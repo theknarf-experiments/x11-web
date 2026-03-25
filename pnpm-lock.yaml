@@ -48,11 +48,11 @@ importers:
   frontend:
     dependencies:
       react:
-        specifier: 19.2.4
-        version: 19.2.4
+        specifier: 19.3.0-canary-3cb2c420-20260324
+        version: 19.3.0-canary-3cb2c420-20260324
       react-dom:
-        specifier: 19.2.4
-        version: 19.2.4(react@19.2.4)
+        specifier: 19.3.0-canary-3cb2c420-20260324
+        version: 19.3.0-canary-3cb2c420-20260324(react@19.3.0-canary-3cb2c420-20260324)
     devDependencies:
       '@types/node':
         specifier: 24.12.0
@@ -1033,13 +1033,13 @@ packages:
     resolution: {integrity: sha512-y3bGgqKj3QBdxLbLkomlohkvsA8gdAiUQlSBJnBhfn+BPxg4bc62d8TcBW15wavDfgexCgccckhcZvywyQYPOw==}
     hasBin: true
 
-  react-dom@19.2.4:
-    resolution: {integrity: sha512-AXJdLo8kgMbimY95O2aKQqsz2iWi9jMgKJhRBAxECE4IFxfcazB2LmzloIoibJI3C12IlY20+KFaLv+71bUJeQ==}
+  react-dom@19.3.0-canary-3cb2c420-20260324:
+    resolution: {integrity: sha512-oITJs/elW/OWyIaX2KyyPrbBjbXIyzr8JevalX4K0pogd2kWfCJpIVO50yz8gZx0qNpVD0XNbyqTo7nY1GtMhw==}
     peerDependencies:
-      react: ^19.2.4
+      react: 19.3.0-canary-3cb2c420-20260324
 
-  react@19.2.4:
-    resolution: {integrity: sha512-9nfp2hYpCwOjAN+8TZFGhtWEwgvWHXqESH8qT89AT/lWklpLON22Lc8pEtnpsZz7VmawabSU0gCjnj8aC0euHQ==}
+  react@19.3.0-canary-3cb2c420-20260324:
+    resolution: {integrity: sha512-33qOxsO0NiFnNItMt4//1o2eCWhyR+JW+o6LwJS4REHKBU11s7qixQB3k10BluD845h380hK1x5yWsTJbLVE1Q==}
     engines: {node: '>=0.10.0'}
 
   readable-stream@2.3.8:
@@ -1089,8 +1089,8 @@ packages:
   safer-buffer@2.1.2:
     resolution: {integrity: sha512-YZo3K82SD7Riyi0E1EQPojLz7kpepnSQI9IyPbHHg1XXXevb5dJI7tpyN2ADxGcQbHG7vcyRHk0cbwqcQriUtg==}
 
-  scheduler@0.27.0:
-    resolution: {integrity: sha512-eNv+WrVbKu1f3vbYJT/xtiF5syA5HPIMtf9IgY/nKg0sWqzAUEvqY/xm7OcZc/qafLx/iO9FgOmeSAp4v5ti/Q==}
+  scheduler@0.28.0-canary-3cb2c420-20260324:
+    resolution: {integrity: sha512-eogv6H1xGrprexxhZTnP48cag2MU9CXf32YV5+8cJ6FxBGgi1VGhy/pkk/tuAlne6dyxaFwiBNDV11luo2GASg==}
 
   serve-handler@6.1.7:
     resolution: {integrity: sha512-CinAq1xWb0vR3twAv9evEU8cNWkXCb9kd5ePAHUKJBkOsUpR1wt/CvGdeca7vqumL1U5cSaeVQ6zZMxiJ3yWsg==}
@@ -2148,12 +2148,12 @@ snapshots:
       minimist: 1.2.8
       strip-json-comments: 2.0.1
 
-  react-dom@19.2.4(react@19.2.4):
+  react-dom@19.3.0-canary-3cb2c420-20260324(react@19.3.0-canary-3cb2c420-20260324):
     dependencies:
-      react: 19.2.4
-      scheduler: 0.27.0
+      react: 19.3.0-canary-3cb2c420-20260324
+      scheduler: 0.28.0-canary-3cb2c420-20260324
 
-  react@19.2.4: {}
+  react@19.3.0-canary-3cb2c420-20260324: {}
 
   readable-stream@2.3.8:
     dependencies:
@@ -2225,7 +2225,7 @@ snapshots:
 
   safer-buffer@2.1.2: {}
 
-  scheduler@0.27.0: {}
+  scheduler@0.28.0-canary-3cb2c420-20260324: {}
 
   serve-handler@6.1.7:
     dependencies:

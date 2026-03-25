@@ -1,4 +1,7 @@
-import { useEffect, useRef, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
+
+const ViewTransition = React.ViewTransition ?? React.Fragment;
+
 import { createPortal } from "react-dom";
 import s from "./Dock.module.css";
 import type { SidecarInfo } from "./types";
@@ -85,18 +88,19 @@ export function Dock({
 			<div className={s.dock} data-testid="dock">
 				{/* App icons */}
 				{windows.map((win) => (
-					<button
-						key={win.clientId}
-						type="button"
-						className={s.iconButton}
-						style={{ background: win.color }}
-						onClick={() => onFocusWindow(win.clientId)}
-						onContextMenu={(e) => handleContextMenu(e, win.clientId)}
-					>
-						<span className={s.tooltip}>{win.title}</span>
-						<span className={s.runningDot} />
-						{win.title.charAt(0).toUpperCase()}
-					</button>
+					<ViewTransition key={win.clientId} name={`dock-icon-${win.clientId}`}>
+						<button
+							type="button"
+							className={s.iconButton}
+							style={{ background: win.color }}
+							onClick={() => onFocusWindow(win.clientId)}
+							onContextMenu={(e) => handleContextMenu(e, win.clientId)}
+						>
+							<span className={s.tooltip}>{win.title}</span>
+							<span className={s.runningDot} />
+							{win.title.charAt(0).toUpperCase()}
+						</button>
+					</ViewTransition>
 				))}
 
 				{/* Separator between apps and add button */}
