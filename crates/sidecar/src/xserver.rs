@@ -760,7 +760,7 @@ fn handle_request(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
         57 | // CopyGC
         58 | // SetDashes
         59 | // SetClipRectangles
-        74 | // PolyText8
+        74 => handle_poly_text8(state, data),
         75 | // PolyText16
         76 => handle_image_text8(state, data),
         77 | // ImageText16
@@ -2009,6 +2009,128 @@ fn handle_poly_fill_arc(state: &ClientState, data: &[u8]) -> Vec<u8> {
         ));
 
         offset += 12;
+    }
+
+    Vec::new()
+}
+
+fn handle_poly_text8(state: &ClientState, data: &[u8]) -> Vec<u8> {
+    // PolyText8: [opcode(1), unused(1), length(2), drawable(4), gc(4), x(2), y(2), items...]
+    // Each text item: [len(1), delta(1), string(len bytes)] OR font shift [255, font_id(4)]
+    if data.len() < 16 {
+        return Vec::new();
+    }
+
+    let drawable = u32::from_le_bytes([data[4], data[5], data[6], data[7]]);
+    let gc_id = u32::from_le_bytes([data[8], data[9], data[10], data[11]]);
+    let mut cursor_x = i16::from_le_bytes([data[12], data[13]]);
+    let y = i16::from_le_bytes([data[14], data[15]]);
+    let gc = state.gcs.get(&gc_id).cloned().unwrap_or_default();
+
+    if gc.function != 3 {
+        return Vec::new();
+    }
+
+    let font = state
+        .font_manager
+        .get_font(gc.font_id)
+        .or_else(|| state.font_manager.get_default_font());
+
+    let font = match font {
+        Some(f) => f,
+        None => return Vec::new(),
+    };
+
+    let mut offset = 16;
+    let end = data.len();
+
+    while offset < end {
+        let item_len = data[offset] as usize;
+
+        if item_len == 255 {
+            // Font shift item: [255, font_id(4)]
+            // We ignore font switches for now (use current GC font)
+            offset += 5;
+            continue;
+        }
+
+        if item_len == 0 {
+            break;
+        }
+
+        if offset + 2 + item_len > end {
+            break;
+        }
+
+        let delta = data[offset + 1] as i8;
+        cursor_x += delta as i16;
+
+        let text = &data[offset + 2..offset + 2 + item_len];
+
+        // Render this text segment (transparent — no background fill)
+        let mut total_width: i32 = 0;
+        for &ch in text {
+            total_width += font.char_info(ch as u16).character_width as i32;
+        }
+        let total_width = total_width.max(1) as u16;
+        let total_height = (font.font_ascent + font.font_descent) as u16;
+
+        let fg_r = ((gc.foreground >> 16) & 0xFF) as u8;
+        let fg_g = ((gc.foreground >> 8) & 0xFF) as u8;
+        let fg_b = (gc.foreground & 0xFF) as u8;
+
+        // Render to pixel buffer with transparent (0,0,0,0) background
+        let mut pixels = vec![0u8; total_width as usize * total_height as usize * 4];
+
+        let mut cx: i32 = 0;
+        let mut has_pixels = false;
+        for &ch in text {
+            let ci = font.char_info(ch as u16);
+            if let Some(glyph) = font.glyph(ch as u16) {
+                let gx = cx + ci.left_side_bearing as i32;
+                let gy = font.font_ascent as i32 - ci.ascent as i32;
+
+                let row_bytes = ((glyph.width as usize) + 7) / 8;
+                for row in 0..glyph.height as usize {
+                    for col in 0..glyph.width as usize {
+                        let byte_idx = row * row_bytes + col / 8;
+                        let bit_idx = 7 - (col % 8);
+                        if byte_idx < glyph.bitmap.len()
+                            && (glyph.bitmap[byte_idx] >> bit_idx) & 1 != 0
+                        {
+                            let px = gx as usize + col;
+                            let py = gy as usize + row;
+                            if px < total_width as usize && py < total_height as usize {
+                                let idx = (py * total_width as usize + px) * 4;
+                                pixels[idx] = fg_b;
+                                pixels[idx + 1] = fg_g;
+                                pixels[idx + 2] = fg_r;
+                                pixels[idx + 3] = 0xFF; // Mark as opaque
+                                has_pixels = true;
+                            }
+                        }
+                    }
+                }
+            }
+            cx += ci.character_width as i32;
+        }
+
+        if has_pixels {
+            let _ = state.update_tx.send((
+                state.client_id.clone(),
+                DisplayUpdate::PutImage {
+                    window_id: drawable,
+                    x: cursor_x,
+                    y: y - font.font_ascent,
+                    width: total_width,
+                    height: total_height,
+                    data: pixels,
+                },
+            ));
+        }
+
+        cursor_x += cx as i16;
+        offset += 2 + item_len;
     }
 
     Vec::new()

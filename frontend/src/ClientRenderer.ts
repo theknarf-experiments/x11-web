@@ -164,17 +164,30 @@ function renderUpdate(
 		case "PutImage": {
 			if (update.data.length === 0) break;
 			const imageData = ctx.createImageData(update.width, update.height);
+			let hasAlpha = false;
 			for (let i = 0; i < update.width * update.height; i++) {
 				const srcOff = i * 4;
 				const dstOff = i * 4;
 				if (srcOff + 3 < update.data.length) {
+					const a = update.data[srcOff + 3];
 					imageData.data[dstOff] = update.data[srcOff + 2];
 					imageData.data[dstOff + 1] = update.data[srcOff + 1];
 					imageData.data[dstOff + 2] = update.data[srcOff];
-					imageData.data[dstOff + 3] = 255;
+					imageData.data[dstOff + 3] = a || 255;
+					if (a === 0) hasAlpha = true;
 				}
 			}
-			ctx.putImageData(imageData, update.x, update.y);
+			if (hasAlpha) {
+				// Has transparent pixels — use drawImage for alpha compositing
+				const tmp = new OffscreenCanvas(update.width, update.height);
+				const tmpCtx = tmp.getContext("2d");
+				if (tmpCtx) {
+					tmpCtx.putImageData(imageData, 0, 0);
+					ctx.drawImage(tmp, update.x, update.y);
+				}
+			} else {
+				ctx.putImageData(imageData, update.x, update.y);
+			}
 			break;
 		}
 		case "CopyArea": {

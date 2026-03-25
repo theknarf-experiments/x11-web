@@ -368,6 +368,67 @@ test.describe
 				maxDiffPixelRatio: 0.05,
 			});
 		});
+
+		test("vim workflow: insert, save, quit, cat", async ({ page }) => {
+			await page.goto(`http://localhost:${frontendPort}`);
+			await waitForDock(page);
+
+			// Spawn xterm with larger geometry for vim
+			await page.locator('[data-testid="spawn-button"]').click();
+			await page.locator('input[placeholder="command"]').fill("xterm");
+			await page.locator('input[placeholder="args"]').fill("-geometry 60x20");
+			await page.locator("button", { hasText: "Spawn" }).click();
+
+			const canvas = page.locator('[data-testid="x11-canvas"]');
+			await expect(canvas).toBeVisible({ timeout: 10_000 });
+			await page.waitForTimeout(3000);
+
+			// Focus canvas
+			await canvas.click();
+			await page.waitForTimeout(500);
+
+			// Open vim with a file
+			await page.keyboard.type("vim /tmp/test.txt", { delay: 50 });
+			await page.keyboard.press("Enter");
+			await page.waitForTimeout(2000);
+
+			// Screenshot: vim opened (empty file)
+			await expect(canvas).toHaveScreenshot("vim-opened.png", {
+				maxDiffPixelRatio: 0.05,
+			});
+
+			// Enter insert mode
+			await page.keyboard.press("i");
+			await page.waitForTimeout(500);
+
+			// Type some text
+			await page.keyboard.type("Hello from x11-web!", { delay: 30 });
+			await page.waitForTimeout(1000);
+
+			// Screenshot: text entered in insert mode
+			await expect(canvas).toHaveScreenshot("vim-insert.png", {
+				maxDiffPixelRatio: 0.05,
+			});
+
+			// Exit insert mode
+			await page.keyboard.press("Escape");
+			await page.waitForTimeout(500);
+
+			// Save and quit (:wq)
+			await page.keyboard.type(":wq", { delay: 50 });
+			await page.keyboard.press("Enter");
+			await page.waitForTimeout(2000);
+
+			// Cat the file to verify it was saved
+			await page.keyboard.type("cat /tmp/test.txt", { delay: 50 });
+			await page.keyboard.press("Enter");
+			await page.waitForTimeout(2000);
+
+			// Screenshot: should show the file contents
+			await expect(canvas).toHaveScreenshot("vim-after-save.png", {
+				maxDiffPixelRatio: 0.05,
+			});
+		});
 	});
 
 async function countNonBlackPixels(
