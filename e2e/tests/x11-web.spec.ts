@@ -196,6 +196,23 @@ test.describe
 			const windowFrame = page.locator('[data-testid="window-frame"]');
 			await expect(windowFrame).toBeVisible({ timeout: 10_000 });
 
+			// Wait for xeyes to actually render (proves the window is real)
+			const canvas = windowFrame.locator('[data-testid="x11-canvas"]');
+			await expect(canvas).toBeVisible();
+			await page.waitForTimeout(3000);
+
+			const pixelsBefore = await canvas.evaluate((el: HTMLCanvasElement) => {
+				const ctx = el.getContext("2d");
+				if (!ctx) return 0;
+				const d = ctx.getImageData(0, 0, el.width, el.height);
+				let n = 0;
+				for (let i = 0; i < d.data.length; i += 4) {
+					if (d.data[i] || d.data[i + 1] || d.data[i + 2]) n++;
+				}
+				return n;
+			});
+			expect(pixelsBefore).toBeGreaterThan(10);
+
 			// Click close button
 			await windowFrame.locator('[data-testid="window-close"]').click();
 

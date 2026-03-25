@@ -13,6 +13,7 @@ function nextRequestId() {
 
 interface CanvasWindow {
 	clientId: string;
+	sidecarId: string;
 	pid: number;
 	title: string;
 	x: number;
@@ -67,7 +68,14 @@ function App() {
 
 				setWindows((prev) => [
 					...prev,
-					{ clientId: cp.clientId, pid: cp.pid, title, x: cx, y: cy },
+					{
+						clientId: cp.clientId,
+						sidecarId: cp.sidecarId,
+						pid: cp.pid,
+						title,
+						x: cx,
+						y: cy,
+					},
 				]);
 			}
 		}
@@ -104,13 +112,7 @@ function App() {
 	const resizeTimerRef = useRef<ReturnType<typeof setTimeout>>(undefined);
 
 	const handleResize = useCallback(
-		(
-			clientId: string,
-			sidecarId: string | undefined,
-			width: number,
-			height: number,
-		) => {
-			if (!sidecarId) return;
+		(clientId: string, sidecarId: string, width: number, height: number) => {
 			clearTimeout(resizeTimerRef.current);
 			resizeTimerRef.current = setTimeout(() => {
 				send({
@@ -137,17 +139,12 @@ function App() {
 		[send],
 	);
 
-	function sidecarForClient(clientId: string): string | undefined {
-		return connectedProcesses.find((p) => p.clientId === clientId)?.sidecarId;
-	}
-
 	return (
 		<>
 			<InfiniteCanvas>
 				{windows.map((win) => {
 					const renderer = renderersRef.current.get(win.clientId);
 					if (!renderer) return null;
-					const sidecarId = sidecarForClient(win.clientId);
 					return (
 						<WindowFrame
 							key={win.clientId}
@@ -156,16 +153,14 @@ function App() {
 							x={win.x}
 							y={win.y}
 							renderer={renderer}
-							onClose={() => {
-								if (sidecarId) handleKill(win.clientId, win.pid, sidecarId);
-							}}
+							onClose={() => handleKill(win.clientId, win.pid, win.sidecarId)}
 							onMove={(nx, ny) => handleMove(win.clientId, nx, ny)}
 							onResize={(nw, nh) =>
-								handleResize(win.clientId, sidecarId, nw, nh)
+								handleResize(win.clientId, win.sidecarId, nw, nh)
 							}
-							onInput={(event) => {
-								if (sidecarId) handleInput(win.clientId, sidecarId, event);
-							}}
+							onInput={(event) =>
+								handleInput(win.clientId, win.sidecarId, event)
+							}
 						/>
 					);
 				})}
