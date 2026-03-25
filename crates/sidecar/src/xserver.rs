@@ -1751,20 +1751,21 @@ fn handle_fill_poly(state: &ClientState, data: &[u8]) -> Vec<u8> {
         offset += 4;
     }
 
-    if points.len() >= 3 {
-        // Close the polygon
-        if points.first() != points.last() {
-            points.push(points[0]);
-        }
-        // Send as filled via DrawLines (frontend could interpret closed polygon as fill)
-        // For now, draw as outline which is better than nothing
+    if points.len() >= 2 {
+        // Approximate filled polygon as a FillRect using bounding box
+        let min_x = points.iter().map(|p| p.0).min().unwrap_or(0);
+        let min_y = points.iter().map(|p| p.1).min().unwrap_or(0);
+        let max_x = points.iter().map(|p| p.0).max().unwrap_or(0);
+        let max_y = points.iter().map(|p| p.1).max().unwrap_or(0);
         let _ = state.update_tx.send((
             state.client_id.clone(),
-            DisplayUpdate::DrawLines {
+            DisplayUpdate::FillRect {
                 window_id: drawable,
-                points,
+                x: min_x,
+                y: min_y,
+                width: (max_x - min_x) as u16,
+                height: (max_y - min_y) as u16,
                 color: gc.foreground,
-                line_width: gc.line_width,
             },
         ));
     }
@@ -1811,7 +1812,7 @@ fn handle_poly_line(state: &ClientState, data: &[u8]) -> Vec<u8> {
         return Vec::new();
     }
 
-    let _coord_mode = data[1]; // 0 = Origin, 1 = Previous
+    let coord_mode = data[1]; // 0 = Origin, 1 = Previous
     let drawable = u32::from_le_bytes([data[4], data[5], data[6], data[7]]);
     let gc_id = u32::from_le_bytes([data[8], data[9], data[10], data[11]]);
     let gc = state.gcs.get(&gc_id).cloned().unwrap_or_default();
@@ -1821,7 +1822,13 @@ fn handle_poly_line(state: &ClientState, data: &[u8]) -> Vec<u8> {
     while offset + 4 <= data.len() {
         let x = i16::from_le_bytes([data[offset], data[offset + 1]]);
         let y = i16::from_le_bytes([data[offset + 2], data[offset + 3]]);
-        points.push((x, y));
+        if coord_mode == 1 && !points.is_empty() {
+            // Previous mode: relative to last point
+            let (px, py) = points[points.len() - 1];
+            points.push((px + x, py + y));
+        } else {
+            points.push((x, y));
+        }
         offset += 4;
     }
 
@@ -1845,14 +1852,23 @@ fn handle_poly_point(state: &ClientState, data: &[u8]) -> Vec<u8> {
         return Vec::new();
     }
 
+    let coord_mode = data[1];
     let drawable = u32::from_le_bytes([data[4], data[5], data[6], data[7]]);
     let gc_id = u32::from_le_bytes([data[8], data[9], data[10], data[11]]);
     let gc = state.gcs.get(&gc_id).cloned().unwrap_or_default();
 
+    let mut last_x: i16 = 0;
+    let mut last_y: i16 = 0;
     let mut offset = 12;
     while offset + 4 <= data.len() {
-        let x = i16::from_le_bytes([data[offset], data[offset + 1]]);
-        let y = i16::from_le_bytes([data[offset + 2], data[offset + 3]]);
+        let mut x = i16::from_le_bytes([data[offset], data[offset + 1]]);
+        let mut y = i16::from_le_bytes([data[offset + 2], data[offset + 3]]);
+        if coord_mode == 1 {
+            x += last_x;
+            y += last_y;
+        }
+        last_x = x;
+        last_y = y;
 
         let _ = state.update_tx.send((
             state.client_id.clone(),
