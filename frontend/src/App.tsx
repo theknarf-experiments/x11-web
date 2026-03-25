@@ -1,6 +1,7 @@
-import { useState } from "react";
+import { useCallback, useState } from "react";
 import s from "./App.module.css";
 import { Button } from "./components/Button";
+import type { InputEvent } from "./types";
 import { useBackendSocket } from "./useBackendSocket";
 import { X11Canvas } from "./X11Canvas";
 
@@ -61,6 +62,20 @@ function App() {
 		setViewingSidecar(sidecarId);
 	}
 
+	const handleInput = useCallback(
+		(event: InputEvent) => {
+			if (viewingSidecar) {
+				send({
+					type: "InputEvent",
+					sidecar_id: viewingSidecar,
+					window_id: 0,
+					event,
+				});
+			}
+		},
+		[viewingSidecar, send],
+	);
+
 	return (
 		<div className={s.app}>
 			<header className={s.header}>
@@ -109,6 +124,7 @@ function App() {
 							updates={displayUpdates[viewingSidecar] || []}
 							width={1024}
 							height={768}
+							onInput={handleInput}
 						/>
 					</section>
 				)}

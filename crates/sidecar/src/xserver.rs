@@ -8,7 +8,8 @@ use tracing::{debug, error, info};
 use x11rb_protocol::protocol::xproto::*;
 use x11rb_protocol::x11_utils::{Serialize, TryParse};
 
-use x11_web_protocol::DisplayUpdate;
+use tokio::sync::broadcast;
+use x11_web_protocol::{DisplayUpdate, InputEvent};
 
 /// Minimal X11 server that accepts client connections and translates
 /// X11 drawing operations into DisplayUpdate messages.
@@ -16,6 +17,7 @@ pub struct X11Server {
     display_number: u32,
     socket_path: PathBuf,
     update_tx: mpsc::UnboundedSender<DisplayUpdate>,
+    input_tx: broadcast::Sender<InputEvent>,
 }
 
 /// Per-connection state for an X11 client.
@@ -190,12 +192,17 @@ const PREDEFINED_ATOMS: &[(&str, u32)] = &[
 ];
 
 impl X11Server {
-    pub fn new(display_number: u32, update_tx: mpsc::UnboundedSender<DisplayUpdate>) -> Self {
+    pub fn new(
+        display_number: u32,
+        update_tx: mpsc::UnboundedSender<DisplayUpdate>,
+        input_tx: broadcast::Sender<InputEvent>,
+    ) -> Self {
         let socket_path = PathBuf::from(format!("/tmp/.X11-unix/X{display_number}"));
         Self {
             display_number,
             socket_path,
             update_tx,
+            input_tx,
         }
     }
 
@@ -222,8 +229,9 @@ impl X11Server {
             match listener.accept().await {
                 Ok((stream, _addr)) => {
                     let update_tx = self.update_tx.clone();
+                    let input_rx = self.input_tx.subscribe();
                     tokio::spawn(async move {
-                        if let Err(e) = handle_client(stream, update_tx).await {
+                        if let Err(e) = handle_client(stream, update_tx, input_rx).await {
                             debug!("X11 client disconnected: {e}");
                         }
                     });
@@ -327,6 +335,7 @@ fn build_setup() -> Setup {
 async fn handle_client(
     mut stream: tokio::net::UnixStream,
     update_tx: mpsc::UnboundedSender<DisplayUpdate>,
+    mut input_rx: broadcast::Receiver<InputEvent>,
 ) -> io::Result<()> {
     // Phase 1: Read client setup request
     // Read at least 12 bytes for the header
@@ -415,49 +424,157 @@ async fn handle_client(
     let mut pending = Vec::new(); // Partial request data
 
     loop {
-        let n = stream.read(&mut buf).await?;
-        if n == 0 {
-            return Ok(()); // Client disconnected
-        }
-
-        pending.extend_from_slice(&buf[..n]);
-
-        // Process complete requests from the pending buffer
-        while pending.len() >= 4 {
-            // Read request length from bytes 2-3 (in 4-byte units)
-            let req_len_units = u16::from_le_bytes([pending[2], pending[3]]) as usize;
-            let req_len_bytes = req_len_units * 4;
-
-            if req_len_bytes == 0 {
-                // BigRequests: length 0 means next 4 bytes have the real length
-                if pending.len() < 8 {
-                    break;
+        tokio::select! {
+            result = stream.read(&mut buf) => {
+                let n = result?;
+                if n == 0 {
+                    return Ok(()); // Client disconnected
                 }
-                let big_len =
-                    u32::from_le_bytes([pending[4], pending[5], pending[6], pending[7]]) as usize;
-                let big_bytes = big_len * 4;
-                if pending.len() < big_bytes {
-                    break;
+
+                pending.extend_from_slice(&buf[..n]);
+
+                // Process complete requests from the pending buffer
+                while pending.len() >= 4 {
+                    let req_len_units = u16::from_le_bytes([pending[2], pending[3]]) as usize;
+                    let req_len_bytes = req_len_units * 4;
+
+                    if req_len_bytes == 0 {
+                        if pending.len() < 8 {
+                            break;
+                        }
+                        let big_len =
+                            u32::from_le_bytes([pending[4], pending[5], pending[6], pending[7]]) as usize;
+                        let big_bytes = big_len * 4;
+                        if pending.len() < big_bytes {
+                            break;
+                        }
+                        state.sequence = state.sequence.wrapping_add(1);
+                        pending.drain(..big_bytes);
+                        continue;
+                    }
+
+                    if pending.len() < req_len_bytes {
+                        break;
+                    }
+
+                    let request_data: Vec<u8> = pending.drain(..req_len_bytes).collect();
+                    state.sequence = state.sequence.wrapping_add(1);
+
+                    let response = handle_request(&mut state, &request_data);
+                    if !response.is_empty() {
+                        stream.write_all(&response).await?;
+                    }
                 }
-                // Skip big requests for now
-                state.sequence = state.sequence.wrapping_add(1);
-                pending.drain(..big_bytes);
-                continue;
             }
-
-            if pending.len() < req_len_bytes {
-                break; // Need more data
-            }
-
-            let request_data: Vec<u8> = pending.drain(..req_len_bytes).collect();
-            state.sequence = state.sequence.wrapping_add(1);
-
-            let response = handle_request(&mut state, &request_data);
-            if !response.is_empty() {
-                stream.write_all(&response).await?;
+            result = input_rx.recv() => {
+                if let Ok(input) = result {
+                    let event_bytes = build_x11_input_event(&state, &input);
+                    if !event_bytes.is_empty() {
+                        stream.write_all(&event_bytes).await?;
+                    }
+                }
             }
         }
     }
+}
+
+/// Convert a frontend InputEvent into X11 wire-format event bytes (32 bytes).
+fn build_x11_input_event(state: &ClientState, input: &InputEvent) -> Vec<u8> {
+    // Find the topmost mapped window to deliver events to
+    let target_window = state
+        .windows
+        .values()
+        .filter(|w| w.mapped && w.id != state.root_window)
+        .max_by_key(|w| w.id) // Pick the last created mapped window
+        .map(|w| w.id)
+        .unwrap_or(state.root_window);
+
+    let seq = state.sequence;
+    let mut event = [0u8; 32];
+
+    match input {
+        InputEvent::MotionNotify { x, y, state: mask } => {
+            event[0] = MOTION_NOTIFY_EVENT; // 6
+            event[1] = 0; // detail: Normal
+            event[2..4].copy_from_slice(&seq.to_le_bytes());
+            // time (4 bytes at offset 4) - use 0
+            event[8..12].copy_from_slice(&state.root_window.to_le_bytes()); // root
+            event[12..16].copy_from_slice(&target_window.to_le_bytes()); // event window
+            event[16..20].copy_from_slice(&target_window.to_le_bytes()); // child
+            event[20..22].copy_from_slice(&x.to_le_bytes()); // root_x
+            event[22..24].copy_from_slice(&y.to_le_bytes()); // root_y
+            event[24..26].copy_from_slice(&x.to_le_bytes()); // event_x
+            event[26..28].copy_from_slice(&y.to_le_bytes()); // event_y
+            event[28..30].copy_from_slice(&mask.to_le_bytes()); // state
+            event[30] = 1; // same_screen
+        }
+        InputEvent::ButtonPress {
+            button,
+            x,
+            y,
+            state: mask,
+        } => {
+            event[0] = BUTTON_PRESS_EVENT; // 4
+            event[1] = *button;
+            event[2..4].copy_from_slice(&seq.to_le_bytes());
+            event[8..12].copy_from_slice(&state.root_window.to_le_bytes());
+            event[12..16].copy_from_slice(&target_window.to_le_bytes());
+            event[16..20].copy_from_slice(&target_window.to_le_bytes());
+            event[20..22].copy_from_slice(&x.to_le_bytes());
+            event[22..24].copy_from_slice(&y.to_le_bytes());
+            event[24..26].copy_from_slice(&x.to_le_bytes());
+            event[26..28].copy_from_slice(&y.to_le_bytes());
+            event[28..30].copy_from_slice(&mask.to_le_bytes());
+            event[30] = 1;
+        }
+        InputEvent::ButtonRelease {
+            button,
+            x,
+            y,
+            state: mask,
+        } => {
+            event[0] = BUTTON_RELEASE_EVENT; // 5
+            event[1] = *button;
+            event[2..4].copy_from_slice(&seq.to_le_bytes());
+            event[8..12].copy_from_slice(&state.root_window.to_le_bytes());
+            event[12..16].copy_from_slice(&target_window.to_le_bytes());
+            event[16..20].copy_from_slice(&target_window.to_le_bytes());
+            event[20..22].copy_from_slice(&x.to_le_bytes());
+            event[22..24].copy_from_slice(&y.to_le_bytes());
+            event[24..26].copy_from_slice(&x.to_le_bytes());
+            event[26..28].copy_from_slice(&y.to_le_bytes());
+            event[28..30].copy_from_slice(&mask.to_le_bytes());
+            event[30] = 1;
+        }
+        InputEvent::KeyPress {
+            keycode,
+            state: mask,
+        } => {
+            event[0] = KEY_PRESS_EVENT; // 2
+            event[1] = *keycode as u8;
+            event[2..4].copy_from_slice(&seq.to_le_bytes());
+            event[8..12].copy_from_slice(&state.root_window.to_le_bytes());
+            event[12..16].copy_from_slice(&target_window.to_le_bytes());
+            event[16..20].copy_from_slice(&target_window.to_le_bytes());
+            event[28..30].copy_from_slice(&mask.to_le_bytes());
+            event[30] = 1;
+        }
+        InputEvent::KeyRelease {
+            keycode,
+            state: mask,
+        } => {
+            event[0] = KEY_RELEASE_EVENT; // 3
+            event[1] = *keycode as u8;
+            event[2..4].copy_from_slice(&seq.to_le_bytes());
+            event[8..12].copy_from_slice(&state.root_window.to_le_bytes());
+            event[12..16].copy_from_slice(&target_window.to_le_bytes());
+            event[16..20].copy_from_slice(&target_window.to_le_bytes());
+            event[28..30].copy_from_slice(&mask.to_le_bytes());
+            event[30] = 1;
+        }
+    }
+
+    event.to_vec()
 }
 
 fn handle_request(state: &mut ClientState, data: &[u8]) -> Vec<u8> {

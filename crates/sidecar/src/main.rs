@@ -122,7 +122,8 @@ async fn main() {
 
     // Start X11 server
     let (display_tx, mut display_rx) = mpsc::unbounded_channel::<DisplayUpdate>();
-    let x11_server = X11Server::new(display_number, display_tx);
+    let (input_tx, _) = tokio::sync::broadcast::channel::<x11_web_protocol::InputEvent>(256);
+    let x11_server = X11Server::new(display_number, display_tx, input_tx.clone());
     let display_string = x11_server.display_string();
     info!("Starting X11 server on DISPLAY={}", display_string);
 
@@ -138,7 +139,14 @@ async fn main() {
         match connect_async(&backend_url).await {
             Ok((ws_stream, _)) => {
                 info!("Connected to backend");
-                run_session(ws_stream, &sidecar_name, &display_string, &mut display_rx).await;
+                run_session(
+                    ws_stream,
+                    &sidecar_name,
+                    &display_string,
+                    &mut display_rx,
+                    &input_tx,
+                )
+                .await;
                 warn!("Disconnected from backend, reconnecting in 5s...");
             }
             Err(e) => {
@@ -156,6 +164,7 @@ async fn run_session(
     sidecar_name: &str,
     display_string: &str,
     display_rx: &mut mpsc::UnboundedReceiver<DisplayUpdate>,
+    input_tx: &tokio::sync::broadcast::Sender<x11_web_protocol::InputEvent>,
 ) {
     let (mut ws_tx, mut ws_rx) = ws_stream.split();
     let mut process_manager = ProcessManager::new(display_string.to_string());
@@ -202,7 +211,7 @@ async fn run_session(
                 match msg {
                     Some(Ok(Message::Text(text))) => {
                         if let Ok(cmd) = serde_json::from_str::<BackendToSidecar>(&text) {
-                            handle_command(cmd, &mut process_manager, &tx).await;
+                            handle_command(cmd, &mut process_manager, &tx, input_tx).await;
                         }
                     }
                     Some(Ok(Message::Close(_))) | None => break,
@@ -229,6 +238,7 @@ async fn handle_command(
     cmd: BackendToSidecar,
     pm: &mut ProcessManager,
     tx: &mpsc::UnboundedSender<SidecarToBackend>,
+    input_tx: &tokio::sync::broadcast::Sender<x11_web_protocol::InputEvent>,
 ) {
     match cmd {
         BackendToSidecar::SpawnProcess {
@@ -268,8 +278,11 @@ async fn handle_command(
                 processes,
             });
         }
-        BackendToSidecar::InputEvent { .. } => {
-            // TODO: Forward to X11 server as X11 events
+        BackendToSidecar::InputEvent {
+            window_id: _,
+            event,
+        } => {
+            let _ = input_tx.send(event);
         }
     }
 }
