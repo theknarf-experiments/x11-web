@@ -118,8 +118,10 @@ export function WindowFrame({
 			e.stopPropagation();
 			const startMX = e.clientX;
 			const startMY = e.clientY;
-			const origW = renderer.width;
-			const origH = renderer.height;
+			// Read current dimensions from the canvas element to avoid stale closure values
+			const canvas = canvasRef.current;
+			const origW = canvas ? canvas.width : renderer.width;
+			const origH = canvas ? canvas.height : renderer.height;
 			const origX = x;
 			const origY = y;
 			const target = e.currentTarget;

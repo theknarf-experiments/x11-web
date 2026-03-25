@@ -48,7 +48,19 @@ export class ClientRenderer {
 
 	pushUpdate(update: DisplayUpdate) {
 		// Resize back buffer to match the app's window dimensions
-		if (update.kind === "WindowCreated" || update.kind === "WindowConfigured") {
+		if (update.kind === "WindowCreated") {
+			// Only grow to fit the largest window the app creates
+			if (
+				update.width > this.backBuffer.width ||
+				update.height > this.backBuffer.height
+			) {
+				this.resizeBuffer(
+					Math.max(update.width, this.backBuffer.width),
+					Math.max(update.height, this.backBuffer.height),
+				);
+			}
+		} else if (update.kind === "WindowConfigured") {
+			// WindowConfigured is from explicit resize — always honor it
 			if (
 				update.width !== this.backBuffer.width ||
 				update.height !== this.backBuffer.height
