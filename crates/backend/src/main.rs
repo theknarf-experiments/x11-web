@@ -163,13 +163,25 @@ async fn handle_sidecar_ws(socket: WebSocket, state: AppState) {
                 )
                 .await;
             }
-            SidecarToBackend::DisplayUpdate { update } => {
+            SidecarToBackend::ProcessConnected { pid, client_id } => {
+                broadcast_to_frontends(
+                    &state,
+                    BackendToFrontend::ProcessConnected {
+                        sidecar_id: sidecar_id.clone(),
+                        pid,
+                        client_id,
+                    },
+                )
+                .await;
+            }
+            SidecarToBackend::DisplayUpdate { client_id, update } => {
                 // Forward to subscribed frontends
                 let frontends = state.frontends.read().await;
                 for frontend in frontends.values() {
                     if frontend.subscribed_sidecars.contains(&sidecar_id) {
                         let _ = frontend.tx.send(BackendToFrontend::DisplayUpdate {
                             sidecar_id: sidecar_id.clone(),
+                            client_id: client_id.clone(),
                             update: update.clone(),
                         });
                     }
@@ -310,13 +322,13 @@ async fn handle_frontend_ws(socket: WebSocket, state: AppState) {
             }
             FrontendToBackend::InputEvent {
                 sidecar_id,
-                window_id,
+                client_id,
                 event,
             } => {
                 forward_to_sidecar(
                     &state,
                     &sidecar_id,
-                    BackendToSidecar::InputEvent { window_id, event },
+                    BackendToSidecar::InputEvent { client_id, event },
                 )
                 .await;
             }

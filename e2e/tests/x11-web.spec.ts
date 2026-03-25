@@ -235,6 +235,44 @@ test.describe
 			// and compared on subsequent runs — if the pupils don't move,
 			// one of them will fail to match its baseline.
 		});
+
+		test("multiple processes show as separate tabs", async ({ page }) => {
+			await page.goto(`http://localhost:${frontendPort}`);
+
+			const sidecarCard = page.locator('[data-testid="sidecar-card"]');
+			await expect(sidecarCard).toBeVisible({ timeout: 15_000 });
+
+			// Spawn first xeyes
+			await page
+				.locator('input[placeholder*="geometry"]')
+				.fill("-geometry 200x150+10+10");
+			await sidecarCard.locator("button", { hasText: "Spawn xeyes" }).click();
+
+			// Wait for first tab to appear
+			const tabs = page.locator('[data-testid="process-tab"]');
+			await expect(tabs.first()).toBeVisible({ timeout: 10_000 });
+
+			// Spawn second xeyes
+			await page
+				.locator('input[placeholder*="geometry"]')
+				.fill("-geometry 200x150+10+10");
+			await sidecarCard.locator("button", { hasText: "Spawn xeyes" }).click();
+
+			// Wait for second tab to appear
+			await expect(tabs).toHaveCount(2, { timeout: 10_000 });
+
+			// Both tabs should be visible
+			await expect(tabs.nth(0)).toBeVisible();
+			await expect(tabs.nth(1)).toBeVisible();
+
+			// Click second tab
+			await tabs.nth(1).click();
+			await page.waitForTimeout(3000);
+
+			// Canvas should exist and have content
+			const canvas = page.locator('[data-testid="x11-canvas"]');
+			await expect(canvas).toBeVisible();
+		});
 	});
 
 async function findFreePort(): Promise<number> {

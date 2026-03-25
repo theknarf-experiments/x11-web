@@ -9,25 +9,31 @@ use x11rb_protocol::protocol::xproto::*;
 use x11rb_protocol::x11_utils::{Serialize, TryParse};
 
 use tokio::sync::broadcast;
+use uuid::Uuid;
 use x11_web_protocol::{DisplayUpdate, InputEvent};
+
+/// A display update tagged with the client_id that produced it.
+pub type TaggedDisplayUpdate = (String, DisplayUpdate);
 
 /// Minimal X11 server that accepts client connections and translates
 /// X11 drawing operations into DisplayUpdate messages.
 pub struct X11Server {
     display_number: u32,
     socket_path: PathBuf,
-    update_tx: mpsc::UnboundedSender<DisplayUpdate>,
-    input_tx: broadcast::Sender<InputEvent>,
+    update_tx: mpsc::UnboundedSender<TaggedDisplayUpdate>,
+    input_tx: broadcast::Sender<(String, InputEvent)>,
+    client_connected_tx: mpsc::UnboundedSender<String>,
 }
 
 /// Per-connection state for an X11 client.
 struct ClientState {
+    client_id: String,
     sequence: u16,
     windows: HashMap<u32, WindowState>,
     pixmaps: HashMap<u32, PixmapState>,
     gcs: HashMap<u32, GcState>,
     atoms: AtomManager,
-    update_tx: mpsc::UnboundedSender<DisplayUpdate>,
+    update_tx: mpsc::UnboundedSender<TaggedDisplayUpdate>,
     root_window: u32,
     root_width: u16,
     root_height: u16,
@@ -196,8 +202,9 @@ const PREDEFINED_ATOMS: &[(&str, u32)] = &[
 impl X11Server {
     pub fn new(
         display_number: u32,
-        update_tx: mpsc::UnboundedSender<DisplayUpdate>,
-        input_tx: broadcast::Sender<InputEvent>,
+        update_tx: mpsc::UnboundedSender<TaggedDisplayUpdate>,
+        input_tx: broadcast::Sender<(String, InputEvent)>,
+        client_connected_tx: mpsc::UnboundedSender<String>,
     ) -> Self {
         let socket_path = PathBuf::from(format!("/tmp/.X11-unix/X{display_number}"));
         Self {
@@ -205,6 +212,7 @@ impl X11Server {
             socket_path,
             update_tx,
             input_tx,
+            client_connected_tx,
         }
     }
 
@@ -230,11 +238,15 @@ impl X11Server {
         loop {
             match listener.accept().await {
                 Ok((stream, _addr)) => {
+                    let client_id = Uuid::new_v4().to_string();
                     let update_tx = self.update_tx.clone();
                     let input_rx = self.input_tx.subscribe();
+                    let _ = self.client_connected_tx.send(client_id.clone());
+                    let cid = client_id.clone();
                     tokio::spawn(async move {
-                        if let Err(e) = handle_client(stream, update_tx, input_rx).await {
-                            debug!("X11 client disconnected: {e}");
+                        if let Err(e) = handle_client(stream, client_id, update_tx, input_rx).await
+                        {
+                            debug!("X11 client {cid} disconnected: {e}");
                         }
                     });
                 }
@@ -336,8 +348,9 @@ fn build_setup() -> Setup {
 
 async fn handle_client(
     mut stream: tokio::net::UnixStream,
-    update_tx: mpsc::UnboundedSender<DisplayUpdate>,
-    mut input_rx: broadcast::Receiver<InputEvent>,
+    client_id: String,
+    update_tx: mpsc::UnboundedSender<TaggedDisplayUpdate>,
+    mut input_rx: broadcast::Receiver<(String, InputEvent)>,
 ) -> io::Result<()> {
     // Phase 1: Read client setup request
     // Read at least 12 bytes for the header
@@ -387,10 +400,11 @@ async fn handle_client(
     setup.serialize_into(&mut reply_bytes);
     stream.write_all(&reply_bytes).await?;
 
-    info!("X11 client connected successfully");
+    info!("X11 client connected: {client_id}");
 
     // Phase 3: Handle requests
     let mut state = ClientState {
+        client_id: client_id.clone(),
         sequence: 0,
         windows: HashMap::new(),
         pixmaps: HashMap::new(),
@@ -471,10 +485,13 @@ async fn handle_client(
                 }
             }
             result = input_rx.recv() => {
-                if let Ok(input) = result {
-                    let event_bytes = build_x11_input_event(&mut state, &input);
-                    if !event_bytes.is_empty() {
-                        stream.write_all(&event_bytes).await?;
+                if let Ok((target_id, input)) = result {
+                    // Only deliver input to the targeted client
+                    if target_id == client_id {
+                        let event_bytes = build_x11_input_event(&mut state, &input);
+                        if !event_bytes.is_empty() {
+                            stream.write_all(&event_bytes).await?;
+                        }
                     }
                 }
             }
@@ -856,13 +873,16 @@ fn handle_create_window(state: &mut ClientState, data: &[u8], _seq: u16) -> Vec<
         },
     );
 
-    let _ = state.update_tx.send(DisplayUpdate::WindowCreated {
-        window_id: wid,
-        x,
-        y,
-        width,
-        height,
-    });
+    let _ = state.update_tx.send((
+        state.client_id.clone(),
+        DisplayUpdate::WindowCreated {
+            window_id: wid,
+            x,
+            y,
+            width,
+            height,
+        },
+    ));
 
     Vec::new() // No reply for CreateWindow
 }
@@ -931,9 +951,10 @@ fn handle_get_window_attributes(state: &ClientState, data: &[u8], seq: u16) -> V
 fn handle_destroy_window(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
     let wid = u32::from_le_bytes([data[4], data[5], data[6], data[7]]);
     state.windows.remove(&wid);
-    let _ = state
-        .update_tx
-        .send(DisplayUpdate::WindowDestroyed { window_id: wid });
+    let _ = state.update_tx.send((
+        state.client_id.clone(),
+        DisplayUpdate::WindowDestroyed { window_id: wid },
+    ));
     Vec::new()
 }
 
@@ -944,19 +965,23 @@ fn handle_map_window(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> 
 
     if let Some(win) = state.windows.get_mut(&wid) {
         win.mapped = true;
-        let _ = state
-            .update_tx
-            .send(DisplayUpdate::WindowMapped { window_id: wid });
+        let _ = state.update_tx.send((
+            state.client_id.clone(),
+            DisplayUpdate::WindowMapped { window_id: wid },
+        ));
 
         // Fill window with its background pixel (like a real X server does)
-        let _ = state.update_tx.send(DisplayUpdate::FillRect {
-            window_id: wid,
-            x: 0,
-            y: 0,
-            width: win.width,
-            height: win.height,
-            color: win.background_pixel,
-        });
+        let _ = state.update_tx.send((
+            state.client_id.clone(),
+            DisplayUpdate::FillRect {
+                window_id: wid,
+                x: 0,
+                y: 0,
+                width: win.width,
+                height: win.height,
+                color: win.background_pixel,
+            },
+        ));
 
         // Send MapNotify event
         let mut map_event = [0u8; 32];
@@ -1016,9 +1041,10 @@ fn handle_unmap_window(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8
 
     if let Some(win) = state.windows.get_mut(&wid) {
         win.mapped = false;
-        let _ = state
-            .update_tx
-            .send(DisplayUpdate::WindowUnmapped { window_id: wid });
+        let _ = state.update_tx.send((
+            state.client_id.clone(),
+            DisplayUpdate::WindowUnmapped { window_id: wid },
+        ));
 
         let mut event = [0u8; 32];
         event[0] = UNMAP_NOTIFY_EVENT;
@@ -1082,13 +1108,16 @@ fn handle_configure_window(state: &mut ClientState, data: &[u8], seq: u16) -> Ve
         }
 
         if changed {
-            let _ = state.update_tx.send(DisplayUpdate::WindowConfigured {
-                window_id: wid,
-                x: win.x,
-                y: win.y,
-                width: win.width,
-                height: win.height,
-            });
+            let _ = state.update_tx.send((
+                state.client_id.clone(),
+                DisplayUpdate::WindowConfigured {
+                    window_id: wid,
+                    x: win.x,
+                    y: win.y,
+                    width: win.width,
+                    height: win.height,
+                },
+            ));
 
             // Send ConfigureNotify
             let mut event = [0u8; 32];
@@ -1416,22 +1445,28 @@ fn handle_clear_area(state: &ClientState, data: &[u8], _seq: u16) -> Vec<u8> {
     // Send as a FillRect with the background color (more useful than ClearArea
     // for the frontend renderer, which otherwise clears to transparent/black)
     if let Some(bg_pixel) = bg {
-        let _ = state.update_tx.send(DisplayUpdate::FillRect {
-            window_id: wid,
-            x,
-            y,
-            width,
-            height,
-            color: bg_pixel,
-        });
+        let _ = state.update_tx.send((
+            state.client_id.clone(),
+            DisplayUpdate::FillRect {
+                window_id: wid,
+                x,
+                y,
+                width,
+                height,
+                color: bg_pixel,
+            },
+        ));
     } else {
-        let _ = state.update_tx.send(DisplayUpdate::ClearArea {
-            window_id: wid,
-            x,
-            y,
-            width,
-            height,
-        });
+        let _ = state.update_tx.send((
+            state.client_id.clone(),
+            DisplayUpdate::ClearArea {
+                window_id: wid,
+                x,
+                y,
+                width,
+                height,
+            },
+        ));
     }
 
     Vec::new()
@@ -1452,16 +1487,19 @@ fn handle_copy_area(state: &ClientState, data: &[u8]) -> Vec<u8> {
     let width = u16::from_le_bytes([data[24], data[25]]);
     let height = u16::from_le_bytes([data[26], data[27]]);
 
-    let _ = state.update_tx.send(DisplayUpdate::CopyArea {
-        src_window_id: src,
-        dst_window_id: dst,
-        src_x,
-        src_y,
-        dst_x,
-        dst_y,
-        width,
-        height,
-    });
+    let _ = state.update_tx.send((
+        state.client_id.clone(),
+        DisplayUpdate::CopyArea {
+            src_window_id: src,
+            dst_window_id: dst,
+            src_x,
+            src_y,
+            dst_x,
+            dst_y,
+            width,
+            height,
+        },
+    ));
 
     Vec::new()
 }
@@ -1482,14 +1520,17 @@ fn handle_poly_fill_rectangle(state: &ClientState, data: &[u8]) -> Vec<u8> {
         let width = u16::from_le_bytes([data[offset + 4], data[offset + 5]]);
         let height = u16::from_le_bytes([data[offset + 6], data[offset + 7]]);
 
-        let _ = state.update_tx.send(DisplayUpdate::FillRect {
-            window_id: drawable,
-            x,
-            y,
-            width,
-            height,
-            color: gc.foreground,
-        });
+        let _ = state.update_tx.send((
+            state.client_id.clone(),
+            DisplayUpdate::FillRect {
+                window_id: drawable,
+                x,
+                y,
+                width,
+                height,
+                color: gc.foreground,
+            },
+        ));
 
         offset += 8;
     }
@@ -1517,12 +1558,15 @@ fn handle_poly_line(state: &ClientState, data: &[u8]) -> Vec<u8> {
     }
 
     if !points.is_empty() {
-        let _ = state.update_tx.send(DisplayUpdate::DrawLines {
-            window_id: drawable,
-            points,
-            color: gc.foreground,
-            line_width: gc.line_width,
-        });
+        let _ = state.update_tx.send((
+            state.client_id.clone(),
+            DisplayUpdate::DrawLines {
+                window_id: drawable,
+                points,
+                color: gc.foreground,
+                line_width: gc.line_width,
+            },
+        ));
     }
 
     Vec::new()
@@ -1542,14 +1586,17 @@ fn handle_poly_point(state: &ClientState, data: &[u8]) -> Vec<u8> {
         let x = i16::from_le_bytes([data[offset], data[offset + 1]]);
         let y = i16::from_le_bytes([data[offset + 2], data[offset + 3]]);
 
-        let _ = state.update_tx.send(DisplayUpdate::FillRect {
-            window_id: drawable,
-            x,
-            y,
-            width: 1,
-            height: 1,
-            color: gc.foreground,
-        });
+        let _ = state.update_tx.send((
+            state.client_id.clone(),
+            DisplayUpdate::FillRect {
+                window_id: drawable,
+                x,
+                y,
+                width: 1,
+                height: 1,
+                color: gc.foreground,
+            },
+        ));
 
         offset += 4;
     }
@@ -1573,12 +1620,15 @@ fn handle_poly_segment(state: &ClientState, data: &[u8]) -> Vec<u8> {
         let x2 = i16::from_le_bytes([data[offset + 4], data[offset + 5]]);
         let y2 = i16::from_le_bytes([data[offset + 6], data[offset + 7]]);
 
-        let _ = state.update_tx.send(DisplayUpdate::DrawLines {
-            window_id: drawable,
-            points: vec![(x1, y1), (x2, y2)],
-            color: gc.foreground,
-            line_width: gc.line_width,
-        });
+        let _ = state.update_tx.send((
+            state.client_id.clone(),
+            DisplayUpdate::DrawLines {
+                window_id: drawable,
+                points: vec![(x1, y1), (x2, y2)],
+                color: gc.foreground,
+                line_width: gc.line_width,
+            },
+        ));
 
         offset += 8;
     }
@@ -1604,17 +1654,20 @@ fn handle_poly_arc(state: &ClientState, data: &[u8]) -> Vec<u8> {
         let angle1 = i16::from_le_bytes([data[offset + 8], data[offset + 9]]);
         let angle2 = i16::from_le_bytes([data[offset + 10], data[offset + 11]]);
 
-        let _ = state.update_tx.send(DisplayUpdate::DrawArc {
-            window_id: drawable,
-            x,
-            y,
-            width,
-            height,
-            angle1,
-            angle2,
-            filled: false,
-            color: gc.foreground,
-        });
+        let _ = state.update_tx.send((
+            state.client_id.clone(),
+            DisplayUpdate::DrawArc {
+                window_id: drawable,
+                x,
+                y,
+                width,
+                height,
+                angle1,
+                angle2,
+                filled: false,
+                color: gc.foreground,
+            },
+        ));
 
         offset += 12;
     }
@@ -1640,17 +1693,20 @@ fn handle_poly_fill_arc(state: &ClientState, data: &[u8]) -> Vec<u8> {
         let angle1 = i16::from_le_bytes([data[offset + 8], data[offset + 9]]);
         let angle2 = i16::from_le_bytes([data[offset + 10], data[offset + 11]]);
 
-        let _ = state.update_tx.send(DisplayUpdate::DrawArc {
-            window_id: drawable,
-            x,
-            y,
-            width,
-            height,
-            angle1,
-            angle2,
-            filled: true,
-            color: gc.foreground,
-        });
+        let _ = state.update_tx.send((
+            state.client_id.clone(),
+            DisplayUpdate::DrawArc {
+                window_id: drawable,
+                x,
+                y,
+                width,
+                height,
+                angle1,
+                angle2,
+                filled: true,
+                color: gc.foreground,
+            },
+        ));
 
         offset += 12;
     }
@@ -1674,14 +1730,17 @@ fn handle_put_image(state: &ClientState, data: &[u8]) -> Vec<u8> {
 
     let pixel_data = data[24..].to_vec();
 
-    let _ = state.update_tx.send(DisplayUpdate::PutImage {
-        window_id: drawable,
-        x: dst_x,
-        y: dst_y,
-        width,
-        height,
-        data: pixel_data,
-    });
+    let _ = state.update_tx.send((
+        state.client_id.clone(),
+        DisplayUpdate::PutImage {
+            window_id: drawable,
+            x: dst_x,
+            y: dst_y,
+            width,
+            height,
+            data: pixel_data,
+        },
+    ));
 
     Vec::new()
 }

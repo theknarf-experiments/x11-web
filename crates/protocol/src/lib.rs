@@ -15,7 +15,10 @@ pub enum BackendToSidecar {
     /// Request list of running processes.
     ListProcesses { request_id: String },
     /// Forward input event from a frontend user.
-    InputEvent { window_id: u32, event: InputEvent },
+    InputEvent {
+        client_id: String,
+        event: InputEvent,
+    },
 }
 
 /// Messages sent from a sidecar to the backend.
@@ -37,8 +40,13 @@ pub enum SidecarToBackend {
         request_id: String,
         processes: Vec<ProcessInfo>,
     },
+    /// An X11 client connected and was associated with a spawned process.
+    ProcessConnected { pid: u32, client_id: String },
     /// Display update from the X server.
-    DisplayUpdate { update: DisplayUpdate },
+    DisplayUpdate {
+        client_id: String,
+        update: DisplayUpdate,
+    },
     /// Error response.
     Error {
         request_id: Option<String>,
@@ -73,9 +81,16 @@ pub enum BackendToFrontend {
         pid: u32,
         exit_code: Option<i32>,
     },
+    /// An X11 client connected and was associated with a spawned process.
+    ProcessConnected {
+        sidecar_id: String,
+        pid: u32,
+        client_id: String,
+    },
     /// Display update forwarded from a sidecar.
     DisplayUpdate {
         sidecar_id: String,
+        client_id: String,
         update: DisplayUpdate,
     },
 }
@@ -104,10 +119,10 @@ pub enum FrontendToBackend {
     },
     /// Subscribe to display updates from a sidecar.
     SubscribeDisplay { sidecar_id: String },
-    /// Send input to a window on a sidecar.
+    /// Send input to a process on a sidecar.
     InputEvent {
         sidecar_id: String,
-        window_id: u32,
+        client_id: String,
         event: InputEvent,
     },
 }

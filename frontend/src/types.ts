@@ -28,7 +28,18 @@ export type BackendToFrontend =
 			pid: number;
 			exit_code: number | null;
 	  }
-	| { type: "DisplayUpdate"; sidecar_id: string; update: DisplayUpdate };
+	| {
+			type: "ProcessConnected";
+			sidecar_id: string;
+			pid: number;
+			client_id: string;
+	  }
+	| {
+			type: "DisplayUpdate";
+			sidecar_id: string;
+			client_id: string;
+			update: DisplayUpdate;
+	  };
 
 // Frontend -> Backend messages
 export type FrontendToBackend =
@@ -45,7 +56,7 @@ export type FrontendToBackend =
 	| {
 			type: "InputEvent";
 			sidecar_id: string;
-			window_id: number;
+			client_id: string;
 			event: InputEvent;
 	  };
 

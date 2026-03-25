@@ -141,12 +141,36 @@
 
 .displaySection {
 	margin-bottom: 24px;
-	padding: 16px;
 	border: 1px solid #333;
 	border-radius: 8px;
+	overflow: hidden;
 }
 
-.displaySection h2 {
-	margin: 0 0 12px;
-	font-size: 18px;
+.tabs {
+	display: flex;
+	gap: 0;
+	border-bottom: 1px solid #333;
+	background: #1a1a1a;
+}
+
+.tab {
+	padding: 8px 16px;
+	border: none;
+	border-right: 1px solid #333;
+	background: transparent;
+	color: #999;
+	cursor: pointer;
+	font-size: 13px;
+	white-space: nowrap;
+}
+
+.tab:hover {
+	color: #eee;
+	background: #252525;
+}
+
+.tabActive {
+	color: #eee;
+	background: #2a2a2a;
+	border-bottom: 2px solid #4ade80;
 }

@@ -1,6 +1,6 @@
 mod xserver;
 
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::process::Stdio;
 
 use futures::{SinkExt, StreamExt};
@@ -12,7 +12,7 @@ use tokio_tungstenite::tungstenite::Message;
 use tracing::{error, info, warn};
 use x11_web_protocol::*;
 
-use crate::xserver::X11Server;
+use crate::xserver::{TaggedDisplayUpdate, X11Server};
 
 struct ProcessManager {
     processes: HashMap<u32, ManagedProcess>,
@@ -121,9 +121,16 @@ async fn main() {
         .unwrap_or(99);
 
     // Start X11 server
-    let (display_tx, mut display_rx) = mpsc::unbounded_channel::<DisplayUpdate>();
-    let (input_tx, _) = tokio::sync::broadcast::channel::<x11_web_protocol::InputEvent>(256);
-    let x11_server = X11Server::new(display_number, display_tx, input_tx.clone());
+    let (display_tx, mut display_rx) = mpsc::unbounded_channel::<TaggedDisplayUpdate>();
+    let (input_tx, _) =
+        tokio::sync::broadcast::channel::<(String, x11_web_protocol::InputEvent)>(256);
+    let (client_connected_tx, mut client_connected_rx) = mpsc::unbounded_channel::<String>();
+    let x11_server = X11Server::new(
+        display_number,
+        display_tx,
+        input_tx.clone(),
+        client_connected_tx,
+    );
     let display_string = x11_server.display_string();
     info!("Starting X11 server on DISPLAY={}", display_string);
 
@@ -145,6 +152,7 @@ async fn main() {
                     &display_string,
                     &mut display_rx,
                     &input_tx,
+                    &mut client_connected_rx,
                 )
                 .await;
                 warn!("Disconnected from backend, reconnecting in 5s...");
@@ -163,11 +171,13 @@ async fn run_session(
     >,
     sidecar_name: &str,
     display_string: &str,
-    display_rx: &mut mpsc::UnboundedReceiver<DisplayUpdate>,
-    input_tx: &tokio::sync::broadcast::Sender<x11_web_protocol::InputEvent>,
+    display_rx: &mut mpsc::UnboundedReceiver<TaggedDisplayUpdate>,
+    input_tx: &tokio::sync::broadcast::Sender<(String, x11_web_protocol::InputEvent)>,
+    client_connected_rx: &mut mpsc::UnboundedReceiver<String>,
 ) {
     let (mut ws_tx, mut ws_rx) = ws_stream.split();
     let mut process_manager = ProcessManager::new(display_string.to_string());
+    let mut pending_pids: VecDeque<u32> = VecDeque::new();
 
     // Send registration
     let register = SidecarToBackend::Register {
@@ -211,15 +221,24 @@ async fn run_session(
                 match msg {
                     Some(Ok(Message::Text(text))) => {
                         if let Ok(cmd) = serde_json::from_str::<BackendToSidecar>(&text) {
-                            handle_command(cmd, &mut process_manager, &tx, input_tx).await;
+                            handle_command(cmd, &mut process_manager, &tx, input_tx, &mut pending_pids).await;
                         }
                     }
                     Some(Ok(Message::Close(_))) | None => break,
                     _ => {}
                 }
             }
-            Some(update) = display_rx.recv() => {
-                let _ = tx.send(SidecarToBackend::DisplayUpdate { update });
+            Some((client_id, update)) = display_rx.recv() => {
+                let _ = tx.send(SidecarToBackend::DisplayUpdate { client_id, update });
+            }
+            Some(client_id) = client_connected_rx.recv() => {
+                // Associate the new X11 client with the most recently spawned process
+                if let Some(pid) = pending_pids.pop_front() {
+                    info!("Process {pid} connected as X11 client {client_id}");
+                    let _ = tx.send(SidecarToBackend::ProcessConnected { pid, client_id });
+                } else {
+                    info!("X11 client {client_id} connected (no pending process)");
+                }
             }
             _ = check_interval.tick() => {
                 let exited = process_manager.check_exited().await;
@@ -238,7 +257,8 @@ async fn handle_command(
     cmd: BackendToSidecar,
     pm: &mut ProcessManager,
     tx: &mpsc::UnboundedSender<SidecarToBackend>,
-    input_tx: &tokio::sync::broadcast::Sender<x11_web_protocol::InputEvent>,
+    input_tx: &tokio::sync::broadcast::Sender<(String, x11_web_protocol::InputEvent)>,
+    pending_pids: &mut VecDeque<u32>,
 ) {
     match cmd {
         BackendToSidecar::SpawnProcess {
@@ -247,6 +267,7 @@ async fn handle_command(
             args,
         } => match pm.spawn(&command, &args).await {
             Ok(pid) => {
+                pending_pids.push_back(pid);
                 let _ = tx.send(SidecarToBackend::ProcessSpawned { request_id, pid });
             }
             Err(message) => {
@@ -278,11 +299,8 @@ async fn handle_command(
                 processes,
             });
         }
-        BackendToSidecar::InputEvent {
-            window_id: _,
-            event,
-        } => {
-            let _ = input_tx.send(event);
+        BackendToSidecar::InputEvent { client_id, event } => {
+            let _ = input_tx.send((client_id, event));
         }
     }
 }

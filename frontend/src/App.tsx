@@ -11,27 +11,47 @@ function nextRequestId() {
 }
 
 function App() {
-	const { connected, sidecars, processes, send, onDisplayUpdate } =
-		useBackendSocket();
+	const {
+		connected,
+		sidecars,
+		processes,
+		connectedProcesses,
+		send,
+		onDisplayUpdate,
+	} = useBackendSocket();
 	const [command, setCommand] = useState("xeyes");
 	const [args, setArgs] = useState("");
 	const [viewingSidecar, setViewingSidecar] = useState<string | null>(null);
+	const [activeClientId, setActiveClientId] = useState<string | null>(null);
 	const [killingPids, setKillingPids] = useState<Set<number>>(new Set());
 
-	// Display update queue — shared between WebSocket callback and canvas rAF loop
-	const displayQueueRef = useRef<DisplayUpdate[]>([]);
+	// Per-client_id display queues (plain arrays, not React state)
+	const queuesRef = useRef<Map<string, DisplayUpdate[]>>(new Map());
 	const viewingSidecarRef = useRef(viewingSidecar);
 	viewingSidecarRef.current = viewingSidecar;
 
-	// Register display callback: push updates for the viewed sidecar into the queue
+	// Register display callback: route updates to per-client queues
 	useEffect(() => {
-		onDisplayUpdate((sidecarId, update) => {
+		onDisplayUpdate((sidecarId, clientId, update) => {
 			if (sidecarId === viewingSidecarRef.current) {
-				displayQueueRef.current.push(update);
+				const queues = queuesRef.current;
+				let q = queues.get(clientId);
+				if (!q) {
+					q = [];
+					queues.set(clientId, q);
+				}
+				q.push(update);
 			}
 		});
 		return () => onDisplayUpdate(null);
 	}, [onDisplayUpdate]);
+
+	// Auto-select first connected process as active tab
+	useEffect(() => {
+		if (!activeClientId && connectedProcesses.length > 0) {
+			setActiveClientId(connectedProcesses[0].clientId);
+		}
+	}, [activeClientId, connectedProcesses]);
 
 	function handleSpawn(sidecarId: string) {
 		send({ type: "SubscribeDisplay", sidecar_id: sidecarId });
@@ -79,17 +99,40 @@ function App() {
 
 	const handleInput = useCallback(
 		(event: InputEvent) => {
-			if (viewingSidecar) {
+			if (viewingSidecar && activeClientId) {
 				send({
 					type: "InputEvent",
 					sidecar_id: viewingSidecar,
-					window_id: 0,
+					client_id: activeClientId,
 					event,
 				});
 			}
 		},
-		[viewingSidecar, send],
+		[viewingSidecar, activeClientId, send],
 	);
+
+	// Get processes for the viewed sidecar that have connected X11 clients
+	const sidecarProcesses = connectedProcesses.filter(
+		(p) => p.sidecarId === viewingSidecar,
+	);
+
+	// Find the command name for a connected process
+	function processLabel(cp: { pid: number; sidecarId: string }) {
+		const procList = processes[cp.sidecarId] || [];
+		const proc = procList.find((p) => p.pid === cp.pid);
+		return proc ? `${proc.command} (${cp.pid})` : `PID ${cp.pid}`;
+	}
+
+	// Active queue ref for the canvas
+	const activeQueueRef = useRef<DisplayUpdate[]>([]);
+	if (activeClientId) {
+		let q = queuesRef.current.get(activeClientId);
+		if (!q) {
+			q = [];
+			queuesRef.current.set(activeClientId, q);
+		}
+		activeQueueRef.current = q;
+	}
 
 	return (
 		<div className={s.app}>
@@ -128,19 +171,30 @@ function App() {
 					</div>
 				</section>
 
-				{viewingSidecar && (
+				{viewingSidecar && sidecarProcesses.length > 0 && (
 					<section className={s.displaySection} data-testid="display-section">
-						<h2>
-							Display —{" "}
-							{sidecars.find((sc) => sc.id === viewingSidecar)?.name ??
-								viewingSidecar.slice(0, 8)}
-						</h2>
-						<X11Canvas
-							queueRef={displayQueueRef}
-							width={1024}
-							height={768}
-							onInput={handleInput}
-						/>
+						<div className={s.tabs} data-testid="process-tabs">
+							{sidecarProcesses.map((cp) => (
+								<button
+									key={cp.clientId}
+									type="button"
+									className={`${s.tab} ${cp.clientId === activeClientId ? s.tabActive : ""}`}
+									onClick={() => setActiveClientId(cp.clientId)}
+									data-testid="process-tab"
+								>
+									{processLabel(cp)}
+								</button>
+							))}
+						</div>
+						{activeClientId && (
+							<X11Canvas
+								key={activeClientId}
+								queueRef={activeQueueRef}
+								width={1024}
+								height={768}
+								onInput={handleInput}
+							/>
+						)}
 					</section>
 				)}
 

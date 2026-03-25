@@ -1517,6 +1517,7 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "url",
+ "uuid",
  "x11-web-protocol",
  "x11rb-protocol",
 ]

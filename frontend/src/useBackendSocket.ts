@@ -11,8 +11,15 @@ const WS_URL = import.meta.env.VITE_WS_URL || "ws://localhost:3001/ws/frontend";
 
 export type DisplayUpdateCallback = (
 	sidecarId: string,
+	clientId: string,
 	update: DisplayUpdate,
 ) => void;
+
+export interface ConnectedProcess {
+	sidecarId: string;
+	pid: number;
+	clientId: string;
+}
 
 export function useBackendSocket() {
 	const wsRef = useRef<WebSocket | null>(null);
@@ -22,6 +29,9 @@ export function useBackendSocket() {
 	const [connected, setConnected] = useState(false);
 	const [sidecars, setSidecars] = useState<SidecarInfo[]>([]);
 	const [processes, setProcesses] = useState<Record<string, ProcessInfo[]>>({});
+	const [connectedProcesses, setConnectedProcesses] = useState<
+		ConnectedProcess[]
+	>([]);
 
 	useEffect(() => {
 		disposed.current = false;
@@ -34,9 +44,7 @@ export function useBackendSocket() {
 
 			ws.onopen = () => setConnected(true);
 
-			ws.onerror = () => {
-				// Suppress console error — onclose handles reconnect
-			};
+			ws.onerror = () => {};
 
 			ws.onclose = () => {
 				setConnected(false);
@@ -65,6 +73,9 @@ export function useBackendSocket() {
 							delete next[msg.sidecar_id];
 							return next;
 						});
+						setConnectedProcesses((prev) =>
+							prev.filter((p) => p.sidecarId !== msg.sidecar_id),
+						);
 						break;
 					case "ProcessList":
 						setProcesses((prev) => ({
@@ -79,10 +90,26 @@ export function useBackendSocket() {
 								(p) => p.pid !== msg.pid,
 							),
 						}));
+						setConnectedProcesses((prev) =>
+							prev.filter((p) => p.pid !== msg.pid),
+						);
+						break;
+					case "ProcessConnected":
+						setConnectedProcesses((prev) => [
+							...prev,
+							{
+								sidecarId: msg.sidecar_id,
+								pid: msg.pid,
+								clientId: msg.client_id,
+							},
+						]);
 						break;
 					case "DisplayUpdate":
-						// Bypass React state — push directly to the canvas via callback
-						displayCallbackRef.current?.(msg.sidecar_id, msg.update);
+						displayCallbackRef.current?.(
+							msg.sidecar_id,
+							msg.client_id,
+							msg.update,
+						);
 						break;
 				}
 			};
@@ -114,5 +141,12 @@ export function useBackendSocket() {
 		displayCallbackRef.current = cb;
 	}, []);
 
-	return { connected, sidecars, processes, send, onDisplayUpdate };
+	return {
+		connected,
+		sidecars,
+		processes,
+		connectedProcesses,
+		send,
+		onDisplayUpdate,
+	};
 }
