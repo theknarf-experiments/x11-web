@@ -129,30 +129,6 @@ function App() {
 			</header>
 
 			<main>
-				<section className={s.launchControls}>
-					<h2>Launch Application</h2>
-					<div className={s.formRow}>
-						<label>
-							Command:
-							<input
-								type="text"
-								value={command}
-								onChange={(e) => setCommand(e.target.value)}
-								placeholder="e.g. xeyes"
-							/>
-						</label>
-						<label>
-							Args:
-							<input
-								type="text"
-								value={args}
-								onChange={(e) => setArgs(e.target.value)}
-								placeholder="e.g. -geometry 200x200"
-							/>
-						</label>
-					</div>
-				</section>
-
 				{viewingSidecar && sidecarProcesses.length > 0 && (
 					<section className={s.displaySection} data-testid="display-section">
 						<div className={s.tabs} data-testid="process-tabs">
@@ -197,10 +173,22 @@ function App() {
 									<h3>{sidecar.name}</h3>
 									<code>{sidecar.id.slice(0, 8)}</code>
 								</div>
-								<div className={s.sidecarActions}>
-									<Button onClick={() => handleSpawn(sidecar.id)}>
-										Spawn {command}
-									</Button>
+								<div className={s.spawnRow}>
+									<input
+										type="text"
+										value={command}
+										onChange={(e) => setCommand(e.target.value)}
+										placeholder="command"
+										className={s.spawnInput}
+									/>
+									<input
+										type="text"
+										value={args}
+										onChange={(e) => setArgs(e.target.value)}
+										placeholder="args"
+										className={s.spawnInput}
+									/>
+									<Button onClick={() => handleSpawn(sidecar.id)}>Spawn</Button>
 								</div>
 								<div className={s.processList}>
 									<h4>Processes</h4>

@@ -35,38 +35,20 @@
 	color: #f87171;
 }
 
-.launchControls {
-	margin-bottom: 24px;
-	padding: 16px;
-	border: 1px solid #333;
-	border-radius: 8px;
-}
-
-.launchControls h2 {
-	margin: 0 0 12px;
-	font-size: 18px;
-}
-
-.formRow {
+.spawnRow {
 	display: flex;
-	gap: 16px;
+	gap: 8px;
+	align-items: center;
+	margin-bottom: 12px;
 }
 
-.formRow label {
-	display: flex;
-	flex-direction: column;
-	gap: 4px;
-	font-size: 14px;
-	color: #999;
-}
-
-.formRow input {
-	padding: 8px 12px;
+.spawnInput {
+	padding: 6px 10px;
 	border: 1px solid #444;
 	border-radius: 6px;
 	background: #1a1a1a;
 	color: #fff;
-	font-size: 14px;
+	font-size: 13px;
 }
 
 .sidecars h2 {
@@ -101,12 +83,6 @@
 .sidecarHeader code {
 	color: #888;
 	font-size: 12px;
-}
-
-.sidecarActions {
-	display: flex;
-	gap: 8px;
-	margin-bottom: 12px;
 }
 
 .processList h4 {

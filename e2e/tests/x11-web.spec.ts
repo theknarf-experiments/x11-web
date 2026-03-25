@@ -142,11 +142,11 @@ test.describe
 
 			// Set args for a larger window so the eyes are visible in the screenshot
 			await page
-				.locator('input[placeholder*="geometry"]')
+				.locator('input[placeholder="args"]')
 				.fill("-geometry 300x200+10+10");
 
 			// Click "Spawn xeyes" button
-			await sidecarCard.locator("button", { hasText: "Spawn xeyes" }).click();
+			await sidecarCard.locator("button", { hasText: "Spawn" }).click();
 
 			// Wait for the display section and canvas to appear
 			const displaySection = page.locator('[data-testid="display-section"]');
@@ -203,9 +203,9 @@ test.describe
 			await expect(sidecarCard).toBeVisible({ timeout: 15_000 });
 
 			await page
-				.locator('input[placeholder*="geometry"]')
+				.locator('input[placeholder="args"]')
 				.fill("-geometry 300x200+10+10");
-			await sidecarCard.locator("button", { hasText: "Spawn xeyes" }).click();
+			await sidecarCard.locator("button", { hasText: "Spawn" }).click();
 
 			const canvas = page.locator('[data-testid="x11-canvas"]');
 			await expect(canvas).toBeVisible({ timeout: 10_000 });
@@ -244,9 +244,9 @@ test.describe
 
 			// Spawn first xeyes
 			await page
-				.locator('input[placeholder*="geometry"]')
+				.locator('input[placeholder="args"]')
 				.fill("-geometry 200x150+10+10");
-			await sidecarCard.locator("button", { hasText: "Spawn xeyes" }).click();
+			await sidecarCard.locator("button", { hasText: "Spawn" }).click();
 
 			// Wait for first tab to appear
 			const tabs = page.locator('[data-testid="process-tab"]');
@@ -254,9 +254,9 @@ test.describe
 
 			// Spawn second xeyes
 			await page
-				.locator('input[placeholder*="geometry"]')
+				.locator('input[placeholder="args"]')
 				.fill("-geometry 200x150+10+10");
-			await sidecarCard.locator("button", { hasText: "Spawn xeyes" }).click();
+			await sidecarCard.locator("button", { hasText: "Spawn" }).click();
 
 			// Wait for second tab to appear
 			await expect(tabs).toHaveCount(2, { timeout: 10_000 });
