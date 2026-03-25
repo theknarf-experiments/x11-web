@@ -17,14 +17,11 @@ let frontendServer: ChildProcess;
 let frontendPort: number;
 let backendPort: number;
 
-// Use serial mode so all tests share the same containers
 test.describe
 	.serial("x11-web e2e", () => {
 		test.beforeAll(async () => {
-			// Create a shared Docker network
 			network = await new Network().start();
 
-			// Build and start backend
 			backendContainer = await GenericContainer.fromDockerfile(
 				PROJECT_ROOT,
 				"Dockerfile.backend",
@@ -42,7 +39,6 @@ test.describe
 			backendPort = backendContainer.getMappedPort(3001);
 			console.log(`Backend running at localhost:${backendPort}`);
 
-			// Build and start sidecar (connects to backend via internal network)
 			sidecarContainer = await GenericContainer.fromDockerfile(
 				PROJECT_ROOT,
 				"Dockerfile.sidecar",
@@ -64,7 +60,6 @@ test.describe
 
 			console.log("Sidecar connected to backend");
 
-			// Build the frontend locally with the correct backend WS URL
 			const wsUrl = `ws://localhost:${backendPort}/ws/frontend`;
 			await new Promise<void>((resolve, reject) => {
 				exec(
@@ -81,14 +76,12 @@ test.describe
 				);
 			});
 
-			// Serve the built frontend with a simple static file server
 			frontendPort = await findFreePort();
 			await new Promise<void>((resolve) => {
 				frontendServer = exec(
 					`${SERVE_BIN} dist -l ${frontendPort} --no-clipboard`,
 					{ cwd: FRONTEND_DIR },
 				);
-				// Wait for server to start
 				const check = setInterval(async () => {
 					try {
 						const res = await fetch(`http://localhost:${frontendPort}`);
@@ -112,166 +105,115 @@ test.describe
 			await network?.stop();
 		});
 
-		test("frontend loads and shows connected status", async ({ page }) => {
+		test("dock shows sidecar as connected", async ({ page }) => {
 			await page.goto(`http://localhost:${frontendPort}`);
 
-			// Wait for WebSocket to connect
-			const status = page.locator('[data-testid="connection-status"]');
-			await expect(status).toHaveText("Connected", { timeout: 15_000 });
+			const dock = page.locator('[data-testid="dock"]');
+			await expect(dock).toBeVisible({ timeout: 15_000 });
+			await expect(dock).toContainText("test-sidecar");
 		});
 
-		test("sidecar appears in the dashboard", async ({ page }) => {
+		test("spawning xeyes creates a window on the canvas", async ({ page }) => {
 			await page.goto(`http://localhost:${frontendPort}`);
 
-			// Wait for sidecar card to appear
-			const sidecarCard = page.locator('[data-testid="sidecar-card"]');
-			await expect(sidecarCard).toBeVisible({ timeout: 15_000 });
+			const dock = page.locator('[data-testid="dock"]');
+			await expect(dock).toContainText("test-sidecar", { timeout: 15_000 });
 
-			// Verify sidecar name is shown
-			await expect(sidecarCard.locator("h3")).toHaveText("test-sidecar");
-		});
-
-		test("spawning xeyes produces display updates on canvas", async ({
-			page,
-		}) => {
-			await page.goto(`http://localhost:${frontendPort}`);
-
-			// Wait for sidecar to appear
-			const sidecarCard = page.locator('[data-testid="sidecar-card"]');
-			await expect(sidecarCard).toBeVisible({ timeout: 15_000 });
-
-			// Set args for a larger window so the eyes are visible in the screenshot
+			// Set args for a larger window
 			await page
 				.locator('input[placeholder="args"]')
 				.fill("-geometry 300x200+10+10");
 
-			// Click "Spawn xeyes" button
-			await sidecarCard.locator("button", { hasText: "Spawn" }).click();
+			// Spawn
+			await page.locator('[data-testid="spawn-button"]').click();
 
-			// Wait for the display section and canvas to appear
-			const displaySection = page.locator('[data-testid="display-section"]');
-			await expect(displaySection).toBeVisible({ timeout: 10_000 });
+			// A window frame should appear on the canvas
+			const windowFrame = page.locator('[data-testid="window-frame"]');
+			await expect(windowFrame).toBeVisible({ timeout: 10_000 });
 
-			const canvas = page.locator('[data-testid="x11-canvas"]');
+			// The canvas inside it should render
+			const canvas = windowFrame.locator('[data-testid="x11-canvas"]');
 			await expect(canvas).toBeVisible();
 
-			// Wait for xeyes to connect to our X server and produce some drawing commands
 			await page.waitForTimeout(5000);
 
-			// Verify non-trivial content was drawn:
-			// 1. Minimum number of non-black pixels (xeyes draws two filled ellipses)
-			// 2. Multiple distinct colors present (background, eye outline, eye fill)
-			const canvasStats = await canvas.evaluate((el: HTMLCanvasElement) => {
+			// Verify content was drawn
+			const nonBlackPixels = await canvas.evaluate((el: HTMLCanvasElement) => {
 				const ctx = el.getContext("2d");
-				if (!ctx) return { nonBlackPixels: 0, distinctColors: 0 };
+				if (!ctx) return 0;
 				const imageData = ctx.getImageData(0, 0, el.width, el.height);
-				let nonBlackPixels = 0;
-				const colors = new Set<string>();
-
+				let count = 0;
 				for (let i = 0; i < imageData.data.length; i += 4) {
-					const r = imageData.data[i];
-					const g = imageData.data[i + 1];
-					const b = imageData.data[i + 2];
-					if (r !== 0 || g !== 0 || b !== 0) {
-						nonBlackPixels++;
-						// Bucket colors to 16-level bins to avoid counting anti-aliasing noise
-						const key = `${r >> 4},${g >> 4},${b >> 4}`;
-						colors.add(key);
+					if (
+						imageData.data[i] !== 0 ||
+						imageData.data[i + 1] !== 0 ||
+						imageData.data[i + 2] !== 0
+					) {
+						count++;
 					}
 				}
-
-				return { nonBlackPixels, distinctColors: colors.size };
+				return count;
 			});
 
-			// xeyes draws a small window — even a handful of non-black pixels
-			// proves the full pipeline works: X11 server → protocol → backend → frontend canvas
-			expect(canvasStats.nonBlackPixels).toBeGreaterThan(10);
+			expect(nonBlackPixels).toBeGreaterThan(10);
 
-			// Screenshot test: compare canvas against a stored reference.
-			// This is the real visual regression check — it catches rendering changes.
-			// Use a generous diff ratio since xeyes rendering can vary slightly
-			// depending on timing (e.g. exact cursor position affects pupil placement).
 			await expect(canvas).toHaveScreenshot("xeyes-canvas.png", {
 				maxDiffPixelRatio: 0.01,
 			});
 		});
 
+		test("multiple processes create multiple windows", async ({ page }) => {
+			await page.goto(`http://localhost:${frontendPort}`);
+
+			const dock = page.locator('[data-testid="dock"]');
+			await expect(dock).toContainText("test-sidecar", { timeout: 15_000 });
+
+			await page
+				.locator('input[placeholder="args"]')
+				.fill("-geometry 200x150+10+10");
+
+			// Spawn first
+			await page.locator('[data-testid="spawn-button"]').click();
+			const windows = page.locator('[data-testid="window-frame"]');
+			await expect(windows.first()).toBeVisible({ timeout: 10_000 });
+
+			// Spawn second
+			await page.locator('[data-testid="spawn-button"]').click();
+			await expect(windows).toHaveCount(2, { timeout: 10_000 });
+		});
+
 		test("xeyes pupils follow the cursor", async ({ page }) => {
 			await page.goto(`http://localhost:${frontendPort}`);
 
-			const sidecarCard = page.locator('[data-testid="sidecar-card"]');
-			await expect(sidecarCard).toBeVisible({ timeout: 15_000 });
+			const dock = page.locator('[data-testid="dock"]');
+			await expect(dock).toContainText("test-sidecar", { timeout: 15_000 });
 
 			await page
 				.locator('input[placeholder="args"]')
 				.fill("-geometry 300x200+10+10");
-			await sidecarCard.locator("button", { hasText: "Spawn" }).click();
+			await page.locator('[data-testid="spawn-button"]').click();
 
 			const canvas = page.locator('[data-testid="x11-canvas"]');
 			await expect(canvas).toBeVisible({ timeout: 10_000 });
 
-			// Wait for initial render
 			await page.waitForTimeout(3000);
 
-			// Take a screenshot with cursor at center
 			const box = await canvas.boundingBox();
 			if (!box) throw new Error("Canvas has no bounding box");
 
+			// Move to center
 			await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
 			await page.waitForTimeout(2000);
 			await expect(canvas).toHaveScreenshot("xeyes-looking-center.png", {
 				maxDiffPixelRatio: 0.01,
 			});
 
-			// Move cursor to top-right corner
+			// Move to top-right
 			await page.mouse.move(box.x + box.width - 10, box.y + 10);
 			await page.waitForTimeout(2000);
 			await expect(canvas).toHaveScreenshot("xeyes-looking-top-right.png", {
 				maxDiffPixelRatio: 0.01,
 			});
-
-			// Verify the two screenshots are different (pupils moved)
-			// This is implicitly verified since both screenshots are stored
-			// and compared on subsequent runs — if the pupils don't move,
-			// one of them will fail to match its baseline.
-		});
-
-		test("multiple processes show as separate tabs", async ({ page }) => {
-			await page.goto(`http://localhost:${frontendPort}`);
-
-			const sidecarCard = page.locator('[data-testid="sidecar-card"]');
-			await expect(sidecarCard).toBeVisible({ timeout: 15_000 });
-
-			// Spawn first xeyes
-			await page
-				.locator('input[placeholder="args"]')
-				.fill("-geometry 200x150+10+10");
-			await sidecarCard.locator("button", { hasText: "Spawn" }).click();
-
-			// Wait for first tab to appear
-			const tabs = page.locator('[data-testid="process-tab"]');
-			await expect(tabs.first()).toBeVisible({ timeout: 10_000 });
-
-			// Spawn second xeyes
-			await page
-				.locator('input[placeholder="args"]')
-				.fill("-geometry 200x150+10+10");
-			await sidecarCard.locator("button", { hasText: "Spawn" }).click();
-
-			// Wait for second tab to appear
-			await expect(tabs).toHaveCount(2, { timeout: 10_000 });
-
-			// Both tabs should be visible
-			await expect(tabs.nth(0)).toBeVisible();
-			await expect(tabs.nth(1)).toBeVisible();
-
-			// Click second tab
-			await tabs.nth(1).click();
-			await page.waitForTimeout(3000);
-
-			// Canvas should exist and have content
-			const canvas = page.locator('[data-testid="x11-canvas"]');
-			await expect(canvas).toBeVisible();
 		});
 	});
 

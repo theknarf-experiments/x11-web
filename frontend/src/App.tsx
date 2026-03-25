@@ -1,15 +1,25 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import s from "./App.module.css";
 import { ClientRenderer } from "./ClientRenderer";
-import { Button } from "./components/Button";
+import { Dock } from "./Dock";
+import { InfiniteCanvas } from "./InfiniteCanvas";
 import type { InputEvent } from "./types";
 import { useBackendSocket } from "./useBackendSocket";
-import { X11Canvas } from "./X11Canvas";
+import { WindowFrame } from "./WindowFrame";
 
 let requestCounter = 0;
 function nextRequestId() {
 	return `req-${++requestCounter}-${Date.now()}`;
 }
+
+interface CanvasWindow {
+	clientId: string;
+	pid: number;
+	title: string;
+	x: number;
+	y: number;
+}
+
+let spawnCounter = 0;
 
 function App() {
 	const {
@@ -20,217 +30,123 @@ function App() {
 		send,
 		onDisplayUpdate,
 	} = useBackendSocket();
-	const [command, setCommand] = useState("xeyes");
-	const [args, setArgs] = useState("");
-	const [viewingSidecar, setViewingSidecar] = useState<string | null>(null);
-	const [activeClientId, setActiveClientId] = useState<string | null>(null);
-	const [killingPids, setKillingPids] = useState<Set<number>>(new Set());
 
-	// Per-client_id renderers (persistent back buffers, survive tab switches)
+	const [windows, setWindows] = useState<CanvasWindow[]>([]);
 	const renderersRef = useRef<Map<string, ClientRenderer>>(new Map());
-	const viewingSidecarRef = useRef(viewingSidecar);
-	viewingSidecarRef.current = viewingSidecar;
 
-	function getRenderer(clientId: string): ClientRenderer {
-		const renderers = renderersRef.current;
-		let r = renderers.get(clientId);
-		if (!r) {
-			r = new ClientRenderer(1024, 768);
-			renderers.set(clientId, r);
-		}
-		return r;
-	}
-
-	// Register display callback: render updates directly to per-client back buffers
+	// Register display callback
 	useEffect(() => {
-		onDisplayUpdate((sidecarId, clientId, update) => {
-			if (sidecarId === viewingSidecarRef.current) {
-				const renderers = renderersRef.current;
-				let r = renderers.get(clientId);
-				if (!r) {
-					r = new ClientRenderer(1024, 768);
-					renderers.set(clientId, r);
-				}
-				r.pushUpdate(update);
+		onDisplayUpdate((_sidecarId, clientId, update) => {
+			const renderers = renderersRef.current;
+			let r = renderers.get(clientId);
+			if (!r) {
+				r = new ClientRenderer(1024, 768);
+				renderers.set(clientId, r);
 			}
+			r.pushUpdate(update);
 		});
 		return () => onDisplayUpdate(null);
 	}, [onDisplayUpdate]);
 
-	// Auto-select first connected process as active tab
+	// When a new process connects, add a window for it
 	useEffect(() => {
-		if (!activeClientId && connectedProcesses.length > 0) {
-			setActiveClientId(connectedProcesses[0].clientId);
+		const existing = new Set(windows.map((w) => w.clientId));
+		for (const cp of connectedProcesses) {
+			if (!existing.has(cp.clientId)) {
+				const procList = processes[cp.sidecarId] || [];
+				const proc = procList.find((p) => p.pid === cp.pid);
+				const title = proc ? `${proc.command} (${cp.pid})` : `PID ${cp.pid}`;
+
+				// Ensure renderer exists before adding window
+				if (!renderersRef.current.has(cp.clientId)) {
+					renderersRef.current.set(cp.clientId, new ClientRenderer(1024, 768));
+				}
+
+				// Place at center of viewport with cascade offset
+				const offset = spawnCounter++ * 30;
+				const cx = window.innerWidth / 2 - 512 + offset;
+				const cy = window.innerHeight / 2 - 384 + offset;
+
+				setWindows((prev) => [
+					...prev,
+					{ clientId: cp.clientId, pid: cp.pid, title, x: cx, y: cy },
+				]);
+			}
 		}
-	}, [activeClientId, connectedProcesses]);
+	}, [connectedProcesses, processes, windows]);
 
-	function handleSpawn(sidecarId: string) {
+	function handleSpawn(sidecarId: string, command: string, args: string[]) {
 		send({ type: "SubscribeDisplay", sidecar_id: sidecarId });
-		setViewingSidecar(sidecarId);
-
 		send({
 			type: "SpawnProcess",
 			request_id: nextRequestId(),
 			sidecar_id: sidecarId,
 			command,
-			args: args ? args.split(" ") : [],
+			args,
 		});
 	}
 
-	function handleKill(sidecarId: string, pid: number) {
-		setKillingPids((prev) => new Set(prev).add(pid));
+	function handleKill(clientId: string, pid: number, sidecarId: string) {
 		send({
 			type: "KillProcess",
 			request_id: nextRequestId(),
 			sidecar_id: sidecarId,
 			pid,
 		});
+		setWindows((prev) => prev.filter((w) => w.clientId !== clientId));
 	}
+
+	const handleMove = useCallback((clientId: string, x: number, y: number) => {
+		setWindows((prev) =>
+			prev.map((w) => (w.clientId === clientId ? { ...w, x, y } : w)),
+		);
+	}, []);
 
 	const handleInput = useCallback(
-		(event: InputEvent) => {
-			if (viewingSidecar && activeClientId) {
-				send({
-					type: "InputEvent",
-					sidecar_id: viewingSidecar,
-					client_id: activeClientId,
-					event,
-				});
-			}
+		(clientId: string, sidecarId: string, event: InputEvent) => {
+			send({
+				type: "InputEvent",
+				sidecar_id: sidecarId,
+				client_id: clientId,
+				event,
+			});
 		},
-		[viewingSidecar, activeClientId, send],
+		[send],
 	);
 
-	// Get processes for the viewed sidecar that have connected X11 clients
-	const sidecarProcesses = connectedProcesses.filter(
-		(p) => p.sidecarId === viewingSidecar,
-	);
-
-	// Find the command name for a connected process
-	function processLabel(cp: { pid: number; sidecarId: string }) {
-		const procList = processes[cp.sidecarId] || [];
-		const proc = procList.find((p) => p.pid === cp.pid);
-		return proc ? `${proc.command} (${cp.pid})` : `PID ${cp.pid}`;
+	// Find sidecarId for a connected process
+	function sidecarForClient(clientId: string): string | undefined {
+		return connectedProcesses.find((p) => p.clientId === clientId)?.sidecarId;
 	}
 
-	// Active renderer for the canvas
-	const activeRenderer = activeClientId ? getRenderer(activeClientId) : null;
-
 	return (
-		<div className={s.app}>
-			<header className={s.header}>
-				<h1>x11-web</h1>
-				<span
-					className={`${s.status} ${connected ? s.online : s.offline}`}
-					data-testid="connection-status"
-				>
-					{connected ? "Connected" : "Disconnected"}
-				</span>
-			</header>
-
-			<main>
-				{viewingSidecar && sidecarProcesses.length > 0 && (
-					<section className={s.displaySection} data-testid="display-section">
-						<div className={s.tabs} data-testid="process-tabs">
-							{sidecarProcesses.map((cp) => (
-								<button
-									key={cp.clientId}
-									type="button"
-									className={`${s.tab} ${cp.clientId === activeClientId ? s.tabActive : ""}`}
-									onClick={() => setActiveClientId(cp.clientId)}
-									data-testid="process-tab"
-								>
-									{processLabel(cp)}
-								</button>
-							))}
-						</div>
-						{activeRenderer && (
-							<X11Canvas
-								key={activeClientId}
-								renderer={activeRenderer}
-								width={1024}
-								height={768}
-								onInput={handleInput}
-							/>
-						)}
-					</section>
-				)}
-
-				<section className={s.sidecars}>
-					<h2>Sidecars ({sidecars.length})</h2>
-					{sidecars.length === 0 ? (
-						<p className={s.empty}>
-							No sidecars connected. Start a sidecar to begin.
-						</p>
-					) : (
-						sidecars.map((sidecar) => (
-							<div
-								key={sidecar.id}
-								className={s.sidecarCard}
-								data-testid="sidecar-card"
-							>
-								<div className={s.sidecarHeader}>
-									<h3>{sidecar.name}</h3>
-									<code>{sidecar.id.slice(0, 8)}</code>
-								</div>
-								<div className={s.spawnRow}>
-									<input
-										type="text"
-										value={command}
-										onChange={(e) => setCommand(e.target.value)}
-										placeholder="command"
-										className={s.spawnInput}
-									/>
-									<input
-										type="text"
-										value={args}
-										onChange={(e) => setArgs(e.target.value)}
-										placeholder="args"
-										className={s.spawnInput}
-									/>
-									<Button onClick={() => handleSpawn(sidecar.id)}>Spawn</Button>
-								</div>
-								<div className={s.processList}>
-									<h4>Processes</h4>
-									{(processes[sidecar.id] || []).length === 0 ? (
-										<p className={s.empty}>No processes running</p>
-									) : (
-										<ul>
-											{(processes[sidecar.id] || []).map((proc) => {
-												const isKilling = killingPids.has(proc.pid);
-												return (
-													<li
-														key={proc.pid}
-														className={isKilling ? s.killing : ""}
-													>
-														<span>
-															PID {proc.pid} — {proc.command}
-															{isKilling && (
-																<span className={s.killingLabel}>
-																	{" "}
-																	(stopping...)
-																</span>
-															)}
-														</span>
-														<Button
-															variant="danger"
-															onClick={() => handleKill(sidecar.id, proc.pid)}
-															disabled={isKilling}
-														>
-															{isKilling ? "Stopping" : "Kill"}
-														</Button>
-													</li>
-												);
-											})}
-										</ul>
-									)}
-								</div>
-							</div>
-						))
-					)}
-				</section>
-			</main>
-		</div>
+		<>
+			<InfiniteCanvas>
+				{windows.map((win) => {
+					const renderer = renderersRef.current.get(win.clientId);
+					if (!renderer) return null;
+					const sidecarId = sidecarForClient(win.clientId);
+					return (
+						<WindowFrame
+							key={win.clientId}
+							clientId={win.clientId}
+							title={win.title}
+							x={win.x}
+							y={win.y}
+							renderer={renderer}
+							onClose={() => {
+								if (sidecarId) handleKill(win.clientId, win.pid, sidecarId);
+							}}
+							onMove={(nx, ny) => handleMove(win.clientId, nx, ny)}
+							onInput={(event) => {
+								if (sidecarId) handleInput(win.clientId, sidecarId, event);
+							}}
+						/>
+					);
+				})}
+			</InfiniteCanvas>
+			<Dock connected={connected} sidecars={sidecars} onSpawn={handleSpawn} />
+		</>
 	);
 }
 

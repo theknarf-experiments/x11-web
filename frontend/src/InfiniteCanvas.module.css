@@ -1,0 +1,19 @@
+.viewport {
+	position: fixed;
+	inset: 0;
+	overflow: hidden;
+	background: #111;
+	cursor: grab;
+}
+
+.viewport:active {
+	cursor: grabbing;
+}
+
+.transform {
+	position: absolute;
+	top: 0;
+	left: 0;
+	transform-origin: 0 0;
+	will-change: transform;
+}
