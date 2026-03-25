@@ -326,9 +326,7 @@ test.describe
 
 			await page.locator('[data-testid="spawn-button"]').click();
 			await page.locator('input[placeholder="command"]').fill("xterm");
-			await page
-				.locator('input[placeholder="args"]')
-				.fill('-geometry 40x10 -e "echo Hello X11 Web && sleep 10"');
+			await page.locator('input[placeholder="args"]').fill("-geometry 40x10");
 			await page.locator("button", { hasText: "Spawn" }).click();
 
 			const canvas = page.locator('[data-testid="x11-canvas"]');

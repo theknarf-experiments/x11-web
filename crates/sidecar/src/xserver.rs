@@ -17,6 +17,8 @@ use tokio::sync::broadcast;
 use uuid::Uuid;
 use x11_web_protocol::{DisplayUpdate, InputEvent};
 
+use crate::fonts::FontManager;
+
 /// A display update tagged with the client_id that produced it.
 pub type TaggedDisplayUpdate = (String, DisplayUpdate);
 
@@ -45,6 +47,7 @@ struct ClientState {
     root_height: u16,
     pointer_x: i16,
     pointer_y: i16,
+    font_manager: FontManager,
 }
 
 #[derive(Clone)]
@@ -78,6 +81,7 @@ struct GcState {
     background: u32,
     line_width: u16,
     function: u8,
+    font_id: u32,
 }
 
 impl Default for GcState {
@@ -87,6 +91,7 @@ impl Default for GcState {
             background: 0xFF_FF_FF, // white
             line_width: 0,
             function: 3, // GXcopy
+            font_id: 0,
         }
     }
 }
@@ -427,6 +432,7 @@ async fn handle_client(
         root_height: SCREEN_HEIGHT,
         pointer_x: 0,
         pointer_y: 0,
+        font_manager: FontManager::new(),
     };
 
     // Add root window to state
@@ -749,8 +755,8 @@ fn handle_request(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
         40 | // TranslateCoordinates -> reply needed
         41 | // WarpPointer
         44 | // QueryKeymap -> reply needed
-        45 | // OpenFont
-        46 | // CloseFont
+        45 => handle_open_font(state, data),
+        46 => handle_close_font(state, data),
         48 | // QueryTextExtents -> reply needed
         50 | // ListFontsWithInfo -> reply needed
         51 | // SetFontPath
@@ -1362,34 +1368,150 @@ fn handle_get_input_focus(state: &ClientState, _data: &[u8], seq: u16) -> Vec<u8
     reply.to_vec()
 }
 
-fn handle_query_font(_state: &ClientState, _data: &[u8], seq: u16) -> Vec<u8> {
-    // Return a minimal font info reply
-    // QueryFont reply: 60 bytes fixed + properties + char_infos
-    let mut reply = vec![0u8; 60];
-    reply[0] = 1;
+fn handle_open_font(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
+    // OpenFont: [opcode(1), unused(1), length(2), fid(4), name_len(2), pad(2), name...]
+    if data.len() < 12 {
+        return Vec::new();
+    }
+    let fid = u32::from_le_bytes([data[4], data[5], data[6], data[7]]);
+    let name_len = u16::from_le_bytes([data[8], data[9]]) as usize;
+    let name = if 12 + name_len <= data.len() {
+        String::from_utf8_lossy(&data[12..12 + name_len]).to_string()
+    } else {
+        "fixed".to_string()
+    };
+    debug!("OpenFont: fid={fid:#x} name={name}");
+    state.font_manager.open_font(fid, &name);
+    Vec::new()
+}
+
+fn handle_close_font(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
+    if data.len() < 8 {
+        return Vec::new();
+    }
+    let fid = u32::from_le_bytes([data[4], data[5], data[6], data[7]]);
+    state.font_manager.close_font(fid);
+    Vec::new()
+}
+
+fn write_charinfo(reply: &mut Vec<u8>, ci: &crate::fonts::CharInfo) {
+    reply.extend_from_slice(&ci.left_side_bearing.to_le_bytes());
+    reply.extend_from_slice(&ci.right_side_bearing.to_le_bytes());
+    reply.extend_from_slice(&ci.character_width.to_le_bytes());
+    reply.extend_from_slice(&ci.ascent.to_le_bytes());
+    reply.extend_from_slice(&ci.descent.to_le_bytes());
+    reply.extend_from_slice(&ci.attributes.to_le_bytes());
+}
+
+fn handle_query_font(state: &ClientState, data: &[u8], seq: u16) -> Vec<u8> {
+    if data.len() < 8 {
+        return Vec::new();
+    }
+    let fontable = u32::from_le_bytes([data[4], data[5], data[6], data[7]]);
+
+    // fontable can be a font ID or a GC ID (containing a font)
+    let font = state
+        .font_manager
+        .get_font(fontable)
+        .or_else(|| {
+            let gc = state.gcs.get(&fontable)?;
+            state.font_manager.get_font(gc.font_id)
+        })
+        .or_else(|| state.font_manager.get_default_font());
+
+    let font = match font {
+        Some(f) => f,
+        None => {
+            // No font available — return minimal stub
+            let mut reply = vec![0u8; 60];
+            reply[0] = 1;
+            reply[2..4].copy_from_slice(&seq.to_le_bytes());
+            reply[4..8].copy_from_slice(&7u32.to_le_bytes());
+            reply[40..42].copy_from_slice(&32u16.to_le_bytes());
+            reply[42..44].copy_from_slice(&126u16.to_le_bytes());
+            reply[44..46].copy_from_slice(&32u16.to_le_bytes());
+            reply[48] = 0;
+            reply[52..54].copy_from_slice(&10i16.to_le_bytes());
+            reply[54..56].copy_from_slice(&3i16.to_le_bytes());
+            return reply;
+        }
+    };
+
+    let n_char_infos = (font.max_char - font.min_char + 1) as u32;
+    let char_infos_bytes = n_char_infos as usize * 12;
+    let total_extra = char_infos_bytes; // no properties for now
+    let length_field = ((32 + total_extra - 32) / 4) as u32; // extra data beyond 32 byte header
+
+    // QueryFont reply: 60-byte fixed header + n_char_infos * 12 bytes
+    // The "60 bytes" includes 32 header + 28 bytes of font info
+    // But actual X11 format: 32 bytes reply header, then inline data
+    // Reply format: [1, unused, seq(2), length(4),
+    //   min_bounds(12), pad(4), max_bounds(12), pad(4),
+    //   min_char(2), max_char(2), default_char(2), n_properties(2),
+    //   draw_direction(1), min_byte1(1), max_byte1(1), all_chars_exist(1),
+    //   font_ascent(2), font_descent(2), n_char_infos(4),
+    //   properties..., char_infos...]
+    let reply_len = 60 + char_infos_bytes;
+    let mut reply = vec![0u8; reply_len];
+    reply[0] = 1; // Reply
     reply[2..4].copy_from_slice(&seq.to_le_bytes());
-    reply[4..8].copy_from_slice(&7u32.to_le_bytes()); // length (extra data in 4-byte units)
-                                                      // min_bounds (12 bytes at offset 8)
-                                                      // max_bounds (12 bytes at offset 24)
-    reply[24..26].copy_from_slice(&8u16.to_le_bytes()); // character_width
-    reply[26..28].copy_from_slice(&12u16.to_le_bytes()); // ascent
-    reply[28..30].copy_from_slice(&4u16.to_le_bytes()); // descent
-                                                        // min_char_or_byte2 at offset 40
-    reply[40..42].copy_from_slice(&32u16.to_le_bytes());
-    // max_char_or_byte2 at offset 42
-    reply[42..44].copy_from_slice(&126u16.to_le_bytes());
-    // default_char at offset 44
-    reply[44..46].copy_from_slice(&32u16.to_le_bytes());
-    // properties_count at offset 46
-    reply[46..48].copy_from_slice(&0u16.to_le_bytes());
-    // draw_direction at offset 48
-    reply[48] = 0; // LeftToRight
-                   // font_ascent at offset 52
-    reply[52..54].copy_from_slice(&12i16.to_le_bytes());
-    // font_descent at offset 54
-    reply[54..56].copy_from_slice(&4i16.to_le_bytes());
-    // n_char_infos at offset 56
-    reply[56..60].copy_from_slice(&0u32.to_le_bytes());
+    let extra_words = ((reply_len - 32) / 4) as u32;
+    reply[4..8].copy_from_slice(&extra_words.to_le_bytes());
+
+    // min_bounds at offset 8 (12 bytes)
+    {
+        let ci = &font.min_bounds;
+        reply[8..10].copy_from_slice(&ci.left_side_bearing.to_le_bytes());
+        reply[10..12].copy_from_slice(&ci.right_side_bearing.to_le_bytes());
+        reply[12..14].copy_from_slice(&ci.character_width.to_le_bytes());
+        reply[14..16].copy_from_slice(&ci.ascent.to_le_bytes());
+        reply[16..18].copy_from_slice(&ci.descent.to_le_bytes());
+        reply[18..20].copy_from_slice(&ci.attributes.to_le_bytes());
+    }
+    // pad at 20..24
+
+    // max_bounds at offset 24 (12 bytes)
+    {
+        let ci = &font.max_bounds;
+        reply[24..26].copy_from_slice(&ci.left_side_bearing.to_le_bytes());
+        reply[26..28].copy_from_slice(&ci.right_side_bearing.to_le_bytes());
+        reply[28..30].copy_from_slice(&ci.character_width.to_le_bytes());
+        reply[30..32].copy_from_slice(&ci.ascent.to_le_bytes());
+        reply[32..34].copy_from_slice(&ci.descent.to_le_bytes());
+        reply[34..36].copy_from_slice(&ci.attributes.to_le_bytes());
+    }
+    // pad at 36..40
+
+    reply[40..42].copy_from_slice(&font.min_char.to_le_bytes());
+    reply[42..44].copy_from_slice(&font.max_char.to_le_bytes());
+    reply[44..46].copy_from_slice(&font.default_char.to_le_bytes());
+    reply[46..48].copy_from_slice(&0u16.to_le_bytes()); // n_properties = 0
+    reply[48] = 0; // draw_direction = LeftToRight
+    reply[49] = 0; // min_byte1
+    reply[50] = 0; // max_byte1
+    reply[51] = if font.char_infos.len() == n_char_infos as usize {
+        1
+    } else {
+        0
+    }; // all_chars_exist
+    reply[52..54].copy_from_slice(&font.font_ascent.to_le_bytes());
+    reply[54..56].copy_from_slice(&font.font_descent.to_le_bytes());
+    reply[56..60].copy_from_slice(&n_char_infos.to_le_bytes());
+
+    // Char infos at offset 60
+    let mut off = 60;
+    for ci in &font.char_infos {
+        if off + 12 <= reply.len() {
+            reply[off..off + 2].copy_from_slice(&ci.left_side_bearing.to_le_bytes());
+            reply[off + 2..off + 4].copy_from_slice(&ci.right_side_bearing.to_le_bytes());
+            reply[off + 4..off + 6].copy_from_slice(&ci.character_width.to_le_bytes());
+            reply[off + 6..off + 8].copy_from_slice(&ci.ascent.to_le_bytes());
+            reply[off + 8..off + 10].copy_from_slice(&ci.descent.to_le_bytes());
+            reply[off + 10..off + 12].copy_from_slice(&ci.attributes.to_le_bytes());
+            off += 12;
+        }
+    }
+
     reply
 }
 
@@ -1457,7 +1579,8 @@ fn parse_gc_values(gc: &mut GcState, value_mask: u32, data: &[u8]) {
                     2 => gc.foreground = val,
                     3 => gc.background = val,
                     5 => gc.line_width = val as u16,
-                    _ => {} // Ignore other GC attributes for now
+                    14 => gc.font_id = val, // font
+                    _ => {}
                 }
                 offset += 4;
             }
@@ -1873,7 +1996,6 @@ fn handle_poly_fill_arc(state: &ClientState, data: &[u8]) -> Vec<u8> {
 }
 
 fn handle_image_text8(state: &ClientState, data: &[u8]) -> Vec<u8> {
-    // ImageText8: [opcode(1), string_len(1), length(2), drawable(4), gc(4), x(2), y(2), string...]
     if data.len() < 16 {
         return Vec::new();
     }
@@ -1891,49 +2013,20 @@ fn handle_image_text8(state: &ClientState, data: &[u8]) -> Vec<u8> {
         return Vec::new();
     };
 
-    let char_w = 7u16;
-    let char_h = 13u16;
-    let ascent = 10i16;
-    let img_w = str_len as u16 * char_w;
-    let img_h = char_h;
-    let img_y = y - ascent;
+    // Get the font from the GC
+    let font = state
+        .font_manager
+        .get_font(gc.font_id)
+        .or_else(|| state.font_manager.get_default_font());
 
-    // Render text to a pixel buffer (BGRX format, 4 bytes per pixel)
-    let fg_r = ((gc.foreground >> 16) & 0xFF) as u8;
-    let fg_g = ((gc.foreground >> 8) & 0xFF) as u8;
-    let fg_b = (gc.foreground & 0xFF) as u8;
-    let bg_r = ((gc.background >> 16) & 0xFF) as u8;
-    let bg_g = ((gc.background >> 8) & 0xFF) as u8;
-    let bg_b = (gc.background & 0xFF) as u8;
+    let font = match font {
+        Some(f) => f,
+        None => return Vec::new(),
+    };
 
-    let mut pixels = vec![0u8; img_w as usize * img_h as usize * 4];
-
-    // Fill background
-    for i in 0..(img_w as usize * img_h as usize) {
-        pixels[i * 4] = bg_b;
-        pixels[i * 4 + 1] = bg_g;
-        pixels[i * 4 + 2] = bg_r;
-        pixels[i * 4 + 3] = 0;
-    }
-
-    // Render each character using built-in 7x13 bitmap font
-    for (ci, &ch) in text.iter().enumerate() {
-        let glyph = get_glyph(ch);
-        for (row, &bits) in glyph.iter().enumerate() {
-            for col in 0..char_w as usize {
-                if bits & (1 << (char_w as usize - 1 - col)) != 0 {
-                    let px = ci * char_w as usize + col;
-                    let py = row;
-                    if px < img_w as usize && py < img_h as usize {
-                        let idx = (py * img_w as usize + px) * 4;
-                        pixels[idx] = fg_b;
-                        pixels[idx + 1] = fg_g;
-                        pixels[idx + 2] = fg_r;
-                        pixels[idx + 3] = 0;
-                    }
-                }
-            }
-        }
+    let (img_w, img_h, pixels) = font.render_text(text, gc.foreground, gc.background);
+    if img_w == 0 || img_h == 0 {
+        return Vec::new();
     }
 
     let _ = state.update_tx.send((
@@ -1941,7 +2034,7 @@ fn handle_image_text8(state: &ClientState, data: &[u8]) -> Vec<u8> {
         DisplayUpdate::PutImage {
             window_id: drawable,
             x,
-            y: img_y,
+            y: y - font.font_ascent,
             width: img_w,
             height: img_h,
             data: pixels,
@@ -1949,251 +2042,6 @@ fn handle_image_text8(state: &ClientState, data: &[u8]) -> Vec<u8> {
     ));
 
     Vec::new()
-}
-
-/// Simple 7x13 bitmap font glyphs for ASCII printable characters.
-/// Each glyph is 13 rows of u8, where each bit represents a pixel (MSB = leftmost).
-fn get_glyph(ch: u8) -> &'static [u8; 13] {
-    static SPACE: [u8; 13] = [0; 13];
-    static DEFAULT: [u8; 13] = [
-        0b0111110, 0b1000010, 0b1000010, 0b1000010, 0b0111110, 0b0000000, 0b0000000, 0b0000000,
-        0b0000000, 0b0000000, 0b0000000, 0b0000000, 0b0000000,
-    ];
-
-    match ch {
-        b' ' => &SPACE,
-        b'!' => &glyph![
-            0b0010000, 0b0010000, 0b0010000, 0b0010000, 0b0010000, 0b0010000, 0b0010000, 0b0000000,
-            0b0010000, 0b0000000, 0b0000000, 0b0000000, 0b0000000
-        ],
-        b'0' => &glyph![
-            0b0111100, 0b0100010, 0b1000010, 0b1000010, 0b1000010, 0b1000010, 0b1000010, 0b1000010,
-            0b0100010, 0b0111100, 0b0000000, 0b0000000, 0b0000000
-        ],
-        b'1' => &glyph![
-            0b0001000, 0b0011000, 0b0101000, 0b0001000, 0b0001000, 0b0001000, 0b0001000, 0b0001000,
-            0b0001000, 0b0111110, 0b0000000, 0b0000000, 0b0000000
-        ],
-        b'A'..=b'Z' => {
-            static UPPER: [[u8; 13]; 26] = [
-                glyph![
-                    0b0011100, 0b0100010, 0b1000001, 0b1000001, 0b1111111, 0b1000001, 0b1000001,
-                    0b1000001, 0b1000001, 0b0000000, 0b0000000, 0b0000000, 0b0000000
-                ], // A
-                glyph![
-                    0b1111110, 0b1000001, 0b1000001, 0b1111110, 0b1000001, 0b1000001, 0b1000001,
-                    0b1000001, 0b1111110, 0b0000000, 0b0000000, 0b0000000, 0b0000000
-                ], // B
-                glyph![
-                    0b0111110, 0b1000001, 0b1000000, 0b1000000, 0b1000000, 0b1000000, 0b1000000,
-                    0b1000001, 0b0111110, 0b0000000, 0b0000000, 0b0000000, 0b0000000
-                ], // C
-                glyph![
-                    0b1111100, 0b1000010, 0b1000001, 0b1000001, 0b1000001, 0b1000001, 0b1000001,
-                    0b1000010, 0b1111100, 0b0000000, 0b0000000, 0b0000000, 0b0000000
-                ], // D
-                glyph![
-                    0b1111111, 0b1000000, 0b1000000, 0b1111110, 0b1000000, 0b1000000, 0b1000000,
-                    0b1000000, 0b1111111, 0b0000000, 0b0000000, 0b0000000, 0b0000000
-                ], // E
-                glyph![
-                    0b1111111, 0b1000000, 0b1000000, 0b1111110, 0b1000000, 0b1000000, 0b1000000,
-                    0b1000000, 0b1000000, 0b0000000, 0b0000000, 0b0000000, 0b0000000
-                ], // F
-                glyph![
-                    0b0111110, 0b1000001, 0b1000000, 0b1000000, 0b1001111, 0b1000001, 0b1000001,
-                    0b1000001, 0b0111110, 0b0000000, 0b0000000, 0b0000000, 0b0000000
-                ], // G
-                glyph![
-                    0b1000001, 0b1000001, 0b1000001, 0b1111111, 0b1000001, 0b1000001, 0b1000001,
-                    0b1000001, 0b1000001, 0b0000000, 0b0000000, 0b0000000, 0b0000000
-                ], // H
-                glyph![
-                    0b0111110, 0b0001000, 0b0001000, 0b0001000, 0b0001000, 0b0001000, 0b0001000,
-                    0b0001000, 0b0111110, 0b0000000, 0b0000000, 0b0000000, 0b0000000
-                ], // I
-                glyph![
-                    0b0011111, 0b0000100, 0b0000100, 0b0000100, 0b0000100, 0b0000100, 0b1000100,
-                    0b1000100, 0b0111000, 0b0000000, 0b0000000, 0b0000000, 0b0000000
-                ], // J
-                glyph![
-                    0b1000010, 0b1000100, 0b1001000, 0b1010000, 0b1100000, 0b1010000, 0b1001000,
-                    0b1000100, 0b1000010, 0b0000000, 0b0000000, 0b0000000, 0b0000000
-                ], // K
-                glyph![
-                    0b1000000, 0b1000000, 0b1000000, 0b1000000, 0b1000000, 0b1000000, 0b1000000,
-                    0b1000000, 0b1111111, 0b0000000, 0b0000000, 0b0000000, 0b0000000
-                ], // L
-                glyph![
-                    0b1000001, 0b1100011, 0b1010101, 0b1001001, 0b1000001, 0b1000001, 0b1000001,
-                    0b1000001, 0b1000001, 0b0000000, 0b0000000, 0b0000000, 0b0000000
-                ], // M
-                glyph![
-                    0b1000001, 0b1100001, 0b1010001, 0b1001001, 0b1000101, 0b1000011, 0b1000001,
-                    0b1000001, 0b1000001, 0b0000000, 0b0000000, 0b0000000, 0b0000000
-                ], // N
-                glyph![
-                    0b0111110, 0b1000001, 0b1000001, 0b1000001, 0b1000001, 0b1000001, 0b1000001,
-                    0b1000001, 0b0111110, 0b0000000, 0b0000000, 0b0000000, 0b0000000
-                ], // O
-                glyph![
-                    0b1111110, 0b1000001, 0b1000001, 0b1000001, 0b1111110, 0b1000000, 0b1000000,
-                    0b1000000, 0b1000000, 0b0000000, 0b0000000, 0b0000000, 0b0000000
-                ], // P
-                glyph![
-                    0b0111110, 0b1000001, 0b1000001, 0b1000001, 0b1000001, 0b1001001, 0b1000101,
-                    0b1000010, 0b0111101, 0b0000000, 0b0000000, 0b0000000, 0b0000000
-                ], // Q
-                glyph![
-                    0b1111110, 0b1000001, 0b1000001, 0b1000001, 0b1111110, 0b1001000, 0b1000100,
-                    0b1000010, 0b1000001, 0b0000000, 0b0000000, 0b0000000, 0b0000000
-                ], // R
-                glyph![
-                    0b0111110, 0b1000001, 0b1000000, 0b0100000, 0b0011100, 0b0000010, 0b0000001,
-                    0b1000001, 0b0111110, 0b0000000, 0b0000000, 0b0000000, 0b0000000
-                ], // S
-                glyph![
-                    0b1111111, 0b0001000, 0b0001000, 0b0001000, 0b0001000, 0b0001000, 0b0001000,
-                    0b0001000, 0b0001000, 0b0000000, 0b0000000, 0b0000000, 0b0000000
-                ], // T
-                glyph![
-                    0b1000001, 0b1000001, 0b1000001, 0b1000001, 0b1000001, 0b1000001, 0b1000001,
-                    0b1000001, 0b0111110, 0b0000000, 0b0000000, 0b0000000, 0b0000000
-                ], // U
-                glyph![
-                    0b1000001, 0b1000001, 0b1000001, 0b0100010, 0b0100010, 0b0010100, 0b0010100,
-                    0b0001000, 0b0001000, 0b0000000, 0b0000000, 0b0000000, 0b0000000
-                ], // V
-                glyph![
-                    0b1000001, 0b1000001, 0b1000001, 0b1000001, 0b1001001, 0b1001001, 0b0101010,
-                    0b0010100, 0b0010100, 0b0000000, 0b0000000, 0b0000000, 0b0000000
-                ], // W
-                glyph![
-                    0b1000001, 0b0100010, 0b0010100, 0b0001000, 0b0001000, 0b0010100, 0b0100010,
-                    0b1000001, 0b1000001, 0b0000000, 0b0000000, 0b0000000, 0b0000000
-                ], // X
-                glyph![
-                    0b1000001, 0b0100010, 0b0010100, 0b0001000, 0b0001000, 0b0001000, 0b0001000,
-                    0b0001000, 0b0001000, 0b0000000, 0b0000000, 0b0000000, 0b0000000
-                ], // Y
-                glyph![
-                    0b1111111, 0b0000010, 0b0000100, 0b0001000, 0b0010000, 0b0100000, 0b1000000,
-                    0b1000000, 0b1111111, 0b0000000, 0b0000000, 0b0000000, 0b0000000
-                ], // Z
-            ];
-            &UPPER[(ch - b'A') as usize]
-        }
-        b'a'..=b'z' => {
-            static LOWER: [[u8; 13]; 26] = [
-                glyph![
-                    0b0000000, 0b0000000, 0b0000000, 0b0111100, 0b0000010, 0b0111110, 0b1000010,
-                    0b1000010, 0b0111110, 0b0000000, 0b0000000, 0b0000000, 0b0000000
-                ], // a
-                glyph![
-                    0b1000000, 0b1000000, 0b1000000, 0b1011100, 0b1100010, 0b1000010, 0b1000010,
-                    0b1100010, 0b1011100, 0b0000000, 0b0000000, 0b0000000, 0b0000000
-                ], // b
-                glyph![
-                    0b0000000, 0b0000000, 0b0000000, 0b0111100, 0b1000010, 0b1000000, 0b1000000,
-                    0b1000010, 0b0111100, 0b0000000, 0b0000000, 0b0000000, 0b0000000
-                ], // c
-                glyph![
-                    0b0000010, 0b0000010, 0b0000010, 0b0111010, 0b1000110, 0b1000010, 0b1000010,
-                    0b1000110, 0b0111010, 0b0000000, 0b0000000, 0b0000000, 0b0000000
-                ], // d
-                glyph![
-                    0b0000000, 0b0000000, 0b0000000, 0b0111100, 0b1000010, 0b1111110, 0b1000000,
-                    0b1000010, 0b0111100, 0b0000000, 0b0000000, 0b0000000, 0b0000000
-                ], // e
-                glyph![
-                    0b0001100, 0b0010010, 0b0010000, 0b0010000, 0b1111100, 0b0010000, 0b0010000,
-                    0b0010000, 0b0010000, 0b0000000, 0b0000000, 0b0000000, 0b0000000
-                ], // f
-                glyph![
-                    0b0000000, 0b0000000, 0b0000000, 0b0111010, 0b1000110, 0b1000010, 0b1000110,
-                    0b0111010, 0b0000010, 0b1000010, 0b0111100, 0b0000000, 0b0000000
-                ], // g
-                glyph![
-                    0b1000000, 0b1000000, 0b1000000, 0b1011100, 0b1100010, 0b1000010, 0b1000010,
-                    0b1000010, 0b1000010, 0b0000000, 0b0000000, 0b0000000, 0b0000000
-                ], // h
-                glyph![
-                    0b0001000, 0b0000000, 0b0000000, 0b0011000, 0b0001000, 0b0001000, 0b0001000,
-                    0b0001000, 0b0011100, 0b0000000, 0b0000000, 0b0000000, 0b0000000
-                ], // i
-                glyph![
-                    0b0000100, 0b0000000, 0b0000000, 0b0001100, 0b0000100, 0b0000100, 0b0000100,
-                    0b0000100, 0b1000100, 0b1000100, 0b0111000, 0b0000000, 0b0000000
-                ], // j
-                glyph![
-                    0b1000000, 0b1000000, 0b1000000, 0b1000100, 0b1001000, 0b1010000, 0b1110000,
-                    0b1001000, 0b1000100, 0b0000000, 0b0000000, 0b0000000, 0b0000000
-                ], // k
-                glyph![
-                    0b0011000, 0b0001000, 0b0001000, 0b0001000, 0b0001000, 0b0001000, 0b0001000,
-                    0b0001000, 0b0011100, 0b0000000, 0b0000000, 0b0000000, 0b0000000
-                ], // l
-                glyph![
-                    0b0000000, 0b0000000, 0b0000000, 0b1110110, 0b1001001, 0b1001001, 0b1001001,
-                    0b1001001, 0b1001001, 0b0000000, 0b0000000, 0b0000000, 0b0000000
-                ], // m
-                glyph![
-                    0b0000000, 0b0000000, 0b0000000, 0b1011100, 0b1100010, 0b1000010, 0b1000010,
-                    0b1000010, 0b1000010, 0b0000000, 0b0000000, 0b0000000, 0b0000000
-                ], // n
-                glyph![
-                    0b0000000, 0b0000000, 0b0000000, 0b0111100, 0b1000010, 0b1000010, 0b1000010,
-                    0b1000010, 0b0111100, 0b0000000, 0b0000000, 0b0000000, 0b0000000
-                ], // o
-                glyph![
-                    0b0000000, 0b0000000, 0b0000000, 0b1011100, 0b1100010, 0b1000010, 0b1100010,
-                    0b1011100, 0b1000000, 0b1000000, 0b1000000, 0b0000000, 0b0000000
-                ], // p
-                glyph![
-                    0b0000000, 0b0000000, 0b0000000, 0b0111010, 0b1000110, 0b1000010, 0b1000110,
-                    0b0111010, 0b0000010, 0b0000010, 0b0000010, 0b0000000, 0b0000000
-                ], // q
-                glyph![
-                    0b0000000, 0b0000000, 0b0000000, 0b1011100, 0b1100010, 0b1000000, 0b1000000,
-                    0b1000000, 0b1000000, 0b0000000, 0b0000000, 0b0000000, 0b0000000
-                ], // r
-                glyph![
-                    0b0000000, 0b0000000, 0b0000000, 0b0111110, 0b1000000, 0b0111100, 0b0000010,
-                    0b0000010, 0b1111100, 0b0000000, 0b0000000, 0b0000000, 0b0000000
-                ], // s
-                glyph![
-                    0b0010000, 0b0010000, 0b0010000, 0b1111100, 0b0010000, 0b0010000, 0b0010000,
-                    0b0010010, 0b0001100, 0b0000000, 0b0000000, 0b0000000, 0b0000000
-                ], // t
-                glyph![
-                    0b0000000, 0b0000000, 0b0000000, 0b1000010, 0b1000010, 0b1000010, 0b1000010,
-                    0b1000110, 0b0111010, 0b0000000, 0b0000000, 0b0000000, 0b0000000
-                ], // u
-                glyph![
-                    0b0000000, 0b0000000, 0b0000000, 0b1000010, 0b1000010, 0b0100100, 0b0100100,
-                    0b0011000, 0b0001000, 0b0000000, 0b0000000, 0b0000000, 0b0000000
-                ], // v
-                glyph![
-                    0b0000000, 0b0000000, 0b0000000, 0b1000001, 0b1001001, 0b1001001, 0b1001001,
-                    0b0101010, 0b0010100, 0b0000000, 0b0000000, 0b0000000, 0b0000000
-                ], // w
-                glyph![
-                    0b0000000, 0b0000000, 0b0000000, 0b1000010, 0b0100100, 0b0011000, 0b0011000,
-                    0b0100100, 0b1000010, 0b0000000, 0b0000000, 0b0000000, 0b0000000
-                ], // x
-                glyph![
-                    0b0000000, 0b0000000, 0b0000000, 0b1000010, 0b1000010, 0b1000110, 0b0111010,
-                    0b0000010, 0b1000010, 0b0111100, 0b0000000, 0b0000000, 0b0000000
-                ], // y
-                glyph![
-                    0b0000000, 0b0000000, 0b0000000, 0b1111110, 0b0000100, 0b0001000, 0b0010000,
-                    0b0100000, 0b1111110, 0b0000000, 0b0000000, 0b0000000, 0b0000000
-                ], // z
-            ];
-            &LOWER[(ch - b'a') as usize]
-        }
-        _ => &DEFAULT,
-    }
 }
 
 fn handle_put_image(state: &ClientState, data: &[u8]) -> Vec<u8> {

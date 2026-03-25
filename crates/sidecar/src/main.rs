@@ -1,3 +1,4 @@
+mod fonts;
 mod xserver;
 
 use std::collections::{HashMap, VecDeque};
