@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import s from "./App.module.css";
+import { ClientRenderer } from "./ClientRenderer";
 import { Button } from "./components/Button";
-import type { DisplayUpdate, InputEvent } from "./types";
+import type { InputEvent } from "./types";
 import { useBackendSocket } from "./useBackendSocket";
 import { X11Canvas } from "./X11Canvas";
 
@@ -25,22 +26,32 @@ function App() {
 	const [activeClientId, setActiveClientId] = useState<string | null>(null);
 	const [killingPids, setKillingPids] = useState<Set<number>>(new Set());
 
-	// Per-client_id display queues (plain arrays, not React state)
-	const queuesRef = useRef<Map<string, DisplayUpdate[]>>(new Map());
+	// Per-client_id renderers (persistent back buffers, survive tab switches)
+	const renderersRef = useRef<Map<string, ClientRenderer>>(new Map());
 	const viewingSidecarRef = useRef(viewingSidecar);
 	viewingSidecarRef.current = viewingSidecar;
 
-	// Register display callback: route updates to per-client queues
+	function getRenderer(clientId: string): ClientRenderer {
+		const renderers = renderersRef.current;
+		let r = renderers.get(clientId);
+		if (!r) {
+			r = new ClientRenderer(1024, 768);
+			renderers.set(clientId, r);
+		}
+		return r;
+	}
+
+	// Register display callback: render updates directly to per-client back buffers
 	useEffect(() => {
 		onDisplayUpdate((sidecarId, clientId, update) => {
 			if (sidecarId === viewingSidecarRef.current) {
-				const queues = queuesRef.current;
-				let q = queues.get(clientId);
-				if (!q) {
-					q = [];
-					queues.set(clientId, q);
+				const renderers = renderersRef.current;
+				let r = renderers.get(clientId);
+				if (!r) {
+					r = new ClientRenderer(1024, 768);
+					renderers.set(clientId, r);
 				}
-				q.push(update);
+				r.pushUpdate(update);
 			}
 		});
 		return () => onDisplayUpdate(null);
@@ -123,16 +134,8 @@ function App() {
 		return proc ? `${proc.command} (${cp.pid})` : `PID ${cp.pid}`;
 	}
 
-	// Active queue ref for the canvas
-	const activeQueueRef = useRef<DisplayUpdate[]>([]);
-	if (activeClientId) {
-		let q = queuesRef.current.get(activeClientId);
-		if (!q) {
-			q = [];
-			queuesRef.current.set(activeClientId, q);
-		}
-		activeQueueRef.current = q;
-	}
+	// Active renderer for the canvas
+	const activeRenderer = activeClientId ? getRenderer(activeClientId) : null;
 
 	return (
 		<div className={s.app}>
@@ -186,10 +189,10 @@ function App() {
 								</button>
 							))}
 						</div>
-						{activeClientId && (
+						{activeRenderer && (
 							<X11Canvas
 								key={activeClientId}
-								queueRef={activeQueueRef}
+								renderer={activeRenderer}
 								width={1024}
 								height={768}
 								onInput={handleInput}
