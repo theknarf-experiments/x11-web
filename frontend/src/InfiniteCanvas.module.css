@@ -3,11 +3,6 @@
 	inset: 0;
 	overflow: hidden;
 	background: #111;
-	cursor: grab;
-}
-
-.viewport:active {
-	cursor: grabbing;
 }
 
 .transform {

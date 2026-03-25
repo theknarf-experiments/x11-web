@@ -1,10 +1,4 @@
-import {
-	type ReactNode,
-	useCallback,
-	useEffect,
-	useRef,
-	useState,
-} from "react";
+import { type ReactNode, useEffect, useRef, useState } from "react";
 import s from "./InfiniteCanvas.module.css";
 
 interface Camera {
@@ -25,39 +19,6 @@ export function InfiniteCanvas({ children }: InfiniteCanvasProps) {
 	const cameraRef = useRef(camera);
 	cameraRef.current = camera;
 	const viewportRef = useRef<HTMLDivElement>(null);
-	const isPanning = useRef(false);
-
-	// Pan: pointer drag on background
-	const handlePointerDown = useCallback((e: React.PointerEvent) => {
-		if (e.target !== e.currentTarget) return;
-		isPanning.current = true;
-		const startX = e.clientX;
-		const startY = e.clientY;
-		const cam = { ...cameraRef.current };
-		const target = e.currentTarget;
-		target.setPointerCapture(e.pointerId);
-
-		const onPointerMove = (ev: Event) => {
-			if (!isPanning.current) return;
-			const { clientX, clientY } = ev as PointerEvent;
-			const dx = clientX - startX;
-			const dy = clientY - startY;
-			setCamera({
-				...cam,
-				x: cam.x - dx / cam.scale,
-				y: cam.y - dy / cam.scale,
-			});
-		};
-
-		const onPointerUp = () => {
-			isPanning.current = false;
-			target.removeEventListener("pointermove", onPointerMove);
-			target.removeEventListener("pointerup", onPointerUp);
-		};
-
-		target.addEventListener("pointermove", onPointerMove);
-		target.addEventListener("pointerup", onPointerUp);
-	}, []);
 
 	// Wheel: scroll = pan, cmd+scroll or pinch = zoom
 	// Use a native event listener to get { passive: false } for preventDefault
@@ -105,12 +66,7 @@ export function InfiniteCanvas({ children }: InfiniteCanvasProps) {
 	const zoomPercent = Math.round(camera.scale * 100);
 
 	return (
-		<div
-			ref={viewportRef}
-			className={s.viewport}
-			onPointerDown={handlePointerDown}
-			data-testid="infinite-canvas"
-		>
+		<div ref={viewportRef} className={s.viewport} data-testid="infinite-canvas">
 			<div
 				className={s.transform}
 				style={{ transform }}
