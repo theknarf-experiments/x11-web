@@ -739,6 +739,7 @@ fn handle_request(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
         84 => handle_alloc_color(state, data, seq),
         91 => handle_query_colors(state, data, seq),
         98 => handle_query_extension(state, data, seq),
+        101 => handle_get_keyboard_mapping(data, seq),
         // Silently ignore these common requests
         19 | // DeleteProperty
         22 | // SetSelectionOwner
@@ -776,7 +777,6 @@ fn handle_request(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
         95 | // FreeCursor
         96 | // RecolorCursor
         100 | // ChangeKeyboardMapping
-        101 | // GetKeyboardMapping -> reply needed
         102 | // ChangeKeyboardControl
         103 | // GetKeyboardControl -> reply needed
         104 | // Bell
@@ -838,20 +838,7 @@ fn handle_misc_request(state: &ClientState, opcode: u8, seq: u16) -> Vec<u8> {
             reply.to_vec()
         }
         // 84 (AllocColor) and 91 (QueryColors) handled in handle_request
-        101 => {
-            // GetKeyboardMapping reply
-            // Return a minimal mapping: 248 keycodes, 1 keysym per keycode
-            let keysyms_per_keycode: u8 = 1;
-            let num_keycodes: u32 = 248; // max_keycode(255) - min_keycode(8) + 1
-            let data_len = num_keycodes * keysyms_per_keycode as u32;
-            let reply_len = 32 + data_len as usize * 4;
-            let mut reply = vec![0u8; reply_len];
-            reply[0] = 1;
-            reply[1] = keysyms_per_keycode;
-            reply[2..4].copy_from_slice(&seq.to_le_bytes());
-            reply[4..8].copy_from_slice(&data_len.to_le_bytes());
-            reply
-        }
+        // 101 (GetKeyboardMapping) handled in handle_request
         103 => {
             // GetKeyboardControl reply
             let mut reply = [0u8; 52]; // 32 + 20 extra
@@ -2178,6 +2165,146 @@ fn handle_query_colors(_state: &ClientState, data: &[u8], seq: u16) -> Vec<u8> {
     }
 
     reply
+}
+
+fn handle_get_keyboard_mapping(data: &[u8], seq: u16) -> Vec<u8> {
+    // GetKeyboardMapping: [opcode(1), pad(1), length(2), first_keycode(1), count(1), pad(2)]
+    let first_keycode = if data.len() >= 5 { data[4] } else { 8 };
+    let count = if data.len() >= 6 { data[5] } else { 248 };
+
+    // Return 4 keysyms per keycode (normal, shift, mode_switch, mode+shift)
+    let keysyms_per_keycode: u8 = 4;
+    let total_syms = count as u32 * keysyms_per_keycode as u32;
+    let reply_len = 32 + total_syms as usize * 4;
+    let mut reply = vec![0u8; reply_len];
+    reply[0] = 1; // Reply
+    reply[1] = keysyms_per_keycode;
+    reply[2..4].copy_from_slice(&seq.to_le_bytes());
+    reply[4..8].copy_from_slice(&total_syms.to_le_bytes());
+
+    // Fill in keysyms for each keycode
+    // This maps X11 keycodes to keysyms using a standard US keyboard layout.
+    // X11 keycodes start at 8 (min_keycode in our setup).
+    // Browser keyCode + 8 = X11 keycode (approximately).
+    for i in 0..count as usize {
+        let keycode = first_keycode as usize + i;
+        let offset = 32 + i * keysyms_per_keycode as usize * 4;
+
+        // Map keycode to (normal_keysym, shifted_keysym)
+        let (normal, shifted) = keycode_to_keysym(keycode as u8);
+
+        // Normal keysym
+        reply[offset..offset + 4].copy_from_slice(&normal.to_le_bytes());
+        // Shifted keysym
+        reply[offset + 4..offset + 8].copy_from_slice(&shifted.to_le_bytes());
+        // Mode switch and mode+shift left as 0 (NoSymbol)
+    }
+
+    reply
+}
+
+/// Map X11 keycode to (normal_keysym, shifted_keysym).
+/// Based on standard US keyboard layout.
+/// X11 keycodes = browser keyCode + 8 (approximately).
+fn keycode_to_keysym(keycode: u8) -> (u32, u32) {
+    // X11 keysym constants
+    const XK_BACKSPACE: u32 = 0xff08;
+    const XK_TAB: u32 = 0xff09;
+    const XK_RETURN: u32 = 0xff0d;
+    const XK_ESCAPE: u32 = 0xff1b;
+    const XK_DELETE: u32 = 0xffff;
+    const XK_HOME: u32 = 0xff50;
+    const XK_LEFT: u32 = 0xff51;
+    const XK_UP: u32 = 0xff52;
+    const XK_RIGHT: u32 = 0xff53;
+    const XK_DOWN: u32 = 0xff54;
+    const XK_PAGE_UP: u32 = 0xff55;
+    const XK_PAGE_DOWN: u32 = 0xff56;
+    const XK_END: u32 = 0xff57;
+    const XK_SHIFT_L: u32 = 0xffe1;
+    const XK_CONTROL_L: u32 = 0xffe3;
+    const XK_ALT_L: u32 = 0xffe9;
+    const XK_CAPS_LOCK: u32 = 0xffe5;
+    const XK_SPACE: u32 = 0x0020;
+    const XK_F1: u32 = 0xffbe;
+
+    // Browser keyCode + 8 = X11 keycode
+    // So keycode 16 = browser Shift (keyCode 8+8=16)
+    // Mapping: X11 keycode → (normal, shifted)
+    match keycode {
+        // Special keys (browser keyCode → X11 keycode = browser + 8)
+        16 => (XK_BACKSPACE, XK_BACKSPACE), // browser 8 = Backspace
+        17 => (XK_TAB, XK_TAB),             // browser 9 = Tab
+        21 => (XK_RETURN, XK_RETURN),       // browser 13 = Enter
+        24 => (XK_SHIFT_L, XK_SHIFT_L),     // browser 16 = Shift
+        25 => (XK_CONTROL_L, XK_CONTROL_L), // browser 17 = Ctrl
+        26 => (XK_ALT_L, XK_ALT_L),         // browser 18 = Alt
+        28 => (XK_CAPS_LOCK, XK_CAPS_LOCK), // browser 20 = CapsLock
+        35 => (XK_ESCAPE, XK_ESCAPE),       // browser 27 = Escape
+        40 => (XK_SPACE, XK_SPACE),         // browser 32 = Space
+
+        // Number keys (browser 48-57 → keycode 56-65)
+        56 => (0x0030, 0x0029), // 0 )
+        57 => (0x0031, 0x0021), // 1 !
+        58 => (0x0032, 0x0040), // 2 @
+        59 => (0x0033, 0x0023), // 3 #
+        60 => (0x0034, 0x0024), // 4 $
+        61 => (0x0035, 0x0025), // 5 %
+        62 => (0x0036, 0x005e), // 6 ^
+        63 => (0x0037, 0x0026), // 7 &
+        64 => (0x0038, 0x002a), // 8 *
+        65 => (0x0039, 0x0028), // 9 (
+
+        // Letter keys (browser 65-90 → keycode 73-98)
+        k @ 73..=98 => {
+            let lower = (k - 73 + b'a') as u32;
+            let upper = (k - 73 + b'A') as u32;
+            (lower, upper)
+        }
+
+        // Arrow keys (browser 37-40 → keycode 45-48)
+        45 => (XK_LEFT, XK_LEFT),
+        46 => (XK_UP, XK_UP),
+        47 => (XK_RIGHT, XK_RIGHT),
+        48 => (XK_DOWN, XK_DOWN),
+
+        // Home/End/PageUp/PageDown (browser 33-36 → keycode 41-44)
+        41 => (XK_PAGE_UP, XK_PAGE_UP),
+        42 => (XK_PAGE_DOWN, XK_PAGE_DOWN),
+        43 => (XK_END, XK_END),
+        44 => (XK_HOME, XK_HOME),
+
+        // Delete (browser 46 → keycode 54... but that conflicts with period)
+        // Actually browser Delete is keyCode 46, → X11 keycode 54
+        // This conflicts with '.' key in some layouts. Let's handle both.
+        119 => (XK_DELETE, XK_DELETE), // browser 111 = Delete
+
+        // F keys (browser 112-123 → keycode 120-131)
+        k @ 120..=131 => {
+            let fnum = (k - 120) as u32;
+            (XK_F1 + fnum, XK_F1 + fnum)
+        }
+
+        // Punctuation (browser keyCode → X11 keycode = browser + 8)
+        194 => (0x002d, 0x005f), // - _  (browser 186... actually varies by browser)
+        195 => (0x003d, 0x002b), // = +
+
+        // Semicolon, quotes, etc (browser-dependent keyCodes)
+        // Common US layout:
+        187 => (0x003b, 0x003a), // ; :  (browser 59/186+8)
+        188 => (0x003d, 0x002b), // = +  (browser 61/187+8)
+        196 => (0x002c, 0x003c), // , <  (browser 188+8)
+        197 => (0x002d, 0x005f), // - _  (browser 189+8)
+        198 => (0x002e, 0x003e), // . >  (browser 190+8)
+        199 => (0x002f, 0x003f), // / ?  (browser 191+8)
+        200 => (0x0060, 0x007e), // ` ~  (browser 192+8)
+        227 => (0x005b, 0x007b), // [ {  (browser 219+8)
+        228 => (0x005c, 0x007c), // \ |  (browser 220+8)
+        229 => (0x005d, 0x007d), // ] }  (browser 221+8)
+        230 => (0x0027, 0x0022), // ' "  (browser 222+8)
+
+        _ => (0, 0), // NoSymbol
+    }
 }
 
 fn handle_query_extension(_state: &ClientState, _data: &[u8], seq: u16) -> Vec<u8> {

@@ -340,6 +340,34 @@ test.describe
 				maxDiffPixelRatio: 0.05,
 			});
 		});
+
+		test("xterm accepts keyboard input", async ({ page }) => {
+			await page.goto(`http://localhost:${frontendPort}`);
+			await waitForDock(page);
+
+			await page.locator('[data-testid="spawn-button"]').click();
+			await page.locator('input[placeholder="command"]').fill("xterm");
+			await page.locator('input[placeholder="args"]').fill("-geometry 60x15");
+			await page.locator("button", { hasText: "Spawn" }).click();
+
+			const canvas = page.locator('[data-testid="x11-canvas"]');
+			await expect(canvas).toBeVisible({ timeout: 10_000 });
+			await page.waitForTimeout(3000);
+
+			// Click the canvas to focus it
+			await canvas.click();
+			await page.waitForTimeout(500);
+
+			// Type a command
+			await page.keyboard.type("echo hello", { delay: 50 });
+			await page.keyboard.press("Enter");
+			await page.waitForTimeout(2000);
+
+			// Take screenshot — should show the typed command and its output
+			await expect(canvas).toHaveScreenshot("xterm-keyboard.png", {
+				maxDiffPixelRatio: 0.05,
+			});
+		});
 	});
 
 async function countNonBlackPixels(

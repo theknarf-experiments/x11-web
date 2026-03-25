@@ -272,7 +272,10 @@ export function WindowFrame({
 				className={s.canvas}
 				data-testid="x11-canvas"
 				tabIndex={0}
-				onPointerDown={(e) => e.stopPropagation()}
+				onPointerDown={(e) => {
+					e.stopPropagation();
+					e.currentTarget.focus();
+				}}
 				onMouseMove={handleMouseMove}
 				onMouseDown={handleMouseDown}
 				onMouseUp={handleMouseUp}
