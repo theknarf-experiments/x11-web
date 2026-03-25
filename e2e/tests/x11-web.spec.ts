@@ -277,6 +277,59 @@ test.describe
 				maxDiffPixelRatio: 0.01,
 			});
 		});
+
+		test("xlogo renders on the canvas", async ({ page }) => {
+			await page.goto(`http://localhost:${frontendPort}`);
+			await waitForDock(page);
+
+			// Change command to xlogo
+			await page.locator('[data-testid="spawn-button"]').click();
+			await page.locator('input[placeholder="command"]').fill("xlogo");
+			await page.locator('input[placeholder="args"]').fill("-geometry 100x100");
+			await page.locator("button", { hasText: "Spawn" }).click();
+
+			const canvas = page.locator('[data-testid="x11-canvas"]');
+			await expect(canvas).toBeVisible({ timeout: 10_000 });
+			await page.waitForTimeout(5000);
+
+			const nonBlackPixels = await canvas.evaluate((el: HTMLCanvasElement) => {
+				const ctx = el.getContext("2d");
+				if (!ctx) return 0;
+				const d = ctx.getImageData(0, 0, el.width, el.height);
+				let n = 0;
+				for (let i = 0; i < d.data.length; i += 4) {
+					if (d.data[i] || d.data[i + 1] || d.data[i + 2]) n++;
+				}
+				return n;
+			});
+			expect(nonBlackPixels).toBeGreaterThan(10);
+		});
+
+		test("xclock renders on the canvas", async ({ page }) => {
+			await page.goto(`http://localhost:${frontendPort}`);
+			await waitForDock(page);
+
+			await page.locator('[data-testid="spawn-button"]').click();
+			await page.locator('input[placeholder="command"]').fill("xclock");
+			await page.locator('input[placeholder="args"]').fill("-update 1");
+			await page.locator("button", { hasText: "Spawn" }).click();
+
+			const canvas = page.locator('[data-testid="x11-canvas"]');
+			await expect(canvas).toBeVisible({ timeout: 10_000 });
+			await page.waitForTimeout(5000);
+
+			const nonBlackPixels = await canvas.evaluate((el: HTMLCanvasElement) => {
+				const ctx = el.getContext("2d");
+				if (!ctx) return 0;
+				const d = ctx.getImageData(0, 0, el.width, el.height);
+				let n = 0;
+				for (let i = 0; i < d.data.length; i += 4) {
+					if (d.data[i] || d.data[i + 1] || d.data[i + 2]) n++;
+				}
+				return n;
+			});
+			expect(nonBlackPixels).toBeGreaterThan(10);
+		});
 	});
 
 async function findFreePort(): Promise<number> {

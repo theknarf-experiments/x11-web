@@ -1,3 +1,8 @@
+/// Helper macro to create a glyph array inline
+macro_rules! glyph {
+    ($($b:expr),+ $(,)?) => { [$($b),+] };
+}
+
 use std::collections::HashMap;
 use std::io;
 use std::path::PathBuf;
@@ -719,7 +724,9 @@ fn handle_request(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
         65 => handle_poly_line(state, data),
         64 => handle_poly_point(state, data),
         66 => handle_poly_segment(state, data),
+        67 => handle_poly_rectangle(state, data),
         68 => handle_poly_arc(state, data),
+        69 => handle_fill_poly(state, data),
         71 => handle_poly_fill_arc(state, data),
         72 => handle_put_image(state, data),
         73 => handle_get_image(state, data, seq),
@@ -751,15 +758,17 @@ fn handle_request(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
         57 | // CopyGC
         58 | // SetDashes
         59 | // SetClipRectangles
-        67 | // PolyRectangle
-        69 | // FillPoly
         74 | // PolyText8
         75 | // PolyText16
-        76 | // ImageText8
+        76 => handle_image_text8(state, data),
         77 | // ImageText16
         78 | // CreateColormap
         79 | // FreeColormap
         88 | // FreeColors
+        93 | // CreateCursor
+        94 | // CreateGlyphCursor
+        95 | // FreeCursor
+        96 | // RecolorCursor
         100 | // ChangeKeyboardMapping
         101 | // GetKeyboardMapping -> reply needed
         102 | // ChangeKeyboardControl
@@ -1577,6 +1586,82 @@ fn handle_copy_area(state: &ClientState, data: &[u8]) -> Vec<u8> {
     Vec::new()
 }
 
+fn handle_poly_rectangle(state: &ClientState, data: &[u8]) -> Vec<u8> {
+    if data.len() < 12 {
+        return Vec::new();
+    }
+
+    let drawable = u32::from_le_bytes([data[4], data[5], data[6], data[7]]);
+    let gc_id = u32::from_le_bytes([data[8], data[9], data[10], data[11]]);
+    let gc = state.gcs.get(&gc_id).cloned().unwrap_or_default();
+
+    let mut offset = 12;
+    while offset + 8 <= data.len() {
+        let x = i16::from_le_bytes([data[offset], data[offset + 1]]);
+        let y = i16::from_le_bytes([data[offset + 2], data[offset + 3]]);
+        let width = u16::from_le_bytes([data[offset + 4], data[offset + 5]]);
+        let height = u16::from_le_bytes([data[offset + 6], data[offset + 7]]);
+
+        // Draw as outline using DrawLines (4 edges)
+        let x2 = x + width as i16;
+        let y2 = y + height as i16;
+        let _ = state.update_tx.send((
+            state.client_id.clone(),
+            DisplayUpdate::DrawLines {
+                window_id: drawable,
+                points: vec![(x, y), (x2, y), (x2, y2), (x, y2), (x, y)],
+                color: gc.foreground,
+                line_width: gc.line_width,
+            },
+        ));
+
+        offset += 8;
+    }
+
+    Vec::new()
+}
+
+fn handle_fill_poly(state: &ClientState, data: &[u8]) -> Vec<u8> {
+    // FillPoly: opcode 69
+    // [opcode(1), unused(1), length(2), drawable(4), gc(4), shape(1), coord_mode(1), pad(2), points...]
+    if data.len() < 16 {
+        return Vec::new();
+    }
+
+    let drawable = u32::from_le_bytes([data[4], data[5], data[6], data[7]]);
+    let gc_id = u32::from_le_bytes([data[8], data[9], data[10], data[11]]);
+    let gc = state.gcs.get(&gc_id).cloned().unwrap_or_default();
+
+    let mut points = Vec::new();
+    let mut offset = 16;
+    while offset + 4 <= data.len() {
+        let x = i16::from_le_bytes([data[offset], data[offset + 1]]);
+        let y = i16::from_le_bytes([data[offset + 2], data[offset + 3]]);
+        points.push((x, y));
+        offset += 4;
+    }
+
+    if points.len() >= 3 {
+        // Close the polygon
+        if points.first() != points.last() {
+            points.push(points[0]);
+        }
+        // Send as filled via DrawLines (frontend could interpret closed polygon as fill)
+        // For now, draw as outline which is better than nothing
+        let _ = state.update_tx.send((
+            state.client_id.clone(),
+            DisplayUpdate::DrawLines {
+                window_id: drawable,
+                points,
+                color: gc.foreground,
+                line_width: gc.line_width,
+            },
+        ));
+    }
+
+    Vec::new()
+}
+
 fn handle_poly_fill_rectangle(state: &ClientState, data: &[u8]) -> Vec<u8> {
     if data.len() < 12 {
         return Vec::new();
@@ -1785,6 +1870,330 @@ fn handle_poly_fill_arc(state: &ClientState, data: &[u8]) -> Vec<u8> {
     }
 
     Vec::new()
+}
+
+fn handle_image_text8(state: &ClientState, data: &[u8]) -> Vec<u8> {
+    // ImageText8: [opcode(1), string_len(1), length(2), drawable(4), gc(4), x(2), y(2), string...]
+    if data.len() < 16 {
+        return Vec::new();
+    }
+
+    let str_len = data[1] as usize;
+    let drawable = u32::from_le_bytes([data[4], data[5], data[6], data[7]]);
+    let gc_id = u32::from_le_bytes([data[8], data[9], data[10], data[11]]);
+    let x = i16::from_le_bytes([data[12], data[13]]);
+    let y = i16::from_le_bytes([data[14], data[15]]);
+    let gc = state.gcs.get(&gc_id).cloned().unwrap_or_default();
+
+    let text = if 16 + str_len <= data.len() {
+        &data[16..16 + str_len]
+    } else {
+        return Vec::new();
+    };
+
+    let char_w = 7u16;
+    let char_h = 13u16;
+    let ascent = 10i16;
+    let img_w = str_len as u16 * char_w;
+    let img_h = char_h;
+    let img_y = y - ascent;
+
+    // Render text to a pixel buffer (BGRX format, 4 bytes per pixel)
+    let fg_r = ((gc.foreground >> 16) & 0xFF) as u8;
+    let fg_g = ((gc.foreground >> 8) & 0xFF) as u8;
+    let fg_b = (gc.foreground & 0xFF) as u8;
+    let bg_r = ((gc.background >> 16) & 0xFF) as u8;
+    let bg_g = ((gc.background >> 8) & 0xFF) as u8;
+    let bg_b = (gc.background & 0xFF) as u8;
+
+    let mut pixels = vec![0u8; img_w as usize * img_h as usize * 4];
+
+    // Fill background
+    for i in 0..(img_w as usize * img_h as usize) {
+        pixels[i * 4] = bg_b;
+        pixels[i * 4 + 1] = bg_g;
+        pixels[i * 4 + 2] = bg_r;
+        pixels[i * 4 + 3] = 0;
+    }
+
+    // Render each character using built-in 7x13 bitmap font
+    for (ci, &ch) in text.iter().enumerate() {
+        let glyph = get_glyph(ch);
+        for (row, &bits) in glyph.iter().enumerate() {
+            for col in 0..char_w as usize {
+                if bits & (1 << (char_w as usize - 1 - col)) != 0 {
+                    let px = ci * char_w as usize + col;
+                    let py = row;
+                    if px < img_w as usize && py < img_h as usize {
+                        let idx = (py * img_w as usize + px) * 4;
+                        pixels[idx] = fg_b;
+                        pixels[idx + 1] = fg_g;
+                        pixels[idx + 2] = fg_r;
+                        pixels[idx + 3] = 0;
+                    }
+                }
+            }
+        }
+    }
+
+    let _ = state.update_tx.send((
+        state.client_id.clone(),
+        DisplayUpdate::PutImage {
+            window_id: drawable,
+            x,
+            y: img_y,
+            width: img_w,
+            height: img_h,
+            data: pixels,
+        },
+    ));
+
+    Vec::new()
+}
+
+/// Simple 7x13 bitmap font glyphs for ASCII printable characters.
+/// Each glyph is 13 rows of u8, where each bit represents a pixel (MSB = leftmost).
+fn get_glyph(ch: u8) -> &'static [u8; 13] {
+    static SPACE: [u8; 13] = [0; 13];
+    static DEFAULT: [u8; 13] = [
+        0b0111110, 0b1000010, 0b1000010, 0b1000010, 0b0111110, 0b0000000, 0b0000000, 0b0000000,
+        0b0000000, 0b0000000, 0b0000000, 0b0000000, 0b0000000,
+    ];
+
+    match ch {
+        b' ' => &SPACE,
+        b'!' => &glyph![
+            0b0010000, 0b0010000, 0b0010000, 0b0010000, 0b0010000, 0b0010000, 0b0010000, 0b0000000,
+            0b0010000, 0b0000000, 0b0000000, 0b0000000, 0b0000000
+        ],
+        b'0' => &glyph![
+            0b0111100, 0b0100010, 0b1000010, 0b1000010, 0b1000010, 0b1000010, 0b1000010, 0b1000010,
+            0b0100010, 0b0111100, 0b0000000, 0b0000000, 0b0000000
+        ],
+        b'1' => &glyph![
+            0b0001000, 0b0011000, 0b0101000, 0b0001000, 0b0001000, 0b0001000, 0b0001000, 0b0001000,
+            0b0001000, 0b0111110, 0b0000000, 0b0000000, 0b0000000
+        ],
+        b'A'..=b'Z' => {
+            static UPPER: [[u8; 13]; 26] = [
+                glyph![
+                    0b0011100, 0b0100010, 0b1000001, 0b1000001, 0b1111111, 0b1000001, 0b1000001,
+                    0b1000001, 0b1000001, 0b0000000, 0b0000000, 0b0000000, 0b0000000
+                ], // A
+                glyph![
+                    0b1111110, 0b1000001, 0b1000001, 0b1111110, 0b1000001, 0b1000001, 0b1000001,
+                    0b1000001, 0b1111110, 0b0000000, 0b0000000, 0b0000000, 0b0000000
+                ], // B
+                glyph![
+                    0b0111110, 0b1000001, 0b1000000, 0b1000000, 0b1000000, 0b1000000, 0b1000000,
+                    0b1000001, 0b0111110, 0b0000000, 0b0000000, 0b0000000, 0b0000000
+                ], // C
+                glyph![
+                    0b1111100, 0b1000010, 0b1000001, 0b1000001, 0b1000001, 0b1000001, 0b1000001,
+                    0b1000010, 0b1111100, 0b0000000, 0b0000000, 0b0000000, 0b0000000
+                ], // D
+                glyph![
+                    0b1111111, 0b1000000, 0b1000000, 0b1111110, 0b1000000, 0b1000000, 0b1000000,
+                    0b1000000, 0b1111111, 0b0000000, 0b0000000, 0b0000000, 0b0000000
+                ], // E
+                glyph![
+                    0b1111111, 0b1000000, 0b1000000, 0b1111110, 0b1000000, 0b1000000, 0b1000000,
+                    0b1000000, 0b1000000, 0b0000000, 0b0000000, 0b0000000, 0b0000000
+                ], // F
+                glyph![
+                    0b0111110, 0b1000001, 0b1000000, 0b1000000, 0b1001111, 0b1000001, 0b1000001,
+                    0b1000001, 0b0111110, 0b0000000, 0b0000000, 0b0000000, 0b0000000
+                ], // G
+                glyph![
+                    0b1000001, 0b1000001, 0b1000001, 0b1111111, 0b1000001, 0b1000001, 0b1000001,
+                    0b1000001, 0b1000001, 0b0000000, 0b0000000, 0b0000000, 0b0000000
+                ], // H
+                glyph![
+                    0b0111110, 0b0001000, 0b0001000, 0b0001000, 0b0001000, 0b0001000, 0b0001000,
+                    0b0001000, 0b0111110, 0b0000000, 0b0000000, 0b0000000, 0b0000000
+                ], // I
+                glyph![
+                    0b0011111, 0b0000100, 0b0000100, 0b0000100, 0b0000100, 0b0000100, 0b1000100,
+                    0b1000100, 0b0111000, 0b0000000, 0b0000000, 0b0000000, 0b0000000
+                ], // J
+                glyph![
+                    0b1000010, 0b1000100, 0b1001000, 0b1010000, 0b1100000, 0b1010000, 0b1001000,
+                    0b1000100, 0b1000010, 0b0000000, 0b0000000, 0b0000000, 0b0000000
+                ], // K
+                glyph![
+                    0b1000000, 0b1000000, 0b1000000, 0b1000000, 0b1000000, 0b1000000, 0b1000000,
+                    0b1000000, 0b1111111, 0b0000000, 0b0000000, 0b0000000, 0b0000000
+                ], // L
+                glyph![
+                    0b1000001, 0b1100011, 0b1010101, 0b1001001, 0b1000001, 0b1000001, 0b1000001,
+                    0b1000001, 0b1000001, 0b0000000, 0b0000000, 0b0000000, 0b0000000
+                ], // M
+                glyph![
+                    0b1000001, 0b1100001, 0b1010001, 0b1001001, 0b1000101, 0b1000011, 0b1000001,
+                    0b1000001, 0b1000001, 0b0000000, 0b0000000, 0b0000000, 0b0000000
+                ], // N
+                glyph![
+                    0b0111110, 0b1000001, 0b1000001, 0b1000001, 0b1000001, 0b1000001, 0b1000001,
+                    0b1000001, 0b0111110, 0b0000000, 0b0000000, 0b0000000, 0b0000000
+                ], // O
+                glyph![
+                    0b1111110, 0b1000001, 0b1000001, 0b1000001, 0b1111110, 0b1000000, 0b1000000,
+                    0b1000000, 0b1000000, 0b0000000, 0b0000000, 0b0000000, 0b0000000
+                ], // P
+                glyph![
+                    0b0111110, 0b1000001, 0b1000001, 0b1000001, 0b1000001, 0b1001001, 0b1000101,
+                    0b1000010, 0b0111101, 0b0000000, 0b0000000, 0b0000000, 0b0000000
+                ], // Q
+                glyph![
+                    0b1111110, 0b1000001, 0b1000001, 0b1000001, 0b1111110, 0b1001000, 0b1000100,
+                    0b1000010, 0b1000001, 0b0000000, 0b0000000, 0b0000000, 0b0000000
+                ], // R
+                glyph![
+                    0b0111110, 0b1000001, 0b1000000, 0b0100000, 0b0011100, 0b0000010, 0b0000001,
+                    0b1000001, 0b0111110, 0b0000000, 0b0000000, 0b0000000, 0b0000000
+                ], // S
+                glyph![
+                    0b1111111, 0b0001000, 0b0001000, 0b0001000, 0b0001000, 0b0001000, 0b0001000,
+                    0b0001000, 0b0001000, 0b0000000, 0b0000000, 0b0000000, 0b0000000
+                ], // T
+                glyph![
+                    0b1000001, 0b1000001, 0b1000001, 0b1000001, 0b1000001, 0b1000001, 0b1000001,
+                    0b1000001, 0b0111110, 0b0000000, 0b0000000, 0b0000000, 0b0000000
+                ], // U
+                glyph![
+                    0b1000001, 0b1000001, 0b1000001, 0b0100010, 0b0100010, 0b0010100, 0b0010100,
+                    0b0001000, 0b0001000, 0b0000000, 0b0000000, 0b0000000, 0b0000000
+                ], // V
+                glyph![
+                    0b1000001, 0b1000001, 0b1000001, 0b1000001, 0b1001001, 0b1001001, 0b0101010,
+                    0b0010100, 0b0010100, 0b0000000, 0b0000000, 0b0000000, 0b0000000
+                ], // W
+                glyph![
+                    0b1000001, 0b0100010, 0b0010100, 0b0001000, 0b0001000, 0b0010100, 0b0100010,
+                    0b1000001, 0b1000001, 0b0000000, 0b0000000, 0b0000000, 0b0000000
+                ], // X
+                glyph![
+                    0b1000001, 0b0100010, 0b0010100, 0b0001000, 0b0001000, 0b0001000, 0b0001000,
+                    0b0001000, 0b0001000, 0b0000000, 0b0000000, 0b0000000, 0b0000000
+                ], // Y
+                glyph![
+                    0b1111111, 0b0000010, 0b0000100, 0b0001000, 0b0010000, 0b0100000, 0b1000000,
+                    0b1000000, 0b1111111, 0b0000000, 0b0000000, 0b0000000, 0b0000000
+                ], // Z
+            ];
+            &UPPER[(ch - b'A') as usize]
+        }
+        b'a'..=b'z' => {
+            static LOWER: [[u8; 13]; 26] = [
+                glyph![
+                    0b0000000, 0b0000000, 0b0000000, 0b0111100, 0b0000010, 0b0111110, 0b1000010,
+                    0b1000010, 0b0111110, 0b0000000, 0b0000000, 0b0000000, 0b0000000
+                ], // a
+                glyph![
+                    0b1000000, 0b1000000, 0b1000000, 0b1011100, 0b1100010, 0b1000010, 0b1000010,
+                    0b1100010, 0b1011100, 0b0000000, 0b0000000, 0b0000000, 0b0000000
+                ], // b
+                glyph![
+                    0b0000000, 0b0000000, 0b0000000, 0b0111100, 0b1000010, 0b1000000, 0b1000000,
+                    0b1000010, 0b0111100, 0b0000000, 0b0000000, 0b0000000, 0b0000000
+                ], // c
+                glyph![
+                    0b0000010, 0b0000010, 0b0000010, 0b0111010, 0b1000110, 0b1000010, 0b1000010,
+                    0b1000110, 0b0111010, 0b0000000, 0b0000000, 0b0000000, 0b0000000
+                ], // d
+                glyph![
+                    0b0000000, 0b0000000, 0b0000000, 0b0111100, 0b1000010, 0b1111110, 0b1000000,
+                    0b1000010, 0b0111100, 0b0000000, 0b0000000, 0b0000000, 0b0000000
+                ], // e
+                glyph![
+                    0b0001100, 0b0010010, 0b0010000, 0b0010000, 0b1111100, 0b0010000, 0b0010000,
+                    0b0010000, 0b0010000, 0b0000000, 0b0000000, 0b0000000, 0b0000000
+                ], // f
+                glyph![
+                    0b0000000, 0b0000000, 0b0000000, 0b0111010, 0b1000110, 0b1000010, 0b1000110,
+                    0b0111010, 0b0000010, 0b1000010, 0b0111100, 0b0000000, 0b0000000
+                ], // g
+                glyph![
+                    0b1000000, 0b1000000, 0b1000000, 0b1011100, 0b1100010, 0b1000010, 0b1000010,
+                    0b1000010, 0b1000010, 0b0000000, 0b0000000, 0b0000000, 0b0000000
+                ], // h
+                glyph![
+                    0b0001000, 0b0000000, 0b0000000, 0b0011000, 0b0001000, 0b0001000, 0b0001000,
+                    0b0001000, 0b0011100, 0b0000000, 0b0000000, 0b0000000, 0b0000000
+                ], // i
+                glyph![
+                    0b0000100, 0b0000000, 0b0000000, 0b0001100, 0b0000100, 0b0000100, 0b0000100,
+                    0b0000100, 0b1000100, 0b1000100, 0b0111000, 0b0000000, 0b0000000
+                ], // j
+                glyph![
+                    0b1000000, 0b1000000, 0b1000000, 0b1000100, 0b1001000, 0b1010000, 0b1110000,
+                    0b1001000, 0b1000100, 0b0000000, 0b0000000, 0b0000000, 0b0000000
+                ], // k
+                glyph![
+                    0b0011000, 0b0001000, 0b0001000, 0b0001000, 0b0001000, 0b0001000, 0b0001000,
+                    0b0001000, 0b0011100, 0b0000000, 0b0000000, 0b0000000, 0b0000000
+                ], // l
+                glyph![
+                    0b0000000, 0b0000000, 0b0000000, 0b1110110, 0b1001001, 0b1001001, 0b1001001,
+                    0b1001001, 0b1001001, 0b0000000, 0b0000000, 0b0000000, 0b0000000
+                ], // m
+                glyph![
+                    0b0000000, 0b0000000, 0b0000000, 0b1011100, 0b1100010, 0b1000010, 0b1000010,
+                    0b1000010, 0b1000010, 0b0000000, 0b0000000, 0b0000000, 0b0000000
+                ], // n
+                glyph![
+                    0b0000000, 0b0000000, 0b0000000, 0b0111100, 0b1000010, 0b1000010, 0b1000010,
+                    0b1000010, 0b0111100, 0b0000000, 0b0000000, 0b0000000, 0b0000000
+                ], // o
+                glyph![
+                    0b0000000, 0b0000000, 0b0000000, 0b1011100, 0b1100010, 0b1000010, 0b1100010,
+                    0b1011100, 0b1000000, 0b1000000, 0b1000000, 0b0000000, 0b0000000
+                ], // p
+                glyph![
+                    0b0000000, 0b0000000, 0b0000000, 0b0111010, 0b1000110, 0b1000010, 0b1000110,
+                    0b0111010, 0b0000010, 0b0000010, 0b0000010, 0b0000000, 0b0000000
+                ], // q
+                glyph![
+                    0b0000000, 0b0000000, 0b0000000, 0b1011100, 0b1100010, 0b1000000, 0b1000000,
+                    0b1000000, 0b1000000, 0b0000000, 0b0000000, 0b0000000, 0b0000000
+                ], // r
+                glyph![
+                    0b0000000, 0b0000000, 0b0000000, 0b0111110, 0b1000000, 0b0111100, 0b0000010,
+                    0b0000010, 0b1111100, 0b0000000, 0b0000000, 0b0000000, 0b0000000
+                ], // s
+                glyph![
+                    0b0010000, 0b0010000, 0b0010000, 0b1111100, 0b0010000, 0b0010000, 0b0010000,
+                    0b0010010, 0b0001100, 0b0000000, 0b0000000, 0b0000000, 0b0000000
+                ], // t
+                glyph![
+                    0b0000000, 0b0000000, 0b0000000, 0b1000010, 0b1000010, 0b1000010, 0b1000010,
+                    0b1000110, 0b0111010, 0b0000000, 0b0000000, 0b0000000, 0b0000000
+                ], // u
+                glyph![
+                    0b0000000, 0b0000000, 0b0000000, 0b1000010, 0b1000010, 0b0100100, 0b0100100,
+                    0b0011000, 0b0001000, 0b0000000, 0b0000000, 0b0000000, 0b0000000
+                ], // v
+                glyph![
+                    0b0000000, 0b0000000, 0b0000000, 0b1000001, 0b1001001, 0b1001001, 0b1001001,
+                    0b0101010, 0b0010100, 0b0000000, 0b0000000, 0b0000000, 0b0000000
+                ], // w
+                glyph![
+                    0b0000000, 0b0000000, 0b0000000, 0b1000010, 0b0100100, 0b0011000, 0b0011000,
+                    0b0100100, 0b1000010, 0b0000000, 0b0000000, 0b0000000, 0b0000000
+                ], // x
+                glyph![
+                    0b0000000, 0b0000000, 0b0000000, 0b1000010, 0b1000010, 0b1000110, 0b0111010,
+                    0b0000010, 0b1000010, 0b0111100, 0b0000000, 0b0000000, 0b0000000
+                ], // y
+                glyph![
+                    0b0000000, 0b0000000, 0b0000000, 0b1111110, 0b0000100, 0b0001000, 0b0010000,
+                    0b0100000, 0b1111110, 0b0000000, 0b0000000, 0b0000000, 0b0000000
+                ], // z
+            ];
+            &LOWER[(ch - b'a') as usize]
+        }
+        _ => &DEFAULT,
+    }
 }
 
 fn handle_put_image(state: &ClientState, data: &[u8]) -> Vec<u8> {
