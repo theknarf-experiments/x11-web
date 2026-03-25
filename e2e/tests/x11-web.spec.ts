@@ -182,6 +182,81 @@ test.describe
 			await expect(windows).toHaveCount(2, { timeout: 10_000 });
 		});
 
+		test("closing a window removes it", async ({ page }) => {
+			await page.goto(`http://localhost:${frontendPort}`);
+
+			const dock = page.locator('[data-testid="dock"]');
+			await expect(dock).toContainText("test-sidecar", { timeout: 15_000 });
+
+			await page
+				.locator('input[placeholder="args"]')
+				.fill("-geometry 200x150+10+10");
+			await page.locator('[data-testid="spawn-button"]').click();
+
+			const windowFrame = page.locator('[data-testid="window-frame"]');
+			await expect(windowFrame).toBeVisible({ timeout: 10_000 });
+
+			// Click close button
+			await windowFrame.locator('[data-testid="window-close"]').click();
+
+			// Window should disappear
+			await expect(windowFrame).toHaveCount(0, { timeout: 10_000 });
+		});
+
+		test("resizing a window changes the canvas dimensions", async ({
+			page,
+		}) => {
+			await page.goto(`http://localhost:${frontendPort}`);
+
+			const dock = page.locator('[data-testid="dock"]');
+			await expect(dock).toContainText("test-sidecar", { timeout: 15_000 });
+
+			await page
+				.locator('input[placeholder="args"]')
+				.fill("-geometry 300x200+10+10");
+			await page.locator('[data-testid="spawn-button"]').click();
+
+			const windowFrame = page.locator('[data-testid="window-frame"]');
+			await expect(windowFrame).toBeVisible({ timeout: 10_000 });
+
+			const canvas = windowFrame.locator('[data-testid="x11-canvas"]');
+			await expect(canvas).toBeVisible();
+			await page.waitForTimeout(3000);
+
+			// Record initial canvas size
+			const initialSize = await canvas.evaluate((el: HTMLCanvasElement) => ({
+				width: el.width,
+				height: el.height,
+			}));
+
+			// Find and drag the resize handle
+			const resizeHandle = windowFrame.locator(
+				":last-child:not(canvas):not([data-testid])",
+			);
+			const handleBox = await windowFrame.boundingBox();
+			if (!handleBox) throw new Error("Window has no bounding box");
+
+			// Drag from bottom-right corner to enlarge
+			const startX = handleBox.x + handleBox.width - 5;
+			const startY = handleBox.y + handleBox.height - 5;
+			await page.mouse.move(startX, startY);
+			await page.mouse.down();
+			await page.mouse.move(startX + 100, startY + 80, { steps: 5 });
+			await page.mouse.up();
+
+			// Wait for resize to propagate
+			await page.waitForTimeout(2000);
+
+			// Canvas should have grown
+			const newSize = await canvas.evaluate((el: HTMLCanvasElement) => ({
+				width: el.width,
+				height: el.height,
+			}));
+
+			expect(newSize.width).toBeGreaterThan(initialSize.width);
+			expect(newSize.height).toBeGreaterThan(initialSize.height);
+		});
+
 		test("xeyes pupils follow the cursor", async ({ page }) => {
 			await page.goto(`http://localhost:${frontendPort}`);
 

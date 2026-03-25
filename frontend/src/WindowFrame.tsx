@@ -238,6 +238,7 @@ export function WindowFrame({
 				<button
 					type="button"
 					className={s.closeButton}
+					onPointerDown={(e) => e.stopPropagation()}
 					onClick={(e) => {
 						e.stopPropagation();
 						onClose();
