@@ -114,26 +114,33 @@ function App() {
 		);
 	}, []);
 
+	const resizeTimerRef = useRef<ReturnType<typeof setTimeout>>(undefined);
+
 	const handleResize = useCallback(
-		(clientId: string, width: number, height: number) => {
+		(
+			clientId: string,
+			sidecarId: string | undefined,
+			width: number,
+			height: number,
+		) => {
 			setWindows((prev) =>
 				prev.map((w) =>
 					w.clientId === clientId ? { ...w, width, height } : w,
 				),
 			);
-		},
-		[],
-	);
-
-	const handleResizeEnd = useCallback(
-		(clientId: string, sidecarId: string, width: number, height: number) => {
-			send({
-				type: "ResizeWindow",
-				sidecar_id: sidecarId,
-				client_id: clientId,
-				width: Math.round(width),
-				height: Math.round(height),
-			});
+			// Debounce the server-side resize to avoid flooding
+			if (sidecarId) {
+				clearTimeout(resizeTimerRef.current);
+				resizeTimerRef.current = setTimeout(() => {
+					send({
+						type: "ResizeWindow",
+						sidecar_id: sidecarId,
+						client_id: clientId,
+						width: Math.round(width),
+						height: Math.round(height),
+					});
+				}, 100);
+			}
 		},
 		[send],
 	);
@@ -176,10 +183,9 @@ function App() {
 								if (sidecarId) handleKill(win.clientId, win.pid, sidecarId);
 							}}
 							onMove={(nx, ny) => handleMove(win.clientId, nx, ny)}
-							onResize={(nw, nh) => handleResize(win.clientId, nw, nh)}
-							onResizeEnd={(nw, nh) => {
-								if (sidecarId) handleResizeEnd(win.clientId, sidecarId, nw, nh);
-							}}
+							onResize={(nw, nh) =>
+								handleResize(win.clientId, sidecarId, nw, nh)
+							}
 							onInput={(event) => {
 								if (sidecarId) handleInput(win.clientId, sidecarId, event);
 							}}
