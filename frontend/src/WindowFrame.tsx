@@ -8,12 +8,25 @@ interface WindowFrameProps {
 	title: string;
 	x: number;
 	y: number;
+	width: number;
+	height: number;
 	renderer: ClientRenderer;
 	onClose: () => void;
 	onMove: (x: number, y: number) => void;
+	onResize: (width: number, height: number) => void;
 	onInput: (event: InputEvent) => void;
-	canvasWidth?: number;
-	canvasHeight?: number;
+}
+
+const CANVAS_WIDTH = 1024;
+const CANVAS_HEIGHT = 768;
+const MIN_WIDTH = 200;
+const MIN_HEIGHT = 150;
+
+function getScale(el: Element): number {
+	const wrapper = el.closest("[data-canvas-scale]");
+	return wrapper
+		? Number.parseFloat(wrapper.getAttribute("data-canvas-scale") || "1")
+		: 1;
 }
 
 export function WindowFrame({
@@ -21,12 +34,13 @@ export function WindowFrame({
 	title,
 	x,
 	y,
+	width,
+	height,
 	renderer,
 	onClose,
 	onMove,
+	onResize,
 	onInput,
-	canvasWidth = 1024,
-	canvasHeight = 768,
 }: WindowFrameProps) {
 	const canvasRef = useRef<HTMLCanvasElement>(null);
 	const onInputRef = useRef(onInput);
@@ -68,19 +82,12 @@ export function WindowFrame({
 			const origY = y;
 			const target = e.currentTarget;
 			target.setPointerCapture(e.pointerId);
+			const scale = getScale(target);
 
 			const onPointerMove = (ev: Event) => {
 				const { clientX, clientY } = ev as PointerEvent;
 				const dx = clientX - startX;
 				const dy = clientY - startY;
-				// Divide by scale to get canvas-space delta.
-				// The parent InfiniteCanvas applies a CSS scale transform,
-				// so screen-space deltas need to be divided by scale.
-				// We read scale from a data attribute on the canvas wrapper.
-				const wrapper = target.closest("[data-canvas-scale]");
-				const scale = wrapper
-					? Number.parseFloat(wrapper.getAttribute("data-canvas-scale") || "1")
-					: 1;
 				onMove(origX + dx / scale, origY + dy / scale);
 			};
 
@@ -95,6 +102,39 @@ export function WindowFrame({
 		[x, y, onMove],
 	);
 
+	// Resize handle drag
+	const handleResizePointerDown = useCallback(
+		(e: React.PointerEvent) => {
+			e.stopPropagation();
+			const startX = e.clientX;
+			const startY = e.clientY;
+			const origW = width;
+			const origH = height;
+			const target = e.currentTarget;
+			target.setPointerCapture(e.pointerId);
+			const scale = getScale(target);
+
+			const onPointerMove = (ev: Event) => {
+				const { clientX, clientY } = ev as PointerEvent;
+				const dx = clientX - startX;
+				const dy = clientY - startY;
+				onResize(
+					Math.max(MIN_WIDTH, origW + dx / scale),
+					Math.max(MIN_HEIGHT, origH + dy / scale),
+				);
+			};
+
+			const onPointerUp = () => {
+				target.removeEventListener("pointermove", onPointerMove);
+				target.removeEventListener("pointerup", onPointerUp);
+			};
+
+			target.addEventListener("pointermove", onPointerMove);
+			target.addEventListener("pointerup", onPointerUp);
+		},
+		[width, height, onResize],
+	);
+
 	// X11 input forwarding
 	const sendInput = useCallback((event: InputEvent) => {
 		onInputRef.current(event);
@@ -103,8 +143,8 @@ export function WindowFrame({
 	const handleMouseMove = useCallback(
 		(e: React.MouseEvent<HTMLCanvasElement>) => {
 			const rect = e.currentTarget.getBoundingClientRect();
-			const scaleX = canvasWidth / rect.width;
-			const scaleY = canvasHeight / rect.height;
+			const scaleX = CANVAS_WIDTH / rect.width;
+			const scaleY = CANVAS_HEIGHT / rect.height;
 			sendInput({
 				kind: "MotionNotify",
 				x: Math.round((e.clientX - rect.left) * scaleX),
@@ -112,15 +152,15 @@ export function WindowFrame({
 				state: mouseButtonMask(e.buttons),
 			});
 		},
-		[sendInput, canvasWidth, canvasHeight],
+		[sendInput],
 	);
 
 	const handleMouseDown = useCallback(
 		(e: React.MouseEvent<HTMLCanvasElement>) => {
 			e.stopPropagation();
 			const rect = e.currentTarget.getBoundingClientRect();
-			const scaleX = canvasWidth / rect.width;
-			const scaleY = canvasHeight / rect.height;
+			const scaleX = CANVAS_WIDTH / rect.width;
+			const scaleY = CANVAS_HEIGHT / rect.height;
 			sendInput({
 				kind: "ButtonPress",
 				button: x11Button(e.button),
@@ -129,14 +169,14 @@ export function WindowFrame({
 				state: mouseButtonMask(e.buttons),
 			});
 		},
-		[sendInput, canvasWidth, canvasHeight],
+		[sendInput],
 	);
 
 	const handleMouseUp = useCallback(
 		(e: React.MouseEvent<HTMLCanvasElement>) => {
 			const rect = e.currentTarget.getBoundingClientRect();
-			const scaleX = canvasWidth / rect.width;
-			const scaleY = canvasHeight / rect.height;
+			const scaleX = CANVAS_WIDTH / rect.width;
+			const scaleY = CANVAS_HEIGHT / rect.height;
 			sendInput({
 				kind: "ButtonRelease",
 				button: x11Button(e.button),
@@ -145,7 +185,7 @@ export function WindowFrame({
 				state: mouseButtonMask(e.buttons),
 			});
 		},
-		[sendInput, canvasWidth, canvasHeight],
+		[sendInput],
 	);
 
 	const handleKeyDown = useCallback(
@@ -180,7 +220,7 @@ export function WindowFrame({
 	return (
 		<div
 			className={s.window}
-			style={{ left: x, top: y }}
+			style={{ left: x, top: y, width }}
 			data-testid="window-frame"
 			data-client-id={clientId}
 		>
@@ -198,20 +238,23 @@ export function WindowFrame({
 				</button>
 				<span className={s.titleText}>{title}</span>
 			</div>
-			<canvas
-				ref={canvasRef}
-				width={canvasWidth}
-				height={canvasHeight}
-				className={s.canvas}
-				data-testid="x11-canvas"
-				tabIndex={0}
-				onMouseMove={handleMouseMove}
-				onMouseDown={handleMouseDown}
-				onMouseUp={handleMouseUp}
-				onKeyDown={handleKeyDown}
-				onKeyUp={handleKeyUp}
-				onContextMenu={handleContextMenu}
-			/>
+			<div className={s.canvasWrapper} style={{ height }}>
+				<canvas
+					ref={canvasRef}
+					width={CANVAS_WIDTH}
+					height={CANVAS_HEIGHT}
+					className={s.canvas}
+					data-testid="x11-canvas"
+					tabIndex={0}
+					onMouseMove={handleMouseMove}
+					onMouseDown={handleMouseDown}
+					onMouseUp={handleMouseUp}
+					onKeyDown={handleKeyDown}
+					onKeyUp={handleKeyUp}
+					onContextMenu={handleContextMenu}
+				/>
+			</div>
+			<div className={s.resizeHandle} onPointerDown={handleResizePointerDown} />
 		</div>
 	);
 }

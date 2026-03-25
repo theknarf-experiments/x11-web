@@ -1,22 +1,25 @@
 .window {
 	position: absolute;
-	border: 1px solid #555;
-	border-radius: 6px;
+	border: 1px solid rgba(255, 255, 255, 0.1);
+	border-radius: 10px;
 	overflow: hidden;
-	box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
+	box-shadow:
+		0 8px 32px rgba(0, 0, 0, 0.5),
+		0 2px 8px rgba(0, 0, 0, 0.3);
 	user-select: none;
+	background: #1e1e1e;
 }
 
 .titleBar {
 	display: flex;
 	align-items: center;
 	gap: 8px;
-	height: 28px;
-	padding: 0 8px;
+	height: 36px;
+	padding: 0 12px;
 	background: #2a2a2a;
 	cursor: grab;
 	font-size: 12px;
-	color: #ccc;
+	color: #999;
 }
 
 .titleBar:active {
@@ -28,25 +31,31 @@
 	text-overflow: ellipsis;
 	white-space: nowrap;
 	flex: 1;
+	text-align: center;
 }
 
 .closeButton {
-	width: 16px;
-	height: 16px;
+	width: 14px;
+	height: 14px;
 	border: none;
 	border-radius: 50%;
-	background: #e44;
-	color: #fff;
+	background: #ff5f57;
+	color: transparent;
 	font-size: 10px;
-	line-height: 16px;
+	line-height: 14px;
 	text-align: center;
 	cursor: pointer;
 	padding: 0;
 	flex-shrink: 0;
+	transition: color 0.1s;
 }
 
 .closeButton:hover {
-	background: #f55;
+	color: rgba(0, 0, 0, 0.6);
+}
+
+.canvasWrapper {
+	padding: 8px;
 }
 
 .canvas {
@@ -54,9 +63,36 @@
 	background: #000;
 	image-rendering: pixelated;
 	outline: none;
+	border-radius: 4px;
+	width: 100%;
+	height: auto;
 }
 
 .canvas:focus {
 	outline: 1px solid #4ade80;
 	outline-offset: -1px;
+}
+
+.resizeHandle {
+	position: absolute;
+	bottom: 0;
+	right: 0;
+	width: 16px;
+	height: 16px;
+	cursor: nwse-resize;
+}
+
+.resizeHandle::after {
+	content: "";
+	position: absolute;
+	bottom: 4px;
+	right: 4px;
+	width: 8px;
+	height: 8px;
+	border-right: 2px solid rgba(255, 255, 255, 0.2);
+	border-bottom: 2px solid rgba(255, 255, 255, 0.2);
+}
+
+.resizeHandle:hover::after {
+	border-color: rgba(255, 255, 255, 0.4);
 }

@@ -17,6 +17,8 @@ interface CanvasWindow {
 	title: string;
 	x: number;
 	y: number;
+	width: number;
+	height: number;
 }
 
 let spawnCounter = 0;
@@ -64,12 +66,22 @@ function App() {
 
 				// Place at center of viewport with cascade offset
 				const offset = spawnCounter++ * 30;
-				const cx = window.innerWidth / 2 - 512 + offset;
-				const cy = window.innerHeight / 2 - 384 + offset;
+				const w = 600;
+				const h = 450;
+				const cx = window.innerWidth / 2 - w / 2 + offset;
+				const cy = window.innerHeight / 2 - h / 2 + offset;
 
 				setWindows((prev) => [
 					...prev,
-					{ clientId: cp.clientId, pid: cp.pid, title, x: cx, y: cy },
+					{
+						clientId: cp.clientId,
+						pid: cp.pid,
+						title,
+						x: cx,
+						y: cy,
+						width: w,
+						height: h,
+					},
 				]);
 			}
 		}
@@ -102,6 +114,17 @@ function App() {
 		);
 	}, []);
 
+	const handleResize = useCallback(
+		(clientId: string, width: number, height: number) => {
+			setWindows((prev) =>
+				prev.map((w) =>
+					w.clientId === clientId ? { ...w, width, height } : w,
+				),
+			);
+		},
+		[],
+	);
+
 	const handleInput = useCallback(
 		(clientId: string, sidecarId: string, event: InputEvent) => {
 			send({
@@ -133,11 +156,14 @@ function App() {
 							title={win.title}
 							x={win.x}
 							y={win.y}
+							width={win.width}
+							height={win.height}
 							renderer={renderer}
 							onClose={() => {
 								if (sidecarId) handleKill(win.clientId, win.pid, sidecarId);
 							}}
 							onMove={(nx, ny) => handleMove(win.clientId, nx, ny)}
+							onResize={(nw, nh) => handleResize(win.clientId, nw, nh)}
 							onInput={(event) => {
 								if (sidecarId) handleInput(win.clientId, sidecarId, event);
 							}}
