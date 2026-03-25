@@ -10,7 +10,7 @@
 .titleBar {
 	display: flex;
 	align-items: center;
-	justify-content: space-between;
+	gap: 8px;
 	height: 28px;
 	padding: 0 8px;
 	background: #2a2a2a;
@@ -43,7 +43,6 @@
 	cursor: pointer;
 	padding: 0;
 	flex-shrink: 0;
-	margin-left: 8px;
 }
 
 .closeButton:hover {

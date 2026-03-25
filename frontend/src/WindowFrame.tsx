@@ -185,7 +185,6 @@ export function WindowFrame({
 			data-client-id={clientId}
 		>
 			<div className={s.titleBar} onPointerDown={handleTitlePointerDown}>
-				<span className={s.titleText}>{title}</span>
 				<button
 					type="button"
 					className={s.closeButton}
@@ -197,6 +196,7 @@ export function WindowFrame({
 				>
 					×
 				</button>
+				<span className={s.titleText}>{title}</span>
 			</div>
 			<canvas
 				ref={canvasRef}

@@ -1,4 +1,10 @@
-import { type ReactNode, useCallback, useRef, useState } from "react";
+import {
+	type ReactNode,
+	useCallback,
+	useEffect,
+	useRef,
+	useState,
+} from "react";
 import s from "./InfiniteCanvas.module.css";
 
 interface Camera {
@@ -18,11 +24,11 @@ export function InfiniteCanvas({ children }: InfiniteCanvasProps) {
 	const [camera, setCamera] = useState<Camera>({ x: 0, y: 0, scale: 1 });
 	const cameraRef = useRef(camera);
 	cameraRef.current = camera;
+	const viewportRef = useRef<HTMLDivElement>(null);
 	const isPanning = useRef(false);
 
-	// Pan: pointer down on background starts panning
+	// Pan: pointer drag on background
 	const handlePointerDown = useCallback((e: React.PointerEvent) => {
-		// Only pan on direct clicks on the viewport (not on children)
 		if (e.target !== e.currentTarget) return;
 		isPanning.current = true;
 		const startX = e.clientX;
@@ -53,39 +59,56 @@ export function InfiniteCanvas({ children }: InfiniteCanvasProps) {
 		target.addEventListener("pointerup", onPointerUp);
 	}, []);
 
-	// Zoom: wheel zooms around cursor position
-	const handleWheel = useCallback((e: React.WheelEvent) => {
-		e.preventDefault();
-		const cam = cameraRef.current;
-		const zoomFactor = e.deltaY > 0 ? 0.9 : 1.1;
-		const newScale = Math.min(
-			MAX_SCALE,
-			Math.max(MIN_SCALE, cam.scale * zoomFactor),
-		);
+	// Wheel: scroll = pan, cmd+scroll or pinch = zoom
+	// Use a native event listener to get { passive: false } for preventDefault
+	useEffect(() => {
+		const el = viewportRef.current;
+		if (!el) return;
 
-		// Zoom toward cursor: keep the point under the cursor fixed
-		const rect = e.currentTarget.getBoundingClientRect();
-		const cursorX = e.clientX - rect.left;
-		const cursorY = e.clientY - rect.top;
+		const onWheel = (e: WheelEvent) => {
+			e.preventDefault();
+			const cam = cameraRef.current;
 
-		// Point in canvas space under cursor before zoom
-		const canvasX = cam.x + cursorX / cam.scale;
-		const canvasY = cam.y + cursorY / cam.scale;
+			if (e.ctrlKey || e.metaKey) {
+				// Zoom (cmd+scroll or pinch-to-zoom — trackpad pinch fires as ctrlKey+wheel)
+				const zoomFactor = e.deltaY > 0 ? 0.95 : 1.05;
+				const newScale = Math.min(
+					MAX_SCALE,
+					Math.max(MIN_SCALE, cam.scale * zoomFactor),
+				);
 
-		// After zoom, the same canvas point should be under the cursor
-		const newX = canvasX - cursorX / newScale;
-		const newY = canvasY - cursorY / newScale;
+				const rect = el.getBoundingClientRect();
+				const cursorX = e.clientX - rect.left;
+				const cursorY = e.clientY - rect.top;
 
-		setCamera({ x: newX, y: newY, scale: newScale });
+				const canvasX = cam.x + cursorX / cam.scale;
+				const canvasY = cam.y + cursorY / cam.scale;
+				const newX = canvasX - cursorX / newScale;
+				const newY = canvasY - cursorY / newScale;
+
+				setCamera({ x: newX, y: newY, scale: newScale });
+			} else {
+				// Pan (regular scroll)
+				setCamera({
+					...cam,
+					x: cam.x + e.deltaX / cam.scale,
+					y: cam.y + e.deltaY / cam.scale,
+				});
+			}
+		};
+
+		el.addEventListener("wheel", onWheel, { passive: false });
+		return () => el.removeEventListener("wheel", onWheel);
 	}, []);
 
 	const transform = `scale(${camera.scale}) translate(${-camera.x}px, ${-camera.y}px)`;
+	const zoomPercent = Math.round(camera.scale * 100);
 
 	return (
 		<div
+			ref={viewportRef}
 			className={s.viewport}
 			onPointerDown={handlePointerDown}
-			onWheel={handleWheel}
 			data-testid="infinite-canvas"
 		>
 			<div
@@ -95,6 +118,7 @@ export function InfiniteCanvas({ children }: InfiniteCanvasProps) {
 			>
 				{children}
 			</div>
+			<div className={s.zoomIndicator}>{zoomPercent}%</div>
 		</div>
 	);
 }
