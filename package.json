@@ -1,0 +1,19 @@
+{
+	"name": "x11-web",
+	"private": true,
+	"packageManager": "pnpm@10.33.0",
+	"scripts": {
+		"build": "turbo run build",
+		"dev": "mprocs --config mprocs.yaml",
+		"lint": "biome check .",
+		"lint:fix": "biome check --write .",
+		"format": "biome format --write .",
+		"test": "turbo run test",
+		"test:e2e": "pnpm --filter x11-web-e2e test"
+	},
+	"devDependencies": {
+		"@biomejs/biome": "2.4.8",
+		"mprocs": "0.9.2",
+		"turbo": "2.8.20"
+	}
+}

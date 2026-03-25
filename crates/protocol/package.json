@@ -1,0 +1,8 @@
+{
+	"name": "x11-web-protocol",
+	"private": true,
+	"scripts": {
+		"build": "cargo build -p x11-web-protocol",
+		"check": "cargo check -p x11-web-protocol"
+	}
+}

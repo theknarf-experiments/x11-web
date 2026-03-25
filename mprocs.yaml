@@ -1,0 +1,11 @@
+procs:
+  backend:
+    cmd: ["cargo", "run", "--bin", "x11-web-backend"]
+    env:
+      RUST_LOG: info
+
+  sidecar:
+    shell: "docker compose -f compose.dev.yml up --build; docker compose -f compose.dev.yml down"
+
+  frontend:
+    cmd: ["pnpm", "--filter", "frontend", "dev"]

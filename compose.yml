@@ -1,0 +1,32 @@
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
+    ports:
+      - "3001:3001"
+    environment:
+      RUST_LOG: info
+
+  sidecar:
+    build:
+      context: .
+      dockerfile: Dockerfile.sidecar
+    depends_on:
+      - backend
+    environment:
+      BACKEND_URL: ws://backend:3001/ws/sidecar
+      SIDECAR_NAME: local-sidecar
+      DISPLAY_NUMBER: "99"
+      RUST_LOG: info
+
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile.frontend
+      args:
+        VITE_WS_URL: ws://localhost:3001/ws/frontend
+    ports:
+      - "8080:8080"
+    depends_on:
+      - backend

@@ -1,0 +1,10 @@
+/target
+node_modules
+.turbo
+.DS_Store
+
+# Frontend
+frontend/dist
+
+# Test artifacts
+test-results

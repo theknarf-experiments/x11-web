@@ -1,0 +1,7 @@
+target/
+node_modules/
+frontend/dist/
+frontend/node_modules/
+e2e/node_modules/
+.git/
+.claude/

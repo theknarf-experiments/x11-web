@@ -1,0 +1,242 @@
+use serde::{Deserialize, Serialize};
+
+/// Messages sent from the backend to a sidecar.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "type")]
+pub enum BackendToSidecar {
+    /// Spawn a new process on the sidecar.
+    SpawnProcess {
+        request_id: String,
+        command: String,
+        args: Vec<String>,
+    },
+    /// Kill a running process.
+    KillProcess { request_id: String, pid: u32 },
+    /// Request list of running processes.
+    ListProcesses { request_id: String },
+    /// Forward input event from a frontend user.
+    InputEvent { window_id: u32, event: InputEvent },
+}
+
+/// Messages sent from a sidecar to the backend.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "type")]
+pub enum SidecarToBackend {
+    /// Sidecar announces itself.
+    Register { sidecar_name: String },
+    /// Heartbeat to keep connection alive.
+    Heartbeat,
+    /// Response to a SpawnProcess command.
+    ProcessSpawned { request_id: String, pid: u32 },
+    /// Response to a KillProcess command.
+    ProcessKilled { request_id: String, pid: u32 },
+    /// A process exited on its own.
+    ProcessExited { pid: u32, exit_code: Option<i32> },
+    /// List of running processes.
+    ProcessList {
+        request_id: String,
+        processes: Vec<ProcessInfo>,
+    },
+    /// Display update from the X server.
+    DisplayUpdate { update: DisplayUpdate },
+    /// Error response.
+    Error {
+        request_id: Option<String>,
+        message: String,
+    },
+}
+
+/// Messages sent from the backend to a frontend client.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "type")]
+pub enum BackendToFrontend {
+    /// Current list of connected sidecars.
+    SidecarList { sidecars: Vec<SidecarInfo> },
+    /// A sidecar connected.
+    SidecarConnected { sidecar: SidecarInfo },
+    /// A sidecar disconnected.
+    SidecarDisconnected { sidecar_id: String },
+    /// Response to a spawn/kill command.
+    CommandResult {
+        request_id: String,
+        success: bool,
+        message: String,
+    },
+    /// Process list for a sidecar.
+    ProcessList {
+        sidecar_id: String,
+        processes: Vec<ProcessInfo>,
+    },
+    /// A process exited.
+    ProcessExited {
+        sidecar_id: String,
+        pid: u32,
+        exit_code: Option<i32>,
+    },
+    /// Display update forwarded from a sidecar.
+    DisplayUpdate {
+        sidecar_id: String,
+        update: DisplayUpdate,
+    },
+}
+
+/// Messages sent from a frontend client to the backend.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "type")]
+pub enum FrontendToBackend {
+    /// Spawn a process on a specific sidecar.
+    SpawnProcess {
+        request_id: String,
+        sidecar_id: String,
+        command: String,
+        args: Vec<String>,
+    },
+    /// Kill a process on a specific sidecar.
+    KillProcess {
+        request_id: String,
+        sidecar_id: String,
+        pid: u32,
+    },
+    /// List processes on a sidecar.
+    ListProcesses {
+        request_id: String,
+        sidecar_id: String,
+    },
+    /// Subscribe to display updates from a sidecar.
+    SubscribeDisplay { sidecar_id: String },
+    /// Send input to a window on a sidecar.
+    InputEvent {
+        sidecar_id: String,
+        window_id: u32,
+        event: InputEvent,
+    },
+}
+
+/// Information about a connected sidecar.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SidecarInfo {
+    pub id: String,
+    pub name: String,
+}
+
+/// Information about a running process.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ProcessInfo {
+    pub pid: u32,
+    pub command: String,
+}
+
+/// A display update from the X server to be rendered in the browser.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "kind")]
+pub enum DisplayUpdate {
+    /// A window was created.
+    WindowCreated {
+        window_id: u32,
+        x: i16,
+        y: i16,
+        width: u16,
+        height: u16,
+    },
+    /// A window was destroyed.
+    WindowDestroyed { window_id: u32 },
+    /// A window was mapped (made visible).
+    WindowMapped { window_id: u32 },
+    /// A window was unmapped (hidden).
+    WindowUnmapped { window_id: u32 },
+    /// A window was moved/resized.
+    WindowConfigured {
+        window_id: u32,
+        x: i16,
+        y: i16,
+        width: u16,
+        height: u16,
+    },
+    /// Fill a rectangle.
+    FillRect {
+        window_id: u32,
+        x: i16,
+        y: i16,
+        width: u16,
+        height: u16,
+        color: u32,
+    },
+    /// Draw lines.
+    DrawLines {
+        window_id: u32,
+        points: Vec<(i16, i16)>,
+        color: u32,
+        line_width: u16,
+    },
+    /// Put an image (raw RGBA pixels, base64 encoded for JSON transport).
+    PutImage {
+        window_id: u32,
+        x: i16,
+        y: i16,
+        width: u16,
+        height: u16,
+        data: Vec<u8>,
+    },
+    /// Copy an area within a window.
+    CopyArea {
+        src_window_id: u32,
+        dst_window_id: u32,
+        src_x: i16,
+        src_y: i16,
+        dst_x: i16,
+        dst_y: i16,
+        width: u16,
+        height: u16,
+    },
+    /// Clear an area.
+    ClearArea {
+        window_id: u32,
+        x: i16,
+        y: i16,
+        width: u16,
+        height: u16,
+    },
+    /// Draw an arc.
+    DrawArc {
+        window_id: u32,
+        x: i16,
+        y: i16,
+        width: u16,
+        height: u16,
+        angle1: i16,
+        angle2: i16,
+        filled: bool,
+        color: u32,
+    },
+}
+
+/// Input events sent from the frontend to X11 clients.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "kind")]
+pub enum InputEvent {
+    KeyPress {
+        keycode: u32,
+        state: u16,
+    },
+    KeyRelease {
+        keycode: u32,
+        state: u16,
+    },
+    ButtonPress {
+        button: u8,
+        x: i16,
+        y: i16,
+        state: u16,
+    },
+    ButtonRelease {
+        button: u8,
+        x: i16,
+        y: i16,
+        state: u16,
+    },
+    MotionNotify {
+        x: i16,
+        y: i16,
+        state: u16,
+    },
+}
