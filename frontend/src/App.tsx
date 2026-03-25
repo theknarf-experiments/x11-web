@@ -17,8 +17,6 @@ interface CanvasWindow {
 	title: string;
 	x: number;
 	y: number;
-	width: number;
-	height: number;
 }
 
 let spawnCounter = 0;
@@ -59,29 +57,17 @@ function App() {
 				const proc = procList.find((p) => p.pid === cp.pid);
 				const title = proc ? `${proc.command} (${cp.pid})` : `PID ${cp.pid}`;
 
-				// Ensure renderer exists before adding window
 				if (!renderersRef.current.has(cp.clientId)) {
 					renderersRef.current.set(cp.clientId, new ClientRenderer(1024, 768));
 				}
 
-				// Place at center of viewport with cascade offset
 				const offset = spawnCounter++ * 30;
-				const w = 600;
-				const h = 450;
-				const cx = window.innerWidth / 2 - w / 2 + offset;
-				const cy = window.innerHeight / 2 - h / 2 + offset;
+				const cx = window.innerWidth / 2 - 512 + offset;
+				const cy = window.innerHeight / 2 - 384 + offset;
 
 				setWindows((prev) => [
 					...prev,
-					{
-						clientId: cp.clientId,
-						pid: cp.pid,
-						title,
-						x: cx,
-						y: cy,
-						width: w,
-						height: h,
-					},
+					{ clientId: cp.clientId, pid: cp.pid, title, x: cx, y: cy },
 				]);
 			}
 		}
@@ -114,6 +100,7 @@ function App() {
 		);
 	}, []);
 
+	// Debounced resize — sends to X11 server
 	const resizeTimerRef = useRef<ReturnType<typeof setTimeout>>(undefined);
 
 	const handleResize = useCallback(
@@ -123,24 +110,17 @@ function App() {
 			width: number,
 			height: number,
 		) => {
-			setWindows((prev) =>
-				prev.map((w) =>
-					w.clientId === clientId ? { ...w, width, height } : w,
-				),
-			);
-			// Debounce the server-side resize to avoid flooding
-			if (sidecarId) {
-				clearTimeout(resizeTimerRef.current);
-				resizeTimerRef.current = setTimeout(() => {
-					send({
-						type: "ResizeWindow",
-						sidecar_id: sidecarId,
-						client_id: clientId,
-						width: Math.round(width),
-						height: Math.round(height),
-					});
-				}, 100);
-			}
+			if (!sidecarId) return;
+			clearTimeout(resizeTimerRef.current);
+			resizeTimerRef.current = setTimeout(() => {
+				send({
+					type: "ResizeWindow",
+					sidecar_id: sidecarId,
+					client_id: clientId,
+					width,
+					height,
+				});
+			}, 100);
 		},
 		[send],
 	);
@@ -157,7 +137,6 @@ function App() {
 		[send],
 	);
 
-	// Find sidecarId for a connected process
 	function sidecarForClient(clientId: string): string | undefined {
 		return connectedProcesses.find((p) => p.clientId === clientId)?.sidecarId;
 	}
@@ -176,8 +155,6 @@ function App() {
 							title={win.title}
 							x={win.x}
 							y={win.y}
-							width={win.width}
-							height={win.height}
 							renderer={renderer}
 							onClose={() => {
 								if (sidecarId) handleKill(win.clientId, win.pid, sidecarId);

@@ -64,8 +64,6 @@
 	image-rendering: pixelated;
 	outline: none;
 	border-radius: 4px;
-	width: 100%;
-	height: auto;
 }
 
 .canvas:focus {

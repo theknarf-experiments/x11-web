@@ -30,17 +30,30 @@ export class ClientRenderer {
 		this.ctx = ctx;
 	}
 
+	get width() {
+		return this.backBuffer.width;
+	}
+
+	get height() {
+		return this.backBuffer.height;
+	}
+
+	/** Resize the back buffer immediately (for live resize feedback). */
+	resize(width: number, height: number) {
+		if (width === this.backBuffer.width && height === this.backBuffer.height)
+			return;
+		this.resizeBuffer(width, height);
+		this.dirty = true;
+	}
+
 	pushUpdate(update: DisplayUpdate) {
-		// Resize back buffer if a window is configured larger than current size
+		// Resize back buffer if a window is configured to a different size
 		if (update.kind === "WindowConfigured") {
 			if (
-				update.width > this.backBuffer.width ||
-				update.height > this.backBuffer.height
+				update.width !== this.backBuffer.width ||
+				update.height !== this.backBuffer.height
 			) {
-				this.resizeBuffer(
-					Math.max(update.width, this.backBuffer.width),
-					Math.max(update.height, this.backBuffer.height),
-				);
+				this.resizeBuffer(update.width, update.height);
 			}
 		}
 		renderUpdate(this.ctx, update, this.windows);
