@@ -1705,6 +1705,11 @@ fn handle_poly_rectangle(state: &ClientState, data: &[u8]) -> Vec<u8> {
     let gc_id = u32::from_le_bytes([data[8], data[9], data[10], data[11]]);
     let gc = state.gcs.get(&gc_id).cloned().unwrap_or_default();
 
+    // Skip XOR operations (used for cursor outlines)
+    if gc.function != 3 {
+        return Vec::new();
+    }
+
     let mut offset = 12;
     while offset + 8 <= data.len() {
         let x = i16::from_le_bytes([data[offset], data[offset + 1]]);
@@ -1712,7 +1717,6 @@ fn handle_poly_rectangle(state: &ClientState, data: &[u8]) -> Vec<u8> {
         let width = u16::from_le_bytes([data[offset + 4], data[offset + 5]]);
         let height = u16::from_le_bytes([data[offset + 6], data[offset + 7]]);
 
-        // Draw as outline using DrawLines (4 edges)
         let x2 = x + width as i16;
         let y2 = y + height as i16;
         let _ = state.update_tx.send((
@@ -1832,7 +1836,9 @@ fn handle_poly_line(state: &ClientState, data: &[u8]) -> Vec<u8> {
         offset += 4;
     }
 
-    if !points.is_empty() {
+    // Only emit for GXcopy (3). GXxor (6) is used for cursor outlines
+    // which we can't properly XOR-composite, so skip them.
+    if !points.is_empty() && gc.function == 3 {
         let _ = state.update_tx.send((
             state.client_id.clone(),
             DisplayUpdate::DrawLines {
