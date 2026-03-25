@@ -1,7 +1,7 @@
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import s from "./App.module.css";
 import { Button } from "./components/Button";
-import type { InputEvent } from "./types";
+import type { DisplayUpdate, InputEvent } from "./types";
 import { useBackendSocket } from "./useBackendSocket";
 import { X11Canvas } from "./X11Canvas";
 
@@ -11,12 +11,27 @@ function nextRequestId() {
 }
 
 function App() {
-	const { connected, sidecars, processes, displayUpdates, send } =
+	const { connected, sidecars, processes, send, onDisplayUpdate } =
 		useBackendSocket();
 	const [command, setCommand] = useState("xeyes");
 	const [args, setArgs] = useState("");
 	const [viewingSidecar, setViewingSidecar] = useState<string | null>(null);
 	const [killingPids, setKillingPids] = useState<Set<number>>(new Set());
+
+	// Display update queue — shared between WebSocket callback and canvas rAF loop
+	const displayQueueRef = useRef<DisplayUpdate[]>([]);
+	const viewingSidecarRef = useRef(viewingSidecar);
+	viewingSidecarRef.current = viewingSidecar;
+
+	// Register display callback: push updates for the viewed sidecar into the queue
+	useEffect(() => {
+		onDisplayUpdate((sidecarId, update) => {
+			if (sidecarId === viewingSidecarRef.current) {
+				displayQueueRef.current.push(update);
+			}
+		});
+		return () => onDisplayUpdate(null);
+	}, [onDisplayUpdate]);
 
 	function handleSpawn(sidecarId: string) {
 		send({ type: "SubscribeDisplay", sidecar_id: sidecarId });
@@ -121,7 +136,7 @@ function App() {
 								viewingSidecar.slice(0, 8)}
 						</h2>
 						<X11Canvas
-							updates={displayUpdates[viewingSidecar] || []}
+							queueRef={displayQueueRef}
 							width={1024}
 							height={768}
 							onInput={handleInput}

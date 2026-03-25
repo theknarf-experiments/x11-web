@@ -3,7 +3,8 @@ import type { DisplayUpdate, InputEvent } from "./types";
 import s from "./X11Canvas.module.css";
 
 interface X11CanvasProps {
-	updates: DisplayUpdate[];
+	/** Push a display update into the render queue (called outside React) */
+	queueRef: React.RefObject<DisplayUpdate[]>;
 	width?: number;
 	height?: number;
 	onInput?: (event: InputEvent) => void;
@@ -18,7 +19,7 @@ interface WindowInfo {
 }
 
 export function X11Canvas({
-	updates,
+	queueRef,
 	width = 1024,
 	height = 768,
 	onInput,
@@ -27,48 +28,53 @@ export function X11Canvas({
 	const backBufferRef = useRef<OffscreenCanvas | null>(null);
 	const backCtxRef = useRef<OffscreenCanvasRenderingContext2D | null>(null);
 	const windowsRef = useRef<Map<number, WindowInfo>>(new Map());
-	const processedRef = useRef<number>(0);
-	const rafRef = useRef<number>(0);
 	const onInputRef = useRef(onInput);
 	onInputRef.current = onInput;
 
+	// rAF render loop: drain queue → back buffer → visible canvas
 	useEffect(() => {
 		const canvas = canvasRef.current;
 		if (!canvas) return;
 		const ctx = canvas.getContext("2d");
 		if (!ctx) return;
 
-		// Create offscreen back buffer on first use or size change
-		if (
-			!backBufferRef.current ||
-			backBufferRef.current.width !== width ||
-			backBufferRef.current.height !== height
-		) {
-			backBufferRef.current = new OffscreenCanvas(width, height);
-			backCtxRef.current = backBufferRef.current.getContext("2d");
-		}
-
-		const backCtx = backCtxRef.current;
+		const backBuffer = new OffscreenCanvas(width, height);
+		const backCtx = backBuffer.getContext("2d") as
+			| OffscreenCanvasRenderingContext2D
+			| undefined;
 		if (!backCtx) return;
+		backBufferRef.current = backBuffer;
+		backCtxRef.current = backCtx;
 
-		// Render all pending updates to the back buffer
-		const startIdx = processedRef.current;
-		const newUpdates = updates.slice(startIdx);
-		processedRef.current = updates.length;
+		// Capture non-null refs for the closure so TS narrows them
+		const renderCtx: RenderContext = backCtx;
+		const visibleCtx = ctx;
 
-		if (newUpdates.length === 0) return;
+		let running = true;
 
-		for (const update of newUpdates) {
-			renderUpdate(backCtx, update, windowsRef.current);
+		function frame() {
+			if (!running) return;
+
+			const queue = queueRef.current;
+			if (queue.length > 0) {
+				// Drain all pending updates into the back buffer
+				const batch = queue.splice(0, queue.length);
+				for (const update of batch) {
+					renderUpdate(renderCtx, update, windowsRef.current);
+				}
+				// Blit to visible canvas
+				visibleCtx.drawImage(backBuffer, 0, 0);
+			}
+
+			requestAnimationFrame(frame);
 		}
 
-		// Schedule a single blit to the visible canvas on next animation frame
-		cancelAnimationFrame(rafRef.current);
-		const backBuffer = backBufferRef.current;
-		rafRef.current = requestAnimationFrame(() => {
-			ctx.drawImage(backBuffer, 0, 0);
-		});
-	}, [updates, width, height]);
+		requestAnimationFrame(frame);
+
+		return () => {
+			running = false;
+		};
+	}, [queueRef, width, height]);
 
 	const sendInput = useCallback((event: InputEvent) => {
 		onInputRef.current?.(event);
@@ -126,7 +132,7 @@ export function X11Canvas({
 			e.preventDefault();
 			sendInput({
 				kind: "KeyPress",
-				keycode: e.keyCode + 8, // X11 keycodes are offset by 8 from browser keyCodes
+				keycode: e.keyCode + 8,
 				state: keyboardMask(e),
 			});
 		},
@@ -170,44 +176,34 @@ export function X11Canvas({
 	);
 }
 
-/** Map browser MouseEvent.button (0=left,1=middle,2=right) to X11 button (1,2,3) */
 function x11Button(browserButton: number): number {
 	switch (browserButton) {
 		case 0:
-			return 1; // Left
+			return 1;
 		case 1:
-			return 2; // Middle
+			return 2;
 		case 2:
-			return 3; // Right
+			return 3;
 		default:
 			return browserButton + 1;
 	}
 }
 
-/** Map browser MouseEvent.buttons bitmask to X11 button mask */
 function mouseButtonMask(buttons: number): number {
 	let mask = 0;
-	if (buttons & 1) mask |= 0x100; // Button1Mask
-	if (buttons & 4) mask |= 0x200; // Button2Mask
-	if (buttons & 2) mask |= 0x400; // Button3Mask
+	if (buttons & 1) mask |= 0x100;
+	if (buttons & 4) mask |= 0x200;
+	if (buttons & 2) mask |= 0x400;
 	return mask;
 }
 
-/** Map browser keyboard modifier state to X11 modifier mask */
 function keyboardMask(e: React.KeyboardEvent): number {
 	let mask = 0;
-	if (e.shiftKey) mask |= 0x01; // ShiftMask
-	if (e.ctrlKey) mask |= 0x04; // ControlMask
-	if (e.altKey) mask |= 0x08; // Mod1Mask
-	if (e.metaKey) mask |= 0x40; // Mod4Mask
+	if (e.shiftKey) mask |= 0x01;
+	if (e.ctrlKey) mask |= 0x04;
+	if (e.altKey) mask |= 0x08;
+	if (e.metaKey) mask |= 0x40;
 	return mask;
-}
-
-function colorToCSS(color: number): string {
-	const r = (color >> 16) & 0xff;
-	const g = (color >> 8) & 0xff;
-	const b = color & 0xff;
-	return `rgb(${r},${g},${b})`;
 }
 
 type RenderContext =
@@ -343,4 +339,11 @@ function renderUpdate(
 			break;
 		}
 	}
+}
+
+function colorToCSS(color: number): string {
+	const r = (color >> 16) & 0xff;
+	const g = (color >> 8) & 0xff;
+	const b = color & 0xff;
+	return `rgb(${r},${g},${b})`;
 }
