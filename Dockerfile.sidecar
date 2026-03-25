@@ -7,6 +7,8 @@ RUN cargo build --release --bin x11-web-sidecar
 FROM debian:bookworm-slim
 RUN apt-get update && apt-get install -y --no-install-recommends \
     x11-apps \
+    xterm \
+    xfonts-base \
     && rm -rf /var/lib/apt/lists/*
 RUN mkdir -p /tmp/.X11-unix
 COPY --from=builder /app/target/release/x11-web-sidecar /usr/local/bin/
