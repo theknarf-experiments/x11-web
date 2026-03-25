@@ -21,7 +21,7 @@
 	display: flex;
 	align-items: center;
 	gap: 8px;
-	height: 20px;
+	height: 16px;
 	padding: 0 2px;
 	font-size: 11px;
 	color: rgba(0, 0, 0, 0.5);
@@ -73,24 +73,30 @@
 
 .resizeHandle {
 	position: absolute;
+	width: 14px;
+	height: 14px;
+}
+
+.resizeSE {
 	bottom: 0;
 	right: 0;
-	width: 18px;
-	height: 18px;
 	cursor: nwse-resize;
 }
 
-.resizeHandle::after {
-	content: "";
-	position: absolute;
-	bottom: 5px;
-	right: 5px;
-	width: 7px;
-	height: 7px;
-	border-right: 2px solid rgba(0, 0, 0, 0.15);
-	border-bottom: 2px solid rgba(0, 0, 0, 0.15);
+.resizeSW {
+	bottom: 0;
+	left: 0;
+	cursor: nesw-resize;
 }
 
-.resizeHandle:hover::after {
-	border-color: rgba(0, 0, 0, 0.3);
+.resizeNE {
+	top: 0;
+	right: 0;
+	cursor: nesw-resize;
+}
+
+.resizeNW {
+	top: 0;
+	left: 0;
+	cursor: nwse-resize;
 }

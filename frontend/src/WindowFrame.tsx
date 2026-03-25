@@ -112,28 +112,44 @@ export function WindowFrame({
 		[x, y, onMove],
 	);
 
-	// Resize handle drag — resizes the renderer directly for instant feedback
-	const handleResizePointerDown = useCallback(
-		(e: React.PointerEvent) => {
+	// Corner resize — dx/dy signs determine which edges move
+	const makeResizeHandler = useCallback(
+		(flipX: boolean, flipY: boolean) => (e: React.PointerEvent) => {
 			e.stopPropagation();
-			const startX = e.clientX;
-			const startY = e.clientY;
+			const startMX = e.clientX;
+			const startMY = e.clientY;
 			const origW = renderer.width;
 			const origH = renderer.height;
+			const origX = x;
+			const origY = y;
 			const target = e.currentTarget;
 			target.setPointerCapture(e.pointerId);
 			const scale = getScale(target);
 
 			const onPointerMove = (ev: Event) => {
 				const { clientX, clientY } = ev as PointerEvent;
-				const dx = clientX - startX;
-				const dy = clientY - startY;
-				const newW = Math.max(MIN_WIDTH, Math.round(origW + dx / scale));
-				const newH = Math.max(MIN_HEIGHT, Math.round(origH + dy / scale));
-				// Resize renderer immediately for instant visual feedback
+				const dx = (clientX - startMX) / scale;
+				const dy = (clientY - startMY) / scale;
+
+				const newW = Math.max(
+					MIN_WIDTH,
+					Math.round(origW + (flipX ? -dx : dx)),
+				);
+				const newH = Math.max(
+					MIN_HEIGHT,
+					Math.round(origH + (flipY ? -dy : dy)),
+				);
+
 				renderer.resize(newW, newH);
-				// Notify parent to send to X11 server (debounced)
 				onResize(newW, newH);
+
+				// Move origin if resizing from left or top edge
+				if (flipX)
+					onMove(
+						origX + (origW - newW),
+						flipY ? origY + (origH - newH) : origY,
+					);
+				else if (flipY) onMove(origX, origY + (origH - newH));
 			};
 
 			const onPointerUp = () => {
@@ -144,7 +160,7 @@ export function WindowFrame({
 			target.addEventListener("pointermove", onPointerMove);
 			target.addEventListener("pointerup", onPointerUp);
 		},
-		[renderer, onResize],
+		[renderer, onResize, onMove, x, y],
 	);
 
 	// X11 input forwarding
@@ -267,7 +283,22 @@ export function WindowFrame({
 				onKeyUp={handleKeyUp}
 				onContextMenu={handleContextMenu}
 			/>
-			<div className={s.resizeHandle} onPointerDown={handleResizePointerDown} />
+			<div
+				className={`${s.resizeHandle} ${s.resizeSE}`}
+				onPointerDown={makeResizeHandler(false, false)}
+			/>
+			<div
+				className={`${s.resizeHandle} ${s.resizeSW}`}
+				onPointerDown={makeResizeHandler(true, false)}
+			/>
+			<div
+				className={`${s.resizeHandle} ${s.resizeNE}`}
+				onPointerDown={makeResizeHandler(false, true)}
+			/>
+			<div
+				className={`${s.resizeHandle} ${s.resizeNW}`}
+				onPointerDown={makeResizeHandler(true, true)}
+			/>
 		</div>
 	);
 }
