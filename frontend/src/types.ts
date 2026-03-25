@@ -58,6 +58,13 @@ export type FrontendToBackend =
 			sidecar_id: string;
 			client_id: string;
 			event: InputEvent;
+	  }
+	| {
+			type: "ResizeWindow";
+			sidecar_id: string;
+			client_id: string;
+			width: number;
+			height: number;
 	  };
 
 export type DisplayUpdate =

@@ -22,6 +22,7 @@ pub struct X11Server {
     socket_path: PathBuf,
     update_tx: mpsc::UnboundedSender<TaggedDisplayUpdate>,
     input_tx: broadcast::Sender<(String, InputEvent)>,
+    resize_tx: broadcast::Sender<(String, u16, u16)>,
     client_connected_tx: mpsc::UnboundedSender<String>,
 }
 
@@ -204,6 +205,7 @@ impl X11Server {
         display_number: u32,
         update_tx: mpsc::UnboundedSender<TaggedDisplayUpdate>,
         input_tx: broadcast::Sender<(String, InputEvent)>,
+        resize_tx: broadcast::Sender<(String, u16, u16)>,
         client_connected_tx: mpsc::UnboundedSender<String>,
     ) -> Self {
         let socket_path = PathBuf::from(format!("/tmp/.X11-unix/X{display_number}"));
@@ -212,6 +214,7 @@ impl X11Server {
             socket_path,
             update_tx,
             input_tx,
+            resize_tx,
             client_connected_tx,
         }
     }
@@ -241,10 +244,12 @@ impl X11Server {
                     let client_id = Uuid::new_v4().to_string();
                     let update_tx = self.update_tx.clone();
                     let input_rx = self.input_tx.subscribe();
+                    let resize_rx = self.resize_tx.subscribe();
                     let _ = self.client_connected_tx.send(client_id.clone());
                     let cid = client_id.clone();
                     tokio::spawn(async move {
-                        if let Err(e) = handle_client(stream, client_id, update_tx, input_rx).await
+                        if let Err(e) =
+                            handle_client(stream, client_id, update_tx, input_rx, resize_rx).await
                         {
                             debug!("X11 client {cid} disconnected: {e}");
                         }
@@ -351,6 +356,7 @@ async fn handle_client(
     client_id: String,
     update_tx: mpsc::UnboundedSender<TaggedDisplayUpdate>,
     mut input_rx: broadcast::Receiver<(String, InputEvent)>,
+    mut resize_rx: broadcast::Receiver<(String, u16, u16)>,
 ) -> io::Result<()> {
     // Phase 1: Read client setup request
     // Read at least 12 bytes for the header
@@ -486,7 +492,6 @@ async fn handle_client(
             }
             result = input_rx.recv() => {
                 if let Ok((target_id, input)) = result {
-                    // Only deliver input to the targeted client
                     if target_id == client_id {
                         let event_bytes = build_x11_input_event(&mut state, &input);
                         if !event_bytes.is_empty() {
@@ -495,8 +500,76 @@ async fn handle_client(
                     }
                 }
             }
+            result = resize_rx.recv() => {
+                if let Ok((target_id, width, height)) = result {
+                    if target_id == client_id {
+                        let events = resize_all_windows(&mut state, width, height);
+                        if !events.is_empty() {
+                            stream.write_all(&events).await?;
+                        }
+                    }
+                }
+            }
         }
     }
+}
+
+/// Resize all mapped windows for this client and send ConfigureNotify + Expose events.
+fn resize_all_windows(state: &mut ClientState, width: u16, height: u16) -> Vec<u8> {
+    let mut events = Vec::new();
+    let seq = state.sequence;
+
+    // Update root window dimensions
+    state.root_width = width;
+    state.root_height = height;
+
+    // Collect window IDs to resize (avoid borrow issues)
+    let window_ids: Vec<u32> = state.windows.keys().copied().collect();
+
+    for wid in window_ids {
+        if let Some(win) = state.windows.get_mut(&wid) {
+            win.width = width;
+            win.height = height;
+
+            // Send ConfigureNotify
+            let mut event = [0u8; 32];
+            event[0] = CONFIGURE_NOTIFY_EVENT;
+            event[2..4].copy_from_slice(&seq.to_le_bytes());
+            event[4..8].copy_from_slice(&wid.to_le_bytes());
+            event[8..12].copy_from_slice(&wid.to_le_bytes());
+            event[16..18].copy_from_slice(&win.x.to_le_bytes());
+            event[18..20].copy_from_slice(&win.y.to_le_bytes());
+            event[20..22].copy_from_slice(&width.to_le_bytes());
+            event[22..24].copy_from_slice(&height.to_le_bytes());
+            event[24..26].copy_from_slice(&win.border_width.to_le_bytes());
+            events.extend_from_slice(&event);
+
+            // Send Expose to trigger redraw
+            if win.mapped {
+                let mut expose = [0u8; 32];
+                expose[0] = EXPOSE_EVENT;
+                expose[2..4].copy_from_slice(&seq.to_le_bytes());
+                expose[4..8].copy_from_slice(&wid.to_le_bytes());
+                expose[12..14].copy_from_slice(&width.to_le_bytes());
+                expose[14..16].copy_from_slice(&height.to_le_bytes());
+                events.extend_from_slice(&expose);
+
+                // Send display update for the resize
+                let _ = state.update_tx.send((
+                    state.client_id.clone(),
+                    DisplayUpdate::WindowConfigured {
+                        window_id: wid,
+                        x: win.x,
+                        y: win.y,
+                        width,
+                        height,
+                    },
+                ));
+            }
+        }
+    }
+
+    events
 }
 
 /// Convert a frontend InputEvent into X11 wire-format event bytes (32 bytes).

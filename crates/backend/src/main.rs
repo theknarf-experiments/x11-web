@@ -332,6 +332,23 @@ async fn handle_frontend_ws(socket: WebSocket, state: AppState) {
                 )
                 .await;
             }
+            FrontendToBackend::ResizeWindow {
+                sidecar_id,
+                client_id,
+                width,
+                height,
+            } => {
+                forward_to_sidecar(
+                    &state,
+                    &sidecar_id,
+                    BackendToSidecar::ResizeWindow {
+                        client_id,
+                        width,
+                        height,
+                    },
+                )
+                .await;
+            }
         }
     }
 

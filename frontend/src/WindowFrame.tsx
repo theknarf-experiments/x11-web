@@ -14,6 +14,7 @@ interface WindowFrameProps {
 	onClose: () => void;
 	onMove: (x: number, y: number) => void;
 	onResize: (width: number, height: number) => void;
+	onResizeEnd: (width: number, height: number) => void;
 	onInput: (event: InputEvent) => void;
 }
 
@@ -40,6 +41,7 @@ export function WindowFrame({
 	onClose,
 	onMove,
 	onResize,
+	onResizeEnd,
 	onInput,
 }: WindowFrameProps) {
 	const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -124,15 +126,21 @@ export function WindowFrame({
 				);
 			};
 
-			const onPointerUp = () => {
+			const onPointerUp = (ev: Event) => {
 				target.removeEventListener("pointermove", onPointerMove);
 				target.removeEventListener("pointerup", onPointerUp);
+				const { clientX, clientY } = ev as PointerEvent;
+				const dx = clientX - startX;
+				const dy = clientY - startY;
+				const finalW = Math.max(MIN_WIDTH, origW + dx / scale);
+				const finalH = Math.max(MIN_HEIGHT, origH + dy / scale);
+				onResizeEnd(finalW, finalH);
 			};
 
 			target.addEventListener("pointermove", onPointerMove);
 			target.addEventListener("pointerup", onPointerUp);
 		},
-		[width, height, onResize],
+		[width, height, onResize, onResizeEnd],
 	);
 
 	// X11 input forwarding

@@ -125,6 +125,19 @@ function App() {
 		[],
 	);
 
+	const handleResizeEnd = useCallback(
+		(clientId: string, sidecarId: string, width: number, height: number) => {
+			send({
+				type: "ResizeWindow",
+				sidecar_id: sidecarId,
+				client_id: clientId,
+				width: Math.round(width),
+				height: Math.round(height),
+			});
+		},
+		[send],
+	);
+
 	const handleInput = useCallback(
 		(clientId: string, sidecarId: string, event: InputEvent) => {
 			send({
@@ -164,6 +177,9 @@ function App() {
 							}}
 							onMove={(nx, ny) => handleMove(win.clientId, nx, ny)}
 							onResize={(nw, nh) => handleResize(win.clientId, nw, nh)}
+							onResizeEnd={(nw, nh) => {
+								if (sidecarId) handleResizeEnd(win.clientId, sidecarId, nw, nh);
+							}}
 							onInput={(event) => {
 								if (sidecarId) handleInput(win.clientId, sidecarId, event);
 							}}

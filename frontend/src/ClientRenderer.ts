@@ -18,7 +18,7 @@ type RenderContext =
  * The visible canvas blits from the back buffer on each rAF.
  */
 export class ClientRenderer {
-	readonly backBuffer: OffscreenCanvas;
+	backBuffer: OffscreenCanvas;
 	private ctx: OffscreenCanvasRenderingContext2D;
 	private windows = new Map<number, WindowInfo>();
 	dirty = false;
@@ -31,8 +31,34 @@ export class ClientRenderer {
 	}
 
 	pushUpdate(update: DisplayUpdate) {
+		// Resize back buffer if a window is configured larger than current size
+		if (update.kind === "WindowConfigured") {
+			if (
+				update.width > this.backBuffer.width ||
+				update.height > this.backBuffer.height
+			) {
+				this.resizeBuffer(
+					Math.max(update.width, this.backBuffer.width),
+					Math.max(update.height, this.backBuffer.height),
+				);
+			}
+		}
 		renderUpdate(this.ctx, update, this.windows);
 		this.dirty = true;
+	}
+
+	private resizeBuffer(width: number, height: number) {
+		// Save current content
+		const oldData = this.ctx.getImageData(
+			0,
+			0,
+			this.backBuffer.width,
+			this.backBuffer.height,
+		);
+		this.backBuffer.width = width;
+		this.backBuffer.height = height;
+		// getContext returns the same context after resize
+		this.ctx.putImageData(oldData, 0, 0);
 	}
 }
 

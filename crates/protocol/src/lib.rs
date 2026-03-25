@@ -19,6 +19,12 @@ pub enum BackendToSidecar {
         client_id: String,
         event: InputEvent,
     },
+    /// Resize a client's windows.
+    ResizeWindow {
+        client_id: String,
+        width: u16,
+        height: u16,
+    },
 }
 
 /// Messages sent from a sidecar to the backend.
@@ -124,6 +130,13 @@ pub enum FrontendToBackend {
         sidecar_id: String,
         client_id: String,
         event: InputEvent,
+    },
+    /// Resize a client's windows on a sidecar.
+    ResizeWindow {
+        sidecar_id: String,
+        client_id: String,
+        width: u16,
+        height: u16,
     },
 }
 
