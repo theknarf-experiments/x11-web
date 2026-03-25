@@ -24,8 +24,11 @@ export function X11Canvas({
 	onInput,
 }: X11CanvasProps) {
 	const canvasRef = useRef<HTMLCanvasElement>(null);
+	const backBufferRef = useRef<OffscreenCanvas | null>(null);
+	const backCtxRef = useRef<OffscreenCanvasRenderingContext2D | null>(null);
 	const windowsRef = useRef<Map<number, WindowInfo>>(new Map());
 	const processedRef = useRef<number>(0);
+	const rafRef = useRef<number>(0);
 	const onInputRef = useRef(onInput);
 	onInputRef.current = onInput;
 
@@ -35,14 +38,37 @@ export function X11Canvas({
 		const ctx = canvas.getContext("2d");
 		if (!ctx) return;
 
+		// Create offscreen back buffer on first use or size change
+		if (
+			!backBufferRef.current ||
+			backBufferRef.current.width !== width ||
+			backBufferRef.current.height !== height
+		) {
+			backBufferRef.current = new OffscreenCanvas(width, height);
+			backCtxRef.current = backBufferRef.current.getContext("2d");
+		}
+
+		const backCtx = backCtxRef.current;
+		if (!backCtx) return;
+
+		// Render all pending updates to the back buffer
 		const startIdx = processedRef.current;
 		const newUpdates = updates.slice(startIdx);
 		processedRef.current = updates.length;
 
+		if (newUpdates.length === 0) return;
+
 		for (const update of newUpdates) {
-			renderUpdate(ctx, update, windowsRef.current);
+			renderUpdate(backCtx, update, windowsRef.current);
 		}
-	}, [updates]);
+
+		// Schedule a single blit to the visible canvas on next animation frame
+		cancelAnimationFrame(rafRef.current);
+		const backBuffer = backBufferRef.current;
+		rafRef.current = requestAnimationFrame(() => {
+			ctx.drawImage(backBuffer, 0, 0);
+		});
+	}, [updates, width, height]);
 
 	const sendInput = useCallback((event: InputEvent) => {
 		onInputRef.current?.(event);
@@ -184,8 +210,12 @@ function colorToCSS(color: number): string {
 	return `rgb(${r},${g},${b})`;
 }
 
+type RenderContext =
+	| CanvasRenderingContext2D
+	| OffscreenCanvasRenderingContext2D;
+
 function renderUpdate(
-	ctx: CanvasRenderingContext2D,
+	ctx: RenderContext,
 	update: DisplayUpdate,
 	windows: Map<number, WindowInfo>,
 ) {
