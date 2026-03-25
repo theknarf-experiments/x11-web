@@ -1,8 +1,3 @@
-/// Helper macro to create a glyph array inline
-macro_rules! glyph {
-    ($($b:expr),+ $(,)?) => { [$($b),+] };
-}
-
 use std::collections::HashMap;
 use std::io;
 use std::path::PathBuf;
@@ -1785,6 +1780,11 @@ fn handle_poly_fill_rectangle(state: &ClientState, data: &[u8]) -> Vec<u8> {
     let drawable = u32::from_le_bytes([data[4], data[5], data[6], data[7]]);
     let gc_id = u32::from_le_bytes([data[8], data[9], data[10], data[11]]);
     let gc = state.gcs.get(&gc_id).cloned().unwrap_or_default();
+
+    // Skip XOR operations (cursor drawing)
+    if gc.function != 3 {
+        return Vec::new();
+    }
 
     let mut offset = 12;
     while offset + 8 <= data.len() {
