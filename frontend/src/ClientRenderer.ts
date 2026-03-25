@@ -164,7 +164,7 @@ function renderUpdate(
 		case "PutImage": {
 			if (update.data.length === 0) break;
 			const imageData = ctx.createImageData(update.width, update.height);
-			let hasAlpha = false;
+			let hasTransparent = false;
 			for (let i = 0; i < update.width * update.height; i++) {
 				const srcOff = i * 4;
 				const dstOff = i * 4;
@@ -173,11 +173,20 @@ function renderUpdate(
 					imageData.data[dstOff] = update.data[srcOff + 2];
 					imageData.data[dstOff + 1] = update.data[srcOff + 1];
 					imageData.data[dstOff + 2] = update.data[srcOff];
-					imageData.data[dstOff + 3] = a || 255;
-					if (a === 0) hasAlpha = true;
+					if (a === 0xff) {
+						// Opaque foreground (from PolyText8)
+						imageData.data[dstOff + 3] = 255;
+					} else if (a === 0x01) {
+						// Transparent background (from PolyText8) — marker value
+						imageData.data[dstOff + 3] = 0;
+						hasTransparent = true;
+					} else {
+						// Normal opaque pixel (a=0 from ImageText8/PutImage)
+						imageData.data[dstOff + 3] = 255;
+					}
 				}
 			}
-			if (hasAlpha) {
+			if (hasTransparent) {
 				// Has transparent pixels — use drawImage for alpha compositing
 				const tmp = new OffscreenCanvas(update.width, update.height);
 				const tmpCtx = tmp.getContext("2d");

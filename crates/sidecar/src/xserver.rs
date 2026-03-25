@@ -2067,69 +2067,28 @@ fn handle_poly_text8(state: &ClientState, data: &[u8]) -> Vec<u8> {
 
         let text = &data[offset + 2..offset + 2 + item_len];
 
-        // Render this text segment (transparent — no background fill)
-        let mut total_width: i32 = 0;
-        for &ch in text {
-            total_width += font.char_info(ch as u16).character_width as i32;
-        }
-        let total_width = total_width.max(1) as u16;
-        let total_height = (font.font_ascent + font.font_descent) as u16;
+        let (img_w, img_h, pixels) = font.render_text_transparent(text, gc.foreground);
 
-        let fg_r = ((gc.foreground >> 16) & 0xFF) as u8;
-        let fg_g = ((gc.foreground >> 8) & 0xFF) as u8;
-        let fg_b = (gc.foreground & 0xFF) as u8;
-
-        // Render to pixel buffer with transparent (0,0,0,0) background
-        let mut pixels = vec![0u8; total_width as usize * total_height as usize * 4];
-
-        let mut cx: i32 = 0;
-        let mut has_pixels = false;
-        for &ch in text {
-            let ci = font.char_info(ch as u16);
-            if let Some(glyph) = font.glyph(ch as u16) {
-                let gx = cx + ci.left_side_bearing as i32;
-                let gy = font.font_ascent as i32 - ci.ascent as i32;
-
-                let row_bytes = ((glyph.width as usize) + 7) / 8;
-                for row in 0..glyph.height as usize {
-                    for col in 0..glyph.width as usize {
-                        let byte_idx = row * row_bytes + col / 8;
-                        let bit_idx = 7 - (col % 8);
-                        if byte_idx < glyph.bitmap.len()
-                            && (glyph.bitmap[byte_idx] >> bit_idx) & 1 != 0
-                        {
-                            let px = gx as usize + col;
-                            let py = gy as usize + row;
-                            if px < total_width as usize && py < total_height as usize {
-                                let idx = (py * total_width as usize + px) * 4;
-                                pixels[idx] = fg_b;
-                                pixels[idx + 1] = fg_g;
-                                pixels[idx + 2] = fg_r;
-                                pixels[idx + 3] = 0xFF; // Mark as opaque
-                                has_pixels = true;
-                            }
-                        }
-                    }
-                }
-            }
-            cx += ci.character_width as i32;
-        }
-
-        if has_pixels {
+        if img_w > 0 && img_h > 0 {
             let _ = state.update_tx.send((
                 state.client_id.clone(),
                 DisplayUpdate::PutImage {
                     window_id: drawable,
                     x: cursor_x,
                     y: y - font.font_ascent,
-                    width: total_width,
-                    height: total_height,
+                    width: img_w,
+                    height: img_h,
                     data: pixels,
                 },
             ));
         }
 
-        cursor_x += cx as i16;
+        // Advance cursor by text width
+        let mut text_advance: i32 = 0;
+        for &ch in text {
+            text_advance += font.char_info(ch as u16).character_width as i32;
+        }
+        cursor_x += text_advance as i16;
         offset += 2 + item_len;
     }
 

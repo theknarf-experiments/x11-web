@@ -131,6 +131,61 @@ impl BitmapFont {
 
         (total_width, total_height, pixels)
     }
+
+    /// Render text with transparent background (for PolyText8).
+    /// Foreground pixels get alpha=0xFF, background pixels get alpha=0.
+    pub fn render_text_transparent(&self, text: &[u8], fg: u32) -> (u16, u16, Vec<u8>) {
+        let mut total_width: i32 = 0;
+        for &ch in text {
+            let ci = self.char_info(ch as u16);
+            total_width += ci.character_width as i32;
+        }
+        let total_width = total_width.max(1) as u16;
+        let total_height = (self.font_ascent + self.font_descent) as u16;
+
+        let fg_r = ((fg >> 16) & 0xFF) as u8;
+        let fg_g = ((fg >> 8) & 0xFF) as u8;
+        let fg_b = (fg & 0xFF) as u8;
+
+        // Background pixels marked with alpha=0x01 (transparent marker)
+        let mut pixels = vec![0u8; total_width as usize * total_height as usize * 4];
+        for i in 0..(total_width as usize * total_height as usize) {
+            pixels[i * 4 + 3] = 0x01; // Transparent marker
+        }
+
+        let mut cursor_x: i32 = 0;
+        for &ch in text {
+            let ci = self.char_info(ch as u16);
+            if let Some(glyph) = self.glyph(ch as u16) {
+                let gx = cursor_x + ci.left_side_bearing as i32;
+                let gy = self.font_ascent as i32 - ci.ascent as i32;
+
+                let row_bytes = ((glyph.width as usize) + 7) / 8;
+                for row in 0..glyph.height as usize {
+                    for col in 0..glyph.width as usize {
+                        let byte_idx = row * row_bytes + col / 8;
+                        let bit_idx = 7 - (col % 8);
+                        if byte_idx < glyph.bitmap.len()
+                            && (glyph.bitmap[byte_idx] >> bit_idx) & 1 != 0
+                        {
+                            let px = gx as usize + col;
+                            let py = gy as usize + row;
+                            if px < total_width as usize && py < total_height as usize {
+                                let idx = (py * total_width as usize + px) * 4;
+                                pixels[idx] = fg_b;
+                                pixels[idx + 1] = fg_g;
+                                pixels[idx + 2] = fg_r;
+                                pixels[idx + 3] = 0xFF; // Opaque foreground
+                            }
+                        }
+                    }
+                }
+            }
+            cursor_x += ci.character_width as i32;
+        }
+
+        (total_width, total_height, pixels)
+    }
 }
 
 /// Font manager that loads and caches fonts
@@ -378,4 +433,65 @@ fn parse_bdf_data(data: &[u8], path: &Path) -> Option<BitmapFont> {
         char_infos,
         glyphs,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_glyph_rendering() {
+        let data = std::fs::read("fonts/6x13.bdf").unwrap();
+        let font = parse_bdf_data(&data, std::path::Path::new("6x13.bdf")).unwrap();
+
+        // Check H glyph
+        let h_info = font.char_info(72); // 'H'
+        println!(
+            "H: cw={} lsb={} rsb={} asc={} desc={}",
+            h_info.character_width,
+            h_info.left_side_bearing,
+            h_info.right_side_bearing,
+            h_info.ascent,
+            h_info.descent
+        );
+
+        let h_glyph = font.glyph(72).unwrap();
+        println!(
+            "H glyph: {}x{} bitmap_len={}",
+            h_glyph.width,
+            h_glyph.height,
+            h_glyph.bitmap.len()
+        );
+
+        let row_bytes = ((h_glyph.width as usize) + 7) / 8;
+        let mut has_pixel = false;
+        for row in 0..h_glyph.height as usize {
+            let mut line = String::new();
+            for col in 0..h_glyph.width as usize {
+                let byte_idx = row * row_bytes + col / 8;
+                let bit_idx = 7 - (col % 8);
+                if byte_idx < h_glyph.bitmap.len() && (h_glyph.bitmap[byte_idx] >> bit_idx) & 1 != 0
+                {
+                    line.push('#');
+                    has_pixel = true;
+                } else {
+                    line.push('.');
+                }
+            }
+            println!("  {}", line);
+        }
+        assert!(has_pixel, "H glyph should have pixels");
+
+        // Test render
+        let (w, h, pixels) = font.render_text_transparent(b"H", 0xFFFFFF);
+        println!("\nrender_text_transparent H: {}x{}", w, h);
+        let mut fg_count = 0;
+        for i in 0..(w as usize * h as usize) {
+            if pixels[i * 4 + 3] == 0xFF {
+                fg_count += 1;
+            }
+        }
+        println!("Foreground pixels: {}", fg_count);
+        assert!(fg_count > 0, "Rendered H should have foreground pixels");
+    }
 }

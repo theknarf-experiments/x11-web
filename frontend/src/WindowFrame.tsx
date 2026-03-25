@@ -255,6 +255,7 @@ export function WindowFrame({
 			className={s.window}
 			style={{ left: x, top: y, background: color }}
 			onPointerDown={handleTitlePointerDown}
+			onClick={() => canvasRef.current?.focus()}
 			data-testid="window-frame"
 			data-client-id={clientId}
 		>
