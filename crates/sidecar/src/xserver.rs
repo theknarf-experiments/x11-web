@@ -1750,21 +1750,23 @@ fn handle_fill_poly(state: &ClientState, data: &[u8]) -> Vec<u8> {
         offset += 4;
     }
 
-    if points.len() >= 2 {
-        // Approximate filled polygon as a FillRect using bounding box
-        let min_x = points.iter().map(|p| p.0).min().unwrap_or(0);
-        let min_y = points.iter().map(|p| p.1).min().unwrap_or(0);
-        let max_x = points.iter().map(|p| p.0).max().unwrap_or(0);
-        let max_y = points.iter().map(|p| p.1).max().unwrap_or(0);
+    // Skip XOR operations (cursor drawing)
+    if gc.function != 3 {
+        return Vec::new();
+    }
+
+    if points.len() >= 3 {
+        // Close the polygon and draw as outline
+        if points.first() != points.last() {
+            points.push(points[0]);
+        }
         let _ = state.update_tx.send((
             state.client_id.clone(),
-            DisplayUpdate::FillRect {
+            DisplayUpdate::DrawLines {
                 window_id: drawable,
-                x: min_x,
-                y: min_y,
-                width: (max_x - min_x) as u16,
-                height: (max_y - min_y) as u16,
+                points,
                 color: gc.foreground,
+                line_width: gc.line_width,
             },
         ));
     }
@@ -1863,6 +1865,10 @@ fn handle_poly_point(state: &ClientState, data: &[u8]) -> Vec<u8> {
     let gc_id = u32::from_le_bytes([data[8], data[9], data[10], data[11]]);
     let gc = state.gcs.get(&gc_id).cloned().unwrap_or_default();
 
+    if gc.function != 3 {
+        return Vec::new();
+    }
+
     let mut last_x: i16 = 0;
     let mut last_y: i16 = 0;
     let mut offset = 12;
@@ -1902,6 +1908,10 @@ fn handle_poly_segment(state: &ClientState, data: &[u8]) -> Vec<u8> {
     let drawable = u32::from_le_bytes([data[4], data[5], data[6], data[7]]);
     let gc_id = u32::from_le_bytes([data[8], data[9], data[10], data[11]]);
     let gc = state.gcs.get(&gc_id).cloned().unwrap_or_default();
+
+    if gc.function != 3 {
+        return Vec::new();
+    }
 
     let mut offset = 12;
     while offset + 8 <= data.len() {
