@@ -40,7 +40,7 @@ function App() {
 			const renderers = renderersRef.current;
 			let r = renderers.get(clientId);
 			if (!r) {
-				r = new ClientRenderer(1024, 768);
+				r = new ClientRenderer(1, 1);
 				renderers.set(clientId, r);
 			}
 			r.pushUpdate(update);
@@ -58,12 +58,12 @@ function App() {
 				const title = proc ? `${proc.command} (${cp.pid})` : `PID ${cp.pid}`;
 
 				if (!renderersRef.current.has(cp.clientId)) {
-					renderersRef.current.set(cp.clientId, new ClientRenderer(1024, 768));
+					renderersRef.current.set(cp.clientId, new ClientRenderer(1, 1));
 				}
 
 				const offset = spawnCounter++ * 30;
-				const cx = window.innerWidth / 2 - 512 + offset;
-				const cy = window.innerHeight / 2 - 384 + offset;
+				const cx = window.innerWidth / 4 + offset;
+				const cy = window.innerHeight / 4 + offset;
 
 				setWindows((prev) => [
 					...prev,

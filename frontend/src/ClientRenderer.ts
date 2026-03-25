@@ -47,8 +47,8 @@ export class ClientRenderer {
 	}
 
 	pushUpdate(update: DisplayUpdate) {
-		// Resize back buffer if a window is configured to a different size
-		if (update.kind === "WindowConfigured") {
+		// Resize back buffer to match the app's window dimensions
+		if (update.kind === "WindowCreated" || update.kind === "WindowConfigured") {
 			if (
 				update.width !== this.backBuffer.width ||
 				update.height !== this.backBuffer.height
