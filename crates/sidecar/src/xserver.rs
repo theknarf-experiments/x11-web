@@ -2361,7 +2361,7 @@ fn handle_get_keyboard_mapping(data: &[u8], seq: u16) -> Vec<u8> {
 /// Based on standard US keyboard layout.
 /// X11 keycodes = browser keyCode + 8 (approximately).
 fn keycode_to_keysym(keycode: u8) -> (u32, u32) {
-    // X11 keysym constants
+    // Evdev-based X11 keycodes (matching the frontend's e.code mapping)
     const XK_BACKSPACE: u32 = 0xff08;
     const XK_TAB: u32 = 0xff09;
     const XK_RETURN: u32 = 0xff0d;
@@ -2375,89 +2375,95 @@ fn keycode_to_keysym(keycode: u8) -> (u32, u32) {
     const XK_PAGE_UP: u32 = 0xff55;
     const XK_PAGE_DOWN: u32 = 0xff56;
     const XK_END: u32 = 0xff57;
+    const XK_INSERT: u32 = 0xff63;
     const XK_SHIFT_L: u32 = 0xffe1;
+    const XK_SHIFT_R: u32 = 0xffe2;
     const XK_CONTROL_L: u32 = 0xffe3;
-    const XK_ALT_L: u32 = 0xffe9;
+    const XK_CONTROL_R: u32 = 0xffe4;
     const XK_CAPS_LOCK: u32 = 0xffe5;
-    const XK_SPACE: u32 = 0x0020;
+    const XK_ALT_L: u32 = 0xffe9;
+    const XK_ALT_R: u32 = 0xffea;
+    const XK_SUPER_L: u32 = 0xffeb;
+    const XK_SUPER_R: u32 = 0xffec;
     const XK_F1: u32 = 0xffbe;
+    const XK_SPACE: u32 = 0x0020;
 
-    // Browser keyCode + 8 = X11 keycode
-    // So keycode 16 = browser Shift (keyCode 8+8=16)
-    // Mapping: X11 keycode → (normal, shifted)
     match keycode {
-        // Special keys (browser keyCode → X11 keycode = browser + 8)
-        16 => (XK_BACKSPACE, XK_BACKSPACE), // browser 8 = Backspace
-        17 => (XK_TAB, XK_TAB),             // browser 9 = Tab
-        21 => (XK_RETURN, XK_RETURN),       // browser 13 = Enter
-        24 => (XK_SHIFT_L, XK_SHIFT_L),     // browser 16 = Shift
-        25 => (XK_CONTROL_L, XK_CONTROL_L), // browser 17 = Ctrl
-        26 => (XK_ALT_L, XK_ALT_L),         // browser 18 = Alt
-        28 => (XK_CAPS_LOCK, XK_CAPS_LOCK), // browser 20 = CapsLock
-        35 => (XK_ESCAPE, XK_ESCAPE),       // browser 27 = Escape
-        40 => (XK_SPACE, XK_SPACE),         // browser 32 = Space
-
-        // Number keys (browser 48-57 → keycode 56-65)
-        56 => (0x0030, 0x0029), // 0 )
-        57 => (0x0031, 0x0021), // 1 !
-        58 => (0x0032, 0x0040), // 2 @
-        59 => (0x0033, 0x0023), // 3 #
-        60 => (0x0034, 0x0024), // 4 $
-        61 => (0x0035, 0x0025), // 5 %
-        62 => (0x0036, 0x005e), // 6 ^
-        63 => (0x0037, 0x0026), // 7 &
-        64 => (0x0038, 0x002a), // 8 *
-        65 => (0x0039, 0x0028), // 9 (
-
-        // Letter keys (browser 65-90 → keycode 73-98)
-        k @ 73..=98 => {
-            let lower = (k - 73 + b'a') as u32;
-            let upper = (k - 73 + b'A') as u32;
-            (lower, upper)
-        }
-
-        // Arrow keys (browser 37-40 → keycode 45-48)
-        45 => (XK_LEFT, XK_LEFT),
-        46 => (XK_UP, XK_UP),
-        47 => (XK_RIGHT, XK_RIGHT),
-        48 => (XK_DOWN, XK_DOWN),
-
-        // Home/End/PageUp/PageDown (browser 33-36 → keycode 41-44)
-        41 => (XK_PAGE_UP, XK_PAGE_UP),
-        42 => (XK_PAGE_DOWN, XK_PAGE_DOWN),
-        43 => (XK_END, XK_END),
-        44 => (XK_HOME, XK_HOME),
-
-        // Delete (browser 46 → keycode 54... but that conflicts with period)
-        // Actually browser Delete is keyCode 46, → X11 keycode 54
-        // This conflicts with '.' key in some layouts. Let's handle both.
-        119 => (XK_DELETE, XK_DELETE), // browser 111 = Delete
-
-        // F keys (browser 112-123 → keycode 120-131)
-        k @ 120..=131 => {
-            let fnum = (k - 120) as u32;
-            (XK_F1 + fnum, XK_F1 + fnum)
-        }
-
-        // Punctuation (browser keyCode → X11 keycode = browser + 8)
-        194 => (0x002d, 0x005f), // - _  (browser 186... actually varies by browser)
-        195 => (0x003d, 0x002b), // = +
-
-        // Semicolon, quotes, etc (browser-dependent keyCodes)
-        // Common US layout:
-        187 => (0x003b, 0x003a), // ; :  (browser 59/186+8)
-        188 => (0x003d, 0x002b), // = +  (browser 61/187+8)
-        196 => (0x002c, 0x003c), // , <  (browser 188+8)
-        197 => (0x002d, 0x005f), // - _  (browser 189+8)
-        198 => (0x002e, 0x003e), // . >  (browser 190+8)
-        199 => (0x002f, 0x003f), // / ?  (browser 191+8)
-        200 => (0x0060, 0x007e), // ` ~  (browser 192+8)
-        227 => (0x005b, 0x007b), // [ {  (browser 219+8)
-        228 => (0x005c, 0x007c), // \ |  (browser 220+8)
-        229 => (0x005d, 0x007d), // ] }  (browser 221+8)
-        230 => (0x0027, 0x0022), // ' "  (browser 222+8)
-
-        _ => (0, 0), // NoSymbol
+        9 => (XK_ESCAPE, XK_ESCAPE),
+        10 => (0x31, 0x21), // 1 !
+        11 => (0x32, 0x40), // 2 @
+        12 => (0x33, 0x23), // 3 #
+        13 => (0x34, 0x24), // 4 $
+        14 => (0x35, 0x25), // 5 %
+        15 => (0x36, 0x5e), // 6 ^
+        16 => (0x37, 0x26), // 7 &
+        17 => (0x38, 0x2a), // 8 *
+        18 => (0x39, 0x28), // 9 (
+        19 => (0x30, 0x29), // 0 )
+        20 => (0x2d, 0x5f), // - _
+        21 => (0x3d, 0x2b), // = +
+        22 => (XK_BACKSPACE, XK_BACKSPACE),
+        23 => (XK_TAB, XK_TAB),
+        24 => (0x71, 0x51), // q Q
+        25 => (0x77, 0x57), // w W
+        26 => (0x65, 0x45), // e E
+        27 => (0x72, 0x52), // r R
+        28 => (0x74, 0x54), // t T
+        29 => (0x79, 0x59), // y Y
+        30 => (0x75, 0x55), // u U
+        31 => (0x69, 0x49), // i I
+        32 => (0x6f, 0x4f), // o O
+        33 => (0x70, 0x50), // p P
+        34 => (0x5b, 0x7b), // [ {
+        35 => (0x5d, 0x7d), // ] }
+        36 => (XK_RETURN, XK_RETURN),
+        37 => (XK_CONTROL_L, XK_CONTROL_L),
+        38 => (0x61, 0x41), // a A
+        39 => (0x73, 0x53), // s S
+        40 => (0x64, 0x44), // d D
+        41 => (0x66, 0x46), // f F
+        42 => (0x67, 0x47), // g G
+        43 => (0x68, 0x48), // h H
+        44 => (0x6a, 0x4a), // j J
+        45 => (0x6b, 0x4b), // k K
+        46 => (0x6c, 0x4c), // l L
+        47 => (0x3b, 0x3a), // ; :
+        48 => (0x27, 0x22), // ' "
+        49 => (0x60, 0x7e), // ` ~
+        50 => (XK_SHIFT_L, XK_SHIFT_L),
+        51 => (0x5c, 0x7c), // \ |
+        52 => (0x7a, 0x5a), // z Z
+        53 => (0x78, 0x58), // x X
+        54 => (0x63, 0x43), // c C
+        55 => (0x76, 0x56), // v V
+        56 => (0x62, 0x42), // b B
+        57 => (0x6e, 0x4e), // n N
+        58 => (0x6d, 0x4d), // m M
+        59 => (0x2c, 0x3c), // , <
+        60 => (0x2e, 0x3e), // . >
+        61 => (0x2f, 0x3f), // / ?
+        62 => (XK_SHIFT_R, XK_SHIFT_R),
+        64 => (XK_ALT_L, XK_ALT_L),
+        65 => (XK_SPACE, XK_SPACE),
+        66 => (XK_CAPS_LOCK, XK_CAPS_LOCK),
+        k @ 67..=76 => (XK_F1 + (k - 67) as u32, XK_F1 + (k - 67) as u32),
+        95 => (XK_F1 + 10, XK_F1 + 10),
+        96 => (XK_F1 + 11, XK_F1 + 11),
+        105 => (XK_CONTROL_R, XK_CONTROL_R),
+        108 => (XK_ALT_R, XK_ALT_R),
+        110 => (XK_HOME, XK_HOME),
+        111 => (XK_UP, XK_UP),
+        112 => (XK_PAGE_UP, XK_PAGE_UP),
+        113 => (XK_LEFT, XK_LEFT),
+        114 => (XK_RIGHT, XK_RIGHT),
+        115 => (XK_END, XK_END),
+        116 => (XK_DOWN, XK_DOWN),
+        117 => (XK_PAGE_DOWN, XK_PAGE_DOWN),
+        118 => (XK_INSERT, XK_INSERT),
+        119 => (XK_DELETE, XK_DELETE),
+        133 => (XK_SUPER_L, XK_SUPER_L),
+        134 => (XK_SUPER_R, XK_SUPER_R),
+        _ => (0, 0),
     }
 }
 

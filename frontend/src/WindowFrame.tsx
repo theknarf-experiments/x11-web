@@ -218,11 +218,14 @@ export function WindowFrame({
 	const handleKeyDown = useCallback(
 		(e: React.KeyboardEvent<HTMLCanvasElement>) => {
 			e.preventDefault();
-			sendInput({
-				kind: "KeyPress",
-				keycode: e.keyCode + 8,
-				state: keyboardMask(e),
-			});
+			const keycode = browserKeyToX11Keycode(e);
+			if (keycode > 0) {
+				sendInput({
+					kind: "KeyPress",
+					keycode,
+					state: keyboardMask(e),
+				});
+			}
 		},
 		[sendInput],
 	);
@@ -230,11 +233,14 @@ export function WindowFrame({
 	const handleKeyUp = useCallback(
 		(e: React.KeyboardEvent<HTMLCanvasElement>) => {
 			e.preventDefault();
-			sendInput({
-				kind: "KeyRelease",
-				keycode: e.keyCode + 8,
-				state: keyboardMask(e),
-			});
+			const keycode = browserKeyToX11Keycode(e);
+			if (keycode > 0) {
+				sendInput({
+					kind: "KeyRelease",
+					keycode,
+					state: keyboardMask(e),
+				});
+			}
 		},
 		[sendInput],
 	);
@@ -301,6 +307,112 @@ export function WindowFrame({
 			/>
 		</div>
 	);
+}
+
+/** Map browser KeyboardEvent to X11 keycode using e.code (physical key).
+ *  Falls back to e.keyCode + 8 for Playwright compatibility. */
+function browserKeyToX11Keycode(e: React.KeyboardEvent): number {
+	// e.code gives the physical key (reliable in real browsers)
+	// Map to X11 keycodes (which = evdev keycode = Linux input code + 8)
+	const codeMap: Record<string, number> = {
+		Escape: 9,
+		Digit1: 10,
+		Digit2: 11,
+		Digit3: 12,
+		Digit4: 13,
+		Digit5: 14,
+		Digit6: 15,
+		Digit7: 16,
+		Digit8: 17,
+		Digit9: 18,
+		Digit0: 19,
+		Minus: 20,
+		Equal: 21,
+		Backspace: 22,
+		Tab: 23,
+		KeyQ: 24,
+		KeyW: 25,
+		KeyE: 26,
+		KeyR: 27,
+		KeyT: 28,
+		KeyY: 29,
+		KeyU: 30,
+		KeyI: 31,
+		KeyO: 32,
+		KeyP: 33,
+		BracketLeft: 34,
+		BracketRight: 35,
+		Enter: 36,
+		ControlLeft: 37,
+		KeyA: 38,
+		KeyS: 39,
+		KeyD: 40,
+		KeyF: 41,
+		KeyG: 42,
+		KeyH: 43,
+		KeyJ: 44,
+		KeyK: 45,
+		KeyL: 46,
+		Semicolon: 47,
+		Quote: 48,
+		Backquote: 49,
+		ShiftLeft: 50,
+		Backslash: 51,
+		KeyZ: 52,
+		KeyX: 53,
+		KeyC: 54,
+		KeyV: 55,
+		KeyB: 56,
+		KeyN: 57,
+		KeyM: 58,
+		Comma: 59,
+		Period: 60,
+		Slash: 61,
+		ShiftRight: 62,
+		NumpadMultiply: 63,
+		AltLeft: 64,
+		Space: 65,
+		CapsLock: 66,
+		F1: 67,
+		F2: 68,
+		F3: 69,
+		F4: 70,
+		F5: 71,
+		F6: 72,
+		F7: 73,
+		F8: 74,
+		F9: 75,
+		F10: 76,
+		NumLock: 77,
+		ScrollLock: 78,
+		F11: 95,
+		F12: 96,
+		ControlRight: 105,
+		AltRight: 108,
+		Home: 110,
+		ArrowUp: 111,
+		PageUp: 112,
+		ArrowLeft: 113,
+		ArrowRight: 114,
+		End: 115,
+		ArrowDown: 116,
+		PageDown: 117,
+		Insert: 118,
+		Delete: 119,
+		MetaLeft: 133,
+		MetaRight: 134,
+	};
+
+	if (e.code && codeMap[e.code] !== undefined) {
+		return codeMap[e.code];
+	}
+
+	// Fallback for Playwright which may not set e.code
+	if (e.keyCode > 0) {
+		return e.keyCode + 8;
+	}
+
+	return 0;
 }
 
 function x11Button(browserButton: number): number {
