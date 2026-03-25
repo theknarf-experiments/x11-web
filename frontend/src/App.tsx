@@ -18,7 +18,23 @@ interface CanvasWindow {
 	title: string;
 	x: number;
 	y: number;
+	color: string;
 }
+
+const PASTEL_COLORS = [
+	"#fce4ec", // pink
+	"#e8eaf6", // indigo
+	"#e0f2f1", // teal
+	"#fff9c4", // yellow
+	"#f3e5f5", // purple
+	"#e8f5e9", // green
+	"#fff3e0", // orange
+	"#e1f5fe", // light blue
+	"#fbe9e7", // deep orange
+	"#f1f8e9", // light green
+	"#ede7f6", // deep purple
+	"#e0f7fa", // cyan
+];
 
 let spawnCounter = 0;
 
@@ -66,9 +82,11 @@ function App() {
 					renderersRef.current.set(cp.clientId, new ClientRenderer(1, 1));
 				}
 
-				const offset = spawnCounter++ * 30;
+				const idx = spawnCounter++;
+				const offset = idx * 30;
 				const cx = window.innerWidth / 4 + offset;
 				const cy = window.innerHeight / 4 + offset;
+				const color = PASTEL_COLORS[idx % PASTEL_COLORS.length];
 
 				setWindows((prev) => [
 					...prev,
@@ -79,6 +97,7 @@ function App() {
 						title,
 						x: cx,
 						y: cy,
+						color,
 					},
 				]);
 			}
@@ -157,6 +176,7 @@ function App() {
 							title={win.title}
 							x={win.x}
 							y={win.y}
+							color={win.color}
 							renderer={renderer}
 							onClose={() => handleKill(win.clientId, win.pid, win.sidecarId)}
 							onMove={(nx, ny) => handleMove(win.clientId, nx, ny)}

@@ -8,6 +8,7 @@ interface WindowFrameProps {
 	title: string;
 	x: number;
 	y: number;
+	color: string;
 	renderer: ClientRenderer;
 	onClose: () => void;
 	onMove: (x: number, y: number) => void;
@@ -30,6 +31,7 @@ export function WindowFrame({
 	title,
 	x,
 	y,
+	color,
 	renderer,
 	onClose,
 	onMove,
@@ -230,11 +232,12 @@ export function WindowFrame({
 	return (
 		<div
 			className={s.window}
-			style={{ left: x, top: y }}
+			style={{ left: x, top: y, background: color }}
+			onPointerDown={handleTitlePointerDown}
 			data-testid="window-frame"
 			data-client-id={clientId}
 		>
-			<div className={s.titleBar} onPointerDown={handleTitlePointerDown}>
+			<div className={s.header}>
 				<button
 					type="button"
 					className={s.closeButton}
@@ -249,22 +252,21 @@ export function WindowFrame({
 				</button>
 				<span className={s.titleText}>{title}</span>
 			</div>
-			<div className={s.canvasWrapper}>
-				<canvas
-					ref={canvasRef}
-					width={canvasWidth}
-					height={canvasHeight}
-					className={s.canvas}
-					data-testid="x11-canvas"
-					tabIndex={0}
-					onMouseMove={handleMouseMove}
-					onMouseDown={handleMouseDown}
-					onMouseUp={handleMouseUp}
-					onKeyDown={handleKeyDown}
-					onKeyUp={handleKeyUp}
-					onContextMenu={handleContextMenu}
-				/>
-			</div>
+			<canvas
+				ref={canvasRef}
+				width={canvasWidth}
+				height={canvasHeight}
+				className={s.canvas}
+				data-testid="x11-canvas"
+				tabIndex={0}
+				onPointerDown={(e) => e.stopPropagation()}
+				onMouseMove={handleMouseMove}
+				onMouseDown={handleMouseDown}
+				onMouseUp={handleMouseUp}
+				onKeyDown={handleKeyDown}
+				onKeyUp={handleKeyUp}
+				onContextMenu={handleContextMenu}
+			/>
 			<div className={s.resizeHandle} onPointerDown={handleResizePointerDown} />
 		</div>
 	);

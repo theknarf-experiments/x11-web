@@ -1,29 +1,30 @@
 .window {
 	position: absolute;
-	border: 1px solid rgba(255, 255, 255, 0.1);
-	border-radius: 10px;
-	overflow: hidden;
+	border: 1px solid rgba(255, 255, 255, 0.08);
+	border-radius: 12px;
 	box-shadow:
-		0 8px 32px rgba(0, 0, 0, 0.5),
-		0 2px 8px rgba(0, 0, 0, 0.3);
+		0 8px 32px rgba(0, 0, 0, 0.4),
+		0 2px 8px rgba(0, 0, 0, 0.2);
 	user-select: none;
-	background: #1e1e1e;
+	cursor: grab;
+	padding: 10px;
+	display: flex;
+	flex-direction: column;
+	gap: 8px;
 }
 
-.titleBar {
+.window:active {
+	cursor: grabbing;
+}
+
+.header {
 	display: flex;
 	align-items: center;
 	gap: 8px;
-	height: 36px;
-	padding: 0 12px;
-	background: #2a2a2a;
-	cursor: grab;
-	font-size: 12px;
-	color: #999;
-}
-
-.titleBar:active {
-	cursor: grabbing;
+	height: 20px;
+	padding: 0 2px;
+	font-size: 11px;
+	color: rgba(0, 0, 0, 0.5);
 }
 
 .titleText {
@@ -39,7 +40,7 @@
 	height: 14px;
 	border: none;
 	border-radius: 50%;
-	background: #ff5f57;
+	background: rgba(0, 0, 0, 0.15);
 	color: transparent;
 	font-size: 10px;
 	line-height: 14px;
@@ -47,15 +48,14 @@
 	cursor: pointer;
 	padding: 0;
 	flex-shrink: 0;
-	transition: color 0.1s;
+	transition:
+		color 0.1s,
+		background 0.1s;
 }
 
 .closeButton:hover {
+	background: #ff5f57;
 	color: rgba(0, 0, 0, 0.6);
-}
-
-.canvasWrapper {
-	padding: 8px;
 }
 
 .canvas {
@@ -63,34 +63,34 @@
 	background: #000;
 	image-rendering: pixelated;
 	outline: none;
-	border-radius: 4px;
+	border-radius: 6px;
 }
 
 .canvas:focus {
-	outline: 1px solid #4ade80;
-	outline-offset: -1px;
+	outline: 2px solid rgba(255, 255, 255, 0.3);
+	outline-offset: -2px;
 }
 
 .resizeHandle {
 	position: absolute;
 	bottom: 0;
 	right: 0;
-	width: 16px;
-	height: 16px;
+	width: 18px;
+	height: 18px;
 	cursor: nwse-resize;
 }
 
 .resizeHandle::after {
 	content: "";
 	position: absolute;
-	bottom: 4px;
-	right: 4px;
-	width: 8px;
-	height: 8px;
-	border-right: 2px solid rgba(255, 255, 255, 0.2);
-	border-bottom: 2px solid rgba(255, 255, 255, 0.2);
+	bottom: 5px;
+	right: 5px;
+	width: 7px;
+	height: 7px;
+	border-right: 2px solid rgba(0, 0, 0, 0.15);
+	border-bottom: 2px solid rgba(0, 0, 0, 0.15);
 }
 
 .resizeHandle:hover::after {
-	border-color: rgba(255, 255, 255, 0.4);
+	border-color: rgba(0, 0, 0, 0.3);
 }
