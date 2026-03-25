@@ -75,14 +75,6 @@ function App() {
 			command,
 			args: args ? args.split(" ") : [],
 		});
-
-		setTimeout(() => {
-			send({
-				type: "ListProcesses",
-				request_id: nextRequestId(),
-				sidecar_id: sidecarId,
-			});
-		}, 500);
 	}
 
 	function handleKill(sidecarId: string, pid: number) {
@@ -93,19 +85,6 @@ function App() {
 			sidecar_id: sidecarId,
 			pid,
 		});
-	}
-
-	function handleListProcesses(sidecarId: string) {
-		send({
-			type: "ListProcesses",
-			request_id: nextRequestId(),
-			sidecar_id: sidecarId,
-		});
-	}
-
-	function handleViewDisplay(sidecarId: string) {
-		send({ type: "SubscribeDisplay", sidecar_id: sidecarId });
-		setViewingSidecar(sidecarId);
 	}
 
 	const handleInput = useCallback(
@@ -221,12 +200,6 @@ function App() {
 								<div className={s.sidecarActions}>
 									<Button onClick={() => handleSpawn(sidecar.id)}>
 										Spawn {command}
-									</Button>
-									<Button onClick={() => handleViewDisplay(sidecar.id)}>
-										View Display
-									</Button>
-									<Button onClick={() => handleListProcesses(sidecar.id)}>
-										Refresh
 									</Button>
 								</div>
 								<div className={s.processList}>
