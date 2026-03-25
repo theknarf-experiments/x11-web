@@ -12,12 +12,12 @@ body {
 }
 
 /* Dock icon ViewTransition animations */
-.dock-icon-in {
-	animation: dock-icon-enter 0.2s ease-out;
+::view-transition-new(.dock-icon-in) {
+	animation: dock-icon-enter 0.2s ease-out forwards;
 }
 
-.dock-icon-out {
-	animation: dock-icon-leave 0.25s ease-out;
+::view-transition-old(.dock-icon-out) {
+	animation: dock-icon-leave 0.25s ease-out forwards;
 }
 
 @keyframes dock-icon-enter {

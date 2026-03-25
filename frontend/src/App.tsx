@@ -1,4 +1,10 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import {
+	startTransition,
+	useCallback,
+	useEffect,
+	useRef,
+	useState,
+} from "react";
 import { ClientRenderer } from "./ClientRenderer";
 import { Dock } from "./Dock";
 import { InfiniteCanvas } from "./InfiniteCanvas";
@@ -123,7 +129,9 @@ function App() {
 			sidecar_id: sidecarId,
 			pid,
 		});
-		setWindows((prev) => prev.filter((w) => w.clientId !== clientId));
+		startTransition(() => {
+			setWindows((prev) => prev.filter((w) => w.clientId !== clientId));
+		});
 	}
 
 	const handleMove = useCallback((clientId: string, x: number, y: number) => {
