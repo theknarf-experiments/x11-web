@@ -11,33 +11,33 @@ body {
 	color: #eee;
 }
 
-/* Dock icon exit animation via View Transitions API */
-::view-transition-old(*) {
-	animation: dock-icon-out 0.25s ease-out;
+/* Dock icon ViewTransition animations */
+.dock-icon-in {
+	animation: dock-icon-enter 0.2s ease-out;
 }
 
-::view-transition-new(*) {
-	animation: dock-icon-in 0.2s ease-out;
+.dock-icon-out {
+	animation: dock-icon-leave 0.25s ease-out;
 }
 
-@keyframes dock-icon-out {
-	from {
-		opacity: 1;
-		transform: scale(1);
-	}
-	to {
-		opacity: 0;
-		transform: scale(0.5);
-	}
-}
-
-@keyframes dock-icon-in {
+@keyframes dock-icon-enter {
 	from {
 		opacity: 0;
-		transform: scale(0.5);
+		transform: scale(0.3) translateY(10px);
 	}
 	to {
 		opacity: 1;
-		transform: scale(1);
+		transform: scale(1) translateY(0);
+	}
+}
+
+@keyframes dock-icon-leave {
+	from {
+		opacity: 1;
+		transform: scale(1) translateY(0);
+	}
+	to {
+		opacity: 0;
+		transform: scale(0.3) translateY(10px);
 	}
 }

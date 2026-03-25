@@ -1,7 +1,4 @@
-import React, { useEffect, useRef, useState } from "react";
-
-const ViewTransition = React.ViewTransition ?? React.Fragment;
-
+import { useEffect, useRef, useState, ViewTransition } from "react";
 import { createPortal } from "react-dom";
 import s from "./Dock.module.css";
 import type { SidecarInfo } from "./types";
@@ -88,7 +85,11 @@ export function Dock({
 			<div className={s.dock} data-testid="dock">
 				{/* App icons */}
 				{windows.map((win) => (
-					<ViewTransition key={win.clientId} name={`dock-icon-${win.clientId}`}>
+					<ViewTransition
+						key={win.clientId}
+						enter="dock-icon-in"
+						exit="dock-icon-out"
+					>
 						<button
 							type="button"
 							className={s.iconButton}
