@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import s from "./Dock.module.css";
 import type { SidecarInfo } from "./types";
 
@@ -80,126 +81,130 @@ export function Dock({
 	}
 
 	return (
-		<div className={s.dock} data-testid="dock">
-			{/* App icons */}
-			{windows.map((win) => (
-				<button
-					key={win.clientId}
-					type="button"
-					className={s.iconButton}
-					style={{ background: win.color }}
-					onClick={() => onFocusWindow(win.clientId)}
-					onContextMenu={(e) => handleContextMenu(e, win.clientId)}
-				>
-					<span className={s.tooltip}>{win.title}</span>
-					<span className={s.runningDot} />
-					{win.title.charAt(0).toUpperCase()}
-				</button>
-			))}
+		<>
+			<div className={s.dock} data-testid="dock">
+				{/* App icons */}
+				{windows.map((win) => (
+					<button
+						key={win.clientId}
+						type="button"
+						className={s.iconButton}
+						style={{ background: win.color }}
+						onClick={() => onFocusWindow(win.clientId)}
+						onContextMenu={(e) => handleContextMenu(e, win.clientId)}
+					>
+						<span className={s.tooltip}>{win.title}</span>
+						<span className={s.runningDot} />
+						{win.title.charAt(0).toUpperCase()}
+					</button>
+				))}
 
-			{/* Separator between apps and add button */}
-			{windows.length > 0 && <div className={s.separator} />}
+				{/* Separator between apps and add button */}
+				{windows.length > 0 && <div className={s.separator} />}
 
-			{/* Add button */}
-			<div ref={spawnRef} style={{ position: "relative" }}>
-				<button
-					type="button"
-					className={`${s.iconButton} ${s.addButton}`}
-					onClick={() => {
-						setShowSpawn(!showSpawn);
-						setContextMenu(null);
-					}}
-					data-testid="spawn-button"
-				>
-					<span className={s.statusDot}>
-						<span
-							className={`${s.statusDotInner} ${connected && sidecars.length > 0 ? s.online : s.offline}`}
-							data-testid="connection-status"
-						/>
-					</span>
-					+
-				</button>
-
-				{showSpawn && (
-					<div className={s.popover}>
-						{sidecars.length > 1 && (
-							<div className={s.popoverRow}>
-								<select
-									className={s.popoverSelect}
-									value={selectedSidecar}
-									onChange={(e) => setSelectedSidecar(e.target.value)}
-								>
-									{sidecars.map((sc) => (
-										<option key={sc.id} value={sc.id}>
-											{sc.name}
-										</option>
-									))}
-								</select>
-							</div>
-						)}
-						{sidecars.length === 1 && (
-							<div className={s.popoverLabel}>{sidecars[0].name}</div>
-						)}
-						<div className={s.popoverRow}>
-							<input
-								type="text"
-								value={command}
-								onChange={(e) => setCommand(e.target.value)}
-								placeholder="command"
-								className={s.popoverInput}
-								onKeyDown={(e) => {
-									if (e.key === "Enter") handleSpawn();
-								}}
-							/>
-						</div>
-						<div className={s.popoverRow}>
-							<input
-								type="text"
-								value={args}
-								onChange={(e) => setArgs(e.target.value)}
-								placeholder="args"
-								className={s.popoverInput}
-								onKeyDown={(e) => {
-									if (e.key === "Enter") handleSpawn();
-								}}
-							/>
-						</div>
-						<div className={s.popoverRow}>
-							<button
-								type="button"
-								className={s.popoverButton}
-								disabled={!selectedSidecar}
-								onClick={handleSpawn}
-							>
-								Spawn
-							</button>
-						</div>
-					</div>
-				)}
-			</div>
-
-			{/* Right-click context menu */}
-			{contextMenu && (
-				<div
-					ref={contextRef}
-					className={s.contextMenu}
-					style={{
-						left: contextMenu.x,
-						bottom: `calc(100vh - ${contextMenu.y}px)`,
-					}}
-				>
+				{/* Add button */}
+				<div ref={spawnRef} style={{ position: "relative" }}>
 					<button
 						type="button"
-						className={s.contextMenuItem}
+						className={`${s.iconButton} ${s.addButton}`}
 						onClick={() => {
-							onClose(contextMenu.clientId);
+							setShowSpawn(!showSpawn);
 							setContextMenu(null);
 						}}
+						data-testid="spawn-button"
 					>
-						Close
+						<span className={s.statusDot}>
+							<span
+								className={`${s.statusDotInner} ${connected && sidecars.length > 0 ? s.online : s.offline}`}
+								data-testid="connection-status"
+							/>
+						</span>
+						+
 					</button>
+
+					{showSpawn && (
+						<div className={s.popover}>
+							{sidecars.length > 1 && (
+								<div className={s.popoverRow}>
+									<select
+										className={s.popoverSelect}
+										value={selectedSidecar}
+										onChange={(e) => setSelectedSidecar(e.target.value)}
+									>
+										{sidecars.map((sc) => (
+											<option key={sc.id} value={sc.id}>
+												{sc.name}
+											</option>
+										))}
+									</select>
+								</div>
+							)}
+							{sidecars.length === 1 && (
+								<div className={s.popoverLabel}>{sidecars[0].name}</div>
+							)}
+							<div className={s.popoverRow}>
+								<input
+									type="text"
+									value={command}
+									onChange={(e) => setCommand(e.target.value)}
+									placeholder="command"
+									className={s.popoverInput}
+									onKeyDown={(e) => {
+										if (e.key === "Enter") handleSpawn();
+									}}
+								/>
+							</div>
+							<div className={s.popoverRow}>
+								<input
+									type="text"
+									value={args}
+									onChange={(e) => setArgs(e.target.value)}
+									placeholder="args"
+									className={s.popoverInput}
+									onKeyDown={(e) => {
+										if (e.key === "Enter") handleSpawn();
+									}}
+								/>
+							</div>
+							<div className={s.popoverRow}>
+								<button
+									type="button"
+									className={s.popoverButton}
+									disabled={!selectedSidecar}
+									onClick={handleSpawn}
+								>
+									Spawn
+								</button>
+							</div>
+						</div>
+					)}
 				</div>
-			)}
-		</div>
+			</div>
+			{/* Right-click context menu — portaled to body to escape dock's transform */}
+			{contextMenu &&
+				createPortal(
+					<div
+						ref={contextRef}
+						className={s.contextMenu}
+						style={{
+							left: contextMenu.x,
+							top: contextMenu.y,
+							transform: "translateY(-100%)",
+						}}
+					>
+						<button
+							type="button"
+							className={s.contextMenuItem}
+							onClick={() => {
+								onClose(contextMenu.clientId);
+								setContextMenu(null);
+							}}
+						>
+							Close
+						</button>
+					</div>,
+					document.body,
+				)}
+		</>
 	);
 }
