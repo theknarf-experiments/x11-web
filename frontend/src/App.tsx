@@ -34,6 +34,7 @@ function App() {
 
 	const [windows, setWindows] = useState<CanvasWindow[]>([]);
 	const renderersRef = useRef<Map<string, ClientRenderer>>(new Map());
+	const closedClientsRef = useRef<Set<string>>(new Set());
 
 	// Register display callback
 	useEffect(() => {
@@ -53,7 +54,10 @@ function App() {
 	useEffect(() => {
 		const existing = new Set(windows.map((w) => w.clientId));
 		for (const cp of connectedProcesses) {
-			if (!existing.has(cp.clientId)) {
+			if (
+				!existing.has(cp.clientId) &&
+				!closedClientsRef.current.has(cp.clientId)
+			) {
 				const procList = processes[cp.sidecarId] || [];
 				const proc = procList.find((p) => p.pid === cp.pid);
 				const title = proc ? `${proc.command} (${cp.pid})` : `PID ${cp.pid}`;
@@ -93,6 +97,7 @@ function App() {
 	}
 
 	function handleKill(clientId: string, pid: number, sidecarId: string) {
+		closedClientsRef.current.add(clientId);
 		send({
 			type: "KillProcess",
 			request_id: nextRequestId(),
