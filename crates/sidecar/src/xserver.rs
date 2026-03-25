@@ -31,6 +31,8 @@ struct ClientState {
     root_window: u32,
     root_width: u16,
     root_height: u16,
+    pointer_x: i16,
+    pointer_y: i16,
 }
 
 #[derive(Clone)]
@@ -398,6 +400,8 @@ async fn handle_client(
         root_window: ROOT_WINDOW,
         root_width: SCREEN_WIDTH,
         root_height: SCREEN_HEIGHT,
+        pointer_x: 0,
+        pointer_y: 0,
     };
 
     // Add root window to state
@@ -468,7 +472,7 @@ async fn handle_client(
             }
             result = input_rx.recv() => {
                 if let Ok(input) = result {
-                    let event_bytes = build_x11_input_event(&state, &input);
+                    let event_bytes = build_x11_input_event(&mut state, &input);
                     if !event_bytes.is_empty() {
                         stream.write_all(&event_bytes).await?;
                     }
@@ -479,7 +483,7 @@ async fn handle_client(
 }
 
 /// Convert a frontend InputEvent into X11 wire-format event bytes (32 bytes).
-fn build_x11_input_event(state: &ClientState, input: &InputEvent) -> Vec<u8> {
+fn build_x11_input_event(state: &mut ClientState, input: &InputEvent) -> Vec<u8> {
     // Find the topmost mapped window to deliver events to
     let target_window = state
         .windows
@@ -488,6 +492,17 @@ fn build_x11_input_event(state: &ClientState, input: &InputEvent) -> Vec<u8> {
         .max_by_key(|w| w.id) // Pick the last created mapped window
         .map(|w| w.id)
         .unwrap_or(state.root_window);
+
+    // Update tracked pointer position for QueryPointer
+    match input {
+        InputEvent::MotionNotify { x, y, .. }
+        | InputEvent::ButtonPress { x, y, .. }
+        | InputEvent::ButtonRelease { x, y, .. } => {
+            state.pointer_x = *x;
+            state.pointer_y = *y;
+        }
+        _ => {}
+    }
 
     let seq = state.sequence;
     let mut event = [0u8; 32];
@@ -1214,7 +1229,12 @@ fn handle_query_pointer(state: &ClientState, _data: &[u8], seq: u16) -> Vec<u8> 
     reply[1] = 1; // same_screen
     reply[2..4].copy_from_slice(&seq.to_le_bytes());
     reply[8..12].copy_from_slice(&state.root_window.to_le_bytes()); // root
-                                                                    // child = 0, root_x = 0, root_y = 0, win_x = 0, win_y = 0, mask = 0
+                                                                    // child = 0
+    reply[16..18].copy_from_slice(&state.pointer_x.to_le_bytes()); // root_x
+    reply[18..20].copy_from_slice(&state.pointer_y.to_le_bytes()); // root_y
+    reply[20..22].copy_from_slice(&state.pointer_x.to_le_bytes()); // win_x
+    reply[22..24].copy_from_slice(&state.pointer_y.to_le_bytes()); // win_y
+                                                                   // mask = 0
     reply.to_vec()
 }
 

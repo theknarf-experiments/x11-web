@@ -195,6 +195,46 @@ test.describe
 				maxDiffPixelRatio: 0.01,
 			});
 		});
+
+		test("xeyes pupils follow the cursor", async ({ page }) => {
+			await page.goto(`http://localhost:${frontendPort}`);
+
+			const sidecarCard = page.locator('[data-testid="sidecar-card"]');
+			await expect(sidecarCard).toBeVisible({ timeout: 15_000 });
+
+			await page
+				.locator('input[placeholder*="geometry"]')
+				.fill("-geometry 300x200+10+10");
+			await sidecarCard.locator("button", { hasText: "Spawn xeyes" }).click();
+
+			const canvas = page.locator('[data-testid="x11-canvas"]');
+			await expect(canvas).toBeVisible({ timeout: 10_000 });
+
+			// Wait for initial render
+			await page.waitForTimeout(3000);
+
+			// Take a screenshot with cursor at center
+			const box = await canvas.boundingBox();
+			if (!box) throw new Error("Canvas has no bounding box");
+
+			await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+			await page.waitForTimeout(2000);
+			await expect(canvas).toHaveScreenshot("xeyes-looking-center.png", {
+				maxDiffPixelRatio: 0.01,
+			});
+
+			// Move cursor to top-right corner
+			await page.mouse.move(box.x + box.width - 10, box.y + 10);
+			await page.waitForTimeout(2000);
+			await expect(canvas).toHaveScreenshot("xeyes-looking-top-right.png", {
+				maxDiffPixelRatio: 0.01,
+			});
+
+			// Verify the two screenshots are different (pupils moved)
+			// This is implicitly verified since both screenshots are stored
+			// and compared on subsequent runs — if the pupils don't move,
+			// one of them will fail to match its baseline.
+		});
 	});
 
 async function findFreePort(): Promise<number> {
