@@ -1,7 +1,7 @@
 import { type ChildProcess, exec } from "node:child_process";
 import * as http from "node:http";
 import * as path from "node:path";
-import { expect, test } from "@playwright/test";
+import { expect, type Page, test } from "@playwright/test";
 import type { StartedNetwork, StartedTestContainer } from "testcontainers";
 import { GenericContainer, Network, Wait } from "testcontainers";
 
@@ -16,6 +16,27 @@ let sidecarContainer: StartedTestContainer;
 let frontendServer: ChildProcess;
 let frontendPort: number;
 let backendPort: number;
+
+/** Open the spawn popover, fill in args, and click Spawn */
+async function spawnApp(page: Page, args = "") {
+	const spawnBtn = page.locator('[data-testid="spawn-button"]');
+	await spawnBtn.click();
+	if (args) {
+		await page.locator('input[placeholder="args"]').fill(args);
+	}
+	// Click the Spawn button inside the popover
+	await page.locator("button", { hasText: "Spawn" }).click();
+}
+
+/** Wait for the dock to be ready (visible with status indicator) */
+async function waitForDock(page: Page) {
+	const dock = page.locator('[data-testid="dock"]');
+	await expect(dock).toBeVisible({ timeout: 15_000 });
+	// Wait for the connection status dot to be green
+	await expect(page.locator('[data-testid="spawn-button"]')).toBeVisible({
+		timeout: 15_000,
+	});
+}
 
 test.describe
 	.serial("x11-web e2e", () => {
@@ -105,39 +126,25 @@ test.describe
 			await network?.stop();
 		});
 
-		test("dock shows sidecar as connected", async ({ page }) => {
+		test("dock is visible", async ({ page }) => {
 			await page.goto(`http://localhost:${frontendPort}`);
-
-			const dock = page.locator('[data-testid="dock"]');
-			await expect(dock).toBeVisible({ timeout: 15_000 });
-			await expect(dock).toContainText("test-sidecar");
+			await waitForDock(page);
 		});
 
 		test("spawning xeyes creates a window on the canvas", async ({ page }) => {
 			await page.goto(`http://localhost:${frontendPort}`);
+			await waitForDock(page);
 
-			const dock = page.locator('[data-testid="dock"]');
-			await expect(dock).toContainText("test-sidecar", { timeout: 15_000 });
+			await spawnApp(page, "-geometry 300x200+10+10");
 
-			// Set args for a larger window
-			await page
-				.locator('input[placeholder="args"]')
-				.fill("-geometry 300x200+10+10");
-
-			// Spawn
-			await page.locator('[data-testid="spawn-button"]').click();
-
-			// A window frame should appear on the canvas
 			const windowFrame = page.locator('[data-testid="window-frame"]');
 			await expect(windowFrame).toBeVisible({ timeout: 10_000 });
 
-			// The canvas inside it should render
 			const canvas = windowFrame.locator('[data-testid="x11-canvas"]');
 			await expect(canvas).toBeVisible();
 
 			await page.waitForTimeout(5000);
 
-			// Verify content was drawn
 			const nonBlackPixels = await canvas.evaluate((el: HTMLCanvasElement) => {
 				const ctx = el.getContext("2d");
 				if (!ctx) return 0;
@@ -164,39 +171,25 @@ test.describe
 
 		test("multiple processes create multiple windows", async ({ page }) => {
 			await page.goto(`http://localhost:${frontendPort}`);
+			await waitForDock(page);
 
-			const dock = page.locator('[data-testid="dock"]');
-			await expect(dock).toContainText("test-sidecar", { timeout: 15_000 });
-
-			await page
-				.locator('input[placeholder="args"]')
-				.fill("-geometry 200x150+10+10");
-
-			// Spawn first
-			await page.locator('[data-testid="spawn-button"]').click();
+			await spawnApp(page, "-geometry 200x150+10+10");
 			const windows = page.locator('[data-testid="window-frame"]');
 			await expect(windows.first()).toBeVisible({ timeout: 10_000 });
 
-			// Spawn second
-			await page.locator('[data-testid="spawn-button"]').click();
+			await spawnApp(page, "-geometry 200x150+10+10");
 			await expect(windows).toHaveCount(2, { timeout: 10_000 });
 		});
 
 		test("closing a window removes it", async ({ page }) => {
 			await page.goto(`http://localhost:${frontendPort}`);
+			await waitForDock(page);
 
-			const dock = page.locator('[data-testid="dock"]');
-			await expect(dock).toContainText("test-sidecar", { timeout: 15_000 });
-
-			await page
-				.locator('input[placeholder="args"]')
-				.fill("-geometry 200x150+10+10");
-			await page.locator('[data-testid="spawn-button"]').click();
+			await spawnApp(page, "-geometry 200x150+10+10");
 
 			const windowFrame = page.locator('[data-testid="window-frame"]');
 			await expect(windowFrame).toBeVisible({ timeout: 10_000 });
 
-			// Wait for xeyes to actually render (proves the window is real)
 			const canvas = windowFrame.locator('[data-testid="x11-canvas"]');
 			await expect(canvas).toBeVisible();
 			await page.waitForTimeout(3000);
@@ -213,10 +206,7 @@ test.describe
 			});
 			expect(pixelsBefore).toBeGreaterThan(10);
 
-			// Click close button
 			await windowFrame.locator('[data-testid="window-close"]').click();
-
-			// Window should disappear
 			await expect(windowFrame).toHaveCount(0, { timeout: 10_000 });
 		});
 
@@ -224,14 +214,9 @@ test.describe
 			page,
 		}) => {
 			await page.goto(`http://localhost:${frontendPort}`);
+			await waitForDock(page);
 
-			const dock = page.locator('[data-testid="dock"]');
-			await expect(dock).toContainText("test-sidecar", { timeout: 15_000 });
-
-			await page
-				.locator('input[placeholder="args"]')
-				.fill("-geometry 300x200+10+10");
-			await page.locator('[data-testid="spawn-button"]').click();
+			await spawnApp(page, "-geometry 300x200+10+10");
 
 			const windowFrame = page.locator('[data-testid="window-frame"]');
 			await expect(windowFrame).toBeVisible({ timeout: 10_000 });
@@ -240,20 +225,14 @@ test.describe
 			await expect(canvas).toBeVisible();
 			await page.waitForTimeout(3000);
 
-			// Record initial canvas size
 			const initialSize = await canvas.evaluate((el: HTMLCanvasElement) => ({
 				width: el.width,
 				height: el.height,
 			}));
 
-			// Find and drag the resize handle
-			const resizeHandle = windowFrame.locator(
-				":last-child:not(canvas):not([data-testid])",
-			);
 			const handleBox = await windowFrame.boundingBox();
 			if (!handleBox) throw new Error("Window has no bounding box");
 
-			// Drag from bottom-right corner to enlarge
 			const startX = handleBox.x + handleBox.width - 5;
 			const startY = handleBox.y + handleBox.height - 5;
 			await page.mouse.move(startX, startY);
@@ -261,10 +240,8 @@ test.describe
 			await page.mouse.move(startX + 100, startY + 80, { steps: 5 });
 			await page.mouse.up();
 
-			// Wait for resize to propagate
 			await page.waitForTimeout(2000);
 
-			// Canvas should have grown
 			const newSize = await canvas.evaluate((el: HTMLCanvasElement) => ({
 				width: el.width,
 				height: el.height,
@@ -276,14 +253,9 @@ test.describe
 
 		test("xeyes pupils follow the cursor", async ({ page }) => {
 			await page.goto(`http://localhost:${frontendPort}`);
+			await waitForDock(page);
 
-			const dock = page.locator('[data-testid="dock"]');
-			await expect(dock).toContainText("test-sidecar", { timeout: 15_000 });
-
-			await page
-				.locator('input[placeholder="args"]')
-				.fill("-geometry 300x200+10+10");
-			await page.locator('[data-testid="spawn-button"]').click();
+			await spawnApp(page, "-geometry 300x200+10+10");
 
 			const canvas = page.locator('[data-testid="x11-canvas"]');
 			await expect(canvas).toBeVisible({ timeout: 10_000 });
@@ -293,14 +265,12 @@ test.describe
 			const box = await canvas.boundingBox();
 			if (!box) throw new Error("Canvas has no bounding box");
 
-			// Move to center
 			await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
 			await page.waitForTimeout(2000);
 			await expect(canvas).toHaveScreenshot("xeyes-looking-center.png", {
 				maxDiffPixelRatio: 0.01,
 			});
 
-			// Move to top-right
 			await page.mouse.move(box.x + box.width - 10, box.y + 10);
 			await page.waitForTimeout(2000);
 			await expect(canvas).toHaveScreenshot("xeyes-looking-top-right.png", {

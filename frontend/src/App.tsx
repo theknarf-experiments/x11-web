@@ -190,7 +190,19 @@ function App() {
 					);
 				})}
 			</InfiniteCanvas>
-			<Dock connected={connected} sidecars={sidecars} onSpawn={handleSpawn} />
+			<Dock
+				connected={connected}
+				sidecars={sidecars}
+				windows={windows.map((w) => ({
+					clientId: w.clientId,
+					title: w.title,
+					color: w.color,
+				}))}
+				onSpawn={handleSpawn}
+				onFocusWindow={(_clientId) => {
+					// TODO: scroll canvas to center on this window
+				}}
+			/>
 		</>
 	);
 }
