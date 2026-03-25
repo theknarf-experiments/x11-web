@@ -195,10 +195,15 @@ function App() {
 				sidecars={sidecars}
 				windows={windows.map((w) => ({
 					clientId: w.clientId,
+					sidecarId: w.sidecarId,
 					title: w.title,
 					color: w.color,
 				}))}
 				onSpawn={handleSpawn}
+				onClose={(clientId) => {
+					const win = windows.find((w) => w.clientId === clientId);
+					if (win) handleKill(win.clientId, win.pid, win.sidecarId);
+				}}
 				onFocusWindow={(_clientId) => {
 					// TODO: scroll canvas to center on this window
 				}}
