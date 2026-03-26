@@ -375,6 +375,25 @@ test.describe
 			expect(await countNonBlackPixels(canvas)).toBeGreaterThan(50);
 		});
 
+		test("xmessage renders on the canvas", async ({ page }) => {
+			await page.goto(`http://localhost:${frontendPort}`);
+			await waitForDock(page);
+
+			const win = await spawnApp(
+				page,
+				'-center "Hello World"',
+				"xmessage",
+			);
+			const canvas = win.locator('[data-testid="x11-canvas"]');
+			await expect(canvas).toBeVisible();
+			await page.waitForTimeout(3000);
+
+			expect(await countNonBlackPixels(canvas)).toBeGreaterThan(100);
+			await expect(canvas).toHaveScreenshot("xmessage-canvas.png", {
+				maxDiffPixelRatio: 0.1,
+			});
+		});
+
 		test("GTK app renders on the canvas", async ({ page }) => {
 			await page.goto(`http://localhost:${frontendPort}`);
 			await waitForDock(page);
