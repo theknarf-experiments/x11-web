@@ -286,6 +286,35 @@ test.describe
 			expect(newSize.height).toBeGreaterThan(initialSize.height);
 		});
 
+		test("clicking a window brings it to front", async ({ page }) => {
+			await page.goto(`http://localhost:${frontendPort}`);
+			await waitForDock(page);
+
+			// Spawn two windows
+			const win1 = await spawnApp(page, "-geometry 200x150+50+50");
+			const win2 = await spawnApp(page, "-geometry 200x150+100+100");
+			await expect(win1).toBeVisible();
+			await expect(win2).toBeVisible();
+
+			// win2 was spawned second, so it should have higher z-index initially
+			const z2Before = await win2.evaluate((el) =>
+				Number.parseInt(el.style.zIndex || "0"),
+			);
+			const z1Before = await win1.evaluate((el) =>
+				Number.parseInt(el.style.zIndex || "0"),
+			);
+			expect(z2Before).toBeGreaterThan(z1Before);
+
+			// Directly trigger pointerdown on win1 to bring it to front
+			await win1.dispatchEvent("pointerdown");
+			await page.waitForTimeout(300);
+
+			const z1After = await win1.evaluate((el) =>
+				Number.parseInt(el.style.zIndex || "0"),
+			);
+			expect(z1After).toBeGreaterThan(z2Before);
+		});
+
 		test("xeyes pupils follow the cursor", async ({ page }) => {
 			await page.goto(`http://localhost:${frontendPort}`);
 			await waitForDock(page);
@@ -411,6 +440,25 @@ test.describe
 			expect(await countNonBlackPixels(canvas)).toBeGreaterThan(100);
 
 			await expect(canvas).toHaveScreenshot("zenity-canvas.png", {
+				maxDiffPixelRatio: 0.15,
+			});
+		});
+
+		test("zenity question dialog renders", async ({ page }) => {
+			await page.goto(`http://localhost:${frontendPort}`);
+			await waitForDock(page);
+
+			const win = await spawnApp(
+				page,
+				'--question --text "Are you sure?" --title "Confirm"',
+				"zenity",
+			);
+			const canvas = win.locator('[data-testid="x11-canvas"]');
+			await expect(canvas).toBeVisible();
+			await page.waitForTimeout(5000);
+
+			expect(await countNonBlackPixels(canvas)).toBeGreaterThan(100);
+			await expect(canvas).toHaveScreenshot("zenity-question.png", {
 				maxDiffPixelRatio: 0.15,
 			});
 		});
