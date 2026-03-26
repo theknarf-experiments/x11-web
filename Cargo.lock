@@ -1736,6 +1736,7 @@ dependencies = [
  "flate2",
  "futures",
  "glob",
+ "libc",
  "rmp-serde",
  "serde",
  "serde_json",

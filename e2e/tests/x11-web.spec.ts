@@ -463,6 +463,39 @@ test.describe
 			});
 		});
 
+		test("firefox starts without crashing the sidecar", async ({ page }) => {
+			await page.goto(`http://localhost:${frontendPort}`);
+			await waitForDock(page);
+
+			const windowFrames = page.locator('[data-testid="window-frame"]');
+			const countBefore = await windowFrames.count();
+
+			await page.locator('[data-testid="spawn-button"]').click();
+			await page.locator('input[placeholder="command"]').fill("firefox-esr");
+			await page.locator('input[placeholder="args"]').fill("--no-remote about:blank");
+			await expect(
+				page.locator("button", { hasText: "Spawn" }),
+			).toBeEnabled({ timeout: 30_000 });
+			await page.locator("button", { hasText: "Spawn" }).click();
+
+			// Firefox creates multiple X11 connections — wait for windows
+			await expect(windowFrames).toHaveCount(countBefore + 4, {
+				timeout: 30_000,
+			});
+
+			// Wait for Firefox to initialize
+			await page.waitForTimeout(10000);
+
+			// Verify the main "Firefox" window exists
+			const firefoxWindow = page.locator(
+				'[data-testid="window-frame"]',
+				{ hasText: "Firefox" },
+			);
+			await expect(firefoxWindow).toBeVisible({ timeout: 10_000 });
+
+			// The afterEach health check verifies sidecar survived
+		});
+
 		test("vim workflow: insert, save, quit, cat", async ({ page }) => {
 			await page.goto(`http://localhost:${frontendPort}`);
 			await waitForDock(page);

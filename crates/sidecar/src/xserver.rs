@@ -5,7 +5,7 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::UnixListener;
 use tokio::sync::mpsc;
 use tokio::time::Duration;
-use tracing::{debug, error, info};
+use tracing::{debug, error, info, warn};
 use x11rb_protocol::protocol::xproto::*;
 use x11rb_protocol::x11_utils::{Serialize, TryParse};
 
@@ -48,6 +48,7 @@ pub(crate) struct ClientState {
     pub(crate) font_manager: FontManager,
     pub(crate) render: crate::render::RenderState,
     pub(crate) selections: HashMap<u32, u32>,
+    pub(crate) shm_segments: HashMap<u32, ShmSegment>,
 }
 
 impl ClientState {
@@ -136,6 +137,19 @@ impl Default for GcState {
         }
     }
 }
+
+/// A shared memory segment attached via MIT-SHM.
+pub(crate) struct ShmSegment {
+    pub(crate) shm_id: i32,
+    pub(crate) addr: *mut u8,
+    pub(crate) size: usize,
+    pub(crate) read_only: bool,
+}
+
+// Safety: ShmSegment holds a raw pointer from shmat() which is valid for the
+// lifetime of the attachment.  We only access it on the single client-handler
+// task, so Send is fine.
+unsafe impl Send for ShmSegment {}
 
 pub(crate) struct AtomManager {
     atoms: HashMap<String, u32>,
@@ -487,6 +501,7 @@ async fn handle_client(
         font_manager: FontManager::new(),
         render: crate::render::RenderState::new(),
         selections: HashMap::new(),
+        shm_segments: HashMap::new(),
     };
 
     // Add root window to state
@@ -878,11 +893,16 @@ fn handle_request(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
             reply.to_vec()
         }
         128 => handle_shape_request(state, data, seq),
+        130 => handle_shm_request(state, data, seq),
         138 => handle_xfixes_request(state, data, seq),
+        134 => handle_sync_request(state, data, seq),
+        135 => handle_ge_request(data, seq),
         139 => crate::render::handle_render_request(state, data, seq),
         140 => handle_randr_request(state, data, seq),
+        142 => handle_x_composite_request(state, data, seq),
+        143 => handle_damage_request(data, seq),
         _ => {
-            debug!("Unhandled X11 request opcode: {major_opcode}");
+            warn!("Unhandled X11 request opcode: {major_opcode} minor: {_minor}");
             Vec::new()
         }
     }
@@ -2294,19 +2314,34 @@ fn handle_put_image(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
         return Vec::new();
     }
 
-    let _format = data[1]; // 0=Bitmap, 1=XYPixmap, 2=ZPixmap
+    let format = data[1]; // 0=Bitmap, 1=XYPixmap, 2=ZPixmap
     let drawable = u32::from_le_bytes([data[4], data[5], data[6], data[7]]);
     let _gc = u32::from_le_bytes([data[8], data[9], data[10], data[11]]);
     let width = u16::from_le_bytes([data[12], data[13]]);
     let height = u16::from_le_bytes([data[14], data[15]]);
     let dst_x = i16::from_le_bytes([data[16], data[17]]);
     let dst_y = i16::from_le_bytes([data[18], data[19]]);
-    // left_pad at [20], depth at [21]
+    let _left_pad = data[20];
+    let depth = data[21];
 
     let pixel_data = &data[24..];
 
-    if let Some(fb) = state.get_framebuffer_mut(drawable) {
-        fb.put_image(dst_x, dst_y, width, height, pixel_data);
+    debug!("PutImage: fmt={format} depth={depth} drawable={drawable:#x} {width}x{height} at ({dst_x},{dst_y}) data={}", pixel_data.len());
+
+    // Only handle ZPixmap format with 32bpp (our native format)
+    if format == 2 && depth >= 24 {
+        if let Some(fb) = state.get_framebuffer_mut(drawable) {
+            fb.put_image(dst_x, dst_y, width, height, pixel_data);
+        }
+    } else if format == 2 && depth == 1 {
+        // 1-bit depth ZPixmap: used for cursor bitmaps, skip
+    } else {
+        debug!(
+            "PutImage: unsupported format={format} depth={depth} {}x{} data_len={}",
+            width,
+            height,
+            pixel_data.len()
+        );
     }
 
     Vec::new()
@@ -2565,7 +2600,7 @@ fn keycode_to_keysym(keycode: u8) -> (u32, u32) {
 
 fn handle_list_extensions(seq: u16) -> Vec<u8> {
     // Return the list of extensions we support
-    let extensions: &[&str] = &["BIG-REQUESTS", "RENDER", "XFIXES", "SHAPE"];
+    let extensions: &[&str] = &["BIG-REQUESTS", "MIT-SHM", "RENDER", "XFIXES", "SHAPE", "SYNC", "Generic Event Extension", "Composite", "DAMAGE"];
 
     // Build the names data: each is a length-prefixed string (1 byte len + name)
     let mut names_data = Vec::new();
@@ -2611,6 +2646,12 @@ fn handle_query_extension(_state: &mut ClientState, data: &[u8], seq: u16) -> Ve
             reply[10] = 0; // first_event
             reply[11] = 0; // first_error
         }
+        "MIT-SHM" => {
+            reply[8] = 1; // present = true
+            reply[9] = 130; // major_opcode
+            reply[10] = 65; // first_event (ShmCompletion)
+            reply[11] = 128; // first_error
+        }
         "BIG-REQUESTS" => {
             reply[8] = 1; // present = true
             reply[9] = 133; // major_opcode
@@ -2628,6 +2669,30 @@ fn handle_query_extension(_state: &mut ClientState, data: &[u8], seq: u16) -> Ve
             reply[9] = 128; // major_opcode
             reply[10] = 64; // first_event
             reply[11] = 0; // first_error
+        }
+        "SYNC" => {
+            reply[8] = 1; // present = true
+            reply[9] = 134; // major_opcode
+            reply[10] = 100; // first_event (use 100 to avoid conflict)
+            reply[11] = 0; // first_error
+        }
+        "Generic Event Extension" => {
+            reply[8] = 1; // present = true
+            reply[9] = 135; // major_opcode
+            reply[10] = 0; // first_event
+            reply[11] = 0; // first_error
+        }
+        "Composite" => {
+            reply[8] = 1; // present = true
+            reply[9] = 142; // major_opcode
+            reply[10] = 0; // first_event
+            reply[11] = 0; // first_error
+        }
+        "DAMAGE" => {
+            reply[8] = 1; // present = true
+            reply[9] = 143; // major_opcode
+            reply[10] = 91; // first_event
+            reply[11] = 152; // first_error
         }
         // RANDR disabled — GTK renders incorrectly with our minimal RANDR replies.
         // The handler code is kept for future use when replies are fully correct.
@@ -2843,5 +2908,393 @@ fn handle_shape_request(_state: &mut ClientState, data: &[u8], seq: u16) -> Vec<
             reply.to_vec()
         }
         _ => Vec::new(),
+    }
+}
+
+/// Handle MIT-SHM extension requests (major opcode 130).
+fn handle_shm_request(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
+    let minor = data[1];
+
+    match minor {
+        // QueryVersion
+        0 => {
+            debug!("SHM QueryVersion");
+            let mut reply = [0u8; 32];
+            reply[0] = 1; // Reply
+            reply[1] = 1; // shared_pixmaps = true
+            reply[2..4].copy_from_slice(&seq.to_le_bytes());
+            // reply[4..8] = additional data length = 0
+            reply[8..10].copy_from_slice(&1u16.to_le_bytes()); // major version
+            reply[10..12].copy_from_slice(&2u16.to_le_bytes()); // minor version
+            reply[12..14].copy_from_slice(&0u16.to_le_bytes()); // uid
+            reply[14..16].copy_from_slice(&0u16.to_le_bytes()); // gid
+            reply[16] = 2; // pixmap_format = ZPixmap
+            reply.to_vec()
+        }
+
+        // Attach
+        1 => {
+            if data.len() < 16 {
+                return Vec::new();
+            }
+            let shmseg = u32::from_le_bytes([data[4], data[5], data[6], data[7]]);
+            let shmid = u32::from_le_bytes([data[8], data[9], data[10], data[11]]) as i32;
+            let read_only = data[12] != 0;
+
+            debug!("SHM Attach: shmseg={shmseg} shmid={shmid} read_only={read_only}");
+
+            unsafe {
+                // Get segment size via shmctl IPC_STAT
+                let mut ds: libc::shmid_ds = std::mem::zeroed();
+                let stat_ret = libc::shmctl(shmid, libc::IPC_STAT, &mut ds);
+                if stat_ret < 0 {
+                    warn!("SHM Attach: shmctl IPC_STAT failed for shmid={shmid}");
+                    return Vec::new();
+                }
+                let size = ds.shm_segsz;
+
+                let flags = if read_only { libc::SHM_RDONLY } else { 0 };
+                let addr = libc::shmat(shmid, std::ptr::null(), flags);
+                if addr == (-1isize) as *mut libc::c_void {
+                    warn!("SHM Attach: shmat failed for shmid={shmid}");
+                    return Vec::new();
+                }
+
+                state.shm_segments.insert(shmseg, ShmSegment {
+                    shm_id: shmid,
+                    addr: addr as *mut u8,
+                    size,
+                    read_only,
+                });
+            }
+
+            Vec::new() // No reply for Attach
+        }
+
+        // Detach
+        2 => {
+            if data.len() < 8 {
+                return Vec::new();
+            }
+            let shmseg = u32::from_le_bytes([data[4], data[5], data[6], data[7]]);
+            debug!("SHM Detach: shmseg={shmseg}");
+
+            if let Some(seg) = state.shm_segments.remove(&shmseg) {
+                unsafe {
+                    libc::shmdt(seg.addr as *const libc::c_void);
+                }
+            }
+
+            Vec::new() // No reply for Detach
+        }
+
+        // PutImage
+        3 => {
+            if data.len() < 40 {
+                return Vec::new();
+            }
+
+            let drawable = u32::from_le_bytes([data[4], data[5], data[6], data[7]]);
+            let _gc = u32::from_le_bytes([data[8], data[9], data[10], data[11]]);
+            let total_width = u16::from_le_bytes([data[12], data[13]]) as usize;
+            let _total_height = u16::from_le_bytes([data[14], data[15]]);
+            let src_x = u16::from_le_bytes([data[16], data[17]]) as usize;
+            let src_y = u16::from_le_bytes([data[18], data[19]]) as usize;
+            let src_width = u16::from_le_bytes([data[20], data[21]]);
+            let src_height = u16::from_le_bytes([data[22], data[23]]);
+            let dst_x = i16::from_le_bytes([data[24], data[25]]);
+            let dst_y = i16::from_le_bytes([data[26], data[27]]);
+            let _depth = data[28];
+            let _format = data[29];
+            let send_event = data[30] != 0;
+            let shmseg = u32::from_le_bytes([data[32], data[33], data[34], data[35]]);
+            let offset = u32::from_le_bytes([data[36], data[37], data[38], data[39]]) as usize;
+
+            debug!(
+                "SHM PutImage: drawable={drawable} shmseg={shmseg} offset={offset} \
+                 total_width={total_width} src=({src_x},{src_y}) size=({src_width}x{src_height}) \
+                 dst=({dst_x},{dst_y}) send_event={send_event}"
+            );
+
+            let seg = match state.shm_segments.get(&shmseg) {
+                Some(s) => s,
+                None => {
+                    warn!("SHM PutImage: unknown shmseg={shmseg}");
+                    return Vec::new();
+                }
+            };
+
+            // Bytes per pixel (32bpp BGRA)
+            let bpp = 4usize;
+            let src_stride = total_width * bpp;
+            let region_size = src_stride * (src_y + src_height as usize);
+
+            // Bounds check
+            if offset + region_size > seg.size {
+                warn!(
+                    "SHM PutImage: out of bounds (offset={offset} + region_size={region_size} > seg.size={})",
+                    seg.size
+                );
+                return Vec::new();
+            }
+
+            // Build a contiguous pixel buffer for the source region
+            let w = src_width as usize;
+            let h = src_height as usize;
+            let mut pixels = vec![0u8; w * h * bpp];
+
+            unsafe {
+                let base = seg.addr.add(offset);
+                for row in 0..h {
+                    let src_off = (src_y + row) * src_stride + src_x * bpp;
+                    let dst_off = row * w * bpp;
+                    let src_ptr = base.add(src_off);
+                    std::ptr::copy_nonoverlapping(src_ptr, pixels.as_mut_ptr().add(dst_off), w * bpp);
+                }
+            }
+
+            // Blit to the drawable's framebuffer
+            if let Some(fb) = state.get_framebuffer_mut(drawable) {
+                fb.put_image(dst_x, dst_y, src_width, src_height, &pixels);
+            }
+
+            // If send_event, return a ShmCompletion event
+            if send_event {
+                let mut event = [0u8; 32];
+                event[0] = 65; // ShmCompletion event type (first_event + 0)
+                event[2..4].copy_from_slice(&seq.to_le_bytes());
+                event[4..8].copy_from_slice(&drawable.to_le_bytes());
+                event[8..12].copy_from_slice(&shmseg.to_le_bytes());
+                event[16..20].copy_from_slice(&(offset as u32).to_le_bytes());
+                event.to_vec()
+            } else {
+                Vec::new()
+            }
+        }
+
+        // GetImage (stub)
+        4 => {
+            debug!("SHM GetImage: stubbed");
+            build_error(2, seq, 0, 130, 4) // BadValue
+        }
+
+        // CreatePixmap (stub)
+        5 => {
+            debug!("SHM CreatePixmap: stubbed");
+            Vec::new()
+        }
+
+        // AttachFd (minor 6) — used in MIT-SHM 1.2+ with fd passing
+        6 => {
+            if data.len() < 16 {
+                return Vec::new();
+            }
+            let shmseg = u32::from_le_bytes([data[4], data[5], data[6], data[7]]);
+            debug!("SHM AttachFd: shmseg={shmseg} (stubbed — fd passing not supported)");
+            Vec::new()
+        }
+
+        _ => {
+            warn!("Unhandled SHM minor opcode: {minor}");
+            Vec::new()
+        }
+    }
+}
+
+fn handle_sync_request(_state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
+    let minor = data[1];
+    debug!("SYNC minor opcode: {minor}");
+
+    match minor {
+        0 => {
+            // Initialize: reply with version 3.1
+            let mut reply = [0u8; 32];
+            reply[0] = 1; // Reply
+            reply[2..4].copy_from_slice(&seq.to_le_bytes());
+            reply[8] = 3; // major version
+            reply[9] = 1; // minor version
+            reply.to_vec()
+        }
+        1 => {
+            // ListSystemCounters: reply with 0 counters
+            let mut reply = [0u8; 32];
+            reply[0] = 1; // Reply
+            reply[2..4].copy_from_slice(&seq.to_le_bytes());
+            // length = 0 (no extra data)
+            // num_counters = 0
+            reply.to_vec()
+        }
+        2 | 3 | 4 => {
+            // CreateCounter, SetCounter, ChangeCounter: void
+            Vec::new()
+        }
+        5 => {
+            // QueryCounter: reply with value 0
+            let mut reply = [0u8; 32];
+            reply[0] = 1; // Reply
+            reply[2..4].copy_from_slice(&seq.to_le_bytes());
+            // value_hi = 0, value_lo = 0 (already zero)
+            reply.to_vec()
+        }
+        6 => {
+            // DestroyCounter: void
+            Vec::new()
+        }
+        7 => {
+            // Await: return immediately (no blocking)
+            Vec::new()
+        }
+        8 | 9 => {
+            // CreateAlarm, ChangeAlarm: void
+            Vec::new()
+        }
+        10 => {
+            // QueryAlarm: reply with zeroed alarm state
+            let mut reply = [0u8; 32];
+            reply[0] = 1; // Reply
+            reply[2..4].copy_from_slice(&seq.to_le_bytes());
+            reply.to_vec()
+        }
+        11 => {
+            // DestroyAlarm: void
+            Vec::new()
+        }
+        12 => {
+            // SetPriority: void
+            Vec::new()
+        }
+        13 => {
+            // GetPriority: reply with priority 0
+            let mut reply = [0u8; 32];
+            reply[0] = 1; // Reply
+            reply[2..4].copy_from_slice(&seq.to_le_bytes());
+            // priority = 0 (already zero)
+            reply.to_vec()
+        }
+        14 | 15 | 16 | 17 => {
+            // CreateFence, TriggerFence, ResetFence, DestroyFence: void
+            Vec::new()
+        }
+        18 => {
+            // QueryFence: reply with triggered=true
+            let mut reply = [0u8; 32];
+            reply[0] = 1; // Reply
+            reply[2..4].copy_from_slice(&seq.to_le_bytes());
+            reply[8] = 1; // triggered = true
+            reply.to_vec()
+        }
+        19 => {
+            // AwaitFence: return immediately
+            Vec::new()
+        }
+        _ => {
+            debug!("Unhandled SYNC minor opcode: {minor}");
+            Vec::new()
+        }
+    }
+}
+
+fn handle_damage_request(data: &[u8], seq: u16) -> Vec<u8> {
+    let minor = data[1];
+    debug!("DAMAGE minor opcode: {minor}");
+
+    match minor {
+        0 => {
+            // QueryVersion: reply with version 1.1
+            let mut reply = [0u8; 32];
+            reply[0] = 1; // Reply
+            reply[2..4].copy_from_slice(&seq.to_le_bytes());
+            reply[8..12].copy_from_slice(&1u32.to_le_bytes()); // major version
+            reply[12..16].copy_from_slice(&1u32.to_le_bytes()); // minor version
+            reply.to_vec()
+        }
+        1 | 2 | 3 | 4 => {
+            // Create, Destroy, Subtract, Add: void
+            Vec::new()
+        }
+        _ => {
+            debug!("Unhandled DAMAGE minor opcode: {minor}");
+            Vec::new()
+        }
+    }
+}
+
+fn handle_x_composite_request(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
+    let minor = data[1];
+    debug!("Composite minor opcode: {minor}");
+
+    match minor {
+        0 => {
+            // QueryVersion: reply with version 0.4
+            let mut reply = [0u8; 32];
+            reply[0] = 1; // Reply
+            reply[2..4].copy_from_slice(&seq.to_le_bytes());
+            reply[8..12].copy_from_slice(&0u32.to_le_bytes()); // major version
+            reply[12..16].copy_from_slice(&4u32.to_le_bytes()); // minor version
+            reply.to_vec()
+        }
+        1 | 2 | 3 | 4 | 5 => {
+            // RedirectWindow, RedirectSubwindows, UnredirectWindow,
+            // UnredirectSubwindows, CreateRegionFromBorderClip: void
+            Vec::new()
+        }
+        6 => {
+            // NameWindowPixmap: create a pixmap aliased to a window's framebuffer
+            // data[4..8] = window, data[8..12] = pixmap
+            if data.len() >= 12 {
+                let window = u32::from_le_bytes([data[4], data[5], data[6], data[7]]);
+                let pixmap = u32::from_le_bytes([data[8], data[9], data[10], data[11]]);
+                // Create a pixmap entry that shares the window's dimensions
+                if let Some(win) = state.windows.get(&window) {
+                    let w = win.width;
+                    let h = win.height;
+                    state.pixmaps.insert(
+                        pixmap,
+                        PixmapState {
+                            _id: pixmap,
+                            _width: w,
+                            _height: h,
+                            _depth: 24,
+                            framebuffer: crate::framebuffer::Framebuffer::new(w as u32, h as u32),
+                        },
+                    );
+                    debug!("NameWindowPixmap: window={window:#x} -> pixmap={pixmap:#x} {w}x{h}");
+                }
+            }
+            Vec::new()
+        }
+        7 => {
+            // GetOverlayWindow: reply with overlay window = root window
+            let mut reply = [0u8; 32];
+            reply[0] = 1; // Reply
+            reply[2..4].copy_from_slice(&seq.to_le_bytes());
+            reply[8..12].copy_from_slice(&state.root_window.to_le_bytes());
+            reply.to_vec()
+        }
+        _ => {
+            debug!("Unhandled Composite minor opcode: {minor}");
+            Vec::new()
+        }
+    }
+}
+
+fn handle_ge_request(data: &[u8], seq: u16) -> Vec<u8> {
+    let minor = data[1];
+    debug!("Generic Event Extension minor opcode: {minor}");
+
+    match minor {
+        0 => {
+            // QueryVersion: reply with version 1.0
+            let mut reply = [0u8; 32];
+            reply[0] = 1; // Reply
+            reply[2..4].copy_from_slice(&seq.to_le_bytes());
+            reply[8..10].copy_from_slice(&1u16.to_le_bytes()); // major version
+            reply[10..12].copy_from_slice(&0u16.to_le_bytes()); // minor version
+            reply.to_vec()
+        }
+        _ => {
+            debug!("Unhandled GE minor opcode: {minor}");
+            Vec::new()
+        }
     }
 }

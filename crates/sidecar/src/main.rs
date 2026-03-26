@@ -185,6 +185,7 @@ async fn run_session(
     let (mut ws_tx, mut ws_rx) = ws_stream.split();
     let mut process_manager = ProcessManager::new(display_string.to_string());
     let mut pending_pids: VecDeque<u32> = VecDeque::new();
+    let mut last_spawned_pid: Option<u32> = None;
 
     // Send registration
     let register = SidecarToBackend::Register {
@@ -239,13 +240,20 @@ async fn run_session(
                 let _ = tx.send(SidecarToBackend::DisplayUpdate { client_id, update });
             }
             Some(client_id) = client_connected_rx.recv() => {
-                // Associate the new X11 client with the most recently spawned process
-                if let Some(pid) = pending_pids.pop_front() {
-                    info!("Process {pid} connected as X11 client {client_id}");
-                    let _ = tx.send(SidecarToBackend::ProcessConnected { pid, client_id });
+                // Associate the new X11 client with the most recently spawned process.
+                // If no pending PID, use the last associated PID (for child processes
+                // like Firefox content processes that open additional X11 connections).
+                let pid = if let Some(pid) = pending_pids.pop_front() {
+                    last_spawned_pid = Some(pid);
+                    pid
+                } else if let Some(pid) = last_spawned_pid {
+                    pid
                 } else {
-                    info!("X11 client {client_id} connected (no pending process)");
-                }
+                    info!("X11 client {client_id} connected (no process to associate)");
+                    continue;
+                };
+                info!("Process {pid} connected as X11 client {client_id}");
+                let _ = tx.send(SidecarToBackend::ProcessConnected { pid, client_id });
             }
             _ = check_interval.tick() => {
                 let exited = process_manager.check_exited().await;
