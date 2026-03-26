@@ -8,12 +8,14 @@ interface WindowFrameProps {
 	title: string;
 	x: number;
 	y: number;
+	zIndex: number;
 	color: string;
 	renderer: ClientRenderer;
 	onClose: () => void;
 	onMove: (x: number, y: number) => void;
 	onResize: (width: number, height: number) => void;
 	onInput: (event: InputEvent) => void;
+	onFocus: () => void;
 }
 
 const MIN_WIDTH = 50;
@@ -31,12 +33,14 @@ export function WindowFrame({
 	title,
 	x,
 	y,
+	zIndex,
 	color,
 	renderer,
 	onClose,
 	onMove,
 	onResize,
 	onInput,
+	onFocus,
 }: WindowFrameProps) {
 	const canvasRef = useRef<HTMLCanvasElement>(null);
 	const onInputRef = useRef(onInput);
@@ -253,8 +257,11 @@ export function WindowFrame({
 	return (
 		<div
 			className={s.window}
-			style={{ left: x, top: y, background: color }}
-			onPointerDown={handleTitlePointerDown}
+			style={{ left: x, top: y, zIndex, background: color }}
+			onPointerDown={(e) => {
+				onFocus();
+				handleTitlePointerDown(e);
+			}}
 			onClick={() => canvasRef.current?.focus()}
 			data-testid="window-frame"
 			data-client-id={clientId}

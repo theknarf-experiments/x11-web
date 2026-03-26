@@ -25,6 +25,7 @@ interface CanvasWindow {
 	x: number;
 	y: number;
 	color: string;
+	zIndex: number;
 }
 
 const PASTEL_COLORS = [
@@ -43,6 +44,7 @@ const PASTEL_COLORS = [
 ];
 
 let spawnCounter = 0;
+let nextZIndex = 1;
 
 function App() {
 	const {
@@ -136,6 +138,7 @@ function App() {
 						x: cx,
 						y: cy,
 						color,
+						zIndex: nextZIndex++,
 					},
 				]);
 
@@ -227,6 +230,14 @@ function App() {
 		[send],
 	);
 
+	const handleFocus = useCallback((clientId: string) => {
+		setWindows((prev) =>
+			prev.map((w) =>
+				w.clientId === clientId ? { ...w, zIndex: nextZIndex++ } : w,
+			),
+		);
+	}, []);
+
 	const handleInput = useCallback(
 		(clientId: string, sidecarId: string, event: InputEvent) => {
 			send({
@@ -252,6 +263,7 @@ function App() {
 							title={win.title}
 							x={win.x}
 							y={win.y}
+							zIndex={win.zIndex}
 							color={win.color}
 							renderer={renderer}
 							onClose={() => handleKill(win.clientId, win.pid, win.sidecarId)}
@@ -262,6 +274,7 @@ function App() {
 							onInput={(event) =>
 								handleInput(win.clientId, win.sidecarId, event)
 							}
+							onFocus={() => handleFocus(win.clientId)}
 						/>
 					);
 				})}

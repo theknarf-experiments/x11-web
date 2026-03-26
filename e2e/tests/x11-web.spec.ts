@@ -390,6 +390,10 @@ test.describe
 
 			// Zenity should render something (GTK dialog with text)
 			expect(await countNonBlackPixels(canvas)).toBeGreaterThan(100);
+
+			await expect(canvas).toHaveScreenshot("zenity-canvas.png", {
+				maxDiffPixelRatio: 0.15,
+			});
 		});
 
 		test("vim workflow: insert, save, quit, cat", async ({ page }) => {
