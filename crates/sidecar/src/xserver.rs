@@ -802,7 +802,19 @@ fn handle_request(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
         73 => handle_get_image(state, data, seq),
         84 => handle_alloc_color(state, data, seq),
         91 => handle_query_colors(state, data, seq),
+        97 => {
+            // QueryBestSize: reply with the requested width/height
+            let mut reply = [0u8; 32];
+            reply[0] = 1;
+            reply[2..4].copy_from_slice(&seq.to_le_bytes());
+            if data.len() >= 12 {
+                reply[8..10].copy_from_slice(&data[8..10]); // width
+                reply[10..12].copy_from_slice(&data[10..12]); // height
+            }
+            reply.to_vec()
+        }
         98 => handle_query_extension(state, data, seq),
+        99 => handle_list_extensions(seq),
         101 => handle_get_keyboard_mapping(data, seq),
         // Requests that need replies - route to handle_misc_request
         26 | // GrabPointer
@@ -2549,6 +2561,32 @@ fn keycode_to_keysym(keycode: u8) -> (u32, u32) {
         134 => (XK_SUPER_R, XK_SUPER_R),
         _ => (0, 0),
     }
+}
+
+fn handle_list_extensions(seq: u16) -> Vec<u8> {
+    // Return the list of extensions we support
+    let extensions: &[&str] = &["BIG-REQUESTS", "RENDER", "XFIXES", "SHAPE"];
+
+    // Build the names data: each is a length-prefixed string (1 byte len + name)
+    let mut names_data = Vec::new();
+    for ext in extensions {
+        names_data.push(ext.len() as u8);
+        names_data.extend_from_slice(ext.as_bytes());
+    }
+    // Pad to 4-byte boundary
+    while names_data.len() % 4 != 0 {
+        names_data.push(0);
+    }
+
+    let extra_len = names_data.len();
+    let mut reply = vec![0u8; 32 + extra_len];
+    reply[0] = 1; // Reply
+    reply[1] = extensions.len() as u8; // num_extensions
+    reply[2..4].copy_from_slice(&seq.to_le_bytes());
+    reply[4..8].copy_from_slice(&((extra_len / 4) as u32).to_le_bytes());
+    reply[32..].copy_from_slice(&names_data);
+
+    reply
 }
 
 fn handle_query_extension(_state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
