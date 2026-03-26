@@ -1,6 +1,8 @@
 use std::collections::HashMap;
 use std::io;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::{Arc, Mutex};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::UnixListener;
 use tokio::sync::mpsc;
@@ -30,11 +32,19 @@ pub struct X11Server {
     client_connected_tx: mpsc::UnboundedSender<String>,
 }
 
+/// Shared window registry, keyed by window ID.
+/// All connections share a single window namespace, as required by X11.
+pub(crate) type SharedWindows = Arc<Mutex<HashMap<u32, WindowState>>>;
+
 /// Per-connection state for an X11 client.
 pub(crate) struct ClientState {
     pub(crate) client_id: String,
     pub(crate) sequence: u16,
+    /// Local snapshot of windows. Before each request batch, sync from shared.
+    /// After each request batch, sync back.
     pub(crate) windows: HashMap<u32, WindowState>,
+    /// Shared window store across all connections.
+    pub(crate) shared_windows: SharedWindows,
     pub(crate) pixmaps: HashMap<u32, PixmapState>,
     pub(crate) gcs: HashMap<u32, GcState>,
     pub(crate) atoms: AtomManager,
@@ -53,14 +63,82 @@ pub(crate) struct ClientState {
 
 impl ClientState {
     /// Get a mutable reference to the framebuffer for a drawable (window or pixmap).
+    /// For NameWindowPixmap aliases, this returns the window's framebuffer.
     pub(crate) fn get_framebuffer_mut(&mut self, drawable: u32) -> Option<&mut Framebuffer> {
-        if let Some(win) = self.windows.get_mut(&drawable) {
+        // First resolve the actual target: if it's a pixmap aliasing a window,
+        // redirect to the window ID.
+        let target = self.resolve_drawable(drawable);
+
+        if let Some(win) = self.windows.get_mut(&target) {
             return Some(&mut win.framebuffer);
         }
-        if let Some(pix) = self.pixmaps.get_mut(&drawable) {
+        if let Some(pix) = self.pixmaps.get_mut(&target) {
             return Some(&mut pix.framebuffer);
         }
         None
+    }
+
+    /// Resolve a drawable ID to the actual drawable ID (following aliases).
+    pub(crate) fn resolve_drawable(&self, drawable: u32) -> u32 {
+        if let Some(pix) = self.pixmaps.get(&drawable) {
+            if let Some(alias_wid) = pix.alias_window {
+                return alias_wid;
+            }
+        }
+        drawable
+    }
+
+    /// Sync local windows with the shared store.
+    /// Pulls in windows created by other connections and pushes our changes.
+    pub(crate) fn sync_windows(&mut self) {
+        if let Ok(mut shared) = self.shared_windows.lock() {
+            // Pull: add windows from shared that we don't have locally
+            for (&wid, shared_win) in shared.iter() {
+                if let Some(local_win) = self.windows.get_mut(&wid) {
+                    // Merge: if shared says mapped and local doesn't, update local
+                    if shared_win.mapped && !local_win.mapped {
+                        local_win.mapped = true;
+                    }
+                    // Also sync properties from shared that are newer
+                    for (&atom, val) in shared_win.properties.iter() {
+                        if !local_win.properties.contains_key(&atom) {
+                            local_win.properties.insert(atom, val.clone());
+                        }
+                    }
+                } else {
+                    self.windows.insert(wid, shared_win.clone());
+                }
+            }
+
+            // Push: update shared with our local changes (only for windows we own)
+            for (&wid, local_win) in self.windows.iter() {
+                if let Some(shared_win) = shared.get_mut(&wid) {
+                    // Merge mapped flag (sticky - once mapped, stays mapped)
+                    if local_win.mapped {
+                        shared_win.mapped = true;
+                    }
+                    // Update properties
+                    for (&atom, val) in local_win.properties.iter() {
+                        shared_win.properties.insert(atom, val.clone());
+                    }
+                    // Update position/size
+                    shared_win.x = local_win.x;
+                    shared_win.y = local_win.y;
+                    shared_win.width = local_win.width;
+                    shared_win.height = local_win.height;
+                } else {
+                    shared.insert(wid, local_win.clone());
+                }
+            }
+
+            // Remove from shared any windows that were destroyed locally
+            let shared_ids: Vec<u32> = shared.keys().copied().collect();
+            for wid in shared_ids {
+                if !self.windows.contains_key(&wid) {
+                    shared.remove(&wid);
+                }
+            }
+        }
     }
 
     /// Send dirty framebuffer regions for all mapped windows as PutImage updates.
@@ -92,6 +170,15 @@ impl ClientState {
     }
 }
 
+/// Stored X11 property value.
+#[derive(Clone)]
+pub(crate) struct PropertyValue {
+    pub(crate) prop_type: u32,
+    pub(crate) format: u8,
+    pub(crate) data: Vec<u8>,
+}
+
+#[derive(Clone)]
 pub(crate) struct WindowState {
     pub(crate) id: u32,
     pub(crate) parent: u32,
@@ -107,6 +194,8 @@ pub(crate) struct WindowState {
     pub(crate) background_pixel: u32,
     pub(crate) override_redirect: bool,
     pub(crate) framebuffer: Framebuffer,
+    /// Properties set on this window (atom -> value).
+    pub(crate) properties: HashMap<u32, PropertyValue>,
 }
 
 pub(crate) struct PixmapState {
@@ -115,6 +204,9 @@ pub(crate) struct PixmapState {
     pub(crate) _height: u16,
     pub(crate) _depth: u8,
     pub(crate) framebuffer: Framebuffer,
+    /// If this pixmap is a NameWindowPixmap alias, this holds the window ID.
+    /// Drawing to this pixmap should actually draw to the window's framebuffer.
+    pub(crate) alias_window: Option<u32>,
 }
 
 #[derive(Clone)]
@@ -303,18 +395,49 @@ impl X11Server {
             self.display_string()
         );
 
+        static CONNECTION_COUNTER: AtomicU32 = AtomicU32::new(0);
+
+        // Shared window state across all connections
+        let shared_windows: SharedWindows = Arc::new(Mutex::new(HashMap::new()));
+        // Pre-populate with root window
+        {
+            let mut windows = shared_windows.lock().unwrap();
+            windows.insert(
+                ROOT_WINDOW,
+                WindowState {
+                    id: ROOT_WINDOW,
+                    parent: 0,
+                    x: 0,
+                    y: 0,
+                    width: SCREEN_WIDTH,
+                    height: SCREEN_HEIGHT,
+                    border_width: 0,
+                    visual: ROOT_VISUAL,
+                    class: 1,
+                    mapped: true,
+                    event_mask: 0,
+                    background_pixel: 0x00000000,
+                    override_redirect: false,
+                    framebuffer: Framebuffer::new(SCREEN_WIDTH as u32, SCREEN_HEIGHT as u32),
+                    properties: HashMap::new(),
+                },
+            );
+        }
+
         loop {
             match listener.accept().await {
                 Ok((stream, _addr)) => {
+                    let conn_index = CONNECTION_COUNTER.fetch_add(1, Ordering::Relaxed);
                     let client_id = Uuid::new_v4().to_string();
                     let update_tx = self.update_tx.clone();
                     let input_rx = self.input_tx.subscribe();
                     let resize_rx = self.resize_tx.subscribe();
                     let _ = self.client_connected_tx.send(client_id.clone());
                     let cid = client_id.clone();
+                    let sw = shared_windows.clone();
                     tokio::spawn(async move {
                         if let Err(e) =
-                            handle_client(stream, client_id, update_tx, input_rx, resize_rx).await
+                            handle_client(stream, client_id, update_tx, input_rx, resize_rx, conn_index, sw).await
                         {
                             debug!("X11 client {cid} disconnected: {e}");
                         }
@@ -340,7 +463,7 @@ const ROOT_COLORMAP: u32 = 0x00000020;
 const SCREEN_WIDTH: u16 = 1024;
 const SCREEN_HEIGHT: u16 = 768;
 
-fn build_setup() -> Setup {
+fn build_setup(conn_index: u32) -> Setup {
     let visual = Visualtype {
         visual_id: ROOT_VISUAL,
         class: VisualClass::TRUE_COLOR,
@@ -403,8 +526,11 @@ fn build_setup() -> Setup {
         protocol_minor_version: 0,
         length: 0, // will fix below
         release_number: 0,
-        resource_id_base: 0x04000000,
-        resource_id_mask: 0x001FFFFF,
+        // Each connection gets a unique resource ID range.
+        // Base = (conn_index + 1) << 22, mask = 0x003FFFFF (4M IDs per connection)
+        // This allows up to ~1000 connections without overlap.
+        resource_id_base: ((conn_index + 1) as u32) << 22,
+        resource_id_mask: 0x003FFFFF,
         motion_buffer_size: 256,
         maximum_request_length: 65535,
         image_byte_order: ImageOrder::LSB_FIRST,
@@ -432,6 +558,8 @@ async fn handle_client(
     update_tx: mpsc::UnboundedSender<TaggedDisplayUpdate>,
     mut input_rx: broadcast::Receiver<(String, InputEvent)>,
     mut resize_rx: broadcast::Receiver<(String, u16, u16)>,
+    conn_index: u32,
+    shared_windows: SharedWindows,
 ) -> io::Result<()> {
     // Phase 1: Read client setup request
     // Read at least 12 bytes for the header
@@ -476,7 +604,7 @@ async fn handle_client(
         .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, format!("Bad setup: {e:?}")))?;
 
     // Phase 2: Send setup reply
-    let setup = build_setup();
+    let setup = build_setup(conn_index);
     let mut reply_bytes = Vec::new();
     setup.serialize_into(&mut reply_bytes);
     stream.write_all(&reply_bytes).await?;
@@ -484,10 +612,13 @@ async fn handle_client(
     info!("X11 client connected: {client_id}");
 
     // Phase 3: Handle requests
+    // Initialize local windows from the shared store (includes root window).
+    let local_windows = shared_windows.lock().unwrap().clone();
     let mut state = ClientState {
         client_id: client_id.clone(),
         sequence: 0,
-        windows: HashMap::new(),
+        windows: local_windows,
+        shared_windows,
         pixmaps: HashMap::new(),
         gcs: HashMap::new(),
         atoms: AtomManager::new(),
@@ -504,27 +635,6 @@ async fn handle_client(
         shm_segments: HashMap::new(),
     };
 
-    // Add root window to state
-    state.windows.insert(
-        ROOT_WINDOW,
-        WindowState {
-            id: ROOT_WINDOW,
-            parent: 0,
-            x: 0,
-            y: 0,
-            width: SCREEN_WIDTH,
-            height: SCREEN_HEIGHT,
-            border_width: 0,
-            visual: ROOT_VISUAL,
-            class: 1, // InputOutput
-            mapped: true,
-            event_mask: 0,
-            background_pixel: 0x00000000,
-            override_redirect: false,
-            framebuffer: Framebuffer::new(SCREEN_WIDTH as u32, SCREEN_HEIGHT as u32),
-        },
-    );
-
     let mut buf = vec![0u8; 256 * 1024]; // 256KB read buffer
     let mut pending = Vec::new(); // Partial request data
     let mut frame_interval = tokio::time::interval(Duration::from_millis(100)); // ~10fps
@@ -538,6 +648,9 @@ async fn handle_client(
                 }
 
                 pending.extend_from_slice(&buf[..n]);
+
+                // Sync windows from shared store before processing
+                state.sync_windows();
 
                 // Process complete requests from the pending buffer
                 while pending.len() >= 4 {
@@ -572,12 +685,112 @@ async fn handle_client(
                     }
                 }
 
+                // Sync windows back to shared store
+                state.sync_windows();
+
                 // Flush dirty windows after processing a batch of requests
                 state.flush_dirty_windows();
             }
             _ = frame_interval.tick() => {
+                // Sync with shared windows
+                state.sync_windows();
+
                 // Periodic frame flush for any remaining dirty regions
                 state.flush_dirty_windows();
+
+                // Act as a minimal WM: auto-map any unmapped top-level windows.
+                // We do this on the tick rather than in CreateWindow so that the
+                // client has time to finish its setup (ChangeProperty, SHAPE, etc.)
+                // before we send the MapNotify/ConfigureNotify/Expose events.
+                let unmapped: Vec<u32> = state.windows.iter()
+                    .filter(|(_, w)| {
+                        !w.mapped
+                        && w.parent == state.root_window
+                        && w.class == 1 // InputOutput
+                        && (w.width > 1 || w.height > 1)
+                    })
+                    .map(|(id, _)| *id)
+                    .collect();
+
+                for wid in unmapped {
+                    let rw = state.root_width;
+                    let rh = state.root_height;
+                    let seq = state.sequence;
+
+                    if let Some(win) = state.windows.get_mut(&wid) {
+                        info!("WM auto-mapping top-level window {wid:#x} (was {}x{})", win.width, win.height);
+                        win.mapped = true;
+
+                        // Resize to full screen like a WM would
+                        win.x = 0;
+                        win.y = 0;
+                        win.width = rw;
+                        win.height = rh;
+                        win.framebuffer.resize(rw as u32, rh as u32);
+
+                        // Fill with background
+                        let bg = win.background_pixel;
+                        win.framebuffer.fill_rect(0, 0, rw, rh, bg);
+
+                        // Set WM_STATE = NormalState (like a real WM does)
+                        let wm_state_atom = state.atoms.intern("WM_STATE", false);
+                        let mut wm_state_data = vec![0u8; 8];
+                        wm_state_data[0..4].copy_from_slice(&1u32.to_le_bytes()); // NormalState
+                        // icon window = None (0)
+                        win.properties.insert(wm_state_atom, PropertyValue {
+                            prop_type: wm_state_atom,
+                            format: 32,
+                            data: wm_state_data,
+                        });
+
+                        let _ = state.update_tx.send((
+                            state.client_id.clone(),
+                            DisplayUpdate::WindowMapped { window_id: wid },
+                        ));
+                        let _ = state.update_tx.send((
+                            state.client_id.clone(),
+                            DisplayUpdate::WindowConfigured {
+                                window_id: wid,
+                                x: 0,
+                                y: 0,
+                                width: rw,
+                                height: rh,
+                            },
+                        ));
+                    }
+
+                    // Send ConfigureNotify event
+                    let mut config_event = [0u8; 32];
+                    config_event[0] = CONFIGURE_NOTIFY_EVENT;
+                    config_event[2..4].copy_from_slice(&seq.to_le_bytes());
+                    config_event[4..8].copy_from_slice(&wid.to_le_bytes());  // event
+                    config_event[8..12].copy_from_slice(&wid.to_le_bytes()); // window
+                    config_event[16..18].copy_from_slice(&0i16.to_le_bytes()); // x
+                    config_event[18..20].copy_from_slice(&0i16.to_le_bytes()); // y
+                    config_event[20..22].copy_from_slice(&rw.to_le_bytes());   // width
+                    config_event[22..24].copy_from_slice(&rh.to_le_bytes());   // height
+                    stream.write_all(&config_event).await?;
+
+                    // Send MapNotify event
+                    let mut map_event = [0u8; 32];
+                    map_event[0] = MAP_NOTIFY_EVENT;
+                    map_event[2..4].copy_from_slice(&seq.to_le_bytes());
+                    map_event[4..8].copy_from_slice(&wid.to_le_bytes());
+                    map_event[8..12].copy_from_slice(&wid.to_le_bytes());
+                    stream.write_all(&map_event).await?;
+
+                    // Send Expose event to trigger rendering
+                    let mut expose_event = [0u8; 32];
+                    expose_event[0] = EXPOSE_EVENT;
+                    expose_event[2..4].copy_from_slice(&seq.to_le_bytes());
+                    expose_event[4..8].copy_from_slice(&wid.to_le_bytes());
+                    expose_event[12..14].copy_from_slice(&rw.to_le_bytes());
+                    expose_event[14..16].copy_from_slice(&rh.to_le_bytes());
+                    stream.write_all(&expose_event).await?;
+                }
+
+                // Immediately sync mapped state to shared so other connections see it
+                state.sync_windows();
             }
             result = input_rx.recv() => {
                 if let Ok((target_id, input)) = result {
@@ -777,6 +990,11 @@ fn handle_request(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
     let _minor = data[1];
     let seq = state.sequence;
 
+    if major_opcode >= 128 {
+        debug!("ext op={major_opcode} minor={_minor} seq={seq}");
+    }
+
+
     match major_opcode {
         1 => handle_create_window(state, data, seq),
         2 => handle_change_window_attributes(state, data),
@@ -851,8 +1069,18 @@ fn handle_request(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
         76 => handle_image_text8(state, data),
         22 => handle_set_selection_owner(state, data),
         24 => handle_convert_selection(state, data, seq),
+        19 => {
+            // DeleteProperty
+            if data.len() >= 12 {
+                let window = u32::from_le_bytes([data[4], data[5], data[6], data[7]]);
+                let property = u32::from_le_bytes([data[8], data[9], data[10], data[11]]);
+                if let Some(win) = state.windows.get_mut(&window) {
+                    win.properties.remove(&property);
+                }
+            }
+            Vec::new()
+        }
         // Silently ignore these common requests (no reply needed)
-        19 | // DeleteProperty
         25 | // SendEvent
         27 | // UngrabPointer
         28 | // UngrabButton
@@ -1075,7 +1303,7 @@ fn handle_create_window(state: &mut ClientState, data: &[u8], _seq: u16) -> Vec<
 
     let use_visual = if visual == 0 { ROOT_VISUAL } else { visual };
 
-    debug!("CreateWindow: id={wid:#x} parent={parent:#x} {x},{y} {width}x{height}");
+    info!("CreateWindow: id={wid:#x} parent={parent:#x} {x},{y} {width}x{height} depth={} class={class} visual={visual:#x}", data[1]);
 
     state.windows.insert(
         wid,
@@ -1094,6 +1322,7 @@ fn handle_create_window(state: &mut ClientState, data: &[u8], _seq: u16) -> Vec<
             background_pixel,
             override_redirect,
             framebuffer: Framebuffer::new(width as u32, height as u32),
+            properties: HashMap::new(),
         },
     );
 
@@ -1191,7 +1420,11 @@ fn handle_map_window(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> 
 
     let mut events = Vec::new();
 
+    if !state.windows.contains_key(&wid) {
+        warn!("MapWindow: id={wid:#x} NOT FOUND in client {}", state.client_id);
+    }
     if let Some(win) = state.windows.get_mut(&wid) {
+        info!("MapWindow: id={wid:#x} {}x{} mapped={}", win.width, win.height, win.mapped);
         win.mapped = true;
         let _ = state.update_tx.send((
             state.client_id.clone(),
@@ -1471,10 +1704,32 @@ fn handle_change_property(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
         return Vec::new();
     }
 
+    let _mode = data[1]; // 0=Replace, 1=Prepend, 2=Append
     let window = u32::from_le_bytes([data[4], data[5], data[6], data[7]]);
     let property_atom = u32::from_le_bytes([data[8], data[9], data[10], data[11]]);
+    let prop_type = u32::from_le_bytes([data[12], data[13], data[14], data[15]]);
     let format = data[16];
     let data_len = u32::from_le_bytes([data[20], data[21], data[22], data[23]]) as usize;
+
+    // Calculate actual byte length based on format
+    let byte_len = match format {
+        8 => data_len,
+        16 => data_len * 2,
+        32 => data_len * 4,
+        _ => data_len,
+    };
+
+    // Store the property value
+    if data.len() >= 24 + byte_len {
+        let prop_data = data[24..24 + byte_len].to_vec();
+        if let Some(win) = state.windows.get_mut(&window) {
+            win.properties.insert(property_atom, PropertyValue {
+                prop_type,
+                format,
+                data: prop_data,
+            });
+        }
+    }
 
     // Check if this is WM_NAME (atom 39) or _NET_WM_NAME
     let is_wm_name = property_atom == 39
@@ -1484,8 +1739,8 @@ fn handle_change_property(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
             .map(|n| n == "_NET_WM_NAME" || n == "WM_NAME")
             .unwrap_or(false);
 
-    if is_wm_name && format == 8 && data.len() >= 24 + data_len {
-        let title = String::from_utf8_lossy(&data[24..24 + data_len]).to_string();
+    if is_wm_name && format == 8 && data.len() >= 24 + byte_len {
+        let title = String::from_utf8_lossy(&data[24..24 + byte_len]).to_string();
         if !title.is_empty() {
             let _ = state.update_tx.send((
                 state.client_id.clone(),
@@ -1500,13 +1755,77 @@ fn handle_change_property(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
     Vec::new()
 }
 
-fn handle_get_property(_state: &mut ClientState, _data: &[u8], seq: u16) -> Vec<u8> {
-    // Return "property not found"
-    let mut reply = [0u8; 32];
-    reply[0] = 1;
-    reply[2..4].copy_from_slice(&seq.to_le_bytes());
-    // type = 0 (None), format = 0, bytes_after = 0, value_length = 0
-    reply.to_vec()
+fn handle_get_property(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
+    // GetProperty: [opcode(1), delete(1), length(2), window(4), property(4),
+    //               type(4), long_offset(4), long_length(4)]
+    if data.len() < 24 {
+        let mut reply = [0u8; 32];
+        reply[0] = 1;
+        reply[2..4].copy_from_slice(&seq.to_le_bytes());
+        return reply.to_vec();
+    }
+
+    let delete = data[1] != 0;
+    let window = u32::from_le_bytes([data[4], data[5], data[6], data[7]]);
+    let property_atom = u32::from_le_bytes([data[8], data[9], data[10], data[11]]);
+    let _req_type = u32::from_le_bytes([data[12], data[13], data[14], data[15]]);
+    let long_offset = u32::from_le_bytes([data[16], data[17], data[18], data[19]]) as usize;
+    let long_length = u32::from_le_bytes([data[20], data[21], data[22], data[23]]) as usize;
+
+    let prop = state.windows.get(&window).and_then(|w| w.properties.get(&property_atom)).cloned();
+
+    if let Some(prop_val) = prop {
+        let byte_offset = long_offset * 4;
+        let max_bytes = long_length * 4;
+        let total_bytes = prop_val.data.len();
+        let available = if byte_offset >= total_bytes { 0 } else { total_bytes - byte_offset };
+        let return_bytes = available.min(max_bytes);
+        let bytes_after = if available > return_bytes { available - return_bytes } else { 0 };
+
+        let return_data = if byte_offset < total_bytes {
+            &prop_val.data[byte_offset..byte_offset + return_bytes]
+        } else {
+            &[]
+        };
+
+        // value_length is in units of format size
+        let value_length = match prop_val.format {
+            8 => return_data.len() as u32,
+            16 => (return_data.len() / 2) as u32,
+            32 => (return_data.len() / 4) as u32,
+            _ => return_data.len() as u32,
+        };
+
+        let padded_len = (return_data.len() + 3) & !3;
+        let extra_words = padded_len / 4;
+        let total_reply = 32 + padded_len;
+
+        let mut reply = vec![0u8; total_reply];
+        reply[0] = 1; // Reply
+        reply[1] = prop_val.format;
+        reply[2..4].copy_from_slice(&seq.to_le_bytes());
+        reply[4..8].copy_from_slice(&(extra_words as u32).to_le_bytes()); // length
+        reply[8..12].copy_from_slice(&prop_val.prop_type.to_le_bytes()); // type
+        reply[12..16].copy_from_slice(&(bytes_after as u32).to_le_bytes()); // bytes_after
+        reply[16..20].copy_from_slice(&value_length.to_le_bytes()); // value_length
+        reply[32..32 + return_data.len()].copy_from_slice(return_data);
+
+        // Delete property if requested and we returned all of it
+        if delete && bytes_after == 0 {
+            if let Some(win) = state.windows.get_mut(&window) {
+                win.properties.remove(&property_atom);
+            }
+        }
+
+        reply
+    } else {
+        // Property not found
+        let mut reply = [0u8; 32];
+        reply[0] = 1;
+        reply[2..4].copy_from_slice(&seq.to_le_bytes());
+        // type = 0 (None), format = 0, bytes_after = 0, value_length = 0
+        reply.to_vec()
+    }
 }
 
 fn handle_get_selection_owner(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
@@ -1834,6 +2153,7 @@ fn handle_create_pixmap(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
             _height: height,
             _depth: depth,
             framebuffer: Framebuffer::new(width as u32, height as u32),
+            alias_window: None,
         },
     );
 
@@ -2918,7 +3238,7 @@ fn handle_shm_request(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8>
     match minor {
         // QueryVersion
         0 => {
-            debug!("SHM QueryVersion");
+            info!("SHM QueryVersion");
             let mut reply = [0u8; 32];
             reply[0] = 1; // Reply
             reply[1] = 1; // shared_pixmaps = true
@@ -2941,7 +3261,7 @@ fn handle_shm_request(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8>
             let shmid = u32::from_le_bytes([data[8], data[9], data[10], data[11]]) as i32;
             let read_only = data[12] != 0;
 
-            debug!("SHM Attach: shmseg={shmseg} shmid={shmid} read_only={read_only}");
+            info!("SHM Attach: shmseg={shmseg} shmid={shmid} read_only={read_only}");
 
             unsafe {
                 // Get segment size via shmctl IPC_STAT
@@ -2977,7 +3297,7 @@ fn handle_shm_request(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8>
                 return Vec::new();
             }
             let shmseg = u32::from_le_bytes([data[4], data[5], data[6], data[7]]);
-            debug!("SHM Detach: shmseg={shmseg}");
+            info!("SHM Detach: shmseg={shmseg}");
 
             if let Some(seg) = state.shm_segments.remove(&shmseg) {
                 unsafe {
@@ -3010,8 +3330,8 @@ fn handle_shm_request(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8>
             let shmseg = u32::from_le_bytes([data[32], data[33], data[34], data[35]]);
             let offset = u32::from_le_bytes([data[36], data[37], data[38], data[39]]) as usize;
 
-            debug!(
-                "SHM PutImage: drawable={drawable} shmseg={shmseg} offset={offset} \
+            info!(
+                "SHM PutImage: drawable={drawable:#x} shmseg={shmseg} offset={offset} \
                  total_width={total_width} src=({src_x},{src_y}) size=({src_width}x{src_height}) \
                  dst=({dst_x},{dst_y}) send_event={send_event}"
             );
@@ -3072,15 +3392,83 @@ fn handle_shm_request(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8>
             }
         }
 
-        // GetImage (stub)
+        // GetImage
         4 => {
-            debug!("SHM GetImage: stubbed");
-            build_error(2, seq, 0, 130, 4) // BadValue
+            if data.len() < 32 {
+                return Vec::new();
+            }
+            let drawable = u32::from_le_bytes([data[4], data[5], data[6], data[7]]);
+            let src_x = i16::from_le_bytes([data[8], data[9]]);
+            let src_y = i16::from_le_bytes([data[10], data[11]]);
+            let width = u16::from_le_bytes([data[12], data[13]]);
+            let height = u16::from_le_bytes([data[14], data[15]]);
+            let _plane_mask = u32::from_le_bytes([data[16], data[17], data[18], data[19]]);
+            let _format = data[20];
+            let shmseg = u32::from_le_bytes([data[24], data[25], data[26], data[27]]);
+            let shm_offset = u32::from_le_bytes([data[28], data[29], data[30], data[31]]) as usize;
+
+            info!("SHM GetImage: drawable={drawable:#x} ({src_x},{src_y}) {width}x{height} shmseg={shmseg} offset={shm_offset}");
+
+            // Copy pixels from drawable into SHM segment
+            let resolved = state.resolve_drawable(drawable);
+            let pixels = if let Some(fb) = state.get_framebuffer_mut(resolved) {
+                fb.extract_pixels(src_x, src_y, width, height)
+            } else {
+                vec![0u8; width as usize * height as usize * 4]
+            };
+
+            if let Some(seg) = state.shm_segments.get(&shmseg) {
+                let bpp = 4usize;
+                let row_bytes = width as usize * bpp;
+                let total_bytes = row_bytes * height as usize;
+                if shm_offset + total_bytes <= seg.size {
+                    unsafe {
+                        std::ptr::copy_nonoverlapping(
+                            pixels.as_ptr(),
+                            seg.addr.add(shm_offset),
+                            total_bytes.min(pixels.len()),
+                        );
+                    }
+                }
+            }
+
+            // Reply
+            let mut reply = [0u8; 32];
+            reply[0] = 1; // Reply
+            reply[1] = 24; // depth
+            reply[2..4].copy_from_slice(&seq.to_le_bytes());
+            reply[8..12].copy_from_slice(&ROOT_VISUAL.to_le_bytes());
+            reply[12..16].copy_from_slice(&(width as u32 * height as u32).to_le_bytes()); // size
+            reply.to_vec()
         }
 
-        // CreatePixmap (stub)
+        // CreatePixmap
         5 => {
-            debug!("SHM CreatePixmap: stubbed");
+            if data.len() < 28 {
+                return Vec::new();
+            }
+            let pid = u32::from_le_bytes([data[4], data[5], data[6], data[7]]);
+            let _drawable = u32::from_le_bytes([data[8], data[9], data[10], data[11]]);
+            let width = u16::from_le_bytes([data[12], data[13]]);
+            let height = u16::from_le_bytes([data[14], data[15]]);
+            let depth = data[16];
+            let shmseg = u32::from_le_bytes([data[20], data[21], data[22], data[23]]);
+            let shm_offset = u32::from_le_bytes([data[24], data[25], data[26], data[27]]) as usize;
+
+            info!("SHM CreatePixmap: pid={pid:#x} {width}x{height} depth={depth} shmseg={shmseg} offset={shm_offset}");
+
+            // Create a regular pixmap — SHM backing is handled when the pixmap is drawn to/from
+            state.pixmaps.insert(
+                pid,
+                PixmapState {
+                    _id: pid,
+                    _width: width,
+                    _height: height,
+                    _depth: depth,
+                    framebuffer: Framebuffer::new(width as u32, height as u32),
+                    alias_window: None,
+                },
+            );
             Vec::new()
         }
 
@@ -3090,7 +3478,7 @@ fn handle_shm_request(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8>
                 return Vec::new();
             }
             let shmseg = u32::from_le_bytes([data[4], data[5], data[6], data[7]]);
-            debug!("SHM AttachFd: shmseg={shmseg} (stubbed — fd passing not supported)");
+            info!("SHM AttachFd: shmseg={shmseg} (stubbed — fd passing not supported)");
             Vec::new()
         }
 
@@ -3103,7 +3491,7 @@ fn handle_shm_request(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8>
 
 fn handle_sync_request(_state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
     let minor = data[1];
-    debug!("SYNC minor opcode: {minor}");
+    info!("SYNC minor opcode: {minor}");
 
     match minor {
         0 => {
@@ -3221,7 +3609,7 @@ fn handle_damage_request(data: &[u8], seq: u16) -> Vec<u8> {
 
 fn handle_x_composite_request(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
     let minor = data[1];
-    debug!("Composite minor opcode: {minor}");
+    info!("Composite minor opcode: {minor}");
 
     match minor {
         0 => {
@@ -3244,7 +3632,9 @@ fn handle_x_composite_request(state: &mut ClientState, data: &[u8], seq: u16) ->
             if data.len() >= 12 {
                 let window = u32::from_le_bytes([data[4], data[5], data[6], data[7]]);
                 let pixmap = u32::from_le_bytes([data[8], data[9], data[10], data[11]]);
-                // Create a pixmap entry that shares the window's dimensions
+                // Create a pixmap entry that aliases the window's framebuffer.
+                // The actual framebuffer here is a dummy - all accesses will be
+                // redirected to the window via alias_window.
                 if let Some(win) = state.windows.get(&window) {
                     let w = win.width;
                     let h = win.height;
@@ -3255,10 +3645,11 @@ fn handle_x_composite_request(state: &mut ClientState, data: &[u8], seq: u16) ->
                             _width: w,
                             _height: h,
                             _depth: 24,
-                            framebuffer: crate::framebuffer::Framebuffer::new(w as u32, h as u32),
+                            framebuffer: crate::framebuffer::Framebuffer::new(0, 0),
+                            alias_window: Some(window),
                         },
                     );
-                    debug!("NameWindowPixmap: window={window:#x} -> pixmap={pixmap:#x} {w}x{h}");
+                    info!("NameWindowPixmap: window={window:#x} -> pixmap={pixmap:#x} {w}x{h} (aliased)");
                 }
             }
             Vec::new()

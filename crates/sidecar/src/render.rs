@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use tracing::debug;
+use tracing::{debug, info};
 
 use crate::xserver::ClientState;
 
@@ -413,7 +413,7 @@ fn handle_composite(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
     let width = read_u16(data, 32);
     let height = read_u16(data, 34);
 
-    debug!(
+    info!(
         "Render Composite: op={op} src={src_pic:#x} dst={dst_pic:#x} src=({src_x},{src_y}) dst=({dst_x},{dst_y}) {width}x{height}"
     );
 

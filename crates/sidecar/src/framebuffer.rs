@@ -4,6 +4,7 @@ use std::io::Write;
 
 /// A server-side pixel buffer using pure Rust (no pixman).
 /// Format: A8R8G8B8 (4 bytes per pixel, BGRA in memory on little-endian).
+#[derive(Clone)]
 pub struct Framebuffer {
     data: Vec<u8>,
     width: u32,
