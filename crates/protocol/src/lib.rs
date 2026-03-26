@@ -19,6 +19,8 @@ pub enum BackendToSidecar {
         client_id: String,
         event: InputEvent,
     },
+    /// Request a full redraw (sends Expose events to all windows).
+    RequestRedraw { client_id: String },
     /// Resize a client's windows.
     ResizeWindow {
         client_id: String,
@@ -138,6 +140,11 @@ pub enum FrontendToBackend {
     },
     /// Subscribe to display updates from a sidecar.
     SubscribeDisplay { sidecar_id: String },
+    /// Request a full redraw of a client's windows.
+    RequestRedraw {
+        sidecar_id: String,
+        client_id: String,
+    },
     /// Send input to a process on a sidecar.
     InputEvent {
         sidecar_id: String,

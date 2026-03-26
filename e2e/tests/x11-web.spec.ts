@@ -24,6 +24,8 @@ async function spawnApp(
 	command = "xeyes",
 ): Promise<Locator> {
 	const windowFrames = page.locator('[data-testid="window-frame"]');
+	// Wait for existing windows to stabilize (from replay on reconnect)
+	await page.waitForTimeout(500);
 	const countBefore = await windowFrames.count();
 
 	await page.locator('[data-testid="spawn-button"]').click();

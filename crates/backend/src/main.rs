@@ -21,6 +21,8 @@ struct AppState {
     connected_processes: Arc<RwLock<HashMap<String, (String, u32)>>>,
     /// Window state for position/color sync: client_id → WindowState
     window_states: Arc<RwLock<HashMap<String, WindowState>>>,
+    /// Display update buffer per client_id for replay on frontend connect
+    display_buffers: Arc<RwLock<HashMap<String, Vec<BackendToFrontend>>>>,
 }
 
 struct SidecarConnection {
@@ -42,6 +44,7 @@ async fn main() {
         frontends: Arc::new(RwLock::new(HashMap::new())),
         connected_processes: Arc::new(RwLock::new(HashMap::new())),
         window_states: Arc::new(RwLock::new(HashMap::new())),
+        display_buffers: Arc::new(RwLock::new(HashMap::new())),
     };
 
     let app = Router::new()
@@ -149,10 +152,22 @@ async fn handle_sidecar_ws(socket: WebSocket, state: AppState) {
                 // Clean up from registries
                 let mut procs = state.connected_processes.write().await;
                 let mut states = state.window_states.write().await;
+                // Find client_ids for this pid to clean up display buffers
+                let client_ids: Vec<String> = procs
+                    .iter()
+                    .filter(|(_, (_, p))| *p == pid)
+                    .map(|(cid, _)| cid.clone())
+                    .collect();
                 procs.retain(|_, (_, p)| *p != pid);
                 states.retain(|_, ws| ws.pid != pid);
                 drop(procs);
                 drop(states);
+                {
+                    let mut bufs = state.display_buffers.write().await;
+                    for cid in &client_ids {
+                        bufs.remove(cid);
+                    }
+                }
                 broadcast_to_frontends(
                     &state,
                     BackendToFrontend::ProcessExited {
@@ -194,15 +209,26 @@ async fn handle_sidecar_ws(socket: WebSocket, state: AppState) {
                 .await;
             }
             SidecarToBackend::DisplayUpdate { client_id, update } => {
+                let msg = BackendToFrontend::DisplayUpdate {
+                    sidecar_id: sidecar_id.clone(),
+                    client_id: client_id.clone(),
+                    update,
+                };
+
+                // Buffer for replay to new frontends
+                state
+                    .display_buffers
+                    .write()
+                    .await
+                    .entry(client_id.clone())
+                    .or_default()
+                    .push(msg.clone());
+
                 // Forward to subscribed frontends
                 let frontends = state.frontends.read().await;
                 for frontend in frontends.values() {
                     if frontend.subscribed_sidecars.contains(&sidecar_id) {
-                        let _ = frontend.tx.send(BackendToFrontend::DisplayUpdate {
-                            sidecar_id: sidecar_id.clone(),
-                            client_id: client_id.clone(),
-                            update: update.clone(),
-                        });
+                        let _ = frontend.tx.send(msg.clone());
                     }
                 }
             }
@@ -227,17 +253,26 @@ async fn handle_sidecar_ws(socket: WebSocket, state: AppState) {
     // Sidecar disconnected
     info!("Sidecar disconnected: {}", sidecar_id);
     state.sidecars.write().await.remove(&sidecar_id);
-    // Clean up processes and window states for this sidecar
-    state
-        .connected_processes
-        .write()
-        .await
-        .retain(|_, (sid, _)| sid != &sidecar_id);
-    state
-        .window_states
-        .write()
-        .await
-        .retain(|_, ws| ws.sidecar_id != sidecar_id);
+    // Clean up processes, window states, and display buffers for this sidecar
+    {
+        let mut procs = state.connected_processes.write().await;
+        let client_ids: Vec<String> = procs
+            .iter()
+            .filter(|(_, (sid, _))| sid == &sidecar_id)
+            .map(|(cid, _)| cid.clone())
+            .collect();
+        procs.retain(|_, (sid, _)| sid != &sidecar_id);
+        drop(procs);
+        state
+            .window_states
+            .write()
+            .await
+            .retain(|_, ws| ws.sidecar_id != sidecar_id);
+        let mut bufs = state.display_buffers.write().await;
+        for cid in &client_ids {
+            bufs.remove(cid);
+        }
+    }
     send_task.abort();
 
     // Notify frontends
@@ -371,9 +406,33 @@ async fn handle_frontend_ws(socket: WebSocket, state: AppState) {
                 let mut frontends = state.frontends.write().await;
                 if let Some(frontend) = frontends.get_mut(&frontend_id) {
                     if !frontend.subscribed_sidecars.contains(&sidecar_id) {
-                        frontend.subscribed_sidecars.push(sidecar_id);
+                        frontend.subscribed_sidecars.push(sidecar_id.clone());
+
+                        // Replay buffered display updates for all clients of this sidecar
+                        let bufs = state.display_buffers.read().await;
+                        let procs = state.connected_processes.read().await;
+                        for (client_id, (sid, _)) in procs.iter() {
+                            if sid == &sidecar_id {
+                                if let Some(buf) = bufs.get(client_id) {
+                                    for msg in buf {
+                                        let _ = frontend.tx.send(msg.clone());
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
+            }
+            FrontendToBackend::RequestRedraw {
+                sidecar_id,
+                client_id,
+            } => {
+                forward_to_sidecar(
+                    &state,
+                    &sidecar_id,
+                    BackendToSidecar::RequestRedraw { client_id },
+                )
+                .await;
             }
             FrontendToBackend::InputEvent {
                 sidecar_id,

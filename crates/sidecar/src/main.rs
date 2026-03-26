@@ -308,6 +308,10 @@ async fn handle_command(
         BackendToSidecar::InputEvent { client_id, event } => {
             let _ = input_tx.send((client_id, event));
         }
+        BackendToSidecar::RequestRedraw { client_id } => {
+            // Trigger a resize to same size to force Expose events
+            let _ = resize_tx.send((client_id, 0, 0));
+        }
         BackendToSidecar::ResizeWindow {
             client_id,
             width,
