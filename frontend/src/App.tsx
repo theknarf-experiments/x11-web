@@ -178,31 +178,22 @@ function App() {
 		});
 	}
 
-	const moveTimerRef = useRef<ReturnType<typeof setTimeout>>(undefined);
-
 	const handleMove = useCallback(
 		(clientId: string, x: number, y: number) => {
-			setWindows((prev) =>
-				prev.map((w) => (w.clientId === clientId ? { ...w, x, y } : w)),
-			);
-			// Debounced sync to backend
-			clearTimeout(moveTimerRef.current);
-			moveTimerRef.current = setTimeout(() => {
-				setWindows((cur) => {
-					const win = cur.find((w) => w.clientId === clientId);
-					if (win) {
-						send({
-							type: "UpdateWindowState",
-							client_id: win.clientId,
-							sidecar_id: win.sidecarId,
-							x: win.x,
-							y: win.y,
-							color: win.color,
-						});
-					}
-					return cur;
-				});
-			}, 200);
+			setWindows((prev) => {
+				const win = prev.find((w) => w.clientId === clientId);
+				if (win) {
+					send({
+						type: "UpdateWindowState",
+						client_id: win.clientId,
+						sidecar_id: win.sidecarId,
+						x,
+						y,
+						color: win.color,
+					});
+				}
+				return prev.map((w) => (w.clientId === clientId ? { ...w, x, y } : w));
+			});
 		},
 		[send],
 	);
