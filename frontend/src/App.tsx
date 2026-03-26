@@ -63,6 +63,16 @@ function App() {
 	// Register display callback
 	useEffect(() => {
 		onDisplayUpdate((_sidecarId, clientId, update) => {
+			// Handle title changes
+			if (update.kind === "TitleChanged") {
+				setWindows((prev) =>
+					prev.map((w) =>
+						w.clientId === clientId ? { ...w, title: update.title } : w,
+					),
+				);
+				return;
+			}
+
 			const renderers = renderersRef.current;
 			let r = renderers.get(clientId);
 			if (!r) {

@@ -271,6 +271,8 @@ pub enum DisplayUpdate {
         width: u16,
         height: u16,
     },
+    /// Window title changed (from WM_NAME property).
+    TitleChanged { window_id: u32, title: String },
     /// Draw an arc.
     DrawArc {
         window_id: u32,

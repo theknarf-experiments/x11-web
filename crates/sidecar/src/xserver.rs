@@ -1301,8 +1301,40 @@ fn handle_get_atom_name(state: &ClientState, data: &[u8], seq: u16) -> Vec<u8> {
     reply
 }
 
-fn handle_change_property(_state: &mut ClientState, _data: &[u8]) -> Vec<u8> {
-    Vec::new() // No reply
+fn handle_change_property(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
+    // ChangeProperty: [opcode(1), mode(1), length(2), window(4), property(4), type(4),
+    //                   format(1), pad(3), data_len(4), data...]
+    if data.len() < 24 {
+        return Vec::new();
+    }
+
+    let window = u32::from_le_bytes([data[4], data[5], data[6], data[7]]);
+    let property_atom = u32::from_le_bytes([data[8], data[9], data[10], data[11]]);
+    let format = data[16];
+    let data_len = u32::from_le_bytes([data[20], data[21], data[22], data[23]]) as usize;
+
+    // Check if this is WM_NAME (atom 39) or _NET_WM_NAME
+    let is_wm_name = property_atom == 39
+        || state
+            .atoms
+            .get_name(property_atom)
+            .map(|n| n == "_NET_WM_NAME" || n == "WM_NAME")
+            .unwrap_or(false);
+
+    if is_wm_name && format == 8 && data.len() >= 24 + data_len {
+        let title = String::from_utf8_lossy(&data[24..24 + data_len]).to_string();
+        if !title.is_empty() {
+            let _ = state.update_tx.send((
+                state.client_id.clone(),
+                DisplayUpdate::TitleChanged {
+                    window_id: window,
+                    title,
+                },
+            ));
+        }
+    }
+
+    Vec::new()
 }
 
 fn handle_get_property(_state: &ClientState, _data: &[u8], seq: u16) -> Vec<u8> {

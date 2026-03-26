@@ -98,6 +98,7 @@ export type FrontendToBackend =
 	  };
 
 export type DisplayUpdate =
+	| { kind: "TitleChanged"; window_id: number; title: string }
 	| {
 			kind: "WindowCreated";
 			window_id: number;
