@@ -800,34 +800,45 @@ fn handle_request(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
         91 => handle_query_colors(state, data, seq),
         98 => handle_query_extension(state, data, seq),
         101 => handle_get_keyboard_mapping(data, seq),
-        // Silently ignore these common requests
+        // Requests that need replies - route to handle_misc_request
+        26 | // GrabPointer
+        31 | // GrabKeyboard
+        40 | // TranslateCoordinates
+        44 | // QueryKeymap
+        48 | // QueryTextExtents
+        50 | // ListFontsWithInfo
+        52 | // GetFontPath
+        103 | // GetKeyboardControl
+        116 | // SetPointerMapping
+        119   // GetModifierMapping
+        => handle_misc_request(state, major_opcode, seq),
+        // Font operations
+        45 => handle_open_font(state, data),
+        46 => handle_close_font(state, data),
+        // Drawing operations
+        74 => handle_poly_text8(state, data),
+        76 => handle_image_text8(state, data),
+        // Silently ignore these common requests (no reply needed)
         19 | // DeleteProperty
         22 | // SetSelectionOwner
         24 | // ConvertSelection
         25 | // SendEvent
-        26 | // GrabPointer -> reply needed
+        27 | // UngrabPointer
         28 | // UngrabButton
+        29 | // UngrabButton (alt)
         30 | // ChangeActivePointerGrab
-        31 | // UngrabPointer
-        33 | // UngrabKeyboard
+        32 | // UngrabKeyboard
+        33 | // GrabKey
+        34 | // UngrabKey
         35 | // AllowEvents
         36 | // GrabServer
         37 | // UngrabServer
-        40 | // TranslateCoordinates -> reply needed
         41 | // WarpPointer
-        44 | // QueryKeymap -> reply needed
-        45 => handle_open_font(state, data),
-        46 => handle_close_font(state, data),
-        48 | // QueryTextExtents -> reply needed
-        50 | // ListFontsWithInfo -> reply needed
         51 | // SetFontPath
-        52 | // GetFontPath -> reply needed
         57 | // CopyGC
         58 | // SetDashes
         59 | // SetClipRectangles
-        74 => handle_poly_text8(state, data),
         75 | // PolyText16
-        76 => handle_image_text8(state, data),
         77 | // ImageText16
         78 | // CreateColormap
         79 | // FreeColormap
@@ -838,13 +849,10 @@ fn handle_request(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
         96 | // RecolorCursor
         100 | // ChangeKeyboardMapping
         102 | // ChangeKeyboardControl
-        103 | // GetKeyboardControl -> reply needed
         104 | // Bell
         115 | // ForceScreenSaver
-        116 | // SetPointerMapping -> reply needed
-        119 | // GetModifierMapping -> reply needed
         127 // NoOperation
-        => handle_misc_request(state, major_opcode, seq),
+        => { Vec::new() },
         133 => {
             // BIG-REQUESTS: Enable reply
             let mut reply = [0u8; 32];
@@ -863,6 +871,18 @@ fn handle_request(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
     }
 }
 
+/// Build an X11 error reply (32 bytes)
+fn build_error(error_code: u8, seq: u16, bad_value: u32, major_opcode: u8, minor_opcode: u16) -> Vec<u8> {
+    let mut err = [0u8; 32];
+    err[0] = 0; // Error indicator
+    err[1] = error_code;
+    err[2..4].copy_from_slice(&seq.to_le_bytes());
+    err[4..8].copy_from_slice(&bad_value.to_le_bytes());
+    err[8..10].copy_from_slice(&minor_opcode.to_le_bytes());
+    err[10] = major_opcode;
+    err.to_vec()
+}
+
 // Handles requests that need stub replies
 fn handle_misc_request(state: &mut ClientState, opcode: u8, seq: u16) -> Vec<u8> {
     match opcode {
@@ -870,7 +890,15 @@ fn handle_misc_request(state: &mut ClientState, opcode: u8, seq: u16) -> Vec<u8>
             // GrabPointer reply: Success
             let mut reply = [0u8; 32];
             reply[0] = 1; // Reply
-            reply[1] = 0; // Success status
+            reply[1] = 0; // GrabSuccess status
+            reply[2..4].copy_from_slice(&seq.to_le_bytes());
+            reply.to_vec()
+        }
+        31 => {
+            // GrabKeyboard reply: Success
+            let mut reply = [0u8; 32];
+            reply[0] = 1; // Reply
+            reply[1] = 0; // GrabSuccess status
             reply[2..4].copy_from_slice(&seq.to_le_bytes());
             reply.to_vec()
         }
@@ -900,6 +928,18 @@ fn handle_misc_request(state: &mut ClientState, opcode: u8, seq: u16) -> Vec<u8>
             reply[8..10].copy_from_slice(&12i16.to_le_bytes());
             reply[10..12].copy_from_slice(&4i16.to_le_bytes());
             reply.to_vec()
+        }
+        50 => {
+            // ListFontsWithInfo reply: terminate with empty reply (name_length=0)
+            let mut reply = [0u8; 32];
+            reply[0] = 1; // Reply
+            reply[1] = 0; // last-reply indicator (name_length = 0)
+            reply[2..4].copy_from_slice(&seq.to_le_bytes());
+            // reply[4..8] = 7 (length of additional data = 7 * 4 = 28 bytes for min/max bounds)
+            reply[4..8].copy_from_slice(&7u32.to_le_bytes());
+            let mut full_reply = reply.to_vec();
+            full_reply.resize(32 + 28, 0); // 28 bytes of padding for the min/max bounds
+            full_reply
         }
         52 => {
             // GetFontPath reply: empty list
@@ -1070,27 +1110,31 @@ fn handle_change_window_attributes(state: &mut ClientState, data: &[u8]) -> Vec<
 fn handle_get_window_attributes(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
     let wid = u32::from_le_bytes([data[4], data[5], data[6], data[7]]);
 
+    let win = match state.windows.get(&wid) {
+        Some(w) => w,
+        None => return build_error(3, seq, wid, 3, 0), // BadWindow
+    };
+
     let mut reply = vec![0u8; 44];
     reply[0] = 1; // Reply
     reply[1] = 0; // backing-store: NotUseful
     reply[2..4].copy_from_slice(&seq.to_le_bytes());
     reply[4..8].copy_from_slice(&3u32.to_le_bytes()); // length = 3 extra u32s
-
-    if let Some(win) = state.windows.get(&wid) {
-        reply[8..12].copy_from_slice(&win.visual.to_le_bytes());
-        reply[12..14].copy_from_slice(&win.class.to_le_bytes());
-        // bit_gravity = 0, win_gravity = 0
-        reply[18..22].copy_from_slice(&0u32.to_le_bytes()); // backing_planes
-        reply[22..26].copy_from_slice(&0u32.to_le_bytes()); // backing_pixel
-        reply[26] = 0; // save_under = false
-        reply[27] = 1; // map_is_installed = true
-        reply[28] = if win.mapped { 2 } else { 0 }; // map_state: Viewable or Unmapped
-        reply[29] = if win.override_redirect { 1 } else { 0 };
-        reply[30..34].copy_from_slice(&ROOT_COLORMAP.to_le_bytes());
-        reply[34..38].copy_from_slice(&win.event_mask.to_le_bytes());
-        reply[38..42].copy_from_slice(&0u32.to_le_bytes()); // your_event_mask
-        reply[42..44].copy_from_slice(&0u16.to_le_bytes()); // do_not_propagate_mask
-    }
+    reply[8..12].copy_from_slice(&win.visual.to_le_bytes());     // visual (4 bytes)
+    reply[12..14].copy_from_slice(&win.class.to_le_bytes());     // class (2 bytes)
+    reply[14] = 0; // bit_gravity
+    reply[15] = 0; // win_gravity
+    reply[16..20].copy_from_slice(&0u32.to_le_bytes()); // backing_planes
+    reply[20..24].copy_from_slice(&0u32.to_le_bytes()); // backing_pixel
+    reply[24] = 0; // save_under = false
+    reply[25] = 1; // map_is_installed = true
+    reply[26] = if win.mapped { 2 } else { 0 }; // map_state: Viewable or Unmapped
+    reply[27] = if win.override_redirect { 1 } else { 0 };
+    reply[28..32].copy_from_slice(&ROOT_COLORMAP.to_le_bytes()); // colormap
+    reply[32..36].copy_from_slice(&win.event_mask.to_le_bytes()); // all_event_masks
+    reply[36..40].copy_from_slice(&0u32.to_le_bytes()); // your_event_mask
+    reply[40..42].copy_from_slice(&0u16.to_le_bytes()); // do_not_propagate_mask
+    // bytes 42-43: unused padding
 
     reply
 }
@@ -1282,30 +1326,42 @@ fn handle_configure_window(state: &mut ClientState, data: &[u8], seq: u16) -> Ve
 fn handle_get_geometry(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
     let drawable = u32::from_le_bytes([data[4], data[5], data[6], data[7]]);
 
-    let mut reply = [0u8; 32];
-    reply[0] = 1; // Reply
-    reply[1] = 24; // depth
-    reply[2..4].copy_from_slice(&seq.to_le_bytes());
-    // length = 0
-
+    // Check windows first, then pixmaps
     if let Some(win) = state.windows.get(&drawable) {
+        let mut reply = [0u8; 32];
+        reply[0] = 1; // Reply
+        reply[1] = 24; // depth
+        reply[2..4].copy_from_slice(&seq.to_le_bytes());
         reply[8..12].copy_from_slice(&state.root_window.to_le_bytes());
         reply[12..14].copy_from_slice(&win.x.to_le_bytes());
         reply[14..16].copy_from_slice(&win.y.to_le_bytes());
         reply[16..18].copy_from_slice(&win.width.to_le_bytes());
         reply[18..20].copy_from_slice(&win.height.to_le_bytes());
         reply[20..22].copy_from_slice(&win.border_width.to_le_bytes());
-    } else {
-        reply[8..12].copy_from_slice(&state.root_window.to_le_bytes());
-        reply[16..18].copy_from_slice(&state.root_width.to_le_bytes());
-        reply[18..20].copy_from_slice(&state.root_height.to_le_bytes());
+        return reply.to_vec();
     }
 
-    reply.to_vec()
+    if let Some(pixmap) = state.pixmaps.get(&drawable) {
+        let mut reply = [0u8; 32];
+        reply[0] = 1; // Reply
+        reply[1] = 24; // depth
+        reply[2..4].copy_from_slice(&seq.to_le_bytes());
+        reply[8..12].copy_from_slice(&state.root_window.to_le_bytes());
+        reply[16..18].copy_from_slice(&pixmap._width.to_le_bytes());
+        reply[18..20].copy_from_slice(&pixmap._height.to_le_bytes());
+        return reply.to_vec();
+    }
+
+    // Drawable not found - return BadDrawable error (error code 9)
+    build_error(9, seq, drawable, 14, 0)
 }
 
 fn handle_query_tree(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
     let wid = u32::from_le_bytes([data[4], data[5], data[6], data[7]]);
+
+    if !state.windows.contains_key(&wid) {
+        return build_error(3, seq, wid, 15, 0); // BadWindow
+    }
 
     let children: Vec<u32> = state
         .windows

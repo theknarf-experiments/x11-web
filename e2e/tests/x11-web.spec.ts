@@ -375,12 +375,10 @@ test.describe
 			expect(await countNonBlackPixels(canvas)).toBeGreaterThan(50);
 		});
 
-		test("GTK app does not crash the sidecar", async ({ page }) => {
+		test("GTK app renders on the canvas", async ({ page }) => {
 			await page.goto(`http://localhost:${frontendPort}`);
 			await waitForDock(page);
 
-			// Spawn zenity — it may not fully render yet (GTK3 needs more
-			// protocol support), but the sidecar must not crash.
 			const win = await spawnApp(
 				page,
 				'--info --text "Hello from GTK" --title "GTK Test"',
@@ -388,9 +386,10 @@ test.describe
 			);
 			const canvas = win.locator('[data-testid="x11-canvas"]');
 			await expect(canvas).toBeVisible();
-			await page.waitForTimeout(3000);
+			await page.waitForTimeout(5000);
 
-			// The afterEach health check will verify the sidecar survived
+			// Zenity should render something (GTK dialog with text)
+			expect(await countNonBlackPixels(canvas)).toBeGreaterThan(100);
 		});
 
 		test("vim workflow: insert, save, quit, cat", async ({ page }) => {
