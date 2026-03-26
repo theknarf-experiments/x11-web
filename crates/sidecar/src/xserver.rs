@@ -44,8 +44,10 @@ pub(crate) struct ClientState {
     pub(crate) root_height: u16,
     pub(crate) pointer_x: i16,
     pub(crate) pointer_y: i16,
+    pub(crate) focus_window: u32,
     pub(crate) font_manager: FontManager,
     pub(crate) render: crate::render::RenderState,
+    pub(crate) selections: HashMap<u32, u32>,
 }
 
 impl ClientState {
@@ -481,8 +483,10 @@ async fn handle_client(
         root_height: SCREEN_HEIGHT,
         pointer_x: 0,
         pointer_y: 0,
+        focus_window: ROOT_WINDOW,
         font_manager: FontManager::new(),
         render: crate::render::RenderState::new(),
+        selections: HashMap::new(),
     };
 
     // Add root window to state
@@ -818,10 +822,10 @@ fn handle_request(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
         // Drawing operations
         74 => handle_poly_text8(state, data),
         76 => handle_image_text8(state, data),
+        22 => handle_set_selection_owner(state, data),
+        24 => handle_convert_selection(state, data, seq),
         // Silently ignore these common requests (no reply needed)
         19 | // DeleteProperty
-        22 | // SetSelectionOwner
-        24 | // ConvertSelection
         25 | // SendEvent
         27 | // UngrabPointer
         28 | // UngrabButton
@@ -864,6 +868,7 @@ fn handle_request(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
         128 => handle_shape_request(state, data, seq),
         138 => handle_xfixes_request(state, data, seq),
         139 => crate::render::handle_render_request(state, data, seq),
+        140 => handle_randr_request(state, data, seq),
         _ => {
             debug!("Unhandled X11 request opcode: {major_opcode}");
             Vec::new()
@@ -1472,12 +1477,51 @@ fn handle_get_property(_state: &mut ClientState, _data: &[u8], seq: u16) -> Vec<
     reply.to_vec()
 }
 
-fn handle_get_selection_owner(_state: &mut ClientState, _data: &[u8], seq: u16) -> Vec<u8> {
+fn handle_get_selection_owner(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
     let mut reply = [0u8; 32];
     reply[0] = 1;
     reply[2..4].copy_from_slice(&seq.to_le_bytes());
-    // owner = None (0)
+    if data.len() >= 8 {
+        let selection = u32::from_le_bytes([data[4], data[5], data[6], data[7]]);
+        let owner = state.selections.get(&selection).copied().unwrap_or(0);
+        reply[8..12].copy_from_slice(&owner.to_le_bytes());
+    }
     reply.to_vec()
+}
+
+fn handle_set_selection_owner(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
+    // SetSelectionOwner: [opcode(1), pad(1), length(2), owner(4), selection(4), timestamp(4)]
+    if data.len() >= 12 {
+        let owner = u32::from_le_bytes([data[4], data[5], data[6], data[7]]);
+        let selection = u32::from_le_bytes([data[8], data[9], data[10], data[11]]);
+        if owner == 0 {
+            state.selections.remove(&selection);
+        } else {
+            state.selections.insert(selection, owner);
+        }
+    }
+    Vec::new()
+}
+
+fn handle_convert_selection(_state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
+    // ConvertSelection: [opcode(1), pad(1), length(2), requestor(4), selection(4), target(4), property(4), timestamp(4)]
+    if data.len() >= 24 {
+        let requestor = u32::from_le_bytes([data[4], data[5], data[6], data[7]]);
+        let selection = u32::from_le_bytes([data[8], data[9], data[10], data[11]]);
+        let target = u32::from_le_bytes([data[12], data[13], data[14], data[15]]);
+
+        // Send SelectionNotify event back with property=None to indicate no data
+        let mut event = [0u8; 32];
+        event[0] = 31; // SelectionNotify
+        event[2..4].copy_from_slice(&seq.to_le_bytes());
+        event[4..8].copy_from_slice(&0u32.to_le_bytes()); // timestamp
+        event[8..12].copy_from_slice(&requestor.to_le_bytes()); // requestor
+        event[12..16].copy_from_slice(&selection.to_le_bytes()); // selection
+        event[16..20].copy_from_slice(&target.to_le_bytes()); // target
+        event[20..24].copy_from_slice(&0u32.to_le_bytes()); // property = None
+        return event.to_vec();
+    }
+    Vec::new()
 }
 
 fn handle_query_pointer(state: &mut ClientState, _data: &[u8], seq: u16) -> Vec<u8> {
@@ -1495,7 +1539,12 @@ fn handle_query_pointer(state: &mut ClientState, _data: &[u8], seq: u16) -> Vec<
     reply.to_vec()
 }
 
-fn handle_set_input_focus(_state: &mut ClientState, _data: &[u8]) -> Vec<u8> {
+fn handle_set_input_focus(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
+    if data.len() >= 8 {
+        let focus = u32::from_le_bytes([data[4], data[5], data[6], data[7]]);
+        // 0 = None, 1 = PointerRoot — keep as-is; otherwise store the window
+        state.focus_window = focus;
+    }
     Vec::new()
 }
 
@@ -1504,7 +1553,7 @@ fn handle_get_input_focus(state: &mut ClientState, _data: &[u8], seq: u16) -> Ve
     reply[0] = 1;
     reply[1] = 1; // revert_to = Parent
     reply[2..4].copy_from_slice(&seq.to_le_bytes());
-    reply[8..12].copy_from_slice(&state.root_window.to_le_bytes());
+    reply[8..12].copy_from_slice(&state.focus_window.to_le_bytes());
     reply.to_vec()
 }
 
@@ -2542,7 +2591,7 @@ fn handle_query_extension(_state: &mut ClientState, data: &[u8], seq: u16) -> Ve
             reply[10] = 64; // first_event
             reply[11] = 0; // first_error
         }
-        "XINERAMA" | "XInputExtension" | "XKEYBOARD" => {
+        "XINERAMA" | "XInputExtension" | "XKEYBOARD" | "RANDR" => {
             // Not present — already zero
         }
         _ => {
@@ -2594,6 +2643,148 @@ fn handle_xfixes_request(_state: &mut ClientState, data: &[u8], seq: u16) -> Vec
         }
         // All other minor opcodes: ignore
         _ => Vec::new(),
+    }
+}
+
+fn handle_randr_request(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
+    let minor = data[1];
+    debug!("RANDR minor opcode: {minor}");
+
+    match minor {
+        0 => {
+            // QueryVersion: return version 1.5
+            let mut reply = [0u8; 32];
+            reply[0] = 1; // Reply
+            reply[2..4].copy_from_slice(&seq.to_le_bytes());
+            reply[8..12].copy_from_slice(&1u32.to_le_bytes()); // major version
+            reply[12..16].copy_from_slice(&5u32.to_le_bytes()); // minor version
+            reply.to_vec()
+        }
+        2 => {
+            // SetScreenConfig: reply with success
+            let mut reply = [0u8; 32];
+            reply[0] = 1; // Reply
+            reply[1] = 0; // Success
+            reply[2..4].copy_from_slice(&seq.to_le_bytes());
+            // timestamp
+            reply[8..12].copy_from_slice(&0u32.to_le_bytes());
+            // config_timestamp
+            reply[12..16].copy_from_slice(&0u32.to_le_bytes());
+            // root window
+            reply[16..20].copy_from_slice(&state.root_window.to_le_bytes());
+            reply.to_vec()
+        }
+        5 => {
+            // GetScreenInfo: minimal screen configuration
+            // Reply header (32) + 1 ScreenSize (8 bytes) + 0 rates
+            let num_sizes: u16 = 1;
+            let extra_data_len: usize = 8; // 1 screen size * 8 bytes
+            let reply_len = 32 + extra_data_len;
+            let mut reply = vec![0u8; reply_len];
+            reply[0] = 1; // Reply
+            reply[1] = 1; // rotations = Rotate_0
+            reply[2..4].copy_from_slice(&seq.to_le_bytes());
+            reply[4..8].copy_from_slice(&((extra_data_len / 4) as u32).to_le_bytes()); // length
+            reply[8..12].copy_from_slice(&state.root_window.to_le_bytes()); // root
+            // timestamp
+            reply[12..16].copy_from_slice(&0u32.to_le_bytes());
+            // config_timestamp
+            reply[16..20].copy_from_slice(&0u32.to_le_bytes());
+            reply[20..22].copy_from_slice(&num_sizes.to_le_bytes()); // nSizes
+            reply[22..24].copy_from_slice(&0u16.to_le_bytes()); // sizeID (current)
+            reply[24..26].copy_from_slice(&1u16.to_le_bytes()); // rotation = Rotate_0
+            reply[26..28].copy_from_slice(&0u16.to_le_bytes()); // nrateEnts = 0
+            // pad bytes 28-31 already zero
+            // Screen size entry: width(2), height(2), mwidth(2), mheight(2)
+            reply[32..34].copy_from_slice(&SCREEN_WIDTH.to_le_bytes());
+            reply[34..36].copy_from_slice(&SCREEN_HEIGHT.to_le_bytes());
+            reply[36..38].copy_from_slice(&270u16.to_le_bytes()); // mm width
+            reply[38..40].copy_from_slice(&203u16.to_le_bytes()); // mm height
+            reply
+        }
+        6 => {
+            // GetScreenSizeRange: min=1x1, max=32767x32767
+            let mut reply = [0u8; 32];
+            reply[0] = 1; // Reply
+            reply[2..4].copy_from_slice(&seq.to_le_bytes());
+            reply[8..10].copy_from_slice(&1u16.to_le_bytes()); // min_width
+            reply[10..12].copy_from_slice(&1u16.to_le_bytes()); // min_height
+            reply[12..14].copy_from_slice(&32767u16.to_le_bytes()); // max_width
+            reply[14..16].copy_from_slice(&32767u16.to_le_bytes()); // max_height
+            reply.to_vec()
+        }
+        7 => {
+            // SetScreenSize: ignore (void)
+            Vec::new()
+        }
+        8 | 19 => {
+            // GetScreenResources / GetScreenResourcesCurrent
+            // Minimal reply with 0 CRTCs, 0 outputs, 0 modes
+            let mut reply = [0u8; 32];
+            reply[0] = 1; // Reply
+            reply[2..4].copy_from_slice(&seq.to_le_bytes());
+            reply[4..8].copy_from_slice(&0u32.to_le_bytes()); // length (no extra data)
+            // timestamp
+            reply[8..12].copy_from_slice(&0u32.to_le_bytes());
+            // config_timestamp
+            reply[12..16].copy_from_slice(&0u32.to_le_bytes());
+            reply[16..18].copy_from_slice(&0u16.to_le_bytes()); // num_crtcs
+            reply[18..20].copy_from_slice(&0u16.to_le_bytes()); // num_outputs
+            reply[20..22].copy_from_slice(&0u16.to_le_bytes()); // num_modes
+            reply[22..24].copy_from_slice(&0u16.to_le_bytes()); // names_len
+            reply.to_vec()
+        }
+        9 => {
+            // GetOutputInfo: return error (BadOutput)
+            build_error(11, seq, 0, 140, 9) // BadAccess as placeholder
+        }
+        14 => {
+            // GetCrtcInfo: return error
+            build_error(11, seq, 0, 140, 14)
+        }
+        15 => {
+            // SetCrtcConfig: reply with success
+            let mut reply = [0u8; 32];
+            reply[0] = 1; // Reply
+            reply[1] = 0; // Success
+            reply[2..4].copy_from_slice(&seq.to_le_bytes());
+            // timestamp
+            reply[8..12].copy_from_slice(&0u32.to_le_bytes());
+            reply.to_vec()
+        }
+        20 => {
+            // SelectInput: ignore
+            Vec::new()
+        }
+        41 => {
+            // GetOutputPrimary: reply with output=0
+            let mut reply = [0u8; 32];
+            reply[0] = 1; // Reply
+            reply[2..4].copy_from_slice(&seq.to_le_bytes());
+            reply[8..12].copy_from_slice(&0u32.to_le_bytes()); // output = 0
+            reply.to_vec()
+        }
+        46 => {
+            // GetProviders: 0 providers
+            let mut reply = [0u8; 32];
+            reply[0] = 1; // Reply
+            reply[2..4].copy_from_slice(&seq.to_le_bytes());
+            // timestamp
+            reply[8..12].copy_from_slice(&0u32.to_le_bytes());
+            reply[12..14].copy_from_slice(&0u16.to_le_bytes()); // num_providers
+            reply.to_vec()
+        }
+        47 => {
+            // GetProviderInfo: empty reply
+            let mut reply = [0u8; 32];
+            reply[0] = 1; // Reply
+            reply[2..4].copy_from_slice(&seq.to_le_bytes());
+            reply.to_vec()
+        }
+        _ => {
+            debug!("Unhandled RANDR minor opcode: {minor}");
+            Vec::new()
+        }
     }
 }
 

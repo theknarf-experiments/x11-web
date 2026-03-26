@@ -13,6 +13,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     zenity \
     libgtk2.0-0 \
     dbus-x11 \
+    emacs-nox \
+    nano \
+    x11-utils \
     && rm -rf /var/lib/apt/lists/*
 RUN mkdir -p /tmp/.X11-unix
 COPY --from=builder /app/target/release/x11-web-sidecar /usr/local/bin/

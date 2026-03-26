@@ -140,22 +140,25 @@ impl Framebuffer {
         let r = ((color >> 16) & 0xFF) as u8;
         let g = ((color >> 8) & 0xFF) as u8;
         let b = (color & 0xFF) as u8;
-        let pixel = [b, g, r, 0xFF]; // BGRA with full alpha
+        let pixel = [b, g, r, 0xFF];
+
+        // Pre-build a row of pixels
+        let row_start = (x as i32).max(0) as usize;
+        let row_end = ((x as i32 + width as i32).min(self.width as i32)).max(0) as usize;
+        if row_start >= row_end { return; }
+        let row_len = row_end - row_start;
+
+        let mut row_buf = vec![0u8; row_len * 4];
+        for i in 0..row_len {
+            row_buf[i*4..i*4+4].copy_from_slice(&pixel);
+        }
 
         for row in 0..height as i32 {
             let dy = y as i32 + row;
-            if dy < 0 || dy >= self.height as i32 {
-                continue;
-            }
-            for col in 0..width as i32 {
-                let dx = x as i32 + col;
-                if dx < 0 || dx >= self.width as i32 {
-                    continue;
-                }
-                let off = dy as usize * self.stride + dx as usize * 4;
-                if off + 3 < self.data.len() {
-                    self.data[off..off + 4].copy_from_slice(&pixel);
-                }
+            if dy < 0 || dy >= self.height as i32 { continue; }
+            let dst_off = dy as usize * self.stride + row_start * 4;
+            if dst_off + row_len * 4 <= self.data.len() {
+                self.data[dst_off..dst_off + row_len * 4].copy_from_slice(&row_buf);
             }
         }
         self.mark_dirty(x as i32, y as i32, width as u32, height as u32);
