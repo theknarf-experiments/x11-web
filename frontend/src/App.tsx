@@ -50,8 +50,10 @@ function App() {
 		sidecars,
 		processes,
 		connectedProcesses,
+		initialWindowStates,
 		send,
 		onDisplayUpdate,
+		onWindowStateChange,
 	} = useBackendSocket();
 
 	const [windows, setWindows] = useState<CanvasWindow[]>([]);
@@ -88,11 +90,31 @@ function App() {
 					renderersRef.current.set(cp.clientId, new ClientRenderer(1, 1));
 				}
 
-				const idx = spawnCounter++;
-				const offset = idx * 30;
-				const cx = window.innerWidth / 4 + offset;
-				const cy = window.innerHeight / 4 + offset;
-				const color = PASTEL_COLORS[idx % PASTEL_COLORS.length];
+				// Check if we have persisted state for this window
+				const saved = initialWindowStates.find(
+					(ws) => ws.clientId === cp.clientId,
+				);
+
+				let cx: number;
+				let cy: number;
+				let color: string;
+				if (saved) {
+					cx = saved.x;
+					cy = saved.y;
+					color = saved.color;
+				} else {
+					const idx = spawnCounter++;
+					const offset = idx * 30;
+					cx = window.innerWidth / 4 + offset;
+					cy = window.innerHeight / 4 + offset;
+					color = PASTEL_COLORS[idx % PASTEL_COLORS.length];
+				}
+
+				// Auto-subscribe to display updates for this sidecar
+				send({
+					type: "SubscribeDisplay",
+					sidecar_id: cp.sidecarId,
+				});
 
 				setWindows((prev) => [
 					...prev,
@@ -106,9 +128,31 @@ function App() {
 						color,
 					},
 				]);
+
+				// Send initial window state to backend for new windows
+				if (!saved) {
+					send({
+						type: "UpdateWindowState",
+						client_id: cp.clientId,
+						sidecar_id: cp.sidecarId,
+						x: cx,
+						y: cy,
+						color,
+					});
+				}
 			}
 		}
-	}, [connectedProcesses, processes, windows]);
+	}, [connectedProcesses, processes, windows, initialWindowStates, send]);
+
+	// Handle window state changes from other tabs
+	useEffect(() => {
+		onWindowStateChange((clientId, x, y, color) => {
+			setWindows((prev) =>
+				prev.map((w) => (w.clientId === clientId ? { ...w, x, y, color } : w)),
+			);
+		});
+		return () => onWindowStateChange(null);
+	}, [onWindowStateChange]);
 
 	function handleSpawn(sidecarId: string, command: string, args: string[]) {
 		send({ type: "SubscribeDisplay", sidecar_id: sidecarId });
@@ -134,11 +178,34 @@ function App() {
 		});
 	}
 
-	const handleMove = useCallback((clientId: string, x: number, y: number) => {
-		setWindows((prev) =>
-			prev.map((w) => (w.clientId === clientId ? { ...w, x, y } : w)),
-		);
-	}, []);
+	const moveTimerRef = useRef<ReturnType<typeof setTimeout>>(undefined);
+
+	const handleMove = useCallback(
+		(clientId: string, x: number, y: number) => {
+			setWindows((prev) =>
+				prev.map((w) => (w.clientId === clientId ? { ...w, x, y } : w)),
+			);
+			// Debounced sync to backend
+			clearTimeout(moveTimerRef.current);
+			moveTimerRef.current = setTimeout(() => {
+				setWindows((cur) => {
+					const win = cur.find((w) => w.clientId === clientId);
+					if (win) {
+						send({
+							type: "UpdateWindowState",
+							client_id: win.clientId,
+							sidecar_id: win.sidecarId,
+							x: win.x,
+							y: win.y,
+							color: win.color,
+						});
+					}
+					return cur;
+				});
+			}, 200);
+		},
+		[send],
+	);
 
 	// Debounced resize — sends to X11 server
 	const resizeTimerRef = useRef<ReturnType<typeof setTimeout>>(undefined);

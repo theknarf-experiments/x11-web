@@ -39,6 +39,28 @@ export type BackendToFrontend =
 			sidecar_id: string;
 			client_id: string;
 			update: DisplayUpdate;
+	  }
+	| {
+			type: "ConnectedProcessesList";
+			processes: { sidecar_id: string; pid: number; client_id: string }[];
+	  }
+	| {
+			type: "WindowStateList";
+			windows: {
+				client_id: string;
+				sidecar_id: string;
+				pid: number;
+				x: number;
+				y: number;
+				color: string;
+			}[];
+	  }
+	| {
+			type: "WindowStateChanged";
+			client_id: string;
+			x: number;
+			y: number;
+			color: string;
 	  };
 
 // Frontend -> Backend messages
@@ -65,6 +87,14 @@ export type FrontendToBackend =
 			client_id: string;
 			width: number;
 			height: number;
+	  }
+	| {
+			type: "UpdateWindowState";
+			client_id: string;
+			sidecar_id: string;
+			x: number;
+			y: number;
+			color: string;
 	  };
 
 export type DisplayUpdate =

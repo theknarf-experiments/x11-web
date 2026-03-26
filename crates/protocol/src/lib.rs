@@ -99,6 +99,19 @@ pub enum BackendToFrontend {
         client_id: String,
         update: DisplayUpdate,
     },
+    /// Initial list of all currently connected processes (sent on frontend connect).
+    ConnectedProcessesList {
+        processes: Vec<ConnectedProcessInfo>,
+    },
+    /// Initial window state for all windows (sent on frontend connect).
+    WindowStateList { windows: Vec<WindowState> },
+    /// A window's state changed (position/color, from another frontend).
+    WindowStateChanged {
+        client_id: String,
+        x: f64,
+        y: f64,
+        color: String,
+    },
 }
 
 /// Messages sent from a frontend client to the backend.
@@ -138,6 +151,33 @@ pub enum FrontendToBackend {
         width: u16,
         height: u16,
     },
+    /// Update a window's position/color (synced across frontends).
+    UpdateWindowState {
+        client_id: String,
+        sidecar_id: String,
+        x: f64,
+        y: f64,
+        color: String,
+    },
+}
+
+/// Information about a connected process (for initial sync).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ConnectedProcessInfo {
+    pub sidecar_id: String,
+    pub pid: u32,
+    pub client_id: String,
+}
+
+/// Window state for position/color sync.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WindowState {
+    pub client_id: String,
+    pub sidecar_id: String,
+    pub pid: u32,
+    pub x: f64,
+    pub y: f64,
+    pub color: String,
 }
 
 /// Information about a connected sidecar.

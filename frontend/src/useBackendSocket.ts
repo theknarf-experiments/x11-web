@@ -21,14 +21,34 @@ export interface ConnectedProcess {
 	clientId: string;
 }
 
+export interface InitialWindowState {
+	clientId: string;
+	sidecarId: string;
+	pid: number;
+	x: number;
+	y: number;
+	color: string;
+}
+
+export type WindowStateChangeCallback = (
+	clientId: string,
+	x: number,
+	y: number,
+	color: string,
+) => void;
+
 export function useBackendSocket() {
 	const wsRef = useRef<WebSocket | null>(null);
 	const reconnectTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
 	const disposed = useRef(false);
 	const displayCallbackRef = useRef<DisplayUpdateCallback | null>(null);
+	const windowStateCallbackRef = useRef<WindowStateChangeCallback | null>(null);
 	const [connected, setConnected] = useState(false);
 	const [sidecars, setSidecars] = useState<SidecarInfo[]>([]);
 	const [processes, setProcesses] = useState<Record<string, ProcessInfo[]>>({});
+	const [initialWindowStates, setInitialWindowStates] = useState<
+		InitialWindowState[]
+	>([]);
 	const [connectedProcesses, setConnectedProcesses] = useState<
 		ConnectedProcess[]
 	>([]);
@@ -111,6 +131,35 @@ export function useBackendSocket() {
 							msg.update,
 						);
 						break;
+					case "ConnectedProcessesList":
+						setConnectedProcesses(
+							msg.processes.map((p) => ({
+								sidecarId: p.sidecar_id,
+								pid: p.pid,
+								clientId: p.client_id,
+							})),
+						);
+						break;
+					case "WindowStateList":
+						setInitialWindowStates(
+							msg.windows.map((w) => ({
+								clientId: w.client_id,
+								sidecarId: w.sidecar_id,
+								pid: w.pid,
+								x: w.x,
+								y: w.y,
+								color: w.color,
+							})),
+						);
+						break;
+					case "WindowStateChanged":
+						windowStateCallbackRef.current?.(
+							msg.client_id,
+							msg.x,
+							msg.y,
+							msg.color,
+						);
+						break;
 				}
 			};
 		}
@@ -141,12 +190,21 @@ export function useBackendSocket() {
 		displayCallbackRef.current = cb;
 	}, []);
 
+	const onWindowStateChange = useCallback(
+		(cb: WindowStateChangeCallback | null) => {
+			windowStateCallbackRef.current = cb;
+		},
+		[],
+	);
+
 	return {
 		connected,
 		sidecars,
 		processes,
 		connectedProcesses,
+		initialWindowStates,
 		send,
 		onDisplayUpdate,
+		onWindowStateChange,
 	};
 }

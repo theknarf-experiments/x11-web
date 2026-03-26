@@ -17,6 +17,10 @@ use x11_web_protocol::*;
 struct AppState {
     sidecars: Arc<RwLock<HashMap<String, SidecarConnection>>>,
     frontends: Arc<RwLock<HashMap<String, FrontendConnection>>>,
+    /// Registry of connected X11 processes: client_id → (sidecar_id, pid)
+    connected_processes: Arc<RwLock<HashMap<String, (String, u32)>>>,
+    /// Window state for position/color sync: client_id → WindowState
+    window_states: Arc<RwLock<HashMap<String, WindowState>>>,
 }
 
 struct SidecarConnection {
@@ -36,6 +40,8 @@ async fn main() {
     let state = AppState {
         sidecars: Arc::new(RwLock::new(HashMap::new())),
         frontends: Arc::new(RwLock::new(HashMap::new())),
+        connected_processes: Arc::new(RwLock::new(HashMap::new())),
+        window_states: Arc::new(RwLock::new(HashMap::new())),
     };
 
     let app = Router::new()
@@ -140,6 +146,13 @@ async fn handle_sidecar_ws(socket: WebSocket, state: AppState) {
                 .await;
             }
             SidecarToBackend::ProcessExited { pid, exit_code } => {
+                // Clean up from registries
+                let mut procs = state.connected_processes.write().await;
+                let mut states = state.window_states.write().await;
+                procs.retain(|_, (_, p)| *p != pid);
+                states.retain(|_, ws| ws.pid != pid);
+                drop(procs);
+                drop(states);
                 broadcast_to_frontends(
                     &state,
                     BackendToFrontend::ProcessExited {
@@ -164,6 +177,12 @@ async fn handle_sidecar_ws(socket: WebSocket, state: AppState) {
                 .await;
             }
             SidecarToBackend::ProcessConnected { pid, client_id } => {
+                // Register in process registry
+                state
+                    .connected_processes
+                    .write()
+                    .await
+                    .insert(client_id.clone(), (sidecar_id.clone(), pid));
                 broadcast_to_frontends(
                     &state,
                     BackendToFrontend::ProcessConnected {
@@ -208,6 +227,17 @@ async fn handle_sidecar_ws(socket: WebSocket, state: AppState) {
     // Sidecar disconnected
     info!("Sidecar disconnected: {}", sidecar_id);
     state.sidecars.write().await.remove(&sidecar_id);
+    // Clean up processes and window states for this sidecar
+    state
+        .connected_processes
+        .write()
+        .await
+        .retain(|_, (sid, _)| sid != &sidecar_id);
+    state
+        .window_states
+        .write()
+        .await
+        .retain(|_, ws| ws.sidecar_id != sidecar_id);
     send_task.abort();
 
     // Notify frontends
@@ -262,6 +292,31 @@ async fn handle_frontend_ws(socket: WebSocket, state: AppState) {
         let _ = tx.send(BackendToFrontend::SidecarList {
             sidecars: sidecar_list,
         });
+    }
+
+    // Send currently connected processes
+    {
+        let procs = state.connected_processes.read().await;
+        let processes: Vec<ConnectedProcessInfo> = procs
+            .iter()
+            .map(|(client_id, (sidecar_id, pid))| ConnectedProcessInfo {
+                sidecar_id: sidecar_id.clone(),
+                pid: *pid,
+                client_id: client_id.clone(),
+            })
+            .collect();
+        if !processes.is_empty() {
+            let _ = tx.send(BackendToFrontend::ConnectedProcessesList { processes });
+        }
+    }
+
+    // Send current window states
+    {
+        let states = state.window_states.read().await;
+        let windows: Vec<WindowState> = states.values().cloned().collect();
+        if !windows.is_empty() {
+            let _ = tx.send(BackendToFrontend::WindowStateList { windows });
+        }
     }
 
     // Process incoming messages from frontend
@@ -348,6 +403,45 @@ async fn handle_frontend_ws(socket: WebSocket, state: AppState) {
                     },
                 )
                 .await;
+            }
+            FrontendToBackend::UpdateWindowState {
+                client_id,
+                sidecar_id,
+                x,
+                y,
+                color,
+            } => {
+                // Look up pid from connected_processes
+                let pid = {
+                    let procs = state.connected_processes.read().await;
+                    procs.get(&client_id).map(|(_, p)| *p).unwrap_or(0)
+                };
+
+                // Store window state
+                state.window_states.write().await.insert(
+                    client_id.clone(),
+                    WindowState {
+                        client_id: client_id.clone(),
+                        sidecar_id,
+                        pid,
+                        x,
+                        y,
+                        color: color.clone(),
+                    },
+                );
+
+                // Broadcast to OTHER frontends
+                let frontends = state.frontends.read().await;
+                for (fid, frontend) in frontends.iter() {
+                    if fid != &frontend_id {
+                        let _ = frontend.tx.send(BackendToFrontend::WindowStateChanged {
+                            client_id: client_id.clone(),
+                            x,
+                            y,
+                            color: color.clone(),
+                        });
+                    }
+                }
             }
         }
     }

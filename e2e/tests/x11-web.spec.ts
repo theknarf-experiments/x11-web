@@ -1,7 +1,7 @@
 import { type ChildProcess, exec } from "node:child_process";
 import * as http from "node:http";
 import * as path from "node:path";
-import { expect, type Page, test } from "@playwright/test";
+import { expect, type Locator, type Page, test } from "@playwright/test";
 import type { StartedNetwork, StartedTestContainer } from "testcontainers";
 import { GenericContainer, Network, Wait } from "testcontainers";
 
@@ -17,24 +17,48 @@ let frontendServer: ChildProcess;
 let frontendPort: number;
 let backendPort: number;
 
-/** Open the spawn popover, fill in args, and click Spawn */
-async function spawnApp(page: Page, args = "") {
-	const spawnBtn = page.locator('[data-testid="spawn-button"]');
-	await spawnBtn.click();
+/** Spawn an app and return the new window frame locator */
+async function spawnApp(
+	page: Page,
+	args = "",
+	command = "xeyes",
+): Promise<Locator> {
+	const windowFrames = page.locator('[data-testid="window-frame"]');
+	const countBefore = await windowFrames.count();
+
+	await page.locator('[data-testid="spawn-button"]').click();
+	if (command !== "xeyes") {
+		await page.locator('input[placeholder="command"]').fill(command);
+	}
 	if (args) {
 		await page.locator('input[placeholder="args"]').fill(args);
 	}
-	// Click the Spawn button inside the popover
 	await page.locator("button", { hasText: "Spawn" }).click();
+
+	await expect(windowFrames).toHaveCount(countBefore + 1, {
+		timeout: 10_000,
+	});
+	return windowFrames.nth(countBefore);
 }
 
-/** Wait for the dock to be ready (visible with status indicator) */
 async function waitForDock(page: Page) {
 	const dock = page.locator('[data-testid="dock"]');
 	await expect(dock).toBeVisible({ timeout: 15_000 });
-	// Wait for the connection status dot to be green
 	await expect(page.locator('[data-testid="spawn-button"]')).toBeVisible({
 		timeout: 15_000,
+	});
+}
+
+async function countNonBlackPixels(canvas: Locator): Promise<number> {
+	return canvas.evaluate((el: HTMLCanvasElement) => {
+		const ctx = el.getContext("2d");
+		if (!ctx) return 0;
+		const d = ctx.getImageData(0, 0, el.width, el.height);
+		let n = 0;
+		for (let i = 0; i < d.data.length; i += 4) {
+			if (d.data[i] || d.data[i + 1] || d.data[i + 2]) n++;
+		}
+		return n;
 	});
 }
 
@@ -135,34 +159,13 @@ test.describe
 			await page.goto(`http://localhost:${frontendPort}`);
 			await waitForDock(page);
 
-			await spawnApp(page, "-geometry 300x200+10+10");
-
-			const windowFrame = page.locator('[data-testid="window-frame"]');
-			await expect(windowFrame).toBeVisible({ timeout: 10_000 });
-
-			const canvas = windowFrame.locator('[data-testid="x11-canvas"]');
+			const win = await spawnApp(page, "-geometry 300x200+10+10");
+			const canvas = win.locator('[data-testid="x11-canvas"]');
 			await expect(canvas).toBeVisible();
-
 			await page.waitForTimeout(5000);
 
-			const nonBlackPixels = await canvas.evaluate((el: HTMLCanvasElement) => {
-				const ctx = el.getContext("2d");
-				if (!ctx) return 0;
-				const imageData = ctx.getImageData(0, 0, el.width, el.height);
-				let count = 0;
-				for (let i = 0; i < imageData.data.length; i += 4) {
-					if (
-						imageData.data[i] !== 0 ||
-						imageData.data[i + 1] !== 0 ||
-						imageData.data[i + 2] !== 0
-					) {
-						count++;
-					}
-				}
-				return count;
-			});
-
-			expect(nonBlackPixels).toBeGreaterThan(10);
+			const pixels = await countNonBlackPixels(canvas);
+			expect(pixels).toBeGreaterThan(10);
 
 			await expect(canvas).toHaveScreenshot("xeyes-canvas.png", {
 				maxDiffPixelRatio: 0.01,
@@ -173,41 +176,35 @@ test.describe
 			await page.goto(`http://localhost:${frontendPort}`);
 			await waitForDock(page);
 
-			await spawnApp(page, "-geometry 200x150+10+10");
-			const windows = page.locator('[data-testid="window-frame"]');
-			await expect(windows.first()).toBeVisible({ timeout: 10_000 });
+			const windowFrames = page.locator('[data-testid="window-frame"]');
+			const countBefore = await windowFrames.count();
 
 			await spawnApp(page, "-geometry 200x150+10+10");
-			await expect(windows).toHaveCount(2, { timeout: 10_000 });
+			await spawnApp(page, "-geometry 200x150+10+10");
+
+			await expect(windowFrames).toHaveCount(countBefore + 2, {
+				timeout: 10_000,
+			});
 		});
 
 		test("closing a window removes it", async ({ page }) => {
 			await page.goto(`http://localhost:${frontendPort}`);
 			await waitForDock(page);
 
-			await spawnApp(page, "-geometry 200x150+10+10");
+			const windowFrames = page.locator('[data-testid="window-frame"]');
+			const countBefore = await windowFrames.count();
 
-			const windowFrame = page.locator('[data-testid="window-frame"]');
-			await expect(windowFrame).toBeVisible({ timeout: 10_000 });
-
-			const canvas = windowFrame.locator('[data-testid="x11-canvas"]');
+			const win = await spawnApp(page, "-geometry 200x150+10+10");
+			const canvas = win.locator('[data-testid="x11-canvas"]');
 			await expect(canvas).toBeVisible();
 			await page.waitForTimeout(3000);
 
-			const pixelsBefore = await canvas.evaluate((el: HTMLCanvasElement) => {
-				const ctx = el.getContext("2d");
-				if (!ctx) return 0;
-				const d = ctx.getImageData(0, 0, el.width, el.height);
-				let n = 0;
-				for (let i = 0; i < d.data.length; i += 4) {
-					if (d.data[i] || d.data[i + 1] || d.data[i + 2]) n++;
-				}
-				return n;
-			});
-			expect(pixelsBefore).toBeGreaterThan(10);
+			expect(await countNonBlackPixels(canvas)).toBeGreaterThan(10);
 
-			await windowFrame.locator('[data-testid="window-close"]').click();
-			await expect(windowFrame).toHaveCount(0, { timeout: 10_000 });
+			await win.locator('[data-testid="window-close"]').click();
+			await expect(windowFrames).toHaveCount(countBefore, {
+				timeout: 10_000,
+			});
 		});
 
 		test("resizing a window changes the canvas dimensions", async ({
@@ -216,12 +213,8 @@ test.describe
 			await page.goto(`http://localhost:${frontendPort}`);
 			await waitForDock(page);
 
-			await spawnApp(page, "-geometry 300x200+10+10");
-
-			const windowFrame = page.locator('[data-testid="window-frame"]');
-			await expect(windowFrame).toBeVisible({ timeout: 10_000 });
-
-			const canvas = windowFrame.locator('[data-testid="x11-canvas"]');
+			const win = await spawnApp(page, "-geometry 300x200+10+10");
+			const canvas = win.locator('[data-testid="x11-canvas"]');
 			await expect(canvas).toBeVisible();
 			await page.waitForTimeout(3000);
 
@@ -230,7 +223,7 @@ test.describe
 				height: el.height,
 			}));
 
-			const handleBox = await windowFrame.boundingBox();
+			const handleBox = await win.boundingBox();
 			if (!handleBox) throw new Error("Window has no bounding box");
 
 			const startX = handleBox.x + handleBox.width - 5;
@@ -239,7 +232,6 @@ test.describe
 			await page.mouse.down();
 			await page.mouse.move(startX + 100, startY + 80, { steps: 5 });
 			await page.mouse.up();
-
 			await page.waitForTimeout(2000);
 
 			const newSize = await canvas.evaluate((el: HTMLCanvasElement) => ({
@@ -255,11 +247,9 @@ test.describe
 			await page.goto(`http://localhost:${frontendPort}`);
 			await waitForDock(page);
 
-			await spawnApp(page, "-geometry 300x200+10+10");
-
-			const canvas = page.locator('[data-testid="x11-canvas"]');
-			await expect(canvas).toBeVisible({ timeout: 10_000 });
-
+			const win = await spawnApp(page, "-geometry 300x200+10+10");
+			const canvas = win.locator('[data-testid="x11-canvas"]');
+			await expect(canvas).toBeVisible();
 			await page.waitForTimeout(3000);
 
 			const box = await canvas.boundingBox();
@@ -282,18 +272,12 @@ test.describe
 			await page.goto(`http://localhost:${frontendPort}`);
 			await waitForDock(page);
 
-			await page.locator('[data-testid="spawn-button"]').click();
-			await page.locator('input[placeholder="command"]').fill("xlogo");
-			await page.locator('input[placeholder="args"]').fill("-geometry 100x100");
-			await page.locator("button", { hasText: "Spawn" }).click();
-
-			const canvas = page.locator('[data-testid="x11-canvas"]');
-			await expect(canvas).toBeVisible({ timeout: 10_000 });
+			const win = await spawnApp(page, "-geometry 100x100", "xlogo");
+			const canvas = win.locator('[data-testid="x11-canvas"]');
+			await expect(canvas).toBeVisible();
 			await page.waitForTimeout(5000);
 
-			const pixels = await countNonBlackPixels(canvas);
-			expect(pixels).toBeGreaterThan(100);
-
+			expect(await countNonBlackPixels(canvas)).toBeGreaterThan(100);
 			await expect(canvas).toHaveScreenshot("xlogo-canvas.png", {
 				maxDiffPixelRatio: 0.05,
 			});
@@ -303,18 +287,12 @@ test.describe
 			await page.goto(`http://localhost:${frontendPort}`);
 			await waitForDock(page);
 
-			await page.locator('[data-testid="spawn-button"]').click();
-			await page.locator('input[placeholder="command"]').fill("xclock");
-			await page.locator('input[placeholder="args"]').fill("");
-			await page.locator("button", { hasText: "Spawn" }).click();
-
-			const canvas = page.locator('[data-testid="x11-canvas"]');
-			await expect(canvas).toBeVisible({ timeout: 10_000 });
+			const win = await spawnApp(page, "", "xclock");
+			const canvas = win.locator('[data-testid="x11-canvas"]');
+			await expect(canvas).toBeVisible();
 			await page.waitForTimeout(5000);
 
-			const pixels = await countNonBlackPixels(canvas);
-			expect(pixels).toBeGreaterThan(100);
-
+			expect(await countNonBlackPixels(canvas)).toBeGreaterThan(100);
 			await expect(canvas).toHaveScreenshot("xclock-canvas.png", {
 				maxDiffPixelRatio: 0.05,
 			});
@@ -324,18 +302,12 @@ test.describe
 			await page.goto(`http://localhost:${frontendPort}`);
 			await waitForDock(page);
 
-			await page.locator('[data-testid="spawn-button"]').click();
-			await page.locator('input[placeholder="command"]').fill("xterm");
-			await page.locator('input[placeholder="args"]').fill("-geometry 40x10");
-			await page.locator("button", { hasText: "Spawn" }).click();
-
-			const canvas = page.locator('[data-testid="x11-canvas"]');
-			await expect(canvas).toBeVisible({ timeout: 10_000 });
+			const win = await spawnApp(page, "-geometry 40x10", "xterm");
+			const canvas = win.locator('[data-testid="x11-canvas"]');
+			await expect(canvas).toBeVisible();
 			await page.waitForTimeout(5000);
 
-			const pixels = await countNonBlackPixels(canvas);
-			expect(pixels).toBeGreaterThan(50);
-
+			expect(await countNonBlackPixels(canvas)).toBeGreaterThan(50);
 			await expect(canvas).toHaveScreenshot("xterm-canvas.png", {
 				maxDiffPixelRatio: 0.05,
 			});
@@ -345,25 +317,17 @@ test.describe
 			await page.goto(`http://localhost:${frontendPort}`);
 			await waitForDock(page);
 
-			await page.locator('[data-testid="spawn-button"]').click();
-			await page.locator('input[placeholder="command"]').fill("xterm");
-			await page.locator('input[placeholder="args"]').fill("-geometry 60x15");
-			await page.locator("button", { hasText: "Spawn" }).click();
-
-			const canvas = page.locator('[data-testid="x11-canvas"]');
-			await expect(canvas).toBeVisible({ timeout: 10_000 });
+			const win = await spawnApp(page, "-geometry 60x15", "xterm");
+			const canvas = win.locator('[data-testid="x11-canvas"]');
+			await expect(canvas).toBeVisible();
 			await page.waitForTimeout(3000);
 
-			// Click the canvas to focus it
 			await canvas.click();
 			await page.waitForTimeout(500);
-
-			// Type a command
 			await page.keyboard.type("echo hello", { delay: 50 });
 			await page.keyboard.press("Enter");
 			await page.waitForTimeout(2000);
 
-			// Take screenshot — should show the typed command and its output
 			await expect(canvas).toHaveScreenshot("xterm-keyboard.png", {
 				maxDiffPixelRatio: 0.05,
 			});
@@ -373,78 +337,46 @@ test.describe
 			await page.goto(`http://localhost:${frontendPort}`);
 			await waitForDock(page);
 
-			// Spawn xterm with larger geometry for vim
-			await page.locator('[data-testid="spawn-button"]').click();
-			await page.locator('input[placeholder="command"]').fill("xterm");
-			await page.locator('input[placeholder="args"]').fill("-geometry 60x20");
-			await page.locator("button", { hasText: "Spawn" }).click();
-
-			const canvas = page.locator('[data-testid="x11-canvas"]');
-			await expect(canvas).toBeVisible({ timeout: 10_000 });
+			const win = await spawnApp(page, "-geometry 60x20", "xterm");
+			const canvas = win.locator('[data-testid="x11-canvas"]');
+			await expect(canvas).toBeVisible();
 			await page.waitForTimeout(3000);
 
-			// Focus canvas
 			await canvas.click();
 			await page.waitForTimeout(500);
 
-			// Open vim with a file
 			await page.keyboard.type("vim /tmp/test.txt", { delay: 50 });
 			await page.keyboard.press("Enter");
 			await page.waitForTimeout(2000);
 
-			// Screenshot: vim opened (empty file)
 			await expect(canvas).toHaveScreenshot("vim-opened.png", {
 				maxDiffPixelRatio: 0.05,
 			});
 
-			// Enter insert mode
 			await page.keyboard.press("i");
 			await page.waitForTimeout(500);
-
-			// Type some text
 			await page.keyboard.type("Hello from x11-web!", { delay: 30 });
 			await page.waitForTimeout(1000);
 
-			// Screenshot: text entered in insert mode
 			await expect(canvas).toHaveScreenshot("vim-insert.png", {
 				maxDiffPixelRatio: 0.05,
 			});
 
-			// Exit insert mode
 			await page.keyboard.press("Escape");
 			await page.waitForTimeout(500);
-
-			// Save and quit (:wq)
 			await page.keyboard.type(":wq", { delay: 50 });
 			await page.keyboard.press("Enter");
 			await page.waitForTimeout(2000);
 
-			// Cat the file to verify it was saved
 			await page.keyboard.type("cat /tmp/test.txt", { delay: 50 });
 			await page.keyboard.press("Enter");
 			await page.waitForTimeout(2000);
 
-			// Screenshot: should show the file contents
 			await expect(canvas).toHaveScreenshot("vim-after-save.png", {
 				maxDiffPixelRatio: 0.05,
 			});
 		});
 	});
-
-async function countNonBlackPixels(
-	canvas: ReturnType<typeof import("@playwright/test").Page.prototype.locator>,
-): Promise<number> {
-	return canvas.evaluate((el: HTMLCanvasElement) => {
-		const ctx = el.getContext("2d");
-		if (!ctx) return 0;
-		const d = ctx.getImageData(0, 0, el.width, el.height);
-		let n = 0;
-		for (let i = 0; i < d.data.length; i += 4) {
-			if (d.data[i] || d.data[i + 1] || d.data[i + 2]) n++;
-		}
-		return n;
-	});
-}
 
 async function findFreePort(): Promise<number> {
 	return new Promise((resolve) => {
