@@ -36,6 +36,40 @@ pub struct X11Server {
 /// All connections share a single window namespace, as required by X11.
 pub(crate) type SharedWindows = Arc<Mutex<HashMap<u32, WindowState>>>;
 
+/// Shared window-manager state.
+///
+/// When a client sets SubstructureRedirectMask on the root window it becomes
+/// the window manager.  Other clients' MapWindow / ConfigureWindow calls on
+/// top-level windows are then redirected as MapRequest / ConfigureRequest
+/// events to the WM client via its event sender.
+pub(crate) struct WmState {
+    /// ID of the client that owns SubstructureRedirect on the root.
+    pub(crate) client_id: Option<String>,
+    /// Channel to send X11 events (MapRequest, ConfigureRequest, …) to the WM
+    /// client's event loop.
+    pub(crate) event_tx: Option<mpsc::UnboundedSender<Vec<u8>>>,
+}
+
+pub(crate) type SharedWmState = Arc<Mutex<WmState>>;
+
+/// RAII guard that clears the shared WM state when the WM client disconnects.
+struct WmCleanupGuard {
+    wm_state: SharedWmState,
+    client_id: String,
+}
+
+impl Drop for WmCleanupGuard {
+    fn drop(&mut self) {
+        if let Ok(mut wm) = self.wm_state.lock() {
+            if wm.client_id.as_deref() == Some(&self.client_id) {
+                info!("WM client {} disconnected – clearing WM state", self.client_id);
+                wm.client_id = None;
+                wm.event_tx = None;
+            }
+        }
+    }
+}
+
 /// Per-connection state for an X11 client.
 pub(crate) struct ClientState {
     pub(crate) client_id: String,
@@ -59,6 +93,11 @@ pub(crate) struct ClientState {
     pub(crate) render: crate::render::RenderState,
     pub(crate) selections: HashMap<u32, u32>,
     pub(crate) shm_segments: HashMap<u32, ShmSegment>,
+    /// Shared WM state – used to redirect MapWindow/ConfigureWindow to the WM.
+    pub(crate) wm_state: SharedWmState,
+    /// Sender half of this client's WM event channel.  Cloned into shared
+    /// WmState when this client registers as the window manager.
+    pub(crate) wm_events_tx: mpsc::UnboundedSender<Vec<u8>>,
 }
 
 impl ClientState {
@@ -399,6 +438,11 @@ impl X11Server {
 
         // Shared window state across all connections
         let shared_windows: SharedWindows = Arc::new(Mutex::new(HashMap::new()));
+        // Shared WM state – tracks which client is the window manager
+        let shared_wm_state: SharedWmState = Arc::new(Mutex::new(WmState {
+            client_id: None,
+            event_tx: None,
+        }));
         // Pre-populate with root window
         {
             let mut windows = shared_windows.lock().unwrap();
@@ -435,9 +479,10 @@ impl X11Server {
                     let _ = self.client_connected_tx.send(client_id.clone());
                     let cid = client_id.clone();
                     let sw = shared_windows.clone();
+                    let wm = shared_wm_state.clone();
                     tokio::spawn(async move {
                         if let Err(e) =
-                            handle_client(stream, client_id, update_tx, input_rx, resize_rx, conn_index, sw).await
+                            handle_client(stream, client_id, update_tx, input_rx, resize_rx, conn_index, sw, wm).await
                         {
                             debug!("X11 client {cid} disconnected: {e}");
                         }
@@ -560,6 +605,7 @@ async fn handle_client(
     mut resize_rx: broadcast::Receiver<(String, u16, u16)>,
     conn_index: u32,
     shared_windows: SharedWindows,
+    shared_wm_state: SharedWmState,
 ) -> io::Result<()> {
     // Phase 1: Read client setup request
     // Read at least 12 bytes for the header
@@ -614,6 +660,11 @@ async fn handle_client(
     // Phase 3: Handle requests
     // Initialize local windows from the shared store (includes root window).
     let local_windows = shared_windows.lock().unwrap().clone();
+
+    // Create a channel for receiving WM events (MapRequest, ConfigureRequest)
+    // directed at this client when it becomes the window manager.
+    let (wm_events_tx, mut wm_events_rx) = mpsc::unbounded_channel::<Vec<u8>>();
+
     let mut state = ClientState {
         client_id: client_id.clone(),
         sequence: 0,
@@ -633,11 +684,19 @@ async fn handle_client(
         render: crate::render::RenderState::new(),
         selections: HashMap::new(),
         shm_segments: HashMap::new(),
+        wm_state: shared_wm_state.clone(),
+        wm_events_tx: wm_events_tx,
     };
 
     let mut buf = vec![0u8; 256 * 1024]; // 256KB read buffer
     let mut pending = Vec::new(); // Partial request data
     let mut frame_interval = tokio::time::interval(Duration::from_millis(100)); // ~10fps
+
+    // Guard: clear WM state if this client was the WM when we exit.
+    let _wm_guard = WmCleanupGuard {
+        wm_state: shared_wm_state,
+        client_id: client_id.clone(),
+    };
 
     loop {
         tokio::select! {
@@ -702,6 +761,16 @@ async fn handle_client(
                 // We do this on the tick rather than in CreateWindow so that the
                 // client has time to finish its setup (ChangeProperty, SHAPE, etc.)
                 // before we send the MapNotify/ConfigureNotify/Expose events.
+                //
+                // Skip auto-mapping when a real WM is connected – it will
+                // handle MapRequest / ConfigureRequest itself.
+                let has_wm = state.wm_state.lock().map_or(false, |wm| wm.client_id.is_some());
+                if has_wm {
+                    // Sync mapped state to shared so other connections see it
+                    state.sync_windows();
+                    continue;
+                }
+
                 let unmapped: Vec<u32> = state.windows.iter()
                     .filter(|(_, w)| {
                         !w.mapped
@@ -811,6 +880,11 @@ async fn handle_client(
                         }
                     }
                 }
+            }
+            // Receive WM events (MapRequest, ConfigureRequest) directed at
+            // this client when it is acting as the window manager.
+            Some(event_data) = wm_events_rx.recv() => {
+                stream.write_all(&event_data).await?;
             }
         }
     }
@@ -989,7 +1063,6 @@ fn handle_request(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
     let major_opcode = data[0];
     let _minor = data[1];
     let seq = state.sequence;
-
     if major_opcode >= 128 {
         debug!("ext op={major_opcode} minor={_minor} seq={seq}");
     }
@@ -1361,7 +1434,21 @@ fn handle_change_window_attributes(state: &mut ClientState, data: &[u8]) -> Vec<
                     ]);
                     match bit {
                         1 => win.background_pixel = val,
-                        11 => win.event_mask = val,
+                        11 => {
+                            win.event_mask = val;
+                            // SubstructureRedirectMask = bit 20 = 0x0010_0000
+                            const SUBSTRUCTURE_REDIRECT_MASK: u32 = 0x0010_0000;
+                            if wid == state.root_window && (val & SUBSTRUCTURE_REDIRECT_MASK) != 0 {
+                                info!(
+                                    "Client {} registering as window manager (SubstructureRedirectMask on root)",
+                                    state.client_id
+                                );
+                                if let Ok(mut wm) = state.wm_state.lock() {
+                                    wm.client_id = Some(state.client_id.clone());
+                                    wm.event_tx = Some(state.wm_events_tx.clone());
+                                }
+                            }
+                        }
                         _ => {}
                     }
                     offset += 4;
@@ -1417,12 +1504,54 @@ fn handle_destroy_window(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
 
 fn handle_map_window(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
     let wid = u32::from_le_bytes([data[4], data[5], data[6], data[7]]);
+    info!("MapWindow called: wid={wid:#x} exists={}", state.windows.contains_key(&wid));
 
     let mut events = Vec::new();
 
     if !state.windows.contains_key(&wid) {
         warn!("MapWindow: id={wid:#x} NOT FOUND in client {}", state.client_id);
+        return events;
     }
+
+    // Check if this is a top-level window (parent == root) and a WM is active.
+    // If so, redirect as a MapRequest event to the WM instead of mapping directly.
+    // override_redirect windows bypass the WM redirect.
+    let is_top_level = state.windows.get(&wid).map_or(false, |w| w.parent == state.root_window);
+    let is_override_redirect = state.windows.get(&wid).map_or(false, |w| w.override_redirect);
+
+    if is_top_level && !is_override_redirect {
+        let should_redirect = {
+            if let Ok(wm) = state.wm_state.lock() {
+                // Only redirect if the WM is a *different* client
+                wm.client_id.as_ref().map_or(false, |id| id != &state.client_id)
+            } else {
+                false
+            }
+        };
+
+        if should_redirect {
+            info!(
+                "MapWindow: redirecting wid={wid:#x} as MapRequest to WM"
+            );
+            // Build MapRequest event (code 20)
+            let mut map_request = [0u8; 32];
+            map_request[0] = MAP_REQUEST_EVENT;
+            // map_request[1] = 0; // unused
+            // sequence number will be the WM's – but we use 0 since the server
+            // inserts events asynchronously.
+            map_request[4..8].copy_from_slice(&state.root_window.to_le_bytes()); // parent
+            map_request[8..12].copy_from_slice(&wid.to_le_bytes()); // window
+
+            if let Ok(wm) = state.wm_state.lock() {
+                if let Some(tx) = &wm.event_tx {
+                    let _ = tx.send(map_request.to_vec());
+                }
+            }
+            // Don't map the window – the WM will do it.
+            return events;
+        }
+    }
+
     if let Some(win) = state.windows.get_mut(&wid) {
         info!("MapWindow: id={wid:#x} {}x{} mapped={}", win.width, win.height, win.mapped);
         win.mapped = true;
@@ -1518,6 +1647,87 @@ fn handle_configure_window(state: &mut ClientState, data: &[u8], seq: u16) -> Ve
 
     let wid = u32::from_le_bytes([data[4], data[5], data[6], data[7]]);
     let value_mask = u16::from_le_bytes([data[8], data[9]]);
+
+    // Check if this is a top-level window that should be redirected to the WM.
+    let is_top_level = state.windows.get(&wid).map_or(false, |w| w.parent == state.root_window);
+    let is_override_redirect = state.windows.get(&wid).map_or(false, |w| w.override_redirect);
+
+    if is_top_level && !is_override_redirect {
+        let should_redirect = {
+            if let Ok(wm) = state.wm_state.lock() {
+                wm.client_id.as_ref().map_or(false, |id| id != &state.client_id)
+            } else {
+                false
+            }
+        };
+
+        if should_redirect {
+            info!("ConfigureWindow: redirecting wid={wid:#x} as ConfigureRequest to WM");
+
+            // Parse the values from the request to populate the ConfigureRequest event.
+            let mut x: i16 = 0;
+            let mut y: i16 = 0;
+            let mut width: u16 = 0;
+            let mut height: u16 = 0;
+            let mut border_width: u16 = 0;
+            let mut sibling: u32 = 0;
+            let mut stack_mode: u8 = 0;
+
+            // Pre-fill with current values from the window
+            if let Some(win) = state.windows.get(&wid) {
+                x = win.x;
+                y = win.y;
+                width = win.width;
+                height = win.height;
+                border_width = win.border_width;
+            }
+
+            let mut offset = 12;
+            for bit in 0..7u16 {
+                if value_mask & (1 << bit) != 0 {
+                    if offset + 4 <= data.len() {
+                        let val = u32::from_le_bytes([
+                            data[offset], data[offset + 1],
+                            data[offset + 2], data[offset + 3],
+                        ]);
+                        match bit {
+                            0 => x = val as i16,
+                            1 => y = val as i16,
+                            2 => width = val as u16,
+                            3 => height = val as u16,
+                            4 => border_width = val as u16,
+                            5 => sibling = val,
+                            6 => stack_mode = val as u8,
+                            _ => {}
+                        }
+                        offset += 4;
+                    }
+                }
+            }
+
+            // Build ConfigureRequest event (code 23)
+            let mut event = [0u8; 32];
+            event[0] = CONFIGURE_REQUEST_EVENT;
+            event[1] = stack_mode; // detail = stack-mode
+            // sequence = 0 (asynchronous server event)
+            event[4..8].copy_from_slice(&state.root_window.to_le_bytes()); // parent
+            event[8..12].copy_from_slice(&wid.to_le_bytes()); // window
+            event[12..16].copy_from_slice(&sibling.to_le_bytes()); // sibling
+            event[16..18].copy_from_slice(&x.to_le_bytes());
+            event[18..20].copy_from_slice(&y.to_le_bytes());
+            event[20..22].copy_from_slice(&width.to_le_bytes());
+            event[22..24].copy_from_slice(&height.to_le_bytes());
+            event[24..26].copy_from_slice(&border_width.to_le_bytes());
+            event[26..28].copy_from_slice(&value_mask.to_le_bytes());
+
+            if let Ok(wm) = state.wm_state.lock() {
+                if let Some(tx) = &wm.event_tx {
+                    let _ = tx.send(event.to_vec());
+                }
+            }
+            return Vec::new();
+        }
+    }
 
     let mut offset = 12;
     let mut changed = false;
@@ -2920,7 +3130,9 @@ fn keycode_to_keysym(keycode: u8) -> (u32, u32) {
 
 fn handle_list_extensions(seq: u16) -> Vec<u8> {
     // Return the list of extensions we support
-    let extensions: &[&str] = &["BIG-REQUESTS", "MIT-SHM", "RENDER", "XFIXES", "SHAPE", "SYNC", "Generic Event Extension", "Composite", "DAMAGE"];
+    // Composite and DAMAGE disabled — they make Firefox use off-screen compositing
+    // which requires a real compositing WM. Without them, Firefox falls back to direct rendering.
+    let extensions: &[&str] = &["BIG-REQUESTS", "MIT-SHM", "RENDER", "XFIXES", "SHAPE", "SYNC", "Generic Event Extension"];
 
     // Build the names data: each is a length-prefixed string (1 byte len + name)
     let mut names_data = Vec::new();
@@ -3002,17 +3214,10 @@ fn handle_query_extension(_state: &mut ClientState, data: &[u8], seq: u16) -> Ve
             reply[10] = 0; // first_event
             reply[11] = 0; // first_error
         }
-        "Composite" => {
-            reply[8] = 1; // present = true
-            reply[9] = 142; // major_opcode
-            reply[10] = 0; // first_event
-            reply[11] = 0; // first_error
-        }
-        "DAMAGE" => {
-            reply[8] = 1; // present = true
-            reply[9] = 143; // major_opcode
-            reply[10] = 91; // first_event
-            reply[11] = 152; // first_error
+        // Composite and DAMAGE disabled — without a real compositing WM,
+        // these cause Firefox/GTK to use off-screen rendering that never blits.
+        "Composite" | "DAMAGE" => {
+            // present = false (already zero)
         }
         // RANDR disabled — GTK renders incorrectly with our minimal RANDR replies.
         // The handler code is kept for future use when replies are fully correct.
