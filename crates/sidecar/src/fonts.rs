@@ -147,11 +147,8 @@ impl BitmapFont {
         let fg_g = ((fg >> 8) & 0xFF) as u8;
         let fg_b = (fg & 0xFF) as u8;
 
-        // Background pixels marked with alpha=0x01 (transparent marker)
+        // Background pixels are fully transparent (alpha=0x00)
         let mut pixels = vec![0u8; total_width as usize * total_height as usize * 4];
-        for i in 0..(total_width as usize * total_height as usize) {
-            pixels[i * 4 + 3] = 0x01; // Transparent marker
-        }
 
         let mut cursor_x: i32 = 0;
         for &ch in text {

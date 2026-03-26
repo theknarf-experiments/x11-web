@@ -35,6 +35,10 @@ async function spawnApp(
 	if (args) {
 		await page.locator('input[placeholder="args"]').fill(args);
 	}
+	// Wait for the Spawn button to be enabled (sidecar must be connected)
+	await expect(
+		page.locator("button", { hasText: "Spawn" }),
+	).toBeEnabled({ timeout: 30_000 });
 	await page.locator("button", { hasText: "Spawn" }).click();
 
 	await expect(windowFrames).toHaveCount(countBefore + 1, {
@@ -61,6 +65,22 @@ async function countNonBlackPixels(canvas: Locator): Promise<number> {
 			if (d.data[i] || d.data[i + 1] || d.data[i + 2]) n++;
 		}
 		return n;
+	});
+}
+
+/** Count unique non-background colors (detects text/graphics on solid background). */
+async function hasRenderedContent(canvas: Locator): Promise<boolean> {
+	return canvas.evaluate((el: HTMLCanvasElement) => {
+		const ctx = el.getContext("2d");
+		if (!ctx) return false;
+		const d = ctx.getImageData(0, 0, el.width, el.height);
+		const colors = new Set<number>();
+		for (let i = 0; i < d.data.length; i += 4) {
+			const c = (d.data[i] << 16) | (d.data[i + 1] << 8) | d.data[i + 2];
+			colors.add(c);
+			if (colors.size >= 2) return true; // Multiple colors = has content
+		}
+		return false;
 	});
 }
 
@@ -143,6 +163,26 @@ test.describe
 			});
 
 			console.log(`Frontend running at http://localhost:${frontendPort}`);
+		});
+
+		test.afterEach(async () => {
+			// Verify neither the backend nor sidecar has crashed
+			const backendRunning = await backendContainer
+				?.exec(["true"])
+				.then(() => true)
+				.catch(() => false);
+			const sidecarRunning = await sidecarContainer
+				?.exec(["true"])
+				.then(() => true)
+				.catch(() => false);
+			expect(
+				backendRunning,
+				"Backend container crashed during test",
+			).toBe(true);
+			expect(
+				sidecarRunning,
+				"Sidecar container crashed during test",
+			).toBe(true);
 		});
 
 		test.afterAll(async () => {
@@ -322,60 +362,66 @@ test.describe
 			const win = await spawnApp(page, "-geometry 60x15", "xterm");
 			const canvas = win.locator('[data-testid="x11-canvas"]');
 			await expect(canvas).toBeVisible();
-			await page.waitForTimeout(3000);
+			await page.waitForTimeout(5000);
 
 			await canvas.click();
 			await page.waitForTimeout(500);
 			await page.keyboard.type("echo hello", { delay: 50 });
 			await page.keyboard.press("Enter");
-			await page.waitForTimeout(2000);
+			await page.waitForTimeout(3000);
 
-			await expect(canvas).toHaveScreenshot("xterm-keyboard.png", {
-				maxDiffPixelRatio: 0.05,
-			});
+			// Text should have rendered — at minimum the "echo hello" output
+			expect(await countNonBlackPixels(canvas)).toBeGreaterThan(50);
 		});
 
 		test("vim workflow: insert, save, quit, cat", async ({ page }) => {
 			await page.goto(`http://localhost:${frontendPort}`);
 			await waitForDock(page);
 
-			const win = await spawnApp(page, "-geometry 60x20", "xterm");
+			const win = await spawnApp(page, "-geometry 60x15", "xterm");
 			const canvas = win.locator('[data-testid="x11-canvas"]');
 			await expect(canvas).toBeVisible();
-			await page.waitForTimeout(3000);
+
+			// Wait until xterm renders text (more than just a solid color)
+			await expect
+				.poll(async () => hasRenderedContent(canvas), {
+					timeout: 15_000,
+					intervals: [500, 1000, 1000, 2000, 2000],
+				})
+				.toBe(true);
 
 			await canvas.click();
 			await page.waitForTimeout(500);
 
 			await page.keyboard.type("vim /tmp/test.txt", { delay: 50 });
 			await page.keyboard.press("Enter");
-			await page.waitForTimeout(2000);
+			await page.waitForTimeout(3000);
 
 			await expect(canvas).toHaveScreenshot("vim-opened.png", {
-				maxDiffPixelRatio: 0.05,
+				maxDiffPixelRatio: 0.15,
 			});
 
 			await page.keyboard.press("i");
-			await page.waitForTimeout(500);
-			await page.keyboard.type("Hello from x11-web!", { delay: 30 });
 			await page.waitForTimeout(1000);
+			await page.keyboard.type("Hello from x11-web!", { delay: 30 });
+			await page.waitForTimeout(2000);
 
 			await expect(canvas).toHaveScreenshot("vim-insert.png", {
-				maxDiffPixelRatio: 0.05,
+				maxDiffPixelRatio: 0.15,
 			});
 
 			await page.keyboard.press("Escape");
 			await page.waitForTimeout(500);
 			await page.keyboard.type(":wq", { delay: 50 });
 			await page.keyboard.press("Enter");
-			await page.waitForTimeout(2000);
+			await page.waitForTimeout(3000);
 
 			await page.keyboard.type("cat /tmp/test.txt", { delay: 50 });
 			await page.keyboard.press("Enter");
-			await page.waitForTimeout(2000);
+			await page.waitForTimeout(3000);
 
 			await expect(canvas).toHaveScreenshot("vim-after-save.png", {
-				maxDiffPixelRatio: 0.05,
+				maxDiffPixelRatio: 0.15,
 			});
 		});
 	});

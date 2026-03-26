@@ -141,7 +141,7 @@ export type DisplayUpdate =
 			y: number;
 			width: number;
 			height: number;
-			data: number[];
+			data: string;
 	  }
 	| {
 			kind: "CopyArea";

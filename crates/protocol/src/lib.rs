@@ -1,5 +1,20 @@
 use serde::{Deserialize, Serialize};
 
+/// Serde helper to encode Vec<u8> as base64 string in JSON.
+mod base64_bytes {
+    use base64::{engine::general_purpose::STANDARD, Engine};
+    use serde::{Deserialize, Deserializer, Serializer};
+
+    pub fn serialize<S: Serializer>(data: &Vec<u8>, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(&STANDARD.encode(data))
+    }
+
+    pub fn deserialize<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Vec<u8>, D::Error> {
+        let s = String::deserialize(deserializer)?;
+        STANDARD.decode(&s).map_err(serde::de::Error::custom)
+    }
+}
+
 /// Messages sent from the backend to a sidecar.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type")]
@@ -250,6 +265,7 @@ pub enum DisplayUpdate {
         y: i16,
         width: u16,
         height: u16,
+        #[serde(with = "base64_bytes")]
         data: Vec<u8>,
     },
     /// Copy an area within a window.

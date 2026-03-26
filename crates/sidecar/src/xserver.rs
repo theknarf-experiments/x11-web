@@ -4,6 +4,7 @@ use std::path::PathBuf;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::UnixListener;
 use tokio::sync::mpsc;
+use tokio::time::Duration;
 use tracing::{debug, error, info};
 use x11rb_protocol::protocol::xproto::*;
 use x11rb_protocol::x11_utils::{Serialize, TryParse};
@@ -13,6 +14,7 @@ use uuid::Uuid;
 use x11_web_protocol::{DisplayUpdate, InputEvent};
 
 use crate::fonts::FontManager;
+use crate::framebuffer::Framebuffer;
 
 /// A display update tagged with the client_id that produced it.
 pub type TaggedDisplayUpdate = (String, DisplayUpdate);
@@ -45,7 +47,47 @@ struct ClientState {
     font_manager: FontManager,
 }
 
-#[derive(Clone)]
+impl ClientState {
+    /// Get a mutable reference to the framebuffer for a drawable (window or pixmap).
+    fn get_framebuffer_mut(&mut self, drawable: u32) -> Option<&mut Framebuffer> {
+        if let Some(win) = self.windows.get_mut(&drawable) {
+            return Some(&mut win.framebuffer);
+        }
+        if let Some(pix) = self.pixmaps.get_mut(&drawable) {
+            return Some(&mut pix.framebuffer);
+        }
+        None
+    }
+
+    /// Send dirty framebuffer regions for all mapped windows as PutImage updates.
+    fn flush_dirty_windows(&mut self) {
+        let window_ids: Vec<u32> = self
+            .windows
+            .iter()
+            .filter(|(_, w)| w.mapped && w.framebuffer.is_dirty())
+            .map(|(id, _)| *id)
+            .collect();
+
+        for wid in window_ids {
+            if let Some(win) = self.windows.get_mut(&wid) {
+                if let Some((x, y, w, h, pixels)) = win.framebuffer.take_dirty_pixels() {
+                    let _ = self.update_tx.send((
+                        self.client_id.clone(),
+                        DisplayUpdate::PutImage {
+                            window_id: wid,
+                            x,
+                            y,
+                            width: w,
+                            height: h,
+                            data: pixels,
+                        },
+                    ));
+                }
+            }
+        }
+    }
+}
+
 struct WindowState {
     id: u32,
     parent: u32,
@@ -60,14 +102,15 @@ struct WindowState {
     event_mask: u32,
     background_pixel: u32,
     override_redirect: bool,
+    framebuffer: Framebuffer,
 }
 
-#[derive(Clone)]
 struct PixmapState {
     _id: u32,
     _width: u16,
     _height: u16,
     _depth: u8,
+    framebuffer: Framebuffer,
 }
 
 #[derive(Clone)]
@@ -447,11 +490,13 @@ async fn handle_client(
             event_mask: 0,
             background_pixel: 0x00000000,
             override_redirect: false,
+            framebuffer: Framebuffer::new(SCREEN_WIDTH as u32, SCREEN_HEIGHT as u32),
         },
     );
 
     let mut buf = vec![0u8; 256 * 1024]; // 256KB read buffer
     let mut pending = Vec::new(); // Partial request data
+    let mut frame_interval = tokio::time::interval(Duration::from_millis(100)); // ~10fps
 
     loop {
         tokio::select! {
@@ -495,6 +540,13 @@ async fn handle_client(
                         stream.write_all(&response).await?;
                     }
                 }
+
+                // Flush dirty windows after processing a batch of requests
+                state.flush_dirty_windows();
+            }
+            _ = frame_interval.tick() => {
+                // Periodic frame flush for any remaining dirty regions
+                state.flush_dirty_windows();
             }
             result = input_rx.recv() => {
                 if let Ok((target_id, input)) = result {
@@ -536,6 +588,7 @@ fn resize_all_windows(state: &mut ClientState, width: u16, height: u16) -> Vec<u
         if let Some(win) = state.windows.get_mut(&wid) {
             win.width = width;
             win.height = height;
+            win.framebuffer.resize(width as u32, height as u32);
 
             // Send ConfigureNotify
             let mut event = [0u8; 32];
@@ -788,7 +841,7 @@ fn handle_request(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
 }
 
 // Handles requests that need stub replies
-fn handle_misc_request(state: &ClientState, opcode: u8, seq: u16) -> Vec<u8> {
+fn handle_misc_request(state: &mut ClientState, opcode: u8, seq: u16) -> Vec<u8> {
     match opcode {
         26 => {
             // GrabPointer reply: Success
@@ -940,6 +993,7 @@ fn handle_create_window(state: &mut ClientState, data: &[u8], _seq: u16) -> Vec<
             event_mask,
             background_pixel,
             override_redirect,
+            framebuffer: Framebuffer::new(width as u32, height as u32),
         },
     );
 
@@ -990,7 +1044,7 @@ fn handle_change_window_attributes(state: &mut ClientState, data: &[u8]) -> Vec<
     Vec::new()
 }
 
-fn handle_get_window_attributes(state: &ClientState, data: &[u8], seq: u16) -> Vec<u8> {
+fn handle_get_window_attributes(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
     let wid = u32::from_le_bytes([data[4], data[5], data[6], data[7]]);
 
     let mut reply = vec![0u8; 44];
@@ -1041,17 +1095,10 @@ fn handle_map_window(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> 
         ));
 
         // Fill window with its background pixel (like a real X server does)
-        let _ = state.update_tx.send((
-            state.client_id.clone(),
-            DisplayUpdate::FillRect {
-                window_id: wid,
-                x: 0,
-                y: 0,
-                width: win.width,
-                height: win.height,
-                color: win.background_pixel,
-            },
-        ));
+        let w = win.width;
+        let h = win.height;
+        let bg = win.background_pixel;
+        win.framebuffer.fill_rect(0, 0, w, h, bg);
 
         // Send MapNotify event
         let mut map_event = [0u8; 32];
@@ -1209,7 +1256,7 @@ fn handle_configure_window(state: &mut ClientState, data: &[u8], seq: u16) -> Ve
     Vec::new()
 }
 
-fn handle_get_geometry(state: &ClientState, data: &[u8], seq: u16) -> Vec<u8> {
+fn handle_get_geometry(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
     let drawable = u32::from_le_bytes([data[4], data[5], data[6], data[7]]);
 
     let mut reply = [0u8; 32];
@@ -1234,7 +1281,7 @@ fn handle_get_geometry(state: &ClientState, data: &[u8], seq: u16) -> Vec<u8> {
     reply.to_vec()
 }
 
-fn handle_query_tree(state: &ClientState, data: &[u8], seq: u16) -> Vec<u8> {
+fn handle_query_tree(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
     let wid = u32::from_le_bytes([data[4], data[5], data[6], data[7]]);
 
     let children: Vec<u32> = state
@@ -1284,7 +1331,7 @@ fn handle_intern_atom(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8>
     reply.to_vec()
 }
 
-fn handle_get_atom_name(state: &ClientState, data: &[u8], seq: u16) -> Vec<u8> {
+fn handle_get_atom_name(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
     let atom = u32::from_le_bytes([data[4], data[5], data[6], data[7]]);
 
     let name = state.atoms.get_name(atom).unwrap_or("");
@@ -1337,7 +1384,7 @@ fn handle_change_property(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
     Vec::new()
 }
 
-fn handle_get_property(_state: &ClientState, _data: &[u8], seq: u16) -> Vec<u8> {
+fn handle_get_property(_state: &mut ClientState, _data: &[u8], seq: u16) -> Vec<u8> {
     // Return "property not found"
     let mut reply = [0u8; 32];
     reply[0] = 1;
@@ -1346,7 +1393,7 @@ fn handle_get_property(_state: &ClientState, _data: &[u8], seq: u16) -> Vec<u8> 
     reply.to_vec()
 }
 
-fn handle_get_selection_owner(_state: &ClientState, _data: &[u8], seq: u16) -> Vec<u8> {
+fn handle_get_selection_owner(_state: &mut ClientState, _data: &[u8], seq: u16) -> Vec<u8> {
     let mut reply = [0u8; 32];
     reply[0] = 1;
     reply[2..4].copy_from_slice(&seq.to_le_bytes());
@@ -1354,7 +1401,7 @@ fn handle_get_selection_owner(_state: &ClientState, _data: &[u8], seq: u16) -> V
     reply.to_vec()
 }
 
-fn handle_query_pointer(state: &ClientState, _data: &[u8], seq: u16) -> Vec<u8> {
+fn handle_query_pointer(state: &mut ClientState, _data: &[u8], seq: u16) -> Vec<u8> {
     let mut reply = [0u8; 32];
     reply[0] = 1;
     reply[1] = 1; // same_screen
@@ -1373,7 +1420,7 @@ fn handle_set_input_focus(_state: &mut ClientState, _data: &[u8]) -> Vec<u8> {
     Vec::new()
 }
 
-fn handle_get_input_focus(state: &ClientState, _data: &[u8], seq: u16) -> Vec<u8> {
+fn handle_get_input_focus(state: &mut ClientState, _data: &[u8], seq: u16) -> Vec<u8> {
     let mut reply = [0u8; 32];
     reply[0] = 1;
     reply[1] = 1; // revert_to = Parent
@@ -1417,7 +1464,7 @@ fn write_charinfo(reply: &mut Vec<u8>, ci: &crate::fonts::CharInfo) {
     reply.extend_from_slice(&ci.attributes.to_le_bytes());
 }
 
-fn handle_query_font(state: &ClientState, data: &[u8], seq: u16) -> Vec<u8> {
+fn handle_query_font(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
     if data.len() < 8 {
         return Vec::new();
     }
@@ -1529,7 +1576,7 @@ fn handle_query_font(state: &ClientState, data: &[u8], seq: u16) -> Vec<u8> {
     reply
 }
 
-fn handle_list_fonts(_state: &ClientState, _data: &[u8], seq: u16) -> Vec<u8> {
+fn handle_list_fonts(_state: &mut ClientState, _data: &[u8], seq: u16) -> Vec<u8> {
     // Return a single font: "fixed"
     let font_name = b"fixed";
     let str_len = 1 + font_name.len(); // length byte + name
@@ -1626,6 +1673,7 @@ fn handle_create_pixmap(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
             _width: width,
             _height: height,
             _depth: depth,
+            framebuffer: Framebuffer::new(width as u32, height as u32),
         },
     );
 
@@ -1638,7 +1686,7 @@ fn handle_free_pixmap(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
     Vec::new()
 }
 
-fn handle_clear_area(state: &ClientState, data: &[u8], _seq: u16) -> Vec<u8> {
+fn handle_clear_area(state: &mut ClientState, data: &[u8], _seq: u16) -> Vec<u8> {
     if data.len() < 16 {
         return Vec::new();
     }
@@ -1661,37 +1709,15 @@ fn handle_clear_area(state: &ClientState, data: &[u8], _seq: u16) -> Vec<u8> {
         w.background_pixel
     });
 
-    // Send as a FillRect with the background color (more useful than ClearArea
-    // for the frontend renderer, which otherwise clears to transparent/black)
-    if let Some(bg_pixel) = bg {
-        let _ = state.update_tx.send((
-            state.client_id.clone(),
-            DisplayUpdate::FillRect {
-                window_id: wid,
-                x,
-                y,
-                width,
-                height,
-                color: bg_pixel,
-            },
-        ));
-    } else {
-        let _ = state.update_tx.send((
-            state.client_id.clone(),
-            DisplayUpdate::ClearArea {
-                window_id: wid,
-                x,
-                y,
-                width,
-                height,
-            },
-        ));
+    let bg_pixel = bg.unwrap_or(0);
+    if let Some(fb) = state.get_framebuffer_mut(wid) {
+        fb.fill_rect(x, y, width, height, bg_pixel);
     }
 
     Vec::new()
 }
 
-fn handle_copy_area(state: &ClientState, data: &[u8]) -> Vec<u8> {
+fn handle_copy_area(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
     if data.len() < 28 {
         return Vec::new();
     }
@@ -1706,24 +1732,27 @@ fn handle_copy_area(state: &ClientState, data: &[u8]) -> Vec<u8> {
     let width = u16::from_le_bytes([data[24], data[25]]);
     let height = u16::from_le_bytes([data[26], data[27]]);
 
-    let _ = state.update_tx.send((
-        state.client_id.clone(),
-        DisplayUpdate::CopyArea {
-            src_window_id: src,
-            dst_window_id: dst,
-            src_x,
-            src_y,
-            dst_x,
-            dst_y,
-            width,
-            height,
-        },
-    ));
+    if src == dst {
+        // Same drawable — use self-copy which handles overlap
+        if let Some(fb) = state.get_framebuffer_mut(src) {
+            fb.copy_area_self(src_x, src_y, dst_x, dst_y, width, height);
+        }
+    } else {
+        // Different drawables — extract pixels from src, put into dst
+        let pixels = state
+            .get_framebuffer_mut(src)
+            .map(|fb| fb.extract_pixels(src_x, src_y, width, height));
+        if let Some(pixels) = pixels {
+            if let Some(fb) = state.get_framebuffer_mut(dst) {
+                fb.put_image(dst_x, dst_y, width, height, &pixels);
+            }
+        }
+    }
 
     Vec::new()
 }
 
-fn handle_poly_rectangle(state: &ClientState, data: &[u8]) -> Vec<u8> {
+fn handle_poly_rectangle(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
     if data.len() < 12 {
         return Vec::new();
     }
@@ -1732,39 +1761,36 @@ fn handle_poly_rectangle(state: &ClientState, data: &[u8]) -> Vec<u8> {
     let gc_id = u32::from_le_bytes([data[8], data[9], data[10], data[11]]);
     let gc = state.gcs.get(&gc_id).cloned().unwrap_or_default();
 
-    // Skip XOR operations (used for cursor outlines)
     if gc.function != 3 {
         return Vec::new();
     }
 
+    let mut rects = Vec::new();
     let mut offset = 12;
     while offset + 8 <= data.len() {
         let x = i16::from_le_bytes([data[offset], data[offset + 1]]);
         let y = i16::from_le_bytes([data[offset + 2], data[offset + 3]]);
         let width = u16::from_le_bytes([data[offset + 4], data[offset + 5]]);
         let height = u16::from_le_bytes([data[offset + 6], data[offset + 7]]);
-
-        let x2 = x + width as i16;
-        let y2 = y + height as i16;
-        let _ = state.update_tx.send((
-            state.client_id.clone(),
-            DisplayUpdate::DrawLines {
-                window_id: drawable,
-                points: vec![(x, y), (x2, y), (x2, y2), (x, y2), (x, y)],
-                color: gc.foreground,
-                line_width: gc.line_width,
-            },
-        ));
-
+        rects.push((x, y, width, height));
         offset += 8;
+    }
+
+    if let Some(fb) = state.get_framebuffer_mut(drawable) {
+        for (x, y, width, height) in rects {
+            let x2 = x as i32 + width as i32;
+            let y2 = y as i32 + height as i32;
+            fb.draw_line(x as i32, y as i32, x2, y as i32, gc.foreground, gc.line_width);
+            fb.draw_line(x2, y as i32, x2, y2, gc.foreground, gc.line_width);
+            fb.draw_line(x2, y2, x as i32, y2, gc.foreground, gc.line_width);
+            fb.draw_line(x as i32, y2, x as i32, y as i32, gc.foreground, gc.line_width);
+        }
     }
 
     Vec::new()
 }
 
-fn handle_fill_poly(state: &ClientState, data: &[u8]) -> Vec<u8> {
-    // FillPoly: opcode 69
-    // [opcode(1), unused(1), length(2), drawable(4), gc(4), shape(1), coord_mode(1), pad(2), points...]
+fn handle_fill_poly(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
     if data.len() < 16 {
         return Vec::new();
     }
@@ -1772,97 +1798,19 @@ fn handle_fill_poly(state: &ClientState, data: &[u8]) -> Vec<u8> {
     let drawable = u32::from_le_bytes([data[4], data[5], data[6], data[7]]);
     let gc_id = u32::from_le_bytes([data[8], data[9], data[10], data[11]]);
     let gc = state.gcs.get(&gc_id).cloned().unwrap_or_default();
+    let coord_mode = data[13]; // 0 = Origin, 1 = Previous
+
+    if gc.function != 3 {
+        return Vec::new();
+    }
 
     let mut points = Vec::new();
     let mut offset = 16;
     while offset + 4 <= data.len() {
         let x = i16::from_le_bytes([data[offset], data[offset + 1]]);
         let y = i16::from_le_bytes([data[offset + 2], data[offset + 3]]);
-        points.push((x, y));
-        offset += 4;
-    }
-
-    // Skip XOR operations (cursor drawing)
-    if gc.function != 3 {
-        return Vec::new();
-    }
-
-    if points.len() >= 3 {
-        // Close the polygon and draw as outline
-        if points.first() != points.last() {
-            points.push(points[0]);
-        }
-        let _ = state.update_tx.send((
-            state.client_id.clone(),
-            DisplayUpdate::DrawLines {
-                window_id: drawable,
-                points,
-                color: gc.foreground,
-                line_width: gc.line_width,
-            },
-        ));
-    }
-
-    Vec::new()
-}
-
-fn handle_poly_fill_rectangle(state: &ClientState, data: &[u8]) -> Vec<u8> {
-    if data.len() < 12 {
-        return Vec::new();
-    }
-
-    let drawable = u32::from_le_bytes([data[4], data[5], data[6], data[7]]);
-    let gc_id = u32::from_le_bytes([data[8], data[9], data[10], data[11]]);
-    let gc = state.gcs.get(&gc_id).cloned().unwrap_or_default();
-
-    // Skip XOR operations (cursor drawing)
-    if gc.function != 3 {
-        return Vec::new();
-    }
-
-    let mut offset = 12;
-    while offset + 8 <= data.len() {
-        let x = i16::from_le_bytes([data[offset], data[offset + 1]]);
-        let y = i16::from_le_bytes([data[offset + 2], data[offset + 3]]);
-        let width = u16::from_le_bytes([data[offset + 4], data[offset + 5]]);
-        let height = u16::from_le_bytes([data[offset + 6], data[offset + 7]]);
-
-        let _ = state.update_tx.send((
-            state.client_id.clone(),
-            DisplayUpdate::FillRect {
-                window_id: drawable,
-                x,
-                y,
-                width,
-                height,
-                color: gc.foreground,
-            },
-        ));
-
-        offset += 8;
-    }
-
-    Vec::new()
-}
-
-fn handle_poly_line(state: &ClientState, data: &[u8]) -> Vec<u8> {
-    if data.len() < 12 {
-        return Vec::new();
-    }
-
-    let coord_mode = data[1]; // 0 = Origin, 1 = Previous
-    let drawable = u32::from_le_bytes([data[4], data[5], data[6], data[7]]);
-    let gc_id = u32::from_le_bytes([data[8], data[9], data[10], data[11]]);
-    let gc = state.gcs.get(&gc_id).cloned().unwrap_or_default();
-
-    let mut points = Vec::new();
-    let mut offset = 12;
-    while offset + 4 <= data.len() {
-        let x = i16::from_le_bytes([data[offset], data[offset + 1]]);
-        let y = i16::from_le_bytes([data[offset + 2], data[offset + 3]]);
         if coord_mode == 1 && !points.is_empty() {
-            // Previous mode: relative to last point
-            let (px, py) = points[points.len() - 1];
+            let (px, py): (i16, i16) = points[points.len() - 1];
             points.push((px + x, py + y));
         } else {
             points.push((x, y));
@@ -1870,24 +1818,49 @@ fn handle_poly_line(state: &ClientState, data: &[u8]) -> Vec<u8> {
         offset += 4;
     }
 
-    // Only emit for GXcopy (3). GXxor (6) is used for cursor outlines
-    // which we can't properly XOR-composite, so skip them.
-    if !points.is_empty() && gc.function == 3 {
-        let _ = state.update_tx.send((
-            state.client_id.clone(),
-            DisplayUpdate::DrawLines {
-                window_id: drawable,
-                points,
-                color: gc.foreground,
-                line_width: gc.line_width,
-            },
-        ));
+    if points.len() >= 3 {
+        if let Some(fb) = state.get_framebuffer_mut(drawable) {
+            fb.fill_polygon(&points, gc.foreground);
+        }
     }
 
     Vec::new()
 }
 
-fn handle_poly_point(state: &ClientState, data: &[u8]) -> Vec<u8> {
+fn handle_poly_fill_rectangle(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
+    if data.len() < 12 {
+        return Vec::new();
+    }
+
+    let drawable = u32::from_le_bytes([data[4], data[5], data[6], data[7]]);
+    let gc_id = u32::from_le_bytes([data[8], data[9], data[10], data[11]]);
+    let gc = state.gcs.get(&gc_id).cloned().unwrap_or_default();
+
+    if gc.function != 3 {
+        return Vec::new();
+    }
+
+    let mut rects = Vec::new();
+    let mut offset = 12;
+    while offset + 8 <= data.len() {
+        let x = i16::from_le_bytes([data[offset], data[offset + 1]]);
+        let y = i16::from_le_bytes([data[offset + 2], data[offset + 3]]);
+        let width = u16::from_le_bytes([data[offset + 4], data[offset + 5]]);
+        let height = u16::from_le_bytes([data[offset + 6], data[offset + 7]]);
+        rects.push((x, y, width, height));
+        offset += 8;
+    }
+
+    if let Some(fb) = state.get_framebuffer_mut(drawable) {
+        for (x, y, width, height) in rects {
+            fb.fill_rect(x, y, width, height, gc.foreground);
+        }
+    }
+
+    Vec::new()
+}
+
+fn handle_poly_line(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
     if data.len() < 12 {
         return Vec::new();
     }
@@ -1901,6 +1874,48 @@ fn handle_poly_point(state: &ClientState, data: &[u8]) -> Vec<u8> {
         return Vec::new();
     }
 
+    let mut points: Vec<(i16, i16)> = Vec::new();
+    let mut offset = 12;
+    while offset + 4 <= data.len() {
+        let x = i16::from_le_bytes([data[offset], data[offset + 1]]);
+        let y = i16::from_le_bytes([data[offset + 2], data[offset + 3]]);
+        if coord_mode == 1 && !points.is_empty() {
+            let (px, py) = points[points.len() - 1];
+            points.push((px + x, py + y));
+        } else {
+            points.push((x, y));
+        }
+        offset += 4;
+    }
+
+    if let Some(fb) = state.get_framebuffer_mut(drawable) {
+        for w in points.windows(2) {
+            fb.draw_line(
+                w[0].0 as i32, w[0].1 as i32,
+                w[1].0 as i32, w[1].1 as i32,
+                gc.foreground, gc.line_width,
+            );
+        }
+    }
+
+    Vec::new()
+}
+
+fn handle_poly_point(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
+    if data.len() < 12 {
+        return Vec::new();
+    }
+
+    let coord_mode = data[1];
+    let drawable = u32::from_le_bytes([data[4], data[5], data[6], data[7]]);
+    let gc_id = u32::from_le_bytes([data[8], data[9], data[10], data[11]]);
+    let gc = state.gcs.get(&gc_id).cloned().unwrap_or_default();
+
+    if gc.function != 3 {
+        return Vec::new();
+    }
+
+    let mut points = Vec::new();
     let mut last_x: i16 = 0;
     let mut last_y: i16 = 0;
     let mut offset = 12;
@@ -1913,26 +1928,20 @@ fn handle_poly_point(state: &ClientState, data: &[u8]) -> Vec<u8> {
         }
         last_x = x;
         last_y = y;
-
-        let _ = state.update_tx.send((
-            state.client_id.clone(),
-            DisplayUpdate::FillRect {
-                window_id: drawable,
-                x,
-                y,
-                width: 1,
-                height: 1,
-                color: gc.foreground,
-            },
-        ));
-
+        points.push((x, y));
         offset += 4;
+    }
+
+    if let Some(fb) = state.get_framebuffer_mut(drawable) {
+        for (x, y) in points {
+            fb.draw_point(x as i32, y as i32, gc.foreground);
+        }
     }
 
     Vec::new()
 }
 
-fn handle_poly_segment(state: &ClientState, data: &[u8]) -> Vec<u8> {
+fn handle_poly_segment(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
     if data.len() < 12 {
         return Vec::new();
     }
@@ -1945,30 +1954,27 @@ fn handle_poly_segment(state: &ClientState, data: &[u8]) -> Vec<u8> {
         return Vec::new();
     }
 
+    let mut segments = Vec::new();
     let mut offset = 12;
     while offset + 8 <= data.len() {
         let x1 = i16::from_le_bytes([data[offset], data[offset + 1]]);
         let y1 = i16::from_le_bytes([data[offset + 2], data[offset + 3]]);
         let x2 = i16::from_le_bytes([data[offset + 4], data[offset + 5]]);
         let y2 = i16::from_le_bytes([data[offset + 6], data[offset + 7]]);
-
-        let _ = state.update_tx.send((
-            state.client_id.clone(),
-            DisplayUpdate::DrawLines {
-                window_id: drawable,
-                points: vec![(x1, y1), (x2, y2)],
-                color: gc.foreground,
-                line_width: gc.line_width,
-            },
-        ));
-
+        segments.push((x1, y1, x2, y2));
         offset += 8;
     }
 
+    if let Some(fb) = state.get_framebuffer_mut(drawable) {
+        for (x1, y1, x2, y2) in segments {
+            fb.draw_line(x1 as i32, y1 as i32, x2 as i32, y2 as i32, gc.foreground, gc.line_width);
+        }
+    }
+
     Vec::new()
 }
 
-fn handle_poly_arc(state: &ClientState, data: &[u8]) -> Vec<u8> {
+fn handle_poly_arc(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
     if data.len() < 12 {
         return Vec::new();
     }
@@ -1977,6 +1983,7 @@ fn handle_poly_arc(state: &ClientState, data: &[u8]) -> Vec<u8> {
     let gc_id = u32::from_le_bytes([data[8], data[9], data[10], data[11]]);
     let gc = state.gcs.get(&gc_id).cloned().unwrap_or_default();
 
+    let mut arcs = Vec::new();
     let mut offset = 12;
     while offset + 12 <= data.len() {
         let x = i16::from_le_bytes([data[offset], data[offset + 1]]);
@@ -1985,29 +1992,20 @@ fn handle_poly_arc(state: &ClientState, data: &[u8]) -> Vec<u8> {
         let height = u16::from_le_bytes([data[offset + 6], data[offset + 7]]);
         let angle1 = i16::from_le_bytes([data[offset + 8], data[offset + 9]]);
         let angle2 = i16::from_le_bytes([data[offset + 10], data[offset + 11]]);
-
-        let _ = state.update_tx.send((
-            state.client_id.clone(),
-            DisplayUpdate::DrawArc {
-                window_id: drawable,
-                x,
-                y,
-                width,
-                height,
-                angle1,
-                angle2,
-                filled: false,
-                color: gc.foreground,
-            },
-        ));
-
+        arcs.push((x, y, width, height, angle1, angle2));
         offset += 12;
+    }
+
+    if let Some(fb) = state.get_framebuffer_mut(drawable) {
+        for (x, y, width, height, angle1, angle2) in arcs {
+            fb.draw_arc(x, y, width, height, angle1, angle2, false, gc.foreground);
+        }
     }
 
     Vec::new()
 }
 
-fn handle_poly_fill_arc(state: &ClientState, data: &[u8]) -> Vec<u8> {
+fn handle_poly_fill_arc(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
     if data.len() < 12 {
         return Vec::new();
     }
@@ -2016,6 +2014,7 @@ fn handle_poly_fill_arc(state: &ClientState, data: &[u8]) -> Vec<u8> {
     let gc_id = u32::from_le_bytes([data[8], data[9], data[10], data[11]]);
     let gc = state.gcs.get(&gc_id).cloned().unwrap_or_default();
 
+    let mut arcs = Vec::new();
     let mut offset = 12;
     while offset + 12 <= data.len() {
         let x = i16::from_le_bytes([data[offset], data[offset + 1]]);
@@ -2024,31 +2023,20 @@ fn handle_poly_fill_arc(state: &ClientState, data: &[u8]) -> Vec<u8> {
         let height = u16::from_le_bytes([data[offset + 6], data[offset + 7]]);
         let angle1 = i16::from_le_bytes([data[offset + 8], data[offset + 9]]);
         let angle2 = i16::from_le_bytes([data[offset + 10], data[offset + 11]]);
-
-        let _ = state.update_tx.send((
-            state.client_id.clone(),
-            DisplayUpdate::DrawArc {
-                window_id: drawable,
-                x,
-                y,
-                width,
-                height,
-                angle1,
-                angle2,
-                filled: true,
-                color: gc.foreground,
-            },
-        ));
-
+        arcs.push((x, y, width, height, angle1, angle2));
         offset += 12;
+    }
+
+    if let Some(fb) = state.get_framebuffer_mut(drawable) {
+        for (x, y, width, height, angle1, angle2) in arcs {
+            fb.draw_arc(x, y, width, height, angle1, angle2, true, gc.foreground);
+        }
     }
 
     Vec::new()
 }
 
-fn handle_poly_text8(state: &ClientState, data: &[u8]) -> Vec<u8> {
-    // PolyText8: [opcode(1), unused(1), length(2), drawable(4), gc(4), x(2), y(2), items...]
-    // Each text item: [len(1), delta(1), string(len bytes)] OR font shift [255, font_id(4)]
+fn handle_poly_text8(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
     if data.len() < 16 {
         return Vec::new();
     }
@@ -2073,6 +2061,8 @@ fn handle_poly_text8(state: &ClientState, data: &[u8]) -> Vec<u8> {
         None => return Vec::new(),
     };
 
+    // Collect text items first to avoid borrow issues
+    let mut items: Vec<(i16, i16, u16, u16, Vec<u8>)> = Vec::new();
     let mut offset = 16;
     let end = data.len();
 
@@ -2080,16 +2070,12 @@ fn handle_poly_text8(state: &ClientState, data: &[u8]) -> Vec<u8> {
         let item_len = data[offset] as usize;
 
         if item_len == 255 {
-            // Font shift item: [255, font_id(4)]
-            // We ignore font switches for now (use current GC font)
             offset += 5;
             continue;
         }
-
         if item_len == 0 {
             break;
         }
-
         if offset + 2 + item_len > end {
             break;
         }
@@ -2098,24 +2084,12 @@ fn handle_poly_text8(state: &ClientState, data: &[u8]) -> Vec<u8> {
         cursor_x += delta as i16;
 
         let text = &data[offset + 2..offset + 2 + item_len];
-
         let (img_w, img_h, pixels) = font.render_text_transparent(text, gc.foreground);
 
         if img_w > 0 && img_h > 0 {
-            let _ = state.update_tx.send((
-                state.client_id.clone(),
-                DisplayUpdate::PutImage {
-                    window_id: drawable,
-                    x: cursor_x,
-                    y: y - font.font_ascent,
-                    width: img_w,
-                    height: img_h,
-                    data: pixels,
-                },
-            ));
+            items.push((cursor_x, y - font.font_ascent, img_w, img_h, pixels));
         }
 
-        // Advance cursor by text width
         let mut text_advance: i32 = 0;
         for &ch in text {
             text_advance += font.char_info(ch as u16).character_width as i32;
@@ -2124,10 +2098,17 @@ fn handle_poly_text8(state: &ClientState, data: &[u8]) -> Vec<u8> {
         offset += 2 + item_len;
     }
 
+    if let Some(fb) = state.get_framebuffer_mut(drawable) {
+        for (x, y, w, h, pixels) in items {
+            // Use Over compositing to preserve background under transparent pixels
+            fb.put_image_over(x, y, w, h, &pixels);
+        }
+    }
+
     Vec::new()
 }
 
-fn handle_image_text8(state: &ClientState, data: &[u8]) -> Vec<u8> {
+fn handle_image_text8(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
     if data.len() < 16 {
         return Vec::new();
     }
@@ -2145,7 +2126,6 @@ fn handle_image_text8(state: &ClientState, data: &[u8]) -> Vec<u8> {
         return Vec::new();
     };
 
-    // Get the font from the GC
     let font = state
         .font_manager
         .get_font(gc.font_id)
@@ -2161,22 +2141,15 @@ fn handle_image_text8(state: &ClientState, data: &[u8]) -> Vec<u8> {
         return Vec::new();
     }
 
-    let _ = state.update_tx.send((
-        state.client_id.clone(),
-        DisplayUpdate::PutImage {
-            window_id: drawable,
-            x,
-            y: y - font.font_ascent,
-            width: img_w,
-            height: img_h,
-            data: pixels,
-        },
-    ));
+    let render_y = y - font.font_ascent;
+    if let Some(fb) = state.get_framebuffer_mut(drawable) {
+        fb.put_image(x, render_y, img_w, img_h, &pixels);
+    }
 
     Vec::new()
 }
 
-fn handle_put_image(state: &ClientState, data: &[u8]) -> Vec<u8> {
+fn handle_put_image(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
     if data.len() < 24 {
         return Vec::new();
     }
@@ -2190,24 +2163,16 @@ fn handle_put_image(state: &ClientState, data: &[u8]) -> Vec<u8> {
     let dst_y = i16::from_le_bytes([data[18], data[19]]);
     // left_pad at [20], depth at [21]
 
-    let pixel_data = data[24..].to_vec();
+    let pixel_data = &data[24..];
 
-    let _ = state.update_tx.send((
-        state.client_id.clone(),
-        DisplayUpdate::PutImage {
-            window_id: drawable,
-            x: dst_x,
-            y: dst_y,
-            width,
-            height,
-            data: pixel_data,
-        },
-    ));
+    if let Some(fb) = state.get_framebuffer_mut(drawable) {
+        fb.put_image(dst_x, dst_y, width, height, pixel_data);
+    }
 
     Vec::new()
 }
 
-fn handle_get_image(_state: &ClientState, data: &[u8], seq: u16) -> Vec<u8> {
+fn handle_get_image(_state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
     if data.len() < 20 {
         return Vec::new();
     }
@@ -2234,7 +2199,7 @@ fn handle_get_image(_state: &ClientState, data: &[u8], seq: u16) -> Vec<u8> {
     reply
 }
 
-fn handle_alloc_color(_state: &ClientState, data: &[u8], seq: u16) -> Vec<u8> {
+fn handle_alloc_color(_state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
     // AllocColor request: [opcode, pad, length, colormap(4), red(2), green(2), blue(2), pad(2)]
     if data.len() < 16 {
         return Vec::new();
@@ -2265,7 +2230,7 @@ fn handle_alloc_color(_state: &ClientState, data: &[u8], seq: u16) -> Vec<u8> {
     reply.to_vec()
 }
 
-fn handle_query_colors(_state: &ClientState, data: &[u8], seq: u16) -> Vec<u8> {
+fn handle_query_colors(_state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
     // QueryColors request: [opcode, pad, length, colormap(4), pixel0(4), pixel1(4), ...]
     if data.len() < 8 {
         return Vec::new();
@@ -2458,7 +2423,7 @@ fn keycode_to_keysym(keycode: u8) -> (u32, u32) {
     }
 }
 
-fn handle_query_extension(_state: &ClientState, _data: &[u8], seq: u16) -> Vec<u8> {
+fn handle_query_extension(_state: &mut ClientState, _data: &[u8], seq: u16) -> Vec<u8> {
     // Reply "extension not found" for all extensions
     let mut reply = [0u8; 32];
     reply[0] = 1;

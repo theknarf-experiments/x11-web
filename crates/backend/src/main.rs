@@ -209,20 +209,31 @@ async fn handle_sidecar_ws(socket: WebSocket, state: AppState) {
                 .await;
             }
             SidecarToBackend::DisplayUpdate { client_id, update } => {
+                let is_put_image = matches!(update, x11_web_protocol::DisplayUpdate::PutImage { .. });
                 let msg = BackendToFrontend::DisplayUpdate {
                     sidecar_id: sidecar_id.clone(),
                     client_id: client_id.clone(),
                     update,
                 };
 
-                // Buffer for replay to new frontends
-                state
-                    .display_buffers
-                    .write()
-                    .await
-                    .entry(client_id.clone())
-                    .or_default()
-                    .push(msg.clone());
+                // Buffer for replay to new frontends.
+                // For PutImage, keep only the latest (replaces previous frame data).
+                // For lifecycle events (WindowCreated, etc.), always append.
+                {
+                    let mut bufs = state.display_buffers.write().await;
+                    let buf = bufs.entry(client_id.clone()).or_default();
+                    if is_put_image {
+                        // Remove old PutImage entries for this client to keep buffer compact
+                        buf.retain(|m| {
+                            if let BackendToFrontend::DisplayUpdate { update: u, .. } = m {
+                                !matches!(u, x11_web_protocol::DisplayUpdate::PutImage { .. })
+                            } else {
+                                true
+                            }
+                        });
+                    }
+                    buf.push(msg.clone());
+                }
 
                 // Forward to subscribed frontends
                 let frontends = state.frontends.read().await;

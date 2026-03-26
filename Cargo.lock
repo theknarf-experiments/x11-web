@@ -797,12 +797,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "paste"
-version = "1.0.15"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "57c0d7b74b563b49d38dae00a0c37d4d6de9b432382b2892f0574ddcae73fd0a"
-
-[[package]]
 name = "percent-encoding"
 version = "2.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -819,23 +813,6 @@ name = "pin-utils"
 version = "0.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8b870d8c151b6f2fb93e84a13146138f05d02ed11c7e7c54f8826aaaf7c9f184"
-
-[[package]]
-name = "pixman"
-version = "0.2.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cea217d496c19ac0a8e502b37078e1f683d16344adee9eb247a5d57c165e1edf"
-dependencies = [
- "paste",
- "pixman-sys",
- "thiserror 1.0.69",
-]
-
-[[package]]
-name = "pixman-sys"
-version = "0.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a1a0483e89e81d7915defe83c51f23f6800594d64f6f4a21253ce87fd8444ada"
 
 [[package]]
 name = "potential_utf"
@@ -1746,6 +1723,7 @@ dependencies = [
 name = "x11-web-protocol"
 version = "0.1.0"
 dependencies = [
+ "base64",
  "rmp-serde",
  "serde",
 ]
@@ -1758,7 +1736,6 @@ dependencies = [
  "flate2",
  "futures",
  "glob",
- "pixman",
  "rmp-serde",
  "serde",
  "serde_json",
