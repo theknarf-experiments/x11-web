@@ -1,5 +1,6 @@
 mod fonts;
 mod framebuffer;
+mod render;
 mod xserver;
 
 use std::collections::{HashMap, VecDeque};

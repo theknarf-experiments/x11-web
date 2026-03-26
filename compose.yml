@@ -19,6 +19,7 @@ services:
       SIDECAR_NAME: local-sidecar
       DISPLAY_NUMBER: "99"
       RUST_LOG: info
+      NO_AT_BRIDGE: "1"
 
   frontend:
     build:

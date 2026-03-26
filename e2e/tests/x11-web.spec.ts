@@ -120,6 +120,7 @@ test.describe
 							SIDECAR_NAME: "test-sidecar",
 							DISPLAY_NUMBER: "99",
 							RUST_LOG: "info",
+							NO_AT_BRIDGE: "1",
 						})
 						.withWaitStrategy(Wait.forLogMessage(/Connected to backend/))
 						.start(),
@@ -372,6 +373,24 @@ test.describe
 
 			// Text should have rendered — at minimum the "echo hello" output
 			expect(await countNonBlackPixels(canvas)).toBeGreaterThan(50);
+		});
+
+		test("GTK app does not crash the sidecar", async ({ page }) => {
+			await page.goto(`http://localhost:${frontendPort}`);
+			await waitForDock(page);
+
+			// Spawn zenity — it may not fully render yet (GTK3 needs more
+			// protocol support), but the sidecar must not crash.
+			const win = await spawnApp(
+				page,
+				'--info --text "Hello from GTK" --title "GTK Test"',
+				"zenity",
+			);
+			const canvas = win.locator('[data-testid="x11-canvas"]');
+			await expect(canvas).toBeVisible();
+			await page.waitForTimeout(3000);
+
+			// The afterEach health check will verify the sidecar survived
 		});
 
 		test("vim workflow: insert, save, quit, cat", async ({ page }) => {

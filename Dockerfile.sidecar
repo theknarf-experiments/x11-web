@@ -10,10 +10,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     xterm \
     xfonts-base \
     vim \
-    \
+    zenity \
+    libgtk2.0-0 \
+    dbus-x11 \
     && rm -rf /var/lib/apt/lists/*
 RUN mkdir -p /tmp/.X11-unix
 COPY --from=builder /app/target/release/x11-web-sidecar /usr/local/bin/
 COPY crates/sidecar/fonts/ /usr/local/share/fonts/bdf/
 ENV DISPLAY_NUMBER=99
+ENV NO_AT_BRIDGE=1
 CMD ["x11-web-sidecar"]

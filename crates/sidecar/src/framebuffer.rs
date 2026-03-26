@@ -34,6 +34,18 @@ impl Framebuffer {
         self.height
     }
 
+    pub fn data(&self) -> &[u8] {
+        &self.data
+    }
+
+    pub fn data_mut(&mut self) -> &mut [u8] {
+        &mut self.data
+    }
+
+    pub fn stride(&self) -> usize {
+        self.stride
+    }
+
     /// Resize the framebuffer, preserving existing content where possible.
     pub fn resize(&mut self, new_width: u32, new_height: u32) {
         if new_width == self.width && new_height == self.height {

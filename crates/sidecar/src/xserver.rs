@@ -31,25 +31,26 @@ pub struct X11Server {
 }
 
 /// Per-connection state for an X11 client.
-struct ClientState {
-    client_id: String,
-    sequence: u16,
-    windows: HashMap<u32, WindowState>,
-    pixmaps: HashMap<u32, PixmapState>,
-    gcs: HashMap<u32, GcState>,
-    atoms: AtomManager,
-    update_tx: mpsc::UnboundedSender<TaggedDisplayUpdate>,
-    root_window: u32,
-    root_width: u16,
-    root_height: u16,
-    pointer_x: i16,
-    pointer_y: i16,
-    font_manager: FontManager,
+pub(crate) struct ClientState {
+    pub(crate) client_id: String,
+    pub(crate) sequence: u16,
+    pub(crate) windows: HashMap<u32, WindowState>,
+    pub(crate) pixmaps: HashMap<u32, PixmapState>,
+    pub(crate) gcs: HashMap<u32, GcState>,
+    pub(crate) atoms: AtomManager,
+    pub(crate) update_tx: mpsc::UnboundedSender<TaggedDisplayUpdate>,
+    pub(crate) root_window: u32,
+    pub(crate) root_width: u16,
+    pub(crate) root_height: u16,
+    pub(crate) pointer_x: i16,
+    pub(crate) pointer_y: i16,
+    pub(crate) font_manager: FontManager,
+    pub(crate) render: crate::render::RenderState,
 }
 
 impl ClientState {
     /// Get a mutable reference to the framebuffer for a drawable (window or pixmap).
-    fn get_framebuffer_mut(&mut self, drawable: u32) -> Option<&mut Framebuffer> {
+    pub(crate) fn get_framebuffer_mut(&mut self, drawable: u32) -> Option<&mut Framebuffer> {
         if let Some(win) = self.windows.get_mut(&drawable) {
             return Some(&mut win.framebuffer);
         }
@@ -88,33 +89,33 @@ impl ClientState {
     }
 }
 
-struct WindowState {
-    id: u32,
-    parent: u32,
-    x: i16,
-    y: i16,
-    width: u16,
-    height: u16,
-    border_width: u16,
-    visual: u32,
-    class: u16,
-    mapped: bool,
-    event_mask: u32,
-    background_pixel: u32,
-    override_redirect: bool,
-    framebuffer: Framebuffer,
+pub(crate) struct WindowState {
+    pub(crate) id: u32,
+    pub(crate) parent: u32,
+    pub(crate) x: i16,
+    pub(crate) y: i16,
+    pub(crate) width: u16,
+    pub(crate) height: u16,
+    pub(crate) border_width: u16,
+    pub(crate) visual: u32,
+    pub(crate) class: u16,
+    pub(crate) mapped: bool,
+    pub(crate) event_mask: u32,
+    pub(crate) background_pixel: u32,
+    pub(crate) override_redirect: bool,
+    pub(crate) framebuffer: Framebuffer,
 }
 
-struct PixmapState {
-    _id: u32,
-    _width: u16,
-    _height: u16,
-    _depth: u8,
-    framebuffer: Framebuffer,
+pub(crate) struct PixmapState {
+    pub(crate) _id: u32,
+    pub(crate) _width: u16,
+    pub(crate) _height: u16,
+    pub(crate) _depth: u8,
+    pub(crate) framebuffer: Framebuffer,
 }
 
 #[derive(Clone)]
-struct GcState {
+pub(crate) struct GcState {
     foreground: u32,
     background: u32,
     line_width: u16,
@@ -134,7 +135,7 @@ impl Default for GcState {
     }
 }
 
-struct AtomManager {
+pub(crate) struct AtomManager {
     atoms: HashMap<String, u32>,
     reverse: HashMap<u32, String>,
     next_atom: u32,
@@ -334,9 +335,14 @@ fn build_setup() -> Setup {
         blue_mask: 0x000000FF,
     };
 
-    let depth = Depth {
+    let depth24 = Depth {
         depth: 24,
         visuals: vec![visual],
+    };
+
+    let depth32 = Depth {
+        depth: 32,
+        visuals: vec![],
     };
 
     let screen = Screen {
@@ -355,11 +361,16 @@ fn build_setup() -> Setup {
         backing_stores: BackingStore::NOT_USEFUL,
         save_unders: false,
         root_depth: 24,
-        allowed_depths: vec![depth],
+        allowed_depths: vec![depth24, depth32],
     };
 
     let format24 = Format {
         depth: 24,
+        bits_per_pixel: 32,
+        scanline_pad: 32,
+    };
+    let format32 = Format {
+        depth: 32,
         bits_per_pixel: 32,
         scanline_pad: 32,
     };
@@ -387,7 +398,7 @@ fn build_setup() -> Setup {
         min_keycode: 8,
         max_keycode: 255,
         vendor: b"x11-web".to_vec(),
-        pixmap_formats: vec![format1, format24],
+        pixmap_formats: vec![format1, format24, format32],
         roots: vec![screen],
     };
 
@@ -471,6 +482,7 @@ async fn handle_client(
         pointer_x: 0,
         pointer_y: 0,
         font_manager: FontManager::new(),
+        render: crate::render::RenderState::new(),
     };
 
     // Add root window to state
@@ -833,6 +845,17 @@ fn handle_request(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
         119 | // GetModifierMapping -> reply needed
         127 // NoOperation
         => handle_misc_request(state, major_opcode, seq),
+        133 => {
+            // BIG-REQUESTS: Enable reply
+            let mut reply = [0u8; 32];
+            reply[0] = 1; // Reply
+            reply[2..4].copy_from_slice(&seq.to_le_bytes());
+            reply[8..12].copy_from_slice(&(4194303u32).to_le_bytes()); // maximum-request-length
+            reply.to_vec()
+        }
+        128 => handle_shape_request(state, data, seq),
+        138 => handle_xfixes_request(state, data, seq),
+        139 => crate::render::handle_render_request(state, data, seq),
         _ => {
             debug!("Unhandled X11 request opcode: {major_opcode}");
             Vec::new()
@@ -2423,11 +2446,115 @@ fn keycode_to_keysym(keycode: u8) -> (u32, u32) {
     }
 }
 
-fn handle_query_extension(_state: &mut ClientState, _data: &[u8], seq: u16) -> Vec<u8> {
-    // Reply "extension not found" for all extensions
+fn handle_query_extension(_state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
+    // Parse extension name from the request
+    let name_len = u16::from_le_bytes([data[4], data[5]]) as usize;
+    let name = if data.len() >= 8 + name_len {
+        std::str::from_utf8(&data[8..8 + name_len]).unwrap_or("")
+    } else {
+        ""
+    };
+
+    debug!("QueryExtension: \"{}\"", name);
+
     let mut reply = [0u8; 32];
-    reply[0] = 1;
+    reply[0] = 1; // Reply
     reply[2..4].copy_from_slice(&seq.to_le_bytes());
-    // present = false (byte 8 = 0) — already zero
+
+    match name {
+        "RENDER" => {
+            reply[8] = 1; // present = true
+            reply[9] = 139; // major_opcode
+            reply[10] = 0; // first_event
+            reply[11] = 0; // first_error
+        }
+        "BIG-REQUESTS" => {
+            reply[8] = 1; // present = true
+            reply[9] = 133; // major_opcode
+            reply[10] = 0; // first_event
+            reply[11] = 0; // first_error
+        }
+        "XFIXES" => {
+            reply[8] = 1; // present = true
+            reply[9] = 138; // major_opcode
+            reply[10] = 87; // first_event
+            reply[11] = 0; // first_error
+        }
+        "SHAPE" => {
+            reply[8] = 1; // present = true
+            reply[9] = 128; // major_opcode
+            reply[10] = 64; // first_event
+            reply[11] = 0; // first_error
+        }
+        "XINERAMA" | "XInputExtension" | "XKEYBOARD" => {
+            // Not present — already zero
+        }
+        _ => {
+            // present = false (byte 8 = 0) — already zero
+        }
+    }
+
     reply.to_vec()
+}
+
+fn handle_xfixes_request(_state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
+    let minor = data[1];
+    debug!("XFIXES minor opcode: {minor}");
+
+    match minor {
+        0 => {
+            // QueryVersion: return version 5.0
+            let mut reply = [0u8; 32];
+            reply[0] = 1; // Reply
+            reply[2..4].copy_from_slice(&seq.to_le_bytes());
+            reply[8..12].copy_from_slice(&5u32.to_le_bytes()); // major version
+            reply[12..16].copy_from_slice(&0u32.to_le_bytes()); // minor version
+            reply.to_vec()
+        }
+        4 => {
+            // GetCursorImage: return an error (BadImplementation)
+            let mut err = [0u8; 32];
+            err[0] = 0; // Error
+            err[1] = 17; // BadImplementation
+            err[2..4].copy_from_slice(&seq.to_le_bytes());
+            err.to_vec()
+        }
+        18 => {
+            // FetchRegion: return empty region reply
+            let mut reply = [0u8; 32];
+            reply[0] = 1; // Reply
+            reply[2..4].copy_from_slice(&seq.to_le_bytes());
+            // reply length = 0 (no rectangles)
+            // extents: x1=0, y1=0, x2=0, y2=0 (bytes 8-15, already zero)
+            reply.to_vec()
+        }
+        31 => {
+            // GetCursorName: return empty reply
+            let mut reply = [0u8; 32];
+            reply[0] = 1; // Reply
+            reply[2..4].copy_from_slice(&seq.to_le_bytes());
+            // atom = 0 (None), name length = 0
+            reply.to_vec()
+        }
+        // All other minor opcodes: ignore
+        _ => Vec::new(),
+    }
+}
+
+fn handle_shape_request(_state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
+    let minor = data[1];
+    debug!("SHAPE minor opcode: {minor}");
+
+    match minor {
+        0 => {
+            // QueryVersion: return version 1.1
+            let mut reply = [0u8; 32];
+            reply[0] = 1; // Reply
+            reply[2..4].copy_from_slice(&seq.to_le_bytes());
+            reply[8..10].copy_from_slice(&1u16.to_le_bytes()); // major version
+            reply[10..12].copy_from_slice(&1u16.to_le_bytes()); // minor version
+            reply.to_vec()
+        }
+        _ => Vec::new(),
+    }
 }
