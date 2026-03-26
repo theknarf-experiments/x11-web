@@ -2629,7 +2629,9 @@ fn handle_query_extension(_state: &mut ClientState, data: &[u8], seq: u16) -> Ve
             reply[10] = 64; // first_event
             reply[11] = 0; // first_error
         }
-        "XINERAMA" | "XInputExtension" | "XKEYBOARD" | "RANDR" => {
+        // RANDR disabled — GTK renders incorrectly with our minimal RANDR replies.
+        // The handler code is kept for future use when replies are fully correct.
+        "XINERAMA" | "XInputExtension" | "XKEYBOARD" => {
             // Not present — already zero
         }
         _ => {
