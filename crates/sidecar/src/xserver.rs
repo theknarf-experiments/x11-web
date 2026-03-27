@@ -1407,6 +1407,8 @@ fn handle_request(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
         72 => handle_put_image(state, data),
         73 => handle_get_image(state, data, seq),
         84 => handle_alloc_color(state, data, seq),
+        85 => handle_alloc_named_color(state, data, seq),
+        92 => handle_lookup_color(state, data, seq),
         91 => handle_query_colors(state, data, seq),
         97 => {
             // QueryBestSize: reply with the requested width/height
@@ -3312,6 +3314,112 @@ fn handle_alloc_color(_state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8
     reply[12..14].copy_from_slice(&blue.to_le_bytes());
     // pad at 14..16
     reply[16..20].copy_from_slice(&pixel.to_le_bytes());
+
+    reply.to_vec()
+}
+
+/// Parse a named color to RGB. Returns (r16, g16, b16) in 16-bit values.
+fn parse_color_name(name: &str) -> (u16, u16, u16) {
+    match name.to_lowercase().as_str() {
+        "white" => (0xFFFF, 0xFFFF, 0xFFFF),
+        "black" => (0, 0, 0),
+        "red" => (0xFFFF, 0, 0),
+        "green" => (0, 0xFFFF, 0),
+        "blue" => (0, 0, 0xFFFF),
+        "yellow" => (0xFFFF, 0xFFFF, 0),
+        "cyan" => (0, 0xFFFF, 0xFFFF),
+        "magenta" => (0xFFFF, 0, 0xFFFF),
+        "gray" | "grey" => (0xBEBE, 0xBEBE, 0xBEBE),
+        "light gray" | "light grey" | "lightgray" | "lightgrey" => (0xD3D3, 0xD3D3, 0xD3D3),
+        "dark gray" | "dark grey" | "darkgray" | "darkgrey" => (0xA9A9, 0xA9A9, 0xA9A9),
+        "orange" => (0xFFFF, 0xA5A5, 0),
+        "brown" => (0xA5A5, 0x2A2A, 0x2A2A),
+        "pink" => (0xFFFF, 0xC0C0, 0xCBCB),
+        "purple" => (0x8080, 0, 0x8080),
+        "navy" => (0, 0, 0x8080),
+        "olive" => (0x8080, 0x8080, 0),
+        "teal" => (0, 0x8080, 0x8080),
+        "maroon" => (0x8080, 0, 0),
+        "silver" => (0xC0C0, 0xC0C0, 0xC0C0),
+        "aqua" => (0, 0xFFFF, 0xFFFF),
+        "lime" => (0, 0xFFFF, 0),
+        "fuchsia" => (0xFFFF, 0, 0xFFFF),
+        _ => {
+            // Try to parse hex format: #RRGGBB or #RGB
+            if name.starts_with('#') && name.len() == 7 {
+                let r = u16::from_str_radix(&name[1..3], 16).unwrap_or(0);
+                let g = u16::from_str_radix(&name[3..5], 16).unwrap_or(0);
+                let b = u16::from_str_radix(&name[5..7], 16).unwrap_or(0);
+                (r * 257, g * 257, b * 257)
+            } else {
+                (0, 0, 0) // default to black for unknown colors
+            }
+        }
+    }
+}
+
+fn handle_alloc_named_color(_state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
+    // AllocNamedColor: [opcode(1), pad(1), length(2), cmap(4), name_len(2), pad(2), name(...)]
+    if data.len() < 12 {
+        return Vec::new();
+    }
+
+    let name_len = u16::from_le_bytes([data[8], data[9]]) as usize;
+    let name = if 12 + name_len <= data.len() {
+        std::str::from_utf8(&data[12..12 + name_len]).unwrap_or("")
+    } else {
+        ""
+    };
+
+    let (r16, g16, b16) = parse_color_name(name);
+    let r8 = (r16 >> 8) as u32;
+    let g8 = (g16 >> 8) as u32;
+    let b8 = (b16 >> 8) as u32;
+    let pixel = (r8 << 16) | (g8 << 8) | b8;
+
+    info!("AllocNamedColor: name={name:?} -> pixel={pixel:#x}");
+
+    // Reply: [1, pad, seq(2), length(4)=0, pixel(4), exact_red(2), exact_green(2), exact_blue(2),
+    //         visual_red(2), visual_green(2), visual_blue(2)]
+    let mut reply = [0u8; 32];
+    reply[0] = 1;
+    reply[2..4].copy_from_slice(&seq.to_le_bytes());
+    reply[8..12].copy_from_slice(&pixel.to_le_bytes());
+    reply[12..14].copy_from_slice(&r16.to_le_bytes()); // exact red
+    reply[14..16].copy_from_slice(&g16.to_le_bytes()); // exact green
+    reply[16..18].copy_from_slice(&b16.to_le_bytes()); // exact blue
+    reply[18..20].copy_from_slice(&r16.to_le_bytes()); // visual red
+    reply[20..22].copy_from_slice(&g16.to_le_bytes()); // visual green
+    reply[22..24].copy_from_slice(&b16.to_le_bytes()); // visual blue
+
+    reply.to_vec()
+}
+
+fn handle_lookup_color(_state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
+    // LookupColor: [opcode(1), pad(1), length(2), cmap(4), name_len(2), pad(2), name(...)]
+    if data.len() < 12 {
+        return Vec::new();
+    }
+
+    let name_len = u16::from_le_bytes([data[8], data[9]]) as usize;
+    let name = if 12 + name_len <= data.len() {
+        std::str::from_utf8(&data[12..12 + name_len]).unwrap_or("")
+    } else {
+        ""
+    };
+
+    let (r16, g16, b16) = parse_color_name(name);
+
+    // Reply: exact and visual colors
+    let mut reply = [0u8; 32];
+    reply[0] = 1;
+    reply[2..4].copy_from_slice(&seq.to_le_bytes());
+    reply[8..10].copy_from_slice(&r16.to_le_bytes());
+    reply[10..12].copy_from_slice(&g16.to_le_bytes());
+    reply[12..14].copy_from_slice(&b16.to_le_bytes());
+    reply[14..16].copy_from_slice(&r16.to_le_bytes());
+    reply[16..18].copy_from_slice(&g16.to_le_bytes());
+    reply[18..20].copy_from_slice(&b16.to_le_bytes());
 
     reply.to_vec()
 }
