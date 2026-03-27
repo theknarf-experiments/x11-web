@@ -100,6 +100,8 @@ pub(crate) struct ClientState {
     pub(crate) wm_events_tx: mpsc::UnboundedSender<Vec<u8>>,
     /// DAMAGE extension: active damage subscriptions (damage_id -> DamageInfo).
     pub(crate) damage_regions: HashMap<u32, DamageInfo>,
+    /// Present extension: event subscriptions (event_id -> PresentSubscription).
+    pub(crate) present_subscriptions: HashMap<u32, PresentSubscription>,
     /// Pending X11 events to deliver to this client (e.g. DamageNotify).
     pub(crate) pending_events: Vec<Vec<u8>>,
 }
@@ -330,6 +332,13 @@ impl Default for GcState {
 pub(crate) struct DamageInfo {
     pub(crate) drawable: u32,  // the window being monitored
     pub(crate) level: u8,      // damage level (RawRectangles=0, DeltaRectangles=1, BoundingBox=2, NonEmpty=3)
+}
+
+/// Present extension event subscription.
+#[derive(Clone)]
+pub(crate) struct PresentSubscription {
+    pub(crate) window: u32,
+    pub(crate) event_mask: u32,
 }
 
 /// A shared memory segment attached via MIT-SHM.
@@ -793,6 +802,7 @@ async fn handle_client(
         wm_state: shared_wm_state.clone(),
         wm_events_tx: wm_events_tx,
         damage_regions: HashMap::new(),
+        present_subscriptions: HashMap::new(),
         pending_events: Vec::new(),
     };
 
@@ -1401,6 +1411,7 @@ fn handle_request(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
         141 => handle_xc_misc_request(data, seq),
         142 => handle_x_composite_request(state, data, seq),
         143 => handle_damage_request(state, data, seq),
+        148 => handle_present_request(state, data, seq),
         _ => {
             warn!("Unhandled X11 request opcode: {major_opcode} minor: {_minor}");
             Vec::new()
@@ -3346,7 +3357,7 @@ fn keycode_to_keysym(keycode: u8) -> (u32, u32) {
 
 fn handle_list_extensions(seq: u16) -> Vec<u8> {
     // Return the list of extensions we support
-    let extensions: &[&str] = &["BIG-REQUESTS", "MIT-SHM", "RENDER", "XFIXES", "SHAPE", "SYNC", "Generic Event Extension", "XC-MISC", "Composite", "DAMAGE"];
+    let extensions: &[&str] = &["BIG-REQUESTS", "MIT-SHM", "RENDER", "XFIXES", "SHAPE", "SYNC", "Generic Event Extension", "XC-MISC", "Composite", "DAMAGE", "Present"];
 
     // Build the names data: each is a length-prefixed string (1 byte len + name)
     let mut names_data = Vec::new();
@@ -3447,6 +3458,12 @@ fn handle_query_extension(_state: &mut ClientState, data: &[u8], seq: u16) -> Ve
         "XC-MISC" => {
             reply[8] = 1; // present = true
             reply[9] = 141; // major_opcode
+            reply[10] = 0; // first_event
+            reply[11] = 0; // first_error
+        }
+        "Present" => {
+            reply[8] = 1; // present = true
+            reply[9] = 148; // major_opcode
             reply[10] = 0; // first_event
             reply[11] = 0; // first_error
         }
@@ -4383,6 +4400,146 @@ fn handle_xc_misc_request(data: &[u8], seq: u16) -> Vec<u8> {
         }
         _ => {
             debug!("Unhandled XC-MISC minor opcode: {minor}");
+            Vec::new()
+        }
+    }
+}
+
+/// Handle X Present extension requests (major opcode 148).
+fn handle_present_request(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
+    let minor = data[1];
+    debug!("Present minor opcode: {minor}");
+
+    match minor {
+        // QueryVersion
+        0 => {
+            let mut reply = [0u8; 32];
+            reply[0] = 1; // Reply
+            reply[2..4].copy_from_slice(&seq.to_le_bytes());
+            reply[8..12].copy_from_slice(&1u32.to_le_bytes()); // major version
+            reply[12..16].copy_from_slice(&2u32.to_le_bytes()); // minor version
+            reply.to_vec()
+        }
+        // Pixmap (PresentPixmap) — the critical operation
+        1 => {
+            if data.len() < 72 {
+                debug!("PresentPixmap: request too short ({} bytes)", data.len());
+                return Vec::new();
+            }
+            let window = u32::from_le_bytes([data[4], data[5], data[6], data[7]]);
+            let pixmap = u32::from_le_bytes([data[8], data[9], data[10], data[11]]);
+            let serial = u32::from_le_bytes([data[12], data[13], data[14], data[15]]);
+            let x_off = i16::from_le_bytes([data[24], data[25]]);
+            let y_off = i16::from_le_bytes([data[26], data[27]]);
+
+            debug!(
+                "PresentPixmap: window={:#x} pixmap={:#x} serial={} x_off={} y_off={}",
+                window, pixmap, serial, x_off, y_off
+            );
+
+            // Copy pixels from the source pixmap to the destination window.
+            // We need to clone the pixel data first because we can't borrow
+            // both the pixmap and window framebuffers simultaneously.
+            let src_info = {
+                // Resolve through aliases (e.g. NameWindowPixmap)
+                let resolved = state.resolve_drawable(pixmap);
+                if let Some(win) = state.windows.get(&resolved) {
+                    Some((
+                        win.framebuffer.width() as u16,
+                        win.framebuffer.height() as u16,
+                        win.framebuffer.data().to_vec(),
+                    ))
+                } else if let Some(pix) = state.pixmaps.get(&resolved) {
+                    Some((
+                        pix.framebuffer.width() as u16,
+                        pix.framebuffer.height() as u16,
+                        pix.framebuffer.data().to_vec(),
+                    ))
+                } else {
+                    debug!("PresentPixmap: source pixmap {:#x} not found", pixmap);
+                    None
+                }
+            };
+
+            if let Some((src_w, src_h, src_data)) = src_info {
+                if let Some(win) = state.windows.get_mut(&window) {
+                    win.framebuffer.put_image(x_off, y_off, src_w, src_h, &src_data);
+                    debug!(
+                        "PresentPixmap: copied {}x{} pixels to window {:#x}",
+                        src_w, src_h, window
+                    );
+                } else {
+                    debug!("PresentPixmap: destination window {:#x} not found", window);
+                }
+            }
+
+            // Send PresentCompleteNotify if the client subscribed via SelectInput
+            let matching_subs: Vec<(u32, u32)> = state
+                .present_subscriptions
+                .iter()
+                .filter(|(_, sub)| sub.window == window && (sub.event_mask & 1) != 0)
+                .map(|(&eid, sub)| (eid, sub.window))
+                .collect();
+
+            for (event_id, _win) in matching_subs {
+                // GenericEvent format for PresentCompleteNotify
+                let mut event = [0u8; 32];
+                event[0] = 35; // GenericEvent
+                event[1] = 148; // Present extension major opcode
+                event[2..4].copy_from_slice(&seq.to_le_bytes());
+                // event[4..8] = 0 (no extra data beyond 32 bytes)
+                event[8..10].copy_from_slice(&1u16.to_le_bytes()); // CompleteNotify event type
+                // event[10..12] = pad
+                event[12..16].copy_from_slice(&event_id.to_le_bytes()); // event_id
+                event[16..20].copy_from_slice(&window.to_le_bytes()); // window
+                event[20..24].copy_from_slice(&serial.to_le_bytes()); // serial
+                event[24] = 0; // kind = Pixmap
+                event[25] = 0; // mode = Copy
+                state.pending_events.push(event.to_vec());
+            }
+
+            Vec::new() // PresentPixmap has no reply
+        }
+        // NotifyMSC
+        2 => {
+            // Stub: we don't track MSC, just ignore
+            debug!("PresentNotifyMSC: stub");
+            Vec::new()
+        }
+        // SelectInput
+        3 => {
+            if data.len() >= 16 {
+                let event_id = u32::from_le_bytes([data[4], data[5], data[6], data[7]]);
+                let window = u32::from_le_bytes([data[8], data[9], data[10], data[11]]);
+                let event_mask = u32::from_le_bytes([data[12], data[13], data[14], data[15]]);
+
+                debug!(
+                    "PresentSelectInput: event_id={:#x} window={:#x} event_mask={:#x}",
+                    event_id, window, event_mask
+                );
+
+                if event_mask == 0 {
+                    // Unsubscribe
+                    state.present_subscriptions.remove(&event_id);
+                } else {
+                    state.present_subscriptions.insert(
+                        event_id,
+                        PresentSubscription { window, event_mask },
+                    );
+                }
+            }
+            Vec::new() // SelectInput has no reply
+        }
+        // QueryCapabilities
+        4 => {
+            let mut reply = [0u8; 32];
+            reply[0] = 1; // Reply
+            reply[2..4].copy_from_slice(&seq.to_le_bytes());
+            reply[8..12].copy_from_slice(&0u32.to_le_bytes()); // capabilities = none
+            reply.to_vec()
+        }
+        _ => {
+            debug!("Unhandled Present minor opcode: {minor}");
             Vec::new()
         }
     }
