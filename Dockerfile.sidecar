@@ -24,6 +24,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     gimp \
     librsvg2-common \
     adwaita-icon-theme \
+    imagemagick \
+    xvfb \
     && rm -rf /var/lib/apt/lists/*
 RUN mkdir -p /tmp/.X11-unix
 COPY --from=builder /app/target/release/x11-web-sidecar /usr/local/bin/

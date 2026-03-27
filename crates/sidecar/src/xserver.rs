@@ -3194,19 +3194,29 @@ fn handle_put_image(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
     Vec::new()
 }
 
-fn handle_get_image(_state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
+fn handle_get_image(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
     if data.len() < 20 {
         return Vec::new();
     }
 
-    let _drawable = u32::from_le_bytes([data[4], data[5], data[6], data[7]]);
-    let _x = i16::from_le_bytes([data[8], data[9]]);
-    let _y = i16::from_le_bytes([data[10], data[11]]);
+    let _format = data[1]; // 1=XYPixmap, 2=ZPixmap
+    let drawable = u32::from_le_bytes([data[4], data[5], data[6], data[7]]);
+    let x = i16::from_le_bytes([data[8], data[9]]);
+    let y = i16::from_le_bytes([data[10], data[11]]);
     let width = u16::from_le_bytes([data[12], data[13]]);
     let height = u16::from_le_bytes([data[14], data[15]]);
 
-    // Return a blank image (all zeros)
-    let row_bytes = width as usize * 4; // 32bpp
+    // Sync SHM pixmaps before reading
+    state.sync_shm_pixmap(drawable);
+
+    // Read actual pixel data from the drawable's framebuffer
+    let pixels = if let Some(fb) = state.get_framebuffer_mut(drawable) {
+        fb.extract_pixels(x, y, width, height)
+    } else {
+        vec![0u8; width as usize * height as usize * 4]
+    };
+
+    let row_bytes = width as usize * 4;
     let padded_row = (row_bytes + 3) & !3;
     let data_len = padded_row * height as usize;
     let length_field = (data_len / 4) as u32;
@@ -3217,6 +3227,16 @@ fn handle_get_image(_state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> 
     reply[2..4].copy_from_slice(&seq.to_le_bytes());
     reply[4..8].copy_from_slice(&length_field.to_le_bytes());
     reply[8..12].copy_from_slice(&ROOT_VISUAL.to_le_bytes());
+
+    // Copy pixel data into reply (row by row with padding)
+    for row in 0..height as usize {
+        let src_off = row * row_bytes;
+        let dst_off = 32 + row * padded_row;
+        let copy_len = row_bytes.min(pixels.len() - src_off);
+        if src_off + copy_len <= pixels.len() && dst_off + copy_len <= reply.len() {
+            reply[dst_off..dst_off + copy_len].copy_from_slice(&pixels[src_off..src_off + copy_len]);
+        }
+    }
 
     reply
 }

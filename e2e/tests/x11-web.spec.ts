@@ -468,8 +468,22 @@ test.describe
 			});
 		});
 
-		// GIMP test skipped in CI — takes >60s to start. Works via docker compose exec.
-		// test("GIMP starts and renders", ...);
+		test("xeyes canvas matches Xvfb reference", async ({ page }) => {
+			await page.goto(`http://localhost:${frontendPort}`);
+			await waitForDock(page);
+
+			const win = await spawnApp(page, "-geometry 200x150+50+50");
+			const canvas = win.locator('[data-testid="x11-canvas"]');
+			await expect(canvas).toBeVisible();
+			await page.waitForTimeout(5000);
+
+			// Eyes must be visible — multiple distinct colors (black bg, white eyes, black pupils)
+			expect(await countNonBlackPixels(canvas)).toBeGreaterThan(100);
+			expect(await hasRenderedContent(canvas)).toBe(true);
+			await expect(canvas).toHaveScreenshot("xeyes-rendering.png", {
+				maxDiffPixelRatio: 0.05,
+			});
+		});
 
 		test("firefox starts without crashing the sidecar", async ({ page }) => {
 			await page.goto(`http://localhost:${frontendPort}`);
