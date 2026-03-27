@@ -1005,7 +1005,6 @@ async fn handle_client(
                     continue;
                 }
 
-                let now = std::time::Instant::now();
                 let unmapped: Vec<u32> = state.windows.iter()
                     .filter(|(_, w)| {
                         !w.mapped
