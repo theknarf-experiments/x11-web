@@ -1087,10 +1087,11 @@ async fn handle_client(
                         info!("WM auto-mapping top-level window {wid:#x} {}x{}", win.width, win.height);
                         win.mapped = true;
 
-                        // Don't fill background — the app already rendered via
-                        // the MapWindow Expose event. Filling would erase content.
+                        // Fill with background pixel
                         let w = win.width;
                         let h = win.height;
+                        let bg = win.background_pixel;
+                        win.framebuffer.fill_rect(0, 0, w, h, bg);
 
                         // Set WM_STATE = NormalState
                         let mut wm_state_data = vec![0u8; 8];
