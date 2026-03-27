@@ -1012,9 +1012,7 @@ async fn handle_client(
                         && w.parent == state.root_window
                         && w.class == 1 // InputOutput
                         && !w.override_redirect
-                        // Delay auto-map by 500ms so the app has time to
-                        // set properties and enter its event loop
-                        && now.duration_since(w.created_at).as_millis() >= 500
+                        && (w.width > 1 || w.height > 1)
                     })
                     .map(|(id, _)| *id)
                     .collect();
