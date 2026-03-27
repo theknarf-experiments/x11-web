@@ -479,6 +479,42 @@ impl X11Server {
                     properties: HashMap::new(),
                 },
             );
+
+            // Set EWMH properties on root at startup so they're available to ALL connections
+            {
+                let mut atoms = shared_atoms.lock().unwrap();
+                let a_swc = atoms.intern("_NET_SUPPORTING_WM_CHECK", false);
+                let a_name = atoms.intern("_NET_WM_NAME", false);
+                let a_utf8 = atoms.intern("UTF8_STRING", false);
+                let a_supported = atoms.intern("_NET_SUPPORTED", false);
+                let a_active = atoms.intern("_NET_ACTIVE_WINDOW", false);
+                let a_client_list = atoms.intern("_NET_CLIENT_LIST", false);
+                let a_frame = atoms.intern("_NET_FRAME_EXTENTS", false);
+
+                let supported = [
+                    atoms.intern("_NET_WM_STATE", false),
+                    atoms.intern("_NET_WM_STATE_FOCUSED", false),
+                    a_active,
+                    a_name,
+                    atoms.intern("_NET_WM_PID", false),
+                    atoms.intern("_NET_WM_WINDOW_TYPE", false),
+                    atoms.intern("_NET_WM_WINDOW_TYPE_NORMAL", false),
+                    a_frame,
+                    a_swc,
+                    a_supported,
+                    a_client_list,
+                ];
+                let mut sup_data = Vec::new();
+                for a in &supported { sup_data.extend_from_slice(&a.to_le_bytes()); }
+
+                let root = windows.get_mut(&ROOT_WINDOW).unwrap();
+                root.properties.insert(a_swc, PropertyValue { prop_type: 33, format: 32, data: ROOT_WINDOW.to_le_bytes().to_vec() });
+                root.properties.insert(a_name, PropertyValue { prop_type: a_utf8, format: 8, data: b"x11-web".to_vec() });
+                root.properties.insert(a_supported, PropertyValue { prop_type: 4, format: 32, data: sup_data });
+                root.properties.insert(a_active, PropertyValue { prop_type: 33, format: 32, data: ROOT_WINDOW.to_le_bytes().to_vec() });
+                root.properties.insert(a_client_list, PropertyValue { prop_type: 33, format: 32, data: Vec::new() });
+                root.properties.insert(a_frame, PropertyValue { prop_type: 6, format: 32, data: vec![0; 16] });
+            }
         }
 
         loop {
@@ -1292,8 +1328,10 @@ fn handle_request(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
         138 => handle_xfixes_request(state, data, seq),
         134 => handle_sync_request(state, data, seq),
         135 => handle_ge_request(data, seq),
+        136 => handle_xkb_request(data, seq),
         139 => crate::render::handle_render_request(state, data, seq),
         140 => handle_randr_request(state, data, seq),
+        141 => handle_xc_misc_request(data, seq),
         142 => handle_x_composite_request(state, data, seq),
         143 => handle_damage_request(data, seq),
         _ => {
@@ -3235,7 +3273,8 @@ fn handle_list_extensions(seq: u16) -> Vec<u8> {
     // Return the list of extensions we support
     // Composite and DAMAGE disabled — they make Firefox use off-screen compositing
     // which requires a real compositing WM. Without them, Firefox falls back to direct rendering.
-    let extensions: &[&str] = &["BIG-REQUESTS", "MIT-SHM", "RENDER", "XFIXES", "SHAPE", "SYNC", "Generic Event Extension", "Composite", "DAMAGE"];
+    // XKEYBOARD disabled — our XKB stub causes Firefox to take a different (worse) init path
+    let extensions: &[&str] = &["BIG-REQUESTS", "MIT-SHM", "RENDER", "XFIXES", "SHAPE", "SYNC", "Generic Event Extension", "XC-MISC"];
 
     // Build the names data: each is a length-prefixed string (1 byte len + name)
     let mut names_data = Vec::new();
@@ -3317,21 +3356,24 @@ fn handle_query_extension(_state: &mut ClientState, data: &[u8], seq: u16) -> Ve
             reply[10] = 0; // first_event
             reply[11] = 0; // first_error
         }
-        "Composite" => {
-            reply[8] = 1;
-            reply[9] = 142;
-            reply[10] = 0;
-            reply[11] = 0;
-        }
-        "DAMAGE" => {
-            reply[8] = 1;
-            reply[9] = 143;
-            reply[10] = 91;
-            reply[11] = 152;
+        // Composite/DAMAGE: disabled to force Firefox to use direct SHM rendering
+        // instead of compositor path (which needs a real compositing WM).
+        "Composite" | "DAMAGE" => {
+            // present = false
         }
         // RANDR disabled — GTK renders incorrectly with our minimal RANDR replies.
         // The handler code is kept for future use when replies are fully correct.
-        "XINERAMA" | "XInputExtension" | "XKEYBOARD" => {
+        // XKEYBOARD disabled — our stub causes Firefox to take a worse init path
+        "XKEYBOARD" => {
+            // present = false
+        }
+        "XC-MISC" => {
+            reply[8] = 1; // present = true
+            reply[9] = 141; // major_opcode
+            reply[10] = 0; // first_event
+            reply[11] = 0; // first_error
+        }
+        "XINERAMA" | "XInputExtension" => {
             // Not present — already zero
         }
         _ => {
@@ -4000,6 +4042,200 @@ fn handle_ge_request(data: &[u8], seq: u16) -> Vec<u8> {
         }
         _ => {
             debug!("Unhandled GE minor opcode: {minor}");
+            Vec::new()
+        }
+    }
+}
+
+fn handle_xkb_request(data: &[u8], seq: u16) -> Vec<u8> {
+    let minor = data[1];
+    debug!("XKB minor opcode: {minor}");
+
+    match minor {
+        0 => {
+            // UseExtension: reply with supported=true, version 1.0
+            let mut reply = [0u8; 32];
+            reply[0] = 1; // Reply
+            reply[1] = 1; // supported = true
+            reply[2..4].copy_from_slice(&seq.to_le_bytes());
+            reply[8..10].copy_from_slice(&1u16.to_le_bytes()); // server major version
+            reply[10..12].copy_from_slice(&0u16.to_le_bytes()); // server minor version
+            reply.to_vec()
+        }
+        1 | 2 | 7 | 9 | 12 | 16 | 101 | 104 => {
+            // SelectEvents, Bell, SetMap, SetCompatMap, SetIndicatorMap,
+            // SetNames, LatchLockState, SetControls: void requests
+            Vec::new()
+        }
+        4 => {
+            // GetMap: return minimal empty map (present=0 means no data follows)
+            let mut reply = [0u8; 32];
+            reply[0] = 1; // Reply
+            reply[2..4].copy_from_slice(&seq.to_le_bytes());
+            // reply[4..8] = 0 (no extra data)
+            if data.len() >= 6 {
+                reply[8] = data[4]; // device_id from request
+            }
+            reply[10..12].copy_from_slice(&8u16.to_le_bytes()); // min_key_code
+            reply[12..14].copy_from_slice(&255u16.to_le_bytes()); // max_key_code
+            // present = 0: no components present in reply
+            reply.to_vec()
+        }
+        8 => {
+            // GetCompatMap: return empty compat map
+            let mut reply = [0u8; 32];
+            reply[0] = 1; // Reply
+            reply[2..4].copy_from_slice(&seq.to_le_bytes());
+            if data.len() >= 6 {
+                reply[8] = data[4]; // device_id
+            }
+            // all counts zero
+            reply.to_vec()
+        }
+        10 => {
+            // GetIndicatorState: reply with state=0
+            let mut reply = [0u8; 32];
+            reply[0] = 1; // Reply
+            reply[2..4].copy_from_slice(&seq.to_le_bytes());
+            if data.len() >= 6 {
+                reply[8] = data[4]; // device_id
+            }
+            // state = 0 (bytes 12..16 already zero)
+            reply.to_vec()
+        }
+        11 => {
+            // GetIndicatorMap: return empty indicators
+            let mut reply = [0u8; 32];
+            reply[0] = 1; // Reply
+            reply[2..4].copy_from_slice(&seq.to_le_bytes());
+            if data.len() >= 6 {
+                reply[8] = data[4]; // device_id
+            }
+            reply.to_vec()
+        }
+        13 => {
+            // GetNamedIndicator: reply with empty
+            let mut reply = [0u8; 32];
+            reply[0] = 1; // Reply
+            reply[2..4].copy_from_slice(&seq.to_le_bytes());
+            if data.len() >= 6 {
+                reply[8] = data[4]; // device_id
+            }
+            reply.to_vec()
+        }
+        15 => {
+            // GetNames: return with 0 counts for everything
+            let mut reply = [0u8; 32];
+            reply[0] = 1; // Reply
+            reply[2..4].copy_from_slice(&seq.to_le_bytes());
+            // reply[4..8] = 0 (no extra data)
+            if data.len() >= 6 {
+                reply[8] = data[4]; // device_id
+            }
+            reply[10..12].copy_from_slice(&8u16.to_le_bytes()); // min_key_code
+            reply[12..14].copy_from_slice(&255u16.to_le_bytes()); // max_key_code
+            // present = 0, everything else 0
+            reply.to_vec()
+        }
+        17 => {
+            // PerClientFlags: reply with value=0
+            let mut reply = [0u8; 32];
+            reply[0] = 1; // Reply
+            reply[2..4].copy_from_slice(&seq.to_le_bytes());
+            if data.len() >= 6 {
+                reply[8] = data[4]; // device_id
+            }
+            // supported, value, autoCtrls, autoCtrlsValues all 0
+            reply.to_vec()
+        }
+        100 => {
+            // GetState: reply with device state
+            let mut reply = [0u8; 32];
+            reply[0] = 1; // Reply
+            reply[2..4].copy_from_slice(&seq.to_le_bytes());
+            if data.len() >= 6 {
+                reply[8] = data[4]; // device_id
+            }
+            // all modifier/group state fields are 0
+            reply.to_vec()
+        }
+        103 => {
+            // GetControls: reply with minimal controls
+            let mut reply = vec![0u8; 32 + 92]; // controls reply has extra data
+            reply[0] = 1; // Reply
+            reply[2..4].copy_from_slice(&seq.to_le_bytes());
+            reply[4..8].copy_from_slice(&(92u32 / 4).to_le_bytes()); // length
+            if data.len() >= 6 {
+                reply[8] = data[4]; // device_id
+            }
+            // num_groups = 1 (at least one group needed)
+            // Offset 27 in the reply body is numGroups
+            // The header is 32 bytes; controls data starts at byte 32
+            // In the XKB GetControls reply: byte 10 = numGroups
+            reply[10] = 1;
+            // per_key_repeat at offset 32+20 = 52: set default repeat mask
+            // (bytes 52..84 = 32 bytes of per-key repeat bitmap)
+            for i in 0..32 {
+                reply[32 + 20 + i] = 0xFF; // all keys repeat by default
+            }
+            reply
+        }
+        _ => {
+            debug!("Unhandled XKB minor opcode: {minor}");
+            Vec::new()
+        }
+    }
+}
+
+fn handle_xc_misc_request(data: &[u8], seq: u16) -> Vec<u8> {
+    let minor = data[1];
+    debug!("XC-MISC minor opcode: {minor}");
+
+    match minor {
+        0 => {
+            // GetVersion: reply with version 1.1
+            let mut reply = [0u8; 32];
+            reply[0] = 1; // Reply
+            reply[2..4].copy_from_slice(&seq.to_le_bytes());
+            reply[8..10].copy_from_slice(&1u16.to_le_bytes()); // major version
+            reply[10..12].copy_from_slice(&1u16.to_le_bytes()); // minor version
+            reply.to_vec()
+        }
+        1 => {
+            // GetXIDRange: reply with a range of resource IDs
+            let mut reply = [0u8; 32];
+            reply[0] = 1; // Reply
+            reply[2..4].copy_from_slice(&seq.to_le_bytes());
+            reply[8..12].copy_from_slice(&0x08000000u32.to_le_bytes()); // start_id
+            reply[12..16].copy_from_slice(&65536u32.to_le_bytes()); // count
+            reply.to_vec()
+        }
+        2 => {
+            // GetXIDList: return requested number of IDs
+            let count = if data.len() >= 8 {
+                u32::from_le_bytes([data[4], data[5], data[6], data[7]])
+            } else {
+                0
+            };
+            let ids_to_return = count.min(4096); // cap at reasonable limit
+            let extra_bytes = (ids_to_return as usize) * 4;
+            let padded = (extra_bytes + 3) & !3;
+            let mut reply = vec![0u8; 32 + padded];
+            reply[0] = 1; // Reply
+            reply[2..4].copy_from_slice(&seq.to_le_bytes());
+            reply[4..8].copy_from_slice(&((padded / 4) as u32).to_le_bytes());
+            reply[8..12].copy_from_slice(&ids_to_return.to_le_bytes()); // ids_count
+            // Fill in sequential IDs starting from a high range
+            let base: u32 = 0x09000000;
+            for i in 0..ids_to_return {
+                let offset = 32 + (i as usize) * 4;
+                let id = base + i;
+                reply[offset..offset + 4].copy_from_slice(&id.to_le_bytes());
+            }
+            reply
+        }
+        _ => {
+            debug!("Unhandled XC-MISC minor opcode: {minor}");
             Vec::new()
         }
     }
