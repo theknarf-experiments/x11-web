@@ -1681,7 +1681,7 @@ fn handle_create_window(state: &mut ClientState, data: &[u8], _seq: u16) -> Vec<
 
     let use_visual = if visual == 0 { ROOT_VISUAL } else { visual };
 
-    info!("CreateWindow: id={wid:#x} parent={parent:#x} {x},{y} {width}x{height} depth={} class={class} visual={visual:#x}", data[1]);
+    info!("CreateWindow: id={wid:#x} parent={parent:#x} {x},{y} {width}x{height} depth={} class={class} visual={visual:#x} bg={background_pixel:#x}", data[1]);
 
     state.windows.insert(
         wid,
@@ -2915,6 +2915,7 @@ fn handle_poly_fill_rectangle(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
     }
 
     let fg = state.map_color_for_drawable(drawable, gc.foreground);
+    info!("PolyFillRect: draw={drawable:#x} fg={fg:#x} gc={gc_id:#x} rects={}", rects.len());
     if let Some(fb) = state.get_framebuffer_mut(drawable) {
         for (x, y, width, height) in rects {
             fb.fill_rect(x, y, width, height, fg);
@@ -3083,6 +3084,7 @@ fn handle_poly_fill_arc(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
     }
 
     let fg = state.map_color_for_drawable(drawable, gc.foreground);
+    info!("PolyFillArc: gc={gc_id:#x} func={} fg_raw={:#x} fg_mapped={fg:#x} draw={drawable:#x}", gc.function, gc.foreground);
     if let Some(fb) = state.get_framebuffer_mut(drawable) {
         for (x, y, width, height, angle1, angle2) in &arcs {
             fb.draw_arc(*x, *y, *width, *height, *angle1, *angle2, true, fg);

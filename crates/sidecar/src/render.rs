@@ -95,6 +95,7 @@ pub fn handle_render_request(state: &mut ClientState, data: &[u8], seq: u16) -> 
     }
 
     let minor = data[1];
+    info!("Render op minor={minor}");
 
     match minor {
         0 => handle_query_version(seq),
