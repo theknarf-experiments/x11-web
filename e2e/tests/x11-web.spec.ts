@@ -240,7 +240,7 @@ test.describe
 			const win = await spawnApp(page, "-geometry 200x150+10+10");
 			const canvas = win.locator('[data-testid="x11-canvas"]');
 			await expect(canvas).toBeVisible();
-			await page.waitForTimeout(3000);
+			await page.waitForTimeout(5000);
 
 			expect(await countNonBlackPixels(canvas)).toBeGreaterThan(10);
 

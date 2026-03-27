@@ -349,7 +349,7 @@ fn handle_create_picture(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
         }
     }
 
-    debug!("Render CreatePicture: pid={pid:#x} drawable={drawable:#x} format={format_id:#x} repeat={repeat}");
+    info!("CreatePicture: pid={pid:#x} drawable={drawable:#x} format={format_id:#x} repeat={repeat}");
 
     state.render.pictures.insert(
         pid,
