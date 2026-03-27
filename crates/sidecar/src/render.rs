@@ -531,6 +531,9 @@ fn resolve_source_pixels(
         return Some((pixels, w, h));
     }
 
+    // Sync SHM-backed pixmap data before reading
+    state.sync_shm_pixmap(drawable);
+
     // Extract pixels from the drawable's framebuffer
     let fb = state.get_framebuffer_mut(drawable)?;
 

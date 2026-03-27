@@ -143,6 +143,55 @@ impl ClientState {
         drawable
     }
 
+    /// If `drawable` is an SHM-backed pixmap, copy the current SHM segment
+    /// contents into the pixmap's framebuffer so subsequent reads see fresh data.
+    /// This must be called before reading pixels from any drawable that might be
+    /// SHM-backed (e.g. before CopyArea src, Render Composite src, GetImage).
+    pub(crate) fn sync_shm_pixmap(&mut self, drawable: u32) {
+        let target = self.resolve_drawable(drawable);
+        let (shmseg, offset, width, height) = {
+            let pix = match self.pixmaps.get(&target) {
+                Some(p) => p,
+                None => return,
+            };
+            let backing = match &pix.shm_backing {
+                Some(b) => b,
+                None => return,
+            };
+            (backing.shmseg, backing.offset, pix._width as usize, pix._height as usize)
+        };
+
+        let seg = match self.shm_segments.get(&shmseg) {
+            Some(s) => s,
+            None => {
+                warn!("sync_shm_pixmap: SHM segment {shmseg} not found for pixmap {target:#x}");
+                return;
+            }
+        };
+
+        let bpp = 4usize;
+        let stride = width * bpp;
+        let total_bytes = stride * height;
+
+        if offset + total_bytes > seg.size {
+            warn!(
+                "sync_shm_pixmap: out of bounds (offset={offset} + size={total_bytes} > seg.size={})",
+                seg.size
+            );
+            return;
+        }
+
+        // Copy SHM data into the pixmap's framebuffer
+        let pix = self.pixmaps.get_mut(&target).unwrap();
+        let fb = &mut pix.framebuffer;
+        let fb_data = fb.data_mut();
+        unsafe {
+            let src_ptr = seg.addr.add(offset);
+            let copy_len = total_bytes.min(fb_data.len());
+            std::ptr::copy_nonoverlapping(src_ptr, fb_data.as_mut_ptr(), copy_len);
+        }
+    }
+
     /// Sync local windows with the shared store.
     /// Pulls in windows created by other connections and pushes our changes.
     pub(crate) fn sync_windows(&mut self) {
@@ -305,6 +354,16 @@ pub(crate) struct PixmapState {
     /// If this pixmap is a NameWindowPixmap alias, this holds the window ID.
     /// Drawing to this pixmap should actually draw to the window's framebuffer.
     pub(crate) alias_window: Option<u32>,
+    /// If this pixmap is SHM-backed, the segment ID and offset into it.
+    /// The client writes directly into shared memory; we must sync before reads.
+    pub(crate) shm_backing: Option<ShmPixmapBacking>,
+}
+
+/// Tracks the SHM segment backing an SHM-created pixmap.
+#[derive(Clone)]
+pub(crate) struct ShmPixmapBacking {
+    pub(crate) shmseg: u32,
+    pub(crate) offset: usize,
 }
 
 #[derive(Clone)]
@@ -2618,6 +2677,7 @@ fn handle_create_pixmap(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
             _depth: depth,
             framebuffer: Framebuffer::new(width as u32, height as u32),
             alias_window: None,
+            shm_backing: None,
         },
     );
 
@@ -2675,6 +2735,9 @@ fn handle_copy_area(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
     let dst_y = i16::from_le_bytes([data[22], data[23]]);
     let width = u16::from_le_bytes([data[24], data[25]]);
     let height = u16::from_le_bytes([data[26], data[27]]);
+
+    // Sync SHM-backed pixmap data before reading from src
+    state.sync_shm_pixmap(src);
 
     if src == dst {
         // Same drawable — use self-copy which handles overlap
@@ -3887,6 +3950,9 @@ fn handle_shm_request(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8>
 
             info!("SHM GetImage: drawable={drawable:#x} ({src_x},{src_y}) {width}x{height} shmseg={shmseg} offset={shm_offset}");
 
+            // Sync SHM-backed pixmap data before reading
+            state.sync_shm_pixmap(drawable);
+
             // Copy pixels from drawable into SHM segment
             let resolved = state.resolve_drawable(drawable);
             let pixels = if let Some(fb) = state.get_framebuffer_mut(resolved) {
@@ -3935,7 +4001,8 @@ fn handle_shm_request(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8>
 
             info!("SHM CreatePixmap: pid={pid:#x} {width}x{height} depth={depth} shmseg={shmseg} offset={shm_offset}");
 
-            // Create a regular pixmap — SHM backing is handled when the pixmap is drawn to/from
+            // Create an SHM-backed pixmap. The client will write directly into
+            // the SHM segment; we sync from it before reading.
             state.pixmaps.insert(
                 pid,
                 PixmapState {
@@ -3945,6 +4012,10 @@ fn handle_shm_request(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8>
                     _depth: depth,
                     framebuffer: Framebuffer::new(width as u32, height as u32),
                     alias_window: None,
+                    shm_backing: Some(ShmPixmapBacking {
+                        shmseg,
+                        offset: shm_offset,
+                    }),
                 },
             );
             Vec::new()
@@ -4195,6 +4266,7 @@ fn handle_x_composite_request(state: &mut ClientState, data: &[u8], seq: u16) ->
                             _depth: 24,
                             framebuffer: crate::framebuffer::Framebuffer::new(0, 0),
                             alias_window: Some(window),
+                            shm_backing: None,
                         },
                     );
                     info!("NameWindowPixmap: window={window:#x} -> pixmap={pixmap:#x} {w}x{h} (aliased)");
