@@ -98,6 +98,10 @@ pub(crate) struct ClientState {
     /// Sender half of this client's WM event channel.  Cloned into shared
     /// WmState when this client registers as the window manager.
     pub(crate) wm_events_tx: mpsc::UnboundedSender<Vec<u8>>,
+    /// DAMAGE extension: active damage subscriptions (damage_id -> DamageInfo).
+    pub(crate) damage_regions: HashMap<u32, DamageInfo>,
+    /// Pending X11 events to deliver to this client (e.g. DamageNotify).
+    pub(crate) pending_events: Vec<Vec<u8>>,
 }
 
 impl ClientState {
@@ -166,6 +170,10 @@ impl ClientState {
                     if local_win.mapped {
                         shared_win.mapped = true;
                     }
+                    // Merge redirected flag (sticky)
+                    if local_win.redirected {
+                        shared_win.redirected = true;
+                    }
                     // Update properties
                     for (&atom, val) in local_win.properties.iter() {
                         shared_win.properties.insert(atom, val.clone());
@@ -202,8 +210,14 @@ impl ClientState {
         for wid in window_ids {
             if let Some(win) = self.windows.get_mut(&wid) {
                 if let Some((x, y, w, h, pixels)) = win.framebuffer.take_dirty_pixels() {
+                    // Use the window's owner client_id for routing display updates
+                    let owner = if win.owner_client_id.is_empty() {
+                        self.client_id.clone()
+                    } else {
+                        win.owner_client_id.clone()
+                    };
                     let _ = self.update_tx.send((
-                        self.client_id.clone(),
+                        owner,
                         DisplayUpdate::PutImage {
                             window_id: wid,
                             x,
@@ -213,6 +227,35 @@ impl ClientState {
                             data: pixels,
                         },
                     ));
+
+                    // Send DamageNotify events for any damage subscriptions on this window
+                    let win_width = win.width;
+                    let win_height = win.height;
+                    let damage_matches: Vec<(u32, u8)> = self
+                        .damage_regions
+                        .iter()
+                        .filter(|(_, info)| info.drawable == wid)
+                        .map(|(&did, info)| (did, info.level))
+                        .collect();
+
+                    for (damage_id, level) in damage_matches {
+                        let mut event = [0u8; 32];
+                        event[0] = 91; // DAMAGE first_event + 0 (DamageNotify)
+                        event[1] = level;
+                        event[2..4].copy_from_slice(&self.sequence.to_le_bytes());
+                        event[4..8].copy_from_slice(&wid.to_le_bytes()); // drawable
+                        event[8..12].copy_from_slice(&damage_id.to_le_bytes()); // damage
+                        // timestamp = 0
+                        event[14..16].copy_from_slice(&(x as u16).to_le_bytes()); // area.x
+                        event[16..18].copy_from_slice(&(y as u16).to_le_bytes()); // area.y
+                        event[18..20].copy_from_slice(&w.to_le_bytes()); // area.width
+                        event[20..22].copy_from_slice(&h.to_le_bytes()); // area.height
+                        // geometry = full window
+                        // geometry.x and geometry.y = 0
+                        event[26..28].copy_from_slice(&win_width.to_le_bytes()); // geometry.width
+                        event[28..30].copy_from_slice(&win_height.to_le_bytes()); // geometry.height
+                        self.pending_events.push(event.to_vec());
+                    }
                 }
             }
         }
@@ -242,9 +285,12 @@ pub(crate) struct WindowState {
     pub(crate) event_mask: u32,
     pub(crate) background_pixel: u32,
     pub(crate) override_redirect: bool,
+    pub(crate) redirected: bool,
     pub(crate) framebuffer: Framebuffer,
     /// Properties set on this window (atom -> value).
     pub(crate) properties: HashMap<u32, PropertyValue>,
+    /// The client_id that created this window (for display update routing).
+    pub(crate) owner_client_id: String,
 }
 
 pub(crate) struct PixmapState {
@@ -277,6 +323,13 @@ impl Default for GcState {
             font_id: 0,
         }
     }
+}
+
+/// Damage subscription info for DAMAGE extension.
+#[derive(Clone)]
+pub(crate) struct DamageInfo {
+    pub(crate) drawable: u32,  // the window being monitored
+    pub(crate) level: u8,      // damage level (RawRectangles=0, DeltaRectangles=1, BoundingBox=2, NonEmpty=3)
 }
 
 /// A shared memory segment attached via MIT-SHM.
@@ -475,8 +528,10 @@ impl X11Server {
                     event_mask: 0,
                     background_pixel: 0x00000000,
                     override_redirect: false,
+                    redirected: false,
                     framebuffer: Framebuffer::new(SCREEN_WIDTH as u32, SCREEN_HEIGHT as u32),
                     properties: HashMap::new(),
+                    owner_client_id: String::new(), // root has no owner
                 },
             );
 
@@ -737,6 +792,8 @@ async fn handle_client(
         shm_segments: HashMap::new(),
         wm_state: shared_wm_state.clone(),
         wm_events_tx: wm_events_tx,
+        damage_regions: HashMap::new(),
+        pending_events: Vec::new(),
     };
 
     // Set EWMH properties on the root window so GDK3/Firefox recognise an
@@ -879,6 +936,11 @@ async fn handle_client(
 
                 // Flush dirty windows after processing a batch of requests
                 state.flush_dirty_windows();
+
+                // Deliver any pending events (e.g. DamageNotify)
+                for event in state.pending_events.drain(..) {
+                    stream.write_all(&event).await?;
+                }
             }
             _ = frame_interval.tick() => {
                 // Sync with shared windows
@@ -886,6 +948,11 @@ async fn handle_client(
 
                 // Periodic frame flush for any remaining dirty regions
                 state.flush_dirty_windows();
+
+                // Deliver any pending events (e.g. DamageNotify)
+                for event in state.pending_events.drain(..) {
+                    stream.write_all(&event).await?;
+                }
 
                 // Act as a minimal WM: auto-map any unmapped top-level windows.
                 // We do this on the tick rather than in CreateWindow so that the
@@ -901,12 +968,14 @@ async fn handle_client(
                     continue;
                 }
 
+                let my_id = state.client_id.clone();
                 let unmapped: Vec<u32> = state.windows.iter()
                     .filter(|(_, w)| {
                         !w.mapped
                         && w.parent == state.root_window
                         && w.class == 1 // InputOutput
                         && (w.width > 1 || w.height > 1)
+                        && w.owner_client_id == my_id // Only auto-map OUR windows
                     })
                     .map(|(id, _)| *id)
                     .collect();
@@ -958,34 +1027,35 @@ async fn handle_client(
                         ));
                     }
 
-                    // Send ConfigureNotify event
+                    // Send ConfigureNotify + MapNotify + Expose events.
+                    // These must go to THIS client's stream (the owner) so the
+                    // app receives them and triggers rendering.
+                    // We queue them as pending_events to be written after flush.
                     let mut config_event = [0u8; 32];
                     config_event[0] = CONFIGURE_NOTIFY_EVENT;
                     config_event[2..4].copy_from_slice(&seq.to_le_bytes());
-                    config_event[4..8].copy_from_slice(&wid.to_le_bytes());  // event
-                    config_event[8..12].copy_from_slice(&wid.to_le_bytes()); // window
-                    config_event[16..18].copy_from_slice(&0i16.to_le_bytes()); // x
-                    config_event[18..20].copy_from_slice(&0i16.to_le_bytes()); // y
-                    config_event[20..22].copy_from_slice(&rw.to_le_bytes());   // width
-                    config_event[22..24].copy_from_slice(&rh.to_le_bytes());   // height
-                    stream.write_all(&config_event).await?;
+                    config_event[4..8].copy_from_slice(&wid.to_le_bytes());
+                    config_event[8..12].copy_from_slice(&wid.to_le_bytes());
+                    config_event[16..18].copy_from_slice(&0i16.to_le_bytes());
+                    config_event[18..20].copy_from_slice(&0i16.to_le_bytes());
+                    config_event[20..22].copy_from_slice(&rw.to_le_bytes());
+                    config_event[22..24].copy_from_slice(&rh.to_le_bytes());
+                    state.pending_events.push(config_event.to_vec());
 
-                    // Send MapNotify event
                     let mut map_event = [0u8; 32];
                     map_event[0] = MAP_NOTIFY_EVENT;
                     map_event[2..4].copy_from_slice(&seq.to_le_bytes());
                     map_event[4..8].copy_from_slice(&wid.to_le_bytes());
                     map_event[8..12].copy_from_slice(&wid.to_le_bytes());
-                    stream.write_all(&map_event).await?;
+                    state.pending_events.push(map_event.to_vec());
 
-                    // Send Expose event to trigger rendering
                     let mut expose_event = [0u8; 32];
                     expose_event[0] = EXPOSE_EVENT;
                     expose_event[2..4].copy_from_slice(&seq.to_le_bytes());
                     expose_event[4..8].copy_from_slice(&wid.to_le_bytes());
                     expose_event[12..14].copy_from_slice(&rw.to_le_bytes());
                     expose_event[14..16].copy_from_slice(&rh.to_le_bytes());
-                    stream.write_all(&expose_event).await?;
+                    state.pending_events.push(expose_event.to_vec());
                 }
 
                 // Immediately sync mapped state to shared so other connections see it
@@ -1333,7 +1403,7 @@ fn handle_request(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
         140 => handle_randr_request(state, data, seq),
         141 => handle_xc_misc_request(data, seq),
         142 => handle_x_composite_request(state, data, seq),
-        143 => handle_damage_request(data, seq),
+        143 => handle_damage_request(state, data, seq),
         _ => {
             warn!("Unhandled X11 request opcode: {major_opcode} minor: {_minor}");
             Vec::new()
@@ -1526,8 +1596,10 @@ fn handle_create_window(state: &mut ClientState, data: &[u8], _seq: u16) -> Vec<
             event_mask,
             background_pixel,
             override_redirect,
+            redirected: false,
             framebuffer: Framebuffer::new(width as u32, height as u32),
             properties: HashMap::new(),
+            owner_client_id: state.client_id.clone(),
         },
     );
 
@@ -2185,7 +2257,13 @@ fn handle_get_selection_owner(state: &mut ClientState, data: &[u8], seq: u16) ->
     reply[2..4].copy_from_slice(&seq.to_le_bytes());
     if data.len() >= 8 {
         let selection = u32::from_le_bytes([data[4], data[5], data[6], data[7]]);
-        let owner = state.selections.get(&selection).copied().unwrap_or(0);
+        // Special-case _NET_WM_CM_S0: always return root window to indicate
+        // that we are a compositing window manager.
+        let owner = if state.get_atom_name(selection).as_deref() == Some("_NET_WM_CM_S0") {
+            state.root_window
+        } else {
+            state.selections.get(&selection).copied().unwrap_or(0)
+        };
         reply[8..12].copy_from_slice(&owner.to_le_bytes());
     }
     reply.to_vec()
@@ -3271,10 +3349,8 @@ fn keycode_to_keysym(keycode: u8) -> (u32, u32) {
 
 fn handle_list_extensions(seq: u16) -> Vec<u8> {
     // Return the list of extensions we support
-    // Composite and DAMAGE disabled — they make Firefox use off-screen compositing
-    // which requires a real compositing WM. Without them, Firefox falls back to direct rendering.
     // XKEYBOARD disabled — our XKB stub causes Firefox to take a different (worse) init path
-    let extensions: &[&str] = &["BIG-REQUESTS", "MIT-SHM", "RENDER", "XFIXES", "SHAPE", "SYNC", "Generic Event Extension", "XC-MISC"];
+    let extensions: &[&str] = &["BIG-REQUESTS", "MIT-SHM", "RENDER", "XFIXES", "SHAPE", "SYNC", "Generic Event Extension", "XC-MISC", "Composite", "DAMAGE"];
 
     // Build the names data: each is a length-prefixed string (1 byte len + name)
     let mut names_data = Vec::new();
@@ -3356,10 +3432,17 @@ fn handle_query_extension(_state: &mut ClientState, data: &[u8], seq: u16) -> Ve
             reply[10] = 0; // first_event
             reply[11] = 0; // first_error
         }
-        // Composite/DAMAGE: disabled to force Firefox to use direct SHM rendering
-        // instead of compositor path (which needs a real compositing WM).
-        "Composite" | "DAMAGE" => {
-            // present = false
+        "Composite" => {
+            reply[8] = 1; // present = true
+            reply[9] = 142; // major_opcode
+            reply[10] = 0; // first_event
+            reply[11] = 0; // first_error
+        }
+        "DAMAGE" => {
+            reply[8] = 1; // present = true
+            reply[9] = 143; // major_opcode
+            reply[10] = 91; // first_event (DamageNotify)
+            reply[11] = 152; // first_error
         }
         // RANDR disabled — GTK renders incorrectly with our minimal RANDR replies.
         // The handler code is kept for future use when replies are fully correct.
@@ -3939,7 +4022,7 @@ fn handle_sync_request(_state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u
     }
 }
 
-fn handle_damage_request(data: &[u8], seq: u16) -> Vec<u8> {
+fn handle_damage_request(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
     let minor = data[1];
     debug!("DAMAGE minor opcode: {minor}");
 
@@ -3953,8 +4036,37 @@ fn handle_damage_request(data: &[u8], seq: u16) -> Vec<u8> {
             reply[12..16].copy_from_slice(&1u32.to_le_bytes()); // minor version
             reply.to_vec()
         }
-        1 | 2 | 3 | 4 => {
-            // Create, Destroy, Subtract, Add: void
+        1 => {
+            // DamageCreate: data[4..8] = damage_id, data[8..12] = drawable, data[12] = level
+            if data.len() >= 13 {
+                let damage_id = u32::from_le_bytes([data[4], data[5], data[6], data[7]]);
+                let drawable = u32::from_le_bytes([data[8], data[9], data[10], data[11]]);
+                let level = data[12];
+                info!("DAMAGE Create: id={damage_id:#x} drawable={drawable:#x} level={level}");
+                state.damage_regions.insert(damage_id, DamageInfo { drawable, level });
+            }
+            Vec::new()
+        }
+        2 => {
+            // DamageDestroy: data[4..8] = damage_id
+            if data.len() >= 8 {
+                let damage_id = u32::from_le_bytes([data[4], data[5], data[6], data[7]]);
+                debug!("DAMAGE Destroy: id={damage_id:#x}");
+                state.damage_regions.remove(&damage_id);
+            }
+            Vec::new()
+        }
+        3 => {
+            // DamageSubtract: data[4..8] = damage_id, data[8..12] = repair, data[12..16] = parts
+            // This acknowledges the damage — we just accept it.
+            if data.len() >= 8 {
+                let damage_id = u32::from_le_bytes([data[4], data[5], data[6], data[7]]);
+                debug!("DAMAGE Subtract: id={damage_id:#x}");
+            }
+            Vec::new()
+        }
+        4 => {
+            // DamageAdd: void
             Vec::new()
         }
         _ => {
@@ -3978,8 +4090,49 @@ fn handle_x_composite_request(state: &mut ClientState, data: &[u8], seq: u16) ->
             reply[12..16].copy_from_slice(&4u32.to_le_bytes()); // minor version
             reply.to_vec()
         }
-        1 | 2 | 3 | 4 | 5 => {
-            // RedirectWindow, RedirectSubwindows, UnredirectWindow,
+        1 => {
+            // RedirectWindow: data[4..8] = window, data[8] = update
+            if data.len() >= 9 {
+                let window = u32::from_le_bytes([data[4], data[5], data[6], data[7]]);
+                let update = data[8];
+                info!("Composite RedirectWindow: window={window:#x} update={update}");
+                if let Some(win) = state.windows.get_mut(&window) {
+                    win.redirected = true;
+                }
+            }
+            Vec::new()
+        }
+        2 => {
+            // RedirectSubwindows: data[4..8] = window, data[8] = update
+            if data.len() >= 9 {
+                let window = u32::from_le_bytes([data[4], data[5], data[6], data[7]]);
+                let update = data[8];
+                info!("Composite RedirectSubwindows: window={window:#x} update={update}");
+                // Mark all children as redirected
+                let children: Vec<u32> = state.windows.iter()
+                    .filter(|(_, w)| w.parent == window)
+                    .map(|(id, _)| *id)
+                    .collect();
+                for child in children {
+                    if let Some(w) = state.windows.get_mut(&child) {
+                        w.redirected = true;
+                    }
+                }
+            }
+            Vec::new()
+        }
+        3 => {
+            // UnredirectWindow: data[4..8] = window
+            if data.len() >= 8 {
+                let window = u32::from_le_bytes([data[4], data[5], data[6], data[7]]);
+                debug!("Composite UnredirectWindow: window={window:#x}");
+                if let Some(win) = state.windows.get_mut(&window) {
+                    win.redirected = false;
+                }
+            }
+            Vec::new()
+        }
+        4 | 5 => {
             // UnredirectSubwindows, CreateRegionFromBorderClip: void
             Vec::new()
         }
