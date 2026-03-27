@@ -2768,9 +2768,6 @@ fn handle_poly_rectangle(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
     let gc_id = u32::from_le_bytes([data[8], data[9], data[10], data[11]]);
     let gc = state.gcs.get(&gc_id).cloned().unwrap_or_default();
 
-    if gc.function != 3 {
-        return Vec::new();
-    }
 
     let mut rects = Vec::new();
     let mut offset = 12;
@@ -2807,9 +2804,6 @@ fn handle_fill_poly(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
     let gc = state.gcs.get(&gc_id).cloned().unwrap_or_default();
     let coord_mode = data[13]; // 0 = Origin, 1 = Previous
 
-    if gc.function != 3 {
-        return Vec::new();
-    }
 
     let mut points = Vec::new();
     let mut offset = 16;
@@ -2843,9 +2837,6 @@ fn handle_poly_fill_rectangle(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
     let gc_id = u32::from_le_bytes([data[8], data[9], data[10], data[11]]);
     let gc = state.gcs.get(&gc_id).cloned().unwrap_or_default();
 
-    if gc.function != 3 {
-        return Vec::new();
-    }
 
     let mut rects = Vec::new();
     let mut offset = 12;
@@ -2877,9 +2868,6 @@ fn handle_poly_line(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
     let gc_id = u32::from_le_bytes([data[8], data[9], data[10], data[11]]);
     let gc = state.gcs.get(&gc_id).cloned().unwrap_or_default();
 
-    if gc.function != 3 {
-        return Vec::new();
-    }
 
     let mut points: Vec<(i16, i16)> = Vec::new();
     let mut offset = 12;
@@ -2918,9 +2906,6 @@ fn handle_poly_point(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
     let gc_id = u32::from_le_bytes([data[8], data[9], data[10], data[11]]);
     let gc = state.gcs.get(&gc_id).cloned().unwrap_or_default();
 
-    if gc.function != 3 {
-        return Vec::new();
-    }
 
     let mut points = Vec::new();
     let mut last_x: i16 = 0;
@@ -2957,9 +2942,6 @@ fn handle_poly_segment(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
     let gc_id = u32::from_le_bytes([data[8], data[9], data[10], data[11]]);
     let gc = state.gcs.get(&gc_id).cloned().unwrap_or_default();
 
-    if gc.function != 3 {
-        return Vec::new();
-    }
 
     let mut segments = Vec::new();
     let mut offset = 12;
@@ -3035,8 +3017,9 @@ fn handle_poly_fill_arc(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
     }
 
     if let Some(fb) = state.get_framebuffer_mut(drawable) {
-        for (x, y, width, height, angle1, angle2) in arcs {
-            fb.draw_arc(x, y, width, height, angle1, angle2, true, gc.foreground);
+        for (x, y, width, height, angle1, angle2) in &arcs {
+            info!("PolyFillArc: draw={drawable:#x} ({x},{y}) {width}x{height} a1={angle1} a2={angle2} color={:#x} fb={}x{}", gc.foreground, fb.width(), fb.height());
+            fb.draw_arc(*x, *y, *width, *height, *angle1, *angle2, true, gc.foreground);
         }
     }
 
@@ -3054,9 +3037,6 @@ fn handle_poly_text8(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
     let y = i16::from_le_bytes([data[14], data[15]]);
     let gc = state.gcs.get(&gc_id).cloned().unwrap_or_default();
 
-    if gc.function != 3 {
-        return Vec::new();
-    }
 
     let font = state
         .font_manager

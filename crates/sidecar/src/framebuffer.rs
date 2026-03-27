@@ -301,22 +301,62 @@ impl Framebuffer {
         pixels
     }
 
-    /// Draw a single pixel at (x, y) with the given color.
-    pub fn draw_point(&mut self, x: i32, y: i32, color: u32) {
+    /// Draw a single pixel at (x, y) with the given color and GC function.
+    /// gc_func: 0=Clear, 1=And, 2=AndReverse, 3=Copy, 4=AndInverted,
+    ///          5=Noop, 6=Xor, 7=Or, 8=Nor, 9=Equiv, 10=Invert,
+    ///          11=OrReverse, 12=CopyInverted, 13=OrInverted, 14=Nand, 15=Set
+    pub fn draw_point_with_func(&mut self, x: i32, y: i32, color: u32, gc_func: u8) {
         if x < 0 || y < 0 || x >= self.width as i32 || y >= self.height as i32 {
             return;
         }
-        let r = ((color >> 16) & 0xFF) as u8;
-        let g = ((color >> 8) & 0xFF) as u8;
-        let b = (color & 0xFF) as u8;
         let off = y as usize * self.stride + x as usize * 4;
-        if off + 3 < self.data.len() {
-            self.data[off] = b;
-            self.data[off + 1] = g;
-            self.data[off + 2] = r;
-            self.data[off + 3] = 0xFF;
+        if off + 3 >= self.data.len() {
+            return;
         }
+
+        let src = color;
+        let dst = u32::from_le_bytes([
+            self.data[off],
+            self.data[off + 1],
+            self.data[off + 2],
+            self.data[off + 3],
+        ]);
+
+        let result = apply_gc_function(gc_func, src, dst);
+
+        let r = ((result >> 16) & 0xFF) as u8;
+        let g = ((result >> 8) & 0xFF) as u8;
+        let b = (result & 0xFF) as u8;
+        self.data[off] = b;
+        self.data[off + 1] = g;
+        self.data[off + 2] = r;
+        self.data[off + 3] = 0xFF;
         self.mark_dirty(x, y, 1, 1);
+    }
+
+    /// Draw a single pixel with GXcopy (the common case).
+    pub fn draw_point(&mut self, x: i32, y: i32, color: u32) {
+        self.draw_point_with_func(x, y, color, 3);
+    }
+
+    /// Fill a rectangle with GC function support.
+    pub fn fill_rect_with_func(&mut self, x: i16, y: i16, width: u16, height: u16, color: u32, gc_func: u8) {
+        if gc_func == 3 {
+            // GXcopy — use fast path
+            self.fill_rect(x, y, width, height, color);
+            return;
+        }
+        // Slow path for other GC functions
+        for row in 0..height as i32 {
+            let dy = y as i32 + row;
+            if dy < 0 || dy >= self.height as i32 { continue; }
+            for col in 0..width as i32 {
+                let dx = x as i32 + col;
+                if dx < 0 || dx >= self.width as i32 { continue; }
+                self.draw_point_with_func(dx, dy, color, gc_func);
+            }
+        }
+        self.mark_dirty(x as i32, y as i32, width as u32, height as u32);
     }
 
     /// Draw a line using Bresenham's algorithm.
@@ -485,6 +525,29 @@ impl Framebuffer {
                 }
             }
         }
+    }
+}
+
+/// Apply X11 GC raster operation function to source and destination pixels.
+fn apply_gc_function(func: u8, src: u32, dst: u32) -> u32 {
+    match func {
+        0 => 0,                      // GXclear
+        1 => src & dst,              // GXand
+        2 => src & !dst,             // GXandReverse
+        3 => src,                    // GXcopy
+        4 => !src & dst,             // GXandInverted
+        5 => dst,                    // GXnoop
+        6 => src ^ dst,              // GXxor
+        7 => src | dst,              // GXor
+        8 => !(src | dst),           // GXnor
+        9 => !(src ^ dst),           // GXequiv
+        10 => !dst,                  // GXinvert
+        11 => src | !dst,            // GXorReverse
+        12 => !src,                  // GXcopyInverted
+        13 => !src | dst,            // GXorInverted
+        14 => !(src & dst),          // GXnand
+        15 => 0x00FFFFFF,            // GXset
+        _ => src,                    // default to copy
     }
 }
 
