@@ -81,7 +81,7 @@ pub(crate) struct ClientState {
     pub(crate) shared_windows: SharedWindows,
     pub(crate) pixmaps: HashMap<u32, PixmapState>,
     pub(crate) gcs: HashMap<u32, GcState>,
-    pub(crate) atoms: AtomManager,
+    pub(crate) atoms: Arc<Mutex<AtomManager>>,
     pub(crate) update_tx: mpsc::UnboundedSender<TaggedDisplayUpdate>,
     pub(crate) root_window: u32,
     pub(crate) root_width: u16,
@@ -101,6 +101,16 @@ pub(crate) struct ClientState {
 }
 
 impl ClientState {
+    /// Intern an atom name, returning its global ID.
+    fn intern_atom(&self, name: &str, only_if_exists: bool) -> u32 {
+        self.atoms.lock().unwrap().intern(name, only_if_exists)
+    }
+
+    /// Get the name of an atom by its global ID.
+    fn get_atom_name(&self, atom: u32) -> Option<String> {
+        self.atoms.lock().unwrap().get_name(atom).map(|s| s.to_string())
+    }
+
     /// Get a mutable reference to the framebuffer for a drawable (window or pixmap).
     /// For NameWindowPixmap aliases, this returns the window's framebuffer.
     pub(crate) fn get_framebuffer_mut(&mut self, drawable: u32) -> Option<&mut Framebuffer> {
@@ -436,6 +446,9 @@ impl X11Server {
 
         static CONNECTION_COUNTER: AtomicU32 = AtomicU32::new(0);
 
+        // Shared atom manager — atom IDs must be global across all X11 connections
+        let shared_atoms: Arc<Mutex<AtomManager>> = Arc::new(Mutex::new(AtomManager::new()));
+
         // Shared window state across all connections
         let shared_windows: SharedWindows = Arc::new(Mutex::new(HashMap::new()));
         // Shared WM state – tracks which client is the window manager
@@ -480,9 +493,10 @@ impl X11Server {
                     let cid = client_id.clone();
                     let sw = shared_windows.clone();
                     let wm = shared_wm_state.clone();
+                    let sa = shared_atoms.clone();
                     tokio::spawn(async move {
                         if let Err(e) =
-                            handle_client(stream, client_id, update_tx, input_rx, resize_rx, conn_index, sw, wm).await
+                            handle_client(stream, client_id, update_tx, input_rx, resize_rx, conn_index, sw, wm, sa).await
                         {
                             debug!("X11 client {cid} disconnected: {e}");
                         }
@@ -606,6 +620,7 @@ async fn handle_client(
     conn_index: u32,
     shared_windows: SharedWindows,
     shared_wm_state: SharedWmState,
+    shared_atoms: Arc<Mutex<AtomManager>>,
 ) -> io::Result<()> {
     // Phase 1: Read client setup request
     // Read at least 12 bytes for the header
@@ -672,7 +687,7 @@ async fn handle_client(
         shared_windows,
         pixmaps: HashMap::new(),
         gcs: HashMap::new(),
-        atoms: AtomManager::new(),
+        atoms: shared_atoms,
         update_tx,
         root_window: ROOT_WINDOW,
         root_width: SCREEN_WIDTH,
@@ -687,6 +702,85 @@ async fn handle_client(
         wm_state: shared_wm_state.clone(),
         wm_events_tx: wm_events_tx,
     };
+
+    // Set EWMH properties on the root window so GDK3/Firefox recognise an
+    // EWMH-compliant WM.  We do this per-connection so that each client's
+    // AtomManager has consistent atom IDs for the property keys it stores.
+    {
+        let atom_supporting_wm_check = state.intern_atom("_NET_SUPPORTING_WM_CHECK", false);
+        let atom_window: u32 = 33; // WINDOW predefined atom
+        let atom_net_wm_name = state.intern_atom("_NET_WM_NAME", false);
+        let atom_utf8 = state.intern_atom("UTF8_STRING", false);
+        let atom_net_supported = state.intern_atom("_NET_SUPPORTED", false);
+        let atom_atom: u32 = 4; // ATOM predefined atom
+        let atom_cardinal: u32 = 6; // CARDINAL predefined atom
+
+        let supported_atoms = [
+            state.intern_atom("_NET_WM_STATE", false),
+            state.intern_atom("_NET_WM_STATE_FOCUSED", false),
+            state.intern_atom("_NET_ACTIVE_WINDOW", false),
+            atom_net_wm_name,
+            state.intern_atom("_NET_WM_PID", false),
+            state.intern_atom("_NET_WM_WINDOW_TYPE", false),
+            state.intern_atom("_NET_WM_WINDOW_TYPE_NORMAL", false),
+            state.intern_atom("_NET_FRAME_EXTENTS", false),
+            atom_supporting_wm_check,
+            atom_net_supported,
+            state.intern_atom("_NET_CLIENT_LIST", false),
+        ];
+
+        // Pre-compute all atom values and root_window before borrowing windows mutably
+        let atom_active = state.intern_atom("_NET_ACTIVE_WINDOW", false);
+        let atom_client_list = state.intern_atom("_NET_CLIENT_LIST", false);
+        let atom_frame = state.intern_atom("_NET_FRAME_EXTENTS", false);
+        let root_wid = state.root_window;
+
+        let mut supported_data = Vec::new();
+        for a in &supported_atoms {
+            supported_data.extend_from_slice(&a.to_le_bytes());
+        }
+
+        if let Some(root) = state.windows.get_mut(&root_wid) {
+            root.properties.insert(atom_supporting_wm_check, PropertyValue {
+                prop_type: atom_window,
+                format: 32,
+                data: root_wid.to_le_bytes().to_vec(),
+            });
+
+            root.properties.insert(atom_net_wm_name, PropertyValue {
+                prop_type: atom_utf8,
+                format: 8,
+                data: b"x11-web".to_vec(),
+            });
+
+            root.properties.insert(atom_net_supported, PropertyValue {
+                prop_type: atom_atom,
+                format: 32,
+                data: supported_data,
+            });
+
+            root.properties.insert(atom_active, PropertyValue {
+                prop_type: atom_window,
+                format: 32,
+                data: root_wid.to_le_bytes().to_vec(),
+            });
+
+            root.properties.insert(atom_client_list, PropertyValue {
+                prop_type: atom_window,
+                format: 32,
+                data: Vec::new(),
+            });
+
+            root.properties.insert(atom_frame, PropertyValue {
+                prop_type: atom_cardinal,
+                format: 32,
+                data: vec![0; 16], // left, right, top, bottom = 0
+            });
+        }
+
+        // Push EWMH properties to shared store immediately
+        state.sync_windows();
+    }
 
     let mut buf = vec![0u8; 256 * 1024]; // 256KB read buffer
     let mut pending = Vec::new(); // Partial request data
@@ -786,6 +880,9 @@ async fn handle_client(
                     let rh = state.root_height;
                     let seq = state.sequence;
 
+                    // Pre-compute atom before borrowing windows
+                    let wm_state_atom = state.intern_atom("WM_STATE", false);
+
                     if let Some(win) = state.windows.get_mut(&wid) {
                         info!("WM auto-mapping top-level window {wid:#x} (was {}x{})", win.width, win.height);
                         win.mapped = true;
@@ -800,9 +897,6 @@ async fn handle_client(
                         // Fill with background
                         let bg = win.background_pixel;
                         win.framebuffer.fill_rect(0, 0, rw, rh, bg);
-
-                        // Set WM_STATE = NormalState (like a real WM does)
-                        let wm_state_atom = state.atoms.intern("WM_STATE", false);
                         let mut wm_state_data = vec![0u8; 8];
                         wm_state_data[0..4].copy_from_slice(&1u32.to_le_bytes()); // NormalState
                         // icon window = None (0)
@@ -1399,6 +1493,16 @@ fn handle_create_window(state: &mut ClientState, data: &[u8], _seq: u16) -> Vec<
         },
     );
 
+    // Set _NET_FRAME_EXTENTS = (0,0,0,0) on new windows — GTK3 checks this.
+    let atom_frame = state.intern_atom("_NET_FRAME_EXTENTS", false);
+    if let Some(win) = state.windows.get_mut(&wid) {
+        win.properties.insert(atom_frame, PropertyValue {
+            prop_type: 6, // CARDINAL
+            format: 32,
+            data: vec![0; 16], // left, right, top, bottom = 0
+        });
+    }
+
     let _ = state.update_tx.send((
         state.client_id.clone(),
         DisplayUpdate::WindowCreated {
@@ -1880,7 +1984,7 @@ fn handle_intern_atom(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8>
         String::new()
     };
 
-    let atom = state.atoms.intern(&name, only_if_exists);
+    let atom = state.intern_atom(&name, only_if_exists);
 
     let mut reply = [0u8; 32];
     reply[0] = 1;
@@ -1893,7 +1997,7 @@ fn handle_intern_atom(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8>
 fn handle_get_atom_name(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
     let atom = u32::from_le_bytes([data[4], data[5], data[6], data[7]]);
 
-    let name = state.atoms.get_name(atom).unwrap_or("");
+    let name = state.get_atom_name(atom).unwrap_or_default();
     let name_bytes = name.as_bytes();
     let padded_len = (name_bytes.len() + 3) & !3;
 
@@ -1944,8 +2048,7 @@ fn handle_change_property(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
     // Check if this is WM_NAME (atom 39) or _NET_WM_NAME
     let is_wm_name = property_atom == 39
         || state
-            .atoms
-            .get_name(property_atom)
+            .get_atom_name(property_atom)
             .map(|n| n == "_NET_WM_NAME" || n == "WM_NAME")
             .unwrap_or(false);
 
@@ -3132,7 +3235,7 @@ fn handle_list_extensions(seq: u16) -> Vec<u8> {
     // Return the list of extensions we support
     // Composite and DAMAGE disabled — they make Firefox use off-screen compositing
     // which requires a real compositing WM. Without them, Firefox falls back to direct rendering.
-    let extensions: &[&str] = &["BIG-REQUESTS", "MIT-SHM", "RENDER", "XFIXES", "SHAPE", "SYNC", "Generic Event Extension"];
+    let extensions: &[&str] = &["BIG-REQUESTS", "MIT-SHM", "RENDER", "XFIXES", "SHAPE", "SYNC", "Generic Event Extension", "Composite", "DAMAGE"];
 
     // Build the names data: each is a length-prefixed string (1 byte len + name)
     let mut names_data = Vec::new();
@@ -3214,10 +3317,17 @@ fn handle_query_extension(_state: &mut ClientState, data: &[u8], seq: u16) -> Ve
             reply[10] = 0; // first_event
             reply[11] = 0; // first_error
         }
-        // Composite and DAMAGE disabled — without a real compositing WM,
-        // these cause Firefox/GTK to use off-screen rendering that never blits.
-        "Composite" | "DAMAGE" => {
-            // present = false (already zero)
+        "Composite" => {
+            reply[8] = 1;
+            reply[9] = 142;
+            reply[10] = 0;
+            reply[11] = 0;
+        }
+        "DAMAGE" => {
+            reply[8] = 1;
+            reply[9] = 143;
+            reply[10] = 91;
+            reply[11] = 152;
         }
         // RANDR disabled — GTK renders incorrectly with our minimal RANDR replies.
         // The handler code is kept for future use when replies are fully correct.
