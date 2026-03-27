@@ -1019,13 +1019,15 @@ async fn handle_client(
                     .map(|(id, _)| *id)
                     .collect();
 
+                // Pre-compute atoms before borrowing windows
+                let wm_state_atom = state.intern_atom("WM_STATE", false);
+                let net_wm_state_atom = state.intern_atom("_NET_WM_STATE", false);
+                let focused_atom = state.intern_atom("_NET_WM_STATE_FOCUSED", false);
+
                 for wid in unmapped {
                     let rw = state.root_width;
                     let rh = state.root_height;
                     let seq = state.sequence;
-
-                    // Pre-compute atom before borrowing windows
-                    let wm_state_atom = state.intern_atom("WM_STATE", false);
 
                     if let Some(win) = state.windows.get_mut(&wid) {
                         info!("WM auto-mapping top-level window {wid:#x} (was {}x{}) -> {}x{}", win.width, win.height, rw, rh);
@@ -1043,11 +1045,17 @@ async fn handle_client(
                         win.framebuffer.fill_rect(0, 0, rw, rh, bg);
                         let mut wm_state_data = vec![0u8; 8];
                         wm_state_data[0..4].copy_from_slice(&1u32.to_le_bytes()); // NormalState
-                        // icon window = None (0)
                         win.properties.insert(wm_state_atom, PropertyValue {
                             prop_type: wm_state_atom,
                             format: 32,
                             data: wm_state_data,
+                        });
+
+                        // Set _NET_WM_STATE with FOCUSED flag — GDK3 needs this
+                        win.properties.insert(net_wm_state_atom, PropertyValue {
+                            prop_type: 4, // ATOM
+                            format: 32,
+                            data: focused_atom.to_le_bytes().to_vec(),
                         });
 
                         let _ = state.update_tx.send((
@@ -1094,6 +1102,23 @@ async fn handle_client(
                     expose_event[12..14].copy_from_slice(&rw.to_le_bytes());
                     expose_event[14..16].copy_from_slice(&rh.to_le_bytes());
                     stream.write_all(&expose_event).await?;
+
+                    let mut prop_event = [0u8; 32];
+                    prop_event[0] = 28; // PropertyNotify
+                    prop_event[2..4].copy_from_slice(&seq.to_le_bytes());
+                    prop_event[4..8].copy_from_slice(&wid.to_le_bytes());
+                    prop_event[8..12].copy_from_slice(&net_wm_state_atom.to_le_bytes());
+                    // state = NewValue (0)
+                    stream.write_all(&prop_event).await?;
+
+                    // Send FocusIn event
+                    let mut focus_event = [0u8; 32];
+                    focus_event[0] = 9; // FocusIn
+                    focus_event[1] = 1; // detail = NotifyAncestor
+                    focus_event[2..4].copy_from_slice(&seq.to_le_bytes());
+                    focus_event[4..8].copy_from_slice(&wid.to_le_bytes());
+                    focus_event[8] = 0; // mode = Normal
+                    stream.write_all(&focus_event).await?;
                 }
 
                 // Immediately sync mapped state to shared so other connections see it
