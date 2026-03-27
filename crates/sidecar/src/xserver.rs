@@ -117,6 +117,17 @@ impl ClientState {
         self.atoms.lock().unwrap().get_name(atom).map(|s| s.to_string())
     }
 
+    /// Map a color value for the drawable's depth. In depth-1 pixmaps,
+    /// color 0 = black and any non-zero = white (0xFFFFFF).
+    pub(crate) fn map_color_for_drawable(&self, drawable: u32, color: u32) -> u32 {
+        let depth = self.pixmaps.get(&drawable).map(|p| p._depth).unwrap_or(24);
+        if depth <= 1 {
+            if color != 0 { 0xFFFFFF } else { 0x000000 }
+        } else {
+            color
+        }
+    }
+
     /// Get a mutable reference to the framebuffer for a drawable (window or pixmap).
     /// For NameWindowPixmap aliases, this returns the window's framebuffer.
     pub(crate) fn get_framebuffer_mut(&mut self, drawable: u32) -> Option<&mut Framebuffer> {
@@ -1071,31 +1082,26 @@ async fn handle_client(
                     let rh = state.root_height;
                     let seq = state.sequence;
 
-                    if let Some(win) = state.windows.get_mut(&wid) {
-                        info!("WM auto-mapping top-level window {wid:#x} (was {}x{}) -> {}x{}", win.width, win.height, rw, rh);
+                    // Get the window's actual size for ConfigureNotify
+                    let (win_x, win_y, win_w, win_h) = if let Some(win) = state.windows.get_mut(&wid) {
+                        info!("WM auto-mapping top-level window {wid:#x} {}x{}", win.width, win.height);
                         win.mapped = true;
 
-                        // Resize to full screen like a WM would
-                        win.x = 0;
-                        win.y = 0;
-                        win.width = rw;
-                        win.height = rh;
-                        win.framebuffer.resize(rw as u32, rh as u32);
+                        // Don't fill background — the app already rendered via
+                        // the MapWindow Expose event. Filling would erase content.
+                        let w = win.width;
+                        let h = win.height;
 
-                        // Fill with background
-                        let bg = win.background_pixel;
-                        win.framebuffer.fill_rect(0, 0, rw, rh, bg);
+                        // Set WM_STATE = NormalState
                         let mut wm_state_data = vec![0u8; 8];
-                        wm_state_data[0..4].copy_from_slice(&1u32.to_le_bytes()); // NormalState
+                        wm_state_data[0..4].copy_from_slice(&1u32.to_le_bytes());
                         win.properties.insert(wm_state_atom, PropertyValue {
                             prop_type: wm_state_atom,
                             format: 32,
                             data: wm_state_data,
                         });
-
-                        // Set _NET_WM_STATE with FOCUSED flag — GDK3 needs this
                         win.properties.insert(net_wm_state_atom, PropertyValue {
-                            prop_type: 4, // ATOM
+                            prop_type: 4,
                             format: 32,
                             data: focused_atom.to_le_bytes().to_vec(),
                         });
@@ -1108,26 +1114,27 @@ async fn handle_client(
                             state.client_id.clone(),
                             DisplayUpdate::WindowConfigured {
                                 window_id: wid,
-                                x: 0,
-                                y: 0,
-                                width: rw,
-                                height: rh,
+                                x: win.x,
+                                y: win.y,
+                                width: w,
+                                height: h,
                             },
                         ));
-                    }
+                        (win.x, win.y, w, h)
+                    } else {
+                        continue;
+                    };
 
-                    // Write events directly to this client's stream.
-                    // Since we filter by owner_client_id, these always go
-                    // to the correct client.
+                    // Send ConfigureNotify with the window's actual size
                     let mut config_event = [0u8; 32];
                     config_event[0] = CONFIGURE_NOTIFY_EVENT;
                     config_event[2..4].copy_from_slice(&seq.to_le_bytes());
                     config_event[4..8].copy_from_slice(&wid.to_le_bytes());
                     config_event[8..12].copy_from_slice(&wid.to_le_bytes());
-                    config_event[16..18].copy_from_slice(&0i16.to_le_bytes());
-                    config_event[18..20].copy_from_slice(&0i16.to_le_bytes());
-                    config_event[20..22].copy_from_slice(&rw.to_le_bytes());
-                    config_event[22..24].copy_from_slice(&rh.to_le_bytes());
+                    config_event[16..18].copy_from_slice(&win_x.to_le_bytes());
+                    config_event[18..20].copy_from_slice(&win_y.to_le_bytes());
+                    config_event[20..22].copy_from_slice(&win_w.to_le_bytes());
+                    config_event[22..24].copy_from_slice(&win_h.to_le_bytes());
                     stream.write_all(&config_event).await?;
 
                     let mut map_event = [0u8; 32];
@@ -2668,6 +2675,8 @@ fn handle_create_pixmap(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
     let width = u16::from_le_bytes([data[12], data[13]]);
     let height = u16::from_le_bytes([data[14], data[15]]);
 
+    info!("CreatePixmap: pid={pid:#x} {}x{} depth={depth}", width, height);
+
     state.pixmaps.insert(
         pid,
         PixmapState {
@@ -2902,9 +2911,10 @@ fn handle_poly_fill_rectangle(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
         offset += 8;
     }
 
+    let fg = state.map_color_for_drawable(drawable, gc.foreground);
     if let Some(fb) = state.get_framebuffer_mut(drawable) {
         for (x, y, width, height) in rects {
-            fb.fill_rect(x, y, width, height, gc.foreground);
+            fb.fill_rect(x, y, width, height, fg);
         }
     }
 
@@ -3069,9 +3079,10 @@ fn handle_poly_fill_arc(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
         offset += 12;
     }
 
+    let fg = state.map_color_for_drawable(drawable, gc.foreground);
     if let Some(fb) = state.get_framebuffer_mut(drawable) {
         for (x, y, width, height, angle1, angle2) in &arcs {
-            fb.draw_arc(*x, *y, *width, *height, *angle1, *angle2, true, gc.foreground);
+            fb.draw_arc(*x, *y, *width, *height, *angle1, *angle2, true, fg);
         }
     }
 
@@ -4591,20 +4602,24 @@ fn handle_present_request(state: &mut ClientState, data: &[u8], seq: u16) -> Vec
             // Copy pixels from the source pixmap to the destination window.
             // We need to clone the pixel data first because we can't borrow
             // both the pixmap and window framebuffers simultaneously.
+            // Sync SHM pixmaps before reading
+            state.sync_shm_pixmap(pixmap);
+
             let src_info = {
-                // Resolve through aliases (e.g. NameWindowPixmap)
                 let resolved = state.resolve_drawable(pixmap);
                 if let Some(win) = state.windows.get(&resolved) {
                     Some((
                         win.framebuffer.width() as u16,
                         win.framebuffer.height() as u16,
                         win.framebuffer.data().to_vec(),
+                        24u8,
                     ))
                 } else if let Some(pix) = state.pixmaps.get(&resolved) {
                     Some((
                         pix.framebuffer.width() as u16,
                         pix.framebuffer.height() as u16,
                         pix.framebuffer.data().to_vec(),
+                        pix._depth,
                     ))
                 } else {
                     debug!("PresentPixmap: source pixmap {:#x} not found", pixmap);
@@ -4612,7 +4627,21 @@ fn handle_present_request(state: &mut ClientState, data: &[u8], seq: u16) -> Vec
                 }
             };
 
-            if let Some((src_w, src_h, src_data)) = src_info {
+            if let Some((src_w, src_h, mut src_data, src_depth)) = src_info {
+                // For depth-1 pixmaps, convert 1-bit values to proper RGB:
+                // pixel != 0 → white (0xFFFFFF), pixel == 0 → black (0x000000)
+                if src_depth <= 1 {
+                    for i in (0..src_data.len()).step_by(4) {
+                        if i + 3 < src_data.len() {
+                            let is_set = src_data[i] != 0 || src_data[i + 1] != 0 || src_data[i + 2] != 0;
+                            let val = if is_set { 0xFF } else { 0x00 };
+                            src_data[i] = val;     // B
+                            src_data[i + 1] = val; // G
+                            src_data[i + 2] = val; // R
+                            src_data[i + 3] = 0xFF;
+                        }
+                    }
+                }
                 if let Some(win) = state.windows.get_mut(&window) {
                     win.framebuffer.put_image(x_off, y_off, src_w, src_h, &src_data);
                     debug!(
