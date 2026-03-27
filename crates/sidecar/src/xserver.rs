@@ -968,14 +968,12 @@ async fn handle_client(
                     continue;
                 }
 
-                let my_id = state.client_id.clone();
                 let unmapped: Vec<u32> = state.windows.iter()
                     .filter(|(_, w)| {
                         !w.mapped
                         && w.parent == state.root_window
                         && w.class == 1 // InputOutput
                         && (w.width > 1 || w.height > 1)
-                        && w.owner_client_id == my_id // Only auto-map OUR OWN windows
                     })
                     .map(|(id, _)| *id)
                     .collect();
@@ -1027,12 +1025,9 @@ async fn handle_client(
                         ));
                     }
 
-                    // Queue the events as pending_events. They'll be written
-                    // to THIS client's stream after the frame tick completes.
-                    // If the window belongs to a different client, the events
-                    // will still trigger rendering because the auto-map also
-                    // fills the framebuffer (marking it dirty), and the
-                    // flush_dirty_windows uses owner_client_id for routing.
+                    // Write events directly to this client's stream.
+                    // Since we filter by owner_client_id, these always go
+                    // to the correct client.
                     let mut config_event = [0u8; 32];
                     config_event[0] = CONFIGURE_NOTIFY_EVENT;
                     config_event[2..4].copy_from_slice(&seq.to_le_bytes());
@@ -1042,14 +1037,14 @@ async fn handle_client(
                     config_event[18..20].copy_from_slice(&0i16.to_le_bytes());
                     config_event[20..22].copy_from_slice(&rw.to_le_bytes());
                     config_event[22..24].copy_from_slice(&rh.to_le_bytes());
-                    state.pending_events.push(config_event.to_vec());
+                    stream.write_all(&config_event).await?;
 
                     let mut map_event = [0u8; 32];
                     map_event[0] = MAP_NOTIFY_EVENT;
                     map_event[2..4].copy_from_slice(&seq.to_le_bytes());
                     map_event[4..8].copy_from_slice(&wid.to_le_bytes());
                     map_event[8..12].copy_from_slice(&wid.to_le_bytes());
-                    state.pending_events.push(map_event.to_vec());
+                    stream.write_all(&map_event).await?;
 
                     let mut expose_event = [0u8; 32];
                     expose_event[0] = EXPOSE_EVENT;
@@ -1057,7 +1052,7 @@ async fn handle_client(
                     expose_event[4..8].copy_from_slice(&wid.to_le_bytes());
                     expose_event[12..14].copy_from_slice(&rw.to_le_bytes());
                     expose_event[14..16].copy_from_slice(&rh.to_le_bytes());
-                    state.pending_events.push(expose_event.to_vec());
+                    stream.write_all(&expose_event).await?;
                 }
 
                 // Immediately sync mapped state to shared so other connections see it
@@ -3351,8 +3346,7 @@ fn keycode_to_keysym(keycode: u8) -> (u32, u32) {
 
 fn handle_list_extensions(seq: u16) -> Vec<u8> {
     // Return the list of extensions we support
-    // XKEYBOARD disabled — our XKB stub causes Firefox to take a different (worse) init path
-    let extensions: &[&str] = &["BIG-REQUESTS", "MIT-SHM", "RENDER", "XFIXES", "SHAPE", "SYNC", "Generic Event Extension", "XC-MISC"];
+    let extensions: &[&str] = &["BIG-REQUESTS", "MIT-SHM", "RENDER", "XFIXES", "SHAPE", "SYNC", "Generic Event Extension", "XC-MISC", "Composite", "DAMAGE"];
 
     // Build the names data: each is a length-prefixed string (1 byte len + name)
     let mut names_data = Vec::new();
@@ -3434,10 +3428,15 @@ fn handle_query_extension(_state: &mut ClientState, data: &[u8], seq: u16) -> Ve
             reply[10] = 0; // first_event
             reply[11] = 0; // first_error
         }
-        // Composite/DAMAGE disabled — forces Firefox to use simple compositor
-        // path with SHM PutImage instead of native compositor.
-        "Composite" | "DAMAGE" => {
-            // present = false
+        "Composite" => {
+            reply[8] = 1;
+            reply[9] = 142;
+        }
+        "DAMAGE" => {
+            reply[8] = 1;
+            reply[9] = 143;
+            reply[10] = 91;
+            reply[11] = 152;
         }
         // RANDR disabled — GTK renders incorrectly with our minimal RANDR replies.
         // The handler code is kept for future use when replies are fully correct.

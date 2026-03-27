@@ -240,9 +240,10 @@ test.describe
 			const win = await spawnApp(page, "-geometry 200x150+10+10");
 			const canvas = win.locator('[data-testid="x11-canvas"]');
 			await expect(canvas).toBeVisible();
-			await page.waitForTimeout(5000);
-
-			expect(await countNonBlackPixels(canvas)).toBeGreaterThan(10);
+			// Wait for auto-map + expose + rendering cycle to complete
+			await expect
+				.poll(async () => countNonBlackPixels(canvas), { timeout: 10_000 })
+				.toBeGreaterThan(10);
 
 			await win.locator('[data-testid="window-close"]').click();
 			await expect(windowFrames).toHaveCount(countBefore, {
