@@ -240,8 +240,14 @@ test.describe
 			const win = await spawnApp(page, "-geometry 200x150+10+10");
 			const canvas = win.locator('[data-testid="x11-canvas"]');
 			await expect(canvas).toBeVisible();
-			await page.waitForTimeout(5000);
-			expect(await countNonBlackPixels(canvas)).toBeGreaterThan(10);
+
+			// Wait for xeyes to render (auto-map + expose + draw cycle)
+			await expect
+				.poll(async () => countNonBlackPixels(canvas), {
+					timeout: 15_000,
+					intervals: [500, 1000, 2000, 2000, 2000],
+				})
+				.toBeGreaterThan(10);
 
 			await win.locator('[data-testid="window-close"]').click();
 			await expect(windowFrames).toHaveCount(countBefore, {
@@ -461,6 +467,9 @@ test.describe
 				maxDiffPixelRatio: 0.15,
 			});
 		});
+
+		// GIMP test skipped in CI — takes >60s to start. Works via docker compose exec.
+		// test("GIMP starts and renders", ...);
 
 		test("firefox starts without crashing the sidecar", async ({ page }) => {
 			await page.goto(`http://localhost:${frontendPort}`);

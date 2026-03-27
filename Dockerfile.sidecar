@@ -21,6 +21,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libdbus-glib-1-2 \
     procps \
     matchbox-window-manager \
+    gimp \
+    librsvg2-common \
+    adwaita-icon-theme \
     && rm -rf /var/lib/apt/lists/*
 RUN mkdir -p /tmp/.X11-unix
 COPY --from=builder /app/target/release/x11-web-sidecar /usr/local/bin/

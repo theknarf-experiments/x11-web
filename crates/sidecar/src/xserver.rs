@@ -150,20 +150,10 @@ impl ClientState {
             // Pull: add windows from shared that we don't have locally
             for (&wid, shared_win) in shared.iter() {
                 if let Some(local_win) = self.windows.get_mut(&wid) {
-                    // Merge: pull mapped flag, size, and properties from shared
+                    // Merge: pull mapped flag and properties from shared
                     if shared_win.mapped && !local_win.mapped {
                         local_win.mapped = true;
                     }
-                    // Sync size from shared, but only if shared is LARGER
-                    // (auto-map resizes up; don't pull a stale smaller size)
-                    if shared_win.width > local_win.width || shared_win.height > local_win.height {
-                        local_win.x = shared_win.x;
-                        local_win.y = shared_win.y;
-                        local_win.width = shared_win.width;
-                        local_win.height = shared_win.height;
-                        local_win.framebuffer.resize(shared_win.width as u32, shared_win.height as u32);
-                    }
-                    // Sync redirected flag
                     if shared_win.redirected {
                         local_win.redirected = true;
                     }
@@ -178,37 +168,22 @@ impl ClientState {
                 }
             }
 
-            // Push: update shared with our local changes.
-            // Size/position only pushed by the connection that owns the window
-            // (or any connection if owner is empty/root). This prevents stale
-            // copies from other connections from overwriting auto-map resizes.
-            let my_client_id = self.client_id.clone();
+            // Push: update shared with our local changes
             for (&wid, local_win) in self.windows.iter() {
                 if let Some(shared_win) = shared.get_mut(&wid) {
-                    // Merge mapped flag (sticky - once mapped, stays mapped)
                     if local_win.mapped {
                         shared_win.mapped = true;
                     }
-                    // Merge redirected flag (sticky)
                     if local_win.redirected {
                         shared_win.redirected = true;
                     }
-                    // Update properties
                     for (&atom, val) in local_win.properties.iter() {
                         shared_win.properties.insert(atom, val.clone());
                     }
-                    // Only push size if we own this window OR auto-mapped it
-                    // (local is larger than shared = we resized it)
-                    let is_owner = shared_win.owner_client_id == my_client_id
-                        || shared_win.owner_client_id.is_empty();
-                    let was_resized = local_win.width > shared_win.width
-                        || local_win.height > shared_win.height;
-                    if is_owner || was_resized {
-                        shared_win.x = local_win.x;
-                        shared_win.y = local_win.y;
-                        shared_win.width = local_win.width;
-                        shared_win.height = local_win.height;
-                    }
+                    shared_win.x = local_win.x;
+                    shared_win.y = local_win.y;
+                    shared_win.width = local_win.width;
+                    shared_win.height = local_win.height;
                 } else {
                     shared.insert(wid, local_win.clone());
                 }
@@ -665,9 +640,20 @@ fn build_setup(conn_index: u32) -> Setup {
         visuals: vec![visual],
     };
 
+    // ARGB visual for depth 32 — needed by GTK3/wxWidgets for RGBA windows
+    let visual_argb = Visualtype {
+        visual_id: 0x40, // ARGB_VISUAL
+        class: VisualClass::TRUE_COLOR,
+        bits_per_rgb_value: 8,
+        colormap_entries: 256,
+        red_mask: 0x00FF0000,
+        green_mask: 0x0000FF00,
+        blue_mask: 0x000000FF,
+    };
+
     let depth32 = Depth {
         depth: 32,
-        visuals: vec![],
+        visuals: vec![visual_argb],
     };
 
     let screen = Screen {
@@ -1100,22 +1086,9 @@ async fn handle_client(
                     expose_event[14..16].copy_from_slice(&rh.to_le_bytes());
                     stream.write_all(&expose_event).await?;
 
-                    let mut prop_event = [0u8; 32];
-                    prop_event[0] = 28; // PropertyNotify
-                    prop_event[2..4].copy_from_slice(&seq.to_le_bytes());
-                    prop_event[4..8].copy_from_slice(&wid.to_le_bytes());
-                    prop_event[8..12].copy_from_slice(&net_wm_state_atom.to_le_bytes());
-                    // state = NewValue (0)
-                    stream.write_all(&prop_event).await?;
-
-                    // Send FocusIn event
-                    let mut focus_event = [0u8; 32];
-                    focus_event[0] = 9; // FocusIn
-                    focus_event[1] = 1; // detail = NotifyAncestor
-                    focus_event[2..4].copy_from_slice(&seq.to_le_bytes());
-                    focus_event[4..8].copy_from_slice(&wid.to_le_bytes());
-                    focus_event[8] = 0; // mode = Normal
-                    stream.write_all(&focus_event).await?;
+                    // Note: PropertyNotify and FocusIn events removed here —
+                    // they confused simple apps like xeyes that don't expect
+                    // unsolicited events. The MapNotify + Expose are sufficient.
                 }
 
                 // Immediately sync mapped state to shared so other connections see it
