@@ -150,11 +150,24 @@ impl ClientState {
             // Pull: add windows from shared that we don't have locally
             for (&wid, shared_win) in shared.iter() {
                 if let Some(local_win) = self.windows.get_mut(&wid) {
-                    // Merge: if shared says mapped and local doesn't, update local
+                    // Merge: pull mapped flag, size, and properties from shared
                     if shared_win.mapped && !local_win.mapped {
                         local_win.mapped = true;
                     }
-                    // Also sync properties from shared that are newer
+                    // Sync size from shared, but only if shared is LARGER
+                    // (auto-map resizes up; don't pull a stale smaller size)
+                    if shared_win.width > local_win.width || shared_win.height > local_win.height {
+                        local_win.x = shared_win.x;
+                        local_win.y = shared_win.y;
+                        local_win.width = shared_win.width;
+                        local_win.height = shared_win.height;
+                        local_win.framebuffer.resize(shared_win.width as u32, shared_win.height as u32);
+                    }
+                    // Sync redirected flag
+                    if shared_win.redirected {
+                        local_win.redirected = true;
+                    }
+                    // Sync properties from shared
                     for (&atom, val) in shared_win.properties.iter() {
                         if !local_win.properties.contains_key(&atom) {
                             local_win.properties.insert(atom, val.clone());
@@ -165,7 +178,11 @@ impl ClientState {
                 }
             }
 
-            // Push: update shared with our local changes (only for windows we own)
+            // Push: update shared with our local changes.
+            // Size/position only pushed by the connection that owns the window
+            // (or any connection if owner is empty/root). This prevents stale
+            // copies from other connections from overwriting auto-map resizes.
+            let my_client_id = self.client_id.clone();
             for (&wid, local_win) in self.windows.iter() {
                 if let Some(shared_win) = shared.get_mut(&wid) {
                     // Merge mapped flag (sticky - once mapped, stays mapped)
@@ -180,11 +197,18 @@ impl ClientState {
                     for (&atom, val) in local_win.properties.iter() {
                         shared_win.properties.insert(atom, val.clone());
                     }
-                    // Update position/size
-                    shared_win.x = local_win.x;
-                    shared_win.y = local_win.y;
-                    shared_win.width = local_win.width;
-                    shared_win.height = local_win.height;
+                    // Only push size if we own this window OR auto-mapped it
+                    // (local is larger than shared = we resized it)
+                    let is_owner = shared_win.owner_client_id == my_client_id
+                        || shared_win.owner_client_id.is_empty();
+                    let was_resized = local_win.width > shared_win.width
+                        || local_win.height > shared_win.height;
+                    if is_owner || was_resized {
+                        shared_win.x = local_win.x;
+                        shared_win.y = local_win.y;
+                        shared_win.width = local_win.width;
+                        shared_win.height = local_win.height;
+                    }
                 } else {
                     shared.insert(wid, local_win.clone());
                 }
@@ -293,6 +317,8 @@ pub(crate) struct WindowState {
     pub(crate) properties: HashMap<u32, PropertyValue>,
     /// The client_id that created this window (for display update routing).
     pub(crate) owner_client_id: String,
+    /// When this window was created (for delayed auto-map).
+    pub(crate) created_at: std::time::Instant,
 }
 
 pub(crate) struct PixmapState {
@@ -541,6 +567,7 @@ impl X11Server {
                     framebuffer: Framebuffer::new(SCREEN_WIDTH as u32, SCREEN_HEIGHT as u32),
                     properties: HashMap::new(),
                     owner_client_id: String::new(), // root has no owner
+                    created_at: std::time::Instant::now(),
                 },
             );
 
@@ -978,12 +1005,16 @@ async fn handle_client(
                     continue;
                 }
 
+                let now = std::time::Instant::now();
                 let unmapped: Vec<u32> = state.windows.iter()
                     .filter(|(_, w)| {
                         !w.mapped
                         && w.parent == state.root_window
                         && w.class == 1 // InputOutput
-                        && (w.width > 1 || w.height > 1)
+                        && !w.override_redirect
+                        // Delay auto-map by 500ms so the app has time to
+                        // set properties and enter its event loop
+                        && now.duration_since(w.created_at).as_millis() >= 500
                     })
                     .map(|(id, _)| *id)
                     .collect();
@@ -997,7 +1028,7 @@ async fn handle_client(
                     let wm_state_atom = state.intern_atom("WM_STATE", false);
 
                     if let Some(win) = state.windows.get_mut(&wid) {
-                        info!("WM auto-mapping top-level window {wid:#x} (was {}x{})", win.width, win.height);
+                        info!("WM auto-mapping top-level window {wid:#x} (was {}x{}) -> {}x{}", win.width, win.height, rw, rh);
                         win.mapped = true;
 
                         // Resize to full screen like a WM would
@@ -1608,6 +1639,7 @@ fn handle_create_window(state: &mut ClientState, data: &[u8], _seq: u16) -> Vec<
             framebuffer: Framebuffer::new(width as u32, height as u32),
             properties: HashMap::new(),
             owner_client_id: state.client_id.clone(),
+            created_at: std::time::Instant::now(),
         },
     );
 
