@@ -2728,7 +2728,7 @@ fn handle_copy_area(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
 
     let src = u32::from_le_bytes([data[4], data[5], data[6], data[7]]);
     let dst = u32::from_le_bytes([data[8], data[9], data[10], data[11]]);
-    let _gc = u32::from_le_bytes([data[12], data[13], data[14], data[15]]);
+    let gc_id = u32::from_le_bytes([data[12], data[13], data[14], data[15]]);
     let src_x = i16::from_le_bytes([data[16], data[17]]);
     let src_y = i16::from_le_bytes([data[18], data[19]]);
     let dst_x = i16::from_le_bytes([data[20], data[21]]);
@@ -2736,22 +2736,75 @@ fn handle_copy_area(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
     let width = u16::from_le_bytes([data[24], data[25]]);
     let height = u16::from_le_bytes([data[26], data[27]]);
 
+    let gc = state.gcs.get(&gc_id).cloned().unwrap_or_default();
+
     // Sync SHM-backed pixmap data before reading from src
     state.sync_shm_pixmap(src);
 
+    // Check if source is a 1-bit depth pixmap (used for clip masks)
+    let src_depth = state.pixmaps.get(&src).map(|p| p._depth).unwrap_or(24);
+
     if src == dst {
-        // Same drawable — use self-copy which handles overlap
         if let Some(fb) = state.get_framebuffer_mut(src) {
             fb.copy_area_self(src_x, src_y, dst_x, dst_y, width, height);
         }
     } else {
-        // Different drawables — extract pixels from src, put into dst
         let pixels = state
             .get_framebuffer_mut(src)
             .map(|fb| fb.extract_pixels(src_x, src_y, width, height));
         if let Some(pixels) = pixels {
-            if let Some(fb) = state.get_framebuffer_mut(dst) {
-                fb.put_image(dst_x, dst_y, width, height, &pixels);
+            if src_depth <= 1 && gc.function != 3 {
+                // 1-bit source with non-copy GC function: map pixel values
+                // to foreground/background colors using the GC function.
+                // Pixel != black → foreground, pixel == black → background
+                if let Some(fb) = state.get_framebuffer_mut(dst) {
+                    let fb_stride = fb.stride();
+                    let fb_w = fb.width() as i32;
+                    let fb_h = fb.height() as i32;
+                    let src_stride = width as usize * 4;
+                    for row in 0..height as usize {
+                        let dy = dst_y as i32 + row as i32;
+                        if dy < 0 || dy >= fb_h { continue; }
+                        for col in 0..width as usize {
+                            let dx = dst_x as i32 + col as i32;
+                            if dx < 0 || dx >= fb_w { continue; }
+                            let src_off = row * src_stride + col * 4;
+                            if src_off + 3 >= pixels.len() { continue; }
+                            let src_pixel = pixels[src_off] as u32
+                                | (pixels[src_off + 1] as u32) << 8
+                                | (pixels[src_off + 2] as u32) << 16;
+                            // If any bit set → use foreground; else background
+                            let color = if src_pixel != 0 {
+                                gc.foreground
+                            } else {
+                                gc.background
+                            };
+                            fb.draw_point_with_func(dx, dy, color, gc.function);
+                        }
+                    }
+                }
+            } else if gc.function != 3 {
+                // Non-copy GC function with regular depth source
+                if let Some(fb) = state.get_framebuffer_mut(dst) {
+                    let src_stride = width as usize * 4;
+                    for row in 0..height as usize {
+                        let dy = dst_y as i32 + row as i32;
+                        for col in 0..width as usize {
+                            let dx = dst_x as i32 + col as i32;
+                            let src_off = row * src_stride + col * 4;
+                            if src_off + 3 >= pixels.len() { continue; }
+                            let color = (pixels[src_off + 2] as u32) << 16
+                                | (pixels[src_off + 1] as u32) << 8
+                                | pixels[src_off] as u32;
+                            fb.draw_point_with_func(dx, dy, color, gc.function);
+                        }
+                    }
+                }
+            } else {
+                // GXcopy — fast path
+                if let Some(fb) = state.get_framebuffer_mut(dst) {
+                    fb.put_image(dst_x, dst_y, width, height, &pixels);
+                }
             }
         }
     }
@@ -3018,7 +3071,6 @@ fn handle_poly_fill_arc(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
 
     if let Some(fb) = state.get_framebuffer_mut(drawable) {
         for (x, y, width, height, angle1, angle2) in &arcs {
-            info!("PolyFillArc: draw={drawable:#x} ({x},{y}) {width}x{height} a1={angle1} a2={angle2} color={:#x} fb={}x{}", gc.foreground, fb.width(), fb.height());
             fb.draw_arc(*x, *y, *width, *height, *angle1, *angle2, true, gc.foreground);
         }
     }
