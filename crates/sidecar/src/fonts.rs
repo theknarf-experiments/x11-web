@@ -251,7 +251,9 @@ impl FontManager {
         info!("Loaded {} fonts", self.fonts.len());
     }
 
-    /// Open a font by name, assign it to a font ID
+    /// Open a font by name, assign it to a font ID.
+    /// Font matching is deterministic: exact match first, then substring,
+    /// then well-known fallbacks, then alphabetically-first loaded font.
     pub fn open_font(&mut self, font_id: u32, name: &str) -> bool {
         let name_lower = name.to_lowercase();
 
@@ -261,19 +263,28 @@ impl FontManager {
             return true;
         }
 
-        // Try matching by XLFD pattern or alias
-        // "fixed" -> first loaded font, or any font containing the name
-        for key in self.fonts.keys() {
-            if key.contains(&name_lower) || name_lower == "fixed" {
-                self.font_ids.insert(font_id, key.clone());
+        // "fixed" is an alias for the default font
+        if name_lower == "fixed" {
+            if let Some(f) = self.get_default_font() {
+                let key = f.name.to_lowercase();
+                self.font_ids.insert(font_id, key);
                 return true;
             }
         }
 
-        // Fallback: use any available font
-        if let Some(key) = self.fonts.keys().next() {
-            let key = key.clone();
-            self.font_ids.insert(font_id, key);
+        // Try matching by XLFD pattern or substring (deterministic: sort keys first)
+        let mut keys: Vec<&String> = self.fonts.keys().collect();
+        keys.sort();
+        for key in &keys {
+            if key.contains(&name_lower) {
+                self.font_ids.insert(font_id, (*key).clone());
+                return true;
+            }
+        }
+
+        // Fallback: alphabetically-first font for determinism
+        if let Some(key) = keys.first() {
+            self.font_ids.insert(font_id, (*key).clone());
             return true;
         }
 
@@ -291,9 +302,18 @@ impl FontManager {
         self.fonts.get(name)
     }
 
-    /// Get any available font (fallback)
+    /// Get the default font. Deterministic: tries well-known names,
+    /// then falls back to alphabetically-first loaded font.
     pub fn get_default_font(&self) -> Option<&BitmapFont> {
-        self.fonts.values().next()
+        for name in &["fixed", "6x13", "cursor"] {
+            if let Some(f) = self.fonts.get(*name) {
+                return Some(f);
+            }
+        }
+        // Deterministic fallback: alphabetically first
+        let mut keys: Vec<&String> = self.fonts.keys().collect();
+        keys.sort();
+        keys.first().and_then(|k| self.fonts.get(*k))
     }
 }
 

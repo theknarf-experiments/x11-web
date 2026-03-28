@@ -107,6 +107,11 @@ impl Framebuffer {
         self.dirty.is_some()
     }
 
+    /// Clear the dirty flag without extracting pixels.
+    pub fn clear_dirty(&mut self) {
+        self.dirty = None;
+    }
+
     /// Extract the dirty region and clear the dirty flag.
     pub fn take_dirty_pixels(&mut self) -> Option<(i16, i16, u16, u16, Vec<u8>)> {
         let (dx, dy, dw, dh) = self.dirty.take()?;

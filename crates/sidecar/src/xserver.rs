@@ -144,6 +144,39 @@ impl ClientState {
         None
     }
 
+    /// Queue DamageNotify events for any DAMAGE subscriptions on the given drawable.
+    /// This should be called after any drawing operation that modifies a pixmap,
+    /// so that clients (like xeyes) using DAMAGE+Present know to present the updated content.
+    pub(crate) fn notify_damage(&mut self, drawable: u32, x: i16, y: i16, width: u16, height: u16) {
+        let resolved = self.resolve_drawable(drawable);
+        let matches: Vec<(u32, u8)> = self
+            .damage_regions
+            .iter()
+            .filter(|(_, info)| info.drawable == resolved)
+            .map(|(&did, info)| (did, info.level))
+            .collect();
+
+        for (damage_id, level) in matches {
+            let mut event = [0u8; 32];
+            event[0] = 91; // DAMAGE first_event + DamageNotify
+            event[1] = level;
+            event[2..4].copy_from_slice(&self.sequence.to_le_bytes());
+            event[4..8].copy_from_slice(&resolved.to_le_bytes()); // drawable
+            event[8..12].copy_from_slice(&damage_id.to_le_bytes()); // damage
+            // timestamp = 0
+            event[14..16].copy_from_slice(&(x as u16).to_le_bytes()); // area.x
+            event[16..18].copy_from_slice(&(y as u16).to_le_bytes()); // area.y
+            event[18..20].copy_from_slice(&width.to_le_bytes()); // area.width
+            event[20..22].copy_from_slice(&height.to_le_bytes()); // area.height
+            // geometry = area (for raw level, area == geometry)
+            event[22..24].copy_from_slice(&(x as u16).to_le_bytes());
+            event[24..26].copy_from_slice(&(y as u16).to_le_bytes());
+            event[26..28].copy_from_slice(&width.to_le_bytes());
+            event[28..30].copy_from_slice(&height.to_le_bytes());
+            self.pending_events.push(event.to_vec());
+        }
+    }
+
     /// Resolve a drawable ID to the actual drawable ID (following aliases).
     pub(crate) fn resolve_drawable(&self, drawable: u32) -> u32 {
         if let Some(pix) = self.pixmaps.get(&drawable) {
@@ -261,10 +294,81 @@ impl ClientState {
 
     /// Send dirty framebuffer regions for all mapped windows as PutImage updates.
     fn flush_dirty_windows(&mut self) {
+        // Step 1: Composite dirty child windows up into their top-level ancestor.
+        // Walk up the parent chain so even deeply nested children reach the
+        // top-level window.  After compositing, clear the child's dirty flag
+        // so only top-level windows remain dirty.
+        let children: Vec<(u32, u16, u16)> = self
+            .windows
+            .iter()
+            .filter(|(_, w)| {
+                w.mapped
+                    && w.framebuffer.is_dirty()
+                    && w.parent != self.root_window
+                    && w.parent != 0
+                    && w.class == 1 // InputOutput only
+            })
+            .map(|(_, w)| (w.id, w.width, w.height))
+            .collect();
+
+        for (child_id, cw, ch) in &children {
+            // Walk up to find the top-level ancestor and accumulate offsets
+            let mut target = *child_id;
+            let mut off_x: i32 = 0;
+            let mut off_y: i32 = 0;
+            for _ in 0..10 {
+                let (parent, wx, wy) = match self.windows.get(&target) {
+                    Some(w) if w.parent != self.root_window && w.parent != 0 => {
+                        (w.parent, w.x as i32, w.y as i32)
+                    }
+                    _ => break,
+                };
+                off_x += wx;
+                off_y += wy;
+                target = parent;
+            }
+
+            if target == *child_id {
+                continue; // Already top-level, nothing to composite
+            }
+
+            // Extract child pixels and composite into ancestor
+            let pixels = if let Some(child) = self.windows.get(child_id) {
+                Some(child.framebuffer.extract_pixels(0, 0, *cw, *ch))
+            } else {
+                None
+            };
+
+            if let Some(pixels) = pixels {
+                if let Some(ancestor) = self.windows.get_mut(&target) {
+                    ancestor.framebuffer.put_image(off_x as i16, off_y as i16, *cw, *ch, &pixels);
+                }
+            }
+
+            // Clear child dirty flag
+            if let Some(child) = self.windows.get_mut(child_id) {
+                child.framebuffer.clear_dirty();
+            }
+        }
+
+        // Debug: log compositing results
+        for (child_id, _, _) in &children {
+            if let Some(child) = self.windows.get(child_id) {
+                let non_black = child.framebuffer.data().chunks(4).filter(|px| px.len() == 4 && (px[0] != 0 || px[1] != 0 || px[2] != 0)).count();
+                let parent = child.parent;
+            }
+        }
+
+        // Step 2: Only send PutImage for top-level windows (parent == root).
         let window_ids: Vec<u32> = self
             .windows
             .iter()
-            .filter(|(_, w)| w.mapped && w.framebuffer.is_dirty())
+            .filter(|(_, w)| {
+                w.mapped
+                    && w.framebuffer.is_dirty()
+                    && w.parent == self.root_window
+                    && w.class == 1
+            })
             .map(|(id, _)| *id)
             .collect();
 
@@ -1109,7 +1213,7 @@ async fn handle_client(
 
                         let _ = state.update_tx.send((
                             state.client_id.clone(),
-                            DisplayUpdate::WindowMapped { window_id: wid },
+                            DisplayUpdate::WindowMapped { window_id: wid, is_top_level: true },
                         ));
                         let _ = state.update_tx.send((
                             state.client_id.clone(),
@@ -1717,6 +1821,7 @@ fn handle_create_window(state: &mut ClientState, data: &[u8], _seq: u16) -> Vec<
         });
     }
 
+    let is_top_level = parent == state.root_window && class == 1 && !override_redirect;
     let _ = state.update_tx.send((
         state.client_id.clone(),
         DisplayUpdate::WindowCreated {
@@ -1725,6 +1830,7 @@ fn handle_create_window(state: &mut ClientState, data: &[u8], _seq: u16) -> Vec<
             y,
             width,
             height,
+            is_top_level,
         },
     ));
 
@@ -1872,10 +1978,11 @@ fn handle_map_window(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> 
 
     if let Some(win) = state.windows.get_mut(&wid) {
         info!("MapWindow: id={wid:#x} {}x{} mapped={}", win.width, win.height, win.mapped);
+        let is_top_level = win.parent == state.root_window && win.class == 1 && !win.override_redirect;
         win.mapped = true;
         let _ = state.update_tx.send((
             state.client_id.clone(),
-            DisplayUpdate::WindowMapped { window_id: wid },
+            DisplayUpdate::WindowMapped { window_id: wid, is_top_level },
         ));
 
         // Fill window with its background pixel (like a real X server does)
@@ -1905,9 +2012,51 @@ fn handle_map_window(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> 
         expose_event[14..16].copy_from_slice(&height.to_le_bytes());
         // count = 0
         events.extend_from_slice(&expose_event);
+
+        // Also send Expose to all mapped descendant windows. In a real X
+        // server, when a parent becomes visible, all its visible children
+        // get Expose events so widgets can redraw (text, buttons, etc.).
+        let descendants: Vec<(u32, u16, u16)> = state
+            .windows
+            .values()
+            .filter(|w| w.mapped && w.id != wid && is_descendant_of(&state.windows, w.id, wid))
+            .map(|w| (w.id, w.width, w.height))
+            .collect();
+
+        if !descendants.is_empty() {
+        }
+
+        for (desc_id, dw, dh) in descendants {
+            let mut exp = [0u8; 32];
+            exp[0] = EXPOSE_EVENT;
+            exp[2..4].copy_from_slice(&seq.to_le_bytes());
+            exp[4..8].copy_from_slice(&desc_id.to_le_bytes());
+            exp[12..14].copy_from_slice(&dw.to_le_bytes());
+            exp[14..16].copy_from_slice(&dh.to_le_bytes());
+            events.extend_from_slice(&exp);
+        }
     }
 
     events
+}
+
+/// Check if window `child` is a descendant of window `ancestor`.
+fn is_descendant_of(windows: &HashMap<u32, WindowState>, child: u32, ancestor: u32) -> bool {
+    let mut current = child;
+    for _ in 0..20 {
+        let parent = match windows.get(&current) {
+            Some(w) => w.parent,
+            None => return false,
+        };
+        if parent == ancestor {
+            return true;
+        }
+        if parent == 0 {
+            return false;
+        }
+        current = parent;
+    }
+    false
 }
 
 fn handle_map_subwindows(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
@@ -2090,6 +2239,13 @@ fn handle_configure_window(state: &mut ClientState, data: &[u8], seq: u16) -> Ve
         }
 
         if changed {
+            // Resize the framebuffer if the window dimensions changed
+            let new_w = win.width as u32;
+            let new_h = win.height as u32;
+            if new_w != win.framebuffer.width() || new_h != win.framebuffer.height() {
+                win.framebuffer = Framebuffer::new(new_w, new_h);
+            }
+
             let _ = state.update_tx.send((
                 state.client_id.clone(),
                 DisplayUpdate::WindowConfigured {
@@ -2917,9 +3073,14 @@ fn handle_poly_fill_rectangle(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
     let fg = state.map_color_for_drawable(drawable, gc.foreground);
     info!("PolyFillRect: draw={drawable:#x} fg={fg:#x} gc={gc_id:#x} rects={}", rects.len());
     if let Some(fb) = state.get_framebuffer_mut(drawable) {
-        for (x, y, width, height) in rects {
+        for &(x, y, width, height) in &rects {
             fb.fill_rect(x, y, width, height, fg);
         }
+    }
+
+    // Notify DAMAGE subscribers
+    for &(x, y, width, height) in &rects {
+        state.notify_damage(drawable, x, y, width, height);
     }
 
     Vec::new()
@@ -3091,6 +3252,11 @@ fn handle_poly_fill_arc(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
         }
     }
 
+    // Notify DAMAGE subscribers
+    for &(x, y, width, height, _, _) in &arcs {
+        state.notify_damage(drawable, x, y, width, height);
+    }
+
     Vec::new()
 }
 
@@ -3167,6 +3333,9 @@ fn handle_image_text8(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
     if data.len() < 16 {
         return Vec::new();
     }
+    let drawable = u32::from_le_bytes([data[4], data[5], data[6], data[7]]);
+    let str_len = data[1] as usize;
+    let text = if data.len() >= 16 + str_len { String::from_utf8_lossy(&data[16..16 + str_len]).to_string() } else { String::new() };
 
     let str_len = data[1] as usize;
     let drawable = u32::from_le_bytes([data[4], data[5], data[6], data[7]]);
@@ -4705,7 +4874,7 @@ fn handle_present_request(state: &mut ClientState, data: &[u8], seq: u16) -> Vec
             let x_off = i16::from_le_bytes([data[24], data[25]]);
             let y_off = i16::from_le_bytes([data[26], data[27]]);
 
-            debug!(
+            info!(
                 "PresentPixmap: window={:#x} pixmap={:#x} serial={} x_off={} y_off={}",
                 window, pixmap, serial, x_off, y_off
             );
@@ -4739,6 +4908,9 @@ fn handle_present_request(state: &mut ClientState, data: &[u8], seq: u16) -> Vec
             };
 
             if let Some((src_w, src_h, mut src_data, src_depth)) = src_info {
+                // Debug: count non-black pixels in source
+                let non_black = src_data.chunks(4).filter(|px| px.len() == 4 && (px[0] != 0 || px[1] != 0 || px[2] != 0)).count();
+
                 // For depth-1 pixmaps, convert 1-bit values to proper RGB:
                 // pixel != 0 → white (0xFFFFFF), pixel == 0 → black (0x000000)
                 if src_depth <= 1 {
@@ -4753,13 +4925,53 @@ fn handle_present_request(state: &mut ClientState, data: &[u8], seq: u16) -> Vec
                         }
                     }
                 }
+                // Determine the target window and offset for rendering.
+                // If the target is a child window, propagate pixels up to the
+                // parent (top-level) window so the frontend sees them.
+                let (target_wid, total_x_off, total_y_off) = {
+                    let mut wid = window;
+                    let mut tx = x_off as i32;
+                    let mut ty = y_off as i32;
+                    // Walk up the parent chain to the top-level window
+                    for _ in 0..10 {
+                        let parent = state.windows.get(&wid).map(|w| w.parent);
+                        match parent {
+                            Some(p) if p != state.root_window && p != 0 => {
+                                // Add this window's position relative to its parent
+                                if let Some(w) = state.windows.get(&wid) {
+                                    tx += w.x as i32;
+                                    ty += w.y as i32;
+                                }
+                                wid = p;
+                            }
+                            _ => break,
+                        }
+                    }
+                    (wid, tx as i16, ty as i16)
+                };
+
+                // Copy to the child window (keeps its framebuffer up-to-date)
                 if let Some(win) = state.windows.get_mut(&window) {
                     win.framebuffer.put_image(x_off, y_off, src_w, src_h, &src_data);
-                    debug!(
-                        "PresentPixmap: copied {}x{} pixels to window {:#x}",
+                }
+
+                // Also copy to the top-level parent so the frontend displays it
+                if target_wid != window {
+                    if let Some(parent_win) = state.windows.get_mut(&target_wid) {
+                        parent_win.framebuffer.put_image(total_x_off, total_y_off, src_w, src_h, &src_data);
+                        info!(
+                            "PresentPixmap: propagated {}x{} from child {:#x} to parent {:#x} at ({},{})",
+                            src_w, src_h, window, target_wid, total_x_off, total_y_off
+                        );
+                    }
+                } else {
+                    info!(
+                        "PresentPixmap: copied {}x{} to window {:#x}",
                         src_w, src_h, window
                     );
-                } else {
+                }
+
+                if !state.windows.contains_key(&window) {
                     debug!("PresentPixmap: destination window {:#x} not found", window);
                 }
             }

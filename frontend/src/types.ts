@@ -106,9 +106,10 @@ export type DisplayUpdate =
 			y: number;
 			width: number;
 			height: number;
+			is_top_level?: boolean;
 	  }
 	| { kind: "WindowDestroyed"; window_id: number }
-	| { kind: "WindowMapped"; window_id: number }
+	| { kind: "WindowMapped"; window_id: number; is_top_level?: boolean }
 	| { kind: "WindowUnmapped"; window_id: number }
 	| {
 			kind: "WindowConfigured";

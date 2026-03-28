@@ -3,9 +3,9 @@ import { createPortal } from "react-dom";
 import s from "./Dock.module.css";
 import type { SidecarInfo } from "./types";
 
-interface DockWindow {
-	clientId: string;
+export interface DockProcess {
 	sidecarId: string;
+	pid: number;
 	title: string;
 	color: string;
 }
@@ -13,23 +13,24 @@ interface DockWindow {
 interface DockProps {
 	connected: boolean;
 	sidecars: SidecarInfo[];
-	windows: DockWindow[];
+	processes: DockProcess[];
 	onSpawn: (sidecarId: string, command: string, args: string[]) => void;
-	onClose: (clientId: string) => void;
-	onFocusWindow: (clientId: string) => void;
+	onClose: (sidecarId: string, pid: number) => void;
+	onFocusWindow: (sidecarId: string, pid: number) => void;
 }
 
 export function Dock({
 	connected,
 	sidecars,
-	windows,
+	processes,
 	onSpawn,
 	onClose,
 	onFocusWindow,
 }: DockProps) {
 	const [showSpawn, setShowSpawn] = useState(false);
 	const [contextMenu, setContextMenu] = useState<{
-		clientId: string;
+		sidecarId: string;
+		pid: number;
 		x: number;
 		y: number;
 	} | null>(null);
@@ -74,38 +75,44 @@ export function Dock({
 		setShowSpawn(false);
 	}
 
-	function handleContextMenu(e: React.MouseEvent, clientId: string) {
+	function handleContextMenu(
+		e: React.MouseEvent,
+		sidecarId: string,
+		pid: number,
+	) {
 		e.preventDefault();
 		e.stopPropagation();
-		setContextMenu({ clientId, x: e.clientX, y: e.clientY });
+		setContextMenu({ sidecarId, pid, x: e.clientX, y: e.clientY });
 	}
 
 	return (
 		<>
 			<div className={s.dock} data-testid="dock">
-				{/* App icons */}
-				{windows.map((win) => (
+				{/* App icons — one per process */}
+				{processes.map((proc) => (
 					<ViewTransition
-						key={win.clientId}
+						key={`${proc.sidecarId}:${proc.pid}`}
 						enter="dock-icon-in"
 						exit="dock-icon-out"
 					>
 						<button
 							type="button"
 							className={s.iconButton}
-							style={{ background: win.color }}
-							onClick={() => onFocusWindow(win.clientId)}
-							onContextMenu={(e) => handleContextMenu(e, win.clientId)}
+							style={{ background: proc.color }}
+							onClick={() => onFocusWindow(proc.sidecarId, proc.pid)}
+							onContextMenu={(e) =>
+								handleContextMenu(e, proc.sidecarId, proc.pid)
+							}
 						>
-							<span className={s.tooltip}>{win.title}</span>
+							<span className={s.tooltip}>{proc.title}</span>
 							<span className={s.runningDot} />
-							{win.title.charAt(0).toUpperCase()}
+							{proc.title.charAt(0).toUpperCase()}
 						</button>
 					</ViewTransition>
 				))}
 
 				{/* Separator between apps and add button */}
-				{windows.length > 0 && <div className={s.separator} />}
+				{processes.length > 0 && <div className={s.separator} />}
 
 				{/* Add button */}
 				<div ref={spawnRef} style={{ position: "relative" }}>
@@ -201,7 +208,7 @@ export function Dock({
 							type="button"
 							className={s.contextMenuItem}
 							onClick={() => {
-								onClose(contextMenu.clientId);
+								onClose(contextMenu.sidecarId, contextMenu.pid);
 								setContextMenu(null);
 							}}
 						>

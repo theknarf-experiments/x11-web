@@ -365,6 +365,17 @@ async fn handle_frontend_ws(socket: WebSocket, state: AppState) {
         }
     }
 
+    // Request process lists from all connected sidecars so the frontend
+    // gets command names (e.g. "xterm", "firefox-esr") immediately.
+    {
+        let sidecars = state.sidecars.read().await;
+        for (sidecar_id, sidecar) in sidecars.iter() {
+            let _ = sidecar.tx.send(BackendToSidecar::ListProcesses {
+                request_id: format!("init-{}", sidecar_id),
+            });
+        }
+    }
+
     // Process incoming messages from frontend
     while let Some(Ok(msg)) = ws_rx.next().await {
         let Message::Text(text) = msg else { continue };

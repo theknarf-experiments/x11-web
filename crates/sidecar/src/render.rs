@@ -108,6 +108,10 @@ pub fn handle_render_request(state: &mut ClientState, data: &[u8], seq: u16) -> 
         }
         7 => handle_free_picture(state, data),
         8 => handle_composite(state, data),
+        10 => handle_trapezoids(state, data),
+        11 => handle_triangles(state, data),
+        12 => handle_tri_strip(state, data),
+        13 => handle_tri_fan(state, data),
         17 => handle_create_glyphset(state, data),
         19 => handle_free_glyphset(state, data),
         20 => handle_add_glyphs(state, data),
@@ -326,7 +330,7 @@ fn write_pictforminfo(
 }
 
 fn handle_create_picture(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
-    if data.len() < 24 {
+    if data.len() < 20 {
         return Vec::new();
     }
     let pid = read_u32(data, 4);
@@ -481,6 +485,428 @@ fn handle_composite(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
                 }
             }
             fb.mark_dirty(dst_x as i32, dst_y as i32, width as u32, height as u32);
+        }
+        // Notify DAMAGE subscribers for the destination drawable
+        if let Some(d) = dst_drawable {
+            state.notify_damage(d, dst_x, dst_y, width, height);
+        }
+    }
+
+    Vec::new()
+}
+
+/// Read a FIXED (16.16 fixed-point) value from data.
+fn read_fixed(data: &[u8], off: usize) -> f64 {
+    let raw = i32::from_le_bytes([data[off], data[off + 1], data[off + 2], data[off + 3]]);
+    raw as f64 / 65536.0
+}
+
+/// Handle XRender Trapezoids (minor opcode 10).
+///
+/// Request format:
+///   1  CARD8    op
+///   3           unused
+///   4  Picture  src
+///   4  Picture  dst
+///   4  PictFormat mask-format
+///   2  INT16    src-x
+///   2  INT16    src-y
+///   N  list of TRAPEZOID (40 bytes each)
+///
+/// Each TRAPEZOID:
+///   4  FIXED  top
+///   4  FIXED  bottom
+///   4  FIXED  left.p1.x
+///   4  FIXED  left.p1.y
+///   4  FIXED  left.p2.x
+///   4  FIXED  left.p2.y
+///   4  FIXED  right.p1.x
+///   4  FIXED  right.p1.y
+///   4  FIXED  right.p2.x
+///   4  FIXED  right.p2.y
+fn handle_trapezoids(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
+    if data.len() < 24 {
+        return Vec::new();
+    }
+
+    let op = data[4];
+    let src_pic = read_u32(data, 8);
+    let dst_pic = read_u32(data, 12);
+    let _mask_format = read_u32(data, 16);
+    let _src_x = read_i16(data, 20);
+    let _src_y = read_i16(data, 22);
+
+    // Resolve source color
+    let (sr, sg, sb, sa) = resolve_source_color(state, src_pic);
+
+    info!(
+        "Render Trapezoids: op={op} src={src_pic:#x} dst={dst_pic:#x} color=({sr},{sg},{sb},{sa})"
+    );
+
+    // Get destination drawable
+    let dst_drawable = state.render.pictures.get(&dst_pic).map(|p| p.drawable);
+    let dst_draw = match dst_drawable {
+        Some(d) => d,
+        None => return Vec::new(),
+    };
+
+    // Parse trapezoids (40 bytes each starting at offset 24)
+    let mut off = 24;
+    let mut traps = Vec::new();
+    while off + 40 <= data.len() {
+        let top = read_fixed(data, off);
+        let bottom = read_fixed(data, off + 4);
+        let left_x1 = read_fixed(data, off + 8);
+        let left_y1 = read_fixed(data, off + 12);
+        let left_x2 = read_fixed(data, off + 16);
+        let left_y2 = read_fixed(data, off + 20);
+        let right_x1 = read_fixed(data, off + 24);
+        let right_y1 = read_fixed(data, off + 28);
+        let right_x2 = read_fixed(data, off + 32);
+        let right_y2 = read_fixed(data, off + 36);
+        traps.push((top, bottom, left_x1, left_y1, left_x2, left_y2, right_x1, right_y1, right_x2, right_y2));
+        off += 40;
+    }
+
+    if !traps.is_empty() {
+        // Compute bounding box for damage notification
+        let mut min_y = f64::MAX;
+        let mut max_y = f64::MIN;
+        let mut min_x = f64::MAX;
+        let mut max_x = f64::MIN;
+        for &(top, bottom, lx1, _, lx2, _, rx1, _, rx2, _) in &traps {
+            min_y = min_y.min(top);
+            max_y = max_y.max(bottom);
+            min_x = min_x.min(lx1).min(lx2);
+            max_x = max_x.max(rx1).max(rx2);
+        }
+
+        if let Some(fb) = state.get_framebuffer_mut(dst_draw) {
+            let fb_w = fb.width() as i32;
+            let fb_h = fb.height() as i32;
+
+            for &(top, bottom, lx1, ly1, lx2, ly2, rx1, ry1, rx2, ry2) in &traps {
+                rasterize_trapezoid(
+                    fb, fb_w, fb_h, op, sr, sg, sb, sa,
+                    top, bottom, lx1, ly1, lx2, ly2, rx1, ry1, rx2, ry2,
+                );
+            }
+        }
+
+        // Notify DAMAGE subscribers that this drawable was modified
+        let dx = min_x.floor().max(0.0) as i16;
+        let dy = min_y.floor().max(0.0) as i16;
+        let dw = (max_x.ceil() - min_x.floor()).max(1.0) as u16;
+        let dh = (max_y.ceil() - min_y.floor()).max(1.0) as u16;
+        state.notify_damage(dst_draw, dx, dy, dw, dh);
+    }
+
+    Vec::new()
+}
+
+/// Rasterize a single trapezoid into the framebuffer using scanline conversion.
+fn rasterize_trapezoid(
+    fb: &mut crate::framebuffer::Framebuffer,
+    fb_w: i32,
+    fb_h: i32,
+    op: u8,
+    sr: u8,
+    sg: u8,
+    sb: u8,
+    sa: u8,
+    top: f64,
+    bottom: f64,
+    lx1: f64,
+    ly1: f64,
+    lx2: f64,
+    ly2: f64,
+    rx1: f64,
+    ry1: f64,
+    rx2: f64,
+    ry2: f64,
+) {
+    let y_start = top.ceil() as i32;
+    let y_end = bottom.floor() as i32;
+
+    if y_start > y_end {
+        return;
+    }
+
+    let fb_stride = fb.stride();
+    let fb_data = fb.data_mut();
+
+    // Precompute edge deltas
+    let left_dy = ly2 - ly1;
+    let right_dy = ry2 - ry1;
+
+    for y in y_start..=y_end {
+        if y < 0 || y >= fb_h {
+            continue;
+        }
+
+        let yf = y as f64 + 0.5; // sample at pixel center
+
+        // Interpolate left edge X at this Y
+        let left_x = if left_dy.abs() < 1e-9 {
+            lx1
+        } else {
+            lx1 + (lx2 - lx1) * (yf - ly1) / left_dy
+        };
+
+        // Interpolate right edge X at this Y
+        let right_x = if right_dy.abs() < 1e-9 {
+            rx1
+        } else {
+            rx1 + (rx2 - rx1) * (yf - ry1) / right_dy
+        };
+
+        let x_start = left_x.ceil() as i32;
+        let x_end = right_x.floor() as i32;
+
+        for x in x_start..=x_end {
+            if x < 0 || x >= fb_w {
+                continue;
+            }
+            let dst_off = y as usize * fb_stride + x as usize * 4;
+            if dst_off + 3 >= fb_data.len() {
+                continue;
+            }
+            match op {
+                0 => {
+                    // PictOpClear
+                    fb_data[dst_off] = 0;
+                    fb_data[dst_off + 1] = 0;
+                    fb_data[dst_off + 2] = 0;
+                    fb_data[dst_off + 3] = 0;
+                }
+                1 => {
+                    // PictOpSrc
+                    fb_data[dst_off] = sb;
+                    fb_data[dst_off + 1] = sg;
+                    fb_data[dst_off + 2] = sr;
+                    fb_data[dst_off + 3] = sa;
+                }
+                _ => {
+                    // PictOpOver (3) and default
+                    composite_over_pixel(
+                        &mut fb_data[dst_off..dst_off + 4],
+                        sb, sg, sr, sa,
+                    );
+                }
+            }
+        }
+    }
+
+    // Mark entire affected region dirty
+    let min_y = top.floor().max(0.0) as i32;
+    let max_y = (bottom.ceil() as i32).min(fb_h);
+    if min_y < max_y {
+        fb.mark_dirty(0, min_y, fb_w as u32, (max_y - min_y) as u32);
+    }
+}
+
+/// Handle XRender Triangles (minor opcode 11).
+fn handle_triangles(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
+    if data.len() < 24 {
+        return Vec::new();
+    }
+
+    let op = data[4];
+    let src_pic = read_u32(data, 8);
+    let dst_pic = read_u32(data, 12);
+    let _mask_format = read_u32(data, 16);
+    let _src_x = read_i16(data, 20);
+    let _src_y = read_i16(data, 22);
+
+    info!("Render Triangles: op={op} src={src_pic:#x} dst={dst_pic:#x}");
+
+    let (sr, sg, sb, sa) = resolve_source_color(state, src_pic);
+
+    let dst_drawable = state.render.pictures.get(&dst_pic).map(|p| p.drawable);
+    let dst_draw = match dst_drawable {
+        Some(d) => d,
+        None => return Vec::new(),
+    };
+
+    // Each triangle = 3 POINTFIX (each 8 bytes = x FIXED + y FIXED) = 24 bytes
+    let mut off = 24;
+    let mut triangles = Vec::new();
+    while off + 24 <= data.len() {
+        let x1 = read_fixed(data, off);
+        let y1 = read_fixed(data, off + 4);
+        let x2 = read_fixed(data, off + 8);
+        let y2 = read_fixed(data, off + 12);
+        let x3 = read_fixed(data, off + 16);
+        let y3 = read_fixed(data, off + 20);
+        triangles.push((x1, y1, x2, y2, x3, y3));
+        off += 24;
+    }
+
+    if let Some(fb) = state.get_framebuffer_mut(dst_draw) {
+        let fb_w = fb.width() as i32;
+        let fb_h = fb.height() as i32;
+
+        for &(x1, y1, x2, y2, x3, y3) in &triangles {
+            rasterize_triangle(fb, fb_w, fb_h, op, sr, sg, sb, sa, x1, y1, x2, y2, x3, y3);
+        }
+    }
+
+    Vec::new()
+}
+
+/// Rasterize a single triangle using scanline conversion.
+fn rasterize_triangle(
+    fb: &mut crate::framebuffer::Framebuffer,
+    fb_w: i32,
+    fb_h: i32,
+    op: u8,
+    sr: u8,
+    sg: u8,
+    sb: u8,
+    sa: u8,
+    x1: f64,
+    y1: f64,
+    x2: f64,
+    y2: f64,
+    x3: f64,
+    y3: f64,
+) {
+    // Convert triangle to trapezoids by sorting vertices by Y
+    let mut verts = [(x1, y1), (x2, y2), (x3, y3)];
+    verts.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal));
+    let (vx0, vy0) = verts[0];
+    let (vx1, vy1) = verts[1];
+    let (vx2, vy2) = verts[2];
+
+    // Top half: vy0 to vy1
+    if (vy1 - vy0).abs() > 1e-9 {
+        // Long edge from v0 to v2, short edge from v0 to v1
+        let mid_x = vx0 + (vx2 - vx0) * (vy1 - vy0) / (vy2 - vy0);
+        let (lx, rx) = if mid_x < vx1 { (mid_x, vx1) } else { (vx1, mid_x) };
+        let (llx, rrx) = if mid_x < vx1 {
+            // Left edge is v0->v2 segment, right edge is v0->v1
+            ((vx0, vy0, vx2, vy2), (vx0, vy0, vx1, vy1))
+        } else {
+            ((vx0, vy0, vx1, vy1), (vx0, vy0, vx2, vy2))
+        };
+        rasterize_trapezoid(
+            fb, fb_w, fb_h, op, sr, sg, sb, sa,
+            vy0, vy1, llx.0, llx.1, llx.2, llx.3, rrx.0, rrx.1, rrx.2, rrx.3,
+        );
+    }
+
+    // Bottom half: vy1 to vy2
+    if (vy2 - vy1).abs() > 1e-9 {
+        let mid_x = vx0 + (vx2 - vx0) * (vy1 - vy0) / (vy2 - vy0);
+        let (llx, rrx) = if mid_x < vx1 {
+            ((vx0, vy0, vx2, vy2), (vx1, vy1, vx2, vy2))
+        } else {
+            ((vx1, vy1, vx2, vy2), (vx0, vy0, vx2, vy2))
+        };
+        rasterize_trapezoid(
+            fb, fb_w, fb_h, op, sr, sg, sb, sa,
+            vy1, vy2, llx.0, llx.1, llx.2, llx.3, rrx.0, rrx.1, rrx.2, rrx.3,
+        );
+    }
+}
+
+/// Handle XRender TriStrip (minor opcode 12).
+fn handle_tri_strip(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
+    if data.len() < 24 {
+        return Vec::new();
+    }
+
+    let op = data[4];
+    let src_pic = read_u32(data, 8);
+    let dst_pic = read_u32(data, 12);
+    let _mask_format = read_u32(data, 16);
+    let _src_x = read_i16(data, 20);
+    let _src_y = read_i16(data, 22);
+
+    info!("Render TriStrip: op={op} src={src_pic:#x} dst={dst_pic:#x}");
+
+    let (sr, sg, sb, sa) = resolve_source_color(state, src_pic);
+
+    let dst_drawable = state.render.pictures.get(&dst_pic).map(|p| p.drawable);
+    let dst_draw = match dst_drawable {
+        Some(d) => d,
+        None => return Vec::new(),
+    };
+
+    // Points: 8 bytes each (FIXED x + FIXED y)
+    let mut points = Vec::new();
+    let mut off = 24;
+    while off + 8 <= data.len() {
+        let x = read_fixed(data, off);
+        let y = read_fixed(data, off + 4);
+        points.push((x, y));
+        off += 8;
+    }
+
+    if points.len() < 3 {
+        return Vec::new();
+    }
+
+    if let Some(fb) = state.get_framebuffer_mut(dst_draw) {
+        let fb_w = fb.width() as i32;
+        let fb_h = fb.height() as i32;
+
+        for i in 0..points.len() - 2 {
+            let (x1, y1) = points[i];
+            let (x2, y2) = points[i + 1];
+            let (x3, y3) = points[i + 2];
+            rasterize_triangle(fb, fb_w, fb_h, op, sr, sg, sb, sa, x1, y1, x2, y2, x3, y3);
+        }
+    }
+
+    Vec::new()
+}
+
+/// Handle XRender TriFan (minor opcode 13).
+fn handle_tri_fan(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
+    if data.len() < 24 {
+        return Vec::new();
+    }
+
+    let op = data[4];
+    let src_pic = read_u32(data, 8);
+    let dst_pic = read_u32(data, 12);
+    let _mask_format = read_u32(data, 16);
+    let _src_x = read_i16(data, 20);
+    let _src_y = read_i16(data, 22);
+
+    info!("Render TriFan: op={op} src={src_pic:#x} dst={dst_pic:#x}");
+
+    let (sr, sg, sb, sa) = resolve_source_color(state, src_pic);
+
+    let dst_drawable = state.render.pictures.get(&dst_pic).map(|p| p.drawable);
+    let dst_draw = match dst_drawable {
+        Some(d) => d,
+        None => return Vec::new(),
+    };
+
+    let mut points = Vec::new();
+    let mut off = 24;
+    while off + 8 <= data.len() {
+        let x = read_fixed(data, off);
+        let y = read_fixed(data, off + 4);
+        points.push((x, y));
+        off += 8;
+    }
+
+    if points.len() < 3 {
+        return Vec::new();
+    }
+
+    if let Some(fb) = state.get_framebuffer_mut(dst_draw) {
+        let fb_w = fb.width() as i32;
+        let fb_h = fb.height() as i32;
+
+        let (cx, cy) = points[0];
+        for i in 1..points.len() - 1 {
+            let (x2, y2) = points[i];
+            let (x3, y3) = points[i + 1];
+            rasterize_triangle(fb, fb_w, fb_h, op, sr, sg, sb, sa, cx, cy, x2, y2, x3, y3);
         }
     }
 
@@ -1063,6 +1489,11 @@ fn handle_fill_rectangles(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
             }
             fb.mark_dirty(*rx as i32, *ry as i32, *rw as u32, *rh as u32);
         }
+    }
+
+    // Notify DAMAGE subscribers
+    for &(x, y, w, h) in &rects {
+        state.notify_damage(dst_draw, x, y, w, h);
     }
 
     Vec::new()

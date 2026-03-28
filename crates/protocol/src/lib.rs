@@ -227,11 +227,19 @@ pub enum DisplayUpdate {
         y: i16,
         width: u16,
         height: u16,
+        /// True if this is a top-level, non-override-redirect, InputOutput window.
+        /// Only these should be shown as WindowFrames in the frontend.
+        #[serde(default)]
+        is_top_level: bool,
     },
     /// A window was destroyed.
     WindowDestroyed { window_id: u32 },
     /// A window was mapped (made visible).
-    WindowMapped { window_id: u32 },
+    WindowMapped {
+        window_id: u32,
+        #[serde(default)]
+        is_top_level: bool,
+    },
     /// A window was unmapped (hidden).
     WindowUnmapped { window_id: u32 },
     /// A window was moved/resized.

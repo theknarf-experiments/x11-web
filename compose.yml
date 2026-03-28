@@ -12,6 +12,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.sidecar
+    hostname: x11web
     depends_on:
       - backend
     environment:
