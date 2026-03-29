@@ -1386,13 +1386,8 @@ fn handle_request(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
     let major_opcode = data[0];
     let _minor = data[1];
     let seq = state.sequence;
-    if major_opcode == 8 && data.len() >= 8 {
-        let wid = u32::from_le_bytes([data[4], data[5], data[6], data[7]]);
-        info!("REQUEST MapWindow wid={wid:#x} seq={seq}");
-    }
-    if major_opcode >= 128 {
-        debug!("ext op={major_opcode} minor={_minor} seq={seq}");
-    }
+    // Log all requests for debugging
+
 
 
     match major_opcode {
@@ -3707,7 +3702,7 @@ fn keycode_to_keysym(keycode: u8) -> (u32, u32) {
 
 fn handle_list_extensions(seq: u16) -> Vec<u8> {
     // Return the list of extensions we support
-    let extensions: &[&str] = &["BIG-REQUESTS", "MIT-SHM", "RENDER", "XFIXES", "SHAPE", "SYNC", "Generic Event Extension", "XC-MISC", "Composite", "DAMAGE", "Present"];
+    let extensions: &[&str] = &["BIG-REQUESTS", "MIT-SHM", "RENDER", "XFIXES", "SHAPE", "SYNC", "Generic Event Extension", "XC-MISC", "Composite", "DAMAGE", "Present", "RANDR"];
 
     // Build the names data: each is a length-prefixed string (1 byte len + name)
     let mut names_data = Vec::new();
@@ -3799,8 +3794,12 @@ fn handle_query_extension(_state: &mut ClientState, data: &[u8], seq: u16) -> Ve
             reply[10] = 91;
             reply[11] = 152;
         }
-        // RANDR disabled — our RANDR replies are incomplete and crash Firefox.
-        // XKEYBOARD disabled — our stub causes Firefox to take a worse init path.
+        "RANDR" => {
+            reply[8] = 1; // present = true
+            reply[9] = 140; // major_opcode
+            reply[10] = 0; // first_event
+            reply[11] = 0; // first_error
+        }
         "XKEYBOARD" => {
             // present = false
         }
@@ -3873,16 +3872,17 @@ fn handle_xfixes_request(_state: &mut ClientState, data: &[u8], seq: u16) -> Vec
 
 fn handle_randr_request(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
     let minor = data[1];
-    debug!("RANDR minor opcode: {minor}");
+    debug!("RANDR minor={minor}");
 
     match minor {
         0 => {
-            // QueryVersion: return version 1.5
+            // QueryVersion: return version 1.2
+            // (1.5 requires GetMonitors which is complex; 1.2 uses GetScreenResources)
             let mut reply = [0u8; 32];
             reply[0] = 1; // Reply
             reply[2..4].copy_from_slice(&seq.to_le_bytes());
             reply[8..12].copy_from_slice(&1u32.to_le_bytes()); // major version
-            reply[12..16].copy_from_slice(&5u32.to_le_bytes()); // minor version
+            reply[12..16].copy_from_slice(&2u32.to_le_bytes()); // minor version
             reply.to_vec()
         }
         2 => {
@@ -3944,28 +3944,148 @@ fn handle_randr_request(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u
         }
         8 | 19 => {
             // GetScreenResources / GetScreenResourcesCurrent
-            // Minimal reply with 0 CRTCs, 0 outputs, 0 modes
-            let mut reply = [0u8; 32];
-            reply[0] = 1; // Reply
-            reply[2..4].copy_from_slice(&seq.to_le_bytes());
-            reply[4..8].copy_from_slice(&0u32.to_le_bytes()); // length (no extra data)
-            // timestamp
-            reply[8..12].copy_from_slice(&0u32.to_le_bytes());
-            // config_timestamp
-            reply[12..16].copy_from_slice(&0u32.to_le_bytes());
-            reply[16..18].copy_from_slice(&0u16.to_le_bytes()); // num_crtcs
-            reply[18..20].copy_from_slice(&0u16.to_le_bytes()); // num_outputs
-            reply[20..22].copy_from_slice(&0u16.to_le_bytes()); // num_modes
-            reply[22..24].copy_from_slice(&0u16.to_le_bytes()); // names_len
-            reply.to_vec()
+            // Use x11rb to build a correct reply via raw bytes.
+            // 1 CRTC (id=100), 1 output (id=200), 1 mode (id=300)
+            let crtc_id: u32 = 100;
+            let output_id: u32 = 200;
+            let mode_id: u32 = 300;
+            let mode_name = b"1024x768";
+            let mode_name_pad = (4 - (mode_name.len() % 4)) % 4;
+
+            // Variable data after the 32-byte header:
+            //   crtc_ids: num_crtcs * 4 bytes
+            //   output_ids: num_outputs * 4 bytes
+            //   mode_infos: num_modes * 32 bytes
+            //   mode_names: names_len bytes + padding
+            let var_len = 4 + 4 + 32 + mode_name.len() + mode_name_pad;
+            let length_field = var_len / 4; // extra 4-byte units beyond 32-byte header
+            let total = 32 + var_len;
+
+            let mut r = vec![0u8; total];
+            r[0] = 1; // Reply
+            r[2..4].copy_from_slice(&seq.to_le_bytes());
+            r[4..8].copy_from_slice(&(length_field as u32).to_le_bytes());
+            r[8..12].copy_from_slice(&1u32.to_le_bytes()); // timestamp
+            r[12..16].copy_from_slice(&1u32.to_le_bytes()); // config_timestamp
+            r[16..18].copy_from_slice(&1u16.to_le_bytes()); // num_crtcs
+            r[18..20].copy_from_slice(&1u16.to_le_bytes()); // num_outputs
+            r[20..22].copy_from_slice(&1u16.to_le_bytes()); // num_modes
+            r[22..24].copy_from_slice(&(mode_name.len() as u16).to_le_bytes()); // names_len
+
+            let mut off = 32;
+            // CRTC IDs array
+            r[off..off + 4].copy_from_slice(&crtc_id.to_le_bytes());
+            off += 4;
+            // Output IDs array
+            r[off..off + 4].copy_from_slice(&output_id.to_le_bytes());
+            off += 4;
+            // ModeInfo struct (32 bytes)
+            r[off..off + 4].copy_from_slice(&mode_id.to_le_bytes());       // id
+            r[off + 4..off + 6].copy_from_slice(&SCREEN_WIDTH.to_le_bytes());  // width
+            r[off + 6..off + 8].copy_from_slice(&SCREEN_HEIGHT.to_le_bytes()); // height
+            r[off + 8..off + 12].copy_from_slice(&60000u32.to_le_bytes());     // dotClock
+            r[off + 12..off + 14].copy_from_slice(&(SCREEN_WIDTH + 40).to_le_bytes()); // hSyncStart
+            r[off + 14..off + 16].copy_from_slice(&(SCREEN_WIDTH + 80).to_le_bytes()); // hSyncEnd
+            r[off + 16..off + 18].copy_from_slice(&(SCREEN_WIDTH + 160).to_le_bytes()); // hTotal
+            // hSkew at off+18 = 0
+            r[off + 20..off + 22].copy_from_slice(&(SCREEN_HEIGHT + 3).to_le_bytes()); // vSyncStart
+            r[off + 22..off + 24].copy_from_slice(&(SCREEN_HEIGHT + 6).to_le_bytes()); // vSyncEnd
+            r[off + 24..off + 26].copy_from_slice(&(SCREEN_HEIGHT + 30).to_le_bytes()); // vTotal
+            r[off + 26..off + 28].copy_from_slice(&(mode_name.len() as u16).to_le_bytes()); // nameLength
+            // modeFlags at off+28..off+32 = 0
+            off += 32;
+            // Mode names
+            r[off..off + mode_name.len()].copy_from_slice(mode_name);
+
+            r
         }
         9 => {
-            // GetOutputInfo: return error (BadOutput)
-            build_error(11, seq, 0, 140, 9) // BadAccess as placeholder
+            // GetOutputInfo (RandR 1.2)
+            // Reply: 32-byte header + inline data
+            // Bytes 8-35 are the output info fields (part of the "extra" length)
+            let output_name = b"default";
+            let crtc_id: u32 = 100;
+            let mode_id: u32 = 300;
+            let num_crtcs: u16 = 1;
+            let num_modes: u16 = 1;
+            let num_clones: u16 = 0;
+
+            // Variable data: crtc_ids + mode_ids + clone_ids + name + pad
+            let name_pad = (4 - (output_name.len() % 4)) % 4;
+            let var_data = (num_crtcs as usize * 4) + (num_modes as usize * 4) + (num_clones as usize * 4) + output_name.len() + name_pad;
+            // The reply length field = (total_reply_bytes - 32) / 4
+            // Total bytes = 32 (header) + 4 (timestamp) + 4 (crtc) + 4 (mm_width) + 4 (mm_height)
+            //             + 1 (connection) + 1 (subpixel) + 2 (num_crtcs) + 2 (num_modes)
+            //             + 2 (num_preferred) + 2 (num_clones) + 2 (name_len) + var_data
+            // = 32 + 24 + var_data (but 24 bytes of inline header are counted as extra)
+            let inline_header = 24; // bytes 8-31 in the reply
+            let length = (inline_header + var_data) / 4;
+            let total = 32 + inline_header + var_data;
+            let mut reply = vec![0u8; total];
+
+            reply[0] = 1; // Reply
+            reply[1] = 0; // status: Success
+            reply[2..4].copy_from_slice(&seq.to_le_bytes());
+            reply[4..8].copy_from_slice(&(length as u32).to_le_bytes());
+            reply[8..12].copy_from_slice(&1u32.to_le_bytes()); // timestamp
+            reply[12..16].copy_from_slice(&crtc_id.to_le_bytes()); // crtc
+            reply[16..20].copy_from_slice(&270u32.to_le_bytes()); // mm_width
+            reply[20..24].copy_from_slice(&203u32.to_le_bytes()); // mm_height
+            reply[24] = 0; // connection: Connected
+            reply[25] = 0; // subpixel_order: Unknown
+            reply[26..28].copy_from_slice(&num_crtcs.to_le_bytes());
+            reply[28..30].copy_from_slice(&num_modes.to_le_bytes());
+            reply[30..32].copy_from_slice(&1u16.to_le_bytes()); // num_preferred
+            reply[32..34].copy_from_slice(&num_clones.to_le_bytes());
+            reply[34..36].copy_from_slice(&(output_name.len() as u16).to_le_bytes());
+
+            let mut off = 36;
+            // CRTC IDs
+            reply[off..off + 4].copy_from_slice(&crtc_id.to_le_bytes());
+            off += 4;
+            // Mode IDs
+            reply[off..off + 4].copy_from_slice(&mode_id.to_le_bytes());
+            off += 4;
+            // Clone IDs (none)
+            // Output name
+            reply[off..off + output_name.len()].copy_from_slice(output_name);
+
+            reply
         }
         14 => {
-            // GetCrtcInfo: return error
-            build_error(11, seq, 0, 140, 14)
+            // GetCrtcInfo (RandR 1.2)
+            // Header fields at bytes 8-31 count as extra data
+            let output_id: u32 = 200;
+            let mode_id: u32 = 300;
+            let num_outputs: u16 = 1;
+            let num_possible: u16 = 1;
+            let var_data = (num_outputs as usize + num_possible as usize) * 4;
+            let inline_header = 24; // bytes 8-31
+            let length = (inline_header + var_data) / 4;
+            let total = 32 + inline_header + var_data;
+            let mut reply = vec![0u8; total];
+
+            reply[0] = 1; // Reply
+            reply[1] = 0; // status: Success
+            reply[2..4].copy_from_slice(&seq.to_le_bytes());
+            reply[4..8].copy_from_slice(&(length as u32).to_le_bytes());
+            reply[8..12].copy_from_slice(&1u32.to_le_bytes()); // timestamp
+            reply[12..14].copy_from_slice(&0i16.to_le_bytes()); // x
+            reply[14..16].copy_from_slice(&0i16.to_le_bytes()); // y
+            reply[16..18].copy_from_slice(&SCREEN_WIDTH.to_le_bytes()); // width
+            reply[18..20].copy_from_slice(&SCREEN_HEIGHT.to_le_bytes()); // height
+            reply[20..24].copy_from_slice(&mode_id.to_le_bytes()); // mode
+            reply[24..26].copy_from_slice(&1u16.to_le_bytes()); // rotation: Rotate_0
+            reply[26..28].copy_from_slice(&1u16.to_le_bytes()); // rotations: Rotate_0
+            reply[28..30].copy_from_slice(&num_outputs.to_le_bytes());
+            reply[30..32].copy_from_slice(&num_possible.to_le_bytes());
+
+            let mut off = 32;
+            reply[off..off + 4].copy_from_slice(&output_id.to_le_bytes());
+            off += 4;
+            reply[off..off + 4].copy_from_slice(&output_id.to_le_bytes());
+
+            reply
         }
         15 => {
             // SetCrtcConfig: reply with success
@@ -3977,16 +4097,16 @@ fn handle_randr_request(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u
             reply[8..12].copy_from_slice(&0u32.to_le_bytes());
             reply.to_vec()
         }
-        20 => {
-            // SelectInput: ignore
+        4 => {
+            // SelectInput: subscribe to screen change events (no-op)
             Vec::new()
         }
         41 => {
-            // GetOutputPrimary: reply with output=0
+            // GetOutputPrimary: return our output
             let mut reply = [0u8; 32];
             reply[0] = 1; // Reply
             reply[2..4].copy_from_slice(&seq.to_le_bytes());
-            reply[8..12].copy_from_slice(&0u32.to_le_bytes()); // output = 0
+            reply[8..12].copy_from_slice(&1u32.to_le_bytes()); // output = 1
             reply.to_vec()
         }
         46 => {
@@ -4006,8 +4126,60 @@ fn handle_randr_request(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u
             reply[2..4].copy_from_slice(&seq.to_le_bytes());
             reply.to_vec()
         }
+        25 => {
+            // GetMonitors (RandR 1.5)
+            // Return 1 monitor with 1 output
+            let monitor_name = state.intern_atom("default", false);
+            let output_id: u32 = 200;
+
+            // MonitorInfo: name(4) + primary(1) + automatic(1) + nOutput(2) +
+            //              x(2) + y(2) + width(2) + height(2) + width_mm(4) + height_mm(4) +
+            //              outputs(4)
+            let monitor_size = 4 + 1 + 1 + 2 + 2 + 2 + 2 + 2 + 4 + 4 + 4; // = 28
+            let var_len = monitor_size;
+            let pad = (4 - (var_len % 4)) % 4;
+            let length_field = (var_len + pad) / 4;
+            let total = 32 + var_len + pad;
+
+            let mut r = vec![0u8; total];
+            r[0] = 1; // Reply
+            r[2..4].copy_from_slice(&seq.to_le_bytes());
+            r[4..8].copy_from_slice(&(length_field as u32).to_le_bytes());
+            r[8..12].copy_from_slice(&1u32.to_le_bytes()); // timestamp
+            r[12..16].copy_from_slice(&1u32.to_le_bytes()); // nMonitors
+            r[16..20].copy_from_slice(&1u32.to_le_bytes()); // nOutputs
+
+            let mut off = 32;
+            r[off..off + 4].copy_from_slice(&monitor_name.to_le_bytes()); // name
+            off += 4;
+            r[off] = 1; // primary
+            off += 1;
+            r[off] = 1; // automatic
+            off += 1;
+            r[off..off + 2].copy_from_slice(&1u16.to_le_bytes()); // nOutput
+            off += 2;
+            r[off..off + 2].copy_from_slice(&0i16.to_le_bytes()); // x
+            off += 2;
+            r[off..off + 2].copy_from_slice(&0i16.to_le_bytes()); // y
+            off += 2;
+            r[off..off + 2].copy_from_slice(&SCREEN_WIDTH.to_le_bytes()); // width
+            off += 2;
+            r[off..off + 2].copy_from_slice(&SCREEN_HEIGHT.to_le_bytes()); // height
+            off += 2;
+            r[off..off + 4].copy_from_slice(&270u32.to_le_bytes()); // width_mm
+            off += 4;
+            r[off..off + 4].copy_from_slice(&203u32.to_le_bytes()); // height_mm
+            off += 4;
+            r[off..off + 4].copy_from_slice(&output_id.to_le_bytes()); // output
+
+            r
+        }
+        42 => {
+            // SetMonitor: no-op
+            Vec::new()
+        }
         _ => {
-            debug!("Unhandled RANDR minor opcode: {minor}");
+            info!("Unhandled RANDR minor opcode: {minor}");
             Vec::new()
         }
     }
