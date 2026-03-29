@@ -17,7 +17,6 @@ pub struct RenderState {
 
 struct PictureState {
     drawable: u32,
-    _format_id: u32,
     repeat: u32,
 }
 
@@ -360,7 +359,6 @@ fn handle_create_picture(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
         pid,
         PictureState {
             drawable,
-            _format_id: format_id,
             repeat,
         },
     );

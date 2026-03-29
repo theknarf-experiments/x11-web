@@ -311,8 +311,7 @@ async fn handle_command(
             window_router.send_input(&window_id, event);
         }
         BackendToSidecar::RequestRedraw { window_id } => {
-            // TODO: implement redraw via router
-            let _ = window_id;
+            window_router.send_resize(&window_id, 0, 0);
         }
         BackendToSidecar::ResizeWindow {
             window_id,

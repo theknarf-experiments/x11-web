@@ -213,7 +213,7 @@ impl ClientState {
     /// Map a color value for the drawable's depth. In depth-1 pixmaps,
     /// color 0 = black and any non-zero = white (0xFFFFFF).
     pub(crate) fn map_color_for_drawable(&self, drawable: u32, color: u32) -> u32 {
-        let depth = self.pixmaps.get(&drawable).map(|p| p._depth).unwrap_or(24);
+        let depth = self.pixmaps.get(&drawable).map(|p| p.depth).unwrap_or(24);
         if depth <= 1 {
             if color != 0 { 0xFFFFFF } else { 0x000000 }
         } else {
@@ -295,7 +295,7 @@ impl ClientState {
                 Some(b) => b,
                 None => return,
             };
-            (backing.shmseg, backing.offset, pix._width as usize, pix._height as usize)
+            (backing.shmseg, backing.offset, pix.width as usize, pix.height as usize)
         };
 
         let seg = match self.shm_segments.get(&shmseg) {
@@ -546,10 +546,9 @@ pub(crate) struct WindowState {
 }
 
 pub(crate) struct PixmapState {
-    pub(crate) _id: u32,
-    pub(crate) _width: u16,
-    pub(crate) _height: u16,
-    pub(crate) _depth: u8,
+    pub(crate) width: u16,
+    pub(crate) height: u16,
+    pub(crate) depth: u8,
     pub(crate) framebuffer: Framebuffer,
     /// If this pixmap is a NameWindowPixmap alias, this holds the window ID.
     /// Drawing to this pixmap should actually draw to the window's framebuffer.
@@ -2448,8 +2447,8 @@ fn handle_get_geometry(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8
         reply[1] = 24; // depth
         reply[2..4].copy_from_slice(&seq.to_le_bytes());
         reply[8..12].copy_from_slice(&state.root_window.to_le_bytes());
-        reply[16..18].copy_from_slice(&pixmap._width.to_le_bytes());
-        reply[18..20].copy_from_slice(&pixmap._height.to_le_bytes());
+        reply[16..18].copy_from_slice(&pixmap.width.to_le_bytes());
+        reply[18..20].copy_from_slice(&pixmap.height.to_le_bytes());
         return reply.to_vec();
     }
 
@@ -2973,10 +2972,9 @@ fn handle_create_pixmap(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
     state.pixmaps.insert(
         pid,
         PixmapState {
-            _id: pid,
-            _width: width,
-            _height: height,
-            _depth: depth,
+            width,
+            height,
+            depth,
             framebuffer: Framebuffer::new(width as u32, height as u32),
             alias_window: None,
             shm_backing: None,
@@ -3044,7 +3042,7 @@ fn handle_copy_area(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
     state.sync_shm_pixmap(src);
 
     // Check if source is a 1-bit depth pixmap (used for clip masks)
-    let src_depth = state.pixmaps.get(&src).map(|p| p._depth).unwrap_or(24);
+    let src_depth = state.pixmaps.get(&src).map(|p| p.depth).unwrap_or(24);
 
     if src == dst {
         if let Some(fb) = state.get_framebuffer_mut(src) {
@@ -4475,10 +4473,9 @@ fn handle_shm_request(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8>
             state.pixmaps.insert(
                 pid,
                 PixmapState {
-                    _id: pid,
-                    _width: width,
-                    _height: height,
-                    _depth: depth,
+                    width,
+                    height,
+                    depth,
                     framebuffer: Framebuffer::new(width as u32, height as u32),
                     alias_window: None,
                     shm_backing: Some(ShmPixmapBacking {
@@ -4729,10 +4726,9 @@ fn handle_x_composite_request(state: &mut ClientState, data: &[u8], seq: u16) ->
                     state.pixmaps.insert(
                         pixmap,
                         PixmapState {
-                            _id: pixmap,
-                            _width: w,
-                            _height: h,
-                            _depth: 24,
+                            width: w,
+                            height: h,
+                            depth: 24,
                             framebuffer: crate::framebuffer::Framebuffer::new(0, 0),
                             alias_window: Some(window),
                             shm_backing: None,
@@ -5025,7 +5021,7 @@ fn handle_present_request(state: &mut ClientState, data: &[u8], seq: u16) -> Vec
                         pix.framebuffer.width() as u16,
                         pix.framebuffer.height() as u16,
                         pix.framebuffer.data().to_vec(),
-                        pix._depth,
+                        pix.depth,
                     ))
                 } else {
                     debug!("PresentPixmap: source pixmap {:#x} not found", pixmap);

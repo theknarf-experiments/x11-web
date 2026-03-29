@@ -276,6 +276,56 @@ test.describe
 			});
 		});
 
+		test("closing one app does not affect other apps", async ({ page }) => {
+			await page.goto(`http://localhost:${frontendPort}`);
+			await waitForDock(page);
+
+			const windowFrames = page.locator('[data-testid="window-frame"]');
+
+			// Spawn two different apps
+			await spawnApp(page, "-geometry 200x150");
+			await page.waitForTimeout(3000);
+
+			await spawnApp(page, "-fn fixed -geometry 40x10", "xterm");
+			await page.waitForTimeout(5000);
+
+			// Both should be visible
+			await expect(windowFrames).toHaveCount(2, { timeout: 5_000 });
+
+			// Close the first window (xeyes)
+			await windowFrames.first().locator('[data-testid="window-close"]').click();
+
+			// Should have 1 window remaining
+			await expect(windowFrames).toHaveCount(1, { timeout: 10_000 });
+
+			// The remaining window should still have rendered content
+			const canvas = windowFrames.first().locator('[data-testid="x11-canvas"]');
+			expect(await hasRenderedContent(canvas)).toBe(true);
+		});
+
+		test("multiple instances of same app get separate dock entries", async ({
+			page,
+		}) => {
+			await page.goto(`http://localhost:${frontendPort}`);
+			await waitForDock(page);
+
+			// Spawn three xeyes
+			await spawnApp(page, "-geometry 100x80");
+			await spawnApp(page, "-geometry 100x80");
+			await spawnApp(page, "-geometry 100x80");
+			await page.waitForTimeout(2000);
+
+			// Dock should have 3 entries (one per process)
+			const dockButtons = page.locator(
+				'[data-testid="dock"] button:not([data-testid="spawn-button"])',
+			);
+			await expect(dockButtons).toHaveCount(3, { timeout: 5_000 });
+
+			// Window frames should have 3 entries
+			const windowFrames = page.locator('[data-testid="window-frame"]');
+			await expect(windowFrames).toHaveCount(3, { timeout: 5_000 });
+		});
+
 		test("resizing a window changes the canvas dimensions", async ({
 			page,
 		}) => {
@@ -734,9 +784,14 @@ test.describe
 			).toBeEnabled({ timeout: 30_000 });
 			await page.locator("button", { hasText: "Spawn" }).click();
 
-			// Wait for Firefox to start. The afterEach health check verifies
-			// the sidecar survived.
+			// Wait for Firefox to start and create windows
 			await page.waitForTimeout(15000);
+
+			// At least one window frame should have been created
+			const windowFrames = page.locator('[data-testid="window-frame"]');
+			expect(await windowFrames.count()).toBeGreaterThan(0);
+
+			// The afterEach health check verifies the sidecar survived
 		});
 	});
 
