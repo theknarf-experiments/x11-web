@@ -1311,8 +1311,12 @@ async fn handle_client(
             }
             result = input_rx.recv() => {
                 if let Ok((window_uuid, input)) = result {
-                    // Check if this client owns the target window
-                    if state.x11_to_uuid.values().any(|u| u == &window_uuid) {
+                    // Look up the X11 window ID for this UUID and set focus
+                    let x11_wid = state.x11_to_uuid.iter()
+                        .find(|(_, uuid)| uuid.as_str() == window_uuid)
+                        .map(|(&wid, _)| wid);
+                    if let Some(wid) = x11_wid {
+                        state.focus_window = wid;
                         let event_bytes = build_x11_input_event(&mut state, &input);
                         if !event_bytes.is_empty() {
                             stream.write_all(&event_bytes).await?;
