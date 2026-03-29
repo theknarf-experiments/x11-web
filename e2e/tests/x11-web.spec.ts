@@ -772,7 +772,9 @@ test.describe
 			});
 		});
 
-		test("firefox starts without crashing the sidecar", async ({ page }) => {
+		test("firefox shows exactly one window and renders content", async ({
+			page,
+		}) => {
 			await page.goto(`http://localhost:${frontendPort}`);
 			await waitForDock(page);
 
@@ -784,14 +786,47 @@ test.describe
 			).toBeEnabled({ timeout: 30_000 });
 			await page.locator("button", { hasText: "Spawn" }).click();
 
-			// Wait for Firefox to start and create windows
-			await page.waitForTimeout(15000);
+			// Wait for Firefox to start
+			await page.waitForTimeout(20000);
 
-			// At least one window frame should have been created
+			// Firefox should show exactly 1 window frame (not 3 or 4)
 			const windowFrames = page.locator('[data-testid="window-frame"]');
-			expect(await windowFrames.count()).toBeGreaterThan(0);
+			expect(await windowFrames.count()).toBe(1);
 
-			// The afterEach health check verifies the sidecar survived
+			// That window should have rendered content
+			const canvas = windowFrames
+				.first()
+				.locator('[data-testid="x11-canvas"]');
+			expect(await hasRenderedContent(canvas)).toBe(true);
+		});
+
+		test("vim can be quit with :q", async ({ page }) => {
+			await page.goto(`http://localhost:${frontendPort}`);
+			await waitForDock(page);
+
+			const win = await spawnApp(page, "-fn fixed -geometry 60x15", "xterm");
+			const canvas = win.locator('[data-testid="x11-canvas"]');
+			await expect(canvas).toBeVisible();
+			await page.waitForTimeout(5000);
+
+			// Open vim
+			await canvas.click();
+			await page.waitForTimeout(500);
+			await page.keyboard.type("vim", { delay: 50 });
+			await page.keyboard.press("Enter");
+			await page.waitForTimeout(3000);
+
+			// Quit vim with Escape + :q + Enter
+			await page.keyboard.press("Escape");
+			await page.waitForTimeout(500);
+			await page.keyboard.type(":q", { delay: 50 });
+			await page.keyboard.press("Enter");
+			await page.waitForTimeout(2000);
+
+			// Should be back at the shell prompt, not stuck in vim
+			await expect(canvas).toHaveScreenshot("vim-quit.png", {
+				maxDiffPixelRatio: 0.05,
+			});
 		});
 	});
 
