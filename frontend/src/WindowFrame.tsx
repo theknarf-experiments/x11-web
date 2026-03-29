@@ -321,7 +321,8 @@ export function WindowFrame({
 				tabIndex={0}
 				onPointerDown={(e) => {
 					e.stopPropagation();
-					e.currentTarget.focus();
+					onFocus(); // Bring window to front
+					e.currentTarget.focus(); // Take keyboard focus
 				}}
 				onMouseMove={handleMouseMove}
 				onMouseDown={handleMouseDown}

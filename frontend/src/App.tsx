@@ -459,8 +459,15 @@ function App() {
 						);
 					});
 				}}
-				onFocusWindow={(_sidecarId, _pid) => {
-					// TODO: scroll canvas to center on this process's windows
+				onFocusWindow={(sidecarId, pid) => {
+					// Bring all windows for this process to front
+					setWindows((prev) =>
+						prev.map((w) =>
+							w.sidecarId === sidecarId && w.pid === pid
+								? { ...w, zIndex: nextZIndex++ }
+								: w,
+						),
+					);
 				}}
 			/>
 		</>
