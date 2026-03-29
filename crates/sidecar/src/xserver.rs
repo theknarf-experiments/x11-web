@@ -151,8 +151,6 @@ pub(crate) struct ClientState {
     pub(crate) atoms: Arc<Mutex<AtomManager>>,
     pub(crate) update_tx: mpsc::UnboundedSender<TaggedDisplayUpdate>,
     pub(crate) root_window: u32,
-    pub(crate) root_width: u16,
-    pub(crate) root_height: u16,
     pub(crate) pointer_x: i16,
     pub(crate) pointer_y: i16,
     pub(crate) focus_window: u32,
@@ -791,7 +789,8 @@ impl X11Server {
                     visual: ROOT_VISUAL,
                     class: 1,
                     mapped: true,
-                    event_mask: 0,
+                    // Include SubstructureRedirectMask so GDK/GTK detects a WM
+                    event_mask: 0x0010_0000, // SubstructureRedirectMask
                     background_pixel: 0x00000000,
                     override_redirect: false,
                     redirected: false,
@@ -1062,8 +1061,6 @@ async fn handle_client(
         atoms: shared_atoms,
         update_tx,
         root_window: ROOT_WINDOW,
-        root_width: SCREEN_WIDTH,
-        root_height: SCREEN_HEIGHT,
         pointer_x: 0,
         pointer_y: 0,
         focus_window: ROOT_WINDOW,
@@ -1242,119 +1239,7 @@ async fn handle_client(
                     stream.write_all(&event).await?;
                 }
 
-                // Act as a minimal WM: auto-map any unmapped top-level windows.
-                // We do this on the tick rather than in CreateWindow so that the
-                // client has time to finish its setup (ChangeProperty, SHAPE, etc.)
-                // before we send the MapNotify/ConfigureNotify/Expose events.
-                //
-                // Skip auto-mapping when a real WM is connected – it will
-                // handle MapRequest / ConfigureRequest itself.
-                let has_wm = state.wm_state.lock().map_or(false, |wm| wm.client_id.is_some());
-                if has_wm {
-                    // Sync mapped state to shared so other connections see it
-                    state.sync_windows();
-                    continue;
-                }
-
-                let unmapped: Vec<u32> = state.windows.iter()
-                    .filter(|(_, w)| {
-                        !w.mapped
-                        && w.parent == state.root_window
-                        && w.class == 1 // InputOutput
-                        && !w.override_redirect
-                        && (w.width > 1 || w.height > 1)
-                    })
-                    .map(|(id, _)| *id)
-                    .collect();
-
-                // Pre-compute atoms before borrowing windows
-                let wm_state_atom = state.intern_atom("WM_STATE", false);
-                let net_wm_state_atom = state.intern_atom("_NET_WM_STATE", false);
-                let focused_atom = state.intern_atom("_NET_WM_STATE_FOCUSED", false);
-
-                for wid in unmapped {
-                    let rw = state.root_width;
-                    let rh = state.root_height;
-                    let seq = state.sequence;
-                    let wid_str = state.get_or_create_window_uuid(wid);
-
-                    // Get the window's actual size for ConfigureNotify
-                    let (win_x, win_y, win_w, win_h) = if let Some(win) = state.windows.get_mut(&wid) {
-                        info!("WM auto-mapping top-level window {wid:#x} {}x{}", win.width, win.height);
-                        win.mapped = true;
-
-                        // Fill with background pixel
-                        let w = win.width;
-                        let h = win.height;
-                        let bg = win.background_pixel;
-                        win.framebuffer.fill_rect(0, 0, w, h, bg);
-
-                        // Set WM_STATE = NormalState
-                        let mut wm_state_data = vec![0u8; 8];
-                        wm_state_data[0..4].copy_from_slice(&1u32.to_le_bytes());
-                        win.properties.insert(wm_state_atom, PropertyValue {
-                            prop_type: wm_state_atom,
-                            format: 32,
-                            data: wm_state_data,
-                        });
-                        win.properties.insert(net_wm_state_atom, PropertyValue {
-                            prop_type: 4,
-                            format: 32,
-                            data: focused_atom.to_le_bytes().to_vec(),
-                        });
-
-                        let _ = state.update_tx.send((
-                            state.client_id.clone(),
-                            DisplayUpdate::WindowMapped { window_id: wid_str.clone(), is_top_level: true },
-                        ));
-                        let _ = state.update_tx.send((
-                            state.client_id.clone(),
-                            DisplayUpdate::WindowConfigured {
-                                window_id: wid_str.clone(),
-                                x: win.x,
-                                y: win.y,
-                                width: w,
-                                height: h,
-                            },
-                        ));
-                        (win.x, win.y, w, h)
-                    } else {
-                        continue;
-                    };
-
-                    // Send ConfigureNotify with the window's actual size
-                    let mut config_event = [0u8; 32];
-                    config_event[0] = CONFIGURE_NOTIFY_EVENT;
-                    config_event[2..4].copy_from_slice(&seq.to_le_bytes());
-                    config_event[4..8].copy_from_slice(&wid.to_le_bytes());
-                    config_event[8..12].copy_from_slice(&wid.to_le_bytes());
-                    config_event[16..18].copy_from_slice(&win_x.to_le_bytes());
-                    config_event[18..20].copy_from_slice(&win_y.to_le_bytes());
-                    config_event[20..22].copy_from_slice(&win_w.to_le_bytes());
-                    config_event[22..24].copy_from_slice(&win_h.to_le_bytes());
-                    stream.write_all(&config_event).await?;
-
-                    let mut map_event = [0u8; 32];
-                    map_event[0] = MAP_NOTIFY_EVENT;
-                    map_event[2..4].copy_from_slice(&seq.to_le_bytes());
-                    map_event[4..8].copy_from_slice(&wid.to_le_bytes());
-                    map_event[8..12].copy_from_slice(&wid.to_le_bytes());
-                    stream.write_all(&map_event).await?;
-
-                    let mut expose_event = [0u8; 32];
-                    expose_event[0] = EXPOSE_EVENT;
-                    expose_event[2..4].copy_from_slice(&seq.to_le_bytes());
-                    expose_event[4..8].copy_from_slice(&wid.to_le_bytes());
-                    expose_event[12..14].copy_from_slice(&rw.to_le_bytes());
-                    expose_event[14..16].copy_from_slice(&rh.to_le_bytes());
-                    stream.write_all(&expose_event).await?;
-
-                    // Note: PropertyNotify and FocusIn events removed here —
-                    // they confused simple apps like xeyes that don't expect
-                    // unsolicited events. The MapNotify + Expose are sufficient.
-                }
-
-                // Immediately sync mapped state to shared so other connections see it
+                // Sync window state to shared store
                 state.sync_windows();
             }
             Some((x11_wid, msg)) = message_rx.recv() => {
@@ -2121,10 +2006,23 @@ fn handle_map_window(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> 
     }
 
     let wid_str = state.window_id_str(wid);
+    let wm_state_atom = state.intern_atom("WM_STATE", false);
     if let Some(win) = state.windows.get_mut(&wid) {
         info!("MapWindow: id={wid:#x} {}x{} mapped={}", win.width, win.height, win.mapped);
         let is_top_level = win.parent == state.root_window && win.class == 1 && !win.override_redirect;
         win.mapped = true;
+
+        // Set WM_STATE = NormalState for top-level windows (apps check this)
+        if is_top_level {
+            let mut wm_state_data = vec![0u8; 8];
+            wm_state_data[0..4].copy_from_slice(&1u32.to_le_bytes()); // NormalState
+            win.properties.insert(wm_state_atom, PropertyValue {
+                prop_type: wm_state_atom,
+                format: 32,
+                data: wm_state_data,
+            });
+        }
+
         let _ = state.update_tx.send((
             state.client_id.clone(),
             DisplayUpdate::WindowMapped { window_id: wid_str.clone(), is_top_level },
@@ -2663,12 +2561,11 @@ fn handle_get_selection_owner(state: &mut ClientState, data: &[u8], seq: u16) ->
     reply[2..4].copy_from_slice(&seq.to_le_bytes());
     if data.len() >= 8 {
         let selection = u32::from_le_bytes([data[4], data[5], data[6], data[7]]);
-        // Special-case _NET_WM_CM_S0: always return root window to indicate
-        // that we are a compositing window manager.
-        let owner = if state.get_atom_name(selection).as_deref() == Some("_NET_WM_CM_S0") {
-            state.root_window
-        } else {
-            state.selections.get(&selection).copied().unwrap_or(0)
+        // Claim ownership of WM selections so GDK/GTK detects a WM
+        let atom_name = state.get_atom_name(selection);
+        let owner = match atom_name.as_deref() {
+            Some("_NET_WM_CM_S0") | Some("WM_S0") => state.root_window,
+            _ => state.selections.get(&selection).copied().unwrap_or(0),
         };
         reply[8..12].copy_from_slice(&owner.to_le_bytes());
     }
