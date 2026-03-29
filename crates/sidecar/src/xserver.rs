@@ -11,7 +11,6 @@ use tracing::{debug, error, info, warn};
 use x11rb_protocol::protocol::xproto::*;
 use x11rb_protocol::x11_utils::{Serialize, TryParse};
 
-use tokio::sync::broadcast;
 use uuid::Uuid;
 use x11_web_protocol::{DisplayUpdate, InputEvent};
 
@@ -27,24 +26,81 @@ pub struct X11Server {
     display_number: u32,
     socket_path: PathBuf,
     update_tx: mpsc::UnboundedSender<TaggedDisplayUpdate>,
-    input_tx: broadcast::Sender<(String, InputEvent)>,
-    resize_tx: broadcast::Sender<(String, u16, u16)>,
     client_connected_tx: mpsc::UnboundedSender<(String, u32)>,
-    window_uuids: WindowUuidMap,
+    /// Routes input/resize events to the correct X11 connection by window UUID.
+    window_router: WindowRouter,
 }
 
 /// Shared window registry, keyed by window ID.
 /// All connections share a single window namespace, as required by X11.
 pub(crate) type SharedWindows = Arc<Mutex<HashMap<u32, WindowState>>>;
 
-/// Maps window UUID (sent to frontend) → (client_id, x11_window_id).
-/// Used to route input/resize from the frontend to the correct X11 connection.
-pub(crate) type WindowUuidMap = Arc<Mutex<HashMap<String, WindowUuidEntry>>>;
+/// Message sent to a specific X11 connection via the window router.
+pub(crate) enum WindowMessage {
+    Input(InputEvent),
+    Resize(u16, u16),
+}
 
+/// Routes messages from the frontend to the correct X11 connection.
+/// Maps window UUID → (sender, x11_window_id).
 #[derive(Clone)]
-pub(crate) struct WindowUuidEntry {
-    pub(crate) client_id: String,
-    pub(crate) x11_window_id: u32,
+pub struct WindowRouter {
+    routes: Arc<Mutex<HashMap<String, WindowRoute>>>,
+}
+
+struct WindowRoute {
+    tx: mpsc::UnboundedSender<(u32, WindowMessage)>,
+    x11_window_id: u32,
+}
+
+impl WindowRouter {
+    pub fn new() -> Self {
+        Self {
+            routes: Arc::new(Mutex::new(HashMap::new())),
+        }
+    }
+
+    /// Register a top-level window. Input for this UUID will be sent to `tx`
+    /// with the X11 window ID.
+    pub(crate) fn register(&self, uuid: &str, x11_wid: u32, tx: &mpsc::UnboundedSender<(u32, WindowMessage)>) {
+        if let Ok(mut routes) = self.routes.lock() {
+            routes.insert(uuid.to_string(), WindowRoute {
+                tx: tx.clone(),
+                x11_window_id: x11_wid,
+            });
+        }
+    }
+
+    /// Unregister all windows for a connection (on disconnect).
+    pub(crate) fn unregister_all(&self, uuids: &[String]) {
+        if let Ok(mut routes) = self.routes.lock() {
+            for uuid in uuids {
+                routes.remove(uuid);
+            }
+        }
+    }
+
+    /// Send an input event to the connection that owns this window UUID.
+    pub fn send_input(&self, window_uuid: &str, event: InputEvent) -> bool {
+        if let Ok(routes) = self.routes.lock() {
+            if let Some(route) = routes.get(window_uuid) {
+                let _ = route.tx.send((route.x11_window_id, WindowMessage::Input(event)));
+                return true;
+            }
+        }
+        false
+    }
+
+    /// Send a resize to the connection that owns this window UUID.
+    pub fn send_resize(&self, window_uuid: &str, width: u16, height: u16) -> bool {
+        if let Ok(routes) = self.routes.lock() {
+            if let Some(route) = routes.get(window_uuid) {
+                let _ = route.tx.send((route.x11_window_id, WindowMessage::Resize(width, height)));
+                return true;
+            }
+        }
+        false
+    }
 }
 
 /// Shared window-manager state.
@@ -115,33 +171,28 @@ pub(crate) struct ClientState {
     pub(crate) present_subscriptions: HashMap<u32, PresentSubscription>,
     /// Pending X11 events to deliver to this client (e.g. DamageNotify).
     pub(crate) pending_events: Vec<Vec<u8>>,
-    /// Shared UUID map for routing input from frontend to the right connection.
-    pub(crate) window_uuids: WindowUuidMap,
+    /// Router for registering windows and routing input/resize.
+    pub(crate) window_router: WindowRouter,
+    /// Sender for this connection's message channel.
+    pub(crate) message_tx: mpsc::UnboundedSender<(u32, WindowMessage)>,
     /// Local map: x11_window_id → uuid (for this client's top-level windows).
     pub(crate) x11_to_uuid: HashMap<u32, String>,
 }
 
 impl ClientState {
     /// Get or create a UUID for a top-level X11 window.
+    /// Registers the window with the router so input/resize can be routed to it.
     pub(crate) fn get_or_create_window_uuid(&mut self, x11_wid: u32) -> String {
         if let Some(uuid) = self.x11_to_uuid.get(&x11_wid) {
             return uuid.clone();
         }
         let uuid = Uuid::new_v4().to_string();
         self.x11_to_uuid.insert(x11_wid, uuid.clone());
-        if let Ok(mut map) = self.window_uuids.lock() {
-            map.insert(uuid.clone(), WindowUuidEntry {
-                client_id: self.client_id.clone(),
-                x11_window_id: x11_wid,
-            });
-        }
+        self.window_router.register(&uuid, x11_wid, &self.message_tx);
         uuid
     }
 
     /// Get the UUID for a top-level X11 window (if it exists).
-    pub(crate) fn get_window_uuid(&self, x11_wid: u32) -> Option<String> {
-        self.x11_to_uuid.get(&x11_wid).cloned()
-    }
 
     /// Get the window ID string to send in display updates.
     /// For top-level windows, returns the UUID. For others, returns the X11 ID as string.
@@ -679,26 +730,20 @@ impl X11Server {
     pub fn new(
         display_number: u32,
         update_tx: mpsc::UnboundedSender<TaggedDisplayUpdate>,
-        input_tx: broadcast::Sender<(String, InputEvent)>,
-        resize_tx: broadcast::Sender<(String, u16, u16)>,
         client_connected_tx: mpsc::UnboundedSender<(String, u32)>,
+        window_router: WindowRouter,
     ) -> Self {
         let socket_path = PathBuf::from(format!("/tmp/.X11-unix/X{display_number}"));
         Self {
             display_number,
             socket_path,
             update_tx,
-            input_tx,
-            resize_tx,
             client_connected_tx,
-            window_uuids: Arc::new(Mutex::new(HashMap::new())),
+            window_router,
         }
     }
 
-    /// Get a reference to the window UUID map (for the main event loop to access).
-    pub fn window_uuids(&self) -> WindowUuidMap {
-        self.window_uuids.clone()
-    }
+    /// Get a clone of the window router (for the main event loop).
 
     pub fn display_string(&self) -> String {
         format!(":{}", self.display_number)
@@ -802,17 +847,17 @@ impl X11Server {
                     // Get the PID of the connecting process via SO_PEERCRED
                     let peer_pid = stream.peer_cred().ok().and_then(|c| c.pid()).unwrap_or(0) as u32;
                     let update_tx = self.update_tx.clone();
-                    let input_rx = self.input_tx.subscribe();
-                    let resize_rx = self.resize_tx.subscribe();
+                    // Per-connection message channel for input/resize routing
+                    let (message_tx, message_rx) = mpsc::unbounded_channel();
                     let _ = self.client_connected_tx.send((client_id.clone(), peer_pid));
                     let cid = client_id.clone();
                     let sw = shared_windows.clone();
                     let wm = shared_wm_state.clone();
                     let sa = shared_atoms.clone();
-                    let wuuids = self.window_uuids.clone();
+                    let wr = self.window_router.clone();
                     tokio::spawn(async move {
                         if let Err(e) =
-                            handle_client(stream, client_id, update_tx, input_rx, resize_rx, conn_index, sw, wm, sa, wuuids).await
+                            handle_client(stream, client_id, update_tx, message_tx, message_rx, conn_index, sw, wm, sa, wr).await
                         {
                             debug!("X11 client {cid} disconnected: {e}");
                         }
@@ -942,13 +987,13 @@ async fn handle_client(
     mut stream: tokio::net::UnixStream,
     client_id: String,
     update_tx: mpsc::UnboundedSender<TaggedDisplayUpdate>,
-    mut input_rx: broadcast::Receiver<(String, InputEvent)>,
-    mut resize_rx: broadcast::Receiver<(String, u16, u16)>,
+    message_tx: mpsc::UnboundedSender<(u32, WindowMessage)>,
+    mut message_rx: mpsc::UnboundedReceiver<(u32, WindowMessage)>,
     conn_index: u32,
     shared_windows: SharedWindows,
     shared_wm_state: SharedWmState,
     shared_atoms: Arc<Mutex<AtomManager>>,
-    window_uuids: WindowUuidMap,
+    window_router: WindowRouter,
 ) -> io::Result<()> {
     // Phase 1: Read client setup request
     // Read at least 12 bytes for the header
@@ -1032,7 +1077,8 @@ async fn handle_client(
         damage_regions: HashMap::new(),
         present_subscriptions: HashMap::new(),
         pending_events: Vec::new(),
-        window_uuids,
+        window_router,
+        message_tx,
         x11_to_uuid: HashMap::new(),
     };
 
@@ -1130,6 +1176,9 @@ async fn handle_client(
             result = stream.read(&mut buf) => {
                 let n = result?;
                 if n == 0 {
+                    // Unregister all windows for this connection
+                    let uuids: Vec<String> = state.x11_to_uuid.values().cloned().collect();
+                    state.window_router.unregister_all(&uuids);
                     return Ok(()); // Client disconnected
                 }
 
@@ -1309,28 +1358,22 @@ async fn handle_client(
                 // Immediately sync mapped state to shared so other connections see it
                 state.sync_windows();
             }
-            result = input_rx.recv() => {
-                if let Ok((window_uuid, input)) = result {
-                    // Look up the X11 window ID for this UUID and set focus
-                    let x11_wid = state.x11_to_uuid.iter()
-                        .find(|(_, uuid)| uuid.as_str() == window_uuid)
-                        .map(|(&wid, _)| wid);
-                    if let Some(wid) = x11_wid {
-                        state.focus_window = wid;
+            Some((x11_wid, msg)) = message_rx.recv() => {
+                match msg {
+                    WindowMessage::Input(input) => {
+                        state.focus_window = x11_wid;
                         let event_bytes = build_x11_input_event(&mut state, &input);
                         if !event_bytes.is_empty() {
                             stream.write_all(&event_bytes).await?;
                         }
                     }
-                }
-            }
-            result = resize_rx.recv() => {
-                if let Ok((window_uuid, width, height)) = result {
-                    // Check if this client owns the target window
-                    if state.x11_to_uuid.values().any(|u| u == &window_uuid) {
-                        let events = resize_window(&mut state, &window_uuid, width, height);
-                        if !events.is_empty() {
-                            stream.write_all(&events).await?;
+                    WindowMessage::Resize(width, height) => {
+                        // Find the UUID for this X11 window ID
+                        if let Some(uuid) = state.x11_to_uuid.get(&x11_wid).cloned() {
+                            let events = resize_window(&mut state, &uuid, width, height);
+                            if !events.is_empty() {
+                                stream.write_all(&events).await?;
+                            }
                         }
                     }
                 }
@@ -1425,65 +1468,7 @@ fn resize_window(state: &mut ClientState, window_uuid: &str, width: u16, height:
     events
 }
 
-/// Resize all mapped windows for this client and send ConfigureNotify + Expose events.
-fn resize_all_windows(state: &mut ClientState, width: u16, height: u16) -> Vec<u8> {
-    let mut events = Vec::new();
-    let seq = state.sequence;
 
-    // Update root window dimensions
-    state.root_width = width;
-    state.root_height = height;
-
-    // Collect window IDs to resize (avoid borrow issues)
-    let window_ids: Vec<u32> = state.windows.keys().copied().collect();
-
-    for wid in window_ids {
-        let wid_str = state.window_id_str(wid);
-        if let Some(win) = state.windows.get_mut(&wid) {
-            win.width = width;
-            win.height = height;
-            win.framebuffer.resize(width as u32, height as u32);
-
-            // Send ConfigureNotify
-            let mut event = [0u8; 32];
-            event[0] = CONFIGURE_NOTIFY_EVENT;
-            event[2..4].copy_from_slice(&seq.to_le_bytes());
-            event[4..8].copy_from_slice(&wid.to_le_bytes());
-            event[8..12].copy_from_slice(&wid.to_le_bytes());
-            event[16..18].copy_from_slice(&win.x.to_le_bytes());
-            event[18..20].copy_from_slice(&win.y.to_le_bytes());
-            event[20..22].copy_from_slice(&width.to_le_bytes());
-            event[22..24].copy_from_slice(&height.to_le_bytes());
-            event[24..26].copy_from_slice(&win.border_width.to_le_bytes());
-            events.extend_from_slice(&event);
-
-            // Send Expose to trigger redraw
-            if win.mapped {
-                let mut expose = [0u8; 32];
-                expose[0] = EXPOSE_EVENT;
-                expose[2..4].copy_from_slice(&seq.to_le_bytes());
-                expose[4..8].copy_from_slice(&wid.to_le_bytes());
-                expose[12..14].copy_from_slice(&width.to_le_bytes());
-                expose[14..16].copy_from_slice(&height.to_le_bytes());
-                events.extend_from_slice(&expose);
-
-                // Send display update for the resize
-                let _ = state.update_tx.send((
-                    state.client_id.clone(),
-                    DisplayUpdate::WindowConfigured {
-                        window_id: wid_str.clone(),
-                        x: win.x,
-                        y: win.y,
-                        width,
-                        height,
-                    },
-                ));
-            }
-        }
-    }
-
-    events
-}
 
 /// Convert a frontend InputEvent into X11 wire-format event bytes (32 bytes).
 fn build_x11_input_event(state: &mut ClientState, input: &InputEvent) -> Vec<u8> {

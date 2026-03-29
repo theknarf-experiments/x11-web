@@ -47,31 +47,6 @@ impl Framebuffer {
         self.stride
     }
 
-    /// Resize the framebuffer, preserving existing content where possible.
-    pub fn resize(&mut self, new_width: u32, new_height: u32) {
-        if new_width == self.width && new_height == self.height {
-            return;
-        }
-
-        let new_stride = new_width as usize * 4;
-        let mut new_data = vec![0u8; new_stride * new_height as usize];
-
-        let copy_w = new_width.min(self.width) as usize * 4;
-        let copy_h = new_height.min(self.height) as usize;
-        for row in 0..copy_h {
-            let src_start = row * self.stride;
-            let dst_start = row * new_stride;
-            new_data[dst_start..dst_start + copy_w]
-                .copy_from_slice(&self.data[src_start..src_start + copy_w]);
-        }
-
-        self.data = new_data;
-        self.width = new_width;
-        self.height = new_height;
-        self.stride = new_stride;
-        self.mark_dirty(0, 0, new_width, new_height);
-    }
-
     /// Mark a rectangular region as dirty.
     pub fn mark_dirty(&mut self, x: i32, y: i32, w: u32, h: u32) {
         let x = x.max(0);
