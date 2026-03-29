@@ -127,7 +127,7 @@ async fn main() {
     let (display_tx, mut display_rx) = mpsc::unbounded_channel::<TaggedDisplayUpdate>();
     let (input_tx, _) =
         tokio::sync::broadcast::channel::<(String, x11_web_protocol::InputEvent)>(256);
-    let (resize_tx, _) = tokio::sync::broadcast::channel::<(String, u16, u16)>(64);
+    let (resize_tx, _) = tokio::sync::broadcast::channel::<(String, u32, u16, u16)>(64);
     let (client_connected_tx, mut client_connected_rx) = mpsc::unbounded_channel::<String>();
     let x11_server = X11Server::new(
         display_number,
@@ -179,7 +179,7 @@ async fn run_session(
     display_string: &str,
     display_rx: &mut mpsc::UnboundedReceiver<TaggedDisplayUpdate>,
     input_tx: &tokio::sync::broadcast::Sender<(String, x11_web_protocol::InputEvent)>,
-    resize_tx: &tokio::sync::broadcast::Sender<(String, u16, u16)>,
+    resize_tx: &tokio::sync::broadcast::Sender<(String, u32, u16, u16)>,
     client_connected_rx: &mut mpsc::UnboundedReceiver<String>,
 ) {
     let (mut ws_tx, mut ws_rx) = ws_stream.split();
@@ -273,7 +273,7 @@ async fn handle_command(
     pm: &mut ProcessManager,
     tx: &mpsc::UnboundedSender<SidecarToBackend>,
     input_tx: &tokio::sync::broadcast::Sender<(String, x11_web_protocol::InputEvent)>,
-    resize_tx: &tokio::sync::broadcast::Sender<(String, u16, u16)>,
+    resize_tx: &tokio::sync::broadcast::Sender<(String, u32, u16, u16)>,
     pending_pids: &mut VecDeque<u32>,
 ) {
     match cmd {
@@ -319,14 +319,15 @@ async fn handle_command(
             let _ = input_tx.send((client_id, event));
         }
         BackendToSidecar::RequestRedraw { client_id } => {
-            let _ = resize_tx.send((client_id, 0, 0));
+            let _ = resize_tx.send((client_id, 0, 0, 0));
         }
         BackendToSidecar::ResizeWindow {
             client_id,
+            window_id,
             width,
             height,
         } => {
-            let _ = resize_tx.send((client_id, width, height));
+            let _ = resize_tx.send((client_id, window_id, width, height));
         }
     }
 }

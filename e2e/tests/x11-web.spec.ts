@@ -312,6 +312,71 @@ test.describe
 			expect(newSize.height).toBeGreaterThan(initialSize.height);
 		});
 
+		test("resizing one window does not affect other windows", async ({
+			page,
+		}) => {
+			await page.goto(`http://localhost:${frontendPort}`);
+			await waitForDock(page);
+
+			// Spawn two windows and separate them so they don't overlap
+			const win1 = await spawnApp(page, "-geometry 200x150+10+10");
+			const canvas1 = win1.locator('[data-testid="x11-canvas"]');
+			await expect(canvas1).toBeVisible();
+
+			const win2 = await spawnApp(page, "-geometry 200x150+10+10");
+			const canvas2 = win2.locator('[data-testid="x11-canvas"]');
+			await expect(canvas2).toBeVisible();
+			await page.waitForTimeout(3000);
+
+			// Drag win2 out of the way so win1's resize handle is accessible
+			const titleBar2 = win2.locator('[class*="header"]');
+			const tb2Box = await titleBar2.boundingBox();
+			if (tb2Box) {
+				await page.mouse.move(tb2Box.x + 50, tb2Box.y + 10);
+				await page.mouse.down();
+				await page.mouse.move(tb2Box.x + 400, tb2Box.y + 10, { steps: 5 });
+				await page.mouse.up();
+			}
+			await page.waitForTimeout(1000);
+
+			// Record both canvas sizes
+			const size1Before = await canvas1.evaluate((el: HTMLCanvasElement) => ({
+				width: el.width,
+				height: el.height,
+			}));
+			const size2Before = await canvas2.evaluate((el: HTMLCanvasElement) => ({
+				width: el.width,
+				height: el.height,
+			}));
+
+			// Resize only win1 via its SE drag handle
+			const box1 = await win1.boundingBox();
+			if (!box1) throw new Error("Window 1 has no bounding box");
+			const startX = box1.x + box1.width - 5;
+			const startY = box1.y + box1.height - 5;
+			await page.mouse.move(startX, startY);
+			await page.mouse.down();
+			await page.mouse.move(startX + 100, startY + 80, { steps: 10 });
+			await page.mouse.up();
+			await page.waitForTimeout(3000);
+
+			// Win1 should have grown
+			const size1After = await canvas1.evaluate((el: HTMLCanvasElement) => ({
+				width: el.width,
+				height: el.height,
+			}));
+			expect(size1After.width).toBeGreaterThan(size1Before.width);
+			expect(size1After.height).toBeGreaterThan(size1Before.height);
+
+			// Win2 should be unchanged
+			const size2After = await canvas2.evaluate((el: HTMLCanvasElement) => ({
+				width: el.width,
+				height: el.height,
+			}));
+			expect(size2After.width).toBe(size2Before.width);
+			expect(size2After.height).toBe(size2Before.height);
+		});
+
 		test("clicking a window brings it to front", async ({ page }) => {
 			await page.goto(`http://localhost:${frontendPort}`);
 			await waitForDock(page);

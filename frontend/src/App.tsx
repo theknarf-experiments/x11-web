@@ -302,13 +302,20 @@ function App() {
 	const resizeTimerRef = useRef<ReturnType<typeof setTimeout>>(undefined);
 
 	const handleResize = useCallback(
-		(clientId: string, sidecarId: string, width: number, height: number) => {
+		(
+			windowId: number,
+			clientId: string,
+			sidecarId: string,
+			width: number,
+			height: number,
+		) => {
 			clearTimeout(resizeTimerRef.current);
 			resizeTimerRef.current = setTimeout(() => {
 				send({
 					type: "ResizeWindow",
 					sidecar_id: sidecarId,
 					client_id: clientId,
+					window_id: windowId,
 					width,
 					height,
 				});
@@ -404,7 +411,13 @@ function App() {
 							}}
 							onMove={(nx, ny) => handleMove(win.windowId, nx, ny)}
 							onResize={(nw, nh) =>
-								handleResize(win.clientId, win.sidecarId, nw, nh)
+								handleResize(
+									win.windowId,
+									win.clientId,
+									win.sidecarId,
+									nw,
+									nh,
+								)
 							}
 							onInput={(event) =>
 								handleInput(win.clientId, win.sidecarId, event)

@@ -28,7 +28,7 @@ pub struct X11Server {
     socket_path: PathBuf,
     update_tx: mpsc::UnboundedSender<TaggedDisplayUpdate>,
     input_tx: broadcast::Sender<(String, InputEvent)>,
-    resize_tx: broadcast::Sender<(String, u16, u16)>,
+    resize_tx: broadcast::Sender<(String, u32, u16, u16)>,
     client_connected_tx: mpsc::UnboundedSender<String>,
 }
 
@@ -648,7 +648,7 @@ impl X11Server {
         display_number: u32,
         update_tx: mpsc::UnboundedSender<TaggedDisplayUpdate>,
         input_tx: broadcast::Sender<(String, InputEvent)>,
-        resize_tx: broadcast::Sender<(String, u16, u16)>,
+        resize_tx: broadcast::Sender<(String, u32, u16, u16)>,
         client_connected_tx: mpsc::UnboundedSender<String>,
     ) -> Self {
         let socket_path = PathBuf::from(format!("/tmp/.X11-unix/X{display_number}"));
@@ -903,7 +903,7 @@ async fn handle_client(
     client_id: String,
     update_tx: mpsc::UnboundedSender<TaggedDisplayUpdate>,
     mut input_rx: broadcast::Receiver<(String, InputEvent)>,
-    mut resize_rx: broadcast::Receiver<(String, u16, u16)>,
+    mut resize_rx: broadcast::Receiver<(String, u32, u16, u16)>,
     conn_index: u32,
     shared_windows: SharedWindows,
     shared_wm_state: SharedWmState,
@@ -1276,9 +1276,14 @@ async fn handle_client(
                 }
             }
             result = resize_rx.recv() => {
-                if let Ok((target_id, width, height)) = result {
+                if let Ok((target_id, window_id, width, height)) = result {
                     if target_id == client_id {
-                        let events = resize_all_windows(&mut state, width, height);
+                        let events = if window_id != 0 {
+                            resize_window(&mut state, window_id, width, height)
+                        } else {
+                            // window_id == 0 means redraw all (RequestRedraw)
+                            resize_all_windows(&mut state, width, height)
+                        };
                         if !events.is_empty() {
                             stream.write_all(&events).await?;
                         }
@@ -1292,6 +1297,81 @@ async fn handle_client(
             }
         }
     }
+}
+
+/// Resize a specific window and its children, send ConfigureNotify + Expose events.
+fn resize_window(state: &mut ClientState, window_id: u32, width: u16, height: u16) -> Vec<u8> {
+    let mut events = Vec::new();
+    let seq = state.sequence;
+
+    // Resize the target window and all its descendants
+    let mut to_resize = vec![window_id];
+    // Also find child windows to resize proportionally
+    let children: Vec<u32> = state
+        .windows
+        .values()
+        .filter(|w| is_descendant_of(&state.windows, w.id, window_id))
+        .map(|w| w.id)
+        .collect();
+    to_resize.extend(children);
+
+    for wid in &to_resize {
+        if let Some(win) = state.windows.get_mut(wid) {
+            if *wid == window_id {
+                // Resize the target window to the exact requested size
+                win.width = width;
+                win.height = height;
+            } else {
+                // Child windows: resize to match parent (same size for simplicity)
+                win.width = width;
+                win.height = height;
+            }
+            win.framebuffer = Framebuffer::new(win.width as u32, win.height as u32);
+
+            let mut event = [0u8; 32];
+            event[0] = CONFIGURE_NOTIFY_EVENT;
+            event[2..4].copy_from_slice(&seq.to_le_bytes());
+            event[4..8].copy_from_slice(&wid.to_le_bytes());
+            event[8..12].copy_from_slice(&wid.to_le_bytes());
+            event[16..18].copy_from_slice(&win.x.to_le_bytes());
+            event[18..20].copy_from_slice(&win.y.to_le_bytes());
+            event[20..22].copy_from_slice(&win.width.to_le_bytes());
+            event[22..24].copy_from_slice(&win.height.to_le_bytes());
+            event[24..26].copy_from_slice(&win.border_width.to_le_bytes());
+            events.extend_from_slice(&event);
+
+            if win.mapped {
+                let mut expose = [0u8; 32];
+                expose[0] = EXPOSE_EVENT;
+                expose[2..4].copy_from_slice(&seq.to_le_bytes());
+                expose[4..8].copy_from_slice(&wid.to_le_bytes());
+                expose[12..14].copy_from_slice(&win.width.to_le_bytes());
+                expose[14..16].copy_from_slice(&win.height.to_le_bytes());
+                events.extend_from_slice(&expose);
+            }
+        }
+    }
+
+    // Send WindowConfigured display update for the top-level window
+    if let Some(win) = state.windows.get(&window_id) {
+        let owner = if win.owner_client_id.is_empty() {
+            state.client_id.clone()
+        } else {
+            win.owner_client_id.clone()
+        };
+        let _ = state.update_tx.send((
+            owner,
+            DisplayUpdate::WindowConfigured {
+                window_id,
+                x: win.x,
+                y: win.y,
+                width: win.width,
+                height: win.height,
+            },
+        ));
+    }
+
+    events
 }
 
 /// Resize all mapped windows for this client and send ConfigureNotify + Expose events.

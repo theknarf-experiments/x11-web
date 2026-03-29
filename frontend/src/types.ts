@@ -85,6 +85,7 @@ export type FrontendToBackend =
 			type: "ResizeWindow";
 			sidecar_id: string;
 			client_id: string;
+			window_id: number;
 			width: number;
 			height: number;
 	  }
