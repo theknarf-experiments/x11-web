@@ -249,6 +249,39 @@ export function WindowFrame({
 		[sendInput],
 	);
 
+	// Scroll wheel → X11 button 4/5/6/7 press+release
+	useEffect(() => {
+		const el = canvasRef.current;
+		if (!el) return;
+
+		const onWheel = (e: WheelEvent) => {
+			e.preventDefault();
+			e.stopPropagation();
+
+			const rect = el.getBoundingClientRect();
+			const scaleX = el.width / rect.width;
+			const scaleY = el.height / rect.height;
+			const x = Math.round((e.clientX - rect.left) * scaleX);
+			const y = Math.round((e.clientY - rect.top) * scaleY);
+			const state = mouseButtonMask(e.buttons);
+
+			// X11 buttons: 4=scroll up, 5=scroll down, 6=scroll left, 7=scroll right
+			let button: number;
+			if (Math.abs(e.deltaY) >= Math.abs(e.deltaX)) {
+				button = e.deltaY > 0 ? 5 : 4;
+			} else {
+				button = e.deltaX > 0 ? 7 : 6;
+			}
+
+			// Send press + release pair
+			onInputRef.current({ kind: "ButtonPress", button, x, y, state });
+			onInputRef.current({ kind: "ButtonRelease", button, x, y, state });
+		};
+
+		el.addEventListener("wheel", onWheel, { passive: false });
+		return () => el.removeEventListener("wheel", onWheel);
+	}, []);
+
 	const handleContextMenu = useCallback(
 		(e: React.MouseEvent) => e.preventDefault(),
 		[],
