@@ -211,6 +211,10 @@ async fn handle_sidecar_ws(socket: WebSocket, state: AppState) {
             }
             SidecarToBackend::DisplayUpdate { client_id, update } => {
                 let is_put_image = matches!(update, x11_web_protocol::DisplayUpdate::PutImage { .. });
+                let put_image_wid = match &update {
+                    x11_web_protocol::DisplayUpdate::PutImage { window_id, .. } => Some(*window_id),
+                    _ => None,
+                };
                 let msg = BackendToFrontend::DisplayUpdate {
                     sidecar_id: sidecar_id.clone(),
                     client_id: client_id.clone(),
@@ -218,20 +222,22 @@ async fn handle_sidecar_ws(socket: WebSocket, state: AppState) {
                 };
 
                 // Buffer for replay to new frontends.
-                // For PutImage, keep only the latest (replaces previous frame data).
-                // For lifecycle events (WindowCreated, etc.), always append.
+                // Keep only the latest PutImage per window_id.
+                // Lifecycle events (WindowCreated, etc.) are always kept.
                 {
                     let mut bufs = state.display_buffers.write().await;
                     let buf = bufs.entry(client_id.clone()).or_default();
                     if is_put_image {
-                        // Remove old PutImage entries for this client to keep buffer compact
-                        buf.retain(|m| {
-                            if let BackendToFrontend::DisplayUpdate { update: u, .. } = m {
-                                !matches!(u, x11_web_protocol::DisplayUpdate::PutImage { .. })
-                            } else {
+                        if let Some(wid) = put_image_wid {
+                            buf.retain(|m| {
+                                if let BackendToFrontend::DisplayUpdate { update: u, .. } = m {
+                                    if let x11_web_protocol::DisplayUpdate::PutImage { window_id, .. } = u {
+                                        return *window_id != wid;
+                                    }
+                                }
                                 true
-                            }
-                        });
+                            });
+                        }
                     }
                     buf.push(msg.clone());
                 }

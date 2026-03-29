@@ -1437,14 +1437,27 @@ fn resize_all_windows(state: &mut ClientState, width: u16, height: u16) -> Vec<u
 
 /// Convert a frontend InputEvent into X11 wire-format event bytes (32 bytes).
 fn build_x11_input_event(state: &mut ClientState, input: &InputEvent) -> Vec<u8> {
-    // Find the topmost mapped window to deliver events to
-    let target_window = state
-        .windows
-        .values()
-        .filter(|w| w.mapped && w.id != state.root_window)
-        .max_by_key(|w| w.id) // Pick the last created mapped window
-        .map(|w| w.id)
-        .unwrap_or(state.root_window);
+    // Deliver events to the focus window if set, otherwise find the
+    // top-level mapped window owned by this client.
+    let target_window = if state.focus_window != 0
+        && state.focus_window != state.root_window
+        && state.windows.contains_key(&state.focus_window)
+    {
+        state.focus_window
+    } else {
+        state
+            .windows
+            .values()
+            .filter(|w| {
+                w.mapped
+                    && w.parent == state.root_window
+                    && w.class == 1
+                    && !w.override_redirect
+            })
+            .max_by_key(|w| w.id)
+            .map(|w| w.id)
+            .unwrap_or(state.root_window)
+    };
 
     // Update tracked pointer position for QueryPointer
     match input {
