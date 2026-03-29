@@ -99,10 +99,6 @@ impl Framebuffer {
         });
     }
 
-    pub fn mark_all_dirty(&mut self) {
-        self.dirty = Some((0, 0, self.width, self.height));
-    }
-
     pub fn is_dirty(&self) -> bool {
         self.dirty.is_some()
     }
@@ -342,26 +338,6 @@ impl Framebuffer {
     /// Draw a single pixel with GXcopy (the common case).
     pub fn draw_point(&mut self, x: i32, y: i32, color: u32) {
         self.draw_point_with_func(x, y, color, 3);
-    }
-
-    /// Fill a rectangle with GC function support.
-    pub fn fill_rect_with_func(&mut self, x: i16, y: i16, width: u16, height: u16, color: u32, gc_func: u8) {
-        if gc_func == 3 {
-            // GXcopy — use fast path
-            self.fill_rect(x, y, width, height, color);
-            return;
-        }
-        // Slow path for other GC functions
-        for row in 0..height as i32 {
-            let dy = y as i32 + row;
-            if dy < 0 || dy >= self.height as i32 { continue; }
-            for col in 0..width as i32 {
-                let dx = x as i32 + col;
-                if dx < 0 || dx >= self.width as i32 { continue; }
-                self.draw_point_with_func(dx, dy, color, gc_func);
-            }
-        }
-        self.mark_dirty(x as i32, y as i32, width as u32, height as u32);
     }
 
     /// Draw a line using Bresenham's algorithm.

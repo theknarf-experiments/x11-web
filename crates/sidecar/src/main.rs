@@ -3,7 +3,7 @@ mod framebuffer;
 mod render;
 mod xserver;
 
-use std::collections::{HashMap, VecDeque};
+use std::collections::HashMap;
 use std::process::Stdio;
 
 use futures::{SinkExt, StreamExt};
@@ -188,7 +188,6 @@ async fn run_session(
 ) {
     let (mut ws_tx, mut ws_rx) = ws_stream.split();
     let mut process_manager = ProcessManager::new(display_string.to_string());
-    let mut pending_pids: VecDeque<u32> = VecDeque::new();
 
     // Send registration
     let register = SidecarToBackend::Register {
@@ -232,7 +231,7 @@ async fn run_session(
                 match msg {
                     Some(Ok(Message::Text(text))) => {
                         if let Ok(cmd) = serde_json::from_str::<BackendToSidecar>(&text) {
-                            handle_command(cmd, &mut process_manager, &tx, input_tx, resize_tx, &mut pending_pids).await;
+                            handle_command(cmd, &mut process_manager, &tx, input_tx, resize_tx).await;
                         }
                     }
                     Some(Ok(Message::Close(_))) | None => break,
@@ -249,8 +248,6 @@ async fn run_session(
                 let pid = find_ancestor_pid(peer_pid, &spawned_pids);
 
                 if let Some(pid) = pid {
-                    // Drain this PID from pending_pids if present (it's been claimed)
-                    pending_pids.retain(|&p| p != pid);
                     let command = process_manager.get_command(pid).unwrap_or("").to_string();
                     info!("Process {pid} ({command}) (peer {peer_pid}) connected as X11 client {client_id}");
                     let _ = tx.send(SidecarToBackend::ProcessConnected { pid, client_id, command });
@@ -277,7 +274,6 @@ async fn handle_command(
     tx: &mpsc::UnboundedSender<SidecarToBackend>,
     input_tx: &tokio::sync::broadcast::Sender<(String, x11_web_protocol::InputEvent)>,
     resize_tx: &tokio::sync::broadcast::Sender<(String, u32, u16, u16)>,
-    pending_pids: &mut VecDeque<u32>,
 ) {
     match cmd {
         BackendToSidecar::SpawnProcess {
@@ -286,7 +282,6 @@ async fn handle_command(
             args,
         } => match pm.spawn(&command, &args).await {
             Ok(pid) => {
-                pending_pids.push_back(pid);
                 let _ = tx.send(SidecarToBackend::ProcessSpawned { request_id, pid });
             }
             Err(message) => {

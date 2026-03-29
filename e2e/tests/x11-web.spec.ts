@@ -406,6 +406,92 @@ test.describe
 			expect(z1After).toBeGreaterThan(z2Before);
 		});
 
+		test("dock icon click brings window to front", async ({ page }) => {
+			await page.goto(`http://localhost:${frontendPort}`);
+			await waitForDock(page);
+
+			// Spawn xeyes first, then xterm on top
+			await spawnApp(page, "-geometry 200x150+50+50");
+			const win2 = await spawnApp(page, "-fn fixed -geometry 40x10", "xterm");
+			await page.waitForTimeout(3000);
+
+			// xterm (win2) is on top
+			const z2Before = await win2.evaluate((el) =>
+				Number.parseInt(el.style.zIndex || "0"),
+			);
+
+			// Click the first dock icon (xeyes) to bring it to front
+			const dockButtons = page.locator('[data-testid="dock"] button');
+			await dockButtons.first().click();
+			await page.waitForTimeout(500);
+
+			// xeyes window should now have a higher z-index than xterm
+			const allFrames = page.locator('[data-testid="window-frame"]');
+			const frame1Z = await allFrames
+				.first()
+				.evaluate((el) => Number.parseInt(el.style.zIndex || "0"));
+			expect(frame1Z).toBeGreaterThan(z2Before);
+		});
+
+		test("keyboard input follows canvas focus between windows", async ({
+			page,
+		}) => {
+			await page.goto(`http://localhost:${frontendPort}`);
+			await waitForDock(page);
+
+			// Spawn two xterms and separate them
+			const win1 = await spawnApp(page, "-fn fixed -geometry 40x10", "xterm");
+			const canvas1 = win1.locator('[data-testid="x11-canvas"]');
+			await expect(canvas1).toBeVisible();
+			await page.waitForTimeout(5000);
+
+			const win2 = await spawnApp(page, "-fn fixed -geometry 40x10", "xterm");
+			const canvas2 = win2.locator('[data-testid="x11-canvas"]');
+			await expect(canvas2).toBeVisible();
+			await page.waitForTimeout(5000);
+
+			// Move win2 to the right so both canvases are clickable
+			const tb2 = win2.locator('[class*="header"]');
+			const tb2Box = await tb2.boundingBox();
+			if (tb2Box) {
+				await page.mouse.move(tb2Box.x + 50, tb2Box.y + 10);
+				await page.mouse.down();
+				await page.mouse.move(tb2Box.x + 400, tb2Box.y + 10, { steps: 5 });
+				await page.mouse.up();
+			}
+			await page.waitForTimeout(1000);
+
+			// Type "AAA" in xterm 1
+			await canvas1.click();
+			await page.waitForTimeout(500);
+			await page.keyboard.type("echo AAA", { delay: 50 });
+			await page.keyboard.press("Enter");
+			await page.waitForTimeout(2000);
+
+			// Switch to xterm 2 and type "BBB"
+			await canvas2.click();
+			await page.waitForTimeout(500);
+			await page.keyboard.type("echo BBB", { delay: 50 });
+			await page.keyboard.press("Enter");
+			await page.waitForTimeout(2000);
+
+			// Switch back to xterm 1 and type more
+			await canvas1.click();
+			await page.waitForTimeout(500);
+			await page.keyboard.type("echo CCC", { delay: 50 });
+			await page.keyboard.press("Enter");
+			await page.waitForTimeout(2000);
+
+			// Both canvases should have rendered distinct content
+			expect(await hasRenderedContent(canvas1)).toBe(true);
+			expect(await hasRenderedContent(canvas2)).toBe(true);
+
+			// Canvas 1 should have more content than canvas 2 (AAA + CCC vs BBB)
+			const pixels1 = await countNonBlackPixels(canvas1);
+			const pixels2 = await countNonBlackPixels(canvas2);
+			expect(pixels1).toBeGreaterThan(pixels2);
+		});
+
 		test("xeyes pupils follow the cursor", async ({ page }) => {
 			await page.goto(`http://localhost:${frontendPort}`);
 			await waitForDock(page);

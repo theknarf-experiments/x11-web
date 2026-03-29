@@ -782,7 +782,6 @@ fn rasterize_triangle(
     if (vy1 - vy0).abs() > 1e-9 {
         // Long edge from v0 to v2, short edge from v0 to v1
         let mid_x = vx0 + (vx2 - vx0) * (vy1 - vy0) / (vy2 - vy0);
-        let (lx, rx) = if mid_x < vx1 { (mid_x, vx1) } else { (vx1, mid_x) };
         let (llx, rrx) = if mid_x < vx1 {
             // Left edge is v0->v2 segment, right edge is v0->v1
             ((vx0, vy0, vx2, vy2), (vx0, vy0, vx1, vy1))

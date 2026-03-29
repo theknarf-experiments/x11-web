@@ -351,13 +351,6 @@ impl ClientState {
             }
         }
 
-        // Debug: log compositing results
-        for (child_id, _, _) in &children {
-            if let Some(child) = self.windows.get(child_id) {
-                let non_black = child.framebuffer.data().chunks(4).filter(|px| px.len() == 4 && (px[0] != 0 || px[1] != 0 || px[2] != 0)).count();
-                let parent = child.parent;
-            }
-        }
 
         // Step 2: Only send PutImage for top-level windows (parent == root).
         let window_ids: Vec<u32> = self
@@ -456,8 +449,6 @@ pub(crate) struct WindowState {
     pub(crate) properties: HashMap<u32, PropertyValue>,
     /// The client_id that created this window (for display update routing).
     pub(crate) owner_client_id: String,
-    /// When this window was created (for delayed auto-map).
-    pub(crate) created_at: std::time::Instant,
 }
 
 pub(crate) struct PixmapState {
@@ -518,10 +509,8 @@ pub(crate) struct PresentSubscription {
 
 /// A shared memory segment attached via MIT-SHM.
 pub(crate) struct ShmSegment {
-    pub(crate) shm_id: i32,
     pub(crate) addr: *mut u8,
     pub(crate) size: usize,
-    pub(crate) read_only: bool,
 }
 
 // Safety: ShmSegment holds a raw pointer from shmat() which is valid for the
@@ -716,7 +705,6 @@ impl X11Server {
                     framebuffer: Framebuffer::new(SCREEN_WIDTH as u32, SCREEN_HEIGHT as u32),
                     properties: HashMap::new(),
                     owner_client_id: String::new(), // root has no owner
-                    created_at: std::time::Instant::now(),
                 },
             );
 
@@ -1913,7 +1901,6 @@ fn handle_create_window(state: &mut ClientState, data: &[u8], _seq: u16) -> Vec<
             framebuffer: Framebuffer::new(width as u32, height as u32),
             properties: HashMap::new(),
             owner_client_id: state.client_id.clone(),
-            created_at: std::time::Instant::now(),
         },
     );
 
@@ -2729,15 +2716,6 @@ fn handle_close_font(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
     Vec::new()
 }
 
-fn write_charinfo(reply: &mut Vec<u8>, ci: &crate::fonts::CharInfo) {
-    reply.extend_from_slice(&ci.left_side_bearing.to_le_bytes());
-    reply.extend_from_slice(&ci.right_side_bearing.to_le_bytes());
-    reply.extend_from_slice(&ci.character_width.to_le_bytes());
-    reply.extend_from_slice(&ci.ascent.to_le_bytes());
-    reply.extend_from_slice(&ci.descent.to_le_bytes());
-    reply.extend_from_slice(&ci.attributes.to_le_bytes());
-}
-
 fn handle_query_font(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
     if data.len() < 8 {
         return Vec::new();
@@ -2774,8 +2752,6 @@ fn handle_query_font(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> 
 
     let n_char_infos = (font.max_char - font.min_char + 1) as u32;
     let char_infos_bytes = n_char_infos as usize * 12;
-    let total_extra = char_infos_bytes; // no properties for now
-    let length_field = ((32 + total_extra - 32) / 4) as u32; // extra data beyond 32 byte header
 
     // QueryFont reply: 60-byte fixed header + n_char_infos * 12 bytes
     // The "60 bytes" includes 32 header + 28 bytes of font info
@@ -2873,7 +2849,6 @@ fn handle_create_gc(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
     }
 
     let gc_id = u32::from_le_bytes([data[4], data[5], data[6], data[7]]);
-    let _drawable = u32::from_le_bytes([data[8], data[9], data[10], data[11]]);
     let value_mask = u32::from_le_bytes([data[12], data[13], data[14], data[15]]);
 
     let mut gc = GcState::default();
@@ -2936,7 +2911,6 @@ fn handle_create_pixmap(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
 
     let depth = data[1];
     let pid = u32::from_le_bytes([data[4], data[5], data[6], data[7]]);
-    let _drawable = u32::from_le_bytes([data[8], data[9], data[10], data[11]]);
     let width = u16::from_le_bytes([data[12], data[13]]);
     let height = u16::from_le_bytes([data[14], data[15]]);
 
@@ -3032,7 +3006,6 @@ fn handle_copy_area(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
                 // to foreground/background colors using the GC function.
                 // Pixel != black → foreground, pixel == black → background
                 if let Some(fb) = state.get_framebuffer_mut(dst) {
-                    let fb_stride = fb.stride();
                     let fb_w = fb.width() as i32;
                     let fb_h = fb.height() as i32;
                     let src_stride = width as usize * 4;
@@ -3439,10 +3412,6 @@ fn handle_image_text8(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
     if data.len() < 16 {
         return Vec::new();
     }
-    let drawable = u32::from_le_bytes([data[4], data[5], data[6], data[7]]);
-    let str_len = data[1] as usize;
-    let text = if data.len() >= 16 + str_len { String::from_utf8_lossy(&data[16..16 + str_len]).to_string() } else { String::new() };
-
     let str_len = data[1] as usize;
     let drawable = u32::from_le_bytes([data[4], data[5], data[6], data[7]]);
     let gc_id = u32::from_le_bytes([data[8], data[9], data[10], data[11]]);
@@ -4271,10 +4240,8 @@ fn handle_shm_request(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8>
                 }
 
                 state.shm_segments.insert(shmseg, ShmSegment {
-                    shm_id: shmid,
                     addr: addr as *mut u8,
                     size,
-                    read_only,
                 });
             }
 
@@ -4441,7 +4408,6 @@ fn handle_shm_request(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8>
                 return Vec::new();
             }
             let pid = u32::from_le_bytes([data[4], data[5], data[6], data[7]]);
-            let _drawable = u32::from_le_bytes([data[8], data[9], data[10], data[11]]);
             let width = u16::from_le_bytes([data[12], data[13]]);
             let height = u16::from_le_bytes([data[14], data[15]]);
             let depth = data[16];
@@ -5015,7 +4981,6 @@ fn handle_present_request(state: &mut ClientState, data: &[u8], seq: u16) -> Vec
 
             if let Some((src_w, src_h, mut src_data, src_depth)) = src_info {
                 // Debug: count non-black pixels in source
-                let non_black = src_data.chunks(4).filter(|px| px.len() == 4 && (px[0] != 0 || px[1] != 0 || px[2] != 0)).count();
 
                 // For depth-1 pixmaps, convert 1-bit values to proper RGB:
                 // pixel != 0 → white (0xFFFFFF), pixel == 0 → black (0x000000)
