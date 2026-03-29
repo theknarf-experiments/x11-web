@@ -1460,12 +1460,19 @@ fn build_x11_input_event(state: &mut ClientState, input: &InputEvent) -> Vec<u8>
     let seq = state.sequence;
     let mut event = [0u8; 32];
 
+    // Timestamp in milliseconds since server start (X11 expects monotonic ms)
+    static SERVER_START: std::sync::OnceLock<std::time::Instant> = std::sync::OnceLock::new();
+    let timestamp = SERVER_START
+        .get_or_init(std::time::Instant::now)
+        .elapsed()
+        .as_millis() as u32;
+
     match input {
         InputEvent::MotionNotify { x, y, state: mask } => {
             event[0] = MOTION_NOTIFY_EVENT; // 6
             event[1] = 0; // detail: Normal
             event[2..4].copy_from_slice(&seq.to_le_bytes());
-            // time (4 bytes at offset 4) - use 0
+            event[4..8].copy_from_slice(&timestamp.to_le_bytes());
             event[8..12].copy_from_slice(&state.root_window.to_le_bytes()); // root
             event[12..16].copy_from_slice(&target_window.to_le_bytes()); // event window
             event[16..20].copy_from_slice(&target_window.to_le_bytes()); // child
@@ -1485,6 +1492,7 @@ fn build_x11_input_event(state: &mut ClientState, input: &InputEvent) -> Vec<u8>
             event[0] = BUTTON_PRESS_EVENT; // 4
             event[1] = *button;
             event[2..4].copy_from_slice(&seq.to_le_bytes());
+            event[4..8].copy_from_slice(&timestamp.to_le_bytes());
             event[8..12].copy_from_slice(&state.root_window.to_le_bytes());
             event[12..16].copy_from_slice(&target_window.to_le_bytes());
             event[16..20].copy_from_slice(&target_window.to_le_bytes());
@@ -1504,6 +1512,7 @@ fn build_x11_input_event(state: &mut ClientState, input: &InputEvent) -> Vec<u8>
             event[0] = BUTTON_RELEASE_EVENT; // 5
             event[1] = *button;
             event[2..4].copy_from_slice(&seq.to_le_bytes());
+            event[4..8].copy_from_slice(&timestamp.to_le_bytes());
             event[8..12].copy_from_slice(&state.root_window.to_le_bytes());
             event[12..16].copy_from_slice(&target_window.to_le_bytes());
             event[16..20].copy_from_slice(&target_window.to_le_bytes());
@@ -1521,6 +1530,7 @@ fn build_x11_input_event(state: &mut ClientState, input: &InputEvent) -> Vec<u8>
             event[0] = KEY_PRESS_EVENT; // 2
             event[1] = *keycode as u8;
             event[2..4].copy_from_slice(&seq.to_le_bytes());
+            event[4..8].copy_from_slice(&timestamp.to_le_bytes());
             event[8..12].copy_from_slice(&state.root_window.to_le_bytes());
             event[12..16].copy_from_slice(&target_window.to_le_bytes());
             event[16..20].copy_from_slice(&target_window.to_le_bytes());
@@ -1534,6 +1544,7 @@ fn build_x11_input_event(state: &mut ClientState, input: &InputEvent) -> Vec<u8>
             event[0] = KEY_RELEASE_EVENT; // 3
             event[1] = *keycode as u8;
             event[2..4].copy_from_slice(&seq.to_le_bytes());
+            event[4..8].copy_from_slice(&timestamp.to_le_bytes());
             event[8..12].copy_from_slice(&state.root_window.to_le_bytes());
             event[12..16].copy_from_slice(&target_window.to_le_bytes());
             event[16..20].copy_from_slice(&target_window.to_le_bytes());
