@@ -789,8 +789,7 @@ impl X11Server {
                     visual: ROOT_VISUAL,
                     class: 1,
                     mapped: true,
-                    // Include SubstructureRedirectMask so GDK/GTK detects a WM
-                    event_mask: 0x0010_0000, // SubstructureRedirectMask
+                    event_mask: 0,
                     background_pixel: 0x00000000,
                     override_redirect: false,
                     redirected: false,
@@ -800,41 +799,9 @@ impl X11Server {
                 },
             );
 
-            // Set EWMH properties on root at startup so they're available to ALL connections
-            {
-                let mut atoms = shared_atoms.lock().unwrap();
-                let a_swc = atoms.intern("_NET_SUPPORTING_WM_CHECK", false);
-                let a_name = atoms.intern("_NET_WM_NAME", false);
-                let a_utf8 = atoms.intern("UTF8_STRING", false);
-                let a_supported = atoms.intern("_NET_SUPPORTED", false);
-                let a_active = atoms.intern("_NET_ACTIVE_WINDOW", false);
-                let a_client_list = atoms.intern("_NET_CLIENT_LIST", false);
-                let a_frame = atoms.intern("_NET_FRAME_EXTENTS", false);
-
-                let supported = [
-                    atoms.intern("_NET_WM_STATE", false),
-                    atoms.intern("_NET_WM_STATE_FOCUSED", false),
-                    a_active,
-                    a_name,
-                    atoms.intern("_NET_WM_PID", false),
-                    atoms.intern("_NET_WM_WINDOW_TYPE", false),
-                    atoms.intern("_NET_WM_WINDOW_TYPE_NORMAL", false),
-                    a_frame,
-                    a_swc,
-                    a_supported,
-                    a_client_list,
-                ];
-                let mut sup_data = Vec::new();
-                for a in &supported { sup_data.extend_from_slice(&a.to_le_bytes()); }
-
-                let root = windows.get_mut(&ROOT_WINDOW).unwrap();
-                root.properties.insert(a_swc, PropertyValue { prop_type: 33, format: 32, data: ROOT_WINDOW.to_le_bytes().to_vec() });
-                root.properties.insert(a_name, PropertyValue { prop_type: a_utf8, format: 8, data: b"x11-web".to_vec() });
-                root.properties.insert(a_supported, PropertyValue { prop_type: 4, format: 32, data: sup_data });
-                root.properties.insert(a_active, PropertyValue { prop_type: 33, format: 32, data: ROOT_WINDOW.to_le_bytes().to_vec() });
-                root.properties.insert(a_client_list, PropertyValue { prop_type: 33, format: 32, data: Vec::new() });
-                root.properties.insert(a_frame, PropertyValue { prop_type: 6, format: 32, data: vec![0; 16] });
-            }
+            // Don't set EWMH properties on root — having them makes GDK3/Firefox
+            // think a WM is managing windows, causing them to wait for WM protocol
+            // responses we don't implement. Without them, apps map directly like on Xvfb.
         }
 
         loop {
@@ -1078,84 +1045,11 @@ async fn handle_client(
         x11_to_uuid: HashMap::new(),
     };
 
-    // Set EWMH properties on the root window so GDK3/Firefox recognise an
-    // EWMH-compliant WM.  We do this per-connection so that each client's
-    // AtomManager has consistent atom IDs for the property keys it stores.
-    {
-        let atom_supporting_wm_check = state.intern_atom("_NET_SUPPORTING_WM_CHECK", false);
-        let atom_window: u32 = 33; // WINDOW predefined atom
-        let atom_net_wm_name = state.intern_atom("_NET_WM_NAME", false);
-        let atom_utf8 = state.intern_atom("UTF8_STRING", false);
-        let atom_net_supported = state.intern_atom("_NET_SUPPORTED", false);
-        let atom_atom: u32 = 4; // ATOM predefined atom
-        let atom_cardinal: u32 = 6; // CARDINAL predefined atom
-
-        let supported_atoms = [
-            state.intern_atom("_NET_WM_STATE", false),
-            state.intern_atom("_NET_WM_STATE_FOCUSED", false),
-            state.intern_atom("_NET_ACTIVE_WINDOW", false),
-            atom_net_wm_name,
-            state.intern_atom("_NET_WM_PID", false),
-            state.intern_atom("_NET_WM_WINDOW_TYPE", false),
-            state.intern_atom("_NET_WM_WINDOW_TYPE_NORMAL", false),
-            state.intern_atom("_NET_FRAME_EXTENTS", false),
-            atom_supporting_wm_check,
-            atom_net_supported,
-            state.intern_atom("_NET_CLIENT_LIST", false),
-        ];
-
-        // Pre-compute all atom values and root_window before borrowing windows mutably
-        let atom_active = state.intern_atom("_NET_ACTIVE_WINDOW", false);
-        let atom_client_list = state.intern_atom("_NET_CLIENT_LIST", false);
-        let atom_frame = state.intern_atom("_NET_FRAME_EXTENTS", false);
-        let root_wid = state.root_window;
-
-        let mut supported_data = Vec::new();
-        for a in &supported_atoms {
-            supported_data.extend_from_slice(&a.to_le_bytes());
-        }
-
-        if let Some(root) = state.windows.get_mut(&root_wid) {
-            root.properties.insert(atom_supporting_wm_check, PropertyValue {
-                prop_type: atom_window,
-                format: 32,
-                data: root_wid.to_le_bytes().to_vec(),
-            });
-
-            root.properties.insert(atom_net_wm_name, PropertyValue {
-                prop_type: atom_utf8,
-                format: 8,
-                data: b"x11-web".to_vec(),
-            });
-
-            root.properties.insert(atom_net_supported, PropertyValue {
-                prop_type: atom_atom,
-                format: 32,
-                data: supported_data,
-            });
-
-            root.properties.insert(atom_active, PropertyValue {
-                prop_type: atom_window,
-                format: 32,
-                data: root_wid.to_le_bytes().to_vec(),
-            });
-
-            root.properties.insert(atom_client_list, PropertyValue {
-                prop_type: atom_window,
-                format: 32,
-                data: Vec::new(),
-            });
-
-            root.properties.insert(atom_frame, PropertyValue {
-                prop_type: atom_cardinal,
-                format: 32,
-                data: vec![0; 16], // left, right, top, bottom = 0
-            });
-        }
-
-        // Push EWMH properties to shared store immediately
-        state.sync_windows();
-    }
+    // Don't set EWMH WM properties (_NET_SUPPORTING_WM_CHECK etc.).
+    // Setting them makes GDK3/Firefox think a WM is managing windows,
+    // which causes them to wait for WM protocol responses we don't
+    // fully implement. Without them, apps behave like on Xvfb —
+    // they call XMapWindow directly.
 
     let mut buf = vec![0u8; 256 * 1024]; // 256KB read buffer
     let mut pending = Vec::new(); // Partial request data
@@ -1492,6 +1386,10 @@ fn handle_request(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
     let major_opcode = data[0];
     let _minor = data[1];
     let seq = state.sequence;
+    if major_opcode == 8 && data.len() >= 8 {
+        let wid = u32::from_le_bytes([data[4], data[5], data[6], data[7]]);
+        info!("REQUEST MapWindow wid={wid:#x} seq={seq}");
+    }
     if major_opcode >= 128 {
         debug!("ext op={major_opcode} minor={_minor} seq={seq}");
     }
@@ -2561,12 +2459,7 @@ fn handle_get_selection_owner(state: &mut ClientState, data: &[u8], seq: u16) ->
     reply[2..4].copy_from_slice(&seq.to_le_bytes());
     if data.len() >= 8 {
         let selection = u32::from_le_bytes([data[4], data[5], data[6], data[7]]);
-        // Claim ownership of WM selections so GDK/GTK detects a WM
-        let atom_name = state.get_atom_name(selection);
-        let owner = match atom_name.as_deref() {
-            Some("_NET_WM_CM_S0") | Some("WM_S0") => state.root_window,
-            _ => state.selections.get(&selection).copied().unwrap_or(0),
-        };
+        let owner = state.selections.get(&selection).copied().unwrap_or(0);
         reply[8..12].copy_from_slice(&owner.to_le_bytes());
     }
     reply.to_vec()
@@ -3906,9 +3799,8 @@ fn handle_query_extension(_state: &mut ClientState, data: &[u8], seq: u16) -> Ve
             reply[10] = 91;
             reply[11] = 152;
         }
-        // RANDR disabled — GTK renders incorrectly with our minimal RANDR replies.
-        // The handler code is kept for future use when replies are fully correct.
-        // XKEYBOARD disabled — our stub causes Firefox to take a worse init path
+        // RANDR disabled — our RANDR replies are incomplete and crash Firefox.
+        // XKEYBOARD disabled — our stub causes Firefox to take a worse init path.
         "XKEYBOARD" => {
             // present = false
         }
