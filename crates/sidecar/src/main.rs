@@ -73,6 +73,10 @@ impl ProcessManager {
         }
     }
 
+    fn get_command(&self, pid: u32) -> Option<&str> {
+        self.processes.get(&pid).map(|p| p.command.as_str())
+    }
+
     fn list(&self) -> Vec<ProcessInfo> {
         self.processes
             .iter()
@@ -247,8 +251,9 @@ async fn run_session(
                 if let Some(pid) = pid {
                     // Drain this PID from pending_pids if present (it's been claimed)
                     pending_pids.retain(|&p| p != pid);
-                    info!("Process {pid} (peer {peer_pid}) connected as X11 client {client_id}");
-                    let _ = tx.send(SidecarToBackend::ProcessConnected { pid, client_id });
+                    let command = process_manager.get_command(pid).unwrap_or("").to_string();
+                    info!("Process {pid} ({command}) (peer {peer_pid}) connected as X11 client {client_id}");
+                    let _ = tx.send(SidecarToBackend::ProcessConnected { pid, client_id, command });
                 } else {
                     info!("X11 client {client_id} connected (peer PID {peer_pid}, no matching spawned process)");
                 }

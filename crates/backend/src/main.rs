@@ -18,7 +18,7 @@ struct AppState {
     sidecars: Arc<RwLock<HashMap<String, SidecarConnection>>>,
     frontends: Arc<RwLock<HashMap<String, FrontendConnection>>>,
     /// Registry of connected X11 processes: client_id → (sidecar_id, pid)
-    connected_processes: Arc<RwLock<HashMap<String, (String, u32)>>>,
+    connected_processes: Arc<RwLock<HashMap<String, (String, u32, String)>>>,
     /// Window state for position/color sync: client_id → WindowState
     window_states: Arc<RwLock<HashMap<String, WindowState>>>,
     /// Display update buffer per client_id for replay on frontend connect
@@ -155,10 +155,10 @@ async fn handle_sidecar_ws(socket: WebSocket, state: AppState) {
                 // Find client_ids for this pid to clean up display buffers
                 let client_ids: Vec<String> = procs
                     .iter()
-                    .filter(|(_, (_, p))| *p == pid)
+                    .filter(|(_, (_, p, _))| *p == pid)
                     .map(|(cid, _)| cid.clone())
                     .collect();
-                procs.retain(|_, (_, p)| *p != pid);
+                procs.retain(|_, (_, p, _)| *p != pid);
                 states.retain(|_, ws| ws.pid != pid);
                 drop(procs);
                 drop(states);
@@ -191,19 +191,20 @@ async fn handle_sidecar_ws(socket: WebSocket, state: AppState) {
                 )
                 .await;
             }
-            SidecarToBackend::ProcessConnected { pid, client_id } => {
+            SidecarToBackend::ProcessConnected { pid, client_id, command } => {
                 // Register in process registry
                 state
                     .connected_processes
                     .write()
                     .await
-                    .insert(client_id.clone(), (sidecar_id.clone(), pid));
+                    .insert(client_id.clone(), (sidecar_id.clone(), pid, command.clone()));
                 broadcast_to_frontends(
                     &state,
                     BackendToFrontend::ProcessConnected {
                         sidecar_id: sidecar_id.clone(),
                         pid,
                         client_id,
+                        command,
                     },
                 )
                 .await;
@@ -269,10 +270,10 @@ async fn handle_sidecar_ws(socket: WebSocket, state: AppState) {
         let mut procs = state.connected_processes.write().await;
         let client_ids: Vec<String> = procs
             .iter()
-            .filter(|(_, (sid, _))| sid == &sidecar_id)
+            .filter(|(_, (sid, _, _))| sid == &sidecar_id)
             .map(|(cid, _)| cid.clone())
             .collect();
-        procs.retain(|_, (sid, _)| sid != &sidecar_id);
+        procs.retain(|_, (sid, _, _)| sid != &sidecar_id);
         drop(procs);
         state
             .window_states
@@ -345,10 +346,11 @@ async fn handle_frontend_ws(socket: WebSocket, state: AppState) {
         let procs = state.connected_processes.read().await;
         let processes: Vec<ConnectedProcessInfo> = procs
             .iter()
-            .map(|(client_id, (sidecar_id, pid))| ConnectedProcessInfo {
+            .map(|(client_id, (sidecar_id, pid, command))| ConnectedProcessInfo {
                 sidecar_id: sidecar_id.clone(),
                 pid: *pid,
                 client_id: client_id.clone(),
+                command: command.clone(),
             })
             .collect();
         if !processes.is_empty() {
@@ -433,7 +435,7 @@ async fn handle_frontend_ws(socket: WebSocket, state: AppState) {
                         // Replay buffered display updates for all clients of this sidecar
                         let bufs = state.display_buffers.read().await;
                         let procs = state.connected_processes.read().await;
-                        for (client_id, (sid, _)) in procs.iter() {
+                        for (client_id, (sid, _, _)) in procs.iter() {
                             if sid == &sidecar_id {
                                 if let Some(buf) = bufs.get(client_id) {
                                     for msg in buf {
@@ -497,7 +499,7 @@ async fn handle_frontend_ws(socket: WebSocket, state: AppState) {
                 // Look up pid from connected_processes
                 let pid = {
                     let procs = state.connected_processes.read().await;
-                    procs.get(&client_id).map(|(_, p)| *p).unwrap_or(0)
+                    procs.get(&client_id).map(|(_, p, _)| *p).unwrap_or(0)
                 };
 
                 // Store window state

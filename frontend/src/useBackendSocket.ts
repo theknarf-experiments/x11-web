@@ -19,6 +19,7 @@ export interface ConnectedProcess {
 	sidecarId: string;
 	pid: number;
 	clientId: string;
+	command: string;
 }
 
 export interface InitialWindowState {
@@ -121,6 +122,7 @@ export function useBackendSocket() {
 								sidecarId: msg.sidecar_id,
 								pid: msg.pid,
 								clientId: msg.client_id,
+								command: msg.command,
 							},
 						]);
 						break;
@@ -137,6 +139,7 @@ export function useBackendSocket() {
 								sidecarId: p.sidecar_id,
 								pid: p.pid,
 								clientId: p.client_id,
+								command: p.command,
 							})),
 						);
 						break;

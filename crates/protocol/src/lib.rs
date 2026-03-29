@@ -65,7 +65,11 @@ pub enum SidecarToBackend {
         processes: Vec<ProcessInfo>,
     },
     /// An X11 client connected and was associated with a spawned process.
-    ProcessConnected { pid: u32, client_id: String },
+    ProcessConnected {
+        pid: u32,
+        client_id: String,
+        command: String,
+    },
     /// Display update from the X server.
     DisplayUpdate {
         client_id: String,
@@ -110,6 +114,7 @@ pub enum BackendToFrontend {
         sidecar_id: String,
         pid: u32,
         client_id: String,
+        command: String,
     },
     /// Display update forwarded from a sidecar.
     DisplayUpdate {
@@ -191,6 +196,7 @@ pub struct ConnectedProcessInfo {
     pub sidecar_id: String,
     pub pid: u32,
     pub client_id: String,
+    pub command: String,
 }
 
 /// Window state for position/color sync.

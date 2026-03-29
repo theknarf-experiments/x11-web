@@ -33,6 +33,7 @@ export type BackendToFrontend =
 			sidecar_id: string;
 			pid: number;
 			client_id: string;
+			command: string;
 	  }
 	| {
 			type: "DisplayUpdate";
@@ -42,7 +43,12 @@ export type BackendToFrontend =
 	  }
 	| {
 			type: "ConnectedProcessesList";
-			processes: { sidecar_id: string; pid: number; client_id: string }[];
+			processes: {
+				sidecar_id: string;
+				pid: number;
+				client_id: string;
+				command: string;
+			}[];
 	  }
 	| {
 			type: "WindowStateList";

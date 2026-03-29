@@ -68,9 +68,9 @@ function App() {
 	/** One renderer per top-level X11 window (keyed by window_id as string). */
 	const renderersRef = useRef<Map<string, ClientRenderer>>(new Map());
 	const closedWindowsRef = useRef<Set<number>>(new Set());
-	/** Map clientId -> { sidecarId, pid } for process association. */
+	/** Map clientId -> { sidecarId, pid, command } for process association. */
 	const clientInfoRef = useRef<
-		Map<string, { sidecarId: string; pid: number }>
+		Map<string, { sidecarId: string; pid: number; command: string }>
 	>(new Map());
 	/** Track which sidecars we've already subscribed to. */
 	const subscribedRef = useRef<Set<string>>(new Set());
@@ -84,6 +84,7 @@ function App() {
 			clientInfoRef.current.set(cp.clientId, {
 				sidecarId: cp.sidecarId,
 				pid: cp.pid,
+				command: cp.command,
 			});
 			// Auto-subscribe to display updates and request process list
 			if (!subscribedRef.current.has(cp.sidecarId)) {
@@ -102,18 +103,21 @@ function App() {
 		setWindows((prev) => {
 			let changed = false;
 			const next = prev.map((w) => {
-				if (w.pid === 0) {
+				if (w.pid === 0 || w.title.startsWith("PID ")) {
 					const info = clientInfoRef.current.get(w.clientId);
 					if (info && info.pid !== 0) {
-						changed = true;
-						const procList = processes[info.sidecarId] || [];
-						const proc = procList.find((p) => p.pid === info.pid);
-						return {
-							...w,
-							pid: info.pid,
-							sidecarId: info.sidecarId,
-							title: proc ? proc.command : w.title,
-						};
+						const title = info.command
+							|| processes[info.sidecarId]?.find((p) => p.pid === info.pid)?.command
+							|| w.title;
+						if (w.pid !== info.pid || w.title !== title) {
+							changed = true;
+							return {
+								...w,
+								pid: info.pid,
+								sidecarId: info.sidecarId,
+								title,
+							};
+						}
 					}
 				}
 				return w;
@@ -164,9 +168,12 @@ function App() {
 					const info = clientInfoRef.current.get(clientId);
 					const pid = info?.pid ?? 0;
 					const sid = info?.sidecarId ?? sidecarId;
-					const procList = processesRef.current[sid] || [];
-					const proc = procList.find((p) => p.pid === pid);
-					const title = proc ? proc.command : `PID ${pid}`;
+					// Use command from ProcessConnected (most reliable),
+					// fall back to ProcessList lookup, then "PID N"
+					const command = info?.command;
+					const title = command
+						|| processesRef.current[sid]?.find((p) => p.pid === pid)?.command
+						|| `PID ${pid}`;
 
 					const saved = initialWindowStates.find(
 						(ws) => ws.clientId === clientId,
