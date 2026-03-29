@@ -495,6 +495,79 @@ test.describe
 			});
 		});
 
+		test("input goes to the focused window when switching between apps", async ({
+			page,
+		}) => {
+			await page.goto(`http://localhost:${frontendPort}`);
+			await waitForDock(page);
+
+			// Spawn two xterms
+			const win1 = await spawnApp(page, "-fn fixed -geometry 40x10", "xterm");
+			const canvas1 = win1.locator('[data-testid="x11-canvas"]');
+			await expect(canvas1).toBeVisible();
+			await page.waitForTimeout(5000);
+
+			const win2 = await spawnApp(page, "-fn fixed -geometry 40x10", "xterm");
+			const canvas2 = win2.locator('[data-testid="x11-canvas"]');
+			await expect(canvas2).toBeVisible();
+			await page.waitForTimeout(5000);
+
+			// Move win2 so they don't overlap
+			const tb2 = win2.locator('[class*="header"]');
+			const tb2Box = await tb2.boundingBox();
+			if (tb2Box) {
+				await page.mouse.move(tb2Box.x + 50, tb2Box.y + 10);
+				await page.mouse.down();
+				await page.mouse.move(tb2Box.x + 400, tb2Box.y + 10, { steps: 5 });
+				await page.mouse.up();
+			}
+			await page.waitForTimeout(1000);
+
+			// Click and type in xterm 1
+			await canvas1.click();
+			await page.waitForTimeout(500);
+			await page.keyboard.type("echo AAA", { delay: 50 });
+			await page.keyboard.press("Enter");
+			await page.waitForTimeout(3000);
+
+			// Click and type in xterm 2
+			await canvas2.click();
+			await page.waitForTimeout(500);
+			await page.keyboard.type("echo BBB", { delay: 50 });
+			await page.keyboard.press("Enter");
+			await page.waitForTimeout(3000);
+
+			// Both should have rendered content with their respective echo output
+			expect(await hasRenderedContent(canvas1)).toBe(true);
+			expect(await hasRenderedContent(canvas2)).toBe(true);
+		});
+
+		test("window content survives page refresh", async ({ page }) => {
+			await page.goto(`http://localhost:${frontendPort}`);
+			await waitForDock(page);
+
+			const win = await spawnApp(page, "-fn fixed -geometry 40x10", "xterm");
+			const canvas = win.locator('[data-testid="x11-canvas"]');
+			await expect(canvas).toBeVisible();
+			await page.waitForTimeout(5000);
+
+			// Verify content is rendered
+			expect(await hasRenderedContent(canvas)).toBe(true);
+
+			// Refresh the page
+			await page.reload();
+			await waitForDock(page);
+
+			// The window should reappear with content
+			const windowFrames = page.locator('[data-testid="window-frame"]');
+			await expect(windowFrames.first()).toBeVisible({ timeout: 10_000 });
+			const restoredCanvas = windowFrames
+				.first()
+				.locator('[data-testid="x11-canvas"]');
+			await page.waitForTimeout(5000);
+			expect(await hasRenderedContent(restoredCanvas)).toBe(true);
+		});
+
 		test("xmessage renders on the canvas", async ({ page }) => {
 			await page.goto(`http://localhost:${frontendPort}`);
 			await waitForDock(page);
