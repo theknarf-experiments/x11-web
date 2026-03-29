@@ -31,15 +31,14 @@ pub enum BackendToSidecar {
     ListProcesses { request_id: String },
     /// Forward input event from a frontend user.
     InputEvent {
-        client_id: String,
+        window_id: String,
         event: InputEvent,
     },
     /// Request a full redraw (sends Expose events to all windows).
-    RequestRedraw { client_id: String },
+    RequestRedraw { window_id: String },
     /// Resize a specific window.
     ResizeWindow {
-        client_id: String,
-        window_id: u32,
+        window_id: String,
         width: u16,
         height: u16,
     },
@@ -161,22 +160,21 @@ pub enum FrontendToBackend {
     },
     /// Subscribe to display updates from a sidecar.
     SubscribeDisplay { sidecar_id: String },
-    /// Request a full redraw of a client's windows.
+    /// Request a full redraw of a window.
     RequestRedraw {
         sidecar_id: String,
-        client_id: String,
+        window_id: String,
     },
-    /// Send input to a process on a sidecar.
+    /// Send input to a window on a sidecar.
     InputEvent {
         sidecar_id: String,
-        client_id: String,
+        window_id: String,
         event: InputEvent,
     },
     /// Resize a specific window on a sidecar.
     ResizeWindow {
         sidecar_id: String,
-        client_id: String,
-        window_id: u32,
+        window_id: String,
         width: u16,
         height: u16,
     },
@@ -230,7 +228,7 @@ pub struct ProcessInfo {
 pub enum DisplayUpdate {
     /// A window was created.
     WindowCreated {
-        window_id: u32,
+        window_id: String,
         x: i16,
         y: i16,
         width: u16,
@@ -241,18 +239,18 @@ pub enum DisplayUpdate {
         is_top_level: bool,
     },
     /// A window was destroyed.
-    WindowDestroyed { window_id: u32 },
+    WindowDestroyed { window_id: String },
     /// A window was mapped (made visible).
     WindowMapped {
-        window_id: u32,
+        window_id: String,
         #[serde(default)]
         is_top_level: bool,
     },
     /// A window was unmapped (hidden).
-    WindowUnmapped { window_id: u32 },
+    WindowUnmapped { window_id: String },
     /// A window was moved/resized.
     WindowConfigured {
-        window_id: u32,
+        window_id: String,
         x: i16,
         y: i16,
         width: u16,
@@ -260,7 +258,7 @@ pub enum DisplayUpdate {
     },
     /// Fill a rectangle.
     FillRect {
-        window_id: u32,
+        window_id: String,
         x: i16,
         y: i16,
         width: u16,
@@ -269,14 +267,14 @@ pub enum DisplayUpdate {
     },
     /// Draw lines.
     DrawLines {
-        window_id: u32,
+        window_id: String,
         points: Vec<(i16, i16)>,
         color: u32,
         line_width: u16,
     },
     /// Put an image (raw RGBA pixels, base64 encoded for JSON transport).
     PutImage {
-        window_id: u32,
+        window_id: String,
         x: i16,
         y: i16,
         width: u16,
@@ -286,8 +284,8 @@ pub enum DisplayUpdate {
     },
     /// Copy an area within a window.
     CopyArea {
-        src_window_id: u32,
-        dst_window_id: u32,
+        src_window_id: String,
+        dst_window_id: String,
         src_x: i16,
         src_y: i16,
         dst_x: i16,
@@ -297,17 +295,17 @@ pub enum DisplayUpdate {
     },
     /// Clear an area.
     ClearArea {
-        window_id: u32,
+        window_id: String,
         x: i16,
         y: i16,
         width: u16,
         height: u16,
     },
     /// Window title changed (from WM_NAME property).
-    TitleChanged { window_id: u32, title: String },
+    TitleChanged { window_id: String, title: String },
     /// Draw an arc.
     DrawArc {
-        window_id: u32,
+        window_id: String,
         x: i16,
         y: i16,
         width: u16,

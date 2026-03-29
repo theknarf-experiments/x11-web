@@ -212,7 +212,7 @@ async fn handle_sidecar_ws(socket: WebSocket, state: AppState) {
             SidecarToBackend::DisplayUpdate { client_id, update } => {
                 let is_put_image = matches!(update, x11_web_protocol::DisplayUpdate::PutImage { .. });
                 let put_image_wid = match &update {
-                    x11_web_protocol::DisplayUpdate::PutImage { window_id, .. } => Some(*window_id),
+                    x11_web_protocol::DisplayUpdate::PutImage { window_id, .. } => Some(window_id.clone()),
                     _ => None,
                 };
                 let msg = BackendToFrontend::DisplayUpdate {
@@ -232,7 +232,7 @@ async fn handle_sidecar_ws(socket: WebSocket, state: AppState) {
                             buf.retain(|m| {
                                 if let BackendToFrontend::DisplayUpdate { update: u, .. } = m {
                                     if let x11_web_protocol::DisplayUpdate::PutImage { window_id, .. } = u {
-                                        return *window_id != wid;
+                                        return window_id != &wid;
                                     }
                                 }
                                 true
@@ -455,30 +455,29 @@ async fn handle_frontend_ws(socket: WebSocket, state: AppState) {
             }
             FrontendToBackend::RequestRedraw {
                 sidecar_id,
-                client_id,
+                window_id,
             } => {
                 forward_to_sidecar(
                     &state,
                     &sidecar_id,
-                    BackendToSidecar::RequestRedraw { client_id },
+                    BackendToSidecar::RequestRedraw { window_id },
                 )
                 .await;
             }
             FrontendToBackend::InputEvent {
                 sidecar_id,
-                client_id,
+                window_id,
                 event,
             } => {
                 forward_to_sidecar(
                     &state,
                     &sidecar_id,
-                    BackendToSidecar::InputEvent { client_id, event },
+                    BackendToSidecar::InputEvent { window_id, event },
                 )
                 .await;
             }
             FrontendToBackend::ResizeWindow {
                 sidecar_id,
-                client_id,
                 window_id,
                 width,
                 height,
@@ -487,7 +486,6 @@ async fn handle_frontend_ws(socket: WebSocket, state: AppState) {
                     &state,
                     &sidecar_id,
                     BackendToSidecar::ResizeWindow {
-                        client_id,
                         window_id,
                         width,
                         height,

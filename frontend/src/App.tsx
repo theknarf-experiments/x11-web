@@ -23,7 +23,7 @@ function nextRequestId() {
  * Multiple windows may share the same clientId (and thus the same renderer).
  */
 interface CanvasWindow {
-	windowId: number;
+	windowId: string;
 	clientId: string;
 	sidecarId: string;
 	pid: number;
@@ -67,7 +67,7 @@ function App() {
 	const [windows, setWindows] = useState<CanvasWindow[]>([]);
 	/** One renderer per top-level X11 window (keyed by window_id as string). */
 	const renderersRef = useRef<Map<string, ClientRenderer>>(new Map());
-	const closedWindowsRef = useRef<Set<number>>(new Set());
+	const closedWindowsRef = useRef<Set<string>>(new Set());
 	/** Map clientId -> { sidecarId, pid, command } for process association. */
 	const clientInfoRef = useRef<
 		Map<string, { sidecarId: string; pid: number; command: string }>
@@ -232,7 +232,7 @@ function App() {
 
 			// WindowDestroyed — remove frame and renderer
 			if (update.kind === "WindowDestroyed") {
-				renderersRef.current.delete(String(update.window_id));
+				renderersRef.current.delete(update.window_id);
 				setWindows((prev) => {
 					if (!prev.some((w) => w.windowId === update.window_id))
 						return prev;
@@ -246,7 +246,7 @@ function App() {
 			const windowId = "window_id" in update ? update.window_id : undefined;
 			if (windowId == null) return;
 
-			const key = String(windowId);
+			const key = windowId;
 			const renderers = renderersRef.current;
 			let r = renderers.get(key);
 			if (!r) {
@@ -285,7 +285,7 @@ function App() {
 	}
 
 	const handleMove = useCallback(
-		(windowId: number, x: number, y: number) => {
+		(windowId: string, x: number, y: number) => {
 			setWindows((prev) => {
 				const win = prev.find((w) => w.windowId === windowId);
 				if (win) {
@@ -309,19 +309,12 @@ function App() {
 	const resizeTimerRef = useRef<ReturnType<typeof setTimeout>>(undefined);
 
 	const handleResize = useCallback(
-		(
-			windowId: number,
-			clientId: string,
-			sidecarId: string,
-			width: number,
-			height: number,
-		) => {
+		(windowId: string, sidecarId: string, width: number, height: number) => {
 			clearTimeout(resizeTimerRef.current);
 			resizeTimerRef.current = setTimeout(() => {
 				send({
 					type: "ResizeWindow",
 					sidecar_id: sidecarId,
-					client_id: clientId,
 					window_id: windowId,
 					width,
 					height,
@@ -331,7 +324,7 @@ function App() {
 		[send],
 	);
 
-	const handleFocus = useCallback((windowId: number) => {
+	const handleFocus = useCallback((windowId: string) => {
 		setWindows((prev) =>
 			prev.map((w) =>
 				w.windowId === windowId ? { ...w, zIndex: nextZIndex++ } : w,
@@ -340,11 +333,11 @@ function App() {
 	}, []);
 
 	const handleInput = useCallback(
-		(clientId: string, sidecarId: string, event: InputEvent) => {
+		(windowId: string, sidecarId: string, event: InputEvent) => {
 			send({
 				type: "InputEvent",
 				sidecar_id: sidecarId,
-				client_id: clientId,
+				window_id: windowId,
 				event,
 			});
 		},
@@ -378,12 +371,12 @@ function App() {
 			<InfiniteCanvas>
 				{windows.map((win) => {
 					// Use the per-client renderer (shared across all windows from the same client)
-					const renderer = renderersRef.current.get(String(win.windowId));
+					const renderer = renderersRef.current.get(win.windowId);
 					if (!renderer) return null;
 					return (
 						<WindowFrame
 							key={win.windowId}
-							clientId={String(win.windowId)}
+							clientId={win.windowId}
 							title={win.title}
 							x={win.x}
 							y={win.y}
@@ -418,16 +411,10 @@ function App() {
 							}}
 							onMove={(nx, ny) => handleMove(win.windowId, nx, ny)}
 							onResize={(nw, nh) =>
-								handleResize(
-									win.windowId,
-									win.clientId,
-									win.sidecarId,
-									nw,
-									nh,
-								)
+								handleResize(win.windowId, win.sidecarId, nw, nh)
 							}
 							onInput={(event) =>
-								handleInput(win.clientId, win.sidecarId, event)
+								handleInput(win.windowId, win.sidecarId, event)
 							}
 							onFocus={() => handleFocus(win.windowId)}
 						/>

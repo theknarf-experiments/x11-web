@@ -84,14 +84,13 @@ export type FrontendToBackend =
 	| {
 			type: "InputEvent";
 			sidecar_id: string;
-			client_id: string;
+			window_id: string;
 			event: InputEvent;
 	  }
 	| {
 			type: "ResizeWindow";
 			sidecar_id: string;
-			client_id: string;
-			window_id: number;
+			window_id: string;
 			width: number;
 			height: number;
 	  }
@@ -105,22 +104,22 @@ export type FrontendToBackend =
 	  };
 
 export type DisplayUpdate =
-	| { kind: "TitleChanged"; window_id: number; title: string }
+	| { kind: "TitleChanged"; window_id: string; title: string }
 	| {
 			kind: "WindowCreated";
-			window_id: number;
+			window_id: string;
 			x: number;
 			y: number;
 			width: number;
 			height: number;
 			is_top_level?: boolean;
 	  }
-	| { kind: "WindowDestroyed"; window_id: number }
-	| { kind: "WindowMapped"; window_id: number; is_top_level?: boolean }
-	| { kind: "WindowUnmapped"; window_id: number }
+	| { kind: "WindowDestroyed"; window_id: string }
+	| { kind: "WindowMapped"; window_id: string; is_top_level?: boolean }
+	| { kind: "WindowUnmapped"; window_id: string }
 	| {
 			kind: "WindowConfigured";
-			window_id: number;
+			window_id: string;
 			x: number;
 			y: number;
 			width: number;
@@ -128,7 +127,7 @@ export type DisplayUpdate =
 	  }
 	| {
 			kind: "FillRect";
-			window_id: number;
+			window_id: string;
 			x: number;
 			y: number;
 			width: number;
@@ -137,14 +136,14 @@ export type DisplayUpdate =
 	  }
 	| {
 			kind: "DrawLines";
-			window_id: number;
+			window_id: string;
 			points: [number, number][];
 			color: number;
 			line_width: number;
 	  }
 	| {
 			kind: "PutImage";
-			window_id: number;
+			window_id: string;
 			x: number;
 			y: number;
 			width: number;
@@ -153,8 +152,8 @@ export type DisplayUpdate =
 	  }
 	| {
 			kind: "CopyArea";
-			src_window_id: number;
-			dst_window_id: number;
+			src_window_id: string;
+			dst_window_id: string;
 			src_x: number;
 			src_y: number;
 			dst_x: number;
@@ -164,7 +163,7 @@ export type DisplayUpdate =
 	  }
 	| {
 			kind: "ClearArea";
-			window_id: number;
+			window_id: string;
 			x: number;
 			y: number;
 			width: number;
@@ -172,7 +171,7 @@ export type DisplayUpdate =
 	  }
 	| {
 			kind: "DrawArc";
-			window_id: number;
+			window_id: string;
 			x: number;
 			y: number;
 			width: number;

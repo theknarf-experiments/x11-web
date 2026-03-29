@@ -21,7 +21,7 @@ type RenderContext =
 export class ClientRenderer {
 	backBuffer: OffscreenCanvas;
 	private ctx: OffscreenCanvasRenderingContext2D;
-	private windows = new Map<number, WindowInfo>();
+	private windows = new Map<string, WindowInfo>();
 	dirty = false;
 
 	constructor(width: number, height: number) {
@@ -86,7 +86,7 @@ export class ClientRenderer {
 function renderUpdate(
 	ctx: RenderContext,
 	update: DisplayUpdate,
-	windows: Map<number, WindowInfo>,
+	windows: Map<string, WindowInfo>,
 ) {
 	switch (update.kind) {
 		case "WindowCreated": {
