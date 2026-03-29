@@ -128,7 +128,7 @@ async fn main() {
     let (input_tx, _) =
         tokio::sync::broadcast::channel::<(String, x11_web_protocol::InputEvent)>(256);
     let (resize_tx, _) = tokio::sync::broadcast::channel::<(String, u32, u16, u16)>(64);
-    let (client_connected_tx, mut client_connected_rx) = mpsc::unbounded_channel::<String>();
+    let (client_connected_tx, mut client_connected_rx) = mpsc::unbounded_channel::<(String, u32)>();
     let x11_server = X11Server::new(
         display_number,
         display_tx,
@@ -180,12 +180,11 @@ async fn run_session(
     display_rx: &mut mpsc::UnboundedReceiver<TaggedDisplayUpdate>,
     input_tx: &tokio::sync::broadcast::Sender<(String, x11_web_protocol::InputEvent)>,
     resize_tx: &tokio::sync::broadcast::Sender<(String, u32, u16, u16)>,
-    client_connected_rx: &mut mpsc::UnboundedReceiver<String>,
+    client_connected_rx: &mut mpsc::UnboundedReceiver<(String, u32)>,
 ) {
     let (mut ws_tx, mut ws_rx) = ws_stream.split();
     let mut process_manager = ProcessManager::new(display_string.to_string());
     let mut pending_pids: VecDeque<u32> = VecDeque::new();
-    let mut last_spawned_pid: Option<u32> = None;
 
     // Send registration
     let register = SidecarToBackend::Register {
@@ -239,21 +238,20 @@ async fn run_session(
             Some((client_id, update)) = display_rx.recv() => {
                 let _ = tx.send(SidecarToBackend::DisplayUpdate { client_id, update });
             }
-            Some(client_id) = client_connected_rx.recv() => {
-                // Associate the new X11 client with the most recently spawned process.
-                // If no pending PID, use the last associated PID (for child processes
-                // like Firefox content processes that open additional X11 connections).
-                let pid = if let Some(pid) = pending_pids.pop_front() {
-                    last_spawned_pid = Some(pid);
-                    pid
-                } else if let Some(pid) = last_spawned_pid {
-                    pid
+            Some((client_id, peer_pid)) = client_connected_rx.recv() => {
+                // Find which spawned process this X11 client belongs to by
+                // walking up the process tree from the peer PID.
+                let spawned_pids: Vec<u32> = process_manager.list().iter().map(|p| p.pid).collect();
+                let pid = find_ancestor_pid(peer_pid, &spawned_pids);
+
+                if let Some(pid) = pid {
+                    // Drain this PID from pending_pids if present (it's been claimed)
+                    pending_pids.retain(|&p| p != pid);
+                    info!("Process {pid} (peer {peer_pid}) connected as X11 client {client_id}");
+                    let _ = tx.send(SidecarToBackend::ProcessConnected { pid, client_id });
                 } else {
-                    info!("X11 client {client_id} connected (no process to associate)");
-                    continue;
-                };
-                info!("Process {pid} connected as X11 client {client_id}");
-                let _ = tx.send(SidecarToBackend::ProcessConnected { pid, client_id });
+                    info!("X11 client {client_id} connected (peer PID {peer_pid}, no matching spawned process)");
+                }
             }
             _ = check_interval.tick() => {
                 let exited = process_manager.check_exited().await;
@@ -330,6 +328,45 @@ async fn handle_command(
             let _ = resize_tx.send((client_id, window_id, width, height));
         }
     }
+}
+
+/// Walk up the process tree from `peer_pid` to find the first ancestor
+/// that is in `spawned_pids`. Returns `Some(pid)` if found.
+/// This uses /proc/<pid>/status to read PPid.
+fn find_ancestor_pid(peer_pid: u32, spawned_pids: &[u32]) -> Option<u32> {
+    if peer_pid == 0 {
+        return None;
+    }
+    // Check if the peer itself is a spawned process
+    if spawned_pids.contains(&peer_pid) {
+        return Some(peer_pid);
+    }
+    // Walk up the tree
+    let mut current = peer_pid;
+    for _ in 0..50 {
+        let ppid = get_ppid(current);
+        match ppid {
+            Some(0) | Some(1) | None => return None, // reached init or failed
+            Some(p) => {
+                if spawned_pids.contains(&p) {
+                    return Some(p);
+                }
+                current = p;
+            }
+        }
+    }
+    None
+}
+
+/// Read the parent PID of a process from /proc/<pid>/status.
+fn get_ppid(pid: u32) -> Option<u32> {
+    let status = std::fs::read_to_string(format!("/proc/{pid}/status")).ok()?;
+    for line in status.lines() {
+        if let Some(rest) = line.strip_prefix("PPid:") {
+            return rest.trim().parse().ok();
+        }
+    }
+    None
 }
 
 fn hostname() -> Option<String> {

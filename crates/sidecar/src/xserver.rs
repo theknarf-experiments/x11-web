@@ -29,7 +29,7 @@ pub struct X11Server {
     update_tx: mpsc::UnboundedSender<TaggedDisplayUpdate>,
     input_tx: broadcast::Sender<(String, InputEvent)>,
     resize_tx: broadcast::Sender<(String, u32, u16, u16)>,
-    client_connected_tx: mpsc::UnboundedSender<String>,
+    client_connected_tx: mpsc::UnboundedSender<(String, u32)>,
 }
 
 /// Shared window registry, keyed by window ID.
@@ -649,7 +649,7 @@ impl X11Server {
         update_tx: mpsc::UnboundedSender<TaggedDisplayUpdate>,
         input_tx: broadcast::Sender<(String, InputEvent)>,
         resize_tx: broadcast::Sender<(String, u32, u16, u16)>,
-        client_connected_tx: mpsc::UnboundedSender<String>,
+        client_connected_tx: mpsc::UnboundedSender<(String, u32)>,
     ) -> Self {
         let socket_path = PathBuf::from(format!("/tmp/.X11-unix/X{display_number}"));
         Self {
@@ -762,10 +762,12 @@ impl X11Server {
                 Ok((stream, _addr)) => {
                     let conn_index = CONNECTION_COUNTER.fetch_add(1, Ordering::Relaxed);
                     let client_id = Uuid::new_v4().to_string();
+                    // Get the PID of the connecting process via SO_PEERCRED
+                    let peer_pid = stream.peer_cred().ok().and_then(|c| c.pid()).unwrap_or(0) as u32;
                     let update_tx = self.update_tx.clone();
                     let input_rx = self.input_tx.subscribe();
                     let resize_rx = self.resize_tx.subscribe();
-                    let _ = self.client_connected_tx.send(client_id.clone());
+                    let _ = self.client_connected_tx.send((client_id.clone(), peer_pid));
                     let cid = client_id.clone();
                     let sw = shared_windows.clone();
                     let wm = shared_wm_state.clone();
