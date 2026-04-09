@@ -77,6 +77,8 @@ function App() {
 	/** Ref to always-current processes map (avoids stale closures in callbacks). */
 	const processesRef = useRef(processes);
 	processesRef.current = processes;
+	const initialWindowStatesRef = useRef(initialWindowStates);
+	initialWindowStatesRef.current = initialWindowStates;
 
 	// Keep clientInfoRef in sync with connectedProcesses
 	useEffect(() => {
@@ -168,14 +170,12 @@ function App() {
 					const info = clientInfoRef.current.get(clientId);
 					const pid = info?.pid ?? 0;
 					const sid = info?.sidecarId ?? sidecarId;
-					// Use command from ProcessConnected (most reliable),
-					// fall back to ProcessList lookup, then "PID N"
 					const command = info?.command;
 					const title = command
 						|| processesRef.current[sid]?.find((p) => p.pid === pid)?.command
 						|| `PID ${pid}`;
 
-					const saved = initialWindowStates.find(
+					const saved = initialWindowStatesRef.current.find(
 						(ws) => ws.clientId === clientId,
 					);
 					let cx: number;
@@ -258,7 +258,8 @@ function App() {
 			r.pushUpdate(update);
 		});
 		return () => onDisplayUpdate(null);
-	}, [onDisplayUpdate, initialWindowStates, send]);
+	// biome-ignore lint/correctness/useExhaustiveDependencies: initialWindowStates used via ref to avoid re-registering callback
+	}, [onDisplayUpdate, send]);
 
 	// Handle window state changes from other tabs
 	useEffect(() => {

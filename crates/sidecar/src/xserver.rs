@@ -1388,8 +1388,6 @@ fn handle_request(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
     let seq = state.sequence;
     // Log all requests for debugging
 
-
-
     match major_opcode {
         1 => handle_create_window(state, data, seq),
         2 => handle_change_window_attributes(state, data),
@@ -1920,12 +1918,6 @@ fn handle_map_window(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> 
             state.client_id.clone(),
             DisplayUpdate::WindowMapped { window_id: wid_str.clone(), is_top_level },
         ));
-
-        // Fill window with its background pixel (like a real X server does)
-        let w = win.width;
-        let h = win.height;
-        let bg = win.background_pixel;
-        win.framebuffer.fill_rect(0, 0, w, h, bg);
 
         // Send MapNotify event
         let mut map_event = [0u8; 32];
@@ -3801,7 +3793,8 @@ fn handle_query_extension(_state: &mut ClientState, data: &[u8], seq: u16) -> Ve
             reply[11] = 0; // first_error
         }
         "XKEYBOARD" => {
-            // present = false
+            // present = false — XKB stub handler exists but advertising it
+            // causes Firefox to crash during XKB keyboard map initialization.
         }
         "XC-MISC" => {
             reply[8] = 1; // present = true

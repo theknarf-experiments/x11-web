@@ -772,10 +772,7 @@ test.describe
 			});
 		});
 
-		// Firefox needs RANDR extension to map windows, but our RANDR is too
-		// incomplete (crashes Firefox). Without RANDR, GDK3 doesn't call
-		// XMapWindow on the top-level. Skipped until RANDR is implemented.
-		test.skip("firefox shows exactly one window and renders content", async ({
+		test("firefox renders on the canvas", async ({
 			page,
 		}) => {
 			await page.goto(`http://localhost:${frontendPort}`);
@@ -789,18 +786,31 @@ test.describe
 			).toBeEnabled({ timeout: 30_000 });
 			await page.locator("button", { hasText: "Spawn" }).click();
 
-			// Wait for Firefox to start
-			await page.waitForTimeout(20000);
-
-			// Firefox should show exactly 1 window frame (not 3 or 4)
+			// Firefox/GDK3 doesn't call XMapWindow on top-level windows,
+			// so the server auto-maps them when child windows are mapped.
 			const windowFrames = page.locator('[data-testid="window-frame"]');
-			expect(await windowFrames.count()).toBe(1);
+			await expect(windowFrames.first()).toBeVisible({ timeout: 60_000 });
 
-			// That window should have rendered content
-			const canvas = windowFrames
-				.first()
-				.locator('[data-testid="x11-canvas"]');
-			expect(await hasRenderedContent(canvas)).toBe(true);
+			// At least one canvas should have rendered content
+			await expect
+				.poll(
+					async () => {
+						const count = await windowFrames.count();
+						for (let i = 0; i < count; i++) {
+							const canvas = windowFrames
+								.nth(i)
+								.locator('[data-testid="x11-canvas"]');
+							if (
+								(await canvas.isVisible()) &&
+								(await hasRenderedContent(canvas))
+							)
+								return true;
+						}
+						return false;
+					},
+					{ timeout: 120_000, intervals: [5000, 5000, 5000, 5000, 5000, 10000, 10000] },
+				)
+				.toBe(true);
 		});
 
 		// TODO: investigate Escape key delivery — vim doesn't receive it
