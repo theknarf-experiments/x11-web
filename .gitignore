@@ -3,8 +3,8 @@ node_modules
 .turbo
 .DS_Store
 
-# Frontend
-frontend/dist
+# Build output
+dist
 
 # Test artifacts
 test-results

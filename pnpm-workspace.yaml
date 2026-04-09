@@ -1,5 +1,6 @@
 packages:
   - frontend
+  - packages/*
   - e2e
   - crates/*
 

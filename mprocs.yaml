@@ -9,3 +9,6 @@ procs:
 
   frontend:
     cmd: ["pnpm", "--filter", "frontend", "dev"]
+
+  storybook:
+    cmd: ["pnpm", "--filter", "@x11-web/components", "dev"]
