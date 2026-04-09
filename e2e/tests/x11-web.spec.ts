@@ -836,6 +836,78 @@ test.describe
 			});
 		});
 
+		test("firefox responds to mouse and keyboard input", async ({
+			page,
+		}) => {
+			await page.goto(`http://localhost:${frontendPort}`);
+			await waitForDock(page);
+
+			// Spawn xeyes first — matches the manual testing flow
+			await spawnApp(page, "-geometry 100x80+0+0");
+			await page.waitForTimeout(2000);
+
+			await page.locator('[data-testid="spawn-button"]').click();
+			await page.locator('input[placeholder="command"]').fill("firefox-esr");
+			await page.locator('input[placeholder="args"]').fill("");
+			await expect(
+				page.locator("button", { hasText: "Spawn" }),
+			).toBeEnabled({ timeout: 30_000 });
+			await page.locator("button", { hasText: "Spawn" }).click();
+
+			const windowFrames = page.locator('[data-testid="window-frame"]');
+			await expect(windowFrames).toHaveCount(2, { timeout: 120_000 });
+
+			// Wait for both canvases to have content
+			let firefoxCanvas: Locator | null = null;
+			await expect
+				.poll(
+					async () => {
+						const count = await windowFrames.count();
+						let withContent = 0;
+						for (let i = 0; i < count; i++) {
+							const canvas = windowFrames
+								.nth(i)
+								.locator('[data-testid="x11-canvas"]');
+							if (
+								(await canvas.isVisible()) &&
+								(await hasRenderedContent(canvas))
+							) {
+								withContent++;
+								firefoxCanvas = canvas;
+							}
+						}
+						return withContent >= 2;
+					},
+					{ timeout: 120_000, intervals: [5000, 5000, 5000, 5000, 5000, 10000] },
+				)
+				.toBe(true);
+
+			// Screenshot before interaction
+			await page.waitForTimeout(5000);
+			await expect(firefoxCanvas!).toHaveScreenshot(
+				"firefox-before-input.png",
+				{ maxDiffPixelRatio: 0.1, timeout: 15_000 },
+			);
+
+			// Click the address bar and type a URL
+			const box = await firefoxCanvas!.boundingBox();
+			expect(box).not.toBeNull();
+			await page.mouse.click(
+				box!.x + box!.width * 0.5,
+				box!.y + box!.height * 0.08,
+			);
+			await page.waitForTimeout(1000);
+			await page.keyboard.type("about:config", { delay: 50 });
+			await page.keyboard.press("Enter");
+			await page.waitForTimeout(5000);
+
+			// The page should have changed — no longer the welcome page
+			await expect(firefoxCanvas!).not.toHaveScreenshot(
+				"firefox-before-input.png",
+				{ maxDiffPixelRatio: 0.1, timeout: 30_000 },
+			);
+		});
+
 		// TODO: investigate Escape key delivery — vim doesn't receive it
 		test.skip("vim can be quit with :q", async ({ page }) => {
 			await page.goto(`http://localhost:${frontendPort}`);
