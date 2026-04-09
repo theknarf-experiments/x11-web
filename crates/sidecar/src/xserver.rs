@@ -1145,7 +1145,7 @@ async fn handle_client(
                 match msg {
                     WindowMessage::Input(input) => {
                         state.focus_window = x11_wid;
-                        let event_bytes = build_x11_input_event(&mut state, &input);
+                        let event_bytes = build_x11_input_event(&mut state, &input, x11_wid);
                         if !event_bytes.is_empty() {
                             stream.write_all(&event_bytes).await?;
                         }
@@ -1254,26 +1254,7 @@ fn resize_window(state: &mut ClientState, window_uuid: &str, width: u16, height:
 
 
 /// Convert a frontend InputEvent into X11 wire-format event bytes (32 bytes).
-fn build_x11_input_event(state: &mut ClientState, input: &InputEvent) -> Vec<u8> {
-    let target_window = if state.focus_window != 0
-        && state.focus_window != state.root_window
-        && state.windows.contains_key(&state.focus_window)
-    {
-        state.focus_window
-    } else {
-        state
-            .windows
-            .values()
-            .filter(|w| {
-                w.mapped
-                    && w.parent == state.root_window
-                    && w.class == 1
-                    && !w.override_redirect
-            })
-            .max_by_key(|w| w.id)
-            .map(|w| w.id)
-            .unwrap_or(state.root_window)
-    };
+fn build_x11_input_event(state: &mut ClientState, input: &InputEvent, target_window: u32) -> Vec<u8> {
 
     // Update tracked pointer position for QueryPointer
     match input {
