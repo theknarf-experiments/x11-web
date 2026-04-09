@@ -194,12 +194,18 @@ export function WindowFrame({
 			const rect = e.currentTarget.getBoundingClientRect();
 			const scaleX = e.currentTarget.width / rect.width;
 			const scaleY = e.currentTarget.height / rect.height;
+			// X11 state = buttons/modifiers BEFORE the press.
+			// Browser e.buttons already includes the just-pressed button, so mask it out.
+			// X11 state = buttons/modifiers BEFORE the press.
+			// Browser e.buttons already includes the just-pressed button, so mask it out.
+			const browserBit = [1, 4, 2][e.button] ?? 0;
+			const prePressButtons = e.buttons & ~browserBit;
 			sendInput({
 				kind: "ButtonPress",
 				button: x11Button(e.button),
 				x: Math.round((e.clientX - rect.left) * scaleX),
 				y: Math.round((e.clientY - rect.top) * scaleY),
-				state: mouseButtonMask(e.buttons),
+				state: mouseButtonMask(prePressButtons) | mouseMods(e),
 			});
 		},
 		[sendInput],
@@ -210,12 +216,16 @@ export function WindowFrame({
 			const rect = e.currentTarget.getBoundingClientRect();
 			const scaleX = e.currentTarget.width / rect.width;
 			const scaleY = e.currentTarget.height / rect.height;
+			// X11 state = buttons/modifiers BEFORE the release (including the button being released).
+			// Browser e.buttons already excludes the just-released button, so add it back.
+			const browserBit = [1, 4, 2][e.button] ?? 0;
+			const preReleaseButtons = e.buttons | browserBit;
 			sendInput({
 				kind: "ButtonRelease",
 				button: x11Button(e.button),
 				x: Math.round((e.clientX - rect.left) * scaleX),
 				y: Math.round((e.clientY - rect.top) * scaleY),
-				state: mouseButtonMask(e.buttons),
+				state: mouseButtonMask(preReleaseButtons) | mouseMods(e),
 			});
 		},
 		[sendInput],
@@ -478,6 +488,15 @@ function mouseButtonMask(buttons: number): number {
 	if (buttons & 1) mask |= 0x100;
 	if (buttons & 4) mask |= 0x200;
 	if (buttons & 2) mask |= 0x400;
+	return mask;
+}
+
+function mouseMods(e: React.MouseEvent): number {
+	let mask = 0;
+	if (e.shiftKey) mask |= 0x01;
+	if (e.ctrlKey) mask |= 0x04;
+	if (e.altKey) mask |= 0x08;
+	if (e.metaKey) mask |= 0x40;
 	return mask;
 }
 

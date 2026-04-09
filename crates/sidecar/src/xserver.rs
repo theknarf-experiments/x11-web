@@ -194,10 +194,9 @@ impl ClientState {
 
     /// Get the UUID for a top-level X11 window (if it exists).
 
-    /// Get the window ID string to send in display updates.
-    /// For top-level windows, returns the UUID. For others, returns the X11 ID as string.
-    pub(crate) fn window_id_str(&self, x11_wid: u32) -> String {
-        self.x11_to_uuid.get(&x11_wid).cloned().unwrap_or_else(|| x11_wid.to_string())
+    /// Get the UUID for a window. Returns None if the window was never registered.
+    pub(crate) fn window_uuid(&self, x11_wid: u32) -> Option<String> {
+        self.x11_to_uuid.get(&x11_wid).cloned()
     }
 
     /// Intern an atom name, returning its global ID.
@@ -459,7 +458,7 @@ impl ClientState {
             .collect();
 
         for wid in window_ids {
-            let wid_str = self.window_id_str(wid);
+            let Some(wid_str) = self.window_uuid(wid) else { continue };
             if let Some(win) = self.windows.get_mut(&wid) {
                 if let Some((x, y, w, h, pixels)) = win.framebuffer.take_dirty_pixels() {
                     // Use the window's owner client_id for routing display updates
@@ -1743,11 +1742,7 @@ fn handle_create_window(state: &mut ClientState, data: &[u8], _seq: u16) -> Vec<
     }
 
     let is_top_level = parent == state.root_window && class == 1 && !override_redirect;
-    let wid_str = if is_top_level {
-        state.get_or_create_window_uuid(wid)
-    } else {
-        wid.to_string()
-    };
+    let wid_str = state.get_or_create_window_uuid(wid);
     let _ = state.update_tx.send((
         state.client_id.clone(),
         DisplayUpdate::WindowCreated {
@@ -1867,14 +1862,15 @@ fn emit_cursor_changed(state: &mut ClientState, wid: u32) {
         }
     }
 
-    let wid_str = state.window_id_str(target);
-    let _ = state.update_tx.send((
-        state.client_id.clone(),
-        DisplayUpdate::CursorChanged {
-            window_id: wid_str,
-            cursor: css_cursor,
-        },
-    ));
+    if let Some(wid_str) = state.window_uuid(target) {
+        let _ = state.update_tx.send((
+            state.client_id.clone(),
+            DisplayUpdate::CursorChanged {
+                window_id: wid_str,
+                cursor: css_cursor,
+            },
+        ));
+    }
 }
 
 fn handle_create_glyph_cursor(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
@@ -1930,10 +1926,13 @@ fn handle_get_window_attributes(state: &mut ClientState, data: &[u8], seq: u16) 
 fn handle_destroy_window(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
     let wid = u32::from_le_bytes([data[4], data[5], data[6], data[7]]);
     state.windows.remove(&wid);
-    let _ = state.update_tx.send((
-        state.client_id.clone(),
-        DisplayUpdate::WindowDestroyed { window_id: state.window_id_str(wid) },
-    ));
+    if let Some(uuid) = state.x11_to_uuid.remove(&wid) {
+        state.window_router.unregister_all(&[uuid.clone()]);
+        let _ = state.update_tx.send((
+            state.client_id.clone(),
+            DisplayUpdate::WindowDestroyed { window_id: uuid },
+        ));
+    }
     Vec::new()
 }
 
@@ -1987,7 +1986,10 @@ fn handle_map_window(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> 
         }
     }
 
-    let wid_str = state.window_id_str(wid);
+    let Some(wid_str) = state.window_uuid(wid) else {
+        warn!("MapWindow: no UUID for {wid:#x}, skipping");
+        return events;
+    };
     let wm_state_atom = state.intern_atom("WM_STATE", false);
     if let Some(win) = state.windows.get_mut(&wid) {
         info!("MapWindow: id={wid:#x} {}x{} mapped={}", win.width, win.height, win.mapped);
@@ -2110,10 +2112,12 @@ fn handle_unmap_window(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8
 
     if let Some(win) = state.windows.get_mut(&wid) {
         win.mapped = false;
-        let _ = state.update_tx.send((
-            state.client_id.clone(),
-            DisplayUpdate::WindowUnmapped { window_id: state.window_id_str(wid) },
-        ));
+        if let Some(uuid) = state.window_uuid(wid) {
+            let _ = state.update_tx.send((
+                state.client_id.clone(),
+                DisplayUpdate::WindowUnmapped { window_id: uuid },
+            ));
+        }
 
         let mut event = [0u8; 32];
         event[0] = UNMAP_NOTIFY_EVENT;
@@ -2217,7 +2221,7 @@ fn handle_configure_window(state: &mut ClientState, data: &[u8], seq: u16) -> Ve
 
     let mut offset = 12;
     let mut changed = false;
-    let wid_str = state.window_id_str(wid);
+    let wid_str = state.window_uuid(wid);
 
     if let Some(win) = state.windows.get_mut(&wid) {
         for bit in 0..7 {
@@ -2266,16 +2270,18 @@ fn handle_configure_window(state: &mut ClientState, data: &[u8], seq: u16) -> Ve
                 win.framebuffer = Framebuffer::new(new_w, new_h);
             }
 
+            if let Some(ref uuid) = wid_str {
             let _ = state.update_tx.send((
                 state.client_id.clone(),
                 DisplayUpdate::WindowConfigured {
-                    window_id: wid_str.clone(),
+                    window_id: uuid.clone(),
                     x: win.x,
                     y: win.y,
                     width: win.width,
                     height: win.height,
                 },
             ));
+            }
 
             // Send ConfigureNotify
             let mut event = [0u8; 32];
@@ -2445,13 +2451,15 @@ fn handle_change_property(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
     if is_wm_name && format == 8 && data.len() >= 24 + byte_len {
         let title = String::from_utf8_lossy(&data[24..24 + byte_len]).to_string();
         if !title.is_empty() {
+            if let Some(uuid) = state.window_uuid(window) {
             let _ = state.update_tx.send((
                 state.client_id.clone(),
                 DisplayUpdate::TitleChanged {
-                    window_id: state.window_id_str(window),
+                    window_id: uuid,
                     title,
                 },
             ));
+            }
         }
     }
 
