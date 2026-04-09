@@ -1270,12 +1270,8 @@ fn build_x11_input_event(state: &mut ClientState, input: &InputEvent, target_win
     let seq = state.sequence;
     let mut event = [0u8; 32];
 
-    // Timestamp in milliseconds since server start (X11 expects monotonic ms)
-    static SERVER_START: std::sync::OnceLock<std::time::Instant> = std::sync::OnceLock::new();
-    let timestamp = SERVER_START
-        .get_or_init(std::time::Instant::now)
-        .elapsed()
-        .as_millis() as u32;
+    // Timestamp 0 = CurrentTime (matches the working version at 1adf817)
+    let timestamp: u32 = 0;
 
     match input {
         InputEvent::MotionNotify { x, y, state: mask } => {
