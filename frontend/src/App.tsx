@@ -32,6 +32,7 @@ interface CanvasWindow {
 	y: number;
 	color: string;
 	zIndex: number;
+	cursor: string;
 }
 
 const PASTEL_COLORS = [
@@ -159,6 +160,17 @@ function App() {
 				);
 			}
 
+			// Cursor changes update the matching window
+			if (update.kind === "CursorChanged") {
+				setWindows((prev) =>
+					prev.map((w) =>
+						w.windowId === update.window_id
+							? { ...w, cursor: update.cursor }
+							: w,
+					),
+				);
+			}
+
 			// WindowMapped with is_top_level — create a WindowFrame
 			if (update.kind === "WindowMapped" && update.is_top_level) {
 				const windowId = update.window_id;
@@ -216,6 +228,7 @@ function App() {
 							y: cy,
 							color,
 							zIndex: nextZIndex++,
+							cursor: "default",
 						},
 					];
 				});
@@ -383,6 +396,7 @@ function App() {
 							y={win.y}
 							zIndex={win.zIndex}
 							color={win.color}
+							cursor={win.cursor}
 							renderer={renderer}
 							onClose={() => {
 								// Kill process — removes ALL windows for this process

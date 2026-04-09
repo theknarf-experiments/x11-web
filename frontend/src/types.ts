@@ -180,6 +180,11 @@ export type DisplayUpdate =
 			angle2: number;
 			filled: boolean;
 			color: number;
+	  }
+	| {
+			kind: "CursorChanged";
+			window_id: string;
+			cursor: string;
 	  };
 
 export type InputEvent =

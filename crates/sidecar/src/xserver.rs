@@ -175,6 +175,8 @@ pub(crate) struct ClientState {
     pub(crate) message_tx: mpsc::UnboundedSender<(u32, WindowMessage)>,
     /// Local map: x11_window_id → uuid (for this client's top-level windows).
     pub(crate) x11_to_uuid: HashMap<u32, String>,
+    /// Cursor resources created by this client.
+    pub(crate) cursors: HashMap<u32, String>,
 }
 
 impl ClientState {
@@ -541,6 +543,8 @@ pub(crate) struct WindowState {
     pub(crate) properties: HashMap<u32, PropertyValue>,
     /// The client_id that created this window (for display update routing).
     pub(crate) owner_client_id: String,
+    /// Cursor resource ID set on this window (None = inherit from parent).
+    pub(crate) cursor: Option<u32>,
 }
 
 pub(crate) struct PixmapState {
@@ -796,6 +800,7 @@ impl X11Server {
                     framebuffer: Framebuffer::new(SCREEN_WIDTH as u32, SCREEN_HEIGHT as u32),
                     properties: HashMap::new(),
                     owner_client_id: String::new(), // root has no owner
+                    cursor: None,
                 },
             );
 
@@ -1043,6 +1048,7 @@ async fn handle_client(
         window_router,
         message_tx,
         x11_to_uuid: HashMap::new(),
+        cursors: HashMap::new(),
     };
 
     // Don't set EWMH WM properties (_NET_SUPPORTING_WM_CHECK etc.).
@@ -1250,8 +1256,6 @@ fn resize_window(state: &mut ClientState, window_uuid: &str, width: u16, height:
 
 /// Convert a frontend InputEvent into X11 wire-format event bytes (32 bytes).
 fn build_x11_input_event(state: &mut ClientState, input: &InputEvent) -> Vec<u8> {
-    // Deliver events to the focus window if set, otherwise find the
-    // top-level mapped window owned by this client.
     let target_window = if state.focus_window != 0
         && state.focus_window != state.root_window
         && state.windows.contains_key(&state.focus_window)
@@ -1295,19 +1299,19 @@ fn build_x11_input_event(state: &mut ClientState, input: &InputEvent) -> Vec<u8>
 
     match input {
         InputEvent::MotionNotify { x, y, state: mask } => {
-            event[0] = MOTION_NOTIFY_EVENT; // 6
+            event[0] = MOTION_NOTIFY_EVENT;
             event[1] = 0; // detail: Normal
             event[2..4].copy_from_slice(&seq.to_le_bytes());
             event[4..8].copy_from_slice(&timestamp.to_le_bytes());
-            event[8..12].copy_from_slice(&state.root_window.to_le_bytes()); // root
-            event[12..16].copy_from_slice(&target_window.to_le_bytes()); // event window
-            event[16..20].copy_from_slice(&target_window.to_le_bytes()); // child
-            event[20..22].copy_from_slice(&x.to_le_bytes()); // root_x
-            event[22..24].copy_from_slice(&y.to_le_bytes()); // root_y
-            event[24..26].copy_from_slice(&x.to_le_bytes()); // event_x
-            event[26..28].copy_from_slice(&y.to_le_bytes()); // event_y
-            event[28..30].copy_from_slice(&mask.to_le_bytes()); // state
-            event[30] = 1; // same_screen
+            event[8..12].copy_from_slice(&state.root_window.to_le_bytes());
+            event[12..16].copy_from_slice(&target_window.to_le_bytes());
+            event[16..20].copy_from_slice(&target_window.to_le_bytes());
+            event[20..22].copy_from_slice(&x.to_le_bytes());
+            event[22..24].copy_from_slice(&y.to_le_bytes());
+            event[24..26].copy_from_slice(&x.to_le_bytes());
+            event[26..28].copy_from_slice(&y.to_le_bytes());
+            event[28..30].copy_from_slice(&mask.to_le_bytes());
+            event[30] = 1;
         }
         InputEvent::ButtonPress {
             button,
@@ -1315,7 +1319,7 @@ fn build_x11_input_event(state: &mut ClientState, input: &InputEvent) -> Vec<u8>
             y,
             state: mask,
         } => {
-            event[0] = BUTTON_PRESS_EVENT; // 4
+            event[0] = BUTTON_PRESS_EVENT;
             event[1] = *button;
             event[2..4].copy_from_slice(&seq.to_le_bytes());
             event[4..8].copy_from_slice(&timestamp.to_le_bytes());
@@ -1335,7 +1339,7 @@ fn build_x11_input_event(state: &mut ClientState, input: &InputEvent) -> Vec<u8>
             y,
             state: mask,
         } => {
-            event[0] = BUTTON_RELEASE_EVENT; // 5
+            event[0] = BUTTON_RELEASE_EVENT;
             event[1] = *button;
             event[2..4].copy_from_slice(&seq.to_le_bytes());
             event[4..8].copy_from_slice(&timestamp.to_le_bytes());
@@ -1353,7 +1357,7 @@ fn build_x11_input_event(state: &mut ClientState, input: &InputEvent) -> Vec<u8>
             keycode,
             state: mask,
         } => {
-            event[0] = KEY_PRESS_EVENT; // 2
+            event[0] = KEY_PRESS_EVENT;
             event[1] = *keycode as u8;
             event[2..4].copy_from_slice(&seq.to_le_bytes());
             event[4..8].copy_from_slice(&timestamp.to_le_bytes());
@@ -1367,7 +1371,7 @@ fn build_x11_input_event(state: &mut ClientState, input: &InputEvent) -> Vec<u8>
             keycode,
             state: mask,
         } => {
-            event[0] = KEY_RELEASE_EVENT; // 3
+            event[0] = KEY_RELEASE_EVENT;
             event[1] = *keycode as u8;
             event[2..4].copy_from_slice(&seq.to_le_bytes());
             event[4..8].copy_from_slice(&timestamp.to_le_bytes());
@@ -1429,6 +1433,8 @@ fn handle_request(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
         84 => handle_alloc_color(state, data, seq),
         85 => handle_alloc_named_color(state, data, seq),
         92 => handle_lookup_color(state, data, seq),
+        94 => handle_create_glyph_cursor(state, data),
+        95 => handle_free_cursor(state, data),
         91 => handle_query_colors(state, data, seq),
         97 => {
             // QueryBestSize: reply with the requested width/height
@@ -1497,9 +1503,7 @@ fn handle_request(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
         78 | // CreateColormap
         79 | // FreeColormap
         88 | // FreeColors
-        93 | // CreateCursor
-        94 | // CreateGlyphCursor
-        95 | // FreeCursor
+        93 | // CreateCursor (custom bitmap — stubbed for now)
         96 | // RecolorCursor
         100 | // ChangeKeyboardMapping
         102 | // ChangeKeyboardControl
@@ -1664,6 +1668,7 @@ fn handle_create_window(state: &mut ClientState, data: &[u8], _seq: u16) -> Vec<
     let mut background_pixel = 0u32;
     let mut event_mask = 0u32;
     let mut override_redirect = false;
+    let mut cursor_id: Option<u32> = None;
 
     // Parse value list
     let mut offset = 32;
@@ -1691,7 +1696,7 @@ fn handle_create_window(state: &mut ClientState, data: &[u8], _seq: u16) -> Vec<
                     11 => event_mask = val,
                     12 => {} // do-not-propagate-mask
                     13 => {} // colormap
-                    14 => {} // cursor
+                    14 => if val != 0 { cursor_id = Some(val); }
                     _ => {}
                 }
                 offset += 4;
@@ -1723,6 +1728,7 @@ fn handle_create_window(state: &mut ClientState, data: &[u8], _seq: u16) -> Vec<
             framebuffer: Framebuffer::new(width as u32, height as u32),
             properties: HashMap::new(),
             owner_client_id: state.client_id.clone(),
+            cursor: cursor_id,
         },
     );
 
@@ -1765,6 +1771,7 @@ fn handle_change_window_attributes(state: &mut ClientState, data: &[u8]) -> Vec<
     let wid = u32::from_le_bytes([data[4], data[5], data[6], data[7]]);
     let value_mask = u32::from_le_bytes([data[8], data[9], data[10], data[11]]);
 
+    let mut cursor_changed = false;
     if let Some(win) = state.windows.get_mut(&wid) {
         let mut offset = 12;
         for bit in 0..15 {
@@ -1793,6 +1800,13 @@ fn handle_change_window_attributes(state: &mut ClientState, data: &[u8]) -> Vec<
                                 }
                             }
                         }
+                        14 => {
+                            let new_cursor = if val == 0 { None } else { Some(val) };
+                            if win.cursor != new_cursor {
+                                win.cursor = new_cursor;
+                                cursor_changed = true;
+                            }
+                        }
                         _ => {}
                     }
                     offset += 4;
@@ -1801,6 +1815,83 @@ fn handle_change_window_attributes(state: &mut ClientState, data: &[u8]) -> Vec<
         }
     }
 
+    if cursor_changed {
+        emit_cursor_changed(state, wid);
+    }
+
+    Vec::new()
+}
+
+/// Map X11 cursor font glyph index to CSS cursor name.
+fn glyph_to_css_cursor(glyph: u16) -> &'static str {
+    match glyph {
+        2 | 30 | 68 => "default",    // arrow / left_ptr
+        24 | 34 => "crosshair",      // cross / crosshair
+        52 => "not-allowed",          // circle
+        58 | 70 => "pointer",         // hand2 / hand1
+        92 => "wait",                 // watch
+        130 => "text",                // xterm
+        132 => "move",                // fleur
+        138 => "help",                // question_arrow
+        116 => "col-resize",          // sb_h_double_arrow
+        120 => "row-resize",          // sb_v_double_arrow
+        12 => "s-resize",             // bottom_side
+        14 => "sw-resize",            // bottom_left_corner
+        16 => "se-resize",            // bottom_right_corner
+        134 => "n-resize",            // top_side
+        136 => "nw-resize",           // top_left_corner
+        100 => "ne-resize",           // top_right_corner
+        108 => "w-resize",            // left_side
+        96 => "e-resize",             // right_side
+        _ => "default",
+    }
+}
+
+/// Resolve the effective cursor for a window and emit CursorChanged to the frontend.
+fn emit_cursor_changed(state: &mut ClientState, wid: u32) {
+    // Resolve the CSS cursor name from the window's cursor resource
+    let css_cursor = state.windows.get(&wid)
+        .and_then(|w| w.cursor)
+        .and_then(|cid| state.cursors.get(&cid))
+        .cloned()
+        .unwrap_or_else(|| "default".to_string());
+
+    // Walk up to the top-level ancestor
+    let mut target = wid;
+    for _ in 0..10 {
+        match state.windows.get(&target) {
+            Some(w) if w.parent != state.root_window && w.parent != 0 => {
+                target = w.parent;
+            }
+            _ => break,
+        }
+    }
+
+    let wid_str = state.window_id_str(target);
+    let _ = state.update_tx.send((
+        state.client_id.clone(),
+        DisplayUpdate::CursorChanged {
+            window_id: wid_str,
+            cursor: css_cursor,
+        },
+    ));
+}
+
+fn handle_create_glyph_cursor(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
+    if data.len() < 32 { return Vec::new(); }
+    let cid = u32::from_le_bytes([data[4], data[5], data[6], data[7]]);
+    let source_char = u16::from_le_bytes([data[16], data[17]]);
+    let css_name = glyph_to_css_cursor(source_char).to_string();
+    info!("CreateGlyphCursor: id={cid:#x} glyph={source_char} -> \"{css_name}\"");
+    state.cursors.insert(cid, css_name);
+    Vec::new()
+}
+
+fn handle_free_cursor(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
+    if data.len() >= 8 {
+        let cid = u32::from_le_bytes([data[4], data[5], data[6], data[7]]);
+        state.cursors.remove(&cid);
+    }
     Vec::new()
 }
 
@@ -2505,7 +2596,6 @@ fn handle_query_pointer(state: &mut ClientState, _data: &[u8], seq: u16) -> Vec<
 fn handle_set_input_focus(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
     if data.len() >= 8 {
         let focus = u32::from_le_bytes([data[4], data[5], data[6], data[7]]);
-        // 0 = None, 1 = PointerRoot — keep as-is; otherwise store the window
         state.focus_window = focus;
     }
     Vec::new()

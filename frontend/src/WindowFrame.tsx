@@ -10,6 +10,7 @@ interface WindowFrameProps {
 	y: number;
 	zIndex: number;
 	color: string;
+	cursor: string;
 	renderer: ClientRenderer;
 	onClose: () => void;
 	onMove: (x: number, y: number) => void;
@@ -35,6 +36,7 @@ export function WindowFrame({
 	y,
 	zIndex,
 	color,
+	cursor,
 	renderer,
 	onClose,
 	onMove,
@@ -317,6 +319,7 @@ export function WindowFrame({
 			<canvas
 				ref={canvasRef}
 				className={s.canvas}
+				style={{ cursor }}
 				data-testid="x11-canvas"
 				tabIndex={0}
 				onPointerDown={(e) => {

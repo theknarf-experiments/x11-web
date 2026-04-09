@@ -315,6 +315,10 @@ pub enum DisplayUpdate {
         filled: bool,
         color: u32,
     },
+    CursorChanged {
+        window_id: String,
+        cursor: String,
+    },
 }
 
 /// Input events sent from the frontend to X11 clients.
