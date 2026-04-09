@@ -778,20 +778,23 @@ test.describe
 			await page.goto(`http://localhost:${frontendPort}`);
 			await waitForDock(page);
 
+			// Spawn xeyes first — matches the manual testing flow
+			await spawnApp(page, "-geometry 100x80+0+0");
+			await page.waitForTimeout(2000);
+
 			await page.locator('[data-testid="spawn-button"]').click();
 			await page.locator('input[placeholder="command"]').fill("firefox-esr");
-			await page.locator('input[placeholder="args"]').fill("--no-remote about:blank");
+			await page.locator('input[placeholder="args"]').fill("");
 			await expect(
 				page.locator("button", { hasText: "Spawn" }),
 			).toBeEnabled({ timeout: 30_000 });
 			await page.locator("button", { hasText: "Spawn" }).click();
 
-			// Firefox/GDK3 doesn't call XMapWindow on top-level windows,
-			// so the server auto-maps them when child windows are mapped.
 			const windowFrames = page.locator('[data-testid="window-frame"]');
-			await expect(windowFrames.first()).toBeVisible({ timeout: 60_000 });
+			// Wait for Firefox window (in addition to xeyes)
+			await expect(windowFrames).toHaveCount(2, { timeout: 120_000 });
 
-			// At least one canvas should have rendered content
+			// Wait for rendered content on the Firefox canvas
 			await expect
 				.poll(
 					async () => {
@@ -811,6 +814,26 @@ test.describe
 					{ timeout: 120_000, intervals: [5000, 5000, 5000, 5000, 5000, 10000, 10000] },
 				)
 				.toBe(true);
+
+			// Screenshot the Firefox canvas (last frame with content)
+			const count = await windowFrames.count();
+			let firefoxCanvas: Locator | null = null;
+			for (let i = 0; i < count; i++) {
+				const canvas = windowFrames
+					.nth(i)
+					.locator('[data-testid="x11-canvas"]');
+				if (
+					(await canvas.isVisible()) &&
+					(await hasRenderedContent(canvas))
+				) {
+					firefoxCanvas = canvas;
+				}
+			}
+			expect(firefoxCanvas).not.toBeNull();
+			await expect(firefoxCanvas!).toHaveScreenshot("firefox-canvas.png", {
+				maxDiffPixelRatio: 0.1,
+				timeout: 15_000,
+			});
 		});
 
 		// TODO: investigate Escape key delivery — vim doesn't receive it
