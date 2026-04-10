@@ -111,10 +111,68 @@ impl RenderState {
 }
 
 /// Composite a single source pixel over a destination pixel using the OVER operator.
+// =============================================================================
+// Disjoint / conjoint coverage helpers used by the advanced PictOps.
+//
+// The X RENDER spec defines two interpretations of coverage when both
+// the source and destination have partial alpha:
+//
+// * Disjoint: src and dst occupy *non-overlapping* fractions of the
+//   pixel. When `Sa + Da > 1` they're forced to overlap; the operator
+//   decides who "wins" that overlap.
+// * Conjoint: src and dst occupy *maximally overlapping* fractions.
+//   The smaller-coverage one is wholly inside the larger-coverage one.
+//
+// All four helpers return the per-channel coefficient scaled to 0..255
+// (so callers can use them directly in the `(Fs, Fd)` table the main
+// blend loop expects).
+// =============================================================================
+
+/// "in_part" for disjoint coverage: the fraction of `a`'s coverage
+/// area that's *inside* the forced overlap with `b`. Zero unless
+/// `a + b > 1`.
+fn in_dis(a: i32, b: i32) -> i32 {
+    if a == 0 {
+        return 0;
+    }
+    let num = (a + b - 255).max(0) as i64;
+    ((num * 255) / a as i64).clamp(0, 255) as i32
+}
+
+/// "out_part" for disjoint coverage: the fraction of `a`'s coverage
+/// area that's *outside* `b`. Equal to `min(1, (1-b)/a)`.
+fn out_dis(a: i32, b: i32) -> i32 {
+    if a == 0 {
+        return 0;
+    }
+    let num = (255 - b) as i64;
+    ((num * 255) / a as i64).clamp(0, 255) as i32
+}
+
+/// "in_part" for conjoint coverage: the fraction of `a`'s coverage
+/// area that's covered by `b`. Equal to `min(1, b/a)`.
+fn in_con(a: i32, b: i32) -> i32 {
+    if a == 0 {
+        return 0;
+    }
+    ((b as i64 * 255) / a as i64).clamp(0, 255) as i32
+}
+
+/// "out_part" for conjoint coverage: the fraction of `a`'s coverage
+/// area that's *not* covered by `b`. Equal to `max(0, 1 - b/a)`.
+fn out_con(a: i32, b: i32) -> i32 {
+    if a == 0 {
+        return 0;
+    }
+    let num = (a - b).max(0) as i64;
+    ((num * 255) / a as i64).clamp(0, 255) as i32
+}
+
 /// Apply a Porter-Duff compositing operator to a single destination
-/// pixel. Implements the 12 standard X RENDER operators (PictOp 0..12)
-/// using premultiplied alpha as the spec requires. Operators above 12
-/// (Saturate, Disjoint*, Conjoint*) fall through to PictOpOver.
+/// pixel. Implements every X RENDER PictOp the spec defines (0..12,
+/// Saturate=13, the Disjoint family 16..27, and the Conjoint family
+/// 32..43) using premultiplied alpha. Unknown ops fall through to
+/// PictOpOver.
 ///
 /// Both `src` and `dst` are premultiplied BGRA in little-endian byte
 /// order. SolidFill colours are premultiplied at creation time, and
@@ -171,88 +229,41 @@ pub(crate) fn composite_pixel(
         10 => (255 - da, sa),               // AtopReverse
         11 => (255 - da, 255 - sa),         // Xor
         12 => (255, 255),                   // Add (clamped below)
-        // Saturate (13) and DisjointOver (19) share the same formula:
-        //   Fs = min(1, (1-Da)/Sa)  if Sa > 0; 0 otherwise
-        //   Fd = 1
-        // The min ensures result alpha never exceeds 1.
-        13 | 19 => {
-            if sa == 0 {
-                (0, 255)
-            } else {
-                let inv_da = (255 - da) as i64;
-                let scaled = (inv_da * 255) / sa as i64;
-                ((scaled.min(255)) as i32, 255)
-            }
-        }
-        // DisjointSrc (17): like Saturate but no destination contribution.
-        17 => {
-            if sa == 0 {
-                (0, 0)
-            } else {
-                let inv_da = (255 - da) as i64;
-                let scaled = (inv_da * 255) / sa as i64;
-                ((scaled.min(255)) as i32, 0)
-            }
-        }
-        // DisjointDst (18): symmetric — destination dominates with the
-        // same disjoint scaling, source contributes nothing.
-        18 => {
-            if da == 0 {
-                (0, 0)
-            } else {
-                let inv_sa = (255 - sa) as i64;
-                let scaled = (inv_sa * 255) / da as i64;
-                (0, (scaled.min(255)) as i32)
-            }
-        }
-        // DisjointOverReverse (20): symmetric of DisjointOver/Saturate.
-        20 => {
-            if da == 0 {
-                (255, 0)
-            } else {
-                let inv_sa = (255 - sa) as i64;
-                let scaled = (inv_sa * 255) / da as i64;
-                (255, (scaled.min(255)) as i32)
-            }
-        }
-        // DisjointClear (16): same as Clear.
-        16 => (0, 0),
-        // ConjointClear (32) / ConjointSrc (33) / ConjointDst (34):
-        // identical to the standard Clear / Src / Dst.
-        32 => (0, 0),
-        33 => {
-            // Identical to PictOpSrc — handled as a fast path above
-            // would have been ideal but the match would still hit
-            // here for op == 33; just compute the equivalent.
-            (255, 0)
-        }
-        34 => (0, 255),
-        // ConjointOver (35):
-        //   Fa = 1
-        //   Fb = max(0, 1 - Sa/Da)  — when Sa fully covers, dst gone
-        35 => {
-            let fb = if da == 0 {
-                0
-            } else if sa >= da {
-                0
-            } else {
-                ((da - sa) as i64 * 255 / da as i64).max(0) as i32
-            };
-            (255, fb)
-        }
-        // ConjointOverReverse (36): symmetric of 35.
-        36 => {
-            let fa = if sa == 0 {
-                0
-            } else if da >= sa {
-                0
-            } else {
-                ((sa - da) as i64 * 255 / sa as i64).max(0) as i32
-            };
-            (fa, 255)
-        }
-        // Remaining Disjoint/Conjoint operators (21..27, 37..43) are
-        // not implemented yet — fall back to Over.
+        // PictOpSaturate (13) per the X RENDER spec is *exactly*
+        // additive Add with the source scaled down so the result
+        // alpha never exceeds 1. Mathematically identical to
+        // PictOpDisjointOverReverse (20).
+        13 | 20 => (out_dis(sa, da), 255),
+
+        // ----- Disjoint family (16..27) -----
+        16 => (0, 0),                                   // DisjointClear
+        17 => (out_dis(sa, da), 0),                     // DisjointSrc
+        18 => (0, out_dis(da, sa)),                     // DisjointDst
+        19 => (255, out_dis(da, sa)),                   // DisjointOver
+        // 20 handled above (DisjointOverReverse == Saturate)
+        21 => (in_dis(sa, da), 0),                      // DisjointIn
+        22 => (0, in_dis(da, sa)),                      // DisjointInReverse
+        23 => (out_dis(sa, da), 0),                     // DisjointOut
+        24 => (0, out_dis(da, sa)),                     // DisjointOutReverse
+        25 => (in_dis(sa, da), out_dis(da, sa)),        // DisjointAtop
+        26 => (out_dis(sa, da), in_dis(da, sa)),        // DisjointAtopReverse
+        27 => (out_dis(sa, da), out_dis(da, sa)),       // DisjointXor
+
+        // ----- Conjoint family (32..43) -----
+        32 => (0, 0),                                   // ConjointClear
+        33 => (255, 0),                                 // ConjointSrc (= Src)
+        34 => (0, 255),                                 // ConjointDst (= Dst)
+        35 => (255, out_con(da, sa)),                   // ConjointOver
+        36 => (out_con(sa, da), 255),                   // ConjointOverReverse
+        37 => (in_con(sa, da), 0),                      // ConjointIn
+        38 => (0, in_con(da, sa)),                      // ConjointInReverse
+        39 => (out_con(sa, da), 0),                     // ConjointOut
+        40 => (0, out_con(da, sa)),                     // ConjointOutReverse
+        41 => (in_con(sa, da), out_con(da, sa)),        // ConjointAtop
+        42 => (out_con(sa, da), in_con(da, sa)),        // ConjointAtopReverse
+        43 => (out_con(sa, da), out_con(da, sa)),       // ConjointXor
+
+        // Anything we still don't recognise — fall back to Over.
         _ => (255, 255 - sa),
     };
 
@@ -1743,27 +1754,42 @@ fn get_glyph_alpha(data: &[u8], width: u16, x: u16, y: u16, format_id: u32) -> u
 ///
 /// Used by Trapezoids / Triangles / TriStrip / TriFan / CompositeGlyphs
 /// where the source is meant to be a single colour for the whole shape.
+/// Three cases we know how to flatten:
+///
+/// 1. A direct solid fill (created via CreateSolidFill).
+/// 2. A picture wrapping a solid fill drawable.
+/// 3. A picture wrapping a tiny pixmap with `repeat=1` — rendercheck
+///    and Cairo both use this pattern as a "solid colour source"
+///    instead of CreateSolidFill. We sample the top-left pixel.
 fn resolve_source_color(state: &ClientState, src_pic: u32) -> (u8, u8, u8, u8) {
-    // Check if it's a solid fill directly
+    // Direct solid fill.
     if let Some(fill) = state.render.solid_fills.get(&src_pic) {
         return (fill.r, fill.g, fill.b, fill.a);
     }
 
-    // Check if it's a picture wrapping a solid fill
     if let Some(pic) = state.render.pictures.get(&src_pic) {
+        // Picture wrapping a solid fill.
         if let Some(fill) = state.render.solid_fills.get(&pic.drawable) {
             return (fill.r, fill.g, fill.b, fill.a);
         }
+        // Picture wrapping a repeat-tiled pixmap. Sample the top-
+        // left pixel — this is what rendercheck does for its triangle
+        // source colour and what Cairo does for tiny "tile" sources.
+        // Only handle the `repeat=1` case so we don't accidentally
+        // flatten a real multi-pixel image to one colour.
+        if pic.repeat == 1 {
+            if let Some(pm) = state.pixmaps.get(&pic.drawable) {
+                let data = pm.framebuffer.data();
+                if data.len() >= 4 {
+                    // BGRA in memory order — return (R, G, B, A).
+                    return (data[2], data[1], data[0], data[3]);
+                }
+            }
+        }
     }
 
-    // Default: opaque white. Note that rendercheck (and some Cairo
-    // paths) use a 1x1 tiled pixmap as a "solid colour source"
-    // instead of CreateSolidFill — the right thing to do there
-    // would be to sample the first pixel of the underlying pixmap,
-    // but in practice the pixmap may not yet contain the colour
-    // the caller intended (it's filled by an earlier Composite that
-    // we may or may not have rasterised correctly), so the safest
-    // fallback continues to be opaque white.
+    // Default: opaque white. Apps that hand us a non-flattenable
+    // source still get *something* drawn instead of nothing.
     (0xFF, 0xFF, 0xFF, 0xFF)
 }
 
@@ -2162,8 +2188,8 @@ fn rasterize_linear_gradient(
 
     for row in 0..h as i32 {
         for col in 0..w as i32 {
-            // Use pixel centres for the projection so the rasterised
-            // gradient lines up with rendercheck's reference.
+            // Sample at pixel centres so t lines up with the
+            // reference rasteriser.
             let mut px = (src_x as i32 + col) as f64 + 0.5;
             let mut py = (src_y as i32 + row) as f64 + 0.5;
             if let Some(tx) = transform {

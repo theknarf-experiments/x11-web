@@ -1437,7 +1437,12 @@ test.describe
 			//                        OverReverse} and Conjoint{
 			//                        Clear,Src,Dst,Over,OverReverse}
 			//                        operators)
-			const RENDERCHECK_BASELINE_PASSED = 240;
+			//   2026-04-10 292/789  (full Disjoint{In,InReverse,Out,
+			//                        OutReverse,Atop,AtopReverse,Xor}
+			//                        and Conjoint{In,InReverse,Out,
+			//                        OutReverse,Atop,AtopReverse,Xor}
+			//                        via shared in/out coverage helpers)
+			const RENDERCHECK_BASELINE_PASSED = 292;
 			expect(passed).toBeGreaterThanOrEqual(RENDERCHECK_BASELINE_PASSED);
 		});
 
