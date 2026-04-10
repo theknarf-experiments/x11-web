@@ -112,6 +112,33 @@ impl Framebuffer {
         Some((dx as i16, dy as i16, dw as u16, dh as u16, compressed))
     }
 
+    /// Bitwise-invert every byte of a rectangle (the GXinvert raster
+    /// op). Used by clients that flip bits via XSetFunction +
+    /// XFillRectangle to compute the complement of an image — most
+    /// commonly the rendercheck `libreoffice_xrgb` "invert" subtest.
+    pub fn invert_rect(&mut self, x: i16, y: i16, width: u16, height: u16) {
+        let row_start = (x as i32).max(0) as usize;
+        let row_end = ((x as i32 + width as i32).min(self.width as i32)).max(0) as usize;
+        if row_start >= row_end {
+            return;
+        }
+        let row_len = row_end - row_start;
+        for row in 0..height as i32 {
+            let dy = y as i32 + row;
+            if dy < 0 || dy >= self.height as i32 {
+                continue;
+            }
+            let dst_off = dy as usize * self.stride + row_start * 4;
+            if dst_off + row_len * 4 > self.data.len() {
+                continue;
+            }
+            for byte in &mut self.data[dst_off..dst_off + row_len * 4] {
+                *byte = !*byte;
+            }
+        }
+        self.mark_dirty(x as i32, y as i32, width as u32, height as u32);
+    }
+
     /// Fill a rectangle with a solid color (0x00RRGGBB format).
     pub fn fill_rect(&mut self, x: i16, y: i16, width: u16, height: u16, color: u32) {
         let r = ((color >> 16) & 0xFF) as u8;

@@ -3427,10 +3427,19 @@ fn handle_poly_fill_rectangle(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
     }
 
     let fg = state.map_color_for_drawable(drawable, gc.foreground);
-    info!("PolyFillRect: draw={drawable:#x} fg={fg:#x} gc={gc_id:#x} rects={}", rects.len());
+    info!("PolyFillRect: draw={drawable:#x} fg={fg:#x} gc={gc_id:#x} rects={} fn={}", rects.len(), gc.function);
     if let Some(fb) = state.get_framebuffer_mut(drawable) {
         for &(x, y, width, height) in &rects {
-            fb.fill_rect(x, y, width, height, fg);
+            // GC function 10 = GXinvert (~dst). Most apps use the
+            // default GXcopy=3, but rendercheck's libreoffice xRGB
+            // "invert" subtest temporarily switches to GXinvert to
+            // flip every bit of the destination — including the
+            // padding byte of an xRGB pixmap.
+            if gc.function == 10 {
+                fb.invert_rect(x, y, width, height);
+            } else {
+                fb.fill_rect(x, y, width, height, fg);
+            }
         }
     }
 

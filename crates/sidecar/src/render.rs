@@ -8,12 +8,44 @@ const PICTFORMAT_ARGB32: u32 = 0x24;
 const PICTFORMAT_RGB24: u32 = 0x25;
 const PICTFORMAT_A8: u32 = 0x26;
 const PICTFORMAT_A1: u32 = 0x27;
+const PICTFORMAT_XRGB32: u32 = 0x28;
+const PICTFORMAT_XBGR32: u32 = 0x29;
 
-/// Whether the given pict format carries an alpha channel. RGB24 has
-/// no alpha; the spec mandates that compositing into such a picture
-/// proceeds as if Da = 1.0.
+/// Whether the given pict format carries an alpha channel. RGB24 /
+/// xRGB32 / xBGR32 have no alpha; the spec mandates compositing into
+/// such pictures proceeds as if Da = 1.0.
 fn pict_format_has_alpha(format_id: u32) -> bool {
-    !matches!(format_id, PICTFORMAT_RGB24)
+    !matches!(
+        format_id,
+        PICTFORMAT_RGB24 | PICTFORMAT_XRGB32 | PICTFORMAT_XBGR32
+    )
+}
+
+/// Decode a 4-byte raw pixmap word into canonical (b, g, r, a) values
+/// according to the picture's format. Our framebuffer stores raw
+/// pixmap memory; the same bytes are interpreted differently when
+/// read through different pict formats (e.g. an `xBGR32` picture and
+/// an `ARGB32` picture wrapping the same pixmap).
+fn decode_pixel_bgra(format_id: u32, bytes: &[u8]) -> (u8, u8, u8, u8) {
+    if bytes.len() < 4 {
+        return (0, 0, 0, 0);
+    }
+    match format_id {
+        // ARGB32: bytes [B, G, R, A] (the layout PutImage hands us
+        // on a little-endian server, and the canonical ordering we
+        // use everywhere internally).
+        PICTFORMAT_ARGB32 => (bytes[0], bytes[1], bytes[2], bytes[3]),
+        // xRGB32 / RGB24: same layout as ARGB32 but the high byte is
+        // either padding (xRGB) or absent (RGB24); force alpha=255.
+        PICTFORMAT_XRGB32 | PICTFORMAT_RGB24 => (bytes[0], bytes[1], bytes[2], 0xff),
+        // xBGR32: R/B swapped — bytes are [R, G, B, X].
+        PICTFORMAT_XBGR32 => (bytes[2], bytes[1], bytes[0], 0xff),
+        // A8 (alpha-only) — used for masks; report grey 0 with the
+        // pixmap's stored alpha so the standard mask multiply path
+        // does the right thing.
+        PICTFORMAT_A8 => (0, 0, 0, bytes[3]),
+        _ => (bytes[0], bytes[1], bytes[2], bytes[3]),
+    }
 }
 
 /// Whether `composite_pixel(op, dst, src=0)` is a no-op for the given
@@ -503,10 +535,15 @@ fn handle_query_version(seq: u16) -> Vec<u8> {
     reply.to_vec()
 }
 
-/// QueryPictFormats: reply with ARGB32, RGB24, A8, A1 formats + screen info
+/// QueryPictFormats: reply with ARGB32, RGB24, A8, A1, xRGB32, xBGR32
+/// formats + screen info
 fn handle_query_pict_formats(seq: u16) -> Vec<u8> {
-    // We define 4 formats: ARGB32, RGB24, A8, A1
-    let num_formats: u32 = 4;
+    // We define 6 formats: ARGB32, RGB24, A8, A1, xRGB32, xBGR32.
+    // The two `x*` formats are needed for the rendercheck
+    // libreoffice / gtk byte-swap tests; they share the depth-32
+    // pixmap layout with ARGB32 but treat the high byte as padding
+    // (xRGB) or swap R/B (xBGR).
+    let num_formats: u32 = 6;
     let num_screens: u32 = 1;
     let num_subpixel: u32 = 1;
 
@@ -607,6 +644,47 @@ fn handle_query_pict_formats(seq: u16) -> Vec<u8> {
         0,
         0,
         0x1, // 1-bit alpha
+    );
+
+    // Format 5: xRGB32 — depth 32, R/G/B in the same byte positions
+    // as ARGB32 but the high byte is padding (alphaMask = 0). The
+    // rendercheck libreoffice test wants this to verify that the
+    // server doesn't peek at the unused byte.
+    write_pictforminfo(
+        &mut reply,
+        &mut off,
+        PICTFORMAT_XRGB32,
+        1,
+        32,
+        16,
+        0xFF,
+        8,
+        0xFF,
+        0,
+        0xFF,
+        0,
+        0, // no alpha
+    );
+
+    // Format 6: xBGR32 — depth 32 with R/B swapped (R at byte 0, B
+    // at byte 2). The rendercheck gtk test exercises this layout
+    // against ARGB32 to verify that the server reads each picture
+    // through its declared format rather than blindly assuming a
+    // canonical byte order.
+    write_pictforminfo(
+        &mut reply,
+        &mut off,
+        PICTFORMAT_XBGR32,
+        1,
+        32,
+        0,
+        0xFF,
+        8,
+        0xFF,
+        16,
+        0xFF,
+        0,
+        0, // no alpha
     );
 
     // Screen info (8 bytes header)
@@ -1624,9 +1702,9 @@ fn resolve_source_pixels(
     }
 
     // Check if it's a picture wrapping a drawable
-    let (drawable, repeat) = {
+    let (drawable, repeat, format_id) = {
         let pic = state.render.pictures.get(&src_pic)?;
-        (pic.drawable, pic.repeat)
+        (pic.drawable, pic.repeat, pic.format_id)
     };
 
     // Check if the drawable's picture is actually a solid fill
@@ -1674,6 +1752,25 @@ fn resolve_source_pixels(
     // Extract pixels from the drawable's framebuffer
     let fb = state.get_framebuffer_mut(drawable)?;
 
+    // Helper to fetch a single pixel from the framebuffer and decode
+    // it into canonical (B, G, R, A) according to the source picture's
+    // format. Wraps the per-format byte-shuffling that lets the same
+    // pixmap be read through (say) `xBGR32` and `ARGB32` and produce
+    // different RGB.
+    let copy_pixel = |fb_data: &[u8],
+                      src_off: usize,
+                      out: &mut [u8],
+                      dst_off: usize| {
+        if src_off + 3 < fb_data.len() && dst_off + 3 < out.len() {
+            let (b, g, r, a) =
+                decode_pixel_bgra(format_id, &fb_data[src_off..src_off + 4]);
+            out[dst_off] = b;
+            out[dst_off + 1] = g;
+            out[dst_off + 2] = r;
+            out[dst_off + 3] = a;
+        }
+    };
+
     // Transformed sources need per-pixel projection back into the
     // framebuffer; this is also the path used by rendercheck's
     // "transformed src/mask coords test 2".
@@ -1713,9 +1810,7 @@ fn resolve_source_pixels(
                     }
                 }
                 let src_off = syi as usize * fb_stride + sxi as usize * 4;
-                if src_off + 3 < fb_data.len() && dst_off + 3 < pixels.len() {
-                    pixels[dst_off..dst_off + 4].copy_from_slice(&fb_data[src_off..src_off + 4]);
-                }
+                copy_pixel(fb_data, src_off, &mut pixels, dst_off);
             }
         }
         return Some((pixels, w, h));
@@ -1739,15 +1834,35 @@ fn resolve_source_pixels(
                 let sx = ((src_x as i32 + col as i32) % fb_w as i32 + fb_w as i32) as u32 % fb_w;
                 let src_off = sy as usize * fb_stride + sx as usize * 4;
                 let dst_off = (row * w + col) as usize * 4;
-                if src_off + 3 < fb_data.len() && dst_off + 3 < pixels.len() {
-                    pixels[dst_off..dst_off + 4].copy_from_slice(&fb_data[src_off..src_off + 4]);
-                }
+                copy_pixel(fb_data, src_off, &mut pixels, dst_off);
             }
         }
         Some((pixels, w, h))
     } else {
-        let pixels = fb.extract_pixels(src_x, src_y, width, height);
-        Some((pixels, width as u32, height as u32))
+        let fb_w = fb.width();
+        let fb_h = fb.height();
+        let fb_stride = fb.stride();
+        let fb_data = fb.data();
+        let w = width as u32;
+        let h = height as u32;
+        let mut pixels = vec![0u8; (w * h * 4) as usize];
+        for row in 0..h as i32 {
+            let sy = src_y as i32 + row;
+            for col in 0..w as i32 {
+                let sx = src_x as i32 + col;
+                let dst_off = (row as u32 * w + col as u32) as usize * 4;
+                if sy < 0 || sx < 0 || (sx as u32) >= fb_w || (sy as u32) >= fb_h {
+                    // Out of bounds and no repeat → transparent.
+                    if dst_off + 3 < pixels.len() {
+                        pixels[dst_off..dst_off + 4].copy_from_slice(&[0, 0, 0, 0]);
+                    }
+                    continue;
+                }
+                let src_off = sy as usize * fb_stride + sx as usize * 4;
+                copy_pixel(fb_data, src_off, &mut pixels, dst_off);
+            }
+        }
+        Some((pixels, w, h))
     }
 }
 

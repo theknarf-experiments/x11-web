@@ -1455,7 +1455,11 @@ test.describe
 			//                        alpha (CA) masks via per-channel
 			//                        Fs/Fd; BadDrawable on render-into
 			//                        -gradient)
-			const RENDERCHECK_BASELINE_PASSED = 786;
+			//   2026-04-11 789/789  (xRGB32 + xBGR32 picture formats
+			//                        with format-aware byte decode in
+			//                        resolve_source_pixels; GXinvert
+			//                        in PolyFillRectangle)
+			const RENDERCHECK_BASELINE_PASSED = 789;
 			expect(passed).toBeGreaterThanOrEqual(RENDERCHECK_BASELINE_PASSED);
 		});
 
