@@ -1423,10 +1423,16 @@ test.describe
 				`rendercheck: ${passed}/${total} passed (exit=${result.exitCode})`,
 			);
 
-			// Baseline established 2026-04-10: 80/789. Bump this
-			// number up (never down) as we implement more XRender
-			// operators / fix per-pixel math.
-			const RENDERCHECK_BASELINE_PASSED = 80;
+			// Pass-count baseline. Bump up (never down) as we
+			// implement more of the XRender spec.
+			//   2026-04-10  80/789  (initial inventory)
+			//   2026-04-10 110/789  (full PictOp 0..12 table)
+			//   2026-04-10 194/789  (handle_get_image returns the
+			//                        actual depth so a8r8g8b8 dest
+			//                        readback gets the alpha byte;
+			//                        + linear gradient parser, +
+			//                        SetPictureTransform handler)
+			const RENDERCHECK_BASELINE_PASSED = 194;
 			expect(passed).toBeGreaterThanOrEqual(RENDERCHECK_BASELINE_PASSED);
 		});
 

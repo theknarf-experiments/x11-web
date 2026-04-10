@@ -3778,6 +3778,16 @@ fn handle_get_image(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
     // Sync SHM pixmaps before reading
     state.sync_shm_pixmap(drawable);
 
+    // Look up the drawable's actual depth — pixmaps record it,
+    // windows report 24. Hard-coding 24 broke depth-32 ARGB readback
+    // because clients (rendercheck, Cairo) ignore the alpha byte
+    // when the reply depth is 24.
+    let depth: u8 = state
+        .pixmaps
+        .get(&drawable)
+        .map(|p| p.depth)
+        .unwrap_or(24);
+
     // Read actual pixel data from the drawable's framebuffer
     let pixels = if let Some(fb) = state.get_framebuffer_mut(drawable) {
         fb.extract_pixels(x, y, width, height)
@@ -3792,7 +3802,7 @@ fn handle_get_image(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
 
     let mut reply = vec![0u8; 32 + data_len];
     reply[0] = 1; // Reply
-    reply[1] = 24; // depth
+    reply[1] = depth;
     reply[2..4].copy_from_slice(&seq.to_le_bytes());
     reply[4..8].copy_from_slice(&length_field.to_le_bytes());
     reply[8..12].copy_from_slice(&ROOT_VISUAL.to_le_bytes());

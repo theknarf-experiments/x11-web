@@ -13,6 +13,13 @@ pub struct RenderState {
     pictures: HashMap<u32, PictureState>,
     glyphsets: HashMap<u32, GlyphSetState>,
     solid_fills: HashMap<u32, SolidFillState>,
+    linear_gradients: HashMap<u32, LinearGradientState>,
+    /// Per-picture 3x3 affine transforms set via SetPictureTransform
+    /// (RENDER minor opcode 28). Applied when sampling source
+    /// pictures — most importantly for gradients, where rendercheck
+    /// uses transforms to map a tiny gradient onto a much larger
+    /// destination region.
+    transforms: HashMap<u32, [f64; 9]>,
 }
 
 struct PictureState {
@@ -72,34 +79,113 @@ struct SolidFillState {
     a: u8,
 }
 
+/// Linear gradient stored in premultiplied alpha. Stops are sorted
+/// ascending by `offset` (which is normally in 0..1 but the spec
+/// allows out-of-range values for special effects we don't handle).
+struct LinearGradientState {
+    p1: (f64, f64),
+    p2: (f64, f64),
+    stops: Vec<GradientStop>,
+}
+
+#[derive(Clone, Copy)]
+struct GradientStop {
+    offset: f64,
+    /// Premultiplied colour at this stop.
+    r: u8,
+    g: u8,
+    b: u8,
+    a: u8,
+}
+
 impl RenderState {
     pub fn new() -> Self {
         Self {
             pictures: HashMap::new(),
             glyphsets: HashMap::new(),
             solid_fills: HashMap::new(),
+            linear_gradients: HashMap::new(),
+            transforms: HashMap::new(),
         }
     }
 }
 
 /// Composite a single source pixel over a destination pixel using the OVER operator.
-fn composite_over_pixel(dst: &mut [u8], src_b: u8, src_g: u8, src_r: u8, src_a: u8) {
-    if src_a == 0 {
-        return;
+/// Apply a Porter-Duff compositing operator to a single destination
+/// pixel. Implements the 12 standard X RENDER operators (PictOp 0..12)
+/// using premultiplied alpha as the spec requires. Operators above 12
+/// (Saturate, Disjoint*, Conjoint*) fall through to PictOpOver.
+///
+/// Both `src` and `dst` are premultiplied BGRA in little-endian byte
+/// order. SolidFill colours are premultiplied at creation time, and
+/// our framebuffer stores all picture data premultiplied, so the
+/// caller doesn't need to convert.
+pub(crate) fn composite_pixel(
+    op: u8,
+    dst: &mut [u8],
+    src_b: u8,
+    src_g: u8,
+    src_r: u8,
+    src_a: u8,
+) {
+    // Fast paths for the operators that don't depend on per-channel
+    // arithmetic — just unconditional writes.
+    match op {
+        0 => {
+            // Clear
+            dst[0] = 0;
+            dst[1] = 0;
+            dst[2] = 0;
+            dst[3] = 0;
+            return;
+        }
+        1 => {
+            // Src
+            dst[0] = src_b;
+            dst[1] = src_g;
+            dst[2] = src_r;
+            dst[3] = src_a;
+            return;
+        }
+        2 => {
+            // Dst — leave the destination untouched.
+            return;
+        }
+        _ => {}
     }
-    if src_a == 255 {
-        dst[0] = src_b;
-        dst[1] = src_g;
-        dst[2] = src_r;
-        dst[3] = 0xFF;
-        return;
-    }
-    let sa = src_a as u32;
-    let da = 255 - sa;
-    dst[0] = ((src_b as u32 * sa + dst[0] as u32 * da) / 255) as u8;
-    dst[1] = ((src_g as u32 * sa + dst[1] as u32 * da) / 255) as u8;
-    dst[2] = ((src_r as u32 * sa + dst[2] as u32 * da) / 255) as u8;
-    dst[3] = 0xFF;
+
+    let sa = src_a as i32;
+    let da = dst[3] as i32;
+
+    // Per-channel `(Fs, Fd)` factors out of 255. The result for any
+    // channel C is `(Cs*Fs + Cd*Fd + 127) / 255`. The +127 is for
+    // round-to-nearest at integer division.
+    let (fs, fd): (i32, i32) = match op {
+        3 => (255, 255 - sa),               // Over
+        4 => (255 - da, 255),               // OverReverse
+        5 => (da, 0),                       // In
+        6 => (0, sa),                       // InReverse
+        7 => (255 - da, 0),                 // Out
+        8 => (0, 255 - sa),                 // OutReverse
+        9 => (da, 255 - sa),                // Atop
+        10 => (255 - da, sa),               // AtopReverse
+        11 => (255 - da, 255 - sa),         // Xor
+        12 => (255, 255),                   // Add (clamped below)
+        // Saturate (13) and Disjoint/Conjoint families (14..26) are
+        // not yet implemented; fall back to Over so apps that hand us
+        // a high op number still get something close to right.
+        _ => (255, 255 - sa),
+    };
+
+    let blend = |s: u8, d: u8| -> u8 {
+        let r = (s as i32 * fs + d as i32 * fd + 127) / 255;
+        r.clamp(0, 255) as u8
+    };
+
+    dst[0] = blend(src_b, dst[0]);
+    dst[1] = blend(src_g, dst[1]);
+    dst[2] = blend(src_r, dst[2]);
+    dst[3] = blend(src_a, dst[3]);
 }
 
 fn pad4(n: usize) -> usize {
@@ -150,10 +236,7 @@ pub fn handle_render_request(state: &mut ClientState, data: &[u8], seq: u16) -> 
             // CreateCursor - ignore
             Vec::new()
         }
-        28 => {
-            // SetPictureTransform - ignore
-            Vec::new()
-        }
+        28 => handle_set_picture_transform(state, data),
         29 => handle_query_filters(seq),
         30 => {
             // SetPictureFilter - ignore
@@ -626,30 +709,14 @@ fn handle_composite(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
                         }
                     }
 
-                    match op {
-                        3 => {
-                            // PictOpOver
-                            composite_over_pixel(&mut fb_data[dst_off..dst_off + 4], sb, sg, sr, sa);
-                        }
-                        1 => {
-                            // PictOpSrc
-                            fb_data[dst_off] = sb;
-                            fb_data[dst_off + 1] = sg;
-                            fb_data[dst_off + 2] = sr;
-                            fb_data[dst_off + 3] = sa;
-                        }
-                        0 => {
-                            // PictOpClear
-                            fb_data[dst_off] = 0;
-                            fb_data[dst_off + 1] = 0;
-                            fb_data[dst_off + 2] = 0;
-                            fb_data[dst_off + 3] = 0;
-                        }
-                        _ => {
-                            // Default to Over
-                            composite_over_pixel(&mut fb_data[dst_off..dst_off + 4], sb, sg, sr, sa);
-                        }
-                    }
+                    composite_pixel(
+                        op,
+                        &mut fb_data[dst_off..dst_off + 4],
+                        sb,
+                        sg,
+                        sr,
+                        sa,
+                    );
                 }
             }
             fb.mark_dirty(dst_x as i32, dst_y as i32, width as u32, height as u32);
@@ -846,29 +913,14 @@ fn rasterize_trapezoid(
             if dst_off + 3 >= fb_data.len() {
                 continue;
             }
-            match op {
-                0 => {
-                    // PictOpClear
-                    fb_data[dst_off] = 0;
-                    fb_data[dst_off + 1] = 0;
-                    fb_data[dst_off + 2] = 0;
-                    fb_data[dst_off + 3] = 0;
-                }
-                1 => {
-                    // PictOpSrc
-                    fb_data[dst_off] = sb;
-                    fb_data[dst_off + 1] = sg;
-                    fb_data[dst_off + 2] = sr;
-                    fb_data[dst_off + 3] = sa;
-                }
-                _ => {
-                    // PictOpOver (3) and default
-                    composite_over_pixel(
-                        &mut fb_data[dst_off..dst_off + 4],
-                        sb, sg, sr, sa,
-                    );
-                }
-            }
+            composite_pixel(
+                op,
+                &mut fb_data[dst_off..dst_off + 4],
+                sb,
+                sg,
+                sr,
+                sa,
+            );
         }
     }
 
@@ -1124,6 +1176,14 @@ fn resolve_source_pixels(
         return Some((pixels, w, h));
     }
 
+    // Check if it's a linear gradient (referenced directly).
+    if let Some(grad) = state.render.linear_gradients.get(&src_pic) {
+        let tx = state.render.transforms.get(&src_pic);
+        return Some(rasterize_linear_gradient(
+            grad, tx, src_x, src_y, width, height,
+        ));
+    }
+
     // Check if it's a picture wrapping a drawable
     let (drawable, repeat) = {
         let pic = state.render.pictures.get(&src_pic)?;
@@ -1143,6 +1203,20 @@ fn resolve_source_pixels(
             pixels[off + 3] = fill.a;
         }
         return Some((pixels, w, h));
+    }
+
+    // Check if the picture wraps a linear gradient.
+    if let Some(grad) = state.render.linear_gradients.get(&drawable) {
+        // Transform may have been set on either the wrapper picture
+        // or the underlying gradient — try the wrapper first.
+        let tx = state
+            .render
+            .transforms
+            .get(&src_pic)
+            .or_else(|| state.render.transforms.get(&drawable));
+        return Some(rasterize_linear_gradient(
+            grad, tx, src_x, src_y, width, height,
+        ));
     }
 
     // Sync SHM-backed pixmap data before reading
@@ -1357,7 +1431,7 @@ fn handle_composite_glyphs(state: &mut ClientState, data: &[u8], glyph_id_size: 
         return Vec::new();
     }
 
-    let _op = data[4];
+    let pict_op = data[4];
     let src_pic = read_u32(data, 8);
     let dst_pic = read_u32(data, 12);
     let _mask_format = read_u32(data, 16);
@@ -1366,7 +1440,7 @@ fn handle_composite_glyphs(state: &mut ClientState, data: &[u8], glyph_id_size: 
     let _src_y = read_i16(data, 26);
 
     debug!(
-        "Render CompositeGlyphs{}: src={src_pic:#x} dst={dst_pic:#x} gs={current_gsid:#x}",
+        "Render CompositeGlyphs{}: op={pict_op} src={src_pic:#x} dst={dst_pic:#x} gs={current_gsid:#x}",
         glyph_id_size * 8
     );
 
@@ -1507,15 +1581,23 @@ fn handle_composite_glyphs(state: &mut ClientState, data: &[u8], glyph_id_size: 
                         continue;
                     }
 
-                    // Modulate source color by glyph alpha
-                    let eff_a = ((sa as u32 * alpha as u32) / 255) as u8;
-                    let eff_r = ((sr as u32 * alpha as u32) / 255) as u8;
-                    let eff_g = ((sg as u32 * alpha as u32) / 255) as u8;
-                    let eff_b = ((sb as u32 * alpha as u32) / 255) as u8;
+                    // Modulate source color by glyph alpha. Both
+                    // source and result are premultiplied.
+                    let eff_a = ((sa as u32 * alpha as u32 + 127) / 255) as u8;
+                    let eff_r = ((sr as u32 * alpha as u32 + 127) / 255) as u8;
+                    let eff_g = ((sg as u32 * alpha as u32 + 127) / 255) as u8;
+                    let eff_b = ((sb as u32 * alpha as u32 + 127) / 255) as u8;
 
                     let dst_off = dy as usize * fb_stride + dx as usize * 4;
                     if dst_off + 3 < fb_data.len() {
-                        composite_over_pixel(&mut fb_data[dst_off..dst_off + 4], eff_b, eff_g, eff_r, eff_a);
+                        composite_pixel(
+                            pict_op,
+                            &mut fb_data[dst_off..dst_off + 4],
+                            eff_b,
+                            eff_g,
+                            eff_r,
+                            eff_a,
+                        );
                     }
                 }
             }
@@ -1609,10 +1691,15 @@ fn handle_fill_rectangles(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
     let blue = read_u16(data, 16);
     let alpha = read_u16(data, 18);
 
-    let r = (red >> 8) as u8;
-    let g = (green >> 8) as u8;
-    let b = (blue >> 8) as u8;
+    // Convert from straight (XRenderColor) to premultiplied so the
+    // composite_pixel formulas operate on the right colour space.
+    let red8 = (red >> 8) as u8;
+    let green8 = (green >> 8) as u8;
+    let blue8 = (blue >> 8) as u8;
     let a = (alpha >> 8) as u8;
+    let r = ((red8 as u32 * a as u32 + 127) / 255) as u8;
+    let g = ((green8 as u32 * a as u32 + 127) / 255) as u8;
+    let b = ((blue8 as u32 * a as u32 + 127) / 255) as u8;
 
     let dst_drawable = state.render.pictures.get(&dst_pic).map(|p| p.drawable);
     let dst_draw = match dst_drawable {
@@ -1657,29 +1744,14 @@ fn handle_fill_rectangles(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
                     if dst_off + 3 >= fb_data.len() {
                         continue;
                     }
-                    match op {
-                        1 => {
-                            // PictOpSrc
-                            fb_data[dst_off] = b;
-                            fb_data[dst_off + 1] = g;
-                            fb_data[dst_off + 2] = r;
-                            fb_data[dst_off + 3] = a;
-                        }
-                        3 => {
-                            // PictOpOver
-                            composite_over_pixel(&mut fb_data[dst_off..dst_off + 4], b, g, r, a);
-                        }
-                        0 => {
-                            // PictOpClear
-                            fb_data[dst_off] = 0;
-                            fb_data[dst_off + 1] = 0;
-                            fb_data[dst_off + 2] = 0;
-                            fb_data[dst_off + 3] = 0;
-                        }
-                        _ => {
-                            composite_over_pixel(&mut fb_data[dst_off..dst_off + 4], b, g, r, a);
-                        }
-                    }
+                    composite_pixel(
+                        op,
+                        &mut fb_data[dst_off..dst_off + 4],
+                        b,
+                        g,
+                        r,
+                        a,
+                    );
                 }
             }
             fb.mark_dirty(*rx as i32, *ry as i32, *rw as u32, *rh as u32);
@@ -1738,21 +1810,28 @@ fn handle_create_solid_fill(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
         return Vec::new();
     }
     let pid = read_u32(data, 4);
-    // Color: 4 x CARD16 (red, green, blue, alpha) at offset 8
-    let red = read_u16(data, 8);
-    let green = read_u16(data, 10);
-    let blue = read_u16(data, 12);
-    let alpha = read_u16(data, 14);
+    // Color: 4 x CARD16 (red, green, blue, alpha) at offset 8.
+    // XRenderColor on the wire is straight (non-premultiplied) alpha;
+    // pictures store premultiplied so we convert here once.
+    let red = (read_u16(data, 8) >> 8) as u8;
+    let green = (read_u16(data, 10) >> 8) as u8;
+    let blue = (read_u16(data, 12) >> 8) as u8;
+    let alpha = (read_u16(data, 14) >> 8) as u8;
+    let premul = |c: u8| -> u8 {
+        ((c as u32 * alpha as u32 + 127) / 255) as u8
+    };
 
-    debug!("Render CreateSolidFill: pid={pid:#x} rgba=({red},{green},{blue},{alpha})");
+    debug!(
+        "Render CreateSolidFill: pid={pid:#x} straight=({red},{green},{blue},{alpha})"
+    );
 
     state.render.solid_fills.insert(
         pid,
         SolidFillState {
-            r: (red >> 8) as u8,
-            g: (green >> 8) as u8,
-            b: (blue >> 8) as u8,
-            a: (alpha >> 8) as u8,
+            r: premul(red),
+            g: premul(green),
+            b: premul(blue),
+            a: alpha,
         },
     );
     Vec::new()
@@ -1762,20 +1841,256 @@ fn handle_create_gradient_fill(state: &mut ClientState, data: &[u8]) -> Vec<u8> 
     if data.len() < 8 {
         return Vec::new();
     }
+    let minor = data[1];
+    match minor {
+        34 => handle_create_linear_gradient(state, data),
+        // Radial (35) and conical (36) are stubbed for now — both are
+        // rare in practice (rendercheck doesn't test them; Cairo
+        // emits them only for radial gradients which most apps avoid).
+        _ => {
+            let pid = read_u32(data, 4);
+            debug!("Render CreateGradientFill minor={minor} (stubbed): pid={pid:#x}");
+            state.render.solid_fills.insert(
+                pid,
+                SolidFillState {
+                    r: 128,
+                    g: 128,
+                    b: 128,
+                    a: 255,
+                },
+            );
+            Vec::new()
+        }
+    }
+}
+
+/// SetPictureTransform (RENDER minor opcode 28).
+///
+/// Wire layout:
+///
+/// ```text
+///   1   opcode (139)
+///   1   minor (28)
+///   2   length
+///   4   PICTURE  picture
+///   9*4 FIXED    transform (3x3 row-major matrix)
+/// ```
+///
+/// The transform maps *destination* coordinates to *source*
+/// coordinates: `(sx*sw, sy*sw, sw) = T · (dx, dy, 1)`. Used by
+/// rendercheck (and Cairo) to project a small gradient over a much
+/// larger destination region.
+fn handle_set_picture_transform(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
+    if data.len() < 8 + 9 * 4 {
+        return Vec::new();
+    }
     let pid = read_u32(data, 4);
+    let mut tx = [0f64; 9];
+    for i in 0..9 {
+        tx[i] = read_fixed(data, 8 + i * 4);
+    }
+    debug!(
+        "SetPictureTransform: pid={pid:#x} m=[[{:.2},{:.2},{:.2}],[{:.2},{:.2},{:.2}],[{:.2},{:.2},{:.2}]]",
+        tx[0], tx[1], tx[2], tx[3], tx[4], tx[5], tx[6], tx[7], tx[8]
+    );
+    // Identity matrix is the most common "reset" — drop the entry
+    // so the lookup short-circuits to the no-op fast path.
+    let is_identity = (tx[0] - 1.0).abs() < 1e-9
+        && tx[1].abs() < 1e-9
+        && tx[2].abs() < 1e-9
+        && tx[3].abs() < 1e-9
+        && (tx[4] - 1.0).abs() < 1e-9
+        && tx[5].abs() < 1e-9
+        && tx[6].abs() < 1e-9
+        && tx[7].abs() < 1e-9
+        && (tx[8] - 1.0).abs() < 1e-9;
+    if is_identity {
+        state.render.transforms.remove(&pid);
+    } else {
+        state.render.transforms.insert(pid, tx);
+    }
+    Vec::new()
+}
 
-    // Approximate gradient as a solid fill using first stop color if available
-    // Gradient requests have varying layouts, just store a neutral color
-    debug!("Render CreateGradientFill (approx): pid={pid:#x}");
+/// Apply a row-major 3x3 transform to a point. Returns
+/// `(sx/sw, sy/sw)` per the X RENDER spec.
+fn apply_transform(tx: &[f64; 9], px: f64, py: f64) -> (f64, f64) {
+    let sx = tx[0] * px + tx[1] * py + tx[2];
+    let sy = tx[3] * px + tx[4] * py + tx[5];
+    let sw = tx[6] * px + tx[7] * py + tx[8];
+    if sw.abs() < 1e-9 {
+        (sx, sy)
+    } else {
+        (sx / sw, sy / sw)
+    }
+}
 
-    state.render.solid_fills.insert(
+/// CreateLinearGradient (RENDER minor opcode 34).
+///
+/// Wire layout:
+///
+/// ```text
+///   1   opcode (139)
+///   1   minor  (34)
+///   2   length
+///   4   pid
+///   8   p1   POINTFIX (FIXED x, FIXED y)
+///   8   p2   POINTFIX
+///   4   num_stops
+///   4*n stops      (FIXED offsets, 0..1)
+///   8*n colors     (4 CARD16: r, g, b, a — straight alpha)
+/// ```
+fn handle_create_linear_gradient(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
+    if data.len() < 32 {
+        return Vec::new();
+    }
+    let pid = read_u32(data, 4);
+    let p1x = read_fixed(data, 8);
+    let p1y = read_fixed(data, 12);
+    let p2x = read_fixed(data, 16);
+    let p2y = read_fixed(data, 20);
+    let num_stops = read_u32(data, 24) as usize;
+
+    // Sanity bound: a typical gradient has 2-8 stops; reject anything
+    // absurd before we allocate.
+    if num_stops > 1024 {
+        return Vec::new();
+    }
+
+    let stops_start = 28;
+    let colors_start = stops_start + num_stops * 4;
+    if colors_start + num_stops * 8 > data.len() {
+        return Vec::new();
+    }
+
+    let mut stops = Vec::with_capacity(num_stops);
+    for i in 0..num_stops {
+        let offset = read_fixed(data, stops_start + i * 4);
+        let coff = colors_start + i * 8;
+        let r = (read_u16(data, coff) >> 8) as u8;
+        let g = (read_u16(data, coff + 2) >> 8) as u8;
+        let b = (read_u16(data, coff + 4) >> 8) as u8;
+        let a = (read_u16(data, coff + 6) >> 8) as u8;
+        // Convert straight → premultiplied to match the pictures
+        // we composite into.
+        let pr = ((r as u32 * a as u32 + 127) / 255) as u8;
+        let pg = ((g as u32 * a as u32 + 127) / 255) as u8;
+        let pb = ((b as u32 * a as u32 + 127) / 255) as u8;
+        stops.push(GradientStop {
+            offset,
+            r: pr,
+            g: pg,
+            b: pb,
+            a,
+        });
+    }
+
+    debug!(
+        "CreateLinearGradient: pid={pid:#x} p1=({p1x:.2},{p1y:.2}) p2=({p2x:.2},{p2y:.2}) stops={num_stops}"
+    );
+
+    state.render.linear_gradients.insert(
         pid,
-        SolidFillState {
-            r: 128,
-            g: 128,
-            b: 128,
-            a: 255,
+        LinearGradientState {
+            p1: (p1x, p1y),
+            p2: (p2x, p2y),
+            stops,
         },
     );
     Vec::new()
+}
+
+/// Sample a sorted stop list at parameter `t` (linearly interpolated
+/// between the two surrounding stops; clamped at the ends).
+fn sample_gradient_stops(stops: &[GradientStop], t: f64) -> (u8, u8, u8, u8) {
+    if stops.is_empty() {
+        return (0, 0, 0, 0);
+    }
+    if t <= stops[0].offset {
+        let s = stops[0];
+        return (s.r, s.g, s.b, s.a);
+    }
+    if t >= stops[stops.len() - 1].offset {
+        let s = stops[stops.len() - 1];
+        return (s.r, s.g, s.b, s.a);
+    }
+    for i in 1..stops.len() {
+        if t <= stops[i].offset {
+            let s0 = stops[i - 1];
+            let s1 = stops[i];
+            let span = s1.offset - s0.offset;
+            let f = if span > 1e-9 { (t - s0.offset) / span } else { 0.0 };
+            let lerp = |a: u8, b: u8| -> u8 {
+                let v = a as f64 * (1.0 - f) + b as f64 * f;
+                v.round().clamp(0.0, 255.0) as u8
+            };
+            return (
+                lerp(s0.r, s1.r),
+                lerp(s0.g, s1.g),
+                lerp(s0.b, s1.b),
+                lerp(s0.a, s1.a),
+            );
+        }
+    }
+    let s = stops[stops.len() - 1];
+    (s.r, s.g, s.b, s.a)
+}
+
+/// Rasterise a region of a linear gradient into a BGRA pixel buffer.
+/// `(src_x, src_y)` is the top-left source coordinate the caller
+/// requested; `(width, height)` is the buffer size. The output is
+/// premultiplied to match the rest of the picture pipeline.
+fn rasterize_linear_gradient(
+    grad: &LinearGradientState,
+    transform: Option<&[f64; 9]>,
+    src_x: i16,
+    src_y: i16,
+    width: u16,
+    height: u16,
+) -> (Vec<u8>, u32, u32) {
+    let w = width as u32;
+    let h = height as u32;
+    let mut pixels = vec![0u8; (w * h * 4) as usize];
+
+    let (p1x, p1y) = grad.p1;
+    let (p2x, p2y) = grad.p2;
+    let dx = p2x - p1x;
+    let dy = p2y - p1y;
+    let len_sq = dx * dx + dy * dy;
+
+    if len_sq < 1e-9 {
+        // Degenerate (p1 == p2): fill with the first stop colour.
+        let (r, g, b, a) = sample_gradient_stops(&grad.stops, 0.0);
+        for i in 0..(w * h) as usize {
+            let off = i * 4;
+            pixels[off] = b;
+            pixels[off + 1] = g;
+            pixels[off + 2] = r;
+            pixels[off + 3] = a;
+        }
+        return (pixels, w, h);
+    }
+
+    for row in 0..h as i32 {
+        for col in 0..w as i32 {
+            // Use pixel centres for the projection so the rasterised
+            // gradient lines up with rendercheck's reference.
+            let mut px = (src_x as i32 + col) as f64 + 0.5;
+            let mut py = (src_y as i32 + row) as f64 + 0.5;
+            if let Some(tx) = transform {
+                let (tx_px, tx_py) = apply_transform(tx, px, py);
+                px = tx_px;
+                py = tx_py;
+            }
+            let t = ((px - p1x) * dx + (py - p1y) * dy) / len_sq;
+            let (r, g, b, a) = sample_gradient_stops(&grad.stops, t);
+            let off = (row as usize * w as usize + col as usize) * 4;
+            pixels[off] = b;
+            pixels[off + 1] = g;
+            pixels[off + 2] = r;
+            pixels[off + 3] = a;
+        }
+    }
+
+    (pixels, w, h)
 }
