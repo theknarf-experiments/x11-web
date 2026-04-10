@@ -5,7 +5,7 @@ edition = "2021"
 
 [dependencies]
 x11-web-protocol = { path = "../protocol" }
-x11rb-protocol = { version = "0.13", features = ["request-parsing", "render"] }
+x11rb-protocol = { version = "0.13", features = ["request-parsing", "render", "xinput"] }
 # pixman removed — using pure-Rust framebuffer to avoid heap corruption
 tokio = { version = "1", features = ["full"] }
 tokio-tungstenite = "0.26"

@@ -1,6 +1,7 @@
 mod fonts;
 mod framebuffer;
 mod render;
+mod xinput2;
 mod xserver;
 
 use std::collections::HashMap;

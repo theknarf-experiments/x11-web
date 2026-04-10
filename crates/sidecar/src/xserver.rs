@@ -177,6 +177,9 @@ pub(crate) struct ClientState {
     pub(crate) x11_to_uuid: HashMap<u32, String>,
     /// Cursor resources created by this client.
     pub(crate) cursors: HashMap<u32, String>,
+    /// XInput2 per-client state: master pointer valuator values and the
+    /// list of XISelectEvents subscriptions registered by this client.
+    pub(crate) xi: crate::xinput2::XiState,
 }
 
 impl ClientState {
@@ -1048,6 +1051,7 @@ async fn handle_client(
         message_tx,
         x11_to_uuid: HashMap::new(),
         cursors: HashMap::new(),
+        xi: crate::xinput2::XiState::default(),
     };
 
     // Don't set EWMH WM properties (_NET_SUPPORTING_WM_CHECK etc.).
@@ -1121,7 +1125,11 @@ async fn handle_client(
                 // Flush dirty windows after processing a batch of requests
                 state.flush_dirty_windows();
 
-                // Deliver any pending events (e.g. DamageNotify)
+                // Deliver any pending events (e.g. DamageNotify).
+                // Synthetic XI events deliberately wait for the next
+                // frame tick so they don't ride the same flush as a
+                // batch of replies (XCB's threaded sequence tracking
+                // gets confused otherwise).
                 for event in state.pending_events.drain(..) {
                     stream.write_all(&event).await?;
                 }
@@ -1132,6 +1140,12 @@ async fn handle_client(
 
                 // Periodic frame flush for any remaining dirty regions
                 state.flush_dirty_windows();
+
+                if state.xi.pending.raw_motion {
+                    state.xi.pending.raw_motion = false;
+                    let ev = crate::xinput2::build_raw_motion_event(state.sequence);
+                    state.pending_events.push(ev);
+                }
 
                 // Deliver any pending events (e.g. DamageNotify)
                 for event in state.pending_events.drain(..) {
@@ -1145,9 +1159,36 @@ async fn handle_client(
                 match msg {
                     WindowMessage::Input(input) => {
                         state.focus_window = x11_wid;
+                        // Update the master pointer valuators so the next
+                        // XIQueryDevice / XIQueryPointer reflects reality.
+                        match &input {
+                            x11_web_protocol::InputEvent::MotionNotify { x, y, .. }
+                            | x11_web_protocol::InputEvent::ButtonPress { x, y, .. }
+                            | x11_web_protocol::InputEvent::ButtonRelease { x, y, .. } => {
+                                state.xi.valuators.x = *x as i32;
+                                state.xi.valuators.y = *y as i32;
+                            }
+                            _ => {}
+                        }
                         let event_bytes = build_x11_input_event(&mut state, &input, x11_wid);
                         if !event_bytes.is_empty() {
                             stream.write_all(&event_bytes).await?;
+                        }
+                        // XInput2 dispatch: emit any GenericEvents the
+                        // client has subscribed to (regular device events
+                        // and/or raw events). xeyes-style apps register
+                        // RawMotion on the root and rely on this path.
+                        let chain = ancestor_chain(&state.windows, x11_wid);
+                        let xi_events = crate::xinput2::build_xi_events_for(
+                            &mut state.xi.valuators,
+                            &state.xi.selections,
+                            &chain,
+                            state.sequence,
+                            state.root_window,
+                            &input,
+                        );
+                        for ev in xi_events {
+                            stream.write_all(&ev).await?;
                         }
                     }
                     WindowMessage::Resize(width, height) => {
@@ -1253,8 +1294,71 @@ fn resize_window(state: &mut ClientState, window_uuid: &str, width: u16, height:
 
 
 
+/// Walk the window tree downward from `parent`, returning the deepest mapped
+/// descendant whose geometry contains the given point and that has selected
+/// for the requested event mask (e.g. ButtonPressMask). Coordinates are
+/// returned relative to the chosen window. If no descendant has selected for
+/// the mask, falls back to `parent` itself.
+///
+/// X11 event delivery normally finds the deepest window under the pointer
+/// that has the relevant mask in its event_mask. Xt-based apps (xterm,
+/// xclock, ...) put their input mask on the leaf widget's window; GTK apps
+/// usually only have it on the top-level. Filtering by event_mask gives the
+/// right answer for both.
+fn find_event_subwindow(
+    windows: &HashMap<u32, WindowState>,
+    parent: u32,
+    rel_x: i16,
+    rel_y: i16,
+    required_mask: u32,
+) -> (u32, i16, i16) {
+    fn descend(
+        windows: &HashMap<u32, WindowState>,
+        parent: u32,
+        rel_x: i16,
+        rel_y: i16,
+        required_mask: u32,
+        best: &mut Option<(u32, i16, i16)>,
+    ) {
+        // Record the current window if it has selected for this event class.
+        if let Some(w) = windows.get(&parent) {
+            if w.event_mask & required_mask != 0 {
+                *best = Some((parent, rel_x, rel_y));
+            }
+        }
+        // Recurse into mapped children that contain the point.
+        let children: Vec<&WindowState> = windows
+            .values()
+            .filter(|w| w.parent == parent && w.mapped)
+            .collect();
+        for child in children {
+            let cx = child.x;
+            let cy = child.y;
+            let cw = child.width as i16;
+            let ch = child.height as i16;
+            if rel_x >= cx && rel_x < cx + cw && rel_y >= cy && rel_y < cy + ch {
+                descend(
+                    windows,
+                    child.id,
+                    rel_x - cx,
+                    rel_y - cy,
+                    required_mask,
+                    best,
+                );
+            }
+        }
+    }
+
+    let mut best: Option<(u32, i16, i16)> = None;
+    descend(windows, parent, rel_x, rel_y, required_mask, &mut best);
+    best.unwrap_or((parent, rel_x, rel_y))
+}
+
 /// Convert a frontend InputEvent into X11 wire-format event bytes (32 bytes).
-fn build_x11_input_event(state: &mut ClientState, input: &InputEvent, target_window: u32) -> Vec<u8> {
+/// `top_level` is the X11 ID of the top-level window the frontend addressed;
+/// for pointer events we descend into its child widget windows so X clients
+/// (notably Xt-based ones like xterm) receive the event on the right widget.
+fn build_x11_input_event(state: &mut ClientState, input: &InputEvent, top_level: u32) -> Vec<u8> {
 
     // Update tracked pointer position for QueryPointer
     match input {
@@ -1273,6 +1377,29 @@ fn build_x11_input_event(state: &mut ClientState, input: &InputEvent, target_win
     // Timestamp 0 = CurrentTime (matches the working version at 1adf817)
     let timestamp: u32 = 0;
 
+    // X11 event masks (from x.h)
+    const BUTTON_PRESS_MASK: u32 = 0x0000_0004;
+    const BUTTON_RELEASE_MASK: u32 = 0x0000_0008;
+    const POINTER_MOTION_MASK: u32 = 0x0000_0040;
+
+    // For pointer events, find the deepest child window under the cursor
+    // that has actually selected for this event class. This matches X11
+    // dispatch semantics: Xt-based apps (xterm) put input masks on leaf
+    // widget windows, while GTK apps usually only have them on the
+    // top-level — filtering by mask gives the right answer for both.
+    let (event_window, event_x, event_y) = match input {
+        InputEvent::MotionNotify { x, y, .. } => {
+            find_event_subwindow(&state.windows, top_level, *x, *y, POINTER_MOTION_MASK)
+        }
+        InputEvent::ButtonPress { x, y, .. } => {
+            find_event_subwindow(&state.windows, top_level, *x, *y, BUTTON_PRESS_MASK)
+        }
+        InputEvent::ButtonRelease { x, y, .. } => {
+            find_event_subwindow(&state.windows, top_level, *x, *y, BUTTON_RELEASE_MASK)
+        }
+        _ => (top_level, 0, 0),
+    };
+
     match input {
         InputEvent::MotionNotify { x, y, state: mask } => {
             event[0] = MOTION_NOTIFY_EVENT;
@@ -1280,12 +1407,12 @@ fn build_x11_input_event(state: &mut ClientState, input: &InputEvent, target_win
             event[2..4].copy_from_slice(&seq.to_le_bytes());
             event[4..8].copy_from_slice(&timestamp.to_le_bytes());
             event[8..12].copy_from_slice(&state.root_window.to_le_bytes());
-            event[12..16].copy_from_slice(&target_window.to_le_bytes());
-            event[16..20].copy_from_slice(&target_window.to_le_bytes());
+            event[12..16].copy_from_slice(&event_window.to_le_bytes());
+            event[16..20].copy_from_slice(&0u32.to_le_bytes()); // child = None
             event[20..22].copy_from_slice(&x.to_le_bytes());
             event[22..24].copy_from_slice(&y.to_le_bytes());
-            event[24..26].copy_from_slice(&x.to_le_bytes());
-            event[26..28].copy_from_slice(&y.to_le_bytes());
+            event[24..26].copy_from_slice(&event_x.to_le_bytes());
+            event[26..28].copy_from_slice(&event_y.to_le_bytes());
             event[28..30].copy_from_slice(&mask.to_le_bytes());
             event[30] = 1;
         }
@@ -1300,12 +1427,12 @@ fn build_x11_input_event(state: &mut ClientState, input: &InputEvent, target_win
             event[2..4].copy_from_slice(&seq.to_le_bytes());
             event[4..8].copy_from_slice(&timestamp.to_le_bytes());
             event[8..12].copy_from_slice(&state.root_window.to_le_bytes());
-            event[12..16].copy_from_slice(&target_window.to_le_bytes());
-            event[16..20].copy_from_slice(&target_window.to_le_bytes());
+            event[12..16].copy_from_slice(&event_window.to_le_bytes());
+            event[16..20].copy_from_slice(&0u32.to_le_bytes()); // child = None
             event[20..22].copy_from_slice(&x.to_le_bytes());
             event[22..24].copy_from_slice(&y.to_le_bytes());
-            event[24..26].copy_from_slice(&x.to_le_bytes());
-            event[26..28].copy_from_slice(&y.to_le_bytes());
+            event[24..26].copy_from_slice(&event_x.to_le_bytes());
+            event[26..28].copy_from_slice(&event_y.to_le_bytes());
             event[28..30].copy_from_slice(&mask.to_le_bytes());
             event[30] = 1;
         }
@@ -1320,12 +1447,12 @@ fn build_x11_input_event(state: &mut ClientState, input: &InputEvent, target_win
             event[2..4].copy_from_slice(&seq.to_le_bytes());
             event[4..8].copy_from_slice(&timestamp.to_le_bytes());
             event[8..12].copy_from_slice(&state.root_window.to_le_bytes());
-            event[12..16].copy_from_slice(&target_window.to_le_bytes());
-            event[16..20].copy_from_slice(&target_window.to_le_bytes());
+            event[12..16].copy_from_slice(&event_window.to_le_bytes());
+            event[16..20].copy_from_slice(&0u32.to_le_bytes()); // child = None
             event[20..22].copy_from_slice(&x.to_le_bytes());
             event[22..24].copy_from_slice(&y.to_le_bytes());
-            event[24..26].copy_from_slice(&x.to_le_bytes());
-            event[26..28].copy_from_slice(&y.to_le_bytes());
+            event[24..26].copy_from_slice(&event_x.to_le_bytes());
+            event[26..28].copy_from_slice(&event_y.to_le_bytes());
             event[28..30].copy_from_slice(&mask.to_le_bytes());
             event[30] = 1;
         }
@@ -1338,8 +1465,8 @@ fn build_x11_input_event(state: &mut ClientState, input: &InputEvent, target_win
             event[2..4].copy_from_slice(&seq.to_le_bytes());
             event[4..8].copy_from_slice(&timestamp.to_le_bytes());
             event[8..12].copy_from_slice(&state.root_window.to_le_bytes());
-            event[12..16].copy_from_slice(&target_window.to_le_bytes());
-            event[16..20].copy_from_slice(&target_window.to_le_bytes());
+            event[12..16].copy_from_slice(&top_level.to_le_bytes());
+            event[16..20].copy_from_slice(&top_level.to_le_bytes());
             event[28..30].copy_from_slice(&mask.to_le_bytes());
             event[30] = 1;
         }
@@ -1352,8 +1479,8 @@ fn build_x11_input_event(state: &mut ClientState, input: &InputEvent, target_win
             event[2..4].copy_from_slice(&seq.to_le_bytes());
             event[4..8].copy_from_slice(&timestamp.to_le_bytes());
             event[8..12].copy_from_slice(&state.root_window.to_le_bytes());
-            event[12..16].copy_from_slice(&target_window.to_le_bytes());
-            event[16..20].copy_from_slice(&target_window.to_le_bytes());
+            event[12..16].copy_from_slice(&top_level.to_le_bytes());
+            event[16..20].copy_from_slice(&top_level.to_le_bytes());
             event[28..30].copy_from_slice(&mask.to_le_bytes());
             event[30] = 1;
         }
@@ -1436,6 +1563,7 @@ fn handle_request(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
         52 | // GetFontPath
         103 | // GetKeyboardControl
         116 | // SetPointerMapping
+        117 | // GetPointerMapping
         119   // GetModifierMapping
         => handle_misc_request(state, major_opcode, seq),
         // Font operations
@@ -1497,6 +1625,25 @@ fn handle_request(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
         }
         128 => handle_shape_request(state, data, seq),
         130 => handle_shm_request(state, data, seq),
+        131 => {
+            let mut reply = crate::xinput2::handle_request(
+                data,
+                seq,
+                &state.xi.valuators,
+                &mut state.xi.selections,
+                &mut state.xi.pending,
+                SCREEN_WIDTH,
+                SCREEN_HEIGHT,
+                state.root_window,
+            );
+            // XIQueryPointer needs the root window patched in.
+            if data.len() >= 2 && data[1] == x11rb_protocol::protocol::xinput::XI_QUERY_POINTER_REQUEST
+                && reply.len() >= 12
+            {
+                crate::xinput2::patch_query_pointer_root(&mut reply, state.root_window);
+            }
+            reply
+        }
         138 => handle_xfixes_request(state, data, seq),
         134 => handle_sync_request(state, data, seq),
         135 => handle_ge_request(data, seq),
@@ -1608,6 +1755,27 @@ fn handle_misc_request(state: &mut ClientState, opcode: u8, seq: u16) -> Vec<u8>
             reply[1] = 0; // MappingSuccess
             reply[2..4].copy_from_slice(&seq.to_le_bytes());
             reply.to_vec()
+        }
+        117 => {
+            // GetPointerMapping reply.
+            // Advertise 7 logical buttons so clients (GTK/Firefox) know
+            // that buttons 4-7 exist for scroll wheel events. Without this,
+            // GTK assumes only 3 buttons and silently drops scroll button
+            // presses.
+            let map: [u8; 7] = [1, 2, 3, 4, 5, 6, 7];
+            let n = map.len() as u8;
+            // Reply length in 4-byte units, after the 32-byte header.
+            // The map is padded to a multiple of 4 bytes.
+            let padded_len = (n as usize + 3) & !3;
+            let reply_extra_units = (padded_len / 4) as u32;
+            let mut reply = vec![0u8; 32 + padded_len];
+            reply[0] = 1; // Reply
+            reply[1] = n; // length of map (in the first byte)
+            reply[2..4].copy_from_slice(&seq.to_le_bytes());
+            reply[4..8].copy_from_slice(&reply_extra_units.to_le_bytes());
+            // Map starts at byte 32
+            reply[32..32 + n as usize].copy_from_slice(&map);
+            reply
         }
         119 => {
             // GetModifierMapping reply
@@ -2036,6 +2204,23 @@ fn handle_map_window(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> 
     }
 
     events
+}
+
+/// Walk from `start` up through `parent` links collecting the chain of
+/// window IDs until we hit the root window or fall off the tree. The
+/// chain is `[start, parent, grandparent, ..., root]`. Used to find which
+/// XISelectEvents subscription wins for a pointer event.
+fn ancestor_chain(windows: &HashMap<u32, WindowState>, start: u32) -> Vec<u32> {
+    let mut chain = Vec::new();
+    let mut cur = start;
+    for _ in 0..32 {
+        chain.push(cur);
+        match windows.get(&cur).map(|w| w.parent) {
+            Some(p) if p != 0 && p != cur => cur = p,
+            _ => break,
+        }
+    }
+    chain
 }
 
 /// Check if window `child` is a descendant of window `ancestor`.
@@ -3769,7 +3954,7 @@ fn keycode_to_keysym(keycode: u8) -> (u32, u32) {
 
 fn handle_list_extensions(seq: u16) -> Vec<u8> {
     // Return the list of extensions we support
-    let extensions: &[&str] = &["BIG-REQUESTS", "MIT-SHM", "RENDER", "XFIXES", "SHAPE", "SYNC", "Generic Event Extension", "XC-MISC", "Composite", "DAMAGE", "Present", "RANDR"];
+    let extensions: &[&str] = &["BIG-REQUESTS", "MIT-SHM", "RENDER", "XFIXES", "SHAPE", "SYNC", "Generic Event Extension", "XC-MISC", "Composite", "DAMAGE", "Present", "RANDR", "XInputExtension"];
 
     // Build the names data: each is a length-prefixed string (1 byte len + name)
     let mut names_data = Vec::new();
@@ -3883,7 +4068,13 @@ fn handle_query_extension(_state: &mut ClientState, data: &[u8], seq: u16) -> Ve
             reply[10] = 0; // first_event
             reply[11] = 0; // first_error
         }
-        "XINERAMA" | "XInputExtension" => {
+        "XInputExtension" => {
+            reply[8] = 1; // present = true
+            reply[9] = crate::xinput2::XI_MAJOR_OPCODE;
+            reply[10] = crate::xinput2::XI_FIRST_EVENT;
+            reply[11] = crate::xinput2::XI_FIRST_ERROR;
+        }
+        "XINERAMA" => {
             // Not present — already zero
         }
         _ => {

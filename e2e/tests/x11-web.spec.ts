@@ -176,6 +176,16 @@ test.describe
 					"pkill -9 -f 'xeyes|xterm|xlogo|xclock|xmessage|zenity|firefox|vim|gimp' 2>/dev/null; true",
 				])
 				.catch(() => {});
+			// Wipe Firefox profile state left behind by SIGKILL — otherwise
+			// the next firefox-esr launch either hangs on a profile lock or
+			// resumes mid-tab and causes flakes between tests.
+			await sidecarContainer
+				?.exec([
+					"bash",
+					"-c",
+					"rm -rf /root/.mozilla /root/.cache/mozilla 2>/dev/null; true",
+				])
+				.catch(() => {});
 			// Wait for process cleanup to propagate through the system
 			await new Promise((r) => setTimeout(r, 2000));
 
@@ -906,6 +916,188 @@ test.describe
 				"firefox-before-input.png",
 				{ maxDiffPixelRatio: 0.1, timeout: 30_000 },
 			);
+		});
+
+		test("scrolling on a window canvas does not pan the InfiniteCanvas", async ({
+			page,
+		}) => {
+			await page.goto(`http://localhost:${frontendPort}`);
+			await waitForDock(page);
+
+			const win = await spawnApp(page, "-geometry 300x200+10+10");
+			const canvas = win.locator('[data-testid="x11-canvas"]');
+			await expect(canvas).toBeVisible();
+			await page.waitForTimeout(2000);
+
+			const transformBefore = await page
+				.locator('[data-testid="infinite-canvas"] > div')
+				.first()
+				.evaluate((el) => (el as HTMLElement).style.transform);
+
+			// Scroll on the canvas
+			const box = await canvas.boundingBox();
+			if (!box) throw new Error("no canvas box");
+			await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+			await page.waitForTimeout(200);
+			for (let i = 0; i < 10; i++) {
+				await page.mouse.wheel(0, 100);
+				await page.waitForTimeout(30);
+			}
+			await page.waitForTimeout(500);
+
+			const transformAfter = await page
+				.locator('[data-testid="infinite-canvas"] > div')
+				.first()
+				.evaluate((el) => (el as HTMLElement).style.transform);
+
+			expect(transformAfter).toBe(transformBefore);
+		});
+
+		test("scroll wheel triggers xterm scrollback", async ({
+			page,
+		}) => {
+			await page.goto(`http://localhost:${frontendPort}`);
+			await waitForDock(page);
+
+			const win = await spawnApp(page, "-fn fixed -geometry 60x15", "xterm");
+			const canvas = win.locator('[data-testid="x11-canvas"]');
+			await expect(canvas).toBeVisible();
+			await expect
+				.poll(async () => hasRenderedContent(canvas), {
+					timeout: 15_000,
+					intervals: [500, 1000, 2000, 2000],
+				})
+				.toBe(true);
+
+			// Run a command that produces enough output to fill the scrollback
+			await canvas.click();
+			await page.waitForTimeout(500);
+			await page.keyboard.type("seq 1 200", { delay: 30 });
+			await page.keyboard.press("Enter");
+			await page.waitForTimeout(2000);
+
+			const fingerprint = async () =>
+				canvas.evaluate((el: HTMLCanvasElement) => {
+					const ctx = el.getContext("2d");
+					if (!ctx) return "";
+					const d = ctx.getImageData(0, 0, el.width, el.height);
+					let h = 0;
+					for (let i = 0; i < d.data.length; i += 97)
+						h = (h * 31 + d.data[i]) >>> 0;
+					return h.toString();
+				});
+
+			const before = await fingerprint();
+
+			const box = await canvas.boundingBox();
+			if (!box) throw new Error("no canvas box");
+			await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+			await page.waitForTimeout(200);
+			// Scroll up (negative deltaY) to reveal earlier output
+			for (let i = 0; i < 30; i++) {
+				await page.mouse.wheel(0, -120);
+				await page.waitForTimeout(50);
+			}
+			await page.waitForTimeout(1500);
+
+			const after = await fingerprint();
+			expect(after).not.toBe(before);
+		});
+
+		// Known failure: Firefox in default mode (no MOZ_USE_XINPUT2) does
+		// not subscribe to XInput2 events, AND does not respond to core
+		// ButtonPress 4/5 events for scroll wheel in our environment. The
+		// XInput2 dispatch path is verified by `xeyes pupils follow the
+		// cursor` and `scroll wheel triggers xterm scrollback`. Marked as
+		// test.fail so the test runs and we'll notice when it starts to
+		// pass — at which point this comment can be removed.
+		test.fail("firefox responds to scroll wheel input", async ({ page }) => {
+			await page.goto(`http://localhost:${frontendPort}`);
+			await waitForDock(page);
+
+			// Spawn xeyes first — matches the manual testing flow.
+			await spawnApp(page, "-geometry 100x80+0+0");
+			await page.waitForTimeout(2000);
+
+			await page.locator('[data-testid="spawn-button"]').click();
+			await page.locator('input[placeholder="command"]').fill("firefox-esr");
+			await page.locator('input[placeholder="args"]').fill("");
+			await expect(
+				page.locator("button", { hasText: "Spawn" }),
+			).toBeEnabled({ timeout: 30_000 });
+			await page.locator("button", { hasText: "Spawn" }).click();
+
+			const windowFrames = page.locator('[data-testid="window-frame"]');
+			await expect(windowFrames).toHaveCount(2, { timeout: 120_000 });
+
+			// Wait for both canvases to render content.
+			let firefoxCanvas: Locator | null = null;
+			await expect
+				.poll(
+					async () => {
+						const count = await windowFrames.count();
+						let withContent = 0;
+						for (let i = 0; i < count; i++) {
+							const canvas = windowFrames
+								.nth(i)
+								.locator('[data-testid="x11-canvas"]');
+							if (
+								(await canvas.isVisible()) &&
+								(await hasRenderedContent(canvas))
+							) {
+								withContent++;
+								firefoxCanvas = canvas;
+							}
+						}
+						return withContent >= 2;
+					},
+					{ timeout: 120_000, intervals: [5000, 5000, 5000, 5000, 5000, 10000] },
+				)
+				.toBe(true);
+			await page.waitForTimeout(5000);
+
+			// Hash every byte of the canvas — sensitive enough to catch
+			// even a few pixels of movement.
+			const fingerprint = async () =>
+				firefoxCanvas!.evaluate((el: HTMLCanvasElement) => {
+					const ctx = el.getContext("2d");
+					if (!ctx) return "";
+					const d = ctx.getImageData(0, 0, el.width, el.height);
+					let h = 2166136261 >>> 0;
+					for (let i = 0; i < d.data.length; i++) {
+						h ^= d.data[i];
+						h = Math.imul(h, 16777619) >>> 0;
+					}
+					return h.toString();
+				});
+
+			// Move cursor onto a part of the Firefox content area that's
+			// guaranteed to be inside the browser viewport — Firefox often
+			// renders larger than the viewport, in which case page.mouse
+			// silently clips moves that go off-screen and the wheel event
+			// never reaches our canvas.
+			const viewport = page.viewportSize() || { width: 1280, height: 720 };
+			const box = await firefoxCanvas!.boundingBox();
+			expect(box).not.toBeNull();
+			const targetX = Math.min(
+				viewport.width - 20,
+				box!.x + box!.width * 0.5,
+			);
+			const targetY = Math.min(
+				viewport.height - 20,
+				box!.y + box!.height * 0.5,
+			);
+			await page.mouse.move(targetX, targetY);
+			await page.waitForTimeout(500);
+
+			const before = await fingerprint();
+			for (let i = 0; i < 30; i++) {
+				await page.mouse.wheel(0, 120);
+				await page.waitForTimeout(40);
+			}
+			await page.waitForTimeout(2500);
+			const after = await fingerprint();
+			expect(after, "Firefox canvas should change after scrolling").not.toBe(before);
 		});
 
 		// TODO: investigate Escape key delivery — vim doesn't receive it
