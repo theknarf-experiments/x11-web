@@ -262,9 +262,15 @@ export function WindowFrame({
 	);
 
 	// Scroll wheel → X11 button 4/5/6/7 press+release
+	// Must use addEventListener with { passive: false } to call preventDefault().
+	// Re-attach when canvasRef changes by keying on renderer (which changes per window).
 	useEffect(() => {
 		const el = canvasRef.current;
 		if (!el) return;
+
+		let accY = 0;
+		let accX = 0;
+		const THRESHOLD = 15;
 
 		const onWheel = (e: WheelEvent) => {
 			e.preventDefault();
@@ -277,22 +283,30 @@ export function WindowFrame({
 			const y = Math.round((e.clientY - rect.top) * scaleY);
 			const state = mouseButtonMask(e.buttons);
 
-			// X11 buttons: 4=scroll up, 5=scroll down, 6=scroll left, 7=scroll right
-			let button: number;
-			if (Math.abs(e.deltaY) >= Math.abs(e.deltaX)) {
-				button = e.deltaY > 0 ? 5 : 4;
-			} else {
-				button = e.deltaX > 0 ? 7 : 6;
-			}
+			accY += e.deltaY;
+			accX += e.deltaX;
 
-			// Send press + release pair
-			onInputRef.current({ kind: "ButtonPress", button, x, y, state });
-			onInputRef.current({ kind: "ButtonRelease", button, x, y, state });
+			// Send MotionNotify first so GTK knows the pointer position
+			if (Math.abs(accY) >= THRESHOLD || Math.abs(accX) >= THRESHOLD) {
+				onInputRef.current({ kind: "MotionNotify", x, y, state });
+			}
+			while (Math.abs(accY) >= THRESHOLD) {
+				const button = accY > 0 ? 5 : 4;
+				onInputRef.current({ kind: "ButtonPress", button, x, y, state });
+				onInputRef.current({ kind: "ButtonRelease", button, x, y, state });
+				accY -= Math.sign(accY) * THRESHOLD;
+			}
+			while (Math.abs(accX) >= THRESHOLD) {
+				const button = accX > 0 ? 7 : 6;
+				onInputRef.current({ kind: "ButtonPress", button, x, y, state });
+				onInputRef.current({ kind: "ButtonRelease", button, x, y, state });
+				accX -= Math.sign(accX) * THRESHOLD;
+			}
 		};
 
 		el.addEventListener("wheel", onWheel, { passive: false });
 		return () => el.removeEventListener("wheel", onWheel);
-	}, []);
+	}, [renderer]);
 
 	const handleContextMenu = useCallback(
 		(e: React.MouseEvent) => e.preventDefault(),
