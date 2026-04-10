@@ -2245,6 +2245,7 @@ dependencies = [
  "base64",
  "rmp-serde",
  "serde",
+ "serde_json",
 ]
 
 [[package]]

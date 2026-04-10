@@ -173,7 +173,7 @@ test.describe
 				?.exec([
 					"bash",
 					"-c",
-					"pkill -9 -f 'xeyes|xterm|xlogo|xclock|xmessage|zenity|firefox|vim|gimp' 2>/dev/null; true",
+					"pkill -9 -f 'xeyes|xterm|xlogo|xclock|xmessage|zenity|firefox|vim|gimp|gtk3-demo' 2>/dev/null; true",
 				])
 				.catch(() => {});
 			// Wipe Firefox profile state left behind by SIGKILL — otherwise
@@ -282,6 +282,64 @@ test.describe
 			// And back again, to verify it's not a one-shot.
 			await xeyesFrame.locator('[data-testid="x11-canvas"]').click();
 			await expect(menuBarTitle).toHaveText("xeyes", { timeout: 5_000 });
+		});
+
+		test("global menu bar mirrors a GTK app's exported menus", async ({
+			page,
+		}) => {
+			await page.goto(`http://localhost:${frontendPort}`);
+			await waitForDock(page);
+
+			// gtk3-demo-application is a GtkApplication that calls
+			// gtk_application_set_menubar(), so once we tell it (via the
+			// _GTK_SHELL_SHOWS_MENUBAR root property) that the shell will
+			// render the menubar, it exports its menu structure over
+			// org.gtk.Menus and never draws it locally.
+			const win = await spawnApp(page, "", "gtk3-demo-application");
+			const canvas = win.locator('[data-testid="x11-canvas"]');
+			await expect(canvas).toBeVisible();
+
+			// Click the canvas so X11 input focus lands on the GTK app
+			// — the global menu bar only shows the *focused* window's
+			// menu, and the focus broadcast fires on ButtonPress.
+			await canvas.click();
+
+			// The MenuStructure update should arrive from the sidecar
+			// shortly after the window maps. Poll until at least one
+			// top-level menu item is rendered.
+			const topItems = page.locator(
+				'[data-testid="global-menu-top-item"]',
+			);
+			await expect
+				.poll(async () => topItems.count(), {
+					timeout: 30_000,
+					intervals: [500, 1000, 2000, 2000, 3000],
+				})
+				.toBeGreaterThan(0);
+
+			// gtk3-demo-application's exported menubar has Preferences
+			// and Help as top-level items.
+			const topLabels = await topItems.allInnerTexts();
+			expect(topLabels).toContain("Preferences");
+			expect(topLabels).toContain("Help");
+
+			// Click Preferences — its dropdown should open with the
+			// real items GTK exported (theme toggle, color submenu, ...).
+			await topItems.filter({ hasText: "Preferences" }).first().click();
+			const dropdown = page.locator(
+				'[data-testid="global-menu-dropdown"]',
+			);
+			await expect(dropdown).toBeVisible();
+
+			const itemLabels = await page
+				.locator('[data-testid="global-menu-item"]')
+				.allInnerTexts();
+			// "Prefer Dark Theme" is a checkbox-style toggle — just
+			// assert it exists, since the checked-state prefix can vary.
+			expect(itemLabels.some((l) => l.includes("Prefer Dark Theme"))).toBe(
+				true,
+			);
+			expect(itemLabels.some((l) => l.includes("Color"))).toBe(true);
 		});
 
 		test("spawning xeyes creates a window on the canvas", async ({ page }) => {

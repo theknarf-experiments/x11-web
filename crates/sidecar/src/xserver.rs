@@ -29,6 +29,10 @@ pub struct X11Server {
     client_connected_tx: mpsc::UnboundedSender<(String, u32)>,
     /// Routes input/resize events to the correct X11 connection by window UUID.
     window_router: WindowRouter,
+    /// Mirrors GTK / Qt application menus over DBus and forwards them
+    /// to the frontend's global menu bar. Cloned into each per-client
+    /// `ClientState` so property-change handlers can attach trackers.
+    menu_tracker: crate::menus::MenuTracker,
 }
 
 /// Shared window registry, keyed by window ID.
@@ -180,6 +184,13 @@ pub(crate) struct ClientState {
     /// XInput2 per-client state: master pointer valuator values and the
     /// list of XISelectEvents subscriptions registered by this client.
     pub(crate) xi: crate::xinput2::XiState,
+    /// Mirrors GTK / Qt application menus over DBus into the frontend's
+    /// global menu bar. Cloned from the X11Server.
+    pub(crate) menu_tracker: crate::menus::MenuTracker,
+    /// Per-window in-progress GTK menu paths, keyed by X11 window id.
+    /// We accumulate `_GTK_*` property values as the app sets them and
+    /// only call `attach_gtk` once enough fields are present.
+    pub(crate) gtk_menu_paths: HashMap<u32, crate::menus::GtkMenuPaths>,
 }
 
 impl ClientState {
@@ -783,6 +794,7 @@ impl X11Server {
         update_tx: mpsc::UnboundedSender<TaggedDisplayUpdate>,
         client_connected_tx: mpsc::UnboundedSender<(String, u32)>,
         window_router: WindowRouter,
+        menu_tracker: crate::menus::MenuTracker,
     ) -> Self {
         let socket_path = PathBuf::from(format!("/tmp/.X11-unix/X{display_number}"));
         Self {
@@ -791,6 +803,7 @@ impl X11Server {
             update_tx,
             client_connected_tx,
             window_router,
+            menu_tracker,
         }
     }
 
@@ -830,6 +843,36 @@ impl X11Server {
         // Pre-populate with root window
         {
             let mut windows = shared_windows.lock().unwrap();
+            let mut root_properties: HashMap<u32, PropertyValue> = HashMap::new();
+
+            // Tell GTK 3 apps that the desktop shell renders the menubar
+            // and app menu — they will then export their menu structure
+            // over `org.gtk.Menus` instead of drawing it locally. The
+            // sidecar's MenuTracker mirrors the exported menu and the
+            // frontend renders it in the global menu bar.
+            //
+            // Atoms are interned now (not lazily) so the values are
+            // visible in `GetProperty(root)` for the very first client
+            // that connects.
+            let mut atoms_lock = shared_atoms.lock().unwrap();
+            let atom_shows_menubar =
+                atoms_lock.intern("_GTK_SHELL_SHOWS_MENUBAR", false);
+            let atom_shows_app_menu =
+                atoms_lock.intern("_GTK_SHELL_SHOWS_APP_MENU", false);
+            drop(atoms_lock);
+
+            let cardinal_one = 1u32.to_le_bytes().to_vec();
+            for atom in [atom_shows_menubar, atom_shows_app_menu] {
+                root_properties.insert(
+                    atom,
+                    PropertyValue {
+                        prop_type: 6, // CARDINAL
+                        format: 32,
+                        data: cardinal_one.clone(),
+                    },
+                );
+            }
+
             windows.insert(
                 ROOT_WINDOW,
                 WindowState {
@@ -848,7 +891,7 @@ impl X11Server {
                     override_redirect: false,
                     redirected: false,
                     framebuffer: Framebuffer::new(SCREEN_WIDTH as u32, SCREEN_HEIGHT as u32),
-                    properties: HashMap::new(),
+                    properties: root_properties,
                     owner_client_id: String::new(), // root has no owner
                     cursor: None,
                 },
@@ -875,9 +918,10 @@ impl X11Server {
                     let wm = shared_wm_state.clone();
                     let sa = shared_atoms.clone();
                     let wr = self.window_router.clone();
+                    let mt = self.menu_tracker.clone();
                     tokio::spawn(async move {
                         if let Err(e) =
-                            handle_client(stream, client_id, update_tx, message_tx, message_rx, conn_index, sw, wm, sa, wr).await
+                            handle_client(stream, client_id, update_tx, message_tx, message_rx, conn_index, sw, wm, sa, wr, mt).await
                         {
                             debug!("X11 client {cid} disconnected: {e}");
                         }
@@ -1014,6 +1058,7 @@ async fn handle_client(
     shared_wm_state: SharedWmState,
     shared_atoms: Arc<Mutex<AtomManager>>,
     window_router: WindowRouter,
+    menu_tracker: crate::menus::MenuTracker,
 ) -> io::Result<()> {
     // Phase 1: Read client setup request
     // Read at least 12 bytes for the header
@@ -1100,6 +1145,8 @@ async fn handle_client(
         x11_to_uuid: HashMap::new(),
         cursors: HashMap::new(),
         xi: crate::xinput2::XiState::default(),
+        menu_tracker,
+        gtk_menu_paths: HashMap::new(),
     };
 
     // Don't set EWMH WM properties (_NET_SUPPORTING_WM_CHECK etc.).
@@ -1206,6 +1253,15 @@ async fn handle_client(
             Some((x11_wid, msg)) = message_rx.recv() => {
                 match msg {
                     WindowMessage::Input(input) => {
+                        // MenuActivate is dispatched out-of-band via
+                        // DBus by the per-window MenuTracker. Don't
+                        // touch focus / valuators / X11 stream for it.
+                        if let x11_web_protocol::InputEvent::MenuActivate { action } = &input {
+                            if let Some(uuid) = state.top_level_uuid_for(x11_wid) {
+                                state.menu_tracker.activate(&uuid, action.clone());
+                            }
+                            continue;
+                        }
                         state.set_focus_window(x11_wid);
                         // Every ButtonPress is a "user clicked here"
                         // signal — force-broadcast even if this client
@@ -1545,6 +1601,11 @@ fn build_x11_input_event(state: &mut ClientState, input: &InputEvent, top_level:
             event[28..30].copy_from_slice(&mask.to_le_bytes());
             event[30] = 1;
         }
+        // MenuActivate is dispatched out-of-band by the per-window
+        // MenuTracker via DBus, not as an X11 wire event. Returning
+        // an empty buffer signals the caller to skip the X11 stream
+        // write.
+        InputEvent::MenuActivate { .. } => return Vec::new(),
     }
 
     event.to_vec()
@@ -2132,8 +2193,10 @@ fn handle_get_window_attributes(state: &mut ClientState, data: &[u8], seq: u16) 
 fn handle_destroy_window(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
     let wid = u32::from_le_bytes([data[4], data[5], data[6], data[7]]);
     state.windows.remove(&wid);
+    state.gtk_menu_paths.remove(&wid);
     if let Some(uuid) = state.x11_to_uuid.remove(&wid) {
         state.window_router.unregister_all(&[uuid.clone()]);
+        state.menu_tracker.detach(&uuid);
         let _ = state.update_tx.send((
             state.client_id.clone(),
             DisplayUpdate::WindowDestroyed { window_id: uuid },
@@ -2682,6 +2745,61 @@ fn handle_change_property(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
                     title,
                 },
             ));
+            }
+        }
+    }
+
+    // Detect GTK application menu export. GTK 3 sets a cluster of
+    // string properties on the top-level window pointing at the
+    // `org.gtk.Menus` and `org.gtk.Actions` object paths it has
+    // exported on its unique bus name. We accumulate the values as
+    // they arrive and hand off to MenuTracker once we have enough.
+    if format == 8 && data.len() >= 24 + byte_len {
+        let atom_name = state.get_atom_name(property_atom);
+        if let Some(name) = atom_name {
+            let is_gtk_menu_atom = matches!(
+                name.as_str(),
+                "_GTK_UNIQUE_BUS_NAME"
+                    | "_GTK_MENUBAR_OBJECT_PATH"
+                    | "_GTK_APP_MENU_OBJECT_PATH"
+                    | "_GTK_APPLICATION_OBJECT_PATH"
+                    | "_GTK_WINDOW_OBJECT_PATH"
+            );
+            if is_gtk_menu_atom {
+                let value = String::from_utf8_lossy(&data[24..24 + byte_len])
+                    .trim_end_matches('\0')
+                    .to_string();
+                let entry = state
+                    .gtk_menu_paths
+                    .entry(window)
+                    .or_default();
+                match name.as_str() {
+                    "_GTK_UNIQUE_BUS_NAME" => entry.bus_name = value,
+                    "_GTK_MENUBAR_OBJECT_PATH" => entry.menubar_path = Some(value),
+                    "_GTK_APP_MENU_OBJECT_PATH" => entry.app_menu_path = Some(value),
+                    "_GTK_APPLICATION_OBJECT_PATH" => {
+                        entry.app_actions_path = Some(value)
+                    }
+                    "_GTK_WINDOW_OBJECT_PATH" => {
+                        entry.win_actions_path = Some(value)
+                    }
+                    _ => {}
+                }
+                // Once the bus name + at least one menu path are set,
+                // hand off to MenuTracker. Subsequent property changes
+                // re-trigger this — `attach_gtk` replaces the existing
+                // tracker for that window.
+                if let Some(paths) = state.gtk_menu_paths.get(&window) {
+                    if paths.has_menu() {
+                        if let Some(uuid) = state.window_uuid(window) {
+                            state.menu_tracker.attach_gtk(
+                                uuid,
+                                state.client_id.clone(),
+                                paths.clone(),
+                            );
+                        }
+                    }
+                }
             }
         }
     }

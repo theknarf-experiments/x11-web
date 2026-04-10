@@ -186,7 +186,45 @@ export type DisplayUpdate =
 			window_id: string;
 			cursor: string;
 	  }
-	| { kind: "WindowFocused"; window_id: string | null };
+	| { kind: "WindowFocused"; window_id: string | null }
+	| {
+			kind: "MenuStructure";
+			window_id: string;
+			menu: MenuItem[];
+	  }
+	| {
+			kind: "MenuStateChanged";
+			window_id: string;
+			item_id: string;
+			enabled?: boolean;
+			checked?: boolean;
+			label?: string;
+	  };
+
+export type MenuItemKind =
+	| "normal"
+	| "submenu"
+	| "separator"
+	| "checkbox"
+	| "radio";
+
+export interface MenuAction {
+	name: string;
+	target?: unknown;
+}
+
+export interface MenuItem {
+	id: string;
+	label?: string;
+	kind: MenuItemKind;
+	enabled?: boolean;
+	visible?: boolean;
+	checked?: boolean;
+	accelerator?: string;
+	icon?: string;
+	action?: MenuAction;
+	children?: MenuItem[];
+}
 
 export type InputEvent =
 	| { kind: "KeyPress"; keycode: number; state: number }
@@ -199,4 +237,5 @@ export type InputEvent =
 			y: number;
 			state: number;
 	  }
-	| { kind: "MotionNotify"; x: number; y: number; state: number };
+	| { kind: "MotionNotify"; x: number; y: number; state: number }
+	| { kind: "MenuActivate"; action: MenuAction };

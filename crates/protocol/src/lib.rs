@@ -326,6 +326,96 @@ pub enum DisplayUpdate {
     WindowFocused {
         window_id: Option<String>,
     },
+    /// Full menu tree for a top-level window. Sent when the sidecar
+    /// first mirrors a GTK / Qt application menu, and again whenever
+    /// the structure changes substantially. Empty `menu` clears the
+    /// frontend's cache for that window (e.g. on app shutdown).
+    MenuStructure {
+        window_id: String,
+        menu: Vec<MenuItem>,
+    },
+    /// Incremental update for a single menu item — used for things
+    /// like enabling / disabling actions or toggling check state
+    /// without re-sending the whole tree.
+    MenuStateChanged {
+        window_id: String,
+        item_id: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        enabled: Option<bool>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        checked: Option<bool>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        label: Option<String>,
+    },
+}
+
+/// One node in a window's menu tree. Common shape across both
+/// `org.gtk.Menus` and `com.canonical.dbusmenu`; the sidecar's
+/// MenuTracker translates each protocol into this representation
+/// before forwarding to the frontend.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MenuItem {
+    /// Stable identifier inside this window's menu tree. The frontend
+    /// uses this for React keys and `MenuStateChanged` lookups. Format
+    /// is opaque — currently `"<group>.<position>"` for GTK menus and
+    /// `"dbm:<id>"` for dbusmenu.
+    pub id: String,
+    /// Human-readable label. `None` indicates a separator.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub label: Option<String>,
+    pub kind: MenuItemKind,
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+    #[serde(default = "default_true")]
+    pub visible: bool,
+    /// Current check / radio state, when applicable.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub checked: Option<bool>,
+    /// Display form of the keyboard shortcut, e.g. `"Ctrl+Q"`. The
+    /// underlying GTK / dbusmenu accelerator string is parsed by the
+    /// sidecar before sending.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub accelerator: Option<String>,
+    /// Named icon (typically a freedesktop icon name). Frontend
+    /// resolves to its own asset, or skips if unknown.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub icon: Option<String>,
+    /// Action to invoke when this item is activated. `None` for
+    /// separators, submenu parents, and items waiting for lazy load.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub action: Option<MenuAction>,
+    /// Children for submenus. Empty for leaves.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub children: Vec<MenuItem>,
+}
+
+fn default_true() -> bool {
+    true
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum MenuItemKind {
+    Normal,
+    Submenu,
+    Separator,
+    Checkbox,
+    Radio,
+}
+
+/// Identifier for the action a menu item triggers, plus any optional
+/// target value (used by GTK actions that take a parameter — e.g.
+/// `app.set-mode("scientific")`).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MenuAction {
+    /// Namespaced action name. Currently:
+    /// - `"app.<name>"` and `"win.<name>"` for `org.gtk.Actions`
+    /// - `"dbm:<int>"` for `com.canonical.dbusmenu`
+    pub name: String,
+    /// GVariant rendered as JSON. The sidecar parses it back into a
+    /// zvariant Value before invoking org.gtk.Actions.Activate.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub target: Option<serde_json::Value>,
 }
 
 /// Input events sent from the frontend to X11 clients.
@@ -356,5 +446,11 @@ pub enum InputEvent {
         x: i16,
         y: i16,
         state: u16,
+    },
+    /// User clicked an item in the global menu bar. Routed by the
+    /// existing per-window InputEvent channel; the sidecar's
+    /// MenuTracker for that window dispatches the action over DBus.
+    MenuActivate {
+        action: MenuAction,
     },
 }

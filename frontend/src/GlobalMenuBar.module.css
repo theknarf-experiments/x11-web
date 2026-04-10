@@ -6,7 +6,7 @@
 	height: 28px;
 	display: flex;
 	align-items: center;
-	gap: 16px;
+	gap: 4px;
 	padding: 0 16px;
 	background: rgba(40, 40, 40, 0.7);
 	backdrop-filter: blur(20px);
@@ -28,4 +28,107 @@
 	white-space: nowrap;
 	overflow: hidden;
 	text-overflow: ellipsis;
+	margin-right: 12px;
+}
+
+.menuItemWrapper {
+	position: relative;
+}
+
+.menuButton,
+.menuButtonOpen {
+	background: transparent;
+	border: none;
+	color: inherit;
+	font: inherit;
+	padding: 4px 10px;
+	border-radius: 4px;
+	cursor: pointer;
+	white-space: nowrap;
+}
+
+.menuButton:hover {
+	background: rgba(255, 255, 255, 0.1);
+}
+
+.menuButtonOpen {
+	background: rgba(255, 255, 255, 0.18);
+}
+
+.menuButton:disabled,
+.menuButtonOpen:disabled {
+	opacity: 0.45;
+	cursor: default;
+}
+
+.dropdown {
+	position: absolute;
+	top: calc(100% + 4px);
+	left: 0;
+	min-width: 200px;
+	background: rgba(40, 40, 40, 0.92);
+	backdrop-filter: blur(20px);
+	border: 1px solid rgba(255, 255, 255, 0.12);
+	border-radius: 6px;
+	box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+	padding: 4px 0;
+	z-index: 210;
+}
+
+.dropdownItemWrapper {
+	position: relative;
+}
+
+.dropdownItem {
+	width: 100%;
+	background: transparent;
+	border: none;
+	color: rgba(255, 255, 255, 0.9);
+	font: inherit;
+	font-size: 13px;
+	padding: 5px 14px;
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 24px;
+	cursor: pointer;
+	text-align: left;
+}
+
+.dropdownItem:hover:not(:disabled) {
+	background: rgba(80, 130, 220, 0.6);
+}
+
+.dropdownItem:disabled {
+	color: rgba(255, 255, 255, 0.35);
+	cursor: default;
+}
+
+.itemLabel {
+	flex: 1;
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
+}
+
+.accel {
+	color: rgba(255, 255, 255, 0.5);
+	font-size: 12px;
+}
+
+.submenuChevron {
+	color: rgba(255, 255, 255, 0.5);
+	font-size: 11px;
+}
+
+.separator {
+	height: 1px;
+	margin: 4px 8px;
+	background: rgba(255, 255, 255, 0.15);
+}
+
+.nestedDropdown {
+	position: absolute;
+	top: 0;
+	left: 100%;
 }

@@ -1,5 +1,6 @@
 mod fonts;
 mod framebuffer;
+mod menus;
 mod render;
 mod xinput2;
 mod xserver;
@@ -223,11 +224,17 @@ async fn main() {
     let (display_tx, mut display_rx) = mpsc::unbounded_channel::<TaggedDisplayUpdate>();
     let (client_connected_tx, mut client_connected_rx) = mpsc::unbounded_channel::<(String, u32)>();
     let window_router = crate::xserver::WindowRouter::new();
+    // MenuTracker connects to the same session bus the apps use; on
+    // failure it becomes a no-op so the rest of the sidecar still
+    // works without DBus.
+    let menu_tracker =
+        crate::menus::MenuTracker::new(display_tx.clone(), dbus_address.clone()).await;
     let x11_server = X11Server::new(
         display_number,
         display_tx,
         client_connected_tx,
         window_router.clone(),
+        menu_tracker,
     );
     let display_string = x11_server.display_string();
     info!("Starting X11 server on DISPLAY={}", display_string);

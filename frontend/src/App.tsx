@@ -10,7 +10,7 @@ import { ClientRenderer } from "./ClientRenderer";
 import { Dock, type DockProcess } from "./Dock";
 import { GlobalMenuBar } from "./GlobalMenuBar";
 import { InfiniteCanvas } from "./InfiniteCanvas";
-import type { InputEvent } from "./types";
+import type { InputEvent, MenuAction, MenuItem } from "./types";
 import { useBackendSocket } from "./useBackendSocket";
 import { WindowFrame } from "./WindowFrame";
 
@@ -69,6 +69,8 @@ function App() {
 	const [windows, setWindows] = useState<CanvasWindow[]>([]);
 	/** UUID of the currently X11-focused top-level window, or null. */
 	const [focusedWindowId, setFocusedWindowId] = useState<string | null>(null);
+	/** Per-window menu trees mirrored from GTK / Qt apps via the sidecar. */
+	const [menus, setMenus] = useState<Map<string, MenuItem[]>>(new Map());
 	/** One renderer per top-level X11 window (keyed by window_id as string). */
 	const renderersRef = useRef<Map<string, ClientRenderer>>(new Map());
 	const closedWindowsRef = useRef<Set<string>>(new Set());
@@ -260,12 +262,31 @@ function App() {
 				setFocusedWindowId((prev) =>
 					prev === update.window_id ? null : prev,
 				);
+				setMenus((prev) => {
+					if (!prev.has(update.window_id)) return prev;
+					const next = new Map(prev);
+					next.delete(update.window_id);
+					return next;
+				});
 			}
 
 			// WindowFocused — the X11 server tells us which top-level
 			// window has input focus. Drives the global menu bar.
 			if (update.kind === "WindowFocused") {
 				setFocusedWindowId(update.window_id);
+			}
+
+			// MenuStructure — full menu tree from a GTK / Qt app.
+			if (update.kind === "MenuStructure") {
+				setMenus((prev) => {
+					const next = new Map(prev);
+					if (update.menu.length === 0) {
+						next.delete(update.window_id);
+					} else {
+						next.set(update.window_id, update.menu);
+					}
+					return next;
+				});
 			}
 
 			// Route display updates to the per-window renderer.
@@ -395,12 +416,32 @@ function App() {
 		return result;
 	}, [windows, processes]);
 
-	const focusedTitle =
-		windows.find((w) => w.windowId === focusedWindowId)?.title ?? null;
+	const focusedWindow = windows.find((w) => w.windowId === focusedWindowId);
+	const focusedTitle = focusedWindow?.title ?? null;
+	const focusedMenu = focusedWindowId
+		? (menus.get(focusedWindowId) ?? null)
+		: null;
+
+	const handleMenuActivate = useCallback(
+		(action: MenuAction) => {
+			if (!focusedWindow) return;
+			send({
+				type: "InputEvent",
+				sidecar_id: focusedWindow.sidecarId,
+				window_id: focusedWindow.windowId,
+				event: { kind: "MenuActivate", action },
+			});
+		},
+		[focusedWindow, send],
+	);
 
 	return (
 		<>
-			<GlobalMenuBar focusedTitle={focusedTitle} />
+			<GlobalMenuBar
+				focusedTitle={focusedTitle}
+				menu={focusedMenu}
+				onActivate={handleMenuActivate}
+			/>
 			<InfiniteCanvas>
 				{windows.map((win) => {
 					// Use the per-client renderer (shared across all windows from the same client)
