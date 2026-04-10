@@ -15,6 +15,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     dbus \
     dbus-x11 \
     gtk-3-examples \
+    featherpad \
     emacs-nox \
     nano \
     x11-utils \

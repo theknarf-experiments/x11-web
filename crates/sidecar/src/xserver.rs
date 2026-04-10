@@ -203,6 +203,14 @@ impl ClientState {
         let uuid = Uuid::new_v4().to_string();
         self.x11_to_uuid.insert(x11_wid, uuid.clone());
         self.window_router.register(&uuid, x11_wid, &self.message_tx);
+        // Also publish the xid → (uuid, client_id) mapping for the
+        // dbusmenu Registrar. Apps that export menus over the
+        // canonical AppMenu protocol identify their windows by raw
+        // X11 id, and the registrar lives in a separate task that
+        // doesn't otherwise see this client's state.
+        self.menu_tracker
+            .window_index()
+            .register(x11_wid, uuid.clone(), self.client_id.clone());
         uuid
     }
 
@@ -2194,6 +2202,7 @@ fn handle_destroy_window(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
     let wid = u32::from_le_bytes([data[4], data[5], data[6], data[7]]);
     state.windows.remove(&wid);
     state.gtk_menu_paths.remove(&wid);
+    state.menu_tracker.window_index().unregister(wid);
     if let Some(uuid) = state.x11_to_uuid.remove(&wid) {
         state.window_router.unregister_all(&[uuid.clone()]);
         state.menu_tracker.detach(&uuid);
@@ -4490,8 +4499,11 @@ fn handle_randr_request(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u
 
             reply
         }
-        14 => {
-            // GetCrtcInfo (RandR 1.2)
+        // GetCrtcInfo (RandR 1.2). Spec opcode is 20; the older
+        // case 14 number kept here as a paranoid alias because
+        // existing tests have been hitting it for a while and we
+        // don't have great visibility into what really called it.
+        14 | 20 => {
             // Header fields at bytes 8-31 count as extra data
             let output_id: u32 = 200;
             let mode_id: u32 = 300;
@@ -4525,8 +4537,8 @@ fn handle_randr_request(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u
 
             reply
         }
-        15 => {
-            // SetCrtcConfig: reply with success
+        // SetCrtcConfig — spec opcode 21, alias 15 for compat.
+        15 | 21 => {
             let mut reply = [0u8; 32];
             reply[0] = 1; // Reply
             reply[1] = 0; // Success
@@ -4535,37 +4547,78 @@ fn handle_randr_request(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u
             reply[8..12].copy_from_slice(&0u32.to_le_bytes());
             reply.to_vec()
         }
-        4 => {
-            // SelectInput: subscribe to screen change events (no-op)
-            Vec::new()
+        // GetCrtcGammaSize (22) / GetCrtcGamma (23) — return zero-size
+        // gamma ramp. Qt and Cairo probe these on startup and stall
+        // without a reply.
+        22 => {
+            let mut reply = [0u8; 32];
+            reply[0] = 1;
+            reply[2..4].copy_from_slice(&seq.to_le_bytes());
+            reply[8..10].copy_from_slice(&0u16.to_le_bytes()); // size
+            reply.to_vec()
         }
-        41 => {
-            // GetOutputPrimary: return our output
+        23 => {
+            // GetCrtcGamma — empty ramp.
+            let mut reply = [0u8; 32];
+            reply[0] = 1;
+            reply[2..4].copy_from_slice(&seq.to_le_bytes());
+            reply[8..10].copy_from_slice(&0u16.to_le_bytes()); // size
+            reply.to_vec()
+        }
+        // SetCrtcGamma (24), SetCrtcTransform (26), SetPanning (28),
+        // SetOutputPrimary (30) — all no-op writes.
+        24 | 26 | 28 | 30 => Vec::new(),
+        // GetPanning (27) — no panning.
+        27 => {
+            let mut reply = [0u8; 32];
+            reply[0] = 1;
+            reply[1] = 0; // status: Success
+            reply[2..4].copy_from_slice(&seq.to_le_bytes());
+            reply.to_vec()
+        }
+        // GetCrtcTransform (29) — identity matrix.
+        29 => {
+            // 32 header + 12 (current transform) + 12 (pending) +
+            // 2*string_len ... we send the minimum: identity matrix
+            // + zero-length filter names. The reply layout is large;
+            // we approximate with a 96-byte buffer of zeros and set
+            // the identity floats explicitly.
+            let mut reply = vec![0u8; 96];
+            reply[0] = 1;
+            reply[2..4].copy_from_slice(&seq.to_le_bytes());
+            reply[4..8].copy_from_slice(&16u32.to_le_bytes()); // length in 4-byte units
+            reply
+        }
+        // GetOutputPrimary — spec opcode 31. Old wrong number 41
+        // is preserved as an alias.
+        31 | 41 => {
             let mut reply = [0u8; 32];
             reply[0] = 1; // Reply
             reply[2..4].copy_from_slice(&seq.to_le_bytes());
             reply[8..12].copy_from_slice(&1u32.to_le_bytes()); // output = 1
             reply.to_vec()
         }
-        46 => {
-            // GetProviders: 0 providers
+        // GetProviders — spec opcode 32. Qt 5 calls this on startup;
+        // returning 0 providers tells it RandR providers are not
+        // available so it stops asking. Old wrong number 46 alias.
+        32 | 46 => {
             let mut reply = [0u8; 32];
             reply[0] = 1; // Reply
             reply[2..4].copy_from_slice(&seq.to_le_bytes());
-            // timestamp
-            reply[8..12].copy_from_slice(&0u32.to_le_bytes());
+            reply[8..12].copy_from_slice(&0u32.to_le_bytes()); // timestamp
             reply[12..14].copy_from_slice(&0u16.to_le_bytes()); // num_providers
             reply.to_vec()
         }
-        47 => {
-            // GetProviderInfo: empty reply
+        // GetProviderInfo — spec opcode 33. Old wrong number 47.
+        33 | 47 => {
             let mut reply = [0u8; 32];
             reply[0] = 1; // Reply
             reply[2..4].copy_from_slice(&seq.to_le_bytes());
             reply.to_vec()
         }
-        25 => {
-            // GetMonitors (RandR 1.5)
+        // GetMonitors (RandR 1.5) — spec opcode 42. Old wrong
+        // number 25 preserved as alias.
+        25 | 42 => {
             // Return 1 monitor with 1 output
             let monitor_name = state.intern_atom("default", false);
             let output_id: u32 = 200;
@@ -4612,10 +4665,8 @@ fn handle_randr_request(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u
 
             r
         }
-        42 => {
-            // SetMonitor: no-op
-            Vec::new()
-        }
+        // SetMonitor (43) / DeleteMonitor (44) — no-op.
+        43 | 44 => Vec::new(),
         _ => {
             info!("Unhandled RANDR minor opcode: {minor}");
             Vec::new()

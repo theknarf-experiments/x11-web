@@ -28,6 +28,51 @@ use zbus::zvariant::{OwnedValue, Value};
 
 use crate::xserver::TaggedDisplayUpdate;
 
+/// Global lookup table from raw X11 window id to the (UUID, X11 client
+/// id) pair we use everywhere else in the protocol.
+///
+/// The dbusmenu Registrar receives `RegisterWindow(xid)` calls from
+/// random Qt / Firefox apps over DBus, and the only piece of info it
+/// has to identify the window is the raw xid. We need to translate
+/// that into the per-frontend UUID (so the `MenuStructure` update goes
+/// to the right `WindowFrame`) and the X11 client id (so the backend
+/// routes the update through the right sidecar→frontend channel).
+///
+/// xserver.rs registers entries when it allocates a UUID for a
+/// top-level window, and unregisters them on DestroyWindow.
+#[derive(Clone, Default)]
+pub struct WindowIndex {
+    inner: Arc<Mutex<HashMap<u32, WindowEntry>>>,
+}
+
+#[derive(Clone)]
+struct WindowEntry {
+    uuid: String,
+    client_id: String,
+}
+
+impl WindowIndex {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn register(&self, xid: u32, uuid: String, client_id: String) {
+        let mut map = self.inner.lock().unwrap();
+        map.insert(xid, WindowEntry { uuid, client_id });
+    }
+
+    pub fn unregister(&self, xid: u32) {
+        let mut map = self.inner.lock().unwrap();
+        map.remove(&xid);
+    }
+
+    /// Look up the window UUID and X11 client id for a raw xid.
+    pub fn lookup(&self, xid: u32) -> Option<(String, String)> {
+        let map = self.inner.lock().unwrap();
+        map.get(&xid).map(|e| (e.uuid.clone(), e.client_id.clone()))
+    }
+}
+
 /// Object paths and bus name advertised by a GTK app's top-level window
 /// via the `_GTK_*` X11 properties. Used by `MenuTracker::attach_gtk`.
 #[derive(Debug, Clone, Default)]
@@ -68,15 +113,23 @@ struct TrackerInner {
     /// Connection to the per-sidecar session bus, or `None` if
     /// dbus-daemon failed to start (Phase 0 fallback).
     conn: Option<zbus::Connection>,
+    /// Stored DBus session address — kept so per-window tasks can
+    /// build their own dedicated connection rather than sharing the
+    /// shared one (some apps don't reliably respond to multiple
+    /// concurrent in-flight method calls on a single connection).
+    dbus_address: Option<String>,
     /// Channel back to the X11Server's display update fan-in. Each
     /// outgoing update is tagged with the *X11 client* id that owns
     /// the window so the backend routes it correctly.
     update_tx: mpsc::UnboundedSender<TaggedDisplayUpdate>,
     /// Per-window tracker tasks, keyed by the window's UUID.
-    windows: Mutex<HashMap<String, WindowEntry>>,
+    windows: Mutex<HashMap<String, TrackerWindow>>,
+    /// Global xid → (uuid, client_id) lookup populated by xserver.rs
+    /// and read by the dbusmenu Registrar.
+    window_index: WindowIndex,
 }
 
-struct WindowEntry {
+struct TrackerWindow {
     cmd_tx: mpsc::UnboundedSender<TrackerCommand>,
     task: tokio::task::JoinHandle<()>,
 }
@@ -99,7 +152,7 @@ impl MenuTracker {
         update_tx: mpsc::UnboundedSender<TaggedDisplayUpdate>,
         dbus_address: Option<String>,
     ) -> Self {
-        let conn = match dbus_address {
+        let conn = match &dbus_address {
             Some(addr) => match zbus::connection::Builder::address(addr.as_str()) {
                 Ok(builder) => match builder.build().await {
                     Ok(c) => {
@@ -119,19 +172,38 @@ impl MenuTracker {
             None => None,
         };
 
-        Self {
+        let tracker = Self {
             inner: Arc::new(TrackerInner {
                 conn,
+                dbus_address,
                 update_tx,
                 windows: Mutex::new(HashMap::new()),
+                window_index: WindowIndex::new(),
             }),
+        };
+
+        // Take ownership of the well-known AppMenu Registrar name and
+        // start serving it. Errors are non-fatal — Qt apps will simply
+        // not export their menus if the registrar isn't there.
+        if tracker.inner.conn.is_some() {
+            if let Err(e) = serve_app_menu_registrar(tracker.clone()).await {
+                warn!("Failed to host com.canonical.AppMenu.Registrar: {e}");
+            }
         }
+
+        tracker
     }
 
     /// Whether DBus is available — i.e. whether `attach_gtk` will
     /// actually do anything.
     pub fn is_active(&self) -> bool {
         self.inner.conn.is_some()
+    }
+
+    /// Shared XID → (uuid, client_id) lookup. Updated by xserver.rs
+    /// as windows come and go; read by the dbusmenu Registrar.
+    pub fn window_index(&self) -> &WindowIndex {
+        &self.inner.window_index
     }
 
     /// Begin mirroring a GTK app's menu for the given top-level window.
@@ -173,7 +245,7 @@ impl MenuTracker {
         ));
 
         let mut windows = self.inner.windows.lock().unwrap();
-        if let Some(prev) = windows.insert(window_uuid, WindowEntry { cmd_tx, task }) {
+        if let Some(prev) = windows.insert(window_uuid, TrackerWindow { cmd_tx, task }) {
             let _ = prev.cmd_tx.send(TrackerCommand::Stop);
             prev.task.abort();
         }
@@ -197,6 +269,166 @@ impl MenuTracker {
             warn!("MenuTracker.activate: no tracker for window {window_uuid}");
         }
     }
+
+    /// Begin mirroring a Qt / Firefox / dbusmenu app's menu for the
+    /// given top-level window. Replaces any existing tracker for the
+    /// same window UUID.
+    pub fn attach_dbusmenu(
+        &self,
+        window_uuid: String,
+        client_id: String,
+        bus_name: String,
+        object_path: String,
+    ) {
+        let dbus_address = match self.inner.dbus_address.clone() {
+            Some(a) => a,
+            None => {
+                debug!("MenuTracker.attach_dbusmenu: no DBus address, ignoring");
+                return;
+            }
+        };
+        info!(
+            "MenuTracker mirroring dbusmenu for window {window_uuid} bus={bus_name} path={object_path}"
+        );
+
+        let (cmd_tx, cmd_rx) = mpsc::unbounded_channel();
+        let update_tx = self.inner.update_tx.clone();
+        let task = tokio::spawn(run_dbusmenu_window_task(
+            dbus_address,
+            window_uuid.clone(),
+            client_id,
+            bus_name,
+            object_path,
+            cmd_rx,
+            update_tx,
+        ));
+
+        let mut windows = self.inner.windows.lock().unwrap();
+        if let Some(prev) = windows.insert(window_uuid, TrackerWindow { cmd_tx, task }) {
+            let _ = prev.cmd_tx.send(TrackerCommand::Stop);
+            prev.task.abort();
+        }
+    }
+}
+
+// =============================================================================
+// com.canonical.AppMenu.Registrar — sidecar-hosted DBus service that
+// Qt apps and Firefox call to publish their dbusmenu paths.
+// =============================================================================
+
+/// Stored registration: maps an X11 window id to the (sender bus
+/// name, dbusmenu object path) the app published.
+#[derive(Clone)]
+struct Registration {
+    service: String,
+    object_path: zbus::zvariant::OwnedObjectPath,
+}
+
+struct AppMenuRegistrar {
+    /// Cloned MenuTracker handle so the registrar can call into
+    /// `attach_dbusmenu` / `detach` / `window_index().lookup`. This
+    /// creates a strong reference cycle (Connection → ObjectServer →
+    /// AppMenuRegistrar → MenuTracker → Connection) but the tracker
+    /// lives for the entire sidecar process so the cycle is bounded.
+    tracker: MenuTracker,
+    registrations: Mutex<HashMap<u32, Registration>>,
+}
+
+#[zbus::interface(name = "com.canonical.AppMenu.Registrar")]
+impl AppMenuRegistrar {
+    /// App publishes its menu. The xid is the raw X11 window id of
+    /// the top-level window the menu belongs to; the sender bus name
+    /// comes from the DBus message header.
+    async fn register_window(
+        &self,
+        #[zbus(header)] header: zbus::message::Header<'_>,
+        window_id: u32,
+        menu_object_path: zbus::zvariant::OwnedObjectPath,
+    ) {
+        let sender = match header.sender() {
+            Some(s) => s.to_string(),
+            None => {
+                warn!("AppMenu.RegisterWindow without sender header");
+                return;
+            }
+        };
+        info!(
+            "AppMenu.RegisterWindow: xid={window_id:#x} sender={sender} path={}",
+            menu_object_path.as_str()
+        );
+
+        match self.tracker.window_index().lookup(window_id) {
+            Some((uuid, client_id)) => {
+                self.tracker.attach_dbusmenu(
+                    uuid,
+                    client_id,
+                    sender.clone(),
+                    menu_object_path.as_str().to_string(),
+                );
+            }
+            None => {
+                warn!("AppMenu.RegisterWindow: unknown xid {window_id:#x}");
+            }
+        }
+
+        self.registrations.lock().unwrap().insert(
+            window_id,
+            Registration {
+                service: sender,
+                object_path: menu_object_path,
+            },
+        );
+    }
+
+    async fn unregister_window(&self, window_id: u32) {
+        info!("AppMenu.UnregisterWindow: xid={window_id:#x}");
+        let removed = self.registrations.lock().unwrap().remove(&window_id);
+        if removed.is_some() {
+            if let Some((uuid, _)) = self.tracker.window_index().lookup(window_id) {
+                self.tracker.detach(&uuid);
+            }
+        }
+    }
+
+    async fn get_menu_for_window(
+        &self,
+        window_id: u32,
+    ) -> (String, zbus::zvariant::OwnedObjectPath) {
+        let regs = self.registrations.lock().unwrap();
+        match regs.get(&window_id) {
+            Some(r) => (r.service.clone(), r.object_path.clone()),
+            None => (
+                String::new(),
+                zbus::zvariant::ObjectPath::try_from("/")
+                    .unwrap()
+                    .into(),
+            ),
+        }
+    }
+
+    async fn get_menus(&self) -> Vec<(u32, String, zbus::zvariant::OwnedObjectPath)> {
+        let regs = self.registrations.lock().unwrap();
+        regs.iter()
+            .map(|(&xid, r)| (xid, r.service.clone(), r.object_path.clone()))
+            .collect()
+    }
+}
+
+async fn serve_app_menu_registrar(tracker: MenuTracker) -> zbus::Result<()> {
+    let conn = match tracker.inner.conn.clone() {
+        Some(c) => c,
+        None => return Ok(()),
+    };
+    let registrar = AppMenuRegistrar {
+        tracker,
+        registrations: Mutex::new(HashMap::new()),
+    };
+    conn.object_server()
+        .at("/com/canonical/AppMenu/Registrar", registrar)
+        .await?;
+    conn.request_name("com.canonical.AppMenu.Registrar").await?;
+    info!("Hosting com.canonical.AppMenu.Registrar at /com/canonical/AppMenu/Registrar");
+    Ok(())
 }
 
 // =============================================================================
@@ -676,5 +908,361 @@ async fn dispatch_activation(
     };
     let platform_data: HashMap<&str, Value<'_>> = HashMap::new();
     proxy.activate(name, &parameters, platform_data).await?;
+    Ok(())
+}
+
+// =============================================================================
+// dbusmenu (com.canonical.dbusmenu) — Qt 5+, Firefox, anything that
+// goes through the AppMenu Registrar.
+// =============================================================================
+
+#[zbus::proxy(
+    interface = "com.canonical.dbusmenu",
+    default_service = "org.freedesktop.DBus",
+    default_path = "/MenuBar"
+)]
+trait Dbusmenu {
+    /// `(revision, layout)` where `layout` is a recursive
+    /// `(i, a{sv}, av)` triple. The third field is `av` (array of
+    /// variants); each variant wraps another triple. We deserialize
+    /// the layout side as `OwnedValue` and walk it manually because
+    /// recursive structures are awkward to express in serde.
+    fn get_layout(
+        &self,
+        parent_id: i32,
+        recursion_depth: i32,
+        property_names: &[&str],
+    ) -> zbus::Result<(u32, OwnedValue)>;
+
+    /// `event_id` is one of "clicked", "opened", "closed", "hovered".
+    fn event(
+        &self,
+        id: i32,
+        event_id: &str,
+        data: &Value<'_>,
+        timestamp: u32,
+    ) -> zbus::Result<()>;
+
+    /// Tell the app a submenu is about to be shown so it can do lazy
+    /// population. Returns true if the layout changed and we should
+    /// re-fetch.
+    fn about_to_show(&self, id: i32) -> zbus::Result<bool>;
+}
+
+/// One node in the dbusmenu layout tree, normalised after parsing.
+struct DbusmenuNode {
+    id: i32,
+    properties: HashMap<String, OwnedValue>,
+    children: Vec<DbusmenuNode>,
+}
+
+async fn run_dbusmenu_window_task(
+    dbus_address: String,
+    window_uuid: String,
+    client_id: String,
+    bus_name: String,
+    object_path: String,
+    mut cmd_rx: mpsc::UnboundedReceiver<TrackerCommand>,
+    update_tx: mpsc::UnboundedSender<TaggedDisplayUpdate>,
+) {
+    debug!(
+        "dbusmenu task starting for {window_uuid} bus={bus_name} path={object_path}"
+    );
+    // Build a fresh dedicated connection per window. The shared
+    // tracker connection serves the AppMenu Registrar interface;
+    // mixing inbound dispatch and outbound method calls on the same
+    // connection caused intermittent hangs in early testing.
+    let conn = match zbus::connection::Builder::address(dbus_address.as_str()) {
+        Ok(builder) => match builder.build().await {
+            Ok(c) => c,
+            Err(e) => {
+                warn!("dbusmenu per-window connection build failed: {e}");
+                return;
+            }
+        },
+        Err(e) => {
+            warn!("dbusmenu invalid DBus address: {e}");
+            return;
+        }
+    };
+
+    // Apps publish their dbusmenu service AFTER calling
+    // RegisterWindow. Give Qt a moment to finish registration before
+    // the first GetLayout, otherwise the call hits an empty path.
+    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+
+    let proxy = match DbusmenuProxy::builder(&conn)
+        .destination(bus_name.clone())
+        .and_then(|b| b.path(object_path.clone()))
+    {
+        Ok(builder) => match builder.build().await {
+            Ok(p) => p,
+            Err(e) => {
+                warn!("dbusmenu proxy build failed for {window_uuid}: {e}");
+                return;
+            }
+        },
+        Err(e) => {
+            warn!("dbusmenu proxy builder error for {window_uuid}: {e}");
+            return;
+        }
+    };
+
+    if let Err(e) = fetch_and_publish_dbusmenu(&proxy, &window_uuid, &client_id, &update_tx).await
+    {
+        warn!("Initial dbusmenu fetch for {window_uuid} failed: {e}");
+    }
+
+    while let Some(cmd) = cmd_rx.recv().await {
+        match cmd {
+            TrackerCommand::Stop => break,
+            TrackerCommand::Refresh => {
+                let _ = fetch_and_publish_dbusmenu(
+                    &proxy,
+                    &window_uuid,
+                    &client_id,
+                    &update_tx,
+                )
+                .await;
+            }
+            TrackerCommand::Activate { action } => {
+                if let Err(e) = dispatch_dbusmenu_activation(&proxy, &action).await {
+                    warn!(
+                        "dbusmenu activation {action_name} failed: {e}",
+                        action_name = action.name
+                    );
+                }
+                // Re-fetch in case the click toggled state.
+                let _ = fetch_and_publish_dbusmenu(
+                    &proxy,
+                    &window_uuid,
+                    &client_id,
+                    &update_tx,
+                )
+                .await;
+            }
+        }
+    }
+
+    info!("dbusmenu task for {window_uuid} stopped");
+}
+
+async fn fetch_and_publish_dbusmenu(
+    proxy: &DbusmenuProxy<'_>,
+    window_uuid: &str,
+    client_id: &str,
+    update_tx: &mpsc::UnboundedSender<TaggedDisplayUpdate>,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    // GetLayout(0, -1, []) — start at the root, infinite depth, all
+    // properties. Most apps return the full tree in one round trip.
+    // Wrapped in a timeout because some apps publish a path then never
+    // actually answer requests at it (looking at you, featherpad).
+    let layout_call = proxy.get_layout(0, -1, &[]);
+    let (_revision, layout_value) =
+        match tokio::time::timeout(std::time::Duration::from_secs(5), layout_call).await {
+            Ok(result) => result?,
+            Err(_) => {
+                warn!("dbusmenu GetLayout timed out for {window_uuid}");
+                return Ok(());
+            }
+        };
+    let root = match parse_dbusmenu_value(&layout_value) {
+        Some(node) => node,
+        None => {
+            warn!("dbusmenu GetLayout returned an unparseable tree");
+            return Ok(());
+        }
+    };
+    info!(
+        "dbusmenu mirror for {window_uuid}: {} top-level items",
+        root.children.len()
+    );
+    // The root item (id 0) is virtual — its children are the
+    // top-level menu items.
+    let menu: Vec<MenuItem> = root.children.iter().map(build_dbusmenu_item).collect();
+
+    let _ = update_tx.send((
+        client_id.to_string(),
+        DisplayUpdate::MenuStructure {
+            window_id: window_uuid.to_string(),
+            menu,
+        },
+    ));
+    Ok(())
+}
+
+/// Walk an `OwnedValue` containing the recursive `(i, a{sv}, av)`
+/// triple that GetLayout returns and produce a typed tree.
+///
+/// We rely on zvariant's `TryInto<(i32, HashMap<...>, Vec<OwnedValue>)>`
+/// to peel one layer at a time: each child in the `Vec<OwnedValue>` is
+/// itself a variant-wrapped triple, and we recurse on it.
+fn parse_dbusmenu_value(value: &OwnedValue) -> Option<DbusmenuNode> {
+    // OwnedValue is Clone (cheap, refcounted). We need to consume one
+    // here because TryInto is by-value.
+    parse_dbusmenu_owned(value.try_clone().ok()?)
+}
+
+fn parse_dbusmenu_owned(value: OwnedValue) -> Option<DbusmenuNode> {
+    let (id, props, children_owned): (
+        i32,
+        HashMap<String, OwnedValue>,
+        Vec<OwnedValue>,
+    ) = value.try_into().ok()?;
+    let children = children_owned
+        .into_iter()
+        .filter_map(parse_dbusmenu_owned)
+        .collect();
+    Some(DbusmenuNode {
+        id,
+        properties: props,
+        children,
+    })
+}
+
+fn dbus_prop_str(props: &HashMap<String, OwnedValue>, key: &str) -> Option<String> {
+    let v = props.get(key)?;
+    let value: &Value = v;
+    match value {
+        Value::Str(s) => Some(s.as_str().to_string()),
+        _ => None,
+    }
+}
+
+fn dbus_prop_bool(props: &HashMap<String, OwnedValue>, key: &str) -> Option<bool> {
+    let v = props.get(key)?;
+    let value: &Value = v;
+    match value {
+        Value::Bool(b) => Some(*b),
+        _ => None,
+    }
+}
+
+fn dbus_prop_i32(props: &HashMap<String, OwnedValue>, key: &str) -> Option<i32> {
+    let v = props.get(key)?;
+    let value: &Value = v;
+    match value {
+        Value::I32(n) => Some(*n),
+        _ => None,
+    }
+}
+
+/// Translate a dbusmenu shortcut (`aas` — array of arrays of strings,
+/// each inner array being a key combination like `["Control", "Q"]`)
+/// into a friendlier display form.
+fn dbus_prop_shortcut(props: &HashMap<String, OwnedValue>) -> Option<String> {
+    let v = props.get("shortcut")?;
+    let value: &Value = v;
+    let outer = match value {
+        Value::Array(a) => a,
+        _ => return None,
+    };
+    // Take the first shortcut (multiple alternates are rare).
+    let first = outer.iter().next()?;
+    let inner = match first {
+        Value::Array(a) => a,
+        _ => return None,
+    };
+    let parts: Vec<String> = inner
+        .iter()
+        .filter_map(|v| match v {
+            Value::Str(s) => Some(s.as_str().to_string()),
+            _ => None,
+        })
+        .collect();
+    if parts.is_empty() {
+        None
+    } else {
+        Some(parts.join("+"))
+    }
+}
+
+/// Convert a parsed dbusmenu node into our canonical `MenuItem`.
+fn build_dbusmenu_item(node: &DbusmenuNode) -> MenuItem {
+    let label = dbus_prop_str(&node.properties, "label").map(strip_underscores);
+    let visible = dbus_prop_bool(&node.properties, "visible").unwrap_or(true);
+    let enabled = dbus_prop_bool(&node.properties, "enabled").unwrap_or(true);
+    let icon = dbus_prop_str(&node.properties, "icon-name");
+    let accelerator = dbus_prop_shortcut(&node.properties);
+
+    let item_type = dbus_prop_str(&node.properties, "type").unwrap_or_default();
+    let toggle_type = dbus_prop_str(&node.properties, "toggle-type").unwrap_or_default();
+    let toggle_state = dbus_prop_i32(&node.properties, "toggle-state");
+    let children_display =
+        dbus_prop_str(&node.properties, "children-display").unwrap_or_default();
+
+    let id = format!("dbm:{}", node.id);
+
+    if item_type == "separator" {
+        return MenuItem {
+            id,
+            label: None,
+            kind: MenuItemKind::Separator,
+            enabled: true,
+            visible,
+            checked: None,
+            accelerator: None,
+            icon: None,
+            action: None,
+            children: Vec::new(),
+        };
+    }
+
+    let is_submenu = children_display == "submenu" || !node.children.is_empty();
+
+    let (kind, checked) = if is_submenu {
+        (MenuItemKind::Submenu, None)
+    } else if toggle_type == "checkmark" {
+        (MenuItemKind::Checkbox, toggle_state.map(|s| s == 1))
+    } else if toggle_type == "radio" {
+        (MenuItemKind::Radio, toggle_state.map(|s| s == 1))
+    } else {
+        (MenuItemKind::Normal, None)
+    };
+
+    let children: Vec<MenuItem> = node.children.iter().map(build_dbusmenu_item).collect();
+
+    let action = if matches!(kind, MenuItemKind::Submenu | MenuItemKind::Separator) {
+        None
+    } else {
+        Some(MenuAction {
+            name: id.clone(),
+            target: None,
+        })
+    };
+
+    MenuItem {
+        id,
+        label,
+        kind,
+        enabled,
+        visible,
+        checked,
+        accelerator,
+        icon,
+        action,
+        children,
+    }
+}
+
+async fn dispatch_dbusmenu_activation(
+    proxy: &DbusmenuProxy<'_>,
+    action: &MenuAction,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    let id_str = action
+        .name
+        .strip_prefix("dbm:")
+        .ok_or_else(|| format!("not a dbusmenu action: {}", action.name))?;
+    let id: i32 = id_str.parse()?;
+    // dbusmenu spec: data is reserved for future use, just send a
+    // dummy variant. The timestamp is best-effort.
+    let timestamp: u32 = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as u32)
+        .unwrap_or(0);
+    let dummy_data = Value::I32(0);
+    proxy
+        .event(id, "clicked", &dummy_data, timestamp)
+        .await?;
     Ok(())
 }

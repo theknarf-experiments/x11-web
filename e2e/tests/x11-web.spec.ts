@@ -173,7 +173,7 @@ test.describe
 				?.exec([
 					"bash",
 					"-c",
-					"pkill -9 -f 'xeyes|xterm|xlogo|xclock|xmessage|zenity|firefox|vim|gimp|gtk3-demo' 2>/dev/null; true",
+					"pkill -9 -f 'xeyes|xterm|xlogo|xclock|xmessage|zenity|firefox|vim|gimp|gtk3-demo|featherpad' 2>/dev/null; true",
 				])
 				.catch(() => {});
 			// Wipe Firefox profile state left behind by SIGKILL — otherwise
@@ -340,6 +340,77 @@ test.describe
 				true,
 			);
 			expect(itemLabels.some((l) => l.includes("Color"))).toBe(true);
+		});
+
+		// TODO(dbusmenu): Marked test.fail because we don't yet have
+		// a working test target for the dbusmenu pipeline.
+		//
+		// What works: the sidecar hosts `com.canonical.AppMenu.Registrar`,
+		// receives `RegisterWindow(xid, path)` calls from Qt apps,
+		// resolves the xid to a window UUID via WindowIndex, and
+		// spawns a per-window dbusmenu tracker task that calls
+		// `org.canonical.dbusmenu.GetLayout` and forwards the result.
+		//
+		// What doesn't: featherpad (the Qt 5 test target) calls
+		// `RegisterWindow("/MenuBar/N")` but never actually exports a
+		// dbus object at that path — DBus introspection at /MenuBar/N
+		// times out, while introspection at the same destination's
+		// root succeeds. featherpad in Debian bookworm appears to
+		// announce the path without actually publishing the menu, or
+		// publishes it under a different path our code doesn't
+		// discover. Other Qt or Firefox apps that publish a real
+		// dbusmenu object should Just Work with the existing
+		// implementation; we'll flip this back to a passing test
+		// once we find or build one.
+		test.fail("global menu bar mirrors a Qt app's exported menus", async ({
+			page,
+		}) => {
+			await page.goto(`http://localhost:${frontendPort}`);
+			await waitForDock(page);
+
+			// FeatherPad is a small Qt 5 text editor with a real
+			// menubar. Modern Qt 5+ auto-exports its menubar over
+			// `com.canonical.dbusmenu` when an AppMenu Registrar is
+			// available — which is exactly what the sidecar hosts.
+			const win = await spawnApp(page, "", "featherpad");
+			const canvas = win.locator('[data-testid="x11-canvas"]');
+			await expect(canvas).toBeVisible();
+
+			// Click the canvas so X11 input focus lands on featherpad
+			// — the global menu bar only renders the focused window's
+			// menu.
+			await canvas.click();
+
+			// Wait for the dbusmenu round-trip to complete and the
+			// MenuStructure update to land in the bar.
+			const topItems = page.locator(
+				'[data-testid="global-menu-top-item"]',
+			);
+			await expect
+				.poll(async () => topItems.count(), {
+					timeout: 30_000,
+					intervals: [500, 1000, 2000, 2000, 3000],
+				})
+				.toBeGreaterThan(0);
+
+			// FeatherPad's menubar has File, Edit, Search, Options,
+			// Help. Assert at least File + Help arrived.
+			const topLabels = await topItems.allInnerTexts();
+			expect(topLabels.some((l) => l.includes("File"))).toBe(true);
+			expect(topLabels.some((l) => l.includes("Help"))).toBe(true);
+
+			// Open File and assert it has real entries — at minimum
+			// New / Open / Save / Quit.
+			await topItems.filter({ hasText: "File" }).first().click();
+			await expect(
+				page.locator('[data-testid="global-menu-dropdown"]'),
+			).toBeVisible();
+
+			const itemLabels = await page
+				.locator('[data-testid="global-menu-item"]')
+				.allInnerTexts();
+			expect(itemLabels.some((l) => /\bNew\b/i.test(l))).toBe(true);
+			expect(itemLabels.some((l) => /\bQuit\b/i.test(l))).toBe(true);
 		});
 
 		test("spawning xeyes creates a window on the canvas", async ({ page }) => {
