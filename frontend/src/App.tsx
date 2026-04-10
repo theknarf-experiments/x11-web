@@ -8,6 +8,7 @@ import {
 } from "react";
 import { ClientRenderer } from "./ClientRenderer";
 import { Dock, type DockProcess } from "./Dock";
+import { GlobalMenuBar } from "./GlobalMenuBar";
 import { InfiniteCanvas } from "./InfiniteCanvas";
 import type { InputEvent } from "./types";
 import { useBackendSocket } from "./useBackendSocket";
@@ -66,6 +67,8 @@ function App() {
 	} = useBackendSocket();
 
 	const [windows, setWindows] = useState<CanvasWindow[]>([]);
+	/** UUID of the currently X11-focused top-level window, or null. */
+	const [focusedWindowId, setFocusedWindowId] = useState<string | null>(null);
 	/** One renderer per top-level X11 window (keyed by window_id as string). */
 	const renderersRef = useRef<Map<string, ClientRenderer>>(new Map());
 	const closedWindowsRef = useRef<Set<string>>(new Set());
@@ -241,6 +244,9 @@ function App() {
 						return prev;
 					return prev.filter((w) => w.windowId !== update.window_id);
 				});
+				setFocusedWindowId((prev) =>
+					prev === update.window_id ? null : prev,
+				);
 			}
 
 			// WindowDestroyed — remove frame and renderer
@@ -251,6 +257,15 @@ function App() {
 						return prev;
 					return prev.filter((w) => w.windowId !== update.window_id);
 				});
+				setFocusedWindowId((prev) =>
+					prev === update.window_id ? null : prev,
+				);
+			}
+
+			// WindowFocused — the X11 server tells us which top-level
+			// window has input focus. Drives the global menu bar.
+			if (update.kind === "WindowFocused") {
+				setFocusedWindowId(update.window_id);
 			}
 
 			// Route display updates to the per-window renderer.
@@ -380,8 +395,12 @@ function App() {
 		return result;
 	}, [windows, processes]);
 
+	const focusedTitle =
+		windows.find((w) => w.windowId === focusedWindowId)?.title ?? null;
+
 	return (
 		<>
+			<GlobalMenuBar focusedTitle={focusedTitle} />
 			<InfiniteCanvas>
 				{windows.map((win) => {
 					// Use the per-client renderer (shared across all windows from the same client)

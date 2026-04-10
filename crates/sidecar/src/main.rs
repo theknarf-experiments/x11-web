@@ -8,6 +8,7 @@ use std::collections::HashMap;
 use std::process::Stdio;
 
 use futures::{SinkExt, StreamExt};
+use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::{Child, Command};
 use tokio::sync::mpsc;
 use tokio::time::{interval, Duration};
@@ -21,6 +22,10 @@ use crate::xserver::{TaggedDisplayUpdate, X11Server};
 struct ProcessManager {
     processes: HashMap<u32, ManagedProcess>,
     display_string: String,
+    /// `DBUS_SESSION_BUS_ADDRESS` for the per-sidecar session bus.
+    /// `None` if dbus-daemon failed to start. When set, every spawned
+    /// X11 app inherits it so GTK / Qt apps can export their AppMenu.
+    dbus_session_address: Option<String>,
 }
 
 struct ManagedProcess {
@@ -29,20 +34,25 @@ struct ManagedProcess {
 }
 
 impl ProcessManager {
-    fn new(display_string: String) -> Self {
+    fn new(display_string: String, dbus_session_address: Option<String>) -> Self {
         Self {
             processes: HashMap::new(),
             display_string,
+            dbus_session_address,
         }
     }
 
     async fn spawn(&mut self, command: &str, args: &[String]) -> Result<u32, String> {
-        let child = Command::new(command)
-            .args(args)
+        let mut cmd = Command::new(command);
+        cmd.args(args)
             .env("DISPLAY", &self.display_string)
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
+            .stderr(Stdio::piped());
+        if let Some(addr) = &self.dbus_session_address {
+            cmd.env("DBUS_SESSION_BUS_ADDRESS", addr);
+        }
+        let child = cmd
             .spawn()
             .map_err(|e| format!("Failed to spawn process: {e}"))?;
 
@@ -115,6 +125,80 @@ impl ProcessManager {
     }
 }
 
+/// Result of starting the per-sidecar DBus session bus. Holding the
+/// `Child` keeps the daemon alive for the lifetime of the sidecar
+/// process; dropping it would let dbus-daemon exit.
+struct DbusSession {
+    address: String,
+    #[allow(dead_code)]
+    daemon: Child,
+}
+
+/// Spawn a private `dbus-daemon --session` and return its bus address.
+///
+/// The daemon prints its address on stdout when invoked with
+/// `--print-address`. We read the first line, then leave the process
+/// running for the lifetime of the sidecar. Errors are non-fatal: if
+/// dbus-daemon isn't installed (e.g. local dev outside the container)
+/// the sidecar continues without DBus support and AppMenu export
+/// simply won't work.
+async fn start_dbus_session() -> Option<DbusSession> {
+    let mut child = match Command::new("dbus-daemon")
+        .args(["--session", "--nofork", "--print-address=1"])
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+    {
+        Ok(c) => c,
+        Err(e) => {
+            warn!("dbus-daemon not started ({e}); AppMenu export disabled");
+            return None;
+        }
+    };
+
+    let stdout = match child.stdout.take() {
+        Some(s) => s,
+        None => {
+            warn!("dbus-daemon stdout unavailable; killing daemon");
+            let _ = child.start_kill();
+            return None;
+        }
+    };
+
+    let mut lines = BufReader::new(stdout).lines();
+    let address = match tokio::time::timeout(Duration::from_secs(5), lines.next_line()).await {
+        Ok(Ok(Some(line))) => line.trim().to_string(),
+        Ok(Ok(None)) => {
+            warn!("dbus-daemon closed stdout before printing address");
+            let _ = child.start_kill();
+            return None;
+        }
+        Ok(Err(e)) => {
+            warn!("Failed reading dbus-daemon stdout: {e}");
+            let _ = child.start_kill();
+            return None;
+        }
+        Err(_) => {
+            warn!("dbus-daemon address read timed out after 5s");
+            let _ = child.start_kill();
+            return None;
+        }
+    };
+
+    if address.is_empty() {
+        warn!("dbus-daemon printed empty address");
+        let _ = child.start_kill();
+        return None;
+    }
+
+    info!("Started session DBus at {address}");
+    Some(DbusSession {
+        address,
+        daemon: child,
+    })
+}
+
 #[tokio::main]
 async fn main() {
     tracing_subscriber::fmt::init();
@@ -127,6 +211,13 @@ async fn main() {
         .ok()
         .and_then(|s| s.parse().ok())
         .unwrap_or(99);
+
+    // Start the per-sidecar DBus session bus before anything else so
+    // every spawned X11 app inherits DBUS_SESSION_BUS_ADDRESS. The
+    // returned handle is held for the lifetime of `main` to keep the
+    // daemon alive.
+    let dbus_session = start_dbus_session().await;
+    let dbus_address = dbus_session.as_ref().map(|s| s.address.clone());
 
     // Start X11 server
     let (display_tx, mut display_rx) = mpsc::unbounded_channel::<TaggedDisplayUpdate>();
@@ -157,6 +248,7 @@ async fn main() {
                     ws_stream,
                     &sidecar_name,
                     &display_string,
+                    dbus_address.clone(),
                     &mut display_rx,
                     &window_router,
                     &mut client_connected_rx,
@@ -178,12 +270,13 @@ async fn run_session(
     >,
     sidecar_name: &str,
     display_string: &str,
+    dbus_address: Option<String>,
     display_rx: &mut mpsc::UnboundedReceiver<TaggedDisplayUpdate>,
     window_router: &crate::xserver::WindowRouter,
     client_connected_rx: &mut mpsc::UnboundedReceiver<(String, u32)>,
 ) {
     let (mut ws_tx, mut ws_rx) = ws_stream.split();
-    let mut process_manager = ProcessManager::new(display_string.to_string());
+    let mut process_manager = ProcessManager::new(display_string.to_string(), dbus_address);
 
     // Send registration
     let register = SidecarToBackend::Register {

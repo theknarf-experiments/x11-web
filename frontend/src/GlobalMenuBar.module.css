@@ -1,0 +1,31 @@
+.menuBar {
+	position: fixed;
+	top: 0;
+	left: 0;
+	right: 0;
+	height: 28px;
+	display: flex;
+	align-items: center;
+	gap: 16px;
+	padding: 0 16px;
+	background: rgba(40, 40, 40, 0.7);
+	backdrop-filter: blur(20px);
+	border-bottom: 1px solid rgba(255, 255, 255, 0.12);
+	color: rgba(255, 255, 255, 0.9);
+	font-size: 13px;
+	font-family:
+		-apple-system,
+		BlinkMacSystemFont,
+		"SF Pro Text",
+		system-ui,
+		sans-serif;
+	z-index: 200;
+	user-select: none;
+}
+
+.appTitle {
+	font-weight: 600;
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
+}

@@ -21,3 +21,7 @@ bdf-parser = "0.1"
 flate2 = "1"
 glob = "0.3"
 libc = "0.2"
+# DBus client — used in PR 2 to mirror GTK / Qt application menus over
+# `org.gtk.Menus` and `com.canonical.dbusmenu`. Brought in here so the
+# Phase 0 dbus-daemon plumbing can verify it links cleanly.
+zbus = { version = "4", default-features = false, features = ["tokio"] }

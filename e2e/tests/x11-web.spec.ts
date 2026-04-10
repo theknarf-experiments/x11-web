@@ -220,6 +220,70 @@ test.describe
 			await waitForDock(page);
 		});
 
+		test("global menu bar tracks the focused window", async ({ page }) => {
+			await page.goto(`http://localhost:${frontendPort}`);
+			await waitForDock(page);
+
+			const menuBarTitle = page.locator(
+				'[data-testid="global-menu-bar-title"]',
+			);
+			// Before any window is focused, the bar shows the fallback.
+			await expect(menuBarTitle).toBeVisible();
+			await expect(menuBarTitle).toHaveText("x11-web");
+
+			// Use two apps that don't set their own WM_NAME so the bar
+			// title is deterministic — xeyes and xclock both keep the
+			// command name we passed to spawn.
+			const xeyesFrame = await spawnApp(
+				page,
+				"-geometry 200x150+50+50",
+				"xeyes",
+			);
+			const xclockFrame = await spawnApp(
+				page,
+				"-geometry 200x150+300+50",
+				"xclock",
+			);
+
+			await expect(
+				xeyesFrame.locator('[data-testid="x11-canvas"]'),
+			).toBeVisible();
+			await expect(
+				xclockFrame.locator('[data-testid="x11-canvas"]'),
+			).toBeVisible();
+			await page.waitForTimeout(2500);
+
+			// The frontend stacks new windows at fixed offsets so the
+			// two frames overlap. Drag xclock far to the right by its
+			// title bar so we can click each canvas independently.
+			const xclockBox = await xclockFrame.boundingBox();
+			if (!xclockBox) throw new Error("xclock frame has no bounding box");
+			await page.mouse.move(
+				xclockBox.x + xclockBox.width / 2,
+				xclockBox.y + 5,
+			);
+			await page.mouse.down();
+			await page.mouse.move(
+				xclockBox.x + xclockBox.width / 2 + 350,
+				xclockBox.y + 5,
+				{ steps: 5 },
+			);
+			await page.mouse.up();
+			await page.waitForTimeout(300);
+
+			// Click into xeyes — focus broadcast should put "xeyes" in the bar.
+			await xeyesFrame.locator('[data-testid="x11-canvas"]').click();
+			await expect(menuBarTitle).toHaveText("xeyes", { timeout: 5_000 });
+
+			// Click into xclock — title should switch.
+			await xclockFrame.locator('[data-testid="x11-canvas"]').click();
+			await expect(menuBarTitle).toHaveText("xclock", { timeout: 5_000 });
+
+			// And back again, to verify it's not a one-shot.
+			await xeyesFrame.locator('[data-testid="x11-canvas"]').click();
+			await expect(menuBarTitle).toHaveText("xeyes", { timeout: 5_000 });
+		});
+
 		test("spawning xeyes creates a window on the canvas", async ({ page }) => {
 			await page.goto(`http://localhost:${frontendPort}`);
 			await waitForDock(page);

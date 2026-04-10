@@ -185,7 +185,8 @@ export type DisplayUpdate =
 			kind: "CursorChanged";
 			window_id: string;
 			cursor: string;
-	  };
+	  }
+	| { kind: "WindowFocused"; window_id: string | null };
 
 export type InputEvent =
 	| { kind: "KeyPress"; keycode: number; state: number }

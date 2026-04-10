@@ -202,6 +202,54 @@ impl ClientState {
         self.x11_to_uuid.get(&x11_wid).cloned()
     }
 
+    /// Walk the parent chain from `x11_wid` to find the nearest top-level
+    /// window that has a registered UUID. Returns `None` if the window
+    /// is the root, doesn't exist, or no ancestor has a UUID.
+    fn top_level_uuid_for(&self, x11_wid: u32) -> Option<String> {
+        if x11_wid == 0 || x11_wid == self.root_window {
+            return None;
+        }
+        let mut current = x11_wid;
+        for _ in 0..32 {
+            if let Some(uuid) = self.x11_to_uuid.get(&current) {
+                return Some(uuid.clone());
+            }
+            match self.windows.get(&current) {
+                Some(w) if w.parent != self.root_window && w.parent != 0 => {
+                    current = w.parent;
+                }
+                _ => return None,
+            }
+        }
+        None
+    }
+
+    /// Update the focus window. If the resolved top-level UUID differs
+    /// from the previously focused one inside *this* client connection,
+    /// broadcast a `WindowFocused` update.
+    ///
+    /// Note: focus is global from the frontend's perspective but each
+    /// X11 client tracks its own focus state. Cross-client focus
+    /// changes are signalled via `broadcast_focus` instead, which is
+    /// called once per real user click.
+    pub(crate) fn set_focus_window(&mut self, new_focus: u32) {
+        let prev_uuid = self.top_level_uuid_for(self.focus_window);
+        self.focus_window = new_focus;
+        let next_uuid = self.top_level_uuid_for(new_focus);
+        if prev_uuid != next_uuid {
+            self.broadcast_focus(next_uuid);
+        }
+    }
+
+    /// Send a `WindowFocused` update to the frontend. The frontend
+    /// dedupes by value, so over-sending is harmless.
+    pub(crate) fn broadcast_focus(&self, window_id: Option<String>) {
+        let _ = self.update_tx.send((
+            self.client_id.clone(),
+            DisplayUpdate::WindowFocused { window_id },
+        ));
+    }
+
     /// Intern an atom name, returning its global ID.
     fn intern_atom(&self, name: &str, only_if_exists: bool) -> u32 {
         self.atoms.lock().unwrap().intern(name, only_if_exists)
@@ -1158,7 +1206,20 @@ async fn handle_client(
             Some((x11_wid, msg)) = message_rx.recv() => {
                 match msg {
                     WindowMessage::Input(input) => {
-                        state.focus_window = x11_wid;
+                        state.set_focus_window(x11_wid);
+                        // Every ButtonPress is a "user clicked here"
+                        // signal — force-broadcast even if this client
+                        // already thought the window was focused, so
+                        // the frontend's global menu bar follows clicks
+                        // across X11 client boundaries (each app runs
+                        // in its own connection).
+                        if matches!(
+                            input,
+                            x11_web_protocol::InputEvent::ButtonPress { .. }
+                        ) {
+                            let uuid = state.top_level_uuid_for(x11_wid);
+                            state.broadcast_focus(uuid);
+                        }
                         // Update the master pointer valuators so the next
                         // XIQueryDevice / XIQueryPointer reflects reality.
                         match &input {
@@ -2766,7 +2827,7 @@ fn handle_query_pointer(state: &mut ClientState, _data: &[u8], seq: u16) -> Vec<
 fn handle_set_input_focus(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
     if data.len() >= 8 {
         let focus = u32::from_le_bytes([data[4], data[5], data[6], data[7]]);
-        state.focus_window = focus;
+        state.set_focus_window(focus);
     }
     Vec::new()
 }

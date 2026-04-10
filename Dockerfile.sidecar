@@ -12,6 +12,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     vim \
     zenity \
     libgtk2.0-0 \
+    dbus \
     dbus-x11 \
     emacs-nox \
     nano \

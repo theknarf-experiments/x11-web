@@ -319,6 +319,13 @@ pub enum DisplayUpdate {
         window_id: String,
         cursor: String,
     },
+    /// The X11 input focus changed. `window_id` is the UUID of the
+    /// focused top-level window, or `None` if focus was cleared (revert
+    /// to root, no window focused). Used by the global menu bar to
+    /// know which window's menu to display.
+    WindowFocused {
+        window_id: Option<String>,
+    },
 }
 
 /// Input events sent from the frontend to X11 clients.
