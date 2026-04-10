@@ -83,6 +83,59 @@ async function hasRenderedContent(canvas: Locator): Promise<boolean> {
 	});
 }
 
+/**
+ * Cheap rolling hash of a canvas's pixel buffer. Used by
+ * `waitForCanvasStable` to detect when an app has finished its
+ * startup repaint sequence.
+ */
+async function canvasPixelHash(canvas: Locator): Promise<string> {
+	return canvas.evaluate((el: HTMLCanvasElement) => {
+		const ctx = el.getContext("2d");
+		if (!ctx) return "";
+		const d = ctx.getImageData(0, 0, el.width, el.height);
+		// Sample every 16th byte; that's enough resolution to spot
+		// any meaningful repaint without iterating millions of pixels
+		// on a hot loop.
+		let h = 0x811c9dc5 | 0;
+		for (let i = 0; i < d.data.length; i += 16) {
+			h = (h ^ d.data[i]) >>> 0;
+			h = Math.imul(h, 0x01000193) >>> 0;
+		}
+		return `${el.width}x${el.height}:${h.toString(16)}`;
+	});
+}
+
+/**
+ * Wait until a canvas's pixel content has been unchanged for at
+ * least `stableMs`. Polls every `pollMs`. Returns once stable, or
+ * gives up after `totalTimeoutMs` (callers can then proceed and let
+ * any downstream snapshot assertion fail with a real diff).
+ */
+async function waitForCanvasStable(
+	canvas: Locator,
+	{
+		stableMs = 1000,
+		pollMs = 200,
+		totalTimeoutMs = 15_000,
+	}: { stableMs?: number; pollMs?: number; totalTimeoutMs?: number } = {},
+): Promise<void> {
+	const start = Date.now();
+	let lastHash = "";
+	let stableSince = 0;
+	while (Date.now() - start < totalTimeoutMs) {
+		const hash = await canvasPixelHash(canvas);
+		const now = Date.now();
+		if (hash === lastHash && hash !== "") {
+			if (stableSince === 0) stableSince = now;
+			if (now - stableSince >= stableMs) return;
+		} else {
+			lastHash = hash;
+			stableSince = 0;
+		}
+		await new Promise((r) => setTimeout(r, pollMs));
+	}
+}
+
 test.describe
 	.serial("x11-web e2e", () => {
 		test.beforeAll(async () => {
@@ -872,10 +925,18 @@ test.describe
 			);
 			const canvas = win.locator('[data-testid="x11-canvas"]');
 			await expect(canvas).toBeVisible();
-			await page.waitForTimeout(3000);
+
+			// xmessage (Athena toolkit) maps the top-level window first
+			// and only paints the "okay" button child a beat later, so
+			// the canvas briefly shows the message text alone. Wait for
+			// the canvas pixel content to stop changing before letting
+			// the screenshot assertion run, otherwise the comparison
+			// races against the second redraw.
+			await waitForCanvasStable(canvas);
 
 			await expect(canvas).toHaveScreenshot("xmessage-canvas.png", {
 				maxDiffPixelRatio: 0.1,
+				timeout: 15_000,
 			});
 		});
 

@@ -1336,7 +1336,12 @@ async fn handle_client(
     }
 }
 
-/// Resize a specific window and its children, send ConfigureNotify + Expose events.
+/// Resize a top-level window in response to a frontend canvas size
+/// change. Only the top-level itself gets new dimensions and a fresh
+/// framebuffer; child window layout is the toolkit's job. We then
+/// send ConfigureNotify to the top-level and an Expose to it (and to
+/// every mapped descendant so widgets redraw their frames / labels /
+/// buttons after the toolkit reflows).
 fn resize_window(state: &mut ClientState, window_uuid: &str, width: u16, height: u16) -> Vec<u8> {
     let mut events = Vec::new();
     let seq = state.sequence;
@@ -1347,52 +1352,55 @@ fn resize_window(state: &mut ClientState, window_uuid: &str, width: u16, height:
         None => return events,
     };
 
-    // Resize the target window and all its descendants
-    let mut to_resize = vec![window_id];
-    // Also find child windows to resize proportionally
-    let children: Vec<u32> = state
-        .windows
-        .values()
-        .filter(|w| is_descendant_of(&state.windows, w.id, window_id))
-        .map(|w| w.id)
+    // Resize *only* the top-level window. Earlier versions also
+    // forced every descendant to the parent's size, which destroys
+    // the toolkit's layout (e.g. xmessage's "okay" button at
+    // (4,29) 32x17 was getting blown up to overlap the message
+    // label and effectively disappeared). Real X servers leave
+    // child geometries alone; the application's toolkit decides
+    // how to reflow when it sees ConfigureNotify on the top-level.
+    if let Some(win) = state.windows.get_mut(&window_id) {
+        win.width = width;
+        win.height = height;
+        win.framebuffer = Framebuffer::new(width as u32, height as u32);
+
+        let mut event = [0u8; 32];
+        event[0] = CONFIGURE_NOTIFY_EVENT;
+        event[2..4].copy_from_slice(&seq.to_le_bytes());
+        event[4..8].copy_from_slice(&window_id.to_le_bytes());
+        event[8..12].copy_from_slice(&window_id.to_le_bytes());
+        event[16..18].copy_from_slice(&win.x.to_le_bytes());
+        event[18..20].copy_from_slice(&win.y.to_le_bytes());
+        event[20..22].copy_from_slice(&width.to_le_bytes());
+        event[22..24].copy_from_slice(&height.to_le_bytes());
+        event[24..26].copy_from_slice(&win.border_width.to_le_bytes());
+        events.extend_from_slice(&event);
+    }
+
+    // Send Expose to the top-level + every mapped descendant. The
+    // toolkit will have laid the children back out by the time it
+    // processes these events; the Exposes give the leaf widgets a
+    // chance to repaint themselves.
+    let exposed: Vec<(u32, u16, u16)> = std::iter::once(window_id)
+        .chain(
+            state
+                .windows
+                .values()
+                .filter(|w| {
+                    w.mapped && w.id != window_id && is_descendant_of(&state.windows, w.id, window_id)
+                })
+                .map(|w| w.id),
+        )
+        .filter_map(|wid| state.windows.get(&wid).map(|w| (wid, w.width, w.height)))
         .collect();
-    to_resize.extend(children);
-
-    for wid in &to_resize {
-        if let Some(win) = state.windows.get_mut(wid) {
-            if *wid == window_id {
-                // Resize the target window to the exact requested size
-                win.width = width;
-                win.height = height;
-            } else {
-                // Child windows: resize to match parent (same size for simplicity)
-                win.width = width;
-                win.height = height;
-            }
-            win.framebuffer = Framebuffer::new(win.width as u32, win.height as u32);
-
-            let mut event = [0u8; 32];
-            event[0] = CONFIGURE_NOTIFY_EVENT;
-            event[2..4].copy_from_slice(&seq.to_le_bytes());
-            event[4..8].copy_from_slice(&wid.to_le_bytes());
-            event[8..12].copy_from_slice(&wid.to_le_bytes());
-            event[16..18].copy_from_slice(&win.x.to_le_bytes());
-            event[18..20].copy_from_slice(&win.y.to_le_bytes());
-            event[20..22].copy_from_slice(&win.width.to_le_bytes());
-            event[22..24].copy_from_slice(&win.height.to_le_bytes());
-            event[24..26].copy_from_slice(&win.border_width.to_le_bytes());
-            events.extend_from_slice(&event);
-
-            if win.mapped {
-                let mut expose = [0u8; 32];
-                expose[0] = EXPOSE_EVENT;
-                expose[2..4].copy_from_slice(&seq.to_le_bytes());
-                expose[4..8].copy_from_slice(&wid.to_le_bytes());
-                expose[12..14].copy_from_slice(&win.width.to_le_bytes());
-                expose[14..16].copy_from_slice(&win.height.to_le_bytes());
-                events.extend_from_slice(&expose);
-            }
-        }
+    for (wid, w, h) in exposed {
+        let mut expose = [0u8; 32];
+        expose[0] = EXPOSE_EVENT;
+        expose[2..4].copy_from_slice(&seq.to_le_bytes());
+        expose[4..8].copy_from_slice(&wid.to_le_bytes());
+        expose[12..14].copy_from_slice(&w.to_le_bytes());
+        expose[14..16].copy_from_slice(&h.to_le_bytes());
+        events.extend_from_slice(&expose);
     }
 
     // Send WindowConfigured display update for the top-level window
@@ -1623,7 +1631,6 @@ fn handle_request(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
     let major_opcode = data[0];
     let _minor = data[1];
     let seq = state.sequence;
-    // Log all requests for debugging
 
     match major_opcode {
         1 => handle_create_window(state, data, seq),
@@ -2273,6 +2280,19 @@ fn handle_map_window(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> 
         info!("MapWindow: id={wid:#x} {}x{} mapped={}", win.width, win.height, win.mapped);
         let is_top_level = win.parent == state.root_window && win.class == 1 && !win.override_redirect;
         win.mapped = true;
+
+        // Auto-fill the framebuffer with the window's background
+        // pixel. The X11 spec says that on map (and on every Expose),
+        // the server fills exposed regions with the background
+        // pattern *before* delivering the Expose event. Apps like
+        // Athena Command (xmessage's "okay" button) only paint their
+        // text on top — they trust the server to have filled the
+        // background. We were leaving it black, which made the
+        // button text invisible because both glyph and bg were dark.
+        let w = win.width;
+        let h = win.height;
+        let bg = win.background_pixel;
+        win.framebuffer.fill_rect(0, 0, w, h, bg);
 
         // Set WM_STATE = NormalState for top-level windows (apps check this)
         if is_top_level {
