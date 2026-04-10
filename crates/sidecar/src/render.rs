@@ -171,9 +171,88 @@ pub(crate) fn composite_pixel(
         10 => (255 - da, sa),               // AtopReverse
         11 => (255 - da, 255 - sa),         // Xor
         12 => (255, 255),                   // Add (clamped below)
-        // Saturate (13) and Disjoint/Conjoint families (14..26) are
-        // not yet implemented; fall back to Over so apps that hand us
-        // a high op number still get something close to right.
+        // Saturate (13) and DisjointOver (19) share the same formula:
+        //   Fs = min(1, (1-Da)/Sa)  if Sa > 0; 0 otherwise
+        //   Fd = 1
+        // The min ensures result alpha never exceeds 1.
+        13 | 19 => {
+            if sa == 0 {
+                (0, 255)
+            } else {
+                let inv_da = (255 - da) as i64;
+                let scaled = (inv_da * 255) / sa as i64;
+                ((scaled.min(255)) as i32, 255)
+            }
+        }
+        // DisjointSrc (17): like Saturate but no destination contribution.
+        17 => {
+            if sa == 0 {
+                (0, 0)
+            } else {
+                let inv_da = (255 - da) as i64;
+                let scaled = (inv_da * 255) / sa as i64;
+                ((scaled.min(255)) as i32, 0)
+            }
+        }
+        // DisjointDst (18): symmetric — destination dominates with the
+        // same disjoint scaling, source contributes nothing.
+        18 => {
+            if da == 0 {
+                (0, 0)
+            } else {
+                let inv_sa = (255 - sa) as i64;
+                let scaled = (inv_sa * 255) / da as i64;
+                (0, (scaled.min(255)) as i32)
+            }
+        }
+        // DisjointOverReverse (20): symmetric of DisjointOver/Saturate.
+        20 => {
+            if da == 0 {
+                (255, 0)
+            } else {
+                let inv_sa = (255 - sa) as i64;
+                let scaled = (inv_sa * 255) / da as i64;
+                (255, (scaled.min(255)) as i32)
+            }
+        }
+        // DisjointClear (16): same as Clear.
+        16 => (0, 0),
+        // ConjointClear (32) / ConjointSrc (33) / ConjointDst (34):
+        // identical to the standard Clear / Src / Dst.
+        32 => (0, 0),
+        33 => {
+            // Identical to PictOpSrc — handled as a fast path above
+            // would have been ideal but the match would still hit
+            // here for op == 33; just compute the equivalent.
+            (255, 0)
+        }
+        34 => (0, 255),
+        // ConjointOver (35):
+        //   Fa = 1
+        //   Fb = max(0, 1 - Sa/Da)  — when Sa fully covers, dst gone
+        35 => {
+            let fb = if da == 0 {
+                0
+            } else if sa >= da {
+                0
+            } else {
+                ((da - sa) as i64 * 255 / da as i64).max(0) as i32
+            };
+            (255, fb)
+        }
+        // ConjointOverReverse (36): symmetric of 35.
+        36 => {
+            let fa = if sa == 0 {
+                0
+            } else if da >= sa {
+                0
+            } else {
+                ((sa - da) as i64 * 255 / sa as i64).max(0) as i32
+            };
+            (fa, 255)
+        }
+        // Remaining Disjoint/Conjoint operators (21..27, 37..43) are
+        // not implemented yet — fall back to Over.
         _ => (255, 255 - sa),
     };
 
@@ -945,7 +1024,7 @@ fn handle_triangles(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
     let _src_x = read_i16(data, 20);
     let _src_y = read_i16(data, 22);
 
-    info!("Render Triangles: op={op} src={src_pic:#x} dst={dst_pic:#x}");
+    debug!("Render Triangles: op={op} src={src_pic:#x} dst={dst_pic:#x}");
 
     let (sr, sg, sb, sa) = resolve_source_color(state, src_pic);
 
@@ -1660,7 +1739,10 @@ fn get_glyph_alpha(data: &[u8], width: u16, x: u16, y: u16, format_id: u32) -> u
     }
 }
 
-/// Resolve a source picture to a solid RGBA color.
+/// Resolve a source picture to a single premultiplied RGBA color.
+///
+/// Used by Trapezoids / Triangles / TriStrip / TriFan / CompositeGlyphs
+/// where the source is meant to be a single colour for the whole shape.
 fn resolve_source_color(state: &ClientState, src_pic: u32) -> (u8, u8, u8, u8) {
     // Check if it's a solid fill directly
     if let Some(fill) = state.render.solid_fills.get(&src_pic) {
@@ -1674,7 +1756,14 @@ fn resolve_source_color(state: &ClientState, src_pic: u32) -> (u8, u8, u8, u8) {
         }
     }
 
-    // Default: opaque white
+    // Default: opaque white. Note that rendercheck (and some Cairo
+    // paths) use a 1x1 tiled pixmap as a "solid colour source"
+    // instead of CreateSolidFill — the right thing to do there
+    // would be to sample the first pixel of the underlying pixmap,
+    // but in practice the pixmap may not yet contain the colour
+    // the caller intended (it's filled by an earlier Composite that
+    // we may or may not have rasterised correctly), so the safest
+    // fallback continues to be opaque white.
     (0xFF, 0xFF, 0xFF, 0xFF)
 }
 

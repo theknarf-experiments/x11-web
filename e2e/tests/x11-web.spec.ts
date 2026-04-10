@@ -1432,7 +1432,12 @@ test.describe
 			//                        readback gets the alpha byte;
 			//                        + linear gradient parser, +
 			//                        SetPictureTransform handler)
-			const RENDERCHECK_BASELINE_PASSED = 194;
+			//   2026-04-10 240/789  (PictOpSaturate, plus the
+			//                        Disjoint{Clear,Src,Dst,Over,
+			//                        OverReverse} and Conjoint{
+			//                        Clear,Src,Dst,Over,OverReverse}
+			//                        operators)
+			const RENDERCHECK_BASELINE_PASSED = 240;
 			expect(passed).toBeGreaterThanOrEqual(RENDERCHECK_BASELINE_PASSED);
 		});
 
