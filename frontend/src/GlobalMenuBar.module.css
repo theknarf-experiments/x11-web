@@ -3,11 +3,11 @@
 	top: 0;
 	left: 0;
 	right: 0;
-	height: 28px;
+	height: 34px;
 	display: flex;
 	align-items: center;
 	gap: 4px;
-	padding: 0 16px;
+	padding: 0 14px;
 	background: rgba(40, 40, 40, 0.7);
 	backdrop-filter: blur(20px);
 	border-bottom: 1px solid rgba(255, 255, 255, 0.12);
@@ -24,11 +24,27 @@
 }
 
 .appTitle {
+	background: transparent;
+	border: none;
+	color: inherit;
+	font: inherit;
 	font-weight: 600;
 	white-space: nowrap;
 	overflow: hidden;
 	text-overflow: ellipsis;
-	margin-right: 12px;
+	padding: 5px 10px;
+	margin-right: 8px;
+	border-radius: 4px;
+	cursor: pointer;
+}
+
+.appTitle:hover:not(:disabled) {
+	background: rgba(255, 255, 255, 0.1);
+}
+
+.appTitle:disabled {
+	cursor: default;
+	opacity: 0.7;
 }
 
 .menuItemWrapper {

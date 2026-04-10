@@ -1,4 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import {
+	AppContextMenu,
+	type AppContextMenuItem,
+} from "./AppContextMenu";
 import s from "./GlobalMenuBar.module.css";
 import type { MenuAction, MenuItem } from "./types";
 
@@ -9,6 +13,13 @@ interface GlobalMenuBarProps {
 	menu: MenuItem[] | null;
 	/** Send an activation back to the focused window. */
 	onActivate: (action: MenuAction) => void;
+	/**
+	 * Items shown when the user clicks the focused app's title in the
+	 * bar. App.tsx builds these via `getAppContextMenuItems` so this
+	 * stays in lock-step with the dock right-click menu — change one
+	 * place, change both.
+	 */
+	appContextMenuItems: AppContextMenuItem[] | null;
 }
 
 /**
@@ -24,8 +35,13 @@ export function GlobalMenuBar({
 	focusedTitle,
 	menu,
 	onActivate,
+	appContextMenuItems,
 }: GlobalMenuBarProps) {
 	const [openIndex, setOpenIndex] = useState<number | null>(null);
+	const [appMenuAnchor, setAppMenuAnchor] = useState<{
+		x: number;
+		y: number;
+	} | null>(null);
 	const barRef = useRef<HTMLDivElement>(null);
 
 	// Close any open menu when the focused window changes — otherwise
@@ -33,6 +49,7 @@ export function GlobalMenuBar({
 	// biome-ignore lint/correctness/useExhaustiveDependencies: only react to focused-window swap
 	useEffect(() => {
 		setOpenIndex(null);
+		setAppMenuAnchor(null);
 	}, [focusedTitle]);
 
 	// Click outside the bar (and any open menu) closes the dropdown.
@@ -57,12 +74,27 @@ export function GlobalMenuBar({
 	);
 
 	const topItems = menu ?? [];
+	const titleClickable =
+		!!appContextMenuItems && appContextMenuItems.length > 0;
 
 	return (
 		<div className={s.menuBar} data-testid="global-menu-bar" ref={barRef}>
-			<span className={s.appTitle} data-testid="global-menu-bar-title">
+			<button
+				type="button"
+				className={s.appTitle}
+				data-testid="global-menu-bar-title"
+				disabled={!titleClickable}
+				onClick={(e) => {
+					if (!titleClickable) return;
+					const rect = e.currentTarget.getBoundingClientRect();
+					setAppMenuAnchor({
+						x: rect.left,
+						y: rect.bottom + 4,
+					});
+				}}
+			>
 				{focusedTitle ?? "x11-web"}
-			</span>
+			</button>
 			{topItems.map((item, idx) => {
 				const isOpen = openIndex === idx;
 				const isSeparator = item.kind === "separator";
@@ -93,6 +125,14 @@ export function GlobalMenuBar({
 					</div>
 				);
 			})}
+			{appMenuAnchor && appContextMenuItems && (
+				<AppContextMenu
+					items={appContextMenuItems}
+					x={appMenuAnchor.x}
+					y={appMenuAnchor.y}
+					onClose={() => setAppMenuAnchor(null)}
+				/>
+			)}
 		</div>
 	);
 }

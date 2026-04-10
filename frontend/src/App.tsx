@@ -1,11 +1,5 @@
-import {
-	startTransition,
-	useCallback,
-	useEffect,
-	useMemo,
-	useRef,
-	useState,
-} from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { getAppContextMenuItems } from "./AppContextMenu";
 import { ClientRenderer } from "./ClientRenderer";
 import { Dock, type DockProcess } from "./Dock";
 import { GlobalMenuBar } from "./GlobalMenuBar";
@@ -394,6 +388,31 @@ function App() {
 		[send],
 	);
 
+	/** Kill a process and remove all of its windows. Shared by the
+	 *  WindowFrame close button, the dock right-click menu, and the
+	 *  global menu bar's app-title menu. */
+	const handleCloseProcess = useCallback(
+		(sidecarId: string, pid: number) => {
+			setWindows((prev) => {
+				for (const w of prev) {
+					if (w.sidecarId === sidecarId && w.pid === pid) {
+						closedWindowsRef.current.add(w.windowId);
+					}
+				}
+				return prev.filter(
+					(w) => !(w.sidecarId === sidecarId && w.pid === pid),
+				);
+			});
+			send({
+				type: "KillProcess",
+				request_id: nextRequestId(),
+				sidecar_id: sidecarId,
+				pid,
+			});
+		},
+		[send],
+	);
+
 	// Deduplicate windows by process for the dock — one entry per (sidecarId, pid)
 	const dockProcesses = useMemo(() => {
 		const seen = new Set<string>();
@@ -435,12 +454,22 @@ function App() {
 		[focusedWindow, send],
 	);
 
+	// Build the same context menu items the dock right-click renders.
+	// Single source of truth lives in `AppContextMenu.getAppContextMenuItems`.
+	const focusedAppContextMenuItems =
+		focusedWindow && focusedWindow.pid > 0
+			? getAppContextMenuItems(focusedWindow.sidecarId, focusedWindow.pid, {
+					onClose: handleCloseProcess,
+				})
+			: null;
+
 	return (
 		<>
 			<GlobalMenuBar
 				focusedTitle={focusedTitle}
 				menu={focusedMenu}
 				onActivate={handleMenuActivate}
+				appContextMenuItems={focusedAppContextMenuItems}
 			/>
 			<InfiniteCanvas>
 				{windows.map((win) => {
@@ -458,32 +487,7 @@ function App() {
 							color={win.color}
 							cursor={win.cursor}
 							renderer={renderer}
-							onClose={() => {
-								// Kill process — removes ALL windows for this process
-								const matching = windows.filter(
-									(w) =>
-										w.sidecarId === win.sidecarId && w.pid === win.pid,
-								);
-								for (const w of matching)
-									closedWindowsRef.current.add(w.windowId);
-								send({
-									type: "KillProcess",
-									request_id: nextRequestId(),
-									sidecar_id: win.sidecarId,
-									pid: win.pid,
-								});
-								startTransition(() => {
-									setWindows((prev) =>
-										prev.filter(
-											(w) =>
-												!(
-													w.sidecarId === win.sidecarId &&
-													w.pid === win.pid
-												),
-										),
-									);
-								});
-							}}
+							onClose={() => handleCloseProcess(win.sidecarId, win.pid)}
 							onMove={(nx, ny) => handleMove(win.windowId, nx, ny)}
 							onResize={(nw, nh) =>
 								handleResize(win.windowId, win.sidecarId, nw, nh)
@@ -501,26 +505,7 @@ function App() {
 				sidecars={sidecars}
 				processes={dockProcesses}
 				onSpawn={handleSpawn}
-				onClose={(sidecarId, pid) => {
-					const matching = windows.filter(
-						(w) => w.sidecarId === sidecarId && w.pid === pid,
-					);
-					for (const w of matching)
-						closedWindowsRef.current.add(w.windowId);
-					send({
-						type: "KillProcess",
-						request_id: nextRequestId(),
-						sidecar_id: sidecarId,
-						pid,
-					});
-					startTransition(() => {
-						setWindows((prev) =>
-							prev.filter(
-								(w) => !(w.sidecarId === sidecarId && w.pid === pid),
-							),
-						);
-					});
-				}}
+				onClose={handleCloseProcess}
 				onFocusWindow={(sidecarId, pid) => {
 					// Bring all windows for this process to front
 					setWindows((prev) =>

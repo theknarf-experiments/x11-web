@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, ViewTransition } from "react";
-import { createPortal } from "react-dom";
+import { AppContextMenu, getAppContextMenuItems } from "./AppContextMenu";
 import s from "./Dock.module.css";
 import type { SidecarInfo } from "./types";
 
@@ -37,7 +37,6 @@ export function Dock({
 	const [command, setCommand] = useState("xeyes");
 	const [args, setArgs] = useState("");
 	const [selectedSidecar, setSelectedSidecar] = useState<string>("");
-	const contextRef = useRef<HTMLDivElement>(null);
 	const spawnRef = useRef<HTMLDivElement>(null);
 
 	// Auto-select first sidecar
@@ -47,18 +46,12 @@ export function Dock({
 		}
 	}, [sidecars, selectedSidecar]);
 
-	// Close menus on outside click
+	// Close the spawn popover on outside click. The context menu has
+	// its own outside-click handler inside `AppContextMenu`.
 	useEffect(() => {
+		if (!showSpawn) return;
 		function handleClick(e: MouseEvent) {
 			if (
-				contextMenu &&
-				contextRef.current &&
-				!contextRef.current.contains(e.target as Node)
-			) {
-				setContextMenu(null);
-			}
-			if (
-				showSpawn &&
 				spawnRef.current &&
 				!spawnRef.current.contains(e.target as Node)
 			) {
@@ -67,7 +60,7 @@ export function Dock({
 		}
 		document.addEventListener("pointerdown", handleClick);
 		return () => document.removeEventListener("pointerdown", handleClick);
-	}, [contextMenu, showSpawn]);
+	}, [showSpawn]);
 
 	function handleSpawn() {
 		if (!selectedSidecar) return;
@@ -192,31 +185,19 @@ export function Dock({
 					)}
 				</div>
 			</div>
-			{/* Right-click context menu — portaled to body to escape dock's transform */}
-			{contextMenu &&
-				createPortal(
-					<div
-						ref={contextRef}
-						className={s.contextMenu}
-						style={{
-							left: contextMenu.x,
-							top: contextMenu.y,
-							transform: "translateY(-100%)",
-						}}
-					>
-						<button
-							type="button"
-							className={s.contextMenuItem}
-							onClick={() => {
-								onClose(contextMenu.sidecarId, contextMenu.pid);
-								setContextMenu(null);
-							}}
-						>
-							Close
-						</button>
-					</div>,
-					document.body,
-				)}
+			{contextMenu && (
+				<AppContextMenu
+					items={getAppContextMenuItems(
+						contextMenu.sidecarId,
+						contextMenu.pid,
+						{ onClose },
+					)}
+					x={contextMenu.x}
+					y={contextMenu.y}
+					openUpwards
+					onClose={() => setContextMenu(null)}
+				/>
+			)}
 		</>
 	);
 }
