@@ -1360,6 +1360,82 @@ test.describe
 				maxDiffPixelRatio: 0.05,
 			});
 		});
+
+		// =====================================================================
+		// Spec-compliance gap inventory.
+		//
+		// These tests run real X11 client tools (xdpyinfo, rendercheck,
+		// x11perf) against our server inside the sidecar container. They
+		// don't go through the frontend at all — they shell out into the
+		// container and capture stdout / exit codes. The goal is to surface
+		// concrete unimplemented or wrong protocol behavior we can then
+		// prioritise fixing, and to act as guard rails so future regressions
+		// fail loudly.
+		// =====================================================================
+
+		test("xdpyinfo describes the server without errors", async () => {
+			const result = await sidecarContainer.exec([
+				"bash",
+				"-c",
+				"DISPLAY=:99 xdpyinfo",
+			]);
+			const fs = await import("node:fs");
+			fs.writeFileSync("/tmp/x11web-xdpyinfo.txt", result.output);
+			console.log(
+				`xdpyinfo exit=${result.exitCode} bytes=${result.output.length}`,
+			);
+			// xdpyinfo bails as soon as it hits an unknown reply or
+			// malformed buffer, so a clean exit alone is a meaningful
+			// pass for a hand-rolled X server.
+			expect(result.exitCode).toBe(0);
+			// And the dump should at least mention us as the screen.
+			expect(result.output).toContain("name of display");
+			expect(result.output).toContain("screen #0");
+		});
+
+		test("rendercheck XRender compliance", async () => {
+			// rendercheck runs ~789 individual XRender tests covering
+			// every compositing operator (Over, Src, In, Out, Atop,
+			// Xor, Add, Saturate, plus the Disjoint and Conjoint
+			// families), glyph rendering, repeat modes, transforms,
+			// and gradients. Each emits a `passed` / `FAILED` line
+			// and a summary at the end. The pass count is our
+			// XRender compliance score; we ratchet it up as we
+			// implement more operators.
+			const result = await sidecarContainer.exec([
+				"bash",
+				"-c",
+				// `-f a8r8g8b8` selects our native pict format —
+				// without it rendercheck loops over every format and
+				// the non-32bit paths are much thinner.
+				"DISPLAY=:99 rendercheck -f a8r8g8b8 2>&1 || true",
+			]);
+			const fs = await import("node:fs");
+			fs.writeFileSync("/tmp/x11web-rendercheck.txt", result.output);
+
+			// Parse the summary line: "N tests passed of M total".
+			const summary = result.output.match(
+				/(\d+)\s+tests passed of\s+(\d+)\s+total/,
+			);
+			const passed = summary ? Number.parseInt(summary[1], 10) : 0;
+			const total = summary ? Number.parseInt(summary[2], 10) : 0;
+			console.log(
+				`rendercheck: ${passed}/${total} passed (exit=${result.exitCode})`,
+			);
+
+			// Baseline established 2026-04-10: 80/789. Bump this
+			// number up (never down) as we implement more XRender
+			// operators / fix per-pixel math.
+			const RENDERCHECK_BASELINE_PASSED = 80;
+			expect(passed).toBeGreaterThanOrEqual(RENDERCHECK_BASELINE_PASSED);
+		});
+
+		// Note: x11perf is in the image too (-noop, -create, -dot,
+		// etc) but its default `-repeat 5 -time 5` makes it 25s per
+		// test and the harness produces no output until each test
+		// completes, which doesn't fit cleanly with testcontainers
+		// `exec`. Left out of Phase A; revisit when we want a
+		// dedicated long-running benchmark suite.
 	});
 
 async function findFreePort(): Promise<number> {
