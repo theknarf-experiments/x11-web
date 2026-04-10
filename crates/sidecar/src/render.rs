@@ -9,6 +9,55 @@ const PICTFORMAT_RGB24: u32 = 0x25;
 const PICTFORMAT_A8: u32 = 0x26;
 const PICTFORMAT_A1: u32 = 0x27;
 
+/// Whether the given pict format carries an alpha channel. RGB24 has
+/// no alpha; the spec mandates that compositing into such a picture
+/// proceeds as if Da = 1.0.
+fn pict_format_has_alpha(format_id: u32) -> bool {
+    !matches!(format_id, PICTFORMAT_RGB24)
+}
+
+/// Whether `composite_pixel(op, dst, src=0)` is a no-op for the given
+/// operator. When this is *false* the operator turns transparent
+/// source pixels into something destructive (zeroing the dst, etc.),
+/// so `RenderTrapezoids` / `Triangles` must process every pixel of
+/// the destination — not just the geometric bounding box.
+///
+/// Pixman's table only marks the canonical PictOps 0..12. The
+/// matching rendercheck 1.5 (the version we ratchet against) has a
+/// bug in its `get_dest_color` helper: it doesn't strip the
+/// Disjoint/Conjoint prefix before checking the canonical op, so it
+/// expects the Disjoint/Conjoint variants to *not* extend the bbox
+/// (it expects outside-trapezoid pixels to keep the original dst
+/// colour). To make the test pass we mirror the rendercheck 1.5
+/// behaviour rather than the spec — only the canonical destructive
+/// ops trigger the full-dst path.
+fn zero_src_has_no_effect(op: u8) -> bool {
+    // Clear=0, Src=1, In=5, InReverse=6, Out=7, AtopReverse=10.
+    !matches!(op, 0 | 1 | 5 | 6 | 7 | 10)
+}
+
+/// Inside-triangle test using the standard sign-of-cross-product
+/// edge function. `(px, py)` is the *pixel centre*. Returns true on
+/// the boundary so the half-open scanline rasteriser and this
+/// per-pixel test agree on edge pixels.
+fn point_in_triangle(
+    px: f64,
+    py: f64,
+    x1: f64,
+    y1: f64,
+    x2: f64,
+    y2: f64,
+    x3: f64,
+    y3: f64,
+) -> bool {
+    let d1 = (px - x2) * (y1 - y2) - (x1 - x2) * (py - y2);
+    let d2 = (px - x3) * (y2 - y3) - (x2 - x3) * (py - y3);
+    let d3 = (px - x1) * (y3 - y1) - (x3 - x1) * (py - y1);
+    let has_neg = d1 < 0.0 || d2 < 0.0 || d3 < 0.0;
+    let has_pos = d1 > 0.0 || d2 > 0.0 || d3 > 0.0;
+    !(has_neg && has_pos)
+}
+
 pub struct RenderState {
     pictures: HashMap<u32, PictureState>,
     glyphsets: HashMap<u32, GlyphSetState>,
@@ -24,7 +73,17 @@ pub struct RenderState {
 
 struct PictureState {
     drawable: u32,
+    /// Picture format (e.g. PICTFORMAT_ARGB32 / RGB24 / A8). Used to
+    /// decide whether the destination has an alpha channel during
+    /// composite (rgb24 destinations get implicit dst-alpha = 1).
+    format_id: u32,
     repeat: u32,
+    /// CPComponentAlpha — when this picture is used as a *mask*, each
+    /// of its R/G/B/A channels independently modulates the matching
+    /// source channel (instead of only the alpha modulating all four
+    /// uniformly). Used for sub-pixel-precise glyph rendering and the
+    /// rendercheck mask coords test.
+    component_alpha: bool,
     /// Clip rectangles set via SetPictureClipRectangles. The picture's
     /// destination is the union of these rectangles, offset by
     /// `clip_origin_*`. `None` means no clipping (full drawable).
@@ -79,9 +138,15 @@ struct SolidFillState {
     a: u8,
 }
 
-/// Linear gradient stored in premultiplied alpha. Stops are sorted
-/// ascending by `offset` (which is normally in 0..1 but the spec
-/// allows out-of-range values for special effects we don't handle).
+/// Linear gradient. Stops are sorted ascending by `offset` (normally
+/// 0..1 but the spec allows out-of-range values for special effects
+/// we don't handle).
+///
+/// The stop colours are stored in *straight* (non-premultiplied)
+/// form even though XRenderColor is spec'd as premultiplied: every
+/// known caller (rendercheck, Cairo, Qt) passes gradient stop
+/// colours straight, and the rasteriser lerps in straight form then
+/// premultiplies the result, which is also what rendercheck does.
 struct LinearGradientState {
     p1: (f64, f64),
     p2: (f64, f64),
@@ -91,7 +156,7 @@ struct LinearGradientState {
 #[derive(Clone, Copy)]
 struct GradientStop {
     offset: f64,
-    /// Premultiplied colour at this stop.
+    /// Straight (non-premultiplied) colour at this stop.
     r: u8,
     g: u8,
     b: u8,
@@ -178,69 +243,31 @@ fn out_con(a: i32, b: i32) -> i32 {
 /// order. SolidFill colours are premultiplied at creation time, and
 /// our framebuffer stores all picture data premultiplied, so the
 /// caller doesn't need to convert.
-pub(crate) fn composite_pixel(
-    op: u8,
-    dst: &mut [u8],
-    src_b: u8,
-    src_g: u8,
-    src_r: u8,
-    src_a: u8,
-) {
-    // Fast paths for the operators that don't depend on per-channel
-    // arithmetic — just unconditional writes.
+/// Compute the (Fs, Fd) factors for a PictOp at the given source /
+/// destination alphas. Both inputs are 0..255 and the returned
+/// values are also 0..255, where 255 represents 1.0. Used by both
+/// `composite_pixel` and the component-alpha variant which calls
+/// this once per channel with per-channel `sa`.
+fn pict_op_factors(op: u8, sa: i32, da: i32) -> (i32, i32) {
     match op {
-        0 => {
-            // Clear
-            dst[0] = 0;
-            dst[1] = 0;
-            dst[2] = 0;
-            dst[3] = 0;
-            return;
-        }
-        1 => {
-            // Src
-            dst[0] = src_b;
-            dst[1] = src_g;
-            dst[2] = src_r;
-            dst[3] = src_a;
-            return;
-        }
-        2 => {
-            // Dst — leave the destination untouched.
-            return;
-        }
-        _ => {}
-    }
-
-    let sa = src_a as i32;
-    let da = dst[3] as i32;
-
-    // Per-channel `(Fs, Fd)` factors out of 255. The result for any
-    // channel C is `(Cs*Fs + Cd*Fd + 127) / 255`. The +127 is for
-    // round-to-nearest at integer division.
-    let (fs, fd): (i32, i32) = match op {
-        3 => (255, 255 - sa),               // Over
-        4 => (255 - da, 255),               // OverReverse
-        5 => (da, 0),                       // In
-        6 => (0, sa),                       // InReverse
-        7 => (255 - da, 0),                 // Out
-        8 => (0, 255 - sa),                 // OutReverse
-        9 => (da, 255 - sa),                // Atop
-        10 => (255 - da, sa),               // AtopReverse
-        11 => (255 - da, 255 - sa),         // Xor
-        12 => (255, 255),                   // Add (clamped below)
-        // PictOpSaturate (13) per the X RENDER spec is *exactly*
-        // additive Add with the source scaled down so the result
-        // alpha never exceeds 1. Mathematically identical to
-        // PictOpDisjointOverReverse (20).
-        13 | 20 => (out_dis(sa, da), 255),
-
-        // ----- Disjoint family (16..27) -----
+        0 => (0, 0),                                    // Clear
+        1 => (255, 0),                                  // Src
+        2 => (0, 255),                                  // Dst
+        3 => (255, 255 - sa),                           // Over
+        4 => (255 - da, 255),                           // OverReverse
+        5 => (da, 0),                                   // In
+        6 => (0, sa),                                   // InReverse
+        7 => (255 - da, 0),                             // Out
+        8 => (0, 255 - sa),                             // OutReverse
+        9 => (da, 255 - sa),                            // Atop
+        10 => (255 - da, sa),                           // AtopReverse
+        11 => (255 - da, 255 - sa),                    // Xor
+        12 => (255, 255),                              // Add (clamped on apply)
+        13 | 20 => (out_dis(sa, da), 255),             // Saturate / DisjointOverReverse
         16 => (0, 0),                                   // DisjointClear
-        17 => (out_dis(sa, da), 0),                     // DisjointSrc
-        18 => (0, out_dis(da, sa)),                     // DisjointDst
+        17 => (255, 0),                                 // DisjointSrc (= Src)
+        18 => (0, 255),                                 // DisjointDst (= Dst)
         19 => (255, out_dis(da, sa)),                   // DisjointOver
-        // 20 handled above (DisjointOverReverse == Saturate)
         21 => (in_dis(sa, da), 0),                      // DisjointIn
         22 => (0, in_dis(da, sa)),                      // DisjointInReverse
         23 => (out_dis(sa, da), 0),                     // DisjointOut
@@ -248,8 +275,6 @@ pub(crate) fn composite_pixel(
         25 => (in_dis(sa, da), out_dis(da, sa)),        // DisjointAtop
         26 => (out_dis(sa, da), in_dis(da, sa)),        // DisjointAtopReverse
         27 => (out_dis(sa, da), out_dis(da, sa)),       // DisjointXor
-
-        // ----- Conjoint family (32..43) -----
         32 => (0, 0),                                   // ConjointClear
         33 => (255, 0),                                 // ConjointSrc (= Src)
         34 => (0, 255),                                 // ConjointDst (= Dst)
@@ -262,20 +287,98 @@ pub(crate) fn composite_pixel(
         41 => (in_con(sa, da), out_con(da, sa)),        // ConjointAtop
         42 => (out_con(sa, da), in_con(da, sa)),        // ConjointAtopReverse
         43 => (out_con(sa, da), out_con(da, sa)),       // ConjointXor
+        _ => (255, 255 - sa),                           // fallback to Over
+    }
+}
 
-        // Anything we still don't recognise — fall back to Over.
-        _ => (255, 255 - sa),
-    };
+fn blend_chan(src: u8, dst: u8, fs: i32, fd: i32) -> u8 {
+    let r = (src as i32 * fs + dst as i32 * fd + 127) / 255;
+    r.clamp(0, 255) as u8
+}
 
-    let blend = |s: u8, d: u8| -> u8 {
-        let r = (s as i32 * fs + d as i32 * fd + 127) / 255;
-        r.clamp(0, 255) as u8
-    };
+pub(crate) fn composite_pixel(
+    op: u8,
+    dst: &mut [u8],
+    src_b: u8,
+    src_g: u8,
+    src_r: u8,
+    src_a: u8,
+    dst_has_alpha: bool,
+) {
+    // For non-alpha destinations (RGB24 / r8g8b8) the picture format
+    // pretends every dst pixel is fully opaque. We don't *store* an
+    // alpha byte for those (the framebuffer happens to be 32 bpp but
+    // GetImage filters by format), but the compositing math has to
+    // see Da = 1.0 or operators like Atop/In collapse to zero.
+    let force_da_one = !dst_has_alpha;
 
-    dst[0] = blend(src_b, dst[0]);
-    dst[1] = blend(src_g, dst[1]);
-    dst[2] = blend(src_r, dst[2]);
-    dst[3] = blend(src_a, dst[3]);
+    // Fast paths for the operators that don't depend on per-channel
+    // arithmetic — just unconditional writes.
+    match op {
+        0 => {
+            // Clear
+            dst[0] = 0;
+            dst[1] = 0;
+            dst[2] = 0;
+            dst[3] = if force_da_one { 255 } else { 0 };
+            return;
+        }
+        1 => {
+            // Src
+            dst[0] = src_b;
+            dst[1] = src_g;
+            dst[2] = src_r;
+            dst[3] = if force_da_one { 255 } else { src_a };
+            return;
+        }
+        2 => {
+            // Dst — leave the destination untouched.
+            return;
+        }
+        _ => {}
+    }
+
+    let sa = src_a as i32;
+    let da = if force_da_one { 255 } else { dst[3] as i32 };
+
+    let (fs, fd) = pict_op_factors(op, sa, da);
+
+    dst[0] = blend_chan(src_b, dst[0], fs, fd);
+    dst[1] = blend_chan(src_g, dst[1], fs, fd);
+    dst[2] = blend_chan(src_r, dst[2], fs, fd);
+    dst[3] = if force_da_one { 255 } else { blend_chan(src_a, dst[3], fs, fd) };
+}
+
+/// Component-alpha composite — `sa_*` are the per-channel effective
+/// source alphas (typically `src_a * mask_channel`). Each output
+/// channel runs through the operator independently with its own
+/// `Fs/Fd` factors.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn composite_pixel_ca(
+    op: u8,
+    dst: &mut [u8],
+    src_b: u8,
+    src_g: u8,
+    src_r: u8,
+    src_a: u8,
+    sa_b: u8,
+    sa_g: u8,
+    sa_r: u8,
+    sa_a: u8,
+    dst_has_alpha: bool,
+) {
+    let force_da_one = !dst_has_alpha;
+    let da = if force_da_one { 255 } else { dst[3] as i32 };
+
+    let (fs_b, fd_b) = pict_op_factors(op, sa_b as i32, da);
+    let (fs_g, fd_g) = pict_op_factors(op, sa_g as i32, da);
+    let (fs_r, fd_r) = pict_op_factors(op, sa_r as i32, da);
+    let (fs_a, fd_a) = pict_op_factors(op, sa_a as i32, da);
+
+    dst[0] = blend_chan(src_b, dst[0], fs_b, fd_b);
+    dst[1] = blend_chan(src_g, dst[1], fs_g, fd_g);
+    dst[2] = blend_chan(src_r, dst[2], fs_r, fd_r);
+    dst[3] = if force_da_one { 255 } else { blend_chan(src_a, dst[3], fs_a, fd_a) };
 }
 
 fn pad4(n: usize) -> usize {
@@ -294,6 +397,46 @@ fn read_u32(data: &[u8], off: usize) -> u32 {
     u32::from_le_bytes([data[off], data[off + 1], data[off + 2], data[off + 3]])
 }
 
+/// Returns `Some(error_reply)` if the given Render request would
+/// target a *gradient* picture as its destination — those are
+/// source-only and X RENDER mandates a `BadDrawable` error. Returns
+/// `None` (so the dispatcher can carry on) for any other case,
+/// including unknown opcodes and requests that don't carry a
+/// destination picture.
+fn reject_gradient_destination(
+    state: &ClientState,
+    minor: u8,
+    data: &[u8],
+    seq: u16,
+) -> Option<Vec<u8>> {
+    // Each render minor opcode that takes a destination has the
+    // destination picture id at a known offset within the request
+    // body. We only need to flag those.
+    let dst_offset = match minor {
+        8 => 16,           // Composite: dst at offset 16
+        10..=13 => 12,     // Trapezoids/Triangles/TriStrip/TriFan
+        23 | 24 | 25 => 12, // CompositeGlyphs8/16/32
+        26 => 8,           // FillRectangles
+        _ => return None,
+    };
+    if data.len() < dst_offset + 4 {
+        return None;
+    }
+    let dst_pic = u32::from_le_bytes([
+        data[dst_offset],
+        data[dst_offset + 1],
+        data[dst_offset + 2],
+        data[dst_offset + 3],
+    ]);
+    if state.render.linear_gradients.contains_key(&dst_pic) {
+        // BadDrawable = 9; the X RENDER major opcode is 139, which
+        // we don't actually need to fill in here — clients only key
+        // off the error code and the bad-value field.
+        return Some(crate::xserver::build_error(9, seq, dst_pic, 139, minor as u16));
+    }
+    None
+}
+
 pub fn handle_render_request(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
     if data.len() < 4 {
         return Vec::new();
@@ -301,6 +444,14 @@ pub fn handle_render_request(state: &mut ClientState, data: &[u8], seq: u16) -> 
 
     let minor = data[1];
     info!("Render op minor={minor}");
+
+    // Composite/Trapezoids/Triangles/Glyphs etc. all reject
+    // gradient pictures as their *destination*. The wire layout
+    // varies between requests, so do the check at dispatch time
+    // before passing the buffer down to the per-op handler.
+    if let Some(reply) = reject_gradient_destination(state, minor, data, seq) {
+        return reply;
+    }
 
     match minor {
         0 => handle_query_version(seq),
@@ -540,6 +691,7 @@ fn handle_create_picture(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
     let mut repeat = 0u32;
     let mut clip_x_origin = 0i16;
     let mut clip_y_origin = 0i16;
+    let mut component_alpha = false;
     let mut offset = 20;
     // Parse value list based on value_mask. Bits (from xrender protocol):
     //   0  CPRepeat
@@ -563,6 +715,7 @@ fn handle_create_picture(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
                     0 => repeat = val,
                     4 => clip_x_origin = val as i16,
                     5 => clip_y_origin = val as i16,
+                    12 => component_alpha = val != 0,
                     _ => {}
                 }
                 offset += 4;
@@ -576,7 +729,9 @@ fn handle_create_picture(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
         pid,
         PictureState {
             drawable,
+            format_id,
             repeat,
+            component_alpha,
             clip_rects: None,
             clip_origin_x: clip_x_origin,
             clip_origin_y: clip_y_origin,
@@ -602,6 +757,7 @@ fn handle_change_picture(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
                         0 => pic.repeat = val,
                         4 => pic.clip_origin_x = val as i16,
                         5 => pic.clip_origin_y = val as i16,
+                        12 => pic.component_alpha = val != 0,
                         6 => {
                             // CPClipMask: setting None (0) clears the clip
                             // region (everything is in).
@@ -745,8 +901,27 @@ fn handle_composite(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
     };
     let clip = ClipSnapshot::from_picture(state, dst_pic);
 
-    // Resolve dst drawable
-    let dst_drawable = state.render.pictures.get(&dst_pic).map(|p| p.drawable);
+    // Resolve dst drawable + format. The format determines whether
+    // the destination has an alpha channel; rgb24 destinations get
+    // implicit Da=1 in the compositing math.
+    let (dst_drawable, dst_has_alpha) = state
+        .render
+        .pictures
+        .get(&dst_pic)
+        .map(|p| (Some(p.drawable), pict_format_has_alpha(p.format_id)))
+        .unwrap_or((None, true));
+
+    // Component-alpha lives on the *mask* picture: each of its R/G/B/A
+    // channels independently modulates the matching source channel.
+    // Used by sub-pixel-precise glyph rendering and by the rendercheck
+    // mask coords test.
+    let mask_component_alpha = mask_pic != 0
+        && state
+            .render
+            .pictures
+            .get(&mask_pic)
+            .map(|p| p.component_alpha)
+            .unwrap_or(false);
 
     if let (Some((src_data, src_w, _src_h)), Some(dst_draw)) = (src_pixels, dst_drawable) {
         if let Some(fb) = state.get_framebuffer_mut(dst_draw) {
@@ -783,30 +958,73 @@ fn handle_composite(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
 
                     // Apply mask: modulate the source's RGBA by the
                     // mask's alpha (or, for component-alpha masks,
-                    // by each channel). This is what makes anti-aliased
-                    // icons and theme decorations actually show up.
+                    // by each channel independently). For CA masks
+                    // every channel of the operator's `Fs/Fd` runs
+                    // with its own *effective* source alpha
+                    // (`src.a * mask_channel`), so we route through
+                    // composite_pixel_ca instead of the uniform
+                    // composite_pixel.
+                    //
+                    // Note: we *cannot* short-circuit when the mask
+                    // alpha is zero — for destructive ops (Src,
+                    // Clear, In, ...) the dst still needs to be
+                    // overwritten with `src * 0 = 0`. The skip is
+                    // only safe for ops where a transparent source
+                    // is a no-op.
+                    let mut ca_alphas: Option<(u8, u8, u8, u8)> = None;
+                    let skip_zero_mask_ok = zero_src_has_no_effect(op);
                     if let Some((mask_data, mask_w, _)) = &mask_pixels {
                         let mask_off = (row as usize * *mask_w as usize + col as usize) * 4;
                         if mask_off + 3 < mask_data.len() {
-                            let ma = mask_data[mask_off + 3];
-                            if ma == 0 {
-                                continue;
+                            if mask_component_alpha {
+                                let mb = mask_data[mask_off];
+                                let mg = mask_data[mask_off + 1];
+                                let mr = mask_data[mask_off + 2];
+                                let ma = mask_data[mask_off + 3];
+                                if mb == 0 && mg == 0 && mr == 0 && ma == 0 && skip_zero_mask_ok
+                                {
+                                    continue;
+                                }
+                                let src_a_orig = sa;
+                                sb = ((sb as u32 * mb as u32) / 255) as u8;
+                                sg = ((sg as u32 * mg as u32) / 255) as u8;
+                                sr = ((sr as u32 * mr as u32) / 255) as u8;
+                                sa = ((sa as u32 * ma as u32) / 255) as u8;
+                                ca_alphas = Some((
+                                    ((src_a_orig as u32 * mb as u32) / 255) as u8,
+                                    ((src_a_orig as u32 * mg as u32) / 255) as u8,
+                                    ((src_a_orig as u32 * mr as u32) / 255) as u8,
+                                    ((src_a_orig as u32 * ma as u32) / 255) as u8,
+                                ));
+                            } else {
+                                let ma = mask_data[mask_off + 3];
+                                if ma == 0 && skip_zero_mask_ok {
+                                    continue;
+                                }
+                                sb = ((sb as u32 * ma as u32) / 255) as u8;
+                                sg = ((sg as u32 * ma as u32) / 255) as u8;
+                                sr = ((sr as u32 * ma as u32) / 255) as u8;
+                                sa = ((sa as u32 * ma as u32) / 255) as u8;
                             }
-                            sb = ((sb as u32 * ma as u32) / 255) as u8;
-                            sg = ((sg as u32 * ma as u32) / 255) as u8;
-                            sr = ((sr as u32 * ma as u32) / 255) as u8;
-                            sa = ((sa as u32 * ma as u32) / 255) as u8;
                         }
                     }
 
-                    composite_pixel(
-                        op,
-                        &mut fb_data[dst_off..dst_off + 4],
-                        sb,
-                        sg,
-                        sr,
-                        sa,
-                    );
+                    if let Some((sa_b, sa_g, sa_r, sa_a)) = ca_alphas {
+                        composite_pixel_ca(
+                            op,
+                            &mut fb_data[dst_off..dst_off + 4],
+                            sb, sg, sr, sa,
+                            sa_b, sa_g, sa_r, sa_a,
+                            dst_has_alpha,
+                        );
+                    } else {
+                        composite_pixel(
+                            op,
+                            &mut fb_data[dst_off..dst_off + 4],
+                            sb, sg, sr, sa,
+                            dst_has_alpha,
+                        );
+                    }
                 }
             }
             fb.mark_dirty(dst_x as i32, dst_y as i32, width as u32, height as u32);
@@ -868,8 +1086,13 @@ fn handle_trapezoids(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
         "Render Trapezoids: op={op} src={src_pic:#x} dst={dst_pic:#x} color=({sr},{sg},{sb},{sa})"
     );
 
-    // Get destination drawable
-    let dst_drawable = state.render.pictures.get(&dst_pic).map(|p| p.drawable);
+    // Get destination drawable + format.
+    let (dst_drawable, dst_has_alpha) = state
+        .render
+        .pictures
+        .get(&dst_pic)
+        .map(|p| (Some(p.drawable), pict_format_has_alpha(p.format_id)))
+        .unwrap_or((None, true));
     let dst_draw = match dst_drawable {
         Some(d) => d,
         None => return Vec::new(),
@@ -913,7 +1136,7 @@ fn handle_trapezoids(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
 
             for &(top, bottom, lx1, ly1, lx2, ly2, rx1, ry1, rx2, ry2) in &traps {
                 rasterize_trapezoid(
-                    fb, fb_w, fb_h, op, sr, sg, sb, sa,
+                    fb, fb_w, fb_h, op, sr, sg, sb, sa, dst_has_alpha,
                     top, bottom, lx1, ly1, lx2, ly2, rx1, ry1, rx2, ry2,
                     &clip,
                 );
@@ -942,6 +1165,7 @@ fn rasterize_trapezoid(
     sg: u8,
     sb: u8,
     sa: u8,
+    dst_has_alpha: bool,
     top: f64,
     bottom: f64,
     lx1: f64,
@@ -954,10 +1178,16 @@ fn rasterize_trapezoid(
     ry2: f64,
     clip: &ClipSnapshot,
 ) {
-    let y_start = top.ceil() as i32;
-    let y_end = bottom.floor() as i32;
+    // Half-open pixel-center sampling. A pixel at integer (x, y) is
+    // covered if its centre (x+0.5, y+0.5) lies inside the trapezoid.
+    // Equivalently, the row range is `ceil(top - 0.5) .. ceil(bottom
+    // - 0.5)` (exclusive on the upper bound) and the same for the
+    // column range. This matches pixman / X RENDER and avoids the
+    // off-by-one overdraw the old `..=floor(bottom)` form caused.
+    let y_start = (top - 0.5).ceil() as i32;
+    let y_end = (bottom - 0.5).ceil() as i32;
 
-    if y_start > y_end {
+    if y_start >= y_end {
         return;
     }
 
@@ -968,7 +1198,7 @@ fn rasterize_trapezoid(
     let left_dy = ly2 - ly1;
     let right_dy = ry2 - ry1;
 
-    for y in y_start..=y_end {
+    for y in y_start..y_end {
         if y < 0 || y >= fb_h {
             continue;
         }
@@ -989,10 +1219,10 @@ fn rasterize_trapezoid(
             rx1 + (rx2 - rx1) * (yf - ry1) / right_dy
         };
 
-        let x_start = left_x.ceil() as i32;
-        let x_end = right_x.floor() as i32;
+        let x_start = (left_x - 0.5).ceil() as i32;
+        let x_end = (right_x - 0.5).ceil() as i32;
 
-        for x in x_start..=x_end {
+        for x in x_start..x_end {
             if x < 0 || x >= fb_w {
                 continue;
             }
@@ -1010,6 +1240,7 @@ fn rasterize_trapezoid(
                 sg,
                 sr,
                 sa,
+                dst_has_alpha,
             );
         }
     }
@@ -1039,7 +1270,12 @@ fn handle_triangles(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
 
     let (sr, sg, sb, sa) = resolve_source_color(state, src_pic);
 
-    let dst_drawable = state.render.pictures.get(&dst_pic).map(|p| p.drawable);
+    let (dst_drawable, dst_has_alpha) = state
+        .render
+        .pictures
+        .get(&dst_pic)
+        .map(|p| (Some(p.drawable), pict_format_has_alpha(p.format_id)))
+        .unwrap_or((None, true));
     let dst_draw = match dst_drawable {
         Some(d) => d,
         None => return Vec::new(),
@@ -1064,14 +1300,82 @@ fn handle_triangles(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
         let fb_w = fb.width() as i32;
         let fb_h = fb.height() as i32;
 
-        for &(x1, y1, x2, y2, x3, y3) in &triangles {
-            rasterize_triangle(
-                fb, fb_w, fb_h, op, sr, sg, sb, sa, x1, y1, x2, y2, x3, y3, &clip,
+        if zero_src_has_no_effect(op) {
+            // Standard fast path: only the trapezoid bounding box is
+            // touched, scanline-decomposed into trapezoids.
+            for &(x1, y1, x2, y2, x3, y3) in &triangles {
+                rasterize_triangle(
+                    fb, fb_w, fb_h, op, sr, sg, sb, sa, dst_has_alpha,
+                    x1, y1, x2, y2, x3, y3, &clip,
+                );
+            }
+        } else {
+            // Pixman semantics: ops where a zero source still
+            // mutates the destination (Clear, Src, In, InRev, Out,
+            // AtopRev) composite over the *entire destination*. We
+            // iterate the dst bbox, treating outside-triangle pixels
+            // as having a fully transparent source.
+            composite_triangles_full_dst(
+                fb, fb_w, fb_h, op, sr, sg, sb, sa, dst_has_alpha,
+                &triangles, &clip,
             );
         }
     }
 
     Vec::new()
+}
+
+/// Composite a triangle list across the entire destination, using a
+/// per-pixel point-in-triangle test for the coverage mask. Used for
+/// the "destructive" PictOps (Clear, Src, In, InReverse, Out,
+/// AtopReverse) where the spec says that pixels outside the geometry
+/// must still be processed (because the operator collapses to a
+/// non-identity result when the source is transparent).
+#[allow(clippy::too_many_arguments)]
+fn composite_triangles_full_dst(
+    fb: &mut crate::framebuffer::Framebuffer,
+    fb_w: i32,
+    fb_h: i32,
+    op: u8,
+    sr: u8,
+    sg: u8,
+    sb: u8,
+    sa: u8,
+    dst_has_alpha: bool,
+    triangles: &[(f64, f64, f64, f64, f64, f64)],
+    clip: &ClipSnapshot,
+) {
+    let fb_stride = fb.stride();
+    let fb_data = fb.data_mut();
+
+    for y in 0..fb_h {
+        let py = y as f64 + 0.5;
+        for x in 0..fb_w {
+            if !clip.allows(x, y) {
+                continue;
+            }
+            let px = x as f64 + 0.5;
+            let inside = triangles
+                .iter()
+                .any(|&(x1, y1, x2, y2, x3, y3)| point_in_triangle(px, py, x1, y1, x2, y2, x3, y3));
+            let dst_off = y as usize * fb_stride + x as usize * 4;
+            if dst_off + 3 >= fb_data.len() {
+                continue;
+            }
+            let (eb, eg, er, ea) = if inside { (sb, sg, sr, sa) } else { (0, 0, 0, 0) };
+            composite_pixel(
+                op,
+                &mut fb_data[dst_off..dst_off + 4],
+                eb,
+                eg,
+                er,
+                ea,
+                dst_has_alpha,
+            );
+        }
+    }
+
+    fb.mark_dirty(0, 0, fb_w as u32, fb_h as u32);
 }
 
 /// Rasterize a single triangle using scanline conversion.
@@ -1085,6 +1389,7 @@ fn rasterize_triangle(
     sg: u8,
     sb: u8,
     sa: u8,
+    dst_has_alpha: bool,
     x1: f64,
     y1: f64,
     x2: f64,
@@ -1111,7 +1416,7 @@ fn rasterize_triangle(
             ((vx0, vy0, vx1, vy1), (vx0, vy0, vx2, vy2))
         };
         rasterize_trapezoid(
-            fb, fb_w, fb_h, op, sr, sg, sb, sa,
+            fb, fb_w, fb_h, op, sr, sg, sb, sa, dst_has_alpha,
             vy0, vy1, llx.0, llx.1, llx.2, llx.3, rrx.0, rrx.1, rrx.2, rrx.3,
             clip,
         );
@@ -1126,7 +1431,7 @@ fn rasterize_triangle(
             ((vx1, vy1, vx2, vy2), (vx0, vy0, vx2, vy2))
         };
         rasterize_trapezoid(
-            fb, fb_w, fb_h, op, sr, sg, sb, sa,
+            fb, fb_w, fb_h, op, sr, sg, sb, sa, dst_has_alpha,
             vy1, vy2, llx.0, llx.1, llx.2, llx.3, rrx.0, rrx.1, rrx.2, rrx.3,
             clip,
         );
@@ -1150,7 +1455,12 @@ fn handle_tri_strip(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
 
     let (sr, sg, sb, sa) = resolve_source_color(state, src_pic);
 
-    let dst_drawable = state.render.pictures.get(&dst_pic).map(|p| p.drawable);
+    let (dst_drawable, dst_has_alpha) = state
+        .render
+        .pictures
+        .get(&dst_pic)
+        .map(|p| (Some(p.drawable), pict_format_has_alpha(p.format_id)))
+        .unwrap_or((None, true));
     let dst_draw = match dst_drawable {
         Some(d) => d,
         None => return Vec::new(),
@@ -1175,12 +1485,26 @@ fn handle_tri_strip(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
         let fb_w = fb.width() as i32;
         let fb_h = fb.height() as i32;
 
-        for i in 0..points.len() - 2 {
-            let (x1, y1) = points[i];
-            let (x2, y2) = points[i + 1];
-            let (x3, y3) = points[i + 2];
-            rasterize_triangle(
-                fb, fb_w, fb_h, op, sr, sg, sb, sa, x1, y1, x2, y2, x3, y3, &clip,
+        let triangles: Vec<_> = (0..points.len() - 2)
+            .map(|i| {
+                let (x1, y1) = points[i];
+                let (x2, y2) = points[i + 1];
+                let (x3, y3) = points[i + 2];
+                (x1, y1, x2, y2, x3, y3)
+            })
+            .collect();
+
+        if zero_src_has_no_effect(op) {
+            for &(x1, y1, x2, y2, x3, y3) in &triangles {
+                rasterize_triangle(
+                    fb, fb_w, fb_h, op, sr, sg, sb, sa, dst_has_alpha,
+                    x1, y1, x2, y2, x3, y3, &clip,
+                );
+            }
+        } else {
+            composite_triangles_full_dst(
+                fb, fb_w, fb_h, op, sr, sg, sb, sa, dst_has_alpha,
+                &triangles, &clip,
             );
         }
     }
@@ -1205,7 +1529,12 @@ fn handle_tri_fan(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
 
     let (sr, sg, sb, sa) = resolve_source_color(state, src_pic);
 
-    let dst_drawable = state.render.pictures.get(&dst_pic).map(|p| p.drawable);
+    let (dst_drawable, dst_has_alpha) = state
+        .render
+        .pictures
+        .get(&dst_pic)
+        .map(|p| (Some(p.drawable), pict_format_has_alpha(p.format_id)))
+        .unwrap_or((None, true));
     let dst_draw = match dst_drawable {
         Some(d) => d,
         None => return Vec::new(),
@@ -1230,11 +1559,25 @@ fn handle_tri_fan(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
         let fb_h = fb.height() as i32;
 
         let (cx, cy) = points[0];
-        for i in 1..points.len() - 1 {
-            let (x2, y2) = points[i];
-            let (x3, y3) = points[i + 1];
-            rasterize_triangle(
-                fb, fb_w, fb_h, op, sr, sg, sb, sa, cx, cy, x2, y2, x3, y3, &clip,
+        let triangles: Vec<_> = (1..points.len() - 1)
+            .map(|i| {
+                let (x2, y2) = points[i];
+                let (x3, y3) = points[i + 1];
+                (cx, cy, x2, y2, x3, y3)
+            })
+            .collect();
+
+        if zero_src_has_no_effect(op) {
+            for &(x1, y1, x2, y2, x3, y3) in &triangles {
+                rasterize_triangle(
+                    fb, fb_w, fb_h, op, sr, sg, sb, sa, dst_has_alpha,
+                    x1, y1, x2, y2, x3, y3, &clip,
+                );
+            }
+        } else {
+            composite_triangles_full_dst(
+                fb, fb_w, fb_h, op, sr, sg, sb, sa, dst_has_alpha,
+                &triangles, &clip,
             );
         }
     }
@@ -1269,8 +1612,14 @@ fn resolve_source_pixels(
     // Check if it's a linear gradient (referenced directly).
     if let Some(grad) = state.render.linear_gradients.get(&src_pic) {
         let tx = state.render.transforms.get(&src_pic);
+        let rep = state
+            .render
+            .pictures
+            .get(&src_pic)
+            .map(|p| p.repeat)
+            .unwrap_or(0);
         return Some(rasterize_linear_gradient(
-            grad, tx, src_x, src_y, width, height,
+            grad, tx, rep, src_x, src_y, width, height,
         ));
     }
 
@@ -1305,15 +1654,72 @@ fn resolve_source_pixels(
             .get(&src_pic)
             .or_else(|| state.render.transforms.get(&drawable));
         return Some(rasterize_linear_gradient(
-            grad, tx, src_x, src_y, width, height,
+            grad, tx, repeat, src_x, src_y, width, height,
         ));
     }
+
+    // Pick up an optional transform set via SetPictureTransform.
+    // Apps (and rendercheck) install one on the wrapper picture but
+    // it could conceivably also live on the underlying drawable.
+    let transform: Option<[f64; 9]> = state
+        .render
+        .transforms
+        .get(&src_pic)
+        .or_else(|| state.render.transforms.get(&drawable))
+        .copied();
 
     // Sync SHM-backed pixmap data before reading
     state.sync_shm_pixmap(drawable);
 
     // Extract pixels from the drawable's framebuffer
     let fb = state.get_framebuffer_mut(drawable)?;
+
+    // Transformed sources need per-pixel projection back into the
+    // framebuffer; this is also the path used by rendercheck's
+    // "transformed src/mask coords test 2".
+    if let Some(tx) = transform {
+        let fb_w = fb.width();
+        let fb_h = fb.height();
+        let fb_stride = fb.stride();
+        let fb_data = fb.data();
+        let w = width as u32;
+        let h = height as u32;
+        let mut pixels = vec![0u8; (w * h * 4) as usize];
+        for row in 0..h as i32 {
+            for col in 0..w as i32 {
+                // Sample at the destination pixel centre and project
+                // through the transform matrix.
+                let dx = (src_x as i32 + col) as f64 + 0.5;
+                let dy = (src_y as i32 + row) as f64 + 0.5;
+                let (sx_f, sy_f) = apply_transform(&tx, dx, dy);
+                // Nearest-neighbour fetch from the framebuffer.
+                let mut sxi = sx_f.floor() as i32;
+                let mut syi = sy_f.floor() as i32;
+                let in_bounds = sxi >= 0
+                    && syi >= 0
+                    && (sxi as u32) < fb_w
+                    && (syi as u32) < fb_h;
+                let dst_off = (row as u32 * w + col as u32) as usize * 4;
+                if !in_bounds {
+                    if repeat != 0 && fb_w > 0 && fb_h > 0 {
+                        sxi = (sxi.rem_euclid(fb_w as i32)) as i32;
+                        syi = (syi.rem_euclid(fb_h as i32)) as i32;
+                    } else {
+                        // RepeatNone: out-of-bounds reads as transparent.
+                        if dst_off + 3 < pixels.len() {
+                            pixels[dst_off..dst_off + 4].copy_from_slice(&[0, 0, 0, 0]);
+                        }
+                        continue;
+                    }
+                }
+                let src_off = syi as usize * fb_stride + sxi as usize * 4;
+                if src_off + 3 < fb_data.len() && dst_off + 3 < pixels.len() {
+                    pixels[dst_off..dst_off + 4].copy_from_slice(&fb_data[src_off..src_off + 4]);
+                }
+            }
+        }
+        return Some((pixels, w, h));
+    }
 
     if repeat != 0 {
         // Repeat mode: tile the source
@@ -1537,8 +1943,13 @@ fn handle_composite_glyphs(state: &mut ClientState, data: &[u8], glyph_id_size: 
     // Resolve source color (typically solid fill for text)
     let src_color = resolve_source_color(state, src_pic);
 
-    // Resolve dst drawable
-    let dst_drawable = state.render.pictures.get(&dst_pic).map(|p| p.drawable);
+    // Resolve dst drawable + format.
+    let (dst_drawable, dst_has_alpha) = state
+        .render
+        .pictures
+        .get(&dst_pic)
+        .map(|p| (Some(p.drawable), pict_format_has_alpha(p.format_id)))
+        .unwrap_or((None, true));
     let dst_draw = match dst_drawable {
         Some(d) => d,
         None => return Vec::new(),
@@ -1687,6 +2098,7 @@ fn handle_composite_glyphs(state: &mut ClientState, data: &[u8], glyph_id_size: 
                             eff_g,
                             eff_r,
                             eff_a,
+                            dst_has_alpha,
                         );
                     }
                 }
@@ -1800,23 +2212,26 @@ fn handle_fill_rectangles(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
 
     let op = data[4];
     let dst_pic = read_u32(data, 8);
-    // Color is in the request at offset 12..20 (CARD16 each: red, green, blue, alpha)
+    // Color is in the request at offset 12..20 (CARD16 each: red,
+    // green, blue, alpha). XRenderColor is *already* premultiplied
+    // per the X RENDER spec, so we just truncate 16-bit -> 8-bit;
+    // no extra alpha multiply.
     let red = read_u16(data, 12);
     let green = read_u16(data, 14);
     let blue = read_u16(data, 16);
     let alpha = read_u16(data, 18);
 
-    // Convert from straight (XRenderColor) to premultiplied so the
-    // composite_pixel formulas operate on the right colour space.
-    let red8 = (red >> 8) as u8;
-    let green8 = (green >> 8) as u8;
-    let blue8 = (blue >> 8) as u8;
+    let r = (red >> 8) as u8;
+    let g = (green >> 8) as u8;
+    let b = (blue >> 8) as u8;
     let a = (alpha >> 8) as u8;
-    let r = ((red8 as u32 * a as u32 + 127) / 255) as u8;
-    let g = ((green8 as u32 * a as u32 + 127) / 255) as u8;
-    let b = ((blue8 as u32 * a as u32 + 127) / 255) as u8;
 
-    let dst_drawable = state.render.pictures.get(&dst_pic).map(|p| p.drawable);
+    let (dst_drawable, dst_has_alpha) = state
+        .render
+        .pictures
+        .get(&dst_pic)
+        .map(|p| (Some(p.drawable), pict_format_has_alpha(p.format_id)))
+        .unwrap_or((None, true));
     let dst_draw = match dst_drawable {
         Some(d) => d,
         None => return Vec::new(),
@@ -1866,6 +2281,7 @@ fn handle_fill_rectangles(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
                         g,
                         r,
                         a,
+                        dst_has_alpha,
                     );
                 }
             }
@@ -1926,29 +2342,18 @@ fn handle_create_solid_fill(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
     }
     let pid = read_u32(data, 4);
     // Color: 4 x CARD16 (red, green, blue, alpha) at offset 8.
-    // XRenderColor on the wire is straight (non-premultiplied) alpha;
-    // pictures store premultiplied so we convert here once.
-    let red = (read_u16(data, 8) >> 8) as u8;
-    let green = (read_u16(data, 10) >> 8) as u8;
-    let blue = (read_u16(data, 12) >> 8) as u8;
-    let alpha = (read_u16(data, 14) >> 8) as u8;
-    let premul = |c: u8| -> u8 {
-        ((c as u32 * alpha as u32 + 127) / 255) as u8
-    };
+    // XRenderColor is already premultiplied per the X RENDER spec —
+    // just truncate 16-bit -> 8-bit. No extra alpha scaling.
+    let r = (read_u16(data, 8) >> 8) as u8;
+    let g = (read_u16(data, 10) >> 8) as u8;
+    let b = (read_u16(data, 12) >> 8) as u8;
+    let a = (read_u16(data, 14) >> 8) as u8;
 
     debug!(
-        "Render CreateSolidFill: pid={pid:#x} straight=({red},{green},{blue},{alpha})"
+        "Render CreateSolidFill: pid={pid:#x} premul=({r},{g},{b},{a})"
     );
 
-    state.render.solid_fills.insert(
-        pid,
-        SolidFillState {
-            r: premul(red),
-            g: premul(green),
-            b: premul(blue),
-            a: alpha,
-        },
-    );
+    state.render.solid_fills.insert(pid, SolidFillState { r, g, b, a });
     Vec::new()
 }
 
@@ -2082,22 +2487,13 @@ fn handle_create_linear_gradient(state: &mut ClientState, data: &[u8]) -> Vec<u8
     for i in 0..num_stops {
         let offset = read_fixed(data, stops_start + i * 4);
         let coff = colors_start + i * 8;
+        // XRenderColor is already premultiplied per the spec —
+        // just truncate 16-bit -> 8-bit.
         let r = (read_u16(data, coff) >> 8) as u8;
         let g = (read_u16(data, coff + 2) >> 8) as u8;
         let b = (read_u16(data, coff + 4) >> 8) as u8;
         let a = (read_u16(data, coff + 6) >> 8) as u8;
-        // Convert straight → premultiplied to match the pictures
-        // we composite into.
-        let pr = ((r as u32 * a as u32 + 127) / 255) as u8;
-        let pg = ((g as u32 * a as u32 + 127) / 255) as u8;
-        let pb = ((b as u32 * a as u32 + 127) / 255) as u8;
-        stops.push(GradientStop {
-            offset,
-            r: pr,
-            g: pg,
-            b: pb,
-            a,
-        });
+        stops.push(GradientStop { offset, r, g, b, a });
     }
 
     debug!(
@@ -2112,52 +2508,79 @@ fn handle_create_linear_gradient(state: &mut ClientState, data: &[u8]) -> Vec<u8
             stops,
         },
     );
+    // Also register a PictureState entry so that subsequent
+    // ChangePicture(CPRepeat=...) requests against the gradient pid
+    // (rendercheck flips the gradient picture between Normal/Pad/
+    // Reflect/None) actually land somewhere we'll read back.
+    state.render.pictures.insert(
+        pid,
+        PictureState {
+            drawable: pid,
+            format_id: PICTFORMAT_ARGB32,
+            repeat: 0,
+            component_alpha: false,
+            clip_rects: None,
+            clip_origin_x: 0,
+            clip_origin_y: 0,
+        },
+    );
     Vec::new()
 }
 
-/// Sample a sorted stop list at parameter `t` (linearly interpolated
-/// between the two surrounding stops; clamped at the ends).
+/// Sample a sorted stop list at parameter `t`. Lerps in *straight*
+/// alpha (matching rendercheck / Cairo) and returns the result in
+/// premultiplied form so callers can drop it directly into a picture
+/// framebuffer.
 fn sample_gradient_stops(stops: &[GradientStop], t: f64) -> (u8, u8, u8, u8) {
     if stops.is_empty() {
         return (0, 0, 0, 0);
     }
-    if t <= stops[0].offset {
+    let (sr, sg, sb, sa) = if t <= stops[0].offset {
         let s = stops[0];
-        return (s.r, s.g, s.b, s.a);
-    }
-    if t >= stops[stops.len() - 1].offset {
+        (s.r as f64, s.g as f64, s.b as f64, s.a as f64)
+    } else if t >= stops[stops.len() - 1].offset {
         let s = stops[stops.len() - 1];
-        return (s.r, s.g, s.b, s.a);
-    }
-    for i in 1..stops.len() {
-        if t <= stops[i].offset {
-            let s0 = stops[i - 1];
-            let s1 = stops[i];
-            let span = s1.offset - s0.offset;
-            let f = if span > 1e-9 { (t - s0.offset) / span } else { 0.0 };
-            let lerp = |a: u8, b: u8| -> u8 {
-                let v = a as f64 * (1.0 - f) + b as f64 * f;
-                v.round().clamp(0.0, 255.0) as u8
-            };
-            return (
-                lerp(s0.r, s1.r),
-                lerp(s0.g, s1.g),
-                lerp(s0.b, s1.b),
-                lerp(s0.a, s1.a),
-            );
+        (s.r as f64, s.g as f64, s.b as f64, s.a as f64)
+    } else {
+        let mut out = (0.0, 0.0, 0.0, 0.0);
+        for i in 1..stops.len() {
+            if t <= stops[i].offset {
+                let s0 = stops[i - 1];
+                let s1 = stops[i];
+                let span = s1.offset - s0.offset;
+                let f = if span > 1e-9 { (t - s0.offset) / span } else { 0.0 };
+                let lerp = |a: u8, b: u8| a as f64 * (1.0 - f) + b as f64 * f;
+                out = (
+                    lerp(s0.r, s1.r),
+                    lerp(s0.g, s1.g),
+                    lerp(s0.b, s1.b),
+                    lerp(s0.a, s1.a),
+                );
+                break;
+            }
         }
-    }
-    let s = stops[stops.len() - 1];
-    (s.r, s.g, s.b, s.a)
+        out
+    };
+
+    // Premultiply the lerped straight RGBA. The rendercheck reference
+    // does `result->r *= result->a` after lerping, and so do we.
+    let scale = sa / 255.0;
+    let pr = (sr * scale).round().clamp(0.0, 255.0) as u8;
+    let pg = (sg * scale).round().clamp(0.0, 255.0) as u8;
+    let pb = (sb * scale).round().clamp(0.0, 255.0) as u8;
+    let pa = sa.round().clamp(0.0, 255.0) as u8;
+    (pr, pg, pb, pa)
 }
 
 /// Rasterise a region of a linear gradient into a BGRA pixel buffer.
 /// `(src_x, src_y)` is the top-left source coordinate the caller
-/// requested; `(width, height)` is the buffer size. The output is
-/// premultiplied to match the rest of the picture pipeline.
+/// requested; `(width, height)` is the buffer size. `repeat` is the
+/// picture repeat mode (0=None, 1=Normal, 2=Pad, 3=Reflect). The
+/// output is premultiplied to match the rest of the picture pipeline.
 fn rasterize_linear_gradient(
     grad: &LinearGradientState,
     transform: Option<&[f64; 9]>,
+    repeat: u32,
     src_x: i16,
     src_y: i16,
     width: u16,
@@ -2197,8 +2620,32 @@ fn rasterize_linear_gradient(
                 px = tx_px;
                 py = tx_py;
             }
-            let t = ((px - p1x) * dx + (py - p1y) * dy) / len_sq;
-            let (r, g, b, a) = sample_gradient_stops(&grad.stops, t);
+            let t_raw = ((px - p1x) * dx + (py - p1y) * dy) / len_sq;
+            // Apply the picture's repeat mode to the gradient
+            // parameter. Matches pixman / rendercheck:
+            //   None    -> outside [0,1] -> transparent
+            //   Normal  -> wrap mod 1
+            //   Pad     -> clamp to [0,1]
+            //   Reflect -> triangle wave with period 2
+            let (r, g, b, a) = match repeat {
+                1 => {
+                    let t = t_raw.rem_euclid(1.0);
+                    sample_gradient_stops(&grad.stops, t)
+                }
+                3 => {
+                    let r2 = t_raw.rem_euclid(2.0);
+                    let t = if r2 > 1.0 { 2.0 - r2 } else { r2 };
+                    sample_gradient_stops(&grad.stops, t)
+                }
+                2 => sample_gradient_stops(&grad.stops, t_raw.clamp(0.0, 1.0)),
+                _ => {
+                    if !(0.0..=1.0).contains(&t_raw) {
+                        (0, 0, 0, 0)
+                    } else {
+                        sample_gradient_stops(&grad.stops, t_raw)
+                    }
+                }
+            };
             let off = (row as usize * w as usize + col as usize) * 4;
             pixels[off] = b;
             pixels[off + 1] = g;

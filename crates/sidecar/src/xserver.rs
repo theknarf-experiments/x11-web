@@ -1792,7 +1792,7 @@ fn handle_request(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
 }
 
 /// Build an X11 error reply (32 bytes)
-fn build_error(error_code: u8, seq: u16, bad_value: u32, major_opcode: u8, minor_opcode: u16) -> Vec<u8> {
+pub(crate) fn build_error(error_code: u8, seq: u16, bad_value: u32, major_opcode: u8, minor_opcode: u16) -> Vec<u8> {
     let mut err = [0u8; 32];
     err[0] = 0; // Error indicator
     err[1] = error_code;

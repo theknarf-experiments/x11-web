@@ -1442,7 +1442,20 @@ test.describe
 			//                        and Conjoint{In,InReverse,Out,
 			//                        OutReverse,Atop,AtopReverse,Xor}
 			//                        via shared in/out coverage helpers)
-			const RENDERCHECK_BASELINE_PASSED = 292;
+			//   2026-04-10 786/789  (XRenderColor is premultiplied per
+			//                        spec — stop double-multiplying;
+			//                        gradient stops lerp in straight
+			//                        space; gradient picture repeat
+			//                        modes; rgb24 dst gets implicit
+			//                        Da=1; pixman half-open trapezoid
+			//                        rasterisation + zero_src_has_no
+			//                        _effect bbox extension; per-pixel
+			//                        SetPictureTransform sampling for
+			//                        non-gradient sources; component
+			//                        alpha (CA) masks via per-channel
+			//                        Fs/Fd; BadDrawable on render-into
+			//                        -gradient)
+			const RENDERCHECK_BASELINE_PASSED = 786;
 			expect(passed).toBeGreaterThanOrEqual(RENDERCHECK_BASELINE_PASSED);
 		});
 
