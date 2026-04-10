@@ -18,6 +18,36 @@ pub struct RenderState {
 struct PictureState {
     drawable: u32,
     repeat: u32,
+    /// Clip rectangles set via SetPictureClipRectangles. The picture's
+    /// destination is the union of these rectangles, offset by
+    /// `clip_origin_*`. `None` means no clipping (full drawable).
+    clip_rects: Option<Vec<(i16, i16, u16, u16)>>,
+    clip_origin_x: i16,
+    clip_origin_y: i16,
+}
+
+impl PictureState {
+    /// Returns true if the destination point is inside the current clip
+    /// region. If no clip rectangles have been set, everything is in.
+    fn point_in_clip(&self, x: i32, y: i32) -> bool {
+        match &self.clip_rects {
+            None => true,
+            Some(rects) => {
+                for &(rx, ry, rw, rh) in rects {
+                    let cx = self.clip_origin_x as i32 + rx as i32;
+                    let cy = self.clip_origin_y as i32 + ry as i32;
+                    if x >= cx
+                        && x < cx + rw as i32
+                        && y >= cy
+                        && y < cy + rh as i32
+                    {
+                        return true;
+                    }
+                }
+                false
+            }
+        }
+    }
 }
 
 struct GlyphSetState {
@@ -101,10 +131,7 @@ pub fn handle_render_request(state: &mut ClientState, data: &[u8], seq: u16) -> 
         1 => handle_query_pict_formats(seq),
         4 => handle_create_picture(state, data),
         5 => handle_change_picture(state, data),
-        6 => {
-            // SetPictureClipRectangles - ignore
-            Vec::new()
-        }
+        6 => handle_set_picture_clip_rectangles(state, data),
         7 => handle_free_picture(state, data),
         8 => handle_composite(state, data),
         10 => handle_trapezoids(state, data),
@@ -338,15 +365,32 @@ fn handle_create_picture(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
     let value_mask = read_u32(data, 16);
 
     let mut repeat = 0u32;
+    let mut clip_x_origin = 0i16;
+    let mut clip_y_origin = 0i16;
     let mut offset = 20;
-    // Parse value list based on value_mask
+    // Parse value list based on value_mask. Bits (from xrender protocol):
+    //   0  CPRepeat
+    //   1  CPAlphaMap
+    //   2  CPAlphaXOrigin
+    //   3  CPAlphaYOrigin
+    //   4  CPClipXOrigin
+    //   5  CPClipYOrigin
+    //   6  CPClipMask
+    //   7  CPGraphicsExposure
+    //   8  CPSubwindowMode
+    //   9  CPPolyEdge
+    //  10  CPPolyMode
+    //  11  CPDither
+    //  12  CPComponentAlpha
     for bit in 0..13 {
         if value_mask & (1 << bit) != 0 {
             if offset + 4 <= data.len() {
                 let val = read_u32(data, offset);
-                if bit == 0 {
-                    // CPRepeat
-                    repeat = val;
+                match bit {
+                    0 => repeat = val,
+                    4 => clip_x_origin = val as i16,
+                    5 => clip_y_origin = val as i16,
+                    _ => {}
                 }
                 offset += 4;
             }
@@ -360,6 +404,9 @@ fn handle_create_picture(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
         PictureState {
             drawable,
             repeat,
+            clip_rects: None,
+            clip_origin_x: clip_x_origin,
+            clip_origin_y: clip_y_origin,
         },
     );
     Vec::new()
@@ -378,13 +425,71 @@ fn handle_change_picture(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
             if value_mask & (1 << bit) != 0 {
                 if offset + 4 <= data.len() {
                     let val = read_u32(data, offset);
-                    if bit == 0 {
-                        pic.repeat = val;
+                    match bit {
+                        0 => pic.repeat = val,
+                        4 => pic.clip_origin_x = val as i16,
+                        5 => pic.clip_origin_y = val as i16,
+                        6 => {
+                            // CPClipMask: setting None (0) clears the clip
+                            // region (everything is in).
+                            if val == 0 {
+                                pic.clip_rects = None;
+                            }
+                            // Non-None pixmap masks aren't supported (we
+                            // don't track pixmap-based clips); leave
+                            // existing rect clip in place.
+                        }
+                        _ => {}
                     }
                     offset += 4;
                 }
             }
         }
+    }
+    Vec::new()
+}
+
+/// SetPictureClipRectangles: replace the picture's clip region with a
+/// list of rectangles. Subsequent rendering operations on this picture
+/// must only affect destination pixels that fall inside one of these
+/// rectangles (offset by `clip_x_origin` / `clip_y_origin`).
+///
+/// Request layout:
+///   1   opcode (139)
+///   1   minor (6)
+///   2   length (in 4-byte units)
+///   4   picture
+///   2   clip_x_origin (INT16)
+///   2   clip_y_origin (INT16)
+///   ... rectangles, 8 bytes each: x(2) y(2) width(2) height(2)
+fn handle_set_picture_clip_rectangles(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
+    if data.len() < 12 {
+        return Vec::new();
+    }
+    let pid = read_u32(data, 4);
+    let clip_x = read_i16(data, 8);
+    let clip_y = read_i16(data, 10);
+
+    let mut rects = Vec::new();
+    let mut off = 12;
+    while off + 8 <= data.len() {
+        let x = read_i16(data, off);
+        let y = read_i16(data, off + 2);
+        let w = read_u16(data, off + 4);
+        let h = read_u16(data, off + 6);
+        rects.push((x, y, w, h));
+        off += 8;
+    }
+
+    debug!(
+        "Render SetPictureClipRectangles: pid={pid:#x} origin=({clip_x},{clip_y}) rects={}",
+        rects.len()
+    );
+
+    if let Some(pic) = state.render.pictures.get_mut(&pid) {
+        pic.clip_origin_x = clip_x;
+        pic.clip_origin_y = clip_y;
+        pic.clip_rects = Some(rects);
     }
     Vec::new()
 }
@@ -397,6 +502,41 @@ fn handle_free_picture(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
     Vec::new()
 }
 
+/// Snapshot a picture's clip state so we can pass it down to drawing
+/// helpers without holding a borrow on `state.render` while we mutate
+/// the framebuffer.
+#[derive(Clone, Default)]
+struct ClipSnapshot {
+    rects: Option<Vec<(i16, i16, u16, u16)>>,
+    origin_x: i16,
+    origin_y: i16,
+}
+
+impl ClipSnapshot {
+    fn from_picture(state: &ClientState, pid: u32) -> Self {
+        if let Some(pic) = state.render.pictures.get(&pid) {
+            ClipSnapshot {
+                rects: pic.clip_rects.clone(),
+                origin_x: pic.clip_origin_x,
+                origin_y: pic.clip_origin_y,
+            }
+        } else {
+            ClipSnapshot::default()
+        }
+    }
+
+    fn allows(&self, x: i32, y: i32) -> bool {
+        match &self.rects {
+            None => true,
+            Some(rects) => rects.iter().any(|&(rx, ry, rw, rh)| {
+                let cx = self.origin_x as i32 + rx as i32;
+                let cy = self.origin_y as i32 + ry as i32;
+                x >= cx && x < cx + rw as i32 && y >= cy && y < cy + rh as i32
+            }),
+        }
+    }
+}
+
 /// The main compositing operation.
 fn handle_composite(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
     if data.len() < 36 {
@@ -405,23 +545,32 @@ fn handle_composite(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
 
     let op = data[4];
     let src_pic = read_u32(data, 8);
-    let _mask_pic = read_u32(data, 12);
+    let mask_pic = read_u32(data, 12);
     let dst_pic = read_u32(data, 16);
     let src_x = read_i16(data, 20);
     let src_y = read_i16(data, 22);
-    let _mask_x = read_i16(data, 24);
-    let _mask_y = read_i16(data, 26);
+    let mask_x = read_i16(data, 24);
+    let mask_y = read_i16(data, 26);
     let dst_x = read_i16(data, 28);
     let dst_y = read_i16(data, 30);
     let width = read_u16(data, 32);
     let height = read_u16(data, 34);
 
     info!(
-        "Render Composite: op={op} src={src_pic:#x} dst={dst_pic:#x} src=({src_x},{src_y}) dst=({dst_x},{dst_y}) {width}x{height}"
+        "Render Composite: op={op} src={src_pic:#x} mask={mask_pic:#x} dst={dst_pic:#x} src=({src_x},{src_y}) dst=({dst_x},{dst_y}) {width}x{height}"
     );
 
     // Resolve source pixels
     let src_pixels: Option<(Vec<u8>, u32, u32)> = resolve_source_pixels(state, src_pic, src_x, src_y, width, height);
+    // If a mask picture is provided, fetch its pixels too. The mask
+    // modulates the source's alpha per-pixel — used heavily by GTK to
+    // draw anti-aliased icons and text decorations.
+    let mask_pixels: Option<(Vec<u8>, u32, u32)> = if mask_pic != 0 {
+        resolve_source_pixels(state, mask_pic, mask_x, mask_y, width, height)
+    } else {
+        None
+    };
+    let clip = ClipSnapshot::from_picture(state, dst_pic);
 
     // Resolve dst drawable
     let dst_drawable = state.render.pictures.get(&dst_pic).map(|p| p.drawable);
@@ -443,6 +592,9 @@ fn handle_composite(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
                     if dx < 0 || dx >= fb_w {
                         continue;
                     }
+                    if !clip.allows(dx, dy) {
+                        continue;
+                    }
                     let src_off = (row as usize * src_w as usize + col as usize) * 4;
                     if src_off + 3 >= src_data.len() {
                         continue;
@@ -451,10 +603,28 @@ fn handle_composite(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
                     if dst_off + 3 >= fb_data.len() {
                         continue;
                     }
-                    let sb = src_data[src_off];
-                    let sg = src_data[src_off + 1];
-                    let sr = src_data[src_off + 2];
-                    let sa = src_data[src_off + 3];
+                    let mut sb = src_data[src_off];
+                    let mut sg = src_data[src_off + 1];
+                    let mut sr = src_data[src_off + 2];
+                    let mut sa = src_data[src_off + 3];
+
+                    // Apply mask: modulate the source's RGBA by the
+                    // mask's alpha (or, for component-alpha masks,
+                    // by each channel). This is what makes anti-aliased
+                    // icons and theme decorations actually show up.
+                    if let Some((mask_data, mask_w, _)) = &mask_pixels {
+                        let mask_off = (row as usize * *mask_w as usize + col as usize) * 4;
+                        if mask_off + 3 < mask_data.len() {
+                            let ma = mask_data[mask_off + 3];
+                            if ma == 0 {
+                                continue;
+                            }
+                            sb = ((sb as u32 * ma as u32) / 255) as u8;
+                            sg = ((sg as u32 * ma as u32) / 255) as u8;
+                            sr = ((sr as u32 * ma as u32) / 255) as u8;
+                            sa = ((sa as u32 * ma as u32) / 255) as u8;
+                        }
+                    }
 
                     match op {
                         3 => {
@@ -547,6 +717,7 @@ fn handle_trapezoids(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
         Some(d) => d,
         None => return Vec::new(),
     };
+    let clip = ClipSnapshot::from_picture(state, dst_pic);
 
     // Parse trapezoids (40 bytes each starting at offset 24)
     let mut off = 24;
@@ -587,6 +758,7 @@ fn handle_trapezoids(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
                 rasterize_trapezoid(
                     fb, fb_w, fb_h, op, sr, sg, sb, sa,
                     top, bottom, lx1, ly1, lx2, ly2, rx1, ry1, rx2, ry2,
+                    &clip,
                 );
             }
         }
@@ -603,6 +775,7 @@ fn handle_trapezoids(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
 }
 
 /// Rasterize a single trapezoid into the framebuffer using scanline conversion.
+#[allow(clippy::too_many_arguments)]
 fn rasterize_trapezoid(
     fb: &mut crate::framebuffer::Framebuffer,
     fb_w: i32,
@@ -622,6 +795,7 @@ fn rasterize_trapezoid(
     ry1: f64,
     rx2: f64,
     ry2: f64,
+    clip: &ClipSnapshot,
 ) {
     let y_start = top.ceil() as i32;
     let y_end = bottom.floor() as i32;
@@ -663,6 +837,9 @@ fn rasterize_trapezoid(
 
         for x in x_start..=x_end {
             if x < 0 || x >= fb_w {
+                continue;
+            }
+            if !clip.allows(x, y) {
                 continue;
             }
             let dst_off = y as usize * fb_stride + x as usize * 4;
@@ -725,6 +902,7 @@ fn handle_triangles(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
         Some(d) => d,
         None => return Vec::new(),
     };
+    let clip = ClipSnapshot::from_picture(state, dst_pic);
 
     // Each triangle = 3 POINTFIX (each 8 bytes = x FIXED + y FIXED) = 24 bytes
     let mut off = 24;
@@ -745,7 +923,9 @@ fn handle_triangles(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
         let fb_h = fb.height() as i32;
 
         for &(x1, y1, x2, y2, x3, y3) in &triangles {
-            rasterize_triangle(fb, fb_w, fb_h, op, sr, sg, sb, sa, x1, y1, x2, y2, x3, y3);
+            rasterize_triangle(
+                fb, fb_w, fb_h, op, sr, sg, sb, sa, x1, y1, x2, y2, x3, y3, &clip,
+            );
         }
     }
 
@@ -753,6 +933,7 @@ fn handle_triangles(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
 }
 
 /// Rasterize a single triangle using scanline conversion.
+#[allow(clippy::too_many_arguments)]
 fn rasterize_triangle(
     fb: &mut crate::framebuffer::Framebuffer,
     fb_w: i32,
@@ -768,6 +949,7 @@ fn rasterize_triangle(
     y2: f64,
     x3: f64,
     y3: f64,
+    clip: &ClipSnapshot,
 ) {
     // Convert triangle to trapezoids by sorting vertices by Y
     let mut verts = [(x1, y1), (x2, y2), (x3, y3)];
@@ -789,6 +971,7 @@ fn rasterize_triangle(
         rasterize_trapezoid(
             fb, fb_w, fb_h, op, sr, sg, sb, sa,
             vy0, vy1, llx.0, llx.1, llx.2, llx.3, rrx.0, rrx.1, rrx.2, rrx.3,
+            clip,
         );
     }
 
@@ -803,6 +986,7 @@ fn rasterize_triangle(
         rasterize_trapezoid(
             fb, fb_w, fb_h, op, sr, sg, sb, sa,
             vy1, vy2, llx.0, llx.1, llx.2, llx.3, rrx.0, rrx.1, rrx.2, rrx.3,
+            clip,
         );
     }
 }
@@ -829,6 +1013,7 @@ fn handle_tri_strip(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
         Some(d) => d,
         None => return Vec::new(),
     };
+    let clip = ClipSnapshot::from_picture(state, dst_pic);
 
     // Points: 8 bytes each (FIXED x + FIXED y)
     let mut points = Vec::new();
@@ -852,7 +1037,9 @@ fn handle_tri_strip(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
             let (x1, y1) = points[i];
             let (x2, y2) = points[i + 1];
             let (x3, y3) = points[i + 2];
-            rasterize_triangle(fb, fb_w, fb_h, op, sr, sg, sb, sa, x1, y1, x2, y2, x3, y3);
+            rasterize_triangle(
+                fb, fb_w, fb_h, op, sr, sg, sb, sa, x1, y1, x2, y2, x3, y3, &clip,
+            );
         }
     }
 
@@ -881,6 +1068,7 @@ fn handle_tri_fan(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
         Some(d) => d,
         None => return Vec::new(),
     };
+    let clip = ClipSnapshot::from_picture(state, dst_pic);
 
     let mut points = Vec::new();
     let mut off = 24;
@@ -903,7 +1091,9 @@ fn handle_tri_fan(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
         for i in 1..points.len() - 1 {
             let (x2, y2) = points[i];
             let (x3, y3) = points[i + 1];
-            rasterize_triangle(fb, fb_w, fb_h, op, sr, sg, sb, sa, cx, cy, x2, y2, x3, y3);
+            rasterize_triangle(
+                fb, fb_w, fb_h, op, sr, sg, sb, sa, cx, cy, x2, y2, x3, y3, &clip,
+            );
         }
     }
 
@@ -1189,6 +1379,7 @@ fn handle_composite_glyphs(state: &mut ClientState, data: &[u8], glyph_id_size: 
         Some(d) => d,
         None => return Vec::new(),
     };
+    let clip = ClipSnapshot::from_picture(state, dst_pic);
 
     // Parse glyphcmds
     let mut off = 28;
@@ -1305,6 +1496,9 @@ fn handle_composite_glyphs(state: &mut ClientState, data: &[u8], glyph_id_size: 
                 for col in 0..op.width as i32 {
                     let dx = op.dst_x + col;
                     if dx < 0 || dx >= fb_w {
+                        continue;
+                    }
+                    if !clip.allows(dx, dy) {
                         continue;
                     }
 
@@ -1425,6 +1619,7 @@ fn handle_fill_rectangles(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
         Some(d) => d,
         None => return Vec::new(),
     };
+    let clip = ClipSnapshot::from_picture(state, dst_pic);
 
     // Parse rectangles (8 bytes each: x(2) y(2) w(2) h(2))
     let mut off = 20;
@@ -1453,6 +1648,9 @@ fn handle_fill_rectangles(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
                 for col in 0..*rw as i32 {
                     let dx = *rx as i32 + col;
                     if dx < 0 || dx >= fb_w {
+                        continue;
+                    }
+                    if !clip.allows(dx, dy) {
                         continue;
                     }
                     let dst_off = dy as usize * fb_stride + dx as usize * 4;

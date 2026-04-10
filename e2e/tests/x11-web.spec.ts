@@ -732,6 +732,54 @@ test.describe
 			});
 		});
 
+		test("gimp renders main window", async ({ page }) => {
+			await page.goto(`http://localhost:${frontendPort}`);
+			await waitForDock(page);
+
+			// Open gimp on a tiny built-in image so the canvas area has
+			// content and many widgets get exercised.
+			await spawnApp(
+				page,
+				"--no-splash /usr/share/pixmaps/debian-logo.png",
+				"gimp",
+			);
+
+			const windowFrames = page.locator('[data-testid="window-frame"]');
+			await expect(windowFrames.first()).toBeVisible({ timeout: 60_000 });
+			await expect
+				.poll(
+					async () => {
+						const count = await windowFrames.count();
+						for (let i = 0; i < count; i++) {
+							const canvas = windowFrames
+								.nth(i)
+								.locator('[data-testid="x11-canvas"]');
+							if (
+								(await canvas.isVisible()) &&
+								(await hasRenderedContent(canvas))
+							) {
+								return true;
+							}
+						}
+						return false;
+					},
+					{
+						timeout: 120_000,
+						intervals: [2000, 3000, 5000, 5000, 10000, 10000],
+					},
+				)
+				.toBe(true);
+
+			// Give gimp time to settle.
+			await page.waitForTimeout(8000);
+
+			const gimpFrame = windowFrames.first();
+			await expect(gimpFrame).toHaveScreenshot("gimp-canvas.png", {
+				maxDiffPixelRatio: 0.05,
+				timeout: 15_000,
+			});
+		});
+
 		test("vim workflow: insert, save, quit, cat", async ({ page }) => {
 			await page.goto(`http://localhost:${frontendPort}`);
 			await waitForDock(page);
