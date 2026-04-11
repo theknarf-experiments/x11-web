@@ -1700,6 +1700,7 @@ fn handle_request(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
         50 | // ListFontsWithInfo
         52 | // GetFontPath
         103 | // GetKeyboardControl
+        106 | // GetPointerControl
         108 | // GetScreenSaver
         116 | // SetPointerMapping
         117 | // GetPointerMapping
@@ -1887,6 +1888,25 @@ fn handle_misc_request(state: &mut ClientState, opcode: u8, seq: u16) -> Vec<u8>
             reply[4..8].copy_from_slice(&5u32.to_le_bytes()); // length = 5 (20 extra bytes)
             reply.to_vec()
         }
+        106 => {
+            // GetPointerControl reply. Layout:
+            //   u16 acceleration_numerator
+            //   u16 acceleration_denominator
+            //   u16 threshold
+            //   18 bytes pad
+            // We don't actually do pointer acceleration server-side
+            // (the frontend delivers raw coordinates), so report the
+            // canonical X11 defaults: 2/1 acceleration, threshold 4.
+            // `xset q` blocks waiting for this reply, so prior to
+            // wiring it up the entire `xset q` query chain hung.
+            let mut reply = [0u8; 32];
+            reply[0] = 1;
+            reply[2..4].copy_from_slice(&seq.to_le_bytes());
+            reply[8..10].copy_from_slice(&2u16.to_le_bytes()); // numerator
+            reply[10..12].copy_from_slice(&1u16.to_le_bytes()); // denominator
+            reply[12..14].copy_from_slice(&4u16.to_le_bytes()); // threshold
+            reply.to_vec()
+        }
         108 => {
             // GetScreenSaver reply: never blank, never expose.
             // Reply layout: u16 timeout, u16 interval, u8 prefer_blanking,
@@ -1926,15 +1946,40 @@ fn handle_misc_request(state: &mut ClientState, opcode: u8, seq: u16) -> Vec<u8>
             reply
         }
         119 => {
-            // GetModifierMapping reply
-            let keycodes_per_modifier: u8 = 2;
-            let data_len = 8 * keycodes_per_modifier as u32; // 8 modifiers
+            // GetModifierMapping reply.
+            //
+            // The modifier-map data is laid out as 8 rows of
+            // `keycodes_per_modifier` bytes, in this fixed order:
+            //   row 0: Shift     row 4: Mod2 (NumLock)
+            //   row 1: Lock      row 5: Mod3
+            //   row 2: Control   row 6: Mod4 (Super/Win)
+            //   row 3: Mod1 (Alt) row 7: Mod5 (AltGr / Mode_switch)
+            // Each cell is a keycode that activates that modifier
+            // (0 = NoSymbol = unused slot). The keycodes here match
+            // the modifier-key entries in `us_qwerty_keysyms`.
+            const KEYCODES_PER_MODIFIER: u8 = 2;
+            const MODIFIER_MAP: [[u8; KEYCODES_PER_MODIFIER as usize]; 8] = [
+                [50, 62],   // Shift: Shift_L, Shift_R
+                [66, 0],    // Lock:  Caps_Lock
+                [37, 105],  // Control: Control_L, Control_R
+                [64, 108],  // Mod1 (Alt): Alt_L, Alt_R
+                [77, 0],    // Mod2 (NumLock): Num_Lock
+                [0, 0],     // Mod3 (unused)
+                [133, 134], // Mod4 (Super): Super_L, Super_R
+                [0, 0],     // Mod5 (AltGr / Mode_switch — unused)
+            ];
+            let data_len = 8 * KEYCODES_PER_MODIFIER as u32;
             let reply_len = 32 + data_len as usize;
             let mut reply = vec![0u8; reply_len];
             reply[0] = 1;
-            reply[1] = keycodes_per_modifier;
+            reply[1] = KEYCODES_PER_MODIFIER;
             reply[2..4].copy_from_slice(&seq.to_le_bytes());
             reply[4..8].copy_from_slice(&((data_len / 4).to_le_bytes()));
+            for (i, row) in MODIFIER_MAP.iter().enumerate() {
+                let off = 32 + i * KEYCODES_PER_MODIFIER as usize;
+                reply[off..off + KEYCODES_PER_MODIFIER as usize]
+                    .copy_from_slice(row);
+            }
             reply
         }
         _ => Vec::new(),
@@ -5729,6 +5774,11 @@ fn us_qwerty_keysyms() -> [u32; 248] {
         (64, 0xffe9), // Alt_L
         (65, b' ' as u32), // Space
         (66, 0xffe5), // Caps_Lock
+        (77, 0xff7f), // Num_Lock
+        (105, 0xffe4), // Control_R
+        (108, 0xffea), // Alt_R
+        (133, 0xffeb), // Super_L
+        (134, 0xffec), // Super_R
     ];
     for &(kc, sym) in mappings {
         if kc >= 8 {

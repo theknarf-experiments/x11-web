@@ -1900,10 +1900,9 @@ test.describe
 			const fs = await import("node:fs");
 
 			// `xmodmap` (no args) prints the modifier table via
-			// GetModifierMapping. We don't assert on the contents
-			// (our modifier mapping is currently empty — see
-			// follow-up below) — only that the request returns a
-			// well-formed reply and the command exits cleanly.
+			// GetModifierMapping. We assert on the actual bindings
+			// since the table's only useful if real modifier keys
+			// resolve to keycodes.
 			const mods = await sidecarContainer.exec([
 				"bash",
 				"-c",
@@ -1911,8 +1910,7 @@ test.describe
 			]);
 			expect(mods.exitCode).toBe(0);
 			expect(mods.output).toContain("up to 2 keys per modifier");
-			// All 8 modifier slot labels must be present even when
-			// they have no keycodes attached.
+			// All 8 modifier slot labels must be present.
 			for (const slot of [
 				"shift",
 				"lock",
@@ -1925,6 +1923,14 @@ test.describe
 			]) {
 				expect(mods.output).toContain(slot);
 			}
+			// And the slots that should have keycodes attached
+			// (matching the MODIFIER_MAP table in xserver.rs).
+			expect(mods.output).toMatch(/shift\s+Shift_L.*Shift_R/);
+			expect(mods.output).toMatch(/lock\s+Caps_Lock/);
+			expect(mods.output).toMatch(/control\s+Control_L.*Control_R/);
+			expect(mods.output).toMatch(/mod1\s+Alt_L.*Alt_R/);
+			expect(mods.output).toMatch(/mod2\s+Num_Lock/);
+			expect(mods.output).toMatch(/mod4\s+Super_L.*Super_R/);
 
 			// `xmodmap -pk` walks the entire core-protocol keymap
 			// (GetKeyboardMapping for keycodes 8..255) and pretty-
@@ -1967,6 +1973,39 @@ test.describe
 			expect(pke.exitCode).toBe(0);
 			expect(pke.output).toContain("keycode   9 = Escape Escape");
 			expect(pke.output).toContain("keycode  10 = 1 exclam");
+		});
+
+		test("xset q reports server keyboard/pointer/screensaver state", async () => {
+			// `xset q` walks a chain of small core-protocol queries
+			// and prints them as a status report:
+			//   GetKeyboardControl  (103) → Keyboard Control section
+			//   GetPointerControl   (106) → Pointer Control section
+			//   GetScreenSaver      (108) → Screen Saver section
+			//   GetFontPath         (52)  → Font Path section
+			// Before we wired up GetPointerControl this command
+			// hung indefinitely waiting for the reply. The test
+			// asserts each section header so any one of those
+			// handlers regressing would fail loudly.
+			const result = await sidecarContainer.exec([
+				"bash",
+				"-c",
+				"DISPLAY=:99 xset q 2>&1",
+			]);
+			const fs = await import("node:fs");
+			fs.writeFileSync("/tmp/x11web-xset-q.txt", result.output);
+			console.log(
+				`xset q: ${result.output.split("\n").length} lines (exit=${result.exitCode})`,
+			);
+			expect(result.exitCode).toBe(0);
+			expect(result.output).toContain("Keyboard Control:");
+			expect(result.output).toContain("Pointer Control:");
+			expect(result.output).toContain("Screen Saver:");
+			expect(result.output).toContain("Font Path:");
+			// Pointer Control reports our advertised acceleration
+			// (2/1) and threshold (4) — the canonical X defaults
+			// we hard-code in the GetPointerControl handler.
+			expect(result.output).toMatch(/acceleration:\s*2\/1/);
+			expect(result.output).toMatch(/threshold:\s*4/);
 		});
 
 		test("xrandr --query enumerates the RandR screen", async () => {
