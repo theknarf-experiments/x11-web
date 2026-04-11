@@ -124,29 +124,6 @@ struct PictureState {
     clip_origin_y: i16,
 }
 
-impl PictureState {
-    /// Returns true if the destination point is inside the current clip
-    /// region. If no clip rectangles have been set, everything is in.
-    fn point_in_clip(&self, x: i32, y: i32) -> bool {
-        match &self.clip_rects {
-            None => true,
-            Some(rects) => {
-                for &(rx, ry, rw, rh) in rects {
-                    let cx = self.clip_origin_x as i32 + rx as i32;
-                    let cy = self.clip_origin_y as i32 + ry as i32;
-                    if x >= cx
-                        && x < cx + rw as i32
-                        && y >= cy
-                        && y < cy + rh as i32
-                    {
-                        return true;
-                    }
-                }
-                false
-            }
-        }
-    }
-}
 
 struct GlyphSetState {
     format_id: u32,

@@ -138,8 +138,6 @@ struct TrackerWindow {
 enum TrackerCommand {
     /// Frontend clicked a menu item — invoke the action over DBus.
     Activate { action: MenuAction },
-    /// Re-fetch the menu from scratch (e.g. on `Changed` signal).
-    Refresh,
     /// Tear down the task and disconnect.
     Stop,
 }
@@ -192,12 +190,6 @@ impl MenuTracker {
         }
 
         tracker
-    }
-
-    /// Whether DBus is available — i.e. whether `attach_gtk` will
-    /// actually do anything.
-    pub fn is_active(&self) -> bool {
-        self.inner.conn.is_some()
     }
 
     /// Shared XID → (uuid, client_id) lookup. Updated by xserver.rs
@@ -536,23 +528,12 @@ async fn run_gtk_window_task(
         warn!("MenuTracker initial fetch failed for {window_uuid}: {e}");
     }
 
-    // Command loop. We don't subscribe to the `Changed` signal yet —
-    // for v1 we re-fetch on explicit Refresh and after each Activate
-    // (since some apps mutate menu state in response to activation).
+    // Command loop. We don't subscribe to the `Changed` signal yet,
+    // so the only refresh trigger is "after each Activate" (since
+    // some apps mutate menu state in response to activation).
     while let Some(cmd) = cmd_rx.recv().await {
         match cmd {
             TrackerCommand::Stop => break,
-            TrackerCommand::Refresh => {
-                let _ = fetch_and_publish(
-                    &menus_proxy,
-                    app_actions.as_ref(),
-                    win_actions.as_ref(),
-                    &window_uuid,
-                    &client_id,
-                    &update_tx,
-                )
-                .await;
-            }
             TrackerCommand::Activate { action } => {
                 if let Err(e) = dispatch_activation(
                     app_actions.as_ref(),
@@ -1016,15 +997,6 @@ async fn run_dbusmenu_window_task(
     while let Some(cmd) = cmd_rx.recv().await {
         match cmd {
             TrackerCommand::Stop => break,
-            TrackerCommand::Refresh => {
-                let _ = fetch_and_publish_dbusmenu(
-                    &proxy,
-                    &window_uuid,
-                    &client_id,
-                    &update_tx,
-                )
-                .await;
-            }
             TrackerCommand::Activate { action } => {
                 if let Err(e) = dispatch_dbusmenu_activation(&proxy, &action).await {
                     warn!(

@@ -76,9 +76,10 @@ pub struct ValuatorState {
     pub scroll_h: i32,
 }
 
-/// Axis numbers we use for the master pointer's valuator/scroll classes.
-pub const AXIS_X: u16 = 0;
-pub const AXIS_Y: u16 = 1;
+/// Axis numbers we use for the master pointer's valuator/scroll
+/// classes. (X=0 and Y=1 are reserved for the regular x/y axes but
+/// we don't actually emit them as separate valuators yet — only the
+/// scroll axes are wired up.)
 pub const AXIS_SCROLL_V: u16 = 2;
 pub const AXIS_SCROLL_H: u16 = 3;
 
@@ -415,15 +416,6 @@ fn build_xi_pointer_event(
     let length_units = ((buf.len() - 32) / 4) as u32;
     buf[4..8].copy_from_slice(&length_units.to_le_bytes());
     buf
-}
-
-/// Possible side-effects from dispatching an XI2 request — used to push
-/// state back to the calling client (e.g. registering a new XISelectEvents
-/// subscription).
-pub enum XiAction {
-    Reply(Vec<u8>),
-    None,
-    SetSelection(XiSelection),
 }
 
 /// Dispatch a request whose major opcode matches our XInputExtension
@@ -855,15 +847,6 @@ pub fn build_raw_pointer_event(event_type: u16, sequence: u16, detail: u32) -> V
     let length_units = ((buf.len() - 32) / 4) as u32;
     buf[4..8].copy_from_slice(&length_units.to_le_bytes());
     buf
-}
-
-/// Helper for unit tests / verification: which selections in `set` cover
-/// the given window?
-pub fn selections_for_window<'a>(
-    set: &'a [XiSelection],
-    window: u32,
-) -> impl Iterator<Item = &'a XiSelection> {
-    set.iter().filter(move |s| s.window == window)
 }
 
 /// Per-client XI state stored on `ClientState`.
