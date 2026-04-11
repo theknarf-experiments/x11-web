@@ -161,11 +161,51 @@ fn build_master_pointer_info(
         }),
     };
 
+    // The scroll axes have to be exposed as XIValuatorClass entries
+    // *as well as* XIScrollClass entries. GDK (and other XI2 clients
+    // following the spec) interprets each XIScrollClass as "this axis,
+    // already declared as a valuator, additionally has scroll-axis
+    // semantics". GDK will assert
+    //   `n_valuator < gdk_device_get_n_axes(device)`
+    // and abort the device init if the scroll class references a
+    // valuator number for which no XIValuatorClass exists — which is
+    // exactly the failure that prevented Firefox from starting up.
+    //
+    // Scroll valuators are RELATIVE (clients compute deltas from
+    // successive values) and unbounded (min == max == 0).
+    let valuator_scroll_v = xi::DeviceClass {
+        len: 0,
+        sourceid: MASTER_POINTER_ID,
+        data: xi::DeviceClassData::Valuator(xi::DeviceClassDataValuator {
+            number: AXIS_SCROLL_V,
+            label: 0,
+            min: fp3232(0),
+            max: fp3232(0),
+            value: fp3232(valuators.scroll_v),
+            resolution: 1,
+            mode: xi::ValuatorMode::RELATIVE,
+        }),
+    };
+
+    let valuator_scroll_h = xi::DeviceClass {
+        len: 0,
+        sourceid: MASTER_POINTER_ID,
+        data: xi::DeviceClassData::Valuator(xi::DeviceClassDataValuator {
+            number: AXIS_SCROLL_H,
+            label: 0,
+            min: fp3232(0),
+            max: fp3232(0),
+            value: fp3232(valuators.scroll_h),
+            resolution: 1,
+            mode: xi::ValuatorMode::RELATIVE,
+        }),
+    };
+
     let scroll_v = xi::DeviceClass {
         len: 0,
         sourceid: MASTER_POINTER_ID,
         data: xi::DeviceClassData::Scroll(xi::DeviceClassDataScroll {
-            number: 2,
+            number: AXIS_SCROLL_V,
             scroll_type: xi::ScrollType::VERTICAL,
             flags: 0u32.into(),
             increment: fp3232(1),
@@ -176,14 +216,27 @@ fn build_master_pointer_info(
         len: 0,
         sourceid: MASTER_POINTER_ID,
         data: xi::DeviceClassData::Scroll(xi::DeviceClassDataScroll {
-            number: 3,
+            number: AXIS_SCROLL_H,
             scroll_type: xi::ScrollType::HORIZONTAL,
             flags: 0u32.into(),
             increment: fp3232(1),
         }),
     };
 
-    let mut classes = vec![button_class, valuator_x, valuator_y, scroll_v, scroll_h];
+    // Class order matters for GDK: it walks the list once, and for
+    // each XIScrollClass it expects the corresponding XIValuatorClass
+    // to have *already* been seen (so `gdk_device_get_n_axes` already
+    // covers the referenced axis). Put the four valuators first, then
+    // the two scroll classes, then the button class.
+    let mut classes = vec![
+        button_class,
+        valuator_x,
+        valuator_y,
+        valuator_scroll_v,
+        valuator_scroll_h,
+        scroll_v,
+        scroll_h,
+    ];
     fill_class_lengths(&mut classes);
 
     xi::XIDeviceInfo {

@@ -4440,12 +4440,31 @@ fn handle_xfixes_request(_state: &mut ClientState, data: &[u8], seq: u16) -> Vec
             reply.to_vec()
         }
         4 => {
-            // GetCursorImage: return an error (BadImplementation)
-            let mut err = [0u8; 32];
-            err[0] = 0; // Error
-            err[1] = 17; // BadImplementation
-            err[2..4].copy_from_slice(&seq.to_le_bytes());
-            err.to_vec()
+            // GetCursorImage: return a 1x1 transparent cursor.
+            // Reply layout (post-32-byte header):
+            //   i16 x, i16 y, u16 width, u16 height, u16 xhot, u16 yhot,
+            //   u32 cursor_serial, 8 bytes pad,
+            //   then width*height u32 ARGB pixels.
+            // Returning BadImplementation here used to make Firefox
+            // segfault on startup.
+            let width: u16 = 1;
+            let height: u16 = 1;
+            let pixels_len = (width as usize) * (height as usize) * 4;
+            let extra = 24 + pixels_len; // 24 bytes of header fields after the 32-byte reply header
+            let total = 32 + extra;
+            let length_units = (extra / 4) as u32;
+            let mut reply = vec![0u8; total];
+            reply[0] = 1; // Reply
+            reply[2..4].copy_from_slice(&seq.to_le_bytes());
+            reply[4..8].copy_from_slice(&length_units.to_le_bytes());
+            // x, y at bytes 8..12 — 0,0
+            reply[12..14].copy_from_slice(&width.to_le_bytes());
+            reply[14..16].copy_from_slice(&height.to_le_bytes());
+            // xhot, yhot at 16..20 — 0,0
+            reply[20..24].copy_from_slice(&0u32.to_le_bytes()); // cursor_serial
+            // 24..32 = pad
+            // 32..32+pixels_len = ARGB pixels (already 0 = transparent)
+            reply
         }
         18 => {
             // FetchRegion: return empty region reply
@@ -5487,12 +5506,29 @@ fn build_xkb_get_map_reply(seq: u16) -> Vec<u8> {
         total_syms_count += 1;
     }
 
-    // 3. KeyActions: empty (nKeyActions = 0 → no per-key array, no actions)
-    // 4. KeyBehaviors: empty
+    // 3. KeyActions: libxkbcommon's `get_actions()` enforces
+    //       firstKeyAction == min_key_code
+    //       firstKeyAction + nKeyActions == max_key_code + 1
+    //    on every reply, so the per-key nActs array must span the
+    //    *entire* keycode range even when every key has zero actions
+    //    (which is our case — we don't model XKB actions). Emit one
+    //    zero byte per key. The total payload is 248 bytes which is
+    //    already 4-byte aligned, and totalActions stays 0.
+    //
+    //    libxkbfile (xkbcomp) doesn't enforce this and accepted the
+    //    previous empty-section reply, but xkbcommon (used by GTK,
+    //    Qt and Firefox) rejected it and fell back to a NULL keymap
+    //    that GDK then crashed on later — see the firefox
+    //    "crashes on first paint" failure mode this fix addresses.
+    for _ in 0..N_KEYS {
+        data.push(0);
+    }
+    // 4. KeyBehaviors: empty (libxkbcommon doesn't enforce span here,
+    //    only that present entries have valid keycodes — sparse OK).
     // 5. VirtualMods: virtualMods = 0 → no per-vmod entries
-    // 6. ExplicitComponents: empty
-    // 7. ModifierMap: empty
-    // 8. VirtualModMap: empty
+    // 6. ExplicitComponents: empty (sparse, like Behaviors)
+    // 7. ModifierMap: empty (sparse)
+    // 8. VirtualModMap: empty (sparse)
 
     // Pad section data out to a 4-byte boundary.
     while data.len() % 4 != 0 {
@@ -5528,7 +5564,7 @@ fn build_xkb_get_map_reply(seq: u16) -> Vec<u8> {
     reply[20] = N_KEYS as u8; // nKeySyms
     reply[21] = MIN_KEY_CODE; // firstKeyAction
     reply[22..24].copy_from_slice(&0u16.to_le_bytes()); // totalActions
-    reply[24] = 0; // nKeyActions
+    reply[24] = N_KEYS as u8; // nKeyActions (full range, all zero)
     reply[25] = MIN_KEY_CODE; // firstKeyBehavior
     reply[26] = 0; // nKeyBehaviors
     reply[27] = 0; // totalKeyBehaviors
@@ -5548,41 +5584,90 @@ fn build_xkb_get_map_reply(seq: u16) -> Vec<u8> {
     reply
 }
 
-/// Build a minimal XKB GetNames reply that returns just the per-key
-/// 4-character names. xkbcomp's `XkbWriteXKBKeycodes` uses these to
-/// emit the `xkb_keycodes` section of the dumped keymap; without
-/// them the output is just `xkb_keymap {};`.
+/// Build an XKB GetNames reply.
+///
+/// This is the second half of the libxkbcommon-compatibility fix
+/// (the first being build_xkb_get_map_reply): libxkbcommon refuses
+/// to load a keymap unless the GetNames reply advertises *all four*
+/// of these bits in `which`:
+///
+///   bit 6  KeyTypeNames     — one ATOM per key type
+///   bit 7  KTLevelNames     — `nLevelsPerType` bytes + sum-of-levels ATOMs
+///   bit 9  KeyNames         — `nKeys * 4` bytes of 4-char key names
+///   bit 11 VirtualModNames  — popcount(virtualMods) ATOMs
+///
+/// The previous version only set bit 9 (KeyNames), which was enough
+/// for libxkbfile (xkbcomp) but caused libxkbcommon (used by GTK,
+/// Qt and Firefox) to reject the reply with
+///   "unmet condition in get_names(): (which & required) == required"
+/// and fall back to a NULL keymap that GDK then crashed on.
+///
+/// We use atom 0 (None) for every type / level name — libxkbcommon
+/// just calls `x11_atom_interner_adopt_atom` for each one and treats
+/// missing atoms as XKB_ATOM_NONE, so the actual values don't matter
+/// for keymap correctness.
 fn build_xkb_get_names_reply(seq: u16, device_id: u8) -> Vec<u8> {
     const MIN_KEY_CODE: u8 = 8;
     const MAX_KEY_CODE: u8 = 255;
     const N_KEYS: usize = (MAX_KEY_CODE - MIN_KEY_CODE + 1) as usize;
     const KEY_NAME_LEN: usize = 4;
 
-    // From XKB.h:
-    //   XkbKeycodesNameMask  = 1 << 0
-    //   XkbKeyTypeNamesMask  = 1 << 6
-    //   XkbKTLevelNamesMask  = 1 << 7
-    //   XkbIndicatorNamesMask= 1 << 8
-    //   XkbKeyNamesMask      = 1 << 9     <-- the bit we need
-    //   XkbKeyAliasesMask    = 1 << 10
-    //   XkbVirtualModNamesMask = 1 << 11
-    //   XkbGroupNamesMask    = 1 << 12
-    //
-    // Setting just XkbKeyNamesMask makes libxkbfile read exactly
-    // `nKeys * 4` bytes of key-name data after the standard reply
-    // header and skip every other section.
-    let which: u32 = 1 << 9;
+    // Number of types must match GetMap (which sends 4 standard
+    // types) — libxkbcommon's get_type_names() asserts
+    //   reply->nTypes == keymap->num_types
+    const N_TYPES: u8 = 4;
+    // Levels per type, mirroring GetMap:
+    //   type 0 ONE_LEVEL=1, type 1 TWO_LEVEL=2, type 2 ALPHABETIC=2,
+    //   type 3 KEYPAD=2 → 7 levels total.
+    const LEVELS_PER_TYPE: [u8; 4] = [1, 2, 2, 2];
 
-    let mut data = Vec::with_capacity(N_KEYS * KEY_NAME_LEN);
+    // ----- Build the variable-length value list. -----
+    // Section bit-case order is determined by the XML switch in
+    // xkb.xml's GetNames reply, NOT by bit number — so:
+    //   1. KeyTypeNames    (bit 6)
+    //   2. KTLevelNames    (bit 7)
+    //   3. VirtualModNames (bit 11) — empty since virtualMods=0
+    //   4. KeyNames        (bit 9)
+    let mut data = Vec::new();
+
+    // 1. KeyTypeNames: nTypes ATOMs (4 bytes each).
+    for _ in 0..N_TYPES {
+        data.extend_from_slice(&0u32.to_le_bytes());
+    }
+
+    // 2. KTLevelNames: nLevelsPerType bytes (one per type), padded
+    //    to a 4-byte boundary, then sum-of-levels ATOMs.
+    for &n in LEVELS_PER_TYPE.iter() {
+        data.push(n);
+    }
+    while data.len() % 4 != 0 {
+        data.push(0);
+    }
+    let total_levels: u8 = LEVELS_PER_TYPE.iter().sum();
+    for _ in 0..total_levels {
+        data.extend_from_slice(&0u32.to_le_bytes());
+    }
+
+    // 3. VirtualModNames: virtualMods=0 → popcount=0 → no entries.
+
+    // 4. KeyNames: 248 * 4 = 992 bytes.
     let key_names = us_qwerty_key_names();
     for kc in MIN_KEY_CODE..=MAX_KEY_CODE {
         let name = key_names[(kc - MIN_KEY_CODE) as usize];
         data.extend_from_slice(name);
     }
 
+    debug_assert_eq!(N_KEYS * KEY_NAME_LEN, 992);
+    // Pad to 4-byte boundary (already 4-aligned, but be safe).
+    while data.len() % 4 != 0 {
+        data.push(0);
+    }
+
+    // `which` mask: bits 6, 7, 9, 11.
+    let which: u32 = (1 << 6) | (1 << 7) | (1 << 9) | (1 << 11);
+
     // 32 bytes header + variable body.
     let total_len = 32 + data.len();
-    // length is words *after* the standard 32-byte header.
     let length_words = (data.len() / 4) as u32;
 
     let mut reply = vec![0u8; total_len];
@@ -5593,7 +5678,7 @@ fn build_xkb_get_names_reply(seq: u16, device_id: u8) -> Vec<u8> {
     reply[8..12].copy_from_slice(&which.to_le_bytes());
     reply[12] = MIN_KEY_CODE;
     reply[13] = MAX_KEY_CODE;
-    reply[14] = 0; // nTypes
+    reply[14] = N_TYPES;
     reply[15] = 0; // groupNames
     // 16-17: virtualMods (0)
     reply[18] = MIN_KEY_CODE; // firstKey
@@ -5601,7 +5686,7 @@ fn build_xkb_get_names_reply(seq: u16, device_id: u8) -> Vec<u8> {
     // 20-23: indicators (0)
     reply[24] = 0; // nRadioGroups
     reply[25] = 0; // nKeyAliases
-    // 26-27: nKTLevels (0)
+    reply[26..28].copy_from_slice(&u16::from(total_levels).to_le_bytes()); // nKTLevels
     // 28-31: pad
     reply[32..32 + data.len()].copy_from_slice(&data);
     reply
