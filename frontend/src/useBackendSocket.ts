@@ -38,6 +38,28 @@ export type WindowStateChangeCallback = (
 	color: string,
 ) => void;
 
+/**
+ * Per-event diagnostic surfaced from the backend / WebSocket layer.
+ * Rendered by `<DiagnosticsPanel>` so the user has *some* visibility
+ * into errors that previously vanished into the void (sidecar errors,
+ * dropped input events, socket errors).
+ */
+export interface Diagnostic {
+	id: string;
+	level: "info" | "warn" | "error";
+	source: "ws" | "command" | "input" | "sidecar";
+	message: string;
+	timestamp: number;
+	sidecarId?: string;
+	windowId?: string;
+}
+
+const MAX_DIAGNOSTICS = 100;
+let diagnosticCounter = 0;
+function nextDiagnosticId() {
+	return `diag-${++diagnosticCounter}-${Date.now()}`;
+}
+
 export function useBackendSocket() {
 	const wsRef = useRef<WebSocket | null>(null);
 	const reconnectTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
@@ -53,6 +75,31 @@ export function useBackendSocket() {
 	const [connectedProcesses, setConnectedProcesses] = useState<
 		ConnectedProcess[]
 	>([]);
+	const [diagnostics, setDiagnostics] = useState<Diagnostic[]>([]);
+
+	const pushDiagnostic = useCallback(
+		(d: Omit<Diagnostic, "id" | "timestamp">) => {
+			setDiagnostics((prev) => {
+				const next = [
+					...prev,
+					{ ...d, id: nextDiagnosticId(), timestamp: Date.now() },
+				];
+				// Keep only the most recent N entries.
+				return next.length > MAX_DIAGNOSTICS
+					? next.slice(next.length - MAX_DIAGNOSTICS)
+					: next;
+			});
+		},
+		[],
+	);
+
+	const dismissDiagnostic = useCallback((id: string) => {
+		setDiagnostics((prev) => prev.filter((d) => d.id !== id));
+	}, []);
+
+	const clearDiagnostics = useCallback(() => {
+		setDiagnostics([]);
+	}, []);
 
 	useEffect(() => {
 		disposed.current = false;
@@ -65,11 +112,22 @@ export function useBackendSocket() {
 
 			ws.onopen = () => setConnected(true);
 
-			ws.onerror = () => {};
+			ws.onerror = () => {
+				pushDiagnostic({
+					level: "error",
+					source: "ws",
+					message: `WebSocket error connecting to ${WS_URL}`,
+				});
+			};
 
-			ws.onclose = () => {
+			ws.onclose = (event) => {
 				setConnected(false);
 				if (!disposed.current) {
+					pushDiagnostic({
+						level: "warn",
+						source: "ws",
+						message: `WebSocket closed (code ${event.code}); reconnecting in 3s`,
+					});
 					reconnectTimer.current = setTimeout(connect, 3000);
 				}
 			};
@@ -163,6 +221,22 @@ export function useBackendSocket() {
 							msg.color,
 						);
 						break;
+					case "CommandResult":
+						pushDiagnostic({
+							level: msg.success ? "info" : "error",
+							source: "command",
+							message: msg.message || (msg.success ? "OK" : "command failed"),
+						});
+						break;
+					case "InputDropped":
+						pushDiagnostic({
+							level: "warn",
+							source: "input",
+							message: `input dropped: ${msg.reason}`,
+							sidecarId: msg.sidecar_id,
+							windowId: msg.window_id,
+						});
+						break;
 				}
 			};
 		}
@@ -181,7 +255,10 @@ export function useBackendSocket() {
 				}
 			}
 		};
-	}, []);
+		// `pushDiagnostic` is a useCallback with [] deps and is therefore
+		// stable for the lifetime of the component, so this effect still
+		// runs only once on mount.
+	}, [pushDiagnostic]);
 
 	const send = useCallback((msg: FrontendToBackend) => {
 		if (wsRef.current?.readyState === WebSocket.OPEN) {
@@ -209,5 +286,8 @@ export function useBackendSocket() {
 		send,
 		onDisplayUpdate,
 		onWindowStateChange,
+		diagnostics,
+		dismissDiagnostic,
+		clearDiagnostics,
 	};
 }

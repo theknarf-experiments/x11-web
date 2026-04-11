@@ -79,6 +79,14 @@ pub enum SidecarToBackend {
         request_id: Option<String>,
         message: String,
     },
+    /// An input event arrived for a window UUID that the sidecar's
+    /// router has no entry for. The event is dropped on the floor;
+    /// this notification lets the frontend surface that fact instead
+    /// of leaving the user wondering why their app stopped responding.
+    InputDropped {
+        window_id: String,
+        reason: String,
+    },
 }
 
 /// Messages sent from the backend to a frontend client.
@@ -133,6 +141,15 @@ pub enum BackendToFrontend {
         x: f64,
         y: f64,
         color: String,
+    },
+    /// Forwarded from `SidecarToBackend::InputDropped`. Tells the
+    /// frontend that an input event it sent was discarded by the
+    /// sidecar's router (e.g. the window UUID is stale because the
+    /// X11 client closed the window between send and route lookup).
+    InputDropped {
+        sidecar_id: String,
+        window_id: String,
+        reason: String,
     },
 }
 

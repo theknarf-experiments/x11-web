@@ -409,7 +409,16 @@ async fn handle_command(
             });
         }
         BackendToSidecar::InputEvent { window_id, event } => {
-            window_router.send_input(&window_id, event);
+            if !window_router.send_input(&window_id, event) {
+                // No route entry — most commonly because the X11
+                // client closed (or never registered) this window.
+                // Surface it so the frontend can show "input dropped"
+                // instead of silently swallowing the event.
+                let _ = tx.send(SidecarToBackend::InputDropped {
+                    window_id,
+                    reason: "no route entry for window UUID".into(),
+                });
+            }
         }
         BackendToSidecar::RequestRedraw { window_id } => {
             window_router.send_resize(&window_id, 0, 0);

@@ -264,6 +264,17 @@ async fn handle_sidecar_ws(socket: WebSocket, state: AppState) {
                 )
                 .await;
             }
+            SidecarToBackend::InputDropped { window_id, reason } => {
+                broadcast_to_frontends(
+                    &state,
+                    BackendToFrontend::InputDropped {
+                        sidecar_id: sidecar_id.clone(),
+                        window_id,
+                        reason,
+                    },
+                )
+                .await;
+            }
             SidecarToBackend::Register { .. } => {} // Already handled
         }
     }

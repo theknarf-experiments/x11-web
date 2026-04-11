@@ -67,6 +67,12 @@ export type BackendToFrontend =
 			x: number;
 			y: number;
 			color: string;
+	  }
+	| {
+			type: "InputDropped";
+			sidecar_id: string;
+			window_id: string;
+			reason: string;
 	  };
 
 // Frontend -> Backend messages

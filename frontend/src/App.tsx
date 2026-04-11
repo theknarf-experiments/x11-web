@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { getAppContextMenuItems } from "./AppContextMenu";
 import { ClientRenderer } from "./ClientRenderer";
+import { DiagnosticsPanel } from "./DiagnosticsPanel";
 import { Dock, type DockProcess } from "./Dock";
 import { GlobalMenuBar } from "./GlobalMenuBar";
 import { InfiniteCanvas } from "./InfiniteCanvas";
@@ -58,6 +59,9 @@ function App() {
 		send,
 		onDisplayUpdate,
 		onWindowStateChange,
+		diagnostics,
+		dismissDiagnostic,
+		clearDiagnostics,
 	} = useBackendSocket();
 
 	const [windows, setWindows] = useState<CanvasWindow[]>([]);
@@ -516,6 +520,11 @@ function App() {
 						),
 					);
 				}}
+			/>
+			<DiagnosticsPanel
+				diagnostics={diagnostics}
+				onDismiss={dismissDiagnostic}
+				onClear={clearDiagnostics}
 			/>
 		</>
 	);
