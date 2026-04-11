@@ -1888,6 +1888,112 @@ test.describe
 			expect(dev3.output).toContain("Virtual core keyboard");
 			expect(dev3.output).toContain("XIKeyClass");
 		});
+
+		test("xmodmap reads the core-protocol keyboard mapping", async () => {
+			// xkbcomp (tested above) exercises the XKB extension path
+			// to fetch our keymap. xmodmap exercises the *legacy* core
+			// X protocol path: GetKeyboardMapping (request 101) and
+			// GetModifierMapping (request 119). These are independent
+			// code paths from XKB GetMap, and many older toolkits and
+			// terminal apps still call them, so a clean xmodmap dump
+			// is meaningful coverage on its own.
+			const fs = await import("node:fs");
+
+			// `xmodmap` (no args) prints the modifier table via
+			// GetModifierMapping. We don't assert on the contents
+			// (our modifier mapping is currently empty — see
+			// follow-up below) — only that the request returns a
+			// well-formed reply and the command exits cleanly.
+			const mods = await sidecarContainer.exec([
+				"bash",
+				"-c",
+				"DISPLAY=:99 xmodmap 2>&1",
+			]);
+			expect(mods.exitCode).toBe(0);
+			expect(mods.output).toContain("up to 2 keys per modifier");
+			// All 8 modifier slot labels must be present even when
+			// they have no keycodes attached.
+			for (const slot of [
+				"shift",
+				"lock",
+				"control",
+				"mod1",
+				"mod2",
+				"mod3",
+				"mod4",
+				"mod5",
+			]) {
+				expect(mods.output).toContain(slot);
+			}
+
+			// `xmodmap -pk` walks the entire core-protocol keymap
+			// (GetKeyboardMapping for keycodes 8..255) and pretty-
+			// prints each row with its keysyms. This is the same
+			// data xkbcomp eventually produces, but reached via a
+			// completely different request handler.
+			const pk = await sidecarContainer.exec([
+				"bash",
+				"-c",
+				"DISPLAY=:99 xmodmap -pk 2>&1",
+			]);
+			fs.writeFileSync("/tmp/x11web-xmodmap-pk.txt", pk.output);
+			console.log(
+				`xmodmap -pk: ${pk.output.split("\n").length} lines (exit=${pk.exitCode})`,
+			);
+			expect(pk.exitCode).toBe(0);
+			expect(pk.output).toContain(
+				"KeyCodes range from 8 to 255",
+			);
+			expect(pk.output).toContain("4 KeySyms per KeyCode");
+			// A few well-known keysyms from the US-QWERTY map.
+			expect(pk.output).toContain("0xff1b (Escape)");
+			expect(pk.output).toContain("0xff08 (BackSpace)");
+			expect(pk.output).toContain("0x0031 (1)");
+			expect(pk.output).toContain("0x0021 (exclam)");
+			// Sanity-check the row count: keycodes 8..255 = 248 rows
+			// plus a 5-line header, so ≥250 lines means we returned
+			// the full table.
+			expect(pk.output.split("\n").length).toBeGreaterThanOrEqual(250);
+
+			// `xmodmap -pke` re-prints the same map in xmodmap input
+			// format (`keycode N = sym1 sym2 ...`), which xmodmap
+			// itself uses to round-trip mapping changes. Different
+			// pretty-printer, same wire data.
+			const pke = await sidecarContainer.exec([
+				"bash",
+				"-c",
+				"DISPLAY=:99 xmodmap -pke 2>&1",
+			]);
+			expect(pke.exitCode).toBe(0);
+			expect(pke.output).toContain("keycode   9 = Escape Escape");
+			expect(pke.output).toContain("keycode  10 = 1 exclam");
+		});
+
+		test("xrandr --query enumerates the RandR screen", async () => {
+			// xrandr exercises the RandR extension end-to-end:
+			// QueryVersion, GetScreenResources, GetOutputInfo,
+			// GetCrtcInfo, plus a handful of GetCrtcGamma calls.
+			// We expose a single fixed 1024x768 output named
+			// "default", so the output is small but every one of
+			// those request handlers has to encode a valid reply
+			// for xrandr to print this much.
+			const result = await sidecarContainer.exec([
+				"bash",
+				"-c",
+				"DISPLAY=:99 xrandr --query 2>&1",
+			]);
+			const fs = await import("node:fs");
+			fs.writeFileSync("/tmp/x11web-xrandr.txt", result.output);
+			console.log(
+				`xrandr: ${result.output.split("\n").length} lines (exit=${result.exitCode})`,
+			);
+			expect(result.exitCode).toBe(0);
+			expect(result.output).toMatch(/Screen 0:.*1024 x 768/);
+			// "default connected 1024x768+0+0" — the RandR output line.
+			expect(result.output).toMatch(/default\s+connected\s+1024x768/);
+			// And the mode list should contain the same resolution.
+			expect(result.output).toMatch(/1024x768\s/);
+		});
 	});
 
 async function findFreePort(): Promise<number> {
