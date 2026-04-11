@@ -1434,6 +1434,43 @@ test.describe
 		// fail loudly.
 		// =====================================================================
 
+		test("xkbcomp dumps a parseable XKB keymap", async () => {
+			// xkbcomp -xkb walks every XKB request the server
+			// supports (UseExtension, GetMap, GetIndicatorMap,
+			// GetControls, GetCompatMap, GetNames, GetGeometry) and
+			// emits a textual XKB keymap to stdout. A clean
+			// (exit-0) dump means our XKB extension implementation
+			// is byte-perfect from libxkbfile's point of view —
+			// libxkbfile validates length fields, struct sizes,
+			// and (notably) requires at least 4 key types and a
+			// non-null sym_interpret list.
+			const result = await sidecarContainer.exec([
+				"bash",
+				"-c",
+				"DISPLAY=:99 xkbcomp -xkb :99 - 2>&1",
+			]);
+			const fs = await import("node:fs");
+			fs.writeFileSync("/tmp/x11web-xkbcomp.txt", result.output);
+			console.log(
+				`xkbcomp: ${result.output.split("\n").length} lines (exit=${result.exitCode})`,
+			);
+			expect(result.exitCode).toBe(0);
+			// Top-level container.
+			expect(result.output).toContain("xkb_keymap {");
+			// Per-section sanity checks.
+			expect(result.output).toContain("xkb_keycodes");
+			expect(result.output).toContain("minimum = 8;");
+			expect(result.output).toContain("maximum = 255;");
+			expect(result.output).toContain("xkb_types");
+			expect(result.output).toContain("xkb_compatibility");
+			expect(result.output).toContain("xkb_symbols");
+			// A few well-known key names from our US-QWERTY map.
+			expect(result.output).toContain("<ESC > = 9;");
+			expect(result.output).toContain("<AE01> = 10;");
+			expect(result.output).toContain("<RTRN> = 36;");
+			expect(result.output).toContain("<SPCE> = 65;");
+		});
+
 		test("xprop / xwininfo / xlsatoms introspect the server", async () => {
 			// Three lightweight introspection tools that exercise
 			// QueryTree / GetWindowAttributes / GetGeometry /

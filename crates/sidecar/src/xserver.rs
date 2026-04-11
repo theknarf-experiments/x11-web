@@ -4346,9 +4346,10 @@ fn handle_query_extension(_state: &mut ClientState, data: &[u8], seq: u16) -> Ve
             reply[11] = 0; // first_error
         }
         "XKEYBOARD" => {
-            // present = false — XKB stub handler exists but advertising it
-            // causes Firefox to crash during XKB keyboard map initialization
-            // and xkbcomp to hang waiting for a real GetMap reply.
+            reply[8] = 1; // present = true
+            reply[9] = 136; // major_opcode (matches the dispatcher)
+            reply[10] = 0; // first_event
+            reply[11] = 0; // first_error
         }
         "XC-MISC" => {
             reply[8] = 1; // present = true
@@ -5331,9 +5332,441 @@ fn handle_ge_request(data: &[u8], seq: u16) -> Vec<u8> {
     }
 }
 
+/// Build an XKB GetMap reply that's complete enough for `xkbcomp -xkb`
+/// to parse and dump.
+///
+/// The XKB GetMap reply has a 40-byte header (8 bytes more than a
+/// standard X reply header) followed by variable-length sections, in
+/// this fixed order:
+///
+///   1. KeyTypes              (XkbKeyTypeWireDesc, 8 bytes each + entries)
+///   2. KeySyms               (XkbSymMapWireDesc, 8 bytes each + syms)
+///   3. KeyActions            (per-key nActs + per-action 8 bytes)
+///   4. KeyBehaviors          (XkbBehaviorWireDesc)
+///   5. VirtualMods           (1 byte per virtual modifier set)
+///   6. ExplicitComponents    (XkbExplicitWireDesc, 2 bytes each)
+///   7. ModifierMap           (XkbKeyModMapWireDesc, 4 bytes each)
+///   8. VirtualModMap         (XkbKeyVModMapWireDesc, 4 bytes each)
+///
+/// Each section is only present if its bit in the `present` mask is
+/// set. For our minimal implementation we set the full 0xff mask but
+/// every section beyond KeyTypes and KeySyms is empty (count = 0),
+/// which costs us nothing on the wire and keeps xkbcomp happy.
+///
+/// The keymap itself is the standard 248-key range (8..255) with one
+/// `ONE_LEVEL` key type and a single keysym per key. Most keys map to
+/// `NoSymbol`; a small US-style ASCII subset is filled in for the
+/// printable range so the dumped keymap actually means something.
+fn build_xkb_get_map_reply(seq: u16) -> Vec<u8> {
+    const MIN_KEY_CODE: u8 = 8;
+    const MAX_KEY_CODE: u8 = 255;
+    const N_KEYS: usize = (MAX_KEY_CODE - MIN_KEY_CODE + 1) as usize; // 248
+
+    // ----- Build the variable-length sections -----
+    let mut data = Vec::new();
+
+    // 1. KeyTypes: libxkbfile rejects any GetMap reply with fewer
+    //    than `XkbNumRequiredTypes` (= 4) types — see
+    //    XkbAllocClientMap in libX11. Provide the 4 standard XKB
+    //    types in their canonical positions:
+    //
+    //      type 0: ONE_LEVEL                 — no modifiers
+    //      type 1: TWO_LEVEL                 — Shift toggles a level
+    //      type 2: ALPHABETIC                — Shift + Lock
+    //      type 3: KEYPAD                    — Shift + NumLock
+    //
+    // Each XkbKeyTypeWireDesc is 8 bytes followed by `nMapEntries`
+    // XkbKtMapEntryWireDesc structures (8 bytes each).
+    let n_types = 4u8;
+
+    // type 0 — ONE_LEVEL: numLevels=1, no map entries.
+    data.extend_from_slice(&[
+        0x00, 0x00, 0x00, 0x00, // mask, realMods, vmods (16-bit)
+        0x01, // numLevels
+        0x00, // nMapEntries
+        0x00, 0x00, // hasPreserve, pad
+    ]);
+
+    // type 1 — TWO_LEVEL: Shift mask, 1 entry mapping Shift -> level 1.
+    data.extend_from_slice(&[
+        0x01, 0x01, 0x00, 0x00, // mask=Shift, realMods=Shift, vmods=0
+        0x02, // numLevels
+        0x01, // nMapEntries
+        0x00, 0x00, // hasPreserve, pad
+    ]);
+    // map entry: active, mask=Shift, level=1, realMods=Shift
+    data.extend_from_slice(&[0x01, 0x01, 0x01, 0x01, 0x00, 0x00, 0x00, 0x00]);
+
+    // type 2 — ALPHABETIC: Shift+Lock, 2 entries.
+    data.extend_from_slice(&[
+        0x03, 0x03, 0x00, 0x00, // mask=Shift|Lock, realMods=Shift|Lock
+        0x02, // numLevels
+        0x02, // nMapEntries
+        0x00, 0x00,
+    ]);
+    data.extend_from_slice(&[0x01, 0x01, 0x01, 0x01, 0x00, 0x00, 0x00, 0x00]);
+    data.extend_from_slice(&[0x01, 0x02, 0x01, 0x02, 0x00, 0x00, 0x00, 0x00]);
+
+    // type 3 — KEYPAD: NumLock (Mod2 = 0x10), 1 entry.
+    data.extend_from_slice(&[
+        0x10, 0x10, 0x00, 0x00, // mask=Mod2, realMods=Mod2
+        0x02, // numLevels
+        0x01, // nMapEntries
+        0x00, 0x00,
+    ]);
+    data.extend_from_slice(&[0x01, 0x10, 0x01, 0x10, 0x00, 0x00, 0x00, 0x00]);
+
+    // 2. KeySyms: one XkbSymMapWireDesc per key. We give every key
+    //    a single sym slot pointing at type 0 (ONE_LEVEL) so the
+    //    layout is uniform — libxkbfile rejects mixed width=0 /
+    //    width=1 entries. Keys we don't model get the canonical
+    //    NoSymbol (0).
+    //
+    // XkbSymMapWireDesc layout:
+    //   4 bytes: kt_index[4]   (group → key type index)
+    //   1 byte:  groupInfo     (low 4 bits = num groups)
+    //   1 byte:  width         (max syms per group across the levels)
+    //   2 bytes: nSyms         (total syms following this header)
+    //   nSyms * 4 bytes:       KeySym values
+    let us_syms = us_qwerty_keysyms();
+    let mut total_syms_count: u16 = 0;
+    for kc in MIN_KEY_CODE..=MAX_KEY_CODE {
+        let sym = us_syms[(kc - MIN_KEY_CODE) as usize];
+        data.extend_from_slice(&[
+            0x00, 0x00, 0x00, 0x00, // kt_index = ONE_LEVEL for all groups
+            0x01, // groupInfo: 1 group
+            0x01, // width: 1 sym per group
+            0x01, 0x00, // nSyms = 1
+        ]);
+        data.extend_from_slice(&sym.to_le_bytes());
+        total_syms_count += 1;
+    }
+
+    // 3. KeyActions: empty (nKeyActions = 0 → no per-key array, no actions)
+    // 4. KeyBehaviors: empty
+    // 5. VirtualMods: virtualMods = 0 → no per-vmod entries
+    // 6. ExplicitComponents: empty
+    // 7. ModifierMap: empty
+    // 8. VirtualModMap: empty
+
+    // Pad section data out to a 4-byte boundary.
+    while data.len() % 4 != 0 {
+        data.push(0);
+    }
+
+    // ----- Header -----
+    let total_len = 40 + data.len();
+    let mut reply = vec![0u8; total_len];
+    reply[0] = 1; // Reply
+    reply[1] = 3; // deviceID (matches Xvfb's default core kbd)
+    reply[2..4].copy_from_slice(&seq.to_le_bytes());
+    // length counts 4-byte words *after* the standard 32-byte X reply
+    // header, so it's (8 + data.len()) / 4.
+    let length_words = ((8 + data.len()) / 4) as u32;
+    reply[4..8].copy_from_slice(&length_words.to_le_bytes());
+    // 8..9 = pad1 (zero)
+    reply[10] = MIN_KEY_CODE;
+    reply[11] = MAX_KEY_CODE;
+    // libxkbfile reads each section based on its count field
+    // (nTypes, nKeySyms, totalActions, ...) rather than the bits
+    // in `present`, so the present mask doesn't actually gate
+    // anything we send. We still report the canonical 0xff so
+    // that other clients (xcffib, real Xlib apps) see "everything
+    // is here, just empty".
+    let present: u16 = 0x00ff;
+    reply[12..14].copy_from_slice(&present.to_le_bytes());
+    reply[14] = 0; // firstType
+    reply[15] = n_types;
+    reply[16] = n_types; // totalTypes
+    reply[17] = MIN_KEY_CODE; // firstKeySym
+    reply[18..20].copy_from_slice(&total_syms_count.to_le_bytes());
+    reply[20] = N_KEYS as u8; // nKeySyms
+    reply[21] = MIN_KEY_CODE; // firstKeyAction
+    reply[22..24].copy_from_slice(&0u16.to_le_bytes()); // totalActions
+    reply[24] = 0; // nKeyActions
+    reply[25] = MIN_KEY_CODE; // firstKeyBehavior
+    reply[26] = 0; // nKeyBehaviors
+    reply[27] = 0; // totalKeyBehaviors
+    reply[28] = MIN_KEY_CODE; // firstKeyExplicit
+    reply[29] = 0; // nKeyExplicit
+    reply[30] = 0; // totalKeyExplicit
+    reply[31] = MIN_KEY_CODE; // firstModMapKey
+    reply[32] = 0; // nModMapKeys
+    reply[33] = 0; // totalModMapKeys
+    reply[34] = MIN_KEY_CODE; // firstVModMapKey
+    reply[35] = 0; // nVModMapKeys
+    reply[36] = 0; // totalVModMapKeys
+    // 37 = pad2
+    reply[38..40].copy_from_slice(&0u16.to_le_bytes()); // virtualMods
+
+    reply[40..].copy_from_slice(&data);
+    reply
+}
+
+/// Build a minimal XKB GetNames reply that returns just the per-key
+/// 4-character names. xkbcomp's `XkbWriteXKBKeycodes` uses these to
+/// emit the `xkb_keycodes` section of the dumped keymap; without
+/// them the output is just `xkb_keymap {};`.
+fn build_xkb_get_names_reply(seq: u16, device_id: u8) -> Vec<u8> {
+    const MIN_KEY_CODE: u8 = 8;
+    const MAX_KEY_CODE: u8 = 255;
+    const N_KEYS: usize = (MAX_KEY_CODE - MIN_KEY_CODE + 1) as usize;
+    const KEY_NAME_LEN: usize = 4;
+
+    // From XKB.h:
+    //   XkbKeycodesNameMask  = 1 << 0
+    //   XkbKeyTypeNamesMask  = 1 << 6
+    //   XkbKTLevelNamesMask  = 1 << 7
+    //   XkbIndicatorNamesMask= 1 << 8
+    //   XkbKeyNamesMask      = 1 << 9     <-- the bit we need
+    //   XkbKeyAliasesMask    = 1 << 10
+    //   XkbVirtualModNamesMask = 1 << 11
+    //   XkbGroupNamesMask    = 1 << 12
+    //
+    // Setting just XkbKeyNamesMask makes libxkbfile read exactly
+    // `nKeys * 4` bytes of key-name data after the standard reply
+    // header and skip every other section.
+    let which: u32 = 1 << 9;
+
+    let mut data = Vec::with_capacity(N_KEYS * KEY_NAME_LEN);
+    let key_names = us_qwerty_key_names();
+    for kc in MIN_KEY_CODE..=MAX_KEY_CODE {
+        let name = key_names[(kc - MIN_KEY_CODE) as usize];
+        data.extend_from_slice(name);
+    }
+
+    // 32 bytes header + variable body.
+    let total_len = 32 + data.len();
+    // length is words *after* the standard 32-byte header.
+    let length_words = (data.len() / 4) as u32;
+
+    let mut reply = vec![0u8; total_len];
+    reply[0] = 1;
+    reply[1] = device_id;
+    reply[2..4].copy_from_slice(&seq.to_le_bytes());
+    reply[4..8].copy_from_slice(&length_words.to_le_bytes());
+    reply[8..12].copy_from_slice(&which.to_le_bytes());
+    reply[12] = MIN_KEY_CODE;
+    reply[13] = MAX_KEY_CODE;
+    reply[14] = 0; // nTypes
+    reply[15] = 0; // groupNames
+    // 16-17: virtualMods (0)
+    reply[18] = MIN_KEY_CODE; // firstKey
+    reply[19] = N_KEYS as u8; // nKeys
+    // 20-23: indicators (0)
+    reply[24] = 0; // nRadioGroups
+    reply[25] = 0; // nKeyAliases
+    // 26-27: nKTLevels (0)
+    // 28-31: pad
+    reply[32..32 + data.len()].copy_from_slice(&data);
+    reply
+}
+
+/// 4-character XKB key names for keycodes 8..255. The first ~70 are
+/// the standard PC-101 names from `xkb/keycodes/evdev`; the rest are
+/// filled with `K{kc}` placeholders so xkbcomp's keycodes-section
+/// dumper has a unique 4-byte identifier for every key.
+fn us_qwerty_key_names() -> [&'static [u8; 4]; 248] {
+    let mut names: [&[u8; 4]; 248] = [b"K   "; 248];
+    let real: &[(u8, &[u8; 4])] = &[
+        (9, b"ESC "),
+        (10, b"AE01"),
+        (11, b"AE02"),
+        (12, b"AE03"),
+        (13, b"AE04"),
+        (14, b"AE05"),
+        (15, b"AE06"),
+        (16, b"AE07"),
+        (17, b"AE08"),
+        (18, b"AE09"),
+        (19, b"AE10"),
+        (20, b"AE11"),
+        (21, b"AE12"),
+        (22, b"BKSP"),
+        (23, b"TAB "),
+        (24, b"AD01"),
+        (25, b"AD02"),
+        (26, b"AD03"),
+        (27, b"AD04"),
+        (28, b"AD05"),
+        (29, b"AD06"),
+        (30, b"AD07"),
+        (31, b"AD08"),
+        (32, b"AD09"),
+        (33, b"AD10"),
+        (34, b"AD11"),
+        (35, b"AD12"),
+        (36, b"RTRN"),
+        (37, b"LCTL"),
+        (38, b"AC01"),
+        (39, b"AC02"),
+        (40, b"AC03"),
+        (41, b"AC04"),
+        (42, b"AC05"),
+        (43, b"AC06"),
+        (44, b"AC07"),
+        (45, b"AC08"),
+        (46, b"AC09"),
+        (47, b"AC10"),
+        (48, b"AC11"),
+        (49, b"TLDE"),
+        (50, b"LFSH"),
+        (51, b"BKSL"),
+        (52, b"AB01"),
+        (53, b"AB02"),
+        (54, b"AB03"),
+        (55, b"AB04"),
+        (56, b"AB05"),
+        (57, b"AB06"),
+        (58, b"AB07"),
+        (59, b"AB08"),
+        (60, b"AB09"),
+        (61, b"AB10"),
+        (62, b"RTSH"),
+        (63, b"KPMU"),
+        (64, b"LALT"),
+        (65, b"SPCE"),
+        (66, b"CAPS"),
+    ];
+    for &(kc, name) in real {
+        if kc >= 8 {
+            names[(kc - 8) as usize] = name;
+        }
+    }
+    // Fill the rest with stable "K{idx}" placeholders. We can't use
+    // a runtime format string in a `const` table, so we precompute
+    // a static pool of 200 4-byte name slots and index into it.
+    static PLACEHOLDERS: [[u8; 4]; 256] = {
+        let mut out = [[b' '; 4]; 256];
+        let hex = b"0123456789ABCDEF";
+        let mut i = 0;
+        while i < 256 {
+            out[i][0] = b'K';
+            out[i][1] = hex[(i >> 8) & 0xf];
+            out[i][2] = hex[(i >> 4) & 0xf];
+            out[i][3] = hex[i & 0xf];
+            i += 1;
+        }
+        out
+    };
+    for kc in 8u8..=255 {
+        let idx = (kc - 8) as usize;
+        if names[idx] == b"K   " {
+            names[idx] = &PLACEHOLDERS[kc as usize];
+        }
+    }
+    names
+}
+
+/// Standard US-QWERTY keysyms keyed by physical X11 keycode (8..255).
+/// Index 0 corresponds to keycode 8 (which is unused on real X
+/// servers — Xorg starts user keys at keycode 9). Returns 0
+/// (NoSymbol) for keys we don't model.
+///
+/// We don't try to be exhaustive — this is the bare minimum so that
+/// xkbcomp can dump a recognisable keymap and so that synthetic
+/// input from the frontend has plausible keysym mappings.
+fn us_qwerty_keysyms() -> [u32; 248] {
+    let mut syms = [0u32; 248];
+    // (keycode, keysym) pairs from /usr/share/X11/xkb/symbols/us
+    // (level 1 only — no Shift variants).
+    let mappings: &[(u8, u32)] = &[
+        (9, 0xff1b),  // Escape
+        (10, b'1' as u32),
+        (11, b'2' as u32),
+        (12, b'3' as u32),
+        (13, b'4' as u32),
+        (14, b'5' as u32),
+        (15, b'6' as u32),
+        (16, b'7' as u32),
+        (17, b'8' as u32),
+        (18, b'9' as u32),
+        (19, b'0' as u32),
+        (20, b'-' as u32),
+        (21, b'=' as u32),
+        (22, 0xff08), // BackSpace
+        (23, 0xff09), // Tab
+        (24, b'q' as u32),
+        (25, b'w' as u32),
+        (26, b'e' as u32),
+        (27, b'r' as u32),
+        (28, b't' as u32),
+        (29, b'y' as u32),
+        (30, b'u' as u32),
+        (31, b'i' as u32),
+        (32, b'o' as u32),
+        (33, b'p' as u32),
+        (34, b'[' as u32),
+        (35, b']' as u32),
+        (36, 0xff0d), // Return
+        (37, 0xffe3), // Control_L
+        (38, b'a' as u32),
+        (39, b's' as u32),
+        (40, b'd' as u32),
+        (41, b'f' as u32),
+        (42, b'g' as u32),
+        (43, b'h' as u32),
+        (44, b'j' as u32),
+        (45, b'k' as u32),
+        (46, b'l' as u32),
+        (47, b';' as u32),
+        (48, b'\'' as u32),
+        (49, b'`' as u32),
+        (50, 0xffe1), // Shift_L
+        (51, b'\\' as u32),
+        (52, b'z' as u32),
+        (53, b'x' as u32),
+        (54, b'c' as u32),
+        (55, b'v' as u32),
+        (56, b'b' as u32),
+        (57, b'n' as u32),
+        (58, b'm' as u32),
+        (59, b',' as u32),
+        (60, b'.' as u32),
+        (61, b'/' as u32),
+        (62, 0xffe2), // Shift_R
+        (63, b'*' as u32),
+        (64, 0xffe9), // Alt_L
+        (65, b' ' as u32), // Space
+        (66, 0xffe5), // Caps_Lock
+    ];
+    for &(kc, sym) in mappings {
+        if kc >= 8 {
+            syms[(kc - 8) as usize] = sym;
+        }
+    }
+    syms
+}
+
 fn handle_xkb_request(data: &[u8], seq: u16) -> Vec<u8> {
+    // Minor opcodes per X11/extensions/XKBproto.h:
+    //
+    //   0  UseExtension              (reply)
+    //   1  SelectEvents              (void)
+    //   3  Bell                      (void)
+    //   4  GetState                  (reply)
+    //   5  LatchLockState            (void)
+    //   6  GetControls               (reply)
+    //   7  SetControls               (void)
+    //   8  GetMap                    (reply)
+    //   9  SetMap                    (void)
+    //  10  GetCompatMap              (reply)
+    //  11  SetCompatMap              (void)
+    //  12  GetIndicatorState         (reply)
+    //  13  GetIndicatorMap           (reply)
+    //  14  SetIndicatorMap           (void)
+    //  15  GetNamedIndicator         (reply)
+    //  16  SetNamedIndicator         (void)
+    //  17  GetNames                  (reply)
+    //  18  SetNames                  (void)
+    //  21  PerClientFlags            (reply)
+    //  22  ListComponents            (reply)
+    //  23  GetKbdByName              (reply)
+    //  24  GetDeviceInfo             (reply)
     let minor = data[1];
     debug!("XKB minor opcode: {minor}");
+
+    let device_id_byte = if data.len() >= 6 { data[4] } else { 0 };
 
     match minor {
         0 => {
@@ -5346,123 +5779,157 @@ fn handle_xkb_request(data: &[u8], seq: u16) -> Vec<u8> {
             reply[10..12].copy_from_slice(&0u16.to_le_bytes()); // server minor version
             reply.to_vec()
         }
-        1 | 2 | 7 | 9 | 12 | 16 | 101 | 104 => {
-            // SelectEvents, Bell, SetMap, SetCompatMap, SetIndicatorMap,
-            // SetNames, LatchLockState, SetControls: void requests
-            Vec::new()
-        }
+        // Void requests — no reply.
+        1 | 3 | 5 | 7 | 9 | 11 | 14 | 16 | 18 => Vec::new(),
         4 => {
-            // GetMap: return minimal empty map (present=0 means no data follows)
+            // GetState: minimal reply with all zero modifier / group state
             let mut reply = [0u8; 32];
-            reply[0] = 1; // Reply
+            reply[0] = 1;
+            reply[1] = device_id_byte;
             reply[2..4].copy_from_slice(&seq.to_le_bytes());
-            // reply[4..8] = 0 (no extra data)
-            if data.len() >= 6 {
-                reply[8] = data[4]; // device_id from request
-            }
-            reply[10..12].copy_from_slice(&8u16.to_le_bytes()); // min_key_code
-            reply[12..14].copy_from_slice(&255u16.to_le_bytes()); // max_key_code
-            // present = 0: no components present in reply
             reply.to_vec()
         }
-        8 => {
-            // GetCompatMap: return empty compat map
-            let mut reply = [0u8; 32];
-            reply[0] = 1; // Reply
+        6 => {
+            // GetControls reply (xcb-proto): 92 bytes total. 8-byte
+            // standard X reply header + 84-byte body. The fields
+            // start at offset 8 with mouseKeysDfltBtn / numGroups
+            // / ... and end with a 32-byte perKeyRepeat bitmap at
+            // offset 60..92.
+            let mut reply = vec![0u8; 92];
+            reply[0] = 1;
+            reply[1] = device_id_byte;
             reply[2..4].copy_from_slice(&seq.to_le_bytes());
-            if data.len() >= 6 {
-                reply[8] = data[4]; // device_id
+            // length = (92 - 32) / 4 = 15
+            reply[4..8].copy_from_slice(&15u32.to_le_bytes());
+            reply[9] = 1; // numGroups (must be >= 1)
+            // perKeyRepeat occupies the last 32 bytes — set every
+            // bit so all keys auto-repeat by default.
+            for byte in &mut reply[60..92] {
+                *byte = 0xff;
             }
-            // all counts zero
-            reply.to_vec()
+            reply
         }
+        8 => build_xkb_get_map_reply(seq),
         10 => {
-            // GetIndicatorState: reply with state=0
-            let mut reply = [0u8; 32];
-            reply[0] = 1; // Reply
+            // GetCompatMap reply.
+            //
+            // libxkbfile's `_XkbReadGetCompatMapReply` calls
+            // `_XkbInitReadBuffer(dpy, &buf, length * 4)`
+            // *unconditionally* and that helper returns failure for
+            // size <= 0, so a 32-byte length=0 reply makes
+            // XkbGetCompatMap return BadAlloc.
+            //
+            // libxkbfile then refuses to render the compat section
+            // unless `xkb->compat->sym_interpret` is non-null —
+            // which only gets allocated when the wire reply
+            // declares at least one sym interpretation. So we ship
+            // a single placeholder XkbSymInterpretWireDesc plus one
+            // group compat entry.
+            //
+            // Reply layout:
+            //   8 bytes:  std header
+            //   8:        groupsRtrn = 0x01  (group 0 present)
+            //   9:        pad
+            //   10-11:    firstSIRtrn = 0
+            //   12-13:    nSIRtrn = 1
+            //   14-15:    nTotalSI = 1
+            //   16-31:    pad (16 bytes)
+            //   32-47:    XkbSymInterpretWireDesc (16 bytes, all 0)
+            //   48-51:    xkbModsWireDesc for group 0 (4 bytes, all 0)
+            //
+            // 52 bytes total → length = 5.
+            let mut reply = vec![0u8; 52];
+            reply[0] = 1;
+            reply[1] = device_id_byte;
             reply[2..4].copy_from_slice(&seq.to_le_bytes());
-            if data.len() >= 6 {
-                reply[8] = data[4]; // device_id
-            }
-            // state = 0 (bytes 12..16 already zero)
-            reply.to_vec()
+            reply[4..8].copy_from_slice(&5u32.to_le_bytes()); // length
+            reply[8] = 0x01; // groupsRtrn: group 0
+            reply[12..14].copy_from_slice(&1u16.to_le_bytes()); // nSIRtrn
+            reply[14..16].copy_from_slice(&1u16.to_le_bytes()); // nTotalSI
+            // bytes 32..48: SymInterpret entry (all-zero placeholder
+            //   sym=NoSymbol, no modifiers, NoAction)
+            // bytes 48..52: ModWireDesc for group 0 (all zero — no mods)
+            reply
         }
-        11 => {
-            // GetIndicatorMap: return empty indicators
+        12 => {
+            // GetIndicatorState: state = 0
             let mut reply = [0u8; 32];
-            reply[0] = 1; // Reply
+            reply[0] = 1;
+            reply[1] = device_id_byte;
             reply[2..4].copy_from_slice(&seq.to_le_bytes());
-            if data.len() >= 6 {
-                reply[8] = data[4]; // device_id
-            }
             reply.to_vec()
         }
         13 => {
-            // GetNamedIndicator: reply with empty
+            // GetIndicatorMap: no indicators
             let mut reply = [0u8; 32];
-            reply[0] = 1; // Reply
+            reply[0] = 1;
+            reply[1] = device_id_byte;
             reply[2..4].copy_from_slice(&seq.to_le_bytes());
-            if data.len() >= 6 {
-                reply[8] = data[4]; // device_id
-            }
             reply.to_vec()
         }
         15 => {
-            // GetNames: return with 0 counts for everything
+            // GetNamedIndicator: empty
             let mut reply = [0u8; 32];
-            reply[0] = 1; // Reply
+            reply[0] = 1;
+            reply[1] = device_id_byte;
             reply[2..4].copy_from_slice(&seq.to_le_bytes());
-            // reply[4..8] = 0 (no extra data)
-            if data.len() >= 6 {
-                reply[8] = data[4]; // device_id
-            }
-            reply[10..12].copy_from_slice(&8u16.to_le_bytes()); // min_key_code
-            reply[12..14].copy_from_slice(&255u16.to_le_bytes()); // max_key_code
-            // present = 0, everything else 0
             reply.to_vec()
         }
-        17 => {
-            // PerClientFlags: reply with value=0
+        17 => build_xkb_get_names_reply(seq, device_id_byte),
+        19 => {
+            // GetGeometry reply: "no geometry". Sending length=0
+            // makes libxkbfile take the early-out path that skips
+            // the body parse entirely (the variable-length section
+            // with labelFont / properties / colors / shapes etc.
+            // would otherwise force us to invent placeholder
+            // colours, and libxkbfile then dereferences
+            // `geom->base_color = &geom->colors[0]` which segfaults
+            // if num_colors stays at zero).
             let mut reply = [0u8; 32];
-            reply[0] = 1; // Reply
+            reply[0] = 1;
+            reply[1] = device_id_byte;
             reply[2..4].copy_from_slice(&seq.to_le_bytes());
-            if data.len() >= 6 {
-                reply[8] = data[4]; // device_id
-            }
-            // supported, value, autoCtrls, autoCtrlsValues all 0
+            // length = 0, found = 0, all other fields zero.
             reply.to_vec()
         }
-        100 => {
-            // GetState: reply with device state
+        21 => {
+            // PerClientFlags: supported = 0, value = 0
             let mut reply = [0u8; 32];
-            reply[0] = 1; // Reply
+            reply[0] = 1;
+            reply[1] = device_id_byte;
             reply[2..4].copy_from_slice(&seq.to_le_bytes());
-            if data.len() >= 6 {
-                reply[8] = data[4]; // device_id
-            }
-            // all modifier/group state fields are 0
             reply.to_vec()
         }
-        103 => {
-            // GetControls: reply with minimal controls
-            let mut reply = vec![0u8; 32 + 92]; // controls reply has extra data
-            reply[0] = 1; // Reply
+        22 => {
+            // ListComponents: empty list of every category. Reply has
+            // CARD16 counts for keymaps / keycodes / types / compat /
+            // symbols / geometries / extra, then 10 bytes of pad.
+            let mut reply = [0u8; 32];
+            reply[0] = 1;
+            reply[1] = device_id_byte;
             reply[2..4].copy_from_slice(&seq.to_le_bytes());
-            reply[4..8].copy_from_slice(&(92u32 / 4).to_le_bytes()); // length
-            if data.len() >= 6 {
-                reply[8] = data[4]; // device_id
-            }
-            // num_groups = 1 (at least one group needed)
-            // Offset 27 in the reply body is numGroups
-            // The header is 32 bytes; controls data starts at byte 32
-            // In the XKB GetControls reply: byte 10 = numGroups
-            reply[10] = 1;
-            // per_key_repeat at offset 32+20 = 52: set default repeat mask
-            // (bytes 52..84 = 32 bytes of per-key repeat bitmap)
-            for i in 0..32 {
-                reply[32 + 20 + i] = 0xFF; // all keys repeat by default
-            }
+            reply.to_vec()
+        }
+        23 => {
+            // GetKbdByName: return our standard map. The reply layout
+            // is the same `present`/section format as GetMap with a
+            // larger header, but for our purposes the GetMap encoder
+            // is close enough — xkbcomp falls back to issuing GetMap
+            // separately if GetKbdByName returns nothing.
+            let mut reply = [0u8; 32];
+            reply[0] = 1;
+            reply[1] = device_id_byte;
+            reply[2..4].copy_from_slice(&seq.to_le_bytes());
             reply
+                .to_vec()
+        }
+        24 => {
+            // GetDeviceInfo: zero device info
+            let mut reply = [0u8; 32];
+            reply[0] = 1;
+            reply[1] = device_id_byte;
+            reply[2..4].copy_from_slice(&seq.to_le_bytes());
+            reply.to_vec()
         }
         _ => {
             debug!("Unhandled XKB minor opcode: {minor}");
