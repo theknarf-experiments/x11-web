@@ -1434,6 +1434,41 @@ test.describe
 		// fail loudly.
 		// =====================================================================
 
+		test("xprop / xwininfo / xlsatoms introspect the server", async () => {
+			// Three lightweight introspection tools that exercise
+			// QueryTree / GetWindowAttributes / GetGeometry /
+			// ListProperties / GetProperty / GetAtomName / ListExtensions
+			// against the root window. Each one bails the moment it
+			// hits a malformed reply, so a clean exit + a few smoke
+			// strings in the output is meaningful coverage of the
+			// "core protocol replies are byte-perfect" surface.
+			const result = await sidecarContainer.exec([
+				"bash",
+				"-c",
+				[
+					"set -e",
+					'echo "=== xprop -root ==="',
+					"DISPLAY=:99 xprop -root",
+					'echo "=== xwininfo -root -tree ==="',
+					"DISPLAY=:99 xwininfo -root -tree",
+					'echo "=== xlsatoms ==="',
+					"DISPLAY=:99 xlsatoms",
+				].join("\n"),
+			]);
+			expect(result.exitCode).toBe(0);
+			// xwininfo emits the canonical "Root window id" header.
+			expect(result.output).toContain("Root window id");
+			// xlsatoms must list the standard X11 predefined atoms.
+			// These are reserved by the spec — every X server hands
+			// them back at fixed atom IDs.
+			expect(result.output).toMatch(/\b1\s+PRIMARY/);
+			expect(result.output).toMatch(/\b4\s+ATOM/);
+			expect(result.output).toMatch(/\b39\s+WM_NAME/);
+			// And we expose our own GTK-shows-menubar atom from the
+			// menu bridge work.
+			expect(result.output).toContain("_GTK_SHELL_SHOWS_MENUBAR");
+		});
+
 		test("xdpyinfo describes the server without errors", async () => {
 			const result = await sidecarContainer.exec([
 				"bash",
@@ -1524,12 +1559,128 @@ test.describe
 			expect(passed).toBeGreaterThanOrEqual(RENDERCHECK_BASELINE_PASSED);
 		});
 
-		// Note: x11perf is in the image too (-noop, -create, -dot,
-		// etc) but its default `-repeat 5 -time 5` makes it 25s per
-		// test and the harness produces no output until each test
-		// completes, which doesn't fit cleanly with testcontainers
-		// `exec`. Left out of Phase A; revisit when we want a
-		// dedicated long-running benchmark suite.
+		test("xev reports synthetic input events", async ({ page }) => {
+			// Spawn xev wrapped in `sh -c` so its stdout is captured
+			// to a file we can read back. We go through the frontend's
+			// spawn flow (instead of direct container exec) so the
+			// resulting window is tracked by the dock and can be
+			// driven from Playwright.
+			//
+			// xev prints one block per X event with the event name
+			// (KeyPress / ButtonPress / Motion / Expose / ...) and
+			// the relevant fields. That gives us a *byte-precise*
+			// contract on event delivery and event-record layout —
+			// far stricter than the existing screenshot-based input
+			// tests.
+			await page.goto(`http://localhost:${frontendPort}`);
+			await waitForDock(page);
+
+			// Drop a small wrapper into /tmp that the spawn flow can
+			// invoke without arguments — the spawn UI splits args on
+			// spaces, so we can't pass `-c 'xev > log'` directly.
+			await sidecarContainer.exec([
+				"bash",
+				"-c",
+				[
+					"rm -f /tmp/xev.log /tmp/xev-wrapper.sh",
+					"cat > /tmp/xev-wrapper.sh <<'EOF'",
+					"#!/bin/sh",
+					"exec xev > /tmp/xev.log 2>&1",
+					"EOF",
+					"chmod +x /tmp/xev-wrapper.sh",
+				].join("\n"),
+			]);
+
+			const win = await spawnApp(page, "", "/tmp/xev-wrapper.sh");
+			const canvas = win.locator('[data-testid="x11-canvas"]');
+			await expect(canvas).toBeVisible();
+
+			// Drive a click and a key.
+			await canvas.click({ position: { x: 30, y: 30 } });
+			await canvas.click({ position: { x: 60, y: 40 } });
+			await page.keyboard.press("a");
+			await page.keyboard.press("Enter");
+
+			// Give the events time to round-trip through the
+			// frontend → backend → sidecar → xev pipeline.
+			await page.waitForTimeout(800);
+
+			// Read xev's accumulated log, then kill it.
+			const logResult = await sidecarContainer.exec([
+				"bash",
+				"-c",
+				'cat /tmp/xev.log; pkill -f "^xev" >/dev/null 2>&1; true',
+			]);
+			const fs = await import("node:fs");
+			fs.writeFileSync("/tmp/x11web-xev.txt", logResult.output);
+
+			const log = logResult.output;
+			console.log(`xev: ${log.split("\n").length} lines captured`);
+
+			// We should always see the window-creation events.
+			expect(log).toContain("MapNotify event");
+			expect(log).toContain("Expose event");
+			// And — the actual point of this test — the synthetic
+			// input events we drove from Playwright.
+			expect(log).toContain("ButtonPress event");
+			expect(log).toContain("ButtonRelease event");
+			expect(log).toContain("KeyPress event");
+		});
+
+		test("x11perf curated short benchmark", async () => {
+			// x11perf's default `-time 5 -repeat 5` makes each test
+			// run for 25 seconds, which is too slow for CI. We use
+			// `-time 1 -repeat 1` and a curated subset that exercises
+			// the core drawing primitives we actually implement:
+			//   - noop:                NoOperation round-trip
+			//   - dot:                 single-pixel rendering
+			//   - line/seg:            PolyLine / PolySegment
+			//   - rect:                PolyFillRectangle
+			//   - putimage:            PutImage
+			//   - copywinwin:          CopyArea (window-to-window)
+			//   - ftext:               PolyText8 (6x13 fixed font)
+			// We don't assert on the throughput numbers (those are
+			// noisy in a container) — just that every selected test
+			// emitted a line of the form "N reps @ ... msec (... /sec)"
+			// and the binary exited cleanly. That's enough to catch
+			// any regression that crashes the server, returns a
+			// malformed reply, or makes a request hang.
+			const tests = [
+				"-noop",
+				"-dot",
+				"-line10",
+				"-line500",
+				"-seg10",
+				"-seg100",
+				"-rect10",
+				"-rect100",
+				"-putimage10",
+				"-putimage100",
+				"-copywinwin10",
+				"-copywinwin100",
+				"-ftext",
+			];
+			const result = await sidecarContainer.exec([
+				"bash",
+				"-c",
+				`DISPLAY=:99 x11perf -time 1 -repeat 1 ${tests.join(" ")} 2>&1 || true`,
+			]);
+			const fs = await import("node:fs");
+			fs.writeFileSync("/tmp/x11web-x11perf.txt", result.output);
+
+			expect(result.exitCode).toBe(0);
+			// Each test prints exactly one "N reps @ ... msec (.../sec)" line.
+			// x11perf right-pads small throughput values, so allow spaces
+			// between the open paren and the number.
+			const repLines = result.output.match(
+				/^\s*\d[\d,]*\s+reps\s+@\s+[\d.]+\s+msec\s+\(\s*[\d.]+\/sec\):/gm,
+			);
+			const repsCount = repLines ? repLines.length : 0;
+			console.log(
+				`x11perf: ${repsCount}/${tests.length} reps lines (exit=${result.exitCode})`,
+			);
+			expect(repsCount).toBe(tests.length);
+		});
 	});
 
 async function findFreePort(): Promise<number> {

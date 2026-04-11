@@ -1647,6 +1647,7 @@ fn handle_request(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
         17 => handle_get_atom_name(state, data, seq),
         18 => handle_change_property(state, data),
         20 => handle_get_property(state, data, seq),
+        21 => handle_list_properties(state, data, seq),
         23 => handle_get_selection_owner(state, data, seq),
         38 => handle_query_pointer(state, data, seq),
         42 => handle_set_input_focus(state, data),
@@ -1699,6 +1700,7 @@ fn handle_request(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
         50 | // ListFontsWithInfo
         52 | // GetFontPath
         103 | // GetKeyboardControl
+        108 | // GetScreenSaver
         116 | // SetPointerMapping
         117 | // GetPointerMapping
         119   // GetModifierMapping
@@ -1883,6 +1885,15 @@ fn handle_misc_request(state: &mut ClientState, opcode: u8, seq: u16) -> Vec<u8>
             reply[0] = 1;
             reply[2..4].copy_from_slice(&seq.to_le_bytes());
             reply[4..8].copy_from_slice(&5u32.to_le_bytes()); // length = 5 (20 extra bytes)
+            reply.to_vec()
+        }
+        108 => {
+            // GetScreenSaver reply: never blank, never expose.
+            // Reply layout: u16 timeout, u16 interval, u8 prefer_blanking,
+            // u8 allow_exposures, 18 bytes pad. All zeros works fine.
+            let mut reply = [0u8; 32];
+            reply[0] = 1;
+            reply[2..4].copy_from_slice(&seq.to_le_bytes());
             reply.to_vec()
         }
         116 => {
@@ -2708,7 +2719,12 @@ fn handle_intern_atom(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8>
 fn handle_get_atom_name(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
     let atom = u32::from_le_bytes([data[4], data[5], data[6], data[7]]);
 
-    let name = state.get_atom_name(atom).unwrap_or_default();
+    // BadAtom (error code 5) for unknown atoms — otherwise tools that
+    // walk the atom space (xlsatoms) will keep incrementing forever
+    // because every probe looks like a successful empty-name reply.
+    let Some(name) = state.get_atom_name(atom) else {
+        return build_error(5, seq, atom, 17, 0);
+    };
     let name_bytes = name.as_bytes();
     let padded_len = (name_bytes.len() + 3) & !3;
 
@@ -2907,6 +2923,56 @@ fn handle_get_property(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8
         // type = 0 (None), format = 0, bytes_after = 0, value_length = 0
         reply.to_vec()
     }
+}
+
+/// ListProperties (opcode 21).
+///
+/// Wire layout:
+///
+/// ```text
+///   1   opcode (21)
+///   1   pad
+///   2   length (2)
+///   4   window
+/// ```
+///
+/// Reply layout:
+///
+/// ```text
+///   1   reply (1)
+///   1   pad
+///   2   sequence
+///   4   length (in 4-byte units, equals num_atoms)
+///   2   num_atoms
+///   22  pad
+///   4*N atoms
+/// ```
+fn handle_list_properties(state: &ClientState, data: &[u8], seq: u16) -> Vec<u8> {
+    if data.len() < 8 {
+        let mut reply = [0u8; 32];
+        reply[0] = 1;
+        reply[2..4].copy_from_slice(&seq.to_le_bytes());
+        return reply.to_vec();
+    }
+    let window = u32::from_le_bytes([data[4], data[5], data[6], data[7]]);
+
+    let atoms: Vec<u32> = state
+        .windows
+        .get(&window)
+        .map(|w| w.properties.keys().copied().collect())
+        .unwrap_or_default();
+
+    let n = atoms.len();
+    let extra_bytes = n * 4;
+    let mut reply = vec![0u8; 32 + extra_bytes];
+    reply[0] = 1; // Reply
+    reply[2..4].copy_from_slice(&seq.to_le_bytes());
+    reply[4..8].copy_from_slice(&(n as u32).to_le_bytes()); // length in 4-byte units
+    reply[8..10].copy_from_slice(&(n as u16).to_le_bytes()); // num_atoms
+    for (i, atom) in atoms.iter().enumerate() {
+        reply[32 + i * 4..32 + i * 4 + 4].copy_from_slice(&atom.to_le_bytes());
+    }
+    reply
 }
 
 fn handle_get_selection_owner(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
@@ -4281,7 +4347,8 @@ fn handle_query_extension(_state: &mut ClientState, data: &[u8], seq: u16) -> Ve
         }
         "XKEYBOARD" => {
             // present = false — XKB stub handler exists but advertising it
-            // causes Firefox to crash during XKB keyboard map initialization.
+            // causes Firefox to crash during XKB keyboard map initialization
+            // and xkbcomp to hang waiting for a real GetMap reply.
         }
         "XC-MISC" => {
             reply[8] = 1; // present = true
