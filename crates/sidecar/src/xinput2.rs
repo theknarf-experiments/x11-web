@@ -77,9 +77,9 @@ pub struct ValuatorState {
 }
 
 /// Axis numbers we use for the master pointer's valuator/scroll
-/// classes. (X=0 and Y=1 are reserved for the regular x/y axes but
-/// we don't actually emit them as separate valuators yet — only the
-/// scroll axes are wired up.)
+/// classes. Valuator 0 / 1 are the absolute X / Y axes (emitted as
+/// `XIValuatorClass` entries in our `XIQueryDevice` reply); 2 / 3
+/// are the vertical / horizontal scroll axes (`XIScrollClass`).
 pub const AXIS_SCROLL_V: u16 = 2;
 pub const AXIS_SCROLL_H: u16 = 3;
 
