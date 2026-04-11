@@ -1782,6 +1782,112 @@ test.describe
 			);
 			expect(repsCount).toBe(tests.length);
 		});
+
+		test("xinput list reports the master pointer/keyboard hierarchy", async () => {
+			// `xinput` is libXi's reference CLI for the XInput / XInput2
+			// extension. It exercises a path nothing else in this suite
+			// touches: XIQueryDevice + the device-class info wire format
+			// (XIButtonClass / XIValuatorClass / XIScrollClass /
+			// XIKeyClass). A regression in any of those structures
+			// would either crash xinput or print garbage; a clean run
+			// is strong evidence the XI2 device tree is well-formed.
+			const fs = await import("node:fs");
+
+			// 1. `xinput list` — short form, hierarchy view.
+			//    Expected layout (master pointer + master keyboard,
+			//    no slaves since we don't expose any):
+			//      ⎡ Virtual core pointer    id=2  [master pointer  (3)]
+			//      ⎣ Virtual core keyboard   id=3  [master keyboard (2)]
+			const list = await sidecarContainer.exec([
+				"bash",
+				"-c",
+				"DISPLAY=:99 xinput list 2>&1",
+			]);
+			fs.writeFileSync("/tmp/x11web-xinput-list.txt", list.output);
+			console.log(
+				`xinput list: ${list.output.split("\n").length} lines (exit=${list.exitCode})`,
+			);
+			expect(list.exitCode).toBe(0);
+			expect(list.output).toContain("Virtual core pointer");
+			expect(list.output).toContain("Virtual core keyboard");
+			expect(list.output).toContain("id=2");
+			expect(list.output).toContain("id=3");
+			expect(list.output).toContain("master pointer");
+			expect(list.output).toContain("master keyboard");
+
+			// 2. `xinput list --id-only` and `--name-only` — these are
+			//    pure XIQueryDevice projections, easy regression checks.
+			const ids = await sidecarContainer.exec([
+				"bash",
+				"-c",
+				"DISPLAY=:99 xinput list --id-only 2>&1",
+			]);
+			expect(ids.exitCode).toBe(0);
+			expect(ids.output.trim().split(/\s+/).sort()).toEqual(["2", "3"]);
+
+			const names = await sidecarContainer.exec([
+				"bash",
+				"-c",
+				"DISPLAY=:99 xinput list --name-only 2>&1",
+			]);
+			expect(names.exitCode).toBe(0);
+			expect(names.output).toContain("Virtual core pointer");
+			expect(names.output).toContain("Virtual core keyboard");
+
+			// 3. `xinput list --long` — verbose form. This walks every
+			//    device-class struct we encode in the XIQueryDevice
+			//    reply and prints it. The strings below correspond
+			//    one-for-one to libXi's printers, so any wire-format
+			//    drift would either drop a class entirely or fail
+			//    parsing earlier.
+			const long = await sidecarContainer.exec([
+				"bash",
+				"-c",
+				"DISPLAY=:99 xinput list --long 2>&1",
+			]);
+			fs.writeFileSync("/tmp/x11web-xinput-list-long.txt", long.output);
+			console.log(
+				`xinput list --long: ${long.output.split("\n").length} lines (exit=${long.exitCode})`,
+			);
+			expect(long.exitCode).toBe(0);
+			// Master pointer: 1 button class (>=5 buttons for the
+			// scroll-wheel pseudo-buttons), 2 valuator classes (X / Y),
+			// 2 scroll classes (vertical + horizontal).
+			expect(long.output).toContain("XIButtonClass");
+			expect(long.output).toMatch(/Buttons supported:\s*[5-9]|\d{2,}/);
+			expect(long.output).toContain("XIValuatorClass");
+			expect(long.output).toContain("Detail for Valuator 0");
+			expect(long.output).toContain("Detail for Valuator 1");
+			expect(long.output).toContain("XIScrollClass");
+			expect(long.output).toContain("Scroll info for Valuator 2");
+			expect(long.output).toContain("Scroll info for Valuator 3");
+			expect(long.output).toContain("type: 1 (vertical)");
+			expect(long.output).toContain("type: 2 (horizontal)");
+			// Master keyboard: 1 key class.
+			expect(long.output).toContain("XIKeyClass");
+
+			// 4. `xinput list 2` and `xinput list 3` — single-device
+			//    queries (XIQueryDevice with deviceid != XIAllDevices).
+			//    These take a different code path through the request
+			//    parser, so they're worth checking separately.
+			const dev2 = await sidecarContainer.exec([
+				"bash",
+				"-c",
+				"DISPLAY=:99 xinput list 2 2>&1",
+			]);
+			expect(dev2.exitCode).toBe(0);
+			expect(dev2.output).toContain("Virtual core pointer");
+			expect(dev2.output).toContain("XIButtonClass");
+
+			const dev3 = await sidecarContainer.exec([
+				"bash",
+				"-c",
+				"DISPLAY=:99 xinput list 3 2>&1",
+			]);
+			expect(dev3.exitCode).toBe(0);
+			expect(dev3.output).toContain("Virtual core keyboard");
+			expect(dev3.output).toContain("XIKeyClass");
+		});
 	});
 
 async function findFreePort(): Promise<number> {
