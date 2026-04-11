@@ -1665,17 +1665,45 @@ test.describe
 		});
 
 		test("x11perf curated short benchmark", async () => {
+			// 42 tests at `-time 1 -repeat 1` plus x11perf's own
+			// per-test setup overhead routinely exceeds the default
+			// 2 min Playwright timeout, so give it some headroom.
+			test.setTimeout(300_000);
 			// x11perf's default `-time 5 -repeat 5` makes each test
 			// run for 25 seconds, which is too slow for CI. We use
 			// `-time 1 -repeat 1` and a curated subset that exercises
-			// the core drawing primitives we actually implement:
+			// the protocol primitives we actually implement.
+			//
+			// Drawing / image primitives:
 			//   - noop:                NoOperation round-trip
 			//   - dot:                 single-pixel rendering
 			//   - line/seg:            PolyLine / PolySegment
 			//   - rect:                PolyFillRectangle
+			//   - orect:               PolyRectangle (outlines)
+			//   - triangle:            FillPoly (3-vertex)
+			//   - circle / fcircle:    PolyArc / PolyFillArc
 			//   - putimage:            PutImage
-			//   - copywinwin:          CopyArea (window-to-window)
+			//   - getimage:            GetImage
+			//   - copywinwin:          CopyArea (window→window)
+			//   - copypixpix:          CopyArea (pixmap→pixmap)
+			//   - scroll:              CopyArea (self, overlapping)
 			//   - ftext:               PolyText8 (6x13 fixed font)
+			//
+			// Pointer / property / window-management primitives
+			// (these don't touch the rendering paths at all and so
+			// catch a different class of regressions — request
+			// dispatch, reply marshalling, window-tree mutation):
+			//   - pointer:             QueryPointer
+			//   - prop:                GetProperty
+			//   - gc:                  ChangeGC
+			//   - create / ucreate:    CreateWindow (mapped/unmapped)
+			//   - map / unmap:         MapWindow / UnmapWindow
+			//   - destroy:             DestroyWindow
+			//   - popup:               map+unmap roundtrip
+			//   - move / umove:        ConfigureWindow (position)
+			//   - resize / uresize:    ConfigureWindow (size)
+			//   - circulate / ucirculate: CirculateWindow
+			//
 			// We don't assert on the throughput numbers (those are
 			// noisy in a container) — just that every selected test
 			// emitted a line of the form "N reps @ ... msec (... /sec)"
@@ -1683,6 +1711,7 @@ test.describe
 			// any regression that crashes the server, returns a
 			// malformed reply, or makes a request hang.
 			const tests = [
+				// drawing / image
 				"-noop",
 				"-dot",
 				"-line10",
@@ -1691,22 +1720,57 @@ test.describe
 				"-seg100",
 				"-rect10",
 				"-rect100",
+				"-orect10",
+				"-orect100",
+				"-triangle10",
+				"-triangle100",
+				"-circle10",
+				"-circle100",
+				"-fcircle10",
+				"-fcircle100",
 				"-putimage10",
 				"-putimage100",
+				"-getimage10",
+				"-getimage100",
 				"-copywinwin10",
 				"-copywinwin100",
+				"-copypixpix10",
+				"-copypixpix100",
+				"-scroll10",
+				"-scroll100",
 				"-ftext",
+				// pointer / property / window-management
+				"-pointer",
+				"-prop",
+				"-gc",
+				"-create",
+				"-ucreate",
+				"-map",
+				"-unmap",
+				"-destroy",
+				"-popup",
+				"-move",
+				"-umove",
+				"-resize",
+				"-uresize",
+				"-circulate",
+				"-ucirculate",
 			];
+			// `-subs 4` constrains the window-management tests
+			// (-create / -map / -resize / etc.) to a single sub-window
+			// count instead of the default seven, which would make
+			// each of those tests emit 7 reps lines and take ~7s.
 			const result = await sidecarContainer.exec([
 				"bash",
 				"-c",
-				`DISPLAY=:99 x11perf -time 1 -repeat 1 ${tests.join(" ")} 2>&1 || true`,
+				`DISPLAY=:99 x11perf -time 1 -repeat 1 -subs 4 ${tests.join(" ")} 2>&1 || true`,
 			]);
 			const fs = await import("node:fs");
 			fs.writeFileSync("/tmp/x11web-x11perf.txt", result.output);
 
 			expect(result.exitCode).toBe(0);
-			// Each test prints exactly one "N reps @ ... msec (.../sec)" line.
+			// Each test prints exactly one "N reps @ ... msec (.../sec)" line
+			// (with -subs 4, the window-mgmt tests also emit just one).
 			// x11perf right-pads small throughput values, so allow spaces
 			// between the open paren and the number.
 			const repLines = result.output.match(
