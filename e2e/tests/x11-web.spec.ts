@@ -2008,6 +2008,58 @@ test.describe
 			expect(result.output).toMatch(/threshold:\s*4/);
 		});
 
+		test("xdotool exercises WarpPointer and SendEvent", async () => {
+			// xdotool calls WarpPointer (opcode 41) to move the pointer,
+			// and can use SendEvent (opcode 25) for synthetic input. It
+			// also uses TranslateCoordinates, GrabServer/UngrabServer,
+			// and GetInputFocus. A clean exit means all these opcodes
+			// return valid responses.
+			const result = await sidecarContainer.exec([
+				"bash",
+				"-c",
+				[
+					"set -e",
+					// Spawn a simple window to target
+					"DISPLAY=:99 xlogo &",
+					"sleep 1",
+					// Move the pointer (WarpPointer)
+					"DISPLAY=:99 xdotool mousemove 100 100",
+					// Get window info (uses TranslateCoordinates, QueryTree)
+					"DISPLAY=:99 xdotool search --name xlogo",
+					// Send a synthetic key event (SendEvent)
+					"DISPLAY=:99 xdotool key Escape",
+					// Get the pointer location back (QueryPointer)
+					"DISPLAY=:99 xdotool getmouselocation",
+					"echo XDOTOOL_PASS",
+				].join("\n"),
+			]);
+			console.log(
+				`xdotool: exit=${result.exitCode} bytes=${result.output.length}`,
+			);
+			expect(result.output).toContain("XDOTOOL_PASS");
+		});
+
+		test("xwininfo -all on root window returns full attributes", async () => {
+			// xwininfo -all exercises GetWindowAttributes, GetGeometry,
+			// QueryTree, ListProperties, GetProperty, and ListExtensions
+			// in a single call. The -all flag makes it dump everything
+			// including WM hints and properties.
+			const result = await sidecarContainer.exec([
+				"bash",
+				"-c",
+				"DISPLAY=:99 xwininfo -root -all 2>&1",
+			]);
+			console.log(
+				`xwininfo -all: exit=${result.exitCode} lines=${result.output.split("\n").length}`,
+			);
+			expect(result.exitCode).toBe(0);
+			expect(result.output).toContain("Root window id");
+			expect(result.output).toContain("Width:");
+			expect(result.output).toContain("Height:");
+			// Should list the predefined properties we set on root
+			expect(result.output).toContain("_GTK_SHELL_SHOWS_MENUBAR");
+		});
+
 		test("xrandr --query enumerates the RandR screen", async () => {
 			// xrandr exercises the RandR extension end-to-end:
 			// QueryVersion, GetScreenResources, GetOutputInfo,

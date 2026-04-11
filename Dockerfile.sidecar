@@ -32,6 +32,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     adwaita-icon-theme \
     imagemagick \
     xvfb \
+    xdotool \
     && rm -rf /var/lib/apt/lists/*
 RUN mkdir -p /tmp/.X11-unix
 # Fixed hostname so xterm/vim prompts are deterministic in e2e snapshot tests
