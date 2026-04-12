@@ -363,7 +363,12 @@ pub(crate) fn handle_get_image(state: &mut ClientState, data: &[u8], seq: u16) -
         ROOT_VISUAL
     };
 
-    let pixels = if let Some(fb) = state.get_framebuffer_mut(drawable) {
+    // Per X11 spec, GetImage on a window returns the screen contents at
+    // that location, which includes composited child window content.
+    let is_window = state.windows.contains_key(&drawable);
+    let pixels = if is_window {
+        state.extract_pixels_include_inferiors(drawable, x, y, width, height)
+    } else if let Some(fb) = state.get_framebuffer_mut(drawable) {
         fb.extract_pixels(x, y, width, height)
     } else {
         vec![0u8; width as usize * height as usize * 4]
