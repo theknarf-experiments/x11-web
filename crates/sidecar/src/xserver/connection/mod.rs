@@ -415,7 +415,7 @@ pub(crate) async fn handle_client(
         randr_next_mode_id: 1000,
         vidmode_viewport_x: 0,
         vidmode_viewport_y: 0,
-        vidmode_modes: vec![handlers::misc_ext::VidModeInfo::default_for_screen(SCREEN_WIDTH, SCREEN_HEIGHT)],
+        vidmode_modes: vec![handlers::vidmode::VidModeInfo::default_for_screen(SCREEN_WIDTH, SCREEN_HEIGHT)],
         vidmode_locked: false,
         vidmode_current_mode: 0,
         big_requests_enabled: false,

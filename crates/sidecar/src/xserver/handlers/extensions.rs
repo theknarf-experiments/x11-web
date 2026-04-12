@@ -13,11 +13,12 @@ pub(crate) use super::sync::handle_sync_request;
 pub(crate) use super::composite::{handle_damage_request, handle_x_composite_request};
 pub(crate) use super::xkb::{handle_ge_request, handle_xkb_request};
 pub(crate) use super::present::{handle_present_request, handle_xc_misc_request, send_present_config_notify};
-pub(crate) use super::misc_ext::{
-    handle_xtest_request, handle_dpms_request, handle_screen_saver_request,
-    handle_vidmode_request, handle_security_request,
-    handle_xinerama_request,
-};
+pub(crate) use super::xtest::handle_xtest_request;
+pub(crate) use super::dpms::handle_dpms_request;
+pub(crate) use super::screensaver::handle_screen_saver_request;
+pub(crate) use super::vidmode::handle_vidmode_request;
+pub(crate) use super::security::handle_security_request;
+pub(crate) use super::xinerama::handle_xinerama_request;
 pub(crate) use super::dbe::handle_dbe_request;
 pub(crate) use super::xvideo::handle_xvideo_request;
 pub(crate) use super::glx::handle_glx_request;

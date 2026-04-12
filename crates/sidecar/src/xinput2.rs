@@ -513,8 +513,8 @@ pub fn handle_request(
     passive_grabs: &mut Vec<Xi2PassiveGrab>,
     pointer_frozen: &mut bool,
     keyboard_frozen: &mut bool,
-    frozen_pointer_events: &mut Vec<Vec<u8>>,
-    frozen_keyboard_events: &mut Vec<Vec<u8>>,
+    _frozen_pointer_events: &mut Vec<Vec<u8>>,
+    _frozen_keyboard_events: &mut Vec<Vec<u8>>,
     screen_width: u16,
     screen_height: u16,
     root_window: u32,
@@ -1478,6 +1478,7 @@ pub fn build_raw_pointer_event(event_type: u16, sequence: u16, detail: u32, msb_
 
 /// Active XI2 device grab (from XIGrabDevice).
 #[derive(Clone, Debug)]
+#[allow(dead_code)]
 pub struct Xi2ActiveGrab {
     /// The device that was grabbed.
     pub deviceid: xi::DeviceId,
@@ -1495,6 +1496,7 @@ pub struct Xi2ActiveGrab {
 
 /// Passive XI2 device grab (from XIPassiveGrabDevice).
 #[derive(Clone, Debug)]
+#[allow(dead_code)]
 pub struct Xi2PassiveGrab {
     /// The device the passive grab is for.
     pub deviceid: xi::DeviceId,
@@ -1517,6 +1519,7 @@ pub struct Xi2PassiveGrab {
 }
 
 /// Maximum number of frozen XI2 events before oldest are dropped.
+#[allow(dead_code)]
 const MAX_XI2_FROZEN_EVENTS: usize = 4096;
 
 /// Per-client XI state stored on `ClientState`.
@@ -1564,6 +1567,7 @@ impl Default for XiState {
     }
 }
 
+#[allow(dead_code)]
 impl XiState {
     /// Check if a passive grab should activate for the given event.
     /// Returns the matching passive grab if found.

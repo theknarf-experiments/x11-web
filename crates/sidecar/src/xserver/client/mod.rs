@@ -88,7 +88,7 @@ pub(crate) struct ClientState {
     /// MIT-SCREEN-SAVER: window ID for the screen saver window.
     pub(crate) screen_saver_window: u32,
     /// MIT-SCREEN-SAVER: stored attributes from SetAttributes.
-    pub(crate) screen_saver_attrs: Option<super::handlers::misc_ext::ScreenSaverAttrs>,
+    pub(crate) screen_saver_attrs: Option<super::handlers::screensaver::ScreenSaverAttrs>,
     /// MIT-SCREEN-SAVER: reference-counted suspend level.
     pub(crate) screen_saver_suspend_count: u32,
     /// Client byte order: false = LSB-first (0x6c), true = MSB-first (0x42).
@@ -304,7 +304,7 @@ pub(crate) struct ClientState {
     /// For our single virtual display this is always clamped to 0.
     pub(crate) vidmode_viewport_y: u32,
     /// XFree86-VidMode: list of available video modes.
-    pub(crate) vidmode_modes: Vec<super::handlers::misc_ext::VidModeInfo>,
+    pub(crate) vidmode_modes: Vec<super::handlers::vidmode::VidModeInfo>,
     /// XFree86-VidMode: whether mode switching is locked.
     pub(crate) vidmode_locked: bool,
     /// XFree86-VidMode: index of the current mode in `vidmode_modes`.

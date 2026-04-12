@@ -259,7 +259,16 @@ pub(crate) fn handle_glx_request(state: &mut ClientState, data: &[u8], seq: u16)
         GLX_GET_DRAWABLE_ATTRIBUTES => drawable::handle_get_drawable_attributes(state, data, seq),
         GLX_CHANGE_DRAWABLE_ATTRIBUTES => drawable::handle_change_drawable_attributes(state, data, seq),
         GLX_QUERY_CONTEXT => drawable::handle_query_context(state, data, seq),
-        GLX_VENDOR_PRIVATE => Vec::new(), // ignore vendor requests
+        GLX_VENDOR_PRIVATE => {
+            // Vendor private requests have no reply per the GLX spec.
+            // Log the vendor code for diagnostics but otherwise succeed silently
+            // since returning an error would break clients using common vendor ops.
+            if data.len() >= 8 {
+                let vendor_code = state.read_u32(data, 4);
+                debug!("GLX VendorPrivate: vendor_code={vendor_code}");
+            }
+            Vec::new()
+        }
         // GLX single GL commands use minor opcodes 101+ (one per GL query function).
         // These carry context_tag(4) + GL-specific payload, dispatched by gl_opcode.
         101..=255 => context::handle_glx_single(state, data, seq),
