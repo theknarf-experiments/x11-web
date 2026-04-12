@@ -42,6 +42,20 @@ pub enum BackendToSidecar {
         width: u16,
         height: u16,
     },
+    /// Request clipboard data from X11 selection.
+    RequestClipboard {
+        selection: String,
+        mime_type: String,
+    },
+    /// Set clipboard content from browser.
+    SetClipboard {
+        selection: String,
+        mime_type: String,
+        #[serde(with = "base64_bytes")]
+        data: Vec<u8>,
+    },
+    /// Resize the virtual screen (RandR-driven).
+    ResizeScreen { width: u16, height: u16 },
 }
 
 /// Messages sent from a sidecar to the backend.
@@ -86,6 +100,18 @@ pub enum SidecarToBackend {
     InputDropped {
         window_id: String,
         reason: String,
+    },
+    /// Clipboard data in response to RequestClipboard.
+    ClipboardData {
+        selection: String,
+        mime_type: String,
+        #[serde(with = "base64_bytes")]
+        data: Vec<u8>,
+    },
+    /// X11 clipboard content changed (new selection owner).
+    ClipboardOffer {
+        selection: String,
+        mime_types: Vec<String>,
     },
 }
 
@@ -151,6 +177,20 @@ pub enum BackendToFrontend {
         window_id: String,
         reason: String,
     },
+    /// Clipboard content from sidecar.
+    ClipboardData {
+        sidecar_id: String,
+        selection: String,
+        mime_type: String,
+        #[serde(with = "base64_bytes")]
+        data: Vec<u8>,
+    },
+    /// X11 clipboard content changed.
+    ClipboardOffer {
+        sidecar_id: String,
+        selection: String,
+        mime_types: Vec<String>,
+    },
 }
 
 /// Messages sent from a frontend client to the backend.
@@ -203,6 +243,26 @@ pub enum FrontendToBackend {
         y: f64,
         color: String,
     },
+    /// Request clipboard content from X11.
+    RequestClipboard {
+        sidecar_id: String,
+        selection: String,
+        mime_type: String,
+    },
+    /// Set clipboard content in X11 from browser.
+    SetClipboard {
+        sidecar_id: String,
+        selection: String,
+        mime_type: String,
+        #[serde(with = "base64_bytes")]
+        data: Vec<u8>,
+    },
+    /// Resize the virtual screen on a sidecar (RandR-driven).
+    ResizeScreen {
+        sidecar_id: String,
+        width: u16,
+        height: u16,
+    },
 }
 
 /// Information about a connected process (for initial sync).
@@ -254,6 +314,14 @@ pub enum DisplayUpdate {
         /// Only these should be shown as WindowFrames in the frontend.
         #[serde(default)]
         is_top_level: bool,
+        #[serde(default)]
+        override_redirect: bool,
+        /// X11 border width in pixels (drawn around the content area).
+        #[serde(default)]
+        border_width: u16,
+        /// X11 border color (ARGB32).
+        #[serde(default)]
+        border_pixel: u32,
     },
     /// A window was destroyed.
     WindowDestroyed { window_id: String },
@@ -262,6 +330,8 @@ pub enum DisplayUpdate {
         window_id: String,
         #[serde(default)]
         is_top_level: bool,
+        #[serde(default)]
+        override_redirect: bool,
     },
     /// A window was unmapped (hidden).
     WindowUnmapped { window_id: String },
@@ -272,6 +342,12 @@ pub enum DisplayUpdate {
         y: i16,
         width: u16,
         height: u16,
+        /// X11 border width in pixels (drawn around the content area).
+        #[serde(default)]
+        border_width: u16,
+        /// X11 border color (ARGB32).
+        #[serde(default)]
+        border_pixel: u32,
     },
     /// Fill a rectangle.
     FillRect {
@@ -335,6 +411,75 @@ pub enum DisplayUpdate {
     CursorChanged {
         window_id: String,
         cursor: String,
+    },
+    /// Animated cursor with multiple frames (from CreateAnimCursor).
+    CursorAnimated {
+        window_id: String,
+        frames: Vec<AnimCursorFrame>,
+    },
+    /// Custom cursor bitmap for a window.
+    CursorBitmap {
+        window_id: String,
+        width: u16,
+        height: u16,
+        hotspot_x: u16,
+        hotspot_y: u16,
+        #[serde(with = "base64_bytes")]
+        data: Vec<u8>,
+    },
+    /// Cursor confinement state changed (pointer grab with confine_to).
+    CursorConfined {
+        window_id: String,
+        confined: bool,
+    },
+    /// Window WM state changed (minimize, maximize, fullscreen).
+    WindowStateChanged {
+        window_id: String,
+        state: WindowWmState,
+    },
+    /// Transient-for relationship set (WM_TRANSIENT_FOR).
+    TransientForSet {
+        window_id: String,
+        parent_window_id: Option<String>,
+    },
+    /// Drag-and-drop event from X11 (XdndDrop protocol).
+    DndEvent {
+        window_id: String,
+        event: DndEventKind,
+    },
+    /// Window stacking order changed (raised to top).
+    WindowRaised {
+        window_id: String,
+    },
+    /// X11 clipboard content changed (selection owner set).
+    ClipboardOffer {
+        selection: String,
+        mime_types: Vec<String>,
+    },
+    /// Clipboard data from X11 selection.
+    ClipboardData {
+        selection: String,
+        mime_type: String,
+        #[serde(with = "base64_bytes")]
+        data: Vec<u8>,
+    },
+    /// Window urgency hint changed (from WM_HINTS UrgencyHint flag).
+    WindowUrgent {
+        window_id: String,
+        urgent: bool,
+    },
+    /// Window icon changed (from WM_HINTS icon_pixmap or _NET_WM_ICON).
+    WindowIconChanged {
+        window_id: String,
+        width: u16,
+        height: u16,
+        #[serde(with = "base64_bytes")]
+        data: Vec<u8>,
+    },
+    /// X11 Bell event — frontend should play an audible/visual bell.
+    Bell {
+        /// Percent volume (0-100).
+        percent: u8,
     },
     /// The X11 input focus changed. `window_id` is the UUID of the
     /// focused top-level window, or `None` if focus was cleared (revert
@@ -435,6 +580,63 @@ pub struct MenuAction {
     pub target: Option<serde_json::Value>,
 }
 
+/// A single frame in an animated cursor (from XRender CreateAnimCursor).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AnimCursorFrame {
+    /// ARGB pixel data, base64-encoded.
+    #[serde(with = "base64_bytes")]
+    pub pixels: Vec<u8>,
+    pub width: u16,
+    pub height: u16,
+    pub hotspot_x: u16,
+    pub hotspot_y: u16,
+    /// Delay in milliseconds before advancing to the next frame.
+    pub delay_ms: u32,
+}
+
+/// Window management state flags.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum WindowWmState {
+    Normal,
+    Minimized,
+    Maximized,
+    Fullscreen,
+    /// Request graceful close via WM_DELETE_WINDOW (ICCCM).
+    Close,
+}
+
+/// Phase of a gesture event (swipe or pinch).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum GesturePhase {
+    Begin,
+    Update,
+    End,
+}
+
+/// Drag-and-drop event kinds mapped from XdndDrop protocol.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "kind")]
+pub enum DndEventKind {
+    /// XdndEnter — a drag entered the window.
+    Enter {
+        /// Available MIME types.
+        mime_types: Vec<String>,
+    },
+    /// XdndPosition — the drag is over the window at a given position.
+    Position { x: i16, y: i16 },
+    /// XdndDrop — the user dropped.
+    Drop {
+        /// MIME type of the dropped content.
+        mime_type: String,
+        /// Data payload (base64 encoded).
+        #[serde(with = "base64_bytes")]
+        data: Vec<u8>,
+    },
+    /// XdndLeave — the drag left the window.
+    Leave,
+}
+
 /// Input events sent from the frontend to X11 clients.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "kind")]
@@ -469,5 +671,55 @@ pub enum InputEvent {
     /// MenuTracker for that window dispatches the action over DBus.
     MenuActivate {
         action: MenuAction,
+    },
+    /// Window management action from frontend (minimize/maximize/fullscreen).
+    WindowManage {
+        action: WindowWmState,
+    },
+    /// Drag-and-drop event from browser to X11.
+    DndBridge {
+        event: DndEventKind,
+    },
+    /// Touch begin event (finger down).
+    TouchBegin {
+        touch_id: u32,
+        x: i16,
+        y: i16,
+        state: u16,
+    },
+    /// Touch update event (finger move).
+    TouchUpdate {
+        touch_id: u32,
+        x: i16,
+        y: i16,
+        state: u16,
+    },
+    /// Touch end event (finger up).
+    TouchEnd {
+        touch_id: u32,
+        x: i16,
+        y: i16,
+        state: u16,
+    },
+    /// Gesture swipe event.
+    GestureSwipe {
+        phase: GesturePhase,
+        fingers: u8,
+        dx: f32,
+        dy: f32,
+    },
+    /// Gesture pinch event.
+    GesturePinch {
+        phase: GesturePhase,
+        fingers: u8,
+        dx: f32,
+        dy: f32,
+        scale: f32,
+        rotation: f32,
+    },
+    /// IME composition event from browser.
+    CompositionEvent {
+        phase: String,
+        text: String,
     },
 }

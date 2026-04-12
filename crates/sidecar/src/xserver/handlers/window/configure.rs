@@ -1,0 +1,939 @@
+//! Configure/reparent/circulate window handlers (opcodes 7, 12, 13).
+
+use super::*;
+use super::{win_gravity_delta, update_sibling_visibility};
+
+// ---------------------------------------------------------------------------
+// Opcode 7: ReparentWindow
+// ---------------------------------------------------------------------------
+
+pub(crate) fn handle_reparent_window(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
+    if data.len() < 16 {
+        return build_error(BAD_LENGTH, seq, 0, 7, 0);
+    }
+
+    let window = state.read_u32(data, 4);
+    let new_parent = state.read_u32(data, 8);
+    let x = state.read_i16(data, 12);
+    let y = state.read_i16(data, 14);
+
+    if !state.windows.contains_key(&window) {
+        return build_error(BAD_WINDOW, state.sequence, window, 7, 0);
+    }
+    if !state.windows.contains_key(&new_parent) {
+        return build_error(BAD_WINDOW, state.sequence, new_parent, 7, 0);
+    }
+
+    let bo = state.msb_first;
+    let old_parent = state.windows.get(&window).map(|w| w.parent).unwrap_or(0);
+
+    // Unmap the window first if mapped
+    let was_mapped = state.windows.get(&window).is_some_and(|w| w.mapped);
+    if was_mapped {
+        if let Some(win) = state.windows.get_mut(&window) {
+            win.mapped = false;
+        }
+    }
+
+    // Remove from old parent's children_order
+    if let Some(old_parent_win) = state.windows.get_mut(&old_parent) {
+        old_parent_win.children_order.retain(|&c| c != window);
+    }
+
+    // Update parent and position
+    if let Some(win) = state.windows.get_mut(&window) {
+        win.parent = new_parent;
+        win.x = x;
+        win.y = y;
+    }
+
+    // Add to new parent's children_order
+    if let Some(new_parent_win) = state.windows.get_mut(&new_parent) {
+        new_parent_win.children_order.push(window);
+    }
+
+    let override_redirect = state.windows.get(&window).is_some_and(|w| w.override_redirect);
+
+    // Build ReparentNotify event template
+    let build_reparent_notify = |event_window: u32| -> [u8; 32] {
+        let mut event = [0u8; 32];
+        event[0] = REPARENT_NOTIFY_EVENT;
+        write_u16_bo(&mut event, 2, seq, bo);
+        write_u32_bo(&mut event, 4, event_window, bo); // event window
+        write_u32_bo(&mut event, 8, window, bo); // window
+        write_u32_bo(&mut event, 12, new_parent, bo); // new parent
+        write_i16_bo(&mut event, 16, x, bo);
+        write_i16_bo(&mut event, 18, y, bo);
+        event[20] = if override_redirect { 1 } else { 0 };
+        event
+    };
+
+    let mut events = Vec::new();
+
+    // Send ReparentNotify to the window itself (StructureNotifyMask)
+    {
+        let event = build_reparent_notify(window);
+        if state.windows.get(&window).is_some_and(|w| w.event_mask & STRUCTURE_NOTIFY_MASK != 0) {
+            events.extend_from_slice(&event);
+        }
+        // Cross-connection broadcast: StructureNotify on the window
+        state.broadcast_event(window, STRUCTURE_NOTIFY_MASK, &event);
+    }
+
+    // Send ReparentNotify to old parent (SubstructureNotifyMask)
+    {
+        let event = build_reparent_notify(old_parent);
+        if state.windows.get(&old_parent).is_some_and(|w| w.event_mask & SUBSTRUCTURE_NOTIFY_MASK != 0) {
+            state.pending_events.push(event.to_vec());
+        }
+        // Cross-connection broadcast: SubstructureNotify on old parent
+        state.broadcast_event(old_parent, SUBSTRUCTURE_NOTIFY_MASK, &event);
+    }
+
+    // Send ReparentNotify to new parent (SubstructureNotifyMask)
+    if old_parent != new_parent {
+        let event = build_reparent_notify(new_parent);
+        if state.windows.get(&new_parent).is_some_and(|w| w.event_mask & SUBSTRUCTURE_NOTIFY_MASK != 0) {
+            state.pending_events.push(event.to_vec());
+        }
+        // Cross-connection broadcast: SubstructureNotify on new parent
+        state.broadcast_event(new_parent, SUBSTRUCTURE_NOTIFY_MASK, &event);
+    }
+
+    // If the window was mapped before reparenting, re-map it
+    if was_mapped {
+        if let Some(win) = state.windows.get_mut(&window) {
+            win.mapped = true;
+        }
+    }
+
+    events
+}
+
+// ---------------------------------------------------------------------------
+// Opcode 12: ConfigureWindow
+// ---------------------------------------------------------------------------
+
+pub(crate) fn handle_configure_window(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
+    if data.len() < 12 {
+        return build_error(BAD_LENGTH, seq, 0, 12, 0);
+    }
+
+    let wid = state.read_u32(data, 4);
+    let value_mask = state.read_u16(data, 8);
+
+    // Validate value-list length matches the bitmask
+    let n_values = (value_mask as u32).count_ones() as usize;
+    let required_len = 12 + n_values * 4;
+    if data.len() < required_len {
+        return build_error(BAD_LENGTH, seq, 0, 12, 0);
+    }
+
+    // Check if this is a top-level window that should be redirected to the WM.
+    let is_top_level = state.windows.get(&wid).is_some_and(|w| w.parent == state.root_window);
+    let is_override_redirect = state.windows.get(&wid).is_some_and(|w| w.override_redirect);
+
+    if is_top_level && !is_override_redirect {
+        let should_redirect = {
+            if let Ok(wm) = state.wm_state.lock() {
+                wm.client_id.as_ref().is_some_and(|id| id != &state.client_id)
+            } else {
+                false
+            }
+        };
+
+        if should_redirect {
+            info!("ConfigureWindow: redirecting wid={wid:#x} as ConfigureRequest to WM");
+
+            // Parse the values from the request to populate the ConfigureRequest event.
+            let mut x: i16 = 0;
+            let mut y: i16 = 0;
+            let mut width: u16 = 0;
+            let mut height: u16 = 0;
+            let mut border_width: u16 = 0;
+            let mut sibling: u32 = 0;
+            let mut stack_mode: u8 = 0;
+
+            // Pre-fill with current values from the window
+            if let Some(win) = state.windows.get(&wid) {
+                x = win.x;
+                y = win.y;
+                width = win.width;
+                height = win.height;
+                border_width = win.border_width;
+            }
+
+            let mut offset = 12;
+            for bit in 0..7u16 {
+                if value_mask & (1 << bit) != 0
+                    && offset + 4 <= data.len() {
+                        let val = state.read_u32(data, offset);
+                        match bit {
+                            0 => x = val as i16,
+                            1 => y = val as i16,
+                            2 => width = val as u16,
+                            3 => height = val as u16,
+                            4 => border_width = val as u16,
+                            5 => sibling = val,
+                            6 => stack_mode = val as u8,
+                            _ => {}
+                        }
+                        offset += 4;
+                    }
+            }
+
+            // Build ConfigureRequest event (code 23)
+            let mut event = [0u8; 32];
+            event[0] = CONFIGURE_REQUEST_EVENT;
+            event[1] = stack_mode; // detail = stack-mode
+            // sequence = 0 (asynchronous server event)
+            state.write_u32(&mut event, 4, state.root_window); // parent
+            state.write_u32(&mut event, 8, wid); // window
+            state.write_u32(&mut event, 12, sibling); // sibling
+            state.write_i16(&mut event, 16, x);
+            state.write_i16(&mut event, 18, y);
+            state.write_u16(&mut event, 20, width);
+            state.write_u16(&mut event, 22, height);
+            state.write_u16(&mut event, 24, border_width);
+            state.write_u16(&mut event, 26, value_mask);
+
+            // Per X11 spec, deliver ConfigureRequest to all clients that have
+            // SubstructureRedirectMask on the parent.
+            if let Ok(wm) = state.wm_state.lock() {
+                if let Some(tx) = &wm.event_tx {
+                    let _ = tx.send(event.to_vec());
+                }
+            }
+            let parent = state.windows.get(&wid).map(|w| w.parent).unwrap_or(state.root_window);
+            state.broadcast_event(parent, SUBSTRUCTURE_REDIRECT_MASK, &event);
+            return Vec::new();
+        }
+    }
+
+    // Per X11 spec: if another client has selected ResizeRedirectMask on this
+    // window, suppress width/height changes and generate ResizeRequest(25)
+    // instead. Position, border, and stacking changes still proceed normally.
+    let resize_redirected = {
+        let has_resize_redirect = state.event_broadcaster
+            .has_mask_subscriber(wid, RESIZE_REDIRECT_MASK, &state.client_id);
+        has_resize_redirect && (value_mask & 0x0C != 0) // bits 2 (width) or 3 (height)
+    };
+    // Strip width/height bits from value_mask if resize is redirected
+    let value_mask = if resize_redirected {
+        // Parse the requested width/height for the ResizeRequest event
+        let mut req_width = state.windows.get(&wid).map(|w| w.width).unwrap_or(1);
+        let mut req_height = state.windows.get(&wid).map(|w| w.height).unwrap_or(1);
+        let mut scan_offset = 12;
+        for bit in 0..7u16 {
+            if value_mask & (1 << bit) != 0 && scan_offset + 4 <= data.len() {
+                let val = state.read_u32(data, scan_offset);
+                if bit == 2 { req_width = val as u16; }
+                if bit == 3 { req_height = val as u16; }
+                scan_offset += 4;
+            }
+        }
+
+        let bo = state.msb_first;
+        let mut event = [0u8; 32];
+        event[0] = RESIZE_REQUEST_EVENT;
+        write_u16_bo(&mut event, 2, seq, bo);
+        write_u32_bo(&mut event, 4, wid, bo);
+        write_u16_bo(&mut event, 8, req_width, bo);
+        write_u16_bo(&mut event, 10, req_height, bo);
+        state.broadcast_event(wid, RESIZE_REDIRECT_MASK, &event);
+
+        // Clear width (bit 2) and height (bit 3) from mask so they aren't applied
+        value_mask & !0x0C
+    } else {
+        value_mask
+    };
+
+    let mut offset = 12;
+    let mut changed = false;
+    let mut sibling: u32 = 0;
+    let mut stack_mode: Option<u8> = None;
+    let wid_str = state.window_uuid(wid);
+    let msb_first = state.msb_first;
+
+    // Get size hints for this window (ICCCM WM_NORMAL_HINTS compliance)
+    let size_hints = state.get_size_hints(wid);
+
+    // _NET_WM_SYNC_REQUEST: if the window has a sync counter and supports the
+    // protocol, increment the counter and send a ClientMessage before resizing.
+    let resizing = value_mask & 0x0C != 0; // bits 2 (width) or 3 (height) set
+    if resizing {
+        let sync_counter = state.windows.get(&wid).and_then(|w| w.sync_request_counter);
+        if let Some(counter_id) = sync_counter {
+            let net_wm_sync_request_atom = state.intern_atom("_NET_WM_SYNC_REQUEST", false);
+            let wm_protocols_atom = state.intern_atom("WM_PROTOCOLS", false);
+            let supports_sync = state.window_supports_protocol(wid, net_wm_sync_request_atom);
+            if supports_sync {
+                // Increment the sync request value
+                let new_value = state.windows.get(&wid)
+                    .map(|w| w.sync_request_value.wrapping_add(1))
+                    .unwrap_or(1);
+                if let Some(win) = state.windows.get_mut(&wid) {
+                    win.sync_request_value = new_value;
+                }
+                // Update the SYNC counter value
+                let lo = new_value as u32;
+                let hi = (new_value >> 32) as i32;
+                if let Some(counter) = state.sync_state.counters.get_mut(&counter_id) {
+                    counter.value_lo = lo;
+                    counter.value_hi = hi;
+                }
+
+                // Send _NET_WM_SYNC_REQUEST ClientMessage
+                let bo = state.msb_first;
+                let seq_num = state.sequence;
+                let timestamp = state.timestamp();
+                let mut cm = [0u8; 32];
+                cm[0] = CLIENT_MESSAGE_EVENT;
+                cm[1] = 32; // format
+                write_u16_bo(&mut cm, 2, seq_num, bo);
+                write_u32_bo(&mut cm, 4, wid, bo);
+                write_u32_bo(&mut cm, 8, wm_protocols_atom, bo);
+                write_u32_bo(&mut cm, 12, net_wm_sync_request_atom, bo);
+                write_u32_bo(&mut cm, 16, timestamp, bo);
+                write_u32_bo(&mut cm, 20, lo, bo); // counter value lo
+                write_u32_bo(&mut cm, 24, hi as u32, bo); // counter value hi
+                state.pending_events.push(cm.to_vec());
+            }
+        }
+    }
+
+    // Capture old dimensions before the mutable borrow for gravity calculations
+    let (old_w, old_h, old_children) = state.windows.get(&wid)
+        .map(|w| (w.width, w.height, w.children_order.clone()))
+        .unwrap_or((0, 0, Vec::new()));
+
+    if let Some(win) = state.windows.get_mut(&wid) {
+        for bit in 0..7 {
+            if value_mask & (1 << bit) != 0
+                && offset + 4 <= data.len() {
+                    let val = read_u32_bo(data, offset, msb_first);
+                    match bit {
+                        0 => {
+                            win.x = val as i16;
+                            changed = true;
+                        }
+                        1 => {
+                            win.y = val as i16;
+                            changed = true;
+                        }
+                        2 => {
+                            let mut w = val as u16;
+                            // Apply size hints (ICCCM §4.1.2.3)
+                            if let Some(ref hints) = size_hints {
+                                // Round to width_inc steps relative to base_width
+                                if hints.width_inc > 1 {
+                                    let base = if hints.base_width > 0 { hints.base_width } else { hints.min_width };
+                                    if w > base {
+                                        let over = (w - base) % hints.width_inc;
+                                        if over != 0 {
+                                            w -= over;
+                                        }
+                                    }
+                                }
+                                if hints.min_width > 0 && w < hints.min_width {
+                                    w = hints.min_width;
+                                }
+                                if hints.max_width > 0 && w > hints.max_width {
+                                    w = hints.max_width;
+                                }
+                            }
+                            win.width = w;
+                            changed = true;
+                        }
+                        3 => {
+                            let mut h = val as u16;
+                            // Apply size hints (ICCCM §4.1.2.3)
+                            if let Some(ref hints) = size_hints {
+                                // Round to height_inc steps relative to base_height
+                                if hints.height_inc > 1 {
+                                    let base = if hints.base_height > 0 { hints.base_height } else { hints.min_height };
+                                    if h > base {
+                                        let over = (h - base) % hints.height_inc;
+                                        if over != 0 {
+                                            h -= over;
+                                        }
+                                    }
+                                }
+                                if hints.min_height > 0 && h < hints.min_height {
+                                    h = hints.min_height;
+                                }
+                                if hints.max_height > 0 && h > hints.max_height {
+                                    h = hints.max_height;
+                                }
+                            }
+                            win.height = h;
+                            changed = true;
+                        }
+                        4 => {
+                            win.border_width = val as u16;
+                        }
+                        5 => sibling = val,
+                        6 => stack_mode = Some(val as u8),
+                        _ => {}
+                    }
+                    offset += 4;
+                }
+        }
+
+        if changed {
+            let new_w = win.width;
+            let new_h = win.height;
+
+            // Resize the framebuffer if the window dimensions changed
+            if new_w as u32 != win.framebuffer.width() || new_h as u32 != win.framebuffer.height() {
+                let bg = state.bit_gravity.get(&wid).copied().unwrap_or(0);
+                win.framebuffer.resize_with_gravity(new_w as u32, new_h as u32, bg);
+            }
+
+            if let Some(ref uuid) = wid_str {
+            let _ = state.update_tx.send((
+                state.client_id.clone(),
+                DisplayUpdate::WindowConfigured {
+                    window_id: uuid.clone(),
+                    x: win.x,
+                    y: win.y,
+                    width: win.width,
+                    height: win.height,
+                    border_width: win.border_width,
+                    border_pixel: win.border_pixel,
+                },
+            ));
+            }
+        }
+    }
+
+    // Apply win_gravity to children when parent was resized
+    if changed {
+        let new_w = state.windows.get(&wid).map(|w| w.width).unwrap_or(old_w);
+        let new_h = state.windows.get(&wid).map(|w| w.height).unwrap_or(old_h);
+        let dw = new_w as i16 - old_w as i16;
+        let dh = new_h as i16 - old_h as i16;
+
+        if (dw != 0 || dh != 0) && !old_children.is_empty() {
+            let bo = state.msb_first;
+
+            // Collect children with Unmap gravity (0) for unmap/remap handling.
+            let mut unmap_children: Vec<u32> = Vec::new();
+
+            for child_id in &old_children {
+                let wg = state.win_gravity.get(child_id).copied().unwrap_or(1);
+
+                // Unmap gravity (0): unmap the child, then remap it after resize.
+                if wg == 0 {
+                    if let Some(child) = state.windows.get_mut(child_id) {
+                        if child.mapped {
+                            child.mapped = false;
+                            unmap_children.push(*child_id);
+
+                            // Send UnmapNotify for the child
+                            let mut unmap_evt = [0u8; 32];
+                            unmap_evt[0] = UNMAP_NOTIFY_EVENT;
+                            write_u16_bo(&mut unmap_evt, 2, seq, bo);
+                            write_u32_bo(&mut unmap_evt, 4, *child_id, bo); // event = child
+                            write_u32_bo(&mut unmap_evt, 8, *child_id, bo); // window
+                            state.pending_events.push(unmap_evt.to_vec());
+                            state.broadcast_event(*child_id, STRUCTURE_NOTIFY_MASK, &unmap_evt);
+
+                            let mut parent_unmap = unmap_evt;
+                            write_u32_bo(&mut parent_unmap, 4, wid, bo); // event = parent
+                            state.broadcast_event(wid, SUBSTRUCTURE_NOTIFY_MASK, &parent_unmap);
+                        }
+                    }
+                    continue;
+                }
+
+                let (dx, dy) = win_gravity_delta(wg, dw, dh);
+                if dx != 0 || dy != 0 {
+                    let (cx, cy) = if let Some(child) = state.windows.get_mut(child_id) {
+                        child.x = child.x.saturating_add(dx);
+                        child.y = child.y.saturating_add(dy);
+                        (child.x, child.y)
+                    } else {
+                        continue;
+                    };
+                    let mut event = [0u8; 32];
+                    event[0] = GRAVITY_NOTIFY_EVENT;
+                    write_u16_bo(&mut event, 2, seq, bo);
+                    write_u32_bo(&mut event, 4, *child_id, bo);
+                    write_u32_bo(&mut event, 8, wid, bo);
+                    write_i16_bo(&mut event, 12, cx, bo);
+                    write_i16_bo(&mut event, 14, cy, bo);
+                    state.pending_events.push(event.to_vec());
+
+                    // Cross-connection broadcast: StructureNotify on the child
+                    state.broadcast_event(*child_id, STRUCTURE_NOTIFY_MASK, &event);
+                    // Cross-connection broadcast: SubstructureNotify on the parent
+                    let mut parent_event = event;
+                    write_u32_bo(&mut parent_event, 4, wid, bo); // event = parent
+                    state.broadcast_event(wid, SUBSTRUCTURE_NOTIFY_MASK, &parent_event);
+                }
+            }
+
+            // Re-map children that had Unmap gravity after the resize is complete.
+            for child_id in &unmap_children {
+                if let Some(child) = state.windows.get_mut(child_id) {
+                    child.mapped = true;
+                }
+
+                let mut map_evt = [0u8; 32];
+                map_evt[0] = MAP_NOTIFY_EVENT;
+                write_u16_bo(&mut map_evt, 2, seq, bo);
+                write_u32_bo(&mut map_evt, 4, *child_id, bo); // event = child
+                write_u32_bo(&mut map_evt, 8, *child_id, bo); // window
+                state.pending_events.push(map_evt.to_vec());
+                state.broadcast_event(*child_id, STRUCTURE_NOTIFY_MASK, &map_evt);
+
+                let mut parent_map = map_evt;
+                write_u32_bo(&mut parent_map, 4, wid, bo); // event = parent
+                state.broadcast_event(wid, SUBSTRUCTURE_NOTIFY_MASK, &parent_map);
+            }
+        }
+    }
+
+    // Handle stacking order changes.
+    // Above=0, Below=1, TopIf=2, BottomIf=3, Opposite=4
+    let stacking_changed = if let Some(mode) = stack_mode {
+        let parent_id = state.windows.get(&wid).map(|w| w.parent);
+        if let Some(parent_id) = parent_id {
+            let raised = if mode == 0 {
+                // Above: raise to top (or above sibling)
+                if let Some(parent_win) = state.windows.get_mut(&parent_id) {
+                    parent_win.children_order.retain(|&c| c != wid);
+                    if sibling != 0 {
+                        if let Some(pos) = parent_win.children_order.iter().position(|&c| c == sibling) {
+                            parent_win.children_order.insert(pos + 1, wid);
+                        } else {
+                            parent_win.children_order.push(wid);
+                        }
+                    } else {
+                        parent_win.children_order.push(wid);
+                    }
+                }
+                true
+            } else if mode == 1 {
+                // Below: lower to bottom (or below sibling)
+                if let Some(parent_win) = state.windows.get_mut(&parent_id) {
+                    parent_win.children_order.retain(|&c| c != wid);
+                    if sibling != 0 {
+                        if let Some(pos) = parent_win.children_order.iter().position(|&c| c == sibling) {
+                            parent_win.children_order.insert(pos, wid);
+                        } else {
+                            parent_win.children_order.insert(0, wid);
+                        }
+                    } else {
+                        parent_win.children_order.insert(0, wid);
+                    }
+                }
+                false
+            } else {
+                // TopIf/BottomIf/Opposite: proper X11 occlusion semantics.
+                // children_order is bottom-to-top, so later index = above.
+
+                // Gather geometry for the target window.
+                let win_geom = state.windows.get(&wid).map(|w| {
+                    let bw = w.border_width as i32;
+                    (w.x as i32, w.y as i32, w.width as i32 + 2 * bw, w.height as i32 + 2 * bw)
+                });
+
+                // Helper: check if two bounding rects overlap.
+                let rects_overlap = |ax: i32, ay: i32, aw: i32, ah: i32,
+                                      bx: i32, by: i32, bw: i32, bh: i32| -> bool {
+                    ax < bx + bw && ax + aw > bx && ay < by + bh && ay + ah > by
+                };
+
+                // Get children_order and build sibling geometries.
+                let children = state.windows.get(&parent_id)
+                    .map(|w| w.children_order.clone())
+                    .unwrap_or_default();
+                let win_idx = children.iter().position(|&c| c == wid);
+
+                if let (Some((wx, wy, ww, wh)), Some(win_idx)) = (win_geom, win_idx) {
+                    // Check if any sibling above occludes us (for TopIf / Opposite).
+                    let occluded_by_above = |specific_sibling: u32| -> bool {
+                        if specific_sibling != 0 {
+                            // Only check the specified sibling, and only if it's above.
+                            if let Some(sib_idx) = children.iter().position(|&c| c == specific_sibling) {
+                                if sib_idx > win_idx {
+                                    if let Some(s) = state.windows.get(&specific_sibling) {
+                                        let sbw = s.border_width as i32;
+                                        return rects_overlap(wx, wy, ww, wh,
+                                            s.x as i32, s.y as i32,
+                                            s.width as i32 + 2 * sbw, s.height as i32 + 2 * sbw);
+                                    }
+                                }
+                            }
+                            false
+                        } else {
+                            // Check all siblings above.
+                            for &sib_id in &children[win_idx + 1..] {
+                                if let Some(s) = state.windows.get(&sib_id) {
+                                    let sbw = s.border_width as i32;
+                                    if rects_overlap(wx, wy, ww, wh,
+                                        s.x as i32, s.y as i32,
+                                        s.width as i32 + 2 * sbw, s.height as i32 + 2 * sbw)
+                                    {
+                                        return true;
+                                    }
+                                }
+                            }
+                            false
+                        }
+                    };
+
+                    // Check if we occlude any sibling below (for BottomIf / Opposite).
+                    let occludes_below = |specific_sibling: u32| -> bool {
+                        if specific_sibling != 0 {
+                            // Only check the specified sibling, and only if it's below.
+                            if let Some(sib_idx) = children.iter().position(|&c| c == specific_sibling) {
+                                if sib_idx < win_idx {
+                                    if let Some(s) = state.windows.get(&specific_sibling) {
+                                        let sbw = s.border_width as i32;
+                                        return rects_overlap(wx, wy, ww, wh,
+                                            s.x as i32, s.y as i32,
+                                            s.width as i32 + 2 * sbw, s.height as i32 + 2 * sbw);
+                                    }
+                                }
+                            }
+                            false
+                        } else {
+                            // Check all siblings below.
+                            for &sib_id in &children[..win_idx] {
+                                if let Some(s) = state.windows.get(&sib_id) {
+                                    let sbw = s.border_width as i32;
+                                    if rects_overlap(wx, wy, ww, wh,
+                                        s.x as i32, s.y as i32,
+                                        s.width as i32 + 2 * sbw, s.height as i32 + 2 * sbw)
+                                    {
+                                        return true;
+                                    }
+                                }
+                            }
+                            false
+                        }
+                    };
+
+                    if mode == 2 {
+                        // TopIf: raise only if occluded by a sibling (or the specified sibling).
+                        if occluded_by_above(sibling) {
+                            if let Some(parent_win) = state.windows.get_mut(&parent_id) {
+                                parent_win.children_order.retain(|&c| c != wid);
+                                parent_win.children_order.push(wid);
+                            }
+                            true
+                        } else {
+                            false
+                        }
+                    } else if mode == 3 {
+                        // BottomIf: lower only if we occlude a sibling (or the specified sibling).
+                        if occludes_below(sibling) {
+                            if let Some(parent_win) = state.windows.get_mut(&parent_id) {
+                                parent_win.children_order.retain(|&c| c != wid);
+                                parent_win.children_order.insert(0, wid);
+                            }
+                            false
+                        } else {
+                            false
+                        }
+                    } else {
+                        // Opposite (mode == 4): raise if occluded, lower if occluding, else no-op.
+                        if occluded_by_above(sibling) {
+                            if let Some(parent_win) = state.windows.get_mut(&parent_id) {
+                                parent_win.children_order.retain(|&c| c != wid);
+                                parent_win.children_order.push(wid);
+                            }
+                            true
+                        } else if occludes_below(sibling) {
+                            if let Some(parent_win) = state.windows.get_mut(&parent_id) {
+                                parent_win.children_order.retain(|&c| c != wid);
+                                parent_win.children_order.insert(0, wid);
+                            }
+                            false
+                        } else {
+                            false
+                        }
+                    }
+                } else {
+                    // Window not found in children_order; no-op.
+                    false
+                }
+            };
+
+            // Send WindowRaised to frontend when the window is raised
+            if raised {
+                if let Some(ref uuid) = wid_str {
+                    let _ = state.update_tx.send((
+                        state.client_id.clone(),
+                        DisplayUpdate::WindowRaised {
+                            window_id: uuid.clone(),
+                        },
+                    ));
+                }
+            }
+            true
+        } else {
+            false
+        }
+    } else {
+        false
+    };
+
+    // Send ConfigureNotify when geometry or stacking changed
+    if changed || stacking_changed {
+        if let Some(win) = state.windows.get(&wid) {
+            let parent_id = win.parent;
+            let override_redirect = win.override_redirect;
+            let x = win.x;
+            let y = win.y;
+            let width = win.width;
+            let height = win.height;
+            let border_width = win.border_width;
+
+            // Compute the above_sibling: the window directly below this one in
+            // the parent's stacking order (per X11 spec ConfigureNotify).
+            let above_sibling = state.windows.get(&parent_id)
+                .and_then(|parent| {
+                    let pos = parent.children_order.iter().position(|&id| id == wid)?;
+                    if pos > 0 { Some(parent.children_order[pos - 1]) } else { None }
+                })
+                .unwrap_or(0);
+
+            // Build the ConfigureNotify event
+            let mut event = [0u8; 32];
+            event[0] = CONFIGURE_NOTIFY_EVENT;
+            write_u16_bo(&mut event, 2, seq, msb_first);
+            write_u32_bo(&mut event, 4, wid, msb_first); // event
+            write_u32_bo(&mut event, 8, wid, msb_first); // window
+            write_u32_bo(&mut event, 12, above_sibling, msb_first); // above_sibling
+            write_i16_bo(&mut event, 16, x, msb_first);
+            write_i16_bo(&mut event, 18, y, msb_first);
+            write_u16_bo(&mut event, 20, width, msb_first);
+            write_u16_bo(&mut event, 22, height, msb_first);
+            write_u16_bo(&mut event, 24, border_width, msb_first);
+            event[26] = if override_redirect { 1 } else { 0 };
+
+            // Also send to parent with SubstructureNotifyMask
+            {
+                let mut parent_event = event;
+                write_u32_bo(&mut parent_event, 4, parent_id, msb_first); // event = parent
+                if let Some(parent_win) = state.windows.get(&parent_id) {
+                    if parent_win.event_mask & SUBSTRUCTURE_NOTIFY_MASK != 0 {
+                        state.pending_events.push(parent_event.to_vec());
+                    }
+                }
+                // Cross-connection broadcast: SubstructureNotify on parent
+                state.broadcast_event(parent_id, SUBSTRUCTURE_NOTIFY_MASK, &parent_event);
+            }
+            // Cross-connection broadcast: StructureNotify on the window itself
+            state.broadcast_event(wid, STRUCTURE_NOTIFY_MASK, &event);
+
+            // Generate Expose event when window size changed (apps need this to redraw)
+            let size_changed = width != old_w || height != old_h;
+            if size_changed {
+                let win_mask = state.windows.get(&wid).map(|w| w.event_mask).unwrap_or(0);
+
+                // Also expose mapped descendants
+                let descendants: Vec<(u32, u16, u16)> = state.windows.values()
+                    .filter(|w| w.mapped && w.id != wid && is_descendant_of(&state.windows, w.id, wid))
+                    .filter(|w| w.event_mask & EXPOSURE_MASK != 0)
+                    .map(|w| (w.id, w.width, w.height))
+                    .collect();
+
+                // Total expose events: 1 (self, if selected) + descendants.len()
+                let self_selected = win_mask & EXPOSURE_MASK != 0;
+                let total = if self_selected { 1 } else { 0 } + descendants.len();
+
+                // Build the Expose event for cross-connection broadcast
+                let mut expose = [0u8; 32];
+                expose[0] = EXPOSE_EVENT;
+                write_u16_bo(&mut expose, 2, seq, msb_first);
+                write_u32_bo(&mut expose, 4, wid, msb_first);
+                // x=0, y=0 already zero
+                write_u16_bo(&mut expose, 12, width, msb_first);
+                write_u16_bo(&mut expose, 14, height, msb_first);
+                write_u16_bo(&mut expose, 16, (total - 1) as u16, msb_first); // count: remaining
+                if self_selected {
+                    state.pending_events.push(expose.to_vec());
+                }
+                // Broadcast to other clients that selected ExposureMask
+                state.broadcast_event(wid, EXPOSURE_MASK, &expose);
+
+                for (i, (desc_id, dw, dh)) in descendants.iter().enumerate() {
+                    let mut exp = [0u8; 32];
+                    exp[0] = EXPOSE_EVENT;
+                    write_u16_bo(&mut exp, 2, seq, msb_first);
+                    write_u32_bo(&mut exp, 4, *desc_id, msb_first);
+                    write_u16_bo(&mut exp, 12, *dw, msb_first);
+                    write_u16_bo(&mut exp, 14, *dh, msb_first);
+                    let base = if self_selected { 1 } else { 0 };
+                    let remaining = (total - base - 1 - i) as u16;
+                    write_u16_bo(&mut exp, 16, remaining, msb_first); // count: remaining
+                    state.pending_events.push(exp.to_vec());
+                }
+            }
+
+            // Notify Present extension subscribers about the reconfiguration
+            super::extensions::send_present_config_notify(
+                state, wid, x, y, width, height,
+                0, 0,            // off_x, off_y
+                width, height,   // pixmap_width, pixmap_height = window size
+                0,               // pixmap_flags
+            );
+
+            // Recalculate and send VisibilityNotify for affected siblings
+            if stacking_changed {
+                update_sibling_visibility(state, wid, seq, msb_first);
+            }
+
+            return event.to_vec();
+        }
+    }
+
+    Vec::new()
+}
+
+// ---------------------------------------------------------------------------
+// Opcode 13: CirculateWindow
+// ---------------------------------------------------------------------------
+
+pub(crate) fn handle_circulate_window(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
+    if data.len() < 8 {
+        return build_error(BAD_LENGTH, seq, 0, 13, 0);
+    }
+
+    let direction = data[1]; // 0 = RaiseLowest, 1 = LowerHighest
+    let window = state.read_u32(data, 4);
+
+    if !state.windows.contains_key(&window) {
+        return build_error_bo(BAD_WINDOW, seq, window, 13, 0, state.msb_first);
+    }
+
+    // Get the parent's children_order to find the target child
+    let children: Vec<u32> = state
+        .windows
+        .get(&window)
+        .map(|w| w.children_order.clone())
+        .unwrap_or_default();
+
+    if children.len() < 2 {
+        // Nothing to circulate with fewer than 2 children
+        return Vec::new();
+    }
+
+    // Find the mapped children only
+    let mapped_children: Vec<u32> = children
+        .iter()
+        .filter(|&&c| state.windows.get(&c).map(|w| w.mapped).unwrap_or(false))
+        .copied()
+        .collect();
+
+    if mapped_children.len() < 2 {
+        return Vec::new();
+    }
+
+    let target_child = if direction == 0 {
+        // RaiseLowest: find the lowest (first in stacking order) mapped child and raise it
+        mapped_children[0]
+    } else {
+        // LowerHighest: find the highest (last in stacking order) mapped child and lower it
+        mapped_children[mapped_children.len() - 1]
+    };
+
+    // Check if parent has SubstructureRedirectMask - if so, generate CirculateRequest instead
+    let parent_redirect = state
+        .windows
+        .get(&window)
+        .map(|w| w.event_mask & SUBSTRUCTURE_REDIRECT_MASK != 0)
+        .unwrap_or(false);
+
+    let bo = state.msb_first;
+
+    if parent_redirect {
+        // Generate CirculateRequest event (code 27) instead of performing the operation
+        let mut event = [0u8; 32];
+        event[0] = CIRCULATE_REQUEST_EVENT;
+        write_u16_bo(&mut event, 2, seq, bo);
+        write_u32_bo(&mut event, 4, window, bo);        // parent (event window)
+        write_u32_bo(&mut event, 8, target_child, bo);   // window being circulated
+        event[16] = direction; // place: 0=Top, 1=Bottom (matches direction semantics)
+        state.pending_events.push(event.to_vec());
+        // Per X11 spec, deliver CirculateRequest to all SubstructureRedirectMask selectors
+        state.broadcast_event(window, SUBSTRUCTURE_REDIRECT_MASK, &event);
+        return Vec::new();
+    }
+
+    // Actually perform the circulation
+    if let Some(parent_win) = state.windows.get_mut(&window) {
+        if direction == 0 {
+            // RaiseLowest: move target_child to end of children_order (top of stack)
+            parent_win.children_order.retain(|&c| c != target_child);
+            parent_win.children_order.push(target_child);
+        } else {
+            // LowerHighest: move target_child to beginning of children_order (bottom of stack)
+            parent_win.children_order.retain(|&c| c != target_child);
+            parent_win.children_order.insert(0, target_child);
+        }
+    }
+
+    // Send WindowRaised to frontend when a window is raised to top
+    if direction == 0 {
+        if let Some(uuid) = state.window_uuid(target_child) {
+            let _ = state.update_tx.send((
+                state.client_id.clone(),
+                DisplayUpdate::WindowRaised {
+                    window_id: uuid,
+                },
+            ));
+        }
+    }
+
+    // Generate CirculateNotify event (code 26)
+    // Deliver to: the window itself (StructureNotify) and parent (SubstructureNotify)
+    let place = if direction == 0 { 0u8 } else { 1u8 }; // 0=Top, 1=Bottom
+    let structure_mask = state
+        .windows
+        .get(&target_child)
+        .map(|w| w.event_mask & STRUCTURE_NOTIFY_MASK != 0)
+        .unwrap_or(false);
+    let substructure_mask = state
+        .windows
+        .get(&window)
+        .map(|w| w.event_mask & SUBSTRUCTURE_NOTIFY_MASK != 0)
+        .unwrap_or(false);
+
+    {
+        let mut event = [0u8; 32];
+        event[0] = CIRCULATE_NOTIFY_EVENT;
+        write_u16_bo(&mut event, 2, seq, bo);
+        write_u32_bo(&mut event, 4, target_child, bo);  // event window
+        write_u32_bo(&mut event, 8, target_child, bo);  // window
+        write_u32_bo(&mut event, 12, window, bo);        // (unused per spec, but some set parent here)
+        event[16] = place;
+        if structure_mask {
+            state.pending_events.push(event.to_vec());
+        }
+        // Cross-connection broadcast: StructureNotify on the circulated child
+        state.broadcast_event(target_child, STRUCTURE_NOTIFY_MASK, &event);
+    }
+
+    {
+        let mut event = [0u8; 32];
+        event[0] = CIRCULATE_NOTIFY_EVENT;
+        write_u16_bo(&mut event, 2, seq, bo);
+        write_u32_bo(&mut event, 4, window, bo);         // event window (parent)
+        write_u32_bo(&mut event, 8, target_child, bo);   // window
+        write_u32_bo(&mut event, 12, window, bo);
+        event[16] = place;
+        if substructure_mask {
+            state.pending_events.push(event.to_vec());
+        }
+        // Cross-connection broadcast: SubstructureNotify on the parent
+        state.broadcast_event(window, SUBSTRUCTURE_NOTIFY_MASK, &event);
+    }
+
+    Vec::new()
+}

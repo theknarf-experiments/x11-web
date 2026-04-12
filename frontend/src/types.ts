@@ -73,6 +73,19 @@ export type BackendToFrontend =
 			sidecar_id: string;
 			window_id: string;
 			reason: string;
+	  }
+	| {
+			type: "ClipboardData";
+			sidecar_id: string;
+			selection: string;
+			mime_type: string;
+			data: string;
+	  }
+	| {
+			type: "ClipboardOffer";
+			sidecar_id: string;
+			selection: string;
+			mime_types: string[];
 	  };
 
 // Frontend -> Backend messages
@@ -107,7 +120,50 @@ export type FrontendToBackend =
 			x: number;
 			y: number;
 			color: string;
+	  }
+	| {
+			type: "RequestClipboard";
+			sidecar_id: string;
+			selection: string;
+			mime_type: string;
+	  }
+	| {
+			type: "SetClipboard";
+			sidecar_id: string;
+			selection: string;
+			mime_type: string;
+			data: string;
+	  }
+	| {
+			type: "ResizeScreen";
+			sidecar_id: string;
+			width: number;
+			height: number;
 	  };
+
+/** Animated cursor frame. */
+export interface AnimCursorFrame {
+	/** Base64-encoded ARGB pixel data. */
+	pixels: string;
+	width: number;
+	height: number;
+	hotspot_x: number;
+	hotspot_y: number;
+	delay_ms: number;
+}
+
+/** Window WM states. */
+export type WindowWmState = "normal" | "minimized" | "maximized" | "fullscreen" | "close";
+
+/** Drag-and-drop event kinds mapped from XdndDrop protocol. */
+export type DndEventKind =
+	| { kind: "Enter"; mime_types: string[] }
+	| { kind: "Position"; x: number; y: number }
+	| { kind: "Drop"; mime_type: string; data: string }
+	| { kind: "Leave" };
+
+/** Focus policy for the window manager. */
+export type FocusPolicy = "click-to-focus" | "focus-follows-mouse";
 
 export type DisplayUpdate =
 	| { kind: "TitleChanged"; window_id: string; title: string }
@@ -119,9 +175,12 @@ export type DisplayUpdate =
 			width: number;
 			height: number;
 			is_top_level?: boolean;
+			override_redirect?: boolean;
+			border_width?: number;
+			border_pixel?: number;
 	  }
 	| { kind: "WindowDestroyed"; window_id: string }
-	| { kind: "WindowMapped"; window_id: string; is_top_level?: boolean }
+	| { kind: "WindowMapped"; window_id: string; is_top_level?: boolean; override_redirect?: boolean }
 	| { kind: "WindowUnmapped"; window_id: string }
 	| {
 			kind: "WindowConfigured";
@@ -130,6 +189,8 @@ export type DisplayUpdate =
 			y: number;
 			width: number;
 			height: number;
+			border_width?: number;
+			border_pixel?: number;
 	  }
 	| {
 			kind: "FillRect";
@@ -192,6 +253,40 @@ export type DisplayUpdate =
 			window_id: string;
 			cursor: string;
 	  }
+	| {
+			kind: "CursorBitmap";
+			window_id: string;
+			width: number;
+			height: number;
+			hotspot_x: number;
+			hotspot_y: number;
+			data: string;
+	  }
+	| {
+			kind: "CursorAnimated";
+			window_id: string;
+			frames: AnimCursorFrame[];
+	  }
+	| {
+			kind: "CursorConfined";
+			window_id: string;
+			confined: boolean;
+	  }
+	| {
+			kind: "WindowStateChanged";
+			window_id: string;
+			state: WindowWmState;
+	  }
+	| {
+			kind: "TransientForSet";
+			window_id: string;
+			parent_window_id: string | null;
+	  }
+	| {
+			kind: "DndEvent";
+			window_id: string;
+			event: DndEventKind;
+	  }
 	| { kind: "WindowFocused"; window_id: string | null }
 	| {
 			kind: "MenuStructure";
@@ -205,7 +300,17 @@ export type DisplayUpdate =
 			enabled?: boolean;
 			checked?: boolean;
 			label?: string;
-	  };
+	  }
+	| { kind: "WindowRaised"; window_id: string }
+	| { kind: "WindowUrgent"; window_id: string; urgent: boolean }
+	| {
+			kind: "WindowIconChanged";
+			window_id: string;
+			width: number;
+			height: number;
+			data: string;
+	  }
+	| { kind: "Bell"; percent: number };
 
 export type MenuItemKind =
 	| "normal"
@@ -244,4 +349,12 @@ export type InputEvent =
 			state: number;
 	  }
 	| { kind: "MotionNotify"; x: number; y: number; state: number }
-	| { kind: "MenuActivate"; action: MenuAction };
+	| { kind: "TouchBegin"; touch_id: number; x: number; y: number; state: number }
+	| { kind: "TouchUpdate"; touch_id: number; x: number; y: number; state: number }
+	| { kind: "TouchEnd"; touch_id: number; x: number; y: number; state: number }
+	| { kind: "GestureSwipe"; dx: number; dy: number; fingers: number; phase: "Begin" | "Update" | "End" }
+	| { kind: "GesturePinch"; dx: number; dy: number; scale: number; rotation: number; fingers: number; phase: "Begin" | "Update" | "End" }
+	| { kind: "MenuActivate"; action: MenuAction }
+	| { kind: "WindowManage"; action: WindowWmState }
+	| { kind: "DndBridge"; event: DndEventKind }
+	| { kind: "CompositionEvent"; phase: "start" | "update" | "end"; text: string };

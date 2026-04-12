@@ -1,3 +1,4 @@
+import { inflateRaw } from "pako";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { getAppContextMenuItems } from "./AppContextMenu";
 import { ClientRenderer } from "./ClientRenderer";
@@ -5,7 +6,15 @@ import { DiagnosticsPanel } from "./DiagnosticsPanel";
 import { Dock, type DockProcess } from "./Dock";
 import { GlobalMenuBar } from "./GlobalMenuBar";
 import { InfiniteCanvas } from "./InfiniteCanvas";
-import type { InputEvent, MenuAction, MenuItem } from "./types";
+import { SettingsPanel } from "./SettingsPanel";
+import type {
+	AnimCursorFrame,
+	FocusPolicy,
+	InputEvent,
+	MenuAction,
+	MenuItem,
+	WindowWmState,
+} from "./types";
 import { useBackendSocket } from "./useBackendSocket";
 import { WindowFrame } from "./WindowFrame";
 
@@ -29,6 +38,25 @@ interface CanvasWindow {
 	color: string;
 	zIndex: number;
 	cursor: string;
+	overrideRedirect: boolean;
+	/** Current WM state. */
+	wmState: WindowWmState;
+	/** Whether cursor is confined to this window. */
+	cursorConfined: boolean;
+	/** Parent window id for transient windows. */
+	transientFor: string | null;
+	/** Saved position before maximize/fullscreen. */
+	savedPosition?: { x: number; y: number };
+	/** WM_HINTS urgency flag. */
+	urgent?: boolean;
+	/** Window icon dimensions and RGBA data (base64). */
+	iconWidth?: number;
+	iconHeight?: number;
+	iconData?: string;
+	/** X11 border width in pixels. */
+	borderWidth: number;
+	/** X11 border color (ARGB32). */
+	borderPixel: number;
 }
 
 const PASTEL_COLORS = [
@@ -49,6 +77,48 @@ const PASTEL_COLORS = [
 let spawnCounter = 0;
 let nextZIndex = 1;
 
+/** Convert ARGB pixel data to a CSS cursor URL data-uri. Returns a promise. */
+function argbToCursorUrl(
+	data: string,
+	width: number,
+	height: number,
+	hotX: number,
+	hotY: number,
+): Promise<string> {
+	const canvas = new OffscreenCanvas(width, height);
+	const ctx = canvas.getContext("2d")!;
+	const binaryStr = atob(data);
+	const compressed = new Uint8Array(binaryStr.length);
+	for (let i = 0; i < binaryStr.length; i++) {
+		compressed[i] = binaryStr.charCodeAt(i);
+	}
+	let rawData: Uint8Array;
+	try {
+		rawData = inflateRaw(compressed);
+	} catch {
+		rawData = compressed;
+	}
+	const imageData = ctx.createImageData(width, height);
+	for (let i = 0; i < width * height; i++) {
+		const srcOff = i * 4;
+		imageData.data[srcOff] = rawData[srcOff + 2]; // R
+		imageData.data[srcOff + 1] = rawData[srcOff + 1]; // G
+		imageData.data[srcOff + 2] = rawData[srcOff]; // B
+		imageData.data[srcOff + 3] = rawData[srcOff + 3]; // A
+	}
+	ctx.putImageData(imageData, 0, 0);
+	return canvas.convertToBlob({ type: "image/png" }).then((blob) => {
+		return new Promise<string>((resolve) => {
+			const reader = new FileReader();
+			reader.onloadend = () => {
+				const dataUrl = reader.result as string;
+				resolve(`url(${dataUrl}) ${hotX} ${hotY}, auto`);
+			};
+			reader.readAsDataURL(blob);
+		});
+	});
+}
+
 function App() {
 	const {
 		connected,
@@ -59,6 +129,8 @@ function App() {
 		send,
 		onDisplayUpdate,
 		onWindowStateChange,
+		onClipboardData,
+		onClipboardOffer,
 		diagnostics,
 		dismissDiagnostic,
 		clearDiagnostics,
@@ -76,6 +148,10 @@ function App() {
 	const clientInfoRef = useRef<
 		Map<string, { sidecarId: string; pid: number; command: string }>
 	>(new Map());
+	/** Track creation metadata (position, override_redirect) for windows not yet mapped. */
+	const windowCreationRef = useRef<
+		Map<string, { x: number; y: number; overrideRedirect: boolean; borderWidth: number; borderPixel: number }>
+	>(new Map());
 	/** Track which sidecars we've already subscribed to. */
 	const subscribedRef = useRef<Set<string>>(new Set());
 	/** Ref to always-current processes map (avoids stale closures in callbacks). */
@@ -83,6 +159,53 @@ function App() {
 	processesRef.current = processes;
 	const initialWindowStatesRef = useRef(initialWindowStates);
 	initialWindowStatesRef.current = initialWindowStates;
+
+	/** Animated cursor timers: windowId -> interval handle. */
+	const animCursorTimersRef = useRef<Map<string, ReturnType<typeof setInterval>>>(new Map());
+
+	/** Focus policy setting. */
+	const [focusPolicy, setFocusPolicy] = useState<FocusPolicy>("click-to-focus");
+
+	// Clean up animated cursor timers on unmount
+	useEffect(() => {
+		return () => {
+			for (const timer of animCursorTimersRef.current.values()) {
+				clearInterval(timer);
+			}
+		};
+	}, []);
+
+	// Send ResizeScreen to all connected sidecars when the viewport resizes.
+	const sidecarsRef = useRef(sidecars);
+	sidecarsRef.current = sidecars;
+	useEffect(() => {
+		let timer: ReturnType<typeof setTimeout> | undefined;
+		const sendScreenSize = () => {
+			const w = Math.round(window.innerWidth);
+			const h = Math.round(window.innerHeight);
+			for (const sc of sidecarsRef.current) {
+				send({
+					type: "ResizeScreen",
+					sidecar_id: sc.id,
+					width: w,
+					height: h,
+				});
+			}
+		};
+		const onResize = () => {
+			clearTimeout(timer);
+			timer = setTimeout(sendScreenSize, 150);
+		};
+		window.addEventListener("resize", onResize);
+		// Send initial size once connected
+		if (connected && sidecarsRef.current.length > 0) {
+			sendScreenSize();
+		}
+		return () => {
+			window.removeEventListener("resize", onResize);
+			clearTimeout(timer);
+		};
+	}, [connected, sidecars, send]);
 
 	// Keep clientInfoRef in sync with connectedProcesses
 	useEffect(() => {
@@ -105,7 +228,6 @@ function App() {
 		}
 
 		// Update any windows that were created before ProcessConnected arrived
-		// (fixes the race where WindowMapped arrives before we know the PID)
 		setWindows((prev) => {
 			let changed = false;
 			const next = prev.map((w) => {
@@ -149,7 +271,45 @@ function App() {
 		});
 	}, [processes]);
 
-	// Register display callback — creates WindowFrames on WindowMapped
+	/** Start an animated cursor cycle for a window. */
+	const startAnimCursor = useCallback((windowId: string, frames: AnimCursorFrame[]) => {
+		// Clear any existing animation for this window
+		const existing = animCursorTimersRef.current.get(windowId);
+		if (existing) clearInterval(existing);
+
+		if (frames.length === 0) return;
+
+		let frameIndex = 0;
+
+		const advanceFrame = () => {
+			const frame = frames[frameIndex];
+			argbToCursorUrl(
+				frame.pixels,
+				frame.width,
+				frame.height,
+				frame.hotspot_x,
+				frame.hotspot_y,
+			).then((cursorCss) => {
+				setWindows((prev) =>
+					prev.map((w) =>
+						w.windowId === windowId ? { ...w, cursor: cursorCss } : w,
+					),
+				);
+			});
+			frameIndex = (frameIndex + 1) % frames.length;
+		};
+
+		// Show first frame immediately
+		advanceFrame();
+
+		// Use the first frame's delay for the interval (simplification --
+		// ideally each frame has its own delay, but setInterval is fixed)
+		const delay = frames[0].delay_ms || 100;
+		const timer = setInterval(advanceFrame, delay);
+		animCursorTimersRef.current.set(windowId, timer);
+	}, []);
+
+	// Register display callback -- creates WindowFrames on WindowMapped
 	useEffect(() => {
 		onDisplayUpdate((sidecarId, clientId, update) => {
 			// Title changes update the matching window
@@ -165,6 +325,12 @@ function App() {
 
 			// Cursor changes update the matching window
 			if (update.kind === "CursorChanged") {
+				// Stop any animated cursor
+				const existing = animCursorTimersRef.current.get(update.window_id);
+				if (existing) {
+					clearInterval(existing);
+					animCursorTimersRef.current.delete(update.window_id);
+				}
 				setWindows((prev) =>
 					prev.map((w) =>
 						w.windowId === update.window_id
@@ -174,10 +340,185 @@ function App() {
 				);
 			}
 
-			// WindowMapped with is_top_level — create a WindowFrame
-			if (update.kind === "WindowMapped" && update.is_top_level) {
+			// Custom cursor bitmap -- convert ARGB data to a CSS cursor URL
+			if (update.kind === "CursorBitmap") {
+				// Stop any animated cursor
+				const existing = animCursorTimersRef.current.get(update.window_id);
+				if (existing) {
+					clearInterval(existing);
+					animCursorTimersRef.current.delete(update.window_id);
+				}
+				const windowId = update.window_id;
+				argbToCursorUrl(
+					update.data,
+					update.width,
+					update.height,
+					update.hotspot_x,
+					update.hotspot_y,
+				).then((cursor) => {
+					setWindows((prev) =>
+						prev.map((w) =>
+							w.windowId === windowId ? { ...w, cursor } : w,
+						),
+					);
+				});
+			}
+
+			// Animated cursor -- cycle through frames
+			if (update.kind === "CursorAnimated") {
+				startAnimCursor(update.window_id, update.frames);
+			}
+
+			// Cursor confinement state changed
+			if (update.kind === "CursorConfined") {
+				setWindows((prev) =>
+					prev.map((w) =>
+						w.windowId === update.window_id
+							? { ...w, cursorConfined: update.confined }
+							: w,
+					),
+				);
+			}
+
+			// Window WM state changed from server
+			if (update.kind === "WindowStateChanged") {
+				setWindows((prev) =>
+					prev.map((w) => {
+						if (w.windowId !== update.window_id) return w;
+						const newW = { ...w, wmState: update.state };
+						if (update.state === "maximized" || update.state === "fullscreen") {
+							newW.savedPosition = { x: w.x, y: w.y };
+						}
+						return newW;
+					}),
+				);
+			}
+
+			// Transient-for relationship
+			if (update.kind === "TransientForSet") {
+				setWindows((prev) =>
+					prev.map((w) =>
+						w.windowId === update.window_id
+							? { ...w, transientFor: update.parent_window_id }
+							: w,
+					),
+				);
+			}
+
+			// DndEvent -- X11 app initiated drag-and-drop toward browser
+			if (update.kind === "DndEvent") {
+				const ev = update.event;
+				if (ev.kind === "Drop" && ev.data) {
+					try {
+						const decoded = atob(ev.data);
+						if (ev.mime_type === "text/plain" || ev.mime_type === "text/uri-list") {
+							navigator.clipboard.writeText(decoded).catch(() => {});
+						}
+					} catch { /* ignore decode errors */ }
+				}
+			}
+
+			// WindowRaised -- server raised a window to the top of the stack
+			if (update.kind === "WindowRaised") {
+				setWindows((prev) =>
+					prev.map((w) =>
+						w.windowId === update.window_id
+							? { ...w, zIndex: nextZIndex++ }
+							: w,
+					),
+				);
+			}
+
+			// Bell -- play an audible/visual bell
+			if (update.kind === "Bell") {
+				try {
+					const ctx = new AudioContext();
+					const osc = ctx.createOscillator();
+					const gain = ctx.createGain();
+					osc.connect(gain);
+					gain.connect(ctx.destination);
+					osc.frequency.value = 800;
+					gain.gain.value = Math.max(0.01, update.percent / 100);
+					osc.start();
+					osc.stop(ctx.currentTime + 0.1);
+				} catch {
+					document.body.style.backgroundColor = "#fff";
+					setTimeout(() => {
+						document.body.style.backgroundColor = "";
+					}, 100);
+				}
+			}
+
+			// WindowUrgent -- set urgency hint (dock bounce / title flash)
+			if (update.kind === "WindowUrgent") {
+				setWindows((prev) =>
+					prev.map((w) =>
+						w.windowId === update.window_id
+							? { ...w, urgent: update.urgent }
+							: w,
+					),
+				);
+			}
+
+			// WindowIconChanged -- update window icon
+			if (update.kind === "WindowIconChanged") {
+				setWindows((prev) =>
+					prev.map((w) =>
+						w.windowId === update.window_id
+							? {
+									...w,
+									iconWidth: update.width,
+									iconHeight: update.height,
+									iconData: update.data,
+								}
+							: w,
+					),
+				);
+			}
+
+			// WindowConfigured -- update override-redirect window positions from server
+			if (update.kind === "WindowConfigured") {
+				const bw = update.border_width ?? 0;
+				const bp = update.border_pixel ?? 0;
+				setWindows((prev) =>
+					prev.map((w) =>
+						w.windowId === update.window_id
+							? {
+								...w,
+								...(w.overrideRedirect ? { x: update.x, y: update.y } : {}),
+								borderWidth: bw,
+								borderPixel: bp,
+							}
+							: w,
+					),
+				);
+				const existing = windowCreationRef.current.get(update.window_id);
+				if (existing) {
+					existing.x = update.x;
+					existing.y = update.y;
+					existing.borderWidth = bw;
+					existing.borderPixel = bp;
+				}
+			}
+
+			// WindowCreated -- track creation metadata for later use at map time
+			if (update.kind === "WindowCreated") {
+				windowCreationRef.current.set(update.window_id, {
+					x: update.x,
+					y: update.y,
+					overrideRedirect: !!update.override_redirect,
+					borderWidth: update.border_width ?? 0,
+					borderPixel: update.border_pixel ?? 0,
+				});
+			}
+
+			// WindowMapped with is_top_level or override_redirect -- create a WindowFrame
+			if (update.kind === "WindowMapped" && (update.is_top_level || update.override_redirect)) {
 				const windowId = update.window_id;
 				if (closedWindowsRef.current.has(windowId)) return;
+
+				const isOverrideRedirect = !!update.override_redirect;
+				const creationMeta = windowCreationRef.current.get(windowId);
 
 				setWindows((prev) => {
 					if (prev.some((w) => w.windowId === windowId)) return prev;
@@ -190,33 +531,40 @@ function App() {
 						|| processesRef.current[sid]?.find((p) => p.pid === pid)?.command
 						|| `PID ${pid}`;
 
-					const saved = initialWindowStatesRef.current.find(
-						(ws) => ws.clientId === clientId,
-					);
 					let cx: number;
 					let cy: number;
 					let color: string;
-					if (saved) {
-						cx = saved.x;
-						cy = saved.y;
-						color = saved.color;
-					} else {
-						const idx = spawnCounter++;
-						const offset = idx * 30;
-						cx = window.innerWidth / 4 + offset;
-						cy = window.innerHeight / 4 + offset;
-						color = PASTEL_COLORS[idx % PASTEL_COLORS.length];
-					}
 
-					if (!saved) {
-						send({
-							type: "UpdateWindowState",
-							client_id: clientId,
-							sidecar_id: sid,
-							x: cx,
-							y: cy,
-							color,
-						});
+					if (isOverrideRedirect) {
+						cx = creationMeta?.x ?? 0;
+						cy = creationMeta?.y ?? 0;
+						color = "transparent";
+					} else {
+						const saved = initialWindowStatesRef.current.find(
+							(ws) => ws.clientId === clientId,
+						);
+						if (saved) {
+							cx = saved.x;
+							cy = saved.y;
+							color = saved.color;
+						} else {
+							const idx = spawnCounter++;
+							const offset = idx * 30;
+							cx = window.innerWidth / 4 + offset;
+							cy = window.innerHeight / 4 + offset;
+							color = PASTEL_COLORS[idx % PASTEL_COLORS.length];
+						}
+
+						if (!saved) {
+							send({
+								type: "UpdateWindowState",
+								client_id: clientId,
+								sidecar_id: sid,
+								x: cx,
+								y: cy,
+								color,
+							});
+						}
 					}
 
 					return [
@@ -232,12 +580,18 @@ function App() {
 							color,
 							zIndex: nextZIndex++,
 							cursor: "default",
+							overrideRedirect: isOverrideRedirect,
+							wmState: "normal" as WindowWmState,
+							cursorConfined: false,
+							transientFor: null,
+							borderWidth: creationMeta?.borderWidth ?? 0,
+							borderPixel: creationMeta?.borderPixel ?? 0,
 						},
 					];
 				});
 			}
 
-			// WindowUnmapped — hide the WindowFrame
+			// WindowUnmapped -- hide the WindowFrame
 			if (update.kind === "WindowUnmapped") {
 				setWindows((prev) => {
 					if (!prev.some((w) => w.windowId === update.window_id))
@@ -249,9 +603,16 @@ function App() {
 				);
 			}
 
-			// WindowDestroyed — remove frame and renderer
+			// WindowDestroyed -- remove frame and renderer
 			if (update.kind === "WindowDestroyed") {
 				renderersRef.current.delete(update.window_id);
+				windowCreationRef.current.delete(update.window_id);
+				// Clean up animated cursor timer
+				const timer = animCursorTimersRef.current.get(update.window_id);
+				if (timer) {
+					clearInterval(timer);
+					animCursorTimersRef.current.delete(update.window_id);
+				}
 				setWindows((prev) => {
 					if (!prev.some((w) => w.windowId === update.window_id))
 						return prev;
@@ -268,13 +629,13 @@ function App() {
 				});
 			}
 
-			// WindowFocused — the X11 server tells us which top-level
+			// WindowFocused -- the X11 server tells us which top-level
 			// window has input focus. Drives the global menu bar.
 			if (update.kind === "WindowFocused") {
 				setFocusedWindowId(update.window_id);
 			}
 
-			// MenuStructure — full menu tree from a GTK / Qt app.
+			// MenuStructure -- full menu tree from a GTK / Qt app.
 			if (update.kind === "MenuStructure") {
 				setMenus((prev) => {
 					const next = new Map(prev);
@@ -287,9 +648,33 @@ function App() {
 				});
 			}
 
+			// MenuStateChanged -- incremental menu item updates (enable/disable/check/label).
+			if (update.kind === "MenuStateChanged") {
+				setMenus((prev) => {
+					const tree = prev.get(update.window_id);
+					if (!tree) return prev;
+					const patchItem = (items: MenuItem[]): MenuItem[] =>
+						items.map((item) => {
+							if (item.id === update.item_id) {
+								return {
+									...item,
+									...(update.enabled !== undefined && { enabled: update.enabled }),
+									...(update.checked !== undefined && { checked: update.checked }),
+									...(update.label !== undefined && { label: update.label }),
+								};
+							}
+							if (item.children) {
+								return { ...item, children: patchItem(item.children) };
+							}
+							return item;
+						});
+					const next = new Map(prev);
+					next.set(update.window_id, patchItem(tree));
+					return next;
+				});
+			}
+
 			// Route display updates to the per-window renderer.
-			// The server composites children into parents and only sends
-			// PutImage for top-level windows, so we key renderers by window_id.
 			const windowId = "window_id" in update ? update.window_id : undefined;
 			if (windowId == null) return;
 
@@ -306,7 +691,7 @@ function App() {
 		});
 		return () => onDisplayUpdate(null);
 	// biome-ignore lint/correctness/useExhaustiveDependencies: initialWindowStates used via ref to avoid re-registering callback
-	}, [onDisplayUpdate, send]);
+	}, [onDisplayUpdate, send, startAnimCursor]);
 
 	// Handle window state changes from other tabs
 	useEffect(() => {
@@ -317,6 +702,155 @@ function App() {
 		});
 		return () => onWindowStateChange(null);
 	}, [onWindowStateChange]);
+
+	// Clipboard bridge: browser <-> X11
+	const clipboardOfferRef = useRef<
+		Map<string, { selection: string; mimeTypes: string[] }>
+	>(new Map());
+
+	useEffect(() => {
+		onClipboardOffer((sidecarId, selection, mimeTypes) => {
+			clipboardOfferRef.current.set(sidecarId, { selection, mimeTypes });
+		});
+		return () => onClipboardOffer(null);
+	}, [onClipboardOffer]);
+
+	useEffect(() => {
+		onClipboardData((_sidecarId, _selection, mimeType, data) => {
+			try {
+				if (mimeType === "text/plain" || mimeType.startsWith("text/")) {
+					const text = atob(data);
+					navigator.clipboard.writeText(text).catch(() => {});
+				} else if (mimeType === "text/html") {
+					const html = atob(data);
+					const blob = new Blob([html], { type: "text/html" });
+					const textBlob = new Blob([html], { type: "text/plain" });
+					const item = new ClipboardItem({
+						"text/html": blob,
+						"text/plain": textBlob,
+					});
+					navigator.clipboard.write([item]).catch(() => {});
+				} else if (mimeType.startsWith("image/")) {
+					// Decode base64 to binary
+					const binaryStr = atob(data);
+					const bytes = new Uint8Array(binaryStr.length);
+					for (let i = 0; i < binaryStr.length; i++) {
+						bytes[i] = binaryStr.charCodeAt(i);
+					}
+					const blob = new Blob([bytes], { type: mimeType });
+					const item = new ClipboardItem({ [mimeType]: blob });
+					navigator.clipboard.write([item]).catch(() => {});
+				}
+			} catch {
+				// ignore decode errors
+			}
+		});
+		return () => onClipboardData(null);
+	}, [onClipboardData]);
+
+	// Listen for paste events: send browser clipboard content to X11
+	useEffect(() => {
+		function handlePaste(e: ClipboardEvent) {
+			const dt = e.clipboardData;
+			if (!dt) return;
+
+			for (const sidecar of sidecars) {
+				if (!subscribedRef.current.has(sidecar.id)) continue;
+
+				// Try HTML first
+				const html = dt.getData("text/html");
+				if (html) {
+					send({
+						type: "SetClipboard",
+						sidecar_id: sidecar.id,
+						selection: "CLIPBOARD",
+						mime_type: "text/html",
+						data: btoa(html),
+					});
+				}
+
+				// Always send plain text
+				const text = dt.getData("text/plain");
+				if (text) {
+					send({
+						type: "SetClipboard",
+						sidecar_id: sidecar.id,
+						selection: "CLIPBOARD",
+						mime_type: "text/plain",
+						data: btoa(text),
+					});
+				}
+
+				// Try images from files
+				for (const file of Array.from(dt.files)) {
+					if (file.type.startsWith("image/")) {
+						const reader = new FileReader();
+						reader.onloadend = () => {
+							const result = reader.result as ArrayBuffer;
+							const bytes = new Uint8Array(result);
+							let binary = "";
+							for (let j = 0; j < bytes.length; j++) {
+								binary += String.fromCharCode(bytes[j]);
+							}
+							send({
+								type: "SetClipboard",
+								sidecar_id: sidecar.id,
+								selection: "CLIPBOARD",
+								mime_type: file.type,
+								data: btoa(binary),
+							});
+						};
+						reader.readAsArrayBuffer(file);
+					}
+				}
+			}
+		}
+
+		function handleCopy() {
+			for (const [sidecarId, offer] of clipboardOfferRef.current) {
+				if (!subscribedRef.current.has(sidecarId)) continue;
+				// Request multiple types if available
+				const requestedTypes = new Set<string>();
+				for (const mime of offer.mimeTypes) {
+					if (
+						mime === "text/plain" ||
+						mime === "text/html" ||
+						mime.startsWith("image/png")
+					) {
+						requestedTypes.add(mime);
+					}
+				}
+				// Fallback to first available type
+				if (requestedTypes.size === 0 && offer.mimeTypes.length > 0) {
+					requestedTypes.add(offer.mimeTypes[0]);
+				}
+				// Also request TARGETS for negotiation
+				if (offer.mimeTypes.includes("TARGETS")) {
+					send({
+						type: "RequestClipboard",
+						sidecar_id: sidecarId,
+						selection: offer.selection,
+						mime_type: "TARGETS",
+					});
+				}
+				for (const mimeType of requestedTypes) {
+					send({
+						type: "RequestClipboard",
+						sidecar_id: sidecarId,
+						selection: offer.selection,
+						mime_type: mimeType,
+					});
+				}
+			}
+		}
+
+		document.addEventListener("paste", handlePaste);
+		document.addEventListener("copy", handleCopy);
+		return () => {
+			document.removeEventListener("paste", handlePaste);
+			document.removeEventListener("copy", handleCopy);
+		};
+	}, [sidecars, send]);
 
 	function handleSpawn(sidecarId: string, command: string, args: string[]) {
 		if (!subscribedRef.current.has(sidecarId)) {
@@ -336,7 +870,7 @@ function App() {
 		(windowId: string, x: number, y: number) => {
 			setWindows((prev) => {
 				const win = prev.find((w) => w.windowId === windowId);
-				if (win) {
+				if (win && !win.overrideRedirect) {
 					send({
 						type: "UpdateWindowState",
 						client_id: win.clientId,
@@ -346,9 +880,17 @@ function App() {
 						color: win.color,
 					});
 				}
-				return prev.map((w) =>
-					w.windowId === windowId ? { ...w, x, y } : w,
-				);
+				// Move transient children along with parent
+				const dx = win ? x - win.x : 0;
+				const dy = win ? y - win.y : 0;
+				return prev.map((w) => {
+					if (w.windowId === windowId) return { ...w, x, y };
+					// If this window is transient for the moved window, follow it
+					if (w.transientFor === windowId) {
+						return { ...w, x: w.x + dx, y: w.y + dy };
+					}
+					return w;
+				});
 			});
 		},
 		[send],
@@ -373,11 +915,17 @@ function App() {
 	);
 
 	const handleFocus = useCallback((windowId: string) => {
-		setWindows((prev) =>
-			prev.map((w) =>
-				w.windowId === windowId ? { ...w, zIndex: nextZIndex++ } : w,
-			),
-		);
+		setWindows((prev) => {
+			const win = prev.find((w) => w.windowId === windowId);
+			if (!win) return prev;
+
+			return prev.map((w) => {
+				if (w.windowId === windowId) return { ...w, zIndex: nextZIndex++ };
+				// Raise transient children above parent
+				if (w.transientFor === windowId) return { ...w, zIndex: nextZIndex++ };
+				return w;
+			});
+		});
 	}, []);
 
 	const handleInput = useCallback(
@@ -392,15 +940,19 @@ function App() {
 		[send],
 	);
 
-	/** Kill a process and remove all of its windows. Shared by the
-	 *  WindowFrame close button, the dock right-click menu, and the
-	 *  global menu bar's app-title menu. */
+	/** Kill a process and remove all of its windows. */
 	const handleCloseProcess = useCallback(
 		(sidecarId: string, pid: number) => {
 			setWindows((prev) => {
 				for (const w of prev) {
 					if (w.sidecarId === sidecarId && w.pid === pid) {
 						closedWindowsRef.current.add(w.windowId);
+						// Clean up animated cursor timer
+						const timer = animCursorTimersRef.current.get(w.windowId);
+						if (timer) {
+							clearInterval(timer);
+							animCursorTimersRef.current.delete(w.windowId);
+						}
 					}
 				}
 				return prev.filter(
@@ -417,12 +969,107 @@ function App() {
 		[send],
 	);
 
-	// Deduplicate windows by process for the dock — one entry per (sidecarId, pid)
+	/** Minimize a window (hide it, show in dock). */
+	const handleMinimize = useCallback(
+		(windowId: string, sidecarId: string) => {
+			setWindows((prev) =>
+				prev.map((w) =>
+					w.windowId === windowId
+						? { ...w, wmState: "minimized" as WindowWmState }
+						: w,
+				),
+			);
+			send({
+				type: "InputEvent",
+				sidecar_id: sidecarId,
+				window_id: windowId,
+				event: { kind: "WindowManage", action: "minimized" },
+			});
+		},
+		[send],
+	);
+
+	/** Maximize a window (expand to fill viewport). */
+	const handleMaximize = useCallback(
+		(windowId: string, sidecarId: string) => {
+			setWindows((prev) =>
+				prev.map((w) =>
+					w.windowId === windowId
+						? {
+								...w,
+								wmState: "maximized" as WindowWmState,
+								savedPosition: { x: w.x, y: w.y },
+							}
+						: w,
+				),
+			);
+			send({
+				type: "InputEvent",
+				sidecar_id: sidecarId,
+				window_id: windowId,
+				event: { kind: "WindowManage", action: "maximized" },
+			});
+		},
+		[send],
+	);
+
+	/** Close a window gracefully via ICCCM WM_DELETE_WINDOW. */
+	const handleCloseWindow = useCallback(
+		(windowId: string, sidecarId: string) => {
+			send({
+				type: "InputEvent",
+				sidecar_id: sidecarId,
+				window_id: windowId,
+				event: { kind: "WindowManage", action: "close" },
+			});
+		},
+		[send],
+	);
+
+	/** Restore a window from maximized/fullscreen/minimized to normal. */
+	const handleRestore = useCallback(
+		(windowId: string, sidecarId: string) => {
+			setWindows((prev) =>
+				prev.map((w) => {
+					if (w.windowId !== windowId) return w;
+					const restored = {
+						...w,
+						wmState: "normal" as WindowWmState,
+					};
+					if (w.savedPosition) {
+						restored.x = w.savedPosition.x;
+						restored.y = w.savedPosition.y;
+					}
+					return restored;
+				}),
+			);
+			send({
+				type: "InputEvent",
+				sidecar_id: sidecarId,
+				window_id: windowId,
+				event: { kind: "WindowManage", action: "normal" },
+			});
+		},
+		[send],
+	);
+
+	/** Focus follows mouse: focus window on mouse enter. */
+	const handleMouseEnterWindow = useCallback(
+		(windowId: string) => {
+			if (focusPolicy !== "focus-follows-mouse") return;
+			handleFocus(windowId);
+			setFocusedWindowId(windowId);
+		},
+		[focusPolicy, handleFocus],
+	);
+
+	// Deduplicate windows by process for the dock -- one entry per (sidecarId, pid)
+	// Include minimized windows so they appear in the dock
 	const dockProcesses = useMemo(() => {
 		const seen = new Set<string>();
 		const result: DockProcess[] = [];
 		for (const w of windows) {
-			if (w.pid === 0) continue; // Skip windows with unknown process
+			if (w.pid === 0) continue;
 			const key = `${w.sidecarId}:${w.pid}`;
 			if (!seen.has(key)) {
 				seen.add(key);
@@ -458,14 +1105,27 @@ function App() {
 		[focusedWindow, send],
 	);
 
-	// Build the same context menu items the dock right-click renders.
-	// Single source of truth lives in `AppContextMenu.getAppContextMenuItems`.
 	const focusedAppContextMenuItems =
 		focusedWindow && focusedWindow.pid > 0
 			? getAppContextMenuItems(focusedWindow.sidecarId, focusedWindow.pid, {
 					onClose: handleCloseProcess,
 				})
 			: null;
+
+	/** Sort windows: transient windows always above their parent. */
+	const sortedWindows = useMemo(() => {
+		const result = [...windows];
+		// Boost transient children z-index to be above parent
+		for (const w of result) {
+			if (w.transientFor) {
+				const parent = result.find((p) => p.windowId === w.transientFor);
+				if (parent && w.zIndex <= parent.zIndex) {
+					w.zIndex = parent.zIndex + 1;
+				}
+			}
+		}
+		return result;
+	}, [windows]);
 
 	return (
 		<>
@@ -476,31 +1136,42 @@ function App() {
 				appContextMenuItems={focusedAppContextMenuItems}
 			/>
 			<InfiniteCanvas>
-				{windows.map((win) => {
-					// Use the per-client renderer (shared across all windows from the same client)
+				{sortedWindows.map((win) => {
 					const renderer = renderersRef.current.get(win.windowId);
 					if (!renderer) return null;
 					return (
-						<WindowFrame
+						<div
 							key={win.windowId}
-							clientId={win.windowId}
-							title={win.title}
-							x={win.x}
-							y={win.y}
-							zIndex={win.zIndex}
-							color={win.color}
-							cursor={win.cursor}
-							renderer={renderer}
-							onClose={() => handleCloseProcess(win.sidecarId, win.pid)}
-							onMove={(nx, ny) => handleMove(win.windowId, nx, ny)}
-							onResize={(nw, nh) =>
-								handleResize(win.windowId, win.sidecarId, nw, nh)
-							}
-							onInput={(event) =>
-								handleInput(win.windowId, win.sidecarId, event)
-							}
-							onFocus={() => handleFocus(win.windowId)}
-						/>
+							onMouseEnter={() => handleMouseEnterWindow(win.windowId)}
+						>
+							<WindowFrame
+								clientId={win.windowId}
+								title={win.title}
+								x={win.x}
+								y={win.y}
+								zIndex={win.zIndex}
+								color={win.color}
+								cursor={win.cursor}
+								renderer={renderer}
+								overrideRedirect={win.overrideRedirect}
+								wmState={win.wmState}
+								cursorConfined={win.cursorConfined}
+								onClose={() => handleCloseWindow(win.windowId, win.sidecarId)}
+								onMove={(nx, ny) => handleMove(win.windowId, nx, ny)}
+								onResize={(nw, nh) =>
+									handleResize(win.windowId, win.sidecarId, nw, nh)
+								}
+								onInput={(event) =>
+									handleInput(win.windowId, win.sidecarId, event)
+								}
+								onFocus={() => handleFocus(win.windowId)}
+								onMinimize={() => handleMinimize(win.windowId, win.sidecarId)}
+								onMaximize={() => handleMaximize(win.windowId, win.sidecarId)}
+								onRestore={() => handleRestore(win.windowId, win.sidecarId)}
+								borderWidth={win.borderWidth}
+								borderPixel={win.borderPixel}
+							/>
+						</div>
 					);
 				})}
 			</InfiniteCanvas>
@@ -511,11 +1182,18 @@ function App() {
 				onSpawn={handleSpawn}
 				onClose={handleCloseProcess}
 				onFocusWindow={(sidecarId, pid) => {
-					// Bring all windows for this process to front
+					// Restore minimized windows and bring all windows for this process to front
 					setWindows((prev) =>
 						prev.map((w) =>
 							w.sidecarId === sidecarId && w.pid === pid
-								? { ...w, zIndex: nextZIndex++ }
+								? {
+										...w,
+										zIndex: nextZIndex++,
+										wmState:
+											w.wmState === "minimized"
+												? ("normal" as WindowWmState)
+												: w.wmState,
+									}
 								: w,
 						),
 					);
@@ -525,6 +1203,10 @@ function App() {
 				diagnostics={diagnostics}
 				onDismiss={dismissDiagnostic}
 				onClear={clearDiagnostics}
+			/>
+			<SettingsPanel
+				focusPolicy={focusPolicy}
+				onFocusPolicyChange={setFocusPolicy}
 			/>
 		</>
 	);
