@@ -764,6 +764,44 @@ pub(crate) fn handle_configure_window(state: &mut ClientState, data: &[u8], seq:
                 })
                 .unwrap_or(0);
 
+            // _NET_WM_SYNC_REQUEST: if the window has a sync counter and size is
+            // changing, send a WM_PROTOCOLS ClientMessage with _NET_WM_SYNC_REQUEST
+            // before the ConfigureNotify per EWMH spec. This lets the client
+            // synchronize its repainting with the resize.
+            if (width != old_w || height != old_h) {
+                let sync_counter = state.windows.get(&wid).and_then(|w| w.sync_request_counter);
+                if let Some(_counter_id) = sync_counter {
+                    let wm_protocols_atom = state.intern_atom("WM_PROTOCOLS", false);
+                    let sync_request_atom = state.intern_atom("_NET_WM_SYNC_REQUEST", false);
+
+                    // Increment the sync request value
+                    let new_value = state.windows.get(&wid)
+                        .map(|w| w.sync_request_value + 1)
+                        .unwrap_or(1);
+                    if let Some(win) = state.windows.get_mut(&wid) {
+                        win.sync_request_value = new_value;
+                    }
+
+                    let lo = (new_value & 0xFFFFFFFF) as u32;
+                    let hi = (new_value >> 32) as u32;
+                    let timestamp = state.timestamp();
+
+                    let mut sync_msg = [0u8; 32];
+                    sync_msg[0] = CLIENT_MESSAGE_EVENT;
+                    sync_msg[1] = 32; // format
+                    write_u32_bo(&mut sync_msg, 4, wid, msb_first);
+                    write_u32_bo(&mut sync_msg, 8, wm_protocols_atom, msb_first);
+                    write_u32_bo(&mut sync_msg, 12, sync_request_atom, msb_first);
+                    write_u32_bo(&mut sync_msg, 16, timestamp, msb_first);
+                    write_u32_bo(&mut sync_msg, 20, lo, msb_first);
+                    write_u32_bo(&mut sync_msg, 24, hi, msb_first);
+
+                    state.pending_events.push(sync_msg.to_vec());
+                    // Also deliver to cross-connection clients
+                    state.broadcast_event(wid, STRUCTURE_NOTIFY_MASK, &sync_msg);
+                }
+            }
+
             // Build the ConfigureNotify event
             let mut event = [0u8; 32];
             event[0] = CONFIGURE_NOTIFY_EVENT;
