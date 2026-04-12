@@ -148,6 +148,8 @@ pub(crate) struct WindowState {
     pub(crate) sync_request_value: u64,
     /// EWMH window type (derived from _NET_WM_WINDOW_TYPE property).
     pub(crate) window_type: WindowType,
+    /// _NET_WM_STRUT reserved space: (left, right, top, bottom).
+    pub(crate) strut: Option<[u32; 4]>,
 }
 
 impl WindowState {

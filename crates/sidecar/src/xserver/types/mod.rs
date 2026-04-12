@@ -707,6 +707,7 @@ mod tests {
             transient_for: None, sync_request_counter: None,
             sync_request_value: 0,
             window_type: super::WindowType::Normal,
+            strut: None,
         }
     }
 

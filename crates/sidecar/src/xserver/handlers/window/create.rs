@@ -177,6 +177,7 @@ pub(crate) fn handle_create_window(state: &mut ClientState, data: &[u8], _seq: u
             sync_request_counter: None,
             sync_request_value: 0,
             window_type: WindowType::Normal,
+            strut: None,
         },
     );
 
@@ -259,6 +260,9 @@ pub(crate) fn handle_destroy_window(state: &mut ClientState, data: &[u8]) -> Vec
         return build_error(BAD_WINDOW, state.sequence, wid, 4, 0);
     }
 
+    // Check if window had struts (for workarea recalculation after removal)
+    let had_strut = state.windows.get(&wid).is_some_and(|w| w.strut.is_some());
+
     // Generate DestroyNotify events before removing the window
     let parent_id = state.windows.get(&wid).map(|w| w.parent);
     if let Some(parent_id) = parent_id {
@@ -327,6 +331,11 @@ pub(crate) fn handle_destroy_window(state: &mut ClientState, data: &[u8]) -> Vec
 
     // Update _NET_CLIENT_LIST on root
     state.update_net_client_list();
+
+    // If the destroyed window had struts, recalculate workarea
+    if had_strut {
+        state.recalculate_workarea();
+    }
 
     Vec::new()
 }

@@ -334,6 +334,7 @@ pub(crate) fn handle_x_composite_request(state: &mut ClientState, data: &[u8], s
                     sync_request_counter: None,
                     sync_request_value: 0,
                     window_type: WindowType::Normal,
+                    strut: None,
                 };
                 state.windows.insert(OVERLAY_WINDOW, overlay);
                 // Push overlay to top of root's children stacking order

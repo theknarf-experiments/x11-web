@@ -393,4 +393,45 @@ impl ClientState {
 
         Some(hints)
     }
+
+    /// Recalculate _NET_WORKAREA on the root window based on all windows with
+    /// _NET_WM_STRUT or _NET_WM_STRUT_PARTIAL properties.
+    /// Workarea = full screen minus reserved strut areas.
+    pub(crate) fn recalculate_workarea(&mut self) {
+        let sw = self.screen_width as u32;
+        let sh = self.screen_height as u32;
+
+        // Accumulate max strut on each edge from all windows
+        let (mut left, mut right, mut top, mut bottom) = (0u32, 0u32, 0u32, 0u32);
+
+        for win in self.windows.values() {
+            if let Some(strut) = &win.strut {
+                left = left.max(strut[0]);
+                right = right.max(strut[1]);
+                top = top.max(strut[2]);
+                bottom = bottom.max(strut[3]);
+            }
+        }
+
+        let x = left;
+        let y = top;
+        let w = sw.saturating_sub(left + right);
+        let h = sh.saturating_sub(top + bottom);
+
+        // _NET_WORKAREA is 4 CARDINAL values per desktop; we have 1 desktop
+        let net_workarea_atom = self.intern_atom("_NET_WORKAREA", false);
+        let mut data = vec![0u8; 16];
+        data[0..4].copy_from_slice(&x.to_le_bytes());
+        data[4..8].copy_from_slice(&y.to_le_bytes());
+        data[8..12].copy_from_slice(&w.to_le_bytes());
+        data[12..16].copy_from_slice(&h.to_le_bytes());
+
+        if let Some(root) = self.windows.get_mut(&self.root_window) {
+            root.properties.insert(net_workarea_atom, PropertyValue {
+                prop_type: 6, // CARDINAL
+                format: 32,
+                data,
+            });
+        }
+    }
 }

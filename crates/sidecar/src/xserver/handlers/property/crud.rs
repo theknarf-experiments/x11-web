@@ -202,6 +202,27 @@ pub(crate) fn handle_change_property(state: &mut ClientState, data: &[u8]) -> Ve
         }
     }
 
+    // Check if this is _NET_WM_STRUT or _NET_WM_STRUT_PARTIAL — update strut and recalculate workarea
+    let is_strut = property_atom == 129 || property_atom == 130
+        || state
+            .get_atom_name(property_atom)
+            .map(|n| n == "_NET_WM_STRUT" || n == "_NET_WM_STRUT_PARTIAL")
+            .unwrap_or(false);
+
+    if is_strut && format == 32 && byte_len >= 16 {
+        let strut_data = &data[24..24 + byte_len.min(data.len() - 24)];
+        if strut_data.len() >= 16 {
+            let left = state.read_u32_from(strut_data, 0);
+            let right = state.read_u32_from(strut_data, 4);
+            let top = state.read_u32_from(strut_data, 8);
+            let bottom = state.read_u32_from(strut_data, 12);
+            if let Some(win) = state.windows.get_mut(&window) {
+                win.strut = Some([left, right, top, bottom]);
+            }
+            state.recalculate_workarea();
+        }
+    }
+
     // Check if this is WM_NAME (atom 39) or _NET_WM_NAME
     let is_wm_name = property_atom == 39
         || state

@@ -512,6 +512,7 @@ impl X11Server {
                     sync_request_counter: None,
                     sync_request_value: 0,
                     window_type: WindowType::Normal,
+                    strut: None,
                 },
             );
 
@@ -561,6 +562,7 @@ impl X11Server {
                     sync_request_counter: None,
                     sync_request_value: 0,
                     window_type: WindowType::Normal,
+                    strut: None,
                 },
             );
 
@@ -621,6 +623,7 @@ impl X11Server {
                     sync_request_counter: None,
                     sync_request_value: 0,
                     window_type: WindowType::Normal,
+                    strut: None,
                 },
             );
 
@@ -727,6 +730,7 @@ impl X11Server {
                     sync_request_counter: None,
                     sync_request_value: 0,
                     window_type: WindowType::Normal,
+                    strut: None,
                 },
             );
 
