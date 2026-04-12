@@ -282,3 +282,124 @@ impl Default for XkbControls {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn effective_mods_combines_all_sources() {
+        let mut s = XkbState::default();
+        s.base_mods = 0x01;     // Shift
+        s.latched_mods = 0x04;  // Control
+        s.locked_mods = 0x02;   // CapsLock
+        assert_eq!(s.effective_mods(), 0x07);
+    }
+
+    #[test]
+    fn effective_group_clamped() {
+        let mut s = XkbState::default();
+        s.base_group = 2;
+        s.latched_group = 3;
+        s.locked_group = 0;
+        // 2 + 3 + 0 = 5, clamped to 3
+        assert_eq!(s.effective_group(), 3);
+    }
+
+    #[test]
+    fn effective_group_negative_clamped() {
+        let mut s = XkbState::default();
+        s.base_group = -2;
+        s.latched_group = 0;
+        s.locked_group = 0;
+        assert_eq!(s.effective_group(), 0);
+    }
+
+    #[test]
+    fn key_press_sets_base_mods_for_shift() {
+        let mut s = XkbState::default();
+        let mod_bit = s.key_press(50); // Shift_L
+        assert_eq!(mod_bit, 0x01);
+        assert_eq!(s.base_mods, 0x01);
+    }
+
+    #[test]
+    fn key_press_toggles_lock_for_capslock() {
+        let mut s = XkbState::default();
+        s.key_press(66); // CapsLock
+        assert_eq!(s.locked_mods, 0x02);
+        // Press again → toggles off
+        s.key_press(66);
+        assert_eq!(s.locked_mods, 0x00);
+    }
+
+    #[test]
+    fn key_release_clears_base_mods() {
+        let mut s = XkbState::default();
+        s.key_press(50); // Shift_L press
+        assert_eq!(s.base_mods, 0x01);
+        s.key_release(50); // Shift_L release
+        assert_eq!(s.base_mods, 0x00);
+    }
+
+    #[test]
+    fn key_release_does_not_toggle_lock_keys() {
+        let mut s = XkbState::default();
+        s.key_press(66); // CapsLock press → locked_mods = 0x02
+        s.key_release(66); // CapsLock release → should NOT toggle again
+        assert_eq!(s.locked_mods, 0x02);
+    }
+
+    #[test]
+    fn non_modifier_key_returns_zero() {
+        let mut s = XkbState::default();
+        let mod_bit = s.key_press(38); // 'a' key
+        assert_eq!(mod_bit, 0);
+        assert_eq!(s.base_mods, 0);
+    }
+
+    #[test]
+    fn modifier_keycode_mapping() {
+        assert_eq!(keycode_to_modifier(50), 0x01);  // Shift_L
+        assert_eq!(keycode_to_modifier(62), 0x01);  // Shift_R
+        assert_eq!(keycode_to_modifier(66), 0x02);  // CapsLock
+        assert_eq!(keycode_to_modifier(37), 0x04);  // Ctrl_L
+        assert_eq!(keycode_to_modifier(105), 0x04); // Ctrl_R
+        assert_eq!(keycode_to_modifier(64), 0x08);  // Alt_L
+        assert_eq!(keycode_to_modifier(108), 0x08); // Alt_R
+        assert_eq!(keycode_to_modifier(77), 0x10);  // NumLock
+        assert_eq!(keycode_to_modifier(133), 0x40); // Super_L
+        assert_eq!(keycode_to_modifier(134), 0x40); // Super_R
+        assert_eq!(keycode_to_modifier(38), 0);     // 'a'
+        assert_eq!(keycode_to_modifier(0), 0);      // invalid
+    }
+
+    #[test]
+    fn lock_key_detection() {
+        assert!(is_lock_key(66));  // CapsLock
+        assert!(is_lock_key(77));  // NumLock
+        assert!(!is_lock_key(50)); // Shift_L
+        assert!(!is_lock_key(37)); // Ctrl_L
+        assert!(!is_lock_key(38)); // 'a'
+    }
+
+    #[test]
+    fn controls_default_has_repeat_keys() {
+        let c = XkbControls::default();
+        assert_ne!(c.enabled_ctrls & (1 << 10), 0); // RepeatKeys enabled
+        assert_eq!(c.repeat_delay, 660);
+        assert_eq!(c.repeat_interval, 40);
+        assert_eq!(c.num_groups, 1);
+    }
+
+    #[test]
+    fn controls_default_modifier_keys_dont_repeat() {
+        let c = XkbControls::default();
+        // Shift_L (keycode 50) should NOT repeat
+        assert_eq!(c.per_key_repeat[50 / 8] & (1 << (50 % 8)), 0);
+        // CapsLock (keycode 66) should NOT repeat
+        assert_eq!(c.per_key_repeat[66 / 8] & (1 << (66 % 8)), 0);
+        // Regular key (keycode 38 = 'a') SHOULD repeat
+        assert_ne!(c.per_key_repeat[38 / 8] & (1 << (38 % 8)), 0);
+    }
+}
