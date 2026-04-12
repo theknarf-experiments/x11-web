@@ -318,7 +318,18 @@ pub(crate) fn handle_map_window(state: &mut ClientState, data: &[u8], seq: u16) 
         state.set_allowed_actions(wid);
     }
 
+    // Enforce stacking based on window type layers (EWMH _NET_WM_WINDOW_TYPE)
+    // This places dock/tooltip/notification windows in their correct layer.
+    {
+        let parent_id = state.windows.get(&wid).map(|w| w.parent);
+        if let Some(parent_id) = parent_id {
+            super::restack_by_window_type(state, wid, parent_id);
+        }
+    }
+
     // Enforce WM_TRANSIENT_FOR stacking: transient windows go above their parent (ICCCM §4.1.2.6)
+    // This runs after type-based stacking so transient dialogs end up above their parent
+    // within the same stacking layer.
     let transient_for = state.windows.get(&wid).and_then(|w| w.transient_for);
     if let Some(parent_wid) = transient_for {
         let root = state.root_window;

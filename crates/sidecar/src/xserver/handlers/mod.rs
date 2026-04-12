@@ -48,6 +48,9 @@ use crate::framebuffer::Framebuffer;
 // Re-export byte-order helpers for use in handler submodules
 pub(crate) use super::core::{read_u32_bo, write_u16_bo, write_u32_bo, write_i16_bo};
 
+// Re-export window stacking helpers for use by property handlers
+pub(crate) use window::{restack_by_window_type, effective_stacking_layer};
+
 // ---------------------------------------------------------------------------
 // Dispatcher
 // ---------------------------------------------------------------------------

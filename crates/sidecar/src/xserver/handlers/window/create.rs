@@ -176,6 +176,7 @@ pub(crate) fn handle_create_window(state: &mut ClientState, data: &[u8], _seq: u
             transient_for: None,
             sync_request_counter: None,
             sync_request_value: 0,
+            window_type: WindowType::Normal,
         },
     );
 

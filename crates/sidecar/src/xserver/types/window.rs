@@ -7,6 +7,75 @@ use tokio::sync::mpsc;
 use crate::framebuffer::Framebuffer;
 use super::region::RegionRect;
 
+/// EWMH window type, used for stacking layer and focus/decoration policy.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum WindowType {
+    Desktop,
+    Dock,
+    Toolbar,
+    Menu,
+    Utility,
+    Splash,
+    Dialog,
+    DropdownMenu,
+    PopupMenu,
+    Tooltip,
+    Notification,
+    Normal,
+}
+
+impl WindowType {
+    /// Stacking layer for this window type. Higher = on top.
+    /// Layer 0: Desktop (always at bottom)
+    /// Layer 1: Below (windows with _NET_WM_STATE_BELOW)
+    /// Layer 2: Normal, Dialog, Splash, Utility, Toolbar
+    /// Layer 3: Above / Dock (panels, taskbars)
+    /// Layer 4: Notification, Tooltip, PopupMenu, DropdownMenu, Menu
+    pub(crate) fn stacking_layer(self) -> u8 {
+        match self {
+            WindowType::Desktop => 0,
+            WindowType::Normal | WindowType::Dialog | WindowType::Splash
+            | WindowType::Utility | WindowType::Toolbar => 2,
+            WindowType::Dock => 3,
+            WindowType::Menu | WindowType::DropdownMenu | WindowType::PopupMenu
+            | WindowType::Tooltip | WindowType::Notification => 4,
+        }
+    }
+
+    /// Whether this window type should receive input focus by default.
+    pub(crate) fn accepts_focus(self) -> bool {
+        match self {
+            WindowType::Normal | WindowType::Dialog | WindowType::Utility
+            | WindowType::Toolbar | WindowType::Splash => true,
+            WindowType::Desktop | WindowType::Dock | WindowType::Menu
+            | WindowType::DropdownMenu | WindowType::PopupMenu
+            | WindowType::Tooltip | WindowType::Notification => false,
+        }
+    }
+
+    /// Resolve from _NET_WM_WINDOW_TYPE atom IDs (tries first match in list per EWMH spec).
+    pub(crate) fn from_atom_ids(atoms: &[u32]) -> Self {
+        for &atom in atoms {
+            match atom {
+                87 => return WindowType::Desktop,
+                86 => return WindowType::Dock,
+                82 => return WindowType::Toolbar,
+                83 => return WindowType::Menu,
+                84 => return WindowType::Utility,
+                85 => return WindowType::Splash,
+                81 => return WindowType::Dialog,
+                88 => return WindowType::DropdownMenu,
+                89 => return WindowType::PopupMenu,
+                90 => return WindowType::Tooltip,
+                91 => return WindowType::Notification,
+                80 => return WindowType::Normal,
+                _ => {} // unknown type, try next
+            }
+        }
+        WindowType::Normal
+    }
+}
+
 /// Stored X11 property value.
 #[derive(Clone, Debug)]
 pub(crate) struct PropertyValue {
@@ -77,6 +146,8 @@ pub(crate) struct WindowState {
     pub(crate) sync_request_counter: Option<u32>,
     /// Pending sync request value (incremented before each resize, awaited before compositing).
     pub(crate) sync_request_value: u64,
+    /// EWMH window type (derived from _NET_WM_WINDOW_TYPE property).
+    pub(crate) window_type: WindowType,
 }
 
 impl WindowState {

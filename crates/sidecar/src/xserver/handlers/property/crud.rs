@@ -177,6 +177,31 @@ pub(crate) fn handle_change_property(state: &mut ClientState, data: &[u8]) -> Ve
         }
     }
 
+    // Check if this is _NET_WM_WINDOW_TYPE — update window type for stacking layer enforcement
+    let is_window_type = property_atom == 79 // _NET_WM_WINDOW_TYPE predefined atom
+        || state
+            .get_atom_name(property_atom)
+            .map(|n| n == "_NET_WM_WINDOW_TYPE")
+            .unwrap_or(false);
+
+    if is_window_type && format == 32 && byte_len >= 4 {
+        let type_data = &data[24..24 + byte_len.min(data.len() - 24)];
+        let mut atom_ids = Vec::new();
+        for chunk in type_data.chunks_exact(4) {
+            atom_ids.push(state.read_u32_from(chunk, 0));
+        }
+        let wtype = WindowType::from_atom_ids(&atom_ids);
+        if let Some(win) = state.windows.get_mut(&window) {
+            win.window_type = wtype;
+        }
+
+        // Enforce stacking layer: reposition in parent's children_order
+        let parent_id = state.windows.get(&window).map(|w| w.parent);
+        if let Some(parent_id) = parent_id {
+            restack_by_window_type(state, window, parent_id);
+        }
+    }
+
     // Check if this is WM_NAME (atom 39) or _NET_WM_NAME
     let is_wm_name = property_atom == 39
         || state

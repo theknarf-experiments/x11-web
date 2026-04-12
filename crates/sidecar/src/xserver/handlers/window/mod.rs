@@ -40,6 +40,64 @@ pub(crate) fn win_gravity_delta(gravity: u8, dw: i16, dh: i16) -> (i16, i16) {
     }
 }
 
+/// Restack a window within its parent's children_order based on its window type stacking layer.
+/// Windows are placed at the top of their stacking layer, preserving order within the same layer.
+pub(crate) fn restack_by_window_type(state: &mut ClientState, wid: u32, parent_id: u32) {
+    let target_layer = state.windows.get(&wid)
+        .map(|w| effective_stacking_layer(w))
+        .unwrap_or(2);
+
+    // Remove and collect children in one pass
+    if let Some(parent) = state.windows.get_mut(&parent_id) {
+        parent.children_order.retain(|&c| c != wid);
+    }
+
+    // Collect layer info for all siblings
+    let children: Vec<(u32, u8)> = state.windows.get(&parent_id)
+        .map(|p| p.children_order.iter().map(|&c| {
+            let layer = state.windows.get(&c)
+                .map(|w| effective_stacking_layer(w))
+                .unwrap_or(2);
+            (c, layer)
+        }).collect())
+        .unwrap_or_default();
+
+    // Find insertion point: after the last window with layer <= target_layer
+    let insert_pos = children.iter().rposition(|(_, layer)| *layer <= target_layer)
+        .map(|pos| pos + 1)
+        .unwrap_or(0);
+
+    if let Some(parent) = state.windows.get_mut(&parent_id) {
+        parent.children_order.insert(insert_pos, wid);
+    }
+}
+
+/// Compute the effective stacking layer for a window, considering both
+/// window type and _NET_WM_STATE_ABOVE/_NET_WM_STATE_BELOW state atoms.
+pub(crate) fn effective_stacking_layer(win: &WindowState) -> u8 {
+    let base_layer = win.window_type.stacking_layer();
+
+    // Check for _NET_WM_STATE_ABOVE / _NET_WM_STATE_BELOW in the window's _NET_WM_STATE property
+    // _NET_WM_STATE atom is 92, ABOVE is 102, BELOW is 103
+    if let Some(prop) = win.properties.get(&92) {
+        if prop.format == 32 {
+            for chunk in prop.data.chunks_exact(4) {
+                let atom = u32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]);
+                if atom == 102 {
+                    // _NET_WM_STATE_ABOVE: promote to at least layer 3
+                    return base_layer.max(3);
+                }
+                if atom == 103 {
+                    // _NET_WM_STATE_BELOW: demote to layer 1
+                    return 1;
+                }
+            }
+        }
+    }
+
+    base_layer
+}
+
 /// Recalculate VisibilityNotify for all siblings of a window after stacking changes.
 pub(crate) fn update_sibling_visibility(state: &mut ClientState, wid: u32, seq: u16, msb_first: bool) {
     // Save-under: when a save_under window is unmapped or reconfigured,

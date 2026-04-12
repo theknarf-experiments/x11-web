@@ -536,32 +536,59 @@ pub(crate) fn handle_configure_window(state: &mut ClientState, data: &[u8], seq:
         let parent_id = state.windows.get(&wid).map(|w| w.parent);
         if let Some(parent_id) = parent_id {
             let raised = if mode == 0 {
-                // Above: raise to top (or above sibling)
-                if let Some(parent_win) = state.windows.get_mut(&parent_id) {
-                    parent_win.children_order.retain(|&c| c != wid);
-                    if sibling != 0 {
+                // Above: raise to top of stacking layer (or above sibling)
+                if sibling != 0 {
+                    // Explicit sibling: place above it (per X11 spec, client knows what it wants)
+                    if let Some(parent_win) = state.windows.get_mut(&parent_id) {
+                        parent_win.children_order.retain(|&c| c != wid);
                         if let Some(pos) = parent_win.children_order.iter().position(|&c| c == sibling) {
                             parent_win.children_order.insert(pos + 1, wid);
                         } else {
                             parent_win.children_order.push(wid);
                         }
-                    } else {
-                        parent_win.children_order.push(wid);
                     }
+                } else {
+                    // No sibling: raise to top of this window's stacking layer
+                    super::restack_by_window_type(state, wid, parent_id);
                 }
                 true
             } else if mode == 1 {
-                // Below: lower to bottom (or below sibling)
-                if let Some(parent_win) = state.windows.get_mut(&parent_id) {
-                    parent_win.children_order.retain(|&c| c != wid);
-                    if sibling != 0 {
+                // Below: lower to bottom of stacking layer (or below sibling)
+                if sibling != 0 {
+                    // Explicit sibling: place below it
+                    if let Some(parent_win) = state.windows.get_mut(&parent_id) {
+                        parent_win.children_order.retain(|&c| c != wid);
                         if let Some(pos) = parent_win.children_order.iter().position(|&c| c == sibling) {
                             parent_win.children_order.insert(pos, wid);
                         } else {
                             parent_win.children_order.insert(0, wid);
                         }
-                    } else {
-                        parent_win.children_order.insert(0, wid);
+                    }
+                } else {
+                    // No sibling: lower to bottom of this window's stacking layer
+                    let target_layer = state.windows.get(&wid)
+                        .map(|w| super::effective_stacking_layer(w))
+                        .unwrap_or(2);
+
+                    if let Some(parent_win) = state.windows.get_mut(&parent_id) {
+                        parent_win.children_order.retain(|&c| c != wid);
+                    }
+
+                    let children: Vec<(u32, u8)> = state.windows.get(&parent_id)
+                        .map(|p| p.children_order.iter().map(|&c| {
+                            let layer = state.windows.get(&c)
+                                .map(|w| super::effective_stacking_layer(w))
+                                .unwrap_or(2);
+                            (c, layer)
+                        }).collect())
+                        .unwrap_or_default();
+
+                    // Insert at the first position where layer >= target_layer
+                    let insert_pos = children.iter().position(|(_, layer)| *layer >= target_layer)
+                        .unwrap_or(children.len());
+
+                    if let Some(parent_win) = state.windows.get_mut(&parent_id) {
+                        parent_win.children_order.insert(insert_pos, wid);
                     }
                 }
                 false

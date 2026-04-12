@@ -4,7 +4,7 @@ use tracing::{debug, info, warn};
 
 use super::super::client::ClientState;
 use super::super::core::{OVERLAY_WINDOW, ROOT_COLORMAP};
-use super::super::types::{DamageInfo, PixmapState, WindowState};
+use super::super::types::{DamageInfo, PixmapState, WindowState, WindowType};
 
 pub(crate) fn handle_damage_request(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
     let minor = data[1];
@@ -333,6 +333,7 @@ pub(crate) fn handle_x_composite_request(state: &mut ClientState, data: &[u8], s
                     transient_for: None,
                     sync_request_counter: None,
                     sync_request_value: 0,
+                    window_type: WindowType::Normal,
                 };
                 state.windows.insert(OVERLAY_WINDOW, overlay);
                 // Push overlay to top of root's children stacking order

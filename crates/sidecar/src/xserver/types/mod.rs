@@ -706,6 +706,7 @@ mod tests {
             backing_pixmap: None, wm_hints_initial_state: None,
             transient_for: None, sync_request_counter: None,
             sync_request_value: 0,
+            window_type: super::WindowType::Normal,
         }
     }
 
@@ -752,5 +753,75 @@ mod tests {
         windows.insert(1, make_test_window(1, 0));
         // A window is not a descendant of itself
         assert!(!crate::xserver::is_descendant_of(&windows, 1, 1));
+    }
+
+    // -----------------------------------------------------------------------
+    // WindowType: stacking layer and focus policy
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn window_type_stacking_layers_correct_order() {
+        // Desktop < Normal < Dock < Tooltip
+        assert!(WindowType::Desktop.stacking_layer() < WindowType::Normal.stacking_layer());
+        assert!(WindowType::Normal.stacking_layer() < WindowType::Dock.stacking_layer());
+        assert!(WindowType::Dock.stacking_layer() < WindowType::Tooltip.stacking_layer());
+    }
+
+    #[test]
+    fn window_type_dialog_same_layer_as_normal() {
+        assert_eq!(WindowType::Dialog.stacking_layer(), WindowType::Normal.stacking_layer());
+    }
+
+    #[test]
+    fn window_type_tooltip_notification_same_top_layer() {
+        assert_eq!(WindowType::Tooltip.stacking_layer(), WindowType::Notification.stacking_layer());
+        assert_eq!(WindowType::Tooltip.stacking_layer(), WindowType::PopupMenu.stacking_layer());
+        assert_eq!(WindowType::Tooltip.stacking_layer(), WindowType::DropdownMenu.stacking_layer());
+    }
+
+    #[test]
+    fn window_type_focus_policy() {
+        assert!(WindowType::Normal.accepts_focus());
+        assert!(WindowType::Dialog.accepts_focus());
+        assert!(!WindowType::Dock.accepts_focus());
+        assert!(!WindowType::Tooltip.accepts_focus());
+        assert!(!WindowType::Notification.accepts_focus());
+        assert!(!WindowType::Desktop.accepts_focus());
+        assert!(!WindowType::PopupMenu.accepts_focus());
+    }
+
+    #[test]
+    fn window_type_from_atom_ids_first_match_wins() {
+        // Per EWMH spec, first recognized type in the list should be used
+        assert_eq!(WindowType::from_atom_ids(&[86, 80]), WindowType::Dock); // DOCK before NORMAL
+        assert_eq!(WindowType::from_atom_ids(&[80, 86]), WindowType::Normal); // NORMAL before DOCK
+    }
+
+    #[test]
+    fn window_type_from_atom_ids_unknown_skipped() {
+        // Unknown atoms should be skipped
+        assert_eq!(WindowType::from_atom_ids(&[999, 86]), WindowType::Dock);
+        assert_eq!(WindowType::from_atom_ids(&[999, 998]), WindowType::Normal); // fallback
+    }
+
+    #[test]
+    fn window_type_from_atom_ids_empty() {
+        assert_eq!(WindowType::from_atom_ids(&[]), WindowType::Normal);
+    }
+
+    #[test]
+    fn window_type_all_atom_ids_recognized() {
+        assert_eq!(WindowType::from_atom_ids(&[87]), WindowType::Desktop);
+        assert_eq!(WindowType::from_atom_ids(&[86]), WindowType::Dock);
+        assert_eq!(WindowType::from_atom_ids(&[82]), WindowType::Toolbar);
+        assert_eq!(WindowType::from_atom_ids(&[83]), WindowType::Menu);
+        assert_eq!(WindowType::from_atom_ids(&[84]), WindowType::Utility);
+        assert_eq!(WindowType::from_atom_ids(&[85]), WindowType::Splash);
+        assert_eq!(WindowType::from_atom_ids(&[81]), WindowType::Dialog);
+        assert_eq!(WindowType::from_atom_ids(&[88]), WindowType::DropdownMenu);
+        assert_eq!(WindowType::from_atom_ids(&[89]), WindowType::PopupMenu);
+        assert_eq!(WindowType::from_atom_ids(&[90]), WindowType::Tooltip);
+        assert_eq!(WindowType::from_atom_ids(&[91]), WindowType::Notification);
+        assert_eq!(WindowType::from_atom_ids(&[80]), WindowType::Normal);
     }
 }

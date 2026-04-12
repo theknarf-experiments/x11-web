@@ -924,6 +924,7 @@ mod tests {
             backing_pixel: 0, save_under: false, visibility: 0,
             backing_pixmap: None, wm_hints_initial_state: None,
             transient_for: None, sync_request_counter: None, sync_request_value: 0,
+            window_type: crate::xserver::types::WindowType::Normal,
         }
     }
 
