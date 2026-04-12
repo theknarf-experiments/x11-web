@@ -509,6 +509,12 @@ pub fn handle_request(
     client_pointer: &mut u16,
     device_properties: &mut HashMap<(u16, u32), Vec<u8>>,
     focus_window: &mut u32,
+    active_grabs: &mut HashMap<xi::DeviceId, Xi2ActiveGrab>,
+    passive_grabs: &mut Vec<Xi2PassiveGrab>,
+    pointer_frozen: &mut bool,
+    keyboard_frozen: &mut bool,
+    frozen_pointer_events: &mut Vec<Vec<u8>>,
+    frozen_keyboard_events: &mut Vec<Vec<u8>>,
     screen_width: u16,
     screen_height: u16,
     root_window: u32,
@@ -664,7 +670,7 @@ pub fn handle_request(
             let reply = xi::XIGetFocusReply {
                 sequence: seq,
                 length: 0,
-                focus: 0,
+                focus: *focus_window,
             };
             serialize_xi_reply(&reply, msb_first)
         }
@@ -680,35 +686,237 @@ pub fn handle_request(
         }
 
         xi::XI_GRAB_DEVICE_REQUEST => {
+            // XIGrabDevice: window(4) + time(4) + cursor(4) + deviceid(2) +
+            //   mode(1) + paired_device_mode(1) + owner_events(1) + pad(1) +
+            //   mask_len(2) + mask...
+            let status = if body.len() >= 18 {
+                let grab_window = read_u32_bo(body, 0, msb_first);
+                let deviceid = read_u16_bo(body, 12, msb_first);
+                let grab_mode = body[14];
+                let paired_device_mode = body[15];
+                let owner_events = body[16] != 0;
+                let mask_len = read_u16_bo(body, 18, msb_first) as usize;
+                let mut event_mask = Vec::new();
+                for i in 0..mask_len {
+                    let off = 20 + i * 4;
+                    if off + 4 <= body.len() {
+                        event_mask.push(read_u32_bo(body, off, msb_first).into());
+                    }
+                }
+
+                // Check if device is already grabbed by this client.
+                if active_grabs.contains_key(&deviceid) {
+                    xproto::GrabStatus::ALREADY_GRABBED
+                } else {
+                    let grab = Xi2ActiveGrab {
+                        deviceid,
+                        grab_window,
+                        event_mask,
+                        owner_events,
+                        paired_device_mode,
+                        grab_mode,
+                    };
+                    // Freeze events if synchronous mode.
+                    if grab_mode == 0 {
+                        if deviceid == MASTER_POINTER_ID || deviceid == 0 || deviceid == 1 {
+                            *pointer_frozen = true;
+                        }
+                        if deviceid == MASTER_KEYBOARD_ID || deviceid == 0 || deviceid == 1 {
+                            *keyboard_frozen = true;
+                        }
+                    }
+                    debug!("XIGrabDevice: device={deviceid} window={grab_window:#x} mode={grab_mode} owner_events={owner_events}");
+                    active_grabs.insert(deviceid, grab);
+                    xproto::GrabStatus::SUCCESS
+                }
+            } else {
+                xproto::GrabStatus::SUCCESS
+            };
+
             let reply = xi::XIGrabDeviceReply {
                 sequence: seq,
                 length: 0,
-                status: xproto::GrabStatus::SUCCESS,
+                status,
             };
             serialize_xi_reply(&reply, msb_first)
         }
         xi::XI_UNGRAB_DEVICE_REQUEST => {
-            debug!("XIUngrabDevice: releasing device grab");
-            // No active grabs to clear in our virtual server — accept silently.
+            // XIUngrabDevice: time(4) + deviceid(2) + pad(2)
+            if body.len() >= 6 {
+                let deviceid = read_u16_bo(body, 4, msb_first);
+                debug!("XIUngrabDevice: releasing device={deviceid}");
+                active_grabs.remove(&deviceid);
+                // Thaw any frozen events for this device.
+                if deviceid == MASTER_POINTER_ID || deviceid == 0 || deviceid == 1 {
+                    *pointer_frozen = false;
+                }
+                if deviceid == MASTER_KEYBOARD_ID || deviceid == 0 || deviceid == 1 {
+                    *keyboard_frozen = false;
+                }
+            }
             Vec::new()
         }
         xi::XI_ALLOW_EVENTS_REQUEST => {
-            debug!("XIAllowEvents: allowing frozen device events");
-            // We never freeze events, so this is a no-op. Accept silently.
+            // XIAllowEvents: time(4) + deviceid(2) + mode(1) + pad(1)
+            if body.len() >= 7 {
+                let deviceid = read_u16_bo(body, 4, msb_first);
+                let mode = body[6];
+                debug!("XIAllowEvents: device={deviceid} mode={mode}");
+                match mode {
+                    // AsyncDevice (0): thaw device, deliver frozen, no re-freeze.
+                    0 => {
+                        if deviceid == MASTER_POINTER_ID || deviceid == 0 || deviceid == 1 {
+                            *pointer_frozen = false;
+                            // Frozen events will be delivered at next flush.
+                        }
+                        if deviceid == MASTER_KEYBOARD_ID || deviceid == 0 || deviceid == 1 {
+                            *keyboard_frozen = false;
+                        }
+                    }
+                    // SyncDevice (1): thaw device, deliver frozen, re-freeze on next event.
+                    1 => {
+                        if deviceid == MASTER_POINTER_ID || deviceid == 0 || deviceid == 1 {
+                            *pointer_frozen = false;
+                            // After delivering, the event loop will re-freeze on next event.
+                        }
+                        if deviceid == MASTER_KEYBOARD_ID || deviceid == 0 || deviceid == 1 {
+                            *keyboard_frozen = false;
+                        }
+                    }
+                    // ReplayDevice (2): release grab and replay.
+                    2 => {
+                        active_grabs.remove(&deviceid);
+                        if deviceid == MASTER_POINTER_ID || deviceid == 0 || deviceid == 1 {
+                            *pointer_frozen = false;
+                        }
+                        if deviceid == MASTER_KEYBOARD_ID || deviceid == 0 || deviceid == 1 {
+                            *keyboard_frozen = false;
+                        }
+                    }
+                    // AsyncPairedDevice (3): thaw the paired device.
+                    3 => {
+                        if deviceid == MASTER_POINTER_ID {
+                            *keyboard_frozen = false;
+                        } else if deviceid == MASTER_KEYBOARD_ID {
+                            *pointer_frozen = false;
+                        }
+                    }
+                    // AsyncAll (4): thaw all devices.
+                    4 => {
+                        *pointer_frozen = false;
+                        *keyboard_frozen = false;
+                    }
+                    _ => {
+                        debug!("XIAllowEvents: unknown mode {mode}");
+                    }
+                }
+            }
             Vec::new()
         }
 
         xi::XI_PASSIVE_GRAB_DEVICE_REQUEST => {
-            let reply = xi::XIPassiveGrabDeviceReply {
-                sequence: seq,
-                length: 0,
-                modifiers: vec![],
-            };
-            serialize_xi_reply(&reply, msb_first)
+            // XIPassiveGrabDevice: time(4) + grab_window(4) + cursor(4) +
+            //   detail(4) + deviceid(2) + num_modifiers(2) + mask_len(2) +
+            //   grab_type(1) + grab_mode(1) + paired_device_mode(1) +
+            //   owner_events(1) + pad(2) + mask(mask_len*4) + modifiers(num_modifiers*4)
+            if body.len() >= 24 {
+                let grab_window = read_u32_bo(body, 4, msb_first);
+                let detail = read_u32_bo(body, 12, msb_first);
+                let deviceid = read_u16_bo(body, 16, msb_first);
+                let num_modifiers = read_u16_bo(body, 18, msb_first) as usize;
+                let mask_len = read_u16_bo(body, 20, msb_first) as usize;
+                let grab_type = body[22];
+                let grab_mode = body[23];
+                let paired_device_mode = body[24];
+                let owner_events = if body.len() > 25 { body[25] != 0 } else { false };
+
+                // Parse event mask.
+                let mask_start = 28; // after padding
+                let mut event_mask = Vec::new();
+                for i in 0..mask_len {
+                    let off = mask_start + i * 4;
+                    if off + 4 <= body.len() {
+                        event_mask.push(read_u32_bo(body, off, msb_first).into());
+                    }
+                }
+
+                // Parse modifier list.
+                let mods_start = mask_start + mask_len * 4;
+                let failed_modifiers = Vec::new();
+                for i in 0..num_modifiers {
+                    let off = mods_start + i * 4;
+                    let modifier = if off + 4 <= body.len() {
+                        read_u32_bo(body, off, msb_first)
+                    } else {
+                        0
+                    };
+
+                    // Remove existing grab with same (window, detail, device, modifier, type).
+                    passive_grabs.retain(|g| {
+                        !(g.grab_window == grab_window
+                            && g.detail == detail
+                            && g.grab_type == grab_type
+                            && g.modifiers == modifier
+                            && (g.deviceid == deviceid || deviceid == 0 || deviceid == 1))
+                    });
+
+                    // Insert new passive grab (LIFO — at front).
+                    passive_grabs.insert(0, Xi2PassiveGrab {
+                        deviceid,
+                        grab_window,
+                        detail,
+                        grab_type,
+                        modifiers: modifier,
+                        event_mask: event_mask.clone(),
+                        owner_events,
+                        paired_device_mode,
+                        grab_mode,
+                    });
+                    debug!("XIPassiveGrabDevice: device={deviceid} window={grab_window:#x} detail={detail} type={grab_type} mod={modifier:#x}");
+                }
+
+                let reply = xi::XIPassiveGrabDeviceReply {
+                    sequence: seq,
+                    length: 0,
+                    modifiers: failed_modifiers,
+                };
+                serialize_xi_reply(&reply, msb_first)
+            } else {
+                let reply = xi::XIPassiveGrabDeviceReply {
+                    sequence: seq,
+                    length: 0,
+                    modifiers: vec![],
+                };
+                serialize_xi_reply(&reply, msb_first)
+            }
         }
         xi::XI_PASSIVE_UNGRAB_DEVICE_REQUEST => {
-            debug!("XIPassiveUngrabDevice: removing passive device grab");
-            // No passive grabs tracked — accept silently.
+            // XIPassiveUngrabDevice: grab_window(4) + detail(4) + deviceid(2) +
+            //   num_modifiers(2) + grab_type(1) + pad(3) + modifiers(num_modifiers*4)
+            if body.len() >= 12 {
+                let grab_window = read_u32_bo(body, 0, msb_first);
+                let detail = read_u32_bo(body, 4, msb_first);
+                let deviceid = read_u16_bo(body, 8, msb_first);
+                let num_modifiers = read_u16_bo(body, 10, msb_first) as usize;
+                let grab_type = body[12];
+
+                for i in 0..num_modifiers {
+                    let off = 16 + i * 4;
+                    let modifier = if off + 4 <= body.len() {
+                        read_u32_bo(body, off, msb_first)
+                    } else {
+                        0
+                    };
+                    passive_grabs.retain(|g| {
+                        !(g.grab_window == grab_window
+                            && g.detail == detail
+                            && g.grab_type == grab_type
+                            && g.modifiers == modifier
+                            && (g.deviceid == deviceid || deviceid == 0 || deviceid == 1))
+                    });
+                    debug!("XIPassiveUngrabDevice: device={deviceid} window={grab_window:#x} detail={detail} type={grab_type} mod={modifier:#x}");
+                }
+            }
             Vec::new()
         }
 
@@ -787,10 +995,25 @@ pub fn handle_request(
         }
 
         xi::XI_GET_SELECTED_EVENTS_REQUEST => {
+            // XIGetSelectedEvents: window(4)
+            let window = if body.len() >= 4 {
+                read_u32_bo(body, 0, msb_first)
+            } else {
+                0
+            };
+            // Find all selections for this window and return them.
+            let masks: Vec<xi::EventMask> = selections
+                .iter()
+                .filter(|s| s.window == window)
+                .map(|s| xi::EventMask {
+                    deviceid: s.deviceid,
+                    mask: s.mask.clone(),
+                })
+                .collect();
             let reply = xi::XIGetSelectedEventsReply {
                 sequence: seq,
                 length: 0,
-                masks: vec![],
+                masks,
             };
             serialize_xi_reply(&reply, msb_first)
         }
@@ -1253,6 +1476,49 @@ pub fn build_raw_pointer_event(event_type: u16, sequence: u16, detail: u32, msb_
     buf
 }
 
+/// Active XI2 device grab (from XIGrabDevice).
+#[derive(Clone, Debug)]
+pub struct Xi2ActiveGrab {
+    /// The device that was grabbed.
+    pub deviceid: xi::DeviceId,
+    /// The window the grab is associated with.
+    pub grab_window: u32,
+    /// Event mask for events delivered during the grab.
+    pub event_mask: Vec<xi::XIEventMask>,
+    /// Whether owner_events is set.
+    pub owner_events: bool,
+    /// Grab mode for the paired device (0=Sync, 1=Async).
+    pub paired_device_mode: u8,
+    /// Grab mode for this device (0=Sync, 1=Async).
+    pub grab_mode: u8,
+}
+
+/// Passive XI2 device grab (from XIPassiveGrabDevice).
+#[derive(Clone, Debug)]
+pub struct Xi2PassiveGrab {
+    /// The device the passive grab is for.
+    pub deviceid: xi::DeviceId,
+    /// The window the grab is associated with.
+    pub grab_window: u32,
+    /// The detail (button, keycode, or touch) that triggers the grab.
+    pub detail: u32,
+    /// Grab type: 1=Button, 2=Keycode, 3=Enter, 4=FocusIn, 5=TouchBegin.
+    pub grab_type: u8,
+    /// Modifier combination that triggers the grab.
+    pub modifiers: u32,
+    /// Event mask to deliver during the grab.
+    pub event_mask: Vec<xi::XIEventMask>,
+    /// Whether owner_events is set.
+    pub owner_events: bool,
+    /// Grab mode for the paired device.
+    pub paired_device_mode: u8,
+    /// Grab mode for this device.
+    pub grab_mode: u8,
+}
+
+/// Maximum number of frozen XI2 events before oldest are dropped.
+const MAX_XI2_FROZEN_EVENTS: usize = 4096;
+
 /// Per-client XI state stored on `ClientState`.
 pub struct XiState {
     pub valuators: ValuatorState,
@@ -1266,6 +1532,18 @@ pub struct XiState {
     /// Per-device properties, keyed by `(device_id, property_atom)`.
     /// Written by `XIChangeProperty`, removed by `XIDeleteProperty`.
     pub device_properties: HashMap<(u16, u32), Vec<u8>>,
+    /// Active XI2 device grabs (one per device).
+    pub active_grabs: HashMap<xi::DeviceId, Xi2ActiveGrab>,
+    /// Passive XI2 device grabs.
+    pub passive_grabs: Vec<Xi2PassiveGrab>,
+    /// Whether the pointer device events are frozen (synchronous grab mode).
+    pub pointer_frozen: bool,
+    /// Whether the keyboard device events are frozen (synchronous grab mode).
+    pub keyboard_frozen: bool,
+    /// Frozen pointer events queue.
+    pub frozen_pointer_events: Vec<Vec<u8>>,
+    /// Frozen keyboard events queue.
+    pub frozen_keyboard_events: Vec<Vec<u8>>,
 }
 
 impl Default for XiState {
@@ -1276,7 +1554,106 @@ impl Default for XiState {
             pending: PendingSynthetic::default(),
             client_pointer: MASTER_POINTER_ID,
             device_properties: HashMap::new(),
+            active_grabs: HashMap::new(),
+            passive_grabs: Vec::new(),
+            pointer_frozen: false,
+            keyboard_frozen: false,
+            frozen_pointer_events: Vec::new(),
+            frozen_keyboard_events: Vec::new(),
         }
+    }
+}
+
+impl XiState {
+    /// Check if a passive grab should activate for the given event.
+    /// Returns the matching passive grab if found.
+    pub fn check_passive_grab(
+        &self,
+        deviceid: xi::DeviceId,
+        detail: u32,
+        grab_type: u8,
+        modifiers: u32,
+        window_chain: &[u32],
+    ) -> Option<&Xi2PassiveGrab> {
+        // Walk the window hierarchy looking for passive grabs (LIFO order).
+        for window in window_chain {
+            // Search in reverse (LIFO) for matching passive grabs.
+            for grab in self.passive_grabs.iter().rev() {
+                if grab.grab_window != *window {
+                    continue;
+                }
+                if grab.grab_type != grab_type {
+                    continue;
+                }
+                // Device match: 0 = AllDevices, 1 = AllMaster, or exact match.
+                if grab.deviceid != 0
+                    && grab.deviceid != 1
+                    && grab.deviceid != deviceid
+                {
+                    continue;
+                }
+                // Detail match: 0 = AnyKey/AnyButton.
+                if grab.detail != 0 && grab.detail != detail {
+                    continue;
+                }
+                // Modifier match: 0x8000 = AnyModifier.
+                if grab.modifiers != 0x8000 && grab.modifiers != modifiers {
+                    continue;
+                }
+                return Some(grab);
+            }
+        }
+        None
+    }
+
+    /// Activate a passive grab (convert to active).
+    pub fn activate_passive_grab(&mut self, grab: &Xi2PassiveGrab) {
+        let active = Xi2ActiveGrab {
+            deviceid: grab.deviceid,
+            grab_window: grab.grab_window,
+            event_mask: grab.event_mask.clone(),
+            owner_events: grab.owner_events,
+            paired_device_mode: grab.paired_device_mode,
+            grab_mode: grab.grab_mode,
+        };
+        // Freeze if synchronous mode.
+        if grab.grab_mode == 0 {
+            if grab.deviceid == MASTER_POINTER_ID || grab.deviceid == 0 || grab.deviceid == 1 {
+                self.pointer_frozen = true;
+            }
+            if grab.deviceid == MASTER_KEYBOARD_ID || grab.deviceid == 0 || grab.deviceid == 1 {
+                self.keyboard_frozen = true;
+            }
+        }
+        self.active_grabs.insert(active.deviceid, active);
+    }
+
+    /// Queue an event during a synchronous grab freeze.
+    pub fn freeze_pointer_event(&mut self, event: Vec<u8>) {
+        if self.frozen_pointer_events.len() >= MAX_XI2_FROZEN_EVENTS {
+            self.frozen_pointer_events.remove(0);
+        }
+        self.frozen_pointer_events.push(event);
+    }
+
+    /// Queue a keyboard event during a synchronous grab freeze.
+    pub fn freeze_keyboard_event(&mut self, event: Vec<u8>) {
+        if self.frozen_keyboard_events.len() >= MAX_XI2_FROZEN_EVENTS {
+            self.frozen_keyboard_events.remove(0);
+        }
+        self.frozen_keyboard_events.push(event);
+    }
+
+    /// Thaw pointer events and return frozen events for delivery.
+    pub fn thaw_pointer(&mut self) -> Vec<Vec<u8>> {
+        self.pointer_frozen = false;
+        std::mem::take(&mut self.frozen_pointer_events)
+    }
+
+    /// Thaw keyboard events and return frozen events for delivery.
+    pub fn thaw_keyboard(&mut self) -> Vec<Vec<u8>> {
+        self.keyboard_frozen = false;
+        std::mem::take(&mut self.frozen_keyboard_events)
     }
 }
 
@@ -1318,6 +1695,12 @@ mod tests {
             &mut MASTER_POINTER_ID.clone(),
             &mut HashMap::new(),
             &mut 0x62,
+            &mut HashMap::new(),
+            &mut Vec::new(),
+            &mut false,
+            &mut false,
+            &mut Vec::new(),
+            &mut Vec::new(),
             1024,
             768,
             0x62,
@@ -1392,6 +1775,12 @@ mod tests {
             &mut MASTER_POINTER_ID.clone(),
             &mut HashMap::new(),
             &mut 0x62,
+            &mut HashMap::new(),
+            &mut Vec::new(),
+            &mut false,
+            &mut false,
+            &mut Vec::new(),
+            &mut Vec::new(),
             1024,
             768,
             0x62,
@@ -1443,6 +1832,12 @@ mod tests {
             &mut MASTER_POINTER_ID.clone(),
             &mut HashMap::new(),
             &mut 0x62,
+            &mut HashMap::new(),
+            &mut Vec::new(),
+            &mut false,
+            &mut false,
+            &mut Vec::new(),
+            &mut Vec::new(),
             1024,
             768,
             0x62,
@@ -1638,6 +2033,12 @@ mod tests {
             &mut MASTER_POINTER_ID.clone(),
             &mut HashMap::new(),
             &mut root_window.clone(),
+            &mut HashMap::new(),
+            &mut Vec::new(),
+            &mut false,
+            &mut false,
+            &mut Vec::new(),
+            &mut Vec::new(),
             1024,
             768,
             root_window,
@@ -1670,5 +2071,281 @@ mod tests {
             build_xi_events_for(&mut valuators, &selections, &chain, 0, 0x62, &input, false)
                 .is_empty()
         );
+    }
+
+    /// Helper to call handle_request with all the XI2 state fields.
+    fn call_handle_request(
+        request: &[u8],
+        seq: u16,
+        xi_state: &mut XiState,
+        focus_window: &mut u32,
+    ) -> Vec<u8> {
+        handle_request(
+            request,
+            seq,
+            &mut xi_state.valuators,
+            &mut xi_state.selections,
+            &mut xi_state.pending,
+            &mut xi_state.client_pointer,
+            &mut xi_state.device_properties,
+            focus_window,
+            &mut xi_state.active_grabs,
+            &mut xi_state.passive_grabs,
+            &mut xi_state.pointer_frozen,
+            &mut xi_state.keyboard_frozen,
+            &mut xi_state.frozen_pointer_events,
+            &mut xi_state.frozen_keyboard_events,
+            1024,
+            768,
+            0x62,
+            false,
+        )
+    }
+
+    #[test]
+    fn xi_grab_device_tracks_active_grab() {
+        let mut xi_state = XiState::default();
+        let mut focus = 0x62u32;
+
+        // Build XIGrabDevice request: [major, minor, length, body...]
+        // body: window(4) + time(4) + cursor(4) + deviceid(2) +
+        //   mode(1) + paired_device_mode(1) + owner_events(1) + pad(1) + mask_len(2) + mask(4)
+        let mut req = vec![XI_MAJOR_OPCODE, xi::XI_GRAB_DEVICE_REQUEST, 8, 0];
+        req.extend_from_slice(&0xdead_beefu32.to_le_bytes()); // window
+        req.extend_from_slice(&0u32.to_le_bytes()); // time
+        req.extend_from_slice(&0u32.to_le_bytes()); // cursor
+        req.extend_from_slice(&MASTER_POINTER_ID.to_le_bytes()); // deviceid
+        req.push(1); // grab_mode = Async
+        req.push(1); // paired_device_mode = Async
+        req.push(1); // owner_events = true
+        req.push(0); // pad
+        req.extend_from_slice(&1u16.to_le_bytes()); // mask_len
+        req.extend_from_slice(&0u16.to_le_bytes()); // pad
+        let bits = (1u32 << xi::BUTTON_PRESS_EVENT) | (1u32 << xi::MOTION_EVENT);
+        req.extend_from_slice(&bits.to_le_bytes()); // mask
+
+        let reply_bytes = call_handle_request(&req, 1, &mut xi_state, &mut focus);
+        let (reply, _) = xi::XIGrabDeviceReply::try_parse(&reply_bytes).unwrap();
+        assert_eq!(reply.status, xproto::GrabStatus::SUCCESS);
+        assert!(xi_state.active_grabs.contains_key(&MASTER_POINTER_ID));
+        assert_eq!(xi_state.active_grabs[&MASTER_POINTER_ID].grab_window, 0xdead_beef);
+        assert!(xi_state.active_grabs[&MASTER_POINTER_ID].owner_events);
+    }
+
+    #[test]
+    fn xi_grab_device_returns_already_grabbed() {
+        let mut xi_state = XiState::default();
+        let mut focus = 0x62u32;
+
+        // Insert an existing grab.
+        xi_state.active_grabs.insert(MASTER_POINTER_ID, Xi2ActiveGrab {
+            deviceid: MASTER_POINTER_ID,
+            grab_window: 0x100,
+            event_mask: vec![],
+            owner_events: false,
+            paired_device_mode: 1,
+            grab_mode: 1,
+        });
+
+        let mut req = vec![XI_MAJOR_OPCODE, xi::XI_GRAB_DEVICE_REQUEST, 8, 0];
+        req.extend_from_slice(&0x200u32.to_le_bytes());
+        req.extend_from_slice(&0u32.to_le_bytes());
+        req.extend_from_slice(&0u32.to_le_bytes());
+        req.extend_from_slice(&MASTER_POINTER_ID.to_le_bytes());
+        req.push(1); req.push(1); req.push(0); req.push(0);
+        req.extend_from_slice(&0u16.to_le_bytes());
+        req.extend_from_slice(&0u16.to_le_bytes());
+
+        let reply_bytes = call_handle_request(&req, 2, &mut xi_state, &mut focus);
+        let (reply, _) = xi::XIGrabDeviceReply::try_parse(&reply_bytes).unwrap();
+        assert_eq!(reply.status, xproto::GrabStatus::ALREADY_GRABBED);
+        // Original grab should still be present.
+        assert_eq!(xi_state.active_grabs[&MASTER_POINTER_ID].grab_window, 0x100);
+    }
+
+    #[test]
+    fn xi_ungrab_device_releases_grab() {
+        let mut xi_state = XiState::default();
+        let mut focus = 0x62u32;
+
+        xi_state.active_grabs.insert(MASTER_POINTER_ID, Xi2ActiveGrab {
+            deviceid: MASTER_POINTER_ID,
+            grab_window: 0x100,
+            event_mask: vec![],
+            owner_events: false,
+            paired_device_mode: 1,
+            grab_mode: 0, // Sync
+        });
+        xi_state.pointer_frozen = true;
+
+        // XIUngrabDevice: [major, minor, length, time(4), deviceid(2), pad(2)]
+        let mut req = vec![XI_MAJOR_OPCODE, xi::XI_UNGRAB_DEVICE_REQUEST, 3, 0];
+        req.extend_from_slice(&0u32.to_le_bytes()); // time
+        req.extend_from_slice(&MASTER_POINTER_ID.to_le_bytes()); // deviceid
+        req.extend_from_slice(&0u16.to_le_bytes()); // pad
+
+        call_handle_request(&req, 3, &mut xi_state, &mut focus);
+        assert!(!xi_state.active_grabs.contains_key(&MASTER_POINTER_ID));
+        assert!(!xi_state.pointer_frozen);
+    }
+
+    #[test]
+    fn xi_passive_grab_registers_and_unregisters() {
+        let mut xi_state = XiState::default();
+        let mut focus = 0x62u32;
+
+        // XIPassiveGrabDevice: time(4) + grab_window(4) + cursor(4) +
+        //   detail(4) + deviceid(2) + num_modifiers(2) + mask_len(2) +
+        //   grab_type(1) + grab_mode(1) + paired_device_mode(1) +
+        //   owner_events(1) + pad(2) + mask(4) + modifiers(4)
+        let mut req = vec![XI_MAJOR_OPCODE, xi::XI_PASSIVE_GRAB_DEVICE_REQUEST, 10, 0];
+        req.extend_from_slice(&0u32.to_le_bytes()); // time
+        req.extend_from_slice(&0x400001u32.to_le_bytes()); // grab_window
+        req.extend_from_slice(&0u32.to_le_bytes()); // cursor
+        req.extend_from_slice(&1u32.to_le_bytes()); // detail = button 1
+        req.extend_from_slice(&MASTER_POINTER_ID.to_le_bytes()); // deviceid
+        req.extend_from_slice(&1u16.to_le_bytes()); // num_modifiers = 1
+        req.extend_from_slice(&1u16.to_le_bytes()); // mask_len = 1
+        req.push(1); // grab_type = Button
+        req.push(1); // grab_mode = Async
+        req.push(1); // paired_device_mode = Async
+        req.push(1); // owner_events = true
+        req.extend_from_slice(&0u16.to_le_bytes()); // pad
+        let bits = 1u32 << xi::BUTTON_PRESS_EVENT;
+        req.extend_from_slice(&bits.to_le_bytes()); // mask
+        req.extend_from_slice(&0u32.to_le_bytes()); // modifiers = AnyModifier? No, 0 = no modifiers
+
+        let reply_bytes = call_handle_request(&req, 4, &mut xi_state, &mut focus);
+        assert!(!reply_bytes.is_empty());
+        assert_eq!(xi_state.passive_grabs.len(), 1);
+        assert_eq!(xi_state.passive_grabs[0].detail, 1);
+        assert_eq!(xi_state.passive_grabs[0].grab_window, 0x400001);
+        assert_eq!(xi_state.passive_grabs[0].grab_type, 1);
+
+        // Now ungrab it.
+        let mut ungrab_req = vec![XI_MAJOR_OPCODE, xi::XI_PASSIVE_UNGRAB_DEVICE_REQUEST, 5, 0];
+        ungrab_req.extend_from_slice(&0x400001u32.to_le_bytes()); // grab_window
+        ungrab_req.extend_from_slice(&1u32.to_le_bytes()); // detail = button 1
+        ungrab_req.extend_from_slice(&MASTER_POINTER_ID.to_le_bytes()); // deviceid
+        ungrab_req.extend_from_slice(&1u16.to_le_bytes()); // num_modifiers = 1
+        ungrab_req.push(1); // grab_type = Button
+        ungrab_req.extend_from_slice(&[0, 0, 0]); // pad
+        ungrab_req.extend_from_slice(&0u32.to_le_bytes()); // modifier = 0
+
+        call_handle_request(&ungrab_req, 5, &mut xi_state, &mut focus);
+        assert!(xi_state.passive_grabs.is_empty());
+    }
+
+    #[test]
+    fn xi_allow_events_async_thaws_pointer() {
+        let mut xi_state = XiState::default();
+        let mut focus = 0x62u32;
+
+        xi_state.pointer_frozen = true;
+        xi_state.frozen_pointer_events.push(vec![1, 2, 3]);
+
+        // XIAllowEvents: [major, minor, length, time(4), deviceid(2), mode(1), pad(1)]
+        let mut req = vec![XI_MAJOR_OPCODE, xi::XI_ALLOW_EVENTS_REQUEST, 3, 0];
+        req.extend_from_slice(&0u32.to_le_bytes()); // time
+        req.extend_from_slice(&MASTER_POINTER_ID.to_le_bytes()); // deviceid
+        req.push(0); // mode = AsyncDevice
+        req.push(0); // pad
+
+        call_handle_request(&req, 6, &mut xi_state, &mut focus);
+        assert!(!xi_state.pointer_frozen);
+    }
+
+    #[test]
+    fn xi_get_focus_returns_actual_focus() {
+        let mut xi_state = XiState::default();
+        let mut focus = 0xdead_beefu32;
+
+        let req = vec![XI_MAJOR_OPCODE, xi::XI_GET_FOCUS_REQUEST, 2, 0,
+            MASTER_KEYBOARD_ID as u8, 0, 0, 0];
+
+        let reply_bytes = call_handle_request(&req, 7, &mut xi_state, &mut focus);
+        let (reply, _) = xi::XIGetFocusReply::try_parse(&reply_bytes).unwrap();
+        assert_eq!(reply.focus, 0xdead_beef);
+    }
+
+    #[test]
+    fn xi_get_selected_events_returns_subscriptions() {
+        let mut xi_state = XiState::default();
+        let mut focus = 0x62u32;
+
+        // Add a subscription.
+        xi_state.selections.push(XiSelection {
+            window: 0x400001,
+            deviceid: 1,
+            mask: vec![(1u32 << xi::BUTTON_PRESS_EVENT).into()],
+        });
+
+        // Build XIGetSelectedEvents request: [major, minor, length, window(4)]
+        let mut req = vec![XI_MAJOR_OPCODE, xi::XI_GET_SELECTED_EVENTS_REQUEST, 2, 0];
+        req.extend_from_slice(&0x400001u32.to_le_bytes());
+
+        let reply_bytes = call_handle_request(&req, 8, &mut xi_state, &mut focus);
+        let (reply, _) = xi::XIGetSelectedEventsReply::try_parse(&reply_bytes).unwrap();
+        assert_eq!(reply.masks.len(), 1);
+        assert_eq!(reply.masks[0].deviceid, 1);
+    }
+
+    #[test]
+    fn xi_passive_grab_check_matches() {
+        let mut xi_state = XiState::default();
+        xi_state.passive_grabs.push(Xi2PassiveGrab {
+            deviceid: MASTER_POINTER_ID,
+            grab_window: 0x400001,
+            detail: 1, // Button 1
+            grab_type: 1, // Button
+            modifiers: 0x8000, // AnyModifier
+            event_mask: vec![],
+            owner_events: false,
+            paired_device_mode: 1,
+            grab_mode: 1,
+        });
+
+        // Should match: button 1 on window 0x400001 with any modifier.
+        let result = xi_state.check_passive_grab(
+            MASTER_POINTER_ID,
+            1, // detail = button 1
+            1, // grab_type = Button
+            0x04, // modifiers = Control
+            &[0x400001, 0x62],
+        );
+        assert!(result.is_some());
+
+        // Should NOT match: button 2.
+        let result = xi_state.check_passive_grab(
+            MASTER_POINTER_ID,
+            2, // detail = button 2
+            1,
+            0,
+            &[0x400001, 0x62],
+        );
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn xi_sync_grab_freezes_pointer() {
+        let mut xi_state = XiState::default();
+        let mut focus = 0x62u32;
+
+        // Grab in synchronous mode (grab_mode = 0).
+        let mut req = vec![XI_MAJOR_OPCODE, xi::XI_GRAB_DEVICE_REQUEST, 8, 0];
+        req.extend_from_slice(&0x400001u32.to_le_bytes()); // window
+        req.extend_from_slice(&0u32.to_le_bytes()); // time
+        req.extend_from_slice(&0u32.to_le_bytes()); // cursor
+        req.extend_from_slice(&MASTER_POINTER_ID.to_le_bytes()); // deviceid
+        req.push(0); // grab_mode = Sync
+        req.push(1); // paired_device_mode = Async
+        req.push(0); // owner_events
+        req.push(0); // pad
+        req.extend_from_slice(&0u16.to_le_bytes()); // mask_len
+        req.extend_from_slice(&0u16.to_le_bytes()); // pad
+
+        call_handle_request(&req, 10, &mut xi_state, &mut focus);
+        assert!(xi_state.pointer_frozen);
+        assert!(xi_state.active_grabs.contains_key(&MASTER_POINTER_ID));
     }
 }
