@@ -876,7 +876,7 @@ pub(crate) fn ancestor_chain(windows: &HashMap<u32, WindowState>, start: u32) ->
 /// Check if window `child` is a descendant of window `ancestor`.
 pub(crate) fn is_descendant_of(windows: &HashMap<u32, WindowState>, child: u32, ancestor: u32) -> bool {
     let mut current = child;
-    for _ in 0..20 {
+    for _ in 0..128 {
         let parent = match windows.get(&current) {
             Some(w) => w.parent,
             None => return false,

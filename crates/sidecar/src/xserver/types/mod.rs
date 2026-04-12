@@ -678,4 +678,79 @@ mod tests {
         assert_eq!(hints.base_width, 0);
         assert_eq!(hints.base_height, 0);
     }
+
+    // -----------------------------------------------------------------------
+    // is_descendant_of: circular parent detection for ReparentWindow
+    // -----------------------------------------------------------------------
+
+    fn make_test_window(id: u32, parent: u32) -> WindowState {
+        use crate::framebuffer::Framebuffer;
+        WindowState {
+            id,
+            parent,
+            x: 0, y: 0, width: 100, height: 100,
+            border_width: 0, visual: 0x21, class: 1,
+            mapped: false, event_mask: 0, do_not_propagate_mask: 0,
+            background_pixel: 0, background_pixmap: None,
+            border_pixel: 0, border_pixmap: None,
+            override_redirect: false, redirected: false,
+            framebuffer: Framebuffer::new(100, 100),
+            properties: std::collections::HashMap::new(),
+            owner_client_id: String::new(),
+            cursor: None, children_order: Vec::new(),
+            retained_temporary: false,
+            bounding_shape: None, clip_shape: None, input_shape: None,
+            shape_select_clients: Vec::new(),
+            colormap: 0, backing_store: 0, backing_planes: 0xFFFFFFFF,
+            backing_pixel: 0, save_under: false, visibility: 0,
+            backing_pixmap: None, wm_hints_initial_state: None,
+            transient_for: None, sync_request_counter: None,
+            sync_request_value: 0,
+        }
+    }
+
+    #[test]
+    fn is_descendant_of_direct_child() {
+        let mut windows = std::collections::HashMap::new();
+        windows.insert(1, make_test_window(1, 0)); // root
+        windows.insert(2, make_test_window(2, 1)); // child of root
+        assert!(crate::xserver::is_descendant_of(&windows, 2, 1));
+    }
+
+    #[test]
+    fn is_descendant_of_grandchild() {
+        let mut windows = std::collections::HashMap::new();
+        windows.insert(1, make_test_window(1, 0));
+        windows.insert(2, make_test_window(2, 1));
+        windows.insert(3, make_test_window(3, 2));
+        assert!(crate::xserver::is_descendant_of(&windows, 3, 1));
+    }
+
+    #[test]
+    fn is_descendant_of_not_ancestor() {
+        let mut windows = std::collections::HashMap::new();
+        windows.insert(1, make_test_window(1, 0));
+        windows.insert(2, make_test_window(2, 1));
+        windows.insert(3, make_test_window(3, 1));
+        // 2 and 3 are siblings, neither is ancestor of the other
+        assert!(!crate::xserver::is_descendant_of(&windows, 2, 3));
+        assert!(!crate::xserver::is_descendant_of(&windows, 3, 2));
+    }
+
+    #[test]
+    fn is_descendant_of_reverse_not_true() {
+        let mut windows = std::collections::HashMap::new();
+        windows.insert(1, make_test_window(1, 0));
+        windows.insert(2, make_test_window(2, 1));
+        // 1 is not a descendant of 2
+        assert!(!crate::xserver::is_descendant_of(&windows, 1, 2));
+    }
+
+    #[test]
+    fn is_descendant_of_same_window() {
+        let mut windows = std::collections::HashMap::new();
+        windows.insert(1, make_test_window(1, 0));
+        // A window is not a descendant of itself
+        assert!(!crate::xserver::is_descendant_of(&windows, 1, 1));
+    }
 }

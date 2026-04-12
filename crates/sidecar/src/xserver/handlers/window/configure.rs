@@ -24,12 +24,44 @@ pub(crate) fn handle_reparent_window(state: &mut ClientState, data: &[u8], seq: 
         return build_error(BAD_WINDOW, state.sequence, new_parent, 7, 0);
     }
 
+    // Per X11 spec: it is a BadMatch error to reparent a window to itself
+    // or to one of its own descendants (would create a circular tree).
+    if window == new_parent || crate::xserver::is_descendant_of(&state.windows, new_parent, window) {
+        return build_error(BAD_MATCH, state.sequence, window, 7, 0);
+    }
+
     let bo = state.msb_first;
     let old_parent = state.windows.get(&window).map(|w| w.parent).unwrap_or(0);
 
-    // Unmap the window first if mapped
+    // Per X11 spec: if the window is mapped, perform an automatic UnmapWindow first.
+    // This means generating proper UnmapNotify events.
     let was_mapped = state.windows.get(&window).is_some_and(|w| w.mapped);
     if was_mapped {
+        // Generate UnmapNotify to the window itself (StructureNotifyMask)
+        {
+            let mut unmap_event = [0u8; 32];
+            unmap_event[0] = UNMAP_NOTIFY_EVENT;
+            write_u16_bo(&mut unmap_event, 2, seq, bo);
+            write_u32_bo(&mut unmap_event, 4, window, bo);
+            write_u32_bo(&mut unmap_event, 8, window, bo);
+            if state.windows.get(&window).is_some_and(|w| w.event_mask & STRUCTURE_NOTIFY_MASK != 0) {
+                state.pending_events.push(unmap_event.to_vec());
+            }
+            state.broadcast_event(window, STRUCTURE_NOTIFY_MASK, &unmap_event);
+        }
+        // Generate UnmapNotify to the old parent (SubstructureNotifyMask)
+        if old_parent != 0 {
+            let mut parent_unmap = [0u8; 32];
+            parent_unmap[0] = UNMAP_NOTIFY_EVENT;
+            write_u16_bo(&mut parent_unmap, 2, seq, bo);
+            write_u32_bo(&mut parent_unmap, 4, old_parent, bo);
+            write_u32_bo(&mut parent_unmap, 8, window, bo);
+            if state.windows.get(&old_parent).is_some_and(|w| w.event_mask & SUBSTRUCTURE_NOTIFY_MASK != 0) {
+                state.pending_events.push(parent_unmap.to_vec());
+            }
+            state.broadcast_event(old_parent, SUBSTRUCTURE_NOTIFY_MASK, &parent_unmap);
+        }
+
         if let Some(win) = state.windows.get_mut(&window) {
             win.mapped = false;
         }
@@ -47,7 +79,7 @@ pub(crate) fn handle_reparent_window(state: &mut ClientState, data: &[u8], seq: 
         win.y = y;
     }
 
-    // Add to new parent's children_order
+    // Add to new parent's children_order (on top of stacking order)
     if let Some(new_parent_win) = state.windows.get_mut(&new_parent) {
         new_parent_win.children_order.push(window);
     }
@@ -76,7 +108,6 @@ pub(crate) fn handle_reparent_window(state: &mut ClientState, data: &[u8], seq: 
         if state.windows.get(&window).is_some_and(|w| w.event_mask & STRUCTURE_NOTIFY_MASK != 0) {
             events.extend_from_slice(&event);
         }
-        // Cross-connection broadcast: StructureNotify on the window
         state.broadcast_event(window, STRUCTURE_NOTIFY_MASK, &event);
     }
 
@@ -86,7 +117,6 @@ pub(crate) fn handle_reparent_window(state: &mut ClientState, data: &[u8], seq: 
         if state.windows.get(&old_parent).is_some_and(|w| w.event_mask & SUBSTRUCTURE_NOTIFY_MASK != 0) {
             state.pending_events.push(event.to_vec());
         }
-        // Cross-connection broadcast: SubstructureNotify on old parent
         state.broadcast_event(old_parent, SUBSTRUCTURE_NOTIFY_MASK, &event);
     }
 
@@ -96,15 +126,20 @@ pub(crate) fn handle_reparent_window(state: &mut ClientState, data: &[u8], seq: 
         if state.windows.get(&new_parent).is_some_and(|w| w.event_mask & SUBSTRUCTURE_NOTIFY_MASK != 0) {
             state.pending_events.push(event.to_vec());
         }
-        // Cross-connection broadcast: SubstructureNotify on new parent
         state.broadcast_event(new_parent, SUBSTRUCTURE_NOTIFY_MASK, &event);
     }
 
-    // If the window was mapped before reparenting, re-map it
+    // Per X11 spec: if the window was originally mapped, perform an automatic
+    // MapWindow on it after the reparent. This generates proper MapNotify events
+    // and handles SubstructureRedirect (WM redirect) for the new parent.
     if was_mapped {
-        if let Some(win) = state.windows.get_mut(&window) {
-            win.mapped = true;
-        }
+        // Build a synthetic MapWindow request and dispatch it
+        let mut map_data = [0u8; 8];
+        map_data[0] = 8; // MapWindow opcode
+        state.write_u16(&mut map_data, 2, 2); // request length = 2
+        state.write_u32(&mut map_data, 4, window);
+        let map_events = super::map::handle_map_window(state, &map_data, seq);
+        events.extend_from_slice(&map_events);
     }
 
     events

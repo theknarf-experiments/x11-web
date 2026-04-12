@@ -1574,4 +1574,220 @@ d.close()
 		// The server should not crash when clients query SHM
 		expect(output).toBeDefined();
 	});
+
+	// -----------------------------------------------------------------------
+	// ReparentWindow spec compliance
+	// -----------------------------------------------------------------------
+
+	test("ReparentWindow generates proper events", async ({
+		sidecarContainer,
+	}) => {
+		const output = await runPythonX11(
+			sidecarContainer,
+			`
+import Xlib.display, Xlib.X
+d = Xlib.display.Display()
+screen = d.screen()
+
+# Create parent windows
+parent1 = screen.root.create_window(0, 0, 200, 200, 0, screen.root_depth,
+    event_mask=Xlib.X.SubstructureNotifyMask)
+parent2 = screen.root.create_window(200, 0, 200, 200, 0, screen.root_depth,
+    event_mask=Xlib.X.SubstructureNotifyMask)
+child = parent1.create_window(10, 10, 50, 50, 0, screen.root_depth,
+    event_mask=Xlib.X.StructureNotifyMask)
+d.sync()
+
+# Verify child is under parent1
+tree1 = parent1.query_tree()
+print(f"before_n_children_p1={len(tree1.children)}")
+
+# Reparent child to parent2 at (20, 20)
+child.reparent(parent2, 20, 20)
+d.sync()
+
+# Verify child moved to parent2
+tree1_after = parent1.query_tree()
+tree2_after = parent2.query_tree()
+print(f"after_n_children_p1={len(tree1_after.children)}")
+print(f"after_n_children_p2={len(tree2_after.children)}")
+
+# Verify geometry was updated
+geo = child.get_geometry()
+print(f"child_x={geo.x} child_y={geo.y}")
+
+child.destroy()
+parent1.destroy()
+parent2.destroy()
+d.close()
+`,
+		);
+		expect(output).toContain("before_n_children_p1=1");
+		expect(output).toContain("after_n_children_p1=0");
+		expect(output).toContain("after_n_children_p2=1");
+		expect(output).toContain("child_x=20");
+		expect(output).toContain("child_y=20");
+	});
+
+	test("ReparentWindow rejects circular parent (self-reparent)", async ({
+		sidecarContainer,
+	}) => {
+		const output = await runPythonX11(
+			sidecarContainer,
+			`
+import Xlib.display, Xlib.X, Xlib.error
+d = Xlib.display.Display()
+screen = d.screen()
+w = screen.root.create_window(0, 0, 100, 100, 0, screen.root_depth)
+d.sync()
+
+# Try to reparent window to itself — should get BadMatch error
+try:
+    w.reparent(w, 0, 0)
+    d.sync()
+    print("result=NO_ERROR")
+except Xlib.error.BadMatch:
+    print("result=BAD_MATCH")
+except Exception as e:
+    print(f"result=OTHER_ERROR:{type(e).__name__}")
+
+w.destroy()
+d.close()
+`,
+		);
+		expect(output).toContain("result=BAD_MATCH");
+	});
+
+	test("ReparentWindow rejects reparenting to own descendant", async ({
+		sidecarContainer,
+	}) => {
+		const output = await runPythonX11(
+			sidecarContainer,
+			`
+import Xlib.display, Xlib.X, Xlib.error
+d = Xlib.display.Display()
+screen = d.screen()
+parent = screen.root.create_window(0, 0, 200, 200, 0, screen.root_depth)
+child = parent.create_window(10, 10, 100, 100, 0, screen.root_depth)
+grandchild = child.create_window(5, 5, 50, 50, 0, screen.root_depth)
+d.sync()
+
+# Try to reparent parent to its grandchild — should get BadMatch
+try:
+    parent.reparent(grandchild, 0, 0)
+    d.sync()
+    print("result=NO_ERROR")
+except Xlib.error.BadMatch:
+    print("result=BAD_MATCH")
+except Exception as e:
+    print(f"result=OTHER_ERROR:{type(e).__name__}")
+
+grandchild.destroy()
+child.destroy()
+parent.destroy()
+d.close()
+`,
+		);
+		expect(output).toContain("result=BAD_MATCH");
+	});
+
+	test("ReparentWindow generates MapNotify when remapping", async ({
+		sidecarContainer,
+	}) => {
+		const output = await runPythonX11(
+			sidecarContainer,
+			`
+import Xlib.display, Xlib.X
+d = Xlib.display.Display()
+screen = d.screen()
+
+parent1 = screen.root.create_window(0, 0, 200, 200, 0, screen.root_depth)
+parent2 = screen.root.create_window(200, 0, 200, 200, 0, screen.root_depth)
+child = parent1.create_window(10, 10, 50, 50, 0, screen.root_depth,
+    event_mask=Xlib.X.StructureNotifyMask)
+
+# Map the child window first
+child.map()
+d.sync()
+
+# Check it's mapped
+attrs = child.get_attributes()
+print(f"before_map_state={attrs.map_state}")
+
+# Reparent the mapped window to parent2
+child.reparent(parent2, 20, 20)
+d.sync()
+
+# It should still be mapped after reparent
+attrs2 = child.get_attributes()
+print(f"after_map_state={attrs2.map_state}")
+
+child.destroy()
+parent1.destroy()
+parent2.destroy()
+d.close()
+`,
+		);
+		// map_state 2 = IsViewable
+		expect(output).toContain("before_map_state=2");
+		expect(output).toContain("after_map_state=2");
+	});
+
+	// -----------------------------------------------------------------------
+	// SetDashes validation
+	// -----------------------------------------------------------------------
+
+	test("SetDashes rejects zero-length dash values", async ({
+		sidecarContainer,
+	}) => {
+		const output = await runPythonX11(
+			sidecarContainer,
+			`
+import Xlib.display, Xlib.X, Xlib.error
+d = Xlib.display.Display()
+screen = d.screen()
+gc = screen.root.create_gc()
+
+# Try setting dashes with a zero value — should get BadValue
+try:
+    gc.set_dashes(0, [4, 0, 2])  # 0 in dash list is invalid
+    d.sync()
+    print("result=NO_ERROR")
+except Xlib.error.BadValue:
+    print("result=BAD_VALUE")
+except Exception as e:
+    print(f"result=OTHER_ERROR:{type(e).__name__}")
+
+gc.free()
+d.close()
+`,
+		);
+		expect(output).toContain("result=BAD_VALUE");
+	});
+
+	test("SetDashes accepts valid non-zero dash values", async ({
+		sidecarContainer,
+	}) => {
+		const output = await runPythonX11(
+			sidecarContainer,
+			`
+import Xlib.display, Xlib.X, Xlib.error
+d = Xlib.display.Display()
+screen = d.screen()
+gc = screen.root.create_gc()
+
+# Valid dash list (all non-zero)
+try:
+    gc.set_dashes(0, [4, 2, 1, 3])
+    d.sync()
+    print("result=OK")
+except Exception as e:
+    print(f"result=ERROR:{type(e).__name__}")
+
+gc.free()
+d.close()
+`,
+		);
+		expect(output).toContain("result=OK");
+	});
 });

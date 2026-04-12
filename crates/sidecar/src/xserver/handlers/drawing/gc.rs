@@ -255,9 +255,18 @@ pub(crate) fn handle_set_dashes(state: &mut ClientState, data: &[u8]) -> Vec<u8>
         return build_error(BAD_LENGTH, state.sequence, 0, 58, 0);
     }
 
+    // Per X11 spec: n_dashes must be > 0 and each dash value must be non-zero.
+    if n_dashes == 0 {
+        return build_error(BAD_VALUE, state.sequence, 0, 58, 0);
+    }
+    let dash_data = &data[12..12 + n_dashes];
+    if dash_data.iter().any(|&d| d == 0) {
+        return build_error(BAD_VALUE, state.sequence, 0, 58, 0);
+    }
+
     if let Some(gc) = state.gcs.get_mut(&gc_id) {
         gc.dash_offset = dash_offset;
-        gc.dash_list = data[12..12 + n_dashes].to_vec();
+        gc.dash_list = dash_data.to_vec();
     }
 
     Vec::new()
