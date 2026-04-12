@@ -230,6 +230,7 @@ fn glyph_to_css_cursor(glyph: u16) -> &'static str {
 
 /// Resolve the effective cursor for a window and emit CursorChanged to the frontend.
 /// When the cursor has pre-rendered bitmap data, also emit CursorBitmap.
+/// Also sends XFixesCursorNotify to any subscribed clients per XFIXES spec.
 fn emit_cursor_changed(state: &mut ClientState, wid: u32) {
     // Resolve the cursor ID and CSS name from the window's cursor resource
     let cursor_id = state.windows.get(&wid).and_then(|w| w.cursor);
@@ -313,6 +314,38 @@ fn emit_cursor_changed(state: &mut ClientState, wid: u32) {
                 cursor: css_cursor,
             },
         ));
+    }
+
+    // Update current_cursor tracking for XFIXES GetCursorImage.
+    let new_cursor_id = cursor_id.unwrap_or(0);
+    let old_cursor_id = state.current_cursor;
+    state.current_cursor = new_cursor_id;
+
+    // Send XFixesCursorNotify to subscribers if the cursor actually changed.
+    if new_cursor_id != old_cursor_id && !state.cursor_event_subscribers.is_empty() {
+        // XFIXES event base = 87, CursorNotify subtype = 1, so event code = 87 + 1 = 88
+        const XFIXES_CURSOR_NOTIFY: u8 = 88;
+        let timestamp = state.timestamp();
+        let cursor_serial = new_cursor_id; // Use cursor ID as serial
+
+        // Collect subscriber windows first to avoid borrow conflict.
+        let subscribers: Vec<u32> = state.cursor_event_subscribers
+            .iter()
+            .filter(|(_, &subscribed)| subscribed)
+            .map(|(&win, _)| win)
+            .collect();
+
+        for sub_win in subscribers {
+            let mut event = [0u8; 32];
+            event[0] = XFIXES_CURSOR_NOTIFY;
+            event[1] = 0; // subtype: DisplayCursor
+            state.write_u16(&mut event, 2, state.sequence);
+            state.write_u32(&mut event, 4, sub_win);       // window
+            state.write_u32(&mut event, 8, cursor_serial);  // cursor-serial
+            state.write_u32(&mut event, 12, timestamp);     // timestamp
+            // 16-19: cursor-name (ATOM, 0 for unnamed)
+            state.pending_events.push(event.to_vec());
+        }
     }
 }
 

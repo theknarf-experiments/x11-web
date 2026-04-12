@@ -23,16 +23,46 @@ pub(crate) fn handle_randr_request(state: &mut ClientState, data: &[u8], seq: u1
         }
 
         // ---------------------------------------------------------------
-        // RRSetScreenConfig (2) — legacy, reply with success
+        // RRSetScreenConfig (2) — legacy screen configuration
+        //
+        // In a web-based X11 server, screen dimensions are managed by the
+        // browser viewport, not by the client. We parse the request to
+        // validate it, check the config timestamp for staleness, and
+        // return success with the current configuration.
         // ---------------------------------------------------------------
         2 => {
+            if data.len() < 24 {
+                return crate::xserver::core::build_error_bo(
+                    crate::xserver::core::BAD_LENGTH, seq, data.len() as u32,
+                    140, 2, state.msb_first,
+                );
+            }
+
+            let _drawable = state.read_u32(data, 4);
+            let _timestamp = state.read_u32(data, 8);
+            let config_timestamp = state.read_u32(data, 12);
+            let _size_index = state.read_u16(data, 16);
+            let _rotation = state.read_u16(data, 18);
+
+            // Check config timestamp — if it doesn't match, reply InvalidConfigTime
+            let status = if config_timestamp != 0
+                && config_timestamp != state.randr_config_timestamp
+            {
+                2 // InvalidConfigTime
+            } else {
+                0 // Success
+            };
+
             let mut reply = [0u8; 32];
             reply[0] = 1;
-            reply[1] = 0; // Success
+            reply[1] = status;
             state.write_u16(&mut reply, 2, seq);
             state.write_u32(&mut reply, 8, state.timestamp());
             state.write_u32(&mut reply, 12, state.randr_config_timestamp);
             state.write_u32(&mut reply, 16, state.root_window);
+            // subpixel_order at byte 20 (0 = Unknown, already zero)
+
+            debug!("RRSetScreenConfig: status={status} config_ts={config_timestamp}");
             reply.to_vec()
         }
 
