@@ -3,6 +3,10 @@ name = "x11-web-sidecar"
 version = "0.1.0"
 edition = "2021"
 
+[features]
+default = ["osmesa"]
+osmesa = []
+
 [dependencies]
 x11-web-protocol = { path = "../protocol" }
 x11rb-protocol = { version = "0.13", features = ["request-parsing", "render", "xinput"] }
@@ -21,6 +25,9 @@ bdf-parser = "0.1"
 flate2 = "1"
 glob = "0.3"
 libc = "0.2"
+freetype-rs = "0.38"
+freetype-sys = { version = "0.23", features = ["bundled"] }
+yeslogic-fontconfig-sys = { version = "6", features = ["dlopen"] }
 # DBus client — used in PR 2 to mirror GTK / Qt application menus over
 # `org.gtk.Menus` and `com.canonical.dbusmenu`. Brought in here so the
 # Phase 0 dbus-daemon plumbing can verify it links cleanly.

@@ -1,0 +1,232 @@
+//! GLX query operations (QueryVersion, GetVisualConfigs, GetFBConfigs,
+//! QueryExtensionsString, QueryServerString).
+
+use super::{
+    FBCONFIG_ATTRIB_COUNT,
+    GLX_FBCONFIG_ID, GLX_VISUAL_ID, GLX_X_RENDERABLE, GLX_RENDER_TYPE,
+    GLX_DRAWABLE_TYPE, GLX_X_VISUAL_TYPE, GLX_CONFIG_CAVEAT,
+    GLX_RED_SIZE, GLX_GREEN_SIZE, GLX_BLUE_SIZE, GLX_ALPHA_SIZE,
+    GLX_BUFFER_SIZE, GLX_DOUBLEBUFFER, GLX_DEPTH_SIZE, GLX_STENCIL_SIZE,
+    GLX_LEVEL, GLX_AUX_BUFFERS, GLX_STEREO,
+    GLX_ACCUM_RED_SIZE, GLX_ACCUM_GREEN_SIZE, GLX_ACCUM_BLUE_SIZE, GLX_ACCUM_ALPHA_SIZE,
+    GLX_SAMPLE_BUFFERS, GLX_SAMPLES, GLX_NONE, GLX_TRUE_COLOR,
+    GLX_RGBA_BIT, GLX_WINDOW_BIT, GLX_PIXMAP_BIT, GLX_PBUFFER_BIT,
+    GLX_MAX_PBUFFER_WIDTH, GLX_MAX_PBUFFER_HEIGHT, GLX_MAX_PBUFFER_PIXELS,
+    GLX_TRANSPARENT_TYPE,
+};
+use super::super::super::core::ROOT_VISUAL;
+
+// ---------------------------------------------------------------------------
+// GLX_QUERY_VERSION (minor 7)
+// ---------------------------------------------------------------------------
+
+pub(crate) fn handle_query_version(seq: u16) -> Vec<u8> {
+    // Return GLX 1.4
+    let mut reply = [0u8; 32];
+    reply[0] = 1; // Reply
+    reply[2..4].copy_from_slice(&seq.to_le_bytes());
+    reply[8..12].copy_from_slice(&1u32.to_le_bytes()); // major
+    reply[12..16].copy_from_slice(&4u32.to_le_bytes()); // minor
+    reply.to_vec()
+}
+
+// ---------------------------------------------------------------------------
+// GLX_GET_VISUAL_CONFIGS (minor 14)
+// ---------------------------------------------------------------------------
+
+pub(crate) fn handle_get_visual_configs(_data: &[u8], seq: u16) -> Vec<u8> {
+    // Return a single visual config matching ROOT_VISUAL
+    let num_configs: u32 = 1;
+    let props_per_config: u32 = 28;
+    let total_props = num_configs * props_per_config;
+
+    let extra_bytes = total_props as usize * 4;
+    let mut reply = vec![0u8; 32 + extra_bytes];
+    reply[0] = 1; // Reply
+    reply[2..4].copy_from_slice(&seq.to_le_bytes());
+    reply[4..8].copy_from_slice(&total_props.to_le_bytes());
+    reply[8..12].copy_from_slice(&num_configs.to_le_bytes());
+    reply[12..16].copy_from_slice(&props_per_config.to_le_bytes());
+
+    // Visual config properties: one RGBA config, depth=24, stencil=8
+    let props: [u32; 28] = [
+        ROOT_VISUAL,    // visual id
+        1,              // class (TrueColor)
+        1,              // rgba (True)
+        8,              // red size
+        8,              // green size
+        8,              // blue size
+        0,              // alpha size
+        0,              // accum red
+        0,              // accum green
+        0,              // accum blue
+        0,              // accum alpha
+        1,              // double buffer
+        0,              // stereo
+        32,             // buffer size
+        24,             // depth size
+        8,              // stencil size
+        0,              // aux buffers
+        0,              // level
+        0,              // visual caveat (None)
+        0x23,           // transparent type (None = 0x8000 but wire uses 0)
+        0, 0, 0, 0,     // transparent r, g, b, a
+        0, 0, 0, 0,     // pad
+    ];
+    for (i, &v) in props.iter().enumerate() {
+        let off = 32 + i * 4;
+        reply[off..off + 4].copy_from_slice(&v.to_le_bytes());
+    }
+
+    reply
+}
+
+// ---------------------------------------------------------------------------
+// GLX_GET_FB_CONFIGS (minor 21)
+// ---------------------------------------------------------------------------
+
+pub(crate) fn handle_get_fb_configs(_data: &[u8], seq: u16) -> Vec<u8> {
+    // Return two FBConfigs: one for depth-24 (XRGB) and one for depth-32 (ARGB)
+    let num_configs: u32 = 2;
+    let props_per_config = FBCONFIG_ATTRIB_COUNT as u32 * 2; // key-value pairs
+
+    let total_u32s = num_configs * props_per_config;
+    let extra_bytes = total_u32s as usize * 4;
+    let mut reply = vec![0u8; 32 + extra_bytes];
+    reply[0] = 1; // Reply
+    reply[2..4].copy_from_slice(&seq.to_le_bytes());
+    reply[4..8].copy_from_slice(&total_u32s.to_le_bytes());
+    reply[8..12].copy_from_slice(&num_configs.to_le_bytes());
+    reply[12..16].copy_from_slice(&props_per_config.to_le_bytes());
+
+    // FBConfig 1: 24-bit XRGB
+    let config1: [(u32, u32); FBCONFIG_ATTRIB_COUNT] = [
+        (GLX_FBCONFIG_ID, 1),
+        (GLX_VISUAL_ID, ROOT_VISUAL),
+        (GLX_X_RENDERABLE, 1),
+        (GLX_RENDER_TYPE, GLX_RGBA_BIT),
+        (GLX_DRAWABLE_TYPE, GLX_WINDOW_BIT | GLX_PIXMAP_BIT | GLX_PBUFFER_BIT),
+        (GLX_X_VISUAL_TYPE, GLX_TRUE_COLOR),
+        (GLX_CONFIG_CAVEAT, GLX_NONE),
+        (GLX_RED_SIZE, 8),
+        (GLX_GREEN_SIZE, 8),
+        (GLX_BLUE_SIZE, 8),
+        (GLX_ALPHA_SIZE, 0),
+        (GLX_BUFFER_SIZE, 32),
+        (GLX_DOUBLEBUFFER, 1),
+        (GLX_DEPTH_SIZE, 24),
+        (GLX_STENCIL_SIZE, 8),
+        (GLX_LEVEL, 0),
+        (GLX_AUX_BUFFERS, 0),
+        (GLX_STEREO, 0),
+        (GLX_ACCUM_RED_SIZE, 0),
+        (GLX_ACCUM_GREEN_SIZE, 0),
+        (GLX_ACCUM_BLUE_SIZE, 0),
+        (GLX_ACCUM_ALPHA_SIZE, 0),
+        (GLX_SAMPLE_BUFFERS, 0),
+        (GLX_SAMPLES, 0),
+        (GLX_TRANSPARENT_TYPE, GLX_NONE),
+        (GLX_MAX_PBUFFER_WIDTH, 4096),
+        (GLX_MAX_PBUFFER_HEIGHT, 4096),
+        (GLX_MAX_PBUFFER_PIXELS, 4096 * 4096),
+    ];
+
+    // FBConfig 2: 32-bit ARGB
+    let config2: [(u32, u32); FBCONFIG_ATTRIB_COUNT] = [
+        (GLX_FBCONFIG_ID, 2),
+        (GLX_VISUAL_ID, 0x40), // ARGB visual
+        (GLX_X_RENDERABLE, 1),
+        (GLX_RENDER_TYPE, GLX_RGBA_BIT),
+        (GLX_DRAWABLE_TYPE, GLX_WINDOW_BIT | GLX_PIXMAP_BIT | GLX_PBUFFER_BIT),
+        (GLX_X_VISUAL_TYPE, GLX_TRUE_COLOR),
+        (GLX_CONFIG_CAVEAT, GLX_NONE),
+        (GLX_RED_SIZE, 8),
+        (GLX_GREEN_SIZE, 8),
+        (GLX_BLUE_SIZE, 8),
+        (GLX_ALPHA_SIZE, 8),
+        (GLX_BUFFER_SIZE, 32),
+        (GLX_DOUBLEBUFFER, 1),
+        (GLX_DEPTH_SIZE, 24),
+        (GLX_STENCIL_SIZE, 8),
+        (GLX_LEVEL, 0),
+        (GLX_AUX_BUFFERS, 0),
+        (GLX_STEREO, 0),
+        (GLX_ACCUM_RED_SIZE, 0),
+        (GLX_ACCUM_GREEN_SIZE, 0),
+        (GLX_ACCUM_BLUE_SIZE, 0),
+        (GLX_ACCUM_ALPHA_SIZE, 0),
+        (GLX_SAMPLE_BUFFERS, 0),
+        (GLX_SAMPLES, 0),
+        (GLX_TRANSPARENT_TYPE, GLX_NONE),
+        (GLX_MAX_PBUFFER_WIDTH, 4096),
+        (GLX_MAX_PBUFFER_HEIGHT, 4096),
+        (GLX_MAX_PBUFFER_PIXELS, 4096 * 4096),
+    ];
+
+    let mut off = 32;
+    for &(key, val) in config1.iter().chain(config2.iter()) {
+        reply[off..off + 4].copy_from_slice(&key.to_le_bytes());
+        off += 4;
+        reply[off..off + 4].copy_from_slice(&val.to_le_bytes());
+        off += 4;
+    }
+
+    reply
+}
+
+// ---------------------------------------------------------------------------
+// GLX_QUERY_EXTENSIONS_STRING (minor 18)
+// ---------------------------------------------------------------------------
+
+pub(crate) fn handle_query_extensions_string(_data: &[u8], seq: u16) -> Vec<u8> {
+    let ext_string = b"GLX_ARB_create_context GLX_ARB_create_context_profile GLX_EXT_visual_info GLX_EXT_visual_rating GLX_MESA_copy_sub_buffer";
+    let n = ext_string.len() as u32;
+    let padded = ((n as usize) + 3) & !3;
+    let extra = 4 + padded; // 4 bytes for length, then string
+
+    let mut reply = vec![0u8; 32 + extra];
+    reply[0] = 1;
+    reply[2..4].copy_from_slice(&seq.to_le_bytes());
+    reply[4..8].copy_from_slice(&((extra / 4) as u32).to_le_bytes());
+    // n at byte 12 (after pad)
+    reply[12..16].copy_from_slice(&n.to_le_bytes());
+    reply[32..36].copy_from_slice(&n.to_le_bytes());
+    reply[36..36 + n as usize].copy_from_slice(ext_string);
+
+    reply
+}
+
+// ---------------------------------------------------------------------------
+// GLX_QUERY_SERVER_STRING (minor 19)
+// ---------------------------------------------------------------------------
+
+pub(crate) fn handle_query_server_string(data: &[u8], seq: u16) -> Vec<u8> {
+    let name = if data.len() >= 12 {
+        u32::from_le_bytes([data[8], data[9], data[10], data[11]])
+    } else {
+        0
+    };
+
+    let string = match name {
+        1 => b"x11-web OSMesa" as &[u8],  // GLX_VENDOR
+        2 => b"1.4" as &[u8],              // GLX_VERSION
+        3 => b"GLX_ARB_create_context GLX_ARB_create_context_profile GLX_EXT_visual_info GLX_EXT_visual_rating GLX_MESA_copy_sub_buffer" as &[u8],  // GLX_EXTENSIONS
+        _ => b"" as &[u8],
+    };
+
+    let n = string.len() as u32;
+    let padded = ((n as usize) + 3) & !3;
+    let extra = 4 + padded;
+
+    let mut reply = vec![0u8; 32 + extra];
+    reply[0] = 1;
+    reply[2..4].copy_from_slice(&seq.to_le_bytes());
+    reply[4..8].copy_from_slice(&((extra / 4) as u32).to_le_bytes());
+    reply[12..16].copy_from_slice(&n.to_le_bytes());
+    reply[32..36].copy_from_slice(&n.to_le_bytes());
+    if !string.is_empty() {
+        reply[36..36 + n as usize].copy_from_slice(string);
+    }
+
+    reply
+}

@@ -1,7 +1,12 @@
+mod colors;
+#[allow(dead_code)]
+mod compose;
 mod fonts;
 mod framebuffer;
 mod menus;
-mod render;
+#[cfg(feature = "osmesa")]
+#[allow(dead_code)]
+mod osmesa;
 mod xinput2;
 mod xserver;
 
@@ -52,6 +57,9 @@ impl ProcessManager {
             .stderr(Stdio::piped());
         if let Some(addr) = &self.dbus_session_address {
             cmd.env("DBUS_SESSION_BUS_ADDRESS", addr);
+        }
+        if let Ok(xauth) = std::env::var("XAUTHORITY") {
+            cmd.env("XAUTHORITY", xauth);
         }
         let child = cmd
             .spawn()
@@ -204,6 +212,16 @@ async fn start_dbus_session() -> Option<DbusSession> {
 async fn main() {
     tracing_subscriber::fmt::init();
 
+    // Attempt to load OSMesa for GLX software rendering
+    #[cfg(feature = "osmesa")]
+    {
+        if osmesa::init() {
+            info!("OSMesa software OpenGL rendering available");
+        } else {
+            warn!("OSMesa not available — GLX will return stub responses");
+        }
+    }
+
     let backend_url =
         std::env::var("BACKEND_URL").unwrap_or_else(|_| "ws://127.0.0.1:3001/ws/sidecar".into());
     let sidecar_name =
@@ -224,19 +242,43 @@ async fn main() {
     let (display_tx, mut display_rx) = mpsc::unbounded_channel::<TaggedDisplayUpdate>();
     let (client_connected_tx, mut client_connected_rx) = mpsc::unbounded_channel::<(String, u32)>();
     let window_router = crate::xserver::WindowRouter::new();
+    // Clipboard bridge channels
+    let (clipboard_notify_tx, mut clipboard_notify_rx) =
+        mpsc::unbounded_channel::<crate::xserver::types::ClipboardEvent>();
+    let shared_clipboard: crate::xserver::types::SharedClipboard =
+        std::sync::Arc::new(std::sync::Mutex::new(HashMap::new()));
     // MenuTracker connects to the same session bus the apps use; on
     // failure it becomes a no-op so the rest of the sidecar still
     // works without DBus.
     let menu_tracker =
         crate::menus::MenuTracker::new(display_tx.clone(), dbus_address.clone()).await;
+    // Watch channel for dynamic screen resize (RandR).
+    let (screen_size_tx, screen_size_rx) =
+        tokio::sync::watch::channel((1024u16, 768u16));
     let x11_server = X11Server::new(
         display_number,
         display_tx,
         client_connected_tx,
         window_router.clone(),
         menu_tracker,
+        clipboard_notify_tx,
+        shared_clipboard.clone(),
+        screen_size_rx,
     );
     let display_string = x11_server.display_string();
+    let shared_selections = x11_server.shared_selections();
+
+    // Write .Xauthority file and set env var so spawned processes inherit it.
+    match x11_server.write_xauthority() {
+        Ok(xauth_path) => {
+            std::env::set_var("XAUTHORITY", &xauth_path);
+            info!("XAUTHORITY={}", xauth_path.display());
+        }
+        Err(e) => {
+            warn!("Failed to write Xauthority file: {e}");
+        }
+    }
+
     info!("Starting X11 server on DISPLAY={}", display_string);
 
     tokio::spawn(async move {
@@ -259,6 +301,10 @@ async fn main() {
                     &mut display_rx,
                     &window_router,
                     &mut client_connected_rx,
+                    &screen_size_tx,
+                    &mut clipboard_notify_rx,
+                    &shared_clipboard,
+                    &shared_selections,
                 )
                 .await;
                 warn!("Disconnected from backend, reconnecting in 5s...");
@@ -281,6 +327,10 @@ async fn run_session(
     display_rx: &mut mpsc::UnboundedReceiver<TaggedDisplayUpdate>,
     window_router: &crate::xserver::WindowRouter,
     client_connected_rx: &mut mpsc::UnboundedReceiver<(String, u32)>,
+    screen_size_tx: &crate::xserver::types::ScreenSizeTx,
+    clipboard_notify_rx: &mut mpsc::UnboundedReceiver<crate::xserver::types::ClipboardEvent>,
+    shared_clipboard: &crate::xserver::types::SharedClipboard,
+    shared_selections: &crate::xserver::types::SharedSelections,
 ) {
     let (mut ws_tx, mut ws_rx) = ws_stream.split();
     let mut process_manager = ProcessManager::new(display_string.to_string(), dbus_address);
@@ -327,7 +377,7 @@ async fn run_session(
                 match msg {
                     Some(Ok(Message::Text(text))) => {
                         if let Ok(cmd) = serde_json::from_str::<BackendToSidecar>(&text) {
-                            handle_command(cmd, &mut process_manager, &tx, window_router).await;
+                            handle_command(cmd, &mut process_manager, &tx, window_router, screen_size_tx, shared_clipboard, shared_selections).await;
                         }
                     }
                     Some(Ok(Message::Close(_))) | None => break,
@@ -351,6 +401,26 @@ async fn run_session(
                     info!("X11 client {client_id} connected (peer PID {peer_pid}, no matching spawned process)");
                 }
             }
+            Some(clipboard_event) = clipboard_notify_rx.recv() => {
+                match clipboard_event {
+                    crate::xserver::types::ClipboardEvent::OwnerChanged { selection, owner } => {
+                        if owner != 0 {
+                            // An X11 client now owns this selection — advertise it to the frontend.
+                            let _ = tx.send(SidecarToBackend::ClipboardOffer {
+                                selection: selection.clone(),
+                                mime_types: vec!["text/plain".into(), "UTF8_STRING".into()],
+                            });
+                        }
+                    }
+                    crate::xserver::types::ClipboardEvent::Data { selection, mime_type, data } => {
+                        let _ = tx.send(SidecarToBackend::ClipboardData {
+                            selection,
+                            mime_type,
+                            data,
+                        });
+                    }
+                }
+            }
             _ = check_interval.tick() => {
                 let exited = process_manager.check_exited().await;
                 for (pid, exit_code) in exited {
@@ -369,6 +439,9 @@ async fn handle_command(
     pm: &mut ProcessManager,
     tx: &mpsc::UnboundedSender<SidecarToBackend>,
     window_router: &crate::xserver::WindowRouter,
+    screen_size_tx: &crate::xserver::types::ScreenSizeTx,
+    shared_clipboard: &crate::xserver::types::SharedClipboard,
+    shared_selections: &crate::xserver::types::SharedSelections,
 ) {
     match cmd {
         BackendToSidecar::SpawnProcess {
@@ -429,6 +502,36 @@ async fn handle_command(
             height,
         } => {
             window_router.send_resize(&window_id, width, height);
+        }
+        BackendToSidecar::RequestClipboard { selection, mime_type } => {
+            info!("Clipboard request: selection={selection} mime={mime_type}");
+            // Look up the current selection owner and request conversion.
+            // The owner will respond via the clipboard event channel.
+            if let Ok(sels) = shared_selections.lock() {
+                if let Some(_entry) = sels.values().next() {
+                    // There is a selection owner — the ConvertSelection mechanism
+                    // will handle this via the normal X11 selection protocol.
+                    // For now, signal that clipboard data is not available from server side.
+                    info!("Selection owner exists — clipboard data flows via X11 selection protocol");
+                }
+            }
+        }
+        BackendToSidecar::SetClipboard { selection, mime_type, data } => {
+            info!("Clipboard set: selection={selection} mime={mime_type} len={}", data.len());
+            // Store the data so that when an X11 client requests this selection,
+            // the server can respond with the browser's clipboard content.
+            if let Ok(mut cb) = shared_clipboard.lock() {
+                cb.insert(selection, crate::xserver::types::ServerClipboardData {
+                    mime_type,
+                    data,
+                });
+            }
+        }
+        BackendToSidecar::ResizeScreen { width, height } => {
+            if width > 0 && height > 0 {
+                info!("Screen resize request: {width}x{height}");
+                let _ = screen_size_tx.send((width, height));
+            }
         }
     }
 }

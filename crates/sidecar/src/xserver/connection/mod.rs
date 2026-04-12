@@ -1,0 +1,1496 @@
+//! Connection handling: per-client event loop with I/O helpers and resize logic
+//! split into focused submodules.
+
+pub(crate) mod scm_io;
+mod resize;
+
+use self::scm_io::{send_with_fds, recv_with_fds};
+use self::resize::apply_screen_resize;
+pub(crate) use self::resize::resize_window;
+
+use std::collections::HashMap;
+use std::io;
+use std::os::unix::io::AsRawFd;
+use std::sync::{Arc, Mutex};
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::sync::mpsc;
+use tokio::time::Duration;
+use tracing::{debug, info, warn};
+use x11rb_protocol::protocol::xproto::{ImageOrder, SetupRequest};
+use x11rb_protocol::x11_utils::{Serialize, TryParse};
+use crate::fonts::FontManager;
+
+use super::atoms::AtomManager;
+use super::client::ClientState;
+use super::core::*;
+use super::grab;
+use super::grab::GrabState;
+use super::types::*;
+use super::handlers;
+use super::setup::{build_setup, byteswap_setup_reply};
+use super::input::{build_x11_input_event, enforce_barriers};
+use super::{ancestor_chain, handle_request};
+
+/// Safely detach a SHM segment, logging errors instead of ignoring them.
+fn safe_shmdt(addr: *mut u8) {
+    if addr.is_null() {
+        return;
+    }
+    let ret = unsafe { libc::shmdt(addr as *const libc::c_void) };
+    if ret != 0 {
+        let err = std::io::Error::last_os_error();
+        warn!("shmdt({:?}) failed: {}", addr, err);
+    }
+}
+
+/// Safely close a file descriptor, logging errors instead of ignoring them.
+fn safe_close(fd: i32) {
+    if fd < 0 {
+        return;
+    }
+    let ret = unsafe { libc::close(fd) };
+    if ret != 0 {
+        let err = std::io::Error::last_os_error();
+        warn!("close(fd={}) failed: {}", fd, err);
+    }
+}
+
+pub(crate) async fn handle_client(
+    mut stream: tokio::net::UnixStream,
+    client_id: String,
+    update_tx: mpsc::UnboundedSender<TaggedDisplayUpdate>,
+    message_tx: mpsc::UnboundedSender<(u32, WindowMessage)>,
+    mut message_rx: mpsc::UnboundedReceiver<(u32, WindowMessage)>,
+    conn_index: u32,
+    shared_windows: SharedWindows,
+    shared_wm_state: SharedWmState,
+    shared_atoms: Arc<Mutex<AtomManager>>,
+    window_router: WindowRouter,
+    menu_tracker: crate::menus::MenuTracker,
+    event_router: EventRouter,
+    shared_selections: SharedSelections,
+    clipboard_notify_tx: mpsc::UnboundedSender<ClipboardEvent>,
+    shared_clipboard: SharedClipboard,
+    shared_pixmaps: SharedPixmaps,
+    shared_pixmap_fbs: SharedPixmapFbs,
+    shared_gcs: SharedGcs,
+    client_registry: SharedClientRegistry,
+    event_broadcaster: EventBroadcaster,
+    server_grab: ServerGrabLock,
+    shared_record_contexts: SharedRecordContexts,
+    persistent_clipboard: PersistentClipboard,
+    auth_cookie: [u8; 16],
+    mut screen_size_rx: super::types::ScreenSizeRx,
+    shared_access_control: super::types::SharedAccessControl,
+    shared_security_tokens: super::types::SharedSecurityTokens,
+) -> io::Result<()> {
+    // Phase 1: Read client setup request
+    let mut header_buf = [0u8; 12];
+    stream.read_exact(&mut header_buf).await?;
+
+    let byte_order = header_buf[0];
+    if byte_order != 0x6c && byte_order != 0x42 {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("Invalid byte order: 0x{:02x}", byte_order),
+        ));
+    }
+
+    let (auth_name_len, auth_data_len) = if byte_order == 0x6c {
+        (
+            u16::from_le_bytes([header_buf[6], header_buf[7]]),
+            u16::from_le_bytes([header_buf[8], header_buf[9]]),
+        )
+    } else {
+        (
+            u16::from_be_bytes([header_buf[6], header_buf[7]]),
+            u16::from_be_bytes([header_buf[8], header_buf[9]]),
+        )
+    };
+
+    fn pad4(n: u16) -> usize {
+        let n = n as usize;
+        (n + 3) & !3
+    }
+    let total_len = 12 + pad4(auth_name_len) + pad4(auth_data_len);
+    let mut setup_buf = vec![0u8; total_len];
+    setup_buf[..12].copy_from_slice(&header_buf);
+    if total_len > 12 {
+        stream.read_exact(&mut setup_buf[12..]).await?;
+    }
+
+    let _setup_request = SetupRequest::try_parse(&setup_buf)
+        .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, format!("Bad setup: {e:?}")))?;
+
+    // Validate MIT-MAGIC-COOKIE-1 auth.
+    // - If the client presents MIT-MAGIC-COOKIE-1, the data must match exactly.
+    // - If no auth is presented (auth_name_len == 0), accept (local Unix socket).
+    // - Unknown auth protocols are accepted with a warning for compatibility.
+    let mut security_trust_level: u32 = 0; // 0 = trusted (default)
+    if auth_name_len > 0 {
+        let auth_name_start = 12usize;
+        let auth_name_end = auth_name_start + auth_name_len as usize;
+        let auth_data_start = auth_name_start + pad4(auth_name_len);
+        let auth_data_end = auth_data_start + auth_data_len as usize;
+
+        if auth_name_end <= setup_buf.len() && auth_data_end <= setup_buf.len() {
+            let client_auth_name = &setup_buf[auth_name_start..auth_name_end];
+            let client_auth_data = &setup_buf[auth_data_start..auth_data_end];
+
+            if client_auth_name == b"MIT-MAGIC-COOKIE-1" {
+                if client_auth_data == auth_cookie {
+                    debug!("Client presented valid MIT-MAGIC-COOKIE-1 auth");
+                } else if client_auth_data.len() == 16 {
+                    // Check against SECURITY-generated tokens
+                    let token_key: [u8; 16] = client_auth_data.try_into().unwrap_or([0; 16]);
+                    let token_info = shared_security_tokens.lock().ok()
+                        .and_then(|tokens| tokens.get(&token_key).cloned());
+                    if let Some(info) = token_info {
+                        if info.is_expired() {
+                            warn!("SECURITY token expired (auth_id={})", info.auth_id);
+                            // Remove expired token
+                            if let Ok(mut tokens) = shared_security_tokens.lock() {
+                                tokens.remove(&token_key);
+                            }
+                            // Fall through to auth failure
+                            let reason = b"SECURITY authorization expired";
+                            let reason_len = reason.len();
+                            let padded_reason_len = (reason_len + 3) & !3;
+                            let additional_data_words = (padded_reason_len / 4) as u16;
+                            let mut resp = Vec::with_capacity(8 + padded_reason_len);
+                            resp.push(0); // Failed
+                            resp.push(reason_len as u8);
+                            if byte_order == 0x6c {
+                                resp.extend_from_slice(&11u16.to_le_bytes());
+                                resp.extend_from_slice(&0u16.to_le_bytes());
+                                resp.extend_from_slice(&additional_data_words.to_le_bytes());
+                            } else {
+                                resp.extend_from_slice(&11u16.to_be_bytes());
+                                resp.extend_from_slice(&0u16.to_be_bytes());
+                                resp.extend_from_slice(&additional_data_words.to_be_bytes());
+                            }
+                            resp.extend_from_slice(reason);
+                            for _ in 0..(padded_reason_len - reason_len) { resp.push(0); }
+                            stream.write_all(&resp).await?;
+                            return Ok(());
+                        }
+                        debug!("Client authenticated via SECURITY token (auth_id={}, trust={})",
+                            info.auth_id, info.trust_level);
+                        // trust_level will be set on the ClientState after creation
+                        security_trust_level = info.trust_level;
+                    } else {
+                        warn!("MIT-MAGIC-COOKIE-1 auth failed: cookie mismatch");
+                        let reason = b"Invalid MIT-MAGIC-COOKIE-1 key";
+                        let reason_len = reason.len();
+                        let padded_reason_len = (reason_len + 3) & !3;
+                        let additional_data_words = (padded_reason_len / 4) as u16;
+                        let mut resp = Vec::with_capacity(8 + padded_reason_len);
+                        resp.push(0); // Failed
+                        resp.push(reason_len as u8);
+                        if byte_order == 0x6c {
+                            resp.extend_from_slice(&11u16.to_le_bytes());
+                            resp.extend_from_slice(&0u16.to_le_bytes());
+                            resp.extend_from_slice(&additional_data_words.to_le_bytes());
+                        } else {
+                            resp.extend_from_slice(&11u16.to_be_bytes());
+                            resp.extend_from_slice(&0u16.to_be_bytes());
+                            resp.extend_from_slice(&additional_data_words.to_be_bytes());
+                        }
+                        resp.extend_from_slice(reason);
+                        for _ in 0..(padded_reason_len - reason_len) { resp.push(0); }
+                        stream.write_all(&resp).await?;
+                        return Ok(());
+                    }
+                } else {
+                    warn!("MIT-MAGIC-COOKIE-1 auth failed: cookie mismatch");
+                    let reason = b"Invalid MIT-MAGIC-COOKIE-1 key";
+                    let reason_len = reason.len();
+                    let padded_reason_len = (reason_len + 3) & !3;
+                    let additional_data_words = (padded_reason_len / 4) as u16;
+                    let mut resp = Vec::with_capacity(8 + padded_reason_len);
+                    resp.push(0); // Failed
+                    resp.push(reason_len as u8);
+                    if byte_order == 0x6c {
+                        resp.extend_from_slice(&11u16.to_le_bytes());
+                        resp.extend_from_slice(&0u16.to_le_bytes());
+                        resp.extend_from_slice(&additional_data_words.to_le_bytes());
+                    } else {
+                        resp.extend_from_slice(&11u16.to_be_bytes());
+                        resp.extend_from_slice(&0u16.to_be_bytes());
+                        resp.extend_from_slice(&additional_data_words.to_be_bytes());
+                    }
+                    resp.extend_from_slice(reason);
+                    for _ in 0..(padded_reason_len - reason_len) { resp.push(0); }
+                    stream.write_all(&resp).await?;
+                    return Ok(());
+                }
+            } else {
+                warn!(
+                    "Client presented unknown auth protocol: {:?} (accepting for compatibility)",
+                    String::from_utf8_lossy(client_auth_name)
+                );
+            }
+        }
+    } else {
+        debug!("Client connected without auth (unauthenticated local connection)");
+    }
+
+    // Phase 2: Send setup reply
+    let msb_first = byte_order == 0x42;
+    let mut setup = build_setup(conn_index);
+    if msb_first {
+        // MSB-first clients expect big-endian image byte order in the setup
+        setup.image_byte_order = ImageOrder::MSB_FIRST;
+        setup.bitmap_format_bit_order = ImageOrder::MSB_FIRST;
+    }
+    let mut reply_bytes = Vec::new();
+    setup.serialize_into(&mut reply_bytes);
+    if msb_first {
+        // x11rb always serializes little-endian; byte-swap for MSB-first clients
+        byteswap_setup_reply(&mut reply_bytes);
+    }
+    stream.write_all(&reply_bytes).await?;
+
+    info!("X11 client connected: {client_id}");
+
+    // Phase 3: Handle requests
+    let local_windows = shared_windows.lock().unwrap().clone();
+    let (wm_events_tx, mut wm_events_rx) = mpsc::unbounded_channel::<Vec<u8>>();
+
+    let resource_id_base = (conn_index + 1) << 22;
+    let mut state = ClientState {
+        client_id: client_id.clone(),
+        resource_id_base,
+        next_xid: resource_id_base,
+        sequence: 0,
+        windows: local_windows,
+        shared_windows,
+        pixmaps: HashMap::new(),
+        gcs: HashMap::new(),
+        atoms: shared_atoms,
+        update_tx,
+        root_window: ROOT_WINDOW,
+        pointer_x: 0,
+        pointer_y: 0,
+        focus_window: ROOT_WINDOW,
+        focus_revert_to: 1, // Parent
+        font_manager: FontManager::new(),
+        render: handlers::render::RenderState::new(),
+        selections: HashMap::new(),
+        selection_timestamps: HashMap::new(),
+        shm_segments: HashMap::new(),
+        wm_state: shared_wm_state.clone(),
+        wm_events_tx,
+        event_router,
+        shared_selections,
+        damage_regions: HashMap::new(),
+        present_subscriptions: HashMap::new(),
+        pending_events: Vec::new(),
+        window_router,
+        message_tx,
+        x11_to_uuid: HashMap::new(),
+        cursors: HashMap::new(),
+        xi: crate::xinput2::XiState::default(),
+        menu_tracker,
+        gtk_menu_paths: HashMap::new(),
+        grabs: GrabState::default(),
+        save_set: Vec::new(),
+        close_down_mode: 0,
+        last_entered_window: ROOT_WINDOW,
+        pressed_keys: [0u8; 32],
+        server_start: std::time::Instant::now(),
+        keyboard_control: Default::default(),
+        pointer_control: Default::default(),
+        screen_saver: Default::default(),
+        screen_saver_event_mask: 0,
+        screen_saver_window: 0,
+        screen_saver_attrs: None,
+        screen_saver_suspend_count: 0,
+        msb_first: byte_order == 0x42,
+        screen_width: SCREEN_WIDTH,
+        screen_height: SCREEN_HEIGHT,
+        randr_config_timestamp: 0,
+        xfixes_regions: HashMap::new(),
+        incr_transfers: Vec::new(),
+        retained_temporary_windows: Vec::new(),
+        colormaps: HashMap::new(),
+        installed_colormaps: {
+            let mut s = std::collections::HashSet::new();
+            s.insert(ROOT_COLORMAP);
+            s
+        },
+        cursor_info: HashMap::new(),
+        sync_state: handlers::sync::SyncState::new(),
+        pending_fds: Vec::new(),
+        reply_fds: Vec::new(),
+        motion_history: Vec::with_capacity(256),
+        pointer_mapping: [1, 2, 3, 4, 5], // identity mapping
+        modifier_map: vec![
+            vec![50, 62],    // Shift (keycodes 50=Shift_L, 62=Shift_R)
+            vec![66],        // Lock (66=Caps_Lock)
+            vec![37, 105],   // Control (37=Control_L, 105=Control_R)
+            vec![64, 108],   // Mod1 (64=Alt_L, 108=Alt_R)
+            vec![77],        // Mod2 (77=Num_Lock)
+            vec![],          // Mod3
+            vec![133, 134],  // Mod4 (133=Super_L, 134=Super_R)
+            vec![],          // Mod5
+        ],
+        win_gravity: HashMap::new(),
+        bit_gravity: HashMap::new(),
+        custom_keymap: HashMap::new(),
+        cursor_event_subscribers: HashMap::new(),
+        selection_event_subscribers: HashMap::new(),
+        cursor_serial: 0,
+        current_cursor: 0,
+        cursor_hidden: 0,
+        back_buffers: HashMap::new(),
+        dbe_idiom_depth: 0,
+        record_contexts: HashMap::new(),
+        shared_record_contexts,
+        glx: Default::default(),
+        security_authorizations: HashMap::new(),
+        shared_security_tokens: shared_security_tokens.clone(),
+        trust_level: security_trust_level,
+        font_path: vec![
+            "/usr/share/fonts/X11/misc".to_string(),
+            "/usr/share/fonts/X11/Type1".to_string(),
+            "/usr/share/fonts/X11/75dpi".to_string(),
+            "/usr/share/fonts/X11/100dpi".to_string(),
+        ],
+        access_hosts: Vec::new(),
+        access_control_enabled: false,
+        shared_access_control: shared_access_control.clone(),
+        xtest_grab_impervious: false,
+        dpms_enabled: true,
+        dpms_power_level: 0,
+        dpms_standby_timeout: 0,
+        dpms_suspend_timeout: 0,
+        dpms_off_timeout: 0,
+        xkb_state: super::client::XkbState::default(),
+        xkb_extra_groups: Vec::new(),
+        xkb_indicators: 0,
+        xkb_indicator_maps: Vec::new(),
+        xkb_group_switch_keys: Vec::new(),
+        xkb_names_atoms: HashMap::new(),
+        xkb_type_names: Vec::new(),
+        xkb_kt_level_names: Vec::new(),
+        xkb_group_names: Vec::new(),
+        xkb_indicator_name_atoms: Vec::new(),
+        xkb_vmod_names: Vec::new(),
+        xkb_key_names: HashMap::new(),
+        xkb_key_aliases: Vec::new(),
+        xkb_key_types: HashMap::new(),
+        xkb_key_actions: HashMap::new(),
+        xkb_key_behaviors: HashMap::new(),
+        xkb_explicit: HashMap::new(),
+        xkb_modmap: HashMap::new(),
+        xkb_vmodmap: HashMap::new(),
+        xkb_vmod_bindings: [0u8; 16],
+        xkb_button_actions: HashMap::new(),
+        xkb_device_led_info: Vec::new(),
+        xv_ports: HashMap::new(),
+        xv_video_notify_drawables: std::collections::HashSet::new(),
+        xv_port_notify_ports: std::collections::HashSet::new(),
+        pointer_button_mask: 0,
+        motion_hint_suppressed: false,
+        barriers: HashMap::new(),
+        disconnect_mode: 0,
+        present_msc: 0,
+        clipboard_notify_tx: Some(clipboard_notify_tx),
+        shared_clipboard,
+        persistent_clipboard,
+        shared_pixmaps,
+        shared_pixmap_fbs,
+        shared_gcs,
+        client_registry: client_registry.clone(),
+        event_broadcaster,
+        server_grab,
+        randr_crtcs: Vec::new(),
+        randr_outputs: Vec::new(),
+        randr_modes: Vec::new(),
+        randr_providers: Vec::new(),
+        randr_event_mask: 0,
+        randr_monitors: Vec::new(),
+        randr_primary_output: 0,
+        randr_next_mode_id: 1000,
+        vidmode_viewport_x: 0,
+        vidmode_viewport_y: 0,
+        vidmode_modes: vec![handlers::misc_ext::VidModeInfo::default_for_screen(SCREEN_WIDTH, SCREEN_HEIGHT)],
+        vidmode_locked: false,
+        vidmode_current_mode: 0,
+        big_requests_enabled: false,
+        xim: handlers::xim::XimServer::new(XIM_WINDOW),
+        xkb_compat_si: super::handlers::xkb::default_compat_si(),
+        xkb_group_compat: Default::default(),
+        xkb_event_mask: 0,
+        xkb_named_indicators: HashMap::new(),
+        dri3_drm_device: None,
+        overlay_ref_count: 0,
+    };
+
+    // Initialize default RandR monitor model.
+    state.randr_init_default();
+
+    // Register this client for global event broadcasts (e.g., MappingNotify).
+    state.event_broadcaster.register_client(&client_id, &state.wm_events_tx);
+
+    // Register this client's resource base in the shared client registry.
+    client_registry.lock().unwrap().push(resource_id_base);
+
+    // RECORD: notify any enabled contexts about the new client connection
+    state.record_notify_client_started();
+
+    // Send MANAGER client message to announce the XSETTINGS manager.
+    // Per the XSETTINGS spec, clients discover the settings manager by
+    // listening for this ClientMessage on the root window.
+    {
+        let timestamp = state.server_start.elapsed().as_millis() as u32;
+        let mut manager_event = vec![0u8; 32];
+        manager_event[0] = 33; // ClientMessage event code
+        manager_event[1] = 32; // format = 32
+        // sequence number (bytes 2-3) — use 0 for server-initiated events
+        manager_event[2..4].copy_from_slice(&0u16.to_le_bytes());
+        // window = root
+        manager_event[4..8].copy_from_slice(&ROOT_WINDOW.to_le_bytes());
+        // type = MANAGER atom (165)
+        manager_event[8..12].copy_from_slice(&165u32.to_le_bytes());
+        // data.l[0] = timestamp
+        manager_event[12..16].copy_from_slice(&timestamp.to_le_bytes());
+        // data.l[1] = _XSETTINGS_S0 atom (164)
+        manager_event[16..20].copy_from_slice(&164u32.to_le_bytes());
+        // data.l[2] = xsettings window id
+        manager_event[20..24].copy_from_slice(&XSETTINGS_WINDOW.to_le_bytes());
+        // data.l[3..4] = 0 (already zeroed)
+        state.pending_events.push(manager_event);
+    }
+
+    let mut compose = crate::compose::ComposeState::new();
+
+    let mut buf = vec![0u8; 256 * 1024];
+    let mut pending = Vec::new();
+    let mut frame_interval = tokio::time::interval(Duration::from_millis(16));
+
+    // Key auto-repeat state.
+    // When a key is held down, we generate synthetic KeyPress events after
+    // an initial delay, then at a regular interval, per X11 spec §12.4.
+    struct RepeatState {
+        keycode: u8,
+        mask: u16,
+        target_wid: u32,
+        in_delay_phase: bool,
+    }
+    let mut key_repeat: Option<RepeatState> = None;
+    let repeat_timer = tokio::time::sleep(Duration::from_secs(86400)); // dormant
+    // Pin the sleep so we can reset it.
+    tokio::pin!(repeat_timer);
+
+    let _wm_guard = WmCleanupGuard {
+        wm_state: shared_wm_state,
+        client_id: client_id.clone(),
+    };
+    let _client_reg_guard = ClientRegistryGuard {
+        registry: client_registry,
+        resource_id_base,
+    };
+
+    loop {
+        tokio::select! {
+            result = stream.readable() => {
+                result?;
+                // Try recvmsg to capture any SCM_RIGHTS file descriptors
+                let raw_fd = stream.as_raw_fd();
+                let (n, received_fds) = match recv_with_fds(raw_fd, &mut buf) {
+                    Ok((n, fds)) => (n, fds),
+                    Err(e) if e.kind() == io::ErrorKind::WouldBlock => continue,
+                    Err(e) => return Err(e),
+                };
+
+                // Store any received file descriptors for SHM AttachFd
+                if !received_fds.is_empty() {
+                    debug!("Received {} fd(s) via SCM_RIGHTS", received_fds.len());
+                    state.pending_fds.extend(received_fds);
+                }
+
+                if n == 0 {
+                    // Release server grab if this client held it
+                    if state.grabs.server_grab_count > 0 {
+                        let (lock, notify) = &*state.server_grab;
+                        if let Ok(mut holder) = lock.try_lock() {
+                            if holder.as_deref() == Some(&state.client_id) {
+                                *holder = None;
+                            }
+                        }
+                        notify.notify_waiters();
+                        state.grabs.server_grab_count = 0;
+                    }
+
+                    // RECORD: notify any enabled contexts about the client disconnection
+                    state.record_notify_client_died();
+                    // Send any pending RECORD notifications before cleanup
+                    let died_events: Vec<Vec<u8>> = state.pending_events.drain(..).collect();
+                    for event in died_events { let _ = stream.write_all(&event).await; }
+
+                    // Handle SaveSet: reparent save_set windows per X11 spec.
+                    // For each window in the save-set that still exists and is an
+                    // inferior of a window created by this client, reparent it to the
+                    // closest ancestor NOT created by this client (typically root).
+                    // This must happen BEFORE the close-down-mode Destroy pass so
+                    // these windows survive.
+                    let save_set: Vec<u32> = state.save_set.drain(..).collect();
+                    let my_client_id = state.client_id.clone();
+                    let root = state.root_window;
+                    let mut reparented_save_set: Vec<u32> = Vec::new();
+                    for wid in &save_set {
+                        let wid = *wid;
+                        // Window must still exist
+                        if !state.windows.contains_key(&wid) {
+                            continue;
+                        }
+                        // Check that the window is an inferior of a window owned
+                        // by this client (walk up from parent, not the window itself)
+                        let is_inferior = {
+                            let mut cur = state.windows.get(&wid).map(|w| w.parent).unwrap_or(0);
+                            let mut found = false;
+                            for _ in 0..128 {
+                                if cur == 0 || cur == wid { break; }
+                                if let Some(w) = state.windows.get(&cur) {
+                                    if w.owner_client_id == my_client_id {
+                                        found = true;
+                                        break;
+                                    }
+                                    cur = w.parent;
+                                } else {
+                                    break;
+                                }
+                            }
+                            found
+                        };
+                        if !is_inferior {
+                            continue;
+                        }
+                        // Find the closest ancestor NOT owned by this client
+                        let new_parent = {
+                            let mut cur = state.windows.get(&wid).map(|w| w.parent).unwrap_or(root);
+                            let mut target = root;
+                            for _ in 0..128 {
+                                if cur == 0 { break; }
+                                if let Some(w) = state.windows.get(&cur) {
+                                    if w.owner_client_id != my_client_id {
+                                        target = cur;
+                                        break;
+                                    }
+                                    cur = w.parent;
+                                } else {
+                                    break;
+                                }
+                            }
+                            target
+                        };
+                        let was_mapped = state.windows.get(&wid).is_some_and(|w| w.mapped);
+                        let old_parent = state.windows.get(&wid).map(|w| w.parent).unwrap_or(0);
+                        // Remove from old parent's children_order
+                        if let Some(old_p) = state.windows.get_mut(&old_parent) {
+                            old_p.children_order.retain(|&c| c != wid);
+                        }
+                        // Update parent
+                        if let Some(win) = state.windows.get_mut(&wid) {
+                            win.parent = new_parent;
+                        }
+                        // Add to new parent's children_order
+                        if let Some(new_p) = state.windows.get_mut(&new_parent) {
+                            new_p.children_order.push(wid);
+                        }
+                        // Update shared window registry with new parent
+                        if let Ok(mut shared) = state.shared_windows.lock() {
+                            if let Some(sw) = shared.get_mut(&wid) {
+                                sw.parent = new_parent;
+                            }
+                        }
+                        // If was mapped, ensure it stays mapped
+                        if was_mapped {
+                            if let Some(win) = state.windows.get_mut(&wid) {
+                                win.mapped = true;
+                            }
+                        }
+                        reparented_save_set.push(wid);
+                    }
+
+                    // Unregister from shared selections owned by this connection
+                    // and emit XFIXES SelectionNotify events for lost selections.
+                    // For CLIPBOARD, persist the data and take server-side ownership
+                    // so future paste requests still work (clipboard manager persistence).
+                    {
+                        const CLIPBOARD_ATOM: u32 = 134;
+                        let my_wids: Vec<u32> = state.x11_to_uuid.keys().copied().collect();
+                        let timestamp = state.timestamp();
+
+                        // Check if this client owns CLIPBOARD and we have cached data.
+                        let owns_clipboard = if let Ok(sels) = state.shared_selections.lock() {
+                            sels.get(&CLIPBOARD_ATOM)
+                                .map(|e| my_wids.contains(&e.owner))
+                                .unwrap_or(false)
+                        } else {
+                            false
+                        };
+                        let has_persistent_data = if owns_clipboard {
+                            state.persistent_clipboard.lock().ok()
+                                .map(|pc| pc.contains_key(&CLIPBOARD_ATOM))
+                                .unwrap_or(false)
+                        } else {
+                            false
+                        };
+
+                        if let Ok(mut sels) = state.shared_selections.lock() {
+                            // Collect selection atoms that are being removed.
+                            let lost_selections: Vec<u32> = sels.iter()
+                                .filter(|(_, entry)| my_wids.contains(&entry.owner))
+                                .map(|(&sel_atom, _)| sel_atom)
+                                .collect();
+
+                            // For CLIPBOARD with persistent data, transfer ownership
+                            // to the server's clipboard manager window instead of
+                            // clearing it. For all other selections, remove them.
+                            if has_persistent_data {
+                                // Create a dummy channel for the clipboard manager
+                                // window — ConvertSelection requests will be handled
+                                // directly by the server via persistent_clipboard.
+                                let (mgr_tx, _mgr_rx) = mpsc::unbounded_channel();
+                                sels.insert(CLIPBOARD_ATOM, SelectionEntry {
+                                    owner: CLIPBOARD_MANAGER_WINDOW,
+                                    event_tx: mgr_tx,
+                                    timestamp,
+                                });
+                                // Remove all other selections owned by this client.
+                                sels.retain(|sel_atom, entry| {
+                                    *sel_atom == CLIPBOARD_ATOM || !my_wids.contains(&entry.owner)
+                                });
+                                debug!(
+                                    "Clipboard manager: persisted CLIPBOARD data, \
+                                     ownership transferred to server window {:#x}",
+                                    CLIPBOARD_MANAGER_WINDOW,
+                                );
+                            } else {
+                                sels.retain(|_, entry| !my_wids.contains(&entry.owner));
+                            }
+
+                            // Emit XFIXES SelectionNotify for each lost selection
+                            // so clipboard monitors (GTK/Qt) are notified.
+                            for sel_atom in &lost_selections {
+                                // For persisted CLIPBOARD, emit with the new server
+                                // owner rather than None.
+                                let new_owner = if *sel_atom == CLIPBOARD_ATOM && has_persistent_data {
+                                    CLIPBOARD_MANAGER_WINDOW
+                                } else {
+                                    0
+                                };
+
+                                if let Some(&event_mask) = state.selection_event_subscribers.get(sel_atom) {
+                                    if event_mask & 1 != 0 {
+                                        const XFIXES_SELECTION_NOTIFY: u8 = 87;
+                                        let mut event = [0u8; 32];
+                                        event[0] = XFIXES_SELECTION_NOTIFY;
+                                        event[1] = 0; // subtype: SetSelectionOwner
+                                        state.write_u16(&mut event, 2, state.sequence);
+                                        state.write_u32(&mut event, 4, state.root_window);
+                                        state.write_u32(&mut event, 8, new_owner);
+                                        state.write_u32(&mut event, 12, *sel_atom);
+                                        state.write_u32(&mut event, 16, timestamp);
+                                        state.write_u32(&mut event, 20, timestamp);
+                                        state.pending_events.push(event.to_vec());
+                                    }
+                                }
+                                // Also broadcast XFIXES events to other connections
+                                // via the event broadcaster.
+                                {
+                                    const XFIXES_SEL_NOTIFY: u8 = 87;
+                                    let mut bcast_event = [0u8; 32];
+                                    bcast_event[0] = XFIXES_SEL_NOTIFY;
+                                    bcast_event[1] = 0;
+                                    state.write_u16(&mut bcast_event, 2, state.sequence);
+                                    state.write_u32(&mut bcast_event, 4, state.root_window);
+                                    state.write_u32(&mut bcast_event, 8, new_owner);
+                                    state.write_u32(&mut bcast_event, 12, *sel_atom);
+                                    state.write_u32(&mut bcast_event, 16, timestamp);
+                                    state.write_u32(&mut bcast_event, 20, timestamp);
+                                    state.event_broadcaster.broadcast_global(
+                                        &bcast_event, &state.client_id,
+                                    );
+                                }
+                            }
+                        }
+                        // Also clear local selection state.
+                        state.selections.clear();
+                        state.selection_timestamps.clear();
+                    }
+
+                    // Unregister shared pixmaps and GCs owned by this connection
+                    state.unregister_all_shared_resources();
+
+                    // Unsubscribe from cross-connection event broadcaster
+                    state.event_broadcaster.unsubscribe_client(&state.client_id);
+
+                    // Revert focus if it points to a window owned by this client
+                    let my_windows: Vec<u32> = state.x11_to_uuid.keys().copied().collect();
+                    if my_windows.contains(&state.focus_window) && state.focus_window != state.root_window {
+                        state.revert_focus_from(state.focus_window);
+                    }
+
+                    // Drain frozen grab events since the grab holder is gone
+                    state.grabs.frozen_pointer_events.clear();
+                    state.grabs.frozen_keyboard_events.clear();
+
+                    match state.close_down_mode {
+                        0 => {
+                            // Destroy: remove all client windows, pixmaps, GCs, colormaps.
+                            // Exclude save-set windows that were reparented above.
+                            let wids: Vec<u32> = state.x11_to_uuid.keys()
+                                .copied()
+                                .filter(|w| !reparented_save_set.contains(w))
+                                .collect();
+                            state.event_router.unregister(&wids);
+                            let uuids: Vec<String> = wids.iter()
+                                .filter_map(|w| state.x11_to_uuid.get(w).cloned())
+                                .collect();
+                            state.window_router.unregister_all(&uuids);
+
+                            // Remove from shared window registry and notify frontend
+                            if let Ok(mut shared) = state.shared_windows.lock() {
+                                for &wid in &wids {
+                                    shared.remove(&wid);
+                                }
+                            }
+                            for &wid in &wids {
+                                if let Some(uuid) = state.x11_to_uuid.get(&wid) {
+                                    let _ = state.update_tx.send((
+                                        state.client_id.clone(),
+                                        x11_web_protocol::DisplayUpdate::WindowDestroyed {
+                                            window_id: uuid.clone(),
+                                        },
+                                    ));
+                                }
+                                state.windows.remove(&wid);
+                            }
+                            // Free pixmaps and GCs owned by this client
+                            state.pixmaps.clear();
+                            state.gcs.clear();
+                            // Free RENDER resources (pictures, glyphsets, gradients)
+                            state.render = handlers::render::RenderState::new();
+                            // Free SYNC resources (counters, alarms, fences)
+                            state.sync_state = handlers::sync::SyncState::default();
+                            // Clear cursor references from surviving windows before freeing cursors
+                            {
+                                let cursor_ids: Vec<u32> = state.cursors.keys().copied().collect();
+                                for win in state.windows.values_mut() {
+                                    if let Some(cid) = win.cursor {
+                                        if cursor_ids.contains(&cid) {
+                                            win.cursor = None;
+                                        }
+                                    }
+                                }
+                            }
+                            // Free cursors and colormaps
+                            state.cursors.clear();
+                            state.cursor_info.clear();
+                            state.colormaps.clear();
+                            // Free XFIXES regions
+                            state.xfixes_regions.clear();
+                            // Free RECORD contexts (local and shared)
+                            state.record_contexts.clear();
+                            if let Ok(mut shared_rec) = state.shared_record_contexts.lock() {
+                                shared_rec.retain(|_, entry| entry.recording_client_id != state.client_id);
+                            }
+                            // Free GLX state
+                            state.glx = handlers::glx::GlxState::default();
+                            // Free damage and present subscriptions
+                            state.damage_regions.clear();
+                            state.present_subscriptions.clear();
+                            // Free DBE back buffers
+                            state.back_buffers.clear();
+                            // Free SHM segments (detach from shared memory)
+                            for (_, seg) in state.shm_segments.drain() {
+                                safe_shmdt(seg.addr);
+                            }
+                            // Close pending file descriptors
+                            for fd in state.pending_fds.drain(..) {
+                                safe_close(fd);
+                            }
+                            for fd in state.reply_fds.drain(..) {
+                                safe_close(fd);
+                            }
+                        }
+                        1 => {
+                            // RetainPermanent: keep windows alive permanently
+                        }
+                        2 => {
+                            // RetainTemporary: keep windows alive but mark them
+                            // so KillClient(AllTemporary) can destroy them later.
+                            let wids: Vec<u32> = state.windows.keys().copied().collect();
+                            for wid in &wids {
+                                if let Some(win) = state.windows.get_mut(wid) {
+                                    win.retained_temporary = true;
+                                }
+                            }
+                            state.retained_temporary_windows.extend(wids.clone());
+                            // Unregister routes for retained windows (they'll be re-registered if adopted)
+                            state.event_router.unregister(&wids);
+                            let uuids: Vec<String> = wids.iter()
+                                .filter_map(|w| state.x11_to_uuid.get(w).cloned())
+                                .collect();
+                            state.window_router.unregister_all(&uuids);
+                        }
+                        _ => {
+                            let wids: Vec<u32> = state.x11_to_uuid.keys().copied().collect();
+                            state.event_router.unregister(&wids);
+                            let uuids: Vec<String> = state.x11_to_uuid.values().cloned().collect();
+                            state.window_router.unregister_all(&uuids);
+                        }
+                    }
+                    return Ok(());
+                }
+
+                pending.extend_from_slice(&buf[..n]);
+                state.sync_windows();
+
+                // Server grab check: if another client holds a GrabServer,
+                // wait until it releases before processing our requests.
+                {
+                    let (lock, notify) = &*state.server_grab;
+                    loop {
+                        let holder = lock.lock().await;
+                        if holder.is_none() || holder.as_deref() == Some(&state.client_id) {
+                            break;
+                        }
+                        drop(holder);
+                        notify.notified().await;
+                    }
+                }
+
+                while pending.len() >= 4 {
+                    // If connection is blocked by a SYNC Await/AwaitFence,
+                    // stop processing further requests until the condition is met.
+                    if state.sync_state.blocked {
+                        break;
+                    }
+
+                    // Read request length respecting client byte order.
+                    let req_len_units = if state.msb_first {
+                        u16::from_be_bytes([pending[2], pending[3]]) as usize
+                    } else {
+                        u16::from_le_bytes([pending[2], pending[3]]) as usize
+                    };
+                    let req_len_bytes = req_len_units * 4;
+
+                    if req_len_bytes == 0 {
+                        // BIG-REQUESTS format: length=0 means extended 32-bit length at offset 4.
+                        // Reject if the client hasn't enabled BIG-REQUESTS.
+                        if !state.big_requests_enabled {
+                            state.sequence = state.sequence.wrapping_add(1);
+                            let err = build_error_bo(BAD_LENGTH, state.sequence, 0, pending[0], 0, state.msb_first);
+                            stream.write_all(&err).await?;
+                            // Skip the 4-byte header we already peeked at.
+                            pending.drain(..4);
+                            continue;
+                        }
+                        if pending.len() < 8 {
+                            break;
+                        }
+                        let big_len = if state.msb_first {
+                            u32::from_be_bytes([pending[4], pending[5], pending[6], pending[7]]) as usize
+                        } else {
+                            u32::from_le_bytes([pending[4], pending[5], pending[6], pending[7]]) as usize
+                        };
+                        let big_bytes = big_len * 4;
+                        if big_bytes < 8 || big_bytes > 16 * 1024 * 1024 {
+                            // Reject absurdly large or too-small requests
+                            warn!("BIG-REQUEST with invalid length: {big_bytes}");
+                            pending.clear();
+                            break;
+                        }
+                        if pending.len() < big_bytes {
+                            break;
+                        }
+                        let request_data: Vec<u8> = pending.drain(..big_bytes).collect();
+                        state.sequence = state.sequence.wrapping_add(1);
+                        let response = handle_request(&mut state, &request_data);
+                        if !response.is_empty() {
+                            stream.write_all(&response).await?;
+                        }
+                        continue;
+                    }
+
+                    if pending.len() < req_len_bytes {
+                        break;
+                    }
+
+                    let request_data: Vec<u8> = pending.drain(..req_len_bytes).collect();
+                    state.sequence = state.sequence.wrapping_add(1);
+
+                    // RECORD: intercept request from this client
+                    state.record_intercept_request(&request_data);
+
+                    let response = handle_request(&mut state, &request_data);
+                    if !response.is_empty() {
+                        // RECORD: intercept reply/error
+                        let major_opcode = request_data[0];
+                        let minor_opcode = if request_data.len() > 1 { request_data[1] } else { 0 };
+                        state.record_intercept_response(&response, major_opcode, minor_opcode);
+                        // If there are fds to send (e.g., SHM CreateSegment),
+                        // use sendmsg with SCM_RIGHTS ancillary data.
+                        if !state.reply_fds.is_empty() {
+                            let fds: Vec<i32> = state.reply_fds.drain(..).collect();
+                            let raw_fd = stream.as_raw_fd();
+                            if let Err(e) = send_with_fds(raw_fd, &response, &fds) {
+                                warn!("Failed to send reply with fds: {e}");
+                            }
+                            // Close the fds after sending (client has their own copy)
+                            for fd in fds {
+                                safe_close(fd);
+                            }
+                        } else {
+                            stream.write_all(&response).await?;
+                        }
+                    }
+                }
+
+                state.sync_windows();
+                // Pending events still need immediate delivery, with RECORD interception
+                let events: Vec<Vec<u8>> = state.pending_events.drain(..).collect();
+                let record_intercepts = state.record_intercept_events(&events);
+                for event in events { stream.write_all(&event).await?; }
+                for intercept in record_intercepts { stream.write_all(&intercept).await?; }
+            }
+            _ = frame_interval.tick() => {
+                state.present_msc += 1;
+
+                // Screen saver auto-activation: check if timeout elapsed since last input.
+                // Per X11 spec §14.3, the screen saver activates when no user input
+                // has occurred for `timeout` seconds and suspend_count == 0.
+                if !state.screen_saver.active
+                    && state.screen_saver.timeout > 0
+                    && state.screen_saver_suspend_count == 0
+                {
+                    let now = state.timestamp();
+                    let elapsed_ms = now.wrapping_sub(state.screen_saver.last_reset_ms);
+                    let timeout_ms = state.screen_saver.timeout as u32 * 1000;
+                    if elapsed_ms >= timeout_ms {
+                        state.screen_saver.active = true;
+                        let notify = handlers::input::build_screen_saver_on_event(&state);
+                        if !notify.is_empty() {
+                            state.pending_events.push(notify);
+                        }
+                        debug!("Screen saver activated (timeout={}s, elapsed={}ms)",
+                            state.screen_saver.timeout, elapsed_ms);
+                    }
+                }
+
+                // Clean up stale INCR selection transfers (5s timeout per X11 spec).
+                state.cleanup_stale_incr_transfers(Duration::from_secs(5));
+
+                // Update SYNC SERVERTIME counter (ID=1) and check alarms
+                let server_time_ms = state.timestamp() as i64;
+                if let Some(counter) = state.sync_state.counters.get_mut(&1) {
+                    let old_value = counter.value_i64();
+                    counter.set_from_i64(server_time_ms);
+                    let new_value = counter.value_i64();
+                    if old_value != new_value {
+                        let seq = state.sequence;
+                        let bo = state.msb_first;
+                        handlers::sync::check_alarms_ext(
+                            &mut state.sync_state.alarms, 1, old_value, new_value,
+                            &mut state.pending_events, seq, bo,
+                        );
+                    }
+                }
+
+                // Check if any pending SYNC Await/AwaitFence is now satisfied
+                // (e.g., SERVERTIME advanced past a threshold).
+                if state.sync_state.blocked {
+                    let ts = state.timestamp();
+                    handlers::sync::check_pending_awaits_ext(&mut state.sync_state, || ts);
+                    handlers::sync::check_pending_fence_awaits_ext(&mut state.sync_state);
+
+                    // If unblocked, process any pending request data that was deferred
+                    if !state.sync_state.blocked && !pending.is_empty() {
+                        while pending.len() >= 4 && !state.sync_state.blocked {
+                            let req_len_units = if state.msb_first {
+                                u16::from_be_bytes([pending[2], pending[3]]) as usize
+                            } else {
+                                u16::from_le_bytes([pending[2], pending[3]]) as usize
+                            };
+                            let req_len_bytes = req_len_units * 4;
+                            if req_len_bytes == 0 {
+                                if pending.len() < 8 { break; }
+                                let big_len = if state.msb_first {
+                                    u32::from_be_bytes([pending[4], pending[5], pending[6], pending[7]]) as usize
+                                } else {
+                                    u32::from_le_bytes([pending[4], pending[5], pending[6], pending[7]]) as usize
+                                };
+                                let big_bytes = big_len * 4;
+                                if big_bytes < 8 || big_bytes > 16 * 1024 * 1024 {
+                                    pending.clear();
+                                    break;
+                                }
+                                if pending.len() < big_bytes { break; }
+                                let request_data: Vec<u8> = pending.drain(..big_bytes).collect();
+                                state.sequence = state.sequence.wrapping_add(1);
+                                let response = handle_request(&mut state, &request_data);
+                                if !response.is_empty() {
+                                    stream.write_all(&response).await?;
+                                }
+                                continue;
+                            }
+                            if pending.len() < req_len_bytes { break; }
+                            let request_data: Vec<u8> = pending.drain(..req_len_bytes).collect();
+                            state.sequence = state.sequence.wrapping_add(1);
+                            state.record_intercept_request(&request_data);
+                            let response = handle_request(&mut state, &request_data);
+                            if !response.is_empty() {
+                                let major_opcode = request_data[0];
+                                let minor_opcode = if request_data.len() > 1 { request_data[1] } else { 0 };
+                                state.record_intercept_response(&response, major_opcode, minor_opcode);
+                                if !state.reply_fds.is_empty() {
+                                    let fds: Vec<i32> = state.reply_fds.drain(..).collect();
+                                    let raw_fd = stream.as_raw_fd();
+                                    if let Err(e) = send_with_fds(raw_fd, &response, &fds) {
+                                        warn!("Failed to send reply with fds: {e}");
+                                    }
+                                    for fd in fds { safe_close(fd); }
+                                } else {
+                                    stream.write_all(&response).await?;
+                                }
+                            }
+                        }
+                    }
+                }
+
+                state.sync_windows();
+                state.flush_dirty_windows();
+
+                if state.xi.pending.raw_motion {
+                    state.xi.pending.raw_motion = false;
+                    let ev = crate::xinput2::build_raw_motion_event(state.sequence, state.msb_first);
+                    state.pending_events.push(ev);
+                }
+
+                // RECORD: intercept events from frame tick
+                let events: Vec<Vec<u8>> = state.pending_events.drain(..).collect();
+                let record_intercepts = state.record_intercept_events(&events);
+                for event in events { stream.write_all(&event).await?; }
+                for intercept in record_intercepts { stream.write_all(&intercept).await?; }
+
+                state.sync_windows();
+            }
+            Some((x11_wid, msg)) = message_rx.recv() => {
+                // Collect this message and drain any immediately available ones
+                // for MotionNotify coalescing.
+                let mut messages = vec![(x11_wid, msg)];
+                while let Ok((wid, m)) = message_rx.try_recv() {
+                    messages.push((wid, m));
+                }
+
+                // Coalesce: keep only the last MotionNotify per window,
+                // but preserve ordering of non-motion events.
+                let mut last_motion: HashMap<u32, usize> = HashMap::new();
+                for (i, (wid, m)) in messages.iter().enumerate() {
+                    if matches!(m, WindowMessage::Input(x11_web_protocol::InputEvent::MotionNotify { .. })) {
+                        last_motion.insert(*wid, i);
+                    }
+                }
+
+                for (i, (x11_wid, msg)) in messages.into_iter().enumerate() {
+                    match msg {
+                        WindowMessage::Input(input) => {
+                            // Skip coalesced (non-last) motion events
+                            if matches!(input, x11_web_protocol::InputEvent::MotionNotify { .. }) {
+                                if let Some(&last_idx) = last_motion.get(&x11_wid) {
+                                    if i < last_idx {
+                                        // Update pointer position but skip event generation
+                                        if let x11_web_protocol::InputEvent::MotionNotify { x, y, .. } = &input {
+                                            let (fx, fy) = if !state.barriers.is_empty() {
+                                                enforce_barriers(&state.barriers, state.pointer_x, state.pointer_y, *x, *y)
+                                            } else {
+                                                (*x, *y)
+                                            };
+                                            state.xi.valuators.x = fx as i32;
+                                            state.xi.valuators.y = fy as i32;
+                                            state.pointer_x = fx;
+                                            state.pointer_y = fy;
+                                            // Record in motion history
+                                            let ts = state.timestamp();
+                                            if state.motion_history.len() >= 256 {
+                                                state.motion_history.remove(0);
+                                            }
+                                            state.motion_history.push((ts, fx, fy));
+                                        }
+                                        continue;
+                                    }
+                                }
+                            }
+
+                            if let x11_web_protocol::InputEvent::MenuActivate { action } = &input {
+                                if let Some(uuid) = state.top_level_uuid_for(x11_wid) {
+                                    state.menu_tracker.activate(&uuid, action.clone());
+                                }
+                                continue;
+                            }
+                            state.set_focus_window(x11_wid);
+                            if matches!(
+                                input,
+                                x11_web_protocol::InputEvent::ButtonPress { .. }
+                            ) {
+                                let uuid = state.top_level_uuid_for(x11_wid);
+                                state.broadcast_focus(uuid);
+                            }
+                            match &input {
+                                x11_web_protocol::InputEvent::MotionNotify { x, y, .. }
+                                | x11_web_protocol::InputEvent::ButtonPress { x, y, .. }
+                                | x11_web_protocol::InputEvent::ButtonRelease { x, y, .. }
+                                | x11_web_protocol::InputEvent::TouchBegin { x, y, .. }
+                                | x11_web_protocol::InputEvent::TouchUpdate { x, y, .. }
+                                | x11_web_protocol::InputEvent::TouchEnd { x, y, .. } => {
+                                    state.xi.valuators.x = *x as i32;
+                                    state.xi.valuators.y = *y as i32;
+                                }
+                                _ => {}
+                            }
+
+                            // Track pressed keys for QueryKeymap + XKB modifier state
+                            // and manage key auto-repeat timer.
+                            match &input {
+                                x11_web_protocol::InputEvent::KeyPress { keycode, state: mask } => {
+                                    let kc = *keycode as usize;
+                                    if kc < 256 {
+                                        state.pressed_keys[kc / 8] |= 1 << (kc % 8);
+                                        state.xkb_state.key_press(kc as u8);
+                                    }
+                                    // Start auto-repeat if enabled for this key.
+                                    let repeat_enabled = (state.xkb_state.controls.enabled_ctrls & (1 << 10)) != 0; // XkbRepeatKeysMask
+                                    let key_repeats = kc < 256 && (state.xkb_state.controls.per_key_repeat[kc / 8] & (1 << (kc % 8))) != 0;
+                                    if repeat_enabled && key_repeats {
+                                        let delay = state.xkb_state.controls.repeat_delay as u64;
+                                        key_repeat = Some(RepeatState {
+                                            keycode: *keycode as u8,
+                                            mask: *mask,
+                                            target_wid: x11_wid,
+                                            in_delay_phase: true,
+                                        });
+                                        repeat_timer.as_mut().reset(tokio::time::Instant::now() + Duration::from_millis(delay));
+                                    } else {
+                                        // Non-repeating key: cancel any pending repeat
+                                        key_repeat = None;
+                                        repeat_timer.as_mut().reset(tokio::time::Instant::now() + Duration::from_secs(86400));
+                                    }
+                                }
+                                x11_web_protocol::InputEvent::KeyRelease { keycode, .. } => {
+                                    let kc = *keycode as usize;
+                                    if kc < 256 {
+                                        state.pressed_keys[kc / 8] &= !(1 << (kc % 8));
+                                        state.xkb_state.key_release(kc as u8);
+                                    }
+                                    // Cancel auto-repeat for this key.
+                                    if key_repeat.as_ref().is_some_and(|r| r.keycode == *keycode as u8) {
+                                        key_repeat = None;
+                                        repeat_timer.as_mut().reset(tokio::time::Instant::now() + Duration::from_secs(86400));
+                                    }
+                                }
+                                _ => {}
+                            }
+
+                            // Compose key / dead key processing for KeyPress events.
+                            // Resolve the keysym for the keycode, run it through the
+                            // compose state machine, and potentially replace or suppress
+                            // the input event.
+                            if let x11_web_protocol::InputEvent::KeyPress { keycode, state: mask } = &input {
+                                let shifted = (*mask & 1) != 0; // ShiftMask
+                                let (normal_ks, shifted_ks) = handlers::keycode_to_keysym(*keycode as u8);
+                                let keysym = if shifted { shifted_ks } else { normal_ks };
+
+                                match compose.process(keysym) {
+                                    crate::compose::ComposeResult::Consumed => {
+                                        // Key is part of an in-progress compose sequence; skip it.
+                                        continue;
+                                    }
+                                    crate::compose::ComposeResult::Composed(text) => {
+                                        // Compose complete. Generate a synthetic KeyPress/KeyRelease
+                                        // pair using a Unicode keysym (0x0100_0000 + codepoint).
+                                        for ch in text.chars() {
+                                            let uni_keysym = if (ch as u32) > 0xff {
+                                                0x0100_0000 + ch as u32
+                                            } else {
+                                                ch as u32
+                                            };
+                                            // Synthesise a KeyPress for the composed character.
+                                            // We reuse keycode 0 (unused) so the X client sees
+                                            // the event; the keysym is delivered via XKB/XI2.
+                                            let synth_press = x11_web_protocol::InputEvent::KeyPress {
+                                                keycode: 0,
+                                                state: *mask,
+                                            };
+                                            let synth_release = x11_web_protocol::InputEvent::KeyRelease {
+                                                keycode: 0,
+                                                state: *mask,
+                                            };
+
+                                            // Core protocol events
+                                            let press_bytes = build_x11_input_event(&mut state, &synth_press, x11_wid);
+                                            if !press_bytes.is_empty() {
+                                                stream.write_all(&press_bytes).await?;
+                                            }
+                                            let release_bytes = build_x11_input_event(&mut state, &synth_release, x11_wid);
+                                            if !release_bytes.is_empty() {
+                                                stream.write_all(&release_bytes).await?;
+                                            }
+
+                                            // XI2 events with the Unicode keysym
+                                            let chain = ancestor_chain(&state.windows, x11_wid);
+                                            let xi_press = crate::xinput2::build_xi_events_for(
+                                                &mut state.xi.valuators,
+                                                &state.xi.selections,
+                                                &chain,
+                                                state.sequence,
+                                                state.root_window,
+                                                &synth_press,
+                                                state.msb_first,
+                                            );
+                                            for ev in xi_press {
+                                                stream.write_all(&ev).await?;
+                                            }
+                                            let xi_release = crate::xinput2::build_xi_events_for(
+                                                &mut state.xi.valuators,
+                                                &state.xi.selections,
+                                                &chain,
+                                                state.sequence,
+                                                state.root_window,
+                                                &synth_release,
+                                                state.msb_first,
+                                            );
+                                            for ev in xi_release {
+                                                stream.write_all(&ev).await?;
+                                            }
+
+                                            let _ = uni_keysym; // keysym available for future XKB integration
+                                        }
+                                        continue;
+                                    }
+                                    crate::compose::ComposeResult::Cancelled(keysyms) => {
+                                        // Bad compose sequence. Replay the buffered keysyms
+                                        // as individual KeyPress events, then fall through
+                                        // to process the current key normally.
+                                        for &ks in &keysyms[..keysyms.len().saturating_sub(1)] {
+                                            // For replayed keysyms we synthesise keycode 0
+                                            let replay = x11_web_protocol::InputEvent::KeyPress {
+                                                keycode: 0,
+                                                state: *mask,
+                                            };
+                                            let bytes = build_x11_input_event(&mut state, &replay, x11_wid);
+                                            if !bytes.is_empty() {
+                                                stream.write_all(&bytes).await?;
+                                            }
+                                            let chain = ancestor_chain(&state.windows, x11_wid);
+                                            let xi_evts = crate::xinput2::build_xi_events_for(
+                                                &mut state.xi.valuators,
+                                                &state.xi.selections,
+                                                &chain,
+                                                state.sequence,
+                                                state.root_window,
+                                                &replay,
+                                                state.msb_first,
+                                            );
+                                            for ev in xi_evts {
+                                                stream.write_all(&ev).await?;
+                                            }
+                                            let _ = ks; // keysym available for future XKB integration
+                                        }
+                                        // Fall through: the original `input` event will be
+                                        // sent below by the normal path.
+                                    }
+                                    crate::compose::ComposeResult::Pass(_) => {
+                                        // Not composing — fall through to normal processing.
+                                    }
+                                }
+                            }
+
+                            // Track pointer button state and check for grabs
+                            match &input {
+                                x11_web_protocol::InputEvent::ButtonPress { button, state: mask, .. } => {
+                                    if *button >= 1 && *button <= 5 {
+                                        state.pointer_button_mask |= 1u16 << (7 + *button as u16);
+                                    }
+                                    grab::check_passive_button_grab(&mut state, *button, *mask, x11_wid);
+                                }
+                                x11_web_protocol::InputEvent::KeyPress { keycode, state: mask } => {
+                                    grab::check_passive_key_grab(&mut state, *keycode as u8, *mask, x11_wid);
+                                }
+                                x11_web_protocol::InputEvent::ButtonRelease { button, state: mask, .. } => {
+                                    if *button >= 1 && *button <= 5 {
+                                        state.pointer_button_mask &= !(1u16 << (7 + *button as u16));
+                                    }
+                                    grab::check_button_release_ungrab(&mut state, 0, *mask);
+                                }
+                                _ => {}
+                            }
+
+                            // Save old pointer position before any clamping, for barrier checks.
+                            let old_pointer_x = state.pointer_x;
+                            let old_pointer_y = state.pointer_y;
+
+                            // Confine-to: clamp pointer coordinates to the confine window bounds
+                            // when there is an active pointer grab with confine_to set.
+                            let input = match &input {
+                                x11_web_protocol::InputEvent::MotionNotify { x, y, state: mask } => {
+                                    let (cx, cy) = grab::clamp_to_confine(&state, *x, *y);
+                                    if cx != *x || cy != *y {
+                                        state.pointer_x = cx;
+                                        state.pointer_y = cy;
+                                        state.xi.valuators.x = cx as i32;
+                                        state.xi.valuators.y = cy as i32;
+                                    }
+                                    x11_web_protocol::InputEvent::MotionNotify { x: cx, y: cy, state: *mask }
+                                }
+                                other => other.clone(),
+                            };
+                            // Enforce XFIXES pointer barriers on motion events.
+                            let input = match &input {
+                                x11_web_protocol::InputEvent::MotionNotify { x, y, state: mask } => {
+                                    if !state.barriers.is_empty() {
+                                        let (bx, by) = enforce_barriers(
+                                            &state.barriers,
+                                            old_pointer_x, old_pointer_y,
+                                            *x, *y,
+                                        );
+                                        if bx != *x || by != *y {
+                                            state.pointer_x = bx;
+                                            state.pointer_y = by;
+                                            state.xi.valuators.x = bx as i32;
+                                            state.xi.valuators.y = by as i32;
+                                        }
+                                        x11_web_protocol::InputEvent::MotionNotify { x: bx, y: by, state: *mask }
+                                    } else {
+                                        input.clone()
+                                    }
+                                }
+                                _ => input,
+                            };
+                            let event_bytes = build_x11_input_event(&mut state, &input, x11_wid);
+
+                            // Reset screen saver timer on any user input (per X11 spec §14.3)
+                            if state.screen_saver.timeout > 0 && state.screen_saver_suspend_count == 0 {
+                                state.screen_saver.last_reset_ms = state.timestamp();
+                                if state.screen_saver.active {
+                                    state.screen_saver.active = false;
+                                    // Send ScreenSaverNotify (Off) event
+                                    let notify = handlers::input::build_screen_saver_off_event(&state);
+                                    if !notify.is_empty() {
+                                        state.pending_events.push(notify);
+                                    }
+                                }
+                            }
+
+                            if !event_bytes.is_empty() {
+                                // Check synchronous grab freeze for pointer/keyboard events
+                                let is_pointer = matches!(&input,
+                                    x11_web_protocol::InputEvent::ButtonPress { .. } |
+                                    x11_web_protocol::InputEvent::ButtonRelease { .. } |
+                                    x11_web_protocol::InputEvent::MotionNotify { .. }
+                                );
+                                let is_keyboard = matches!(&input,
+                                    x11_web_protocol::InputEvent::KeyPress { .. } |
+                                    x11_web_protocol::InputEvent::KeyRelease { .. }
+                                );
+
+                                let frozen = if is_pointer {
+                                    grab::check_pointer_sync_freeze(&mut state, &event_bytes)
+                                } else if is_keyboard {
+                                    grab::check_keyboard_sync_freeze(&mut state, &event_bytes)
+                                } else {
+                                    false
+                                };
+
+                                if !frozen {
+                                    // RECORD: intercept input events
+                                    let record_intercepts = state.record_intercept_events(std::slice::from_ref(&event_bytes));
+                                    for intercept in record_intercepts { stream.write_all(&intercept).await?; }
+                                    stream.write_all(&event_bytes).await?;
+                                }
+                            }
+                            let chain = ancestor_chain(&state.windows, x11_wid);
+                            let xi_events = crate::xinput2::build_xi_events_for(
+                                &mut state.xi.valuators,
+                                &state.xi.selections,
+                                &chain,
+                                state.sequence,
+                                state.root_window,
+                                &input,
+                                state.msb_first,
+                            );
+                            for ev in xi_events {
+                                stream.write_all(&ev).await?;
+                            }
+                        }
+                        WindowMessage::Resize(width, height) => {
+                            if let Some(uuid) = state.x11_to_uuid.get(&x11_wid).cloned() {
+                                let events = resize_window(&mut state, &uuid, width, height);
+                                if !events.is_empty() {
+                                    stream.write_all(&events).await?;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            Ok(_) = screen_size_rx.changed() => {
+                let (new_w, new_h) = *screen_size_rx.borrow_and_update();
+                if new_w > 0 && new_h > 0 && (new_w != state.screen_width || new_h != state.screen_height) {
+                    let events = apply_screen_resize(&mut state, new_w, new_h);
+                    if !events.is_empty() {
+                        stream.write_all(&events).await?;
+                    }
+                }
+            }
+            Some(event_data) = wm_events_rx.recv() => {
+                // RECORD: intercept WM events
+                let record_intercepts = state.record_intercept_events(std::slice::from_ref(&event_data));
+                for intercept in record_intercepts { stream.write_all(&intercept).await?; }
+                stream.write_all(&event_data).await?;
+            }
+            () = &mut repeat_timer => {
+                // Key auto-repeat timer fired. Generate a synthetic KeyPress event
+                // for the held key, per X11 spec §12.4.
+                if let Some(ref repeat) = key_repeat {
+                    let synth = x11_web_protocol::InputEvent::KeyPress {
+                        keycode: repeat.keycode as u32,
+                        state: repeat.mask,
+                    };
+                    let event_bytes = build_x11_input_event(&mut state, &synth, repeat.target_wid);
+                    if !event_bytes.is_empty() {
+                        stream.write_all(&event_bytes).await?;
+                    }
+                    // Also generate XI2 event for the repeat.
+                    let chain = ancestor_chain(&state.windows, repeat.target_wid);
+                    let xi_events = crate::xinput2::build_xi_events_for(
+                        &mut state.xi.valuators,
+                        &state.xi.selections,
+                        &chain,
+                        state.sequence,
+                        state.root_window,
+                        &synth,
+                        state.msb_first,
+                    );
+                    for ev in xi_events {
+                        stream.write_all(&ev).await?;
+                    }
+
+                    // Schedule next repeat: if we were in delay phase, switch to interval.
+                    let interval = state.xkb_state.controls.repeat_interval as u64;
+                    if let Some(ref mut r) = key_repeat {
+                        r.in_delay_phase = false;
+                    }
+                    repeat_timer.as_mut().reset(tokio::time::Instant::now() + Duration::from_millis(interval));
+                } else {
+                    // No key held, park the timer far in the future.
+                    repeat_timer.as_mut().reset(tokio::time::Instant::now() + Duration::from_secs(86400));
+                }
+            }
+        }
+    }
+}

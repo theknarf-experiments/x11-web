@@ -1,0 +1,880 @@
+//! RECORD extension handler (opcode 154).
+//!
+//! The RECORD extension allows a client to intercept protocol traffic from
+//! other X11 clients in real time. A recording client creates a context,
+//! registers ranges of protocol elements to intercept, then enables the
+//! context. While enabled, matching events/requests/replies/errors from
+//! OTHER clients are forwarded to the recording client as data replies.
+
+use tracing::debug;
+
+use super::super::client::ClientState;
+
+// ---------------------------------------------------------------------------
+// RECORD data category constants
+// ---------------------------------------------------------------------------
+
+/// FromServer: events and errors from the server.
+pub(crate) const RECORD_FROM_SERVER: u8 = 0;
+/// FromClient: client requests.
+pub(crate) const RECORD_FROM_CLIENT: u8 = 1;
+/// ClientStarted: new client connection.
+pub(crate) const RECORD_CLIENT_STARTED: u8 = 2;
+/// ClientDied: client disconnection.
+pub(crate) const RECORD_CLIENT_DIED: u8 = 3;
+/// StartOfData: initial reply when context is enabled.
+pub(crate) const RECORD_START_OF_DATA: u8 = 4;
+/// EndOfData: context disabled.
+pub(crate) const RECORD_END_OF_DATA: u8 = 5;
+
+// ---------------------------------------------------------------------------
+// RecordRange: describes what protocol elements to intercept
+// ---------------------------------------------------------------------------
+
+/// A range of protocol elements to intercept.
+#[derive(Clone, Debug)]
+pub(crate) struct RecordRange {
+    /// Core request range (first, last opcode).
+    pub(crate) core_requests: (u8, u8),
+    /// Core reply range.
+    pub(crate) core_replies: (u8, u8),
+    /// Extension requests range (major, first_minor, last_minor).
+    pub(crate) ext_requests: (u8, u8, u8),
+    /// Extension replies range.
+    pub(crate) ext_replies: (u8, u8, u8),
+    /// Delivered event range (first, last).
+    pub(crate) delivered_events: (u8, u8),
+    /// Device event range (first, last).
+    pub(crate) device_events: (u8, u8),
+    /// Error range (first, last).
+    pub(crate) errors: (u8, u8),
+    /// Client started/died flags.
+    pub(crate) client_started: bool,
+    pub(crate) client_died: bool,
+}
+
+impl Default for RecordRange {
+    fn default() -> Self {
+        RecordRange {
+            core_requests: (0, 0),
+            core_replies: (0, 0),
+            ext_requests: (0, 0, 0),
+            ext_replies: (0, 0, 0),
+            delivered_events: (0, 0),
+            device_events: (0, 0),
+            errors: (0, 0),
+            client_started: false,
+            client_died: false,
+        }
+    }
+}
+
+impl RecordRange {
+    /// Check if a core request opcode matches this range.
+    pub(crate) fn matches_core_request(&self, opcode: u8) -> bool {
+        let (first, last) = self.core_requests;
+        first != 0 && last != 0 && opcode >= first && opcode <= last
+    }
+
+    /// Check if a core reply opcode matches this range.
+    pub(crate) fn matches_core_reply(&self, opcode: u8) -> bool {
+        let (first, last) = self.core_replies;
+        first != 0 && last != 0 && opcode >= first && opcode <= last
+    }
+
+    /// Check if an extension request matches this range.
+    pub(crate) fn matches_ext_request(&self, major: u8, minor: u8) -> bool {
+        let (ext_major, first_minor, last_minor) = self.ext_requests;
+        ext_major != 0 && major == ext_major && minor >= first_minor && minor <= last_minor
+    }
+
+    /// Check if an extension reply matches this range.
+    pub(crate) fn matches_ext_reply(&self, major: u8, minor: u8) -> bool {
+        let (ext_major, first_minor, last_minor) = self.ext_replies;
+        ext_major != 0 && major == ext_major && minor >= first_minor && minor <= last_minor
+    }
+
+    /// Check if a delivered event code matches this range.
+    pub(crate) fn matches_delivered_event(&self, event_code: u8) -> bool {
+        let (first, last) = self.delivered_events;
+        first != 0 && last != 0 && event_code >= first && event_code <= last
+    }
+
+    /// Check if a device event code matches this range.
+    pub(crate) fn matches_device_event(&self, event_code: u8) -> bool {
+        let (first, last) = self.device_events;
+        first != 0 && last != 0 && event_code >= first && event_code <= last
+    }
+
+    /// Check if an error code matches this range.
+    pub(crate) fn matches_error(&self, error_code: u8) -> bool {
+        let (first, last) = self.errors;
+        first != 0 && last != 0 && error_code >= first && error_code <= last
+    }
+}
+
+// ---------------------------------------------------------------------------
+// RecordContext: per-context state
+// ---------------------------------------------------------------------------
+
+/// RECORD context tracking state.
+#[derive(Clone, Debug)]
+#[allow(dead_code)]
+pub(crate) struct RecordContext {
+    /// Context ID.
+    pub(crate) id: u32,
+    /// Whether this context is currently enabled (recording).
+    pub(crate) enabled: bool,
+    /// Element header flags.
+    pub(crate) element_header: u8,
+    /// Ranges of protocol elements to intercept.
+    pub(crate) ranges: Vec<RecordRange>,
+    /// Client resource IDs registered for interception.
+    /// Special values: 1 = CurrentClients, 2 = FutureClients, 3 = AllClients.
+    pub(crate) client_specs: Vec<u32>,
+    /// Sequence number of the EnableContext request (used for reply headers).
+    pub(crate) enable_sequence: u16,
+}
+
+impl RecordContext {
+    /// Check if this context should intercept traffic from the given client.
+    /// `recording_client_id` is the client that owns the RECORD context.
+    /// `source_client_id` is the client whose traffic is being considered.
+    /// The RECORD spec says the recording client's own traffic is NOT intercepted
+    /// unless explicitly listed.
+    pub(crate) fn should_intercept_client(
+        &self,
+        source_client_id: &str,
+        recording_client_id: &str,
+        source_resource_base: u32,
+    ) -> bool {
+        if !self.enabled {
+            return false;
+        }
+        for &spec in &self.client_specs {
+            match spec {
+                // CurrentClients (1) or AllClients (3): intercept all current clients
+                // except the recording client itself.
+                1 | 3 => {
+                    if source_client_id != recording_client_id {
+                        return true;
+                    }
+                }
+                // FutureClients (2): intercept future clients only.
+                // In practice this also means "not the recording client".
+                2 => {
+                    if source_client_id != recording_client_id {
+                        return true;
+                    }
+                }
+                _ => {
+                    // Specific client resource base -- match only if the source
+                    // client's resource base equals the requested spec.
+                    if source_resource_base == spec {
+                        return true;
+                    }
+                }
+            }
+        }
+        false
+    }
+
+    /// Check if any range matches a delivered event.
+    pub(crate) fn matches_event(&self, event_code: u8) -> bool {
+        for range in &self.ranges {
+            if range.matches_delivered_event(event_code) || range.matches_device_event(event_code) {
+                return true;
+            }
+        }
+        false
+    }
+
+    /// Check if any range matches a core request.
+    pub(crate) fn matches_core_request(&self, opcode: u8) -> bool {
+        for range in &self.ranges {
+            if range.matches_core_request(opcode) {
+                return true;
+            }
+        }
+        false
+    }
+
+    /// Check if any range matches a core reply.
+    pub(crate) fn matches_core_reply(&self, opcode: u8) -> bool {
+        for range in &self.ranges {
+            if range.matches_core_reply(opcode) {
+                return true;
+            }
+        }
+        false
+    }
+
+    /// Check if any range matches an extension request.
+    pub(crate) fn matches_ext_request(&self, major: u8, minor: u8) -> bool {
+        for range in &self.ranges {
+            if range.matches_ext_request(major, minor) {
+                return true;
+            }
+        }
+        false
+    }
+
+    /// Check if any range matches an extension reply.
+    pub(crate) fn matches_ext_reply(&self, major: u8, minor: u8) -> bool {
+        for range in &self.ranges {
+            if range.matches_ext_reply(major, minor) {
+                return true;
+            }
+        }
+        false
+    }
+
+    /// Check if any range matches an error.
+    pub(crate) fn matches_error(&self, error_code: u8) -> bool {
+        for range in &self.ranges {
+            if range.matches_error(error_code) {
+                return true;
+            }
+        }
+        false
+    }
+
+    /// Check if any range has client_started set.
+    pub(crate) fn wants_client_started(&self) -> bool {
+        self.ranges.iter().any(|r| r.client_started)
+    }
+
+    /// Check if any range has client_died set.
+    pub(crate) fn wants_client_died(&self) -> bool {
+        self.ranges.iter().any(|r| r.client_died)
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Wire format helpers
+// ---------------------------------------------------------------------------
+
+fn parse_record_range(data: &[u8]) -> RecordRange {
+    if data.len() < 24 {
+        return RecordRange::default();
+    }
+    RecordRange {
+        core_requests: (data[0], data[1]),
+        core_replies: (data[2], data[3]),
+        ext_requests: (data[4], data[5], data[6]),
+        ext_replies: (data[8], data[9], data[10]),
+        delivered_events: (data[12], data[13]),
+        device_events: (data[14], data[15]),
+        errors: (data[16], data[17]),
+        client_started: data[18] != 0,
+        client_died: data[20] != 0,
+    }
+}
+
+/// Build a RECORD intercept data reply.
+///
+/// The RECORD protocol sends intercepted data as X11 replies to the
+/// EnableContext request. The format is:
+///
+/// ```text
+/// Byte 0:      1 (Reply)
+/// Byte 1:      category (FromServer=0, FromClient=1, etc.)
+/// Bytes 2-3:   sequence number of EnableContext
+/// Bytes 4-7:   length (extra data in 4-byte units)
+/// Bytes 8-11:  element_header (depends on context flags)
+/// Bytes 12-15: client_swapped (0 = native byte order)
+/// Bytes 16-19: xid_base of intercepted client (0 for server)
+/// Bytes 20-23: server_time
+/// Bytes 24-27: rec_sequence_num (sequence of intercepted data)
+/// Bytes 28-31: padding
+/// Bytes 32+:   intercepted data
+/// ```
+pub(crate) fn build_record_data_reply(
+    category: u8,
+    enable_seq: u16,
+    element_header: u8,
+    intercepted_data: &[u8],
+    server_time: u32,
+    intercepted_seq: u16,
+) -> Vec<u8> {
+    let data_len = intercepted_data.len();
+    let padded = (data_len + 3) & !3;
+    let extra_words = padded / 4;
+    let mut reply = vec![0u8; 32 + padded];
+
+    reply[0] = 1; // Reply
+    reply[1] = category;
+    reply[2..4].copy_from_slice(&enable_seq.to_le_bytes());
+    reply[4..8].copy_from_slice(&(extra_words as u32).to_le_bytes());
+    reply[8] = element_header;
+    // client_swapped = 0 at bytes 12-15 (already zero)
+    // xid_base = 0 at bytes 16-19 (already zero)
+    reply[20..24].copy_from_slice(&server_time.to_le_bytes());
+    reply[24..26].copy_from_slice(&intercepted_seq.to_le_bytes());
+    // bytes 26-31: padding (already zero)
+
+    if !intercepted_data.is_empty() {
+        reply[32..32 + data_len].copy_from_slice(intercepted_data);
+    }
+
+    reply
+}
+
+/// Build a StartOfData or EndOfData reply (no intercepted data payload).
+pub(crate) fn build_record_status_reply(
+    category: u8,
+    enable_seq: u16,
+    element_header: u8,
+    server_time: u32,
+) -> Vec<u8> {
+    build_record_data_reply(category, enable_seq, element_header, &[], server_time, 0)
+}
+
+// ---------------------------------------------------------------------------
+// RECORD request handler (opcode 154)
+// ---------------------------------------------------------------------------
+
+pub(crate) fn handle_record_request(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
+    let minor = data[1];
+    match minor {
+        0 => {
+            // QueryVersion
+            let mut reply = [0u8; 32];
+            reply[0] = 1;
+            reply[2..4].copy_from_slice(&seq.to_le_bytes());
+            reply[8..10].copy_from_slice(&1u16.to_le_bytes()); // major
+            reply[10..12].copy_from_slice(&13u16.to_le_bytes()); // minor
+            reply.to_vec()
+        }
+        1 => {
+            // CreateContext
+            // SECURITY: untrusted clients are denied CreateContext (BadAccess)
+            if state.trust_level > 0 {
+                return crate::xserver::core::build_error_bo(
+                    crate::xserver::core::BAD_ACCESS, seq, 0,
+                    154, minor as u16, state.msb_first,
+                );
+            }
+            if data.len() >= 20 {
+                let context_id = u32::from_le_bytes([data[4], data[5], data[6], data[7]]);
+                let element_header = data[8];
+                let num_client_specs =
+                    u32::from_le_bytes([data[12], data[13], data[14], data[15]]) as usize;
+                let num_ranges =
+                    u32::from_le_bytes([data[16], data[17], data[18], data[19]]) as usize;
+
+                // Parse client specs (each 4 bytes)
+                let mut client_specs = Vec::with_capacity(num_client_specs);
+                for i in 0..num_client_specs {
+                    let off = 20 + i * 4;
+                    if off + 4 <= data.len() {
+                        client_specs
+                            .push(u32::from_le_bytes([data[off], data[off + 1], data[off + 2], data[off + 3]]));
+                    }
+                }
+
+                // Parse ranges (each 24 bytes, after client specs)
+                let specs_offset = 20 + num_client_specs * 4;
+                let mut ranges = Vec::with_capacity(num_ranges);
+                for i in 0..num_ranges {
+                    let range_off = specs_offset + i * 24;
+                    if range_off + 24 <= data.len() {
+                        ranges.push(parse_record_range(&data[range_off..]));
+                    }
+                }
+
+                debug!(
+                    "RECORD CreateContext: id={context_id:#x} specs={num_client_specs} ranges={num_ranges}"
+                );
+                let ctx = RecordContext {
+                    id: context_id,
+                    enabled: false,
+                    element_header,
+                    ranges,
+                    client_specs,
+                    enable_sequence: 0,
+                };
+                // Insert into shared registry for cross-client interception
+                if let Ok(mut shared) = state.shared_record_contexts.lock() {
+                    shared.insert(
+                        context_id,
+                        super::super::types::SharedRecordEntry {
+                            recording_client_id: state.client_id.clone(),
+                            recording_resource_base: state.resource_id_base,
+                            context: ctx.clone(),
+                            event_tx: state.wm_events_tx.clone(),
+                        },
+                    );
+                }
+                state.record_contexts.insert(context_id, ctx);
+                Vec::new()
+            } else {
+                crate::xserver::core::build_error_bo(
+                    crate::xserver::core::BAD_LENGTH, seq, 0,
+                    154, minor as u16, state.msb_first,
+                )
+            }
+        }
+        2 => {
+            // RegisterClients
+            if data.len() >= 20 {
+                let context_id = u32::from_le_bytes([data[4], data[5], data[6], data[7]]);
+                let element_header = data[8];
+                let num_client_specs =
+                    u32::from_le_bytes([data[12], data[13], data[14], data[15]]) as usize;
+                let num_ranges =
+                    u32::from_le_bytes([data[16], data[17], data[18], data[19]]) as usize;
+
+                let mut client_specs = Vec::with_capacity(num_client_specs);
+                for i in 0..num_client_specs {
+                    let off = 20 + i * 4;
+                    if off + 4 <= data.len() {
+                        client_specs
+                            .push(u32::from_le_bytes([data[off], data[off + 1], data[off + 2], data[off + 3]]));
+                    }
+                }
+
+                let specs_offset = 20 + num_client_specs * 4;
+                let mut ranges = Vec::with_capacity(num_ranges);
+                for i in 0..num_ranges {
+                    let range_off = specs_offset + i * 24;
+                    if range_off + 24 <= data.len() {
+                        ranges.push(parse_record_range(&data[range_off..]));
+                    }
+                }
+
+                if let Some(ctx) = state.record_contexts.get_mut(&context_id) {
+                    ctx.element_header = element_header;
+                    ctx.ranges.extend(ranges);
+                    ctx.client_specs.extend(client_specs);
+                    // Sync to shared registry
+                    if let Ok(mut shared) = state.shared_record_contexts.lock() {
+                        if let Some(entry) = shared.get_mut(&context_id) {
+                            entry.context = ctx.clone();
+                        }
+                    }
+                }
+                Vec::new()
+            } else {
+                crate::xserver::core::build_error_bo(
+                    crate::xserver::core::BAD_LENGTH, seq, 0,
+                    154, minor as u16, state.msb_first,
+                )
+            }
+        }
+        3 => {
+            // UnregisterClients
+            if data.len() >= 12 {
+                let context_id = u32::from_le_bytes([data[4], data[5], data[6], data[7]]);
+                let num_client_specs =
+                    u32::from_le_bytes([data[8], data[9], data[10], data[11]]) as usize;
+
+                if let Some(ctx) = state.record_contexts.get_mut(&context_id) {
+                    // Remove matching client specs
+                    for i in 0..num_client_specs {
+                        let off = 12 + i * 4;
+                        if off + 4 <= data.len() {
+                            let spec = u32::from_le_bytes([
+                                data[off],
+                                data[off + 1],
+                                data[off + 2],
+                                data[off + 3],
+                            ]);
+                            ctx.client_specs.retain(|&s| s != spec);
+                        }
+                    }
+                    // If no client specs remain, clear ranges too
+                    if ctx.client_specs.is_empty() {
+                        ctx.ranges.clear();
+                    }
+                    // Sync to shared registry
+                    if let Ok(mut shared) = state.shared_record_contexts.lock() {
+                        if let Some(entry) = shared.get_mut(&context_id) {
+                            entry.context = ctx.clone();
+                        }
+                    }
+                }
+                Vec::new()
+            } else {
+                crate::xserver::core::build_error_bo(
+                    crate::xserver::core::BAD_LENGTH, seq, 0,
+                    154, minor as u16, state.msb_first,
+                )
+            }
+        }
+        4 => {
+            // GetContext
+            if data.len() >= 8 {
+                let context_id = u32::from_le_bytes([data[4], data[5], data[6], data[7]]);
+                if let Some(ctx) = state.record_contexts.get(&context_id) {
+                    // Build reply with intercepted client info
+                    let num_clients = if ctx.client_specs.is_empty() { 0u32 } else { 1u32 };
+                    let ranges_per_client = ctx.ranges.len() as u32;
+                    // Each client info: client_resource(4) + num_ranges(4)
+                    // Each range: 24 bytes
+                    let client_info_bytes = if num_clients > 0 {
+                        8 + (ranges_per_client as usize * 24)
+                    } else {
+                        0
+                    };
+                    let padded = (client_info_bytes + 3) & !3;
+                    let extra_words = padded / 4;
+
+                    let mut reply = vec![0u8; 32 + padded];
+                    reply[0] = 1;
+                    reply[1] = if ctx.enabled { 1 } else { 0 };
+                    reply[2..4].copy_from_slice(&seq.to_le_bytes());
+                    reply[4..8].copy_from_slice(&(extra_words as u32).to_le_bytes());
+                    reply[8] = ctx.element_header;
+                    reply[12..16].copy_from_slice(&num_clients.to_le_bytes());
+
+                    if num_clients > 0 {
+                        // Write client info
+                        let spec = ctx.client_specs.first().copied().unwrap_or(3);
+                        reply[32..36].copy_from_slice(&spec.to_le_bytes());
+                        reply[36..40].copy_from_slice(&ranges_per_client.to_le_bytes());
+
+                        // Write ranges
+                        for (i, range) in ctx.ranges.iter().enumerate() {
+                            let off = 40 + i * 24;
+                            if off + 24 <= reply.len() {
+                                reply[off] = range.core_requests.0;
+                                reply[off + 1] = range.core_requests.1;
+                                reply[off + 2] = range.core_replies.0;
+                                reply[off + 3] = range.core_replies.1;
+                                reply[off + 4] = range.ext_requests.0;
+                                reply[off + 5] = range.ext_requests.1;
+                                reply[off + 6] = range.ext_requests.2;
+                                reply[off + 8] = range.ext_replies.0;
+                                reply[off + 9] = range.ext_replies.1;
+                                reply[off + 10] = range.ext_replies.2;
+                                reply[off + 12] = range.delivered_events.0;
+                                reply[off + 13] = range.delivered_events.1;
+                                reply[off + 14] = range.device_events.0;
+                                reply[off + 15] = range.device_events.1;
+                                reply[off + 16] = range.errors.0;
+                                reply[off + 17] = range.errors.1;
+                                reply[off + 18] = if range.client_started { 1 } else { 0 };
+                                reply[off + 20] = if range.client_died { 1 } else { 0 };
+                            }
+                        }
+                    }
+
+                    reply
+                } else {
+                    let mut reply = [0u8; 32];
+                    reply[0] = 1;
+                    reply[2..4].copy_from_slice(&seq.to_le_bytes());
+                    reply.to_vec()
+                }
+            } else {
+                crate::xserver::core::build_error_bo(
+                    crate::xserver::core::BAD_LENGTH, seq, 0,
+                    154, minor as u16, state.msb_first,
+                )
+            }
+        }
+        5 => {
+            // EnableContext
+            if data.len() >= 8 {
+                let context_id = u32::from_le_bytes([data[4], data[5], data[6], data[7]]);
+                if let Some(ctx) = state.record_contexts.get_mut(&context_id) {
+                    ctx.enabled = true;
+                    ctx.enable_sequence = seq;
+                    debug!("RECORD EnableContext: id={context_id:#x}");
+                }
+
+                // Update shared context: set enabled, update enable_sequence and event_tx
+                if let Ok(mut shared) = state.shared_record_contexts.lock() {
+                    if let Some(entry) = shared.get_mut(&context_id) {
+                        entry.context.enabled = true;
+                        entry.context.enable_sequence = seq;
+                        entry.event_tx = state.wm_events_tx.clone();
+                    }
+                }
+
+                // Return StartOfData reply
+                let element_header = state
+                    .record_contexts
+                    .get(&context_id)
+                    .map(|c| c.element_header)
+                    .unwrap_or(0);
+                let server_time = state.server_start.elapsed().as_millis() as u32;
+                build_record_status_reply(RECORD_START_OF_DATA, seq, element_header, server_time)
+            } else {
+                crate::xserver::core::build_error_bo(
+                    crate::xserver::core::BAD_LENGTH, seq, 0,
+                    154, minor as u16, state.msb_first,
+                )
+            }
+        }
+        6 => {
+            // DisableContext
+            if data.len() >= 8 {
+                let context_id = u32::from_le_bytes([data[4], data[5], data[6], data[7]]);
+                let (enable_seq, element_header) = state
+                    .record_contexts
+                    .get(&context_id)
+                    .map(|c| (c.enable_sequence, c.element_header))
+                    .unwrap_or((0, 0));
+
+                if let Some(ctx) = state.record_contexts.get_mut(&context_id) {
+                    ctx.enabled = false;
+                    debug!("RECORD DisableContext: id={context_id:#x}");
+                }
+
+                // Update shared context
+                if let Ok(mut shared) = state.shared_record_contexts.lock() {
+                    if let Some(entry) = shared.get_mut(&context_id) {
+                        entry.context.enabled = false;
+                    }
+                }
+
+                // Return EndOfData reply
+                let server_time = state.server_start.elapsed().as_millis() as u32;
+                build_record_status_reply(RECORD_END_OF_DATA, enable_seq, element_header, server_time)
+            } else {
+                crate::xserver::core::build_error_bo(
+                    crate::xserver::core::BAD_LENGTH, seq, 0,
+                    154, minor as u16, state.msb_first,
+                )
+            }
+        }
+        7 => {
+            // FreeContext
+            if data.len() >= 8 {
+                let context_id = u32::from_le_bytes([data[4], data[5], data[6], data[7]]);
+                state.record_contexts.remove(&context_id);
+                // Remove from shared registry
+                if let Ok(mut shared) = state.shared_record_contexts.lock() {
+                    shared.remove(&context_id);
+                }
+                debug!("RECORD FreeContext: id={context_id:#x}");
+                Vec::new()
+            } else {
+                crate::xserver::core::build_error_bo(
+                    crate::xserver::core::BAD_LENGTH, seq, 0,
+                    154, minor as u16, state.msb_first,
+                )
+            }
+        }
+        _ => {
+            crate::xserver::core::build_error_bo(
+                crate::xserver::core::BAD_REQUEST, seq, minor as u32,
+                154, minor as u16, state.msb_first,
+            )
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Interception helpers (called from the main event loop)
+// ---------------------------------------------------------------------------
+
+/// Check all active RECORD contexts and generate intercept data for an event
+/// being delivered to a client.
+///
+/// `event_data` is the raw 32-byte X11 event.
+/// `source_client_id` is the client connection generating/receiving the event.
+///
+/// Returns a list of RECORD data replies to send to the recording client.
+pub(crate) fn intercept_event(
+    record_contexts: &HashMap<u32, RecordContext>,
+    recording_client_id: &str,
+    source_client_id: &str,
+    source_resource_base: u32,
+    event_data: &[u8],
+    server_time: u32,
+    source_seq: u16,
+) -> Vec<Vec<u8>> {
+    if record_contexts.is_empty() || event_data.is_empty() {
+        return Vec::new();
+    }
+
+    let event_code = event_data[0] & 0x7f; // strip high bit (SendEvent flag)
+    let mut results = Vec::new();
+
+    for ctx in record_contexts.values() {
+        if !ctx.enabled {
+            continue;
+        }
+        if !ctx.should_intercept_client(source_client_id, recording_client_id, source_resource_base) {
+            continue;
+        }
+        if ctx.matches_event(event_code) {
+            results.push(build_record_data_reply(
+                RECORD_FROM_SERVER,
+                ctx.enable_sequence,
+                ctx.element_header,
+                event_data,
+                server_time,
+                source_seq,
+            ));
+        }
+    }
+
+    results
+}
+
+/// Check all active RECORD contexts and generate intercept data for a request
+/// from a client.
+///
+/// `request_data` is the raw X11 request bytes.
+/// `source_client_id` is the client that sent the request.
+///
+/// Returns a list of RECORD data replies to send to the recording client.
+pub(crate) fn intercept_request(
+    record_contexts: &HashMap<u32, RecordContext>,
+    recording_client_id: &str,
+    source_client_id: &str,
+    source_resource_base: u32,
+    request_data: &[u8],
+    server_time: u32,
+    source_seq: u16,
+) -> Vec<Vec<u8>> {
+    if record_contexts.is_empty() || request_data.is_empty() {
+        return Vec::new();
+    }
+
+    let major_opcode = request_data[0];
+    let minor_opcode = if request_data.len() > 1 { request_data[1] } else { 0 };
+    let mut results = Vec::new();
+
+    for ctx in record_contexts.values() {
+        if !ctx.enabled {
+            continue;
+        }
+        if !ctx.should_intercept_client(source_client_id, recording_client_id, source_resource_base) {
+            continue;
+        }
+
+        let matched = if major_opcode <= 127 {
+            ctx.matches_core_request(major_opcode)
+        } else {
+            ctx.matches_ext_request(major_opcode, minor_opcode)
+        };
+
+        if matched {
+            results.push(build_record_data_reply(
+                RECORD_FROM_CLIENT,
+                ctx.enable_sequence,
+                ctx.element_header,
+                request_data,
+                server_time,
+                source_seq,
+            ));
+        }
+    }
+
+    results
+}
+
+/// Check all active RECORD contexts and generate intercept data for a reply.
+///
+/// `reply_data` is the raw X11 reply bytes.
+/// `original_opcode` is the major opcode of the request that generated this reply.
+/// `original_minor` is the minor opcode (for extension requests).
+/// `source_client_id` is the client the reply is being sent to.
+///
+/// Returns a list of RECORD data replies to send to the recording client.
+pub(crate) fn intercept_reply(
+    record_contexts: &HashMap<u32, RecordContext>,
+    recording_client_id: &str,
+    source_client_id: &str,
+    source_resource_base: u32,
+    reply_data: &[u8],
+    original_opcode: u8,
+    original_minor: u8,
+    server_time: u32,
+    source_seq: u16,
+) -> Vec<Vec<u8>> {
+    if record_contexts.is_empty() || reply_data.is_empty() {
+        return Vec::new();
+    }
+
+    // Only intercept actual replies (byte 0 == 1), not events or errors
+    if reply_data[0] != 1 {
+        return Vec::new();
+    }
+
+    let mut results = Vec::new();
+
+    for ctx in record_contexts.values() {
+        if !ctx.enabled {
+            continue;
+        }
+        if !ctx.should_intercept_client(source_client_id, recording_client_id, source_resource_base) {
+            continue;
+        }
+
+        let matched = if original_opcode <= 127 {
+            ctx.matches_core_reply(original_opcode)
+        } else {
+            ctx.matches_ext_reply(original_opcode, original_minor)
+        };
+
+        if matched {
+            results.push(build_record_data_reply(
+                RECORD_FROM_SERVER,
+                ctx.enable_sequence,
+                ctx.element_header,
+                reply_data,
+                server_time,
+                source_seq,
+            ));
+        }
+    }
+
+    results
+}
+
+/// Check all active RECORD contexts and generate intercept data for an error.
+///
+/// `error_data` is the raw 32-byte X11 error reply.
+/// `source_client_id` is the client the error is being sent to.
+///
+/// Returns a list of RECORD data replies to send to the recording client.
+pub(crate) fn intercept_error(
+    record_contexts: &HashMap<u32, RecordContext>,
+    recording_client_id: &str,
+    source_client_id: &str,
+    source_resource_base: u32,
+    error_data: &[u8],
+    server_time: u32,
+    source_seq: u16,
+) -> Vec<Vec<u8>> {
+    if record_contexts.is_empty() || error_data.is_empty() {
+        return Vec::new();
+    }
+
+    // Error format: byte 0 == 0, byte 1 == error_code
+    if error_data[0] != 0 || error_data.len() < 2 {
+        return Vec::new();
+    }
+
+    let error_code = error_data[1];
+    let mut results = Vec::new();
+
+    for ctx in record_contexts.values() {
+        if !ctx.enabled {
+            continue;
+        }
+        if !ctx.should_intercept_client(source_client_id, recording_client_id, source_resource_base) {
+            continue;
+        }
+        if ctx.matches_error(error_code) {
+            results.push(build_record_data_reply(
+                RECORD_FROM_SERVER,
+                ctx.enable_sequence,
+                ctx.element_header,
+                error_data,
+                server_time,
+                source_seq,
+            ));
+        }
+    }
+
+    results
+}
+
+use std::collections::HashMap;

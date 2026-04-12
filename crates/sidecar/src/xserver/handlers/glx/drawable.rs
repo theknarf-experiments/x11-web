@@ -1,0 +1,434 @@
+//! GLX drawable management (CreateGLXPixmap, DestroyGLXPixmap, CreatePbuffer,
+//! DestroyPbuffer, CreateWindow, DeleteWindow, GetDrawableAttributes,
+//! ChangeDrawableAttributes, UseXFont, QueryContext).
+
+use std::collections::HashMap;
+use tracing::{debug, warn};
+
+use super::super::super::client::ClientState;
+use super::super::super::core::ROOT_VISUAL;
+use super::{GlxDrawable, GlxDrawableKind, GLX_FBCONFIG_ID, GLX_RENDER_TYPE, GLX_RGBA_BIT};
+
+// ---------------------------------------------------------------------------
+// GLX_USE_X_FONT (minor 12)
+// ---------------------------------------------------------------------------
+
+pub(crate) fn handle_use_x_font(state: &mut ClientState, data: &[u8], _seq: u16) -> Vec<u8> {
+    // UseXFont loads an X font into GL display lists containing glBitmap calls.
+    // Wire: 4 context_tag | 4 font | 4 first | 4 count | 4 list_base
+    if data.len() < 24 {
+        return Vec::new();
+    }
+    let _context_tag = u32::from_le_bytes([data[4], data[5], data[6], data[7]]);
+    let font_id = u32::from_le_bytes([data[8], data[9], data[10], data[11]]);
+    let first = u32::from_le_bytes([data[12], data[13], data[14], data[15]]);
+    let count = u32::from_le_bytes([data[16], data[17], data[18], data[19]]);
+    let list_base = u32::from_le_bytes([data[20], data[21], data[22], data[23]]);
+
+    debug!(
+        "GLX UseXFont: font={font_id:#x} first={first} count={count} list_base={list_base}"
+    );
+
+    let font = match state.font_manager.get_font(font_id) {
+        Some(f) => f.clone(),
+        None => {
+            warn!("GLX UseXFont: font {font_id:#x} not found");
+            return Vec::new();
+        }
+    };
+
+    // GL_COMPILE = 0x1300
+    const GL_COMPILE: u32 = 0x1300;
+
+    // Set pixel storage for 1-bit bitmaps: byte-aligned, MSB first
+    crate::osmesa::gl_pixel_storei(0x0D05, 1); // GL_UNPACK_ALIGNMENT = 1
+    crate::osmesa::gl_pixel_storei(0x0CF1, 0); // GL_UNPACK_LSB_FIRST = 0
+
+    for i in 0..count {
+        let char_code = (first + i) as u16;
+        let list_id = list_base + i;
+
+        crate::osmesa::gl_new_list(list_id, GL_COMPILE);
+
+        if char_code >= font.min_char && char_code <= font.max_char {
+            let idx = (char_code - font.min_char) as usize;
+            if idx < font.glyphs.len() && idx < font.char_infos.len() {
+                let glyph = &font.glyphs[idx];
+                let ci = &font.char_infos[idx];
+
+                if glyph.width > 0 && glyph.height > 0 && !glyph.bitmap.is_empty() {
+                    crate::osmesa::gl_bitmap(
+                        glyph.width as i32,
+                        glyph.height as i32,
+                        ci.left_side_bearing as f32,        // x origin
+                        ci.descent as f32,                  // y origin
+                        ci.character_width as f32,          // x advance
+                        0.0,                                // y advance
+                        &glyph.bitmap,
+                    );
+                } else {
+                    // Empty glyph — just advance the raster position
+                    crate::osmesa::gl_bitmap(
+                        0, 0,
+                        0.0, 0.0,
+                        ci.character_width as f32,
+                        0.0,
+                        &[],
+                    );
+                }
+            }
+        }
+
+        crate::osmesa::gl_end_list();
+    }
+
+    Vec::new() // void request
+}
+
+// ---------------------------------------------------------------------------
+// GLX_CREATE_GLX_PIXMAP (minor 13)
+// ---------------------------------------------------------------------------
+
+pub(crate) fn handle_create_glx_pixmap(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
+    // Wire: 4 screen | 4 visual | 4 pixmap (X) | 4 glx_pixmap (new id)
+    if data.len() < 20 {
+        return crate::xserver::core::build_error_bo(
+            crate::xserver::core::BAD_LENGTH, seq, data.len() as u32,
+            159, 13, state.msb_first,
+        );
+    }
+    let visual = u32::from_le_bytes([data[8], data[9], data[10], data[11]]);
+    let x_pixmap = u32::from_le_bytes([data[12], data[13], data[14], data[15]]);
+    let glx_pixmap = u32::from_le_bytes([data[16], data[17], data[18], data[19]]);
+
+    let fbconfig = if visual == 0x40 { 2 } else { 1 };
+    state.glx.drawables.insert(
+        glx_pixmap,
+        GlxDrawable {
+            kind: GlxDrawableKind::Pixmap,
+            x_drawable: x_pixmap,
+            fbconfig,
+            attributes: HashMap::new(),
+        },
+    );
+    debug!("Created GLX pixmap {glx_pixmap:#x} backed by X pixmap {x_pixmap:#x}");
+    Vec::new() // void request
+}
+
+// ---------------------------------------------------------------------------
+// GLX_CREATE_PIXMAP (minor 22)
+// ---------------------------------------------------------------------------
+
+/// Creates a GLX pixmap from an existing X pixmap and an FBConfig.
+pub(crate) fn handle_create_pixmap(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
+    // Wire: screen(4) fbconfig(4) pixmap(4) glx_pixmap(4) num_attribs(4) attribs...
+    if data.len() < 24 {
+        return crate::xserver::core::build_error_bo(
+            crate::xserver::core::BAD_LENGTH, seq, data.len() as u32,
+            159, 22, state.msb_first,
+        );
+    }
+    let _screen = u32::from_le_bytes([data[4], data[5], data[6], data[7]]);
+    let fbconfig = u32::from_le_bytes([data[8], data[9], data[10], data[11]]);
+    let x_pixmap = u32::from_le_bytes([data[12], data[13], data[14], data[15]]);
+    let glx_pixmap = u32::from_le_bytes([data[16], data[17], data[18], data[19]]);
+    let num_attribs = u32::from_le_bytes([data[20], data[21], data[22], data[23]]) as usize;
+
+    // Validate the X pixmap exists
+    if !state.pixmaps.contains_key(&x_pixmap) {
+        return crate::xserver::core::build_error_bo(
+            crate::xserver::core::BAD_PIXMAP, seq, x_pixmap,
+            159, 22, state.msb_first,
+        );
+    }
+
+    // Parse attribute pairs (terminated by key=0 or end of data)
+    let mut attributes = HashMap::new();
+    for i in 0..num_attribs {
+        let base = 24 + i * 8;
+        if base + 8 > data.len() {
+            break;
+        }
+        let key = u32::from_le_bytes([data[base], data[base + 1], data[base + 2], data[base + 3]]);
+        if key == 0 {
+            break;
+        }
+        let val = u32::from_le_bytes([data[base + 4], data[base + 5], data[base + 6], data[base + 7]]);
+        attributes.insert(key, val);
+    }
+
+    state.glx.drawables.insert(
+        glx_pixmap,
+        GlxDrawable {
+            kind: GlxDrawableKind::Pixmap,
+            x_drawable: x_pixmap,
+            fbconfig,
+            attributes,
+        },
+    );
+    debug!("Created GLX pixmap {glx_pixmap:#x} (opcode 22) backed by X pixmap {x_pixmap:#x} fbconfig={fbconfig}");
+    Vec::new() // Void request
+}
+
+// ---------------------------------------------------------------------------
+// GLX_DESTROY_GLX_PIXMAP (minor 15)
+// ---------------------------------------------------------------------------
+
+pub(crate) fn handle_destroy_glx_pixmap(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
+    if data.len() < 8 {
+        return crate::xserver::core::build_error_bo(
+            crate::xserver::core::BAD_LENGTH, seq, data.len() as u32,
+            159, 15, state.msb_first,
+        );
+    }
+    let glx_pixmap = u32::from_le_bytes([data[4], data[5], data[6], data[7]]);
+    if state.glx.drawables.remove(&glx_pixmap).is_some() {
+        debug!("Destroyed GLX pixmap {glx_pixmap:#x}");
+    } else {
+        warn!("DestroyGLXPixmap: unknown drawable {glx_pixmap:#x}");
+    }
+    Vec::new()
+}
+
+// ---------------------------------------------------------------------------
+// GLX_CREATE_PBUFFER (minor 27)
+// ---------------------------------------------------------------------------
+
+pub(crate) fn handle_create_pbuffer(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
+    // Wire: 4 screen | 4 fbconfig | 4 pbuffer_id | 4 num_attribs | attribs...
+    if data.len() < 20 {
+        return crate::xserver::core::build_error_bo(
+            crate::xserver::core::BAD_LENGTH, seq, data.len() as u32,
+            159, 27, state.msb_first,
+        );
+    }
+    let fbconfig = u32::from_le_bytes([data[8], data[9], data[10], data[11]]);
+    let pbuffer_id = u32::from_le_bytes([data[12], data[13], data[14], data[15]]);
+    let num_attribs = u32::from_le_bytes([data[16], data[17], data[18], data[19]]) as usize;
+
+    let mut attributes = HashMap::new();
+    for i in 0..num_attribs {
+        let base = 20 + i * 8;
+        if base + 8 > data.len() {
+            break;
+        }
+        let key = u32::from_le_bytes([data[base], data[base + 1], data[base + 2], data[base + 3]]);
+        let val = u32::from_le_bytes([data[base + 4], data[base + 5], data[base + 6], data[base + 7]]);
+        attributes.insert(key, val);
+    }
+
+    state.glx.drawables.insert(
+        pbuffer_id,
+        GlxDrawable {
+            kind: GlxDrawableKind::Pbuffer,
+            x_drawable: 0, // pbuffers have no backing X drawable
+            fbconfig,
+            attributes,
+        },
+    );
+    debug!("Created GLX pbuffer {pbuffer_id:#x} fbconfig={fbconfig}");
+    Vec::new()
+}
+
+// ---------------------------------------------------------------------------
+// GLX_DESTROY_PBUFFER (minor 28)
+// ---------------------------------------------------------------------------
+
+pub(crate) fn handle_destroy_pbuffer(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
+    if data.len() < 8 {
+        return crate::xserver::core::build_error_bo(
+            crate::xserver::core::BAD_LENGTH, seq, data.len() as u32,
+            159, 28, state.msb_first,
+        );
+    }
+    let pbuffer_id = u32::from_le_bytes([data[4], data[5], data[6], data[7]]);
+    if state.glx.drawables.remove(&pbuffer_id).is_some() {
+        debug!("Destroyed GLX pbuffer {pbuffer_id:#x}");
+    } else {
+        warn!("DestroyPbuffer: unknown drawable {pbuffer_id:#x}");
+    }
+    Vec::new()
+}
+
+// ---------------------------------------------------------------------------
+// GLX_CREATE_WINDOW (minor 31)
+// ---------------------------------------------------------------------------
+
+pub(crate) fn handle_create_window(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
+    // Wire: 4 screen | 4 fbconfig | 4 window (X) | 4 glx_window | 4 num_attribs | attribs...
+    if data.len() < 24 {
+        return crate::xserver::core::build_error_bo(
+            crate::xserver::core::BAD_LENGTH, seq, data.len() as u32,
+            159, 31, state.msb_first,
+        );
+    }
+    let fbconfig = u32::from_le_bytes([data[8], data[9], data[10], data[11]]);
+    let x_window = u32::from_le_bytes([data[12], data[13], data[14], data[15]]);
+    let glx_window = u32::from_le_bytes([data[16], data[17], data[18], data[19]]);
+    let num_attribs = u32::from_le_bytes([data[20], data[21], data[22], data[23]]) as usize;
+
+    let mut attributes = HashMap::new();
+    for i in 0..num_attribs {
+        let base = 24 + i * 8;
+        if base + 8 > data.len() {
+            break;
+        }
+        let key = u32::from_le_bytes([data[base], data[base + 1], data[base + 2], data[base + 3]]);
+        let val = u32::from_le_bytes([data[base + 4], data[base + 5], data[base + 6], data[base + 7]]);
+        attributes.insert(key, val);
+    }
+
+    state.glx.drawables.insert(
+        glx_window,
+        GlxDrawable {
+            kind: GlxDrawableKind::Window,
+            x_drawable: x_window,
+            fbconfig,
+            attributes,
+        },
+    );
+    debug!("Created GLX window {glx_window:#x} backed by X window {x_window:#x}");
+    Vec::new()
+}
+
+// ---------------------------------------------------------------------------
+// GLX_DELETE_WINDOW (minor 32)
+// ---------------------------------------------------------------------------
+
+pub(crate) fn handle_delete_window(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
+    if data.len() < 8 {
+        return crate::xserver::core::build_error_bo(
+            crate::xserver::core::BAD_LENGTH, seq, data.len() as u32,
+            159, 32, state.msb_first,
+        );
+    }
+    let glx_window = u32::from_le_bytes([data[4], data[5], data[6], data[7]]);
+    if state.glx.drawables.remove(&glx_window).is_some() {
+        debug!("Deleted GLX window {glx_window:#x}");
+    } else {
+        warn!("DeleteWindow: unknown drawable {glx_window:#x}");
+    }
+    Vec::new()
+}
+
+// ---------------------------------------------------------------------------
+// GLX_GET_DRAWABLE_ATTRIBUTES (minor 29)
+// ---------------------------------------------------------------------------
+
+pub(crate) fn handle_get_drawable_attributes(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
+    if data.len() < 8 {
+        let mut reply = [0u8; 32];
+        reply[0] = 1;
+        reply[2..4].copy_from_slice(&seq.to_le_bytes());
+        return reply.to_vec();
+    }
+    let drawable_id = u32::from_le_bytes([data[4], data[5], data[6], data[7]]);
+
+    if let Some(drawable) = state.glx.drawables.get(&drawable_id) {
+        // Return stored attributes plus the fbconfig id
+        let mut pairs: Vec<(u32, u32)> = Vec::new();
+        pairs.push((GLX_FBCONFIG_ID, drawable.fbconfig));
+        for (&k, &v) in &drawable.attributes {
+            if k != GLX_FBCONFIG_ID {
+                pairs.push((k, v));
+            }
+        }
+
+        let num_attribs = pairs.len() as u32;
+        let extra_bytes = pairs.len() * 8;
+        let mut reply = vec![0u8; 32 + extra_bytes];
+        reply[0] = 1;
+        reply[2..4].copy_from_slice(&seq.to_le_bytes());
+        reply[4..8].copy_from_slice(&((extra_bytes / 4) as u32).to_le_bytes());
+        reply[8..12].copy_from_slice(&num_attribs.to_le_bytes());
+
+        for (i, &(key, val)) in pairs.iter().enumerate() {
+            let off = 32 + i * 8;
+            reply[off..off + 4].copy_from_slice(&key.to_le_bytes());
+            reply[off + 4..off + 8].copy_from_slice(&val.to_le_bytes());
+        }
+        reply
+    } else {
+        // Unknown drawable -- return empty attribute list
+        let num_attribs: u32 = 0;
+        let mut reply = [0u8; 32];
+        reply[0] = 1;
+        reply[2..4].copy_from_slice(&seq.to_le_bytes());
+        reply[8..12].copy_from_slice(&num_attribs.to_le_bytes());
+        reply.to_vec()
+    }
+}
+
+// ---------------------------------------------------------------------------
+// GLX_CHANGE_DRAWABLE_ATTRIBUTES (minor 30)
+// ---------------------------------------------------------------------------
+
+pub(crate) fn handle_change_drawable_attributes(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
+    if data.len() < 12 {
+        return crate::xserver::core::build_error_bo(
+            crate::xserver::core::BAD_LENGTH, seq, data.len() as u32,
+            159, 30, state.msb_first,
+        );
+    }
+    let drawable_id = u32::from_le_bytes([data[4], data[5], data[6], data[7]]);
+    let num_attribs = u32::from_le_bytes([data[8], data[9], data[10], data[11]]) as usize;
+
+    if let Some(drawable) = state.glx.drawables.get_mut(&drawable_id) {
+        for i in 0..num_attribs {
+            let base = 12 + i * 8;
+            if base + 8 > data.len() {
+                break;
+            }
+            let key = u32::from_le_bytes([data[base], data[base + 1], data[base + 2], data[base + 3]]);
+            let val = u32::from_le_bytes([data[base + 4], data[base + 5], data[base + 6], data[base + 7]]);
+            drawable.attributes.insert(key, val);
+        }
+        debug!("Changed {num_attribs} attributes on GLX drawable {drawable_id:#x}");
+    } else {
+        warn!("ChangeDrawableAttributes: unknown drawable {drawable_id:#x}");
+    }
+    Vec::new()
+}
+
+// ---------------------------------------------------------------------------
+// GLX_QUERY_CONTEXT (minor 25)
+// ---------------------------------------------------------------------------
+
+pub(crate) fn handle_query_context(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
+    if data.len() < 8 {
+        return crate::xserver::core::build_error_bo(
+            crate::xserver::core::BAD_LENGTH, seq, data.len() as u32,
+            159, 25, state.msb_first,
+        );
+    }
+    let ctx_id = u32::from_le_bytes([data[4], data[5], data[6], data[7]]);
+
+    // Return 4 attributes: FBCONFIG_ID, RENDER_TYPE, SCREEN, SHARE_CONTEXT
+    let num_attribs: u32 = 4;
+    let extra = num_attribs as usize * 8; // 2 u32s each
+    let mut reply = vec![0u8; 32 + extra];
+    reply[0] = 1;
+    reply[2..4].copy_from_slice(&seq.to_le_bytes());
+    reply[4..8].copy_from_slice(&((extra / 4) as u32).to_le_bytes());
+    reply[8..12].copy_from_slice(&num_attribs.to_le_bytes());
+
+    let ctx = state.glx.contexts.get(&ctx_id);
+    let screen = ctx.map(|c| c.screen).unwrap_or(0);
+    let visual = ctx.map(|c| c.visual).unwrap_or(ROOT_VISUAL);
+    let share_list = ctx.map(|c| c.share_list).unwrap_or(0);
+
+    // FBCONFIG_ID
+    reply[32..36].copy_from_slice(&GLX_FBCONFIG_ID.to_le_bytes());
+    reply[36..40].copy_from_slice(&(if visual == 0x40 { 2u32 } else { 1u32 }).to_le_bytes());
+    // RENDER_TYPE
+    reply[40..44].copy_from_slice(&GLX_RENDER_TYPE.to_le_bytes());
+    reply[44..48].copy_from_slice(&GLX_RGBA_BIT.to_le_bytes());
+    // SCREEN
+    reply[48..52].copy_from_slice(&0x3u32.to_le_bytes()); // GLX_SCREEN = 0x3
+    reply[52..56].copy_from_slice(&screen.to_le_bytes());
+    // SHARE_CONTEXT_EXT (0x800A)
+    reply[56..60].copy_from_slice(&0x800Au32.to_le_bytes());
+    reply[60..64].copy_from_slice(&share_list.to_le_bytes());
+
+    reply
+}

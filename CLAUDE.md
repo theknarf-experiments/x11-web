@@ -5,3 +5,5 @@ This project uses **pnpm** as the JavaScript package manager and **Cargo** for R
 - Use `pnpm` for all JS/TS dependency and script operations (never npm or npx)
 - Use `cargo` for building and managing Rust crates
 - Use `turbo` to run cross-project tasks
+
+Commit regularry as stuff work

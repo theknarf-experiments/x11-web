@@ -8,7 +8,10 @@
 //! their `Serialize` impls produce the bytes. This guarantees we never
 //! drift from the canonical layout.
 
+use std::collections::HashMap;
 use tracing::{debug, warn};
+
+use crate::xserver::core::{read_u16_bo, read_u32_bo, write_u16_bo, write_u32_bo};
 
 use x11rb_protocol::protocol::xinput as xi;
 use x11rb_protocol::protocol::xproto;
@@ -88,12 +91,12 @@ pub const AXIS_SCROLL_H: u16 = 3;
 /// XI minor opcode of the request being answered, matching the upstream
 /// xserver convention).
 #[allow(dead_code)]
-fn xi_reply_header(seq: u16, xi_reply_type: u8, length_units: u32) -> Vec<u8> {
+fn xi_reply_header(seq: u16, xi_reply_type: u8, length_units: u32, msb_first: bool) -> Vec<u8> {
     let mut buf = vec![0u8; 32 + (length_units as usize) * 4];
     buf[0] = 1; // X_Reply
     buf[1] = xi_reply_type;
-    buf[2..4].copy_from_slice(&seq.to_le_bytes());
-    buf[4..8].copy_from_slice(&length_units.to_le_bytes());
+    write_u16_bo(&mut buf, 2, seq, msb_first);
+    write_u32_bo(&mut buf, 4, length_units, msb_first);
     buf
 }
 
@@ -101,7 +104,7 @@ fn xi_reply_header(seq: u16, xi_reply_type: u8, length_units: u32) -> Vec<u8> {
 /// (in 4-byte units after the 32-byte header). x11rb's `Serialize` impls
 /// don't compute `length` automatically — it has to match the actual
 /// number of trailing bytes or XCB hits "Too much data requested".
-fn serialize_xi_reply<R: x11rb_protocol::x11_utils::Serialize>(reply: &R) -> Vec<u8> {
+fn serialize_xi_reply<R: x11rb_protocol::x11_utils::Serialize>(reply: &R, msb_first: bool) -> Vec<u8> {
     let mut buf = Vec::new();
     reply.serialize_into(&mut buf);
     while buf.len() % 4 != 0 {
@@ -109,7 +112,7 @@ fn serialize_xi_reply<R: x11rb_protocol::x11_utils::Serialize>(reply: &R) -> Vec
     }
     debug_assert!(buf.len() >= 32, "XI reply must be at least 32 bytes");
     let length_units = ((buf.len() - 32) / 4) as u32;
-    buf[4..8].copy_from_slice(&length_units.to_le_bytes());
+    write_u32_bo(&mut buf, 4, length_units, msb_first);
     buf
 }
 
@@ -223,6 +226,25 @@ fn build_master_pointer_info(
         }),
     };
 
+    // Touch class: advertise direct touch support with 10 simultaneous touch points.
+    let touch_class = xi::DeviceClass {
+        len: 0,
+        sourceid: MASTER_POINTER_ID,
+        data: xi::DeviceClassData::Touch(xi::DeviceClassDataTouch {
+            mode: xi::TouchMode::DIRECT,
+            num_touches: 10,
+        }),
+    };
+
+    // Gesture class: advertise pinch and swipe gesture support.
+    let gesture_class = xi::DeviceClass {
+        len: 0,
+        sourceid: MASTER_POINTER_ID,
+        data: xi::DeviceClassData::Gesture(xi::DeviceClassDataGesture {
+            num_touches: 5,
+        }),
+    };
+
     // Class order matters for GDK: it walks the list once, and for
     // each XIScrollClass it expects the corresponding XIValuatorClass
     // to have *already* been seen (so `gdk_device_get_n_axes` already
@@ -236,6 +258,8 @@ fn build_master_pointer_info(
         valuator_scroll_h,
         scroll_v,
         scroll_h,
+        touch_class,
+        gesture_class,
     ];
     fill_class_lengths(&mut classes);
 
@@ -287,6 +311,7 @@ fn query_device_reply_bytes(
     valuators: &ValuatorState,
     screen_width: u16,
     screen_height: u16,
+    msb_first: bool,
 ) -> Vec<u8> {
     // Resolve which devices the client asked for. 0 = AllDevices, 1 = AllMaster.
     let mp = build_master_pointer_info(valuators, screen_width, screen_height);
@@ -304,7 +329,7 @@ fn query_device_reply_bytes(
         length: 0, // patched by serialize_xi_reply
         infos,
     };
-    serialize_xi_reply(&reply)
+    serialize_xi_reply(&reply, msb_first)
 }
 
 /// Convert our internal pointer mask byte (state from `InputEvent`) into
@@ -329,7 +354,7 @@ fn mods_from_state(state: u16) -> xi::ModifierInfo {
 /// event sequence numbers against its outstanding-request tracker, and a
 /// stale sequence number causes `Unknown sequence number while processing
 /// queue` and a hard abort.
-pub fn build_raw_motion_event(sequence: u16) -> Vec<u8> {
+pub fn build_raw_motion_event(sequence: u16, msb_first: bool) -> Vec<u8> {
     let event = xi::RawMotionEvent {
         response_type: 35, // GenericEvent
         extension: XI_MAJOR_OPCODE,
@@ -351,7 +376,7 @@ pub fn build_raw_motion_event(sequence: u16) -> Vec<u8> {
         buf.push(0);
     }
     let length_units = ((buf.len() - 32) / 4) as u32;
-    buf[4..8].copy_from_slice(&length_units.to_le_bytes());
+    write_u32_bo(&mut buf, 4, length_units, msb_first);
     buf
 }
 
@@ -392,6 +417,7 @@ fn build_xi_pointer_event(
     mods: u16,
     button_held_bit: Option<u8>,
     axes: &[AxisValue],
+    msb_first: bool,
 ) -> Vec<u8> {
     // Buttons mask is variable-length: enough words to cover the highest
     // button number we ever need (7).
@@ -467,7 +493,7 @@ fn build_xi_pointer_event(
     // `length` field counts additional 4-byte units beyond the 32-byte
     // header. Patch it.
     let length_units = ((buf.len() - 32) / 4) as u32;
-    buf[4..8].copy_from_slice(&length_units.to_le_bytes());
+    write_u32_bo(&mut buf, 4, length_units, msb_first);
     buf
 }
 
@@ -477,17 +503,21 @@ fn build_xi_pointer_event(
 pub fn handle_request(
     data: &[u8],
     seq: u16,
-    valuators: &ValuatorState,
+    valuators: &mut ValuatorState,
     selections: &mut Vec<XiSelection>,
     pending: &mut PendingSynthetic,
+    client_pointer: &mut u16,
+    device_properties: &mut HashMap<(u16, u32), Vec<u8>>,
+    focus_window: &mut u32,
     screen_width: u16,
     screen_height: u16,
     root_window: u32,
+    msb_first: bool,
 ) -> Vec<u8> {
     if data.len() < 4 {
         return Vec::new();
     }
-    let length_units = u16::from_le_bytes([data[2], data[3]]);
+    let length_units = read_u16_bo(data, 2, msb_first);
     let header = RequestHeader {
         major_opcode: data[0],
         minor_opcode: data[1],
@@ -511,7 +541,7 @@ pub fn handle_request(
                 server_minor: 4,
                 present: true,
             };
-            serialize_xi_reply(&reply)
+            serialize_xi_reply(&reply, msb_first)
         }
 
         // ListInputDevices (XI 1.x): return zero devices. Modern apps
@@ -525,7 +555,7 @@ pub fn handle_request(
                 infos: vec![],
                 names: vec![],
             };
-            serialize_xi_reply(&reply)
+            serialize_xi_reply(&reply, msb_first)
         }
 
         // ---- XI 2.x ------------------------------------------------------
@@ -542,13 +572,13 @@ pub fn handle_request(
                 major_version: major,
                 minor_version: minor,
             };
-            serialize_xi_reply(&reply)
+            serialize_xi_reply(&reply, msb_first)
         }
 
         xi::XI_QUERY_DEVICE_REQUEST => {
             let req =
                 xi::XIQueryDeviceRequest::try_parse_request(header, body).unwrap_or_default();
-            query_device_reply_bytes(seq, req.deviceid, valuators, screen_width, screen_height)
+            query_device_reply_bytes(seq, req.deviceid, valuators, screen_width, screen_height, msb_first)
         }
 
         xi::XI_SELECT_EVENTS_REQUEST => {
@@ -587,16 +617,24 @@ pub fn handle_request(
             Vec::new()
         }
 
-        xi::XI_SET_CLIENT_POINTER_REQUEST => Vec::new(),
+        xi::XI_SET_CLIENT_POINTER_REQUEST => {
+            // XISetClientPointer: body is window(4) + deviceid(2) + pad(2)
+            if body.len() >= 6 {
+                let deviceid = read_u16_bo(body, 4, msb_first);
+                debug!("XISetClientPointer: deviceid={deviceid}");
+                *client_pointer = deviceid;
+            }
+            Vec::new()
+        }
 
         xi::XI_GET_CLIENT_POINTER_REQUEST => {
             let reply = xi::XIGetClientPointerReply {
                 sequence: seq,
                 length: 0,
                 set: true,
-                deviceid: MASTER_POINTER_ID,
+                deviceid: *client_pointer,
             };
-            serialize_xi_reply(&reply)
+            serialize_xi_reply(&reply, msb_first)
         }
 
         xi::XI_QUERY_POINTER_REQUEST => {
@@ -619,7 +657,7 @@ pub fn handle_request(
                     effective: 0,
                 },
             };
-            serialize_xi_reply(&reply)
+            serialize_xi_reply(&reply, msb_first)
         }
 
         xi::XI_GET_FOCUS_REQUEST => {
@@ -628,10 +666,18 @@ pub fn handle_request(
                 length: 0,
                 focus: 0,
             };
-            serialize_xi_reply(&reply)
+            serialize_xi_reply(&reply, msb_first)
         }
 
-        xi::XI_SET_FOCUS_REQUEST => Vec::new(),
+        xi::XI_SET_FOCUS_REQUEST => {
+            // XISetFocus: body is window(4) + time(4) + deviceid(2) + pad(2)
+            if body.len() >= 4 {
+                let window = read_u32_bo(body, 0, msb_first);
+                debug!("XISetFocus: window={window:#x}");
+                *focus_window = window;
+            }
+            Vec::new()
+        }
 
         xi::XI_GRAB_DEVICE_REQUEST => {
             let reply = xi::XIGrabDeviceReply {
@@ -639,10 +685,18 @@ pub fn handle_request(
                 length: 0,
                 status: xproto::GrabStatus::SUCCESS,
             };
-            serialize_xi_reply(&reply)
+            serialize_xi_reply(&reply, msb_first)
         }
-        xi::XI_UNGRAB_DEVICE_REQUEST => Vec::new(),
-        xi::XI_ALLOW_EVENTS_REQUEST => Vec::new(),
+        xi::XI_UNGRAB_DEVICE_REQUEST => {
+            debug!("XIUngrabDevice: releasing device grab");
+            // No active grabs to clear in our virtual server — accept silently.
+            Vec::new()
+        }
+        xi::XI_ALLOW_EVENTS_REQUEST => {
+            debug!("XIAllowEvents: allowing frozen device events");
+            // We never freeze events, so this is a no-op. Accept silently.
+            Vec::new()
+        }
 
         xi::XI_PASSIVE_GRAB_DEVICE_REQUEST => {
             let reply = xi::XIPassiveGrabDeviceReply {
@@ -650,31 +704,87 @@ pub fn handle_request(
                 length: 0,
                 modifiers: vec![],
             };
-            serialize_xi_reply(&reply)
+            serialize_xi_reply(&reply, msb_first)
         }
-        xi::XI_PASSIVE_UNGRAB_DEVICE_REQUEST => Vec::new(),
+        xi::XI_PASSIVE_UNGRAB_DEVICE_REQUEST => {
+            debug!("XIPassiveUngrabDevice: removing passive device grab");
+            // No passive grabs tracked — accept silently.
+            Vec::new()
+        }
 
         xi::XI_LIST_PROPERTIES_REQUEST => {
+            // Return all property atoms for the requested device.
+            let deviceid = if body.len() >= 2 {
+                read_u16_bo(body, 0, msb_first)
+            } else {
+                0
+            };
+            let properties: Vec<u32> = device_properties
+                .keys()
+                .filter(|(dev, _)| *dev == deviceid)
+                .map(|(_, atom)| *atom)
+                .collect();
             let reply = xi::XIListPropertiesReply {
                 sequence: seq,
                 length: 0,
-                properties: vec![],
+                properties,
             };
-            serialize_xi_reply(&reply)
+            serialize_xi_reply(&reply, msb_first)
         }
         xi::XI_GET_PROPERTY_REQUEST => {
-            let reply = xi::XIGetPropertyReply {
-                sequence: seq,
-                length: 0,
-                type_: 0,
-                bytes_after: 0,
-                num_items: 0,
-                items: xi::XIGetPropertyItems::Data8(vec![]),
+            // XIGetProperty: deviceid(2) + pad(2) + property(4) + type(4) + offset(4) + len(4)
+            let (deviceid, property) = if body.len() >= 8 {
+                (read_u16_bo(body, 0, msb_first), read_u32_bo(body, 4, msb_first))
+            } else {
+                (0, 0)
             };
-            serialize_xi_reply(&reply)
+            if let Some(value) = device_properties.get(&(deviceid, property)) {
+                let reply = xi::XIGetPropertyReply {
+                    sequence: seq,
+                    length: 0,
+                    type_: 31, // XA_STRING as a reasonable default
+                    bytes_after: 0,
+                    num_items: value.len() as u32,
+                    items: xi::XIGetPropertyItems::Data8(value.clone()),
+                };
+                serialize_xi_reply(&reply, msb_first)
+            } else {
+                let reply = xi::XIGetPropertyReply {
+                    sequence: seq,
+                    length: 0,
+                    type_: 0,
+                    bytes_after: 0,
+                    num_items: 0,
+                    items: xi::XIGetPropertyItems::Data8(vec![]),
+                };
+                serialize_xi_reply(&reply, msb_first)
+            }
         }
-        xi::XI_CHANGE_PROPERTY_REQUEST => Vec::new(),
-        xi::XI_DELETE_PROPERTY_REQUEST => Vec::new(),
+        xi::XI_CHANGE_PROPERTY_REQUEST => {
+            // XIChangeProperty: deviceid(2) + mode(1) + format(1) + property(4) + type(4) + num_items(4) + data...
+            if body.len() >= 16 {
+                let deviceid = read_u16_bo(body, 0, msb_first);
+                let property = read_u32_bo(body, 4, msb_first);
+                let value = if body.len() > 16 {
+                    body[16..].to_vec()
+                } else {
+                    Vec::new()
+                };
+                debug!("XIChangeProperty: device={deviceid} property={property} len={}", value.len());
+                device_properties.insert((deviceid, property), value);
+            }
+            Vec::new()
+        }
+        xi::XI_DELETE_PROPERTY_REQUEST => {
+            // XIDeleteProperty: deviceid(2) + pad(2) + property(4)
+            if body.len() >= 8 {
+                let deviceid = read_u16_bo(body, 0, msb_first);
+                let property = read_u32_bo(body, 4, msb_first);
+                debug!("XIDeleteProperty: device={deviceid} property={property}");
+                device_properties.remove(&(deviceid, property));
+            }
+            Vec::new()
+        }
 
         xi::XI_GET_SELECTED_EVENTS_REQUEST => {
             let reply = xi::XIGetSelectedEventsReply {
@@ -682,22 +792,164 @@ pub fn handle_request(
                 length: 0,
                 masks: vec![],
             };
-            serialize_xi_reply(&reply)
+            serialize_xi_reply(&reply, msb_first)
         }
 
-        xi::XI_BARRIER_RELEASE_POINTER_REQUEST => Vec::new(),
-        xi::XI_CHANGE_HIERARCHY_REQUEST => Vec::new(),
-        xi::XI_WARP_POINTER_REQUEST => Vec::new(),
-        xi::XI_CHANGE_CURSOR_REQUEST => Vec::new(),
-
-        // ---- XI 1.x stubs (rarely-used legacy paths) ---------------------
-
-        // Anything else: silently swallow. The XI 1.x ecosystem is full
-        // of obscure requests; returning nothing keeps clients from
-        // hanging on missing replies.
-        other => {
-            debug!("XInput minor opcode {other} unhandled — silently ignoring");
+        xi::XI_BARRIER_RELEASE_POINTER_REQUEST => {
+            debug!("XIBarrierReleasePointer: accepted (no real barriers)");
             Vec::new()
+        }
+        xi::XI_CHANGE_HIERARCHY_REQUEST => {
+            debug!("XIChangeHierarchy: accepted (virtual device topology is fixed)");
+            Vec::new()
+        }
+        xi::XI_WARP_POINTER_REQUEST => {
+            // XIWarpPointer: move pointer to specified coordinates.
+            // Request: src_win(4), dst_win(4), src_x(FP1616), src_y(FP1616),
+            //          dst_x(FP1616), dst_y(FP1616), deviceid(2), pad(2)
+            if let Ok(req) = xi::XIWarpPointerRequest::try_parse_request(header, body) {
+                // Convert FP16.16 to integer coordinates
+                let dst_x = req.dst_x >> 16;
+                let dst_y = req.dst_y >> 16;
+
+                if req.dst_win != 0 {
+                    // Absolute warp to dst_win coordinates
+                    valuators.x = dst_x.clamp(0, screen_width as i32 - 1);
+                    valuators.y = dst_y.clamp(0, screen_height as i32 - 1);
+                } else {
+                    // Relative warp from current position
+                    valuators.x = (valuators.x + dst_x).clamp(0, screen_width as i32 - 1);
+                    valuators.y = (valuators.y + dst_y).clamp(0, screen_height as i32 - 1);
+                }
+                debug!("XIWarpPointer: moved to ({}, {})", valuators.x, valuators.y);
+            }
+            Vec::new()
+        }
+        xi::XI_CHANGE_CURSOR_REQUEST => {
+            // XIChangeCursor: change cursor for specified window.
+            // This is a void request — just accept it. Actual cursor
+            // rendering is handled by the cursor tracking in the main
+            // event loop and forwarded to the frontend.
+            if let Ok(req) = xi::XIChangeCursorRequest::try_parse_request(header, body) {
+                debug!("XIChangeCursor: window={:#x} cursor={:#x}", req.window, req.cursor);
+            }
+            Vec::new()
+        }
+
+        // ---- XI 1.x reply-expecting requests --------------------------------
+        //
+        // These legacy opcodes expect a reply. Returning an empty Vec
+        // would hang the client. We return minimal valid replies.
+
+        // OpenDevice (3): reply with zero input classes.
+        3 => {
+            debug!("XI 1.x OpenDevice: returning empty device info");
+            let mut reply = vec![0u8; 32];
+            reply[0] = 1; // reply
+            write_u16_bo(&mut reply, 2, seq, msb_first);
+            // length=0, xi_reply_type=3, num_classes=0
+            reply[8] = 3; // xi_reply_type
+            reply
+        }
+
+        // GetDeviceDontPropagateList (9): reply with zero events.
+        9 => {
+            debug!("XI 1.x GetDeviceDontPropagateList: returning empty list");
+            let mut reply = vec![0u8; 32];
+            reply[0] = 1;
+            write_u16_bo(&mut reply, 2, seq, msb_first);
+            reply[8] = 9;
+            reply
+        }
+
+        // GetDeviceMotionEvents (10): reply with zero events.
+        10 => {
+            debug!("XI 1.x GetDeviceMotionEvents: returning empty");
+            let mut reply = vec![0u8; 32];
+            reply[0] = 1;
+            write_u16_bo(&mut reply, 2, seq, msb_first);
+            reply[8] = 10;
+            reply
+        }
+
+        // GetDeviceFocus (20): reply with focus=PointerRoot.
+        20 => {
+            debug!("XI 1.x GetDeviceFocus: returning PointerRoot");
+            let mut reply = vec![0u8; 32];
+            reply[0] = 1;
+            write_u16_bo(&mut reply, 2, seq, msb_first);
+            reply[8] = 20; // xi_reply_type
+            write_u32_bo(&mut reply, 12, 1, msb_first); // focus = PointerRoot
+            reply
+        }
+
+        // GetDeviceKeyMapping (24): reply with zero keysyms.
+        24 => {
+            debug!("XI 1.x GetDeviceKeyMapping: returning empty");
+            let mut reply = vec![0u8; 32];
+            reply[0] = 1;
+            write_u16_bo(&mut reply, 2, seq, msb_first);
+            reply[1] = 0; // keysyms per keycode
+            reply[8] = 24;
+            reply
+        }
+
+        // GetDeviceModifierMapping (26): reply with zero modifiers.
+        26 => {
+            debug!("XI 1.x GetDeviceModifierMapping: returning empty");
+            let mut reply = vec![0u8; 32];
+            reply[0] = 1;
+            reply[1] = 0; // keycodes_per_modifier
+            write_u16_bo(&mut reply, 2, seq, msb_first);
+            reply[8] = 26;
+            reply
+        }
+
+        // GetDeviceButtonMapping (28): reply with identity mapping.
+        28 => {
+            debug!("XI 1.x GetDeviceButtonMapping: returning identity");
+            let n_buttons = 5u8;
+            let map_len = ((n_buttons as usize + 3) & !3) / 4; // pad to 4 bytes in units of 4
+            let mut reply = vec![0u8; 32 + map_len * 4];
+            reply[0] = 1;
+            reply[1] = n_buttons;
+            write_u16_bo(&mut reply, 2, seq, msb_first);
+            write_u32_bo(&mut reply, 4, map_len as u32, msb_first);
+            reply[8] = 28;
+            for i in 0..n_buttons as usize {
+                reply[32 + i] = (i + 1) as u8; // identity mapping
+            }
+            reply
+        }
+
+        // QueryDeviceState (30): reply with zero classes.
+        30 => {
+            debug!("XI 1.x QueryDeviceState: returning empty");
+            let mut reply = vec![0u8; 32];
+            reply[0] = 1;
+            write_u16_bo(&mut reply, 2, seq, msb_first);
+            reply[8] = 30;
+            reply
+        }
+
+        // ---- XI 1.x void requests (no reply expected) -----------------------
+        // CloseDevice(4), SetDeviceMode(5), SelectExtensionEvent(6),
+        // ChangeDeviceDontPropagateList(8), SetDeviceFocus(21),
+        // ChangeDeviceKeyMapping(25), SetDeviceModifierMapping(27),
+        // SetDeviceButtonMapping(29), etc.
+        4 | 5 | 6 | 8 | 21 | 25 | 27 | 29 => {
+            debug!("XI 1.x void opcode {}: accepting silently", header.minor_opcode);
+            Vec::new()
+        }
+
+        other => {
+            debug!("XInput minor opcode {other} unhandled — returning empty reply");
+            // For unknown opcodes, return a minimal reply to prevent hangs
+            // in case the client expects one.
+            let mut reply = vec![0u8; 32];
+            reply[0] = 1; // reply
+            write_u16_bo(&mut reply, 2, seq, msb_first);
+            reply
         }
     }
 }
@@ -706,9 +958,9 @@ pub fn handle_request(
 /// produced by `handle_request`. The reply is built before we know which
 /// root window the X server is using; this lets the dispatch site fix it
 /// up before sending.
-pub fn patch_query_pointer_root(buf: &mut [u8], root_window: u32) {
+pub fn patch_query_pointer_root(buf: &mut [u8], root_window: u32, msb_first: bool) {
     if buf.len() >= 12 {
-        buf[8..12].copy_from_slice(&root_window.to_le_bytes());
+        write_u32_bo(buf, 8, root_window, msb_first);
     }
 }
 
@@ -735,6 +987,7 @@ pub fn build_xi_events_for(
     seq: u16,
     root_window: u32,
     input: &InputEvent,
+    msb_first: bool,
 ) -> Vec<Vec<u8>> {
     // Map scroll-wheel button events into a synthetic motion event with
     // the matching scroll valuator bumped. Buttons 4 (up) and 5 (down)
@@ -816,6 +1069,42 @@ pub fn build_xi_events_for(
                 state,
                 Vec::new(),
             ),
+            // Touch events use the same wire format as button events (XI2 spec §4.5).
+            // The detail field carries the touch ID.
+            InputEvent::TouchBegin { touch_id, x, y, state } => (
+                xi::TOUCH_BEGIN_EVENT,
+                xi::RAW_TOUCH_BEGIN_EVENT,
+                touch_id,
+                x,
+                y,
+                None,
+                state,
+                Vec::new(),
+            ),
+            InputEvent::TouchUpdate { touch_id, x, y, state } => (
+                xi::TOUCH_UPDATE_EVENT,
+                xi::RAW_TOUCH_UPDATE_EVENT,
+                touch_id,
+                x,
+                y,
+                None,
+                state,
+                Vec::new(),
+            ),
+            InputEvent::TouchEnd { touch_id, x, y, state } => (
+                xi::TOUCH_END_EVENT,
+                xi::RAW_TOUCH_END_EVENT,
+                touch_id,
+                x,
+                y,
+                None,
+                state,
+                Vec::new(),
+            ),
+            // Gesture events are handled separately below (different wire format).
+            InputEvent::GestureSwipe { .. } | InputEvent::GesturePinch { .. } => {
+                return build_gesture_events(input, selections, chain, seq, root_window, msb_first);
+            }
             _ => return Vec::new(),
         }
     };
@@ -851,6 +1140,7 @@ pub fn build_xi_events_for(
             mods,
             button_bit,
             &axes,
+            msb_first,
         ));
     }
 
@@ -867,16 +1157,77 @@ pub fn build_xi_events_for(
     });
 
     if any_raw {
-        out.push(build_raw_pointer_event(raw_type, seq, detail));
+        out.push(build_raw_pointer_event(raw_type, seq, detail, msb_first));
     }
 
     out
 }
 
+/// Build XI2 gesture events (GestureSwipe/GesturePinch).
+/// These use the GestureSwipeBeginEvent/GesturePinchBeginEvent structures.
+fn build_gesture_events(
+    input: &InputEvent,
+    selections: &[XiSelection],
+    chain: &[u32],
+    seq: u16,
+    root_window: u32,
+    msb_first: bool,
+) -> Vec<Vec<u8>> {
+    let (event_type, detail) = match input {
+        InputEvent::GestureSwipe { phase, fingers, .. } => {
+            let evtype = match phase {
+                x11_web_protocol::GesturePhase::Begin => xi::GESTURE_SWIPE_BEGIN_EVENT,
+                x11_web_protocol::GesturePhase::Update => xi::GESTURE_SWIPE_UPDATE_EVENT,
+                x11_web_protocol::GesturePhase::End => xi::GESTURE_SWIPE_END_EVENT,
+            };
+            (evtype, *fingers as u32)
+        }
+        InputEvent::GesturePinch { phase, fingers, .. } => {
+            let evtype = match phase {
+                x11_web_protocol::GesturePhase::Begin => xi::GESTURE_PINCH_BEGIN_EVENT,
+                x11_web_protocol::GesturePhase::Update => xi::GESTURE_PINCH_UPDATE_EVENT,
+                x11_web_protocol::GesturePhase::End => xi::GESTURE_PINCH_END_EVENT,
+            };
+            (evtype, *fingers as u32)
+        }
+        _ => return Vec::new(),
+    };
+
+    // Find target window
+    let target = chain.iter().copied().find(|w| {
+        selections.iter().any(|s| {
+            s.window == *w
+                && (s.deviceid == 0 || s.deviceid == 1 || s.deviceid == MASTER_POINTER_ID)
+                && s.wants(event_type)
+        })
+    });
+
+    let Some(event_window) = target else { return Vec::new() };
+
+    // Build using the pointer event structure (gesture events share the same
+    // wire format as button/motion events in XI2).
+    let ev = build_xi_pointer_event(
+        event_type,
+        seq,
+        detail,
+        MASTER_POINTER_ID,
+        MASTER_POINTER_ID,
+        root_window,
+        event_window,
+        0,
+        0, 0, 0, 0,
+        0,
+        None,
+        &[],
+        msb_first,
+    );
+    vec![ev]
+}
+
 /// Build a raw pointer event (`XI_RawMotion`/`XI_RawButtonPress`/
 /// `XI_RawButtonRelease`). Raw events have no event window and no
 /// coordinates — clients that want a position call XQueryPointer.
-pub fn build_raw_pointer_event(event_type: u16, sequence: u16, detail: u32) -> Vec<u8> {
+pub fn build_raw_pointer_event(event_type: u16, sequence: u16, detail: u32, msb_first: bool) -> Vec<u8> {
     let event = xi::RawButtonPressEvent {
         response_type: 35,
         extension: XI_MAJOR_OPCODE,
@@ -898,18 +1249,35 @@ pub fn build_raw_pointer_event(event_type: u16, sequence: u16, detail: u32) -> V
         buf.push(0);
     }
     let length_units = ((buf.len() - 32) / 4) as u32;
-    buf[4..8].copy_from_slice(&length_units.to_le_bytes());
+    write_u32_bo(&mut buf, 4, length_units, msb_first);
     buf
 }
 
 /// Per-client XI state stored on `ClientState`.
-#[derive(Default)]
 pub struct XiState {
     pub valuators: ValuatorState,
     pub selections: Vec<XiSelection>,
     /// Synthetic events that should be emitted at the next pending-event
     /// flush, using the *current* sequence number rather than a stale one.
     pub pending: PendingSynthetic,
+    /// The client pointer device ID. Defaults to `MASTER_POINTER_ID` (2).
+    /// Set by `XISetClientPointer`.
+    pub client_pointer: u16,
+    /// Per-device properties, keyed by `(device_id, property_atom)`.
+    /// Written by `XIChangeProperty`, removed by `XIDeleteProperty`.
+    pub device_properties: HashMap<(u16, u32), Vec<u8>>,
+}
+
+impl Default for XiState {
+    fn default() -> Self {
+        Self {
+            valuators: ValuatorState::default(),
+            selections: Vec::new(),
+            pending: PendingSynthetic::default(),
+            client_pointer: MASTER_POINTER_ID,
+            device_properties: HashMap::new(),
+        }
+    }
 }
 
 #[cfg(test)]
@@ -923,7 +1291,7 @@ mod tests {
     #[test]
     fn query_device_roundtrip() {
         let mut selections = Vec::new();
-        let valuators = ValuatorState {
+        let mut valuators = ValuatorState {
             x: 42,
             y: 99,
             ..Default::default()
@@ -944,12 +1312,16 @@ mod tests {
         let bytes = handle_request(
             &request,
             17,
-            &valuators,
+            &mut valuators,
             &mut selections,
             &mut PendingSynthetic::default(),
+            &mut MASTER_POINTER_ID.clone(),
+            &mut HashMap::new(),
+            &mut 0x62,
             1024,
             768,
             0x62,
+            false,
         );
         assert!(!bytes.is_empty(), "expected a reply");
 
@@ -965,7 +1337,7 @@ mod tests {
         assert_eq!(mp.attachment, MASTER_KEYBOARD_ID);
         assert!(mp.enabled);
         assert_eq!(mp.name, b"Virtual core pointer");
-        assert_eq!(mp.classes.len(), 5);
+        assert_eq!(mp.classes.len(), 9); // button + 4 valuators (x,y,scroll_v,scroll_h) + 2 scrolls + touch + gesture
 
         // The x and y valuators should report our current cursor position.
         let valuators_in_reply: Vec<&xi::DeviceClassDataValuator> = mp
@@ -973,10 +1345,10 @@ mod tests {
             .iter()
             .filter_map(|c| c.data.as_valuator())
             .collect();
-        assert_eq!(valuators_in_reply.len(), 2);
-        assert_eq!(valuators_in_reply[0].number, 0);
+        assert_eq!(valuators_in_reply.len(), 4); // x, y, scroll_v, scroll_h
+        assert_eq!(valuators_in_reply[0].number, 0); // x
         assert_eq!(valuators_in_reply[0].value.integral, 42);
-        assert_eq!(valuators_in_reply[1].number, 1);
+        assert_eq!(valuators_in_reply[1].number, 1); // y
         assert_eq!(valuators_in_reply[1].value.integral, 99);
 
         // Two scroll classes (vertical + horizontal).
@@ -999,7 +1371,7 @@ mod tests {
     #[test]
     fn query_version_round_trips() {
         let mut selections = Vec::new();
-        let valuators = ValuatorState::default();
+        let mut valuators = ValuatorState::default();
         // [opcode, minor, length, major(2), minor(2)]
         let request = vec![
             XI_MAJOR_OPCODE,
@@ -1014,12 +1386,16 @@ mod tests {
         let bytes = handle_request(
             &request,
             7,
-            &valuators,
+            &mut valuators,
             &mut selections,
             &mut PendingSynthetic::default(),
+            &mut MASTER_POINTER_ID.clone(),
+            &mut HashMap::new(),
+            &mut 0x62,
             1024,
             768,
             0x62,
+            false,
         );
         let (reply, _) = xi::XIQueryVersionReply::try_parse(&bytes).unwrap();
         assert_eq!(reply.sequence, 7);
@@ -1030,7 +1406,7 @@ mod tests {
     #[test]
     fn select_events_records_subscription() {
         let mut selections = Vec::new();
-        let valuators = ValuatorState::default();
+        let mut valuators = ValuatorState::default();
         // Build XISelectEvents request with a single EventMask asking for
         // XI_Motion (event type 6) and XI_ButtonPress (event type 4) on
         // window 0xdeadbeef for AllMaster (deviceid 1).
@@ -1061,12 +1437,16 @@ mod tests {
         let bytes = handle_request(
             &req,
             0,
-            &valuators,
+            &mut valuators,
             &mut selections,
             &mut PendingSynthetic::default(),
+            &mut MASTER_POINTER_ID.clone(),
+            &mut HashMap::new(),
+            &mut 0x62,
             1024,
             768,
             0x62,
+            false,
         );
         assert!(bytes.is_empty(), "XISelectEvents has no reply");
         assert_eq!(selections.len(), 1);
@@ -1095,6 +1475,7 @@ mod tests {
             0,
             Some(5),
             &[],
+            false,
         );
         let (event, _) = xi::ButtonPressEvent::try_parse(&bytes).unwrap();
         assert_eq!(event.response_type, 35);
@@ -1123,7 +1504,7 @@ mod tests {
             state: 0,
         };
         let events =
-            build_xi_events_for(&mut valuators, &selections, &chain, 5, 0x62, &input);
+            build_xi_events_for(&mut valuators, &selections, &chain, 5, 0x62, &input, false);
         assert_eq!(events.len(), 1);
         let (event, _) = xi::ButtonPressEvent::try_parse(&events[0]).unwrap();
         assert_eq!(event.event, 0x40_0001);
@@ -1147,7 +1528,7 @@ mod tests {
             state: 0,
         };
         let events =
-            build_xi_events_for(&mut valuators, &selections, &chain, 9, root, &input);
+            build_xi_events_for(&mut valuators, &selections, &chain, 9, root, &input, false);
         assert_eq!(events.len(), 1);
         let (raw, _) = xi::RawButtonPressEvent::try_parse(&events[0]).unwrap();
         assert_eq!(raw.event_type, xi::RAW_MOTION_EVENT);
@@ -1173,7 +1554,7 @@ mod tests {
             state: 0,
         };
         let events =
-            build_xi_events_for(&mut valuators, &selections, &chain, 5, 0x62, &input);
+            build_xi_events_for(&mut valuators, &selections, &chain, 5, 0x62, &input, false);
         assert_eq!(events.len(), 1);
         let (event, _) = xi::ButtonPressEvent::try_parse(&events[0]).unwrap();
         assert_eq!(event.event_type, xi::MOTION_EVENT);
@@ -1202,7 +1583,7 @@ mod tests {
             state: 0,
         };
         let events =
-            build_xi_events_for(&mut valuators, &selections, &chain, 5, 0x62, &input);
+            build_xi_events_for(&mut valuators, &selections, &chain, 5, 0x62, &input, false);
         assert!(
             events.is_empty(),
             "scroll-button release shouldn't emit a second motion event"
@@ -1211,10 +1592,10 @@ mod tests {
 
     #[test]
     fn raw_motion_event_is_exactly_32_bytes() {
-        let bytes = build_raw_motion_event(0);
+        let bytes = build_raw_motion_event(0, false);
         // Verify exact wire layout. We sometimes refer to this in
         // bytes during debugging.
-        eprintln!("synthetic raw motion bytes: {bytes:02x?}");
+        debug!("synthetic raw motion bytes: {bytes:02x?}");
         assert_eq!(
             bytes.len(),
             32,
@@ -1236,7 +1617,7 @@ mod tests {
         let root_window = 0x62u32;
         let mut selections = Vec::new();
         let mut pending = PendingSynthetic::default();
-        let valuators = ValuatorState::default();
+        let mut valuators = ValuatorState::default();
 
         // Build XISelectEvents for the root window with XI_RawMotion (17).
         let mut req = vec![XI_MAJOR_OPCODE, xi::XI_SELECT_EVENTS_REQUEST, 5, 0];
@@ -1251,17 +1632,21 @@ mod tests {
         let _reply = handle_request(
             &req,
             0,
-            &valuators,
+            &mut valuators,
             &mut selections,
             &mut pending,
+            &mut MASTER_POINTER_ID.clone(),
+            &mut HashMap::new(),
+            &mut root_window.clone(),
             1024,
             768,
             root_window,
+            false,
         );
         assert!(pending.raw_motion, "synthetic RawMotion should be marked");
 
         // The actual wire format must be parseable by x11rb.
-        let bytes = build_raw_motion_event(42);
+        let bytes = build_raw_motion_event(42, false);
         let (event, _) = xi::RawButtonPressEvent::try_parse(&bytes).unwrap();
         assert_eq!(event.response_type, 35);
         assert_eq!(event.extension, XI_MAJOR_OPCODE);
@@ -1282,7 +1667,7 @@ mod tests {
             state: 0,
         };
         assert!(
-            build_xi_events_for(&mut valuators, &selections, &chain, 0, 0x62, &input)
+            build_xi_events_for(&mut valuators, &selections, &chain, 0, 0x62, &input, false)
                 .is_empty()
         );
     }

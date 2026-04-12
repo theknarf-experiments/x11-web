@@ -1,14 +1,57 @@
 FROM rust:1-bookworm AS builder
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libosmesa6-dev \
+    cmake \
+    && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 COPY Cargo.toml Cargo.lock ./
 COPY crates/ crates/
 RUN cargo build --release --bin x11-web-sidecar
 
+# Build Xts (X Test Suite) from source — not available in Debian repos
+FROM debian:bookworm-slim AS xts-builder
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    git ca-certificates build-essential pkg-config \
+    libx11-dev libxt-dev libxext-dev libxi-dev libxtst-dev \
+    libxmu-dev libxaw7-dev xutils-dev autoconf automake libtool \
+    x11proto-dev libxrender-dev libxfixes-dev libxrandr-dev \
+    libxinerama-dev libxcomposite-dev libxdamage-dev \
+    && rm -rf /var/lib/apt/lists/*
+# Clone and build xts from freedesktop.org
+RUN git clone --depth 1 https://gitlab.freedesktop.org/xorg/test/xts.git /opt/xts-src
+WORKDIR /opt/xts-src
+# Configure and build the test suite.
+# autoreconf may warn about missing macros for optional subsystems — that is fine.
+RUN autoreconf -fi 2>&1; \
+    if [ ! -f configure ]; then echo "autoreconf failed to produce configure" >&2; exit 1; fi
+RUN ./configure --prefix=/opt/xts 2>&1
+# Build and install — some individual test programs may fail (stale tests for
+# deprecated features), but the overall build must succeed.
+RUN make -j$(nproc) 2>&1; exit 0
+RUN make install 2>&1; exit 0
+# Verify the install produced something useful
+RUN test -d /opt/xts || { echo "XTS install dir missing" >&2; exit 1; }
+
+# Build dbusmenu test helper from source
+FROM debian:bookworm-slim AS dbusmenu-builder
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential pkg-config \
+    libdbusmenu-glib-dev libx11-dev libglib2.0-dev \
+    && rm -rf /var/lib/apt/lists/*
+COPY crates/sidecar/test-tools/dbusmenu-test.c /tmp/
+RUN gcc -o /usr/local/bin/dbusmenu-test /tmp/dbusmenu-test.c \
+    $(pkg-config --cflags --libs dbusmenu-glib-0.4 x11) \
+    || echo "dbusmenu-test build failed (non-fatal)"
+
 FROM debian:bookworm-slim
 RUN apt-get update && apt-get install -y --no-install-recommends \
+    libosmesa6 \
     x11-apps \
     xterm \
     xfonts-base \
+    xfonts-75dpi \
+    xfonts-100dpi \
+    xfonts-scalable \
     vim \
     zenity \
     libgtk2.0-0 \
@@ -24,6 +67,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     xinput \
     firefox-esr \
     fonts-dejavu-core \
+    fonts-liberation \
+    fonts-noto-core \
     libdbus-glib-1-2 \
     procps \
     matchbox-window-manager \
@@ -33,7 +78,49 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     imagemagick \
     xvfb \
     xdotool \
+    gnome-calculator \
+    x11perf \
+    rendercheck \
+    xauth \
+    xclip \
+    xsel \
+    libxcomposite1 \
+    libxdamage1 \
+    libxrandr2 \
+    mesa-utils \
+    x11-xkb-utils \
+    xfonts-cyrillic \
+    libxt6 libxmu6 libxaw7 libxtst6 \
+    # GTK4 app support
+    libgtk-4-1 gnome-text-editor \
+    # Qt6 app support
+    qt6-base-dev libqt6widgets6 \
+    # LibreOffice (writer only, keeps image smaller)
+    libreoffice-writer-nogui \
+    # Fontconfig for TrueType/OpenType font discovery
+    fontconfig \
+    # Python3 for test scripts and protocol fuzzing
+    python3 python3-xlib \
+    # SDL2 for game/multimedia testing
+    libsdl2-2.0-0 \
+    # Qt5 terminal for e2e Qt5 tests
+    qterminal \
+    # Tcl/Tk for e2e wish tests
+    tk \
+    # dbusmenu runtime library for test helper
+    libdbusmenu-glib4 \
+    # GLX testing
+    glmark2 \
+    # X11 protocol testing
+    xdpyinfo \
+    # Additional X11 test utilities
+    xlsfonts \
+    xlsatoms \
     && rm -rf /var/lib/apt/lists/*
+# Copy Xts test suite from builder
+COPY --from=xts-builder /opt/xts /opt/xts
+COPY --from=xts-builder /opt/xts-src /opt/xts-src
+COPY --from=dbusmenu-builder /usr/local/bin/dbusmenu-test /usr/local/bin/dbusmenu-test
 RUN mkdir -p /tmp/.X11-unix
 # Fixed hostname so xterm/vim prompts are deterministic in e2e snapshot tests
 RUN echo "x11web" > /etc/hostname

@@ -38,6 +38,19 @@ export type WindowStateChangeCallback = (
 	color: string,
 ) => void;
 
+export type ClipboardDataCallback = (
+	sidecarId: string,
+	selection: string,
+	mimeType: string,
+	data: string,
+) => void;
+
+export type ClipboardOfferCallback = (
+	sidecarId: string,
+	selection: string,
+	mimeTypes: string[],
+) => void;
+
 /**
  * Per-event diagnostic surfaced from the backend / WebSocket layer.
  * Rendered by `<DiagnosticsPanel>` so the user has *some* visibility
@@ -66,6 +79,8 @@ export function useBackendSocket() {
 	const disposed = useRef(false);
 	const displayCallbackRef = useRef<DisplayUpdateCallback | null>(null);
 	const windowStateCallbackRef = useRef<WindowStateChangeCallback | null>(null);
+	const clipboardDataCallbackRef = useRef<ClipboardDataCallback | null>(null);
+	const clipboardOfferCallbackRef = useRef<ClipboardOfferCallback | null>(null);
 	const [connected, setConnected] = useState(false);
 	const [sidecars, setSidecars] = useState<SidecarInfo[]>([]);
 	const [processes, setProcesses] = useState<Record<string, ProcessInfo[]>>({});
@@ -237,6 +252,21 @@ export function useBackendSocket() {
 							windowId: msg.window_id,
 						});
 						break;
+					case "ClipboardData":
+						clipboardDataCallbackRef.current?.(
+							msg.sidecar_id,
+							msg.selection,
+							msg.mime_type,
+							msg.data,
+						);
+						break;
+					case "ClipboardOffer":
+						clipboardOfferCallbackRef.current?.(
+							msg.sidecar_id,
+							msg.selection,
+							msg.mime_types,
+						);
+						break;
 				}
 			};
 		}
@@ -277,6 +307,20 @@ export function useBackendSocket() {
 		[],
 	);
 
+	const onClipboardData = useCallback(
+		(cb: ClipboardDataCallback | null) => {
+			clipboardDataCallbackRef.current = cb;
+		},
+		[],
+	);
+
+	const onClipboardOffer = useCallback(
+		(cb: ClipboardOfferCallback | null) => {
+			clipboardOfferCallbackRef.current = cb;
+		},
+		[],
+	);
+
 	return {
 		connected,
 		sidecars,
@@ -286,6 +330,8 @@ export function useBackendSocket() {
 		send,
 		onDisplayUpdate,
 		onWindowStateChange,
+		onClipboardData,
+		onClipboardOffer,
 		diagnostics,
 		dismissDiagnostic,
 		clearDiagnostics,

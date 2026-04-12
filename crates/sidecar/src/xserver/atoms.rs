@@ -111,4 +111,366 @@ pub(crate) const PREDEFINED_ATOMS: &[(&str, u32)] = &[
     ("CAP_HEIGHT", 66),
     ("WM_CLASS", 67),
     ("WM_TRANSIENT_FOR", 68),
+    // ICCCM atoms
+    ("WM_PROTOCOLS", 69),
+    ("WM_DELETE_WINDOW", 70),
+    ("WM_TAKE_FOCUS", 71),
+    ("WM_STATE", 72),
+    ("WM_CHANGE_STATE", 73),
+    ("WM_COLORMAP_WINDOWS", 74),
+    // EWMH atoms
+    ("_NET_SUPPORTED", 75),
+    ("_NET_SUPPORTING_WM_CHECK", 76),
+    ("_NET_WM_NAME", 77),
+    ("_NET_WM_ICON_NAME", 78),
+    ("_NET_WM_WINDOW_TYPE", 79),
+    ("_NET_WM_WINDOW_TYPE_NORMAL", 80),
+    ("_NET_WM_WINDOW_TYPE_DIALOG", 81),
+    ("_NET_WM_WINDOW_TYPE_TOOLBAR", 82),
+    ("_NET_WM_WINDOW_TYPE_MENU", 83),
+    ("_NET_WM_WINDOW_TYPE_UTILITY", 84),
+    ("_NET_WM_WINDOW_TYPE_SPLASH", 85),
+    ("_NET_WM_WINDOW_TYPE_DOCK", 86),
+    ("_NET_WM_WINDOW_TYPE_DESKTOP", 87),
+    ("_NET_WM_WINDOW_TYPE_DROPDOWN_MENU", 88),
+    ("_NET_WM_WINDOW_TYPE_POPUP_MENU", 89),
+    ("_NET_WM_WINDOW_TYPE_TOOLTIP", 90),
+    ("_NET_WM_WINDOW_TYPE_NOTIFICATION", 91),
+    ("_NET_WM_STATE", 92),
+    ("_NET_WM_STATE_MODAL", 93),
+    ("_NET_WM_STATE_STICKY", 94),
+    ("_NET_WM_STATE_MAXIMIZED_VERT", 95),
+    ("_NET_WM_STATE_MAXIMIZED_HORZ", 96),
+    ("_NET_WM_STATE_SHADED", 97),
+    ("_NET_WM_STATE_SKIP_TASKBAR", 98),
+    ("_NET_WM_STATE_SKIP_PAGER", 99),
+    ("_NET_WM_STATE_HIDDEN", 100),
+    ("_NET_WM_STATE_FULLSCREEN", 101),
+    ("_NET_WM_STATE_ABOVE", 102),
+    ("_NET_WM_STATE_BELOW", 103),
+    ("_NET_WM_STATE_DEMANDS_ATTENTION", 104),
+    ("_NET_WM_STATE_FOCUSED", 105),
+    ("_NET_WM_ALLOWED_ACTIONS", 106),
+    ("_NET_WM_ACTION_MOVE", 107),
+    ("_NET_WM_ACTION_RESIZE", 108),
+    ("_NET_WM_ACTION_MINIMIZE", 109),
+    ("_NET_WM_ACTION_SHADE", 110),
+    ("_NET_WM_ACTION_STICK", 111),
+    ("_NET_WM_ACTION_MAXIMIZE_HORZ", 112),
+    ("_NET_WM_ACTION_MAXIMIZE_VERT", 113),
+    ("_NET_WM_ACTION_FULLSCREEN", 114),
+    ("_NET_WM_ACTION_CHANGE_DESKTOP", 115),
+    ("_NET_WM_ACTION_CLOSE", 116),
+    ("_NET_ACTIVE_WINDOW", 117),
+    ("_NET_CLIENT_LIST", 118),
+    ("_NET_CLIENT_LIST_STACKING", 119),
+    ("_NET_NUMBER_OF_DESKTOPS", 120),
+    ("_NET_CURRENT_DESKTOP", 121),
+    ("_NET_DESKTOP_NAMES", 122),
+    ("_NET_WORKAREA", 123),
+    ("_NET_DESKTOP_GEOMETRY", 124),
+    ("_NET_DESKTOP_VIEWPORT", 125),
+    ("_NET_FRAME_EXTENTS", 126),
+    ("_NET_WM_PID", 127),
+    ("_NET_WM_USER_TIME", 128),
+    ("_NET_WM_STRUT", 129),
+    ("_NET_WM_STRUT_PARTIAL", 130),
+    ("_NET_WM_ICON", 131),
+    ("_NET_WM_VISIBLE_NAME", 132),
+    ("UTF8_STRING", 133),
+    ("CLIPBOARD", 134),
+    ("TARGETS", 135),
+    ("MULTIPLE", 136),
+    ("TIMESTAMP", 137),
+    ("INCR", 138),
+    ("_NET_WM_PING", 139),
+    ("_NET_WM_SYNC_REQUEST", 140),
+    ("_MOTIF_WM_HINTS", 141),
+    // XDND (X Drag and Drop) atoms
+    ("XdndAware", 142),
+    ("XdndSelection", 143),
+    ("XdndEnter", 144),
+    ("XdndLeave", 145),
+    ("XdndPosition", 146),
+    ("XdndDrop", 147),
+    ("XdndFinished", 148),
+    ("XdndStatus", 149),
+    ("XdndActionCopy", 150),
+    ("XdndActionMove", 151),
+    ("XdndActionLink", 152),
+    ("XdndActionAsk", 153),
+    ("XdndActionPrivate", 154),
+    ("XdndTypeList", 155),
+    ("XdndProxy", 156),
+    // XIM (X Input Method) protocol atoms
+    ("_XIM_PROTOCOL", 157),
+    ("_XIM_XCONNECT", 158),
+    ("XIM_SERVERS", 159),
+    ("LOCALES", 160),
+    ("TRANSPORT", 161),
+    ("_XIM_MOREDATA", 162),
+    // XSETTINGS (toolkit configuration)
+    ("_XSETTINGS_SETTINGS", 163),
+    ("_XSETTINGS_S0", 164),
+    ("MANAGER", 165),
+    // Additional ICCCM/EWMH atoms for broader app compatibility
+    ("_NET_WM_WINDOW_OPACITY", 166),
+    ("_NET_WM_MOVERESIZE", 167),
+    ("_NET_REQUEST_FRAME_EXTENTS", 168),
+    ("_NET_WM_FULL_PLACEMENT", 169),
+    ("_NET_STARTUP_ID", 170),
+    ("_NET_WM_DESKTOP", 171),
+    ("_NET_CLOSE_WINDOW", 172),
+    ("_NET_MOVERESIZE_WINDOW", 173),
+    ("_NET_RESTACK_WINDOW", 174),
+    ("_NET_WM_FULLSCREEN_MONITORS", 175),
+    ("_NET_WM_CM_S0", 176),
+    ("_XEMBED", 177),
+    ("_XEMBED_INFO", 178),
+    // Clipboard manager atoms
+    ("CLIPBOARD_MANAGER", 179),
+    ("SAVE_TARGETS", 180),
+    // Type atoms used by properties
+    ("COMPOUND_TEXT", 181),
+    ("TEXT", 182),
+    ("text/plain", 183),
+    ("text/plain;charset=utf-8", 184),
+    // Compose/dead key support
+    ("_XKB_RULES_NAMES", 185),
 ];
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // -----------------------------------------------------------------------
+    // Basic intern / lookup
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn intern_new_atom_returns_nonzero_id() {
+        let mut mgr = AtomManager::new();
+        let id = mgr.intern("MY_CUSTOM_ATOM", false);
+        assert_ne!(id, 0, "intern of a new atom must return a non-zero ID");
+    }
+
+    #[test]
+    fn intern_same_name_returns_same_id() {
+        let mut mgr = AtomManager::new();
+        let id1 = mgr.intern("DUPLICATE_NAME", false);
+        let id2 = mgr.intern("DUPLICATE_NAME", false);
+        assert_eq!(id1, id2, "interning the same name twice must return the same ID");
+    }
+
+    #[test]
+    fn intern_different_names_return_different_ids() {
+        let mut mgr = AtomManager::new();
+        let id1 = mgr.intern("FIRST_ATOM", false);
+        let id2 = mgr.intern("SECOND_ATOM", false);
+        assert_ne!(id1, id2, "distinct names must get distinct IDs");
+    }
+
+    #[test]
+    fn intern_incrementing_ids() {
+        let mut mgr = AtomManager::new();
+        // The pre-defined atoms go up to 185, so new IDs start at 186
+        let id1 = mgr.intern("NEW_A", false);
+        let id2 = mgr.intern("NEW_B", false);
+        let id3 = mgr.intern("NEW_C", false);
+        // IDs must be strictly increasing
+        assert!(id1 < id2, "IDs must be monotonically increasing");
+        assert!(id2 < id3, "IDs must be monotonically increasing");
+    }
+
+    #[test]
+    fn get_name_returns_correct_name() {
+        let mut mgr = AtomManager::new();
+        let id = mgr.intern("HELLO_WORLD", false);
+        assert_eq!(mgr.get_name(id), Some("HELLO_WORLD"));
+    }
+
+    #[test]
+    fn get_name_unknown_id_returns_none() {
+        let mgr = AtomManager::new();
+        // 0 is never a valid atom ID in X11
+        assert_eq!(mgr.get_name(0), None);
+        // A very large ID that was never interned
+        assert_eq!(mgr.get_name(999_999), None);
+    }
+
+    // -----------------------------------------------------------------------
+    // only_if_exists flag
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn intern_only_if_exists_returns_zero_for_missing_atom() {
+        let mut mgr = AtomManager::new();
+        let id = mgr.intern("NONEXISTENT_ATOM", true);
+        assert_eq!(id, 0, "only_if_exists=true must return 0 when atom does not exist");
+    }
+
+    #[test]
+    fn intern_only_if_exists_returns_id_for_existing_atom() {
+        let mut mgr = AtomManager::new();
+        let created = mgr.intern("PREEXISTING", false);
+        let found = mgr.intern("PREEXISTING", true);
+        assert_eq!(created, found, "only_if_exists=true must return the existing ID");
+    }
+
+    // -----------------------------------------------------------------------
+    // Pre-registered standard atoms
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn primary_atom_has_id_1() {
+        let mgr = AtomManager::new();
+        assert_eq!(mgr.get_name(1), Some("PRIMARY"));
+    }
+
+    #[test]
+    fn secondary_atom_has_id_2() {
+        let mgr = AtomManager::new();
+        assert_eq!(mgr.get_name(2), Some("SECONDARY"));
+    }
+
+    #[test]
+    fn atom_atom_has_id_4() {
+        let mgr = AtomManager::new();
+        assert_eq!(mgr.get_name(4), Some("ATOM"));
+    }
+
+    #[test]
+    fn string_atom_has_id_31() {
+        let mgr = AtomManager::new();
+        assert_eq!(mgr.get_name(31), Some("STRING"));
+    }
+
+    #[test]
+    fn wm_name_atom_has_id_39() {
+        let mgr = AtomManager::new();
+        assert_eq!(mgr.get_name(39), Some("WM_NAME"));
+    }
+
+    #[test]
+    fn wm_class_atom_has_id_67() {
+        let mgr = AtomManager::new();
+        assert_eq!(mgr.get_name(67), Some("WM_CLASS"));
+    }
+
+    #[test]
+    fn wm_protocols_atom_has_id_69() {
+        let mgr = AtomManager::new();
+        assert_eq!(mgr.get_name(69), Some("WM_PROTOCOLS"));
+    }
+
+    #[test]
+    fn wm_delete_window_atom_has_id_70() {
+        let mgr = AtomManager::new();
+        assert_eq!(mgr.get_name(70), Some("WM_DELETE_WINDOW"));
+    }
+
+    #[test]
+    fn utf8_string_atom_has_id_133() {
+        let mgr = AtomManager::new();
+        assert_eq!(mgr.get_name(133), Some("UTF8_STRING"));
+    }
+
+    #[test]
+    fn clipboard_atom_has_id_134() {
+        let mgr = AtomManager::new();
+        assert_eq!(mgr.get_name(134), Some("CLIPBOARD"));
+    }
+
+    #[test]
+    fn net_wm_name_atom_has_id_77() {
+        let mgr = AtomManager::new();
+        assert_eq!(mgr.get_name(77), Some("_NET_WM_NAME"));
+    }
+
+    #[test]
+    fn intern_predefined_atom_returns_correct_id() {
+        let mut mgr = AtomManager::new();
+        // Interning a predefined atom must return its fixed ID, not a new one
+        assert_eq!(mgr.intern("PRIMARY", false), 1);
+        assert_eq!(mgr.intern("STRING", false), 31);
+        assert_eq!(mgr.intern("WM_NAME", false), 39);
+        assert_eq!(mgr.intern("UTF8_STRING", false), 133);
+    }
+
+    // -----------------------------------------------------------------------
+    // Case sensitivity
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn atom_names_are_case_sensitive() {
+        let mut mgr = AtomManager::new();
+        let upper = mgr.intern("MYATOM", false);
+        let lower = mgr.intern("myatom", false);
+        let mixed = mgr.intern("MyAtom", false);
+        // All three must be distinct atoms
+        assert_ne!(upper, lower, "atom names must be case-sensitive: MYATOM vs myatom");
+        assert_ne!(upper, mixed, "atom names must be case-sensitive: MYATOM vs MyAtom");
+        assert_ne!(lower, mixed, "atom names must be case-sensitive: myatom vs MyAtom");
+    }
+
+    #[test]
+    fn predefined_atom_lookup_is_case_sensitive() {
+        let mut mgr = AtomManager::new();
+        // "string" (lowercase) is NOT the same as predefined "STRING"
+        let lowercase_id = mgr.intern("string", false);
+        let uppercase_id = mgr.intern("STRING", false);
+        assert_ne!(lowercase_id, uppercase_id, "'string' and 'STRING' must be different atoms");
+        assert_eq!(uppercase_id, 31, "predefined 'STRING' must still have ID 31");
+    }
+
+    // -----------------------------------------------------------------------
+    // All predefined atoms are registered correctly
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn all_predefined_atoms_are_retrievable() {
+        let mgr = AtomManager::new();
+        for &(name, id) in PREDEFINED_ATOMS {
+            assert_eq!(
+                mgr.get_name(id),
+                Some(name),
+                "predefined atom '{name}' (ID {id}) not retrievable by ID"
+            );
+        }
+    }
+
+    #[test]
+    fn all_predefined_atoms_are_interneable() {
+        let mut mgr = AtomManager::new();
+        for &(name, expected_id) in PREDEFINED_ATOMS {
+            assert_eq!(
+                mgr.intern(name, false),
+                expected_id,
+                "interning predefined atom '{name}' must return ID {expected_id}"
+            );
+        }
+    }
+
+    #[test]
+    fn predefined_atoms_have_unique_ids() {
+        let mut seen_ids = std::collections::HashSet::new();
+        let mut seen_names = std::collections::HashSet::new();
+        for &(name, id) in PREDEFINED_ATOMS {
+            assert!(seen_ids.insert(id), "predefined atom ID {id} ('{name}') is duplicated");
+            assert!(seen_names.insert(name), "predefined atom name '{name}' is duplicated");
+        }
+    }
+
+    #[test]
+    fn new_atoms_do_not_collide_with_predefined() {
+        let mut mgr = AtomManager::new();
+        let custom_id = mgr.intern("Z_BRAND_NEW_ATOM", false);
+        // Must not coincide with any predefined atom ID
+        let predefined_ids: std::collections::HashSet<u32> =
+            PREDEFINED_ATOMS.iter().map(|&(_, id)| id).collect();
+        assert!(
+            !predefined_ids.contains(&custom_id),
+            "new atom ID {custom_id} collides with a predefined atom"
+        );
+    }
+}

@@ -7,10 +7,47 @@
 //! When a grab is active, events are redirected to the grabbing client
 //! and other clients don't see them.
 
+use std::collections::HashMap;
 use tracing::{debug, info};
-
+use super::core::{read_u16_bo, read_u32_bo, ENTER_NOTIFY_EVENT, LEAVE_NOTIFY_EVENT, BAD_CURSOR, BAD_LENGTH, BAD_WINDOW};
 use super::client::ClientState;
 use super::core::build_error;
+use super::types::WindowState;
+use super::{build_single_crossing_event, CROSSING_MODE_GRAB, CROSSING_MODE_UNGRAB};
+
+/// Generate crossing events for a grab activation.
+/// Sends LeaveNotify(mode=Grab) to the current pointer window and
+/// EnterNotify(mode=Grab) to the grab window.
+fn emit_grab_crossing_events(state: &mut ClientState, grab_window: u32) {
+    let current_window = state.last_entered_window;
+    if current_window == grab_window {
+        return;
+    }
+    if let Some(leave) = build_single_crossing_event(state, LEAVE_NOTIFY_EVENT, current_window, CROSSING_MODE_GRAB) {
+        state.pending_events.push(leave.to_vec());
+    }
+    if let Some(enter) = build_single_crossing_event(state, ENTER_NOTIFY_EVENT, grab_window, CROSSING_MODE_GRAB) {
+        state.pending_events.push(enter.to_vec());
+    }
+    state.last_entered_window = grab_window;
+}
+
+/// Generate crossing events for a grab deactivation.
+/// Sends LeaveNotify(mode=Ungrab) from the grab window and
+/// EnterNotify(mode=Ungrab) to the root window (next MotionNotify will correct).
+fn emit_ungrab_crossing_events(state: &mut ClientState, grab_window: u32) {
+    let dest_window = state.root_window;
+    if grab_window == dest_window {
+        return;
+    }
+    if let Some(leave) = build_single_crossing_event(state, LEAVE_NOTIFY_EVENT, grab_window, CROSSING_MODE_UNGRAB) {
+        state.pending_events.push(leave.to_vec());
+    }
+    if let Some(enter) = build_single_crossing_event(state, ENTER_NOTIFY_EVENT, dest_window, CROSSING_MODE_UNGRAB) {
+        state.pending_events.push(enter.to_vec());
+    }
+    state.last_entered_window = dest_window;
+}
 
 /// State for all grab operations on a connection.
 #[derive(Default)]
@@ -25,6 +62,18 @@ pub(crate) struct GrabState {
     pub(crate) key_grabs: Vec<PassiveKeyGrab>,
     /// Server grab count (GrabServer/UngrabServer).
     pub(crate) server_grab_count: u32,
+    /// Whether pointer events are frozen (Synchronous mode grab).
+    pub(crate) pointer_frozen: bool,
+    /// Whether keyboard events are frozen (Synchronous mode grab).
+    pub(crate) keyboard_frozen: bool,
+    /// Re-freeze pointer after delivering one event (SyncPointer / SyncBoth mode).
+    pub(crate) pointer_sync_pending: bool,
+    /// Re-freeze keyboard after delivering one event (SyncKeyboard / SyncBoth mode).
+    pub(crate) keyboard_sync_pending: bool,
+    /// Frozen pointer events, queued until AllowEvents thaws them.
+    pub(crate) frozen_pointer_events: Vec<Vec<u8>>,
+    /// Frozen keyboard events, queued until AllowEvents thaws them.
+    pub(crate) frozen_keyboard_events: Vec<Vec<u8>>,
 }
 
 #[derive(Clone)]
@@ -36,6 +85,45 @@ pub(crate) struct ActivePointerGrab {
     pub(crate) confine_to: u32,
     pub(crate) cursor: u32,
     pub(crate) owner_events: bool,
+    /// Absolute screen bounds for confine_to window (x, y, x+width, y+height).
+    /// None if confine_to is 0 (no confinement).
+    pub(crate) confine_bounds: Option<(i16, i16, i16, i16)>,
+}
+
+/// Check if a window is viewable: it must be mapped and all ancestors up to root
+/// must also be mapped (per X11 spec, a window is viewable iff it and all of its
+/// ancestors are mapped).
+fn is_viewable(windows: &HashMap<u32, WindowState>, wid: u32, root: u32) -> bool {
+    let mut cur = wid;
+    for _ in 0..128 {
+        if cur == root { return true; }
+        match windows.get(&cur) {
+            Some(w) if w.mapped => cur = w.parent,
+            _ => return false,
+        }
+    }
+    false
+}
+
+/// Compute absolute screen-space bounds for a window by walking up to root.
+fn window_abs_bounds(windows: &HashMap<u32, WindowState>, wid: u32, root: u32) -> Option<(i16, i16, i16, i16)> {
+    let w = windows.get(&wid)?;
+    let width = w.width as i16;
+    let height = w.height as i16;
+    let mut abs_x = w.x;
+    let mut abs_y = w.y;
+    let mut cur = w.parent;
+    for _ in 0..128 {
+        if cur == root || cur == 0 { break; }
+        if let Some(p) = windows.get(&cur) {
+            abs_x += p.x;
+            abs_y += p.y;
+            cur = p.parent;
+        } else {
+            break;
+        }
+    }
+    Some((abs_x, abs_y, abs_x.saturating_add(width), abs_y.saturating_add(height)))
 }
 
 #[derive(Clone)]
@@ -70,25 +158,107 @@ pub(crate) struct PassiveKeyGrab {
 }
 
 /// GrabPointer (opcode 26)
+///
+/// Status codes: 0=Success, 1=AlreadyGrabbed, 2=InvalidTime,
+///               3=NotViewable, 4=Frozen
 pub(crate) fn handle_grab_pointer(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
     if data.len() < 24 {
-        return build_error(16, seq, 0, 26, 0); // BadLength
+        return build_error(BAD_LENGTH, seq, 0, 26, 0);
     }
 
     let owner_events = data[1] != 0;
-    let grab_window = u32::from_le_bytes([data[4], data[5], data[6], data[7]]);
-    let event_mask = u16::from_le_bytes([data[8], data[9]]) as u32;
+    let grab_window = state.read_u32(data, 4);
+    let event_mask = state.read_u16(data, 8) as u32;
     let pointer_mode = data[10];
     let keyboard_mode = data[11];
-    let confine_to = u32::from_le_bytes([data[12], data[13], data[14], data[15]]);
-    let cursor = u32::from_le_bytes([data[16], data[17], data[18], data[19]]);
+    let confine_to = state.read_u32(data, 12);
+    let cursor = state.read_u32(data, 16);
+    let timestamp = state.read_u32(data, 20); // 0 = CurrentTime
 
     // Validate grab_window exists
     if !state.windows.contains_key(&grab_window) && grab_window != state.root_window {
-        return build_error(3, seq, grab_window, 26, 0); // BadWindow
+        return build_error(BAD_WINDOW, seq, grab_window, 26, 0);
+    }
+
+    // Validate cursor ID if specified (0 = None)
+    if cursor != 0 && !state.cursors.contains_key(&cursor) {
+        return build_error(BAD_CURSOR, seq, cursor, 26, 0);
     }
 
     info!("GrabPointer: window={grab_window:#x} owner_events={owner_events} event_mask={event_mask:#x}");
+
+    // Status 1: AlreadyGrabbed — another client already holds an active pointer grab.
+    // In our single-client-per-connection model we check our own grab state; a grab
+    // held by *this* client is replaced (per spec), but if the pointer is frozen by
+    // another grab we report Frozen instead.
+    if state.grabs.pointer_grab.is_some() {
+        // Per X11 spec, an active grab by the *same* client is replaced — only
+        // report AlreadyGrabbed if a *different* client holds it.  Since each
+        // ClientState is per-connection, the grab here always belongs to us, so
+        // we allow replacement.  (Cross-client grabs would be checked via shared
+        // state in a multi-client server.)
+    }
+
+    // Status 4: Frozen — if the pointer is frozen by an active synchronous grab
+    // from a different client, we should return Frozen.  In our per-connection
+    // model we approximate this: if the pointer is already frozen and we don't
+    // own the grab, report Frozen.
+    if state.grabs.pointer_frozen && state.grabs.pointer_grab.is_none() {
+        let mut reply = [0u8; 32];
+        reply[0] = 1;
+        reply[1] = 4; // Frozen
+        state.write_u16(&mut reply, 2, seq);
+        return reply.to_vec();
+    }
+
+    // Status 3: NotViewable — grab_window must be viewable (mapped + all ancestors mapped).
+    // The root window is always viewable.
+    if grab_window != state.root_window
+        && !is_viewable(&state.windows, grab_window, state.root_window)
+    {
+        let mut reply = [0u8; 32];
+        reply[0] = 1;
+        reply[1] = 3; // NotViewable
+        state.write_u16(&mut reply, 2, seq);
+        return reply.to_vec();
+    }
+
+    // Status 2: InvalidTime — if a non-zero timestamp is earlier than the
+    // current server time, the grab is rejected.
+    if timestamp != 0 {
+        let now = state.timestamp();
+        // Treat the timestamp as invalid if it is more than 0 but appears to be
+        // in the past (simple unsigned comparison; wraparound after ~49 days is
+        // unlikely in practice).
+        let delta = now.wrapping_sub(timestamp);
+        if delta > 0 && delta < 0x8000_0000 {
+            // timestamp is in the past
+        } else if timestamp != now {
+            // timestamp is in the future — also invalid per spec
+            let mut reply = [0u8; 32];
+            reply[0] = 1;
+            reply[1] = 2; // InvalidTime
+            state.write_u16(&mut reply, 2, seq);
+            return reply.to_vec();
+        }
+    }
+
+    // Synchronous mode (1) freezes the device
+    state.grabs.pointer_frozen = pointer_mode == 1;
+    if keyboard_mode == 1 {
+        state.grabs.keyboard_frozen = true;
+    }
+
+    // Compute confine bounds if confine_to is specified
+    let confine_bounds = if confine_to != 0 {
+        if confine_to == state.root_window {
+            Some((0, 0, state.screen_width as i16, state.screen_height as i16))
+        } else {
+            window_abs_bounds(&state.windows, confine_to, state.root_window)
+        }
+    } else {
+        None
+    };
 
     state.grabs.pointer_grab = Some(ActivePointerGrab {
         grab_window,
@@ -98,20 +268,31 @@ pub(crate) fn handle_grab_pointer(state: &mut ClientState, data: &[u8], seq: u16
         confine_to,
         cursor,
         owner_events,
+        confine_bounds,
     });
+
+    // Generate crossing events: Leave(Grab) from current window, Enter(Grab) to grab window
+    emit_grab_crossing_events(state, grab_window);
 
     // Reply: GrabSuccess
     let mut reply = [0u8; 32];
     reply[0] = 1; // Reply
     reply[1] = 0; // GrabSuccess
-    reply[2..4].copy_from_slice(&seq.to_le_bytes());
+    state.write_u16(&mut reply, 2, seq);
     reply.to_vec()
 }
 
 /// UngrabPointer (opcode 27)
 pub(crate) fn handle_ungrab_pointer(state: &mut ClientState, _data: &[u8]) -> Vec<u8> {
-    if state.grabs.pointer_grab.is_some() {
+    if let Some(ref grab) = state.grabs.pointer_grab {
+        let grab_window = grab.grab_window;
         debug!("UngrabPointer: releasing active pointer grab");
+        // Generate crossing events: Leave(Ungrab) from grab window, Enter(Ungrab) to pointer window
+        emit_ungrab_crossing_events(state, grab_window);
+        // Thaw frozen pointer events
+        state.grabs.pointer_frozen = false;
+        let events = std::mem::take(&mut state.grabs.frozen_pointer_events);
+        for e in events { state.pending_events.push(e); }
         state.grabs.pointer_grab = None;
     }
     Vec::new()
@@ -124,14 +305,14 @@ pub(crate) fn handle_grab_button(state: &mut ClientState, data: &[u8]) -> Vec<u8
     }
 
     let owner_events = data[1] != 0;
-    let grab_window = u32::from_le_bytes([data[4], data[5], data[6], data[7]]);
-    let event_mask = u16::from_le_bytes([data[8], data[9]]) as u32;
+    let grab_window = state.read_u32(data, 4);
+    let event_mask = state.read_u16(data, 8) as u32;
     let pointer_mode = data[10];
     let keyboard_mode = data[11];
-    let confine_to = u32::from_le_bytes([data[12], data[13], data[14], data[15]]);
-    let cursor = u32::from_le_bytes([data[16], data[17], data[18], data[19]]);
+    let confine_to = state.read_u32(data, 12);
+    let cursor = state.read_u32(data, 16);
     let button = data[20];
-    let modifiers = u16::from_le_bytes([data[22], data[23]]);
+    let modifiers = state.read_u16(data, 22);
 
     debug!("GrabButton: window={grab_window:#x} button={button} modifiers={modifiers:#x}");
 
@@ -140,7 +321,9 @@ pub(crate) fn handle_grab_button(state: &mut ClientState, data: &[u8]) -> Vec<u8
         !(g.grab_window == grab_window && g.button == button && g.modifiers == modifiers)
     });
 
-    state.grabs.button_grabs.push(PassiveButtonGrab {
+    // Insert at front for LIFO ordering: per X11 spec, the most recently
+    // established passive grab wins when multiple grabs match.
+    state.grabs.button_grabs.insert(0, PassiveButtonGrab {
         grab_window,
         button,
         modifiers,
@@ -162,8 +345,8 @@ pub(crate) fn handle_ungrab_button(state: &mut ClientState, data: &[u8]) -> Vec<
     }
 
     let button = data[1];
-    let grab_window = u32::from_le_bytes([data[4], data[5], data[6], data[7]]);
-    let modifiers = u16::from_le_bytes([data[8], data[9]]);
+    let grab_window = state.read_u32(data, 4);
+    let modifiers = state.read_u16(data, 8);
 
     debug!("UngrabButton: window={grab_window:#x} button={button} modifiers={modifiers:#x}");
 
@@ -185,9 +368,10 @@ pub(crate) fn handle_change_active_pointer_grab(state: &mut ClientState, data: &
         return Vec::new();
     }
 
+    let bo = state.msb_first;
     if let Some(ref mut grab) = state.grabs.pointer_grab {
-        let cursor = u32::from_le_bytes([data[4], data[5], data[6], data[7]]);
-        let event_mask = u16::from_le_bytes([data[12], data[13]]) as u32;
+        let cursor = read_u32_bo(data, 4, bo);
+        let event_mask = read_u16_bo(data, 12, bo) as u32;
         grab.cursor = cursor;
         grab.event_mask = event_mask;
         debug!("ChangeActivePointerGrab: cursor={cursor:#x} event_mask={event_mask:#x}");
@@ -197,21 +381,66 @@ pub(crate) fn handle_change_active_pointer_grab(state: &mut ClientState, data: &
 }
 
 /// GrabKeyboard (opcode 31)
+///
+/// Status codes: 0=Success, 1=AlreadyGrabbed, 2=InvalidTime,
+///               3=NotViewable, 4=Frozen
 pub(crate) fn handle_grab_keyboard(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
     if data.len() < 16 {
-        return build_error(16, seq, 0, 31, 0);
+        return build_error(BAD_LENGTH, seq, 0, 31, 0);
     }
 
     let owner_events = data[1] != 0;
-    let grab_window = u32::from_le_bytes([data[4], data[5], data[6], data[7]]);
+    let grab_window = state.read_u32(data, 4);
+    let timestamp = state.read_u32(data, 8); // 0 = CurrentTime
     let pointer_mode = data[12];
     let keyboard_mode = data[13];
 
     if !state.windows.contains_key(&grab_window) && grab_window != state.root_window {
-        return build_error(3, seq, grab_window, 31, 0);
+        return build_error(BAD_WINDOW, seq, grab_window, 31, 0);
     }
 
     info!("GrabKeyboard: window={grab_window:#x} owner_events={owner_events}");
+
+    // Status 4: Frozen -- keyboard is frozen by another grab we don't own
+    if state.grabs.keyboard_frozen && state.grabs.keyboard_grab.is_none() {
+        let mut reply = [0u8; 32];
+        reply[0] = 1;
+        reply[1] = 4; // Frozen
+        state.write_u16(&mut reply, 2, seq);
+        return reply.to_vec();
+    }
+
+    // Status 3: NotViewable -- grab_window must be viewable
+    if grab_window != state.root_window
+        && !is_viewable(&state.windows, grab_window, state.root_window)
+    {
+        let mut reply = [0u8; 32];
+        reply[0] = 1;
+        reply[1] = 3; // NotViewable
+        state.write_u16(&mut reply, 2, seq);
+        return reply.to_vec();
+    }
+
+    // Status 2: InvalidTime -- reject if timestamp is in the future
+    if timestamp != 0 {
+        let now = state.timestamp();
+        let delta = now.wrapping_sub(timestamp);
+        if delta > 0 && delta < 0x8000_0000 {
+            // timestamp is in the past -- OK
+        } else if timestamp != now {
+            let mut reply = [0u8; 32];
+            reply[0] = 1;
+            reply[1] = 2; // InvalidTime
+            state.write_u16(&mut reply, 2, seq);
+            return reply.to_vec();
+        }
+    }
+
+    // Synchronous mode (1) freezes the device
+    state.grabs.keyboard_frozen = keyboard_mode == 1;
+    if pointer_mode == 1 {
+        state.grabs.pointer_frozen = true;
+    }
 
     state.grabs.keyboard_grab = Some(ActiveKeyboardGrab {
         grab_window,
@@ -220,17 +449,27 @@ pub(crate) fn handle_grab_keyboard(state: &mut ClientState, data: &[u8], seq: u1
         owner_events,
     });
 
+    // Generate crossing events: Leave(Grab) from current window, Enter(Grab) to grab window
+    emit_grab_crossing_events(state, grab_window);
+
     let mut reply = [0u8; 32];
     reply[0] = 1;
     reply[1] = 0; // GrabSuccess
-    reply[2..4].copy_from_slice(&seq.to_le_bytes());
+    state.write_u16(&mut reply, 2, seq);
     reply.to_vec()
 }
 
 /// UngrabKeyboard (opcode 32)
 pub(crate) fn handle_ungrab_keyboard(state: &mut ClientState, _data: &[u8]) -> Vec<u8> {
-    if state.grabs.keyboard_grab.is_some() {
+    if let Some(ref grab) = state.grabs.keyboard_grab {
+        let grab_window = grab.grab_window;
         debug!("UngrabKeyboard: releasing active keyboard grab");
+        // Generate crossing events: Leave(Ungrab) from grab window, Enter(Ungrab) to pointer window
+        emit_ungrab_crossing_events(state, grab_window);
+        // Thaw frozen keyboard events
+        state.grabs.keyboard_frozen = false;
+        let events = std::mem::take(&mut state.grabs.frozen_keyboard_events);
+        for e in events { state.pending_events.push(e); }
         state.grabs.keyboard_grab = None;
     }
     Vec::new()
@@ -243,8 +482,8 @@ pub(crate) fn handle_grab_key(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
     }
 
     let owner_events = data[1] != 0;
-    let grab_window = u32::from_le_bytes([data[4], data[5], data[6], data[7]]);
-    let modifiers = u16::from_le_bytes([data[8], data[9]]);
+    let grab_window = state.read_u32(data, 4);
+    let modifiers = state.read_u16(data, 8);
     let key = data[10];
     let pointer_mode = data[11];
     let keyboard_mode = data[12];
@@ -256,7 +495,9 @@ pub(crate) fn handle_grab_key(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
         !(g.grab_window == grab_window && g.key == key && g.modifiers == modifiers)
     });
 
-    state.grabs.key_grabs.push(PassiveKeyGrab {
+    // Insert at front for LIFO ordering: per X11 spec, the most recently
+    // established passive grab wins when multiple grabs match.
+    state.grabs.key_grabs.insert(0, PassiveKeyGrab {
         grab_window,
         key,
         modifiers,
@@ -275,8 +516,8 @@ pub(crate) fn handle_ungrab_key(state: &mut ClientState, data: &[u8]) -> Vec<u8>
     }
 
     let key = data[1];
-    let grab_window = u32::from_le_bytes([data[4], data[5], data[6], data[7]]);
-    let modifiers = u16::from_le_bytes([data[8], data[9]]);
+    let grab_window = state.read_u32(data, 4);
+    let modifiers = state.read_u16(data, 8);
 
     debug!("UngrabKey: window={grab_window:#x} key={key} modifiers={modifiers:#x}");
 
@@ -292,19 +533,221 @@ pub(crate) fn handle_ungrab_key(state: &mut ClientState, data: &[u8]) -> Vec<u8>
 }
 
 /// AllowEvents (opcode 35)
-pub(crate) fn handle_allow_events(_state: &mut ClientState, data: &[u8]) -> Vec<u8> {
-    if data.len() >= 8 {
-        let mode = data[1];
-        debug!("AllowEvents: mode={mode}");
+///
+/// Modes: 0=AsyncPointer, 1=SyncPointer, 2=ReplayPointer,
+///        3=AsyncKeyboard, 4=SyncKeyboard, 5=ReplayKeyboard,
+///        6=AsyncBoth, 7=SyncBoth
+pub(crate) fn handle_allow_events(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
+    if data.len() < 4 {
+        return Vec::new();
     }
-    // In our implementation, events are never frozen, so this is a no-op.
+    let mode = data[1];
+    debug!("AllowEvents: mode={mode}");
+
+    match mode {
+        0 => {
+            // AsyncPointer: thaw pointer, deliver frozen events, no re-freeze
+            state.grabs.pointer_frozen = false;
+            state.grabs.pointer_sync_pending = false;
+            let events = std::mem::take(&mut state.grabs.frozen_pointer_events);
+            for e in events {
+                state.pending_events.push(e);
+            }
+        }
+        1 => {
+            // SyncPointer: thaw pointer, deliver frozen events, re-freeze on next event
+            state.grabs.pointer_frozen = false;
+            state.grabs.pointer_sync_pending = true;
+            let events = std::mem::take(&mut state.grabs.frozen_pointer_events);
+            for e in events {
+                state.pending_events.push(e);
+            }
+        }
+        2 => {
+            // ReplayPointer: release grab, replay frozen events through normal event delivery
+            if let Some(ref grab) = state.grabs.pointer_grab {
+                let gw = grab.grab_window;
+                emit_ungrab_crossing_events(state, gw);
+            }
+            state.grabs.pointer_frozen = false;
+            state.grabs.pointer_sync_pending = false;
+            let events = std::mem::take(&mut state.grabs.frozen_pointer_events);
+            state.grabs.pointer_grab = None;
+            for e in events {
+                state.pending_events.push(e);
+            }
+        }
+        3 => {
+            // AsyncKeyboard: thaw keyboard, deliver frozen events, no re-freeze
+            state.grabs.keyboard_frozen = false;
+            state.grabs.keyboard_sync_pending = false;
+            let events = std::mem::take(&mut state.grabs.frozen_keyboard_events);
+            for e in events {
+                state.pending_events.push(e);
+            }
+        }
+        4 => {
+            // SyncKeyboard: thaw keyboard, deliver frozen events, re-freeze on next event
+            state.grabs.keyboard_frozen = false;
+            state.grabs.keyboard_sync_pending = true;
+            let events = std::mem::take(&mut state.grabs.frozen_keyboard_events);
+            for e in events {
+                state.pending_events.push(e);
+            }
+        }
+        5 => {
+            // ReplayKeyboard: release grab, replay frozen events through normal event delivery
+            if let Some(ref grab) = state.grabs.keyboard_grab {
+                let gw = grab.grab_window;
+                emit_ungrab_crossing_events(state, gw);
+            }
+            state.grabs.keyboard_frozen = false;
+            state.grabs.keyboard_sync_pending = false;
+            let events = std::mem::take(&mut state.grabs.frozen_keyboard_events);
+            state.grabs.keyboard_grab = None;
+            for e in events {
+                state.pending_events.push(e);
+            }
+        }
+        6 => {
+            // AsyncBoth: thaw both pointer and keyboard, no re-freeze
+            state.grabs.pointer_frozen = false;
+            state.grabs.keyboard_frozen = false;
+            state.grabs.pointer_sync_pending = false;
+            state.grabs.keyboard_sync_pending = false;
+            let pevents = std::mem::take(&mut state.grabs.frozen_pointer_events);
+            let kevents = std::mem::take(&mut state.grabs.frozen_keyboard_events);
+            for e in pevents { state.pending_events.push(e); }
+            for e in kevents { state.pending_events.push(e); }
+        }
+        7 => {
+            // SyncBoth: thaw both, re-freeze on next event of either type
+            state.grabs.pointer_frozen = false;
+            state.grabs.keyboard_frozen = false;
+            state.grabs.pointer_sync_pending = true;
+            state.grabs.keyboard_sync_pending = true;
+            let pevents = std::mem::take(&mut state.grabs.frozen_pointer_events);
+            let kevents = std::mem::take(&mut state.grabs.frozen_keyboard_events);
+            for e in pevents { state.pending_events.push(e); }
+            for e in kevents { state.pending_events.push(e); }
+        }
+        _ => {}
+    }
+
     Vec::new()
 }
 
+/// Check for matching passive button grabs and activate if found.
+/// Returns true if a grab was activated (event should be redirected to grab window).
+pub(crate) fn check_passive_button_grab(state: &mut ClientState, button: u8, modifiers: u16, window: u32) -> bool {
+    // Walk up the window hierarchy to find a matching passive button grab
+    let mut current = window;
+    for _ in 0..128 {
+        let matching = state.grabs.button_grabs.iter().find(|g| {
+            g.grab_window == current
+            && (g.button == 0 || g.button == button)         // AnyButton or exact match
+            && (g.modifiers == 0x8000 || g.modifiers == modifiers) // AnyModifier or exact match
+        }).cloned();
+
+        if let Some(grab) = matching {
+            let gw = grab.grab_window;
+            debug!("Passive button grab activated: window={gw:#x} button={button}");
+            // Compute confine bounds for passive grab activation
+            let confine_bounds = if grab.confine_to != 0 {
+                if grab.confine_to == state.root_window {
+                    Some((0, 0, state.screen_width as i16, state.screen_height as i16))
+                } else {
+                    window_abs_bounds(&state.windows, grab.confine_to, state.root_window)
+                }
+            } else {
+                None
+            };
+            state.grabs.pointer_grab = Some(ActivePointerGrab {
+                grab_window: gw,
+                event_mask: grab.event_mask,
+                pointer_mode: grab.pointer_mode,
+                keyboard_mode: grab.keyboard_mode,
+                confine_to: grab.confine_to,
+                cursor: grab.cursor,
+                owner_events: grab.owner_events,
+                confine_bounds,
+            });
+            // Generate crossing events for passive grab activation
+            emit_grab_crossing_events(state, gw);
+            return true;
+        }
+
+        // Walk up to parent
+        match state.windows.get(&current) {
+            Some(w) if w.parent != 0 && w.parent != current => current = w.parent,
+            _ => break,
+        }
+    }
+    false
+}
+
+/// Check for matching passive key grabs and activate if found.
+/// Returns true if a grab was activated.
+pub(crate) fn check_passive_key_grab(state: &mut ClientState, keycode: u8, modifiers: u16, window: u32) -> bool {
+    let mut current = window;
+    for _ in 0..128 {
+        let matching = state.grabs.key_grabs.iter().find(|g| {
+            g.grab_window == current
+            && (g.key == 0 || g.key == keycode)              // AnyKey or exact match
+            && (g.modifiers == 0x8000 || g.modifiers == modifiers) // AnyModifier or exact match
+        }).cloned();
+
+        if let Some(grab) = matching {
+            let gw = grab.grab_window;
+            debug!("Passive key grab activated: window={gw:#x} key={keycode}");
+            state.grabs.keyboard_grab = Some(ActiveKeyboardGrab {
+                grab_window: gw,
+                pointer_mode: grab.pointer_mode,
+                keyboard_mode: grab.keyboard_mode,
+                owner_events: grab.owner_events,
+            });
+            // Generate crossing events for passive grab activation
+            emit_grab_crossing_events(state, gw);
+            return true;
+        }
+
+        match state.windows.get(&current) {
+            Some(w) if w.parent != 0 && w.parent != current => current = w.parent,
+            _ => break,
+        }
+    }
+    false
+}
+
+/// Deactivate an active pointer grab on ButtonRelease if all buttons are released.
+pub(crate) fn check_button_release_ungrab(state: &mut ClientState, _button: u8, button_mask: u16) {
+    // If we have an active pointer grab from a passive activation,
+    // release it when all buttons are released (button_mask has no button bits set)
+    if let Some(ref grab) = state.grabs.pointer_grab {
+        // Button bits in state mask: Button1=0x100, Button2=0x200, Button3=0x400, Button4=0x800, Button5=0x1000
+        let any_buttons_held = (button_mask & 0x1F00) != 0;
+        if !any_buttons_held {
+            let grab_window = grab.grab_window;
+            debug!("Auto-ungrab: all buttons released");
+            // Generate crossing events for automatic ungrab
+            emit_ungrab_crossing_events(state, grab_window);
+            state.grabs.pointer_grab = None;
+        }
+    }
+}
+
 /// GrabServer (opcode 36)
+///
+/// Per X11 spec, GrabServer freezes processing of requests from all other
+/// clients until UngrabServer is issued. We record the grab in the shared
+/// ServerGrabLock so the per-client request loops can block.
 pub(crate) fn handle_grab_server(state: &mut ClientState, _data: &[u8]) -> Vec<u8> {
     state.grabs.server_grab_count += 1;
-    debug!("GrabServer: count={}", state.grabs.server_grab_count);
+    let (lock, _notify) = &*state.server_grab;
+    if let Ok(mut holder) = lock.try_lock() {
+        *holder = Some(state.client_id.clone());
+    }
+    debug!("GrabServer: count={} client={}", state.grabs.server_grab_count, state.client_id);
     Vec::new()
 }
 
@@ -313,6 +756,70 @@ pub(crate) fn handle_ungrab_server(state: &mut ClientState, _data: &[u8]) -> Vec
     if state.grabs.server_grab_count > 0 {
         state.grabs.server_grab_count -= 1;
     }
-    debug!("UngrabServer: count={}", state.grabs.server_grab_count);
+    if state.grabs.server_grab_count == 0 {
+        let (lock, notify) = &*state.server_grab;
+        if let Ok(mut holder) = lock.try_lock() {
+            *holder = None;
+        }
+        notify.notify_waiters();
+    }
+    debug!("UngrabServer: count={} client={}", state.grabs.server_grab_count, state.client_id);
     Vec::new()
+}
+
+/// Check if a pointer event should be frozen (Synchronous grab mode).
+/// If pointer_sync_pending is true, re-freeze the pointer after delivering one event.
+/// Returns true if the event should be queued (frozen), false if it should be delivered.
+/// Maximum number of frozen events to queue per device (pointer/keyboard).
+/// Beyond this, oldest events are dropped to prevent unbounded memory growth.
+const MAX_FROZEN_EVENTS: usize = 4096;
+
+pub(crate) fn check_pointer_sync_freeze(state: &mut ClientState, event: &[u8]) -> bool {
+    if state.grabs.pointer_frozen {
+        // Already frozen — queue the event (with bounded capacity)
+        if state.grabs.frozen_pointer_events.len() >= MAX_FROZEN_EVENTS {
+            state.grabs.frozen_pointer_events.remove(0);
+        }
+        state.grabs.frozen_pointer_events.push(event.to_vec());
+        return true;
+    }
+    if state.grabs.pointer_sync_pending {
+        // Deliver this one event, then re-freeze
+        state.grabs.pointer_sync_pending = false;
+        state.grabs.pointer_frozen = true;
+        return false; // deliver this event
+    }
+    false
+}
+
+/// Check if a keyboard event should be frozen (Synchronous grab mode).
+/// Returns true if the event should be queued (frozen), false if it should be delivered.
+pub(crate) fn check_keyboard_sync_freeze(state: &mut ClientState, event: &[u8]) -> bool {
+    if state.grabs.keyboard_frozen {
+        if state.grabs.frozen_keyboard_events.len() >= MAX_FROZEN_EVENTS {
+            state.grabs.frozen_keyboard_events.remove(0);
+        }
+        state.grabs.frozen_keyboard_events.push(event.to_vec());
+        return true;
+    }
+    if state.grabs.keyboard_sync_pending {
+        state.grabs.keyboard_sync_pending = false;
+        state.grabs.keyboard_frozen = true;
+        return false;
+    }
+    false
+}
+
+/// If there is an active pointer grab with confine_to, clamp the given
+/// coordinates to the confine window's bounds. Returns the (possibly clamped)
+/// coordinates.
+pub(crate) fn clamp_to_confine(state: &ClientState, x: i16, y: i16) -> (i16, i16) {
+    if let Some(ref grab) = state.grabs.pointer_grab {
+        if let Some((x1, y1, x2, y2)) = grab.confine_bounds {
+            let cx = x.max(x1).min(x2.saturating_sub(1));
+            let cy = y.max(y1).min(y2.saturating_sub(1));
+            return (cx, cy);
+        }
+    }
+    (x, y)
 }

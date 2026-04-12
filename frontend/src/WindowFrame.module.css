@@ -23,6 +23,44 @@
 		0 0 0 1px rgba(255, 255, 255, 0.1);
 }
 
+.maximized {
+	position: fixed;
+	top: 0;
+	left: 0;
+	right: 0;
+	bottom: 0;
+	border-radius: 0;
+	border: none;
+	padding: 0;
+	z-index: 9999;
+}
+
+.fullscreen {
+	position: fixed;
+	top: 0;
+	left: 0;
+	width: 100vw;
+	height: 100vh;
+	border-radius: 0;
+	border: none;
+	padding: 0;
+	z-index: 10000;
+}
+
+.fullscreen .header {
+	display: none;
+}
+
+.fullscreen .canvas {
+	border-radius: 0;
+	width: 100%;
+	height: 100%;
+}
+
+.fullscreen .resizeHandle {
+	display: none;
+}
+
 
 .header {
 	display: flex;
@@ -51,6 +89,12 @@
 	text-align: center;
 }
 
+.trafficLights {
+	display: flex;
+	gap: 4px;
+	flex-shrink: 0;
+}
+
 .closeButton {
 	width: 14px;
 	height: 14px;
@@ -71,6 +115,52 @@
 
 .closeButton:hover {
 	background: #ff5f57;
+	color: rgba(0, 0, 0, 0.6);
+}
+
+.minimizeButton {
+	width: 14px;
+	height: 14px;
+	border: none;
+	border-radius: 50%;
+	background: rgba(0, 0, 0, 0.15);
+	color: transparent;
+	font-size: 10px;
+	line-height: 14px;
+	text-align: center;
+	cursor: pointer;
+	padding: 0;
+	flex-shrink: 0;
+	transition:
+		color 0.1s,
+		background 0.1s;
+}
+
+.minimizeButton:hover {
+	background: #ffbd2e;
+	color: rgba(0, 0, 0, 0.6);
+}
+
+.maximizeButton {
+	width: 14px;
+	height: 14px;
+	border: none;
+	border-radius: 50%;
+	background: rgba(0, 0, 0, 0.15);
+	color: transparent;
+	font-size: 10px;
+	line-height: 14px;
+	text-align: center;
+	cursor: pointer;
+	padding: 0;
+	flex-shrink: 0;
+	transition:
+		color 0.1s,
+		background 0.1s;
+}
+
+.maximizeButton:hover {
+	background: #28c840;
 	color: rgba(0, 0, 0, 0.6);
 }
 
@@ -115,4 +205,54 @@
 	top: 0;
 	left: 0;
 	cursor: nwse-resize;
+}
+
+.overrideRedirect {
+	position: absolute;
+	user-select: none;
+	display: flex;
+	flex-direction: column;
+	pointer-events: auto;
+}
+
+.settingsPanel {
+	position: fixed;
+	bottom: 80px;
+	right: 16px;
+	background: rgba(30, 30, 30, 0.95);
+	border: 1px solid rgba(255, 255, 255, 0.1);
+	border-radius: 8px;
+	padding: 12px 16px;
+	color: #ccc;
+	font-size: 12px;
+	z-index: 20000;
+	min-width: 200px;
+	backdrop-filter: blur(12px);
+}
+
+.settingsPanel h4 {
+	margin: 0 0 8px 0;
+	font-size: 13px;
+	color: #fff;
+}
+
+.settingsRow {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 12px;
+	padding: 4px 0;
+}
+
+.settingsRow label {
+	cursor: pointer;
+}
+
+.settingsRow select {
+	background: rgba(255, 255, 255, 0.1);
+	border: 1px solid rgba(255, 255, 255, 0.2);
+	border-radius: 4px;
+	color: #fff;
+	padding: 2px 4px;
+	font-size: 11px;
 }

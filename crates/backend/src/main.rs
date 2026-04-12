@@ -275,6 +275,38 @@ async fn handle_sidecar_ws(socket: WebSocket, state: AppState) {
                 )
                 .await;
             }
+            SidecarToBackend::ClipboardData {
+                selection,
+                mime_type,
+                data,
+            } => {
+                let frontends = state.frontends.read().await;
+                for frontend in frontends.values() {
+                    if frontend.subscribed_sidecars.contains(&sidecar_id) {
+                        let _ = frontend.tx.send(BackendToFrontend::ClipboardData {
+                            sidecar_id: sidecar_id.clone(),
+                            selection: selection.clone(),
+                            mime_type: mime_type.clone(),
+                            data: data.clone(),
+                        });
+                    }
+                }
+            }
+            SidecarToBackend::ClipboardOffer {
+                selection,
+                mime_types,
+            } => {
+                let frontends = state.frontends.read().await;
+                for frontend in frontends.values() {
+                    if frontend.subscribed_sidecars.contains(&sidecar_id) {
+                        let _ = frontend.tx.send(BackendToFrontend::ClipboardOffer {
+                            sidecar_id: sidecar_id.clone(),
+                            selection: selection.clone(),
+                            mime_types: mime_types.clone(),
+                        });
+                    }
+                }
+            }
             SidecarToBackend::Register { .. } => {} // Already handled
         }
     }
@@ -501,6 +533,43 @@ async fn handle_frontend_ws(socket: WebSocket, state: AppState) {
                         width,
                         height,
                     },
+                )
+                .await;
+            }
+            FrontendToBackend::RequestClipboard {
+                sidecar_id,
+                selection,
+                mime_type,
+            } => {
+                forward_to_sidecar(
+                    &state,
+                    &sidecar_id,
+                    BackendToSidecar::RequestClipboard { selection, mime_type },
+                )
+                .await;
+            }
+            FrontendToBackend::SetClipboard {
+                sidecar_id,
+                selection,
+                mime_type,
+                data,
+            } => {
+                forward_to_sidecar(
+                    &state,
+                    &sidecar_id,
+                    BackendToSidecar::SetClipboard { selection, mime_type, data },
+                )
+                .await;
+            }
+            FrontendToBackend::ResizeScreen {
+                sidecar_id,
+                width,
+                height,
+            } => {
+                forward_to_sidecar(
+                    &state,
+                    &sidecar_id,
+                    BackendToSidecar::ResizeScreen { width, height },
                 )
                 .await;
             }
