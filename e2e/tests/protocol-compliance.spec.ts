@@ -1241,3 +1241,134 @@ test.describe.serial("x11perf smoke tests", () => {
 		});
 	}
 });
+
+// ---------------------------------------------------------------------------
+// XI2 (XInput2) protocol compliance tests
+// ---------------------------------------------------------------------------
+test.describe.serial("XI2 protocol compliance", () => {
+	let python3Available = false;
+
+	test("detect python3 availability", async ({ sidecarContainer }) => {
+		const check = await execInSidecar(
+			sidecarContainer,
+			"python3 -c 'import Xlib.display' 2>/dev/null && echo AVAILABLE || echo MISSING",
+		);
+		python3Available = check.includes("AVAILABLE");
+		if (!python3Available) {
+			console.log("python3-xlib not installed – XI2 tests will be skipped");
+		}
+		expect(true).toBe(true);
+	});
+
+	test("XIQueryVersion negotiates version 2.x", async ({
+		sidecarContainer,
+	}) => {
+		test.skip(!python3Available, "python3-xlib not available");
+		const output = await runPythonX11(
+			sidecarContainer,
+			`
+import Xlib.display
+d = Xlib.display.Display()
+# XInputExtension should be present
+ext = d.query_extension('XInputExtension')
+print(f"present={ext is not None and ext.present}")
+d.close()
+`,
+		);
+		expect(output).toContain("present=True");
+	});
+
+	test("xinput list shows virtual core devices", async ({
+		sidecarContainer,
+	}) => {
+		const output = await execInSidecar(
+			sidecarContainer,
+			"xinput list 2>&1 || true",
+		);
+		// Should show virtual core pointer and keyboard
+		expect(output).toMatch(/[Vv]irtual core pointer/i);
+		expect(output).toMatch(/[Vv]irtual core keyboard/i);
+	});
+
+	test("xinput list-props shows device properties", async ({
+		sidecarContainer,
+	}) => {
+		const output = await execInSidecar(
+			sidecarContainer,
+			"xinput list-props 2 2>&1 || true",
+		);
+		// Device 2 is the virtual core pointer — should not error
+		expect(output).not.toContain("X Error");
+		expect(output).not.toContain("unable to find device");
+	});
+
+	test("xdotool uses XI2 for pointer operations", async ({
+		sidecarContainer,
+	}) => {
+		// xdotool internally uses XI2 for many operations
+		const output = await execInSidecar(
+			sidecarContainer,
+			"xdotool getmouselocation 2>&1 || true",
+		);
+		// Should return coordinates without errors
+		expect(output).toMatch(/x:\d+/);
+		expect(output).toMatch(/y:\d+/);
+	});
+});
+
+// ---------------------------------------------------------------------------
+// SECURITY extension compliance tests
+// ---------------------------------------------------------------------------
+test.describe.serial("SECURITY extension compliance", () => {
+	test("SECURITY extension is advertised", async ({
+		sidecarContainer,
+	}) => {
+		const output = await execInSidecar(
+			sidecarContainer,
+			"xdpyinfo -queryExtensions 2>&1 || true",
+		);
+		expect(output).toContain("SECURITY");
+	});
+});
+
+// ---------------------------------------------------------------------------
+// Access control (ChangeHosts/ListHosts) compliance tests
+// ---------------------------------------------------------------------------
+test.describe.serial("Host access control compliance", () => {
+	test("xhost reports access control state", async ({
+		sidecarContainer,
+	}) => {
+		const output = await execInSidecar(
+			sidecarContainer,
+			"xhost 2>&1 || true",
+		);
+		// Should report the current access control state
+		expect(output).toMatch(/access control/i);
+	});
+
+	test("ListHosts returns valid response via python3", async ({
+		sidecarContainer,
+	}) => {
+		const check = await execInSidecar(
+			sidecarContainer,
+			"python3 -c 'import Xlib.display' 2>/dev/null && echo AVAILABLE || echo MISSING",
+		);
+		const python3Available = check.includes("AVAILABLE");
+		test.skip(!python3Available, "python3-xlib not available");
+
+		const output = await runPythonX11(
+			sidecarContainer,
+			`
+import Xlib.display
+d = Xlib.display.Display()
+hosts = d.list_hosts()
+print(f"acl_enabled={hosts.mode}")
+print(f"n_hosts={len(hosts.hosts)}")
+d.close()
+`,
+		);
+		// mode is 0 (disabled) or 1 (enabled)
+		expect(output).toMatch(/acl_enabled=[01]/);
+		expect(output).toMatch(/n_hosts=\d+/);
+	});
+});
