@@ -662,6 +662,93 @@ impl X11Server {
             }
         }
 
+        // Create the system tray manager window and own _NET_SYSTEM_TRAY_S0.
+        // This advertises a system tray so tray-capable apps (nm-applet, etc.)
+        // can discover it and dock their status icons.
+        {
+            let mut atoms_lock = shared_atoms.lock().unwrap();
+            let tray_orientation_atom = atoms_lock.intern("_NET_SYSTEM_TRAY_ORIENTATION", false);
+            let tray_visual_atom = atoms_lock.intern("_NET_SYSTEM_TRAY_VISUAL", false);
+            drop(atoms_lock);
+
+            let mut tray_properties: HashMap<u32, PropertyValue> = HashMap::new();
+            // Orientation: 0 = horizontal
+            tray_properties.insert(tray_orientation_atom, PropertyValue {
+                prop_type: 6, // CARDINAL
+                format: 32,
+                data: 0u32.to_le_bytes().to_vec(),
+            });
+            // Visual: advertise the 32-bit ARGB visual (0x40) for alpha-aware tray icons
+            tray_properties.insert(tray_visual_atom, PropertyValue {
+                prop_type: 32, // VISUALID
+                format: 32,
+                data: 0x40u32.to_le_bytes().to_vec(),
+            });
+
+            let mut windows = shared_windows.lock().unwrap();
+            windows.insert(
+                types::SYSTEM_TRAY_WINDOW,
+                WindowState {
+                    id: types::SYSTEM_TRAY_WINDOW,
+                    parent: ROOT_WINDOW,
+                    x: -1,
+                    y: -1,
+                    width: 1,
+                    height: 1,
+                    border_width: 0,
+                    visual: 0,
+                    class: 2, // InputOnly
+                    mapped: false,
+                    event_mask: 0,
+                    do_not_propagate_mask: 0,
+                    background_pixel: 0,
+                    background_pixmap: None,
+                    border_pixel: 0,
+                    border_pixmap: None,
+                    override_redirect: true,
+                    redirected: false,
+                    framebuffer: Framebuffer::new(0, 0),
+                    properties: tray_properties,
+                    owner_client_id: String::new(),
+                    cursor: None,
+                    children_order: Vec::new(),
+                    retained_temporary: false,
+                    bounding_shape: None,
+                    clip_shape: None,
+                    input_shape: None,
+                    shape_select_clients: Vec::new(),
+                    colormap: ROOT_COLORMAP,
+                    backing_store: 0,
+                    backing_planes: 0xFFFFFFFF,
+                    backing_pixel: 0,
+                    save_under: false,
+                    visibility: 0,
+                    backing_pixmap: None,
+                    wm_hints_initial_state: None,
+                    transient_for: None,
+                    sync_request_counter: None,
+                    sync_request_value: 0,
+                    window_type: WindowType::Normal,
+                    strut: None,
+                },
+            );
+            if let Some(root) = windows.get_mut(&ROOT_WINDOW) {
+                root.children_order.push(types::SYSTEM_TRAY_WINDOW);
+            }
+        }
+
+        // Own _NET_SYSTEM_TRAY_S0 selection
+        {
+            let (tray_tx, _tray_rx) = mpsc::unbounded_channel();
+            if let Ok(mut sels) = shared_selections.lock() {
+                sels.insert(186, SelectionEntry { // 186 = _NET_SYSTEM_TRAY_S0
+                    owner: types::SYSTEM_TRAY_WINDOW,
+                    event_tx: tray_tx,
+                    timestamp: 0,
+                });
+            }
+        }
+
         // Create the XIM (X Input Method) server window and set up the
         // XIM_SERVERS property on root so toolkit apps can discover our IM.
         {

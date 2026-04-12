@@ -237,6 +237,11 @@ pub(crate) const PREDEFINED_ATOMS: &[(&str, u32)] = &[
     ("text/plain;charset=utf-8", 184),
     // Compose/dead key support
     ("_XKB_RULES_NAMES", 185),
+    // System tray (freedesktop.org System Tray Protocol)
+    ("_NET_SYSTEM_TRAY_S0", 186),
+    ("_NET_SYSTEM_TRAY_OPCODE", 187),
+    ("_NET_SYSTEM_TRAY_ORIENTATION", 188),
+    ("_NET_SYSTEM_TRAY_VISUAL", 189),
 ];
 
 #[cfg(test)]

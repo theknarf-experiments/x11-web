@@ -298,6 +298,47 @@ pub(crate) fn handle_send_event(state: &mut ClientState, data: &[u8]) -> Vec<u8>
                 }
                 return Vec::new();
             }
+
+            // _NET_SYSTEM_TRAY_OPCODE: system tray protocol messages
+            // Opcode values: 0 = SYSTEM_TRAY_REQUEST_DOCK
+            //                1 = SYSTEM_TRAY_BEGIN_MESSAGE
+            //                2 = SYSTEM_TRAY_CANCEL_MESSAGE
+            let tray_opcode_atom = state.intern_atom("_NET_SYSTEM_TRAY_OPCODE", false);
+            if msg_type == tray_opcode_atom {
+                let opcode = state.read_u32(&event, 12);
+                if opcode == 0 {
+                    // SYSTEM_TRAY_REQUEST_DOCK: reparent the icon window into our tray
+                    let icon_window = state.read_u32(&event, 16);
+                    debug!("SYSTEM_TRAY_REQUEST_DOCK: icon_window={icon_window:#x}");
+
+                    // Map the icon window if not already mapped
+                    if let Some(win) = state.windows.get_mut(&icon_window) {
+                        if !win.mapped {
+                            win.mapped = true;
+                        }
+                    }
+
+                    // Send XEMBED_EMBEDDED_NOTIFY to the icon window
+                    // XEmbed message format: ClientMessage with _XEMBED type
+                    // data[0] = timestamp, data[1] = XEMBED_EMBEDDED_NOTIFY (0),
+                    // data[2] = embedder window
+                    let xembed_atom = state.intern_atom("_XEMBED", false);
+                    let timestamp = state.timestamp();
+                    let mut xembed_event = [0u8; 32];
+                    xembed_event[0] = CLIENT_MESSAGE_EVENT;
+                    xembed_event[1] = 32; // format
+                    state.write_u32(&mut xembed_event, 4, icon_window);
+                    state.write_u32(&mut xembed_event, 8, xembed_atom);
+                    state.write_u32(&mut xembed_event, 12, timestamp);
+                    state.write_u32(&mut xembed_event, 16, 0); // XEMBED_EMBEDDED_NOTIFY
+                    state.write_u32(&mut xembed_event, 20, crate::xserver::types::SYSTEM_TRAY_WINDOW);
+
+                    if !state.event_router.send_event(icon_window, xembed_event.to_vec()) {
+                        state.pending_events.push(xembed_event.to_vec());
+                    }
+                }
+                return Vec::new();
+            }
         }
     }
 

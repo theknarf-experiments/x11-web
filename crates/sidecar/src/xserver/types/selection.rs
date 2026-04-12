@@ -49,6 +49,9 @@ pub(crate) const CLIPBOARD_PROXY_WINDOW: u32 = 0x00000010;
 /// window and serves the saved data to future requestors.
 pub(crate) const CLIPBOARD_MANAGER_WINDOW: u32 = 0x00000014;
 
+/// Window ID used as the system tray manager (_NET_SYSTEM_TRAY_S0 owner).
+pub(crate) const SYSTEM_TRAY_WINDOW: u32 = 0x00000016;
+
 /// Saved clipboard entry for persistence across client disconnects.
 #[derive(Clone)]
 pub(crate) struct PersistentClipboardEntry {

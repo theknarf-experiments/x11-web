@@ -464,6 +464,22 @@ pub(crate) async fn handle_client(
         state.pending_events.push(manager_event);
     }
 
+    // Send MANAGER client message to announce the system tray manager.
+    // Apps listen for this on the root to discover _NET_SYSTEM_TRAY_S0.
+    {
+        let timestamp = state.server_start.elapsed().as_millis() as u32;
+        let mut tray_event = vec![0u8; 32];
+        tray_event[0] = 33; // ClientMessage event code
+        tray_event[1] = 32; // format = 32
+        tray_event[2..4].copy_from_slice(&0u16.to_le_bytes());
+        tray_event[4..8].copy_from_slice(&ROOT_WINDOW.to_le_bytes());
+        tray_event[8..12].copy_from_slice(&165u32.to_le_bytes()); // MANAGER atom
+        tray_event[12..16].copy_from_slice(&timestamp.to_le_bytes());
+        tray_event[16..20].copy_from_slice(&186u32.to_le_bytes()); // _NET_SYSTEM_TRAY_S0
+        tray_event[20..24].copy_from_slice(&crate::xserver::types::SYSTEM_TRAY_WINDOW.to_le_bytes());
+        state.pending_events.push(tray_event);
+    }
+
     let mut compose = crate::compose::ComposeState::new();
 
     let mut buf = vec![0u8; 256 * 1024];
