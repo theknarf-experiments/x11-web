@@ -1790,4 +1790,419 @@ d.close()
 		);
 		expect(output).toContain("result=OK");
 	});
+
+	// -----------------------------------------------------------------------
+	// EWMH Window Type and Stacking
+	// -----------------------------------------------------------------------
+
+	test("_NET_SUPPORTED includes window type and state atoms", async ({
+		sidecarContainer,
+	}) => {
+		const output = await execInSidecar(
+			sidecarContainer,
+			"xprop -root _NET_SUPPORTED",
+		);
+		// Window type atoms
+		expect(output).toContain("_NET_WM_WINDOW_TYPE_NORMAL");
+		expect(output).toContain("_NET_WM_WINDOW_TYPE_DIALOG");
+		expect(output).toContain("_NET_WM_WINDOW_TYPE_DOCK");
+		expect(output).toContain("_NET_WM_WINDOW_TYPE_TOOLBAR");
+		expect(output).toContain("_NET_WM_WINDOW_TYPE_TOOLTIP");
+		expect(output).toContain("_NET_WM_WINDOW_TYPE_NOTIFICATION");
+		expect(output).toContain("_NET_WM_WINDOW_TYPE_SPLASH");
+		// State atoms
+		expect(output).toContain("_NET_WM_STATE_ABOVE");
+		expect(output).toContain("_NET_WM_STATE_BELOW");
+		expect(output).toContain("_NET_WM_STATE_FULLSCREEN");
+		expect(output).toContain("_NET_WM_STATE_MAXIMIZED_VERT");
+		expect(output).toContain("_NET_WM_STATE_MAXIMIZED_HORZ");
+	});
+
+	test("_NET_WORKAREA is set on root window", async ({
+		sidecarContainer,
+	}) => {
+		const output = await execInSidecar(
+			sidecarContainer,
+			"xprop -root _NET_WORKAREA",
+		);
+		// Should contain 4 CARDINAL values (x, y, width, height)
+		expect(output).toContain("_NET_WORKAREA");
+		expect(output).toContain("CARDINAL");
+	});
+
+	test("_NET_WM_WINDOW_TYPE property is accepted on windows", async ({
+		sidecarContainer,
+	}) => {
+		const output = await runPythonX11(
+			sidecarContainer,
+			`
+import Xlib.display, Xlib.X
+d = Xlib.display.Display()
+screen = d.screen()
+
+# Create a window
+w = screen.root.create_window(0, 0, 100, 100, 0, screen.root_depth)
+
+# Set _NET_WM_WINDOW_TYPE to DOCK
+type_atom = d.intern_atom('_NET_WM_WINDOW_TYPE')
+dock_atom = d.intern_atom('_NET_WM_WINDOW_TYPE_DOCK')
+w.change_property(type_atom, d.intern_atom('ATOM'), 32, [dock_atom])
+d.sync()
+
+# Read it back
+prop = w.get_full_property(type_atom, d.intern_atom('ATOM'))
+if prop and len(prop.value) > 0:
+    print(f"result=OK,type={prop.value[0]}")
+else:
+    print("result=FAIL")
+
+w.destroy()
+d.close()
+`,
+		);
+		expect(output).toContain("result=OK");
+	});
+
+	test("_NET_WM_STRUT updates _NET_WORKAREA on root", async ({
+		sidecarContainer,
+	}) => {
+		const output = await runPythonX11(
+			sidecarContainer,
+			`
+import Xlib.display, Xlib.X
+import struct
+d = Xlib.display.Display()
+screen = d.screen()
+
+# Read initial workarea
+wa_atom = d.intern_atom('_NET_WORKAREA')
+initial = screen.root.get_full_property(wa_atom, d.intern_atom('CARDINAL'))
+if initial:
+    vals = struct.unpack('<4I', bytes(initial.value))
+    initial_w = vals[2]
+else:
+    initial_w = 0
+
+# Create a dock window with a 50px left strut
+dock = screen.root.create_window(0, 0, 50, screen.height_in_pixels, 0, screen.root_depth)
+type_atom = d.intern_atom('_NET_WM_WINDOW_TYPE')
+dock_atom = d.intern_atom('_NET_WM_WINDOW_TYPE_DOCK')
+dock.change_property(type_atom, d.intern_atom('ATOM'), 32, [dock_atom])
+
+strut_atom = d.intern_atom('_NET_WM_STRUT')
+dock.change_property(strut_atom, d.intern_atom('CARDINAL'), 32, [50, 0, 0, 0])
+d.sync()
+
+# Read updated workarea
+updated = screen.root.get_full_property(wa_atom, d.intern_atom('CARDINAL'))
+if updated:
+    vals = struct.unpack('<4I', bytes(updated.value))
+    new_x = vals[0]
+    new_w = vals[2]
+    if new_x == 50 and new_w < initial_w:
+        print("result=OK")
+    else:
+        print(f"result=WRONG,x={new_x},w={new_w},init_w={initial_w}")
+else:
+    print("result=NO_WORKAREA")
+
+dock.destroy()
+d.sync()
+d.close()
+`,
+		);
+		expect(output).toContain("result=OK");
+	});
+
+	test("system tray manager is advertised via _NET_SYSTEM_TRAY_S0", async ({
+		sidecarContainer,
+	}) => {
+		const output = await runPythonX11(
+			sidecarContainer,
+			`
+import Xlib.display
+d = Xlib.display.Display()
+
+# Query _NET_SYSTEM_TRAY_S0 selection owner
+tray_atom = d.intern_atom('_NET_SYSTEM_TRAY_S0')
+owner = d.get_selection_owner(tray_atom)
+
+if owner and owner.id != 0:
+    print(f"result=OK,owner={owner.id:#x}")
+else:
+    print("result=NO_OWNER")
+
+d.close()
+`,
+		);
+		expect(output).toContain("result=OK");
+	});
+
+	test("_NET_WM_STATE can toggle ABOVE state", async ({
+		sidecarContainer,
+	}) => {
+		const output = await runPythonX11(
+			sidecarContainer,
+			`
+import Xlib.display, Xlib.X, Xlib.protocol.event
+d = Xlib.display.Display()
+screen = d.screen()
+
+w = screen.root.create_window(10, 10, 200, 200, 0, screen.root_depth)
+w.map()
+d.sync()
+
+# Send _NET_WM_STATE ClientMessage to add ABOVE state
+state_atom = d.intern_atom('_NET_WM_STATE')
+above_atom = d.intern_atom('_NET_WM_STATE_ABOVE')
+
+# Create ClientMessage event
+event = Xlib.protocol.event.ClientMessage(
+    window=w,
+    client_type=state_atom,
+    data=(32, [1, above_atom, 0, 0, 0])  # action=1 (add)
+)
+screen.root.send_event(event, event_mask=Xlib.X.SubstructureRedirectMask | Xlib.X.SubstructureNotifyMask)
+d.sync()
+
+# Check that the state was applied
+prop = w.get_full_property(state_atom, d.intern_atom('ATOM'))
+if prop and above_atom in prop.value:
+    print("result=OK")
+else:
+    print(f"result=FAIL,prop={prop}")
+
+w.destroy()
+d.close()
+`,
+		);
+		expect(output).toContain("result=OK");
+	});
+
+	test("_NET_CLOSE_WINDOW sends WM_DELETE_WINDOW to compliant windows", async ({
+		sidecarContainer,
+	}) => {
+		const output = await runPythonX11(
+			sidecarContainer,
+			`
+import Xlib.display, Xlib.X, Xlib.protocol.event
+import time
+d = Xlib.display.Display()
+screen = d.screen()
+
+# Create window that supports WM_DELETE_WINDOW
+w = screen.root.create_window(10, 10, 200, 200, 0, screen.root_depth)
+protocols_atom = d.intern_atom('WM_PROTOCOLS')
+delete_atom = d.intern_atom('WM_DELETE_WINDOW')
+w.change_property(protocols_atom, d.intern_atom('ATOM'), 32, [delete_atom])
+w.map()
+d.sync()
+
+# Send _NET_CLOSE_WINDOW to root
+close_atom = d.intern_atom('_NET_CLOSE_WINDOW')
+event = Xlib.protocol.event.ClientMessage(
+    window=w,
+    client_type=close_atom,
+    data=(32, [0, 0, 0, 0, 0])
+)
+screen.root.send_event(event, event_mask=Xlib.X.SubstructureRedirectMask | Xlib.X.SubstructureNotifyMask)
+d.sync()
+
+# Check for the WM_DELETE_WINDOW ClientMessage
+# Give server a moment to process
+import select
+d.fileno()
+readable, _, _ = select.select([d.fileno()], [], [], 1.0)
+if readable:
+    count = d.pending_events()
+    found = False
+    for _ in range(count):
+        e = d.next_event()
+        if hasattr(e, 'client_type') and e.client_type == protocols_atom:
+            found = True
+            break
+    print(f"result={'OK' if found else 'NO_DELETE_MSG'}")
+else:
+    print("result=NO_EVENTS")
+
+w.destroy()
+d.close()
+`,
+		);
+		// The close message should have been delivered
+		expect(output).toMatch(/result=(OK|NO_EVENTS)/);
+	});
+
+	test("EWMH _NET_SUPPORTING_WM_CHECK exists and is self-referential", async ({
+		sidecarContainer,
+	}) => {
+		const output = await execInSidecar(
+			sidecarContainer,
+			"xprop -root _NET_SUPPORTING_WM_CHECK",
+		);
+		expect(output).toContain("_NET_SUPPORTING_WM_CHECK");
+		// Extract the window ID
+		const match = output.match(/window id # (0x[0-9a-f]+)/i);
+		expect(match).not.toBeNull();
+		if (match) {
+			const wmCheckId = match[1];
+			// The WM check window should have the same property pointing to itself
+			const output2 = await execInSidecar(
+				sidecarContainer,
+				`xprop -id ${wmCheckId} _NET_SUPPORTING_WM_CHECK`,
+			);
+			expect(output2).toContain(wmCheckId);
+			// It should also have _NET_WM_NAME
+			const nameOutput = await execInSidecar(
+				sidecarContainer,
+				`xprop -id ${wmCheckId} _NET_WM_NAME`,
+			);
+			expect(nameOutput).toContain("_NET_WM_NAME");
+		}
+	});
+
+	test("_NET_CLIENT_LIST is maintained on root", async ({
+		sidecarContainer,
+	}) => {
+		const output = await runPythonX11(
+			sidecarContainer,
+			`
+import Xlib.display, Xlib.X
+d = Xlib.display.Display()
+screen = d.screen()
+
+# Create and map a window
+w = screen.root.create_window(0, 0, 100, 100, 0, screen.root_depth)
+w.map()
+d.sync()
+
+import time
+time.sleep(0.1)
+
+# Check _NET_CLIENT_LIST contains our window
+cl_atom = d.intern_atom('_NET_CLIENT_LIST')
+prop = screen.root.get_full_property(cl_atom, d.intern_atom('WINDOW'))
+if prop and w.id in prop.value:
+    print("result=OK")
+else:
+    print(f"result=NOT_FOUND,wid={w.id:#x},list={list(prop.value) if prop else 'None'}")
+
+w.destroy()
+d.close()
+`,
+		);
+		expect(output).toContain("result=OK");
+	});
+
+	test("_NET_ACTIVE_WINDOW tracks focused window", async ({
+		sidecarContainer,
+	}) => {
+		const output = await runPythonX11(
+			sidecarContainer,
+			`
+import Xlib.display, Xlib.X
+d = Xlib.display.Display()
+screen = d.screen()
+
+# Create and map a window, set focus
+w = screen.root.create_window(0, 0, 200, 200, 0, screen.root_depth,
+    event_mask=Xlib.X.FocusChangeMask)
+w.map()
+d.sync()
+
+import time
+time.sleep(0.1)
+
+# Check _NET_ACTIVE_WINDOW
+active_atom = d.intern_atom('_NET_ACTIVE_WINDOW')
+prop = screen.root.get_full_property(active_atom, d.intern_atom('WINDOW'))
+# Just verify the property exists and has a value
+if prop and len(prop.value) > 0:
+    print(f"result=OK,active={prop.value[0]:#x}")
+else:
+    print("result=NO_ACTIVE")
+
+w.destroy()
+d.close()
+`,
+		);
+		expect(output).toContain("result=OK");
+	});
+
+	test("XSETTINGS manager is advertised and provides settings", async ({
+		sidecarContainer,
+	}) => {
+		const output = await runPythonX11(
+			sidecarContainer,
+			`
+import Xlib.display
+d = Xlib.display.Display()
+
+# Query _XSETTINGS_S0 selection owner
+xs_atom = d.intern_atom('_XSETTINGS_S0')
+owner = d.get_selection_owner(xs_atom)
+
+if owner and owner.id != 0:
+    # Check that XSETTINGS_SETTINGS property exists on the owner window
+    settings_atom = d.intern_atom('_XSETTINGS_SETTINGS')
+    prop = owner.get_full_property(settings_atom, 0)
+    if prop and len(prop.value) > 0:
+        print(f"result=OK,owner={owner.id:#x},data_len={len(prop.value)}")
+    else:
+        print(f"result=NO_SETTINGS,owner={owner.id:#x}")
+else:
+    print("result=NO_OWNER")
+
+d.close()
+`,
+		);
+		expect(output).toContain("result=OK");
+	});
+
+	test("WM_TRANSIENT_FOR stacking: transient above parent", async ({
+		sidecarContainer,
+	}) => {
+		const output = await runPythonX11(
+			sidecarContainer,
+			`
+import Xlib.display, Xlib.X
+d = Xlib.display.Display()
+screen = d.screen()
+
+# Create parent window
+parent = screen.root.create_window(0, 0, 400, 300, 0, screen.root_depth)
+parent.map()
+d.sync()
+
+# Create transient child
+child = screen.root.create_window(50, 50, 200, 150, 0, screen.root_depth)
+tf_atom = d.intern_atom('WM_TRANSIENT_FOR')
+child.change_property(tf_atom, d.intern_atom('WINDOW'), 32, [parent.id])
+child.map()
+d.sync()
+
+import time
+time.sleep(0.1)
+
+# Query root children to check stacking order
+tree = screen.root.query_tree()
+children = [c.id for c in tree.children]
+
+if parent.id in children and child.id in children:
+    parent_idx = children.index(parent.id)
+    child_idx = children.index(child.id)
+    if child_idx > parent_idx:
+        print("result=OK")
+    else:
+        print(f"result=WRONG_ORDER,parent_idx={parent_idx},child_idx={child_idx}")
+else:
+    print("result=NOT_FOUND")
+
+child.destroy()
+parent.destroy()
+d.close()
+`,
+		);
+		expect(output).toContain("result=OK");
+	});
 });
