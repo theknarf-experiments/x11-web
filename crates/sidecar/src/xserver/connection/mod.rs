@@ -1175,10 +1175,12 @@ pub(crate) async fn handle_client(
                             match &input {
                                 x11_web_protocol::InputEvent::KeyPress { keycode, state: mask } => {
                                     let kc = *keycode as usize;
+                                    let xkb_before = handlers::xkb::XkbStateSnapshot::capture(&state);
                                     if kc < 256 {
                                         state.pressed_keys[kc / 8] |= 1 << (kc % 8);
                                         state.xkb_state.key_press(kc as u8);
                                     }
+                                    handlers::xkb::maybe_send_xkb_state_notify(&mut state, &xkb_before, kc as u8, 2);
                                     // Start auto-repeat if enabled for this key.
                                     let repeat_enabled = (state.xkb_state.controls.enabled_ctrls & (1 << 10)) != 0; // XkbRepeatKeysMask
                                     let key_repeats = kc < 256 && (state.xkb_state.controls.per_key_repeat[kc / 8] & (1 << (kc % 8))) != 0;
@@ -1199,10 +1201,12 @@ pub(crate) async fn handle_client(
                                 }
                                 x11_web_protocol::InputEvent::KeyRelease { keycode, .. } => {
                                     let kc = *keycode as usize;
+                                    let xkb_before = handlers::xkb::XkbStateSnapshot::capture(&state);
                                     if kc < 256 {
                                         state.pressed_keys[kc / 8] &= !(1 << (kc % 8));
                                         state.xkb_state.key_release(kc as u8);
                                     }
+                                    handlers::xkb::maybe_send_xkb_state_notify(&mut state, &xkb_before, kc as u8, 3);
                                     // Cancel auto-repeat for this key.
                                     if key_repeat.as_ref().is_some_and(|r| r.keycode == *keycode as u8) {
                                         key_repeat = None;

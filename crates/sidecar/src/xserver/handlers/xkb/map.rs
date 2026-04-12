@@ -610,6 +610,10 @@ pub(crate) fn handle_xkb_set_map(state: &mut ClientState, data: &[u8], seq: u16)
 
     let _ = offset;
     debug!("SetMap: present=0x{present:04x} fully processed");
+
+    // Send XkbMapNotify if client subscribed.
+    super::maybe_send_xkb_map_notify(state, present);
+
     Vec::new()
 }
 

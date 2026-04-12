@@ -68,6 +68,8 @@ pub(crate) fn handle_xkb_latch_lock_state(state: &mut ClientState, data: &[u8], 
         );
     }
 
+    let before = super::XkbStateSnapshot::capture(state);
+
     let msb = state.msb_first;
     let _device_spec = read_u16(data, 4, msb);
     let affect_mod_locks = data[6];
@@ -104,8 +106,12 @@ pub(crate) fn handle_xkb_latch_lock_state(state: &mut ClientState, data: &[u8], 
 
     debug!(
         "LatchLockState: locked_mods=0x{:02x} latched_mods=0x{:02x} locked_group={} latched_group={}",
-        xkb.locked_mods, xkb.latched_mods, xkb.locked_group, xkb.latched_group
+        state.xkb_state.locked_mods, state.xkb_state.latched_mods,
+        state.xkb_state.locked_group, state.xkb_state.latched_group
     );
+
+    // Send XkbStateNotify if state changed and client subscribed.
+    super::maybe_send_xkb_state_notify(state, &before, 0, 0);
 
     Vec::new()
 }
@@ -187,6 +193,8 @@ pub(crate) fn handle_xkb_set_controls(state: &mut ClientState, data: &[u8], seq:
         );
     }
 
+    let enabled_ctrls_before = state.xkb_state.controls.enabled_ctrls;
+
     // Read all values upfront to avoid borrow conflicts
     let msb = state.msb_first;
     let change_ctrls = read_u32(data, 8, msb);
@@ -261,6 +269,9 @@ pub(crate) fn handle_xkb_set_controls(state: &mut ClientState, data: &[u8], seq:
         "SetControls: change=0x{change_ctrls:08x} enabled=0x{:08x} repeat_delay={} repeat_interval={}",
         ctrls.enabled_ctrls, ctrls.repeat_delay, ctrls.repeat_interval
     );
+
+    // Send XkbControlsNotify if client subscribed.
+    super::maybe_send_xkb_controls_notify(state, change_ctrls, enabled_ctrls_before);
 
     Vec::new()
 }

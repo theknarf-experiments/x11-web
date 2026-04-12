@@ -72,6 +72,7 @@ pub(crate) fn handle_xtest_request(state: &mut ClientState, data: &[u8], seq: u1
                         let keycode = detail;
 
                         // Update pressed_keys bitmap + XKB modifier state
+                        let xkb_before = super::xkb::XkbStateSnapshot::capture(state);
                         let byte_idx = (keycode / 8) as usize;
                         let bit_mask = 1u8 << (keycode % 8);
                         if byte_idx < state.pressed_keys.len() {
@@ -83,6 +84,7 @@ pub(crate) fn handle_xtest_request(state: &mut ClientState, data: &[u8], seq: u1
                                 state.xkb_state.key_release(keycode);
                             }
                         }
+                        super::xkb::maybe_send_xkb_state_notify(state, &xkb_before, keycode, event_type);
 
                         let mut event = [0u8; 32];
                         event[0] = event_type;

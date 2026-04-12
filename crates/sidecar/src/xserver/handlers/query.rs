@@ -102,7 +102,7 @@ pub(crate) fn handle_query_extension(_state: &mut ClientState, data: &[u8], seq:
         "XKEYBOARD" => {
             reply[8] = 1;
             reply[9] = 136;
-            reply[10] = 0;
+            reply[10] = 85; // first_event: XkbEventCode
             reply[11] = 0;
         }
         "XC-MISC" => {

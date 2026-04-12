@@ -370,3 +370,234 @@ pub(crate) fn handle_xkb_request(state: &mut ClientState, data: &[u8], seq: u16)
         }
     }
 }
+
+// ---------------------------------------------------------------------------
+// XKB event constants
+// ---------------------------------------------------------------------------
+
+/// XKB extension event code (first_event assigned by QueryExtension).
+pub(crate) const XKB_EVENT_BASE: u8 = 85;
+
+// XKB event type codes (xkbType field in the event)
+const XKB_STATE_NOTIFY: u8 = 0;
+const XKB_MAP_NOTIFY: u8 = 1;
+const XKB_CONTROLS_NOTIFY: u8 = 3;
+
+// XKB SelectEvents mask bits (from spec Table 18.1)
+const XKB_STATE_NOTIFY_MASK: u32 = 1 << 0;
+const XKB_MAP_NOTIFY_MASK: u32 = 1 << 1;
+const XKB_CONTROLS_NOTIFY_MASK: u32 = 1 << 3;
+
+// ---------------------------------------------------------------------------
+// XKB event builders
+// ---------------------------------------------------------------------------
+
+/// Snapshot of XKB modifier/group state for change detection.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) struct XkbStateSnapshot {
+    pub(crate) base_mods: u8,
+    pub(crate) latched_mods: u8,
+    pub(crate) locked_mods: u8,
+    pub(crate) base_group: i16,
+    pub(crate) latched_group: i16,
+    pub(crate) locked_group: i16,
+}
+
+impl XkbStateSnapshot {
+    /// Capture the current XKB state.
+    pub(crate) fn capture(state: &ClientState) -> Self {
+        let xkb = &state.xkb_state;
+        Self {
+            base_mods: xkb.base_mods,
+            latched_mods: xkb.latched_mods,
+            locked_mods: xkb.locked_mods,
+            base_group: xkb.base_group,
+            latched_group: xkb.latched_group,
+            locked_group: xkb.locked_group,
+        }
+    }
+}
+
+/// Build and enqueue an XkbStateNotify event if the client subscribed and
+/// the XKB state actually changed from `before`.
+///
+/// The `keycode` is the triggering key (0 if triggered by LatchLockState).
+/// The `event_type` is the X11 event type that triggered the change
+/// (2=KeyPress, 3=KeyRelease, 0=programmatic).
+pub(crate) fn maybe_send_xkb_state_notify(
+    state: &mut ClientState,
+    before: &XkbStateSnapshot,
+    keycode: u8,
+    event_type: u8,
+) {
+    // Check if this client subscribed to XkbStateNotify.
+    if state.xkb_event_mask & XKB_STATE_NOTIFY_MASK == 0 {
+        return;
+    }
+
+    let after = XkbStateSnapshot::capture(state);
+    if *before == after {
+        return; // No change
+    }
+
+    let xkb = &state.xkb_state;
+    let effective_mods = xkb.effective_mods();
+    let effective_group = xkb.effective_group() as u8;
+
+    // Build the changed bitmask: which components changed.
+    let mut changed: u16 = 0;
+    if before.base_mods != after.base_mods { changed |= 1 << 0; }   // ModifierState
+    if before.latched_mods != after.latched_mods { changed |= 1 << 1; } // ModifierBase
+    if before.locked_mods != after.locked_mods { changed |= 1 << 2; }   // ModifierLatch
+    if before.base_group != after.base_group { changed |= 1 << 3; }
+    if before.latched_group != after.latched_group { changed |= 1 << 4; }
+    if before.locked_group != after.locked_group { changed |= 1 << 5; }
+
+    // XkbStateNotify event layout (32 bytes):
+    //   0: event code (XKB_EVENT_BASE)
+    //   1: xkbType (0 = StateNotify)
+    //   2-3: sequence number
+    //   4-7: time (CARD32)
+    //   8: deviceID
+    //   9: mods (effective)
+    //  10: baseMods
+    //  11: latchedMods
+    //  12: lockedMods
+    //  13: group (effective)
+    //  14: baseGroup (INT16, low byte)
+    //  15: baseGroup (INT16, high byte)
+    //  16-17: latchedGroup (INT16)
+    //  18: compatState
+    //  19: grabMods
+    //  20: compatGrabMods
+    //  21: lookupMods
+    //  22: compatLookupMods
+    //  23: ptrBtnState (high byte)
+    //  24-25: changed (CARD16)
+    //  26: keycode
+    //  27: eventType (what triggered: KeyPress=2, KeyRelease=3)
+    //  28-29: requestMajor (CARD8) / requestMinor (CARD8)
+    //  30-31: pad
+    let mut event = [0u8; 32];
+    event[0] = XKB_EVENT_BASE;
+    event[1] = XKB_STATE_NOTIFY;
+    state.write_u16(&mut event, 2, state.sequence);
+    state.write_u32(&mut event, 4, state.timestamp());
+    event[8] = 0; // deviceID = core keyboard
+    event[9] = effective_mods;
+    event[10] = after.base_mods;
+    event[11] = after.latched_mods;
+    event[12] = after.locked_mods;
+    event[13] = effective_group;
+    state.write_i16(&mut event, 14, after.base_group);
+    state.write_i16(&mut event, 16, after.latched_group);
+    event[18] = effective_mods; // compatState
+    event[19] = effective_mods; // grabMods
+    event[20] = effective_mods; // compatGrabMods
+    event[21] = effective_mods; // lookupMods
+    event[22] = effective_mods; // compatLookupMods
+    // 23: ptrBtnState high byte = 0
+    state.write_u16(&mut event, 24, changed);
+    event[26] = keycode;
+    event[27] = event_type;
+
+    state.pending_events.push(event.to_vec());
+}
+
+/// Build and enqueue an XkbMapNotify event if the client subscribed.
+///
+/// Called after SetMap to notify interested clients of keymap changes.
+/// The `changed` bitmask indicates which components were modified.
+pub(crate) fn maybe_send_xkb_map_notify(state: &mut ClientState, changed: u16) {
+    if state.xkb_event_mask & XKB_MAP_NOTIFY_MASK == 0 {
+        return;
+    }
+
+    // XkbMapNotify event layout (32 bytes):
+    //   0: event code (XKB_EVENT_BASE)
+    //   1: xkbType (1 = MapNotify)
+    //   2-3: sequence number
+    //   4-7: time
+    //   8: deviceID
+    //   9: ptrBtnActions
+    //  10-11: changed (CARD16)
+    //  12: minKeyCode
+    //  13: maxKeyCode
+    //  14: firstType
+    //  15: nTypes
+    //  16: firstKeySym
+    //  17: nKeySyms
+    //  18: firstKeyAct
+    //  19: nKeyActs
+    //  20: firstKeyBehavior
+    //  21: nKeyBehaviors
+    //  22: firstKeyExplicit
+    //  23: nKeyExplicit
+    //  24: firstModMapKey
+    //  25: nModMapKeys
+    //  26: firstVModMapKey
+    //  27: nVModMapKeys
+    //  28-29: virtualMods (CARD16)
+    //  30-31: pad
+    let mut event = [0u8; 32];
+    event[0] = XKB_EVENT_BASE;
+    event[1] = XKB_MAP_NOTIFY;
+    state.write_u16(&mut event, 2, state.sequence);
+    state.write_u32(&mut event, 4, state.timestamp());
+    event[8] = 0; // deviceID
+    state.write_u16(&mut event, 10, changed);
+    event[12] = MIN_KEY_CODE;
+    event[13] = MAX_KEY_CODE;
+    // For simplicity, report the full range for all components.
+    event[14] = 0; // firstType
+    event[15] = 4; // nTypes (typical)
+    event[16] = MIN_KEY_CODE; // firstKeySym
+    event[17] = (MAX_KEY_CODE - MIN_KEY_CODE + 1); // nKeySyms
+    event[18] = MIN_KEY_CODE; // firstKeyAct
+    event[19] = (MAX_KEY_CODE - MIN_KEY_CODE + 1); // nKeyActs
+
+    state.pending_events.push(event.to_vec());
+}
+
+/// Build and enqueue an XkbControlsNotify event if the client subscribed.
+///
+/// Called after SetControls with the bitmask of changed control fields.
+pub(crate) fn maybe_send_xkb_controls_notify(
+    state: &mut ClientState,
+    changed_ctrls: u32,
+    enabled_ctrls_before: u32,
+) {
+    if state.xkb_event_mask & XKB_CONTROLS_NOTIFY_MASK == 0 {
+        return;
+    }
+
+    let enabled_changes = state.xkb_state.controls.enabled_ctrls ^ enabled_ctrls_before;
+
+    // XkbControlsNotify event layout (32 bytes):
+    //   0: event code (XKB_EVENT_BASE)
+    //   1: xkbType (3 = ControlsNotify)
+    //   2-3: sequence number
+    //   4-7: time
+    //   8: deviceID
+    //   9: numGroups
+    //  10-11: pad
+    //  12-15: changedControls (CARD32)
+    //  16-19: enabledControls (CARD32)
+    //  20-23: enabledControlChanges (CARD32)
+    //  24: keycode
+    //  25: eventType
+    //  26-27: requestMajor/requestMinor
+    //  28-31: pad
+    let mut event = [0u8; 32];
+    event[0] = XKB_EVENT_BASE;
+    event[1] = XKB_CONTROLS_NOTIFY;
+    state.write_u16(&mut event, 2, state.sequence);
+    state.write_u32(&mut event, 4, state.timestamp());
+    event[8] = 0; // deviceID
+    event[9] = state.xkb_state.controls.num_groups;
+    state.write_u32(&mut event, 12, changed_ctrls);
+    state.write_u32(&mut event, 16, state.xkb_state.controls.enabled_ctrls);
+    state.write_u32(&mut event, 20, enabled_changes);
+
+    state.pending_events.push(event.to_vec());
+}
