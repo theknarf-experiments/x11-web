@@ -221,7 +221,7 @@ pub(crate) fn handle_xkb_set_controls(state: &mut ClientState, data: &[u8], seq:
 
     // Byte 13: numGroups
     let new_groups = data[13];
-    if new_groups >= 1 && new_groups <= 4 {
+    if (1..=4).contains(&new_groups) {
         ctrls.num_groups = new_groups;
     }
 

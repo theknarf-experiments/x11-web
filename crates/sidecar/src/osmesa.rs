@@ -1750,9 +1750,9 @@ impl MesaContext {
                 let si = x * 4;
                 let di = x * 4;
                 // OSMesa RGBA -> Framebuffer BGRA (A8R8G8B8 on LE)
-                dst_row[di + 0] = src_row[si + 2]; // B
+                dst_row[di] = src_row[si + 2]; // B
                 dst_row[di + 1] = src_row[si + 1]; // G
-                dst_row[di + 2] = src_row[si + 0]; // R
+                dst_row[di + 2] = src_row[si]; // R
                 dst_row[di + 3] = src_row[si + 3]; // A
             }
         }

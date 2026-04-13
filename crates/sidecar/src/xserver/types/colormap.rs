@@ -135,7 +135,7 @@ impl ColormapState {
                 let b = if bi < n { self.entries[bi].2 } else { ((bi as u16) << 8) | bi as u16 };
                 (r, g, b)
             }
-            0 | 1 | 2 | 3 => {
+            0..=3 => {
                 // StaticGray, GrayScale, StaticColor, PseudoColor: index into table
                 if (pixel as usize) < self.entries.len() {
                     self.entries[pixel as usize]

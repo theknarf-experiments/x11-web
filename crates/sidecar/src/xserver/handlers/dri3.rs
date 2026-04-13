@@ -74,7 +74,7 @@ fn convert_nv12_to_fb(
     let uv_offset = offsets[1] as usize;
 
     let y_size = y_offset + y_stride * height;
-    let uv_height = (height + 1) / 2;
+    let uv_height = height.div_ceil(2);
     let uv_size = uv_offset + uv_stride * uv_height;
 
     let y_fd = if !fds.is_empty() && fds[0] >= 0 { fds[0] } else { return; };
@@ -127,7 +127,7 @@ fn convert_yv12_to_fb(
     let u_stride = strides[2] as usize;
     let u_offset = offsets[2] as usize;
 
-    let half_h = (height + 1) / 2;
+    let half_h = height.div_ceil(2);
     let y_size = y_offset + y_stride * height;
     let v_size = v_offset + v_stride * half_h;
     let u_size = u_offset + u_stride * half_h;

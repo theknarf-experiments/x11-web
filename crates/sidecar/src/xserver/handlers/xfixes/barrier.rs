@@ -1,0 +1,67 @@
+//! XFIXES barrier and misc operations.
+
+use tracing::debug;
+
+use super::super::super::client::ClientState;
+
+/// 31: CreatePointerBarrier
+pub(crate) fn handle_create_pointer_barrier(state: &mut ClientState, data: &[u8], _seq: u16) -> Vec<u8> {
+    if data.len() >= 28 {
+        let barrier_id = state.read_u32(data, 4);
+        let window = state.read_u32(data, 8);
+        let x1 = state.read_i16(data, 12);
+        let y1 = state.read_i16(data, 14);
+        let x2 = state.read_i16(data, 16);
+        let y2 = state.read_i16(data, 18);
+        let directions = state.read_u32(data, 20);
+        let num_devices = state.read_u16(data, 24) as usize;
+        let mut device_ids = Vec::with_capacity(num_devices);
+        for i in 0..num_devices {
+            let off = 28 + i * 2;
+            if off + 2 <= data.len() {
+                device_ids.push(state.read_u16(data, off));
+            }
+        }
+        debug!("XFIXES CreatePointerBarrier: id={barrier_id:#x} window={window:#x} ({x1},{y1})-({x2},{y2}) dirs={directions:#x} devices={num_devices}");
+        state.barriers.insert(barrier_id, super::super::super::types::PointerBarrier {
+            barrier_id,
+            window,
+            x1,
+            y1,
+            x2,
+            y2,
+            directions,
+            device_ids,
+        });
+    }
+    Vec::new()
+}
+
+/// 32: DeletePointerBarrier
+pub(crate) fn handle_delete_pointer_barrier(state: &mut ClientState, data: &[u8], _seq: u16) -> Vec<u8> {
+    if data.len() >= 8 {
+        let barrier_id = state.read_u32(data, 4);
+        debug!("XFIXES DeletePointerBarrier: id={barrier_id:#x}");
+        state.barriers.remove(&barrier_id);
+    }
+    Vec::new()
+}
+
+/// 33: SetClientDisconnectMode
+pub(crate) fn handle_set_client_disconnect_mode(state: &mut ClientState, data: &[u8], _seq: u16) -> Vec<u8> {
+    if data.len() >= 8 {
+        let mode = state.read_u32(data, 4);
+        debug!("XFIXES SetClientDisconnectMode: mode={mode:#x}");
+        state.disconnect_mode = mode;
+    }
+    Vec::new()
+}
+
+/// 34: GetClientDisconnectMode
+pub(crate) fn handle_get_client_disconnect_mode(state: &mut ClientState, _data: &[u8], seq: u16) -> Vec<u8> {
+    let mut reply = [0u8; 32];
+    reply[0] = 1;
+    state.write_u16(&mut reply, 2, seq);
+    state.write_u32(&mut reply, 8, state.disconnect_mode);
+    reply.to_vec()
+}

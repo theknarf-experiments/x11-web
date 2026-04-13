@@ -165,7 +165,7 @@ impl ClientState {
         let pix = self.pixmaps.get(&pixmap_id)?;
         let w = pix.width as usize;
         let h = pix.height as usize;
-        let stride = (w + 7) / 8;
+        let stride = w.div_ceil(8);
         let mut bits = vec![0u8; stride * h];
         let data = pix.framebuffer.data();
         for y in 0..h {

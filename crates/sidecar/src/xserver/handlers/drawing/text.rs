@@ -195,7 +195,7 @@ pub(crate) fn handle_poly_text16(state: &mut ClientState, data: &[u8]) -> Vec<u8
                         let fg_b = (gc.foreground & 0xFF) as u8;
                         let gw = glyph.width as usize;
                         let gh = glyph.height as usize;
-                        let row_bytes = (gw + 7) / 8;
+                        let row_bytes = gw.div_ceil(8);
                         let mut pixels = vec![0u8; gw * gh * 4];
                         for row in 0..gh {
                             for col in 0..gw {
@@ -404,7 +404,7 @@ pub(crate) fn handle_image_text16(state: &mut ClientState, data: &[u8]) -> Vec<u
         if let Some(glyph) = glyph_opt {
             let gw = glyph.width as usize;
             let gh = glyph.height as usize;
-            let row_bytes = (gw + 7) / 8;
+            let row_bytes = gw.div_ceil(8);
             let gx = pen_x + ci.left_side_bearing as i32;
             let gy = font.font_ascent as i32 - ci.ascent as i32;
             for row in 0..gh {

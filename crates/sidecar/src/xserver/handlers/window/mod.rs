@@ -44,7 +44,7 @@ pub(crate) fn win_gravity_delta(gravity: u8, dw: i16, dh: i16) -> (i16, i16) {
 /// Windows are placed at the top of their stacking layer, preserving order within the same layer.
 pub(crate) fn restack_by_window_type(state: &mut ClientState, wid: u32, parent_id: u32) {
     let target_layer = state.windows.get(&wid)
-        .map(|w| effective_stacking_layer(w))
+        .map(effective_stacking_layer)
         .unwrap_or(2);
 
     // Remove and collect children in one pass
@@ -56,7 +56,7 @@ pub(crate) fn restack_by_window_type(state: &mut ClientState, wid: u32, parent_i
     let children: Vec<(u32, u8)> = state.windows.get(&parent_id)
         .map(|p| p.children_order.iter().map(|&c| {
             let layer = state.windows.get(&c)
-                .map(|w| effective_stacking_layer(w))
+                .map(effective_stacking_layer)
                 .unwrap_or(2);
             (c, layer)
         }).collect())

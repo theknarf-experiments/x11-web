@@ -33,6 +33,7 @@ pub(crate) const RECORD_END_OF_DATA: u8 = 5;
 
 /// A range of protocol elements to intercept.
 #[derive(Clone, Debug)]
+#[derive(Default)]
 pub(crate) struct RecordRange {
     /// Core request range (first, last opcode).
     pub(crate) core_requests: (u8, u8),
@@ -53,21 +54,6 @@ pub(crate) struct RecordRange {
     pub(crate) client_died: bool,
 }
 
-impl Default for RecordRange {
-    fn default() -> Self {
-        RecordRange {
-            core_requests: (0, 0),
-            core_replies: (0, 0),
-            ext_requests: (0, 0, 0),
-            ext_replies: (0, 0, 0),
-            delivered_events: (0, 0),
-            device_events: (0, 0),
-            errors: (0, 0),
-            client_started: false,
-            client_died: false,
-        }
-    }
-}
 
 impl RecordRange {
     /// Check if a core request opcode matches this range.

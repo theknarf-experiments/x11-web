@@ -705,9 +705,7 @@ pub fn handle_request(
                 }
 
                 // Check if device is already grabbed by this client.
-                if active_grabs.contains_key(&deviceid) {
-                    xproto::GrabStatus::ALREADY_GRABBED
-                } else {
+                if let std::collections::hash_map::Entry::Vacant(e) = active_grabs.entry(deviceid) {
                     let grab = Xi2ActiveGrab {
                         deviceid,
                         grab_window,
@@ -726,8 +724,10 @@ pub fn handle_request(
                         }
                     }
                     debug!("XIGrabDevice: device={deviceid} window={grab_window:#x} mode={grab_mode} owner_events={owner_events}");
-                    active_grabs.insert(deviceid, grab);
+                    e.insert(grab);
                     xproto::GrabStatus::SUCCESS
+                } else {
+                    xproto::GrabStatus::ALREADY_GRABBED
                 }
             } else {
                 xproto::GrabStatus::SUCCESS

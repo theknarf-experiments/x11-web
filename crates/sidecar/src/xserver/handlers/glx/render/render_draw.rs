@@ -188,7 +188,7 @@ pub(crate) fn dispatch(opcode: u16, data: &[u8]) -> Option<bool> {
         }
         // glEdgeFlagv (1 byte boolean)
         22 => {
-            if data.len() >= 1 {
+            if !data.is_empty() {
                 osmesa::gl_edge_flag(data[0]);
             }
         }
@@ -840,7 +840,7 @@ pub(crate) fn dispatch(opcode: u16, data: &[u8]) -> Option<bool> {
         }
         // glIndexubv (opcode 194)
         194 => {
-            if data.len() >= 1 {
+            if !data.is_empty() {
                 osmesa::gl_indexub(data[0]);
             }
         }

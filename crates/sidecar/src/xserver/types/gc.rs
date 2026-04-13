@@ -23,7 +23,7 @@ impl ClipMaskBitmap {
         if x < 0 || y < 0 || x >= self.width as i32 || y >= self.height as i32 {
             return false;
         }
-        let stride = ((self.width as usize) + 7) / 8;
+        let stride = (self.width as usize).div_ceil(8);
         let byte_idx = y as usize * stride + (x as usize) / 8;
         let bit_idx = (x as usize) % 8;
         if byte_idx < self.bits.len() {
@@ -37,7 +37,7 @@ impl ClipMaskBitmap {
     /// by row).  The rectangles are offset by (origin_x, origin_y) so they can
     /// be used directly as GC clip rectangles.
     pub(crate) fn to_clip_rects(&self, origin_x: i16, origin_y: i16) -> Vec<(i16, i16, u16, u16)> {
-        let stride = ((self.width as usize) + 7) / 8;
+        let stride = (self.width as usize).div_ceil(8);
         let mut rects = Vec::new();
         for y in 0..self.height as usize {
             let mut x = 0usize;

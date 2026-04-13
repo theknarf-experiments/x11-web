@@ -260,7 +260,7 @@ pub(crate) fn handle_set_dashes(state: &mut ClientState, data: &[u8]) -> Vec<u8>
         return build_error(BAD_VALUE, state.sequence, 0, 58, 0);
     }
     let dash_data = &data[12..12 + n_dashes];
-    if dash_data.iter().any(|&d| d == 0) {
+    if dash_data.contains(&0) {
         return build_error(BAD_VALUE, state.sequence, 0, 58, 0);
     }
 

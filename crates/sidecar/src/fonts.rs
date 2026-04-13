@@ -108,7 +108,7 @@ impl BitmapFont {
         let rsb = lsb + w as i16;
 
         // Convert FreeType bitmap (8-bit grayscale) to 1-bit MSB-first
-        let row_bytes = ((w as usize) + 7) / 8;
+        let row_bytes = (w as usize).div_ceil(8);
         let mut bmp = vec![0u8; row_bytes * h as usize];
         let buffer = bitmap.buffer();
         let pitch = bitmap.pitch().unsigned_abs() as usize;
@@ -173,7 +173,7 @@ impl BitmapFont {
                 let gx = cursor_x + ci.left_side_bearing as i32;
                 let gy = self.font_ascent as i32 - ci.ascent as i32;
 
-                let row_bytes = ((glyph.width as usize) + 7) / 8;
+                let row_bytes = (glyph.width as usize).div_ceil(8);
                 for row in 0..glyph.height as usize {
                     for col in 0..glyph.width as usize {
                         let byte_idx = row * row_bytes + col / 8;
@@ -225,7 +225,7 @@ impl BitmapFont {
                 let gx = cursor_x + ci.left_side_bearing as i32;
                 let gy = self.font_ascent as i32 - ci.ascent as i32;
 
-                let row_bytes = ((glyph.width as usize) + 7) / 8;
+                let row_bytes = (glyph.width as usize).div_ceil(8);
                 for row in 0..glyph.height as usize {
                     for col in 0..glyph.width as usize {
                         let byte_idx = row * row_bytes + col / 8;
@@ -290,7 +290,7 @@ impl ScalableFont {
         let pitch = bitmap.pitch().unsigned_abs() as usize;
 
         // Convert FreeType bitmap (8-bit gray) to 1-bit MSB bitmap
-        let row_bytes = ((w as usize) + 7) / 8;
+        let row_bytes = (w as usize).div_ceil(8);
         let mut bmp = vec![0u8; row_bytes * h as usize];
         let buf = bitmap.buffer();
         for row in 0..h as usize {
@@ -993,7 +993,7 @@ fn parse_bdf_data(data: &[u8], path: &Path) -> Option<BitmapFont> {
     };
 
     let font_bb = font.metadata.bounding_box;
-    let font_ascent = font_bb.offset.y + font_bb.size.y as i32;
+    let font_ascent = font_bb.offset.y + font_bb.size.y;
     let font_descent = -font_bb.offset.y;
 
     // Collect all glyph codes
@@ -1046,9 +1046,9 @@ fn parse_bdf_data(data: &[u8], path: &Path) -> Option<BitmapFont> {
 
         let ci = CharInfo {
             left_side_bearing: bb.offset.x as i16,
-            right_side_bearing: (bb.offset.x + bb.size.x as i32) as i16,
+            right_side_bearing: (bb.offset.x + bb.size.x) as i16,
             character_width: dw_x as i16,
-            ascent: (bb.offset.y + bb.size.y as i32) as i16,
+            ascent: (bb.offset.y + bb.size.y) as i16,
             descent: -bb.offset.y as i16,
             attributes: 0,
         };
@@ -1071,7 +1071,7 @@ fn parse_bdf_data(data: &[u8], path: &Path) -> Option<BitmapFont> {
         // Extract bitmap data
         let w = bb.size.x as u16;
         let h = bb.size.y as u16;
-        let row_bytes = ((w as usize) + 7) / 8;
+        let row_bytes = (w as usize).div_ceil(8);
         let mut bitmap = vec![0u8; row_bytes * h as usize];
 
         for row in 0..h as usize {
@@ -1185,7 +1185,7 @@ const PCF_COMPRESSED_METRICS: u32 = 0x00000100;
 const PCF_BYTE_MASK: u32 = 1 << 2; // MSB byte order
 const PCF_BIT_MASK: u32 = 1 << 3;  // MSB bit order
 #[allow(dead_code)]
-const PCF_GLYPH_PAD_MASK: u32 = 3 << 0; // 2 bits for glyph padding
+const PCF_GLYPH_PAD_MASK: u32 = 3; // 2 bits for glyph padding
 
 fn pcf_read_u32(data: &[u8], offset: usize, msb: bool) -> u32 {
     if offset + 4 > data.len() {

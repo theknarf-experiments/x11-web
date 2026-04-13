@@ -171,7 +171,7 @@ pub(crate) fn handle_put_image(state: &mut ClientState, data: &[u8]) -> Vec<u8> 
             let h = height as usize;
             let fb_w = fb.width() as usize;
             let fb_h = fb.height() as usize;
-            let row_bytes = (w + 1) / 2;
+            let row_bytes = w.div_ceil(2);
             let padded_row = (row_bytes + 3) & !3;
             let fb_data = fb.data_mut();
             for row in 0..h {
@@ -219,7 +219,7 @@ pub(crate) fn handle_put_image(state: &mut ClientState, data: &[u8]) -> Vec<u8> 
             let h = height as usize;
             let dx = dst_x as usize;
             let dy = dst_y as usize;
-            let row_bytes = (w + 7) / 8;
+            let row_bytes = w.div_ceil(8);
             let padded_row = (row_bytes + 3) & !3;
             let fb_data = fb.data_mut();
             for row in 0..h {
@@ -255,7 +255,7 @@ pub(crate) fn handle_put_image(state: &mut ClientState, data: &[u8]) -> Vec<u8> 
             let fb_h = fb.height() as usize;
             // Each scanline is (left_pad + w) bits, rounded up to 32-bit boundary
             let scanline_bits = left_pad + w;
-            let scanline_bytes = (scanline_bits + 7) / 8;
+            let scanline_bytes = scanline_bits.div_ceil(8);
             let padded_scanline = (scanline_bytes + 3) & !3;
 
             if format == 0 {
@@ -460,7 +460,7 @@ pub(crate) fn handle_get_image(state: &mut ClientState, data: &[u8], seq: u16) -
         1 => {
             // XYPixmap: planar format, one bitmap per plane in plane_mask, MSB plane first.
             // Only planes with bits set in plane_mask are included in the output.
-            let scanline_bytes = (w + 7) / 8;
+            let scanline_bytes = w.div_ceil(8);
             let padded_scanline = (scanline_bytes + 3) & !3;
             let plane_size = padded_scanline * h;
             // Collect which planes are active (in descending order for MSB-first output)
@@ -498,7 +498,7 @@ pub(crate) fn handle_get_image(state: &mut ClientState, data: &[u8], seq: u16) -
             out
         }
         _ => {
-            let scanline_bytes = (w + 7) / 8;
+            let scanline_bytes = w.div_ceil(8);
             let padded_scanline = (scanline_bytes + 3) & !3;
             let mut out = vec![0u8; padded_scanline * h];
             for row in 0..h {

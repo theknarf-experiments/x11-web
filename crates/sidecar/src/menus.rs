@@ -727,7 +727,7 @@ fn build_tree(
         let id = format!("{group_id}.{idx}");
         let label = string_prop(raw, "label").map(strip_underscores);
         let action_name = string_prop(raw, "action");
-        let target = raw.get("target").and_then(|v| owned_value_to_json(v));
+        let target = raw.get("target").and_then(owned_value_to_json);
         let accelerator = string_prop(raw, "accel").map(prettify_accel);
         let icon = string_prop(raw, "icon")
             .or_else(|| string_prop(raw, "verb-icon"));

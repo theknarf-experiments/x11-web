@@ -150,7 +150,7 @@ pub(crate) fn handle_add_glyphs(state: &mut ClientState, data: &[u8], seq: u16) 
                     }
                     Some(fmt) if fmt == PICTFORMAT_A1 => {
                         // A1: each row padded to 4 bytes (in bits)
-                        let row_bytes = pad4((width as usize + 7) / 8);
+                        let row_bytes = pad4((width as usize).div_ceil(8));
                         let total = row_bytes * height as usize;
                         let d = if pixel_off + total <= data.len() {
                             data[pixel_off..pixel_off + total].to_vec()
@@ -282,11 +282,7 @@ pub(crate) fn handle_add_glyphs_from_picture(state: &mut ClientState, data: &[u8
         // Get the framebuffer data from the drawable
         if let Some(px) = state.pixmaps.get(&did) {
             Some((px.framebuffer.data().to_vec(), px.framebuffer.width() as usize))
-        } else if let Some(win) = state.windows.get(&did) {
-            Some((win.framebuffer.data().to_vec(), win.framebuffer.width() as usize))
-        } else {
-            None
-        }
+        } else { state.windows.get(&did).map(|win| (win.framebuffer.data().to_vec(), win.framebuffer.width() as usize)) }
     });
 
     let format_id = state.render.glyphsets.get(&gsid).map(|gs| gs.format_id);
@@ -297,8 +293,8 @@ pub(crate) fn handle_add_glyphs_from_picture(state: &mut ClientState, data: &[u8
     let mut src_x_cursor: usize = 0;
     let mut glyphs_to_store: Vec<(u32, StoredGlyph)> = Vec::with_capacity(num_glyphs);
 
-    for (_idx, (&gid, &(width, height, x, y, x_off, y_off))) in
-        glyph_ids.iter().zip(glyph_infos.iter()).enumerate()
+    for (&gid, &(width, height, x, y, x_off, y_off)) in
+        glyph_ids.iter().zip(glyph_infos.iter())
     {
         let glyph_data = if width > 0 && height > 0 {
             if let Some((ref fb_data, fb_stride)) = src_drawable {
@@ -324,7 +320,7 @@ pub(crate) fn handle_add_glyphs_from_picture(state: &mut ClientState, data: &[u8
                             }
                             // Pad row to 4 bytes
                             let pad = row_bytes - width as usize;
-                            pixels.extend(std::iter::repeat(0u8).take(pad));
+                            pixels.extend(std::iter::repeat_n(0u8, pad));
                         }
                     }
                     Some(fmt) if fmt == PICTFORMAT_ARGB32 => {
@@ -357,7 +353,7 @@ pub(crate) fn handle_add_glyphs_from_picture(state: &mut ClientState, data: &[u8
                                 pixels.push(alpha);
                             }
                             let pad = row_bytes - width as usize;
-                            pixels.extend(std::iter::repeat(0u8).take(pad));
+                            pixels.extend(std::iter::repeat_n(0u8, pad));
                         }
                     }
                 }
@@ -626,7 +622,7 @@ fn get_glyph_alpha(data: &[u8], width: u16, x: u16, y: u16, format_id: u32) -> u
             }
         }
         f if f == PICTFORMAT_A1 => {
-            let row_bytes = pad4((width as usize + 7) / 8);
+            let row_bytes = pad4((width as usize).div_ceil(8));
             let byte_off = y as usize * row_bytes + (x as usize / 8);
             let bit_off = x as usize % 8;
             if byte_off < data.len() {

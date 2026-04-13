@@ -567,7 +567,7 @@ pub(crate) fn handle_configure_window(state: &mut ClientState, data: &[u8], seq:
                 } else {
                     // No sibling: lower to bottom of this window's stacking layer
                     let target_layer = state.windows.get(&wid)
-                        .map(|w| super::effective_stacking_layer(w))
+                        .map(super::effective_stacking_layer)
                         .unwrap_or(2);
 
                     if let Some(parent_win) = state.windows.get_mut(&parent_id) {
@@ -577,7 +577,7 @@ pub(crate) fn handle_configure_window(state: &mut ClientState, data: &[u8], seq:
                     let children: Vec<(u32, u8)> = state.windows.get(&parent_id)
                         .map(|p| p.children_order.iter().map(|&c| {
                             let layer = state.windows.get(&c)
-                                .map(|w| super::effective_stacking_layer(w))
+                                .map(super::effective_stacking_layer)
                                 .unwrap_or(2);
                             (c, layer)
                         }).collect())
