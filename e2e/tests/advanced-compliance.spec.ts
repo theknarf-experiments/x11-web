@@ -2166,4 +2166,144 @@ d.close()
 		expect(output).toContain("frame_set=true");
 		expect(output).toContain("frame_extents=[0, 0, 0, 0]");
 	});
+
+	test("_NET_WM_STATE_MODAL raises window above parent", async ({
+		sidecarContainer,
+	}) => {
+		const output = await runPythonX11(
+			sidecarContainer,
+			`
+import Xlib.display, Xlib.X, Xlib.protocol.event
+import time
+d = Xlib.display.Display()
+screen = d.screen()
+
+# Create parent and dialog windows
+parent = screen.root.create_window(0, 0, 400, 300, 0, screen.root_depth)
+parent.map()
+d.sync()
+
+dialog = screen.root.create_window(50, 50, 200, 150, 0, screen.root_depth)
+dialog.map()
+d.sync()
+time.sleep(0.1)
+
+# Set MODAL state via ClientMessage
+state_atom = d.intern_atom('_NET_WM_STATE')
+modal_atom = d.intern_atom('_NET_WM_STATE_MODAL')
+event = Xlib.protocol.event.ClientMessage(
+    window=dialog,
+    client_type=state_atom,
+    data=(32, [1, modal_atom, 0, 0, 0])  # action=1 (add)
+)
+screen.root.send_event(event, event_mask=Xlib.X.SubstructureRedirectMask | Xlib.X.SubstructureNotifyMask)
+d.sync()
+time.sleep(0.1)
+
+# Verify MODAL state was set
+prop = dialog.get_full_property(state_atom, d.intern_atom('ATOM'))
+if prop and modal_atom in prop.value:
+    print("modal_set=True")
+else:
+    print("modal_set=False")
+
+# Verify dialog is above parent in stacking order
+tree = screen.root.query_tree()
+children = [c.id for c in tree.children]
+if parent.id in children and dialog.id in children:
+    p_idx = children.index(parent.id)
+    d_idx = children.index(dialog.id)
+    print(f"dialog_above_parent={d_idx > p_idx}")
+
+dialog.destroy()
+parent.destroy()
+d.close()
+`,
+		);
+		expect(output).toContain("modal_set=True");
+		expect(output).toContain("dialog_above_parent=True");
+	});
+
+	test("_NET_WM_STATE_DEMANDS_ATTENTION is accepted", async ({
+		sidecarContainer,
+	}) => {
+		const output = await runPythonX11(
+			sidecarContainer,
+			`
+import Xlib.display, Xlib.X, Xlib.protocol.event
+d = Xlib.display.Display()
+screen = d.screen()
+
+w = screen.root.create_window(0, 0, 200, 200, 0, screen.root_depth)
+w.map()
+d.sync()
+
+# Set DEMANDS_ATTENTION state
+state_atom = d.intern_atom('_NET_WM_STATE')
+attention_atom = d.intern_atom('_NET_WM_STATE_DEMANDS_ATTENTION')
+event = Xlib.protocol.event.ClientMessage(
+    window=w,
+    client_type=state_atom,
+    data=(32, [1, attention_atom, 0, 0, 0])
+)
+screen.root.send_event(event, event_mask=Xlib.X.SubstructureRedirectMask | Xlib.X.SubstructureNotifyMask)
+d.sync()
+
+import time
+time.sleep(0.1)
+
+# Verify the state was recorded
+prop = w.get_full_property(state_atom, d.intern_atom('ATOM'))
+if prop and attention_atom in prop.value:
+    print("demands_attention_set=True")
+else:
+    print("demands_attention_set=False")
+
+w.destroy()
+d.close()
+`,
+		);
+		expect(output).toContain("demands_attention_set=True");
+	});
+
+	test("_NET_WM_ALLOWED_ACTIONS is set on mapped windows", async ({
+		sidecarContainer,
+	}) => {
+		const output = await runPythonX11(
+			sidecarContainer,
+			`
+import Xlib.display, Xlib.X
+import time
+d = Xlib.display.Display()
+screen = d.screen()
+
+w = screen.root.create_window(0, 0, 100, 100, 0, screen.root_depth)
+w.map()
+d.sync()
+time.sleep(0.2)
+
+allowed_atom = d.intern_atom('_NET_WM_ALLOWED_ACTIONS')
+prop = w.get_full_property(allowed_atom, d.intern_atom('ATOM'))
+if prop and len(prop.value) > 0:
+    close_atom = d.intern_atom('_NET_WM_ACTION_CLOSE')
+    move_atom = d.intern_atom('_NET_WM_ACTION_MOVE')
+    resize_atom = d.intern_atom('_NET_WM_ACTION_RESIZE')
+    has_close = close_atom in prop.value
+    has_move = move_atom in prop.value
+    has_resize = resize_atom in prop.value
+    print(f"actions_count={len(prop.value)}")
+    print(f"has_close={has_close}")
+    print(f"has_move={has_move}")
+    print(f"has_resize={has_resize}")
+else:
+    print("no_allowed_actions")
+
+w.destroy()
+d.close()
+`,
+		);
+		expect(output).toContain("has_close=True");
+		expect(output).toContain("has_move=True");
+		expect(output).toContain("has_resize=True");
+	});
 });
