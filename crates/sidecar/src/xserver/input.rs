@@ -203,8 +203,9 @@ fn find_deepest_window(
 }
 
 /// Propagate a keyboard event up the window tree from the focus window.
-/// Returns the window that should receive the event.
-/// Per X11 spec: keyboard events propagate from focus window to ancestors
+/// Returns the window that should receive the event, or 0 if propagation
+/// was blocked by `do_not_propagate_mask`.
+/// Per X11 spec §7.5: keyboard events propagate from focus window to ancestors
 /// until a window selecting for the event is found, or do_not_propagate blocks it.
 pub(crate) fn propagate_keyboard_event(
     windows: &HashMap<u32, WindowState>,
@@ -218,7 +219,7 @@ pub(crate) fn propagate_keyboard_event(
                 return current;
             }
             if w.do_not_propagate_mask & required_mask != 0 {
-                return focus_window; // Blocked; caller will see no mask match
+                return 0; // Blocked by do_not_propagate — discard event
             }
             let p = w.parent;
             if p == 0 || p == current {
@@ -229,6 +230,8 @@ pub(crate) fn propagate_keyboard_event(
             break;
         }
     }
+    // No window in the chain selected for this event.
+    // Return focus_window as fallback (caller decides based on grab state).
     focus_window
 }
 
@@ -535,7 +538,12 @@ fn resolve_keyboard_event_target(
     // No active grab — normal keyboard delivery
     let focus = state.focus_window;
     let target = if focus != 0 && focus != state.root_window {
-        propagate_keyboard_event(&state.windows, focus, required_mask)
+        let prop = propagate_keyboard_event(&state.windows, focus, required_mask);
+        if prop == 0 {
+            // Blocked by do_not_propagate — discard event
+            return (0, 0, 0);
+        }
+        prop
     } else {
         top_level
     };
@@ -624,6 +632,11 @@ pub(crate) fn build_x11_input_event(state: &mut ClientState, input: &InputEvent,
         }
         _ => (top_level, 0, 0),
     };
+
+    // If target is 0, event was blocked by do_not_propagate — discard it.
+    if event_window == 0 {
+        return Vec::new();
+    }
 
     // Generate crossing events for pointer movement between windows
     let mut crossing_events = Vec::new();
@@ -1134,9 +1147,9 @@ mod tests {
         windows.insert(10, parent);
         windows.insert(20, test_window(20, 10, 0, 0, 50, 50, 0));
 
-        // Should be blocked at window 10, returning focus window (20).
+        // Should be blocked at window 10, returning 0 (event discarded).
         let target = propagate_keyboard_event(&windows, 20, KEY_PRESS_MASK);
-        assert_eq!(target, 20);
+        assert_eq!(target, 0);
     }
 
     #[test]
@@ -1239,7 +1252,7 @@ mod tests {
         windows.insert(10, child);
 
         let target = propagate_keyboard_event(&windows, 10, KEY_PRESS_MASK);
-        // Should return focus_window (blocked, no match)
-        assert_eq!(target, 10);
+        // Should return 0 (blocked by do_not_propagate, event discarded)
+        assert_eq!(target, 0);
     }
 }

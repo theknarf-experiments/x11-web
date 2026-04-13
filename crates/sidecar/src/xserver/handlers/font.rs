@@ -127,15 +127,46 @@ pub(crate) fn handle_query_font(state: &mut ClientState, data: &[u8], seq: u16) 
     let point_size = pixel_size * 10;
     let char_width = font.max_bounds.character_width as i32;
 
-    // Intern the property atoms.
+    // Parse XLFD name components for additional properties.
+    // XLFD format: -foundry-family-weight-slant-setwidth-addstyle-pixel-point-resx-resy-spacing-avgwidth-registry-encoding
+    let xlfd_parts: Vec<&str> = font.name.split('-').collect();
+    let (xlfd_weight, xlfd_spacing, xlfd_avg_width) = if xlfd_parts.len() >= 15 {
+        let w = match xlfd_parts[3].to_lowercase().as_str() {
+            "bold" | "demibold" => 200,
+            "medium" | "regular" | "" => 10,
+            "light" => 5,
+            _ => 10,
+        };
+        let spacing = match xlfd_parts[11].to_uppercase().as_str() {
+            "M" | "C" => 1, // Monospaced / Cell
+            "P" => 2, // Proportional
+            _ => 1,
+        };
+        let avg_w = xlfd_parts[12].parse::<i32>().unwrap_or(char_width * 10);
+        (w, spacing, avg_w)
+    } else {
+        (10, 1, char_width * 10)
+    };
+
+    // Intern the property atoms. Per X11 spec, these match standard BDF/PCF properties.
     let prop_defs: Vec<(&str, i32)> = vec![
         ("PIXEL_SIZE", pixel_size),
         ("POINT_SIZE", point_size),
         ("RESOLUTION_X", 75),
         ("RESOLUTION_Y", 75),
-        ("WEIGHT", 10), // medium weight
+        ("WEIGHT", xlfd_weight),
         ("X_HEIGHT", (font.font_ascent as i32 * 2) / 3),
         ("QUAD_WIDTH", char_width),
+        ("CAP_HEIGHT", font.font_ascent as i32),
+        ("FONT_ASCENT", font.font_ascent as i32),
+        ("FONT_DESCENT", font.font_descent as i32),
+        ("AVERAGE_WIDTH", xlfd_avg_width),
+        ("SPACING", xlfd_spacing),
+        ("MIN_SPACE", char_width),
+        ("NORM_SPACE", char_width),
+        ("MAX_SPACE", char_width),
+        ("UNDERLINE_POSITION", -(font.font_descent as i32 / 2).max(1)),
+        ("UNDERLINE_THICKNESS", 1),
     ];
 
     let props: Vec<(u32, i32)> = {

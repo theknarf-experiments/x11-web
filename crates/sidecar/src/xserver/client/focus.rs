@@ -140,21 +140,29 @@ impl ClientState {
     /// Compute focus detail modes and the virtual path between two focus windows.
     /// Returns (out_detail, in_detail, virtual_ancestors).
     fn compute_focus_detail(&self, old_focus: u32, new_focus: u32) -> (u8, u8, Vec<u32>) {
-        // Special cases for None (0) and PointerRoot (1)
+        // Special cases for None (0) and PointerRoot (1) per X11 spec §12.5.
+        //
+        // Detail codes: 0=Ancestor, 1=Virtual, 2=Inferior, 3=Nonlinear,
+        //               4=NonlinearVirtual, 5=Pointer, 6=PointerRoot, 7=None
         if old_focus == 0 {
-            return (7, 7, Vec::new()); // None detail
+            // From None:
+            if new_focus == 1 {
+                return (7, 6, Vec::new()); // None → PointerRoot: out=None, in=PointerRoot on root
+            }
+            return (7, 3, Vec::new()); // None → window: out=None, in=Nonlinear
         }
         if old_focus == 1 {
+            // From PointerRoot:
             if new_focus == 0 {
-                return (6, 5, Vec::new()); // PointerRoot → None
+                return (6, 7, Vec::new()); // PointerRoot → None: out=PointerRoot on root, in=None
             }
-            return (6, 6, Vec::new()); // PointerRoot
+            return (6, 3, Vec::new()); // PointerRoot → window: out=PointerRoot on root, in=Nonlinear
         }
         if new_focus == 0 {
-            return (5, 5, Vec::new()); // → None (Pointer detail)
+            return (3, 7, Vec::new()); // window → None: out=Nonlinear, in=None
         }
         if new_focus == 1 {
-            return (6, 6, Vec::new()); // → PointerRoot
+            return (3, 6, Vec::new()); // window → PointerRoot: out=Nonlinear, in=PointerRoot on root
         }
 
         // Build ancestor chains for both windows
