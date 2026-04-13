@@ -67,12 +67,12 @@ pub(crate) fn build_xkb_get_map_reply(state: &mut ClientState, seq: u16) -> Vec<
     // =====================================================================
     let mut total_syms_count: u16 = 0;
     for kc in MIN_KEY_CODE..=MAX_KEY_CODE {
-        let (normal, shifted) = super::super::keycode_to_keysym(kc);
+        let (normal, shifted) = super::super::resolve_keysym(kc, &state.custom_keymap);
         let two_level = normal != 0 && shifted != 0 && normal != shifted;
         let width: u8 = if two_level { 2 } else { 1 };
 
         // Collect keysyms for each group.
-        // Group 0: built-in US-QWERTY (from keycode_to_keysym).
+        // Group 0: custom keymap (from ChangeKeyboardMapping/SetMap) or built-in US-QWERTY.
         // Groups 1+: from xkb_extra_groups tables (fallback to group 0 if missing).
         let mut group_syms: Vec<Vec<u32>> = Vec::with_capacity(num_groups as usize);
 

@@ -907,7 +907,7 @@ fn handle_xim_forward_event(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
     let modifier_state = u16::from_le_bytes([x_event[28], x_event[29]]);
 
     // Look up the keysym from the keycode.
-    let (normal_keysym, shifted_keysym) = super::keycode_to_keysym(keycode);
+    let (normal_keysym, shifted_keysym) = super::resolve_keysym(keycode, &state.custom_keymap);
     let shift_pressed = modifier_state & 0x0001 != 0;
     let caps_lock = modifier_state & 0x0002 != 0;
 

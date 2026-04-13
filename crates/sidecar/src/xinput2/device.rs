@@ -161,6 +161,7 @@ pub(crate) fn build_device_key_mapping_reply(
     count: u8,
     seq: u16,
     msb_first: bool,
+    custom_keymap: &std::collections::HashMap<u8, Vec<u32>>,
 ) -> Vec<u8> {
     // We use 4 keysyms per keycode (normal, shift, altgr, shift+altgr)
     // matching the core GetKeyboardMapping format.
@@ -176,16 +177,22 @@ pub(crate) fn build_device_key_mapping_reply(
     write_u32_bo(&mut reply, 4, length_units, msb_first);
     reply[8] = 24; // xi_reply_type
 
-    // Fill in keysyms using the same keycode_to_keysym mapping as core.
+    // Fill in keysyms, consulting custom_keymap first, then built-in US layout.
     for i in 0..n_keycodes {
         let kc = first_keycode.wrapping_add(i as u8);
-        let (normal, shifted) = keycode_to_keysym_xi(kc);
         let offset = 32 + i * keysyms_per_keycode as usize * 4;
-        write_u32_bo(&mut reply, offset, normal, msb_first);
-        write_u32_bo(&mut reply, offset + 4, shifted, msb_first);
-        // altgr and shift+altgr are NoSymbol
-        write_u32_bo(&mut reply, offset + 8, 0, msb_first);
-        write_u32_bo(&mut reply, offset + 12, 0, msb_first);
+        if let Some(syms) = custom_keymap.get(&kc) {
+            for (j, &sym) in syms.iter().enumerate().take(keysyms_per_keycode as usize) {
+                write_u32_bo(&mut reply, offset + j * 4, sym, msb_first);
+            }
+        } else {
+            let (normal, shifted) = keycode_to_keysym_xi(kc);
+            write_u32_bo(&mut reply, offset, normal, msb_first);
+            write_u32_bo(&mut reply, offset + 4, shifted, msb_first);
+            // altgr and shift+altgr are NoSymbol
+            write_u32_bo(&mut reply, offset + 8, 0, msb_first);
+            write_u32_bo(&mut reply, offset + 12, 0, msb_first);
+        }
     }
     reply
 }

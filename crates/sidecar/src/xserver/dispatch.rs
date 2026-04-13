@@ -81,6 +81,7 @@ pub(super) fn handle_request(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
                 SCREEN_HEIGHT,
                 state.root_window,
                 state.msb_first,
+                &state.custom_keymap,
             );
             if data.len() >= 2 && data[1] == x11rb_protocol::protocol::xinput::XI_QUERY_POINTER_REQUEST
                 && reply.len() >= 12

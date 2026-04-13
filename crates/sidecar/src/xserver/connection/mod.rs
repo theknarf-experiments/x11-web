@@ -1219,7 +1219,7 @@ pub(crate) async fn handle_client(
                             // the input event.
                             if let x11_web_protocol::InputEvent::KeyPress { keycode, state: mask } = &input {
                                 let shifted = (*mask & 1) != 0; // ShiftMask
-                                let (normal_ks, shifted_ks) = handlers::keycode_to_keysym(*keycode as u8);
+                                let (normal_ks, shifted_ks) = handlers::resolve_keysym(*keycode as u8, &state.custom_keymap);
                                 let keysym = if shifted { shifted_ks } else { normal_ks };
 
                                 match compose.process(keysym) {

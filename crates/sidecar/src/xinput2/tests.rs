@@ -53,6 +53,7 @@ use super::*;
             768,
             0x62,
             false,
+            &std::collections::HashMap::new(),
         );
         assert!(!bytes.is_empty(), "expected a reply");
 
@@ -134,6 +135,7 @@ use super::*;
             768,
             0x62,
             false,
+            &std::collections::HashMap::new(),
         );
         let (reply, _) = xi::XIQueryVersionReply::try_parse(&bytes).unwrap();
         assert_eq!(reply.sequence, 7);
@@ -192,6 +194,7 @@ use super::*;
             768,
             0x62,
             false,
+            &std::collections::HashMap::new(),
         );
         assert!(bytes.is_empty(), "XISelectEvents has no reply");
         assert_eq!(selections.len(), 1);
@@ -394,6 +397,7 @@ use super::*;
             768,
             root_window,
             false,
+            &std::collections::HashMap::new(),
         );
         assert!(pending.raw_motion, "synthetic RawMotion should be marked");
 
@@ -451,6 +455,7 @@ use super::*;
             768,
             0x62,
             false,
+            &std::collections::HashMap::new(),
         )
     }
 

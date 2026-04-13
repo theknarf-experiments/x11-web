@@ -39,6 +39,7 @@ pub fn handle_request(
     screen_height: u16,
     root_window: u32,
     msb_first: bool,
+    custom_keymap: &std::collections::HashMap<u8, Vec<u32>>,
 ) -> Vec<u8> {
     if data.len() < 4 {
         return Vec::new();
@@ -656,7 +657,7 @@ pub fn handle_request(
             let first_keycode = if body.len() >= 2 { body[1] } else { 8 };
             let count = if body.len() >= 3 { body[2] } else { 0 };
             debug!("XI 1.x GetDeviceKeyMapping: first={first_keycode} count={count}");
-            build_device_key_mapping_reply(first_keycode, count, seq, msb_first)
+            build_device_key_mapping_reply(first_keycode, count, seq, msb_first, custom_keymap)
         }
 
         // GetDeviceModifierMapping (26): return the actual modifier map

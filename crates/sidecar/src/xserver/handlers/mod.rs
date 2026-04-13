@@ -368,6 +368,18 @@ fn emit_cursor_changed(state: &mut ClientState, wid: u32) {
 // Use is_descendant_of from the parent module (ancestor_chain also available via super:: if needed).
 use super::is_descendant_of;
 
+/// Resolve keycode to (normal_keysym, shifted_keysym), consulting the custom
+/// keymap first (set by ChangeKeyboardMapping / XkbSetMap), then falling back
+/// to the built-in US keyboard layout.
+pub(crate) fn resolve_keysym(keycode: u8, custom_keymap: &std::collections::HashMap<u8, Vec<u32>>) -> (u32, u32) {
+    if let Some(syms) = custom_keymap.get(&keycode) {
+        let normal = syms.first().copied().unwrap_or(0);
+        let shifted = syms.get(1).copied().unwrap_or(normal);
+        return (normal, shifted);
+    }
+    keycode_to_keysym(keycode)
+}
+
 /// Map X11 keycode to (normal_keysym, shifted_keysym).
 /// Based on standard US keyboard layout.
 pub(crate) fn keycode_to_keysym(keycode: u8) -> (u32, u32) {
@@ -756,6 +768,39 @@ mod tests {
         assert_eq!(keycode_to_keysym(1), (0, 0));
         assert_eq!(keycode_to_keysym(200), (0, 0));
         assert_eq!(keycode_to_keysym(255), (0, 0));
+    }
+
+    // -----------------------------------------------------------------------
+    // resolve_keysym — custom keymap overrides
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn resolve_keysym_uses_custom_keymap() {
+        let mut custom = std::collections::HashMap::new();
+        // Override keycode 38 ('a') to produce 'x' / 'X'
+        custom.insert(38u8, vec![0x78, 0x58]);
+        let (normal, shifted) = resolve_keysym(38, &custom);
+        assert_eq!(normal, 0x78); // 'x'
+        assert_eq!(shifted, 0x58); // 'X'
+    }
+
+    #[test]
+    fn resolve_keysym_falls_back_to_builtin() {
+        let custom = std::collections::HashMap::new();
+        // No custom mapping for keycode 38 => built-in 'a'/'A'
+        let (normal, shifted) = resolve_keysym(38, &custom);
+        assert_eq!(normal, 0x61); // 'a'
+        assert_eq!(shifted, 0x41); // 'A'
+    }
+
+    #[test]
+    fn resolve_keysym_single_sym_duplicates() {
+        let mut custom = std::collections::HashMap::new();
+        // Single keysym: shifted should equal normal
+        custom.insert(10u8, vec![0xff1b]); // Escape
+        let (normal, shifted) = resolve_keysym(10, &custom);
+        assert_eq!(normal, 0xff1b);
+        assert_eq!(shifted, 0xff1b);
     }
 
     // -----------------------------------------------------------------------
