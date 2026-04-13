@@ -527,11 +527,10 @@ pub(crate) fn dispatch(opcode: u16, data: &[u8]) -> Option<bool> {
             if data.len() >= 4 {
                 let n = i32::from_le_bytes([data[0], data[1], data[2], data[3]]);
                 if n > 0 && data.len() >= 4 + n as usize * 4 {
-                    let mut textures = vec![0u32; n as usize];
-                    for i in 0..n as usize {
+                    let textures: Vec<u32> = (0..n as usize).map(|i| {
                         let off = 4 + i * 4;
-                        textures[i] = u32::from_le_bytes([data[off], data[off+1], data[off+2], data[off+3]]);
-                    }
+                        u32::from_le_bytes([data[off], data[off+1], data[off+2], data[off+3]])
+                    }).collect();
                     osmesa::gl_delete_textures(&textures);
                 }
             }

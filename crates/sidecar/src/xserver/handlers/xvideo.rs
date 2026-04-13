@@ -139,8 +139,8 @@ fn convert_i420_to_argb(
     let w = width as usize;
     let h = height as usize;
     let y_size = w * h;
-    let uv_stride = (w + 1) / 2;
-    let uv_size = uv_stride * ((h + 1) / 2);
+    let uv_stride = w.div_ceil(2);
+    let uv_size = uv_stride * h.div_ceil(2);
 
     if yuv.len() < y_size + 2 * uv_size {
         return vec![0u8; w * h * 4];
@@ -181,8 +181,8 @@ fn convert_yv12_to_argb(
     let w = width as usize;
     let h = height as usize;
     let y_size = w * h;
-    let uv_stride = (w + 1) / 2;
-    let uv_size = uv_stride * ((h + 1) / 2);
+    let uv_stride = w.div_ceil(2);
+    let uv_size = uv_stride * h.div_ceil(2);
 
     if yuv.len() < y_size + 2 * uv_size {
         return vec![0u8; w * h * 4];
@@ -344,8 +344,8 @@ fn convert_nv12_to_argb(
     let w = width as usize;
     let h = height as usize;
     let y_size = w * h;
-    let uv_stride = ((w + 1) / 2) * 2; // interleaved UV, so stride is width (rounded up to even)
-    let uv_rows = (h + 1) / 2;
+    let uv_stride = w.div_ceil(2) * 2; // interleaved UV, so stride is width (rounded up to even)
+    let uv_rows = h.div_ceil(2);
     let uv_size = uv_stride * uv_rows;
 
     if data.len() < y_size + uv_size {
@@ -387,8 +387,8 @@ fn convert_nv21_to_argb(
     let w = width as usize;
     let h = height as usize;
     let y_size = w * h;
-    let uv_stride = ((w + 1) / 2) * 2;
-    let uv_rows = (h + 1) / 2;
+    let uv_stride = w.div_ceil(2) * 2;
+    let uv_rows = h.div_ceil(2);
     let uv_size = uv_stride * uv_rows;
 
     if data.len() < y_size + uv_size {
@@ -430,7 +430,7 @@ fn convert_yv16_to_argb(
     let w = width as usize;
     let h = height as usize;
     let y_size = w * h;
-    let uv_stride = (w + 1) / 2;
+    let uv_stride = w.div_ceil(2);
     let uv_size = uv_stride * h; // full height, half width
 
     if data.len() < y_size + 2 * uv_size {
@@ -616,9 +616,9 @@ fn convert_argb_to_i420(argb: &[u8], width: u32, height: u32) -> Vec<u8> {
     let (size, _, _) = query_image_attributes(FOURCC_I420, width, height);
     let mut out = vec![0u8; size as usize];
     let y_stride = width;
-    let uv_stride = (width + 1) / 2;
+    let uv_stride = width.div_ceil(2);
     let y_size = y_stride * height;
-    let uv_size = uv_stride * ((height + 1) / 2);
+    let uv_size = uv_stride * height.div_ceil(2);
     let u_off = y_size as usize;
     let v_off = u_off + uv_size as usize;
     for row in 0..height {
@@ -643,9 +643,9 @@ fn convert_argb_to_yv12(argb: &[u8], width: u32, height: u32) -> Vec<u8> {
     let (size, _, _) = query_image_attributes(FOURCC_YV12, width, height);
     let mut out = vec![0u8; size as usize];
     let y_stride = width;
-    let uv_stride = (width + 1) / 2;
+    let uv_stride = width.div_ceil(2);
     let y_size = y_stride * height;
-    let uv_size = uv_stride * ((height + 1) / 2);
+    let uv_size = uv_stride * height.div_ceil(2);
     let v_off = y_size as usize;           // YV12: V before U
     let u_off = v_off + uv_size as usize;
     for row in 0..height {
@@ -721,7 +721,7 @@ fn convert_argb_to_nv12(argb: &[u8], width: u32, height: u32) -> Vec<u8> {
     let mut out = vec![0u8; size as usize];
     let y_stride = width;
     let y_size = y_stride * height;
-    let uv_stride = ((width + 1) / 2) * 2;
+    let uv_stride = width.div_ceil(2) * 2;
     for row in 0..height {
         for col in 0..width {
             let px = ((row * width + col) * 4) as usize;
@@ -748,7 +748,7 @@ fn convert_argb_to_nv21(argb: &[u8], width: u32, height: u32) -> Vec<u8> {
     let mut out = vec![0u8; size as usize];
     let y_stride = width;
     let y_size = y_stride * height;
-    let uv_stride = ((width + 1) / 2) * 2;
+    let uv_stride = width.div_ceil(2) * 2;
     for row in 0..height {
         for col in 0..width {
             let px = ((row * width + col) * 4) as usize;
@@ -774,7 +774,7 @@ fn convert_argb_to_yv16(argb: &[u8], width: u32, height: u32) -> Vec<u8> {
     let (size, _, _) = query_image_attributes(FOURCC_YV16, width, height);
     let mut out = vec![0u8; size as usize];
     let y_stride = width;
-    let uv_stride = (width + 1) / 2;
+    let uv_stride = width.div_ceil(2);
     let y_size = y_stride * height;
     let uv_size = uv_stride * height;
     let v_off = y_size as usize;
@@ -842,17 +842,17 @@ fn query_image_attributes(fourcc: u32, width: u32, height: u32) -> (u32, [u32; 3
     match fourcc {
         FOURCC_I420 => {
             let y_pitch = width;
-            let uv_pitch = (width + 1) / 2;
+            let uv_pitch = width.div_ceil(2);
             let y_size = y_pitch * height;
-            let uv_size = uv_pitch * ((height + 1) / 2);
+            let uv_size = uv_pitch * height.div_ceil(2);
             let total = y_size + 2 * uv_size;
             (total, [y_pitch, uv_pitch, uv_pitch], [0, y_size, y_size + uv_size])
         }
         FOURCC_YV12 => {
             let y_pitch = width;
-            let uv_pitch = (width + 1) / 2;
+            let uv_pitch = width.div_ceil(2);
             let y_size = y_pitch * height;
-            let uv_size = uv_pitch * ((height + 1) / 2);
+            let uv_size = uv_pitch * height.div_ceil(2);
             let total = y_size + 2 * uv_size;
             // YV12: V plane before U plane
             (total, [y_pitch, uv_pitch, uv_pitch], [0, y_size, y_size + uv_size])
@@ -864,15 +864,15 @@ fn query_image_attributes(fourcc: u32, width: u32, height: u32) -> (u32, [u32; 3
         }
         FOURCC_NV12 | FOURCC_NV21 => {
             let y_pitch = width;
-            let uv_pitch = ((width + 1) / 2) * 2; // interleaved UV pairs
+            let uv_pitch = width.div_ceil(2) * 2; // interleaved UV pairs
             let y_size = y_pitch * height;
-            let uv_size = uv_pitch * ((height + 1) / 2);
+            let uv_size = uv_pitch * height.div_ceil(2);
             let total = y_size + uv_size;
             (total, [y_pitch, uv_pitch, 0], [0, y_size, 0])
         }
         FOURCC_YV16 => {
             let y_pitch = width;
-            let uv_pitch = (width + 1) / 2;
+            let uv_pitch = width.div_ceil(2);
             let y_size = y_pitch * height;
             let uv_size = uv_pitch * height; // full height, half width
             let total = y_size + 2 * uv_size;
@@ -1405,13 +1405,13 @@ pub(crate) fn handle_xvideo_request(state: &mut ClientState, data: &[u8], seq: u
                 state.write_u16(&mut reply, 18, height as u16);
 
                 // Write pitches
-                for i in 0..num_planes as usize {
-                    state.write_u32(&mut reply, 32 + i * 4, pitches[i]);
+                for (i, &pitch) in pitches.iter().take(num_planes as usize).enumerate() {
+                    state.write_u32(&mut reply, 32 + i * 4, pitch);
                 }
                 // Write offsets
                 let off_base = 32 + num_planes as usize * 4;
-                for i in 0..num_planes as usize {
-                    state.write_u32(&mut reply, off_base + i * 4, offsets[i]);
+                for (i, &offset) in offsets.iter().take(num_planes as usize).enumerate() {
+                    state.write_u32(&mut reply, off_base + i * 4, offset);
                 }
 
                 reply

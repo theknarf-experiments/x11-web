@@ -72,24 +72,25 @@ pub(crate) fn handle_map_window(state: &mut ClientState, data: &[u8], seq: u16) 
 
     // Pre-extract background fill info before the main mutable borrow.
     // Complex fills (ParentRelative, pixmap tiling) need separate data extraction.
-    let bg_info: Option<(Option<u32>, u32, i16, i16, u32, u16, u16)> = state.windows.get(&wid).map(|w| {
-        (w.background_pixmap, w.background_pixel, w.x, w.y, w.parent, w.width, w.height)
+    struct BgInfo { bg_pixmap: Option<u32>, bg_pixel: u32, x: i16, y: i16, parent: u32, width: u16, height: u16 }
+    let bg_info: Option<BgInfo> = state.windows.get(&wid).map(|w| {
+        BgInfo { bg_pixmap: w.background_pixmap, bg_pixel: w.background_pixel, x: w.x, y: w.y, parent: w.parent, width: w.width, height: w.height }
     });
 
     // For ParentRelative, copy parent pixel data before mutating
-    let parent_pixel_data: Option<(Vec<u8>, u32, u32)> = bg_info.as_ref().and_then(|(bg_pix, _, _, _, parent_id, _, _)| {
-        if *bg_pix == Some(1) {
-            state.windows.get(parent_id).map(|p| (p.framebuffer.data().to_vec(), p.framebuffer.width(), p.framebuffer.height()))
+    let parent_pixel_data: Option<(Vec<u8>, u32, u32)> = bg_info.as_ref().and_then(|info| {
+        if info.bg_pixmap == Some(1) {
+            state.windows.get(&info.parent).map(|p| (p.framebuffer.data().to_vec(), p.framebuffer.width(), p.framebuffer.height()))
         } else {
             None
         }
     });
 
     // For pixmap tiling, copy pixmap data before mutating
-    let tile_pixel_data: Option<(Vec<u8>, u32, u32)> = bg_info.as_ref().and_then(|(bg_pix, _, _, _, _, _, _)| {
-        match bg_pix {
-            Some(pid) if *pid > 1 => {
-                state.pixmaps.get(pid).map(|p| (p.framebuffer.data().to_vec(), p.width as u32, p.height as u32))
+    let tile_pixel_data: Option<(Vec<u8>, u32, u32)> = bg_info.as_ref().and_then(|info| {
+        match info.bg_pixmap {
+            Some(pid) if pid > 1 => {
+                state.pixmaps.get(&pid).map(|p| (p.framebuffer.data().to_vec(), p.width as u32, p.height as u32))
             }
             _ => None,
         }

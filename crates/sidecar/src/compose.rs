@@ -318,8 +318,8 @@ impl ComposeState {
                 continue;
             }
             // Handle "include" directives: resolve %L, %H, %S placeholders
-            if line.starts_with("include") {
-                let include_path = line["include".len()..].trim().trim_matches('"');
+            if let Some(rest) = line.strip_prefix("include") {
+                let include_path = rest.trim().trim_matches('"');
                 if !include_path.is_empty() {
                     let resolved = resolve_include_path(include_path);
                     if let Some(resolved_path) = resolved {
@@ -532,7 +532,7 @@ fn keysym_from_name(name: &str) -> Option<u32> {
         "braceright" => Some(0x7d),
         "asciitilde" => Some(0x7e),
         // Named uppercase letters
-        _ if name.len() == 1 && name.chars().next().map_or(false, |c| c.is_ascii_uppercase()) => {
+        _ if name.len() == 1 && name.chars().next().is_some_and(|c| c.is_ascii_uppercase()) => {
             Some(name.chars().next()? as u32)
         }
         // Try Unicode hex keysym: U+XXXX or UXXXX

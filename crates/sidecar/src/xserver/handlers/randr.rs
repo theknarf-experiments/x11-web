@@ -414,8 +414,8 @@ pub(crate) fn handle_randr_request(state: &mut ClientState, data: &[u8], seq: u1
                 // Read the 3×3 fixed-point matrix.  state.read_u32 handles
                 // byte-order; we reinterpret the bits as i32 for storage.
                 let mut matrix = [0i32; 9];
-                for i in 0..9usize {
-                    matrix[i] = state.read_u32(data, 8 + i * 4) as i32;
+                for (i, slot) in matrix.iter_mut().enumerate() {
+                    *slot = state.read_u32(data, 8 + i * 4) as i32;
                 }
                 if let Some(crtc) = state.randr_find_crtc_mut(crtc_id) {
                     crtc.transform = matrix;
@@ -499,14 +499,14 @@ pub(crate) fn handle_randr_request(state: &mut ClientState, data: &[u8], seq: u1
             state.write_u32(&mut reply, 4, 20); // 20 words of extra data
 
             // Write pending transform at offset 8 (state.write_u32 handles byte-order)
-            for i in 0..9usize {
-                state.write_u32(&mut reply, 8 + i * 4, transform[i] as u32);
+            for (i, &val) in transform.iter().enumerate() {
+                state.write_u32(&mut reply, 8 + i * 4, val as u32);
             }
             // pending filter name length = 0 at offset 44, padding at 46-47: already 0
 
             // Write current transform at offset 48
-            for i in 0..9usize {
-                state.write_u32(&mut reply, 48 + i * 4, transform[i] as u32);
+            for (i, &val) in transform.iter().enumerate() {
+                state.write_u32(&mut reply, 48 + i * 4, val as u32);
             }
             // current filter name length = 0 at offset 84, padding at 86-87: already 0
 

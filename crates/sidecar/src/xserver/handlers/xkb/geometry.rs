@@ -153,7 +153,7 @@ fn write_counted_string(buf: &mut Vec<u8>, s: &str) {
     buf.extend_from_slice(&(bytes.len() as u16).to_le_bytes());
     buf.extend_from_slice(bytes);
     let padding = pad4(2 + bytes.len());
-    buf.extend(std::iter::repeat(0u8).take(padding));
+    buf.extend(std::iter::repeat_n(0u8, padding));
 }
 
 /// Serialize an XkbOutline to wire format.
@@ -379,7 +379,7 @@ fn serialize_geometry_body(geom: &XkbGeometry) -> Vec<u8> {
 
     // Pad to 4-byte boundary
     let padding = pad4(body.len());
-    body.extend(std::iter::repeat(0u8).take(padding));
+    body.extend(std::iter::repeat_n(0u8, padding));
 
     body
 }
@@ -592,18 +592,16 @@ fn default_pc105_geometry(atoms: &Arc<Mutex<AtomManager>>) -> XkbGeometry {
     };
 
     // Row 4: Space bar row (LCtrl, Super, LAlt, Space, RAlt, Super, Menu, RCtrl)
-    let space_row_keys: Vec<XkbKey> = {
-        let mut keys = Vec::new();
-        keys.push(mk_key(&key_names, 37, S_WIDE, 0));   // LCTL
-        keys.push(mk_key(&key_names, 133, S_NORM, KEY_GAP)); // LWIN/Super_L
-        keys.push(mk_key(&key_names, 64, S_NORM, KEY_GAP));  // LALT
-        keys.push(mk_key(&key_names, 65, S_SPCE, KEY_GAP));  // SPCE
-        keys.push(mk_key(&key_names, 108, S_NORM, KEY_GAP)); // RALT
-        keys.push(mk_key(&key_names, 134, S_NORM, KEY_GAP)); // RWIN/Super_R
-        keys.push(mk_key(&key_names, 135, S_NORM, KEY_GAP)); // MENU (kc 135)
-        keys.push(mk_key(&key_names, 105, S_WIDE, KEY_GAP)); // RCTL
-        keys
-    };
+    let space_row_keys: Vec<XkbKey> = vec![
+        mk_key(&key_names, 37, S_WIDE, 0),         // LCTL
+        mk_key(&key_names, 133, S_NORM, KEY_GAP),   // LWIN/Super_L
+        mk_key(&key_names, 64, S_NORM, KEY_GAP),    // LALT
+        mk_key(&key_names, 65, S_SPCE, KEY_GAP),    // SPCE
+        mk_key(&key_names, 108, S_NORM, KEY_GAP),   // RALT
+        mk_key(&key_names, 134, S_NORM, KEY_GAP),   // RWIN/Super_R
+        mk_key(&key_names, 135, S_NORM, KEY_GAP),   // MENU (kc 135)
+        mk_key(&key_names, 105, S_WIDE, KEY_GAP),   // RCTL
+    ];
 
     let alpha_section = XkbSection {
         name: sect_alpha,
@@ -626,29 +624,23 @@ fn default_pc105_geometry(atoms: &Arc<Mutex<AtomManager>>) -> XkbGeometry {
 
     // ----- Section 3: Navigation cluster (Insert, Home, PgUp, Delete, End, PgDn) -----
     let nav_left: i16 = 2950;
-    let nav_keys_top: Vec<XkbKey> = {
-        let mut keys = Vec::new();
-        keys.push(mk_key(&key_names, 118, S_NORM, 0));  // INS (kc 118)
-        keys.push(mk_key(&key_names, 110, S_NORM, KEY_GAP)); // HOME (kc 110)
-        keys.push(mk_key(&key_names, 112, S_NORM, KEY_GAP)); // PGUP (kc 112)
-        keys
-    };
-    let nav_keys_bot: Vec<XkbKey> = {
-        let mut keys = Vec::new();
-        keys.push(mk_key(&key_names, 119, S_NORM, 0));  // DELE (kc 119)
-        keys.push(mk_key(&key_names, 115, S_NORM, KEY_GAP)); // END (kc 115)
-        keys.push(mk_key(&key_names, 117, S_NORM, KEY_GAP)); // PGDN (kc 117)
-        keys
-    };
+    let nav_keys_top: Vec<XkbKey> = vec![
+        mk_key(&key_names, 118, S_NORM, 0),         // INS (kc 118)
+        mk_key(&key_names, 110, S_NORM, KEY_GAP),   // HOME (kc 110)
+        mk_key(&key_names, 112, S_NORM, KEY_GAP),   // PGUP (kc 112)
+    ];
+    let nav_keys_bot: Vec<XkbKey> = vec![
+        mk_key(&key_names, 119, S_NORM, 0),         // DELE (kc 119)
+        mk_key(&key_names, 115, S_NORM, KEY_GAP),   // END (kc 115)
+        mk_key(&key_names, 117, S_NORM, KEY_GAP),   // PGDN (kc 117)
+    ];
 
     // Also: PrintScreen (kc 107), ScrollLock (kc 78), Pause (kc 127)
-    let nav_keys_top2: Vec<XkbKey> = {
-        let mut keys = Vec::new();
-        keys.push(mk_key(&key_names, 107, S_NORM, 0));  // PRSC
-        keys.push(mk_key(&key_names, 78, S_NORM, KEY_GAP));  // SCLK
-        keys.push(mk_key(&key_names, 127, S_NORM, KEY_GAP)); // PAUS
-        keys
-    };
+    let nav_keys_top2: Vec<XkbKey> = vec![
+        mk_key(&key_names, 107, S_NORM, 0),         // PRSC
+        mk_key(&key_names, 78, S_NORM, KEY_GAP),    // SCLK
+        mk_key(&key_names, 127, S_NORM, KEY_GAP),   // PAUS
+    ];
 
     let nav_section = XkbSection {
         name: sect_nav,
@@ -671,19 +663,15 @@ fn default_pc105_geometry(atoms: &Arc<Mutex<AtomManager>>) -> XkbGeometry {
     let arrow_left: i16 = nav_left;
     let arrow_top: i16 = alpha_top + KEY_UNIT * 3 + KEY_GAP * 5;
 
-    let arrow_keys_top: Vec<XkbKey> = {
-        let mut keys = Vec::new();
+    let arrow_keys_top: Vec<XkbKey> = vec![
         // Up arrow centered above Down: offset by 1 key
-        keys.push(mk_key(&key_names, 111, S_NORM, KEY_UNIT)); // UP (kc 111)
-        keys
-    };
-    let arrow_keys_bot: Vec<XkbKey> = {
-        let mut keys = Vec::new();
-        keys.push(mk_key(&key_names, 113, S_NORM, 0));  // LEFT (kc 113)
-        keys.push(mk_key(&key_names, 116, S_NORM, KEY_GAP)); // DOWN (kc 116)
-        keys.push(mk_key(&key_names, 114, S_NORM, KEY_GAP)); // RGHT (kc 114)
-        keys
-    };
+        mk_key(&key_names, 111, S_NORM, KEY_UNIT), // UP (kc 111)
+    ];
+    let arrow_keys_bot: Vec<XkbKey> = vec![
+        mk_key(&key_names, 113, S_NORM, 0),         // LEFT (kc 113)
+        mk_key(&key_names, 116, S_NORM, KEY_GAP),   // DOWN (kc 116)
+        mk_key(&key_names, 114, S_NORM, KEY_GAP),   // RGHT (kc 114)
+    ];
 
     let arrow_section = XkbSection {
         name: sect_arrows,
@@ -705,47 +693,37 @@ fn default_pc105_geometry(atoms: &Arc<Mutex<AtomManager>>) -> XkbGeometry {
     let kp_left: i16 = nav_left + KEY_UNIT * 3 + KEY_GAP * 5;
 
     // Numpad row 0: NumLock, KP/, KP*, KP-
-    let kp_row0: Vec<XkbKey> = {
-        let mut keys = Vec::new();
-        keys.push(mk_key(&key_names, 77, S_NORM, 0));   // NMLK
-        keys.push(mk_key(&key_names, 106, S_NORM, KEY_GAP)); // KPDV (kc 106)
-        keys.push(mk_key(&key_names, 63, S_NORM, KEY_GAP));  // KPMU
-        keys.push(mk_key(&key_names, 82, S_NORM, KEY_GAP));  // KPSU (kc 82)
-        keys
-    };
+    let kp_row0: Vec<XkbKey> = vec![
+        mk_key(&key_names, 77, S_NORM, 0),          // NMLK
+        mk_key(&key_names, 106, S_NORM, KEY_GAP),   // KPDV (kc 106)
+        mk_key(&key_names, 63, S_NORM, KEY_GAP),    // KPMU
+        mk_key(&key_names, 82, S_NORM, KEY_GAP),    // KPSU (kc 82)
+    ];
     // Numpad row 1: KP7, KP8, KP9, KP+
-    let kp_row1: Vec<XkbKey> = {
-        let mut keys = Vec::new();
-        keys.push(mk_key(&key_names, 79, S_NORM, 0));   // KP7
-        keys.push(mk_key(&key_names, 80, S_NORM, KEY_GAP)); // KP8
-        keys.push(mk_key(&key_names, 81, S_NORM, KEY_GAP)); // KP9
-        keys.push(mk_key(&key_names, 86, S_TALL, KEY_GAP)); // KPAD (kc 86) - tall
-        keys
-    };
+    let kp_row1: Vec<XkbKey> = vec![
+        mk_key(&key_names, 79, S_NORM, 0),          // KP7
+        mk_key(&key_names, 80, S_NORM, KEY_GAP),    // KP8
+        mk_key(&key_names, 81, S_NORM, KEY_GAP),    // KP9
+        mk_key(&key_names, 86, S_TALL, KEY_GAP),    // KPAD (kc 86) - tall
+    ];
     // Numpad row 2: KP4, KP5, KP6 (KP+ spans from row 1)
-    let kp_row2: Vec<XkbKey> = {
-        let mut keys = Vec::new();
-        keys.push(mk_key(&key_names, 83, S_NORM, 0));   // KP4
-        keys.push(mk_key(&key_names, 84, S_NORM, KEY_GAP)); // KP5
-        keys.push(mk_key(&key_names, 85, S_NORM, KEY_GAP)); // KP6
-        keys
-    };
+    let kp_row2: Vec<XkbKey> = vec![
+        mk_key(&key_names, 83, S_NORM, 0),          // KP4
+        mk_key(&key_names, 84, S_NORM, KEY_GAP),    // KP5
+        mk_key(&key_names, 85, S_NORM, KEY_GAP),    // KP6
+    ];
     // Numpad row 3: KP1, KP2, KP3, KPEnter
-    let kp_row3: Vec<XkbKey> = {
-        let mut keys = Vec::new();
-        keys.push(mk_key(&key_names, 87, S_NORM, 0));   // KP1
-        keys.push(mk_key(&key_names, 88, S_NORM, KEY_GAP)); // KP2
-        keys.push(mk_key(&key_names, 89, S_NORM, KEY_GAP)); // KP3
-        keys.push(mk_key(&key_names, 104, S_TALL, KEY_GAP)); // KPEN (kc 104) - tall
-        keys
-    };
+    let kp_row3: Vec<XkbKey> = vec![
+        mk_key(&key_names, 87, S_NORM, 0),          // KP1
+        mk_key(&key_names, 88, S_NORM, KEY_GAP),    // KP2
+        mk_key(&key_names, 89, S_NORM, KEY_GAP),    // KP3
+        mk_key(&key_names, 104, S_TALL, KEY_GAP),   // KPEN (kc 104) - tall
+    ];
     // Numpad row 4: KP0 (wide), KPDot
-    let kp_row4: Vec<XkbKey> = {
-        let mut keys = Vec::new();
-        keys.push(mk_key(&key_names, 90, S_LARG, 0));   // KP0 - wide
-        keys.push(mk_key(&key_names, 91, S_NORM, KEY_GAP)); // KPDL (kc 91)
-        keys
-    };
+    let kp_row4: Vec<XkbKey> = vec![
+        mk_key(&key_names, 90, S_LARG, 0),          // KP0 - wide
+        mk_key(&key_names, 91, S_NORM, KEY_GAP),    // KPDL (kc 91)
+    ];
 
     let keypad_section = XkbSection {
         name: sect_keypad,

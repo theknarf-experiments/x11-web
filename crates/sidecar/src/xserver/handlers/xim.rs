@@ -415,7 +415,7 @@ fn handle_xim_open(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
     reply_body.extend_from_slice(&ic_attr_3);
     reply_body.extend_from_slice(&ic_attr_4);
 
-    let length_words = ((reply_body.len() + 3) / 4) as u16;
+    let length_words = reply_body.len().div_ceil(4) as u16;
     let mut reply = Vec::with_capacity(4 + reply_body.len());
     reply.push(XIM_OPEN_REPLY);
     reply.push(0);
@@ -459,9 +459,7 @@ fn build_xim_attr(id: u16, attr_type: u16, name: &[u8]) -> Vec<u8> {
     buf.extend_from_slice(&(name.len() as u16).to_le_bytes());
     buf.extend_from_slice(name);
     // Pad to 4-byte boundary
-    for _ in 0..(padded_name_len - name.len()) {
-        buf.push(0);
-    }
+    buf.resize(buf.len() + padded_name_len - name.len(), 0);
     buf
 }
 
@@ -810,7 +808,7 @@ fn handle_xim_get_ic_values(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
     reply_body.extend_from_slice(&[0, 0]); // pad
     reply_body.extend_from_slice(&ic_attrs);
 
-    let length_words = ((reply_body.len() + 3) / 4) as u16;
+    let length_words = reply_body.len().div_ceil(4) as u16;
     let mut reply = Vec::with_capacity(4 + reply_body.len());
     reply.push(XIM_GET_IC_VALUES_REPLY);
     reply.push(0);
@@ -886,7 +884,7 @@ fn handle_xim_forward_event(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
     let shift_pressed = modifier_state & 0x0001 != 0;
     let caps_lock = modifier_state & 0x0002 != 0;
 
-    let keysym = if normal_keysym >= 0x61 && normal_keysym <= 0x7a {
+    let keysym = if (0x61..=0x7a).contains(&normal_keysym) {
         // Letter key: apply shift and caps lock
         if shift_pressed ^ caps_lock {
             shifted_keysym
@@ -938,11 +936,9 @@ fn send_xim_commit(state: &mut ClientState, im_id: u16, ic_id: u16, text: &str) 
     body.extend_from_slice(&(text_bytes.len() as u16).to_le_bytes());
     body.extend_from_slice(text_bytes);
     // Pad to 4-byte boundary
-    for _ in 0..(padded_len - text_bytes.len()) {
-        body.push(0);
-    }
+    body.resize(body.len() + padded_len - text_bytes.len(), 0);
 
-    let length_words = ((body.len() + 3) / 4) as u16;
+    let length_words = body.len().div_ceil(4) as u16;
     let mut msg = Vec::with_capacity(4 + body.len());
     msg.push(XIM_COMMIT);
     msg.push(0);
@@ -1036,20 +1032,16 @@ fn send_xim_preedit_draw(state: &mut ClientState, im_id: u16, ic_id: u16, text: 
     body.extend_from_slice(&(text_bytes.len() as u16).to_le_bytes());
     body.extend_from_slice(text_bytes);
     // Pad string to 4-byte boundary
-    for _ in 0..(padded_text_len - text_bytes.len()) {
-        body.push(0);
-    }
+    body.resize(body.len() + padded_text_len - text_bytes.len(), 0);
     // No feedback array: feedback_length = 0
     body.extend_from_slice(&0u16.to_le_bytes());
     // Pad to 4-byte boundary if needed
     if body.len() % 4 != 0 {
         let pad = 4 - (body.len() % 4);
-        for _ in 0..pad {
-            body.push(0);
-        }
+        body.resize(body.len() + pad, 0);
     }
 
-    let length_words = ((body.len() + 3) / 4) as u16;
+    let length_words = body.len().div_ceil(4) as u16;
     let mut msg = Vec::with_capacity(4 + body.len());
     msg.push(XIM_PREEDIT_DRAW);
     msg.push(0);

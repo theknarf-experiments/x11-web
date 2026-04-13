@@ -268,7 +268,6 @@ impl RenderState {
     }
 }
 
-/// Composite a single source pixel over a destination pixel using the OVER operator.
 // =============================================================================
 // Disjoint / conjoint coverage helpers used by the advanced PictOps.
 //
@@ -502,7 +501,7 @@ fn reject_gradient_destination(
     let dst_offset = match minor {
         8 => 16,           // Composite: dst at offset 16
         10..=13 => 12,     // Trapezoids/Triangles/TriStrip/TriFan
-        23 | 24 | 25 => 12, // CompositeGlyphs8/16/32
+        23..=25 => 12, // CompositeGlyphs8/16/32
         26 => 8,           // FillRectangles
         _ => return None,
     };
@@ -570,7 +569,7 @@ pub fn handle_render_request(state: &mut ClientState, data: &[u8], seq: u16) -> 
         31 => picture::handle_create_anim_cursor(state, data, seq),
         32 => composite::handle_add_traps(state, data, seq),
         33 => gradient::handle_create_solid_fill(state, data, seq),
-        34 | 35 | 36 => gradient::handle_create_gradient_fill(state, data, seq),
+        34..=36 => gradient::handle_create_gradient_fill(state, data, seq),
         2 => picture::handle_query_pict_index_values(state, data, seq),
         _ => {
             debug!("Unhandled RENDER minor opcode: {minor}");
@@ -605,11 +604,7 @@ impl ClipSnapshot {
                 // Try to get the framebuffer for the mask pixmap
                 let fb_info = if let Some(px) = state.pixmaps.get(&mask_id) {
                     Some((px.framebuffer.width(), px.framebuffer.height(), px.framebuffer.data()))
-                } else if let Some(win) = state.windows.get(&mask_id) {
-                    Some((win.framebuffer.width(), win.framebuffer.height(), win.framebuffer.data()))
-                } else {
-                    None
-                };
+                } else { state.windows.get(&mask_id).map(|win| (win.framebuffer.width(), win.framebuffer.height(), win.framebuffer.data())) };
                 fb_info.map(|(w, h, data)| {
                     // Extract alpha channel from BGRA data
                     let stride = (w as usize) * 4;

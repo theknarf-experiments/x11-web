@@ -354,7 +354,7 @@ pub(crate) fn handle_glx_single(state: &mut ClientState, data: &[u8], seq: u16) 
                 }
             }
             let data_bytes = n * 4;
-            let extra_words = (data_bytes + 3) / 4;
+            let extra_words = data_bytes.div_ceil(4);
             let mut reply = vec![0u8; 32 + extra_words * 4];
             reply[0] = 1;
             reply[2..4].copy_from_slice(&seq.to_le_bytes());
@@ -381,7 +381,7 @@ pub(crate) fn handle_glx_single(state: &mut ClientState, data: &[u8], seq: u16) 
                 }
             }
             let data_bytes = n * 4;
-            let extra_words = (data_bytes + 3) / 4;
+            let extra_words = data_bytes.div_ceil(4);
             let mut reply = vec![0u8; 32 + extra_words * 4];
             reply[0] = 1;
             reply[2..4].copy_from_slice(&seq.to_le_bytes());
@@ -408,7 +408,7 @@ pub(crate) fn handle_glx_single(state: &mut ClientState, data: &[u8], seq: u16) 
                 }
             }
             let data_bytes = n * 8;
-            let extra_words = (data_bytes + 3) / 4;
+            let extra_words = data_bytes.div_ceil(4);
             let mut reply = vec![0u8; 32 + extra_words * 4];
             reply[0] = 1;
             reply[2..4].copy_from_slice(&seq.to_le_bytes());
@@ -434,7 +434,7 @@ pub(crate) fn handle_glx_single(state: &mut ClientState, data: &[u8], seq: u16) 
                     osmesa::gl_get_booleanv(pname, &mut params);
                 }
             }
-            let extra_words = (n + 3) / 4;
+            let extra_words = n.div_ceil(4);
             let mut reply = vec![0u8; 32 + extra_words * 4];
             reply[0] = 1;
             reply[2..4].copy_from_slice(&seq.to_le_bytes());
@@ -819,7 +819,7 @@ pub(crate) fn handle_glx_single(state: &mut ClientState, data: &[u8], seq: u16) 
             }
             let n = 4usize;
             let data_bytes = n * 8;
-            let extra_words = (data_bytes + 3) / 4;
+            let extra_words = data_bytes.div_ceil(4);
             let mut reply = vec![0u8; 32 + extra_words * 4];
             reply[0] = 1;
             reply[2..4].copy_from_slice(&seq.to_le_bytes());
@@ -919,7 +919,7 @@ pub(crate) fn handle_glx_single(state: &mut ClientState, data: &[u8], seq: u16) 
                 }
             }
             let data_bytes = n * 8;
-            let extra_words = (data_bytes + 3) / 4;
+            let extra_words = data_bytes.div_ceil(4);
             let mut reply = vec![0u8; 32 + extra_words * 4];
             reply[0] = 1;
             reply[2..4].copy_from_slice(&seq.to_le_bytes());
@@ -1021,7 +1021,7 @@ pub(crate) fn handle_glx_single(state: &mut ClientState, data: &[u8], seq: u16) 
                     osmesa::gl_get_tex_image(target, level, format, type_, &mut pixels);
                 }
             }
-            let extra_words = (image_size + 3) / 4;
+            let extra_words = image_size.div_ceil(4);
             let mut reply = vec![0u8; 32 + extra_words * 4];
             reply[0] = 1;
             reply[2..4].copy_from_slice(&seq.to_le_bytes());
@@ -1096,11 +1096,10 @@ pub(crate) fn handle_glx_single(state: &mut ClientState, data: &[u8], seq: u16) 
             if payload.len() < 4 + n * 4 {
                 return glx_single_empty_reply(seq);
             }
-            let mut textures = vec![0u32; n];
-            for i in 0..n {
+            let textures: Vec<u32> = (0..n).map(|i| {
                 let off = 4 + i * 4;
-                textures[i] = u32::from_le_bytes([payload[off], payload[off + 1], payload[off + 2], payload[off + 3]]);
-            }
+                u32::from_le_bytes([payload[off], payload[off + 1], payload[off + 2], payload[off + 3]])
+            }).collect();
             let mut residences = vec![0u8; n];
             let all_resident: u8 = {
                 #[cfg(feature = "osmesa")]
@@ -1111,15 +1110,13 @@ pub(crate) fn handle_glx_single(state: &mut ClientState, data: &[u8], seq: u16) 
                 }
                 #[cfg(not(feature = "osmesa"))] { 1 }
             };
-            let extra_words = (n + 3) / 4;
+            let extra_words = n.div_ceil(4);
             let mut reply = vec![0u8; 32 + extra_words * 4];
             reply[0] = 1;
             reply[2..4].copy_from_slice(&seq.to_le_bytes());
             reply[4..8].copy_from_slice(&(extra_words as u32).to_le_bytes());
             reply[8..12].copy_from_slice(&(all_resident as u32).to_le_bytes());
-            for i in 0..n {
-                reply[32 + i] = residences[i];
-            }
+            reply[32..32 + n].copy_from_slice(&residences);
             reply
         }
         // glDeleteTextures (opcode 144)
@@ -1130,11 +1127,10 @@ pub(crate) fn handle_glx_single(state: &mut ClientState, data: &[u8], seq: u16) 
             let n = i32::from_le_bytes([payload[0], payload[1], payload[2], payload[3]]);
             let n = n.max(0) as usize;
             if payload.len() >= 4 + n * 4 {
-                let mut textures = vec![0u32; n];
-                for i in 0..n {
+                let textures: Vec<u32> = (0..n).map(|i| {
                     let off = 4 + i * 4;
-                    textures[i] = u32::from_le_bytes([payload[off], payload[off + 1], payload[off + 2], payload[off + 3]]);
-                }
+                    u32::from_le_bytes([payload[off], payload[off + 1], payload[off + 2], payload[off + 3]])
+                }).collect();
                 #[cfg(feature = "osmesa")]
                 {
                     if osmesa::is_available() && n > 0 {
@@ -1216,9 +1212,7 @@ pub(crate) fn glx_single_empty_reply(seq: u16) -> Vec<u8> {
 fn gl_integer_count(pname: u32) -> usize {
     match pname {
         // Matrices (16 values)
-        0x0BA6 | // GL_MODELVIEW_MATRIX
-        0x0BA7 | // GL_PROJECTION_MATRIX
-        0x0BA8   // GL_TEXTURE_MATRIX
+        0x0BA6..=0x0BA8   // GL_TEXTURE_MATRIX
         => 16,
         // 4-component vectors
         0x0B23 | // GL_COLOR_CLEAR_VALUE
@@ -1247,10 +1241,7 @@ fn gl_float_count(pname: u32) -> usize {
 /// Return the expected number of values for a glGetLight query.
 fn gl_light_param_count(pname: u32) -> usize {
     match pname {
-        0x1200 | // GL_AMBIENT
-        0x1201 | // GL_DIFFUSE
-        0x1202 | // GL_SPECULAR
-        0x1203   // GL_POSITION
+        0x1200..=0x1203   // GL_POSITION
         => 4,
         0x1204   // GL_SPOT_DIRECTION
         => 3,

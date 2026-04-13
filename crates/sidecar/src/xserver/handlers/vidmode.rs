@@ -221,11 +221,11 @@ pub(crate) fn handle_vidmode_request(state: &mut ClientState, data: &[u8], seq: 
                 (linear.clone(), linear.clone(), linear)
             };
             let ramps = [&ramp_r, &ramp_g, &ramp_b];
-            for channel in 0..3 {
+            for (channel, ramp) in ramps.iter().enumerate() {
                 let base = 32 + channel * padded;
                 for i in 0..size {
-                    let val = if i < ramps[channel].len() {
-                        ramps[channel][i]
+                    let val = if i < ramp.len() {
+                        ramp[i]
                     } else {
                         // Extrapolate linearly if requested size exceeds stored ramp
                         ((i as u32 * 65535) / (size.max(1) as u32 - 1).max(1)) as u16

@@ -29,8 +29,8 @@ pub(crate) fn handle_set_picture_transform(state: &mut ClientState, data: &[u8],
     }
     let pid = read_u32_bo(data, 4, bo);
     let mut tx = [0f64; 9];
-    for i in 0..9 {
-        tx[i] = read_fixed_bo(data, 8 + i * 4, bo);
+    for (i, slot) in tx.iter_mut().enumerate() {
+        *slot = read_fixed_bo(data, 8 + i * 4, bo);
     }
     debug!(
         "SetPictureTransform: pid={pid:#x} m=[[{:.2},{:.2},{:.2}],[{:.2},{:.2},{:.2}],[{:.2},{:.2},{:.2}]]",

@@ -926,7 +926,7 @@ impl Framebuffer {
                     // half_sin = sin(theta/2) where theta = pi - angle_between
                     // For miter: miter_length = hw / sin(alpha/2)
                     // where alpha = pi - theta (the join angle)
-                    let alpha = (1.0 - cos_theta).max(0.0).min(2.0);
+                    let alpha = (1.0 - cos_theta).clamp(0.0, 2.0);
                     // alpha = 2 * sin^2(angle/2), where angle is between the directions
                     // sin(join_half_angle) = sin((pi - angle)/2) = cos(angle/2)
                     // cos^2(angle/2) = (1 + cos_theta) / 2
@@ -1231,13 +1231,12 @@ impl Framebuffer {
                     for px in min_x..=max_x {
                         let ddx = (px as f64 - cx) / rx;
                         let ddy = (py as f64 - cy) / ry;
-                        if ddx * ddx + ddy * ddy <= 1.0 {
-                            if angle2.abs() >= 360 * 64
-                                || point_in_arc(ddx, ddy, start_rad, extent_rad)
+                        if ddx * ddx + ddy * ddy <= 1.0
+                            && (angle2.abs() >= 360 * 64
+                                || point_in_arc(ddx, ddy, start_rad, extent_rad))
                             {
                                 self.draw_point_gc(px, py, color, gc_func, plane_mask, clip_rects);
                             }
-                        }
                     }
                 }
             }
@@ -1455,7 +1454,7 @@ impl Framebuffer {
         let start_rad = (angle1 as f64) / 64.0 * std::f64::consts::PI / 180.0;
         let extent_rad = (angle2 as f64) / 64.0 * std::f64::consts::PI / 180.0;
         let chord = ArcChordData::new_if_chord(arc_mode, angle2, start_rad, extent_rad);
-        let stipple_stride = ((stipple_w + 7) / 8) as usize;
+        let stipple_stride = stipple_w.div_ceil(8) as usize;
 
         let min_y = y.max(0) as i32;
         let max_y = ((y as i32 + height as i32).min(self.height as i32 - 1)).max(0);
@@ -1592,7 +1591,7 @@ impl Framebuffer {
                             for fx in min_x..=max_x {
                                 // Check distance from line segment
                                 let t_proj = ((fx as f64 - lx as f64) * dx + (fy as f64 - ly as f64) * dy) / (len * len);
-                                if t_proj >= 0.0 && t_proj <= 1.0 {
+                                if (0.0..=1.0).contains(&t_proj) {
                                     let closest_x = lx as f64 + t_proj * dx;
                                     let closest_y = ly as f64 + t_proj * dy;
                                     let dist = ((fx as f64 - closest_x).powi(2) + (fy as f64 - closest_y).powi(2)).sqrt();
@@ -1709,7 +1708,7 @@ impl Framebuffer {
             self.fill_rect_rop(x, y, width, height, foreground, function, plane_mask);
             return;
         }
-        let stipple_stride = ((stipple_w + 7) / 8) as usize;
+        let stipple_stride = stipple_w.div_ceil(8) as usize;
         let row_start = (x as i32).max(0) as usize;
         let row_end = ((x as i32 + width as i32).min(self.width as i32)).max(0) as usize;
         if row_start >= row_end {
@@ -1951,7 +1950,7 @@ impl Framebuffer {
         if points.len() < 3 || stipple_w == 0 || stipple_h == 0 || stipple_data.is_empty() {
             return;
         }
-        let stipple_stride = ((stipple_w + 7) / 8) as usize;
+        let stipple_stride = stipple_w.div_ceil(8) as usize;
         let scanlines = self.compute_polygon_scanlines(points, fill_rule);
         for (y, spans) in &scanlines {
             let dy = *y;

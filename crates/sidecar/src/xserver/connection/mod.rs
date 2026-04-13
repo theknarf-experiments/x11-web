@@ -55,6 +55,28 @@ fn safe_close(fd: i32) {
     }
 }
 
+/// Build an X11 connection failure response.
+fn build_auth_failure(byte_order: u8, reason: &[u8]) -> Vec<u8> {
+    let reason_len = reason.len();
+    let padded_reason_len = (reason_len + 3) & !3;
+    let additional_data_words = (padded_reason_len / 4) as u16;
+    let mut resp = Vec::with_capacity(8 + padded_reason_len);
+    resp.push(0); // Failed
+    resp.push(reason_len as u8);
+    if byte_order == 0x6c {
+        resp.extend_from_slice(&11u16.to_le_bytes());
+        resp.extend_from_slice(&0u16.to_le_bytes());
+        resp.extend_from_slice(&additional_data_words.to_le_bytes());
+    } else {
+        resp.extend_from_slice(&11u16.to_be_bytes());
+        resp.extend_from_slice(&0u16.to_be_bytes());
+        resp.extend_from_slice(&additional_data_words.to_be_bytes());
+    }
+    resp.extend_from_slice(reason);
+    resp.resize(8 + padded_reason_len, 0);
+    resp
+}
+
 pub(crate) async fn handle_client(
     mut stream: tokio::net::UnixStream,
     client_id: String,
@@ -152,25 +174,7 @@ pub(crate) async fn handle_client(
                             if let Ok(mut tokens) = shared_security_tokens.lock() {
                                 tokens.remove(&token_key);
                             }
-                            // Fall through to auth failure
-                            let reason = b"SECURITY authorization expired";
-                            let reason_len = reason.len();
-                            let padded_reason_len = (reason_len + 3) & !3;
-                            let additional_data_words = (padded_reason_len / 4) as u16;
-                            let mut resp = Vec::with_capacity(8 + padded_reason_len);
-                            resp.push(0); // Failed
-                            resp.push(reason_len as u8);
-                            if byte_order == 0x6c {
-                                resp.extend_from_slice(&11u16.to_le_bytes());
-                                resp.extend_from_slice(&0u16.to_le_bytes());
-                                resp.extend_from_slice(&additional_data_words.to_le_bytes());
-                            } else {
-                                resp.extend_from_slice(&11u16.to_be_bytes());
-                                resp.extend_from_slice(&0u16.to_be_bytes());
-                                resp.extend_from_slice(&additional_data_words.to_be_bytes());
-                            }
-                            resp.extend_from_slice(reason);
-                            for _ in 0..(padded_reason_len - reason_len) { resp.push(0); }
+                            let resp = build_auth_failure(byte_order, b"SECURITY authorization expired");
                             stream.write_all(&resp).await?;
                             return Ok(());
                         }
@@ -180,47 +184,13 @@ pub(crate) async fn handle_client(
                         security_trust_level = info.trust_level;
                     } else {
                         warn!("MIT-MAGIC-COOKIE-1 auth failed: cookie mismatch");
-                        let reason = b"Invalid MIT-MAGIC-COOKIE-1 key";
-                        let reason_len = reason.len();
-                        let padded_reason_len = (reason_len + 3) & !3;
-                        let additional_data_words = (padded_reason_len / 4) as u16;
-                        let mut resp = Vec::with_capacity(8 + padded_reason_len);
-                        resp.push(0); // Failed
-                        resp.push(reason_len as u8);
-                        if byte_order == 0x6c {
-                            resp.extend_from_slice(&11u16.to_le_bytes());
-                            resp.extend_from_slice(&0u16.to_le_bytes());
-                            resp.extend_from_slice(&additional_data_words.to_le_bytes());
-                        } else {
-                            resp.extend_from_slice(&11u16.to_be_bytes());
-                            resp.extend_from_slice(&0u16.to_be_bytes());
-                            resp.extend_from_slice(&additional_data_words.to_be_bytes());
-                        }
-                        resp.extend_from_slice(reason);
-                        for _ in 0..(padded_reason_len - reason_len) { resp.push(0); }
+                        let resp = build_auth_failure(byte_order, b"Invalid MIT-MAGIC-COOKIE-1 key");
                         stream.write_all(&resp).await?;
                         return Ok(());
                     }
                 } else {
                     warn!("MIT-MAGIC-COOKIE-1 auth failed: cookie mismatch");
-                    let reason = b"Invalid MIT-MAGIC-COOKIE-1 key";
-                    let reason_len = reason.len();
-                    let padded_reason_len = (reason_len + 3) & !3;
-                    let additional_data_words = (padded_reason_len / 4) as u16;
-                    let mut resp = Vec::with_capacity(8 + padded_reason_len);
-                    resp.push(0); // Failed
-                    resp.push(reason_len as u8);
-                    if byte_order == 0x6c {
-                        resp.extend_from_slice(&11u16.to_le_bytes());
-                        resp.extend_from_slice(&0u16.to_le_bytes());
-                        resp.extend_from_slice(&additional_data_words.to_le_bytes());
-                    } else {
-                        resp.extend_from_slice(&11u16.to_be_bytes());
-                        resp.extend_from_slice(&0u16.to_be_bytes());
-                        resp.extend_from_slice(&additional_data_words.to_be_bytes());
-                    }
-                    resp.extend_from_slice(reason);
-                    for _ in 0..(padded_reason_len - reason_len) { resp.push(0); }
+                    let resp = build_auth_failure(byte_order, b"Invalid MIT-MAGIC-COOKIE-1 key");
                     stream.write_all(&resp).await?;
                     return Ok(());
                 }
@@ -916,7 +886,7 @@ pub(crate) async fn handle_client(
                             u32::from_le_bytes([pending[4], pending[5], pending[6], pending[7]]) as usize
                         };
                         let big_bytes = big_len * 4;
-                        if big_bytes < 8 || big_bytes > 16 * 1024 * 1024 {
+                        if !(8..=16 * 1024 * 1024).contains(&big_bytes) {
                             // Reject absurdly large or too-small requests
                             warn!("BIG-REQUEST with invalid length: {big_bytes}");
                             pending.clear();
@@ -1042,7 +1012,7 @@ pub(crate) async fn handle_client(
                                     u32::from_le_bytes([pending[4], pending[5], pending[6], pending[7]]) as usize
                                 };
                                 let big_bytes = big_len * 4;
-                                if big_bytes < 8 || big_bytes > 16 * 1024 * 1024 {
+                                if !(8..=16 * 1024 * 1024).contains(&big_bytes) {
                                     pending.clear();
                                     break;
                                 }
