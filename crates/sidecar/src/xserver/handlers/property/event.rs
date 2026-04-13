@@ -81,6 +81,9 @@ pub(crate) fn handle_send_event(state: &mut ClientState, data: &[u8]) -> Vec<u8>
                 let max_vert_atom = state.intern_atom("_NET_WM_STATE_MAXIMIZED_VERT", false);
                 let max_horz_atom = state.intern_atom("_NET_WM_STATE_MAXIMIZED_HORZ", false);
                 let hidden_atom = state.intern_atom("_NET_WM_STATE_HIDDEN", false);
+                let modal_atom = state.intern_atom("_NET_WM_STATE_MODAL", false);
+                let above_atom = state.intern_atom("_NET_WM_STATE_ABOVE", false);
+                let demands_attention_atom = state.intern_atom("_NET_WM_STATE_DEMANDS_ATTENTION", false);
 
                 let atoms_to_change = if prop2 != 0 { vec![prop1, prop2] } else { vec![prop1] };
 
@@ -134,10 +137,36 @@ pub(crate) fn handle_send_event(state: &mut ClientState, data: &[u8]) -> Vec<u8>
                     let _ = state.update_tx.send((
                         state.client_id.clone(),
                         DisplayUpdate::WindowStateChanged {
-                            window_id: uuid,
+                            window_id: uuid.clone(),
                             state: new_state,
                         },
                     ));
+
+                    // MODAL: raise window above its transient-for parent (EWMH §_NET_WM_STATE_MODAL)
+                    if current_atoms.contains(&modal_atom) || current_atoms.contains(&above_atom) {
+                        // Raise this window to the top of the stack
+                        if let Some(children) = state.windows.get(&state.root_window)
+                            .map(|r| r.children_order.clone())
+                        {
+                            if children.contains(&source_window) {
+                                if let Some(root) = state.windows.get_mut(&state.root_window) {
+                                    root.children_order.retain(|&w| w != source_window);
+                                    root.children_order.push(source_window);
+                                }
+                            }
+                        }
+                    }
+
+                    // DEMANDS_ATTENTION: notify frontend so it can show urgency hint
+                    if current_atoms.contains(&demands_attention_atom) {
+                        let _ = state.update_tx.send((
+                            state.client_id.clone(),
+                            DisplayUpdate::WindowUrgent {
+                                window_id: uuid,
+                                urgent: true,
+                            },
+                        ));
+                    }
                 }
 
                 return Vec::new();
