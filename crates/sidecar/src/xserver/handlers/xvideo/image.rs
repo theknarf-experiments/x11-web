@@ -1,75 +1,14 @@
-//\! XVideo (Xv) extension handler.
+//! XVideo image operations: PutImage, ShmPutImage, PutStill, GetStill, PutVideo, GetVideo,
+//! StopVideo, ListImageFormats, QueryImageAttributes, plus YUV conversion code.
 
 use tracing::debug;
 
-use super::super::client::ClientState;
-
-/// XVideo (Xv) (opcode 156)
-///
-/// Software-only video adaptor supporting basic YUV/RGB overlay rendering.
-/// Port 100 is the single available port on the software adaptor.
-const XV_PORT_BASE: u32 = 100;
-
-/// Number of XVideo ports exposed by our software adaptor.
-const XV_NUM_PORTS: u32 = 1;
-
-/// FOURCC identifiers for supported image formats.
-const FOURCC_YUY2: u32 = 0x32595559; // 'YUY2'
-const FOURCC_I420: u32 = 0x30323449; // 'I420'
-const FOURCC_YV12: u32 = 0x32315659; // 'YV12'
-const FOURCC_UYVY: u32 = 0x59565955; // 'UYVY'
-const FOURCC_NV12: u32 = 0x3231564E; // 'NV12'
-const FOURCC_NV21: u32 = 0x3132564E; // 'NV21'
-const FOURCC_YV16: u32 = 0x36315659; // 'YV16'
-const FOURCC_RGB3: u32 = 0x33424752; // 'RGB3' (packed RGB24)
-const FOURCC_RV32: u32 = 0x32335652; // 'RV32' (packed RGBA32/BGRA32)
-const FOURCC_Y800: u32 = 0x30303859; // 'Y800' / 'GREY' (8-bit grayscale)
-
-/// A frame captured by GetStill: raw ARGB32 pixels plus dimensions.
-#[derive(Clone, Debug)]
-#[allow(dead_code)]
-pub(crate) struct CapturedFrame {
-    /// Width in pixels.
-    pub(crate) width: u16,
-    /// Height in pixels.
-    pub(crate) height: u16,
-    /// ARGB32 pixel data (4 bytes per pixel, row-major).
-    pub(crate) data: Vec<u8>,
-}
-
-/// Per-port XVideo state: attributes and allocation tracking.
-#[derive(Clone, Debug)]
-pub(crate) struct XvPortState {
-    /// Whether this port is currently grabbed by a client.
-    pub(crate) grabbed: bool,
-    /// Brightness adjustment (-1000..1000, default 0).
-    pub(crate) brightness: i32,
-    /// Contrast adjustment (0..2000, default 1000 = 1.0x).
-    pub(crate) contrast: i32,
-    /// Saturation adjustment (0..2000, default 1000 = 1.0x).
-    pub(crate) saturation: i32,
-    /// Hue adjustment (-180..180 degrees, default 0).
-    pub(crate) hue: i32,
-    /// Colorspace: 0 = BT.601 (SD), 1 = BT.709 (HD).
-    pub(crate) colorspace: i32,
-    /// Captured frame from GetStill: ARGB32 pixel data and dimensions.
-    /// Populated by GetStill, consumed by PutStill / PutVideo.
-    pub(crate) captured_frame: Option<CapturedFrame>,
-}
-
-impl Default for XvPortState {
-    fn default() -> Self {
-        Self {
-            grabbed: false,
-            brightness: 0,
-            contrast: 1000,
-            saturation: 1000,
-            hue: 0,
-            colorspace: 0, // BT.601
-            captured_frame: None,
-        }
-    }
-}
+use super::super::super::client::ClientState;
+use super::{
+    CapturedFrame,
+    FOURCC_I420, FOURCC_NV12, FOURCC_NV21, FOURCC_RGB3, FOURCC_RV32,
+    FOURCC_UYVY, FOURCC_Y800, FOURCC_YUY2, FOURCC_YV12, FOURCC_YV16,
+};
 
 // ---------------------------------------------------------------------------
 // YUV → RGB conversion (integer math, no floating point)
@@ -982,120 +921,13 @@ fn xv_put_image_impl(
     );
 }
 
-/// Atom name constants for XVideo port attributes.
-const XV_ATTR_BRIGHTNESS: &str = "XV_BRIGHTNESS";
-const XV_ATTR_CONTRAST: &str = "XV_CONTRAST";
-const XV_ATTR_SATURATION: &str = "XV_SATURATION";
-const XV_ATTR_HUE: &str = "XV_HUE";
-const XV_ATTR_COLORSPACE: &str = "XV_COLORSPACE";
-
-pub(crate) fn handle_xvideo_request(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
-    let minor = data[1];
+pub(crate) fn handle_image_request(
+    state: &mut ClientState,
+    data: &[u8],
+    seq: u16,
+    minor: u8,
+) -> Vec<u8> {
     match minor {
-        0 => { // XvQueryExtension
-            let mut reply = [0u8; 32];
-            reply[0] = 1;
-            state.write_u16(&mut reply, 2, seq);
-            state.write_u16(&mut reply, 8, 2); // major
-            state.write_u16(&mut reply, 10, 2); // minor
-            reply.to_vec()
-        }
-        1 => { // XvQueryAdaptors
-            // Return one software adaptor with a single port
-            let adaptor_name = b"x11-web Software Video Adaptor";
-            let name_len = adaptor_name.len();
-            let name_padded = (name_len + 3) & !3;
-
-            // AdaptorInfo structure:
-            // base_id(4) + name_size(2) + num_ports(2) + num_formats(2) + type(1) + pad(1) + name(padded)
-            // + format list: visual(4) + depth(1) + pad(3) per format
-            let format_entry_size = 8; // visual(4) + depth(1) + pad(3)
-            let adaptor_size = 12 + name_padded + format_entry_size; // 1 format
-            let extra_words = (adaptor_size / 4) as u32;
-
-            let mut reply = vec![0u8; 32 + adaptor_size];
-            reply[0] = 1;
-            state.write_u16(&mut reply, 2, seq);
-            state.write_u32(&mut reply, 4, extra_words);
-            state.write_u16(&mut reply, 8, 1); // num_adaptors
-
-            // Adaptor info
-            let off = 32;
-            state.write_u32(&mut reply[off..], 0, XV_PORT_BASE); // base_id
-            state.write_u16(&mut reply[off..], 4, name_len as u16); // name_size
-            state.write_u16(&mut reply[off..], 6, XV_NUM_PORTS as u16); // num_ports
-            state.write_u16(&mut reply[off..], 8, 1); // num_formats
-            reply[off + 10] = 0x06; // type = InputMask | ImageMask (video input + image)
-
-            // Name
-            reply[off + 12..off + 12 + name_len].copy_from_slice(adaptor_name);
-
-            // Format: visual + depth
-            let fmt_off = off + 12 + name_padded;
-            state.write_u32(&mut reply[fmt_off..], 0, 0x21); // root visual
-            reply[fmt_off + 4] = 24; // depth
-
-            reply
-        }
-        2 => { // XvQueryEncodings
-            // Return one encoding (the screen itself)
-            let enc_name = b"XV_IMAGE";
-            let name_len = enc_name.len();
-            let name_padded = (name_len + 3) & !3;
-            let enc_size = 16 + name_padded; // id(4) + name_size(2) + width(2) + height(2) + rate_num(4) + rate_den(4) + name
-            let extra_words = (enc_size / 4) as u32;
-
-            let mut reply = vec![0u8; 32 + enc_size];
-            reply[0] = 1;
-            state.write_u16(&mut reply, 2, seq);
-            state.write_u32(&mut reply, 4, extra_words);
-            state.write_u16(&mut reply, 8, 1); // num_encodings
-
-            let off = 32;
-            state.write_u32(&mut reply[off..], 0, 0); // encoding_id
-            state.write_u16(&mut reply[off..], 4, name_len as u16);
-            state.write_u16(&mut reply[off..], 6, state.screen_width);
-            state.write_u16(&mut reply[off..], 8, state.screen_height);
-            // rate = 30/1
-            state.write_u32(&mut reply[off..], 12, 30); // numerator
-            state.write_u32(&mut reply[off..], 16, 1);  // denominator (skip 10-11 padding)
-            reply[off + 20..off + 20 + name_len].copy_from_slice(enc_name);
-            reply
-        }
-        3 => { // XvGrabPort
-            if data.len() >= 8 {
-                let port = state.read_u32(data, 4);
-                debug!("XVideo GrabPort: port={port}");
-                // Ensure port state exists and mark as grabbed
-                let ps = state.xv_ports.entry(port).or_default();
-                if ps.grabbed {
-                    // Already grabbed — return AlreadyGrabbed (1)
-                    let mut reply = [0u8; 32];
-                    reply[0] = 1;
-                    reply[1] = 1; // result = AlreadyGrabbed
-                    state.write_u16(&mut reply, 2, seq);
-                    return reply.to_vec();
-                }
-                ps.grabbed = true;
-                let mut reply = [0u8; 32];
-                reply[0] = 1;
-                reply[1] = 0; // result = Success
-                state.write_u16(&mut reply, 2, seq);
-                reply.to_vec()
-            } else {
-                Vec::new()
-            }
-        }
-        4 => { // XvUngrabPort
-            if data.len() >= 8 {
-                let port = state.read_u32(data, 4);
-                debug!("XVideo UngrabPort: port={port}");
-                if let Some(ps) = state.xv_ports.get_mut(&port) {
-                    ps.grabbed = false;
-                }
-            }
-            Vec::new()
-        }
         5 => { // PutVideo — not supported (software adaptor has no video capture)
             // Per XVideo spec §4.3: return BadMatch for unsupported port operations.
             let port = if data.len() >= 8 { state.read_u32(data, 4) } else { 0 };
@@ -1182,143 +1014,12 @@ pub(crate) fn handle_xvideo_request(state: &mut ClientState, data: &[u8], seq: u
             // GetStill is a void request — no reply is sent.
             Vec::new()
         }
-        9 => { // XvQueryBestSize
-            let mut reply = [0u8; 32];
-            reply[0] = 1;
-            state.write_u16(&mut reply, 2, seq);
-            if data.len() >= 16 {
-                let w = state.read_u16(data, 8);
-                let h = state.read_u16(data, 10);
-                state.write_u16(&mut reply, 8, w);
-                state.write_u16(&mut reply, 10, h);
-            }
-            reply.to_vec()
-        }
-        10 => { // XvSetPortAttribute
-            if data.len() >= 16 {
-                let port = state.read_u32(data, 4);
-                let atom = state.read_u32(data, 8);
-                let value = state.read_u32(data, 12) as i32;
-
-                let name = state.get_atom_name(atom).unwrap_or_default();
-                let ps = state.xv_ports.entry(port).or_default();
-
-                match name.as_str() {
-                    XV_ATTR_BRIGHTNESS => ps.brightness = value.clamp(-1000, 1000),
-                    XV_ATTR_CONTRAST   => ps.contrast = value.clamp(0, 2000),
-                    XV_ATTR_SATURATION => ps.saturation = value.clamp(0, 2000),
-                    XV_ATTR_HUE        => ps.hue = value.clamp(-180, 180),
-                    XV_ATTR_COLORSPACE => ps.colorspace = value.clamp(0, 1),
-                    _ => debug!("XVideo SetPortAttribute: unknown attr {name} (atom={atom})"),
-                }
-                debug!("XVideo SetPortAttribute: port={port} {name}={value}");
-            }
-            Vec::new()
-        }
-        11 => { // XvGetPortAttribute
-            if data.len() >= 12 {
-                let port = state.read_u32(data, 4);
-                let atom = state.read_u32(data, 8);
-
-                let name = state.get_atom_name(atom).unwrap_or_default();
-                let ps = state.xv_ports.entry(port).or_default();
-
-                let value: i32 = match name.as_str() {
-                    XV_ATTR_BRIGHTNESS => ps.brightness,
-                    XV_ATTR_CONTRAST   => ps.contrast,
-                    XV_ATTR_SATURATION => ps.saturation,
-                    XV_ATTR_HUE        => ps.hue,
-                    XV_ATTR_COLORSPACE => ps.colorspace,
-                    _ => 0,
-                };
-
-                let mut reply = [0u8; 32];
-                reply[0] = 1;
-                state.write_u16(&mut reply, 2, seq);
-                state.write_u32(&mut reply, 8, value as u32);
-                reply.to_vec()
-            } else {
-                Vec::new()
-            }
-        }
         12 => { // XvStopVideo
             if data.len() >= 8 {
                 let port = state.read_u32(data, 4);
                 debug!("XVideo StopVideo: port={port}");
             }
             Vec::new()
-        }
-        13 => { // SelectVideoNotify — register interest in XvVideoNotify events on a drawable
-            // This is a void request. Track the subscription in client state so we can
-            // deliver VideoNotify events if/when video operations complete on that drawable.
-            if data.len() >= 9 {
-                let drawable = state.read_u32(data, 4);
-                let on_off = data[8] != 0;
-                if on_off {
-                    state.xv_video_notify_drawables.insert(drawable);
-                } else {
-                    state.xv_video_notify_drawables.remove(&drawable);
-                }
-                debug!("XVideo SelectVideoNotify: drawable={drawable:#x} on={on_off}");
-            } else {
-                debug!("XVideo SelectVideoNotify: short request (len={}), ignoring", data.len());
-            }
-            Vec::new()
-        }
-        14 => { // SelectPortNotify — register interest in XvPortNotify events on a port
-            // This is a void request. Track the subscription so we can deliver
-            // PortNotify events when port attributes change.
-            if data.len() >= 9 {
-                let port = state.read_u32(data, 4);
-                let on_off = data[8] != 0;
-                if on_off {
-                    state.xv_port_notify_ports.insert(port);
-                } else {
-                    state.xv_port_notify_ports.remove(&port);
-                }
-                debug!("XVideo SelectPortNotify: port={port} on={on_off}");
-            } else {
-                debug!("XVideo SelectPortNotify: short request (len={}), ignoring", data.len());
-            }
-            Vec::new()
-        }
-        15 => { // XvQueryPortAttributes
-            // Return 5 attributes: BRIGHTNESS, CONTRAST, SATURATION, HUE, COLORSPACE
-            struct AttrDef {
-                name: &'static [u8],
-                min: i32,
-                max: i32,
-                flags: u32, // bit 0 = Gettable, bit 1 = Settable
-            }
-            let attrs = [
-                AttrDef { name: b"XV_BRIGHTNESS", min: -1000, max: 1000, flags: 3 },
-                AttrDef { name: b"XV_CONTRAST",   min: 0,     max: 2000, flags: 3 },
-                AttrDef { name: b"XV_SATURATION", min: 0,     max: 2000, flags: 3 },
-                AttrDef { name: b"XV_HUE",        min: -180,  max: 180,  flags: 3 },
-                AttrDef { name: b"XV_COLORSPACE",  min: 0,     max: 1,    flags: 3 },
-            ];
-
-            // Each AttributeInfo: flags(4) + min(4) + max(4) + size(4) + name(padded)
-            let mut extra_data = Vec::new();
-            for attr in &attrs {
-                let name_padded = (attr.name.len() + 3) & !3;
-                let mut buf = vec![0u8; 16 + name_padded];
-                state.write_u32(&mut buf, 0, attr.flags);
-                state.write_u32(&mut buf, 4, attr.min as u32);
-                state.write_u32(&mut buf, 8, attr.max as u32);
-                state.write_u32(&mut buf, 12, attr.name.len() as u32);
-                buf[16..16 + attr.name.len()].copy_from_slice(attr.name);
-                extra_data.extend_from_slice(&buf);
-            }
-
-            let extra_words = extra_data.len() / 4;
-            let mut reply = vec![0u8; 32 + extra_data.len()];
-            reply[0] = 1;
-            state.write_u16(&mut reply, 2, seq);
-            state.write_u32(&mut reply, 4, extra_words as u32);
-            state.write_u32(&mut reply, 8, attrs.len() as u32); // num_attributes
-            reply[32..].copy_from_slice(&extra_data);
-            reply
         }
         16 => { // XvListImageFormats
             // Report all supported formats
@@ -1552,11 +1253,6 @@ pub(crate) fn handle_xvideo_request(state: &mut ClientState, data: &[u8], seq: u
         20 => { // XvGetStill — not meaningful for software rendering, return void
             Vec::new()
         }
-        _ => {
-            crate::xserver::core::build_error_bo(
-                crate::xserver::core::BAD_REQUEST, seq, minor as u32,
-                156, minor as u16, state.msb_first,
-            )
-        }
+        _ => Vec::new(),
     }
 }
