@@ -536,10 +536,23 @@ fn resolve_keyboard_event_target(
 ) -> (u32, i16, i16) {
     if let Some(ref grab) = state.grabs.keyboard_grab {
         if grab.owner_events {
-            // owner_events=true: try normal delivery (focus window propagation)
+            // owner_events=true: try normal delivery first, fall back to grab_window.
             let focus = state.focus_window;
-            // Per X11 spec: focus=1 is PointerRoot — deliver to window under pointer.
-            if focus != 0 && focus != 1 && focus != state.root_window {
+            if focus == 0 {
+                // Focus is None — fall back to grab_window
+                return (grab.grab_window, 0, 0);
+            } else if focus == 1 || focus == state.root_window {
+                // PointerRoot or root: try window under pointer first
+                let target = propagate_keyboard_event(&state.windows, top_level, required_mask);
+                let selects = state.windows.get(&target)
+                    .map(|w| w.event_mask & required_mask != 0)
+                    .unwrap_or(false);
+                if selects {
+                    return (target, 0, 0);
+                }
+                // Fall back to grab_window
+                return (grab.grab_window, 0, 0);
+            } else {
                 let target = propagate_keyboard_event(&state.windows, focus, required_mask);
                 let selects = state.windows.get(&target)
                     .map(|w| w.event_mask & required_mask != 0)
@@ -547,9 +560,9 @@ fn resolve_keyboard_event_target(
                 if selects {
                     return (target, 0, 0);
                 }
+                // Fall back to grab_window
+                return (grab.grab_window, 0, 0);
             }
-            // No window selects — deliver to grab_window
-            return (grab.grab_window, 0, 0);
         } else {
             // owner_events=false: always deliver to grab_window
             return (grab.grab_window, 0, 0);
