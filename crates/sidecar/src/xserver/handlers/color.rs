@@ -694,9 +694,23 @@ pub(crate) fn handle_create_cursor(state: &mut ClientState, data: &[u8]) -> Vec<
     if !state.validate_resource_id(cid) {
         return build_error(BAD_ID_CHOICE, state.sequence, cid, 93, 0);
     }
+    // Per X11 spec: reject duplicate cursor IDs
+    if state.cursors.contains_key(&cid) || state.cursor_info.contains_key(&cid) {
+        return build_error(BAD_ID_CHOICE, state.sequence, cid, 93, 0);
+    }
 
     let source_pixmap = state.read_u32(data, 8);
     let mask_pixmap = state.read_u32(data, 12);
+
+    // Per X11 spec: source pixmap must exist and have depth 1
+    if !state.pixmaps.contains_key(&source_pixmap) {
+        return build_error(BAD_PIXMAP, state.sequence, source_pixmap, 93, 0);
+    }
+    // Validate mask pixmap exists if non-zero
+    if mask_pixmap != 0 && !state.pixmaps.contains_key(&mask_pixmap) {
+        return build_error(BAD_PIXMAP, state.sequence, mask_pixmap, 93, 0);
+    }
+
     let fore_red = state.read_u16(data, 16);
     let fore_green = state.read_u16(data, 18);
     let fore_blue = state.read_u16(data, 20);
@@ -832,6 +846,10 @@ pub(crate) fn handle_create_glyph_cursor(state: &mut ClientState, data: &[u8]) -
 
     // Validate resource ID is within this client's allocated range
     if !state.validate_resource_id(cid) {
+        return build_error(BAD_ID_CHOICE, state.sequence, cid, 94, 0);
+    }
+    // Per X11 spec: reject duplicate cursor IDs
+    if state.cursors.contains_key(&cid) || state.cursor_info.contains_key(&cid) {
         return build_error(BAD_ID_CHOICE, state.sequence, cid, 94, 0);
     }
 
