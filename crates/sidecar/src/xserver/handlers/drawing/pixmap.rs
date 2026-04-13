@@ -73,5 +73,6 @@ pub(crate) fn handle_free_pixmap(state: &mut ClientState, data: &[u8]) -> Vec<u8
     state.pixmaps.remove(&pid);
     // Unregister from shared registry
     state.unregister_shared_pixmap(pid);
+    state.recycle_xid(pid);
     Vec::new()
 }

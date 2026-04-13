@@ -41,6 +41,7 @@ pub(crate) fn handle_damage_request(state: &mut ClientState, data: &[u8], seq: u
             let damage_id = state.read_u32(data, 4);
             debug!("DAMAGE Destroy: id={damage_id:#x}");
             state.damage_regions.remove(&damage_id);
+            state.recycle_xid(damage_id);
             Vec::new()
         }
         3 => {

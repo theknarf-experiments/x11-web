@@ -34,6 +34,7 @@ pub(crate) fn handle_free_glyphset(state: &mut ClientState, data: &[u8], seq: u1
     require_len!(data, 8, seq, 139, data[1] as u16, bo);
     let gsid = read_u32_bo(data, 4, bo);
     state.render.glyphsets.remove(&gsid);
+    state.recycle_xid(gsid);
     Vec::new()
 }
 

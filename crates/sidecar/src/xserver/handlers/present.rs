@@ -33,8 +33,10 @@ pub(crate) fn handle_xc_misc_request(state: &mut ClientState, data: &[u8], seq: 
             reply.to_vec()
         }
         1 => {
-            // GetXIDRange: reply with a contiguous range of resource IDs
-            // from this client's allocation space.
+            // GetXIDRange: reply with a contiguous range of resource IDs.
+            // Per the XC-MISC spec, first try to return recycled (freed) IDs
+            // as individual IDs wouldn't form a contiguous range; fall back
+            // to allocating new IDs from the client's ID space.
             let mask: u32 = 0x003FFFFF;
             let current_offset = state.next_xid.wrapping_sub(state.resource_id_base) & mask;
             let remaining = mask.saturating_sub(current_offset) + 1;
@@ -51,31 +53,48 @@ pub(crate) fn handle_xc_misc_request(state: &mut ClientState, data: &[u8], seq: 
             reply.to_vec()
         }
         2 => {
-            // GetXIDList: return requested number of individual resource IDs
+            // GetXIDList: return requested number of individual resource IDs.
+            // Prefer recycled (freed) IDs over allocating new sequential ones.
             let count = if data.len() >= 8 {
                 state.read_u32(data, 4)
             } else {
                 0
             };
-            let mask: u32 = 0x003FFFFF;
-            let current_offset = state.next_xid.wrapping_sub(state.resource_id_base) & mask;
-            let remaining = mask.saturating_sub(current_offset) + 1;
-            let ids_to_return = count.min(4096).min(remaining);
-            let extra_bytes = (ids_to_return as usize) * 4;
+            let ids_to_return = count.min(4096) as usize;
+
+            // Collect IDs: first from freed pool, then from sequential allocation
+            let mut ids: Vec<u32> = Vec::with_capacity(ids_to_return);
+
+            // Drain freed XIDs first (most recently freed first)
+            while ids.len() < ids_to_return && !state.freed_xids.is_empty() {
+                ids.push(state.freed_xids.pop().unwrap());
+            }
+
+            // Fill remaining from sequential allocation
+            if ids.len() < ids_to_return {
+                let mask: u32 = 0x003FFFFF;
+                let current_offset = state.next_xid.wrapping_sub(state.resource_id_base) & mask;
+                let remaining = mask.saturating_sub(current_offset) + 1;
+                let sequential_count = ((ids_to_return - ids.len()) as u32).min(remaining);
+                for i in 0..sequential_count {
+                    let id = state.resource_id_base | ((current_offset + i) & mask);
+                    ids.push(id);
+                }
+                state.next_xid = state.resource_id_base | ((current_offset + sequential_count) & mask);
+            }
+
+            let actual_count = ids.len() as u32;
+            let extra_bytes = (actual_count as usize) * 4;
             let padded = (extra_bytes + 3) & !3;
             let mut reply = vec![0u8; 32 + padded];
             reply[0] = 1; // Reply
             state.write_u16(&mut reply, 2, seq);
             state.write_u32(&mut reply, 4, (padded / 4) as u32);
-            state.write_u32(&mut reply, 8, ids_to_return); // ids_count
-            // Allocate sequential IDs from this client's range
-            for i in 0..ids_to_return {
-                let offset = 32 + (i as usize) * 4;
-                let id = state.resource_id_base | ((current_offset + i) & mask);
+            state.write_u32(&mut reply, 8, actual_count); // ids_count
+            for (i, &id) in ids.iter().enumerate() {
+                let offset = 32 + i * 4;
                 state.write_u32(&mut reply, offset, id);
             }
-            // Advance the counter
-            state.next_xid = state.resource_id_base | ((current_offset + ids_to_return) & mask);
             reply
         }
         _ => {

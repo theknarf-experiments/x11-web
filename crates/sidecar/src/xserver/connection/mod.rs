@@ -394,6 +394,7 @@ pub(crate) async fn handle_client(
         vidmode_locked: false,
         vidmode_current_mode: 0,
         big_requests_enabled: false,
+        freed_xids: Vec::new(),
         xim: handlers::xim::XimServer::new(XIM_WINDOW),
         xkb_compat_si: super::handlers::xkb::default_compat_si(),
         xkb_group_compat: Default::default(),

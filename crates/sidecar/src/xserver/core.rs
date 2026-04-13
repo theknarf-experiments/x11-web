@@ -42,6 +42,8 @@ pub(crate) const FOCUS_IN_EVENT: u8 = 9;
 pub(crate) const FOCUS_OUT_EVENT: u8 = 10;
 pub(crate) const KEYMAP_NOTIFY_EVENT: u8 = 11;
 pub(crate) const EXPOSE_EVENT: u8 = 12;
+pub(crate) const GRAPHICS_EXPOSURE_EVENT: u8 = 13;
+pub(crate) const NO_EXPOSURE_EVENT: u8 = 14;
 pub(crate) const VISIBILITY_NOTIFY_EVENT: u8 = 15;
 pub(crate) const CREATE_NOTIFY_EVENT: u8 = 16;
 pub(crate) const DESTROY_NOTIFY_EVENT: u8 = 17;
@@ -770,5 +772,160 @@ mod tests {
         assert_eq!(err[1], BAD_VALUE);
         assert_eq!(u16::from_be_bytes([err[2], err[3]]), 0x1234); // Sequence (big-endian)
         assert_eq!(u32::from_be_bytes([err[4], err[5], err[6], err[7]]), 0xDEADBEEF);
+    }
+
+    // -----------------------------------------------------------------------
+    // Event type codes — X11 protocol spec compliance
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn event_types_match_x11_spec() {
+        assert_eq!(KEY_PRESS_EVENT, 2);
+        assert_eq!(KEY_RELEASE_EVENT, 3);
+        assert_eq!(BUTTON_PRESS_EVENT, 4);
+        assert_eq!(BUTTON_RELEASE_EVENT, 5);
+        assert_eq!(MOTION_NOTIFY_EVENT, 6);
+        assert_eq!(ENTER_NOTIFY_EVENT, 7);
+        assert_eq!(LEAVE_NOTIFY_EVENT, 8);
+        assert_eq!(FOCUS_IN_EVENT, 9);
+        assert_eq!(FOCUS_OUT_EVENT, 10);
+        assert_eq!(KEYMAP_NOTIFY_EVENT, 11);
+        assert_eq!(EXPOSE_EVENT, 12);
+        assert_eq!(GRAPHICS_EXPOSURE_EVENT, 13);
+        assert_eq!(NO_EXPOSURE_EVENT, 14);
+        assert_eq!(VISIBILITY_NOTIFY_EVENT, 15);
+        assert_eq!(CREATE_NOTIFY_EVENT, 16);
+        assert_eq!(DESTROY_NOTIFY_EVENT, 17);
+        assert_eq!(UNMAP_NOTIFY_EVENT, 18);
+        assert_eq!(MAP_NOTIFY_EVENT, 19);
+        assert_eq!(MAP_REQUEST_EVENT, 20);
+        assert_eq!(REPARENT_NOTIFY_EVENT, 21);
+        assert_eq!(CONFIGURE_NOTIFY_EVENT, 22);
+        assert_eq!(CONFIGURE_REQUEST_EVENT, 23);
+        assert_eq!(GRAVITY_NOTIFY_EVENT, 24);
+        assert_eq!(RESIZE_REQUEST_EVENT, 25);
+        assert_eq!(CIRCULATE_NOTIFY_EVENT, 26);
+        assert_eq!(CIRCULATE_REQUEST_EVENT, 27);
+        assert_eq!(PROPERTY_NOTIFY_EVENT, 28);
+        assert_eq!(SELECTION_CLEAR_EVENT, 29);
+        assert_eq!(SELECTION_REQUEST_EVENT, 30);
+        assert_eq!(SELECTION_NOTIFY_EVENT, 31);
+        assert_eq!(COLOURMAP_NOTIFY_EVENT, 32);
+        assert_eq!(CLIENT_MESSAGE_EVENT, 33);
+        assert_eq!(MAPPING_NOTIFY_EVENT, 34);
+    }
+
+    #[test]
+    fn all_33_event_types_are_contiguous() {
+        // X11 spec defines event codes 2-34 (33 events)
+        let events = [
+            KEY_PRESS_EVENT, KEY_RELEASE_EVENT, BUTTON_PRESS_EVENT,
+            BUTTON_RELEASE_EVENT, MOTION_NOTIFY_EVENT, ENTER_NOTIFY_EVENT,
+            LEAVE_NOTIFY_EVENT, FOCUS_IN_EVENT, FOCUS_OUT_EVENT,
+            KEYMAP_NOTIFY_EVENT, EXPOSE_EVENT, GRAPHICS_EXPOSURE_EVENT,
+            NO_EXPOSURE_EVENT, VISIBILITY_NOTIFY_EVENT, CREATE_NOTIFY_EVENT,
+            DESTROY_NOTIFY_EVENT, UNMAP_NOTIFY_EVENT, MAP_NOTIFY_EVENT,
+            MAP_REQUEST_EVENT, REPARENT_NOTIFY_EVENT, CONFIGURE_NOTIFY_EVENT,
+            CONFIGURE_REQUEST_EVENT, GRAVITY_NOTIFY_EVENT, RESIZE_REQUEST_EVENT,
+            CIRCULATE_NOTIFY_EVENT, CIRCULATE_REQUEST_EVENT, PROPERTY_NOTIFY_EVENT,
+            SELECTION_CLEAR_EVENT, SELECTION_REQUEST_EVENT, SELECTION_NOTIFY_EVENT,
+            COLOURMAP_NOTIFY_EVENT, CLIENT_MESSAGE_EVENT, MAPPING_NOTIFY_EVENT,
+        ];
+        assert_eq!(events.len(), 33);
+        for (i, &ev) in events.iter().enumerate() {
+            assert_eq!(ev, (i as u8) + 2, "event at index {i} should be {}", (i as u8) + 2);
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // Event masks — X11 protocol spec compliance
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn event_masks_are_powers_of_two() {
+        let masks = [
+            KEY_PRESS_MASK, KEY_RELEASE_MASK, BUTTON_PRESS_MASK,
+            BUTTON_RELEASE_MASK, ENTER_WINDOW_MASK, LEAVE_WINDOW_MASK,
+            POINTER_MOTION_MASK, POINTER_MOTION_HINT_MASK,
+            BUTTON1_MOTION_MASK, BUTTON2_MOTION_MASK, BUTTON3_MOTION_MASK,
+            BUTTON4_MOTION_MASK, BUTTON5_MOTION_MASK, BUTTON_MOTION_MASK,
+            KEYMAP_STATE_MASK, EXPOSURE_MASK, VISIBILITY_CHANGE_MASK,
+            STRUCTURE_NOTIFY_MASK, RESIZE_REDIRECT_MASK,
+            SUBSTRUCTURE_NOTIFY_MASK, SUBSTRUCTURE_REDIRECT_MASK,
+            FOCUS_CHANGE_MASK, PROPERTY_CHANGE_MASK, COLOURMAP_CHANGE_MASK,
+            OWNER_GRAB_BUTTON_MASK,
+        ];
+        for &m in &masks {
+            assert!(m.is_power_of_two(), "mask {m:#010x} is not a power of two");
+        }
+    }
+
+    #[test]
+    fn event_masks_match_x11_spec_bit_positions() {
+        assert_eq!(KEY_PRESS_MASK, 1 << 0);
+        assert_eq!(KEY_RELEASE_MASK, 1 << 1);
+        assert_eq!(BUTTON_PRESS_MASK, 1 << 2);
+        assert_eq!(BUTTON_RELEASE_MASK, 1 << 3);
+        assert_eq!(ENTER_WINDOW_MASK, 1 << 4);
+        assert_eq!(LEAVE_WINDOW_MASK, 1 << 5);
+        assert_eq!(POINTER_MOTION_MASK, 1 << 6);
+        assert_eq!(POINTER_MOTION_HINT_MASK, 1 << 7);
+        assert_eq!(BUTTON1_MOTION_MASK, 1 << 8);
+        assert_eq!(BUTTON2_MOTION_MASK, 1 << 9);
+        assert_eq!(BUTTON3_MOTION_MASK, 1 << 10);
+        assert_eq!(BUTTON4_MOTION_MASK, 1 << 11);
+        assert_eq!(BUTTON5_MOTION_MASK, 1 << 12);
+        assert_eq!(BUTTON_MOTION_MASK, 1 << 13);
+        assert_eq!(KEYMAP_STATE_MASK, 1 << 14);
+        assert_eq!(EXPOSURE_MASK, 1 << 15);
+        assert_eq!(VISIBILITY_CHANGE_MASK, 1 << 16);
+        assert_eq!(STRUCTURE_NOTIFY_MASK, 1 << 17);
+        assert_eq!(RESIZE_REDIRECT_MASK, 1 << 18);
+        assert_eq!(SUBSTRUCTURE_NOTIFY_MASK, 1 << 19);
+        assert_eq!(SUBSTRUCTURE_REDIRECT_MASK, 1 << 20);
+        assert_eq!(FOCUS_CHANGE_MASK, 1 << 21);
+        assert_eq!(PROPERTY_CHANGE_MASK, 1 << 22);
+        assert_eq!(COLOURMAP_CHANGE_MASK, 1 << 23);
+        assert_eq!(OWNER_GRAB_BUTTON_MASK, 1 << 24);
+    }
+
+    #[test]
+    fn event_masks_are_all_unique() {
+        let masks = [
+            KEY_PRESS_MASK, KEY_RELEASE_MASK, BUTTON_PRESS_MASK,
+            BUTTON_RELEASE_MASK, ENTER_WINDOW_MASK, LEAVE_WINDOW_MASK,
+            POINTER_MOTION_MASK, POINTER_MOTION_HINT_MASK,
+            BUTTON1_MOTION_MASK, BUTTON2_MOTION_MASK, BUTTON3_MOTION_MASK,
+            BUTTON4_MOTION_MASK, BUTTON5_MOTION_MASK, BUTTON_MOTION_MASK,
+            KEYMAP_STATE_MASK, EXPOSURE_MASK, VISIBILITY_CHANGE_MASK,
+            STRUCTURE_NOTIFY_MASK, RESIZE_REDIRECT_MASK,
+            SUBSTRUCTURE_NOTIFY_MASK, SUBSTRUCTURE_REDIRECT_MASK,
+            FOCUS_CHANGE_MASK, PROPERTY_CHANGE_MASK, COLOURMAP_CHANGE_MASK,
+            OWNER_GRAB_BUTTON_MASK,
+        ];
+        let mut seen = std::collections::HashSet::new();
+        for &m in &masks {
+            assert!(seen.insert(m), "mask {m:#010x} is duplicated");
+        }
+        assert_eq!(seen.len(), 25, "should have exactly 25 unique masks");
+    }
+
+    // -----------------------------------------------------------------------
+    // Root window and visual constants
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn root_window_constants_are_distinct() {
+        let ids = [ROOT_WINDOW, OVERLAY_WINDOW, WM_CHECK_WINDOW, XSETTINGS_WINDOW, XIM_WINDOW];
+        let mut seen = std::collections::HashSet::new();
+        for &id in &ids {
+            assert!(seen.insert(id), "window ID {id:#x} is duplicated");
+        }
+    }
+
+    #[test]
+    fn root_visual_and_colormap_are_non_zero() {
+        assert_ne!(ROOT_VISUAL, 0);
+        assert_ne!(ROOT_COLORMAP, 0);
     }
 }

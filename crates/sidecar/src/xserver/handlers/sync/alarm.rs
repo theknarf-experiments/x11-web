@@ -139,6 +139,7 @@ pub(crate) fn destroy_alarm(state: &mut ClientState, data: &[u8], _seq: u16) -> 
         let alarm_id = state.read_u32(data, 4);
         debug!("SYNC DestroyAlarm: id={alarm_id:#x}");
         state.sync_state.alarms.remove(&alarm_id);
+        state.recycle_xid(alarm_id);
     }
     Vec::new()
 }

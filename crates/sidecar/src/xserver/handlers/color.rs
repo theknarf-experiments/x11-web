@@ -69,6 +69,7 @@ pub(crate) fn handle_free_colormap(state: &mut ClientState, data: &[u8]) -> Vec<
     }
     state.colormaps.remove(&mid);
     state.installed_colormaps.remove(&mid);
+    state.recycle_xid(mid);
     debug!("FreeColormap: id={mid:#x}");
     Vec::new()
 }
@@ -904,6 +905,7 @@ pub(crate) fn handle_free_cursor(state: &mut ClientState, data: &[u8]) -> Vec<u8
     }
     state.cursors.remove(&cid);
     state.cursor_info.remove(&cid);
+    state.recycle_xid(cid);
     Vec::new()
 }
 

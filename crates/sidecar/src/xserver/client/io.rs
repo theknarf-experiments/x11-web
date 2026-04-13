@@ -9,6 +9,14 @@ impl ClientState {
         (id & !0x003FFFFF) == self.resource_id_base
     }
 
+    /// Recycle a freed resource ID so it can be reused via XC-MISC GetXIDList.
+    /// Only recycles IDs that belong to this client's range.
+    pub(crate) fn recycle_xid(&mut self, id: u32) {
+        if self.validate_resource_id(id) {
+            self.freed_xids.push(id);
+        }
+    }
+
     /// Get the current server timestamp (milliseconds since server start).
     pub(crate) fn timestamp(&self) -> u32 {
         self.server_start.elapsed().as_millis() as u32

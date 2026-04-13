@@ -54,6 +54,7 @@ pub(crate) fn handle_dbe_request(state: &mut ClientState, data: &[u8], seq: u16)
             debug!("DBE DeallocateBackBuffer: buffer={back_buffer_id:#x}");
             state.pixmaps.remove(&back_buffer_id);
             state.back_buffers.remove(&back_buffer_id);
+            state.recycle_xid(back_buffer_id);
             Vec::new()
         }
         3 => { // SwapBuffers

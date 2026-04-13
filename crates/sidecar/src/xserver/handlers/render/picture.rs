@@ -448,6 +448,7 @@ pub(crate) fn handle_free_picture(state: &mut ClientState, data: &[u8]) -> Vec<u
     if data.len() >= 8 {
         let pid = read_u32_bo(data, 4, bo);
         state.render.pictures.remove(&pid);
+        state.recycle_xid(pid);
     }
     Vec::new()
 }

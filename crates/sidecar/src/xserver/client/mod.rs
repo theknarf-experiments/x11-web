@@ -313,6 +313,8 @@ pub(crate) struct ClientState {
     pub(crate) vidmode_current_mode: usize,
     /// Whether the client has enabled BIG-REQUESTS via BigReqEnable.
     pub(crate) big_requests_enabled: bool,
+    /// Freed resource IDs available for reuse via XC-MISC GetXIDRange/GetXIDList.
+    pub(crate) freed_xids: Vec<u32>,
     /// Built-in XIM (X Input Method) server state.
     pub(crate) xim: super::handlers::xim::XimServer,
     /// DRI3: DRM device in use by this client (major, minor device numbers).

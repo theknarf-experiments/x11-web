@@ -114,6 +114,7 @@ pub(crate) fn handle_destroy_region(state: &mut ClientState, data: &[u8], seq: u
     require_len!(data, 8, seq, 138, 10, state.msb_first);
     let region_id = state.read_u32(data, 4);
     state.xfixes_regions.remove(&region_id);
+    state.recycle_xid(region_id);
     debug!("DestroyRegion: id={region_id:#x}");
     Vec::new()
 }

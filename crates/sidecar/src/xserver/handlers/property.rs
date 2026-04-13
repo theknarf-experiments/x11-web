@@ -401,3 +401,121 @@ pub(crate) fn event_type_to_mask(event_type: u8) -> u32 {
         _ => 0, // ClientMessage, Selection*, MappingNotify, etc.
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // -----------------------------------------------------------------------
+    // event_type_to_mask — correct mask for each event type
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn device_events_map_to_correct_masks() {
+        assert_eq!(event_type_to_mask(KEY_PRESS_EVENT), KEY_PRESS_MASK);
+        assert_eq!(event_type_to_mask(KEY_RELEASE_EVENT), KEY_RELEASE_MASK);
+        assert_eq!(event_type_to_mask(BUTTON_PRESS_EVENT), BUTTON_PRESS_MASK);
+        assert_eq!(event_type_to_mask(BUTTON_RELEASE_EVENT), BUTTON_RELEASE_MASK);
+        assert_eq!(event_type_to_mask(MOTION_NOTIFY_EVENT), POINTER_MOTION_MASK);
+    }
+
+    #[test]
+    fn crossing_events_map_to_correct_masks() {
+        assert_eq!(event_type_to_mask(ENTER_NOTIFY_EVENT), ENTER_WINDOW_MASK);
+        assert_eq!(event_type_to_mask(LEAVE_NOTIFY_EVENT), LEAVE_WINDOW_MASK);
+    }
+
+    #[test]
+    fn focus_events_share_mask() {
+        assert_eq!(event_type_to_mask(FOCUS_IN_EVENT), FOCUS_CHANGE_MASK);
+        assert_eq!(event_type_to_mask(FOCUS_OUT_EVENT), FOCUS_CHANGE_MASK);
+    }
+
+    #[test]
+    fn keymap_notify_maps_to_keymap_state_mask() {
+        assert_eq!(event_type_to_mask(KEYMAP_NOTIFY_EVENT), KEYMAP_STATE_MASK);
+    }
+
+    #[test]
+    fn expose_maps_to_exposure_mask() {
+        assert_eq!(event_type_to_mask(EXPOSE_EVENT), EXPOSURE_MASK);
+    }
+
+    #[test]
+    fn visibility_notify_maps_to_visibility_change_mask() {
+        assert_eq!(event_type_to_mask(VISIBILITY_NOTIFY_EVENT), VISIBILITY_CHANGE_MASK);
+    }
+
+    #[test]
+    fn structure_events_share_structure_notify_mask() {
+        let structure_events = [
+            CREATE_NOTIFY_EVENT, DESTROY_NOTIFY_EVENT, UNMAP_NOTIFY_EVENT,
+            MAP_NOTIFY_EVENT, REPARENT_NOTIFY_EVENT, CONFIGURE_NOTIFY_EVENT,
+            GRAVITY_NOTIFY_EVENT,
+        ];
+        for ev in structure_events {
+            assert_eq!(
+                event_type_to_mask(ev), STRUCTURE_NOTIFY_MASK,
+                "event type {ev} should map to STRUCTURE_NOTIFY_MASK"
+            );
+        }
+    }
+
+    #[test]
+    fn redirect_events_map_to_substructure_redirect_mask() {
+        let redirect_events = [
+            MAP_REQUEST_EVENT, CONFIGURE_REQUEST_EVENT, CIRCULATE_REQUEST_EVENT,
+        ];
+        for ev in redirect_events {
+            assert_eq!(
+                event_type_to_mask(ev), SUBSTRUCTURE_REDIRECT_MASK,
+                "event type {ev} should map to SUBSTRUCTURE_REDIRECT_MASK"
+            );
+        }
+    }
+
+    #[test]
+    fn resize_request_maps_to_resize_redirect_mask() {
+        assert_eq!(event_type_to_mask(RESIZE_REQUEST_EVENT), RESIZE_REDIRECT_MASK);
+    }
+
+    #[test]
+    fn circulate_notify_maps_to_substructure_notify_mask() {
+        assert_eq!(event_type_to_mask(CIRCULATE_NOTIFY_EVENT), SUBSTRUCTURE_NOTIFY_MASK);
+    }
+
+    #[test]
+    fn property_notify_maps_to_property_change_mask() {
+        assert_eq!(event_type_to_mask(PROPERTY_NOTIFY_EVENT), PROPERTY_CHANGE_MASK);
+    }
+
+    #[test]
+    fn colourmap_notify_maps_to_colourmap_change_mask() {
+        assert_eq!(event_type_to_mask(COLOURMAP_NOTIFY_EVENT), COLOURMAP_CHANGE_MASK);
+    }
+
+    #[test]
+    fn maskless_events_return_zero() {
+        // These events have no corresponding event mask per X11 spec
+        assert_eq!(event_type_to_mask(CLIENT_MESSAGE_EVENT), 0);
+        assert_eq!(event_type_to_mask(SELECTION_CLEAR_EVENT), 0);
+        assert_eq!(event_type_to_mask(SELECTION_REQUEST_EVENT), 0);
+        assert_eq!(event_type_to_mask(SELECTION_NOTIFY_EVENT), 0);
+        assert_eq!(event_type_to_mask(MAPPING_NOTIFY_EVENT), 0);
+    }
+
+    #[test]
+    fn graphics_exposure_and_no_exposure_return_zero() {
+        // GraphicsExposure/NoExposure are controlled by GC graphics_exposures, not event masks
+        assert_eq!(event_type_to_mask(GRAPHICS_EXPOSURE_EVENT), 0);
+        assert_eq!(event_type_to_mask(NO_EXPOSURE_EVENT), 0);
+    }
+
+    #[test]
+    fn invalid_event_types_return_zero() {
+        assert_eq!(event_type_to_mask(0), 0);
+        assert_eq!(event_type_to_mask(1), 0);
+        assert_eq!(event_type_to_mask(35), 0);
+        assert_eq!(event_type_to_mask(255), 0);
+    }
+}

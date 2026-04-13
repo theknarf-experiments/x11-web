@@ -1,7 +1,7 @@
 //! Drawing primitive operations (opcodes 61-71).
 
 use super::*;
-use crate::xserver::core::require_len;
+use crate::xserver::core::{require_len, GRAPHICS_EXPOSURE_EVENT, NO_EXPOSURE_EVENT};
 
 // ---------------------------------------------------------------------------
 // Opcode 61: ClearArea
@@ -197,7 +197,7 @@ pub(crate) fn handle_copy_area(state: &mut ClientState, data: &[u8]) -> Vec<u8> 
         if exposed_rects.is_empty() {
             // NoExposure event (type 14)
             let mut event = [0u8; 32];
-            event[0] = 14; // NoExposure
+            event[0] = NO_EXPOSURE_EVENT;
             state.write_u16(&mut event, 2, state.sequence);
             state.write_u32(&mut event, 4, dst);
             state.write_u16(&mut event, 8, 0u16); // minor_opcode: 0 for core protocol
@@ -208,7 +208,7 @@ pub(crate) fn handle_copy_area(state: &mut ClientState, data: &[u8]) -> Vec<u8> 
             let last_idx = exposed_rects.len() - 1;
             for (i, &(ex, ey, ew, eh)) in exposed_rects.iter().enumerate() {
                 let mut event = [0u8; 32];
-                event[0] = 13; // GraphicsExposure
+                event[0] = GRAPHICS_EXPOSURE_EVENT;
                 state.write_u16(&mut event, 2, state.sequence);
                 state.write_u32(&mut event, 4, dst);
                 state.write_u16(&mut event, 8, ex as u16);
@@ -328,7 +328,7 @@ pub(crate) fn handle_copy_plane(state: &mut ClientState, data: &[u8]) -> Vec<u8>
 
         if exposed_rects.is_empty() {
             let mut event = [0u8; 32];
-            event[0] = 14; // NoExposure
+            event[0] = NO_EXPOSURE_EVENT;
             state.write_u16(&mut event, 2, state.sequence);
             state.write_u32(&mut event, 4, dst);
             state.write_u16(&mut event, 8, 0u16); // minor_opcode: 0 for core protocol
@@ -338,7 +338,7 @@ pub(crate) fn handle_copy_plane(state: &mut ClientState, data: &[u8]) -> Vec<u8>
             let last_idx = exposed_rects.len() - 1;
             for (i, &(ex, ey, ew, eh)) in exposed_rects.iter().enumerate() {
                 let mut event = [0u8; 32];
-                event[0] = 13; // GraphicsExposure
+                event[0] = GRAPHICS_EXPOSURE_EVENT;
                 state.write_u16(&mut event, 2, state.sequence);
                 state.write_u32(&mut event, 4, dst);
                 state.write_u16(&mut event, 8, ex as u16);

@@ -70,6 +70,7 @@ pub(crate) fn destroy_fence(state: &mut ClientState, data: &[u8], _seq: u16) -> 
     if data.len() >= 8 {
         let fence_id = state.read_u32(data, 4);
         debug!("SYNC DestroyFence: id={fence_id:#x}");
+        state.recycle_xid(fence_id);
         if let Some(fence) = state.sync_state.fences.remove(&fence_id) {
             if fence.fd >= 0 {
                 unsafe { libc::close(fence.fd); }

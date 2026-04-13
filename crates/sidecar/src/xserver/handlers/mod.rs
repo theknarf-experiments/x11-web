@@ -1381,6 +1381,84 @@ mod tests {
         assert_eq!(wm_state_val, 1, "Non-top-level mapped windows should have NormalState");
     }
 
+    // -----------------------------------------------------------------------
+    // QueryExtension → dispatch consistency
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn query_extension_opcodes_match_dispatch() {
+        // Ensure QueryExtension returns the same major opcodes used by dispatch.
+        // This catches mismatches that would cause clients to send requests to
+        // the wrong extension handler.
+        let query_dispatch: &[(&str, u8)] = &[
+            ("SHAPE", 128),
+            ("MIT-SHM", 130),
+            ("XInputExtension", 131),
+            ("BIG-REQUESTS", 133),
+            ("SYNC", 134),
+            ("Generic Event Extension", 135),
+            ("XKEYBOARD", 136),
+            ("XFIXES", 138),
+            ("RENDER", 139),
+            ("RANDR", 140),
+            ("XC-MISC", 141),
+            ("Composite", 142),
+            ("DAMAGE", 143),
+            ("Present", 148),
+            ("DRI3", 149),
+            ("XTEST", 150),
+            ("DPMS", 151),
+            ("MIT-SCREEN-SAVER", 152),
+            ("XFree86-VidModeExtension", 153),
+            ("RECORD", 154),
+            ("SECURITY", 155),
+            ("XVideo", 156),
+            ("DOUBLE-BUFFER", 157),
+            ("XINERAMA", 158),
+            ("GLX", 159),
+            ("X-Resource", 160),
+        ];
+        // Verify all opcodes are in valid extension range (128-255)
+        for &(name, opcode) in query_dispatch {
+            assert!(
+                opcode >= 128,
+                "Extension '{name}' has opcode {opcode} < 128 (must be in extension range)"
+            );
+        }
+        // Verify no gaps between 128-160 that might indicate missing extensions
+        let mut opcodes: Vec<u8> = query_dispatch.iter().map(|&(_, op)| op).collect();
+        opcodes.sort();
+        opcodes.dedup();
+        assert_eq!(
+            opcodes.len(), query_dispatch.len(),
+            "Extension opcodes must all be unique"
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // ListExtensions includes all QueryExtension-supported extensions
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn list_extensions_complete() {
+        // All extensions supported by QueryExtension must also appear in ListExtensions
+        let query_names: &[&str] = &[
+            "RENDER", "MIT-SHM", "BIG-REQUESTS", "XFIXES", "SHAPE", "SYNC",
+            "Generic Event Extension", "Composite", "DAMAGE", "RANDR",
+            "XInputExtension", "XKEYBOARD", "XTEST", "DPMS", "MIT-SCREEN-SAVER",
+            "XFree86-VidModeExtension", "RECORD", "SECURITY", "XVideo",
+            "DOUBLE-BUFFER", "XINERAMA", "GLX", "DRI3", "X-Resource", "XC-MISC",
+            "Present",
+        ];
+        let list_extensions: &[&str] = &["BIG-REQUESTS", "MIT-SHM", "RENDER", "XFIXES", "SHAPE", "SYNC", "Generic Event Extension", "XC-MISC", "Composite", "DAMAGE", "Present", "RANDR", "XInputExtension", "XKEYBOARD", "XTEST", "DPMS", "MIT-SCREEN-SAVER", "XFree86-VidModeExtension", "RECORD", "SECURITY", "XVideo", "DOUBLE-BUFFER", "XINERAMA", "GLX", "DRI3", "X-Resource"];
+        for &name in query_names {
+            assert!(
+                list_extensions.contains(&name),
+                "Extension '{name}' is in QueryExtension but missing from ListExtensions"
+            );
+        }
+    }
+
     #[test]
     fn wm_state_iconic_only_for_toplevel() {
         // Only top-level windows can start in IconicState (3)

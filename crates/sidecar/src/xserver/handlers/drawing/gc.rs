@@ -320,5 +320,6 @@ pub(crate) fn handle_free_gc(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
     state.gcs.remove(&gc_id);
     // Unregister from shared registry
     state.unregister_shared_gc(gc_id);
+    state.recycle_xid(gc_id);
     Vec::new()
 }

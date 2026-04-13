@@ -137,6 +137,7 @@ pub(crate) fn destroy_counter(state: &mut ClientState, data: &[u8], _seq: u16) -
         let counter_id = state.read_u32(data, 4);
         debug!("SYNC DestroyCounter: id={counter_id:#x}");
         state.sync_state.counters.remove(&counter_id);
+        state.recycle_xid(counter_id);
         // Deactivate any alarms referencing this counter
         for alarm in state.sync_state.alarms.values_mut() {
             if alarm.counter == counter_id {
