@@ -303,7 +303,7 @@ pub(crate) fn handle_warp_pointer(state: &mut ClientState, data: &[u8], seq: u16
     event[0] = MOTION_NOTIFY_EVENT;
     event[1] = 0; // detail = Normal
     state.write_u16(&mut event, 2, seq);
-    // timestamp = 0
+    state.write_u32(&mut event, 4, state.timestamp()); // timestamp
     state.write_u32(&mut event, 8, state.root_window); // root
     // event window = focus_window
     state.write_u32(&mut event, 12, state.focus_window);
@@ -472,19 +472,76 @@ pub(crate) fn handle_change_keyboard_control(state: &mut ClientState, data: &[u8
     let value_mask = state.read_u32(data, 4);
     let mut offset = 8;
 
+    // Per X11 spec, led (bit 4) and led_mode (bit 5) work together,
+    // and key (bit 6) and auto_repeat_mode (bit 7) work together.
+    // We must track intermediate values as we parse sequentially.
+    let mut led_value: Option<u32> = None;
+    let mut key_value: Option<u32> = None;
+
     for bit in 0..8u32 {
         if value_mask & (1 << bit) != 0
             && offset + 4 <= data.len() {
                 let val = state.read_u32(data, offset);
                 match bit {
-                    0 => state.keyboard_control.key_click_percent = val as u8,
-                    1 => state.keyboard_control.bell_percent = val as u8,
+                    0 => state.keyboard_control.key_click_percent = val.min(100) as u8,
+                    1 => state.keyboard_control.bell_percent = val.min(100) as u8,
                     2 => state.keyboard_control.bell_pitch = val as u16,
                     3 => state.keyboard_control.bell_duration = val as u16,
-                    4 => state.keyboard_control.led_mask = val,
-                    5 => { /* led_mode - no-op */ }
-                    6 => { /* key - auto-repeat key */ }
-                    7 => state.keyboard_control.global_auto_repeat = val as u8,
+                    4 => {
+                        // led: identifies which LED (1-32) to modify with led_mode
+                        led_value = Some(val);
+                        // If led_mode is not also set, this just stores the value
+                        // for potential use by led_mode if it appears later
+                    }
+                    5 => {
+                        // led_mode: 0=Off, 1=On for the LED specified by led (bit 4)
+                        if val > 1 {
+                            return build_error(BAD_VALUE, state.sequence, val, 102, 0);
+                        }
+                        if let Some(led) = led_value {
+                            if led >= 1 && led <= 32 {
+                                let bit_pos = led - 1;
+                                if val == 1 {
+                                    state.keyboard_control.led_mask |= 1 << bit_pos;
+                                } else {
+                                    state.keyboard_control.led_mask &= !(1 << bit_pos);
+                                }
+                            }
+                        } else {
+                            // Per spec: if led is not specified, led_mode applies to all LEDs
+                            if val == 1 {
+                                state.keyboard_control.led_mask = 0xFFFFFFFF;
+                            } else {
+                                state.keyboard_control.led_mask = 0;
+                            }
+                        }
+                    }
+                    6 => {
+                        // key: identifies which keycode's auto-repeat to modify
+                        key_value = Some(val);
+                    }
+                    7 => {
+                        // auto_repeat_mode: 0=Off, 1=On, 2=Default
+                        if val > 2 {
+                            return build_error(BAD_VALUE, state.sequence, val, 102, 0);
+                        }
+                        if let Some(key) = key_value {
+                            // Per spec: key must be a valid keycode (8-255)
+                            if key >= 8 && key <= 255 {
+                                let byte_idx = (key / 8) as usize;
+                                let bit_mask = 1u8 << (key % 8);
+                                match val {
+                                    0 => state.keyboard_control.auto_repeats[byte_idx] &= !bit_mask,
+                                    1 => state.keyboard_control.auto_repeats[byte_idx] |= bit_mask,
+                                    2 => state.keyboard_control.auto_repeats[byte_idx] |= bit_mask, // Default = On
+                                    _ => {}
+                                }
+                            }
+                        } else {
+                            // Per spec: if key is not specified, this sets global auto_repeat
+                            state.keyboard_control.global_auto_repeat = val.min(1) as u8;
+                        }
+                    }
                     _ => {}
                 }
                 offset += 4;
@@ -687,18 +744,8 @@ fn build_screen_saver_notify(state: &ClientState, saver_state: u8) -> Vec<u8> {
     //   byte 17: forced (1 = forced via ForceScreenSaver)
     //   bytes 18-31: pad
     let mut event = [0u8; 32];
-    // Use the MIT-SCREEN-SAVER extension base event code. Most servers
-    // negotiate this dynamically, but we hardcode the base at
-    // the extension event base. Since we use 92 as the event base for
-    // MIT-SCREEN-SAVER (matching typical Xorg), encode it here.
-    // However, since we are sending this in the same reply stream and the
-    // client already negotiated the extension, we use state's knowledge.
-    // For simplicity, we use the standard MIT-SCREEN-SAVER event format
-    // at code 0 from the extension's base. The actual event code depends on
-    // the negotiated base. We'll use 0 as a placeholder and let the
-    // extension dispatch handle it. In practice for this embedded server
-    // the ScreenSaverNotify is primarily a notification in the reply stream.
-    event[0] = 0; // Will be overridden with extension event base by caller if needed
+    // MIT-SCREEN-SAVER ScreenSaverNotify event code = extension base (92) + 0
+    event[0] = 92;
     event[1] = saver_state;
     state.write_u16(&mut event, 2, state.sequence);
     state.write_u32(&mut event, 4, state.timestamp());

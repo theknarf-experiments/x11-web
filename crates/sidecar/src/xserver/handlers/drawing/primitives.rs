@@ -446,16 +446,63 @@ pub(crate) fn handle_poly_line(state: &mut ClientState, data: &[u8]) -> Vec<u8> 
 
     let fg = state.map_color_for_drawable(drawable, gc.foreground);
     let bg = state.map_color_for_drawable(drawable, gc.background);
+
+    // Extract tile/stipple data before borrowing framebuffer
+    let tile_data: Option<(Vec<u8>, u32, u32)> = if gc.fill_style == 1 {
+        state.pixmaps.get(&gc.tile).map(|p| {
+            (p.framebuffer.data().to_vec(), p.width as u32, p.height as u32)
+        })
+    } else {
+        None
+    };
+    let stipple_data: Option<(Vec<u8>, u32, u32)> = if gc.fill_style == 2 || gc.fill_style == 3 {
+        state.pixmaps.get(&gc.stipple).map(|p| {
+            (p.framebuffer.data().to_vec(), p.width as u32, p.height as u32)
+        })
+    } else {
+        None
+    };
+
     if let Some(fb) = state.get_framebuffer_mut(drawable) {
         let dashes = &gc.dash_list;
         let pts: Vec<(i32, i32)> = points.iter().map(|&(x, y)| (x as i32, y as i32)).collect();
-        fb.draw_polyline_gc(
-            &pts, fg, gc.line_width,
-            gc.function, gc.plane_mask,
-            gc.line_style, gc.cap_style, gc.join_style,
-            gc.dash_offset, dashes,
-            bg, &gc.clip_rects,
-        );
+        match gc.fill_style {
+            1 => {
+                // Tiled: draw each segment with tile pattern
+                if let Some((ref tdata, tw, th)) = tile_data {
+                    for w in pts.windows(2) {
+                        fb.draw_line_tiled(
+                            w[0].0, w[0].1, w[1].0, w[1].1,
+                            tdata, tw, th, gc.ts_x, gc.ts_y,
+                            gc.function, gc.plane_mask, gc.cap_style, &gc.clip_rects,
+                        );
+                    }
+                } else {
+                    fb.draw_polyline_gc(&pts, fg, gc.line_width, gc.function, gc.plane_mask,
+                        gc.line_style, gc.cap_style, gc.join_style, gc.dash_offset, dashes, bg, &gc.clip_rects);
+                }
+            }
+            2 | 3 => {
+                // Stippled/OpaqueStippled: draw each segment with stipple pattern
+                if let Some((ref sdata, sw, sh)) = stipple_data {
+                    for w in pts.windows(2) {
+                        fb.draw_line_stippled(
+                            w[0].0, w[0].1, w[1].0, w[1].1,
+                            fg, bg, sdata, sw, sh, gc.ts_x, gc.ts_y,
+                            gc.fill_style == 3, gc.function, gc.plane_mask, gc.cap_style, &gc.clip_rects,
+                        );
+                    }
+                } else {
+                    fb.draw_polyline_gc(&pts, fg, gc.line_width, gc.function, gc.plane_mask,
+                        gc.line_style, gc.cap_style, gc.join_style, gc.dash_offset, dashes, bg, &gc.clip_rects);
+                }
+            }
+            _ => {
+                // Solid (0)
+                fb.draw_polyline_gc(&pts, fg, gc.line_width, gc.function, gc.plane_mask,
+                    gc.line_style, gc.cap_style, gc.join_style, gc.dash_offset, dashes, bg, &gc.clip_rects);
+            }
+        }
     }
     if !points.is_empty() {
         let lw = gc.line_width.max(1) as i16;
@@ -503,17 +550,62 @@ pub(crate) fn handle_poly_segment(state: &mut ClientState, data: &[u8]) -> Vec<u
 
     let fg = state.map_color_for_drawable(drawable, gc.foreground);
     let bg = state.map_color_for_drawable(drawable, gc.background);
+
+    // Extract tile/stipple data before borrowing framebuffer
+    let tile_data: Option<(Vec<u8>, u32, u32)> = if gc.fill_style == 1 {
+        state.pixmaps.get(&gc.tile).map(|p| {
+            (p.framebuffer.data().to_vec(), p.width as u32, p.height as u32)
+        })
+    } else {
+        None
+    };
+    let stipple_data: Option<(Vec<u8>, u32, u32)> = if gc.fill_style == 2 || gc.fill_style == 3 {
+        state.pixmaps.get(&gc.stipple).map(|p| {
+            (p.framebuffer.data().to_vec(), p.width as u32, p.height as u32)
+        })
+    } else {
+        None
+    };
+
     if let Some(fb) = state.get_framebuffer_mut(drawable) {
         let dashes = &gc.dash_list;
         for &(x1, y1, x2, y2) in &segments {
-            fb.draw_line_gc(
-                x1 as i32, y1 as i32, x2 as i32, y2 as i32,
-                fg, gc.line_width,
-                gc.function, gc.plane_mask,
-                gc.line_style, gc.cap_style, gc.join_style,
-                gc.dash_offset, dashes,
-                bg, &gc.clip_rects,
-            );
+            match gc.fill_style {
+                1 => {
+                    if let Some((ref tdata, tw, th)) = tile_data {
+                        fb.draw_line_tiled(
+                            x1 as i32, y1 as i32, x2 as i32, y2 as i32,
+                            tdata, tw, th, gc.ts_x, gc.ts_y,
+                            gc.function, gc.plane_mask, gc.cap_style, &gc.clip_rects,
+                        );
+                    } else {
+                        fb.draw_line_gc(x1 as i32, y1 as i32, x2 as i32, y2 as i32,
+                            fg, gc.line_width, gc.function, gc.plane_mask,
+                            gc.line_style, gc.cap_style, gc.join_style,
+                            gc.dash_offset, dashes, bg, &gc.clip_rects);
+                    }
+                }
+                2 | 3 => {
+                    if let Some((ref sdata, sw, sh)) = stipple_data {
+                        fb.draw_line_stippled(
+                            x1 as i32, y1 as i32, x2 as i32, y2 as i32,
+                            fg, bg, sdata, sw, sh, gc.ts_x, gc.ts_y,
+                            gc.fill_style == 3, gc.function, gc.plane_mask, gc.cap_style, &gc.clip_rects,
+                        );
+                    } else {
+                        fb.draw_line_gc(x1 as i32, y1 as i32, x2 as i32, y2 as i32,
+                            fg, gc.line_width, gc.function, gc.plane_mask,
+                            gc.line_style, gc.cap_style, gc.join_style,
+                            gc.dash_offset, dashes, bg, &gc.clip_rects);
+                    }
+                }
+                _ => {
+                    fb.draw_line_gc(x1 as i32, y1 as i32, x2 as i32, y2 as i32,
+                        fg, gc.line_width, gc.function, gc.plane_mask,
+                        gc.line_style, gc.cap_style, gc.join_style,
+                        gc.dash_offset, dashes, bg, &gc.clip_rects);
+                }
+            }
         }
     }
     if !segments.is_empty() {
@@ -562,24 +654,73 @@ pub(crate) fn handle_poly_rectangle(state: &mut ClientState, data: &[u8]) -> Vec
 
     let fg = state.map_color_for_drawable(drawable, gc.foreground);
     let bg = state.map_color_for_drawable(drawable, gc.background);
+
+    // Extract tile/stipple data before borrowing framebuffer
+    let tile_data: Option<(Vec<u8>, u32, u32)> = if gc.fill_style == 1 {
+        state.pixmaps.get(&gc.tile).map(|p| {
+            (p.framebuffer.data().to_vec(), p.width as u32, p.height as u32)
+        })
+    } else {
+        None
+    };
+    let stipple_data: Option<(Vec<u8>, u32, u32)> = if gc.fill_style == 2 || gc.fill_style == 3 {
+        state.pixmaps.get(&gc.stipple).map(|p| {
+            (p.framebuffer.data().to_vec(), p.width as u32, p.height as u32)
+        })
+    } else {
+        None
+    };
+
     if let Some(fb) = state.get_framebuffer_mut(drawable) {
         let dashes = &gc.dash_list;
         for &(x, y, width, height) in &rects {
             let x2 = x as i32 + width as i32;
             let y2 = y as i32 + height as i32;
-            // Per spec: PolyRectangle draws 4 lines with join_style = Miter at corners
-            fb.draw_line_gc(x as i32, y as i32, x2, y as i32, fg, gc.line_width,
-                gc.function, gc.plane_mask, gc.line_style, 1, gc.join_style,
-                gc.dash_offset, dashes, bg, &gc.clip_rects);
-            fb.draw_line_gc(x2, y as i32, x2, y2, fg, gc.line_width,
-                gc.function, gc.plane_mask, gc.line_style, 1, gc.join_style,
-                gc.dash_offset, dashes, bg, &gc.clip_rects);
-            fb.draw_line_gc(x2, y2, x as i32, y2, fg, gc.line_width,
-                gc.function, gc.plane_mask, gc.line_style, 1, gc.join_style,
-                gc.dash_offset, dashes, bg, &gc.clip_rects);
-            fb.draw_line_gc(x as i32, y2, x as i32, y as i32, fg, gc.line_width,
-                gc.function, gc.plane_mask, gc.line_style, 1, gc.join_style,
-                gc.dash_offset, dashes, bg, &gc.clip_rects);
+            let lines = [
+                (x as i32, y as i32, x2, y as i32),
+                (x2, y as i32, x2, y2),
+                (x2, y2, x as i32, y2),
+                (x as i32, y2, x as i32, y as i32),
+            ];
+            match gc.fill_style {
+                1 => {
+                    if let Some((ref tdata, tw, th)) = tile_data {
+                        for &(lx0, ly0, lx1, ly1) in &lines {
+                            fb.draw_line_tiled(lx0, ly0, lx1, ly1, tdata, tw, th,
+                                gc.ts_x, gc.ts_y, gc.function, gc.plane_mask,
+                                gc.cap_style, &gc.clip_rects);
+                        }
+                    } else {
+                        for &(lx0, ly0, lx1, ly1) in &lines {
+                            fb.draw_line_gc(lx0, ly0, lx1, ly1, fg, gc.line_width,
+                                gc.function, gc.plane_mask, gc.line_style, gc.cap_style, gc.join_style,
+                                gc.dash_offset, dashes, bg, &gc.clip_rects);
+                        }
+                    }
+                }
+                2 | 3 => {
+                    if let Some((ref sdata, sw, sh)) = stipple_data {
+                        for &(lx0, ly0, lx1, ly1) in &lines {
+                            fb.draw_line_stippled(lx0, ly0, lx1, ly1, fg, bg,
+                                sdata, sw, sh, gc.ts_x, gc.ts_y, gc.fill_style == 3,
+                                gc.function, gc.plane_mask, gc.cap_style, &gc.clip_rects);
+                        }
+                    } else {
+                        for &(lx0, ly0, lx1, ly1) in &lines {
+                            fb.draw_line_gc(lx0, ly0, lx1, ly1, fg, gc.line_width,
+                                gc.function, gc.plane_mask, gc.line_style, gc.cap_style, gc.join_style,
+                                gc.dash_offset, dashes, bg, &gc.clip_rects);
+                        }
+                    }
+                }
+                _ => {
+                    for &(lx0, ly0, lx1, ly1) in &lines {
+                        fb.draw_line_gc(lx0, ly0, lx1, ly1, fg, gc.line_width,
+                            gc.function, gc.plane_mask, gc.line_style, gc.cap_style, gc.join_style,
+                            gc.dash_offset, dashes, bg, &gc.clip_rects);
+                    }
+                }
+            }
         }
     }
     let lw = gc.line_width.max(1) as i16;

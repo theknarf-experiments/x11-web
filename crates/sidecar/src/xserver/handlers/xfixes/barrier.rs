@@ -9,6 +9,13 @@ pub(crate) fn handle_create_pointer_barrier(state: &mut ClientState, data: &[u8]
     if data.len() >= 28 {
         let barrier_id = state.read_u32(data, 4);
         let window = state.read_u32(data, 8);
+        // Per XFIXES spec: validate window exists
+        if window != state.root_window && !state.windows.contains_key(&window) {
+            return crate::xserver::core::build_error(
+                crate::xserver::core::BAD_WINDOW, _seq, window,
+                138, 31, // XFIXES major opcode = 138
+            );
+        }
         let x1 = state.read_i16(data, 12);
         let y1 = state.read_i16(data, 14);
         let x2 = state.read_i16(data, 16);

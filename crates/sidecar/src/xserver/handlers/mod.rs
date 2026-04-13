@@ -63,6 +63,22 @@ pub(crate) fn handle_core_request(state: &mut ClientState, data: &[u8]) -> Vec<u
     let _minor = data[1];
     let seq = state.sequence;
 
+    // Per SECURITY extension spec: untrusted clients are restricted from
+    // certain operations that could affect other clients or system security.
+    if state.trust_level > 0 {
+        match major_opcode {
+            // ChangeHosts: untrusted clients cannot modify host access control
+            109 => {
+                return build_error(BAD_ACCESS, seq, 0, major_opcode, 0);
+            }
+            // SetAccessControl: untrusted clients cannot change access control mode
+            111 => {
+                return build_error(BAD_ACCESS, seq, 0, major_opcode, 0);
+            }
+            _ => {}
+        }
+    }
+
     match major_opcode {
         1 => window::handle_create_window(state, data, seq),
         2 => window::handle_change_window_attributes(state, data),

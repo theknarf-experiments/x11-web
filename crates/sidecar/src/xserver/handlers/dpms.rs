@@ -58,11 +58,23 @@ pub(crate) fn handle_dpms_request(state: &mut ClientState, data: &[u8], seq: u16
         6 => { // ForceLevel
             require_len!(data, 6, seq, 151, minor as u16, state.msb_first);
             let level = state.read_u16(data, 4);
-            // 0=On, 1=Standby, 2=Suspend, 3=Off
-            if level <= 3 {
-                state.dpms_power_level = level;
-                debug!("DPMS ForceLevel: level={level}");
+            // Per DPMS spec: level must be 0-3 (On, Standby, Suspend, Off)
+            if level > 3 {
+                return crate::xserver::core::build_error_bo(
+                    crate::xserver::core::BAD_VALUE, seq, level as u32,
+                    151, minor as u16, state.msb_first,
+                );
             }
+            // Per DPMS spec: ForceLevel should fail if DPMS is disabled
+            // and the requested level is not DPMSModeOn (0)
+            if !state.dpms_enabled && level != 0 {
+                return crate::xserver::core::build_error_bo(
+                    crate::xserver::core::BAD_VALUE, seq, level as u32,
+                    151, minor as u16, state.msb_first,
+                );
+            }
+            state.dpms_power_level = level;
+            debug!("DPMS ForceLevel: level={level}");
             Vec::new()
         }
         7 => { // Info

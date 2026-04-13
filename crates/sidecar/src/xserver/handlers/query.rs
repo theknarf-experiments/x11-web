@@ -174,7 +174,7 @@ pub(crate) fn handle_query_extension(_state: &mut ClientState, data: &[u8], seq:
         "MIT-SCREEN-SAVER" => {
             reply[8] = 1;
             reply[9] = 152;
-            reply[10] = 0;
+            reply[10] = 92; // first_event: ScreenSaverNotify event base
             reply[11] = 0;
         }
         "XFree86-VidModeExtension" => {

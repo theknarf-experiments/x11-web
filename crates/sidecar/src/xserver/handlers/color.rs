@@ -87,17 +87,13 @@ pub(crate) fn handle_copy_colormap_and_free(state: &mut ClientState, data: &[u8]
         return build_error(BAD_COLOR, _seq, src, 80, 0);
     }
     let new_cmap = if let Some(src_cmap) = state.colormaps.get(&src) {
-        let mut cmap = src_cmap.clone();
-        // Free all allocated cells in the source
-        for a in &mut cmap.allocated {
-            *a = false;
-        }
-        cmap
+        src_cmap.clone()
     } else {
         ColormapState::new_truecolor(0x21)
     };
     state.colormaps.insert(mid, new_cmap);
-    // Free allocated cells in the source colormap
+    // Per X11 spec: free all allocated cells in the SOURCE colormap
+    // (cells allocated by this client are released from the source)
     if let Some(src_cmap) = state.colormaps.get_mut(&src) {
         for a in src_cmap.allocated.iter_mut() {
             *a = false;

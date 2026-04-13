@@ -1049,6 +1049,131 @@ impl Framebuffer {
         }
     }
 
+    /// Draw a line using a tile pattern for per-pixel color lookup.
+    /// Per X11 spec, when fill_style is Tiled, line pixels use the tile color at each (x,y).
+    pub fn draw_line_tiled(
+        &mut self,
+        x0: i32, y0: i32, x1: i32, y1: i32,
+        tile_data: &[u8], tile_w: u32, tile_h: u32,
+        ts_x: i16, ts_y: i16,
+        gc_func: u8, plane_mask: u32,
+        cap_style: u8,
+        clip_rects: &[(i16, i16, u16, u16)],
+    ) {
+        if tile_w == 0 || tile_h == 0 || tile_data.is_empty() {
+            return;
+        }
+        let tile_stride = tile_w as usize * 4;
+        let dx = (x1 - x0).abs();
+        let dy = -(y1 - y0).abs();
+        let sx: i32 = if x0 < x1 { 1 } else { -1 };
+        let sy: i32 = if y0 < y1 { 1 } else { -1 };
+        let mut err = dx + dy;
+        let mut x = x0;
+        let mut y = y0;
+        let mut is_first = true;
+
+        loop {
+            let is_last = x == x1 && y == y1;
+            let skip = cap_style == 0 && is_last && !is_first;
+
+            if !skip {
+                let tile_x = ((x - ts_x as i32) % tile_w as i32 + tile_w as i32) as u32 % tile_w;
+                let tile_y = ((y - ts_y as i32) % tile_h as i32 + tile_h as i32) as u32 % tile_h;
+                let off = tile_y as usize * tile_stride + tile_x as usize * 4;
+                if off + 3 < tile_data.len() {
+                    let color = (tile_data[off + 2] as u32) << 16
+                        | (tile_data[off + 1] as u32) << 8
+                        | tile_data[off] as u32;
+                    self.draw_point_gc(x, y, color, gc_func, plane_mask, clip_rects);
+                }
+            }
+
+            is_first = false;
+            if is_last { break; }
+            let e2 = 2 * err;
+            if e2 >= dy { err += dy; x += sx; }
+            if e2 <= dx { err += dx; y += sy; }
+        }
+    }
+
+    /// Draw a line using a stipple pattern for per-pixel fill.
+    /// Per X11 spec, when fill_style is Stippled, only foreground pixels where
+    /// stipple bit is set are drawn. OpaqueStippled draws bg where bit is unset.
+    pub fn draw_line_stippled(
+        &mut self,
+        x0: i32, y0: i32, x1: i32, y1: i32,
+        fg: u32, bg: u32,
+        stipple_data: &[u8], stipple_w: u32, stipple_h: u32,
+        ts_x: i16, ts_y: i16,
+        opaque: bool,
+        gc_func: u8, plane_mask: u32,
+        cap_style: u8,
+        clip_rects: &[(i16, i16, u16, u16)],
+    ) {
+        if stipple_w == 0 || stipple_h == 0 || stipple_data.is_empty() {
+            return;
+        }
+        let dx = (x1 - x0).abs();
+        let dy = -(y1 - y0).abs();
+        let sx: i32 = if x0 < x1 { 1 } else { -1 };
+        let sy: i32 = if y0 < y1 { 1 } else { -1 };
+        let mut err = dx + dy;
+        let mut x = x0;
+        let mut y = y0;
+        let mut is_first = true;
+
+        // Stipple is a 1-bit-per-pixel bitmap; stride is ceil(stipple_w/8) bytes per row
+        // However, pixmap data in our framebuffer is stored as 32bpp BGRA.
+        // For 1-bit depth stipples, the data is stored as 1 bit per pixel in row-major order.
+        // We detect the format based on data size.
+        let is_1bpp = stipple_data.len() < (stipple_w * stipple_h * 4) as usize;
+        let bpp_stride = if is_1bpp {
+            ((stipple_w + 7) / 8) as usize
+        } else {
+            stipple_w as usize * 4
+        };
+
+        loop {
+            let is_last = x == x1 && y == y1;
+            let skip = cap_style == 0 && is_last && !is_first;
+
+            if !skip {
+                let sx_pos = ((x - ts_x as i32) % stipple_w as i32 + stipple_w as i32) as u32 % stipple_w;
+                let sy_pos = ((y - ts_y as i32) % stipple_h as i32 + stipple_h as i32) as u32 % stipple_h;
+
+                let bit_set = if is_1bpp {
+                    let byte_idx = sy_pos as usize * bpp_stride + (sx_pos / 8) as usize;
+                    if byte_idx < stipple_data.len() {
+                        stipple_data[byte_idx] & (1 << (sx_pos % 8)) != 0
+                    } else {
+                        false
+                    }
+                } else {
+                    // 32bpp: check if pixel is non-zero (any channel)
+                    let off = sy_pos as usize * bpp_stride + sx_pos as usize * 4;
+                    if off + 3 < stipple_data.len() {
+                        stipple_data[off] != 0 || stipple_data[off + 1] != 0 || stipple_data[off + 2] != 0
+                    } else {
+                        false
+                    }
+                };
+
+                if bit_set {
+                    self.draw_point_gc(x, y, fg, gc_func, plane_mask, clip_rects);
+                } else if opaque {
+                    self.draw_point_gc(x, y, bg, gc_func, plane_mask, clip_rects);
+                }
+            }
+
+            is_first = false;
+            if is_last { break; }
+            let e2 = 2 * err;
+            if e2 >= dy { err += dy; x += sx; }
+            if e2 <= dx { err += dx; y += sy; }
+        }
+    }
+
     /// Draw a single pixel with GC function, plane mask, and clip rects.
     pub fn draw_point_gc(
         &mut self,
