@@ -65,6 +65,12 @@ pub(crate) fn handle_map_window(state: &mut ClientState, data: &[u8], seq: u16) 
         }
     }
 
+    // Per X11 spec: "If the window is already mapped, the request has no effect."
+    if state.windows.get(&wid).is_some_and(|w| w.mapped) {
+        debug!("MapWindow: id={wid:#x} already mapped, no-op");
+        return events;
+    }
+
     let Some(wid_str) = state.window_uuid(wid) else {
         warn!("MapWindow: no UUID for {wid:#x}, skipping");
         return events;
@@ -433,6 +439,12 @@ pub(crate) fn handle_unmap_window(state: &mut ClientState, data: &[u8], seq: u16
 
     if !state.windows.contains_key(&wid) {
         return build_error(BAD_WINDOW, seq, wid, 10, 0);
+    }
+
+    // Per X11 spec: "If the window is already unmapped, the request has no effect."
+    if state.windows.get(&wid).is_some_and(|w| !w.mapped) {
+        debug!("UnmapWindow: id={wid:#x} already unmapped, no-op");
+        return Vec::new();
     }
 
     let mut events = Vec::new();
