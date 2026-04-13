@@ -25,20 +25,37 @@ pub(crate) fn handle_send_event(state: &mut ClientState, data: &[u8]) -> Vec<u8>
     // Otherwise: deliver to the specified window
     let target = match destination {
         0 => {
-            // Find the window containing the pointer.
+            // Find the deepest mapped window containing the pointer.
+            // Walk the window tree from root, descending into children
+            // (in reverse stacking order = top window first) to find the
+            // most specific window under the pointer.
             let px = state.pointer_x;
             let py = state.pointer_y;
             let mut found = state.root_window;
-            for (_, win) in state.windows.iter() {
-                if win.mapped
-                    && win.parent == state.root_window
-                    && px >= win.x
-                    && py >= win.y
-                    && px < win.x + win.width as i16
-                    && py < win.y + win.height as i16
-                {
-                    found = win.id;
-                    break;
+            let mut current = state.root_window;
+            'outer: loop {
+                let children = state.windows.get(&current)
+                    .map(|w| w.children_order.clone())
+                    .unwrap_or_default();
+                let mut descended = false;
+                // Iterate in reverse stacking order (top of stack = last in list)
+                for &child_id in children.iter().rev() {
+                    if let Some(child) = state.windows.get(&child_id) {
+                        if child.mapped
+                            && px >= child.x
+                            && py >= child.y
+                            && px < child.x.saturating_add(child.width as i16)
+                            && py < child.y.saturating_add(child.height as i16)
+                        {
+                            found = child_id;
+                            current = child_id;
+                            descended = true;
+                            break;
+                        }
+                    }
+                }
+                if !descended {
+                    break 'outer;
                 }
             }
             found
