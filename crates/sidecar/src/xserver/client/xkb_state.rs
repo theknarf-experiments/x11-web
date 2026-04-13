@@ -568,6 +568,55 @@ mod tests {
     // -----------------------------------------------------------------------
 
     #[test]
+    fn xkb_control_masks_match_spec() {
+        // Verify that the XKB boolean control mask values match the X11 spec:
+        // RepeatKeys=bit0, SlowKeys=bit1, BounceKeys=bit2, StickyKeys=bit3,
+        // MouseKeys=bit4, MouseKeysAccel=bit5, AccessXKeys=bit6
+        let c = XkbControls::default();
+        // RepeatKeys should be bit 0
+        assert_eq!(c.enabled_ctrls & 1, 1, "RepeatKeys should be bit 0");
+        // Other controls should not be enabled by default
+        assert_eq!(c.enabled_ctrls & (1 << 1), 0, "SlowKeys should be off");
+        assert_eq!(c.enabled_ctrls & (1 << 2), 0, "BounceKeys should be off");
+        assert_eq!(c.enabled_ctrls & (1 << 3), 0, "StickyKeys should be off");
+        assert_eq!(c.enabled_ctrls & (1 << 4), 0, "MouseKeys should be off");
+    }
+
+    #[test]
+    fn bounce_keys_uses_correct_mask_bit2() {
+        let mut s = XkbState::default();
+        // Enable only bit 2 (BounceKeys)
+        s.controls.enabled_ctrls = 1 << 2;
+        s.controls.debounce_delay = 300;
+        s.key_release(38);
+        assert!(s.bounce_keys_reject(38), "BounceKeys at bit 2 should reject");
+
+        // Verify bit 4 (MouseKeys) does NOT trigger BounceKeys
+        let mut s2 = XkbState::default();
+        s2.controls.enabled_ctrls = 1 << 4; // MouseKeys, not BounceKeys
+        s2.controls.debounce_delay = 300;
+        s2.key_release(38);
+        assert!(!s2.bounce_keys_reject(38), "MouseKeys bit should not trigger BounceKeys");
+    }
+
+    #[test]
+    fn sticky_keys_uses_correct_mask_bit3() {
+        let mut s = XkbState::default();
+        // Enable only bit 3 (StickyKeys)
+        s.controls.enabled_ctrls = 1 << 3;
+        s.key_press(50); // Shift_L
+        assert_eq!(s.sticky_mods, 0x01, "StickyKeys at bit 3 should latch Shift");
+        assert_eq!(s.base_mods, 0, "StickyKeys should NOT set base_mods");
+
+        // Verify bit 6 (AccessXKeys) does NOT trigger StickyKeys
+        let mut s2 = XkbState::default();
+        s2.controls.enabled_ctrls = 1 << 6; // AccessXKeys, not StickyKeys
+        s2.key_press(50); // Shift_L
+        assert_eq!(s2.sticky_mods, 0, "AccessXKeys bit should not trigger StickyKeys");
+        assert_eq!(s2.base_mods, 0x01, "Without StickyKeys, Shift should go to base_mods");
+    }
+
+    #[test]
     fn mousekeys_numpad_movement() {
         assert_eq!(mousekeys_movement(80), Some((0, -1)));  // KP_8 = Up
         assert_eq!(mousekeys_movement(88), Some((0, 1)));   // KP_2 = Down
