@@ -450,3 +450,96 @@ fn draw_diagonal_line() {
     let off = 5 * fb.stride() + 5 * 4;
     assert_eq!(fb.data()[off], 0xFF); // B = 255
 }
+
+// -----------------------------------------------------------------------
+// Wide dashed line rendering
+// -----------------------------------------------------------------------
+
+#[test]
+fn wide_dashed_horiz_line_has_gaps() {
+    let mut fb = Framebuffer::new(40, 10);
+    // Dash pattern: 4 on, 4 off.  Line width 3.
+    // OnOffDash (line_style=1)
+    fb.draw_line_gc(
+        0, 5, 39, 5,        // horizontal line from (0,5) to (39,5)
+        0xFF0000, 3,         // red, width 3
+        3, 0xFFFFFFFF,       // GXcopy, full plane mask
+        1, 1, 0,             // OnOffDash, Butt cap, Miter join
+        0, &[4, 4],          // dash offset 0, pattern [4,4]
+        0, &[],              // bg, no clip
+    );
+    // At x=2 (within first dash-on segment), center y=5, should be drawn
+    let off_on = 5 * fb.stride() + 2 * 4;
+    assert_ne!(fb.data()[off_on + 2], 0, "pixel at x=2 should be drawn (on-dash)");
+
+    // At x=6 (within first dash-off segment), center y=5, should NOT be drawn
+    let off_off = 5 * fb.stride() + 6 * 4;
+    assert_eq!(fb.data()[off_off + 2], 0, "pixel at x=6 should be gap (off-dash)");
+
+    // Width: y=4 should also be drawn at x=2 (line_width=3 means hw=1)
+    let off_top = 4 * fb.stride() + 2 * 4;
+    assert_ne!(fb.data()[off_top + 2], 0, "pixel at (2,4) should be drawn (wide)");
+}
+
+#[test]
+fn wide_dashed_vert_line_has_gaps() {
+    let mut fb = Framebuffer::new(10, 40);
+    // Dash pattern: 5 on, 5 off.  Line width 4.
+    fb.draw_line_gc(
+        5, 0, 5, 39,
+        0x00FF00, 4,
+        3, 0xFFFFFFFF,
+        1, 1, 0,
+        0, &[5, 5],
+        0, &[],
+    );
+    // At y=2 (on), should be drawn
+    let off_on = 2 * fb.stride() + 5 * 4;
+    assert_ne!(fb.data()[off_on + 1], 0, "pixel at y=2 should be drawn");
+
+    // At y=7 (off), should not be drawn
+    let off_off = 7 * fb.stride() + 5 * 4;
+    assert_eq!(fb.data()[off_off + 1], 0, "pixel at y=7 should be gap");
+}
+
+#[test]
+fn wide_dashed_diagonal_line_has_gaps() {
+    let mut fb = Framebuffer::new(40, 40);
+    // Dash pattern: 6 on, 6 off.  Line width 3.
+    fb.draw_line_gc(
+        0, 0, 39, 39,
+        0x0000FF, 3,
+        3, 0xFFFFFFFF,
+        1, 1, 0,
+        0, &[6, 6],
+        0, &[],
+    );
+    // At (2,2) (on), should be drawn
+    let off_on = 2 * fb.stride() + 2 * 4;
+    assert_ne!(fb.data()[off_on], 0, "pixel at (2,2) should be drawn");
+
+    // After ~8 pixels of Bresenham travel (off region), should not be drawn
+    // Note: diagonal pixel count depends on Bresenham steps, check around pixel 9
+    // which should be in the gap region for pattern [6,6]
+    let off_off = 9 * fb.stride() + 9 * 4;
+    assert_eq!(fb.data()[off_off], 0, "pixel at (9,9) should be gap");
+}
+
+#[test]
+fn wide_double_dash_draws_background() {
+    let mut fb = Framebuffer::new(40, 10);
+    // DoubleDash (line_style=2): gaps drawn in background color
+    fb.draw_line_gc(
+        0, 5, 39, 5,
+        0xFF0000, 3,         // red foreground
+        3, 0xFFFFFFFF,
+        2, 1, 0,             // DoubleDash
+        0, &[4, 4],
+        0x00FF00,            // green background
+        &[],
+    );
+    // At x=6 (gap), should be green (background)
+    let off_gap = 5 * fb.stride() + 6 * 4;
+    assert_ne!(fb.data()[off_gap + 1], 0, "gap pixel should have green background");
+    assert_eq!(fb.data()[off_gap + 2], 0, "gap pixel should not have red");
+}

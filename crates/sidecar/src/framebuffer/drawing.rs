@@ -49,80 +49,30 @@ impl Framebuffer {
             self.bresenham_line_gc(x0, y0, x1, y1, color, gc_func, plane_mask,
                                    cap_style, dashes, line_style, background, clip_rects);
         } else {
-            // Wide line: draw a filled rectangle along the line path
+            // Wide line with dash support
             let hw = (line_width / 2) as i32;
+            let is_dashed = dashes.is_some();
+
             if y0 == y1 {
                 // Horizontal wide line
-                let min_x = x0.min(x1);
-                let max_x = x0.max(x1);
-                let extra = match cap_style {
-                    2 | 3 => hw, // Round or Projecting: extend by half-width
-                    _ => 0,
-                };
-                self.fill_rect_rop_clipped(
-                    (min_x - extra) as i16, (y0 - hw) as i16,
-                    (max_x - min_x + 1 + extra * 2) as u16, line_width,
-                    color, gc_func, plane_mask, clip_rects,
-                );
+                self.draw_wide_line_horiz(x0, y0, x1, hw, line_width, color, gc_func,
+                    plane_mask, cap_style, line_style, background, clip_rects, dashes);
             } else if x0 == x1 {
                 // Vertical wide line
-                let min_y = y0.min(y1);
-                let max_y = y0.max(y1);
-                let extra = match cap_style {
-                    2 | 3 => hw,
-                    _ => 0,
-                };
-                self.fill_rect_rop_clipped(
-                    (x0 - hw) as i16, (min_y - extra) as i16,
-                    line_width, (max_y - min_y + 1 + extra * 2) as u16,
-                    color, gc_func, plane_mask, clip_rects,
-                );
+                self.draw_wide_line_vert(x0, y0, y1, hw, line_width, color, gc_func,
+                    plane_mask, cap_style, line_style, background, clip_rects, dashes);
             } else {
-                // Diagonal wide line: use perpendicular offset from the line direction.
-                // Compute the unit direction and perpendicular vectors.
-                let fdx = (x1 - x0) as f64;
-                let fdy = (y1 - y0) as f64;
-                let len = fdx.hypot(fdy);
-                let ux = fdx / len;
-                let uy = fdy / len;
-                // Perpendicular direction (rotated 90 degrees)
-                let px = -uy;
-                let py = ux;
-
-                // Extend endpoints for Projecting cap (cap_style 3)
-                let (ex0, ey0, ex1, ey1) = if cap_style == 3 {
-                    let ext = hw as f64;
-                    (
-                        (x0 as f64 - ux * ext).round() as i32,
-                        (y0 as f64 - uy * ext).round() as i32,
-                        (x1 as f64 + ux * ext).round() as i32,
-                        (y1 as f64 + uy * ext).round() as i32,
-                    )
-                } else {
-                    (x0, y0, x1, y1)
-                };
-
-                for d in -hw..=hw {
-                    let ox = (px * d as f64).round() as i32;
-                    let oy = (py * d as f64).round() as i32;
-                    self.bresenham_line_gc(
-                        ex0 + ox, ey0 + oy, ex1 + ox, ey1 + oy,
-                        color, gc_func, plane_mask,
-                        // Use Butt cap for the individual scan lines since we
-                        // handle caps at the composite level
-                        1, None, 0, background, clip_rects,
-                    );
-                }
+                // Diagonal wide line
+                self.draw_wide_line_diagonal(x0, y0, x1, y1, hw, color, gc_func,
+                    plane_mask, cap_style, line_style, background, clip_rects, dashes);
             }
 
-            // Round cap: draw filled circles at endpoints
-            if cap_style == 2 && line_width > 2 {
+            // Round cap: draw filled circles at endpoints (only for solid lines;
+            // dashed lines handle caps per-segment)
+            if cap_style == 2 && line_width > 2 && !is_dashed {
                 self.fill_circle(x0, y0, hw, color, gc_func, plane_mask, clip_rects);
                 self.fill_circle(x1, y1, hw, color, gc_func, plane_mask, clip_rects);
             }
-
-            // Projecting cap for diagonal lines: fill_circle would be wrong,
-            // but the line extension above handles it via the extended endpoints.
         }
     }
 
@@ -297,6 +247,269 @@ impl Framebuffer {
                             ];
                             self.fill_polygon_gc(&quad, color, 0, gc_func, plane_mask, clip_rects);
                         }
+                    }
+                }
+            }
+        }
+    }
+
+    /// Draw a wide horizontal line with dash support.
+    #[allow(clippy::too_many_arguments)]
+    fn draw_wide_line_horiz(
+        &mut self,
+        x0: i32, y: i32, x1: i32, hw: i32, line_width: u16,
+        color: u32, gc_func: u8, plane_mask: u32,
+        cap_style: u8, line_style: u8, background: u32,
+        clip_rects: &[(i16, i16, u16, u16)],
+        dashes: Option<DashState>,
+    ) {
+        let min_x = x0.min(x1);
+        let max_x = x0.max(x1);
+        let cap_extra = match cap_style { 2 | 3 => hw, _ => 0 };
+
+        match dashes {
+            None => {
+                // Solid wide horizontal line
+                self.fill_rect_rop_clipped(
+                    (min_x - cap_extra) as i16, (y - hw) as i16,
+                    (max_x - min_x + 1 + cap_extra * 2) as u16, line_width,
+                    color, gc_func, plane_mask, clip_rects,
+                );
+            }
+            Some(mut ds) => {
+                // Dashed wide horizontal line: walk pixels left-to-right,
+                // collect contiguous on/off runs, draw each as a rectangle.
+                let dir = if x0 <= x1 { 1i32 } else { -1i32 };
+                let count = (max_x - min_x + 1) as usize;
+                let start_x = x0;
+                let mut seg_start = start_x;
+                let mut seg_on = ds.is_on();
+                let mut cx = start_x;
+
+                for i in 0..count {
+                    let cur_on = ds.is_on();
+                    if cur_on != seg_on || i == 0 {
+                        if i > 0 {
+                            // Flush previous segment
+                            self.flush_wide_h_segment(
+                                seg_start, cx - dir, y, hw, line_width, seg_on,
+                                color, background, gc_func, plane_mask, line_style,
+                                cap_style, i == 0, false, clip_rects,
+                            );
+                        }
+                        seg_start = cx;
+                        seg_on = cur_on;
+                    }
+                    ds.advance();
+                    if i + 1 < count {
+                        cx += dir;
+                    }
+                }
+                // Flush last segment
+                self.flush_wide_h_segment(
+                    seg_start, cx, y, hw, line_width, seg_on,
+                    color, background, gc_func, plane_mask, line_style,
+                    cap_style, false, true, clip_rects,
+                );
+            }
+        }
+    }
+
+    /// Flush a single horizontal dash segment as a filled rectangle.
+    #[allow(clippy::too_many_arguments)]
+    fn flush_wide_h_segment(
+        &mut self,
+        x_start: i32, x_end: i32, y: i32, hw: i32, line_width: u16,
+        is_on: bool, color: u32, background: u32,
+        gc_func: u8, plane_mask: u32, line_style: u8,
+        _cap_style: u8, _is_first: bool, _is_last: bool,
+        clip_rects: &[(i16, i16, u16, u16)],
+    ) {
+        let min_x = x_start.min(x_end);
+        let max_x = x_start.max(x_end);
+        let w = (max_x - min_x + 1) as u16;
+
+        if is_on {
+            self.fill_rect_rop_clipped(
+                min_x as i16, (y - hw) as i16, w, line_width,
+                color, gc_func, plane_mask, clip_rects,
+            );
+        } else if line_style == 2 {
+            // DoubleDash: draw background in gaps
+            self.fill_rect_rop_clipped(
+                min_x as i16, (y - hw) as i16, w, line_width,
+                background, gc_func, plane_mask, clip_rects,
+            );
+        }
+    }
+
+    /// Draw a wide vertical line with dash support.
+    #[allow(clippy::too_many_arguments)]
+    fn draw_wide_line_vert(
+        &mut self,
+        x: i32, y0: i32, y1: i32, hw: i32, line_width: u16,
+        color: u32, gc_func: u8, plane_mask: u32,
+        cap_style: u8, line_style: u8, background: u32,
+        clip_rects: &[(i16, i16, u16, u16)],
+        dashes: Option<DashState>,
+    ) {
+        let min_y = y0.min(y1);
+        let max_y = y0.max(y1);
+        let cap_extra = match cap_style { 2 | 3 => hw, _ => 0 };
+
+        match dashes {
+            None => {
+                // Solid wide vertical line
+                self.fill_rect_rop_clipped(
+                    (x - hw) as i16, (min_y - cap_extra) as i16,
+                    line_width, (max_y - min_y + 1 + cap_extra * 2) as u16,
+                    color, gc_func, plane_mask, clip_rects,
+                );
+            }
+            Some(mut ds) => {
+                // Dashed wide vertical line
+                let dir = if y0 <= y1 { 1i32 } else { -1i32 };
+                let count = (max_y - min_y + 1) as usize;
+                let mut cy = y0;
+                let mut seg_start = cy;
+                let mut seg_on = ds.is_on();
+
+                for i in 0..count {
+                    let cur_on = ds.is_on();
+                    if cur_on != seg_on || i == 0 {
+                        if i > 0 {
+                            let seg_min = seg_start.min(cy - dir);
+                            let seg_max = seg_start.max(cy - dir);
+                            let h = (seg_max - seg_min + 1) as u16;
+                            if seg_on {
+                                self.fill_rect_rop_clipped(
+                                    (x - hw) as i16, seg_min as i16, line_width, h,
+                                    color, gc_func, plane_mask, clip_rects,
+                                );
+                            } else if line_style == 2 {
+                                self.fill_rect_rop_clipped(
+                                    (x - hw) as i16, seg_min as i16, line_width, h,
+                                    background, gc_func, plane_mask, clip_rects,
+                                );
+                            }
+                        }
+                        seg_start = cy;
+                        seg_on = cur_on;
+                    }
+                    ds.advance();
+                    if i + 1 < count {
+                        cy += dir;
+                    }
+                }
+                // Flush last segment
+                let seg_min = seg_start.min(cy);
+                let seg_max = seg_start.max(cy);
+                let h = (seg_max - seg_min + 1) as u16;
+                if seg_on {
+                    self.fill_rect_rop_clipped(
+                        (x - hw) as i16, seg_min as i16, line_width, h,
+                        color, gc_func, plane_mask, clip_rects,
+                    );
+                } else if line_style == 2 {
+                    self.fill_rect_rop_clipped(
+                        (x - hw) as i16, seg_min as i16, line_width, h,
+                        background, gc_func, plane_mask, clip_rects,
+                    );
+                }
+            }
+        }
+    }
+
+    /// Draw a wide diagonal line with dash support.
+    /// Uses perpendicular strips from the center line, with dash state
+    /// controlling which strips are drawn.
+    #[allow(clippy::too_many_arguments)]
+    fn draw_wide_line_diagonal(
+        &mut self,
+        x0: i32, y0: i32, x1: i32, y1: i32, hw: i32,
+        color: u32, gc_func: u8, plane_mask: u32,
+        cap_style: u8, line_style: u8, background: u32,
+        clip_rects: &[(i16, i16, u16, u16)],
+        dashes: Option<DashState>,
+    ) {
+        let fdx = (x1 - x0) as f64;
+        let fdy = (y1 - y0) as f64;
+        let len = fdx.hypot(fdy);
+        let ux = fdx / len;
+        let uy = fdy / len;
+        // Perpendicular direction (rotated 90 degrees)
+        let px = -uy;
+        let py = ux;
+
+        // Extend endpoints for Projecting cap (cap_style 3)
+        let (ex0, ey0, ex1, ey1) = if cap_style == 3 {
+            let ext = hw as f64;
+            (
+                (x0 as f64 - ux * ext).round() as i32,
+                (y0 as f64 - uy * ext).round() as i32,
+                (x1 as f64 + ux * ext).round() as i32,
+                (y1 as f64 + uy * ext).round() as i32,
+            )
+        } else {
+            (x0, y0, x1, y1)
+        };
+
+        match dashes {
+            None => {
+                // Solid wide diagonal line: draw parallel offset lines
+                for d in -hw..=hw {
+                    let ox = (px * d as f64).round() as i32;
+                    let oy = (py * d as f64).round() as i32;
+                    self.bresenham_line_gc(
+                        ex0 + ox, ey0 + oy, ex1 + ox, ey1 + oy,
+                        color, gc_func, plane_mask,
+                        1, None, 0, background, clip_rects,
+                    );
+                }
+            }
+            Some(mut ds) => {
+                // Dashed wide diagonal line: walk along center line with Bresenham,
+                // drawing perpendicular strips at each pixel based on dash state.
+                let dx = (ex1 - ex0).abs();
+                let dy = -(ey1 - ey0).abs();
+                let sx: i32 = if ex0 < ex1 { 1 } else { -1 };
+                let sy: i32 = if ey0 < ey1 { 1 } else { -1 };
+                let mut err = dx + dy;
+                let mut cx = ex0;
+                let mut cy = ey0;
+
+                loop {
+                    let is_on = ds.is_on();
+                    let draw_color = if is_on {
+                        Some(color)
+                    } else if line_style == 2 {
+                        Some(background)
+                    } else {
+                        None
+                    };
+
+                    if let Some(c) = draw_color {
+                        // Draw perpendicular strip at (cx, cy)
+                        for d in -hw..=hw {
+                            let px_i = cx + (px * d as f64).round() as i32;
+                            let py_i = cy + (py * d as f64).round() as i32;
+                            self.draw_point_gc(px_i, py_i, c, gc_func, plane_mask, clip_rects);
+                        }
+                    }
+
+                    ds.advance();
+
+                    if cx == ex1 && cy == ey1 {
+                        break;
+                    }
+                    let e2 = 2 * err;
+                    if e2 >= dy {
+                        err += dy;
+                        cx += sx;
+                    }
+                    if e2 <= dx {
+                        err += dx;
+                        cy += sy;
                     }
                 }
             }
