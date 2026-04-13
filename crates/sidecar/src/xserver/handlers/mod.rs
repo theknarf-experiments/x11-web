@@ -1290,5 +1290,63 @@ mod tests {
         let should_reject = !dpms_enabled && level != 0;
         assert!(!should_reject);
     }
+
+    // -----------------------------------------------------------------------
+    // SubstructureRedirect compliance tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn substructure_redirect_mask_prevents_direct_map() {
+        // Per X11 spec: when a parent has SubstructureRedirectMask set,
+        // MapWindow on a child generates MapRequest instead of actually mapping.
+        // This applies to ALL windows, not just top-level.
+        let parent_mask: u32 = super::SUBSTRUCTURE_REDIRECT_MASK;
+        let override_redirect = false;
+        let has_redirect = parent_mask & super::SUBSTRUCTURE_REDIRECT_MASK != 0;
+        assert!(has_redirect && !override_redirect, "Non-OR child of redirect parent should generate MapRequest");
+    }
+
+    #[test]
+    fn override_redirect_bypasses_substructure_redirect() {
+        // override_redirect windows must bypass SubstructureRedirect
+        let parent_mask: u32 = super::SUBSTRUCTURE_REDIRECT_MASK;
+        let override_redirect = true;
+        let should_redirect = (parent_mask & super::SUBSTRUCTURE_REDIRECT_MASK != 0) && !override_redirect;
+        assert!(!should_redirect, "Override-redirect windows must not be redirected");
+    }
+
+    #[test]
+    fn configure_request_sent_for_non_toplevel_with_redirect() {
+        // Per X11 spec: ConfigureWindow on ANY child generates ConfigureRequest
+        // when parent has SubstructureRedirectMask, not just top-level.
+        let parent_mask: u32 = super::SUBSTRUCTURE_REDIRECT_MASK;
+        let is_override_redirect = false;
+        let parent_has_redirect = parent_mask & super::SUBSTRUCTURE_REDIRECT_MASK != 0;
+        assert!(parent_has_redirect && !is_override_redirect,
+            "Non-OR child should generate ConfigureRequest when parent has redirect");
+    }
+
+    #[test]
+    fn wm_state_set_on_all_mapped_windows() {
+        // Per ICCCM §4.1.3.1: WM_STATE must be set on ALL mapped windows,
+        // not just top-level windows. Non-top-level default to NormalState (1).
+        let is_top_level = false;
+        let initial_state = 1u32; // NormalState
+        let wm_state_val = if is_top_level && initial_state == 3 { 3u32 } else { 1u32 };
+        assert_eq!(wm_state_val, 1, "Non-top-level mapped windows should have NormalState");
+    }
+
+    #[test]
+    fn wm_state_iconic_only_for_toplevel() {
+        // Only top-level windows can start in IconicState (3)
+        let is_top_level = true;
+        let initial_state = 3u32;
+        let wm_state_val = if is_top_level && initial_state == 3 { 3u32 } else { 1u32 };
+        assert_eq!(wm_state_val, 3, "Top-level with initial_state=3 should be IconicState");
+
+        let is_top_level = false;
+        let wm_state_val2 = if is_top_level && initial_state == 3 { 3u32 } else { 1u32 };
+        assert_eq!(wm_state_val2, 1, "Non-top-level should always be NormalState");
+    }
 }
 

@@ -164,11 +164,14 @@ pub(crate) fn handle_configure_window(state: &mut ClientState, data: &[u8], seq:
     let required_len = 12 + n_values * 4;
     require_len!(data, required_len, seq, 12);
 
-    // Check if this is a top-level window that should be redirected to the WM.
-    let is_top_level = state.windows.get(&wid).is_some_and(|w| w.parent == state.root_window);
+    // Per X11 spec: if the window's parent has SubstructureRedirectMask set by
+    // another client, ConfigureWindow generates ConfigureRequest instead of
+    // actually configuring. This applies to ALL windows, not just top-level,
+    // unless override_redirect is set.
     let is_override_redirect = state.windows.get(&wid).is_some_and(|w| w.override_redirect);
+    let parent_id = state.windows.get(&wid).map(|w| w.parent).unwrap_or(0);
 
-    if is_top_level && !is_override_redirect {
+    if !is_override_redirect && parent_id != 0 {
         let should_redirect = {
             if let Ok(wm) = state.wm_state.lock() {
                 wm.client_id.as_ref().is_some_and(|id| id != &state.client_id)
@@ -177,8 +180,12 @@ pub(crate) fn handle_configure_window(state: &mut ClientState, data: &[u8], seq:
             }
         };
 
-        if should_redirect {
-            info!("ConfigureWindow: redirecting wid={wid:#x} as ConfigureRequest to WM");
+        // Also check if any client has SubstructureRedirectMask on the parent
+        let parent_has_redirect = state.windows.get(&parent_id)
+            .is_some_and(|p| p.event_mask & SUBSTRUCTURE_REDIRECT_MASK != 0);
+
+        if should_redirect || parent_has_redirect {
+            info!("ConfigureWindow: redirecting wid={wid:#x} as ConfigureRequest (parent={parent_id:#x})");
 
             // Parse the values from the request to populate the ConfigureRequest event.
             let mut x: i16 = 0;
@@ -221,8 +228,7 @@ pub(crate) fn handle_configure_window(state: &mut ClientState, data: &[u8], seq:
             let mut event = [0u8; 32];
             event[0] = CONFIGURE_REQUEST_EVENT;
             event[1] = stack_mode; // detail = stack-mode
-            // sequence = 0 (asynchronous server event)
-            state.write_u32(&mut event, 4, state.root_window); // parent
+            state.write_u32(&mut event, 4, parent_id); // parent
             state.write_u32(&mut event, 8, wid); // window
             state.write_u32(&mut event, 12, sibling); // sibling
             state.write_i16(&mut event, 16, x);
@@ -239,8 +245,7 @@ pub(crate) fn handle_configure_window(state: &mut ClientState, data: &[u8], seq:
                     let _ = tx.send(event.to_vec());
                 }
             }
-            let parent = state.windows.get(&wid).map(|w| w.parent).unwrap_or(state.root_window);
-            state.broadcast_event(parent, SUBSTRUCTURE_REDIRECT_MASK, &event);
+            state.broadcast_event(parent_id, SUBSTRUCTURE_REDIRECT_MASK, &event);
             return Vec::new();
         }
     }

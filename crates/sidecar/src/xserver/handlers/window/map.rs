@@ -20,46 +20,47 @@ pub(crate) fn handle_map_window(state: &mut ClientState, data: &[u8], seq: u16) 
         return build_error(BAD_WINDOW, seq, wid, 8, 0);
     }
 
-    // Check if this is a top-level window (parent == root) and a WM is active.
-    // If so, redirect as a MapRequest event to the WM instead of mapping directly.
-    // override_redirect windows bypass the WM redirect.
-    let is_top_level = state.windows.get(&wid).is_some_and(|w| w.parent == state.root_window);
+    // Per X11 spec: if the window's parent has SubstructureRedirectMask set by
+    // another client, MapWindow generates MapRequest instead of actually mapping.
+    // This applies to ALL windows (not just top-level), unless override_redirect.
     let is_override_redirect = state.windows.get(&wid).is_some_and(|w| w.override_redirect);
+    let parent_id = state.windows.get(&wid).map(|w| w.parent).unwrap_or(0);
 
-    if is_top_level && !is_override_redirect {
+    if !is_override_redirect && parent_id != 0 {
         let should_redirect = {
             if let Ok(wm) = state.wm_state.lock() {
-                // Only redirect if the WM is a *different* client
+                // Redirect if a WM has registered AND is a different client
                 wm.client_id.as_ref().is_some_and(|id| id != &state.client_id)
             } else {
                 false
             }
         };
 
-        if should_redirect {
+        // Also check if any client has SubstructureRedirectMask on the parent
+        // (even without a formal WM registration — per X11 spec the mask is
+        // what matters, not a WM registration handshake).
+        let parent_has_redirect = state.windows.get(&parent_id)
+            .is_some_and(|p| p.event_mask & SUBSTRUCTURE_REDIRECT_MASK != 0);
+
+        if should_redirect || parent_has_redirect {
             info!(
-                "MapWindow: redirecting wid={wid:#x} as MapRequest to WM"
+                "MapWindow: redirecting wid={wid:#x} as MapRequest (parent={parent_id:#x})"
             );
             // Build MapRequest event (code 20)
             let mut map_request = [0u8; 32];
             map_request[0] = MAP_REQUEST_EVENT;
-            // map_request[1] = 0; // unused
-            // sequence number will be the WM's -- but we use 0 since the server
-            // inserts events asynchronously.
-            state.write_u32(&mut map_request, 4, state.root_window); // parent
+            state.write_u32(&mut map_request, 4, parent_id); // parent
             state.write_u32(&mut map_request, 8, wid); // window
 
-            // Per X11 spec, deliver MapRequest to all clients that have
-            // SubstructureRedirectMask on the parent (typically just the WM).
+            // Deliver MapRequest to the WM if registered
             if let Ok(wm) = state.wm_state.lock() {
                 if let Some(tx) = &wm.event_tx {
                     let _ = tx.send(map_request.to_vec());
                 }
             }
-            // Also broadcast to any other clients with SubstructureRedirectMask
-            let parent = state.windows.get(&wid).map(|w| w.parent).unwrap_or(state.root_window);
-            state.broadcast_event(parent, SUBSTRUCTURE_REDIRECT_MASK, &map_request);
-            // Don't map the window -- the WM will do it.
+            // Also broadcast to any other clients with SubstructureRedirectMask on parent
+            state.broadcast_event(parent_id, SUBSTRUCTURE_REDIRECT_MASK, &map_request);
+            // Don't map the window -- the WM/redirector will do it.
             return events;
         }
     }
@@ -173,9 +174,11 @@ pub(crate) fn handle_map_window(state: &mut ClientState, data: &[u8], seq: u16) 
         // Honor WM_HINTS initial_state: 3=IconicState starts minimized
         let initial_state = win.wm_hints_initial_state.unwrap_or(1); // default NormalState
 
-        // Set WM_STATE based on initial_state
-        if is_top_level {
-            let wm_state_val = if initial_state == 3 { 3u32 } else { 1u32 }; // IconicState or NormalState
+        // Set WM_STATE per ICCCM §4.1.3.1: set on all mapped windows.
+        // Top-level windows may have IconicState (3) from WM_HINTS;
+        // child windows default to NormalState (1).
+        {
+            let wm_state_val = if is_top_level && initial_state == 3 { 3u32 } else { 1u32 };
             let mut wm_state_data = vec![0u8; 8];
             write_u32_bo(&mut wm_state_data, 0, wm_state_val, false); // LE
             win.properties.insert(wm_state_atom, PropertyValue {

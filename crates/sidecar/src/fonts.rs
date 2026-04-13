@@ -1704,6 +1704,10 @@ fn glob_match(pattern: &str, text: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Mutex;
+
+    /// FreeType library is not thread-safe; serialize tests that create FontManager.
+    static FT_LOCK: Mutex<()> = Mutex::new(());
 
     #[test]
     fn test_glyph_rendering() {
@@ -1810,6 +1814,7 @@ mod tests {
 
     #[test]
     fn list_fonts_wildcard_returns_well_known() {
+        let _lock = FT_LOCK.lock().unwrap();
         let fm = FontManager::new();
         let result = fm.list_fonts("*", 100);
         assert!(result.contains(&"fixed".to_string()));
@@ -1818,6 +1823,7 @@ mod tests {
 
     #[test]
     fn list_fonts_max_names_limit() {
+        let _lock = FT_LOCK.lock().unwrap();
         let fm = FontManager::new();
         let result = fm.list_fonts("*", 2);
         assert!(result.len() <= 2);
@@ -1825,6 +1831,7 @@ mod tests {
 
     #[test]
     fn list_fonts_specific_pattern() {
+        let _lock = FT_LOCK.lock().unwrap();
         let fm = FontManager::new();
         let result = fm.list_fonts("fixed", 10);
         assert!(result.contains(&"fixed".to_string()));
@@ -1832,6 +1839,7 @@ mod tests {
 
     #[test]
     fn list_fonts_no_match() {
+        let _lock = FT_LOCK.lock().unwrap();
         let fm = FontManager::new();
         let result = fm.list_fonts("nonexistent-font-xyz", 10);
         assert!(result.is_empty());
@@ -1907,6 +1915,7 @@ mod tests {
 
     #[test]
     fn open_font_succeeds_when_fonts_available() {
+        let _lock = FT_LOCK.lock().unwrap();
         let mut fm = FontManager::new();
         // If any fonts are loaded, "fixed" should succeed
         if !fm.fonts.is_empty() {
@@ -1917,6 +1926,7 @@ mod tests {
 
     #[test]
     fn open_font_with_xlfd_pattern_if_available() {
+        let _lock = FT_LOCK.lock().unwrap();
         let mut fm = FontManager::new();
         if !fm.fonts.is_empty() {
             let ok = fm.open_font(3, "-*-*-*-*-*-*-*-*-*-*-*-*-*-*");
@@ -1926,6 +1936,7 @@ mod tests {
 
     #[test]
     fn close_font_removes_id() {
+        let _lock = FT_LOCK.lock().unwrap();
         let mut fm = FontManager::new();
         if fm.open_font(10, "fixed") {
             assert!(fm.get_font(10).is_some());
@@ -1936,6 +1947,7 @@ mod tests {
 
     #[test]
     fn open_and_close_font_id_lifecycle() {
+        let _lock = FT_LOCK.lock().unwrap();
         let mut fm = FontManager::new();
         // Opening a font twice with same ID should work (last wins)
         if fm.open_font(100, "fixed") {
@@ -2005,6 +2017,7 @@ mod tests {
 
     #[test]
     fn list_fonts_max_names_zero() {
+        let _lock = FT_LOCK.lock().unwrap();
         let fm = FontManager::new();
         let result = fm.list_fonts("*", 0);
         assert!(result.is_empty());
@@ -2012,6 +2025,7 @@ mod tests {
 
     #[test]
     fn list_fonts_max_names_one() {
+        let _lock = FT_LOCK.lock().unwrap();
         let fm = FontManager::new();
         let result = fm.list_fonts("*", 1);
         assert!(result.len() <= 1);
