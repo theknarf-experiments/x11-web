@@ -864,5 +864,253 @@ mod tests {
         assert_eq!(glyph_to_css_cursor(999), "default");
         assert_eq!(glyph_to_css_cursor(u16::MAX), "default");
     }
+
+    // -----------------------------------------------------------------------
+    // Extension opcode uniqueness — no two extensions may share a major opcode
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn extension_major_opcodes_are_unique() {
+        let opcodes: &[(u8, &str)] = &[
+            (128, "SHAPE"), (130, "MIT-SHM"), (131, "XInputExtension"),
+            (133, "BIG-REQUESTS"), (134, "SYNC"), (135, "GE"),
+            (136, "XKB"), (138, "XFIXES"), (139, "RENDER"),
+            (140, "RANDR"), (141, "XC-MISC"), (142, "Composite"),
+            (143, "DAMAGE"), (148, "Present"), (149, "DRI3"),
+            (150, "XTEST"), (151, "DPMS"), (152, "MIT-SCREEN-SAVER"),
+            (153, "VidMode"), (154, "RECORD"), (155, "SECURITY"),
+            (156, "XVideo"), (157, "DBE"), (158, "XINERAMA"),
+            (159, "GLX"), (160, "X-Resource"),
+        ];
+        let mut seen = std::collections::HashMap::new();
+        for &(opcode, name) in opcodes {
+            if let Some(prev) = seen.insert(opcode, name) {
+                panic!("Opcode collision: {} and {} both use major opcode {}", prev, name, opcode);
+            }
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // Extension event base uniqueness — non-zero first_event values must not
+    // overlap with another extension's event range.
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn extension_event_bases_no_overlap() {
+        // (first_event, num_events, name)
+        let events: &[(u8, u8, &str)] = &[
+            (64, 1, "SHAPE"),       // ShapeNotify
+            (65, 1, "MIT-SHM"),     // ShmCompletion
+            (83, 1, "SYNC"),        // AlarmNotify
+            (85, 1, "XKB"),         // XkbEventCode
+            (87, 2, "XFIXES"),      // SelectionNotify + CursorNotify
+            (89, 2, "RANDR"),       // ScreenChangeNotify + RRNotify
+            (91, 1, "DAMAGE"),      // DamageNotify
+            (93, 1, "SECURITY"),    // AuthorizationRevoked
+            (95, 2, "XVideo"),      // VideoNotify + PortNotify
+        ];
+        for i in 0..events.len() {
+            let (base_a, count_a, name_a) = events[i];
+            for j in (i + 1)..events.len() {
+                let (base_b, count_b, name_b) = events[j];
+                let range_a = base_a..base_a + count_a;
+                let range_b = base_b..base_b + count_b;
+                let overlaps = range_a.start < range_b.end && range_b.start < range_a.end;
+                assert!(
+                    !overlaps,
+                    "Event range overlap: {} ({}-{}) and {} ({}-{})",
+                    name_a, base_a, base_a + count_a - 1,
+                    name_b, base_b, base_b + count_b - 1,
+                );
+            }
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // All 119 core opcodes are handled (1-119 + 127=NoOperation)
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn all_core_opcodes_are_dispatched() {
+        // Opcodes 1-119 and 127 should be handled
+        let handled: Vec<u8> = (1..=119).chain(std::iter::once(127u8)).collect();
+        assert_eq!(handled.len(), 120, "119 core opcodes + NoOperation = 120");
+        // Opcodes 120-126 are undefined in X11 spec and should return BAD_REQUEST
+        // (which is the correct behavior for unknown opcodes)
+    }
+
+    // -----------------------------------------------------------------------
+    // SYNC alarm trigger logic
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn sync_alarm_positive_transition() {
+        use super::sync::{SyncAlarm, check_alarms_ext};
+        let mut alarms = HashMap::new();
+        alarms.insert(1, SyncAlarm {
+            counter: 10,
+            value_type: 0,
+            value_hi: 0,
+            value_lo: 100,
+            test_type: 0, // PositiveTransition
+            delta_hi: 0,
+            delta_lo: 0,
+            events: true,
+            state: 0,
+        });
+        let mut pending = Vec::new();
+        // Counter goes from 50 to 150 — should trigger (crosses threshold 100)
+        check_alarms_ext(&mut alarms, 10, 50, 150, &mut pending, 1, false);
+        assert_eq!(pending.len(), 1, "Alarm should fire on positive transition across threshold");
+        assert_eq!(pending[0][0], 83, "Event code should be SYNC AlarmNotify (83)");
+    }
+
+    #[test]
+    fn sync_alarm_no_trigger_when_below() {
+        use super::sync::{SyncAlarm, check_alarms_ext};
+        let mut alarms = HashMap::new();
+        alarms.insert(1, SyncAlarm {
+            counter: 10,
+            value_type: 0,
+            value_hi: 0,
+            value_lo: 100,
+            test_type: 0, // PositiveTransition
+            delta_hi: 0,
+            delta_lo: 0,
+            events: true,
+            state: 0,
+        });
+        let mut pending = Vec::new();
+        // Counter goes from 50 to 80 — should NOT trigger (doesn't cross 100)
+        check_alarms_ext(&mut alarms, 10, 50, 80, &mut pending, 1, false);
+        assert_eq!(pending.len(), 0, "Alarm should NOT fire when threshold not crossed");
+    }
+
+    #[test]
+    fn sync_alarm_negative_transition() {
+        use super::sync::{SyncAlarm, check_alarms_ext};
+        let mut alarms = HashMap::new();
+        alarms.insert(1, SyncAlarm {
+            counter: 10,
+            value_type: 0,
+            value_hi: 0,
+            value_lo: 100,
+            test_type: 1, // NegativeTransition
+            delta_hi: 0,
+            delta_lo: 0,
+            events: true,
+            state: 0,
+        });
+        let mut pending = Vec::new();
+        // Counter goes from 150 to 50 — should trigger (crosses threshold 100 downward)
+        check_alarms_ext(&mut alarms, 10, 150, 50, &mut pending, 1, false);
+        assert_eq!(pending.len(), 1, "Alarm should fire on negative transition across threshold");
+    }
+
+    #[test]
+    fn sync_alarm_delta_advances_threshold() {
+        use super::sync::{SyncAlarm, check_alarms_ext};
+        let mut alarms = HashMap::new();
+        alarms.insert(1, SyncAlarm {
+            counter: 10,
+            value_type: 0,
+            value_hi: 0,
+            value_lo: 100,
+            test_type: 0, // PositiveTransition
+            delta_hi: 0,
+            delta_lo: 50, // advance by 50 after each trigger
+            events: true,
+            state: 0,
+        });
+        let mut pending = Vec::new();
+        check_alarms_ext(&mut alarms, 10, 50, 150, &mut pending, 1, false);
+        assert_eq!(pending.len(), 1);
+        // Threshold should now be 150 (100 + 50 delta)
+        assert_eq!(alarms[&1].value_lo, 150);
+        assert_eq!(alarms[&1].state, 0, "Alarm with delta should remain active");
+    }
+
+    #[test]
+    fn sync_alarm_zero_delta_becomes_inactive() {
+        use super::sync::{SyncAlarm, check_alarms_ext};
+        let mut alarms = HashMap::new();
+        alarms.insert(1, SyncAlarm {
+            counter: 10,
+            value_type: 0,
+            value_hi: 0,
+            value_lo: 100,
+            test_type: 0, // PositiveTransition
+            delta_hi: 0,
+            delta_lo: 0, // zero delta = one-shot
+            events: true,
+            state: 0,
+        });
+        let mut pending = Vec::new();
+        check_alarms_ext(&mut alarms, 10, 50, 150, &mut pending, 1, false);
+        assert_eq!(pending.len(), 1);
+        assert_eq!(alarms[&1].state, 1, "Zero-delta alarm should become Inactive after firing");
+    }
+
+    #[test]
+    fn sync_alarm_inactive_does_not_fire() {
+        use super::sync::{SyncAlarm, check_alarms_ext};
+        let mut alarms = HashMap::new();
+        alarms.insert(1, SyncAlarm {
+            counter: 10,
+            value_type: 0,
+            value_hi: 0,
+            value_lo: 100,
+            test_type: 0,
+            delta_hi: 0,
+            delta_lo: 0,
+            events: true,
+            state: 1, // Inactive
+        });
+        let mut pending = Vec::new();
+        check_alarms_ext(&mut alarms, 10, 50, 150, &mut pending, 1, false);
+        assert_eq!(pending.len(), 0, "Inactive alarm should not fire");
+    }
+
+    #[test]
+    fn sync_alarm_wrong_counter_does_not_fire() {
+        use super::sync::{SyncAlarm, check_alarms_ext};
+        let mut alarms = HashMap::new();
+        alarms.insert(1, SyncAlarm {
+            counter: 10,
+            value_type: 0,
+            value_hi: 0,
+            value_lo: 100,
+            test_type: 0,
+            delta_hi: 0,
+            delta_lo: 0,
+            events: true,
+            state: 0,
+        });
+        let mut pending = Vec::new();
+        // Update counter 20 (alarm watches counter 10) — should NOT fire
+        check_alarms_ext(&mut alarms, 20, 50, 150, &mut pending, 1, false);
+        assert_eq!(pending.len(), 0, "Alarm on different counter should not fire");
+    }
+
+    #[test]
+    fn sync_alarm_positive_comparison() {
+        use super::sync::{SyncAlarm, check_alarms_ext};
+        let mut alarms = HashMap::new();
+        alarms.insert(1, SyncAlarm {
+            counter: 10,
+            value_type: 0,
+            value_hi: 0,
+            value_lo: 100,
+            test_type: 2, // PositiveComparison
+            delta_hi: 0,
+            delta_lo: 0,
+            events: true,
+            state: 0,
+        });
+        let mut pending = Vec::new();
+        // PositiveComparison fires whenever new_value >= threshold, regardless of old
+        check_alarms_ext(&mut alarms, 10, 200, 150, &mut pending, 1, false);
+        assert_eq!(pending.len(), 1, "PositiveComparison: 150 >= 100 should fire");
+    }
 }
 

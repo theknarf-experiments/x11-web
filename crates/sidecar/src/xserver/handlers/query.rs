@@ -163,7 +163,7 @@ pub(crate) fn handle_query_extension(_state: &mut ClientState, data: &[u8], seq:
         "XVideo" => {
             reply[8] = 1;
             reply[9] = 156;
-            reply[10] = 93; // first_event: XvVideoNotify
+            reply[10] = 95; // first_event: XvVideoNotify=95, XvPortNotify=96
             reply[11] = 156; // first_error: XvBadPort, XvBadEncoding, XvBadControl
         }
         "DOUBLE-BUFFER" => {
