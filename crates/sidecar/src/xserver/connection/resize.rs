@@ -29,6 +29,48 @@ pub(crate) fn resize_window(state: &mut ClientState, window_uuid: &str, width: u
         })
         .unwrap_or(0);
 
+    // _NET_WM_SYNC_REQUEST: if the window has a sync counter and supports the
+    // protocol, increment the counter and send a ClientMessage before resizing.
+    // This lets the client synchronize its repainting with the resize.
+    {
+        let sync_counter = state.windows.get(&window_id).and_then(|w| w.sync_request_counter);
+        if let Some(counter_id) = sync_counter {
+            let net_wm_sync_request_atom = state.intern_atom("_NET_WM_SYNC_REQUEST", false);
+            let wm_protocols_atom = state.intern_atom("WM_PROTOCOLS", false);
+            let supports_sync = state.window_supports_protocol(window_id, net_wm_sync_request_atom);
+            if supports_sync {
+                // Increment the sync request value
+                let new_value = state.windows.get(&window_id)
+                    .map(|w| w.sync_request_value.wrapping_add(1))
+                    .unwrap_or(1);
+                if let Some(win) = state.windows.get_mut(&window_id) {
+                    win.sync_request_value = new_value;
+                }
+                // Update the SYNC counter value
+                let lo = new_value as u32;
+                let hi = (new_value >> 32) as i32;
+                if let Some(counter) = state.sync_state.counters.get_mut(&counter_id) {
+                    counter.value_lo = lo;
+                    counter.value_hi = hi;
+                }
+
+                // Send _NET_WM_SYNC_REQUEST ClientMessage
+                let timestamp = state.timestamp();
+                let mut cm = [0u8; 32];
+                cm[0] = CLIENT_MESSAGE_EVENT;
+                cm[1] = 32; // format
+                write_u16_bo(&mut cm, 2, seq, bo);
+                write_u32_bo(&mut cm, 4, window_id, bo);
+                write_u32_bo(&mut cm, 8, wm_protocols_atom, bo);
+                write_u32_bo(&mut cm, 12, net_wm_sync_request_atom, bo);
+                write_u32_bo(&mut cm, 16, timestamp, bo);
+                write_u32_bo(&mut cm, 20, lo, bo); // counter value lo
+                write_u32_bo(&mut cm, 24, hi as u32, bo); // counter value hi
+                events.extend_from_slice(&cm);
+            }
+        }
+    }
+
     if let Some(win) = state.windows.get_mut(&window_id) {
         win.width = width;
         win.height = height;

@@ -1365,6 +1365,23 @@ pub(crate) async fn handle_client(
                             };
                             let event_bytes = build_x11_input_event(&mut state, &input, x11_wid);
 
+                            // Update _NET_WM_USER_TIME on user input (KeyPress, ButtonPress)
+                            if matches!(&input,
+                                x11_web_protocol::InputEvent::KeyPress { .. } |
+                                x11_web_protocol::InputEvent::ButtonPress { .. }
+                            ) {
+                                let user_time_atom = state.intern_atom("_NET_WM_USER_TIME", false);
+                                let timestamp = state.timestamp();
+                                let focused = state.focus_window;
+                                if let Some(win) = state.windows.get_mut(&focused) {
+                                    win.properties.insert(user_time_atom, PropertyValue {
+                                        prop_type: 6, // CARDINAL
+                                        format: 32,
+                                        data: timestamp.to_le_bytes().to_vec(),
+                                    });
+                                }
+                            }
+
                             // Reset screen saver timer on any user input (per X11 spec §14.3)
                             if state.screen_saver.timeout > 0 && state.screen_saver_suspend_count == 0 {
                                 state.screen_saver.last_reset_ms = state.timestamp();
