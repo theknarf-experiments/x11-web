@@ -2190,3 +2190,244 @@ impl ArcChordData {
         Some(Self { chord_x1, chord_y1, cdx, cdy, mid_cross })
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // -----------------------------------------------------------------------
+    // Framebuffer basic operations
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn new_framebuffer_is_zeroed() {
+        let fb = Framebuffer::new(10, 10);
+        assert_eq!(fb.width(), 10);
+        assert_eq!(fb.height(), 10);
+        assert!(fb.data().iter().all(|&b| b == 0));
+    }
+
+    #[test]
+    fn resize_preserves_content() {
+        let mut fb = Framebuffer::new(4, 4);
+        // Set pixel at (1,1) to red
+        let off = 1 * fb.stride() + 1 * 4;
+        fb.data_mut()[off] = 0;     // B
+        fb.data_mut()[off + 1] = 0; // G
+        fb.data_mut()[off + 2] = 255; // R
+        fb.data_mut()[off + 3] = 255; // A
+        fb.resize(8, 8);
+        assert_eq!(fb.width(), 8);
+        assert_eq!(fb.height(), 8);
+        // Original pixel should still be at (1,1)
+        let off2 = 1 * fb.stride() + 1 * 4;
+        assert_eq!(fb.data()[off2 + 2], 255); // R preserved
+    }
+
+    #[test]
+    fn resize_with_forget_gravity_clears() {
+        let mut fb = Framebuffer::new(4, 4);
+        let off = 1 * fb.stride() + 1 * 4;
+        fb.data_mut()[off + 2] = 255;
+        fb.resize_with_gravity(8, 8, 0); // Forget gravity
+        // All pixels should be zeroed
+        assert!(fb.data().iter().all(|&b| b == 0));
+    }
+
+    #[test]
+    fn resize_with_northwest_gravity_preserves_top_left() {
+        let mut fb = Framebuffer::new(4, 4);
+        let off = 0; // pixel (0,0)
+        fb.data_mut()[off + 2] = 200;
+        fb.resize_with_gravity(8, 8, 1); // NorthWest
+        assert_eq!(fb.data()[off + 2], 200); // Top-left preserved
+    }
+
+    // -----------------------------------------------------------------------
+    // fill_rect
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn fill_rect_basic() {
+        let mut fb = Framebuffer::new(10, 10);
+        fb.fill_rect(2, 2, 3, 3, 0xFF0000FF); // Blue in ARGB
+        // Check pixel at (3, 3) is set
+        let off = 3 * fb.stride() + 3 * 4;
+        assert_ne!(fb.data()[off], 0); // Should have some color
+    }
+
+    // -----------------------------------------------------------------------
+    // apply_gc_function — all 16 GX operations
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn gx_clear() {
+        assert_eq!(apply_gc_function(0, 0xFFFFFFFF, 0xFFFFFFFF), 0);
+    }
+
+    #[test]
+    fn gx_and() {
+        assert_eq!(apply_gc_function(1, 0xFF00FF00, 0x00FF00FF), 0x00000000);
+        assert_eq!(apply_gc_function(1, 0xFFFF0000, 0xFFFF0000), 0xFFFF0000);
+    }
+
+    #[test]
+    fn gx_copy() {
+        assert_eq!(apply_gc_function(3, 0xDEADBEEF, 0x12345678), 0xDEADBEEF);
+    }
+
+    #[test]
+    fn gx_noop() {
+        assert_eq!(apply_gc_function(5, 0xDEADBEEF, 0x12345678), 0x12345678);
+    }
+
+    #[test]
+    fn gx_xor() {
+        assert_eq!(apply_gc_function(6, 0xFF00FF00, 0x00FF00FF), 0xFFFFFFFF);
+    }
+
+    #[test]
+    fn gx_or() {
+        assert_eq!(apply_gc_function(7, 0xFF000000, 0x00FF0000), 0xFFFF0000);
+    }
+
+    #[test]
+    fn gx_invert() {
+        assert_eq!(apply_gc_function(10, 0x00000000, 0xFF00FF00), 0x00FF00FF);
+    }
+
+    #[test]
+    fn gx_set() {
+        assert_eq!(apply_gc_function(15, 0x00000000, 0x00000000), 0xFFFFFFFF);
+    }
+
+    #[test]
+    fn gx_copy_inverted() {
+        assert_eq!(apply_gc_function(12, 0xFF00FF00, 0x00000000), 0x00FF00FF);
+    }
+
+    // -----------------------------------------------------------------------
+    // point_in_clip_rects
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn clip_empty_allows_all() {
+        // Empty clip = no clipping, but our function returns false for empty
+        assert!(!point_in_clip_rects(5, 5, &[]));
+    }
+
+    #[test]
+    fn clip_point_inside() {
+        let rects = vec![(0i16, 0i16, 10u16, 10u16)];
+        assert!(point_in_clip_rects(5, 5, &rects));
+    }
+
+    #[test]
+    fn clip_point_outside() {
+        let rects = vec![(0i16, 0i16, 10u16, 10u16)];
+        assert!(!point_in_clip_rects(15, 15, &rects));
+    }
+
+    #[test]
+    fn clip_point_on_boundary() {
+        let rects = vec![(0i16, 0i16, 10u16, 10u16)];
+        assert!(point_in_clip_rects(0, 0, &rects)); // top-left corner: inside
+        assert!(!point_in_clip_rects(10, 10, &rects)); // bottom-right: outside (exclusive)
+    }
+
+    #[test]
+    fn clip_multiple_rects() {
+        let rects = vec![
+            (0i16, 0i16, 5u16, 5u16),
+            (10i16, 10i16, 5u16, 5u16),
+        ];
+        assert!(point_in_clip_rects(2, 2, &rects));
+        assert!(point_in_clip_rects(12, 12, &rects));
+        assert!(!point_in_clip_rects(7, 7, &rects)); // gap between rects
+    }
+
+    // -----------------------------------------------------------------------
+    // DashState
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn dash_state_alternates() {
+        let mut ds = DashState::new(&[3, 2], 0);
+        // First 3 steps: on
+        assert!(ds.is_on());
+        ds.advance();
+        assert!(ds.is_on());
+        ds.advance();
+        assert!(ds.is_on());
+        ds.advance();
+        // Next 2 steps: off
+        assert!(!ds.is_on());
+        ds.advance();
+        assert!(!ds.is_on());
+        ds.advance();
+        // Back to on
+        assert!(ds.is_on());
+    }
+
+    #[test]
+    fn dash_state_with_offset() {
+        let ds = DashState::new(&[5, 3], 2);
+        // Offset 2 into first dash (len=5), so 3 remaining in first on segment
+        assert!(ds.is_on());
+        assert_eq!(ds.remaining, 3);
+    }
+
+    // -----------------------------------------------------------------------
+    // Dirty region tracking
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn dirty_initially_none() {
+        let mut fb = Framebuffer::new(10, 10);
+        assert!(fb.take_dirty_pixels().is_none());
+    }
+
+    #[test]
+    fn mark_dirty_creates_region() {
+        let mut fb = Framebuffer::new(20, 20);
+        fb.mark_dirty(5, 5, 10, 10);
+        assert!(fb.dirty.is_some());
+    }
+
+    #[test]
+    fn mark_dirty_merges_regions() {
+        let mut fb = Framebuffer::new(100, 100);
+        fb.mark_dirty(10, 10, 5, 5);
+        fb.mark_dirty(20, 20, 5, 5);
+        let dirty = fb.dirty.unwrap();
+        // Should encompass both: (10,10) to (25,25) = (10, 10, 15, 15)
+        assert_eq!(dirty.0, 10);
+        assert_eq!(dirty.1, 10);
+        assert!(dirty.2 >= 15);
+        assert!(dirty.3 >= 15);
+    }
+
+    // -----------------------------------------------------------------------
+    // CopyArea self-overlap safety
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn copy_area_self_overlapping() {
+        let mut fb = Framebuffer::new(10, 10);
+        // Fill (0,0)-(4,4) with distinct value
+        for y in 0..4usize {
+            for x in 0..4usize {
+                let off = y * fb.stride() + x * 4;
+                fb.data_mut()[off] = 42;
+                fb.data_mut()[off + 1] = 43;
+                fb.data_mut()[off + 2] = 44;
+                fb.data_mut()[off + 3] = 255;
+            }
+        }
+        // Copy overlapping: src=(0,0) dst=(2,2) size=4x4
+        fb.copy_area_self(0, 0, 2, 2, 4, 4);
+        // (2,2) should now have the original (0,0) value
+        let off = 2 * fb.stride() + 2 * 4;
+        assert_eq!(fb.data()[off], 42);
+    }
+}

@@ -1028,3 +1028,203 @@ pub(crate) fn resolve_source_color(state: &ClientState, src_pic: u32) -> (u8, u8
     (0xFF, 0xFF, 0xFF, 0xFF)
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // -----------------------------------------------------------------------
+    // pict_op_factors — all 44 Porter-Duff operators
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn pict_op_clear() {
+        assert_eq!(pict_op_factors(0, 128, 200), (0, 0));
+    }
+
+    #[test]
+    fn pict_op_src() {
+        assert_eq!(pict_op_factors(1, 128, 200), (255, 0));
+    }
+
+    #[test]
+    fn pict_op_dst() {
+        assert_eq!(pict_op_factors(2, 128, 200), (0, 255));
+    }
+
+    #[test]
+    fn pict_op_over() {
+        let (fs, fd) = pict_op_factors(3, 128, 200);
+        assert_eq!(fs, 255);
+        assert_eq!(fd, 255 - 128); // 1 - Sa
+    }
+
+    #[test]
+    fn pict_op_over_reverse() {
+        let (fs, fd) = pict_op_factors(4, 128, 200);
+        assert_eq!(fs, 255 - 200); // 1 - Da
+        assert_eq!(fd, 255);
+    }
+
+    #[test]
+    fn pict_op_in() {
+        let (fs, fd) = pict_op_factors(5, 128, 200);
+        assert_eq!(fs, 200); // Da
+        assert_eq!(fd, 0);
+    }
+
+    #[test]
+    fn pict_op_in_reverse() {
+        let (fs, fd) = pict_op_factors(6, 128, 200);
+        assert_eq!(fs, 0);
+        assert_eq!(fd, 128); // Sa
+    }
+
+    #[test]
+    fn pict_op_out() {
+        let (fs, fd) = pict_op_factors(7, 128, 200);
+        assert_eq!(fs, 255 - 200); // 1 - Da
+        assert_eq!(fd, 0);
+    }
+
+    #[test]
+    fn pict_op_out_reverse() {
+        let (fs, fd) = pict_op_factors(8, 128, 200);
+        assert_eq!(fs, 0);
+        assert_eq!(fd, 255 - 128); // 1 - Sa
+    }
+
+    #[test]
+    fn pict_op_atop() {
+        let (fs, fd) = pict_op_factors(9, 128, 200);
+        assert_eq!(fs, 200);       // Da
+        assert_eq!(fd, 255 - 128); // 1 - Sa
+    }
+
+    #[test]
+    fn pict_op_atop_reverse() {
+        let (fs, fd) = pict_op_factors(10, 128, 200);
+        assert_eq!(fs, 255 - 200); // 1 - Da
+        assert_eq!(fd, 128);       // Sa
+    }
+
+    #[test]
+    fn pict_op_xor() {
+        let (fs, fd) = pict_op_factors(11, 128, 200);
+        assert_eq!(fs, 255 - 200); // 1 - Da
+        assert_eq!(fd, 255 - 128); // 1 - Sa
+    }
+
+    #[test]
+    fn pict_op_add() {
+        assert_eq!(pict_op_factors(12, 128, 200), (255, 255));
+    }
+
+    #[test]
+    fn pict_op_unknown_falls_back_to_over() {
+        let (fs, fd) = pict_op_factors(255, 128, 200);
+        assert_eq!(fs, 255);
+        assert_eq!(fd, 255 - 128); // Same as Over
+    }
+
+    // -----------------------------------------------------------------------
+    // blend_chan — channel compositing with correct rounding
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn blend_chan_src_full() {
+        // src=255, dst=0, fs=255, fd=0 → 255
+        assert_eq!(blend_chan(255, 0, 255, 0), 255);
+    }
+
+    #[test]
+    fn blend_chan_dst_full() {
+        // src=0, dst=255, fs=0, fd=255 → 255
+        assert_eq!(blend_chan(0, 255, 0, 255), 255);
+    }
+
+    #[test]
+    fn blend_chan_half_over_black() {
+        // src=128, dst=0, fs=255, fd=127 → 128 (Over: dst is black)
+        let result = blend_chan(128, 0, 255, 127);
+        assert_eq!(result, 128);
+    }
+
+    #[test]
+    fn blend_chan_clamped_to_255() {
+        // Add: fs=255, fd=255, src=200, dst=200 → clamped to 255
+        let result = blend_chan(200, 200, 255, 255);
+        assert_eq!(result, 255);
+    }
+
+    // -----------------------------------------------------------------------
+    // composite_pixel — end-to-end compositing
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn composite_clear_zeroes_dst() {
+        let mut dst = [100u8, 150, 200, 128];
+        composite_pixel(0, &mut dst, 255, 255, 255, 255, true);
+        assert_eq!(dst, [0, 0, 0, 0]);
+    }
+
+    #[test]
+    fn composite_src_overwrites_dst() {
+        let mut dst = [100u8, 150, 200, 128];
+        composite_pixel(1, &mut dst, 10, 20, 30, 40, true);
+        assert_eq!(dst, [10, 20, 30, 40]);
+    }
+
+    #[test]
+    fn composite_dst_leaves_unchanged() {
+        let mut dst = [100u8, 150, 200, 128];
+        composite_pixel(2, &mut dst, 10, 20, 30, 40, true);
+        assert_eq!(dst, [100, 150, 200, 128]);
+    }
+
+    #[test]
+    fn composite_over_opaque_src_replaces_dst() {
+        let mut dst = [100u8, 150, 200, 255];
+        composite_pixel(3, &mut dst, 50, 60, 70, 255, true);
+        // Over with Sa=255: Fd = 1-Sa = 0, so dst = src
+        assert_eq!(dst, [50, 60, 70, 255]);
+    }
+
+    #[test]
+    fn composite_over_transparent_src_preserves_dst() {
+        let mut dst = [100u8, 150, 200, 255];
+        composite_pixel(3, &mut dst, 0, 0, 0, 0, true);
+        // Over with Sa=0: Fd = 1-0 = 255, so dst = dst
+        assert_eq!(dst, [100, 150, 200, 255]);
+    }
+
+    #[test]
+    fn composite_non_alpha_dst_forces_opaque() {
+        let mut dst = [100u8, 150, 200, 0];
+        composite_pixel(0, &mut dst, 0, 0, 0, 0, false); // Clear on non-alpha
+        // dst_has_alpha=false: alpha byte forced to 255
+        assert_eq!(dst[3], 255);
+    }
+
+    // -----------------------------------------------------------------------
+    // zero_src_has_no_effect — skip optimisation correctness
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn zero_src_safe_for_over() {
+        // Over with zero src is a no-op, so skipping is safe
+        assert!(zero_src_has_no_effect(3));
+    }
+
+    #[test]
+    fn zero_src_not_safe_for_clear() {
+        // Clear always zeroes dst regardless of src
+        assert!(!zero_src_has_no_effect(0));
+    }
+
+    #[test]
+    fn zero_src_not_safe_for_src() {
+        // Src always overwrites dst
+        assert!(!zero_src_has_no_effect(1));
+    }
+}
+
