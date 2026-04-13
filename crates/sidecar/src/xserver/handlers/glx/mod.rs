@@ -17,6 +17,8 @@ mod context;
 mod drawable;
 mod query;
 mod render;
+mod single_ops;
+mod single_query;
 
 use std::collections::HashMap;
 use tracing::{debug, warn};
