@@ -8,13 +8,11 @@ use x11rb_protocol::x11_utils::RequestHeader;
 
 use crate::xserver::core::{read_u16_bo, read_u32_bo, write_u16_bo, write_u32_bo};
 
-use super::{
-    fp1616, serialize_xi_reply,
-    MASTER_KEYBOARD_ID, MASTER_POINTER_ID,
-    PendingSynthetic, ValuatorState, XiSelection,
-    Xi2ActiveGrab, Xi2PassiveGrab,
-};
 use super::device::*;
+use super::{
+    fp1616, serialize_xi_reply, PendingSynthetic, ValuatorState, Xi2ActiveGrab, Xi2PassiveGrab,
+    XiSelection, MASTER_KEYBOARD_ID, MASTER_POINTER_ID,
+};
 
 /// Dispatch a request whose major opcode matches our XInputExtension
 /// registration. Returns the wire-format reply (or `Vec::new()` for
@@ -79,13 +77,16 @@ pub fn handle_request(
         }
 
         // ---- XI 2.x ------------------------------------------------------
-
         xi::XI_QUERY_VERSION_REQUEST => {
             // Negotiate down to (2, 4).
             let req =
                 xi::XIQueryVersionRequest::try_parse_request(header, body).unwrap_or_default();
             let major = req.major_version.min(2);
-            let minor = if major < 2 { req.minor_version } else { req.minor_version.min(4) };
+            let minor = if major < 2 {
+                req.minor_version
+            } else {
+                req.minor_version.min(4)
+            };
             let reply = xi::XIQueryVersionReply {
                 sequence: seq,
                 length: 0,
@@ -96,9 +97,15 @@ pub fn handle_request(
         }
 
         xi::XI_QUERY_DEVICE_REQUEST => {
-            let req =
-                xi::XIQueryDeviceRequest::try_parse_request(header, body).unwrap_or_default();
-            query_device_reply_bytes(seq, req.deviceid, valuators, screen_width, screen_height, msb_first)
+            let req = xi::XIQueryDeviceRequest::try_parse_request(header, body).unwrap_or_default();
+            query_device_reply_bytes(
+                seq,
+                req.deviceid,
+                valuators,
+                screen_width,
+                screen_height,
+                msb_first,
+            )
         }
 
         xi::XI_SELECT_EVENTS_REQUEST => {
@@ -342,7 +349,11 @@ pub fn handle_request(
                 let grab_type = body[22];
                 let grab_mode = body[23];
                 let paired_device_mode = body[24];
-                let owner_events = if body.len() > 25 { body[25] != 0 } else { false };
+                let owner_events = if body.len() > 25 {
+                    body[25] != 0
+                } else {
+                    false
+                };
 
                 // Parse event mask.
                 let mask_start = 28; // after padding
@@ -375,17 +386,20 @@ pub fn handle_request(
                     });
 
                     // Insert new passive grab (LIFO — at front).
-                    passive_grabs.insert(0, Xi2PassiveGrab {
-                        deviceid,
-                        grab_window,
-                        detail,
-                        grab_type,
-                        modifiers: modifier,
-                        event_mask: event_mask.clone(),
-                        owner_events,
-                        paired_device_mode,
-                        grab_mode,
-                    });
+                    passive_grabs.insert(
+                        0,
+                        Xi2PassiveGrab {
+                            deviceid,
+                            grab_window,
+                            detail,
+                            grab_type,
+                            modifiers: modifier,
+                            event_mask: event_mask.clone(),
+                            owner_events,
+                            paired_device_mode,
+                            grab_mode,
+                        },
+                    );
                     debug!("XIPassiveGrabDevice: device={deviceid} window={grab_window:#x} detail={detail} type={grab_type} mod={modifier:#x}");
                 }
 
@@ -456,7 +470,10 @@ pub fn handle_request(
         xi::XI_GET_PROPERTY_REQUEST => {
             // XIGetProperty: deviceid(2) + pad(2) + property(4) + type(4) + offset(4) + len(4)
             let (deviceid, property) = if body.len() >= 8 {
-                (read_u16_bo(body, 0, msb_first), read_u32_bo(body, 4, msb_first))
+                (
+                    read_u16_bo(body, 0, msb_first),
+                    read_u32_bo(body, 4, msb_first),
+                )
             } else {
                 (0, 0)
             };
@@ -492,7 +509,10 @@ pub fn handle_request(
                 } else {
                     Vec::new()
                 };
-                debug!("XIChangeProperty: device={deviceid} property={property} len={}", value.len());
+                debug!(
+                    "XIChangeProperty: device={deviceid} property={property} len={}",
+                    value.len()
+                );
                 device_properties.insert((deviceid, property), value);
             }
             Vec::new()
@@ -568,7 +588,10 @@ pub fn handle_request(
             // rendering is handled by the cursor tracking in the main
             // event loop and forwarded to the frontend.
             if let Ok(req) = xi::XIChangeCursorRequest::try_parse_request(header, body) {
-                debug!("XIChangeCursor: window={:#x} cursor={:#x}", req.window, req.cursor);
+                debug!(
+                    "XIChangeCursor: window={:#x} cursor={:#x}",
+                    req.window, req.cursor
+                );
             }
             Vec::new()
         }
@@ -591,7 +614,11 @@ pub fn handle_request(
         // exclusion mask for the given window. We store these in the
         // xi1_dont_propagate map.
         9 => {
-            let window = if body.len() >= 4 { read_u32_bo(body, 0, msb_first) } else { 0 };
+            let window = if body.len() >= 4 {
+                read_u32_bo(body, 0, msb_first)
+            } else {
+                0
+            };
             debug!("XI 1.x GetDeviceDontPropagateList: window={window:#x}");
             let count = xi1_dont_propagate
                 .as_ref()
@@ -720,15 +747,27 @@ pub fn handle_request(
 
         // SelectExtensionEvent (6): track per-window XI 1.x event masks.
         6 => {
-            let window = if body.len() >= 4 { read_u32_bo(body, 0, msb_first) } else { 0 };
+            let window = if body.len() >= 4 {
+                read_u32_bo(body, 0, msb_first)
+            } else {
+                0
+            };
             debug!("XI 1.x SelectExtensionEvent: window={window:#x}");
             Vec::new()
         }
 
         // ChangeDeviceDontPropagateList (8): update the stored masks.
         8 => {
-            let window = if body.len() >= 4 { read_u32_bo(body, 0, msb_first) } else { 0 };
-            let count = if body.len() >= 8 { read_u16_bo(body, 4, msb_first) as usize } else { 0 };
+            let window = if body.len() >= 4 {
+                read_u32_bo(body, 0, msb_first)
+            } else {
+                0
+            };
+            let count = if body.len() >= 8 {
+                read_u16_bo(body, 4, msb_first) as usize
+            } else {
+                0
+            };
             let mode = if body.len() >= 8 { body[6] } else { 0 }; // 0=Add, 1=Delete
             debug!("XI 1.x ChangeDeviceDontPropagateList: window={window:#x} count={count} mode={mode}");
             let map = xi1_dont_propagate.get_or_insert_with(HashMap::new);
@@ -753,7 +792,11 @@ pub fn handle_request(
 
         // SetDeviceFocus (21): update device focus.
         21 => {
-            let w = if body.len() >= 4 { read_u32_bo(body, 0, msb_first) } else { 0 };
+            let w = if body.len() >= 4 {
+                read_u32_bo(body, 0, msb_first)
+            } else {
+                0
+            };
             debug!("XI 1.x SetDeviceFocus: window={w:#x}");
             *focus_window = w;
             Vec::new()

@@ -19,7 +19,7 @@ pub(crate) fn handle_list_components(
     // libxkbcommon expect from a well-configured X server.
 
     // Standard XKB component names
-    let keymaps: &[&str] = &[];  // keymaps are built from the other 5 lists
+    let keymaps: &[&str] = &[]; // keymaps are built from the other 5 lists
     let keycodes: &[&str] = &["evdev", "evdev+aliases(qwerty)"];
     let types: &[&str] = &["complete", "default"];
     let compat: &[&str] = &["complete", "default"];
@@ -67,8 +67,14 @@ pub(crate) fn handle_list_components(
         }
     }
 
-    debug!("ListComponents: returning {} keycodes, {} types, {} compat, {} symbols, {} geometry",
-        keycodes.len(), types.len(), compat.len(), symbols.len(), geometry.len());
+    debug!(
+        "ListComponents: returning {} keycodes, {} types, {} compat, {} symbols, {} geometry",
+        keycodes.len(),
+        types.len(),
+        compat.len(),
+        symbols.len(),
+        geometry.len()
+    );
     reply
 }
 
@@ -113,15 +119,15 @@ pub(crate) fn handle_get_device_info(
     // Name starts at byte 32 + 24 = 56 in our layout
     // Actually, the body starts at 32, and after the 24 fixed body bytes:
     reply[56..56 + name_len].copy_from_slice(device_name);
-    debug!("GetDeviceInfo: returning '{}'", std::str::from_utf8(device_name).unwrap_or("?"));
+    debug!(
+        "GetDeviceInfo: returning '{}'",
+        std::str::from_utf8(device_name).unwrap_or("?")
+    );
     reply
 }
 
 /// Handle SetDeviceInfo (minor opcode 25).
-pub(crate) fn handle_set_device_info(
-    state: &mut ClientState,
-    data: &[u8],
-) -> Vec<u8> {
+pub(crate) fn handle_set_device_info(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
     // SetDeviceInfo: parse and store device button actions and LED info.
     // Wire format:
     //   4-5: deviceSpec
@@ -143,15 +149,29 @@ pub(crate) fn handle_set_device_info(
         // Parse button actions (each action is 8 bytes)
         if change & 1 != 0 {
             for i in 0..n_btns {
-                if offset + 8 > data.len() { break; }
+                if offset + 8 > data.len() {
+                    break;
+                }
                 let btn_idx = first_btn + i;
                 let action_type = data[offset];
                 // Store the button action mapping
-                state.xkb_button_actions.insert(btn_idx, [
-                    data[offset], data[offset+1], data[offset+2], data[offset+3],
-                    data[offset+4], data[offset+5], data[offset+6], data[offset+7],
-                ]);
-                debug!("SetDeviceInfo: button {} action type {}", btn_idx, action_type);
+                state.xkb_button_actions.insert(
+                    btn_idx,
+                    [
+                        data[offset],
+                        data[offset + 1],
+                        data[offset + 2],
+                        data[offset + 3],
+                        data[offset + 4],
+                        data[offset + 5],
+                        data[offset + 6],
+                        data[offset + 7],
+                    ],
+                );
+                debug!(
+                    "SetDeviceInfo: button {} action type {}",
+                    btn_idx, action_type
+                );
                 offset += 8;
             }
         }
@@ -163,7 +183,10 @@ pub(crate) fn handle_set_device_info(
             // Store as opaque blobs for GetDeviceInfo to echo back.
             let remaining = &data[offset..];
             state.xkb_device_led_info = remaining.to_vec();
-            debug!("SetDeviceInfo: stored {} bytes of LED info", remaining.len());
+            debug!(
+                "SetDeviceInfo: stored {} bytes of LED info",
+                remaining.len()
+            );
         }
     }
     Vec::new()

@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use super::types::{CharInfo, GlyphBitmap, BitmapFont};
+use super::types::{BitmapFont, CharInfo, GlyphBitmap};
 
 // ---------------------------------------------------------------------------
 // Scalable (TrueType / OpenType) font support via FreeType
@@ -29,7 +29,8 @@ impl ScalableFont {
         let face = lib.new_face(&self.path, 0).ok()?;
         face.set_pixel_sizes(0, self.pixel_size).ok()?;
 
-        face.load_char(char_code as usize, freetype::face::LoadFlag::RENDER).ok()?;
+        face.load_char(char_code as usize, freetype::face::LoadFlag::RENDER)
+            .ok()?;
         let glyph = face.glyph();
         let bitmap = glyph.bitmap();
         let metrics = glyph.metrics();
@@ -63,7 +64,14 @@ impl ScalableFont {
             attributes: 0,
         };
 
-        Some((ci, GlyphBitmap { width: w, height: h, bitmap: bmp }))
+        Some((
+            ci,
+            GlyphBitmap {
+                width: w,
+                height: h,
+                bitmap: bmp,
+            },
+        ))
     }
 
     /// Convert this scalable font into a `BitmapFont` covering Latin-1 (0–255).
@@ -78,7 +86,14 @@ impl ScalableFont {
         let num_chars = 256usize;
 
         let mut char_infos = vec![CharInfo::default(); num_chars];
-        let mut glyphs = vec![GlyphBitmap { width: 0, height: 0, bitmap: Vec::new() }; num_chars];
+        let mut glyphs = vec![
+            GlyphBitmap {
+                width: 0,
+                height: 0,
+                bitmap: Vec::new()
+            };
+            num_chars
+        ];
 
         let mut min_bounds = CharInfo {
             left_side_bearing: i16::MAX,
@@ -92,13 +107,17 @@ impl ScalableFont {
 
         for code in min_char..=max_char {
             if let Some((ci, glyph)) = self.render_glyph(code as u32) {
-                min_bounds.left_side_bearing = min_bounds.left_side_bearing.min(ci.left_side_bearing);
-                min_bounds.right_side_bearing = min_bounds.right_side_bearing.min(ci.right_side_bearing);
+                min_bounds.left_side_bearing =
+                    min_bounds.left_side_bearing.min(ci.left_side_bearing);
+                min_bounds.right_side_bearing =
+                    min_bounds.right_side_bearing.min(ci.right_side_bearing);
                 min_bounds.character_width = min_bounds.character_width.min(ci.character_width);
                 min_bounds.ascent = min_bounds.ascent.min(ci.ascent);
                 min_bounds.descent = min_bounds.descent.min(ci.descent);
-                max_bounds.left_side_bearing = max_bounds.left_side_bearing.max(ci.left_side_bearing);
-                max_bounds.right_side_bearing = max_bounds.right_side_bearing.max(ci.right_side_bearing);
+                max_bounds.left_side_bearing =
+                    max_bounds.left_side_bearing.max(ci.left_side_bearing);
+                max_bounds.right_side_bearing =
+                    max_bounds.right_side_bearing.max(ci.right_side_bearing);
                 max_bounds.character_width = max_bounds.character_width.max(ci.character_width);
                 max_bounds.ascent = max_bounds.ascent.max(ci.ascent);
                 max_bounds.descent = max_bounds.descent.max(ci.descent);
@@ -152,7 +171,10 @@ impl ScalableFont {
         // First pass: measure total width
         let mut total_width: i32 = 0;
         for &ch in text {
-            if face.load_char(ch as usize, freetype::face::LoadFlag::RENDER).is_ok() {
+            if face
+                .load_char(ch as usize, freetype::face::LoadFlag::RENDER)
+                .is_ok()
+            {
                 total_width += (face.glyph().metrics().horiAdvance >> 6) as i32;
             }
         }
@@ -167,7 +189,10 @@ impl ScalableFont {
         // Second pass: render
         let mut pen_x: i32 = 0;
         for &ch in text {
-            if face.load_char(ch as usize, freetype::face::LoadFlag::RENDER).is_err() {
+            if face
+                .load_char(ch as usize, freetype::face::LoadFlag::RENDER)
+                .is_err()
+            {
                 continue;
             }
             let glyph = face.glyph();
@@ -194,8 +219,10 @@ impl ScalableFont {
                         let a = alpha as u16;
                         let inv_a = 255 - a;
                         pixels[idx] = ((fg_b as u16 * a + pixels[idx] as u16 * inv_a) / 255) as u8;
-                        pixels[idx + 1] = ((fg_g as u16 * a + pixels[idx + 1] as u16 * inv_a) / 255) as u8;
-                        pixels[idx + 2] = ((fg_r as u16 * a + pixels[idx + 2] as u16 * inv_a) / 255) as u8;
+                        pixels[idx + 1] =
+                            ((fg_g as u16 * a + pixels[idx + 1] as u16 * inv_a) / 255) as u8;
+                        pixels[idx + 2] =
+                            ((fg_r as u16 * a + pixels[idx + 2] as u16 * inv_a) / 255) as u8;
                         pixels[idx + 3] = pixels[idx + 3].saturating_add(alpha);
                     }
                 }

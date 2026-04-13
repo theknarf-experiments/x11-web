@@ -49,7 +49,16 @@ pub(crate) fn handle_put_image(state: &mut ClientState, data: &[u8]) -> Vec<u8> 
     if format == 2 && depth >= 24 {
         // ZPixmap depth 24/32: direct BGRA/BGRX pixel data
         if let Some(fb) = state.get_framebuffer_mut(drawable) {
-            fb.put_image_gc(dst_x, dst_y, width, height, pixel_data, gc.function, gc.plane_mask, &gc.clip_rects);
+            fb.put_image_gc(
+                dst_x,
+                dst_y,
+                width,
+                height,
+                pixel_data,
+                gc.function,
+                gc.plane_mask,
+                &gc.clip_rects,
+            );
         }
     } else if format == 2 && depth == 16 {
         // ZPixmap depth 16: RGB565 packed pixels → BGRA32 framebuffer
@@ -67,13 +76,21 @@ pub(crate) fn handle_put_image(state: &mut ClientState, data: &[u8]) -> Vec<u8> 
             let fb_data = fb.data_mut();
             for row in 0..h {
                 let dy = dst_y as i32 + row as i32;
-                if dy < 0 || dy >= fb_h as i32 { continue; }
+                if dy < 0 || dy >= fb_h as i32 {
+                    continue;
+                }
                 for col in 0..w {
                     let dx = dst_x as i32 + col as i32;
-                    if dx < 0 || dx >= fb_w as i32 { continue; }
-                    if has_clip && !should_draw_pixel(dx, dy, &clip_rects) { continue; }
+                    if dx < 0 || dx >= fb_w as i32 {
+                        continue;
+                    }
+                    if has_clip && !should_draw_pixel(dx, dy, &clip_rects) {
+                        continue;
+                    }
                     let src_off = row * padded_row + col * 2;
-                    if src_off + 1 >= pixel_data.len() { continue; }
+                    if src_off + 1 >= pixel_data.len() {
+                        continue;
+                    }
                     let val = u16::from_le_bytes([pixel_data[src_off], pixel_data[src_off + 1]]);
                     let r = ((val >> 11) & 0x1F) as u8;
                     let g = ((val >> 5) & 0x3F) as u8;
@@ -101,8 +118,16 @@ pub(crate) fn handle_put_image(state: &mut ClientState, data: &[u8]) -> Vec<u8> 
         // Store the colormap-resolved RGB in B/G/R channels for rendering, and
         // preserve the original colormap index in the A channel so that GetImage
         // can return the correct palette index (not the resolved RGB).
-        let drawable_cmap = state.windows.get(&drawable)
-            .and_then(|w| if w.colormap != 0 { Some(w.colormap) } else { None })
+        let drawable_cmap = state
+            .windows
+            .get(&drawable)
+            .and_then(|w| {
+                if w.colormap != 0 {
+                    Some(w.colormap)
+                } else {
+                    None
+                }
+            })
             .unwrap_or(ROOT_COLORMAP);
         // Pre-build a 256-entry lookup table from the colormap
         let mut lut = [[0u8; 4]; 256];
@@ -110,7 +135,12 @@ pub(crate) fn handle_put_image(state: &mut ClientState, data: &[u8]) -> Vec<u8> 
             for i in 0..256u32 {
                 let (r16, g16, b16) = cmap.lookup(i);
                 // [B, G, R, index] — alpha channel stores the original index
-                lut[i as usize] = [(b16 >> 8) as u8, (g16 >> 8) as u8, (r16 >> 8) as u8, i as u8];
+                lut[i as usize] = [
+                    (b16 >> 8) as u8,
+                    (g16 >> 8) as u8,
+                    (r16 >> 8) as u8,
+                    i as u8,
+                ];
             }
         } else {
             // Fallback: treat index as grayscale, store index in alpha
@@ -133,16 +163,25 @@ pub(crate) fn handle_put_image(state: &mut ClientState, data: &[u8]) -> Vec<u8> 
             let fb_data = fb.data_mut();
             for row in 0..h {
                 let dy = dst_y as i32 + row as i32;
-                if dy < 0 || dy >= fb_h as i32 { continue; }
+                if dy < 0 || dy >= fb_h as i32 {
+                    continue;
+                }
                 for col in 0..w {
                     let dx = dst_x as i32 + col as i32;
-                    if dx < 0 || dx >= fb_w as i32 { continue; }
-                    if has_clip && !should_draw_pixel(dx, dy, &clip_rects) { continue; }
+                    if dx < 0 || dx >= fb_w as i32 {
+                        continue;
+                    }
+                    if has_clip && !should_draw_pixel(dx, dy, &clip_rects) {
+                        continue;
+                    }
                     let src_off = row * padded_row + col;
-                    if src_off >= pixel_data.len() { continue; }
+                    if src_off >= pixel_data.len() {
+                        continue;
+                    }
                     let idx = pixel_data[src_off] as usize;
                     let pixel = &lut[idx];
-                    let src_color = (pixel[2] as u32) << 16 | (pixel[1] as u32) << 8 | pixel[0] as u32;
+                    let src_color =
+                        (pixel[2] as u32) << 16 | (pixel[1] as u32) << 8 | pixel[0] as u32;
                     let fb_off = (dy as usize * fb_w + dx as usize) * 4;
                     if fb_off + 3 < fb_data.len() {
                         let dst_color = (fb_data[fb_off + 2] as u32) << 16
@@ -175,13 +214,21 @@ pub(crate) fn handle_put_image(state: &mut ClientState, data: &[u8]) -> Vec<u8> 
             let fb_data = fb.data_mut();
             for row in 0..h {
                 let dy = dst_y as i32 + row as i32;
-                if dy < 0 || dy >= fb_h as i32 { continue; }
+                if dy < 0 || dy >= fb_h as i32 {
+                    continue;
+                }
                 for col in 0..w {
                     let dx = dst_x as i32 + col as i32;
-                    if dx < 0 || dx >= fb_w as i32 { continue; }
-                    if has_clip && !should_draw_pixel(dx, dy, &clip_rects) { continue; }
+                    if dx < 0 || dx >= fb_w as i32 {
+                        continue;
+                    }
+                    if has_clip && !should_draw_pixel(dx, dy, &clip_rects) {
+                        continue;
+                    }
                     let byte_off = row * padded_row + col / 2;
-                    if byte_off >= pixel_data.len() { continue; }
+                    if byte_off >= pixel_data.len() {
+                        continue;
+                    }
                     let nibble = if col % 2 == 0 {
                         pixel_data[byte_off] & 0x0F
                     } else {
@@ -222,10 +269,14 @@ pub(crate) fn handle_put_image(state: &mut ClientState, data: &[u8]) -> Vec<u8> 
             let padded_row = (row_bytes + 3) & !3;
             let fb_data = fb.data_mut();
             for row in 0..h {
-                if dy + row >= fb_h { break; }
+                if dy + row >= fb_h {
+                    break;
+                }
                 let src_row_start = row * padded_row;
                 for col in 0..w {
-                    if dx + col >= fb_w { break; }
+                    if dx + col >= fb_w {
+                        break;
+                    }
                     let byte_idx = src_row_start + col / 8;
                     let bit_idx = col % 8;
                     let bit = if byte_idx < pixel_data.len() {
@@ -236,10 +287,10 @@ pub(crate) fn handle_put_image(state: &mut ClientState, data: &[u8]) -> Vec<u8> 
                     let fb_off = ((dy + row) * fb_w + (dx + col)) * 4;
                     if fb_off + 3 < fb_data.len() {
                         let val = if bit != 0 { 0xFF } else { 0x00 };
-                        fb_data[fb_off] = val;     // B
+                        fb_data[fb_off] = val; // B
                         fb_data[fb_off + 1] = val; // G
                         fb_data[fb_off + 2] = val; // R
-                        fb_data[fb_off + 3] = 0;   // A (unused, cursor reads RGB only)
+                        fb_data[fb_off + 3] = 0; // A (unused, cursor reads RGB only)
                     }
                 }
             }
@@ -266,11 +317,17 @@ pub(crate) fn handle_put_image(state: &mut ClientState, data: &[u8]) -> Vec<u8> 
                 let fb_data = fb.data_mut();
                 for row in 0..h {
                     let dy = dst_y as i32 + row as i32;
-                    if dy < 0 || dy >= fb_h as i32 { continue; }
+                    if dy < 0 || dy >= fb_h as i32 {
+                        continue;
+                    }
                     for col in 0..w {
                         let dx = dst_x as i32 + col as i32;
-                        if dx < 0 || dx >= fb_w as i32 { continue; }
-                        if has_clip && !should_draw_pixel(dx, dy, &gc.clip_rects) { continue; }
+                        if dx < 0 || dx >= fb_w as i32 {
+                            continue;
+                        }
+                        if has_clip && !should_draw_pixel(dx, dy, &gc.clip_rects) {
+                            continue;
+                        }
                         let bit_pos = left_pad + col;
                         let byte_idx = row * padded_scanline + bit_pos / 8;
                         let bit = if byte_idx < pixel_data.len() {
@@ -290,7 +347,8 @@ pub(crate) fn handle_put_image(state: &mut ClientState, data: &[u8]) -> Vec<u8> 
                                 let dst_color = (fb_data[fb_off + 2] as u32) << 16
                                     | (fb_data[fb_off + 1] as u32) << 8
                                     | fb_data[fb_off] as u32;
-                                let result = (apply_rop(gc_func, src_color, dst_color) & plane_mask)
+                                let result = (apply_rop(gc_func, src_color, dst_color)
+                                    & plane_mask)
                                     | (dst_color & !plane_mask);
                                 fb_data[fb_off] = (result & 0xFF) as u8;
                                 fb_data[fb_off + 1] = ((result >> 8) & 0xFF) as u8;
@@ -310,21 +368,31 @@ pub(crate) fn handle_put_image(state: &mut ClientState, data: &[u8]) -> Vec<u8> 
                 let fb_data = fb.data_mut();
                 for row in 0..h {
                     let dy = dst_y as i32 + row as i32;
-                    if dy < 0 || dy >= fb_h as i32 { continue; }
+                    if dy < 0 || dy >= fb_h as i32 {
+                        continue;
+                    }
                     for col in 0..w {
                         let dx = dst_x as i32 + col as i32;
-                        if dx < 0 || dx >= fb_w as i32 { continue; }
-                        if has_clip && !should_draw_pixel(dx, dy, &gc.clip_rects) { continue; }
+                        if dx < 0 || dx >= fb_w as i32 {
+                            continue;
+                        }
+                        if has_clip && !should_draw_pixel(dx, dy, &gc.clip_rects) {
+                            continue;
+                        }
                         let bit_pos = left_pad + col;
                         let fb_off = (dy as usize * fb_w + dx as usize) * 4;
-                        if fb_off + 3 >= fb_data.len() { continue; }
+                        if fb_off + 3 >= fb_data.len() {
+                            continue;
+                        }
                         let dst_color = (fb_data[fb_off + 2] as u32) << 16
                             | (fb_data[fb_off + 1] as u32) << 8
                             | fb_data[fb_off] as u32;
                         let mut pixel_val = dst_color;
                         for plane in 0..num_planes {
                             let plane_bit = 1u32 << plane;
-                            if plane_mask & plane_bit == 0 { continue; }
+                            if plane_mask & plane_bit == 0 {
+                                continue;
+                            }
                             let plane_offset = (num_planes - 1 - plane) * plane_size;
                             let byte_idx = plane_offset + row * padded_scanline + bit_pos / 8;
                             if byte_idx < pixel_data.len() {
@@ -388,7 +456,9 @@ pub(crate) fn handle_get_image(state: &mut ClientState, data: &[u8], seq: u16) -
         // Also check ancestors are mapped
         let mut parent = win.parent;
         for _ in 0..128 {
-            if parent == state.root_window || parent == 0 { break; }
+            if parent == state.root_window || parent == 0 {
+                break;
+            }
             if let Some(pw) = state.windows.get(&parent) {
                 if !pw.mapped {
                     return build_error(BAD_MATCH, seq, drawable, 73, 0);
@@ -436,7 +506,13 @@ pub(crate) fn handle_get_image(state: &mut ClientState, data: &[u8], seq: u16) -
     let image_data = match format {
         2 => {
             // ZPixmap: packed pixel data, apply plane_mask to each pixel
-            let bpp: usize = if depth <= 8 { 1 } else if depth <= 16 { 2 } else { 4 };
+            let bpp: usize = if depth <= 8 {
+                1
+            } else if depth <= 16 {
+                2
+            } else {
+                4
+            };
             let row_bytes = w * bpp;
             let padded_row = (row_bytes + 3) & !3;
             let mut out = vec![0u8; padded_row * h];

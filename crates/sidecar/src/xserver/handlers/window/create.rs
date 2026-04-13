@@ -31,7 +31,10 @@ pub(crate) fn handle_create_window(state: &mut ClientState, data: &[u8], _seq: u
     // Validate parent window exists (root window or a window we know about).
     if parent != state.root_window && !state.windows.contains_key(&parent) {
         // Also check shared windows for cross-connection parents.
-        let parent_exists = state.shared_windows.lock().ok()
+        let parent_exists = state
+            .shared_windows
+            .lock()
+            .ok()
             .is_some_and(|s| s.contains_key(&parent));
         if !parent_exists {
             return build_error(BAD_WINDOW, _seq, parent, 1, 0);
@@ -46,7 +49,13 @@ pub(crate) fn handle_create_window(state: &mut ClientState, data: &[u8], _seq: u
     // Per X11 spec: width and height must be non-zero and fit in 16 bits.
     // Zero-size windows are rejected with BadValue.
     if width == 0 || height == 0 || width > 32767 || height > 32767 {
-        return build_error(BAD_VALUE, _seq, if width == 0 { 0 } else { width as u32 }, 1, 0);
+        return build_error(
+            BAD_VALUE,
+            _seq,
+            if width == 0 { 0 } else { width as u32 },
+            1,
+            0,
+        );
     }
 
     // Per X11 spec: if depth is specified (non-zero) and doesn't match the
@@ -64,8 +73,8 @@ pub(crate) fn handle_create_window(state: &mut ClientState, data: &[u8], _seq: u
     let mut background_pixmap: Option<u32> = None;
     let mut border_pixel = 0u32;
     let mut border_pixmap: Option<u32> = None;
-    let mut bit_gravity: u8 = 0;  // Forget
-    let mut win_gravity: u8 = 1;  // NorthWest (default per spec)
+    let mut bit_gravity: u8 = 0; // Forget
+    let mut win_gravity: u8 = 1; // NorthWest (default per spec)
     let mut backing_store: u8 = 0; // NotUseful
     let mut backing_planes: u32 = 0xFFFFFFFF; // all planes
     let mut backing_pixel: u32 = 0;
@@ -79,60 +88,67 @@ pub(crate) fn handle_create_window(state: &mut ClientState, data: &[u8], _seq: u
     // Parse value list
     let mut offset = 32;
     for bit in 0..15 {
-        if value_mask & (1 << bit) != 0
-            && offset + 4 <= data.len() {
-                let val = state.read_u32(data, offset);
-                match bit {
-                    0 => {
-                        // background-pixmap: 0=None, 1=ParentRelative, else pixmap ID
-                        background_pixmap = Some(val);
-                    }
-                    1 => background_pixel = val,
-                    2 => {
-                        // border-pixmap: 0=CopyFromParent, else pixmap ID
-                        border_pixmap = Some(val);
-                    }
-                    3 => border_pixel = val,
-                    4 => {
-                        if val > 10 { return build_error(BAD_VALUE, _seq, val, 1, 0); }
-                        bit_gravity = val as u8;
-                    }
-                    5 => {
-                        if val > 10 { return build_error(BAD_VALUE, _seq, val, 1, 0); }
-                        win_gravity = val as u8;
-                    }
-                    6 => {
-                        if val > 2 { return build_error(BAD_VALUE, _seq, val, 1, 0); }
-                        backing_store = val as u8;
-                    }
-                    7 => backing_planes = val,
-                    8 => backing_pixel = val,
-                    9 => override_redirect = val != 0,
-                    10 => save_under = val != 0,
-                    11 => event_mask = val,
-                    12 => do_not_propagate_mask = val,
-                    13 => colormap_id = val, // colormap
-                    14 => {
-                        if val != 0 {
-                            // Validate cursor ID exists
-                            if !state.cursors.contains_key(&val) {
-                                return build_error(BAD_CURSOR, _seq, val, 1, 0);
-                            }
-                            cursor_id = Some(val);
-                        }
-                    }
-                    _ => {}
+        if value_mask & (1 << bit) != 0 && offset + 4 <= data.len() {
+            let val = state.read_u32(data, offset);
+            match bit {
+                0 => {
+                    // background-pixmap: 0=None, 1=ParentRelative, else pixmap ID
+                    background_pixmap = Some(val);
                 }
-                offset += 4;
+                1 => background_pixel = val,
+                2 => {
+                    // border-pixmap: 0=CopyFromParent, else pixmap ID
+                    border_pixmap = Some(val);
+                }
+                3 => border_pixel = val,
+                4 => {
+                    if val > 10 {
+                        return build_error(BAD_VALUE, _seq, val, 1, 0);
+                    }
+                    bit_gravity = val as u8;
+                }
+                5 => {
+                    if val > 10 {
+                        return build_error(BAD_VALUE, _seq, val, 1, 0);
+                    }
+                    win_gravity = val as u8;
+                }
+                6 => {
+                    if val > 2 {
+                        return build_error(BAD_VALUE, _seq, val, 1, 0);
+                    }
+                    backing_store = val as u8;
+                }
+                7 => backing_planes = val,
+                8 => backing_pixel = val,
+                9 => override_redirect = val != 0,
+                10 => save_under = val != 0,
+                11 => event_mask = val,
+                12 => do_not_propagate_mask = val,
+                13 => colormap_id = val, // colormap
+                14 => {
+                    if val != 0 {
+                        // Validate cursor ID exists
+                        if !state.cursors.contains_key(&val) {
+                            return build_error(BAD_CURSOR, _seq, val, 1, 0);
+                        }
+                        cursor_id = Some(val);
+                    }
+                }
+                _ => {}
             }
+            offset += 4;
+        }
     }
 
     // Per X11 spec Section 12.3: SubstructureRedirectMask and ResizeRedirectMask
     // may only be selected by ONE client on a given window.  Check for conflicts
     // before inserting the new window so we never leave partial state behind.
     if event_mask != 0 {
-        if let Some(_conflict) = state.event_broadcaster
-            .check_redirect_conflict(parent, event_mask, &state.client_id)
+        if let Some(_conflict) =
+            state
+                .event_broadcaster
+                .check_redirect_conflict(parent, event_mask, &state.client_id)
         {
             return build_error(BAD_ACCESS, _seq, 0, 1, 0);
         }
@@ -148,7 +164,11 @@ pub(crate) fn handle_create_window(state: &mut ClientState, data: &[u8], _seq: u
     // InputOnly windows (class=2) must not have backgrounds, borders, or framebuffers.
     // They exist only to receive events. Per spec, depth must be 0 for InputOnly.
     let is_input_only = class == 2;
-    let use_depth = if is_input_only { 0 } else { crate::xserver::core::depth_for_visual(use_visual) };
+    let use_depth = if is_input_only {
+        0
+    } else {
+        crate::xserver::core::depth_for_visual(use_visual)
+    };
     let fb = if is_input_only {
         Framebuffer::new(0, 0) // zero-size: no pixel storage
     } else {
@@ -172,7 +192,11 @@ pub(crate) fn handle_create_window(state: &mut ClientState, data: &[u8], _seq: u
             event_mask,
             do_not_propagate_mask,
             background_pixel: if is_input_only { 0 } else { background_pixel },
-            background_pixmap: if is_input_only { None } else { background_pixmap },
+            background_pixmap: if is_input_only {
+                None
+            } else {
+                background_pixmap
+            },
             border_pixel: if is_input_only { 0 } else { border_pixel },
             border_pixmap: if is_input_only { None } else { border_pixmap },
             override_redirect,
@@ -189,7 +213,11 @@ pub(crate) fn handle_create_window(state: &mut ClientState, data: &[u8], _seq: u
             shape_select_clients: Vec::new(),
             colormap: colormap_id,
             backing_store: if is_input_only { 0 } else { backing_store },
-            backing_planes: if is_input_only { 0xFFFFFFFF } else { backing_planes },
+            backing_planes: if is_input_only {
+                0xFFFFFFFF
+            } else {
+                backing_planes
+            },
             backing_pixel: if is_input_only { 0 } else { backing_pixel },
             save_under: if is_input_only { false } else { save_under },
             visibility: 0,
@@ -231,28 +259,37 @@ pub(crate) fn handle_create_window(state: &mut ClientState, data: &[u8], _seq: u
     let atom_machine = state.intern_atom("WM_CLIENT_MACHINE", false);
     let client_pid = state.peer_pid;
     if let Some(win) = state.windows.get_mut(&wid) {
-        win.properties.insert(atom_frame, PropertyValue {
-            prop_type: 6, // CARDINAL
-            format: 32,
-            data: vec![0; 16], // left, right, top, bottom = 0
-        });
-        // _NET_WM_PID
-        if client_pid > 0 {
-            win.properties.insert(atom_pid, PropertyValue {
+        win.properties.insert(
+            atom_frame,
+            PropertyValue {
                 prop_type: 6, // CARDINAL
                 format: 32,
-                data: client_pid.to_le_bytes().to_vec(),
-            });
+                data: vec![0; 16], // left, right, top, bottom = 0
+            },
+        );
+        // _NET_WM_PID
+        if client_pid > 0 {
+            win.properties.insert(
+                atom_pid,
+                PropertyValue {
+                    prop_type: 6, // CARDINAL
+                    format: 32,
+                    data: client_pid.to_le_bytes().to_vec(),
+                },
+            );
         }
         // WM_CLIENT_MACHINE: hostname
-        let hostname = std::fs::read_to_string("/etc/hostname")
-            .unwrap_or_else(|_| "localhost".to_string());
+        let hostname =
+            std::fs::read_to_string("/etc/hostname").unwrap_or_else(|_| "localhost".to_string());
         let hostname = hostname.trim();
-        win.properties.insert(atom_machine, PropertyValue {
-            prop_type: 31, // STRING
-            format: 8,
-            data: hostname.as_bytes().to_vec(),
-        });
+        win.properties.insert(
+            atom_machine,
+            PropertyValue {
+                prop_type: 31, // STRING
+                format: 8,
+                data: hostname.as_bytes().to_vec(),
+            },
+        );
     }
 
     let is_top_level = parent == state.root_window && class == 1 && !override_redirect;
@@ -356,7 +393,9 @@ pub(crate) fn handle_destroy_window(state: &mut ClientState, data: &[u8]) -> Vec
     // subwindows recursively. Collect all descendants (depth-first).
     let mut all_descendants = Vec::new();
     {
-        let mut stack: Vec<u32> = state.windows.get(&wid)
+        let mut stack: Vec<u32> = state
+            .windows
+            .get(&wid)
             .map(|w| w.children_order.clone())
             .unwrap_or_default();
         while let Some(child) = stack.pop() {
@@ -408,7 +447,9 @@ pub(crate) fn handle_destroy_window(state: &mut ClientState, data: &[u8]) -> Vec
             shared.remove(&desc);
         }
         if let Some(uuid) = state.x11_to_uuid.remove(&desc) {
-            state.window_router.unregister_all(std::slice::from_ref(&uuid));
+            state
+                .window_router
+                .unregister_all(std::slice::from_ref(&uuid));
             state.menu_tracker.detach(&uuid);
             let _ = state.update_tx.send((
                 state.client_id.clone(),
@@ -435,7 +476,9 @@ pub(crate) fn handle_destroy_window(state: &mut ClientState, data: &[u8]) -> Vec
     }
 
     if let Some(uuid) = state.x11_to_uuid.remove(&wid) {
-        state.window_router.unregister_all(std::slice::from_ref(&uuid));
+        state
+            .window_router
+            .unregister_all(std::slice::from_ref(&uuid));
         state.menu_tracker.detach(&uuid);
         let _ = state.update_tx.send((
             state.client_id.clone(),
@@ -506,7 +549,9 @@ pub(crate) fn handle_destroy_subwindows(state: &mut ClientState, data: &[u8]) ->
         state.gtk_menu_paths.remove(&wid);
         state.menu_tracker.window_index().unregister(wid);
         if let Some(uuid) = state.x11_to_uuid.remove(&wid) {
-            state.window_router.unregister_all(std::slice::from_ref(&uuid));
+            state
+                .window_router
+                .unregister_all(std::slice::from_ref(&uuid));
             state.menu_tracker.detach(&uuid);
             let _ = state.update_tx.send((
                 state.client_id.clone(),

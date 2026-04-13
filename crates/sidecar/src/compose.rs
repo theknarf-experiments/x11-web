@@ -77,9 +77,10 @@ impl ComposeState {
         }
 
         // Check if any table entry starts with our current sequence
-        let has_prefix = self.table.keys().any(|k| {
-            k.len() > self.current.len() && k.starts_with(&self.current)
-        });
+        let has_prefix = self
+            .table
+            .keys()
+            .any(|k| k.len() > self.current.len() && k.starts_with(&self.current));
 
         if has_prefix {
             // More keys needed
@@ -311,7 +312,9 @@ impl ComposeState {
     ///   include "%L"   # include locale default
     /// Lines starting with # are comments.
     pub fn load_xcompose_file(&mut self, path: &std::path::Path) {
-        let Ok(content) = std::fs::read_to_string(path) else { return };
+        let Ok(content) = std::fs::read_to_string(path) else {
+            return;
+        };
         for line in content.lines() {
             let line = line.trim();
             if line.is_empty() || line.starts_with('#') {
@@ -337,7 +340,9 @@ impl ComposeState {
                 let output_part = line[colon_pos + 1..].trim();
 
                 // Extract output string (between quotes)
-                let output = if let (Some(start), Some(end)) = (output_part.find('"'), output_part.rfind('"')) {
+                let output = if let (Some(start), Some(end)) =
+                    (output_part.find('"'), output_part.rfind('"'))
+                {
                     if start < end {
                         output_part[start + 1..end].to_string()
                     } else {

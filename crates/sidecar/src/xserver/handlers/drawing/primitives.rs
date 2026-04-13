@@ -55,7 +55,11 @@ pub(crate) fn handle_clear_area(state: &mut ClientState, data: &[u8], _seq: u16)
         write_u16_bo(&mut event, 12, width, bo);
         write_u16_bo(&mut event, 14, height, bo);
         // count = 0 (last in sequence)
-        if state.windows.get(&wid).is_some_and(|w| w.event_mask & EXPOSURE_MASK != 0) {
+        if state
+            .windows
+            .get(&wid)
+            .is_some_and(|w| w.event_mask & EXPOSURE_MASK != 0)
+        {
             state.pending_events.push(event.to_vec());
         }
         // Broadcast to other clients that selected ExposureMask on this window
@@ -112,7 +116,16 @@ pub(crate) fn handle_copy_area(state: &mut ClientState, data: &[u8]) -> Vec<u8> 
             if has_clip {
                 // Self-copy with clipping: extract then put back through clipped path
                 let pixels = fb.extract_pixels(src_x, src_y, width, height);
-                fb.put_image_gc(dst_x, dst_y, width, height, &pixels, gc.function, gc.plane_mask, &gc.clip_rects);
+                fb.put_image_gc(
+                    dst_x,
+                    dst_y,
+                    width,
+                    height,
+                    &pixels,
+                    gc.function,
+                    gc.plane_mask,
+                    &gc.clip_rects,
+                );
             } else {
                 fb.copy_area_self(src_x, src_y, dst_x, dst_y, width, height);
             }
@@ -121,7 +134,8 @@ pub(crate) fn handle_copy_area(state: &mut ClientState, data: &[u8]) -> Vec<u8> 
         let pixels = if include_inferiors {
             Some(state.extract_pixels_include_inferiors(src, src_x, src_y, width, height))
         } else {
-            state.get_framebuffer_mut(src)
+            state
+                .get_framebuffer_mut(src)
                 .map(|fb| fb.extract_pixels(src_x, src_y, width, height))
         };
         if let Some(pixels) = pixels {
@@ -134,28 +148,41 @@ pub(crate) fn handle_copy_area(state: &mut ClientState, data: &[u8]) -> Vec<u8> 
                     let src_stride = width as usize * 4;
                     for row in 0..height as usize {
                         let dy = dst_y as i32 + row as i32;
-                        if dy < 0 || dy >= fb_h { continue; }
+                        if dy < 0 || dy >= fb_h {
+                            continue;
+                        }
                         for col in 0..width as usize {
                             let dx = dst_x as i32 + col as i32;
-                            if dx < 0 || dx >= fb_w { continue; }
-                            if has_clip && !should_draw_pixel(dx, dy, &gc.clip_rects) { continue; }
+                            if dx < 0 || dx >= fb_w {
+                                continue;
+                            }
+                            if has_clip && !should_draw_pixel(dx, dy, &gc.clip_rects) {
+                                continue;
+                            }
                             let src_off = row * src_stride + col * 4;
-                            if src_off + 3 >= pixels.len() { continue; }
+                            if src_off + 3 >= pixels.len() {
+                                continue;
+                            }
                             let src_pixel = pixels[src_off] as u32
                                 | (pixels[src_off + 1] as u32) << 8
                                 | (pixels[src_off + 2] as u32) << 16;
-                            let color = if src_pixel != 0 {
-                                ca_fg
-                            } else {
-                                ca_bg
-                            };
+                            let color = if src_pixel != 0 { ca_fg } else { ca_bg };
                             fb.draw_point_with_func(dx, dy, color, gc.function);
                         }
                     }
                 }
             } else if gc.function != 3 || has_clip {
                 if let Some(fb) = state.get_framebuffer_mut(dst) {
-                    fb.put_image_gc(dst_x, dst_y, width, height, &pixels, gc.function, gc.plane_mask, &gc.clip_rects);
+                    fb.put_image_gc(
+                        dst_x,
+                        dst_y,
+                        width,
+                        height,
+                        &pixels,
+                        gc.function,
+                        gc.plane_mask,
+                        &gc.clip_rects,
+                    );
                 }
             } else {
                 // GXcopy, no clip -- fast path
@@ -282,9 +309,13 @@ pub(crate) fn handle_copy_plane(state: &mut ClientState, data: &[u8]) -> Vec<u8>
                 for col in 0..width as usize {
                     let dx = dst_x as i32 + col as i32;
                     let dy = dst_y as i32 + row as i32;
-                    if has_clip && !should_draw_pixel(dx, dy, &gc.clip_rects) { continue; }
+                    if has_clip && !should_draw_pixel(dx, dy, &gc.clip_rects) {
+                        continue;
+                    }
                     let src_off = row * src_stride + col * 4;
-                    if src_off + 3 >= pixels.len() { continue; }
+                    if src_off + 3 >= pixels.len() {
+                        continue;
+                    }
                     let src_pixel = pixels[src_off] as u32
                         | (pixels[src_off + 1] as u32) << 8
                         | (pixels[src_off + 2] as u32) << 16
@@ -398,17 +429,32 @@ pub(crate) fn handle_poly_point(state: &mut ClientState, data: &[u8]) -> Vec<u8>
     let fg = state.map_color_for_drawable(drawable, gc.foreground);
     if let Some(fb) = state.get_framebuffer_mut(drawable) {
         for &(x, y) in &points {
-            fb.draw_point_gc(x as i32, y as i32, fg, gc.function, gc.plane_mask, &gc.clip_rects);
+            fb.draw_point_gc(
+                x as i32,
+                y as i32,
+                fg,
+                gc.function,
+                gc.plane_mask,
+                &gc.clip_rects,
+            );
         }
     }
     if !points.is_empty() {
         let (mut min_x, mut min_y) = points[0];
         let (mut max_x, mut max_y) = points[0];
         for &(x, y) in &points[1..] {
-            min_x = min_x.min(x); min_y = min_y.min(y);
-            max_x = max_x.max(x); max_y = max_y.max(y);
+            min_x = min_x.min(x);
+            min_y = min_y.min(y);
+            max_x = max_x.max(x);
+            max_y = max_y.max(y);
         }
-        state.notify_damage(drawable, min_x, min_y, (max_x - min_x + 1) as u16, (max_y - min_y + 1) as u16);
+        state.notify_damage(
+            drawable,
+            min_x,
+            min_y,
+            (max_x - min_x + 1) as u16,
+            (max_y - min_y + 1) as u16,
+        );
     }
 
     Vec::new()
@@ -454,14 +500,22 @@ pub(crate) fn handle_poly_line(state: &mut ClientState, data: &[u8]) -> Vec<u8> 
     // Extract tile/stipple data before borrowing framebuffer
     let tile_data: Option<(Vec<u8>, u32, u32)> = if gc.fill_style == 1 {
         state.pixmaps.get(&gc.tile).map(|p| {
-            (p.framebuffer.data().to_vec(), p.width as u32, p.height as u32)
+            (
+                p.framebuffer.data().to_vec(),
+                p.width as u32,
+                p.height as u32,
+            )
         })
     } else {
         None
     };
     let stipple_data: Option<(Vec<u8>, u32, u32)> = if gc.fill_style == 2 || gc.fill_style == 3 {
         state.pixmaps.get(&gc.stipple).map(|p| {
-            (p.framebuffer.data().to_vec(), p.width as u32, p.height as u32)
+            (
+                p.framebuffer.data().to_vec(),
+                p.width as u32,
+                p.height as u32,
+            )
         })
     } else {
         None
@@ -476,14 +530,36 @@ pub(crate) fn handle_poly_line(state: &mut ClientState, data: &[u8]) -> Vec<u8> 
                 if let Some((ref tdata, tw, th)) = tile_data {
                     for w in pts.windows(2) {
                         fb.draw_line_tiled(
-                            w[0].0, w[0].1, w[1].0, w[1].1,
-                            tdata, tw, th, gc.ts_x, gc.ts_y,
-                            gc.function, gc.plane_mask, gc.cap_style, &gc.clip_rects,
+                            w[0].0,
+                            w[0].1,
+                            w[1].0,
+                            w[1].1,
+                            tdata,
+                            tw,
+                            th,
+                            gc.ts_x,
+                            gc.ts_y,
+                            gc.function,
+                            gc.plane_mask,
+                            gc.cap_style,
+                            &gc.clip_rects,
                         );
                     }
                 } else {
-                    fb.draw_polyline_gc(&pts, fg, gc.line_width, gc.function, gc.plane_mask,
-                        gc.line_style, gc.cap_style, gc.join_style, gc.dash_offset, dashes, bg, &gc.clip_rects);
+                    fb.draw_polyline_gc(
+                        &pts,
+                        fg,
+                        gc.line_width,
+                        gc.function,
+                        gc.plane_mask,
+                        gc.line_style,
+                        gc.cap_style,
+                        gc.join_style,
+                        gc.dash_offset,
+                        dashes,
+                        bg,
+                        &gc.clip_rects,
+                    );
                 }
             }
             2 | 3 => {
@@ -491,20 +567,57 @@ pub(crate) fn handle_poly_line(state: &mut ClientState, data: &[u8]) -> Vec<u8> 
                 if let Some((ref sdata, sw, sh)) = stipple_data {
                     for w in pts.windows(2) {
                         fb.draw_line_stippled(
-                            w[0].0, w[0].1, w[1].0, w[1].1,
-                            fg, bg, sdata, sw, sh, gc.ts_x, gc.ts_y,
-                            gc.fill_style == 3, gc.function, gc.plane_mask, gc.cap_style, &gc.clip_rects,
+                            w[0].0,
+                            w[0].1,
+                            w[1].0,
+                            w[1].1,
+                            fg,
+                            bg,
+                            sdata,
+                            sw,
+                            sh,
+                            gc.ts_x,
+                            gc.ts_y,
+                            gc.fill_style == 3,
+                            gc.function,
+                            gc.plane_mask,
+                            gc.cap_style,
+                            &gc.clip_rects,
                         );
                     }
                 } else {
-                    fb.draw_polyline_gc(&pts, fg, gc.line_width, gc.function, gc.plane_mask,
-                        gc.line_style, gc.cap_style, gc.join_style, gc.dash_offset, dashes, bg, &gc.clip_rects);
+                    fb.draw_polyline_gc(
+                        &pts,
+                        fg,
+                        gc.line_width,
+                        gc.function,
+                        gc.plane_mask,
+                        gc.line_style,
+                        gc.cap_style,
+                        gc.join_style,
+                        gc.dash_offset,
+                        dashes,
+                        bg,
+                        &gc.clip_rects,
+                    );
                 }
             }
             _ => {
                 // Solid (0)
-                fb.draw_polyline_gc(&pts, fg, gc.line_width, gc.function, gc.plane_mask,
-                    gc.line_style, gc.cap_style, gc.join_style, gc.dash_offset, dashes, bg, &gc.clip_rects);
+                fb.draw_polyline_gc(
+                    &pts,
+                    fg,
+                    gc.line_width,
+                    gc.function,
+                    gc.plane_mask,
+                    gc.line_style,
+                    gc.cap_style,
+                    gc.join_style,
+                    gc.dash_offset,
+                    dashes,
+                    bg,
+                    &gc.clip_rects,
+                );
             }
         }
     }
@@ -513,10 +626,18 @@ pub(crate) fn handle_poly_line(state: &mut ClientState, data: &[u8]) -> Vec<u8> 
         let (mut min_x, mut min_y) = points[0];
         let (mut max_x, mut max_y) = points[0];
         for &(x, y) in &points[1..] {
-            min_x = min_x.min(x); min_y = min_y.min(y);
-            max_x = max_x.max(x); max_y = max_y.max(y);
+            min_x = min_x.min(x);
+            min_y = min_y.min(y);
+            max_x = max_x.max(x);
+            max_y = max_y.max(y);
         }
-        state.notify_damage(drawable, min_x - lw, min_y - lw, (max_x - min_x + 2 * lw) as u16, (max_y - min_y + 2 * lw) as u16);
+        state.notify_damage(
+            drawable,
+            min_x - lw,
+            min_y - lw,
+            (max_x - min_x + 2 * lw) as u16,
+            (max_y - min_y + 2 * lw) as u16,
+        );
     }
 
     Vec::new()
@@ -558,14 +679,22 @@ pub(crate) fn handle_poly_segment(state: &mut ClientState, data: &[u8]) -> Vec<u
     // Extract tile/stipple data before borrowing framebuffer
     let tile_data: Option<(Vec<u8>, u32, u32)> = if gc.fill_style == 1 {
         state.pixmaps.get(&gc.tile).map(|p| {
-            (p.framebuffer.data().to_vec(), p.width as u32, p.height as u32)
+            (
+                p.framebuffer.data().to_vec(),
+                p.width as u32,
+                p.height as u32,
+            )
         })
     } else {
         None
     };
     let stipple_data: Option<(Vec<u8>, u32, u32)> = if gc.fill_style == 2 || gc.fill_style == 3 {
         state.pixmaps.get(&gc.stipple).map(|p| {
-            (p.framebuffer.data().to_vec(), p.width as u32, p.height as u32)
+            (
+                p.framebuffer.data().to_vec(),
+                p.width as u32,
+                p.height as u32,
+            )
         })
     } else {
         None
@@ -578,49 +707,121 @@ pub(crate) fn handle_poly_segment(state: &mut ClientState, data: &[u8]) -> Vec<u
                 1 => {
                     if let Some((ref tdata, tw, th)) = tile_data {
                         fb.draw_line_tiled(
-                            x1 as i32, y1 as i32, x2 as i32, y2 as i32,
-                            tdata, tw, th, gc.ts_x, gc.ts_y,
-                            gc.function, gc.plane_mask, gc.cap_style, &gc.clip_rects,
+                            x1 as i32,
+                            y1 as i32,
+                            x2 as i32,
+                            y2 as i32,
+                            tdata,
+                            tw,
+                            th,
+                            gc.ts_x,
+                            gc.ts_y,
+                            gc.function,
+                            gc.plane_mask,
+                            gc.cap_style,
+                            &gc.clip_rects,
                         );
                     } else {
-                        fb.draw_line_gc(x1 as i32, y1 as i32, x2 as i32, y2 as i32,
-                            fg, gc.line_width, gc.function, gc.plane_mask,
-                            gc.line_style, gc.cap_style, gc.join_style,
-                            gc.dash_offset, dashes, bg, &gc.clip_rects);
+                        fb.draw_line_gc(
+                            x1 as i32,
+                            y1 as i32,
+                            x2 as i32,
+                            y2 as i32,
+                            fg,
+                            gc.line_width,
+                            gc.function,
+                            gc.plane_mask,
+                            gc.line_style,
+                            gc.cap_style,
+                            gc.join_style,
+                            gc.dash_offset,
+                            dashes,
+                            bg,
+                            &gc.clip_rects,
+                        );
                     }
                 }
                 2 | 3 => {
                     if let Some((ref sdata, sw, sh)) = stipple_data {
                         fb.draw_line_stippled(
-                            x1 as i32, y1 as i32, x2 as i32, y2 as i32,
-                            fg, bg, sdata, sw, sh, gc.ts_x, gc.ts_y,
-                            gc.fill_style == 3, gc.function, gc.plane_mask, gc.cap_style, &gc.clip_rects,
+                            x1 as i32,
+                            y1 as i32,
+                            x2 as i32,
+                            y2 as i32,
+                            fg,
+                            bg,
+                            sdata,
+                            sw,
+                            sh,
+                            gc.ts_x,
+                            gc.ts_y,
+                            gc.fill_style == 3,
+                            gc.function,
+                            gc.plane_mask,
+                            gc.cap_style,
+                            &gc.clip_rects,
                         );
                     } else {
-                        fb.draw_line_gc(x1 as i32, y1 as i32, x2 as i32, y2 as i32,
-                            fg, gc.line_width, gc.function, gc.plane_mask,
-                            gc.line_style, gc.cap_style, gc.join_style,
-                            gc.dash_offset, dashes, bg, &gc.clip_rects);
+                        fb.draw_line_gc(
+                            x1 as i32,
+                            y1 as i32,
+                            x2 as i32,
+                            y2 as i32,
+                            fg,
+                            gc.line_width,
+                            gc.function,
+                            gc.plane_mask,
+                            gc.line_style,
+                            gc.cap_style,
+                            gc.join_style,
+                            gc.dash_offset,
+                            dashes,
+                            bg,
+                            &gc.clip_rects,
+                        );
                     }
                 }
                 _ => {
-                    fb.draw_line_gc(x1 as i32, y1 as i32, x2 as i32, y2 as i32,
-                        fg, gc.line_width, gc.function, gc.plane_mask,
-                        gc.line_style, gc.cap_style, gc.join_style,
-                        gc.dash_offset, dashes, bg, &gc.clip_rects);
+                    fb.draw_line_gc(
+                        x1 as i32,
+                        y1 as i32,
+                        x2 as i32,
+                        y2 as i32,
+                        fg,
+                        gc.line_width,
+                        gc.function,
+                        gc.plane_mask,
+                        gc.line_style,
+                        gc.cap_style,
+                        gc.join_style,
+                        gc.dash_offset,
+                        dashes,
+                        bg,
+                        &gc.clip_rects,
+                    );
                 }
             }
         }
     }
     if !segments.is_empty() {
         let lw = gc.line_width.max(1) as i16;
-        let mut min_x = i16::MAX; let mut min_y = i16::MAX;
-        let mut max_x = i16::MIN; let mut max_y = i16::MIN;
+        let mut min_x = i16::MAX;
+        let mut min_y = i16::MAX;
+        let mut max_x = i16::MIN;
+        let mut max_y = i16::MIN;
         for &(x1, y1, x2, y2) in &segments {
-            min_x = min_x.min(x1).min(x2); min_y = min_y.min(y1).min(y2);
-            max_x = max_x.max(x1).max(x2); max_y = max_y.max(y1).max(y2);
+            min_x = min_x.min(x1).min(x2);
+            min_y = min_y.min(y1).min(y2);
+            max_x = max_x.max(x1).max(x2);
+            max_y = max_y.max(y1).max(y2);
         }
-        state.notify_damage(drawable, min_x - lw, min_y - lw, (max_x - min_x + 2 * lw) as u16, (max_y - min_y + 2 * lw) as u16);
+        state.notify_damage(
+            drawable,
+            min_x - lw,
+            min_y - lw,
+            (max_x - min_x + 2 * lw) as u16,
+            (max_y - min_y + 2 * lw) as u16,
+        );
     }
 
     Vec::new()
@@ -662,14 +863,22 @@ pub(crate) fn handle_poly_rectangle(state: &mut ClientState, data: &[u8]) -> Vec
     // Extract tile/stipple data before borrowing framebuffer
     let tile_data: Option<(Vec<u8>, u32, u32)> = if gc.fill_style == 1 {
         state.pixmaps.get(&gc.tile).map(|p| {
-            (p.framebuffer.data().to_vec(), p.width as u32, p.height as u32)
+            (
+                p.framebuffer.data().to_vec(),
+                p.width as u32,
+                p.height as u32,
+            )
         })
     } else {
         None
     };
     let stipple_data: Option<(Vec<u8>, u32, u32)> = if gc.fill_style == 2 || gc.fill_style == 3 {
         state.pixmaps.get(&gc.stipple).map(|p| {
-            (p.framebuffer.data().to_vec(), p.width as u32, p.height as u32)
+            (
+                p.framebuffer.data().to_vec(),
+                p.width as u32,
+                p.height as u32,
+            )
         })
     } else {
         None
@@ -690,38 +899,107 @@ pub(crate) fn handle_poly_rectangle(state: &mut ClientState, data: &[u8]) -> Vec
                 1 => {
                     if let Some((ref tdata, tw, th)) = tile_data {
                         for &(lx0, ly0, lx1, ly1) in &lines {
-                            fb.draw_line_tiled(lx0, ly0, lx1, ly1, tdata, tw, th,
-                                gc.ts_x, gc.ts_y, gc.function, gc.plane_mask,
-                                gc.cap_style, &gc.clip_rects);
+                            fb.draw_line_tiled(
+                                lx0,
+                                ly0,
+                                lx1,
+                                ly1,
+                                tdata,
+                                tw,
+                                th,
+                                gc.ts_x,
+                                gc.ts_y,
+                                gc.function,
+                                gc.plane_mask,
+                                gc.cap_style,
+                                &gc.clip_rects,
+                            );
                         }
                     } else {
                         for &(lx0, ly0, lx1, ly1) in &lines {
-                            fb.draw_line_gc(lx0, ly0, lx1, ly1, fg, gc.line_width,
-                                gc.function, gc.plane_mask, gc.line_style, gc.cap_style, gc.join_style,
-                                gc.dash_offset, dashes, bg, &gc.clip_rects);
+                            fb.draw_line_gc(
+                                lx0,
+                                ly0,
+                                lx1,
+                                ly1,
+                                fg,
+                                gc.line_width,
+                                gc.function,
+                                gc.plane_mask,
+                                gc.line_style,
+                                gc.cap_style,
+                                gc.join_style,
+                                gc.dash_offset,
+                                dashes,
+                                bg,
+                                &gc.clip_rects,
+                            );
                         }
                     }
                 }
                 2 | 3 => {
                     if let Some((ref sdata, sw, sh)) = stipple_data {
                         for &(lx0, ly0, lx1, ly1) in &lines {
-                            fb.draw_line_stippled(lx0, ly0, lx1, ly1, fg, bg,
-                                sdata, sw, sh, gc.ts_x, gc.ts_y, gc.fill_style == 3,
-                                gc.function, gc.plane_mask, gc.cap_style, &gc.clip_rects);
+                            fb.draw_line_stippled(
+                                lx0,
+                                ly0,
+                                lx1,
+                                ly1,
+                                fg,
+                                bg,
+                                sdata,
+                                sw,
+                                sh,
+                                gc.ts_x,
+                                gc.ts_y,
+                                gc.fill_style == 3,
+                                gc.function,
+                                gc.plane_mask,
+                                gc.cap_style,
+                                &gc.clip_rects,
+                            );
                         }
                     } else {
                         for &(lx0, ly0, lx1, ly1) in &lines {
-                            fb.draw_line_gc(lx0, ly0, lx1, ly1, fg, gc.line_width,
-                                gc.function, gc.plane_mask, gc.line_style, gc.cap_style, gc.join_style,
-                                gc.dash_offset, dashes, bg, &gc.clip_rects);
+                            fb.draw_line_gc(
+                                lx0,
+                                ly0,
+                                lx1,
+                                ly1,
+                                fg,
+                                gc.line_width,
+                                gc.function,
+                                gc.plane_mask,
+                                gc.line_style,
+                                gc.cap_style,
+                                gc.join_style,
+                                gc.dash_offset,
+                                dashes,
+                                bg,
+                                &gc.clip_rects,
+                            );
                         }
                     }
                 }
                 _ => {
                     for &(lx0, ly0, lx1, ly1) in &lines {
-                        fb.draw_line_gc(lx0, ly0, lx1, ly1, fg, gc.line_width,
-                            gc.function, gc.plane_mask, gc.line_style, gc.cap_style, gc.join_style,
-                            gc.dash_offset, dashes, bg, &gc.clip_rects);
+                        fb.draw_line_gc(
+                            lx0,
+                            ly0,
+                            lx1,
+                            ly1,
+                            fg,
+                            gc.line_width,
+                            gc.function,
+                            gc.plane_mask,
+                            gc.line_style,
+                            gc.cap_style,
+                            gc.join_style,
+                            gc.dash_offset,
+                            dashes,
+                            bg,
+                            &gc.clip_rects,
+                        );
                     }
                 }
             }
@@ -729,7 +1007,13 @@ pub(crate) fn handle_poly_rectangle(state: &mut ClientState, data: &[u8]) -> Vec
     }
     let lw = gc.line_width.max(1) as i16;
     for &(x, y, width, height) in &rects {
-        state.notify_damage(drawable, x - lw, y - lw, width.saturating_add(2 * lw as u16), height.saturating_add(2 * lw as u16));
+        state.notify_damage(
+            drawable,
+            x - lw,
+            y - lw,
+            width.saturating_add(2 * lw as u16),
+            height.saturating_add(2 * lw as u16),
+        );
     }
 
     Vec::new()
@@ -772,16 +1056,35 @@ pub(crate) fn handle_poly_arc(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
     if let Some(fb) = state.get_framebuffer_mut(drawable) {
         for &(x, y, width, height, angle1, angle2) in &arcs {
             fb.draw_arc_gc(
-                x, y, width, height, angle1, angle2, false, fg, bg,
-                gc.line_width, gc.function, gc.plane_mask,
-                gc.line_style, gc.dash_offset, &gc.dash_list,
-                &gc.clip_rects, gc.arc_mode,
+                x,
+                y,
+                width,
+                height,
+                angle1,
+                angle2,
+                false,
+                fg,
+                bg,
+                gc.line_width,
+                gc.function,
+                gc.plane_mask,
+                gc.line_style,
+                gc.dash_offset,
+                &gc.dash_list,
+                &gc.clip_rects,
+                gc.arc_mode,
             );
         }
     }
     let lw = gc.line_width.max(1) as i16;
     for &(x, y, width, height, _, _) in &arcs {
-        state.notify_damage(drawable, x - lw, y - lw, width.saturating_add(2 * lw as u16), height.saturating_add(2 * lw as u16));
+        state.notify_damage(
+            drawable,
+            x - lw,
+            y - lw,
+            width.saturating_add(2 * lw as u16),
+            height.saturating_add(2 * lw as u16),
+        );
     }
 
     Vec::new()
@@ -827,14 +1130,22 @@ pub(crate) fn handle_fill_poly(state: &mut ClientState, data: &[u8]) -> Vec<u8> 
     // Extract tile/stipple data before borrowing framebuffer
     let tile_data: Option<(Vec<u8>, u32, u32)> = if gc.fill_style == 1 {
         state.pixmaps.get(&gc.tile).map(|p| {
-            (p.framebuffer.data().to_vec(), p.width as u32, p.height as u32)
+            (
+                p.framebuffer.data().to_vec(),
+                p.width as u32,
+                p.height as u32,
+            )
         })
     } else {
         None
     };
     let stipple_data: Option<(Vec<u8>, u32, u32)> = if gc.fill_style == 2 || gc.fill_style == 3 {
         state.pixmaps.get(&gc.stipple).map(|p| {
-            (p.framebuffer.data().to_vec(), p.width as u32, p.height as u32)
+            (
+                p.framebuffer.data().to_vec(),
+                p.width as u32,
+                p.height as u32,
+            )
         })
     } else {
         None
@@ -846,34 +1157,86 @@ pub(crate) fn handle_fill_poly(state: &mut ClientState, data: &[u8]) -> Vec<u8> 
                 1 => {
                     // Tiled: rasterize polygon using tile pattern
                     if let Some((ref tdata, tw, th)) = tile_data {
-                        fb.fill_polygon_tiled(&points, tdata, tw, th, gc.ts_x, gc.ts_y,
-                            gc.fill_rule, gc.function, gc.plane_mask, &gc.clip_rects);
+                        fb.fill_polygon_tiled(
+                            &points,
+                            tdata,
+                            tw,
+                            th,
+                            gc.ts_x,
+                            gc.ts_y,
+                            gc.fill_rule,
+                            gc.function,
+                            gc.plane_mask,
+                            &gc.clip_rects,
+                        );
                     } else {
-                        fb.fill_polygon_gc(&points, fg, gc.fill_rule, gc.function, gc.plane_mask, &gc.clip_rects);
+                        fb.fill_polygon_gc(
+                            &points,
+                            fg,
+                            gc.fill_rule,
+                            gc.function,
+                            gc.plane_mask,
+                            &gc.clip_rects,
+                        );
                     }
                 }
                 2 | 3 => {
                     // Stippled/OpaqueStippled: rasterize with stipple pattern
                     if let Some((ref sdata, sw, sh)) = stipple_data {
-                        fb.fill_polygon_stippled(&points, fg, bg, sdata, sw, sh, gc.ts_x, gc.ts_y,
-                            gc.fill_style == 3, gc.fill_rule, gc.function, gc.plane_mask, &gc.clip_rects);
+                        fb.fill_polygon_stippled(
+                            &points,
+                            fg,
+                            bg,
+                            sdata,
+                            sw,
+                            sh,
+                            gc.ts_x,
+                            gc.ts_y,
+                            gc.fill_style == 3,
+                            gc.fill_rule,
+                            gc.function,
+                            gc.plane_mask,
+                            &gc.clip_rects,
+                        );
                     } else {
-                        fb.fill_polygon_gc(&points, fg, gc.fill_rule, gc.function, gc.plane_mask, &gc.clip_rects);
+                        fb.fill_polygon_gc(
+                            &points,
+                            fg,
+                            gc.fill_rule,
+                            gc.function,
+                            gc.plane_mask,
+                            &gc.clip_rects,
+                        );
                     }
                 }
                 _ => {
                     // Solid (0)
-                    fb.fill_polygon_gc(&points, fg, gc.fill_rule, gc.function, gc.plane_mask, &gc.clip_rects);
+                    fb.fill_polygon_gc(
+                        &points,
+                        fg,
+                        gc.fill_rule,
+                        gc.function,
+                        gc.plane_mask,
+                        &gc.clip_rects,
+                    );
                 }
             }
         }
         let (mut min_x, mut min_y) = points[0];
         let (mut max_x, mut max_y) = points[0];
         for &(x, y) in &points[1..] {
-            min_x = min_x.min(x); min_y = min_y.min(y);
-            max_x = max_x.max(x); max_y = max_y.max(y);
+            min_x = min_x.min(x);
+            min_y = min_y.min(y);
+            max_x = max_x.max(x);
+            max_y = max_y.max(y);
         }
-        state.notify_damage(drawable, min_x, min_y, (max_x - min_x + 1) as u16, (max_y - min_y + 1) as u16);
+        state.notify_damage(
+            drawable,
+            min_x,
+            min_y,
+            (max_x - min_x + 1) as u16,
+            (max_y - min_y + 1) as u16,
+        );
     }
 
     Vec::new()
@@ -911,7 +1274,12 @@ pub(crate) fn handle_poly_fill_rectangle(state: &mut ClientState, data: &[u8]) -
 
     let fg = state.map_color_for_drawable(drawable, gc.foreground);
     let bg = state.map_color_for_drawable(drawable, gc.background);
-    info!("PolyFillRect: draw={drawable:#x} fg={fg:#x} gc={gc_id:#x} rects={} fn={} fill_style={}", rects.len(), gc.function, gc.fill_style);
+    info!(
+        "PolyFillRect: draw={drawable:#x} fg={fg:#x} gc={gc_id:#x} rects={} fn={} fill_style={}",
+        rects.len(),
+        gc.function,
+        gc.fill_style
+    );
 
     // Extract tile/stipple data before borrowing framebuffer
     let tile_data: Option<(Vec<u8>, u32, u32)> = if gc.fill_style == 1 {
@@ -940,40 +1308,123 @@ pub(crate) fn handle_poly_fill_rectangle(state: &mut ClientState, data: &[u8]) -
                     // Tiled
                     if let Some((ref data, tw, th)) = tile_data {
                         if gc.clip_rects.is_empty() {
-                            fb.fill_rect_tiled(x, y, width, height, data, tw, th, gc.ts_x, gc.ts_y, gc.function, gc.plane_mask);
+                            fb.fill_rect_tiled(
+                                x,
+                                y,
+                                width,
+                                height,
+                                data,
+                                tw,
+                                th,
+                                gc.ts_x,
+                                gc.ts_y,
+                                gc.function,
+                                gc.plane_mask,
+                            );
                         } else {
                             // Apply clip: intersect each clip rect with the fill rect
                             for &(cx, cy, cw, ch) in &gc.clip_rects {
-                                let (ix, iy, iw, ih) = intersect_rects(x, y, width, height, cx, cy, cw, ch);
+                                let (ix, iy, iw, ih) =
+                                    intersect_rects(x, y, width, height, cx, cy, cw, ch);
                                 if iw > 0 && ih > 0 {
-                                    fb.fill_rect_tiled(ix, iy, iw, ih, data, tw, th, gc.ts_x, gc.ts_y, gc.function, gc.plane_mask);
+                                    fb.fill_rect_tiled(
+                                        ix,
+                                        iy,
+                                        iw,
+                                        ih,
+                                        data,
+                                        tw,
+                                        th,
+                                        gc.ts_x,
+                                        gc.ts_y,
+                                        gc.function,
+                                        gc.plane_mask,
+                                    );
                                 }
                             }
                         }
                     } else {
-                        fb.fill_rect_rop_clipped(x, y, width, height, fg, gc.function, gc.plane_mask, &gc.clip_rects);
+                        fb.fill_rect_rop_clipped(
+                            x,
+                            y,
+                            width,
+                            height,
+                            fg,
+                            gc.function,
+                            gc.plane_mask,
+                            &gc.clip_rects,
+                        );
                     }
                 }
                 2 | 3 => {
                     // Stippled (2) or OpaqueStippled (3)
                     if let Some((ref data, sw, sh)) = stipple_data {
                         if gc.clip_rects.is_empty() {
-                            fb.fill_rect_stippled(x, y, width, height, fg, bg, data, sw, sh, gc.ts_x, gc.ts_y, gc.fill_style == 3, gc.function, gc.plane_mask);
+                            fb.fill_rect_stippled(
+                                x,
+                                y,
+                                width,
+                                height,
+                                fg,
+                                bg,
+                                data,
+                                sw,
+                                sh,
+                                gc.ts_x,
+                                gc.ts_y,
+                                gc.fill_style == 3,
+                                gc.function,
+                                gc.plane_mask,
+                            );
                         } else {
                             for &(cx, cy, cw, ch) in &gc.clip_rects {
-                                let (ix, iy, iw, ih) = intersect_rects(x, y, width, height, cx, cy, cw, ch);
+                                let (ix, iy, iw, ih) =
+                                    intersect_rects(x, y, width, height, cx, cy, cw, ch);
                                 if iw > 0 && ih > 0 {
-                                    fb.fill_rect_stippled(ix, iy, iw, ih, fg, bg, data, sw, sh, gc.ts_x, gc.ts_y, gc.fill_style == 3, gc.function, gc.plane_mask);
+                                    fb.fill_rect_stippled(
+                                        ix,
+                                        iy,
+                                        iw,
+                                        ih,
+                                        fg,
+                                        bg,
+                                        data,
+                                        sw,
+                                        sh,
+                                        gc.ts_x,
+                                        gc.ts_y,
+                                        gc.fill_style == 3,
+                                        gc.function,
+                                        gc.plane_mask,
+                                    );
                                 }
                             }
                         }
                     } else {
-                        fb.fill_rect_rop_clipped(x, y, width, height, fg, gc.function, gc.plane_mask, &gc.clip_rects);
+                        fb.fill_rect_rop_clipped(
+                            x,
+                            y,
+                            width,
+                            height,
+                            fg,
+                            gc.function,
+                            gc.plane_mask,
+                            &gc.clip_rects,
+                        );
                     }
                 }
                 _ => {
                     // Solid (0) or fallback
-                    fb.fill_rect_rop_clipped(x, y, width, height, fg, gc.function, gc.plane_mask, &gc.clip_rects);
+                    fb.fill_rect_rop_clipped(
+                        x,
+                        y,
+                        width,
+                        height,
+                        fg,
+                        gc.function,
+                        gc.plane_mask,
+                        &gc.clip_rects,
+                    );
                 }
             }
         }
@@ -1026,14 +1477,22 @@ pub(crate) fn handle_poly_fill_arc(state: &mut ClientState, data: &[u8]) -> Vec<
     // Extract tile/stipple data before borrowing framebuffer
     let tile_data: Option<(Vec<u8>, u32, u32)> = if gc.fill_style == 1 {
         state.pixmaps.get(&gc.tile).map(|p| {
-            (p.framebuffer.data().to_vec(), p.width as u32, p.height as u32)
+            (
+                p.framebuffer.data().to_vec(),
+                p.width as u32,
+                p.height as u32,
+            )
         })
     } else {
         None
     };
     let stipple_data: Option<(Vec<u8>, u32, u32)> = if gc.fill_style == 2 || gc.fill_style == 3 {
         state.pixmaps.get(&gc.stipple).map(|p| {
-            (p.framebuffer.data().to_vec(), p.width as u32, p.height as u32)
+            (
+                p.framebuffer.data().to_vec(),
+                p.width as u32,
+                p.height as u32,
+            )
         })
     } else {
         None
@@ -1046,38 +1505,112 @@ pub(crate) fn handle_poly_fill_arc(state: &mut ClientState, data: &[u8]) -> Vec<
                     // Tiled: fill arc region with tile pattern (per-pixel within arc shape)
                     if let Some((ref tdata, tw, th)) = tile_data {
                         fb.fill_arc_tiled(
-                            x, y, width, height, angle1, angle2,
-                            tdata, tw, th, gc.ts_x, gc.ts_y,
-                            gc.arc_mode, gc.function, gc.plane_mask, &gc.clip_rects,
+                            x,
+                            y,
+                            width,
+                            height,
+                            angle1,
+                            angle2,
+                            tdata,
+                            tw,
+                            th,
+                            gc.ts_x,
+                            gc.ts_y,
+                            gc.arc_mode,
+                            gc.function,
+                            gc.plane_mask,
+                            &gc.clip_rects,
                         );
                     } else {
                         // Fallback to solid fill if tile pixmap is missing
-                        fb.draw_arc_gc(x, y, width, height, angle1, angle2, true, fg, bg,
-                            gc.line_width, gc.function, gc.plane_mask,
-                            gc.line_style, gc.dash_offset, &gc.dash_list, &gc.clip_rects, gc.arc_mode);
+                        fb.draw_arc_gc(
+                            x,
+                            y,
+                            width,
+                            height,
+                            angle1,
+                            angle2,
+                            true,
+                            fg,
+                            bg,
+                            gc.line_width,
+                            gc.function,
+                            gc.plane_mask,
+                            gc.line_style,
+                            gc.dash_offset,
+                            &gc.dash_list,
+                            &gc.clip_rects,
+                            gc.arc_mode,
+                        );
                     }
                 }
                 2 | 3 => {
                     // Stippled/OpaqueStippled: fill arc region with stipple pattern
                     if let Some((ref sdata, sw, sh)) = stipple_data {
                         fb.fill_arc_stippled(
-                            x, y, width, height, angle1, angle2,
-                            fg, bg, sdata, sw, sh, gc.ts_x, gc.ts_y,
-                            gc.fill_style == 3, gc.arc_mode,
-                            gc.function, gc.plane_mask, &gc.clip_rects,
+                            x,
+                            y,
+                            width,
+                            height,
+                            angle1,
+                            angle2,
+                            fg,
+                            bg,
+                            sdata,
+                            sw,
+                            sh,
+                            gc.ts_x,
+                            gc.ts_y,
+                            gc.fill_style == 3,
+                            gc.arc_mode,
+                            gc.function,
+                            gc.plane_mask,
+                            &gc.clip_rects,
                         );
                     } else {
                         // Fallback to solid fill if stipple pixmap is missing
-                        fb.draw_arc_gc(x, y, width, height, angle1, angle2, true, fg, bg,
-                            gc.line_width, gc.function, gc.plane_mask,
-                            gc.line_style, gc.dash_offset, &gc.dash_list, &gc.clip_rects, gc.arc_mode);
+                        fb.draw_arc_gc(
+                            x,
+                            y,
+                            width,
+                            height,
+                            angle1,
+                            angle2,
+                            true,
+                            fg,
+                            bg,
+                            gc.line_width,
+                            gc.function,
+                            gc.plane_mask,
+                            gc.line_style,
+                            gc.dash_offset,
+                            &gc.dash_list,
+                            &gc.clip_rects,
+                            gc.arc_mode,
+                        );
                     }
                 }
                 _ => {
                     // Solid (0)
-                    fb.draw_arc_gc(x, y, width, height, angle1, angle2, true, fg, bg,
-                        gc.line_width, gc.function, gc.plane_mask,
-                        gc.line_style, gc.dash_offset, &gc.dash_list, &gc.clip_rects, gc.arc_mode);
+                    fb.draw_arc_gc(
+                        x,
+                        y,
+                        width,
+                        height,
+                        angle1,
+                        angle2,
+                        true,
+                        fg,
+                        bg,
+                        gc.line_width,
+                        gc.function,
+                        gc.plane_mask,
+                        gc.line_style,
+                        gc.dash_offset,
+                        &gc.dash_list,
+                        &gc.clip_rects,
+                        gc.arc_mode,
+                    );
                 }
             }
         }

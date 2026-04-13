@@ -1,13 +1,14 @@
 //! Connection handling: per-client event loop with I/O helpers and resize logic
 //! split into focused submodules.
 
-pub(crate) mod scm_io;
 mod resize;
+pub(crate) mod scm_io;
 
-use self::scm_io::{send_with_fds, recv_with_fds};
 use self::resize::apply_screen_resize;
 pub(crate) use self::resize::resize_window;
+use self::scm_io::{recv_with_fds, send_with_fds};
 
+use crate::fonts::FontManager;
 use std::collections::HashMap;
 use std::io;
 use std::os::unix::io::AsRawFd;
@@ -18,17 +19,16 @@ use tokio::time::Duration;
 use tracing::{debug, info, warn};
 use x11rb_protocol::protocol::xproto::{ImageOrder, SetupRequest};
 use x11rb_protocol::x11_utils::{Serialize, TryParse};
-use crate::fonts::FontManager;
 
 use super::atoms::AtomManager;
 use super::client::ClientState;
 use super::core::*;
 use super::grab;
 use super::grab::GrabState;
-use super::types::*;
 use super::handlers;
-use super::setup::{build_setup, byteswap_setup_reply};
 use super::input::{build_x11_input_event, enforce_barriers};
+use super::setup::{build_setup, byteswap_setup_reply};
+use super::types::*;
 use super::{ancestor_chain, handle_request};
 
 /// Patch the sequence number (bytes 2-3) of every 32-byte event to match
@@ -197,7 +197,9 @@ pub(crate) async fn handle_client(
                 } else if client_auth_data.len() == 16 {
                     // Check against SECURITY-generated tokens
                     let token_key: [u8; 16] = client_auth_data.try_into().unwrap_or([0; 16]);
-                    let token_info = shared_security_tokens.lock().ok()
+                    let token_info = shared_security_tokens
+                        .lock()
+                        .ok()
                         .and_then(|tokens| tokens.get(&token_key).cloned());
                     if let Some(info) = token_info {
                         if info.is_expired() {
@@ -206,17 +208,21 @@ pub(crate) async fn handle_client(
                             if let Ok(mut tokens) = shared_security_tokens.lock() {
                                 tokens.remove(&token_key);
                             }
-                            let resp = build_auth_failure(byte_order, b"SECURITY authorization expired");
+                            let resp =
+                                build_auth_failure(byte_order, b"SECURITY authorization expired");
                             stream.write_all(&resp).await?;
                             return Ok(());
                         }
-                        debug!("Client authenticated via SECURITY token (auth_id={}, trust={})",
-                            info.auth_id, info.trust_level);
+                        debug!(
+                            "Client authenticated via SECURITY token (auth_id={}, trust={})",
+                            info.auth_id, info.trust_level
+                        );
                         // trust_level will be set on the ClientState after creation
                         security_trust_level = info.trust_level;
                     } else {
                         warn!("MIT-MAGIC-COOKIE-1 auth failed: cookie mismatch");
-                        let resp = build_auth_failure(byte_order, b"Invalid MIT-MAGIC-COOKIE-1 key");
+                        let resp =
+                            build_auth_failure(byte_order, b"Invalid MIT-MAGIC-COOKIE-1 key");
                         stream.write_all(&resp).await?;
                         return Ok(());
                     }
@@ -332,14 +338,14 @@ pub(crate) async fn handle_client(
         motion_history: Vec::with_capacity(256),
         pointer_mapping: [1, 2, 3, 4, 5, 6, 7], // identity mapping
         modifier_map: vec![
-            vec![50, 62],    // Shift (keycodes 50=Shift_L, 62=Shift_R)
-            vec![66],        // Lock (66=Caps_Lock)
-            vec![37, 105],   // Control (37=Control_L, 105=Control_R)
-            vec![64, 108],   // Mod1 (64=Alt_L, 108=Alt_R)
-            vec![77],        // Mod2 (77=Num_Lock)
-            vec![],          // Mod3
-            vec![133, 134],  // Mod4 (133=Super_L, 134=Super_R)
-            vec![],          // Mod5
+            vec![50, 62],   // Shift (keycodes 50=Shift_L, 62=Shift_R)
+            vec![66],       // Lock (66=Caps_Lock)
+            vec![37, 105],  // Control (37=Control_L, 105=Control_R)
+            vec![64, 108],  // Mod1 (64=Alt_L, 108=Alt_R)
+            vec![77],       // Mod2 (77=Num_Lock)
+            vec![],         // Mod3
+            vec![133, 134], // Mod4 (133=Super_L, 134=Super_R)
+            vec![],         // Mod5
         ],
         win_gravity: HashMap::new(),
         bit_gravity: HashMap::new(),
@@ -421,7 +427,10 @@ pub(crate) async fn handle_client(
         randr_next_mode_id: 1000,
         vidmode_viewport_x: 0,
         vidmode_viewport_y: 0,
-        vidmode_modes: vec![handlers::vidmode::VidModeInfo::default_for_screen(SCREEN_WIDTH, SCREEN_HEIGHT)],
+        vidmode_modes: vec![handlers::vidmode::VidModeInfo::default_for_screen(
+            SCREEN_WIDTH,
+            SCREEN_HEIGHT,
+        )],
         vidmode_locked: false,
         vidmode_current_mode: 0,
         big_requests_enabled: false,
@@ -439,7 +448,9 @@ pub(crate) async fn handle_client(
     state.randr_init_default();
 
     // Register this client for global event broadcasts (e.g., MappingNotify).
-    state.event_broadcaster.register_client(&client_id, &state.wm_events_tx);
+    state
+        .event_broadcaster
+        .register_client(&client_id, &state.wm_events_tx);
 
     // Register this client's resource base in the shared client registry.
     client_registry.lock().unwrap().push(resource_id_base);
@@ -499,7 +510,7 @@ pub(crate) async fn handle_client(
     }
     let mut key_repeat: Option<RepeatState> = None;
     let repeat_timer = tokio::time::sleep(Duration::from_secs(86400)); // dormant
-    // Pin the sleep so we can reset it.
+                                                                       // Pin the sleep so we can reset it.
     tokio::pin!(repeat_timer);
 
     let _wm_guard = WmCleanupGuard {

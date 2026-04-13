@@ -18,7 +18,7 @@ const PCF_BDF_ACCELERATORS: u32 = 1 << 8;
 const PCF_ACCEL_W_INKBOUNDS: u32 = 0x00000100;
 const PCF_COMPRESSED_METRICS: u32 = 0x00000100;
 const PCF_BYTE_MASK: u32 = 1 << 2; // MSB byte order
-const PCF_BIT_MASK: u32 = 1 << 3;  // MSB bit order
+const PCF_BIT_MASK: u32 = 1 << 3; // MSB bit order
 #[allow(dead_code)]
 const PCF_GLYPH_PAD_MASK: u32 = 3; // 2 bits for glyph padding
 
@@ -27,9 +27,19 @@ fn pcf_read_u32(data: &[u8], offset: usize, msb: bool) -> u32 {
         return 0;
     }
     if msb {
-        u32::from_be_bytes([data[offset], data[offset + 1], data[offset + 2], data[offset + 3]])
+        u32::from_be_bytes([
+            data[offset],
+            data[offset + 1],
+            data[offset + 2],
+            data[offset + 3],
+        ])
     } else {
-        u32::from_le_bytes([data[offset], data[offset + 1], data[offset + 2], data[offset + 3]])
+        u32::from_le_bytes([
+            data[offset],
+            data[offset + 1],
+            data[offset + 2],
+            data[offset + 3],
+        ])
     }
 }
 
@@ -93,16 +103,34 @@ fn parse_pcf_data(data: &[u8], path: &Path) -> Option<BitmapFont> {
     for i in 0..table_count {
         let off = 8 + i * 16;
         tables.push(PcfTable {
-            table_type: u32::from_le_bytes([data[off], data[off + 1], data[off + 2], data[off + 3]]),
-            format: u32::from_le_bytes([data[off + 4], data[off + 5], data[off + 6], data[off + 7]]),
-            size: u32::from_le_bytes([data[off + 8], data[off + 9], data[off + 10], data[off + 11]]),
-            offset: u32::from_le_bytes([data[off + 12], data[off + 13], data[off + 14], data[off + 15]]),
+            table_type: u32::from_le_bytes([
+                data[off],
+                data[off + 1],
+                data[off + 2],
+                data[off + 3],
+            ]),
+            format: u32::from_le_bytes([
+                data[off + 4],
+                data[off + 5],
+                data[off + 6],
+                data[off + 7],
+            ]),
+            size: u32::from_le_bytes([
+                data[off + 8],
+                data[off + 9],
+                data[off + 10],
+                data[off + 11],
+            ]),
+            offset: u32::from_le_bytes([
+                data[off + 12],
+                data[off + 13],
+                data[off + 14],
+                data[off + 15],
+            ]),
         });
     }
 
-    let find_table = |tt: u32| -> Option<&PcfTable> {
-        tables.iter().find(|t| t.table_type == tt)
-    };
+    let find_table = |tt: u32| -> Option<&PcfTable> { tables.iter().find(|t| t.table_type == tt) };
 
     // Parse metrics
     let metrics_table = find_table(PCF_METRICS)?;
@@ -124,8 +152,7 @@ fn parse_pcf_data(data: &[u8], path: &Path) -> Option<BitmapFont> {
     };
 
     // Parse accelerators for ascent/descent
-    let accel_table = find_table(PCF_BDF_ACCELERATORS)
-        .or_else(|| find_table(PCF_ACCELERATORS));
+    let accel_table = find_table(PCF_BDF_ACCELERATORS).or_else(|| find_table(PCF_ACCELERATORS));
     let (font_ascent, font_descent) = if let Some(at) = accel_table {
         parse_pcf_accelerators(data, at)
     } else {
@@ -349,7 +376,9 @@ fn parse_pcf_bitmaps(data: &[u8], table: &PcfTable, glyph_count: usize) -> Optio
             data.len().min(off + table.size as usize)
         };
 
-        let size = next_off.saturating_sub(bm_off).min(data.len() - bm_off.min(data.len()));
+        let size = next_off
+            .saturating_sub(bm_off)
+            .min(data.len() - bm_off.min(data.len()));
         let mut bitmap = if bm_off + size <= data.len() {
             data[bm_off..bm_off + size].to_vec()
         } else {
@@ -369,10 +398,7 @@ fn parse_pcf_bitmaps(data: &[u8], table: &PcfTable, glyph_count: usize) -> Optio
     Some(bitmaps)
 }
 
-fn parse_pcf_encodings(
-    data: &[u8],
-    table: &PcfTable,
-) -> Option<(u16, u16, HashMap<u16, usize>)> {
+fn parse_pcf_encodings(data: &[u8], table: &PcfTable) -> Option<(u16, u16, HashMap<u16, usize>)> {
     let off = table.offset as usize;
     if off + 14 > data.len() {
         return None;

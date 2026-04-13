@@ -43,14 +43,14 @@ impl SyncCounter {
 #[derive(Clone, Debug)]
 pub(crate) struct SyncAlarm {
     pub(crate) counter: u32,
-    pub(crate) value_type: u8,   // 0=Absolute, 1=Relative
+    pub(crate) value_type: u8, // 0=Absolute, 1=Relative
     pub(crate) value_hi: i32,
     pub(crate) value_lo: u32,
-    pub(crate) test_type: u8,    // 0=PositiveTransition, 1=NegativeTransition, 2=PositiveComparison, 3=NegativeComparison
+    pub(crate) test_type: u8, // 0=PositiveTransition, 1=NegativeTransition, 2=PositiveComparison, 3=NegativeComparison
     pub(crate) delta_hi: i32,
     pub(crate) delta_lo: u32,
     pub(crate) events: bool,
-    pub(crate) state: u8,        // 0=Active, 1=Inactive, 2=Destroyed
+    pub(crate) state: u8, // 0=Active, 1=Inactive, 2=Destroyed
 }
 
 /// A SYNC fence for synchronization.
@@ -113,11 +113,14 @@ impl SyncState {
     pub(crate) fn new() -> Self {
         let mut s = Self::default();
         // Pre-populate SERVERTIME system counter (ID=1)
-        s.counters.insert(1, SyncCounter {
-            value_hi: 0,
-            value_lo: 0,
-            is_system: true,
-        });
+        s.counters.insert(
+            1,
+            SyncCounter {
+                value_hi: 0,
+                value_lo: 0,
+                is_system: true,
+            },
+        );
         s
     }
 }
@@ -133,7 +136,15 @@ pub(crate) fn check_alarms_ext(
     seq: u16,
     msb_first: bool,
 ) {
-    check_alarms(alarms, counter_id, old_value, new_value, pending_events, seq, msb_first);
+    check_alarms(
+        alarms,
+        counter_id,
+        old_value,
+        new_value,
+        pending_events,
+        seq,
+        msb_first,
+    );
 }
 
 /// Check all alarms for the given counter and generate AlarmNotify events.
@@ -152,10 +163,10 @@ fn check_alarms(
         .filter(|(_, a)| {
             let threshold = ((a.value_hi as i64) << 32) | (a.value_lo as i64);
             match a.test_type {
-                0 => old_value < threshold && new_value >= threshold,  // PositiveTransition
-                1 => old_value > threshold && new_value <= threshold,  // NegativeTransition
-                2 => new_value >= threshold,                           // PositiveComparison
-                3 => new_value <= threshold,                           // NegativeComparison
+                0 => old_value < threshold && new_value >= threshold, // PositiveTransition
+                1 => old_value > threshold && new_value <= threshold, // NegativeTransition
+                2 => new_value >= threshold,                          // PositiveComparison
+                3 => new_value <= threshold,                          // NegativeComparison
                 _ => false,
             }
         })
@@ -173,16 +184,16 @@ fn check_alarms(
         // SYNC first_event = 83 (matches what we report in query.rs)
         let mut event = [0u8; 32];
         event[0] = 83; // SyncAlarmNotify event code
-        event[1] = 0;  // sub-code
+        event[1] = 0; // sub-code
         write_u16_bo(&mut event, 2, seq, msb_first);
         write_u32_bo(&mut event, 4, alarm_id, msb_first);
         // counter value (bytes 8-15)
         let Some(alarm) = alarms.get(&alarm_id) else {
             return;
         };
-        write_u32_bo(&mut event, 8, new_value as u32, msb_first);     // value_lo
+        write_u32_bo(&mut event, 8, new_value as u32, msb_first); // value_lo
         write_u32_bo(&mut event, 12, (new_value >> 32) as u32, msb_first); // value_hi
-        // alarm value (bytes 16-23)
+                                                                           // alarm value (bytes 16-23)
         write_u32_bo(&mut event, 16, alarm.value_lo, msb_first);
         write_u32_bo(&mut event, 20, alarm.value_hi as u32, msb_first);
         // timestamp
@@ -210,10 +221,10 @@ fn check_alarms(
 /// Check if a single await trigger condition is satisfied given the current counter value.
 fn is_trigger_satisfied(trigger: &AwaitTrigger, current_value: i64) -> bool {
     match trigger.test_type {
-        0 => current_value >= trigger.wait_value,  // PositiveTransition
-        1 => current_value <= trigger.wait_value,  // NegativeTransition
-        2 => current_value >= trigger.wait_value,  // PositiveComparison
-        3 => current_value <= trigger.wait_value,  // NegativeComparison
+        0 => current_value >= trigger.wait_value, // PositiveTransition
+        1 => current_value <= trigger.wait_value, // NegativeTransition
+        2 => current_value >= trigger.wait_value, // PositiveComparison
+        3 => current_value <= trigger.wait_value, // NegativeComparison
         _ => true,
     }
 }
@@ -236,7 +247,9 @@ pub(crate) fn check_pending_awaits_ext(
             let current = if trigger.counter_id == 1 {
                 server_time_fn() as i64
             } else {
-                sync_state.counters.get(&trigger.counter_id)
+                sync_state
+                    .counters
+                    .get(&trigger.counter_id)
                     .map(|c| c.value_i64())
                     .unwrap_or(0)
             };
@@ -251,7 +264,10 @@ pub(crate) fn check_pending_awaits_ext(
         }
     });
 
-    if unblocked && sync_state.pending_awaits.is_empty() && sync_state.pending_fence_awaits.is_empty() {
+    if unblocked
+        && sync_state.pending_awaits.is_empty()
+        && sync_state.pending_fence_awaits.is_empty()
+    {
         sync_state.blocked = false;
     }
 
@@ -261,9 +277,7 @@ pub(crate) fn check_pending_awaits_ext(
 /// Check all pending AwaitFence requests and unblock if any fence is triggered.
 /// Called when a fence is triggered (TriggerFence).
 /// Returns true if the connection was unblocked.
-pub(crate) fn check_pending_fence_awaits_ext(
-    sync_state: &mut SyncState,
-) -> bool {
+pub(crate) fn check_pending_fence_awaits_ext(sync_state: &mut SyncState) -> bool {
     if sync_state.pending_fence_awaits.is_empty() {
         return false;
     }
@@ -272,7 +286,11 @@ pub(crate) fn check_pending_fence_awaits_ext(
 
     sync_state.pending_fence_awaits.retain(|pfa| {
         let any_triggered = pfa.fence_ids.iter().any(|&fid| {
-            sync_state.fences.get(&fid).map(|f| f.triggered).unwrap_or(false)
+            sync_state
+                .fences
+                .get(&fid)
+                .map(|f| f.triggered)
+                .unwrap_or(false)
         });
         if any_triggered {
             unblocked = true;
@@ -283,7 +301,10 @@ pub(crate) fn check_pending_fence_awaits_ext(
         }
     });
 
-    if unblocked && sync_state.pending_fence_awaits.is_empty() && sync_state.pending_awaits.is_empty() {
+    if unblocked
+        && sync_state.pending_fence_awaits.is_empty()
+        && sync_state.pending_awaits.is_empty()
+    {
         sync_state.blocked = false;
     }
 
@@ -326,8 +347,12 @@ pub(crate) fn handle_sync_request(state: &mut ClientState, data: &[u8], seq: u16
         _ => {
             warn!("Unhandled SYNC minor opcode: {minor}");
             crate::xserver::core::build_error_bo(
-                crate::xserver::core::BAD_REQUEST, seq, minor as u32,
-                134, minor as u16, state.msb_first,
+                crate::xserver::core::BAD_REQUEST,
+                seq,
+                minor as u32,
+                134,
+                minor as u16,
+                state.msb_first,
             )
         }
     }

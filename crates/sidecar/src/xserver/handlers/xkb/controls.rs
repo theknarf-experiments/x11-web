@@ -2,13 +2,15 @@
 
 use super::super::super::client::ClientState;
 use super::{
-    XKB_REPEAT_KEYS_MASK, XKB_SLOW_KEYS_MASK, XKB_BOUNCE_KEYS_MASK,
-    XKB_MOUSE_KEYS_MASK, XKB_ACCESS_X_KEYS_MASK, XKB_ACCESS_X_TIMEOUT_MASK,
-    XKB_ACCESS_X_FEEDBACK_MASK, XKB_ALL_BOOLEAN_CTRLS_MASK,
+    XKB_ACCESS_X_FEEDBACK_MASK, XKB_ACCESS_X_KEYS_MASK, XKB_ACCESS_X_TIMEOUT_MASK,
+    XKB_ALL_BOOLEAN_CTRLS_MASK, XKB_BOUNCE_KEYS_MASK, XKB_MOUSE_KEYS_MASK, XKB_REPEAT_KEYS_MASK,
+    XKB_SLOW_KEYS_MASK,
 };
-use crate::xserver::core::{read_u16_bo as read_u16, read_u32_bo as read_u32, read_i16_bo as read_i16};
-use tracing::debug;
 use crate::xserver::core::require_len;
+use crate::xserver::core::{
+    read_i16_bo as read_i16, read_u16_bo as read_u16, read_u32_bo as read_u32,
+};
+use tracing::debug;
 
 /// Build an XKB GetState reply with real modifier/group state.
 pub(crate) fn build_xkb_get_state_reply(state: &ClientState, seq: u16, device_id: u8) -> Vec<u8> {
@@ -55,13 +57,17 @@ pub(crate) fn build_xkb_get_state_reply(state: &ClientState, seq: u16, device_id
     reply[20] = effective_mods; // compatGrabMods
     reply[21] = effective_mods; // lookupMods
     reply[22] = effective_mods; // compatLookupMods
-    // 23 = pad
-    // 24-25: ptrBtnState = 0 (no pointer button state tracked here)
+                                // 23 = pad
+                                // 24-25: ptrBtnState = 0 (no pointer button state tracked here)
     reply.to_vec()
 }
 
 /// Handle XKB LatchLockState request.
-pub(crate) fn handle_xkb_latch_lock_state(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
+pub(crate) fn handle_xkb_latch_lock_state(
+    state: &mut ClientState,
+    data: &[u8],
+    seq: u16,
+) -> Vec<u8> {
     require_len!(data, 16, seq, 136, data[1] as u16, state.msb_first);
 
     let before = super::XkbStateSnapshot::capture(state);
@@ -75,8 +81,16 @@ pub(crate) fn handle_xkb_latch_lock_state(state: &mut ClientState, data: &[u8], 
     let affect_mod_latches = data[10];
     let mod_latches = data[11];
     // Bytes 12-13: pad
-    let latch_group = if data.len() >= 15 { data[14] != 0 } else { false };
-    let group_latch = if data.len() >= 16 { read_i16(data, 14, msb) } else { 0 };
+    let latch_group = if data.len() >= 15 {
+        data[14] != 0
+    } else {
+        false
+    };
+    let group_latch = if data.len() >= 16 {
+        read_i16(data, 14, msb)
+    } else {
+        0
+    };
 
     let xkb = &mut state.xkb_state;
 
@@ -87,7 +101,8 @@ pub(crate) fn handle_xkb_latch_lock_state(state: &mut ClientState, data: &[u8], 
 
     // Apply modifier latches
     if affect_mod_latches != 0 {
-        xkb.latched_mods = (xkb.latched_mods & !affect_mod_latches) | (mod_latches & affect_mod_latches);
+        xkb.latched_mods =
+            (xkb.latched_mods & !affect_mod_latches) | (mod_latches & affect_mod_latches);
     }
 
     // Apply group lock
@@ -113,7 +128,11 @@ pub(crate) fn handle_xkb_latch_lock_state(state: &mut ClientState, data: &[u8], 
 }
 
 /// Build an XKB GetControls reply with real control state.
-pub(crate) fn build_xkb_get_controls_reply(state: &ClientState, seq: u16, device_id: u8) -> Vec<u8> {
+pub(crate) fn build_xkb_get_controls_reply(
+    state: &ClientState,
+    seq: u16,
+    device_id: u8,
+) -> Vec<u8> {
     let ctrls = &state.xkb_state.controls;
 
     // GetControls reply: 92 bytes total (32 header + 60 body)
@@ -217,8 +236,12 @@ pub(crate) fn handle_xkb_set_controls(state: &mut ClientState, data: &[u8], seq:
 
     // RepeatKeys controls
     if change_ctrls & XKB_REPEAT_KEYS_MASK != 0 {
-        if repeat_delay > 0 { ctrls.repeat_delay = repeat_delay; }
-        if repeat_interval > 0 { ctrls.repeat_interval = repeat_interval; }
+        if repeat_delay > 0 {
+            ctrls.repeat_delay = repeat_delay;
+        }
+        if repeat_interval > 0 {
+            ctrls.repeat_interval = repeat_interval;
+        }
     }
 
     // SlowKeys
@@ -241,7 +264,10 @@ pub(crate) fn handle_xkb_set_controls(state: &mut ClientState, data: &[u8], seq:
     }
 
     // AccessX settings
-    if change_ctrls & (XKB_ACCESS_X_KEYS_MASK | XKB_ACCESS_X_TIMEOUT_MASK | XKB_ACCESS_X_FEEDBACK_MASK) != 0 {
+    if change_ctrls
+        & (XKB_ACCESS_X_KEYS_MASK | XKB_ACCESS_X_TIMEOUT_MASK | XKB_ACCESS_X_FEEDBACK_MASK)
+        != 0
+    {
         ctrls.ax_timeout = ax_timeout;
         ctrls.ax_options = ax_options & 0xFFFF;
     }

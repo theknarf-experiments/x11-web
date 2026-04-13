@@ -11,7 +11,8 @@ pub(crate) fn handle_notify_request(
     minor: u8,
 ) -> Vec<u8> {
     match minor {
-        13 => { // SelectVideoNotify — register interest in XvVideoNotify events on a drawable
+        13 => {
+            // SelectVideoNotify — register interest in XvVideoNotify events on a drawable
             // This is a void request. Track the subscription in client state so we can
             // deliver VideoNotify events if/when video operations complete on that drawable.
             if data.len() >= 9 {
@@ -24,11 +25,15 @@ pub(crate) fn handle_notify_request(
                 }
                 debug!("XVideo SelectVideoNotify: drawable={drawable:#x} on={on_off}");
             } else {
-                debug!("XVideo SelectVideoNotify: short request (len={}), ignoring", data.len());
+                debug!(
+                    "XVideo SelectVideoNotify: short request (len={}), ignoring",
+                    data.len()
+                );
             }
             Vec::new()
         }
-        14 => { // SelectPortNotify — register interest in XvPortNotify events on a port
+        14 => {
+            // SelectPortNotify — register interest in XvPortNotify events on a port
             // This is a void request. Track the subscription so we can deliver
             // PortNotify events when port attributes change.
             if data.len() >= 9 {
@@ -41,15 +46,22 @@ pub(crate) fn handle_notify_request(
                 }
                 debug!("XVideo SelectPortNotify: port={port} on={on_off}");
             } else {
-                debug!("XVideo SelectPortNotify: short request (len={}), ignoring", data.len());
+                debug!(
+                    "XVideo SelectPortNotify: short request (len={}), ignoring",
+                    data.len()
+                );
             }
             Vec::new()
         }
         _ => {
             debug!("XVideo notify: unhandled minor opcode {minor}");
             crate::xserver::core::build_error_bo(
-                crate::xserver::core::BAD_REQUEST, seq, minor as u32,
-                156, minor as u16, state.msb_first,
+                crate::xserver::core::BAD_REQUEST,
+                seq,
+                minor as u32,
+                156,
+                minor as u16,
+                state.msb_first,
             )
         }
     }

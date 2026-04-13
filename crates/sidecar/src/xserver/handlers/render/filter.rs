@@ -1,9 +1,9 @@
 use tracing::debug;
 
-use crate::xserver::ClientState;
-use crate::xserver::core::{read_u16_bo, read_u32_bo, write_u16_bo, write_u32_bo};
 use super::{pad4, PictFilter};
 use crate::xserver::core::require_len;
+use crate::xserver::core::{read_u16_bo, read_u32_bo, write_u16_bo, write_u32_bo};
+use crate::xserver::ClientState;
 
 /// SetPictureFilter (RENDER minor opcode 30).
 /// Sets the filter on a picture (nearest, bilinear, etc.).

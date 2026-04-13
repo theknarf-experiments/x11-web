@@ -166,7 +166,10 @@ pub(crate) fn handle_xim_xconnect(state: &mut ClientState, event: &[u8]) -> Vec<
     state.write_u32(&mut reply, 24, 20); // divide size
 
     // Route the reply to the client's communication window.
-    if !state.event_router.send_event(client_comm_window, reply.to_vec()) {
+    if !state
+        .event_router
+        .send_event(client_comm_window, reply.to_vec())
+    {
         // Client window is on this connection -- deliver locally.
         state.pending_events.push(reply.to_vec());
     }
@@ -326,7 +329,7 @@ fn send_xim_reply_to(state: &mut ClientState, client_window: u32, reply_data: &[
         state.write_u32(&mut cm, 4, client_window);
         state.write_u32(&mut cm, 8, xim_protocol_atom);
         state.write_u32(&mut cm, 12, reply_data.len() as u32); // data.l[0] = length
-        state.write_u32(&mut cm, 16, prop_atom);               // data.l[1] = property atom
+        state.write_u32(&mut cm, 16, prop_atom); // data.l[1] = property atom
 
         if !state.event_router.send_event(client_window, cm.to_vec()) {
             state.pending_events.push(cm.to_vec());
@@ -348,10 +351,13 @@ fn handle_xim_connect(state: &mut ClientState, _data: &[u8]) -> Vec<u8> {
     //   server-major-version (2 bytes), server-minor-version (2 bytes)
     let reply = [
         XIM_CONNECT_REPLY,
-        0,    // minor
-        1, 0, // length = 1 (4 bytes)
-        1, 0, // server major version = 1
-        0, 0, // server minor version = 0
+        0, // minor
+        1,
+        0, // length = 1 (4 bytes)
+        1,
+        0, // server major version = 1
+        0,
+        0, // server minor version = 0
     ];
 
     // We don't have an im_id yet (that comes with XIM_OPEN), so send to
@@ -587,7 +593,14 @@ fn handle_xim_create_ic(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
     if data.len() >= 8 {
         let attr_len = u16::from_le_bytes([data[6], data[7]]) as usize;
         let attr_data = &data[8..data.len().min(8 + attr_len)];
-        parse_ic_attributes(attr_data, &mut input_style, &mut client_window, &mut focus_window, &mut spot_x, &mut spot_y);
+        parse_ic_attributes(
+            attr_data,
+            &mut input_style,
+            &mut client_window,
+            &mut focus_window,
+            &mut spot_x,
+            &mut spot_y,
+        );
     }
 
     if focus_window == 0 {
@@ -763,7 +776,14 @@ fn handle_xim_set_ic_values(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
         let mut focus_window = 0u32;
         let mut spot_x: i16 = 0;
         let mut spot_y: i16 = 0;
-        parse_ic_attributes(attr_data, &mut input_style, &mut client_window, &mut focus_window, &mut spot_x, &mut spot_y);
+        parse_ic_attributes(
+            attr_data,
+            &mut input_style,
+            &mut client_window,
+            &mut focus_window,
+            &mut spot_x,
+            &mut spot_y,
+        );
 
         if let Some(conn) = state.xim.connections.get_mut(&im_id) {
             if let Some(ic) = conn.contexts.get_mut(&ic_id) {

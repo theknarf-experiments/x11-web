@@ -9,7 +9,8 @@ use crate::xserver::core::require_len;
 pub(crate) fn handle_xtest_request(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
     let minor = data[1];
     match minor {
-        0 => { // GetVersion
+        0 => {
+            // GetVersion
             let mut reply = [0u8; 32];
             reply[0] = 1;
             reply[1] = 2; // major_version in data byte
@@ -17,7 +18,8 @@ pub(crate) fn handle_xtest_request(state: &mut ClientState, data: &[u8], seq: u1
             state.write_u16(&mut reply, 8, 2); // minor_version
             reply.to_vec()
         }
-        1 => { // CompareCursor
+        1 => {
+            // CompareCursor
             require_len!(data, 12, seq, 150, minor as u16, state.msb_first);
             let window = state.read_u32(data, 4);
             let cursor_id = state.read_u32(data, 8);
@@ -25,7 +27,9 @@ pub(crate) fn handle_xtest_request(state: &mut ClientState, data: &[u8], seq: u1
             // Compare the cursor currently set on the window against cursor_id.
             // cursor_id=0 means "current cursor" (always same).
             // cursor_id=1 means "None" cursor.
-            let win_cursor = state.windows.get(&window)
+            let win_cursor = state
+                .windows
+                .get(&window)
                 .and_then(|w| w.cursor)
                 .unwrap_or(0);
             let same = if cursor_id == 0 {
@@ -40,12 +44,17 @@ pub(crate) fn handle_xtest_request(state: &mut ClientState, data: &[u8], seq: u1
             state.write_u16(&mut reply, 2, seq);
             reply.to_vec()
         }
-        2 => { // FakeInput
+        2 => {
+            // FakeInput
             // SECURITY: untrusted clients are denied FakeInput (BadAccess)
             if state.trust_level > 0 {
                 return crate::xserver::core::build_error_bo(
-                    crate::xserver::core::BAD_ACCESS, seq, 0,
-                    150, minor as u16, state.msb_first,
+                    crate::xserver::core::BAD_ACCESS,
+                    seq,
+                    0,
+                    150,
+                    minor as u16,
+                    state.msb_first,
                 );
             }
             require_len!(data, 24, seq, 150, minor as u16, state.msb_first);
@@ -75,7 +84,12 @@ pub(crate) fn handle_xtest_request(state: &mut ClientState, data: &[u8], seq: u1
                                 state.xkb_state.key_release(keycode);
                             }
                         }
-                        super::xkb::maybe_send_xkb_state_notify(state, &xkb_before, keycode, event_type);
+                        super::xkb::maybe_send_xkb_state_notify(
+                            state,
+                            &xkb_before,
+                            keycode,
+                            event_type,
+                        );
 
                         let mut event = [0u8; 32];
                         event[0] = event_type;
@@ -131,7 +145,11 @@ pub(crate) fn handle_xtest_request(state: &mut ClientState, data: &[u8], seq: u1
                         // Enforce XFIXES pointer barriers
                         if !state.barriers.is_empty() {
                             let (bx, by) = super::super::input::enforce_barriers(
-                                &state.barriers, old_px, old_py, state.pointer_x, state.pointer_y,
+                                &state.barriers,
+                                old_px,
+                                old_py,
+                                state.pointer_x,
+                                state.pointer_y,
                             );
                             state.pointer_x = bx;
                             state.pointer_y = by;
@@ -157,15 +175,20 @@ pub(crate) fn handle_xtest_request(state: &mut ClientState, data: &[u8], seq: u1
                     _ => {
                         warn!("XTEST FakeInput: unknown event type {event_type}");
                         return crate::xserver::core::build_error_bo(
-                            crate::xserver::core::BAD_VALUE, seq, event_type as u32,
-                            150, minor as u16, state.msb_first,
+                            crate::xserver::core::BAD_VALUE,
+                            seq,
+                            event_type as u32,
+                            150,
+                            minor as u16,
+                            state.msb_first,
                         );
                     }
                 }
             }
             Vec::new()
         }
-        3 => { // GrabControl
+        3 => {
+            // GrabControl
             // Impervious mode: when enabled, XTEST events bypass active grabs.
             // This allows accessibility tools and test harnesses to inject
             // events even when another client holds a grab.
@@ -178,8 +201,12 @@ pub(crate) fn handle_xtest_request(state: &mut ClientState, data: &[u8], seq: u1
         _ => {
             debug!("XTEST: unhandled minor opcode {minor}");
             crate::xserver::core::build_error_bo(
-                crate::xserver::core::BAD_REQUEST, seq, minor as u32,
-                150, minor as u16, state.msb_first,
+                crate::xserver::core::BAD_REQUEST,
+                seq,
+                minor as u32,
+                150,
+                minor as u16,
+                state.msb_first,
             )
         }
     }

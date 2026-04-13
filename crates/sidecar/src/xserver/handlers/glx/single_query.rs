@@ -166,7 +166,9 @@ pub(crate) fn handle_get_string(payload: &[u8], seq: u16) -> Vec<u8> {
             }
         }
         #[cfg(not(feature = "osmesa"))]
-        { String::new() }
+        {
+            String::new()
+        }
     };
     let bytes = s.as_bytes();
     let n = bytes.len() as u32;
@@ -196,10 +198,19 @@ pub(crate) fn handle_is_enabled(payload: &[u8], seq: u16) -> Vec<u8> {
         #[cfg(feature = "osmesa")]
         {
             if osmesa::is_available() {
-                if osmesa::gl_is_enabled(cap) { 1 } else { 0 }
-            } else { 0 }
+                if osmesa::gl_is_enabled(cap) {
+                    1
+                } else {
+                    0
+                }
+            } else {
+                0
+            }
         }
-        #[cfg(not(feature = "osmesa"))] { 0 }
+        #[cfg(not(feature = "osmesa"))]
+        {
+            0
+        }
     };
     let mut reply = [0u8; 32];
     reply[0] = 1;
@@ -221,10 +232,19 @@ pub(crate) fn handle_is_texture(payload: &[u8], seq: u16) -> Vec<u8> {
         #[cfg(feature = "osmesa")]
         {
             if osmesa::is_available() {
-                if osmesa::gl_is_texture(texture) { 1 } else { 0 }
-            } else { 0 }
+                if osmesa::gl_is_texture(texture) {
+                    1
+                } else {
+                    0
+                }
+            } else {
+                0
+            }
         }
-        #[cfg(not(feature = "osmesa"))] { 0 }
+        #[cfg(not(feature = "osmesa"))]
+        {
+            0
+        }
     };
     let mut reply = [0u8; 32];
     reply[0] = 1;
@@ -409,9 +429,14 @@ pub(crate) fn handle_get_tex_image(payload: &[u8], seq: u16) -> Vec<u8> {
                 osmesa::gl_get_tex_level_parameteriv(target, level, 0x1000, &mut w); // GL_TEXTURE_WIDTH
                 osmesa::gl_get_tex_level_parameteriv(target, level, 0x1001, &mut h); // GL_TEXTURE_HEIGHT
                 (w[0], h[0])
-            } else { (0, 0) }
+            } else {
+                (0, 0)
+            }
         }
-        #[cfg(not(feature = "osmesa"))] { (0, 0) }
+        #[cfg(not(feature = "osmesa"))]
+        {
+            (0, 0)
+        }
     };
     let components = gl_format_components(format);
     let type_size = gl_type_size(type_);
@@ -734,9 +759,14 @@ pub(crate) fn handle_get_pixel_mapfv(payload: &[u8], seq: u16) -> Vec<u8> {
                 let mut sz = [0i32; 1];
                 osmesa::gl_get_integerv(size_pname, &mut sz);
                 sz[0].max(0) as usize
-            } else { 0 }
+            } else {
+                0
+            }
         }
-        #[cfg(not(feature = "osmesa"))] { 0 }
+        #[cfg(not(feature = "osmesa"))]
+        {
+            0
+        }
     };
     let mut values = vec![0f32; n];
     #[cfg(feature = "osmesa")]
@@ -825,9 +855,14 @@ pub(crate) fn handle_gen_lists(payload: &[u8], seq: u16) -> Vec<u8> {
         {
             if osmesa::is_available() && range > 0 {
                 osmesa::gl_gen_lists(range)
-            } else { 0 }
+            } else {
+                0
+            }
         }
-        #[cfg(not(feature = "osmesa"))] { 0 }
+        #[cfg(not(feature = "osmesa"))]
+        {
+            0
+        }
     };
     let mut reply = [0u8; 32];
     reply[0] = 1;
@@ -849,10 +884,19 @@ pub(crate) fn handle_is_list(payload: &[u8], seq: u16) -> Vec<u8> {
         #[cfg(feature = "osmesa")]
         {
             if osmesa::is_available() {
-                if osmesa::gl_is_list(list) { 1 } else { 0 }
-            } else { 0 }
+                if osmesa::gl_is_list(list) {
+                    1
+                } else {
+                    0
+                }
+            } else {
+                0
+            }
         }
-        #[cfg(not(feature = "osmesa"))] { 0 }
+        #[cfg(not(feature = "osmesa"))]
+        {
+            0
+        }
     };
     let mut reply = [0u8; 32];
     reply[0] = 1;

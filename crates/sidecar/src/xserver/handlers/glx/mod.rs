@@ -219,7 +219,9 @@ pub(crate) fn handle_glx_request(state: &mut ClientState, data: &[u8], seq: u16)
                 let minor = state.read_u32(data, 8);
                 let str_len = state.read_u32(data, 12) as usize;
                 let client_str = if data.len() >= 16 + str_len && str_len > 0 {
-                    String::from_utf8_lossy(&data[16..16 + str_len]).trim_end_matches('\0').to_string()
+                    String::from_utf8_lossy(&data[16..16 + str_len])
+                        .trim_end_matches('\0')
+                        .to_string()
                 } else {
                     String::new()
                 };
@@ -236,7 +238,9 @@ pub(crate) fn handle_glx_request(state: &mut ClientState, data: &[u8], seq: u16)
                 let versions_bytes = (num_versions as usize) * 8; // each version pair is 2 x u32
                 let str_offset = 20 + versions_bytes;
                 let client_str = if data.len() >= str_offset + str_len && str_len > 0 {
-                    String::from_utf8_lossy(&data[str_offset..str_offset + str_len]).trim_end_matches('\0').to_string()
+                    String::from_utf8_lossy(&data[str_offset..str_offset + str_len])
+                        .trim_end_matches('\0')
+                        .to_string()
                 } else {
                     String::new()
                 };
@@ -255,7 +259,9 @@ pub(crate) fn handle_glx_request(state: &mut ClientState, data: &[u8], seq: u16)
         GLX_CREATE_WINDOW => drawable::handle_create_window(state, data, seq),
         GLX_DELETE_WINDOW => drawable::handle_delete_window(state, data, seq),
         GLX_GET_DRAWABLE_ATTRIBUTES => drawable::handle_get_drawable_attributes(state, data, seq),
-        GLX_CHANGE_DRAWABLE_ATTRIBUTES => drawable::handle_change_drawable_attributes(state, data, seq),
+        GLX_CHANGE_DRAWABLE_ATTRIBUTES => {
+            drawable::handle_change_drawable_attributes(state, data, seq)
+        }
         GLX_QUERY_CONTEXT => drawable::handle_query_context(state, data, seq),
         GLX_VENDOR_PRIVATE => {
             // Vendor private requests have no reply per the GLX spec.
@@ -273,8 +279,12 @@ pub(crate) fn handle_glx_request(state: &mut ClientState, data: &[u8], seq: u16)
         _ => {
             warn!("Unhandled GLX minor opcode: {minor}");
             crate::xserver::core::build_error_bo(
-                crate::xserver::core::BAD_REQUEST, seq, minor as u32,
-                159, minor as u16, state.msb_first,
+                crate::xserver::core::BAD_REQUEST,
+                seq,
+                minor as u32,
+                159,
+                minor as u16,
+                state.msb_first,
             )
         }
     }
@@ -345,16 +355,16 @@ fn blit_osmesa_to_drawable(state: &mut ClientState, drawable: u32) {
                 for k in 0..4 {
                     let s = si + k * 4;
                     let d = di + k * 4;
-                    dst_row[d]     = src_row[s + 2]; // B
+                    dst_row[d] = src_row[s + 2]; // B
                     dst_row[d + 1] = src_row[s + 1]; // G
-                    dst_row[d + 2] = src_row[s];     // R
+                    dst_row[d + 2] = src_row[s]; // R
                     dst_row[d + 3] = src_row[s + 3]; // A
                 }
             }
             for x in bulk..w {
                 let si = x * 4;
                 let di = x * 4;
-                dst_row[di]     = src_row[si + 2];
+                dst_row[di] = src_row[si + 2];
                 dst_row[di + 1] = src_row[si + 1];
                 dst_row[di + 2] = src_row[si];
                 dst_row[di + 3] = src_row[si + 3];

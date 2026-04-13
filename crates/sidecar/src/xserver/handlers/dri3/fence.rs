@@ -19,7 +19,9 @@ pub(crate) fn handle_fence_from_fd(
     // Request: drawable(4), fence(4), initially_triggered(1), pad(3)
     if data.len() < 16 {
         if let Some(fd) = state.pending_fds.pop() {
-            unsafe { libc::close(fd); }
+            unsafe {
+                libc::close(fd);
+            }
         }
         return build_error_bo(BAD_LENGTH, seq, 0, DRI3_MAJOR_OPCODE, minor as u16, bo);
     }
@@ -29,16 +31,21 @@ pub(crate) fn handle_fence_from_fd(
     let initially_triggered = data[12] != 0;
 
     let fd = state.pending_fds.pop().unwrap_or(-1);
-    debug!("DRI3 FenceFromFD: fence={fence_id:#x} fd={fd} initially_triggered={initially_triggered}");
+    debug!(
+        "DRI3 FenceFromFD: fence={fence_id:#x} fd={fd} initially_triggered={initially_triggered}"
+    );
 
     // Register with the SYNC extension's fence tracking
     use super::super::sync::FenceState;
-    state.sync_state.fences.insert(fence_id, FenceState {
-        id: fence_id,
-        triggered: initially_triggered,
-        initially_triggered,
-        fd,
-    });
+    state.sync_state.fences.insert(
+        fence_id,
+        FenceState {
+            id: fence_id,
+            triggered: initially_triggered,
+            initially_triggered,
+            fd,
+        },
+    );
 
     Vec::new() // void request
 }

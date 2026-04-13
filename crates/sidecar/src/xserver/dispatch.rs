@@ -83,10 +83,15 @@ pub(super) fn handle_request(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
                 state.msb_first,
                 &state.custom_keymap,
             );
-            if data.len() >= 2 && data[1] == x11rb_protocol::protocol::xinput::XI_QUERY_POINTER_REQUEST
+            if data.len() >= 2
+                && data[1] == x11rb_protocol::protocol::xinput::XI_QUERY_POINTER_REQUEST
                 && reply.len() >= 12
             {
-                crate::xinput2::patch_query_pointer_root(&mut reply, state.root_window, state.msb_first);
+                crate::xinput2::patch_query_pointer_root(
+                    &mut reply,
+                    state.root_window,
+                    state.msb_first,
+                );
             }
             reply
         }
@@ -116,8 +121,12 @@ pub(super) fn handle_request(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
             warn!("Unhandled X11 request opcode: {major_opcode} minor: {_minor}");
             // Return BadRequest error per spec for unrecognized opcodes
             super::core::build_error_bo(
-                BAD_REQUEST, seq, major_opcode as u32,
-                major_opcode, _minor as u16, state.msb_first,
+                BAD_REQUEST,
+                seq,
+                major_opcode as u32,
+                major_opcode,
+                _minor as u16,
+                state.msb_first,
             )
         }
     }

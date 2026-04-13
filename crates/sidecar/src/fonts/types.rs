@@ -78,7 +78,8 @@ impl BitmapFont {
         let lib = super::ft_library();
         let face = lib.new_face(path, 0).ok()?;
         face.set_pixel_sizes(0, self.scalable_pixel_size).ok()?;
-        face.load_char(code as usize, freetype::face::LoadFlag::RENDER).ok()?;
+        face.load_char(code as usize, freetype::face::LoadFlag::RENDER)
+            .ok()?;
         let glyph = face.glyph();
         let bitmap = glyph.bitmap();
         let metrics = glyph.metrics();
@@ -117,7 +118,14 @@ impl BitmapFont {
             descent,
             attributes: 0,
         };
-        Some((ci, GlyphBitmap { width: w, height: h, bitmap: bmp }))
+        Some((
+            ci,
+            GlyphBitmap {
+                width: w,
+                height: h,
+                bitmap: bmp,
+            },
+        ))
     }
 
     /// Render a string to a pixel buffer (BGRX format, 4 bytes per pixel).

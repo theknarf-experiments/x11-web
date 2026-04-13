@@ -38,11 +38,7 @@ pub(crate) fn send_with_fds(sock_fd: i32, data: &[u8], fds: &[i32]) -> io::Resul
         (*cmsg).cmsg_type = libc::SCM_RIGHTS;
         (*cmsg).cmsg_len = libc::CMSG_LEN(fd_bytes as u32) as usize;
         let data_ptr = libc::CMSG_DATA(cmsg);
-        std::ptr::copy_nonoverlapping(
-            fds.as_ptr() as *const u8,
-            data_ptr,
-            fd_bytes,
-        );
+        std::ptr::copy_nonoverlapping(fds.as_ptr() as *const u8, data_ptr, fd_bytes);
 
         let n = libc::sendmsg(sock_fd, &msg, 0);
         if n < 0 {

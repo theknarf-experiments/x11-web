@@ -1,14 +1,12 @@
 use tracing::debug;
 
-use crate::xserver::ClientState;
-use crate::xserver::core::{read_u16_bo, read_u32_bo};
-use crate::xserver::core::require_len;
 use super::{
-    PICTFORMAT_ARGB32, read_fixed_bo,
-    PictureState, PictFilter, SolidFillState,
-    LinearGradientState, RadialGradientState, ConicalGradientState,
-    GradientStop,
+    read_fixed_bo, ConicalGradientState, GradientStop, LinearGradientState, PictFilter,
+    PictureState, RadialGradientState, SolidFillState, PICTFORMAT_ARGB32,
 };
+use crate::xserver::core::require_len;
+use crate::xserver::core::{read_u16_bo, read_u32_bo};
+use crate::xserver::ClientState;
 
 pub(crate) fn handle_create_solid_fill(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
     let bo = state.msb_first;
@@ -22,15 +20,20 @@ pub(crate) fn handle_create_solid_fill(state: &mut ClientState, data: &[u8], seq
     let b = (read_u16_bo(data, 12, bo) >> 8) as u8;
     let a = (read_u16_bo(data, 14, bo) >> 8) as u8;
 
-    debug!(
-        "Render CreateSolidFill: pid={pid:#x} premul=({r},{g},{b},{a})"
-    );
+    debug!("Render CreateSolidFill: pid={pid:#x} premul=({r},{g},{b},{a})");
 
-    state.render.solid_fills.insert(pid, SolidFillState { r, g, b, a });
+    state
+        .render
+        .solid_fills
+        .insert(pid, SolidFillState { r, g, b, a });
     Vec::new()
 }
 
-pub(crate) fn handle_create_gradient_fill(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
+pub(crate) fn handle_create_gradient_fill(
+    state: &mut ClientState,
+    data: &[u8],
+    seq: u16,
+) -> Vec<u8> {
     require_len!(data, 8, seq, 139, data[1] as u16, state.msb_first);
     let minor = data[1];
     match minor {
@@ -40,8 +43,12 @@ pub(crate) fn handle_create_gradient_fill(state: &mut ClientState, data: &[u8], 
         _ => {
             // Unreachable from dispatch, but return proper error if called directly
             crate::xserver::core::build_error_bo(
-                crate::xserver::core::BAD_REQUEST, 0, minor as u32,
-                139, minor as u16, state.msb_first,
+                crate::xserver::core::BAD_REQUEST,
+                0,
+                minor as u32,
+                139,
+                minor as u16,
+                state.msb_first,
             )
         }
     }
@@ -77,7 +84,12 @@ fn handle_create_linear_gradient(state: &mut ClientState, data: &[u8], seq: u16)
     // absurd before we allocate.
     if num_stops > 1024 {
         return crate::xserver::core::build_error_bo(
-            crate::xserver::core::BAD_VALUE, seq, num_stops as u32, 139, minor, bo,
+            crate::xserver::core::BAD_VALUE,
+            seq,
+            num_stops as u32,
+            139,
+            minor,
+            bo,
         );
     }
 
@@ -85,7 +97,12 @@ fn handle_create_linear_gradient(state: &mut ClientState, data: &[u8], seq: u16)
     let colors_start = stops_start + num_stops * 4;
     if colors_start + num_stops * 8 > data.len() {
         return crate::xserver::core::build_error_bo(
-            crate::xserver::core::BAD_LENGTH, seq, 0, 139, minor, bo,
+            crate::xserver::core::BAD_LENGTH,
+            seq,
+            0,
+            139,
+            minor,
+            bo,
         );
     }
 
@@ -156,7 +173,11 @@ pub(crate) fn sample_gradient_stops(stops: &[GradientStop], t: f64) -> (u8, u8, 
                 let s0 = stops[i - 1];
                 let s1 = stops[i];
                 let span = s1.offset - s0.offset;
-                let f = if span > 1e-9 { (t - s0.offset) / span } else { 0.0 };
+                let f = if span > 1e-9 {
+                    (t - s0.offset) / span
+                } else {
+                    0.0
+                };
                 let lerp = |a: u8, b: u8| a as f64 * (1.0 - f) + b as f64 * f;
                 out = (
                     lerp(s0.r, s1.r),
@@ -297,7 +318,12 @@ fn handle_create_radial_gradient(state: &mut ClientState, data: &[u8], seq: u16)
 
     if num_stops > 1024 {
         return crate::xserver::core::build_error_bo(
-            crate::xserver::core::BAD_VALUE, seq, num_stops as u32, 139, minor, bo,
+            crate::xserver::core::BAD_VALUE,
+            seq,
+            num_stops as u32,
+            139,
+            minor,
+            bo,
         );
     }
 
@@ -305,7 +331,12 @@ fn handle_create_radial_gradient(state: &mut ClientState, data: &[u8], seq: u16)
     let colors_start = stops_start + num_stops * 4;
     if colors_start + num_stops * 8 > data.len() {
         return crate::xserver::core::build_error_bo(
-            crate::xserver::core::BAD_LENGTH, seq, 0, 139, minor, bo,
+            crate::xserver::core::BAD_LENGTH,
+            seq,
+            0,
+            139,
+            minor,
+            bo,
         );
     }
 
@@ -477,7 +508,12 @@ fn handle_create_conical_gradient(state: &mut ClientState, data: &[u8], seq: u16
 
     if num_stops > 1024 {
         return crate::xserver::core::build_error_bo(
-            crate::xserver::core::BAD_VALUE, seq, num_stops as u32, 139, minor, bo,
+            crate::xserver::core::BAD_VALUE,
+            seq,
+            num_stops as u32,
+            139,
+            minor,
+            bo,
         );
     }
 
@@ -485,7 +521,12 @@ fn handle_create_conical_gradient(state: &mut ClientState, data: &[u8], seq: u16
     let colors_start = stops_start + num_stops * 4;
     if colors_start + num_stops * 8 > data.len() {
         return crate::xserver::core::build_error_bo(
-            crate::xserver::core::BAD_LENGTH, seq, 0, 139, minor, bo,
+            crate::xserver::core::BAD_LENGTH,
+            seq,
+            0,
+            139,
+            minor,
+            bo,
         );
     }
 
@@ -563,8 +604,7 @@ pub(crate) fn rasterize_conical_gradient(
             let dy = py - cy;
             // atan2 gives angle in [-PI, PI]; normalize to [0, 1]
             let angle = dy.atan2(dx) - start_angle;
-            let t_raw = angle.rem_euclid(2.0 * std::f64::consts::PI)
-                / (2.0 * std::f64::consts::PI);
+            let t_raw = angle.rem_euclid(2.0 * std::f64::consts::PI) / (2.0 * std::f64::consts::PI);
 
             // Conical gradients always repeat (they're inherently cyclic)
             let (r, g, b_val, a) = apply_gradient_repeat(&grad.stops, t_raw, repeat);
@@ -583,7 +623,13 @@ pub(crate) fn rasterize_conical_gradient(
 /// Apply a pixmap repeat mode to raw coordinates, returning clamped/wrapped
 /// coordinates suitable for indexing into a (w x h) pixmap.
 /// repeat: 1=Normal (tile), 2=Pad (clamp), 3=Reflect.
-pub(crate) fn apply_pixmap_repeat(raw_x: i32, raw_y: i32, w: i32, h: i32, repeat: u32) -> (u32, u32) {
+pub(crate) fn apply_pixmap_repeat(
+    raw_x: i32,
+    raw_y: i32,
+    w: i32,
+    h: i32,
+    repeat: u32,
+) -> (u32, u32) {
     match repeat {
         2 => {
             // Pad: clamp to edges
@@ -594,9 +640,15 @@ pub(crate) fn apply_pixmap_repeat(raw_x: i32, raw_y: i32, w: i32, h: i32, repeat
         3 => {
             // Reflect: mirror at boundaries
             let reflect = |v: i32, size: i32| -> u32 {
-                if size <= 0 { return 0; }
+                if size <= 0 {
+                    return 0;
+                }
                 let v2 = ((v % (2 * size)) + 2 * size) % (2 * size);
-                if v2 < size { v2 as u32 } else { (2 * size - 1 - v2) as u32 }
+                if v2 < size {
+                    v2 as u32
+                } else {
+                    (2 * size - 1 - v2) as u32
+                }
             };
             (reflect(raw_x, w), reflect(raw_y, h))
         }
@@ -610,11 +662,7 @@ pub(crate) fn apply_pixmap_repeat(raw_x: i32, raw_y: i32, w: i32, h: i32, repeat
 }
 
 /// Apply repeat mode to a gradient parameter `t` and sample the stops.
-fn apply_gradient_repeat(
-    stops: &[GradientStop],
-    t_raw: f64,
-    repeat: u32,
-) -> (u8, u8, u8, u8) {
+fn apply_gradient_repeat(stops: &[GradientStop], t_raw: f64, repeat: u32) -> (u8, u8, u8, u8) {
     match repeat {
         1 => {
             // Normal (repeat/wrap)

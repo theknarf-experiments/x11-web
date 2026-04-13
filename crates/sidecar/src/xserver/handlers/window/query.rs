@@ -62,7 +62,9 @@ pub(crate) fn handle_query_tree(state: &mut ClientState, data: &[u8], seq: u16) 
             // children_order may not include all children (e.g. cross-connection windows).
             // Start with the stacking order, then append any children not in it.
             let mut ordered = w.children_order.clone();
-            let all_children: Vec<u32> = state.windows.values()
+            let all_children: Vec<u32> = state
+                .windows
+                .values()
                 .filter(|c| c.parent == wid && !ordered.contains(&c.id))
                 .map(|c| c.id)
                 .collect();

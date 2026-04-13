@@ -124,14 +124,14 @@ impl XkbState {
 pub(crate) fn mousekeys_movement(keycode: u8) -> Option<(i16, i16)> {
     match keycode {
         79 => Some((-1, -1)), // KP_7 (Home) → up-left
-        80 => Some(( 0, -1)), // KP_8 (Up) → up
-        81 => Some(( 1, -1)), // KP_9 (PgUp) → up-right
-        83 => Some((-1,  0)), // KP_4 (Left) → left
+        80 => Some((0, -1)),  // KP_8 (Up) → up
+        81 => Some((1, -1)),  // KP_9 (PgUp) → up-right
+        83 => Some((-1, 0)),  // KP_4 (Left) → left
         // 84 = KP_5 (Begin) → button click (not movement)
-        85 => Some(( 1,  0)), // KP_6 (Right) → right
-        87 => Some((-1,  1)), // KP_1 (End) → down-left
-        88 => Some(( 0,  1)), // KP_2 (Down) → down
-        89 => Some(( 1,  1)), // KP_3 (PgDn) → down-right
+        85 => Some((1, 0)),  // KP_6 (Right) → right
+        87 => Some((-1, 1)), // KP_1 (End) → down-left
+        88 => Some((0, 1)),  // KP_2 (Down) → down
+        89 => Some((1, 1)),  // KP_3 (PgDn) → down-right
         _ => None,
     }
 }
@@ -154,12 +154,12 @@ pub(crate) fn mousekeys_is_click(keycode: u8) -> bool {
 ///   Mod5    = 0x80 (bit 7) - unused
 pub(crate) fn keycode_to_modifier(keycode: u8) -> u8 {
     match keycode {
-        50 | 62 => 0x01,        // Shift_L, Shift_R
-        66 => 0x02,             // Caps_Lock
-        37 | 105 => 0x04,       // Control_L, Control_R
-        64 | 108 => 0x08,       // Alt_L, Alt_R → Mod1
-        77 => 0x10,             // Num_Lock → Mod2
-        133 | 134 => 0x40,      // Super_L, Super_R → Mod4
+        50 | 62 => 0x01,   // Shift_L, Shift_R
+        66 => 0x02,        // Caps_Lock
+        37 | 105 => 0x04,  // Control_L, Control_R
+        64 | 108 => 0x08,  // Alt_L, Alt_R → Mod1
+        77 => 0x10,        // Num_Lock → Mod2
+        133 | 134 => 0x40, // Super_L, Super_R → Mod4
         _ => 0,
     }
 }
@@ -375,9 +375,9 @@ mod tests {
     #[test]
     fn effective_mods_combines_all_sources() {
         let mut s = XkbState::default();
-        s.base_mods = 0x01;     // Shift
-        s.latched_mods = 0x04;  // Control
-        s.locked_mods = 0x02;   // CapsLock
+        s.base_mods = 0x01; // Shift
+        s.latched_mods = 0x04; // Control
+        s.locked_mods = 0x02; // CapsLock
         assert_eq!(s.effective_mods(), 0x07);
     }
 
@@ -445,24 +445,24 @@ mod tests {
 
     #[test]
     fn modifier_keycode_mapping() {
-        assert_eq!(keycode_to_modifier(50), 0x01);  // Shift_L
-        assert_eq!(keycode_to_modifier(62), 0x01);  // Shift_R
-        assert_eq!(keycode_to_modifier(66), 0x02);  // CapsLock
-        assert_eq!(keycode_to_modifier(37), 0x04);  // Ctrl_L
+        assert_eq!(keycode_to_modifier(50), 0x01); // Shift_L
+        assert_eq!(keycode_to_modifier(62), 0x01); // Shift_R
+        assert_eq!(keycode_to_modifier(66), 0x02); // CapsLock
+        assert_eq!(keycode_to_modifier(37), 0x04); // Ctrl_L
         assert_eq!(keycode_to_modifier(105), 0x04); // Ctrl_R
-        assert_eq!(keycode_to_modifier(64), 0x08);  // Alt_L
+        assert_eq!(keycode_to_modifier(64), 0x08); // Alt_L
         assert_eq!(keycode_to_modifier(108), 0x08); // Alt_R
-        assert_eq!(keycode_to_modifier(77), 0x10);  // NumLock
+        assert_eq!(keycode_to_modifier(77), 0x10); // NumLock
         assert_eq!(keycode_to_modifier(133), 0x40); // Super_L
         assert_eq!(keycode_to_modifier(134), 0x40); // Super_R
-        assert_eq!(keycode_to_modifier(38), 0);     // 'a'
-        assert_eq!(keycode_to_modifier(0), 0);      // invalid
+        assert_eq!(keycode_to_modifier(38), 0); // 'a'
+        assert_eq!(keycode_to_modifier(0), 0); // invalid
     }
 
     #[test]
     fn lock_key_detection() {
-        assert!(is_lock_key(66));  // CapsLock
-        assert!(is_lock_key(77));  // NumLock
+        assert!(is_lock_key(66)); // CapsLock
+        assert!(is_lock_key(77)); // NumLock
         assert!(!is_lock_key(50)); // Shift_L
         assert!(!is_lock_key(37)); // Ctrl_L
         assert!(!is_lock_key(38)); // 'a'
@@ -496,7 +496,7 @@ mod tests {
     fn sticky_keys_latches_modifier_on_press() {
         let mut s = XkbState::default();
         s.controls.enabled_ctrls |= 1 << 3; // StickyKeys
-        // Press Shift_L
+                                            // Press Shift_L
         s.key_press(50);
         assert_eq!(s.sticky_mods, 0x01);
         assert_eq!(s.latched_mods, 0x01);
@@ -507,11 +507,11 @@ mod tests {
     fn sticky_keys_clears_on_non_modifier_press() {
         let mut s = XkbState::default();
         s.controls.enabled_ctrls |= 1 << 3; // StickyKeys
-        // Press and release Shift_L
+                                            // Press and release Shift_L
         s.key_press(50);
         s.key_release(50);
         assert_eq!(s.latched_mods, 0x01); // Still latched
-        // Now press 'a' — sticky should clear
+                                          // Now press 'a' — sticky should clear
         s.key_press(38);
         assert_eq!(s.sticky_mods, 0);
         assert_eq!(s.latched_mods, 0);
@@ -521,7 +521,7 @@ mod tests {
     fn sticky_keys_modifier_persists_until_non_modifier() {
         let mut s = XkbState::default();
         s.controls.enabled_ctrls |= 1 << 3; // StickyKeys
-        // Press Shift, release, press Ctrl — both should be latched
+                                            // Press Shift, release, press Ctrl — both should be latched
         s.key_press(50); // Shift
         s.key_release(50);
         s.key_press(37); // Ctrl
@@ -549,8 +549,9 @@ mod tests {
         let mut s = XkbState::default();
         s.controls.enabled_ctrls |= 1 << 2; // BounceKeys
         s.controls.debounce_delay = 1; // 1ms
-        // Simulate release
-        s.bounce_key_release_time.insert(38, Instant::now() - std::time::Duration::from_millis(10));
+                                       // Simulate release
+        s.bounce_key_release_time
+            .insert(38, Instant::now() - std::time::Duration::from_millis(10));
         // After 10ms > 1ms debounce — should be accepted
         assert!(!s.bounce_keys_reject(38));
     }
@@ -589,14 +590,20 @@ mod tests {
         s.controls.enabled_ctrls = 1 << 2;
         s.controls.debounce_delay = 300;
         s.key_release(38);
-        assert!(s.bounce_keys_reject(38), "BounceKeys at bit 2 should reject");
+        assert!(
+            s.bounce_keys_reject(38),
+            "BounceKeys at bit 2 should reject"
+        );
 
         // Verify bit 4 (MouseKeys) does NOT trigger BounceKeys
         let mut s2 = XkbState::default();
         s2.controls.enabled_ctrls = 1 << 4; // MouseKeys, not BounceKeys
         s2.controls.debounce_delay = 300;
         s2.key_release(38);
-        assert!(!s2.bounce_keys_reject(38), "MouseKeys bit should not trigger BounceKeys");
+        assert!(
+            !s2.bounce_keys_reject(38),
+            "MouseKeys bit should not trigger BounceKeys"
+        );
     }
 
     #[test]
@@ -605,33 +612,42 @@ mod tests {
         // Enable only bit 3 (StickyKeys)
         s.controls.enabled_ctrls = 1 << 3;
         s.key_press(50); // Shift_L
-        assert_eq!(s.sticky_mods, 0x01, "StickyKeys at bit 3 should latch Shift");
+        assert_eq!(
+            s.sticky_mods, 0x01,
+            "StickyKeys at bit 3 should latch Shift"
+        );
         assert_eq!(s.base_mods, 0, "StickyKeys should NOT set base_mods");
 
         // Verify bit 6 (AccessXKeys) does NOT trigger StickyKeys
         let mut s2 = XkbState::default();
         s2.controls.enabled_ctrls = 1 << 6; // AccessXKeys, not StickyKeys
         s2.key_press(50); // Shift_L
-        assert_eq!(s2.sticky_mods, 0, "AccessXKeys bit should not trigger StickyKeys");
-        assert_eq!(s2.base_mods, 0x01, "Without StickyKeys, Shift should go to base_mods");
+        assert_eq!(
+            s2.sticky_mods, 0,
+            "AccessXKeys bit should not trigger StickyKeys"
+        );
+        assert_eq!(
+            s2.base_mods, 0x01,
+            "Without StickyKeys, Shift should go to base_mods"
+        );
     }
 
     #[test]
     fn mousekeys_numpad_movement() {
-        assert_eq!(mousekeys_movement(80), Some((0, -1)));  // KP_8 = Up
-        assert_eq!(mousekeys_movement(88), Some((0, 1)));   // KP_2 = Down
-        assert_eq!(mousekeys_movement(83), Some((-1, 0)));  // KP_4 = Left
-        assert_eq!(mousekeys_movement(85), Some((1, 0)));   // KP_6 = Right
+        assert_eq!(mousekeys_movement(80), Some((0, -1))); // KP_8 = Up
+        assert_eq!(mousekeys_movement(88), Some((0, 1))); // KP_2 = Down
+        assert_eq!(mousekeys_movement(83), Some((-1, 0))); // KP_4 = Left
+        assert_eq!(mousekeys_movement(85), Some((1, 0))); // KP_6 = Right
         assert_eq!(mousekeys_movement(79), Some((-1, -1))); // KP_7 = Up-Left
-        assert_eq!(mousekeys_movement(81), Some((1, -1)));  // KP_9 = Up-Right
-        assert_eq!(mousekeys_movement(87), Some((-1, 1)));  // KP_1 = Down-Left
-        assert_eq!(mousekeys_movement(89), Some((1, 1)));   // KP_3 = Down-Right
-        assert_eq!(mousekeys_movement(38), None);           // 'a' = not a mouse key
+        assert_eq!(mousekeys_movement(81), Some((1, -1))); // KP_9 = Up-Right
+        assert_eq!(mousekeys_movement(87), Some((-1, 1))); // KP_1 = Down-Left
+        assert_eq!(mousekeys_movement(89), Some((1, 1))); // KP_3 = Down-Right
+        assert_eq!(mousekeys_movement(38), None); // 'a' = not a mouse key
     }
 
     #[test]
     fn mousekeys_click_is_kp5() {
-        assert!(mousekeys_is_click(84));  // KP_5
+        assert!(mousekeys_is_click(84)); // KP_5
         assert!(!mousekeys_is_click(80)); // KP_8 is movement, not click
         assert!(!mousekeys_is_click(38)); // 'a' is not a mouse key
     }

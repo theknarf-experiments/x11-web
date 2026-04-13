@@ -28,7 +28,9 @@ pub(crate) fn await_op(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8
     let mut triggers = Vec::with_capacity(n_triggers);
     let mut offset = 4;
     for _ in 0..n_triggers {
-        if offset + 28 > data.len() { break; }
+        if offset + 28 > data.len() {
+            break;
+        }
         let counter_id = state.read_u32(data, offset);
         let value_type = state.read_u32(data, offset + 4);
         let wait_value = ((state.read_u32(data, offset + 8) as i64) << 32)
@@ -41,7 +43,10 @@ pub(crate) fn await_op(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8
         let current = if counter_id == 1 {
             state.timestamp() as i64
         } else {
-            state.sync_state.counters.get(&counter_id)
+            state
+                .sync_state
+                .counters
+                .get(&counter_id)
                 .map(|c| c.value_i64())
                 .unwrap_or(0)
         };
@@ -62,13 +67,19 @@ pub(crate) fn await_op(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8
     }
 
     if any_satisfied || triggers.is_empty() {
-        debug!("SYNC Await: satisfied immediately ({} triggers)", triggers.len());
+        debug!(
+            "SYNC Await: satisfied immediately ({} triggers)",
+            triggers.len()
+        );
     } else {
-        debug!("SYNC Await: {} triggers not yet satisfied, blocking connection", triggers.len());
-        state.sync_state.pending_awaits.push(PendingAwait {
-            triggers,
-            seq,
-        });
+        debug!(
+            "SYNC Await: {} triggers not yet satisfied, blocking connection",
+            triggers.len()
+        );
+        state
+            .sync_state
+            .pending_awaits
+            .push(PendingAwait { triggers, seq });
         state.sync_state.blocked = true;
     }
     Vec::new()
@@ -89,7 +100,12 @@ pub(crate) fn set_priority(state: &mut ClientState, data: &[u8], _seq: u16) -> V
 pub(crate) fn get_priority(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
     require_len!(data, 8, seq, 134, data[1] as u16, state.msb_first);
     let resource_id = state.read_u32(data, 4);
-    let priority = state.sync_state.priorities.get(&resource_id).copied().unwrap_or(0);
+    let priority = state
+        .sync_state
+        .priorities
+        .get(&resource_id)
+        .copied()
+        .unwrap_or(0);
     debug!("SYNC GetPriority: resource={resource_id:#x} priority={priority}");
     let mut reply = [0u8; 32];
     reply[0] = 1;

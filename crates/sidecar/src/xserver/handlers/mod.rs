@@ -3,38 +3,38 @@
 //! Each handler corresponds to a single X11 core protocol request. The
 //! dispatcher [`handle_core_request`] routes based on the major opcode.
 
-pub(crate) mod extensions;
-mod window;
-mod property;
-mod drawing;
 mod color;
-pub(crate) mod input;
+mod drawing;
+pub(crate) mod extensions;
 mod font;
+pub(crate) mod input;
+mod property;
 mod query;
 pub(crate) mod render;
+mod window;
 
 // Extension submodules (re-exported via extensions.rs)
-mod xfixes;
+mod composite;
+mod dbe;
+mod dpms;
+mod dri3;
+pub(crate) mod glx;
+mod present;
 mod randr;
+pub(crate) mod record;
+pub(crate) mod screensaver;
+mod security;
 mod shape;
 mod shm;
 pub(crate) mod sync;
-mod composite;
-pub(crate) mod xkb;
-mod present;
-mod xtest;
-mod dpms;
-pub(crate) mod screensaver;
 pub(crate) mod vidmode;
-mod security;
-mod xinerama;
-mod dbe;
-pub(crate) mod xvideo;
-pub(crate) mod glx;
-pub(crate) mod record;
-mod dri3;
-mod xresource;
+mod xfixes;
 pub(crate) mod xim;
+mod xinerama;
+pub(crate) mod xkb;
+mod xresource;
+mod xtest;
+pub(crate) mod xvideo;
 
 use std::collections::HashMap;
 use tracing::{debug, info, warn};
@@ -46,7 +46,7 @@ use super::types::*;
 use crate::framebuffer::Framebuffer;
 
 // Re-export byte-order helpers for use in handler submodules
-pub(crate) use super::core::{read_u32_bo, write_u16_bo, write_u32_bo, write_i16_bo};
+pub(crate) use super::core::{read_u32_bo, write_i16_bo, write_u16_bo, write_u32_bo};
 
 // Re-export window stacking helpers for use by property handlers
 pub(crate) use window::restack_by_window_type;
@@ -208,8 +208,12 @@ pub(crate) fn handle_core_request(state: &mut ClientState, data: &[u8]) -> Vec<u
             warn!("Unhandled core X11 request opcode: {major_opcode} minor: {_minor}");
             // Return BadRequest error for unrecognized opcodes per X11 spec
             super::core::build_error_bo(
-                BAD_REQUEST, seq, major_opcode as u32,
-                major_opcode, _minor as u16, state.msb_first,
+                BAD_REQUEST,
+                seq,
+                major_opcode as u32,
+                major_opcode,
+                _minor as u16,
+                state.msb_first,
             )
         }
     }
@@ -222,24 +226,24 @@ pub(crate) fn handle_core_request(state: &mut ClientState, data: &[u8]) -> Vec<u
 /// Map X11 cursor font glyph index to CSS cursor name.
 fn glyph_to_css_cursor(glyph: u16) -> &'static str {
     match glyph {
-        2 | 30 | 68 => "default",    // arrow / left_ptr
-        24 | 34 => "crosshair",      // cross / crosshair
-        52 => "not-allowed",          // circle
-        58 | 70 => "pointer",         // hand2 / hand1
-        92 => "wait",                 // watch
-        130 => "text",                // xterm
-        132 => "move",                // fleur
-        138 => "help",                // question_arrow
-        116 => "col-resize",          // sb_h_double_arrow
-        120 => "row-resize",          // sb_v_double_arrow
-        12 => "s-resize",             // bottom_side
-        14 => "sw-resize",            // bottom_left_corner
-        16 => "se-resize",            // bottom_right_corner
-        134 => "n-resize",            // top_side
-        136 => "nw-resize",           // top_left_corner
-        100 => "ne-resize",           // top_right_corner
-        108 => "w-resize",            // left_side
-        96 => "e-resize",             // right_side
+        2 | 30 | 68 => "default", // arrow / left_ptr
+        24 | 34 => "crosshair",   // cross / crosshair
+        52 => "not-allowed",      // circle
+        58 | 70 => "pointer",     // hand2 / hand1
+        92 => "wait",             // watch
+        130 => "text",            // xterm
+        132 => "move",            // fleur
+        138 => "help",            // question_arrow
+        116 => "col-resize",      // sb_h_double_arrow
+        120 => "row-resize",      // sb_v_double_arrow
+        12 => "s-resize",         // bottom_side
+        14 => "sw-resize",        // bottom_left_corner
+        16 => "se-resize",        // bottom_right_corner
+        134 => "n-resize",        // top_side
+        136 => "nw-resize",       // top_left_corner
+        100 => "ne-resize",       // top_right_corner
+        108 => "w-resize",        // left_side
+        96 => "e-resize",         // right_side
         _ => "default",
     }
 }
@@ -276,19 +280,23 @@ fn emit_cursor_changed(state: &mut ClientState, wid: u32) {
                     use std::io::Write;
                     use x11_web_protocol::AnimCursorFrame;
 
-                    let frames: Vec<AnimCursorFrame> = info.anim_frames.iter().map(|(argb, w, h, hx, hy, delay)| {
-                        let mut encoder = DeflateEncoder::new(Vec::new(), Compression::fast());
-                        let _ = encoder.write_all(argb);
-                        let compressed = encoder.finish().unwrap_or_else(|_| argb.clone());
-                        AnimCursorFrame {
-                            pixels: compressed,
-                            width: *w,
-                            height: *h,
-                            hotspot_x: *hx,
-                            hotspot_y: *hy,
-                            delay_ms: *delay,
-                        }
-                    }).collect();
+                    let frames: Vec<AnimCursorFrame> = info
+                        .anim_frames
+                        .iter()
+                        .map(|(argb, w, h, hx, hy, delay)| {
+                            let mut encoder = DeflateEncoder::new(Vec::new(), Compression::fast());
+                            let _ = encoder.write_all(argb);
+                            let compressed = encoder.finish().unwrap_or_else(|_| argb.clone());
+                            AnimCursorFrame {
+                                pixels: compressed,
+                                width: *w,
+                                height: *h,
+                                hotspot_x: *hx,
+                                hotspot_y: *hy,
+                                delay_ms: *delay,
+                            }
+                        })
+                        .collect();
 
                     let _ = state.update_tx.send((
                         state.client_id.clone(),
@@ -345,7 +353,8 @@ fn emit_cursor_changed(state: &mut ClientState, wid: u32) {
         let cursor_serial = new_cursor_id; // Use cursor ID as serial
 
         // Collect subscriber windows first to avoid borrow conflict.
-        let subscribers: Vec<u32> = state.cursor_event_subscribers
+        let subscribers: Vec<u32> = state
+            .cursor_event_subscribers
             .iter()
             .filter(|(_, &subscribed)| subscribed)
             .map(|(&win, _)| win)
@@ -356,10 +365,10 @@ fn emit_cursor_changed(state: &mut ClientState, wid: u32) {
             event[0] = XFIXES_CURSOR_NOTIFY;
             event[1] = 0; // subtype: DisplayCursor
             state.write_u16(&mut event, 2, state.sequence);
-            state.write_u32(&mut event, 4, sub_win);       // window
-            state.write_u32(&mut event, 8, cursor_serial);  // cursor-serial
-            state.write_u32(&mut event, 12, timestamp);     // timestamp
-            // 16-19: cursor-name (ATOM, 0 for unnamed)
+            state.write_u32(&mut event, 4, sub_win); // window
+            state.write_u32(&mut event, 8, cursor_serial); // cursor-serial
+            state.write_u32(&mut event, 12, timestamp); // timestamp
+                                                        // 16-19: cursor-name (ATOM, 0 for unnamed)
             state.pending_events.push(event.to_vec());
         }
     }
@@ -371,7 +380,10 @@ use super::is_descendant_of;
 /// Resolve keycode to (normal_keysym, shifted_keysym), consulting the custom
 /// keymap first (set by ChangeKeyboardMapping / XkbSetMap), then falling back
 /// to the built-in US keyboard layout.
-pub(crate) fn resolve_keysym(keycode: u8, custom_keymap: &std::collections::HashMap<u8, Vec<u32>>) -> (u32, u32) {
+pub(crate) fn resolve_keysym(
+    keycode: u8,
+    custom_keymap: &std::collections::HashMap<u8, Vec<u32>>,
+) -> (u32, u32) {
     if let Some(syms) = custom_keymap.get(&keycode) {
         let normal = syms.first().copied().unwrap_or(0);
         let shifted = syms.get(1).copied().unwrap_or(normal);
@@ -754,7 +766,14 @@ mod tests {
         for i in 0u32..10 {
             let kc = (67 + i) as u8;
             let (sym, _) = keycode_to_keysym(kc);
-            assert_eq!(sym, XK_F1 + i, "F{} keycode {} expected sym 0x{:04x}", i + 1, kc, XK_F1 + i);
+            assert_eq!(
+                sym,
+                XK_F1 + i,
+                "F{} keycode {} expected sym 0x{:04x}",
+                i + 1,
+                kc,
+                XK_F1 + i
+            );
         }
     }
 
@@ -933,20 +952,40 @@ mod tests {
     #[test]
     fn extension_major_opcodes_are_unique() {
         let opcodes: &[(u8, &str)] = &[
-            (128, "SHAPE"), (130, "MIT-SHM"), (131, "XInputExtension"),
-            (133, "BIG-REQUESTS"), (134, "SYNC"), (135, "GE"),
-            (136, "XKB"), (138, "XFIXES"), (139, "RENDER"),
-            (140, "RANDR"), (141, "XC-MISC"), (142, "Composite"),
-            (143, "DAMAGE"), (148, "Present"), (149, "DRI3"),
-            (150, "XTEST"), (151, "DPMS"), (152, "MIT-SCREEN-SAVER"),
-            (153, "VidMode"), (154, "RECORD"), (155, "SECURITY"),
-            (156, "XVideo"), (157, "DBE"), (158, "XINERAMA"),
-            (159, "GLX"), (160, "X-Resource"),
+            (128, "SHAPE"),
+            (130, "MIT-SHM"),
+            (131, "XInputExtension"),
+            (133, "BIG-REQUESTS"),
+            (134, "SYNC"),
+            (135, "GE"),
+            (136, "XKB"),
+            (138, "XFIXES"),
+            (139, "RENDER"),
+            (140, "RANDR"),
+            (141, "XC-MISC"),
+            (142, "Composite"),
+            (143, "DAMAGE"),
+            (148, "Present"),
+            (149, "DRI3"),
+            (150, "XTEST"),
+            (151, "DPMS"),
+            (152, "MIT-SCREEN-SAVER"),
+            (153, "VidMode"),
+            (154, "RECORD"),
+            (155, "SECURITY"),
+            (156, "XVideo"),
+            (157, "DBE"),
+            (158, "XINERAMA"),
+            (159, "GLX"),
+            (160, "X-Resource"),
         ];
         let mut seen = std::collections::HashMap::new();
         for &(opcode, name) in opcodes {
             if let Some(prev) = seen.insert(opcode, name) {
-                panic!("Opcode collision: {} and {} both use major opcode {}", prev, name, opcode);
+                panic!(
+                    "Opcode collision: {} and {} both use major opcode {}",
+                    prev, name, opcode
+                );
             }
         }
     }
@@ -960,15 +999,15 @@ mod tests {
     fn extension_event_bases_no_overlap() {
         // (first_event, num_events, name)
         let events: &[(u8, u8, &str)] = &[
-            (64, 1, "SHAPE"),       // ShapeNotify
-            (65, 1, "MIT-SHM"),     // ShmCompletion
-            (83, 1, "SYNC"),        // AlarmNotify
-            (85, 1, "XKB"),         // XkbEventCode
-            (87, 2, "XFIXES"),      // SelectionNotify + CursorNotify
-            (89, 2, "RANDR"),       // ScreenChangeNotify + RRNotify
-            (91, 1, "DAMAGE"),      // DamageNotify
-            (93, 1, "SECURITY"),    // AuthorizationRevoked
-            (95, 2, "XVideo"),      // VideoNotify + PortNotify
+            (64, 1, "SHAPE"),    // ShapeNotify
+            (65, 1, "MIT-SHM"),  // ShmCompletion
+            (83, 1, "SYNC"),     // AlarmNotify
+            (85, 1, "XKB"),      // XkbEventCode
+            (87, 2, "XFIXES"),   // SelectionNotify + CursorNotify
+            (89, 2, "RANDR"),    // ScreenChangeNotify + RRNotify
+            (91, 1, "DAMAGE"),   // DamageNotify
+            (93, 1, "SECURITY"), // AuthorizationRevoked
+            (95, 2, "XVideo"),   // VideoNotify + PortNotify
         ];
         for i in 0..events.len() {
             let (base_a, count_a, name_a) = events[i];
@@ -980,8 +1019,12 @@ mod tests {
                 assert!(
                     !overlaps,
                     "Event range overlap: {} ({}-{}) and {} ({}-{})",
-                    name_a, base_a, base_a + count_a - 1,
-                    name_b, base_b, base_b + count_b - 1,
+                    name_a,
+                    base_a,
+                    base_a + count_a - 1,
+                    name_b,
+                    base_b,
+                    base_b + count_b - 1,
                 );
             }
         }
@@ -1006,83 +1049,110 @@ mod tests {
 
     #[test]
     fn sync_alarm_positive_transition() {
-        use super::sync::{SyncAlarm, check_alarms_ext};
+        use super::sync::{check_alarms_ext, SyncAlarm};
         let mut alarms = HashMap::new();
-        alarms.insert(1, SyncAlarm {
-            counter: 10,
-            value_type: 0,
-            value_hi: 0,
-            value_lo: 100,
-            test_type: 0, // PositiveTransition
-            delta_hi: 0,
-            delta_lo: 0,
-            events: true,
-            state: 0,
-        });
+        alarms.insert(
+            1,
+            SyncAlarm {
+                counter: 10,
+                value_type: 0,
+                value_hi: 0,
+                value_lo: 100,
+                test_type: 0, // PositiveTransition
+                delta_hi: 0,
+                delta_lo: 0,
+                events: true,
+                state: 0,
+            },
+        );
         let mut pending = Vec::new();
         // Counter goes from 50 to 150 — should trigger (crosses threshold 100)
         check_alarms_ext(&mut alarms, 10, 50, 150, &mut pending, 1, false);
-        assert_eq!(pending.len(), 1, "Alarm should fire on positive transition across threshold");
-        assert_eq!(pending[0][0], 83, "Event code should be SYNC AlarmNotify (83)");
+        assert_eq!(
+            pending.len(),
+            1,
+            "Alarm should fire on positive transition across threshold"
+        );
+        assert_eq!(
+            pending[0][0], 83,
+            "Event code should be SYNC AlarmNotify (83)"
+        );
     }
 
     #[test]
     fn sync_alarm_no_trigger_when_below() {
-        use super::sync::{SyncAlarm, check_alarms_ext};
+        use super::sync::{check_alarms_ext, SyncAlarm};
         let mut alarms = HashMap::new();
-        alarms.insert(1, SyncAlarm {
-            counter: 10,
-            value_type: 0,
-            value_hi: 0,
-            value_lo: 100,
-            test_type: 0, // PositiveTransition
-            delta_hi: 0,
-            delta_lo: 0,
-            events: true,
-            state: 0,
-        });
+        alarms.insert(
+            1,
+            SyncAlarm {
+                counter: 10,
+                value_type: 0,
+                value_hi: 0,
+                value_lo: 100,
+                test_type: 0, // PositiveTransition
+                delta_hi: 0,
+                delta_lo: 0,
+                events: true,
+                state: 0,
+            },
+        );
         let mut pending = Vec::new();
         // Counter goes from 50 to 80 — should NOT trigger (doesn't cross 100)
         check_alarms_ext(&mut alarms, 10, 50, 80, &mut pending, 1, false);
-        assert_eq!(pending.len(), 0, "Alarm should NOT fire when threshold not crossed");
+        assert_eq!(
+            pending.len(),
+            0,
+            "Alarm should NOT fire when threshold not crossed"
+        );
     }
 
     #[test]
     fn sync_alarm_negative_transition() {
-        use super::sync::{SyncAlarm, check_alarms_ext};
+        use super::sync::{check_alarms_ext, SyncAlarm};
         let mut alarms = HashMap::new();
-        alarms.insert(1, SyncAlarm {
-            counter: 10,
-            value_type: 0,
-            value_hi: 0,
-            value_lo: 100,
-            test_type: 1, // NegativeTransition
-            delta_hi: 0,
-            delta_lo: 0,
-            events: true,
-            state: 0,
-        });
+        alarms.insert(
+            1,
+            SyncAlarm {
+                counter: 10,
+                value_type: 0,
+                value_hi: 0,
+                value_lo: 100,
+                test_type: 1, // NegativeTransition
+                delta_hi: 0,
+                delta_lo: 0,
+                events: true,
+                state: 0,
+            },
+        );
         let mut pending = Vec::new();
         // Counter goes from 150 to 50 — should trigger (crosses threshold 100 downward)
         check_alarms_ext(&mut alarms, 10, 150, 50, &mut pending, 1, false);
-        assert_eq!(pending.len(), 1, "Alarm should fire on negative transition across threshold");
+        assert_eq!(
+            pending.len(),
+            1,
+            "Alarm should fire on negative transition across threshold"
+        );
     }
 
     #[test]
     fn sync_alarm_delta_advances_threshold() {
-        use super::sync::{SyncAlarm, check_alarms_ext};
+        use super::sync::{check_alarms_ext, SyncAlarm};
         let mut alarms = HashMap::new();
-        alarms.insert(1, SyncAlarm {
-            counter: 10,
-            value_type: 0,
-            value_hi: 0,
-            value_lo: 100,
-            test_type: 0, // PositiveTransition
-            delta_hi: 0,
-            delta_lo: 50, // advance by 50 after each trigger
-            events: true,
-            state: 0,
-        });
+        alarms.insert(
+            1,
+            SyncAlarm {
+                counter: 10,
+                value_type: 0,
+                value_hi: 0,
+                value_lo: 100,
+                test_type: 0, // PositiveTransition
+                delta_hi: 0,
+                delta_lo: 50, // advance by 50 after each trigger
+                events: true,
+                state: 0,
+            },
+        );
         let mut pending = Vec::new();
         check_alarms_ext(&mut alarms, 10, 50, 150, &mut pending, 1, false);
         assert_eq!(pending.len(), 1);
@@ -1093,40 +1163,49 @@ mod tests {
 
     #[test]
     fn sync_alarm_zero_delta_becomes_inactive() {
-        use super::sync::{SyncAlarm, check_alarms_ext};
+        use super::sync::{check_alarms_ext, SyncAlarm};
         let mut alarms = HashMap::new();
-        alarms.insert(1, SyncAlarm {
-            counter: 10,
-            value_type: 0,
-            value_hi: 0,
-            value_lo: 100,
-            test_type: 0, // PositiveTransition
-            delta_hi: 0,
-            delta_lo: 0, // zero delta = one-shot
-            events: true,
-            state: 0,
-        });
+        alarms.insert(
+            1,
+            SyncAlarm {
+                counter: 10,
+                value_type: 0,
+                value_hi: 0,
+                value_lo: 100,
+                test_type: 0, // PositiveTransition
+                delta_hi: 0,
+                delta_lo: 0, // zero delta = one-shot
+                events: true,
+                state: 0,
+            },
+        );
         let mut pending = Vec::new();
         check_alarms_ext(&mut alarms, 10, 50, 150, &mut pending, 1, false);
         assert_eq!(pending.len(), 1);
-        assert_eq!(alarms[&1].state, 1, "Zero-delta alarm should become Inactive after firing");
+        assert_eq!(
+            alarms[&1].state, 1,
+            "Zero-delta alarm should become Inactive after firing"
+        );
     }
 
     #[test]
     fn sync_alarm_inactive_does_not_fire() {
-        use super::sync::{SyncAlarm, check_alarms_ext};
+        use super::sync::{check_alarms_ext, SyncAlarm};
         let mut alarms = HashMap::new();
-        alarms.insert(1, SyncAlarm {
-            counter: 10,
-            value_type: 0,
-            value_hi: 0,
-            value_lo: 100,
-            test_type: 0,
-            delta_hi: 0,
-            delta_lo: 0,
-            events: true,
-            state: 1, // Inactive
-        });
+        alarms.insert(
+            1,
+            SyncAlarm {
+                counter: 10,
+                value_type: 0,
+                value_hi: 0,
+                value_lo: 100,
+                test_type: 0,
+                delta_hi: 0,
+                delta_lo: 0,
+                events: true,
+                state: 1, // Inactive
+            },
+        );
         let mut pending = Vec::new();
         check_alarms_ext(&mut alarms, 10, 50, 150, &mut pending, 1, false);
         assert_eq!(pending.len(), 0, "Inactive alarm should not fire");
@@ -1134,44 +1213,58 @@ mod tests {
 
     #[test]
     fn sync_alarm_wrong_counter_does_not_fire() {
-        use super::sync::{SyncAlarm, check_alarms_ext};
+        use super::sync::{check_alarms_ext, SyncAlarm};
         let mut alarms = HashMap::new();
-        alarms.insert(1, SyncAlarm {
-            counter: 10,
-            value_type: 0,
-            value_hi: 0,
-            value_lo: 100,
-            test_type: 0,
-            delta_hi: 0,
-            delta_lo: 0,
-            events: true,
-            state: 0,
-        });
+        alarms.insert(
+            1,
+            SyncAlarm {
+                counter: 10,
+                value_type: 0,
+                value_hi: 0,
+                value_lo: 100,
+                test_type: 0,
+                delta_hi: 0,
+                delta_lo: 0,
+                events: true,
+                state: 0,
+            },
+        );
         let mut pending = Vec::new();
         // Update counter 20 (alarm watches counter 10) — should NOT fire
         check_alarms_ext(&mut alarms, 20, 50, 150, &mut pending, 1, false);
-        assert_eq!(pending.len(), 0, "Alarm on different counter should not fire");
+        assert_eq!(
+            pending.len(),
+            0,
+            "Alarm on different counter should not fire"
+        );
     }
 
     #[test]
     fn sync_alarm_positive_comparison() {
-        use super::sync::{SyncAlarm, check_alarms_ext};
+        use super::sync::{check_alarms_ext, SyncAlarm};
         let mut alarms = HashMap::new();
-        alarms.insert(1, SyncAlarm {
-            counter: 10,
-            value_type: 0,
-            value_hi: 0,
-            value_lo: 100,
-            test_type: 2, // PositiveComparison
-            delta_hi: 0,
-            delta_lo: 0,
-            events: true,
-            state: 0,
-        });
+        alarms.insert(
+            1,
+            SyncAlarm {
+                counter: 10,
+                value_type: 0,
+                value_hi: 0,
+                value_lo: 100,
+                test_type: 2, // PositiveComparison
+                delta_hi: 0,
+                delta_lo: 0,
+                events: true,
+                state: 0,
+            },
+        );
         let mut pending = Vec::new();
         // PositiveComparison fires whenever new_value >= threshold, regardless of old
         check_alarms_ext(&mut alarms, 10, 200, 150, &mut pending, 1, false);
-        assert_eq!(pending.len(), 1, "PositiveComparison: 150 >= 100 should fire");
+        assert_eq!(
+            pending.len(),
+            1,
+            "PositiveComparison: 150 >= 100 should fire"
+        );
     }
 
     // -----------------------------------------------------------------------
@@ -1183,23 +1276,23 @@ mod tests {
         use crate::framebuffer::apply_gc_function;
         let src = 0x00FF00FF_u32; // magenta
         let dst = 0x0000FFFF_u32; // cyan
-        assert_eq!(apply_gc_function(0, src, dst), 0);                  // GXclear
-        assert_eq!(apply_gc_function(1, src, dst), src & dst);          // GXand
-        assert_eq!(apply_gc_function(2, src, dst), src & !dst);         // GXandReverse
-        assert_eq!(apply_gc_function(3, src, dst), src);                // GXcopy
-        assert_eq!(apply_gc_function(4, src, dst), !src & dst);         // GXandInverted
-        assert_eq!(apply_gc_function(5, src, dst), dst);                // GXnoop
-        assert_eq!(apply_gc_function(6, src, dst), src ^ dst);          // GXxor
-        assert_eq!(apply_gc_function(7, src, dst), src | dst);          // GXor
-        assert_eq!(apply_gc_function(8, src, dst), !(src | dst));       // GXnor
-        assert_eq!(apply_gc_function(9, src, dst), !(src ^ dst));       // GXequiv
-        assert_eq!(apply_gc_function(10, src, dst), !dst);              // GXinvert
-        assert_eq!(apply_gc_function(11, src, dst), src | !dst);        // GXorReverse
-        assert_eq!(apply_gc_function(12, src, dst), !src);              // GXcopyInverted
-        assert_eq!(apply_gc_function(13, src, dst), !src | dst);        // GXorInverted
-        assert_eq!(apply_gc_function(14, src, dst), !(src & dst));      // GXnand
-        assert_eq!(apply_gc_function(15, src, dst), 0xFFFFFFFF);        // GXset
-        assert_eq!(apply_gc_function(16, src, dst), src);               // out of range -> copy
+        assert_eq!(apply_gc_function(0, src, dst), 0); // GXclear
+        assert_eq!(apply_gc_function(1, src, dst), src & dst); // GXand
+        assert_eq!(apply_gc_function(2, src, dst), src & !dst); // GXandReverse
+        assert_eq!(apply_gc_function(3, src, dst), src); // GXcopy
+        assert_eq!(apply_gc_function(4, src, dst), !src & dst); // GXandInverted
+        assert_eq!(apply_gc_function(5, src, dst), dst); // GXnoop
+        assert_eq!(apply_gc_function(6, src, dst), src ^ dst); // GXxor
+        assert_eq!(apply_gc_function(7, src, dst), src | dst); // GXor
+        assert_eq!(apply_gc_function(8, src, dst), !(src | dst)); // GXnor
+        assert_eq!(apply_gc_function(9, src, dst), !(src ^ dst)); // GXequiv
+        assert_eq!(apply_gc_function(10, src, dst), !dst); // GXinvert
+        assert_eq!(apply_gc_function(11, src, dst), src | !dst); // GXorReverse
+        assert_eq!(apply_gc_function(12, src, dst), !src); // GXcopyInverted
+        assert_eq!(apply_gc_function(13, src, dst), !src | dst); // GXorInverted
+        assert_eq!(apply_gc_function(14, src, dst), !(src & dst)); // GXnand
+        assert_eq!(apply_gc_function(15, src, dst), 0xFFFFFFFF); // GXset
+        assert_eq!(apply_gc_function(16, src, dst), src); // out of range -> copy
     }
 
     // -----------------------------------------------------------------------
@@ -1245,7 +1338,7 @@ mod tests {
         use super::super::client::types::KeyboardControl;
         let mut kc = KeyboardControl::default();
         assert_eq!(kc.led_mask & (1 << 2), 0); // LED 3 initially off
-        // Simulate: set led=3 first, then led_mode=1
+                                               // Simulate: set led=3 first, then led_mode=1
         kc.led_mask |= 1 << 2; // LED 3 on (bit 2, since LED 3 = index 2)
         assert_ne!(kc.led_mask & (1 << 2), 0);
     }
@@ -1348,7 +1441,10 @@ mod tests {
         let parent_mask: u32 = super::SUBSTRUCTURE_REDIRECT_MASK;
         let override_redirect = false;
         let has_redirect = parent_mask & super::SUBSTRUCTURE_REDIRECT_MASK != 0;
-        assert!(has_redirect && !override_redirect, "Non-OR child of redirect parent should generate MapRequest");
+        assert!(
+            has_redirect && !override_redirect,
+            "Non-OR child of redirect parent should generate MapRequest"
+        );
     }
 
     #[test]
@@ -1356,8 +1452,12 @@ mod tests {
         // override_redirect windows must bypass SubstructureRedirect
         let parent_mask: u32 = super::SUBSTRUCTURE_REDIRECT_MASK;
         let override_redirect = true;
-        let should_redirect = (parent_mask & super::SUBSTRUCTURE_REDIRECT_MASK != 0) && !override_redirect;
-        assert!(!should_redirect, "Override-redirect windows must not be redirected");
+        let should_redirect =
+            (parent_mask & super::SUBSTRUCTURE_REDIRECT_MASK != 0) && !override_redirect;
+        assert!(
+            !should_redirect,
+            "Override-redirect windows must not be redirected"
+        );
     }
 
     #[test]
@@ -1367,8 +1467,10 @@ mod tests {
         let parent_mask: u32 = super::SUBSTRUCTURE_REDIRECT_MASK;
         let is_override_redirect = false;
         let parent_has_redirect = parent_mask & super::SUBSTRUCTURE_REDIRECT_MASK != 0;
-        assert!(parent_has_redirect && !is_override_redirect,
-            "Non-OR child should generate ConfigureRequest when parent has redirect");
+        assert!(
+            parent_has_redirect && !is_override_redirect,
+            "Non-OR child should generate ConfigureRequest when parent has redirect"
+        );
     }
 
     #[test]
@@ -1377,8 +1479,15 @@ mod tests {
         // not just top-level windows. Non-top-level default to NormalState (1).
         let is_top_level = false;
         let initial_state = 1u32; // NormalState
-        let wm_state_val = if is_top_level && initial_state == 3 { 3u32 } else { 1u32 };
-        assert_eq!(wm_state_val, 1, "Non-top-level mapped windows should have NormalState");
+        let wm_state_val = if is_top_level && initial_state == 3 {
+            3u32
+        } else {
+            1u32
+        };
+        assert_eq!(
+            wm_state_val, 1,
+            "Non-top-level mapped windows should have NormalState"
+        );
     }
 
     // -----------------------------------------------------------------------
@@ -1430,7 +1539,8 @@ mod tests {
         opcodes.sort();
         opcodes.dedup();
         assert_eq!(
-            opcodes.len(), query_dispatch.len(),
+            opcodes.len(),
+            query_dispatch.len(),
             "Extension opcodes must all be unique"
         );
     }
@@ -1443,14 +1553,61 @@ mod tests {
     fn list_extensions_complete() {
         // All extensions supported by QueryExtension must also appear in ListExtensions
         let query_names: &[&str] = &[
-            "RENDER", "MIT-SHM", "BIG-REQUESTS", "XFIXES", "SHAPE", "SYNC",
-            "Generic Event Extension", "Composite", "DAMAGE", "RANDR",
-            "XInputExtension", "XKEYBOARD", "XTEST", "DPMS", "MIT-SCREEN-SAVER",
-            "XFree86-VidModeExtension", "RECORD", "SECURITY", "XVideo",
-            "DOUBLE-BUFFER", "XINERAMA", "GLX", "DRI3", "X-Resource", "XC-MISC",
+            "RENDER",
+            "MIT-SHM",
+            "BIG-REQUESTS",
+            "XFIXES",
+            "SHAPE",
+            "SYNC",
+            "Generic Event Extension",
+            "Composite",
+            "DAMAGE",
+            "RANDR",
+            "XInputExtension",
+            "XKEYBOARD",
+            "XTEST",
+            "DPMS",
+            "MIT-SCREEN-SAVER",
+            "XFree86-VidModeExtension",
+            "RECORD",
+            "SECURITY",
+            "XVideo",
+            "DOUBLE-BUFFER",
+            "XINERAMA",
+            "GLX",
+            "DRI3",
+            "X-Resource",
+            "XC-MISC",
             "Present",
         ];
-        let list_extensions: &[&str] = &["BIG-REQUESTS", "MIT-SHM", "RENDER", "XFIXES", "SHAPE", "SYNC", "Generic Event Extension", "XC-MISC", "Composite", "DAMAGE", "Present", "RANDR", "XInputExtension", "XKEYBOARD", "XTEST", "DPMS", "MIT-SCREEN-SAVER", "XFree86-VidModeExtension", "RECORD", "SECURITY", "XVideo", "DOUBLE-BUFFER", "XINERAMA", "GLX", "DRI3", "X-Resource"];
+        let list_extensions: &[&str] = &[
+            "BIG-REQUESTS",
+            "MIT-SHM",
+            "RENDER",
+            "XFIXES",
+            "SHAPE",
+            "SYNC",
+            "Generic Event Extension",
+            "XC-MISC",
+            "Composite",
+            "DAMAGE",
+            "Present",
+            "RANDR",
+            "XInputExtension",
+            "XKEYBOARD",
+            "XTEST",
+            "DPMS",
+            "MIT-SCREEN-SAVER",
+            "XFree86-VidModeExtension",
+            "RECORD",
+            "SECURITY",
+            "XVideo",
+            "DOUBLE-BUFFER",
+            "XINERAMA",
+            "GLX",
+            "DRI3",
+            "X-Resource",
+        ];
         for &name in query_names {
             assert!(
                 list_extensions.contains(&name),
@@ -1464,12 +1621,25 @@ mod tests {
         // Only top-level windows can start in IconicState (3)
         let is_top_level = true;
         let initial_state = 3u32;
-        let wm_state_val = if is_top_level && initial_state == 3 { 3u32 } else { 1u32 };
-        assert_eq!(wm_state_val, 3, "Top-level with initial_state=3 should be IconicState");
+        let wm_state_val = if is_top_level && initial_state == 3 {
+            3u32
+        } else {
+            1u32
+        };
+        assert_eq!(
+            wm_state_val, 3,
+            "Top-level with initial_state=3 should be IconicState"
+        );
 
         let is_top_level = false;
-        let wm_state_val2 = if is_top_level && initial_state == 3 { 3u32 } else { 1u32 };
-        assert_eq!(wm_state_val2, 1, "Non-top-level should always be NormalState");
+        let wm_state_val2 = if is_top_level && initial_state == 3 {
+            3u32
+        } else {
+            1u32
+        };
+        assert_eq!(
+            wm_state_val2, 1,
+            "Non-top-level should always be NormalState"
+        );
     }
 }
-

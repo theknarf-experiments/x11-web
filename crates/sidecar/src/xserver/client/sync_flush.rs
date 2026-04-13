@@ -19,13 +19,20 @@ impl ClientState {
                 Some(b) => b,
                 None => return,
             };
-            (backing.shmseg, backing.offset, pix.width as usize, pix.height as usize)
+            (
+                backing.shmseg,
+                backing.offset,
+                pix.width as usize,
+                pix.height as usize,
+            )
         };
 
         let seg = match self.shm_segments.get(&shmseg) {
             Some(s) => s,
             None => {
-                tracing::warn!("sync_shm_pixmap: SHM segment {shmseg} not found for pixmap {target:#x}");
+                tracing::warn!(
+                    "sync_shm_pixmap: SHM segment {shmseg} not found for pixmap {target:#x}"
+                );
                 return;
             }
         };
@@ -71,7 +78,10 @@ impl ClientState {
                         local_win.redirected = true;
                     }
                     for (&atom, val) in shared_win.properties.iter() {
-                        local_win.properties.entry(atom).or_insert_with(|| val.clone());
+                        local_win
+                            .properties
+                            .entry(atom)
+                            .or_insert_with(|| val.clone());
                     }
                 } else {
                     self.windows.insert(wid, shared_win.clone());
@@ -158,11 +168,16 @@ impl ClientState {
                 continue;
             }
 
-            let pixels = self.windows.get(child_id).map(|child| child.framebuffer.extract_pixels(0, 0, *cw, *ch));
+            let pixels = self
+                .windows
+                .get(child_id)
+                .map(|child| child.framebuffer.extract_pixels(0, 0, *cw, *ch));
 
             if let Some(pixels) = pixels {
                 if let Some(ancestor) = self.windows.get_mut(&target) {
-                    ancestor.framebuffer.put_image(off_x as i16, off_y as i16, *cw, *ch, &pixels);
+                    ancestor
+                        .framebuffer
+                        .put_image(off_x as i16, off_y as i16, *cw, *ch, &pixels);
                 }
             }
 
@@ -178,23 +193,26 @@ impl ClientState {
             .windows
             .iter()
             .filter(|(_, w)| {
-                w.mapped
-                    && w.framebuffer.is_dirty()
-                    && w.parent == self.root_window
-                    && w.class == 1
+                w.mapped && w.framebuffer.is_dirty() && w.parent == self.root_window && w.class == 1
             })
             .map(|(id, w)| (*id, w.redirected))
             .collect();
 
         for (wid, redirected) in window_ids {
-            let Some(wid_str) = self.window_uuid(wid) else { continue };
+            let Some(wid_str) = self.window_uuid(wid) else {
+                continue;
+            };
             if let Some(win) = self.windows.get_mut(&wid) {
                 if let Some((x, y, w, h, mut pixels)) = win.framebuffer.take_dirty_pixels() {
                     // Accumulate damage for DAMAGE subscribers regardless of redirect state.
                     let damage_rect = super::super::types::RegionRect {
-                        x, y, width: w, height: h,
+                        x,
+                        y,
+                        width: w,
+                        height: h,
                     };
-                    let damage_region = super::super::types::XFixesRegion::from_rects(vec![damage_rect]);
+                    let damage_region =
+                        super::super::types::XFixesRegion::from_rects(vec![damage_rect]);
                     let win_width = win.width;
                     let win_height = win.height;
                     let damage_matches: Vec<(u32, u8)> = self
@@ -238,7 +256,7 @@ impl ClientState {
                                 if !point_in_shape(shape, x + px, y + py) {
                                     let offset = (py as usize * w as usize + px as usize) * 4;
                                     if offset + 3 < pixels.len() {
-                                        pixels[offset] = 0;     // B
+                                        pixels[offset] = 0; // B
                                         pixels[offset + 1] = 0; // G
                                         pixels[offset + 2] = 0; // R
                                         pixels[offset + 3] = 0; // A
@@ -282,7 +300,12 @@ impl ClientState {
         let resolved = self.resolve_drawable(drawable);
 
         // Accumulate damage into matching DamageInfo regions.
-        let damage_rect = super::super::types::RegionRect { x, y, width, height };
+        let damage_rect = super::super::types::RegionRect {
+            x,
+            y,
+            width,
+            height,
+        };
         let damage_region = super::super::types::XFixesRegion::from_rects(vec![damage_rect]);
 
         let matches: Vec<(u32, u8)> = self

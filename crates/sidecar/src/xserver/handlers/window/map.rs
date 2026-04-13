@@ -1,8 +1,8 @@
 //! Map/unmap window handlers (opcodes 8, 9, 10, 11).
 
+use super::update_sibling_visibility;
 use super::*;
 use crate::xserver::core::require_len;
-use super::update_sibling_visibility;
 
 // ---------------------------------------------------------------------------
 // Opcode 8: MapWindow
@@ -11,12 +11,18 @@ use super::update_sibling_visibility;
 pub(crate) fn handle_map_window(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
     require_len!(data, 8, seq, 8);
     let wid = state.read_u32(data, 4);
-    info!("MapWindow called: wid={wid:#x} exists={}", state.windows.contains_key(&wid));
+    info!(
+        "MapWindow called: wid={wid:#x} exists={}",
+        state.windows.contains_key(&wid)
+    );
 
     let mut events = Vec::new();
 
     if !state.windows.contains_key(&wid) {
-        warn!("MapWindow: id={wid:#x} NOT FOUND in client {}", state.client_id);
+        warn!(
+            "MapWindow: id={wid:#x} NOT FOUND in client {}",
+            state.client_id
+        );
         return build_error(BAD_WINDOW, seq, wid, 8, 0);
     }
 
@@ -30,7 +36,9 @@ pub(crate) fn handle_map_window(state: &mut ClientState, data: &[u8], seq: u16) 
         let should_redirect = {
             if let Ok(wm) = state.wm_state.lock() {
                 // Redirect if a WM has registered AND is a different client
-                wm.client_id.as_ref().is_some_and(|id| id != &state.client_id)
+                wm.client_id
+                    .as_ref()
+                    .is_some_and(|id| id != &state.client_id)
             } else {
                 false
             }
@@ -39,13 +47,13 @@ pub(crate) fn handle_map_window(state: &mut ClientState, data: &[u8], seq: u16) 
         // Also check if any client has SubstructureRedirectMask on the parent
         // (even without a formal WM registration — per X11 spec the mask is
         // what matters, not a WM registration handshake).
-        let parent_has_redirect = state.windows.get(&parent_id)
+        let parent_has_redirect = state
+            .windows
+            .get(&parent_id)
             .is_some_and(|p| p.event_mask & SUBSTRUCTURE_REDIRECT_MASK != 0);
 
         if should_redirect || parent_has_redirect {
-            info!(
-                "MapWindow: redirecting wid={wid:#x} as MapRequest (parent={parent_id:#x})"
-            );
+            info!("MapWindow: redirecting wid={wid:#x} as MapRequest (parent={parent_id:#x})");
             // Build MapRequest event (code 20)
             let mut map_request = [0u8; 32];
             map_request[0] = MAP_REQUEST_EVENT;
@@ -80,33 +88,50 @@ pub(crate) fn handle_map_window(state: &mut ClientState, data: &[u8], seq: u16) 
 
     // Pre-extract background fill info before the main mutable borrow.
     // Complex fills (ParentRelative, pixmap tiling) need separate data extraction.
-    struct BgInfo { bg_pixmap: Option<u32>, parent: u32 }
-    let bg_info: Option<BgInfo> = state.windows.get(&wid).map(|w| {
-        BgInfo { bg_pixmap: w.background_pixmap, parent: w.parent }
+    struct BgInfo {
+        bg_pixmap: Option<u32>,
+        parent: u32,
+    }
+    let bg_info: Option<BgInfo> = state.windows.get(&wid).map(|w| BgInfo {
+        bg_pixmap: w.background_pixmap,
+        parent: w.parent,
     });
 
     // For ParentRelative, copy parent pixel data before mutating
     let parent_pixel_data: Option<(Vec<u8>, u32, u32)> = bg_info.as_ref().and_then(|info| {
         if info.bg_pixmap == Some(1) {
-            state.windows.get(&info.parent).map(|p| (p.framebuffer.data().to_vec(), p.framebuffer.width(), p.framebuffer.height()))
+            state.windows.get(&info.parent).map(|p| {
+                (
+                    p.framebuffer.data().to_vec(),
+                    p.framebuffer.width(),
+                    p.framebuffer.height(),
+                )
+            })
         } else {
             None
         }
     });
 
     // For pixmap tiling, copy pixmap data before mutating
-    let tile_pixel_data: Option<(Vec<u8>, u32, u32)> = bg_info.as_ref().and_then(|info| {
-        match info.bg_pixmap {
-            Some(pid) if pid > 1 => {
-                state.pixmaps.get(&pid).map(|p| (p.framebuffer.data().to_vec(), p.width as u32, p.height as u32))
-            }
+    let tile_pixel_data: Option<(Vec<u8>, u32, u32)> =
+        bg_info.as_ref().and_then(|info| match info.bg_pixmap {
+            Some(pid) if pid > 1 => state.pixmaps.get(&pid).map(|p| {
+                (
+                    p.framebuffer.data().to_vec(),
+                    p.width as u32,
+                    p.height as u32,
+                )
+            }),
             _ => None,
-        }
-    });
+        });
 
     if let Some(win) = state.windows.get_mut(&wid) {
-        info!("MapWindow: id={wid:#x} {}x{} mapped={}", win.width, win.height, win.mapped);
-        let is_top_level = win.parent == state.root_window && win.class == 1 && !win.override_redirect;
+        info!(
+            "MapWindow: id={wid:#x} {}x{} mapped={}",
+            win.width, win.height, win.mapped
+        );
+        let is_top_level =
+            win.parent == state.root_window && win.class == 1 && !win.override_redirect;
         win.mapped = true;
 
         let w = win.width;
@@ -148,8 +173,10 @@ pub(crate) fn handle_map_window(state: &mut ClientState, data: &[u8], seq: u16) 
                                 if sx >= 0 && sy >= 0 && (sx as u32) < pw && (sy as u32) < ph {
                                     let src_off = ((sy as u32) * pw + sx as u32) as usize * 4;
                                     let dst_off = dy as usize * dst_stride + dx as usize * 4;
-                                    if src_off + 4 <= parent_data.len() && dst_off + 4 <= dst.len() {
-                                        dst[dst_off..dst_off + 4].copy_from_slice(&parent_data[src_off..src_off + 4]);
+                                    if src_off + 4 <= parent_data.len() && dst_off + 4 <= dst.len()
+                                    {
+                                        dst[dst_off..dst_off + 4]
+                                            .copy_from_slice(&parent_data[src_off..src_off + 4]);
                                     }
                                 }
                             }
@@ -161,8 +188,7 @@ pub(crate) fn handle_map_window(state: &mut ClientState, data: &[u8], seq: u16) 
                     if let Some((ref pix_data, pix_w, pix_h)) = tile_pixel_data {
                         if pix_w > 0 && pix_h > 0 {
                             win.framebuffer.fill_rect_tiled(
-                                0, 0, w, h, pix_data, pix_w, pix_h,
-                                0, 0, 3, 0xFFFFFFFF,
+                                0, 0, w, h, pix_data, pix_w, pix_h, 0, 0, 3, 0xFFFFFFFF,
                             );
                         }
                     } else {
@@ -184,14 +210,21 @@ pub(crate) fn handle_map_window(state: &mut ClientState, data: &[u8], seq: u16) 
         // Top-level windows may have IconicState (3) from WM_HINTS;
         // child windows default to NormalState (1).
         {
-            let wm_state_val = if is_top_level && initial_state == 3 { 3u32 } else { 1u32 };
+            let wm_state_val = if is_top_level && initial_state == 3 {
+                3u32
+            } else {
+                1u32
+            };
             let mut wm_state_data = vec![0u8; 8];
             write_u32_bo(&mut wm_state_data, 0, wm_state_val, false); // LE
-            win.properties.insert(wm_state_atom, PropertyValue {
-                prop_type: wm_state_atom,
-                format: 32,
-                data: wm_state_data,
-            });
+            win.properties.insert(
+                wm_state_atom,
+                PropertyValue {
+                    prop_type: wm_state_atom,
+                    format: 32,
+                    data: wm_state_data,
+                },
+            );
         }
 
         let override_redirect = win.override_redirect;
@@ -201,7 +234,11 @@ pub(crate) fn handle_map_window(state: &mut ClientState, data: &[u8], seq: u16) 
 
         let _ = state.update_tx.send((
             state.client_id.clone(),
-            DisplayUpdate::WindowMapped { window_id: wid_str.clone(), is_top_level, override_redirect },
+            DisplayUpdate::WindowMapped {
+                window_id: wid_str.clone(),
+                is_top_level,
+                override_redirect,
+            },
         ));
 
         // If initial_state is IconicState (3), immediately send Minimized state to frontend
@@ -286,13 +323,22 @@ pub(crate) fn handle_map_window(state: &mut ClientState, data: &[u8], seq: u16) 
             // x=0, y=0 already zero
             write_u16_bo(&mut expose_event, 12, width, msb_first);
             write_u16_bo(&mut expose_event, 14, height, msb_first);
-            write_u16_bo(&mut expose_event, 16, total.saturating_sub(1) as u16, msb_first); // count: remaining
+            write_u16_bo(
+                &mut expose_event,
+                16,
+                total.saturating_sub(1) as u16,
+                msb_first,
+            ); // count: remaining
             if self_selected {
                 events.extend_from_slice(&expose_event);
             }
 
             for (i, (desc_id, dw, dh)) in descendants.iter().enumerate() {
-                let desc_mask = state.windows.get(desc_id).map(|w| w.event_mask).unwrap_or(0);
+                let desc_mask = state
+                    .windows
+                    .get(desc_id)
+                    .map(|w| w.event_mask)
+                    .unwrap_or(0);
                 if desc_mask & EXPOSURE_MASK != 0 {
                     let mut exp = [0u8; 32];
                     exp[0] = EXPOSE_EVENT;
@@ -313,13 +359,17 @@ pub(crate) fn handle_map_window(state: &mut ClientState, data: &[u8], seq: u16) 
     }
 
     // After the mutable borrow is released, set EWMH properties
-    let is_top_level_for_ewmh = state.windows.get(&wid)
+    let is_top_level_for_ewmh = state
+        .windows
+        .get(&wid)
         .is_some_and(|w| w.parent == state.root_window && w.class == 1 && !w.override_redirect);
 
     // Set _NET_WM_STATE to empty (NormalState) if not already set
     let net_wm_state_atom = state.intern_atom("_NET_WM_STATE", false);
     if let Some(win) = state.windows.get_mut(&wid) {
-        win.properties.entry(net_wm_state_atom).or_insert_with(|| PropertyValue {
+        win.properties
+            .entry(net_wm_state_atom)
+            .or_insert_with(|| PropertyValue {
                 prop_type: 4, // ATOM
                 format: 32,
                 data: Vec::new(),
@@ -352,7 +402,11 @@ pub(crate) fn handle_map_window(state: &mut ClientState, data: &[u8], seq: u16) 
             if has_parent && has_child {
                 // Remove transient window and re-insert it just above its parent
                 root_win.children_order.retain(|&c| c != wid);
-                if let Some(pos) = root_win.children_order.iter().position(|&c| c == parent_wid) {
+                if let Some(pos) = root_win
+                    .children_order
+                    .iter()
+                    .position(|&c| c == parent_wid)
+                {
                     root_win.children_order.insert(pos + 1, wid);
                 } else {
                     root_win.children_order.push(wid);
@@ -369,7 +423,9 @@ pub(crate) fn handle_map_window(state: &mut ClientState, data: &[u8], seq: u16) 
     // Globally Active: input=false, supports WM_TAKE_FOCUS → only send WM_TAKE_FOCUS
     // No Input: input=false, no WM_TAKE_FOCUS → don't focus at all
     if is_top_level_for_ewmh {
-        let accepts_input = state.windows.get(&wid)
+        let accepts_input = state
+            .windows
+            .get(&wid)
             .and_then(|w| w.wm_hints_input)
             .unwrap_or(true); // ICCCM default: accepts focus if not specified
         if accepts_input {
@@ -390,11 +446,18 @@ pub(crate) fn handle_map_window(state: &mut ClientState, data: &[u8], seq: u16) 
                 let abs_y = win.y as i16;
                 let abs_x2 = abs_x + win.width as i16;
                 let abs_y2 = abs_y + win.height as i16;
-                if pointer_x >= abs_x && pointer_x < abs_x2
-                    && pointer_y >= abs_y && pointer_y < abs_y2
+                if pointer_x >= abs_x
+                    && pointer_x < abs_x2
+                    && pointer_y >= abs_y
+                    && pointer_y < abs_y2
                 {
                     let crossing = crate::xserver::input::build_crossing_events(
-                        state, wid, pointer_x, pointer_y, pointer_x - abs_x, pointer_y - abs_y,
+                        state,
+                        wid,
+                        pointer_x,
+                        pointer_y,
+                        pointer_x - abs_x,
+                        pointer_y - abs_y,
                     );
                     events.extend(crossing);
                 }
@@ -460,7 +523,9 @@ pub(crate) fn handle_unmap_window(state: &mut ClientState, data: &[u8], seq: u16
     let mut events = Vec::new();
 
     // Extract info we need before mutating
-    let (is_top_level, parent_id) = state.windows.get(&wid)
+    let (is_top_level, parent_id) = state
+        .windows
+        .get(&wid)
         .map(|w| (w.parent == state.root_window, w.parent))
         .unwrap_or((false, 0));
     let bo = state.msb_first;
@@ -522,7 +587,9 @@ pub(crate) fn handle_unmap_window(state: &mut ClientState, data: &[u8], seq: u16
         write_u32_bo(&mut parent_event, 4, parent_id, bo);
         write_u32_bo(&mut parent_event, 8, wid, bo);
 
-        let parent_wants_notify = state.windows.get(&parent_id)
+        let parent_wants_notify = state
+            .windows
+            .get(&parent_id)
             .is_some_and(|w| w.event_mask & SUBSTRUCTURE_NOTIFY_MASK != 0);
         if parent_wants_notify {
             events.extend_from_slice(&parent_event);
@@ -540,7 +607,9 @@ pub(crate) fn handle_unmap_window(state: &mut ClientState, data: &[u8], seq: u16
 
     // ICCCM §4.1.2.6: When a transient-for parent is unmapped, also unmap its transient children.
     // Collect transient children first to avoid borrow issues.
-    let transient_children: Vec<u32> = state.windows.values()
+    let transient_children: Vec<u32> = state
+        .windows
+        .values()
         .filter(|w| w.transient_for == Some(wid) && w.mapped)
         .map(|w| w.id)
         .collect();
@@ -568,7 +637,11 @@ pub(crate) fn handle_unmap_window(state: &mut ClientState, data: &[u8], seq: u16
         let pointer_x = state.pointer_x;
         let pointer_y = state.pointer_y;
         // The pointer now enters the parent window
-        let target = if parent_id != 0 { parent_id } else { state.root_window };
+        let target = if parent_id != 0 {
+            parent_id
+        } else {
+            state.root_window
+        };
         let crossing = crate::xserver::input::build_crossing_events(
             state, target, pointer_x, pointer_y, pointer_x, pointer_y,
         );

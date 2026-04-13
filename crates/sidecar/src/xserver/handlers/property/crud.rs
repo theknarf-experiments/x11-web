@@ -61,18 +61,24 @@ pub(crate) fn handle_change_property(state: &mut ClientState, data: &[u8]) -> Ve
                             existing.data = combined;
                         } else {
                             // Type/format mismatch: replace per spec (BadMatch would be stricter)
-                            win.properties.insert(property_atom, PropertyValue {
+                            win.properties.insert(
+                                property_atom,
+                                PropertyValue {
+                                    prop_type,
+                                    format,
+                                    data: new_data,
+                                },
+                            );
+                        }
+                    } else {
+                        win.properties.insert(
+                            property_atom,
+                            PropertyValue {
                                 prop_type,
                                 format,
                                 data: new_data,
-                            });
-                        }
-                    } else {
-                        win.properties.insert(property_atom, PropertyValue {
-                            prop_type,
-                            format,
-                            data: new_data,
-                        });
+                            },
+                        );
                     }
                 }
                 2 => {
@@ -81,27 +87,36 @@ pub(crate) fn handle_change_property(state: &mut ClientState, data: &[u8]) -> Ve
                         if existing.prop_type == prop_type && existing.format == format {
                             existing.data.extend_from_slice(&new_data);
                         } else {
-                            win.properties.insert(property_atom, PropertyValue {
+                            win.properties.insert(
+                                property_atom,
+                                PropertyValue {
+                                    prop_type,
+                                    format,
+                                    data: new_data,
+                                },
+                            );
+                        }
+                    } else {
+                        win.properties.insert(
+                            property_atom,
+                            PropertyValue {
                                 prop_type,
                                 format,
                                 data: new_data,
-                            });
-                        }
-                    } else {
-                        win.properties.insert(property_atom, PropertyValue {
-                            prop_type,
-                            format,
-                            data: new_data,
-                        });
+                            },
+                        );
                     }
                 }
                 _ => {
                     // Replace (mode 0 or any other value)
-                    win.properties.insert(property_atom, PropertyValue {
-                        prop_type,
-                        format,
-                        data: new_data,
-                    });
+                    win.properties.insert(
+                        property_atom,
+                        PropertyValue {
+                            prop_type,
+                            format,
+                            data: new_data,
+                        },
+                    );
                 }
             }
         }
@@ -153,7 +168,11 @@ pub(crate) fn handle_change_property(state: &mut ClientState, data: &[u8]) -> Ve
         if transient_data.len() >= 4 {
             let parent_wid = state.read_u32_from(transient_data, 0);
             if let Some(win) = state.windows.get_mut(&window) {
-                win.transient_for = if parent_wid != 0 { Some(parent_wid) } else { None };
+                win.transient_for = if parent_wid != 0 {
+                    Some(parent_wid)
+                } else {
+                    None
+                };
             }
         }
     }
@@ -169,7 +188,11 @@ pub(crate) fn handle_change_property(state: &mut ClientState, data: &[u8]) -> Ve
         if counter_data.len() >= 4 {
             let counter_id = state.read_u32_from(counter_data, 0);
             if let Some(win) = state.windows.get_mut(&window) {
-                win.sync_request_counter = if counter_id != 0 { Some(counter_id) } else { None };
+                win.sync_request_counter = if counter_id != 0 {
+                    Some(counter_id)
+                } else {
+                    None
+                };
             }
         }
     }
@@ -200,7 +223,8 @@ pub(crate) fn handle_change_property(state: &mut ClientState, data: &[u8]) -> Ve
     }
 
     // Check if this is _NET_WM_STRUT or _NET_WM_STRUT_PARTIAL — update strut and recalculate workarea
-    let is_strut = property_atom == 129 || property_atom == 130
+    let is_strut = property_atom == 129
+        || property_atom == 130
         || state
             .get_atom_name(property_atom)
             .map(|n| n == "_NET_WM_STRUT" || n == "_NET_WM_STRUT_PARTIAL")
@@ -231,13 +255,13 @@ pub(crate) fn handle_change_property(state: &mut ClientState, data: &[u8]) -> Ve
         let title = String::from_utf8_lossy(&data[24..24 + byte_len]).to_string();
         if !title.is_empty() {
             if let Some(uuid) = state.window_uuid(window) {
-            let _ = state.update_tx.send((
-                state.client_id.clone(),
-                DisplayUpdate::TitleChanged {
-                    window_id: uuid,
-                    title,
-                },
-            ));
+                let _ = state.update_tx.send((
+                    state.client_id.clone(),
+                    DisplayUpdate::TitleChanged {
+                        window_id: uuid,
+                        title,
+                    },
+                ));
             }
         }
     }
@@ -258,20 +282,13 @@ pub(crate) fn handle_change_property(state: &mut ClientState, data: &[u8]) -> Ve
                 let value = String::from_utf8_lossy(&data[24..24 + byte_len])
                     .trim_end_matches('\0')
                     .to_string();
-                let entry = state
-                    .gtk_menu_paths
-                    .entry(window)
-                    .or_default();
+                let entry = state.gtk_menu_paths.entry(window).or_default();
                 match name.as_str() {
                     "_GTK_UNIQUE_BUS_NAME" => entry.bus_name = value,
                     "_GTK_MENUBAR_OBJECT_PATH" => entry.menubar_path = Some(value),
                     "_GTK_APP_MENU_OBJECT_PATH" => entry.app_menu_path = Some(value),
-                    "_GTK_APPLICATION_OBJECT_PATH" => {
-                        entry.app_actions_path = Some(value)
-                    }
-                    "_GTK_WINDOW_OBJECT_PATH" => {
-                        entry.win_actions_path = Some(value)
-                    }
+                    "_GTK_APPLICATION_OBJECT_PATH" => entry.app_actions_path = Some(value),
+                    "_GTK_WINDOW_OBJECT_PATH" => entry.win_actions_path = Some(value),
                     _ => {}
                 }
                 if let Some(paths) = state.gtk_menu_paths.get(&window) {
@@ -359,7 +376,11 @@ pub(crate) fn handle_change_property(state: &mut ClientState, data: &[u8]) -> Ve
             if flags & (1 << 6) != 0 && hint_data.len() >= 36 {
                 let group_leader = state.read_u32_from(hint_data, 32);
                 if let Some(win) = state.windows.get_mut(&window) {
-                    win.wm_hints_window_group = if group_leader != 0 { Some(group_leader) } else { None };
+                    win.wm_hints_window_group = if group_leader != 0 {
+                        Some(group_leader)
+                    } else {
+                        None
+                    };
                 }
             }
         }
@@ -420,7 +441,11 @@ pub(crate) fn handle_delete_property(state: &mut ClientState, data: &[u8]) -> Ve
     {
         let window = state.read_u32(data, 4);
         let window_exists = state.windows.contains_key(&window)
-            || state.shared_windows.lock().ok().is_some_and(|s| s.contains_key(&window));
+            || state
+                .shared_windows
+                .lock()
+                .ok()
+                .is_some_and(|s| s.contains_key(&window));
         if !window_exists {
             return build_error(BAD_WINDOW, state.sequence, window, 19, 0);
         }
@@ -486,19 +511,27 @@ pub(crate) fn handle_get_property(state: &mut ClientState, data: &[u8], seq: u16
 
     // Validate window exists (local or shared)
     let window_exists = state.windows.contains_key(&window)
-        || state.shared_windows.lock().ok().is_some_and(|s| s.contains_key(&window));
+        || state
+            .shared_windows
+            .lock()
+            .ok()
+            .is_some_and(|s| s.contains_key(&window));
     if !window_exists {
         return build_error(BAD_WINDOW, seq, window, 20, 0);
     }
 
     // Check local copy first, then shared store for cross-client access.
-    let prop = state.windows.get(&window)
+    let prop = state
+        .windows
+        .get(&window)
         .and_then(|w| w.properties.get(&property_atom))
         .cloned()
         .or_else(|| {
-            state.shared_windows.lock().ok()
-                .and_then(|shared| shared.get(&window)
-                    .and_then(|w| w.properties.get(&property_atom).cloned()))
+            state.shared_windows.lock().ok().and_then(|shared| {
+                shared
+                    .get(&window)
+                    .and_then(|w| w.properties.get(&property_atom).cloned())
+            })
         });
 
     if let Some(prop_val) = prop {
@@ -582,7 +615,11 @@ pub(crate) fn handle_list_properties(state: &ClientState, data: &[u8], seq: u16)
     let window = state.read_u32(data, 4);
 
     let window_exists = state.windows.contains_key(&window)
-        || state.shared_windows.lock().ok().is_some_and(|s| s.contains_key(&window));
+        || state
+            .shared_windows
+            .lock()
+            .ok()
+            .is_some_and(|s| s.contains_key(&window));
     if !window_exists {
         return build_error(BAD_WINDOW, seq, window, 21, 0);
     }

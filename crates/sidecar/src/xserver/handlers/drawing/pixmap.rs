@@ -40,7 +40,10 @@ pub(crate) fn handle_create_pixmap(state: &mut ClientState, data: &[u8]) -> Vec<
         return build_error(BAD_ID_CHOICE, state.sequence, pid, 53, 0);
     }
 
-    info!("CreatePixmap: pid={pid:#x} {}x{} depth={depth}", width, height);
+    info!(
+        "CreatePixmap: pid={pid:#x} {}x{} depth={depth}",
+        width, height
+    );
 
     state.pixmaps.insert(
         pid,

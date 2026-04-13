@@ -80,7 +80,8 @@ pub(crate) fn handle_xc_misc_request(state: &mut ClientState, data: &[u8], seq: 
                     let id = state.resource_id_base | ((current_offset + i) & mask);
                     ids.push(id);
                 }
-                state.next_xid = state.resource_id_base | ((current_offset + sequential_count) & mask);
+                state.next_xid =
+                    state.resource_id_base | ((current_offset + sequential_count) & mask);
             }
 
             let actual_count = ids.len() as u32;
@@ -100,8 +101,12 @@ pub(crate) fn handle_xc_misc_request(state: &mut ClientState, data: &[u8], seq: 
         _ => {
             debug!("Unhandled XC-MISC minor opcode: {minor}");
             crate::xserver::core::build_error_bo(
-                crate::xserver::core::BAD_REQUEST, seq, minor as u32,
-                141, minor as u16, state.msb_first,
+                crate::xserver::core::BAD_REQUEST,
+                seq,
+                minor as u32,
+                141,
+                minor as u16,
+                state.msb_first,
             )
         }
     }
@@ -150,7 +155,10 @@ pub(crate) fn handle_present_request(state: &mut ClientState, data: &[u8], seq: 
                         );
                     }
                 } else {
-                    debug!("PresentPixmap: wait_fence {:#x} unknown, treating as triggered", wait_fence);
+                    debug!(
+                        "PresentPixmap: wait_fence {:#x} unknown, treating as triggered",
+                        wait_fence
+                    );
                 }
             }
 
@@ -194,7 +202,11 @@ pub(crate) fn handle_present_request(state: &mut ClientState, data: &[u8], seq: 
                             .filter(|r| r.width > 0 && r.height > 0)
                             .map(|r| (r.x, r.y, r.width, r.height))
                             .collect();
-                        if v.is_empty() { None } else { Some(v) }
+                        if v.is_empty() {
+                            None
+                        } else {
+                            Some(v)
+                        }
                     }
                 })
             } else {
@@ -211,13 +223,21 @@ pub(crate) fn handle_present_request(state: &mut ClientState, data: &[u8], seq: 
                     let min_y = rects.iter().map(|r| r.1).min().unwrap();
                     let max_x = rects.iter().map(|r| r.0 as i32 + r.2 as i32).max().unwrap();
                     let max_y = rects.iter().map(|r| r.1 as i32 + r.3 as i32).max().unwrap();
-                    (min_x, min_y, (max_x - min_x as i32) as u16, (max_y - min_y as i32) as u16)
+                    (
+                        min_x,
+                        min_y,
+                        (max_x - min_x as i32) as u16,
+                        (max_y - min_y as i32) as u16,
+                    )
                 }
             });
             if let Some((rx, ry, rw, rh)) = region_clip {
                 debug!(
                     "PresentPixmap: region clip x={} y={} w={} h={} ({} rects)",
-                    rx, ry, rw, rh,
+                    rx,
+                    ry,
+                    rw,
+                    rh,
                     region_rects.as_ref().map_or(0, |r| r.len()),
                 );
             }
@@ -250,9 +270,10 @@ pub(crate) fn handle_present_request(state: &mut ClientState, data: &[u8], seq: 
                 if src_depth <= 1 {
                     for i in (0..src_data.len()).step_by(4) {
                         if i + 3 < src_data.len() {
-                            let is_set = src_data[i] != 0 || src_data[i + 1] != 0 || src_data[i + 2] != 0;
+                            let is_set =
+                                src_data[i] != 0 || src_data[i + 1] != 0 || src_data[i + 2] != 0;
                             let val = if is_set { 0xFF } else { 0x00 };
-                            src_data[i] = val;     // B
+                            src_data[i] = val; // B
                             src_data[i + 1] = val; // G
                             src_data[i + 2] = val; // R
                             src_data[i + 3] = 0xFF;
@@ -321,12 +342,15 @@ pub(crate) fn handle_present_request(state: &mut ClientState, data: &[u8], seq: 
 
                 for (eff_x, eff_y, eff_w, eff_h) in &copy_rects {
                     let dst_stride = *eff_w as usize * 4;
-                    let needs_sub = *eff_x != 0 || *eff_y != 0 || *eff_w != src_w || *eff_h != src_h;
+                    let needs_sub =
+                        *eff_x != 0 || *eff_y != 0 || *eff_w != src_w || *eff_h != src_h;
                     let (copy_data, copy_w, copy_h, copy_x_off, copy_y_off) = if needs_sub {
                         let mut sub = vec![0u8; dst_stride * *eff_h as usize];
                         for row in 0..*eff_h as usize {
                             let sy = *eff_y as usize + row;
-                            if sy >= src_h as usize { break; }
+                            if sy >= src_h as usize {
+                                break;
+                            }
                             let s_start = sy * src_stride + *eff_x as usize * 4;
                             let s_end = s_start + dst_stride;
                             if s_end <= src_data.len() {
@@ -342,7 +366,8 @@ pub(crate) fn handle_present_request(state: &mut ClientState, data: &[u8], seq: 
 
                     // Copy to the child window (keeps its framebuffer up-to-date)
                     if let Some(win) = state.windows.get_mut(&window) {
-                        win.framebuffer.put_image(copy_x_off, copy_y_off, copy_w, copy_h, &copy_data);
+                        win.framebuffer
+                            .put_image(copy_x_off, copy_y_off, copy_w, copy_h, &copy_data);
                     }
 
                     // Also copy to the top-level parent so the frontend displays it
@@ -350,7 +375,13 @@ pub(crate) fn handle_present_request(state: &mut ClientState, data: &[u8], seq: 
                         let total_x_off = (copy_x_off as i32 + parent_dx) as i16;
                         let total_y_off = (copy_y_off as i32 + parent_dy) as i16;
                         if let Some(parent_win) = state.windows.get_mut(&target_wid) {
-                            parent_win.framebuffer.put_image(total_x_off, total_y_off, copy_w, copy_h, &copy_data);
+                            parent_win.framebuffer.put_image(
+                                total_x_off,
+                                total_y_off,
+                                copy_w,
+                                copy_h,
+                                &copy_data,
+                            );
                         }
                     }
 
@@ -368,7 +399,8 @@ pub(crate) fn handle_present_request(state: &mut ClientState, data: &[u8], seq: 
                 if copy_rects.len() > 1 {
                     info!(
                         "PresentPixmap: copied {} rects to window {:#x}",
-                        copy_rects.len(), window
+                        copy_rects.len(),
+                        window
                     );
                 } else if target_wid != window {
                     info!(
@@ -409,7 +441,9 @@ pub(crate) fn handle_present_request(state: &mut ClientState, data: &[u8], seq: 
             let matching_subs: Vec<(u32, u32)> = state
                 .present_subscriptions
                 .iter()
-                .filter(|(_, sub)| sub.window == window && (sub.event_mask & PRESENT_COMPLETE_NOTIFY_MASK) != 0)
+                .filter(|(_, sub)| {
+                    sub.window == window && (sub.event_mask & PRESENT_COMPLETE_NOTIFY_MASK) != 0
+                })
                 .map(|(&eid, sub)| (eid, sub.window))
                 .collect();
 
@@ -430,10 +464,10 @@ pub(crate) fn handle_present_request(state: &mut ClientState, data: &[u8], seq: 
                 state.write_u32(&mut event, 12, *event_id); // event_id
                 state.write_u32(&mut event, 16, window); // window
                 state.write_u32(&mut event, 20, serial); // serial
-                // UST: 64-bit microseconds since server start
+                                                         // UST: 64-bit microseconds since server start
                 state.write_u32(&mut event, 24, (ust & 0xFFFF_FFFF) as u32); // UST low
                 state.write_u32(&mut event, 28, (ust >> 32) as u32); // UST high
-                // MSC: 64-bit in extra data
+                                                                     // MSC: 64-bit in extra data
                 state.write_u32(&mut event, 32, (msc & 0xFFFF_FFFF) as u32); // MSC low
                 state.write_u32(&mut event, 36, (msc >> 32) as u32); // MSC high
                 state.pending_events.push(event);
@@ -446,7 +480,9 @@ pub(crate) fn handle_present_request(state: &mut ClientState, data: &[u8], seq: 
                 let idle_subs: Vec<u32> = state
                     .present_subscriptions
                     .iter()
-                    .filter(|(_, sub)| sub.window == window && (sub.event_mask & PRESENT_IDLE_NOTIFY_MASK) != 0)
+                    .filter(|(_, sub)| {
+                        sub.window == window && (sub.event_mask & PRESENT_IDLE_NOTIFY_MASK) != 0
+                    })
                     .map(|(&eid, _)| eid)
                     .collect();
 
@@ -457,7 +493,7 @@ pub(crate) fn handle_present_request(state: &mut ClientState, data: &[u8], seq: 
                     state.write_u16(&mut event, 2, seq);
                     // bytes 4-7: length = 0 (no extra data beyond 32 bytes)
                     state.write_u16(&mut event, 8, 2); // evtype = IdleNotify
-                    // bytes 10-11: pad
+                                                       // bytes 10-11: pad
                     state.write_u32(&mut event, 12, event_id); // event id
                     state.write_u32(&mut event, 16, window); // window
                     state.write_u32(&mut event, 20, serial); // serial
@@ -492,7 +528,9 @@ pub(crate) fn handle_present_request(state: &mut ClientState, data: &[u8], seq: 
             let matching_subs: Vec<(u32, u32)> = state
                 .present_subscriptions
                 .iter()
-                .filter(|(_, sub)| sub.window == window && (sub.event_mask & PRESENT_COMPLETE_NOTIFY_MASK) != 0)
+                .filter(|(_, sub)| {
+                    sub.window == window && (sub.event_mask & PRESENT_COMPLETE_NOTIFY_MASK) != 0
+                })
                 .map(|(&eid, sub)| (eid, sub.window))
                 .collect();
 
@@ -538,10 +576,9 @@ pub(crate) fn handle_present_request(state: &mut ClientState, data: &[u8], seq: 
                 // Unsubscribe
                 state.present_subscriptions.remove(&event_id);
             } else {
-                state.present_subscriptions.insert(
-                    event_id,
-                    PresentSubscription { window, event_mask },
-                );
+                state
+                    .present_subscriptions
+                    .insert(event_id, PresentSubscription { window, event_mask });
             }
             Vec::new() // SelectInput has no reply
         }
@@ -561,8 +598,12 @@ pub(crate) fn handle_present_request(state: &mut ClientState, data: &[u8], seq: 
         _ => {
             debug!("Unhandled Present minor opcode: {minor}");
             crate::xserver::core::build_error_bo(
-                crate::xserver::core::BAD_REQUEST, seq, minor as u32,
-                148, minor as u16, state.msb_first,
+                crate::xserver::core::BAD_REQUEST,
+                seq,
+                minor as u32,
+                148,
+                minor as u16,
+                state.msb_first,
             )
         }
     }
@@ -586,7 +627,9 @@ pub(crate) fn send_present_config_notify(
     let subs: Vec<u32> = state
         .present_subscriptions
         .iter()
-        .filter(|(_, sub)| sub.window == window && (sub.event_mask & PRESENT_CONFIG_NOTIFY_MASK) != 0)
+        .filter(|(_, sub)| {
+            sub.window == window && (sub.event_mask & PRESENT_CONFIG_NOTIFY_MASK) != 0
+        })
         .map(|(&eid, _)| eid)
         .collect();
 
@@ -606,7 +649,7 @@ pub(crate) fn send_present_config_notify(
         state.write_u16(&mut event, 2, seq);
         state.write_u32(&mut event, 4, 4); // extra length in 4-byte words
         state.write_u16(&mut event, 8, 3); // evtype = ConfigNotify
-        // bytes 10-11: pad
+                                           // bytes 10-11: pad
         state.write_u32(&mut event, 12, event_id);
         state.write_u32(&mut event, 16, window);
         state.write_i16(&mut event, 20, x);

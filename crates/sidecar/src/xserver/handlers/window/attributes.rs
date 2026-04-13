@@ -27,32 +27,33 @@ pub(crate) fn handle_change_window_attributes(state: &mut ClientState, data: &[u
     {
         let mut voff = 12;
         for bit in 0..15 {
-            if value_mask & (1 << bit) != 0
-                && voff + 4 <= data.len() {
-                    let val = read_u32_bo(data, voff, msb_first);
-                    match bit {
-                        4 if val > 10 => return build_error(BAD_VALUE, state.sequence, val, 2, 0),
-                        5 if val > 10 => return build_error(BAD_VALUE, state.sequence, val, 2, 0),
-                        6 if val > 2 => return build_error(BAD_VALUE, state.sequence, val, 2, 0),
-                        // bit 11 = event-mask: check SubstructureRedirect/ResizeRedirect
-                        // mutual exclusion per X11 spec Section 12.3
-                        11 => {
-                            if let Some(_conflict) = state.event_broadcaster
-                                .check_redirect_conflict(wid, val, &state.client_id)
-                            {
-                                return build_error(BAD_ACCESS, state.sequence, 0, 2, 0);
-                            }
+            if value_mask & (1 << bit) != 0 && voff + 4 <= data.len() {
+                let val = read_u32_bo(data, voff, msb_first);
+                match bit {
+                    4 if val > 10 => return build_error(BAD_VALUE, state.sequence, val, 2, 0),
+                    5 if val > 10 => return build_error(BAD_VALUE, state.sequence, val, 2, 0),
+                    6 if val > 2 => return build_error(BAD_VALUE, state.sequence, val, 2, 0),
+                    // bit 11 = event-mask: check SubstructureRedirect/ResizeRedirect
+                    // mutual exclusion per X11 spec Section 12.3
+                    11 => {
+                        if let Some(_conflict) = state.event_broadcaster.check_redirect_conflict(
+                            wid,
+                            val,
+                            &state.client_id,
+                        ) {
+                            return build_error(BAD_ACCESS, state.sequence, 0, 2, 0);
                         }
-                        // bit 14 = cursor: validate cursor ID exists
-                        14 if val != 0 => {
-                            if !state.cursors.contains_key(&val) {
-                                return build_error(BAD_CURSOR, state.sequence, val, 2, 0);
-                            }
-                        }
-                        _ => {}
                     }
-                    voff += 4;
+                    // bit 14 = cursor: validate cursor ID exists
+                    14 if val != 0 => {
+                        if !state.cursors.contains_key(&val) {
+                            return build_error(BAD_CURSOR, state.sequence, val, 2, 0);
+                        }
+                    }
+                    _ => {}
                 }
+                voff += 4;
+            }
         }
     }
 
@@ -62,64 +63,67 @@ pub(crate) fn handle_change_window_attributes(state: &mut ClientState, data: &[u
     if let Some(win) = state.windows.get_mut(&wid) {
         let mut offset = 12;
         for bit in 0..15 {
-            if value_mask & (1 << bit) != 0
-                && offset + 4 <= data.len() {
-                    let val = read_u32_bo(data, offset, msb_first);
-                    match bit {
-                        0 => {
-                            // background-pixmap: 0=None, 1=ParentRelative, else pixmap ID
-                            win.background_pixmap = Some(val);
-                        }
-                        1 => win.background_pixel = val,
-                        2 => {
-                            // border-pixmap: 0=CopyFromParent, else pixmap ID
-                            win.border_pixmap = Some(val);
-                        }
-                        3 => win.border_pixel = val,
-                        4 => { state.bit_gravity.insert(wid, val as u8); }
-                        5 => { state.win_gravity.insert(wid, val as u8); }
-                        6 => win.backing_store = val as u8,
-                        7 => win.backing_planes = val,
-                        8 => win.backing_pixel = val,
-                        9 => win.override_redirect = val != 0,
-                        10 => win.save_under = val != 0,
-                        11 => {
-                            win.event_mask = val;
-                            // SubstructureRedirectMask = bit 20 = 0x0010_0000
-                            const SUBSTRUCTURE_REDIRECT_MASK: u32 = 0x0010_0000;
-                            if wid == state.root_window && (val & SUBSTRUCTURE_REDIRECT_MASK) != 0 {
-                                info!(
+            if value_mask & (1 << bit) != 0 && offset + 4 <= data.len() {
+                let val = read_u32_bo(data, offset, msb_first);
+                match bit {
+                    0 => {
+                        // background-pixmap: 0=None, 1=ParentRelative, else pixmap ID
+                        win.background_pixmap = Some(val);
+                    }
+                    1 => win.background_pixel = val,
+                    2 => {
+                        // border-pixmap: 0=CopyFromParent, else pixmap ID
+                        win.border_pixmap = Some(val);
+                    }
+                    3 => win.border_pixel = val,
+                    4 => {
+                        state.bit_gravity.insert(wid, val as u8);
+                    }
+                    5 => {
+                        state.win_gravity.insert(wid, val as u8);
+                    }
+                    6 => win.backing_store = val as u8,
+                    7 => win.backing_planes = val,
+                    8 => win.backing_pixel = val,
+                    9 => win.override_redirect = val != 0,
+                    10 => win.save_under = val != 0,
+                    11 => {
+                        win.event_mask = val;
+                        // SubstructureRedirectMask = bit 20 = 0x0010_0000
+                        const SUBSTRUCTURE_REDIRECT_MASK: u32 = 0x0010_0000;
+                        if wid == state.root_window && (val & SUBSTRUCTURE_REDIRECT_MASK) != 0 {
+                            info!(
                                     "Client {} registering as window manager (SubstructureRedirectMask on root)",
                                     state.client_id
                                 );
-                                if let Ok(mut wm) = state.wm_state.lock() {
-                                    wm.client_id = Some(state.client_id.clone());
-                                    wm.event_tx = Some(state.wm_events_tx.clone());
-                                }
-                            }
-                            // Defer cross-connection subscription until after mutable borrow ends
-                            deferred_event_mask = Some(val);
-                        }
-                        12 => win.do_not_propagate_mask = val,
-                        13 => {
-                            // Colormap: 0 = CopyFromParent
-                            let old_cmap = win.colormap;
-                            win.colormap = val;
-                            if val != old_cmap && (win.event_mask & COLOURMAP_CHANGE_MASK != 0) {
-                                deferred_colormap_notify = Some((old_cmap, val));
+                            if let Ok(mut wm) = state.wm_state.lock() {
+                                wm.client_id = Some(state.client_id.clone());
+                                wm.event_tx = Some(state.wm_events_tx.clone());
                             }
                         }
-                        14 => {
-                            let new_cursor = if val == 0 { None } else { Some(val) };
-                            if win.cursor != new_cursor {
-                                win.cursor = new_cursor;
-                                cursor_changed = true;
-                            }
-                        }
-                        _ => {}
+                        // Defer cross-connection subscription until after mutable borrow ends
+                        deferred_event_mask = Some(val);
                     }
-                    offset += 4;
+                    12 => win.do_not_propagate_mask = val,
+                    13 => {
+                        // Colormap: 0 = CopyFromParent
+                        let old_cmap = win.colormap;
+                        win.colormap = val;
+                        if val != old_cmap && (win.event_mask & COLOURMAP_CHANGE_MASK != 0) {
+                            deferred_colormap_notify = Some((old_cmap, val));
+                        }
+                    }
+                    14 => {
+                        let new_cursor = if val == 0 { None } else { Some(val) };
+                        if win.cursor != new_cursor {
+                            win.cursor = new_cursor;
+                            cursor_changed = true;
+                        }
+                    }
+                    _ => {}
                 }
+                offset += 4;
+            }
         }
     }
 
@@ -172,7 +176,11 @@ pub(crate) fn handle_change_window_attributes(state: &mut ClientState, data: &[u
 // Opcode 3: GetWindowAttributes
 // ---------------------------------------------------------------------------
 
-pub(crate) fn handle_get_window_attributes(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
+pub(crate) fn handle_get_window_attributes(
+    state: &mut ClientState,
+    data: &[u8],
+    seq: u16,
+) -> Vec<u8> {
     require_len!(data, 8, seq, 3);
     let wid = state.read_u32(data, 4);
 
@@ -186,8 +194,8 @@ pub(crate) fn handle_get_window_attributes(state: &mut ClientState, data: &[u8],
     reply[1] = win.backing_store;
     state.write_u16(&mut reply, 2, seq);
     state.write_u32(&mut reply, 4, 3u32); // length = 3 extra u32s
-    state.write_u32(&mut reply, 8, win.visual);     // visual (4 bytes)
-    state.write_u16(&mut reply, 12, win.class);     // class (2 bytes)
+    state.write_u32(&mut reply, 8, win.visual); // visual (4 bytes)
+    state.write_u16(&mut reply, 12, win.class); // class (2 bytes)
     reply[14] = state.bit_gravity.get(&wid).copied().unwrap_or(0); // bit_gravity
     reply[15] = state.win_gravity.get(&wid).copied().unwrap_or(1); // win_gravity
     state.write_u32(&mut reply, 16, win.backing_planes); // backing_planes
@@ -196,15 +204,19 @@ pub(crate) fn handle_get_window_attributes(state: &mut ClientState, data: &[u8],
     reply[25] = 1; // map_is_installed = true
     reply[26] = if win.mapped { 2 } else { 0 }; // map_state: Viewable or Unmapped
     reply[27] = if win.override_redirect { 1 } else { 0 };
-    let cmap = if win.colormap != 0 { win.colormap } else { ROOT_COLORMAP };
+    let cmap = if win.colormap != 0 {
+        win.colormap
+    } else {
+        ROOT_COLORMAP
+    };
     state.write_u32(&mut reply, 28, cmap); // colormap
-    // all_event_masks: union of all clients' event masks (own + remote)
+                                           // all_event_masks: union of all clients' event masks (own + remote)
     let remote_masks = state.event_broadcaster.all_event_masks(wid);
     state.write_u32(&mut reply, 32, win.event_mask | remote_masks);
     // your_event_mask: this client's own event mask
     state.write_u32(&mut reply, 36, win.event_mask);
     state.write_u16(&mut reply, 40, win.do_not_propagate_mask as u16); // do_not_propagate_mask
-    // bytes 42-43: unused padding
+                                                                       // bytes 42-43: unused padding
 
     reply
 }

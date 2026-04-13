@@ -268,7 +268,10 @@ mod tests {
         let mut mgr = AtomManager::new();
         let id1 = mgr.intern("DUPLICATE_NAME", false);
         let id2 = mgr.intern("DUPLICATE_NAME", false);
-        assert_eq!(id1, id2, "interning the same name twice must return the same ID");
+        assert_eq!(
+            id1, id2,
+            "interning the same name twice must return the same ID"
+        );
     }
 
     #[test]
@@ -315,7 +318,10 @@ mod tests {
     fn intern_only_if_exists_returns_zero_for_missing_atom() {
         let mut mgr = AtomManager::new();
         let id = mgr.intern("NONEXISTENT_ATOM", true);
-        assert_eq!(id, 0, "only_if_exists=true must return 0 when atom does not exist");
+        assert_eq!(
+            id, 0,
+            "only_if_exists=true must return 0 when atom does not exist"
+        );
     }
 
     #[test]
@@ -323,7 +329,10 @@ mod tests {
         let mut mgr = AtomManager::new();
         let created = mgr.intern("PREEXISTING", false);
         let found = mgr.intern("PREEXISTING", true);
-        assert_eq!(created, found, "only_if_exists=true must return the existing ID");
+        assert_eq!(
+            created, found,
+            "only_if_exists=true must return the existing ID"
+        );
     }
 
     // -----------------------------------------------------------------------
@@ -417,9 +426,18 @@ mod tests {
         let lower = mgr.intern("myatom", false);
         let mixed = mgr.intern("MyAtom", false);
         // All three must be distinct atoms
-        assert_ne!(upper, lower, "atom names must be case-sensitive: MYATOM vs myatom");
-        assert_ne!(upper, mixed, "atom names must be case-sensitive: MYATOM vs MyAtom");
-        assert_ne!(lower, mixed, "atom names must be case-sensitive: myatom vs MyAtom");
+        assert_ne!(
+            upper, lower,
+            "atom names must be case-sensitive: MYATOM vs myatom"
+        );
+        assert_ne!(
+            upper, mixed,
+            "atom names must be case-sensitive: MYATOM vs MyAtom"
+        );
+        assert_ne!(
+            lower, mixed,
+            "atom names must be case-sensitive: myatom vs MyAtom"
+        );
     }
 
     #[test]
@@ -428,8 +446,14 @@ mod tests {
         // "string" (lowercase) is NOT the same as predefined "STRING"
         let lowercase_id = mgr.intern("string", false);
         let uppercase_id = mgr.intern("STRING", false);
-        assert_ne!(lowercase_id, uppercase_id, "'string' and 'STRING' must be different atoms");
-        assert_eq!(uppercase_id, 31, "predefined 'STRING' must still have ID 31");
+        assert_ne!(
+            lowercase_id, uppercase_id,
+            "'string' and 'STRING' must be different atoms"
+        );
+        assert_eq!(
+            uppercase_id, 31,
+            "predefined 'STRING' must still have ID 31"
+        );
     }
 
     // -----------------------------------------------------------------------
@@ -465,8 +489,14 @@ mod tests {
         let mut seen_ids = std::collections::HashSet::new();
         let mut seen_names = std::collections::HashSet::new();
         for &(name, id) in PREDEFINED_ATOMS {
-            assert!(seen_ids.insert(id), "predefined atom ID {id} ('{name}') is duplicated");
-            assert!(seen_names.insert(name), "predefined atom name '{name}' is duplicated");
+            assert!(
+                seen_ids.insert(id),
+                "predefined atom ID {id} ('{name}') is duplicated"
+            );
+            assert!(
+                seen_names.insert(name),
+                "predefined atom name '{name}' is duplicated"
+            );
         }
     }
 

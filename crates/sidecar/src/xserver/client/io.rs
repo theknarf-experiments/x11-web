@@ -24,8 +24,21 @@ impl ClientState {
 
     /// Build an error reply in the client's byte order.
     #[allow(dead_code)]
-    pub(crate) fn error(&self, error_code: u8, bad_value: u32, major_opcode: u8, minor_opcode: u16) -> Vec<u8> {
-        super::super::core::build_error_bo(error_code, self.sequence, bad_value, major_opcode, minor_opcode, self.msb_first)
+    pub(crate) fn error(
+        &self,
+        error_code: u8,
+        bad_value: u32,
+        major_opcode: u8,
+        minor_opcode: u16,
+    ) -> Vec<u8> {
+        super::super::core::build_error_bo(
+            error_code,
+            self.sequence,
+            bad_value,
+            major_opcode,
+            minor_opcode,
+            self.msb_first,
+        )
     }
 
     // -----------------------------------------------------------------------
@@ -48,9 +61,19 @@ impl ClientState {
     #[allow(dead_code)]
     pub(crate) fn read_u32(&self, data: &[u8], offset: usize) -> u32 {
         if self.msb_first {
-            u32::from_be_bytes([data[offset], data[offset + 1], data[offset + 2], data[offset + 3]])
+            u32::from_be_bytes([
+                data[offset],
+                data[offset + 1],
+                data[offset + 2],
+                data[offset + 3],
+            ])
         } else {
-            u32::from_le_bytes([data[offset], data[offset + 1], data[offset + 2], data[offset + 3]])
+            u32::from_le_bytes([
+                data[offset],
+                data[offset + 1],
+                data[offset + 2],
+                data[offset + 3],
+            ])
         }
     }
 
@@ -77,7 +100,11 @@ impl ClientState {
     #[inline]
     #[allow(dead_code)]
     pub(crate) fn write_u16(&self, buf: &mut [u8], offset: usize, val: u16) {
-        let bytes = if self.msb_first { val.to_be_bytes() } else { val.to_le_bytes() };
+        let bytes = if self.msb_first {
+            val.to_be_bytes()
+        } else {
+            val.to_le_bytes()
+        };
         buf[offset..offset + 2].copy_from_slice(&bytes);
     }
 
@@ -85,7 +112,11 @@ impl ClientState {
     #[inline]
     #[allow(dead_code)]
     pub(crate) fn write_u32(&self, buf: &mut [u8], offset: usize, val: u32) {
-        let bytes = if self.msb_first { val.to_be_bytes() } else { val.to_le_bytes() };
+        let bytes = if self.msb_first {
+            val.to_be_bytes()
+        } else {
+            val.to_le_bytes()
+        };
         buf[offset..offset + 4].copy_from_slice(&bytes);
     }
 
@@ -93,7 +124,11 @@ impl ClientState {
     #[inline]
     #[allow(dead_code)]
     pub(crate) fn write_i16(&self, buf: &mut [u8], offset: usize, val: i16) {
-        let bytes = if self.msb_first { val.to_be_bytes() } else { val.to_le_bytes() };
+        let bytes = if self.msb_first {
+            val.to_be_bytes()
+        } else {
+            val.to_le_bytes()
+        };
         buf[offset..offset + 2].copy_from_slice(&bytes);
     }
 }

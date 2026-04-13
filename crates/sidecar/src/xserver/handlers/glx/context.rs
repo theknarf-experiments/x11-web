@@ -10,12 +10,12 @@ use crate::osmesa::MesaContext;
 
 use super::super::super::client::ClientState;
 use super::super::super::core::ROOT_VISUAL;
-use super::{GlxContext, get_drawable_size};
 #[cfg(feature = "osmesa")]
 use super::blit_osmesa_to_drawable;
+use super::{get_drawable_size, GlxContext};
 
-use super::single_query;
 use super::single_ops;
+use super::single_query;
 use crate::xserver::core::require_len;
 
 // ---------------------------------------------------------------------------
@@ -60,7 +60,9 @@ pub(crate) fn handle_create_new_context(state: &mut ClientState, data: &[u8], se
     let screen = u32::from_le_bytes([data[12], data[13], data[14], data[15]]);
     let share_list = if data.len() >= 24 {
         u32::from_le_bytes([data[20], data[21], data[22], data[23]])
-    } else { 0 };
+    } else {
+        0
+    };
 
     // Map fbconfig to visual
     let visual = if fbconfig == 2 { 0x40 } else { ROOT_VISUAL };
@@ -88,7 +90,11 @@ pub(crate) fn handle_create_new_context(state: &mut ClientState, data: &[u8], se
 // GLX_CREATE_CONTEXT_ATTRIBS_ARB (minor 34)
 // ---------------------------------------------------------------------------
 
-pub(crate) fn handle_create_context_attribs(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
+pub(crate) fn handle_create_context_attribs(
+    state: &mut ClientState,
+    data: &[u8],
+    seq: u16,
+) -> Vec<u8> {
     require_len!(data, 28, seq, 159, 34, state.msb_first);
     let ctx_id = u32::from_le_bytes([data[4], data[5], data[6], data[7]]);
     let fbconfig = u32::from_le_bytes([data[8], data[9], data[10], data[11]]);
@@ -156,7 +162,11 @@ pub(crate) fn handle_make_current(state: &mut ClientState, data: &[u8], seq: u16
 // GLX_MAKE_CONTEXT_CURRENT (minor 26)
 // ---------------------------------------------------------------------------
 
-pub(crate) fn handle_make_context_current(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
+pub(crate) fn handle_make_context_current(
+    state: &mut ClientState,
+    data: &[u8],
+    seq: u16,
+) -> Vec<u8> {
     require_len!(data, 20, seq, 159, 26, state.msb_first);
     // draw drawable, read drawable, context
     let drawable = u32::from_le_bytes([data[4], data[5], data[6], data[7]]);
@@ -249,14 +259,10 @@ pub(crate) fn handle_copy_context(state: &mut ClientState, data: &[u8], seq: u16
     // Validate both contexts exist
     if !state.glx.contexts.contains_key(&src_ctx) {
         // GLXBadContext error (first error code for GLX extension = 160 by convention)
-        return crate::xserver::core::build_error_bo(
-            160, seq, src_ctx, 159, 10, state.msb_first,
-        );
+        return crate::xserver::core::build_error_bo(160, seq, src_ctx, 159, 10, state.msb_first);
     }
     if !state.glx.contexts.contains_key(&dst_ctx) {
-        return crate::xserver::core::build_error_bo(
-            160, seq, dst_ctx, 159, 10, state.msb_first,
-        );
+        return crate::xserver::core::build_error_bo(160, seq, dst_ctx, 159, 10, state.msb_first);
     }
 
     debug!("GLX CopyContext: src={src_ctx:#x} dst={dst_ctx:#x}");
@@ -431,7 +437,8 @@ pub(crate) fn handle_wait_x(state: &mut ClientState) -> Vec<u8> {
         if ctx_id != 0 && drawable != 0 {
             // Copy the X framebuffer content into the OSMesa buffer
             let target = state.resolve_drawable(drawable);
-            let x_pixels: Option<(Vec<u8>, u32, u32)> = state.get_framebuffer(target)
+            let x_pixels: Option<(Vec<u8>, u32, u32)> = state
+                .get_framebuffer(target)
                 .map(|fb| (fb.data().to_vec(), fb.width(), fb.height()));
 
             if let Some((pixels, w, h)) = x_pixels {

@@ -2,7 +2,10 @@
 
 use x11_web_protocol::DisplayUpdate;
 
-use super::super::core::{write_u16_bo, write_u32_bo, KEYMAP_NOTIFY_EVENT, KEYMAP_STATE_MASK, FOCUS_IN_EVENT, FOCUS_OUT_EVENT, FOCUS_CHANGE_MASK, CLIENT_MESSAGE_EVENT};
+use super::super::core::{
+    write_u16_bo, write_u32_bo, CLIENT_MESSAGE_EVENT, FOCUS_CHANGE_MASK, FOCUS_IN_EVENT,
+    FOCUS_OUT_EVENT, KEYMAP_NOTIFY_EVENT, KEYMAP_STATE_MASK,
+};
 use super::super::types::*;
 use super::ClientState;
 
@@ -14,12 +17,16 @@ impl ClientState {
             return;
         }
         let new_focus = match self.focus_revert_to {
-            0 => 0,                // RevertToNone
-            1 => 1,                // RevertToPointerRoot
+            0 => 0, // RevertToNone
+            1 => 1, // RevertToPointerRoot
             2 => {
                 // RevertToParent: walk up the window tree to find the nearest
                 // ancestor that still exists (it may have been destroyed too).
-                let mut candidate = self.windows.get(&window).map(|w| w.parent).unwrap_or(self.root_window);
+                let mut candidate = self
+                    .windows
+                    .get(&window)
+                    .map(|w| w.parent)
+                    .unwrap_or(self.root_window);
                 for _ in 0..128 {
                     if candidate == 0 || candidate == self.root_window {
                         break;
@@ -30,7 +37,11 @@ impl ClientState {
                     // This ancestor no longer exists; fall back to root.
                     candidate = self.root_window;
                 }
-                if candidate == 0 { self.root_window } else { candidate }
+                if candidate == 0 {
+                    self.root_window
+                } else {
+                    candidate
+                }
             }
             _ => self.root_window,
         };
@@ -52,11 +63,14 @@ impl ClientState {
             let net_active_atom = self.intern_atom("_NET_ACTIVE_WINDOW", false);
             let data = new_focus.to_le_bytes().to_vec();
             if let Some(root) = self.windows.get_mut(&self.root_window) {
-                root.properties.insert(net_active_atom, PropertyValue {
-                    prop_type: 33, // WINDOW
-                    format: 32,
-                    data,
-                });
+                root.properties.insert(
+                    net_active_atom,
+                    PropertyValue {
+                        prop_type: 33, // WINDOW
+                        format: 32,
+                        data,
+                    },
+                );
             }
             self.update_net_client_list();
         }
@@ -124,7 +138,9 @@ impl ClientState {
 
     /// Helper to send a single focus event if the window has FocusChangeMask selected.
     fn send_focus_event(&mut self, event_type: u8, detail: u8, window: u32, bo: bool, seq: u16) {
-        let has_mask = self.windows.get(&window)
+        let has_mask = self
+            .windows
+            .get(&window)
             .is_some_and(|w| w.event_mask & FOCUS_CHANGE_MASK != 0);
         if has_mask || window == self.root_window {
             let mut event = [0u8; 32];
@@ -176,7 +192,8 @@ impl ClientState {
         if old_is_ancestor && new_chain.contains(&old_focus) {
             // old focus is an ancestor of new focus
             // FocusOut detail = Inferior, FocusIn detail = Ancestor
-            let path: Vec<u32> = new_chain.iter()
+            let path: Vec<u32> = new_chain
+                .iter()
                 .take_while(|&&w| w != old_focus)
                 .copied()
                 .collect();
@@ -185,7 +202,8 @@ impl ClientState {
         if new_is_ancestor && old_chain.contains(&new_focus) {
             // new focus is an ancestor of old focus
             // FocusOut detail = Ancestor, FocusIn detail = Inferior
-            let path: Vec<u32> = old_chain.iter()
+            let path: Vec<u32> = old_chain
+                .iter()
                 .take_while(|&&w| w != new_focus)
                 .copied()
                 .collect();
@@ -199,12 +217,15 @@ impl ClientState {
             if new_chain.contains(&ow) || ow == self.root_window {
                 // Found LCA — collect intermediate windows
                 for &w in &old_chain {
-                    if w == ow { break; }
+                    if w == ow {
+                        break;
+                    }
                     virtual_path.push(w);
                 }
                 virtual_path.push(ow);
                 // Collect from new side
-                let new_intermediates: Vec<u32> = new_chain.iter()
+                let new_intermediates: Vec<u32> = new_chain
+                    .iter()
                     .take_while(|&&w| w != ow)
                     .copied()
                     .collect();
@@ -248,40 +269,58 @@ impl ClientState {
         let net_client_list_stacking_atom = self.intern_atom("_NET_CLIENT_LIST_STACKING", false);
 
         // _NET_CLIENT_LIST: all mapped top-level windows in deterministic (sorted) order
-        let mut client_windows: Vec<u32> = self.windows.values()
+        let mut client_windows: Vec<u32> = self
+            .windows
+            .values()
             .filter(|w| w.parent == self.root_window && w.class == 1 && w.mapped)
             .map(|w| w.id)
             .collect();
         client_windows.sort(); // Deterministic order
 
-        let data: Vec<u8> = client_windows.iter().flat_map(|w| w.to_le_bytes()).collect();
+        let data: Vec<u8> = client_windows
+            .iter()
+            .flat_map(|w| w.to_le_bytes())
+            .collect();
 
         // _NET_CLIENT_LIST_STACKING: mapped top-level windows in z-order (bottom to top)
         // Use root's children_order which tracks actual stacking order.
-        let stacking_windows: Vec<u32> = self.windows.get(&self.root_window)
+        let stacking_windows: Vec<u32> = self
+            .windows
+            .get(&self.root_window)
             .map(|root| {
-                root.children_order.iter()
+                root.children_order
+                    .iter()
                     .filter(|&&cid| {
-                        self.windows.get(&cid)
+                        self.windows
+                            .get(&cid)
                             .is_some_and(|w| w.class == 1 && w.mapped)
                     })
                     .copied()
                     .collect()
             })
             .unwrap_or_default();
-        let stacking_data: Vec<u8> = stacking_windows.iter().flat_map(|w| w.to_le_bytes()).collect();
+        let stacking_data: Vec<u8> = stacking_windows
+            .iter()
+            .flat_map(|w| w.to_le_bytes())
+            .collect();
 
         if let Some(root) = self.windows.get_mut(&self.root_window) {
-            root.properties.insert(net_client_list_atom, PropertyValue {
-                prop_type: 33, // WINDOW
-                format: 32,
-                data,
-            });
-            root.properties.insert(net_client_list_stacking_atom, PropertyValue {
-                prop_type: 33,
-                format: 32,
-                data: stacking_data,
-            });
+            root.properties.insert(
+                net_client_list_atom,
+                PropertyValue {
+                    prop_type: 33, // WINDOW
+                    format: 32,
+                    data,
+                },
+            );
+            root.properties.insert(
+                net_client_list_stacking_atom,
+                PropertyValue {
+                    prop_type: 33,
+                    format: 32,
+                    data: stacking_data,
+                },
+            );
         }
     }
 
@@ -298,11 +337,14 @@ impl ClientState {
         data[0..4].copy_from_slice(&wm_state_val.to_le_bytes());
         // icon_window = None (0)
         if let Some(win) = self.windows.get_mut(&window) {
-            win.properties.insert(wm_state_atom, PropertyValue {
-                prop_type: wm_state_atom,
-                format: 32,
-                data,
-            });
+            win.properties.insert(
+                wm_state_atom,
+                PropertyValue {
+                    prop_type: wm_state_atom,
+                    format: 32,
+                    data,
+                },
+            );
         }
     }
 
@@ -321,24 +363,31 @@ impl ClientState {
         ];
         let data: Vec<u8> = actions.iter().flat_map(|a| a.to_le_bytes()).collect();
         if let Some(win) = self.windows.get_mut(&window) {
-            win.properties.insert(allowed_atom, PropertyValue {
-                prop_type: 4, // ATOM
-                format: 32,
-                data,
-            });
+            win.properties.insert(
+                allowed_atom,
+                PropertyValue {
+                    prop_type: 4, // ATOM
+                    format: 32,
+                    data,
+                },
+            );
         }
     }
 
     /// Check if a window supports a specific WM_PROTOCOLS atom.
     pub(crate) fn window_supports_protocol(&self, window: u32, protocol_atom: u32) -> bool {
         let wm_protocols_atom = self.intern_atom("WM_PROTOCOLS", true);
-        if wm_protocols_atom == 0 { return false; }
-        self.windows.get(&window)
+        if wm_protocols_atom == 0 {
+            return false;
+        }
+        self.windows
+            .get(&window)
             .and_then(|w| w.properties.get(&wm_protocols_atom))
             .map(|pv| {
                 if pv.format == 32 {
                     pv.data.chunks_exact(4).any(|chunk| {
-                        u32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]) == protocol_atom
+                        u32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]])
+                            == protocol_atom
                     })
                 } else {
                     false
@@ -393,32 +442,48 @@ impl ClientState {
     /// Get WM_NORMAL_HINTS (size hints) for a window.
     pub(crate) fn get_size_hints(&self, window: u32) -> Option<SizeHints> {
         let wm_normal_hints_atom = self.intern_atom("WM_NORMAL_HINTS", true);
-        if wm_normal_hints_atom == 0 { return None; }
-        let pv = self.windows.get(&window)?.properties.get(&wm_normal_hints_atom)?;
-        if pv.format != 32 || pv.data.len() < 72 { return None; }
+        if wm_normal_hints_atom == 0 {
+            return None;
+        }
+        let pv = self
+            .windows
+            .get(&window)?
+            .properties
+            .get(&wm_normal_hints_atom)?;
+        if pv.format != 32 || pv.data.len() < 72 {
+            return None;
+        }
 
         let flags = u32::from_le_bytes([pv.data[0], pv.data[1], pv.data[2], pv.data[3]]);
         let mut hints = SizeHints::default();
 
         // PMinSize flag (bit 4)
         if flags & (1 << 4) != 0 && pv.data.len() >= 32 {
-            hints.min_width = u32::from_le_bytes([pv.data[20], pv.data[21], pv.data[22], pv.data[23]]) as u16;
-            hints.min_height = u32::from_le_bytes([pv.data[24], pv.data[25], pv.data[26], pv.data[27]]) as u16;
+            hints.min_width =
+                u32::from_le_bytes([pv.data[20], pv.data[21], pv.data[22], pv.data[23]]) as u16;
+            hints.min_height =
+                u32::from_le_bytes([pv.data[24], pv.data[25], pv.data[26], pv.data[27]]) as u16;
         }
         // PMaxSize flag (bit 5)
         if flags & (1 << 5) != 0 && pv.data.len() >= 40 {
-            hints.max_width = u32::from_le_bytes([pv.data[28], pv.data[29], pv.data[30], pv.data[31]]) as u16;
-            hints.max_height = u32::from_le_bytes([pv.data[32], pv.data[33], pv.data[34], pv.data[35]]) as u16;
+            hints.max_width =
+                u32::from_le_bytes([pv.data[28], pv.data[29], pv.data[30], pv.data[31]]) as u16;
+            hints.max_height =
+                u32::from_le_bytes([pv.data[32], pv.data[33], pv.data[34], pv.data[35]]) as u16;
         }
         // PResizeInc flag (bit 6)
         if flags & (1 << 6) != 0 && pv.data.len() >= 48 {
-            hints.width_inc = u32::from_le_bytes([pv.data[36], pv.data[37], pv.data[38], pv.data[39]]) as u16;
-            hints.height_inc = u32::from_le_bytes([pv.data[40], pv.data[41], pv.data[42], pv.data[43]]) as u16;
+            hints.width_inc =
+                u32::from_le_bytes([pv.data[36], pv.data[37], pv.data[38], pv.data[39]]) as u16;
+            hints.height_inc =
+                u32::from_le_bytes([pv.data[40], pv.data[41], pv.data[42], pv.data[43]]) as u16;
         }
         // PBaseSize flag (bit 8)
         if flags & (1 << 8) != 0 && pv.data.len() >= 64 {
-            hints.base_width = u32::from_le_bytes([pv.data[52], pv.data[53], pv.data[54], pv.data[55]]) as u16;
-            hints.base_height = u32::from_le_bytes([pv.data[56], pv.data[57], pv.data[58], pv.data[59]]) as u16;
+            hints.base_width =
+                u32::from_le_bytes([pv.data[52], pv.data[53], pv.data[54], pv.data[55]]) as u16;
+            hints.base_height =
+                u32::from_le_bytes([pv.data[56], pv.data[57], pv.data[58], pv.data[59]]) as u16;
         }
 
         Some(hints)
@@ -457,11 +522,14 @@ impl ClientState {
         data[12..16].copy_from_slice(&h.to_le_bytes());
 
         if let Some(root) = self.windows.get_mut(&self.root_window) {
-            root.properties.insert(net_workarea_atom, PropertyValue {
-                prop_type: 6, // CARDINAL
-                format: 32,
-                data,
-            });
+            root.properties.insert(
+                net_workarea_atom,
+                PropertyValue {
+                    prop_type: 6, // CARDINAL
+                    format: 32,
+                    data,
+                },
+            );
         }
     }
 }

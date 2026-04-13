@@ -253,8 +253,7 @@ async fn main() {
     let menu_tracker =
         crate::menus::MenuTracker::new(display_tx.clone(), dbus_address.clone()).await;
     // Watch channel for dynamic screen resize (RandR).
-    let (screen_size_tx, screen_size_rx) =
-        tokio::sync::watch::channel((1024u16, 768u16));
+    let (screen_size_tx, screen_size_rx) = tokio::sync::watch::channel((1024u16, 768u16));
     let x11_server = X11Server::new(
         display_number,
         display_tx,
@@ -503,7 +502,10 @@ async fn handle_command(
         } => {
             window_router.send_resize(&window_id, width, height);
         }
-        BackendToSidecar::RequestClipboard { selection, mime_type } => {
+        BackendToSidecar::RequestClipboard {
+            selection,
+            mime_type,
+        } => {
             info!("Clipboard request: selection={selection} mime={mime_type}");
             // Look up the current selection owner and request conversion.
             // The owner will respond via the clipboard event channel.
@@ -512,19 +514,28 @@ async fn handle_command(
                     // There is a selection owner — the ConvertSelection mechanism
                     // will handle this via the normal X11 selection protocol.
                     // For now, signal that clipboard data is not available from server side.
-                    info!("Selection owner exists — clipboard data flows via X11 selection protocol");
+                    info!(
+                        "Selection owner exists — clipboard data flows via X11 selection protocol"
+                    );
                 }
             }
         }
-        BackendToSidecar::SetClipboard { selection, mime_type, data } => {
-            info!("Clipboard set: selection={selection} mime={mime_type} len={}", data.len());
+        BackendToSidecar::SetClipboard {
+            selection,
+            mime_type,
+            data,
+        } => {
+            info!(
+                "Clipboard set: selection={selection} mime={mime_type} len={}",
+                data.len()
+            );
             // Store the data so that when an X11 client requests this selection,
             // the server can respond with the browser's clipboard content.
             if let Ok(mut cb) = shared_clipboard.lock() {
-                cb.insert(selection, crate::xserver::types::ServerClipboardData {
-                    mime_type,
-                    data,
-                });
+                cb.insert(
+                    selection,
+                    crate::xserver::types::ServerClipboardData { mime_type, data },
+                );
             }
         }
         BackendToSidecar::ResizeScreen { width, height } => {

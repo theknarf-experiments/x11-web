@@ -5,9 +5,9 @@ use std::sync::{Arc, Mutex};
 
 use tracing::debug;
 
+use super::map::us_qwerty_key_names;
 use crate::xserver::atoms::AtomManager;
 use crate::xserver::client::ClientState;
-use super::map::us_qwerty_key_names;
 
 // ---------------------------------------------------------------------------
 // Data structures
@@ -240,7 +240,13 @@ const DOODAD_LOGO: u8 = 5;
 fn serialize_doodad(buf: &mut Vec<u8>, doodad: &XkbDoodad) {
     match doodad {
         XkbDoodad::Outline {
-            name, top, left, angle, color_ndx, shape_ndx, priority,
+            name,
+            top,
+            left,
+            angle,
+            color_ndx,
+            shape_ndx,
+            priority,
         } => {
             buf.extend_from_slice(&name.to_le_bytes());
             buf.push(DOODAD_OUTLINE);
@@ -253,7 +259,13 @@ fn serialize_doodad(buf: &mut Vec<u8>, doodad: &XkbDoodad) {
             buf.extend_from_slice(&[0u8; 6]); // pad to 20 bytes total
         }
         XkbDoodad::Solid {
-            name, top, left, angle, color_ndx, shape_ndx, priority,
+            name,
+            top,
+            left,
+            angle,
+            color_ndx,
+            shape_ndx,
+            priority,
         } => {
             buf.extend_from_slice(&name.to_le_bytes());
             buf.push(DOODAD_SOLID);
@@ -266,7 +278,14 @@ fn serialize_doodad(buf: &mut Vec<u8>, doodad: &XkbDoodad) {
             buf.extend_from_slice(&[0u8; 6]); // pad to 20 bytes total
         }
         XkbDoodad::Text {
-            name, top, left, angle, color_ndx, text, font, priority,
+            name,
+            top,
+            left,
+            angle,
+            color_ndx,
+            text,
+            font,
+            priority,
         } => {
             buf.extend_from_slice(&name.to_le_bytes());
             buf.push(DOODAD_TEXT);
@@ -278,12 +297,19 @@ fn serialize_doodad(buf: &mut Vec<u8>, doodad: &XkbDoodad) {
             buf.extend_from_slice(&[0u8; 4]);
             buf.push(*color_ndx);
             buf.push(0); // pad
-            // Variable: text string then font string
+                         // Variable: text string then font string
             write_counted_string(buf, text);
             write_counted_string(buf, font);
         }
         XkbDoodad::Indicator {
-            name, top, left, angle, shape_ndx, on_color_ndx, off_color_ndx, priority,
+            name,
+            top,
+            left,
+            angle,
+            shape_ndx,
+            on_color_ndx,
+            off_color_ndx,
+            priority,
         } => {
             buf.extend_from_slice(&name.to_le_bytes());
             buf.push(DOODAD_INDICATOR);
@@ -297,7 +323,14 @@ fn serialize_doodad(buf: &mut Vec<u8>, doodad: &XkbDoodad) {
             buf.extend_from_slice(&[0u8; 5]); // pad to 20 bytes total
         }
         XkbDoodad::Logo {
-            name, top, left, angle, color_ndx, shape_ndx, logo_name, priority,
+            name,
+            top,
+            left,
+            angle,
+            color_ndx,
+            shape_ndx,
+            logo_name,
+            priority,
         } => {
             buf.extend_from_slice(&name.to_le_bytes());
             buf.push(DOODAD_LOGO);
@@ -308,7 +341,7 @@ fn serialize_doodad(buf: &mut Vec<u8>, doodad: &XkbDoodad) {
             buf.push(*color_ndx);
             buf.push(*shape_ndx);
             buf.extend_from_slice(&[0u8; 6]); // pad to 20 bytes total
-            // Variable: logo name string
+                                              // Variable: logo name string
             write_counted_string(buf, logo_name);
         }
     }
@@ -391,7 +424,7 @@ fn serialize_geometry_body(geom: &XkbGeometry) -> Vec<u8> {
 /// Standard key unit in tenths of mm (1 key = 19mm pitch, 18mm cap + 1mm gap).
 const KEY_UNIT: i16 = 190; // 19.0mm in tenths
 const KEY_CAP: i16 = 180; // 18.0mm in tenths
-const KEY_GAP: i16 = 10;  // 1.0mm in tenths
+const KEY_GAP: i16 = 10; // 1.0mm in tenths
 
 /// Build a rectangular outline for a key of given width and height (in tenths of mm).
 fn rect_outline(w: i16, h: i16) -> XkbOutline {
@@ -508,16 +541,31 @@ fn default_pc105_geometry(atoms: &Arc<Mutex<AtomManager>>) -> XkbGeometry {
         keys.push(mk_key(&key_names, 9, S_NORM, 0));
         // gap then F1-F4 (kc 67-70)
         for (i, kc) in (67u8..=70).enumerate() {
-            keys.push(mk_key(&key_names, kc, S_NORM, if i == 0 { KEY_UNIT } else { KEY_GAP }));
+            keys.push(mk_key(
+                &key_names,
+                kc,
+                S_NORM,
+                if i == 0 { KEY_UNIT } else { KEY_GAP },
+            ));
         }
         // gap then F5-F8 (kc 71-74)
         for (i, kc) in (71u8..=74).enumerate() {
-            keys.push(mk_key(&key_names, kc, S_NORM, if i == 0 { KEY_GAP * 5 } else { KEY_GAP }));
+            keys.push(mk_key(
+                &key_names,
+                kc,
+                S_NORM,
+                if i == 0 { KEY_GAP * 5 } else { KEY_GAP },
+            ));
         }
         // gap then F9-F12 (kc 75-76, 95-96)
         let f9_12: [u8; 4] = [75, 76, 95, 96];
         for (i, &kc) in f9_12.iter().enumerate() {
-            keys.push(mk_key(&key_names, kc, S_NORM, if i == 0 { KEY_GAP * 5 } else { KEY_GAP }));
+            keys.push(mk_key(
+                &key_names,
+                kc,
+                S_NORM,
+                if i == 0 { KEY_GAP * 5 } else { KEY_GAP },
+            ));
         }
         keys
     };
@@ -593,14 +641,14 @@ fn default_pc105_geometry(atoms: &Arc<Mutex<AtomManager>>) -> XkbGeometry {
 
     // Row 4: Space bar row (LCtrl, Super, LAlt, Space, RAlt, Super, Menu, RCtrl)
     let space_row_keys: Vec<XkbKey> = vec![
-        mk_key(&key_names, 37, S_WIDE, 0),         // LCTL
-        mk_key(&key_names, 133, S_NORM, KEY_GAP),   // LWIN/Super_L
-        mk_key(&key_names, 64, S_NORM, KEY_GAP),    // LALT
-        mk_key(&key_names, 65, S_SPCE, KEY_GAP),    // SPCE
-        mk_key(&key_names, 108, S_NORM, KEY_GAP),   // RALT
-        mk_key(&key_names, 134, S_NORM, KEY_GAP),   // RWIN/Super_R
-        mk_key(&key_names, 135, S_NORM, KEY_GAP),   // MENU (kc 135)
-        mk_key(&key_names, 105, S_WIDE, KEY_GAP),   // RCTL
+        mk_key(&key_names, 37, S_WIDE, 0),        // LCTL
+        mk_key(&key_names, 133, S_NORM, KEY_GAP), // LWIN/Super_L
+        mk_key(&key_names, 64, S_NORM, KEY_GAP),  // LALT
+        mk_key(&key_names, 65, S_SPCE, KEY_GAP),  // SPCE
+        mk_key(&key_names, 108, S_NORM, KEY_GAP), // RALT
+        mk_key(&key_names, 134, S_NORM, KEY_GAP), // RWIN/Super_R
+        mk_key(&key_names, 135, S_NORM, KEY_GAP), // MENU (kc 135)
+        mk_key(&key_names, 105, S_WIDE, KEY_GAP), // RCTL
     ];
 
     let alpha_section = XkbSection {
@@ -612,11 +660,36 @@ fn default_pc105_geometry(atoms: &Arc<Mutex<AtomManager>>) -> XkbGeometry {
         angle: 0,
         priority: 1,
         rows: vec![
-            XkbRow { top: 0, left: 0, vertical: false, keys: num_row_keys },
-            XkbRow { top: KEY_UNIT, left: 0, vertical: false, keys: qwerty_row_keys },
-            XkbRow { top: KEY_UNIT * 2, left: 0, vertical: false, keys: home_row_keys },
-            XkbRow { top: KEY_UNIT * 3, left: 0, vertical: false, keys: bottom_row_keys },
-            XkbRow { top: KEY_UNIT * 4, left: 0, vertical: false, keys: space_row_keys },
+            XkbRow {
+                top: 0,
+                left: 0,
+                vertical: false,
+                keys: num_row_keys,
+            },
+            XkbRow {
+                top: KEY_UNIT,
+                left: 0,
+                vertical: false,
+                keys: qwerty_row_keys,
+            },
+            XkbRow {
+                top: KEY_UNIT * 2,
+                left: 0,
+                vertical: false,
+                keys: home_row_keys,
+            },
+            XkbRow {
+                top: KEY_UNIT * 3,
+                left: 0,
+                vertical: false,
+                keys: bottom_row_keys,
+            },
+            XkbRow {
+                top: KEY_UNIT * 4,
+                left: 0,
+                vertical: false,
+                keys: space_row_keys,
+            },
         ],
         doodads: Vec::new(),
         overlays: Vec::new(),
@@ -625,21 +698,21 @@ fn default_pc105_geometry(atoms: &Arc<Mutex<AtomManager>>) -> XkbGeometry {
     // ----- Section 3: Navigation cluster (Insert, Home, PgUp, Delete, End, PgDn) -----
     let nav_left: i16 = 2950;
     let nav_keys_top: Vec<XkbKey> = vec![
-        mk_key(&key_names, 118, S_NORM, 0),         // INS (kc 118)
-        mk_key(&key_names, 110, S_NORM, KEY_GAP),   // HOME (kc 110)
-        mk_key(&key_names, 112, S_NORM, KEY_GAP),   // PGUP (kc 112)
+        mk_key(&key_names, 118, S_NORM, 0),       // INS (kc 118)
+        mk_key(&key_names, 110, S_NORM, KEY_GAP), // HOME (kc 110)
+        mk_key(&key_names, 112, S_NORM, KEY_GAP), // PGUP (kc 112)
     ];
     let nav_keys_bot: Vec<XkbKey> = vec![
-        mk_key(&key_names, 119, S_NORM, 0),         // DELE (kc 119)
-        mk_key(&key_names, 115, S_NORM, KEY_GAP),   // END (kc 115)
-        mk_key(&key_names, 117, S_NORM, KEY_GAP),   // PGDN (kc 117)
+        mk_key(&key_names, 119, S_NORM, 0),       // DELE (kc 119)
+        mk_key(&key_names, 115, S_NORM, KEY_GAP), // END (kc 115)
+        mk_key(&key_names, 117, S_NORM, KEY_GAP), // PGDN (kc 117)
     ];
 
     // Also: PrintScreen (kc 107), ScrollLock (kc 78), Pause (kc 127)
     let nav_keys_top2: Vec<XkbKey> = vec![
-        mk_key(&key_names, 107, S_NORM, 0),         // PRSC
-        mk_key(&key_names, 78, S_NORM, KEY_GAP),    // SCLK
-        mk_key(&key_names, 127, S_NORM, KEY_GAP),   // PAUS
+        mk_key(&key_names, 107, S_NORM, 0),       // PRSC
+        mk_key(&key_names, 78, S_NORM, KEY_GAP),  // SCLK
+        mk_key(&key_names, 127, S_NORM, KEY_GAP), // PAUS
     ];
 
     let nav_section = XkbSection {
@@ -651,9 +724,24 @@ fn default_pc105_geometry(atoms: &Arc<Mutex<AtomManager>>) -> XkbGeometry {
         angle: 0,
         priority: 2,
         rows: vec![
-            XkbRow { top: 0, left: 0, vertical: false, keys: nav_keys_top2 },
-            XkbRow { top: alpha_top, left: 0, vertical: false, keys: nav_keys_top },
-            XkbRow { top: alpha_top + KEY_UNIT, left: 0, vertical: false, keys: nav_keys_bot },
+            XkbRow {
+                top: 0,
+                left: 0,
+                vertical: false,
+                keys: nav_keys_top2,
+            },
+            XkbRow {
+                top: alpha_top,
+                left: 0,
+                vertical: false,
+                keys: nav_keys_top,
+            },
+            XkbRow {
+                top: alpha_top + KEY_UNIT,
+                left: 0,
+                vertical: false,
+                keys: nav_keys_bot,
+            },
         ],
         doodads: Vec::new(),
         overlays: Vec::new(),
@@ -668,9 +756,9 @@ fn default_pc105_geometry(atoms: &Arc<Mutex<AtomManager>>) -> XkbGeometry {
         mk_key(&key_names, 111, S_NORM, KEY_UNIT), // UP (kc 111)
     ];
     let arrow_keys_bot: Vec<XkbKey> = vec![
-        mk_key(&key_names, 113, S_NORM, 0),         // LEFT (kc 113)
-        mk_key(&key_names, 116, S_NORM, KEY_GAP),   // DOWN (kc 116)
-        mk_key(&key_names, 114, S_NORM, KEY_GAP),   // RGHT (kc 114)
+        mk_key(&key_names, 113, S_NORM, 0),       // LEFT (kc 113)
+        mk_key(&key_names, 116, S_NORM, KEY_GAP), // DOWN (kc 116)
+        mk_key(&key_names, 114, S_NORM, KEY_GAP), // RGHT (kc 114)
     ];
 
     let arrow_section = XkbSection {
@@ -682,8 +770,18 @@ fn default_pc105_geometry(atoms: &Arc<Mutex<AtomManager>>) -> XkbGeometry {
         angle: 0,
         priority: 3,
         rows: vec![
-            XkbRow { top: 0, left: 0, vertical: false, keys: arrow_keys_top },
-            XkbRow { top: KEY_UNIT, left: 0, vertical: false, keys: arrow_keys_bot },
+            XkbRow {
+                top: 0,
+                left: 0,
+                vertical: false,
+                keys: arrow_keys_top,
+            },
+            XkbRow {
+                top: KEY_UNIT,
+                left: 0,
+                vertical: false,
+                keys: arrow_keys_bot,
+            },
         ],
         doodads: Vec::new(),
         overlays: Vec::new(),
@@ -694,35 +792,35 @@ fn default_pc105_geometry(atoms: &Arc<Mutex<AtomManager>>) -> XkbGeometry {
 
     // Numpad row 0: NumLock, KP/, KP*, KP-
     let kp_row0: Vec<XkbKey> = vec![
-        mk_key(&key_names, 77, S_NORM, 0),          // NMLK
-        mk_key(&key_names, 106, S_NORM, KEY_GAP),   // KPDV (kc 106)
-        mk_key(&key_names, 63, S_NORM, KEY_GAP),    // KPMU
-        mk_key(&key_names, 82, S_NORM, KEY_GAP),    // KPSU (kc 82)
+        mk_key(&key_names, 77, S_NORM, 0),        // NMLK
+        mk_key(&key_names, 106, S_NORM, KEY_GAP), // KPDV (kc 106)
+        mk_key(&key_names, 63, S_NORM, KEY_GAP),  // KPMU
+        mk_key(&key_names, 82, S_NORM, KEY_GAP),  // KPSU (kc 82)
     ];
     // Numpad row 1: KP7, KP8, KP9, KP+
     let kp_row1: Vec<XkbKey> = vec![
-        mk_key(&key_names, 79, S_NORM, 0),          // KP7
-        mk_key(&key_names, 80, S_NORM, KEY_GAP),    // KP8
-        mk_key(&key_names, 81, S_NORM, KEY_GAP),    // KP9
-        mk_key(&key_names, 86, S_TALL, KEY_GAP),    // KPAD (kc 86) - tall
+        mk_key(&key_names, 79, S_NORM, 0),       // KP7
+        mk_key(&key_names, 80, S_NORM, KEY_GAP), // KP8
+        mk_key(&key_names, 81, S_NORM, KEY_GAP), // KP9
+        mk_key(&key_names, 86, S_TALL, KEY_GAP), // KPAD (kc 86) - tall
     ];
     // Numpad row 2: KP4, KP5, KP6 (KP+ spans from row 1)
     let kp_row2: Vec<XkbKey> = vec![
-        mk_key(&key_names, 83, S_NORM, 0),          // KP4
-        mk_key(&key_names, 84, S_NORM, KEY_GAP),    // KP5
-        mk_key(&key_names, 85, S_NORM, KEY_GAP),    // KP6
+        mk_key(&key_names, 83, S_NORM, 0),       // KP4
+        mk_key(&key_names, 84, S_NORM, KEY_GAP), // KP5
+        mk_key(&key_names, 85, S_NORM, KEY_GAP), // KP6
     ];
     // Numpad row 3: KP1, KP2, KP3, KPEnter
     let kp_row3: Vec<XkbKey> = vec![
-        mk_key(&key_names, 87, S_NORM, 0),          // KP1
-        mk_key(&key_names, 88, S_NORM, KEY_GAP),    // KP2
-        mk_key(&key_names, 89, S_NORM, KEY_GAP),    // KP3
-        mk_key(&key_names, 104, S_TALL, KEY_GAP),   // KPEN (kc 104) - tall
+        mk_key(&key_names, 87, S_NORM, 0),        // KP1
+        mk_key(&key_names, 88, S_NORM, KEY_GAP),  // KP2
+        mk_key(&key_names, 89, S_NORM, KEY_GAP),  // KP3
+        mk_key(&key_names, 104, S_TALL, KEY_GAP), // KPEN (kc 104) - tall
     ];
     // Numpad row 4: KP0 (wide), KPDot
     let kp_row4: Vec<XkbKey> = vec![
-        mk_key(&key_names, 90, S_LARG, 0),          // KP0 - wide
-        mk_key(&key_names, 91, S_NORM, KEY_GAP),    // KPDL (kc 91)
+        mk_key(&key_names, 90, S_LARG, 0),       // KP0 - wide
+        mk_key(&key_names, 91, S_NORM, KEY_GAP), // KPDL (kc 91)
     ];
 
     let keypad_section = XkbSection {
@@ -734,11 +832,36 @@ fn default_pc105_geometry(atoms: &Arc<Mutex<AtomManager>>) -> XkbGeometry {
         angle: 0,
         priority: 4,
         rows: vec![
-            XkbRow { top: 0, left: 0, vertical: false, keys: kp_row0 },
-            XkbRow { top: KEY_UNIT, left: 0, vertical: false, keys: kp_row1 },
-            XkbRow { top: KEY_UNIT * 2, left: 0, vertical: false, keys: kp_row2 },
-            XkbRow { top: KEY_UNIT * 3, left: 0, vertical: false, keys: kp_row3 },
-            XkbRow { top: KEY_UNIT * 4, left: 0, vertical: false, keys: kp_row4 },
+            XkbRow {
+                top: 0,
+                left: 0,
+                vertical: false,
+                keys: kp_row0,
+            },
+            XkbRow {
+                top: KEY_UNIT,
+                left: 0,
+                vertical: false,
+                keys: kp_row1,
+            },
+            XkbRow {
+                top: KEY_UNIT * 2,
+                left: 0,
+                vertical: false,
+                keys: kp_row2,
+            },
+            XkbRow {
+                top: KEY_UNIT * 3,
+                left: 0,
+                vertical: false,
+                keys: kp_row3,
+            },
+            XkbRow {
+                top: KEY_UNIT * 4,
+                left: 0,
+                vertical: false,
+                keys: kp_row4,
+            },
         ],
         doodads: Vec::new(),
         overlays: Vec::new(),
@@ -824,15 +947,19 @@ fn default_pc105_geometry(atoms: &Arc<Mutex<AtomManager>>) -> XkbGeometry {
         width_mm: 470,
         height_mm: 170,
         label_font: "helvetica".to_string(),
-        properties: vec![
-            XkbProperty {
-                name: "description".to_string(),
-                value: "Generic 105-key PC".to_string(),
-            },
-        ],
+        properties: vec![XkbProperty {
+            name: "description".to_string(),
+            value: "Generic 105-key PC".to_string(),
+        }],
         colors,
         shapes,
-        sections: vec![fn_section, alpha_section, nav_section, arrow_section, keypad_section],
+        sections: vec![
+            fn_section,
+            alpha_section,
+            nav_section,
+            arrow_section,
+            keypad_section,
+        ],
         doodads: indicator_doodads,
         key_aliases,
     }
@@ -884,11 +1011,7 @@ pub(crate) fn build_xkb_get_geometry_reply(
 /// silently (void request -- no reply). The parsed geometry is logged
 /// but not persisted beyond the current session since our server
 /// always provides the default PC-105 geometry.
-pub(crate) fn handle_xkb_set_geometry(
-    _state: &mut ClientState,
-    data: &[u8],
-    _seq: u16,
-) -> Vec<u8> {
+pub(crate) fn handle_xkb_set_geometry(_state: &mut ClientState, data: &[u8], _seq: u16) -> Vec<u8> {
     // SetGeometry is a void request -- no reply byte. We just need to
     // not crash when xkbcomp sends one.
     if data.len() < 20 {
@@ -929,7 +1052,11 @@ mod tests {
     fn default_geometry_has_five_sections() {
         let atoms = test_atoms();
         let geom = default_pc105_geometry(&atoms);
-        assert_eq!(geom.sections.len(), 5, "expected 5 sections (fn, alpha, nav, arrows, keypad)");
+        assert_eq!(
+            geom.sections.len(),
+            5,
+            "expected 5 sections (fn, alpha, nav, arrows, keypad)"
+        );
     }
 
     #[test]
@@ -974,7 +1101,11 @@ mod tests {
         assert_eq!(reply[1], 3, "device ID should be 3");
         assert_eq!(u16::from_le_bytes([reply[2], reply[3]]), 42, "sequence");
         let length = u32::from_le_bytes([reply[4], reply[5], reply[6], reply[7]]);
-        assert_eq!(reply.len(), 32 + (length as usize) * 4, "reply length matches");
+        assert_eq!(
+            reply.len(),
+            32 + (length as usize) * 4,
+            "reply length matches"
+        );
         assert_eq!(reply[12], 1, "foundGeometry should be TRUE");
 
         // Check counts in header
@@ -1013,11 +1144,20 @@ mod tests {
         }
 
         // Verify ESC is present (kc 9, idx 1)
-        assert!(geom_key_names.contains(key_names[1]), "ESC should be in geometry");
+        assert!(
+            geom_key_names.contains(key_names[1]),
+            "ESC should be in geometry"
+        );
         // Verify SPCE is present (kc 65, idx 57)
-        assert!(geom_key_names.contains(key_names[57]), "SPCE should be in geometry");
+        assert!(
+            geom_key_names.contains(key_names[57]),
+            "SPCE should be in geometry"
+        );
         // Verify RTRN is present (kc 36, idx 28)
-        assert!(geom_key_names.contains(key_names[28]), "RTRN should be in geometry");
+        assert!(
+            geom_key_names.contains(key_names[28]),
+            "RTRN should be in geometry"
+        );
     }
 
     #[test]
@@ -1026,8 +1166,8 @@ mod tests {
         // We only need the data buffer; SetGeometry is stateless in our impl.
         let mut data = vec![0u8; 24];
         data[1] = 20; // minor opcode
-        data[4] = 3;  // device_id
-        // Parse the header the same way the handler does.
+        data[4] = 3; // device_id
+                     // Parse the header the same way the handler does.
         assert!(data.len() >= 20);
         let n_shapes = u16::from_le_bytes([data[10], data[11]]);
         let n_sections = u16::from_le_bytes([data[12], data[13]]);

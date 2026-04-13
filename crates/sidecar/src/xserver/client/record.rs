@@ -44,11 +44,17 @@ impl ClientState {
                     continue;
                 }
                 let major_opcode = request_data[0];
-                let minor_opcode = if request_data.len() > 1 { request_data[1] } else { 0 };
+                let minor_opcode = if request_data.len() > 1 {
+                    request_data[1]
+                } else {
+                    0
+                };
                 let matched = if major_opcode <= 127 {
                     entry.context.matches_core_request(major_opcode)
                 } else {
-                    entry.context.matches_ext_request(major_opcode, minor_opcode)
+                    entry
+                        .context
+                        .matches_ext_request(major_opcode, minor_opcode)
                 };
                 if matched {
                     let reply = super::super::handlers::record::build_record_data_reply(

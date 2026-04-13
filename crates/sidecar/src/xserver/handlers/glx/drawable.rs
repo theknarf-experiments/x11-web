@@ -26,9 +26,7 @@ pub(crate) fn handle_use_x_font(state: &mut ClientState, data: &[u8], _seq: u16)
     let count = u32::from_le_bytes([data[16], data[17], data[18], data[19]]);
     let list_base = u32::from_le_bytes([data[20], data[21], data[22], data[23]]);
 
-    debug!(
-        "GLX UseXFont: font={font_id:#x} first={first} count={count} list_base={list_base}"
-    );
+    debug!("GLX UseXFont: font={font_id:#x} first={first} count={count} list_base={list_base}");
 
     let font = match state.font_manager.get_font(font_id) {
         Some(f) => f.clone(),
@@ -61,21 +59,15 @@ pub(crate) fn handle_use_x_font(state: &mut ClientState, data: &[u8], _seq: u16)
                     crate::osmesa::gl_bitmap(
                         glyph.width as i32,
                         glyph.height as i32,
-                        ci.left_side_bearing as f32,        // x origin
-                        ci.descent as f32,                  // y origin
-                        ci.character_width as f32,          // x advance
-                        0.0,                                // y advance
+                        ci.left_side_bearing as f32, // x origin
+                        ci.descent as f32,           // y origin
+                        ci.character_width as f32,   // x advance
+                        0.0,                         // y advance
                         &glyph.bitmap,
                     );
                 } else {
                     // Empty glyph — just advance the raster position
-                    crate::osmesa::gl_bitmap(
-                        0, 0,
-                        0.0, 0.0,
-                        ci.character_width as f32,
-                        0.0,
-                        &[],
-                    );
+                    crate::osmesa::gl_bitmap(0, 0, 0.0, 0.0, ci.character_width as f32, 0.0, &[]);
                 }
             }
         }
@@ -128,8 +120,12 @@ pub(crate) fn handle_create_pixmap(state: &mut ClientState, data: &[u8], seq: u1
     // Validate the X pixmap exists
     if !state.pixmaps.contains_key(&x_pixmap) {
         return crate::xserver::core::build_error_bo(
-            crate::xserver::core::BAD_PIXMAP, seq, x_pixmap,
-            159, 22, state.msb_first,
+            crate::xserver::core::BAD_PIXMAP,
+            seq,
+            x_pixmap,
+            159,
+            22,
+            state.msb_first,
         );
     }
 
@@ -144,7 +140,12 @@ pub(crate) fn handle_create_pixmap(state: &mut ClientState, data: &[u8], seq: u1
         if key == 0 {
             break;
         }
-        let val = u32::from_le_bytes([data[base + 4], data[base + 5], data[base + 6], data[base + 7]]);
+        let val = u32::from_le_bytes([
+            data[base + 4],
+            data[base + 5],
+            data[base + 6],
+            data[base + 7],
+        ]);
         attributes.insert(key, val);
     }
 
@@ -194,7 +195,12 @@ pub(crate) fn handle_create_pbuffer(state: &mut ClientState, data: &[u8], seq: u
             break;
         }
         let key = u32::from_le_bytes([data[base], data[base + 1], data[base + 2], data[base + 3]]);
-        let val = u32::from_le_bytes([data[base + 4], data[base + 5], data[base + 6], data[base + 7]]);
+        let val = u32::from_le_bytes([
+            data[base + 4],
+            data[base + 5],
+            data[base + 6],
+            data[base + 7],
+        ]);
         attributes.insert(key, val);
     }
 
@@ -246,7 +252,12 @@ pub(crate) fn handle_create_window(state: &mut ClientState, data: &[u8], seq: u1
             break;
         }
         let key = u32::from_le_bytes([data[base], data[base + 1], data[base + 2], data[base + 3]]);
-        let val = u32::from_le_bytes([data[base + 4], data[base + 5], data[base + 6], data[base + 7]]);
+        let val = u32::from_le_bytes([
+            data[base + 4],
+            data[base + 5],
+            data[base + 6],
+            data[base + 7],
+        ]);
         attributes.insert(key, val);
     }
 
@@ -282,7 +293,11 @@ pub(crate) fn handle_delete_window(state: &mut ClientState, data: &[u8], seq: u1
 // GLX_GET_DRAWABLE_ATTRIBUTES (minor 29)
 // ---------------------------------------------------------------------------
 
-pub(crate) fn handle_get_drawable_attributes(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
+pub(crate) fn handle_get_drawable_attributes(
+    state: &mut ClientState,
+    data: &[u8],
+    seq: u16,
+) -> Vec<u8> {
     if data.len() < 8 {
         let mut reply = [0u8; 32];
         reply[0] = 1;
@@ -330,7 +345,11 @@ pub(crate) fn handle_get_drawable_attributes(state: &mut ClientState, data: &[u8
 // GLX_CHANGE_DRAWABLE_ATTRIBUTES (minor 30)
 // ---------------------------------------------------------------------------
 
-pub(crate) fn handle_change_drawable_attributes(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
+pub(crate) fn handle_change_drawable_attributes(
+    state: &mut ClientState,
+    data: &[u8],
+    seq: u16,
+) -> Vec<u8> {
     require_len!(data, 12, seq, 159, 30, state.msb_first);
     let drawable_id = u32::from_le_bytes([data[4], data[5], data[6], data[7]]);
     let num_attribs = u32::from_le_bytes([data[8], data[9], data[10], data[11]]) as usize;
@@ -341,8 +360,14 @@ pub(crate) fn handle_change_drawable_attributes(state: &mut ClientState, data: &
             if base + 8 > data.len() {
                 break;
             }
-            let key = u32::from_le_bytes([data[base], data[base + 1], data[base + 2], data[base + 3]]);
-            let val = u32::from_le_bytes([data[base + 4], data[base + 5], data[base + 6], data[base + 7]]);
+            let key =
+                u32::from_le_bytes([data[base], data[base + 1], data[base + 2], data[base + 3]]);
+            let val = u32::from_le_bytes([
+                data[base + 4],
+                data[base + 5],
+                data[base + 6],
+                data[base + 7],
+            ]);
             drawable.attributes.insert(key, val);
         }
         debug!("Changed {num_attribs} attributes on GLX drawable {drawable_id:#x}");

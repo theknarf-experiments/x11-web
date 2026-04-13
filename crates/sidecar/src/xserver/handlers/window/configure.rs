@@ -1,8 +1,8 @@
 //! Configure/reparent/circulate window handlers (opcodes 7, 12, 13).
 
 use super::*;
+use super::{update_sibling_visibility, win_gravity_delta};
 use crate::xserver::core::require_len;
-use super::{win_gravity_delta, update_sibling_visibility};
 
 // ---------------------------------------------------------------------------
 // Opcode 7: ReparentWindow
@@ -25,7 +25,8 @@ pub(crate) fn handle_reparent_window(state: &mut ClientState, data: &[u8], seq: 
 
     // Per X11 spec: it is a BadMatch error to reparent a window to itself
     // or to one of its own descendants (would create a circular tree).
-    if window == new_parent || crate::xserver::is_descendant_of(&state.windows, new_parent, window) {
+    if window == new_parent || crate::xserver::is_descendant_of(&state.windows, new_parent, window)
+    {
         return build_error(BAD_MATCH, state.sequence, window, 7, 0);
     }
 
@@ -43,7 +44,11 @@ pub(crate) fn handle_reparent_window(state: &mut ClientState, data: &[u8], seq: 
             write_u16_bo(&mut unmap_event, 2, seq, bo);
             write_u32_bo(&mut unmap_event, 4, window, bo);
             write_u32_bo(&mut unmap_event, 8, window, bo);
-            if state.windows.get(&window).is_some_and(|w| w.event_mask & STRUCTURE_NOTIFY_MASK != 0) {
+            if state
+                .windows
+                .get(&window)
+                .is_some_and(|w| w.event_mask & STRUCTURE_NOTIFY_MASK != 0)
+            {
                 state.pending_events.push(unmap_event.to_vec());
             }
             state.broadcast_event(window, STRUCTURE_NOTIFY_MASK, &unmap_event);
@@ -55,7 +60,11 @@ pub(crate) fn handle_reparent_window(state: &mut ClientState, data: &[u8], seq: 
             write_u16_bo(&mut parent_unmap, 2, seq, bo);
             write_u32_bo(&mut parent_unmap, 4, old_parent, bo);
             write_u32_bo(&mut parent_unmap, 8, window, bo);
-            if state.windows.get(&old_parent).is_some_and(|w| w.event_mask & SUBSTRUCTURE_NOTIFY_MASK != 0) {
+            if state
+                .windows
+                .get(&old_parent)
+                .is_some_and(|w| w.event_mask & SUBSTRUCTURE_NOTIFY_MASK != 0)
+            {
                 state.pending_events.push(parent_unmap.to_vec());
             }
             state.broadcast_event(old_parent, SUBSTRUCTURE_NOTIFY_MASK, &parent_unmap);
@@ -83,7 +92,10 @@ pub(crate) fn handle_reparent_window(state: &mut ClientState, data: &[u8], seq: 
         new_parent_win.children_order.push(window);
     }
 
-    let override_redirect = state.windows.get(&window).is_some_and(|w| w.override_redirect);
+    let override_redirect = state
+        .windows
+        .get(&window)
+        .is_some_and(|w| w.override_redirect);
 
     // Build ReparentNotify event template
     let build_reparent_notify = |event_window: u32| -> [u8; 32] {
@@ -104,7 +116,11 @@ pub(crate) fn handle_reparent_window(state: &mut ClientState, data: &[u8], seq: 
     // Send ReparentNotify to the window itself (StructureNotifyMask)
     {
         let event = build_reparent_notify(window);
-        if state.windows.get(&window).is_some_and(|w| w.event_mask & STRUCTURE_NOTIFY_MASK != 0) {
+        if state
+            .windows
+            .get(&window)
+            .is_some_and(|w| w.event_mask & STRUCTURE_NOTIFY_MASK != 0)
+        {
             events.extend_from_slice(&event);
         }
         state.broadcast_event(window, STRUCTURE_NOTIFY_MASK, &event);
@@ -113,7 +129,11 @@ pub(crate) fn handle_reparent_window(state: &mut ClientState, data: &[u8], seq: 
     // Send ReparentNotify to old parent (SubstructureNotifyMask)
     {
         let event = build_reparent_notify(old_parent);
-        if state.windows.get(&old_parent).is_some_and(|w| w.event_mask & SUBSTRUCTURE_NOTIFY_MASK != 0) {
+        if state
+            .windows
+            .get(&old_parent)
+            .is_some_and(|w| w.event_mask & SUBSTRUCTURE_NOTIFY_MASK != 0)
+        {
             state.pending_events.push(event.to_vec());
         }
         state.broadcast_event(old_parent, SUBSTRUCTURE_NOTIFY_MASK, &event);
@@ -122,7 +142,11 @@ pub(crate) fn handle_reparent_window(state: &mut ClientState, data: &[u8], seq: 
     // Send ReparentNotify to new parent (SubstructureNotifyMask)
     if old_parent != new_parent {
         let event = build_reparent_notify(new_parent);
-        if state.windows.get(&new_parent).is_some_and(|w| w.event_mask & SUBSTRUCTURE_NOTIFY_MASK != 0) {
+        if state
+            .windows
+            .get(&new_parent)
+            .is_some_and(|w| w.event_mask & SUBSTRUCTURE_NOTIFY_MASK != 0)
+        {
             state.pending_events.push(event.to_vec());
         }
         state.broadcast_event(new_parent, SUBSTRUCTURE_NOTIFY_MASK, &event);
@@ -174,14 +198,18 @@ pub(crate) fn handle_configure_window(state: &mut ClientState, data: &[u8], seq:
     if !is_override_redirect && parent_id != 0 {
         let should_redirect = {
             if let Ok(wm) = state.wm_state.lock() {
-                wm.client_id.as_ref().is_some_and(|id| id != &state.client_id)
+                wm.client_id
+                    .as_ref()
+                    .is_some_and(|id| id != &state.client_id)
             } else {
                 false
             }
         };
 
         // Also check if any client has SubstructureRedirectMask on the parent
-        let parent_has_redirect = state.windows.get(&parent_id)
+        let parent_has_redirect = state
+            .windows
+            .get(&parent_id)
             .is_some_and(|p| p.event_mask & SUBSTRUCTURE_REDIRECT_MASK != 0);
 
         if should_redirect || parent_has_redirect {
@@ -207,21 +235,20 @@ pub(crate) fn handle_configure_window(state: &mut ClientState, data: &[u8], seq:
 
             let mut offset = 12;
             for bit in 0..7u16 {
-                if value_mask & (1 << bit) != 0
-                    && offset + 4 <= data.len() {
-                        let val = state.read_u32(data, offset);
-                        match bit {
-                            0 => x = val as i16,
-                            1 => y = val as i16,
-                            2 => width = val as u16,
-                            3 => height = val as u16,
-                            4 => border_width = val as u16,
-                            5 => sibling = val,
-                            6 => stack_mode = val as u8,
-                            _ => {}
-                        }
-                        offset += 4;
+                if value_mask & (1 << bit) != 0 && offset + 4 <= data.len() {
+                    let val = state.read_u32(data, offset);
+                    match bit {
+                        0 => x = val as i16,
+                        1 => y = val as i16,
+                        2 => width = val as u16,
+                        3 => height = val as u16,
+                        4 => border_width = val as u16,
+                        5 => sibling = val,
+                        6 => stack_mode = val as u8,
+                        _ => {}
                     }
+                    offset += 4;
+                }
             }
 
             // Build ConfigureRequest event (code 23)
@@ -254,8 +281,11 @@ pub(crate) fn handle_configure_window(state: &mut ClientState, data: &[u8], seq:
     // window, suppress width/height changes and generate ResizeRequest(25)
     // instead. Position, border, and stacking changes still proceed normally.
     let resize_redirected = {
-        let has_resize_redirect = state.event_broadcaster
-            .has_mask_subscriber(wid, RESIZE_REDIRECT_MASK, &state.client_id);
+        let has_resize_redirect = state.event_broadcaster.has_mask_subscriber(
+            wid,
+            RESIZE_REDIRECT_MASK,
+            &state.client_id,
+        );
         has_resize_redirect && (value_mask & 0x0C != 0) // bits 2 (width) or 3 (height)
     };
     // Strip width/height bits from value_mask if resize is redirected
@@ -267,8 +297,12 @@ pub(crate) fn handle_configure_window(state: &mut ClientState, data: &[u8], seq:
         for bit in 0..7u16 {
             if value_mask & (1 << bit) != 0 && scan_offset + 4 <= data.len() {
                 let val = state.read_u32(data, scan_offset);
-                if bit == 2 { req_width = val as u16; }
-                if bit == 3 { req_height = val as u16; }
+                if bit == 2 {
+                    req_width = val as u16;
+                }
+                if bit == 3 {
+                    req_height = val as u16;
+                }
                 scan_offset += 4;
             }
         }
@@ -309,7 +343,9 @@ pub(crate) fn handle_configure_window(state: &mut ClientState, data: &[u8], seq:
             let supports_sync = state.window_supports_protocol(wid, net_wm_sync_request_atom);
             if supports_sync {
                 // Increment the sync request value
-                let new_value = state.windows.get(&wid)
+                let new_value = state
+                    .windows
+                    .get(&wid)
                     .map(|w| w.sync_request_value.wrapping_add(1))
                     .unwrap_or(1);
                 if let Some(win) = state.windows.get_mut(&wid) {
@@ -343,95 +379,104 @@ pub(crate) fn handle_configure_window(state: &mut ClientState, data: &[u8], seq:
     }
 
     // Capture old dimensions before the mutable borrow for gravity calculations
-    let (old_w, old_h, old_children) = state.windows.get(&wid)
+    let (old_w, old_h, old_children) = state
+        .windows
+        .get(&wid)
         .map(|w| (w.width, w.height, w.children_order.clone()))
         .unwrap_or((0, 0, Vec::new()));
 
     if let Some(win) = state.windows.get_mut(&wid) {
         for bit in 0..7 {
-            if value_mask & (1 << bit) != 0
-                && offset + 4 <= data.len() {
-                    let val = read_u32_bo(data, offset, msb_first);
-                    match bit {
-                        0 => {
-                            win.x = val as i16;
-                            changed = true;
-                        }
-                        1 => {
-                            win.y = val as i16;
-                            changed = true;
-                        }
-                        2 => {
-                            // Per X11 spec: width must be non-zero
-                            if val == 0 {
-                                return build_error(BAD_VALUE, seq, 0, 12, 0);
-                            }
-                            let mut w = val as u16;
-                            // Apply size hints (ICCCM §4.1.2.3)
-                            if let Some(ref hints) = size_hints {
-                                // Round to width_inc steps relative to base_width
-                                if hints.width_inc > 1 {
-                                    let base = if hints.base_width > 0 { hints.base_width } else { hints.min_width };
-                                    if w > base {
-                                        let over = (w - base) % hints.width_inc;
-                                        if over != 0 {
-                                            w -= over;
-                                        }
-                                    }
-                                }
-                                if hints.min_width > 0 && w < hints.min_width {
-                                    w = hints.min_width;
-                                }
-                                if hints.max_width > 0 && w > hints.max_width {
-                                    w = hints.max_width;
-                                }
-                            }
-                            win.width = w;
-                            changed = true;
-                        }
-                        3 => {
-                            // Per X11 spec: height must be non-zero
-                            if val == 0 {
-                                return build_error(BAD_VALUE, seq, 0, 12, 0);
-                            }
-                            let mut h = val as u16;
-                            // Apply size hints (ICCCM §4.1.2.3)
-                            if let Some(ref hints) = size_hints {
-                                // Round to height_inc steps relative to base_height
-                                if hints.height_inc > 1 {
-                                    let base = if hints.base_height > 0 { hints.base_height } else { hints.min_height };
-                                    if h > base {
-                                        let over = (h - base) % hints.height_inc;
-                                        if over != 0 {
-                                            h -= over;
-                                        }
-                                    }
-                                }
-                                if hints.min_height > 0 && h < hints.min_height {
-                                    h = hints.min_height;
-                                }
-                                if hints.max_height > 0 && h > hints.max_height {
-                                    h = hints.max_height;
-                                }
-                            }
-                            win.height = h;
-                            changed = true;
-                        }
-                        4 => {
-                            win.border_width = val as u16;
-                        }
-                        5 => sibling = val,
-                        6 => {
-                            // Per X11 spec: valid stack modes are 0-4
-                            if val > 4 {
-                                return build_error(BAD_VALUE, seq, val, 12, 0);
-                            }
-                            stack_mode = Some(val as u8);
-                        }
-                        _ => {}
+            if value_mask & (1 << bit) != 0 && offset + 4 <= data.len() {
+                let val = read_u32_bo(data, offset, msb_first);
+                match bit {
+                    0 => {
+                        win.x = val as i16;
+                        changed = true;
                     }
-                    offset += 4;
+                    1 => {
+                        win.y = val as i16;
+                        changed = true;
+                    }
+                    2 => {
+                        // Per X11 spec: width must be non-zero
+                        if val == 0 {
+                            return build_error(BAD_VALUE, seq, 0, 12, 0);
+                        }
+                        let mut w = val as u16;
+                        // Apply size hints (ICCCM §4.1.2.3)
+                        if let Some(ref hints) = size_hints {
+                            // Round to width_inc steps relative to base_width
+                            if hints.width_inc > 1 {
+                                let base = if hints.base_width > 0 {
+                                    hints.base_width
+                                } else {
+                                    hints.min_width
+                                };
+                                if w > base {
+                                    let over = (w - base) % hints.width_inc;
+                                    if over != 0 {
+                                        w -= over;
+                                    }
+                                }
+                            }
+                            if hints.min_width > 0 && w < hints.min_width {
+                                w = hints.min_width;
+                            }
+                            if hints.max_width > 0 && w > hints.max_width {
+                                w = hints.max_width;
+                            }
+                        }
+                        win.width = w;
+                        changed = true;
+                    }
+                    3 => {
+                        // Per X11 spec: height must be non-zero
+                        if val == 0 {
+                            return build_error(BAD_VALUE, seq, 0, 12, 0);
+                        }
+                        let mut h = val as u16;
+                        // Apply size hints (ICCCM §4.1.2.3)
+                        if let Some(ref hints) = size_hints {
+                            // Round to height_inc steps relative to base_height
+                            if hints.height_inc > 1 {
+                                let base = if hints.base_height > 0 {
+                                    hints.base_height
+                                } else {
+                                    hints.min_height
+                                };
+                                if h > base {
+                                    let over = (h - base) % hints.height_inc;
+                                    if over != 0 {
+                                        h -= over;
+                                    }
+                                }
+                            }
+                            if hints.min_height > 0 && h < hints.min_height {
+                                h = hints.min_height;
+                            }
+                            if hints.max_height > 0 && h > hints.max_height {
+                                h = hints.max_height;
+                            }
+                        }
+                        win.height = h;
+                        changed = true;
+                    }
+                    4 => {
+                        win.border_width = val as u16;
+                    }
+                    5 => sibling = val,
+                    6 => {
+                        // Per X11 spec: valid stack modes are 0-4
+                        if val > 4 {
+                            return build_error(BAD_VALUE, seq, val, 12, 0);
+                        }
+                        stack_mode = Some(val as u8);
+                    }
+                    _ => {}
                 }
+                offset += 4;
+            }
         }
 
         if changed {
@@ -441,22 +486,23 @@ pub(crate) fn handle_configure_window(state: &mut ClientState, data: &[u8], seq:
             // Resize the framebuffer if the window dimensions changed
             if new_w as u32 != win.framebuffer.width() || new_h as u32 != win.framebuffer.height() {
                 let bg = state.bit_gravity.get(&wid).copied().unwrap_or(0);
-                win.framebuffer.resize_with_gravity(new_w as u32, new_h as u32, bg);
+                win.framebuffer
+                    .resize_with_gravity(new_w as u32, new_h as u32, bg);
             }
 
             if let Some(ref uuid) = wid_str {
-            let _ = state.update_tx.send((
-                state.client_id.clone(),
-                DisplayUpdate::WindowConfigured {
-                    window_id: uuid.clone(),
-                    x: win.x,
-                    y: win.y,
-                    width: win.width,
-                    height: win.height,
-                    border_width: win.border_width,
-                    border_pixel: win.border_pixel,
-                },
-            ));
+                let _ = state.update_tx.send((
+                    state.client_id.clone(),
+                    DisplayUpdate::WindowConfigured {
+                        window_id: uuid.clone(),
+                        x: win.x,
+                        y: win.y,
+                        width: win.width,
+                        height: win.height,
+                        border_width: win.border_width,
+                        border_pixel: win.border_pixel,
+                    },
+                ));
             }
         }
     }
@@ -559,7 +605,9 @@ pub(crate) fn handle_configure_window(state: &mut ClientState, data: &[u8], seq:
         // if the sibling doesn't share the same parent.
         if sibling != 0 {
             if let Some(pid) = parent_id {
-                let sibling_is_sibling = state.windows.get(&sibling)
+                let sibling_is_sibling = state
+                    .windows
+                    .get(&sibling)
                     .map(|s| s.parent == pid)
                     .unwrap_or(false);
                 if !sibling_is_sibling {
@@ -575,7 +623,9 @@ pub(crate) fn handle_configure_window(state: &mut ClientState, data: &[u8], seq:
                     // Explicit sibling: place above it (per X11 spec, client knows what it wants)
                     if let Some(parent_win) = state.windows.get_mut(&parent_id) {
                         parent_win.children_order.retain(|&c| c != wid);
-                        if let Some(pos) = parent_win.children_order.iter().position(|&c| c == sibling) {
+                        if let Some(pos) =
+                            parent_win.children_order.iter().position(|&c| c == sibling)
+                        {
                             parent_win.children_order.insert(pos + 1, wid);
                         } else {
                             parent_win.children_order.push(wid);
@@ -592,7 +642,9 @@ pub(crate) fn handle_configure_window(state: &mut ClientState, data: &[u8], seq:
                     // Explicit sibling: place below it
                     if let Some(parent_win) = state.windows.get_mut(&parent_id) {
                         parent_win.children_order.retain(|&c| c != wid);
-                        if let Some(pos) = parent_win.children_order.iter().position(|&c| c == sibling) {
+                        if let Some(pos) =
+                            parent_win.children_order.iter().position(|&c| c == sibling)
+                        {
                             parent_win.children_order.insert(pos, wid);
                         } else {
                             parent_win.children_order.insert(0, wid);
@@ -600,7 +652,9 @@ pub(crate) fn handle_configure_window(state: &mut ClientState, data: &[u8], seq:
                     }
                 } else {
                     // No sibling: lower to bottom of this window's stacking layer
-                    let target_layer = state.windows.get(&wid)
+                    let target_layer = state
+                        .windows
+                        .get(&wid)
                         .map(super::effective_stacking_layer)
                         .unwrap_or(2);
 
@@ -608,17 +662,28 @@ pub(crate) fn handle_configure_window(state: &mut ClientState, data: &[u8], seq:
                         parent_win.children_order.retain(|&c| c != wid);
                     }
 
-                    let children: Vec<(u32, u8)> = state.windows.get(&parent_id)
-                        .map(|p| p.children_order.iter().map(|&c| {
-                            let layer = state.windows.get(&c)
-                                .map(super::effective_stacking_layer)
-                                .unwrap_or(2);
-                            (c, layer)
-                        }).collect())
+                    let children: Vec<(u32, u8)> = state
+                        .windows
+                        .get(&parent_id)
+                        .map(|p| {
+                            p.children_order
+                                .iter()
+                                .map(|&c| {
+                                    let layer = state
+                                        .windows
+                                        .get(&c)
+                                        .map(super::effective_stacking_layer)
+                                        .unwrap_or(2);
+                                    (c, layer)
+                                })
+                                .collect()
+                        })
                         .unwrap_or_default();
 
                     // Insert at the first position where layer >= target_layer
-                    let insert_pos = children.iter().position(|(_, layer)| *layer >= target_layer)
+                    let insert_pos = children
+                        .iter()
+                        .position(|(_, layer)| *layer >= target_layer)
                         .unwrap_or(children.len());
 
                     if let Some(parent_win) = state.windows.get_mut(&parent_id) {
@@ -633,17 +698,31 @@ pub(crate) fn handle_configure_window(state: &mut ClientState, data: &[u8], seq:
                 // Gather geometry for the target window.
                 let win_geom = state.windows.get(&wid).map(|w| {
                     let bw = w.border_width as i32;
-                    (w.x as i32, w.y as i32, w.width as i32 + 2 * bw, w.height as i32 + 2 * bw)
+                    (
+                        w.x as i32,
+                        w.y as i32,
+                        w.width as i32 + 2 * bw,
+                        w.height as i32 + 2 * bw,
+                    )
                 });
 
                 // Helper: check if two bounding rects overlap.
-                let rects_overlap = |ax: i32, ay: i32, aw: i32, ah: i32,
-                                      bx: i32, by: i32, bw: i32, bh: i32| -> bool {
+                let rects_overlap = |ax: i32,
+                                     ay: i32,
+                                     aw: i32,
+                                     ah: i32,
+                                     bx: i32,
+                                     by: i32,
+                                     bw: i32,
+                                     bh: i32|
+                 -> bool {
                     ax < bx + bw && ax + aw > bx && ay < by + bh && ay + ah > by
                 };
 
                 // Get children_order and build sibling geometries.
-                let children = state.windows.get(&parent_id)
+                let children = state
+                    .windows
+                    .get(&parent_id)
                     .map(|w| w.children_order.clone())
                     .unwrap_or_default();
                 let win_idx = children.iter().position(|&c| c == wid);
@@ -653,13 +732,22 @@ pub(crate) fn handle_configure_window(state: &mut ClientState, data: &[u8], seq:
                     let occluded_by_above = |specific_sibling: u32| -> bool {
                         if specific_sibling != 0 {
                             // Only check the specified sibling, and only if it's above.
-                            if let Some(sib_idx) = children.iter().position(|&c| c == specific_sibling) {
+                            if let Some(sib_idx) =
+                                children.iter().position(|&c| c == specific_sibling)
+                            {
                                 if sib_idx > win_idx {
                                     if let Some(s) = state.windows.get(&specific_sibling) {
                                         let sbw = s.border_width as i32;
-                                        return rects_overlap(wx, wy, ww, wh,
-                                            s.x as i32, s.y as i32,
-                                            s.width as i32 + 2 * sbw, s.height as i32 + 2 * sbw);
+                                        return rects_overlap(
+                                            wx,
+                                            wy,
+                                            ww,
+                                            wh,
+                                            s.x as i32,
+                                            s.y as i32,
+                                            s.width as i32 + 2 * sbw,
+                                            s.height as i32 + 2 * sbw,
+                                        );
                                     }
                                 }
                             }
@@ -669,10 +757,16 @@ pub(crate) fn handle_configure_window(state: &mut ClientState, data: &[u8], seq:
                             for &sib_id in &children[win_idx + 1..] {
                                 if let Some(s) = state.windows.get(&sib_id) {
                                     let sbw = s.border_width as i32;
-                                    if rects_overlap(wx, wy, ww, wh,
-                                        s.x as i32, s.y as i32,
-                                        s.width as i32 + 2 * sbw, s.height as i32 + 2 * sbw)
-                                    {
+                                    if rects_overlap(
+                                        wx,
+                                        wy,
+                                        ww,
+                                        wh,
+                                        s.x as i32,
+                                        s.y as i32,
+                                        s.width as i32 + 2 * sbw,
+                                        s.height as i32 + 2 * sbw,
+                                    ) {
                                         return true;
                                     }
                                 }
@@ -685,13 +779,22 @@ pub(crate) fn handle_configure_window(state: &mut ClientState, data: &[u8], seq:
                     let occludes_below = |specific_sibling: u32| -> bool {
                         if specific_sibling != 0 {
                             // Only check the specified sibling, and only if it's below.
-                            if let Some(sib_idx) = children.iter().position(|&c| c == specific_sibling) {
+                            if let Some(sib_idx) =
+                                children.iter().position(|&c| c == specific_sibling)
+                            {
                                 if sib_idx < win_idx {
                                     if let Some(s) = state.windows.get(&specific_sibling) {
                                         let sbw = s.border_width as i32;
-                                        return rects_overlap(wx, wy, ww, wh,
-                                            s.x as i32, s.y as i32,
-                                            s.width as i32 + 2 * sbw, s.height as i32 + 2 * sbw);
+                                        return rects_overlap(
+                                            wx,
+                                            wy,
+                                            ww,
+                                            wh,
+                                            s.x as i32,
+                                            s.y as i32,
+                                            s.width as i32 + 2 * sbw,
+                                            s.height as i32 + 2 * sbw,
+                                        );
                                     }
                                 }
                             }
@@ -701,10 +804,16 @@ pub(crate) fn handle_configure_window(state: &mut ClientState, data: &[u8], seq:
                             for &sib_id in &children[..win_idx] {
                                 if let Some(s) = state.windows.get(&sib_id) {
                                     let sbw = s.border_width as i32;
-                                    if rects_overlap(wx, wy, ww, wh,
-                                        s.x as i32, s.y as i32,
-                                        s.width as i32 + 2 * sbw, s.height as i32 + 2 * sbw)
-                                    {
+                                    if rects_overlap(
+                                        wx,
+                                        wy,
+                                        ww,
+                                        wh,
+                                        s.x as i32,
+                                        s.y as i32,
+                                        s.width as i32 + 2 * sbw,
+                                        s.height as i32 + 2 * sbw,
+                                    ) {
                                         return true;
                                     }
                                 }
@@ -791,10 +900,16 @@ pub(crate) fn handle_configure_window(state: &mut ClientState, data: &[u8], seq:
 
             // Compute the above_sibling: the window directly below this one in
             // the parent's stacking order (per X11 spec ConfigureNotify).
-            let above_sibling = state.windows.get(&parent_id)
+            let above_sibling = state
+                .windows
+                .get(&parent_id)
                 .and_then(|parent| {
                     let pos = parent.children_order.iter().position(|&id| id == wid)?;
-                    if pos > 0 { Some(parent.children_order[pos - 1]) } else { None }
+                    if pos > 0 {
+                        Some(parent.children_order[pos - 1])
+                    } else {
+                        None
+                    }
                 })
                 .unwrap_or(0);
 
@@ -809,7 +924,9 @@ pub(crate) fn handle_configure_window(state: &mut ClientState, data: &[u8], seq:
                     let sync_request_atom = state.intern_atom("_NET_WM_SYNC_REQUEST", false);
 
                     // Increment the sync request value
-                    let new_value = state.windows.get(&wid)
+                    let new_value = state
+                        .windows
+                        .get(&wid)
                         .map(|w| w.sync_request_value + 1)
                         .unwrap_or(1);
                     if let Some(win) = state.windows.get_mut(&wid) {
@@ -877,8 +994,12 @@ pub(crate) fn handle_configure_window(state: &mut ClientState, data: &[u8], seq:
                 let win_mask = state.windows.get(&wid).map(|w| w.event_mask).unwrap_or(0);
 
                 // Also expose mapped descendants
-                let descendants: Vec<(u32, u16, u16)> = state.windows.values()
-                    .filter(|w| w.mapped && w.id != wid && is_descendant_of(&state.windows, w.id, wid))
+                let descendants: Vec<(u32, u16, u16)> = state
+                    .windows
+                    .values()
+                    .filter(|w| {
+                        w.mapped && w.id != wid && is_descendant_of(&state.windows, w.id, wid)
+                    })
                     .filter(|w| w.event_mask & EXPOSURE_MASK != 0)
                     .map(|w| (w.id, w.width, w.height))
                     .collect();
@@ -918,10 +1039,9 @@ pub(crate) fn handle_configure_window(state: &mut ClientState, data: &[u8], seq:
 
             // Notify Present extension subscribers about the reconfiguration
             super::extensions::send_present_config_notify(
-                state, wid, x, y, width, height,
-                0, 0,            // off_x, off_y
-                width, height,   // pixmap_width, pixmap_height = window size
-                0,               // pixmap_flags
+                state, wid, x, y, width, height, 0, 0, // off_x, off_y
+                width, height, // pixmap_width, pixmap_height = window size
+                0,      // pixmap_flags
             );
 
             // Recalculate and send VisibilityNotify for affected siblings.
@@ -997,8 +1117,8 @@ pub(crate) fn handle_circulate_window(state: &mut ClientState, data: &[u8], seq:
         let mut event = [0u8; 32];
         event[0] = CIRCULATE_REQUEST_EVENT;
         write_u16_bo(&mut event, 2, seq, bo);
-        write_u32_bo(&mut event, 4, window, bo);        // parent (event window)
-        write_u32_bo(&mut event, 8, target_child, bo);   // window being circulated
+        write_u32_bo(&mut event, 4, window, bo); // parent (event window)
+        write_u32_bo(&mut event, 8, target_child, bo); // window being circulated
         event[16] = direction; // place: 0=Top, 1=Bottom (matches direction semantics)
         state.pending_events.push(event.to_vec());
         // Per X11 spec, deliver CirculateRequest to all SubstructureRedirectMask selectors
@@ -1024,9 +1144,7 @@ pub(crate) fn handle_circulate_window(state: &mut ClientState, data: &[u8], seq:
         if let Some(uuid) = state.window_uuid(target_child) {
             let _ = state.update_tx.send((
                 state.client_id.clone(),
-                DisplayUpdate::WindowRaised {
-                    window_id: uuid,
-                },
+                DisplayUpdate::WindowRaised { window_id: uuid },
             ));
         }
     }
@@ -1049,9 +1167,9 @@ pub(crate) fn handle_circulate_window(state: &mut ClientState, data: &[u8], seq:
         let mut event = [0u8; 32];
         event[0] = CIRCULATE_NOTIFY_EVENT;
         write_u16_bo(&mut event, 2, seq, bo);
-        write_u32_bo(&mut event, 4, target_child, bo);  // event window
-        write_u32_bo(&mut event, 8, target_child, bo);  // window
-        write_u32_bo(&mut event, 12, window, bo);        // (unused per spec, but some set parent here)
+        write_u32_bo(&mut event, 4, target_child, bo); // event window
+        write_u32_bo(&mut event, 8, target_child, bo); // window
+        write_u32_bo(&mut event, 12, window, bo); // (unused per spec, but some set parent here)
         event[16] = place;
         if structure_mask {
             state.pending_events.push(event.to_vec());
@@ -1064,8 +1182,8 @@ pub(crate) fn handle_circulate_window(state: &mut ClientState, data: &[u8], seq:
         let mut event = [0u8; 32];
         event[0] = CIRCULATE_NOTIFY_EVENT;
         write_u16_bo(&mut event, 2, seq, bo);
-        write_u32_bo(&mut event, 4, window, bo);         // event window (parent)
-        write_u32_bo(&mut event, 8, target_child, bo);   // window
+        write_u32_bo(&mut event, 4, window, bo); // event window (parent)
+        write_u32_bo(&mut event, 8, target_child, bo); // window
         write_u32_bo(&mut event, 12, window, bo);
         event[16] = place;
         if substructure_mask {

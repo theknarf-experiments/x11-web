@@ -34,7 +34,9 @@ pub(crate) fn handle_send_event(state: &mut ClientState, data: &[u8]) -> Vec<u8>
             let mut found = state.root_window;
             let mut current = state.root_window;
             'outer: loop {
-                let children = state.windows.get(&current)
+                let children = state
+                    .windows
+                    .get(&current)
                     .map(|w| w.children_order.clone())
                     .unwrap_or_default();
                 let mut descended = false;
@@ -77,10 +79,12 @@ pub(crate) fn handle_send_event(state: &mut ClientState, data: &[u8]) -> Vec<u8>
     );
 
     // Intercept XIM (X Input Method) client messages directed at the XIM window.
-    if event_type == CLIENT_MESSAGE_EVENT && event.len() >= 32
-        && super::super::xim::maybe_handle_xim_message(state, &event) {
-            return Vec::new();
-        }
+    if event_type == CLIENT_MESSAGE_EVENT
+        && event.len() >= 32
+        && super::super::xim::maybe_handle_xim_message(state, &event)
+    {
+        return Vec::new();
+    }
 
     // Intercept EWMH _NET_WM_STATE ClientMessage sent to root window.
     // Per EWMH spec: clients send ClientMessage to root to request state changes.
@@ -106,15 +110,23 @@ pub(crate) fn handle_send_event(state: &mut ClientState, data: &[u8]) -> Vec<u8>
                 let hidden_atom = state.intern_atom("_NET_WM_STATE_HIDDEN", false);
                 let modal_atom = state.intern_atom("_NET_WM_STATE_MODAL", false);
                 let above_atom = state.intern_atom("_NET_WM_STATE_ABOVE", false);
-                let demands_attention_atom = state.intern_atom("_NET_WM_STATE_DEMANDS_ATTENTION", false);
+                let demands_attention_atom =
+                    state.intern_atom("_NET_WM_STATE_DEMANDS_ATTENTION", false);
 
-                let atoms_to_change = if prop2 != 0 { vec![prop1, prop2] } else { vec![prop1] };
+                let atoms_to_change = if prop2 != 0 {
+                    vec![prop1, prop2]
+                } else {
+                    vec![prop1]
+                };
 
                 // Get current state atoms (stored as LE)
-                let mut current_atoms: Vec<u32> = state.windows.get(&source_window)
+                let mut current_atoms: Vec<u32> = state
+                    .windows
+                    .get(&source_window)
                     .and_then(|w| w.properties.get(&net_wm_state_atom))
                     .map(|pv| {
-                        pv.data.chunks_exact(4)
+                        pv.data
+                            .chunks_exact(4)
                             .map(|c| u32::from_le_bytes([c[0], c[1], c[2], c[3]]))
                             .collect()
                     })
@@ -122,9 +134,16 @@ pub(crate) fn handle_send_event(state: &mut ClientState, data: &[u8]) -> Vec<u8>
 
                 for atom in &atoms_to_change {
                     match action {
-                        0 => { current_atoms.retain(|a| a != atom); } // Remove
-                        1 => { if !current_atoms.contains(atom) { current_atoms.push(*atom); } } // Add
-                        2 => { // Toggle
+                        0 => {
+                            current_atoms.retain(|a| a != atom);
+                        } // Remove
+                        1 => {
+                            if !current_atoms.contains(atom) {
+                                current_atoms.push(*atom);
+                            }
+                        } // Add
+                        2 => {
+                            // Toggle
                             if current_atoms.contains(atom) {
                                 current_atoms.retain(|a| a != atom);
                             } else {
@@ -136,13 +155,17 @@ pub(crate) fn handle_send_event(state: &mut ClientState, data: &[u8]) -> Vec<u8>
                 }
 
                 // Update the property (stored as LE)
-                let data_bytes: Vec<u8> = current_atoms.iter().flat_map(|a| a.to_le_bytes()).collect();
+                let data_bytes: Vec<u8> =
+                    current_atoms.iter().flat_map(|a| a.to_le_bytes()).collect();
                 if let Some(win) = state.windows.get_mut(&source_window) {
-                    win.properties.insert(net_wm_state_atom, PropertyValue {
-                        prop_type: 4,
-                        format: 32,
-                        data: data_bytes,
-                    });
+                    win.properties.insert(
+                        net_wm_state_atom,
+                        PropertyValue {
+                            prop_type: 4,
+                            format: 32,
+                            data: data_bytes,
+                        },
+                    );
                 }
 
                 // Generate PropertyNotify for clients watching PropertyChangeMask
@@ -165,7 +188,8 @@ pub(crate) fn handle_send_event(state: &mut ClientState, data: &[u8]) -> Vec<u8>
 
                 // Determine the new WM state and broadcast to frontend
                 let is_fullscreen = current_atoms.contains(&fullscreen_atom);
-                let is_maximized = current_atoms.contains(&max_vert_atom) || current_atoms.contains(&max_horz_atom);
+                let is_maximized = current_atoms.contains(&max_vert_atom)
+                    || current_atoms.contains(&max_horz_atom);
 
                 let new_state = if is_fullscreen {
                     x11_web_protocol::WindowWmState::Fullscreen
@@ -181,7 +205,9 @@ pub(crate) fn handle_send_event(state: &mut ClientState, data: &[u8]) -> Vec<u8>
                 // maximized state it MUST resize the window accordingly and send
                 // a synthetic ConfigureNotify so the client knows its new size.
                 let needs_resize = is_fullscreen || is_maximized;
-                let had_saved = state.windows.get(&source_window)
+                let had_saved = state
+                    .windows
+                    .get(&source_window)
                     .is_some_and(|w| w.saved_geometry.is_some());
 
                 if needs_resize && !had_saved {
@@ -204,10 +230,15 @@ pub(crate) fn handle_send_event(state: &mut ClientState, data: &[u8]) -> Vec<u8>
                     }
                     // Send ConfigureNotify to the client
                     {
-                        let override_redirect = state.windows.get(&source_window)
+                        let override_redirect = state
+                            .windows
+                            .get(&source_window)
                             .is_some_and(|w| w.override_redirect);
-                        let border_width = state.windows.get(&source_window)
-                            .map(|w| w.border_width).unwrap_or(0);
+                        let border_width = state
+                            .windows
+                            .get(&source_window)
+                            .map(|w| w.border_width)
+                            .unwrap_or(0);
                         let mut cn = [0u8; 32];
                         cn[0] = CONFIGURE_NOTIFY_EVENT;
                         state.write_u16(&mut cn, 2, state.sequence);
@@ -220,15 +251,21 @@ pub(crate) fn handle_send_event(state: &mut ClientState, data: &[u8]) -> Vec<u8>
                         state.write_u16(&mut cn, 22, sh);
                         state.write_u16(&mut cn, 24, border_width);
                         cn[26] = if override_redirect { 1 } else { 0 };
-                        if state.windows.get(&source_window)
-                            .is_some_and(|w| w.event_mask & STRUCTURE_NOTIFY_MASK != 0) {
+                        if state
+                            .windows
+                            .get(&source_window)
+                            .is_some_and(|w| w.event_mask & STRUCTURE_NOTIFY_MASK != 0)
+                        {
                             state.pending_events.push(cn.to_vec());
                         }
                         state.broadcast_event(source_window, STRUCTURE_NOTIFY_MASK, &cn);
 
                         // Send Expose so the client redraws at the new size
-                        if state.windows.get(&source_window)
-                            .is_some_and(|w| w.event_mask & EXPOSURE_MASK != 0) {
+                        if state
+                            .windows
+                            .get(&source_window)
+                            .is_some_and(|w| w.event_mask & EXPOSURE_MASK != 0)
+                        {
                             let mut expose = [0u8; 32];
                             expose[0] = EXPOSE_EVENT;
                             state.write_u16(&mut expose, 2, state.sequence);
@@ -240,10 +277,16 @@ pub(crate) fn handle_send_event(state: &mut ClientState, data: &[u8]) -> Vec<u8>
                     }
                     // Notify frontend of new geometry
                     if let Some(uuid) = state.window_uuid(source_window) {
-                        let bw = state.windows.get(&source_window)
-                            .map(|w| w.border_width).unwrap_or(0);
-                        let bp = state.windows.get(&source_window)
-                            .map(|w| w.border_pixel).unwrap_or(0);
+                        let bw = state
+                            .windows
+                            .get(&source_window)
+                            .map(|w| w.border_width)
+                            .unwrap_or(0);
+                        let bp = state
+                            .windows
+                            .get(&source_window)
+                            .map(|w| w.border_pixel)
+                            .unwrap_or(0);
                         let _ = state.update_tx.send((
                             state.client_id.clone(),
                             DisplayUpdate::WindowConfigured {
@@ -259,7 +302,9 @@ pub(crate) fn handle_send_event(state: &mut ClientState, data: &[u8]) -> Vec<u8>
                     }
                 } else if !needs_resize && had_saved {
                     // Restore saved geometry when leaving fullscreen/maximized
-                    let saved = state.windows.get(&source_window)
+                    let saved = state
+                        .windows
+                        .get(&source_window)
                         .and_then(|w| w.saved_geometry);
                     if let Some((sx, sy, sw, sh)) = saved {
                         if let Some(win) = state.windows.get_mut(&source_window) {
@@ -272,10 +317,15 @@ pub(crate) fn handle_send_event(state: &mut ClientState, data: &[u8]) -> Vec<u8>
                         }
                         // Send ConfigureNotify to the client
                         {
-                            let override_redirect = state.windows.get(&source_window)
+                            let override_redirect = state
+                                .windows
+                                .get(&source_window)
                                 .is_some_and(|w| w.override_redirect);
-                            let border_width = state.windows.get(&source_window)
-                                .map(|w| w.border_width).unwrap_or(0);
+                            let border_width = state
+                                .windows
+                                .get(&source_window)
+                                .map(|w| w.border_width)
+                                .unwrap_or(0);
                             let mut cn = [0u8; 32];
                             cn[0] = CONFIGURE_NOTIFY_EVENT;
                             state.write_u16(&mut cn, 2, state.sequence);
@@ -287,15 +337,21 @@ pub(crate) fn handle_send_event(state: &mut ClientState, data: &[u8]) -> Vec<u8>
                             state.write_u16(&mut cn, 22, sh);
                             state.write_u16(&mut cn, 24, border_width);
                             cn[26] = if override_redirect { 1 } else { 0 };
-                            if state.windows.get(&source_window)
-                                .is_some_and(|w| w.event_mask & STRUCTURE_NOTIFY_MASK != 0) {
+                            if state
+                                .windows
+                                .get(&source_window)
+                                .is_some_and(|w| w.event_mask & STRUCTURE_NOTIFY_MASK != 0)
+                            {
                                 state.pending_events.push(cn.to_vec());
                             }
                             state.broadcast_event(source_window, STRUCTURE_NOTIFY_MASK, &cn);
 
                             // Expose for redraw
-                            if state.windows.get(&source_window)
-                                .is_some_and(|w| w.event_mask & EXPOSURE_MASK != 0) {
+                            if state
+                                .windows
+                                .get(&source_window)
+                                .is_some_and(|w| w.event_mask & EXPOSURE_MASK != 0)
+                            {
                                 let mut expose = [0u8; 32];
                                 expose[0] = EXPOSE_EVENT;
                                 state.write_u16(&mut expose, 2, state.sequence);
@@ -307,10 +363,16 @@ pub(crate) fn handle_send_event(state: &mut ClientState, data: &[u8]) -> Vec<u8>
                         }
                         // Notify frontend
                         if let Some(uuid) = state.window_uuid(source_window) {
-                            let bw = state.windows.get(&source_window)
-                                .map(|w| w.border_width).unwrap_or(0);
-                            let bp = state.windows.get(&source_window)
-                                .map(|w| w.border_pixel).unwrap_or(0);
+                            let bw = state
+                                .windows
+                                .get(&source_window)
+                                .map(|w| w.border_width)
+                                .unwrap_or(0);
+                            let bp = state
+                                .windows
+                                .get(&source_window)
+                                .map(|w| w.border_pixel)
+                                .unwrap_or(0);
                             let _ = state.update_tx.send((
                                 state.client_id.clone(),
                                 DisplayUpdate::WindowConfigured {
@@ -346,7 +408,9 @@ pub(crate) fn handle_send_event(state: &mut ClientState, data: &[u8]) -> Vec<u8>
                     }
                     if current_atoms.contains(&modal_atom) || current_atoms.contains(&above_atom) {
                         // Raise this window to the top of the stack
-                        if let Some(children) = state.windows.get(&state.root_window)
+                        if let Some(children) = state
+                            .windows
+                            .get(&state.root_window)
                             .map(|r| r.children_order.clone())
                         {
                             if children.contains(&source_window) {
@@ -416,7 +480,9 @@ pub(crate) fn handle_send_event(state: &mut ClientState, data: &[u8]) -> Vec<u8>
                 // Compute frame extents from border_width. The frontend renders
                 // decorations (title bar etc.) but the X11 border_width is part of
                 // the protocol-visible frame.
-                let bw = state.windows.get(&source_window)
+                let bw = state
+                    .windows
+                    .get(&source_window)
                     .map(|w| w.border_width as u32)
                     .unwrap_or(0);
                 if let Some(win) = state.windows.get_mut(&source_window) {
@@ -426,11 +492,14 @@ pub(crate) fn handle_send_event(state: &mut ClientState, data: &[u8]) -> Vec<u8>
                     data.extend_from_slice(&bw.to_le_bytes()); // right
                     data.extend_from_slice(&bw.to_le_bytes()); // top
                     data.extend_from_slice(&bw.to_le_bytes()); // bottom
-                    win.properties.insert(atom_frame, PropertyValue {
-                        prop_type: 6, // CARDINAL
-                        format: 32,
-                        data,
-                    });
+                    win.properties.insert(
+                        atom_frame,
+                        PropertyValue {
+                            prop_type: 6, // CARDINAL
+                            format: 32,
+                            data,
+                        },
+                    );
                 }
                 // Generate PropertyNotify for the frame extents change
                 {
@@ -457,7 +526,9 @@ pub(crate) fn handle_send_event(state: &mut ClientState, data: &[u8]) -> Vec<u8>
             if msg_type == net_active_atom {
                 let source_window = state.read_u32(&event, 4);
                 // Respect ICCCM input focus model (WM_HINTS input field)
-                let accepts_input = state.windows.get(&source_window)
+                let accepts_input = state
+                    .windows
+                    .get(&source_window)
                     .and_then(|w| w.wm_hints_input)
                     .unwrap_or(true);
                 if accepts_input {
@@ -504,14 +575,30 @@ pub(crate) fn handle_send_event(state: &mut ClientState, data: &[u8]) -> Vec<u8>
                 debug!("_NET_MOVERESIZE_WINDOW: window={source_window:#x} flags={flags:#x} {x},{y} {width}x{height}");
                 if let Some(win) = state.windows.get_mut(&source_window) {
                     // flags bits 8-11 indicate which fields are present
-                    if flags & (1 << 8) != 0 { win.x = x; }
-                    if flags & (1 << 9) != 0 { win.y = y; }
-                    if flags & (1 << 10) != 0 { win.width = width; }
-                    if flags & (1 << 11) != 0 { win.height = height; }
+                    if flags & (1 << 8) != 0 {
+                        win.x = x;
+                    }
+                    if flags & (1 << 9) != 0 {
+                        win.y = y;
+                    }
+                    if flags & (1 << 10) != 0 {
+                        win.width = width;
+                    }
+                    if flags & (1 << 11) != 0 {
+                        win.height = height;
+                    }
                 }
                 if let Some(uuid) = state.window_uuid(source_window) {
-                    let bw = state.windows.get(&source_window).map(|w| w.border_width).unwrap_or(0);
-                    let bp = state.windows.get(&source_window).map(|w| w.border_pixel).unwrap_or(0);
+                    let bw = state
+                        .windows
+                        .get(&source_window)
+                        .map(|w| w.border_width)
+                        .unwrap_or(0);
+                    let bp = state
+                        .windows
+                        .get(&source_window)
+                        .map(|w| w.border_pixel)
+                        .unwrap_or(0);
                     let _ = state.update_tx.send((
                         state.client_id.clone(),
                         DisplayUpdate::WindowConfigured {
@@ -536,9 +623,7 @@ pub(crate) fn handle_send_event(state: &mut ClientState, data: &[u8]) -> Vec<u8>
                 if let Some(uuid) = state.window_uuid(source_window) {
                     let _ = state.update_tx.send((
                         state.client_id.clone(),
-                        DisplayUpdate::WindowRaised {
-                            window_id: uuid,
-                        },
+                        DisplayUpdate::WindowRaised { window_id: uuid },
                     ));
                 }
                 return Vec::new();
@@ -556,11 +641,14 @@ pub(crate) fn handle_send_event(state: &mut ClientState, data: &[u8]) -> Vec<u8>
                     let net_wm_state_atom = state.intern_atom("_NET_WM_STATE", false);
                     let data = hidden_atom.to_le_bytes().to_vec();
                     if let Some(win) = state.windows.get_mut(&source_window) {
-                        win.properties.insert(net_wm_state_atom, PropertyValue {
-                            prop_type: 4,
-                            format: 32,
-                            data,
-                        });
+                        win.properties.insert(
+                            net_wm_state_atom,
+                            PropertyValue {
+                                prop_type: 4,
+                                format: 32,
+                                data,
+                            },
+                        );
                     }
                     // Generate PropertyNotify for the state change
                     {
@@ -572,7 +660,11 @@ pub(crate) fn handle_send_event(state: &mut ClientState, data: &[u8]) -> Vec<u8>
                         state.write_u32(&mut pn, 8, net_wm_state_atom);
                         state.write_u32(&mut pn, 12, state.timestamp());
                         pn[16] = 0;
-                        if state.windows.get(&source_window).is_some_and(|w| w.event_mask & pcm != 0) {
+                        if state
+                            .windows
+                            .get(&source_window)
+                            .is_some_and(|w| w.event_mask & pcm != 0)
+                        {
                             state.pending_events.push(pn.to_vec());
                         }
                         state.broadcast_event(source_window, pcm, &pn);
@@ -593,7 +685,9 @@ pub(crate) fn handle_send_event(state: &mut ClientState, data: &[u8]) -> Vec<u8>
                     // Remove _NET_WM_STATE_HIDDEN from the state
                     if let Some(win) = state.windows.get_mut(&source_window) {
                         if let Some(prop) = win.properties.get_mut(&net_wm_state_atom) {
-                            let atoms: Vec<u32> = prop.data.chunks_exact(4)
+                            let atoms: Vec<u32> = prop
+                                .data
+                                .chunks_exact(4)
                                 .map(|c| u32::from_le_bytes([c[0], c[1], c[2], c[3]]))
                                 .filter(|&a| a != hidden_atom)
                                 .collect();
@@ -610,7 +704,11 @@ pub(crate) fn handle_send_event(state: &mut ClientState, data: &[u8]) -> Vec<u8>
                         state.write_u32(&mut pn, 8, net_wm_state_atom);
                         state.write_u32(&mut pn, 12, state.timestamp());
                         pn[16] = 0;
-                        if state.windows.get(&source_window).is_some_and(|w| w.event_mask & pcm != 0) {
+                        if state
+                            .windows
+                            .get(&source_window)
+                            .is_some_and(|w| w.event_mask & pcm != 0)
+                        {
                             state.pending_events.push(pn.to_vec());
                         }
                         state.broadcast_event(source_window, pcm, &pn);
@@ -660,9 +758,16 @@ pub(crate) fn handle_send_event(state: &mut ClientState, data: &[u8]) -> Vec<u8>
                     state.write_u32(&mut xembed_event, 8, xembed_atom);
                     state.write_u32(&mut xembed_event, 12, timestamp);
                     state.write_u32(&mut xembed_event, 16, 0); // XEMBED_EMBEDDED_NOTIFY
-                    state.write_u32(&mut xembed_event, 20, crate::xserver::types::SYSTEM_TRAY_WINDOW);
+                    state.write_u32(
+                        &mut xembed_event,
+                        20,
+                        crate::xserver::types::SYSTEM_TRAY_WINDOW,
+                    );
 
-                    if !state.event_router.send_event(icon_window, xembed_event.to_vec()) {
+                    if !state
+                        .event_router
+                        .send_event(icon_window, xembed_event.to_vec())
+                    {
                         state.pending_events.push(xembed_event.to_vec());
                     }
                 }
@@ -677,8 +782,16 @@ pub(crate) fn handle_send_event(state: &mut ClientState, data: &[u8]) -> Vec<u8>
                 let _timestamp = state.read_u32(&event, 12);
                 let xembed_message = state.read_u32(&event, 16);
                 let detail = state.read_u32(&event, 20);
-                let _data1 = if event.len() >= 28 { state.read_u32(&event, 24) } else { 0 };
-                let _data2 = if event.len() >= 32 { state.read_u32(&event, 28) } else { 0 };
+                let _data1 = if event.len() >= 28 {
+                    state.read_u32(&event, 24)
+                } else {
+                    0
+                };
+                let _data2 = if event.len() >= 32 {
+                    state.read_u32(&event, 28)
+                } else {
+                    0
+                };
 
                 // XEmbed message types:
                 const XEMBED_EMBEDDED_NOTIFY: u32 = 0;
@@ -735,9 +848,14 @@ pub(crate) fn handle_send_event(state: &mut ClientState, data: &[u8]) -> Vec<u8>
                         debug!("XEMBED_FOCUS_NEXT/PREV: target={target:#x}");
                     }
                     XEMBED_MODALITY_ON | XEMBED_MODALITY_OFF => {
-                        debug!("XEMBED_MODALITY: target={target:#x} on={}", xembed_message == XEMBED_MODALITY_ON);
+                        debug!(
+                            "XEMBED_MODALITY: target={target:#x} on={}",
+                            xembed_message == XEMBED_MODALITY_ON
+                        );
                     }
-                    XEMBED_REGISTER_ACCELERATOR | XEMBED_UNREGISTER_ACCELERATOR | XEMBED_ACTIVATE_ACCELERATOR => {
+                    XEMBED_REGISTER_ACCELERATOR
+                    | XEMBED_UNREGISTER_ACCELERATOR
+                    | XEMBED_ACTIVATE_ACCELERATOR => {
                         debug!("XEMBED_ACCELERATOR: target={target:#x} msg={xembed_message}");
                     }
                     _ => {
@@ -836,22 +954,26 @@ pub(crate) fn handle_send_event(state: &mut ClientState, data: &[u8]) -> Vec<u8>
             // Try local windows first, then fall back to shared windows
             // (for cross-connection transfers where the requestor is on
             // a different connection).
-            let prop_data = state.windows.get(&requestor_wid)
+            let prop_data = state
+                .windows
+                .get(&requestor_wid)
                 .and_then(|w| w.properties.get(&property_atom))
                 .map(|pv| pv.data.clone())
                 .or_else(|| {
-                    state.shared_windows.lock().ok()
-                        .and_then(|sw| sw.get(&requestor_wid)
+                    state.shared_windows.lock().ok().and_then(|sw| {
+                        sw.get(&requestor_wid)
                             .and_then(|w| w.properties.get(&property_atom))
-                            .map(|pv| pv.data.clone()))
+                            .map(|pv| pv.data.clone())
+                    })
                 });
             if let Some(data) = prop_data {
                 if let Ok(mut pc) = state.persistent_clipboard.lock() {
-                    let entry = pc.entry(CLIPBOARD_ATOM)
-                        .or_insert_with(|| PersistentClipboardEntry {
-                            targets: HashMap::new(),
-                            timestamp: state.timestamp(),
-                        });
+                    let entry =
+                        pc.entry(CLIPBOARD_ATOM)
+                            .or_insert_with(|| PersistentClipboardEntry {
+                                targets: HashMap::new(),
+                                timestamp: state.timestamp(),
+                            });
                     entry.targets.insert(target_atom, data);
                     entry.timestamp = state.timestamp();
                 }
@@ -862,8 +984,8 @@ pub(crate) fn handle_send_event(state: &mut ClientState, data: &[u8]) -> Vec<u8>
     // Check if the delivery target window belongs to this connection or another.
     // For cross-connection event delivery (required by XDND, ICCCM selections,
     // ClientMessage), try the EventRouter first.
-    let is_local = state.x11_to_uuid.contains_key(&delivery_target)
-        || delivery_target == state.root_window;
+    let is_local =
+        state.x11_to_uuid.contains_key(&delivery_target) || delivery_target == state.root_window;
 
     if is_local {
         // Target window is owned by this connection — deliver locally.
@@ -873,7 +995,10 @@ pub(crate) fn handle_send_event(state: &mut ClientState, data: &[u8]) -> Vec<u8>
         // This handles XDND (XdndEnter, XdndPosition, XdndStatus, XdndDrop,
         // XdndFinished, XdndLeave), ICCCM SelectionNotify, and any other
         // ClientMessage sent to windows on other connections.
-        if !state.event_router.send_event(delivery_target, event.clone()) {
+        if !state
+            .event_router
+            .send_event(delivery_target, event.clone())
+        {
             // No route found — the target window may be a child window
             // of a top-level we know about, or it may be on this connection
             // but not registered (e.g., sub-windows). Fall back to local delivery.

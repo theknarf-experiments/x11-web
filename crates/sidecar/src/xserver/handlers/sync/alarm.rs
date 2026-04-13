@@ -10,18 +10,22 @@ use crate::xserver::core::require_len;
 pub(crate) fn create_alarm(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
     require_len!(data, 8, seq, 134, data[1] as u16, state.msb_first);
     let alarm_id = state.read_u32(data, 4);
-    let value_mask = if data.len() >= 12 { state.read_u32(data, 8) } else { 0 };
+    let value_mask = if data.len() >= 12 {
+        state.read_u32(data, 8)
+    } else {
+        0
+    };
 
     let mut alarm = SyncAlarm {
         counter: 0,
-        value_type: 0,   // Absolute
+        value_type: 0, // Absolute
         value_hi: 0,
         value_lo: 0,
-        test_type: 0,   // PositiveTransition
+        test_type: 0, // PositiveTransition
         delta_hi: 0,
-        delta_lo: 1,    // Default delta = 1
+        delta_lo: 1, // Default delta = 1
         events: true,
-        state: 0,       // Active
+        state: 0, // Active
     };
 
     let mut offset = 12;
@@ -55,8 +59,10 @@ pub(crate) fn create_alarm(state: &mut ClientState, data: &[u8], seq: u16) -> Ve
         alarm.events = state.read_u32(data, offset) != 0;
     }
 
-    debug!("SYNC CreateAlarm: id={alarm_id:#x} counter={:#x} test_type={} events={}",
-        alarm.counter, alarm.test_type, alarm.events);
+    debug!(
+        "SYNC CreateAlarm: id={alarm_id:#x} counter={:#x} test_type={} events={}",
+        alarm.counter, alarm.test_type, alarm.events
+    );
 
     state.sync_state.alarms.insert(alarm_id, alarm);
     Vec::new()
@@ -67,7 +73,11 @@ pub(crate) fn change_alarm(state: &mut ClientState, data: &[u8], seq: u16) -> Ve
     require_len!(data, 8, seq, 134, data[1] as u16, state.msb_first);
     let bo = state.msb_first;
     let alarm_id = state.read_u32(data, 4);
-    let value_mask = if data.len() >= 12 { state.read_u32(data, 8) } else { 0 };
+    let value_mask = if data.len() >= 12 {
+        state.read_u32(data, 8)
+    } else {
+        0
+    };
 
     if let Some(alarm) = state.sync_state.alarms.get_mut(&alarm_id) {
         let mut offset = 12;
@@ -81,7 +91,8 @@ pub(crate) fn change_alarm(state: &mut ClientState, data: &[u8], seq: u16) -> Ve
                     3 => {
                         alarm.value_hi = val as i32;
                         if offset + 8 <= data.len() {
-                            alarm.value_lo = super::super::super::core::read_u32_bo(data, offset + 4, bo);
+                            alarm.value_lo =
+                                super::super::super::core::read_u32_bo(data, offset + 4, bo);
                             offset += 4;
                         }
                     }

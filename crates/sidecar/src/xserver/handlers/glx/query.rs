@@ -1,20 +1,17 @@
 //! GLX query operations (QueryVersion, GetVisualConfigs, GetFBConfigs,
 //! QueryExtensionsString, QueryServerString).
 
-use super::{
-    FBCONFIG_ATTRIB_COUNT,
-    GLX_FBCONFIG_ID, GLX_VISUAL_ID, GLX_X_RENDERABLE, GLX_RENDER_TYPE,
-    GLX_DRAWABLE_TYPE, GLX_X_VISUAL_TYPE, GLX_CONFIG_CAVEAT,
-    GLX_RED_SIZE, GLX_GREEN_SIZE, GLX_BLUE_SIZE, GLX_ALPHA_SIZE,
-    GLX_BUFFER_SIZE, GLX_DOUBLEBUFFER, GLX_DEPTH_SIZE, GLX_STENCIL_SIZE,
-    GLX_LEVEL, GLX_AUX_BUFFERS, GLX_STEREO,
-    GLX_ACCUM_RED_SIZE, GLX_ACCUM_GREEN_SIZE, GLX_ACCUM_BLUE_SIZE, GLX_ACCUM_ALPHA_SIZE,
-    GLX_SAMPLE_BUFFERS, GLX_SAMPLES, GLX_NONE, GLX_TRUE_COLOR,
-    GLX_RGBA_BIT, GLX_WINDOW_BIT, GLX_PIXMAP_BIT, GLX_PBUFFER_BIT,
-    GLX_MAX_PBUFFER_WIDTH, GLX_MAX_PBUFFER_HEIGHT, GLX_MAX_PBUFFER_PIXELS,
-    GLX_TRANSPARENT_TYPE,
-};
 use super::super::super::core::ROOT_VISUAL;
+use super::{
+    FBCONFIG_ATTRIB_COUNT, GLX_ACCUM_ALPHA_SIZE, GLX_ACCUM_BLUE_SIZE, GLX_ACCUM_GREEN_SIZE,
+    GLX_ACCUM_RED_SIZE, GLX_ALPHA_SIZE, GLX_AUX_BUFFERS, GLX_BLUE_SIZE, GLX_BUFFER_SIZE,
+    GLX_CONFIG_CAVEAT, GLX_DEPTH_SIZE, GLX_DOUBLEBUFFER, GLX_DRAWABLE_TYPE, GLX_FBCONFIG_ID,
+    GLX_GREEN_SIZE, GLX_LEVEL, GLX_MAX_PBUFFER_HEIGHT, GLX_MAX_PBUFFER_PIXELS,
+    GLX_MAX_PBUFFER_WIDTH, GLX_NONE, GLX_PBUFFER_BIT, GLX_PIXMAP_BIT, GLX_RED_SIZE,
+    GLX_RENDER_TYPE, GLX_RGBA_BIT, GLX_SAMPLES, GLX_SAMPLE_BUFFERS, GLX_STENCIL_SIZE, GLX_STEREO,
+    GLX_TRANSPARENT_TYPE, GLX_TRUE_COLOR, GLX_VISUAL_ID, GLX_WINDOW_BIT, GLX_X_RENDERABLE,
+    GLX_X_VISUAL_TYPE,
+};
 
 // ---------------------------------------------------------------------------
 // GLX_QUERY_VERSION (minor 7)
@@ -50,28 +47,34 @@ pub(crate) fn handle_get_visual_configs(_data: &[u8], seq: u16) -> Vec<u8> {
 
     // Visual config properties: one RGBA config, depth=24, stencil=8
     let props: [u32; 28] = [
-        ROOT_VISUAL,    // visual id
-        1,              // class (TrueColor)
-        1,              // rgba (True)
-        8,              // red size
-        8,              // green size
-        8,              // blue size
-        0,              // alpha size
-        0,              // accum red
-        0,              // accum green
-        0,              // accum blue
-        0,              // accum alpha
-        1,              // double buffer
-        0,              // stereo
-        32,             // buffer size
-        24,             // depth size
-        8,              // stencil size
-        0,              // aux buffers
-        0,              // level
-        0,              // visual caveat (None)
-        0x23,           // transparent type (None = 0x8000 but wire uses 0)
-        0, 0, 0, 0,     // transparent r, g, b, a
-        0, 0, 0, 0,     // pad
+        ROOT_VISUAL, // visual id
+        1,           // class (TrueColor)
+        1,           // rgba (True)
+        8,           // red size
+        8,           // green size
+        8,           // blue size
+        0,           // alpha size
+        0,           // accum red
+        0,           // accum green
+        0,           // accum blue
+        0,           // accum alpha
+        1,           // double buffer
+        0,           // stereo
+        32,          // buffer size
+        24,          // depth size
+        8,           // stencil size
+        0,           // aux buffers
+        0,           // level
+        0,           // visual caveat (None)
+        0x23,        // transparent type (None = 0x8000 but wire uses 0)
+        0,
+        0,
+        0,
+        0, // transparent r, g, b, a
+        0,
+        0,
+        0,
+        0, // pad
     ];
     for (i, &v) in props.iter().enumerate() {
         let off = 32 + i * 4;
@@ -105,7 +108,10 @@ pub(crate) fn handle_get_fb_configs(_data: &[u8], seq: u16) -> Vec<u8> {
         (GLX_VISUAL_ID, ROOT_VISUAL),
         (GLX_X_RENDERABLE, 1),
         (GLX_RENDER_TYPE, GLX_RGBA_BIT),
-        (GLX_DRAWABLE_TYPE, GLX_WINDOW_BIT | GLX_PIXMAP_BIT | GLX_PBUFFER_BIT),
+        (
+            GLX_DRAWABLE_TYPE,
+            GLX_WINDOW_BIT | GLX_PIXMAP_BIT | GLX_PBUFFER_BIT,
+        ),
         (GLX_X_VISUAL_TYPE, GLX_TRUE_COLOR),
         (GLX_CONFIG_CAVEAT, GLX_NONE),
         (GLX_RED_SIZE, 8),
@@ -137,7 +143,10 @@ pub(crate) fn handle_get_fb_configs(_data: &[u8], seq: u16) -> Vec<u8> {
         (GLX_VISUAL_ID, 0x40), // ARGB visual
         (GLX_X_RENDERABLE, 1),
         (GLX_RENDER_TYPE, GLX_RGBA_BIT),
-        (GLX_DRAWABLE_TYPE, GLX_WINDOW_BIT | GLX_PIXMAP_BIT | GLX_PBUFFER_BIT),
+        (
+            GLX_DRAWABLE_TYPE,
+            GLX_WINDOW_BIT | GLX_PIXMAP_BIT | GLX_PBUFFER_BIT,
+        ),
         (GLX_X_VISUAL_TYPE, GLX_TRUE_COLOR),
         (GLX_CONFIG_CAVEAT, GLX_NONE),
         (GLX_RED_SIZE, 8),

@@ -4,8 +4,8 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use tokio::sync::mpsc;
 
-use crate::framebuffer::Framebuffer;
 use super::region::RegionRect;
+use crate::framebuffer::Framebuffer;
 
 /// EWMH window type, used for stacking layer and focus/decoration policy.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -34,11 +34,17 @@ impl WindowType {
     pub(crate) fn stacking_layer(self) -> u8 {
         match self {
             WindowType::Desktop => 0,
-            WindowType::Normal | WindowType::Dialog | WindowType::Splash
-            | WindowType::Utility | WindowType::Toolbar => 2,
+            WindowType::Normal
+            | WindowType::Dialog
+            | WindowType::Splash
+            | WindowType::Utility
+            | WindowType::Toolbar => 2,
             WindowType::Dock => 3,
-            WindowType::Menu | WindowType::DropdownMenu | WindowType::PopupMenu
-            | WindowType::Tooltip | WindowType::Notification => 4,
+            WindowType::Menu
+            | WindowType::DropdownMenu
+            | WindowType::PopupMenu
+            | WindowType::Tooltip
+            | WindowType::Notification => 4,
         }
     }
 
@@ -46,11 +52,18 @@ impl WindowType {
     #[cfg(test)]
     pub(crate) fn accepts_focus(self) -> bool {
         match self {
-            WindowType::Normal | WindowType::Dialog | WindowType::Utility
-            | WindowType::Toolbar | WindowType::Splash => true,
-            WindowType::Desktop | WindowType::Dock | WindowType::Menu
-            | WindowType::DropdownMenu | WindowType::PopupMenu
-            | WindowType::Tooltip | WindowType::Notification => false,
+            WindowType::Normal
+            | WindowType::Dialog
+            | WindowType::Utility
+            | WindowType::Toolbar
+            | WindowType::Splash => true,
+            WindowType::Desktop
+            | WindowType::Dock
+            | WindowType::Menu
+            | WindowType::DropdownMenu
+            | WindowType::PopupMenu
+            | WindowType::Tooltip
+            | WindowType::Notification => false,
         }
     }
 
@@ -178,9 +191,9 @@ impl WindowState {
 
 /// Check if a point falls within at least one rectangle of a shape region.
 pub(crate) fn point_in_shape(shape: &[RegionRect], x: i16, y: i16) -> bool {
-    shape.iter().any(|r| {
-        x >= r.x && x < r.x + r.width as i16 && y >= r.y && y < r.y + r.height as i16
-    })
+    shape
+        .iter()
+        .any(|r| x >= r.x && x < r.x + r.width as i16 && y >= r.y && y < r.y + r.height as i16)
 }
 
 /// WM_NORMAL_HINTS (size hints) parsed from ICCCM properties.
@@ -214,7 +227,10 @@ impl Drop for WmCleanupGuard {
     fn drop(&mut self) {
         if let Ok(mut wm) = self.wm_state.lock() {
             if wm.client_id.as_deref() == Some(&self.client_id) {
-                tracing::info!("WM client {} disconnected – clearing WM state", self.client_id);
+                tracing::info!(
+                    "WM client {} disconnected – clearing WM state",
+                    self.client_id
+                );
                 wm.client_id = None;
                 wm.event_tx = None;
             }

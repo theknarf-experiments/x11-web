@@ -1,13 +1,12 @@
 use tracing::debug;
 
-use crate::xserver::ClientState;
-use crate::xserver::core::{read_u16_bo, read_u32_bo, read_i16_bo, write_u16_bo, write_u32_bo};
-use crate::xserver::core::require_len;
 use super::{
-    PICTFORMAT_ARGB32, PICTFORMAT_RGB24, PICTFORMAT_A8, PICTFORMAT_A1,
-    PICTFORMAT_XRGB32, PICTFORMAT_XBGR32,
-    PictureState, PictFilter, resolve_source_pixels,
+    resolve_source_pixels, PictFilter, PictureState, PICTFORMAT_A1, PICTFORMAT_A8,
+    PICTFORMAT_ARGB32, PICTFORMAT_RGB24, PICTFORMAT_XBGR32, PICTFORMAT_XRGB32,
 };
+use crate::xserver::core::require_len;
+use crate::xserver::core::{read_i16_bo, read_u16_bo, read_u32_bo, write_u16_bo, write_u32_bo};
+use crate::xserver::ClientState;
 
 /// QueryVersion: reply with version 0.11
 pub(crate) fn handle_query_version(seq: u16, bo: bool) -> Vec<u8> {
@@ -57,7 +56,7 @@ pub(crate) fn handle_query_pict_formats(seq: u16, bo: bool) -> Vec<u8> {
     write_u32_bo(&mut reply, 8, num_formats, bo); // num_formats
     write_u32_bo(&mut reply, 12, num_screens, bo); // num_screens
     write_u32_bo(&mut reply, 16, num_depths, bo); // num_depths
-    // reply[20..24] = num_visuals (we have 1 visual across all depths)
+                                                  // reply[20..24] = num_visuals (we have 1 visual across all depths)
     write_u32_bo(&mut reply, 20, 1, bo);
     write_u32_bo(&mut reply, 24, num_subpixel, bo); // num_subpixel
 
@@ -269,7 +268,12 @@ pub(crate) fn handle_create_picture(state: &mut ClientState, data: &[u8], seq: u
         p.depth
     } else {
         return crate::xserver::core::build_error_bo(
-            crate::xserver::core::BAD_DRAWABLE, seq, drawable, 139, data[1] as u16, bo,
+            crate::xserver::core::BAD_DRAWABLE,
+            seq,
+            drawable,
+            139,
+            data[1] as u16,
+            bo,
         );
     };
 
@@ -281,7 +285,12 @@ pub(crate) fn handle_create_picture(state: &mut ClientState, data: &[u8], seq: u
         PICTFORMAT_A1 => 1,
         _ => {
             return crate::xserver::core::build_error_bo(
-                crate::xserver::core::BAD_MATCH, seq, format_id, 139, data[1] as u16, bo,
+                crate::xserver::core::BAD_MATCH,
+                seq,
+                format_id,
+                139,
+                data[1] as u16,
+                bo,
             );
         }
     };
@@ -300,7 +309,12 @@ pub(crate) fn handle_create_picture(state: &mut ClientState, data: &[u8], seq: u
             "CreatePicture: format depth {format_depth} incompatible with drawable depth {drawable_depth}"
         );
         return crate::xserver::core::build_error_bo(
-            crate::xserver::core::BAD_MATCH, seq, format_id, 139, data[1] as u16, bo,
+            crate::xserver::core::BAD_MATCH,
+            seq,
+            format_id,
+            139,
+            data[1] as u16,
+            bo,
         );
     }
 
@@ -394,7 +408,9 @@ pub(crate) fn handle_change_picture(state: &mut ClientState, data: &[u8], seq: u
                     6 => {
                         pic.clip_mask = if val == 0 { None } else { Some(val) };
                         // Reset clip rects when clip mask changes
-                        if val == 0 { pic.clip_rects = None; }
+                        if val == 0 {
+                            pic.clip_rects = None;
+                        }
                         debug!("  clip_mask={val:#x}");
                     }
                     12 => {
@@ -411,7 +427,11 @@ pub(crate) fn handle_change_picture(state: &mut ClientState, data: &[u8], seq: u
     Vec::new()
 }
 
-pub(crate) fn handle_set_picture_clip_rectangles(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
+pub(crate) fn handle_set_picture_clip_rectangles(
+    state: &mut ClientState,
+    data: &[u8],
+    seq: u16,
+) -> Vec<u8> {
     let bo = state.msb_first;
     require_len!(data, 12, seq, 139, data[1] as u16, bo);
     let pid = read_u32_bo(data, 4, bo);
@@ -472,9 +492,15 @@ pub(crate) fn handle_create_cursor(state: &mut ClientState, data: &[u8], seq: u1
     let (width, height) = if let Some(pic) = state.render.pictures.get(&src_picture) {
         let d = pic.drawable;
         if let Some(px) = state.pixmaps.get(&d) {
-            (px.framebuffer.width() as u16, px.framebuffer.height() as u16)
+            (
+                px.framebuffer.width() as u16,
+                px.framebuffer.height() as u16,
+            )
         } else if let Some(win) = state.windows.get(&d) {
-            (win.framebuffer.width() as u16, win.framebuffer.height() as u16)
+            (
+                win.framebuffer.width() as u16,
+                win.framebuffer.height() as u16,
+            )
         } else {
             (32, 32) // fallback
         }
@@ -503,24 +529,27 @@ pub(crate) fn handle_create_cursor(state: &mut ClientState, data: &[u8], seq: u1
 
     // Register the cursor with full bitmap data
     state.cursors.insert(cursor_id, "render-cursor".to_string());
-    state.cursor_info.insert(cursor_id, CursorInfo {
-        css_name: String::new(),
-        source_pixmap: 0,
-        mask_pixmap: 0,
-        fore_red: 0,
-        fore_green: 0,
-        fore_blue: 0,
-        back_red: 0,
-        back_green: 0,
-        back_blue: 0,
-        hotspot_x,
-        hotspot_y,
-        argb_data,
-        width,
-        height,
-        name: String::new(),
-        anim_frames: Vec::new(),
-    });
+    state.cursor_info.insert(
+        cursor_id,
+        CursorInfo {
+            css_name: String::new(),
+            source_pixmap: 0,
+            mask_pixmap: 0,
+            fore_red: 0,
+            fore_green: 0,
+            fore_blue: 0,
+            back_red: 0,
+            back_green: 0,
+            back_blue: 0,
+            hotspot_x,
+            hotspot_y,
+            argb_data,
+            width,
+            height,
+            name: String::new(),
+            anim_frames: Vec::new(),
+        },
+    );
     Vec::new()
 }
 
@@ -539,7 +568,9 @@ pub(crate) fn handle_create_anim_cursor(state: &mut ClientState, data: &[u8], se
     let mut anim_frames: Vec<(Vec<u8>, u16, u16, u16, u16, u32)> = Vec::with_capacity(num_frames);
     for i in 0..num_frames {
         let off = 8 + i * 8;
-        if off + 8 > data.len() { break; }
+        if off + 8 > data.len() {
+            break;
+        }
         let frame_cid = read_u32_bo(data, off, bo);
         let delay = read_u32_bo(data, off + 4, bo);
         if let Some(info) = state.cursor_info.get(&frame_cid) {
@@ -561,20 +592,27 @@ pub(crate) fn handle_create_anim_cursor(state: &mut ClientState, data: &[u8], se
     // Use the first frame as the static fallback, and store all frames.
     if let Some((ref argb, w, h, hx, hy, _)) = anim_frames.first() {
         use crate::xserver::types::CursorInfo;
-        state.cursor_info.insert(cursor_id, CursorInfo {
-            css_name: String::new(),
-            source_pixmap: 0,
-            mask_pixmap: 0,
-            fore_red: 0, fore_green: 0, fore_blue: 0,
-            back_red: 0, back_green: 0, back_blue: 0,
-            hotspot_x: *hx,
-            hotspot_y: *hy,
-            argb_data: argb.clone(),
-            width: *w,
-            height: *h,
-            name: String::new(),
-            anim_frames,
-        });
+        state.cursor_info.insert(
+            cursor_id,
+            CursorInfo {
+                css_name: String::new(),
+                source_pixmap: 0,
+                mask_pixmap: 0,
+                fore_red: 0,
+                fore_green: 0,
+                fore_blue: 0,
+                back_red: 0,
+                back_green: 0,
+                back_blue: 0,
+                hotspot_x: *hx,
+                hotspot_y: *hy,
+                argb_data: argb.clone(),
+                width: *w,
+                height: *h,
+                name: String::new(),
+                anim_frames,
+            },
+        );
     } else {
         // No valid frames found — copy first frame's cursor info as fallback
         let first_frame_cursor = if num_frames > 0 && data.len() >= 16 {
@@ -597,7 +635,11 @@ pub(crate) fn handle_create_anim_cursor(state: &mut ClientState, data: &[u8], se
 
 /// Returns the list of index values for an Indexed PictFormat.
 /// Since we only support TrueColor/DirectColor formats, return an empty list.
-pub(crate) fn handle_query_pict_index_values(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
+pub(crate) fn handle_query_pict_index_values(
+    state: &mut ClientState,
+    data: &[u8],
+    seq: u16,
+) -> Vec<u8> {
     let bo = state.msb_first;
     require_len!(data, 8, seq, 139, data[1] as u16, bo);
     let _format = read_u32_bo(data, 4, bo);

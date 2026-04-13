@@ -97,10 +97,7 @@ pub enum SidecarToBackend {
     /// router has no entry for. The event is dropped on the floor;
     /// this notification lets the frontend surface that fact instead
     /// of leaving the user wondering why their app stopped responding.
-    InputDropped {
-        window_id: String,
-        reason: String,
-    },
+    InputDropped { window_id: String, reason: String },
     /// Clipboard data in response to RequestClipboard.
     ClipboardData {
         selection: String,
@@ -324,7 +321,9 @@ pub enum DisplayUpdate {
         border_pixel: u32,
     },
     /// A window was destroyed.
-    WindowDestroyed { window_id: String },
+    WindowDestroyed {
+        window_id: String,
+    },
     /// A window was mapped (made visible).
     WindowMapped {
         window_id: String,
@@ -334,7 +333,9 @@ pub enum DisplayUpdate {
         override_redirect: bool,
     },
     /// A window was unmapped (hidden).
-    WindowUnmapped { window_id: String },
+    WindowUnmapped {
+        window_id: String,
+    },
     /// A window was moved/resized.
     WindowConfigured {
         window_id: String,
@@ -395,7 +396,10 @@ pub enum DisplayUpdate {
         height: u16,
     },
     /// Window title changed (from WM_NAME property).
-    TitleChanged { window_id: String, title: String },
+    TitleChanged {
+        window_id: String,
+        title: String,
+    },
     /// Draw an arc.
     DrawArc {
         window_id: String,

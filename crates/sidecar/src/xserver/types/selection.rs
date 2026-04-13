@@ -24,7 +24,11 @@ pub enum ClipboardEvent {
     /// Selection ownership changed.
     OwnerChanged { selection: String, owner: u32 },
     /// Selection data is available (response to a clipboard read request).
-    Data { selection: String, mime_type: String, data: Vec<u8> },
+    Data {
+        selection: String,
+        mime_type: String,
+        data: Vec<u8>,
+    },
 }
 
 /// Server-side clipboard data set by the backend (for pasting from browser into X11 apps).
@@ -147,7 +151,13 @@ mod tests {
         // incremental transfers for typical clipboard data.
         // Mirrors the constant in handlers/property.rs.
         const INCR_THRESHOLD: usize = 65536;
-        assert!(INCR_THRESHOLD >= 4096, "INCR threshold should be at least 4KB");
-        assert!(INCR_THRESHOLD <= 1_048_576, "INCR threshold should be at most 1MB");
+        assert!(
+            INCR_THRESHOLD >= 4096,
+            "INCR threshold should be at least 4KB"
+        );
+        assert!(
+            INCR_THRESHOLD <= 1_048_576,
+            "INCR threshold should be at most 1MB"
+        );
     }
 }

@@ -38,9 +38,14 @@ pub(crate) fn handle_render_mode(payload: &[u8], seq: u16) -> Vec<u8> {
         {
             if osmesa::is_available() {
                 osmesa::gl_render_mode(mode)
-            } else { 0 }
+            } else {
+                0
+            }
         }
-        #[cfg(not(feature = "osmesa"))] { 0 }
+        #[cfg(not(feature = "osmesa"))]
+        {
+            0
+        }
     };
     let mut reply = [0u8; 32];
     reply[0] = 1;
@@ -114,19 +119,35 @@ pub(crate) fn handle_are_textures_resident(payload: &[u8], seq: u16) -> Vec<u8> 
     if payload.len() < 4 + n * 4 {
         return glx_single_empty_reply(seq);
     }
-    let textures: Vec<u32> = (0..n).map(|i| {
-        let off = 4 + i * 4;
-        u32::from_le_bytes([payload[off], payload[off + 1], payload[off + 2], payload[off + 3]])
-    }).collect();
+    let textures: Vec<u32> = (0..n)
+        .map(|i| {
+            let off = 4 + i * 4;
+            u32::from_le_bytes([
+                payload[off],
+                payload[off + 1],
+                payload[off + 2],
+                payload[off + 3],
+            ])
+        })
+        .collect();
     let mut residences = vec![0u8; n];
     let all_resident: u8 = {
         #[cfg(feature = "osmesa")]
         {
             if osmesa::is_available() && n > 0 {
-                if osmesa::gl_are_textures_resident(&textures, &mut residences) { 1 } else { 0 }
-            } else { 1 }
+                if osmesa::gl_are_textures_resident(&textures, &mut residences) {
+                    1
+                } else {
+                    0
+                }
+            } else {
+                1
+            }
         }
-        #[cfg(not(feature = "osmesa"))] { 1 }
+        #[cfg(not(feature = "osmesa"))]
+        {
+            1
+        }
     };
     let extra_words = n.div_ceil(4);
     let mut reply = vec![0u8; 32 + extra_words * 4];
@@ -149,10 +170,17 @@ pub(crate) fn handle_delete_textures(payload: &[u8], seq: u16) -> Vec<u8> {
     let n = i32::from_le_bytes([payload[0], payload[1], payload[2], payload[3]]);
     let n = n.max(0) as usize;
     if payload.len() >= 4 + n * 4 {
-        let textures: Vec<u32> = (0..n).map(|i| {
-            let off = 4 + i * 4;
-            u32::from_le_bytes([payload[off], payload[off + 1], payload[off + 2], payload[off + 3]])
-        }).collect();
+        let textures: Vec<u32> = (0..n)
+            .map(|i| {
+                let off = 4 + i * 4;
+                u32::from_le_bytes([
+                    payload[off],
+                    payload[off + 1],
+                    payload[off + 2],
+                    payload[off + 3],
+                ])
+            })
+            .collect();
         #[cfg(feature = "osmesa")]
         {
             if osmesa::is_available() && n > 0 {

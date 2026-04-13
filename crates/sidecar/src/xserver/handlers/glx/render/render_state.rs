@@ -238,7 +238,7 @@ pub(crate) fn dispatch(opcode: u16, data: &[u8]) -> Option<bool> {
                 let plane = u32::from_le_bytes([data[0], data[1], data[2], data[3]]);
                 let mut eq = [0f64; 4];
                 for i in 0..4 {
-                    eq[i] = f64::from_le_bytes(data[4+i*8..12+i*8].try_into().unwrap());
+                    eq[i] = f64::from_le_bytes(data[4 + i * 8..12 + i * 8].try_into().unwrap());
                 }
                 osmesa::gl_clip_plane(plane, &eq);
             }
@@ -266,7 +266,12 @@ pub(crate) fn dispatch(opcode: u16, data: &[u8]) -> Option<bool> {
                 let count = (data.len() - 4) / 4;
                 let mut params = vec![0f32; count];
                 for i in 0..count {
-                    params[i] = f32::from_le_bytes([data[4+i*4], data[5+i*4], data[6+i*4], data[7+i*4]]);
+                    params[i] = f32::from_le_bytes([
+                        data[4 + i * 4],
+                        data[5 + i * 4],
+                        data[6 + i * 4],
+                        data[7 + i * 4],
+                    ]);
                 }
                 osmesa::gl_fogfv(pname, &params);
             }
@@ -286,7 +291,12 @@ pub(crate) fn dispatch(opcode: u16, data: &[u8]) -> Option<bool> {
                 let count = (data.len() - 4) / 4;
                 let mut params = vec![0i32; count];
                 for i in 0..count {
-                    params[i] = i32::from_le_bytes([data[4+i*4], data[5+i*4], data[6+i*4], data[7+i*4]]);
+                    params[i] = i32::from_le_bytes([
+                        data[4 + i * 4],
+                        data[5 + i * 4],
+                        data[6 + i * 4],
+                        data[7 + i * 4],
+                    ]);
                 }
                 osmesa::gl_fogiv(pname, &params);
             }
@@ -308,7 +318,12 @@ pub(crate) fn dispatch(opcode: u16, data: &[u8]) -> Option<bool> {
                 let count = (data.len() - 8) / 4;
                 let mut params = vec![0f32; count];
                 for i in 0..count {
-                    params[i] = f32::from_le_bytes([data[8+i*4], data[9+i*4], data[10+i*4], data[11+i*4]]);
+                    params[i] = f32::from_le_bytes([
+                        data[8 + i * 4],
+                        data[9 + i * 4],
+                        data[10 + i * 4],
+                        data[11 + i * 4],
+                    ]);
                 }
                 osmesa::gl_lightfv(light, pname, &params);
             }
@@ -330,7 +345,12 @@ pub(crate) fn dispatch(opcode: u16, data: &[u8]) -> Option<bool> {
                 let count = (data.len() - 8) / 4;
                 let mut params = vec![0i32; count];
                 for i in 0..count {
-                    params[i] = i32::from_le_bytes([data[8+i*4], data[9+i*4], data[10+i*4], data[11+i*4]]);
+                    params[i] = i32::from_le_bytes([
+                        data[8 + i * 4],
+                        data[9 + i * 4],
+                        data[10 + i * 4],
+                        data[11 + i * 4],
+                    ]);
                 }
                 osmesa::gl_lightiv(light, pname, &params);
             }
@@ -350,7 +370,12 @@ pub(crate) fn dispatch(opcode: u16, data: &[u8]) -> Option<bool> {
                 let count = (data.len() - 4) / 4;
                 let mut params = vec![0f32; count];
                 for i in 0..count {
-                    params[i] = f32::from_le_bytes([data[4+i*4], data[5+i*4], data[6+i*4], data[7+i*4]]);
+                    params[i] = f32::from_le_bytes([
+                        data[4 + i * 4],
+                        data[5 + i * 4],
+                        data[6 + i * 4],
+                        data[7 + i * 4],
+                    ]);
                 }
                 osmesa::gl_light_modelfv(pname, &params);
             }
@@ -370,7 +395,12 @@ pub(crate) fn dispatch(opcode: u16, data: &[u8]) -> Option<bool> {
                 let count = (data.len() - 4) / 4;
                 let mut params = vec![0i32; count];
                 for i in 0..count {
-                    params[i] = i32::from_le_bytes([data[4+i*4], data[5+i*4], data[6+i*4], data[7+i*4]]);
+                    params[i] = i32::from_le_bytes([
+                        data[4 + i * 4],
+                        data[5 + i * 4],
+                        data[6 + i * 4],
+                        data[7 + i * 4],
+                    ]);
                 }
                 osmesa::gl_light_modeliv(pname, &params);
             }
@@ -400,7 +430,12 @@ pub(crate) fn dispatch(opcode: u16, data: &[u8]) -> Option<bool> {
                 let count = (data.len() - 8) / 4;
                 let mut params = vec![0f32; count];
                 for i in 0..count {
-                    params[i] = f32::from_le_bytes([data[8+i*4], data[9+i*4], data[10+i*4], data[11+i*4]]);
+                    params[i] = f32::from_le_bytes([
+                        data[8 + i * 4],
+                        data[9 + i * 4],
+                        data[10 + i * 4],
+                        data[11 + i * 4],
+                    ]);
                 }
                 osmesa::gl_materialfv(face, pname, &params);
             }
@@ -422,7 +457,12 @@ pub(crate) fn dispatch(opcode: u16, data: &[u8]) -> Option<bool> {
                 let count = (data.len() - 8) / 4;
                 let mut params = vec![0i32; count];
                 for i in 0..count {
-                    params[i] = i32::from_le_bytes([data[8+i*4], data[9+i*4], data[10+i*4], data[11+i*4]]);
+                    params[i] = i32::from_le_bytes([
+                        data[8 + i * 4],
+                        data[9 + i * 4],
+                        data[10 + i * 4],
+                        data[11 + i * 4],
+                    ]);
                 }
                 osmesa::gl_materialiv(face, pname, &params);
             }
@@ -522,8 +562,10 @@ pub(crate) fn dispatch(opcode: u16, data: &[u8]) -> Option<bool> {
                     let mut values = vec![0f32; count];
                     for i in 0..count {
                         values[i] = f32::from_le_bytes([
-                            data[8 + i * 4], data[9 + i * 4],
-                            data[10 + i * 4], data[11 + i * 4],
+                            data[8 + i * 4],
+                            data[9 + i * 4],
+                            data[10 + i * 4],
+                            data[11 + i * 4],
                         ]);
                     }
                     osmesa::gl_pixel_mapfv(map, map_size, &values);
@@ -540,8 +582,10 @@ pub(crate) fn dispatch(opcode: u16, data: &[u8]) -> Option<bool> {
                     let mut values = vec![0u32; count];
                     for i in 0..count {
                         values[i] = u32::from_le_bytes([
-                            data[8 + i * 4], data[9 + i * 4],
-                            data[10 + i * 4], data[11 + i * 4],
+                            data[8 + i * 4],
+                            data[9 + i * 4],
+                            data[10 + i * 4],
+                            data[11 + i * 4],
                         ]);
                     }
                     osmesa::gl_pixel_mapuiv(map, map_size, &values);
@@ -557,9 +601,7 @@ pub(crate) fn dispatch(opcode: u16, data: &[u8]) -> Option<bool> {
                 if data.len() >= 8 + count * 2 {
                     let mut values = vec![0u16; count];
                     for i in 0..count {
-                        values[i] = u16::from_le_bytes([
-                            data[8 + i * 2], data[9 + i * 2],
-                        ]);
+                        values[i] = u16::from_le_bytes([data[8 + i * 2], data[9 + i * 2]]);
                     }
                     osmesa::gl_pixel_mapusv(map, map_size, &values);
                 }
@@ -677,7 +719,15 @@ pub(crate) fn dispatch(opcode: u16, data: &[u8]) -> Option<bool> {
                 let border = i32::from_le_bytes([data[36], data[37], data[38], data[39]]);
                 let image_size = i32::from_le_bytes([data[40], data[41], data[42], data[43]]);
                 let pixel_data = if data.len() > 44 { &data[44..] } else { &[] };
-                osmesa::gl_compressed_tex_image_1d(target, level, internalformat, width, border, image_size, pixel_data);
+                osmesa::gl_compressed_tex_image_1d(
+                    target,
+                    level,
+                    internalformat,
+                    width,
+                    border,
+                    image_size,
+                    pixel_data,
+                );
             }
         }
         // glCompressedTexImage2D (opcode 214): pixel header(20) + target(4) + level(4)
@@ -692,7 +742,16 @@ pub(crate) fn dispatch(opcode: u16, data: &[u8]) -> Option<bool> {
                 let border = i32::from_le_bytes([data[40], data[41], data[42], data[43]]);
                 let image_size = i32::from_le_bytes([data[44], data[45], data[46], data[47]]);
                 let pixel_data = if data.len() > 48 { &data[48..] } else { &[] };
-                osmesa::gl_compressed_tex_image_2d(target, level, internalformat, width, height, border, image_size, pixel_data);
+                osmesa::gl_compressed_tex_image_2d(
+                    target,
+                    level,
+                    internalformat,
+                    width,
+                    height,
+                    border,
+                    image_size,
+                    pixel_data,
+                );
             }
         }
         // glCompressedTexImage3D (opcode 215): pixel header(20) + target(4) + level(4)
@@ -708,7 +767,17 @@ pub(crate) fn dispatch(opcode: u16, data: &[u8]) -> Option<bool> {
                 let border = i32::from_le_bytes([data[44], data[45], data[46], data[47]]);
                 let image_size = i32::from_le_bytes([data[48], data[49], data[50], data[51]]);
                 let pixel_data = if data.len() > 52 { &data[52..] } else { &[] };
-                osmesa::gl_compressed_tex_image_3d(target, level, internalformat, width, height, depth, border, image_size, pixel_data);
+                osmesa::gl_compressed_tex_image_3d(
+                    target,
+                    level,
+                    internalformat,
+                    width,
+                    height,
+                    depth,
+                    border,
+                    image_size,
+                    pixel_data,
+                );
             }
         }
         // ARB_vertex_blend opcodes 222-228: Weight functions
@@ -762,7 +831,12 @@ pub(crate) fn dispatch(opcode: u16, data: &[u8]) -> Option<bool> {
                 let count = (data.len() - 4) / 4;
                 let mut params = vec![0f32; count];
                 for i in 0..count {
-                    params[i] = f32::from_le_bytes([data[4+i*4], data[5+i*4], data[6+i*4], data[7+i*4]]);
+                    params[i] = f32::from_le_bytes([
+                        data[4 + i * 4],
+                        data[5 + i * 4],
+                        data[6 + i * 4],
+                        data[7 + i * 4],
+                    ]);
                 }
                 osmesa::gl_point_parameterfv(pname, &params);
             }

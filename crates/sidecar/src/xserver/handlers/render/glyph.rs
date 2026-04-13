@@ -1,15 +1,13 @@
 use std::collections::HashMap;
 use tracing::debug;
 
-use crate::xserver::ClientState;
-use crate::xserver::core::{read_u16_bo, read_u32_bo, read_i16_bo};
-use crate::xserver::core::require_len;
 use super::{
-    PICTFORMAT_ARGB32, PICTFORMAT_A8, PICTFORMAT_A1,
-    pict_format_has_alpha, pad4,
-    composite_pixel, composite_pixel_ca, ClipSnapshot, resolve_source_color,
-    GlyphSetState, StoredGlyph,
+    composite_pixel, composite_pixel_ca, pad4, pict_format_has_alpha, resolve_source_color,
+    ClipSnapshot, GlyphSetState, StoredGlyph, PICTFORMAT_A1, PICTFORMAT_A8, PICTFORMAT_ARGB32,
 };
+use crate::xserver::core::require_len;
+use crate::xserver::core::{read_i16_bo, read_u16_bo, read_u32_bo};
+use crate::xserver::ClientState;
 
 pub(crate) fn handle_create_glyphset(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
     let bo = state.msb_first;
@@ -206,7 +204,11 @@ pub(crate) fn handle_add_glyphs(state: &mut ClientState, data: &[u8], seq: u16) 
 ///     glyph_id (CARD32)
 ///   Then for each glyph:
 ///     GlyphInfo (12 bytes): width(2), height(2), x(2), y(2), x_off(2), y_off(2)
-pub(crate) fn handle_add_glyphs_from_picture(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
+pub(crate) fn handle_add_glyphs_from_picture(
+    state: &mut ClientState,
+    data: &[u8],
+    seq: u16,
+) -> Vec<u8> {
     let bo = state.msb_first;
     let minor = data[1] as u16;
     require_len!(data, 16, seq, 139, minor, bo);
@@ -247,8 +249,18 @@ pub(crate) fn handle_add_glyphs_from_picture(state: &mut ClientState, data: &[u8
         let did = p.drawable;
         // Get the framebuffer data from the drawable
         if let Some(px) = state.pixmaps.get(&did) {
-            Some((px.framebuffer.data().to_vec(), px.framebuffer.width() as usize))
-        } else { state.windows.get(&did).map(|win| (win.framebuffer.data().to_vec(), win.framebuffer.width() as usize)) }
+            Some((
+                px.framebuffer.data().to_vec(),
+                px.framebuffer.width() as usize,
+            ))
+        } else {
+            state.windows.get(&did).map(|win| {
+                (
+                    win.framebuffer.data().to_vec(),
+                    win.framebuffer.width() as usize,
+                )
+            })
+        }
     });
 
     let format_id = state.render.glyphsets.get(&gsid).map(|gs| gs.format_id);
@@ -259,9 +271,7 @@ pub(crate) fn handle_add_glyphs_from_picture(state: &mut ClientState, data: &[u8
     let mut src_x_cursor: usize = 0;
     let mut glyphs_to_store: Vec<(u32, StoredGlyph)> = Vec::with_capacity(num_glyphs);
 
-    for (&gid, &(width, height, x, y, x_off, y_off)) in
-        glyph_ids.iter().zip(glyph_infos.iter())
-    {
+    for (&gid, &(width, height, x, y, x_off, y_off)) in glyph_ids.iter().zip(glyph_infos.iter()) {
         let glyph_data = if width > 0 && height > 0 {
             if let Some((ref fb_data, fb_stride)) = src_drawable {
                 let bpp = 4usize; // BGRA framebuffer
@@ -373,7 +383,12 @@ pub(crate) fn handle_free_glyphs(state: &mut ClientState, data: &[u8], seq: u16)
 }
 
 /// Handle CompositeGlyphs8/16/32
-pub(crate) fn handle_composite_glyphs(state: &mut ClientState, data: &[u8], glyph_id_size: usize, seq: u16) -> Vec<u8> {
+pub(crate) fn handle_composite_glyphs(
+    state: &mut ClientState,
+    data: &[u8],
+    glyph_id_size: usize,
+    seq: u16,
+) -> Vec<u8> {
     let bo = state.msb_first;
     let minor = data[1] as u16;
     require_len!(data, 28, seq, 139, minor, bo);
@@ -403,9 +418,16 @@ pub(crate) fn handle_composite_glyphs(state: &mut ClientState, data: &[u8], glyp
         .unwrap_or((None, true));
     let dst_draw = match dst_drawable {
         Some(d) => d,
-        None => return crate::xserver::core::build_error_bo(
-            crate::xserver::core::BAD_VALUE, seq, dst_pic, 139, minor, bo,
-        ),
+        None => {
+            return crate::xserver::core::build_error_bo(
+                crate::xserver::core::BAD_VALUE,
+                seq,
+                dst_pic,
+                139,
+                minor,
+                bo,
+            )
+        }
     };
     let clip = ClipSnapshot::from_picture(state, dst_pic);
 
@@ -544,9 +566,8 @@ pub(crate) fn handle_composite_glyphs(state: &mut ClientState, data: &[u8], glyp
                     if is_argb {
                         // Component-alpha: each glyph channel modulates
                         // the corresponding source channel independently.
-                        let (mb, mg, mr, ma) = get_glyph_argb(
-                            &op.alpha_data, op.width, col as u16, row as u16,
-                        );
+                        let (mb, mg, mr, ma) =
+                            get_glyph_argb(&op.alpha_data, op.width, col as u16, row as u16);
                         if mb == 0 && mg == 0 && mr == 0 && ma == 0 {
                             continue;
                         }
@@ -562,15 +583,25 @@ pub(crate) fn handle_composite_glyphs(state: &mut ClientState, data: &[u8], glyp
                         composite_pixel_ca(
                             pict_op,
                             &mut fb_data[dst_off..dst_off + 4],
-                            eff_b, eff_g, eff_r, eff_a,
-                            sa_b, sa_g, sa_r, sa_a,
+                            eff_b,
+                            eff_g,
+                            eff_r,
+                            eff_a,
+                            sa_b,
+                            sa_g,
+                            sa_r,
+                            sa_a,
                             dst_has_alpha,
                         );
                     } else {
                         // Uniform alpha (A8/A1): single alpha modulates
                         // all source channels equally.
                         let alpha = get_glyph_alpha(
-                            &op.alpha_data, op.width, col as u16, row as u16, op.format_id,
+                            &op.alpha_data,
+                            op.width,
+                            col as u16,
+                            row as u16,
+                            op.format_id,
                         );
                         if alpha == 0 {
                             continue;
@@ -583,7 +614,10 @@ pub(crate) fn handle_composite_glyphs(state: &mut ClientState, data: &[u8], glyp
                         composite_pixel(
                             pict_op,
                             &mut fb_data[dst_off..dst_off + 4],
-                            eff_b, eff_g, eff_r, eff_a,
+                            eff_b,
+                            eff_g,
+                            eff_r,
+                            eff_a,
                             dst_has_alpha,
                         );
                     }
@@ -674,8 +708,8 @@ pub(super) mod tests {
     fn glyph_argb_second_pixel() {
         // Two ARGB32 pixels at (0,0) and (1,0)
         let data = vec![
-            10, 20, 30, 200,  // pixel (0,0)
-            50, 60, 70, 100,  // pixel (1,0)
+            10, 20, 30, 200, // pixel (0,0)
+            50, 60, 70, 100, // pixel (1,0)
         ];
         let (b, g, r, a) = get_glyph_argb(&data, 2, 1, 0);
         assert_eq!((b, g, r, a), (50, 60, 70, 100));
@@ -698,7 +732,7 @@ pub(super) mod tests {
         let a = get_glyph_alpha(&data, 8, 0, 0, PICTFORMAT_A1);
         assert_eq!(a, 255); // bit 0 set
         let a = get_glyph_alpha(&data, 8, 1, 0, PICTFORMAT_A1);
-        assert_eq!(a, 0);   // bit 1 not set
+        assert_eq!(a, 0); // bit 1 not set
         let a = get_glyph_alpha(&data, 8, 2, 0, PICTFORMAT_A1);
         assert_eq!(a, 255); // bit 2 set
     }

@@ -23,25 +23,20 @@ mod tests;
 // These are used by submodules (handler, tests) via `use super::*`.
 #[allow(unused_imports)]
 pub(crate) use device::{
-    MIN_KEYCODE, MAX_KEYCODE, N_POINTER_BUTTONS,
-    build_list_input_devices_reply, build_open_device_reply,
-    build_device_key_mapping_reply, keycode_to_keysym_xi,
-    build_device_modifier_mapping_reply, build_query_device_state_reply,
-    build_master_pointer_info, build_master_keyboard_info,
-    fill_class_lengths, query_device_reply_bytes, mods_from_state,
+    build_device_key_mapping_reply, build_device_modifier_mapping_reply,
+    build_list_input_devices_reply, build_master_keyboard_info, build_master_pointer_info,
+    build_open_device_reply, build_query_device_state_reply, fill_class_lengths,
+    keycode_to_keysym_xi, mods_from_state, query_device_reply_bytes, MAX_KEYCODE, MIN_KEYCODE,
+    N_POINTER_BUTTONS,
 };
 
 #[allow(unused_imports)]
-pub(crate) use events::{
-    build_xi_pointer_event,
-    build_gesture_events,
-};
+pub(crate) use events::{build_gesture_events, build_xi_pointer_event};
 
 // Re-export public items used by other modules in the crate.
 #[allow(unused_imports)]
 pub use events::{
-    build_raw_motion_event, build_xi_events_for,
-    build_raw_pointer_event, patch_query_pointer_root,
+    build_raw_motion_event, build_raw_pointer_event, build_xi_events_for, patch_query_pointer_root,
 };
 
 pub use handler::handle_request;
@@ -89,7 +84,10 @@ fn fp1616(v: i16) -> xi::Fp1616 {
 }
 
 fn fp3232(int: i32) -> xi::Fp3232 {
-    xi::Fp3232 { integral: int, frac: 0 }
+    xi::Fp3232 {
+        integral: int,
+        frac: 0,
+    }
 }
 
 /// Per-axis valuator state we track for the master pointer. The X server
@@ -133,7 +131,10 @@ fn xi_reply_header(seq: u16, xi_reply_type: u8, length_units: u32, msb_first: bo
 /// (in 4-byte units after the 32-byte header). x11rb's `Serialize` impls
 /// don't compute `length` automatically — it has to match the actual
 /// number of trailing bytes or XCB hits "Too much data requested".
-fn serialize_xi_reply<R: x11rb_protocol::x11_utils::Serialize>(reply: &R, msb_first: bool) -> Vec<u8> {
+fn serialize_xi_reply<R: x11rb_protocol::x11_utils::Serialize>(
+    reply: &R,
+    msb_first: bool,
+) -> Vec<u8> {
     let mut buf = Vec::new();
     reply.serialize_into(&mut buf);
     while buf.len() % 4 != 0 {

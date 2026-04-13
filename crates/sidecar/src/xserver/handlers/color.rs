@@ -74,12 +74,15 @@ pub(crate) fn handle_free_colormap(state: &mut ClientState, data: &[u8]) -> Vec<
     Vec::new()
 }
 
-
 // ---------------------------------------------------------------------------
 // Opcode 80: CopyColormapAndFree
 // ---------------------------------------------------------------------------
 
-pub(crate) fn handle_copy_colormap_and_free(state: &mut ClientState, data: &[u8], _seq: u16) -> Vec<u8> {
+pub(crate) fn handle_copy_colormap_and_free(
+    state: &mut ClientState,
+    data: &[u8],
+    _seq: u16,
+) -> Vec<u8> {
     require_len!(data, 12, _seq, 80);
     let mid = state.read_u32(data, 4);
     let src = state.read_u32(data, 8);
@@ -123,7 +126,9 @@ pub(crate) fn handle_install_colormap(state: &mut ClientState, data: &[u8]) -> V
     // Per X11 spec, generate ColormapNotify for ALL windows that have
     // ColormapChangeMask (COLOURMAP_CHANGE_MASK) selected, notifying that this
     // colormap is now installed.
-    let notify_windows: Vec<u32> = state.windows.iter()
+    let notify_windows: Vec<u32> = state
+        .windows
+        .iter()
         .filter(|(_, w)| w.event_mask & COLOURMAP_CHANGE_MASK != 0)
         .map(|(&id, _)| id)
         .collect();
@@ -161,7 +166,9 @@ pub(crate) fn handle_uninstall_colormap(state: &mut ClientState, data: &[u8]) ->
     }
 
     // Generate ColormapNotify with state=Uninstalled for all selecting windows
-    let notify_windows: Vec<u32> = state.windows.iter()
+    let notify_windows: Vec<u32> = state
+        .windows
+        .iter()
         .filter(|(_, w)| w.event_mask & COLOURMAP_CHANGE_MASK != 0)
         .map(|(&id, _)| id)
         .collect();
@@ -181,7 +188,9 @@ pub(crate) fn handle_uninstall_colormap(state: &mut ClientState, data: &[u8]) ->
     // should be installed automatically.
     let default_cmap = ROOT_COLORMAP;
     if mid != default_cmap {
-        let notify_windows2: Vec<u32> = state.windows.iter()
+        let notify_windows2: Vec<u32> = state
+            .windows
+            .iter()
             .filter(|(_, w)| w.event_mask & COLOURMAP_CHANGE_MASK != 0)
             .map(|(&id, _)| id)
             .collect();
@@ -341,7 +350,10 @@ pub(crate) fn handle_alloc_color_cells(state: &mut ClientState, data: &[u8], seq
     }
 
     // Only PseudoColor/GrayScale colormaps support writable cells
-    let is_writable = state.colormaps.get(&cmap_id).is_some_and(|c| c.is_writable());
+    let is_writable = state
+        .colormaps
+        .get(&cmap_id)
+        .is_some_and(|c| c.is_writable());
     if !is_writable {
         return build_error(BAD_ALLOC, seq, 0, 86, 0);
     }
@@ -418,7 +430,10 @@ pub(crate) fn handle_alloc_color_planes(state: &mut ClientState, data: &[u8], se
         return build_error(BAD_COLOR, seq, cmap_id, 87, 0);
     }
 
-    let is_writable = state.colormaps.get(&cmap_id).is_some_and(|c| c.is_writable());
+    let is_writable = state
+        .colormaps
+        .get(&cmap_id)
+        .is_some_and(|c| c.is_writable());
     if !is_writable {
         return build_error(BAD_ALLOC, seq, 0, 87, 0);
     }
@@ -645,7 +660,10 @@ pub(crate) fn handle_store_colors(state: &mut ClientState, data: &[u8]) -> Vec<u
 
     if let Some(cmap) = state.colormaps.get_mut(&cmap_id) {
         cmap.store_colors(&items);
-        debug!("StoreColors: cmap={cmap_id:#x} stored {} items", items.len());
+        debug!(
+            "StoreColors: cmap={cmap_id:#x} stored {} items",
+            items.len()
+        );
     }
     Vec::new()
 }
@@ -728,13 +746,7 @@ pub(crate) fn handle_create_cursor(state: &mut ClientState, data: &[u8]) -> Vec<
 
     // Read the source pixmap dimensions and pixel data to build ARGB cursor bitmap.
     let (width, height, argb_data) = build_cursor_argb(
-        state, source_pixmap, mask_pixmap,
-        fore_red, fore_green, fore_blue,
-        back_red, back_green, back_blue,
-    );
-
-    state.cursor_info.insert(cid, CursorInfo {
-        css_name: "default".to_string(),
+        state,
         source_pixmap,
         mask_pixmap,
         fore_red,
@@ -743,14 +755,29 @@ pub(crate) fn handle_create_cursor(state: &mut ClientState, data: &[u8]) -> Vec<
         back_red,
         back_green,
         back_blue,
-        hotspot_x,
-        hotspot_y,
-        argb_data,
-        width,
-        height,
-        name: String::new(),
-        anim_frames: Vec::new(),
-    });
+    );
+
+    state.cursor_info.insert(
+        cid,
+        CursorInfo {
+            css_name: "default".to_string(),
+            source_pixmap,
+            mask_pixmap,
+            fore_red,
+            fore_green,
+            fore_blue,
+            back_red,
+            back_green,
+            back_blue,
+            hotspot_x,
+            hotspot_y,
+            argb_data,
+            width,
+            height,
+            name: String::new(),
+            anim_frames: Vec::new(),
+        },
+    );
     state.cursors.insert(cid, "default".to_string());
 
     info!("CreateCursor: id={cid:#x} (bitmap cursor {width}x{height})");
@@ -766,8 +793,12 @@ fn build_cursor_argb(
     state: &ClientState,
     source_pixmap: u32,
     mask_pixmap: u32,
-    fore_red: u16, fore_green: u16, fore_blue: u16,
-    back_red: u16, back_green: u16, back_blue: u16,
+    fore_red: u16,
+    fore_green: u16,
+    fore_blue: u16,
+    back_red: u16,
+    back_green: u16,
+    back_blue: u16,
 ) -> (u16, u16, Vec<u8>) {
     let src_pix = match state.pixmaps.get(&source_pixmap) {
         Some(p) => p,
@@ -785,7 +816,10 @@ fn build_cursor_argb(
 
     let src_data = src_pix.framebuffer.data();
     let mask_data = if mask_pixmap != 0 {
-        state.pixmaps.get(&mask_pixmap).map(|p| p.framebuffer.data())
+        state
+            .pixmaps
+            .get(&mask_pixmap)
+            .map(|p| p.framebuffer.data())
     } else {
         None
     };
@@ -870,24 +904,27 @@ pub(crate) fn handle_create_glyph_cursor(state: &mut ClientState, data: &[u8]) -
     let css_name = glyph_to_css_cursor(source_char).to_string();
     info!("CreateGlyphCursor: id={cid:#x} glyph={source_char} -> \"{css_name}\"");
 
-    state.cursor_info.insert(cid, CursorInfo {
-        css_name: css_name.clone(),
-        source_pixmap: 0,
-        mask_pixmap: 0,
-        fore_red,
-        fore_green,
-        fore_blue,
-        back_red,
-        back_green,
-        back_blue,
-        hotspot_x: 0,
-        hotspot_y: 0,
-        argb_data: Vec::new(),
-        width: 0,
-        height: 0,
-        name: String::new(),
-        anim_frames: Vec::new(),
-    });
+    state.cursor_info.insert(
+        cid,
+        CursorInfo {
+            css_name: css_name.clone(),
+            source_pixmap: 0,
+            mask_pixmap: 0,
+            fore_red,
+            fore_green,
+            fore_blue,
+            back_red,
+            back_green,
+            back_blue,
+            hotspot_x: 0,
+            hotspot_y: 0,
+            argb_data: Vec::new(),
+            width: 0,
+            height: 0,
+            name: String::new(),
+            anim_frames: Vec::new(),
+        },
+    );
     state.cursors.insert(cid, css_name);
     Vec::new()
 }
@@ -932,9 +969,15 @@ pub(crate) fn handle_recolor_cursor(state: &mut ClientState, data: &[u8]) -> Vec
     let rebuilt = state.cursor_info.get(&cid).and_then(|info| {
         if info.source_pixmap != 0 {
             let (w, h, argb) = build_cursor_argb(
-                state, info.source_pixmap, info.mask_pixmap,
-                fore_red, fore_green, fore_blue,
-                back_red, back_green, back_blue,
+                state,
+                info.source_pixmap,
+                info.mask_pixmap,
+                fore_red,
+                fore_green,
+                fore_blue,
+                back_red,
+                back_green,
+                back_blue,
             );
             Some((w, h, argb))
         } else {

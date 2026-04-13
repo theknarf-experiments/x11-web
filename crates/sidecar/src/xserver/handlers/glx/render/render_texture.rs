@@ -31,7 +31,12 @@ pub(crate) fn dispatch(opcode: u16, data: &[u8]) -> Option<bool> {
                 let count = (data.len() - 8) / 4;
                 let mut params = vec![0f32; count];
                 for i in 0..count {
-                    params[i] = f32::from_le_bytes([data[8+i*4], data[9+i*4], data[10+i*4], data[11+i*4]]);
+                    params[i] = f32::from_le_bytes([
+                        data[8 + i * 4],
+                        data[9 + i * 4],
+                        data[10 + i * 4],
+                        data[11 + i * 4],
+                    ]);
                 }
                 osmesa::gl_tex_parameterfv(target, pname, &params);
             }
@@ -44,7 +49,12 @@ pub(crate) fn dispatch(opcode: u16, data: &[u8]) -> Option<bool> {
                 let count = (data.len() - 8) / 4;
                 let mut params = vec![0i32; count];
                 for i in 0..count {
-                    params[i] = i32::from_le_bytes([data[8+i*4], data[9+i*4], data[10+i*4], data[11+i*4]]);
+                    params[i] = i32::from_le_bytes([
+                        data[8 + i * 4],
+                        data[9 + i * 4],
+                        data[10 + i * 4],
+                        data[11 + i * 4],
+                    ]);
                 }
                 osmesa::gl_tex_parameteriv(target, pname, &params);
             }
@@ -66,7 +76,12 @@ pub(crate) fn dispatch(opcode: u16, data: &[u8]) -> Option<bool> {
                 let count = (data.len() - 8) / 4;
                 let mut params = vec![0f32; count];
                 for i in 0..count {
-                    params[i] = f32::from_le_bytes([data[8+i*4], data[9+i*4], data[10+i*4], data[11+i*4]]);
+                    params[i] = f32::from_le_bytes([
+                        data[8 + i * 4],
+                        data[9 + i * 4],
+                        data[10 + i * 4],
+                        data[11 + i * 4],
+                    ]);
                 }
                 osmesa::gl_tex_envfv(target, pname, &params);
             }
@@ -88,7 +103,12 @@ pub(crate) fn dispatch(opcode: u16, data: &[u8]) -> Option<bool> {
                 let count = (data.len() - 8) / 4;
                 let mut params = vec![0i32; count];
                 for i in 0..count {
-                    params[i] = i32::from_le_bytes([data[8+i*4], data[9+i*4], data[10+i*4], data[11+i*4]]);
+                    params[i] = i32::from_le_bytes([
+                        data[8 + i * 4],
+                        data[9 + i * 4],
+                        data[10 + i * 4],
+                        data[11 + i * 4],
+                    ]);
                 }
                 osmesa::gl_tex_enviv(target, pname, &params);
             }
@@ -110,7 +130,7 @@ pub(crate) fn dispatch(opcode: u16, data: &[u8]) -> Option<bool> {
                 let count = (data.len() - 8) / 8;
                 let mut params = vec![0f64; count];
                 for i in 0..count {
-                    params[i] = f64::from_le_bytes(data[8+i*8..16+i*8].try_into().unwrap());
+                    params[i] = f64::from_le_bytes(data[8 + i * 8..16 + i * 8].try_into().unwrap());
                 }
                 osmesa::gl_tex_gendv(coord, pname, &params);
             }
@@ -132,7 +152,12 @@ pub(crate) fn dispatch(opcode: u16, data: &[u8]) -> Option<bool> {
                 let count = (data.len() - 8) / 4;
                 let mut params = vec![0f32; count];
                 for i in 0..count {
-                    params[i] = f32::from_le_bytes([data[8+i*4], data[9+i*4], data[10+i*4], data[11+i*4]]);
+                    params[i] = f32::from_le_bytes([
+                        data[8 + i * 4],
+                        data[9 + i * 4],
+                        data[10 + i * 4],
+                        data[11 + i * 4],
+                    ]);
                 }
                 osmesa::gl_tex_genfv(coord, pname, &params);
             }
@@ -154,7 +179,12 @@ pub(crate) fn dispatch(opcode: u16, data: &[u8]) -> Option<bool> {
                 let count = (data.len() - 8) / 4;
                 let mut params = vec![0i32; count];
                 for i in 0..count {
-                    params[i] = i32::from_le_bytes([data[8+i*4], data[9+i*4], data[10+i*4], data[11+i*4]]);
+                    params[i] = i32::from_le_bytes([
+                        data[8 + i * 4],
+                        data[9 + i * 4],
+                        data[10 + i * 4],
+                        data[11 + i * 4],
+                    ]);
                 }
                 osmesa::gl_tex_geniv(coord, pname, &params);
             }
@@ -212,13 +242,24 @@ pub(crate) fn dispatch(opcode: u16, data: &[u8]) -> Option<bool> {
                 let width = i32::from_le_bytes([data[28], data[29], data[30], data[31]]);
                 let format = if data.len() >= 36 {
                     u32::from_le_bytes([data[32], data[33], data[34], data[35]])
-                } else { osmesa::GL_RGBA };
+                } else {
+                    osmesa::GL_RGBA
+                };
                 let type_ = if data.len() >= 40 {
                     u32::from_le_bytes([data[36], data[37], data[38], data[39]])
-                } else { osmesa::GL_UNSIGNED_BYTE };
+                } else {
+                    osmesa::GL_UNSIGNED_BYTE
+                };
                 let pixel_data = if data.len() > 40 { &data[40..] } else { &[] };
                 if !pixel_data.is_empty() {
-                    osmesa::gl_color_table(target, internalformat, width, format, type_, pixel_data);
+                    osmesa::gl_color_table(
+                        target,
+                        internalformat,
+                        width,
+                        format,
+                        type_,
+                        pixel_data,
+                    );
                 }
             }
         }
@@ -230,16 +271,24 @@ pub(crate) fn dispatch(opcode: u16, data: &[u8]) -> Option<bool> {
                 let xoffset = i32::from_le_bytes([data[28], data[29], data[30], data[31]]);
                 let width = if data.len() >= 36 {
                     i32::from_le_bytes([data[32], data[33], data[34], data[35]])
-                } else { 0 };
+                } else {
+                    0
+                };
                 let format = if data.len() >= 40 {
                     u32::from_le_bytes([data[36], data[37], data[38], data[39]])
-                } else { osmesa::GL_RGBA };
+                } else {
+                    osmesa::GL_RGBA
+                };
                 let type_ = if data.len() >= 44 {
                     u32::from_le_bytes([data[40], data[41], data[42], data[43]])
-                } else { osmesa::GL_UNSIGNED_BYTE };
+                } else {
+                    osmesa::GL_UNSIGNED_BYTE
+                };
                 let pixel_data = if data.len() > 44 { &data[44..] } else { &[] };
                 if !pixel_data.is_empty() {
-                    osmesa::gl_tex_sub_image_1d(target, level, xoffset, width, format, type_, pixel_data);
+                    osmesa::gl_tex_sub_image_1d(
+                        target, level, xoffset, width, format, type_, pixel_data,
+                    );
                 }
             }
         }
@@ -252,18 +301,41 @@ pub(crate) fn dispatch(opcode: u16, data: &[u8]) -> Option<bool> {
                 let width = i32::from_le_bytes([data[32], data[33], data[34], data[35]]);
                 let border = if data.len() >= 40 {
                     i32::from_le_bytes([data[36], data[37], data[38], data[39]])
-                } else { 0 };
+                } else {
+                    0
+                };
                 let format = if data.len() >= 44 {
                     u32::from_le_bytes([data[40], data[41], data[42], data[43]])
-                } else { osmesa::GL_RGBA };
+                } else {
+                    osmesa::GL_RGBA
+                };
                 let type_ = if data.len() >= 48 {
                     u32::from_le_bytes([data[44], data[45], data[46], data[47]])
-                } else { osmesa::GL_UNSIGNED_BYTE };
+                } else {
+                    osmesa::GL_UNSIGNED_BYTE
+                };
                 let pixel_data = if data.len() > 48 { &data[48..] } else { &[] };
                 if pixel_data.is_empty() {
-                    osmesa::gl_tex_image_1d_null(target, level, internal_format, width, border, format, type_);
+                    osmesa::gl_tex_image_1d_null(
+                        target,
+                        level,
+                        internal_format,
+                        width,
+                        border,
+                        format,
+                        type_,
+                    );
                 } else {
-                    osmesa::gl_tex_image_1d(target, level, internal_format, width, border, format, type_, pixel_data);
+                    osmesa::gl_tex_image_1d(
+                        target,
+                        level,
+                        internal_format,
+                        width,
+                        border,
+                        format,
+                        type_,
+                        pixel_data,
+                    );
                 }
             }
         }
@@ -297,16 +369,31 @@ pub(crate) fn dispatch(opcode: u16, data: &[u8]) -> Option<bool> {
                     osmesa::GL_UNSIGNED_BYTE
                 };
 
-                let pixel_data = if data.len() > 52 {
-                    &data[52..]
-                } else {
-                    &[]
-                };
+                let pixel_data = if data.len() > 52 { &data[52..] } else { &[] };
 
                 if pixel_data.is_empty() {
-                    osmesa::gl_tex_image_2d_null(target, level, internal_format, width, height, border, format, type_);
+                    osmesa::gl_tex_image_2d_null(
+                        target,
+                        level,
+                        internal_format,
+                        width,
+                        height,
+                        border,
+                        format,
+                        type_,
+                    );
                 } else {
-                    osmesa::gl_tex_image_2d(target, level, internal_format, width, height, border, format, type_, pixel_data);
+                    osmesa::gl_tex_image_2d(
+                        target,
+                        level,
+                        internal_format,
+                        width,
+                        height,
+                        border,
+                        format,
+                        type_,
+                        pixel_data,
+                    );
                 }
             }
         }
@@ -332,7 +419,9 @@ pub(crate) fn dispatch(opcode: u16, data: &[u8]) -> Option<bool> {
 
                 let pixel_data = if data.len() > 52 { &data[52..] } else { &[] };
                 if !pixel_data.is_empty() {
-                    osmesa::gl_tex_sub_image_2d(target, level, xoffset, yoffset, width, height, format, type_, pixel_data);
+                    osmesa::gl_tex_sub_image_2d(
+                        target, level, xoffset, yoffset, width, height, format, type_, pixel_data,
+                    );
                 }
             }
         }
@@ -360,7 +449,16 @@ pub(crate) fn dispatch(opcode: u16, data: &[u8]) -> Option<bool> {
                 let width = i32::from_le_bytes([data[20], data[21], data[22], data[23]]);
                 let height = i32::from_le_bytes([data[24], data[25], data[26], data[27]]);
                 let border = i32::from_le_bytes([data[28], data[29], data[30], data[31]]);
-                osmesa::gl_copy_tex_image_2d(target, level, internalformat, x, y, width, height, border);
+                osmesa::gl_copy_tex_image_2d(
+                    target,
+                    level,
+                    internalformat,
+                    x,
+                    y,
+                    width,
+                    height,
+                    border,
+                );
             }
         }
         // glCopyTexSubImage1D (opcode 4105)
@@ -386,7 +484,9 @@ pub(crate) fn dispatch(opcode: u16, data: &[u8]) -> Option<bool> {
                 let y = i32::from_le_bytes([data[20], data[21], data[22], data[23]]);
                 let width = i32::from_le_bytes([data[24], data[25], data[26], data[27]]);
                 let height = i32::from_le_bytes([data[28], data[29], data[30], data[31]]);
-                osmesa::gl_copy_tex_sub_image_2d(target, level, xoffset, yoffset, x, y, width, height);
+                osmesa::gl_copy_tex_sub_image_2d(
+                    target, level, xoffset, yoffset, x, y, width, height,
+                );
             }
         }
         // glConvolutionParameterf (opcode 4108)
@@ -406,7 +506,12 @@ pub(crate) fn dispatch(opcode: u16, data: &[u8]) -> Option<bool> {
                 let count = (data.len() - 8) / 4;
                 let mut params = vec![0f32; count];
                 for i in 0..count {
-                    params[i] = f32::from_le_bytes([data[8+i*4], data[9+i*4], data[10+i*4], data[11+i*4]]);
+                    params[i] = f32::from_le_bytes([
+                        data[8 + i * 4],
+                        data[9 + i * 4],
+                        data[10 + i * 4],
+                        data[11 + i * 4],
+                    ]);
                 }
                 osmesa::gl_convolution_parameterfv(target, pname, &params);
             }
@@ -428,7 +533,12 @@ pub(crate) fn dispatch(opcode: u16, data: &[u8]) -> Option<bool> {
                 let count = (data.len() - 8) / 4;
                 let mut params = vec![0i32; count];
                 for i in 0..count {
-                    params[i] = i32::from_le_bytes([data[8+i*4], data[9+i*4], data[10+i*4], data[11+i*4]]);
+                    params[i] = i32::from_le_bytes([
+                        data[8 + i * 4],
+                        data[9 + i * 4],
+                        data[10 + i * 4],
+                        data[11 + i * 4],
+                    ]);
                 }
                 osmesa::gl_convolution_parameteriv(target, pname, &params);
             }
@@ -466,7 +576,18 @@ pub(crate) fn dispatch(opcode: u16, data: &[u8]) -> Option<bool> {
                 let type_ = u32::from_le_bytes([data[52], data[53], data[54], data[55]]);
                 let pixel_data = if data.len() > 56 { &data[56..] } else { &[] };
                 if !pixel_data.is_empty() {
-                    osmesa::gl_tex_image_3d(target, level, internal_format, width, height, depth, border, format, type_, pixel_data);
+                    osmesa::gl_tex_image_3d(
+                        target,
+                        level,
+                        internal_format,
+                        width,
+                        height,
+                        depth,
+                        border,
+                        format,
+                        type_,
+                        pixel_data,
+                    );
                 }
             }
         }
@@ -485,7 +606,10 @@ pub(crate) fn dispatch(opcode: u16, data: &[u8]) -> Option<bool> {
                 let type_ = u32::from_le_bytes([data[56], data[57], data[58], data[59]]);
                 let pixel_data = if data.len() > 60 { &data[60..] } else { &[] };
                 if !pixel_data.is_empty() {
-                    osmesa::gl_tex_sub_image_3d(target, level, xoffset, yoffset, zoffset, width, height, depth, format, type_, pixel_data);
+                    osmesa::gl_tex_sub_image_3d(
+                        target, level, xoffset, yoffset, zoffset, width, height, depth, format,
+                        type_, pixel_data,
+                    );
                 }
             }
         }
@@ -501,7 +625,16 @@ pub(crate) fn dispatch(opcode: u16, data: &[u8]) -> Option<bool> {
                 let image_size = i32::from_le_bytes([data[44], data[45], data[46], data[47]]);
 
                 let pixel_data = if data.len() > 48 { &data[48..] } else { &[] };
-                osmesa::gl_compressed_tex_image_2d(target, level, internalformat, width, height, border, image_size, pixel_data);
+                osmesa::gl_compressed_tex_image_2d(
+                    target,
+                    level,
+                    internalformat,
+                    width,
+                    height,
+                    border,
+                    image_size,
+                    pixel_data,
+                );
             }
         }
         // glBindTexture (opcode 4117)
@@ -527,10 +660,17 @@ pub(crate) fn dispatch(opcode: u16, data: &[u8]) -> Option<bool> {
             if data.len() >= 4 {
                 let n = i32::from_le_bytes([data[0], data[1], data[2], data[3]]);
                 if n > 0 && data.len() >= 4 + n as usize * 4 {
-                    let textures: Vec<u32> = (0..n as usize).map(|i| {
-                        let off = 4 + i * 4;
-                        u32::from_le_bytes([data[off], data[off+1], data[off+2], data[off+3]])
-                    }).collect();
+                    let textures: Vec<u32> = (0..n as usize)
+                        .map(|i| {
+                            let off = 4 + i * 4;
+                            u32::from_le_bytes([
+                                data[off],
+                                data[off + 1],
+                                data[off + 2],
+                                data[off + 3],
+                            ])
+                        })
+                        .collect();
                     osmesa::gl_delete_textures(&textures);
                 }
             }
@@ -545,7 +685,15 @@ pub(crate) fn dispatch(opcode: u16, data: &[u8]) -> Option<bool> {
                 let border = i32::from_le_bytes([data[36], data[37], data[38], data[39]]);
                 let image_size = i32::from_le_bytes([data[40], data[41], data[42], data[43]]);
                 let pixel_data = if data.len() > 44 { &data[44..] } else { &[] };
-                osmesa::gl_compressed_tex_image_1d(target, level, internalformat, width, border, image_size, pixel_data);
+                osmesa::gl_compressed_tex_image_1d(
+                    target,
+                    level,
+                    internalformat,
+                    width,
+                    border,
+                    image_size,
+                    pixel_data,
+                );
             }
         }
         // glCompressedTexImage2D (opcode 217 -- GL 1.3 non-ARB version)
@@ -559,7 +707,16 @@ pub(crate) fn dispatch(opcode: u16, data: &[u8]) -> Option<bool> {
                 let border = i32::from_le_bytes([data[40], data[41], data[42], data[43]]);
                 let image_size = i32::from_le_bytes([data[44], data[45], data[46], data[47]]);
                 let pixel_data = if data.len() > 48 { &data[48..] } else { &[] };
-                osmesa::gl_compressed_tex_image_2d(target, level, internalformat, width, height, border, image_size, pixel_data);
+                osmesa::gl_compressed_tex_image_2d(
+                    target,
+                    level,
+                    internalformat,
+                    width,
+                    height,
+                    border,
+                    image_size,
+                    pixel_data,
+                );
             }
         }
         // glCompressedTexImage3D (opcode 218)
@@ -574,7 +731,17 @@ pub(crate) fn dispatch(opcode: u16, data: &[u8]) -> Option<bool> {
                 let border = i32::from_le_bytes([data[44], data[45], data[46], data[47]]);
                 let image_size = i32::from_le_bytes([data[48], data[49], data[50], data[51]]);
                 let pixel_data = if data.len() > 52 { &data[52..] } else { &[] };
-                osmesa::gl_compressed_tex_image_3d(target, level, internalformat, width, height, depth, border, image_size, pixel_data);
+                osmesa::gl_compressed_tex_image_3d(
+                    target,
+                    level,
+                    internalformat,
+                    width,
+                    height,
+                    depth,
+                    border,
+                    image_size,
+                    pixel_data,
+                );
             }
         }
         // glCompressedTexSubImage1D (opcode 219)
@@ -587,7 +754,9 @@ pub(crate) fn dispatch(opcode: u16, data: &[u8]) -> Option<bool> {
                 let format = u32::from_le_bytes([data[36], data[37], data[38], data[39]]);
                 let image_size = i32::from_le_bytes([data[40], data[41], data[42], data[43]]);
                 let pixel_data = if data.len() > 44 { &data[44..] } else { &[] };
-                osmesa::gl_compressed_tex_sub_image_1d(target, level, xoffset, width, format, image_size, pixel_data);
+                osmesa::gl_compressed_tex_sub_image_1d(
+                    target, level, xoffset, width, format, image_size, pixel_data,
+                );
             }
         }
         // glCompressedTexSubImage2D (opcode 220)
@@ -602,7 +771,9 @@ pub(crate) fn dispatch(opcode: u16, data: &[u8]) -> Option<bool> {
                 let format = u32::from_le_bytes([data[44], data[45], data[46], data[47]]);
                 let image_size = i32::from_le_bytes([data[48], data[49], data[50], data[51]]);
                 let pixel_data = if data.len() > 52 { &data[52..] } else { &[] };
-                osmesa::gl_compressed_tex_sub_image_2d(target, level, xoffset, yoffset, width, height, format, image_size, pixel_data);
+                osmesa::gl_compressed_tex_sub_image_2d(
+                    target, level, xoffset, yoffset, width, height, format, image_size, pixel_data,
+                );
             }
         }
         // glCompressedTexSubImage3D (opcode 221)
@@ -619,7 +790,10 @@ pub(crate) fn dispatch(opcode: u16, data: &[u8]) -> Option<bool> {
                 let format = u32::from_le_bytes([data[52], data[53], data[54], data[55]]);
                 let image_size = i32::from_le_bytes([data[56], data[57], data[58], data[59]]);
                 let pixel_data = if data.len() > 60 { &data[60..] } else { &[] };
-                osmesa::gl_compressed_tex_sub_image_3d(target, level, xoffset, yoffset, zoffset, width, height, depth, format, image_size, pixel_data);
+                osmesa::gl_compressed_tex_sub_image_3d(
+                    target, level, xoffset, yoffset, zoffset, width, height, depth, format,
+                    image_size, pixel_data,
+                );
             }
         }
         _ => return None,

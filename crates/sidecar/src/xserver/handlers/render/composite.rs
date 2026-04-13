@@ -1,13 +1,12 @@
 use tracing::{debug, info};
 
-use crate::xserver::ClientState;
-use crate::xserver::core::{read_u16_bo, read_u32_bo, read_i16_bo};
-use crate::xserver::core::require_len;
 use super::{
-    pict_format_has_alpha, zero_src_has_no_effect, point_in_triangle,
-    composite_pixel, composite_pixel_ca, read_fixed_bo,
-    ClipSnapshot, resolve_source_pixels, resolve_source_color,
+    composite_pixel, composite_pixel_ca, pict_format_has_alpha, point_in_triangle, read_fixed_bo,
+    resolve_source_color, resolve_source_pixels, zero_src_has_no_effect, ClipSnapshot,
 };
+use crate::xserver::core::require_len;
+use crate::xserver::core::{read_i16_bo, read_u16_bo, read_u32_bo};
+use crate::xserver::ClientState;
 
 /// The main compositing operation.
 pub(crate) fn handle_composite(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
@@ -32,7 +31,8 @@ pub(crate) fn handle_composite(state: &mut ClientState, data: &[u8], seq: u16) -
     );
 
     // Resolve source pixels
-    let src_pixels: Option<(Vec<u8>, u32, u32)> = resolve_source_pixels(state, src_pic, src_x, src_y, width, height);
+    let src_pixels: Option<(Vec<u8>, u32, u32)> =
+        resolve_source_pixels(state, src_pic, src_x, src_y, width, height);
     // If a mask picture is provided, fetch its pixels too. The mask
     // modulates the source's alpha per-pixel — used heavily by GTK to
     // draw anti-aliased icons and text decorations.
@@ -123,8 +123,7 @@ pub(crate) fn handle_composite(state: &mut ClientState, data: &[u8], seq: u16) -
                                 let mg = mask_data[mask_off + 1];
                                 let mr = mask_data[mask_off + 2];
                                 let ma = mask_data[mask_off + 3];
-                                if mb == 0 && mg == 0 && mr == 0 && ma == 0 && skip_zero_mask_ok
-                                {
+                                if mb == 0 && mg == 0 && mr == 0 && ma == 0 && skip_zero_mask_ok {
                                     continue;
                                 }
                                 let src_a_orig = sa;
@@ -155,15 +154,24 @@ pub(crate) fn handle_composite(state: &mut ClientState, data: &[u8], seq: u16) -
                         composite_pixel_ca(
                             op,
                             &mut fb_data[dst_off..dst_off + 4],
-                            sb, sg, sr, sa,
-                            sa_b, sa_g, sa_r, sa_a,
+                            sb,
+                            sg,
+                            sr,
+                            sa,
+                            sa_b,
+                            sa_g,
+                            sa_r,
+                            sa_a,
                             dst_has_alpha,
                         );
                     } else {
                         composite_pixel(
                             op,
                             &mut fb_data[dst_off..dst_off + 4],
-                            sb, sg, sr, sa,
+                            sb,
+                            sg,
+                            sr,
+                            sa,
                             dst_has_alpha,
                         );
                     }
@@ -179,7 +187,6 @@ pub(crate) fn handle_composite(state: &mut ClientState, data: &[u8], seq: u16) -
 
     Vec::new()
 }
-
 
 /// Handle XRender Trapezoids (minor opcode 10).
 ///
@@ -232,9 +239,16 @@ pub(crate) fn handle_trapezoids(state: &mut ClientState, data: &[u8], seq: u16) 
         .unwrap_or((None, true));
     let dst_draw = match dst_drawable {
         Some(d) => d,
-        None => return crate::xserver::core::build_error_bo(
-            crate::xserver::core::BAD_VALUE, seq, dst_pic, 139, minor, bo,
-        ),
+        None => {
+            return crate::xserver::core::build_error_bo(
+                crate::xserver::core::BAD_VALUE,
+                seq,
+                dst_pic,
+                139,
+                minor,
+                bo,
+            )
+        }
     };
     let clip = ClipSnapshot::from_picture(state, dst_pic);
 
@@ -252,7 +266,9 @@ pub(crate) fn handle_trapezoids(state: &mut ClientState, data: &[u8], seq: u16) 
         let right_y1 = read_fixed_bo(data, off + 28, bo);
         let right_x2 = read_fixed_bo(data, off + 32, bo);
         let right_y2 = read_fixed_bo(data, off + 36, bo);
-        traps.push((top, bottom, left_x1, left_y1, left_x2, left_y2, right_x1, right_y1, right_x2, right_y2));
+        traps.push((
+            top, bottom, left_x1, left_y1, left_x2, left_y2, right_x1, right_y1, right_x2, right_y2,
+        ));
         off += 40;
     }
 
@@ -275,8 +291,25 @@ pub(crate) fn handle_trapezoids(state: &mut ClientState, data: &[u8], seq: u16) 
 
             for &(top, bottom, lx1, ly1, lx2, ly2, rx1, ry1, rx2, ry2) in &traps {
                 rasterize_trapezoid(
-                    fb, fb_w, fb_h, op, sr, sg, sb, sa, dst_has_alpha,
-                    top, bottom, lx1, ly1, lx2, ly2, rx1, ry1, rx2, ry2,
+                    fb,
+                    fb_w,
+                    fb_h,
+                    op,
+                    sr,
+                    sg,
+                    sb,
+                    sa,
+                    dst_has_alpha,
+                    top,
+                    bottom,
+                    lx1,
+                    ly1,
+                    lx2,
+                    ly2,
+                    rx1,
+                    ry1,
+                    rx2,
+                    ry2,
                     &clip,
                 );
             }
@@ -417,9 +450,16 @@ pub(crate) fn handle_triangles(state: &mut ClientState, data: &[u8], seq: u16) -
         .unwrap_or((None, true));
     let dst_draw = match dst_drawable {
         Some(d) => d,
-        None => return crate::xserver::core::build_error_bo(
-            crate::xserver::core::BAD_VALUE, seq, dst_pic, 139, minor, bo,
-        ),
+        None => {
+            return crate::xserver::core::build_error_bo(
+                crate::xserver::core::BAD_VALUE,
+                seq,
+                dst_pic,
+                139,
+                minor,
+                bo,
+            )
+        }
     };
     let clip = ClipSnapshot::from_picture(state, dst_pic);
 
@@ -446,8 +486,22 @@ pub(crate) fn handle_triangles(state: &mut ClientState, data: &[u8], seq: u16) -
             // touched, scanline-decomposed into trapezoids.
             for &(x1, y1, x2, y2, x3, y3) in &triangles {
                 rasterize_triangle(
-                    fb, fb_w, fb_h, op, sr, sg, sb, sa, dst_has_alpha,
-                    x1, y1, x2, y2, x3, y3, &clip,
+                    fb,
+                    fb_w,
+                    fb_h,
+                    op,
+                    sr,
+                    sg,
+                    sb,
+                    sa,
+                    dst_has_alpha,
+                    x1,
+                    y1,
+                    x2,
+                    y2,
+                    x3,
+                    y3,
+                    &clip,
                 );
             }
         } else {
@@ -457,8 +511,17 @@ pub(crate) fn handle_triangles(state: &mut ClientState, data: &[u8], seq: u16) -
             // iterate the dst bbox, treating outside-triangle pixels
             // as having a fully transparent source.
             composite_triangles_full_dst(
-                fb, fb_w, fb_h, op, sr, sg, sb, sa, dst_has_alpha,
-                &triangles, &clip,
+                fb,
+                fb_w,
+                fb_h,
+                op,
+                sr,
+                sg,
+                sb,
+                sa,
+                dst_has_alpha,
+                &triangles,
+                &clip,
             );
         }
     }
@@ -503,7 +566,11 @@ fn composite_triangles_full_dst(
             if dst_off + 3 >= fb_data.len() {
                 continue;
             }
-            let (eb, eg, er, ea) = if inside { (sb, sg, sr, sa) } else { (0, 0, 0, 0) };
+            let (eb, eg, er, ea) = if inside {
+                (sb, sg, sr, sa)
+            } else {
+                (0, 0, 0, 0)
+            };
             composite_pixel(
                 op,
                 &mut fb_data[dst_off..dst_off + 4],
@@ -557,8 +624,25 @@ fn rasterize_triangle(
             ((vx0, vy0, vx1, vy1), (vx0, vy0, vx2, vy2))
         };
         rasterize_trapezoid(
-            fb, fb_w, fb_h, op, sr, sg, sb, sa, dst_has_alpha,
-            vy0, vy1, llx.0, llx.1, llx.2, llx.3, rrx.0, rrx.1, rrx.2, rrx.3,
+            fb,
+            fb_w,
+            fb_h,
+            op,
+            sr,
+            sg,
+            sb,
+            sa,
+            dst_has_alpha,
+            vy0,
+            vy1,
+            llx.0,
+            llx.1,
+            llx.2,
+            llx.3,
+            rrx.0,
+            rrx.1,
+            rrx.2,
+            rrx.3,
             clip,
         );
     }
@@ -572,8 +656,25 @@ fn rasterize_triangle(
             ((vx1, vy1, vx2, vy2), (vx0, vy0, vx2, vy2))
         };
         rasterize_trapezoid(
-            fb, fb_w, fb_h, op, sr, sg, sb, sa, dst_has_alpha,
-            vy1, vy2, llx.0, llx.1, llx.2, llx.3, rrx.0, rrx.1, rrx.2, rrx.3,
+            fb,
+            fb_w,
+            fb_h,
+            op,
+            sr,
+            sg,
+            sb,
+            sa,
+            dst_has_alpha,
+            vy1,
+            vy2,
+            llx.0,
+            llx.1,
+            llx.2,
+            llx.3,
+            rrx.0,
+            rrx.1,
+            rrx.2,
+            rrx.3,
             clip,
         );
     }
@@ -604,9 +705,16 @@ pub(crate) fn handle_tri_strip(state: &mut ClientState, data: &[u8], seq: u16) -
         .unwrap_or((None, true));
     let dst_draw = match dst_drawable {
         Some(d) => d,
-        None => return crate::xserver::core::build_error_bo(
-            crate::xserver::core::BAD_VALUE, seq, dst_pic, 139, minor, bo,
-        ),
+        None => {
+            return crate::xserver::core::build_error_bo(
+                crate::xserver::core::BAD_VALUE,
+                seq,
+                dst_pic,
+                139,
+                minor,
+                bo,
+            )
+        }
     };
     let clip = ClipSnapshot::from_picture(state, dst_pic);
 
@@ -622,7 +730,12 @@ pub(crate) fn handle_tri_strip(state: &mut ClientState, data: &[u8], seq: u16) -
 
     if points.len() < 3 {
         return crate::xserver::core::build_error_bo(
-            crate::xserver::core::BAD_LENGTH, seq, 0, 139, minor, bo,
+            crate::xserver::core::BAD_LENGTH,
+            seq,
+            0,
+            139,
+            minor,
+            bo,
         );
     }
 
@@ -642,14 +755,37 @@ pub(crate) fn handle_tri_strip(state: &mut ClientState, data: &[u8], seq: u16) -
         if zero_src_has_no_effect(op) {
             for &(x1, y1, x2, y2, x3, y3) in &triangles {
                 rasterize_triangle(
-                    fb, fb_w, fb_h, op, sr, sg, sb, sa, dst_has_alpha,
-                    x1, y1, x2, y2, x3, y3, &clip,
+                    fb,
+                    fb_w,
+                    fb_h,
+                    op,
+                    sr,
+                    sg,
+                    sb,
+                    sa,
+                    dst_has_alpha,
+                    x1,
+                    y1,
+                    x2,
+                    y2,
+                    x3,
+                    y3,
+                    &clip,
                 );
             }
         } else {
             composite_triangles_full_dst(
-                fb, fb_w, fb_h, op, sr, sg, sb, sa, dst_has_alpha,
-                &triangles, &clip,
+                fb,
+                fb_w,
+                fb_h,
+                op,
+                sr,
+                sg,
+                sb,
+                sa,
+                dst_has_alpha,
+                &triangles,
+                &clip,
             );
         }
     }
@@ -682,9 +818,16 @@ pub(crate) fn handle_tri_fan(state: &mut ClientState, data: &[u8], seq: u16) -> 
         .unwrap_or((None, true));
     let dst_draw = match dst_drawable {
         Some(d) => d,
-        None => return crate::xserver::core::build_error_bo(
-            crate::xserver::core::BAD_VALUE, seq, dst_pic, 139, minor, bo,
-        ),
+        None => {
+            return crate::xserver::core::build_error_bo(
+                crate::xserver::core::BAD_VALUE,
+                seq,
+                dst_pic,
+                139,
+                minor,
+                bo,
+            )
+        }
     };
     let clip = ClipSnapshot::from_picture(state, dst_pic);
 
@@ -699,7 +842,12 @@ pub(crate) fn handle_tri_fan(state: &mut ClientState, data: &[u8], seq: u16) -> 
 
     if points.len() < 3 {
         return crate::xserver::core::build_error_bo(
-            crate::xserver::core::BAD_LENGTH, seq, 0, 139, minor, bo,
+            crate::xserver::core::BAD_LENGTH,
+            seq,
+            0,
+            139,
+            minor,
+            bo,
         );
     }
 
@@ -719,14 +867,37 @@ pub(crate) fn handle_tri_fan(state: &mut ClientState, data: &[u8], seq: u16) -> 
         if zero_src_has_no_effect(op) {
             for &(x1, y1, x2, y2, x3, y3) in &triangles {
                 rasterize_triangle(
-                    fb, fb_w, fb_h, op, sr, sg, sb, sa, dst_has_alpha,
-                    x1, y1, x2, y2, x3, y3, &clip,
+                    fb,
+                    fb_w,
+                    fb_h,
+                    op,
+                    sr,
+                    sg,
+                    sb,
+                    sa,
+                    dst_has_alpha,
+                    x1,
+                    y1,
+                    x2,
+                    y2,
+                    x3,
+                    y3,
+                    &clip,
                 );
             }
         } else {
             composite_triangles_full_dst(
-                fb, fb_w, fb_h, op, sr, sg, sb, sa, dst_has_alpha,
-                &triangles, &clip,
+                fb,
+                fb_w,
+                fb_h,
+                op,
+                sr,
+                sg,
+                sb,
+                sa,
+                dst_has_alpha,
+                &triangles,
+                &clip,
             );
         }
     }
@@ -763,9 +934,16 @@ pub(crate) fn handle_fill_rectangles(state: &mut ClientState, data: &[u8], seq: 
         .unwrap_or((None, true));
     let dst_draw = match dst_drawable {
         Some(d) => d,
-        None => return crate::xserver::core::build_error_bo(
-            crate::xserver::core::BAD_VALUE, seq, dst_pic, 139, minor, bo,
-        ),
+        None => {
+            return crate::xserver::core::build_error_bo(
+                crate::xserver::core::BAD_VALUE,
+                seq,
+                dst_pic,
+                139,
+                minor,
+                bo,
+            )
+        }
     };
     let clip = ClipSnapshot::from_picture(state, dst_pic);
 
@@ -852,9 +1030,16 @@ pub(crate) fn handle_add_traps(state: &mut ClientState, data: &[u8], seq: u16) -
     let (target, fb_w) = {
         let pic = match state.render.pictures.get(&pic_id) {
             Some(p) => p,
-            None => return crate::xserver::core::build_error_bo(
-                crate::xserver::core::BAD_VALUE, seq, pic_id, 139, minor, bo,
-            ),
+            None => {
+                return crate::xserver::core::build_error_bo(
+                    crate::xserver::core::BAD_VALUE,
+                    seq,
+                    pic_id,
+                    139,
+                    minor,
+                    bo,
+                )
+            }
         };
         let d = pic.drawable;
         let w = if let Some(px) = state.pixmaps.get(&d) {
@@ -863,7 +1048,12 @@ pub(crate) fn handle_add_traps(state: &mut ClientState, data: &[u8], seq: u16) -
             win.framebuffer.width()
         } else {
             return crate::xserver::core::build_error_bo(
-                crate::xserver::core::BAD_VALUE, seq, d, 139, minor, bo,
+                crate::xserver::core::BAD_VALUE,
+                seq,
+                d,
+                139,
+                minor,
+                bo,
             );
         };
         (d, w)

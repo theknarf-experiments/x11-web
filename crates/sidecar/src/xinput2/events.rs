@@ -5,11 +5,11 @@ use x11_web_protocol::InputEvent;
 
 use crate::xserver::core::write_u32_bo;
 
-use super::{
-    fp1616, fp3232, AxisValue, ValuatorState, XiSelection,
-    AXIS_SCROLL_H, AXIS_SCROLL_V, MASTER_POINTER_ID, XI_MAJOR_OPCODE,
-};
 use super::device::mods_from_state;
+use super::{
+    fp1616, fp3232, AxisValue, ValuatorState, XiSelection, AXIS_SCROLL_H, AXIS_SCROLL_V,
+    MASTER_POINTER_ID, XI_MAJOR_OPCODE,
+};
 
 /// Build an XI2 `RawMotion` event. Raw events have no event window —
 /// they're delivered to every client that selected on the root window.
@@ -197,9 +197,8 @@ pub fn build_xi_events_for(
         _ => None,
     };
 
-    let (device_type, raw_type, detail, x, y, button_bit, mods, axes) = if let Some(
-        (axis, value),
-    ) = scroll_axis
+    let (device_type, raw_type, detail, x, y, button_bit, mods, axes) = if let Some((axis, value)) =
+        scroll_axis
     {
         let (x, y, mods) = match *input {
             InputEvent::ButtonPress { x, y, state, .. } => (x, y, state),
@@ -217,7 +216,12 @@ pub fn build_xi_events_for(
         )
     } else {
         match *input {
-            InputEvent::ButtonPress { button, x, y, state } => (
+            InputEvent::ButtonPress {
+                button,
+                x,
+                y,
+                state,
+            } => (
                 xi::BUTTON_PRESS_EVENT,
                 xi::RAW_BUTTON_PRESS_EVENT,
                 button as u32,
@@ -227,7 +231,12 @@ pub fn build_xi_events_for(
                 state,
                 Vec::new(),
             ),
-            InputEvent::ButtonRelease { button, x, y, state } => {
+            InputEvent::ButtonRelease {
+                button,
+                x,
+                y,
+                state,
+            } => {
                 // Suppress XI events for scroll-button releases — they
                 // were translated to motion events on the press side.
                 if (4..=7).contains(&button) {
@@ -256,7 +265,12 @@ pub fn build_xi_events_for(
             ),
             // Touch events use the same wire format as button events (XI2 spec §4.5).
             // The detail field carries the touch ID.
-            InputEvent::TouchBegin { touch_id, x, y, state } => (
+            InputEvent::TouchBegin {
+                touch_id,
+                x,
+                y,
+                state,
+            } => (
                 xi::TOUCH_BEGIN_EVENT,
                 xi::RAW_TOUCH_BEGIN_EVENT,
                 touch_id,
@@ -266,7 +280,12 @@ pub fn build_xi_events_for(
                 state,
                 Vec::new(),
             ),
-            InputEvent::TouchUpdate { touch_id, x, y, state } => (
+            InputEvent::TouchUpdate {
+                touch_id,
+                x,
+                y,
+                state,
+            } => (
                 xi::TOUCH_UPDATE_EVENT,
                 xi::RAW_TOUCH_UPDATE_EVENT,
                 touch_id,
@@ -276,7 +295,12 @@ pub fn build_xi_events_for(
                 state,
                 Vec::new(),
             ),
-            InputEvent::TouchEnd { touch_id, x, y, state } => (
+            InputEvent::TouchEnd {
+                touch_id,
+                x,
+                y,
+                state,
+            } => (
                 xi::TOUCH_END_EVENT,
                 xi::RAW_TOUCH_END_EVENT,
                 touch_id,
@@ -301,9 +325,7 @@ pub fn build_xi_events_for(
     let device_target = chain.iter().copied().find(|w| {
         selections.iter().any(|s| {
             s.window == *w
-                && (s.deviceid == 0
-                    || s.deviceid == 1
-                    || s.deviceid == MASTER_POINTER_ID)
+                && (s.deviceid == 0 || s.deviceid == 1 || s.deviceid == MASTER_POINTER_ID)
                 && s.wants(device_type)
         })
     });
@@ -334,9 +356,7 @@ pub fn build_xi_events_for(
     let any_raw = chain.iter().any(|w| {
         selections.iter().any(|s| {
             s.window == *w
-                && (s.deviceid == 0
-                    || s.deviceid == 1
-                    || s.deviceid == MASTER_POINTER_ID)
+                && (s.deviceid == 0 || s.deviceid == 1 || s.deviceid == MASTER_POINTER_ID)
                 && s.wants(raw_type)
         })
     });
@@ -387,7 +407,9 @@ pub(crate) fn build_gesture_events(
         })
     });
 
-    let Some(event_window) = target else { return Vec::new() };
+    let Some(event_window) = target else {
+        return Vec::new();
+    };
 
     // Build using the pointer event structure (gesture events share the same
     // wire format as button/motion events in XI2).
@@ -400,7 +422,10 @@ pub(crate) fn build_gesture_events(
         root_window,
         event_window,
         0,
-        0, 0, 0, 0,
+        0,
+        0,
+        0,
+        0,
         0,
         None,
         &[],
@@ -412,7 +437,12 @@ pub(crate) fn build_gesture_events(
 /// Build a raw pointer event (`XI_RawMotion`/`XI_RawButtonPress`/
 /// `XI_RawButtonRelease`). Raw events have no event window and no
 /// coordinates — clients that want a position call XQueryPointer.
-pub fn build_raw_pointer_event(event_type: u16, sequence: u16, detail: u32, msb_first: bool) -> Vec<u8> {
+pub fn build_raw_pointer_event(
+    event_type: u16,
+    sequence: u16,
+    detail: u32,
+    msb_first: bool,
+) -> Vec<u8> {
     let event = xi::RawButtonPressEvent {
         response_type: 35,
         extension: XI_MAJOR_OPCODE,

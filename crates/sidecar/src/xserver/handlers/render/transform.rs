@@ -1,9 +1,9 @@
 use tracing::debug;
 
-use crate::xserver::ClientState;
-use crate::xserver::core::read_u32_bo;
 use super::read_fixed_bo;
+use crate::xserver::core::read_u32_bo;
 use crate::xserver::core::require_len;
+use crate::xserver::ClientState;
 
 /// SetPictureTransform (RENDER minor opcode 28).
 ///
@@ -21,7 +21,11 @@ use crate::xserver::core::require_len;
 /// coordinates: `(sx*sw, sy*sw, sw) = T · (dx, dy, 1)`. Used by
 /// rendercheck (and Cairo) to project a small gradient over a much
 /// larger destination region.
-pub(crate) fn handle_set_picture_transform(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
+pub(crate) fn handle_set_picture_transform(
+    state: &mut ClientState,
+    data: &[u8],
+    seq: u16,
+) -> Vec<u8> {
     let bo = state.msb_first;
     require_len!(data, 8 + 9 * 4, seq, 139, data[1] as u16, bo);
     let pid = read_u32_bo(data, 4, bo);

@@ -76,7 +76,8 @@ impl VidModeInfo {
 pub(crate) fn handle_vidmode_request(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
     let minor = data[1];
     match minor {
-        0 => { // QueryVersion
+        0 => {
+            // QueryVersion
             let mut reply = [0u8; 32];
             reply[0] = 1;
             state.write_u16(&mut reply, 2, seq);
@@ -84,11 +85,16 @@ pub(crate) fn handle_vidmode_request(state: &mut ClientState, data: &[u8], seq: 
             state.write_u16(&mut reply, 10, 2); // minor
             reply.to_vec()
         }
-        1 => { // GetModeLine
+        1 => {
+            // GetModeLine
             // Return the current mode from the mode list.
-            let mode = state.vidmode_modes.get(state.vidmode_current_mode)
+            let mode = state
+                .vidmode_modes
+                .get(state.vidmode_current_mode)
                 .cloned()
-                .unwrap_or_else(|| VidModeInfo::default_for_screen(state.screen_width, state.screen_height));
+                .unwrap_or_else(|| {
+                    VidModeInfo::default_for_screen(state.screen_width, state.screen_height)
+                });
             let mut reply = vec![0u8; 52]; // 32 header + 20 modeline data
             reply[0] = 1;
             state.write_u16(&mut reply, 2, seq);
@@ -104,10 +110,11 @@ pub(crate) fn handle_vidmode_request(state: &mut ClientState, data: &[u8], seq: 
             state.write_u16(&mut reply, 26, mode.vsyncend); // vsyncend
             state.write_u16(&mut reply, 28, mode.vtotal); // vtotal
             state.write_u32(&mut reply, 32, mode.flags); // flags
-            // privsize at 36..40 = 0
+                                                         // privsize at 36..40 = 0
             reply
         }
-        6 => { // GetAllModeLines
+        6 => {
+            // GetAllModeLines
             // Return all modes from the mode list.
             let mode_count = state.vidmode_modes.len();
             let mode_size = 48; // bytes per mode line info
@@ -135,7 +142,8 @@ pub(crate) fn handle_vidmode_request(state: &mut ClientState, data: &[u8], seq: 
             }
             reply
         }
-        14 => { // GetGamma
+        14 => {
+            // GetGamma
             let mut reply = [0u8; 32];
             reply[0] = 1;
             state.write_u16(&mut reply, 2, seq);
@@ -155,7 +163,11 @@ pub(crate) fn handle_vidmode_request(state: &mut ClientState, data: &[u8], seq: 
                         1.0
                     }
                 };
-                (approx(&crtc.gamma_red), approx(&crtc.gamma_green), approx(&crtc.gamma_blue))
+                (
+                    approx(&crtc.gamma_red),
+                    approx(&crtc.gamma_green),
+                    approx(&crtc.gamma_blue),
+                )
             } else {
                 (1.0, 1.0, 1.0)
             };
@@ -165,7 +177,8 @@ pub(crate) fn handle_vidmode_request(state: &mut ClientState, data: &[u8], seq: 
             state.write_u32(&mut reply, 16, (gamma_b * 65536.0) as u32); // blue
             reply.to_vec()
         }
-        15 => { // SetGamma
+        15 => {
+            // SetGamma
             // Parse three 16.16 fixed-point gamma values from request
             require_len!(data, 20, seq, 153, minor as u16, state.msb_first);
             let red_fp = state.read_u32(data, 8);
@@ -176,15 +189,17 @@ pub(crate) fn handle_vidmode_request(state: &mut ClientState, data: &[u8], seq: 
             let gamma_b = blue_fp as f64 / 65536.0;
             // Compute ramp: ramp[i] = ((i/255)^(1/gamma) * 65535) as u16
             let compute_ramp = |gamma: f64| -> Vec<u16> {
-                (0..256).map(|i| {
-                    let normalized = i as f64 / 255.0;
-                    let val = if gamma > 0.0 {
-                        normalized.powf(1.0 / gamma) * 65535.0
-                    } else {
-                        normalized * 65535.0
-                    };
-                    val.round() as u16
-                }).collect()
+                (0..256)
+                    .map(|i| {
+                        let normalized = i as f64 / 255.0;
+                        let val = if gamma > 0.0 {
+                            normalized.powf(1.0 / gamma) * 65535.0
+                        } else {
+                            normalized * 65535.0
+                        };
+                        val.round() as u16
+                    })
+                    .collect()
             };
             if let Some(crtc) = state.randr_crtcs.get_mut(0) {
                 crtc.gamma_red = compute_ramp(gamma_r);
@@ -193,7 +208,8 @@ pub(crate) fn handle_vidmode_request(state: &mut ClientState, data: &[u8], seq: 
             }
             Vec::new()
         }
-        16 => { // GetGammaRamp
+        16 => {
+            // GetGammaRamp
             // Parse ramp size from request
             let size = if data.len() >= 8 {
                 state.read_u16(data, 4) as usize
@@ -208,12 +224,14 @@ pub(crate) fn handle_vidmode_request(state: &mut ClientState, data: &[u8], seq: 
             state.write_u16(&mut reply, 2, seq);
             state.write_u32(&mut reply, 4, (total_extra / 4) as u32);
             state.write_u16(&mut reply, 8, size as u16); // size
-            // Return stored ramp from CRTC, referencing directly to avoid clones
+                                                         // Return stored ramp from CRTC, referencing directly to avoid clones
             let linear_ramp: Vec<u16>;
             let ramps: [&[u16]; 3] = if let Some(crtc) = state.randr_crtcs.first() {
                 [&crtc.gamma_red, &crtc.gamma_green, &crtc.gamma_blue]
             } else {
-                linear_ramp = (0..256).map(|i| ((i as u32 * 65535) / 255) as u16).collect();
+                linear_ramp = (0..256)
+                    .map(|i| ((i as u32 * 65535) / 255) as u16)
+                    .collect();
                 [&linear_ramp, &linear_ramp, &linear_ramp]
             };
             for (channel, ramp) in ramps.iter().enumerate() {
@@ -233,7 +251,8 @@ pub(crate) fn handle_vidmode_request(state: &mut ClientState, data: &[u8], seq: 
             }
             reply
         }
-        17 => { // SetGammaRamp
+        17 => {
+            // SetGammaRamp
             // Parse ramp size and ramp data from request
             require_len!(data, 8, seq, 153, minor as u16, state.msb_first);
             let size = state.read_u16(data, 4) as usize;
@@ -243,15 +262,21 @@ pub(crate) fn handle_vidmode_request(state: &mut ClientState, data: &[u8], seq: 
             let needed = ramp_start + padded * 3;
             if data.len() < needed || size == 0 {
                 return crate::xserver::core::build_error_bo(
-                    crate::xserver::core::BAD_LENGTH, seq, 0,
-                    153, minor as u16, state.msb_first,
+                    crate::xserver::core::BAD_LENGTH,
+                    seq,
+                    0,
+                    153,
+                    minor as u16,
+                    state.msb_first,
                 );
             }
             let parse_channel = |offset: usize| -> Vec<u16> {
-                (0..size).map(|i| {
-                    let pos = offset + i * 2;
-                    state.read_u16(data, pos)
-                }).collect()
+                (0..size)
+                    .map(|i| {
+                        let pos = offset + i * 2;
+                        state.read_u16(data, pos)
+                    })
+                    .collect()
             };
             let red = parse_channel(ramp_start);
             let green = parse_channel(ramp_start + padded);
@@ -263,18 +288,24 @@ pub(crate) fn handle_vidmode_request(state: &mut ClientState, data: &[u8], seq: 
             }
             Vec::new()
         }
-        18 => { // GetGammaRampSize
+        18 => {
+            // GetGammaRampSize
             let mut reply = [0u8; 32];
             reply[0] = 1;
             state.write_u16(&mut reply, 2, seq);
             state.write_u16(&mut reply, 8, 256); // size = 256
             reply.to_vec()
         }
-        2 => { // GetModeLine (legacy alias)
+        2 => {
+            // GetModeLine (legacy alias)
             // Same as minor 1 — some clients use minor 2
-            let mode = state.vidmode_modes.get(state.vidmode_current_mode)
+            let mode = state
+                .vidmode_modes
+                .get(state.vidmode_current_mode)
                 .cloned()
-                .unwrap_or_else(|| VidModeInfo::default_for_screen(state.screen_width, state.screen_height));
+                .unwrap_or_else(|| {
+                    VidModeInfo::default_for_screen(state.screen_width, state.screen_height)
+                });
             let mut reply = vec![0u8; 52];
             reply[0] = 1;
             state.write_u16(&mut reply, 2, seq);
@@ -291,7 +322,8 @@ pub(crate) fn handle_vidmode_request(state: &mut ClientState, data: &[u8], seq: 
             state.write_u32(&mut reply, 32, mode.flags);
             reply
         }
-        3 => { // SwitchToMode — attempt to switch to a matching mode in the mode list
+        3 => {
+            // SwitchToMode — attempt to switch to a matching mode in the mode list
             // XF86VidModeSwitchToMode: screen(2) + pad(2) + ModeInfo starting at offset 8.
             require_len!(data, 52, seq, 153, minor as u16, state.msb_first);
             let screen = state.read_u16(data, 4);
@@ -303,7 +335,11 @@ pub(crate) fn handle_vidmode_request(state: &mut ClientState, data: &[u8], seq: 
                 );
                 return Vec::new();
             }
-            if let Some(idx) = state.vidmode_modes.iter().position(|m| m.matches(&requested)) {
+            if let Some(idx) = state
+                .vidmode_modes
+                .iter()
+                .position(|m| m.matches(&requested))
+            {
                 state.vidmode_current_mode = idx;
                 debug!(
                     "VidMode SwitchToMode: screen={screen} switched to mode {idx} ({}x{}, dotclock={})",
@@ -317,7 +353,8 @@ pub(crate) fn handle_vidmode_request(state: &mut ClientState, data: &[u8], seq: 
             }
             Vec::new()
         }
-        4 => { // GetMonitor
+        4 => {
+            // GetMonitor
             // Return a single monitor with vendor/model strings
             let vendor = b"x11web";
             let model = b"virtual";
@@ -328,7 +365,11 @@ pub(crate) fn handle_vidmode_request(state: &mut ClientState, data: &[u8], seq: 
             let hsync_count: u32 = 1;
             let vsync_count: u32 = 1;
             // hsync ranges (2 u32 each: low, high) + vsync ranges
-            let extra = 8 + vendor_padded + model_padded + (hsync_count as usize * 8) + (vsync_count as usize * 8);
+            let extra = 8
+                + vendor_padded
+                + model_padded
+                + (hsync_count as usize * 8)
+                + (vsync_count as usize * 8);
             let padded_extra = (extra + 3) & !3;
             let mut reply = vec![0u8; 32 + padded_extra];
             reply[0] = 1;
@@ -352,16 +393,21 @@ pub(crate) fn handle_vidmode_request(state: &mut ClientState, data: &[u8], seq: 
             state.write_u32(&mut reply, off + 4, 7500); // high = 75.00 Hz
             reply
         }
-        5 => { // LockModeSwitch — store the lock state
+        5 => {
+            // LockModeSwitch — store the lock state
             // XF86VidModeLockModeSwitch: screen(2) + lock(2)
             require_len!(data, 8, seq, 153, minor as u16, state.msb_first);
             let screen = state.read_u16(data, 4);
             let lock = state.read_u16(data, 6);
             state.vidmode_locked = lock != 0;
-            debug!("VidMode LockModeSwitch: screen={screen} locked={}", state.vidmode_locked);
+            debug!(
+                "VidMode LockModeSwitch: screen={screen} locked={}",
+                state.vidmode_locked
+            );
             Vec::new()
         }
-        7 => { // AddModeLine — parse and add to mode list
+        7 => {
+            // AddModeLine — parse and add to mode list
             // XF86VidModeAddModeLine: screen(2) + pad(2) + ModeInfo starting at offset 8.
             // The "after" mode info follows at offset 8 + 32 = 40, but we only need the new mode.
             require_len!(data, 54, seq, 153, minor as u16, state.msb_first);
@@ -377,7 +423,8 @@ pub(crate) fn handle_vidmode_request(state: &mut ClientState, data: &[u8], seq: 
             }
             Vec::new()
         }
-        8 => { // DeleteModeLine — remove matching mode from the list
+        8 => {
+            // DeleteModeLine — remove matching mode from the list
             // XF86VidModeDeleteModeLine: screen(2) + pad(2) + ModeInfo starting at offset 8.
             require_len!(data, 50, seq, 153, minor as u16, state.msb_first);
             let screen = state.read_u16(data, 4);
@@ -402,14 +449,16 @@ pub(crate) fn handle_vidmode_request(state: &mut ClientState, data: &[u8], seq: 
             }
             Vec::new()
         }
-        9 => { // ValidateModeLine — always return MODE_OK
+        9 => {
+            // ValidateModeLine — always return MODE_OK
             let mut reply = [0u8; 32];
             reply[0] = 1;
             state.write_u16(&mut reply, 2, seq);
             state.write_u32(&mut reply, 8, 0); // status = MODE_OK
             reply.to_vec()
         }
-        10 => { // SwitchMode — cycle through mode list by zoom direction
+        10 => {
+            // SwitchMode — cycle through mode list by zoom direction
             // XF86VidModeSwitchMode: screen(2) + zoom(2)
             require_len!(data, 8, seq, 153, minor as u16, state.msb_first);
             let screen = state.read_u16(data, 4);
@@ -433,7 +482,8 @@ pub(crate) fn handle_vidmode_request(state: &mut ClientState, data: &[u8], seq: 
             }
             Vec::new()
         }
-        11 => { // GetViewPort
+        11 => {
+            // GetViewPort
             let mut reply = [0u8; 32];
             reply[0] = 1;
             state.write_u16(&mut reply, 2, seq);
@@ -441,7 +491,8 @@ pub(crate) fn handle_vidmode_request(state: &mut ClientState, data: &[u8], seq: 
             state.write_u32(&mut reply, 12, state.vidmode_viewport_y);
             reply.to_vec()
         }
-        12 => { // SetViewPort — store offset (clamped to screen bounds) and log
+        12 => {
+            // SetViewPort — store offset (clamped to screen bounds) and log
             // XF86VidModeSetViewPort: screen(2) + pad(2) + x(4) + y(4)
             require_len!(data, 16, seq, 153, minor as u16, state.msb_first);
             let screen = state.read_u16(data, 4);
@@ -452,24 +503,35 @@ pub(crate) fn handle_vidmode_request(state: &mut ClientState, data: &[u8], seq: 
             debug!("VidMode SetViewPort: screen={screen} x={x} y={y} (stored; virtual display always at 0,0)");
             Vec::new()
         }
-        13 => { // GetDotClocks
+        13 => {
+            // GetDotClocks
             let mut reply = vec![0u8; 36]; // 32 header + 4 clock value
             reply[0] = 1;
             state.write_u16(&mut reply, 2, seq);
             state.write_u32(&mut reply, 4, 1); // length = 1 extra u32
             state.write_u32(&mut reply, 8, 0); // flags = 0
             state.write_u32(&mut reply, 12, 1); // clocks = 1
-            state.write_u32(&mut reply, 16, state.screen_width as u32 * state.screen_height as u32 * 60); // maxclocks
-            // Padding at 20..32 is zero
-            // clock[0] = dot clock of the mode
-            state.write_u32(&mut reply, 32, state.screen_width as u32 * state.screen_height as u32 * 60);
+            state.write_u32(
+                &mut reply,
+                16,
+                state.screen_width as u32 * state.screen_height as u32 * 60,
+            ); // maxclocks
+               // Padding at 20..32 is zero
+               // clock[0] = dot clock of the mode
+            state.write_u32(
+                &mut reply,
+                32,
+                state.screen_width as u32 * state.screen_height as u32 * 60,
+            );
             reply
         }
-        _ => {
-            crate::xserver::core::build_error_bo(
-                crate::xserver::core::BAD_REQUEST, seq, 0,
-                153, minor as u16, state.msb_first,
-            )
-        }
+        _ => crate::xserver::core::build_error_bo(
+            crate::xserver::core::BAD_REQUEST,
+            seq,
+            0,
+            153,
+            minor as u16,
+            state.msb_first,
+        ),
     }
 }

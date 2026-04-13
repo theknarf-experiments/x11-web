@@ -18,305 +18,550 @@ use tracing::{debug, error, info, warn};
 pub type OSMesaContext = *mut c_void;
 
 // Mesa format constants (kept for completeness of the OSMesa/GL API surface)
-#[allow(dead_code)] pub const OSMESA_BGRA: u32 = 0x0002; // GL_BGRA = 0x80E1 but OSMesa uses its own enum
+#[allow(dead_code)]
+pub const OSMESA_BGRA: u32 = 0x0002; // GL_BGRA = 0x80E1 but OSMesa uses its own enum
 pub const OSMESA_RGBA: u32 = 0x1908;
-#[allow(dead_code)] pub const OSMESA_ROW_LENGTH: u32 = 0x10;
+#[allow(dead_code)]
+pub const OSMESA_ROW_LENGTH: u32 = 0x10;
 pub const OSMESA_Y_UP: u32 = 0x11;
 
 // GL constants we need
-#[allow(dead_code)] pub const GL_COLOR_BUFFER_BIT: u32 = 0x00004000;
-#[allow(dead_code)] pub const GL_DEPTH_BUFFER_BIT: u32 = 0x00000100;
-#[allow(dead_code)] pub const GL_STENCIL_BUFFER_BIT: u32 = 0x00000400;
-#[allow(dead_code)] pub const GL_ACCUM_BUFFER_BIT: u32 = 0x00000200;
+#[allow(dead_code)]
+pub const GL_COLOR_BUFFER_BIT: u32 = 0x00004000;
+#[allow(dead_code)]
+pub const GL_DEPTH_BUFFER_BIT: u32 = 0x00000100;
+#[allow(dead_code)]
+pub const GL_STENCIL_BUFFER_BIT: u32 = 0x00000400;
+#[allow(dead_code)]
+pub const GL_ACCUM_BUFFER_BIT: u32 = 0x00000200;
 pub const GL_UNSIGNED_BYTE: u32 = 0x1401;
-#[allow(dead_code)] pub const GL_BYTE: u32 = 0x1400;
-#[allow(dead_code)] pub const GL_UNSIGNED_SHORT: u32 = 0x1403;
-#[allow(dead_code)] pub const GL_SHORT: u32 = 0x1402;
-#[allow(dead_code)] pub const GL_UNSIGNED_INT: u32 = 0x1405;
-#[allow(dead_code)] pub const GL_INT: u32 = 0x1404;
-#[allow(dead_code)] pub const GL_FLOAT: u32 = 0x1406;
-#[allow(dead_code)] pub const GL_DOUBLE: u32 = 0x140A;
-#[allow(dead_code)] pub const GL_TRUE: u8 = 1;
-#[allow(dead_code)] pub const GL_FALSE: u8 = 0;
+#[allow(dead_code)]
+pub const GL_BYTE: u32 = 0x1400;
+#[allow(dead_code)]
+pub const GL_UNSIGNED_SHORT: u32 = 0x1403;
+#[allow(dead_code)]
+pub const GL_SHORT: u32 = 0x1402;
+#[allow(dead_code)]
+pub const GL_UNSIGNED_INT: u32 = 0x1405;
+#[allow(dead_code)]
+pub const GL_INT: u32 = 0x1404;
+#[allow(dead_code)]
+pub const GL_FLOAT: u32 = 0x1406;
+#[allow(dead_code)]
+pub const GL_DOUBLE: u32 = 0x140A;
+#[allow(dead_code)]
+pub const GL_TRUE: u8 = 1;
+#[allow(dead_code)]
+pub const GL_FALSE: u8 = 0;
 
 // GL primitive types
-#[allow(dead_code)] pub const GL_POINTS: u32 = 0x0000;
-#[allow(dead_code)] pub const GL_LINES: u32 = 0x0001;
-#[allow(dead_code)] pub const GL_LINE_LOOP: u32 = 0x0002;
-#[allow(dead_code)] pub const GL_LINE_STRIP: u32 = 0x0003;
-#[allow(dead_code)] pub const GL_TRIANGLES: u32 = 0x0004;
-#[allow(dead_code)] pub const GL_TRIANGLE_STRIP: u32 = 0x0005;
-#[allow(dead_code)] pub const GL_TRIANGLE_FAN: u32 = 0x0006;
-#[allow(dead_code)] pub const GL_QUADS: u32 = 0x0007;
-#[allow(dead_code)] pub const GL_QUAD_STRIP: u32 = 0x0008;
-#[allow(dead_code)] pub const GL_POLYGON: u32 = 0x0009;
+#[allow(dead_code)]
+pub const GL_POINTS: u32 = 0x0000;
+#[allow(dead_code)]
+pub const GL_LINES: u32 = 0x0001;
+#[allow(dead_code)]
+pub const GL_LINE_LOOP: u32 = 0x0002;
+#[allow(dead_code)]
+pub const GL_LINE_STRIP: u32 = 0x0003;
+#[allow(dead_code)]
+pub const GL_TRIANGLES: u32 = 0x0004;
+#[allow(dead_code)]
+pub const GL_TRIANGLE_STRIP: u32 = 0x0005;
+#[allow(dead_code)]
+pub const GL_TRIANGLE_FAN: u32 = 0x0006;
+#[allow(dead_code)]
+pub const GL_QUADS: u32 = 0x0007;
+#[allow(dead_code)]
+pub const GL_QUAD_STRIP: u32 = 0x0008;
+#[allow(dead_code)]
+pub const GL_POLYGON: u32 = 0x0009;
 
 // GL enable/disable caps
-#[allow(dead_code)] pub const GL_TEXTURE_2D: u32 = 0x0DE1;
-#[allow(dead_code)] pub const GL_TEXTURE_1D: u32 = 0x0DE0;
-#[allow(dead_code)] pub const GL_DEPTH_TEST: u32 = 0x0B71;
-#[allow(dead_code)] pub const GL_BLEND: u32 = 0x0BE2;
-#[allow(dead_code)] pub const GL_ALPHA_TEST: u32 = 0x0BC0;
-#[allow(dead_code)] pub const GL_SCISSOR_TEST: u32 = 0x0C11;
-#[allow(dead_code)] pub const GL_STENCIL_TEST: u32 = 0x0B90;
-#[allow(dead_code)] pub const GL_CULL_FACE: u32 = 0x0B44;
-#[allow(dead_code)] pub const GL_LIGHTING: u32 = 0x0B50;
-#[allow(dead_code)] pub const GL_FOG: u32 = 0x0B60;
-#[allow(dead_code)] pub const GL_NORMALIZE: u32 = 0x0BA1;
-#[allow(dead_code)] pub const GL_COLOR_MATERIAL: u32 = 0x0B57;
-#[allow(dead_code)] pub const GL_LINE_SMOOTH: u32 = 0x0B20;
-#[allow(dead_code)] pub const GL_POLYGON_SMOOTH: u32 = 0x0B41;
-#[allow(dead_code)] pub const GL_MULTISAMPLE: u32 = 0x809D;
-#[allow(dead_code)] pub const GL_DITHER: u32 = 0x0BD0;
-#[allow(dead_code)] pub const GL_AUTO_NORMAL: u32 = 0x0D80;
-#[allow(dead_code)] pub const GL_MAP1_VERTEX_3: u32 = 0x0D97;
-#[allow(dead_code)] pub const GL_MAP1_VERTEX_4: u32 = 0x0D98;
-#[allow(dead_code)] pub const GL_MAP2_VERTEX_3: u32 = 0x0DB7;
-#[allow(dead_code)] pub const GL_MAP2_VERTEX_4: u32 = 0x0DB8;
-#[allow(dead_code)] pub const GL_POLYGON_OFFSET_FILL: u32 = 0x8037;
-#[allow(dead_code)] pub const GL_POLYGON_OFFSET_LINE: u32 = 0x2A02;
-#[allow(dead_code)] pub const GL_POLYGON_OFFSET_POINT: u32 = 0x2A01;
-#[allow(dead_code)] pub const GL_POLYGON_STIPPLE: u32 = 0x0B42;
-#[allow(dead_code)] pub const GL_TEXTURE_GEN_S: u32 = 0x0C60;
-#[allow(dead_code)] pub const GL_TEXTURE_GEN_T: u32 = 0x0C61;
-#[allow(dead_code)] pub const GL_TEXTURE_GEN_R: u32 = 0x0C62;
-#[allow(dead_code)] pub const GL_TEXTURE_GEN_Q: u32 = 0x0C63;
-#[allow(dead_code)] pub const GL_CLIP_PLANE0: u32 = 0x3000;
-#[allow(dead_code)] pub const GL_CLIP_PLANE1: u32 = 0x3001;
-#[allow(dead_code)] pub const GL_CLIP_PLANE2: u32 = 0x3002;
-#[allow(dead_code)] pub const GL_CLIP_PLANE3: u32 = 0x3003;
-#[allow(dead_code)] pub const GL_CLIP_PLANE4: u32 = 0x3004;
-#[allow(dead_code)] pub const GL_CLIP_PLANE5: u32 = 0x3005;
+#[allow(dead_code)]
+pub const GL_TEXTURE_2D: u32 = 0x0DE1;
+#[allow(dead_code)]
+pub const GL_TEXTURE_1D: u32 = 0x0DE0;
+#[allow(dead_code)]
+pub const GL_DEPTH_TEST: u32 = 0x0B71;
+#[allow(dead_code)]
+pub const GL_BLEND: u32 = 0x0BE2;
+#[allow(dead_code)]
+pub const GL_ALPHA_TEST: u32 = 0x0BC0;
+#[allow(dead_code)]
+pub const GL_SCISSOR_TEST: u32 = 0x0C11;
+#[allow(dead_code)]
+pub const GL_STENCIL_TEST: u32 = 0x0B90;
+#[allow(dead_code)]
+pub const GL_CULL_FACE: u32 = 0x0B44;
+#[allow(dead_code)]
+pub const GL_LIGHTING: u32 = 0x0B50;
+#[allow(dead_code)]
+pub const GL_FOG: u32 = 0x0B60;
+#[allow(dead_code)]
+pub const GL_NORMALIZE: u32 = 0x0BA1;
+#[allow(dead_code)]
+pub const GL_COLOR_MATERIAL: u32 = 0x0B57;
+#[allow(dead_code)]
+pub const GL_LINE_SMOOTH: u32 = 0x0B20;
+#[allow(dead_code)]
+pub const GL_POLYGON_SMOOTH: u32 = 0x0B41;
+#[allow(dead_code)]
+pub const GL_MULTISAMPLE: u32 = 0x809D;
+#[allow(dead_code)]
+pub const GL_DITHER: u32 = 0x0BD0;
+#[allow(dead_code)]
+pub const GL_AUTO_NORMAL: u32 = 0x0D80;
+#[allow(dead_code)]
+pub const GL_MAP1_VERTEX_3: u32 = 0x0D97;
+#[allow(dead_code)]
+pub const GL_MAP1_VERTEX_4: u32 = 0x0D98;
+#[allow(dead_code)]
+pub const GL_MAP2_VERTEX_3: u32 = 0x0DB7;
+#[allow(dead_code)]
+pub const GL_MAP2_VERTEX_4: u32 = 0x0DB8;
+#[allow(dead_code)]
+pub const GL_POLYGON_OFFSET_FILL: u32 = 0x8037;
+#[allow(dead_code)]
+pub const GL_POLYGON_OFFSET_LINE: u32 = 0x2A02;
+#[allow(dead_code)]
+pub const GL_POLYGON_OFFSET_POINT: u32 = 0x2A01;
+#[allow(dead_code)]
+pub const GL_POLYGON_STIPPLE: u32 = 0x0B42;
+#[allow(dead_code)]
+pub const GL_TEXTURE_GEN_S: u32 = 0x0C60;
+#[allow(dead_code)]
+pub const GL_TEXTURE_GEN_T: u32 = 0x0C61;
+#[allow(dead_code)]
+pub const GL_TEXTURE_GEN_R: u32 = 0x0C62;
+#[allow(dead_code)]
+pub const GL_TEXTURE_GEN_Q: u32 = 0x0C63;
+#[allow(dead_code)]
+pub const GL_CLIP_PLANE0: u32 = 0x3000;
+#[allow(dead_code)]
+pub const GL_CLIP_PLANE1: u32 = 0x3001;
+#[allow(dead_code)]
+pub const GL_CLIP_PLANE2: u32 = 0x3002;
+#[allow(dead_code)]
+pub const GL_CLIP_PLANE3: u32 = 0x3003;
+#[allow(dead_code)]
+pub const GL_CLIP_PLANE4: u32 = 0x3004;
+#[allow(dead_code)]
+pub const GL_CLIP_PLANE5: u32 = 0x3005;
 
 // Texture formats
-#[allow(dead_code)] pub const GL_RGB: u32 = 0x1907;
+#[allow(dead_code)]
+pub const GL_RGB: u32 = 0x1907;
 pub const GL_RGBA: u32 = 0x1908;
-#[allow(dead_code)] pub const GL_LUMINANCE: u32 = 0x1909;
-#[allow(dead_code)] pub const GL_LUMINANCE_ALPHA: u32 = 0x190A;
-#[allow(dead_code)] pub const GL_ALPHA: u32 = 0x1906;
-#[allow(dead_code)] pub const GL_BGRA: u32 = 0x80E1;
-#[allow(dead_code)] pub const GL_BGR: u32 = 0x80E0;
-#[allow(dead_code)] pub const GL_RED: u32 = 0x1903;
-#[allow(dead_code)] pub const GL_GREEN: u32 = 0x1904;
-#[allow(dead_code)] pub const GL_BLUE: u32 = 0x1905;
-#[allow(dead_code)] pub const GL_DEPTH_COMPONENT: u32 = 0x1902;
-#[allow(dead_code)] pub const GL_STENCIL_INDEX: u32 = 0x1901;
-#[allow(dead_code)] pub const GL_COLOR_INDEX: u32 = 0x1900;
+#[allow(dead_code)]
+pub const GL_LUMINANCE: u32 = 0x1909;
+#[allow(dead_code)]
+pub const GL_LUMINANCE_ALPHA: u32 = 0x190A;
+#[allow(dead_code)]
+pub const GL_ALPHA: u32 = 0x1906;
+#[allow(dead_code)]
+pub const GL_BGRA: u32 = 0x80E1;
+#[allow(dead_code)]
+pub const GL_BGR: u32 = 0x80E0;
+#[allow(dead_code)]
+pub const GL_RED: u32 = 0x1903;
+#[allow(dead_code)]
+pub const GL_GREEN: u32 = 0x1904;
+#[allow(dead_code)]
+pub const GL_BLUE: u32 = 0x1905;
+#[allow(dead_code)]
+pub const GL_DEPTH_COMPONENT: u32 = 0x1902;
+#[allow(dead_code)]
+pub const GL_STENCIL_INDEX: u32 = 0x1901;
+#[allow(dead_code)]
+pub const GL_COLOR_INDEX: u32 = 0x1900;
 
 // Texture parameters
-#[allow(dead_code)] pub const GL_TEXTURE_MIN_FILTER: u32 = 0x2801;
-#[allow(dead_code)] pub const GL_TEXTURE_MAG_FILTER: u32 = 0x2800;
-#[allow(dead_code)] pub const GL_TEXTURE_WRAP_S: u32 = 0x2802;
-#[allow(dead_code)] pub const GL_TEXTURE_WRAP_T: u32 = 0x2803;
-#[allow(dead_code)] pub const GL_NEAREST: i32 = 0x2600;
-#[allow(dead_code)] pub const GL_LINEAR: i32 = 0x2601;
-#[allow(dead_code)] pub const GL_NEAREST_MIPMAP_NEAREST: i32 = 0x2700;
-#[allow(dead_code)] pub const GL_LINEAR_MIPMAP_NEAREST: i32 = 0x2701;
-#[allow(dead_code)] pub const GL_NEAREST_MIPMAP_LINEAR: i32 = 0x2702;
-#[allow(dead_code)] pub const GL_LINEAR_MIPMAP_LINEAR: i32 = 0x2703;
-#[allow(dead_code)] pub const GL_CLAMP: i32 = 0x2900;
-#[allow(dead_code)] pub const GL_REPEAT: i32 = 0x2901;
+#[allow(dead_code)]
+pub const GL_TEXTURE_MIN_FILTER: u32 = 0x2801;
+#[allow(dead_code)]
+pub const GL_TEXTURE_MAG_FILTER: u32 = 0x2800;
+#[allow(dead_code)]
+pub const GL_TEXTURE_WRAP_S: u32 = 0x2802;
+#[allow(dead_code)]
+pub const GL_TEXTURE_WRAP_T: u32 = 0x2803;
+#[allow(dead_code)]
+pub const GL_NEAREST: i32 = 0x2600;
+#[allow(dead_code)]
+pub const GL_LINEAR: i32 = 0x2601;
+#[allow(dead_code)]
+pub const GL_NEAREST_MIPMAP_NEAREST: i32 = 0x2700;
+#[allow(dead_code)]
+pub const GL_LINEAR_MIPMAP_NEAREST: i32 = 0x2701;
+#[allow(dead_code)]
+pub const GL_NEAREST_MIPMAP_LINEAR: i32 = 0x2702;
+#[allow(dead_code)]
+pub const GL_LINEAR_MIPMAP_LINEAR: i32 = 0x2703;
+#[allow(dead_code)]
+pub const GL_CLAMP: i32 = 0x2900;
+#[allow(dead_code)]
+pub const GL_REPEAT: i32 = 0x2901;
 
 // Matrix modes
-#[allow(dead_code)] pub const GL_MODELVIEW: u32 = 0x1700;
-#[allow(dead_code)] pub const GL_PROJECTION: u32 = 0x1701;
-#[allow(dead_code)] pub const GL_TEXTURE: u32 = 0x1702;
+#[allow(dead_code)]
+pub const GL_MODELVIEW: u32 = 0x1700;
+#[allow(dead_code)]
+pub const GL_PROJECTION: u32 = 0x1701;
+#[allow(dead_code)]
+pub const GL_TEXTURE: u32 = 0x1702;
 
 // Lighting constants
-#[allow(dead_code)] pub const GL_LIGHT0: u32 = 0x4000;
-#[allow(dead_code)] pub const GL_LIGHT1: u32 = 0x4001;
-#[allow(dead_code)] pub const GL_LIGHT2: u32 = 0x4002;
-#[allow(dead_code)] pub const GL_LIGHT3: u32 = 0x4003;
-#[allow(dead_code)] pub const GL_LIGHT4: u32 = 0x4004;
-#[allow(dead_code)] pub const GL_LIGHT5: u32 = 0x4005;
-#[allow(dead_code)] pub const GL_LIGHT6: u32 = 0x4006;
-#[allow(dead_code)] pub const GL_LIGHT7: u32 = 0x4007;
-#[allow(dead_code)] pub const GL_AMBIENT: u32 = 0x1200;
-#[allow(dead_code)] pub const GL_DIFFUSE: u32 = 0x1201;
-#[allow(dead_code)] pub const GL_SPECULAR: u32 = 0x1202;
-#[allow(dead_code)] pub const GL_POSITION: u32 = 0x1203;
-#[allow(dead_code)] pub const GL_SPOT_DIRECTION: u32 = 0x1204;
-#[allow(dead_code)] pub const GL_SPOT_EXPONENT: u32 = 0x1205;
-#[allow(dead_code)] pub const GL_SPOT_CUTOFF: u32 = 0x1206;
-#[allow(dead_code)] pub const GL_CONSTANT_ATTENUATION: u32 = 0x1207;
-#[allow(dead_code)] pub const GL_LINEAR_ATTENUATION: u32 = 0x1208;
-#[allow(dead_code)] pub const GL_QUADRATIC_ATTENUATION: u32 = 0x1209;
-#[allow(dead_code)] pub const GL_EMISSION: u32 = 0x1600;
-#[allow(dead_code)] pub const GL_SHININESS: u32 = 0x1601;
-#[allow(dead_code)] pub const GL_AMBIENT_AND_DIFFUSE: u32 = 0x1602;
-#[allow(dead_code)] pub const GL_COLOR_INDEXES: u32 = 0x1603;
-#[allow(dead_code)] pub const GL_LIGHT_MODEL_AMBIENT: u32 = 0x0B53;
-#[allow(dead_code)] pub const GL_LIGHT_MODEL_LOCAL_VIEWER: u32 = 0x0B51;
-#[allow(dead_code)] pub const GL_LIGHT_MODEL_TWO_SIDE: u32 = 0x0B52;
-#[allow(dead_code)] pub const GL_FRONT: u32 = 0x0404;
-#[allow(dead_code)] pub const GL_BACK: u32 = 0x0405;
-#[allow(dead_code)] pub const GL_FRONT_AND_BACK: u32 = 0x0408;
+#[allow(dead_code)]
+pub const GL_LIGHT0: u32 = 0x4000;
+#[allow(dead_code)]
+pub const GL_LIGHT1: u32 = 0x4001;
+#[allow(dead_code)]
+pub const GL_LIGHT2: u32 = 0x4002;
+#[allow(dead_code)]
+pub const GL_LIGHT3: u32 = 0x4003;
+#[allow(dead_code)]
+pub const GL_LIGHT4: u32 = 0x4004;
+#[allow(dead_code)]
+pub const GL_LIGHT5: u32 = 0x4005;
+#[allow(dead_code)]
+pub const GL_LIGHT6: u32 = 0x4006;
+#[allow(dead_code)]
+pub const GL_LIGHT7: u32 = 0x4007;
+#[allow(dead_code)]
+pub const GL_AMBIENT: u32 = 0x1200;
+#[allow(dead_code)]
+pub const GL_DIFFUSE: u32 = 0x1201;
+#[allow(dead_code)]
+pub const GL_SPECULAR: u32 = 0x1202;
+#[allow(dead_code)]
+pub const GL_POSITION: u32 = 0x1203;
+#[allow(dead_code)]
+pub const GL_SPOT_DIRECTION: u32 = 0x1204;
+#[allow(dead_code)]
+pub const GL_SPOT_EXPONENT: u32 = 0x1205;
+#[allow(dead_code)]
+pub const GL_SPOT_CUTOFF: u32 = 0x1206;
+#[allow(dead_code)]
+pub const GL_CONSTANT_ATTENUATION: u32 = 0x1207;
+#[allow(dead_code)]
+pub const GL_LINEAR_ATTENUATION: u32 = 0x1208;
+#[allow(dead_code)]
+pub const GL_QUADRATIC_ATTENUATION: u32 = 0x1209;
+#[allow(dead_code)]
+pub const GL_EMISSION: u32 = 0x1600;
+#[allow(dead_code)]
+pub const GL_SHININESS: u32 = 0x1601;
+#[allow(dead_code)]
+pub const GL_AMBIENT_AND_DIFFUSE: u32 = 0x1602;
+#[allow(dead_code)]
+pub const GL_COLOR_INDEXES: u32 = 0x1603;
+#[allow(dead_code)]
+pub const GL_LIGHT_MODEL_AMBIENT: u32 = 0x0B53;
+#[allow(dead_code)]
+pub const GL_LIGHT_MODEL_LOCAL_VIEWER: u32 = 0x0B51;
+#[allow(dead_code)]
+pub const GL_LIGHT_MODEL_TWO_SIDE: u32 = 0x0B52;
+#[allow(dead_code)]
+pub const GL_FRONT: u32 = 0x0404;
+#[allow(dead_code)]
+pub const GL_BACK: u32 = 0x0405;
+#[allow(dead_code)]
+pub const GL_FRONT_AND_BACK: u32 = 0x0408;
 
 // Display list modes
-#[allow(dead_code)] pub const GL_COMPILE: u32 = 0x1300;
-#[allow(dead_code)] pub const GL_COMPILE_AND_EXECUTE: u32 = 0x1301;
+#[allow(dead_code)]
+pub const GL_COMPILE: u32 = 0x1300;
+#[allow(dead_code)]
+pub const GL_COMPILE_AND_EXECUTE: u32 = 0x1301;
 
 // Vertex array client state
-#[allow(dead_code)] pub const GL_VERTEX_ARRAY: u32 = 0x8074;
-#[allow(dead_code)] pub const GL_COLOR_ARRAY: u32 = 0x8076;
-#[allow(dead_code)] pub const GL_NORMAL_ARRAY: u32 = 0x8075;
-#[allow(dead_code)] pub const GL_TEXTURE_COORD_ARRAY: u32 = 0x8078;
-#[allow(dead_code)] pub const GL_INDEX_ARRAY: u32 = 0x8077;
-#[allow(dead_code)] pub const GL_EDGE_FLAG_ARRAY: u32 = 0x8079;
+#[allow(dead_code)]
+pub const GL_VERTEX_ARRAY: u32 = 0x8074;
+#[allow(dead_code)]
+pub const GL_COLOR_ARRAY: u32 = 0x8076;
+#[allow(dead_code)]
+pub const GL_NORMAL_ARRAY: u32 = 0x8075;
+#[allow(dead_code)]
+pub const GL_TEXTURE_COORD_ARRAY: u32 = 0x8078;
+#[allow(dead_code)]
+pub const GL_INDEX_ARRAY: u32 = 0x8077;
+#[allow(dead_code)]
+pub const GL_EDGE_FLAG_ARRAY: u32 = 0x8079;
 
 // Fog parameters
-#[allow(dead_code)] pub const GL_FOG_MODE: u32 = 0x0B65;
-#[allow(dead_code)] pub const GL_FOG_DENSITY: u32 = 0x0B62;
-#[allow(dead_code)] pub const GL_FOG_START: u32 = 0x0B63;
-#[allow(dead_code)] pub const GL_FOG_END: u32 = 0x0B64;
-#[allow(dead_code)] pub const GL_FOG_INDEX: u32 = 0x0B61;
-#[allow(dead_code)] pub const GL_FOG_COLOR: u32 = 0x0B66;
-#[allow(dead_code)] pub const GL_EXP: u32 = 0x0800;
-#[allow(dead_code)] pub const GL_EXP2: u32 = 0x0801;
+#[allow(dead_code)]
+pub const GL_FOG_MODE: u32 = 0x0B65;
+#[allow(dead_code)]
+pub const GL_FOG_DENSITY: u32 = 0x0B62;
+#[allow(dead_code)]
+pub const GL_FOG_START: u32 = 0x0B63;
+#[allow(dead_code)]
+pub const GL_FOG_END: u32 = 0x0B64;
+#[allow(dead_code)]
+pub const GL_FOG_INDEX: u32 = 0x0B61;
+#[allow(dead_code)]
+pub const GL_FOG_COLOR: u32 = 0x0B66;
+#[allow(dead_code)]
+pub const GL_EXP: u32 = 0x0800;
+#[allow(dead_code)]
+pub const GL_EXP2: u32 = 0x0801;
 
 // Texture environment
-#[allow(dead_code)] pub const GL_TEXTURE_ENV: u32 = 0x2300;
-#[allow(dead_code)] pub const GL_TEXTURE_ENV_MODE: u32 = 0x2200;
-#[allow(dead_code)] pub const GL_TEXTURE_ENV_COLOR: u32 = 0x2201;
-#[allow(dead_code)] pub const GL_MODULATE: u32 = 0x2100;
-#[allow(dead_code)] pub const GL_DECAL: u32 = 0x2101;
-#[allow(dead_code)] pub const GL_REPLACE: u32 = 0x1E01;
+#[allow(dead_code)]
+pub const GL_TEXTURE_ENV: u32 = 0x2300;
+#[allow(dead_code)]
+pub const GL_TEXTURE_ENV_MODE: u32 = 0x2200;
+#[allow(dead_code)]
+pub const GL_TEXTURE_ENV_COLOR: u32 = 0x2201;
+#[allow(dead_code)]
+pub const GL_MODULATE: u32 = 0x2100;
+#[allow(dead_code)]
+pub const GL_DECAL: u32 = 0x2101;
+#[allow(dead_code)]
+pub const GL_REPLACE: u32 = 0x1E01;
 
 // Texture generation
-#[allow(dead_code)] pub const GL_S: u32 = 0x2000;
-#[allow(dead_code)] pub const GL_T: u32 = 0x2001;
-#[allow(dead_code)] pub const GL_R: u32 = 0x2002;
-#[allow(dead_code)] pub const GL_Q: u32 = 0x2003;
-#[allow(dead_code)] pub const GL_TEXTURE_GEN_MODE: u32 = 0x2500;
-#[allow(dead_code)] pub const GL_OBJECT_PLANE: u32 = 0x2501;
-#[allow(dead_code)] pub const GL_EYE_PLANE: u32 = 0x2502;
-#[allow(dead_code)] pub const GL_OBJECT_LINEAR: u32 = 0x2401;
-#[allow(dead_code)] pub const GL_EYE_LINEAR: u32 = 0x2400;
-#[allow(dead_code)] pub const GL_SPHERE_MAP: u32 = 0x2402;
+#[allow(dead_code)]
+pub const GL_S: u32 = 0x2000;
+#[allow(dead_code)]
+pub const GL_T: u32 = 0x2001;
+#[allow(dead_code)]
+pub const GL_R: u32 = 0x2002;
+#[allow(dead_code)]
+pub const GL_Q: u32 = 0x2003;
+#[allow(dead_code)]
+pub const GL_TEXTURE_GEN_MODE: u32 = 0x2500;
+#[allow(dead_code)]
+pub const GL_OBJECT_PLANE: u32 = 0x2501;
+#[allow(dead_code)]
+pub const GL_EYE_PLANE: u32 = 0x2502;
+#[allow(dead_code)]
+pub const GL_OBJECT_LINEAR: u32 = 0x2401;
+#[allow(dead_code)]
+pub const GL_EYE_LINEAR: u32 = 0x2400;
+#[allow(dead_code)]
+pub const GL_SPHERE_MAP: u32 = 0x2402;
 
 // Accumulation ops
-#[allow(dead_code)] pub const GL_ACCUM: u32 = 0x0100;
-#[allow(dead_code)] pub const GL_LOAD: u32 = 0x0101;
-#[allow(dead_code)] pub const GL_RETURN: u32 = 0x0102;
-#[allow(dead_code)] pub const GL_MULT: u32 = 0x0103;
-#[allow(dead_code)] pub const GL_ADD: u32 = 0x0104;
+#[allow(dead_code)]
+pub const GL_ACCUM: u32 = 0x0100;
+#[allow(dead_code)]
+pub const GL_LOAD: u32 = 0x0101;
+#[allow(dead_code)]
+pub const GL_RETURN: u32 = 0x0102;
+#[allow(dead_code)]
+pub const GL_MULT: u32 = 0x0103;
+#[allow(dead_code)]
+pub const GL_ADD: u32 = 0x0104;
 
 // Selection/Feedback
-#[allow(dead_code)] pub const GL_RENDER: u32 = 0x1C00;
-#[allow(dead_code)] pub const GL_SELECT: u32 = 0x1C02;
-#[allow(dead_code)] pub const GL_FEEDBACK: u32 = 0x1C01;
-#[allow(dead_code)] pub const GL_2D: u32 = 0x0600;
-#[allow(dead_code)] pub const GL_3D: u32 = 0x0601;
-#[allow(dead_code)] pub const GL_3D_COLOR: u32 = 0x0602;
-#[allow(dead_code)] pub const GL_3D_COLOR_TEXTURE: u32 = 0x0603;
-#[allow(dead_code)] pub const GL_4D_COLOR_TEXTURE: u32 = 0x0604;
-#[allow(dead_code)] pub const GL_PASS_THROUGH_TOKEN: f32 = 0x0700 as f32;
+#[allow(dead_code)]
+pub const GL_RENDER: u32 = 0x1C00;
+#[allow(dead_code)]
+pub const GL_SELECT: u32 = 0x1C02;
+#[allow(dead_code)]
+pub const GL_FEEDBACK: u32 = 0x1C01;
+#[allow(dead_code)]
+pub const GL_2D: u32 = 0x0600;
+#[allow(dead_code)]
+pub const GL_3D: u32 = 0x0601;
+#[allow(dead_code)]
+pub const GL_3D_COLOR: u32 = 0x0602;
+#[allow(dead_code)]
+pub const GL_3D_COLOR_TEXTURE: u32 = 0x0603;
+#[allow(dead_code)]
+pub const GL_4D_COLOR_TEXTURE: u32 = 0x0604;
+#[allow(dead_code)]
+pub const GL_PASS_THROUGH_TOKEN: f32 = 0x0700 as f32;
 
 // Logic ops
-#[allow(dead_code)] pub const GL_CLEAR: u32 = 0x1500;
-#[allow(dead_code)] pub const GL_AND: u32 = 0x1501;
-#[allow(dead_code)] pub const GL_AND_REVERSE: u32 = 0x1502;
-#[allow(dead_code)] pub const GL_COPY: u32 = 0x1503;
-#[allow(dead_code)] pub const GL_AND_INVERTED: u32 = 0x1504;
-#[allow(dead_code)] pub const GL_NOOP: u32 = 0x1505;
-#[allow(dead_code)] pub const GL_XOR: u32 = 0x1506;
-#[allow(dead_code)] pub const GL_OR: u32 = 0x1507;
-#[allow(dead_code)] pub const GL_NOR: u32 = 0x1508;
-#[allow(dead_code)] pub const GL_EQUIV: u32 = 0x1509;
-#[allow(dead_code)] pub const GL_INVERT: u32 = 0x150A;
-#[allow(dead_code)] pub const GL_OR_REVERSE: u32 = 0x150B;
-#[allow(dead_code)] pub const GL_COPY_INVERTED: u32 = 0x150C;
-#[allow(dead_code)] pub const GL_OR_INVERTED: u32 = 0x150D;
-#[allow(dead_code)] pub const GL_NAND: u32 = 0x150E;
-#[allow(dead_code)] pub const GL_SET: u32 = 0x150F;
+#[allow(dead_code)]
+pub const GL_CLEAR: u32 = 0x1500;
+#[allow(dead_code)]
+pub const GL_AND: u32 = 0x1501;
+#[allow(dead_code)]
+pub const GL_AND_REVERSE: u32 = 0x1502;
+#[allow(dead_code)]
+pub const GL_COPY: u32 = 0x1503;
+#[allow(dead_code)]
+pub const GL_AND_INVERTED: u32 = 0x1504;
+#[allow(dead_code)]
+pub const GL_NOOP: u32 = 0x1505;
+#[allow(dead_code)]
+pub const GL_XOR: u32 = 0x1506;
+#[allow(dead_code)]
+pub const GL_OR: u32 = 0x1507;
+#[allow(dead_code)]
+pub const GL_NOR: u32 = 0x1508;
+#[allow(dead_code)]
+pub const GL_EQUIV: u32 = 0x1509;
+#[allow(dead_code)]
+pub const GL_INVERT: u32 = 0x150A;
+#[allow(dead_code)]
+pub const GL_OR_REVERSE: u32 = 0x150B;
+#[allow(dead_code)]
+pub const GL_COPY_INVERTED: u32 = 0x150C;
+#[allow(dead_code)]
+pub const GL_OR_INVERTED: u32 = 0x150D;
+#[allow(dead_code)]
+pub const GL_NAND: u32 = 0x150E;
+#[allow(dead_code)]
+pub const GL_SET: u32 = 0x150F;
 
 // Pixel copy types
-#[allow(dead_code)] pub const GL_COLOR: u32 = 0x1800;
-#[allow(dead_code)] pub const GL_DEPTH: u32 = 0x1801;
-#[allow(dead_code)] pub const GL_STENCIL: u32 = 0x1802;
+#[allow(dead_code)]
+pub const GL_COLOR: u32 = 0x1800;
+#[allow(dead_code)]
+pub const GL_DEPTH: u32 = 0x1801;
+#[allow(dead_code)]
+pub const GL_STENCIL: u32 = 0x1802;
 
 // Pixel storage
-#[allow(dead_code)] pub const GL_PACK_ALIGNMENT: u32 = 0x0D05;
-#[allow(dead_code)] pub const GL_UNPACK_ALIGNMENT: u32 = 0x0CF5;
-#[allow(dead_code)] pub const GL_PACK_ROW_LENGTH: u32 = 0x0D02;
-#[allow(dead_code)] pub const GL_UNPACK_ROW_LENGTH: u32 = 0x0CF2;
-#[allow(dead_code)] pub const GL_PACK_SKIP_ROWS: u32 = 0x0D03;
-#[allow(dead_code)] pub const GL_PACK_SKIP_PIXELS: u32 = 0x0D04;
-#[allow(dead_code)] pub const GL_UNPACK_SKIP_ROWS: u32 = 0x0CF3;
-#[allow(dead_code)] pub const GL_UNPACK_SKIP_PIXELS: u32 = 0x0CF4;
-#[allow(dead_code)] pub const GL_PACK_LSB_FIRST: u32 = 0x0D01;
-#[allow(dead_code)] pub const GL_UNPACK_LSB_FIRST: u32 = 0x0CF1;
-#[allow(dead_code)] pub const GL_PACK_SWAP_BYTES: u32 = 0x0D00;
-#[allow(dead_code)] pub const GL_UNPACK_SWAP_BYTES: u32 = 0x0CF0;
+#[allow(dead_code)]
+pub const GL_PACK_ALIGNMENT: u32 = 0x0D05;
+#[allow(dead_code)]
+pub const GL_UNPACK_ALIGNMENT: u32 = 0x0CF5;
+#[allow(dead_code)]
+pub const GL_PACK_ROW_LENGTH: u32 = 0x0D02;
+#[allow(dead_code)]
+pub const GL_UNPACK_ROW_LENGTH: u32 = 0x0CF2;
+#[allow(dead_code)]
+pub const GL_PACK_SKIP_ROWS: u32 = 0x0D03;
+#[allow(dead_code)]
+pub const GL_PACK_SKIP_PIXELS: u32 = 0x0D04;
+#[allow(dead_code)]
+pub const GL_UNPACK_SKIP_ROWS: u32 = 0x0CF3;
+#[allow(dead_code)]
+pub const GL_UNPACK_SKIP_PIXELS: u32 = 0x0CF4;
+#[allow(dead_code)]
+pub const GL_PACK_LSB_FIRST: u32 = 0x0D01;
+#[allow(dead_code)]
+pub const GL_UNPACK_LSB_FIRST: u32 = 0x0CF1;
+#[allow(dead_code)]
+pub const GL_PACK_SWAP_BYTES: u32 = 0x0D00;
+#[allow(dead_code)]
+pub const GL_UNPACK_SWAP_BYTES: u32 = 0x0CF0;
 
 // GetString names
-#[allow(dead_code)] pub const GL_VENDOR: u32 = 0x1F00;
-#[allow(dead_code)] pub const GL_RENDERER: u32 = 0x1F01;
-#[allow(dead_code)] pub const GL_VERSION: u32 = 0x1F02;
-#[allow(dead_code)] pub const GL_EXTENSIONS: u32 = 0x1F03;
+#[allow(dead_code)]
+pub const GL_VENDOR: u32 = 0x1F00;
+#[allow(dead_code)]
+pub const GL_RENDERER: u32 = 0x1F01;
+#[allow(dead_code)]
+pub const GL_VERSION: u32 = 0x1F02;
+#[allow(dead_code)]
+pub const GL_EXTENSIONS: u32 = 0x1F03;
 
 // GL 1.4 blend equation modes
-#[allow(dead_code)] pub const GL_FUNC_ADD: u32 = 0x8006;
-#[allow(dead_code)] pub const GL_FUNC_SUBTRACT: u32 = 0x800A;
-#[allow(dead_code)] pub const GL_FUNC_REVERSE_SUBTRACT: u32 = 0x800B;
-#[allow(dead_code)] pub const GL_MIN: u32 = 0x8007;
-#[allow(dead_code)] pub const GL_MAX: u32 = 0x8008;
+#[allow(dead_code)]
+pub const GL_FUNC_ADD: u32 = 0x8006;
+#[allow(dead_code)]
+pub const GL_FUNC_SUBTRACT: u32 = 0x800A;
+#[allow(dead_code)]
+pub const GL_FUNC_REVERSE_SUBTRACT: u32 = 0x800B;
+#[allow(dead_code)]
+pub const GL_MIN: u32 = 0x8007;
+#[allow(dead_code)]
+pub const GL_MAX: u32 = 0x8008;
 
 // GL 1.5 buffer targets
-#[allow(dead_code)] pub const GL_ARRAY_BUFFER: u32 = 0x8892;
-#[allow(dead_code)] pub const GL_ELEMENT_ARRAY_BUFFER: u32 = 0x8893;
-#[allow(dead_code)] pub const GL_STATIC_DRAW: u32 = 0x88E4;
-#[allow(dead_code)] pub const GL_DYNAMIC_DRAW: u32 = 0x88E8;
-#[allow(dead_code)] pub const GL_STREAM_DRAW: u32 = 0x88E0;
-#[allow(dead_code)] pub const GL_READ_ONLY: u32 = 0x88B8;
-#[allow(dead_code)] pub const GL_WRITE_ONLY: u32 = 0x88B9;
-#[allow(dead_code)] pub const GL_READ_WRITE: u32 = 0x88BA;
+#[allow(dead_code)]
+pub const GL_ARRAY_BUFFER: u32 = 0x8892;
+#[allow(dead_code)]
+pub const GL_ELEMENT_ARRAY_BUFFER: u32 = 0x8893;
+#[allow(dead_code)]
+pub const GL_STATIC_DRAW: u32 = 0x88E4;
+#[allow(dead_code)]
+pub const GL_DYNAMIC_DRAW: u32 = 0x88E8;
+#[allow(dead_code)]
+pub const GL_STREAM_DRAW: u32 = 0x88E0;
+#[allow(dead_code)]
+pub const GL_READ_ONLY: u32 = 0x88B8;
+#[allow(dead_code)]
+pub const GL_WRITE_ONLY: u32 = 0x88B9;
+#[allow(dead_code)]
+pub const GL_READ_WRITE: u32 = 0x88BA;
 
 // GL 2.0 shader types
-#[allow(dead_code)] pub const GL_VERTEX_SHADER: u32 = 0x8B31;
-#[allow(dead_code)] pub const GL_FRAGMENT_SHADER: u32 = 0x8B30;
-#[allow(dead_code)] pub const GL_COMPILE_STATUS: u32 = 0x8B81;
-#[allow(dead_code)] pub const GL_LINK_STATUS: u32 = 0x8B82;
-#[allow(dead_code)] pub const GL_INFO_LOG_LENGTH: u32 = 0x8B84;
+#[allow(dead_code)]
+pub const GL_VERTEX_SHADER: u32 = 0x8B31;
+#[allow(dead_code)]
+pub const GL_FRAGMENT_SHADER: u32 = 0x8B30;
+#[allow(dead_code)]
+pub const GL_COMPILE_STATUS: u32 = 0x8B81;
+#[allow(dead_code)]
+pub const GL_LINK_STATUS: u32 = 0x8B82;
+#[allow(dead_code)]
+pub const GL_INFO_LOG_LENGTH: u32 = 0x8B84;
 
 // GL 3.0 FBO constants
-#[allow(dead_code)] pub const GL_FRAMEBUFFER: u32 = 0x8D40;
-#[allow(dead_code)] pub const GL_RENDERBUFFER: u32 = 0x8D41;
-#[allow(dead_code)] pub const GL_COLOR_ATTACHMENT0: u32 = 0x8CE0;
-#[allow(dead_code)] pub const GL_DEPTH_ATTACHMENT: u32 = 0x8D00;
-#[allow(dead_code)] pub const GL_STENCIL_ATTACHMENT: u32 = 0x8D20;
-#[allow(dead_code)] pub const GL_FRAMEBUFFER_COMPLETE: u32 = 0x8CD5;
-#[allow(dead_code)] pub const GL_DEPTH_COMPONENT16: u32 = 0x81A5;
-#[allow(dead_code)] pub const GL_DEPTH_COMPONENT24: u32 = 0x81A6;
+#[allow(dead_code)]
+pub const GL_FRAMEBUFFER: u32 = 0x8D40;
+#[allow(dead_code)]
+pub const GL_RENDERBUFFER: u32 = 0x8D41;
+#[allow(dead_code)]
+pub const GL_COLOR_ATTACHMENT0: u32 = 0x8CE0;
+#[allow(dead_code)]
+pub const GL_DEPTH_ATTACHMENT: u32 = 0x8D00;
+#[allow(dead_code)]
+pub const GL_STENCIL_ATTACHMENT: u32 = 0x8D20;
+#[allow(dead_code)]
+pub const GL_FRAMEBUFFER_COMPLETE: u32 = 0x8CD5;
+#[allow(dead_code)]
+pub const GL_DEPTH_COMPONENT16: u32 = 0x81A5;
+#[allow(dead_code)]
+pub const GL_DEPTH_COMPONENT24: u32 = 0x81A6;
 
 // Evaluator map targets (some already above)
-#[allow(dead_code)] pub const GL_MAP1_COLOR_4: u32 = 0x0D90;
-#[allow(dead_code)] pub const GL_MAP1_INDEX: u32 = 0x0D91;
-#[allow(dead_code)] pub const GL_MAP1_NORMAL: u32 = 0x0D92;
-#[allow(dead_code)] pub const GL_MAP1_TEXTURE_COORD_1: u32 = 0x0D93;
-#[allow(dead_code)] pub const GL_MAP1_TEXTURE_COORD_2: u32 = 0x0D94;
-#[allow(dead_code)] pub const GL_MAP1_TEXTURE_COORD_3: u32 = 0x0D95;
-#[allow(dead_code)] pub const GL_MAP1_TEXTURE_COORD_4: u32 = 0x0D96;
-#[allow(dead_code)] pub const GL_MAP2_COLOR_4: u32 = 0x0DB0;
-#[allow(dead_code)] pub const GL_MAP2_INDEX: u32 = 0x0DB1;
-#[allow(dead_code)] pub const GL_MAP2_NORMAL: u32 = 0x0DB2;
-#[allow(dead_code)] pub const GL_MAP2_TEXTURE_COORD_1: u32 = 0x0DB3;
-#[allow(dead_code)] pub const GL_MAP2_TEXTURE_COORD_2: u32 = 0x0DB4;
-#[allow(dead_code)] pub const GL_MAP2_TEXTURE_COORD_3: u32 = 0x0DB5;
-#[allow(dead_code)] pub const GL_MAP2_TEXTURE_COORD_4: u32 = 0x0DB6;
+#[allow(dead_code)]
+pub const GL_MAP1_COLOR_4: u32 = 0x0D90;
+#[allow(dead_code)]
+pub const GL_MAP1_INDEX: u32 = 0x0D91;
+#[allow(dead_code)]
+pub const GL_MAP1_NORMAL: u32 = 0x0D92;
+#[allow(dead_code)]
+pub const GL_MAP1_TEXTURE_COORD_1: u32 = 0x0D93;
+#[allow(dead_code)]
+pub const GL_MAP1_TEXTURE_COORD_2: u32 = 0x0D94;
+#[allow(dead_code)]
+pub const GL_MAP1_TEXTURE_COORD_3: u32 = 0x0D95;
+#[allow(dead_code)]
+pub const GL_MAP1_TEXTURE_COORD_4: u32 = 0x0D96;
+#[allow(dead_code)]
+pub const GL_MAP2_COLOR_4: u32 = 0x0DB0;
+#[allow(dead_code)]
+pub const GL_MAP2_INDEX: u32 = 0x0DB1;
+#[allow(dead_code)]
+pub const GL_MAP2_NORMAL: u32 = 0x0DB2;
+#[allow(dead_code)]
+pub const GL_MAP2_TEXTURE_COORD_1: u32 = 0x0DB3;
+#[allow(dead_code)]
+pub const GL_MAP2_TEXTURE_COORD_2: u32 = 0x0DB4;
+#[allow(dead_code)]
+pub const GL_MAP2_TEXTURE_COORD_3: u32 = 0x0DB5;
+#[allow(dead_code)]
+pub const GL_MAP2_TEXTURE_COORD_4: u32 = 0x0DB6;
 
 // Hint targets
-#[allow(dead_code)] pub const GL_PERSPECTIVE_CORRECTION_HINT: u32 = 0x0C50;
-#[allow(dead_code)] pub const GL_POINT_SMOOTH_HINT: u32 = 0x0C51;
-#[allow(dead_code)] pub const GL_LINE_SMOOTH_HINT: u32 = 0x0C52;
-#[allow(dead_code)] pub const GL_POLYGON_SMOOTH_HINT: u32 = 0x0C53;
-#[allow(dead_code)] pub const GL_FOG_HINT: u32 = 0x0C54;
-#[allow(dead_code)] pub const GL_DONT_CARE: u32 = 0x1100;
-#[allow(dead_code)] pub const GL_FASTEST: u32 = 0x1101;
-#[allow(dead_code)] pub const GL_NICEST: u32 = 0x1102;
+#[allow(dead_code)]
+pub const GL_PERSPECTIVE_CORRECTION_HINT: u32 = 0x0C50;
+#[allow(dead_code)]
+pub const GL_POINT_SMOOTH_HINT: u32 = 0x0C51;
+#[allow(dead_code)]
+pub const GL_LINE_SMOOTH_HINT: u32 = 0x0C52;
+#[allow(dead_code)]
+pub const GL_POLYGON_SMOOTH_HINT: u32 = 0x0C53;
+#[allow(dead_code)]
+pub const GL_FOG_HINT: u32 = 0x0C54;
+#[allow(dead_code)]
+pub const GL_DONT_CARE: u32 = 0x1100;
+#[allow(dead_code)]
+pub const GL_FASTEST: u32 = 0x1101;
+#[allow(dead_code)]
+pub const GL_NICEST: u32 = 0x1102;
 
 // GL 3.0 texture types
-#[allow(dead_code)] pub const GL_TEXTURE_3D: u32 = 0x806F;
+#[allow(dead_code)]
+pub const GL_TEXTURE_3D: u32 = 0x806F;
 
 // --------------------------------------------------------------------------
 // Dynamic function pointer table
@@ -1145,7 +1390,8 @@ pub fn is_available() -> bool {
 }
 
 fn fns() -> &'static OsMesaFns {
-    FNS.get().expect("OSMesa not initialized — call osmesa::init() first")
+    FNS.get()
+        .expect("OSMesa not initialized — call osmesa::init() first")
 }
 
 /// Resolve an arbitrary GL function by name at runtime using the stored
@@ -1167,20 +1413,18 @@ pub fn resolve_proc(name: &str) -> Option<*const c_void> {
 
 fn try_load() -> Result<OsMesaFns, String> {
     // Try common library names
-    let lib_names = [
-        "libOSMesa.so.8",
-        "libOSMesa.so.6",
-        "libOSMesa.so",
-    ];
+    let lib_names = ["libOSMesa.so.8", "libOSMesa.so.6", "libOSMesa.so"];
 
     let lib = {
         let mut last_err = String::new();
         let mut loaded = None;
         for name in &lib_names {
-            match unsafe { libc::dlopen(
-                CString::new(*name).unwrap().as_ptr(),
-                libc::RTLD_NOW | libc::RTLD_GLOBAL,
-            ) } {
+            match unsafe {
+                libc::dlopen(
+                    CString::new(*name).unwrap().as_ptr(),
+                    libc::RTLD_NOW | libc::RTLD_GLOBAL,
+                )
+            } {
                 handle if !handle.is_null() => {
                     info!("Loaded {name}");
                     loaded = Some(handle);
@@ -1274,7 +1518,12 @@ fn try_load() -> Result<OsMesaFns, String> {
         enable: gl!(lib, get_proc_address, "glEnable", FnGlEnable),
         disable: gl!(lib, get_proc_address, "glDisable", FnGlDisable),
         gen_textures: gl!(lib, get_proc_address, "glGenTextures", FnGlGenTextures),
-        delete_textures: gl!(lib, get_proc_address, "glDeleteTextures", FnGlDeleteTextures),
+        delete_textures: gl!(
+            lib,
+            get_proc_address,
+            "glDeleteTextures",
+            FnGlDeleteTextures
+        ),
         bind_texture: gl!(lib, get_proc_address, "glBindTexture", FnGlBindTexture),
         tex_image_2d: gl!(lib, get_proc_address, "glTexImage2D", FnGlTexImage2D),
         tex_parameteri: gl!(lib, get_proc_address, "glTexParameteri", FnGlTexParameteri),
@@ -1381,8 +1630,18 @@ fn try_load() -> Result<OsMesaFns, String> {
         line_stipple: gl!(lib, get_proc_address, "glLineStipple", FnGlLineStipple),
         draw_buffer: gl!(lib, get_proc_address, "glDrawBuffer", FnGlDrawBuffer),
         read_buffer: gl!(lib, get_proc_address, "glReadBuffer", FnGlReadBuffer),
-        copy_tex_image_1d: gl!(lib, get_proc_address, "glCopyTexImage1D", FnGlCopyTexImage1D),
-        copy_tex_sub_image_1d: gl!(lib, get_proc_address, "glCopyTexSubImage1D", FnGlCopyTexSubImage1D),
+        copy_tex_image_1d: gl!(
+            lib,
+            get_proc_address,
+            "glCopyTexImage1D",
+            FnGlCopyTexImage1D
+        ),
+        copy_tex_sub_image_1d: gl!(
+            lib,
+            get_proc_address,
+            "glCopyTexSubImage1D",
+            FnGlCopyTexSubImage1D
+        ),
         tex_sub_image_1d: gl!(lib, get_proc_address, "glTexSubImage1D", FnGlTexSubImage1D),
 
         // Display Lists
@@ -1418,8 +1677,18 @@ fn try_load() -> Result<OsMesaFns, String> {
 
         // Polygon/Drawing
         polygon_offset: gl!(lib, get_proc_address, "glPolygonOffset", FnGlPolygonOffset),
-        polygon_stipple: gl!(lib, get_proc_address, "glPolygonStipple", FnGlPolygonStipple),
-        get_polygon_stipple: gl!(lib, get_proc_address, "glGetPolygonStipple", FnGlGetPolygonStipple),
+        polygon_stipple: gl!(
+            lib,
+            get_proc_address,
+            "glPolygonStipple",
+            FnGlPolygonStipple
+        ),
+        get_polygon_stipple: gl!(
+            lib,
+            get_proc_address,
+            "glGetPolygonStipple",
+            FnGlGetPolygonStipple
+        ),
         logic_op: gl!(lib, get_proc_address, "glLogicOp", FnGlLogicOp),
         draw_pixels: gl!(lib, get_proc_address, "glDrawPixels", FnGlDrawPixels),
         copy_pixels: gl!(lib, get_proc_address, "glCopyPixels", FnGlCopyPixels),
@@ -1447,14 +1716,44 @@ fn try_load() -> Result<OsMesaFns, String> {
         tex_genfv: gl!(lib, get_proc_address, "glTexGenfv", FnGlTexGenfv),
         tex_gendv: gl!(lib, get_proc_address, "glTexGendv", FnGlTexGendv),
         tex_image_1d: gl!(lib, get_proc_address, "glTexImage1D", FnGlTexImage1D),
-        copy_tex_image_2d: gl!(lib, get_proc_address, "glCopyTexImage2D", FnGlCopyTexImage2D),
-        copy_tex_sub_image_2d: gl!(lib, get_proc_address, "glCopyTexSubImage2D", FnGlCopyTexSubImage2D),
+        copy_tex_image_2d: gl!(
+            lib,
+            get_proc_address,
+            "glCopyTexImage2D",
+            FnGlCopyTexImage2D
+        ),
+        copy_tex_sub_image_2d: gl!(
+            lib,
+            get_proc_address,
+            "glCopyTexSubImage2D",
+            FnGlCopyTexSubImage2D
+        ),
         tex_parameterf: gl!(lib, get_proc_address, "glTexParameterf", FnGlTexParameterf),
-        tex_parameterfv: gl!(lib, get_proc_address, "glTexParameterfv", FnGlTexParameterfv),
-        tex_parameteriv: gl!(lib, get_proc_address, "glTexParameteriv", FnGlTexParameteriv),
+        tex_parameterfv: gl!(
+            lib,
+            get_proc_address,
+            "glTexParameterfv",
+            FnGlTexParameterfv
+        ),
+        tex_parameteriv: gl!(
+            lib,
+            get_proc_address,
+            "glTexParameteriv",
+            FnGlTexParameteriv
+        ),
         pixel_storef: gl!(lib, get_proc_address, "glPixelStoref", FnGlPixelStoref),
-        pixel_transferf: gl!(lib, get_proc_address, "glPixelTransferf", FnGlPixelTransferf),
-        pixel_transferi: gl!(lib, get_proc_address, "glPixelTransferi", FnGlPixelTransferi),
+        pixel_transferf: gl!(
+            lib,
+            get_proc_address,
+            "glPixelTransferf",
+            FnGlPixelTransferf
+        ),
+        pixel_transferi: gl!(
+            lib,
+            get_proc_address,
+            "glPixelTransferi",
+            FnGlPixelTransferi
+        ),
 
         // Vertex Arrays (GL 1.1)
         draw_arrays: gl!(lib, get_proc_address, "glDrawArrays", FnGlDrawArrays),
@@ -1462,35 +1761,90 @@ fn try_load() -> Result<OsMesaFns, String> {
         vertex_pointer: gl!(lib, get_proc_address, "glVertexPointer", FnGlVertexPointer),
         color_pointer: gl!(lib, get_proc_address, "glColorPointer", FnGlColorPointer),
         normal_pointer: gl!(lib, get_proc_address, "glNormalPointer", FnGlNormalPointer),
-        tex_coord_pointer: gl!(lib, get_proc_address, "glTexCoordPointer", FnGlTexCoordPointer),
-        enable_client_state: gl!(lib, get_proc_address, "glEnableClientState", FnGlEnableClientState),
-        disable_client_state: gl!(lib, get_proc_address, "glDisableClientState", FnGlDisableClientState),
-        interleaved_arrays: gl!(lib, get_proc_address, "glInterleavedArrays", FnGlInterleavedArrays),
+        tex_coord_pointer: gl!(
+            lib,
+            get_proc_address,
+            "glTexCoordPointer",
+            FnGlTexCoordPointer
+        ),
+        enable_client_state: gl!(
+            lib,
+            get_proc_address,
+            "glEnableClientState",
+            FnGlEnableClientState
+        ),
+        disable_client_state: gl!(
+            lib,
+            get_proc_address,
+            "glDisableClientState",
+            FnGlDisableClientState
+        ),
+        interleaved_arrays: gl!(
+            lib,
+            get_proc_address,
+            "glInterleavedArrays",
+            FnGlInterleavedArrays
+        ),
         array_element: gl!(lib, get_proc_address, "glArrayElement", FnGlArrayElement),
 
         // State queries
         get_booleanv: gl!(lib, get_proc_address, "glGetBooleanv", FnGlGetBooleanv),
         get_doublev: gl!(lib, get_proc_address, "glGetDoublev", FnGlGetDoublev),
         is_enabled: gl!(lib, get_proc_address, "glIsEnabled", FnGlIsEnabled),
-        get_tex_parameteriv: gl!(lib, get_proc_address, "glGetTexParameteriv", FnGlGetTexParameteriv),
-        get_tex_parameterfv: gl!(lib, get_proc_address, "glGetTexParameterfv", FnGlGetTexParameterfv),
-        get_tex_level_parameteriv: gl!(lib, get_proc_address, "glGetTexLevelParameteriv", FnGlGetTexLevelParameteriv),
-        get_tex_level_parameterfv: gl!(lib, get_proc_address, "glGetTexLevelParameterfv", FnGlGetTexLevelParameterfv),
+        get_tex_parameteriv: gl!(
+            lib,
+            get_proc_address,
+            "glGetTexParameteriv",
+            FnGlGetTexParameteriv
+        ),
+        get_tex_parameterfv: gl!(
+            lib,
+            get_proc_address,
+            "glGetTexParameterfv",
+            FnGlGetTexParameterfv
+        ),
+        get_tex_level_parameteriv: gl!(
+            lib,
+            get_proc_address,
+            "glGetTexLevelParameteriv",
+            FnGlGetTexLevelParameteriv
+        ),
+        get_tex_level_parameterfv: gl!(
+            lib,
+            get_proc_address,
+            "glGetTexLevelParameterfv",
+            FnGlGetTexLevelParameterfv
+        ),
         get_tex_image: gl!(lib, get_proc_address, "glGetTexImage", FnGlGetTexImage),
         get_lightfv: gl!(lib, get_proc_address, "glGetLightfv", FnGlGetLightfv),
         get_lightiv: gl!(lib, get_proc_address, "glGetLightiv", FnGlGetLightiv),
         get_materialfv: gl!(lib, get_proc_address, "glGetMaterialfv", FnGlGetMaterialfv),
         get_materialiv: gl!(lib, get_proc_address, "glGetMaterialiv", FnGlGetMaterialiv),
         is_texture: gl!(lib, get_proc_address, "glIsTexture", FnGlIsTexture),
-        are_textures_resident: gl!(lib, get_proc_address, "glAreTexturesResident", FnGlAreTexturesResident),
+        are_textures_resident: gl!(
+            lib,
+            get_proc_address,
+            "glAreTexturesResident",
+            FnGlAreTexturesResident
+        ),
         get_tex_envfv: gl!(lib, get_proc_address, "glGetTexEnvfv", FnGlGetTexEnvfv),
         get_tex_enviv: gl!(lib, get_proc_address, "glGetTexEnviv", FnGlGetTexEnviv),
         get_tex_gendv: gl!(lib, get_proc_address, "glGetTexGendv", FnGlGetTexGendv),
         get_tex_genfv: gl!(lib, get_proc_address, "glGetTexGenfv", FnGlGetTexGenfv),
         get_tex_geniv: gl!(lib, get_proc_address, "glGetTexGeniv", FnGlGetTexGeniv),
         get_pixel_mapfv: gl!(lib, get_proc_address, "glGetPixelMapfv", FnGlGetPixelMapfv),
-        get_pixel_mapuiv: gl!(lib, get_proc_address, "glGetPixelMapuiv", FnGlGetPixelMapuiv),
-        get_pixel_mapusv: gl!(lib, get_proc_address, "glGetPixelMapusv", FnGlGetPixelMapusv),
+        get_pixel_mapuiv: gl!(
+            lib,
+            get_proc_address,
+            "glGetPixelMapuiv",
+            FnGlGetPixelMapuiv
+        ),
+        get_pixel_mapusv: gl!(
+            lib,
+            get_proc_address,
+            "glGetPixelMapusv",
+            FnGlGetPixelMapusv
+        ),
         get_mapdv: gl!(lib, get_proc_address, "glGetMapdv", FnGlGetMapdv),
         get_mapfv: gl!(lib, get_proc_address, "glGetMapfv", FnGlGetMapfv),
         get_mapiv: gl!(lib, get_proc_address, "glGetMapiv", FnGlGetMapiv),
@@ -1526,7 +1880,12 @@ fn try_load() -> Result<OsMesaFns, String> {
         pop_name: gl!(lib, get_proc_address, "glPopName", FnGlPopName),
         load_name: gl!(lib, get_proc_address, "glLoadName", FnGlLoadName),
         select_buffer: gl!(lib, get_proc_address, "glSelectBuffer", FnGlSelectBuffer),
-        feedback_buffer: gl!(lib, get_proc_address, "glFeedbackBuffer", FnGlFeedbackBuffer),
+        feedback_buffer: gl!(
+            lib,
+            get_proc_address,
+            "glFeedbackBuffer",
+            FnGlFeedbackBuffer
+        ),
         pass_through: gl!(lib, get_proc_address, "glPassThrough", FnGlPassThrough),
         push_attrib: gl!(lib, get_proc_address, "glPushAttrib", FnGlPushAttrib),
         pop_attrib: gl!(lib, get_proc_address, "glPopAttrib", FnGlPopAttrib),
@@ -1542,43 +1901,163 @@ fn try_load() -> Result<OsMesaFns, String> {
 
         // GL 1.3
         active_texture: gl_opt!(lib, get_proc_address, "glActiveTexture", FnGlActiveTexture),
-        multi_tex_coord1f: gl_opt!(lib, get_proc_address, "glMultiTexCoord1f", FnGlMultiTexCoord1f),
-        multi_tex_coord2f: gl_opt!(lib, get_proc_address, "glMultiTexCoord2f", FnGlMultiTexCoord2f),
-        multi_tex_coord3f: gl_opt!(lib, get_proc_address, "glMultiTexCoord3f", FnGlMultiTexCoord3f),
-        multi_tex_coord4f: gl_opt!(lib, get_proc_address, "glMultiTexCoord4f", FnGlMultiTexCoord4f),
-        sample_coverage: gl_opt!(lib, get_proc_address, "glSampleCoverage", FnGlSampleCoverage),
-        compressed_tex_image_1d: gl_opt!(lib, get_proc_address, "glCompressedTexImage1D", FnGlCompressedTexImage1D),
-        compressed_tex_image_2d: gl_opt!(lib, get_proc_address, "glCompressedTexImage2D", FnGlCompressedTexImage2D),
-        compressed_tex_image_3d: gl_opt!(lib, get_proc_address, "glCompressedTexImage3D", FnGlCompressedTexImage3D),
-        compressed_tex_sub_image_1d: gl_opt!(lib, get_proc_address, "glCompressedTexSubImage1D", FnGlCompressedTexSubImage1D),
-        compressed_tex_sub_image_2d: gl_opt!(lib, get_proc_address, "glCompressedTexSubImage2D", FnGlCompressedTexSubImage2D),
-        compressed_tex_sub_image_3d: gl_opt!(lib, get_proc_address, "glCompressedTexSubImage3D", FnGlCompressedTexSubImage3D),
+        multi_tex_coord1f: gl_opt!(
+            lib,
+            get_proc_address,
+            "glMultiTexCoord1f",
+            FnGlMultiTexCoord1f
+        ),
+        multi_tex_coord2f: gl_opt!(
+            lib,
+            get_proc_address,
+            "glMultiTexCoord2f",
+            FnGlMultiTexCoord2f
+        ),
+        multi_tex_coord3f: gl_opt!(
+            lib,
+            get_proc_address,
+            "glMultiTexCoord3f",
+            FnGlMultiTexCoord3f
+        ),
+        multi_tex_coord4f: gl_opt!(
+            lib,
+            get_proc_address,
+            "glMultiTexCoord4f",
+            FnGlMultiTexCoord4f
+        ),
+        sample_coverage: gl_opt!(
+            lib,
+            get_proc_address,
+            "glSampleCoverage",
+            FnGlSampleCoverage
+        ),
+        compressed_tex_image_1d: gl_opt!(
+            lib,
+            get_proc_address,
+            "glCompressedTexImage1D",
+            FnGlCompressedTexImage1D
+        ),
+        compressed_tex_image_2d: gl_opt!(
+            lib,
+            get_proc_address,
+            "glCompressedTexImage2D",
+            FnGlCompressedTexImage2D
+        ),
+        compressed_tex_image_3d: gl_opt!(
+            lib,
+            get_proc_address,
+            "glCompressedTexImage3D",
+            FnGlCompressedTexImage3D
+        ),
+        compressed_tex_sub_image_1d: gl_opt!(
+            lib,
+            get_proc_address,
+            "glCompressedTexSubImage1D",
+            FnGlCompressedTexSubImage1D
+        ),
+        compressed_tex_sub_image_2d: gl_opt!(
+            lib,
+            get_proc_address,
+            "glCompressedTexSubImage2D",
+            FnGlCompressedTexSubImage2D
+        ),
+        compressed_tex_sub_image_3d: gl_opt!(
+            lib,
+            get_proc_address,
+            "glCompressedTexSubImage3D",
+            FnGlCompressedTexSubImage3D
+        ),
 
         // GL 1.4
-        secondary_color3f: gl_opt!(lib, get_proc_address, "glSecondaryColor3f", FnGlSecondaryColor3f),
-        secondary_color3ub: gl_opt!(lib, get_proc_address, "glSecondaryColor3ub", FnGlSecondaryColor3ub),
+        secondary_color3f: gl_opt!(
+            lib,
+            get_proc_address,
+            "glSecondaryColor3f",
+            FnGlSecondaryColor3f
+        ),
+        secondary_color3ub: gl_opt!(
+            lib,
+            get_proc_address,
+            "glSecondaryColor3ub",
+            FnGlSecondaryColor3ub
+        ),
         window_pos2f: gl_opt!(lib, get_proc_address, "glWindowPos2f", FnGlWindowPos2f),
         window_pos3f: gl_opt!(lib, get_proc_address, "glWindowPos3f", FnGlWindowPos3f),
         fog_coordf: gl_opt!(lib, get_proc_address, "glFogCoordf", FnGlFogCoordf),
         fog_coordd: gl_opt!(lib, get_proc_address, "glFogCoordd", FnGlFogCoordd),
-        point_parameterf: gl_opt!(lib, get_proc_address, "glPointParameterf", FnGlPointParameterf),
-        point_parameterfv: gl_opt!(lib, get_proc_address, "glPointParameterfv", FnGlPointParameterfv),
-        point_parameteri: gl_opt!(lib, get_proc_address, "glPointParameteri", FnGlPointParameteri),
+        point_parameterf: gl_opt!(
+            lib,
+            get_proc_address,
+            "glPointParameterf",
+            FnGlPointParameterf
+        ),
+        point_parameterfv: gl_opt!(
+            lib,
+            get_proc_address,
+            "glPointParameterfv",
+            FnGlPointParameterfv
+        ),
+        point_parameteri: gl_opt!(
+            lib,
+            get_proc_address,
+            "glPointParameteri",
+            FnGlPointParameteri
+        ),
         blend_equation: gl_opt!(lib, get_proc_address, "glBlendEquation", FnGlBlendEquation),
-        blend_func_separate: gl_opt!(lib, get_proc_address, "glBlendFuncSeparate", FnGlBlendFuncSeparate),
+        blend_func_separate: gl_opt!(
+            lib,
+            get_proc_address,
+            "glBlendFuncSeparate",
+            FnGlBlendFuncSeparate
+        ),
         blend_color: gl_opt!(lib, get_proc_address, "glBlendColor", FnGlBlendColor),
 
         // GL 2.0 stencil separate
-        stencil_func_separate: gl_opt!(lib, get_proc_address, "glStencilFuncSeparate", FnGlStencilFuncSeparate),
-        stencil_op_separate: gl_opt!(lib, get_proc_address, "glStencilOpSeparate", FnGlStencilOpSeparate),
-        stencil_mask_separate: gl_opt!(lib, get_proc_address, "glStencilMaskSeparate", FnGlStencilMaskSeparate),
+        stencil_func_separate: gl_opt!(
+            lib,
+            get_proc_address,
+            "glStencilFuncSeparate",
+            FnGlStencilFuncSeparate
+        ),
+        stencil_op_separate: gl_opt!(
+            lib,
+            get_proc_address,
+            "glStencilOpSeparate",
+            FnGlStencilOpSeparate
+        ),
+        stencil_mask_separate: gl_opt!(
+            lib,
+            get_proc_address,
+            "glStencilMaskSeparate",
+            FnGlStencilMaskSeparate
+        ),
 
         // Imaging subset
         color_table: gl_opt!(lib, get_proc_address, "glColorTable", FnGlColorTable),
-        convolution_parameterf: gl_opt!(lib, get_proc_address, "glConvolutionParameterf", FnGlConvolutionParameterf),
-        convolution_parameterfv: gl_opt!(lib, get_proc_address, "glConvolutionParameterfv", FnGlConvolutionParameterfv),
-        convolution_parameteri: gl_opt!(lib, get_proc_address, "glConvolutionParameteri", FnGlConvolutionParameteri),
-        convolution_parameteriv: gl_opt!(lib, get_proc_address, "glConvolutionParameteriv", FnGlConvolutionParameteriv),
+        convolution_parameterf: gl_opt!(
+            lib,
+            get_proc_address,
+            "glConvolutionParameterf",
+            FnGlConvolutionParameterf
+        ),
+        convolution_parameterfv: gl_opt!(
+            lib,
+            get_proc_address,
+            "glConvolutionParameterfv",
+            FnGlConvolutionParameterfv
+        ),
+        convolution_parameteri: gl_opt!(
+            lib,
+            get_proc_address,
+            "glConvolutionParameteri",
+            FnGlConvolutionParameteri
+        ),
+        convolution_parameteriv: gl_opt!(
+            lib,
+            get_proc_address,
+            "glConvolutionParameteriv",
+            FnGlConvolutionParameteriv
+        ),
         histogram: gl_opt!(lib, get_proc_address, "glHistogram", FnGlHistogram),
         minmax: gl_opt!(lib, get_proc_address, "glMinmax", FnGlMinmax),
 
@@ -1588,7 +2067,12 @@ fn try_load() -> Result<OsMesaFns, String> {
         shader_source: gl_opt!(lib, get_proc_address, "glShaderSource", FnGlShaderSource),
         compile_shader: gl_opt!(lib, get_proc_address, "glCompileShader", FnGlCompileShader),
         get_shaderiv: gl_opt!(lib, get_proc_address, "glGetShaderiv", FnGlGetShaderiv),
-        get_shader_info_log: gl_opt!(lib, get_proc_address, "glGetShaderInfoLog", FnGlGetShaderInfoLog),
+        get_shader_info_log: gl_opt!(
+            lib,
+            get_proc_address,
+            "glGetShaderInfoLog",
+            FnGlGetShaderInfoLog
+        ),
         create_program: gl_opt!(lib, get_proc_address, "glCreateProgram", FnGlCreateProgram),
         delete_program: gl_opt!(lib, get_proc_address, "glDeleteProgram", FnGlDeleteProgram),
         attach_shader: gl_opt!(lib, get_proc_address, "glAttachShader", FnGlAttachShader),
@@ -1596,8 +2080,18 @@ fn try_load() -> Result<OsMesaFns, String> {
         link_program: gl_opt!(lib, get_proc_address, "glLinkProgram", FnGlLinkProgram),
         use_program: gl_opt!(lib, get_proc_address, "glUseProgram", FnGlUseProgram),
         get_programiv: gl_opt!(lib, get_proc_address, "glGetProgramiv", FnGlGetProgramiv),
-        get_program_info_log: gl_opt!(lib, get_proc_address, "glGetProgramInfoLog", FnGlGetProgramInfoLog),
-        get_uniform_location: gl_opt!(lib, get_proc_address, "glGetUniformLocation", FnGlGetUniformLocation),
+        get_program_info_log: gl_opt!(
+            lib,
+            get_proc_address,
+            "glGetProgramInfoLog",
+            FnGlGetProgramInfoLog
+        ),
+        get_uniform_location: gl_opt!(
+            lib,
+            get_proc_address,
+            "glGetUniformLocation",
+            FnGlGetUniformLocation
+        ),
         uniform1f: gl_opt!(lib, get_proc_address, "glUniform1f", FnGlUniform1f),
         uniform2f: gl_opt!(lib, get_proc_address, "glUniform2f", FnGlUniform2f),
         uniform3f: gl_opt!(lib, get_proc_address, "glUniform3f", FnGlUniform3f),
@@ -1606,11 +2100,36 @@ fn try_load() -> Result<OsMesaFns, String> {
         uniform2i: gl_opt!(lib, get_proc_address, "glUniform2i", FnGlUniform2i),
         uniform3i: gl_opt!(lib, get_proc_address, "glUniform3i", FnGlUniform3i),
         uniform4i: gl_opt!(lib, get_proc_address, "glUniform4i", FnGlUniform4i),
-        uniform_matrix4fv: gl_opt!(lib, get_proc_address, "glUniformMatrix4fv", FnGlUniformMatrix4fv),
-        get_attrib_location: gl_opt!(lib, get_proc_address, "glGetAttribLocation", FnGlGetAttribLocation),
-        vertex_attrib_pointer: gl_opt!(lib, get_proc_address, "glVertexAttribPointer", FnGlVertexAttribPointer),
-        enable_vertex_attrib_array: gl_opt!(lib, get_proc_address, "glEnableVertexAttribArray", FnGlEnableVertexAttribArray),
-        disable_vertex_attrib_array: gl_opt!(lib, get_proc_address, "glDisableVertexAttribArray", FnGlDisableVertexAttribArray),
+        uniform_matrix4fv: gl_opt!(
+            lib,
+            get_proc_address,
+            "glUniformMatrix4fv",
+            FnGlUniformMatrix4fv
+        ),
+        get_attrib_location: gl_opt!(
+            lib,
+            get_proc_address,
+            "glGetAttribLocation",
+            FnGlGetAttribLocation
+        ),
+        vertex_attrib_pointer: gl_opt!(
+            lib,
+            get_proc_address,
+            "glVertexAttribPointer",
+            FnGlVertexAttribPointer
+        ),
+        enable_vertex_attrib_array: gl_opt!(
+            lib,
+            get_proc_address,
+            "glEnableVertexAttribArray",
+            FnGlEnableVertexAttribArray
+        ),
+        disable_vertex_attrib_array: gl_opt!(
+            lib,
+            get_proc_address,
+            "glDisableVertexAttribArray",
+            FnGlDisableVertexAttribArray
+        ),
 
         // GL 1.5 Buffer Objects
         gen_buffers: gl_opt!(lib, get_proc_address, "glGenBuffers", FnGlGenBuffers),
@@ -1622,19 +2141,84 @@ fn try_load() -> Result<OsMesaFns, String> {
         unmap_buffer: gl_opt!(lib, get_proc_address, "glUnmapBuffer", FnGlUnmapBuffer),
 
         // GL 3.0 FBO/VAO
-        gen_framebuffers: gl_opt!(lib, get_proc_address, "glGenFramebuffers", FnGlGenFramebuffers),
-        delete_framebuffers: gl_opt!(lib, get_proc_address, "glDeleteFramebuffers", FnGlDeleteFramebuffers),
-        bind_framebuffer: gl_opt!(lib, get_proc_address, "glBindFramebuffer", FnGlBindFramebuffer),
-        framebuffer_texture_2d: gl_opt!(lib, get_proc_address, "glFramebufferTexture2D", FnGlFramebufferTexture2D),
-        gen_renderbuffers: gl_opt!(lib, get_proc_address, "glGenRenderbuffers", FnGlGenRenderbuffers),
-        delete_renderbuffers: gl_opt!(lib, get_proc_address, "glDeleteRenderbuffers", FnGlDeleteRenderbuffers),
-        bind_renderbuffer: gl_opt!(lib, get_proc_address, "glBindRenderbuffer", FnGlBindRenderbuffer),
-        renderbuffer_storage: gl_opt!(lib, get_proc_address, "glRenderbufferStorage", FnGlRenderbufferStorage),
-        check_framebuffer_status: gl_opt!(lib, get_proc_address, "glCheckFramebufferStatus", FnGlCheckFramebufferStatus),
-        framebuffer_renderbuffer: gl_opt!(lib, get_proc_address, "glFramebufferRenderbuffer", FnGlFramebufferRenderbuffer),
-        gen_vertex_arrays: gl_opt!(lib, get_proc_address, "glGenVertexArrays", FnGlGenVertexArrays),
-        delete_vertex_arrays: gl_opt!(lib, get_proc_address, "glDeleteVertexArrays", FnGlDeleteVertexArrays),
-        bind_vertex_array: gl_opt!(lib, get_proc_address, "glBindVertexArray", FnGlBindVertexArray),
+        gen_framebuffers: gl_opt!(
+            lib,
+            get_proc_address,
+            "glGenFramebuffers",
+            FnGlGenFramebuffers
+        ),
+        delete_framebuffers: gl_opt!(
+            lib,
+            get_proc_address,
+            "glDeleteFramebuffers",
+            FnGlDeleteFramebuffers
+        ),
+        bind_framebuffer: gl_opt!(
+            lib,
+            get_proc_address,
+            "glBindFramebuffer",
+            FnGlBindFramebuffer
+        ),
+        framebuffer_texture_2d: gl_opt!(
+            lib,
+            get_proc_address,
+            "glFramebufferTexture2D",
+            FnGlFramebufferTexture2D
+        ),
+        gen_renderbuffers: gl_opt!(
+            lib,
+            get_proc_address,
+            "glGenRenderbuffers",
+            FnGlGenRenderbuffers
+        ),
+        delete_renderbuffers: gl_opt!(
+            lib,
+            get_proc_address,
+            "glDeleteRenderbuffers",
+            FnGlDeleteRenderbuffers
+        ),
+        bind_renderbuffer: gl_opt!(
+            lib,
+            get_proc_address,
+            "glBindRenderbuffer",
+            FnGlBindRenderbuffer
+        ),
+        renderbuffer_storage: gl_opt!(
+            lib,
+            get_proc_address,
+            "glRenderbufferStorage",
+            FnGlRenderbufferStorage
+        ),
+        check_framebuffer_status: gl_opt!(
+            lib,
+            get_proc_address,
+            "glCheckFramebufferStatus",
+            FnGlCheckFramebufferStatus
+        ),
+        framebuffer_renderbuffer: gl_opt!(
+            lib,
+            get_proc_address,
+            "glFramebufferRenderbuffer",
+            FnGlFramebufferRenderbuffer
+        ),
+        gen_vertex_arrays: gl_opt!(
+            lib,
+            get_proc_address,
+            "glGenVertexArrays",
+            FnGlGenVertexArrays
+        ),
+        delete_vertex_arrays: gl_opt!(
+            lib,
+            get_proc_address,
+            "glDeleteVertexArrays",
+            FnGlDeleteVertexArrays
+        ),
+        bind_vertex_array: gl_opt!(
+            lib,
+            get_proc_address,
+            "glBindVertexArray",
+            FnGlBindVertexArray
+        ),
     })
 }
 
@@ -1662,9 +2246,7 @@ impl MesaContext {
             return None;
         }
         let f = fns();
-        let ctx = unsafe {
-            (f.create_context_ext)(OSMESA_RGBA, 24, 8, 0, ptr::null_mut())
-        };
+        let ctx = unsafe { (f.create_context_ext)(OSMESA_RGBA, 24, 8, 0, ptr::null_mut()) };
         if ctx.is_null() {
             error!("OSMesaCreateContextExt returned NULL");
             return None;
@@ -1673,19 +2255,34 @@ impl MesaContext {
         let mut buffer = vec![0u8; buf_size];
 
         let ok = unsafe {
-            (f.make_current)(ctx, buffer.as_mut_ptr() as *mut c_void, GL_UNSIGNED_BYTE, width as i32, height as i32)
+            (f.make_current)(
+                ctx,
+                buffer.as_mut_ptr() as *mut c_void,
+                GL_UNSIGNED_BYTE,
+                width as i32,
+                height as i32,
+            )
         };
         if ok == 0 {
             error!("OSMesaMakeCurrent failed for {}x{}", width, height);
-            unsafe { (f.destroy_context)(ctx); }
+            unsafe {
+                (f.destroy_context)(ctx);
+            }
             return None;
         }
 
         // Tell OSMesa that Y=0 is at the top (matches X11 coordinate system)
-        unsafe { (f.pixel_store)(OSMESA_Y_UP, 0); }
+        unsafe {
+            (f.pixel_store)(OSMESA_Y_UP, 0);
+        }
 
         debug!("Created OSMesa context {}x{}", width, height);
-        Some(Self { ctx, buffer, width, height })
+        Some(Self {
+            ctx,
+            buffer,
+            width,
+            height,
+        })
     }
 
     /// Resize the backing buffer and re-bind the context.
@@ -1696,13 +2293,21 @@ impl MesaContext {
         self.width = width;
         self.height = height;
         let ok = unsafe {
-            (f.make_current)(self.ctx, self.buffer.as_mut_ptr() as *mut c_void, GL_UNSIGNED_BYTE, width as i32, height as i32)
+            (f.make_current)(
+                self.ctx,
+                self.buffer.as_mut_ptr() as *mut c_void,
+                GL_UNSIGNED_BYTE,
+                width as i32,
+                height as i32,
+            )
         };
         if ok == 0 {
             error!("OSMesaMakeCurrent failed on resize to {}x{}", width, height);
             return false;
         }
-        unsafe { (f.pixel_store)(OSMESA_Y_UP, 0); }
+        unsafe {
+            (f.pixel_store)(OSMESA_Y_UP, 0);
+        }
         true
     }
 
@@ -1710,7 +2315,13 @@ impl MesaContext {
     pub fn make_current(&mut self) -> bool {
         let f = fns();
         let ok = unsafe {
-            (f.make_current)(self.ctx, self.buffer.as_mut_ptr() as *mut c_void, GL_UNSIGNED_BYTE, self.width as i32, self.height as i32)
+            (f.make_current)(
+                self.ctx,
+                self.buffer.as_mut_ptr() as *mut c_void,
+                GL_UNSIGNED_BYTE,
+                self.width as i32,
+                self.height as i32,
+            )
         };
         ok != 0
     }
@@ -1764,7 +2375,9 @@ impl Drop for MesaContext {
     fn drop(&mut self) {
         if is_available() && !self.ctx.is_null() {
             let f = fns();
-            unsafe { (f.destroy_context)(self.ctx); }
+            unsafe {
+                (f.destroy_context)(self.ctx);
+            }
         }
     }
 }

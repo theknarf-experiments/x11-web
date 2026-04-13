@@ -17,7 +17,10 @@ pub(crate) struct AccessControlState {
 
 impl AccessControlState {
     pub(crate) fn new() -> Self {
-        Self { enabled: false, hosts: Vec::new() }
+        Self {
+            enabled: false,
+            hosts: Vec::new(),
+        }
     }
 
     /// Check if a TCP peer address is allowed to connect.
@@ -31,29 +34,37 @@ impl AccessControlState {
         // Check if the peer's IP matches any entry in the hosts list
         for host in &self.hosts {
             match host.family {
-                0 => { // Internet (IPv4)
+                0 => {
+                    // Internet (IPv4)
                     if host.address.len() == 4 {
                         if let std::net::IpAddr::V4(v4) = ip {
-                            if v4.octets() == <[u8; 4]>::try_from(host.address.as_slice()).unwrap_or([0; 4]) {
+                            if v4.octets()
+                                == <[u8; 4]>::try_from(host.address.as_slice()).unwrap_or([0; 4])
+                            {
                                 return true;
                             }
                         }
                     }
                 }
-                6 => { // InternetV6
+                6 => {
+                    // InternetV6
                     if host.address.len() == 16 {
                         if let std::net::IpAddr::V6(v6) = ip {
-                            if v6.octets() == <[u8; 16]>::try_from(host.address.as_slice()).unwrap_or([0; 16]) {
+                            if v6.octets()
+                                == <[u8; 16]>::try_from(host.address.as_slice()).unwrap_or([0; 16])
+                            {
                                 return true;
                             }
                         }
                     }
                 }
-                5 => { // ServerInterpreted — check for "localuser" or "localgroup" patterns
+                5 => {
+                    // ServerInterpreted — check for "localuser" or "localgroup" patterns
                     // Accept ServerInterpreted entries as wildcards for now
                     return true;
                 }
-                254 => { // Local — always matches local connections
+                254 => {
+                    // Local — always matches local connections
                     return true;
                 }
                 _ => {} // DECnet, Chaos, etc. — not matched

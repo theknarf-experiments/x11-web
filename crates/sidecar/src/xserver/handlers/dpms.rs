@@ -9,7 +9,8 @@ use crate::xserver::core::require_len;
 pub(crate) fn handle_dpms_request(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
     let minor = data[1];
     match minor {
-        0 => { // GetVersion
+        0 => {
+            // GetVersion
             let mut reply = [0u8; 32];
             reply[0] = 1;
             state.write_u16(&mut reply, 2, seq);
@@ -17,14 +18,16 @@ pub(crate) fn handle_dpms_request(state: &mut ClientState, data: &[u8], seq: u16
             state.write_u16(&mut reply, 10, 2); // minor
             reply.to_vec()
         }
-        1 => { // Capable
+        1 => {
+            // Capable
             let mut reply = [0u8; 32];
             reply[0] = 1;
             state.write_u16(&mut reply, 2, seq);
             reply[8] = 1; // capable = true
             reply.to_vec()
         }
-        2 => { // GetTimeouts
+        2 => {
+            // GetTimeouts
             let mut reply = [0u8; 32];
             reply[0] = 1;
             state.write_u16(&mut reply, 2, seq);
@@ -33,7 +36,8 @@ pub(crate) fn handle_dpms_request(state: &mut ClientState, data: &[u8], seq: u16
             state.write_u16(&mut reply, 12, state.dpms_off_timeout);
             reply.to_vec()
         }
-        3 => { // SetTimeouts
+        3 => {
+            // SetTimeouts
             require_len!(data, 10, seq, 151, minor as u16, state.msb_first);
             state.dpms_standby_timeout = state.read_u16(data, 4);
             state.dpms_suspend_timeout = state.read_u16(data, 6);
@@ -44,40 +48,52 @@ pub(crate) fn handle_dpms_request(state: &mut ClientState, data: &[u8], seq: u16
             );
             Vec::new()
         }
-        4 => { // Enable
+        4 => {
+            // Enable
             state.dpms_enabled = true;
             debug!("DPMS Enable");
             Vec::new()
         }
-        5 => { // Disable
+        5 => {
+            // Disable
             state.dpms_enabled = false;
             state.dpms_power_level = 0; // reset to On when disabled
             debug!("DPMS Disable");
             Vec::new()
         }
-        6 => { // ForceLevel
+        6 => {
+            // ForceLevel
             require_len!(data, 6, seq, 151, minor as u16, state.msb_first);
             let level = state.read_u16(data, 4);
             // Per DPMS spec: level must be 0-3 (On, Standby, Suspend, Off)
             if level > 3 {
                 return crate::xserver::core::build_error_bo(
-                    crate::xserver::core::BAD_VALUE, seq, level as u32,
-                    151, minor as u16, state.msb_first,
+                    crate::xserver::core::BAD_VALUE,
+                    seq,
+                    level as u32,
+                    151,
+                    minor as u16,
+                    state.msb_first,
                 );
             }
             // Per DPMS spec: ForceLevel should fail if DPMS is disabled
             // and the requested level is not DPMSModeOn (0)
             if !state.dpms_enabled && level != 0 {
                 return crate::xserver::core::build_error_bo(
-                    crate::xserver::core::BAD_VALUE, seq, level as u32,
-                    151, minor as u16, state.msb_first,
+                    crate::xserver::core::BAD_VALUE,
+                    seq,
+                    level as u32,
+                    151,
+                    minor as u16,
+                    state.msb_first,
                 );
             }
             state.dpms_power_level = level;
             debug!("DPMS ForceLevel: level={level}");
             Vec::new()
         }
-        7 => { // Info
+        7 => {
+            // Info
             let mut reply = [0u8; 32];
             reply[0] = 1;
             state.write_u16(&mut reply, 2, seq);
@@ -88,8 +104,12 @@ pub(crate) fn handle_dpms_request(state: &mut ClientState, data: &[u8], seq: u16
         _ => {
             debug!("DPMS: unhandled minor opcode {minor}");
             crate::xserver::core::build_error_bo(
-                crate::xserver::core::BAD_REQUEST, seq, minor as u32,
-                151, minor as u16, state.msb_first,
+                crate::xserver::core::BAD_REQUEST,
+                seq,
+                minor as u32,
+                151,
+                minor as u16,
+                state.msb_first,
             )
         }
     }

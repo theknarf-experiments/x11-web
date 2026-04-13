@@ -4,16 +4,16 @@
 //! re-exports everything at the module root so existing `use super::types::*`
 //! imports continue to work unchanged.
 
+mod colormap;
+mod control;
+mod cursor;
+mod gc;
+mod pixmap;
+mod randr;
+mod region;
 mod routing;
 mod selection;
 mod window;
-mod colormap;
-mod gc;
-mod pixmap;
-mod region;
-mod cursor;
-mod control;
-mod randr;
 
 // Re-export everything so callers can still do `use super::types::*`.
 pub use routing::*;
@@ -21,15 +21,15 @@ pub(crate) use routing::{
     EventBroadcaster, EventRouter, ServerGrabLock, SharedWindows, WindowMessage,
 };
 
-pub(crate) use selection::*;
-pub(crate) use window::*;
 pub(crate) use colormap::*;
+pub(crate) use control::*;
+pub(crate) use cursor::*;
 pub(crate) use gc::*;
 pub(crate) use pixmap::*;
-pub(crate) use region::*;
-pub(crate) use cursor::*;
-pub(crate) use control::*;
 pub(crate) use randr::*;
+pub(crate) use region::*;
+pub(crate) use selection::*;
+pub(crate) use window::*;
 
 #[cfg(test)]
 mod tests {
@@ -48,19 +48,28 @@ mod tests {
     #[test]
     fn gc_state_default_plane_mask_is_all_ones() {
         let gc = GcState::default();
-        assert_eq!(gc.plane_mask, 0xFFFF_FFFF, "default plane_mask must be all ones");
+        assert_eq!(
+            gc.plane_mask, 0xFFFF_FFFF,
+            "default plane_mask must be all ones"
+        );
     }
 
     #[test]
     fn gc_state_default_foreground_is_black() {
         let gc = GcState::default();
-        assert_eq!(gc.foreground, 0x00_00_00, "default foreground must be black (0x000000)");
+        assert_eq!(
+            gc.foreground, 0x00_00_00,
+            "default foreground must be black (0x000000)"
+        );
     }
 
     #[test]
     fn gc_state_default_background_is_white() {
         let gc = GcState::default();
-        assert_eq!(gc.background, 0xFF_FF_FF, "default background must be white (0xFFFFFF)");
+        assert_eq!(
+            gc.background, 0xFF_FF_FF,
+            "default background must be white (0xFFFFFF)"
+        );
     }
 
     #[test]
@@ -122,13 +131,19 @@ mod tests {
     #[test]
     fn gc_state_default_subwindow_mode_is_clip_by_children() {
         let gc = GcState::default();
-        assert_eq!(gc.subwindow_mode, 0, "default subwindow_mode must be ClipByChildren (0)");
+        assert_eq!(
+            gc.subwindow_mode, 0,
+            "default subwindow_mode must be ClipByChildren (0)"
+        );
     }
 
     #[test]
     fn gc_state_default_graphics_exposures_is_true() {
         let gc = GcState::default();
-        assert!(gc.graphics_exposures, "default graphics_exposures must be true");
+        assert!(
+            gc.graphics_exposures,
+            "default graphics_exposures must be true"
+        );
     }
 
     #[test]
@@ -180,14 +195,24 @@ mod tests {
 
     #[test]
     fn point_in_shape_inside() {
-        let rects = vec![RegionRect { x: 10, y: 10, width: 100, height: 100 }];
+        let rects = vec![RegionRect {
+            x: 10,
+            y: 10,
+            width: 100,
+            height: 100,
+        }];
         assert!(point_in_shape(&rects, 50, 50));
-        assert!(point_in_shape(&rects, 10, 10));  // top-left corner (inclusive)
+        assert!(point_in_shape(&rects, 10, 10)); // top-left corner (inclusive)
     }
 
     #[test]
     fn point_in_shape_outside() {
-        let rects = vec![RegionRect { x: 10, y: 10, width: 100, height: 100 }];
+        let rects = vec![RegionRect {
+            x: 10,
+            y: 10,
+            width: 100,
+            height: 100,
+        }];
         // Right edge is exclusive: x < r.x + r.width => x < 110
         assert!(!point_in_shape(&rects, 110, 50));
         assert!(!point_in_shape(&rects, 50, 110));
@@ -203,8 +228,18 @@ mod tests {
     #[test]
     fn point_in_shape_multiple_rects() {
         let rects = vec![
-            RegionRect { x: 0, y: 0, width: 10, height: 10 },
-            RegionRect { x: 100, y: 100, width: 10, height: 10 },
+            RegionRect {
+                x: 0,
+                y: 0,
+                width: 10,
+                height: 10,
+            },
+            RegionRect {
+                x: 100,
+                y: 100,
+                width: 10,
+                height: 10,
+            },
         ];
         assert!(point_in_shape(&rects, 5, 5));
         assert!(point_in_shape(&rects, 105, 105));
@@ -227,7 +262,12 @@ mod tests {
 
     #[test]
     fn region_extents_single_rect() {
-        let r = XFixesRegion::from_rects(vec![RegionRect { x: 5, y: 10, width: 20, height: 30 }]);
+        let r = XFixesRegion::from_rects(vec![RegionRect {
+            x: 5,
+            y: 10,
+            width: 20,
+            height: 30,
+        }]);
         let ext = r.extents();
         assert_eq!(ext.x, 5);
         assert_eq!(ext.y, 10);
@@ -238,8 +278,18 @@ mod tests {
     #[test]
     fn region_extents_multiple_rects() {
         let r = XFixesRegion::from_rects(vec![
-            RegionRect { x: 0, y: 0, width: 10, height: 10 },
-            RegionRect { x: 20, y: 20, width: 10, height: 10 },
+            RegionRect {
+                x: 0,
+                y: 0,
+                width: 10,
+                height: 10,
+            },
+            RegionRect {
+                x: 20,
+                y: 20,
+                width: 10,
+                height: 10,
+            },
         ]);
         let ext = r.extents();
         // Bounding box: x=0, y=0, right=30, bottom=30 => width=30, height=30
@@ -251,16 +301,36 @@ mod tests {
 
     #[test]
     fn region_union() {
-        let a = XFixesRegion::from_rects(vec![RegionRect { x: 0, y: 0, width: 10, height: 10 }]);
-        let b = XFixesRegion::from_rects(vec![RegionRect { x: 20, y: 20, width: 5, height: 5 }]);
+        let a = XFixesRegion::from_rects(vec![RegionRect {
+            x: 0,
+            y: 0,
+            width: 10,
+            height: 10,
+        }]);
+        let b = XFixesRegion::from_rects(vec![RegionRect {
+            x: 20,
+            y: 20,
+            width: 5,
+            height: 5,
+        }]);
         let u = a.union(&b);
         assert_eq!(u.rects.len(), 2);
     }
 
     #[test]
     fn region_intersect_overlapping() {
-        let a = XFixesRegion::from_rects(vec![RegionRect { x: 0, y: 0, width: 20, height: 20 }]);
-        let b = XFixesRegion::from_rects(vec![RegionRect { x: 10, y: 10, width: 20, height: 20 }]);
+        let a = XFixesRegion::from_rects(vec![RegionRect {
+            x: 0,
+            y: 0,
+            width: 20,
+            height: 20,
+        }]);
+        let b = XFixesRegion::from_rects(vec![RegionRect {
+            x: 10,
+            y: 10,
+            width: 20,
+            height: 20,
+        }]);
         let i = a.intersect(&b);
         assert_eq!(i.rects.len(), 1);
         assert_eq!(i.rects[0].x, 10);
@@ -271,15 +341,33 @@ mod tests {
 
     #[test]
     fn region_intersect_non_overlapping() {
-        let a = XFixesRegion::from_rects(vec![RegionRect { x: 0, y: 0, width: 10, height: 10 }]);
-        let b = XFixesRegion::from_rects(vec![RegionRect { x: 20, y: 20, width: 10, height: 10 }]);
+        let a = XFixesRegion::from_rects(vec![RegionRect {
+            x: 0,
+            y: 0,
+            width: 10,
+            height: 10,
+        }]);
+        let b = XFixesRegion::from_rects(vec![RegionRect {
+            x: 20,
+            y: 20,
+            width: 10,
+            height: 10,
+        }]);
         let i = a.intersect(&b);
-        assert!(i.rects.is_empty(), "non-overlapping regions have empty intersection");
+        assert!(
+            i.rects.is_empty(),
+            "non-overlapping regions have empty intersection"
+        );
     }
 
     #[test]
     fn region_translate() {
-        let mut r = XFixesRegion::from_rects(vec![RegionRect { x: 5, y: 10, width: 20, height: 30 }]);
+        let mut r = XFixesRegion::from_rects(vec![RegionRect {
+            x: 5,
+            y: 10,
+            width: 20,
+            height: 30,
+        }]);
         r.translate(15, -5);
         assert_eq!(r.rects[0].x, 20);
         assert_eq!(r.rects[0].y, 5);
@@ -341,7 +429,10 @@ mod tests {
             allocated: vec![true; n], // read-only: all pre-allocated
             next_free: n,
         };
-        assert!(!cm.is_writable(), "StaticColor colormap must not be writable");
+        assert!(
+            !cm.is_writable(),
+            "StaticColor colormap must not be writable"
+        );
         assert_eq!(cm.visual_class, 2);
         // All pre-allocated (read-only)
         assert!(cm.allocated.iter().all(|&a| a));
@@ -358,7 +449,9 @@ mod tests {
     #[test]
     fn colormap_pseudocolor_alloc_and_lookup() {
         let mut cm = ColormapState::new_pseudocolor(0x21, 256);
-        let pixel = cm.alloc_color(0xFFFF, 0x0000, 0x0000).expect("alloc must succeed");
+        let pixel = cm
+            .alloc_color(0xFFFF, 0x0000, 0x0000)
+            .expect("alloc must succeed");
         let (r, g, b) = cm.lookup(pixel);
         assert_eq!(r, 0xFFFF);
         assert_eq!(g, 0x0000);
@@ -426,14 +519,21 @@ mod tests {
     #[test]
     fn edid_has_correct_header() {
         let edid = generate_edid(527, 296, 1920, 1080);
-        assert_eq!(&edid[0..8], &[0x00, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x00]);
+        assert_eq!(
+            &edid[0..8],
+            &[0x00, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x00]
+        );
     }
 
     #[test]
     fn edid_checksum_valid() {
         let edid = generate_edid(527, 296, 1920, 1080);
         let sum: u32 = edid.iter().map(|&b| b as u32).sum();
-        assert_eq!(sum % 256, 0, "EDID checksum must make all 128 bytes sum to 0 mod 256");
+        assert_eq!(
+            sum % 256,
+            0,
+            "EDID checksum must make all 128 bytes sum to 0 mod 256"
+        );
     }
 
     #[test]
@@ -449,49 +549,109 @@ mod tests {
 
     #[test]
     fn region_subtract_no_overlap() {
-        let a = XFixesRegion::from_rects(vec![RegionRect { x: 0, y: 0, width: 10, height: 10 }]);
-        let b = XFixesRegion::from_rects(vec![RegionRect { x: 20, y: 20, width: 10, height: 10 }]);
+        let a = XFixesRegion::from_rects(vec![RegionRect {
+            x: 0,
+            y: 0,
+            width: 10,
+            height: 10,
+        }]);
+        let b = XFixesRegion::from_rects(vec![RegionRect {
+            x: 20,
+            y: 20,
+            width: 10,
+            height: 10,
+        }]);
         let s = a.subtract(&b);
-        assert_eq!(s.rects.len(), 1, "subtracting non-overlapping region should keep original");
+        assert_eq!(
+            s.rects.len(),
+            1,
+            "subtracting non-overlapping region should keep original"
+        );
         assert_eq!(s.rects[0].x, 0);
         assert_eq!(s.rects[0].width, 10);
     }
 
     #[test]
     fn region_subtract_full_overlap() {
-        let a = XFixesRegion::from_rects(vec![RegionRect { x: 5, y: 5, width: 10, height: 10 }]);
-        let b = XFixesRegion::from_rects(vec![RegionRect { x: 0, y: 0, width: 100, height: 100 }]);
+        let a = XFixesRegion::from_rects(vec![RegionRect {
+            x: 5,
+            y: 5,
+            width: 10,
+            height: 10,
+        }]);
+        let b = XFixesRegion::from_rects(vec![RegionRect {
+            x: 0,
+            y: 0,
+            width: 100,
+            height: 100,
+        }]);
         let s = a.subtract(&b);
-        assert!(s.rects.is_empty(), "subtracting encompassing region should yield empty");
+        assert!(
+            s.rects.is_empty(),
+            "subtracting encompassing region should yield empty"
+        );
     }
 
     #[test]
     fn region_subtract_partial_creates_fragments() {
-        let a = XFixesRegion::from_rects(vec![RegionRect { x: 0, y: 0, width: 20, height: 20 }]);
-        let b = XFixesRegion::from_rects(vec![RegionRect { x: 5, y: 5, width: 10, height: 10 }]);
+        let a = XFixesRegion::from_rects(vec![RegionRect {
+            x: 0,
+            y: 0,
+            width: 20,
+            height: 20,
+        }]);
+        let b = XFixesRegion::from_rects(vec![RegionRect {
+            x: 5,
+            y: 5,
+            width: 10,
+            height: 10,
+        }]);
         let s = a.subtract(&b);
         // Should create 4 fragments: top, left, right, bottom strips
-        assert!(s.rects.len() >= 3, "subtracting center should create at least 3 fragments, got {}", s.rects.len());
+        assert!(
+            s.rects.len() >= 3,
+            "subtracting center should create at least 3 fragments, got {}",
+            s.rects.len()
+        );
         // The combined area should equal 20*20 - 10*10 = 300
-        let total_area: i32 = s.rects.iter()
+        let total_area: i32 = s
+            .rects
+            .iter()
             .map(|r| r.width as i32 * r.height as i32)
             .sum();
-        assert_eq!(total_area, 300, "area after subtraction must be 300 (400 - 100)");
+        assert_eq!(
+            total_area, 300,
+            "area after subtraction must be 300 (400 - 100)"
+        );
     }
 
     #[test]
     fn region_invert_empty() {
         let empty = XFixesRegion::new();
-        let bounds = RegionRect { x: 0, y: 0, width: 100, height: 100 };
+        let bounds = RegionRect {
+            x: 0,
+            y: 0,
+            width: 100,
+            height: 100,
+        };
         let inv = empty.invert(&bounds);
-        assert_eq!(inv.rects.len(), 1, "inverting empty region should yield the bounding rect");
+        assert_eq!(
+            inv.rects.len(),
+            1,
+            "inverting empty region should yield the bounding rect"
+        );
         assert_eq!(inv.rects[0].width, 100);
         assert_eq!(inv.rects[0].height, 100);
     }
 
     #[test]
     fn region_expand_increases_extents() {
-        let r = XFixesRegion::from_rects(vec![RegionRect { x: 10, y: 10, width: 20, height: 20 }]);
+        let r = XFixesRegion::from_rects(vec![RegionRect {
+            x: 10,
+            y: 10,
+            width: 20,
+            height: 20,
+        }]);
         let expanded = r.expand(5, 5, 5, 5);
         assert_eq!(expanded.rects.len(), 1);
         assert_eq!(expanded.rects[0].x, 5);
@@ -513,7 +673,10 @@ mod tests {
         assert!(cm.alloc_color(0x0000, 0x0000, 0xFF00).is_some());
         assert!(cm.alloc_color(0xFF00, 0xFF00, 0x0000).is_some());
         // 5th distinct color should fail (all 4 cells used)
-        assert!(cm.alloc_color(0x0000, 0xFF00, 0xFF00).is_none(), "allocation must fail when all cells used");
+        assert!(
+            cm.alloc_color(0x0000, 0xFF00, 0xFF00).is_none(),
+            "allocation must fail when all cells used"
+        );
     }
 
     #[test]
@@ -528,10 +691,14 @@ mod tests {
     fn colormap_staticgray_find_closest() {
         let cm = ColormapState::new_staticgray(0x25, 16);
         let mut cm = cm; // alloc_color needs &mut self
-        // Allocate a mid-gray — should pick the closest entry
+                         // Allocate a mid-gray — should pick the closest entry
         let pixel = cm.alloc_color(0x8000, 0x8000, 0x8000).unwrap();
         // Pixel should be near the middle of the 16-entry ramp
-        assert!(pixel >= 6 && pixel <= 9, "closest match for 0x8000 in 16-entry ramp should be near index 8, got {}", pixel);
+        assert!(
+            pixel >= 6 && pixel <= 9,
+            "closest match for 0x8000 in 16-entry ramp should be near index 8, got {}",
+            pixel
+        );
     }
 
     #[test]
@@ -540,7 +707,10 @@ mod tests {
         // Pixel 0x804020: R channel index 0x80, G index 0x40, B index 0x20
         let (r, g, b) = cm.lookup(0x804020);
         // Each channel should be looked up independently in the identity ramp
-        assert!(r > 0 && g > 0 && b > 0, "DirectColor lookup must return non-zero for non-zero indices");
+        assert!(
+            r > 0 && g > 0 && b > 0,
+            "DirectColor lookup must return non-zero for non-zero indices"
+        );
         assert!(r > g && g > b, "R > G > B for pixel 0x804020");
     }
 
@@ -688,23 +858,43 @@ mod tests {
         WindowState {
             id,
             parent,
-            x: 0, y: 0, width: 100, height: 100,
-            border_width: 0, visual: 0x21, depth: 24, class: 1,
-            mapped: false, event_mask: 0, do_not_propagate_mask: 0,
-            background_pixel: 0, background_pixmap: None,
-            border_pixel: 0, border_pixmap: None,
-            override_redirect: false, redirected: false,
+            x: 0,
+            y: 0,
+            width: 100,
+            height: 100,
+            border_width: 0,
+            visual: 0x21,
+            depth: 24,
+            class: 1,
+            mapped: false,
+            event_mask: 0,
+            do_not_propagate_mask: 0,
+            background_pixel: 0,
+            background_pixmap: None,
+            border_pixel: 0,
+            border_pixmap: None,
+            override_redirect: false,
+            redirected: false,
             framebuffer: Framebuffer::new(100, 100),
             properties: std::collections::HashMap::new(),
             owner_client_id: String::new(),
-            cursor: None, children_order: Vec::new(),
+            cursor: None,
+            children_order: Vec::new(),
             retained_temporary: false,
-            bounding_shape: None, clip_shape: None, input_shape: None,
+            bounding_shape: None,
+            clip_shape: None,
+            input_shape: None,
             shape_select_clients: Vec::new(),
-            colormap: 0, backing_store: 0, backing_planes: 0xFFFFFFFF,
-            backing_pixel: 0, save_under: false, visibility: 0,
-            backing_pixmap: None, wm_hints_initial_state: None,
-            transient_for: None, sync_request_counter: None,
+            colormap: 0,
+            backing_store: 0,
+            backing_planes: 0xFFFFFFFF,
+            backing_pixel: 0,
+            save_under: false,
+            visibility: 0,
+            backing_pixmap: None,
+            wm_hints_initial_state: None,
+            transient_for: None,
+            sync_request_counter: None,
             sync_request_value: 0,
             window_type: super::WindowType::Normal,
             strut: None,
@@ -774,14 +964,26 @@ mod tests {
 
     #[test]
     fn window_type_dialog_same_layer_as_normal() {
-        assert_eq!(WindowType::Dialog.stacking_layer(), WindowType::Normal.stacking_layer());
+        assert_eq!(
+            WindowType::Dialog.stacking_layer(),
+            WindowType::Normal.stacking_layer()
+        );
     }
 
     #[test]
     fn window_type_tooltip_notification_same_top_layer() {
-        assert_eq!(WindowType::Tooltip.stacking_layer(), WindowType::Notification.stacking_layer());
-        assert_eq!(WindowType::Tooltip.stacking_layer(), WindowType::PopupMenu.stacking_layer());
-        assert_eq!(WindowType::Tooltip.stacking_layer(), WindowType::DropdownMenu.stacking_layer());
+        assert_eq!(
+            WindowType::Tooltip.stacking_layer(),
+            WindowType::Notification.stacking_layer()
+        );
+        assert_eq!(
+            WindowType::Tooltip.stacking_layer(),
+            WindowType::PopupMenu.stacking_layer()
+        );
+        assert_eq!(
+            WindowType::Tooltip.stacking_layer(),
+            WindowType::DropdownMenu.stacking_layer()
+        );
     }
 
     #[test]
@@ -936,9 +1138,12 @@ mod tests {
 
     #[test]
     fn region_from_single_rect() {
-        let r = XFixesRegion::from_rects(vec![
-            region::RegionRect { x: 0, y: 0, width: 100, height: 100 },
-        ]);
+        let r = XFixesRegion::from_rects(vec![region::RegionRect {
+            x: 0,
+            y: 0,
+            width: 100,
+            height: 100,
+        }]);
         assert_eq!(r.rects.len(), 1);
         assert_eq!(r.rects[0].x, 0);
         assert_eq!(r.rects[0].width, 100);
@@ -946,9 +1151,12 @@ mod tests {
 
     #[test]
     fn region_extents_from_constructed_rect() {
-        let r = XFixesRegion::from_rects(vec![
-            region::RegionRect { x: 10, y: 20, width: 30, height: 40 },
-        ]);
+        let r = XFixesRegion::from_rects(vec![region::RegionRect {
+            x: 10,
+            y: 20,
+            width: 30,
+            height: 40,
+        }]);
         let ext = r.extents();
         assert_eq!(ext.x, 10);
         assert_eq!(ext.y, 20);
@@ -959,8 +1167,18 @@ mod tests {
     #[test]
     fn region_extents_bounding_box_from_overlapping() {
         let r = XFixesRegion::from_rects(vec![
-            region::RegionRect { x: 0, y: 0, width: 50, height: 50 },
-            region::RegionRect { x: 30, y: 30, width: 50, height: 50 },
+            region::RegionRect {
+                x: 0,
+                y: 0,
+                width: 50,
+                height: 50,
+            },
+            region::RegionRect {
+                x: 30,
+                y: 30,
+                width: 50,
+                height: 50,
+            },
         ]);
         let ext = r.extents();
         assert_eq!(ext.x, 0);

@@ -21,7 +21,7 @@ pub(crate) fn handle_randr_request(state: &mut ClientState, data: &[u8], seq: u1
             let mut reply = [0u8; 32];
             reply[0] = 1;
             state.write_u16(&mut reply, 2, seq);
-            state.write_u32(&mut reply, 8, 1);  // major version
+            state.write_u32(&mut reply, 8, 1); // major version
             state.write_u32(&mut reply, 12, 5); // minor version
             reply.to_vec()
         }
@@ -39,13 +39,12 @@ pub(crate) fn handle_randr_request(state: &mut ClientState, data: &[u8], seq: u1
             let _rotation = state.read_u16(data, 18);
 
             // Check config timestamp — if it doesn't match, reply InvalidConfigTime
-            let status = if config_timestamp != 0
-                && config_timestamp != state.randr_config_timestamp
-            {
-                2 // InvalidConfigTime
-            } else {
-                0 // Success
-            };
+            let status =
+                if config_timestamp != 0 && config_timestamp != state.randr_config_timestamp {
+                    2 // InvalidConfigTime
+                } else {
+                    0 // Success
+                };
 
             let mut reply = [0u8; 32];
             reply[0] = 1;
@@ -112,8 +111,12 @@ pub(crate) fn handle_randr_request(state: &mut ClientState, data: &[u8], seq: u1
         _ => {
             info!("Unhandled RANDR minor opcode: {minor}");
             crate::xserver::core::build_error_bo(
-                crate::xserver::core::BAD_REQUEST, seq, minor as u32,
-                140, minor as u16, state.msb_first,
+                crate::xserver::core::BAD_REQUEST,
+                seq,
+                minor as u32,
+                140,
+                minor as u16,
+                state.msb_first,
             )
         }
     }

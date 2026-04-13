@@ -56,8 +56,8 @@ pub(crate) fn handle_query_font(state: &mut ClientState, data: &[u8], seq: u16) 
     let fontable = state.read_u32(data, 4);
 
     // fontable can be a font ID or a GC ID (containing a font)
-    let is_valid_fontable = state.font_manager.get_font(fontable).is_some()
-        || state.gcs.contains_key(&fontable);
+    let is_valid_fontable =
+        state.font_manager.get_font(fontable).is_some() || state.gcs.contains_key(&fontable);
 
     if !is_valid_fontable {
         return build_error(BAD_FONT, seq, fontable, 47, 0);
@@ -86,35 +86,35 @@ pub(crate) fn handle_query_font(state: &mut ClientState, data: &[u8], seq: u16) 
             state.write_u16(&mut reply, 2, seq);
             state.write_u32(&mut reply, 4, ((reply_len - 32) / 4) as u32);
             // min_bounds: lsb=0, rsb=6, width=6, ascent=10, descent=3
-            state.write_i16(&mut reply, 8, 0);   // min lsb
-            state.write_i16(&mut reply, 10, 6);   // min rsb
-            state.write_i16(&mut reply, 12, 6);   // min width
-            state.write_i16(&mut reply, 14, 10);  // min ascent
-            state.write_i16(&mut reply, 16, 3);   // min descent
-            // max_bounds (same for monospaced)
+            state.write_i16(&mut reply, 8, 0); // min lsb
+            state.write_i16(&mut reply, 10, 6); // min rsb
+            state.write_i16(&mut reply, 12, 6); // min width
+            state.write_i16(&mut reply, 14, 10); // min ascent
+            state.write_i16(&mut reply, 16, 3); // min descent
+                                                // max_bounds (same for monospaced)
             state.write_i16(&mut reply, 24, 0);
             state.write_i16(&mut reply, 26, 6);
             state.write_i16(&mut reply, 28, 6);
             state.write_i16(&mut reply, 30, 10);
             state.write_i16(&mut reply, 32, 3);
-            state.write_u16(&mut reply, 40, 32u16);  // min_char_or_byte2
+            state.write_u16(&mut reply, 40, 32u16); // min_char_or_byte2
             state.write_u16(&mut reply, 42, 126u16); // max_char_or_byte2
-            state.write_u16(&mut reply, 44, 32u16);  // default_char
-            state.write_u16(&mut reply, 46, 0u16);   // n_properties
-            reply[48] = 0;   // draw_direction = LeftToRight
-            reply[51] = 1;   // all_chars_exist
-            state.write_i16(&mut reply, 52, 10i16);  // font_ascent
-            state.write_i16(&mut reply, 54, 3i16);   // font_descent
+            state.write_u16(&mut reply, 44, 32u16); // default_char
+            state.write_u16(&mut reply, 46, 0u16); // n_properties
+            reply[48] = 0; // draw_direction = LeftToRight
+            reply[51] = 1; // all_chars_exist
+            state.write_i16(&mut reply, 52, 10i16); // font_ascent
+            state.write_i16(&mut reply, 54, 3i16); // font_descent
             state.write_u32(&mut reply, 56, n_char_infos);
             // Fill per-character info (all same for monospaced fallback)
             let mut off = 60;
             for _ in 0..n_char_infos {
-                state.write_i16(&mut reply, off, 0);      // lsb
-                state.write_i16(&mut reply, off + 2, 6);   // rsb
-                state.write_i16(&mut reply, off + 4, 6);   // width
-                state.write_i16(&mut reply, off + 6, 10);  // ascent
-                state.write_i16(&mut reply, off + 8, 3);   // descent
-                state.write_u16(&mut reply, off + 10, 0);  // attributes
+                state.write_i16(&mut reply, off, 0); // lsb
+                state.write_i16(&mut reply, off + 2, 6); // rsb
+                state.write_i16(&mut reply, off + 4, 6); // width
+                state.write_i16(&mut reply, off + 6, 10); // ascent
+                state.write_i16(&mut reply, off + 8, 3); // descent
+                state.write_u16(&mut reply, off + 10, 0); // attributes
                 off += 12;
             }
             return reply;
@@ -139,7 +139,7 @@ pub(crate) fn handle_query_font(state: &mut ClientState, data: &[u8], seq: u16) 
         };
         let spacing = match xlfd_parts[11].to_uppercase().as_str() {
             "M" | "C" => 1, // Monospaced / Cell
-            "P" => 2, // Proportional
+            "P" => 2,       // Proportional
             _ => 1,
         };
         let avg_w = xlfd_parts[12].parse::<i32>().unwrap_or(char_width * 10);
@@ -308,7 +308,13 @@ pub(crate) fn handle_query_text_extents(state: &mut ClientState, data: &[u8], se
         if pos > right {
             right = pos;
         }
-        (font.font_ascent, font.font_descent, width as i16, left as i16, right as i16)
+        (
+            font.font_ascent,
+            font.font_descent,
+            width as i16,
+            left as i16,
+            right as i16,
+        )
     } else {
         (12i16, 4i16, 0i16, 0i16, 0i16)
     };
@@ -368,7 +374,11 @@ pub(crate) fn handle_list_fonts(state: &mut ClientState, data: &[u8], seq: u16) 
 // Opcode 50: ListFontsWithInfo
 // ---------------------------------------------------------------------------
 
-pub(crate) fn handle_list_fonts_with_info(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
+pub(crate) fn handle_list_fonts_with_info(
+    state: &mut ClientState,
+    data: &[u8],
+    seq: u16,
+) -> Vec<u8> {
     // Parse request: max_names(2) + pattern_length(2) + pattern(variable)
     require_len!(data, 8, seq, 50);
     let max_names = state.read_u16(data, 4);

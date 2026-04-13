@@ -1,7 +1,7 @@
 //! RandR data model: CRTCs, outputs, modes, providers, monitors, and EDID generation.
 
-use std::collections::HashMap;
 use super::window::PropertyValue;
+use std::collections::HashMap;
 
 /// RandR CRTC (a display controller that drives an output).
 #[derive(Clone, Debug)]
@@ -26,7 +26,9 @@ pub(crate) struct RandrCrtc {
 impl RandrCrtc {
     /// Create a default CRTC with a linear gamma ramp.
     pub(crate) fn new(id: u32, width: u16, height: u16, mode_id: u32, output_id: u32) -> Self {
-        let gamma: Vec<u16> = (0..256).map(|i| ((i as u32 * 65535) / 255) as u16).collect();
+        let gamma: Vec<u16> = (0..256)
+            .map(|i| ((i as u32 * 65535) / 255) as u16)
+            .collect();
         Self {
             id,
             x: 0,
@@ -146,7 +148,12 @@ pub(crate) const RR_CRTC_CHANGE_NOTIFY_MASK: u32 = 1 << 1;
 pub(crate) const RR_OUTPUT_CHANGE_NOTIFY_MASK: u32 = 1 << 2;
 
 /// Generate a minimal valid EDID blob (128 bytes).
-pub(crate) fn generate_edid(width_mm: u16, height_mm: u16, width_px: u16, height_px: u16) -> Vec<u8> {
+pub(crate) fn generate_edid(
+    width_mm: u16,
+    height_mm: u16,
+    width_px: u16,
+    height_px: u16,
+) -> Vec<u8> {
     let mut edid = vec![0u8; 128];
     // Header
     edid[0..8].copy_from_slice(&[0x00, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x00]);
@@ -207,7 +214,7 @@ pub(crate) fn generate_edid(width_mm: u16, height_mm: u16, width_px: u16, height
     edid[63] = 40;
     // V sync offset (4 bits) : V sync width (4 bits)
     edid[64] = 0x36; // offset=3, width=6
-    // Upper bits of sync
+                     // Upper bits of sync
     edid[65] = 0x00;
     // Image size mm
     edid[66] = (width_mm & 0xFF) as u8;

@@ -62,11 +62,23 @@ fn convert_nv12_to_fb(
     let uv_height = height.div_ceil(2);
     let uv_size = uv_offset + uv_stride * uv_height;
 
-    let y_fd = if !fds.is_empty() && fds[0] >= 0 { fds[0] } else { return; };
-    let uv_fd = if fds.len() > 1 && fds[1] >= 0 { fds[1] } else { y_fd };
+    let y_fd = if !fds.is_empty() && fds[0] >= 0 {
+        fds[0]
+    } else {
+        return;
+    };
+    let uv_fd = if fds.len() > 1 && fds[1] >= 0 {
+        fds[1]
+    } else {
+        y_fd
+    };
 
     let y_buf = read_fd_buffer(y_fd, y_size);
-    let uv_buf = if uv_fd == y_fd { y_buf.clone() } else { read_fd_buffer(uv_fd, uv_size) };
+    let uv_buf = if uv_fd == y_fd {
+        y_buf.clone()
+    } else {
+        read_fd_buffer(uv_fd, uv_size)
+    };
 
     if y_buf.is_empty() {
         return;
@@ -117,12 +129,28 @@ fn convert_yv12_to_fb(
     let v_size = v_offset + v_stride * half_h;
     let u_size = u_offset + u_stride * half_h;
 
-    let y_fd = if !fds.is_empty() && fds[0] >= 0 { fds[0] } else { return; };
-    let v_fd = if fds.len() > 1 && fds[1] >= 0 { fds[1] } else { y_fd };
-    let u_fd = if fds.len() > 2 && fds[2] >= 0 { fds[2] } else { v_fd };
+    let y_fd = if !fds.is_empty() && fds[0] >= 0 {
+        fds[0]
+    } else {
+        return;
+    };
+    let v_fd = if fds.len() > 1 && fds[1] >= 0 {
+        fds[1]
+    } else {
+        y_fd
+    };
+    let u_fd = if fds.len() > 2 && fds[2] >= 0 {
+        fds[2]
+    } else {
+        v_fd
+    };
 
     let y_buf = read_fd_buffer(y_fd, y_size);
-    let v_buf = if v_fd == y_fd { y_buf.clone() } else { read_fd_buffer(v_fd, v_size) };
+    let v_buf = if v_fd == y_fd {
+        y_buf.clone()
+    } else {
+        read_fd_buffer(v_fd, v_size)
+    };
     let u_buf = if u_fd == y_fd {
         y_buf.clone()
     } else if u_fd == v_fd {
@@ -175,7 +203,11 @@ fn convert_yuy2_to_fb(
     // YUY2 is packed: 2 bytes per pixel, so stride >= width * 2
     let read_size = offset0 + stride0 * height;
 
-    let fd = if !fds.is_empty() && fds[0] >= 0 { fds[0] } else { return; };
+    let fd = if !fds.is_empty() && fds[0] >= 0 {
+        fds[0]
+    } else {
+        return;
+    };
     let buf = read_fd_buffer(fd, read_size);
     if buf.is_empty() {
         return;
@@ -302,13 +334,15 @@ pub(crate) fn handle_buffer_from_pixmap(
     debug!("DRI3 BufferFromPixmap: pid={pixmap_id:#x}");
 
     let (width, height, depth, data_bytes) = if let Some(pix) = state.pixmaps.get(&pixmap_id) {
-        (pix.width, pix.height, pix.depth, pix.framebuffer.data().to_vec())
+        (
+            pix.width,
+            pix.height,
+            pix.depth,
+            pix.framebuffer.data().to_vec(),
+        )
     } else {
         warn!("DRI3 BufferFromPixmap: unknown pixmap {pixmap_id:#x}");
-        return build_error_bo(
-            BAD_PIXMAP, seq, pixmap_id,
-            DRI3_MAJOR_OPCODE, 3, bo,
-        );
+        return build_error_bo(BAD_PIXMAP, seq, pixmap_id, DRI3_MAJOR_OPCODE, 3, bo);
     };
 
     // Create a memfd and write the pixmap data into it
@@ -329,10 +363,7 @@ pub(crate) fn handle_buffer_from_pixmap(
 
     if fd < 0 {
         warn!("DRI3 BufferFromPixmap: memfd_create failed");
-        return build_error_bo(
-            BAD_ALLOC, seq, pixmap_id,
-            DRI3_MAJOR_OPCODE, 3, bo,
-        );
+        return build_error_bo(BAD_ALLOC, seq, pixmap_id, DRI3_MAJOR_OPCODE, 3, bo);
     }
 
     state.reply_fds.push(fd);
@@ -387,7 +418,9 @@ pub(crate) fn handle_pixmap_from_buffers(
     if data.len() < 52 {
         // Drain any pending fds
         for fd in state.pending_fds.drain(..) {
-            unsafe { libc::close(fd); }
+            unsafe {
+                libc::close(fd);
+            }
         }
         return build_error_bo(BAD_LENGTH, seq, 0, DRI3_MAJOR_OPCODE, minor as u16, bo);
     }
@@ -413,7 +446,11 @@ pub(crate) fn handle_pixmap_from_buffers(
 
     let depth = data[48];
     let _bpp = data[49];
-    let fourcc = if data.len() > 53 { read_u32_bo(data, 50, bo) } else { 0 };
+    let fourcc = if data.len() > 53 {
+        read_u32_bo(data, 50, bo)
+    } else {
+        0
+    };
     let num_buffers = if data.len() > 62 { data[62] } else { 1 };
 
     debug!(
@@ -469,9 +506,10 @@ pub(crate) fn handle_pixmap_from_buffers(
                         for row in 0..h {
                             let src_start = offset0 + row * stride0;
                             let dst_start = row * dst_stride;
-                            let copy_len = dst_stride.min(stride0).min(
-                                buf.len().saturating_sub(src_start)
-                            ).min(dst.len().saturating_sub(dst_start));
+                            let copy_len = dst_stride
+                                .min(stride0)
+                                .min(buf.len().saturating_sub(src_start))
+                                .min(dst.len().saturating_sub(dst_start));
                             if copy_len > 0 && src_start + copy_len <= buf.len() {
                                 dst[dst_start..dst_start + copy_len]
                                     .copy_from_slice(&buf[src_start..src_start + copy_len]);
@@ -488,7 +526,9 @@ pub(crate) fn handle_pixmap_from_buffers(
     // Close all fds
     for fd in &fds {
         if *fd >= 0 {
-            unsafe { libc::close(*fd); }
+            unsafe {
+                libc::close(*fd);
+            }
         }
     }
 
@@ -523,13 +563,15 @@ pub(crate) fn handle_buffers_from_pixmap(
     debug!("DRI3 BuffersFromPixmap: pid={pixmap_id:#x}");
 
     let (width, height, depth, data_bytes) = if let Some(pix) = state.pixmaps.get(&pixmap_id) {
-        (pix.width, pix.height, pix.depth, pix.framebuffer.data().to_vec())
+        (
+            pix.width,
+            pix.height,
+            pix.depth,
+            pix.framebuffer.data().to_vec(),
+        )
     } else {
         warn!("DRI3 BuffersFromPixmap: unknown pixmap {pixmap_id:#x}");
-        return build_error_bo(
-            BAD_PIXMAP, seq, pixmap_id,
-            DRI3_MAJOR_OPCODE, 8, bo,
-        );
+        return build_error_bo(BAD_PIXMAP, seq, pixmap_id, DRI3_MAJOR_OPCODE, 8, bo);
     };
 
     // Create a memfd with the pixmap data (single plane)
@@ -550,10 +592,7 @@ pub(crate) fn handle_buffers_from_pixmap(
 
     if fd < 0 {
         warn!("DRI3 BuffersFromPixmap: memfd_create failed");
-        return build_error_bo(
-            BAD_ALLOC, seq, pixmap_id,
-            DRI3_MAJOR_OPCODE, 8, bo,
-        );
+        return build_error_bo(BAD_ALLOC, seq, pixmap_id, DRI3_MAJOR_OPCODE, 8, bo);
     }
 
     state.reply_fds.push(fd);
@@ -576,7 +615,7 @@ pub(crate) fn handle_buffers_from_pixmap(
     reply[20] = depth;
     reply[21] = bpp;
     reply[22] = 1; // num_buffers
-    // Extra data: stride0 (4 bytes) + offset0 (4 bytes)
+                   // Extra data: stride0 (4 bytes) + offset0 (4 bytes)
     write_u32_bo(&mut reply, 32, stride, bo);
     write_u32_bo(&mut reply, 36, 0, bo); // offset = 0
     reply

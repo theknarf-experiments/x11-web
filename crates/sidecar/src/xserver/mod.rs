@@ -5,9 +5,9 @@
 
 pub(crate) mod atoms;
 pub(crate) mod client;
+pub(crate) mod connection;
 #[allow(dead_code)]
 pub(crate) mod core;
-pub(crate) mod connection;
 mod dispatch;
 #[allow(dead_code)]
 pub(crate) mod grab;
@@ -22,13 +22,10 @@ pub use types::{TaggedDisplayUpdate, WindowRouter};
 // Re-exports used by render.rs and other sibling modules
 pub(crate) use client::ClientState;
 // Re-exports from input.rs for grab.rs
-pub(crate) use input::{
-    CROSSING_MODE_GRAB, CROSSING_MODE_UNGRAB,
-};
+pub(crate) use input::{CROSSING_MODE_GRAB, CROSSING_MODE_UNGRAB};
 // Re-exports from split-out modules
-pub(crate) use window_tree::{ancestor_chain, is_descendant_of, compute_visibility};
 use dispatch::handle_request;
-
+pub(crate) use window_tree::{ancestor_chain, compute_visibility, is_descendant_of};
 
 use std::collections::HashMap;
 use std::io;
@@ -189,8 +186,10 @@ impl X11Server {
         let shared_gcs: types::SharedGcs = Arc::new(Mutex::new(HashMap::new()));
         let client_registry: types::SharedClientRegistry = Arc::new(Mutex::new(Vec::new()));
         let event_broadcaster = types::EventBroadcaster::new();
-        let server_grab: types::ServerGrabLock = Arc::new((tokio::sync::Mutex::new(None), tokio::sync::Notify::new()));
-        let shared_record_contexts: types::SharedRecordContexts = Arc::new(Mutex::new(HashMap::new()));
+        let server_grab: types::ServerGrabLock =
+            Arc::new((tokio::sync::Mutex::new(None), tokio::sync::Notify::new()));
+        let shared_record_contexts: types::SharedRecordContexts =
+            Arc::new(Mutex::new(HashMap::new()));
 
         // Pre-populate with root window
         {
@@ -198,10 +197,8 @@ impl X11Server {
             let mut root_properties: HashMap<u32, PropertyValue> = HashMap::new();
 
             let mut atoms_lock = shared_atoms.lock().unwrap();
-            let atom_shows_menubar =
-                atoms_lock.intern("_GTK_SHELL_SHOWS_MENUBAR", false);
-            let atom_shows_app_menu =
-                atoms_lock.intern("_GTK_SHELL_SHOWS_APP_MENU", false);
+            let atom_shows_menubar = atoms_lock.intern("_GTK_SHELL_SHOWS_MENUBAR", false);
+            let atom_shows_app_menu = atoms_lock.intern("_GTK_SHELL_SHOWS_APP_MENU", false);
 
             let cardinal_one = 1u32.to_le_bytes().to_vec();
             for atom in [atom_shows_menubar, atom_shows_app_menu] {
@@ -322,66 +319,90 @@ impl X11Server {
             atoms_lock.intern("XdndActionPrivate", false);
             atoms_lock.intern("XdndSelection", false);
             atoms_lock.intern("XdndProxy", false);
-            let supported_data: Vec<u8> = supported_atoms.iter().flat_map(|a| a.to_le_bytes()).collect();
-            root_properties.insert(net_supported_atom, PropertyValue {
-                prop_type: 4, // ATOM
-                format: 32,
-                data: supported_data,
-            });
+            let supported_data: Vec<u8> = supported_atoms
+                .iter()
+                .flat_map(|a| a.to_le_bytes())
+                .collect();
+            root_properties.insert(
+                net_supported_atom,
+                PropertyValue {
+                    prop_type: 4, // ATOM
+                    format: 32,
+                    data: supported_data,
+                },
+            );
 
             // _NET_SUPPORTING_WM_CHECK: points to a dedicated child window (EWMH spec).
             // Both root and the check window carry this property; the check window
             // also carries _NET_WM_NAME = "x11-web".
             let net_supporting = atoms_lock.intern("_NET_SUPPORTING_WM_CHECK", false);
-            root_properties.insert(net_supporting, PropertyValue {
-                prop_type: 33, // WINDOW
-                format: 32,
-                data: WM_CHECK_WINDOW.to_le_bytes().to_vec(),
-            });
+            root_properties.insert(
+                net_supporting,
+                PropertyValue {
+                    prop_type: 33, // WINDOW
+                    format: 32,
+                    data: WM_CHECK_WINDOW.to_le_bytes().to_vec(),
+                },
+            );
 
             // _NET_WM_NAME on root
             let net_wm_name = atoms_lock.intern("_NET_WM_NAME", false);
             let utf8_string = atoms_lock.intern("UTF8_STRING", false);
-            root_properties.insert(net_wm_name, PropertyValue {
-                prop_type: utf8_string,
-                format: 8,
-                data: b"x11-web".to_vec(),
-            });
+            root_properties.insert(
+                net_wm_name,
+                PropertyValue {
+                    prop_type: utf8_string,
+                    format: 8,
+                    data: b"x11-web".to_vec(),
+                },
+            );
 
             // _NET_NUMBER_OF_DESKTOPS = 1
             let net_num_desktops = atoms_lock.intern("_NET_NUMBER_OF_DESKTOPS", false);
-            root_properties.insert(net_num_desktops, PropertyValue {
-                prop_type: 6, // CARDINAL
-                format: 32,
-                data: 1u32.to_le_bytes().to_vec(),
-            });
+            root_properties.insert(
+                net_num_desktops,
+                PropertyValue {
+                    prop_type: 6, // CARDINAL
+                    format: 32,
+                    data: 1u32.to_le_bytes().to_vec(),
+                },
+            );
 
             // _NET_CURRENT_DESKTOP = 0
             let net_cur_desktop = atoms_lock.intern("_NET_CURRENT_DESKTOP", false);
-            root_properties.insert(net_cur_desktop, PropertyValue {
-                prop_type: 6,
-                format: 32,
-                data: 0u32.to_le_bytes().to_vec(),
-            });
+            root_properties.insert(
+                net_cur_desktop,
+                PropertyValue {
+                    prop_type: 6,
+                    format: 32,
+                    data: 0u32.to_le_bytes().to_vec(),
+                },
+            );
 
             // _NET_DESKTOP_GEOMETRY
             let net_desktop_geom = atoms_lock.intern("_NET_DESKTOP_GEOMETRY", false);
             let mut geom_data = Vec::new();
             geom_data.extend_from_slice(&(SCREEN_WIDTH as u32).to_le_bytes());
             geom_data.extend_from_slice(&(SCREEN_HEIGHT as u32).to_le_bytes());
-            root_properties.insert(net_desktop_geom, PropertyValue {
-                prop_type: 6,
-                format: 32,
-                data: geom_data,
-            });
+            root_properties.insert(
+                net_desktop_geom,
+                PropertyValue {
+                    prop_type: 6,
+                    format: 32,
+                    data: geom_data,
+                },
+            );
 
             // _NET_DESKTOP_VIEWPORT = (0, 0)
             let net_desktop_vp = atoms_lock.intern("_NET_DESKTOP_VIEWPORT", false);
-            root_properties.insert(net_desktop_vp, PropertyValue {
-                prop_type: 6,
-                format: 32,
-                data: vec![0; 8],
-            });
+            root_properties.insert(
+                net_desktop_vp,
+                PropertyValue {
+                    prop_type: 6,
+                    format: 32,
+                    data: vec![0; 8],
+                },
+            );
 
             // _NET_WORKAREA = (0, 0, SCREEN_WIDTH, SCREEN_HEIGHT)
             let net_workarea = atoms_lock.intern("_NET_WORKAREA", false);
@@ -390,88 +411,118 @@ impl X11Server {
             workarea.extend_from_slice(&0u32.to_le_bytes());
             workarea.extend_from_slice(&(SCREEN_WIDTH as u32).to_le_bytes());
             workarea.extend_from_slice(&(SCREEN_HEIGHT as u32).to_le_bytes());
-            root_properties.insert(net_workarea, PropertyValue {
-                prop_type: 6,
-                format: 32,
-                data: workarea,
-            });
+            root_properties.insert(
+                net_workarea,
+                PropertyValue {
+                    prop_type: 6,
+                    format: 32,
+                    data: workarea,
+                },
+            );
 
             // _NET_CLIENT_LIST = empty
             let net_client_list = atoms_lock.intern("_NET_CLIENT_LIST", false);
-            root_properties.insert(net_client_list, PropertyValue {
-                prop_type: 33, // WINDOW
-                format: 32,
-                data: Vec::new(),
-            });
+            root_properties.insert(
+                net_client_list,
+                PropertyValue {
+                    prop_type: 33, // WINDOW
+                    format: 32,
+                    data: Vec::new(),
+                },
+            );
 
             // _NET_CLIENT_LIST_STACKING = empty
             let net_client_list_stacking = atoms_lock.intern("_NET_CLIENT_LIST_STACKING", false);
-            root_properties.insert(net_client_list_stacking, PropertyValue {
-                prop_type: 33,
-                format: 32,
-                data: Vec::new(),
-            });
+            root_properties.insert(
+                net_client_list_stacking,
+                PropertyValue {
+                    prop_type: 33,
+                    format: 32,
+                    data: Vec::new(),
+                },
+            );
 
             // _NET_ACTIVE_WINDOW = 0 (none)
             let net_active = atoms_lock.intern("_NET_ACTIVE_WINDOW", false);
-            root_properties.insert(net_active, PropertyValue {
-                prop_type: 33,
-                format: 32,
-                data: 0u32.to_le_bytes().to_vec(),
-            });
+            root_properties.insert(
+                net_active,
+                PropertyValue {
+                    prop_type: 33,
+                    format: 32,
+                    data: 0u32.to_le_bytes().to_vec(),
+                },
+            );
 
             // _NET_DESKTOP_NAMES = "Desktop\0"
             let net_desktop_names = atoms_lock.intern("_NET_DESKTOP_NAMES", false);
-            root_properties.insert(net_desktop_names, PropertyValue {
-                prop_type: utf8_string,
-                format: 8,
-                data: b"Desktop\0".to_vec(),
-            });
+            root_properties.insert(
+                net_desktop_names,
+                PropertyValue {
+                    prop_type: utf8_string,
+                    format: 8,
+                    data: b"Desktop\0".to_vec(),
+                },
+            );
 
             // _XKB_RULES_NAMES — toolkit apps (GTK, Qt) read this to configure XKB.
             // Format: five null-terminated strings: rules, model, layout, variant, options
             let xkb_rules_atom = atoms_lock.intern("_XKB_RULES_NAMES", false);
             let xkb_rules_data = b"evdev\0pc105\0us\0\0\0".to_vec();
-            root_properties.insert(xkb_rules_atom, PropertyValue {
-                prop_type: 31, // STRING
-                format: 8,
-                data: xkb_rules_data,
-            });
+            root_properties.insert(
+                xkb_rules_atom,
+                PropertyValue {
+                    prop_type: 31, // STRING
+                    format: 8,
+                    data: xkb_rules_data,
+                },
+            );
 
             // _NET_WM_CM_S0 — advertise compositing manager (our server composites)
             let net_wm_cm_atom = atoms_lock.intern("_NET_WM_CM_S0", false);
-            root_properties.insert(net_wm_cm_atom, PropertyValue {
-                prop_type: 33, // WINDOW
-                format: 32,
-                data: ROOT_WINDOW.to_le_bytes().to_vec(),
-            });
+            root_properties.insert(
+                net_wm_cm_atom,
+                PropertyValue {
+                    prop_type: 33, // WINDOW
+                    format: 32,
+                    data: ROOT_WINDOW.to_le_bytes().to_vec(),
+                },
+            );
 
             // RESOURCE_MANAGER — toolkit configuration string read by Xt/GTK/Qt
             // This provides sensible defaults for font DPI and related settings.
             let resource_mgr_atom = atoms_lock.intern("RESOURCE_MANAGER", false);
             let resource_mgr_data = b"Xft.dpi:\t96\nXft.antialias:\t1\nXft.hinting:\t1\nXft.hintstyle:\thintslight\nXft.rgba:\trgb\n".to_vec();
-            root_properties.insert(resource_mgr_atom, PropertyValue {
-                prop_type: 31, // STRING
-                format: 8,
-                data: resource_mgr_data,
-            });
+            root_properties.insert(
+                resource_mgr_atom,
+                PropertyValue {
+                    prop_type: 31, // STRING
+                    format: 8,
+                    data: resource_mgr_data,
+                },
+            );
 
             // WM_CHECK_WINDOW properties: _NET_SUPPORTING_WM_CHECK points to itself,
             // _NET_WM_NAME = "x11-web" (required by EWMH spec).
             let mut wm_check_properties: HashMap<u32, PropertyValue> = HashMap::new();
             let net_supporting_wm_check = atoms_lock.intern("_NET_SUPPORTING_WM_CHECK", false);
-            wm_check_properties.insert(net_supporting_wm_check, PropertyValue {
-                prop_type: 33, // WINDOW
-                format: 32,
-                data: WM_CHECK_WINDOW.to_le_bytes().to_vec(),
-            });
+            wm_check_properties.insert(
+                net_supporting_wm_check,
+                PropertyValue {
+                    prop_type: 33, // WINDOW
+                    format: 32,
+                    data: WM_CHECK_WINDOW.to_le_bytes().to_vec(),
+                },
+            );
             let net_wm_name_atom = atoms_lock.intern("_NET_WM_NAME", false);
             let utf8_string_atom = atoms_lock.intern("UTF8_STRING", false);
-            wm_check_properties.insert(net_wm_name_atom, PropertyValue {
-                prop_type: utf8_string_atom,
-                format: 8,
-                data: b"x11-web".to_vec(),
-            });
+            wm_check_properties.insert(
+                net_wm_name_atom,
+                PropertyValue {
+                    prop_type: utf8_string_atom,
+                    format: 8,
+                    data: b"x11-web".to_vec(),
+                },
+            );
 
             drop(atoms_lock);
 
@@ -589,11 +640,14 @@ impl X11Server {
             {
                 let mut atoms_lock = shared_atoms.lock().unwrap();
                 let xsettings_settings_atom = atoms_lock.intern("_XSETTINGS_SETTINGS", false);
-                xsettings_properties.insert(xsettings_settings_atom, PropertyValue {
-                    prop_type: xsettings_settings_atom,
-                    format: 8,
-                    data: setup::build_xsettings_data(),
-                });
+                xsettings_properties.insert(
+                    xsettings_settings_atom,
+                    PropertyValue {
+                        prop_type: xsettings_settings_atom,
+                        format: 8,
+                        data: setup::build_xsettings_data(),
+                    },
+                );
             }
 
             windows.insert(
@@ -660,11 +714,15 @@ impl X11Server {
         {
             let (dummy_tx, _dummy_rx) = mpsc::unbounded_channel();
             if let Ok(mut sels) = shared_selections.lock() {
-                sels.insert(164, SelectionEntry { // 164 = _XSETTINGS_S0
-                    owner: XSETTINGS_WINDOW,
-                    event_tx: dummy_tx,
-                    timestamp: 0,
-                });
+                sels.insert(
+                    164,
+                    SelectionEntry {
+                        // 164 = _XSETTINGS_S0
+                        owner: XSETTINGS_WINDOW,
+                        event_tx: dummy_tx,
+                        timestamp: 0,
+                    },
+                );
             }
         }
 
@@ -675,11 +733,15 @@ impl X11Server {
         {
             let (mgr_tx, _mgr_rx) = mpsc::unbounded_channel();
             if let Ok(mut sels) = shared_selections.lock() {
-                sels.insert(179, SelectionEntry { // 179 = CLIPBOARD_MANAGER
-                    owner: types::CLIPBOARD_MANAGER_WINDOW,
-                    event_tx: mgr_tx,
-                    timestamp: 0,
-                });
+                sels.insert(
+                    179,
+                    SelectionEntry {
+                        // 179 = CLIPBOARD_MANAGER
+                        owner: types::CLIPBOARD_MANAGER_WINDOW,
+                        event_tx: mgr_tx,
+                        timestamp: 0,
+                    },
+                );
             }
         }
 
@@ -694,17 +756,23 @@ impl X11Server {
 
             let mut tray_properties: HashMap<u32, PropertyValue> = HashMap::new();
             // Orientation: 0 = horizontal
-            tray_properties.insert(tray_orientation_atom, PropertyValue {
-                prop_type: 6, // CARDINAL
-                format: 32,
-                data: 0u32.to_le_bytes().to_vec(),
-            });
+            tray_properties.insert(
+                tray_orientation_atom,
+                PropertyValue {
+                    prop_type: 6, // CARDINAL
+                    format: 32,
+                    data: 0u32.to_le_bytes().to_vec(),
+                },
+            );
             // Visual: advertise the 32-bit ARGB visual (0x40) for alpha-aware tray icons
-            tray_properties.insert(tray_visual_atom, PropertyValue {
-                prop_type: 32, // VISUALID
-                format: 32,
-                data: 0x40u32.to_le_bytes().to_vec(),
-            });
+            tray_properties.insert(
+                tray_visual_atom,
+                PropertyValue {
+                    prop_type: 32, // VISUALID
+                    format: 32,
+                    data: 0x40u32.to_le_bytes().to_vec(),
+                },
+            );
 
             let mut windows = shared_windows.lock().unwrap();
             windows.insert(
@@ -767,11 +835,15 @@ impl X11Server {
         {
             let (tray_tx, _tray_rx) = mpsc::unbounded_channel();
             if let Ok(mut sels) = shared_selections.lock() {
-                sels.insert(186, SelectionEntry { // 186 = _NET_SYSTEM_TRAY_S0
-                    owner: types::SYSTEM_TRAY_WINDOW,
-                    event_tx: tray_tx,
-                    timestamp: 0,
-                });
+                sels.insert(
+                    186,
+                    SelectionEntry {
+                        // 186 = _NET_SYSTEM_TRAY_S0
+                        owner: types::SYSTEM_TRAY_WINDOW,
+                        event_tx: tray_tx,
+                        timestamp: 0,
+                    },
+                );
             }
         }
 
@@ -787,16 +859,22 @@ impl X11Server {
 
             // XIM window properties: LOCALES and TRANSPORT
             let mut xim_properties: HashMap<u32, PropertyValue> = HashMap::new();
-            xim_properties.insert(locales_atom, PropertyValue {
-                prop_type: 31, // STRING
-                format: 8,
-                data: b"@locale=C,en,en_US,en_US.UTF-8,POSIX".to_vec(),
-            });
-            xim_properties.insert(transport_atom, PropertyValue {
-                prop_type: 31, // STRING
-                format: 8,
-                data: b"@transport=X/".to_vec(),
-            });
+            xim_properties.insert(
+                locales_atom,
+                PropertyValue {
+                    prop_type: 31, // STRING
+                    format: 8,
+                    data: b"@locale=C,en,en_US,en_US.UTF-8,POSIX".to_vec(),
+                },
+            );
+            xim_properties.insert(
+                transport_atom,
+                PropertyValue {
+                    prop_type: 31, // STRING
+                    format: 8,
+                    data: b"@transport=X/".to_vec(),
+                },
+            );
 
             let mut windows = shared_windows.lock().unwrap();
 
@@ -855,11 +933,14 @@ impl X11Server {
             // Set XIM_SERVERS property on root: list of server name atoms.
             if let Some(root) = windows.get_mut(&ROOT_WINDOW) {
                 root.children_order.push(XIM_WINDOW);
-                root.properties.insert(xim_servers_atom, PropertyValue {
-                    prop_type: 4, // ATOM
-                    format: 32,
-                    data: xim_server_name_atom.to_le_bytes().to_vec(),
-                });
+                root.properties.insert(
+                    xim_servers_atom,
+                    PropertyValue {
+                        prop_type: 4, // ATOM
+                        format: 32,
+                        data: xim_server_name_atom.to_le_bytes().to_vec(),
+                    },
+                );
             }
         }
 
@@ -911,8 +992,12 @@ impl X11Server {
                 let sst = self.shared_security_tokens.clone();
                 let stream = $stream;
                 tokio::spawn(async move {
-                    if let Err(e) =
-                        connection::handle_client(stream, client_id, update_tx, message_tx, message_rx, conn_index, peer_pid, sw, wm, sa, wr, mt, er, ss, cn, sc, sp, spf, sg, cr, eb, sgl, src, pc, ac, ssr, sacl, sst).await
+                    if let Err(e) = connection::handle_client(
+                        stream, client_id, update_tx, message_tx, message_rx, conn_index, peer_pid,
+                        sw, wm, sa, wr, mt, er, ss, cn, sc, sp, spf, sg, cr, eb, sgl, src, pc, ac,
+                        ssr, sacl, sst,
+                    )
+                    .await
                     {
                         debug!("X11 client {cid} disconnected: {e}");
                     }
@@ -980,8 +1065,3 @@ impl Drop for X11Server {
         let _ = std::fs::remove_file(&self.socket_path);
     }
 }
-
-
-
-
-

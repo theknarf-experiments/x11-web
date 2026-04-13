@@ -49,7 +49,9 @@ pub(crate) fn handle_query_best_size(state: &ClientState, data: &[u8], seq: u16)
 
 /// Round up to the nearest power of two, with a minimum of 1.
 fn next_power_of_two(v: u16) -> u16 {
-    if v == 0 { return 1; }
+    if v == 0 {
+        return 1;
+    }
     let v32 = v as u32;
     (v32.next_power_of_two() as u16).max(1)
 }
@@ -244,7 +246,34 @@ pub(crate) fn handle_query_extension(_state: &mut ClientState, data: &[u8], seq:
 // ---------------------------------------------------------------------------
 
 pub(crate) fn handle_list_extensions(state: &ClientState, seq: u16) -> Vec<u8> {
-    let extensions: &[&str] = &["BIG-REQUESTS", "MIT-SHM", "RENDER", "XFIXES", "SHAPE", "SYNC", "Generic Event Extension", "XC-MISC", "Composite", "DAMAGE", "Present", "RANDR", "XInputExtension", "XKEYBOARD", "XTEST", "DPMS", "MIT-SCREEN-SAVER", "XFree86-VidModeExtension", "RECORD", "SECURITY", "XVideo", "DOUBLE-BUFFER", "XINERAMA", "GLX", "DRI3", "X-Resource"];
+    let extensions: &[&str] = &[
+        "BIG-REQUESTS",
+        "MIT-SHM",
+        "RENDER",
+        "XFIXES",
+        "SHAPE",
+        "SYNC",
+        "Generic Event Extension",
+        "XC-MISC",
+        "Composite",
+        "DAMAGE",
+        "Present",
+        "RANDR",
+        "XInputExtension",
+        "XKEYBOARD",
+        "XTEST",
+        "DPMS",
+        "MIT-SCREEN-SAVER",
+        "XFree86-VidModeExtension",
+        "RECORD",
+        "SECURITY",
+        "XVideo",
+        "DOUBLE-BUFFER",
+        "XINERAMA",
+        "GLX",
+        "DRI3",
+        "X-Resource",
+    ];
 
     let mut names_data = Vec::new();
     for ext in extensions {

@@ -5,9 +5,8 @@ use tracing::debug;
 
 use super::super::super::client::ClientState;
 use super::{
-    CapturedFrame,
-    FOURCC_I420, FOURCC_NV12, FOURCC_NV21, FOURCC_RGB3, FOURCC_RV32,
-    FOURCC_UYVY, FOURCC_Y800, FOURCC_YUY2, FOURCC_YV12, FOURCC_YV16,
+    CapturedFrame, FOURCC_I420, FOURCC_NV12, FOURCC_NV21, FOURCC_RGB3, FOURCC_RV32, FOURCC_UYVY,
+    FOURCC_Y800, FOURCC_YUY2, FOURCC_YV12, FOURCC_YV16,
 };
 
 // ---------------------------------------------------------------------------
@@ -17,7 +16,13 @@ use super::{
 /// Clamp an i32 to the 0..255 range and return as u8.
 #[inline(always)]
 fn clamp_u8(v: i32) -> u8 {
-    if v < 0 { 0 } else if v > 255 { 255 } else { v as u8 }
+    if v < 0 {
+        0
+    } else if v > 255 {
+        255
+    } else {
+        v as u8
+    }
 }
 
 /// Convert a single YUV pixel to (R, G, B) using BT.601 coefficients.
@@ -63,18 +68,17 @@ type YuvToRgb = fn(u8, u8, u8) -> (u8, u8, u8);
 
 /// Select the conversion function based on colorspace.
 fn select_converter(colorspace: i32) -> YuvToRgb {
-    if colorspace == 1 { yuv_to_rgb_bt709 } else { yuv_to_rgb_bt601 }
+    if colorspace == 1 {
+        yuv_to_rgb_bt709
+    } else {
+        yuv_to_rgb_bt601
+    }
 }
 
 /// Convert I420 (planar YUV 4:2:0) data to ARGB32.
 ///
 /// Layout: Y plane (width * height), U plane (width/2 * height/2), V plane (width/2 * height/2).
-fn convert_i420_to_argb(
-    yuv: &[u8],
-    width: u32,
-    height: u32,
-    conv: YuvToRgb,
-) -> Vec<u8> {
+fn convert_i420_to_argb(yuv: &[u8], width: u32, height: u32, conv: YuvToRgb) -> Vec<u8> {
     let w = width as usize;
     let h = height as usize;
     let y_size = w * h;
@@ -99,7 +103,7 @@ fn convert_i420_to_argb(
             let v = v_plane[uv_row * uv_stride + uv_col];
             let (r, g, b) = conv(y, u, v);
             let off = (row * w + col) * 4;
-            argb[off] = b;     // B
+            argb[off] = b; // B
             argb[off + 1] = g; // G
             argb[off + 2] = r; // R
             argb[off + 3] = 0xFF; // A
@@ -111,12 +115,7 @@ fn convert_i420_to_argb(
 /// Convert YV12 (planar YUV 4:2:0, V before U) data to ARGB32.
 ///
 /// Layout: Y plane (width * height), V plane (width/2 * height/2), U plane (width/2 * height/2).
-fn convert_yv12_to_argb(
-    yuv: &[u8],
-    width: u32,
-    height: u32,
-    conv: YuvToRgb,
-) -> Vec<u8> {
+fn convert_yv12_to_argb(yuv: &[u8], width: u32, height: u32, conv: YuvToRgb) -> Vec<u8> {
     let w = width as usize;
     let h = height as usize;
     let y_size = w * h;
@@ -154,12 +153,7 @@ fn convert_yv12_to_argb(
 /// Convert YUY2 (packed YUV 4:2:2) data to ARGB32.
 ///
 /// Layout: [Y0, U0, Y1, V0] repeated. Each 4-byte macro-pixel encodes 2 horizontal pixels.
-fn convert_yuy2_to_argb(
-    yuv: &[u8],
-    width: u32,
-    height: u32,
-    conv: YuvToRgb,
-) -> Vec<u8> {
+fn convert_yuy2_to_argb(yuv: &[u8], width: u32, height: u32, conv: YuvToRgb) -> Vec<u8> {
     let w = width as usize;
     let h = height as usize;
     let src_stride = w * 2; // 2 bytes per pixel (16bpp packed)
@@ -214,12 +208,7 @@ fn convert_yuy2_to_argb(
 /// Convert UYVY (packed YUV 4:2:2, alternate byte order) data to ARGB32.
 ///
 /// Layout: [U0, Y0, V0, Y1] repeated. Each 4-byte macro-pixel encodes 2 horizontal pixels.
-fn convert_uyvy_to_argb(
-    yuv: &[u8],
-    width: u32,
-    height: u32,
-    conv: YuvToRgb,
-) -> Vec<u8> {
+fn convert_uyvy_to_argb(yuv: &[u8], width: u32, height: u32, conv: YuvToRgb) -> Vec<u8> {
     let w = width as usize;
     let h = height as usize;
     let src_stride = w * 2;
@@ -274,12 +263,7 @@ fn convert_uyvy_to_argb(
 /// Convert NV12 (semi-planar YUV 4:2:0, interleaved UV) data to ARGB32.
 ///
 /// Layout: Y plane (width * height), then interleaved UV pairs (width/2 * height/2 * 2 bytes).
-fn convert_nv12_to_argb(
-    data: &[u8],
-    width: u32,
-    height: u32,
-    conv: YuvToRgb,
-) -> Vec<u8> {
+fn convert_nv12_to_argb(data: &[u8], width: u32, height: u32, conv: YuvToRgb) -> Vec<u8> {
     let w = width as usize;
     let h = height as usize;
     let y_size = w * h;
@@ -317,12 +301,7 @@ fn convert_nv12_to_argb(
 ///
 /// Layout: Y plane (width * height), then interleaved VU pairs (width/2 * height/2 * 2 bytes).
 /// Same as NV12 but with V and U swapped in the interleaved plane.
-fn convert_nv21_to_argb(
-    data: &[u8],
-    width: u32,
-    height: u32,
-    conv: YuvToRgb,
-) -> Vec<u8> {
+fn convert_nv21_to_argb(data: &[u8], width: u32, height: u32, conv: YuvToRgb) -> Vec<u8> {
     let w = width as usize;
     let h = height as usize;
     let y_size = w * h;
@@ -360,12 +339,7 @@ fn convert_nv21_to_argb(
 ///
 /// Layout: Y plane (width * height), V plane (width/2 * height), U plane (width/2 * height).
 /// Like YV12 but chroma is subsampled only horizontally (not vertically).
-fn convert_yv16_to_argb(
-    data: &[u8],
-    width: u32,
-    height: u32,
-    conv: YuvToRgb,
-) -> Vec<u8> {
+fn convert_yv16_to_argb(data: &[u8], width: u32, height: u32, conv: YuvToRgb) -> Vec<u8> {
     let w = width as usize;
     let h = height as usize;
     let y_size = w * h;
@@ -402,11 +376,7 @@ fn convert_yv16_to_argb(
 /// Convert packed RGB24 (RGB3) data to ARGB32.
 ///
 /// Layout: 3 bytes per pixel [R, G, B] in row-major order.
-fn convert_rgb3_to_argb(
-    data: &[u8],
-    width: u32,
-    height: u32,
-) -> Vec<u8> {
+fn convert_rgb3_to_argb(data: &[u8], width: u32, height: u32) -> Vec<u8> {
     let w = width as usize;
     let h = height as usize;
     let src_stride = w * 3;
@@ -423,7 +393,7 @@ fn convert_rgb3_to_argb(
             let g = data[src_off + 1];
             let b = data[src_off + 2];
             let dst_off = (row * w + col) * 4;
-            argb[dst_off] = b;     // B
+            argb[dst_off] = b; // B
             argb[dst_off + 1] = g; // G
             argb[dst_off + 2] = r; // R
             argb[dst_off + 3] = 0xFF; // A
@@ -436,11 +406,7 @@ fn convert_rgb3_to_argb(
 ///
 /// Layout: 4 bytes per pixel [B, G, R, A] in row-major order.
 /// The input is BGRA which maps directly to our ARGB32 framebuffer format (BGRA in memory).
-fn convert_rv32_to_argb(
-    data: &[u8],
-    width: u32,
-    height: u32,
-) -> Vec<u8> {
+fn convert_rv32_to_argb(data: &[u8], width: u32, height: u32) -> Vec<u8> {
     let w = width as usize;
     let h = height as usize;
     let src_stride = w * 4;
@@ -461,11 +427,7 @@ fn convert_rv32_to_argb(
 /// Convert 8-bit grayscale (Y800/GREY) data to ARGB32.
 ///
 /// Layout: 1 byte per pixel (luma only). Each pixel is replicated to R=G=B=Y.
-fn convert_grey_to_argb(
-    data: &[u8],
-    width: u32,
-    height: u32,
-) -> Vec<u8> {
+fn convert_grey_to_argb(data: &[u8], width: u32, height: u32) -> Vec<u8> {
     let w = width as usize;
     let h = height as usize;
 
@@ -478,7 +440,7 @@ fn convert_grey_to_argb(
         for col in 0..w {
             let y = data[row * w + col];
             let off = (row * w + col) * 4;
-            argb[off] = y;     // B
+            argb[off] = y; // B
             argb[off + 1] = y; // G
             argb[off + 2] = y; // R
             argb[off + 3] = 0xFF; // A
@@ -530,12 +492,7 @@ fn rgb_to_yuv_bt601(r: u8, g: u8, b: u8) -> (u8, u8, u8) {
 /// Convert ARGB32 framebuffer data to the requested FOURCC format.
 /// Returns None if the format is not supported for export.
 #[allow(dead_code)]
-fn convert_argb_to_format(
-    argb: &[u8],
-    width: u32,
-    height: u32,
-    fourcc: u32,
-) -> Option<Vec<u8>> {
+fn convert_argb_to_format(argb: &[u8], width: u32, height: u32, fourcc: u32) -> Option<Vec<u8>> {
     match fourcc {
         FOURCC_I420 => Some(convert_argb_to_i420(argb, width, height)),
         FOURCC_YV12 => Some(convert_argb_to_yv12(argb, width, height)),
@@ -563,7 +520,9 @@ fn convert_argb_to_i420(argb: &[u8], width: u32, height: u32) -> Vec<u8> {
     for row in 0..height {
         for col in 0..width {
             let px = ((row * width + col) * 4) as usize;
-            if px + 3 >= argb.len() { break; }
+            if px + 3 >= argb.len() {
+                break;
+            }
             let (b, g, r) = (argb[px], argb[px + 1], argb[px + 2]);
             let (y, u, v) = rgb_to_yuv_bt601(r, g, b);
             out[(row * y_stride + col) as usize] = y;
@@ -585,12 +544,14 @@ fn convert_argb_to_yv12(argb: &[u8], width: u32, height: u32) -> Vec<u8> {
     let uv_stride = width.div_ceil(2);
     let y_size = y_stride * height;
     let uv_size = uv_stride * height.div_ceil(2);
-    let v_off = y_size as usize;           // YV12: V before U
+    let v_off = y_size as usize; // YV12: V before U
     let u_off = v_off + uv_size as usize;
     for row in 0..height {
         for col in 0..width {
             let px = ((row * width + col) * 4) as usize;
-            if px + 3 >= argb.len() { break; }
+            if px + 3 >= argb.len() {
+                break;
+            }
             let (b, g, r) = (argb[px], argb[px + 1], argb[px + 2]);
             let (y, u, v) = rgb_to_yuv_bt601(r, g, b);
             out[(row * y_stride + col) as usize] = y;
@@ -611,9 +572,21 @@ fn convert_argb_to_yuy2(argb: &[u8], width: u32, height: u32) -> Vec<u8> {
     for row in 0..height {
         for col in (0..width).step_by(2) {
             let px0 = ((row * width + col) * 4) as usize;
-            let px1 = if col + 1 < width { ((row * width + col + 1) * 4) as usize } else { px0 };
-            let (b0, g0, r0) = (argb.get(px0).copied().unwrap_or(0), argb.get(px0+1).copied().unwrap_or(0), argb.get(px0+2).copied().unwrap_or(0));
-            let (b1, g1, r1) = (argb.get(px1).copied().unwrap_or(0), argb.get(px1+1).copied().unwrap_or(0), argb.get(px1+2).copied().unwrap_or(0));
+            let px1 = if col + 1 < width {
+                ((row * width + col + 1) * 4) as usize
+            } else {
+                px0
+            };
+            let (b0, g0, r0) = (
+                argb.get(px0).copied().unwrap_or(0),
+                argb.get(px0 + 1).copied().unwrap_or(0),
+                argb.get(px0 + 2).copied().unwrap_or(0),
+            );
+            let (b1, g1, r1) = (
+                argb.get(px1).copied().unwrap_or(0),
+                argb.get(px1 + 1).copied().unwrap_or(0),
+                argb.get(px1 + 2).copied().unwrap_or(0),
+            );
             let (y0, u0, v0) = rgb_to_yuv_bt601(r0, g0, b0);
             let (y1, u1, v1) = rgb_to_yuv_bt601(r1, g1, b1);
             let u = ((u0 as u16 + u1 as u16) / 2) as u8;
@@ -636,9 +609,21 @@ fn convert_argb_to_uyvy(argb: &[u8], width: u32, height: u32) -> Vec<u8> {
     for row in 0..height {
         for col in (0..width).step_by(2) {
             let px0 = ((row * width + col) * 4) as usize;
-            let px1 = if col + 1 < width { ((row * width + col + 1) * 4) as usize } else { px0 };
-            let (b0, g0, r0) = (argb.get(px0).copied().unwrap_or(0), argb.get(px0+1).copied().unwrap_or(0), argb.get(px0+2).copied().unwrap_or(0));
-            let (b1, g1, r1) = (argb.get(px1).copied().unwrap_or(0), argb.get(px1+1).copied().unwrap_or(0), argb.get(px1+2).copied().unwrap_or(0));
+            let px1 = if col + 1 < width {
+                ((row * width + col + 1) * 4) as usize
+            } else {
+                px0
+            };
+            let (b0, g0, r0) = (
+                argb.get(px0).copied().unwrap_or(0),
+                argb.get(px0 + 1).copied().unwrap_or(0),
+                argb.get(px0 + 2).copied().unwrap_or(0),
+            );
+            let (b1, g1, r1) = (
+                argb.get(px1).copied().unwrap_or(0),
+                argb.get(px1 + 1).copied().unwrap_or(0),
+                argb.get(px1 + 2).copied().unwrap_or(0),
+            );
             let (y0, u0, v0) = rgb_to_yuv_bt601(r0, g0, b0);
             let (y1, u1, v1) = rgb_to_yuv_bt601(r1, g1, b1);
             let u = ((u0 as u16 + u1 as u16) / 2) as u8;
@@ -664,7 +649,9 @@ fn convert_argb_to_nv12(argb: &[u8], width: u32, height: u32) -> Vec<u8> {
     for row in 0..height {
         for col in 0..width {
             let px = ((row * width + col) * 4) as usize;
-            if px + 3 >= argb.len() { break; }
+            if px + 3 >= argb.len() {
+                break;
+            }
             let (b, g, r) = (argb[px], argb[px + 1], argb[px + 2]);
             let (y, u, v) = rgb_to_yuv_bt601(r, g, b);
             out[(row * y_stride + col) as usize] = y;
@@ -691,7 +678,9 @@ fn convert_argb_to_nv21(argb: &[u8], width: u32, height: u32) -> Vec<u8> {
     for row in 0..height {
         for col in 0..width {
             let px = ((row * width + col) * 4) as usize;
-            if px + 3 >= argb.len() { break; }
+            if px + 3 >= argb.len() {
+                break;
+            }
             let (b, g, r) = (argb[px], argb[px + 1], argb[px + 2]);
             let (y, u, v) = rgb_to_yuv_bt601(r, g, b);
             out[(row * y_stride + col) as usize] = y;
@@ -700,7 +689,7 @@ fn convert_argb_to_nv21(argb: &[u8], width: u32, height: u32) -> Vec<u8> {
                 let uv_col = col / 2;
                 let uv_off = y_size as usize + (uv_row * uv_stride + uv_col * 2) as usize;
                 if uv_off + 1 < out.len() {
-                    out[uv_off] = v;     // NV21: V before U
+                    out[uv_off] = v; // NV21: V before U
                     out[uv_off + 1] = u;
                 }
             }
@@ -721,7 +710,9 @@ fn convert_argb_to_yv16(argb: &[u8], width: u32, height: u32) -> Vec<u8> {
     for row in 0..height {
         for col in 0..width {
             let px = ((row * width + col) * 4) as usize;
-            if px + 3 >= argb.len() { break; }
+            if px + 3 >= argb.len() {
+                break;
+            }
             let (b, g, r) = (argb[px], argb[px + 1], argb[px + 2]);
             let (y, u, v) = rgb_to_yuv_bt601(r, g, b);
             out[(row * y_stride + col) as usize] = y;
@@ -740,7 +731,11 @@ fn convert_argb_to_rgb3(argb: &[u8], width: u32, height: u32) -> Vec<u8> {
     for row in 0..height {
         for col in 0..width {
             let px = ((row * width + col) * 4) as usize;
-            let (b, g, r) = (argb.get(px).copied().unwrap_or(0), argb.get(px+1).copied().unwrap_or(0), argb.get(px+2).copied().unwrap_or(0));
+            let (b, g, r) = (
+                argb.get(px).copied().unwrap_or(0),
+                argb.get(px + 1).copied().unwrap_or(0),
+                argb.get(px + 2).copied().unwrap_or(0),
+            );
             out.push(r);
             out.push(g);
             out.push(b);
@@ -766,7 +761,11 @@ fn convert_argb_to_grey(argb: &[u8], width: u32, height: u32) -> Vec<u8> {
     for row in 0..height {
         for col in 0..width {
             let px = ((row * width + col) * 4) as usize;
-            let (b, g, r) = (argb.get(px).copied().unwrap_or(0), argb.get(px+1).copied().unwrap_or(0), argb.get(px+2).copied().unwrap_or(0));
+            let (b, g, r) = (
+                argb.get(px).copied().unwrap_or(0),
+                argb.get(px + 1).copied().unwrap_or(0),
+                argb.get(px + 2).copied().unwrap_or(0),
+            );
             // Luma: Y = 0.299*R + 0.587*G + 0.114*B
             let y = ((77 * r as u32 + 150 * g as u32 + 29 * b as u32 + 128) >> 8) as u8;
             out.push(y);
@@ -785,7 +784,11 @@ fn query_image_attributes(fourcc: u32, width: u32, height: u32) -> (u32, [u32; 3
             let y_size = y_pitch * height;
             let uv_size = uv_pitch * height.div_ceil(2);
             let total = y_size + 2 * uv_size;
-            (total, [y_pitch, uv_pitch, uv_pitch], [0, y_size, y_size + uv_size])
+            (
+                total,
+                [y_pitch, uv_pitch, uv_pitch],
+                [0, y_size, y_size + uv_size],
+            )
         }
         FOURCC_YV12 => {
             let y_pitch = width;
@@ -794,7 +797,11 @@ fn query_image_attributes(fourcc: u32, width: u32, height: u32) -> (u32, [u32; 3
             let uv_size = uv_pitch * height.div_ceil(2);
             let total = y_size + 2 * uv_size;
             // YV12: V plane before U plane
-            (total, [y_pitch, uv_pitch, uv_pitch], [0, y_size, y_size + uv_size])
+            (
+                total,
+                [y_pitch, uv_pitch, uv_pitch],
+                [0, y_size, y_size + uv_size],
+            )
         }
         FOURCC_YUY2 | FOURCC_UYVY => {
             let pitch = width * 2;
@@ -815,7 +822,11 @@ fn query_image_attributes(fourcc: u32, width: u32, height: u32) -> (u32, [u32; 3
             let y_size = y_pitch * height;
             let uv_size = uv_pitch * height; // full height, half width
             let total = y_size + 2 * uv_size;
-            (total, [y_pitch, uv_pitch, uv_pitch], [0, y_size, y_size + uv_size])
+            (
+                total,
+                [y_pitch, uv_pitch, uv_pitch],
+                [0, y_size, y_size + uv_size],
+            )
         }
         FOURCC_RGB3 => {
             let pitch = width * 3;
@@ -837,13 +848,7 @@ fn query_image_attributes(fourcc: u32, width: u32, height: u32) -> (u32, [u32; 3
 }
 
 /// Scale ARGB32 pixel data from (src_w x src_h) to (dst_w x dst_h) using nearest-neighbor.
-fn scale_argb_nearest(
-    src: &[u8],
-    src_w: u32,
-    src_h: u32,
-    dst_w: u32,
-    dst_h: u32,
-) -> Vec<u8> {
+fn scale_argb_nearest(src: &[u8], src_w: u32, src_h: u32, dst_w: u32, dst_h: u32) -> Vec<u8> {
     if src_w == dst_w && src_h == dst_h {
         return src.to_vec();
     }
@@ -911,7 +916,13 @@ fn xv_put_image_impl(
     };
 
     // Scale if source and destination dimensions differ
-    let scaled = scale_argb_nearest(&argb, src_w as u32, src_h as u32, dst_w as u32, dst_h as u32);
+    let scaled = scale_argb_nearest(
+        &argb,
+        src_w as u32,
+        src_h as u32,
+        dst_w as u32,
+        dst_h as u32,
+    );
 
     xv_blit_to_drawable(state, drawable, &scaled, dst_x, dst_y, dst_w, dst_h);
 
@@ -928,34 +939,62 @@ pub(crate) fn handle_image_request(
     minor: u8,
 ) -> Vec<u8> {
     match minor {
-        5 => { // PutVideo — not supported (software adaptor has no video capture)
+        5 => {
+            // PutVideo — not supported (software adaptor has no video capture)
             // Per XVideo spec §4.3: return BadMatch for unsupported port operations.
-            let port = if data.len() >= 8 { state.read_u32(data, 4) } else { 0 };
+            let port = if data.len() >= 8 {
+                state.read_u32(data, 4)
+            } else {
+                0
+            };
             debug!("XVideo PutVideo: port={port} — returning BadMatch (capture not supported)");
             crate::xserver::core::build_error_bo(
-                crate::xserver::core::BAD_MATCH, seq, port,
-                156, minor as u16, state.msb_first,
+                crate::xserver::core::BAD_MATCH,
+                seq,
+                port,
+                156,
+                minor as u16,
+                state.msb_first,
             )
         }
-        6 => { // PutStill — not supported (software adaptor has no video capture)
+        6 => {
+            // PutStill — not supported (software adaptor has no video capture)
             // Per XVideo spec §4.4: return BadMatch for unsupported port operations.
-            let port = if data.len() >= 8 { state.read_u32(data, 4) } else { 0 };
+            let port = if data.len() >= 8 {
+                state.read_u32(data, 4)
+            } else {
+                0
+            };
             debug!("XVideo PutStill: port={port} — returning BadMatch (capture not supported)");
             crate::xserver::core::build_error_bo(
-                crate::xserver::core::BAD_MATCH, seq, port,
-                156, minor as u16, state.msb_first,
+                crate::xserver::core::BAD_MATCH,
+                seq,
+                port,
+                156,
+                minor as u16,
+                state.msb_first,
             )
         }
-        7 => { // GetVideo — not supported (software adaptor has no video capture output)
+        7 => {
+            // GetVideo — not supported (software adaptor has no video capture output)
             // Per XVideo spec §4.5: return BadMatch for unsupported port operations.
-            let port = if data.len() >= 8 { state.read_u32(data, 4) } else { 0 };
+            let port = if data.len() >= 8 {
+                state.read_u32(data, 4)
+            } else {
+                0
+            };
             debug!("XVideo GetVideo: port={port} — returning BadMatch (capture not supported)");
             crate::xserver::core::build_error_bo(
-                crate::xserver::core::BAD_MATCH, seq, port,
-                156, minor as u16, state.msb_first,
+                crate::xserver::core::BAD_MATCH,
+                seq,
+                port,
+                156,
+                minor as u16,
+                state.msb_first,
             )
         }
-        8 => { // GetStill — capture current pixels from a drawable region
+        8 => {
+            // GetStill — capture current pixels from a drawable region
             if data.len() < 32 {
                 return Vec::new();
             }
@@ -971,22 +1010,32 @@ pub(crate) fn handle_image_request(
             let drw_w = state.read_u16(data, 28);
             let drw_h = state.read_u16(data, 30);
 
-            debug!("XVideo GetStill: port={port} drawable={drawable:#x} gc={gc_id:#x} \
-                    vid=({vid_x},{vid_y} {vid_w}x{vid_h}) drw=({drw_x},{drw_y} {drw_w}x{drw_h})");
+            debug!(
+                "XVideo GetStill: port={port} drawable={drawable:#x} gc={gc_id:#x} \
+                    vid=({vid_x},{vid_y} {vid_w}x{vid_h}) drw=({drw_x},{drw_y} {drw_w}x{drw_h})"
+            );
 
             // Validate the drawable exists (window or pixmap).
             if !state.windows.contains_key(&drawable) && !state.pixmaps.contains_key(&drawable) {
                 return crate::xserver::core::build_error_bo(
-                    crate::xserver::core::BAD_DRAWABLE, seq, drawable,
-                    156, minor as u16, state.msb_first,
+                    crate::xserver::core::BAD_DRAWABLE,
+                    seq,
+                    drawable,
+                    156,
+                    minor as u16,
+                    state.msb_first,
                 );
             }
 
             // Validate the GC exists.
             if !state.gcs.contains_key(&gc_id) {
                 return crate::xserver::core::build_error_bo(
-                    crate::xserver::core::BAD_GC, seq, gc_id,
-                    156, minor as u16, state.msb_first,
+                    crate::xserver::core::BAD_GC,
+                    seq,
+                    gc_id,
+                    156,
+                    minor as u16,
+                    state.msb_first,
                 );
             }
 
@@ -1014,14 +1063,16 @@ pub(crate) fn handle_image_request(
             // GetStill is a void request — no reply is sent.
             Vec::new()
         }
-        12 => { // XvStopVideo
+        12 => {
+            // XvStopVideo
             if data.len() >= 8 {
                 let port = state.read_u32(data, 4);
                 debug!("XVideo StopVideo: port={port}");
             }
             Vec::new()
         }
-        16 => { // XvListImageFormats
+        16 => {
+            // XvListImageFormats
             // Report all supported formats
             let num_formats: u32 = 10;
             let extra_bytes = (num_formats * 128) as usize;
@@ -1034,9 +1085,17 @@ pub(crate) fn handle_image_request(
 
             // Helper to fill an ImageFormatInfo at a given offset
             // format_type: 1 = XvYUV, 0 = XvRGB
-            let fill_format = |reply: &mut Vec<u8>, idx: usize, fourcc: u32, name: &[u8; 4], bpp: u8,
-                               format_type: u32, num_planes: u32,
-                               horz_u: u32, vert_u: u32, horz_v: u32, vert_v: u32| {
+            let fill_format = |reply: &mut Vec<u8>,
+                               idx: usize,
+                               fourcc: u32,
+                               name: &[u8; 4],
+                               bpp: u8,
+                               format_type: u32,
+                               num_planes: u32,
+                               horz_u: u32,
+                               vert_u: u32,
+                               horz_v: u32,
+                               vert_v: u32| {
                 let off = 32 + idx * 128;
                 state.write_u32(&mut reply[off..], 0, fourcc);
                 state.write_u32(&mut reply[off..], 4, format_type);
@@ -1076,7 +1135,8 @@ pub(crate) fn handle_image_request(
 
             reply
         }
-        17 => { // XvQueryImageAttributes
+        17 => {
+            // XvQueryImageAttributes
             if data.len() >= 16 {
                 let _port = state.read_u32(data, 4);
                 let fourcc = state.read_u32(data, 8);
@@ -1120,7 +1180,8 @@ pub(crate) fn handle_image_request(
                 Vec::new()
             }
         }
-        18 => { // XvPutImage
+        18 => {
+            // XvPutImage
             // XvPutImage request layout:
             // [0]: major opcode
             // [1]: minor opcode (18)
@@ -1160,16 +1221,23 @@ pub(crate) fn handle_image_request(
 
                 // Use image dimensions for conversion, then scale to drw dimensions
                 xv_put_image_impl(
-                    state, drawable, port, fourcc,
+                    state,
+                    drawable,
+                    port,
+                    fourcc,
                     yuv_data,
                     if src_w > 0 { src_w } else { img_w },
                     if src_h > 0 { src_h } else { img_h },
-                    drw_x, drw_y, drw_w, drw_h,
+                    drw_x,
+                    drw_y,
+                    drw_w,
+                    drw_h,
                 );
             }
             Vec::new()
         }
-        19 => { // XvShmPutImage
+        19 => {
+            // XvShmPutImage
             // XvShmPutImage request layout:
             // [4..8]: port
             // [8..12]: drawable
@@ -1225,10 +1293,8 @@ pub(crate) fn handle_image_request(
                         };
 
                         xv_put_image_impl(
-                            state, drawable, port, fourcc,
-                            yuv_data,
-                            w, h,
-                            drw_x, drw_y, drw_w, drw_h,
+                            state, drawable, port, fourcc, yuv_data, w, h, drw_x, drw_y, drw_w,
+                            drw_h,
                         );
                     } else {
                         debug!("XVideo ShmPutImage: out of bounds (offset={offset} + size={data_size} > seg.size={})", seg.size);
@@ -1250,14 +1316,19 @@ pub(crate) fn handle_image_request(
             }
             Vec::new()
         }
-        20 => { // XvGetStill — not meaningful for software rendering, return void
+        20 => {
+            // XvGetStill — not meaningful for software rendering, return void
             Vec::new()
         }
         _ => {
             debug!("XVideo image: unhandled minor opcode {minor}");
             crate::xserver::core::build_error_bo(
-                crate::xserver::core::BAD_REQUEST, seq, minor as u32,
-                156, minor as u16, state.msb_first,
+                crate::xserver::core::BAD_REQUEST,
+                seq,
+                minor as u32,
+                156,
+                minor as u16,
+                state.msb_first,
             )
         }
     }

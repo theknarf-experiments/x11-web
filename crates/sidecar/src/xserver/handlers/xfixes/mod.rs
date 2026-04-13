@@ -1,8 +1,8 @@
 //! XFIXES extension handler.
 
+mod barrier;
 mod cursor;
 mod region;
-mod barrier;
 
 use tracing::debug;
 
@@ -28,9 +28,9 @@ pub(crate) fn handle_xfixes_request(state: &mut ClientState, data: &[u8], seq: u
         1 => {
             require_len!(data, 12, seq, 138, 1, state.msb_first);
             let window = state.read_u32(data, 4);
-            let mode   = data[8];
+            let mode = data[8];
             let _target = if data.len() > 9 { data[9] } else { 0 };
-            let _map    = if data.len() > 10 { data[10] } else { 0 };
+            let _map = if data.len() > 10 { data[10] } else { 0 };
 
             match mode {
                 0 => {
@@ -45,8 +45,12 @@ pub(crate) fn handle_xfixes_request(state: &mut ClientState, data: &[u8], seq: u
                 }
                 _ => {
                     return crate::xserver::core::build_error_bo(
-                        crate::xserver::core::BAD_VALUE, seq, mode as u32,
-                        138, 1, state.msb_first,
+                        crate::xserver::core::BAD_VALUE,
+                        seq,
+                        mode as u32,
+                        138,
+                        1,
+                        state.msb_first,
                     );
                 }
             }
@@ -62,7 +66,9 @@ pub(crate) fn handle_xfixes_request(state: &mut ClientState, data: &[u8], seq: u
                 let event_mask = state.read_u32(data, 12);
                 debug!("XFIXES SelectSelectionInput: window={window:#x} selection={selection:#x} mask={event_mask:#x}");
                 if event_mask != 0 {
-                    state.selection_event_subscribers.insert(selection, event_mask);
+                    state
+                        .selection_event_subscribers
+                        .insert(selection, event_mask);
                 } else {
                     state.selection_event_subscribers.remove(&selection);
                 }
@@ -111,8 +117,12 @@ pub(crate) fn handle_xfixes_request(state: &mut ClientState, data: &[u8], seq: u
         _ => {
             debug!("XFIXES: unhandled minor opcode {minor}");
             crate::xserver::core::build_error_bo(
-                crate::xserver::core::BAD_REQUEST, seq, minor as u32,
-                138, minor as u16, state.msb_first,
+                crate::xserver::core::BAD_REQUEST,
+                seq,
+                minor as u32,
+                138,
+                minor as u16,
+                state.msb_first,
             )
         }
     }

@@ -35,8 +35,7 @@ fn test_glyph_rendering() {
         for col in 0..h_glyph.width as usize {
             let byte_idx = row * row_bytes + col / 8;
             let bit_idx = 7 - (col % 8);
-            if byte_idx < h_glyph.bitmap.len() && (h_glyph.bitmap[byte_idx] >> bit_idx) & 1 != 0
-            {
+            if byte_idx < h_glyph.bitmap.len() && (h_glyph.bitmap[byte_idx] >> bit_idx) & 1 != 0 {
                 line.push('#');
                 has_pixel = true;
             } else {
@@ -263,14 +262,26 @@ fn open_and_close_font_id_lifecycle() {
 fn char_info_out_of_range_uses_default() {
     let font = BitmapFont {
         name: "test".to_string(),
-        min_bounds: CharInfo { character_width: 6, ..Default::default() },
-        max_bounds: CharInfo { character_width: 6, ..Default::default() },
+        min_bounds: CharInfo {
+            character_width: 6,
+            ..Default::default()
+        },
+        max_bounds: CharInfo {
+            character_width: 6,
+            ..Default::default()
+        },
         min_char: 32,
         max_char: 126,
         default_char: 32,
         font_ascent: 10,
         font_descent: 3,
-        char_infos: vec![CharInfo { character_width: 6, ..Default::default() }; 95],
+        char_infos: vec![
+            CharInfo {
+                character_width: 6,
+                ..Default::default()
+            };
+            95
+        ],
         glyphs: Vec::new(),
         scalable_path: None,
         scalable_pixel_size: 13,
@@ -284,16 +295,28 @@ fn char_info_out_of_range_uses_default() {
 fn char_info_at_boundaries() {
     let font = BitmapFont {
         name: "test".to_string(),
-        min_bounds: CharInfo { character_width: 5, ..Default::default() },
-        max_bounds: CharInfo { character_width: 8, ..Default::default() },
+        min_bounds: CharInfo {
+            character_width: 5,
+            ..Default::default()
+        },
+        max_bounds: CharInfo {
+            character_width: 8,
+            ..Default::default()
+        },
         min_char: 32,
         max_char: 126,
         default_char: 32,
         font_ascent: 10,
         font_descent: 3,
         char_infos: {
-            let mut v = vec![CharInfo { character_width: 6, ..Default::default() }; 95];
-            v[0].character_width = 5;  // char 32 (space)
+            let mut v = vec![
+                CharInfo {
+                    character_width: 6,
+                    ..Default::default()
+                };
+                95
+            ];
+            v[0].character_width = 5; // char 32 (space)
             v[94].character_width = 8; // char 126 (~)
             v
         },

@@ -167,9 +167,7 @@ pub(super) fn load_fonts_alias(path: &str) -> Vec<(String, String)> {
         // Format: "alias" "target" OR alias target
         let parts: Vec<&str> = if line.contains('"') {
             // Quoted format
-            line.split('"')
-                .filter(|s| !s.trim().is_empty())
-                .collect()
+            line.split('"').filter(|s| !s.trim().is_empty()).collect()
         } else {
             line.splitn(2, char::is_whitespace)
                 .map(|s| s.trim())

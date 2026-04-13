@@ -7,11 +7,12 @@ use super::super::client::ClientState;
 /// SECURITY (opcode 155)
 pub(crate) fn handle_security_request(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
     use super::super::client::SecurityAuthorization;
-use crate::xserver::core::require_len;
+    use crate::xserver::core::require_len;
 
     let minor = data[1];
     match minor {
-        0 => { // QueryVersion
+        0 => {
+            // QueryVersion
             let mut reply = [0u8; 32];
             reply[0] = 1;
             state.write_u16(&mut reply, 2, seq);
@@ -19,7 +20,8 @@ use crate::xserver::core::require_len;
             state.write_u16(&mut reply, 10, 0); // minor
             reply.to_vec()
         }
-        1 => { // GenerateAuthorization
+        1 => {
+            // GenerateAuthorization
             if data.len() >= 16 {
                 let auth_proto_name_len = state.read_u16(data, 4) as usize;
                 let auth_proto_data_len = state.read_u16(data, 6) as usize;
@@ -55,13 +57,16 @@ use crate::xserver::core::require_len;
                 // Generate a unique auth ID using UUID to avoid collisions
                 let auth_id = uuid::Uuid::new_v4().as_u128() as u32;
 
-                state.security_authorizations.insert(auth_id, SecurityAuthorization {
+                state.security_authorizations.insert(
                     auth_id,
-                    trust_level,
-                    timeout,
-                    group,
-                    event_mask,
-                });
+                    SecurityAuthorization {
+                        auth_id,
+                        trust_level,
+                        timeout,
+                        group,
+                        event_mask,
+                    },
+                );
 
                 debug!("SECURITY GenerateAuthorization: auth_id={auth_id} trust={trust_level}");
 
@@ -72,13 +77,16 @@ use crate::xserver::core::require_len;
                 let mut token_key = [0u8; 16];
                 token_key.copy_from_slice(&auth_data[..16]);
                 if let Ok(mut tokens) = state.shared_security_tokens.lock() {
-                    tokens.insert(token_key, crate::xserver::types::SecurityTokenInfo {
-                        auth_id,
-                        trust_level,
-                        timeout,
-                        group,
-                        created_at: std::time::Instant::now(),
-                    });
+                    tokens.insert(
+                        token_key,
+                        crate::xserver::types::SecurityTokenInfo {
+                            auth_id,
+                            trust_level,
+                            timeout,
+                            group,
+                            created_at: std::time::Instant::now(),
+                        },
+                    );
                 }
 
                 let auth_data_len = auth_data.len() as u32;
@@ -93,12 +101,17 @@ use crate::xserver::core::require_len;
                 reply
             } else {
                 crate::xserver::core::build_error_bo(
-                    crate::xserver::core::BAD_LENGTH, seq, 0,
-                    155, minor as u16, state.msb_first,
+                    crate::xserver::core::BAD_LENGTH,
+                    seq,
+                    0,
+                    155,
+                    minor as u16,
+                    state.msb_first,
                 )
             }
         }
-        2 => { // RevokeAuthorization
+        2 => {
+            // RevokeAuthorization
             require_len!(data, 8, seq, 155, minor as u16, state.msb_first);
             let auth_id = state.read_u32(data, 4);
             state.security_authorizations.remove(&auth_id);
@@ -113,8 +126,12 @@ use crate::xserver::core::require_len;
         _ => {
             debug!("SECURITY: unhandled minor opcode {minor}");
             crate::xserver::core::build_error_bo(
-                crate::xserver::core::BAD_REQUEST, seq, minor as u32,
-                155, minor as u16, state.msb_first,
+                crate::xserver::core::BAD_REQUEST,
+                seq,
+                minor as u32,
+                155,
+                minor as u16,
+                state.msb_first,
             )
         }
     }

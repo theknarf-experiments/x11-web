@@ -10,8 +10,8 @@ mod render_state;
 mod render_texture;
 
 use super::super::super::client::ClientState;
-use tracing::warn;
 use crate::xserver::core::require_len;
+use tracing::warn;
 
 // ---------------------------------------------------------------------------
 // GLX_RENDER (minor 1) -- batched GL commands
@@ -47,8 +47,12 @@ pub(crate) fn handle_render(state: &mut ClientState, data: &[u8], seq: u16) -> V
         {
             if !dispatch_render_opcode(render_opcode, cmd_data) {
                 return crate::xserver::core::build_error_bo(
-                    crate::xserver::core::BAD_REQUEST, seq, render_opcode as u32,
-                    159, 1, state.msb_first,
+                    crate::xserver::core::BAD_REQUEST,
+                    seq,
+                    render_opcode as u32,
+                    159,
+                    1,
+                    state.msb_first,
                 );
             }
         }
@@ -116,6 +120,9 @@ fn dispatch_render_opcode(opcode: u16, data: &[u8]) -> bool {
         return ok;
     }
 
-    warn!("Unhandled GLX render opcode: {opcode} (data len: {})", data.len());
+    warn!(
+        "Unhandled GLX render opcode: {opcode} (data len: {})",
+        data.len()
+    );
     false
 }

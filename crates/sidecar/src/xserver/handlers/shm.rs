@@ -45,8 +45,12 @@ pub(crate) fn handle_shm_request(state: &mut ClientState, data: &[u8], seq: u16)
                 if stat_ret < 0 {
                     warn!("SHM Attach: shmctl IPC_STAT failed for shmid={shmid}");
                     return crate::xserver::core::build_error_bo(
-                        crate::xserver::core::BAD_VALUE, seq, shmid as u32,
-                        130, minor as u16, state.msb_first,
+                        crate::xserver::core::BAD_VALUE,
+                        seq,
+                        shmid as u32,
+                        130,
+                        minor as u16,
+                        state.msb_first,
                     );
                 }
                 let size = ds.shm_segsz;
@@ -56,15 +60,22 @@ pub(crate) fn handle_shm_request(state: &mut ClientState, data: &[u8], seq: u16)
                 if addr == (-1isize) as *mut libc::c_void {
                     warn!("SHM Attach: shmat failed for shmid={shmid}");
                     return crate::xserver::core::build_error_bo(
-                        crate::xserver::core::BAD_ACCESS, seq, shmid as u32,
-                        130, minor as u16, state.msb_first,
+                        crate::xserver::core::BAD_ACCESS,
+                        seq,
+                        shmid as u32,
+                        130,
+                        minor as u16,
+                        state.msb_first,
                     );
                 }
 
-                state.shm_segments.insert(shmseg, ShmSegment {
-                    addr: addr as *mut u8,
-                    size,
-                });
+                state.shm_segments.insert(
+                    shmseg,
+                    ShmSegment {
+                        addr: addr as *mut u8,
+                        size,
+                    },
+                );
             }
 
             Vec::new() // No reply for Attach
@@ -116,8 +127,12 @@ pub(crate) fn handle_shm_request(state: &mut ClientState, data: &[u8], seq: u16)
                 None => {
                     warn!("SHM PutImage: unknown shmseg={shmseg}");
                     return crate::xserver::core::build_error_bo(
-                        crate::xserver::core::BAD_VALUE, seq, shmseg,
-                        130, minor as u16, state.msb_first,
+                        crate::xserver::core::BAD_VALUE,
+                        seq,
+                        shmseg,
+                        130,
+                        minor as u16,
+                        state.msb_first,
                     );
                 }
             };
@@ -134,8 +149,12 @@ pub(crate) fn handle_shm_request(state: &mut ClientState, data: &[u8], seq: u16)
                     seg.size
                 );
                 return crate::xserver::core::build_error_bo(
-                    crate::xserver::core::BAD_VALUE, seq, offset as u32,
-                    130, minor as u16, state.msb_first,
+                    crate::xserver::core::BAD_VALUE,
+                    seq,
+                    offset as u32,
+                    130,
+                    minor as u16,
+                    state.msb_first,
                 );
             }
 
@@ -150,7 +169,11 @@ pub(crate) fn handle_shm_request(state: &mut ClientState, data: &[u8], seq: u16)
                     let src_off = (src_y + row) * src_stride + src_x * bpp;
                     let dst_off = row * w * bpp;
                     let src_ptr = base.add(src_off);
-                    std::ptr::copy_nonoverlapping(src_ptr, pixels.as_mut_ptr().add(dst_off), w * bpp);
+                    std::ptr::copy_nonoverlapping(
+                        src_ptr,
+                        pixels.as_mut_ptr().add(dst_off),
+                        w * bpp,
+                    );
                 }
             }
 
@@ -272,8 +295,12 @@ pub(crate) fn handle_shm_request(state: &mut ClientState, data: &[u8], seq: u16)
                         warn!("SHM AttachFd: fstat failed for fd={fd}");
                         libc::close(fd);
                         return crate::xserver::core::build_error_bo(
-                            crate::xserver::core::BAD_ACCESS, seq, shmseg,
-                            130, minor as u16, state.msb_first,
+                            crate::xserver::core::BAD_ACCESS,
+                            seq,
+                            shmseg,
+                            130,
+                            minor as u16,
+                            state.msb_first,
                         );
                     }
                     let size = stat.st_size as usize;
@@ -281,8 +308,12 @@ pub(crate) fn handle_shm_request(state: &mut ClientState, data: &[u8], seq: u16)
                         warn!("SHM AttachFd: zero-size fd={fd}");
                         libc::close(fd);
                         return crate::xserver::core::build_error_bo(
-                            crate::xserver::core::BAD_VALUE, seq, shmseg,
-                            130, minor as u16, state.msb_first,
+                            crate::xserver::core::BAD_VALUE,
+                            seq,
+                            shmseg,
+                            130,
+                            minor as u16,
+                            state.msb_first,
                         );
                     }
 
@@ -291,34 +322,39 @@ pub(crate) fn handle_shm_request(state: &mut ClientState, data: &[u8], seq: u16)
                     } else {
                         libc::PROT_READ | libc::PROT_WRITE
                     };
-                    let addr = libc::mmap(
-                        std::ptr::null_mut(),
-                        size,
-                        prot,
-                        libc::MAP_SHARED,
-                        fd,
-                        0,
-                    );
+                    let addr =
+                        libc::mmap(std::ptr::null_mut(), size, prot, libc::MAP_SHARED, fd, 0);
                     libc::close(fd); // fd can be closed after mmap
 
                     if addr == libc::MAP_FAILED {
                         warn!("SHM AttachFd: mmap failed for fd={fd}");
                         return crate::xserver::core::build_error_bo(
-                            crate::xserver::core::BAD_ACCESS, seq, shmseg,
-                            130, minor as u16, state.msb_first,
+                            crate::xserver::core::BAD_ACCESS,
+                            seq,
+                            shmseg,
+                            130,
+                            minor as u16,
+                            state.msb_first,
                         );
                     }
 
-                    state.shm_segments.insert(shmseg, ShmSegment {
-                        addr: addr as *mut u8,
-                        size,
-                    });
+                    state.shm_segments.insert(
+                        shmseg,
+                        ShmSegment {
+                            addr: addr as *mut u8,
+                            size,
+                        },
+                    );
                 }
             } else {
                 warn!("SHM AttachFd: no pending fd for shmseg={shmseg}");
                 return crate::xserver::core::build_error_bo(
-                    crate::xserver::core::BAD_VALUE, seq, shmseg,
-                    130, minor as u16, state.msb_first,
+                    crate::xserver::core::BAD_VALUE,
+                    seq,
+                    shmseg,
+                    130,
+                    minor as u16,
+                    state.msb_first,
                 );
             }
             Vec::new()
@@ -336,7 +372,11 @@ pub(crate) fn handle_shm_request(state: &mut ClientState, data: &[u8], seq: u16)
 
             if size == 0 {
                 return super::super::core::build_error(
-                    super::super::core::BAD_VALUE, seq, 0, 130, 7,
+                    super::super::core::BAD_VALUE,
+                    seq,
+                    0,
+                    130,
+                    7,
                 );
             }
 
@@ -347,8 +387,12 @@ pub(crate) fn handle_shm_request(state: &mut ClientState, data: &[u8], seq: u16)
                 if fd < 0 {
                     warn!("SHM CreateSegment: memfd_create failed");
                     return crate::xserver::core::build_error_bo(
-                        crate::xserver::core::BAD_ALLOC, seq, 0,
-                        130, minor as u16, state.msb_first,
+                        crate::xserver::core::BAD_ALLOC,
+                        seq,
+                        0,
+                        130,
+                        minor as u16,
+                        state.msb_first,
                     );
                 }
 
@@ -357,8 +401,12 @@ pub(crate) fn handle_shm_request(state: &mut ClientState, data: &[u8], seq: u16)
                     warn!("SHM CreateSegment: ftruncate failed");
                     libc::close(fd);
                     return crate::xserver::core::build_error_bo(
-                        crate::xserver::core::BAD_ALLOC, seq, size as u32,
-                        130, minor as u16, state.msb_first,
+                        crate::xserver::core::BAD_ALLOC,
+                        seq,
+                        size as u32,
+                        130,
+                        minor as u16,
+                        state.msb_first,
                     );
                 }
 
@@ -368,27 +416,27 @@ pub(crate) fn handle_shm_request(state: &mut ClientState, data: &[u8], seq: u16)
                 } else {
                     libc::PROT_READ | libc::PROT_WRITE
                 };
-                let addr = libc::mmap(
-                    std::ptr::null_mut(),
-                    size,
-                    prot,
-                    libc::MAP_SHARED,
-                    fd,
-                    0,
-                );
+                let addr = libc::mmap(std::ptr::null_mut(), size, prot, libc::MAP_SHARED, fd, 0);
                 if addr == libc::MAP_FAILED {
                     warn!("SHM CreateSegment: mmap failed");
                     libc::close(fd);
                     return crate::xserver::core::build_error_bo(
-                        crate::xserver::core::BAD_ALLOC, seq, size as u32,
-                        130, minor as u16, state.msb_first,
+                        crate::xserver::core::BAD_ALLOC,
+                        seq,
+                        size as u32,
+                        130,
+                        minor as u16,
+                        state.msb_first,
                     );
                 }
 
-                state.shm_segments.insert(shmseg, ShmSegment {
-                    addr: addr as *mut u8,
-                    size,
-                });
+                state.shm_segments.insert(
+                    shmseg,
+                    ShmSegment {
+                        addr: addr as *mut u8,
+                        size,
+                    },
+                );
 
                 // Build reply with fd
                 // The fd needs to be sent via SCM_RIGHTS ancillary data
@@ -408,8 +456,12 @@ pub(crate) fn handle_shm_request(state: &mut ClientState, data: &[u8], seq: u16)
         _ => {
             warn!("Unhandled SHM minor opcode: {minor}");
             crate::xserver::core::build_error_bo(
-                crate::xserver::core::BAD_REQUEST, seq, minor as u32,
-                130, minor as u16, state.msb_first,
+                crate::xserver::core::BAD_REQUEST,
+                seq,
+                minor as u32,
+                130,
+                minor as u16,
+                state.msb_first,
             )
         }
     }

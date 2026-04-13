@@ -10,13 +10,17 @@ impl ClientState {
     /// Per X11 spec, stale incremental selection transfers should be cleaned up
     /// if the requestor stops consuming chunks.
     pub(crate) fn cleanup_stale_incr_transfers(&mut self, timeout: std::time::Duration) {
-        self.incr_transfers.retain(|t| t.last_activity.elapsed() < timeout);
+        self.incr_transfers
+            .retain(|t| t.last_activity.elapsed() < timeout);
     }
 
     /// Add a new INCR transfer, enforcing a maximum limit.
     /// If the limit is reached, stale transfers are cleaned up first.
     /// Returns false if the transfer could not be added (limit still exceeded after cleanup).
-    pub(crate) fn push_incr_transfer(&mut self, transfer: super::super::types::IncrTransfer) -> bool {
+    pub(crate) fn push_incr_transfer(
+        &mut self,
+        transfer: super::super::types::IncrTransfer,
+    ) -> bool {
         const MAX_INCR_TRANSFERS: usize = 100;
         if self.incr_transfers.len() >= MAX_INCR_TRANSFERS {
             self.cleanup_stale_incr_transfers(std::time::Duration::from_secs(5));
@@ -39,7 +43,8 @@ impl ClientState {
         }
         let uuid = Uuid::new_v4().to_string();
         self.x11_to_uuid.insert(x11_wid, uuid.clone());
-        self.window_router.register(&uuid, x11_wid, &self.message_tx);
+        self.window_router
+            .register(&uuid, x11_wid, &self.message_tx);
         self.event_router.register(x11_wid, &self.wm_events_tx);
         self.menu_tracker
             .window_index()
@@ -55,7 +60,8 @@ impl ClientState {
     /// Broadcast an event to other connections that have selected the given
     /// event mask on the specified window.
     pub(crate) fn broadcast_event(&self, window_id: u32, event_mask_bit: u32, event: &[u8]) {
-        self.event_broadcaster.broadcast(window_id, event_mask_bit, event, &self.client_id);
+        self.event_broadcaster
+            .broadcast(window_id, event_mask_bit, event, &self.client_id);
     }
 
     /// Subscribe this client to cross-connection events on a window.
@@ -102,6 +108,10 @@ impl ClientState {
 
     /// Get the name of an atom by its global ID.
     pub(crate) fn get_atom_name(&self, atom: u32) -> Option<String> {
-        self.atoms.lock().unwrap().get_name(atom).map(|s| s.to_string())
+        self.atoms
+            .lock()
+            .unwrap()
+            .get_name(atom)
+            .map(|s| s.to_string())
     }
 }

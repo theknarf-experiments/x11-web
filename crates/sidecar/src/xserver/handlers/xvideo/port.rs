@@ -15,7 +15,8 @@ pub(crate) fn handle_port_request(
     minor: u8,
 ) -> Vec<u8> {
     match minor {
-        3 => { // XvGrabPort
+        3 => {
+            // XvGrabPort
             if data.len() >= 8 {
                 let port = state.read_u32(data, 4);
                 debug!("XVideo GrabPort: port={port}");
@@ -39,7 +40,8 @@ pub(crate) fn handle_port_request(
                 Vec::new()
             }
         }
-        4 => { // XvUngrabPort
+        4 => {
+            // XvUngrabPort
             if data.len() >= 8 {
                 let port = state.read_u32(data, 4);
                 debug!("XVideo UngrabPort: port={port}");
@@ -49,7 +51,8 @@ pub(crate) fn handle_port_request(
             }
             Vec::new()
         }
-        9 => { // XvQueryBestSize
+        9 => {
+            // XvQueryBestSize
             let mut reply = [0u8; 32];
             reply[0] = 1;
             state.write_u16(&mut reply, 2, seq);
@@ -61,7 +64,8 @@ pub(crate) fn handle_port_request(
             }
             reply.to_vec()
         }
-        10 => { // XvSetPortAttribute
+        10 => {
+            // XvSetPortAttribute
             if data.len() >= 16 {
                 let port = state.read_u32(data, 4);
                 let atom = state.read_u32(data, 8);
@@ -72,15 +76,19 @@ pub(crate) fn handle_port_request(
 
                 match name.as_str() {
                     XV_ATTR_BRIGHTNESS => ps.brightness = value.clamp(-1000, 1000),
-                    XV_ATTR_CONTRAST   => ps.contrast = value.clamp(0, 2000),
+                    XV_ATTR_CONTRAST => ps.contrast = value.clamp(0, 2000),
                     XV_ATTR_SATURATION => ps.saturation = value.clamp(0, 2000),
-                    XV_ATTR_HUE        => ps.hue = value.clamp(-180, 180),
+                    XV_ATTR_HUE => ps.hue = value.clamp(-180, 180),
                     XV_ATTR_COLORSPACE => ps.colorspace = value.clamp(0, 1),
                     _ => {
                         debug!("XVideo SetPortAttribute: unknown attr {name} (atom={atom})");
                         return crate::xserver::core::build_error_bo(
-                            crate::xserver::core::BAD_MATCH, seq, atom,
-                            156, 10, state.msb_first,
+                            crate::xserver::core::BAD_MATCH,
+                            seq,
+                            atom,
+                            156,
+                            10,
+                            state.msb_first,
                         );
                     }
                 }
@@ -88,7 +96,8 @@ pub(crate) fn handle_port_request(
             }
             Vec::new()
         }
-        11 => { // XvGetPortAttribute
+        11 => {
+            // XvGetPortAttribute
             if data.len() >= 12 {
                 let port = state.read_u32(data, 4);
                 let atom = state.read_u32(data, 8);
@@ -98,15 +107,19 @@ pub(crate) fn handle_port_request(
 
                 let value: i32 = match name.as_str() {
                     XV_ATTR_BRIGHTNESS => ps.brightness,
-                    XV_ATTR_CONTRAST   => ps.contrast,
+                    XV_ATTR_CONTRAST => ps.contrast,
                     XV_ATTR_SATURATION => ps.saturation,
-                    XV_ATTR_HUE        => ps.hue,
+                    XV_ATTR_HUE => ps.hue,
                     XV_ATTR_COLORSPACE => ps.colorspace,
                     _ => {
                         debug!("XVideo GetPortAttribute: unknown attr {name} (atom={atom})");
                         return crate::xserver::core::build_error_bo(
-                            crate::xserver::core::BAD_MATCH, seq, atom,
-                            156, 11, state.msb_first,
+                            crate::xserver::core::BAD_MATCH,
+                            seq,
+                            atom,
+                            156,
+                            11,
+                            state.msb_first,
                         );
                     }
                 };
@@ -120,7 +133,8 @@ pub(crate) fn handle_port_request(
                 Vec::new()
             }
         }
-        15 => { // XvQueryPortAttributes
+        15 => {
+            // XvQueryPortAttributes
             // Return 5 attributes: BRIGHTNESS, CONTRAST, SATURATION, HUE, COLORSPACE
             struct AttrDef {
                 name: &'static [u8],
@@ -129,11 +143,36 @@ pub(crate) fn handle_port_request(
                 flags: u32, // bit 0 = Gettable, bit 1 = Settable
             }
             let attrs = [
-                AttrDef { name: b"XV_BRIGHTNESS", min: -1000, max: 1000, flags: 3 },
-                AttrDef { name: b"XV_CONTRAST",   min: 0,     max: 2000, flags: 3 },
-                AttrDef { name: b"XV_SATURATION", min: 0,     max: 2000, flags: 3 },
-                AttrDef { name: b"XV_HUE",        min: -180,  max: 180,  flags: 3 },
-                AttrDef { name: b"XV_COLORSPACE",  min: 0,     max: 1,    flags: 3 },
+                AttrDef {
+                    name: b"XV_BRIGHTNESS",
+                    min: -1000,
+                    max: 1000,
+                    flags: 3,
+                },
+                AttrDef {
+                    name: b"XV_CONTRAST",
+                    min: 0,
+                    max: 2000,
+                    flags: 3,
+                },
+                AttrDef {
+                    name: b"XV_SATURATION",
+                    min: 0,
+                    max: 2000,
+                    flags: 3,
+                },
+                AttrDef {
+                    name: b"XV_HUE",
+                    min: -180,
+                    max: 180,
+                    flags: 3,
+                },
+                AttrDef {
+                    name: b"XV_COLORSPACE",
+                    min: 0,
+                    max: 1,
+                    flags: 3,
+                },
             ];
 
             // Each AttributeInfo: flags(4) + min(4) + max(4) + size(4) + name(padded)
@@ -161,8 +200,12 @@ pub(crate) fn handle_port_request(
         _ => {
             debug!("XVideo port: unhandled minor opcode {minor}");
             crate::xserver::core::build_error_bo(
-                crate::xserver::core::BAD_REQUEST, seq, minor as u32,
-                156, minor as u16, state.msb_first,
+                crate::xserver::core::BAD_REQUEST,
+                seq,
+                minor as u32,
+                156,
+                minor as u16,
+                state.msb_first,
             )
         }
     }

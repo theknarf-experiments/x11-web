@@ -1,9 +1,8 @@
+use super::core::*;
 use x11rb_protocol::protocol::xproto::{
-    BackingStore, Depth, EventMask, Format, ImageOrder, Screen, Setup,
-    Visualtype, VisualClass,
+    BackingStore, Depth, EventMask, Format, ImageOrder, Screen, Setup, VisualClass, Visualtype,
 };
 use x11rb_protocol::x11_utils::Serialize;
-use super::core::*;
 
 /// Byte-swap all multi-byte fields in an x11rb-serialized Setup reply from
 /// little-endian to big-endian (MSB-first).  This walks the wire-format
@@ -30,28 +29,28 @@ pub(crate) fn byteswap_setup_reply(buf: &mut [u8]) {
     // --- Fixed-size header (bytes 0..39) ---
     // [0] status (u8) — no swap
     // [1] unused
-    swap16(buf, 2);   // protocol-major-version
-    swap16(buf, 4);   // protocol-minor-version
-    swap16(buf, 6);   // additional-data length (in 4-byte units)
-    swap32(buf, 8);   // release-number
-    swap32(buf, 12);  // resource-id-base
-    swap32(buf, 16);  // resource-id-mask
-    swap32(buf, 20);  // motion-buffer-size
-    // Read vendor length and format count BEFORE swapping them (they're still LE)
+    swap16(buf, 2); // protocol-major-version
+    swap16(buf, 4); // protocol-minor-version
+    swap16(buf, 6); // additional-data length (in 4-byte units)
+    swap32(buf, 8); // release-number
+    swap32(buf, 12); // resource-id-base
+    swap32(buf, 16); // resource-id-mask
+    swap32(buf, 20); // motion-buffer-size
+                     // Read vendor length and format count BEFORE swapping them (they're still LE)
     let vendor_len = u16::from_le_bytes([buf[24], buf[25]]) as usize;
     let num_formats = buf[29] as usize;
     let num_screens = buf[28] as usize;
-    swap16(buf, 24);  // length-of-vendor
-    swap16(buf, 26);  // maximum-request-length
-    // [28] number-of-screens (u8) — no swap
-    // [29] number-of-formats (u8) — no swap
-    // [30] image-byte-order (u8) — no swap
-    // [31] bitmap-format-bit-order (u8) — no swap
-    // [32] bitmap-format-scanline-unit (u8) — no swap
-    // [33] bitmap-format-scanline-pad (u8) — no swap
-    // [34] min-keycode (u8) — no swap
-    // [35] max-keycode (u8) — no swap
-    // [36..39] unused (4 bytes)
+    swap16(buf, 24); // length-of-vendor
+    swap16(buf, 26); // maximum-request-length
+                     // [28] number-of-screens (u8) — no swap
+                     // [29] number-of-formats (u8) — no swap
+                     // [30] image-byte-order (u8) — no swap
+                     // [31] bitmap-format-bit-order (u8) — no swap
+                     // [32] bitmap-format-scanline-unit (u8) — no swap
+                     // [33] bitmap-format-scanline-pad (u8) — no swap
+                     // [34] min-keycode (u8) — no swap
+                     // [35] max-keycode (u8) — no swap
+                     // [36..39] unused (4 bytes)
 
     // --- Vendor string (padded to 4 bytes) ---
     let mut off = 40;
@@ -67,9 +66,9 @@ pub(crate) fn byteswap_setup_reply(buf: &mut [u8]) {
         if off + 40 > buf.len() {
             return;
         }
-        swap32(buf, off);      // root window
-        swap32(buf, off + 4);  // default-colormap
-        swap32(buf, off + 8);  // white-pixel
+        swap32(buf, off); // root window
+        swap32(buf, off + 4); // default-colormap
+        swap32(buf, off + 8); // white-pixel
         swap32(buf, off + 12); // black-pixel
         swap32(buf, off + 16); // current-input-masks
         swap16(buf, off + 20); // width-in-pixels
@@ -79,9 +78,9 @@ pub(crate) fn byteswap_setup_reply(buf: &mut [u8]) {
         swap16(buf, off + 28); // min-installed-maps
         swap16(buf, off + 30); // max-installed-maps
         swap32(buf, off + 32); // root-visual
-        // [off+36] backing-stores (u8)
-        // [off+37] save-unders (u8)
-        // [off+38] root-depth (u8)
+                               // [off+36] backing-stores (u8)
+                               // [off+37] save-unders (u8)
+                               // [off+38] root-depth (u8)
         let num_depths = buf[off + 39] as usize;
         off += 40;
 
@@ -94,7 +93,7 @@ pub(crate) fn byteswap_setup_reply(buf: &mut [u8]) {
             // [off+1] unused
             let num_visuals = u16::from_le_bytes([buf[off + 2], buf[off + 3]]) as usize;
             swap16(buf, off + 2); // number-of-visuals
-            // [off+4..7] unused (4 bytes)
+                                  // [off+4..7] unused (4 bytes)
             off += 8;
 
             // --- Visuals (24 bytes each) ---
@@ -102,14 +101,14 @@ pub(crate) fn byteswap_setup_reply(buf: &mut [u8]) {
                 if off + 24 > buf.len() {
                     return;
                 }
-                swap32(buf, off);      // visual-id
-                // [off+4] class (u8)
-                // [off+5] bits-per-rgb-value (u8)
-                swap16(buf, off + 6);  // colormap-entries
-                swap32(buf, off + 8);  // red-mask
+                swap32(buf, off); // visual-id
+                                  // [off+4] class (u8)
+                                  // [off+5] bits-per-rgb-value (u8)
+                swap16(buf, off + 6); // colormap-entries
+                swap32(buf, off + 8); // red-mask
                 swap32(buf, off + 12); // green-mask
                 swap32(buf, off + 16); // blue-mask
-                // [off+20..23] unused (4 bytes)
+                                       // [off+20..23] unused (4 bytes)
                 off += 24;
             }
         }
@@ -126,7 +125,7 @@ pub(crate) fn build_xsettings_data() -> Vec<u8> {
     buf.push(0); // byte-order: LSB
     buf.extend_from_slice(&[0u8; 3]); // padding
     buf.extend_from_slice(&0u32.to_le_bytes()); // serial
-    // n_settings placeholder — we'll patch it after adding all settings
+                                                // n_settings placeholder — we'll patch it after adding all settings
     let n_settings_offset = buf.len();
     buf.extend_from_slice(&0u32.to_le_bytes());
 
@@ -141,7 +140,9 @@ pub(crate) fn build_xsettings_data() -> Vec<u8> {
         buf.extend_from_slice(name_bytes);
         // pad name to 4-byte boundary
         let pad = (4 - (name_bytes.len() % 4)) % 4;
-        for _ in 0..pad { buf.push(0); }
+        for _ in 0..pad {
+            buf.push(0);
+        }
         buf.extend_from_slice(&0u32.to_le_bytes()); // last_change_serial
         buf.extend_from_slice(&value.to_le_bytes());
     };
@@ -153,39 +154,66 @@ pub(crate) fn build_xsettings_data() -> Vec<u8> {
         buf.extend_from_slice(&(name_bytes.len() as u16).to_le_bytes());
         buf.extend_from_slice(name_bytes);
         let pad = (4 - (name_bytes.len() % 4)) % 4;
-        for _ in 0..pad { buf.push(0); }
+        for _ in 0..pad {
+            buf.push(0);
+        }
         buf.extend_from_slice(&0u32.to_le_bytes()); // last_change_serial
         let val_bytes = value.as_bytes();
         buf.extend_from_slice(&(val_bytes.len() as u32).to_le_bytes());
         buf.extend_from_slice(val_bytes);
         let vpad = (4 - (val_bytes.len() % 4)) % 4;
-        for _ in 0..vpad { buf.push(0); }
+        for _ in 0..vpad {
+            buf.push(0);
+        }
     };
 
     // Xft settings
-    write_integer(&mut buf, "Xft/DPI", 98304); count += 1;
-    write_integer(&mut buf, "Xft/Antialias", 1); count += 1;
-    write_integer(&mut buf, "Xft/Hinting", 1); count += 1;
-    write_string(&mut buf, "Xft/HintStyle", "hintslight"); count += 1;
-    write_string(&mut buf, "Xft/RGBA", "rgb"); count += 1;
+    write_integer(&mut buf, "Xft/DPI", 98304);
+    count += 1;
+    write_integer(&mut buf, "Xft/Antialias", 1);
+    count += 1;
+    write_integer(&mut buf, "Xft/Hinting", 1);
+    count += 1;
+    write_string(&mut buf, "Xft/HintStyle", "hintslight");
+    count += 1;
+    write_string(&mut buf, "Xft/RGBA", "rgb");
+    count += 1;
 
     // Net settings
-    write_string(&mut buf, "Net/ThemeName", "Adwaita"); count += 1;
-    write_string(&mut buf, "Net/IconThemeName", "Adwaita"); count += 1;
-    write_integer(&mut buf, "Net/CursorBlink", 1); count += 1;
-    write_integer(&mut buf, "Net/CursorBlinkTime", 1200); count += 1;
-    write_integer(&mut buf, "Net/EnableEventSounds", 0); count += 1;
-    write_integer(&mut buf, "Net/EnableInputFeedbackSounds", 0); count += 1;
+    write_string(&mut buf, "Net/ThemeName", "Adwaita");
+    count += 1;
+    write_string(&mut buf, "Net/IconThemeName", "Adwaita");
+    count += 1;
+    write_integer(&mut buf, "Net/CursorBlink", 1);
+    count += 1;
+    write_integer(&mut buf, "Net/CursorBlinkTime", 1200);
+    count += 1;
+    write_integer(&mut buf, "Net/EnableEventSounds", 0);
+    count += 1;
+    write_integer(&mut buf, "Net/EnableInputFeedbackSounds", 0);
+    count += 1;
 
     // Gtk settings
-    write_string(&mut buf, "Gtk/CursorThemeName", "default"); count += 1;
-    write_integer(&mut buf, "Gtk/CursorThemeSize", 24); count += 1;
-    write_string(&mut buf, "Gtk/FontName", "Sans 10"); count += 1;
-    write_integer(&mut buf, "Gtk/EnableAnimations", 1); count += 1;
-    write_integer(&mut buf, "Gtk/DialogsUseHeader", 1); count += 1;
-    write_string(&mut buf, "Gtk/DecorationLayout", "menu:minimize,maximize,close"); count += 1;
-    write_integer(&mut buf, "Gtk/ShellShowsMenubar", 0); count += 1;
-    write_integer(&mut buf, "Gtk/ShellShowsAppMenu", 0); count += 1;
+    write_string(&mut buf, "Gtk/CursorThemeName", "default");
+    count += 1;
+    write_integer(&mut buf, "Gtk/CursorThemeSize", 24);
+    count += 1;
+    write_string(&mut buf, "Gtk/FontName", "Sans 10");
+    count += 1;
+    write_integer(&mut buf, "Gtk/EnableAnimations", 1);
+    count += 1;
+    write_integer(&mut buf, "Gtk/DialogsUseHeader", 1);
+    count += 1;
+    write_string(
+        &mut buf,
+        "Gtk/DecorationLayout",
+        "menu:minimize,maximize,close",
+    );
+    count += 1;
+    write_integer(&mut buf, "Gtk/ShellShowsMenubar", 0);
+    count += 1;
+    write_integer(&mut buf, "Gtk/ShellShowsAppMenu", 0);
+    count += 1;
 
     // Patch n_settings
     buf[n_settings_offset..n_settings_offset + 4].copy_from_slice(&count.to_le_bytes());
@@ -333,12 +361,36 @@ pub(crate) fn build_setup(conn_index: u32) -> Setup {
         allowed_depths: vec![depth1, depth4, depth8, depth16, depth24, depth32],
     };
 
-    let format24 = Format { depth: 24, bits_per_pixel: 32, scanline_pad: 32 };
-    let format32 = Format { depth: 32, bits_per_pixel: 32, scanline_pad: 32 };
-    let format1 = Format { depth: 1, bits_per_pixel: 1, scanline_pad: 32 };
-    let format4 = Format { depth: 4, bits_per_pixel: 8, scanline_pad: 32 };
-    let format8 = Format { depth: 8, bits_per_pixel: 8, scanline_pad: 32 };
-    let format16 = Format { depth: 16, bits_per_pixel: 16, scanline_pad: 32 };
+    let format24 = Format {
+        depth: 24,
+        bits_per_pixel: 32,
+        scanline_pad: 32,
+    };
+    let format32 = Format {
+        depth: 32,
+        bits_per_pixel: 32,
+        scanline_pad: 32,
+    };
+    let format1 = Format {
+        depth: 1,
+        bits_per_pixel: 1,
+        scanline_pad: 32,
+    };
+    let format4 = Format {
+        depth: 4,
+        bits_per_pixel: 8,
+        scanline_pad: 32,
+    };
+    let format8 = Format {
+        depth: 8,
+        bits_per_pixel: 8,
+        scanline_pad: 32,
+    };
+    let format16 = Format {
+        depth: 16,
+        bits_per_pixel: 16,
+        scanline_pad: 32,
+    };
 
     let mut setup = Setup {
         status: 1,
@@ -465,7 +517,11 @@ mod tests {
     #[test]
     fn setup_screen_has_six_depths() {
         let setup = build_setup(0);
-        let depths: Vec<u8> = setup.roots[0].allowed_depths.iter().map(|d| d.depth).collect();
+        let depths: Vec<u8> = setup.roots[0]
+            .allowed_depths
+            .iter()
+            .map(|d| d.depth)
+            .collect();
         assert_eq!(depths.len(), 6);
         assert!(depths.contains(&1));
         assert!(depths.contains(&4));
@@ -478,16 +534,30 @@ mod tests {
     #[test]
     fn setup_depth_24_has_truecolor_and_directcolor() {
         let setup = build_setup(0);
-        let depth24 = setup.roots[0].allowed_depths.iter().find(|d| d.depth == 24).unwrap();
+        let depth24 = setup.roots[0]
+            .allowed_depths
+            .iter()
+            .find(|d| d.depth == 24)
+            .unwrap();
         assert_eq!(depth24.visuals.len(), 2);
-        assert!(depth24.visuals.iter().any(|v| v.class == VisualClass::TRUE_COLOR));
-        assert!(depth24.visuals.iter().any(|v| v.class == VisualClass::DIRECT_COLOR));
+        assert!(depth24
+            .visuals
+            .iter()
+            .any(|v| v.class == VisualClass::TRUE_COLOR));
+        assert!(depth24
+            .visuals
+            .iter()
+            .any(|v| v.class == VisualClass::DIRECT_COLOR));
     }
 
     #[test]
     fn setup_depth_32_has_argb_truecolor() {
         let setup = build_setup(0);
-        let depth32 = setup.roots[0].allowed_depths.iter().find(|d| d.depth == 32).unwrap();
+        let depth32 = setup.roots[0]
+            .allowed_depths
+            .iter()
+            .find(|d| d.depth == 32)
+            .unwrap();
         assert_eq!(depth32.visuals.len(), 1);
         assert_eq!(depth32.visuals[0].visual_id, 0x40);
         assert_eq!(depth32.visuals[0].class, VisualClass::TRUE_COLOR);
@@ -496,25 +566,50 @@ mod tests {
     #[test]
     fn setup_depth_8_has_pseudocolor_grayscale_staticcolor() {
         let setup = build_setup(0);
-        let depth8 = setup.roots[0].allowed_depths.iter().find(|d| d.depth == 8).unwrap();
+        let depth8 = setup.roots[0]
+            .allowed_depths
+            .iter()
+            .find(|d| d.depth == 8)
+            .unwrap();
         assert_eq!(depth8.visuals.len(), 3);
-        assert!(depth8.visuals.iter().any(|v| v.class == VisualClass::PSEUDO_COLOR));
-        assert!(depth8.visuals.iter().any(|v| v.class == VisualClass::GRAY_SCALE));
-        assert!(depth8.visuals.iter().any(|v| v.class == VisualClass::STATIC_COLOR));
+        assert!(depth8
+            .visuals
+            .iter()
+            .any(|v| v.class == VisualClass::PSEUDO_COLOR));
+        assert!(depth8
+            .visuals
+            .iter()
+            .any(|v| v.class == VisualClass::GRAY_SCALE));
+        assert!(depth8
+            .visuals
+            .iter()
+            .any(|v| v.class == VisualClass::STATIC_COLOR));
     }
 
     #[test]
     fn setup_depth_1_has_no_visuals() {
         let setup = build_setup(0);
-        let depth1 = setup.roots[0].allowed_depths.iter().find(|d| d.depth == 1).unwrap();
+        let depth1 = setup.roots[0]
+            .allowed_depths
+            .iter()
+            .find(|d| d.depth == 1)
+            .unwrap();
         assert!(depth1.visuals.is_empty());
     }
 
     #[test]
     fn setup_root_visual_rgb_masks_standard() {
         let setup = build_setup(0);
-        let depth24 = setup.roots[0].allowed_depths.iter().find(|d| d.depth == 24).unwrap();
-        let root_vis = depth24.visuals.iter().find(|v| v.visual_id == ROOT_VISUAL).unwrap();
+        let depth24 = setup.roots[0]
+            .allowed_depths
+            .iter()
+            .find(|d| d.depth == 24)
+            .unwrap();
+        let root_vis = depth24
+            .visuals
+            .iter()
+            .find(|v| v.visual_id == ROOT_VISUAL)
+            .unwrap();
         assert_eq!(root_vis.red_mask, 0x00FF0000);
         assert_eq!(root_vis.green_mask, 0x0000FF00);
         assert_eq!(root_vis.blue_mask, 0x000000FF);
@@ -561,7 +656,10 @@ mod tests {
         let data = build_xsettings_data();
         let count = u32::from_le_bytes([data[8], data[9], data[10], data[11]]);
         assert!(count > 0, "must have at least one setting");
-        assert!(count >= 15, "should have at least 15 settings for GTK/Xft compat");
+        assert!(
+            count >= 15,
+            "should have at least 15 settings for GTK/Xft compat"
+        );
     }
 
     #[test]

@@ -26,7 +26,12 @@ pub(crate) fn dispatch(opcode: u16, data: &[u8]) -> Option<bool> {
             if data.len() >= 64 {
                 let mut m = [0f32; 16];
                 for i in 0..16 {
-                    m[i] = f32::from_le_bytes([data[i*4], data[i*4+1], data[i*4+2], data[i*4+3]]);
+                    m[i] = f32::from_le_bytes([
+                        data[i * 4],
+                        data[i * 4 + 1],
+                        data[i * 4 + 2],
+                        data[i * 4 + 3],
+                    ]);
                 }
                 osmesa::gl_load_matrixf(&m);
             }
@@ -37,8 +42,14 @@ pub(crate) fn dispatch(opcode: u16, data: &[u8]) -> Option<bool> {
                 let mut m = [0f64; 16];
                 for i in 0..16 {
                     m[i] = f64::from_le_bytes([
-                        data[i*8], data[i*8+1], data[i*8+2], data[i*8+3],
-                        data[i*8+4], data[i*8+5], data[i*8+6], data[i*8+7],
+                        data[i * 8],
+                        data[i * 8 + 1],
+                        data[i * 8 + 2],
+                        data[i * 8 + 3],
+                        data[i * 8 + 4],
+                        data[i * 8 + 5],
+                        data[i * 8 + 6],
+                        data[i * 8 + 7],
                     ]);
                 }
                 osmesa::gl_load_matrixd(&m);
@@ -49,7 +60,12 @@ pub(crate) fn dispatch(opcode: u16, data: &[u8]) -> Option<bool> {
             if data.len() >= 64 {
                 let mut m = [0f32; 16];
                 for i in 0..16 {
-                    m[i] = f32::from_le_bytes([data[i*4], data[i*4+1], data[i*4+2], data[i*4+3]]);
+                    m[i] = f32::from_le_bytes([
+                        data[i * 4],
+                        data[i * 4 + 1],
+                        data[i * 4 + 2],
+                        data[i * 4 + 3],
+                    ]);
                 }
                 osmesa::gl_mult_matrixf(&m);
             }
@@ -60,8 +76,14 @@ pub(crate) fn dispatch(opcode: u16, data: &[u8]) -> Option<bool> {
                 let mut m = [0f64; 16];
                 for i in 0..16 {
                     m[i] = f64::from_le_bytes([
-                        data[i*8], data[i*8+1], data[i*8+2], data[i*8+3],
-                        data[i*8+4], data[i*8+5], data[i*8+6], data[i*8+7],
+                        data[i * 8],
+                        data[i * 8 + 1],
+                        data[i * 8 + 2],
+                        data[i * 8 + 3],
+                        data[i * 8 + 4],
+                        data[i * 8 + 5],
+                        data[i * 8 + 6],
+                        data[i * 8 + 7],
                     ]);
                 }
                 osmesa::gl_mult_matrixd(&m);

@@ -1,15 +1,15 @@
 use std::collections::HashMap;
 use tracing::{debug, info};
 
-use crate::xserver::ClientState;
 use crate::xserver::core::read_u32_bo;
 use crate::xserver::core::require_len;
+use crate::xserver::ClientState;
 
-mod picture;
 mod composite;
-mod gradient;
-mod glyph;
 mod filter;
+mod glyph;
+mod gradient;
+mod picture;
 mod transform;
 
 // PictFormat IDs
@@ -148,7 +148,6 @@ pub(super) struct PictureState {
     pub(super) filter: PictFilter,
 }
 
-
 pub(super) struct GlyphSetState {
     pub(super) format_id: u32,
     pub(super) glyphs: HashMap<u32, StoredGlyph>,
@@ -245,7 +244,8 @@ impl RenderState {
 
     /// Get the clip rectangles for a picture (if any are set).
     pub fn picture_clip_rects(&self, pic_id: u32) -> Option<&[(i16, i16, u16, u16)]> {
-        self.pictures.get(&pic_id)
+        self.pictures
+            .get(&pic_id)
             .and_then(|p| p.clip_rects.as_deref())
     }
 
@@ -343,44 +343,44 @@ fn out_con(a: i32, b: i32) -> i32 {
 /// this once per channel with per-channel `sa`.
 fn pict_op_factors(op: u8, sa: i32, da: i32) -> (i32, i32) {
     match op {
-        0 => (0, 0),                                    // Clear
-        1 => (255, 0),                                  // Src
-        2 => (0, 255),                                  // Dst
-        3 => (255, 255 - sa),                           // Over
-        4 => (255 - da, 255),                           // OverReverse
-        5 => (da, 0),                                   // In
-        6 => (0, sa),                                   // InReverse
-        7 => (255 - da, 0),                             // Out
-        8 => (0, 255 - sa),                             // OutReverse
-        9 => (da, 255 - sa),                            // Atop
-        10 => (255 - da, sa),                           // AtopReverse
-        11 => (255 - da, 255 - sa),                    // Xor
-        12 => (255, 255),                              // Add (clamped on apply)
-        13 | 20 => (out_dis(sa, da), 255),             // Saturate / DisjointOverReverse
-        16 => (0, 0),                                   // DisjointClear
-        17 => (255, 0),                                 // DisjointSrc (= Src)
-        18 => (0, 255),                                 // DisjointDst (= Dst)
-        19 => (255, out_dis(da, sa)),                   // DisjointOver
-        21 => (in_dis(sa, da), 0),                      // DisjointIn
-        22 => (0, in_dis(da, sa)),                      // DisjointInReverse
-        23 => (out_dis(sa, da), 0),                     // DisjointOut
-        24 => (0, out_dis(da, sa)),                     // DisjointOutReverse
-        25 => (in_dis(sa, da), out_dis(da, sa)),        // DisjointAtop
-        26 => (out_dis(sa, da), in_dis(da, sa)),        // DisjointAtopReverse
-        27 => (out_dis(sa, da), out_dis(da, sa)),       // DisjointXor
-        32 => (0, 0),                                   // ConjointClear
-        33 => (255, 0),                                 // ConjointSrc (= Src)
-        34 => (0, 255),                                 // ConjointDst (= Dst)
-        35 => (255, out_con(da, sa)),                   // ConjointOver
-        36 => (out_con(sa, da), 255),                   // ConjointOverReverse
-        37 => (in_con(sa, da), 0),                      // ConjointIn
-        38 => (0, in_con(da, sa)),                      // ConjointInReverse
-        39 => (out_con(sa, da), 0),                     // ConjointOut
-        40 => (0, out_con(da, sa)),                     // ConjointOutReverse
-        41 => (in_con(sa, da), out_con(da, sa)),        // ConjointAtop
-        42 => (out_con(sa, da), in_con(da, sa)),        // ConjointAtopReverse
-        43 => (out_con(sa, da), out_con(da, sa)),       // ConjointXor
-        _ => (255, 255 - sa),                           // fallback to Over
+        0 => (0, 0),                              // Clear
+        1 => (255, 0),                            // Src
+        2 => (0, 255),                            // Dst
+        3 => (255, 255 - sa),                     // Over
+        4 => (255 - da, 255),                     // OverReverse
+        5 => (da, 0),                             // In
+        6 => (0, sa),                             // InReverse
+        7 => (255 - da, 0),                       // Out
+        8 => (0, 255 - sa),                       // OutReverse
+        9 => (da, 255 - sa),                      // Atop
+        10 => (255 - da, sa),                     // AtopReverse
+        11 => (255 - da, 255 - sa),               // Xor
+        12 => (255, 255),                         // Add (clamped on apply)
+        13 | 20 => (out_dis(sa, da), 255),        // Saturate / DisjointOverReverse
+        16 => (0, 0),                             // DisjointClear
+        17 => (255, 0),                           // DisjointSrc (= Src)
+        18 => (0, 255),                           // DisjointDst (= Dst)
+        19 => (255, out_dis(da, sa)),             // DisjointOver
+        21 => (in_dis(sa, da), 0),                // DisjointIn
+        22 => (0, in_dis(da, sa)),                // DisjointInReverse
+        23 => (out_dis(sa, da), 0),               // DisjointOut
+        24 => (0, out_dis(da, sa)),               // DisjointOutReverse
+        25 => (in_dis(sa, da), out_dis(da, sa)),  // DisjointAtop
+        26 => (out_dis(sa, da), in_dis(da, sa)),  // DisjointAtopReverse
+        27 => (out_dis(sa, da), out_dis(da, sa)), // DisjointXor
+        32 => (0, 0),                             // ConjointClear
+        33 => (255, 0),                           // ConjointSrc (= Src)
+        34 => (0, 255),                           // ConjointDst (= Dst)
+        35 => (255, out_con(da, sa)),             // ConjointOver
+        36 => (out_con(sa, da), 255),             // ConjointOverReverse
+        37 => (in_con(sa, da), 0),                // ConjointIn
+        38 => (0, in_con(da, sa)),                // ConjointInReverse
+        39 => (out_con(sa, da), 0),               // ConjointOut
+        40 => (0, out_con(da, sa)),               // ConjointOutReverse
+        41 => (in_con(sa, da), out_con(da, sa)),  // ConjointAtop
+        42 => (out_con(sa, da), in_con(da, sa)),  // ConjointAtopReverse
+        43 => (out_con(sa, da), out_con(da, sa)), // ConjointXor
+        _ => (255, 255 - sa),                     // fallback to Over
     }
 }
 
@@ -439,7 +439,11 @@ pub(crate) fn composite_pixel(
     dst[0] = blend_chan(src_b, dst[0], fs, fd);
     dst[1] = blend_chan(src_g, dst[1], fs, fd);
     dst[2] = blend_chan(src_r, dst[2], fs, fd);
-    dst[3] = if force_da_one { 255 } else { blend_chan(src_a, dst[3], fs, fd) };
+    dst[3] = if force_da_one {
+        255
+    } else {
+        blend_chan(src_a, dst[3], fs, fd)
+    };
 }
 
 /// Component-alpha composite — `sa_*` are the per-channel effective
@@ -471,7 +475,11 @@ pub(crate) fn composite_pixel_ca(
     dst[0] = blend_chan(src_b, dst[0], fs_b, fd_b);
     dst[1] = blend_chan(src_g, dst[1], fs_g, fd_g);
     dst[2] = blend_chan(src_r, dst[2], fs_r, fd_r);
-    dst[3] = if force_da_one { 255 } else { blend_chan(src_a, dst[3], fs_a, fd_a) };
+    dst[3] = if force_da_one {
+        255
+    } else {
+        blend_chan(src_a, dst[3], fs_a, fd_a)
+    };
 }
 
 pub(crate) fn pad4(n: usize) -> usize {
@@ -500,10 +508,10 @@ fn reject_gradient_destination(
     // destination picture id at a known offset within the request
     // body. We only need to flag those.
     let dst_offset = match minor {
-        8 => 16,           // Composite: dst at offset 16
-        10..=13 => 12,     // Trapezoids/Triangles/TriStrip/TriFan
+        8 => 16,       // Composite: dst at offset 16
+        10..=13 => 12, // Trapezoids/Triangles/TriStrip/TriFan
         23..=25 => 12, // CompositeGlyphs8/16/32
-        26 => 8,           // FillRectangles
+        26 => 8,       // FillRectangles
         _ => return None,
     };
     if data.len() < dst_offset + 4 {
@@ -517,7 +525,14 @@ fn reject_gradient_destination(
         // BadDrawable = 9; the X RENDER major opcode is 139, which
         // we don't actually need to fill in here — clients only key
         // off the error code and the bad-value field.
-        return Some(crate::xserver::core::build_error_bo(9, seq, dst_pic, 139, minor as u16, state.msb_first));
+        return Some(crate::xserver::core::build_error_bo(
+            9,
+            seq,
+            dst_pic,
+            139,
+            minor as u16,
+            state.msb_first,
+        ));
     }
     None
 }
@@ -571,8 +586,12 @@ pub fn handle_render_request(state: &mut ClientState, data: &[u8], seq: u16) -> 
         _ => {
             debug!("Unhandled RENDER minor opcode: {minor}");
             crate::xserver::core::build_error_bo(
-                crate::xserver::core::BAD_REQUEST, seq, minor as u32,
-                139, minor as u16, bo,
+                crate::xserver::core::BAD_REQUEST,
+                seq,
+                minor as u32,
+                139,
+                minor as u16,
+                bo,
             )
         }
     }
@@ -600,8 +619,20 @@ impl ClipSnapshot {
                 }
                 // Try to get the framebuffer for the mask pixmap
                 let fb_info = if let Some(px) = state.pixmaps.get(&mask_id) {
-                    Some((px.framebuffer.width(), px.framebuffer.height(), px.framebuffer.data()))
-                } else { state.windows.get(&mask_id).map(|win| (win.framebuffer.width(), win.framebuffer.height(), win.framebuffer.data())) };
+                    Some((
+                        px.framebuffer.width(),
+                        px.framebuffer.height(),
+                        px.framebuffer.data(),
+                    ))
+                } else {
+                    state.windows.get(&mask_id).map(|win| {
+                        (
+                            win.framebuffer.width(),
+                            win.framebuffer.height(),
+                            win.framebuffer.data(),
+                        )
+                    })
+                };
                 fb_info.map(|(w, h, data)| {
                     // Extract alpha channel from BGRA data
                     let stride = (w as usize) * 4;
@@ -679,13 +710,19 @@ pub(crate) fn resolve_gradient_pixels(
         .unwrap_or(0);
 
     if let Some(grad) = state.render.linear_gradients.get(&grad_id) {
-        return Some(gradient::rasterize_linear_gradient(grad, tx, rep, src_x, src_y, width, height));
+        return Some(gradient::rasterize_linear_gradient(
+            grad, tx, rep, src_x, src_y, width, height,
+        ));
     }
     if let Some(grad) = state.render.radial_gradients.get(&grad_id) {
-        return Some(gradient::rasterize_radial_gradient(grad, tx, rep, src_x, src_y, width, height));
+        return Some(gradient::rasterize_radial_gradient(
+            grad, tx, rep, src_x, src_y, width, height,
+        ));
     }
     if let Some(grad) = state.render.conical_gradients.get(&grad_id) {
-        return Some(gradient::rasterize_conical_gradient(grad, tx, rep, src_x, src_y, width, height));
+        return Some(gradient::rasterize_conical_gradient(
+            grad, tx, rep, src_x, src_y, width, height,
+        ));
     }
     None
 }
@@ -717,7 +754,8 @@ pub(crate) fn bilinear_sample(
         let in_bounds = fx >= 0 && fy >= 0 && (fx as u32) < fb_w && (fy as u32) < fb_h;
         if !in_bounds {
             if repeat != 0 && fb_w > 0 && fb_h > 0 {
-                let (rx, ry) = gradient::apply_pixmap_repeat(fx, fy, fb_w as i32, fb_h as i32, repeat);
+                let (rx, ry) =
+                    gradient::apply_pixmap_repeat(fx, fy, fb_w as i32, fb_h as i32, repeat);
                 fx = rx as i32;
                 fy = ry as i32;
             } else {
@@ -777,7 +815,9 @@ pub(crate) fn resolve_source_pixels(
     }
 
     // Check if it's a gradient (referenced directly).
-    if let Some(result) = resolve_gradient_pixels(state, src_pic, src_pic, src_x, src_y, width, height) {
+    if let Some(result) =
+        resolve_gradient_pixels(state, src_pic, src_pic, src_x, src_y, width, height)
+    {
         return Some(result);
     }
 
@@ -803,7 +843,9 @@ pub(crate) fn resolve_source_pixels(
     }
 
     // Check if the picture wraps a gradient.
-    if let Some(result) = resolve_gradient_pixels(state, src_pic, drawable, src_x, src_y, width, height) {
+    if let Some(result) =
+        resolve_gradient_pixels(state, src_pic, drawable, src_x, src_y, width, height)
+    {
         return Some(result);
     }
 
@@ -828,13 +870,9 @@ pub(crate) fn resolve_source_pixels(
     // format. Wraps the per-format byte-shuffling that lets the same
     // pixmap be read through (say) `xBGR32` and `ARGB32` and produce
     // different RGB.
-    let copy_pixel = |fb_data: &[u8],
-                      src_off: usize,
-                      out: &mut [u8],
-                      dst_off: usize| {
+    let copy_pixel = |fb_data: &[u8], src_off: usize, out: &mut [u8], dst_off: usize| {
         if src_off + 3 < fb_data.len() && dst_off + 3 < out.len() {
-            let (b, g, r, a) =
-                decode_pixel_bgra(format_id, &fb_data[src_off..src_off + 4]);
+            let (b, g, r, a) = decode_pixel_bgra(format_id, &fb_data[src_off..src_off + 4]);
             out[dst_off] = b;
             out[dst_off + 1] = g;
             out[dst_off + 2] = r;
@@ -866,8 +904,7 @@ pub(crate) fn resolve_source_pixels(
 
                 if use_bilinear {
                     let (b, g, r, a) = bilinear_sample(
-                        fb_data, fb_stride, fb_w, fb_h,
-                        format_id, repeat, sx_f, sy_f,
+                        fb_data, fb_stride, fb_w, fb_h, format_id, repeat, sx_f, sy_f,
                     );
                     if dst_off + 3 < pixels.len() {
                         pixels[dst_off] = b;
@@ -879,13 +916,17 @@ pub(crate) fn resolve_source_pixels(
                     // Nearest-neighbour fetch from the framebuffer.
                     let mut sxi = sx_f.floor() as i32;
                     let mut syi = sy_f.floor() as i32;
-                    let in_bounds = sxi >= 0
-                        && syi >= 0
-                        && (sxi as u32) < fb_w
-                        && (syi as u32) < fb_h;
+                    let in_bounds =
+                        sxi >= 0 && syi >= 0 && (sxi as u32) < fb_w && (syi as u32) < fb_h;
                     if !in_bounds {
                         if repeat != 0 && fb_w > 0 && fb_h > 0 {
-                            let (rx, ry) = gradient::apply_pixmap_repeat(sxi, syi, fb_w as i32, fb_h as i32, repeat);
+                            let (rx, ry) = gradient::apply_pixmap_repeat(
+                                sxi,
+                                syi,
+                                fb_w as i32,
+                                fb_h as i32,
+                                repeat,
+                            );
                             sxi = rx as i32;
                             syi = ry as i32;
                         } else {
@@ -921,10 +962,8 @@ pub(crate) fn resolve_source_pixels(
                 if use_bilinear {
                     let sx = src_x as f64 + col as f64 + 0.5;
                     let sy = src_y as f64 + row as f64 + 0.5;
-                    let (b, g, r, a) = bilinear_sample(
-                        fb_data, fb_stride, fb_w, fb_h,
-                        format_id, repeat, sx, sy,
-                    );
+                    let (b, g, r, a) =
+                        bilinear_sample(fb_data, fb_stride, fb_w, fb_h, format_id, repeat, sx, sy);
                     let dst_off = (row * w + col) as usize * 4;
                     if dst_off + 3 < pixels.len() {
                         pixels[dst_off] = b;
@@ -935,7 +974,13 @@ pub(crate) fn resolve_source_pixels(
                 } else {
                     let raw_sy = src_y as i32 + row as i32;
                     let raw_sx = src_x as i32 + col as i32;
-                    let (sx, sy) = gradient::apply_pixmap_repeat(raw_sx, raw_sy, fb_w as i32, fb_h as i32, repeat);
+                    let (sx, sy) = gradient::apply_pixmap_repeat(
+                        raw_sx,
+                        raw_sy,
+                        fb_w as i32,
+                        fb_h as i32,
+                        repeat,
+                    );
                     let src_off = sy as usize * fb_stride + sx as usize * 4;
                     let dst_off = (row * w + col) as usize * 4;
                     copy_pixel(fb_data, src_off, &mut pixels, dst_off);
@@ -958,9 +1003,14 @@ pub(crate) fn resolve_source_pixels(
                 let dst_off = (row as u32 * w + col as u32) as usize * 4;
                 if use_bilinear {
                     let (b, g, r, a) = bilinear_sample(
-                        fb_data, fb_stride, fb_w, fb_h,
-                        format_id, repeat,
-                        sx as f64 + 0.5, sy as f64 + 0.5,
+                        fb_data,
+                        fb_stride,
+                        fb_w,
+                        fb_h,
+                        format_id,
+                        repeat,
+                        sx as f64 + 0.5,
+                        sy as f64 + 0.5,
                     );
                     if dst_off + 3 < pixels.len() {
                         pixels[dst_off] = b;
@@ -1096,7 +1146,7 @@ mod tests {
     #[test]
     fn pict_op_atop() {
         let (fs, fd) = pict_op_factors(9, 128, 200);
-        assert_eq!(fs, 200);       // Da
+        assert_eq!(fs, 200); // Da
         assert_eq!(fd, 255 - 128); // 1 - Sa
     }
 
@@ -1104,7 +1154,7 @@ mod tests {
     fn pict_op_atop_reverse() {
         let (fs, fd) = pict_op_factors(10, 128, 200);
         assert_eq!(fs, 255 - 200); // 1 - Da
-        assert_eq!(fd, 128);       // Sa
+        assert_eq!(fd, 128); // Sa
     }
 
     #[test]
@@ -1201,7 +1251,7 @@ mod tests {
     fn composite_non_alpha_dst_forces_opaque() {
         let mut dst = [100u8, 150, 200, 0];
         composite_pixel(0, &mut dst, 0, 0, 0, 0, false); // Clear on non-alpha
-        // dst_has_alpha=false: alpha byte forced to 255
+                                                         // dst_has_alpha=false: alpha byte forced to 255
         assert_eq!(dst[3], 255);
     }
 
@@ -1238,10 +1288,9 @@ mod tests {
         // means R channel fully opaque, G channel half, B channel zero.
         let mut dst = [0u8, 0, 0, 255]; // opaque black (BGRA)
         composite_pixel_ca(
-            3,    // PictOpOver
-            &mut dst,
-            0, 0, 255, 255,     // src: B=0, G=0, R=255, A=255
-            0, 128, 255, 255,   // sa_b=0, sa_g=128, sa_r=255, sa_a=255
+            3, // PictOpOver
+            &mut dst, 0, 0, 255, 255, // src: B=0, G=0, R=255, A=255
+            0, 128, 255, 255, // sa_b=0, sa_g=128, sa_r=255, sa_a=255
             true,
         );
         // R channel: src_r=255, sa_r=255, dst_r=0 → Fd=1-sa_r=0 → result=255
@@ -1258,10 +1307,9 @@ mod tests {
         // so for Over: Fd = 1-sa = 1, Fs = 1. Result = src(0) + dst * 1 = dst.
         let mut dst = [100u8, 150, 200, 255]; // BGRA
         composite_pixel_ca(
-            3,    // PictOpOver
-            &mut dst,
-            0, 0, 0, 0,   // src fully modulated to zero
-            0, 0, 0, 0,   // all channel alphas zero → Fd = 255
+            3, // PictOpOver
+            &mut dst, 0, 0, 0, 0, // src fully modulated to zero
+            0, 0, 0, 0, // all channel alphas zero → Fd = 255
             true,
         );
         // With src=0 and Fd=255: result = 0 + dst * 1 = dst preserved.
@@ -1275,17 +1323,16 @@ mod tests {
         // PictOpSrc with CA: dst should be replaced by src regardless of dst.
         let mut dst = [100u8, 150, 200, 255];
         composite_pixel_ca(
-            1,    // PictOpSrc
-            &mut dst,
-            10, 20, 30, 128,    // src BGRA
-            64, 128, 255, 128,  // per-channel sa
+            1, // PictOpSrc
+            &mut dst, 10, 20, 30, 128, // src BGRA
+            64, 128, 255, 128, // per-channel sa
             true,
         );
         // Src op: Fs=1, Fd=0, so result = src
-        assert_eq!(dst[0], 10);   // B
-        assert_eq!(dst[1], 20);   // G
-        assert_eq!(dst[2], 30);   // R
-        assert_eq!(dst[3], 128);  // A
+        assert_eq!(dst[0], 10); // B
+        assert_eq!(dst[1], 20); // G
+        assert_eq!(dst[2], 30); // R
+        assert_eq!(dst[3], 128); // A
     }
 
     // -----------------------------------------------------------------------
@@ -1318,9 +1365,14 @@ mod tests {
         // A single red pixel sampled at its center should return red.
         let fb_data = vec![0u8, 0, 255, 255]; // BGRA: red
         let (b, g, r, a) = bilinear_sample(
-            &fb_data, 4, 1, 1,
-            PICTFORMAT_ARGB32, 1, // repeat=Normal
-            0.5, 0.5,
+            &fb_data,
+            4,
+            1,
+            1,
+            PICTFORMAT_ARGB32,
+            1, // repeat=Normal
+            0.5,
+            0.5,
         );
         assert_eq!((r, g, b, a), (255, 0, 0, 255));
     }
@@ -1330,11 +1382,16 @@ mod tests {
         // Two pixels: red and green, sample at boundary
         let mut fb_data = vec![0u8; 8];
         fb_data[0..4].copy_from_slice(&[0, 0, 255, 255]); // red BGRA
-        fb_data[4..8].copy_from_slice(&[0, 255, 0, 255]);   // green BGRA
+        fb_data[4..8].copy_from_slice(&[0, 255, 0, 255]); // green BGRA
         let (b, g, r, a) = bilinear_sample(
-            &fb_data, 8, 2, 1,
-            PICTFORMAT_ARGB32, 0, // no repeat
-            1.0, 0.5,            // at boundary between pixels
+            &fb_data,
+            8,
+            2,
+            1,
+            PICTFORMAT_ARGB32,
+            0, // no repeat
+            1.0,
+            0.5, // at boundary between pixels
         );
         // Should be roughly a mix of red and green
         assert!(r > 100 && r < 200);
@@ -1353,7 +1410,7 @@ mod tests {
         // With Sa=128, Da=64: Fa = min(1, (255-64)/128) = min(255, (191*255)/128) ≈ 380 → clamped to 255
         let (fa, fb) = super::pict_op_factors(13, 128, 64);
         assert_eq!(fb, 255); // Fb = 1.0 always for Saturate
-        assert!(fa > 0);     // Fa should be positive
+        assert!(fa > 0); // Fa should be positive
     }
 
     #[test]
@@ -1376,11 +1433,15 @@ mod tests {
     #[test]
     fn pict_op_all_44_operators_mapped() {
         // Verify all 44 operators (0-12, 16-27, 32-43) return reasonable values
-        let standard_ops = [0,1,2,3,4,5,6,7,8,9,10,11,12,13]; // 0-13
-        let disjoint_ops = [16,17,18,19,20,21,22,23,24,25,26,27]; // 16-27
-        let conjoint_ops = [32,33,34,35,36,37,38,39,40,41,42,43]; // 32-43
+        let standard_ops = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13]; // 0-13
+        let disjoint_ops = [16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27]; // 16-27
+        let conjoint_ops = [32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43]; // 32-43
 
-        for &op in standard_ops.iter().chain(disjoint_ops.iter()).chain(conjoint_ops.iter()) {
+        for &op in standard_ops
+            .iter()
+            .chain(disjoint_ops.iter())
+            .chain(conjoint_ops.iter())
+        {
             let (fa, fb) = super::pict_op_factors(op, 128, 128);
             assert!(fa >= 0 && fa <= 255, "op {op}: Fa={fa} out of range");
             assert!(fb >= 0 && fb <= 255, "op {op}: Fb={fb} out of range");
@@ -1485,8 +1546,7 @@ mod tests {
         let mut dst = [255u8, 0, 0, 255]; // BGRA: blue, opaque
         composite_pixel(
             3, // PictOpOver
-            &mut dst,
-            0, 255, 0, 128, // src: B=0, G=255, R=0, A=128
+            &mut dst, 0, 255, 0, 128, // src: B=0, G=255, R=0, A=128
             true,
         );
         // sa=128, da=255, fs=255, fd=255-128=127
@@ -1495,7 +1555,7 @@ mod tests {
         // R: blend_chan(0, 0, 255, 127) = (0 + 0 + 127)/255 = 0
         assert_eq!(dst[1], 255); // G: fully green
         assert_eq!(dst[0], 127); // B: attenuated blue
-        assert_eq!(dst[2], 0);   // R: none
+        assert_eq!(dst[2], 0); // R: none
     }
 
     #[test]
@@ -1665,4 +1725,3 @@ mod tests {
         assert_eq!(fb, 0);
     }
 }
-

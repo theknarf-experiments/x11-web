@@ -24,9 +24,8 @@ pub use types::{CharInfo, GlyphBitmap};
 static FREETYPE_LIB: OnceLock<freetype::Library> = OnceLock::new();
 
 fn ft_library() -> &'static freetype::Library {
-    FREETYPE_LIB.get_or_init(|| {
-        freetype::Library::init().expect("Failed to initialise FreeType library")
-    })
+    FREETYPE_LIB
+        .get_or_init(|| freetype::Library::init().expect("Failed to initialise FreeType library"))
 }
 
 // ---------------------------------------------------------------------------
@@ -61,12 +60,26 @@ fn fontconfig_list_fonts() -> Vec<(String, String, std::path::PathBuf)> {
         }
         let path = std::path::PathBuf::from(parts[0]);
         // Only accept TrueType and OpenType fonts
-        let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("").to_lowercase();
+        let ext = path
+            .extension()
+            .and_then(|e| e.to_str())
+            .unwrap_or("")
+            .to_lowercase();
         if ext != "ttf" && ext != "otf" && ext != "ttc" {
             continue;
         }
-        let family = parts[1].split(',').next().unwrap_or(parts[1]).trim().to_string();
-        let style = parts[2].split(',').next().unwrap_or(parts[2]).trim().to_string();
+        let family = parts[1]
+            .split(',')
+            .next()
+            .unwrap_or(parts[1])
+            .trim()
+            .to_string();
+        let style = parts[2]
+            .split(',')
+            .next()
+            .unwrap_or(parts[2])
+            .trim()
+            .to_string();
         results.push((family, style, path));
     }
 
@@ -76,12 +89,17 @@ fn fontconfig_list_fonts() -> Vec<(String, String, std::path::PathBuf)> {
 
 /// Build an XLFD name for a scalable font.
 fn build_xlfd(family: &str, style: &str, pixel_size: u32) -> String {
-    let weight = if style.to_lowercase().contains("bold") { "bold" } else { "medium" };
-    let slant = if style.to_lowercase().contains("italic") || style.to_lowercase().contains("oblique") {
-        "i"
+    let weight = if style.to_lowercase().contains("bold") {
+        "bold"
     } else {
-        "r"
+        "medium"
     };
+    let slant =
+        if style.to_lowercase().contains("italic") || style.to_lowercase().contains("oblique") {
+            "i"
+        } else {
+            "r"
+        };
     // Construct a standard XLFD name
     format!(
         "-misc-{}-{}-{}-normal--{}-{}-75-75-p-0-iso8859-1",
@@ -197,7 +215,10 @@ impl FontManager {
             }
         }
 
-        info!("Discovered {} scalable font variants", self.scalable_fonts.len());
+        info!(
+            "Discovered {} scalable font variants",
+            self.scalable_fonts.len()
+        );
     }
 
     fn scan_font_directories(&mut self) {
@@ -266,7 +287,11 @@ impl FontManager {
                     .to_string_lossy()
                     .to_lowercase();
                 // Also strip .pcf or .bdf from double extensions
-                let stem = stem.strip_suffix(".pcf").or(stem.strip_suffix(".bdf")).unwrap_or(&stem).to_string();
+                let stem = stem
+                    .strip_suffix(".pcf")
+                    .or(stem.strip_suffix(".bdf"))
+                    .unwrap_or(&stem)
+                    .to_string();
                 if self.fonts.contains_key(&stem) && !self.fonts.contains_key(&xlfd_lower) {
                     if let Some(font) = self.fonts.get(&stem).cloned() {
                         self.fonts.insert(xlfd_lower, font);
@@ -334,7 +359,10 @@ impl FontManager {
 
         // Try scalable fonts: match by family name or XLFD pattern
         if let Some(sf) = self.find_scalable_font(&name_lower) {
-            debug!("Loading scalable font for '{}': {} ({}pt)", name, sf.xlfd_name, sf.pixel_size);
+            debug!(
+                "Loading scalable font for '{}': {} ({}pt)",
+                name, sf.xlfd_name, sf.pixel_size
+            );
             if let Some(bf) = sf.to_bitmap_font() {
                 let key = bf.name.to_lowercase();
                 self.fonts.insert(key.clone(), bf);
@@ -386,12 +414,20 @@ impl FontManager {
         } else {
             0
         };
-        let target_size = if requested_size > 0 { requested_size } else { 13 };
+        let target_size = if requested_size > 0 {
+            requested_size
+        } else {
+            13
+        };
 
         // Extract family name hints from the pattern
         let family_hint = if name_lower.starts_with('-') {
             let fields: Vec<&str> = name_lower.split('-').collect();
-            if fields.len() > 2 { fields[2].to_string() } else { String::new() }
+            if fields.len() > 2 {
+                fields[2].to_string()
+            } else {
+                String::new()
+            }
         } else {
             // Might be a short name like "dejavu sans mono"
             name_lower.replace('-', " ")

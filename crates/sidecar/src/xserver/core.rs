@@ -20,13 +20,13 @@ pub(crate) const SCREEN_HEIGHT: u16 = 768;
 /// Returns the root depth (24) for unknown visuals as a safe fallback.
 pub(crate) fn depth_for_visual(visual: u32) -> u8 {
     match visual {
-        0x40 => 32,                     // TrueColor ARGB
-        0x21 | 0x22 => 24,             // TrueColor / DirectColor 24-bit
-        0x24 => 16,                     // TrueColor 16-bit
-        0x23 | 0x26 | 0x27 => 8,       // PseudoColor / GrayScale / StaticColor
-        0x25 => 4,                      // StaticGray 4-bit
-        0 => 0,                         // InputOnly windows
-        _ => 24,                        // default to root depth
+        0x40 => 32,              // TrueColor ARGB
+        0x21 | 0x22 => 24,       // TrueColor / DirectColor 24-bit
+        0x24 => 16,              // TrueColor 16-bit
+        0x23 | 0x26 | 0x27 => 8, // PseudoColor / GrayScale / StaticColor
+        0x25 => 4,               // StaticGray 4-bit
+        0 => 0,                  // InputOnly windows
+        _ => 24,                 // default to root depth
     }
 }
 
@@ -119,15 +119,23 @@ macro_rules! require_len {
     ($data:expr, $min:expr, $seq:expr, $major:expr) => {
         if $data.len() < $min {
             return $crate::xserver::core::build_error(
-                $crate::xserver::core::BAD_LENGTH, $seq, 0, $major, 0,
+                $crate::xserver::core::BAD_LENGTH,
+                $seq,
+                0,
+                $major,
+                0,
             );
         }
     };
     ($data:expr, $min:expr, $seq:expr, $major:expr, $minor:expr, $msb:expr) => {
         if $data.len() < $min {
             return $crate::xserver::core::build_error_bo(
-                $crate::xserver::core::BAD_LENGTH, $seq, $data.len() as u32,
-                $major, $minor as u16, $msb,
+                $crate::xserver::core::BAD_LENGTH,
+                $seq,
+                $data.len() as u32,
+                $major,
+                $minor as u16,
+                $msb,
             );
         }
     };
@@ -135,12 +143,32 @@ macro_rules! require_len {
 pub(crate) use require_len;
 
 /// Build an X11 error reply (32 bytes) in little-endian byte order.
-pub(crate) fn build_error(error_code: u8, seq: u16, bad_value: u32, major_opcode: u8, minor_opcode: u16) -> Vec<u8> {
-    build_error_bo(error_code, seq, bad_value, major_opcode, minor_opcode, false)
+pub(crate) fn build_error(
+    error_code: u8,
+    seq: u16,
+    bad_value: u32,
+    major_opcode: u8,
+    minor_opcode: u16,
+) -> Vec<u8> {
+    build_error_bo(
+        error_code,
+        seq,
+        bad_value,
+        major_opcode,
+        minor_opcode,
+        false,
+    )
 }
 
 /// Build an X11 error reply (32 bytes) with specified byte order.
-pub(crate) fn build_error_bo(error_code: u8, seq: u16, bad_value: u32, major_opcode: u8, minor_opcode: u16, msb_first: bool) -> Vec<u8> {
+pub(crate) fn build_error_bo(
+    error_code: u8,
+    seq: u16,
+    bad_value: u32,
+    major_opcode: u8,
+    minor_opcode: u16,
+    msb_first: bool,
+) -> Vec<u8> {
     let mut err = [0u8; 32];
     err[0] = 0; // Error indicator
     err[1] = error_code;
@@ -171,9 +199,19 @@ pub(crate) fn read_u16_bo(data: &[u8], offset: usize, msb_first: bool) -> u16 {
 #[inline]
 pub(crate) fn read_u32_bo(data: &[u8], offset: usize, msb_first: bool) -> u32 {
     if msb_first {
-        u32::from_be_bytes([data[offset], data[offset + 1], data[offset + 2], data[offset + 3]])
+        u32::from_be_bytes([
+            data[offset],
+            data[offset + 1],
+            data[offset + 2],
+            data[offset + 3],
+        ])
     } else {
-        u32::from_le_bytes([data[offset], data[offset + 1], data[offset + 2], data[offset + 3]])
+        u32::from_le_bytes([
+            data[offset],
+            data[offset + 1],
+            data[offset + 2],
+            data[offset + 3],
+        ])
     }
 }
 
@@ -190,21 +228,33 @@ pub(crate) fn read_i16_bo(data: &[u8], offset: usize, msb_first: bool) -> i16 {
 /// Helper to write u16 into a buffer in the specified byte order.
 #[inline]
 pub(crate) fn write_u16_bo(buf: &mut [u8], offset: usize, val: u16, msb_first: bool) {
-    let bytes = if msb_first { val.to_be_bytes() } else { val.to_le_bytes() };
+    let bytes = if msb_first {
+        val.to_be_bytes()
+    } else {
+        val.to_le_bytes()
+    };
     buf[offset..offset + 2].copy_from_slice(&bytes);
 }
 
 /// Helper to write u32 into a buffer in the specified byte order.
 #[inline]
 pub(crate) fn write_u32_bo(buf: &mut [u8], offset: usize, val: u32, msb_first: bool) {
-    let bytes = if msb_first { val.to_be_bytes() } else { val.to_le_bytes() };
+    let bytes = if msb_first {
+        val.to_be_bytes()
+    } else {
+        val.to_le_bytes()
+    };
     buf[offset..offset + 4].copy_from_slice(&bytes);
 }
 
 /// Helper to write i16 into a buffer in the specified byte order.
 #[inline]
 pub(crate) fn write_i16_bo(buf: &mut [u8], offset: usize, val: i16, msb_first: bool) {
-    let bytes = if msb_first { val.to_be_bytes() } else { val.to_le_bytes() };
+    let bytes = if msb_first {
+        val.to_be_bytes()
+    } else {
+        val.to_le_bytes()
+    };
     buf[offset..offset + 2].copy_from_slice(&bytes);
 }
 
@@ -464,7 +514,11 @@ mod tests {
         let mut buf = [0u8; 2];
         for &v in values {
             write_u16_bo(&mut buf, 0, v, false);
-            assert_eq!(read_u16_bo(&buf, 0, false), v, "round-trip LE u16 failed for {v}");
+            assert_eq!(
+                read_u16_bo(&buf, 0, false),
+                v,
+                "round-trip LE u16 failed for {v}"
+            );
         }
     }
 
@@ -474,7 +528,11 @@ mod tests {
         let mut buf = [0u8; 2];
         for &v in values {
             write_u16_bo(&mut buf, 0, v, true);
-            assert_eq!(read_u16_bo(&buf, 0, true), v, "round-trip BE u16 failed for {v}");
+            assert_eq!(
+                read_u16_bo(&buf, 0, true),
+                v,
+                "round-trip BE u16 failed for {v}"
+            );
         }
     }
 
@@ -484,7 +542,11 @@ mod tests {
         let mut buf = [0u8; 4];
         for &v in values {
             write_u32_bo(&mut buf, 0, v, false);
-            assert_eq!(read_u32_bo(&buf, 0, false), v, "round-trip LE u32 failed for {v}");
+            assert_eq!(
+                read_u32_bo(&buf, 0, false),
+                v,
+                "round-trip LE u32 failed for {v}"
+            );
         }
     }
 
@@ -494,7 +556,11 @@ mod tests {
         let mut buf = [0u8; 4];
         for &v in values {
             write_u32_bo(&mut buf, 0, v, true);
-            assert_eq!(read_u32_bo(&buf, 0, true), v, "round-trip BE u32 failed for {v}");
+            assert_eq!(
+                read_u32_bo(&buf, 0, true),
+                v,
+                "round-trip BE u32 failed for {v}"
+            );
         }
     }
 
@@ -504,7 +570,11 @@ mod tests {
         let mut buf = [0u8; 2];
         for &v in values {
             write_i16_bo(&mut buf, 0, v, false);
-            assert_eq!(read_i16_bo(&buf, 0, false), v, "round-trip LE i16 failed for {v}");
+            assert_eq!(
+                read_i16_bo(&buf, 0, false),
+                v,
+                "round-trip LE i16 failed for {v}"
+            );
         }
     }
 
@@ -514,7 +584,11 @@ mod tests {
         let mut buf = [0u8; 2];
         for &v in values {
             write_i16_bo(&mut buf, 0, v, true);
-            assert_eq!(read_i16_bo(&buf, 0, true), v, "round-trip BE i16 failed for {v}");
+            assert_eq!(
+                read_i16_bo(&buf, 0, true),
+                v,
+                "round-trip BE i16 failed for {v}"
+            );
         }
     }
 
@@ -646,10 +720,23 @@ mod tests {
     #[test]
     fn error_codes_are_unique_and_in_range() {
         let codes: &[u8] = &[
-            BAD_REQUEST, BAD_VALUE, BAD_WINDOW, BAD_PIXMAP, BAD_ATOM,
-            BAD_CURSOR, BAD_FONT, BAD_MATCH, BAD_DRAWABLE, BAD_ACCESS,
-            BAD_ALLOC, BAD_COLOR, BAD_GC, BAD_ID_CHOICE, BAD_NAME,
-            BAD_LENGTH, BAD_IMPLEMENTATION,
+            BAD_REQUEST,
+            BAD_VALUE,
+            BAD_WINDOW,
+            BAD_PIXMAP,
+            BAD_ATOM,
+            BAD_CURSOR,
+            BAD_FONT,
+            BAD_MATCH,
+            BAD_DRAWABLE,
+            BAD_ACCESS,
+            BAD_ALLOC,
+            BAD_COLOR,
+            BAD_GC,
+            BAD_ID_CHOICE,
+            BAD_NAME,
+            BAD_LENGTH,
+            BAD_IMPLEMENTATION,
         ];
         // All 17 codes
         assert_eq!(codes.len(), 17);
@@ -752,7 +839,10 @@ mod tests {
         assert_eq!(err[0], 0); // Error indicator
         assert_eq!(err[1], BAD_WINDOW); // Error code
         assert_eq!(u16::from_le_bytes([err[2], err[3]]), 42); // Sequence
-        assert_eq!(u32::from_le_bytes([err[4], err[5], err[6], err[7]]), 0x12345678); // Bad value
+        assert_eq!(
+            u32::from_le_bytes([err[4], err[5], err[6], err[7]]),
+            0x12345678
+        ); // Bad value
         assert_eq!(err[10], 12); // Major opcode
     }
 
@@ -771,7 +861,10 @@ mod tests {
         assert_eq!(err[0], 0); // Error indicator
         assert_eq!(err[1], BAD_VALUE);
         assert_eq!(u16::from_be_bytes([err[2], err[3]]), 0x1234); // Sequence (big-endian)
-        assert_eq!(u32::from_be_bytes([err[4], err[5], err[6], err[7]]), 0xDEADBEEF);
+        assert_eq!(
+            u32::from_be_bytes([err[4], err[5], err[6], err[7]]),
+            0xDEADBEEF
+        );
     }
 
     // -----------------------------------------------------------------------
@@ -819,21 +912,48 @@ mod tests {
     fn all_33_event_types_are_contiguous() {
         // X11 spec defines event codes 2-34 (33 events)
         let events = [
-            KEY_PRESS_EVENT, KEY_RELEASE_EVENT, BUTTON_PRESS_EVENT,
-            BUTTON_RELEASE_EVENT, MOTION_NOTIFY_EVENT, ENTER_NOTIFY_EVENT,
-            LEAVE_NOTIFY_EVENT, FOCUS_IN_EVENT, FOCUS_OUT_EVENT,
-            KEYMAP_NOTIFY_EVENT, EXPOSE_EVENT, GRAPHICS_EXPOSURE_EVENT,
-            NO_EXPOSURE_EVENT, VISIBILITY_NOTIFY_EVENT, CREATE_NOTIFY_EVENT,
-            DESTROY_NOTIFY_EVENT, UNMAP_NOTIFY_EVENT, MAP_NOTIFY_EVENT,
-            MAP_REQUEST_EVENT, REPARENT_NOTIFY_EVENT, CONFIGURE_NOTIFY_EVENT,
-            CONFIGURE_REQUEST_EVENT, GRAVITY_NOTIFY_EVENT, RESIZE_REQUEST_EVENT,
-            CIRCULATE_NOTIFY_EVENT, CIRCULATE_REQUEST_EVENT, PROPERTY_NOTIFY_EVENT,
-            SELECTION_CLEAR_EVENT, SELECTION_REQUEST_EVENT, SELECTION_NOTIFY_EVENT,
-            COLOURMAP_NOTIFY_EVENT, CLIENT_MESSAGE_EVENT, MAPPING_NOTIFY_EVENT,
+            KEY_PRESS_EVENT,
+            KEY_RELEASE_EVENT,
+            BUTTON_PRESS_EVENT,
+            BUTTON_RELEASE_EVENT,
+            MOTION_NOTIFY_EVENT,
+            ENTER_NOTIFY_EVENT,
+            LEAVE_NOTIFY_EVENT,
+            FOCUS_IN_EVENT,
+            FOCUS_OUT_EVENT,
+            KEYMAP_NOTIFY_EVENT,
+            EXPOSE_EVENT,
+            GRAPHICS_EXPOSURE_EVENT,
+            NO_EXPOSURE_EVENT,
+            VISIBILITY_NOTIFY_EVENT,
+            CREATE_NOTIFY_EVENT,
+            DESTROY_NOTIFY_EVENT,
+            UNMAP_NOTIFY_EVENT,
+            MAP_NOTIFY_EVENT,
+            MAP_REQUEST_EVENT,
+            REPARENT_NOTIFY_EVENT,
+            CONFIGURE_NOTIFY_EVENT,
+            CONFIGURE_REQUEST_EVENT,
+            GRAVITY_NOTIFY_EVENT,
+            RESIZE_REQUEST_EVENT,
+            CIRCULATE_NOTIFY_EVENT,
+            CIRCULATE_REQUEST_EVENT,
+            PROPERTY_NOTIFY_EVENT,
+            SELECTION_CLEAR_EVENT,
+            SELECTION_REQUEST_EVENT,
+            SELECTION_NOTIFY_EVENT,
+            COLOURMAP_NOTIFY_EVENT,
+            CLIENT_MESSAGE_EVENT,
+            MAPPING_NOTIFY_EVENT,
         ];
         assert_eq!(events.len(), 33);
         for (i, &ev) in events.iter().enumerate() {
-            assert_eq!(ev, (i as u8) + 2, "event at index {i} should be {}", (i as u8) + 2);
+            assert_eq!(
+                ev,
+                (i as u8) + 2,
+                "event at index {i} should be {}",
+                (i as u8) + 2
+            );
         }
     }
 
@@ -844,15 +964,30 @@ mod tests {
     #[test]
     fn event_masks_are_powers_of_two() {
         let masks = [
-            KEY_PRESS_MASK, KEY_RELEASE_MASK, BUTTON_PRESS_MASK,
-            BUTTON_RELEASE_MASK, ENTER_WINDOW_MASK, LEAVE_WINDOW_MASK,
-            POINTER_MOTION_MASK, POINTER_MOTION_HINT_MASK,
-            BUTTON1_MOTION_MASK, BUTTON2_MOTION_MASK, BUTTON3_MOTION_MASK,
-            BUTTON4_MOTION_MASK, BUTTON5_MOTION_MASK, BUTTON_MOTION_MASK,
-            KEYMAP_STATE_MASK, EXPOSURE_MASK, VISIBILITY_CHANGE_MASK,
-            STRUCTURE_NOTIFY_MASK, RESIZE_REDIRECT_MASK,
-            SUBSTRUCTURE_NOTIFY_MASK, SUBSTRUCTURE_REDIRECT_MASK,
-            FOCUS_CHANGE_MASK, PROPERTY_CHANGE_MASK, COLOURMAP_CHANGE_MASK,
+            KEY_PRESS_MASK,
+            KEY_RELEASE_MASK,
+            BUTTON_PRESS_MASK,
+            BUTTON_RELEASE_MASK,
+            ENTER_WINDOW_MASK,
+            LEAVE_WINDOW_MASK,
+            POINTER_MOTION_MASK,
+            POINTER_MOTION_HINT_MASK,
+            BUTTON1_MOTION_MASK,
+            BUTTON2_MOTION_MASK,
+            BUTTON3_MOTION_MASK,
+            BUTTON4_MOTION_MASK,
+            BUTTON5_MOTION_MASK,
+            BUTTON_MOTION_MASK,
+            KEYMAP_STATE_MASK,
+            EXPOSURE_MASK,
+            VISIBILITY_CHANGE_MASK,
+            STRUCTURE_NOTIFY_MASK,
+            RESIZE_REDIRECT_MASK,
+            SUBSTRUCTURE_NOTIFY_MASK,
+            SUBSTRUCTURE_REDIRECT_MASK,
+            FOCUS_CHANGE_MASK,
+            PROPERTY_CHANGE_MASK,
+            COLOURMAP_CHANGE_MASK,
             OWNER_GRAB_BUTTON_MASK,
         ];
         for &m in &masks {
@@ -892,15 +1027,30 @@ mod tests {
     #[test]
     fn event_masks_are_all_unique() {
         let masks = [
-            KEY_PRESS_MASK, KEY_RELEASE_MASK, BUTTON_PRESS_MASK,
-            BUTTON_RELEASE_MASK, ENTER_WINDOW_MASK, LEAVE_WINDOW_MASK,
-            POINTER_MOTION_MASK, POINTER_MOTION_HINT_MASK,
-            BUTTON1_MOTION_MASK, BUTTON2_MOTION_MASK, BUTTON3_MOTION_MASK,
-            BUTTON4_MOTION_MASK, BUTTON5_MOTION_MASK, BUTTON_MOTION_MASK,
-            KEYMAP_STATE_MASK, EXPOSURE_MASK, VISIBILITY_CHANGE_MASK,
-            STRUCTURE_NOTIFY_MASK, RESIZE_REDIRECT_MASK,
-            SUBSTRUCTURE_NOTIFY_MASK, SUBSTRUCTURE_REDIRECT_MASK,
-            FOCUS_CHANGE_MASK, PROPERTY_CHANGE_MASK, COLOURMAP_CHANGE_MASK,
+            KEY_PRESS_MASK,
+            KEY_RELEASE_MASK,
+            BUTTON_PRESS_MASK,
+            BUTTON_RELEASE_MASK,
+            ENTER_WINDOW_MASK,
+            LEAVE_WINDOW_MASK,
+            POINTER_MOTION_MASK,
+            POINTER_MOTION_HINT_MASK,
+            BUTTON1_MOTION_MASK,
+            BUTTON2_MOTION_MASK,
+            BUTTON3_MOTION_MASK,
+            BUTTON4_MOTION_MASK,
+            BUTTON5_MOTION_MASK,
+            BUTTON_MOTION_MASK,
+            KEYMAP_STATE_MASK,
+            EXPOSURE_MASK,
+            VISIBILITY_CHANGE_MASK,
+            STRUCTURE_NOTIFY_MASK,
+            RESIZE_REDIRECT_MASK,
+            SUBSTRUCTURE_NOTIFY_MASK,
+            SUBSTRUCTURE_REDIRECT_MASK,
+            FOCUS_CHANGE_MASK,
+            PROPERTY_CHANGE_MASK,
+            COLOURMAP_CHANGE_MASK,
             OWNER_GRAB_BUTTON_MASK,
         ];
         let mut seen = std::collections::HashSet::new();
@@ -916,7 +1066,13 @@ mod tests {
 
     #[test]
     fn root_window_constants_are_distinct() {
-        let ids = [ROOT_WINDOW, OVERLAY_WINDOW, WM_CHECK_WINDOW, XSETTINGS_WINDOW, XIM_WINDOW];
+        let ids = [
+            ROOT_WINDOW,
+            OVERLAY_WINDOW,
+            WM_CHECK_WINDOW,
+            XSETTINGS_WINDOW,
+            XIM_WINDOW,
+        ];
         let mut seen = std::collections::HashSet::new();
         for &id in &ids {
             assert!(seen.insert(id), "window ID {id:#x} is duplicated");

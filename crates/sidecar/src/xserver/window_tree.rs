@@ -19,7 +19,11 @@ pub(crate) fn ancestor_chain(windows: &HashMap<u32, WindowState>, start: u32) ->
 }
 
 /// Check if window `child` is a descendant of window `ancestor`.
-pub(crate) fn is_descendant_of(windows: &HashMap<u32, WindowState>, child: u32, ancestor: u32) -> bool {
+pub(crate) fn is_descendant_of(
+    windows: &HashMap<u32, WindowState>,
+    child: u32,
+    ancestor: u32,
+) -> bool {
     let mut current = child;
     for _ in 0..128 {
         let parent = match windows.get(&current) {
@@ -41,7 +45,14 @@ pub(crate) fn is_descendant_of(windows: &HashMap<u32, WindowState>, child: u32, 
 /// Returns: 0 = Unobscured, 1 = PartiallyObscured, 2 = FullyObscured.
 pub(crate) fn compute_visibility(windows: &HashMap<u32, WindowState>, wid: u32) -> u8 {
     let (parent_id, wx, wy, ww, wh, mapped) = match windows.get(&wid) {
-        Some(w) => (w.parent, w.x as i32, w.y as i32, w.width as i32, w.height as i32, w.mapped),
+        Some(w) => (
+            w.parent,
+            w.x as i32,
+            w.y as i32,
+            w.width as i32,
+            w.height as i32,
+            w.mapped,
+        ),
         None => return 2,
     };
     if !mapped || ww == 0 || wh == 0 {

@@ -930,8 +930,14 @@ mod tests {
 
     #[test]
     fn test_space_insensitive() {
-        assert_eq!(lookup_color("DarkSlateGray"), lookup_color("dark slate gray"));
-        assert_eq!(lookup_color("cornflowerblue"), lookup_color("cornflower blue"));
+        assert_eq!(
+            lookup_color("DarkSlateGray"),
+            lookup_color("dark slate gray")
+        );
+        assert_eq!(
+            lookup_color("cornflowerblue"),
+            lookup_color("cornflower blue")
+        );
     }
 
     #[test]
@@ -945,20 +951,29 @@ mod tests {
     fn test_hex_rrggbb() {
         assert_eq!(lookup_color("#FF0000"), Some((65535, 0, 0)));
         assert_eq!(lookup_color("#00FF00"), Some((0, 65535, 0)));
-        assert_eq!(lookup_color("#808080"), Some((128 * 257, 128 * 257, 128 * 257)));
+        assert_eq!(
+            lookup_color("#808080"),
+            Some((128 * 257, 128 * 257, 128 * 257))
+        );
     }
 
     #[test]
     fn test_hex_rrrrggggbbbb() {
         assert_eq!(lookup_color("#FFFF00000000"), Some((65535, 0, 0)));
-        assert_eq!(lookup_color("#800080008000"), Some((0x8000, 0x8000, 0x8000)));
+        assert_eq!(
+            lookup_color("#800080008000"),
+            Some((0x8000, 0x8000, 0x8000))
+        );
     }
 
     #[test]
     fn test_rgbi() {
         assert_eq!(lookup_color("rgbi:1.0/0.0/0.0"), Some((65535, 0, 0)));
         assert_eq!(lookup_color("rgbi:0.0/1.0/0.0"), Some((0, 65535, 0)));
-        assert_eq!(lookup_color("rgbi:0.5/0.5/0.5"), Some((32768, 32768, 32768)));
+        assert_eq!(
+            lookup_color("rgbi:0.5/0.5/0.5"),
+            Some((32768, 32768, 32768))
+        );
     }
 
     #[test]
@@ -968,7 +983,10 @@ mod tests {
         // gray100 = white
         assert_eq!(lookup_color("gray100"), Some((65535, 65535, 65535)));
         // grey50 = (127, 127, 127)
-        assert_eq!(lookup_color("grey50"), Some((127 * 257, 127 * 257, 127 * 257)));
+        assert_eq!(
+            lookup_color("grey50"),
+            Some((127 * 257, 127 * 257, 127 * 257))
+        );
     }
 
     #[test]

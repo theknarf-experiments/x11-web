@@ -53,11 +53,14 @@ pub(crate) fn start_incr_transfer(
     if let Some(win) = state.windows.get_mut(&requestor) {
         let mut size_data = [0u8; 4];
         write_u32_bo(&mut size_data, 0, total_size, msb);
-        win.properties.insert(property, PropertyValue {
-            prop_type: INCR_ATOM,
-            format: 32,
-            data: size_data.to_vec(),
-        });
+        win.properties.insert(
+            property,
+            PropertyValue {
+                prop_type: INCR_ATOM,
+                format: 32,
+                data: size_data.to_vec(),
+            },
+        );
     }
 
     // Generate PropertyNotify(NewValue) so the requestor is notified.
@@ -102,9 +105,10 @@ pub(crate) fn start_incr_transfer(
 /// signal completion.
 pub(crate) fn advance_incr_transfer(state: &mut ClientState, window: u32, property: u32) {
     // Find the matching INCR transfer.
-    let idx = state.incr_transfers.iter().position(|t| {
-        t.requestor == window && t.property == property
-    });
+    let idx = state
+        .incr_transfers
+        .iter()
+        .position(|t| t.requestor == window && t.property == property);
     let Some(idx) = idx else { return };
 
     // Update last_activity timestamp for timeout tracking.
@@ -116,11 +120,14 @@ pub(crate) fn advance_incr_transfer(state: &mut ClientState, window: u32, proper
     if remaining == 0 {
         // All data sent — write zero-length property to signal completion.
         if let Some(win) = state.windows.get_mut(&window) {
-            win.properties.insert(property, PropertyValue {
-                prop_type: transfer.target,
-                format: 8,
-                data: Vec::new(),
-            });
+            win.properties.insert(
+                property,
+                PropertyValue {
+                    prop_type: transfer.target,
+                    format: 8,
+                    data: Vec::new(),
+                },
+            );
         }
         state.incr_transfers.remove(idx);
     } else {
@@ -132,11 +139,14 @@ pub(crate) fn advance_incr_transfer(state: &mut ClientState, window: u32, proper
         state.incr_transfers[idx].offset += chunk_size;
 
         if let Some(win) = state.windows.get_mut(&window) {
-            win.properties.insert(property, PropertyValue {
-                prop_type: target,
-                format: 8,
-                data: chunk,
-            });
+            win.properties.insert(
+                property,
+                PropertyValue {
+                    prop_type: target,
+                    format: 8,
+                    data: chunk,
+                },
+            );
         }
     }
 
@@ -225,11 +235,14 @@ pub(crate) fn serve_persistent_clipboard(
         drop(pc_lock); // release lock before mutating state
 
         if let Some(win) = state.windows.get_mut(&requestor) {
-            win.properties.insert(property, PropertyValue {
-                prop_type: ATOM_ATOM,
-                format: 32,
-                data,
-            });
+            win.properties.insert(
+                property,
+                PropertyValue {
+                    prop_type: ATOM_ATOM,
+                    format: 32,
+                    data,
+                },
+            );
         }
 
         let mut event = [0u8; 32];
@@ -254,11 +267,14 @@ pub(crate) fn serve_persistent_clipboard(
         let mut ts_data = [0u8; 4];
         state.write_u32(&mut ts_data, 0, ts);
         if let Some(win) = state.windows.get_mut(&requestor) {
-            win.properties.insert(property, PropertyValue {
-                prop_type: CARDINAL_ATOM,
-                format: 32,
-                data: ts_data.to_vec(),
-            });
+            win.properties.insert(
+                property,
+                PropertyValue {
+                    prop_type: CARDINAL_ATOM,
+                    format: 32,
+                    data: ts_data.to_vec(),
+                },
+            );
         }
 
         let mut event = [0u8; 32];
@@ -303,11 +319,14 @@ pub(crate) fn serve_persistent_clipboard(
         } else {
             // Small data: set property inline (normal transfer).
             if let Some(win) = state.windows.get_mut(&requestor) {
-                win.properties.insert(property, PropertyValue {
-                    prop_type,
-                    format: 8,
-                    data,
-                });
+                win.properties.insert(
+                    property,
+                    PropertyValue {
+                        prop_type,
+                        format: 8,
+                        data,
+                    },
+                );
             }
 
             let mut event = [0u8; 32];
@@ -344,11 +363,14 @@ pub(crate) fn serve_persistent_clipboard(
                 // (ASCII subset). For COMPOUND_TEXT, we just pass through as-is
                 // since modern apps generally handle UTF-8.
                 if let Some(win) = state.windows.get_mut(&requestor) {
-                    win.properties.insert(property, PropertyValue {
-                        prop_type: target,
-                        format: 8,
-                        data,
-                    });
+                    win.properties.insert(
+                        property,
+                        PropertyValue {
+                            prop_type: target,
+                            format: 8,
+                            data,
+                        },
+                    );
                 }
 
                 let mut event = [0u8; 32];
@@ -388,8 +410,12 @@ pub(crate) fn event_type_to_mask(event_type: u8) -> u32 {
         KEYMAP_NOTIFY_EVENT => KEYMAP_STATE_MASK,
         EXPOSE_EVENT => EXPOSURE_MASK,
         VISIBILITY_NOTIFY_EVENT => VISIBILITY_CHANGE_MASK,
-        CREATE_NOTIFY_EVENT | DESTROY_NOTIFY_EVENT | UNMAP_NOTIFY_EVENT
-        | MAP_NOTIFY_EVENT | REPARENT_NOTIFY_EVENT | CONFIGURE_NOTIFY_EVENT
+        CREATE_NOTIFY_EVENT
+        | DESTROY_NOTIFY_EVENT
+        | UNMAP_NOTIFY_EVENT
+        | MAP_NOTIFY_EVENT
+        | REPARENT_NOTIFY_EVENT
+        | CONFIGURE_NOTIFY_EVENT
         | GRAVITY_NOTIFY_EVENT => STRUCTURE_NOTIFY_MASK,
         MAP_REQUEST_EVENT | CONFIGURE_REQUEST_EVENT | CIRCULATE_REQUEST_EVENT => {
             SUBSTRUCTURE_REDIRECT_MASK
@@ -415,7 +441,10 @@ mod tests {
         assert_eq!(event_type_to_mask(KEY_PRESS_EVENT), KEY_PRESS_MASK);
         assert_eq!(event_type_to_mask(KEY_RELEASE_EVENT), KEY_RELEASE_MASK);
         assert_eq!(event_type_to_mask(BUTTON_PRESS_EVENT), BUTTON_PRESS_MASK);
-        assert_eq!(event_type_to_mask(BUTTON_RELEASE_EVENT), BUTTON_RELEASE_MASK);
+        assert_eq!(
+            event_type_to_mask(BUTTON_RELEASE_EVENT),
+            BUTTON_RELEASE_MASK
+        );
         assert_eq!(event_type_to_mask(MOTION_NOTIFY_EVENT), POINTER_MOTION_MASK);
     }
 
@@ -443,19 +472,27 @@ mod tests {
 
     #[test]
     fn visibility_notify_maps_to_visibility_change_mask() {
-        assert_eq!(event_type_to_mask(VISIBILITY_NOTIFY_EVENT), VISIBILITY_CHANGE_MASK);
+        assert_eq!(
+            event_type_to_mask(VISIBILITY_NOTIFY_EVENT),
+            VISIBILITY_CHANGE_MASK
+        );
     }
 
     #[test]
     fn structure_events_share_structure_notify_mask() {
         let structure_events = [
-            CREATE_NOTIFY_EVENT, DESTROY_NOTIFY_EVENT, UNMAP_NOTIFY_EVENT,
-            MAP_NOTIFY_EVENT, REPARENT_NOTIFY_EVENT, CONFIGURE_NOTIFY_EVENT,
+            CREATE_NOTIFY_EVENT,
+            DESTROY_NOTIFY_EVENT,
+            UNMAP_NOTIFY_EVENT,
+            MAP_NOTIFY_EVENT,
+            REPARENT_NOTIFY_EVENT,
+            CONFIGURE_NOTIFY_EVENT,
             GRAVITY_NOTIFY_EVENT,
         ];
         for ev in structure_events {
             assert_eq!(
-                event_type_to_mask(ev), STRUCTURE_NOTIFY_MASK,
+                event_type_to_mask(ev),
+                STRUCTURE_NOTIFY_MASK,
                 "event type {ev} should map to STRUCTURE_NOTIFY_MASK"
             );
         }
@@ -464,11 +501,14 @@ mod tests {
     #[test]
     fn redirect_events_map_to_substructure_redirect_mask() {
         let redirect_events = [
-            MAP_REQUEST_EVENT, CONFIGURE_REQUEST_EVENT, CIRCULATE_REQUEST_EVENT,
+            MAP_REQUEST_EVENT,
+            CONFIGURE_REQUEST_EVENT,
+            CIRCULATE_REQUEST_EVENT,
         ];
         for ev in redirect_events {
             assert_eq!(
-                event_type_to_mask(ev), SUBSTRUCTURE_REDIRECT_MASK,
+                event_type_to_mask(ev),
+                SUBSTRUCTURE_REDIRECT_MASK,
                 "event type {ev} should map to SUBSTRUCTURE_REDIRECT_MASK"
             );
         }
@@ -476,22 +516,34 @@ mod tests {
 
     #[test]
     fn resize_request_maps_to_resize_redirect_mask() {
-        assert_eq!(event_type_to_mask(RESIZE_REQUEST_EVENT), RESIZE_REDIRECT_MASK);
+        assert_eq!(
+            event_type_to_mask(RESIZE_REQUEST_EVENT),
+            RESIZE_REDIRECT_MASK
+        );
     }
 
     #[test]
     fn circulate_notify_maps_to_substructure_notify_mask() {
-        assert_eq!(event_type_to_mask(CIRCULATE_NOTIFY_EVENT), SUBSTRUCTURE_NOTIFY_MASK);
+        assert_eq!(
+            event_type_to_mask(CIRCULATE_NOTIFY_EVENT),
+            SUBSTRUCTURE_NOTIFY_MASK
+        );
     }
 
     #[test]
     fn property_notify_maps_to_property_change_mask() {
-        assert_eq!(event_type_to_mask(PROPERTY_NOTIFY_EVENT), PROPERTY_CHANGE_MASK);
+        assert_eq!(
+            event_type_to_mask(PROPERTY_NOTIFY_EVENT),
+            PROPERTY_CHANGE_MASK
+        );
     }
 
     #[test]
     fn colourmap_notify_maps_to_colourmap_change_mask() {
-        assert_eq!(event_type_to_mask(COLOURMAP_NOTIFY_EVENT), COLOURMAP_CHANGE_MASK);
+        assert_eq!(
+            event_type_to_mask(COLOURMAP_NOTIFY_EVENT),
+            COLOURMAP_CHANGE_MASK
+        );
     }
 
     #[test]

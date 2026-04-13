@@ -32,8 +32,7 @@ pub(crate) const RECORD_END_OF_DATA: u8 = 5;
 // ---------------------------------------------------------------------------
 
 /// A range of protocol elements to intercept.
-#[derive(Clone, Debug)]
-#[derive(Default)]
+#[derive(Clone, Debug, Default)]
 pub(crate) struct RecordRange {
     /// Core request range (first, last opcode).
     pub(crate) core_requests: (u8, u8),
@@ -53,7 +52,6 @@ pub(crate) struct RecordRange {
     pub(crate) client_started: bool,
     pub(crate) client_died: bool,
 }
-
 
 impl RecordRange {
     /// Check if a core request opcode matches this range.
@@ -337,8 +335,12 @@ pub(crate) fn handle_record_request(state: &mut ClientState, data: &[u8], seq: u
             // SECURITY: untrusted clients are denied CreateContext (BadAccess)
             if state.trust_level > 0 {
                 return crate::xserver::core::build_error_bo(
-                    crate::xserver::core::BAD_ACCESS, seq, 0,
-                    154, minor as u16, state.msb_first,
+                    crate::xserver::core::BAD_ACCESS,
+                    seq,
+                    0,
+                    154,
+                    minor as u16,
+                    state.msb_first,
                 );
             }
             if data.len() >= 20 {
@@ -354,8 +356,12 @@ pub(crate) fn handle_record_request(state: &mut ClientState, data: &[u8], seq: u
                 for i in 0..num_client_specs {
                     let off = 20 + i * 4;
                     if off + 4 <= data.len() {
-                        client_specs
-                            .push(u32::from_le_bytes([data[off], data[off + 1], data[off + 2], data[off + 3]]));
+                        client_specs.push(u32::from_le_bytes([
+                            data[off],
+                            data[off + 1],
+                            data[off + 2],
+                            data[off + 3],
+                        ]));
                     }
                 }
 
@@ -396,8 +402,12 @@ pub(crate) fn handle_record_request(state: &mut ClientState, data: &[u8], seq: u
                 Vec::new()
             } else {
                 crate::xserver::core::build_error_bo(
-                    crate::xserver::core::BAD_LENGTH, seq, 0,
-                    154, minor as u16, state.msb_first,
+                    crate::xserver::core::BAD_LENGTH,
+                    seq,
+                    0,
+                    154,
+                    minor as u16,
+                    state.msb_first,
                 )
             }
         }
@@ -415,8 +425,12 @@ pub(crate) fn handle_record_request(state: &mut ClientState, data: &[u8], seq: u
                 for i in 0..num_client_specs {
                     let off = 20 + i * 4;
                     if off + 4 <= data.len() {
-                        client_specs
-                            .push(u32::from_le_bytes([data[off], data[off + 1], data[off + 2], data[off + 3]]));
+                        client_specs.push(u32::from_le_bytes([
+                            data[off],
+                            data[off + 1],
+                            data[off + 2],
+                            data[off + 3],
+                        ]));
                     }
                 }
 
@@ -443,8 +457,12 @@ pub(crate) fn handle_record_request(state: &mut ClientState, data: &[u8], seq: u
                 Vec::new()
             } else {
                 crate::xserver::core::build_error_bo(
-                    crate::xserver::core::BAD_LENGTH, seq, 0,
-                    154, minor as u16, state.msb_first,
+                    crate::xserver::core::BAD_LENGTH,
+                    seq,
+                    0,
+                    154,
+                    minor as u16,
+                    state.msb_first,
                 )
             }
         }
@@ -483,8 +501,12 @@ pub(crate) fn handle_record_request(state: &mut ClientState, data: &[u8], seq: u
                 Vec::new()
             } else {
                 crate::xserver::core::build_error_bo(
-                    crate::xserver::core::BAD_LENGTH, seq, 0,
-                    154, minor as u16, state.msb_first,
+                    crate::xserver::core::BAD_LENGTH,
+                    seq,
+                    0,
+                    154,
+                    minor as u16,
+                    state.msb_first,
                 )
             }
         }
@@ -494,7 +516,11 @@ pub(crate) fn handle_record_request(state: &mut ClientState, data: &[u8], seq: u
                 let context_id = u32::from_le_bytes([data[4], data[5], data[6], data[7]]);
                 if let Some(ctx) = state.record_contexts.get(&context_id) {
                     // Build reply with intercepted client info
-                    let num_clients = if ctx.client_specs.is_empty() { 0u32 } else { 1u32 };
+                    let num_clients = if ctx.client_specs.is_empty() {
+                        0u32
+                    } else {
+                        1u32
+                    };
                     let ranges_per_client = ctx.ranges.len() as u32;
                     // Each client info: client_resource(4) + num_ranges(4)
                     // Each range: 24 bytes
@@ -555,8 +581,12 @@ pub(crate) fn handle_record_request(state: &mut ClientState, data: &[u8], seq: u
                 }
             } else {
                 crate::xserver::core::build_error_bo(
-                    crate::xserver::core::BAD_LENGTH, seq, 0,
-                    154, minor as u16, state.msb_first,
+                    crate::xserver::core::BAD_LENGTH,
+                    seq,
+                    0,
+                    154,
+                    minor as u16,
+                    state.msb_first,
                 )
             }
         }
@@ -589,8 +619,12 @@ pub(crate) fn handle_record_request(state: &mut ClientState, data: &[u8], seq: u
                 build_record_status_reply(RECORD_START_OF_DATA, seq, element_header, server_time)
             } else {
                 crate::xserver::core::build_error_bo(
-                    crate::xserver::core::BAD_LENGTH, seq, 0,
-                    154, minor as u16, state.msb_first,
+                    crate::xserver::core::BAD_LENGTH,
+                    seq,
+                    0,
+                    154,
+                    minor as u16,
+                    state.msb_first,
                 )
             }
         }
@@ -618,11 +652,20 @@ pub(crate) fn handle_record_request(state: &mut ClientState, data: &[u8], seq: u
 
                 // Return EndOfData reply
                 let server_time = state.server_start.elapsed().as_millis() as u32;
-                build_record_status_reply(RECORD_END_OF_DATA, enable_seq, element_header, server_time)
+                build_record_status_reply(
+                    RECORD_END_OF_DATA,
+                    enable_seq,
+                    element_header,
+                    server_time,
+                )
             } else {
                 crate::xserver::core::build_error_bo(
-                    crate::xserver::core::BAD_LENGTH, seq, 0,
-                    154, minor as u16, state.msb_first,
+                    crate::xserver::core::BAD_LENGTH,
+                    seq,
+                    0,
+                    154,
+                    minor as u16,
+                    state.msb_first,
                 )
             }
         }
@@ -640,16 +683,24 @@ pub(crate) fn handle_record_request(state: &mut ClientState, data: &[u8], seq: u
                 Vec::new()
             } else {
                 crate::xserver::core::build_error_bo(
-                    crate::xserver::core::BAD_LENGTH, seq, 0,
-                    154, minor as u16, state.msb_first,
+                    crate::xserver::core::BAD_LENGTH,
+                    seq,
+                    0,
+                    154,
+                    minor as u16,
+                    state.msb_first,
                 )
             }
         }
         _ => {
             debug!("RECORD: unhandled minor opcode {minor}");
             crate::xserver::core::build_error_bo(
-                crate::xserver::core::BAD_REQUEST, seq, minor as u32,
-                154, minor as u16, state.msb_first,
+                crate::xserver::core::BAD_REQUEST,
+                seq,
+                minor as u32,
+                154,
+                minor as u16,
+                state.msb_first,
             )
         }
     }
@@ -686,7 +737,8 @@ pub(crate) fn intercept_event(
         if !ctx.enabled {
             continue;
         }
-        if !ctx.should_intercept_client(source_client_id, recording_client_id, source_resource_base) {
+        if !ctx.should_intercept_client(source_client_id, recording_client_id, source_resource_base)
+        {
             continue;
         }
         if ctx.matches_event(event_code) {
@@ -725,14 +777,19 @@ pub(crate) fn intercept_request(
     }
 
     let major_opcode = request_data[0];
-    let minor_opcode = if request_data.len() > 1 { request_data[1] } else { 0 };
+    let minor_opcode = if request_data.len() > 1 {
+        request_data[1]
+    } else {
+        0
+    };
     let mut results = Vec::new();
 
     for ctx in record_contexts.values() {
         if !ctx.enabled {
             continue;
         }
-        if !ctx.should_intercept_client(source_client_id, recording_client_id, source_resource_base) {
+        if !ctx.should_intercept_client(source_client_id, recording_client_id, source_resource_base)
+        {
             continue;
         }
 
@@ -791,7 +848,8 @@ pub(crate) fn intercept_reply(
         if !ctx.enabled {
             continue;
         }
-        if !ctx.should_intercept_client(source_client_id, recording_client_id, source_resource_base) {
+        if !ctx.should_intercept_client(source_client_id, recording_client_id, source_resource_base)
+        {
             continue;
         }
 
@@ -847,7 +905,8 @@ pub(crate) fn intercept_error(
         if !ctx.enabled {
             continue;
         }
-        if !ctx.should_intercept_client(source_client_id, recording_client_id, source_resource_base) {
+        if !ctx.should_intercept_client(source_client_id, recording_client_id, source_resource_base)
+        {
             continue;
         }
         if ctx.matches_error(error_code) {
@@ -944,10 +1003,7 @@ mod tests {
             id: 1,
             enabled: true,
             element_header: 0,
-            ranges: vec![
-                make_range((0, 0), (2, 5)),
-                make_range((0, 0), (10, 20)),
-            ],
+            ranges: vec![make_range((0, 0), (2, 5)), make_range((0, 0), (10, 20))],
             client_specs: vec![3], // AllClients
             enable_sequence: 0,
         };
@@ -1001,12 +1057,20 @@ mod tests {
     #[test]
     fn build_record_data_reply_format() {
         let reply = build_record_data_reply(
-            RECORD_FROM_SERVER, 42, 1, &[0x01, 0x02, 0x03, 0x04], 12345, 99,
+            RECORD_FROM_SERVER,
+            42,
+            1,
+            &[0x01, 0x02, 0x03, 0x04],
+            12345,
+            99,
         );
         assert_eq!(reply[0], 1); // Reply indicator
         assert_eq!(reply[1], RECORD_FROM_SERVER);
         assert_eq!(u16::from_le_bytes([reply[2], reply[3]]), 42); // enable_seq
-        assert_eq!(u32::from_le_bytes([reply[4], reply[5], reply[6], reply[7]]), 1); // 4 bytes = 1 word
+        assert_eq!(
+            u32::from_le_bytes([reply[4], reply[5], reply[6], reply[7]]),
+            1
+        ); // 4 bytes = 1 word
         assert_eq!(reply[8], 1); // element_header
         assert_eq!(reply[32], 0x01); // intercepted data
         assert_eq!(reply[33], 0x02);
@@ -1081,18 +1145,18 @@ mod tests {
     #[test]
     fn parse_record_range_wire_format() {
         let mut wire = [0u8; 24];
-        wire[0] = 1;   // core_requests first
+        wire[0] = 1; // core_requests first
         wire[1] = 127; // core_requests last
-        wire[2] = 3;   // core_replies first
-        wire[3] = 50;  // core_replies last
-        wire[12] = 2;  // delivered_events first
+        wire[2] = 3; // core_replies first
+        wire[3] = 50; // core_replies last
+        wire[12] = 2; // delivered_events first
         wire[13] = 34; // delivered_events last
-        wire[14] = 2;  // device_events first
-        wire[15] = 6;  // device_events last
-        wire[16] = 1;  // errors first
+        wire[14] = 2; // device_events first
+        wire[15] = 6; // device_events last
+        wire[16] = 1; // errors first
         wire[17] = 17; // errors last
-        wire[18] = 1;  // client_started
-        wire[20] = 1;  // client_died
+        wire[18] = 1; // client_started
+        wire[20] = 1; // client_died
 
         let range = parse_record_range(&wire);
         assert_eq!(range.core_requests, (1, 127));

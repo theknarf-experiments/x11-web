@@ -38,11 +38,14 @@ pub(crate) fn create_counter(state: &mut ClientState, data: &[u8], seq: u16) -> 
     let value_hi = state.read_u32(data, 8) as i32;
     let value_lo = state.read_u32(data, 12);
     debug!("SYNC CreateCounter: id={counter_id:#x} value={value_hi}:{value_lo}");
-    state.sync_state.counters.insert(counter_id, SyncCounter {
-        value_hi,
-        value_lo,
-        is_system: false,
-    });
+    state.sync_state.counters.insert(
+        counter_id,
+        SyncCounter {
+            value_hi,
+            value_lo,
+            is_system: false,
+        },
+    );
     Vec::new()
 }
 
@@ -54,7 +57,10 @@ pub(crate) fn set_counter(state: &mut ClientState, data: &[u8], seq: u16) -> Vec
     let value_lo = state.read_u32(data, 12);
     debug!("SYNC SetCounter: id={counter_id:#x} value={value_hi}:{value_lo}");
 
-    let old_value = state.sync_state.counters.get(&counter_id)
+    let old_value = state
+        .sync_state
+        .counters
+        .get(&counter_id)
         .map(|c| c.value_i64())
         .unwrap_or(0);
 
@@ -65,9 +71,13 @@ pub(crate) fn set_counter(state: &mut ClientState, data: &[u8], seq: u16) -> Vec
 
     let new_value = ((value_hi as i64) << 32) | (value_lo as i64);
     check_alarms(
-        &mut state.sync_state.alarms, counter_id,
-        old_value, new_value,
-        &mut state.pending_events, seq, state.msb_first,
+        &mut state.sync_state.alarms,
+        counter_id,
+        old_value,
+        new_value,
+        &mut state.pending_events,
+        seq,
+        state.msb_first,
     );
     // Check if any pending Await is now satisfied
     let ts = state.timestamp();
@@ -84,7 +94,10 @@ pub(crate) fn change_counter(state: &mut ClientState, data: &[u8], seq: u16) -> 
     let delta = ((delta_hi as i64) << 32) | (delta_lo as i64);
     debug!("SYNC ChangeCounter: id={counter_id:#x} delta={delta}");
 
-    let old_value = state.sync_state.counters.get(&counter_id)
+    let old_value = state
+        .sync_state
+        .counters
+        .get(&counter_id)
         .map(|c| c.value_i64())
         .unwrap_or(0);
     let new_value = old_value.wrapping_add(delta);
@@ -94,9 +107,13 @@ pub(crate) fn change_counter(state: &mut ClientState, data: &[u8], seq: u16) -> 
     }
 
     check_alarms(
-        &mut state.sync_state.alarms, counter_id,
-        old_value, new_value,
-        &mut state.pending_events, seq, state.msb_first,
+        &mut state.sync_state.alarms,
+        counter_id,
+        old_value,
+        new_value,
+        &mut state.pending_events,
+        seq,
+        state.msb_first,
     );
     // Check if any pending Await is now satisfied
     let ts = state.timestamp();
@@ -117,15 +134,20 @@ pub(crate) fn query_counter(state: &mut ClientState, data: &[u8], seq: u16) -> V
     if counter_id == 1 {
         // SERVERTIME: return current elapsed time in ms
         let ms = state.timestamp();
-        state.write_u32(&mut reply, 8, 0u32);  // value_hi
-        state.write_u32(&mut reply, 12, ms);    // value_lo
+        state.write_u32(&mut reply, 8, 0u32); // value_hi
+        state.write_u32(&mut reply, 12, ms); // value_lo
     } else if let Some(counter) = state.sync_state.counters.get(&counter_id) {
         state.write_u32(&mut reply, 8, counter.value_hi as u32);
         state.write_u32(&mut reply, 12, counter.value_lo);
     } else {
         // BadCounter
         return super::super::super::core::build_error_bo(
-            BAD_VALUE, seq, counter_id, 134, 5, state.msb_first,
+            BAD_VALUE,
+            seq,
+            counter_id,
+            134,
+            5,
+            state.msb_first,
         );
     }
     reply.to_vec()
@@ -155,11 +177,15 @@ pub(crate) fn destroy_counter(state: &mut ClientState, data: &[u8], _seq: u16) -
             // immediately True, so any await with a trigger on this counter is satisfied.
             let references_destroyed = pa.triggers.iter().any(|t| t.counter_id == counter_id);
             if references_destroyed {
-                debug!("SYNC DestroyCounter: cancelling pending Await (seq={})", pa.seq);
+                debug!(
+                    "SYNC DestroyCounter: cancelling pending Await (seq={})",
+                    pa.seq
+                );
             }
             !references_destroyed
         });
-        if had_pending && state.sync_state.pending_awaits.is_empty()
+        if had_pending
+            && state.sync_state.pending_awaits.is_empty()
             && state.sync_state.pending_fence_awaits.is_empty()
         {
             state.sync_state.blocked = false;

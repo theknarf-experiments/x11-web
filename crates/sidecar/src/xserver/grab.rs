@@ -7,13 +7,13 @@
 //! When a grab is active, events are redirected to the grabbing client
 //! and other clients don't see them.
 
-use std::collections::HashMap;
-use tracing::{debug, info};
-use super::core::{read_u16_bo, read_u32_bo, require_len, BAD_CURSOR, BAD_LENGTH, BAD_WINDOW};
 use super::client::ClientState;
 use super::core::build_error;
+use super::core::{read_u16_bo, read_u32_bo, require_len, BAD_CURSOR, BAD_LENGTH, BAD_WINDOW};
 use super::types::WindowState;
 use super::{CROSSING_MODE_GRAB, CROSSING_MODE_UNGRAB};
+use std::collections::HashMap;
+use tracing::{debug, info};
 
 /// Generate crossing events for a grab activation.
 /// Per X11 spec §11.3, uses mode=Grab and computes proper detail
@@ -24,7 +24,13 @@ fn emit_grab_crossing_events(state: &mut ClientState, grab_window: u32) {
     let x = state.pointer_x;
     let y = state.pointer_y;
     let events = super::input::build_crossing_events_with_mode(
-        state, grab_window, x, y, x, y, CROSSING_MODE_GRAB,
+        state,
+        grab_window,
+        x,
+        y,
+        x,
+        y,
+        CROSSING_MODE_GRAB,
     );
     if !events.is_empty() {
         // build_crossing_events_with_mode already sets last_entered_window
@@ -50,7 +56,13 @@ fn emit_ungrab_crossing_events(state: &mut ClientState, grab_window: u32) {
     let x = state.pointer_x;
     let y = state.pointer_y;
     let events = super::input::build_crossing_events_with_mode(
-        state, dest_window, x, y, x, y, CROSSING_MODE_UNGRAB,
+        state,
+        dest_window,
+        x,
+        y,
+        x,
+        y,
+        CROSSING_MODE_UNGRAB,
     );
     if !events.is_empty() {
         for chunk in events.chunks_exact(32) {
@@ -106,7 +118,9 @@ pub(crate) struct ActivePointerGrab {
 fn is_viewable(windows: &HashMap<u32, WindowState>, wid: u32, root: u32) -> bool {
     let mut cur = wid;
     for _ in 0..128 {
-        if cur == root { return true; }
+        if cur == root {
+            return true;
+        }
         match windows.get(&cur) {
             Some(w) if w.mapped => cur = w.parent,
             _ => return false,
@@ -116,7 +130,11 @@ fn is_viewable(windows: &HashMap<u32, WindowState>, wid: u32, root: u32) -> bool
 }
 
 /// Compute absolute screen-space bounds for a window by walking up to root.
-fn window_abs_bounds(windows: &HashMap<u32, WindowState>, wid: u32, root: u32) -> Option<(i16, i16, i16, i16)> {
+fn window_abs_bounds(
+    windows: &HashMap<u32, WindowState>,
+    wid: u32,
+    root: u32,
+) -> Option<(i16, i16, i16, i16)> {
     let w = windows.get(&wid)?;
     let width = w.width as i16;
     let height = w.height as i16;
@@ -124,7 +142,9 @@ fn window_abs_bounds(windows: &HashMap<u32, WindowState>, wid: u32, root: u32) -
     let mut abs_y = w.y;
     let mut cur = w.parent;
     for _ in 0..128 {
-        if cur == root || cur == 0 { break; }
+        if cur == root || cur == 0 {
+            break;
+        }
         if let Some(p) = windows.get(&cur) {
             abs_x += p.x;
             abs_y += p.y;
@@ -133,7 +153,12 @@ fn window_abs_bounds(windows: &HashMap<u32, WindowState>, wid: u32, root: u32) -
             break;
         }
     }
-    Some((abs_x, abs_y, abs_x.saturating_add(width), abs_y.saturating_add(height)))
+    Some((
+        abs_x,
+        abs_y,
+        abs_x.saturating_add(width),
+        abs_y.saturating_add(height),
+    ))
 }
 
 #[derive(Clone)]
@@ -147,8 +172,8 @@ pub(crate) struct ActiveKeyboardGrab {
 #[derive(Clone)]
 pub(crate) struct PassiveButtonGrab {
     pub(crate) grab_window: u32,
-    pub(crate) button: u8,        // 0 = AnyButton
-    pub(crate) modifiers: u16,    // 0x8000 = AnyModifier
+    pub(crate) button: u8,     // 0 = AnyButton
+    pub(crate) modifiers: u16, // 0x8000 = AnyModifier
     pub(crate) event_mask: u32,
     pub(crate) pointer_mode: u8,
     pub(crate) keyboard_mode: u8,
@@ -160,8 +185,8 @@ pub(crate) struct PassiveButtonGrab {
 #[derive(Clone)]
 pub(crate) struct PassiveKeyGrab {
     pub(crate) grab_window: u32,
-    pub(crate) key: u8,           // 0 = AnyKey
-    pub(crate) modifiers: u16,    // 0x8000 = AnyModifier
+    pub(crate) key: u8,        // 0 = AnyKey
+    pub(crate) modifiers: u16, // 0x8000 = AnyModifier
     pub(crate) pointer_mode: u8,
     pub(crate) keyboard_mode: u8,
     pub(crate) owner_events: bool,
@@ -302,7 +327,9 @@ pub(crate) fn handle_ungrab_pointer(state: &mut ClientState, _data: &[u8]) -> Ve
         // Thaw frozen pointer events
         state.grabs.pointer_frozen = false;
         let events = std::mem::take(&mut state.grabs.frozen_pointer_events);
-        for e in events { state.pending_events.push(e); }
+        for e in events {
+            state.pending_events.push(e);
+        }
         state.grabs.pointer_grab = None;
     }
     Vec::new()
@@ -343,17 +370,20 @@ pub(crate) fn handle_grab_button(state: &mut ClientState, data: &[u8], seq: u16)
 
     // Insert at front for LIFO ordering: per X11 spec, the most recently
     // established passive grab wins when multiple grabs match.
-    state.grabs.button_grabs.insert(0, PassiveButtonGrab {
-        grab_window,
-        button,
-        modifiers,
-        event_mask,
-        pointer_mode,
-        keyboard_mode,
-        confine_to,
-        cursor,
-        owner_events,
-    });
+    state.grabs.button_grabs.insert(
+        0,
+        PassiveButtonGrab {
+            grab_window,
+            button,
+            modifiers,
+            event_mask,
+            pointer_mode,
+            keyboard_mode,
+            confine_to,
+            cursor,
+            owner_events,
+        },
+    );
 
     Vec::new()
 }
@@ -370,7 +400,10 @@ pub(crate) fn handle_ungrab_button(state: &mut ClientState, data: &[u8], seq: u1
 
     if button == 0 && modifiers == 0x8000 {
         // AnyButton + AnyModifier: remove all button grabs on this window
-        state.grabs.button_grabs.retain(|g| g.grab_window != grab_window);
+        state
+            .grabs
+            .button_grabs
+            .retain(|g| g.grab_window != grab_window);
     } else {
         state.grabs.button_grabs.retain(|g| {
             !(g.grab_window == grab_window && g.button == button && g.modifiers == modifiers)
@@ -381,7 +414,11 @@ pub(crate) fn handle_ungrab_button(state: &mut ClientState, data: &[u8], seq: u1
 }
 
 /// ChangeActivePointerGrab (opcode 30)
-pub(crate) fn handle_change_active_pointer_grab(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
+pub(crate) fn handle_change_active_pointer_grab(
+    state: &mut ClientState,
+    data: &[u8],
+    seq: u16,
+) -> Vec<u8> {
     require_len!(data, 16, seq, 30);
 
     let bo = state.msb_first;
@@ -493,14 +530,18 @@ pub(crate) fn handle_ungrab_keyboard(state: &mut ClientState, _data: &[u8]) -> V
         state.grabs.keyboard_frozen = false;
         state.grabs.keyboard_sync_pending = false;
         let events = std::mem::take(&mut state.grabs.frozen_keyboard_events);
-        for e in events { state.pending_events.push(e); }
+        for e in events {
+            state.pending_events.push(e);
+        }
         // Per X11 spec: if this keyboard grab had pointer_mode=Synchronous,
         // the pointer was frozen by this grab — unfreeze it now.
         if pointer_mode == 1 && state.grabs.pointer_grab.is_none() {
             state.grabs.pointer_frozen = false;
             state.grabs.pointer_sync_pending = false;
             let pevents = std::mem::take(&mut state.grabs.frozen_pointer_events);
-            for e in pevents { state.pending_events.push(e); }
+            for e in pevents {
+                state.pending_events.push(e);
+            }
         }
         state.grabs.keyboard_grab = None;
     }
@@ -526,20 +567,24 @@ pub(crate) fn handle_grab_key(state: &mut ClientState, data: &[u8], seq: u16) ->
     debug!("GrabKey: window={grab_window:#x} key={key} modifiers={modifiers:#x}");
 
     // Remove any existing grab with the same (window, key, modifiers)
-    state.grabs.key_grabs.retain(|g| {
-        !(g.grab_window == grab_window && g.key == key && g.modifiers == modifiers)
-    });
+    state
+        .grabs
+        .key_grabs
+        .retain(|g| !(g.grab_window == grab_window && g.key == key && g.modifiers == modifiers));
 
     // Insert at front for LIFO ordering: per X11 spec, the most recently
     // established passive grab wins when multiple grabs match.
-    state.grabs.key_grabs.insert(0, PassiveKeyGrab {
-        grab_window,
-        key,
-        modifiers,
-        pointer_mode,
-        keyboard_mode,
-        owner_events,
-    });
+    state.grabs.key_grabs.insert(
+        0,
+        PassiveKeyGrab {
+            grab_window,
+            key,
+            modifiers,
+            pointer_mode,
+            keyboard_mode,
+            owner_events,
+        },
+    );
 
     Vec::new()
 }
@@ -555,7 +600,10 @@ pub(crate) fn handle_ungrab_key(state: &mut ClientState, data: &[u8], seq: u16) 
     debug!("UngrabKey: window={grab_window:#x} key={key} modifiers={modifiers:#x}");
 
     if key == 0 && modifiers == 0x8000 {
-        state.grabs.key_grabs.retain(|g| g.grab_window != grab_window);
+        state
+            .grabs
+            .key_grabs
+            .retain(|g| g.grab_window != grab_window);
     } else {
         state.grabs.key_grabs.retain(|g| {
             !(g.grab_window == grab_window && g.key == key && g.modifiers == modifiers)
@@ -650,8 +698,12 @@ pub(crate) fn handle_allow_events(state: &mut ClientState, data: &[u8]) -> Vec<u
             state.grabs.keyboard_sync_pending = false;
             let pevents = std::mem::take(&mut state.grabs.frozen_pointer_events);
             let kevents = std::mem::take(&mut state.grabs.frozen_keyboard_events);
-            for e in pevents { state.pending_events.push(e); }
-            for e in kevents { state.pending_events.push(e); }
+            for e in pevents {
+                state.pending_events.push(e);
+            }
+            for e in kevents {
+                state.pending_events.push(e);
+            }
         }
         7 => {
             // SyncBoth: thaw both, re-freeze on next event of either type
@@ -661,8 +713,12 @@ pub(crate) fn handle_allow_events(state: &mut ClientState, data: &[u8]) -> Vec<u
             state.grabs.keyboard_sync_pending = true;
             let pevents = std::mem::take(&mut state.grabs.frozen_pointer_events);
             let kevents = std::mem::take(&mut state.grabs.frozen_keyboard_events);
-            for e in pevents { state.pending_events.push(e); }
-            for e in kevents { state.pending_events.push(e); }
+            for e in pevents {
+                state.pending_events.push(e);
+            }
+            for e in kevents {
+                state.pending_events.push(e);
+            }
         }
         _ => {}
     }
@@ -672,15 +728,25 @@ pub(crate) fn handle_allow_events(state: &mut ClientState, data: &[u8]) -> Vec<u
 
 /// Check for matching passive button grabs and activate if found.
 /// Returns true if a grab was activated (event should be redirected to grab window).
-pub(crate) fn check_passive_button_grab(state: &mut ClientState, button: u8, modifiers: u16, window: u32) -> bool {
+pub(crate) fn check_passive_button_grab(
+    state: &mut ClientState,
+    button: u8,
+    modifiers: u16,
+    window: u32,
+) -> bool {
     // Walk up the window hierarchy to find a matching passive button grab
     let mut current = window;
     for _ in 0..128 {
-        let matching = state.grabs.button_grabs.iter().find(|g| {
-            g.grab_window == current
+        let matching = state
+            .grabs
+            .button_grabs
+            .iter()
+            .find(|g| {
+                g.grab_window == current
             && (g.button == 0 || g.button == button)         // AnyButton or exact match
             && (g.modifiers == 0x8000 || g.modifiers == modifiers) // AnyModifier or exact match
-        }).cloned();
+            })
+            .cloned();
 
         if let Some(grab) = matching {
             let gw = grab.grab_window;
@@ -729,14 +795,24 @@ pub(crate) fn check_passive_button_grab(state: &mut ClientState, button: u8, mod
 
 /// Check for matching passive key grabs and activate if found.
 /// Returns true if a grab was activated.
-pub(crate) fn check_passive_key_grab(state: &mut ClientState, keycode: u8, modifiers: u16, window: u32) -> bool {
+pub(crate) fn check_passive_key_grab(
+    state: &mut ClientState,
+    keycode: u8,
+    modifiers: u16,
+    window: u32,
+) -> bool {
     let mut current = window;
     for _ in 0..128 {
-        let matching = state.grabs.key_grabs.iter().find(|g| {
-            g.grab_window == current
+        let matching = state
+            .grabs
+            .key_grabs
+            .iter()
+            .find(|g| {
+                g.grab_window == current
             && (g.key == 0 || g.key == keycode)              // AnyKey or exact match
             && (g.modifiers == 0x8000 || g.modifiers == modifiers) // AnyModifier or exact match
-        }).cloned();
+            })
+            .cloned();
 
         if let Some(grab) = matching {
             let gw = grab.grab_window;
@@ -784,7 +860,9 @@ pub(crate) fn check_button_release_ungrab(state: &mut ClientState, _button: u8, 
             state.grabs.pointer_frozen = false;
             state.grabs.pointer_sync_pending = false;
             let events = std::mem::take(&mut state.grabs.frozen_pointer_events);
-            for e in events { state.pending_events.push(e); }
+            for e in events {
+                state.pending_events.push(e);
+            }
             state.grabs.pointer_grab = None;
         }
     }
@@ -809,7 +887,10 @@ pub(crate) fn handle_grab_server(state: &mut ClientState, _data: &[u8]) -> Vec<u
         }
         std::hint::spin_loop();
     }
-    debug!("GrabServer: count={} client={}", state.grabs.server_grab_count, state.client_id);
+    debug!(
+        "GrabServer: count={} client={}",
+        state.grabs.server_grab_count, state.client_id
+    );
     Vec::new()
 }
 
@@ -829,7 +910,10 @@ pub(crate) fn handle_ungrab_server(state: &mut ClientState, _data: &[u8]) -> Vec
         }
         notify.notify_waiters();
     }
-    debug!("UngrabServer: count={} client={}", state.grabs.server_grab_count, state.client_id);
+    debug!(
+        "UngrabServer: count={} client={}",
+        state.grabs.server_grab_count, state.client_id
+    );
     Vec::new()
 }
 
@@ -1196,20 +1280,22 @@ mod tests {
             owner_events: false,
         });
         // Remove existing + insert new (same triple)
-        gs.button_grabs.retain(|g| {
-            !(g.grab_window == 100 && g.button == 1 && g.modifiers == 0)
-        });
-        gs.button_grabs.insert(0, PassiveButtonGrab {
-            grab_window: 100,
-            button: 1,
-            modifiers: 0,
-            event_mask: 0x08, // different event_mask
-            pointer_mode: 1,
-            keyboard_mode: 0,
-            confine_to: 0,
-            cursor: 0,
-            owner_events: true,
-        });
+        gs.button_grabs
+            .retain(|g| !(g.grab_window == 100 && g.button == 1 && g.modifiers == 0));
+        gs.button_grabs.insert(
+            0,
+            PassiveButtonGrab {
+                grab_window: 100,
+                button: 1,
+                modifiers: 0,
+                event_mask: 0x08, // different event_mask
+                pointer_mode: 1,
+                keyboard_mode: 0,
+                confine_to: 0,
+                cursor: 0,
+                owner_events: true,
+            },
+        );
         assert_eq!(gs.button_grabs.len(), 1);
         assert_eq!(gs.button_grabs[0].event_mask, 0x08);
         assert!(gs.button_grabs[0].owner_events);
@@ -1219,19 +1305,37 @@ mod tests {
     fn ungrab_button_any_removes_all_on_window() {
         let mut gs = make_grab_state();
         gs.button_grabs.push(PassiveButtonGrab {
-            grab_window: 100, button: 1, modifiers: 0,
-            event_mask: 0x04, pointer_mode: 0, keyboard_mode: 0,
-            confine_to: 0, cursor: 0, owner_events: false,
+            grab_window: 100,
+            button: 1,
+            modifiers: 0,
+            event_mask: 0x04,
+            pointer_mode: 0,
+            keyboard_mode: 0,
+            confine_to: 0,
+            cursor: 0,
+            owner_events: false,
         });
         gs.button_grabs.push(PassiveButtonGrab {
-            grab_window: 100, button: 2, modifiers: 0,
-            event_mask: 0x04, pointer_mode: 0, keyboard_mode: 0,
-            confine_to: 0, cursor: 0, owner_events: false,
+            grab_window: 100,
+            button: 2,
+            modifiers: 0,
+            event_mask: 0x04,
+            pointer_mode: 0,
+            keyboard_mode: 0,
+            confine_to: 0,
+            cursor: 0,
+            owner_events: false,
         });
         gs.button_grabs.push(PassiveButtonGrab {
-            grab_window: 200, button: 1, modifiers: 0,
-            event_mask: 0x04, pointer_mode: 0, keyboard_mode: 0,
-            confine_to: 0, cursor: 0, owner_events: false,
+            grab_window: 200,
+            button: 1,
+            modifiers: 0,
+            event_mask: 0x04,
+            pointer_mode: 0,
+            keyboard_mode: 0,
+            confine_to: 0,
+            cursor: 0,
+            owner_events: false,
         });
         // AnyButton + AnyModifier removes all on window 100
         gs.button_grabs.retain(|g| g.grab_window != 100);
@@ -1283,7 +1387,7 @@ mod tests {
             button: 1,
             modifiers: 0x8000, // AnyModifier
             event_mask: 0x04,
-            pointer_mode: 1, // Async
+            pointer_mode: 1,  // Async
             keyboard_mode: 1, // Async
             confine_to: 0,
             cursor: 0,
@@ -1299,9 +1403,9 @@ mod tests {
     fn passive_key_grab_stores_all_fields() {
         let grab = PassiveKeyGrab {
             grab_window: 0x200,
-            key: 0, // AnyKey
-            modifiers: 0x01, // Shift
-            pointer_mode: 0, // Sync
+            key: 0,           // AnyKey
+            modifiers: 0x01,  // Shift
+            pointer_mode: 0,  // Sync
             keyboard_mode: 1, // Async
             owner_events: false,
         };
@@ -1315,28 +1419,34 @@ mod tests {
     fn grab_button_lifo_ordering() {
         let mut gs = make_grab_state();
         // Insert two button grabs with different modifiers
-        gs.button_grabs.insert(0, PassiveButtonGrab {
-            grab_window: 0x100,
-            button: 1,
-            modifiers: 0,
-            event_mask: 0x04,
-            pointer_mode: 1,
-            keyboard_mode: 1,
-            confine_to: 0,
-            cursor: 0,
-            owner_events: false,
-        });
-        gs.button_grabs.insert(0, PassiveButtonGrab {
-            grab_window: 0x100,
-            button: 1,
-            modifiers: 0x01, // Shift
-            event_mask: 0x04,
-            pointer_mode: 1,
-            keyboard_mode: 1,
-            confine_to: 0,
-            cursor: 0,
-            owner_events: false,
-        });
+        gs.button_grabs.insert(
+            0,
+            PassiveButtonGrab {
+                grab_window: 0x100,
+                button: 1,
+                modifiers: 0,
+                event_mask: 0x04,
+                pointer_mode: 1,
+                keyboard_mode: 1,
+                confine_to: 0,
+                cursor: 0,
+                owner_events: false,
+            },
+        );
+        gs.button_grabs.insert(
+            0,
+            PassiveButtonGrab {
+                grab_window: 0x100,
+                button: 1,
+                modifiers: 0x01, // Shift
+                event_mask: 0x04,
+                pointer_mode: 1,
+                keyboard_mode: 1,
+                confine_to: 0,
+                cursor: 0,
+                owner_events: false,
+            },
+        );
         // LIFO: most recently inserted should be at front
         assert_eq!(gs.button_grabs[0].modifiers, 0x01);
         assert_eq!(gs.button_grabs[1].modifiers, 0);
@@ -1351,26 +1461,42 @@ mod tests {
         let mut gs = make_grab_state();
         gs.button_grabs.push(PassiveButtonGrab {
             grab_window: 0x100,
-            button: 1, modifiers: 0, event_mask: 0x04,
-            pointer_mode: 0, keyboard_mode: 0, confine_to: 0,
-            cursor: 0, owner_events: false,
+            button: 1,
+            modifiers: 0,
+            event_mask: 0x04,
+            pointer_mode: 0,
+            keyboard_mode: 0,
+            confine_to: 0,
+            cursor: 0,
+            owner_events: false,
         });
         gs.button_grabs.push(PassiveButtonGrab {
             grab_window: 0x200,
-            button: 1, modifiers: 0, event_mask: 0x04,
-            pointer_mode: 0, keyboard_mode: 0, confine_to: 0,
-            cursor: 0, owner_events: false,
+            button: 1,
+            modifiers: 0,
+            event_mask: 0x04,
+            pointer_mode: 0,
+            keyboard_mode: 0,
+            confine_to: 0,
+            cursor: 0,
+            owner_events: false,
         });
         gs.button_grabs.push(PassiveButtonGrab {
             grab_window: 0x300,
-            button: 2, modifiers: 0, event_mask: 0x04,
-            pointer_mode: 0, keyboard_mode: 0, confine_to: 0,
-            cursor: 0, owner_events: false,
+            button: 2,
+            modifiers: 0,
+            event_mask: 0x04,
+            pointer_mode: 0,
+            keyboard_mode: 0,
+            confine_to: 0,
+            cursor: 0,
+            owner_events: false,
         });
 
         // Simulate client disconnect: remove grabs for windows 0x100 and 0x300
         let my_windows: std::collections::HashSet<u32> = [0x100, 0x300].into();
-        gs.button_grabs.retain(|g| !my_windows.contains(&g.grab_window));
+        gs.button_grabs
+            .retain(|g| !my_windows.contains(&g.grab_window));
 
         assert_eq!(gs.button_grabs.len(), 1);
         assert_eq!(gs.button_grabs[0].grab_window, 0x200);
@@ -1380,16 +1506,25 @@ mod tests {
     fn cleanup_key_grabs_by_window_set() {
         let mut gs = make_grab_state();
         gs.key_grabs.push(PassiveKeyGrab {
-            grab_window: 0x100, key: 38, modifiers: 0,
-            pointer_mode: 0, keyboard_mode: 0, owner_events: false,
+            grab_window: 0x100,
+            key: 38,
+            modifiers: 0,
+            pointer_mode: 0,
+            keyboard_mode: 0,
+            owner_events: false,
         });
         gs.key_grabs.push(PassiveKeyGrab {
-            grab_window: 0x200, key: 39, modifiers: 0,
-            pointer_mode: 0, keyboard_mode: 0, owner_events: false,
+            grab_window: 0x200,
+            key: 39,
+            modifiers: 0,
+            pointer_mode: 0,
+            keyboard_mode: 0,
+            owner_events: false,
         });
 
         let my_windows: std::collections::HashSet<u32> = [0x100].into();
-        gs.key_grabs.retain(|g| !my_windows.contains(&g.grab_window));
+        gs.key_grabs
+            .retain(|g| !my_windows.contains(&g.grab_window));
 
         assert_eq!(gs.key_grabs.len(), 1);
         assert_eq!(gs.key_grabs[0].grab_window, 0x200);
@@ -1401,22 +1536,34 @@ mod tests {
         // Client A owns window 0x100
         gs.button_grabs.push(PassiveButtonGrab {
             grab_window: 0x100,
-            button: 1, modifiers: 0, event_mask: 0x04,
-            pointer_mode: 0, keyboard_mode: 0, confine_to: 0,
-            cursor: 0, owner_events: false,
+            button: 1,
+            modifiers: 0,
+            event_mask: 0x04,
+            pointer_mode: 0,
+            keyboard_mode: 0,
+            confine_to: 0,
+            cursor: 0,
+            owner_events: false,
         });
         // Client B owns window 0x200
         gs.button_grabs.push(PassiveButtonGrab {
             grab_window: 0x200,
-            button: 1, modifiers: 0, event_mask: 0x04,
-            pointer_mode: 0, keyboard_mode: 0, confine_to: 0,
-            cursor: 0, owner_events: false,
+            button: 1,
+            modifiers: 0,
+            event_mask: 0x04,
+            pointer_mode: 0,
+            keyboard_mode: 0,
+            confine_to: 0,
+            cursor: 0,
+            owner_events: false,
         });
 
         // Only clean up client A's windows
         let client_a_windows: std::collections::HashSet<u32> = [0x100].into();
-        gs.button_grabs.retain(|g| !client_a_windows.contains(&g.grab_window));
-        gs.key_grabs.retain(|g| !client_a_windows.contains(&g.grab_window));
+        gs.button_grabs
+            .retain(|g| !client_a_windows.contains(&g.grab_window));
+        gs.key_grabs
+            .retain(|g| !client_a_windows.contains(&g.grab_window));
 
         assert_eq!(gs.button_grabs.len(), 1);
         assert_eq!(gs.button_grabs[0].grab_window, 0x200);

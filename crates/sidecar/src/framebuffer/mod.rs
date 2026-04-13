@@ -7,7 +7,6 @@ mod shapes;
 #[cfg(test)]
 mod tests;
 
-
 /// A server-side pixel buffer using pure Rust (no pixman).
 /// Format: A8R8G8B8 (4 bytes per pixel, BGRA in memory on little-endian).
 #[derive(Clone)]
@@ -54,7 +53,8 @@ impl Framebuffer {
         for y in 0..copy_h {
             let src_off = y * self.stride;
             let dst_off = y * new_stride;
-            new_data[dst_off..dst_off + copy_w].copy_from_slice(&self.data[src_off..src_off + copy_w]);
+            new_data[dst_off..dst_off + copy_w]
+                .copy_from_slice(&self.data[src_off..src_off + copy_w]);
         }
         self.data = new_data;
         self.width = new_width;
@@ -109,17 +109,17 @@ impl Framebuffer {
         // Destination offset: where in the new buffer to place old content.
         // A positive dx means old content shifts right; positive dy means down.
         let (dx, dy): (i32, i32) = match gravity {
-            1  => (0, 0),                   // NorthWest
-            2  => (dw / 2, 0),              // North
-            3  => (dw, 0),                  // NorthEast
-            4  => (0, dh / 2),              // West
-            5  => (dw / 2, dh / 2),         // Center
-            6  => (dw, dh / 2),             // East
-            7  => (0, dh),                  // SouthWest
-            8  => (dw / 2, dh),             // South
-            9  => (dw, dh),                 // SouthEast
-            10 => (0, 0),                   // Static
-            _  => (0, 0),
+            1 => (0, 0),           // NorthWest
+            2 => (dw / 2, 0),      // North
+            3 => (dw, 0),          // NorthEast
+            4 => (0, dh / 2),      // West
+            5 => (dw / 2, dh / 2), // Center
+            6 => (dw, dh / 2),     // East
+            7 => (0, dh),          // SouthWest
+            8 => (dw / 2, dh),     // South
+            9 => (dw, dh),         // SouthEast
+            10 => (0, 0),          // Static
+            _ => (0, 0),
         };
 
         // Row-by-row copy with bounds checking.
@@ -127,7 +127,9 @@ impl Framebuffer {
         // Similarly for columns.
         let src_x_start = (-dx).max(0) as usize;
         let dst_x_start = dx.max(0) as usize;
-        let copy_w = (old_w as usize).min(new_width as usize - dst_x_start).saturating_sub(src_x_start);
+        let copy_w = (old_w as usize)
+            .min(new_width as usize - dst_x_start)
+            .saturating_sub(src_x_start);
 
         for src_y in 0..old_h as usize {
             let dst_y = src_y as i32 + dy;
@@ -178,12 +180,7 @@ impl Framebuffer {
                 let min_y = dy.min(y);
                 let max_x = (dx + dw as i32).max(x + w as i32);
                 let max_y = (dy + dh as i32).max(y + h as i32);
-                (
-                    min_x,
-                    min_y,
-                    (max_x - min_x) as u32,
-                    (max_y - min_y) as u32,
-                )
+                (min_x, min_y, (max_x - min_x) as u32, (max_y - min_y) as u32)
             }
         });
     }
@@ -264,17 +261,21 @@ impl Framebuffer {
         // Pre-build a row of pixels
         let row_start = (x as i32).max(0) as usize;
         let row_end = ((x as i32 + width as i32).min(self.width as i32)).max(0) as usize;
-        if row_start >= row_end { return; }
+        if row_start >= row_end {
+            return;
+        }
         let row_len = row_end - row_start;
 
         let mut row_buf = vec![0u8; row_len * 4];
         for i in 0..row_len {
-            row_buf[i*4..i*4+4].copy_from_slice(&pixel);
+            row_buf[i * 4..i * 4 + 4].copy_from_slice(&pixel);
         }
 
         for row in 0..height as i32 {
             let dy = y as i32 + row;
-            if dy < 0 || dy >= self.height as i32 { continue; }
+            if dy < 0 || dy >= self.height as i32 {
+                continue;
+            }
             let dst_off = dy as usize * self.stride + row_start * 4;
             if dst_off + row_len * 4 <= self.data.len() {
                 self.data[dst_off..dst_off + row_len * 4].copy_from_slice(&row_buf);
@@ -339,10 +340,10 @@ impl Framebuffer {
                 // Apply plane mask: affected planes come from result,
                 // unaffected planes keep the dst value.
                 let masked = (result & plane_mask) | (dst & !plane_mask);
-                self.data[off] = (masked & 0xFF) as u8;           // B
-                self.data[off + 1] = ((masked >> 8) & 0xFF) as u8;  // G
+                self.data[off] = (masked & 0xFF) as u8; // B
+                self.data[off + 1] = ((masked >> 8) & 0xFF) as u8; // G
                 self.data[off + 2] = ((masked >> 16) & 0xFF) as u8; // R
-                self.data[off + 3] = 0xFF;                          // A
+                self.data[off + 3] = 0xFF; // A
             }
         }
         self.mark_dirty(x as i32, y as i32, width as u32, height as u32);
@@ -365,8 +366,8 @@ impl Framebuffer {
                 continue;
             }
             let col_start = if x < 0 { (-x) as usize } else { 0 };
-            let col_end =
-                (width as usize).min((self.width as i32 - x.max(0) as i32).max(0) as usize + col_start);
+            let col_end = (width as usize)
+                .min((self.width as i32 - x.max(0) as i32).max(0) as usize + col_start);
             if col_start >= col_end {
                 continue;
             }
@@ -416,8 +417,7 @@ impl Framebuffer {
                     continue;
                 }
                 if src_a == 0xFF {
-                    self.data[dst_off..dst_off + 4]
-                        .copy_from_slice(&data[src_off..src_off + 4]);
+                    self.data[dst_off..dst_off + 4].copy_from_slice(&data[src_off..src_off + 4]);
                 } else {
                     let sa = src_a as u32;
                     let da = 255 - sa;
@@ -493,9 +493,12 @@ impl Framebuffer {
                 } else {
                     let sa = src_a as u32;
                     let da = 255 - sa;
-                    let b = ((data[src_off] as u32 * sa + self.data[dst_off] as u32 * da) / 255) as u8;
-                    let g = ((data[src_off + 1] as u32 * sa + self.data[dst_off + 1] as u32 * da) / 255) as u8;
-                    let r = ((data[src_off + 2] as u32 * sa + self.data[dst_off + 2] as u32 * da) / 255) as u8;
+                    let b =
+                        ((data[src_off] as u32 * sa + self.data[dst_off] as u32 * da) / 255) as u8;
+                    let g = ((data[src_off + 1] as u32 * sa + self.data[dst_off + 1] as u32 * da)
+                        / 255) as u8;
+                    let r = ((data[src_off + 2] as u32 * sa + self.data[dst_off + 2] as u32 * da)
+                        / 255) as u8;
                     (b, g, r)
                 };
 
@@ -642,9 +645,9 @@ impl Framebuffer {
                 let src = y * self.stride + x * 4;
                 let dst = (y * self.width as usize + x) * 4;
                 if src + 3 < self.data.len() && dst + 3 < rgba.len() {
-                    rgba[dst] = self.data[src + 2];     // R (from BGRA B offset)
+                    rgba[dst] = self.data[src + 2]; // R (from BGRA B offset)
                     rgba[dst + 1] = self.data[src + 1]; // G
-                    rgba[dst + 2] = self.data[src];     // B
+                    rgba[dst + 2] = self.data[src]; // B
                     rgba[dst + 3] = self.data[src + 3]; // A
                 }
             }
@@ -691,7 +694,14 @@ impl Framebuffer {
     }
 
     /// Draw a point applying both GC function and plane_mask.
-    pub fn draw_point_with_func_masked(&mut self, x: i32, y: i32, color: u32, gc_func: u8, plane_mask: u32) {
+    pub fn draw_point_with_func_masked(
+        &mut self,
+        x: i32,
+        y: i32,
+        color: u32,
+        gc_func: u8,
+        plane_mask: u32,
+    ) {
         if x < 0 || y < 0 || x >= self.width as i32 || y >= self.height as i32 {
             return;
         }
@@ -727,7 +737,12 @@ pub(crate) struct DashState {
 impl DashState {
     pub(crate) fn new(pattern: &[u8], offset: u16) -> Self {
         if pattern.is_empty() {
-            return Self { pattern: vec![1], index: 0, remaining: 1, on: true };
+            return Self {
+                pattern: vec![1],
+                index: 0,
+                remaining: 1,
+                on: true,
+            };
         }
         let pat: Vec<u8> = pattern.to_vec();
         // Advance past offset
@@ -745,7 +760,12 @@ impl DashState {
             rem = pat[idx] as u32;
             on = !on;
         }
-        Self { pattern: pat, index: idx, remaining: rem, on }
+        Self {
+            pattern: pat,
+            index: idx,
+            remaining: rem,
+            on,
+        }
     }
 
     pub(crate) fn is_on(&self) -> bool {
@@ -768,8 +788,10 @@ impl DashState {
 /// Check if a point is inside any of the clip rectangles.
 pub(crate) fn point_in_clip_rects(x: i32, y: i32, rects: &[(i16, i16, u16, u16)]) -> bool {
     for &(rx, ry, rw, rh) in rects {
-        if x >= rx as i32 && x < rx as i32 + rw as i32
-            && y >= ry as i32 && y < ry as i32 + rh as i32
+        if x >= rx as i32
+            && x < rx as i32 + rw as i32
+            && y >= ry as i32
+            && y < ry as i32 + rh as i32
         {
             return true;
         }
@@ -780,23 +802,23 @@ pub(crate) fn point_in_clip_rects(x: i32, y: i32, rects: &[(i16, i16, u16, u16)]
 /// Apply X11 GC raster operation function to source and destination pixels.
 pub fn apply_gc_function(func: u8, src: u32, dst: u32) -> u32 {
     match func {
-        0 => 0,                      // GXclear
-        1 => src & dst,              // GXand
-        2 => src & !dst,             // GXandReverse
-        3 => src,                    // GXcopy
-        4 => !src & dst,             // GXandInverted
-        5 => dst,                    // GXnoop
-        6 => src ^ dst,              // GXxor
-        7 => src | dst,              // GXor
-        8 => !(src | dst),           // GXnor
-        9 => !(src ^ dst),           // GXequiv
-        10 => !dst,                  // GXinvert
-        11 => src | !dst,            // GXorReverse
-        12 => !src,                  // GXcopyInverted
-        13 => !src | dst,            // GXorInverted
-        14 => !(src & dst),          // GXnand
-        15 => 0xFFFFFFFF,            // GXset
-        _ => src,                    // default to copy
+        0 => 0,             // GXclear
+        1 => src & dst,     // GXand
+        2 => src & !dst,    // GXandReverse
+        3 => src,           // GXcopy
+        4 => !src & dst,    // GXandInverted
+        5 => dst,           // GXnoop
+        6 => src ^ dst,     // GXxor
+        7 => src | dst,     // GXor
+        8 => !(src | dst),  // GXnor
+        9 => !(src ^ dst),  // GXequiv
+        10 => !dst,         // GXinvert
+        11 => src | !dst,   // GXorReverse
+        12 => !src,         // GXcopyInverted
+        13 => !src | dst,   // GXorInverted
+        14 => !(src & dst), // GXnand
+        15 => 0xFFFFFFFF,   // GXset
+        _ => src,           // default to copy
     }
 }
 
@@ -827,7 +849,12 @@ pub(crate) struct ArcChordData {
 
 impl ArcChordData {
     /// Create chord data only if arc_mode is Chord (0) and extent < full circle.
-    pub(crate) fn new_if_chord(arc_mode: u8, angle2: i16, start_rad: f64, extent_rad: f64) -> Option<Self> {
+    pub(crate) fn new_if_chord(
+        arc_mode: u8,
+        angle2: i16,
+        start_rad: f64,
+        extent_rad: f64,
+    ) -> Option<Self> {
         if arc_mode != 0 || angle2.abs() >= 360 * 64 {
             return None;
         }
@@ -842,6 +869,12 @@ impl ArcChordData {
         let mid_x = mid_rad.cos();
         let mid_y = -mid_rad.sin();
         let mid_cross = cdx * (mid_y - chord_y1) - cdy * (mid_x - chord_x1);
-        Some(Self { chord_x1, chord_y1, cdx, cdy, mid_cross })
+        Some(Self {
+            chord_x1,
+            chord_y1,
+            cdx,
+            cdy,
+            mid_cross,
+        })
     }
 }

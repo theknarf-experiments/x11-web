@@ -82,7 +82,16 @@ pub(crate) fn handle_poly_text8(state: &mut ClientState, data: &[u8]) -> Vec<u8>
 
     if let Some(fb) = state.get_framebuffer_mut(drawable) {
         for &(x, y, w, h, ref pixels) in &items {
-            fb.put_image_over_gc(x, y, w, h, pixels, gc.function, gc.plane_mask, &gc.clip_rects);
+            fb.put_image_over_gc(
+                x,
+                y,
+                w,
+                h,
+                pixels,
+                gc.function,
+                gc.plane_mask,
+                &gc.clip_rects,
+            );
         }
     }
     for &(x, y, w, h, _) in &items {
@@ -173,7 +182,8 @@ pub(crate) fn handle_poly_text16(state: &mut ClientState, data: &[u8]) -> Vec<u8
             }
 
             // For characters within the basic range, use the standard renderer
-            let basic_chars: Vec<u8> = char_codes.iter()
+            let basic_chars: Vec<u8> = char_codes
+                .iter()
                 .filter(|&&c| c <= 255)
                 .map(|&c| c as u8)
                 .collect();
@@ -181,7 +191,8 @@ pub(crate) fn handle_poly_text16(state: &mut ClientState, data: &[u8]) -> Vec<u8
 
             if !has_extended {
                 // All characters in basic range — use optimized path
-                let (img_w, img_h, pixels) = font.render_text_transparent(&basic_chars, gc.foreground);
+                let (img_w, img_h, pixels) =
+                    font.render_text_transparent(&basic_chars, gc.foreground);
                 if img_w > 0 && img_h > 0 {
                     items.push((cursor_x, y - font.font_ascent, img_w, img_h, pixels));
                 }
@@ -212,7 +223,9 @@ pub(crate) fn handle_poly_text16(state: &mut ClientState, data: &[u8]) -> Vec<u8
                             let mut pixels = vec![0u8; gw * gh * 4];
                             for row in 0..gh {
                                 for col in 0..gw {
-                                    let bit = (glyph.bitmap[row * row_bytes + col / 8] >> (7 - (col % 8))) & 1;
+                                    let bit = (glyph.bitmap[row * row_bytes + col / 8]
+                                        >> (7 - (col % 8)))
+                                        & 1;
                                     if bit != 0 {
                                         let idx = (row * gw + col) * 4;
                                         pixels[idx] = fg_b;
@@ -238,7 +251,16 @@ pub(crate) fn handle_poly_text16(state: &mut ClientState, data: &[u8]) -> Vec<u8
 
     if let Some(fb) = state.get_framebuffer_mut(drawable) {
         for &(x, y, w, h, ref pixels) in &items {
-            fb.put_image_over_gc(x, y, w, h, pixels, gc.function, gc.plane_mask, &gc.clip_rects);
+            fb.put_image_over_gc(
+                x,
+                y,
+                w,
+                h,
+                pixels,
+                gc.function,
+                gc.plane_mask,
+                &gc.clip_rects,
+            );
         }
     }
     for &(x, y, w, h, _) in &items {
@@ -292,7 +314,16 @@ pub(crate) fn handle_image_text8(state: &mut ClientState, data: &[u8]) -> Vec<u8
 
     let render_y = y - font.font_ascent;
     if let Some(fb) = state.get_framebuffer_mut(drawable) {
-        fb.put_image_gc(x, render_y, img_w, img_h, &pixels, gc.function, gc.plane_mask, &gc.clip_rects);
+        fb.put_image_gc(
+            x,
+            render_y,
+            img_w,
+            img_h,
+            &pixels,
+            gc.function,
+            gc.plane_mask,
+            &gc.clip_rects,
+        );
     }
     state.notify_damage(drawable, x, render_y, img_w, img_h);
 
@@ -423,7 +454,8 @@ pub(crate) fn handle_image_text16(state: &mut ClientState, data: &[u8]) -> Vec<u
                     if bit != 0 {
                         let px = gx + col as i32;
                         let py = gy + row as i32;
-                        if px >= 0 && px < total_width as i32 && py >= 0 && py < total_height as i32 {
+                        if px >= 0 && px < total_width as i32 && py >= 0 && py < total_height as i32
+                        {
                             let idx = (py as usize * total_width as usize + px as usize) * 4;
                             pixels[idx] = fg_b;
                             pixels[idx + 1] = fg_g;
@@ -439,7 +471,16 @@ pub(crate) fn handle_image_text16(state: &mut ClientState, data: &[u8]) -> Vec<u
 
     let render_y = y - font.font_ascent;
     if let Some(fb) = state.get_framebuffer_mut(drawable) {
-        fb.put_image_gc(x, render_y, total_width, total_height, &pixels, gc.function, gc.plane_mask, &gc.clip_rects);
+        fb.put_image_gc(
+            x,
+            render_y,
+            total_width,
+            total_height,
+            &pixels,
+            gc.function,
+            gc.plane_mask,
+            &gc.clip_rects,
+        );
     }
     state.notify_damage(drawable, x, render_y, total_width, total_height);
 

@@ -103,9 +103,11 @@ impl ColormapState {
             let r = ((i >> 5) & 0x7) as u32;
             let g = ((i >> 2) & 0x7) as u32;
             let b = (i & 0x3) as u32;
-            entries.push(
-                (((r * 65535) / 7) as u16, ((g * 65535) / 7) as u16, ((b * 65535) / 3) as u16),
-            );
+            entries.push((
+                ((r * 65535) / 7) as u16,
+                ((g * 65535) / 7) as u16,
+                ((b * 65535) / 3) as u16,
+            ));
         }
         Self {
             visual,
@@ -130,9 +132,21 @@ impl ColormapState {
                 let gi = ((pixel >> 8) & 0xFF) as usize;
                 let bi = (pixel & 0xFF) as usize;
                 let n = self.entries.len();
-                let r = if ri < n { self.entries[ri].0 } else { ((ri as u16) << 8) | ri as u16 };
-                let g = if gi < n { self.entries[gi].1 } else { ((gi as u16) << 8) | gi as u16 };
-                let b = if bi < n { self.entries[bi].2 } else { ((bi as u16) << 8) | bi as u16 };
+                let r = if ri < n {
+                    self.entries[ri].0
+                } else {
+                    ((ri as u16) << 8) | ri as u16
+                };
+                let g = if gi < n {
+                    self.entries[gi].1
+                } else {
+                    ((gi as u16) << 8) | gi as u16
+                };
+                let b = if bi < n {
+                    self.entries[bi].2
+                } else {
+                    ((bi as u16) << 8) | bi as u16
+                };
                 (r, g, b)
             }
             0..=3 => {
@@ -158,12 +172,14 @@ impl ColormapState {
         match self.visual_class {
             4 => {
                 // TrueColor: compute pixel directly
-                let pixel = (((r >> 8) as u32) << 16) | (((g >> 8) as u32) << 8) | ((b >> 8) as u32);
+                let pixel =
+                    (((r >> 8) as u32) << 16) | (((g >> 8) as u32) << 8) | ((b >> 8) as u32);
                 Some(pixel)
             }
             5 => {
                 // DirectColor: compute pixel from per-channel lookup.
-                let pixel = (((r >> 8) as u32) << 16) | (((g >> 8) as u32) << 8) | ((b >> 8) as u32);
+                let pixel =
+                    (((r >> 8) as u32) << 16) | (((g >> 8) as u32) << 8) | ((b >> 8) as u32);
                 Some(pixel)
             }
             0 | 2 => {
@@ -214,7 +230,9 @@ impl ColormapState {
         let n = n_colors as usize;
         let mut pixels = Vec::with_capacity(n);
         for i in 0..self.entries.len() {
-            if pixels.len() >= n { break; }
+            if pixels.len() >= n {
+                break;
+            }
             if !self.allocated[i] {
                 self.allocated[i] = true;
                 pixels.push(i as u32);
@@ -253,10 +271,12 @@ impl ColormapState {
                 run_len += 1;
                 if run_len >= n {
                     // Found a contiguous block
-                    let pixels: Vec<u32> = (run_start..run_start + n).map(|j| {
-                        self.allocated[j] = true;
-                        j as u32
-                    }).collect();
+                    let pixels: Vec<u32> = (run_start..run_start + n)
+                        .map(|j| {
+                            self.allocated[j] = true;
+                            j as u32
+                        })
+                        .collect();
                     return Some(pixels);
                 }
             } else {
@@ -282,10 +302,18 @@ impl ColormapState {
         for &(pixel, r, g, b, flags) in items {
             if (pixel as usize) < self.entries.len() {
                 let entry = &mut self.entries[pixel as usize];
-                if flags & 0x01 != 0 { entry.0 = r; } // DoRed
-                if flags & 0x02 != 0 { entry.1 = g; } // DoGreen
-                if flags & 0x04 != 0 { entry.2 = b; } // DoBlue
-                if flags == 0 { *entry = (r, g, b); }  // All channels
+                if flags & 0x01 != 0 {
+                    entry.0 = r;
+                } // DoRed
+                if flags & 0x02 != 0 {
+                    entry.1 = g;
+                } // DoGreen
+                if flags & 0x04 != 0 {
+                    entry.2 = b;
+                } // DoBlue
+                if flags == 0 {
+                    *entry = (r, g, b);
+                } // All channels
             }
         }
     }
@@ -429,8 +457,8 @@ mod tests {
         let first = cmap.alloc_cells(3).unwrap(); // 0, 1, 2
         let _second = cmap.alloc_cells(2).unwrap(); // 3, 4
         cmap.free_cells(&first); // Free 0, 1, 2
-        // Now cells 0,1,2 are free, 3,4 are allocated, 5+ are free
-        // Ask for 4 contiguous: should skip 0-2 (only 3 free) and find 5-8
+                                 // Now cells 0,1,2 are free, 3,4 are allocated, 5+ are free
+                                 // Ask for 4 contiguous: should skip 0-2 (only 3 free) and find 5-8
         let contig = cmap.alloc_cells_contiguous(4).unwrap();
         assert_eq!(contig.len(), 4);
         assert_eq!(contig[0], 5);

@@ -15,10 +15,15 @@ pub(crate) struct ScreenSaverAttrs {
 }
 
 /// MIT-SCREEN-SAVER (opcode 152)
-pub(crate) fn handle_screen_saver_request(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
+pub(crate) fn handle_screen_saver_request(
+    state: &mut ClientState,
+    data: &[u8],
+    seq: u16,
+) -> Vec<u8> {
     let minor = data[1];
     match minor {
-        0 => { // QueryVersion
+        0 => {
+            // QueryVersion
             let mut reply = [0u8; 32];
             reply[0] = 1;
             state.write_u16(&mut reply, 2, seq);
@@ -26,7 +31,8 @@ pub(crate) fn handle_screen_saver_request(state: &mut ClientState, data: &[u8], 
             state.write_u16(&mut reply, 10, 1); // server_minor
             reply.to_vec()
         }
-        1 => { // QueryInfo
+        1 => {
+            // QueryInfo
             let mut reply = [0u8; 32];
             reply[0] = 1;
             // state: 0=Off, 1=On, 2=Cycle, 3=Disabled
@@ -47,7 +53,8 @@ pub(crate) fn handle_screen_saver_request(state: &mut ClientState, data: &[u8], 
             reply[24] = 0; // kind = Blanked
             reply.to_vec()
         }
-        2 => { // SelectInput
+        2 => {
+            // SelectInput
             require_len!(data, 12, seq, 152, minor as u16, state.msb_first);
             let _drawable = state.read_u32(data, 4);
             let event_mask = state.read_u32(data, 8);
@@ -55,7 +62,8 @@ pub(crate) fn handle_screen_saver_request(state: &mut ClientState, data: &[u8], 
             debug!("ScreenSaver SelectInput: event_mask=0x{event_mask:08x}");
             Vec::new()
         }
-        3 => { // SetAttributes
+        3 => {
+            // SetAttributes
             // Store screen saver window attributes for when the saver activates.
             // Parse the same value-list as CreateWindow.
             require_len!(data, 24, seq, 152, minor as u16, state.msb_first);
@@ -71,35 +79,51 @@ pub(crate) fn handle_screen_saver_request(state: &mut ClientState, data: &[u8], 
                 let _visual = state.read_u32(data, 20);
                 let _value_mask = state.read_u32(data, 24);
                 state.screen_saver_attrs = Some(ScreenSaverAttrs {
-                    x, y, width, height,
+                    x,
+                    y,
+                    width,
+                    height,
                 });
                 debug!("ScreenSaver SetAttributes: {x},{y} {width}x{height}");
             }
             Vec::new()
         }
-        4 => { // UnsetAttributes
+        4 => {
+            // UnsetAttributes
             state.screen_saver_attrs = None;
             debug!("ScreenSaver UnsetAttributes");
             Vec::new()
         }
-        5 => { // Suspend
+        5 => {
+            // Suspend
             // Reference-counted suspend: each Suspend increments, each Resume decrements.
             state.screen_saver_suspend_count += 1;
-            debug!("ScreenSaver Suspend: count={}", state.screen_saver_suspend_count);
+            debug!(
+                "ScreenSaver Suspend: count={}",
+                state.screen_saver_suspend_count
+            );
             Vec::new()
         }
-        6 => { // Resume
+        6 => {
+            // Resume
             if state.screen_saver_suspend_count > 0 {
                 state.screen_saver_suspend_count -= 1;
             }
-            debug!("ScreenSaver Resume: count={}", state.screen_saver_suspend_count);
+            debug!(
+                "ScreenSaver Resume: count={}",
+                state.screen_saver_suspend_count
+            );
             Vec::new()
         }
         _ => {
             debug!("ScreenSaver: unhandled minor opcode {minor}");
             crate::xserver::core::build_error_bo(
-                crate::xserver::core::BAD_REQUEST, seq, minor as u32,
-                152, minor as u16, state.msb_first,
+                crate::xserver::core::BAD_REQUEST,
+                seq,
+                minor as u32,
+                152,
+                minor as u16,
+                state.msb_first,
             )
         }
     }

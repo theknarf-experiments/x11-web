@@ -714,7 +714,12 @@ pub(crate) fn dispatch(opcode: u16, data: &[u8]) -> Option<bool> {
                 let count = (data.len() - 20) / 4;
                 let mut points = vec![0f32; count];
                 for i in 0..count {
-                    points[i] = f32::from_le_bytes([data[20+i*4], data[21+i*4], data[22+i*4], data[23+i*4]]);
+                    points[i] = f32::from_le_bytes([
+                        data[20 + i * 4],
+                        data[21 + i * 4],
+                        data[22 + i * 4],
+                        data[23 + i * 4],
+                    ]);
                 }
                 osmesa::gl_map1f(target, u1, u2, stride, order, &points);
             }
@@ -730,7 +735,8 @@ pub(crate) fn dispatch(opcode: u16, data: &[u8]) -> Option<bool> {
                 let count = (data.len() - 28) / 8;
                 let mut points = vec![0f64; count];
                 for i in 0..count {
-                    points[i] = f64::from_le_bytes(data[28+i*8..36+i*8].try_into().unwrap());
+                    points[i] =
+                        f64::from_le_bytes(data[28 + i * 8..36 + i * 8].try_into().unwrap());
                 }
                 osmesa::gl_map1d(target, u1, u2, stride, order, &points);
             }
@@ -750,9 +756,16 @@ pub(crate) fn dispatch(opcode: u16, data: &[u8]) -> Option<bool> {
                 let count = (data.len() - 36) / 4;
                 let mut points = vec![0f32; count];
                 for i in 0..count {
-                    points[i] = f32::from_le_bytes([data[36+i*4], data[37+i*4], data[38+i*4], data[39+i*4]]);
+                    points[i] = f32::from_le_bytes([
+                        data[36 + i * 4],
+                        data[37 + i * 4],
+                        data[38 + i * 4],
+                        data[39 + i * 4],
+                    ]);
                 }
-                osmesa::gl_map2f(target, u1, u2, ustride, uorder, v1, v2, vstride, vorder, &points);
+                osmesa::gl_map2f(
+                    target, u1, u2, ustride, uorder, v1, v2, vstride, vorder, &points,
+                );
             }
         }
         // glMap2d (opcode 168)
@@ -770,9 +783,12 @@ pub(crate) fn dispatch(opcode: u16, data: &[u8]) -> Option<bool> {
                 let count = (data.len() - 52) / 8;
                 let mut points = vec![0f64; count];
                 for i in 0..count {
-                    points[i] = f64::from_le_bytes(data[52+i*8..60+i*8].try_into().unwrap());
+                    points[i] =
+                        f64::from_le_bytes(data[52 + i * 8..60 + i * 8].try_into().unwrap());
                 }
-                osmesa::gl_map2d(target, u1, u2, ustride, uorder, v1, v2, vstride, vorder, &points);
+                osmesa::gl_map2d(
+                    target, u1, u2, ustride, uorder, v1, v2, vstride, vorder, &points,
+                );
             }
         }
         // glMapGrid1f (opcode 169)
@@ -1058,12 +1074,8 @@ pub(crate) fn dispatch(opcode: u16, data: &[u8]) -> Option<bool> {
                                 }
                                 if array_bits & 0x08 != 0 {
                                     // texcoord
-                                    osmesa::gl_enable_client_state(
-                                        osmesa::GL_TEXTURE_COORD_ARRAY,
-                                    );
-                                    osmesa::gl_tex_coord_pointer(
-                                        num_values, gl_type, stride, ptr,
-                                    );
+                                    osmesa::gl_enable_client_state(osmesa::GL_TEXTURE_COORD_ARRAY);
+                                    osmesa::gl_tex_coord_pointer(num_values, gl_type, stride, ptr);
                                     enabled.push(osmesa::GL_TEXTURE_COORD_ARRAY);
                                 }
                             }

@@ -1,8 +1,8 @@
-use std::collections::HashMap;
-use x11_web_protocol::{DisplayUpdate, InputEvent};
 use super::client::ClientState;
 use super::core::*;
 use super::types::*;
+use std::collections::HashMap;
+use x11_web_protocol::{DisplayUpdate, InputEvent};
 
 /// Emit a PropertyNotify event for a window property change.
 /// Used when the server internally modifies properties (e.g. _NET_WM_STATE).
@@ -32,8 +32,10 @@ pub(crate) const CROSSING_MODE_UNGRAB: u8 = 2;
 /// Returns the adjusted (x, y) position after barrier enforcement.
 pub(crate) fn enforce_barriers(
     barriers: &HashMap<u32, PointerBarrier>,
-    old_x: i16, old_y: i16,
-    new_x: i16, new_y: i16,
+    old_x: i16,
+    old_y: i16,
+    new_x: i16,
+    new_y: i16,
 ) -> (i16, i16) {
     let mut final_x = new_x;
     let mut final_y = new_y;
@@ -180,7 +182,9 @@ fn find_deepest_window(
             let children_order = &pw.children_order;
             for &child_id in children_order.iter().rev() {
                 if let Some(child) = windows.get(&child_id) {
-                    if !child.mapped { continue; }
+                    if !child.mapped {
+                        continue;
+                    }
                     let cx = child.x;
                     let cy = child.y;
                     let cw = child.width as i16;
@@ -286,8 +290,23 @@ fn is_blocked_by_modal(windows: &HashMap<u32, WindowState>, target: u32) -> bool
     false
 }
 
-pub(crate) fn build_crossing_events(state: &mut ClientState, new_window: u32, x: i16, y: i16, event_x: i16, event_y: i16) -> Vec<u8> {
-    build_crossing_events_with_mode(state, new_window, x, y, event_x, event_y, CROSSING_MODE_NORMAL)
+pub(crate) fn build_crossing_events(
+    state: &mut ClientState,
+    new_window: u32,
+    x: i16,
+    y: i16,
+    event_x: i16,
+    event_y: i16,
+) -> Vec<u8> {
+    build_crossing_events_with_mode(
+        state,
+        new_window,
+        x,
+        y,
+        event_x,
+        event_y,
+        CROSSING_MODE_NORMAL,
+    )
 }
 
 /// Crossing event detail constants per X11 spec Section 7.4.
@@ -303,10 +322,14 @@ fn ancestor_path(windows: &HashMap<u32, WindowState>, window: u32, root: u32) ->
     let mut path = vec![window];
     let mut cur = window;
     for _ in 0..64 {
-        if cur == root || cur == 0 { break; }
+        if cur == root || cur == 0 {
+            break;
+        }
         if let Some(w) = windows.get(&cur) {
             let p = w.parent;
-            if p == 0 || p == cur { break; }
+            if p == 0 || p == cur {
+                break;
+            }
             path.push(p);
             cur = p;
         } else {
@@ -317,17 +340,27 @@ fn ancestor_path(windows: &HashMap<u32, WindowState>, window: u32, root: u32) ->
 }
 
 /// Compute window-local coordinates for a given window by walking up to root.
-fn window_local_coords(windows: &HashMap<u32, WindowState>, window: u32, root: u32, abs_x: i16, abs_y: i16) -> (i16, i16) {
+fn window_local_coords(
+    windows: &HashMap<u32, WindowState>,
+    window: u32,
+    root: u32,
+    abs_x: i16,
+    abs_y: i16,
+) -> (i16, i16) {
     let mut ox = 0i32;
     let mut oy = 0i32;
     let mut cur = window;
     for _ in 0..128 {
-        if cur == root || cur == 0 { break; }
+        if cur == root || cur == 0 {
+            break;
+        }
         if let Some(w) = windows.get(&cur) {
             ox += w.x as i32;
             oy += w.y as i32;
             cur = w.parent;
-        } else { break; }
+        } else {
+            break;
+        }
     }
     ((abs_x as i32 - ox) as i16, (abs_y as i32 - oy) as i16)
 }
@@ -335,27 +368,43 @@ fn window_local_coords(windows: &HashMap<u32, WindowState>, window: u32, root: u
 /// Build a single crossing event with proper child field.
 fn make_crossing_event(
     windows: &HashMap<u32, WindowState>,
-    event_code: u8, detail: u8, mode: u8,
-    seq: u16, timestamp: u32, root_window: u32,
-    event_window: u32, abs_x: i16, abs_y: i16,
-    bo: bool, focus_window: u32,
+    event_code: u8,
+    detail: u8,
+    mode: u8,
+    seq: u16,
+    timestamp: u32,
+    root_window: u32,
+    event_window: u32,
+    abs_x: i16,
+    abs_y: i16,
+    bo: bool,
+    focus_window: u32,
 ) -> [u8; 32] {
     let (ev_x, ev_y) = window_local_coords(windows, event_window, root_window, abs_x, abs_y);
 
     // Per X11 spec: child field is the child of event_window that contains the
     // pointer, or None (0) if the pointer is directly in event_window.
     let child = if let Some(win) = windows.get(&event_window) {
-        win.children_order.iter().rev().copied().find(|&cid| {
-            if let Some(c) = windows.get(&cid) {
-                if !c.mapped { return false; }
-                let cx = c.x;
-                let cy = c.y;
-                ev_x >= cx && ev_x < cx + c.width as i16
-                    && ev_y >= cy && ev_y < cy + c.height as i16
-            } else {
-                false
-            }
-        }).unwrap_or(0)
+        win.children_order
+            .iter()
+            .rev()
+            .copied()
+            .find(|&cid| {
+                if let Some(c) = windows.get(&cid) {
+                    if !c.mapped {
+                        return false;
+                    }
+                    let cx = c.x;
+                    let cy = c.y;
+                    ev_x >= cx
+                        && ev_x < cx + c.width as i16
+                        && ev_y >= cy
+                        && ev_y < cy + c.height as i16
+                } else {
+                    false
+                }
+            })
+            .unwrap_or(0)
     } else {
         0
     };
@@ -365,11 +414,18 @@ fn make_crossing_event(
         let mut cur = focus_window;
         let mut found = false;
         for _ in 0..64 {
-            if cur == event_window { found = true; break; }
-            if cur == 0 { break; }
+            if cur == event_window {
+                found = true;
+                break;
+            }
+            if cur == 0 {
+                break;
+            }
             if let Some(w) = windows.get(&cur) {
                 cur = w.parent;
-            } else { break; }
+            } else {
+                break;
+            }
         }
         found
     };
@@ -382,10 +438,10 @@ fn make_crossing_event(
     write_u32_bo(&mut event, 8, root_window, bo);
     write_u32_bo(&mut event, 12, event_window, bo);
     write_u32_bo(&mut event, 16, child, bo);
-    write_i16_bo(&mut event, 20, abs_x, bo);  // root_x
-    write_i16_bo(&mut event, 22, abs_y, bo);  // root_y
-    write_i16_bo(&mut event, 24, ev_x, bo);   // event_x
-    write_i16_bo(&mut event, 26, ev_y, bo);   // event_y
+    write_i16_bo(&mut event, 20, abs_x, bo); // root_x
+    write_i16_bo(&mut event, 22, abs_y, bo); // root_y
+    write_i16_bo(&mut event, 24, ev_x, bo); // event_x
+    write_i16_bo(&mut event, 26, ev_y, bo); // event_y
     event[30] = mode;
     event[31] = 0x01 | if has_focus { 0x01 } else { 0x00 }; // same_screen=1, focus
     event
@@ -395,21 +451,53 @@ fn make_crossing_event(
 fn emit_crossing(
     windows: &HashMap<u32, WindowState>,
     events: &mut Vec<u8>,
-    event_code: u8, detail: u8, mode: u8,
-    seq: u16, timestamp: u32, root_window: u32,
-    window: u32, abs_x: i16, abs_y: i16,
-    bo: bool, focus_window: u32,
+    event_code: u8,
+    detail: u8,
+    mode: u8,
+    seq: u16,
+    timestamp: u32,
+    root_window: u32,
+    window: u32,
+    abs_x: i16,
+    abs_y: i16,
+    bo: bool,
+    focus_window: u32,
 ) {
-    let required_mask = if event_code == ENTER_NOTIFY_EVENT { ENTER_WINDOW_MASK } else { LEAVE_WINDOW_MASK };
+    let required_mask = if event_code == ENTER_NOTIFY_EVENT {
+        ENTER_WINDOW_MASK
+    } else {
+        LEAVE_WINDOW_MASK
+    };
     if let Some(win) = windows.get(&window) {
         if win.event_mask & required_mask != 0 {
-            let ev = make_crossing_event(windows, event_code, detail, mode, seq, timestamp, root_window, window, abs_x, abs_y, bo, focus_window);
+            let ev = make_crossing_event(
+                windows,
+                event_code,
+                detail,
+                mode,
+                seq,
+                timestamp,
+                root_window,
+                window,
+                abs_x,
+                abs_y,
+                bo,
+                focus_window,
+            );
             events.extend_from_slice(&ev);
         }
     }
 }
 
-pub(crate) fn build_crossing_events_with_mode(state: &mut ClientState, new_window: u32, x: i16, y: i16, _event_x: i16, _event_y: i16, mode: u8) -> Vec<u8> {
+pub(crate) fn build_crossing_events_with_mode(
+    state: &mut ClientState,
+    new_window: u32,
+    x: i16,
+    y: i16,
+    _event_x: i16,
+    _event_y: i16,
+    mode: u8,
+) -> Vec<u8> {
     let mut events = Vec::new();
     let old_window = state.last_entered_window;
     if old_window == new_window {
@@ -433,7 +521,21 @@ pub(crate) fn build_crossing_events_with_mode(state: &mut ClientState, new_windo
     if old_is_ancestor_of_new {
         // Case B: old is ancestor of new (pointer moved to a descendant).
         // LeaveNotify(old, detail=Inferior)
-        emit_crossing(&state.windows, &mut events, LEAVE_NOTIFY_EVENT, DETAIL_INFERIOR, mode, seq, timestamp, root_window, old_window, x, y, bo, focus_window);
+        emit_crossing(
+            &state.windows,
+            &mut events,
+            LEAVE_NOTIFY_EVENT,
+            DETAIL_INFERIOR,
+            mode,
+            seq,
+            timestamp,
+            root_window,
+            old_window,
+            x,
+            y,
+            bo,
+            focus_window,
+        );
 
         // EnterNotify(Virtual) for each intermediate window from old's child down to new's parent.
         // new_path = [new, ..., old's_child, old, ...]
@@ -441,54 +543,182 @@ pub(crate) fn build_crossing_events_with_mode(state: &mut ClientState, new_windo
         if let Some(old_pos) = new_path.iter().position(|&w| w == old_window) {
             // Intermediates: new_path[1..old_pos] in reverse (from old's child toward new's parent)
             for &intermediate in new_path[1..old_pos].iter().rev() {
-                emit_crossing(&state.windows, &mut events, ENTER_NOTIFY_EVENT, DETAIL_VIRTUAL, mode, seq, timestamp, root_window, intermediate, x, y, bo, focus_window);
+                emit_crossing(
+                    &state.windows,
+                    &mut events,
+                    ENTER_NOTIFY_EVENT,
+                    DETAIL_VIRTUAL,
+                    mode,
+                    seq,
+                    timestamp,
+                    root_window,
+                    intermediate,
+                    x,
+                    y,
+                    bo,
+                    focus_window,
+                );
             }
         }
 
         // EnterNotify(new, detail=Ancestor)
-        emit_crossing(&state.windows, &mut events, ENTER_NOTIFY_EVENT, DETAIL_ANCESTOR, mode, seq, timestamp, root_window, new_window, x, y, bo, focus_window);
-
+        emit_crossing(
+            &state.windows,
+            &mut events,
+            ENTER_NOTIFY_EVENT,
+            DETAIL_ANCESTOR,
+            mode,
+            seq,
+            timestamp,
+            root_window,
+            new_window,
+            x,
+            y,
+            bo,
+            focus_window,
+        );
     } else if new_is_ancestor_of_old {
         // Case A: new is ancestor of old (pointer moved to an ancestor).
         // LeaveNotify(old, detail=Ancestor)
-        emit_crossing(&state.windows, &mut events, LEAVE_NOTIFY_EVENT, DETAIL_ANCESTOR, mode, seq, timestamp, root_window, old_window, x, y, bo, focus_window);
+        emit_crossing(
+            &state.windows,
+            &mut events,
+            LEAVE_NOTIFY_EVENT,
+            DETAIL_ANCESTOR,
+            mode,
+            seq,
+            timestamp,
+            root_window,
+            old_window,
+            x,
+            y,
+            bo,
+            focus_window,
+        );
 
         // LeaveNotify(Virtual) for each intermediate from old's parent up to new's child.
         if let Some(new_pos) = old_path.iter().position(|&w| w == new_window) {
             // Intermediates: old_path[1..new_pos] (from old's parent toward new's child)
             for &intermediate in &old_path[1..new_pos] {
-                emit_crossing(&state.windows, &mut events, LEAVE_NOTIFY_EVENT, DETAIL_VIRTUAL, mode, seq, timestamp, root_window, intermediate, x, y, bo, focus_window);
+                emit_crossing(
+                    &state.windows,
+                    &mut events,
+                    LEAVE_NOTIFY_EVENT,
+                    DETAIL_VIRTUAL,
+                    mode,
+                    seq,
+                    timestamp,
+                    root_window,
+                    intermediate,
+                    x,
+                    y,
+                    bo,
+                    focus_window,
+                );
             }
         }
 
         // EnterNotify(new, detail=Inferior)
-        emit_crossing(&state.windows, &mut events, ENTER_NOTIFY_EVENT, DETAIL_INFERIOR, mode, seq, timestamp, root_window, new_window, x, y, bo, focus_window);
-
+        emit_crossing(
+            &state.windows,
+            &mut events,
+            ENTER_NOTIFY_EVENT,
+            DETAIL_INFERIOR,
+            mode,
+            seq,
+            timestamp,
+            root_window,
+            new_window,
+            x,
+            y,
+            bo,
+            focus_window,
+        );
     } else {
         // Case C: Nonlinear (neither is ancestor of the other).
         // Find Lowest Common Ancestor (LCA).
         let old_set: std::collections::HashSet<u32> = old_path.iter().copied().collect();
-        let lca = new_path.iter().copied().find(|w| old_set.contains(w)).unwrap_or(root_window);
+        let lca = new_path
+            .iter()
+            .copied()
+            .find(|w| old_set.contains(w))
+            .unwrap_or(root_window);
 
         // LeaveNotify(old, detail=Nonlinear)
-        emit_crossing(&state.windows, &mut events, LEAVE_NOTIFY_EVENT, DETAIL_NONLINEAR, mode, seq, timestamp, root_window, old_window, x, y, bo, focus_window);
+        emit_crossing(
+            &state.windows,
+            &mut events,
+            LEAVE_NOTIFY_EVENT,
+            DETAIL_NONLINEAR,
+            mode,
+            seq,
+            timestamp,
+            root_window,
+            old_window,
+            x,
+            y,
+            bo,
+            focus_window,
+        );
 
         // LeaveNotify(NonlinearVirtual) for intermediates from old's parent up to LCA's child.
         if let Some(lca_pos) = old_path.iter().position(|&w| w == lca) {
             for &intermediate in &old_path[1..lca_pos] {
-                emit_crossing(&state.windows, &mut events, LEAVE_NOTIFY_EVENT, DETAIL_NONLINEAR_VIRTUAL, mode, seq, timestamp, root_window, intermediate, x, y, bo, focus_window);
+                emit_crossing(
+                    &state.windows,
+                    &mut events,
+                    LEAVE_NOTIFY_EVENT,
+                    DETAIL_NONLINEAR_VIRTUAL,
+                    mode,
+                    seq,
+                    timestamp,
+                    root_window,
+                    intermediate,
+                    x,
+                    y,
+                    bo,
+                    focus_window,
+                );
             }
         }
 
         // EnterNotify(NonlinearVirtual) for intermediates from LCA's child down to new's parent.
         if let Some(lca_pos) = new_path.iter().position(|&w| w == lca) {
             for &intermediate in new_path[1..lca_pos].iter().rev() {
-                emit_crossing(&state.windows, &mut events, ENTER_NOTIFY_EVENT, DETAIL_NONLINEAR_VIRTUAL, mode, seq, timestamp, root_window, intermediate, x, y, bo, focus_window);
+                emit_crossing(
+                    &state.windows,
+                    &mut events,
+                    ENTER_NOTIFY_EVENT,
+                    DETAIL_NONLINEAR_VIRTUAL,
+                    mode,
+                    seq,
+                    timestamp,
+                    root_window,
+                    intermediate,
+                    x,
+                    y,
+                    bo,
+                    focus_window,
+                );
             }
         }
 
         // EnterNotify(new, detail=Nonlinear)
-        emit_crossing(&state.windows, &mut events, ENTER_NOTIFY_EVENT, DETAIL_NONLINEAR, mode, seq, timestamp, root_window, new_window, x, y, bo, focus_window);
+        emit_crossing(
+            &state.windows,
+            &mut events,
+            ENTER_NOTIFY_EVENT,
+            DETAIL_NONLINEAR,
+            mode,
+            seq,
+            timestamp,
+            root_window,
+            new_window,
+            x,
+            y,
+            bo,
+            focus_window,
+        );
     }
 
     // KeymapNotify follows EnterNotify per X11 spec.
@@ -515,15 +745,19 @@ pub(crate) fn build_crossing_events_with_mode(state: &mut ClientState, new_windo
 fn resolve_pointer_event_target(
     state: &ClientState,
     top_level: u32,
-    x: i16, y: i16,
+    x: i16,
+    y: i16,
     required_mask: u32,
 ) -> (u32, i16, i16) {
     if let Some(ref grab) = state.grabs.pointer_grab {
         if grab.owner_events {
             // owner_events=true: try normal delivery first
-            let (win, ex, ey) = find_event_subwindow(&state.windows, top_level, x, y, required_mask);
+            let (win, ex, ey) =
+                find_event_subwindow(&state.windows, top_level, x, y, required_mask);
             // Check if the found window actually selects for this event
-            let selects = state.windows.get(&win)
+            let selects = state
+                .windows
+                .get(&win)
                 .map(|w| w.event_mask & required_mask != 0)
                 .unwrap_or(false)
                 || (win == state.root_window);
@@ -576,7 +810,9 @@ fn resolve_keyboard_event_target(
             } else if focus == 1 || focus == state.root_window {
                 // PointerRoot or root: try window under pointer first
                 let target = propagate_keyboard_event(&state.windows, top_level, required_mask);
-                let selects = state.windows.get(&target)
+                let selects = state
+                    .windows
+                    .get(&target)
                     .map(|w| w.event_mask & required_mask != 0)
                     .unwrap_or(false);
                 if selects {
@@ -586,7 +822,9 @@ fn resolve_keyboard_event_target(
                 return (grab.grab_window, 0, 0);
             } else {
                 let target = propagate_keyboard_event(&state.windows, focus, required_mask);
-                let selects = state.windows.get(&target)
+                let selects = state
+                    .windows
+                    .get(&target)
                     .map(|w| w.event_mask & required_mask != 0)
                     .unwrap_or(false);
                 if selects {
@@ -652,7 +890,11 @@ fn keyboard_event_child(
     0
 }
 
-pub(crate) fn build_x11_input_event(state: &mut ClientState, input: &InputEvent, top_level: u32) -> Vec<u8> {
+pub(crate) fn build_x11_input_event(
+    state: &mut ClientState,
+    input: &InputEvent,
+    top_level: u32,
+) -> Vec<u8> {
     match input {
         InputEvent::MotionNotify { x, y, .. }
         | InputEvent::ButtonPress { x, y, .. }
@@ -713,9 +955,12 @@ pub(crate) fn build_x11_input_event(state: &mut ClientState, input: &InputEvent,
     // If the event target has a modal child window (transient_for pointing to it
     // and modal=true), block pointer/keyboard events to the parent. This prevents
     // interaction with windows behind modal dialogs per EWMH spec.
-    if matches!(input,
-        InputEvent::ButtonPress { .. } | InputEvent::ButtonRelease { .. }
-        | InputEvent::KeyPress { .. } | InputEvent::KeyRelease { .. }
+    if matches!(
+        input,
+        InputEvent::ButtonPress { .. }
+            | InputEvent::ButtonRelease { .. }
+            | InputEvent::KeyPress { .. }
+            | InputEvent::KeyRelease { .. }
     ) {
         if is_blocked_by_modal(&state.windows, event_window) {
             return Vec::new();
@@ -735,7 +980,9 @@ pub(crate) fn build_x11_input_event(state: &mut ClientState, input: &InputEvent,
         if !crossing_events.is_empty() {
             state.motion_hint_suppressed = false;
         }
-        let has_hint = state.windows.get(&event_window)
+        let has_hint = state
+            .windows
+            .get(&event_window)
             .map(|w| w.event_mask & POINTER_MOTION_HINT_MASK != 0)
             .unwrap_or(false);
         if has_hint {
@@ -762,7 +1009,12 @@ pub(crate) fn build_x11_input_event(state: &mut ClientState, input: &InputEvent,
             write_u16_bo(&mut event, 28, *mask, bo);
             event[30] = 1;
         }
-        InputEvent::ButtonPress { button, x, y, state: mask } => {
+        InputEvent::ButtonPress {
+            button,
+            x,
+            y,
+            state: mask,
+        } => {
             state.motion_hint_suppressed = false;
             event[0] = BUTTON_PRESS_EVENT;
             event[1] = *button;
@@ -778,7 +1030,12 @@ pub(crate) fn build_x11_input_event(state: &mut ClientState, input: &InputEvent,
             write_u16_bo(&mut event, 28, *mask, bo);
             event[30] = 1;
         }
-        InputEvent::ButtonRelease { button, x, y, state: mask } => {
+        InputEvent::ButtonRelease {
+            button,
+            x,
+            y,
+            state: mask,
+        } => {
             state.motion_hint_suppressed = false;
             event[0] = BUTTON_RELEASE_EVENT;
             event[1] = *button;
@@ -794,7 +1051,10 @@ pub(crate) fn build_x11_input_event(state: &mut ClientState, input: &InputEvent,
             write_u16_bo(&mut event, 28, *mask, bo);
             event[30] = 1;
         }
-        InputEvent::KeyPress { keycode, state: mask } => {
+        InputEvent::KeyPress {
+            keycode,
+            state: mask,
+        } => {
             event[0] = KEY_PRESS_EVENT;
             event[1] = *keycode as u8;
             write_u16_bo(&mut event, 2, seq, bo);
@@ -805,13 +1065,22 @@ pub(crate) fn build_x11_input_event(state: &mut ClientState, input: &InputEvent,
             write_u32_bo(&mut event, 16, child, bo);
             write_i16_bo(&mut event, 20, state.pointer_x, bo); // root_x
             write_i16_bo(&mut event, 22, state.pointer_y, bo); // root_y
-            let (kev_x, kev_y) = window_local_coords(&state.windows, event_window, root_window, state.pointer_x, state.pointer_y);
+            let (kev_x, kev_y) = window_local_coords(
+                &state.windows,
+                event_window,
+                root_window,
+                state.pointer_x,
+                state.pointer_y,
+            );
             write_i16_bo(&mut event, 24, kev_x, bo); // event_x
             write_i16_bo(&mut event, 26, kev_y, bo); // event_y
             write_u16_bo(&mut event, 28, *mask, bo);
             event[30] = 1;
         }
-        InputEvent::KeyRelease { keycode, state: mask } => {
+        InputEvent::KeyRelease {
+            keycode,
+            state: mask,
+        } => {
             event[0] = KEY_RELEASE_EVENT;
             event[1] = *keycode as u8;
             write_u16_bo(&mut event, 2, seq, bo);
@@ -822,7 +1091,13 @@ pub(crate) fn build_x11_input_event(state: &mut ClientState, input: &InputEvent,
             write_u32_bo(&mut event, 16, child, bo);
             write_i16_bo(&mut event, 20, state.pointer_x, bo); // root_x
             write_i16_bo(&mut event, 22, state.pointer_y, bo); // root_y
-            let (kev_x, kev_y) = window_local_coords(&state.windows, event_window, root_window, state.pointer_x, state.pointer_y);
+            let (kev_x, kev_y) = window_local_coords(
+                &state.windows,
+                event_window,
+                root_window,
+                state.pointer_x,
+                state.pointer_y,
+            );
             write_i16_bo(&mut event, 24, kev_x, bo); // event_x
             write_i16_bo(&mut event, 26, kev_y, bo); // event_y
             write_u16_bo(&mut event, 28, *mask, bo);
@@ -835,8 +1110,10 @@ pub(crate) fn build_x11_input_event(state: &mut ClientState, input: &InputEvent,
             let wm_delete_atom = state.intern_atom("WM_DELETE_WINDOW", false);
             let _wm_take_focus_atom = state.intern_atom("WM_TAKE_FOCUS", false);
             let net_wm_state_atom = state.intern_atom("_NET_WM_STATE", false);
-            let net_wm_state_maximized_vert = state.intern_atom("_NET_WM_STATE_MAXIMIZED_VERT", false);
-            let net_wm_state_maximized_horz = state.intern_atom("_NET_WM_STATE_MAXIMIZED_HORZ", false);
+            let net_wm_state_maximized_vert =
+                state.intern_atom("_NET_WM_STATE_MAXIMIZED_VERT", false);
+            let net_wm_state_maximized_horz =
+                state.intern_atom("_NET_WM_STATE_MAXIMIZED_HORZ", false);
             let net_wm_state_fullscreen = state.intern_atom("_NET_WM_STATE_FULLSCREEN", false);
             let net_wm_state_hidden = state.intern_atom("_NET_WM_STATE_HIDDEN", false);
 
@@ -847,11 +1124,14 @@ pub(crate) fn build_x11_input_event(state: &mut ClientState, input: &InputEvent,
                 WindowWmState::Normal => {
                     // Remove all state atoms
                     if let Some(win) = state.windows.get_mut(&top_level) {
-                        win.properties.insert(net_wm_state_atom, PropertyValue {
-                            prop_type: 4, // ATOM
-                            format: 32,
-                            data: Vec::new(),
-                        });
+                        win.properties.insert(
+                            net_wm_state_atom,
+                            PropertyValue {
+                                prop_type: 4, // ATOM
+                                format: 32,
+                                data: Vec::new(),
+                            },
+                        );
                     }
                     emit_property_notify(state, top_level, net_wm_state_atom);
                     state.set_wm_state(top_level, 1); // NormalState
@@ -869,11 +1149,14 @@ pub(crate) fn build_x11_input_event(state: &mut ClientState, input: &InputEvent,
                     // Set _NET_WM_STATE_HIDDEN and WM_STATE = IconicState
                     if let Some(win) = state.windows.get_mut(&top_level) {
                         let atom_data = net_wm_state_hidden.to_le_bytes().to_vec();
-                        win.properties.insert(net_wm_state_atom, PropertyValue {
-                            prop_type: 4,
-                            format: 32,
-                            data: atom_data,
-                        });
+                        win.properties.insert(
+                            net_wm_state_atom,
+                            PropertyValue {
+                                prop_type: 4,
+                                format: 32,
+                                data: atom_data,
+                            },
+                        );
                     }
                     emit_property_notify(state, top_level, net_wm_state_atom);
                     state.set_wm_state(top_level, 3); // IconicState
@@ -891,11 +1174,14 @@ pub(crate) fn build_x11_input_event(state: &mut ClientState, input: &InputEvent,
                         let mut atom_data = Vec::new();
                         atom_data.extend_from_slice(&net_wm_state_maximized_vert.to_le_bytes());
                         atom_data.extend_from_slice(&net_wm_state_maximized_horz.to_le_bytes());
-                        win.properties.insert(net_wm_state_atom, PropertyValue {
-                            prop_type: 4,
-                            format: 32,
-                            data: atom_data,
-                        });
+                        win.properties.insert(
+                            net_wm_state_atom,
+                            PropertyValue {
+                                prop_type: 4,
+                                format: 32,
+                                data: atom_data,
+                            },
+                        );
                     }
                     emit_property_notify(state, top_level, net_wm_state_atom);
                     state.set_wm_state(top_level, 1); // NormalState
@@ -910,11 +1196,14 @@ pub(crate) fn build_x11_input_event(state: &mut ClientState, input: &InputEvent,
                 WindowWmState::Fullscreen => {
                     if let Some(win) = state.windows.get_mut(&top_level) {
                         let atom_data = net_wm_state_fullscreen.to_le_bytes().to_vec();
-                        win.properties.insert(net_wm_state_atom, PropertyValue {
-                            prop_type: 4,
-                            format: 32,
-                            data: atom_data,
-                        });
+                        win.properties.insert(
+                            net_wm_state_atom,
+                            PropertyValue {
+                                prop_type: 4,
+                                format: 32,
+                                data: atom_data,
+                            },
+                        );
                     }
                     emit_property_notify(state, top_level, net_wm_state_atom);
                     state.set_wm_state(top_level, 1); // NormalState
@@ -984,26 +1273,56 @@ mod tests {
     use crate::framebuffer::Framebuffer;
 
     /// Create a minimal WindowState for testing.
-    fn test_window(id: u32, parent: u32, x: i16, y: i16, w: u16, h: u16, event_mask: u32) -> WindowState {
+    fn test_window(
+        id: u32,
+        parent: u32,
+        x: i16,
+        y: i16,
+        w: u16,
+        h: u16,
+        event_mask: u32,
+    ) -> WindowState {
         WindowState {
-            id, parent, x, y, width: w, height: h,
-            border_width: 0, visual: 0x21, depth: 24, class: 1, mapped: true,
+            id,
+            parent,
+            x,
+            y,
+            width: w,
+            height: h,
+            border_width: 0,
+            visual: 0x21,
+            depth: 24,
+            class: 1,
+            mapped: true,
             event_mask,
             do_not_propagate_mask: 0,
-            background_pixel: 0, background_pixmap: None,
-            border_pixel: 0, border_pixmap: None,
-            override_redirect: false, redirected: false,
+            background_pixel: 0,
+            background_pixmap: None,
+            border_pixel: 0,
+            border_pixmap: None,
+            override_redirect: false,
+            redirected: false,
             framebuffer: Framebuffer::new(w as u32, h as u32),
             properties: HashMap::new(),
             owner_client_id: String::new(),
-            cursor: None, children_order: Vec::new(),
+            cursor: None,
+            children_order: Vec::new(),
             retained_temporary: false,
-            bounding_shape: None, clip_shape: None, input_shape: None,
+            bounding_shape: None,
+            clip_shape: None,
+            input_shape: None,
             shape_select_clients: Vec::new(),
-            colormap: 0, backing_store: 0, backing_planes: 0xFFFFFFFF,
-            backing_pixel: 0, save_under: false, visibility: 0,
-            backing_pixmap: None, wm_hints_initial_state: None,
-            transient_for: None, sync_request_counter: None, sync_request_value: 0,
+            colormap: 0,
+            backing_store: 0,
+            backing_planes: 0xFFFFFFFF,
+            backing_pixel: 0,
+            save_under: false,
+            visibility: 0,
+            backing_pixmap: None,
+            wm_hints_initial_state: None,
+            transient_for: None,
+            sync_request_counter: None,
+            sync_request_value: 0,
             window_type: crate::xserver::types::WindowType::Normal,
             strut: None,
             wm_hints_input: None,
@@ -1143,7 +1462,11 @@ mod tests {
 
         // LCA = root
         let old_set: std::collections::HashSet<u32> = old_path.iter().copied().collect();
-        let lca = new_path.iter().copied().find(|w| old_set.contains(w)).unwrap();
+        let lca = new_path
+            .iter()
+            .copied()
+            .find(|w| old_set.contains(w))
+            .unwrap();
         assert_eq!(lca, root);
 
         // Leave intermediates (old's parent up to LCA's child): old_path[1..lca_pos] = [100]
@@ -1153,7 +1476,8 @@ mod tests {
 
         // Enter intermediates (LCA's child down to new's parent): new_path[1..lca_pos] reversed = [200]
         let new_lca_pos = new_path.iter().position(|&w| w == lca).unwrap();
-        let enter_intermediates: Vec<u32> = new_path[1..new_lca_pos].iter().rev().copied().collect();
+        let enter_intermediates: Vec<u32> =
+            new_path[1..new_lca_pos].iter().rev().copied().collect();
         assert_eq!(enter_intermediates, vec![200]); // NonlinearVirtual EnterNotify
     }
 
@@ -1247,12 +1571,19 @@ mod tests {
     #[test]
     fn test_enforce_barriers_vertical() {
         let mut barriers = HashMap::new();
-        barriers.insert(1, PointerBarrier {
-            barrier_id: 1, window: 0x62,
-            x1: 500, y1: 0, x2: 500, y2: 768,
-            directions: 1, // PositiveX (blocks left-to-right)
-            device_ids: Vec::new(),
-        });
+        barriers.insert(
+            1,
+            PointerBarrier {
+                barrier_id: 1,
+                window: 0x62,
+                x1: 500,
+                y1: 0,
+                x2: 500,
+                y2: 768,
+                directions: 1, // PositiveX (blocks left-to-right)
+                device_ids: Vec::new(),
+            },
+        );
 
         // Moving right across barrier at x=500
         let (fx, fy) = enforce_barriers(&barriers, 490, 100, 510, 100);
@@ -1268,12 +1599,19 @@ mod tests {
     #[test]
     fn test_enforce_barriers_horizontal() {
         let mut barriers = HashMap::new();
-        barriers.insert(1, PointerBarrier {
-            barrier_id: 1, window: 0x62,
-            x1: 0, y1: 400, x2: 1024, y2: 400,
-            directions: 0, // all directions
-            device_ids: Vec::new(),
-        });
+        barriers.insert(
+            1,
+            PointerBarrier {
+                barrier_id: 1,
+                window: 0x62,
+                x1: 0,
+                y1: 400,
+                x2: 1024,
+                y2: 400,
+                directions: 0, // all directions
+                device_ids: Vec::new(),
+            },
+        );
 
         let (fx, fy) = enforce_barriers(&barriers, 500, 390, 500, 410);
         assert_eq!(fx, 500);
@@ -1366,7 +1704,10 @@ mod tests {
         windows.insert(30, test_window(30, 10, 10, 10, 50, 50, BUTTON_PRESS_MASK));
 
         // Window 20 at (300,300,100,100)
-        windows.insert(20, test_window(20, root, 300, 300, 100, 100, BUTTON_PRESS_MASK));
+        windows.insert(
+            20,
+            test_window(20, root, 300, 300, 100, 100, BUTTON_PRESS_MASK),
+        );
 
         // Click at (15, 15) should find window 30 (nested child of 10)
         let (target, _rx, _ry) = find_event_subwindow(&windows, root, 15, 15, BUTTON_PRESS_MASK);

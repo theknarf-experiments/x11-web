@@ -71,14 +71,38 @@ pub(crate) fn handle_xresource_request(state: &mut ClientState, data: &[u8], seq
                 count: u32,
             }
             let types = [
-                TypeCount { type_name: "WINDOW", count: num_windows },
-                TypeCount { type_name: "PIXMAP", count: num_pixmaps },
-                TypeCount { type_name: "GC", count: num_gcs },
-                TypeCount { type_name: "CURSOR", count: num_cursors },
-                TypeCount { type_name: "COLORMAP", count: num_colormaps },
-                TypeCount { type_name: "FONT", count: num_fonts },
-                TypeCount { type_name: "PICTURE", count: num_pictures },
-                TypeCount { type_name: "GLYPHSET", count: num_glyphsets },
+                TypeCount {
+                    type_name: "WINDOW",
+                    count: num_windows,
+                },
+                TypeCount {
+                    type_name: "PIXMAP",
+                    count: num_pixmaps,
+                },
+                TypeCount {
+                    type_name: "GC",
+                    count: num_gcs,
+                },
+                TypeCount {
+                    type_name: "CURSOR",
+                    count: num_cursors,
+                },
+                TypeCount {
+                    type_name: "COLORMAP",
+                    count: num_colormaps,
+                },
+                TypeCount {
+                    type_name: "FONT",
+                    count: num_fonts,
+                },
+                TypeCount {
+                    type_name: "PICTURE",
+                    count: num_pictures,
+                },
+                TypeCount {
+                    type_name: "GLYPHSET",
+                    count: num_glyphsets,
+                },
             ];
 
             // Only include types with count > 0
@@ -111,7 +135,9 @@ pub(crate) fn handle_xresource_request(state: &mut ClientState, data: &[u8], seq
                 return build_error_bo(BAD_REQUEST, seq, 0, XRES_MAJOR_OPCODE, minor as u16, bo);
             }
 
-            let total_bytes: u64 = state.pixmaps.values()
+            let total_bytes: u64 = state
+                .pixmaps
+                .values()
                 .map(|p| (p.width as u64) * (p.height as u64) * (p.depth as u64 / 8).max(1))
                 .sum();
 
@@ -208,7 +234,9 @@ pub(crate) fn handle_xresource_request(state: &mut ClientState, data: &[u8], seq
 
             // Compute byte counts for all resource types
             let window_bytes: u64 = state.windows.len() as u64 * 256; // estimate per window
-            let pixmap_bytes: u64 = state.pixmaps.values()
+            let pixmap_bytes: u64 = state
+                .pixmaps
+                .values()
                 .map(|p| (p.width as u64) * (p.height as u64) * (p.depth as u64 / 8).max(1))
                 .sum();
             let gc_bytes: u64 = state.gcs.len() as u64 * 128;
@@ -220,10 +248,26 @@ pub(crate) fn handle_xresource_request(state: &mut ClientState, data: &[u8], seq
                 bytes: u64,
             }
             let all_types = [
-                SizeEntry { type_name: "WINDOW", count: state.windows.len() as u32, bytes: window_bytes },
-                SizeEntry { type_name: "PIXMAP", count: state.pixmaps.len() as u32, bytes: pixmap_bytes },
-                SizeEntry { type_name: "GC", count: state.gcs.len() as u32, bytes: gc_bytes },
-                SizeEntry { type_name: "CURSOR", count: state.cursors.len() as u32, bytes: cursor_bytes },
+                SizeEntry {
+                    type_name: "WINDOW",
+                    count: state.windows.len() as u32,
+                    bytes: window_bytes,
+                },
+                SizeEntry {
+                    type_name: "PIXMAP",
+                    count: state.pixmaps.len() as u32,
+                    bytes: pixmap_bytes,
+                },
+                SizeEntry {
+                    type_name: "GC",
+                    count: state.gcs.len() as u32,
+                    bytes: gc_bytes,
+                },
+                SizeEntry {
+                    type_name: "CURSOR",
+                    count: state.cursors.len() as u32,
+                    bytes: cursor_bytes,
+                },
             ];
 
             // If num_specs > 0, filter to requested types; otherwise return all
@@ -264,7 +308,14 @@ pub(crate) fn handle_xresource_request(state: &mut ClientState, data: &[u8], seq
 
         _ => {
             debug!("Unhandled X-Resource minor opcode: {minor}");
-            build_error_bo(BAD_REQUEST, seq, minor as u32, XRES_MAJOR_OPCODE, minor as u16, bo)
+            build_error_bo(
+                BAD_REQUEST,
+                seq,
+                minor as u32,
+                XRES_MAJOR_OPCODE,
+                minor as u16,
+                bo,
+            )
         }
     }
 }

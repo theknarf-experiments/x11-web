@@ -44,18 +44,48 @@ pub(crate) fn handle_get_supported_modifiers(
     // Window modifiers (u64 each), starting at offset 32
     let mut off = 32;
     // LINEAR
-    write_u32_bo(&mut reply, off, (DRM_FORMAT_MOD_LINEAR & 0xFFFF_FFFF) as u32, bo);
-    write_u32_bo(&mut reply, off + 4, (DRM_FORMAT_MOD_LINEAR >> 32) as u32, bo);
+    write_u32_bo(
+        &mut reply,
+        off,
+        (DRM_FORMAT_MOD_LINEAR & 0xFFFF_FFFF) as u32,
+        bo,
+    );
+    write_u32_bo(
+        &mut reply,
+        off + 4,
+        (DRM_FORMAT_MOD_LINEAR >> 32) as u32,
+        bo,
+    );
     off += 8;
 
     // Screen modifiers (u64 each)
     // LINEAR
-    write_u32_bo(&mut reply, off, (DRM_FORMAT_MOD_LINEAR & 0xFFFF_FFFF) as u32, bo);
-    write_u32_bo(&mut reply, off + 4, (DRM_FORMAT_MOD_LINEAR >> 32) as u32, bo);
+    write_u32_bo(
+        &mut reply,
+        off,
+        (DRM_FORMAT_MOD_LINEAR & 0xFFFF_FFFF) as u32,
+        bo,
+    );
+    write_u32_bo(
+        &mut reply,
+        off + 4,
+        (DRM_FORMAT_MOD_LINEAR >> 32) as u32,
+        bo,
+    );
     off += 8;
     // INVALID (used by Mesa as a fallback/any-modifier sentinel)
-    write_u32_bo(&mut reply, off, (DRM_FORMAT_MOD_INVALID & 0xFFFF_FFFF) as u32, bo);
-    write_u32_bo(&mut reply, off + 4, (DRM_FORMAT_MOD_INVALID >> 32) as u32, bo);
+    write_u32_bo(
+        &mut reply,
+        off,
+        (DRM_FORMAT_MOD_INVALID & 0xFFFF_FFFF) as u32,
+        bo,
+    );
+    write_u32_bo(
+        &mut reply,
+        off + 4,
+        (DRM_FORMAT_MOD_INVALID >> 32) as u32,
+        bo,
+    );
 
     reply
 }

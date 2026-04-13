@@ -4,8 +4,13 @@ impl Framebuffer {
     /// fill_rect_rop with clip rectangle support.
     pub fn fill_rect_rop_clipped(
         &mut self,
-        x: i16, y: i16, width: u16, height: u16,
-        color: u32, function: u8, plane_mask: u32,
+        x: i16,
+        y: i16,
+        width: u16,
+        height: u16,
+        color: u32,
+        function: u8,
+        plane_mask: u32,
         clip_rects: &[(i16, i16, u16, u16)],
     ) {
         if clip_rects.is_empty() {
@@ -20,9 +25,13 @@ impl Framebuffer {
             let iy1 = (y as i32 + height as i32).min(cy as i32 + ch as i32);
             if ix0 < ix1 && iy0 < iy1 {
                 self.fill_rect_rop(
-                    ix0 as i16, iy0 as i16,
-                    (ix1 - ix0) as u16, (iy1 - iy0) as u16,
-                    color, function, plane_mask,
+                    ix0 as i16,
+                    iy0 as i16,
+                    (ix1 - ix0) as u16,
+                    (iy1 - iy0) as u16,
+                    color,
+                    function,
+                    plane_mask,
                 );
             }
         }
@@ -68,10 +77,13 @@ impl Framebuffer {
                 continue;
             }
             // Which row in the stipple pattern (tiled)
-            let stip_y = ((dy - ts_y as i32) % stipple_h as i32 + stipple_h as i32) as u32 % stipple_h;
+            let stip_y =
+                ((dy - ts_y as i32) % stipple_h as i32 + stipple_h as i32) as u32 % stipple_h;
 
             for px in row_start..row_end {
-                let stip_x = ((px as i32 - ts_x as i32) % stipple_w as i32 + stipple_w as i32) as u32 % stipple_w;
+                let stip_x = ((px as i32 - ts_x as i32) % stipple_w as i32 + stipple_w as i32)
+                    as u32
+                    % stipple_w;
                 let byte_idx = stip_y as usize * stipple_stride + (stip_x / 8) as usize;
                 let bit = if byte_idx < stipple_data.len() {
                     (stipple_data[byte_idx] >> (stip_x % 8)) & 1
@@ -80,9 +92,13 @@ impl Framebuffer {
                 };
 
                 if bit != 0 {
-                    self.draw_point_with_func_masked(px as i32, dy, foreground, function, plane_mask);
+                    self.draw_point_with_func_masked(
+                        px as i32, dy, foreground, function, plane_mask,
+                    );
                 } else if opaque {
-                    self.draw_point_with_func_masked(px as i32, dy, background, function, plane_mask);
+                    self.draw_point_with_func_masked(
+                        px as i32, dy, background, function, plane_mask,
+                    );
                 }
             }
         }
@@ -124,7 +140,8 @@ impl Framebuffer {
             let tile_y = ((dy - ts_y as i32) % tile_h as i32 + tile_h as i32) as u32 % tile_h;
 
             for px in row_start..row_end {
-                let tile_x = ((px as i32 - ts_x as i32) % tile_w as i32 + tile_w as i32) as u32 % tile_w;
+                let tile_x =
+                    ((px as i32 - ts_x as i32) % tile_w as i32 + tile_w as i32) as u32 % tile_w;
                 let off = tile_y as usize * tile_stride + tile_x as usize * 4;
                 if off + 3 < tile_data.len() {
                     let color = (tile_data[off + 2] as u32) << 16
@@ -138,7 +155,9 @@ impl Framebuffer {
                                 .copy_from_slice(&tile_data[off..off + 4]);
                         }
                     } else {
-                        self.draw_point_with_func_masked(px as i32, dy, color, function, plane_mask);
+                        self.draw_point_with_func_masked(
+                            px as i32, dy, color, function, plane_mask,
+                        );
                     }
                 }
             }
@@ -222,9 +241,9 @@ impl Framebuffer {
                         if ddx * ddx + ddy * ddy <= 1.0
                             && (angle2.abs() >= 360 * 64
                                 || point_in_arc(ddx, ddy, start_rad, extent_rad))
-                            {
-                                self.draw_point_gc(px, py, color, gc_func, plane_mask, clip_rects);
-                            }
+                        {
+                            self.draw_point_gc(px, py, color, gc_func, plane_mask, clip_rects);
+                        }
                     }
                 }
             }
@@ -336,10 +355,16 @@ impl Framebuffer {
     /// the bounding box (x, y, width, height) and angle parameters.
     #[inline]
     fn pixel_in_filled_arc(
-        px: i32, py: i32,
-        cx: f64, cy: f64, rx: f64, ry: f64,
-        _angle1: i16, angle2: i16,
-        start_rad: f64, extent_rad: f64,
+        px: i32,
+        py: i32,
+        cx: f64,
+        cy: f64,
+        rx: f64,
+        ry: f64,
+        _angle1: i16,
+        angle2: i16,
+        start_rad: f64,
+        extent_rad: f64,
         arc_mode: u8,
         // Pre-computed chord data for ArcChord mode (only used when arc_mode == 0)
         chord: Option<&ArcChordData>,
@@ -370,12 +395,20 @@ impl Framebuffer {
     #[allow(clippy::too_many_arguments)]
     pub fn fill_arc_tiled(
         &mut self,
-        x: i16, y: i16, width: u16, height: u16,
-        angle1: i16, angle2: i16,
-        tile_data: &[u8], tile_w: u32, tile_h: u32,
-        ts_x: i16, ts_y: i16,
+        x: i16,
+        y: i16,
+        width: u16,
+        height: u16,
+        angle1: i16,
+        angle2: i16,
+        tile_data: &[u8],
+        tile_w: u32,
+        tile_h: u32,
+        ts_x: i16,
+        ts_y: i16,
         arc_mode: u8,
-        gc_func: u8, plane_mask: u32,
+        gc_func: u8,
+        plane_mask: u32,
         clip_rects: &[(i16, i16, u16, u16)],
     ) {
         if width == 0 || height == 0 || tile_w == 0 || tile_h == 0 || tile_data.is_empty() {
@@ -398,7 +431,20 @@ impl Framebuffer {
 
         for py in min_y..=max_y {
             for px in min_x..=max_x {
-                if !Self::pixel_in_filled_arc(px, py, cx, cy, rx, ry, angle1, angle2, start_rad, extent_rad, arc_mode, chord.as_ref()) {
+                if !Self::pixel_in_filled_arc(
+                    px,
+                    py,
+                    cx,
+                    cy,
+                    rx,
+                    ry,
+                    angle1,
+                    angle2,
+                    start_rad,
+                    extent_rad,
+                    arc_mode,
+                    chord.as_ref(),
+                ) {
                     continue;
                 }
                 if !self.in_clip(px, py, clip_rects) {
@@ -421,17 +467,27 @@ impl Framebuffer {
     #[allow(clippy::too_many_arguments)]
     pub fn fill_arc_stippled(
         &mut self,
-        x: i16, y: i16, width: u16, height: u16,
-        angle1: i16, angle2: i16,
-        fg: u32, bg: u32,
-        stipple_data: &[u8], stipple_w: u32, stipple_h: u32,
-        ts_x: i16, ts_y: i16,
+        x: i16,
+        y: i16,
+        width: u16,
+        height: u16,
+        angle1: i16,
+        angle2: i16,
+        fg: u32,
+        bg: u32,
+        stipple_data: &[u8],
+        stipple_w: u32,
+        stipple_h: u32,
+        ts_x: i16,
+        ts_y: i16,
         opaque: bool,
         arc_mode: u8,
-        gc_func: u8, plane_mask: u32,
+        gc_func: u8,
+        plane_mask: u32,
         clip_rects: &[(i16, i16, u16, u16)],
     ) {
-        if width == 0 || height == 0 || stipple_w == 0 || stipple_h == 0 || stipple_data.is_empty() {
+        if width == 0 || height == 0 || stipple_w == 0 || stipple_h == 0 || stipple_data.is_empty()
+        {
             return;
         }
 
@@ -451,7 +507,20 @@ impl Framebuffer {
 
         for py in min_y..=max_y {
             for px in min_x..=max_x {
-                if !Self::pixel_in_filled_arc(px, py, cx, cy, rx, ry, angle1, angle2, start_rad, extent_rad, arc_mode, chord.as_ref()) {
+                if !Self::pixel_in_filled_arc(
+                    px,
+                    py,
+                    cx,
+                    cy,
+                    rx,
+                    ry,
+                    angle1,
+                    angle2,
+                    start_rad,
+                    extent_rad,
+                    arc_mode,
+                    chord.as_ref(),
+                ) {
                     continue;
                 }
                 if !self.in_clip(px, py, clip_rects) {
@@ -504,8 +573,8 @@ impl Framebuffer {
         // For filled arcs, use arc_mode-aware fill with full GC support.
         if filled {
             self.draw_arc_with_mode_gc(
-                x, y, width, height, angle1, angle2, true, foreground, arc_mode,
-                function, plane_mask, clip_rects, line_width,
+                x, y, width, height, angle1, angle2, true, foreground, arc_mode, function,
+                plane_mask, clip_rects, line_width,
             );
             return;
         }
@@ -578,19 +647,29 @@ impl Framebuffer {
                         for fy in min_y..=max_y {
                             for fx in min_x..=max_x {
                                 // Check distance from line segment
-                                let t_proj = ((fx as f64 - lx as f64) * dx + (fy as f64 - ly as f64) * dy) / (len * len);
+                                let t_proj = ((fx as f64 - lx as f64) * dx
+                                    + (fy as f64 - ly as f64) * dy)
+                                    / (len * len);
                                 if (0.0..=1.0).contains(&t_proj) {
                                     let closest_x = lx as f64 + t_proj * dx;
                                     let closest_y = ly as f64 + t_proj * dy;
-                                    let dist = ((fx as f64 - closest_x).powi(2) + (fy as f64 - closest_y).powi(2)).sqrt();
+                                    let dist = ((fx as f64 - closest_x).powi(2)
+                                        + (fy as f64 - closest_y).powi(2))
+                                    .sqrt();
                                     if dist <= half_lw {
-                                        if !clip_rects.is_empty() && !clip_rects.iter().any(|&(cx, cy, cw, ch)| {
-                                            fx >= cx as i32 && fx < (cx as i32 + cw as i32) &&
-                                            fy >= cy as i32 && fy < (cy as i32 + ch as i32)
-                                        }) {
+                                        if !clip_rects.is_empty()
+                                            && !clip_rects.iter().any(|&(cx, cy, cw, ch)| {
+                                                fx >= cx as i32
+                                                    && fx < (cx as i32 + cw as i32)
+                                                    && fy >= cy as i32
+                                                    && fy < (cy as i32 + ch as i32)
+                                            })
+                                        {
                                             continue;
                                         }
-                                        self.draw_point_with_func_masked(fx, fy, color, function, plane_mask);
+                                        self.draw_point_with_func_masked(
+                                            fx, fy, color, function, plane_mask,
+                                        );
                                     }
                                 }
                             }
@@ -622,10 +701,13 @@ impl Framebuffer {
         let mut cx = x0;
         let mut cy = y0;
         loop {
-            let in_clip = clip_rects.is_empty() || clip_rects.iter().any(|&(rx, ry, rw, rh)| {
-                cx >= rx as i32 && cx < (rx as i32 + rw as i32) &&
-                cy >= ry as i32 && cy < (ry as i32 + rh as i32)
-            });
+            let in_clip = clip_rects.is_empty()
+                || clip_rects.iter().any(|&(rx, ry, rw, rh)| {
+                    cx >= rx as i32
+                        && cx < (rx as i32 + rw as i32)
+                        && cy >= ry as i32
+                        && cy < (ry as i32 + rh as i32)
+                });
             if in_clip {
                 self.draw_point_with_func_masked(cx, cy, color, function, plane_mask);
             }
@@ -701,8 +783,16 @@ impl Framebuffer {
                             let sx = sx_val.max(0).min(i16::MAX as i32) as i16;
                             let ex = (*cx).min(self.width as i32 - 1).min(i16::MAX as i32) as i16;
                             if ex >= sx {
-                                self.fill_rect_rop_clipped(sx, y as i16,
-                                    (ex - sx + 1) as u16, 1, color, gc_func, plane_mask, clip_rects);
+                                self.fill_rect_rop_clipped(
+                                    sx,
+                                    y as i16,
+                                    (ex - sx + 1) as u16,
+                                    1,
+                                    color,
+                                    gc_func,
+                                    plane_mask,
+                                    clip_rects,
+                                );
                             }
                         }
                     }
@@ -726,8 +816,16 @@ impl Framebuffer {
                         let start_x = pair[0].max(0).min(i16::MAX as i32) as i16;
                         let end_x = pair[1].min(self.width as i32 - 1).min(i16::MAX as i32) as i16;
                         if end_x >= start_x {
-                            self.fill_rect_rop_clipped(start_x, y as i16,
-                                (end_x - start_x + 1) as u16, 1, color, gc_func, plane_mask, clip_rects);
+                            self.fill_rect_rop_clipped(
+                                start_x,
+                                y as i16,
+                                (end_x - start_x + 1) as u16,
+                                1,
+                                color,
+                                gc_func,
+                                plane_mask,
+                                clip_rects,
+                            );
                         }
                     }
                 }
@@ -758,7 +856,9 @@ impl Framebuffer {
             let dy = *y;
             for &(sx, ex) in spans {
                 for px in sx..=ex {
-                    if !self.in_clip(px as i32, dy as i32, clip_rects) { continue; }
+                    if !self.in_clip(px as i32, dy as i32, clip_rects) {
+                        continue;
+                    }
                     let tile_px = ((px as i32 - ts_x as i32).rem_euclid(tile_w as i32)) as usize;
                     let tile_py = ((dy as i32 - ts_y as i32).rem_euclid(tile_h as i32)) as usize;
                     let offset = (tile_py * tile_w as usize + tile_px) * 4;
@@ -768,7 +868,9 @@ impl Framebuffer {
                         let r = tile_data[offset + 2] as u32;
                         let a = tile_data[offset + 3] as u32;
                         let color = (a << 24) | (r << 16) | (g << 8) | b;
-                        self.draw_point_with_func_masked(px as i32, dy as i32, color, gc_func, plane_mask);
+                        self.draw_point_with_func_masked(
+                            px as i32, dy as i32, color, gc_func, plane_mask,
+                        );
                     }
                 }
             }
@@ -801,7 +903,9 @@ impl Framebuffer {
             let dy = *y;
             for &(sx, ex) in spans {
                 for px in sx..=ex {
-                    if !self.in_clip(px as i32, dy as i32, clip_rects) { continue; }
+                    if !self.in_clip(px as i32, dy as i32, clip_rects) {
+                        continue;
+                    }
                     let stip_x = ((px as i32 - ts_x as i32).rem_euclid(stipple_w as i32)) as u32;
                     let stip_y = ((dy as i32 - ts_y as i32).rem_euclid(stipple_h as i32)) as u32;
                     let byte_idx = stip_y as usize * stipple_stride + (stip_x / 8) as usize;
@@ -811,9 +915,13 @@ impl Framebuffer {
                         0
                     };
                     if bit != 0 {
-                        self.draw_point_with_func_masked(px as i32, dy as i32, fg, gc_func, plane_mask);
+                        self.draw_point_with_func_masked(
+                            px as i32, dy as i32, fg, gc_func, plane_mask,
+                        );
                     } else if opaque {
-                        self.draw_point_with_func_masked(px as i32, dy as i32, bg, gc_func, plane_mask);
+                        self.draw_point_with_func_masked(
+                            px as i32, dy as i32, bg, gc_func, plane_mask,
+                        );
                     }
                 }
             }
@@ -826,15 +934,26 @@ impl Framebuffer {
             return true;
         }
         clip_rects.iter().any(|&(cx, cy, cw, ch)| {
-            x >= cx as i32 && x < (cx as i32 + cw as i32) &&
-            y >= cy as i32 && y < (cy as i32 + ch as i32)
+            x >= cx as i32
+                && x < (cx as i32 + cw as i32)
+                && y >= cy as i32
+                && y < (cy as i32 + ch as i32)
         })
     }
 
     /// Compute polygon scanlines: returns sorted (y, [(start_x, end_x)]) pairs.
-    fn compute_polygon_scanlines(&self, points: &[(i16, i16)], fill_rule: u8) -> Vec<(i16, Vec<(i16, i16)>)> {
+    fn compute_polygon_scanlines(
+        &self,
+        points: &[(i16, i16)],
+        fill_rule: u8,
+    ) -> Vec<(i16, Vec<(i16, i16)>)> {
         let min_y = points.iter().map(|p| p.1).min().unwrap().max(0);
-        let max_y = points.iter().map(|p| p.1).max().unwrap().min(self.height as i16 - 1);
+        let max_y = points
+            .iter()
+            .map(|p| p.1)
+            .max()
+            .unwrap()
+            .min(self.height as i16 - 1);
         let n = points.len();
         let mut result = Vec::new();
 
@@ -867,7 +986,9 @@ impl Framebuffer {
                         if let Some(sx_val) = span_start.take() {
                             let sx = sx_val.max(0).min(i16::MAX as i32) as i16;
                             let ex = (*cx).min(self.width as i32 - 1).min(i16::MAX as i32) as i16;
-                            if ex >= sx { spans.push((sx, ex)); }
+                            if ex >= sx {
+                                spans.push((sx, ex));
+                            }
                         }
                     }
                 }
@@ -887,7 +1008,9 @@ impl Framebuffer {
                     if pair.len() == 2 {
                         let sx = pair[0].max(0) as i16;
                         let ex = pair[1].min(self.width as i32 - 1) as i16;
-                        if ex >= sx { spans.push((sx, ex)); }
+                        if ex >= sx {
+                            spans.push((sx, ex));
+                        }
                     }
                 }
             }

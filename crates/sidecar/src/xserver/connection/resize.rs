@@ -6,26 +6,44 @@ use x11_web_protocol::DisplayUpdate;
 use crate::framebuffer::Framebuffer;
 use crate::xserver::client::ClientState;
 use crate::xserver::core::*;
-use crate::xserver::types::{RandrMode, generate_edid, PropertyValue};
 use crate::xserver::is_descendant_of;
+use crate::xserver::types::{generate_edid, PropertyValue, RandrMode};
 
 /// Resize a top-level window in response to a frontend canvas size change.
-pub(crate) fn resize_window(state: &mut ClientState, window_uuid: &str, width: u16, height: u16) -> Vec<u8> {
+pub(crate) fn resize_window(
+    state: &mut ClientState,
+    window_uuid: &str,
+    width: u16,
+    height: u16,
+) -> Vec<u8> {
     let mut events = Vec::new();
     let seq = state.sequence;
     let bo = state.msb_first;
 
-    let window_id = match state.x11_to_uuid.iter().find(|(_, uuid)| uuid.as_str() == window_uuid) {
+    let window_id = match state
+        .x11_to_uuid
+        .iter()
+        .find(|(_, uuid)| uuid.as_str() == window_uuid)
+    {
         Some((&wid, _)) => wid,
         None => return events,
     };
 
     // Compute above_sibling before the mutable borrow
-    let above_sib = state.windows.get(&window_id)
+    let above_sib = state
+        .windows
+        .get(&window_id)
         .and_then(|w| {
             let parent = state.windows.get(&w.parent)?;
-            let pos = parent.children_order.iter().position(|&id| id == window_id)?;
-            if pos > 0 { Some(parent.children_order[pos - 1]) } else { None }
+            let pos = parent
+                .children_order
+                .iter()
+                .position(|&id| id == window_id)?;
+            if pos > 0 {
+                Some(parent.children_order[pos - 1])
+            } else {
+                None
+            }
         })
         .unwrap_or(0);
 
@@ -33,14 +51,19 @@ pub(crate) fn resize_window(state: &mut ClientState, window_uuid: &str, width: u
     // protocol, increment the counter and send a ClientMessage before resizing.
     // This lets the client synchronize its repainting with the resize.
     {
-        let sync_counter = state.windows.get(&window_id).and_then(|w| w.sync_request_counter);
+        let sync_counter = state
+            .windows
+            .get(&window_id)
+            .and_then(|w| w.sync_request_counter);
         if let Some(counter_id) = sync_counter {
             let net_wm_sync_request_atom = state.intern_atom("_NET_WM_SYNC_REQUEST", false);
             let wm_protocols_atom = state.intern_atom("WM_PROTOCOLS", false);
             let supports_sync = state.window_supports_protocol(window_id, net_wm_sync_request_atom);
             if supports_sync {
                 // Increment the sync request value
-                let new_value = state.windows.get(&window_id)
+                let new_value = state
+                    .windows
+                    .get(&window_id)
                     .map(|w| w.sync_request_value.wrapping_add(1))
                     .unwrap_or(1);
                 if let Some(win) = state.windows.get_mut(&window_id) {
@@ -96,7 +119,9 @@ pub(crate) fn resize_window(state: &mut ClientState, window_uuid: &str, width: u
                 .windows
                 .values()
                 .filter(|w| {
-                    w.mapped && w.id != window_id && is_descendant_of(&state.windows, w.id, window_id)
+                    w.mapped
+                        && w.id != window_id
+                        && is_descendant_of(&state.windows, w.id, window_id)
                 })
                 .map(|w| w.id),
         )
@@ -187,16 +212,22 @@ pub(super) fn apply_screen_resize(state: &mut ClientState, new_w: u16, new_h: u1
         workarea_data.extend_from_slice(&(new_h as u32).to_le_bytes());
 
         if let Some(root) = state.windows.get_mut(&state.root_window) {
-            root.properties.insert(geom_atom, PropertyValue {
-                prop_type: 6, // CARDINAL
-                format: 32,
-                data: geom_data,
-            });
-            root.properties.insert(workarea_atom, PropertyValue {
-                prop_type: 6,
-                format: 32,
-                data: workarea_data,
-            });
+            root.properties.insert(
+                geom_atom,
+                PropertyValue {
+                    prop_type: 6, // CARDINAL
+                    format: 32,
+                    data: geom_data,
+                },
+            );
+            root.properties.insert(
+                workarea_atom,
+                PropertyValue {
+                    prop_type: 6,
+                    format: 32,
+                    data: workarea_data,
+                },
+            );
         }
     }
 
@@ -226,11 +257,14 @@ pub(super) fn apply_screen_resize(state: &mut ClientState, new_w: u16, new_h: u1
     if let Some(output) = state.randr_outputs.iter_mut().find(|o| o.id == output_id) {
         output.mm_width = mm_w;
         output.mm_height = mm_h;
-        output.properties.insert(edid_atom, PropertyValue {
-            prop_type: edid_atom,
-            format: 8,
-            data: edid_data,
-        });
+        output.properties.insert(
+            edid_atom,
+            PropertyValue {
+                prop_type: edid_atom,
+                format: 8,
+                data: edid_data,
+            },
+        );
     }
 
     // 5. Generate X11 events
@@ -245,12 +279,12 @@ pub(super) fn apply_screen_resize(state: &mut ClientState, new_w: u16, new_h: u1
         write_u16_bo(&mut event, 2, seq, bo);
         write_u32_bo(&mut event, 4, state.root_window, bo); // event window
         write_u32_bo(&mut event, 8, state.root_window, bo); // window
-        // above_sibling = 0 (root window has no parent/siblings)
-        write_i16_bo(&mut event, 16, 0, bo);  // x
-        write_i16_bo(&mut event, 18, 0, bo);  // y
+                                                            // above_sibling = 0 (root window has no parent/siblings)
+        write_i16_bo(&mut event, 16, 0, bo); // x
+        write_i16_bo(&mut event, 18, 0, bo); // y
         write_u16_bo(&mut event, 20, new_w, bo);
         write_u16_bo(&mut event, 22, new_h, bo);
-        write_u16_bo(&mut event, 24, 0, bo);  // border_width
+        write_u16_bo(&mut event, 24, 0, bo); // border_width
         events.extend_from_slice(&event);
     }
 

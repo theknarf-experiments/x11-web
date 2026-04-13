@@ -48,12 +48,20 @@ impl WindowRouter {
         }
     }
 
-    pub(crate) fn register(&self, uuid: &str, x11_wid: u32, tx: &mpsc::UnboundedSender<(u32, WindowMessage)>) {
+    pub(crate) fn register(
+        &self,
+        uuid: &str,
+        x11_wid: u32,
+        tx: &mpsc::UnboundedSender<(u32, WindowMessage)>,
+    ) {
         if let Ok(mut routes) = self.routes.lock() {
-            routes.insert(uuid.to_string(), WindowRoute {
-                tx: tx.clone(),
-                x11_window_id: x11_wid,
-            });
+            routes.insert(
+                uuid.to_string(),
+                WindowRoute {
+                    tx: tx.clone(),
+                    x11_window_id: x11_wid,
+                },
+            );
         }
     }
 
@@ -68,7 +76,9 @@ impl WindowRouter {
     pub fn send_input(&self, window_uuid: &str, event: InputEvent) -> bool {
         if let Ok(routes) = self.routes.lock() {
             if let Some(route) = routes.get(window_uuid) {
-                let _ = route.tx.send((route.x11_window_id, WindowMessage::Input(event)));
+                let _ = route
+                    .tx
+                    .send((route.x11_window_id, WindowMessage::Input(event)));
                 return true;
             }
         }
@@ -78,7 +88,9 @@ impl WindowRouter {
     pub fn send_resize(&self, window_uuid: &str, width: u16, height: u16) -> bool {
         if let Ok(routes) = self.routes.lock() {
             if let Some(route) = routes.get(window_uuid) {
-                let _ = route.tx.send((route.x11_window_id, WindowMessage::Resize(width, height)));
+                let _ = route
+                    .tx
+                    .send((route.x11_window_id, WindowMessage::Resize(width, height)));
                 return true;
             }
         }
@@ -266,9 +278,7 @@ impl EventBroadcaster {
         if let Ok(subs) = self.subscriptions.lock() {
             if let Some(list) = subs.get(&window_id) {
                 for sub in list {
-                    if sub.client_id != source_client_id
-                        && (sub.event_mask & event_mask_bit) != 0
-                    {
+                    if sub.client_id != source_client_id && (sub.event_mask & event_mask_bit) != 0 {
                         let _ = sub.tx.send(event.to_vec());
                         delivered += 1;
                     }
@@ -324,9 +334,7 @@ impl EventBroadcaster {
         if let Ok(subs) = self.subscriptions.lock() {
             if let Some(list) = subs.get(&window_id) {
                 for sub in list {
-                    if sub.client_id != exclude_client
-                        && (sub.event_mask & event_mask_bit) != 0
-                    {
+                    if sub.client_id != exclude_client && (sub.event_mask & event_mask_bit) != 0 {
                         return true;
                     }
                 }
@@ -363,11 +371,7 @@ impl EventBroadcaster {
     /// Broadcast an event to ALL clients on the given window (e.g., MappingNotify).
     /// Does not filter by event mask or source client.
     #[allow(dead_code)]
-    pub(crate) fn broadcast_all(
-        &self,
-        window_id: u32,
-        event: &[u8],
-    ) -> usize {
+    pub(crate) fn broadcast_all(&self, window_id: u32, event: &[u8]) -> usize {
         let mut delivered = 0;
         if let Ok(subs) = self.subscriptions.lock() {
             if let Some(list) = subs.get(&window_id) {

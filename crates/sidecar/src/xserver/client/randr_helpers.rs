@@ -15,17 +15,26 @@ impl ClientState {
         let provider_id: u32 = 400;
 
         let mode = RandrMode::new(mode_id, self.screen_width, self.screen_height);
-        let crtc = RandrCrtc::new(crtc_id, self.screen_width, self.screen_height, mode_id, output_id);
+        let crtc = RandrCrtc::new(
+            crtc_id,
+            self.screen_width,
+            self.screen_height,
+            mode_id,
+            output_id,
+        );
 
         // Pre-populate EDID property.
         let edid_atom = self.intern_atom("EDID", false);
         let edid_data = generate_edid(270, 203, self.screen_width, self.screen_height);
         let mut output_props = std::collections::HashMap::new();
-        output_props.insert(edid_atom, PropertyValue {
-            prop_type: edid_atom,
-            format: 8,
-            data: edid_data,
-        });
+        output_props.insert(
+            edid_atom,
+            PropertyValue {
+                prop_type: edid_atom,
+                format: 8,
+                data: edid_data,
+            },
+        );
 
         let output = RandrOutput {
             id: output_id,

@@ -26,7 +26,12 @@ impl XFixesRegion {
     /// Compute the bounding extents of the region.
     pub(crate) fn extents(&self) -> RegionRect {
         if self.rects.is_empty() {
-            return RegionRect { x: 0, y: 0, width: 0, height: 0 };
+            return RegionRect {
+                x: 0,
+                y: 0,
+                width: 0,
+                height: 0,
+            };
         }
         let mut x1 = i16::MAX;
         let mut y1 = i16::MAX;
@@ -124,7 +129,12 @@ mod tests {
     use super::*;
 
     fn r(x: i16, y: i16, w: u16, h: u16) -> RegionRect {
-        RegionRect { x, y, width: w, height: h }
+        RegionRect {
+            x,
+            y,
+            width: w,
+            height: h,
+        }
     }
 
     #[test]
@@ -204,7 +214,11 @@ mod tests {
         // Should produce: top strip, left strip, right strip, bottom strip
         assert!(s.rects.len() >= 3);
         // Total area should be 30*30 - 10*10 = 800
-        let area: i32 = s.rects.iter().map(|r| r.width as i32 * r.height as i32).sum();
+        let area: i32 = s
+            .rects
+            .iter()
+            .map(|r| r.width as i32 * r.height as i32)
+            .sum();
         assert_eq!(area, 800);
     }
 
@@ -225,7 +239,11 @@ mod tests {
         let inv = reg.invert(&bounds);
         // Inversion = bounds - region, should produce surrounding fragments
         assert!(!inv.rects.is_empty());
-        let area: i32 = inv.rects.iter().map(|r| r.width as i32 * r.height as i32).sum();
+        let area: i32 = inv
+            .rects
+            .iter()
+            .map(|r| r.width as i32 * r.height as i32)
+            .sum();
         assert_eq!(area, 30 * 30 - 10 * 10); // 800
     }
 

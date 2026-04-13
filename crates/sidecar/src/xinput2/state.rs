@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use x11rb_protocol::protocol::xinput as xi;
 
-use super::{MASTER_KEYBOARD_ID, MASTER_POINTER_ID, Xi2ActiveGrab, Xi2PassiveGrab};
+use super::{Xi2ActiveGrab, Xi2PassiveGrab, MASTER_KEYBOARD_ID, MASTER_POINTER_ID};
 
 use crate::xinput2::{PendingSynthetic, ValuatorState, XiSelection};
 
@@ -82,10 +82,7 @@ impl XiState {
                     continue;
                 }
                 // Device match: 0 = AllDevices, 1 = AllMaster, or exact match.
-                if grab.deviceid != 0
-                    && grab.deviceid != 1
-                    && grab.deviceid != deviceid
-                {
+                if grab.deviceid != 0 && grab.deviceid != 1 && grab.deviceid != deviceid {
                     continue;
                 }
                 // Detail match: 0 = AnyKey/AnyButton.

@@ -6,7 +6,11 @@ use super::super::super::client::ClientState;
 
 /// RRGetCrtcInfo (20).
 pub(crate) fn handle_get_crtc_info(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
-    let crtc_id = if data.len() >= 8 { state.read_u32(data, 4) } else { 0 };
+    let crtc_id = if data.len() >= 8 {
+        state.read_u32(data, 4)
+    } else {
+        0
+    };
     build_crtc_info_reply(state, seq, crtc_id)
 }
 
@@ -40,7 +44,11 @@ pub(crate) fn handle_set_crtc_config(state: &mut ClientState, data: &[u8], seq: 
     let rotation = state.read_u16(data, 24);
 
     // Parse output list
-    let _num_outputs = if data.len() > 28 { (data.len() - 28) / 4 } else { 0 };
+    let _num_outputs = if data.len() > 28 {
+        (data.len() - 28) / 4
+    } else {
+        0
+    };
 
     // Look up mode dimensions first to avoid borrow conflict.
     let mode_dims = if mode_id == 0 {
@@ -50,7 +58,10 @@ pub(crate) fn handle_set_crtc_config(state: &mut ClientState, data: &[u8], seq: 
     };
 
     let found = if let Some(crtc) = state.randr_find_crtc_mut(crtc_id) {
-        info!("RRSetCrtcConfig crtc={} mode={} pos=({},{}) rot={}", crtc_id, mode_id, x, y, rotation);
+        info!(
+            "RRSetCrtcConfig crtc={} mode={} pos=({},{}) rot={}",
+            crtc_id, mode_id, x, y, rotation
+        );
 
         crtc.x = x;
         crtc.y = y;
@@ -82,9 +93,21 @@ pub(crate) fn handle_set_crtc_config(state: &mut ClientState, data: &[u8], seq: 
 }
 
 /// RRGetCrtcGammaSize (22).
-pub(crate) fn handle_get_crtc_gamma_size(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
-    let crtc_id = if data.len() >= 8 { state.read_u32(data, 4) } else { 0 };
-    let size: u16 = if state.randr_find_crtc(crtc_id).is_some() { 256 } else { 0 };
+pub(crate) fn handle_get_crtc_gamma_size(
+    state: &mut ClientState,
+    data: &[u8],
+    seq: u16,
+) -> Vec<u8> {
+    let crtc_id = if data.len() >= 8 {
+        state.read_u32(data, 4)
+    } else {
+        0
+    };
+    let size: u16 = if state.randr_find_crtc(crtc_id).is_some() {
+        256
+    } else {
+        0
+    };
     let mut reply = [0u8; 32];
     reply[0] = 1;
     state.write_u16(&mut reply, 2, seq);
@@ -94,7 +117,11 @@ pub(crate) fn handle_get_crtc_gamma_size(state: &mut ClientState, data: &[u8], s
 
 /// RRGetCrtcGamma (23).
 pub(crate) fn handle_get_crtc_gamma(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
-    let crtc_id = if data.len() >= 8 { state.read_u32(data, 4) } else { 0 };
+    let crtc_id = if data.len() >= 8 {
+        state.read_u32(data, 4)
+    } else {
+        0
+    };
     build_get_crtc_gamma_reply(state, seq, crtc_id)
 }
 
@@ -105,7 +132,11 @@ pub(crate) fn handle_set_crtc_gamma(state: &mut ClientState, data: &[u8], _seq: 
 }
 
 /// RRSetCrtcTransform (26).
-pub(crate) fn handle_set_crtc_transform(state: &mut ClientState, data: &[u8], _seq: u16) -> Vec<u8> {
+pub(crate) fn handle_set_crtc_transform(
+    state: &mut ClientState,
+    data: &[u8],
+    _seq: u16,
+) -> Vec<u8> {
     if data.len() >= 44 {
         let crtc_id = state.read_u32(data, 4);
         // Read the 3x3 fixed-point matrix.  state.read_u32 handles
@@ -121,7 +152,10 @@ pub(crate) fn handle_set_crtc_transform(state: &mut ClientState, data: &[u8], _s
             debug!("RRSetCrtcTransform crtc={crtc_id} (unknown crtc, ignoring)");
         }
     } else {
-        debug!("RRSetCrtcTransform: request too short ({}B), ignoring", data.len());
+        debug!(
+            "RRSetCrtcTransform: request too short ({}B), ignoring",
+            data.len()
+        );
     }
     Vec::new()
 }
@@ -137,23 +171,32 @@ pub(crate) fn handle_get_panning(state: &mut ClientState, _data: &[u8], seq: u16
 
 /// RRSetPanning (28).
 pub(crate) fn handle_set_panning(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
-    let crtc_id = if data.len() >= 8 { state.read_u32(data, 4) } else { 0 };
+    let crtc_id = if data.len() >= 8 {
+        state.read_u32(data, 4)
+    } else {
+        0
+    };
     debug!("RRSetPanning crtc={crtc_id} -> Success");
     let mut reply = [0u8; 32];
-    reply[0] = 1;          // reply
-    reply[1] = 0;          // Success
+    reply[0] = 1; // reply
+    reply[1] = 0; // Success
     state.write_u16(&mut reply, 2, seq);
-    state.write_u32(&mut reply, 4, 0);   // no extra data
+    state.write_u32(&mut reply, 4, 0); // no extra data
     state.write_u32(&mut reply, 8, state.timestamp());
     reply.to_vec()
 }
 
 /// RRGetCrtcTransform (29).
 pub(crate) fn handle_get_crtc_transform(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
-    let crtc_id = if data.len() >= 8 { state.read_u32(data, 4) } else { 0 };
+    let crtc_id = if data.len() >= 8 {
+        state.read_u32(data, 4)
+    } else {
+        0
+    };
     // Retrieve transform or fall back to identity.
     let identity = [65536i32, 0, 0, 0, 65536, 0, 0, 0, 65536];
-    let transform = state.randr_find_crtc(crtc_id)
+    let transform = state
+        .randr_find_crtc(crtc_id)
         .map(|c| c.transform)
         .unwrap_or(identity);
 

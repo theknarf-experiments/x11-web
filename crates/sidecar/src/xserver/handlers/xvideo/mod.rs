@@ -83,7 +83,8 @@ pub(crate) const XV_ATTR_COLORSPACE: &str = "XV_COLORSPACE";
 pub(crate) fn handle_xvideo_request(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
     let minor = data[1];
     match minor {
-        0 => { // XvQueryExtension
+        0 => {
+            // XvQueryExtension
             let mut reply = [0u8; 32];
             reply[0] = 1;
             state.write_u16(&mut reply, 2, seq);
@@ -91,7 +92,8 @@ pub(crate) fn handle_xvideo_request(state: &mut ClientState, data: &[u8], seq: u
             state.write_u16(&mut reply, 10, 2); // minor
             reply.to_vec()
         }
-        1 => { // XvQueryAdaptors
+        1 => {
+            // XvQueryAdaptors
             // Return one software adaptor with a single port
             let adaptor_name = b"x11-web Software Video Adaptor";
             let name_len = adaptor_name.len();
@@ -128,7 +130,8 @@ pub(crate) fn handle_xvideo_request(state: &mut ClientState, data: &[u8], seq: u
 
             reply
         }
-        2 => { // XvQueryEncodings
+        2 => {
+            // XvQueryEncodings
             // Return one encoding (the screen itself)
             let enc_name = b"XV_IMAGE";
             let name_len = enc_name.len();
@@ -149,18 +152,22 @@ pub(crate) fn handle_xvideo_request(state: &mut ClientState, data: &[u8], seq: u
             state.write_u16(&mut reply[off..], 8, state.screen_height);
             // rate = 30/1
             state.write_u32(&mut reply[off..], 12, 30); // numerator
-            state.write_u32(&mut reply[off..], 16, 1);  // denominator (skip 10-11 padding)
+            state.write_u32(&mut reply[off..], 16, 1); // denominator (skip 10-11 padding)
             reply[off + 20..off + 20 + name_len].copy_from_slice(enc_name);
             reply
         }
         3 | 4 | 9 | 10 | 11 | 15 => port::handle_port_request(state, data, seq, minor),
-        5 | 6 | 7 | 8 | 12 | 16 | 17 | 18 | 19 | 20 => image::handle_image_request(state, data, seq, minor),
-        13 | 14 => notify::handle_notify_request(state, data, seq, minor),
-        _ => {
-            crate::xserver::core::build_error_bo(
-                crate::xserver::core::BAD_REQUEST, seq, minor as u32,
-                156, minor as u16, state.msb_first,
-            )
+        5 | 6 | 7 | 8 | 12 | 16 | 17 | 18 | 19 | 20 => {
+            image::handle_image_request(state, data, seq, minor)
         }
+        13 | 14 => notify::handle_notify_request(state, data, seq, minor),
+        _ => crate::xserver::core::build_error_bo(
+            crate::xserver::core::BAD_REQUEST,
+            seq,
+            minor as u32,
+            156,
+            minor as u16,
+            state.msb_first,
+        ),
     }
 }

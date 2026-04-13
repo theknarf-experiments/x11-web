@@ -21,7 +21,9 @@ pub(crate) fn handle_bell(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
     };
     let _ = state.update_tx.send((
         state.client_id.clone(),
-        x11_web_protocol::DisplayUpdate::Bell { percent: effective_percent },
+        x11_web_protocol::DisplayUpdate::Bell {
+            percent: effective_percent,
+        },
     ));
     Vec::new()
 }
@@ -79,12 +81,12 @@ pub(crate) fn handle_query_pointer(state: &mut ClientState, data: &[u8], seq: u1
     reply[1] = 1; // same_screen
     state.write_u16(&mut reply, 2, seq);
     state.write_u32(&mut reply, 8, state.root_window); // root
-    state.write_u32(&mut reply, 12, child);             // child
-    state.write_i16(&mut reply, 16, state.pointer_x);   // root_x
-    state.write_i16(&mut reply, 18, state.pointer_y);   // root_y
-    state.write_i16(&mut reply, 20, win_x);              // win_x
-    state.write_i16(&mut reply, 22, win_y);              // win_y
-    state.write_u16(&mut reply, 24, mask);               // mask
+    state.write_u32(&mut reply, 12, child); // child
+    state.write_i16(&mut reply, 16, state.pointer_x); // root_x
+    state.write_i16(&mut reply, 18, state.pointer_y); // root_y
+    state.write_i16(&mut reply, 20, win_x); // win_x
+    state.write_i16(&mut reply, 22, win_y); // win_y
+    state.write_u16(&mut reply, 24, mask); // mask
     reply.to_vec()
 }
 
@@ -100,7 +102,9 @@ pub(crate) fn handle_get_motion_events(state: &mut ClientState, data: &[u8], seq
     let stop_time = state.read_u32(data, 12);
 
     // Filter motion history by time range
-    let events: Vec<&(u32, i16, i16)> = state.motion_history.iter()
+    let events: Vec<&(u32, i16, i16)> = state
+        .motion_history
+        .iter()
         .filter(|(ts, _, _)| {
             (start_time == 0 || *ts >= start_time) && (stop_time == 0 || *ts <= stop_time)
         })
@@ -130,7 +134,11 @@ pub(crate) fn handle_get_motion_events(state: &mut ClientState, data: &[u8], seq
 // Opcode 40: TranslateCoordinates
 // ---------------------------------------------------------------------------
 
-pub(crate) fn handle_translate_coordinates(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
+pub(crate) fn handle_translate_coordinates(
+    state: &mut ClientState,
+    data: &[u8],
+    seq: u16,
+) -> Vec<u8> {
     require_len!(data, 16, seq, 40);
 
     let src_window = state.read_u32(data, 4);
@@ -237,7 +245,9 @@ pub(crate) fn handle_warp_pointer(state: &mut ClientState, data: &[u8], seq: u16
                 cur = w.parent;
             }
             for _ in 0..128 {
-                if cur == state.root_window || cur == 0 { break; }
+                if cur == state.root_window || cur == 0 {
+                    break;
+                }
                 if let Some(w) = state.windows.get(&cur) {
                     sw_abs_x += w.x as i32;
                     sw_abs_y += w.y as i32;
@@ -250,8 +260,16 @@ pub(crate) fn handle_warp_pointer(state: &mut ClientState, data: &[u8], seq: u16
         // Compute the check rectangle in root coordinates.
         let check_x = sw_abs_x + src_x as i32;
         let check_y = sw_abs_y + src_y as i32;
-        let check_w = if src_width == 0 { sw_width } else { src_width as i32 };
-        let check_h = if src_height == 0 { sw_height } else { src_height as i32 };
+        let check_w = if src_width == 0 {
+            sw_width
+        } else {
+            src_width as i32
+        };
+        let check_h = if src_height == 0 {
+            sw_height
+        } else {
+            src_height as i32
+        };
 
         let px = state.pointer_x as i32;
         let py = state.pointer_y as i32;
@@ -292,7 +310,11 @@ pub(crate) fn handle_warp_pointer(state: &mut ClientState, data: &[u8], seq: u16
     // Enforce XFIXES pointer barriers
     if !state.barriers.is_empty() {
         let (bx, by) = super::super::input::enforce_barriers(
-            &state.barriers, old_px, old_py, state.pointer_x, state.pointer_y,
+            &state.barriers,
+            old_px,
+            old_py,
+            state.pointer_x,
+            state.pointer_y,
         );
         state.pointer_x = bx;
         state.pointer_y = by;
@@ -306,15 +328,22 @@ pub(crate) fn handle_warp_pointer(state: &mut ClientState, data: &[u8], seq: u16
     // Find the deepest window under the new pointer position
     let new_window = {
         let (w, _, _) = super::super::input::find_event_subwindow(
-            &state.windows, state.root_window, new_x, new_y, ENTER_WINDOW_MASK | LEAVE_WINDOW_MASK,
+            &state.windows,
+            state.root_window,
+            new_x,
+            new_y,
+            ENTER_WINDOW_MASK | LEAVE_WINDOW_MASK,
         );
-        if w != 0 { w } else { state.root_window }
+        if w != 0 {
+            w
+        } else {
+            state.root_window
+        }
     };
 
     // Generate crossing events for the pointer move
-    let crossing = super::super::input::build_crossing_events(
-        state, new_window, new_x, new_y, new_x, new_y,
-    );
+    let crossing =
+        super::super::input::build_crossing_events(state, new_window, new_x, new_y, new_x, new_y);
     for chunk in crossing.chunks_exact(32) {
         state.pending_events.push(chunk.to_vec());
     }
@@ -326,7 +355,7 @@ pub(crate) fn handle_warp_pointer(state: &mut ClientState, data: &[u8], seq: u16
     state.write_u16(&mut event, 2, seq);
     state.write_u32(&mut event, 4, state.timestamp()); // timestamp
     state.write_u32(&mut event, 8, state.root_window); // root
-    // event window = window under pointer (not focus_window, which may differ)
+                                                       // event window = window under pointer (not focus_window, which may differ)
     state.write_u32(&mut event, 12, new_window);
     state.write_i16(&mut event, 20, state.pointer_x); // root_x
     state.write_i16(&mut event, 22, state.pointer_y); // root_y
@@ -383,7 +412,7 @@ pub(crate) fn handle_query_keymap(state: &ClientState, seq: u16) -> Vec<u8> {
     reply[0] = 1;
     state.write_u16(&mut reply, 2, seq);
     state.write_u32(&mut reply, 4, 2u32); // length = 2 (8 extra bytes)
-    // Copy the pressed_keys bitmap into the reply
+                                          // Copy the pressed_keys bitmap into the reply
     reply[32..40].copy_from_slice(&state.pressed_keys[0..8]);
     reply.to_vec()
 }
@@ -392,7 +421,11 @@ pub(crate) fn handle_query_keymap(state: &ClientState, seq: u16) -> Vec<u8> {
 // Opcode 100: ChangeKeyboardMapping
 // ---------------------------------------------------------------------------
 
-pub(crate) fn handle_change_keyboard_mapping(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
+pub(crate) fn handle_change_keyboard_mapping(
+    state: &mut ClientState,
+    data: &[u8],
+    seq: u16,
+) -> Vec<u8> {
     require_len!(data, 8, seq, 100);
 
     let keycode_count = data[1] as usize;
@@ -406,7 +439,11 @@ pub(crate) fn handle_change_keyboard_mapping(state: &mut ClientState, data: &[u8
     // Parse and store the new keycode->keysym mappings
     let total_syms = keycode_count * keysyms_per_keycode;
     if data.len() < 8 + total_syms * 4 {
-        debug!("ChangeKeyboardMapping: request too short ({} < {})", data.len(), 8 + total_syms * 4);
+        debug!(
+            "ChangeKeyboardMapping: request too short ({} < {})",
+            data.len(),
+            8 + total_syms * 4
+        );
         return build_error(BAD_LENGTH, seq, 0, 100, 0);
     }
 
@@ -435,7 +472,9 @@ pub(crate) fn handle_change_keyboard_mapping(state: &mut ClientState, data: &[u8
     event[5] = first_keycode;
     event[6] = keycode_count as u8;
     state.pending_events.push(event.to_vec());
-    state.event_broadcaster.broadcast_global(&event, &state.client_id);
+    state
+        .event_broadcaster
+        .broadcast_global(&event, &state.client_id);
 
     Vec::new()
 }
@@ -450,7 +489,12 @@ pub(crate) fn handle_get_keyboard_mapping(state: &ClientState, data: &[u8], seq:
     let count = data[5];
 
     // Determine keysyms_per_keycode: use max from custom mappings or default 4
-    let max_custom = state.custom_keymap.values().map(|v| v.len()).max().unwrap_or(0);
+    let max_custom = state
+        .custom_keymap
+        .values()
+        .map(|v| v.len())
+        .max()
+        .unwrap_or(0);
     let keysyms_per_keycode = max_custom.max(4) as u8;
     let total_syms = count as u32 * keysyms_per_keycode as u32;
     let reply_len = 32 + total_syms as usize * 4;
@@ -500,73 +544,72 @@ pub(crate) fn handle_change_keyboard_control(state: &mut ClientState, data: &[u8
     let mut key_value: Option<u32> = None;
 
     for bit in 0..8u32 {
-        if value_mask & (1 << bit) != 0
-            && offset + 4 <= data.len() {
-                let val = state.read_u32(data, offset);
-                match bit {
-                    0 => state.keyboard_control.key_click_percent = val.min(100) as u8,
-                    1 => state.keyboard_control.bell_percent = val.min(100) as u8,
-                    2 => state.keyboard_control.bell_pitch = val as u16,
-                    3 => state.keyboard_control.bell_duration = val as u16,
-                    4 => {
-                        // led: identifies which LED (1-32) to modify with led_mode
-                        led_value = Some(val);
-                        // If led_mode is not also set, this just stores the value
-                        // for potential use by led_mode if it appears later
-                    }
-                    5 => {
-                        // led_mode: 0=Off, 1=On for the LED specified by led (bit 4)
-                        if val > 1 {
-                            return build_error(BAD_VALUE, state.sequence, val, 102, 0);
-                        }
-                        if let Some(led) = led_value {
-                            if led >= 1 && led <= 32 {
-                                let bit_pos = led - 1;
-                                if val == 1 {
-                                    state.keyboard_control.led_mask |= 1 << bit_pos;
-                                } else {
-                                    state.keyboard_control.led_mask &= !(1 << bit_pos);
-                                }
-                            }
-                        } else {
-                            // Per spec: if led is not specified, led_mode applies to all LEDs
-                            if val == 1 {
-                                state.keyboard_control.led_mask = 0xFFFFFFFF;
-                            } else {
-                                state.keyboard_control.led_mask = 0;
-                            }
-                        }
-                    }
-                    6 => {
-                        // key: identifies which keycode's auto-repeat to modify
-                        key_value = Some(val);
-                    }
-                    7 => {
-                        // auto_repeat_mode: 0=Off, 1=On, 2=Default
-                        if val > 2 {
-                            return build_error(BAD_VALUE, state.sequence, val, 102, 0);
-                        }
-                        if let Some(key) = key_value {
-                            // Per spec: key must be a valid keycode (8-255)
-                            if key >= 8 && key <= 255 {
-                                let byte_idx = (key / 8) as usize;
-                                let bit_mask = 1u8 << (key % 8);
-                                match val {
-                                    0 => state.keyboard_control.auto_repeats[byte_idx] &= !bit_mask,
-                                    1 => state.keyboard_control.auto_repeats[byte_idx] |= bit_mask,
-                                    2 => state.keyboard_control.auto_repeats[byte_idx] |= bit_mask, // Default = On
-                                    _ => {}
-                                }
-                            }
-                        } else {
-                            // Per spec: if key is not specified, this sets global auto_repeat
-                            state.keyboard_control.global_auto_repeat = val.min(1) as u8;
-                        }
-                    }
-                    _ => {}
+        if value_mask & (1 << bit) != 0 && offset + 4 <= data.len() {
+            let val = state.read_u32(data, offset);
+            match bit {
+                0 => state.keyboard_control.key_click_percent = val.min(100) as u8,
+                1 => state.keyboard_control.bell_percent = val.min(100) as u8,
+                2 => state.keyboard_control.bell_pitch = val as u16,
+                3 => state.keyboard_control.bell_duration = val as u16,
+                4 => {
+                    // led: identifies which LED (1-32) to modify with led_mode
+                    led_value = Some(val);
+                    // If led_mode is not also set, this just stores the value
+                    // for potential use by led_mode if it appears later
                 }
-                offset += 4;
+                5 => {
+                    // led_mode: 0=Off, 1=On for the LED specified by led (bit 4)
+                    if val > 1 {
+                        return build_error(BAD_VALUE, state.sequence, val, 102, 0);
+                    }
+                    if let Some(led) = led_value {
+                        if led >= 1 && led <= 32 {
+                            let bit_pos = led - 1;
+                            if val == 1 {
+                                state.keyboard_control.led_mask |= 1 << bit_pos;
+                            } else {
+                                state.keyboard_control.led_mask &= !(1 << bit_pos);
+                            }
+                        }
+                    } else {
+                        // Per spec: if led is not specified, led_mode applies to all LEDs
+                        if val == 1 {
+                            state.keyboard_control.led_mask = 0xFFFFFFFF;
+                        } else {
+                            state.keyboard_control.led_mask = 0;
+                        }
+                    }
+                }
+                6 => {
+                    // key: identifies which keycode's auto-repeat to modify
+                    key_value = Some(val);
+                }
+                7 => {
+                    // auto_repeat_mode: 0=Off, 1=On, 2=Default
+                    if val > 2 {
+                        return build_error(BAD_VALUE, state.sequence, val, 102, 0);
+                    }
+                    if let Some(key) = key_value {
+                        // Per spec: key must be a valid keycode (8-255)
+                        if key >= 8 && key <= 255 {
+                            let byte_idx = (key / 8) as usize;
+                            let bit_mask = 1u8 << (key % 8);
+                            match val {
+                                0 => state.keyboard_control.auto_repeats[byte_idx] &= !bit_mask,
+                                1 => state.keyboard_control.auto_repeats[byte_idx] |= bit_mask,
+                                2 => state.keyboard_control.auto_repeats[byte_idx] |= bit_mask, // Default = On
+                                _ => {}
+                            }
+                        }
+                    } else {
+                        // Per spec: if key is not specified, this sets global auto_repeat
+                        state.keyboard_control.global_auto_repeat = val.min(1) as u8;
+                    }
+                }
+                _ => {}
             }
+            offset += 4;
+        }
     }
 
     Vec::new()
@@ -704,7 +747,9 @@ pub(crate) fn handle_force_screen_saver(state: &mut ClientState, data: &[u8], se
                 // Expose events must be generated for all mapped windows that
                 // select ExposureMask, since the screen content needs repainting.
                 let bo = state.msb_first;
-                let expose_targets: Vec<(u32, u16, u16, u32)> = state.windows.values()
+                let expose_targets: Vec<(u32, u16, u16, u32)> = state
+                    .windows
+                    .values()
                     .filter(|w| w.mapped && w.id != state.root_window)
                     .map(|w| (w.id, w.width, w.height, w.event_mask))
                     .collect();
@@ -845,22 +890,26 @@ pub(crate) fn handle_change_hosts(state: &mut ClientState, data: &[u8]) -> Vec<u
     //   6 = Internet6 (IPv6, 16 bytes)
     //   254 = Local (no address data expected)
     match family {
-        0 => { // Internet (IPv4)
+        0 => {
+            // Internet (IPv4)
             if addr_len != 4 {
                 return build_error(BAD_VALUE, state.sequence, addr_len as u32, 109, 0);
             }
         }
-        6 => { // Internet6 (IPv6)
+        6 => {
+            // Internet6 (IPv6)
             if addr_len != 16 {
                 return build_error(BAD_VALUE, state.sequence, addr_len as u32, 109, 0);
             }
         }
-        1 => { // DECnet
+        1 => {
+            // DECnet
             if addr_len != 2 {
                 return build_error(BAD_VALUE, state.sequence, addr_len as u32, 109, 0);
             }
         }
-        5 => { // ServerInterpreted - variable length, must have at least type+NUL+value
+        5 => {
+            // ServerInterpreted - variable length, must have at least type+NUL+value
             if addr_len < 1 {
                 return build_error(BAD_VALUE, state.sequence, addr_len as u32, 109, 0);
             }
@@ -874,14 +923,25 @@ pub(crate) fn handle_change_hosts(state: &mut ClientState, data: &[u8]) -> Vec<u
     }
 
     match mode {
-        0 => { // Insert
+        0 => {
+            // Insert
             // Don't add duplicates
-            if !state.access_hosts.iter().any(|h| h.family == family && h.address == address) {
-                state.access_hosts.push(AccessHost { family, address: address.clone() });
+            if !state
+                .access_hosts
+                .iter()
+                .any(|h| h.family == family && h.address == address)
+            {
+                state.access_hosts.push(AccessHost {
+                    family,
+                    address: address.clone(),
+                });
             }
         }
-        1 => { // Delete
-            state.access_hosts.retain(|h| !(h.family == family && h.address == address));
+        1 => {
+            // Delete
+            state
+                .access_hosts
+                .retain(|h| !(h.family == family && h.address == address));
         }
         _ => unreachable!(), // Validated above
     }
@@ -962,7 +1022,9 @@ pub(crate) fn handle_kill_client(state: &mut ClientState, data: &[u8]) -> Vec<u8
         for wid in &to_destroy {
             state.windows.remove(wid);
             if let Some(uuid) = state.x11_to_uuid.remove(wid) {
-                state.window_router.unregister_all(std::slice::from_ref(&uuid));
+                state
+                    .window_router
+                    .unregister_all(std::slice::from_ref(&uuid));
                 let _ = state.update_tx.send((
                     state.client_id.clone(),
                     DisplayUpdate::WindowDestroyed { window_id: uuid },
@@ -982,7 +1044,10 @@ pub(crate) fn handle_kill_client(state: &mut ClientState, data: &[u8]) -> Vec<u8
     } else {
         debug!("KillClient: resource={resource:#x}");
 
-        let owner = state.windows.get(&resource).map(|w| w.owner_client_id.clone());
+        let owner = state
+            .windows
+            .get(&resource)
+            .map(|w| w.owner_client_id.clone());
         if let Some(owner_id) = owner {
             let to_destroy: Vec<u32> = state
                 .windows
@@ -993,7 +1058,9 @@ pub(crate) fn handle_kill_client(state: &mut ClientState, data: &[u8]) -> Vec<u8
             for wid in to_destroy {
                 state.windows.remove(&wid);
                 if let Some(uuid) = state.x11_to_uuid.remove(&wid) {
-                    state.window_router.unregister_all(std::slice::from_ref(&uuid));
+                    state
+                        .window_router
+                        .unregister_all(std::slice::from_ref(&uuid));
                     let _ = state.update_tx.send((
                         state.client_id.clone(),
                         DisplayUpdate::WindowDestroyed { window_id: uuid },
@@ -1081,7 +1148,9 @@ pub(crate) fn handle_rotate_properties(state: &mut ClientState, data: &[u8]) -> 
     // each property in the list, with state=NewValue (0).
     let seq = state.sequence;
     let timestamp = state.timestamp();
-    let win_mask = state.windows.get(&window)
+    let win_mask = state
+        .windows
+        .get(&window)
         .map(|w| w.event_mask)
         .unwrap_or(0);
     for &atom in &atoms {
@@ -1105,14 +1174,21 @@ pub(crate) fn handle_rotate_properties(state: &mut ClientState, data: &[u8]) -> 
 // Opcode 116: SetPointerMapping
 // ---------------------------------------------------------------------------
 
-pub(crate) fn handle_set_pointer_mapping(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
+pub(crate) fn handle_set_pointer_mapping(
+    state: &mut ClientState,
+    data: &[u8],
+    seq: u16,
+) -> Vec<u8> {
     require_len!(data, 4, seq, 116);
     let n_buttons = data[1] as usize;
     // Parse the new mapping from the request data (support up to 7 buttons)
     let max_buttons = state.pointer_mapping.len();
     if data.len() >= 4 + n_buttons && n_buttons <= max_buttons {
         state.pointer_mapping[..n_buttons].copy_from_slice(&data[4..4 + n_buttons]);
-        debug!("SetPointerMapping: {:?}", &state.pointer_mapping[..n_buttons]);
+        debug!(
+            "SetPointerMapping: {:?}",
+            &state.pointer_mapping[..n_buttons]
+        );
 
         // MappingNotify (request=Pointer) must be sent to ALL clients per X11 spec.
         let mut event = [0u8; 32];
@@ -1120,7 +1196,9 @@ pub(crate) fn handle_set_pointer_mapping(state: &mut ClientState, data: &[u8], s
         state.write_u16(&mut event, 2, seq);
         event[4] = 2; // request = Pointer
         state.pending_events.push(event.to_vec());
-        state.event_broadcaster.broadcast_global(&event, &state.client_id);
+        state
+            .event_broadcaster
+            .broadcast_global(&event, &state.client_id);
     }
 
     let mut reply = [0u8; 32];
@@ -1152,7 +1230,11 @@ pub(crate) fn handle_get_pointer_mapping(state: &ClientState, seq: u16) -> Vec<u
 // Opcode 118: SetModifierMapping
 // ---------------------------------------------------------------------------
 
-pub(crate) fn handle_set_modifier_mapping(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
+pub(crate) fn handle_set_modifier_mapping(
+    state: &mut ClientState,
+    data: &[u8],
+    seq: u16,
+) -> Vec<u8> {
     require_len!(data, 4, seq, 118);
     let keycodes_per_modifier = data[1] as usize;
     let total_keycodes = 8 * keycodes_per_modifier;
@@ -1162,10 +1244,17 @@ pub(crate) fn handle_set_modifier_mapping(state: &mut ClientState, data: &[u8], 
         for mod_idx in 0..8 {
             let start = 4 + mod_idx * keycodes_per_modifier;
             let end = start + keycodes_per_modifier;
-            let keycodes: Vec<u8> = data[start..end].iter().copied().filter(|&k| k != 0).collect();
+            let keycodes: Vec<u8> = data[start..end]
+                .iter()
+                .copied()
+                .filter(|&k| k != 0)
+                .collect();
             state.modifier_map.push(keycodes);
         }
-        debug!("SetModifierMapping: {} keycodes/modifier", keycodes_per_modifier);
+        debug!(
+            "SetModifierMapping: {} keycodes/modifier",
+            keycodes_per_modifier
+        );
 
         // MappingNotify must be sent to ALL clients per X11 spec.
         let mut event = [0u8; 32];
@@ -1173,7 +1262,9 @@ pub(crate) fn handle_set_modifier_mapping(state: &mut ClientState, data: &[u8], 
         state.write_u16(&mut event, 2, state.sequence);
         event[4] = 0; // request = Modifier
         state.pending_events.push(event.to_vec());
-        state.event_broadcaster.broadcast_global(&event, &state.client_id);
+        state
+            .event_broadcaster
+            .broadcast_global(&event, &state.client_id);
     }
 
     let mut reply = [0u8; 32];
@@ -1189,7 +1280,13 @@ pub(crate) fn handle_set_modifier_mapping(state: &mut ClientState, data: &[u8], 
 
 pub(crate) fn handle_get_modifier_mapping(state: &ClientState, seq: u16) -> Vec<u8> {
     // Find the max keycodes per modifier to determine padding
-    let max_keycodes = state.modifier_map.iter().map(|v| v.len()).max().unwrap_or(2).max(2);
+    let max_keycodes = state
+        .modifier_map
+        .iter()
+        .map(|v| v.len())
+        .max()
+        .unwrap_or(2)
+        .max(2);
     let keycodes_per_modifier = max_keycodes as u8;
 
     let data_len = 8 * keycodes_per_modifier as usize;

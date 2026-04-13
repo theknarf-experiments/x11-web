@@ -22,7 +22,10 @@ pub(crate) fn handle_set_selection_owner(state: &mut ClientState, data: &[u8]) -
         // Check if there was a previous owner (local or cross-connection).
         let prev_owner_local = state.selections.get(&selection).copied();
         let prev_owner_remote = if prev_owner_local.is_none() {
-            state.shared_selections.lock().ok()
+            state
+                .shared_selections
+                .lock()
+                .ok()
                 .and_then(|sels| sels.get(&selection).map(|e| e.owner))
         } else {
             None
@@ -40,7 +43,7 @@ pub(crate) fn handle_set_selection_owner(state: &mut ClientState, data: &[u8]) -
             state.write_u32(&mut event, 4, state.timestamp()); // timestamp
             state.write_u32(&mut event, 8, prev_owner); // window
             state.write_u32(&mut event, 12, selection); // selection atom
-            // Deliver to the previous owner — may be on another connection.
+                                                        // Deliver to the previous owner — may be on another connection.
             if state.x11_to_uuid.contains_key(&prev_owner) {
                 state.pending_events.push(event.to_vec());
             } else {
@@ -69,11 +72,14 @@ pub(crate) fn handle_set_selection_owner(state: &mut ClientState, data: &[u8]) -
             state.selection_timestamps.insert(selection, timestamp);
             // Register in shared selections so other connections can find us.
             if let Ok(mut sels) = state.shared_selections.lock() {
-                sels.insert(selection, SelectionEntry {
-                    owner,
-                    event_tx: state.wm_events_tx.clone(),
-                    timestamp,
-                });
+                sels.insert(
+                    selection,
+                    SelectionEntry {
+                        owner,
+                        event_tx: state.wm_events_tx.clone(),
+                        timestamp,
+                    },
+                );
             }
         }
 
@@ -118,16 +124,26 @@ pub(crate) fn handle_set_selection_owner(state: &mut ClientState, data: &[u8]) -
 // Opcode 23: GetSelectionOwner
 // ---------------------------------------------------------------------------
 
-pub(crate) fn handle_get_selection_owner(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
+pub(crate) fn handle_get_selection_owner(
+    state: &mut ClientState,
+    data: &[u8],
+    seq: u16,
+) -> Vec<u8> {
     require_len!(data, 8, seq, 23);
     let mut reply = [0u8; 32];
     reply[0] = 1;
     state.write_u16(&mut reply, 2, seq);
     let selection = state.read_u32(data, 4);
     // Check local selections first, then shared (cross-connection).
-    let owner = state.selections.get(&selection).copied()
+    let owner = state
+        .selections
+        .get(&selection)
+        .copied()
         .or_else(|| {
-            state.shared_selections.lock().ok()
+            state
+                .shared_selections
+                .lock()
+                .ok()
                 .and_then(|sels| sels.get(&selection).map(|e| e.owner))
         })
         .unwrap_or(0);
@@ -191,9 +207,15 @@ pub(crate) fn handle_convert_selection(state: &mut ClientState, data: &[u8], _se
         const CARDINAL_ATOM: u32 = 6;
         if target == TIMESTAMP_ATOM {
             // Look up the timestamp when this selection was acquired.
-            let sel_ts = state.selection_timestamps.get(&selection).copied()
+            let sel_ts = state
+                .selection_timestamps
+                .get(&selection)
+                .copied()
                 .or_else(|| {
-                    state.shared_selections.lock().ok()
+                    state
+                        .shared_selections
+                        .lock()
+                        .ok()
                         .and_then(|sels| sels.get(&selection).map(|e| e.timestamp))
                 });
 
@@ -202,11 +224,14 @@ pub(crate) fn handle_convert_selection(state: &mut ClientState, data: &[u8], _se
                 let mut ts_data = [0u8; 4];
                 state.write_u32(&mut ts_data, 0, ts);
                 if let Some(win) = state.windows.get_mut(&requestor) {
-                    win.properties.insert(effective_property, PropertyValue {
-                        prop_type: CARDINAL_ATOM,
-                        format: 32,
-                        data: ts_data.to_vec(),
-                    });
+                    win.properties.insert(
+                        effective_property,
+                        PropertyValue {
+                            prop_type: CARDINAL_ATOM,
+                            format: 32,
+                            data: ts_data.to_vec(),
+                        },
+                    );
                 }
                 effective_property
             } else {
@@ -233,15 +258,20 @@ pub(crate) fn handle_convert_selection(state: &mut ClientState, data: &[u8], _se
         if target == MULTIPLE_ATOM && effective_property != 0 {
             // Read the ATOM_PAIR list from the requestor's property.
             // Format is pairs of (target, property) atoms, each u32.
-            let pairs: Vec<(u32, u32)> = state.windows.get(&requestor)
+            let pairs: Vec<(u32, u32)> = state
+                .windows
+                .get(&requestor)
                 .and_then(|w| w.properties.get(&effective_property))
                 .filter(|pv| pv.format == 32)
                 .map(|pv| {
-                    pv.data.chunks_exact(8).map(|chunk| {
-                        let t = u32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]);
-                        let p = u32::from_le_bytes([chunk[4], chunk[5], chunk[6], chunk[7]]);
-                        (t, p)
-                    }).collect()
+                    pv.data
+                        .chunks_exact(8)
+                        .map(|chunk| {
+                            let t = u32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]);
+                            let p = u32::from_le_bytes([chunk[4], chunk[5], chunk[6], chunk[7]]);
+                            (t, p)
+                        })
+                        .collect()
                 })
                 .unwrap_or_default();
 
@@ -267,19 +297,26 @@ pub(crate) fn handle_convert_selection(state: &mut ClientState, data: &[u8], _se
             let mut result_pairs: Vec<(u32, u32)> = Vec::with_capacity(pairs.len());
             let owner_local = state.selections.get(&selection).copied();
             let remote_entry = if owner_local.is_none() {
-                state.shared_selections.lock().ok()
-                    .and_then(|sels| sels.get(&selection)
+                state.shared_selections.lock().ok().and_then(|sels| {
+                    sels.get(&selection)
                         .filter(|e| e.owner != CLIPBOARD_MANAGER_WINDOW)
-                        .map(|e| (e.owner, e.event_tx.clone(), e.timestamp)))
+                        .map(|e| (e.owner, e.event_tx.clone(), e.timestamp))
+                })
             } else {
                 None
             };
             // Check if the server's clipboard manager owns this selection.
-            let server_owned_multi = owner_local.is_none() && remote_entry.is_none()
-                && state.shared_selections.lock().ok()
-                    .map(|sels| sels.get(&selection)
-                        .map(|e| e.owner == CLIPBOARD_MANAGER_WINDOW)
-                        .unwrap_or(false))
+            let server_owned_multi = owner_local.is_none()
+                && remote_entry.is_none()
+                && state
+                    .shared_selections
+                    .lock()
+                    .ok()
+                    .map(|sels| {
+                        sels.get(&selection)
+                            .map(|e| e.owner == CLIPBOARD_MANAGER_WINDOW)
+                            .unwrap_or(false)
+                    })
                     .unwrap_or(false);
 
             for (pair_target, pair_property) in &pairs {
@@ -288,23 +325,34 @@ pub(crate) fn handle_convert_selection(state: &mut ClientState, data: &[u8], _se
 
                 if pt == TIMESTAMP_ATOM {
                     // Handle TIMESTAMP inline.
-                    let sel_ts = state.selection_timestamps.get(&selection).copied()
+                    let sel_ts = state
+                        .selection_timestamps
+                        .get(&selection)
+                        .copied()
                         .or_else(|| remote_entry.as_ref().map(|(_, _, ts)| *ts))
-                        .or_else(|| if server_owned_multi {
-                            state.persistent_clipboard.lock().ok()
-                                .and_then(|pc| pc.get(&selection).map(|e| e.timestamp))
-                        } else {
-                            None
+                        .or_else(|| {
+                            if server_owned_multi {
+                                state
+                                    .persistent_clipboard
+                                    .lock()
+                                    .ok()
+                                    .and_then(|pc| pc.get(&selection).map(|e| e.timestamp))
+                            } else {
+                                None
+                            }
                         });
                     if let Some(ts) = sel_ts {
                         let mut ts_data = [0u8; 4];
                         state.write_u32(&mut ts_data, 0, ts);
                         if let Some(win) = state.windows.get_mut(&requestor) {
-                            win.properties.insert(pp, PropertyValue {
-                                prop_type: CARDINAL_ATOM,
-                                format: 32,
-                                data: ts_data.to_vec(),
-                            });
+                            win.properties.insert(
+                                pp,
+                                PropertyValue {
+                                    prop_type: CARDINAL_ATOM,
+                                    format: 32,
+                                    data: ts_data.to_vec(),
+                                },
+                            );
                         }
                         result_pairs.push((pt, pp));
                     } else {
@@ -357,11 +405,14 @@ pub(crate) fn handle_convert_selection(state: &mut ClientState, data: &[u8], _se
                 result_data.extend_from_slice(&p.to_le_bytes());
             }
             if let Some(win) = state.windows.get_mut(&requestor) {
-                win.properties.insert(effective_property, PropertyValue {
-                    prop_type: ATOM_ATOM,
-                    format: 32,
-                    data: result_data,
-                });
+                win.properties.insert(
+                    effective_property,
+                    PropertyValue {
+                        prop_type: ATOM_ATOM,
+                        format: 32,
+                        data: result_data,
+                    },
+                );
             }
 
             // Send SelectionNotify with target=MULTIPLE
@@ -383,17 +434,21 @@ pub(crate) fn handle_convert_selection(state: &mut ClientState, data: &[u8], _se
 
         // Check if the server's clipboard manager owns this selection
         // (persistent clipboard after the original owner disconnected).
-        let is_server_owned = state.shared_selections.lock().ok()
-            .map(|sels| sels.get(&selection)
-                .map(|e| e.owner == CLIPBOARD_MANAGER_WINDOW)
-                .unwrap_or(false))
+        let is_server_owned = state
+            .shared_selections
+            .lock()
+            .ok()
+            .map(|sels| {
+                sels.get(&selection)
+                    .map(|e| e.owner == CLIPBOARD_MANAGER_WINDOW)
+                    .unwrap_or(false)
+            })
             .unwrap_or(false);
 
         if is_server_owned {
             // Serve data directly from the persistent clipboard store.
-            let served = serve_persistent_clipboard(
-                state, selection, target, effective_property, requestor,
-            );
+            let served =
+                serve_persistent_clipboard(state, selection, target, effective_property, requestor);
             if served {
                 return Vec::new();
             }
@@ -416,13 +471,12 @@ pub(crate) fn handle_convert_selection(state: &mut ClientState, data: &[u8], _se
             state.pending_events.push(sel_request.to_vec());
         } else {
             // Check shared (cross-connection) selections.
-            let remote_entry = state.shared_selections.lock().ok()
-                .and_then(|sels| {
-                    sels.get(&selection)
-                        // Skip the clipboard manager window — already handled above.
-                        .filter(|e| e.owner != CLIPBOARD_MANAGER_WINDOW)
-                        .map(|e| (e.owner, e.event_tx.clone()))
-                });
+            let remote_entry = state.shared_selections.lock().ok().and_then(|sels| {
+                sels.get(&selection)
+                    // Skip the clipboard manager window — already handled above.
+                    .filter(|e| e.owner != CLIPBOARD_MANAGER_WINDOW)
+                    .map(|e| (e.owner, e.event_tx.clone()))
+            });
 
             if let Some((owner, event_tx)) = remote_entry {
                 // Owner is on another connection — forward SelectionRequest
@@ -440,7 +494,7 @@ pub(crate) fn handle_convert_selection(state: &mut ClientState, data: &[u8], _se
                 state.write_u32(&mut event, 12, selection);
                 state.write_u32(&mut event, 16, target);
                 state.write_u32(&mut event, 20, 0u32); // property = None
-                // Try cross-connection delivery first, fall back to local
+                                                       // Try cross-connection delivery first, fall back to local
                 if !state.event_router.send_event(requestor, event.to_vec()) {
                     state.pending_events.push(event.to_vec());
                 }

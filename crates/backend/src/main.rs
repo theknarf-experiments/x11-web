@@ -191,13 +191,16 @@ async fn handle_sidecar_ws(socket: WebSocket, state: AppState) {
                 )
                 .await;
             }
-            SidecarToBackend::ProcessConnected { pid, client_id, command } => {
+            SidecarToBackend::ProcessConnected {
+                pid,
+                client_id,
+                command,
+            } => {
                 // Register in process registry
-                state
-                    .connected_processes
-                    .write()
-                    .await
-                    .insert(client_id.clone(), (sidecar_id.clone(), pid, command.clone()));
+                state.connected_processes.write().await.insert(
+                    client_id.clone(),
+                    (sidecar_id.clone(), pid, command.clone()),
+                );
                 broadcast_to_frontends(
                     &state,
                     BackendToFrontend::ProcessConnected {
@@ -210,9 +213,12 @@ async fn handle_sidecar_ws(socket: WebSocket, state: AppState) {
                 .await;
             }
             SidecarToBackend::DisplayUpdate { client_id, update } => {
-                let is_put_image = matches!(update, x11_web_protocol::DisplayUpdate::PutImage { .. });
+                let is_put_image =
+                    matches!(update, x11_web_protocol::DisplayUpdate::PutImage { .. });
                 let put_image_wid = match &update {
-                    x11_web_protocol::DisplayUpdate::PutImage { window_id, .. } => Some(window_id.clone()),
+                    x11_web_protocol::DisplayUpdate::PutImage { window_id, .. } => {
+                        Some(window_id.clone())
+                    }
                     _ => None,
                 };
                 let msg = BackendToFrontend::DisplayUpdate {
@@ -231,7 +237,11 @@ async fn handle_sidecar_ws(socket: WebSocket, state: AppState) {
                         if let Some(wid) = put_image_wid {
                             buf.retain(|m| {
                                 if let BackendToFrontend::DisplayUpdate { update: u, .. } = m {
-                                    if let x11_web_protocol::DisplayUpdate::PutImage { window_id, .. } = u {
+                                    if let x11_web_protocol::DisplayUpdate::PutImage {
+                                        window_id,
+                                        ..
+                                    } = u
+                                    {
                                         return window_id != &wid;
                                     }
                                 }
@@ -395,12 +405,14 @@ async fn handle_frontend_ws(socket: WebSocket, state: AppState) {
         let procs = state.connected_processes.read().await;
         let processes: Vec<ConnectedProcessInfo> = procs
             .iter()
-            .map(|(client_id, (sidecar_id, pid, command))| ConnectedProcessInfo {
-                sidecar_id: sidecar_id.clone(),
-                pid: *pid,
-                client_id: client_id.clone(),
-                command: command.clone(),
-            })
+            .map(
+                |(client_id, (sidecar_id, pid, command))| ConnectedProcessInfo {
+                    sidecar_id: sidecar_id.clone(),
+                    pid: *pid,
+                    client_id: client_id.clone(),
+                    command: command.clone(),
+                },
+            )
             .collect();
         if !processes.is_empty() {
             let _ = tx.send(BackendToFrontend::ConnectedProcessesList { processes });
@@ -544,7 +556,10 @@ async fn handle_frontend_ws(socket: WebSocket, state: AppState) {
                 forward_to_sidecar(
                     &state,
                     &sidecar_id,
-                    BackendToSidecar::RequestClipboard { selection, mime_type },
+                    BackendToSidecar::RequestClipboard {
+                        selection,
+                        mime_type,
+                    },
                 )
                 .await;
             }
@@ -557,7 +572,11 @@ async fn handle_frontend_ws(socket: WebSocket, state: AppState) {
                 forward_to_sidecar(
                     &state,
                     &sidecar_id,
-                    BackendToSidecar::SetClipboard { selection, mime_type, data },
+                    BackendToSidecar::SetClipboard {
+                        selection,
+                        mime_type,
+                        data,
+                    },
                 )
                 .await;
             }

@@ -4,8 +4,23 @@ impl Framebuffer {
     /// Draw a line using Bresenham's algorithm (simple version, GXcopy).
     #[allow(dead_code)]
     pub fn draw_line(&mut self, x0: i32, y0: i32, x1: i32, y1: i32, color: u32, line_width: u16) {
-        self.draw_line_gc(x0, y0, x1, y1, color, line_width, 3, 0xFFFFFFFF,
-                          0, 1, 0, 0, &[], 0, &[]);
+        self.draw_line_gc(
+            x0,
+            y0,
+            x1,
+            y1,
+            color,
+            line_width,
+            3,
+            0xFFFFFFFF,
+            0,
+            1,
+            0,
+            0,
+            &[],
+            0,
+            &[],
+        );
     }
 
     /// Draw a line with full GC support: raster op, cap/join styles, dashes, clip rects.
@@ -22,7 +37,10 @@ impl Framebuffer {
     #[allow(clippy::too_many_arguments)]
     pub fn draw_line_gc(
         &mut self,
-        x0: i32, y0: i32, x1: i32, y1: i32,
+        x0: i32,
+        y0: i32,
+        x1: i32,
+        y1: i32,
         color: u32,
         line_width: u16,
         gc_func: u8,
@@ -46,8 +64,10 @@ impl Framebuffer {
         };
 
         if line_width <= 1 {
-            self.bresenham_line_gc(x0, y0, x1, y1, color, gc_func, plane_mask,
-                                   cap_style, dashes, line_style, background, clip_rects);
+            self.bresenham_line_gc(
+                x0, y0, x1, y1, color, gc_func, plane_mask, cap_style, dashes, line_style,
+                background, clip_rects,
+            );
         } else {
             // Wide line with dash support
             let hw = (line_width / 2) as i32;
@@ -55,16 +75,22 @@ impl Framebuffer {
 
             if y0 == y1 {
                 // Horizontal wide line
-                self.draw_wide_line_horiz(x0, y0, x1, hw, line_width, color, gc_func,
-                    plane_mask, cap_style, line_style, background, clip_rects, dashes);
+                self.draw_wide_line_horiz(
+                    x0, y0, x1, hw, line_width, color, gc_func, plane_mask, cap_style, line_style,
+                    background, clip_rects, dashes,
+                );
             } else if x0 == x1 {
                 // Vertical wide line
-                self.draw_wide_line_vert(x0, y0, y1, hw, line_width, color, gc_func,
-                    plane_mask, cap_style, line_style, background, clip_rects, dashes);
+                self.draw_wide_line_vert(
+                    x0, y0, y1, hw, line_width, color, gc_func, plane_mask, cap_style, line_style,
+                    background, clip_rects, dashes,
+                );
             } else {
                 // Diagonal wide line
-                self.draw_wide_line_diagonal(x0, y0, x1, y1, hw, color, gc_func,
-                    plane_mask, cap_style, line_style, background, clip_rects, dashes);
+                self.draw_wide_line_diagonal(
+                    x0, y0, x1, y1, hw, color, gc_func, plane_mask, cap_style, line_style,
+                    background, clip_rects, dashes,
+                );
             }
 
             // Round cap: draw filled circles at endpoints (only for solid lines;
@@ -109,10 +135,21 @@ impl Framebuffer {
         // Draw each line segment
         for w in points.windows(2) {
             self.draw_line_gc(
-                w[0].0, w[0].1, w[1].0, w[1].1,
-                color, line_width, gc_func, plane_mask,
-                line_style, cap_style, join_style,
-                dash_offset, dash_list, background, clip_rects,
+                w[0].0,
+                w[0].1,
+                w[1].0,
+                w[1].1,
+                color,
+                line_width,
+                gc_func,
+                plane_mask,
+                line_style,
+                cap_style,
+                join_style,
+                dash_offset,
+                dash_list,
+                background,
+                clip_rects,
             );
         }
 
@@ -156,8 +193,7 @@ impl Framebuffer {
                 1 => {
                     // JoinRound: filled circle at join point
                     self.fill_circle(
-                        jx as i32, jy as i32, hw as i32,
-                        color, gc_func, plane_mask, clip_rects,
+                        jx as i32, jy as i32, hw as i32, color, gc_func, plane_mask, clip_rects,
                     );
                 }
                 2 => {
@@ -198,11 +234,11 @@ impl Framebuffer {
                     // sin(join_half_angle) = sin((pi - angle)/2) = cos(angle/2)
                     // cos^2(angle/2) = (1 + cos_theta) / 2
                     let half_join_sin_sq = alpha / 2.0; // sin^2(half of the supplementary angle)
-                    // Miter limit: miter_length <= miter_limit * line_width
-                    // miter_length = hw / sin(half_join_angle)
-                    // X11 miter limit ratio: 1/sin(10.43/2 degrees) ~ 11.0
-                    // Simplified: if sin^2(half_join) < threshold, use bevel
-                    // threshold = (1 / 11.0)^2 ≈ 0.00826
+                                                        // Miter limit: miter_length <= miter_limit * line_width
+                                                        // miter_length = hw / sin(half_join_angle)
+                                                        // X11 miter limit ratio: 1/sin(10.43/2 degrees) ~ 11.0
+                                                        // Simplified: if sin^2(half_join) < threshold, use bevel
+                                                        // threshold = (1 / 11.0)^2 ≈ 0.00826
                     let miter_limit_sin_sq = 0.00826;
 
                     if half_join_sin_sq < miter_limit_sin_sq {
@@ -257,23 +293,39 @@ impl Framebuffer {
     #[allow(clippy::too_many_arguments)]
     fn draw_wide_line_horiz(
         &mut self,
-        x0: i32, y: i32, x1: i32, hw: i32, line_width: u16,
-        color: u32, gc_func: u8, plane_mask: u32,
-        cap_style: u8, line_style: u8, background: u32,
+        x0: i32,
+        y: i32,
+        x1: i32,
+        hw: i32,
+        line_width: u16,
+        color: u32,
+        gc_func: u8,
+        plane_mask: u32,
+        cap_style: u8,
+        line_style: u8,
+        background: u32,
         clip_rects: &[(i16, i16, u16, u16)],
         dashes: Option<DashState>,
     ) {
         let min_x = x0.min(x1);
         let max_x = x0.max(x1);
-        let cap_extra = match cap_style { 2 | 3 => hw, _ => 0 };
+        let cap_extra = match cap_style {
+            2 | 3 => hw,
+            _ => 0,
+        };
 
         match dashes {
             None => {
                 // Solid wide horizontal line
                 self.fill_rect_rop_clipped(
-                    (min_x - cap_extra) as i16, (y - hw) as i16,
-                    (max_x - min_x + 1 + cap_extra * 2) as u16, line_width,
-                    color, gc_func, plane_mask, clip_rects,
+                    (min_x - cap_extra) as i16,
+                    (y - hw) as i16,
+                    (max_x - min_x + 1 + cap_extra * 2) as u16,
+                    line_width,
+                    color,
+                    gc_func,
+                    plane_mask,
+                    clip_rects,
                 );
             }
             Some(mut ds) => {
@@ -292,9 +344,21 @@ impl Framebuffer {
                         if i > 0 {
                             // Flush previous segment
                             self.flush_wide_h_segment(
-                                seg_start, cx - dir, y, hw, line_width, seg_on,
-                                color, background, gc_func, plane_mask, line_style,
-                                cap_style, i == 0, false, clip_rects,
+                                seg_start,
+                                cx - dir,
+                                y,
+                                hw,
+                                line_width,
+                                seg_on,
+                                color,
+                                background,
+                                gc_func,
+                                plane_mask,
+                                line_style,
+                                cap_style,
+                                i == 0,
+                                false,
+                                clip_rects,
                             );
                         }
                         seg_start = cx;
@@ -307,9 +371,8 @@ impl Framebuffer {
                 }
                 // Flush last segment
                 self.flush_wide_h_segment(
-                    seg_start, cx, y, hw, line_width, seg_on,
-                    color, background, gc_func, plane_mask, line_style,
-                    cap_style, false, true, clip_rects,
+                    seg_start, cx, y, hw, line_width, seg_on, color, background, gc_func,
+                    plane_mask, line_style, cap_style, false, true, clip_rects,
                 );
             }
         }
@@ -319,10 +382,20 @@ impl Framebuffer {
     #[allow(clippy::too_many_arguments)]
     fn flush_wide_h_segment(
         &mut self,
-        x_start: i32, x_end: i32, y: i32, hw: i32, line_width: u16,
-        is_on: bool, color: u32, background: u32,
-        gc_func: u8, plane_mask: u32, line_style: u8,
-        _cap_style: u8, _is_first: bool, _is_last: bool,
+        x_start: i32,
+        x_end: i32,
+        y: i32,
+        hw: i32,
+        line_width: u16,
+        is_on: bool,
+        color: u32,
+        background: u32,
+        gc_func: u8,
+        plane_mask: u32,
+        line_style: u8,
+        _cap_style: u8,
+        _is_first: bool,
+        _is_last: bool,
         clip_rects: &[(i16, i16, u16, u16)],
     ) {
         let min_x = x_start.min(x_end);
@@ -331,14 +404,26 @@ impl Framebuffer {
 
         if is_on {
             self.fill_rect_rop_clipped(
-                min_x as i16, (y - hw) as i16, w, line_width,
-                color, gc_func, plane_mask, clip_rects,
+                min_x as i16,
+                (y - hw) as i16,
+                w,
+                line_width,
+                color,
+                gc_func,
+                plane_mask,
+                clip_rects,
             );
         } else if line_style == 2 {
             // DoubleDash: draw background in gaps
             self.fill_rect_rop_clipped(
-                min_x as i16, (y - hw) as i16, w, line_width,
-                background, gc_func, plane_mask, clip_rects,
+                min_x as i16,
+                (y - hw) as i16,
+                w,
+                line_width,
+                background,
+                gc_func,
+                plane_mask,
+                clip_rects,
             );
         }
     }
@@ -347,23 +432,39 @@ impl Framebuffer {
     #[allow(clippy::too_many_arguments)]
     fn draw_wide_line_vert(
         &mut self,
-        x: i32, y0: i32, y1: i32, hw: i32, line_width: u16,
-        color: u32, gc_func: u8, plane_mask: u32,
-        cap_style: u8, line_style: u8, background: u32,
+        x: i32,
+        y0: i32,
+        y1: i32,
+        hw: i32,
+        line_width: u16,
+        color: u32,
+        gc_func: u8,
+        plane_mask: u32,
+        cap_style: u8,
+        line_style: u8,
+        background: u32,
         clip_rects: &[(i16, i16, u16, u16)],
         dashes: Option<DashState>,
     ) {
         let min_y = y0.min(y1);
         let max_y = y0.max(y1);
-        let cap_extra = match cap_style { 2 | 3 => hw, _ => 0 };
+        let cap_extra = match cap_style {
+            2 | 3 => hw,
+            _ => 0,
+        };
 
         match dashes {
             None => {
                 // Solid wide vertical line
                 self.fill_rect_rop_clipped(
-                    (x - hw) as i16, (min_y - cap_extra) as i16,
-                    line_width, (max_y - min_y + 1 + cap_extra * 2) as u16,
-                    color, gc_func, plane_mask, clip_rects,
+                    (x - hw) as i16,
+                    (min_y - cap_extra) as i16,
+                    line_width,
+                    (max_y - min_y + 1 + cap_extra * 2) as u16,
+                    color,
+                    gc_func,
+                    plane_mask,
+                    clip_rects,
                 );
             }
             Some(mut ds) => {
@@ -383,13 +484,25 @@ impl Framebuffer {
                             let h = (seg_max - seg_min + 1) as u16;
                             if seg_on {
                                 self.fill_rect_rop_clipped(
-                                    (x - hw) as i16, seg_min as i16, line_width, h,
-                                    color, gc_func, plane_mask, clip_rects,
+                                    (x - hw) as i16,
+                                    seg_min as i16,
+                                    line_width,
+                                    h,
+                                    color,
+                                    gc_func,
+                                    plane_mask,
+                                    clip_rects,
                                 );
                             } else if line_style == 2 {
                                 self.fill_rect_rop_clipped(
-                                    (x - hw) as i16, seg_min as i16, line_width, h,
-                                    background, gc_func, plane_mask, clip_rects,
+                                    (x - hw) as i16,
+                                    seg_min as i16,
+                                    line_width,
+                                    h,
+                                    background,
+                                    gc_func,
+                                    plane_mask,
+                                    clip_rects,
                                 );
                             }
                         }
@@ -407,13 +520,25 @@ impl Framebuffer {
                 let h = (seg_max - seg_min + 1) as u16;
                 if seg_on {
                     self.fill_rect_rop_clipped(
-                        (x - hw) as i16, seg_min as i16, line_width, h,
-                        color, gc_func, plane_mask, clip_rects,
+                        (x - hw) as i16,
+                        seg_min as i16,
+                        line_width,
+                        h,
+                        color,
+                        gc_func,
+                        plane_mask,
+                        clip_rects,
                     );
                 } else if line_style == 2 {
                     self.fill_rect_rop_clipped(
-                        (x - hw) as i16, seg_min as i16, line_width, h,
-                        background, gc_func, plane_mask, clip_rects,
+                        (x - hw) as i16,
+                        seg_min as i16,
+                        line_width,
+                        h,
+                        background,
+                        gc_func,
+                        plane_mask,
+                        clip_rects,
                     );
                 }
             }
@@ -426,9 +551,17 @@ impl Framebuffer {
     #[allow(clippy::too_many_arguments)]
     fn draw_wide_line_diagonal(
         &mut self,
-        x0: i32, y0: i32, x1: i32, y1: i32, hw: i32,
-        color: u32, gc_func: u8, plane_mask: u32,
-        cap_style: u8, line_style: u8, background: u32,
+        x0: i32,
+        y0: i32,
+        x1: i32,
+        y1: i32,
+        hw: i32,
+        color: u32,
+        gc_func: u8,
+        plane_mask: u32,
+        cap_style: u8,
+        line_style: u8,
+        background: u32,
         clip_rects: &[(i16, i16, u16, u16)],
         dashes: Option<DashState>,
     ) {
@@ -461,9 +594,18 @@ impl Framebuffer {
                     let ox = (px * d as f64).round() as i32;
                     let oy = (py * d as f64).round() as i32;
                     self.bresenham_line_gc(
-                        ex0 + ox, ey0 + oy, ex1 + ox, ey1 + oy,
-                        color, gc_func, plane_mask,
-                        1, None, 0, background, clip_rects,
+                        ex0 + ox,
+                        ey0 + oy,
+                        ex1 + ox,
+                        ey1 + oy,
+                        color,
+                        gc_func,
+                        plane_mask,
+                        1,
+                        None,
+                        0,
+                        background,
+                        clip_rects,
                     );
                 }
             }
@@ -519,7 +661,10 @@ impl Framebuffer {
     /// Bresenham line with GC raster op, dashes, cap_style, and clip rects.
     fn bresenham_line_gc(
         &mut self,
-        x0: i32, y0: i32, x1: i32, y1: i32,
+        x0: i32,
+        y0: i32,
+        x1: i32,
+        y1: i32,
         color: u32,
         gc_func: u8,
         plane_mask: u32,
@@ -583,10 +728,17 @@ impl Framebuffer {
     /// Per X11 spec, when fill_style is Tiled, line pixels use the tile color at each (x,y).
     pub fn draw_line_tiled(
         &mut self,
-        x0: i32, y0: i32, x1: i32, y1: i32,
-        tile_data: &[u8], tile_w: u32, tile_h: u32,
-        ts_x: i16, ts_y: i16,
-        gc_func: u8, plane_mask: u32,
+        x0: i32,
+        y0: i32,
+        x1: i32,
+        y1: i32,
+        tile_data: &[u8],
+        tile_w: u32,
+        tile_h: u32,
+        ts_x: i16,
+        ts_y: i16,
+        gc_func: u8,
+        plane_mask: u32,
         cap_style: u8,
         clip_rects: &[(i16, i16, u16, u16)],
     ) {
@@ -620,10 +772,18 @@ impl Framebuffer {
             }
 
             is_first = false;
-            if is_last { break; }
+            if is_last {
+                break;
+            }
             let e2 = 2 * err;
-            if e2 >= dy { err += dy; x += sx; }
-            if e2 <= dx { err += dx; y += sy; }
+            if e2 >= dy {
+                err += dy;
+                x += sx;
+            }
+            if e2 <= dx {
+                err += dx;
+                y += sy;
+            }
         }
     }
 
@@ -632,12 +792,20 @@ impl Framebuffer {
     /// stipple bit is set are drawn. OpaqueStippled draws bg where bit is unset.
     pub fn draw_line_stippled(
         &mut self,
-        x0: i32, y0: i32, x1: i32, y1: i32,
-        fg: u32, bg: u32,
-        stipple_data: &[u8], stipple_w: u32, stipple_h: u32,
-        ts_x: i16, ts_y: i16,
+        x0: i32,
+        y0: i32,
+        x1: i32,
+        y1: i32,
+        fg: u32,
+        bg: u32,
+        stipple_data: &[u8],
+        stipple_w: u32,
+        stipple_h: u32,
+        ts_x: i16,
+        ts_y: i16,
         opaque: bool,
-        gc_func: u8, plane_mask: u32,
+        gc_func: u8,
+        plane_mask: u32,
         cap_style: u8,
         clip_rects: &[(i16, i16, u16, u16)],
     ) {
@@ -669,8 +837,10 @@ impl Framebuffer {
             let skip = cap_style == 0 && is_last && !is_first;
 
             if !skip {
-                let sx_pos = ((x - ts_x as i32) % stipple_w as i32 + stipple_w as i32) as u32 % stipple_w;
-                let sy_pos = ((y - ts_y as i32) % stipple_h as i32 + stipple_h as i32) as u32 % stipple_h;
+                let sx_pos =
+                    ((x - ts_x as i32) % stipple_w as i32 + stipple_w as i32) as u32 % stipple_w;
+                let sy_pos =
+                    ((y - ts_y as i32) % stipple_h as i32 + stipple_h as i32) as u32 % stipple_h;
 
                 let bit_set = if is_1bpp {
                     let byte_idx = sy_pos as usize * bpp_stride + (sx_pos / 8) as usize;
@@ -683,7 +853,9 @@ impl Framebuffer {
                     // 32bpp: check if pixel is non-zero (any channel)
                     let off = sy_pos as usize * bpp_stride + sx_pos as usize * 4;
                     if off + 3 < stipple_data.len() {
-                        stipple_data[off] != 0 || stipple_data[off + 1] != 0 || stipple_data[off + 2] != 0
+                        stipple_data[off] != 0
+                            || stipple_data[off + 1] != 0
+                            || stipple_data[off + 2] != 0
                     } else {
                         false
                     }
@@ -697,17 +869,26 @@ impl Framebuffer {
             }
 
             is_first = false;
-            if is_last { break; }
+            if is_last {
+                break;
+            }
             let e2 = 2 * err;
-            if e2 >= dy { err += dy; x += sx; }
-            if e2 <= dx { err += dx; y += sy; }
+            if e2 >= dy {
+                err += dy;
+                x += sx;
+            }
+            if e2 <= dx {
+                err += dx;
+                y += sy;
+            }
         }
     }
 
     /// Draw a single pixel with GC function, plane mask, and clip rects.
     pub fn draw_point_gc(
         &mut self,
-        x: i32, y: i32,
+        x: i32,
+        y: i32,
         color: u32,
         gc_func: u8,
         plane_mask: u32,
@@ -745,8 +926,12 @@ impl Framebuffer {
     /// Fill a small circle (for round line caps/joins).
     pub(crate) fn fill_circle(
         &mut self,
-        cx: i32, cy: i32, radius: i32,
-        color: u32, gc_func: u8, plane_mask: u32,
+        cx: i32,
+        cy: i32,
+        radius: i32,
+        color: u32,
+        gc_func: u8,
+        plane_mask: u32,
         clip_rects: &[(i16, i16, u16, u16)],
     ) {
         let r2 = radius * radius;

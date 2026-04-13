@@ -1,10 +1,10 @@
 //! XKB names operations: GetNames, SetNames.
 
 use super::super::super::client::ClientState;
-use super::{MIN_KEY_CODE, MAX_KEY_CODE, N_KEYS};
+use super::{MAX_KEY_CODE, MIN_KEY_CODE, N_KEYS};
+use crate::xserver::core::require_len;
 use crate::xserver::core::{read_u16_bo as read_u16, read_u32_bo as read_u32};
 use tracing::debug;
-use crate::xserver::core::require_len;
 
 /// Build an XKB GetNames reply.
 ///
@@ -31,13 +31,25 @@ pub(crate) fn build_xkb_get_names_reply(
     // Intern all name atoms we may need up front.
     let (keycodes_atom, geometry_atom, symbols_atom, compat_atom) = {
         let mut atoms = state.atoms.lock().unwrap();
-        let kc = state.xkb_names_atoms.get(&0).copied()
+        let kc = state
+            .xkb_names_atoms
+            .get(&0)
+            .copied()
             .unwrap_or_else(|| atoms.intern("evdev", false));
-        let geo = state.xkb_names_atoms.get(&1).copied()
+        let geo = state
+            .xkb_names_atoms
+            .get(&1)
+            .copied()
             .unwrap_or_else(|| atoms.intern("pc(pc105)", false));
-        let sym = state.xkb_names_atoms.get(&2).copied()
+        let sym = state
+            .xkb_names_atoms
+            .get(&2)
+            .copied()
             .unwrap_or_else(|| atoms.intern("pc+us", false));
-        let compat = state.xkb_names_atoms.get(&4).copied()
+        let compat = state
+            .xkb_names_atoms
+            .get(&4)
+            .copied()
             .unwrap_or_else(|| atoms.intern("complete", false));
         (kc, geo, sym, compat)
     };
@@ -54,10 +66,14 @@ pub(crate) fn build_xkb_get_names_reply(
     // Intern type/level/vmod names.
     let (type_atoms, level_atoms, vmod_atoms) = {
         let mut atoms = state.atoms.lock().unwrap();
-        let ta: Vec<u32> = type_name_strs.iter()
+        let ta: Vec<u32> = type_name_strs
+            .iter()
             .enumerate()
             .map(|(i, s)| {
-                state.xkb_type_names.get(i).copied()
+                state
+                    .xkb_type_names
+                    .get(i)
+                    .copied()
                     .unwrap_or_else(|| atoms.intern(s, false))
             })
             .collect();
@@ -65,7 +81,9 @@ pub(crate) fn build_xkb_get_names_reply(
         for (ti, names) in level_name_strs.iter().enumerate() {
             let mut v = Vec::new();
             for (li, s) in names.iter().enumerate() {
-                let a = state.xkb_kt_level_names.get(ti)
+                let a = state
+                    .xkb_kt_level_names
+                    .get(ti)
                     .and_then(|lv| lv.get(li))
                     .copied()
                     .unwrap_or_else(|| atoms.intern(s, false));
@@ -73,10 +91,14 @@ pub(crate) fn build_xkb_get_names_reply(
             }
             la.push(v);
         }
-        let va: Vec<u32> = vmod_name_strs.iter()
+        let va: Vec<u32> = vmod_name_strs
+            .iter()
             .enumerate()
             .map(|(i, s)| {
-                state.xkb_vmod_names.get(i).copied()
+                state
+                    .xkb_vmod_names
+                    .get(i)
+                    .copied()
                     .unwrap_or_else(|| atoms.intern(s, false))
             })
             .collect();
@@ -89,7 +111,10 @@ pub(crate) fn build_xkb_get_names_reply(
         let mut atoms = state.atoms.lock().unwrap();
         (0..num_groups as usize)
             .map(|i| {
-                state.xkb_group_names.get(i).copied()
+                state
+                    .xkb_group_names
+                    .get(i)
+                    .copied()
                     .unwrap_or_else(|| atoms.intern(group_name_strs_default[i], false))
             })
             .collect::<Vec<_>>()
@@ -99,10 +124,14 @@ pub(crate) fn build_xkb_get_names_reply(
     let indicator_name_strs = ["Caps Lock", "Num Lock", "Scroll Lock", "Group 2"];
     let indicator_atoms = {
         let mut atoms = state.atoms.lock().unwrap();
-        indicator_name_strs.iter()
+        indicator_name_strs
+            .iter()
             .enumerate()
             .map(|(i, s)| {
-                state.xkb_indicator_name_atoms.get(i).copied()
+                state
+                    .xkb_indicator_name_atoms
+                    .get(i)
+                    .copied()
                     .unwrap_or_else(|| atoms.intern(s, false))
             })
             .collect::<Vec<u32>>()
@@ -246,7 +275,7 @@ pub(crate) fn build_xkb_get_names_reply(
     reply[24] = 0; // nRadioGroups
     reply[25] = n_key_aliases as u8;
     state.write_u16(&mut reply, 26, u16::from(total_levels)); // nKTLevels
-    // 28-31: pad
+                                                              // 28-31: pad
     reply[32..32 + data.len()].copy_from_slice(&data);
     reply
 }
@@ -267,39 +296,48 @@ pub(crate) fn handle_xkb_set_names(state: &mut ClientState, data: &[u8], seq: u1
     let _first_kt = if data.len() > 14 { data[14] } else { 0 };
     let n_kt_levels = if data.len() > 15 { data[15] } else { 0 };
     // 16-19: indicators (CARD32)
-    let indicators = if data.len() >= 20 { read_u32(data, 16, msb) } else { 0 };
+    let indicators = if data.len() >= 20 {
+        read_u32(data, 16, msb)
+    } else {
+        0
+    };
     // 20: groupNames (CARD8), 21: nRadioGroups, 22: firstKey, 23: nKeys
     let group_names_mask = if data.len() > 20 { data[20] } else { 0 };
     let _n_radio = if data.len() > 21 { data[21] } else { 0 };
-    let first_key = if data.len() > 22 { data[22] } else { MIN_KEY_CODE };
+    let first_key = if data.len() > 22 {
+        data[22]
+    } else {
+        MIN_KEY_CODE
+    };
     let n_keys = if data.len() > 23 { data[23] } else { 0 };
     // 24-25: nKeyAliases (CARD16)
-    let n_key_aliases = if data.len() >= 26 { read_u16(data, 24, msb) } else { 0 };
+    let n_key_aliases = if data.len() >= 26 {
+        read_u16(data, 24, msb)
+    } else {
+        0
+    };
     // 28-29: totalKTLevelNames (CARD16)
 
     let mut offset = 32;
 
     // Bit 0: Keycodes name atom
-    if which & (1 << 0) != 0
-        && offset + 4 <= data.len() {
-            let atom = read_u32(data, offset, msb);
-            state.xkb_names_atoms.insert(0, atom);
-            offset += 4;
-        }
+    if which & (1 << 0) != 0 && offset + 4 <= data.len() {
+        let atom = read_u32(data, offset, msb);
+        state.xkb_names_atoms.insert(0, atom);
+        offset += 4;
+    }
     // Bit 1: Geometry name atom
-    if which & (1 << 1) != 0
-        && offset + 4 <= data.len() {
-            let atom = read_u32(data, offset, msb);
-            state.xkb_names_atoms.insert(1, atom);
-            offset += 4;
-        }
+    if which & (1 << 1) != 0 && offset + 4 <= data.len() {
+        let atom = read_u32(data, offset, msb);
+        state.xkb_names_atoms.insert(1, atom);
+        offset += 4;
+    }
     // Bit 2: Symbols name atom
-    if which & (1 << 2) != 0
-        && offset + 4 <= data.len() {
-            let atom = read_u32(data, offset, msb);
-            state.xkb_names_atoms.insert(2, atom);
-            offset += 4;
-        }
+    if which & (1 << 2) != 0 && offset + 4 <= data.len() {
+        let atom = read_u32(data, offset, msb);
+        state.xkb_names_atoms.insert(2, atom);
+        offset += 4;
+    }
     // Bit 3: PhysSymbols name atom
     if which & (1 << 3) != 0 {
         // GroupNames: one atom per set bit in groupNames mask
@@ -391,7 +429,11 @@ pub(crate) fn handle_xkb_set_names(state: &mut ClientState, data: &[u8], seq: u1
     // Bit 11: VirtualModNames
     if which & (1 << 11) != 0 {
         // virtualMods bitmask is at bytes 30-31 of the request
-        let vmods: u16 = if data.len() >= 32 { read_u16(data, 30, msb) } else { 0 };
+        let vmods: u16 = if data.len() >= 32 {
+            read_u16(data, 30, msb)
+        } else {
+            0
+        };
         let n_vmods = vmods.count_ones() as usize;
         state.xkb_vmod_names.clear();
         for _ in 0..n_vmods {

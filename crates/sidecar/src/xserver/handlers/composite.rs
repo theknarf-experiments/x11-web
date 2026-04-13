@@ -17,7 +17,7 @@ pub(crate) fn handle_damage_request(state: &mut ClientState, data: &[u8], seq: u
             let mut reply = [0u8; 32];
             reply[0] = 1; // Reply
             state.write_u16(&mut reply, 2, seq);
-            state.write_u32(&mut reply, 8, 1);  // major version
+            state.write_u32(&mut reply, 8, 1); // major version
             state.write_u32(&mut reply, 12, 1); // minor version
             reply.to_vec()
         }
@@ -28,11 +28,14 @@ pub(crate) fn handle_damage_request(state: &mut ClientState, data: &[u8], seq: u
             let drawable = state.read_u32(data, 8);
             let level = data[12];
             info!("DAMAGE Create: id={damage_id:#x} drawable={drawable:#x} level={level}");
-            state.damage_regions.insert(damage_id, DamageInfo {
-                drawable,
-                level,
-                accumulated: super::super::types::XFixesRegion::new(),
-            });
+            state.damage_regions.insert(
+                damage_id,
+                DamageInfo {
+                    drawable,
+                    level,
+                    accumulated: super::super::types::XFixesRegion::new(),
+                },
+            );
             Vec::new()
         }
         2 => {
@@ -54,7 +57,9 @@ pub(crate) fn handle_damage_request(state: &mut ClientState, data: &[u8], seq: u
             debug!("DAMAGE Subtract: id={damage_id:#x} repair={repair:#x} parts={parts:#x}");
 
             // Get the accumulated damage for this damage object.
-            let accumulated = state.damage_regions.get(&damage_id)
+            let accumulated = state
+                .damage_regions
+                .get(&damage_id)
                 .map(|d| d.accumulated.clone())
                 .unwrap_or_else(super::super::types::XFixesRegion::new);
 
@@ -97,14 +102,22 @@ pub(crate) fn handle_damage_request(state: &mut ClientState, data: &[u8], seq: u
         _ => {
             debug!("Unhandled DAMAGE minor opcode: {minor}");
             crate::xserver::core::build_error_bo(
-                crate::xserver::core::BAD_REQUEST, seq, minor as u32,
-                143, minor as u16, state.msb_first,
+                crate::xserver::core::BAD_REQUEST,
+                seq,
+                minor as u32,
+                143,
+                minor as u16,
+                state.msb_first,
             )
         }
     }
 }
 
-pub(crate) fn handle_x_composite_request(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
+pub(crate) fn handle_x_composite_request(
+    state: &mut ClientState,
+    data: &[u8],
+    seq: u16,
+) -> Vec<u8> {
     let minor = data[1];
     info!("Composite minor opcode: {minor}");
 
@@ -114,7 +127,7 @@ pub(crate) fn handle_x_composite_request(state: &mut ClientState, data: &[u8], s
             let mut reply = [0u8; 32];
             reply[0] = 1; // Reply
             state.write_u16(&mut reply, 2, seq);
-            state.write_u32(&mut reply, 8, 0);  // major version
+            state.write_u32(&mut reply, 8, 0); // major version
             state.write_u32(&mut reply, 12, 4); // minor version
             reply.to_vec()
         }
@@ -128,8 +141,12 @@ pub(crate) fn handle_x_composite_request(state: &mut ClientState, data: &[u8], s
                 win.redirected = true;
             } else {
                 return crate::xserver::core::build_error_bo(
-                    crate::xserver::core::BAD_WINDOW, seq, window,
-                    142, minor as u16, state.msb_first,
+                    crate::xserver::core::BAD_WINDOW,
+                    seq,
+                    window,
+                    142,
+                    minor as u16,
+                    state.msb_first,
                 );
             }
             Vec::new()
@@ -142,12 +159,18 @@ pub(crate) fn handle_x_composite_request(state: &mut ClientState, data: &[u8], s
             info!("Composite RedirectSubwindows: window={window:#x} update={update}");
             if !state.windows.contains_key(&window) {
                 return crate::xserver::core::build_error_bo(
-                    crate::xserver::core::BAD_WINDOW, seq, window,
-                    142, minor as u16, state.msb_first,
+                    crate::xserver::core::BAD_WINDOW,
+                    seq,
+                    window,
+                    142,
+                    minor as u16,
+                    state.msb_first,
                 );
             }
             // Mark all children as redirected
-            let children: Vec<u32> = state.windows.iter()
+            let children: Vec<u32> = state
+                .windows
+                .iter()
                 .filter(|(_, w)| w.parent == window)
                 .map(|(id, _)| *id)
                 .collect();
@@ -167,8 +190,12 @@ pub(crate) fn handle_x_composite_request(state: &mut ClientState, data: &[u8], s
                 win.redirected = false;
             } else {
                 return crate::xserver::core::build_error_bo(
-                    crate::xserver::core::BAD_WINDOW, seq, window,
-                    142, minor as u16, state.msb_first,
+                    crate::xserver::core::BAD_WINDOW,
+                    seq,
+                    window,
+                    142,
+                    minor as u16,
+                    state.msb_first,
                 );
             }
             Vec::new()
@@ -180,11 +207,17 @@ pub(crate) fn handle_x_composite_request(state: &mut ClientState, data: &[u8], s
             debug!("Composite UnredirectSubwindows: window={window:#x}");
             if !state.windows.contains_key(&window) {
                 return crate::xserver::core::build_error_bo(
-                    crate::xserver::core::BAD_WINDOW, seq, window,
-                    142, minor as u16, state.msb_first,
+                    crate::xserver::core::BAD_WINDOW,
+                    seq,
+                    window,
+                    142,
+                    minor as u16,
+                    state.msb_first,
                 );
             }
-            let children: Vec<u32> = state.windows.iter()
+            let children: Vec<u32> = state
+                .windows
+                .iter()
                 .filter(|(_, w)| w.parent == window)
                 .map(|(id, _)| *id)
                 .collect();
@@ -200,7 +233,9 @@ pub(crate) fn handle_x_composite_request(state: &mut ClientState, data: &[u8], s
             require_len!(data, 12, seq, 142, minor as u16, state.msb_first);
             let region_id = state.read_u32(data, 4);
             let window = state.read_u32(data, 8);
-            debug!("Composite CreateRegionFromBorderClip: region={region_id:#x} window={window:#x}");
+            debug!(
+                "Composite CreateRegionFromBorderClip: region={region_id:#x} window={window:#x}"
+            );
             let rect = if let Some(win) = state.windows.get(&window) {
                 super::super::types::RegionRect {
                     x: 0,
@@ -210,8 +245,12 @@ pub(crate) fn handle_x_composite_request(state: &mut ClientState, data: &[u8], s
                 }
             } else {
                 return crate::xserver::core::build_error_bo(
-                    crate::xserver::core::BAD_WINDOW, seq, window,
-                    142, minor as u16, state.msb_first,
+                    crate::xserver::core::BAD_WINDOW,
+                    seq,
+                    window,
+                    142,
+                    minor as u16,
+                    state.msb_first,
                 );
             };
             state.xfixes_regions.insert(
@@ -266,8 +305,12 @@ pub(crate) fn handle_x_composite_request(state: &mut ClientState, data: &[u8], s
                 info!("NameWindowPixmap: window={window:#x} -> pixmap={pixmap:#x} {w}x{h} depth={depth} redirected={redirected}");
             } else {
                 return crate::xserver::core::build_error_bo(
-                    crate::xserver::core::BAD_WINDOW, seq, window,
-                    142, minor as u16, state.msb_first,
+                    crate::xserver::core::BAD_WINDOW,
+                    seq,
+                    window,
+                    142,
+                    minor as u16,
+                    state.msb_first,
                 );
             }
             Vec::new()
@@ -289,7 +332,7 @@ pub(crate) fn handle_x_composite_request(state: &mut ClientState, data: &[u8], s
                     border_width: 0,
                     visual: 0x40, // 32-bit ARGB visual for compositing
                     depth: 32,
-                    class: 1,    // InputOutput
+                    class: 1, // InputOutput
                     mapped: true,
                     event_mask: 0,
                     do_not_propagate_mask: 0,
@@ -325,7 +368,7 @@ pub(crate) fn handle_x_composite_request(state: &mut ClientState, data: &[u8], s
                     wm_hints_input: None,
                     wm_hints_window_group: None,
                     modal: false,
-            saved_geometry: None,
+                    saved_geometry: None,
                 };
                 state.windows.insert(OVERLAY_WINDOW, overlay);
                 // Push overlay to top of root's children stacking order
@@ -335,7 +378,10 @@ pub(crate) fn handle_x_composite_request(state: &mut ClientState, data: &[u8], s
                 info!("Created overlay window {OVERLAY_WINDOW:#x} ({w}x{h})");
             }
             state.overlay_ref_count += 1;
-            info!("Overlay window ref count incremented to {}", state.overlay_ref_count);
+            info!(
+                "Overlay window ref count incremented to {}",
+                state.overlay_ref_count
+            );
             let mut reply = [0u8; 32];
             reply[0] = 1; // Reply
             state.write_u16(&mut reply, 2, seq);
@@ -362,8 +408,12 @@ pub(crate) fn handle_x_composite_request(state: &mut ClientState, data: &[u8], s
         _ => {
             debug!("Unhandled Composite minor opcode: {minor}");
             crate::xserver::core::build_error_bo(
-                crate::xserver::core::BAD_REQUEST, seq, minor as u32,
-                142, minor as u16, state.msb_first,
+                crate::xserver::core::BAD_REQUEST,
+                seq,
+                minor as u32,
+                142,
+                minor as u16,
+                state.msb_first,
             )
         }
     }
@@ -371,10 +421,15 @@ pub(crate) fn handle_x_composite_request(state: &mut ClientState, data: &[u8], s
 
 #[cfg(test)]
 mod tests {
-    use super::super::super::types::{DamageInfo, XFixesRegion, RegionRect};
+    use super::super::super::types::{DamageInfo, RegionRect, XFixesRegion};
 
     fn r(x: i16, y: i16, w: u16, h: u16) -> RegionRect {
-        RegionRect { x, y, width: w, height: h }
+        RegionRect {
+            x,
+            y,
+            width: w,
+            height: h,
+        }
     }
 
     #[test]
@@ -427,10 +482,7 @@ mod tests {
         let mut info = DamageInfo {
             drawable: 0x100,
             level: 0,
-            accumulated: XFixesRegion::from_rects(vec![
-                r(0, 0, 10, 10),
-                r(20, 20, 5, 5),
-            ]),
+            accumulated: XFixesRegion::from_rects(vec![r(0, 0, 10, 10), r(20, 20, 5, 5)]),
         };
 
         // Subtract everything (repair covers all)
@@ -445,10 +497,7 @@ mod tests {
         let mut info = DamageInfo {
             drawable: 0x100,
             level: 0,
-            accumulated: XFixesRegion::from_rects(vec![
-                r(0, 0, 50, 50),
-                r(60, 60, 20, 20),
-            ]),
+            accumulated: XFixesRegion::from_rects(vec![r(0, 0, 50, 50), r(60, 60, 20, 20)]),
         };
 
         // Subtract only the first rect area

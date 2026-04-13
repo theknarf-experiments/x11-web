@@ -16,7 +16,11 @@ impl ClientState {
             24
         };
         if depth <= 1 {
-            if color != 0 { 0xFFFFFF } else { 0x000000 }
+            if color != 0 {
+                0xFFFFFF
+            } else {
+                0x000000
+            }
         } else {
             color
         }
@@ -29,7 +33,9 @@ impl ClientState {
     /// pixmap directly modify the window's off-screen surface.
     pub(crate) fn get_framebuffer_mut(&mut self, drawable: u32) -> Option<&mut Framebuffer> {
         // Resolve alias: if this is a NameWindowPixmap, redirect to the window.
-        let target = self.pixmaps.get(&drawable)
+        let target = self
+            .pixmaps
+            .get(&drawable)
             .and_then(|p| p.alias_window)
             .unwrap_or(drawable);
         if let Some(win) = self.windows.get_mut(&target) {
@@ -63,7 +69,11 @@ impl ClientState {
     pub(crate) fn drawable_exists(&self, drawable: u32) -> bool {
         self.windows.contains_key(&drawable)
             || self.pixmaps.contains_key(&drawable)
-            || self.shared_pixmaps.lock().ok().is_some_and(|s| s.contains_key(&drawable))
+            || self
+                .shared_pixmaps
+                .lock()
+                .ok()
+                .is_some_and(|s| s.contains_key(&drawable))
     }
 
     /// Look up a GC by ID, including cross-connection shared GCs.
@@ -93,9 +103,14 @@ impl ClientState {
     ///
     /// For pixmaps with alias_window set (COMPOSITE NameWindowPixmap), this
     /// returns the aliased window's live framebuffer.
-    pub(crate) fn get_framebuffer(&self, drawable: u32) -> Option<&crate::framebuffer::Framebuffer> {
+    pub(crate) fn get_framebuffer(
+        &self,
+        drawable: u32,
+    ) -> Option<&crate::framebuffer::Framebuffer> {
         // Resolve alias: if this is a NameWindowPixmap, redirect to the window.
-        let target = self.pixmaps.get(&drawable)
+        let target = self
+            .pixmaps
+            .get(&drawable)
             .and_then(|p| p.alias_window)
             .unwrap_or(drawable);
         if let Some(win) = self.windows.get(&target) {
@@ -138,7 +153,9 @@ impl ClientState {
             let children = parent_win.children_order.clone();
             for child_id in children {
                 if let Some(child) = self.windows.get(&child_id) {
-                    if !child.mapped { continue; }
+                    if !child.mapped {
+                        continue;
+                    }
                     // Child position relative to parent
                     let cx = child.x as i32;
                     let cy = child.y as i32;
@@ -149,10 +166,14 @@ impl ClientState {
                     // Blit child onto result at the correct offset
                     for row in 0..ch {
                         let dst_row = cy + row as i32 - y as i32;
-                        if dst_row < 0 || dst_row >= h as i32 { continue; }
+                        if dst_row < 0 || dst_row >= h as i32 {
+                            continue;
+                        }
                         for col in 0..cw {
                             let dst_col = cx + col as i32 - x as i32;
-                            if dst_col < 0 || dst_col >= w as i32 { continue; }
+                            if dst_col < 0 || dst_col >= w as i32 {
+                                continue;
+                            }
                             let src_off = (row * cw + col) * 4;
                             let dst_off = (dst_row as usize * w + dst_col as usize) * 4;
                             if src_off + 3 < child_data.len() && dst_off + 3 < result.len() {
@@ -178,7 +199,10 @@ impl ClientState {
     /// the pixmap's framebuffer (which stores RGBA) to a 1-bit-per-pixel
     /// bitmap where any non-zero pixel maps to a 1-bit.
     /// Returns `None` if the pixmap ID is 0 (None) or doesn't exist.
-    pub(crate) fn resolve_clip_mask(&self, pixmap_id: u32) -> Option<super::super::types::ClipMaskBitmap> {
+    pub(crate) fn resolve_clip_mask(
+        &self,
+        pixmap_id: u32,
+    ) -> Option<super::super::types::ClipMaskBitmap> {
         if pixmap_id == 0 {
             return None;
         }
@@ -215,14 +239,23 @@ impl ClientState {
     // -----------------------------------------------------------------------
 
     /// Register a pixmap in the shared registry for cross-connection access.
-    pub(crate) fn register_shared_pixmap(&self, pixmap_id: u32, width: u16, height: u16, depth: u8) {
+    pub(crate) fn register_shared_pixmap(
+        &self,
+        pixmap_id: u32,
+        width: u16,
+        height: u16,
+        depth: u8,
+    ) {
         if let Ok(mut shared) = self.shared_pixmaps.lock() {
-            shared.insert(pixmap_id, super::super::types::SharedPixmapMeta {
-                width,
-                height,
-                depth,
-                owner_client_id: self.client_id.clone(),
-            });
+            shared.insert(
+                pixmap_id,
+                super::super::types::SharedPixmapMeta {
+                    width,
+                    height,
+                    depth,
+                    owner_client_id: self.client_id.clone(),
+                },
+            );
         }
     }
 

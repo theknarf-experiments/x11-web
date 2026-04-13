@@ -7,18 +7,34 @@ use super::super::super::types::{OutputPropertyConfig, PropertyValue, RandrMode,
 
 /// RRGetOutputInfo (9).
 pub(crate) fn handle_get_output_info(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
-    let output_id = if data.len() >= 8 { state.read_u32(data, 4) } else { 0 };
+    let output_id = if data.len() >= 8 {
+        state.read_u32(data, 4)
+    } else {
+        0
+    };
     build_output_info_reply(state, seq, output_id)
 }
 
 /// RRListOutputProperties (10).
-pub(crate) fn handle_list_output_properties(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
-    let output_id = if data.len() >= 8 { state.read_u32(data, 4) } else { 0 };
+pub(crate) fn handle_list_output_properties(
+    state: &mut ClientState,
+    data: &[u8],
+    seq: u16,
+) -> Vec<u8> {
+    let output_id = if data.len() >= 8 {
+        state.read_u32(data, 4)
+    } else {
+        0
+    };
     build_list_output_properties_reply(state, seq, output_id)
 }
 
 /// RRQueryOutputProperty (11).
-pub(crate) fn handle_query_output_property(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
+pub(crate) fn handle_query_output_property(
+    state: &mut ClientState,
+    data: &[u8],
+    seq: u16,
+) -> Vec<u8> {
     if data.len() < 12 {
         let mut reply = [0u8; 32];
         reply[0] = 1;
@@ -29,26 +45,27 @@ pub(crate) fn handle_query_output_property(state: &mut ClientState, data: &[u8],
     let property_atom = state.read_u32(data, 8);
 
     // Check if the output has an explicit property config (set by ConfigureOutputProperty)
-    let (pending, range, immutable, values) = if let Some(output) = state.randr_find_output(output_id) {
-        if let Some(config) = output.property_configs.get(&property_atom) {
-            (config.pending, config.range, false, config.values.clone())
-        } else {
-            // Fall back to well-known property defaults based on atom name
-            let atom_name = state.get_atom_name(property_atom).unwrap_or_default();
-            match atom_name.as_str() {
-                "Backlight" | "BACKLIGHT" => {
-                    // Range constraint: min=0, max=100
-                    (false, true, false, vec![0, 100])
-                }
-                _ => {
-                    // Unknown property: no constraints
-                    (false, false, false, Vec::new())
+    let (pending, range, immutable, values) =
+        if let Some(output) = state.randr_find_output(output_id) {
+            if let Some(config) = output.property_configs.get(&property_atom) {
+                (config.pending, config.range, false, config.values.clone())
+            } else {
+                // Fall back to well-known property defaults based on atom name
+                let atom_name = state.get_atom_name(property_atom).unwrap_or_default();
+                match atom_name.as_str() {
+                    "Backlight" | "BACKLIGHT" => {
+                        // Range constraint: min=0, max=100
+                        (false, true, false, vec![0, 100])
+                    }
+                    _ => {
+                        // Unknown property: no constraints
+                        (false, false, false, Vec::new())
+                    }
                 }
             }
-        }
-    } else {
-        (false, false, false, Vec::new())
-    };
+        } else {
+            (false, false, false, Vec::new())
+        };
 
     let num_values = values.len() as u32;
     let extra_bytes = (num_values as usize) * 4;
@@ -69,7 +86,11 @@ pub(crate) fn handle_query_output_property(state: &mut ClientState, data: &[u8],
 }
 
 /// RRConfigureOutputProperty (12).
-pub(crate) fn handle_configure_output_property(state: &mut ClientState, data: &[u8], _seq: u16) -> Vec<u8> {
+pub(crate) fn handle_configure_output_property(
+    state: &mut ClientState,
+    data: &[u8],
+    _seq: u16,
+) -> Vec<u8> {
     if data.len() >= 14 {
         let output_id = state.read_u32(data, 4);
         let property_atom = state.read_u32(data, 8);
@@ -83,11 +104,14 @@ pub(crate) fn handle_configure_output_property(state: &mut ClientState, data: &[
             off += 4;
         }
         if let Some(output) = state.randr_find_output_mut(output_id) {
-            output.property_configs.insert(property_atom, OutputPropertyConfig {
-                pending,
-                range,
-                values,
-            });
+            output.property_configs.insert(
+                property_atom,
+                OutputPropertyConfig {
+                    pending,
+                    range,
+                    values,
+                },
+            );
         }
         debug!("RRConfigureOutputProperty output={output_id} property={property_atom} pending={pending} range={range}");
     }
@@ -95,7 +119,11 @@ pub(crate) fn handle_configure_output_property(state: &mut ClientState, data: &[
 }
 
 /// RRChangeOutputProperty (13).
-pub(crate) fn handle_change_output_property(state: &mut ClientState, data: &[u8], _seq: u16) -> Vec<u8> {
+pub(crate) fn handle_change_output_property(
+    state: &mut ClientState,
+    data: &[u8],
+    _seq: u16,
+) -> Vec<u8> {
     if data.len() >= 24 {
         let output_id = state.read_u32(data, 4);
         let property = state.read_u32(data, 8);
@@ -116,18 +144,25 @@ pub(crate) fn handle_change_output_property(state: &mut ClientState, data: &[u8]
             Vec::new()
         };
         if let Some(output) = state.randr_find_output_mut(output_id) {
-            output.properties.insert(property, PropertyValue {
-                prop_type,
-                format,
-                data: prop_data,
-            });
+            output.properties.insert(
+                property,
+                PropertyValue {
+                    prop_type,
+                    format,
+                    data: prop_data,
+                },
+            );
         }
     }
     Vec::new()
 }
 
 /// RRDeleteOutputProperty (14).
-pub(crate) fn handle_delete_output_property(state: &mut ClientState, data: &[u8], _seq: u16) -> Vec<u8> {
+pub(crate) fn handle_delete_output_property(
+    state: &mut ClientState,
+    data: &[u8],
+    _seq: u16,
+) -> Vec<u8> {
     if data.len() >= 12 {
         let output_id = state.read_u32(data, 4);
         let property = state.read_u32(data, 8);
@@ -141,7 +176,11 @@ pub(crate) fn handle_delete_output_property(state: &mut ClientState, data: &[u8]
 }
 
 /// RRGetOutputProperty (15).
-pub(crate) fn handle_get_output_property(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
+pub(crate) fn handle_get_output_property(
+    state: &mut ClientState,
+    data: &[u8],
+    seq: u16,
+) -> Vec<u8> {
     build_get_output_property_reply(state, data, seq)
 }
 
@@ -245,7 +284,11 @@ pub(crate) fn handle_add_output_mode(state: &mut ClientState, data: &[u8], _seq:
 }
 
 /// RRDeleteOutputMode (19).
-pub(crate) fn handle_delete_output_mode(state: &mut ClientState, data: &[u8], _seq: u16) -> Vec<u8> {
+pub(crate) fn handle_delete_output_mode(
+    state: &mut ClientState,
+    data: &[u8],
+    _seq: u16,
+) -> Vec<u8> {
     if data.len() >= 12 {
         let output_id = state.read_u32(data, 4);
         let mode_id = state.read_u32(data, 8);
@@ -258,7 +301,11 @@ pub(crate) fn handle_delete_output_mode(state: &mut ClientState, data: &[u8], _s
 }
 
 /// RRSetOutputPrimary (30).
-pub(crate) fn handle_set_output_primary(state: &mut ClientState, data: &[u8], _seq: u16) -> Vec<u8> {
+pub(crate) fn handle_set_output_primary(
+    state: &mut ClientState,
+    data: &[u8],
+    _seq: u16,
+) -> Vec<u8> {
     if data.len() >= 12 {
         let output_id = state.read_u32(data, 8);
         state.randr_primary_output = output_id;
@@ -268,7 +315,11 @@ pub(crate) fn handle_set_output_primary(state: &mut ClientState, data: &[u8], _s
 }
 
 /// RRGetOutputPrimary (31).
-pub(crate) fn handle_get_output_primary(state: &mut ClientState, _data: &[u8], seq: u16) -> Vec<u8> {
+pub(crate) fn handle_get_output_primary(
+    state: &mut ClientState,
+    _data: &[u8],
+    seq: u16,
+) -> Vec<u8> {
     // Use the stored primary, or fall back to the first output if
     // no primary has been explicitly set yet.
     let primary_output = if state.randr_primary_output != 0 {
@@ -305,13 +356,21 @@ pub(crate) fn handle_get_providers(state: &mut ClientState, _data: &[u8], seq: u
 
 /// RRGetProviderInfo (33).
 pub(crate) fn handle_get_provider_info(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
-    let provider_id = if data.len() >= 8 { state.read_u32(data, 4) } else { 0 };
+    let provider_id = if data.len() >= 8 {
+        state.read_u32(data, 4)
+    } else {
+        0
+    };
     build_provider_info_reply(state, seq, provider_id)
 }
 
 /// RRSetProviderOffloadSink (34): Set a provider as an offload sink.
 /// Virtual display has a single provider — accept and log for diagnostics.
-pub(crate) fn handle_set_provider_offload_sink(_state: &mut ClientState, data: &[u8], _seq: u16) -> Vec<u8> {
+pub(crate) fn handle_set_provider_offload_sink(
+    _state: &mut ClientState,
+    data: &[u8],
+    _seq: u16,
+) -> Vec<u8> {
     if data.len() >= 16 {
         let provider = _state.read_u32(data, 4);
         let sink = _state.read_u32(data, 8);
@@ -323,18 +382,28 @@ pub(crate) fn handle_set_provider_offload_sink(_state: &mut ClientState, data: &
 
 /// RRSetProviderOutputSource (35): Set a provider as an output source.
 /// Virtual display has a single provider — accept and log for diagnostics.
-pub(crate) fn handle_set_provider_output_source(_state: &mut ClientState, data: &[u8], _seq: u16) -> Vec<u8> {
+pub(crate) fn handle_set_provider_output_source(
+    _state: &mut ClientState,
+    data: &[u8],
+    _seq: u16,
+) -> Vec<u8> {
     if data.len() >= 16 {
         let provider = _state.read_u32(data, 4);
         let source = _state.read_u32(data, 8);
         let config_ts = _state.read_u32(data, 12);
-        debug!("RRSetProviderOutputSource: provider={provider:#x} source={source:#x} ts={config_ts}");
+        debug!(
+            "RRSetProviderOutputSource: provider={provider:#x} source={source:#x} ts={config_ts}"
+        );
     }
     Vec::new()
 }
 
 /// RRListProviderProperties (36).
-pub(crate) fn handle_list_provider_properties(state: &mut ClientState, _data: &[u8], seq: u16) -> Vec<u8> {
+pub(crate) fn handle_list_provider_properties(
+    state: &mut ClientState,
+    _data: &[u8],
+    seq: u16,
+) -> Vec<u8> {
     let mut reply = [0u8; 32];
     reply[0] = 1;
     state.write_u16(&mut reply, 2, seq);
@@ -344,7 +413,11 @@ pub(crate) fn handle_list_provider_properties(state: &mut ClientState, _data: &[
 }
 
 /// RRQueryProviderProperty (37).
-pub(crate) fn handle_query_provider_property(state: &mut ClientState, _data: &[u8], seq: u16) -> Vec<u8> {
+pub(crate) fn handle_query_provider_property(
+    state: &mut ClientState,
+    _data: &[u8],
+    seq: u16,
+) -> Vec<u8> {
     // Reply with empty constraints (pending=0, range=0, immutable=0, no values)
     let mut reply = [0u8; 32];
     reply[0] = 1;
@@ -353,25 +426,41 @@ pub(crate) fn handle_query_provider_property(state: &mut ClientState, _data: &[u
 }
 
 /// RRConfigureProviderProperty (38).
-pub(crate) fn handle_configure_provider_property(_state: &mut ClientState, _data: &[u8], _seq: u16) -> Vec<u8> {
+pub(crate) fn handle_configure_provider_property(
+    _state: &mut ClientState,
+    _data: &[u8],
+    _seq: u16,
+) -> Vec<u8> {
     debug!("RRConfigureProviderProperty (no-op)");
     Vec::new()
 }
 
 /// RRChangeProviderProperty (39).
-pub(crate) fn handle_change_provider_property(_state: &mut ClientState, _data: &[u8], _seq: u16) -> Vec<u8> {
+pub(crate) fn handle_change_provider_property(
+    _state: &mut ClientState,
+    _data: &[u8],
+    _seq: u16,
+) -> Vec<u8> {
     debug!("RRChangeProviderProperty (no-op)");
     Vec::new()
 }
 
 /// RRDeleteProviderProperty (40).
-pub(crate) fn handle_delete_provider_property(_state: &mut ClientState, _data: &[u8], _seq: u16) -> Vec<u8> {
+pub(crate) fn handle_delete_provider_property(
+    _state: &mut ClientState,
+    _data: &[u8],
+    _seq: u16,
+) -> Vec<u8> {
     debug!("RRDeleteProviderProperty (no-op)");
     Vec::new()
 }
 
 /// RRGetProviderProperty (41).
-pub(crate) fn handle_get_provider_property(state: &mut ClientState, _data: &[u8], seq: u16) -> Vec<u8> {
+pub(crate) fn handle_get_provider_property(
+    state: &mut ClientState,
+    _data: &[u8],
+    seq: u16,
+) -> Vec<u8> {
     // Reply with type=None, format=0, length=0, bytes_after=0
     let mut reply = [0u8; 32];
     reply[0] = 1;
@@ -449,8 +538,12 @@ pub(crate) fn handle_create_lease(state: &mut ClientState, _data: &[u8], seq: u1
     let minor = 45u8;
     debug!("RRCreateLease: not supported on virtual display");
     crate::xserver::core::build_error_bo(
-        crate::xserver::core::BAD_ACCESS, seq, 0,
-        140, minor as u16, state.msb_first,
+        crate::xserver::core::BAD_ACCESS,
+        seq,
+        0,
+        140,
+        minor as u16,
+        state.msb_first,
     )
 }
 
@@ -486,7 +579,11 @@ fn build_output_info_reply(state: &ClientState, seq: u16, output_id: u32) -> Vec
     let num_clones: u16 = 0;
 
     let name_pad = (4 - (output_name.len() % 4)) % 4;
-    let var_data = (num_crtcs as usize * 4) + (num_modes as usize * 4) + (num_clones as usize * 4) + output_name.len() + name_pad;
+    let var_data = (num_crtcs as usize * 4)
+        + (num_modes as usize * 4)
+        + (num_clones as usize * 4)
+        + output_name.len()
+        + name_pad;
     let inline_header = 24; // bytes 8-31
     let length = (inline_header + var_data) / 4;
     let total = 32 + inline_header + var_data;
@@ -604,7 +701,7 @@ fn build_get_output_property_reply(state: &ClientState, data: &[u8], seq: u16) -
         reply[0] = 1;
         state.write_u16(&mut reply, 2, seq);
         state.write_u32(&mut reply, 8, prop.prop_type); // actual type
-        // bytes_after = total data length
+                                                        // bytes_after = total data length
         state.write_u32(&mut reply, 12, prop.data.len() as u32);
         return reply.to_vec();
     }

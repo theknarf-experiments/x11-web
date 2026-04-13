@@ -8,15 +8,15 @@
 //!   indicators — GetIndicatorState, GetIndicatorMap, SetIndicatorMap, GetNamedIndicator
 //!   device     — ListComponents, GetDeviceInfo, SetDeviceInfo
 
-mod map;
-mod controls;
-mod names;
 mod compat;
-mod indicators;
+mod controls;
 mod device;
 mod geometry;
+mod indicators;
+mod map;
+mod names;
 
-use super::super::client::{ClientState, XkbNamedIndicator, XkbIndicatorMap, XkbSymInterpretation};
+use super::super::client::{ClientState, XkbIndicatorMap, XkbNamedIndicator, XkbSymInterpretation};
 use tracing::debug;
 
 /// Build the default compat SI table for initializing new ClientState instances.
@@ -116,8 +116,8 @@ fn handle_xkb_select_events(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
         return Vec::new();
     }
     let affect_which = state.read_u16(data, 6) as u32;
-    let clear        = state.read_u16(data, 8) as u32;
-    let select_all   = state.read_u16(data, 10) as u32;
+    let clear = state.read_u16(data, 8) as u32;
+    let select_all = state.read_u16(data, 10) as u32;
 
     let old_mask = state.xkb_event_mask;
     // Bits touched by this request: first clear them, then apply selectAll
@@ -165,28 +165,32 @@ fn handle_xkb_select_events(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
 ///  29-32  map.ctrls (CARD32)
 fn handle_xkb_set_named_indicator(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
     if data.len() < 20 {
-        debug!("XKB SetNamedIndicator: request too short ({} bytes)", data.len());
+        debug!(
+            "XKB SetNamedIndicator: request too short ({} bytes)",
+            data.len()
+        );
         return Vec::new();
     }
 
     let indicator_atom = state.read_u32(data, 12);
-    let set_state      = data.get(16).copied().unwrap_or(0) != 0;
-    let on             = data.get(17).copied().unwrap_or(0) != 0;
-    let set_map        = data.get(18).copied().unwrap_or(0) != 0;
+    let set_state = data.get(16).copied().unwrap_or(0) != 0;
+    let on = data.get(17).copied().unwrap_or(0) != 0;
+    let set_map = data.get(18).copied().unwrap_or(0) != 0;
 
     // Parse the indicator map if setMap is true and we have enough bytes.
     let map = if set_map && data.len() >= 33 {
         let ctrls = state.read_u32(data, 29);
         XkbIndicatorMap {
             which_groups: data[22],
-            groups:       data[23],
-            which_mods:   data[24],
-            mods:         data[25],
+            groups: data[23],
+            which_mods: data[24],
+            mods: data[25],
             ctrls,
         }
     } else {
         // Preserve the existing map for this indicator, or default.
-        state.xkb_named_indicators
+        state
+            .xkb_named_indicators
             .get(&indicator_atom)
             .map(|ni| ni.map.clone())
             .unwrap_or_default()
@@ -195,7 +199,8 @@ fn handle_xkb_set_named_indicator(state: &mut ClientState, data: &[u8]) -> Vec<u
     // Determine the indicator index: try the existing entry first, then
     // allocate a new slot (capped at 31 so the 32-bit state bitmask is safe).
     let next_index = state.xkb_named_indicators.len().min(31) as u8;
-    let index = state.xkb_named_indicators
+    let index = state
+        .xkb_named_indicators
         .get(&indicator_atom)
         .map(|ni| ni.index)
         .unwrap_or(next_index);
@@ -249,8 +254,12 @@ pub(crate) fn handle_ge_request(state: &mut ClientState, data: &[u8], seq: u16) 
         _ => {
             debug!("Unhandled GE minor opcode: {minor}");
             crate::xserver::core::build_error_bo(
-                crate::xserver::core::BAD_REQUEST, seq, minor as u32,
-                135, minor as u16, state.msb_first,
+                crate::xserver::core::BAD_REQUEST,
+                seq,
+                minor as u32,
+                135,
+                minor as u16,
+                state.msb_first,
             )
         }
     }
@@ -283,8 +292,16 @@ pub(crate) fn handle_xkb_request(state: &mut ClientState, data: &[u8], seq: u16)
             // XKB Bell request layout: 4-5=deviceSpec, 6-7=bellClass,
             //   8-9=bellID, 10=percent, 11=forceSound, 12=soundOnly,
             //   13=pad, 14-17=name(ATOM), 18-21=window
-            let percent = if data.len() > 10 { data[10] } else { state.keyboard_control.bell_percent };
-            let _force = if data.len() > 11 { data[11] != 0 } else { false };
+            let percent = if data.len() > 10 {
+                data[10]
+            } else {
+                state.keyboard_control.bell_percent
+            };
+            let _force = if data.len() > 11 {
+                data[11] != 0
+            } else {
+                false
+            };
             debug!("XKB Bell: percent={percent}");
             // No wire reply for Bell (it is void). We log it so the
             // frontend or test harness can observe bell events.
@@ -305,7 +322,11 @@ pub(crate) fn handle_xkb_request(state: &mut ClientState, data: &[u8], seq: u16)
         16 => handle_xkb_set_named_indicator(state, data), // SetNamedIndicator
         17 => {
             // GetNames: request bytes 8-11 contain the `which` bitmask.
-            let req_which: u32 = if data.len() >= 12 { state.read_u32(data, 8) } else { 0x0FFF };
+            let req_which: u32 = if data.len() >= 12 {
+                state.read_u32(data, 8)
+            } else {
+                0x0FFF
+            };
             names::build_xkb_get_names_reply(state, seq, device_id_byte, req_which)
         }
         18 => names::handle_xkb_set_names(state, data, seq), // SetNames
@@ -327,9 +348,9 @@ pub(crate) fn handle_xkb_request(state: &mut ClientState, data: &[u8], seq: u16)
                 let auto_ctrls_values = state.read_u32(data, 24);
                 let result = value & change;
                 let supported: u32 = 0x1F; // all per-client flags supported
-                state.write_u32(&mut reply, 8, supported);    // supported
-                state.write_u32(&mut reply, 12, result);      // value
-                state.write_u32(&mut reply, 16, auto_ctrls);  // autoCtrls
+                state.write_u32(&mut reply, 8, supported); // supported
+                state.write_u32(&mut reply, 12, result); // value
+                state.write_u32(&mut reply, 16, auto_ctrls); // autoCtrls
                 state.write_u32(&mut reply, 20, auto_ctrls_values); // autoCtrlsValues
             } else if data.len() >= 16 {
                 let change = state.read_u32(data, 8);
@@ -364,8 +385,12 @@ pub(crate) fn handle_xkb_request(state: &mut ClientState, data: &[u8], seq: u16)
         _ => {
             debug!("Unhandled XKB minor opcode: {minor}");
             crate::xserver::core::build_error_bo(
-                crate::xserver::core::BAD_REQUEST, seq, minor as u32,
-                136, minor as u16, state.msb_first,
+                crate::xserver::core::BAD_REQUEST,
+                seq,
+                minor as u32,
+                136,
+                minor as u16,
+                state.msb_first,
             )
         }
     }
@@ -446,12 +471,24 @@ pub(crate) fn maybe_send_xkb_state_notify(
 
     // Build the changed bitmask: which components changed.
     let mut changed: u16 = 0;
-    if before.base_mods != after.base_mods { changed |= 1 << 0; }   // ModifierState
-    if before.latched_mods != after.latched_mods { changed |= 1 << 1; } // ModifierBase
-    if before.locked_mods != after.locked_mods { changed |= 1 << 2; }   // ModifierLatch
-    if before.base_group != after.base_group { changed |= 1 << 3; }
-    if before.latched_group != after.latched_group { changed |= 1 << 4; }
-    if before.locked_group != after.locked_group { changed |= 1 << 5; }
+    if before.base_mods != after.base_mods {
+        changed |= 1 << 0;
+    } // ModifierState
+    if before.latched_mods != after.latched_mods {
+        changed |= 1 << 1;
+    } // ModifierBase
+    if before.locked_mods != after.locked_mods {
+        changed |= 1 << 2;
+    } // ModifierLatch
+    if before.base_group != after.base_group {
+        changed |= 1 << 3;
+    }
+    if before.latched_group != after.latched_group {
+        changed |= 1 << 4;
+    }
+    if before.locked_group != after.locked_group {
+        changed |= 1 << 5;
+    }
 
     // XkbStateNotify event layout (32 bytes):
     //   0: event code (XKB_EVENT_BASE)
@@ -496,7 +533,7 @@ pub(crate) fn maybe_send_xkb_state_notify(
     event[20] = effective_mods; // compatGrabMods
     event[21] = effective_mods; // lookupMods
     event[22] = effective_mods; // compatLookupMods
-    // 23: ptrBtnState high byte = 0
+                                // 23: ptrBtnState high byte = 0
     state.write_u16(&mut event, 24, changed);
     event[26] = keycode;
     event[27] = event_type;

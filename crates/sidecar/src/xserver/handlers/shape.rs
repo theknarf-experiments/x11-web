@@ -52,8 +52,12 @@ pub(crate) fn handle_shape_request(state: &mut ClientState, data: &[u8], seq: u1
             // out-of-range values with BadValue per the SHAPE 1.1 spec.
             if ordering > 3 {
                 return crate::xserver::core::build_error_bo(
-                    crate::xserver::core::BAD_VALUE, seq, ordering as u32,
-                    128, 1, state.msb_first,
+                    crate::xserver::core::BAD_VALUE,
+                    seq,
+                    ordering as u32,
+                    128,
+                    1,
+                    state.msb_first,
                 );
             }
             let window_id = state.read_u32(data, 8);
@@ -96,15 +100,23 @@ pub(crate) fn handle_shape_request(state: &mut ClientState, data: &[u8], seq: u1
             let window_id = state.read_u32(data, 8);
             let x_offset = state.read_i16(data, 12);
             let y_offset = state.read_i16(data, 14);
-            let pixmap_id = if data.len() >= 20 { state.read_u32(data, 16) } else { 0 };
+            let pixmap_id = if data.len() >= 20 {
+                state.read_u32(data, 16)
+            } else {
+                0
+            };
 
             let new_shape = if pixmap_id == 0 {
                 // None pixmap => reset to default shape
                 None
             } else if !state.pixmaps.contains_key(&pixmap_id) {
                 return crate::xserver::core::build_error_bo(
-                    crate::xserver::core::BAD_PIXMAP, seq, pixmap_id,
-                    128, 2, state.msb_first,
+                    crate::xserver::core::BAD_PIXMAP,
+                    seq,
+                    pixmap_id,
+                    128,
+                    2,
+                    state.msb_first,
                 );
             } else {
                 // Extract shape from pixmap: non-zero pixels form the shape
@@ -130,15 +142,17 @@ pub(crate) fn handle_shape_request(state: &mut ClientState, data: &[u8], seq: u1
             let src_window = state.read_u32(data, 16);
 
             // Get source shape
-            let src_rects = get_window_shape(state, src_window, src_kind)
-                .map(|rects| {
-                    rects.iter().map(|r| RegionRect {
+            let src_rects = get_window_shape(state, src_window, src_kind).map(|rects| {
+                rects
+                    .iter()
+                    .map(|r| RegionRect {
                         x: r.x + x_offset,
                         y: r.y + y_offset,
                         width: r.width,
                         height: r.height,
-                    }).collect::<Vec<_>>()
-                });
+                    })
+                    .collect::<Vec<_>>()
+            });
 
             apply_shape(state, dest_window, dest_kind, operation, src_rects);
             send_shape_notify(state, dest_window, dest_kind, seq);
@@ -159,10 +173,16 @@ pub(crate) fn handle_shape_request(state: &mut ClientState, data: &[u8], seq: u1
                     SHAPE_BOUNDING => &mut win.bounding_shape,
                     SHAPE_CLIP => &mut win.clip_shape,
                     SHAPE_INPUT => &mut win.input_shape,
-                    _ => return crate::xserver::core::build_error_bo(
-                        crate::xserver::core::BAD_VALUE, seq, kind as u32,
-                        128, 4, state.msb_first,
-                    ),
+                    _ => {
+                        return crate::xserver::core::build_error_bo(
+                            crate::xserver::core::BAD_VALUE,
+                            seq,
+                            kind as u32,
+                            128,
+                            4,
+                            state.msb_first,
+                        )
+                    }
                 };
                 if let Some(rects) = shape {
                     for r in rects.iter_mut() {
@@ -182,7 +202,8 @@ pub(crate) fn handle_shape_request(state: &mut ClientState, data: &[u8], seq: u1
             require_len!(data, 8, seq, 128, 5, state.msb_first);
             let window_id = state.read_u32(data, 4);
 
-            let (bounding_shaped, bx, by, bw, bh) = if let Some(win) = state.windows.get(&window_id) {
+            let (bounding_shaped, bx, by, bw, bh) = if let Some(win) = state.windows.get(&window_id)
+            {
                 if let Some(ref rects) = win.bounding_shape {
                     let ext = compute_extents(rects);
                     (true, ext.x, ext.y, ext.width, ext.height)
@@ -246,7 +267,9 @@ pub(crate) fn handle_shape_request(state: &mut ClientState, data: &[u8], seq: u1
             require_len!(data, 8, seq, 128, 7, state.msb_first);
             let window_id = state.read_u32(data, 4);
 
-            let enabled = state.windows.get(&window_id)
+            let enabled = state
+                .windows
+                .get(&window_id)
                 .map(|w| !w.shape_select_clients.is_empty())
                 .unwrap_or(false);
 
@@ -272,12 +295,24 @@ pub(crate) fn handle_shape_request(state: &mut ClientState, data: &[u8], seq: u1
                     SHAPE_CLIP => win.clip_shape.as_deref(),
                     SHAPE_INPUT => win.input_shape.as_deref(),
                     _ => None,
-                }.map(|r| r.to_vec()).unwrap_or_else(|| {
+                }
+                .map(|r| r.to_vec())
+                .unwrap_or_else(|| {
                     // No shape set — return single rectangle covering the window
-                    vec![RegionRect { x: 0, y: 0, width: win.width, height: win.height }]
+                    vec![RegionRect {
+                        x: 0,
+                        y: 0,
+                        width: win.width,
+                        height: win.height,
+                    }]
                 })
             } else {
-                vec![RegionRect { x: 0, y: 0, width: state.screen_width, height: state.screen_height }]
+                vec![RegionRect {
+                    x: 0,
+                    y: 0,
+                    width: state.screen_width,
+                    height: state.screen_height,
+                }]
             };
 
             let n_rects = rects.len() as u32;
@@ -303,8 +338,12 @@ pub(crate) fn handle_shape_request(state: &mut ClientState, data: &[u8], seq: u1
         _ => {
             debug!("SHAPE: unhandled minor opcode {minor}");
             crate::xserver::core::build_error_bo(
-                crate::xserver::core::BAD_REQUEST, seq, minor as u32,
-                128, minor as u16, state.msb_first,
+                crate::xserver::core::BAD_REQUEST,
+                seq,
+                minor as u32,
+                128,
+                minor as u16,
+                state.msb_first,
             )
         }
     }
@@ -315,16 +354,31 @@ fn get_window_shape(state: &ClientState, window_id: u32, kind: u8) -> Option<Vec
     let win = state.windows.get(&window_id)?;
     match kind {
         SHAPE_BOUNDING => win.bounding_shape.clone().or_else(|| {
-            Some(vec![RegionRect { x: 0, y: 0, width: win.width, height: win.height }])
+            Some(vec![RegionRect {
+                x: 0,
+                y: 0,
+                width: win.width,
+                height: win.height,
+            }])
         }),
         SHAPE_CLIP => win.clip_shape.clone().or_else(|| {
             win.bounding_shape.clone().or_else(|| {
-                Some(vec![RegionRect { x: 0, y: 0, width: win.width, height: win.height }])
+                Some(vec![RegionRect {
+                    x: 0,
+                    y: 0,
+                    width: win.width,
+                    height: win.height,
+                }])
             })
         }),
         SHAPE_INPUT => win.input_shape.clone().or_else(|| {
             win.bounding_shape.clone().or_else(|| {
-                Some(vec![RegionRect { x: 0, y: 0, width: win.width, height: win.height }])
+                Some(vec![RegionRect {
+                    x: 0,
+                    y: 0,
+                    width: win.width,
+                    height: win.height,
+                }])
             })
         }),
         _ => None,
@@ -332,7 +386,13 @@ fn get_window_shape(state: &ClientState, window_id: u32, kind: u8) -> Option<Vec
 }
 
 /// Apply a shape operation to a window.
-fn apply_shape(state: &mut ClientState, window_id: u32, kind: u8, operation: u8, new_rects: Option<Vec<RegionRect>>) {
+fn apply_shape(
+    state: &mut ClientState,
+    window_id: u32,
+    kind: u8,
+    operation: u8,
+    new_rects: Option<Vec<RegionRect>>,
+) {
     let win = match state.windows.get_mut(&window_id) {
         Some(w) => w,
         None => return,
@@ -355,13 +415,21 @@ fn apply_shape(state: &mut ClientState, window_id: u32, kind: u8, operation: u8,
             if let Some(new) = new_rects {
                 combined.extend(new);
             }
-            *target = if combined.is_empty() { None } else { Some(combined) };
+            *target = if combined.is_empty() {
+                None
+            } else {
+                Some(combined)
+            };
         }
         SHAPE_INTERSECT => {
             if let Some(ref existing) = target {
                 if let Some(ref new) = new_rects {
                     let result = intersect_rects(existing, new);
-                    *target = if result.is_empty() { None } else { Some(result) };
+                    *target = if result.is_empty() {
+                        None
+                    } else {
+                        Some(result)
+                    };
                 } else {
                     // Intersect with full window = keep existing
                 }
@@ -375,13 +443,26 @@ fn apply_shape(state: &mut ClientState, window_id: u32, kind: u8, operation: u8,
             if let Some(ref existing) = target {
                 if let Some(ref new) = new_rects {
                     let result = subtract_rects(existing, new);
-                    *target = if result.is_empty() { None } else { Some(result) };
+                    *target = if result.is_empty() {
+                        None
+                    } else {
+                        Some(result)
+                    };
                 }
             } else if let Some(ref new) = new_rects {
                 // Subtract from full window: create full rect then subtract
-                let full = vec![RegionRect { x: 0, y: 0, width: win.width, height: win.height }];
+                let full = vec![RegionRect {
+                    x: 0,
+                    y: 0,
+                    width: win.width,
+                    height: win.height,
+                }];
                 let result = subtract_rects(&full, new);
-                *target = if result.is_empty() { None } else { Some(result) };
+                *target = if result.is_empty() {
+                    None
+                } else {
+                    Some(result)
+                };
             }
         }
         SHAPE_INVERT => {
@@ -389,7 +470,11 @@ fn apply_shape(state: &mut ClientState, window_id: u32, kind: u8, operation: u8,
             if let Some(ref existing) = target {
                 if let Some(ref new) = new_rects {
                     let result = subtract_rects(new, existing);
-                    *target = if result.is_empty() { None } else { Some(result) };
+                    *target = if result.is_empty() {
+                        None
+                    } else {
+                        Some(result)
+                    };
                 }
             } else {
                 // existing is full window, invert = empty
@@ -401,7 +486,12 @@ fn apply_shape(state: &mut ClientState, window_id: u32, kind: u8, operation: u8,
 }
 
 /// Extract a shape from a pixmap: scan for non-zero pixels and build rectangles.
-fn extract_shape_from_pixmap(state: &ClientState, pixmap_id: u32, x_offset: i16, y_offset: i16) -> Vec<RegionRect> {
+fn extract_shape_from_pixmap(
+    state: &ClientState,
+    pixmap_id: u32,
+    x_offset: i16,
+    y_offset: i16,
+) -> Vec<RegionRect> {
     let pix = match state.pixmaps.get(&pixmap_id) {
         Some(p) => p,
         None => return Vec::new(),
@@ -427,7 +517,9 @@ fn extract_shape_from_pixmap(state: &ClientState, pixmap_id: u32, x_offset: i16,
                     let start_x = x;
                     while x < w {
                         let po = (y * w + x) * 4;
-                        if po + 4 > data.len() { break; }
+                        if po + 4 > data.len() {
+                            break;
+                        }
                         let pa = data[po + 3];
                         let pr = data[po + 2];
                         let pg = data[po + 1];
@@ -489,16 +581,23 @@ fn send_shape_notify(state: &mut ClientState, window_id: u32, kind: u8, seq: u16
         };
         match shape {
             Some(rects) => (true, compute_extents(rects)),
-            None => (false, RegionRect {
-                x: 0, y: 0,
-                width: win.width, height: win.height,
-            }),
+            None => (
+                false,
+                RegionRect {
+                    x: 0,
+                    y: 0,
+                    width: win.width,
+                    height: win.height,
+                },
+            ),
         }
     } else {
         return;
     };
 
-    let has_subscribers = state.windows.get(&window_id)
+    let has_subscribers = state
+        .windows
+        .get(&window_id)
         .map(|w| !w.shape_select_clients.is_empty())
         .unwrap_or(false);
 
@@ -522,7 +621,12 @@ fn send_shape_notify(state: &mut ClientState, window_id: u32, kind: u8, seq: u16
 /// Compute bounding extents of a rectangle list.
 fn compute_extents(rects: &[RegionRect]) -> RegionRect {
     if rects.is_empty() {
-        return RegionRect { x: 0, y: 0, width: 0, height: 0 };
+        return RegionRect {
+            x: 0,
+            y: 0,
+            width: 0,
+            height: 0,
+        };
     }
     let mut x1 = i16::MAX;
     let mut y1 = i16::MAX;
@@ -634,6 +738,10 @@ fn subtract_single_rect(r: &RegionRect, sub: &RegionRect, out: &mut Vec<RegionRe
 }
 
 fn write_i16_bo(buf: &mut [u8], offset: usize, val: i16, msb_first: bool) {
-    let bytes = if msb_first { val.to_be_bytes() } else { val.to_le_bytes() };
+    let bytes = if msb_first {
+        val.to_be_bytes()
+    } else {
+        val.to_le_bytes()
+    };
     buf[offset..offset + 2].copy_from_slice(&bytes);
 }

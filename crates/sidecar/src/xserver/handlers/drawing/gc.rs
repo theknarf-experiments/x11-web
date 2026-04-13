@@ -6,52 +6,56 @@ use crate::xserver::core::require_len;
 /// Parse GC value-list and apply to `gc`.
 /// Returns `Some((error_bit, bad_value))` if a value fails X11 spec validation,
 /// or `None` when all values are valid.
-fn parse_gc_values(gc: &mut GcState, value_mask: u32, data: &[u8], msb_first: bool) -> Option<(u8, u32)> {
+fn parse_gc_values(
+    gc: &mut GcState,
+    value_mask: u32,
+    data: &[u8],
+    msb_first: bool,
+) -> Option<(u8, u32)> {
     let mut offset = 0;
     for bit in 0..23 {
-        if value_mask & (1 << bit) != 0
-            && offset + 4 <= data.len() {
-                let val = read_u32_bo(data, offset, msb_first);
-                // Validate enumerated fields per the X11 protocol spec
-                match bit {
-                    0 if val > 15 => return Some((bit as u8, val)),
-                    5 if val > 2 => return Some((bit as u8, val)),
-                    6 if val > 3 => return Some((bit as u8, val)),
-                    7 if val > 2 => return Some((bit as u8, val)),
-                    8 if val > 3 => return Some((bit as u8, val)),
-                    9 if val > 1 => return Some((bit as u8, val)),
-                    15 if val > 1 => return Some((bit as u8, val)),
-                    22 if val > 1 => return Some((bit as u8, val)),
-                    _ => {}
-                }
-                match bit {
-                    0 => gc.function = val as u8,
-                    1 => gc.plane_mask = val,
-                    2 => gc.foreground = val,
-                    3 => gc.background = val,
-                    4 => gc.line_width = val as u16,
-                    5 => gc.line_style = val as u8,
-                    6 => gc.cap_style = val as u8,
-                    7 => gc.join_style = val as u8,
-                    8 => gc.fill_style = val as u8,
-                    9 => gc.fill_rule = val as u8,
-                    10 => gc.tile = val,
-                    11 => gc.stipple = val,
-                    12 => gc.ts_x = val as i16,
-                    13 => gc.ts_y = val as i16,
-                    14 => gc.font_id = val,
-                    15 => gc.subwindow_mode = val as u8,
-                    16 => gc.graphics_exposures = val != 0,
-                    17 => gc.clip_x = val as i16,
-                    18 => gc.clip_y = val as i16,
-                    19 => gc.clip_mask = val,
-                    20 => gc.dash_offset = val as u16,
-                    21 => gc.dashes = val as u8,
-                    22 => gc.arc_mode = val as u8,
-                    _ => {}
-                }
-                offset += 4;
+        if value_mask & (1 << bit) != 0 && offset + 4 <= data.len() {
+            let val = read_u32_bo(data, offset, msb_first);
+            // Validate enumerated fields per the X11 protocol spec
+            match bit {
+                0 if val > 15 => return Some((bit as u8, val)),
+                5 if val > 2 => return Some((bit as u8, val)),
+                6 if val > 3 => return Some((bit as u8, val)),
+                7 if val > 2 => return Some((bit as u8, val)),
+                8 if val > 3 => return Some((bit as u8, val)),
+                9 if val > 1 => return Some((bit as u8, val)),
+                15 if val > 1 => return Some((bit as u8, val)),
+                22 if val > 1 => return Some((bit as u8, val)),
+                _ => {}
             }
+            match bit {
+                0 => gc.function = val as u8,
+                1 => gc.plane_mask = val,
+                2 => gc.foreground = val,
+                3 => gc.background = val,
+                4 => gc.line_width = val as u16,
+                5 => gc.line_style = val as u8,
+                6 => gc.cap_style = val as u8,
+                7 => gc.join_style = val as u8,
+                8 => gc.fill_style = val as u8,
+                9 => gc.fill_rule = val as u8,
+                10 => gc.tile = val,
+                11 => gc.stipple = val,
+                12 => gc.ts_x = val as i16,
+                13 => gc.ts_y = val as i16,
+                14 => gc.font_id = val,
+                15 => gc.subwindow_mode = val as u8,
+                16 => gc.graphics_exposures = val != 0,
+                17 => gc.clip_x = val as i16,
+                18 => gc.clip_y = val as i16,
+                19 => gc.clip_mask = val,
+                20 => gc.dash_offset = val as u16,
+                21 => gc.dashes = val as u8,
+                22 => gc.arc_mode = val as u8,
+                _ => {}
+            }
+            offset += 4;
+        }
     }
     None
 }
@@ -85,7 +89,9 @@ pub(crate) fn handle_create_gc(state: &mut ClientState, data: &[u8]) -> Vec<u8> 
     }
 
     let mut gc = GcState::default();
-    if let Some((_error_bit, bad_value)) = parse_gc_values(&mut gc, value_mask, &data[16..], state.msb_first) {
+    if let Some((_error_bit, bad_value)) =
+        parse_gc_values(&mut gc, value_mask, &data[16..], state.msb_first)
+    {
         return build_error(BAD_VALUE, state.sequence, bad_value, 55, 0);
     }
 
@@ -129,7 +135,9 @@ pub(crate) fn handle_change_gc(state: &mut ClientState, data: &[u8]) -> Vec<u8> 
     }
 
     if let Some(gc) = state.gcs.get_mut(&gc_id) {
-        if let Some((_error_bit, bad_value)) = parse_gc_values(gc, value_mask, &data[12..], state.msb_first) {
+        if let Some((_error_bit, bad_value)) =
+            parse_gc_values(gc, value_mask, &data[12..], state.msb_first)
+        {
             return build_error(BAD_VALUE, state.sequence, bad_value, 56, 0);
         }
     }
@@ -190,35 +198,77 @@ pub(crate) fn handle_copy_gc(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
     };
 
     if let Some(dst) = state.gcs.get_mut(&dst_gc) {
-        if value_mask & (1 << 0) != 0 { dst.function = src.function; }
-        if value_mask & (1 << 1) != 0 { dst.plane_mask = src.plane_mask; }
-        if value_mask & (1 << 2) != 0 { dst.foreground = src.foreground; }
-        if value_mask & (1 << 3) != 0 { dst.background = src.background; }
-        if value_mask & (1 << 4) != 0 { dst.line_width = src.line_width; }
-        if value_mask & (1 << 5) != 0 { dst.line_style = src.line_style; }
-        if value_mask & (1 << 6) != 0 { dst.cap_style = src.cap_style; }
-        if value_mask & (1 << 7) != 0 { dst.join_style = src.join_style; }
-        if value_mask & (1 << 8) != 0 { dst.fill_style = src.fill_style; }
-        if value_mask & (1 << 9) != 0 { dst.fill_rule = src.fill_rule; }
-        if value_mask & (1 << 10) != 0 { dst.tile = src.tile; }
-        if value_mask & (1 << 11) != 0 { dst.stipple = src.stipple; }
-        if value_mask & (1 << 12) != 0 { dst.ts_x = src.ts_x; }
-        if value_mask & (1 << 13) != 0 { dst.ts_y = src.ts_y; }
-        if value_mask & (1 << 14) != 0 { dst.font_id = src.font_id; }
-        if value_mask & (1 << 15) != 0 { dst.subwindow_mode = src.subwindow_mode; }
-        if value_mask & (1 << 16) != 0 { dst.graphics_exposures = src.graphics_exposures; }
-        if value_mask & (1 << 17) != 0 { dst.clip_x = src.clip_x; }
-        if value_mask & (1 << 18) != 0 { dst.clip_y = src.clip_y; }
+        if value_mask & (1 << 0) != 0 {
+            dst.function = src.function;
+        }
+        if value_mask & (1 << 1) != 0 {
+            dst.plane_mask = src.plane_mask;
+        }
+        if value_mask & (1 << 2) != 0 {
+            dst.foreground = src.foreground;
+        }
+        if value_mask & (1 << 3) != 0 {
+            dst.background = src.background;
+        }
+        if value_mask & (1 << 4) != 0 {
+            dst.line_width = src.line_width;
+        }
+        if value_mask & (1 << 5) != 0 {
+            dst.line_style = src.line_style;
+        }
+        if value_mask & (1 << 6) != 0 {
+            dst.cap_style = src.cap_style;
+        }
+        if value_mask & (1 << 7) != 0 {
+            dst.join_style = src.join_style;
+        }
+        if value_mask & (1 << 8) != 0 {
+            dst.fill_style = src.fill_style;
+        }
+        if value_mask & (1 << 9) != 0 {
+            dst.fill_rule = src.fill_rule;
+        }
+        if value_mask & (1 << 10) != 0 {
+            dst.tile = src.tile;
+        }
+        if value_mask & (1 << 11) != 0 {
+            dst.stipple = src.stipple;
+        }
+        if value_mask & (1 << 12) != 0 {
+            dst.ts_x = src.ts_x;
+        }
+        if value_mask & (1 << 13) != 0 {
+            dst.ts_y = src.ts_y;
+        }
+        if value_mask & (1 << 14) != 0 {
+            dst.font_id = src.font_id;
+        }
+        if value_mask & (1 << 15) != 0 {
+            dst.subwindow_mode = src.subwindow_mode;
+        }
+        if value_mask & (1 << 16) != 0 {
+            dst.graphics_exposures = src.graphics_exposures;
+        }
+        if value_mask & (1 << 17) != 0 {
+            dst.clip_x = src.clip_x;
+        }
+        if value_mask & (1 << 18) != 0 {
+            dst.clip_y = src.clip_y;
+        }
         if value_mask & (1 << 19) != 0 {
             dst.clip_mask = src.clip_mask;
             dst.clip_mask_bitmap = src.clip_mask_bitmap.clone();
         }
-        if value_mask & (1 << 20) != 0 { dst.dash_offset = src.dash_offset; }
+        if value_mask & (1 << 20) != 0 {
+            dst.dash_offset = src.dash_offset;
+        }
         if value_mask & (1 << 21) != 0 {
             dst.dashes = src.dashes;
             dst.dash_list = src.dash_list.clone();
         }
-        if value_mask & (1 << 22) != 0 { dst.arc_mode = src.arc_mode; }
+        if value_mask & (1 << 22) != 0 {
+            dst.arc_mode = src.arc_mode;
+        }
         // clip_rects follow the clip origin fields (bits 17-19)
         if value_mask & ((1 << 17) | (1 << 18) | (1 << 19)) != 0 {
             dst.clip_rects = src.clip_rects.clone();

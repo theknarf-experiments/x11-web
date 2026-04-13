@@ -5,15 +5,22 @@ use tracing::debug;
 use super::super::super::client::ClientState;
 
 /// 31: CreatePointerBarrier
-pub(crate) fn handle_create_pointer_barrier(state: &mut ClientState, data: &[u8], _seq: u16) -> Vec<u8> {
+pub(crate) fn handle_create_pointer_barrier(
+    state: &mut ClientState,
+    data: &[u8],
+    _seq: u16,
+) -> Vec<u8> {
     if data.len() >= 28 {
         let barrier_id = state.read_u32(data, 4);
         let window = state.read_u32(data, 8);
         // Per XFIXES spec: validate window exists
         if window != state.root_window && !state.windows.contains_key(&window) {
             return crate::xserver::core::build_error(
-                crate::xserver::core::BAD_WINDOW, _seq, window,
-                138, 31, // XFIXES major opcode = 138
+                crate::xserver::core::BAD_WINDOW,
+                _seq,
+                window,
+                138,
+                31, // XFIXES major opcode = 138
             );
         }
         let x1 = state.read_i16(data, 12);
@@ -33,22 +40,29 @@ pub(crate) fn handle_create_pointer_barrier(state: &mut ClientState, data: &[u8]
             }
         }
         debug!("XFIXES CreatePointerBarrier: id={barrier_id:#x} window={window:#x} ({x1},{y1})-({x2},{y2}) dirs={directions:#x} devices={num_devices}");
-        state.barriers.insert(barrier_id, super::super::super::types::PointerBarrier {
+        state.barriers.insert(
             barrier_id,
-            window,
-            x1,
-            y1,
-            x2,
-            y2,
-            directions,
-            device_ids,
-        });
+            super::super::super::types::PointerBarrier {
+                barrier_id,
+                window,
+                x1,
+                y1,
+                x2,
+                y2,
+                directions,
+                device_ids,
+            },
+        );
     }
     Vec::new()
 }
 
 /// 32: DeletePointerBarrier
-pub(crate) fn handle_delete_pointer_barrier(state: &mut ClientState, data: &[u8], _seq: u16) -> Vec<u8> {
+pub(crate) fn handle_delete_pointer_barrier(
+    state: &mut ClientState,
+    data: &[u8],
+    _seq: u16,
+) -> Vec<u8> {
     if data.len() >= 8 {
         let barrier_id = state.read_u32(data, 4);
         debug!("XFIXES DeletePointerBarrier: id={barrier_id:#x}");
@@ -62,7 +76,11 @@ pub(crate) fn handle_delete_pointer_barrier(state: &mut ClientState, data: &[u8]
 ///
 /// Per XFIXES 6+ spec, valid modes: 0 = Default, 1 = ForceDisconnect.
 /// Mask to valid bits for forward compatibility.
-pub(crate) fn handle_set_client_disconnect_mode(state: &mut ClientState, data: &[u8], _seq: u16) -> Vec<u8> {
+pub(crate) fn handle_set_client_disconnect_mode(
+    state: &mut ClientState,
+    data: &[u8],
+    _seq: u16,
+) -> Vec<u8> {
     if data.len() >= 8 {
         let mode = state.read_u32(data, 4) & 0x1; // Only bit 0 is defined
         debug!("XFIXES SetClientDisconnectMode: mode={mode:#x}");
@@ -72,7 +90,11 @@ pub(crate) fn handle_set_client_disconnect_mode(state: &mut ClientState, data: &
 }
 
 /// 34: GetClientDisconnectMode
-pub(crate) fn handle_get_client_disconnect_mode(state: &mut ClientState, _data: &[u8], seq: u16) -> Vec<u8> {
+pub(crate) fn handle_get_client_disconnect_mode(
+    state: &mut ClientState,
+    _data: &[u8],
+    seq: u16,
+) -> Vec<u8> {
     let mut reply = [0u8; 32];
     reply[0] = 1;
     state.write_u16(&mut reply, 2, seq);

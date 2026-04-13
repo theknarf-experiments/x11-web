@@ -97,8 +97,7 @@ pub struct GtkMenuPaths {
 impl GtkMenuPaths {
     /// `true` if the paths name at least one menu source we can mirror.
     pub fn has_menu(&self) -> bool {
-        !self.bus_name.is_empty()
-            && (self.menubar_path.is_some() || self.app_menu_path.is_some())
+        !self.bus_name.is_empty() && (self.menubar_path.is_some() || self.app_menu_path.is_some())
     }
 }
 
@@ -200,12 +199,7 @@ impl MenuTracker {
 
     /// Begin mirroring a GTK app's menu for the given top-level window.
     /// Replaces any existing tracker for the same window UUID.
-    pub fn attach_gtk(
-        &self,
-        window_uuid: String,
-        client_id: String,
-        paths: GtkMenuPaths,
-    ) {
+    pub fn attach_gtk(&self, window_uuid: String, client_id: String, paths: GtkMenuPaths) {
         let conn = match self.inner.conn.clone() {
             Some(c) => c,
             None => {
@@ -214,9 +208,7 @@ impl MenuTracker {
             }
         };
         if !paths.has_menu() {
-            debug!(
-                "MenuTracker.attach_gtk: no menu paths for window {window_uuid}, ignoring"
-            );
+            debug!("MenuTracker.attach_gtk: no menu paths for window {window_uuid}, ignoring");
             return;
         }
 
@@ -391,9 +383,7 @@ impl AppMenuRegistrar {
             Some(r) => (r.service.clone(), r.object_path.clone()),
             None => (
                 String::new(),
-                zbus::zvariant::ObjectPath::try_from("/")
-                    .unwrap()
-                    .into(),
+                zbus::zvariant::ObjectPath::try_from("/").unwrap().into(),
             ),
         }
     }
@@ -452,9 +442,7 @@ trait GtkMenus {
 trait GtkActions {
     fn list(&self) -> zbus::Result<Vec<String>>;
     /// `a{s(bgav)}` — map from action name to (enabled, param_signature, state).
-    fn describe_all(
-        &self,
-    ) -> zbus::Result<HashMap<String, (bool, String, Vec<OwnedValue>)>>;
+    fn describe_all(&self) -> zbus::Result<HashMap<String, (bool, String, Vec<OwnedValue>)>>;
     fn activate(
         &self,
         action_name: &str,
@@ -535,12 +523,8 @@ async fn run_gtk_window_task(
         match cmd {
             TrackerCommand::Stop => break,
             TrackerCommand::Activate { action } => {
-                if let Err(e) = dispatch_activation(
-                    app_actions.as_ref(),
-                    win_actions.as_ref(),
-                    &action,
-                )
-                .await
+                if let Err(e) =
+                    dispatch_activation(app_actions.as_ref(), win_actions.as_ref(), &action).await
                 {
                     warn!(
                         "MenuTracker activate {action_name} failed: {e}",
@@ -729,8 +713,7 @@ fn build_tree(
         let action_name = string_prop(raw, "action");
         let target = raw.get("target").and_then(owned_value_to_json);
         let accelerator = string_prop(raw, "accel").map(prettify_accel);
-        let icon = string_prop(raw, "icon")
-            .or_else(|| string_prop(raw, "verb-icon"));
+        let icon = string_prop(raw, "icon").or_else(|| string_prop(raw, "verb-icon"));
 
         // Submenu? Pull child group recursively.
         if let Some(linked) = link_group(raw, ":submenu") {
@@ -754,15 +737,13 @@ fn build_tree(
         let (kind, enabled, checked) = match action_name.as_deref() {
             Some(name) => match actions.get(name) {
                 Some((enabled, _sig, state)) => {
-                    let checked_state = state
-                        .first()
-                        .and_then(|v| {
-                            let value: &Value = v;
-                            match value {
-                                Value::Bool(b) => Some(*b),
-                                _ => None,
-                            }
-                        });
+                    let checked_state = state.first().and_then(|v| {
+                        let value: &Value = v;
+                        match value {
+                            Value::Bool(b) => Some(*b),
+                            _ => None,
+                        }
+                    });
                     let kind = if checked_state.is_some() {
                         MenuItemKind::Checkbox
                     } else {
@@ -916,13 +897,7 @@ trait Dbusmenu {
     ) -> zbus::Result<(u32, OwnedValue)>;
 
     /// `event_id` is one of "clicked", "opened", "closed", "hovered".
-    fn event(
-        &self,
-        id: i32,
-        event_id: &str,
-        data: &Value<'_>,
-        timestamp: u32,
-    ) -> zbus::Result<()>;
+    fn event(&self, id: i32, event_id: &str, data: &Value<'_>, timestamp: u32) -> zbus::Result<()>;
 
     /// Tell the app a submenu is about to be shown so it can do lazy
     /// population. Returns true if the layout changed and we should
@@ -946,9 +921,7 @@ async fn run_dbusmenu_window_task(
     mut cmd_rx: mpsc::UnboundedReceiver<TrackerCommand>,
     update_tx: mpsc::UnboundedSender<TaggedDisplayUpdate>,
 ) {
-    debug!(
-        "dbusmenu task starting for {window_uuid} bus={bus_name} path={object_path}"
-    );
+    debug!("dbusmenu task starting for {window_uuid} bus={bus_name} path={object_path}");
     // Build a fresh dedicated connection per window. The shared
     // tracker connection serves the AppMenu Registrar interface;
     // mixing inbound dispatch and outbound method calls on the same
@@ -989,8 +962,7 @@ async fn run_dbusmenu_window_task(
         }
     };
 
-    if let Err(e) = fetch_and_publish_dbusmenu(&proxy, &window_uuid, &client_id, &update_tx).await
-    {
+    if let Err(e) = fetch_and_publish_dbusmenu(&proxy, &window_uuid, &client_id, &update_tx).await {
         warn!("Initial dbusmenu fetch for {window_uuid} failed: {e}");
     }
 
@@ -1005,13 +977,8 @@ async fn run_dbusmenu_window_task(
                     );
                 }
                 // Re-fetch in case the click toggled state.
-                let _ = fetch_and_publish_dbusmenu(
-                    &proxy,
-                    &window_uuid,
-                    &client_id,
-                    &update_tx,
-                )
-                .await;
+                let _ =
+                    fetch_and_publish_dbusmenu(&proxy, &window_uuid, &client_id, &update_tx).await;
             }
         }
     }
@@ -1076,11 +1043,8 @@ fn parse_dbusmenu_value(value: &OwnedValue) -> Option<DbusmenuNode> {
 }
 
 fn parse_dbusmenu_owned(value: OwnedValue) -> Option<DbusmenuNode> {
-    let (id, props, children_owned): (
-        i32,
-        HashMap<String, OwnedValue>,
-        Vec<OwnedValue>,
-    ) = value.try_into().ok()?;
+    let (id, props, children_owned): (i32, HashMap<String, OwnedValue>, Vec<OwnedValue>) =
+        value.try_into().ok()?;
     let children = children_owned
         .into_iter()
         .filter_map(parse_dbusmenu_owned)
@@ -1160,8 +1124,7 @@ fn build_dbusmenu_item(node: &DbusmenuNode) -> MenuItem {
     let item_type = dbus_prop_str(&node.properties, "type").unwrap_or_default();
     let toggle_type = dbus_prop_str(&node.properties, "toggle-type").unwrap_or_default();
     let toggle_state = dbus_prop_i32(&node.properties, "toggle-state");
-    let children_display =
-        dbus_prop_str(&node.properties, "children-display").unwrap_or_default();
+    let children_display = dbus_prop_str(&node.properties, "children-display").unwrap_or_default();
 
     let id = format!("dbm:{}", node.id);
 
@@ -1233,8 +1196,6 @@ async fn dispatch_dbusmenu_activation(
         .map(|d| d.as_millis() as u32)
         .unwrap_or(0);
     let dummy_data = Value::I32(0);
-    proxy
-        .event(id, "clicked", &dummy_data, timestamp)
-        .await?;
+    proxy.event(id, "clicked", &dummy_data, timestamp).await?;
     Ok(())
 }

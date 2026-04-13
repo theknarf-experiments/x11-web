@@ -3,8 +3,8 @@
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
-use crate::framebuffer::Framebuffer;
 use super::gc::GcState;
+use crate::framebuffer::Framebuffer;
 
 pub(crate) struct PixmapState {
     pub(crate) width: u16,

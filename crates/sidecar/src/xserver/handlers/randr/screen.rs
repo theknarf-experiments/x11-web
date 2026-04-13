@@ -40,12 +40,16 @@ pub(crate) fn handle_get_screen_info(state: &mut ClientState, _data: &[u8], seq:
 }
 
 /// RRGetScreenSizeRange (6).
-pub(crate) fn handle_get_screen_size_range(state: &mut ClientState, _data: &[u8], seq: u16) -> Vec<u8> {
+pub(crate) fn handle_get_screen_size_range(
+    state: &mut ClientState,
+    _data: &[u8],
+    seq: u16,
+) -> Vec<u8> {
     let mut reply = [0u8; 32];
     reply[0] = 1;
     state.write_u16(&mut reply, 2, seq);
-    state.write_u16(&mut reply, 8, 1);     // min_width
-    state.write_u16(&mut reply, 10, 1);    // min_height
+    state.write_u16(&mut reply, 8, 1); // min_width
+    state.write_u16(&mut reply, 10, 1); // min_height
     state.write_u16(&mut reply, 12, 32767); // max_width
     state.write_u16(&mut reply, 14, 32767); // max_height
     reply.to_vec()
@@ -57,7 +61,10 @@ pub(crate) fn handle_set_screen_size(state: &mut ClientState, data: &[u8], _seq:
         let new_w = state.read_u16(data, 4);
         let new_h = state.read_u16(data, 6);
         if new_w > 0 && new_h > 0 {
-            info!("RandR SetScreenSize: {}x{} -> {}x{}", state.screen_width, state.screen_height, new_w, new_h);
+            info!(
+                "RandR SetScreenSize: {}x{} -> {}x{}",
+                state.screen_width, state.screen_height, new_w, new_h
+            );
             state.screen_width = new_w;
             state.screen_height = new_h;
             state.randr_config_timestamp += 1;
@@ -149,12 +156,20 @@ pub(crate) fn build_screen_resources_reply(state: &ClientState, seq: u16) -> Vec
 /// monitors set via RRSetMonitor.
 pub(crate) fn build_get_monitors_reply(state: &ClientState, seq: u16) -> Vec<u8> {
     // Collect automatic monitors from active CRTCs.
-    let active_crtcs: Vec<_> = state.randr_crtcs.iter().filter(|c| c.mode_id != 0).collect();
+    let active_crtcs: Vec<_> = state
+        .randr_crtcs
+        .iter()
+        .filter(|c| c.mode_id != 0)
+        .collect();
     let n_auto = active_crtcs.len();
     let n_user = state.randr_monitors.len();
     let n_monitors = n_auto + n_user;
     let total_outputs: usize = active_crtcs.iter().map(|c| c.outputs.len()).sum::<usize>()
-        + state.randr_monitors.iter().map(|m| m.output_ids.len()).sum::<usize>();
+        + state
+            .randr_monitors
+            .iter()
+            .map(|m| m.output_ids.len())
+            .sum::<usize>();
 
     // MonitorInfo = 24 bytes + nOutput * 4
     let mut monitor_data_len = 0usize;
@@ -180,7 +195,11 @@ pub(crate) fn build_get_monitors_reply(state: &ClientState, seq: u16) -> Vec<u8>
 
     // Emit automatic monitors from CRTCs.
     for (i, crtc) in active_crtcs.iter().enumerate() {
-        let name_str = if i == 0 { "default".to_string() } else { format!("monitor-{}", i) };
+        let name_str = if i == 0 {
+            "default".to_string()
+        } else {
+            format!("monitor-{}", i)
+        };
         let monitor_name = state.intern_atom(&name_str, false);
 
         state.write_u32(&mut r, off, monitor_name);
