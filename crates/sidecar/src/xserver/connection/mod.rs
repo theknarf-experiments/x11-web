@@ -31,6 +31,23 @@ use super::setup::{build_setup, byteswap_setup_reply};
 use super::input::{build_x11_input_event, enforce_barriers};
 use super::{ancestor_chain, handle_request};
 
+/// Patch the sequence number (bytes 2-3) of every 32-byte event to match
+/// the client's current sequence.  X11 spec requires event sequence fields
+/// to reflect the "last request processed" at the time of delivery; stale
+/// values from other connections or earlier setup phases cause xcb to abort
+/// with "Unknown sequence number".
+fn patch_event_sequences(events: &mut [Vec<u8>], seq: u16, msb_first: bool) {
+    for ev in events.iter_mut() {
+        if ev.len() >= 4 {
+            if msb_first {
+                ev[2..4].copy_from_slice(&seq.to_be_bytes());
+            } else {
+                ev[2..4].copy_from_slice(&seq.to_le_bytes());
+            }
+        }
+    }
+}
+
 /// Safely detach a SHM segment, logging errors instead of ignoring them.
 fn safe_shmdt(addr: *mut u8) {
     if addr.is_null() {
@@ -420,40 +437,35 @@ pub(crate) async fn handle_client(
     // Per the XSETTINGS spec, clients discover the settings manager by
     // listening for this ClientMessage on the root window.
     {
+        let bo = state.msb_first;
         let timestamp = state.server_start.elapsed().as_millis() as u32;
-        let mut manager_event = vec![0u8; 32];
-        manager_event[0] = 33; // ClientMessage event code
-        manager_event[1] = 32; // format = 32
-        // sequence number (bytes 2-3) — use 0 for server-initiated events
-        manager_event[2..4].copy_from_slice(&0u16.to_le_bytes());
-        // window = root
-        manager_event[4..8].copy_from_slice(&ROOT_WINDOW.to_le_bytes());
-        // type = MANAGER atom (165)
-        manager_event[8..12].copy_from_slice(&165u32.to_le_bytes());
-        // data.l[0] = timestamp
-        manager_event[12..16].copy_from_slice(&timestamp.to_le_bytes());
-        // data.l[1] = _XSETTINGS_S0 atom (164)
-        manager_event[16..20].copy_from_slice(&164u32.to_le_bytes());
-        // data.l[2] = xsettings window id
-        manager_event[20..24].copy_from_slice(&XSETTINGS_WINDOW.to_le_bytes());
-        // data.l[3..4] = 0 (already zeroed)
-        state.pending_events.push(manager_event);
+        let mut ev = vec![0u8; 32];
+        ev[0] = 33; // ClientMessage event code
+        ev[1] = 32; // format = 32
+        write_u16_bo(&mut ev, 2, 0, bo); // sequence 0 for server-initiated
+        write_u32_bo(&mut ev, 4, ROOT_WINDOW, bo);
+        write_u32_bo(&mut ev, 8, 165, bo); // MANAGER atom
+        write_u32_bo(&mut ev, 12, timestamp, bo);
+        write_u32_bo(&mut ev, 16, 164, bo); // _XSETTINGS_S0
+        write_u32_bo(&mut ev, 20, XSETTINGS_WINDOW, bo);
+        state.pending_events.push(ev);
     }
 
     // Send MANAGER client message to announce the system tray manager.
     // Apps listen for this on the root to discover _NET_SYSTEM_TRAY_S0.
     {
+        let bo = state.msb_first;
         let timestamp = state.server_start.elapsed().as_millis() as u32;
-        let mut tray_event = vec![0u8; 32];
-        tray_event[0] = 33; // ClientMessage event code
-        tray_event[1] = 32; // format = 32
-        tray_event[2..4].copy_from_slice(&0u16.to_le_bytes());
-        tray_event[4..8].copy_from_slice(&ROOT_WINDOW.to_le_bytes());
-        tray_event[8..12].copy_from_slice(&165u32.to_le_bytes()); // MANAGER atom
-        tray_event[12..16].copy_from_slice(&timestamp.to_le_bytes());
-        tray_event[16..20].copy_from_slice(&186u32.to_le_bytes()); // _NET_SYSTEM_TRAY_S0
-        tray_event[20..24].copy_from_slice(&crate::xserver::types::SYSTEM_TRAY_WINDOW.to_le_bytes());
-        state.pending_events.push(tray_event);
+        let mut ev = vec![0u8; 32];
+        ev[0] = 33; // ClientMessage event code
+        ev[1] = 32; // format = 32
+        write_u16_bo(&mut ev, 2, 0, bo); // sequence 0 for server-initiated
+        write_u32_bo(&mut ev, 4, ROOT_WINDOW, bo);
+        write_u32_bo(&mut ev, 8, 165, bo); // MANAGER atom
+        write_u32_bo(&mut ev, 12, timestamp, bo);
+        write_u32_bo(&mut ev, 16, 186, bo); // _NET_SYSTEM_TRAY_S0
+        write_u32_bo(&mut ev, 20, crate::xserver::types::SYSTEM_TRAY_WINDOW, bo);
+        state.pending_events.push(ev);
     }
 
     let mut compose = crate::compose::ComposeState::new();
@@ -519,7 +531,8 @@ pub(crate) async fn handle_client(
                     // RECORD: notify any enabled contexts about the client disconnection
                     state.record_notify_client_died();
                     // Send any pending RECORD notifications before cleanup
-                    let died_events: Vec<Vec<u8>> = state.pending_events.drain(..).collect();
+                    let mut died_events: Vec<Vec<u8>> = state.pending_events.drain(..).collect();
+                    patch_event_sequences(&mut died_events, state.sequence, state.msb_first);
                     for event in died_events { let _ = stream.write_all(&event).await; }
 
                     // Handle SaveSet: reparent save_set windows per X11 spec.
@@ -967,8 +980,11 @@ pub(crate) async fn handle_client(
                 }
 
                 state.sync_windows();
-                // Pending events still need immediate delivery, with RECORD interception
-                let events: Vec<Vec<u8>> = state.pending_events.drain(..).collect();
+                // Pending events still need immediate delivery, with RECORD interception.
+                // Patch sequence numbers to the current value so xcb sees
+                // monotonically non-decreasing sequences.
+                let mut events: Vec<Vec<u8>> = state.pending_events.drain(..).collect();
+                patch_event_sequences(&mut events, state.sequence, state.msb_first);
                 let record_intercepts = state.record_intercept_events(&events);
                 for event in events { stream.write_all(&event).await?; }
                 for intercept in record_intercepts { stream.write_all(&intercept).await?; }
@@ -1086,8 +1102,10 @@ pub(crate) async fn handle_client(
                     state.pending_events.push(ev);
                 }
 
-                // RECORD: intercept events from frame tick
-                let events: Vec<Vec<u8>> = state.pending_events.drain(..).collect();
+                // RECORD: intercept events from frame tick.
+                // Patch sequence numbers to current value before delivery.
+                let mut events: Vec<Vec<u8>> = state.pending_events.drain(..).collect();
+                patch_event_sequences(&mut events, state.sequence, state.msb_first);
                 let record_intercepts = state.record_intercept_events(&events);
                 for event in events { stream.write_all(&event).await?; }
                 for intercept in record_intercepts { stream.write_all(&intercept).await?; }
@@ -1627,7 +1645,19 @@ pub(crate) async fn handle_client(
                     }
                 }
             }
-            Some(event_data) = wm_events_rx.recv() => {
+            Some(mut event_data) = wm_events_rx.recv() => {
+                // Patch the sequence number (bytes 2-3) to match THIS client's
+                // current sequence.  Cross-connection events arrive with the
+                // *sender's* sequence, which is meaningless to xcb on the
+                // receiving side and causes "Unknown sequence number" aborts.
+                if event_data.len() >= 4 {
+                    let seq = state.sequence;
+                    if state.msb_first {
+                        event_data[2..4].copy_from_slice(&seq.to_be_bytes());
+                    } else {
+                        event_data[2..4].copy_from_slice(&seq.to_le_bytes());
+                    }
+                }
                 // RECORD: intercept WM events
                 let record_intercepts = state.record_intercept_events(std::slice::from_ref(&event_data));
                 for intercept in record_intercepts { stream.write_all(&intercept).await?; }
