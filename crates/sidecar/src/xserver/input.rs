@@ -899,7 +899,7 @@ mod tests {
     fn test_window(id: u32, parent: u32, x: i16, y: i16, w: u16, h: u16, event_mask: u32) -> WindowState {
         WindowState {
             id, parent, x, y, width: w, height: h,
-            border_width: 0, visual: 0x21, class: 1, mapped: true,
+            border_width: 0, visual: 0x21, depth: 24, class: 1, mapped: true,
             event_mask,
             do_not_propagate_mask: 0,
             background_pixel: 0, background_pixmap: None,

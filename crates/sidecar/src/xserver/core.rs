@@ -16,6 +16,20 @@ pub(crate) const ROOT_COLORMAP: u32 = 0x00000020;
 pub(crate) const SCREEN_WIDTH: u16 = 1024;
 pub(crate) const SCREEN_HEIGHT: u16 = 768;
 
+/// Map a visual ID to its pixel depth, matching the visual table in setup.rs.
+/// Returns the root depth (24) for unknown visuals as a safe fallback.
+pub(crate) fn depth_for_visual(visual: u32) -> u8 {
+    match visual {
+        0x40 => 32,                     // TrueColor ARGB
+        0x21 | 0x22 => 24,             // TrueColor / DirectColor 24-bit
+        0x24 => 16,                     // TrueColor 16-bit
+        0x23 | 0x26 | 0x27 => 8,       // PseudoColor / GrayScale / StaticColor
+        0x25 => 4,                      // StaticGray 4-bit
+        0 => 0,                         // InputOnly windows
+        _ => 24,                        // default to root depth
+    }
+}
+
 // X11 event type codes
 pub(crate) const KEY_PRESS_EVENT: u8 = 2;
 pub(crate) const KEY_RELEASE_EVENT: u8 = 3;

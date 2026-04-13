@@ -30,7 +30,7 @@ pub(crate) fn handle_dbe_request(state: &mut ClientState, data: &[u8], seq: u16)
             if let Some(win) = state.windows.get(&window_id) {
                 let w = win.width;
                 let h = win.height;
-                let depth = if win.visual == 0x40 { 32 } else { 24 };
+                let depth = win.depth;
                 state.pixmaps.insert(back_buffer_id, super::super::types::PixmapState {
                     width: w,
                     height: h,

@@ -15,7 +15,7 @@ pub(crate) fn handle_get_geometry(state: &mut ClientState, data: &[u8], seq: u16
     if let Some(win) = state.windows.get(&drawable) {
         let mut reply = [0u8; 32];
         reply[0] = 1; // Reply
-        reply[1] = 24; // depth
+        reply[1] = win.depth;
         state.write_u16(&mut reply, 2, seq);
         state.write_u32(&mut reply, 8, state.root_window);
         state.write_i16(&mut reply, 12, win.x);
@@ -29,7 +29,7 @@ pub(crate) fn handle_get_geometry(state: &mut ClientState, data: &[u8], seq: u16
     if let Some(pixmap) = state.pixmaps.get(&drawable) {
         let mut reply = [0u8; 32];
         reply[0] = 1; // Reply
-        reply[1] = 24; // depth
+        reply[1] = pixmap.depth;
         state.write_u16(&mut reply, 2, seq);
         state.write_u32(&mut reply, 8, state.root_window);
         state.write_u16(&mut reply, 16, pixmap.width);

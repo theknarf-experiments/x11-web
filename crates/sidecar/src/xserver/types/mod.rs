@@ -689,7 +689,7 @@ mod tests {
             id,
             parent,
             x: 0, y: 0, width: 100, height: 100,
-            border_width: 0, visual: 0x21, class: 1,
+            border_width: 0, visual: 0x21, depth: 24, class: 1,
             mapped: false, event_mask: 0, do_not_propagate_mask: 0,
             background_pixel: 0, background_pixmap: None,
             border_pixel: 0, border_pixmap: None,

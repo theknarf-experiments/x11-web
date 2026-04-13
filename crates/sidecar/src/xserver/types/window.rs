@@ -95,6 +95,8 @@ pub(crate) struct WindowState {
     pub(crate) height: u16,
     pub(crate) border_width: u16,
     pub(crate) visual: u32,
+    /// Pixel depth derived from the visual (e.g. 24, 32, 16, 8, 4, 0 for InputOnly).
+    pub(crate) depth: u8,
     pub(crate) class: u16,
     pub(crate) mapped: bool,
     pub(crate) event_mask: u32,

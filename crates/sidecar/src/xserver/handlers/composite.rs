@@ -215,7 +215,7 @@ pub(crate) fn handle_x_composite_request(state: &mut ClientState, data: &[u8], s
             if let Some(win) = state.windows.get(&window) {
                 let w = win.width;
                 let h = win.height;
-                let depth = if win.visual == 0x40 { 32 } else { 24 };
+                let depth = win.depth;
                 let fb = win.framebuffer.clone();
                 state.pixmaps.insert(
                     pixmap,
@@ -253,6 +253,7 @@ pub(crate) fn handle_x_composite_request(state: &mut ClientState, data: &[u8], s
                     height: h,
                     border_width: 0,
                     visual: 0x40, // 32-bit ARGB visual for compositing
+                    depth: 32,
                     class: 1,    // InputOutput
                     mapped: true,
                     event_mask: 0,

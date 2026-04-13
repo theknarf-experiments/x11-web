@@ -125,6 +125,7 @@ pub(crate) fn handle_create_window(state: &mut ClientState, data: &[u8], _seq: u
     // InputOnly windows (class=2) must not have backgrounds, borders, or framebuffers.
     // They exist only to receive events. Per spec, depth must be 0 for InputOnly.
     let is_input_only = class == 2;
+    let use_depth = if is_input_only { 0 } else { crate::xserver::core::depth_for_visual(use_visual) };
     let fb = if is_input_only {
         Framebuffer::new(0, 0) // zero-size: no pixel storage
     } else {
@@ -142,6 +143,7 @@ pub(crate) fn handle_create_window(state: &mut ClientState, data: &[u8], _seq: u
             height,
             border_width: if is_input_only { 0 } else { border_width },
             visual: if is_input_only { 0 } else { use_visual },
+            depth: use_depth,
             class,
             mapped: false,
             event_mask,

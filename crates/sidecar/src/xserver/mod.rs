@@ -479,6 +479,7 @@ impl X11Server {
                     height: SCREEN_HEIGHT,
                     border_width: 0,
                     visual: ROOT_VISUAL,
+                    depth: 24,
                     class: 1,
                     mapped: true,
                     event_mask: 0,
@@ -529,6 +530,7 @@ impl X11Server {
                     height: 1,
                     border_width: 0,
                     visual: 0,
+                    depth: 0,
                     class: 2, // InputOnly
                     mapped: false,
                     event_mask: 0,
@@ -590,6 +592,7 @@ impl X11Server {
                     height: 1,
                     border_width: 0,
                     visual: 0,
+                    depth: 0,
                     class: 2, // InputOnly
                     mapped: false,
                     event_mask: 0,
@@ -696,6 +699,7 @@ impl X11Server {
                     height: 1,
                     border_width: 0,
                     visual: 0,
+                    depth: 0,
                     class: 2, // InputOnly
                     mapped: false,
                     event_mask: 0,
@@ -784,6 +788,7 @@ impl X11Server {
                     height: 1,
                     border_width: 0,
                     visual: 0,
+                    depth: 0,
                     class: 2, // InputOnly
                     mapped: false,
                     event_mask: 0,

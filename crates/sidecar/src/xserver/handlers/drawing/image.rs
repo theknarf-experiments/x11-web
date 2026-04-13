@@ -388,16 +388,12 @@ pub(crate) fn handle_get_image(state: &mut ClientState, data: &[u8], seq: u16) -
     // Sync SHM pixmaps before reading
     state.sync_shm_pixmap(drawable);
 
-    let depth: u8 = state
-        .pixmaps
-        .get(&drawable)
-        .map(|p| p.depth)
-        .unwrap_or(24);
-
-    let visual = if state.pixmaps.contains_key(&drawable) {
-        0u32
+    let (depth, visual): (u8, u32) = if let Some(p) = state.pixmaps.get(&drawable) {
+        (p.depth, 0u32)
+    } else if let Some(w) = state.windows.get(&drawable) {
+        (w.depth, w.visual)
     } else {
-        ROOT_VISUAL
+        (24, ROOT_VISUAL)
     };
 
     // Per X11 spec, GetImage on a window returns the screen contents at
