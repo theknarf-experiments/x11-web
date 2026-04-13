@@ -518,6 +518,9 @@ impl X11Server {
                     sync_request_value: 0,
                     window_type: WindowType::Normal,
                     strut: None,
+                    wm_hints_input: None,
+                    wm_hints_window_group: None,
+                    modal: false,
                 },
             );
 
@@ -569,6 +572,9 @@ impl X11Server {
                     sync_request_value: 0,
                     window_type: WindowType::Normal,
                     strut: None,
+                    wm_hints_input: None,
+                    wm_hints_window_group: None,
+                    modal: false,
                 },
             );
 
@@ -631,6 +637,9 @@ impl X11Server {
                     sync_request_value: 0,
                     window_type: WindowType::Normal,
                     strut: None,
+                    wm_hints_input: None,
+                    wm_hints_window_group: None,
+                    modal: false,
                 },
             );
 
@@ -738,6 +747,9 @@ impl X11Server {
                     sync_request_value: 0,
                     window_type: WindowType::Normal,
                     strut: None,
+                    wm_hints_input: None,
+                    wm_hints_window_group: None,
+                    modal: false,
                 },
             );
             if let Some(root) = windows.get_mut(&ROOT_WINDOW) {
@@ -827,6 +839,9 @@ impl X11Server {
                     sync_request_value: 0,
                     window_type: WindowType::Normal,
                     strut: None,
+                    wm_hints_input: None,
+                    wm_hints_window_group: None,
+                    modal: false,
                 },
             );
 

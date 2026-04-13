@@ -254,6 +254,38 @@ pub(crate) fn propagate_keyboard_event(
     focus_window
 }
 
+/// Check if a window is blocked by a modal child.
+/// A window is blocked if any mapped window has transient_for pointing to it
+/// (or one of its ancestors) and has modal=true.
+fn is_blocked_by_modal(windows: &HashMap<u32, WindowState>, target: u32) -> bool {
+    // Walk target and its ancestors to collect the set of windows that could be blocked.
+    let mut blocked_set = Vec::new();
+    let mut cur = target;
+    for _ in 0..64 {
+        blocked_set.push(cur);
+        if let Some(w) = windows.get(&cur) {
+            if w.parent == 0 || w.parent == cur {
+                break;
+            }
+            cur = w.parent;
+        } else {
+            break;
+        }
+    }
+
+    // Check if any window is modal and transient-for one of the blocked windows.
+    for w in windows.values() {
+        if w.modal && w.mapped {
+            if let Some(tf) = w.transient_for {
+                if blocked_set.contains(&tf) && w.id != target {
+                    return true;
+                }
+            }
+        }
+    }
+    false
+}
+
 pub(crate) fn build_crossing_events(state: &mut ClientState, new_window: u32, x: i16, y: i16, event_x: i16, event_y: i16) -> Vec<u8> {
     build_crossing_events_with_mode(state, new_window, x, y, event_x, event_y, CROSSING_MODE_NORMAL)
 }
@@ -677,6 +709,19 @@ pub(crate) fn build_x11_input_event(state: &mut ClientState, input: &InputEvent,
         return Vec::new();
     }
 
+    // Modal dialog blocking (EWMH _NET_WM_STATE_MODAL):
+    // If the event target has a modal child window (transient_for pointing to it
+    // and modal=true), block pointer/keyboard events to the parent. This prevents
+    // interaction with windows behind modal dialogs per EWMH spec.
+    if matches!(input,
+        InputEvent::ButtonPress { .. } | InputEvent::ButtonRelease { .. }
+        | InputEvent::KeyPress { .. } | InputEvent::KeyRelease { .. }
+    ) {
+        if is_blocked_by_modal(&state.windows, event_window) {
+            return Vec::new();
+        }
+    }
+
     // Generate crossing events for pointer movement between windows
     let mut crossing_events = Vec::new();
     if let InputEvent::MotionNotify { x, y, .. } = input {
@@ -961,6 +1006,9 @@ mod tests {
             transient_for: None, sync_request_counter: None, sync_request_value: 0,
             window_type: crate::xserver::types::WindowType::Normal,
             strut: None,
+            wm_hints_input: None,
+            wm_hints_window_group: None,
+            modal: false,
         }
     }
 
@@ -1344,5 +1392,115 @@ mod tests {
         // Click should fall through to root
         let (target, _, _) = find_event_subwindow(&windows, root, 50, 50, BUTTON_PRESS_MASK);
         assert_eq!(target, root);
+    }
+
+    // -----------------------------------------------------------------------
+    // Modal dialog blocking tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn modal_child_blocks_parent_input() {
+        let mut windows = HashMap::new();
+        let root = 0x62;
+        let mut root_win = test_window(root, 0, 0, 0, 1024, 768, 0);
+        root_win.children_order = vec![10, 20];
+        windows.insert(root, root_win);
+
+        // Parent window
+        windows.insert(10, test_window(10, root, 0, 0, 400, 400, BUTTON_PRESS_MASK));
+
+        // Modal child window (transient_for=10, modal=true)
+        let mut modal_win = test_window(20, root, 100, 100, 200, 200, BUTTON_PRESS_MASK);
+        modal_win.transient_for = Some(10);
+        modal_win.modal = true;
+        windows.insert(20, modal_win);
+
+        // Parent (10) should be blocked by modal child (20)
+        assert!(is_blocked_by_modal(&windows, 10));
+
+        // Modal window itself should NOT be blocked
+        assert!(!is_blocked_by_modal(&windows, 20));
+
+        // Root should NOT be blocked (modal is transient for 10, not root)
+        assert!(!is_blocked_by_modal(&windows, root));
+    }
+
+    #[test]
+    fn non_modal_transient_does_not_block() {
+        let mut windows = HashMap::new();
+        let root = 0x62;
+        let mut root_win = test_window(root, 0, 0, 0, 1024, 768, 0);
+        root_win.children_order = vec![10, 20];
+        windows.insert(root, root_win);
+
+        windows.insert(10, test_window(10, root, 0, 0, 400, 400, BUTTON_PRESS_MASK));
+
+        // Non-modal transient child
+        let mut child = test_window(20, root, 100, 100, 200, 200, BUTTON_PRESS_MASK);
+        child.transient_for = Some(10);
+        child.modal = false;
+        windows.insert(20, child);
+
+        // Parent should NOT be blocked (child is not modal)
+        assert!(!is_blocked_by_modal(&windows, 10));
+    }
+
+    #[test]
+    fn unmapped_modal_does_not_block() {
+        let mut windows = HashMap::new();
+        let root = 0x62;
+        let mut root_win = test_window(root, 0, 0, 0, 1024, 768, 0);
+        root_win.children_order = vec![10, 20];
+        windows.insert(root, root_win);
+
+        windows.insert(10, test_window(10, root, 0, 0, 400, 400, BUTTON_PRESS_MASK));
+
+        // Modal but unmapped child should not block
+        let mut modal_win = test_window(20, root, 100, 100, 200, 200, BUTTON_PRESS_MASK);
+        modal_win.transient_for = Some(10);
+        modal_win.modal = true;
+        modal_win.mapped = false;
+        windows.insert(20, modal_win);
+
+        assert!(!is_blocked_by_modal(&windows, 10));
+    }
+
+    #[test]
+    fn modal_blocks_ancestor_of_transient_parent() {
+        let mut windows = HashMap::new();
+        let root = 0x62;
+        let mut root_win = test_window(root, 0, 0, 0, 1024, 768, 0);
+        root_win.children_order = vec![10];
+        windows.insert(root, root_win);
+
+        // Parent with child
+        let mut parent = test_window(10, root, 0, 0, 400, 400, BUTTON_PRESS_MASK);
+        parent.children_order = vec![30];
+        windows.insert(10, parent);
+
+        // Subwindow of parent
+        windows.insert(30, test_window(30, 10, 0, 0, 100, 100, BUTTON_PRESS_MASK));
+
+        // Modal dialog transient for parent (10)
+        let mut modal_win = test_window(20, root, 100, 100, 200, 200, BUTTON_PRESS_MASK);
+        modal_win.transient_for = Some(10);
+        modal_win.modal = true;
+        windows.insert(20, modal_win);
+
+        // Subwindow (30) is a child of parent (10), so it should be blocked
+        // because the modal blocks the ancestor (10) in the chain
+        assert!(is_blocked_by_modal(&windows, 30));
+    }
+
+    // -----------------------------------------------------------------------
+    // WM_HINTS field tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn wm_hints_input_field_defaults_to_none() {
+        let w = test_window(1, 0, 0, 0, 100, 100, 0);
+        assert_eq!(w.wm_hints_input, None);
+        assert_eq!(w.wm_hints_window_group, None);
+        assert!(!w.modal);
     }
 }

@@ -708,6 +708,9 @@ mod tests {
             sync_request_value: 0,
             window_type: super::WindowType::Normal,
             strut: None,
+            wm_hints_input: None,
+            wm_hints_window_group: None,
+            modal: false,
         }
     }
 
@@ -963,5 +966,42 @@ mod tests {
         assert_eq!(ext.y, 0);
         assert_eq!(ext.width, 80);
         assert_eq!(ext.height, 80);
+    }
+
+    // -----------------------------------------------------------------------
+    // WindowState new field defaults
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn window_state_wm_hints_defaults() {
+        let w = make_test_window(42, 1);
+        assert_eq!(w.wm_hints_input, None);
+        assert_eq!(w.wm_hints_window_group, None);
+        assert!(!w.modal);
+    }
+
+    #[test]
+    fn window_state_modal_can_be_set() {
+        let mut w = make_test_window(42, 1);
+        w.modal = true;
+        w.transient_for = Some(10);
+        assert!(w.modal);
+        assert_eq!(w.transient_for, Some(10));
+    }
+
+    #[test]
+    fn window_state_wm_hints_input_can_be_set() {
+        let mut w = make_test_window(42, 1);
+        w.wm_hints_input = Some(false);
+        assert_eq!(w.wm_hints_input, Some(false));
+        w.wm_hints_input = Some(true);
+        assert_eq!(w.wm_hints_input, Some(true));
+    }
+
+    #[test]
+    fn window_state_window_group_can_be_set() {
+        let mut w = make_test_window(42, 1);
+        w.wm_hints_window_group = Some(100);
+        assert_eq!(w.wm_hints_window_group, Some(100));
     }
 }

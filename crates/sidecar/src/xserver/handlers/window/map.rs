@@ -364,9 +364,17 @@ pub(crate) fn handle_map_window(state: &mut ClientState, data: &[u8], seq: u16) 
     // Update _NET_CLIENT_LIST on root
     state.update_net_client_list();
 
-    // Send WM_TAKE_FOCUS to the newly mapped window (ICCCM)
-    // and _NET_WM_PING to begin monitoring responsiveness (EWMH)
+    // ICCCM focus model: respect WM_HINTS input field (§4.1.7).
+    // Passive / Locally Active: input=true → call SetInputFocus
+    // Globally Active: input=false, supports WM_TAKE_FOCUS → only send WM_TAKE_FOCUS
+    // No Input: input=false, no WM_TAKE_FOCUS → don't focus at all
     if is_top_level_for_ewmh {
+        let accepts_input = state.windows.get(&wid)
+            .and_then(|w| w.wm_hints_input)
+            .unwrap_or(true); // ICCCM default: accepts focus if not specified
+        if accepts_input {
+            state.set_focus_window(wid);
+        }
         state.send_wm_take_focus(wid);
         state.send_wm_ping(wid);
     }

@@ -200,6 +200,9 @@ pub(crate) fn handle_create_window(state: &mut ClientState, data: &[u8], _seq: u
             sync_request_value: 0,
             window_type: WindowType::Normal,
             strut: None,
+            wm_hints_input: None,
+            wm_hints_window_group: None,
+            modal: false,
         },
     );
 

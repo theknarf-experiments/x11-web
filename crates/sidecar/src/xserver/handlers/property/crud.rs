@@ -336,11 +336,30 @@ pub(crate) fn handle_change_property(state: &mut ClientState, data: &[u8]) -> Ve
                 }
             }
 
+            // Bit 0 = InputHint — whether the window accepts keyboard focus (ICCCM §4.1.2.4).
+            // WM_HINTS layout: flags(4), input(4), initial_state(4), icon_pixmap(4), ...
+            if flags & (1 << 0) != 0 && hint_data.len() >= 8 {
+                let input_val = state.read_u32_from(hint_data, 4);
+                if let Some(win) = state.windows.get_mut(&window) {
+                    win.wm_hints_input = Some(input_val != 0);
+                }
+            }
+
             // Store initial_state for MapWindow to check later
             if flags & (1 << 1) != 0 && hint_data.len() >= 12 {
                 let initial_state = state.read_u32_from(hint_data, 8);
                 if let Some(win) = state.windows.get_mut(&window) {
                     win.wm_hints_initial_state = Some(initial_state);
+                }
+            }
+
+            // Bit 6 = WindowGroupHint — window_group leader (ICCCM §4.1.2.6).
+            // WM_HINTS layout: flags(0), input(4), initial_state(8), icon_pixmap(12),
+            //   icon_window(16), icon_x(20), icon_y(24), icon_mask(28), window_group(32)
+            if flags & (1 << 6) != 0 && hint_data.len() >= 36 {
+                let group_leader = state.read_u32_from(hint_data, 32);
+                if let Some(win) = state.windows.get_mut(&window) {
+                    win.wm_hints_window_group = if group_leader != 0 { Some(group_leader) } else { None };
                 }
             }
         }

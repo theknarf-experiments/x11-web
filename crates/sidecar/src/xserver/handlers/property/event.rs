@@ -184,6 +184,13 @@ pub(crate) fn handle_send_event(state: &mut ClientState, data: &[u8]) -> Vec<u8>
                     ));
 
                     // MODAL: raise window above its transient-for parent (EWMH §_NET_WM_STATE_MODAL)
+                    // Also update the modal flag on WindowState for input blocking.
+                    {
+                        let is_modal = current_atoms.contains(&modal_atom);
+                        if let Some(win) = state.windows.get_mut(&source_window) {
+                            win.modal = is_modal;
+                        }
+                    }
                     if current_atoms.contains(&modal_atom) || current_atoms.contains(&above_atom) {
                         // Raise this window to the top of the stack
                         if let Some(children) = state.windows.get(&state.root_window)
@@ -253,13 +260,41 @@ pub(crate) fn handle_send_event(state: &mut ClientState, data: &[u8]) -> Vec<u8>
             if msg_type == net_request_frame_atom {
                 let source_window = state.read_u32(&event, 4);
                 let atom_frame = state.intern_atom("_NET_FRAME_EXTENTS", false);
+                // Compute frame extents from border_width. The frontend renders
+                // decorations (title bar etc.) but the X11 border_width is part of
+                // the protocol-visible frame.
+                let bw = state.windows.get(&source_window)
+                    .map(|w| w.border_width as u32)
+                    .unwrap_or(0);
                 if let Some(win) = state.windows.get_mut(&source_window) {
-                    // Set frame extents to 0 (server-side decoration handled by frontend)
+                    // _NET_FRAME_EXTENTS: left, right, top, bottom (CARD32 each, stored LE)
+                    let mut data = Vec::with_capacity(16);
+                    data.extend_from_slice(&bw.to_le_bytes()); // left
+                    data.extend_from_slice(&bw.to_le_bytes()); // right
+                    data.extend_from_slice(&bw.to_le_bytes()); // top
+                    data.extend_from_slice(&bw.to_le_bytes()); // bottom
                     win.properties.insert(atom_frame, PropertyValue {
                         prop_type: 6, // CARDINAL
                         format: 32,
-                        data: vec![0; 16],
+                        data,
                     });
+                }
+                // Generate PropertyNotify for the frame extents change
+                {
+                    let property_change_mask: u32 = 0x0040_0000;
+                    let mut pn_event = [0u8; 32];
+                    pn_event[0] = PROPERTY_NOTIFY_EVENT;
+                    state.write_u16(&mut pn_event, 2, state.sequence);
+                    state.write_u32(&mut pn_event, 4, source_window);
+                    state.write_u32(&mut pn_event, 8, atom_frame);
+                    state.write_u32(&mut pn_event, 12, state.timestamp());
+                    pn_event[16] = 0; // NewValue
+                    if let Some(win) = state.windows.get(&source_window) {
+                        if win.event_mask & property_change_mask != 0 {
+                            state.pending_events.push(pn_event.to_vec());
+                        }
+                    }
+                    state.broadcast_event(source_window, property_change_mask, &pn_event);
                 }
                 return Vec::new();
             }
@@ -268,7 +303,13 @@ pub(crate) fn handle_send_event(state: &mut ClientState, data: &[u8]) -> Vec<u8>
             let net_active_atom = state.intern_atom("_NET_ACTIVE_WINDOW", false);
             if msg_type == net_active_atom {
                 let source_window = state.read_u32(&event, 4);
-                state.set_focus_window(source_window);
+                // Respect ICCCM input focus model (WM_HINTS input field)
+                let accepts_input = state.windows.get(&source_window)
+                    .and_then(|w| w.wm_hints_input)
+                    .unwrap_or(true);
+                if accepts_input {
+                    state.set_focus_window(source_window);
+                }
                 // Send WM_TAKE_FOCUS if the target supports it
                 state.send_wm_take_focus(source_window);
                 return Vec::new();

@@ -153,6 +153,14 @@ pub(crate) struct WindowState {
     pub(crate) window_type: WindowType,
     /// _NET_WM_STRUT reserved space: (left, right, top, bottom).
     pub(crate) strut: Option<[u32; 4]>,
+    /// WM_HINTS input field (ICCCM §4.1.2.4): whether the window accepts focus.
+    /// None = not set (defaults to true per ICCCM), Some(true) = accepts input,
+    /// Some(false) = does not accept input (Globally Active or No Input model).
+    pub(crate) wm_hints_input: Option<bool>,
+    /// WM_HINTS window_group (ICCCM §4.1.2.6): leader window for this group.
+    pub(crate) wm_hints_window_group: Option<u32>,
+    /// Whether _NET_WM_STATE_MODAL is currently set on this window.
+    pub(crate) modal: bool,
 }
 
 impl WindowState {
