@@ -463,6 +463,17 @@ pub(crate) fn handle_get_image(state: &mut ClientState, data: &[u8], seq: u16) -
                             let val = ((r >> 3) << 11) | ((g >> 2) << 5) | (b >> 3);
                             let masked = val & (plane_mask as u16);
                             out[dst_off..dst_off + 2].copy_from_slice(&masked.to_le_bytes());
+                        } else if depth <= 1 {
+                            // For depth-1 bitmaps, pixel data is in the RGB channels:
+                            // non-zero RGB = foreground (1), zero RGB = background (0).
+                            let is_set = pixels[src_off] != 0
+                                || pixels[src_off + 1] != 0
+                                || pixels[src_off + 2] != 0;
+                            out[dst_off] = if is_set { 1 & (plane_mask as u8) } else { 0 };
+                        } else if depth <= 4 {
+                            // For depth-4, extract a 4-bit pixel from RGB channels
+                            let r = pixels[src_off + 2] as u8;
+                            out[dst_off] = (r >> 4) & (plane_mask as u8);
                         } else {
                             // For depth 8 colormapped visuals, the original
                             // palette index is stored in the A channel (offset +3).
