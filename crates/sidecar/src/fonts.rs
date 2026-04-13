@@ -1836,4 +1836,184 @@ mod tests {
         let result = fm.list_fonts("nonexistent-font-xyz", 10);
         assert!(result.is_empty());
     }
+
+    // -----------------------------------------------------------------------
+    // XLFD glob pattern edge cases
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn glob_match_empty_pattern_matches_nothing() {
+        // An empty pattern should NOT match anything (empty != wildcard)
+        assert!(!glob_match("", "hello"));
+    }
+
+    #[test]
+    fn glob_match_empty_both() {
+        assert!(glob_match("", ""));
+    }
+
+    #[test]
+    fn glob_match_star_matches_empty() {
+        assert!(glob_match("*", ""));
+    }
+
+    #[test]
+    fn glob_match_question_requires_char() {
+        assert!(!glob_match("?", ""));
+        assert!(glob_match("?", "a"));
+    }
+
+    #[test]
+    fn glob_match_multiple_stars() {
+        assert!(glob_match("**", "anything"));
+        assert!(glob_match("a*b*c", "axbxc"));
+        assert!(glob_match("a*b*c", "abc"));
+        assert!(!glob_match("a*b*c", "axc"));
+    }
+
+    #[test]
+    fn glob_match_mixed_star_question() {
+        assert!(glob_match("a?c*", "abcdef"));
+        assert!(!glob_match("a?c*", "adef"));
+    }
+
+    #[test]
+    fn glob_match_xlfd_full_wildcard() {
+        let font = "-misc-fixed-medium-r-semicondensed--13-120-75-75-c-60-iso8859-1";
+        assert!(glob_match("-*-*-*-*-*-*-*-*-*-*-*-*-*-*", font));
+    }
+
+    #[test]
+    fn glob_match_xlfd_partial_fields() {
+        let font = "-misc-fixed-medium-r-semicondensed--13-120-75-75-c-60-iso8859-1";
+        // Match by foundry and family
+        assert!(glob_match("-misc-fixed-*", font));
+        // Match by encoding
+        assert!(glob_match("*iso8859-1", font));
+        // Match by pixel size
+        assert!(glob_match("*--13-*", font));
+    }
+
+    #[test]
+    fn glob_match_case_sensitive() {
+        // glob_match is case-sensitive; callers must lowercase
+        assert!(!glob_match("HELLO", "hello"));
+        assert!(glob_match("hello", "hello"));
+    }
+
+    // -----------------------------------------------------------------------
+    // Font manager: open_font edge cases
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn open_font_succeeds_when_fonts_available() {
+        let mut fm = FontManager::new();
+        // If any fonts are loaded, "fixed" should succeed
+        if !fm.fonts.is_empty() {
+            let ok = fm.open_font(1, "fixed");
+            assert!(ok);
+        }
+    }
+
+    #[test]
+    fn open_font_with_xlfd_pattern_if_available() {
+        let mut fm = FontManager::new();
+        if !fm.fonts.is_empty() {
+            let ok = fm.open_font(3, "-*-*-*-*-*-*-*-*-*-*-*-*-*-*");
+            assert!(ok);
+        }
+    }
+
+    #[test]
+    fn close_font_removes_id() {
+        let mut fm = FontManager::new();
+        if fm.open_font(10, "fixed") {
+            assert!(fm.get_font(10).is_some());
+            fm.close_font(10);
+            assert!(fm.get_font(10).is_none());
+        }
+    }
+
+    #[test]
+    fn open_and_close_font_id_lifecycle() {
+        let mut fm = FontManager::new();
+        // Opening a font twice with same ID should work (last wins)
+        if fm.open_font(100, "fixed") {
+            assert!(fm.get_font(100).is_some());
+            fm.close_font(100);
+            assert!(fm.get_font(100).is_none());
+            // Closing again should be harmless
+            fm.close_font(100);
+            assert!(fm.get_font(100).is_none());
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // BitmapFont: char_info edge cases
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn char_info_out_of_range_uses_default() {
+        let font = BitmapFont {
+            name: "test".to_string(),
+            min_bounds: CharInfo { character_width: 6, ..Default::default() },
+            max_bounds: CharInfo { character_width: 6, ..Default::default() },
+            min_char: 32,
+            max_char: 126,
+            default_char: 32,
+            font_ascent: 10,
+            font_descent: 3,
+            char_infos: vec![CharInfo { character_width: 6, ..Default::default() }; 95],
+            glyphs: Vec::new(),
+            scalable_path: None,
+            scalable_pixel_size: 13,
+        };
+        // Code 200 is out of range — should fall back to default_char
+        let ci = font.char_info(200);
+        assert_eq!(ci.character_width, 6);
+    }
+
+    #[test]
+    fn char_info_at_boundaries() {
+        let font = BitmapFont {
+            name: "test".to_string(),
+            min_bounds: CharInfo { character_width: 5, ..Default::default() },
+            max_bounds: CharInfo { character_width: 8, ..Default::default() },
+            min_char: 32,
+            max_char: 126,
+            default_char: 32,
+            font_ascent: 10,
+            font_descent: 3,
+            char_infos: {
+                let mut v = vec![CharInfo { character_width: 6, ..Default::default() }; 95];
+                v[0].character_width = 5;  // char 32 (space)
+                v[94].character_width = 8; // char 126 (~)
+                v
+            },
+            glyphs: Vec::new(),
+            scalable_path: None,
+            scalable_pixel_size: 13,
+        };
+        assert_eq!(font.char_info(32).character_width, 5);
+        assert_eq!(font.char_info(126).character_width, 8);
+        assert_eq!(font.char_info(80).character_width, 6);
+    }
+
+    // -----------------------------------------------------------------------
+    // list_fonts: max_names boundary
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn list_fonts_max_names_zero() {
+        let fm = FontManager::new();
+        let result = fm.list_fonts("*", 0);
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn list_fonts_max_names_one() {
+        let fm = FontManager::new();
+        let result = fm.list_fonts("*", 1);
+        assert!(result.len() <= 1);
+    }
 }

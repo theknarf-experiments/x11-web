@@ -1386,5 +1386,283 @@ mod tests {
             assert!(fb >= 0 && fb <= 255, "op {op}: Fb={fb} out of range");
         }
     }
+
+    // -----------------------------------------------------------------------
+    // RENDER compositing edge cases (spec compliance)
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn pict_op_clear_zeroes_everything() {
+        // PictOpClear: Fa=0, Fb=0 — result always 0
+        let (fa, fb) = super::pict_op_factors(0, 255, 255);
+        assert_eq!(fa, 0);
+        assert_eq!(fb, 0);
+    }
+
+    #[test]
+    fn pict_op_src_ignores_dst() {
+        // PictOpSrc: Fa=1, Fb=0 — result = src regardless of dst
+        let (fa, fb) = super::pict_op_factors(1, 128, 200);
+        assert_eq!(fa, 255);
+        assert_eq!(fb, 0);
+    }
+
+    #[test]
+    fn pict_op_dst_ignores_src() {
+        // PictOpDst: Fa=0, Fb=1 — result = dst regardless of src
+        let (fa, fb) = super::pict_op_factors(2, 128, 200);
+        assert_eq!(fa, 0);
+        assert_eq!(fb, 255);
+    }
+
+    #[test]
+    fn pict_op_over_semi_transparent() {
+        // PictOpOver: Fa=1, Fb=1-Sa
+        let (fa, fb) = super::pict_op_factors(3, 128, 200);
+        assert_eq!(fa, 255);
+        assert_eq!(fb, 255 - 128); // 127
+    }
+
+    #[test]
+    fn pict_op_over_fully_opaque() {
+        // Fully opaque src: Over becomes Src (Fb=0)
+        let (fa, fb) = super::pict_op_factors(3, 255, 200);
+        assert_eq!(fa, 255);
+        assert_eq!(fb, 0);
+    }
+
+    #[test]
+    fn pict_op_over_fully_transparent() {
+        // Fully transparent src: Over becomes Dst (Fa still 255, Fb=255)
+        let (fa, fb) = super::pict_op_factors(3, 0, 200);
+        assert_eq!(fa, 255);
+        assert_eq!(fb, 255);
+    }
+
+    #[test]
+    fn pict_op_in_uses_dst_alpha() {
+        // PictOpIn: Fa=Da, Fb=0
+        let (fa, fb) = super::pict_op_factors(5, 128, 200);
+        assert_eq!(fa, 200);
+        assert_eq!(fb, 0);
+    }
+
+    #[test]
+    fn pict_op_out_uses_inv_dst_alpha() {
+        // PictOpOut: Fa=1-Da, Fb=0
+        let (fa, fb) = super::pict_op_factors(7, 128, 200);
+        assert_eq!(fa, 255 - 200); // 55
+        assert_eq!(fb, 0);
+    }
+
+    #[test]
+    fn pict_op_atop_uses_da_and_inv_sa() {
+        // PictOpAtop: Fa=Da, Fb=1-Sa
+        let (fa, fb) = super::pict_op_factors(9, 100, 150);
+        assert_eq!(fa, 150);
+        assert_eq!(fb, 255 - 100); // 155
+    }
+
+    #[test]
+    fn pict_op_xor_uses_inv_both() {
+        // PictOpXor: Fa=1-Da, Fb=1-Sa
+        let (fa, fb) = super::pict_op_factors(11, 100, 150);
+        assert_eq!(fa, 255 - 150); // 105
+        assert_eq!(fb, 255 - 100); // 155
+    }
+
+    #[test]
+    fn pict_op_add_both_full() {
+        // PictOpAdd: Fa=1, Fb=1
+        let (fa, fb) = super::pict_op_factors(12, 128, 128);
+        assert_eq!(fa, 255);
+        assert_eq!(fb, 255);
+    }
+
+    #[test]
+    fn composite_pixel_over_blends_correctly() {
+        // Over with 50% alpha green src onto opaque blue dst
+        let mut dst = [255u8, 0, 0, 255]; // BGRA: blue, opaque
+        composite_pixel(
+            3, // PictOpOver
+            &mut dst,
+            0, 255, 0, 128, // src: B=0, G=255, R=0, A=128
+            true,
+        );
+        // sa=128, da=255, fs=255, fd=255-128=127
+        // B: blend_chan(0, 255, 255, 127) = (0 + 255*127 + 127)/255 = 127
+        // G: blend_chan(255, 0, 255, 127) = (255*255 + 0 + 127)/255 = 255
+        // R: blend_chan(0, 0, 255, 127) = (0 + 0 + 127)/255 = 0
+        assert_eq!(dst[1], 255); // G: fully green
+        assert_eq!(dst[0], 127); // B: attenuated blue
+        assert_eq!(dst[2], 0);   // R: none
+    }
+
+    #[test]
+    fn composite_pixel_src_replaces_completely() {
+        let mut dst = [255u8, 0, 0, 255]; // blue
+        composite_pixel(1, &mut dst, 0, 255, 0, 128, true); // PictOpSrc: green
+        assert_eq!(dst, [0, 255, 0, 128]);
+    }
+
+    #[test]
+    fn composite_pixel_dst_preserves_completely() {
+        let mut dst = [255u8, 0, 0, 255]; // blue
+        composite_pixel(2, &mut dst, 0, 255, 0, 128, true); // PictOpDst
+        assert_eq!(dst, [255, 0, 0, 255]); // unchanged
+    }
+
+    #[test]
+    fn composite_pixel_clear_zeroes_all() {
+        let mut dst = [255u8, 128, 64, 200];
+        composite_pixel(0, &mut dst, 100, 100, 100, 100, true); // PictOpClear
+        assert_eq!(dst, [0, 0, 0, 0]);
+    }
+
+    // -----------------------------------------------------------------------
+    // decode_pixel_bgra format handling
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn decode_pixel_argb32() {
+        let bytes = [10u8, 20, 30, 200]; // BGRA
+        let (b, g, r, a) = decode_pixel_bgra(PICTFORMAT_ARGB32, &bytes);
+        assert_eq!((b, g, r, a), (10, 20, 30, 200));
+    }
+
+    #[test]
+    fn decode_pixel_xrgb32_forces_opaque() {
+        let bytes = [10u8, 20, 30, 0]; // BGRX with X=0
+        let (b, g, r, a) = decode_pixel_bgra(PICTFORMAT_XRGB32, &bytes);
+        assert_eq!((b, g, r, a), (10, 20, 30, 255)); // alpha forced to 255
+    }
+
+    #[test]
+    fn decode_pixel_xbgr32_swaps_rb() {
+        let bytes = [10u8, 20, 30, 0]; // stored as [R, G, B, X]
+        let (b, g, r, a) = decode_pixel_bgra(PICTFORMAT_XBGR32, &bytes);
+        assert_eq!((b, g, r, a), (30, 20, 10, 255)); // R/B swapped, alpha forced
+    }
+
+    #[test]
+    fn decode_pixel_a8_only_alpha() {
+        let bytes = [0u8, 0, 0, 180];
+        let (b, g, r, a) = decode_pixel_bgra(PICTFORMAT_A8, &bytes);
+        assert_eq!((b, g, r, a), (0, 0, 0, 180)); // only alpha
+    }
+
+    #[test]
+    fn decode_pixel_short_buffer() {
+        let bytes = [10u8, 20]; // too short
+        let (b, g, r, a) = decode_pixel_bgra(PICTFORMAT_ARGB32, &bytes);
+        assert_eq!((b, g, r, a), (0, 0, 0, 0));
+    }
+
+    // -----------------------------------------------------------------------
+    // pict_format_has_alpha
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn pict_format_alpha_detection() {
+        assert!(pict_format_has_alpha(PICTFORMAT_ARGB32));
+        assert!(pict_format_has_alpha(PICTFORMAT_A8));
+        assert!(pict_format_has_alpha(PICTFORMAT_A1));
+        assert!(!pict_format_has_alpha(PICTFORMAT_RGB24));
+        assert!(!pict_format_has_alpha(PICTFORMAT_XRGB32));
+        assert!(!pict_format_has_alpha(PICTFORMAT_XBGR32));
+    }
+
+    // -----------------------------------------------------------------------
+    // zero_src_has_no_effect — identify destructive operators
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn zero_src_effect_for_standard_ops() {
+        // Destructive: Clear(0), Src(1), In(5), InReverse(6), Out(7), AtopReverse(10)
+        assert!(!zero_src_has_no_effect(0)); // Clear
+        assert!(!zero_src_has_no_effect(1)); // Src
+        assert!(!zero_src_has_no_effect(5)); // In
+        assert!(!zero_src_has_no_effect(6)); // InReverse
+        assert!(!zero_src_has_no_effect(7)); // Out
+        assert!(!zero_src_has_no_effect(10)); // AtopReverse
+
+        // Non-destructive: Dst(2), Over(3), OverReverse(4), OutReverse(8), Atop(9), Xor(11), Add(12), Saturate(13)
+        assert!(zero_src_has_no_effect(2));
+        assert!(zero_src_has_no_effect(3));
+        assert!(zero_src_has_no_effect(4));
+        assert!(zero_src_has_no_effect(8));
+        assert!(zero_src_has_no_effect(9));
+        assert!(zero_src_has_no_effect(11));
+        assert!(zero_src_has_no_effect(12));
+        assert!(zero_src_has_no_effect(13));
+    }
+
+    // -----------------------------------------------------------------------
+    // point_in_triangle edge cases
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn point_in_triangle_inside() {
+        assert!(point_in_triangle(1.0, 1.0, 0.0, 0.0, 3.0, 0.0, 0.0, 3.0));
+    }
+
+    #[test]
+    fn point_in_triangle_outside() {
+        assert!(!point_in_triangle(5.0, 5.0, 0.0, 0.0, 3.0, 0.0, 0.0, 3.0));
+    }
+
+    #[test]
+    fn point_in_triangle_on_edge() {
+        // On the hypotenuse of a right triangle
+        assert!(point_in_triangle(1.5, 1.5, 0.0, 0.0, 3.0, 0.0, 0.0, 3.0));
+    }
+
+    #[test]
+    fn point_in_triangle_at_vertex() {
+        assert!(point_in_triangle(0.0, 0.0, 0.0, 0.0, 3.0, 0.0, 0.0, 3.0));
+    }
+
+    #[test]
+    fn point_in_triangle_degenerate_line() {
+        // Degenerate triangle (all points collinear) — should not crash
+        let _ = point_in_triangle(1.0, 0.0, 0.0, 0.0, 2.0, 0.0, 4.0, 0.0);
+    }
+
+    // -----------------------------------------------------------------------
+    // Disjoint/Conjoint operator boundary values
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn disjoint_over_with_zero_alpha() {
+        // DisjointOver (op 19): with Sa=0, Da=128
+        let (fa, fb) = super::pict_op_factors(19, 0, 128);
+        // Fa should handle zero Sa gracefully (no divide by zero)
+        assert!(fa <= 255);
+        assert!(fb <= 255);
+    }
+
+    #[test]
+    fn conjoint_over_with_full_alpha() {
+        // ConjointOver (op 35): Sa=255, Da=255
+        let (fa, fb) = super::pict_op_factors(35, 255, 255);
+        assert!(fa <= 255);
+        assert!(fb <= 255);
+    }
+
+    #[test]
+    fn disjoint_src_factors() {
+        // DisjointSrc (op 17): Fa=1, Fb=max(0,(1-Sa)/Da)
+        let (fa, fb) = super::pict_op_factors(17, 128, 128);
+        assert_eq!(fa, 255);
+        assert!(fb <= 255);
+    }
+
+    #[test]
+    fn conjoint_clear_zeroes() {
+        // ConjointClear (op 32): Fa=0, Fb=0
+        let (fa, fb) = super::pict_op_factors(32, 128, 128);
+        assert_eq!(fa, 0);
+        assert_eq!(fb, 0);
+    }
 }
 

@@ -2639,4 +2639,135 @@ mod tests {
         let off = 0 * fb.stride() + 1 * 4;
         assert_eq!(fb.data()[off + 1], 0xFF); // G = 255 (green)
     }
+
+    // -----------------------------------------------------------------------
+    // Gravity resize edge cases
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn resize_with_southeast_gravity_preserves_bottom_right() {
+        let mut fb = Framebuffer::new(4, 4);
+        // Set pixel at (3,3) - bottom-right corner
+        let off = 3 * fb.stride() + 3 * 4;
+        fb.data_mut()[off + 2] = 255; // R
+        fb.data_mut()[off + 3] = 255; // A
+        fb.resize_with_gravity(8, 8, 9); // SouthEast
+        // Pixel should now be at (7,7)
+        let off2 = 7 * fb.stride() + 7 * 4;
+        assert_eq!(fb.data()[off2 + 2], 255);
+    }
+
+    #[test]
+    fn resize_with_center_gravity_preserves_center() {
+        let mut fb = Framebuffer::new(4, 4);
+        // Set pixel at (2,2) - near center
+        let off = 2 * fb.stride() + 2 * 4;
+        fb.data_mut()[off + 2] = 255; // R
+        fb.data_mut()[off + 3] = 255; // A
+        fb.resize_with_gravity(8, 8, 5); // Center
+        // Content should be offset by (2,2) to center it
+        let off2 = 4 * fb.stride() + 4 * 4;
+        assert_eq!(fb.data()[off2 + 2], 255);
+    }
+
+    #[test]
+    fn resize_shrink_preserves_visible_content() {
+        let mut fb = Framebuffer::new(8, 8);
+        // Set pixel at (1,1) - should survive shrink
+        let off = 1 * fb.stride() + 1 * 4;
+        fb.data_mut()[off + 2] = 255; // R
+        fb.resize_with_gravity(4, 4, 1); // NorthWest
+        let off2 = 1 * fb.stride() + 1 * 4;
+        assert_eq!(fb.data()[off2 + 2], 255);
+    }
+
+    #[test]
+    fn resize_to_same_size_is_noop() {
+        let mut fb = Framebuffer::new(4, 4);
+        let off = 2 * fb.stride() + 2 * 4;
+        fb.data_mut()[off + 2] = 42;
+        fb.resize_with_gravity(4, 4, 1);
+        // Should be unchanged
+        let off2 = 2 * fb.stride() + 2 * 4;
+        assert_eq!(fb.data()[off2 + 2], 42);
+    }
+
+    #[test]
+    fn resize_to_1x1_preserves_top_left_pixel() {
+        let mut fb = Framebuffer::new(4, 4);
+        let off = 0; // pixel at (0,0)
+        fb.data_mut()[off + 2] = 200; // R
+        fb.resize_with_gravity(1, 1, 1); // NorthWest
+        assert_eq!(fb.data()[2], 200);
+    }
+
+    // -----------------------------------------------------------------------
+    // Framebuffer pixel operations
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn set_pixel_and_get_pixel_roundtrip() {
+        let mut fb = Framebuffer::new(10, 10);
+        let color = 0xFF_00_FF_00u32; // ARGB green
+        let x = 5i16;
+        let y = 3i16;
+        let off = y as usize * fb.stride() + x as usize * 4;
+        let b = (color & 0xFF) as u8;
+        let g = ((color >> 8) & 0xFF) as u8;
+        let r = ((color >> 16) & 0xFF) as u8;
+        let a = ((color >> 24) & 0xFF) as u8;
+        fb.data_mut()[off] = b;
+        fb.data_mut()[off + 1] = g;
+        fb.data_mut()[off + 2] = r;
+        fb.data_mut()[off + 3] = a;
+        assert_eq!(fb.data()[off], 0);     // B
+        assert_eq!(fb.data()[off + 1], 255); // G
+        assert_eq!(fb.data()[off + 2], 0);   // R
+        assert_eq!(fb.data()[off + 3], 255); // A
+    }
+
+    #[test]
+    fn large_framebuffer_allocation() {
+        // Real apps may create large pixmaps (e.g., 4K resolution)
+        let fb = Framebuffer::new(3840, 2160);
+        assert_eq!(fb.width(), 3840);
+        assert_eq!(fb.height(), 2160);
+        assert_eq!(fb.data().len(), 3840 * 2160 * 4);
+    }
+
+    #[test]
+    fn framebuffer_stride_is_width_times_4() {
+        let fb = Framebuffer::new(100, 50);
+        assert_eq!(fb.stride(), 100 * 4);
+    }
+
+    // -----------------------------------------------------------------------
+    // Draw line basic operations
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn draw_horizontal_line() {
+        let mut fb = Framebuffer::new(20, 10);
+        fb.draw_line(0, 5, 19, 5, 0xFF0000, 1);
+        // Check a pixel in the middle of the line
+        let off = 5 * fb.stride() + 10 * 4;
+        assert_eq!(fb.data()[off + 2], 0xFF); // R = 255
+    }
+
+    #[test]
+    fn draw_vertical_line() {
+        let mut fb = Framebuffer::new(10, 20);
+        fb.draw_line(5, 0, 5, 19, 0x00FF00, 1);
+        let off = 10 * fb.stride() + 5 * 4;
+        assert_eq!(fb.data()[off + 1], 0xFF); // G = 255
+    }
+
+    #[test]
+    fn draw_diagonal_line() {
+        let mut fb = Framebuffer::new(10, 10);
+        fb.draw_line(0, 0, 9, 9, 0x0000FF, 1);
+        // Check pixel at (5,5) — should be on the diagonal
+        let off = 5 * fb.stride() + 5 * 4;
+        assert_eq!(fb.data()[off], 0xFF); // B = 255
+    }
 }
