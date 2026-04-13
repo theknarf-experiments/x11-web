@@ -24,8 +24,19 @@ pub(crate) fn handle_create_window(state: &mut ClientState, data: &[u8], _seq: u
     let height = state.read_u16(data, 18);
     let border_width = state.read_u16(data, 20);
     let class = state.read_u16(data, 22);
+    let req_depth = data[1];
     let visual = state.read_u32(data, 24);
     let value_mask = state.read_u32(data, 28);
+
+    // Validate parent window exists (root window or a window we know about).
+    if parent != state.root_window && !state.windows.contains_key(&parent) {
+        // Also check shared windows for cross-connection parents.
+        let parent_exists = state.shared_windows.lock().ok()
+            .is_some_and(|s| s.contains_key(&parent));
+        if !parent_exists {
+            return build_error(BAD_WINDOW, _seq, parent, 1, 0);
+        }
+    }
 
     // Validate value-list length matches the bitmask
     let n_values = value_mask.count_ones() as usize;
@@ -36,6 +47,17 @@ pub(crate) fn handle_create_window(state: &mut ClientState, data: &[u8], _seq: u
     // Zero-size windows are rejected with BadValue.
     if width == 0 || height == 0 || width > 32767 || height > 32767 {
         return build_error(BAD_VALUE, _seq, if width == 0 { 0 } else { width as u32 }, 1, 0);
+    }
+
+    // Per X11 spec: if depth is specified (non-zero) and doesn't match the
+    // visual's depth, return BadMatch.  0 means CopyFromParent.
+    let is_input_only_class = class == 2;
+    if req_depth != 0 && !is_input_only_class {
+        let use_visual = if visual == 0 { ROOT_VISUAL } else { visual };
+        let visual_depth = crate::xserver::core::depth_for_visual(use_visual);
+        if req_depth != visual_depth {
+            return build_error(BAD_MATCH, _seq, 0, 1, 0);
+        }
     }
 
     let mut background_pixel = 0u32;

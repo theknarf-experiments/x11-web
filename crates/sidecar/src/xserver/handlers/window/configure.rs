@@ -154,6 +154,11 @@ pub(crate) fn handle_configure_window(state: &mut ClientState, data: &[u8], seq:
     let wid = state.read_u32(data, 4);
     let value_mask = state.read_u16(data, 8);
 
+    // Validate window exists.
+    if wid != state.root_window && !state.windows.contains_key(&wid) {
+        return build_error(BAD_WINDOW, seq, wid, 12, 0);
+    }
+
     // Validate value-list length matches the bitmask
     let n_values = (value_mask as u32).count_ones() as usize;
     let required_len = 12 + n_values * 4;
@@ -529,6 +534,21 @@ pub(crate) fn handle_configure_window(state: &mut ClientState, data: &[u8], seq:
     // Above=0, Below=1, TopIf=2, BottomIf=3, Opposite=4
     let stacking_changed = if let Some(mode) = stack_mode {
         let parent_id = state.windows.get(&wid).map(|w| w.parent);
+
+        // Per X11 spec §12.6: if a sibling is specified, it must be an actual
+        // sibling (same parent) of the window being configured. Return BadMatch
+        // if the sibling doesn't share the same parent.
+        if sibling != 0 {
+            if let Some(pid) = parent_id {
+                let sibling_is_sibling = state.windows.get(&sibling)
+                    .map(|s| s.parent == pid)
+                    .unwrap_or(false);
+                if !sibling_is_sibling {
+                    return build_error(BAD_MATCH, seq, 0, 12, 0);
+                }
+            }
+        }
+
         if let Some(parent_id) = parent_id {
             let raised = if mode == 0 {
                 // Above: raise to top of stacking layer (or above sibling)
