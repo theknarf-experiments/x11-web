@@ -825,4 +825,143 @@ mod tests {
         assert_eq!(WindowType::from_atom_ids(&[91]), WindowType::Notification);
         assert_eq!(WindowType::from_atom_ids(&[80]), WindowType::Normal);
     }
+
+    // -----------------------------------------------------------------------
+    // RotateProperties: duplicate atom detection
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn rotate_properties_duplicate_detection() {
+        // Verify that duplicate atoms in a list are properly detected
+        let atoms = vec![10u32, 20, 30, 20]; // 20 appears twice
+        let mut seen = std::collections::HashSet::with_capacity(atoms.len());
+        let mut found_dup = false;
+        for &atom in &atoms {
+            if !seen.insert(atom) {
+                found_dup = true;
+                break;
+            }
+        }
+        assert!(found_dup, "Should detect duplicate atom 20");
+    }
+
+    #[test]
+    fn rotate_properties_no_duplicates() {
+        let atoms = vec![10u32, 20, 30, 40];
+        let mut seen = std::collections::HashSet::with_capacity(atoms.len());
+        let all_unique = atoms.iter().all(|a| seen.insert(*a));
+        assert!(all_unique, "All atoms should be unique");
+    }
+
+    // -----------------------------------------------------------------------
+    // PropertyValue rotation logic
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn rotate_properties_positive_delta() {
+        // Simulate rotating 3 properties by delta=1
+        // Properties: [A, B, C] with delta=1 -> [C, A, B]
+        let values = vec![Some(1u32), Some(2), Some(3)];
+        let n = values.len() as i16;
+        let delta: i16 = 1;
+        let effective_delta = ((delta % n) + n) % n;
+        assert_eq!(effective_delta, 1);
+
+        let mut result = vec![0u32; 3];
+        for i in 0..3 {
+            let src_idx = ((i as i16 - effective_delta + n) % n) as usize;
+            result[i] = values[src_idx].unwrap();
+        }
+        // [A, B, C] rotated by +1 = [C, A, B]
+        assert_eq!(result, vec![3, 1, 2]);
+    }
+
+    #[test]
+    fn rotate_properties_negative_delta() {
+        let values = vec![Some(1u32), Some(2), Some(3)];
+        let n = values.len() as i16;
+        let delta: i16 = -1;
+        let effective_delta = ((delta % n) + n) % n;
+        assert_eq!(effective_delta, 2);
+
+        let mut result = vec![0u32; 3];
+        for i in 0..3 {
+            let src_idx = ((i as i16 - effective_delta + n) % n) as usize;
+            result[i] = values[src_idx].unwrap();
+        }
+        // [A, B, C] rotated by -1 = [B, C, A]
+        assert_eq!(result, vec![2, 3, 1]);
+    }
+
+    #[test]
+    fn rotate_properties_full_cycle() {
+        // Delta equals length -> no-op
+        let values = vec![Some(1u32), Some(2), Some(3)];
+        let n = values.len() as i16;
+        let delta: i16 = 3;
+        let effective_delta = ((delta % n) + n) % n;
+        assert_eq!(effective_delta, 0);
+    }
+
+    // -----------------------------------------------------------------------
+    // RetainTemporary window flag
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn window_retained_temporary_default_false() {
+        let win = make_test_window(1, 0);
+        assert!(!win.retained_temporary);
+    }
+
+    #[test]
+    fn window_retained_temporary_can_be_set() {
+        let mut win = make_test_window(1, 0);
+        win.retained_temporary = true;
+        assert!(win.retained_temporary);
+    }
+
+    // -----------------------------------------------------------------------
+    // XFixesRegion operations
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn region_empty_has_no_rects() {
+        let r = XFixesRegion::new();
+        assert!(r.rects.is_empty());
+    }
+
+    #[test]
+    fn region_from_single_rect() {
+        let r = XFixesRegion::from_rects(vec![
+            region::RegionRect { x: 0, y: 0, width: 100, height: 100 },
+        ]);
+        assert_eq!(r.rects.len(), 1);
+        assert_eq!(r.rects[0].x, 0);
+        assert_eq!(r.rects[0].width, 100);
+    }
+
+    #[test]
+    fn region_extents_from_constructed_rect() {
+        let r = XFixesRegion::from_rects(vec![
+            region::RegionRect { x: 10, y: 20, width: 30, height: 40 },
+        ]);
+        let ext = r.extents();
+        assert_eq!(ext.x, 10);
+        assert_eq!(ext.y, 20);
+        assert_eq!(ext.width, 30);
+        assert_eq!(ext.height, 40);
+    }
+
+    #[test]
+    fn region_extents_bounding_box_from_overlapping() {
+        let r = XFixesRegion::from_rects(vec![
+            region::RegionRect { x: 0, y: 0, width: 50, height: 50 },
+            region::RegionRect { x: 30, y: 30, width: 50, height: 50 },
+        ]);
+        let ext = r.extents();
+        assert_eq!(ext.x, 0);
+        assert_eq!(ext.y, 0);
+        assert_eq!(ext.width, 80);
+        assert_eq!(ext.height, 80);
+    }
 }

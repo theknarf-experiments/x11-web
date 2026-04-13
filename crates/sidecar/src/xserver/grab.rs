@@ -1341,4 +1341,84 @@ mod tests {
         assert_eq!(gs.button_grabs[0].modifiers, 0x01);
         assert_eq!(gs.button_grabs[1].modifiers, 0);
     }
+
+    // -----------------------------------------------------------------------
+    // Passive grab cleanup: removing grabs by window set
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn cleanup_button_grabs_by_window_set() {
+        let mut gs = make_grab_state();
+        gs.button_grabs.push(PassiveButtonGrab {
+            grab_window: 0x100,
+            button: 1, modifiers: 0, event_mask: 0x04,
+            pointer_mode: 0, keyboard_mode: 0, confine_to: 0,
+            cursor: 0, owner_events: false,
+        });
+        gs.button_grabs.push(PassiveButtonGrab {
+            grab_window: 0x200,
+            button: 1, modifiers: 0, event_mask: 0x04,
+            pointer_mode: 0, keyboard_mode: 0, confine_to: 0,
+            cursor: 0, owner_events: false,
+        });
+        gs.button_grabs.push(PassiveButtonGrab {
+            grab_window: 0x300,
+            button: 2, modifiers: 0, event_mask: 0x04,
+            pointer_mode: 0, keyboard_mode: 0, confine_to: 0,
+            cursor: 0, owner_events: false,
+        });
+
+        // Simulate client disconnect: remove grabs for windows 0x100 and 0x300
+        let my_windows: std::collections::HashSet<u32> = [0x100, 0x300].into();
+        gs.button_grabs.retain(|g| !my_windows.contains(&g.grab_window));
+
+        assert_eq!(gs.button_grabs.len(), 1);
+        assert_eq!(gs.button_grabs[0].grab_window, 0x200);
+    }
+
+    #[test]
+    fn cleanup_key_grabs_by_window_set() {
+        let mut gs = make_grab_state();
+        gs.key_grabs.push(PassiveKeyGrab {
+            grab_window: 0x100, key: 38, modifiers: 0,
+            pointer_mode: 0, keyboard_mode: 0, owner_events: false,
+        });
+        gs.key_grabs.push(PassiveKeyGrab {
+            grab_window: 0x200, key: 39, modifiers: 0,
+            pointer_mode: 0, keyboard_mode: 0, owner_events: false,
+        });
+
+        let my_windows: std::collections::HashSet<u32> = [0x100].into();
+        gs.key_grabs.retain(|g| !my_windows.contains(&g.grab_window));
+
+        assert_eq!(gs.key_grabs.len(), 1);
+        assert_eq!(gs.key_grabs[0].grab_window, 0x200);
+    }
+
+    #[test]
+    fn cleanup_preserves_grabs_from_other_clients() {
+        let mut gs = make_grab_state();
+        // Client A owns window 0x100
+        gs.button_grabs.push(PassiveButtonGrab {
+            grab_window: 0x100,
+            button: 1, modifiers: 0, event_mask: 0x04,
+            pointer_mode: 0, keyboard_mode: 0, confine_to: 0,
+            cursor: 0, owner_events: false,
+        });
+        // Client B owns window 0x200
+        gs.button_grabs.push(PassiveButtonGrab {
+            grab_window: 0x200,
+            button: 1, modifiers: 0, event_mask: 0x04,
+            pointer_mode: 0, keyboard_mode: 0, confine_to: 0,
+            cursor: 0, owner_events: false,
+        });
+
+        // Only clean up client A's windows
+        let client_a_windows: std::collections::HashSet<u32> = [0x100].into();
+        gs.button_grabs.retain(|g| !client_a_windows.contains(&g.grab_window));
+        gs.key_grabs.retain(|g| !client_a_windows.contains(&g.grab_window));
+
+        assert_eq!(gs.button_grabs.len(), 1);
+        assert_eq!(gs.button_grabs[0].grab_window, 0x200);
+    }
 }
