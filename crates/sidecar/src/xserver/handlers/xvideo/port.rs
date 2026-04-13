@@ -76,7 +76,13 @@ pub(crate) fn handle_port_request(
                     XV_ATTR_SATURATION => ps.saturation = value.clamp(0, 2000),
                     XV_ATTR_HUE        => ps.hue = value.clamp(-180, 180),
                     XV_ATTR_COLORSPACE => ps.colorspace = value.clamp(0, 1),
-                    _ => debug!("XVideo SetPortAttribute: unknown attr {name} (atom={atom})"),
+                    _ => {
+                        debug!("XVideo SetPortAttribute: unknown attr {name} (atom={atom})");
+                        return crate::xserver::core::build_error_bo(
+                            crate::xserver::core::BAD_MATCH, seq, atom,
+                            156, 10, state.msb_first,
+                        );
+                    }
                 }
                 debug!("XVideo SetPortAttribute: port={port} {name}={value}");
             }
@@ -96,7 +102,13 @@ pub(crate) fn handle_port_request(
                     XV_ATTR_SATURATION => ps.saturation,
                     XV_ATTR_HUE        => ps.hue,
                     XV_ATTR_COLORSPACE => ps.colorspace,
-                    _ => 0,
+                    _ => {
+                        debug!("XVideo GetPortAttribute: unknown attr {name} (atom={atom})");
+                        return crate::xserver::core::build_error_bo(
+                            crate::xserver::core::BAD_MATCH, seq, atom,
+                            156, 11, state.msb_first,
+                        );
+                    }
                 };
 
                 let mut reply = [0u8; 32];
@@ -146,6 +158,12 @@ pub(crate) fn handle_port_request(
             reply[32..].copy_from_slice(&extra_data);
             reply
         }
-        _ => Vec::new(),
+        _ => {
+            debug!("XVideo port: unhandled minor opcode {minor}");
+            crate::xserver::core::build_error_bo(
+                crate::xserver::core::BAD_REQUEST, seq, minor as u32,
+                156, minor as u16, state.msb_first,
+            )
+        }
     }
 }

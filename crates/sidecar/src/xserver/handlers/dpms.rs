@@ -74,6 +74,7 @@ pub(crate) fn handle_dpms_request(state: &mut ClientState, data: &[u8], seq: u16
             reply.to_vec()
         }
         _ => {
+            debug!("DPMS: unhandled minor opcode {minor}");
             crate::xserver::core::build_error_bo(
                 crate::xserver::core::BAD_REQUEST, seq, minor as u32,
                 151, minor as u16, state.msb_first,

@@ -7,7 +7,7 @@
 //!
 //! ## Wire protocol overview
 //!
-//! GLX uses a single major opcode (assigned as 149 by our QueryExtension
+//! GLX uses a single major opcode (assigned as 159 by our QueryExtension
 //! handler).  The first byte of the request data is the GLX minor opcode.
 //! GLX render requests (minor opcode 1) batch multiple GL commands inside
 //! a single X11 request -- each sub-command has its own 4-byte header

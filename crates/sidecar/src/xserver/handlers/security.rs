@@ -110,6 +110,7 @@ use crate::xserver::core::require_len;
             Vec::new()
         }
         _ => {
+            debug!("SECURITY: unhandled minor opcode {minor}");
             crate::xserver::core::build_error_bo(
                 crate::xserver::core::BAD_REQUEST, seq, minor as u32,
                 155, minor as u16, state.msb_first,

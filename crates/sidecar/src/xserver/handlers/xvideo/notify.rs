@@ -46,8 +46,11 @@ pub(crate) fn handle_notify_request(
             Vec::new()
         }
         _ => {
-            let _ = seq;
-            Vec::new()
+            debug!("XVideo notify: unhandled minor opcode {minor}");
+            crate::xserver::core::build_error_bo(
+                crate::xserver::core::BAD_REQUEST, seq, minor as u32,
+                156, minor as u16, state.msb_first,
+            )
         }
     }
 }

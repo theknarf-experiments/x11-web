@@ -1253,6 +1253,12 @@ pub(crate) fn handle_image_request(
         20 => { // XvGetStill — not meaningful for software rendering, return void
             Vec::new()
         }
-        _ => Vec::new(),
+        _ => {
+            debug!("XVideo image: unhandled minor opcode {minor}");
+            crate::xserver::core::build_error_bo(
+                crate::xserver::core::BAD_REQUEST, seq, minor as u32,
+                156, minor as u16, state.msb_first,
+            )
+        }
     }
 }

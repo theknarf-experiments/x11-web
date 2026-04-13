@@ -208,15 +208,14 @@ pub(crate) fn handle_vidmode_request(state: &mut ClientState, data: &[u8], seq: 
             state.write_u16(&mut reply, 2, seq);
             state.write_u32(&mut reply, 4, (total_extra / 4) as u32);
             state.write_u16(&mut reply, 8, size as u16); // size
-            // Return stored ramp from CRTC
-            let (ramp_r, ramp_g, ramp_b) = if let Some(crtc) = state.randr_crtcs.first() {
-                (crtc.gamma_red.clone(), crtc.gamma_green.clone(), crtc.gamma_blue.clone())
+            // Return stored ramp from CRTC, referencing directly to avoid clones
+            let linear_ramp: Vec<u16>;
+            let ramps: [&[u16]; 3] = if let Some(crtc) = state.randr_crtcs.first() {
+                [&crtc.gamma_red, &crtc.gamma_green, &crtc.gamma_blue]
             } else {
-                // Fallback: linear ramp
-                let linear: Vec<u16> = (0..256).map(|i| ((i as u32 * 65535) / 255) as u16).collect();
-                (linear.clone(), linear.clone(), linear)
+                linear_ramp = (0..256).map(|i| ((i as u32 * 65535) / 255) as u16).collect();
+                [&linear_ramp, &linear_ramp, &linear_ramp]
             };
-            let ramps = [&ramp_r, &ramp_g, &ramp_b];
             for (channel, ramp) in ramps.iter().enumerate() {
                 let base = 32 + channel * padded;
                 for i in 0..size {

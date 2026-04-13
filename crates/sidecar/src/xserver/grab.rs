@@ -790,9 +790,17 @@ pub(crate) fn check_button_release_ungrab(state: &mut ClientState, _button: u8, 
 /// ServerGrabLock so the per-client request loops can block.
 pub(crate) fn handle_grab_server(state: &mut ClientState, _data: &[u8]) -> Vec<u8> {
     state.grabs.server_grab_count += 1;
+    // Set the shared grab lock so other clients' request loops will block.
+    // We spin briefly if the mutex is momentarily held by another client's
+    // check; in practice the first try_lock() always succeeds because the
+    // mutex is only held for nanoseconds during the grab-check path.
     let (lock, _notify) = &*state.server_grab;
-    if let Ok(mut holder) = lock.try_lock() {
-        *holder = Some(state.client_id.clone());
+    for _ in 0..100 {
+        if let Ok(mut holder) = lock.try_lock() {
+            *holder = Some(state.client_id.clone());
+            break;
+        }
+        std::hint::spin_loop();
     }
     debug!("GrabServer: count={} client={}", state.grabs.server_grab_count, state.client_id);
     Vec::new()
@@ -805,8 +813,12 @@ pub(crate) fn handle_ungrab_server(state: &mut ClientState, _data: &[u8]) -> Vec
     }
     if state.grabs.server_grab_count == 0 {
         let (lock, notify) = &*state.server_grab;
-        if let Ok(mut holder) = lock.try_lock() {
-            *holder = None;
+        for _ in 0..100 {
+            if let Ok(mut holder) = lock.try_lock() {
+                *holder = None;
+                break;
+            }
+            std::hint::spin_loop();
         }
         notify.notify_waiters();
     }

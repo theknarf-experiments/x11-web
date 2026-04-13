@@ -176,6 +176,7 @@ pub(crate) fn handle_xtest_request(state: &mut ClientState, data: &[u8], seq: u1
             Vec::new()
         }
         _ => {
+            debug!("XTEST: unhandled minor opcode {minor}");
             crate::xserver::core::build_error_bo(
                 crate::xserver::core::BAD_REQUEST, seq, minor as u32,
                 150, minor as u16, state.msb_first,

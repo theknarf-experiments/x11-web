@@ -43,8 +43,8 @@ pub(crate) fn handle_query_extension(_state: &mut ClientState, data: &[u8], seq:
         "RENDER" => {
             reply[8] = 1; // present = true
             reply[9] = 139; // major_opcode
-            reply[10] = 0; // first_event
-            reply[11] = 0; // first_error
+            reply[10] = 0; // first_event (RENDER has no events)
+            reply[11] = 142; // first_error: BadPictFormat=142, BadPicture=143, BadPictOp=144, BadGlyphSet=145, BadGlyph=146
         }
         "MIT-SHM" => {
             reply[8] = 1;
@@ -73,7 +73,7 @@ pub(crate) fn handle_query_extension(_state: &mut ClientState, data: &[u8], seq:
         "SYNC" => {
             reply[8] = 1;
             reply[9] = 134;
-            reply[10] = 100;
+            reply[10] = 83; // first_event: AlarmNotify (must match handler event code)
             reply[11] = 0;
         }
         "Generic Event Extension" => {
@@ -85,6 +85,8 @@ pub(crate) fn handle_query_extension(_state: &mut ClientState, data: &[u8], seq:
         "Composite" => {
             reply[8] = 1;
             reply[9] = 142;
+            reply[10] = 0; // first_event (no events; Composite uses Damage events)
+            reply[11] = 0; // first_error (no extension-specific errors)
         }
         "DAMAGE" => {
             reply[8] = 1;
@@ -149,28 +151,38 @@ pub(crate) fn handle_query_extension(_state: &mut ClientState, data: &[u8], seq:
         "RECORD" => {
             reply[8] = 1;
             reply[9] = 154;
+            reply[10] = 0; // first_event (no events)
+            reply[11] = 154; // first_error: BadContext
         }
         "SECURITY" => {
             reply[8] = 1;
             reply[9] = 155;
+            reply[10] = 93; // first_event: SecurityAuthorizationRevoked
+            reply[11] = 155; // first_error: BadAuthorization
         }
         "XVideo" => {
             reply[8] = 1;
             reply[9] = 156;
+            reply[10] = 93; // first_event: XvVideoNotify
+            reply[11] = 156; // first_error: XvBadPort, XvBadEncoding, XvBadControl
         }
         "DOUBLE-BUFFER" => {
             reply[8] = 1;
             reply[9] = 157;
+            reply[10] = 0; // first_event (no events)
+            reply[11] = 157; // first_error: BadBuffer
         }
         "XINERAMA" => {
             reply[8] = 1;
             reply[9] = 158;
+            reply[10] = 0; // first_event (no events)
+            reply[11] = 0; // first_error (no errors)
         }
         "GLX" => {
             reply[8] = 1;
             reply[9] = 159;
-            reply[10] = 0;
-            reply[11] = 0;
+            reply[10] = 0; // first_event (GLX uses GenericEvent via GE)
+            reply[11] = 159; // first_error: GLXBadContext=159, GLXBadContextState=160, etc.
         }
         "X-Resource" => {
             reply[8] = 1;

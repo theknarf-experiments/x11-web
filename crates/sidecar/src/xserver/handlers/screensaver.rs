@@ -96,6 +96,7 @@ pub(crate) fn handle_screen_saver_request(state: &mut ClientState, data: &[u8], 
             Vec::new()
         }
         _ => {
+            debug!("ScreenSaver: unhandled minor opcode {minor}");
             crate::xserver::core::build_error_bo(
                 crate::xserver::core::BAD_REQUEST, seq, minor as u32,
                 152, minor as u16, state.msb_first,

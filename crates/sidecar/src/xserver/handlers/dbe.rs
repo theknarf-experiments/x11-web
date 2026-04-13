@@ -191,6 +191,7 @@ pub(crate) fn handle_dbe_request(state: &mut ClientState, data: &[u8], seq: u16)
             reply.to_vec()
         }
         _ => {
+            debug!("DBE: unhandled minor opcode {minor}");
             crate::xserver::core::build_error_bo(
                 crate::xserver::core::BAD_REQUEST, seq, minor as u32,
                 157, minor as u16, state.msb_first,

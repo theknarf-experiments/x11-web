@@ -1,5 +1,7 @@
 //! XINERAMA extension handler (opcode 158).
 
+use tracing::debug;
+
 use super::super::client::ClientState;
 
 /// Handle XINERAMA extension requests. We report a single screen covering the
@@ -79,8 +81,9 @@ pub(crate) fn handle_xinerama_request(state: &ClientState, data: &[u8], seq: u16
             reply
         }
         _ => {
+            debug!("XINERAMA: unhandled minor opcode {minor}");
             crate::xserver::core::build_error_bo(
-                crate::xserver::core::BAD_REQUEST, seq, 0,
+                crate::xserver::core::BAD_REQUEST, seq, minor as u32,
                 158, minor as u16, state.msb_first,
             )
         }

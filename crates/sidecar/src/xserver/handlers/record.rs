@@ -645,6 +645,7 @@ pub(crate) fn handle_record_request(state: &mut ClientState, data: &[u8], seq: u
             }
         }
         _ => {
+            debug!("RECORD: unhandled minor opcode {minor}");
             crate::xserver::core::build_error_bo(
                 crate::xserver::core::BAD_REQUEST, seq, minor as u32,
                 154, minor as u16, state.msb_first,
