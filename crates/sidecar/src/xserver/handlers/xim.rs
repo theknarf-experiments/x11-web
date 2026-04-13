@@ -37,10 +37,19 @@ const XIM_SET_IC_VALUES: u8 = 60;
 const XIM_SET_IC_VALUES_REPLY: u8 = 61;
 const XIM_GET_IC_VALUES: u8 = 62;
 const XIM_GET_IC_VALUES_REPLY: u8 = 63;
+const XIM_TRIGGER_NOTIFY: u8 = 35;
+#[allow(dead_code)]
+const XIM_TRIGGER_NOTIFY_REPLY: u8 = 36;
 const XIM_SET_IC_FOCUS: u8 = 68;
 const XIM_UNSET_IC_FOCUS: u8 = 69;
 const XIM_FORWARD_EVENT: u8 = 82;
 const XIM_COMMIT: u8 = 83;
+const XIM_RESET_IC: u8 = 64;
+const XIM_RESET_IC_REPLY: u8 = 65;
+const XIM_SYNC: u8 = 38;
+const XIM_SYNC_REPLY: u8 = 39;
+const XIM_GEOMETRY: u8 = 66;
+const XIM_STR_CONVERSION: u8 = 67;
 
 // XIM input style flags
 const XIM_PREEDIT_CALLBACKS: u32 = 0x0002;
@@ -216,8 +225,26 @@ pub(crate) fn handle_xim_protocol(state: &mut ClientState, event: &[u8]) -> Vec<
         XIM_GET_IC_VALUES => handle_xim_get_ic_values(state, xim_data),
         XIM_SET_IC_FOCUS => handle_xim_set_ic_focus(state, xim_data),
         XIM_UNSET_IC_FOCUS => handle_xim_unset_ic_focus(state, xim_data),
+        XIM_RESET_IC => handle_xim_reset_ic(state, xim_data),
         XIM_FORWARD_EVENT => handle_xim_forward_event(state, xim_data),
         XIM_PREEDIT_START_REPLY => handle_xim_preedit_start_reply(state, xim_data),
+        XIM_TRIGGER_NOTIFY => handle_xim_trigger_notify(state, xim_data),
+        XIM_SYNC => handle_xim_sync(state, xim_data),
+        XIM_SYNC_REPLY => {
+            // Client acknowledges a sync request — no action needed.
+            debug!("XIM: SYNC_REPLY");
+            Vec::new()
+        }
+        XIM_GEOMETRY => {
+            // Client notifies IM of geometry change — no action for passthrough IM.
+            debug!("XIM: GEOMETRY notification");
+            Vec::new()
+        }
+        XIM_STR_CONVERSION => {
+            // String conversion reply from client — not used in passthrough mode.
+            debug!("XIM: STR_CONVERSION");
+            Vec::new()
+        }
         _ => {
             debug!("XIM: unhandled major opcode {}", major_opcode);
             Vec::new()
@@ -941,6 +968,133 @@ fn send_xim_commit(state: &mut ClientState, im_id: u16, ic_id: u16, text: &str) 
     let length_words = body.len().div_ceil(4) as u16;
     let mut msg = Vec::with_capacity(4 + body.len());
     msg.push(XIM_COMMIT);
+    msg.push(0);
+    msg.extend_from_slice(&length_words.to_le_bytes());
+    msg.extend_from_slice(&body);
+
+    send_xim_reply(state, im_id, &msg);
+}
+
+/// XIM_RESET_IC (64): Client resets an input context. If there is any
+/// in-progress preedit text, it should be returned and the preedit ended.
+fn handle_xim_reset_ic(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
+    if data.len() < 8 {
+        return Vec::new();
+    }
+    let im_id = u16::from_le_bytes([data[4], data[5]]);
+    let ic_id = u16::from_le_bytes([data[6], data[7]]);
+
+    debug!("XIM: RESET_IC im_id={} ic_id={}", im_id, ic_id);
+
+    // End any active preedit session.
+    let was_active = state
+        .xim
+        .connections
+        .get(&im_id)
+        .and_then(|c| c.contexts.get(&ic_id))
+        .map(|ic| ic.preedit_active)
+        .unwrap_or(false);
+
+    if was_active {
+        send_xim_preedit_done(state, im_id, ic_id);
+    }
+
+    // XIM_RESET_IC_REPLY: major=65, minor=0
+    //   im_id(2), ic_id(2),
+    //   byte_length_of_committed_string(2) = 0,
+    //   committed_string = empty, pad
+    let mut reply_body = Vec::new();
+    reply_body.extend_from_slice(&im_id.to_le_bytes());
+    reply_body.extend_from_slice(&ic_id.to_le_bytes());
+    reply_body.extend_from_slice(&0u16.to_le_bytes()); // no committed string
+    reply_body.extend_from_slice(&[0, 0]); // pad
+
+    let length_words = reply_body.len().div_ceil(4) as u16;
+    let mut reply = Vec::with_capacity(4 + reply_body.len());
+    reply.push(XIM_RESET_IC_REPLY);
+    reply.push(0);
+    reply.extend_from_slice(&length_words.to_le_bytes());
+    reply.extend_from_slice(&reply_body);
+
+    send_xim_reply(state, im_id, &reply);
+    Vec::new()
+}
+
+/// XIM_TRIGGER_NOTIFY (35): Client notifies IM of trigger key activation.
+/// Reply with XIM_TRIGGER_NOTIFY_REPLY to accept the on/off switch.
+fn handle_xim_trigger_notify(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
+    if data.len() < 12 {
+        return Vec::new();
+    }
+    let im_id = u16::from_le_bytes([data[4], data[5]]);
+    let ic_id = u16::from_le_bytes([data[6], data[7]]);
+    let flag = u32::from_le_bytes([data[8], data[9], data[10], data[11]]);
+
+    debug!(
+        "XIM: TRIGGER_NOTIFY im_id={} ic_id={} flag={}",
+        im_id, ic_id, flag
+    );
+
+    // XIM_TRIGGER_NOTIFY_REPLY: major=36, minor=0, length=1
+    //   im_id(2), ic_id(2)
+    let mut reply = Vec::with_capacity(8);
+    reply.push(XIM_TRIGGER_NOTIFY_REPLY);
+    reply.push(0);
+    reply.extend_from_slice(&1u16.to_le_bytes());
+    reply.extend_from_slice(&im_id.to_le_bytes());
+    reply.extend_from_slice(&ic_id.to_le_bytes());
+
+    send_xim_reply(state, im_id, &reply);
+    Vec::new()
+}
+
+/// XIM_SYNC (38): Server asks client to sync. Reply immediately with
+/// XIM_SYNC_REPLY since our passthrough IM doesn't need synchronization.
+fn handle_xim_sync(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
+    if data.len() < 8 {
+        return Vec::new();
+    }
+    let im_id = u16::from_le_bytes([data[4], data[5]]);
+    let ic_id = u16::from_le_bytes([data[6], data[7]]);
+
+    debug!("XIM: SYNC im_id={} ic_id={}", im_id, ic_id);
+
+    // XIM_SYNC_REPLY: major=39, minor=0, length=1
+    //   im_id(2), ic_id(2)
+    let mut reply = Vec::with_capacity(8);
+    reply.push(XIM_SYNC_REPLY);
+    reply.push(0);
+    reply.extend_from_slice(&1u16.to_le_bytes());
+    reply.extend_from_slice(&im_id.to_le_bytes());
+    reply.extend_from_slice(&ic_id.to_le_bytes());
+
+    send_xim_reply(state, im_id, &reply);
+    Vec::new()
+}
+
+/// Send XIM_PREEDIT_CARET to notify the client of a caret position change.
+#[allow(dead_code)]
+pub(crate) fn send_xim_preedit_caret(
+    state: &mut ClientState,
+    im_id: u16,
+    ic_id: u16,
+    position: i32,
+    direction: u32,
+    style: u32,
+) {
+    // XIM_PREEDIT_CARET: major=73, minor=0
+    //   im_id(2), ic_id(2),
+    //   position(4), direction(4), style(4)
+    let mut body = Vec::new();
+    body.extend_from_slice(&im_id.to_le_bytes());
+    body.extend_from_slice(&ic_id.to_le_bytes());
+    body.extend_from_slice(&position.to_le_bytes());
+    body.extend_from_slice(&direction.to_le_bytes());
+    body.extend_from_slice(&style.to_le_bytes());
+
+    let length_words = body.len().div_ceil(4) as u16;
+    let mut msg = Vec::with_capacity(4 + body.len());
+    msg.push(XIM_PREEDIT_CARET);
     msg.push(0);
     msg.extend_from_slice(&length_words.to_le_bytes());
     msg.extend_from_slice(&body);
