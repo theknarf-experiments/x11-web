@@ -59,42 +59,6 @@ impl ClientState {
                 });
             }
             self.update_net_client_list();
-
-            // EWMH _NET_WM_STATE_FOCUSED: GTK3/4 checks this atom on the
-            // focused window to decide whether to draw focused decorations.
-            let net_wm_state_atom = self.intern_atom("_NET_WM_STATE", false);
-            let focused_atom = self.intern_atom("_NET_WM_STATE_FOCUSED", false);
-
-            // Remove FOCUSED from old window's _NET_WM_STATE
-            if prev_focus > 1 {
-                if let Some(win) = self.windows.get_mut(&prev_focus) {
-                    if let Some(pv) = win.properties.get_mut(&net_wm_state_atom) {
-                        let mut atoms: Vec<u32> = pv.data.chunks_exact(4)
-                            .map(|c| u32::from_le_bytes([c[0], c[1], c[2], c[3]]))
-                            .collect();
-                        atoms.retain(|a| *a != focused_atom);
-                        pv.data = atoms.iter().flat_map(|a| a.to_le_bytes()).collect();
-                    }
-                }
-            }
-
-            // Add FOCUSED to new window's _NET_WM_STATE
-            if new_focus > 1 {
-                if let Some(win) = self.windows.get_mut(&new_focus) {
-                    let pv = win.properties.entry(net_wm_state_atom).or_insert_with(|| PropertyValue {
-                        prop_type: 4, // ATOM
-                        format: 32,
-                        data: Vec::new(),
-                    });
-                    let mut atoms: Vec<u32> = pv.data.chunks_exact(4)
-                        .map(|c| u32::from_le_bytes([c[0], c[1], c[2], c[3]]))
-                        .collect();
-                    if !atoms.contains(&focused_atom) {
-                        atoms.push(focused_atom);
-                    }
-                    pv.data = atoms.iter().flat_map(|a| a.to_le_bytes()).collect();
-                }
-            }
         }
 
         // Generate FocusOut/FocusIn events with proper detail modes per X11 spec.

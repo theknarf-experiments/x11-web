@@ -140,7 +140,11 @@ fn parse_pcf_data(data: &[u8], path: &Path) -> Option<BitmapFont> {
     };
 
     // Build the BitmapFont
-    let num_chars = (max_char - min_char + 1) as usize;
+    let num_chars = if max_char >= min_char {
+        (max_char - min_char + 1) as usize
+    } else {
+        0
+    };
     let mut char_infos = vec![CharInfo::default(); num_chars];
     let mut glyphs_vec = vec![
         GlyphBitmap {
@@ -194,10 +198,12 @@ fn parse_pcf_data(data: &[u8], path: &Path) -> Option<BitmapFont> {
         max_bounds.ascent = max_bounds.ascent.max(ci.ascent);
         max_bounds.descent = max_bounds.descent.max(ci.descent);
 
-        char_infos[idx] = ci;
+        if idx < char_infos.len() {
+            char_infos[idx] = ci;
+        }
 
         // Get bitmap for this glyph
-        if glyph_idx < bitmaps.len() {
+        if glyph_idx < bitmaps.len() && idx < glyphs_vec.len() {
             let w = (m.right_side_bearing - m.left_side_bearing).max(0) as u16;
             let h = (m.ascent + m.descent).max(0) as u16;
             glyphs_vec[idx] = GlyphBitmap {
