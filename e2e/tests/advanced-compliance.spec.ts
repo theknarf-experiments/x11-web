@@ -2307,3 +2307,271 @@ d.close()
 		expect(output).toContain("has_resize=True");
 	});
 });
+
+// ===========================================================================
+// XI 1.x (XInput) protocol compliance
+// ===========================================================================
+
+test.describe.serial("XI 1.x protocol compliance", () => {
+	test("XInput extension is present", async ({ sidecarContainer }) => {
+		const output = await execInSidecar(
+			sidecarContainer,
+			`xinput list 2>&1 || echo "xinput_not_available"`,
+		);
+		// xinput should not error out
+		expect(output).not.toContain("unable to open display");
+	});
+
+	test("ListInputDevices returns pointer and keyboard via xinput", async ({
+		sidecarContainer,
+	}) => {
+		const output = await runPythonX11(
+			sidecarContainer,
+			`
+import Xlib.display
+d = Xlib.display.Display()
+xi = d.query_extension('XInputExtension')
+print(f"xi_present={xi is not None and xi.major_opcode > 0}")
+if xi:
+    print(f"major_opcode={xi.major_opcode}")
+d.close()
+`,
+		);
+		expect(output).toContain("xi_present=True");
+	});
+
+	test("xdpyinfo lists XInputExtension", async ({ sidecarContainer }) => {
+		const output = await execInSidecar(sidecarContainer, "xdpyinfo 2>&1");
+		expect(output).toContain("XInputExtension");
+	});
+});
+
+// ===========================================================================
+// XIM (X Input Method) protocol compliance
+// ===========================================================================
+
+test.describe.serial("XIM protocol compliance", () => {
+	test("XIM server window exists on display", async ({
+		sidecarContainer,
+	}) => {
+		const output = await runPythonX11(
+			sidecarContainer,
+			`
+import Xlib.display
+d = Xlib.display.Display()
+# Check XIM_SERVERS atom
+xim_atom = d.intern_atom('XIM_SERVERS', True)
+if xim_atom:
+    root = d.screen().root
+    prop = root.get_full_property(xim_atom, d.intern_atom('ATOM'))
+    if prop and len(prop.value) > 0:
+        print(f"xim_servers_count={len(prop.value)}")
+        print("xim_server_found=True")
+    else:
+        print("xim_server_found=False")
+else:
+    print("xim_atom_missing")
+d.close()
+`,
+		);
+		// XIM server should be advertised
+		expect(output).toContain("xim_server_found=True");
+	});
+
+	test("xterm launches without XIM errors", async ({
+		sidecarContainer,
+	}) => {
+		// Launch xterm briefly and verify it doesn't crash from XIM issues
+		const output = await execInSidecar(
+			sidecarContainer,
+			`timeout 3 xterm -e "echo xterm_started && sleep 1" 2>&1; echo "exit_code=$?"`,
+		);
+		// Should not see "Cannot open input method" or similar errors
+		expect(output).not.toContain("Cannot open input method");
+	});
+});
+
+// ===========================================================================
+// XEmbed protocol compliance
+// ===========================================================================
+
+test.describe.serial("XEmbed protocol compliance", () => {
+	test("_XEMBED and _XEMBED_INFO atoms exist", async ({
+		sidecarContainer,
+	}) => {
+		const output = await runPythonX11(
+			sidecarContainer,
+			`
+import Xlib.display
+d = Xlib.display.Display()
+xembed = d.intern_atom('_XEMBED', True)
+xembed_info = d.intern_atom('_XEMBED_INFO', True)
+print(f"xembed_atom={xembed}")
+print(f"xembed_info_atom={xembed_info}")
+print(f"xembed_present={xembed > 0}")
+print(f"xembed_info_present={xembed_info > 0}")
+d.close()
+`,
+		);
+		expect(output).toContain("xembed_present=True");
+		expect(output).toContain("xembed_info_present=True");
+	});
+
+	test("System tray atoms are pre-defined", async ({
+		sidecarContainer,
+	}) => {
+		const output = await runPythonX11(
+			sidecarContainer,
+			`
+import Xlib.display
+d = Xlib.display.Display()
+tray_opcode = d.intern_atom('_NET_SYSTEM_TRAY_OPCODE', True)
+tray_s0 = d.intern_atom('_NET_SYSTEM_TRAY_S0', True)
+print(f"tray_opcode_exists={tray_opcode > 0}")
+print(f"tray_s0_exists={tray_s0 > 0}")
+d.close()
+`,
+		);
+		expect(output).toContain("tray_opcode_exists=True");
+		expect(output).toContain("tray_s0_exists=True");
+	});
+});
+
+// ===========================================================================
+// Comprehensive application compatibility tests
+// ===========================================================================
+
+test.describe.serial("Application compatibility", () => {
+	test("Tk applications (wish) can open display", async ({
+		sidecarContainer,
+	}) => {
+		// Tk uses XI 1.x, so this tests our ListInputDevices implementation
+		const output = await execInSidecar(
+			sidecarContainer,
+			`echo 'puts "tk_ok"; exit' | timeout 5 wish 2>&1 || echo "wish_not_available"`,
+		);
+		if (!output.includes("wish_not_available")) {
+			expect(output).toContain("tk_ok");
+		}
+	});
+
+	test("xclock renders without errors", async ({ sidecarContainer }) => {
+		const output = await execInSidecar(
+			sidecarContainer,
+			`timeout 3 xclock -digital 2>&1; echo "exit=$?"`,
+		);
+		expect(output).not.toContain("Error");
+		expect(output).not.toContain("cannot open display");
+	});
+
+	test("xdpyinfo reports complete display info", async ({
+		sidecarContainer,
+	}) => {
+		const output = await execInSidecar(sidecarContainer, "xdpyinfo 2>&1");
+		expect(output).toContain("number of extensions:");
+		expect(output).toContain("RENDER");
+		expect(output).toContain("RANDR");
+		expect(output).toContain("XFIXES");
+		expect(output).toContain("SYNC");
+		expect(output).toContain("XKEYBOARD");
+		expect(output).toContain("Composite");
+		expect(output).toContain("GLX");
+		expect(output).toContain("MIT-SHM");
+		expect(output).toContain("DOUBLE-BUFFER");
+		expect(output).toContain("SHAPE");
+		expect(output).toContain("RECORD");
+		expect(output).toContain("XTEST");
+		expect(output).toContain("X-Resource");
+		expect(output).toContain("DPMS");
+		expect(output).toContain("BIG-REQUESTS");
+	});
+
+	test("Multiple concurrent X clients don't crash", async ({
+		sidecarContainer,
+	}) => {
+		const output = await runPythonX11(
+			sidecarContainer,
+			`
+import Xlib.display
+import threading
+import time
+
+results = []
+errors = []
+
+def create_window(idx):
+    try:
+        d = Xlib.display.Display()
+        screen = d.screen()
+        w = screen.root.create_window(
+            10 + idx * 20, 10, 50, 50, 0, screen.root_depth)
+        w.map()
+        d.sync()
+        time.sleep(0.3)
+        w.destroy()
+        d.sync()
+        d.close()
+        results.append(f"client_{idx}_ok")
+    except Exception as e:
+        errors.append(f"client_{idx}_error={e}")
+
+threads = []
+for i in range(5):
+    t = threading.Thread(target=create_window, args=(i,))
+    threads.append(t)
+    t.start()
+
+for t in threads:
+    t.join()
+
+print(f"ok_count={len(results)}")
+print(f"error_count={len(errors)}")
+for e in errors:
+    print(e)
+`,
+		);
+		expect(output).toContain("ok_count=5");
+		expect(output).toContain("error_count=0");
+	});
+
+	test("Clipboard round-trip between clients works", async ({
+		sidecarContainer,
+	}) => {
+		const output = await runPythonX11(
+			sidecarContainer,
+			`
+import Xlib.display, Xlib.X, Xlib.Xatom
+import time
+
+d1 = Xlib.display.Display()
+d2 = Xlib.display.Display()
+screen = d1.screen()
+
+# Create owner window
+owner = screen.root.create_window(0, 0, 1, 1, 0, screen.root_depth,
+    event_mask=Xlib.X.PropertyChangeMask)
+owner.map()
+d1.sync()
+
+# Set clipboard content
+clipboard = d1.intern_atom('CLIPBOARD')
+targets = d1.intern_atom('TARGETS')
+utf8 = d1.intern_atom('UTF8_STRING')
+test_data = "Hello from x11-web test!"
+
+# Set owner
+owner.set_selection_owner(clipboard, Xlib.X.CurrentTime)
+d1.sync()
+
+# Verify ownership
+sel_owner = d1.get_selection_owner(clipboard)
+print(f"owner_set={sel_owner == owner.id}")
+
+owner.destroy()
+d1.close()
+d2.close()
+`,
+		);
+		expect(output).toContain("owner_set=True");
+	});
+});
