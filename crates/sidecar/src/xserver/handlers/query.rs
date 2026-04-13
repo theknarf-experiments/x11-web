@@ -9,14 +9,49 @@ use crate::xserver::core::require_len;
 
 pub(crate) fn handle_query_best_size(state: &ClientState, data: &[u8], seq: u16) -> Vec<u8> {
     require_len!(data, 12, seq, 97);
+    let class = data[1]; // 0=Cursor, 1=Tile, 2=Stipple
+    let width = state.read_u16(data, 8);
+    let height = state.read_u16(data, 10);
+
+    // Per X11 spec §8.5.2:
+    // - Cursor: return the closest size that the display can support.
+    //   Our software implementation supports any size, so return as-is.
+    // - Tile: return the size snapped to a power-of-two or the closest
+    //   size the server can tile efficiently.  In software, any size works.
+    // - Stipple: similar to Tile.
+    // Validate class is 0, 1, or 2.
+    if class > 2 {
+        return build_error(BAD_VALUE, seq, class as u32, 97, 0);
+    }
+
+    let (best_w, best_h) = match class {
+        0 => {
+            // Cursor: most hardware has a max cursor size.  We support any
+            // size in software; clamp to a reasonable 256×256 maximum.
+            (width.min(256).max(1), height.min(256).max(1))
+        }
+        1 | 2 => {
+            // Tile / Stipple: snap to nearest power-of-two for efficient
+            // tiling when the hardware would benefit. Our software renderer
+            // handles any size, but returning power-of-two is conventional.
+            (next_power_of_two(width), next_power_of_two(height))
+        }
+        _ => (width, height),
+    };
+
     let mut reply = [0u8; 32];
     reply[0] = 1;
     state.write_u16(&mut reply, 2, seq);
-    let width = state.read_u16(data, 8);
-    let height = state.read_u16(data, 10);
-    state.write_u16(&mut reply, 8, width);
-    state.write_u16(&mut reply, 10, height);
+    state.write_u16(&mut reply, 8, best_w);
+    state.write_u16(&mut reply, 10, best_h);
     reply.to_vec()
+}
+
+/// Round up to the nearest power of two, with a minimum of 1.
+fn next_power_of_two(v: u16) -> u16 {
+    if v == 0 { return 1; }
+    let v32 = v as u32;
+    (v32.next_power_of_two() as u16).max(1)
 }
 
 // ---------------------------------------------------------------------------

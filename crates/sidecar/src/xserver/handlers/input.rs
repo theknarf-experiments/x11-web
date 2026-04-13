@@ -849,8 +849,13 @@ pub(crate) fn handle_set_access_control(state: &mut ClientState, data: &[u8]) ->
 
 pub(crate) fn handle_set_close_down_mode(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
     require_len!(data, 4, state.sequence, 112);
-    state.close_down_mode = data[1];
-    debug!("SetCloseDownMode: mode={}", data[1]);
+    let mode = data[1];
+    // Per X11 spec: mode must be 0 (Destroy), 1 (RetainPermanent), or 2 (RetainTemporary).
+    if mode > 2 {
+        return build_error(BAD_VALUE, state.sequence, mode as u32, 112, 0);
+    }
+    state.close_down_mode = mode;
+    debug!("SetCloseDownMode: mode={mode}");
     Vec::new()
 }
 
