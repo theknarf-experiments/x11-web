@@ -380,6 +380,84 @@ pub(crate) fn handle_send_event(state: &mut ClientState, data: &[u8]) -> Vec<u8>
                 }
                 return Vec::new();
             }
+
+            // _XEMBED: XEmbed protocol messages for embedded window management.
+            // These control focus, activation, and lifecycle of embedded windows
+            // (system tray icons, plugin windows, embedded terminals).
+            let xembed_atom = state.intern_atom("_XEMBED", false);
+            if msg_type == xembed_atom {
+                let _timestamp = state.read_u32(&event, 12);
+                let xembed_message = state.read_u32(&event, 16);
+                let detail = state.read_u32(&event, 20);
+                let _data1 = if event.len() >= 28 { state.read_u32(&event, 24) } else { 0 };
+                let _data2 = if event.len() >= 32 { state.read_u32(&event, 28) } else { 0 };
+
+                // XEmbed message types:
+                const XEMBED_EMBEDDED_NOTIFY: u32 = 0;
+                const XEMBED_WINDOW_ACTIVATE: u32 = 1;
+                const XEMBED_WINDOW_DEACTIVATE: u32 = 2;
+                const XEMBED_REQUEST_FOCUS: u32 = 3;
+                const XEMBED_FOCUS_IN: u32 = 4;
+                const XEMBED_FOCUS_OUT: u32 = 5;
+                const XEMBED_FOCUS_NEXT: u32 = 6;
+                const XEMBED_FOCUS_PREV: u32 = 7;
+                const XEMBED_MODALITY_ON: u32 = 10;
+                const XEMBED_MODALITY_OFF: u32 = 11;
+                const XEMBED_REGISTER_ACCELERATOR: u32 = 12;
+                const XEMBED_UNREGISTER_ACCELERATOR: u32 = 13;
+                const XEMBED_ACTIVATE_ACCELERATOR: u32 = 14;
+
+                match xembed_message {
+                    XEMBED_EMBEDDED_NOTIFY => {
+                        debug!("XEMBED_EMBEDDED_NOTIFY: target={target:#x} embedder={detail:#x}");
+                        // The window has been embedded — update _XEMBED_INFO
+                        // to mark it as mapped/visible.
+                    }
+                    XEMBED_WINDOW_ACTIVATE => {
+                        debug!("XEMBED_WINDOW_ACTIVATE: target={target:#x}");
+                        // Forward as FocusIn if the target window exists.
+                    }
+                    XEMBED_WINDOW_DEACTIVATE => {
+                        debug!("XEMBED_WINDOW_DEACTIVATE: target={target:#x}");
+                    }
+                    XEMBED_REQUEST_FOCUS => {
+                        debug!("XEMBED_REQUEST_FOCUS: target={target:#x}");
+                        // An embedded window requests focus. Send XEMBED_FOCUS_IN back.
+                        let reply_xembed_atom = state.intern_atom("_XEMBED", false);
+                        let ts = state.timestamp();
+                        let mut focus_event = [0u8; 32];
+                        focus_event[0] = CLIENT_MESSAGE_EVENT;
+                        focus_event[1] = 32;
+                        state.write_u32(&mut focus_event, 4, target);
+                        state.write_u32(&mut focus_event, 8, reply_xembed_atom);
+                        state.write_u32(&mut focus_event, 12, ts);
+                        state.write_u32(&mut focus_event, 16, XEMBED_FOCUS_IN);
+                        state.write_u32(&mut focus_event, 20, 1); // XEMBED_FOCUS_CURRENT
+                        if !state.event_router.send_event(target, focus_event.to_vec()) {
+                            state.pending_events.push(focus_event.to_vec());
+                        }
+                    }
+                    XEMBED_FOCUS_IN => {
+                        debug!("XEMBED_FOCUS_IN: target={target:#x} detail={detail}");
+                    }
+                    XEMBED_FOCUS_OUT => {
+                        debug!("XEMBED_FOCUS_OUT: target={target:#x}");
+                    }
+                    XEMBED_FOCUS_NEXT | XEMBED_FOCUS_PREV => {
+                        debug!("XEMBED_FOCUS_NEXT/PREV: target={target:#x}");
+                    }
+                    XEMBED_MODALITY_ON | XEMBED_MODALITY_OFF => {
+                        debug!("XEMBED_MODALITY: target={target:#x} on={}", xembed_message == XEMBED_MODALITY_ON);
+                    }
+                    XEMBED_REGISTER_ACCELERATOR | XEMBED_UNREGISTER_ACCELERATOR | XEMBED_ACTIVATE_ACCELERATOR => {
+                        debug!("XEMBED_ACCELERATOR: target={target:#x} msg={xembed_message}");
+                    }
+                    _ => {
+                        debug!("XEMBED: unknown message {xembed_message} target={target:#x}");
+                    }
+                }
+                return Vec::new();
+            }
         }
     }
 
