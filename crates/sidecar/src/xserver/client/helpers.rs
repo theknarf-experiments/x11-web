@@ -16,7 +16,6 @@ impl ClientState {
     /// Add a new INCR transfer, enforcing a maximum limit.
     /// If the limit is reached, stale transfers are cleaned up first.
     /// Returns false if the transfer could not be added (limit still exceeded after cleanup).
-    #[allow(dead_code)]
     pub(crate) fn push_incr_transfer(&mut self, transfer: super::super::types::IncrTransfer) -> bool {
         const MAX_INCR_TRANSFERS: usize = 100;
         if self.incr_transfers.len() >= MAX_INCR_TRANSFERS {

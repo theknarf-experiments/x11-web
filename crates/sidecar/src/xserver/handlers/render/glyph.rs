@@ -7,7 +7,7 @@ use crate::xserver::core::require_len;
 use super::{
     PICTFORMAT_ARGB32, PICTFORMAT_A8, PICTFORMAT_A1,
     pict_format_has_alpha, pad4,
-    composite_pixel, ClipSnapshot, resolve_source_color,
+    composite_pixel, composite_pixel_ca, ClipSnapshot, resolve_source_color,
     GlyphSetState, StoredGlyph,
 };
 
@@ -515,6 +515,12 @@ pub(crate) fn handle_composite_glyphs(state: &mut ClientState, data: &[u8], glyp
 
         for op in &ops {
             let fb_data = fb.data_mut();
+            // ARGB32-format glyphs carry per-channel alpha for sub-pixel
+            // (LCD) text rendering. Each channel of the glyph mask
+            // independently modulates the corresponding source channel,
+            // matching the RENDER spec's component-alpha behaviour.
+            let is_argb = op.format_id == PICTFORMAT_ARGB32;
+
             for row in 0..op.height as i32 {
                 let dy = op.dst_y + row;
                 if dy < 0 || dy >= fb_h {
@@ -529,27 +535,54 @@ pub(crate) fn handle_composite_glyphs(state: &mut ClientState, data: &[u8], glyp
                         continue;
                     }
 
-                    let alpha = get_glyph_alpha(&op.alpha_data, op.width, col as u16, row as u16, op.format_id);
-                    if alpha == 0 {
+                    let dst_off = dy as usize * fb_stride + dx as usize * 4;
+                    if dst_off + 3 >= fb_data.len() {
                         continue;
                     }
 
-                    // Modulate source color by glyph alpha. Both
-                    // source and result are premultiplied.
-                    let eff_a = ((sa as u32 * alpha as u32 + 127) / 255) as u8;
-                    let eff_r = ((sr as u32 * alpha as u32 + 127) / 255) as u8;
-                    let eff_g = ((sg as u32 * alpha as u32 + 127) / 255) as u8;
-                    let eff_b = ((sb as u32 * alpha as u32 + 127) / 255) as u8;
+                    if is_argb {
+                        // Component-alpha: each glyph channel modulates
+                        // the corresponding source channel independently.
+                        let (mb, mg, mr, ma) = get_glyph_argb(
+                            &op.alpha_data, op.width, col as u16, row as u16,
+                        );
+                        if mb == 0 && mg == 0 && mr == 0 && ma == 0 {
+                            continue;
+                        }
+                        let eff_b = ((sb as u32 * mb as u32 + 127) / 255) as u8;
+                        let eff_g = ((sg as u32 * mg as u32 + 127) / 255) as u8;
+                        let eff_r = ((sr as u32 * mr as u32 + 127) / 255) as u8;
+                        let eff_a = ((sa as u32 * ma as u32 + 127) / 255) as u8;
+                        // Per-channel effective source alpha for CA compositing.
+                        let sa_b = ((sa as u32 * mb as u32 + 127) / 255) as u8;
+                        let sa_g = ((sa as u32 * mg as u32 + 127) / 255) as u8;
+                        let sa_r = ((sa as u32 * mr as u32 + 127) / 255) as u8;
+                        let sa_a = ((sa as u32 * ma as u32 + 127) / 255) as u8;
+                        composite_pixel_ca(
+                            pict_op,
+                            &mut fb_data[dst_off..dst_off + 4],
+                            eff_b, eff_g, eff_r, eff_a,
+                            sa_b, sa_g, sa_r, sa_a,
+                            dst_has_alpha,
+                        );
+                    } else {
+                        // Uniform alpha (A8/A1): single alpha modulates
+                        // all source channels equally.
+                        let alpha = get_glyph_alpha(
+                            &op.alpha_data, op.width, col as u16, row as u16, op.format_id,
+                        );
+                        if alpha == 0 {
+                            continue;
+                        }
+                        let eff_a = ((sa as u32 * alpha as u32 + 127) / 255) as u8;
+                        let eff_r = ((sr as u32 * alpha as u32 + 127) / 255) as u8;
+                        let eff_g = ((sg as u32 * alpha as u32 + 127) / 255) as u8;
+                        let eff_b = ((sb as u32 * alpha as u32 + 127) / 255) as u8;
 
-                    let dst_off = dy as usize * fb_stride + dx as usize * 4;
-                    if dst_off + 3 < fb_data.len() {
                         composite_pixel(
                             pict_op,
                             &mut fb_data[dst_off..dst_off + 4],
-                            eff_b,
-                            eff_g,
-                            eff_r,
-                            eff_a,
+                            eff_b, eff_g, eff_r, eff_a,
                             dst_has_alpha,
                         );
                     }
@@ -611,5 +644,18 @@ fn get_glyph_alpha(data: &[u8], width: u16, x: u16, y: u16, format_id: u32) -> u
                 0
             }
         }
+    }
+}
+
+/// Extract per-channel BGRA values from an ARGB32-format glyph at a given position.
+/// Used for component-alpha (sub-pixel) text rendering where each channel
+/// of the glyph mask independently modulates the corresponding source channel.
+fn get_glyph_argb(data: &[u8], width: u16, x: u16, y: u16) -> (u8, u8, u8, u8) {
+    let off = (y as usize * width as usize + x as usize) * 4;
+    if off + 3 < data.len() {
+        // Glyph data is stored in BGRA order (matching our framebuffer layout).
+        (data[off], data[off + 1], data[off + 2], data[off + 3])
+    } else {
+        (0, 0, 0, 0)
     }
 }

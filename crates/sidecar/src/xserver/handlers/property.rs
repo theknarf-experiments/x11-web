@@ -32,7 +32,11 @@ pub(super) use super::*;
 ///
 /// The caller must send the SelectionNotify event with the INCR target to
 /// the requestor after calling this function.
-#[allow(dead_code)]
+/// INCR threshold: data larger than this triggers incremental transfer.
+/// The ICCCM suggests using the server's maximum request size; common
+/// implementations use 64 KB.  We use 64 KB to match standard practice.
+pub(crate) const INCR_THRESHOLD: usize = 65536;
+
 pub(crate) fn start_incr_transfer(
     state: &mut ClientState,
     requestor: u32,
@@ -42,7 +46,6 @@ pub(crate) fn start_incr_transfer(
     data: Vec<u8>,
 ) -> bool {
     const INCR_ATOM: u32 = 138;
-    const CARDINAL_ATOM: u32 = 6;
     let total_size = data.len() as u32;
 
     // Set the INCR property with the total size estimate (CARDINAL/32).
@@ -262,24 +265,44 @@ pub(crate) fn serve_persistent_clipboard(
         // The property type is the target atom itself (standard practice).
         let prop_type = target;
 
-        if let Some(win) = state.windows.get_mut(&requestor) {
-            win.properties.insert(property, PropertyValue {
-                prop_type,
-                format: 8,
-                data,
-            });
-        }
+        if data.len() > INCR_THRESHOLD {
+            // Large data: use INCR (incremental) transfer per ICCCM §2.7.2.
+            // Set INCR property, register transfer, then send SelectionNotify
+            // with the property so the requestor knows to begin consuming.
+            start_incr_transfer(state, requestor, property, selection, target, data);
 
-        let mut event = [0u8; 32];
-        event[0] = SELECTION_NOTIFY_EVENT;
-        state.write_u16(&mut event, 2, state.sequence);
-        state.write_u32(&mut event, 4, state.timestamp());
-        state.write_u32(&mut event, 8, requestor);
-        state.write_u32(&mut event, 12, selection);
-        state.write_u32(&mut event, 16, target);
-        state.write_u32(&mut event, 20, property);
-        if !state.event_router.send_event(requestor, event.to_vec()) {
-            state.pending_events.push(event.to_vec());
+            let mut event = [0u8; 32];
+            event[0] = SELECTION_NOTIFY_EVENT;
+            state.write_u16(&mut event, 2, state.sequence);
+            state.write_u32(&mut event, 4, state.timestamp());
+            state.write_u32(&mut event, 8, requestor);
+            state.write_u32(&mut event, 12, selection);
+            state.write_u32(&mut event, 16, target);
+            state.write_u32(&mut event, 20, property);
+            if !state.event_router.send_event(requestor, event.to_vec()) {
+                state.pending_events.push(event.to_vec());
+            }
+        } else {
+            // Small data: set property inline (normal transfer).
+            if let Some(win) = state.windows.get_mut(&requestor) {
+                win.properties.insert(property, PropertyValue {
+                    prop_type,
+                    format: 8,
+                    data,
+                });
+            }
+
+            let mut event = [0u8; 32];
+            event[0] = SELECTION_NOTIFY_EVENT;
+            state.write_u16(&mut event, 2, state.sequence);
+            state.write_u32(&mut event, 4, state.timestamp());
+            state.write_u32(&mut event, 8, requestor);
+            state.write_u32(&mut event, 12, selection);
+            state.write_u32(&mut event, 16, target);
+            state.write_u32(&mut event, 20, property);
+            if !state.event_router.send_event(requestor, event.to_vec()) {
+                state.pending_events.push(event.to_vec());
+            }
         }
         return true;
     }
