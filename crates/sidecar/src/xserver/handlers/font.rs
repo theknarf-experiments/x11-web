@@ -15,6 +15,10 @@ pub(crate) fn handle_open_font(state: &mut ClientState, data: &[u8]) -> Vec<u8> 
     if !state.validate_resource_id(fid) {
         return build_error(BAD_ID_CHOICE, state.sequence, fid, 45, 0);
     }
+    // Per X11 spec: BAD_ID_CHOICE if the font ID is already in use
+    if state.font_manager.get_font(fid).is_some() {
+        return build_error(BAD_ID_CHOICE, state.sequence, fid, 45, 0);
+    }
 
     let name_len = state.read_u16(data, 8) as usize;
     let name = if 12 + name_len <= data.len() {

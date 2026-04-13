@@ -332,6 +332,11 @@ pub(crate) fn handle_alloc_color_cells(state: &mut ClientState, data: &[u8], seq
     let n_colors = state.read_u16(data, 8);
     let n_planes = state.read_u16(data, 10);
 
+    // Per X11 spec: n_colors must be non-zero
+    if n_colors == 0 {
+        return build_error(BAD_VALUE, seq, 0, 86, 0);
+    }
+
     // Validate colormap exists
     if cmap_id != ROOT_COLORMAP && !state.colormaps.contains_key(&cmap_id) {
         return build_error(BAD_COLOR, seq, cmap_id, 86, 0);
@@ -341,6 +346,11 @@ pub(crate) fn handle_alloc_color_cells(state: &mut ClientState, data: &[u8], seq
     let is_writable = state.colormaps.get(&cmap_id).is_some_and(|c| c.is_writable());
     if !is_writable {
         return build_error(BAD_ALLOC, seq, 0, 86, 0);
+    }
+
+    // Validate planes count is reasonable (max 24 bits depth)
+    if n_planes > 24 {
+        return build_error(BAD_VALUE, seq, n_planes as u32, 86, 0);
     }
 
     // For simplicity, we support n_planes=0 (flat allocation) or small plane counts
@@ -396,6 +406,11 @@ pub(crate) fn handle_alloc_color_planes(state: &mut ClientState, data: &[u8], se
     let n_greens = state.read_u16(data, 12);
     let n_blues = state.read_u16(data, 14);
 
+    // Per X11 spec: n_colors must be non-zero
+    if n_colors == 0 {
+        return build_error(BAD_VALUE, seq, 0, 87, 0);
+    }
+
     // Validate colormap exists
     if cmap_id != ROOT_COLORMAP && !state.colormaps.contains_key(&cmap_id) {
         return build_error(BAD_COLOR, seq, cmap_id, 87, 0);
@@ -407,6 +422,10 @@ pub(crate) fn handle_alloc_color_planes(state: &mut ClientState, data: &[u8], se
     }
 
     let total_planes = n_reds as usize + n_greens as usize + n_blues as usize;
+    // Per X11 spec: total planes must fit within the visual's depth
+    if total_planes > 24 {
+        return build_error(BAD_VALUE, seq, total_planes as u32, 87, 0);
+    }
     let total_colors = n_colors as usize * (1usize << total_planes);
 
     let pixels = if let Some(cmap) = state.colormaps.get_mut(&cmap_id) {
