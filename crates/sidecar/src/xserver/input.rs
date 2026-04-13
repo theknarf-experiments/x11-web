@@ -1298,4 +1298,51 @@ mod tests {
         // Should return 0 (blocked by do_not_propagate, event discarded)
         assert_eq!(target, 0);
     }
+
+    #[test]
+    fn test_find_event_subwindow_deepest_mapped() {
+        // Test that find_event_subwindow finds the deepest mapped child under (x, y)
+        let mut windows = HashMap::new();
+        let root = 0x62;
+        let mut root_win = test_window(root, 0, 0, 0, 1024, 768, 0);
+        root_win.children_order = vec![10, 20];
+        windows.insert(root, root_win);
+
+        // Window 10 at (0,0,200,200)
+        let mut w10 = test_window(10, root, 0, 0, 200, 200, BUTTON_PRESS_MASK);
+        w10.children_order = vec![30];
+        windows.insert(10, w10);
+
+        // Window 30 nested in 10 at (10,10,50,50)
+        windows.insert(30, test_window(30, 10, 10, 10, 50, 50, BUTTON_PRESS_MASK));
+
+        // Window 20 at (300,300,100,100)
+        windows.insert(20, test_window(20, root, 300, 300, 100, 100, BUTTON_PRESS_MASK));
+
+        // Click at (15, 15) should find window 30 (nested child of 10)
+        let (target, _rx, _ry) = find_event_subwindow(&windows, root, 15, 15, BUTTON_PRESS_MASK);
+        assert_eq!(target, 30);
+
+        // Click at (350, 350) should find window 20
+        let (target2, _, _) = find_event_subwindow(&windows, root, 350, 350, BUTTON_PRESS_MASK);
+        assert_eq!(target2, 20);
+    }
+
+    #[test]
+    fn test_find_event_subwindow_unmapped_skipped() {
+        let mut windows = HashMap::new();
+        let root = 0x62;
+        let mut root_win = test_window(root, 0, 0, 0, 1024, 768, BUTTON_PRESS_MASK);
+        root_win.children_order = vec![10];
+        windows.insert(root, root_win);
+
+        // Unmapped window — should be skipped
+        let mut w10 = test_window(10, root, 0, 0, 200, 200, BUTTON_PRESS_MASK);
+        w10.mapped = false;
+        windows.insert(10, w10);
+
+        // Click should fall through to root
+        let (target, _, _) = find_event_subwindow(&windows, root, 50, 50, BUTTON_PRESS_MASK);
+        assert_eq!(target, root);
+    }
 }
