@@ -729,6 +729,19 @@ pub(crate) async fn handle_client(
                     // Drain frozen grab events since the grab holder is gone
                     state.grabs.frozen_pointer_events.clear();
                     state.grabs.frozen_keyboard_events.clear();
+                    // Release any active pointer/keyboard grabs held by this client
+                    state.grabs.pointer_grab = None;
+                    state.grabs.keyboard_grab = None;
+                    // Clean up passive grabs on windows owned by this client.
+                    // Per X11 spec, when a client disconnects with DestroyAll, all
+                    // its passive grabs (button and key) must be removed to prevent
+                    // stale references to destroyed windows.
+                    {
+                        let my_windows: std::collections::HashSet<u32> =
+                            state.x11_to_uuid.keys().copied().collect();
+                        state.grabs.button_grabs.retain(|g| !my_windows.contains(&g.grab_window));
+                        state.grabs.key_grabs.retain(|g| !my_windows.contains(&g.grab_window));
+                    }
 
                     match state.close_down_mode {
                         0 => {
@@ -819,6 +832,15 @@ pub(crate) async fn handle_client(
                             for wid in &wids {
                                 if let Some(win) = state.windows.get_mut(wid) {
                                     win.retained_temporary = true;
+                                }
+                            }
+                            // Sync the retained_temporary flag to shared_windows so
+                            // other clients can see it via KillClient(AllTemporary).
+                            if let Ok(mut shared) = state.shared_windows.lock() {
+                                for &wid in &wids {
+                                    if let Some(win) = shared.get_mut(&wid) {
+                                        win.retained_temporary = true;
+                                    }
                                 }
                             }
                             state.retained_temporary_windows.extend(wids.clone());

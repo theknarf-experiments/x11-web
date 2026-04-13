@@ -918,16 +918,29 @@ pub(crate) fn handle_kill_client(state: &mut ClientState, data: &[u8]) -> Vec<u8
     if resource == 0 {
         // AllTemporary: destroy all windows retained from clients that
         // disconnected with close_down_mode = RetainTemporary.
+        // Per X11 spec, this destroys ALL resources from such clients.
         debug!("KillClient: AllTemporary");
-        let to_destroy: Vec<u32> = state
+
+        // Collect retained_temporary windows from both local and shared state.
+        let mut to_destroy: Vec<u32> = state
             .windows
             .values()
             .filter(|w| w.retained_temporary)
             .map(|w| w.id)
             .collect();
-        for wid in to_destroy {
-            state.windows.remove(&wid);
-            if let Some(uuid) = state.x11_to_uuid.remove(&wid) {
+
+        // Also check shared_windows for retained windows from other clients.
+        if let Ok(shared) = state.shared_windows.lock() {
+            for (wid, win) in shared.iter() {
+                if win.retained_temporary && !to_destroy.contains(wid) {
+                    to_destroy.push(*wid);
+                }
+            }
+        }
+
+        for wid in &to_destroy {
+            state.windows.remove(wid);
+            if let Some(uuid) = state.x11_to_uuid.remove(wid) {
                 state.window_router.unregister_all(std::slice::from_ref(&uuid));
                 let _ = state.update_tx.send((
                     state.client_id.clone(),
@@ -935,6 +948,14 @@ pub(crate) fn handle_kill_client(state: &mut ClientState, data: &[u8]) -> Vec<u8
                 ));
             }
         }
+
+        // Remove from shared_windows as well.
+        if let Ok(mut shared) = state.shared_windows.lock() {
+            for wid in &to_destroy {
+                shared.remove(wid);
+            }
+        }
+
         // Also clean up retained_temporary_windows list
         state.retained_temporary_windows.clear();
     } else {
@@ -991,10 +1012,22 @@ pub(crate) fn handle_rotate_properties(state: &mut ClientState, data: &[u8]) -> 
     let mut atoms = Vec::with_capacity(n_atoms);
     for i in 0..n_atoms {
         let off = 12 + i * 4;
-        atoms.push(state.read_u32(data, off));
+        let atom = state.read_u32(data, off);
+        atoms.push(atom);
+    }
+
+    // Per X11 spec, duplicate atoms in the list generate BadMatch.
+    {
+        let mut seen = std::collections::HashSet::with_capacity(atoms.len());
+        for &atom in &atoms {
+            if !seen.insert(atom) {
+                return build_error(BAD_MATCH, state.sequence, atom, 114, 0);
+            }
+        }
     }
 
     if atoms.len() < 2 {
+        // Single atom: valid but a no-op per spec.
         return Vec::new();
     }
 
