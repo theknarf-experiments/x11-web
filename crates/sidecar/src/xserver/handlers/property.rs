@@ -192,8 +192,26 @@ pub(crate) fn serve_persistent_clipboard(
 
     // Handle TARGETS: return the list of available target atoms plus
     // TARGETS and TIMESTAMP (standard practice).
+    // Also advertise text format variants if any text format is stored.
     if target == TARGETS_ATOM {
+        const STRING_ATOM: u32 = 31;
+        const UTF8_STRING_ATOM: u32 = 133;
+        const COMPOUND_TEXT_ATOM: u32 = 181;
+        const TEXT_ATOM: u32 = 182;
+        let text_atoms = [STRING_ATOM, UTF8_STRING_ATOM, COMPOUND_TEXT_ATOM, TEXT_ATOM];
+
         let mut atoms: Vec<u32> = entry.targets.keys().copied().collect();
+
+        // If any text format is available, advertise all text formats
+        let has_text = atoms.iter().any(|a| text_atoms.contains(a));
+        if has_text {
+            for &ta in &text_atoms {
+                if !atoms.contains(&ta) {
+                    atoms.push(ta);
+                }
+            }
+        }
+
         if !atoms.contains(&TARGETS_ATOM) {
             atoms.push(TARGETS_ATOM);
         }
@@ -305,6 +323,48 @@ pub(crate) fn serve_persistent_clipboard(
             }
         }
         return true;
+    }
+
+    // Target not found directly — try automatic text format conversion.
+    // Many apps request UTF8_STRING but clipboard may only have STRING, or vice versa.
+    const STRING_ATOM: u32 = 31;
+    const UTF8_STRING_ATOM: u32 = 133;
+    const COMPOUND_TEXT_ATOM: u32 = 181;
+    const TEXT_ATOM: u32 = 182;
+
+    let text_targets = [STRING_ATOM, UTF8_STRING_ATOM, COMPOUND_TEXT_ATOM, TEXT_ATOM];
+    if text_targets.contains(&target) {
+        // Look for any available text format and convert
+        for &alt in &text_targets {
+            if let Some(data) = entry.targets.get(&alt) {
+                let data = data.clone();
+                drop(pc_lock);
+
+                // For STRING <-> UTF8_STRING, the data is typically compatible
+                // (ASCII subset). For COMPOUND_TEXT, we just pass through as-is
+                // since modern apps generally handle UTF-8.
+                if let Some(win) = state.windows.get_mut(&requestor) {
+                    win.properties.insert(property, PropertyValue {
+                        prop_type: target,
+                        format: 8,
+                        data,
+                    });
+                }
+
+                let mut event = [0u8; 32];
+                event[0] = SELECTION_NOTIFY_EVENT;
+                state.write_u16(&mut event, 2, state.sequence);
+                state.write_u32(&mut event, 4, state.timestamp());
+                state.write_u32(&mut event, 8, requestor);
+                state.write_u32(&mut event, 12, selection);
+                state.write_u32(&mut event, 16, target);
+                state.write_u32(&mut event, 20, property);
+                if !state.event_router.send_event(requestor, event.to_vec()) {
+                    state.pending_events.push(event.to_vec());
+                }
+                return true;
+            }
+        }
     }
 
     drop(pc_lock);
