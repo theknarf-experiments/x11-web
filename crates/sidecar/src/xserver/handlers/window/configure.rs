@@ -362,6 +362,10 @@ pub(crate) fn handle_configure_window(state: &mut ClientState, data: &[u8], seq:
                             changed = true;
                         }
                         2 => {
+                            // Per X11 spec: width must be non-zero
+                            if val == 0 {
+                                return build_error(BAD_VALUE, seq, 0, 12, 0);
+                            }
                             let mut w = val as u16;
                             // Apply size hints (ICCCM §4.1.2.3)
                             if let Some(ref hints) = size_hints {
@@ -386,6 +390,10 @@ pub(crate) fn handle_configure_window(state: &mut ClientState, data: &[u8], seq:
                             changed = true;
                         }
                         3 => {
+                            // Per X11 spec: height must be non-zero
+                            if val == 0 {
+                                return build_error(BAD_VALUE, seq, 0, 12, 0);
+                            }
                             let mut h = val as u16;
                             // Apply size hints (ICCCM §4.1.2.3)
                             if let Some(ref hints) = size_hints {

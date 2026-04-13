@@ -379,6 +379,26 @@ pub(crate) fn handle_get_image(state: &mut ClientState, data: &[u8], seq: u16) -
     if !state.windows.contains_key(&drawable) && !state.pixmaps.contains_key(&drawable) {
         return build_error(BAD_DRAWABLE, seq, drawable, 73, 0);
     }
+    // Per X11 spec: GetImage on an InputOutput window that is unmapped or
+    // has an unmapped ancestor generates BadMatch. Pixmaps are always OK.
+    if let Some(win) = state.windows.get(&drawable) {
+        if win.class == 1 && !win.mapped {
+            return build_error(BAD_MATCH, seq, drawable, 73, 0);
+        }
+        // Also check ancestors are mapped
+        let mut parent = win.parent;
+        for _ in 0..128 {
+            if parent == state.root_window || parent == 0 { break; }
+            if let Some(pw) = state.windows.get(&parent) {
+                if !pw.mapped {
+                    return build_error(BAD_MATCH, seq, drawable, 73, 0);
+                }
+                parent = pw.parent;
+            } else {
+                break;
+            }
+        }
+    }
     if format != 1 && format != 2 {
         return build_error(BAD_VALUE, seq, format as u32, 73, 0);
     }

@@ -16,6 +16,10 @@ pub(crate) fn handle_clear_area(state: &mut ClientState, data: &[u8], _seq: u16)
     if !state.windows.contains_key(&wid) {
         return build_error(BAD_WINDOW, state.sequence, wid, 61, 0);
     }
+    // Per X11 spec: ClearArea on an InputOnly window generates BadMatch.
+    if state.windows.get(&wid).is_some_and(|w| w.class == 2) {
+        return build_error(BAD_MATCH, state.sequence, wid, 61, 0);
+    }
 
     let x = state.read_i16(data, 8);
     let y = state.read_i16(data, 10);
