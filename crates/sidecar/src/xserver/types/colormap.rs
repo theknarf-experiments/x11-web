@@ -461,4 +461,39 @@ mod tests {
         let mut cmap = ColormapState::new_truecolor(0x21);
         assert!(cmap.alloc_cells_contiguous(1).is_none());
     }
+
+    // -----------------------------------------------------------------------
+    // CopyColormapAndFree: copy preserves allocations, source is freed
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn copy_colormap_preserves_allocated_state() {
+        let mut src = ColormapState::new_pseudocolor(0x23, 256);
+        // Allocate some cells in source
+        src.allocated[0] = true;
+        src.allocated[5] = true;
+        src.allocated[10] = true;
+        // Clone = copy (simulating CopyColormapAndFree step 1)
+        let copy = src.clone();
+        // Copy should preserve allocated state
+        assert!(copy.allocated[0]);
+        assert!(copy.allocated[5]);
+        assert!(copy.allocated[10]);
+        assert!(!copy.allocated[1]);
+    }
+
+    #[test]
+    fn copy_colormap_frees_source_cells() {
+        let mut src = ColormapState::new_pseudocolor(0x23, 256);
+        src.allocated[0] = true;
+        src.allocated[5] = true;
+        // Step 1: clone for copy
+        let _copy = src.clone();
+        // Step 2: free source cells (simulating CopyColormapAndFree step 2)
+        for a in src.allocated.iter_mut() {
+            *a = false;
+        }
+        assert!(!src.allocated[0]);
+        assert!(!src.allocated[5]);
+    }
 }

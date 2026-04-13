@@ -2555,4 +2555,88 @@ mod tests {
         let off = 2 * fb.stride() + 2 * 4;
         assert_eq!(fb.data()[off], 42);
     }
+
+    // -----------------------------------------------------------------------
+    // Tiled line drawing
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn draw_line_tiled_horizontal() {
+        let mut fb = Framebuffer::new(20, 10);
+        // Create a 2x1 tile: red, green (BGRA format)
+        let tile_data = vec![
+            0, 0, 255, 255,  // pixel (0,0) = red
+            0, 255, 0, 255,  // pixel (1,0) = green
+        ];
+        fb.draw_line_tiled(2, 3, 7, 3, &tile_data, 2, 1, 0, 0,
+            3, 0xFFFFFFFF, 1, &[]);
+        // Check pixel at (2,3): tile_x = 2%2 = 0 → red
+        let off = 3 * fb.stride() + 2 * 4;
+        assert_eq!(fb.data()[off + 2], 255); // R = 255 (red)
+        // Check pixel at (3,3): tile_x = 3%2 = 1 → green
+        let off2 = 3 * fb.stride() + 3 * 4;
+        assert_eq!(fb.data()[off2 + 1], 255); // G = 255 (green)
+    }
+
+    #[test]
+    fn draw_line_tiled_respects_ts_origin() {
+        let mut fb = Framebuffer::new(20, 10);
+        // 2x1 tile: blue, white
+        let tile_data = vec![
+            255, 0, 0, 255,    // pixel (0,0) = blue
+            255, 255, 255, 255, // pixel (1,0) = white
+        ];
+        // ts_x = 1 shifts tile origin
+        fb.draw_line_tiled(0, 0, 3, 0, &tile_data, 2, 1, 1, 0,
+            3, 0xFFFFFFFF, 1, &[]);
+        // At x=0: tile_x = (0-1)%2 = 1 → white
+        let off = 0 * fb.stride() + 0 * 4;
+        assert_eq!(fb.data()[off], 255); // B
+        assert_eq!(fb.data()[off + 1], 255); // G
+        assert_eq!(fb.data()[off + 2], 255); // R
+    }
+
+    // -----------------------------------------------------------------------
+    // Stippled line drawing
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn draw_line_stippled_foreground_only() {
+        let mut fb = Framebuffer::new(20, 10);
+        // 2x1 stipple as 32bpp: pixel 0 set (white), pixel 1 unset (black)
+        let stipple_data = vec![
+            255, 255, 255, 255, // pixel (0,0) = set
+            0, 0, 0, 0,        // pixel (1,0) = unset
+        ];
+        let fg = 0xFF0000; // red
+        let bg = 0x00FF00; // green
+        // Stippled (opaque=false): only draw fg where stipple bit is set
+        fb.draw_line_stippled(0, 0, 3, 0, fg, bg,
+            &stipple_data, 2, 1, 0, 0, false,
+            3, 0xFFFFFFFF, 1, &[]);
+        // At x=0: stipple set → fg (red)
+        let off = 0 * fb.stride() + 0 * 4;
+        assert_eq!(fb.data()[off + 2], 0xFF); // R
+        // At x=1: stipple unset, not opaque → should remain 0 (not drawn)
+        let off1 = 0 * fb.stride() + 1 * 4;
+        assert_eq!(fb.data()[off1 + 2], 0); // R = 0 (not drawn)
+    }
+
+    #[test]
+    fn draw_line_stippled_opaque_draws_background() {
+        let mut fb = Framebuffer::new(20, 10);
+        let stipple_data = vec![
+            255, 255, 255, 255, // set
+            0, 0, 0, 0,        // unset
+        ];
+        let fg = 0xFF0000;
+        let bg = 0x00FF00;
+        // OpaqueStippled: draw bg where stipple bit is unset
+        fb.draw_line_stippled(0, 0, 3, 0, fg, bg,
+            &stipple_data, 2, 1, 0, 0, true,
+            3, 0xFFFFFFFF, 1, &[]);
+        // At x=1: stipple unset, opaque → bg (green)
+        let off = 0 * fb.stride() + 1 * 4;
+        assert_eq!(fb.data()[off + 1], 0xFF); // G = 255 (green)
+    }
 }

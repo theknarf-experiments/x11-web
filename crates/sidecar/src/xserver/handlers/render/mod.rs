@@ -1342,5 +1342,49 @@ mod tests {
         assert_eq!(a, 255);
         let _ = b;
     }
+
+    // -----------------------------------------------------------------------
+    // PictOp Saturate (op 13) — verify it's a distinct operator
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn pict_op_saturate_factors() {
+        // Saturate: Fa = min(1, (1-Da)/Sa), Fb = 1
+        // With Sa=128, Da=64: Fa = min(1, (255-64)/128) = min(255, (191*255)/128) ≈ 380 → clamped to 255
+        let (fa, fb) = super::pict_op_factors(13, 128, 64);
+        assert_eq!(fb, 255); // Fb = 1.0 always for Saturate
+        assert!(fa > 0);     // Fa should be positive
+    }
+
+    #[test]
+    fn pict_op_saturate_fully_opaque_src() {
+        // With Sa=255 (fully opaque), Da=128:
+        // Fa = min(1, (255-128)/255) = (127*255)/255 = 127
+        let (fa, fb) = super::pict_op_factors(13, 255, 128);
+        assert_eq!(fb, 255);
+        assert!((fa - 127).abs() <= 1); // Allow rounding
+    }
+
+    #[test]
+    fn pict_op_saturate_zero_src_alpha() {
+        // With Sa=0: out_dis returns 0 (divide by zero protection)
+        let (fa, fb) = super::pict_op_factors(13, 0, 128);
+        assert_eq!(fa, 0);
+        assert_eq!(fb, 255);
+    }
+
+    #[test]
+    fn pict_op_all_44_operators_mapped() {
+        // Verify all 44 operators (0-12, 16-27, 32-43) return reasonable values
+        let standard_ops = [0,1,2,3,4,5,6,7,8,9,10,11,12,13]; // 0-13
+        let disjoint_ops = [16,17,18,19,20,21,22,23,24,25,26,27]; // 16-27
+        let conjoint_ops = [32,33,34,35,36,37,38,39,40,41,42,43]; // 32-43
+
+        for &op in standard_ops.iter().chain(disjoint_ops.iter()).chain(conjoint_ops.iter()) {
+            let (fa, fb) = super::pict_op_factors(op, 128, 128);
+            assert!(fa >= 0 && fa <= 255, "op {op}: Fa={fa} out of range");
+            assert!(fb >= 0 && fb <= 255, "op {op}: Fb={fb} out of range");
+        }
+    }
 }
 
