@@ -307,6 +307,8 @@ pub(crate) fn handle_create_picture(state: &mut ClientState, data: &[u8], seq: u
     let mut repeat = 0u32;
     let mut component_alpha = false;
     let mut clip_mask: Option<u32> = None;
+    let mut clip_origin_x: i16 = 0;
+    let mut clip_origin_y: i16 = 0;
     let mut val_off = 20;
     // Parse value-list based on value_mask
     for bit in 0..13 {
@@ -319,6 +321,14 @@ pub(crate) fn handle_create_picture(state: &mut ClientState, data: &[u8], seq: u
                 0 => {
                     repeat = val;
                     debug!("  repeat={repeat}");
+                }
+                4 => {
+                    clip_origin_x = val as i16;
+                    debug!("  clip_origin_x={clip_origin_x}");
+                }
+                5 => {
+                    clip_origin_y = val as i16;
+                    debug!("  clip_origin_y={clip_origin_y}");
                 }
                 6 => {
                     // CPClipMask
@@ -343,8 +353,8 @@ pub(crate) fn handle_create_picture(state: &mut ClientState, data: &[u8], seq: u
             repeat,
             component_alpha,
             clip_rects: None,
-            clip_origin_x: 0,
-            clip_origin_y: 0,
+            clip_origin_x,
+            clip_origin_y,
             clip_mask,
             filter: PictFilter::Nearest,
         },
@@ -373,8 +383,18 @@ pub(crate) fn handle_change_picture(state: &mut ClientState, data: &[u8], seq: u
                         pic.repeat = val;
                         debug!("  repeat={val}");
                     }
+                    4 => {
+                        pic.clip_origin_x = val as i16;
+                        debug!("  clip_origin_x={}", pic.clip_origin_x);
+                    }
+                    5 => {
+                        pic.clip_origin_y = val as i16;
+                        debug!("  clip_origin_y={}", pic.clip_origin_y);
+                    }
                     6 => {
                         pic.clip_mask = if val == 0 { None } else { Some(val) };
+                        // Reset clip rects when clip mask changes
+                        if val == 0 { pic.clip_rects = None; }
                         debug!("  clip_mask={val:#x}");
                     }
                     12 => {
