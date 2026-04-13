@@ -367,3 +367,206 @@ pub(crate) fn build_setup(conn_index: u32) -> Setup {
 
     setup
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // -----------------------------------------------------------------------
+    // Setup reply — X11 protocol spec compliance
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn setup_protocol_version() {
+        let setup = build_setup(0);
+        assert_eq!(setup.protocol_major_version, 11);
+        assert_eq!(setup.protocol_minor_version, 0);
+    }
+
+    #[test]
+    fn setup_status_is_success() {
+        let setup = build_setup(0);
+        assert_eq!(setup.status, 1);
+    }
+
+    #[test]
+    fn setup_has_exactly_one_screen() {
+        let setup = build_setup(0);
+        assert_eq!(setup.roots.len(), 1);
+    }
+
+    #[test]
+    fn setup_screen_root_matches_constant() {
+        let setup = build_setup(0);
+        assert_eq!(setup.roots[0].root, ROOT_WINDOW);
+    }
+
+    #[test]
+    fn setup_screen_root_depth_is_24() {
+        let setup = build_setup(0);
+        assert_eq!(setup.roots[0].root_depth, 24);
+    }
+
+    #[test]
+    fn setup_screen_root_visual_matches() {
+        let setup = build_setup(0);
+        assert_eq!(setup.roots[0].root_visual, ROOT_VISUAL);
+    }
+
+    #[test]
+    fn setup_screen_dimensions() {
+        let setup = build_setup(0);
+        assert_eq!(setup.roots[0].width_in_pixels, SCREEN_WIDTH);
+        assert_eq!(setup.roots[0].height_in_pixels, SCREEN_HEIGHT);
+    }
+
+    #[test]
+    fn setup_screen_white_and_black_pixels() {
+        let setup = build_setup(0);
+        assert_eq!(setup.roots[0].white_pixel, 0x00FFFFFF);
+        assert_eq!(setup.roots[0].black_pixel, 0x00000000);
+    }
+
+    #[test]
+    fn setup_keycode_range() {
+        let setup = build_setup(0);
+        assert_eq!(setup.min_keycode, 8);
+        assert_eq!(setup.max_keycode, 255);
+    }
+
+    #[test]
+    fn setup_resource_id_base_unique_per_connection() {
+        let s0 = build_setup(0);
+        let s1 = build_setup(1);
+        let s2 = build_setup(2);
+        assert_ne!(s0.resource_id_base, s1.resource_id_base);
+        assert_ne!(s1.resource_id_base, s2.resource_id_base);
+    }
+
+    #[test]
+    fn setup_resource_id_mask() {
+        let setup = build_setup(0);
+        assert_eq!(setup.resource_id_mask, 0x003FFFFF);
+    }
+
+    #[test]
+    fn setup_has_six_pixmap_formats() {
+        let setup = build_setup(0);
+        assert_eq!(setup.pixmap_formats.len(), 6);
+        let depths: Vec<u8> = setup.pixmap_formats.iter().map(|f| f.depth).collect();
+        assert!(depths.contains(&1));
+        assert!(depths.contains(&4));
+        assert!(depths.contains(&8));
+        assert!(depths.contains(&16));
+        assert!(depths.contains(&24));
+        assert!(depths.contains(&32));
+    }
+
+    #[test]
+    fn setup_screen_has_six_depths() {
+        let setup = build_setup(0);
+        let depths: Vec<u8> = setup.roots[0].allowed_depths.iter().map(|d| d.depth).collect();
+        assert_eq!(depths.len(), 6);
+        assert!(depths.contains(&1));
+        assert!(depths.contains(&4));
+        assert!(depths.contains(&8));
+        assert!(depths.contains(&16));
+        assert!(depths.contains(&24));
+        assert!(depths.contains(&32));
+    }
+
+    #[test]
+    fn setup_depth_24_has_truecolor_and_directcolor() {
+        let setup = build_setup(0);
+        let depth24 = setup.roots[0].allowed_depths.iter().find(|d| d.depth == 24).unwrap();
+        assert_eq!(depth24.visuals.len(), 2);
+        assert!(depth24.visuals.iter().any(|v| v.class == VisualClass::TRUE_COLOR));
+        assert!(depth24.visuals.iter().any(|v| v.class == VisualClass::DIRECT_COLOR));
+    }
+
+    #[test]
+    fn setup_depth_32_has_argb_truecolor() {
+        let setup = build_setup(0);
+        let depth32 = setup.roots[0].allowed_depths.iter().find(|d| d.depth == 32).unwrap();
+        assert_eq!(depth32.visuals.len(), 1);
+        assert_eq!(depth32.visuals[0].visual_id, 0x40);
+        assert_eq!(depth32.visuals[0].class, VisualClass::TRUE_COLOR);
+    }
+
+    #[test]
+    fn setup_depth_8_has_pseudocolor_grayscale_staticcolor() {
+        let setup = build_setup(0);
+        let depth8 = setup.roots[0].allowed_depths.iter().find(|d| d.depth == 8).unwrap();
+        assert_eq!(depth8.visuals.len(), 3);
+        assert!(depth8.visuals.iter().any(|v| v.class == VisualClass::PSEUDO_COLOR));
+        assert!(depth8.visuals.iter().any(|v| v.class == VisualClass::GRAY_SCALE));
+        assert!(depth8.visuals.iter().any(|v| v.class == VisualClass::STATIC_COLOR));
+    }
+
+    #[test]
+    fn setup_depth_1_has_no_visuals() {
+        let setup = build_setup(0);
+        let depth1 = setup.roots[0].allowed_depths.iter().find(|d| d.depth == 1).unwrap();
+        assert!(depth1.visuals.is_empty());
+    }
+
+    #[test]
+    fn setup_root_visual_rgb_masks_standard() {
+        let setup = build_setup(0);
+        let depth24 = setup.roots[0].allowed_depths.iter().find(|d| d.depth == 24).unwrap();
+        let root_vis = depth24.visuals.iter().find(|v| v.visual_id == ROOT_VISUAL).unwrap();
+        assert_eq!(root_vis.red_mask, 0x00FF0000);
+        assert_eq!(root_vis.green_mask, 0x0000FF00);
+        assert_eq!(root_vis.blue_mask, 0x000000FF);
+    }
+
+    #[test]
+    fn setup_vendor_is_x11_web() {
+        let setup = build_setup(0);
+        assert_eq!(setup.vendor, b"x11-web");
+    }
+
+    #[test]
+    fn setup_serializes_without_panic() {
+        let setup = build_setup(0);
+        let mut bytes = Vec::new();
+        setup.serialize_into(&mut bytes);
+        assert!(bytes.len() > 32, "setup reply must be larger than 32 bytes");
+    }
+
+    #[test]
+    fn setup_byteswap_modifies_bytes() {
+        let setup = build_setup(0);
+        let mut bytes = Vec::new();
+        setup.serialize_into(&mut bytes);
+        let original = bytes.clone();
+        byteswap_setup_reply(&mut bytes);
+        // Byteswap should change multi-byte fields (u16/u32) in the header
+        // At minimum, protocol version (u16 at offset 2) should differ
+        assert_ne!(bytes, original, "byteswap must modify the data");
+    }
+
+    // -----------------------------------------------------------------------
+    // XSETTINGS data — format validation
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn xsettings_data_starts_with_lsb_byte_order() {
+        let data = build_xsettings_data();
+        assert_eq!(data[0], 0, "byte order must be LSB-first (0)");
+    }
+
+    #[test]
+    fn xsettings_data_has_nonzero_settings_count() {
+        let data = build_xsettings_data();
+        let count = u32::from_le_bytes([data[8], data[9], data[10], data[11]]);
+        assert!(count > 0, "must have at least one setting");
+        assert!(count >= 15, "should have at least 15 settings for GTK/Xft compat");
+    }
+
+    #[test]
+    fn xsettings_data_length_is_4_aligned() {
+        let data = build_xsettings_data();
+        assert_eq!(data.len() % 4, 0, "XSETTINGS data must be 4-byte aligned");
+    }
+}
