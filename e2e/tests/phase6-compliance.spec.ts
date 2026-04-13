@@ -12,7 +12,7 @@ async function execInSidecar(
 	cmd: string,
 	timeoutMs = 30_000,
 ): Promise<string> {
-	const result = await container.exec(["bash", "-c", `DISPLAY=:99 ${cmd}`]);
+	const result = await container.exec(["bash", "-c", `export DISPLAY=:99; ${cmd}`]);
 	return result.output.trim();
 }
 

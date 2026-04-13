@@ -17,7 +17,7 @@ async function execInSidecar(
 	const result = await container.exec([
 		"bash",
 		"-c",
-		`DISPLAY=:99 ${cmd}`,
+		`export DISPLAY=:99; ${cmd}`,
 	]);
 	return result.output.trim();
 }
@@ -31,7 +31,7 @@ async function runPythonX11(
 	const result = await container.exec([
 		"bash",
 		"-c",
-		`DISPLAY=:99 python3 -c '${escaped}'`,
+		`export DISPLAY=:99; python3 -c '${escaped}'`,
 	]);
 	return result.output.trim();
 }
