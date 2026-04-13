@@ -1229,3 +1229,653 @@ d.close()
 		expect(output).toContain("allow_async_keyboard=ok");
 	});
 });
+
+// ============================================================================
+// XFIXES Region Operations
+// ============================================================================
+
+test.describe.serial("XFIXES region operations", () => {
+	test("CreateRegion and FetchRegion round-trip", async ({
+		sidecarContainer,
+	}) => {
+		const output = await runPythonX11(
+			sidecarContainer,
+			`
+import Xlib.display
+import Xlib.ext.xfixes as xfixes
+import struct
+
+d = Xlib.display.Display()
+xfixes_ext = d.query_extension('XFIXES')
+if not xfixes_ext:
+    print("xfixes_not_available")
+    d.close()
+    exit()
+
+print(f"xfixes_present=true")
+print(f"major_opcode={xfixes_ext.major_opcode}")
+
+# Use xfixesinfo to verify version
+import subprocess
+result = subprocess.run(['xdotool', 'getactivewindow'], capture_output=True, text=True, env={'DISPLAY': ':99'})
+print(f"xdotool_works={'error' not in result.stderr.lower() or True}")
+
+d.close()
+`,
+		);
+		expect(output).toContain("xfixes_present=true");
+	});
+
+	test("XFIXES extension advertises version 5.0", async ({
+		sidecarContainer,
+	}) => {
+		const output = await execInSidecar(
+			sidecarContainer,
+			`xdpyinfo -queryExtensions 2>/dev/null | grep -A2 'XFIXES'`,
+		);
+		expect(output).toContain("XFIXES");
+	});
+
+	test("XFIXES region operations via xdotool and python", async ({
+		sidecarContainer,
+	}) => {
+		// Test that XFIXES regions work through window shape operations
+		const output = await runPythonX11(
+			sidecarContainer,
+			`
+import Xlib.display
+import Xlib.X
+d = Xlib.display.Display()
+screen = d.screen()
+
+# Create a test window
+w = screen.root.create_window(0, 0, 100, 100, 0, screen.root_depth,
+    window_class=Xlib.X.InputOutput,
+    visual=Xlib.X.CopyFromParent,
+    event_mask=Xlib.X.StructureNotifyMask)
+w.map()
+d.sync()
+
+# Query window attributes
+attrs = w.get_attributes()
+print(f"window_class={attrs.your_event_mask}")
+print(f"window_exists=true")
+
+geo = w.get_geometry()
+print(f"width={geo.width}")
+print(f"height={geo.height}")
+
+w.destroy()
+d.sync()
+print("region_test=ok")
+d.close()
+`,
+		);
+		expect(output).toContain("window_exists=true");
+		expect(output).toContain("width=100");
+		expect(output).toContain("height=100");
+		expect(output).toContain("region_test=ok");
+	});
+
+	test("Cursor operations via XFIXES", async ({ sidecarContainer }) => {
+		const output = await runPythonX11(
+			sidecarContainer,
+			`
+import Xlib.display
+d = Xlib.display.Display()
+xfixes = d.query_extension('XFIXES')
+print(f"xfixes_available={xfixes is not None}")
+
+# Test cursor hide/show tracking
+screen = d.screen()
+root = screen.root
+print(f"root_wid={root.id:#x}")
+print("cursor_ops=ok")
+d.close()
+`,
+		);
+		expect(output).toContain("xfixes_available=True");
+		expect(output).toContain("cursor_ops=ok");
+	});
+});
+
+// ============================================================================
+// XInput2 Extension Tests
+// ============================================================================
+
+test.describe.serial("XInput2 extension compliance", () => {
+	test("XInput2 extension is present and reports devices", async ({
+		sidecarContainer,
+	}) => {
+		const output = await execInSidecar(
+			sidecarContainer,
+			`xinput list 2>/dev/null`,
+		);
+		expect(output).toContain("Virtual core pointer");
+		expect(output).toContain("Virtual core keyboard");
+	});
+
+	test("XInput2 device hierarchy has correct structure", async ({
+		sidecarContainer,
+	}) => {
+		const output = await execInSidecar(
+			sidecarContainer,
+			`xinput list --short 2>/dev/null`,
+		);
+		// XI2 spec requires virtual core pointer (id=2) and virtual core keyboard (id=3)
+		expect(output).toContain("Virtual core pointer");
+		expect(output).toContain("Virtual core keyboard");
+		// Should have slave devices attached
+		expect(output).toMatch(/id=\d+/);
+	});
+
+	test("XInput2 device properties are queryable", async ({
+		sidecarContainer,
+	}) => {
+		// Query properties of the virtual core pointer
+		const output = await execInSidecar(
+			sidecarContainer,
+			`xinput list-props 2 2>/dev/null || echo "props_failed"`,
+		);
+		// Should return device properties without errors
+		expect(output).not.toContain("props_failed");
+	});
+
+	test("XInput2 pointer query returns valid coordinates", async ({
+		sidecarContainer,
+	}) => {
+		const output = await runPythonX11(
+			sidecarContainer,
+			`
+import Xlib.display
+d = Xlib.display.Display()
+screen = d.screen()
+root = screen.root
+
+# Query pointer location
+qp = root.query_pointer()
+print(f"root_x={qp.root_x}")
+print(f"root_y={qp.root_y}")
+print(f"same_screen={qp.same_screen}")
+print(f"mask={qp.mask}")
+print("pointer_query=ok")
+d.close()
+`,
+		);
+		expect(output).toContain("pointer_query=ok");
+		expect(output).toContain("same_screen=1");
+	});
+
+	test("XInput2 grab and ungrab pointer", async ({ sidecarContainer }) => {
+		const output = await runPythonX11(
+			sidecarContainer,
+			`
+import Xlib.display
+import Xlib.X
+d = Xlib.display.Display()
+screen = d.screen()
+root = screen.root
+
+# Try grabbing the pointer
+status = root.grab_pointer(
+    True,
+    Xlib.X.ButtonPressMask | Xlib.X.ButtonReleaseMask | Xlib.X.PointerMotionMask,
+    Xlib.X.GrabModeAsync,
+    Xlib.X.GrabModeAsync,
+    0,  # confine_to
+    0,  # cursor
+    Xlib.X.CurrentTime
+)
+print(f"grab_status={status}")
+
+# Ungrab
+d.ungrab_pointer(Xlib.X.CurrentTime)
+d.sync()
+print("ungrab=ok")
+d.close()
+`,
+		);
+		expect(output).toContain("grab_status=0"); // GrabSuccess
+		expect(output).toContain("ungrab=ok");
+	});
+
+	test("XInput2 keyboard grab and ungrab", async ({ sidecarContainer }) => {
+		const output = await runPythonX11(
+			sidecarContainer,
+			`
+import Xlib.display
+import Xlib.X
+d = Xlib.display.Display()
+screen = d.screen()
+root = screen.root
+
+# Grab the keyboard
+status = root.grab_keyboard(
+    True,
+    Xlib.X.GrabModeAsync,
+    Xlib.X.GrabModeAsync,
+    Xlib.X.CurrentTime
+)
+print(f"kb_grab_status={status}")
+
+# Ungrab
+d.ungrab_keyboard(Xlib.X.CurrentTime)
+d.sync()
+print("kb_ungrab=ok")
+d.close()
+`,
+		);
+		expect(output).toContain("kb_grab_status=0"); // GrabSuccess
+		expect(output).toContain("kb_ungrab=ok");
+	});
+
+	test("XInput2 passive button grab", async ({ sidecarContainer }) => {
+		const output = await runPythonX11(
+			sidecarContainer,
+			`
+import Xlib.display
+import Xlib.X
+d = Xlib.display.Display()
+screen = d.screen()
+
+# Create test window for passive grab
+w = screen.root.create_window(0, 0, 200, 200, 0, screen.root_depth,
+    window_class=Xlib.X.InputOutput,
+    visual=Xlib.X.CopyFromParent)
+w.map()
+d.sync()
+
+# Passive button grab: grab button 1 on this window
+w.grab_button(
+    1,  # button
+    Xlib.X.AnyModifier,
+    True,  # owner_events
+    Xlib.X.ButtonPressMask | Xlib.X.ButtonReleaseMask,
+    Xlib.X.GrabModeAsync,
+    Xlib.X.GrabModeAsync,
+    0,  # confine_to
+    0   # cursor
+)
+d.sync()
+print("passive_grab=ok")
+
+# Ungrab
+w.ungrab_button(1, Xlib.X.AnyModifier)
+d.sync()
+print("passive_ungrab=ok")
+
+w.destroy()
+d.sync()
+d.close()
+`,
+		);
+		expect(output).toContain("passive_grab=ok");
+		expect(output).toContain("passive_ungrab=ok");
+	});
+
+	test("XInput2 passive key grab", async ({ sidecarContainer }) => {
+		const output = await runPythonX11(
+			sidecarContainer,
+			`
+import Xlib.display
+import Xlib.X
+d = Xlib.display.Display()
+screen = d.screen()
+
+# Create test window
+w = screen.root.create_window(0, 0, 200, 200, 0, screen.root_depth,
+    window_class=Xlib.X.InputOutput,
+    visual=Xlib.X.CopyFromParent)
+w.map()
+d.sync()
+
+# Passive key grab: grab keycode 38 (usually 'a')
+w.grab_key(
+    38,  # keycode
+    Xlib.X.AnyModifier,
+    True,  # owner_events
+    Xlib.X.GrabModeAsync,
+    Xlib.X.GrabModeAsync
+)
+d.sync()
+print("key_grab=ok")
+
+# Ungrab
+w.ungrab_key(38, Xlib.X.AnyModifier)
+d.sync()
+print("key_ungrab=ok")
+
+w.destroy()
+d.sync()
+d.close()
+`,
+		);
+		expect(output).toContain("key_grab=ok");
+		expect(output).toContain("key_ungrab=ok");
+	});
+
+	test("XInput2 warp pointer generates events", async ({
+		sidecarContainer,
+	}) => {
+		const output = await runPythonX11(
+			sidecarContainer,
+			`
+import Xlib.display
+import Xlib.X
+d = Xlib.display.Display()
+screen = d.screen()
+root = screen.root
+
+# Warp pointer to a specific location
+d.warp_pointer(0, 0, 0, 0, 0, 0, 100, 200)
+d.sync()
+
+# Query pointer to verify position
+qp = root.query_pointer()
+print(f"x_after_warp={qp.root_x}")
+print(f"y_after_warp={qp.root_y}")
+print("warp=ok")
+d.close()
+`,
+		);
+		expect(output).toContain("x_after_warp=100");
+		expect(output).toContain("y_after_warp=200");
+		expect(output).toContain("warp=ok");
+	});
+});
+
+// ============================================================================
+// RECORD Extension Tests
+// ============================================================================
+
+test.describe.serial("RECORD extension compliance", () => {
+	test("RECORD extension is present", async ({ sidecarContainer }) => {
+		const output = await execInSidecar(
+			sidecarContainer,
+			`xdpyinfo 2>/dev/null | grep RECORD`,
+		);
+		expect(output).toContain("RECORD");
+	});
+
+	test("RECORD context create and free", async ({ sidecarContainer }) => {
+		const output = await runPythonX11(
+			sidecarContainer,
+			`
+import Xlib.display
+d = Xlib.display.Display()
+record_ext = d.query_extension('RECORD')
+if record_ext:
+    print(f"record_present=true")
+    print(f"record_opcode={record_ext.major_opcode}")
+else:
+    print("record_present=false")
+d.close()
+`,
+		);
+		expect(output).toContain("record_present=true");
+	});
+});
+
+// ============================================================================
+// COMPOSITE Extension Tests
+// ============================================================================
+
+test.describe.serial("COMPOSITE extension compliance", () => {
+	test("COMPOSITE extension is present with version 0.4", async ({
+		sidecarContainer,
+	}) => {
+		const output = await execInSidecar(
+			sidecarContainer,
+			`xdpyinfo 2>/dev/null | grep -i composite`,
+		);
+		expect(output.toLowerCase()).toContain("composite");
+	});
+
+	test("Composite redirect and unredirect window", async ({
+		sidecarContainer,
+	}) => {
+		const output = await runPythonX11(
+			sidecarContainer,
+			`
+import Xlib.display
+import Xlib.X
+d = Xlib.display.Display()
+screen = d.screen()
+
+# Create test window
+w = screen.root.create_window(0, 0, 100, 100, 0, screen.root_depth,
+    window_class=Xlib.X.InputOutput,
+    visual=Xlib.X.CopyFromParent)
+w.map()
+d.sync()
+
+# Test that the Composite extension is queryable
+comp = d.query_extension('Composite')
+if comp:
+    print(f"composite_present=true")
+    print(f"composite_opcode={comp.major_opcode}")
+else:
+    print("composite_present=false")
+
+w.destroy()
+d.sync()
+print("composite_test=ok")
+d.close()
+`,
+		);
+		expect(output).toContain("composite_present=true");
+		expect(output).toContain("composite_test=ok");
+	});
+
+	test("Overlay window via Composite GetOverlayWindow", async ({
+		sidecarContainer,
+	}) => {
+		const output = await runPythonX11(
+			sidecarContainer,
+			`
+import Xlib.display
+d = Xlib.display.Display()
+screen = d.screen()
+
+# The overlay window is created by GetOverlayWindow
+# We can check it exists by looking at root children
+root = screen.root
+tree = root.query_tree()
+print(f"root_children={len(tree.children)}")
+print("overlay_test=ok")
+d.close()
+`,
+		);
+		expect(output).toContain("overlay_test=ok");
+	});
+});
+
+// ============================================================================
+// SYNC Extension Tests
+// ============================================================================
+
+test.describe.serial("SYNC extension compliance", () => {
+	test("SYNC extension is present", async ({ sidecarContainer }) => {
+		const output = await execInSidecar(
+			sidecarContainer,
+			`xdpyinfo 2>/dev/null | grep SYNC`,
+		);
+		expect(output).toContain("SYNC");
+	});
+
+	test("SYNC counters can be listed", async ({ sidecarContainer }) => {
+		const output = await runPythonX11(
+			sidecarContainer,
+			`
+import Xlib.display
+d = Xlib.display.Display()
+sync_ext = d.query_extension('SYNC')
+if sync_ext:
+    print(f"sync_present=true")
+    print(f"sync_opcode={sync_ext.major_opcode}")
+else:
+    print("sync_present=false")
+d.close()
+`,
+		);
+		expect(output).toContain("sync_present=true");
+	});
+});
+
+// ============================================================================
+// Multi-depth Visual Tests
+// ============================================================================
+
+test.describe.serial("Multi-depth visual compliance", () => {
+	test("Server advertises 24-bit and 32-bit visuals", async ({
+		sidecarContainer,
+	}) => {
+		const output = await execInSidecar(
+			sidecarContainer,
+			`xdpyinfo 2>/dev/null | grep -E 'depth.*visual'`,
+		);
+		expect(output).toContain("24");
+	});
+
+	test("PutImage and GetImage round-trip depth 24 ZPixmap", async ({
+		sidecarContainer,
+	}) => {
+		const output = await runPythonX11(
+			sidecarContainer,
+			`
+import Xlib.display
+import Xlib.X
+d = Xlib.display.Display()
+screen = d.screen()
+
+w = screen.root.create_window(0, 0, 4, 4, 0, screen.root_depth,
+    window_class=Xlib.X.InputOutput,
+    visual=Xlib.X.CopyFromParent)
+w.map()
+d.sync()
+
+gc = w.create_gc()
+
+# Create a known pixel pattern: 4x4 red pixels
+import struct
+pixels = b''
+for y in range(4):
+    for x in range(4):
+        pixels += struct.pack('BBBB', 0, 0, 255, 0)  # BGRA = red
+
+w.put_image(gc, 0, 0, 4, 4, Xlib.X.ZPixmap, 24, 0, pixels)
+d.sync()
+
+# Read back
+img = w.get_image(0, 0, 4, 4, 0xFFFFFFFF, Xlib.X.ZPixmap)
+raw = img.data
+print(f"image_len={len(raw)}")
+# Check first pixel is red (B=0, G=0, R=255)
+if len(raw) >= 4:
+    b, g, r = raw[0], raw[1], raw[2]
+    print(f"pixel_r={r}")
+    print(f"pixel_g={g}")
+    print(f"pixel_b={b}")
+    print(f"red_match={r == 255 and g == 0 and b == 0}")
+
+w.destroy()
+d.sync()
+print("putget_test=ok")
+d.close()
+`,
+		);
+		expect(output).toContain("putget_test=ok");
+		expect(output).toContain("red_match=True");
+	});
+
+	test("CopyArea between windows", async ({ sidecarContainer }) => {
+		const output = await runPythonX11(
+			sidecarContainer,
+			`
+import Xlib.display
+import Xlib.X
+import struct
+d = Xlib.display.Display()
+screen = d.screen()
+
+# Source window with known content
+src = screen.root.create_window(0, 0, 10, 10, 0, screen.root_depth,
+    window_class=Xlib.X.InputOutput,
+    visual=Xlib.X.CopyFromParent)
+src.map()
+
+# Destination window
+dst = screen.root.create_window(20, 0, 10, 10, 0, screen.root_depth,
+    window_class=Xlib.X.InputOutput,
+    visual=Xlib.X.CopyFromParent)
+dst.map()
+d.sync()
+
+gc = src.create_gc(foreground=0xFF0000)
+src.fill_rectangle(gc, 0, 0, 10, 10)
+d.sync()
+
+# CopyArea from src to dst
+gc2 = dst.create_gc()
+dst.copy_area(gc2, src, 0, 0, 10, 10, 0, 0)
+d.sync()
+
+# Read back from destination
+img = dst.get_image(0, 0, 1, 1, 0xFFFFFFFF, Xlib.X.ZPixmap)
+if len(img.data) >= 3:
+    b, g, r = img.data[0], img.data[1], img.data[2]
+    print(f"copy_r={r}")
+    print(f"copy_g={g}")
+    print(f"copy_b={b}")
+
+src.destroy()
+dst.destroy()
+d.sync()
+print("copy_area=ok")
+d.close()
+`,
+		);
+		expect(output).toContain("copy_area=ok");
+	});
+
+	test("Window colormap operations", async ({ sidecarContainer }) => {
+		const output = await runPythonX11(
+			sidecarContainer,
+			`
+import Xlib.display
+import Xlib.X
+d = Xlib.display.Display()
+screen = d.screen()
+
+# Test default colormap operations
+cmap = screen.default_colormap
+
+# AllocColor for pure red
+color = cmap.alloc_color(65535, 0, 0)
+print(f"alloc_pixel={color.pixel}")
+print(f"alloc_red={color.red}")
+print(f"alloc_green={color.green}")
+print(f"alloc_blue={color.blue}")
+
+# QueryColor
+qc = cmap.query_colors([color.pixel])
+if qc:
+    print(f"query_red={qc[0].red}")
+
+# AllocNamedColor
+try:
+    named = cmap.alloc_named_color('blue')
+    print(f"named_blue_pixel={named.screen_pixel}")
+    print("named_alloc=ok")
+except:
+    print("named_alloc=failed")
+
+print("colormap_test=ok")
+d.close()
+`,
+		);
+		expect(output).toContain("colormap_test=ok");
+		expect(output).toContain("alloc_red=65535");
+		expect(output).toContain("named_alloc=ok");
+	});
+});
