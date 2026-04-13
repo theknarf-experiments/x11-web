@@ -1039,7 +1039,6 @@ d.close()
 		);
 		expect(output).toContain("xim_support=True");
 	});
-});
 
 	test("Backing store preserves window contents across unmap/remap", async ({
 		sidecarContainer,

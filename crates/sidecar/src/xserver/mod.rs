@@ -523,6 +523,7 @@ impl X11Server {
                     wm_hints_input: None,
                     wm_hints_window_group: None,
                     modal: false,
+                    saved_geometry: None,
                 },
             );
 
@@ -577,6 +578,7 @@ impl X11Server {
                     wm_hints_input: None,
                     wm_hints_window_group: None,
                     modal: false,
+                    saved_geometry: None,
                 },
             );
 
@@ -642,6 +644,7 @@ impl X11Server {
                     wm_hints_input: None,
                     wm_hints_window_group: None,
                     modal: false,
+                    saved_geometry: None,
                 },
             );
 
@@ -752,6 +755,7 @@ impl X11Server {
                     wm_hints_input: None,
                     wm_hints_window_group: None,
                     modal: false,
+                    saved_geometry: None,
                 },
             );
             if let Some(root) = windows.get_mut(&ROOT_WINDOW) {
@@ -844,6 +848,7 @@ impl X11Server {
                     wm_hints_input: None,
                     wm_hints_window_group: None,
                     modal: false,
+                    saved_geometry: None,
                 },
             );
 

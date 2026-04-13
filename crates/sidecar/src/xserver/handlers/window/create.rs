@@ -203,6 +203,7 @@ pub(crate) fn handle_create_window(state: &mut ClientState, data: &[u8], _seq: u
             wm_hints_input: None,
             wm_hints_window_group: None,
             modal: false,
+            saved_geometry: None,
         },
     );
 

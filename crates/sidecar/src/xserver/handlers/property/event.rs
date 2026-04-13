@@ -164,15 +164,168 @@ pub(crate) fn handle_send_event(state: &mut ClientState, data: &[u8]) -> Vec<u8>
                 }
 
                 // Determine the new WM state and broadcast to frontend
-                let new_state = if current_atoms.contains(&fullscreen_atom) {
+                let is_fullscreen = current_atoms.contains(&fullscreen_atom);
+                let is_maximized = current_atoms.contains(&max_vert_atom) || current_atoms.contains(&max_horz_atom);
+
+                let new_state = if is_fullscreen {
                     x11_web_protocol::WindowWmState::Fullscreen
-                } else if current_atoms.contains(&max_vert_atom) || current_atoms.contains(&max_horz_atom) {
+                } else if is_maximized {
                     x11_web_protocol::WindowWmState::Maximized
                 } else if current_atoms.contains(&hidden_atom) {
                     x11_web_protocol::WindowWmState::Minimized
                 } else {
                     x11_web_protocol::WindowWmState::Normal
                 };
+
+                // Per EWMH spec: when the window manager changes fullscreen or
+                // maximized state it MUST resize the window accordingly and send
+                // a synthetic ConfigureNotify so the client knows its new size.
+                let needs_resize = is_fullscreen || is_maximized;
+                let had_saved = state.windows.get(&source_window)
+                    .is_some_and(|w| w.saved_geometry.is_some());
+
+                if needs_resize && !had_saved {
+                    // Save current geometry before resizing
+                    if let Some(win) = state.windows.get(&source_window) {
+                        let saved = (win.x, win.y, win.width, win.height);
+                        if let Some(win) = state.windows.get_mut(&source_window) {
+                            win.saved_geometry = Some(saved);
+                        }
+                    }
+                    // Resize to fill screen
+                    let sw = state.screen_width;
+                    let sh = state.screen_height;
+                    if let Some(win) = state.windows.get_mut(&source_window) {
+                        win.x = 0;
+                        win.y = 0;
+                        win.width = sw;
+                        win.height = sh;
+                        win.framebuffer.resize_with_gravity(sw as u32, sh as u32, 0);
+                    }
+                    // Send ConfigureNotify to the client
+                    {
+                        let override_redirect = state.windows.get(&source_window)
+                            .is_some_and(|w| w.override_redirect);
+                        let border_width = state.windows.get(&source_window)
+                            .map(|w| w.border_width).unwrap_or(0);
+                        let mut cn = [0u8; 32];
+                        cn[0] = CONFIGURE_NOTIFY_EVENT;
+                        state.write_u16(&mut cn, 2, state.sequence);
+                        state.write_u32(&mut cn, 4, source_window);
+                        state.write_u32(&mut cn, 8, source_window);
+                        // above-sibling = 0
+                        state.write_i16(&mut cn, 16, 0);
+                        state.write_i16(&mut cn, 18, 0);
+                        state.write_u16(&mut cn, 20, sw);
+                        state.write_u16(&mut cn, 22, sh);
+                        state.write_u16(&mut cn, 24, border_width);
+                        cn[26] = if override_redirect { 1 } else { 0 };
+                        if state.windows.get(&source_window)
+                            .is_some_and(|w| w.event_mask & STRUCTURE_NOTIFY_MASK != 0) {
+                            state.pending_events.push(cn.to_vec());
+                        }
+                        state.broadcast_event(source_window, STRUCTURE_NOTIFY_MASK, &cn);
+
+                        // Send Expose so the client redraws at the new size
+                        if state.windows.get(&source_window)
+                            .is_some_and(|w| w.event_mask & EXPOSURE_MASK != 0) {
+                            let mut expose = [0u8; 32];
+                            expose[0] = EXPOSE_EVENT;
+                            state.write_u16(&mut expose, 2, state.sequence);
+                            state.write_u32(&mut expose, 4, source_window);
+                            state.write_u16(&mut expose, 12, sw);
+                            state.write_u16(&mut expose, 14, sh);
+                            state.pending_events.push(expose.to_vec());
+                        }
+                    }
+                    // Notify frontend of new geometry
+                    if let Some(uuid) = state.window_uuid(source_window) {
+                        let bw = state.windows.get(&source_window)
+                            .map(|w| w.border_width).unwrap_or(0);
+                        let bp = state.windows.get(&source_window)
+                            .map(|w| w.border_pixel).unwrap_or(0);
+                        let _ = state.update_tx.send((
+                            state.client_id.clone(),
+                            DisplayUpdate::WindowConfigured {
+                                window_id: uuid,
+                                x: 0,
+                                y: 0,
+                                width: sw,
+                                height: sh,
+                                border_width: bw,
+                                border_pixel: bp,
+                            },
+                        ));
+                    }
+                } else if !needs_resize && had_saved {
+                    // Restore saved geometry when leaving fullscreen/maximized
+                    let saved = state.windows.get(&source_window)
+                        .and_then(|w| w.saved_geometry);
+                    if let Some((sx, sy, sw, sh)) = saved {
+                        if let Some(win) = state.windows.get_mut(&source_window) {
+                            win.x = sx;
+                            win.y = sy;
+                            win.width = sw;
+                            win.height = sh;
+                            win.saved_geometry = None;
+                            win.framebuffer.resize_with_gravity(sw as u32, sh as u32, 0);
+                        }
+                        // Send ConfigureNotify to the client
+                        {
+                            let override_redirect = state.windows.get(&source_window)
+                                .is_some_and(|w| w.override_redirect);
+                            let border_width = state.windows.get(&source_window)
+                                .map(|w| w.border_width).unwrap_or(0);
+                            let mut cn = [0u8; 32];
+                            cn[0] = CONFIGURE_NOTIFY_EVENT;
+                            state.write_u16(&mut cn, 2, state.sequence);
+                            state.write_u32(&mut cn, 4, source_window);
+                            state.write_u32(&mut cn, 8, source_window);
+                            state.write_i16(&mut cn, 16, sx);
+                            state.write_i16(&mut cn, 18, sy);
+                            state.write_u16(&mut cn, 20, sw);
+                            state.write_u16(&mut cn, 22, sh);
+                            state.write_u16(&mut cn, 24, border_width);
+                            cn[26] = if override_redirect { 1 } else { 0 };
+                            if state.windows.get(&source_window)
+                                .is_some_and(|w| w.event_mask & STRUCTURE_NOTIFY_MASK != 0) {
+                                state.pending_events.push(cn.to_vec());
+                            }
+                            state.broadcast_event(source_window, STRUCTURE_NOTIFY_MASK, &cn);
+
+                            // Expose for redraw
+                            if state.windows.get(&source_window)
+                                .is_some_and(|w| w.event_mask & EXPOSURE_MASK != 0) {
+                                let mut expose = [0u8; 32];
+                                expose[0] = EXPOSE_EVENT;
+                                state.write_u16(&mut expose, 2, state.sequence);
+                                state.write_u32(&mut expose, 4, source_window);
+                                state.write_u16(&mut expose, 12, sw);
+                                state.write_u16(&mut expose, 14, sh);
+                                state.pending_events.push(expose.to_vec());
+                            }
+                        }
+                        // Notify frontend
+                        if let Some(uuid) = state.window_uuid(source_window) {
+                            let bw = state.windows.get(&source_window)
+                                .map(|w| w.border_width).unwrap_or(0);
+                            let bp = state.windows.get(&source_window)
+                                .map(|w| w.border_pixel).unwrap_or(0);
+                            let _ = state.update_tx.send((
+                                state.client_id.clone(),
+                                DisplayUpdate::WindowConfigured {
+                                    window_id: uuid,
+                                    x: sx,
+                                    y: sy,
+                                    width: sw,
+                                    height: sh,
+                                    border_width: bw,
+                                    border_pixel: bp,
+                                },
+                            ));
+                        }
+                    }
+                }
 
                 if let Some(uuid) = state.window_uuid(source_window) {
                     let _ = state.update_tx.send((

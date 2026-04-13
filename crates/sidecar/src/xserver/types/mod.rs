@@ -711,6 +711,7 @@ mod tests {
             wm_hints_input: None,
             wm_hints_window_group: None,
             modal: false,
+            saved_geometry: None,
         }
     }
 
@@ -1003,5 +1004,58 @@ mod tests {
         let mut w = make_test_window(42, 1);
         w.wm_hints_window_group = Some(100);
         assert_eq!(w.wm_hints_window_group, Some(100));
+    }
+
+    #[test]
+    fn saved_geometry_initially_none() {
+        let w = make_test_window(42, 1);
+        assert!(w.saved_geometry.is_none());
+    }
+
+    #[test]
+    fn saved_geometry_save_and_restore() {
+        let mut w = make_test_window(42, 1);
+        w.x = 50;
+        w.y = 100;
+        w.width = 400;
+        w.height = 300;
+        // Save geometry before fullscreen
+        w.saved_geometry = Some((w.x, w.y, w.width, w.height));
+        // Simulate fullscreen resize
+        w.x = 0;
+        w.y = 0;
+        w.width = 1024;
+        w.height = 768;
+        assert_eq!(w.saved_geometry, Some((50, 100, 400, 300)));
+        // Restore from fullscreen
+        if let Some((sx, sy, sw, sh)) = w.saved_geometry {
+            w.x = sx;
+            w.y = sy;
+            w.width = sw;
+            w.height = sh;
+            w.saved_geometry = None;
+        }
+        assert_eq!(w.x, 50);
+        assert_eq!(w.y, 100);
+        assert_eq!(w.width, 400);
+        assert_eq!(w.height, 300);
+        assert!(w.saved_geometry.is_none());
+    }
+
+    #[test]
+    fn saved_geometry_not_overwritten_when_already_set() {
+        let mut w = make_test_window(42, 1);
+        w.x = 50;
+        w.y = 100;
+        w.width = 400;
+        w.height = 300;
+        w.saved_geometry = Some((50, 100, 400, 300));
+        // Simulate maximize after fullscreen (should not overwrite saved)
+        w.x = 0;
+        w.y = 0;
+        w.width = 1024;
+        w.height = 768;
+        // The saved geometry should still point to the original position
+        assert_eq!(w.saved_geometry, Some((50, 100, 400, 300)));
     }
 }

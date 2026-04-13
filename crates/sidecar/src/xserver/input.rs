@@ -1009,6 +1009,7 @@ mod tests {
             wm_hints_input: None,
             wm_hints_window_group: None,
             modal: false,
+            saved_geometry: None,
         }
     }
 

@@ -161,6 +161,9 @@ pub(crate) struct WindowState {
     pub(crate) wm_hints_window_group: Option<u32>,
     /// Whether _NET_WM_STATE_MODAL is currently set on this window.
     pub(crate) modal: bool,
+    /// Saved geometry before entering fullscreen/maximized state (x, y, width, height).
+    /// Restored when leaving the state.
+    pub(crate) saved_geometry: Option<(i16, i16, u16, u16)>,
 }
 
 impl WindowState {
