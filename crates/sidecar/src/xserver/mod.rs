@@ -236,6 +236,8 @@ impl X11Server {
                 atoms_lock.intern("_NET_WM_WINDOW_TYPE_DROPDOWN_MENU", false),
                 atoms_lock.intern("_NET_WM_WINDOW_TYPE_POPUP_MENU", false),
                 atoms_lock.intern("_NET_WM_WINDOW_TYPE_TOOLTIP", false),
+                atoms_lock.intern("_NET_WM_WINDOW_TYPE_DOCK", false),
+                atoms_lock.intern("_NET_WM_WINDOW_TYPE_DESKTOP", false),
                 // Window state atoms
                 atoms_lock.intern("_NET_WM_STATE", false),
                 atoms_lock.intern("_NET_WM_STATE_FULLSCREEN", false),

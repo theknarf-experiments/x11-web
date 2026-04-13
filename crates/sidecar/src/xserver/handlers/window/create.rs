@@ -400,6 +400,7 @@ pub(crate) fn handle_destroy_window(state: &mut ClientState, data: &[u8]) -> Vec
         }
 
         state.windows.remove(&desc);
+        state.recycle_xid(desc);
         state.gtk_menu_paths.remove(&desc);
         state.menu_tracker.window_index().unregister(desc);
         if let Ok(mut shared) = state.shared_windows.lock() {
@@ -423,6 +424,7 @@ pub(crate) fn handle_destroy_window(state: &mut ClientState, data: &[u8]) -> Vec
     }
 
     state.windows.remove(&wid);
+    state.recycle_xid(wid);
     state.gtk_menu_paths.remove(&wid);
     state.menu_tracker.window_index().unregister(wid);
 

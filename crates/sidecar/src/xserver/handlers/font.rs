@@ -43,6 +43,7 @@ pub(crate) fn handle_close_font(state: &mut ClientState, data: &[u8]) -> Vec<u8>
         return build_error(BAD_FONT, state.sequence, fid, 46, 0);
     }
     state.font_manager.close_font(fid);
+    state.recycle_xid(fid);
     Vec::new()
 }
 

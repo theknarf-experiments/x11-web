@@ -219,6 +219,7 @@ pub(crate) fn handle_destroy_pbuffer(state: &mut ClientState, data: &[u8], seq: 
     require_len!(data, 8, seq, 159, 28, state.msb_first);
     let pbuffer_id = u32::from_le_bytes([data[4], data[5], data[6], data[7]]);
     if state.glx.drawables.remove(&pbuffer_id).is_some() {
+        state.recycle_xid(pbuffer_id);
         debug!("Destroyed GLX pbuffer {pbuffer_id:#x}");
     } else {
         warn!("DestroyPbuffer: unknown drawable {pbuffer_id:#x}");

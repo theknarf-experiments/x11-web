@@ -102,6 +102,7 @@ use crate::xserver::core::require_len;
             require_len!(data, 8, seq, 155, minor as u16, state.msb_first);
             let auth_id = state.read_u32(data, 4);
             state.security_authorizations.remove(&auth_id);
+            state.recycle_xid(auth_id);
             // Remove from shared token map
             if let Ok(mut tokens) = state.shared_security_tokens.lock() {
                 tokens.retain(|_, info| info.auth_id != auth_id);

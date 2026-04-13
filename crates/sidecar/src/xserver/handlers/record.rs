@@ -631,6 +631,7 @@ pub(crate) fn handle_record_request(state: &mut ClientState, data: &[u8], seq: u
             if data.len() >= 8 {
                 let context_id = u32::from_le_bytes([data[4], data[5], data[6], data[7]]);
                 state.record_contexts.remove(&context_id);
+                state.recycle_xid(context_id);
                 // Remove from shared registry
                 if let Ok(mut shared) = state.shared_record_contexts.lock() {
                     shared.remove(&context_id);

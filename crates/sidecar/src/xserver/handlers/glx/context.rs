@@ -124,6 +124,7 @@ pub(crate) fn handle_destroy_context(state: &mut ClientState, data: &[u8], seq: 
     require_len!(data, 8, seq, 159, 4, state.msb_first);
     let ctx_id = u32::from_le_bytes([data[4], data[5], data[6], data[7]]);
     state.glx.contexts.remove(&ctx_id);
+    state.recycle_xid(ctx_id);
     if state.glx.current_context == ctx_id {
         state.glx.current_context = 0;
         state.glx.current_drawable = 0;

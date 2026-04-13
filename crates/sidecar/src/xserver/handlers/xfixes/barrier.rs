@@ -53,6 +53,7 @@ pub(crate) fn handle_delete_pointer_barrier(state: &mut ClientState, data: &[u8]
         let barrier_id = state.read_u32(data, 4);
         debug!("XFIXES DeletePointerBarrier: id={barrier_id:#x}");
         state.barriers.remove(&barrier_id);
+        state.recycle_xid(barrier_id);
     }
     Vec::new()
 }
