@@ -17,8 +17,15 @@ impl ClientState {
     }
 
     /// Get a mutable reference to the framebuffer for a drawable.
+    ///
+    /// For pixmaps with alias_window set (COMPOSITE NameWindowPixmap), this
+    /// returns the aliased window's live framebuffer so that operations on the
+    /// pixmap directly modify the window's off-screen surface.
     pub(crate) fn get_framebuffer_mut(&mut self, drawable: u32) -> Option<&mut Framebuffer> {
-        let target = self.resolve_drawable(drawable);
+        // Resolve alias: if this is a NameWindowPixmap, redirect to the window.
+        let target = self.pixmaps.get(&drawable)
+            .and_then(|p| p.alias_window)
+            .unwrap_or(drawable);
         if let Some(win) = self.windows.get_mut(&target) {
             return Some(&mut win.framebuffer);
         }
@@ -77,11 +84,18 @@ impl ClientState {
     }
 
     /// Get a read-only reference to the framebuffer for a drawable (window or pixmap).
+    ///
+    /// For pixmaps with alias_window set (COMPOSITE NameWindowPixmap), this
+    /// returns the aliased window's live framebuffer.
     pub(crate) fn get_framebuffer(&self, drawable: u32) -> Option<&crate::framebuffer::Framebuffer> {
-        if let Some(win) = self.windows.get(&drawable) {
+        // Resolve alias: if this is a NameWindowPixmap, redirect to the window.
+        let target = self.pixmaps.get(&drawable)
+            .and_then(|p| p.alias_window)
+            .unwrap_or(drawable);
+        if let Some(win) = self.windows.get(&target) {
             return Some(&win.framebuffer);
         }
-        if let Some(pix) = self.pixmaps.get(&drawable) {
+        if let Some(pix) = self.pixmaps.get(&target) {
             return Some(&pix.framebuffer);
         }
         None

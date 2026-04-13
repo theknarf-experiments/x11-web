@@ -58,10 +58,20 @@ pub(crate) struct ShmSegment {
 unsafe impl Send for ShmSegment {}
 
 /// Damage subscription info for DAMAGE extension.
+///
+/// Per the DAMAGE spec, damage accumulates as a region of rectangles
+/// until the client acknowledges it via DamageSubtract.  The `level`
+/// field controls granularity:
+///   0 = RawRectangles — report each individual damaged rect
+///   1 = DeltaRectangles — coalesce into bounding box since last
+///   2 = BoundingBox — single bounding rect of all damage
+///   3 = NonEmpty — just notify that damage exists
 #[derive(Clone)]
 pub(crate) struct DamageInfo {
     pub(crate) drawable: u32,
     pub(crate) level: u8,
+    /// Accumulated damage region since last DamageSubtract.
+    pub(crate) accumulated: super::region::XFixesRegion,
 }
 
 /// Present extension event subscription.

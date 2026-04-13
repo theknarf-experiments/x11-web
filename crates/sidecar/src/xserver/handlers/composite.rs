@@ -28,7 +28,11 @@ pub(crate) fn handle_damage_request(state: &mut ClientState, data: &[u8], seq: u
             let drawable = state.read_u32(data, 8);
             let level = data[12];
             info!("DAMAGE Create: id={damage_id:#x} drawable={drawable:#x} level={level}");
-            state.damage_regions.insert(damage_id, DamageInfo { drawable, level });
+            state.damage_regions.insert(damage_id, DamageInfo {
+                drawable,
+                level,
+                accumulated: super::super::types::XFixesRegion::new(),
+            });
             Vec::new()
         }
         2 => {
@@ -41,25 +45,39 @@ pub(crate) fn handle_damage_request(state: &mut ClientState, data: &[u8], seq: u
         }
         3 => {
             // DamageSubtract: data[4..8] = damage_id, data[8..12] = repair_region, data[12..16] = parts_region
-            // Per spec: subtract 'repair' from damage, store remainder in 'parts'.
-            // The repair region is what the client has already processed.
+            // Per spec: subtract 'repair' from accumulated damage, store remainder in 'parts'.
             require_len!(data, 16, seq, 143, minor as u16, state.msb_first);
             let damage_id = state.read_u32(data, 4);
             let repair = state.read_u32(data, 8);
             let parts = state.read_u32(data, 12);
             debug!("DAMAGE Subtract: id={damage_id:#x} repair={repair:#x} parts={parts:#x}");
 
-            // If repair=None (0), subtract everything (acknowledge all damage).
-            // If parts=None (0), discard the result.
-            // In our implementation, damage is delivered per-frame via DamageNotify
-            // events, so subtract is an acknowledgment.
-            if repair == 0 {
-                // Client acknowledges all pending damage — nothing to track
-            }
+            // Get the accumulated damage for this damage object.
+            let accumulated = state.damage_regions.get(&damage_id)
+                .map(|d| d.accumulated.clone())
+                .unwrap_or_else(super::super::types::XFixesRegion::new);
+
+            let remainder = if repair == 0 {
+                // repair=None: subtract everything (acknowledge all damage).
+                super::super::types::XFixesRegion::new()
+            } else if let Some(repair_region) = state.xfixes_regions.get(&repair) {
+                // Subtract the repair region from accumulated damage.
+                accumulated.subtract(repair_region)
+            } else {
+                // Repair region doesn't exist — treat as empty (acknowledge nothing).
+                accumulated.clone()
+            };
+
+            // Store the remainder in the parts region (if not None).
             if parts != 0 {
-                // Store an empty region as "parts" (no remaining damage)
-                state.xfixes_regions.insert(parts, super::super::types::XFixesRegion::new());
+                state.xfixes_regions.insert(parts, remainder.clone());
             }
+
+            // Update the accumulated damage to the remainder.
+            if let Some(dmg) = state.damage_regions.get_mut(&damage_id) {
+                dmg.accumulated = remainder;
+            }
+
             Vec::new()
         }
         4 => {
@@ -202,13 +220,18 @@ pub(crate) fn handle_x_composite_request(state: &mut ClientState, data: &[u8], s
             Vec::new()
         }
         6 => {
-            // NameWindowPixmap: create a pixmap backed by a copy of the window's framebuffer.
+            // NameWindowPixmap: create a pixmap that is a live alias of the
+            // window's off-screen framebuffer.
             // data[4..8] = window, data[8..12] = pixmap
-            // Per the Composite spec, the returned pixmap contains the window's
-            // off-screen storage.  We clone the framebuffer so reads (GetImage,
-            // CopyArea) see the real pixel data and writes go to the snapshot.
-            // The alias_window link is kept so that damage notifications and
-            // resolve_drawable still route correctly.
+            //
+            // Per the Composite spec the returned pixmap IS the window's
+            // off-screen storage — reads (GetImage, CopyArea) always see the
+            // most recent content and writes go directly to the window.
+            // The alias_window link ensures resolve_drawable routes operations
+            // back to the window for damage notification.
+            //
+            // For redirected windows this is the live off-screen surface.
+            // For non-redirected windows we clone a snapshot (legacy compat).
             require_len!(data, 12, seq, 142, minor as u16, state.msb_first);
             let window = state.read_u32(data, 4);
             let pixmap = state.read_u32(data, 8);
@@ -216,7 +239,18 @@ pub(crate) fn handle_x_composite_request(state: &mut ClientState, data: &[u8], s
                 let w = win.width;
                 let h = win.height;
                 let depth = win.depth;
-                let fb = win.framebuffer.clone();
+                let redirected = win.redirected;
+                // For redirected windows: the pixmap IS the window's framebuffer
+                // (shared via alias_window). Drawing to the pixmap draws to the
+                // window and vice versa. For non-redirected: clone a snapshot.
+                let fb = if redirected {
+                    // Create an empty framebuffer as placeholder — actual reads/writes
+                    // will be redirected to the window via alias_window in
+                    // get_framebuffer_mut / get_framebuffer.
+                    crate::framebuffer::Framebuffer::new(w as u32, h as u32)
+                } else {
+                    win.framebuffer.clone()
+                };
                 state.pixmaps.insert(
                     pixmap,
                     PixmapState {
@@ -228,7 +262,7 @@ pub(crate) fn handle_x_composite_request(state: &mut ClientState, data: &[u8], s
                         shm_backing: None,
                     },
                 );
-                info!("NameWindowPixmap: window={window:#x} -> pixmap={pixmap:#x} {w}x{h} depth={depth}");
+                info!("NameWindowPixmap: window={window:#x} -> pixmap={pixmap:#x} {w}x{h} depth={depth} redirected={redirected}");
             } else {
                 return crate::xserver::core::build_error_bo(
                     crate::xserver::core::BAD_WINDOW, seq, window,
@@ -327,5 +361,99 @@ pub(crate) fn handle_x_composite_request(state: &mut ClientState, data: &[u8], s
                 142, minor as u16, state.msb_first,
             )
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::super::super::types::{DamageInfo, XFixesRegion, RegionRect};
+
+    fn r(x: i16, y: i16, w: u16, h: u16) -> RegionRect {
+        RegionRect { x, y, width: w, height: h }
+    }
+
+    #[test]
+    fn damage_info_accumulates_regions() {
+        let mut info = DamageInfo {
+            drawable: 0x100,
+            level: 0,
+            accumulated: XFixesRegion::new(),
+        };
+        assert!(info.accumulated.rects.is_empty());
+
+        // Accumulate first damage
+        let r1 = XFixesRegion::from_rects(vec![r(0, 0, 10, 10)]);
+        info.accumulated = info.accumulated.union(&r1);
+        assert_eq!(info.accumulated.rects.len(), 1);
+
+        // Accumulate second damage
+        let r2 = XFixesRegion::from_rects(vec![r(20, 20, 5, 5)]);
+        info.accumulated = info.accumulated.union(&r2);
+        assert_eq!(info.accumulated.rects.len(), 2);
+
+        // Extents should cover both
+        let ext = info.accumulated.extents();
+        assert_eq!(ext.x, 0);
+        assert_eq!(ext.y, 0);
+        assert_eq!(ext.width, 25);
+        assert_eq!(ext.height, 25);
+    }
+
+    #[test]
+    fn damage_subtract_removes_repair_region() {
+        let mut info = DamageInfo {
+            drawable: 0x100,
+            level: 0,
+            accumulated: XFixesRegion::from_rects(vec![r(0, 0, 100, 100)]),
+        };
+
+        // Subtract the top half
+        let repair = XFixesRegion::from_rects(vec![r(0, 0, 100, 50)]);
+        info.accumulated = info.accumulated.subtract(&repair);
+
+        // Should have bottom half remaining
+        let ext = info.accumulated.extents();
+        assert_eq!(ext.y, 50);
+        assert_eq!(ext.height, 50);
+    }
+
+    #[test]
+    fn damage_subtract_all_clears_accumulated() {
+        let mut info = DamageInfo {
+            drawable: 0x100,
+            level: 0,
+            accumulated: XFixesRegion::from_rects(vec![
+                r(0, 0, 10, 10),
+                r(20, 20, 5, 5),
+            ]),
+        };
+
+        // Subtract everything (repair covers all)
+        let repair = XFixesRegion::from_rects(vec![r(0, 0, 1000, 1000)]);
+        info.accumulated = info.accumulated.subtract(&repair);
+
+        assert!(info.accumulated.rects.is_empty());
+    }
+
+    #[test]
+    fn damage_subtract_partial_leaves_remainder() {
+        let mut info = DamageInfo {
+            drawable: 0x100,
+            level: 0,
+            accumulated: XFixesRegion::from_rects(vec![
+                r(0, 0, 50, 50),
+                r(60, 60, 20, 20),
+            ]),
+        };
+
+        // Subtract only the first rect area
+        let repair = XFixesRegion::from_rects(vec![r(0, 0, 50, 50)]);
+        info.accumulated = info.accumulated.subtract(&repair);
+
+        // Second rect should remain
+        assert!(!info.accumulated.rects.is_empty());
+        let ext = info.accumulated.extents();
+        assert_eq!(ext.x, 60);
+        assert_eq!(ext.y, 60);
     }
 }

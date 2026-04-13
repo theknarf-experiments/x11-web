@@ -108,8 +108,15 @@ impl ClientState {
     }
 
     /// Send dirty framebuffer regions for all mapped windows as PutImage updates.
+    ///
+    /// Per the COMPOSITE spec, redirected windows are NOT composited onto their
+    /// parent — they remain as separate off-screen surfaces. A compositing
+    /// manager reads their content via NameWindowPixmap and composites them
+    /// using the RENDER extension.
     pub(crate) fn flush_dirty_windows(&mut self) {
-        let children: Vec<(u32, u16, u16)> = self
+        // Phase 1: Composite non-redirected child windows onto their top-level ancestor.
+        // Redirected children keep their own framebuffer untouched.
+        let children: Vec<(u32, u16, u16, bool)> = self
             .windows
             .iter()
             .filter(|(_, w)| {
@@ -119,10 +126,19 @@ impl ClientState {
                     && w.parent != 0
                     && w.class == 1
             })
-            .map(|(_, w)| (w.id, w.width, w.height))
+            .map(|(_, w)| (w.id, w.width, w.height, w.redirected))
             .collect();
 
-        for (child_id, cw, ch) in &children {
+        for (child_id, cw, ch, redirected) in &children {
+            if *redirected {
+                // Redirected child: do NOT composite onto parent.
+                // Just clear the dirty flag — the compositor reads via NameWindowPixmap.
+                if let Some(child) = self.windows.get_mut(child_id) {
+                    child.framebuffer.clear_dirty();
+                }
+                continue;
+            }
+
             let mut target = *child_id;
             let mut off_x: i32 = 0;
             let mut off_y: i32 = 0;
@@ -155,7 +171,10 @@ impl ClientState {
             }
         }
 
-        let window_ids: Vec<u32> = self
+        // Phase 2: Flush top-level (root children) windows.
+        // Redirected top-level windows: still accumulate damage but do NOT send
+        // PutImage to the frontend display — the compositor manages their presentation.
+        let window_ids: Vec<(u32, bool)> = self
             .windows
             .iter()
             .filter(|(_, w)| {
@@ -164,13 +183,54 @@ impl ClientState {
                     && w.parent == self.root_window
                     && w.class == 1
             })
-            .map(|(id, _)| *id)
+            .map(|(id, w)| (*id, w.redirected))
             .collect();
 
-        for wid in window_ids {
+        for (wid, redirected) in window_ids {
             let Some(wid_str) = self.window_uuid(wid) else { continue };
             if let Some(win) = self.windows.get_mut(&wid) {
                 if let Some((x, y, w, h, mut pixels)) = win.framebuffer.take_dirty_pixels() {
+                    // Accumulate damage for DAMAGE subscribers regardless of redirect state.
+                    let damage_rect = super::super::types::RegionRect {
+                        x, y, width: w, height: h,
+                    };
+                    let damage_region = super::super::types::XFixesRegion::from_rects(vec![damage_rect]);
+                    let win_width = win.width;
+                    let win_height = win.height;
+                    let damage_matches: Vec<(u32, u8)> = self
+                        .damage_regions
+                        .iter_mut()
+                        .filter(|(_, info)| info.drawable == wid)
+                        .map(|(&did, info)| {
+                            info.accumulated = info.accumulated.union(&damage_region);
+                            (did, info.level)
+                        })
+                        .collect();
+
+                    let bo = self.msb_first;
+                    let seq = self.sequence;
+                    for (damage_id, level) in damage_matches {
+                        let mut event = [0u8; 32];
+                        event[0] = 91;
+                        event[1] = level;
+                        write_u16_bo(&mut event, 2, seq, bo);
+                        write_u32_bo(&mut event, 4, wid, bo);
+                        write_u32_bo(&mut event, 8, damage_id, bo);
+                        write_u16_bo(&mut event, 14, x as u16, bo);
+                        write_u16_bo(&mut event, 16, y as u16, bo);
+                        write_u16_bo(&mut event, 18, w, bo);
+                        write_u16_bo(&mut event, 20, h, bo);
+                        write_u16_bo(&mut event, 26, win_width, bo);
+                        write_u16_bo(&mut event, 28, win_height, bo);
+                        self.pending_events.push(event.to_vec());
+                    }
+
+                    // Redirected windows: skip sending to frontend display.
+                    // The compositor reads their content via NameWindowPixmap/RENDER.
+                    if redirected {
+                        continue;
+                    }
+
                     // Apply shape clipping: mask pixels outside the bounding/clip shape
                     if let Some(shape) = win.effective_render_shape() {
                         for py in 0..h as i16 {
@@ -204,33 +264,6 @@ impl ClientState {
                             data: pixels,
                         },
                     ));
-
-                    let win_width = win.width;
-                    let win_height = win.height;
-                    let damage_matches: Vec<(u32, u8)> = self
-                        .damage_regions
-                        .iter()
-                        .filter(|(_, info)| info.drawable == wid)
-                        .map(|(&did, info)| (did, info.level))
-                        .collect();
-
-                    let bo = self.msb_first;
-                    let seq = self.sequence;
-                    for (damage_id, level) in damage_matches {
-                        let mut event = [0u8; 32];
-                        event[0] = 91;
-                        event[1] = level;
-                        write_u16_bo(&mut event, 2, seq, bo);
-                        write_u32_bo(&mut event, 4, wid, bo);
-                        write_u32_bo(&mut event, 8, damage_id, bo);
-                        write_u16_bo(&mut event, 14, x as u16, bo);
-                        write_u16_bo(&mut event, 16, y as u16, bo);
-                        write_u16_bo(&mut event, 18, w, bo);
-                        write_u16_bo(&mut event, 20, h, bo);
-                        write_u16_bo(&mut event, 26, win_width, bo);
-                        write_u16_bo(&mut event, 28, win_height, bo);
-                        self.pending_events.push(event.to_vec());
-                    }
                 }
             }
         }
@@ -241,13 +274,25 @@ impl ClientState {
     // -----------------------------------------------------------------------
 
     /// Queue DamageNotify events for subscriptions on the given drawable.
+    ///
+    /// Per the DAMAGE spec, each notification also accumulates the damaged
+    /// rectangle into the DamageInfo's region so that DamageSubtract can
+    /// compute proper region differences.
     pub(crate) fn notify_damage(&mut self, drawable: u32, x: i16, y: i16, width: u16, height: u16) {
         let resolved = self.resolve_drawable(drawable);
+
+        // Accumulate damage into matching DamageInfo regions.
+        let damage_rect = super::super::types::RegionRect { x, y, width, height };
+        let damage_region = super::super::types::XFixesRegion::from_rects(vec![damage_rect]);
+
         let matches: Vec<(u32, u8)> = self
             .damage_regions
-            .iter()
+            .iter_mut()
             .filter(|(_, info)| info.drawable == resolved)
-            .map(|(&did, info)| (did, info.level))
+            .map(|(&did, info)| {
+                info.accumulated = info.accumulated.union(&damage_region);
+                (did, info.level)
+            })
             .collect();
 
         let bo = self.msb_first;
