@@ -157,12 +157,12 @@ impl BitmapFont {
 
         let mut pixels = vec![0u8; total_width as usize * total_height as usize * 4];
 
-        // Fill background
+        // Fill background (opaque — ImageText fills the bounding box)
         for i in 0..(total_width as usize * total_height as usize) {
             pixels[i * 4] = bg_b;
             pixels[i * 4 + 1] = bg_g;
             pixels[i * 4 + 2] = bg_r;
-            pixels[i * 4 + 3] = 0;
+            pixels[i * 4 + 3] = 0xFF;
         }
 
         // Render each character
@@ -188,7 +188,7 @@ impl BitmapFont {
                                 pixels[idx] = fg_b;
                                 pixels[idx + 1] = fg_g;
                                 pixels[idx + 2] = fg_r;
-                                pixels[idx + 3] = 0;
+                                pixels[idx + 3] = 0xFF;
                             }
                         }
                     }

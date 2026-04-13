@@ -24,15 +24,15 @@ pub(crate) fn handle_poly_text8(state: &mut ClientState, data: &[u8]) -> Vec<u8>
     let y = state.read_i16(data, 14);
     let gc = state.gcs.get(&gc_id).cloned().unwrap_or_default();
 
-    let font = state
+    let mut current_font_id = gc.font_id;
+    let mut font = state
         .font_manager
-        .get_font(gc.font_id)
+        .get_font(current_font_id)
         .or_else(|| state.font_manager.get_default_font());
 
-    let font = match font {
-        Some(f) => f,
-        None => return Vec::new(),
-    };
+    if font.is_none() {
+        return Vec::new();
+    }
 
     // Collect text items first to avoid borrow issues
     let mut items: Vec<(i16, i16, u16, u16, Vec<u8>)> = Vec::new();
@@ -43,6 +43,15 @@ pub(crate) fn handle_poly_text8(state: &mut ClientState, data: &[u8]) -> Vec<u8>
         let item_len = data[offset] as usize;
 
         if item_len == 255 {
+            // Font-switch item: length=255, then 4-byte font ID.
+            // Per X11 spec, change the active font for subsequent text items.
+            if offset + 5 <= end {
+                let new_font_id = state.read_u32(data, offset + 1);
+                if let Some(f) = state.font_manager.get_font(new_font_id) {
+                    font = Some(f);
+                    current_font_id = new_font_id;
+                }
+            }
             offset += 5;
             continue;
         }
@@ -56,18 +65,20 @@ pub(crate) fn handle_poly_text8(state: &mut ClientState, data: &[u8]) -> Vec<u8>
         let delta = data[offset + 1] as i8;
         cursor_x += delta as i16;
 
-        let text = &data[offset + 2..offset + 2 + item_len];
-        let (img_w, img_h, pixels) = font.render_text_transparent(text, gc.foreground);
+        if let Some(ref f) = font {
+            let text = &data[offset + 2..offset + 2 + item_len];
+            let (img_w, img_h, pixels) = f.render_text_transparent(text, gc.foreground);
 
-        if img_w > 0 && img_h > 0 {
-            items.push((cursor_x, y - font.font_ascent, img_w, img_h, pixels));
-        }
+            if img_w > 0 && img_h > 0 {
+                items.push((cursor_x, y - f.font_ascent, img_w, img_h, pixels));
+            }
 
-        let mut text_advance: i32 = 0;
-        for &ch in text {
-            text_advance += font.char_info(ch as u16).character_width as i32;
+            let mut text_advance: i32 = 0;
+            for &ch in text {
+                text_advance += f.char_info(ch as u16).character_width as i32;
+            }
+            cursor_x += text_advance as i16;
         }
-        cursor_x += text_advance as i16;
         offset += 2 + item_len;
     }
 
@@ -104,15 +115,15 @@ pub(crate) fn handle_poly_text16(state: &mut ClientState, data: &[u8]) -> Vec<u8
     let y = state.read_i16(data, 14);
     let gc = state.gcs.get(&gc_id).cloned().unwrap_or_default();
 
-    let font = state
+    let mut current_font_id = gc.font_id;
+    let mut font = state
         .font_manager
-        .get_font(gc.font_id)
+        .get_font(current_font_id)
         .or_else(|| state.font_manager.get_default_font());
 
-    let font = match font {
-        Some(f) => f,
-        None => return Vec::new(),
-    };
+    if font.is_none() {
+        return Vec::new();
+    }
 
     let mut items: Vec<(i16, i16, u16, u16, Vec<u8>)> = Vec::new();
     let mut offset = 16;
@@ -122,6 +133,14 @@ pub(crate) fn handle_poly_text16(state: &mut ClientState, data: &[u8]) -> Vec<u8
         let item_len = data[offset] as usize;
 
         if item_len == 255 {
+            // Font-switch item: change active font for subsequent text items.
+            if offset + 5 <= end {
+                let new_font_id = state.read_u32(data, offset + 1);
+                if let Some(f) = state.font_manager.get_font(new_font_id) {
+                    font = Some(f);
+                    current_font_id = new_font_id;
+                }
+            }
             offset += 5;
             continue;
         }
@@ -135,87 +154,89 @@ pub(crate) fn handle_poly_text16(state: &mut ClientState, data: &[u8]) -> Vec<u8
         let delta = data[offset + 1] as i8;
         cursor_x += delta as i16;
 
-        // Extract 2-byte character codes (big-endian per X11 spec)
-        let mut char_codes: Vec<u16> = Vec::with_capacity(item_len);
-        for i in 0..item_len {
-            let char_offset = offset + 2 + i * 2;
-            let hi = data[char_offset] as u16;
-            let lo = data[char_offset + 1] as u16;
-            char_codes.push((hi << 8) | lo);
-        }
-
-        // Render each character, using on-demand glyph rendering for codepoints > 255
-        let mut text_advance: i32 = 0;
-        for &code in &char_codes {
-            if code <= font.max_char {
-                text_advance += font.char_info(code).character_width as i32;
-            } else if let Some((ci, _)) = font.render_extended_glyph(code as u32) {
-                text_advance += ci.character_width as i32;
-            } else {
-                text_advance += font.char_info(font.default_char).character_width as i32;
+        if let Some(ref font) = font {
+            // Extract 2-byte character codes (big-endian per X11 spec)
+            let mut char_codes: Vec<u16> = Vec::with_capacity(item_len);
+            for i in 0..item_len {
+                let char_offset = offset + 2 + i * 2;
+                let hi = data[char_offset] as u16;
+                let lo = data[char_offset + 1] as u16;
+                char_codes.push((hi << 8) | lo);
             }
-        }
 
-        // For characters within the basic range, use the standard renderer
-        let basic_chars: Vec<u8> = char_codes.iter()
-            .filter(|&&c| c <= 255)
-            .map(|&c| c as u8)
-            .collect();
-        let has_extended = char_codes.iter().any(|&c| c > 255);
-
-        if !has_extended {
-            // All characters in basic range — use optimized path
-            let (img_w, img_h, pixels) = font.render_text_transparent(&basic_chars, gc.foreground);
-            if img_w > 0 && img_h > 0 {
-                items.push((cursor_x, y - font.font_ascent, img_w, img_h, pixels));
-            }
-        } else {
-            // Mix of basic and extended characters — render individually
-            let mut local_x = cursor_x;
+            // Render each character, using on-demand glyph rendering for codepoints > 255
+            let mut text_advance: i32 = 0;
             for &code in &char_codes {
-                let (ci, glyph_opt) = if code <= font.max_char {
-                    let ci = font.char_info(code).clone();
-                    let g = font.glyph(code).cloned();
-                    (ci, g)
-                } else if let Some((ci, g)) = font.render_extended_glyph(code as u32) {
-                    (ci, Some(g))
+                if code <= font.max_char {
+                    text_advance += font.char_info(code).character_width as i32;
+                } else if let Some((ci, _)) = font.render_extended_glyph(code as u32) {
+                    text_advance += ci.character_width as i32;
                 } else {
-                    let ci = font.char_info(font.default_char).clone();
-                    let g = font.glyph(font.default_char).cloned();
-                    (ci, g)
-                };
+                    text_advance += font.char_info(font.default_char).character_width as i32;
+                }
+            }
 
-                if let Some(glyph) = glyph_opt {
-                    if glyph.width > 0 && glyph.height > 0 {
-                        let fg_r = ((gc.foreground >> 16) & 0xFF) as u8;
-                        let fg_g = ((gc.foreground >> 8) & 0xFF) as u8;
-                        let fg_b = (gc.foreground & 0xFF) as u8;
-                        let gw = glyph.width as usize;
-                        let gh = glyph.height as usize;
-                        let row_bytes = gw.div_ceil(8);
-                        let mut pixels = vec![0u8; gw * gh * 4];
-                        for row in 0..gh {
-                            for col in 0..gw {
-                                let bit = (glyph.bitmap[row * row_bytes + col / 8] >> (7 - (col % 8))) & 1;
-                                if bit != 0 {
-                                    let idx = (row * gw + col) * 4;
-                                    pixels[idx] = fg_b;
-                                    pixels[idx + 1] = fg_g;
-                                    pixels[idx + 2] = fg_r;
-                                    pixels[idx + 3] = 0xFF;
+            // For characters within the basic range, use the standard renderer
+            let basic_chars: Vec<u8> = char_codes.iter()
+                .filter(|&&c| c <= 255)
+                .map(|&c| c as u8)
+                .collect();
+            let has_extended = char_codes.iter().any(|&c| c > 255);
+
+            if !has_extended {
+                // All characters in basic range — use optimized path
+                let (img_w, img_h, pixels) = font.render_text_transparent(&basic_chars, gc.foreground);
+                if img_w > 0 && img_h > 0 {
+                    items.push((cursor_x, y - font.font_ascent, img_w, img_h, pixels));
+                }
+            } else {
+                // Mix of basic and extended characters — render individually
+                let mut local_x = cursor_x;
+                for &code in &char_codes {
+                    let (ci, glyph_opt) = if code <= font.max_char {
+                        let ci = font.char_info(code).clone();
+                        let g = font.glyph(code).cloned();
+                        (ci, g)
+                    } else if let Some((ci, g)) = font.render_extended_glyph(code as u32) {
+                        (ci, Some(g))
+                    } else {
+                        let ci = font.char_info(font.default_char).clone();
+                        let g = font.glyph(font.default_char).cloned();
+                        (ci, g)
+                    };
+
+                    if let Some(glyph) = glyph_opt {
+                        if glyph.width > 0 && glyph.height > 0 {
+                            let fg_r = ((gc.foreground >> 16) & 0xFF) as u8;
+                            let fg_g = ((gc.foreground >> 8) & 0xFF) as u8;
+                            let fg_b = (gc.foreground & 0xFF) as u8;
+                            let gw = glyph.width as usize;
+                            let gh = glyph.height as usize;
+                            let row_bytes = gw.div_ceil(8);
+                            let mut pixels = vec![0u8; gw * gh * 4];
+                            for row in 0..gh {
+                                for col in 0..gw {
+                                    let bit = (glyph.bitmap[row * row_bytes + col / 8] >> (7 - (col % 8))) & 1;
+                                    if bit != 0 {
+                                        let idx = (row * gw + col) * 4;
+                                        pixels[idx] = fg_b;
+                                        pixels[idx + 1] = fg_g;
+                                        pixels[idx + 2] = fg_r;
+                                        pixels[idx + 3] = 0xFF;
+                                    }
                                 }
                             }
+                            let gx = local_x + ci.left_side_bearing;
+                            let gy = y - ci.ascent;
+                            items.push((gx, gy, glyph.width, glyph.height, pixels));
                         }
-                        let gx = local_x + ci.left_side_bearing;
-                        let gy = y - ci.ascent;
-                        items.push((gx, gy, glyph.width, glyph.height, pixels));
                     }
+                    local_x += ci.character_width;
                 }
-                local_x += ci.character_width;
             }
-        }
 
-        cursor_x += text_advance as i16;
+            cursor_x += text_advance as i16;
+        }
         offset += 2 + item_len * 2;
     }
 
