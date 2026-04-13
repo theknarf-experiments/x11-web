@@ -885,7 +885,7 @@ impl X11Server {
                 let stream = $stream;
                 tokio::spawn(async move {
                     if let Err(e) =
-                        connection::handle_client(stream, client_id, update_tx, message_tx, message_rx, conn_index, sw, wm, sa, wr, mt, er, ss, cn, sc, sp, spf, sg, cr, eb, sgl, src, pc, ac, ssr, sacl, sst).await
+                        connection::handle_client(stream, client_id, update_tx, message_tx, message_rx, conn_index, peer_pid, sw, wm, sa, wr, mt, er, ss, cn, sc, sp, spf, sg, cr, eb, sgl, src, pc, ac, ssr, sacl, sst).await
                     {
                         debug!("X11 client {cid} disconnected: {e}");
                     }

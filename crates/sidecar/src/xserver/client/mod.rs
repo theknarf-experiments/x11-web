@@ -28,6 +28,8 @@ pub(crate) use xkb_state::*;
 /// Per-connection state for an X11 client.
 pub(crate) struct ClientState {
     pub(crate) client_id: String,
+    /// PID of the connected peer process (from SO_PEERCRED), 0 if unknown.
+    pub(crate) peer_pid: u32,
     pub(crate) resource_id_base: u32,
     /// Next XID to allocate for XC-MISC GetXIDRange/GetXIDList.
     /// Starts at resource_id_base and increments within the client's ID mask.

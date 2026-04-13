@@ -562,6 +562,13 @@ pub(crate) fn handle_free_colors(state: &mut ClientState, data: &[u8]) -> Vec<u8
     if cmap_id != ROOT_COLORMAP && !state.colormaps.contains_key(&cmap_id) {
         return build_error(BAD_COLOR, state.sequence, cmap_id, 88, 0);
     }
+    // Per X11 spec, FreeColors on a read-only colormap is a BadAccess error
+    if let Some(cmap) = state.colormaps.get(&cmap_id) {
+        if !cmap.is_writable() {
+            return build_error(BAD_ACCESS, state.sequence, cmap_id, 88, 0);
+        }
+    }
+
     let _plane_mask = state.read_u32(data, 8);
     let n_pixels = (data.len() - 12) / 4;
 
@@ -588,6 +595,13 @@ pub(crate) fn handle_store_colors(state: &mut ClientState, data: &[u8]) -> Vec<u
     if cmap_id != ROOT_COLORMAP && !state.colormaps.contains_key(&cmap_id) {
         return build_error(BAD_COLOR, state.sequence, cmap_id, 89, 0);
     }
+    // Per X11 spec, StoreColors on a read-only colormap is a BadAccess error
+    if let Some(cmap) = state.colormaps.get(&cmap_id) {
+        if !cmap.is_writable() {
+            return build_error(BAD_ACCESS, state.sequence, cmap_id, 89, 0);
+        }
+    }
+
     // Each ColorItem is 12 bytes: pixel(4) + red(2) + green(2) + blue(2) + flags(1) + pad(1)
     let n_items = (data.len() - 8) / 12;
 
@@ -624,6 +638,13 @@ pub(crate) fn handle_store_named_color(state: &mut ClientState, data: &[u8]) -> 
     if cmap_id != ROOT_COLORMAP && !state.colormaps.contains_key(&cmap_id) {
         return build_error(BAD_COLOR, state.sequence, cmap_id, 90, 0);
     }
+    // Per X11 spec, StoreNamedColor on a read-only colormap is a BadAccess error
+    if let Some(cmap) = state.colormaps.get(&cmap_id) {
+        if !cmap.is_writable() {
+            return build_error(BAD_ACCESS, state.sequence, cmap_id, 90, 0);
+        }
+    }
+
     let pixel = state.read_u32(data, 8);
     let name_len = state.read_u16(data, 12) as usize;
     let name = if 16 + name_len <= data.len() {

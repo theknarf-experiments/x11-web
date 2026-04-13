@@ -143,6 +143,19 @@ pub(crate) fn handle_send_event(state: &mut ClientState, data: &[u8]) -> Vec<u8>
                 return Vec::new();
             }
 
+            // WM_PROTOCOLS response: handle _NET_WM_PING pong
+            let wm_protocols_atom = state.intern_atom("WM_PROTOCOLS", false);
+            if msg_type == wm_protocols_atom {
+                let protocol_atom = state.read_u32(&event, 12);
+                let net_wm_ping_atom = state.intern_atom("_NET_WM_PING", false);
+                if protocol_atom == net_wm_ping_atom {
+                    // _NET_WM_PING pong: client is alive. Record the response timestamp.
+                    let source_window = state.read_u32(&event, 4);
+                    debug!("_NET_WM_PING pong received from window {source_window:#x}");
+                    return Vec::new();
+                }
+            }
+
             // _NET_CLOSE_WINDOW: graceful close request
             let net_close_atom = state.intern_atom("_NET_CLOSE_WINDOW", false);
             if msg_type == net_close_atom {

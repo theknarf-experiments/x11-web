@@ -368,6 +368,28 @@ impl ClientState {
         }
     }
 
+    /// Send _NET_WM_PING ClientMessage to a window if it supports it.
+    /// Per EWMH spec, the WM sends this to check if a window is responding.
+    /// The client should respond by sending the same message back to the root.
+    pub(crate) fn send_wm_ping(&mut self, window: u32) {
+        let net_wm_ping_atom = self.intern_atom("_NET_WM_PING", false);
+        if self.window_supports_protocol(window, net_wm_ping_atom) {
+            let wm_protocols_atom = self.intern_atom("WM_PROTOCOLS", false);
+            let timestamp = self.timestamp();
+
+            let mut cm = [0u8; 32];
+            cm[0] = CLIENT_MESSAGE_EVENT;
+            cm[1] = 32; // format
+            self.write_u16(&mut cm, 2, self.sequence);
+            self.write_u32(&mut cm, 4, window);
+            self.write_u32(&mut cm, 8, wm_protocols_atom);
+            self.write_u32(&mut cm, 12, net_wm_ping_atom);
+            self.write_u32(&mut cm, 16, timestamp);
+            self.write_u32(&mut cm, 20, window); // window being pinged
+            self.pending_events.push(cm.to_vec());
+        }
+    }
+
     /// Get WM_NORMAL_HINTS (size hints) for a window.
     pub(crate) fn get_size_hints(&self, window: u32) -> Option<SizeHints> {
         let wm_normal_hints_atom = self.intern_atom("WM_NORMAL_HINTS", true);

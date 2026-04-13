@@ -84,6 +84,7 @@ pub(crate) async fn handle_client(
     message_tx: mpsc::UnboundedSender<(u32, WindowMessage)>,
     mut message_rx: mpsc::UnboundedReceiver<(u32, WindowMessage)>,
     conn_index: u32,
+    peer_pid: u32,
     shared_windows: SharedWindows,
     shared_wm_state: SharedWmState,
     shared_atoms: Arc<Mutex<AtomManager>>,
@@ -230,6 +231,7 @@ pub(crate) async fn handle_client(
     let resource_id_base = (conn_index + 1) << 22;
     let mut state = ClientState {
         client_id: client_id.clone(),
+        peer_pid,
         resource_id_base,
         next_xid: resource_id_base,
         sequence: 0,

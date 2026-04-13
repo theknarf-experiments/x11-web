@@ -198,11 +198,33 @@ pub(crate) fn handle_create_window(state: &mut ClientState, data: &[u8], _seq: u
 
     // Set _NET_FRAME_EXTENTS = (0,0,0,0) on new windows -- GTK3 checks this.
     let atom_frame = state.intern_atom("_NET_FRAME_EXTENTS", false);
+    // Set _NET_WM_PID if we know the client's process ID (EWMH §5.6)
+    let atom_pid = state.intern_atom("_NET_WM_PID", false);
+    // Set WM_CLIENT_MACHINE (ICCCM §4.1.2.9)
+    let atom_machine = state.intern_atom("WM_CLIENT_MACHINE", false);
+    let client_pid = state.peer_pid;
     if let Some(win) = state.windows.get_mut(&wid) {
         win.properties.insert(atom_frame, PropertyValue {
             prop_type: 6, // CARDINAL
             format: 32,
             data: vec![0; 16], // left, right, top, bottom = 0
+        });
+        // _NET_WM_PID
+        if client_pid > 0 {
+            win.properties.insert(atom_pid, PropertyValue {
+                prop_type: 6, // CARDINAL
+                format: 32,
+                data: client_pid.to_le_bytes().to_vec(),
+            });
+        }
+        // WM_CLIENT_MACHINE: hostname
+        let hostname = std::fs::read_to_string("/etc/hostname")
+            .unwrap_or_else(|_| "localhost".to_string());
+        let hostname = hostname.trim();
+        win.properties.insert(atom_machine, PropertyValue {
+            prop_type: 31, // STRING
+            format: 8,
+            data: hostname.as_bytes().to_vec(),
         });
     }
 
