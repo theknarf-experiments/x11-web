@@ -862,6 +862,12 @@ pub(crate) fn handle_configure_window(state: &mut ClientState, data: &[u8], seq:
                 // Cross-connection broadcast: SubstructureNotify on parent
                 state.broadcast_event(parent_id, SUBSTRUCTURE_NOTIFY_MASK, &parent_event);
             }
+            // Deliver StructureNotify to the window's own client if subscribed
+            if let Some(win) = state.windows.get(&wid) {
+                if win.event_mask & STRUCTURE_NOTIFY_MASK != 0 {
+                    state.pending_events.push(event.to_vec());
+                }
+            }
             // Cross-connection broadcast: StructureNotify on the window itself
             state.broadcast_event(wid, STRUCTURE_NOTIFY_MASK, &event);
 

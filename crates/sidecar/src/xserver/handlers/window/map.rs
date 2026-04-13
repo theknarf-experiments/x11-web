@@ -222,7 +222,9 @@ pub(crate) fn handle_map_window(state: &mut ClientState, data: &[u8], seq: u16) 
         write_u32_bo(&mut map_event, 4, wid, msb_first); // event window
         write_u32_bo(&mut map_event, 8, wid, msb_first); // window
         map_event[12] = if override_redirect { 1 } else { 0 };
-        events.extend_from_slice(&map_event);
+        if event_mask & STRUCTURE_NOTIFY_MASK != 0 {
+            events.extend_from_slice(&map_event);
+        }
 
         // Send MapNotify to parent (SubstructureNotifyMask)
         let parent_id = win.parent;
@@ -497,7 +499,10 @@ pub(crate) fn handle_unmap_window(state: &mut ClientState, data: &[u8], seq: u16
         write_u16_bo(&mut event, 2, seq, bo);
         write_u32_bo(&mut event, 4, wid, bo);
         write_u32_bo(&mut event, 8, wid, bo);
-        events.extend_from_slice(&event);
+        let win_mask = state.windows.get(&wid).map(|w| w.event_mask).unwrap_or(0);
+        if win_mask & STRUCTURE_NOTIFY_MASK != 0 {
+            events.extend_from_slice(&event);
+        }
         event
     };
 
