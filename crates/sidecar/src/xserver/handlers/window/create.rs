@@ -348,6 +348,70 @@ pub(crate) fn handle_destroy_window(state: &mut ClientState, data: &[u8]) -> Vec
     // Revert focus if this was the focus window
     state.revert_focus_from(wid);
 
+    // Per X11 spec §12.5.2: DestroyWindow destroys the window AND all of its
+    // subwindows recursively. Collect all descendants (depth-first).
+    let mut all_descendants = Vec::new();
+    {
+        let mut stack: Vec<u32> = state.windows.get(&wid)
+            .map(|w| w.children_order.clone())
+            .unwrap_or_default();
+        while let Some(child) = stack.pop() {
+            all_descendants.push(child);
+            if let Some(w) = state.windows.get(&child) {
+                stack.extend(w.children_order.iter().copied());
+            }
+        }
+    }
+
+    // Revert focus if it points to any descendant being destroyed
+    for &desc in &all_descendants {
+        if state.focus_window == desc {
+            state.revert_focus_from(desc);
+        }
+    }
+
+    // Destroy all descendants first (bottom-up in hierarchy)
+    for desc in all_descendants.iter().rev() {
+        let desc = *desc;
+        // Send DestroyNotify for each descendant
+        if let Some(desc_parent) = state.windows.get(&desc).map(|w| w.parent) {
+            let mut event = [0u8; 32];
+            event[0] = DESTROY_NOTIFY_EVENT;
+            state.write_u16(&mut event, 2, state.sequence);
+            state.write_u32(&mut event, 4, desc);
+            state.write_u32(&mut event, 8, desc);
+            if let Some(w) = state.windows.get(&desc) {
+                if w.event_mask & STRUCTURE_NOTIFY_MASK != 0 {
+                    state.pending_events.push(event.to_vec());
+                }
+            }
+            state.broadcast_event(desc, STRUCTURE_NOTIFY_MASK, &event);
+
+            // SubstructureNotify on the parent
+            let mut pevent = [0u8; 32];
+            pevent[0] = DESTROY_NOTIFY_EVENT;
+            state.write_u16(&mut pevent, 2, state.sequence);
+            state.write_u32(&mut pevent, 4, desc_parent);
+            state.write_u32(&mut pevent, 8, desc);
+            state.broadcast_event(desc_parent, SUBSTRUCTURE_NOTIFY_MASK, &pevent);
+        }
+
+        state.windows.remove(&desc);
+        state.gtk_menu_paths.remove(&desc);
+        state.menu_tracker.window_index().unregister(desc);
+        if let Ok(mut shared) = state.shared_windows.lock() {
+            shared.remove(&desc);
+        }
+        if let Some(uuid) = state.x11_to_uuid.remove(&desc) {
+            state.window_router.unregister_all(std::slice::from_ref(&uuid));
+            state.menu_tracker.detach(&uuid);
+            let _ = state.update_tx.send((
+                state.client_id.clone(),
+                DisplayUpdate::WindowDestroyed { window_id: uuid },
+            ));
+        }
+    }
+
     // Remove from parent's children_order
     if let Some(parent_id) = parent_id {
         if let Some(parent_win) = state.windows.get_mut(&parent_id) {

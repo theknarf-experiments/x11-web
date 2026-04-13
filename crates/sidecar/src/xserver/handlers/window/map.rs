@@ -363,6 +363,29 @@ pub(crate) fn handle_map_window(state: &mut ClientState, data: &[u8], seq: u16) 
         state.send_wm_ping(wid);
     }
 
+    // Per X11 spec §7: when a window is mapped and contains the pointer,
+    // generate EnterNotify/LeaveNotify crossing events.
+    {
+        let pointer_x = state.pointer_x;
+        let pointer_y = state.pointer_y;
+        if let Some(win) = state.windows.get(&wid) {
+            if win.mapped {
+                let abs_x = win.x as i16;
+                let abs_y = win.y as i16;
+                let abs_x2 = abs_x + win.width as i16;
+                let abs_y2 = abs_y + win.height as i16;
+                if pointer_x >= abs_x && pointer_x < abs_x2
+                    && pointer_y >= abs_y && pointer_y < abs_y2
+                {
+                    let crossing = crate::xserver::input::build_crossing_events(
+                        state, wid, pointer_x, pointer_y, pointer_x - abs_x, pointer_y - abs_y,
+                    );
+                    events.extend(crossing);
+                }
+            }
+        }
+    }
+
     events
 }
 
@@ -512,6 +535,20 @@ pub(crate) fn handle_unmap_window(state: &mut ClientState, data: &[u8], seq: u16
 
     // Unmapping a window may unobscure siblings — recalculate visibility
     update_sibling_visibility(state, wid, seq, bo);
+
+    // Per X11 spec §7: when a window containing the pointer is unmapped,
+    // generate LeaveNotify/EnterNotify crossing events. The pointer
+    // effectively enters the parent or root.
+    if state.last_entered_window == wid {
+        let pointer_x = state.pointer_x;
+        let pointer_y = state.pointer_y;
+        // The pointer now enters the parent window
+        let target = if parent_id != 0 { parent_id } else { state.root_window };
+        let crossing = crate::xserver::input::build_crossing_events(
+            state, target, pointer_x, pointer_y, pointer_x, pointer_y,
+        );
+        events.extend(crossing);
+    }
 
     events
 }
