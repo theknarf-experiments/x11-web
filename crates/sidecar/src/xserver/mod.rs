@@ -8,12 +8,14 @@ pub(crate) mod client;
 #[allow(dead_code)]
 pub(crate) mod core;
 pub(crate) mod connection;
+mod dispatch;
 #[allow(dead_code)]
 pub(crate) mod grab;
 pub(crate) mod handlers;
 pub(crate) mod input;
 pub(crate) mod setup;
 pub(crate) mod types;
+pub(crate) mod window_tree;
 
 // Re-exports used by main.rs and other crates
 pub use types::{TaggedDisplayUpdate, WindowRouter};
@@ -23,6 +25,9 @@ pub(crate) use client::ClientState;
 pub(crate) use input::{
     CROSSING_MODE_GRAB, CROSSING_MODE_UNGRAB,
 };
+// Re-exports from split-out modules
+pub(crate) use window_tree::{ancestor_chain, is_descendant_of, compute_visibility};
+use dispatch::handle_request;
 
 
 use std::collections::HashMap;
@@ -958,210 +963,3 @@ impl Drop for X11Server {
 
 
 
-/// Walk from `start` up through `parent` links collecting the chain of window IDs.
-pub(crate) fn ancestor_chain(windows: &HashMap<u32, WindowState>, start: u32) -> Vec<u32> {
-    let mut chain = Vec::new();
-    let mut cur = start;
-    for _ in 0..128 {
-        chain.push(cur);
-        match windows.get(&cur).map(|w| w.parent) {
-            Some(p) if p != 0 && p != cur => cur = p,
-            _ => break,
-        }
-    }
-    chain
-}
-
-/// Check if window `child` is a descendant of window `ancestor`.
-pub(crate) fn is_descendant_of(windows: &HashMap<u32, WindowState>, child: u32, ancestor: u32) -> bool {
-    let mut current = child;
-    for _ in 0..128 {
-        let parent = match windows.get(&current) {
-            Some(w) => w.parent,
-            None => return false,
-        };
-        if parent == ancestor {
-            return true;
-        }
-        if parent == 0 {
-            return false;
-        }
-        current = parent;
-    }
-    false
-}
-
-/// Compute the visibility state of a window based on its siblings' stacking order.
-/// Returns: 0 = Unobscured, 1 = PartiallyObscured, 2 = FullyObscured.
-pub(crate) fn compute_visibility(windows: &HashMap<u32, WindowState>, wid: u32) -> u8 {
-    let (parent_id, wx, wy, ww, wh, mapped) = match windows.get(&wid) {
-        Some(w) => (w.parent, w.x as i32, w.y as i32, w.width as i32, w.height as i32, w.mapped),
-        None => return 2,
-    };
-    if !mapped || ww == 0 || wh == 0 {
-        return 2; // FullyObscured — not visible
-    }
-
-    let children = match windows.get(&parent_id) {
-        Some(p) => p.children_order.clone(),
-        None => return 0, // No parent → root-level, assume unobscured
-    };
-
-    // Find our position in the stacking order
-    let our_idx = match children.iter().position(|&c| c == wid) {
-        Some(i) => i,
-        None => return 0,
-    };
-
-    // Check all siblings above us (higher index = on top)
-    let mut obscured_area = 0i64;
-    let total_area = ww as i64 * wh as i64;
-    let mut partially = false;
-
-    for &sibling_id in &children[our_idx + 1..] {
-        let sibling = match windows.get(&sibling_id) {
-            Some(s) if s.mapped => s,
-            _ => continue,
-        };
-
-        let sx = sibling.x as i32;
-        let sy = sibling.y as i32;
-        let sw = sibling.width as i32;
-        let sh = sibling.height as i32;
-
-        // Compute intersection
-        let ix1 = wx.max(sx);
-        let iy1 = wy.max(sy);
-        let ix2 = (wx + ww).min(sx + sw);
-        let iy2 = (wy + wh).min(sy + sh);
-
-        if ix1 < ix2 && iy1 < iy2 {
-            let overlap = (ix2 - ix1) as i64 * (iy2 - iy1) as i64;
-            obscured_area += overlap;
-            partially = true;
-        }
-    }
-
-    if !partially {
-        0 // Unobscured
-    } else if obscured_area >= total_area {
-        2 // FullyObscured (conservative: not accounting for overlap between siblings)
-    } else {
-        1 // PartiallyObscured
-    }
-}
-
-fn handle_request(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
-    if data.len() < 4 {
-        return Vec::new();
-    }
-    let major_opcode = data[0];
-    let _minor = data[1];
-    let seq = state.sequence;
-    // Extension major opcodes (assigned by QueryExtension)
-    const EXT_SHAPE: u8 = 128;
-    const EXT_SHM: u8 = 130;
-    const EXT_XINPUT: u8 = 131;
-    const EXT_BIG_REQUESTS: u8 = 133;
-    const EXT_SYNC: u8 = 134;
-    const EXT_GE: u8 = 135;
-    const EXT_XKB: u8 = 136;
-    const EXT_XFIXES: u8 = 138;
-    const EXT_RENDER: u8 = 139;
-    const EXT_RANDR: u8 = 140;
-    const EXT_XC_MISC: u8 = 141;
-    const EXT_COMPOSITE: u8 = 142;
-    const EXT_DAMAGE: u8 = 143;
-    const EXT_PRESENT: u8 = 148;
-    const EXT_DRI3: u8 = 149;
-    const EXT_XTEST: u8 = 150;
-    const EXT_DPMS: u8 = 151;
-    const EXT_SCREEN_SAVER: u8 = 152;
-    const EXT_VIDMODE: u8 = 153;
-    const EXT_RECORD: u8 = 154;
-    const EXT_SECURITY: u8 = 155;
-    const EXT_XVIDEO: u8 = 156;
-    const EXT_DBE: u8 = 157;
-    const EXT_XINERAMA: u8 = 158;
-    const EXT_GLX: u8 = 159;
-    const EXT_XRESOURCE: u8 = 160;
-
-    match major_opcode {
-        // Core protocol requests (opcodes 1-127)
-        1..=127 => handlers::handle_core_request(state, data),
-
-        EXT_BIG_REQUESTS => {
-            // BigReqEnable: mark BIG-REQUESTS as enabled and return max request length.
-            state.big_requests_enabled = true;
-            let bo = state.msb_first;
-            let mut reply = [0u8; 32];
-            reply[0] = 1;
-            write_u16_bo(&mut reply, 2, seq, bo);
-            write_u32_bo(&mut reply, 8, 4194304u32, bo); // 16MB / 4 = 4194304 words
-            reply.to_vec()
-        }
-
-        // Extension protocol requests
-        EXT_SHAPE => handlers::extensions::handle_shape_request(state, data, seq),
-        EXT_SHM => handlers::extensions::handle_shm_request(state, data, seq),
-        EXT_XINPUT => {
-            let mut reply = crate::xinput2::handle_request(
-                data,
-                seq,
-                &mut state.xi.valuators,
-                &mut state.xi.selections,
-                &mut state.xi.pending,
-                &mut state.xi.client_pointer,
-                &mut state.xi.device_properties,
-                &mut state.focus_window,
-                &mut state.xi.active_grabs,
-                &mut state.xi.passive_grabs,
-                &mut state.xi.pointer_frozen,
-                &mut state.xi.keyboard_frozen,
-                &mut state.xi.frozen_pointer_events,
-                &mut state.xi.frozen_keyboard_events,
-                &mut state.xi.xi1_dont_propagate,
-                SCREEN_WIDTH,
-                SCREEN_HEIGHT,
-                state.root_window,
-                state.msb_first,
-            );
-            if data.len() >= 2 && data[1] == x11rb_protocol::protocol::xinput::XI_QUERY_POINTER_REQUEST
-                && reply.len() >= 12
-            {
-                crate::xinput2::patch_query_pointer_root(&mut reply, state.root_window, state.msb_first);
-            }
-            reply
-        }
-        EXT_SYNC => handlers::extensions::handle_sync_request(state, data, seq),
-        EXT_GE => handlers::extensions::handle_ge_request(state, data, seq),
-        EXT_XKB => handlers::extensions::handle_xkb_request(state, data, seq),
-        EXT_XFIXES => handlers::extensions::handle_xfixes_request(state, data, seq),
-        EXT_RENDER => handlers::render::handle_render_request(state, data, seq),
-        EXT_RANDR => handlers::extensions::handle_randr_request(state, data, seq),
-        EXT_XC_MISC => handlers::extensions::handle_xc_misc_request(state, data, seq),
-        EXT_COMPOSITE => handlers::extensions::handle_x_composite_request(state, data, seq),
-        EXT_DAMAGE => handlers::extensions::handle_damage_request(state, data, seq),
-        EXT_PRESENT => handlers::extensions::handle_present_request(state, data, seq),
-        EXT_DRI3 => handlers::extensions::handle_dri3_request(state, data, seq),
-        EXT_XTEST => handlers::extensions::handle_xtest_request(state, data, seq),
-        EXT_DPMS => handlers::extensions::handle_dpms_request(state, data, seq),
-        EXT_SCREEN_SAVER => handlers::extensions::handle_screen_saver_request(state, data, seq),
-        EXT_VIDMODE => handlers::extensions::handle_vidmode_request(state, data, seq),
-        EXT_RECORD => handlers::record::handle_record_request(state, data, seq),
-        EXT_SECURITY => handlers::extensions::handle_security_request(state, data, seq),
-        EXT_XVIDEO => handlers::extensions::handle_xvideo_request(state, data, seq),
-        EXT_DBE => handlers::extensions::handle_dbe_request(state, data, seq),
-        EXT_XINERAMA => handlers::extensions::handle_xinerama_request(state, data, seq),
-        EXT_GLX => handlers::extensions::handle_glx_request(state, data, seq),
-        EXT_XRESOURCE => handlers::extensions::handle_xresource_request(state, data, seq),
-        _ => {
-            warn!("Unhandled X11 request opcode: {major_opcode} minor: {_minor}");
-            // Return BadRequest error per spec for unrecognized opcodes
-            self::core::build_error_bo(
-                BAD_REQUEST, seq, major_opcode as u32,
-                major_opcode, _minor as u16, state.msb_first,
-            )
-        }
-    }
-}
