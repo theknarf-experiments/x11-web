@@ -910,8 +910,10 @@ pub(crate) fn handle_configure_window(state: &mut ClientState, data: &[u8], seq:
                 0,               // pixmap_flags
             );
 
-            // Recalculate and send VisibilityNotify for affected siblings
-            if stacking_changed {
+            // Recalculate and send VisibilityNotify for affected siblings.
+            // Geometry changes (move/resize) can also affect occlusion, not
+            // just stacking order changes.
+            if stacking_changed || changed {
                 update_sibling_visibility(state, wid, seq, msb_first);
             }
 
