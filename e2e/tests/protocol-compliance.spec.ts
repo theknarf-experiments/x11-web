@@ -2205,4 +2205,132 @@ d.close()
 		);
 		expect(output).toContain("result=OK");
 	});
+
+	test("QueryExtension returns unique major opcodes for all extensions", async ({
+		sidecarContainer,
+	}) => {
+		const output = await runPythonX11(
+			sidecarContainer,
+			`
+import Xlib.display
+d = Xlib.display.Display()
+extensions = [
+    'BIG-REQUESTS', 'MIT-SHM', 'RENDER', 'XFIXES', 'SHAPE', 'SYNC',
+    'Composite', 'DAMAGE', 'Present', 'RANDR', 'XKEYBOARD',
+    'XTEST', 'DPMS', 'RECORD', 'SECURITY', 'XVideo',
+    'DOUBLE-BUFFER', 'XINERAMA', 'GLX', 'DRI3', 'X-Resource',
+]
+opcodes = {}
+conflicts = []
+for name in extensions:
+    info = d.query_extension(name)
+    if info and info.major_opcode > 0:
+        code = info.major_opcode
+        if code in opcodes:
+            conflicts.append(f"{name}={code} conflicts with {opcodes[code]}")
+        opcodes[code] = name
+if conflicts:
+    print(f"CONFLICTS: {', '.join(conflicts)}")
+else:
+    print(f"OK: {len(opcodes)} extensions with unique opcodes")
+d.close()
+`,
+		);
+		expect(output).toContain("OK:");
+		expect(output).not.toContain("CONFLICTS");
+	});
+
+	test("SYNC extension events use correct event base", async ({
+		sidecarContainer,
+	}) => {
+		const output = await runPythonX11(
+			sidecarContainer,
+			`
+import Xlib.display
+d = Xlib.display.Display()
+info = d.query_extension('SYNC')
+if info:
+    print(f"present={info.major_opcode > 0}")
+    print(f"major_opcode={info.major_opcode}")
+    print(f"first_event={info.first_event}")
+    # SYNC first_event must be 83 (AlarmNotify)
+    print(f"event_base_correct={info.first_event == 83}")
+else:
+    print("present=False")
+d.close()
+`,
+		);
+		expect(output).toContain("present=True");
+		expect(output).toContain("event_base_correct=True");
+	});
+
+	test("RENDER extension reports first_error for BadPictFormat", async ({
+		sidecarContainer,
+	}) => {
+		const output = await runPythonX11(
+			sidecarContainer,
+			`
+import Xlib.display
+d = Xlib.display.Display()
+info = d.query_extension('RENDER')
+if info:
+    print(f"present={info.major_opcode > 0}")
+    print(f"first_error={info.first_error}")
+    # RENDER first_error should be non-zero (142 = BadPictFormat)
+    print(f"has_error_base={info.first_error > 0}")
+else:
+    print("present=False")
+d.close()
+`,
+		);
+		expect(output).toContain("present=True");
+		expect(output).toContain("has_error_base=True");
+	});
+
+	test("Extension event bases do not overlap", async ({
+		sidecarContainer,
+	}) => {
+		const output = await runPythonX11(
+			sidecarContainer,
+			`
+import Xlib.display
+d = Xlib.display.Display()
+# Extensions with events and their expected event counts
+ext_events = {
+    'SHAPE': 1,
+    'MIT-SHM': 1,
+    'SYNC': 1,
+    'XKEYBOARD': 1,
+    'XFIXES': 2,
+    'RANDR': 2,
+    'DAMAGE': 1,
+    'SECURITY': 1,
+    'XVideo': 2,
+}
+ranges = []
+for name, count in ext_events.items():
+    info = d.query_extension(name)
+    if info and info.first_event > 0:
+        base = info.first_event
+        ranges.append((base, base + count, name))
+
+# Check for overlaps
+overlaps = []
+for i in range(len(ranges)):
+    for j in range(i + 1, len(ranges)):
+        a_start, a_end, a_name = ranges[i]
+        b_start, b_end, b_name = ranges[j]
+        if a_start < b_end and b_start < a_end:
+            overlaps.append(f"{a_name}({a_start}-{a_end-1}) overlaps {b_name}({b_start}-{b_end-1})")
+
+if overlaps:
+    print(f"OVERLAP: {'; '.join(overlaps)}")
+else:
+    print(f"OK: {len(ranges)} event ranges are non-overlapping")
+d.close()
+`,
+		);
+		expect(output).toContain("OK:");
+		expect(output).not.toContain("OVERLAP");
+	});
 });
