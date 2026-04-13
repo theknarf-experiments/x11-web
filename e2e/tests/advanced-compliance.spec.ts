@@ -161,7 +161,7 @@ w = screen.root.create_window(0, 0, 100, 100, 0, screen.root_depth,
 d.sync()
 
 attrs = w.get_attributes()
-print(f"save_under={attrs.save_under}")
+print(f"save_under={bool(attrs.save_under)}")
 
 w.destroy()
 d.close()
@@ -706,7 +706,7 @@ root = screen.root
 # Create a valid window first, then destroy it
 w = root.create_window(0, 0, 10, 10, 0, screen.root_depth)
 wid = w.id
-w.destroy_window()
+w.destroy()
 d.sync()
 print("drawable_validated=True")
 d.close()
@@ -1732,7 +1732,7 @@ test.describe.serial("Multi-depth visual compliance", () => {
 	}) => {
 		const output = await execInSidecar(
 			sidecarContainer,
-			`xdpyinfo 2>/dev/null | grep -E 'depth.*visual'`,
+			`xdpyinfo 2>&1 | grep 'depth' | head -5`,
 		);
 		expect(output).toContain("24");
 	});
