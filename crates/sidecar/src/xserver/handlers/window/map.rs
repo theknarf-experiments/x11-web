@@ -73,9 +73,9 @@ pub(crate) fn handle_map_window(state: &mut ClientState, data: &[u8], seq: u16) 
 
     // Pre-extract background fill info before the main mutable borrow.
     // Complex fills (ParentRelative, pixmap tiling) need separate data extraction.
-    struct BgInfo { bg_pixmap: Option<u32>, bg_pixel: u32, x: i16, y: i16, parent: u32, width: u16, height: u16 }
+    struct BgInfo { bg_pixmap: Option<u32>, parent: u32 }
     let bg_info: Option<BgInfo> = state.windows.get(&wid).map(|w| {
-        BgInfo { bg_pixmap: w.background_pixmap, bg_pixel: w.background_pixel, x: w.x, y: w.y, parent: w.parent, width: w.width, height: w.height }
+        BgInfo { bg_pixmap: w.background_pixmap, parent: w.parent }
     });
 
     // For ParentRelative, copy parent pixel data before mutating

@@ -4,8 +4,6 @@ mod image;
 mod notify;
 mod port;
 
-use tracing::debug;
-
 use super::super::client::ClientState;
 
 /// XVideo (Xv) (opcode 156)
