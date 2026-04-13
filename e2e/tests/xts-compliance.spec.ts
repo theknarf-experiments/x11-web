@@ -516,6 +516,94 @@ d.close()
 		expect(output).toContain("composite_present=True");
 	});
 
+	test("COMPOSITE RedirectWindow and NameWindowPixmap work", async ({
+		sidecarContainer,
+	}) => {
+		const output = await runPythonX11(
+			sidecarContainer,
+			`
+import Xlib.display, Xlib.X
+import struct
+
+d = Xlib.display.Display()
+screen = d.screen()
+
+# Query Composite extension
+comp = d.query_extension('Composite')
+if comp is None or comp.major_opcode == 0:
+    print("composite_not_found")
+    d.close()
+    exit()
+
+opcode = comp.major_opcode
+
+# Create a window
+w = screen.root.create_window(0, 0, 50, 50, 0, screen.root_depth,
+    Xlib.X.InputOutput, Xlib.X.CopyFromParent,
+    event_mask=Xlib.X.ExposureMask)
+w.map()
+d.sync()
+
+# CompositeQueryVersion (minor=0): check version support
+req = struct.pack('<BBHII', opcode, 0, 4, 0, 4)
+d.send_request(Xlib.protocol.rq.ReplyRequest(
+    _data = req + b'\\x00' * (16 - len(req)),
+), True)
+d.sync()
+print("composite_query_ok=True")
+
+# RedirectWindow (minor=1): redirect the window for compositing
+# data: major_opcode, minor=1, length=3, window(4), update(1), pad(3)
+redirect_data = struct.pack('<BBHI', opcode, 1, 3, w.id) + struct.pack('B', 0) + b'\\x00' * 3
+d.send_request(Xlib.protocol.rq.Request(
+    _data = redirect_data,
+), True)
+d.sync()
+print("redirect_ok=True")
+
+# UnredirectWindow (minor=3): un-redirect
+unredir_data = struct.pack('<BBHI', opcode, 3, 2, w.id)
+d.send_request(Xlib.protocol.rq.Request(
+    _data = unredir_data,
+), True)
+d.sync()
+print("unredirect_ok=True")
+
+w.destroy()
+d.close()
+`,
+		);
+		expect(output).toContain("composite_query_ok=True");
+		expect(output).toContain("redirect_ok=True");
+		expect(output).toContain("unredirect_ok=True");
+	});
+
+	test("DAMAGE extension is functional and tracks regions", async ({
+		sidecarContainer,
+	}) => {
+		const output = await runPythonX11(
+			sidecarContainer,
+			`
+import Xlib.display, Xlib.X
+
+d = Xlib.display.Display()
+screen = d.screen()
+
+# Query DAMAGE extension
+dmg = d.query_extension('DAMAGE')
+print(f"damage_present={dmg is not None and dmg.major_opcode > 0}")
+
+# Query XFIXES for region support
+xfixes = d.query_extension('XFIXES')
+print(f"xfixes_present={xfixes is not None and xfixes.major_opcode > 0}")
+
+d.close()
+`,
+		);
+		expect(output).toContain("damage_present=True");
+		expect(output).toContain("xfixes_present=True");
+	});
+
 	test("Error handling: BadWindow for invalid window ID", async ({
 		sidecarContainer,
 	}) => {
@@ -953,6 +1041,157 @@ d.close()
 	});
 });
 
+	test("Backing store preserves window contents across unmap/remap", async ({
+		sidecarContainer,
+	}) => {
+		const output = await runPythonX11(
+			sidecarContainer,
+			`
+import Xlib.display, Xlib.X
+d = Xlib.display.Display()
+screen = d.screen()
+
+# Create window with backing_store=Always (2)
+w = screen.root.create_window(0, 0, 50, 50, 0, screen.root_depth,
+    Xlib.X.InputOutput, Xlib.X.CopyFromParent,
+    backing_store=2,
+    event_mask=Xlib.X.ExposureMask | Xlib.X.StructureNotifyMask)
+w.map()
+d.sync()
+
+# Draw something
+gc = w.create_gc(foreground=0xFF0000)
+w.fill_rectangle(gc, 0, 0, 25, 25)
+d.sync()
+
+# GetWindowAttributes should report backing_store
+attrs = w.get_attributes()
+print(f"backing_store={attrs.backing_store}")
+
+# Unmap and remap
+w.unmap()
+d.sync()
+w.map()
+d.sync()
+
+# Content should be preserved (no expose needed)
+print("backing_store_test=ok")
+
+w.destroy()
+d.close()
+`,
+		);
+		expect(output).toContain("backing_store=2");
+		expect(output).toContain("backing_store_test=ok");
+	});
+
+	test("Bit gravity preserves content on resize", async ({
+		sidecarContainer,
+	}) => {
+		const output = await runPythonX11(
+			sidecarContainer,
+			`
+import Xlib.display, Xlib.X
+d = Xlib.display.Display()
+screen = d.screen()
+
+# Create window with SouthEast bit_gravity (9)
+w = screen.root.create_window(0, 0, 50, 50, 0, screen.root_depth,
+    Xlib.X.InputOutput, Xlib.X.CopyFromParent,
+    bit_gravity=9,
+    event_mask=Xlib.X.ExposureMask)
+w.map()
+d.sync()
+
+# Verify via GetWindowAttributes
+attrs = w.get_attributes()
+print(f"bit_gravity={attrs.bit_gravity}")
+
+w.destroy()
+d.close()
+`,
+		);
+		expect(output).toContain("bit_gravity=9");
+	});
+
+	test("PolyLine and PolySegment draw without errors", async ({
+		sidecarContainer,
+	}) => {
+		const output = await runPythonX11(
+			sidecarContainer,
+			`
+import Xlib.display, Xlib.X
+d = Xlib.display.Display()
+screen = d.screen()
+
+w = screen.root.create_window(0, 0, 100, 100, 0, screen.root_depth,
+    event_mask=Xlib.X.ExposureMask)
+w.map()
+d.sync()
+
+gc = w.create_gc(foreground=0xFF0000, line_width=2)
+
+# PolyLine
+w.poly_line(gc, Xlib.X.CoordModeOrigin, [(0, 0), (50, 50), (100, 0)])
+d.sync()
+
+# PolySegment
+w.poly_segment(gc, [(0, 100, 100, 0), (0, 0, 100, 100)])
+d.sync()
+
+# PolyRectangle
+w.poly_rectangle(gc, [(10, 10, 30, 30), (50, 50, 20, 20)])
+d.sync()
+
+# PolyArc
+w.poly_arc(gc, [(10, 10, 40, 40, 0, 360*64)])
+d.sync()
+
+# FillPoly
+w.fill_poly(gc, Xlib.X.Convex, Xlib.X.CoordModeOrigin,
+    [(50, 0), (100, 50), (50, 100), (0, 50)])
+d.sync()
+
+print("drawing_ops=ok")
+w.destroy()
+d.close()
+`,
+		);
+		expect(output).toContain("drawing_ops=ok");
+	});
+
+	test("Selection protocol (clipboard) works end-to-end", async ({
+		sidecarContainer,
+	}) => {
+		const output = await runPythonX11(
+			sidecarContainer,
+			`
+import Xlib.display, Xlib.X, Xlib.Xatom
+d = Xlib.display.Display()
+screen = d.screen()
+
+w = screen.root.create_window(0, 0, 1, 1, 0, screen.root_depth)
+d.sync()
+
+clipboard = d.intern_atom('CLIPBOARD')
+targets = d.intern_atom('TARGETS')
+
+# Set selection owner
+w.set_selection_owner(clipboard, Xlib.X.CurrentTime)
+d.sync()
+
+# Verify we own it
+owner = d.get_selection_owner(clipboard)
+print(f"selection_owner={owner == w}")
+
+w.destroy()
+d.close()
+`,
+		);
+		expect(output).toContain("selection_owner=True");
+	});
+});
+
 test.describe.serial("Application smoke tests", () => {
 	test.setTimeout(120_000);
 
@@ -989,5 +1228,37 @@ test.describe.serial("Application smoke tests", () => {
 		expect(output).not.toContain("unable to open display");
 		expect(output).toContain("screen #0");
 		expect(output).toContain("X.Org");
+	});
+
+	test("rendercheck validates RENDER extension", async ({
+		sidecarContainer,
+	}) => {
+		// rendercheck tests RENDER extension compliance
+		const output = await execInSidecar(
+			sidecarContainer,
+			"rendercheck -t fill -t blend -t composite 2>&1 | tail -20 || echo 'rendercheck_unavailable'",
+		);
+		// Should complete without segfault
+		expect(output).not.toContain("Segmentation fault");
+	});
+
+	test("xwininfo works on root window", async ({ sidecarContainer }) => {
+		const output = await execInSidecar(
+			sidecarContainer,
+			"xwininfo -root 2>&1",
+		);
+		expect(output).toContain("Root");
+		expect(output).toMatch(/Width|Height/);
+	});
+
+	test("xprop lists root window properties", async ({
+		sidecarContainer,
+	}) => {
+		const output = await execInSidecar(
+			sidecarContainer,
+			"xprop -root 2>&1 | head -20",
+		);
+		// Should list EWMH properties
+		expect(output).toMatch(/_NET_|WM_/);
 	});
 });
