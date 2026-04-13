@@ -119,6 +119,127 @@ impl XFixesRegion {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn r(x: i16, y: i16, w: u16, h: u16) -> RegionRect {
+        RegionRect { x, y, width: w, height: h }
+    }
+
+    #[test]
+    fn empty_region_extents_are_zero() {
+        let reg = XFixesRegion::new();
+        let ext = reg.extents();
+        assert_eq!(ext.width, 0);
+        assert_eq!(ext.height, 0);
+    }
+
+    #[test]
+    fn single_rect_extents_match() {
+        let reg = XFixesRegion::from_rects(vec![r(10, 20, 30, 40)]);
+        let ext = reg.extents();
+        assert_eq!(ext.x, 10);
+        assert_eq!(ext.y, 20);
+        assert_eq!(ext.width, 30);
+        assert_eq!(ext.height, 40);
+    }
+
+    #[test]
+    fn union_concatenates_rects() {
+        let a = XFixesRegion::from_rects(vec![r(0, 0, 10, 10)]);
+        let b = XFixesRegion::from_rects(vec![r(20, 20, 10, 10)]);
+        let u = a.union(&b);
+        assert_eq!(u.rects.len(), 2);
+        let ext = u.extents();
+        assert_eq!(ext.x, 0);
+        assert_eq!(ext.y, 0);
+        assert_eq!(ext.width, 30);
+        assert_eq!(ext.height, 30);
+    }
+
+    #[test]
+    fn intersect_overlapping_rects() {
+        let a = XFixesRegion::from_rects(vec![r(0, 0, 20, 20)]);
+        let b = XFixesRegion::from_rects(vec![r(10, 10, 20, 20)]);
+        let i = a.intersect(&b);
+        assert_eq!(i.rects.len(), 1);
+        assert_eq!(i.rects[0].x, 10);
+        assert_eq!(i.rects[0].y, 10);
+        assert_eq!(i.rects[0].width, 10);
+        assert_eq!(i.rects[0].height, 10);
+    }
+
+    #[test]
+    fn intersect_non_overlapping_is_empty() {
+        let a = XFixesRegion::from_rects(vec![r(0, 0, 10, 10)]);
+        let b = XFixesRegion::from_rects(vec![r(20, 20, 10, 10)]);
+        let i = a.intersect(&b);
+        assert!(i.rects.is_empty());
+    }
+
+    #[test]
+    fn subtract_non_overlapping_keeps_original() {
+        let a = XFixesRegion::from_rects(vec![r(0, 0, 10, 10)]);
+        let b = XFixesRegion::from_rects(vec![r(20, 20, 10, 10)]);
+        let s = a.subtract(&b);
+        assert_eq!(s.rects.len(), 1);
+        assert_eq!(s.rects[0].x, 0);
+    }
+
+    #[test]
+    fn subtract_fully_covering_produces_empty() {
+        let a = XFixesRegion::from_rects(vec![r(5, 5, 10, 10)]);
+        let b = XFixesRegion::from_rects(vec![r(0, 0, 100, 100)]);
+        let s = a.subtract(&b);
+        assert!(s.rects.is_empty());
+    }
+
+    #[test]
+    fn subtract_partial_creates_fragments() {
+        // Subtract a center hole from a rect
+        let a = XFixesRegion::from_rects(vec![r(0, 0, 30, 30)]);
+        let b = XFixesRegion::from_rects(vec![r(10, 10, 10, 10)]);
+        let s = a.subtract(&b);
+        // Should produce: top strip, left strip, right strip, bottom strip
+        assert!(s.rects.len() >= 3);
+        // Total area should be 30*30 - 10*10 = 800
+        let area: i32 = s.rects.iter().map(|r| r.width as i32 * r.height as i32).sum();
+        assert_eq!(area, 800);
+    }
+
+    #[test]
+    fn translate_moves_all_rects() {
+        let mut reg = XFixesRegion::from_rects(vec![r(0, 0, 10, 10), r(20, 20, 5, 5)]);
+        reg.translate(5, -3);
+        assert_eq!(reg.rects[0].x, 5);
+        assert_eq!(reg.rects[0].y, -3);
+        assert_eq!(reg.rects[1].x, 25);
+        assert_eq!(reg.rects[1].y, 17);
+    }
+
+    #[test]
+    fn invert_within_bounds() {
+        let reg = XFixesRegion::from_rects(vec![r(10, 10, 10, 10)]);
+        let bounds = r(0, 0, 30, 30);
+        let inv = reg.invert(&bounds);
+        // Inversion = bounds - region, should produce surrounding fragments
+        assert!(!inv.rects.is_empty());
+        let area: i32 = inv.rects.iter().map(|r| r.width as i32 * r.height as i32).sum();
+        assert_eq!(area, 30 * 30 - 10 * 10); // 800
+    }
+
+    #[test]
+    fn expand_increases_all_sides() {
+        let reg = XFixesRegion::from_rects(vec![r(10, 10, 20, 20)]);
+        let expanded = reg.expand(5, 5, 5, 5);
+        assert_eq!(expanded.rects[0].x, 5);
+        assert_eq!(expanded.rects[0].y, 5);
+        assert_eq!(expanded.rects[0].width, 30);
+        assert_eq!(expanded.rects[0].height, 30);
+    }
+}
+
 /// Subtract rectangle `sub` from rectangle `r`, appending result fragments.
 fn subtract_rect(r: &RegionRect, sub: &RegionRect, out: &mut Vec<RegionRect>) {
     let rx2 = r.x + r.width as i16;

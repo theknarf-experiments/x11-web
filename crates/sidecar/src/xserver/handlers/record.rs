@@ -864,3 +864,241 @@ pub(crate) fn intercept_error(
 }
 
 use std::collections::HashMap;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn make_range(core_req: (u8, u8), events: (u8, u8)) -> RecordRange {
+        RecordRange {
+            core_requests: core_req,
+            core_replies: (0, 0),
+            ext_requests: (0, 0, 0),
+            ext_replies: (0, 0, 0),
+            delivered_events: events,
+            device_events: (0, 0),
+            errors: (0, 0),
+            client_started: false,
+            client_died: false,
+        }
+    }
+
+    #[test]
+    fn record_range_matches_core_request_in_range() {
+        let range = make_range((10, 20), (0, 0));
+        assert!(range.matches_core_request(10));
+        assert!(range.matches_core_request(15));
+        assert!(range.matches_core_request(20));
+        assert!(!range.matches_core_request(9));
+        assert!(!range.matches_core_request(21));
+    }
+
+    #[test]
+    fn record_range_zero_range_matches_nothing() {
+        let range = make_range((0, 0), (0, 0));
+        assert!(!range.matches_core_request(0));
+        assert!(!range.matches_core_request(1));
+    }
+
+    #[test]
+    fn record_range_matches_delivered_events() {
+        let range = make_range((0, 0), (2, 34));
+        assert!(range.matches_delivered_event(2));
+        assert!(range.matches_delivered_event(20));
+        assert!(range.matches_delivered_event(34));
+        assert!(!range.matches_delivered_event(1));
+        assert!(!range.matches_delivered_event(35));
+    }
+
+    #[test]
+    fn record_range_matches_ext_request() {
+        let range = RecordRange {
+            ext_requests: (150, 0, 10),
+            ..Default::default()
+        };
+        assert!(range.matches_ext_request(150, 0));
+        assert!(range.matches_ext_request(150, 5));
+        assert!(range.matches_ext_request(150, 10));
+        assert!(!range.matches_ext_request(150, 11));
+        assert!(!range.matches_ext_request(151, 5));
+    }
+
+    #[test]
+    fn record_range_matches_errors() {
+        let range = RecordRange {
+            errors: (1, 17),
+            ..Default::default()
+        };
+        assert!(range.matches_error(1));
+        assert!(range.matches_error(10));
+        assert!(range.matches_error(17));
+        assert!(!range.matches_error(0));
+        assert!(!range.matches_error(18));
+    }
+
+    #[test]
+    fn record_context_matches_event_any_range() {
+        let ctx = RecordContext {
+            id: 1,
+            enabled: true,
+            element_header: 0,
+            ranges: vec![
+                make_range((0, 0), (2, 5)),
+                make_range((0, 0), (10, 20)),
+            ],
+            client_specs: vec![3], // AllClients
+            enable_sequence: 0,
+        };
+        assert!(ctx.matches_event(3));
+        assert!(ctx.matches_event(15));
+        assert!(!ctx.matches_event(7));
+    }
+
+    #[test]
+    fn record_context_should_intercept_all_clients() {
+        let ctx = RecordContext {
+            id: 1,
+            enabled: true,
+            element_header: 0,
+            ranges: vec![],
+            client_specs: vec![3], // AllClients
+            enable_sequence: 0,
+        };
+        // Should intercept other clients, not the recording client itself
+        assert!(ctx.should_intercept_client("client_b", "client_a", 0x200));
+        assert!(!ctx.should_intercept_client("client_a", "client_a", 0x100));
+    }
+
+    #[test]
+    fn record_context_should_intercept_specific_client() {
+        let ctx = RecordContext {
+            id: 1,
+            enabled: true,
+            element_header: 0,
+            ranges: vec![],
+            client_specs: vec![0x200], // Specific resource base
+            enable_sequence: 0,
+        };
+        assert!(ctx.should_intercept_client("any", "recorder", 0x200));
+        assert!(!ctx.should_intercept_client("any", "recorder", 0x300));
+    }
+
+    #[test]
+    fn record_context_disabled_intercepts_nothing() {
+        let ctx = RecordContext {
+            id: 1,
+            enabled: false,
+            element_header: 0,
+            ranges: vec![],
+            client_specs: vec![3],
+            enable_sequence: 0,
+        };
+        assert!(!ctx.should_intercept_client("b", "a", 0));
+    }
+
+    #[test]
+    fn build_record_data_reply_format() {
+        let reply = build_record_data_reply(
+            RECORD_FROM_SERVER, 42, 1, &[0x01, 0x02, 0x03, 0x04], 12345, 99,
+        );
+        assert_eq!(reply[0], 1); // Reply indicator
+        assert_eq!(reply[1], RECORD_FROM_SERVER);
+        assert_eq!(u16::from_le_bytes([reply[2], reply[3]]), 42); // enable_seq
+        assert_eq!(u32::from_le_bytes([reply[4], reply[5], reply[6], reply[7]]), 1); // 4 bytes = 1 word
+        assert_eq!(reply[8], 1); // element_header
+        assert_eq!(reply[32], 0x01); // intercepted data
+        assert_eq!(reply[33], 0x02);
+        assert_eq!(reply[34], 0x03);
+        assert_eq!(reply[35], 0x04);
+    }
+
+    #[test]
+    fn build_record_status_reply_is_empty_data() {
+        let reply = build_record_status_reply(RECORD_START_OF_DATA, 10, 0, 5000);
+        assert_eq!(reply[0], 1);
+        assert_eq!(reply[1], RECORD_START_OF_DATA);
+        assert_eq!(reply.len(), 32); // No extra data
+    }
+
+    #[test]
+    fn intercept_event_matches_and_builds_reply() {
+        let mut contexts = HashMap::new();
+        let ctx = RecordContext {
+            id: 1,
+            enabled: true,
+            element_header: 0,
+            ranges: vec![make_range((0, 0), (2, 34))],
+            client_specs: vec![3], // AllClients
+            enable_sequence: 50,
+        };
+        contexts.insert(1, ctx);
+
+        let event = [2u8; 32]; // Event code 2 (KeyPress)
+        let results = intercept_event(&contexts, "recorder", "source", 0x200, &event, 1000, 5);
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0][1], RECORD_FROM_SERVER);
+    }
+
+    #[test]
+    fn intercept_event_skips_disabled_context() {
+        let mut contexts = HashMap::new();
+        let ctx = RecordContext {
+            id: 1,
+            enabled: false,
+            element_header: 0,
+            ranges: vec![make_range((0, 0), (2, 34))],
+            client_specs: vec![3],
+            enable_sequence: 50,
+        };
+        contexts.insert(1, ctx);
+
+        let event = [2u8; 32];
+        let results = intercept_event(&contexts, "rec", "src", 0, &event, 0, 0);
+        assert!(results.is_empty());
+    }
+
+    #[test]
+    fn intercept_request_matches_core_opcode() {
+        let mut contexts = HashMap::new();
+        let ctx = RecordContext {
+            id: 1,
+            enabled: true,
+            element_header: 0,
+            ranges: vec![make_range((1, 127), (0, 0))],
+            client_specs: vec![3],
+            enable_sequence: 10,
+        };
+        contexts.insert(1, ctx);
+
+        let request = [42u8, 0, 2, 0]; // Opcode 42, length 2
+        let results = intercept_request(&contexts, "rec", "src", 0x200, &request, 500, 1);
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0][1], RECORD_FROM_CLIENT);
+    }
+
+    #[test]
+    fn parse_record_range_wire_format() {
+        let mut wire = [0u8; 24];
+        wire[0] = 1;   // core_requests first
+        wire[1] = 127; // core_requests last
+        wire[2] = 3;   // core_replies first
+        wire[3] = 50;  // core_replies last
+        wire[12] = 2;  // delivered_events first
+        wire[13] = 34; // delivered_events last
+        wire[14] = 2;  // device_events first
+        wire[15] = 6;  // device_events last
+        wire[16] = 1;  // errors first
+        wire[17] = 17; // errors last
+        wire[18] = 1;  // client_started
+        wire[20] = 1;  // client_died
+
+        let range = parse_record_range(&wire);
+        assert_eq!(range.core_requests, (1, 127));
+        assert_eq!(range.core_replies, (3, 50));
+        assert_eq!(range.delivered_events, (2, 34));
+        assert_eq!(range.device_events, (2, 6));
+        assert_eq!(range.errors, (1, 17));
+        assert!(range.client_started);
+        assert!(range.client_died);
+    }
+}
