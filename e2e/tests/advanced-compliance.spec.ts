@@ -275,12 +275,12 @@ d.sync()
 
 # Set selection owner
 clipboard = d.intern_atom('CLIPBOARD')
-d.set_selection_owner(w, clipboard, Xlib.X.CurrentTime)
+w.set_selection_owner(clipboard, Xlib.X.CurrentTime)
 d.sync()
 
 # Verify ownership
 owner = d.get_selection_owner(clipboard)
-print(f"owns_clipboard={owner.id == w.id}")
+print(f"owns_clipboard={owner == w.id or (hasattr(owner, 'id') and owner.id == w.id)}")
 
 # Set a property with data
 test_data = b"Hello from X11 clipboard test! " * 100  # ~3KB

@@ -629,11 +629,13 @@ pub(crate) fn handle_get_image(state: &mut ClientState, data: &[u8], seq: u16) -
     };
 
     let data_len = image_data.len();
-    let length_field = (data_len / 4) as u32;
+    // Pad data to 4-byte boundary per X11 protocol
+    let padded_len = (data_len + 3) & !3;
+    let length_field = (padded_len / 4) as u32;
 
-    let mut reply = vec![0u8; 32 + data_len];
+    let mut reply = vec![0u8; 32 + padded_len];
     reply[0] = 1; // Reply
-    reply[1] = if format == 0 { 1 } else { depth };
+    reply[1] = depth;
     state.write_u16(&mut reply, 2, seq);
     state.write_u32(&mut reply, 4, length_field);
     state.write_u32(&mut reply, 8, visual);
