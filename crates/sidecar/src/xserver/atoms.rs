@@ -242,6 +242,10 @@ pub(crate) const PREDEFINED_ATOMS: &[(&str, u32)] = &[
     ("_NET_SYSTEM_TRAY_OPCODE", 187),
     ("_NET_SYSTEM_TRAY_ORIENTATION", 188),
     ("_NET_SYSTEM_TRAY_VISUAL", 189),
+    // ICCCM selection targets
+    ("DELETE", 190),
+    ("INSERT_SELECTION", 191),
+    ("INSERT_PROPERTY", 192),
 ];
 
 #[cfg(test)]

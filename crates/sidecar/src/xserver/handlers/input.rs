@@ -208,14 +208,58 @@ pub(crate) fn handle_translate_coordinates(state: &mut ClientState, data: &[u8],
 pub(crate) fn handle_warp_pointer(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
     require_len!(data, 24, seq, 41);
 
-    let _src_window = state.read_u32(data, 4);
+    let src_window = state.read_u32(data, 4);
     let dst_window = state.read_u32(data, 8);
-    let _src_x = state.read_i16(data, 12);
-    let _src_y = state.read_i16(data, 14);
-    let _src_width = state.read_u16(data, 16);
-    let _src_height = state.read_u16(data, 18);
+    let src_x = state.read_i16(data, 12);
+    let src_y = state.read_i16(data, 14);
+    let src_width = state.read_u16(data, 16);
+    let src_height = state.read_u16(data, 18);
     let dst_x = state.read_i16(data, 20);
     let dst_y = state.read_i16(data, 22);
+
+    // Per X11 spec §11.6.2: if src_window is not 0, the warp is conditional.
+    // The pointer must currently be inside src_window within the specified
+    // rectangle (src_x, src_y, src_width, src_height).  If src_width or
+    // src_height is 0, the full window extent is used.
+    if src_window != 0 {
+        // Compute absolute position of src_window.
+        let mut sw_abs_x: i32 = 0;
+        let mut sw_abs_y: i32 = 0;
+        let mut sw_width: i32 = state.screen_width as i32;
+        let mut sw_height: i32 = state.screen_height as i32;
+        if src_window != state.root_window {
+            let mut cur = src_window;
+            if let Some(w) = state.windows.get(&cur) {
+                sw_width = w.width as i32;
+                sw_height = w.height as i32;
+                sw_abs_x = w.x as i32;
+                sw_abs_y = w.y as i32;
+                cur = w.parent;
+            }
+            for _ in 0..128 {
+                if cur == state.root_window || cur == 0 { break; }
+                if let Some(w) = state.windows.get(&cur) {
+                    sw_abs_x += w.x as i32;
+                    sw_abs_y += w.y as i32;
+                    cur = w.parent;
+                } else {
+                    break;
+                }
+            }
+        }
+        // Compute the check rectangle in root coordinates.
+        let check_x = sw_abs_x + src_x as i32;
+        let check_y = sw_abs_y + src_y as i32;
+        let check_w = if src_width == 0 { sw_width } else { src_width as i32 };
+        let check_h = if src_height == 0 { sw_height } else { src_height as i32 };
+
+        let px = state.pointer_x as i32;
+        let py = state.pointer_y as i32;
+        if px < check_x || py < check_y || px >= check_x + check_w || py >= check_y + check_h {
+            // Pointer is outside the source rectangle — skip the warp.
+            return Vec::new();
+        }
+    }
 
     let old_px = state.pointer_x;
     let old_py = state.pointer_y;

@@ -158,6 +158,34 @@ pub(crate) fn handle_convert_selection(state: &mut ClientState, data: &[u8], _se
         // Use property = target if property is None (per ICCCM convention).
         let effective_property = if property == 0 { target } else { property };
 
+        // --- DELETE target: owner should delete the selection data (ICCCM §2.6.3.1) ---
+        const DELETE_ATOM: u32 = 190;
+        if target == DELETE_ATOM {
+            // If we're the owner, remove the selection.
+            state.selections.remove(&selection);
+            state.selection_timestamps.remove(&selection);
+            if let Ok(mut sels) = state.shared_selections.lock() {
+                sels.remove(&selection);
+            }
+            if let Ok(mut pc) = state.persistent_clipboard.lock() {
+                pc.remove(&selection);
+            }
+
+            // Send SelectionNotify with property set (success).
+            let mut event = [0u8; 32];
+            event[0] = SELECTION_NOTIFY_EVENT;
+            state.write_u16(&mut event, 2, state.sequence);
+            state.write_u32(&mut event, 4, state.timestamp());
+            state.write_u32(&mut event, 8, requestor);
+            state.write_u32(&mut event, 12, selection);
+            state.write_u32(&mut event, 16, target);
+            state.write_u32(&mut event, 20, effective_property);
+            if !state.event_router.send_event(requestor, event.to_vec()) {
+                state.pending_events.push(event.to_vec());
+            }
+            return Vec::new();
+        }
+
         // --- TIMESTAMP target: respond with the selection acquisition timestamp ---
         const TIMESTAMP_ATOM: u32 = 137;
         const CARDINAL_ATOM: u32 = 6;
