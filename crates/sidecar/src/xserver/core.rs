@@ -682,4 +682,60 @@ mod tests {
         assert_eq!(BAD_LENGTH, 16);
         assert_eq!(BAD_IMPLEMENTATION, 17);
     }
+
+    // -----------------------------------------------------------------------
+    // depth_for_visual
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn depth_for_visual_argb_32bit() {
+        assert_eq!(depth_for_visual(0x40), 32);
+    }
+
+    #[test]
+    fn depth_for_visual_root_truecolor_24bit() {
+        assert_eq!(depth_for_visual(ROOT_VISUAL), 24);
+        assert_eq!(depth_for_visual(0x21), 24);
+    }
+
+    #[test]
+    fn depth_for_visual_directcolor_24bit() {
+        assert_eq!(depth_for_visual(0x22), 24);
+    }
+
+    #[test]
+    fn depth_for_visual_truecolor_16bit() {
+        assert_eq!(depth_for_visual(0x24), 16);
+    }
+
+    #[test]
+    fn depth_for_visual_pseudocolor_8bit() {
+        assert_eq!(depth_for_visual(0x23), 8);
+    }
+
+    #[test]
+    fn depth_for_visual_grayscale_8bit() {
+        assert_eq!(depth_for_visual(0x26), 8);
+    }
+
+    #[test]
+    fn depth_for_visual_staticcolor_8bit() {
+        assert_eq!(depth_for_visual(0x27), 8);
+    }
+
+    #[test]
+    fn depth_for_visual_staticgray_4bit() {
+        assert_eq!(depth_for_visual(0x25), 4);
+    }
+
+    #[test]
+    fn depth_for_visual_input_only_zero() {
+        assert_eq!(depth_for_visual(0), 0);
+    }
+
+    #[test]
+    fn depth_for_visual_unknown_defaults_to_24() {
+        assert_eq!(depth_for_visual(0xFF), 24);
+        assert_eq!(depth_for_visual(0x99), 24);
+    }
 }

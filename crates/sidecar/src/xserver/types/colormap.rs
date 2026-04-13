@@ -100,11 +100,11 @@ impl ColormapState {
         let mut entries = Vec::with_capacity(n_entries);
         for i in 0..n_entries {
             // 3-3-2 decomposition: RRRGGGBB
-            let r = ((i >> 5) & 0x7) as u16;
-            let g = ((i >> 2) & 0x7) as u16;
-            let b = (i & 0x3) as u16;
+            let r = ((i >> 5) & 0x7) as u32;
+            let g = ((i >> 2) & 0x7) as u32;
+            let b = (i & 0x3) as u32;
             entries.push(
-                ((r * 65535) / 7, (g * 65535) / 7, (b * 65535) / 3),
+                (((r * 65535) / 7) as u16, ((g * 65535) / 7) as u16, ((b * 65535) / 3) as u16),
             );
         }
         Self {
@@ -240,6 +240,8 @@ impl ColormapState {
     }
 
     /// Store colors into the colormap.
+    /// Note: callers must check `is_writable()` before calling this to enforce
+    /// read-only semantics per X11 spec.
     pub(crate) fn store_colors(&mut self, items: &[(u32, u16, u16, u16, u8)]) {
         for &(pixel, r, g, b, flags) in items {
             if (pixel as usize) < self.entries.len() {
@@ -250,5 +252,126 @@ impl ColormapState {
                 if flags == 0 { *entry = (r, g, b); }  // All channels
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn truecolor_is_read_only() {
+        let cmap = ColormapState::new_truecolor(0x21);
+        assert!(!cmap.is_writable());
+    }
+
+    #[test]
+    fn staticgray_is_read_only() {
+        let cmap = ColormapState::new_staticgray(0x25, 16);
+        assert!(!cmap.is_writable());
+    }
+
+    #[test]
+    fn staticcolor_is_read_only() {
+        let cmap = ColormapState::new_staticcolor(0x27, 256);
+        assert!(!cmap.is_writable());
+    }
+
+    #[test]
+    fn pseudocolor_is_writable() {
+        let cmap = ColormapState::new_pseudocolor(0x23, 256);
+        assert!(cmap.is_writable());
+    }
+
+    #[test]
+    fn grayscale_is_writable() {
+        let cmap = ColormapState::new_grayscale(0x26, 256);
+        assert!(cmap.is_writable());
+    }
+
+    #[test]
+    fn directcolor_is_writable() {
+        let cmap = ColormapState::new_directcolor(0x22, 256);
+        assert!(cmap.is_writable());
+    }
+
+    #[test]
+    fn truecolor_alloc_color_computes_pixel() {
+        let mut cmap = ColormapState::new_truecolor(0x21);
+        let pixel = cmap.alloc_color(0xFF00, 0x8000, 0x0000);
+        assert_eq!(pixel, Some(0x00FF8000));
+    }
+
+    #[test]
+    fn pseudocolor_alloc_and_lookup_round_trip() {
+        let mut cmap = ColormapState::new_pseudocolor(0x23, 256);
+        let pixel = cmap.alloc_color(0xFFFF, 0x0000, 0xFFFF).unwrap();
+        let (r, g, b) = cmap.lookup(pixel);
+        assert_eq!(r, 0xFFFF);
+        assert_eq!(g, 0x0000);
+        assert_eq!(b, 0xFFFF);
+    }
+
+    #[test]
+    fn staticgray_alloc_finds_closest_match() {
+        let cmap = ColormapState::new_staticgray(0x25, 16);
+        // Closest entry to full white should be the last index
+        let mut cmap = cmap;
+        let pixel = cmap.alloc_color(0xFFFF, 0xFFFF, 0xFFFF).unwrap();
+        assert_eq!(pixel, 15);
+    }
+
+    #[test]
+    fn pseudocolor_alloc_cells_and_free() {
+        let mut cmap = ColormapState::new_pseudocolor(0x23, 256);
+        let cells = cmap.alloc_cells(3).unwrap();
+        assert_eq!(cells.len(), 3);
+        cmap.free_cells(&cells);
+        // Should be able to re-allocate after freeing
+        let cells2 = cmap.alloc_cells(3).unwrap();
+        assert_eq!(cells2.len(), 3);
+    }
+
+    #[test]
+    fn readonly_alloc_cells_fails() {
+        let mut cmap = ColormapState::new_truecolor(0x21);
+        assert!(cmap.alloc_cells(1).is_none());
+    }
+
+    #[test]
+    fn staticcolor_332_decomposition() {
+        let cmap = ColormapState::new_staticcolor(0x27, 256);
+        // Index 0: R=0, G=0, B=0
+        let (r, g, b) = cmap.lookup(0);
+        assert_eq!(r, 0);
+        assert_eq!(g, 0);
+        assert_eq!(b, 0);
+        // Index 255 (0xFF): R=7, G=7, B=3 → max values
+        let (r, g, b) = cmap.lookup(255);
+        assert_eq!(r, 65535);
+        assert_eq!(g, 65535);
+        assert_eq!(b, 65535);
+    }
+
+    #[test]
+    fn store_colors_updates_entries() {
+        let mut cmap = ColormapState::new_pseudocolor(0x23, 256);
+        cmap.store_colors(&[(0, 0x1234, 0x5678, 0x9ABC, 0x07)]);
+        let (r, g, b) = cmap.lookup(0);
+        assert_eq!(r, 0x1234);
+        assert_eq!(g, 0x5678);
+        assert_eq!(b, 0x9ABC);
+    }
+
+    #[test]
+    fn store_colors_partial_flags() {
+        let mut cmap = ColormapState::new_pseudocolor(0x23, 256);
+        cmap.store_colors(&[(0, 0xAAAA, 0xBBBB, 0xCCCC, 0)]);
+        // Only update red (flag 0x01)
+        cmap.store_colors(&[(0, 0x1111, 0, 0, 0x01)]);
+        let (r, g, b) = cmap.lookup(0);
+        assert_eq!(r, 0x1111);
+        assert_eq!(g, 0xBBBB); // unchanged
+        assert_eq!(b, 0xCCCC); // unchanged
     }
 }
