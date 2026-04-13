@@ -659,3 +659,46 @@ fn get_glyph_argb(data: &[u8], width: u16, x: u16, y: u16) -> (u8, u8, u8, u8) {
         (0, 0, 0, 0)
     }
 }
+
+#[cfg(test)]
+pub(super) mod tests {
+    use super::*;
+
+    /// Wrapper for get_glyph_argb so parent module tests can call it.
+    pub fn get_glyph_argb_wrapper(data: &[u8], width: u16, x: u16, y: u16) -> (u8, u8, u8, u8) {
+        get_glyph_argb(data, width, x, y)
+    }
+
+    #[test]
+    fn glyph_argb_second_pixel() {
+        // Two ARGB32 pixels at (0,0) and (1,0)
+        let data = vec![
+            10, 20, 30, 200,  // pixel (0,0)
+            50, 60, 70, 100,  // pixel (1,0)
+        ];
+        let (b, g, r, a) = get_glyph_argb(&data, 2, 1, 0);
+        assert_eq!((b, g, r, a), (50, 60, 70, 100));
+    }
+
+    #[test]
+    fn glyph_a8_alpha_extraction() {
+        // A8 format: one byte per pixel, padded to 4 bytes per row
+        let data = vec![128, 64, 32, 0]; // 4 pixels in one padded row
+        let a = get_glyph_alpha(&data, 4, 0, 0, PICTFORMAT_A8);
+        assert_eq!(a, 128);
+        let a = get_glyph_alpha(&data, 4, 1, 0, PICTFORMAT_A8);
+        assert_eq!(a, 64);
+    }
+
+    #[test]
+    fn glyph_a1_bit_extraction() {
+        // A1 format: bit-packed, LSB first
+        let data = vec![0b00000101, 0, 0, 0]; // bits 0 and 2 are set
+        let a = get_glyph_alpha(&data, 8, 0, 0, PICTFORMAT_A1);
+        assert_eq!(a, 255); // bit 0 set
+        let a = get_glyph_alpha(&data, 8, 1, 0, PICTFORMAT_A1);
+        assert_eq!(a, 0);   // bit 1 not set
+        let a = get_glyph_alpha(&data, 8, 2, 0, PICTFORMAT_A1);
+        assert_eq!(a, 255); // bit 2 set
+    }
+}

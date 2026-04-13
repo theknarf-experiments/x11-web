@@ -81,3 +81,73 @@ pub(crate) struct IncrTransfer {
     /// Used to time out stale transfers per X11 spec.
     pub(crate) last_activity: Instant,
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn incr_transfer_chunk_state() {
+        let transfer = IncrTransfer {
+            requestor: 100,
+            property: 200,
+            selection: 300,
+            target: 400,
+            data: vec![0u8; 200_000], // 200KB
+            offset: 0,
+            chunk_size: 65536,
+            last_activity: Instant::now(),
+        };
+        // First chunk should be chunk_size bytes
+        let remaining = transfer.data.len() - transfer.offset;
+        let chunk = remaining.min(transfer.chunk_size);
+        assert_eq!(chunk, 65536);
+        // After 3 chunks
+        let offset_after_3 = 65536 * 3;
+        let remaining = transfer.data.len() - offset_after_3;
+        assert_eq!(remaining, 200_000 - 65536 * 3);
+        // Last chunk is smaller
+        let last_chunk = remaining.min(65536);
+        assert!(last_chunk < 65536);
+        assert_eq!(last_chunk, 200_000 - 65536 * 3);
+    }
+
+    #[test]
+    fn incr_transfer_completes_when_offset_equals_len() {
+        let transfer = IncrTransfer {
+            requestor: 1,
+            property: 2,
+            selection: 3,
+            target: 4,
+            data: vec![42u8; 100],
+            offset: 100, // All data sent
+            chunk_size: 50,
+            last_activity: Instant::now(),
+        };
+        let remaining = transfer.data.len() - transfer.offset;
+        assert_eq!(remaining, 0);
+    }
+
+    #[test]
+    fn persistent_clipboard_entry_multiple_targets() {
+        let mut entry = PersistentClipboardEntry {
+            targets: HashMap::new(),
+            timestamp: 12345,
+        };
+        entry.targets.insert(100, b"hello".to_vec()); // UTF8_STRING
+        entry.targets.insert(101, b"hello".to_vec()); // STRING
+        assert_eq!(entry.targets.len(), 2);
+        assert!(entry.targets.contains_key(&100));
+        assert!(entry.targets.contains_key(&101));
+    }
+
+    #[test]
+    fn incr_threshold_is_reasonable() {
+        // The INCR threshold should be large enough to avoid unnecessary
+        // incremental transfers for typical clipboard data.
+        // Mirrors the constant in handlers/property.rs.
+        const INCR_THRESHOLD: usize = 65536;
+        assert!(INCR_THRESHOLD >= 4096, "INCR threshold should be at least 4KB");
+        assert!(INCR_THRESHOLD <= 1_048_576, "INCR threshold should be at most 1MB");
+    }
+}

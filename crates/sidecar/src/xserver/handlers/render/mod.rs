@@ -1226,5 +1226,121 @@ mod tests {
         // Src always overwrites dst
         assert!(!zero_src_has_no_effect(1));
     }
+
+    // -----------------------------------------------------------------------
+    // Component-alpha (CA) compositing
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn composite_pixel_ca_over_white_on_black() {
+        // CA Over: each channel uses its own effective Sa.
+        // src=(255,0,0,255) with per-channel alphas (255,128,0,255)
+        // means R channel fully opaque, G channel half, B channel zero.
+        let mut dst = [0u8, 0, 0, 255]; // opaque black (BGRA)
+        composite_pixel_ca(
+            3,    // PictOpOver
+            &mut dst,
+            0, 0, 255, 255,     // src: B=0, G=0, R=255, A=255
+            0, 128, 255, 255,   // sa_b=0, sa_g=128, sa_r=255, sa_a=255
+            true,
+        );
+        // R channel: src_r=255, sa_r=255, dst_r=0 → Fd=1-sa_r=0 → result=255
+        assert_eq!(dst[2], 255);
+        // G channel: src_g=0, sa_g=128, dst_g=0 → Fd=1-sa_g=127 → result=0
+        assert_eq!(dst[1], 0);
+        // B channel: src_b=0, sa_b=0, dst_b=0 → Fd=1-sa_b=255 → result=0
+        assert_eq!(dst[0], 0);
+    }
+
+    #[test]
+    fn composite_pixel_ca_over_preserves_dst_where_mask_zero() {
+        // When CA mask channels are 0, src is modulated to 0 and sa=0,
+        // so for Over: Fd = 1-sa = 1, Fs = 1. Result = src(0) + dst * 1 = dst.
+        let mut dst = [100u8, 150, 200, 255]; // BGRA
+        composite_pixel_ca(
+            3,    // PictOpOver
+            &mut dst,
+            0, 0, 0, 0,   // src fully modulated to zero
+            0, 0, 0, 0,   // all channel alphas zero → Fd = 255
+            true,
+        );
+        // With src=0 and Fd=255: result = 0 + dst * 1 = dst preserved.
+        assert_eq!(dst[0], 100); // B
+        assert_eq!(dst[1], 150); // G
+        assert_eq!(dst[2], 200); // R
+    }
+
+    #[test]
+    fn composite_pixel_ca_src_replaces_dst() {
+        // PictOpSrc with CA: dst should be replaced by src regardless of dst.
+        let mut dst = [100u8, 150, 200, 255];
+        composite_pixel_ca(
+            1,    // PictOpSrc
+            &mut dst,
+            10, 20, 30, 128,    // src BGRA
+            64, 128, 255, 128,  // per-channel sa
+            true,
+        );
+        // Src op: Fs=1, Fd=0, so result = src
+        assert_eq!(dst[0], 10);   // B
+        assert_eq!(dst[1], 20);   // G
+        assert_eq!(dst[2], 30);   // R
+        assert_eq!(dst[3], 128);  // A
+    }
+
+    // -----------------------------------------------------------------------
+    // Glyph ARGB helper
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn get_glyph_argb_extracts_channels() {
+        use super::glyph::tests::get_glyph_argb_wrapper;
+        // ARGB32 glyph: pixel at (0,0) stored as BGRA in memory
+        let data = vec![10u8, 20, 30, 200]; // B=10, G=20, R=30, A=200
+        let (b, g, r, a) = get_glyph_argb_wrapper(&data, 1, 0, 0);
+        assert_eq!((b, g, r, a), (10, 20, 30, 200));
+    }
+
+    #[test]
+    fn get_glyph_argb_out_of_bounds() {
+        use super::glyph::tests::get_glyph_argb_wrapper;
+        let data = vec![10u8, 20, 30]; // Too short for 4 bytes
+        let (b, g, r, a) = get_glyph_argb_wrapper(&data, 1, 0, 0);
+        assert_eq!((b, g, r, a), (0, 0, 0, 0));
+    }
+
+    // -----------------------------------------------------------------------
+    // Bilinear filtering
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn bilinear_sample_center_of_single_pixel() {
+        // A single red pixel sampled at its center should return red.
+        let fb_data = vec![0u8, 0, 255, 255]; // BGRA: red
+        let (b, g, r, a) = bilinear_sample(
+            &fb_data, 4, 1, 1,
+            PICTFORMAT_ARGB32, 1, // repeat=Normal
+            0.5, 0.5,
+        );
+        assert_eq!((r, g, b, a), (255, 0, 0, 255));
+    }
+
+    #[test]
+    fn bilinear_sample_between_two_pixels() {
+        // Two pixels: red and green, sample at boundary
+        let mut fb_data = vec![0u8; 8];
+        fb_data[0..4].copy_from_slice(&[0, 0, 255, 255]); // red BGRA
+        fb_data[4..8].copy_from_slice(&[0, 255, 0, 255]);   // green BGRA
+        let (b, g, r, a) = bilinear_sample(
+            &fb_data, 8, 2, 1,
+            PICTFORMAT_ARGB32, 0, // no repeat
+            1.0, 0.5,            // at boundary between pixels
+        );
+        // Should be roughly a mix of red and green
+        assert!(r > 100 && r < 200);
+        assert!(g > 100 && g < 200);
+        assert_eq!(a, 255);
+        let _ = b;
+    }
 }
 
