@@ -1007,10 +1007,11 @@ pub(crate) fn handle_rotate_properties(state: &mut ClientState, data: &[u8]) -> 
 pub(crate) fn handle_set_pointer_mapping(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
     require_len!(data, 4, seq, 116);
     let n_buttons = data[1] as usize;
-    // Parse the new mapping from the request data
-    if data.len() >= 4 + n_buttons && n_buttons <= 5 {
-        state.pointer_mapping[..n_buttons.min(5)].copy_from_slice(&data[4..(n_buttons.min(5) + 4)]);
-        debug!("SetPointerMapping: {:?}", &state.pointer_mapping[..n_buttons.min(5)]);
+    // Parse the new mapping from the request data (support up to 7 buttons)
+    let max_buttons = state.pointer_mapping.len();
+    if data.len() >= 4 + n_buttons && n_buttons <= max_buttons {
+        state.pointer_mapping[..n_buttons].copy_from_slice(&data[4..4 + n_buttons]);
+        debug!("SetPointerMapping: {:?}", &state.pointer_mapping[..n_buttons]);
 
         // MappingNotify (request=Pointer) must be sent to ALL clients per X11 spec.
         let mut event = [0u8; 32];
@@ -1033,16 +1034,7 @@ pub(crate) fn handle_set_pointer_mapping(state: &mut ClientState, data: &[u8], s
 // ---------------------------------------------------------------------------
 
 pub(crate) fn handle_get_pointer_mapping(state: &ClientState, seq: u16) -> Vec<u8> {
-    // Return the stored pointer mapping (buttons 1-5) plus identity for 6,7 (scroll)
-    let map: [u8; 7] = [
-        state.pointer_mapping[0],
-        state.pointer_mapping[1],
-        state.pointer_mapping[2],
-        state.pointer_mapping[3],
-        state.pointer_mapping[4],
-        6,
-        7,
-    ];
+    let map = &state.pointer_mapping;
     let n = map.len() as u8;
     let padded_len = (n as usize + 3) & !3;
     let reply_extra_units = (padded_len / 4) as u32;
@@ -1051,7 +1043,7 @@ pub(crate) fn handle_get_pointer_mapping(state: &ClientState, seq: u16) -> Vec<u
     reply[1] = n;
     state.write_u16(&mut reply, 2, seq);
     state.write_u32(&mut reply, 4, reply_extra_units);
-    reply[32..32 + n as usize].copy_from_slice(&map);
+    reply[32..32 + n as usize].copy_from_slice(map);
     reply
 }
 

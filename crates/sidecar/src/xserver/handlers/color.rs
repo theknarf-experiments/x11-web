@@ -328,6 +328,7 @@ pub(crate) fn handle_alloc_named_color(state: &mut ClientState, data: &[u8], seq
 pub(crate) fn handle_alloc_color_cells(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
     require_len!(data, 12, seq, 86);
 
+    let contiguous = data[1] != 0;
     let cmap_id = state.read_u32(data, 4);
     let n_colors = state.read_u16(data, 8);
     let n_planes = state.read_u16(data, 10);
@@ -353,7 +354,6 @@ pub(crate) fn handle_alloc_color_cells(state: &mut ClientState, data: &[u8], seq
         return build_error(BAD_VALUE, seq, n_planes as u32, 86, 0);
     }
 
-    // For simplicity, we support n_planes=0 (flat allocation) or small plane counts
     let total_colors = if n_planes > 0 {
         n_colors as usize * (1usize << n_planes as u32)
     } else {
@@ -361,7 +361,11 @@ pub(crate) fn handle_alloc_color_cells(state: &mut ClientState, data: &[u8], seq
     };
 
     let pixels = if let Some(cmap) = state.colormaps.get_mut(&cmap_id) {
-        cmap.alloc_cells(total_colors as u16)
+        if contiguous {
+            cmap.alloc_cells_contiguous(total_colors as u16)
+        } else {
+            cmap.alloc_cells(total_colors as u16)
+        }
     } else {
         None
     };
@@ -400,6 +404,7 @@ pub(crate) fn handle_alloc_color_cells(state: &mut ClientState, data: &[u8], seq
 pub(crate) fn handle_alloc_color_planes(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
     require_len!(data, 16, seq, 87);
 
+    let contiguous = data[1] != 0;
     let cmap_id = state.read_u32(data, 4);
     let n_colors = state.read_u16(data, 8);
     let n_reds = state.read_u16(data, 10);
@@ -429,7 +434,11 @@ pub(crate) fn handle_alloc_color_planes(state: &mut ClientState, data: &[u8], se
     let total_colors = n_colors as usize * (1usize << total_planes);
 
     let pixels = if let Some(cmap) = state.colormaps.get_mut(&cmap_id) {
-        cmap.alloc_cells(total_colors as u16)
+        if contiguous {
+            cmap.alloc_cells_contiguous(total_colors as u16)
+        } else {
+            cmap.alloc_cells(total_colors as u16)
+        }
     } else {
         None
     };

@@ -48,6 +48,12 @@ pub(crate) fn handle_send_event(state: &mut ClientState, data: &[u8]) -> Vec<u8>
     };
 
     let event_type = event[0] & 0x7F; // strip synthetic bit for logging
+
+    // Per X11 spec: event type must be >= 2 (types 0-1 are errors/replies, not events)
+    if event_type < 2 {
+        return build_error(BAD_VALUE, state.sequence, event_type as u32, 25, 0);
+    }
+
     debug!(
         "SendEvent: type={} dest={:#x} target={:#x}",
         event_type, destination, target

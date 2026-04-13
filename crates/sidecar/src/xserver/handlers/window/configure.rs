@@ -408,7 +408,13 @@ pub(crate) fn handle_configure_window(state: &mut ClientState, data: &[u8], seq:
                             win.border_width = val as u16;
                         }
                         5 => sibling = val,
-                        6 => stack_mode = Some(val as u8),
+                        6 => {
+                            // Per X11 spec: valid stack modes are 0-4
+                            if val > 4 {
+                                return build_error(BAD_VALUE, seq, val, 12, 0);
+                            }
+                            stack_mode = Some(val as u8);
+                        }
                         _ => {}
                     }
                     offset += 4;

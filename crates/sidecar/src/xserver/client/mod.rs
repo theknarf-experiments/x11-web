@@ -120,8 +120,8 @@ pub(crate) struct ClientState {
     pub(crate) reply_fds: Vec<i32>,
     /// Motion history buffer (circular): (timestamp_ms, x, y).
     pub(crate) motion_history: Vec<(u32, i16, i16)>,
-    /// Pointer button mapping (button 1-5 -> mapped button).
-    pub(crate) pointer_mapping: [u8; 5],
+    /// Pointer button mapping (button 1-7 -> mapped button).
+    pub(crate) pointer_mapping: [u8; 7],
     /// Modifier mapping: 8 modifiers x N keycodes.
     pub(crate) modifier_map: Vec<Vec<u8>>,
     /// Window gravity values (stored per window ID).

@@ -24,10 +24,9 @@ pub(crate) fn handle_poly_text8(state: &mut ClientState, data: &[u8]) -> Vec<u8>
     let y = state.read_i16(data, 14);
     let gc = state.gcs.get(&gc_id).cloned().unwrap_or_default();
 
-    let mut current_font_id = gc.font_id;
     let mut font = state
         .font_manager
-        .get_font(current_font_id)
+        .get_font(gc.font_id)
         .or_else(|| state.font_manager.get_default_font());
 
     if font.is_none() {
@@ -49,7 +48,6 @@ pub(crate) fn handle_poly_text8(state: &mut ClientState, data: &[u8]) -> Vec<u8>
                 let new_font_id = state.read_u32(data, offset + 1);
                 if let Some(f) = state.font_manager.get_font(new_font_id) {
                     font = Some(f);
-                    current_font_id = new_font_id;
                 }
             }
             offset += 5;
@@ -115,10 +113,9 @@ pub(crate) fn handle_poly_text16(state: &mut ClientState, data: &[u8]) -> Vec<u8
     let y = state.read_i16(data, 14);
     let gc = state.gcs.get(&gc_id).cloned().unwrap_or_default();
 
-    let mut current_font_id = gc.font_id;
     let mut font = state
         .font_manager
-        .get_font(current_font_id)
+        .get_font(gc.font_id)
         .or_else(|| state.font_manager.get_default_font());
 
     if font.is_none() {
@@ -138,7 +135,6 @@ pub(crate) fn handle_poly_text16(state: &mut ClientState, data: &[u8]) -> Vec<u8
                 let new_font_id = state.read_u32(data, offset + 1);
                 if let Some(f) = state.font_manager.get_font(new_font_id) {
                     font = Some(f);
-                    current_font_id = new_font_id;
                 }
             }
             offset += 5;

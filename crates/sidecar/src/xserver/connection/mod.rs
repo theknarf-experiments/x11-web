@@ -197,9 +197,12 @@ pub(crate) async fn handle_client(
                 }
             } else {
                 warn!(
-                    "Client presented unknown auth protocol: {:?} (accepting for compatibility)",
+                    "Client presented unknown auth protocol: {:?} — rejecting per X11 spec",
                     String::from_utf8_lossy(client_auth_name)
                 );
+                let resp = build_auth_failure(byte_order, b"Unsupported authentication protocol");
+                stream.write_all(&resp).await?;
+                return Ok(());
             }
         }
     } else {
@@ -296,7 +299,7 @@ pub(crate) async fn handle_client(
         pending_fds: Vec::new(),
         reply_fds: Vec::new(),
         motion_history: Vec::with_capacity(256),
-        pointer_mapping: [1, 2, 3, 4, 5], // identity mapping
+        pointer_mapping: [1, 2, 3, 4, 5, 6, 7], // identity mapping
         modifier_map: vec![
             vec![50, 62],    // Shift (keycodes 50=Shift_L, 62=Shift_R)
             vec![66],        // Lock (66=Caps_Lock)

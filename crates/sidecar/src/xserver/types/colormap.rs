@@ -230,6 +230,42 @@ impl ColormapState {
         Some(pixels)
     }
 
+    /// Allocate `n_colors` contiguous (consecutive) cells.
+    /// Per X11 AllocColorPlanes spec, when contiguous=true the allocated
+    /// pixel values must be a contiguous block.
+    pub(crate) fn alloc_cells_contiguous(&mut self, n_colors: u16) -> Option<Vec<u32>> {
+        if !self.is_writable() {
+            return None;
+        }
+        let n = n_colors as usize;
+        if n == 0 {
+            return Some(Vec::new());
+        }
+        // Scan for a contiguous run of n free cells
+        let len = self.entries.len();
+        let mut run_start = 0;
+        let mut run_len = 0;
+        for i in 0..len {
+            if !self.allocated[i] {
+                if run_len == 0 {
+                    run_start = i;
+                }
+                run_len += 1;
+                if run_len >= n {
+                    // Found a contiguous block
+                    let pixels: Vec<u32> = (run_start..run_start + n).map(|j| {
+                        self.allocated[j] = true;
+                        j as u32
+                    }).collect();
+                    return Some(pixels);
+                }
+            } else {
+                run_len = 0;
+            }
+        }
+        None
+    }
+
     /// Free color cells.
     pub(crate) fn free_cells(&mut self, pixels: &[u32]) {
         for &p in pixels {

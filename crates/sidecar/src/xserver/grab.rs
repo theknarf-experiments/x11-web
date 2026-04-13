@@ -9,7 +9,7 @@
 
 use std::collections::HashMap;
 use tracing::{debug, info};
-use super::core::{read_u16_bo, read_u32_bo, BAD_CURSOR, BAD_LENGTH, BAD_WINDOW};
+use super::core::{read_u16_bo, read_u32_bo, require_len, BAD_CURSOR, BAD_LENGTH, BAD_WINDOW};
 use super::client::ClientState;
 use super::core::build_error;
 use super::types::WindowState;
@@ -309,18 +309,28 @@ pub(crate) fn handle_ungrab_pointer(state: &mut ClientState, _data: &[u8]) -> Ve
 }
 
 /// GrabButton (opcode 28)
-pub(crate) fn handle_grab_button(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
-    if data.len() < 24 {
-        return Vec::new();
-    }
+pub(crate) fn handle_grab_button(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
+    require_len!(data, 24, seq, 28);
 
     let owner_events = data[1] != 0;
     let grab_window = state.read_u32(data, 4);
+
+    // Validate grab_window exists
+    if !state.windows.contains_key(&grab_window) && grab_window != state.root_window {
+        return build_error(BAD_WINDOW, seq, grab_window, 28, 0);
+    }
+
     let event_mask = state.read_u16(data, 8) as u32;
     let pointer_mode = data[10];
     let keyboard_mode = data[11];
     let confine_to = state.read_u32(data, 12);
     let cursor = state.read_u32(data, 16);
+
+    // Validate cursor if non-zero
+    if cursor != 0 && !state.cursors.contains_key(&cursor) {
+        return build_error(BAD_CURSOR, seq, cursor, 28, 0);
+    }
+
     let button = data[20];
     let modifiers = state.read_u16(data, 22);
 
@@ -349,10 +359,8 @@ pub(crate) fn handle_grab_button(state: &mut ClientState, data: &[u8]) -> Vec<u8
 }
 
 /// UngrabButton (opcode 29)
-pub(crate) fn handle_ungrab_button(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
-    if data.len() < 12 {
-        return Vec::new();
-    }
+pub(crate) fn handle_ungrab_button(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
+    require_len!(data, 12, seq, 29);
 
     let button = data[1];
     let grab_window = state.read_u32(data, 4);
@@ -374,9 +382,7 @@ pub(crate) fn handle_ungrab_button(state: &mut ClientState, data: &[u8]) -> Vec<
 
 /// ChangeActivePointerGrab (opcode 30)
 pub(crate) fn handle_change_active_pointer_grab(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
-    if data.len() < 16 {
-        return Vec::new();
-    }
+    require_len!(data, 16, seq, 30);
 
     let bo = state.msb_first;
     let cursor = read_u32_bo(data, 4, bo);
@@ -502,13 +508,16 @@ pub(crate) fn handle_ungrab_keyboard(state: &mut ClientState, _data: &[u8]) -> V
 }
 
 /// GrabKey (opcode 33)
-pub(crate) fn handle_grab_key(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
-    if data.len() < 16 {
-        return Vec::new();
-    }
+pub(crate) fn handle_grab_key(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
+    require_len!(data, 16, seq, 33);
 
     let owner_events = data[1] != 0;
     let grab_window = state.read_u32(data, 4);
+
+    // Validate grab_window exists
+    if !state.windows.contains_key(&grab_window) && grab_window != state.root_window {
+        return build_error(BAD_WINDOW, seq, grab_window, 33, 0);
+    }
     let modifiers = state.read_u16(data, 8);
     let key = data[10];
     let pointer_mode = data[11];
@@ -536,10 +545,8 @@ pub(crate) fn handle_grab_key(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
 }
 
 /// UngrabKey (opcode 34)
-pub(crate) fn handle_ungrab_key(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
-    if data.len() < 12 {
-        return Vec::new();
-    }
+pub(crate) fn handle_ungrab_key(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
+    require_len!(data, 12, seq, 34);
 
     let key = data[1];
     let grab_window = state.read_u32(data, 4);
