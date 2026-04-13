@@ -21,7 +21,6 @@ pub use types::{TaggedDisplayUpdate, WindowRouter};
 pub(crate) use client::ClientState;
 // Re-exports from input.rs for grab.rs
 pub(crate) use input::{
-    build_single_crossing_event,
     CROSSING_MODE_GRAB, CROSSING_MODE_UNGRAB,
 };
 

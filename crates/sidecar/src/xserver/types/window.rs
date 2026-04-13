@@ -43,6 +43,7 @@ impl WindowType {
     }
 
     /// Whether this window type should receive input focus by default.
+    #[cfg(test)]
     pub(crate) fn accepts_focus(self) -> bool {
         match self {
             WindowType::Normal | WindowType::Dialog | WindowType::Utility

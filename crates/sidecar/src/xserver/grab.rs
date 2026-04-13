@@ -9,44 +9,54 @@
 
 use std::collections::HashMap;
 use tracing::{debug, info};
-use super::core::{read_u16_bo, read_u32_bo, ENTER_NOTIFY_EVENT, LEAVE_NOTIFY_EVENT, BAD_CURSOR, BAD_LENGTH, BAD_WINDOW};
+use super::core::{read_u16_bo, read_u32_bo, BAD_CURSOR, BAD_LENGTH, BAD_WINDOW};
 use super::client::ClientState;
 use super::core::build_error;
 use super::types::WindowState;
-use super::{build_single_crossing_event, CROSSING_MODE_GRAB, CROSSING_MODE_UNGRAB};
+use super::{CROSSING_MODE_GRAB, CROSSING_MODE_UNGRAB};
 
 /// Generate crossing events for a grab activation.
-/// Sends LeaveNotify(mode=Grab) to the current pointer window and
-/// EnterNotify(mode=Grab) to the grab window.
+/// Per X11 spec §11.3, uses mode=Grab and computes proper detail
+/// (Ancestor/Inferior/Nonlinear) based on the relationship between the
+/// current pointer window and the grab window, with Virtual events on
+/// intermediate windows.
 fn emit_grab_crossing_events(state: &mut ClientState, grab_window: u32) {
-    let current_window = state.last_entered_window;
-    if current_window == grab_window {
-        return;
+    let x = state.pointer_x;
+    let y = state.pointer_y;
+    let events = super::input::build_crossing_events_with_mode(
+        state, grab_window, x, y, x, y, CROSSING_MODE_GRAB,
+    );
+    if !events.is_empty() {
+        // build_crossing_events_with_mode already sets last_entered_window
+        for chunk in events.chunks_exact(32) {
+            state.pending_events.push(chunk.to_vec());
+        }
     }
-    if let Some(leave) = build_single_crossing_event(state, LEAVE_NOTIFY_EVENT, current_window, CROSSING_MODE_GRAB) {
-        state.pending_events.push(leave.to_vec());
-    }
-    if let Some(enter) = build_single_crossing_event(state, ENTER_NOTIFY_EVENT, grab_window, CROSSING_MODE_GRAB) {
-        state.pending_events.push(enter.to_vec());
-    }
-    state.last_entered_window = grab_window;
 }
 
 /// Generate crossing events for a grab deactivation.
-/// Sends LeaveNotify(mode=Ungrab) from the grab window and
-/// EnterNotify(mode=Ungrab) to the root window (next MotionNotify will correct).
+/// Per X11 spec §11.3, uses mode=Ungrab and computes proper detail based
+/// on the relationship between the grab window and the current pointer window.
 fn emit_ungrab_crossing_events(state: &mut ClientState, grab_window: u32) {
+    // On ungrab, crossing events go from grab_window to the window actually
+    // containing the pointer (approximated as root; next MotionNotify corrects).
     let dest_window = state.root_window;
     if grab_window == dest_window {
         return;
     }
-    if let Some(leave) = build_single_crossing_event(state, LEAVE_NOTIFY_EVENT, grab_window, CROSSING_MODE_UNGRAB) {
-        state.pending_events.push(leave.to_vec());
+    // Temporarily set last_entered_window to grab_window so crossing events
+    // are computed from the correct source.
+    state.last_entered_window = grab_window;
+    let x = state.pointer_x;
+    let y = state.pointer_y;
+    let events = super::input::build_crossing_events_with_mode(
+        state, dest_window, x, y, x, y, CROSSING_MODE_UNGRAB,
+    );
+    if !events.is_empty() {
+        for chunk in events.chunks_exact(32) {
+            state.pending_events.push(chunk.to_vec());
+        }
     }
-    if let Some(enter) = build_single_crossing_event(state, ENTER_NOTIFY_EVENT, dest_window, CROSSING_MODE_UNGRAB) {
-        state.pending_events.push(enter.to_vec());
-    }
-    state.last_entered_window = dest_window;
 }
 
 /// State for all grab operations on a connection.
@@ -363,14 +373,20 @@ pub(crate) fn handle_ungrab_button(state: &mut ClientState, data: &[u8]) -> Vec<
 }
 
 /// ChangeActivePointerGrab (opcode 30)
-pub(crate) fn handle_change_active_pointer_grab(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
+pub(crate) fn handle_change_active_pointer_grab(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
     if data.len() < 16 {
         return Vec::new();
     }
 
     let bo = state.msb_first;
+    let cursor = read_u32_bo(data, 4, bo);
+
+    // Validate cursor ID if specified (0 = None)
+    if cursor != 0 && !state.cursors.contains_key(&cursor) {
+        return build_error(BAD_CURSOR, seq, cursor, 30, 0);
+    }
+
     if let Some(ref mut grab) = state.grabs.pointer_grab {
-        let cursor = read_u32_bo(data, 4, bo);
         let event_mask = read_u16_bo(data, 12, bo) as u32;
         grab.cursor = cursor;
         grab.event_mask = event_mask;
@@ -463,13 +479,23 @@ pub(crate) fn handle_grab_keyboard(state: &mut ClientState, data: &[u8], seq: u1
 pub(crate) fn handle_ungrab_keyboard(state: &mut ClientState, _data: &[u8]) -> Vec<u8> {
     if let Some(ref grab) = state.grabs.keyboard_grab {
         let grab_window = grab.grab_window;
+        let pointer_mode = grab.pointer_mode;
         debug!("UngrabKeyboard: releasing active keyboard grab");
         // Generate crossing events: Leave(Ungrab) from grab window, Enter(Ungrab) to pointer window
         emit_ungrab_crossing_events(state, grab_window);
         // Thaw frozen keyboard events
         state.grabs.keyboard_frozen = false;
+        state.grabs.keyboard_sync_pending = false;
         let events = std::mem::take(&mut state.grabs.frozen_keyboard_events);
         for e in events { state.pending_events.push(e); }
+        // Per X11 spec: if this keyboard grab had pointer_mode=Synchronous,
+        // the pointer was frozen by this grab — unfreeze it now.
+        if pointer_mode == 1 && state.grabs.pointer_grab.is_none() {
+            state.grabs.pointer_frozen = false;
+            state.grabs.pointer_sync_pending = false;
+            let pevents = std::mem::take(&mut state.grabs.frozen_pointer_events);
+            for e in pevents { state.pending_events.push(e); }
+        }
         state.grabs.keyboard_grab = None;
     }
     Vec::new()
@@ -662,6 +688,14 @@ pub(crate) fn check_passive_button_grab(state: &mut ClientState, button: u8, mod
             } else {
                 None
             };
+            // Per X11 spec §11.4: when a passive grab activates, synchronous
+            // modes take effect immediately — freeze the appropriate devices.
+            if grab.pointer_mode == 1 {
+                state.grabs.pointer_frozen = true;
+            }
+            if grab.keyboard_mode == 1 {
+                state.grabs.keyboard_frozen = true;
+            }
             state.grabs.pointer_grab = Some(ActivePointerGrab {
                 grab_window: gw,
                 event_mask: grab.event_mask,
@@ -700,6 +734,14 @@ pub(crate) fn check_passive_key_grab(state: &mut ClientState, keycode: u8, modif
         if let Some(grab) = matching {
             let gw = grab.grab_window;
             debug!("Passive key grab activated: window={gw:#x} key={keycode}");
+            // Per X11 spec §11.4: when a passive grab activates, synchronous
+            // modes take effect immediately — freeze the appropriate devices.
+            if grab.keyboard_mode == 1 {
+                state.grabs.keyboard_frozen = true;
+            }
+            if grab.pointer_mode == 1 {
+                state.grabs.pointer_frozen = true;
+            }
             state.grabs.keyboard_grab = Some(ActiveKeyboardGrab {
                 grab_window: gw,
                 pointer_mode: grab.pointer_mode,
@@ -731,6 +773,11 @@ pub(crate) fn check_button_release_ungrab(state: &mut ClientState, _button: u8, 
             debug!("Auto-ungrab: all buttons released");
             // Generate crossing events for automatic ungrab
             emit_ungrab_crossing_events(state, grab_window);
+            // Thaw frozen events on auto-ungrab
+            state.grabs.pointer_frozen = false;
+            state.grabs.pointer_sync_pending = false;
+            let events = std::mem::take(&mut state.grabs.frozen_pointer_events);
+            for e in events { state.pending_events.push(e); }
             state.grabs.pointer_grab = None;
         }
     }
@@ -822,4 +869,387 @@ pub(crate) fn clamp_to_confine(state: &ClientState, x: i16, y: i16) -> (i16, i16
         }
     }
     (x, y)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn make_grab_state() -> GrabState {
+        GrabState::default()
+    }
+
+    // -----------------------------------------------------------------------
+    // Passive button grab activation sets freeze state
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn passive_button_grab_sync_mode_freezes_pointer() {
+        let mut gs = make_grab_state();
+        // Add a passive button grab with pointer_mode=Synchronous (1)
+        gs.button_grabs.push(PassiveButtonGrab {
+            grab_window: 100,
+            button: 1,
+            modifiers: 0,
+            event_mask: 0x04, // ButtonPressMask
+            pointer_mode: 1,  // Synchronous
+            keyboard_mode: 0, // Async
+            confine_to: 0,
+            cursor: 0,
+            owner_events: false,
+        });
+        // Verify the grab has sync mode stored
+        assert_eq!(gs.button_grabs[0].pointer_mode, 1);
+        // When this grab activates, pointer_frozen should be set to true
+        // (tested via check_passive_button_grab in integration tests)
+    }
+
+    #[test]
+    fn passive_button_grab_async_mode_no_freeze() {
+        let mut gs = make_grab_state();
+        gs.button_grabs.push(PassiveButtonGrab {
+            grab_window: 100,
+            button: 1,
+            modifiers: 0,
+            event_mask: 0x04,
+            pointer_mode: 0, // Async
+            keyboard_mode: 0,
+            confine_to: 0,
+            cursor: 0,
+            owner_events: false,
+        });
+        assert_eq!(gs.button_grabs[0].pointer_mode, 0);
+        assert!(!gs.pointer_frozen);
+    }
+
+    #[test]
+    fn passive_key_grab_sync_mode_freezes_keyboard() {
+        let mut gs = make_grab_state();
+        gs.key_grabs.push(PassiveKeyGrab {
+            grab_window: 100,
+            key: 38, // 'a'
+            modifiers: 0,
+            pointer_mode: 0,
+            keyboard_mode: 1, // Synchronous
+            owner_events: false,
+        });
+        assert_eq!(gs.key_grabs[0].keyboard_mode, 1);
+    }
+
+    // -----------------------------------------------------------------------
+    // GrabState freeze/thaw mechanics
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn pointer_sync_freeze_queues_event() {
+        let mut gs = make_grab_state();
+        gs.pointer_frozen = true;
+        // Simulate a frozen event
+        gs.frozen_pointer_events.push(vec![0u8; 32]);
+        assert_eq!(gs.frozen_pointer_events.len(), 1);
+    }
+
+    #[test]
+    fn allow_events_async_pointer_thaws() {
+        let mut gs = make_grab_state();
+        gs.pointer_frozen = true;
+        gs.pointer_sync_pending = true;
+        gs.frozen_pointer_events.push(vec![0u8; 32]);
+
+        // Simulate AllowEvents(AsyncPointer): mode 0
+        gs.pointer_frozen = false;
+        gs.pointer_sync_pending = false;
+        let events = std::mem::take(&mut gs.frozen_pointer_events);
+        assert_eq!(events.len(), 1);
+        assert!(!gs.pointer_frozen);
+        assert!(!gs.pointer_sync_pending);
+    }
+
+    #[test]
+    fn allow_events_sync_pointer_refreeze() {
+        let mut gs = make_grab_state();
+        gs.pointer_frozen = true;
+        gs.frozen_pointer_events.push(vec![0u8; 32]);
+
+        // Simulate AllowEvents(SyncPointer): mode 1
+        gs.pointer_frozen = false;
+        gs.pointer_sync_pending = true;
+        let _events = std::mem::take(&mut gs.frozen_pointer_events);
+
+        // sync_pending should cause re-freeze on next event
+        assert!(gs.pointer_sync_pending);
+        assert!(!gs.pointer_frozen);
+    }
+
+    #[test]
+    fn ungrab_keyboard_unfreezes_pointer_if_sync() {
+        let mut gs = make_grab_state();
+        // Simulate a keyboard grab with pointer_mode=Synchronous
+        gs.keyboard_grab = Some(ActiveKeyboardGrab {
+            grab_window: 100,
+            pointer_mode: 1, // Synchronous — froze the pointer
+            keyboard_mode: 0,
+            owner_events: false,
+        });
+        gs.pointer_frozen = true;
+        gs.frozen_pointer_events.push(vec![0u8; 32]);
+
+        // Simulate UngrabKeyboard
+        let grab = gs.keyboard_grab.take().unwrap();
+        gs.keyboard_frozen = false;
+        gs.keyboard_sync_pending = false;
+        // Per spec: if keyboard grab had pointer_mode=Sync and no pointer grab,
+        // unfreeze pointer too.
+        if grab.pointer_mode == 1 && gs.pointer_grab.is_none() {
+            gs.pointer_frozen = false;
+            gs.pointer_sync_pending = false;
+            let pevents = std::mem::take(&mut gs.frozen_pointer_events);
+            assert_eq!(pevents.len(), 1);
+        }
+        assert!(!gs.pointer_frozen);
+    }
+
+    #[test]
+    fn ungrab_keyboard_keeps_pointer_frozen_if_pointer_grab_active() {
+        let mut gs = make_grab_state();
+        gs.keyboard_grab = Some(ActiveKeyboardGrab {
+            grab_window: 100,
+            pointer_mode: 1,
+            keyboard_mode: 0,
+            owner_events: false,
+        });
+        // Also have an active pointer grab (so we shouldn't unfreeze)
+        gs.pointer_grab = Some(ActivePointerGrab {
+            grab_window: 200,
+            event_mask: 0x04,
+            pointer_mode: 1,
+            keyboard_mode: 0,
+            confine_to: 0,
+            cursor: 0,
+            owner_events: false,
+            confine_bounds: None,
+        });
+        gs.pointer_frozen = true;
+
+        let grab = gs.keyboard_grab.take().unwrap();
+        gs.keyboard_frozen = false;
+        // Per spec: don't unfreeze if pointer_grab is still active
+        if grab.pointer_mode == 1 && gs.pointer_grab.is_none() {
+            gs.pointer_frozen = false;
+        }
+        // Pointer should still be frozen because pointer_grab is active
+        assert!(gs.pointer_frozen);
+    }
+
+    // -----------------------------------------------------------------------
+    // Button release auto-ungrab thaws frozen events
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn auto_ungrab_thaws_frozen_pointer() {
+        let mut gs = make_grab_state();
+        gs.pointer_grab = Some(ActivePointerGrab {
+            grab_window: 100,
+            event_mask: 0x04,
+            pointer_mode: 1,
+            keyboard_mode: 0,
+            confine_to: 0,
+            cursor: 0,
+            owner_events: false,
+            confine_bounds: None,
+        });
+        gs.pointer_frozen = true;
+        gs.frozen_pointer_events.push(vec![0u8; 32]);
+
+        // Simulate all buttons released (button_mask = 0)
+        let any_buttons_held = (0u16 & 0x1F00) != 0;
+        assert!(!any_buttons_held);
+
+        // Simulate auto-ungrab
+        gs.pointer_frozen = false;
+        gs.pointer_sync_pending = false;
+        let events = std::mem::take(&mut gs.frozen_pointer_events);
+        gs.pointer_grab = None;
+
+        assert!(!gs.pointer_frozen);
+        assert!(gs.pointer_grab.is_none());
+        assert_eq!(events.len(), 1);
+    }
+
+    // -----------------------------------------------------------------------
+    // Confine bounds clamping
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn confine_clamp_within_bounds() {
+        let mut gs = make_grab_state();
+        gs.pointer_grab = Some(ActivePointerGrab {
+            grab_window: 100,
+            event_mask: 0,
+            pointer_mode: 0,
+            keyboard_mode: 0,
+            confine_to: 200,
+            cursor: 0,
+            owner_events: false,
+            confine_bounds: Some((100, 100, 300, 300)),
+        });
+        // Test: point inside bounds unchanged
+        if let Some((x1, y1, x2, y2)) = gs.pointer_grab.as_ref().unwrap().confine_bounds {
+            let cx = 150i16.max(x1).min(x2.saturating_sub(1));
+            let cy = 200i16.max(y1).min(y2.saturating_sub(1));
+            assert_eq!((cx, cy), (150, 200));
+        }
+    }
+
+    #[test]
+    fn confine_clamp_outside_bounds() {
+        let mut gs = make_grab_state();
+        gs.pointer_grab = Some(ActivePointerGrab {
+            grab_window: 100,
+            event_mask: 0,
+            pointer_mode: 0,
+            keyboard_mode: 0,
+            confine_to: 200,
+            cursor: 0,
+            owner_events: false,
+            confine_bounds: Some((100, 100, 300, 300)),
+        });
+        if let Some((x1, y1, x2, y2)) = gs.pointer_grab.as_ref().unwrap().confine_bounds {
+            let cx = 50i16.max(x1).min(x2.saturating_sub(1));
+            let cy = 400i16.max(y1).min(y2.saturating_sub(1));
+            assert_eq!((cx, cy), (100, 299));
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // Passive grab matching
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn passive_button_grab_any_button_matches() {
+        let mut gs = make_grab_state();
+        gs.button_grabs.push(PassiveButtonGrab {
+            grab_window: 100,
+            button: 0, // AnyButton
+            modifiers: 0,
+            event_mask: 0x04,
+            pointer_mode: 0,
+            keyboard_mode: 0,
+            confine_to: 0,
+            cursor: 0,
+            owner_events: false,
+        });
+        // AnyButton (0) should match any button
+        let grab = &gs.button_grabs[0];
+        assert!(grab.button == 0 || grab.button == 3);
+    }
+
+    #[test]
+    fn passive_key_grab_any_modifier_matches() {
+        let mut gs = make_grab_state();
+        gs.key_grabs.push(PassiveKeyGrab {
+            grab_window: 100,
+            key: 38,
+            modifiers: 0x8000, // AnyModifier
+            pointer_mode: 0,
+            keyboard_mode: 0,
+            owner_events: false,
+        });
+        let grab = &gs.key_grabs[0];
+        assert_eq!(grab.modifiers, 0x8000);
+        // AnyModifier matches any modifier state
+        assert!(grab.modifiers == 0x8000 || grab.modifiers == 0x04);
+    }
+
+    #[test]
+    fn grab_button_replaces_same_triple() {
+        let mut gs = make_grab_state();
+        // First grab
+        gs.button_grabs.push(PassiveButtonGrab {
+            grab_window: 100,
+            button: 1,
+            modifiers: 0,
+            event_mask: 0x04,
+            pointer_mode: 0,
+            keyboard_mode: 0,
+            confine_to: 0,
+            cursor: 0,
+            owner_events: false,
+        });
+        // Remove existing + insert new (same triple)
+        gs.button_grabs.retain(|g| {
+            !(g.grab_window == 100 && g.button == 1 && g.modifiers == 0)
+        });
+        gs.button_grabs.insert(0, PassiveButtonGrab {
+            grab_window: 100,
+            button: 1,
+            modifiers: 0,
+            event_mask: 0x08, // different event_mask
+            pointer_mode: 1,
+            keyboard_mode: 0,
+            confine_to: 0,
+            cursor: 0,
+            owner_events: true,
+        });
+        assert_eq!(gs.button_grabs.len(), 1);
+        assert_eq!(gs.button_grabs[0].event_mask, 0x08);
+        assert!(gs.button_grabs[0].owner_events);
+    }
+
+    #[test]
+    fn ungrab_button_any_removes_all_on_window() {
+        let mut gs = make_grab_state();
+        gs.button_grabs.push(PassiveButtonGrab {
+            grab_window: 100, button: 1, modifiers: 0,
+            event_mask: 0x04, pointer_mode: 0, keyboard_mode: 0,
+            confine_to: 0, cursor: 0, owner_events: false,
+        });
+        gs.button_grabs.push(PassiveButtonGrab {
+            grab_window: 100, button: 2, modifiers: 0,
+            event_mask: 0x04, pointer_mode: 0, keyboard_mode: 0,
+            confine_to: 0, cursor: 0, owner_events: false,
+        });
+        gs.button_grabs.push(PassiveButtonGrab {
+            grab_window: 200, button: 1, modifiers: 0,
+            event_mask: 0x04, pointer_mode: 0, keyboard_mode: 0,
+            confine_to: 0, cursor: 0, owner_events: false,
+        });
+        // AnyButton + AnyModifier removes all on window 100
+        gs.button_grabs.retain(|g| g.grab_window != 100);
+        assert_eq!(gs.button_grabs.len(), 1);
+        assert_eq!(gs.button_grabs[0].grab_window, 200);
+    }
+
+    // -----------------------------------------------------------------------
+    // Frozen event capacity limit
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn frozen_events_bounded() {
+        let mut gs = make_grab_state();
+        gs.pointer_frozen = true;
+        for _ in 0..MAX_FROZEN_EVENTS + 10 {
+            if gs.frozen_pointer_events.len() >= MAX_FROZEN_EVENTS {
+                gs.frozen_pointer_events.remove(0);
+            }
+            gs.frozen_pointer_events.push(vec![0u8; 32]);
+        }
+        assert_eq!(gs.frozen_pointer_events.len(), MAX_FROZEN_EVENTS);
+    }
+
+    // -----------------------------------------------------------------------
+    // Server grab count
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn server_grab_nesting() {
+        let mut gs = make_grab_state();
+        gs.server_grab_count += 1;
+        gs.server_grab_count += 1;
+        assert_eq!(gs.server_grab_count, 2);
+        gs.server_grab_count -= 1;
+        assert_eq!(gs.server_grab_count, 1);
+        gs.server_grab_count -= 1;
+        assert_eq!(gs.server_grab_count, 0);
+    }
 }

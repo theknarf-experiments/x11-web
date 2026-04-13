@@ -343,15 +343,20 @@ pub(crate) fn handle_send_event(state: &mut ClientState, data: &[u8]) -> Vec<u8>
     }
 
     // Resolve the actual delivery target, respecting propagate and event_mask
-    // per the X11 protocol specification.
+    // per the X11 protocol specification §10.6.
     let delivery_target = if propagate {
         // Propagate mode: walk up the window tree from `target` until we find
-        // a window where event_mask intersects the window's selected event mask,
+        // a window where event_mask intersects the window's selected event mask
+        // (including masks from other clients via EventBroadcaster),
         // or until we hit root, or until do_not_propagate_mask blocks the event.
         let event_mask_bit = event_type_to_mask(event_type);
         let mut current = target;
         let mut found = None;
-        while let Some(win) = state.windows.get(&current) {
+        for _ in 0..128 {
+            let win = match state.windows.get(&current) {
+                Some(w) => w,
+                None => break,
+            };
             // If the window's do_not_propagate_mask blocks this event type,
             // stop propagation — no delivery.
             if event_mask_bit != 0 && (win.do_not_propagate_mask & event_mask_bit) != 0 {
@@ -361,15 +366,15 @@ pub(crate) fn handle_send_event(state: &mut ClientState, data: &[u8]) -> Vec<u8>
                 );
                 break;
             }
-            // Check if any client on this window selected one of the
-            // requested event types (event_mask & window's event_mask).
-            if event_mask != 0 && (win.event_mask & event_mask) != 0 {
+            // Check both local and remote clients' masks on this window.
+            let combined_mask = win.event_mask | state.event_broadcaster.all_event_masks(current);
+            if event_mask != 0 && (combined_mask & event_mask) != 0 {
                 found = Some(current);
                 break;
             }
             // If event_mask is 0 and propagate is true, the spec says
             // propagate until a client selects ANY event (unusual, but handle it).
-            if event_mask == 0 && win.event_mask != 0 {
+            if event_mask == 0 && combined_mask != 0 {
                 found = Some(current);
                 break;
             }

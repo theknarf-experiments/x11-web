@@ -768,7 +768,7 @@ pub(crate) fn handle_configure_window(state: &mut ClientState, data: &[u8], seq:
             // changing, send a WM_PROTOCOLS ClientMessage with _NET_WM_SYNC_REQUEST
             // before the ConfigureNotify per EWMH spec. This lets the client
             // synchronize its repainting with the resize.
-            if (width != old_w || height != old_h) {
+            if width != old_w || height != old_h {
                 let sync_counter = state.windows.get(&wid).and_then(|w| w.sync_request_counter);
                 if let Some(_counter_id) = sync_counter {
                     let wm_protocols_atom = state.intern_atom("WM_PROTOCOLS", false);

@@ -451,27 +451,6 @@ pub(crate) fn build_crossing_events_with_mode(state: &mut ClientState, new_windo
     events
 }
 
-/// Build a single crossing event (EnterNotify or LeaveNotify) for a specific window.
-/// Used by grab activation/deactivation to send mode=Grab/Ungrab crossing events.
-pub(crate) fn build_single_crossing_event(state: &ClientState, event_code: u8, window: u32, mode: u8) -> Option<[u8; 32]> {
-    let required_mask = if event_code == ENTER_NOTIFY_EVENT { ENTER_WINDOW_MASK } else { LEAVE_WINDOW_MASK };
-    let win = state.windows.get(&window)?;
-    if win.event_mask & required_mask == 0 {
-        return None;
-    }
-
-    let timestamp = state.timestamp();
-    let ev = make_crossing_event(
-        &state.windows,
-        event_code,
-        DETAIL_NONLINEAR, // Grab/Ungrab crossing events use Nonlinear per spec
-        mode, state.sequence, timestamp, state.root_window,
-        window, state.pointer_x, state.pointer_y,
-        state.msb_first, state.focus_window,
-    );
-    Some(ev)
-}
-
 /// Resolve the target window for a pointer event, respecting active pointer grabs.
 ///
 /// Per X11 spec §11.5:

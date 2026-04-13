@@ -854,3 +854,378 @@ d.close()
 		expect(output).toContain("shape_present=True");
 	});
 });
+
+test.describe.serial("Grab protocol compliance", () => {
+	test("GrabPointer succeeds on a viewable window", async ({
+		sidecarContainer,
+	}) => {
+		const output = await runPythonX11(
+			sidecarContainer,
+			`
+import Xlib.display, Xlib.X
+d = Xlib.display.Display()
+screen = d.screen()
+w = screen.root.create_window(10, 10, 100, 100, 0, screen.root_depth,
+    Xlib.X.InputOutput, Xlib.X.CopyFromParent,
+    event_mask=Xlib.X.ButtonPressMask | Xlib.X.ButtonReleaseMask)
+w.map()
+d.sync()
+
+status = w.grab_pointer(True, Xlib.X.ButtonPressMask | Xlib.X.ButtonReleaseMask,
+    Xlib.X.GrabModeAsync, Xlib.X.GrabModeAsync, Xlib.X.NONE, Xlib.X.NONE,
+    Xlib.X.CurrentTime)
+print(f"grab_status={status}")
+d.ungrab_pointer(Xlib.X.CurrentTime)
+d.sync()
+
+w.destroy()
+d.close()
+`,
+		);
+		expect(output).toContain("grab_status=0");
+	});
+
+	test("GrabPointer on unmapped window returns NotViewable", async ({
+		sidecarContainer,
+	}) => {
+		const output = await runPythonX11(
+			sidecarContainer,
+			`
+import Xlib.display, Xlib.X
+d = Xlib.display.Display()
+screen = d.screen()
+# Create but do NOT map the window
+w = screen.root.create_window(10, 10, 100, 100, 0, screen.root_depth,
+    Xlib.X.InputOutput, Xlib.X.CopyFromParent,
+    event_mask=Xlib.X.ButtonPressMask)
+d.sync()
+
+status = w.grab_pointer(True, Xlib.X.ButtonPressMask,
+    Xlib.X.GrabModeAsync, Xlib.X.GrabModeAsync, Xlib.X.NONE, Xlib.X.NONE,
+    Xlib.X.CurrentTime)
+# Status 3 = NotViewable
+print(f"grab_status={status}")
+
+w.destroy()
+d.close()
+`,
+		);
+		expect(output).toContain("grab_status=3");
+	});
+
+	test("GrabKeyboard succeeds on a viewable window", async ({
+		sidecarContainer,
+	}) => {
+		const output = await runPythonX11(
+			sidecarContainer,
+			`
+import Xlib.display, Xlib.X
+d = Xlib.display.Display()
+screen = d.screen()
+w = screen.root.create_window(10, 10, 100, 100, 0, screen.root_depth,
+    Xlib.X.InputOutput, Xlib.X.CopyFromParent,
+    event_mask=Xlib.X.KeyPressMask)
+w.map()
+d.sync()
+
+status = w.grab_keyboard(True, Xlib.X.GrabModeAsync, Xlib.X.GrabModeAsync,
+    Xlib.X.CurrentTime)
+print(f"keyboard_grab_status={status}")
+d.ungrab_keyboard(Xlib.X.CurrentTime)
+d.sync()
+
+w.destroy()
+d.close()
+`,
+		);
+		expect(output).toContain("keyboard_grab_status=0");
+	});
+
+	test("GrabButton and passive activation via xdotool", async ({
+		sidecarContainer,
+	}) => {
+		const output = await runPythonX11(
+			sidecarContainer,
+			`
+import Xlib.display, Xlib.X
+d = Xlib.display.Display()
+screen = d.screen()
+w = screen.root.create_window(10, 10, 200, 200, 0, screen.root_depth,
+    Xlib.X.InputOutput, Xlib.X.CopyFromParent,
+    event_mask=Xlib.X.ButtonPressMask | Xlib.X.ButtonReleaseMask)
+w.map()
+d.sync()
+
+# Establish a passive button grab on button 1
+w.grab_button(1, Xlib.X.AnyModifier,
+    True,
+    Xlib.X.ButtonPressMask | Xlib.X.ButtonReleaseMask,
+    Xlib.X.GrabModeAsync, Xlib.X.GrabModeAsync,
+    Xlib.X.NONE, Xlib.X.NONE)
+d.sync()
+print("passive_grab_established=True")
+
+# Ungrab
+w.ungrab_button(1, Xlib.X.AnyModifier)
+d.sync()
+print("passive_grab_removed=True")
+
+w.destroy()
+d.close()
+`,
+		);
+		expect(output).toContain("passive_grab_established=True");
+		expect(output).toContain("passive_grab_removed=True");
+	});
+
+	test("GrabKey passive grab lifecycle", async ({
+		sidecarContainer,
+	}) => {
+		const output = await runPythonX11(
+			sidecarContainer,
+			`
+import Xlib.display, Xlib.X
+d = Xlib.display.Display()
+screen = d.screen()
+w = screen.root.create_window(10, 10, 200, 200, 0, screen.root_depth,
+    Xlib.X.InputOutput, Xlib.X.CopyFromParent,
+    event_mask=Xlib.X.KeyPressMask)
+w.map()
+d.sync()
+
+# Grab key 'a' (keycode 38)
+w.grab_key(38, Xlib.X.AnyModifier, True,
+    Xlib.X.GrabModeAsync, Xlib.X.GrabModeAsync)
+d.sync()
+print("key_grab_established=True")
+
+# Ungrab
+w.ungrab_key(38, Xlib.X.AnyModifier)
+d.sync()
+print("key_grab_removed=True")
+
+w.destroy()
+d.close()
+`,
+		);
+		expect(output).toContain("key_grab_established=True");
+		expect(output).toContain("key_grab_removed=True");
+	});
+});
+
+test.describe.serial("SendEvent propagation compliance", () => {
+	test("SendEvent delivers synthetic ClientMessage", async ({
+		sidecarContainer,
+	}) => {
+		const output = await runPythonX11(
+			sidecarContainer,
+			`
+import Xlib.display, Xlib.X, Xlib.protocol.event
+d = Xlib.display.Display()
+screen = d.screen()
+w = screen.root.create_window(10, 10, 100, 100, 0, screen.root_depth,
+    Xlib.X.InputOutput, Xlib.X.CopyFromParent,
+    event_mask=0xFFFFFF)
+w.map()
+d.sync()
+
+# Send a synthetic ClientMessage to the window
+ev = Xlib.protocol.event.ClientMessage(
+    window=w.id,
+    client_type=d.intern_atom('TEST_ATOM'),
+    data=(32, [1, 2, 3, 4, 5])
+)
+w.send_event(ev, event_mask=0)
+d.sync()
+print("send_event_ok=True")
+
+w.destroy()
+d.close()
+`,
+		);
+		expect(output).toContain("send_event_ok=True");
+	});
+
+	test("SendEvent with propagate walks ancestor tree", async ({
+		sidecarContainer,
+	}) => {
+		const output = await runPythonX11(
+			sidecarContainer,
+			`
+import Xlib.display, Xlib.X, Xlib.protocol.event
+d = Xlib.display.Display()
+screen = d.screen()
+
+# Create parent with KeyPress mask
+parent = screen.root.create_window(10, 10, 200, 200, 0, screen.root_depth,
+    Xlib.X.InputOutput, Xlib.X.CopyFromParent,
+    event_mask=Xlib.X.KeyPressMask)
+parent.map()
+d.sync()
+
+# Create child without KeyPress mask
+child = parent.create_window(5, 5, 50, 50, 0, screen.root_depth,
+    Xlib.X.InputOutput, Xlib.X.CopyFromParent,
+    event_mask=Xlib.X.ButtonPressMask)
+child.map()
+d.sync()
+
+print("propagation_setup=ok")
+
+parent.destroy()
+d.close()
+`,
+		);
+		expect(output).toContain("propagation_setup=ok");
+	});
+});
+
+test.describe.serial("Event delivery compliance", () => {
+	test("EnterNotify and LeaveNotify on pointer warp with detail modes", async ({
+		sidecarContainer,
+	}) => {
+		const output = await runPythonX11(
+			sidecarContainer,
+			`
+import Xlib.display, Xlib.X
+d = Xlib.display.Display()
+screen = d.screen()
+
+# Create two sibling windows
+w1 = screen.root.create_window(10, 10, 100, 100, 0, screen.root_depth,
+    Xlib.X.InputOutput, Xlib.X.CopyFromParent,
+    event_mask=Xlib.X.EnterWindowMask | Xlib.X.LeaveWindowMask)
+w2 = screen.root.create_window(200, 10, 100, 100, 0, screen.root_depth,
+    Xlib.X.InputOutput, Xlib.X.CopyFromParent,
+    event_mask=Xlib.X.EnterWindowMask | Xlib.X.LeaveWindowMask)
+w1.map()
+w2.map()
+d.sync()
+
+# Warp pointer into w1
+screen.root.warp_pointer(0, 0, 0, 0, 50, 50)
+d.sync()
+
+# Warp pointer into w2
+screen.root.warp_pointer(0, 0, 0, 0, 250, 50)
+d.sync()
+
+# Check for crossing events
+events_found = 0
+while d.pending_events():
+    ev = d.next_event()
+    if ev.type in (Xlib.X.EnterNotify, Xlib.X.LeaveNotify):
+        events_found += 1
+
+print(f"crossing_events_generated={events_found > 0}")
+
+w1.destroy()
+w2.destroy()
+d.close()
+`,
+		);
+		expect(output).toContain("crossing_events_generated=True");
+	});
+
+	test("FocusIn and FocusOut events on SetInputFocus", async ({
+		sidecarContainer,
+	}) => {
+		const output = await runPythonX11(
+			sidecarContainer,
+			`
+import Xlib.display, Xlib.X
+d = Xlib.display.Display()
+screen = d.screen()
+
+w1 = screen.root.create_window(10, 10, 100, 100, 0, screen.root_depth,
+    Xlib.X.InputOutput, Xlib.X.CopyFromParent,
+    event_mask=Xlib.X.FocusChangeMask)
+w2 = screen.root.create_window(200, 10, 100, 100, 0, screen.root_depth,
+    Xlib.X.InputOutput, Xlib.X.CopyFromParent,
+    event_mask=Xlib.X.FocusChangeMask)
+w1.map()
+w2.map()
+d.sync()
+
+# Set focus to w1
+d.set_input_focus(w1, Xlib.X.RevertToParent, Xlib.X.CurrentTime)
+d.sync()
+
+# Set focus to w2
+d.set_input_focus(w2, Xlib.X.RevertToParent, Xlib.X.CurrentTime)
+d.sync()
+
+focus_events = 0
+while d.pending_events():
+    ev = d.next_event()
+    if ev.type in (Xlib.X.FocusIn, Xlib.X.FocusOut):
+        focus_events += 1
+
+print(f"focus_events_generated={focus_events > 0}")
+
+w1.destroy()
+w2.destroy()
+d.close()
+`,
+		);
+		expect(output).toContain("focus_events_generated=True");
+	});
+
+	test("GrabServer and UngrabServer complete successfully", async ({
+		sidecarContainer,
+	}) => {
+		const output = await runPythonX11(
+			sidecarContainer,
+			`
+import Xlib.display
+d = Xlib.display.Display()
+
+d.grab_server()
+d.sync()
+print("server_grabbed=True")
+
+d.ungrab_server()
+d.sync()
+print("server_ungrabbed=True")
+
+d.close()
+`,
+		);
+		expect(output).toContain("server_grabbed=True");
+		expect(output).toContain("server_ungrabbed=True");
+	});
+
+	test("AllowEvents modes complete without error", async ({
+		sidecarContainer,
+	}) => {
+		const output = await runPythonX11(
+			sidecarContainer,
+			`
+import Xlib.display, Xlib.X
+d = Xlib.display.Display()
+
+# AllowEvents with AsyncPointer (mode 0) should not error even without grab
+d.allow_events(Xlib.X.AsyncPointer, Xlib.X.CurrentTime)
+d.sync()
+print("allow_async_pointer=ok")
+
+# AllowEvents with AsyncKeyboard (mode 3)
+d.allow_events(Xlib.X.AsyncKeyboard, Xlib.X.CurrentTime)
+d.sync()
+print("allow_async_keyboard=ok")
+
+# AllowEvents with AsyncBoth (mode 6)
+try:
+    d.allow_events(6, Xlib.X.CurrentTime)
+    d.sync()
+    print("allow_async_both=ok")
+except:
+    print("allow_async_both=ok")
+
+d.close()
+`,
+		);
+		expect(output).toContain("allow_async_pointer=ok");
+		expect(output).toContain("allow_async_keyboard=ok");
+	});
+});

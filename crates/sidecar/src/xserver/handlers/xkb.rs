@@ -552,9 +552,9 @@ pub(crate) fn maybe_send_xkb_map_notify(state: &mut ClientState, changed: u16) {
     event[14] = 0; // firstType
     event[15] = 4; // nTypes (typical)
     event[16] = MIN_KEY_CODE; // firstKeySym
-    event[17] = (MAX_KEY_CODE - MIN_KEY_CODE + 1); // nKeySyms
+    event[17] = MAX_KEY_CODE - MIN_KEY_CODE + 1; // nKeySyms
     event[18] = MIN_KEY_CODE; // firstKeyAct
-    event[19] = (MAX_KEY_CODE - MIN_KEY_CODE + 1); // nKeyActs
+    event[19] = MAX_KEY_CODE - MIN_KEY_CODE + 1; // nKeyActs
 
     state.pending_events.push(event.to_vec());
 }

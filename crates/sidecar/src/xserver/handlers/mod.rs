@@ -49,7 +49,7 @@ use crate::framebuffer::Framebuffer;
 pub(crate) use super::core::{read_u32_bo, write_u16_bo, write_u32_bo, write_i16_bo};
 
 // Re-export window stacking helpers for use by property handlers
-pub(crate) use window::{restack_by_window_type, effective_stacking_layer};
+pub(crate) use window::restack_by_window_type;
 
 // ---------------------------------------------------------------------------
 // Dispatcher
@@ -94,7 +94,7 @@ pub(crate) fn handle_core_request(state: &mut ClientState, data: &[u8]) -> Vec<u
         27 => super::grab::handle_ungrab_pointer(state, data),
         28 => super::grab::handle_grab_button(state, data),
         29 => super::grab::handle_ungrab_button(state, data),
-        30 => super::grab::handle_change_active_pointer_grab(state, data),
+        30 => super::grab::handle_change_active_pointer_grab(state, data, seq),
         31 => super::grab::handle_grab_keyboard(state, data, seq),
         32 => super::grab::handle_ungrab_keyboard(state, data),
         33 => super::grab::handle_grab_key(state, data),

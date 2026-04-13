@@ -189,9 +189,10 @@ impl EventBroadcaster {
         }
     }
 
-    /// Broadcast an event to ALL connected clients unconditionally.
+    /// Broadcast an event to all other connected clients unconditionally.
     /// Used for MappingNotify which per X11 spec must reach every client.
-    /// Excludes the source client (they already get it via pending_events).
+    /// The source client is excluded here because it receives the event
+    /// via pending_events (pushed by the caller before invoking broadcast).
     pub(crate) fn broadcast_global(&self, event: &[u8], source_client_id: &str) -> usize {
         let mut delivered = 0;
         if let Ok(clients) = self.all_clients.lock() {
