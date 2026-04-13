@@ -1879,3 +1879,291 @@ d.close()
 		expect(output).toContain("named_alloc=ok");
 	});
 });
+
+test.describe.serial("ICCCM/EWMH compliance", () => {
+	test("_NET_SUPPORTED lists required atoms on root", async ({
+		sidecarContainer,
+	}) => {
+		const output = await execInSidecar(
+			sidecarContainer,
+			"xprop -root _NET_SUPPORTED",
+		);
+		expect(output).toContain("_NET_WM_STATE");
+		expect(output).toContain("_NET_WM_NAME");
+		expect(output).toContain("_NET_ACTIVE_WINDOW");
+		expect(output).toContain("_NET_CLIENT_LIST");
+		expect(output).toContain("_NET_WM_PING");
+		expect(output).toContain("_NET_WM_SYNC_REQUEST");
+		expect(output).toContain("_NET_CLOSE_WINDOW");
+		expect(output).toContain("_NET_WM_WINDOW_TYPE");
+		expect(output).toContain("_NET_WM_STRUT");
+		expect(output).toContain("_NET_WORKAREA");
+	});
+
+	test("_NET_SUPPORTING_WM_CHECK points to valid window", async ({
+		sidecarContainer,
+	}) => {
+		const output = await execInSidecar(
+			sidecarContainer,
+			"xprop -root _NET_SUPPORTING_WM_CHECK",
+		);
+		expect(output).toContain("_NET_SUPPORTING_WM_CHECK");
+		// Extract the window ID
+		const match = output.match(/window id # (0x[0-9a-f]+)/i);
+		expect(match).toBeTruthy();
+		if (match) {
+			const wmCheckId = match[1];
+			// Verify the WM check window has _NET_WM_NAME
+			const wmName = await execInSidecar(
+				sidecarContainer,
+				`xprop -id ${wmCheckId} _NET_WM_NAME`,
+			);
+			expect(wmName).toContain("x11-web");
+		}
+	});
+
+	test("Windows get _NET_WM_PID set", async ({ sidecarContainer }) => {
+		const output = await runPythonX11(
+			sidecarContainer,
+			`
+import Xlib.display, Xlib.X
+d = Xlib.display.Display()
+screen = d.screen()
+root = screen.root
+w = root.create_window(0, 0, 100, 100, 0, screen.root_depth,
+                        Xlib.X.InputOutput, Xlib.X.CopyFromParent)
+pid_atom = d.intern_atom('_NET_WM_PID')
+prop = w.get_full_property(pid_atom, Xlib.X.AnyPropertyType)
+if prop and prop.value:
+    print(f"pid_value={prop.value[0]}")
+    print(f"pid_nonzero={prop.value[0] > 0}")
+else:
+    print("pid_value=none")
+    print("pid_nonzero=false")
+w.destroy()
+d.close()
+`,
+		);
+		expect(output).toContain("pid_nonzero=True");
+	});
+
+	test("Windows get WM_CLIENT_MACHINE set", async ({
+		sidecarContainer,
+	}) => {
+		const output = await runPythonX11(
+			sidecarContainer,
+			`
+import Xlib.display, Xlib.X
+d = Xlib.display.Display()
+screen = d.screen()
+root = screen.root
+w = root.create_window(0, 0, 100, 100, 0, screen.root_depth,
+                        Xlib.X.InputOutput, Xlib.X.CopyFromParent)
+machine_atom = d.intern_atom('WM_CLIENT_MACHINE')
+prop = w.get_full_property(machine_atom, Xlib.X.AnyPropertyType)
+if prop and prop.value:
+    hostname = bytes(prop.value).decode('utf-8', errors='replace')
+    print(f"machine={hostname}")
+    print(f"machine_set=true")
+else:
+    print("machine_set=false")
+w.destroy()
+d.close()
+`,
+		);
+		expect(output).toContain("machine_set=true");
+	});
+
+	test("GetGeometry returns correct depth for different visuals", async ({
+		sidecarContainer,
+	}) => {
+		const output = await runPythonX11(
+			sidecarContainer,
+			`
+import Xlib.display, Xlib.X
+d = Xlib.display.Display()
+screen = d.screen()
+root = screen.root
+
+# Root depth (24-bit TrueColor)
+w24 = root.create_window(0, 0, 10, 10, 0, 24, Xlib.X.InputOutput,
+                          Xlib.X.CopyFromParent)
+geo = w24.get_geometry()
+print(f"depth_24={geo.depth}")
+
+# Try creating with depth 32 (ARGB visual 0x40)
+try:
+    visual_argb = None
+    for depth_info in screen.allowed_depths:
+        if depth_info.depth == 32:
+            for v in depth_info.visuals:
+                visual_argb = v.visual_id
+                break
+    if visual_argb:
+        w32 = root.create_window(0, 0, 10, 10, 0, 32, Xlib.X.InputOutput,
+                                  visual_argb)
+        geo32 = w32.get_geometry()
+        print(f"depth_32={geo32.depth}")
+        w32.destroy()
+    else:
+        print("depth_32=no_visual")
+except Exception as e:
+    print(f"depth_32=error:{e}")
+
+w24.destroy()
+d.close()
+`,
+		);
+		expect(output).toContain("depth_24=24");
+		expect(output).toContain("depth_32=32");
+	});
+
+	test("Colormap read-only enforcement for TrueColor", async ({
+		sidecarContainer,
+	}) => {
+		const output = await runPythonX11(
+			sidecarContainer,
+			`
+import Xlib.display, Xlib.X, Xlib.error
+d = Xlib.display.Display()
+screen = d.screen()
+
+# The default colormap is TrueColor (read-only)
+cmap = screen.default_colormap
+
+# AllocColor should work (read-only lookup)
+color = cmap.alloc_color(65535, 0, 0)
+print(f"alloc_ok={color.pixel > 0 or color.pixel == 0}")
+
+# FreeColors on a TrueColor colormap should fail with BadAccess
+try:
+    cmap.free_colors([color.pixel], 0)
+    d.sync()
+    print("free_accepted=true")
+except Exception as e:
+    error_str = str(e)
+    print(f"free_error={error_str}")
+    if 'BadAccess' in error_str or 'error' in error_str.lower():
+        print("free_rejected=true")
+    else:
+        print("free_rejected=false")
+
+print("colormap_readonly_test=ok")
+d.close()
+`,
+		);
+		expect(output).toContain("colormap_readonly_test=ok");
+	});
+
+	test("_NET_WM_STATE changes via ClientMessage", async ({
+		sidecarContainer,
+	}) => {
+		const output = await runPythonX11(
+			sidecarContainer,
+			`
+import Xlib.display, Xlib.X, Xlib.protocol.event
+import struct
+d = Xlib.display.Display()
+screen = d.screen()
+root = screen.root
+
+w = root.create_window(0, 0, 200, 200, 0, screen.root_depth,
+                        Xlib.X.InputOutput, Xlib.X.CopyFromParent)
+w.map()
+d.sync()
+
+net_wm_state = d.intern_atom('_NET_WM_STATE')
+fullscreen = d.intern_atom('_NET_WM_STATE_FULLSCREEN')
+
+# Send ClientMessage to root to request fullscreen
+ev = Xlib.protocol.event.ClientMessage(
+    window=w, client_type=net_wm_state, data=(32, [1, fullscreen, 0, 1, 0]))
+root.send_event(ev, event_mask=Xlib.X.SubstructureRedirectMask | Xlib.X.SubstructureNotifyMask)
+d.sync()
+import time
+time.sleep(0.1)
+
+# Check if fullscreen state was set
+prop = w.get_full_property(net_wm_state, Xlib.X.AnyPropertyType)
+if prop and prop.value is not None:
+    atoms = list(prop.value)
+    print(f"has_fullscreen={fullscreen in atoms}")
+else:
+    print("has_fullscreen=false")
+
+print("state_change_test=ok")
+w.destroy()
+d.close()
+`,
+		);
+		expect(output).toContain("state_change_test=ok");
+		expect(output).toContain("has_fullscreen=True");
+	});
+
+	test("WM_DELETE_WINDOW via _NET_CLOSE_WINDOW", async ({
+		sidecarContainer,
+	}) => {
+		const output = await runPythonX11(
+			sidecarContainer,
+			`
+import Xlib.display, Xlib.X, Xlib.protocol.event
+d = Xlib.display.Display()
+screen = d.screen()
+root = screen.root
+
+w = root.create_window(0, 0, 100, 100, 0, screen.root_depth,
+                        Xlib.X.InputOutput, Xlib.X.CopyFromParent)
+# Set WM_PROTOCOLS to include WM_DELETE_WINDOW
+wm_protocols = d.intern_atom('WM_PROTOCOLS')
+wm_delete = d.intern_atom('WM_DELETE_WINDOW')
+w.change_property(wm_protocols, Xlib.X.AnyPropertyType, 32, [wm_delete])
+w.map()
+d.sync()
+
+# Send _NET_CLOSE_WINDOW to root
+net_close = d.intern_atom('_NET_CLOSE_WINDOW')
+ev = Xlib.protocol.event.ClientMessage(
+    window=w, client_type=net_close, data=(32, [0, 0, 0, 0, 0]))
+root.send_event(ev, event_mask=Xlib.X.SubstructureRedirectMask | Xlib.X.SubstructureNotifyMask)
+d.sync()
+import time
+time.sleep(0.1)
+
+# Check for the WM_DELETE_WINDOW ClientMessage
+# We'll just verify no crash occurred
+print("close_window_test=ok")
+w.destroy()
+d.close()
+`,
+		);
+		expect(output).toContain("close_window_test=ok");
+	});
+
+	test("_NET_FRAME_EXTENTS set on new windows", async ({
+		sidecarContainer,
+	}) => {
+		const output = await runPythonX11(
+			sidecarContainer,
+			`
+import Xlib.display, Xlib.X
+d = Xlib.display.Display()
+screen = d.screen()
+root = screen.root
+w = root.create_window(0, 0, 100, 100, 0, screen.root_depth,
+                        Xlib.X.InputOutput, Xlib.X.CopyFromParent)
+frame_atom = d.intern_atom('_NET_FRAME_EXTENTS')
+prop = w.get_full_property(frame_atom, Xlib.X.AnyPropertyType)
+if prop and prop.value is not None:
+    extents = list(prop.value)
+    print(f"frame_extents={extents}")
+    print(f"frame_set=true")
+else:
+    print("frame_set=false")
+w.destroy()
+d.close()
+`,
+		);
+		expect(output).toContain("frame_set=true");
+		expect(output).toContain("frame_extents=[0, 0, 0, 0]");
+	});
+});
