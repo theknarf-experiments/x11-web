@@ -1120,6 +1120,7 @@ fn handle_request(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
                 &mut state.xi.keyboard_frozen,
                 &mut state.xi.frozen_pointer_events,
                 &mut state.xi.frozen_keyboard_events,
+                &mut state.xi.xi1_dont_propagate,
                 SCREEN_WIDTH,
                 SCREEN_HEIGHT,
                 state.root_window,

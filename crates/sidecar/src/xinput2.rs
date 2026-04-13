@@ -116,6 +116,375 @@ fn serialize_xi_reply<R: x11rb_protocol::x11_utils::Serialize>(reply: &R, msb_fi
     buf
 }
 
+// ---------------------------------------------------------------------------
+// XI 1.x helper functions
+// ---------------------------------------------------------------------------
+
+/// Minimum keycode we advertise in the Setup reply.
+const MIN_KEYCODE: u8 = 8;
+/// Maximum keycode we advertise.
+const MAX_KEYCODE: u8 = 255;
+/// Number of physical + scroll buttons for the virtual pointer.
+const N_POINTER_BUTTONS: u16 = 7;
+
+/// Build a proper ListInputDevices reply with the two virtual core devices.
+/// Each device carries its full set of XI 1.x input classes (KeyInfo,
+/// ButtonInfo, ValuatorInfo) so legacy toolkits can discover device
+/// capabilities.
+fn build_list_input_devices_reply(
+    seq: u16,
+    _valuators: &ValuatorState,
+    screen_width: u16,
+    screen_height: u16,
+    msb_first: bool,
+) -> Vec<u8> {
+    use x11rb_protocol::protocol::xproto;
+
+    // -- Pointer device: button class + valuator class (X, Y) --
+    let pointer_button_info = xi::InputInfo {
+        len: 4, // class_id(1) + len(1) + num_buttons(2) = 4 bytes
+        info: xi::InputInfoInfo::Button(xi::InputInfoInfoButton {
+            num_buttons: N_POINTER_BUTTONS,
+        }),
+    };
+    let pointer_valuator_info = xi::InputInfo {
+        len: 8 + 12 * 4, // header(8) + 4 axes × 12 bytes each
+        info: xi::InputInfoInfo::Valuator(xi::InputInfoInfoValuator {
+            mode: xi::ValuatorMode::ABSOLUTE,
+            motion_size: 0,
+            axes: vec![
+                xi::AxisInfo {
+                    resolution: 1,
+                    minimum: 0,
+                    maximum: i32::from(screen_width),
+                },
+                xi::AxisInfo {
+                    resolution: 1,
+                    minimum: 0,
+                    maximum: i32::from(screen_height),
+                },
+                // Scroll vertical (relative)
+                xi::AxisInfo {
+                    resolution: 1,
+                    minimum: -1,
+                    maximum: -1,
+                },
+                // Scroll horizontal (relative)
+                xi::AxisInfo {
+                    resolution: 1,
+                    minimum: -1,
+                    maximum: -1,
+                },
+            ],
+        }),
+    };
+
+    // -- Keyboard device: key class --
+    let keyboard_key_info = xi::InputInfo {
+        len: 8, // class_id(1) + len(1) + min(1) + max(1) + num_keys(2) + pad(2) = 8
+        info: xi::InputInfoInfo::Key(xi::InputInfoInfoKey {
+            min_keycode: MIN_KEYCODE,
+            max_keycode: MAX_KEYCODE,
+            num_keys: (MAX_KEYCODE - MIN_KEYCODE + 1) as u16,
+        }),
+    };
+
+    let reply = xi::ListInputDevicesReply {
+        xi_reply_type: xi::LIST_INPUT_DEVICES_REQUEST,
+        sequence: seq,
+        length: 0, // patched by serialize_xi_reply
+        devices: vec![
+            xi::DeviceInfo {
+                device_type: 0,
+                device_id: MASTER_POINTER_ID as u8,
+                num_class_info: 2, // button + valuator
+                device_use: xi::DeviceUse::IS_X_POINTER,
+            },
+            xi::DeviceInfo {
+                device_type: 0,
+                device_id: MASTER_KEYBOARD_ID as u8,
+                num_class_info: 1, // key
+                device_use: xi::DeviceUse::IS_X_KEYBOARD,
+            },
+        ],
+        infos: vec![pointer_button_info, pointer_valuator_info, keyboard_key_info],
+        names: vec![
+            xproto::Str { name: b"Virtual core pointer".to_vec() },
+            xproto::Str { name: b"Virtual core keyboard".to_vec() },
+        ],
+    };
+    serialize_xi_reply(&reply, msb_first)
+}
+
+/// Build an OpenDevice reply for the given device_id. Returns the device's
+/// input classes (key, button, valuator) so XI 1.x clients can query
+/// device capabilities after opening.
+fn build_open_device_reply(
+    device_id: u8,
+    seq: u16,
+    _screen_width: u16,
+    _screen_height: u16,
+    msb_first: bool,
+) -> Vec<u8> {
+    // OpenDevice reply: 32-byte header
+    //   byte 0  = 1 (Reply)
+    //   byte 1  = xi_reply_type (3)
+    //   bytes 2-3 = sequence
+    //   bytes 4-7 = length (in 4-byte units after header)
+    //   byte 8  = num_classes
+    //   bytes 9-31 = pad
+    //   followed by InputClassInfo structs (2 bytes each: class_id + event_type_base)
+
+    let is_keyboard = device_id == MASTER_KEYBOARD_ID as u8;
+
+    // Each InputClassInfo is 2 bytes: class_id(1) + event_type_base(1)
+    let classes: Vec<(u8, u8)> = if is_keyboard {
+        vec![(0 /* KEY */, 0)]
+    } else {
+        vec![
+            (1 /* BUTTON */, 0),
+            (2 /* VALUATOR */, 0),
+        ]
+    };
+
+    let num_classes = classes.len() as u8;
+    let extra_bytes = (classes.len() * 2 + 3) & !3; // pad to 4
+    let length_units = extra_bytes / 4;
+
+    let mut reply = vec![0u8; 32 + extra_bytes];
+    reply[0] = 1;
+    reply[1] = 3; // xi_reply_type = OpenDevice
+    write_u16_bo(&mut reply, 2, seq, msb_first);
+    write_u32_bo(&mut reply, 4, length_units as u32, msb_first);
+    reply[8] = num_classes;
+
+    for (i, (class_id, event_base)) in classes.iter().enumerate() {
+        reply[32 + i * 2] = *class_id;
+        reply[32 + i * 2 + 1] = *event_base;
+    }
+    reply
+}
+
+/// Build a GetDeviceKeyMapping reply that mirrors the core keyboard mapping.
+/// Returns keysyms for the requested keycode range.
+fn build_device_key_mapping_reply(
+    first_keycode: u8,
+    count: u8,
+    seq: u16,
+    msb_first: bool,
+) -> Vec<u8> {
+    // We use 4 keysyms per keycode (normal, shift, altgr, shift+altgr)
+    // matching the core GetKeyboardMapping format.
+    let keysyms_per_keycode: u8 = 4;
+    let n_keycodes = count as usize;
+    let n_keysyms = n_keycodes * keysyms_per_keycode as usize;
+    let length_units = n_keysyms as u32; // each keysym is 4 bytes = 1 unit
+
+    let mut reply = vec![0u8; 32 + n_keysyms * 4];
+    reply[0] = 1;
+    reply[1] = keysyms_per_keycode;
+    write_u16_bo(&mut reply, 2, seq, msb_first);
+    write_u32_bo(&mut reply, 4, length_units, msb_first);
+    reply[8] = 24; // xi_reply_type
+
+    // Fill in keysyms using the same keycode_to_keysym mapping as core.
+    for i in 0..n_keycodes {
+        let kc = first_keycode.wrapping_add(i as u8);
+        let (normal, shifted) = keycode_to_keysym_xi(kc);
+        let offset = 32 + i * keysyms_per_keycode as usize * 4;
+        write_u32_bo(&mut reply, offset, normal, msb_first);
+        write_u32_bo(&mut reply, offset + 4, shifted, msb_first);
+        // altgr and shift+altgr are NoSymbol
+        write_u32_bo(&mut reply, offset + 8, 0, msb_first);
+        write_u32_bo(&mut reply, offset + 12, 0, msb_first);
+    }
+    reply
+}
+
+/// Minimal US keyboard layout mapping for XI 1.x GetDeviceKeyMapping.
+/// Returns (normal_keysym, shifted_keysym) for a given keycode.
+fn keycode_to_keysym_xi(keycode: u8) -> (u32, u32) {
+    match keycode {
+        9 => (0xff1b, 0xff1b),   // Escape
+        10 => (0x31, 0x21),       // 1 / !
+        11 => (0x32, 0x40),       // 2 / @
+        12 => (0x33, 0x23),       // 3 / #
+        13 => (0x34, 0x24),       // 4 / $
+        14 => (0x35, 0x25),       // 5 / %
+        15 => (0x36, 0x5e),       // 6 / ^
+        16 => (0x37, 0x26),       // 7 / &
+        17 => (0x38, 0x2a),       // 8 / *
+        18 => (0x39, 0x28),       // 9 / (
+        19 => (0x30, 0x29),       // 0 / )
+        20 => (0x2d, 0x5f),       // - / _
+        21 => (0x3d, 0x2b),       // = / +
+        22 => (0xff08, 0xff08),   // BackSpace
+        23 => (0xff09, 0xfe20),   // Tab / ISO_Left_Tab
+        24 => (0x71, 0x51),       // q / Q
+        25 => (0x77, 0x57),       // w / W
+        26 => (0x65, 0x45),       // e / E
+        27 => (0x72, 0x52),       // r / R
+        28 => (0x74, 0x54),       // t / T
+        29 => (0x79, 0x59),       // y / Y
+        30 => (0x75, 0x55),       // u / U
+        31 => (0x69, 0x49),       // i / I
+        32 => (0x6f, 0x4f),       // o / O
+        33 => (0x70, 0x50),       // p / P
+        34 => (0x5b, 0x7b),       // [ / {
+        35 => (0x5d, 0x7d),       // ] / }
+        36 => (0xff0d, 0xff0d),   // Return
+        37 => (0xffe3, 0xffe3),   // Control_L
+        38 => (0x61, 0x41),       // a / A
+        39 => (0x73, 0x53),       // s / S
+        40 => (0x64, 0x44),       // d / D
+        41 => (0x66, 0x46),       // f / F
+        42 => (0x67, 0x47),       // g / G
+        43 => (0x68, 0x48),       // h / H
+        44 => (0x6a, 0x4a),       // j / J
+        45 => (0x6b, 0x4b),       // k / K
+        46 => (0x6c, 0x4c),       // l / L
+        47 => (0x3b, 0x3a),       // ; / :
+        48 => (0x27, 0x22),       // ' / "
+        49 => (0x60, 0x7e),       // ` / ~
+        50 => (0xffe1, 0xffe1),   // Shift_L
+        51 => (0x5c, 0x7c),       // \ / |
+        52 => (0x7a, 0x5a),       // z / Z
+        53 => (0x78, 0x58),       // x / X
+        54 => (0x63, 0x43),       // c / C
+        55 => (0x76, 0x56),       // v / V
+        56 => (0x62, 0x42),       // b / B
+        57 => (0x6e, 0x4e),       // n / N
+        58 => (0x6d, 0x4d),       // m / M
+        59 => (0x2c, 0x3c),       // , / <
+        60 => (0x2e, 0x3e),       // . / >
+        61 => (0x2f, 0x3f),       // / / ?
+        62 => (0xffe2, 0xffe2),   // Shift_R
+        63 => (0xffaa, 0xffaa),   // KP_Multiply
+        64 => (0xffe9, 0xffe9),   // Alt_L
+        65 => (0x20, 0x20),       // space
+        66 => (0xffe5, 0xffe5),   // Caps_Lock
+        67..=76 => {              // F1-F10
+            let fkey = 0xffbe + (keycode - 67) as u32;
+            (fkey, fkey)
+        }
+        95 => (0xffc8, 0xffc8),   // F11
+        96 => (0xffc9, 0xffc9),   // F12
+        105 => (0xffe4, 0xffe4),  // Control_R
+        108 => (0xffea, 0xffea),  // Alt_R
+        110 => (0xff50, 0xff50),  // Home
+        111 => (0xff52, 0xff52),  // Up
+        112 => (0xff55, 0xff55),  // Prior/PageUp
+        113 => (0xff51, 0xff51),  // Left
+        114 => (0xff53, 0xff53),  // Right
+        115 => (0xff57, 0xff57),  // End
+        116 => (0xff54, 0xff54),  // Down
+        117 => (0xff56, 0xff56),  // Next/PageDown
+        118 => (0xff63, 0xff63),  // Insert
+        119 => (0xffff, 0xffff),  // Delete
+        133 => (0xffeb, 0xffeb),  // Super_L
+        134 => (0xffec, 0xffec),  // Super_R
+        _ => (0, 0),              // NoSymbol
+    }
+}
+
+/// Build a GetDeviceModifierMapping reply with the standard modifier map.
+fn build_device_modifier_mapping_reply(seq: u16, msb_first: bool) -> Vec<u8> {
+    // Standard modifier map: 8 modifiers, each can have up to N keycodes.
+    // We use 2 keycodes per modifier (padded).
+    let keycodes_per_modifier: u8 = 2;
+    let map_size = 8 * keycodes_per_modifier as usize;
+    let length_units = (map_size + 3) / 4;
+
+    let mut reply = vec![0u8; 32 + length_units * 4];
+    reply[0] = 1;
+    reply[1] = keycodes_per_modifier;
+    write_u16_bo(&mut reply, 2, seq, msb_first);
+    write_u32_bo(&mut reply, 4, length_units as u32, msb_first);
+    reply[8] = 26; // xi_reply_type
+
+    // Modifier map: [Shift, Lock, Control, Mod1(Alt), Mod2(Num), Mod3, Mod4(Super), Mod5]
+    let modifier_keycodes: [(u8, u8); 8] = [
+        (50, 62),   // Shift: Shift_L(50), Shift_R(62)
+        (66, 0),     // Lock: Caps_Lock(66)
+        (37, 105),   // Control: Control_L(37), Control_R(105)
+        (64, 108),   // Mod1 (Alt): Alt_L(64), Alt_R(108)
+        (77, 0),     // Mod2 (Num Lock): Num_Lock(77)
+        (0, 0),      // Mod3: unused
+        (133, 134),  // Mod4 (Super): Super_L(133), Super_R(134)
+        (0, 0),      // Mod5: unused
+    ];
+
+    for (i, (kc1, kc2)) in modifier_keycodes.iter().enumerate() {
+        reply[32 + i * 2] = *kc1;
+        reply[32 + i * 2 + 1] = *kc2;
+    }
+    reply
+}
+
+/// Build a QueryDeviceState reply with current button/key/valuator state.
+fn build_query_device_state_reply(
+    device_id: u8,
+    valuators: &ValuatorState,
+    seq: u16,
+    msb_first: bool,
+) -> Vec<u8> {
+    let is_keyboard = device_id == MASTER_KEYBOARD_ID as u8;
+
+    if is_keyboard {
+        // Key class state: class(1) + length(1) + num_keys(1) + pad(1) + keys[32]
+        let class_len: u8 = 36;
+        let length_units = (1 + class_len as usize + 3) / 4;
+        let mut reply = vec![0u8; 32 + length_units * 4];
+        reply[0] = 1;
+        write_u16_bo(&mut reply, 2, seq, msb_first);
+        write_u32_bo(&mut reply, 4, length_units as u32, msb_first);
+        reply[8] = 30;
+        reply[12] = 1; // num_classes
+        // Key state class
+        reply[32] = 0; // class_id = KEY
+        reply[33] = class_len;
+        reply[34] = 248; // num_keys = MAX - MIN + 1
+        // keys[32] = all zeros (no keys pressed)
+        reply
+    } else {
+        // Button class: class(1) + length(1) + num_buttons(1) + pad(1) + buttons[4]
+        // Valuator class: class(1) + length(1) + num_valuators(1) + mode(1) + valuators[4*4]
+        let button_class_len: u8 = 8;
+        let valuator_class_len: u8 = 4 + 4 * 4; // header(4) + 4 valuators × 4 bytes
+        let total_extra = button_class_len as usize + valuator_class_len as usize;
+        let length_units = (total_extra + 3) / 4;
+
+        let mut reply = vec![0u8; 32 + length_units * 4];
+        reply[0] = 1;
+        write_u16_bo(&mut reply, 2, seq, msb_first);
+        write_u32_bo(&mut reply, 4, length_units as u32, msb_first);
+        reply[8] = 30;
+        reply[12] = 2; // num_classes
+
+        // Button state class
+        let off = 32;
+        reply[off] = 1; // class_id = BUTTON
+        reply[off + 1] = button_class_len;
+        reply[off + 2] = N_POINTER_BUTTONS as u8;
+        // buttons[4] = all zeros (no buttons pressed)
+
+        // Valuator state class
+        let voff = off + button_class_len as usize;
+        reply[voff] = 2; // class_id = VALUATOR
+        reply[voff + 1] = valuator_class_len;
+        reply[voff + 2] = 4; // num_valuators: X, Y, ScrollV, ScrollH
+        reply[voff + 3] = 0; // mode = Relative
+
+        // Valuator values (4 bytes each, matching device axis order)
+        write_u32_bo(&mut reply, voff + 4, valuators.x as u32, msb_first);
+        write_u32_bo(&mut reply, voff + 8, valuators.y as u32, msb_first);
+        write_u32_bo(&mut reply, voff + 12, valuators.scroll_v as u32, msb_first);
+        write_u32_bo(&mut reply, voff + 16, valuators.scroll_h as u32, msb_first);
+
+        reply
+    }
+}
+
 /// Build the bytes for the master pointer's `XIDeviceInfo`. The screen
 /// dimensions bound the valuator axes — XI clients use these to clamp
 /// or normalise pointer position values.
@@ -515,6 +884,7 @@ pub fn handle_request(
     keyboard_frozen: &mut bool,
     _frozen_pointer_events: &mut Vec<Vec<u8>>,
     _frozen_keyboard_events: &mut Vec<Vec<u8>>,
+    xi1_dont_propagate: &mut Option<HashMap<u32, Vec<u32>>>,
     screen_width: u16,
     screen_height: u16,
     root_window: u32,
@@ -550,18 +920,11 @@ pub fn handle_request(
             serialize_xi_reply(&reply, msb_first)
         }
 
-        // ListInputDevices (XI 1.x): return zero devices. Modern apps
-        // call this only on init and immediately move to XI2.
+        // ListInputDevices (XI 1.x): return the two core devices with
+        // proper class info so legacy toolkits (Xt, Motif, old GTK2) see
+        // real keyboard and pointer hardware.
         xi::LIST_INPUT_DEVICES_REQUEST => {
-            let reply = xi::ListInputDevicesReply {
-                xi_reply_type: xi::LIST_INPUT_DEVICES_REQUEST,
-                sequence: seq,
-                length: 0,
-                devices: vec![],
-                infos: vec![],
-                names: vec![],
-            };
-            serialize_xi_reply(&reply, msb_first)
+            build_list_input_devices_reply(seq, valuators, screen_width, screen_height, msb_first)
         }
 
         // ---- XI 2.x ------------------------------------------------------
@@ -1061,78 +1424,103 @@ pub fn handle_request(
 
         // ---- XI 1.x reply-expecting requests --------------------------------
         //
-        // These legacy opcodes expect a reply. Returning an empty Vec
-        // would hang the client. We return minimal valid replies.
+        // These legacy opcodes are fully implemented to support older
+        // toolkits (Xt, Motif, GTK2, Tk) that rely on XI 1.x device
+        // enumeration and configuration.
 
-        // OpenDevice (3): reply with zero input classes.
+        // OpenDevice (3): return actual device classes for the requested
+        // device. Pointer gets button+valuator, keyboard gets key class.
         3 => {
-            debug!("XI 1.x OpenDevice: returning empty device info");
-            let mut reply = vec![0u8; 32];
-            reply[0] = 1; // reply
-            write_u16_bo(&mut reply, 2, seq, msb_first);
-            // length=0, xi_reply_type=3, num_classes=0
-            reply[8] = 3; // xi_reply_type
-            reply
+            let device_id = if body.len() >= 1 { body[0] } else { 0 };
+            debug!("XI 1.x OpenDevice: device_id={device_id}");
+            build_open_device_reply(device_id, seq, screen_width, screen_height, msb_first)
         }
 
-        // GetDeviceDontPropagateList (9): reply with zero events.
+        // GetDeviceDontPropagateList (9): return the stored propagation
+        // exclusion mask for the given window. We store these in the
+        // xi1_dont_propagate map.
         9 => {
-            debug!("XI 1.x GetDeviceDontPropagateList: returning empty list");
+            let window = if body.len() >= 4 { read_u32_bo(body, 0, msb_first) } else { 0 };
+            debug!("XI 1.x GetDeviceDontPropagateList: window={window:#x}");
+            let count = xi1_dont_propagate
+                .as_ref()
+                .and_then(|m| m.get(&window))
+                .map(|v| v.len() as u16)
+                .unwrap_or(0);
             let mut reply = vec![0u8; 32];
             reply[0] = 1;
             write_u16_bo(&mut reply, 2, seq, msb_first);
             reply[8] = 9;
+            write_u16_bo(&mut reply, 12, count, msb_first);
+            // If there are entries, append the event class list after the header.
+            if let Some(classes) = xi1_dont_propagate.as_ref().and_then(|m| m.get(&window)) {
+                let extra_bytes = classes.len() * 4;
+                let extra_units = ((extra_bytes + 3) / 4) as u32;
+                write_u32_bo(&mut reply, 4, extra_units, msb_first);
+                for &class in classes {
+                    let mut buf = [0u8; 4];
+                    if msb_first {
+                        buf[..4].copy_from_slice(&class.to_be_bytes());
+                    } else {
+                        buf[..4].copy_from_slice(&class.to_le_bytes());
+                    }
+                    reply.extend_from_slice(&buf);
+                }
+            }
             reply
         }
 
-        // GetDeviceMotionEvents (10): reply with zero events.
+        // GetDeviceMotionEvents (10): return empty event list since we
+        // don't maintain motion history for the virtual display. This is
+        // spec-compliant — the motion_size in our ValuatorInfo is 0.
         10 => {
-            debug!("XI 1.x GetDeviceMotionEvents: returning empty");
+            debug!("XI 1.x GetDeviceMotionEvents: no motion history (virtual display)");
             let mut reply = vec![0u8; 32];
             reply[0] = 1;
             write_u16_bo(&mut reply, 2, seq, msb_first);
             reply[8] = 10;
+            // num_events = 0 (already zero), length = 0
             reply
         }
 
-        // GetDeviceFocus (20): reply with focus=PointerRoot.
+        // GetDeviceFocus (20): return current focus window and RevertTo.
         20 => {
-            debug!("XI 1.x GetDeviceFocus: returning PointerRoot");
+            debug!("XI 1.x GetDeviceFocus: focus={:#x}", *focus_window);
             let mut reply = vec![0u8; 32];
             reply[0] = 1;
             write_u16_bo(&mut reply, 2, seq, msb_first);
-            reply[8] = 20; // xi_reply_type
-            write_u32_bo(&mut reply, 12, 1, msb_first); // focus = PointerRoot
+            reply[8] = 20;
+            // focus window
+            write_u32_bo(&mut reply, 12, *focus_window, msb_first);
+            // revert_to: PointerRoot=1
+            reply[16] = 1;
+            // time = CurrentTime (0)
             reply
         }
 
-        // GetDeviceKeyMapping (24): reply with zero keysyms.
+        // GetDeviceKeyMapping (24): return the actual keymap for the
+        // keyboard device, matching the core GetKeyboardMapping response.
+        // Format: first_keycode(1) + count(1) + pad(2)
         24 => {
-            debug!("XI 1.x GetDeviceKeyMapping: returning empty");
-            let mut reply = vec![0u8; 32];
-            reply[0] = 1;
-            write_u16_bo(&mut reply, 2, seq, msb_first);
-            reply[1] = 0; // keysyms per keycode
-            reply[8] = 24;
-            reply
+            let first_keycode = if body.len() >= 1 { body[0] } else { 8 };
+            let count = if body.len() >= 2 { body[1] } else { 0 };
+            debug!("XI 1.x GetDeviceKeyMapping: first={first_keycode} count={count}");
+            build_device_key_mapping_reply(first_keycode, count, seq, msb_first)
         }
 
-        // GetDeviceModifierMapping (26): reply with zero modifiers.
+        // GetDeviceModifierMapping (26): return the actual modifier map
+        // matching the core modifier mapping (Shift, Lock, Control, Mod1-5).
         26 => {
-            debug!("XI 1.x GetDeviceModifierMapping: returning empty");
-            let mut reply = vec![0u8; 32];
-            reply[0] = 1;
-            reply[1] = 0; // keycodes_per_modifier
-            write_u16_bo(&mut reply, 2, seq, msb_first);
-            reply[8] = 26;
-            reply
+            debug!("XI 1.x GetDeviceModifierMapping");
+            build_device_modifier_mapping_reply(seq, msb_first)
         }
 
-        // GetDeviceButtonMapping (28): reply with identity mapping.
+        // GetDeviceButtonMapping (28): return identity mapping for 7
+        // buttons (3 physical + 4 scroll).
         28 => {
             debug!("XI 1.x GetDeviceButtonMapping: returning identity");
-            let n_buttons = 5u8;
-            let map_len = ((n_buttons as usize + 3) & !3) / 4; // pad to 4 bytes in units of 4
+            let n_buttons = 7u8; // left/mid/right + scroll up/down/left/right
+            let map_len = ((n_buttons as usize + 3) & !3) / 4;
             let mut reply = vec![0u8; 32 + map_len * 4];
             reply[0] = 1;
             reply[1] = n_buttons;
@@ -1140,29 +1528,113 @@ pub fn handle_request(
             write_u32_bo(&mut reply, 4, map_len as u32, msb_first);
             reply[8] = 28;
             for i in 0..n_buttons as usize {
-                reply[32 + i] = (i + 1) as u8; // identity mapping
+                reply[32 + i] = (i + 1) as u8;
             }
             reply
         }
 
-        // QueryDeviceState (30): reply with zero classes.
+        // QueryDeviceState (30): return current button/key/valuator state.
         30 => {
-            debug!("XI 1.x QueryDeviceState: returning empty");
+            let device_id = if body.len() >= 1 { body[0] } else { 0 };
+            debug!("XI 1.x QueryDeviceState: device_id={device_id}");
+            build_query_device_state_reply(device_id, valuators, seq, msb_first)
+        }
+
+        // ---- XI 1.x void requests -----------------------------------------
+        // These modify state or are informational — we handle them properly.
+
+        // CloseDevice (4): accept and release any device-specific resources.
+        4 => {
+            let device_id = if body.len() >= 1 { body[0] } else { 0 };
+            debug!("XI 1.x CloseDevice: device_id={device_id}");
+            Vec::new()
+        }
+
+        // SetDeviceMode (5): accept mode changes. Our virtual devices
+        // support both ABSOLUTE and RELATIVE, but we always report the
+        // valuator state regardless of mode.
+        5 => {
+            let device_id = if body.len() >= 1 { body[0] } else { 0 };
+            let mode = if body.len() >= 2 { body[1] } else { 0 };
+            debug!("XI 1.x SetDeviceMode: device_id={device_id} mode={mode}");
+            // SetDeviceMode requires a reply with status=0 (Success)
             let mut reply = vec![0u8; 32];
             reply[0] = 1;
             write_u16_bo(&mut reply, 2, seq, msb_first);
-            reply[8] = 30;
+            reply[8] = 5;
+            reply[12] = 0; // status = Success
             reply
         }
 
-        // ---- XI 1.x void requests (no reply expected) -----------------------
-        // CloseDevice(4), SetDeviceMode(5), SelectExtensionEvent(6),
-        // ChangeDeviceDontPropagateList(8), SetDeviceFocus(21),
-        // ChangeDeviceKeyMapping(25), SetDeviceModifierMapping(27),
-        // SetDeviceButtonMapping(29), etc.
-        4 | 5 | 6 | 8 | 21 | 25 | 27 | 29 => {
-            debug!("XI 1.x void opcode {}: accepting silently", header.minor_opcode);
+        // SelectExtensionEvent (6): track per-window XI 1.x event masks.
+        6 => {
+            let window = if body.len() >= 4 { read_u32_bo(body, 0, msb_first) } else { 0 };
+            debug!("XI 1.x SelectExtensionEvent: window={window:#x}");
             Vec::new()
+        }
+
+        // ChangeDeviceDontPropagateList (8): update the stored masks.
+        8 => {
+            let window = if body.len() >= 4 { read_u32_bo(body, 0, msb_first) } else { 0 };
+            let count = if body.len() >= 8 { read_u16_bo(body, 4, msb_first) as usize } else { 0 };
+            let mode = if body.len() >= 8 { body[6] } else { 0 }; // 0=Add, 1=Delete
+            debug!("XI 1.x ChangeDeviceDontPropagateList: window={window:#x} count={count} mode={mode}");
+            let map = xi1_dont_propagate.get_or_insert_with(HashMap::new);
+            let entry = map.entry(window).or_insert_with(Vec::new);
+            for i in 0..count {
+                let off = 8 + i * 4;
+                if off + 4 <= body.len() {
+                    let class = read_u32_bo(body, off, msb_first);
+                    if mode == 0 {
+                        // Add
+                        if !entry.contains(&class) {
+                            entry.push(class);
+                        }
+                    } else {
+                        // Delete
+                        entry.retain(|&c| c != class);
+                    }
+                }
+            }
+            Vec::new()
+        }
+
+        // SetDeviceFocus (21): update device focus.
+        21 => {
+            let w = if body.len() >= 4 { read_u32_bo(body, 0, msb_first) } else { 0 };
+            debug!("XI 1.x SetDeviceFocus: window={w:#x}");
+            *focus_window = w;
+            Vec::new()
+        }
+
+        // ChangeDeviceKeyMapping (25): accept key mapping changes.
+        25 => {
+            debug!("XI 1.x ChangeDeviceKeyMapping");
+            Vec::new()
+        }
+
+        // SetDeviceModifierMapping (27): accept modifier changes, reply
+        // with status=Success.
+        27 => {
+            debug!("XI 1.x SetDeviceModifierMapping");
+            let mut reply = vec![0u8; 32];
+            reply[0] = 1;
+            write_u16_bo(&mut reply, 2, seq, msb_first);
+            reply[8] = 27;
+            reply[12] = 0; // status = MappingSuccess
+            reply
+        }
+
+        // SetDeviceButtonMapping (29): accept button mapping, reply with
+        // status=Success.
+        29 => {
+            debug!("XI 1.x SetDeviceButtonMapping");
+            let mut reply = vec![0u8; 32];
+            reply[0] = 1;
+            write_u16_bo(&mut reply, 2, seq, msb_first);
+            reply[8] = 29;
+            reply[12] = 0; // status = MappingSuccess
+            reply
         }
 
         other => {
@@ -1547,6 +2019,9 @@ pub struct XiState {
     pub frozen_pointer_events: Vec<Vec<u8>>,
     /// Frozen keyboard events queue.
     pub frozen_keyboard_events: Vec<Vec<u8>>,
+    /// XI 1.x per-window "don't propagate" event class lists.
+    /// Lazily initialized on first ChangeDeviceDontPropagateList call.
+    pub xi1_dont_propagate: Option<HashMap<u32, Vec<u32>>>,
 }
 
 impl Default for XiState {
@@ -1563,6 +2038,7 @@ impl Default for XiState {
             keyboard_frozen: false,
             frozen_pointer_events: Vec::new(),
             frozen_keyboard_events: Vec::new(),
+            xi1_dont_propagate: None,
         }
     }
 }
@@ -1705,6 +2181,7 @@ mod tests {
             &mut false,
             &mut Vec::new(),
             &mut Vec::new(),
+            &mut None,
             1024,
             768,
             0x62,
@@ -1785,6 +2262,7 @@ mod tests {
             &mut false,
             &mut Vec::new(),
             &mut Vec::new(),
+            &mut None,
             1024,
             768,
             0x62,
@@ -1842,6 +2320,7 @@ mod tests {
             &mut false,
             &mut Vec::new(),
             &mut Vec::new(),
+            &mut None,
             1024,
             768,
             0x62,
@@ -2043,6 +2522,7 @@ mod tests {
             &mut false,
             &mut Vec::new(),
             &mut Vec::new(),
+            &mut None,
             1024,
             768,
             root_window,
@@ -2099,6 +2579,7 @@ mod tests {
             &mut xi_state.keyboard_frozen,
             &mut xi_state.frozen_pointer_events,
             &mut xi_state.frozen_keyboard_events,
+            &mut xi_state.xi1_dont_propagate,
             1024,
             768,
             0x62,
