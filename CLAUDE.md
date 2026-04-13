@@ -6,4 +6,4 @@ This project uses **pnpm** as the JavaScript package manager and **Cargo** for R
 - Use `cargo` for building and managing Rust crates
 - Use `turbo` to run cross-project tasks
 
-Commit regularry as stuff work
+Commit intermittently as stuff work, ensure that stuff works and never commit anything that breaks e2e tests.

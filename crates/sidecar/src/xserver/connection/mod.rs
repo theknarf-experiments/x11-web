@@ -124,6 +124,20 @@ pub(crate) async fn handle_client(
     shared_access_control: super::types::SharedAccessControl,
     shared_security_tokens: super::types::SharedSecurityTokens,
 ) -> io::Result<()> {
+    // Wait for any active GrabServer to be released before processing
+    // the new connection setup.  Per X11 spec, GrabServer blocks ALL
+    // request processing from other clients, including initial connections.
+    {
+        loop {
+            let holder = server_grab.0.lock().await;
+            if holder.is_none() {
+                break;
+            }
+            drop(holder);
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+    }
+
     // Phase 1: Read client setup request
     let mut header_buf = [0u8; 12];
     stream.read_exact(&mut header_buf).await?;
@@ -881,14 +895,14 @@ pub(crate) async fn handle_client(
                 // Server grab check: if another client holds a GrabServer,
                 // wait until it releases before processing our requests.
                 {
-                    let (lock, notify) = &*state.server_grab;
+                    let (lock, _notify) = &*state.server_grab;
                     loop {
                         let holder = lock.lock().await;
                         if holder.is_none() || holder.as_deref() == Some(&state.client_id) {
                             break;
                         }
                         drop(holder);
-                        notify.notified().await;
+                        tokio::time::sleep(Duration::from_millis(5)).await;
                     }
                 }
 
