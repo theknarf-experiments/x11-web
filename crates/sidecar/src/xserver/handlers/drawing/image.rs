@@ -54,6 +54,10 @@ pub(crate) fn handle_put_image(state: &mut ClientState, data: &[u8]) -> Vec<u8> 
         }
     } else if format == 2 && depth == 16 {
         // ZPixmap depth 16: RGB565 packed pixels → BGRA32 framebuffer
+        let gc_func = gc.function;
+        let plane_mask = gc.plane_mask;
+        let has_clip = !gc.clip_rects.is_empty();
+        let clip_rects = gc.clip_rects.clone();
         if let Some(fb) = state.get_framebuffer_mut(drawable) {
             let w = width as usize;
             let h = height as usize;
@@ -63,22 +67,31 @@ pub(crate) fn handle_put_image(state: &mut ClientState, data: &[u8]) -> Vec<u8> 
             let padded_row = (row_bytes + 3) & !3;
             let fb_data = fb.data_mut();
             for row in 0..h {
-                let dy = dst_y as usize + row;
-                if dy >= fb_h { break; }
+                let dy = dst_y as i32 + row as i32;
+                if dy < 0 || dy >= fb_h as i32 { continue; }
                 for col in 0..w {
-                    let dx = dst_x as usize + col;
-                    if dx >= fb_w { continue; }
+                    let dx = dst_x as i32 + col as i32;
+                    if dx < 0 || dx >= fb_w as i32 { continue; }
+                    if has_clip && !should_draw_pixel(dx, dy, &clip_rects) { continue; }
                     let src_off = row * padded_row + col * 2;
                     if src_off + 1 >= pixel_data.len() { continue; }
                     let val = u16::from_le_bytes([pixel_data[src_off], pixel_data[src_off + 1]]);
                     let r = ((val >> 11) & 0x1F) as u8;
                     let g = ((val >> 5) & 0x3F) as u8;
                     let b = (val & 0x1F) as u8;
-                    let fb_off = (dy * fb_w + dx) * 4;
+                    let src_color = ((((r << 3) | (r >> 2)) as u32) << 16)
+                        | ((((g << 2) | (g >> 4)) as u32) << 8)
+                        | (((b << 3) | (b >> 2)) as u32);
+                    let fb_off = (dy as usize * fb_w + dx as usize) * 4;
                     if fb_off + 3 < fb_data.len() {
-                        fb_data[fb_off] = (b << 3) | (b >> 2);
-                        fb_data[fb_off + 1] = (g << 2) | (g >> 4);
-                        fb_data[fb_off + 2] = (r << 3) | (r >> 2);
+                        let dst_color = (fb_data[fb_off + 2] as u32) << 16
+                            | (fb_data[fb_off + 1] as u32) << 8
+                            | fb_data[fb_off] as u32;
+                        let result = apply_rop(gc_func, src_color, dst_color);
+                        let masked = (result & plane_mask) | (dst_color & !plane_mask);
+                        fb_data[fb_off] = (masked & 0xFF) as u8;
+                        fb_data[fb_off + 1] = ((masked >> 8) & 0xFF) as u8;
+                        fb_data[fb_off + 2] = ((masked >> 16) & 0xFF) as u8;
                         fb_data[fb_off + 3] = 0xFF;
                     }
                 }
@@ -108,6 +121,10 @@ pub(crate) fn handle_put_image(state: &mut ClientState, data: &[u8]) -> Vec<u8> 
             }
         }
 
+        let gc_func = gc.function;
+        let plane_mask = gc.plane_mask;
+        let has_clip = !gc.clip_rects.is_empty();
+        let clip_rects = gc.clip_rects.clone();
         if let Some(fb) = state.get_framebuffer_mut(drawable) {
             let w = width as usize;
             let h = height as usize;
@@ -116,23 +133,39 @@ pub(crate) fn handle_put_image(state: &mut ClientState, data: &[u8]) -> Vec<u8> 
             let padded_row = (w + 3) & !3;
             let fb_data = fb.data_mut();
             for row in 0..h {
-                let dy = dst_y as usize + row;
-                if dy >= fb_h { break; }
+                let dy = dst_y as i32 + row as i32;
+                if dy < 0 || dy >= fb_h as i32 { continue; }
                 for col in 0..w {
-                    let dx = dst_x as usize + col;
-                    if dx >= fb_w { continue; }
+                    let dx = dst_x as i32 + col as i32;
+                    if dx < 0 || dx >= fb_w as i32 { continue; }
+                    if has_clip && !should_draw_pixel(dx, dy, &clip_rects) { continue; }
                     let src_off = row * padded_row + col;
                     if src_off >= pixel_data.len() { continue; }
                     let idx = pixel_data[src_off] as usize;
-                    let fb_off = (dy * fb_w + dx) * 4;
+                    let pixel = &lut[idx];
+                    let src_color = (pixel[2] as u32) << 16 | (pixel[1] as u32) << 8 | pixel[0] as u32;
+                    let fb_off = (dy as usize * fb_w + dx as usize) * 4;
                     if fb_off + 3 < fb_data.len() {
-                        fb_data[fb_off..fb_off + 4].copy_from_slice(&lut[idx]);
+                        let dst_color = (fb_data[fb_off + 2] as u32) << 16
+                            | (fb_data[fb_off + 1] as u32) << 8
+                            | fb_data[fb_off] as u32;
+                        let result = apply_rop(gc_func, src_color, dst_color);
+                        let masked = (result & plane_mask) | (dst_color & !plane_mask);
+                        fb_data[fb_off] = (masked & 0xFF) as u8;
+                        fb_data[fb_off + 1] = ((masked >> 8) & 0xFF) as u8;
+                        fb_data[fb_off + 2] = ((masked >> 16) & 0xFF) as u8;
+                        // Preserve colormap index in alpha channel for GetImage
+                        fb_data[fb_off + 3] = pixel[3];
                     }
                 }
             }
         }
     } else if format == 2 && depth == 4 {
         // ZPixmap depth 4: nibble-packed pixels
+        let gc_func = gc.function;
+        let plane_mask = gc.plane_mask;
+        let has_clip = !gc.clip_rects.is_empty();
+        let clip_rects = gc.clip_rects.clone();
         if let Some(fb) = state.get_framebuffer_mut(drawable) {
             let w = width as usize;
             let h = height as usize;
@@ -142,11 +175,12 @@ pub(crate) fn handle_put_image(state: &mut ClientState, data: &[u8]) -> Vec<u8> 
             let padded_row = (row_bytes + 3) & !3;
             let fb_data = fb.data_mut();
             for row in 0..h {
-                let dy = dst_y as usize + row;
-                if dy >= fb_h { break; }
+                let dy = dst_y as i32 + row as i32;
+                if dy < 0 || dy >= fb_h as i32 { continue; }
                 for col in 0..w {
-                    let dx = dst_x as usize + col;
-                    if dx >= fb_w { continue; }
+                    let dx = dst_x as i32 + col as i32;
+                    if dx < 0 || dx >= fb_w as i32 { continue; }
+                    if has_clip && !should_draw_pixel(dx, dy, &clip_rects) { continue; }
                     let byte_off = row * padded_row + col / 2;
                     if byte_off >= pixel_data.len() { continue; }
                     let nibble = if col % 2 == 0 {
@@ -156,11 +190,17 @@ pub(crate) fn handle_put_image(state: &mut ClientState, data: &[u8]) -> Vec<u8> 
                     };
                     // Scale 4-bit to 8-bit grayscale
                     let v = nibble | (nibble << 4);
-                    let fb_off = (dy * fb_w + dx) * 4;
+                    let src_color = (v as u32) << 16 | (v as u32) << 8 | v as u32;
+                    let fb_off = (dy as usize * fb_w + dx as usize) * 4;
                     if fb_off + 3 < fb_data.len() {
-                        fb_data[fb_off] = v;
-                        fb_data[fb_off + 1] = v;
-                        fb_data[fb_off + 2] = v;
+                        let dst_color = (fb_data[fb_off + 2] as u32) << 16
+                            | (fb_data[fb_off + 1] as u32) << 8
+                            | fb_data[fb_off] as u32;
+                        let result = apply_rop(gc_func, src_color, dst_color);
+                        let masked = (result & plane_mask) | (dst_color & !plane_mask);
+                        fb_data[fb_off] = (masked & 0xFF) as u8;
+                        fb_data[fb_off + 1] = ((masked >> 8) & 0xFF) as u8;
+                        fb_data[fb_off + 2] = ((masked >> 16) & 0xFF) as u8;
                         fb_data[fb_off + 3] = 0xFF;
                     }
                 }

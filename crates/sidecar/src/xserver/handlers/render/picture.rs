@@ -264,6 +264,49 @@ pub(crate) fn handle_create_picture(state: &mut ClientState, data: &[u8], seq: u
         "Render CreatePicture: pid={pid:#x} drawable={drawable:#x} format={format_id:#x} vmask={value_mask:#x}"
     );
 
+    // Validate drawable exists (BadDrawable if not)
+    let drawable_depth: u8 = if state.windows.contains_key(&drawable) {
+        // Windows use the root visual depth (24-bit TrueColor stored as 32bpp)
+        24
+    } else if let Some(p) = state.pixmaps.get(&drawable) {
+        p.depth
+    } else {
+        return crate::xserver::core::build_error_bo(
+            crate::xserver::core::BAD_DRAWABLE, seq, drawable, 139, data[1] as u16, bo,
+        );
+    };
+
+    // Validate format ID is known
+    let format_depth: u8 = match format_id {
+        PICTFORMAT_ARGB32 | PICTFORMAT_XRGB32 | PICTFORMAT_XBGR32 => 32,
+        PICTFORMAT_RGB24 => 24,
+        PICTFORMAT_A8 => 8,
+        PICTFORMAT_A1 => 1,
+        _ => {
+            return crate::xserver::core::build_error_bo(
+                crate::xserver::core::BAD_MATCH, seq, format_id, 139, data[1] as u16, bo,
+            );
+        }
+    };
+
+    // Validate format depth matches drawable depth (BadMatch if not).
+    // Allow 32-bit formats on 24-bit drawables (common practice — GTK/Qt
+    // routinely create ARGB32 pictures on depth-24 windows) and 24-bit
+    // formats on 32-bit drawables.
+    let depth_compatible = match (format_depth, drawable_depth) {
+        (fd, dd) if fd == dd => true,
+        (32, 24) | (24, 32) => true,
+        _ => false,
+    };
+    if !depth_compatible {
+        debug!(
+            "CreatePicture: format depth {format_depth} incompatible with drawable depth {drawable_depth}"
+        );
+        return crate::xserver::core::build_error_bo(
+            crate::xserver::core::BAD_MATCH, seq, format_id, 139, data[1] as u16, bo,
+        );
+    }
+
     let mut repeat = 0u32;
     let mut component_alpha = false;
     let mut clip_mask: Option<u32> = None;

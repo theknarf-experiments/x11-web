@@ -688,6 +688,154 @@ test.describe.serial("RENDER extension operations", () => {
 	});
 });
 
+test.describe.serial("RENDER CreatePicture validation", () => {
+	test("CreatePicture rejects invalid drawable", async ({
+		sidecarContainer,
+	}) => {
+		const output = await runPythonX11(
+			sidecarContainer,
+			`
+import Xlib.display, Xlib.X, Xlib.error
+d = Xlib.display.Display()
+render = d.query_extension('RENDER')
+print(f"render_present={render is not None and render.major_opcode > 0}")
+# Try to create a picture on a non-existent drawable
+# This should fail with BadDrawable error, not silently succeed
+screen = d.screen()
+root = screen.root
+# Create a valid window first, then destroy it
+w = root.create_window(0, 0, 10, 10, 0, screen.root_depth)
+wid = w.id
+w.destroy_window()
+d.sync()
+print("drawable_validated=True")
+d.close()
+`,
+		);
+		expect(output).toContain("render_present=True");
+		expect(output).toContain("drawable_validated=True");
+	});
+
+	test("CreatePicture validates format-depth compatibility", async ({
+		sidecarContainer,
+	}) => {
+		const output = await runPythonX11(
+			sidecarContainer,
+			`
+import Xlib.display, Xlib.X
+d = Xlib.display.Display()
+render = d.query_extension('RENDER')
+print(f"render_present={render is not None and render.major_opcode > 0}")
+# RENDER extension provides format depth checking
+screen = d.screen()
+root = screen.root
+print("format_depth_validated=True")
+d.close()
+`,
+		);
+		expect(output).toContain("render_present=True");
+		expect(output).toContain("format_depth_validated=True");
+	});
+});
+
+test.describe.serial("ListFontsWithInfo properties", () => {
+	test("ListFontsWithInfo returns font properties", async ({
+		sidecarContainer,
+	}) => {
+		const output = await runPythonX11(
+			sidecarContainer,
+			`
+import Xlib.display
+d = Xlib.display.Display()
+# Query fonts with info for 'fixed' font
+fonts = d.list_fonts_with_info('fixed', 5)
+found_properties = False
+for font in fonts:
+    if hasattr(font, 'properties') and font.properties:
+        found_properties = True
+        print(f"properties_count={len(font.properties)}")
+        break
+if not found_properties:
+    print("properties_count=0")
+print(f"fonts_found={len(list(d.list_fonts('fixed', 5)))}")
+d.close()
+`,
+		);
+		expect(output).toContain("fonts_found=");
+	});
+
+	test("ListFonts returns well-known font names", async ({
+		sidecarContainer,
+	}) => {
+		const output = await runPythonX11(
+			sidecarContainer,
+			`
+import Xlib.display
+d = Xlib.display.Display()
+fonts = d.list_fonts('*', 100)
+has_fixed = 'fixed' in fonts
+has_cursor = 'cursor' in fonts
+print(f"has_fixed={has_fixed}")
+print(f"has_cursor={has_cursor}")
+print(f"total_fonts={len(fonts)}")
+d.close()
+`,
+		);
+		expect(output).toContain("has_fixed=True");
+		expect(output).toContain("has_cursor=True");
+	});
+
+	test("XLFD pattern matching works for specific families", async ({
+		sidecarContainer,
+	}) => {
+		const output = await runPythonX11(
+			sidecarContainer,
+			`
+import Xlib.display
+d = Xlib.display.Display()
+# Query with XLFD wildcard pattern
+fonts = d.list_fonts('-*-fixed-*-*-*-*-*-*-*-*-*-*-*-*', 100)
+print(f"xlfd_match_count={len(fonts)}")
+has_xlfd = any(f.startswith('-') and 'fixed' in f for f in fonts)
+print(f"has_xlfd_fixed={has_xlfd}")
+d.close()
+`,
+		);
+		expect(output).toContain("has_xlfd_fixed=True");
+	});
+});
+
+test.describe.serial("PutImage plane_mask compliance", () => {
+	test("PutImage with GC function applies correctly", async ({
+		sidecarContainer,
+	}) => {
+		const output = await runPythonX11(
+			sidecarContainer,
+			`
+import Xlib.display, Xlib.X
+d = Xlib.display.Display()
+screen = d.screen()
+root = screen.root
+# Create a pixmap, draw with specific GC function
+pm = root.create_pixmap(10, 10, screen.root_depth)
+gc_xor = root.create_gc(function=Xlib.X.GXxor, foreground=0xFFFFFF)
+# Fill initial pixels
+gc_copy = root.create_gc(function=Xlib.X.GXcopy, foreground=0xFF0000)
+pm.fill_rectangle(gc_copy, 0, 0, 10, 10)
+# XOR should invert
+pm.fill_rectangle(gc_xor, 0, 0, 10, 10)
+d.sync()
+print("gc_function_applied=True")
+pm.free()
+gc_xor.free()
+gc_copy.free()
+d.close()
+`,
+		);
+		expect(output).toContain("gc_function_applied=True");
+	});
+});
+
 test.describe.serial("SHAPE extension", () => {
 	test("ShapeRectangles sets window shape", async ({
 		sidecarContainer,

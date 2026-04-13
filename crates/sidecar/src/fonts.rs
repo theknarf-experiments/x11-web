@@ -851,6 +851,9 @@ impl FontManager {
     /// List font names matching an XLFD pattern.
     /// Supports wildcards: `*` matches any sequence, `?` matches any single
     /// character.  Returns at most `max_names` results.
+    ///
+    /// When the pattern is a full XLFD with a specific pixel size field,
+    /// virtual font names are generated from scalable fonts at that size.
     pub fn list_fonts(&self, pattern: &str, max_names: u16) -> Vec<String> {
         // Well-known names that we always advertise, even when no BDF files
         // are loaded.  Sorted so output is deterministic.
@@ -870,6 +873,20 @@ impl FontManager {
                 return true;
             }
             glob_match(&pat, &name.to_lowercase())
+        };
+
+        // Extract requested pixel size from XLFD pattern for scalable font synthesis.
+        // XLFD: -foundry-family-weight-slant-setwidth--pixelSize-pointSize-...
+        // Field index 7 (0-indexed, first empty field before foundry is index 0).
+        let requested_size = if pat.starts_with('-') {
+            let fields: Vec<&str> = pat.split('-').collect();
+            if fields.len() > 7 {
+                fields[7].parse::<u32>().ok().filter(|&s| s > 0)
+            } else {
+                None
+            }
+        } else {
+            None
         };
 
         // Collect matching names from loaded fonts + well-known, de-dup.
@@ -898,11 +915,21 @@ impl FontManager {
             }
         }
 
-        // Include discovered scalable fonts.
-        let mut sf_names: Vec<String> = self.scalable_fonts
-            .iter()
-            .map(|sf| sf.xlfd_name.to_lowercase())
-            .collect();
+        // Include discovered scalable fonts — both at their native sizes and
+        // at the specifically requested pixel size (if the XLFD pattern
+        // specifies one).  This allows apps like xfontsel to discover
+        // scalable fonts at arbitrary sizes.
+        let mut sf_names: Vec<String> = Vec::new();
+        for sf in &self.scalable_fonts {
+            sf_names.push(sf.xlfd_name.to_lowercase());
+            // Generate a virtual XLFD at the requested pixel size
+            if let Some(size) = requested_size {
+                if sf.pixel_size != size {
+                    let virtual_xlfd = build_xlfd(&sf.family, &sf.style, size);
+                    sf_names.push(virtual_xlfd.to_lowercase());
+                }
+            }
+        }
         sf_names.sort();
         sf_names.dedup();
         for name in sf_names {
@@ -1732,5 +1759,81 @@ mod tests {
         }
         debug!("Foreground pixels: {}", fg_count);
         assert!(fg_count > 0, "Rendered H should have foreground pixels");
+    }
+
+    // -----------------------------------------------------------------------
+    // glob_match tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn glob_match_exact() {
+        assert!(glob_match("hello", "hello"));
+        assert!(!glob_match("hello", "world"));
+    }
+
+    #[test]
+    fn glob_match_star() {
+        assert!(glob_match("*", "anything"));
+        assert!(glob_match("hel*", "hello"));
+        assert!(glob_match("*llo", "hello"));
+        assert!(glob_match("h*o", "hello"));
+        assert!(!glob_match("h*x", "hello"));
+    }
+
+    #[test]
+    fn glob_match_question() {
+        assert!(glob_match("h?llo", "hello"));
+        assert!(!glob_match("h?lo", "hello"));
+    }
+
+    #[test]
+    fn glob_match_xlfd_pattern() {
+        // Standard XLFD: 14 hyphen-separated fields
+        let font = "-misc-fixed-medium-r-semicondensed--13-120-75-75-c-60-iso8859-1";
+        assert!(glob_match("-misc-fixed-*-*-*-*-*-*-*-*-*-*-*-*", font));
+        assert!(glob_match("-*-fixed-*-*-*-*-13-*-*-*-*-*-*-*", font));
+        assert!(glob_match("-*-*-*-*-*-*-*-*-*-*-*-*-iso8859-1", font));
+        assert!(!glob_match("-*-helvetica-*-*-*-*-*-*-*-*-*-*-*-*", font));
+    }
+
+    #[test]
+    fn glob_match_xlfd_pixel_size() {
+        let font = "-misc-fixed-medium-r-semicondensed--13-120-75-75-c-60-iso8859-1";
+        // Specific pixel size
+        assert!(glob_match("-*-*-*-*-*-*-13-*-*-*-*-*-*-*", font));
+        assert!(!glob_match("-*-*-*-*-*-*-12-*-*-*-*-*-*-*", font));
+    }
+
+    // -----------------------------------------------------------------------
+    // list_fonts tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn list_fonts_wildcard_returns_well_known() {
+        let fm = FontManager::new();
+        let result = fm.list_fonts("*", 100);
+        assert!(result.contains(&"fixed".to_string()));
+        assert!(result.contains(&"cursor".to_string()));
+    }
+
+    #[test]
+    fn list_fonts_max_names_limit() {
+        let fm = FontManager::new();
+        let result = fm.list_fonts("*", 2);
+        assert!(result.len() <= 2);
+    }
+
+    #[test]
+    fn list_fonts_specific_pattern() {
+        let fm = FontManager::new();
+        let result = fm.list_fonts("fixed", 10);
+        assert!(result.contains(&"fixed".to_string()));
+    }
+
+    #[test]
+    fn list_fonts_no_match() {
+        let fm = FontManager::new();
+        let result = fm.list_fonts("nonexistent-font-xyz", 10);
+        assert!(result.is_empty());
     }
 }

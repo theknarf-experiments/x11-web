@@ -104,3 +104,161 @@ pub(crate) fn intersect_rects(
         (0, 0, 0, 0)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // -----------------------------------------------------------------------
+    // apply_rop — all 16 GC raster functions
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn rop_gx_clear() {
+        assert_eq!(apply_rop(0, 0xFF00FF, 0x00FF00), 0);
+    }
+
+    #[test]
+    fn rop_gx_and() {
+        assert_eq!(apply_rop(1, 0xFF00FF, 0x00FF00), 0x000000);
+        assert_eq!(apply_rop(1, 0xFFFFFF, 0x123456), 0x123456);
+    }
+
+    #[test]
+    fn rop_gx_and_reverse() {
+        assert_eq!(apply_rop(2, 0xFF0000, 0x00FF00), 0xFF0000);
+    }
+
+    #[test]
+    fn rop_gx_copy() {
+        assert_eq!(apply_rop(3, 0xABCDEF, 0x000000), 0xABCDEF);
+    }
+
+    #[test]
+    fn rop_gx_and_inverted() {
+        assert_eq!(apply_rop(4, 0xFF0000, 0x00FF00), 0x00FF00);
+    }
+
+    #[test]
+    fn rop_gx_noop() {
+        assert_eq!(apply_rop(5, 0xABCDEF, 0x123456), 0x123456);
+    }
+
+    #[test]
+    fn rop_gx_xor() {
+        assert_eq!(apply_rop(6, 0xFF00FF, 0x00FF00), 0xFFFFFF);
+    }
+
+    #[test]
+    fn rop_gx_or() {
+        assert_eq!(apply_rop(7, 0xFF0000, 0x00FF00), 0xFFFF00);
+    }
+
+    #[test]
+    fn rop_gx_nor() {
+        // !(0xFF0000 | 0x00FF00) = !0xFFFF00 = 0xFF0000FF (we only care about low 24 bits)
+        let result = apply_rop(8, 0xFF0000, 0x00FF00);
+        assert_eq!(result & 0x00FFFFFF, 0x0000FF);
+    }
+
+    #[test]
+    fn rop_gx_equiv() {
+        // !(src ^ dst) = !(0xFF0000 ^ 0x00FF00) = !0xFFFF00
+        let result = apply_rop(9, 0xFF0000, 0x00FF00);
+        assert_eq!(result & 0x00FFFFFF, 0x0000FF);
+    }
+
+    #[test]
+    fn rop_gx_invert() {
+        let result = apply_rop(10, 0x000000, 0x00FF00);
+        assert_eq!(result & 0x00FFFFFF, 0xFF00FF);
+    }
+
+    #[test]
+    fn rop_gx_or_reverse() {
+        assert_eq!(apply_rop(11, 0xFF0000, 0x000000) & 0x00FFFFFF, 0xFFFFFF);
+    }
+
+    #[test]
+    fn rop_gx_copy_inverted() {
+        let result = apply_rop(12, 0xFF0000, 0x000000);
+        assert_eq!(result & 0x00FFFFFF, 0x00FFFF);
+    }
+
+    #[test]
+    fn rop_gx_or_inverted() {
+        // !src | dst = !0xFF0000 | 0x00FF00
+        let result = apply_rop(13, 0xFF0000, 0x00FF00);
+        assert_eq!(result & 0x00FFFFFF, 0x00FFFF);
+    }
+
+    #[test]
+    fn rop_gx_nand() {
+        let result = apply_rop(14, 0xFFFFFF, 0xFFFFFF);
+        assert_eq!(result & 0x00FFFFFF, 0x000000);
+    }
+
+    #[test]
+    fn rop_gx_set() {
+        assert_eq!(apply_rop(15, 0, 0), 0xFFFFFFFF);
+    }
+
+    // -----------------------------------------------------------------------
+    // intersect_rects
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn intersect_rects_overlap() {
+        let (x, y, w, h) = intersect_rects(0, 0, 10, 10, 5, 5, 10, 10);
+        assert_eq!((x, y, w, h), (5, 5, 5, 5));
+    }
+
+    #[test]
+    fn intersect_rects_no_overlap() {
+        let (_, _, w, h) = intersect_rects(0, 0, 5, 5, 10, 10, 5, 5);
+        assert_eq!((w, h), (0, 0));
+    }
+
+    #[test]
+    fn intersect_rects_contained() {
+        let (x, y, w, h) = intersect_rects(0, 0, 20, 20, 5, 5, 5, 5);
+        assert_eq!((x, y, w, h), (5, 5, 5, 5));
+    }
+
+    // -----------------------------------------------------------------------
+    // should_draw_pixel
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn should_draw_pixel_empty_clips() {
+        assert!(should_draw_pixel(0, 0, &[]));
+    }
+
+    #[test]
+    fn should_draw_pixel_inside_clip() {
+        let clips = vec![(0i16, 0i16, 10u16, 10u16)];
+        assert!(should_draw_pixel(5, 5, &clips));
+    }
+
+    #[test]
+    fn should_draw_pixel_outside_clip() {
+        let clips = vec![(0i16, 0i16, 10u16, 10u16)];
+        assert!(!should_draw_pixel(15, 15, &clips));
+    }
+
+    // -----------------------------------------------------------------------
+    // plane_mask application
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn plane_mask_preserves_masked_bits() {
+        let src = 0xFFFFFF;
+        let dst = 0x123456;
+        let plane_mask: u32 = 0xFF0000; // only red channel
+        let result = apply_rop(3, src, dst); // GXcopy
+        let masked = (result & plane_mask) | (dst & !plane_mask);
+        assert_eq!(masked & 0xFF0000, 0xFF0000); // red from src
+        assert_eq!(masked & 0x00FF00, 0x003400); // green from dst
+        assert_eq!(masked & 0x0000FF, 0x000056); // blue from dst
+    }
+}

@@ -367,9 +367,33 @@ pub(crate) fn handle_list_fonts_with_info(state: &mut ClientState, data: &[u8], 
         // Try to get font info for this name
         let font = state.font_manager.get_font_by_name(name);
 
-        let n_properties: u16 = 0;
+        // Build font properties (same as QueryFont) when font data is available
+        let props: Vec<(u32, i32)> = if let Some(f) = &font {
+            let pixel_size = (f.font_ascent + f.font_descent) as i32;
+            let point_size = pixel_size * 10;
+            let char_width = f.max_bounds.character_width as i32;
+            let prop_defs: Vec<(&str, i32)> = vec![
+                ("PIXEL_SIZE", pixel_size),
+                ("POINT_SIZE", point_size),
+                ("RESOLUTION_X", 75),
+                ("RESOLUTION_Y", 75),
+                ("WEIGHT", 10),
+                ("X_HEIGHT", (f.font_ascent as i32 * 2) / 3),
+                ("QUAD_WIDTH", char_width),
+            ];
+            let mut atoms = state.atoms.lock().unwrap();
+            prop_defs
+                .iter()
+                .map(|(pname, val)| (atoms.intern(pname, false), *val))
+                .collect()
+        } else {
+            Vec::new()
+        };
+        let n_properties = props.len() as u16;
+        let props_bytes = props.len() * 8; // each FONTPROP is 8 bytes
+
         let name_pad = (4 - (name_len % 4)) % 4;
-        let extra = n_properties as usize * 8 + name_len + name_pad;
+        let extra = props_bytes + name_len + name_pad;
         let reply_len_units = (extra / 4) as u32 + 7; // 7 for the 28 bytes after header
 
         let total = 32 + 28 + extra;
@@ -379,7 +403,7 @@ pub(crate) fn handle_list_fonts_with_info(state: &mut ClientState, data: &[u8], 
         state.write_u16(&mut reply, 2, seq);
         state.write_u32(&mut reply, 4, reply_len_units);
 
-        if let Some(f) = font {
+        if let Some(f) = &font {
             // min_bounds at offset 8
             state.write_i16(&mut reply, 8, f.min_bounds.left_side_bearing);
             state.write_i16(&mut reply, 10, f.min_bounds.right_side_bearing);
@@ -407,8 +431,16 @@ pub(crate) fn handle_list_fonts_with_info(state: &mut ClientState, data: &[u8], 
         let replies_remaining = (remaining as usize - i - 1) as u32;
         state.write_u32(&mut reply, 56, replies_remaining);
 
+        // Font properties at offset 60 (each FONTPROP = 4-byte atom + 4-byte value)
+        let mut off = 60;
+        for (atom, value) in &props {
+            state.write_u32(&mut reply, off, *atom);
+            state.write_u32(&mut reply, off + 4, *value as u32);
+            off += 8;
+        }
+
         // Name after properties
-        let name_off = 60 + n_properties as usize * 8;
+        let name_off = 60 + props_bytes;
         if name_off + name_len <= reply.len() {
             reply[name_off..name_off + name_len].copy_from_slice(&name_bytes[..name_len]);
         }
