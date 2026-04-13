@@ -410,4 +410,55 @@ mod tests {
         assert_eq!(g, 0xBBBB); // unchanged
         assert_eq!(b, 0xCCCC); // unchanged
     }
+
+    #[test]
+    fn alloc_cells_contiguous_basic() {
+        let mut cmap = ColormapState::new_pseudocolor(0x23, 256);
+        let cells = cmap.alloc_cells_contiguous(4).unwrap();
+        assert_eq!(cells.len(), 4);
+        // Cells must be consecutive
+        for i in 1..cells.len() {
+            assert_eq!(cells[i], cells[i - 1] + 1);
+        }
+    }
+
+    #[test]
+    fn alloc_cells_contiguous_with_gaps() {
+        let mut cmap = ColormapState::new_pseudocolor(0x23, 16);
+        // Allocate and free some cells to create gaps
+        let first = cmap.alloc_cells(3).unwrap(); // 0, 1, 2
+        let _second = cmap.alloc_cells(2).unwrap(); // 3, 4
+        cmap.free_cells(&first); // Free 0, 1, 2
+        // Now cells 0,1,2 are free, 3,4 are allocated, 5+ are free
+        // Ask for 4 contiguous: should skip 0-2 (only 3 free) and find 5-8
+        let contig = cmap.alloc_cells_contiguous(4).unwrap();
+        assert_eq!(contig.len(), 4);
+        assert_eq!(contig[0], 5);
+        assert_eq!(contig[3], 8);
+    }
+
+    #[test]
+    fn alloc_cells_contiguous_fails_when_not_enough() {
+        let mut cmap = ColormapState::new_pseudocolor(0x23, 8);
+        // Allocate every other cell to fragment the space
+        cmap.allocated[0] = true;
+        cmap.allocated[2] = true;
+        cmap.allocated[4] = true;
+        cmap.allocated[6] = true;
+        // Now free cells are 1, 3, 5, 7 — no contiguous run of 2
+        assert!(cmap.alloc_cells_contiguous(2).is_none());
+    }
+
+    #[test]
+    fn alloc_cells_contiguous_empty() {
+        let mut cmap = ColormapState::new_pseudocolor(0x23, 256);
+        let cells = cmap.alloc_cells_contiguous(0).unwrap();
+        assert_eq!(cells.len(), 0);
+    }
+
+    #[test]
+    fn alloc_cells_contiguous_readonly_fails() {
+        let mut cmap = ColormapState::new_truecolor(0x21);
+        assert!(cmap.alloc_cells_contiguous(1).is_none());
+    }
 }

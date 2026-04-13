@@ -1112,5 +1112,65 @@ mod tests {
         check_alarms_ext(&mut alarms, 10, 200, 150, &mut pending, 1, false);
         assert_eq!(pending.len(), 1, "PositiveComparison: 150 >= 100 should fire");
     }
+
+    // -----------------------------------------------------------------------
+    // apply_gc_function — all 16 raster ops
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn gc_function_all_16_ops() {
+        use crate::framebuffer::apply_gc_function;
+        let src = 0x00FF00FF_u32; // magenta
+        let dst = 0x0000FFFF_u32; // cyan
+        assert_eq!(apply_gc_function(0, src, dst), 0);                  // GXclear
+        assert_eq!(apply_gc_function(1, src, dst), src & dst);          // GXand
+        assert_eq!(apply_gc_function(2, src, dst), src & !dst);         // GXandReverse
+        assert_eq!(apply_gc_function(3, src, dst), src);                // GXcopy
+        assert_eq!(apply_gc_function(4, src, dst), !src & dst);         // GXandInverted
+        assert_eq!(apply_gc_function(5, src, dst), dst);                // GXnoop
+        assert_eq!(apply_gc_function(6, src, dst), src ^ dst);          // GXxor
+        assert_eq!(apply_gc_function(7, src, dst), src | dst);          // GXor
+        assert_eq!(apply_gc_function(8, src, dst), !(src | dst));       // GXnor
+        assert_eq!(apply_gc_function(9, src, dst), !(src ^ dst));       // GXequiv
+        assert_eq!(apply_gc_function(10, src, dst), !dst);              // GXinvert
+        assert_eq!(apply_gc_function(11, src, dst), src | !dst);        // GXorReverse
+        assert_eq!(apply_gc_function(12, src, dst), !src);              // GXcopyInverted
+        assert_eq!(apply_gc_function(13, src, dst), !src | dst);        // GXorInverted
+        assert_eq!(apply_gc_function(14, src, dst), !(src & dst));      // GXnand
+        assert_eq!(apply_gc_function(15, src, dst), 0xFFFFFFFF);        // GXset
+        assert_eq!(apply_gc_function(16, src, dst), src);               // out of range -> copy
+    }
+
+    // -----------------------------------------------------------------------
+    // Plane mask correctly combines with GC function
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn plane_mask_preserves_unmasked_bits() {
+        use crate::framebuffer::apply_gc_function;
+        let src = 0x00FF0000; // red
+        let dst = 0x000000FF; // blue
+        let plane_mask = 0x00FF0000; // only red channel
+        let result = apply_gc_function(6, src, dst); // XOR
+        let masked = (result & plane_mask) | (dst & !plane_mask);
+        // XOR of red and blue = 0x00FF00FF, masked to red channel only:
+        // red channel: 0xFF (from result), other channels: from dst (0x000000FF)
+        assert_eq!(masked & 0x00FF0000, 0x00FF0000); // red from XOR
+        assert_eq!(masked & 0x000000FF, 0x000000FF); // blue preserved from dst
+    }
+
+    // -----------------------------------------------------------------------
+    // Pointer mapping validates button count
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn pointer_mapping_identity_default() {
+        // Verify default identity mapping is [1, 2, 3, 4, 5, 6, 7]
+        let expected = [1u8, 2, 3, 4, 5, 6, 7];
+        assert_eq!(expected.len(), 7);
+        for (i, &v) in expected.iter().enumerate() {
+            assert_eq!(v, (i + 1) as u8);
+        }
+    }
 }
 

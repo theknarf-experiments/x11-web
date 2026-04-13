@@ -1271,4 +1271,74 @@ mod tests {
         gs.server_grab_count -= 1;
         assert_eq!(gs.server_grab_count, 0);
     }
+
+    // -----------------------------------------------------------------------
+    // Passive grab data structures
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn passive_button_grab_stores_all_fields() {
+        let grab = PassiveButtonGrab {
+            grab_window: 0x100,
+            button: 1,
+            modifiers: 0x8000, // AnyModifier
+            event_mask: 0x04,
+            pointer_mode: 1, // Async
+            keyboard_mode: 1, // Async
+            confine_to: 0,
+            cursor: 0,
+            owner_events: true,
+        };
+        assert_eq!(grab.grab_window, 0x100);
+        assert_eq!(grab.button, 1);
+        assert_eq!(grab.modifiers, 0x8000);
+        assert!(grab.owner_events);
+    }
+
+    #[test]
+    fn passive_key_grab_stores_all_fields() {
+        let grab = PassiveKeyGrab {
+            grab_window: 0x200,
+            key: 0, // AnyKey
+            modifiers: 0x01, // Shift
+            pointer_mode: 0, // Sync
+            keyboard_mode: 1, // Async
+            owner_events: false,
+        };
+        assert_eq!(grab.grab_window, 0x200);
+        assert_eq!(grab.key, 0);
+        assert_eq!(grab.modifiers, 0x01);
+        assert!(!grab.owner_events);
+    }
+
+    #[test]
+    fn grab_button_lifo_ordering() {
+        let mut gs = make_grab_state();
+        // Insert two button grabs with different modifiers
+        gs.button_grabs.insert(0, PassiveButtonGrab {
+            grab_window: 0x100,
+            button: 1,
+            modifiers: 0,
+            event_mask: 0x04,
+            pointer_mode: 1,
+            keyboard_mode: 1,
+            confine_to: 0,
+            cursor: 0,
+            owner_events: false,
+        });
+        gs.button_grabs.insert(0, PassiveButtonGrab {
+            grab_window: 0x100,
+            button: 1,
+            modifiers: 0x01, // Shift
+            event_mask: 0x04,
+            pointer_mode: 1,
+            keyboard_mode: 1,
+            confine_to: 0,
+            cursor: 0,
+            owner_events: false,
+        });
+        // LIFO: most recently inserted should be at front
+        assert_eq!(gs.button_grabs[0].modifiers, 0x01);
+        assert_eq!(gs.button_grabs[1].modifiers, 0);
+    }
 }

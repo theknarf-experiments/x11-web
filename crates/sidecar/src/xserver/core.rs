@@ -738,4 +738,37 @@ mod tests {
         assert_eq!(depth_for_visual(0xFF), 24);
         assert_eq!(depth_for_visual(0x99), 24);
     }
+
+    // -----------------------------------------------------------------------
+    // build_error — validates X11 error packet format
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn build_error_format() {
+        let err = build_error(BAD_WINDOW, 42, 0x12345678, 12, 0);
+        assert_eq!(err.len(), 32);
+        assert_eq!(err[0], 0); // Error indicator
+        assert_eq!(err[1], BAD_WINDOW); // Error code
+        assert_eq!(u16::from_le_bytes([err[2], err[3]]), 42); // Sequence
+        assert_eq!(u32::from_le_bytes([err[4], err[5], err[6], err[7]]), 0x12345678); // Bad value
+        assert_eq!(err[10], 12); // Major opcode
+    }
+
+    #[test]
+    fn build_error_bad_length() {
+        let err = build_error(BAD_LENGTH, 100, 0, 28, 0);
+        assert_eq!(err[1], BAD_LENGTH);
+        assert_eq!(u16::from_le_bytes([err[2], err[3]]), 100);
+        assert_eq!(err[10], 28);
+    }
+
+    #[test]
+    fn build_error_bo_big_endian() {
+        let err = build_error_bo(BAD_VALUE, 0x1234, 0xDEADBEEF, 33, 0, true);
+        assert_eq!(err.len(), 32);
+        assert_eq!(err[0], 0); // Error indicator
+        assert_eq!(err[1], BAD_VALUE);
+        assert_eq!(u16::from_be_bytes([err[2], err[3]]), 0x1234); // Sequence (big-endian)
+        assert_eq!(u32::from_be_bytes([err[4], err[5], err[6], err[7]]), 0xDEADBEEF);
+    }
 }
