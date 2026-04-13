@@ -4,6 +4,25 @@ use super::client::ClientState;
 use super::core::*;
 use super::types::*;
 
+/// Emit a PropertyNotify event for a window property change.
+/// Used when the server internally modifies properties (e.g. _NET_WM_STATE).
+fn emit_property_notify(state: &mut ClientState, window: u32, atom: u32) {
+    let property_change_mask: u32 = 0x0040_0000;
+    let mut event = [0u8; 32];
+    event[0] = PROPERTY_NOTIFY_EVENT;
+    state.write_u16(&mut event, 2, state.sequence);
+    state.write_u32(&mut event, 4, window);
+    state.write_u32(&mut event, 8, atom);
+    state.write_u32(&mut event, 12, state.timestamp());
+    event[16] = 0; // NewValue
+    if let Some(win) = state.windows.get(&window) {
+        if win.event_mask & property_change_mask != 0 {
+            state.pending_events.push(event.to_vec());
+        }
+    }
+    state.broadcast_event(window, property_change_mask, &event);
+}
+
 /// Crossing event mode constants.
 pub(crate) const CROSSING_MODE_NORMAL: u8 = 0;
 pub(crate) const CROSSING_MODE_GRAB: u8 = 1;
@@ -776,6 +795,7 @@ pub(crate) fn build_x11_input_event(state: &mut ClientState, input: &InputEvent,
                             data: Vec::new(),
                         });
                     }
+                    emit_property_notify(state, top_level, net_wm_state_atom);
                     state.set_wm_state(top_level, 1); // NormalState
                     let _ = state.update_tx.send((
                         state.client_id.clone(),
@@ -797,6 +817,7 @@ pub(crate) fn build_x11_input_event(state: &mut ClientState, input: &InputEvent,
                             data: atom_data,
                         });
                     }
+                    emit_property_notify(state, top_level, net_wm_state_atom);
                     state.set_wm_state(top_level, 3); // IconicState
                     let _ = state.update_tx.send((
                         state.client_id.clone(),
@@ -818,6 +839,7 @@ pub(crate) fn build_x11_input_event(state: &mut ClientState, input: &InputEvent,
                             data: atom_data,
                         });
                     }
+                    emit_property_notify(state, top_level, net_wm_state_atom);
                     state.set_wm_state(top_level, 1); // NormalState
                     let _ = state.update_tx.send((
                         state.client_id.clone(),
@@ -836,6 +858,7 @@ pub(crate) fn build_x11_input_event(state: &mut ClientState, input: &InputEvent,
                             data: atom_data,
                         });
                     }
+                    emit_property_notify(state, top_level, net_wm_state_atom);
                     state.set_wm_state(top_level, 1); // NormalState
                     let _ = state.update_tx.send((
                         state.client_id.clone(),

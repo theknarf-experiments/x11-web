@@ -128,6 +128,24 @@ pub(crate) fn handle_send_event(state: &mut ClientState, data: &[u8]) -> Vec<u8>
                     });
                 }
 
+                // Generate PropertyNotify for clients watching PropertyChangeMask
+                {
+                    let property_change_mask: u32 = 0x0040_0000;
+                    let mut pn_event = [0u8; 32];
+                    pn_event[0] = PROPERTY_NOTIFY_EVENT;
+                    state.write_u16(&mut pn_event, 2, state.sequence);
+                    state.write_u32(&mut pn_event, 4, source_window);
+                    state.write_u32(&mut pn_event, 8, net_wm_state_atom);
+                    state.write_u32(&mut pn_event, 12, state.timestamp());
+                    pn_event[16] = 0; // NewValue
+                    if let Some(win) = state.windows.get(&source_window) {
+                        if win.event_mask & property_change_mask != 0 {
+                            state.pending_events.push(pn_event.to_vec());
+                        }
+                    }
+                    state.broadcast_event(source_window, property_change_mask, &pn_event);
+                }
+
                 // Determine the new WM state and broadcast to frontend
                 let new_state = if current_atoms.contains(&fullscreen_atom) {
                     x11_web_protocol::WindowWmState::Fullscreen
@@ -333,6 +351,21 @@ pub(crate) fn handle_send_event(state: &mut ClientState, data: &[u8]) -> Vec<u8>
                             data,
                         });
                     }
+                    // Generate PropertyNotify for the state change
+                    {
+                        let pcm: u32 = 0x0040_0000;
+                        let mut pn = [0u8; 32];
+                        pn[0] = PROPERTY_NOTIFY_EVENT;
+                        state.write_u16(&mut pn, 2, state.sequence);
+                        state.write_u32(&mut pn, 4, source_window);
+                        state.write_u32(&mut pn, 8, net_wm_state_atom);
+                        state.write_u32(&mut pn, 12, state.timestamp());
+                        pn[16] = 0;
+                        if state.windows.get(&source_window).is_some_and(|w| w.event_mask & pcm != 0) {
+                            state.pending_events.push(pn.to_vec());
+                        }
+                        state.broadcast_event(source_window, pcm, &pn);
+                    }
                     if let Some(uuid) = state.window_uuid(source_window) {
                         let _ = state.update_tx.send((
                             state.client_id.clone(),
@@ -349,13 +382,27 @@ pub(crate) fn handle_send_event(state: &mut ClientState, data: &[u8]) -> Vec<u8>
                     // Remove _NET_WM_STATE_HIDDEN from the state
                     if let Some(win) = state.windows.get_mut(&source_window) {
                         if let Some(prop) = win.properties.get_mut(&net_wm_state_atom) {
-                            // Remove hidden atom from the state list
                             let atoms: Vec<u32> = prop.data.chunks_exact(4)
                                 .map(|c| u32::from_le_bytes([c[0], c[1], c[2], c[3]]))
                                 .filter(|&a| a != hidden_atom)
                                 .collect();
                             prop.data = atoms.iter().flat_map(|a| a.to_le_bytes()).collect();
                         }
+                    }
+                    // Generate PropertyNotify for the state change
+                    {
+                        let pcm: u32 = 0x0040_0000;
+                        let mut pn = [0u8; 32];
+                        pn[0] = PROPERTY_NOTIFY_EVENT;
+                        state.write_u16(&mut pn, 2, state.sequence);
+                        state.write_u32(&mut pn, 4, source_window);
+                        state.write_u32(&mut pn, 8, net_wm_state_atom);
+                        state.write_u32(&mut pn, 12, state.timestamp());
+                        pn[16] = 0;
+                        if state.windows.get(&source_window).is_some_and(|w| w.event_mask & pcm != 0) {
+                            state.pending_events.push(pn.to_vec());
+                        }
+                        state.broadcast_event(source_window, pcm, &pn);
                     }
                     if let Some(uuid) = state.window_uuid(source_window) {
                         let _ = state.update_tx.send((
