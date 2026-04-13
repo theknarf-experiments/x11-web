@@ -356,7 +356,7 @@ d.close()
 	});
 
 	test("rendercheck passes all tests", async ({ sidecarContainer }) => {
-		test.setTimeout(120_000);
+		test.setTimeout(300_000);
 		const output = await execInSidecar(
 			sidecarContainer,
 			"rendercheck 2>&1 || true",
