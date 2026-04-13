@@ -309,15 +309,27 @@ pub(crate) fn handle_get_provider_info(state: &mut ClientState, data: &[u8], seq
     build_provider_info_reply(state, seq, provider_id)
 }
 
-/// RRSetProviderOffloadSink (34).
-pub(crate) fn handle_set_provider_offload_sink(_state: &mut ClientState, _data: &[u8], _seq: u16) -> Vec<u8> {
-    debug!("RRSetProviderOffloadSink (no-op)");
+/// RRSetProviderOffloadSink (34): Set a provider as an offload sink.
+/// Virtual display has a single provider — accept and log for diagnostics.
+pub(crate) fn handle_set_provider_offload_sink(_state: &mut ClientState, data: &[u8], _seq: u16) -> Vec<u8> {
+    if data.len() >= 16 {
+        let provider = _state.read_u32(data, 4);
+        let sink = _state.read_u32(data, 8);
+        let config_ts = _state.read_u32(data, 12);
+        debug!("RRSetProviderOffloadSink: provider={provider:#x} sink={sink:#x} ts={config_ts}");
+    }
     Vec::new()
 }
 
-/// RRSetProviderOutputSource (35).
-pub(crate) fn handle_set_provider_output_source(_state: &mut ClientState, _data: &[u8], _seq: u16) -> Vec<u8> {
-    debug!("RRSetProviderOutputSource (no-op)");
+/// RRSetProviderOutputSource (35): Set a provider as an output source.
+/// Virtual display has a single provider — accept and log for diagnostics.
+pub(crate) fn handle_set_provider_output_source(_state: &mut ClientState, data: &[u8], _seq: u16) -> Vec<u8> {
+    if data.len() >= 16 {
+        let provider = _state.read_u32(data, 4);
+        let source = _state.read_u32(data, 8);
+        let config_ts = _state.read_u32(data, 12);
+        debug!("RRSetProviderOutputSource: provider={provider:#x} source={source:#x} ts={config_ts}");
+    }
     Vec::new()
 }
 
