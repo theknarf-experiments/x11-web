@@ -351,12 +351,15 @@ pub(crate) fn handle_put_image(state: &mut ClientState, data: &[u8]) -> Vec<u8> 
             }
         }
     } else {
+        // Per X11 spec: BadMatch when format/depth combination is not supported
+        // by the drawable. Return error instead of silently ignoring.
         debug!(
             "PutImage: unsupported format={format} depth={depth} {}x{} data_len={}",
             width,
             height,
             pixel_data.len()
         );
+        return build_error(BAD_MATCH, state.sequence, format as u32, 72, 0);
     }
     state.notify_damage(drawable, dst_x, dst_y, width, height);
 

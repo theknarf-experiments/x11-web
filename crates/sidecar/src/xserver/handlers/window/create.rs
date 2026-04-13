@@ -32,9 +32,10 @@ pub(crate) fn handle_create_window(state: &mut ClientState, data: &[u8], _seq: u
     let required_len = 32 + n_values * 4;
     require_len!(data, required_len, _seq, 1);
 
-    // Validate window dimensions are within reasonable bounds
-    if width > 32767 || height > 32767 {
-        return build_error(BAD_VALUE, _seq, width as u32, 1, 0);
+    // Per X11 spec: width and height must be non-zero and fit in 16 bits.
+    // Zero-size windows are rejected with BadValue.
+    if width == 0 || height == 0 || width > 32767 || height > 32767 {
+        return build_error(BAD_VALUE, _seq, if width == 0 { 0 } else { width as u32 }, 1, 0);
     }
 
     let mut background_pixel = 0u32;
