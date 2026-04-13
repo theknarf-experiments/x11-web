@@ -698,8 +698,8 @@ impl Framebuffer {
                         span_start = Some(*cx);
                     } else if was_inside && !now_inside {
                         if let Some(sx_val) = span_start.take() {
-                            let sx = sx_val.max(0) as i16;
-                            let ex = (*cx).min(self.width as i32 - 1) as i16;
+                            let sx = sx_val.max(0).min(i16::MAX as i32) as i16;
+                            let ex = (*cx).min(self.width as i32 - 1).min(i16::MAX as i32) as i16;
                             if ex >= sx {
                                 self.fill_rect_rop_clipped(sx, y as i16,
                                     (ex - sx + 1) as u16, 1, color, gc_func, plane_mask, clip_rects);
@@ -723,8 +723,8 @@ impl Framebuffer {
 
                 for pair in intersections.chunks(2) {
                     if pair.len() == 2 {
-                        let start_x = pair[0].max(0) as i16;
-                        let end_x = pair[1].min(self.width as i32 - 1) as i16;
+                        let start_x = pair[0].max(0).min(i16::MAX as i32) as i16;
+                        let end_x = pair[1].min(self.width as i32 - 1).min(i16::MAX as i32) as i16;
                         if end_x >= start_x {
                             self.fill_rect_rop_clipped(start_x, y as i16,
                                 (end_x - start_x + 1) as u16, 1, color, gc_func, plane_mask, clip_rects);
@@ -865,8 +865,8 @@ impl Framebuffer {
                         span_start = Some(*cx);
                     } else if was_inside && !now_inside {
                         if let Some(sx_val) = span_start.take() {
-                            let sx = sx_val.max(0) as i16;
-                            let ex = (*cx).min(self.width as i32 - 1) as i16;
+                            let sx = sx_val.max(0).min(i16::MAX as i32) as i16;
+                            let ex = (*cx).min(self.width as i32 - 1).min(i16::MAX as i32) as i16;
                             if ex >= sx { spans.push((sx, ex)); }
                         }
                     }

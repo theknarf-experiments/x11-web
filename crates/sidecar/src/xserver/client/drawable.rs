@@ -8,7 +8,13 @@ use super::ClientState;
 impl ClientState {
     /// Map a color value for the drawable's depth.
     pub(crate) fn map_color_for_drawable(&self, drawable: u32, color: u32) -> u32 {
-        let depth = self.pixmaps.get(&drawable).map(|p| p.depth).unwrap_or(24);
+        let depth = if let Some(p) = self.pixmaps.get(&drawable) {
+            p.depth
+        } else if let Some(w) = self.windows.get(&drawable) {
+            w.depth
+        } else {
+            24
+        };
         if depth <= 1 {
             if color != 0 { 0xFFFFFF } else { 0x000000 }
         } else {
