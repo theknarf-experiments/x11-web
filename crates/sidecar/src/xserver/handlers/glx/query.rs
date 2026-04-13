@@ -91,16 +91,22 @@ pub(crate) fn handle_get_visual_configs(_data: &[u8], seq: u16) -> Vec<u8> {
 pub(crate) fn handle_get_fb_configs(_data: &[u8], seq: u16) -> Vec<u8> {
     // Return two FBConfigs: one for depth-24 (XRGB) and one for depth-32 (ARGB)
     let num_configs: u32 = 2;
-    let props_per_config = FBCONFIG_ATTRIB_COUNT as u32 * 2; // key-value pairs
+    // numAttribs in the GLX wire protocol is the number of attribute *pairs*
+    // (key-value), NOT the number of u32 words.  Each attribute occupies
+    // 2 u32s on the wire.  Mesa's __glXInitializeVisualConfigFromTags reads
+    // exactly numAttribs key-value pairs, so getting this wrong makes the
+    // client read past the end of the reply data.
+    let num_attribs = FBCONFIG_ATTRIB_COUNT as u32;
+    let u32s_per_config = num_attribs * 2;
 
-    let total_u32s = num_configs * props_per_config;
+    let total_u32s = num_configs * u32s_per_config;
     let extra_bytes = total_u32s as usize * 4;
     let mut reply = vec![0u8; 32 + extra_bytes];
     reply[0] = 1; // Reply
     reply[2..4].copy_from_slice(&seq.to_le_bytes());
     reply[4..8].copy_from_slice(&total_u32s.to_le_bytes());
     reply[8..12].copy_from_slice(&num_configs.to_le_bytes());
-    reply[12..16].copy_from_slice(&props_per_config.to_le_bytes());
+    reply[12..16].copy_from_slice(&num_attribs.to_le_bytes());
 
     // FBConfig 1: 24-bit XRGB
     let config1: [(u32, u32); FBCONFIG_ATTRIB_COUNT] = [
