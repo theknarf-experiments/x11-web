@@ -354,8 +354,10 @@ pub(crate) fn handle_map_window(state: &mut ClientState, data: &[u8], seq: u16) 
     state.update_net_client_list();
 
     // Send WM_TAKE_FOCUS to the newly mapped window (ICCCM)
+    // and _NET_WM_PING to begin monitoring responsiveness (EWMH)
     if is_top_level_for_ewmh {
         state.send_wm_take_focus(wid);
+        state.send_wm_ping(wid);
     }
 
     events
