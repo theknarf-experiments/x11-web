@@ -1,6 +1,7 @@
 //! Configure/reparent/circulate window handlers (opcodes 7, 12, 13).
 
 use super::*;
+use crate::xserver::core::require_len;
 use super::{win_gravity_delta, update_sibling_visibility};
 
 // ---------------------------------------------------------------------------
@@ -8,9 +9,7 @@ use super::{win_gravity_delta, update_sibling_visibility};
 // ---------------------------------------------------------------------------
 
 pub(crate) fn handle_reparent_window(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
-    if data.len() < 16 {
-        return build_error(BAD_LENGTH, seq, 0, 7, 0);
-    }
+    require_len!(data, 16, seq, 7);
 
     let window = state.read_u32(data, 4);
     let new_parent = state.read_u32(data, 8);
@@ -150,9 +149,7 @@ pub(crate) fn handle_reparent_window(state: &mut ClientState, data: &[u8], seq: 
 // ---------------------------------------------------------------------------
 
 pub(crate) fn handle_configure_window(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
-    if data.len() < 12 {
-        return build_error(BAD_LENGTH, seq, 0, 12, 0);
-    }
+    require_len!(data, 12, seq, 12);
 
     let wid = state.read_u32(data, 4);
     let value_mask = state.read_u16(data, 8);
@@ -160,9 +157,7 @@ pub(crate) fn handle_configure_window(state: &mut ClientState, data: &[u8], seq:
     // Validate value-list length matches the bitmask
     let n_values = (value_mask as u32).count_ones() as usize;
     let required_len = 12 + n_values * 4;
-    if data.len() < required_len {
-        return build_error(BAD_LENGTH, seq, 0, 12, 0);
-    }
+    require_len!(data, required_len, seq, 12);
 
     // Check if this is a top-level window that should be redirected to the WM.
     let is_top_level = state.windows.get(&wid).is_some_and(|w| w.parent == state.root_window);
@@ -901,9 +896,7 @@ pub(crate) fn handle_configure_window(state: &mut ClientState, data: &[u8], seq:
 // ---------------------------------------------------------------------------
 
 pub(crate) fn handle_circulate_window(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
-    if data.len() < 8 {
-        return build_error(BAD_LENGTH, seq, 0, 13, 0);
-    }
+    require_len!(data, 8, seq, 13);
 
     let direction = data[1]; // 0 = RaiseLowest, 1 = LowerHighest
     let window = state.read_u32(data, 4);

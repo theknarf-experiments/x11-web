@@ -2,15 +2,14 @@
 //! ConvertSelection (24).
 
 use super::*;
+use crate::xserver::core::require_len;
 
 // ---------------------------------------------------------------------------
 // Opcode 22: SetSelectionOwner
 // ---------------------------------------------------------------------------
 
 pub(crate) fn handle_set_selection_owner(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
-    if data.len() < 16 {
-        return build_error(BAD_LENGTH, state.sequence, 0, 22, 0);
-    }
+    require_len!(data, 16, state.sequence, 22);
     {
         let owner = state.read_u32(data, 4);
         let selection = state.read_u32(data, 8);
@@ -120,9 +119,7 @@ pub(crate) fn handle_set_selection_owner(state: &mut ClientState, data: &[u8]) -
 // ---------------------------------------------------------------------------
 
 pub(crate) fn handle_get_selection_owner(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
-    if data.len() < 8 {
-        return build_error(BAD_LENGTH, seq, 0, 23, 0);
-    }
+    require_len!(data, 8, seq, 23);
     let mut reply = [0u8; 32];
     reply[0] = 1;
     state.write_u16(&mut reply, 2, seq);
@@ -143,9 +140,7 @@ pub(crate) fn handle_get_selection_owner(state: &mut ClientState, data: &[u8], s
 // ---------------------------------------------------------------------------
 
 pub(crate) fn handle_convert_selection(state: &mut ClientState, data: &[u8], _seq: u16) -> Vec<u8> {
-    if data.len() < 24 {
-        return build_error(BAD_LENGTH, _seq, 0, 24, 0);
-    }
+    require_len!(data, 24, _seq, 24);
     {
         let requestor = state.read_u32(data, 4);
         let selection = state.read_u32(data, 8);

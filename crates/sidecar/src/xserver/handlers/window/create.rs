@@ -1,15 +1,14 @@
 //! Create/destroy window handlers (opcodes 1, 4, 5).
 
 use super::*;
+use crate::xserver::core::require_len;
 
 // ---------------------------------------------------------------------------
 // Opcode 1: CreateWindow
 // ---------------------------------------------------------------------------
 
 pub(crate) fn handle_create_window(state: &mut ClientState, data: &[u8], _seq: u16) -> Vec<u8> {
-    if data.len() < 32 {
-        return build_error(BAD_LENGTH, _seq, 0, 1, 0);
-    }
+    require_len!(data, 32, _seq, 1);
 
     let wid = state.read_u32(data, 4);
 
@@ -31,9 +30,7 @@ pub(crate) fn handle_create_window(state: &mut ClientState, data: &[u8], _seq: u
     // Validate value-list length matches the bitmask
     let n_values = value_mask.count_ones() as usize;
     let required_len = 32 + n_values * 4;
-    if data.len() < required_len {
-        return build_error(BAD_LENGTH, _seq, 0, 1, 0);
-    }
+    require_len!(data, required_len, _seq, 1);
 
     // Validate window dimensions are within reasonable bounds
     if width > 32767 || height > 32767 {
@@ -253,7 +250,7 @@ pub(crate) fn handle_create_window(state: &mut ClientState, data: &[u8], _seq: u
 // ---------------------------------------------------------------------------
 
 pub(crate) fn handle_destroy_window(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
-    if data.len() < 8 { return build_error(BAD_LENGTH, state.sequence, 0, 4, 0); }
+    require_len!(data, 8, state.sequence, 4);
     let wid = state.read_u32(data, 4);
 
     if !state.windows.contains_key(&wid) {
@@ -345,9 +342,7 @@ pub(crate) fn handle_destroy_window(state: &mut ClientState, data: &[u8]) -> Vec
 // ---------------------------------------------------------------------------
 
 pub(crate) fn handle_destroy_subwindows(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
-    if data.len() < 8 {
-        return build_error(BAD_LENGTH, state.sequence, 0, 5, 0);
-    }
+    require_len!(data, 8, state.sequence, 5);
     let parent = state.read_u32(data, 4);
 
     if !state.windows.contains_key(&parent) {

@@ -7,6 +7,7 @@ use super::super::client::ClientState;
 /// SECURITY (opcode 155)
 pub(crate) fn handle_security_request(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
     use super::super::client::SecurityAuthorization;
+use crate::xserver::core::require_len;
 
     let minor = data[1];
     match minor {
@@ -98,12 +99,7 @@ pub(crate) fn handle_security_request(state: &mut ClientState, data: &[u8], seq:
             }
         }
         2 => { // RevokeAuthorization
-            if data.len() < 8 {
-                return crate::xserver::core::build_error_bo(
-                    crate::xserver::core::BAD_LENGTH, seq, 0,
-                    155, minor as u16, state.msb_first,
-                );
-            }
+            require_len!(data, 8, seq, 155, minor as u16, state.msb_first);
             let auth_id = state.read_u32(data, 4);
             state.security_authorizations.remove(&auth_id);
             // Remove from shared token map

@@ -9,6 +9,7 @@ use tracing::debug;
 use super::super::client::ClientState;
 use super::super::core::{write_u16_bo, write_u32_bo};
 use super::super::types::RegionRect;
+use crate::xserver::core::require_len;
 
 /// SHAPE kind constants.
 const SHAPE_BOUNDING: u8 = 0;
@@ -42,12 +43,7 @@ pub(crate) fn handle_shape_request(state: &mut ClientState, data: &[u8], seq: u1
 
         // 1: Rectangles — set shape from a list of rectangles
         1 => {
-            if data.len() < 16 {
-                return crate::xserver::core::build_error_bo(
-                    crate::xserver::core::BAD_LENGTH, seq, 0,
-                    128, 1, state.msb_first,
-                );
-            }
+            require_len!(data, 16, seq, 128, 1, state.msb_first);
             let operation = data[4];
             let kind = data[5];
             let ordering = data[6];
@@ -94,12 +90,7 @@ pub(crate) fn handle_shape_request(state: &mut ClientState, data: &[u8], seq: u1
 
         // 2: Mask — set shape from a pixmap bitmap
         2 => {
-            if data.len() < 16 {
-                return crate::xserver::core::build_error_bo(
-                    crate::xserver::core::BAD_LENGTH, seq, 0,
-                    128, 2, state.msb_first,
-                );
-            }
+            require_len!(data, 16, seq, 128, 2, state.msb_first);
             let operation = data[4];
             let kind = data[5];
             let window_id = state.read_u32(data, 8);
@@ -129,12 +120,7 @@ pub(crate) fn handle_shape_request(state: &mut ClientState, data: &[u8], seq: u1
 
         // 3: Combine — combine shapes from another window
         3 => {
-            if data.len() < 20 {
-                return crate::xserver::core::build_error_bo(
-                    crate::xserver::core::BAD_LENGTH, seq, 0,
-                    128, 3, state.msb_first,
-                );
-            }
+            require_len!(data, 20, seq, 128, 3, state.msb_first);
             let operation = data[4];
             let dest_kind = data[5];
             let src_kind = data[6];
@@ -162,12 +148,7 @@ pub(crate) fn handle_shape_request(state: &mut ClientState, data: &[u8], seq: u1
 
         // 4: Offset — translate a shape
         4 => {
-            if data.len() < 12 {
-                return crate::xserver::core::build_error_bo(
-                    crate::xserver::core::BAD_LENGTH, seq, 0,
-                    128, 4, state.msb_first,
-                );
-            }
+            require_len!(data, 12, seq, 128, 4, state.msb_first);
             let kind = data[4];
             let window_id = state.read_u32(data, 8);
             let x_offset = state.read_i16(data, 12);
@@ -198,12 +179,7 @@ pub(crate) fn handle_shape_request(state: &mut ClientState, data: &[u8], seq: u1
 
         // 5: QueryExtents — get bounding and clip shape extents
         5 => {
-            if data.len() < 8 {
-                return crate::xserver::core::build_error_bo(
-                    crate::xserver::core::BAD_LENGTH, seq, 0,
-                    128, 5, state.msb_first,
-                );
-            }
+            require_len!(data, 8, seq, 128, 5, state.msb_first);
             let window_id = state.read_u32(data, 4);
 
             let (bounding_shaped, bx, by, bw, bh) = if let Some(win) = state.windows.get(&window_id) {
@@ -246,12 +222,7 @@ pub(crate) fn handle_shape_request(state: &mut ClientState, data: &[u8], seq: u1
 
         // 6: SelectInput — subscribe to ShapeNotify events
         6 => {
-            if data.len() < 12 {
-                return crate::xserver::core::build_error_bo(
-                    crate::xserver::core::BAD_LENGTH, seq, 0,
-                    128, 6, state.msb_first,
-                );
-            }
+            require_len!(data, 12, seq, 128, 6, state.msb_first);
             let window_id = state.read_u32(data, 4);
             let enable = data[8] != 0;
 
@@ -272,12 +243,7 @@ pub(crate) fn handle_shape_request(state: &mut ClientState, data: &[u8], seq: u1
 
         // 7: InputSelected — query if shape events are selected
         7 => {
-            if data.len() < 8 {
-                return crate::xserver::core::build_error_bo(
-                    crate::xserver::core::BAD_LENGTH, seq, 0,
-                    128, 7, state.msb_first,
-                );
-            }
+            require_len!(data, 8, seq, 128, 7, state.msb_first);
             let window_id = state.read_u32(data, 4);
 
             let enabled = state.windows.get(&window_id)
@@ -293,12 +259,7 @@ pub(crate) fn handle_shape_request(state: &mut ClientState, data: &[u8], seq: u1
 
         // 8: GetRectangles — get the shape rectangles for a window
         8 => {
-            if data.len() < 8 {
-                return crate::xserver::core::build_error_bo(
-                    crate::xserver::core::BAD_LENGTH, seq, 0,
-                    128, 8, state.msb_first,
-                );
-            }
+            require_len!(data, 8, seq, 128, 8, state.msb_first);
             let window_id = state.read_u32(data, 4);
             let kind = data[4]; // Actually at data[4] in the request after the window
 

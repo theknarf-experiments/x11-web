@@ -1,15 +1,14 @@
 //! Window attributes and save-set handlers (opcodes 2, 3, 6).
 
 use super::*;
+use crate::xserver::core::require_len;
 
 // ---------------------------------------------------------------------------
 // Opcode 2: ChangeWindowAttributes
 // ---------------------------------------------------------------------------
 
 pub(crate) fn handle_change_window_attributes(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
-    if data.len() < 12 {
-        return build_error(BAD_LENGTH, state.sequence, 0, 2, 0);
-    }
+    require_len!(data, 12, state.sequence, 2);
 
     let wid = state.read_u32(data, 4);
     let value_mask = state.read_u32(data, 8);
@@ -17,9 +16,7 @@ pub(crate) fn handle_change_window_attributes(state: &mut ClientState, data: &[u
     // Validate value-list length matches the bitmask
     let n_values = value_mask.count_ones() as usize;
     let required_len = 12 + n_values * 4;
-    if data.len() < required_len {
-        return build_error(BAD_LENGTH, state.sequence, 0, 2, 0);
-    }
+    require_len!(data, required_len, state.sequence, 2);
 
     if !state.windows.contains_key(&wid) {
         return build_error(BAD_WINDOW, state.sequence, wid, 2, 0);
@@ -176,7 +173,7 @@ pub(crate) fn handle_change_window_attributes(state: &mut ClientState, data: &[u
 // ---------------------------------------------------------------------------
 
 pub(crate) fn handle_get_window_attributes(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
-    if data.len() < 8 { return build_error(BAD_LENGTH, seq, 0, 3, 0); }
+    require_len!(data, 8, seq, 3);
     let wid = state.read_u32(data, 4);
 
     let win = match state.windows.get(&wid) {
@@ -217,9 +214,7 @@ pub(crate) fn handle_get_window_attributes(state: &mut ClientState, data: &[u8],
 // ---------------------------------------------------------------------------
 
 pub(crate) fn handle_change_save_set(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
-    if data.len() < 8 {
-        return build_error(BAD_LENGTH, state.sequence, 0, 6, 0);
-    }
+    require_len!(data, 8, state.sequence, 6);
     let mode = data[1]; // 0 = Insert, 1 = Delete
     let window = state.read_u32(data, 4);
 

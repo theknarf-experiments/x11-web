@@ -1,15 +1,14 @@
 //! Font handlers (opcodes 45-52).
 
 use super::*;
+use crate::xserver::core::require_len;
 
 // ---------------------------------------------------------------------------
 // Opcode 45: OpenFont
 // ---------------------------------------------------------------------------
 
 pub(crate) fn handle_open_font(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
-    if data.len() < 12 {
-        return build_error(BAD_LENGTH, state.sequence, 0, 45, 0);
-    }
+    require_len!(data, 12, state.sequence, 45);
     let fid = state.read_u32(data, 4);
 
     // Validate resource ID is within this client's allocated range
@@ -33,9 +32,7 @@ pub(crate) fn handle_open_font(state: &mut ClientState, data: &[u8]) -> Vec<u8> 
 // ---------------------------------------------------------------------------
 
 pub(crate) fn handle_close_font(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
-    if data.len() < 8 {
-        return build_error(BAD_LENGTH, state.sequence, 0, 46, 0);
-    }
+    require_len!(data, 8, state.sequence, 46);
     let fid = state.read_u32(data, 4);
     // Validate font exists
     if state.font_manager.get_font(fid).is_none() {
@@ -50,9 +47,7 @@ pub(crate) fn handle_close_font(state: &mut ClientState, data: &[u8]) -> Vec<u8>
 // ---------------------------------------------------------------------------
 
 pub(crate) fn handle_query_font(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
-    if data.len() < 8 {
-        return build_error(BAD_LENGTH, seq, 0, 47, 0);
-    }
+    require_len!(data, 8, seq, 47);
     let fontable = state.read_u32(data, 4);
 
     // fontable can be a font ID or a GC ID (containing a font)
@@ -259,9 +254,7 @@ pub(crate) fn handle_query_font(state: &mut ClientState, data: &[u8], seq: u16) 
 // ---------------------------------------------------------------------------
 
 pub(crate) fn handle_query_text_extents(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
-    if data.len() < 8 {
-        return build_error(BAD_LENGTH, seq, 0, 48, 0);
-    }
+    require_len!(data, 8, seq, 48);
 
     let fontable = state.read_u32(data, 4);
 
@@ -333,9 +326,7 @@ pub(crate) fn handle_query_text_extents(state: &mut ClientState, data: &[u8], se
 // ---------------------------------------------------------------------------
 
 pub(crate) fn handle_list_fonts(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
-    if data.len() < 8 {
-        return build_error(BAD_LENGTH, seq, 0, 49, 0);
-    }
+    require_len!(data, 8, seq, 49);
     // Parse the request: max_names (2 bytes), pattern_len (2 bytes), pattern
     let max_names = state.read_u16(data, 4);
     let pattern_len = state.read_u16(data, 6) as usize;
@@ -374,9 +365,7 @@ pub(crate) fn handle_list_fonts(state: &mut ClientState, data: &[u8], seq: u16) 
 
 pub(crate) fn handle_list_fonts_with_info(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
     // Parse request: max_names(2) + pattern_length(2) + pattern(variable)
-    if data.len() < 8 {
-        return build_error(BAD_LENGTH, seq, 0, 50, 0);
-    }
+    require_len!(data, 8, seq, 50);
     let max_names = state.read_u16(data, 4);
     let pattern_len = state.read_u16(data, 6) as usize;
     let pattern = if pattern_len > 0 && data.len() >= 8 + pattern_len {
@@ -518,9 +507,7 @@ pub(crate) fn handle_get_font_path(state: &ClientState, seq: u16) -> Vec<u8> {
 }
 
 pub(crate) fn handle_set_font_path(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
-    if data.len() < 8 {
-        return build_error(BAD_LENGTH, state.sequence, 0, 51, 0);
-    }
+    require_len!(data, 8, state.sequence, 51);
     let num_paths = state.read_u16(data, 4) as usize;
     let mut paths = Vec::with_capacity(num_paths);
     let mut off = 8;

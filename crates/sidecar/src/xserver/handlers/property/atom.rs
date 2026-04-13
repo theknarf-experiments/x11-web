@@ -1,13 +1,14 @@
 //! Atom operations — InternAtom (opcode 16), GetAtomName (opcode 17).
 
 use super::*;
+use crate::xserver::core::require_len;
 
 // ---------------------------------------------------------------------------
 // Opcode 16: InternAtom
 // ---------------------------------------------------------------------------
 
 pub(crate) fn handle_intern_atom(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
-    if data.len() < 8 { return build_error(BAD_LENGTH, seq, 0, 16, 0); }
+    require_len!(data, 8, seq, 16);
     let only_if_exists = data[1] != 0;
     let name_len = state.read_u16(data, 4) as usize;
 
@@ -31,7 +32,7 @@ pub(crate) fn handle_intern_atom(state: &mut ClientState, data: &[u8], seq: u16)
 // ---------------------------------------------------------------------------
 
 pub(crate) fn handle_get_atom_name(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
-    if data.len() < 8 { return build_error(BAD_LENGTH, seq, 0, 17, 0); }
+    require_len!(data, 8, seq, 17);
     let atom = state.read_u32(data, 4);
 
     // BadAtom (error code 5) for unknown atoms

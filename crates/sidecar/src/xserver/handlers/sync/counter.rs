@@ -4,8 +4,9 @@
 use tracing::debug;
 
 use super::super::super::client::ClientState;
-use super::super::super::core::{BAD_LENGTH, BAD_VALUE};
+use super::super::super::core::BAD_VALUE;
 use super::{check_alarms, check_pending_awaits_ext, SyncCounter};
+use crate::xserver::core::require_len;
 
 /// Minor opcode 1: ListSystemCounters
 pub(crate) fn list_system_counters(state: &mut ClientState, seq: u16) -> Vec<u8> {
@@ -32,9 +33,7 @@ pub(crate) fn list_system_counters(state: &mut ClientState, seq: u16) -> Vec<u8>
 
 /// Minor opcode 2: CreateCounter
 pub(crate) fn create_counter(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
-    if data.len() < 16 {
-        return crate::xserver::core::build_error_bo(BAD_LENGTH, seq, 0, 134, data[1] as u16, state.msb_first);
-    }
+    require_len!(data, 16, seq, 134, data[1] as u16, state.msb_first);
     let counter_id = state.read_u32(data, 4);
     let value_hi = state.read_u32(data, 8) as i32;
     let value_lo = state.read_u32(data, 12);
@@ -49,9 +48,7 @@ pub(crate) fn create_counter(state: &mut ClientState, data: &[u8], seq: u16) -> 
 
 /// Minor opcode 3: SetCounter
 pub(crate) fn set_counter(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
-    if data.len() < 16 {
-        return crate::xserver::core::build_error_bo(BAD_LENGTH, seq, 0, 134, data[1] as u16, state.msb_first);
-    }
+    require_len!(data, 16, seq, 134, data[1] as u16, state.msb_first);
     let counter_id = state.read_u32(data, 4);
     let value_hi = state.read_u32(data, 8) as i32;
     let value_lo = state.read_u32(data, 12);
@@ -80,9 +77,7 @@ pub(crate) fn set_counter(state: &mut ClientState, data: &[u8], seq: u16) -> Vec
 
 /// Minor opcode 4: ChangeCounter
 pub(crate) fn change_counter(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
-    if data.len() < 16 {
-        return crate::xserver::core::build_error_bo(BAD_LENGTH, seq, 0, 134, data[1] as u16, state.msb_first);
-    }
+    require_len!(data, 16, seq, 134, data[1] as u16, state.msb_first);
     let counter_id = state.read_u32(data, 4);
     let delta_hi = state.read_u32(data, 8) as i32;
     let delta_lo = state.read_u32(data, 12);
@@ -111,9 +106,7 @@ pub(crate) fn change_counter(state: &mut ClientState, data: &[u8], seq: u16) -> 
 
 /// Minor opcode 5: QueryCounter
 pub(crate) fn query_counter(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
-    if data.len() < 8 {
-        return crate::xserver::core::build_error_bo(BAD_LENGTH, seq, 0, 134, data[1] as u16, state.msb_first);
-    }
+    require_len!(data, 8, seq, 134, data[1] as u16, state.msb_first);
     let counter_id = state.read_u32(data, 4);
     debug!("SYNC QueryCounter: id={counter_id:#x}");
 

@@ -6,6 +6,7 @@ use super::{
     SA_SET_MODS, SA_LOCK_MODS, SA_SET_GROUP, SA_LOCK_GROUP,
     KB_LOCK, MODIFIER_KEYS,
 };
+use crate::xserver::core::require_len;
 use tracing::debug;
 
 /// Build an XKB GetMap reply with full sections: KeyTypes, KeySyms,
@@ -369,12 +370,7 @@ pub(crate) fn build_xkb_get_map_reply(state: &mut ClientState, seq: u16) -> Vec<
 /// Handle XKB SetMap request: allow clients to change key type assignments
 /// and symbol mappings.
 pub(crate) fn handle_xkb_set_map(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
-    if data.len() < 36 {
-        return crate::xserver::core::build_error_bo(
-            crate::xserver::core::BAD_LENGTH, seq, data.len() as u32,
-            136, data[1] as u16, state.msb_first,
-        );
-    }
+    require_len!(data, 36, seq, 136, data[1] as u16, state.msb_first);
 
     let present = state.read_u16(data, 8);
     let _flags = state.read_u16(data, 10);

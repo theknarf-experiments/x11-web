@@ -1,15 +1,14 @@
 //! Color/colormap and cursor handlers (opcodes 78-96).
 
 use super::*;
+use crate::xserver::core::require_len;
 
 // ---------------------------------------------------------------------------
 // Opcode 78: CreateColormap
 // ---------------------------------------------------------------------------
 
 pub(crate) fn handle_create_colormap(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
-    if data.len() < 16 {
-        return build_error(BAD_LENGTH, state.sequence, 0, 78, 0);
-    }
+    require_len!(data, 16, state.sequence, 78);
 
     let _alloc = data[1]; // 0=None, 1=All (for writable colormaps, pre-allocate all cells)
     let mid = state.read_u32(data, 4);
@@ -62,9 +61,7 @@ pub(crate) fn handle_create_colormap(state: &mut ClientState, data: &[u8]) -> Ve
 // ---------------------------------------------------------------------------
 
 pub(crate) fn handle_free_colormap(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
-    if data.len() < 8 {
-        return build_error(BAD_LENGTH, state.sequence, 0, 79, 0);
-    }
+    require_len!(data, 8, state.sequence, 79);
     let mid = state.read_u32(data, 4);
     // Validate colormap exists (not the default, which cannot be freed)
     if mid != ROOT_COLORMAP && !state.colormaps.contains_key(&mid) {
@@ -82,9 +79,7 @@ pub(crate) fn handle_free_colormap(state: &mut ClientState, data: &[u8]) -> Vec<
 // ---------------------------------------------------------------------------
 
 pub(crate) fn handle_copy_colormap_and_free(state: &mut ClientState, data: &[u8], _seq: u16) -> Vec<u8> {
-    if data.len() < 12 {
-        return build_error(BAD_LENGTH, _seq, 0, 80, 0);
-    }
+    require_len!(data, 12, _seq, 80);
     let mid = state.read_u32(data, 4);
     let src = state.read_u32(data, 8);
     // Validate source colormap exists
@@ -117,9 +112,7 @@ pub(crate) fn handle_copy_colormap_and_free(state: &mut ClientState, data: &[u8]
 // ---------------------------------------------------------------------------
 
 pub(crate) fn handle_install_colormap(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
-    if data.len() < 8 {
-        return build_error(BAD_LENGTH, state.sequence, 0, 81, 0);
-    }
+    require_len!(data, 8, state.sequence, 81);
     let mid = state.read_u32(data, 4);
     // Validate colormap exists
     if mid != ROOT_COLORMAP && !state.colormaps.contains_key(&mid) {
@@ -157,9 +150,7 @@ pub(crate) fn handle_install_colormap(state: &mut ClientState, data: &[u8]) -> V
 // ---------------------------------------------------------------------------
 
 pub(crate) fn handle_uninstall_colormap(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
-    if data.len() < 8 {
-        return build_error(BAD_LENGTH, state.sequence, 0, 82, 0);
-    }
+    require_len!(data, 8, state.sequence, 82);
     let mid = state.read_u32(data, 4);
     // Validate colormap exists
     if mid != ROOT_COLORMAP && !state.colormaps.contains_key(&mid) {
@@ -244,9 +235,7 @@ pub(crate) fn handle_list_installed_colormaps(state: &ClientState, seq: u16) -> 
 // ---------------------------------------------------------------------------
 
 pub(crate) fn handle_alloc_color(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
-    if data.len() < 16 {
-        return build_error(BAD_LENGTH, seq, 0, 84, 0);
-    }
+    require_len!(data, 16, seq, 84);
 
     let cmap_id = state.read_u32(data, 4);
     let red = state.read_u16(data, 8);
@@ -290,9 +279,7 @@ pub(crate) fn handle_alloc_color(state: &mut ClientState, data: &[u8], seq: u16)
 // ---------------------------------------------------------------------------
 
 pub(crate) fn handle_alloc_named_color(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
-    if data.len() < 12 {
-        return build_error(BAD_LENGTH, seq, 0, 85, 0);
-    }
+    require_len!(data, 12, seq, 85);
 
     let cmap_id = state.read_u32(data, 4);
     // Validate colormap exists
@@ -339,9 +326,7 @@ pub(crate) fn handle_alloc_named_color(state: &mut ClientState, data: &[u8], seq
 // ---------------------------------------------------------------------------
 
 pub(crate) fn handle_alloc_color_cells(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
-    if data.len() < 12 {
-        return build_error(BAD_LENGTH, seq, 0, 86, 0);
-    }
+    require_len!(data, 12, seq, 86);
 
     let cmap_id = state.read_u32(data, 4);
     let n_colors = state.read_u16(data, 8);
@@ -403,9 +388,7 @@ pub(crate) fn handle_alloc_color_cells(state: &mut ClientState, data: &[u8], seq
 // ---------------------------------------------------------------------------
 
 pub(crate) fn handle_alloc_color_planes(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
-    if data.len() < 16 {
-        return build_error(BAD_LENGTH, seq, 0, 87, 0);
-    }
+    require_len!(data, 16, seq, 87);
 
     let cmap_id = state.read_u32(data, 4);
     let n_colors = state.read_u16(data, 8);
@@ -475,9 +458,7 @@ pub(crate) fn handle_alloc_color_planes(state: &mut ClientState, data: &[u8], se
 // ---------------------------------------------------------------------------
 
 pub(crate) fn handle_query_colors(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
-    if data.len() < 8 {
-        return build_error(BAD_LENGTH, seq, 0, 91, 0);
-    }
+    require_len!(data, 8, seq, 91);
 
     let cmap_id = state.read_u32(data, 4);
 
@@ -533,9 +514,7 @@ pub(crate) fn handle_query_colors(state: &mut ClientState, data: &[u8], seq: u16
 // ---------------------------------------------------------------------------
 
 pub(crate) fn handle_lookup_color(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
-    if data.len() < 12 {
-        return build_error(BAD_LENGTH, seq, 0, 92, 0);
-    }
+    require_len!(data, 12, seq, 92);
 
     let cmap_id = state.read_u32(data, 4);
     // Validate colormap exists
@@ -576,9 +555,7 @@ pub(crate) fn handle_lookup_color(state: &mut ClientState, data: &[u8], seq: u16
 // ---------------------------------------------------------------------------
 
 pub(crate) fn handle_free_colors(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
-    if data.len() < 12 {
-        return build_error(BAD_LENGTH, state.sequence, 0, 88, 0);
-    }
+    require_len!(data, 12, state.sequence, 88);
 
     let cmap_id = state.read_u32(data, 4);
     // Validate colormap exists
@@ -604,9 +581,7 @@ pub(crate) fn handle_free_colors(state: &mut ClientState, data: &[u8]) -> Vec<u8
 // ---------------------------------------------------------------------------
 
 pub(crate) fn handle_store_colors(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
-    if data.len() < 8 {
-        return build_error(BAD_LENGTH, state.sequence, 0, 89, 0);
-    }
+    require_len!(data, 8, state.sequence, 89);
 
     let cmap_id = state.read_u32(data, 4);
     // Validate colormap exists
@@ -641,9 +616,7 @@ pub(crate) fn handle_store_colors(state: &mut ClientState, data: &[u8]) -> Vec<u
 // ---------------------------------------------------------------------------
 
 pub(crate) fn handle_store_named_color(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
-    if data.len() < 16 {
-        return build_error(BAD_LENGTH, state.sequence, 0, 90, 0);
-    }
+    require_len!(data, 16, state.sequence, 90);
 
     let flags = data[1];
     let cmap_id = state.read_u32(data, 4);
@@ -673,9 +646,7 @@ pub(crate) fn handle_store_named_color(state: &mut ClientState, data: &[u8]) -> 
 // ---------------------------------------------------------------------------
 
 pub(crate) fn handle_create_cursor(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
-    if data.len() < 32 {
-        return build_error(BAD_LENGTH, state.sequence, 0, 93, 0);
-    }
+    require_len!(data, 32, state.sequence, 93);
 
     let cid = state.read_u32(data, 4);
 
@@ -816,7 +787,7 @@ fn build_cursor_argb(
 // ---------------------------------------------------------------------------
 
 pub(crate) fn handle_create_glyph_cursor(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
-    if data.len() < 32 { return build_error(BAD_LENGTH, state.sequence, 0, 94, 0); }
+    require_len!(data, 32, state.sequence, 94);
     let cid = state.read_u32(data, 4);
 
     // Validate resource ID is within this client's allocated range
@@ -862,9 +833,7 @@ pub(crate) fn handle_create_glyph_cursor(state: &mut ClientState, data: &[u8]) -
 // ---------------------------------------------------------------------------
 
 pub(crate) fn handle_free_cursor(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
-    if data.len() < 8 {
-        return build_error(BAD_LENGTH, state.sequence, 0, 95, 0);
-    }
+    require_len!(data, 8, state.sequence, 95);
     let cid = state.read_u32(data, 4);
     // Validate cursor exists
     if !state.cursors.contains_key(&cid) {
@@ -880,9 +849,7 @@ pub(crate) fn handle_free_cursor(state: &mut ClientState, data: &[u8]) -> Vec<u8
 // ---------------------------------------------------------------------------
 
 pub(crate) fn handle_recolor_cursor(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
-    if data.len() < 20 {
-        return build_error(BAD_LENGTH, state.sequence, 0, 96, 0);
-    }
+    require_len!(data, 20, state.sequence, 96);
 
     let cid = state.read_u32(data, 4);
     // Validate cursor exists

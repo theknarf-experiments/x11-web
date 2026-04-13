@@ -8,6 +8,7 @@ use tracing::{debug, warn};
 use super::super::super::client::ClientState;
 use super::super::super::core::ROOT_VISUAL;
 use super::{GlxDrawable, GlxDrawableKind, GLX_FBCONFIG_ID, GLX_RENDER_TYPE, GLX_RGBA_BIT};
+use crate::xserver::core::require_len;
 
 // ---------------------------------------------------------------------------
 // GLX_USE_X_FONT (minor 12)
@@ -91,12 +92,7 @@ pub(crate) fn handle_use_x_font(state: &mut ClientState, data: &[u8], _seq: u16)
 
 pub(crate) fn handle_create_glx_pixmap(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
     // Wire: 4 screen | 4 visual | 4 pixmap (X) | 4 glx_pixmap (new id)
-    if data.len() < 20 {
-        return crate::xserver::core::build_error_bo(
-            crate::xserver::core::BAD_LENGTH, seq, data.len() as u32,
-            159, 13, state.msb_first,
-        );
-    }
+    require_len!(data, 20, seq, 159, 13, state.msb_first);
     let visual = u32::from_le_bytes([data[8], data[9], data[10], data[11]]);
     let x_pixmap = u32::from_le_bytes([data[12], data[13], data[14], data[15]]);
     let glx_pixmap = u32::from_le_bytes([data[16], data[17], data[18], data[19]]);
@@ -122,12 +118,7 @@ pub(crate) fn handle_create_glx_pixmap(state: &mut ClientState, data: &[u8], seq
 /// Creates a GLX pixmap from an existing X pixmap and an FBConfig.
 pub(crate) fn handle_create_pixmap(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
     // Wire: screen(4) fbconfig(4) pixmap(4) glx_pixmap(4) num_attribs(4) attribs...
-    if data.len() < 24 {
-        return crate::xserver::core::build_error_bo(
-            crate::xserver::core::BAD_LENGTH, seq, data.len() as u32,
-            159, 22, state.msb_first,
-        );
-    }
+    require_len!(data, 24, seq, 159, 22, state.msb_first);
     let _screen = u32::from_le_bytes([data[4], data[5], data[6], data[7]]);
     let fbconfig = u32::from_le_bytes([data[8], data[9], data[10], data[11]]);
     let x_pixmap = u32::from_le_bytes([data[12], data[13], data[14], data[15]]);
@@ -175,12 +166,7 @@ pub(crate) fn handle_create_pixmap(state: &mut ClientState, data: &[u8], seq: u1
 // ---------------------------------------------------------------------------
 
 pub(crate) fn handle_destroy_glx_pixmap(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
-    if data.len() < 8 {
-        return crate::xserver::core::build_error_bo(
-            crate::xserver::core::BAD_LENGTH, seq, data.len() as u32,
-            159, 15, state.msb_first,
-        );
-    }
+    require_len!(data, 8, seq, 159, 15, state.msb_first);
     let glx_pixmap = u32::from_le_bytes([data[4], data[5], data[6], data[7]]);
     if state.glx.drawables.remove(&glx_pixmap).is_some() {
         debug!("Destroyed GLX pixmap {glx_pixmap:#x}");
@@ -196,12 +182,7 @@ pub(crate) fn handle_destroy_glx_pixmap(state: &mut ClientState, data: &[u8], se
 
 pub(crate) fn handle_create_pbuffer(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
     // Wire: 4 screen | 4 fbconfig | 4 pbuffer_id | 4 num_attribs | attribs...
-    if data.len() < 20 {
-        return crate::xserver::core::build_error_bo(
-            crate::xserver::core::BAD_LENGTH, seq, data.len() as u32,
-            159, 27, state.msb_first,
-        );
-    }
+    require_len!(data, 20, seq, 159, 27, state.msb_first);
     let fbconfig = u32::from_le_bytes([data[8], data[9], data[10], data[11]]);
     let pbuffer_id = u32::from_le_bytes([data[12], data[13], data[14], data[15]]);
     let num_attribs = u32::from_le_bytes([data[16], data[17], data[18], data[19]]) as usize;
@@ -235,12 +216,7 @@ pub(crate) fn handle_create_pbuffer(state: &mut ClientState, data: &[u8], seq: u
 // ---------------------------------------------------------------------------
 
 pub(crate) fn handle_destroy_pbuffer(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
-    if data.len() < 8 {
-        return crate::xserver::core::build_error_bo(
-            crate::xserver::core::BAD_LENGTH, seq, data.len() as u32,
-            159, 28, state.msb_first,
-        );
-    }
+    require_len!(data, 8, seq, 159, 28, state.msb_first);
     let pbuffer_id = u32::from_le_bytes([data[4], data[5], data[6], data[7]]);
     if state.glx.drawables.remove(&pbuffer_id).is_some() {
         debug!("Destroyed GLX pbuffer {pbuffer_id:#x}");
@@ -256,12 +232,7 @@ pub(crate) fn handle_destroy_pbuffer(state: &mut ClientState, data: &[u8], seq: 
 
 pub(crate) fn handle_create_window(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
     // Wire: 4 screen | 4 fbconfig | 4 window (X) | 4 glx_window | 4 num_attribs | attribs...
-    if data.len() < 24 {
-        return crate::xserver::core::build_error_bo(
-            crate::xserver::core::BAD_LENGTH, seq, data.len() as u32,
-            159, 31, state.msb_first,
-        );
-    }
+    require_len!(data, 24, seq, 159, 31, state.msb_first);
     let fbconfig = u32::from_le_bytes([data[8], data[9], data[10], data[11]]);
     let x_window = u32::from_le_bytes([data[12], data[13], data[14], data[15]]);
     let glx_window = u32::from_le_bytes([data[16], data[17], data[18], data[19]]);
@@ -296,12 +267,7 @@ pub(crate) fn handle_create_window(state: &mut ClientState, data: &[u8], seq: u1
 // ---------------------------------------------------------------------------
 
 pub(crate) fn handle_delete_window(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
-    if data.len() < 8 {
-        return crate::xserver::core::build_error_bo(
-            crate::xserver::core::BAD_LENGTH, seq, data.len() as u32,
-            159, 32, state.msb_first,
-        );
-    }
+    require_len!(data, 8, seq, 159, 32, state.msb_first);
     let glx_window = u32::from_le_bytes([data[4], data[5], data[6], data[7]]);
     if state.glx.drawables.remove(&glx_window).is_some() {
         debug!("Deleted GLX window {glx_window:#x}");
@@ -364,12 +330,7 @@ pub(crate) fn handle_get_drawable_attributes(state: &mut ClientState, data: &[u8
 // ---------------------------------------------------------------------------
 
 pub(crate) fn handle_change_drawable_attributes(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
-    if data.len() < 12 {
-        return crate::xserver::core::build_error_bo(
-            crate::xserver::core::BAD_LENGTH, seq, data.len() as u32,
-            159, 30, state.msb_first,
-        );
-    }
+    require_len!(data, 12, seq, 159, 30, state.msb_first);
     let drawable_id = u32::from_le_bytes([data[4], data[5], data[6], data[7]]);
     let num_attribs = u32::from_le_bytes([data[8], data[9], data[10], data[11]]) as usize;
 
@@ -395,12 +356,7 @@ pub(crate) fn handle_change_drawable_attributes(state: &mut ClientState, data: &
 // ---------------------------------------------------------------------------
 
 pub(crate) fn handle_query_context(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
-    if data.len() < 8 {
-        return crate::xserver::core::build_error_bo(
-            crate::xserver::core::BAD_LENGTH, seq, data.len() as u32,
-            159, 25, state.msb_first,
-        );
-    }
+    require_len!(data, 8, seq, 159, 25, state.msb_first);
     let ctx_id = u32::from_le_bytes([data[4], data[5], data[6], data[7]]);
 
     // Return 4 attributes: FBCONFIG_ID, RENDER_TYPE, SCREEN, SHARE_CONTEXT

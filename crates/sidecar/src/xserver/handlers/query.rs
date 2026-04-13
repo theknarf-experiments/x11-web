@@ -1,15 +1,14 @@
 //! Query and miscellaneous handlers (opcodes 97-99).
 
 use super::*;
+use crate::xserver::core::require_len;
 
 // ---------------------------------------------------------------------------
 // Opcode 97: QueryBestSize
 // ---------------------------------------------------------------------------
 
 pub(crate) fn handle_query_best_size(state: &ClientState, data: &[u8], seq: u16) -> Vec<u8> {
-    if data.len() < 12 {
-        return build_error(BAD_LENGTH, seq, 0, 97, 0);
-    }
+    require_len!(data, 12, seq, 97);
     let mut reply = [0u8; 32];
     reply[0] = 1;
     state.write_u16(&mut reply, 2, seq);
@@ -25,7 +24,7 @@ pub(crate) fn handle_query_best_size(state: &ClientState, data: &[u8], seq: u16)
 // ---------------------------------------------------------------------------
 
 pub(crate) fn handle_query_extension(_state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
-    if data.len() < 8 { return build_error(BAD_LENGTH, seq, 0, 98, 0); }
+    require_len!(data, 8, seq, 98);
     // Parse extension name from the request
     let name_len = _state.read_u16(data, 4) as usize;
     let name = if data.len() >= 8 + name_len {

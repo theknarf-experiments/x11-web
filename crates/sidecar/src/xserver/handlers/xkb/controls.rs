@@ -8,6 +8,7 @@ use super::{
 };
 use crate::xserver::core::{read_u16_bo as read_u16, read_u32_bo as read_u32, read_i16_bo as read_i16};
 use tracing::debug;
+use crate::xserver::core::require_len;
 
 /// Build an XKB GetState reply with real modifier/group state.
 pub(crate) fn build_xkb_get_state_reply(state: &ClientState, seq: u16, device_id: u8) -> Vec<u8> {
@@ -61,12 +62,7 @@ pub(crate) fn build_xkb_get_state_reply(state: &ClientState, seq: u16, device_id
 
 /// Handle XKB LatchLockState request.
 pub(crate) fn handle_xkb_latch_lock_state(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
-    if data.len() < 16 {
-        return crate::xserver::core::build_error_bo(
-            crate::xserver::core::BAD_LENGTH, seq, data.len() as u32,
-            136, data[1] as u16, state.msb_first,
-        );
-    }
+    require_len!(data, 16, seq, 136, data[1] as u16, state.msb_first);
 
     let before = super::XkbStateSnapshot::capture(state);
 
@@ -185,13 +181,7 @@ pub(crate) fn build_xkb_get_controls_reply(state: &ClientState, seq: u16, device
 
 /// Handle XKB SetControls request.
 pub(crate) fn handle_xkb_set_controls(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
-    if data.len() < 92 {
-        debug!("SetControls: request too short ({} bytes)", data.len());
-        return crate::xserver::core::build_error_bo(
-            crate::xserver::core::BAD_LENGTH, seq, data.len() as u32,
-            136, data[1] as u16, state.msb_first,
-        );
-    }
+    require_len!(data, 92, seq, 136, data[1] as u16, state.msb_first);
 
     let enabled_ctrls_before = state.xkb_state.controls.enabled_ctrls;
 

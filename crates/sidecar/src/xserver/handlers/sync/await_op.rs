@@ -3,8 +3,8 @@
 use tracing::debug;
 
 use super::super::super::client::ClientState;
-use super::super::super::core::BAD_LENGTH;
 use super::{is_trigger_satisfied, AwaitTrigger, PendingAwait};
+use crate::xserver::core::require_len;
 
 /// Minor opcode 7: Await
 pub(crate) fn await_op(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
@@ -87,9 +87,7 @@ pub(crate) fn set_priority(state: &mut ClientState, data: &[u8], _seq: u16) -> V
 
 /// Minor opcode 13: GetPriority
 pub(crate) fn get_priority(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
-    if data.len() < 8 {
-        return crate::xserver::core::build_error_bo(BAD_LENGTH, seq, 0, 134, data[1] as u16, state.msb_first);
-    }
+    require_len!(data, 8, seq, 134, data[1] as u16, state.msb_first);
     let resource_id = state.read_u32(data, 4);
     let priority = state.sync_state.priorities.get(&resource_id).copied().unwrap_or(0);
     debug!("SYNC GetPriority: resource={resource_id:#x} priority={priority}");

@@ -8,6 +8,7 @@ use super::super::super::core::*;
 use super::super::super::types::PixmapState;
 use super::DRI3_MAJOR_OPCODE;
 use crate::framebuffer::Framebuffer;
+use crate::xserver::core::require_len;
 
 // DRM fourcc codes for YUV formats
 const FOURCC_NV12: u32 = 0x3231564E; // 'NV12'
@@ -225,9 +226,7 @@ pub(crate) fn handle_pixmap_from_buffer(
     // PixmapFromBuffer: create a pixmap from a DMA-BUF fd
     // Request: pixmap(4), drawable(4), size(4), width(2), height(2),
     //          stride(2), depth(1), bpp(1)
-    if data.len() < 24 {
-        return build_error_bo(BAD_LENGTH, seq, 0, DRI3_MAJOR_OPCODE, minor as u16, bo);
-    }
+    require_len!(data, 24, seq, DRI3_MAJOR_OPCODE, minor as u16, bo);
 
     let pixmap_id = read_u32_bo(data, 4, bo);
     let _drawable = read_u32_bo(data, 8, bo);
@@ -297,9 +296,7 @@ pub(crate) fn handle_buffer_from_pixmap(
     seq: u16,
     bo: bool,
 ) -> Vec<u8> {
-    if data.len() < 8 {
-        return build_error_bo(BAD_LENGTH, seq, 0, DRI3_MAJOR_OPCODE, 3, bo);
-    }
+    require_len!(data, 8, seq, DRI3_MAJOR_OPCODE, 3, bo);
 
     let pixmap_id = read_u32_bo(data, 4, bo);
     debug!("DRI3 BufferFromPixmap: pid={pixmap_id:#x}");
@@ -520,9 +517,7 @@ pub(crate) fn handle_buffers_from_pixmap(
     seq: u16,
     bo: bool,
 ) -> Vec<u8> {
-    if data.len() < 8 {
-        return build_error_bo(BAD_LENGTH, seq, 0, DRI3_MAJOR_OPCODE, 8, bo);
-    }
+    require_len!(data, 8, seq, DRI3_MAJOR_OPCODE, 8, bo);
 
     let pixmap_id = read_u32_bo(data, 4, bo);
     debug!("DRI3 BuffersFromPixmap: pid={pixmap_id:#x}");

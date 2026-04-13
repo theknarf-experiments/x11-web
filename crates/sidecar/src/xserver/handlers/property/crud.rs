@@ -2,15 +2,14 @@
 //! GetProperty (20), ListProperties (21).
 
 use super::*;
+use crate::xserver::core::require_len;
 
 // ---------------------------------------------------------------------------
 // Opcode 18: ChangeProperty
 // ---------------------------------------------------------------------------
 
 pub(crate) fn handle_change_property(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
-    if data.len() < 24 {
-        return build_error(BAD_LENGTH, state.sequence, 0, 18, 0);
-    }
+    require_len!(data, 24, state.sequence, 18);
 
     let mode = data[1]; // 0=Replace, 1=Prepend, 2=Append
     let window = state.read_u32(data, 4);
@@ -41,9 +40,7 @@ pub(crate) fn handle_change_property(state: &mut ClientState, data: &[u8]) -> Ve
     };
 
     // Validate that the declared data fits within the request
-    if data.len() < 24 + byte_len {
-        return build_error(BAD_LENGTH, state.sequence, 0, 18, 0);
-    }
+    require_len!(data, 24 + byte_len, state.sequence, 18);
 
     // Validate window exists
     if !state.windows.contains_key(&window) {
@@ -400,9 +397,7 @@ pub(crate) fn handle_change_property(state: &mut ClientState, data: &[u8]) -> Ve
 // ---------------------------------------------------------------------------
 
 pub(crate) fn handle_delete_property(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
-    if data.len() < 12 {
-        return build_error(BAD_LENGTH, state.sequence, 0, 19, 0);
-    }
+    require_len!(data, 12, state.sequence, 19);
     {
         let window = state.read_u32(data, 4);
         let window_exists = state.windows.contains_key(&window)
@@ -456,9 +451,7 @@ pub(crate) fn handle_delete_property(state: &mut ClientState, data: &[u8]) -> Ve
 // ---------------------------------------------------------------------------
 
 pub(crate) fn handle_get_property(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
-    if data.len() < 24 {
-        return build_error(BAD_LENGTH, seq, 0, 20, 0);
-    }
+    require_len!(data, 24, seq, 20);
 
     let delete = data[1] != 0;
     let window = state.read_u32(data, 4);
@@ -566,9 +559,7 @@ pub(crate) fn handle_get_property(state: &mut ClientState, data: &[u8], seq: u16
 // ---------------------------------------------------------------------------
 
 pub(crate) fn handle_list_properties(state: &ClientState, data: &[u8], seq: u16) -> Vec<u8> {
-    if data.len() < 8 {
-        return build_error(BAD_LENGTH, seq, 0, 21, 0);
-    }
+    require_len!(data, 8, seq, 21);
     let window = state.read_u32(data, 4);
 
     let window_exists = state.windows.contains_key(&window)

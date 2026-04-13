@@ -4,6 +4,7 @@ use super::super::super::client::ClientState;
 use super::{MIN_KEY_CODE, MAX_KEY_CODE, N_KEYS};
 use crate::xserver::core::{read_u16_bo as read_u16, read_u32_bo as read_u32};
 use tracing::debug;
+use crate::xserver::core::require_len;
 
 /// Build an XKB GetNames reply.
 ///
@@ -256,12 +257,7 @@ pub(crate) fn build_xkb_get_names_reply(
 /// to keycodes, types, indicators, groups, virtual modifiers, key aliases,
 /// and the overall keyboard description.
 pub(crate) fn handle_xkb_set_names(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
-    if data.len() < 16 {
-        return crate::xserver::core::build_error_bo(
-            crate::xserver::core::BAD_LENGTH, seq, data.len() as u32,
-            136, data[1] as u16, state.msb_first,
-        );
-    }
+    require_len!(data, 16, seq, 136, data[1] as u16, state.msb_first);
 
     let msb = state.msb_first;
     let which = read_u32(data, 8, msb);

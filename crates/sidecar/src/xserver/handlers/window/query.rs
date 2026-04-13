@@ -1,13 +1,14 @@
 //! Query/geometry window handlers (opcodes 14, 15).
 
 use super::*;
+use crate::xserver::core::require_len;
 
 // ---------------------------------------------------------------------------
 // Opcode 14: GetGeometry
 // ---------------------------------------------------------------------------
 
 pub(crate) fn handle_get_geometry(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
-    if data.len() < 8 { return build_error(BAD_LENGTH, seq, 0, 14, 0); }
+    require_len!(data, 8, seq, 14);
     let drawable = state.read_u32(data, 4);
 
     // Check windows first, then pixmaps
@@ -45,7 +46,7 @@ pub(crate) fn handle_get_geometry(state: &mut ClientState, data: &[u8], seq: u16
 // ---------------------------------------------------------------------------
 
 pub(crate) fn handle_query_tree(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
-    if data.len() < 8 { return build_error(BAD_LENGTH, seq, 0, 15, 0); }
+    require_len!(data, 8, seq, 15);
     let wid = state.read_u32(data, 4);
 
     if !state.windows.contains_key(&wid) {

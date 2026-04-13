@@ -16,18 +16,14 @@ use super::blit_osmesa_to_drawable;
 
 use super::single_query;
 use super::single_ops;
+use crate::xserver::core::require_len;
 
 // ---------------------------------------------------------------------------
 // GLX_CREATE_CONTEXT (minor 3)
 // ---------------------------------------------------------------------------
 
 pub(crate) fn handle_create_context(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
-    if data.len() < 24 {
-        return crate::xserver::core::build_error_bo(
-            crate::xserver::core::BAD_LENGTH, seq, data.len() as u32,
-            159, 3, state.msb_first,
-        );
-    }
+    require_len!(data, 24, seq, 159, 3, state.msb_first);
     let ctx_id = u32::from_le_bytes([data[4], data[5], data[6], data[7]]);
     let visual = u32::from_le_bytes([data[8], data[9], data[10], data[11]]);
     let screen = u32::from_le_bytes([data[12], data[13], data[14], data[15]]);
@@ -58,12 +54,7 @@ pub(crate) fn handle_create_context(state: &mut ClientState, data: &[u8], seq: u
 
 pub(crate) fn handle_create_new_context(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
     // Same layout but uses FBConfig ID instead of visual
-    if data.len() < 28 {
-        return crate::xserver::core::build_error_bo(
-            crate::xserver::core::BAD_LENGTH, seq, data.len() as u32,
-            159, 24, state.msb_first,
-        );
-    }
+    require_len!(data, 28, seq, 159, 24, state.msb_first);
     let ctx_id = u32::from_le_bytes([data[4], data[5], data[6], data[7]]);
     let fbconfig = u32::from_le_bytes([data[8], data[9], data[10], data[11]]);
     let screen = u32::from_le_bytes([data[12], data[13], data[14], data[15]]);
@@ -98,12 +89,7 @@ pub(crate) fn handle_create_new_context(state: &mut ClientState, data: &[u8], se
 // ---------------------------------------------------------------------------
 
 pub(crate) fn handle_create_context_attribs(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
-    if data.len() < 28 {
-        return crate::xserver::core::build_error_bo(
-            crate::xserver::core::BAD_LENGTH, seq, data.len() as u32,
-            159, 34, state.msb_first,
-        );
-    }
+    require_len!(data, 28, seq, 159, 34, state.msb_first);
     let ctx_id = u32::from_le_bytes([data[4], data[5], data[6], data[7]]);
     let fbconfig = u32::from_le_bytes([data[8], data[9], data[10], data[11]]);
     let screen = u32::from_le_bytes([data[12], data[13], data[14], data[15]]);
@@ -135,12 +121,7 @@ pub(crate) fn handle_create_context_attribs(state: &mut ClientState, data: &[u8]
 // ---------------------------------------------------------------------------
 
 pub(crate) fn handle_destroy_context(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
-    if data.len() < 8 {
-        return crate::xserver::core::build_error_bo(
-            crate::xserver::core::BAD_LENGTH, seq, data.len() as u32,
-            159, 4, state.msb_first,
-        );
-    }
+    require_len!(data, 8, seq, 159, 4, state.msb_first);
     let ctx_id = u32::from_le_bytes([data[4], data[5], data[6], data[7]]);
     state.glx.contexts.remove(&ctx_id);
     if state.glx.current_context == ctx_id {
@@ -156,12 +137,7 @@ pub(crate) fn handle_destroy_context(state: &mut ClientState, data: &[u8], seq: 
 // ---------------------------------------------------------------------------
 
 pub(crate) fn handle_make_current(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
-    if data.len() < 16 {
-        return crate::xserver::core::build_error_bo(
-            crate::xserver::core::BAD_LENGTH, seq, data.len() as u32,
-            159, 5, state.msb_first,
-        );
-    }
+    require_len!(data, 16, seq, 159, 5, state.msb_first);
     let drawable = u32::from_le_bytes([data[4], data[5], data[6], data[7]]);
     let ctx_id = u32::from_le_bytes([data[8], data[9], data[10], data[11]]);
 
@@ -180,12 +156,7 @@ pub(crate) fn handle_make_current(state: &mut ClientState, data: &[u8], seq: u16
 // ---------------------------------------------------------------------------
 
 pub(crate) fn handle_make_context_current(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
-    if data.len() < 20 {
-        return crate::xserver::core::build_error_bo(
-            crate::xserver::core::BAD_LENGTH, seq, data.len() as u32,
-            159, 26, state.msb_first,
-        );
-    }
+    require_len!(data, 20, seq, 159, 26, state.msb_first);
     // draw drawable, read drawable, context
     let drawable = u32::from_le_bytes([data[4], data[5], data[6], data[7]]);
     let _read_drawable = u32::from_le_bytes([data[8], data[9], data[10], data[11]]);
@@ -269,12 +240,7 @@ pub(crate) fn handle_is_direct(seq: u16) -> Vec<u8> {
 /// acknowledge the request.
 pub(crate) fn handle_copy_context(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
     // Wire: src_context(4) dst_context(4) mask(4) src_context_tag(4)
-    if data.len() < 20 {
-        return crate::xserver::core::build_error_bo(
-            crate::xserver::core::BAD_LENGTH, seq, data.len() as u32,
-            159, 10, state.msb_first,
-        );
-    }
+    require_len!(data, 20, seq, 159, 10, state.msb_first);
     let src_ctx = u32::from_le_bytes([data[4], data[5], data[6], data[7]]);
     let dst_ctx = u32::from_le_bytes([data[8], data[9], data[10], data[11]]);
     let _mask = u32::from_le_bytes([data[12], data[13], data[14], data[15]]);
@@ -303,12 +269,7 @@ pub(crate) fn handle_copy_context(state: &mut ClientState, data: &[u8], seq: u16
 pub(crate) fn handle_glx_single(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
     // GLX single GL commands arrive as individual minor opcodes (101+).
     // Wire layout: major_opcode(1) minor=gl_opcode(1) req_len(2) context_tag(4) payload(...)
-    if data.len() < 8 {
-        return crate::xserver::core::build_error_bo(
-            crate::xserver::core::BAD_LENGTH, seq, data.len() as u32,
-            159, data[1] as u16, state.msb_first,
-        );
-    }
+    require_len!(data, 8, seq, 159, data[1] as u16, state.msb_first);
     let _context_tag = u32::from_le_bytes([data[4], data[5], data[6], data[7]]);
     let gl_opcode = data[1] as u32;
     let payload = if data.len() > 8 { &data[8..] } else { &[] };
@@ -412,12 +373,7 @@ pub(crate) fn handle_vendor_private_with_reply(data: &[u8], seq: u16) -> Vec<u8>
 // ---------------------------------------------------------------------------
 
 pub(crate) fn handle_swap_buffers(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
-    if data.len() < 12 {
-        return crate::xserver::core::build_error_bo(
-            crate::xserver::core::BAD_LENGTH, seq, data.len() as u32,
-            159, 11, state.msb_first,
-        );
-    }
+    require_len!(data, 12, seq, 159, 11, state.msb_first);
     let _tag = u32::from_le_bytes([data[4], data[5], data[6], data[7]]);
     let drawable = u32::from_le_bytes([data[8], data[9], data[10], data[11]]);
 

@@ -1,6 +1,7 @@
 //! GC operations (opcodes 55-60).
 
 use super::*;
+use crate::xserver::core::require_len;
 
 /// Parse GC value-list and apply to `gc`.
 /// Returns `Some((error_bit, bad_value))` if a value fails X11 spec validation,
@@ -60,9 +61,7 @@ fn parse_gc_values(gc: &mut GcState, value_mask: u32, data: &[u8], msb_first: bo
 // ---------------------------------------------------------------------------
 
 pub(crate) fn handle_create_gc(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
-    if data.len() < 16 {
-        return build_error(BAD_LENGTH, state.sequence, 0, 55, 0);
-    }
+    require_len!(data, 16, state.sequence, 55);
 
     let gc_id = state.read_u32(data, 4);
 
@@ -120,9 +119,7 @@ pub(crate) fn handle_create_gc(state: &mut ClientState, data: &[u8]) -> Vec<u8> 
 // ---------------------------------------------------------------------------
 
 pub(crate) fn handle_change_gc(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
-    if data.len() < 12 {
-        return build_error(BAD_LENGTH, state.sequence, 0, 56, 0);
-    }
+    require_len!(data, 12, state.sequence, 56);
 
     let gc_id = state.read_u32(data, 4);
     let value_mask = state.read_u32(data, 8);
@@ -174,9 +171,7 @@ pub(crate) fn handle_change_gc(state: &mut ClientState, data: &[u8]) -> Vec<u8> 
 // ---------------------------------------------------------------------------
 
 pub(crate) fn handle_copy_gc(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
-    if data.len() < 16 {
-        return build_error(BAD_LENGTH, state.sequence, 0, 57, 0);
-    }
+    require_len!(data, 16, state.sequence, 57);
 
     let src_gc = state.read_u32(data, 4);
     let dst_gc = state.read_u32(data, 8);
@@ -238,9 +233,7 @@ pub(crate) fn handle_copy_gc(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
 // ---------------------------------------------------------------------------
 
 pub(crate) fn handle_set_dashes(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
-    if data.len() < 12 {
-        return build_error(BAD_LENGTH, state.sequence, 0, 58, 0);
-    }
+    require_len!(data, 12, state.sequence, 58);
 
     let gc_id = state.read_u32(data, 4);
     let dash_offset = state.read_u16(data, 8);
@@ -277,9 +270,7 @@ pub(crate) fn handle_set_dashes(state: &mut ClientState, data: &[u8]) -> Vec<u8>
 // ---------------------------------------------------------------------------
 
 pub(crate) fn handle_set_clip_rectangles(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
-    if data.len() < 12 {
-        return build_error(BAD_LENGTH, state.sequence, 0, 59, 0);
-    }
+    require_len!(data, 12, state.sequence, 59);
 
     let _ordering = data[1];
     let gc_id = state.read_u32(data, 4);
@@ -321,9 +312,7 @@ pub(crate) fn handle_set_clip_rectangles(state: &mut ClientState, data: &[u8]) -
 // ---------------------------------------------------------------------------
 
 pub(crate) fn handle_free_gc(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
-    if data.len() < 8 {
-        return build_error(BAD_LENGTH, state.sequence, 0, 60, 0);
-    }
+    require_len!(data, 8, state.sequence, 60);
     let gc_id = state.read_u32(data, 4);
     if !state.gcs.contains_key(&gc_id) {
         return build_error(BAD_GC, state.sequence, gc_id, 60, 0);

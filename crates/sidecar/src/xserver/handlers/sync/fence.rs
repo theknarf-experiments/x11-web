@@ -4,8 +4,9 @@
 use tracing::{debug, warn};
 
 use super::super::super::client::ClientState;
-use super::super::super::core::{BAD_LENGTH, BAD_MATCH, BAD_VALUE};
+use super::super::super::core::{BAD_MATCH, BAD_VALUE};
 use super::{check_pending_fence_awaits_ext, FenceState, PendingFenceAwait};
+use crate::xserver::core::require_len;
 
 /// Minor opcode 14: CreateFence
 pub(crate) fn create_fence(state: &mut ClientState, data: &[u8], _seq: u16) -> Vec<u8> {
@@ -96,9 +97,7 @@ pub(crate) fn destroy_fence(state: &mut ClientState, data: &[u8], _seq: u16) -> 
 
 /// Minor opcode 18: QueryFence
 pub(crate) fn query_fence(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
-    if data.len() < 8 {
-        return crate::xserver::core::build_error_bo(BAD_LENGTH, seq, 0, 134, data[1] as u16, state.msb_first);
-    }
+    require_len!(data, 8, seq, 134, data[1] as u16, state.msb_first);
     let fence_id = state.read_u32(data, 4);
     let triggered = state.sync_state.fences.get(&fence_id).map(|f| f.triggered).unwrap_or(true);
     debug!("SYNC QueryFence: id={fence_id:#x} triggered={triggered}");

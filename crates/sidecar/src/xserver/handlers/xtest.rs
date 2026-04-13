@@ -3,6 +3,7 @@
 use tracing::{debug, warn};
 
 use super::super::client::ClientState;
+use crate::xserver::core::require_len;
 
 /// XTEST (opcode 150)
 pub(crate) fn handle_xtest_request(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
@@ -17,12 +18,7 @@ pub(crate) fn handle_xtest_request(state: &mut ClientState, data: &[u8], seq: u1
             reply.to_vec()
         }
         1 => { // CompareCursor
-            if data.len() < 12 {
-                return crate::xserver::core::build_error_bo(
-                    crate::xserver::core::BAD_LENGTH, seq, 0,
-                    150, minor as u16, state.msb_first,
-                );
-            }
+            require_len!(data, 12, seq, 150, minor as u16, state.msb_first);
             let window = state.read_u32(data, 4);
             let cursor_id = state.read_u32(data, 8);
 
@@ -52,12 +48,7 @@ pub(crate) fn handle_xtest_request(state: &mut ClientState, data: &[u8], seq: u1
                     150, minor as u16, state.msb_first,
                 );
             }
-            if data.len() < 24 {
-                return crate::xserver::core::build_error_bo(
-                    crate::xserver::core::BAD_LENGTH, seq, 0,
-                    150, minor as u16, state.msb_first,
-                );
-            }
+            require_len!(data, 24, seq, 150, minor as u16, state.msb_first);
             {
                 let event_type = data[4];
                 let detail = data[5];
@@ -178,12 +169,7 @@ pub(crate) fn handle_xtest_request(state: &mut ClientState, data: &[u8], seq: u1
             // Impervious mode: when enabled, XTEST events bypass active grabs.
             // This allows accessibility tools and test harnesses to inject
             // events even when another client holds a grab.
-            if data.len() < 8 {
-                return crate::xserver::core::build_error_bo(
-                    crate::xserver::core::BAD_LENGTH, seq, 0,
-                    150, minor as u16, state.msb_first,
-                );
-            }
+            require_len!(data, 8, seq, 150, minor as u16, state.msb_first);
             let impervious = data[4] != 0;
             state.xtest_grab_impervious = impervious;
             debug!("XTEST GrabControl: impervious={impervious}");

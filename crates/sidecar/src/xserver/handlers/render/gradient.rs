@@ -2,6 +2,7 @@ use tracing::debug;
 
 use crate::xserver::ClientState;
 use crate::xserver::core::{read_u16_bo, read_u32_bo};
+use crate::xserver::core::require_len;
 use super::{
     PICTFORMAT_ARGB32, read_fixed_bo,
     PictureState, PictFilter, SolidFillState,
@@ -11,11 +12,7 @@ use super::{
 
 pub(crate) fn handle_create_solid_fill(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
     let bo = state.msb_first;
-    if data.len() < 16 {
-        return crate::xserver::core::build_error_bo(
-            crate::xserver::core::BAD_LENGTH, seq, 0, 139, data[1] as u16, bo,
-        );
-    }
+    require_len!(data, 16, seq, 139, data[1] as u16, bo);
     let pid = read_u32_bo(data, 4, bo);
     // Color: 4 x CARD16 (red, green, blue, alpha) at offset 8.
     // XRenderColor is already premultiplied per the X RENDER spec —
@@ -34,11 +31,7 @@ pub(crate) fn handle_create_solid_fill(state: &mut ClientState, data: &[u8], seq
 }
 
 pub(crate) fn handle_create_gradient_fill(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
-    if data.len() < 8 {
-        return crate::xserver::core::build_error_bo(
-            crate::xserver::core::BAD_LENGTH, seq, 0, 139, data[1] as u16, state.msb_first,
-        );
-    }
+    require_len!(data, 8, seq, 139, data[1] as u16, state.msb_first);
     let minor = data[1];
     match minor {
         34 => handle_create_linear_gradient(state, data, seq),
@@ -72,11 +65,7 @@ pub(crate) fn handle_create_gradient_fill(state: &mut ClientState, data: &[u8], 
 fn handle_create_linear_gradient(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
     let bo = state.msb_first;
     let minor = data[1] as u16;
-    if data.len() < 32 {
-        return crate::xserver::core::build_error_bo(
-            crate::xserver::core::BAD_LENGTH, seq, 0, 139, minor, bo,
-        );
-    }
+    require_len!(data, 32, seq, 139, minor, bo);
     let pid = read_u32_bo(data, 4, bo);
     let p1x = read_fixed_bo(data, 8, bo);
     let p1y = read_fixed_bo(data, 12, bo);
@@ -296,11 +285,7 @@ pub(crate) fn rasterize_linear_gradient(
 fn handle_create_radial_gradient(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
     let bo = state.msb_first;
     let minor = data[1] as u16;
-    if data.len() < 40 {
-        return crate::xserver::core::build_error_bo(
-            crate::xserver::core::BAD_LENGTH, seq, 0, 139, minor, bo,
-        );
-    }
+    require_len!(data, 40, seq, 139, minor, bo);
     let pid = read_u32_bo(data, 4, bo);
     let inner_cx = read_fixed_bo(data, 8, bo);
     let inner_cy = read_fixed_bo(data, 12, bo);
@@ -481,11 +466,7 @@ pub(crate) fn rasterize_radial_gradient(
 fn handle_create_conical_gradient(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
     let bo = state.msb_first;
     let minor = data[1] as u16;
-    if data.len() < 24 {
-        return crate::xserver::core::build_error_bo(
-            crate::xserver::core::BAD_LENGTH, seq, 0, 139, minor, bo,
-        );
-    }
+    require_len!(data, 24, seq, 139, minor, bo);
     let pid = read_u32_bo(data, 4, bo);
     let cx = read_fixed_bo(data, 8, bo);
     let cy = read_fixed_bo(data, 12, bo);

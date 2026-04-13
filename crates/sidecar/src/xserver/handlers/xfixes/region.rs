@@ -4,12 +4,11 @@ use tracing::debug;
 
 use super::super::super::client::ClientState;
 use super::super::super::types::{XFixesRegion, RegionRect};
+use crate::xserver::core::require_len;
 
 /// 5: CreateRegion
 pub(crate) fn handle_create_region(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
-    if data.len() < 8 {
-        return crate::xserver::core::build_error_bo(crate::xserver::core::BAD_LENGTH, seq, data.len() as u32, 138, 5, state.msb_first);
-    }
+    require_len!(data, 8, seq, 138, 5, state.msb_first);
     let region_id = state.read_u32(data, 4);
     let num_rects = (data.len() - 8) / 8;
     let mut rects = Vec::with_capacity(num_rects);
@@ -28,9 +27,7 @@ pub(crate) fn handle_create_region(state: &mut ClientState, data: &[u8], seq: u1
 
 /// 6: CreateRegionFromBitmap
 pub(crate) fn handle_create_region_from_bitmap(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
-    if data.len() < 12 {
-        return crate::xserver::core::build_error_bo(crate::xserver::core::BAD_LENGTH, seq, data.len() as u32, 138, 6, state.msb_first);
-    }
+    require_len!(data, 12, seq, 138, 6, state.msb_first);
     let region_id = state.read_u32(data, 4);
     let bitmap_id = state.read_u32(data, 8);
     // Create region from pixmap bitmap — use full pixmap bounds
@@ -47,9 +44,7 @@ pub(crate) fn handle_create_region_from_bitmap(state: &mut ClientState, data: &[
 
 /// 7: CreateRegionFromWindow
 pub(crate) fn handle_create_region_from_window(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
-    if data.len() < 12 {
-        return crate::xserver::core::build_error_bo(crate::xserver::core::BAD_LENGTH, seq, data.len() as u32, 138, 7, state.msb_first);
-    }
+    require_len!(data, 12, seq, 138, 7, state.msb_first);
     let region_id = state.read_u32(data, 4);
     let window_id = state.read_u32(data, 8);
     let region = if let Some(w) = state.windows.get(&window_id) {
@@ -65,9 +60,7 @@ pub(crate) fn handle_create_region_from_window(state: &mut ClientState, data: &[
 
 /// 8: CreateRegionFromGC
 pub(crate) fn handle_create_region_from_gc(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
-    if data.len() < 12 {
-        return crate::xserver::core::build_error_bo(crate::xserver::core::BAD_LENGTH, seq, data.len() as u32, 138, 8, state.msb_first);
-    }
+    require_len!(data, 12, seq, 138, 8, state.msb_first);
     let region_id = state.read_u32(data, 4);
     let gc_id = state.read_u32(data, 8);
     let region = if let Some(gc) = state.gcs.get(&gc_id) {
@@ -87,9 +80,7 @@ pub(crate) fn handle_create_region_from_gc(state: &mut ClientState, data: &[u8],
 
 /// 9: CreateRegionFromPicture
 pub(crate) fn handle_create_region_from_picture(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
-    if data.len() < 12 {
-        return crate::xserver::core::build_error_bo(crate::xserver::core::BAD_LENGTH, seq, data.len() as u32, 138, 9, state.msb_first);
-    }
+    require_len!(data, 12, seq, 138, 9, state.msb_first);
     let region_id = state.read_u32(data, 4);
     let picture_id = state.read_u32(data, 8);
     // Try to use the picture's clip region first; fall back to drawable bounds.
@@ -120,9 +111,7 @@ pub(crate) fn handle_create_region_from_picture(state: &mut ClientState, data: &
 
 /// 10: DestroyRegion
 pub(crate) fn handle_destroy_region(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
-    if data.len() < 8 {
-        return crate::xserver::core::build_error_bo(crate::xserver::core::BAD_LENGTH, seq, data.len() as u32, 138, 10, state.msb_first);
-    }
+    require_len!(data, 8, seq, 138, 10, state.msb_first);
     let region_id = state.read_u32(data, 4);
     state.xfixes_regions.remove(&region_id);
     debug!("DestroyRegion: id={region_id:#x}");
@@ -131,9 +120,7 @@ pub(crate) fn handle_destroy_region(state: &mut ClientState, data: &[u8], seq: u
 
 /// 11: SetRegion
 pub(crate) fn handle_set_region(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
-    if data.len() < 8 {
-        return crate::xserver::core::build_error_bo(crate::xserver::core::BAD_LENGTH, seq, data.len() as u32, 138, 11, state.msb_first);
-    }
+    require_len!(data, 8, seq, 138, 11, state.msb_first);
     let region_id = state.read_u32(data, 4);
     let num_rects = (data.len() - 8) / 8;
     let mut rects = Vec::with_capacity(num_rects);
@@ -151,9 +138,7 @@ pub(crate) fn handle_set_region(state: &mut ClientState, data: &[u8], seq: u16) 
 
 /// 12: CopyRegion
 pub(crate) fn handle_copy_region(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
-    if data.len() < 12 {
-        return crate::xserver::core::build_error_bo(crate::xserver::core::BAD_LENGTH, seq, data.len() as u32, 138, 12, state.msb_first);
-    }
+    require_len!(data, 12, seq, 138, 12, state.msb_first);
     let src_id = state.read_u32(data, 4);
     let dst_id = state.read_u32(data, 8);
     let region = state.xfixes_regions.get(&src_id).cloned().unwrap_or_else(XFixesRegion::new);
@@ -163,9 +148,7 @@ pub(crate) fn handle_copy_region(state: &mut ClientState, data: &[u8], seq: u16)
 
 /// 13: UnionRegion
 pub(crate) fn handle_union_region(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
-    if data.len() < 16 {
-        return crate::xserver::core::build_error_bo(crate::xserver::core::BAD_LENGTH, seq, data.len() as u32, 138, 13, state.msb_first);
-    }
+    require_len!(data, 16, seq, 138, 13, state.msb_first);
     let src1 = state.read_u32(data, 4);
     let src2 = state.read_u32(data, 8);
     let dst = state.read_u32(data, 12);
@@ -177,9 +160,7 @@ pub(crate) fn handle_union_region(state: &mut ClientState, data: &[u8], seq: u16
 
 /// 14: IntersectRegion
 pub(crate) fn handle_intersect_region(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
-    if data.len() < 16 {
-        return crate::xserver::core::build_error_bo(crate::xserver::core::BAD_LENGTH, seq, data.len() as u32, 138, 14, state.msb_first);
-    }
+    require_len!(data, 16, seq, 138, 14, state.msb_first);
     let src1 = state.read_u32(data, 4);
     let src2 = state.read_u32(data, 8);
     let dst = state.read_u32(data, 12);
@@ -191,9 +172,7 @@ pub(crate) fn handle_intersect_region(state: &mut ClientState, data: &[u8], seq:
 
 /// 15: SubtractRegion
 pub(crate) fn handle_subtract_region(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
-    if data.len() < 16 {
-        return crate::xserver::core::build_error_bo(crate::xserver::core::BAD_LENGTH, seq, data.len() as u32, 138, 15, state.msb_first);
-    }
+    require_len!(data, 16, seq, 138, 15, state.msb_first);
     let src1 = state.read_u32(data, 4);
     let src2 = state.read_u32(data, 8);
     let dst = state.read_u32(data, 12);
@@ -205,9 +184,7 @@ pub(crate) fn handle_subtract_region(state: &mut ClientState, data: &[u8], seq: 
 
 /// 16: InvertRegion
 pub(crate) fn handle_invert_region(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
-    if data.len() < 20 {
-        return crate::xserver::core::build_error_bo(crate::xserver::core::BAD_LENGTH, seq, data.len() as u32, 138, 16, state.msb_first);
-    }
+    require_len!(data, 20, seq, 138, 16, state.msb_first);
     let src = state.read_u32(data, 4);
     let bx = state.read_i16(data, 8);
     let by = state.read_i16(data, 10);
@@ -222,9 +199,7 @@ pub(crate) fn handle_invert_region(state: &mut ClientState, data: &[u8], seq: u1
 
 /// 17: TranslateRegion
 pub(crate) fn handle_translate_region(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
-    if data.len() < 12 {
-        return crate::xserver::core::build_error_bo(crate::xserver::core::BAD_LENGTH, seq, data.len() as u32, 138, 17, state.msb_first);
-    }
+    require_len!(data, 12, seq, 138, 17, state.msb_first);
     let region_id = state.read_u32(data, 4);
     let dx = state.read_i16(data, 8);
     let dy = state.read_i16(data, 10);
@@ -236,9 +211,7 @@ pub(crate) fn handle_translate_region(state: &mut ClientState, data: &[u8], seq:
 
 /// 18: RegionExtents
 pub(crate) fn handle_region_extents(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
-    if data.len() < 12 {
-        return crate::xserver::core::build_error_bo(crate::xserver::core::BAD_LENGTH, seq, data.len() as u32, 138, 18, state.msb_first);
-    }
+    require_len!(data, 12, seq, 138, 18, state.msb_first);
     let src = state.read_u32(data, 4);
     let dst = state.read_u32(data, 8);
     let ext = state.xfixes_regions.get(&src)
@@ -250,9 +223,7 @@ pub(crate) fn handle_region_extents(state: &mut ClientState, data: &[u8], seq: u
 
 /// 19: FetchRegion
 pub(crate) fn handle_fetch_region(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
-    if data.len() < 8 {
-        return crate::xserver::core::build_error_bo(crate::xserver::core::BAD_LENGTH, seq, data.len() as u32, 138, 19, state.msb_first);
-    }
+    require_len!(data, 8, seq, 138, 19, state.msb_first);
     let region_id = state.read_u32(data, 4);
     let region = state.xfixes_regions.get(&region_id);
     let (ext, rects) = match region {
@@ -285,9 +256,7 @@ pub(crate) fn handle_fetch_region(state: &mut ClientState, data: &[u8], seq: u16
 
 /// 20: SetGCClipRegion
 pub(crate) fn handle_set_gc_clip_region(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
-    if data.len() < 16 {
-        return crate::xserver::core::build_error_bo(crate::xserver::core::BAD_LENGTH, seq, data.len() as u32, 138, 20, state.msb_first);
-    }
+    require_len!(data, 16, seq, 138, 20, state.msb_first);
     let gc_id = state.read_u32(data, 4);
     let region_id = state.read_u32(data, 8);
     let x_origin = state.read_i16(data, 12);
@@ -343,9 +312,7 @@ pub(crate) fn handle_set_window_shape_region(state: &mut ClientState, data: &[u8
 
 /// 22: SetPictureClipRegion
 pub(crate) fn handle_set_picture_clip_region(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
-    if data.len() < 16 {
-        return crate::xserver::core::build_error_bo(crate::xserver::core::BAD_LENGTH, seq, data.len() as u32, 138, 22, state.msb_first);
-    }
+    require_len!(data, 16, seq, 138, 22, state.msb_first);
     let pic_id = state.read_u32(data, 4);
     let region_id = state.read_u32(data, 8);
     let x_origin = state.read_i16(data, 12);
@@ -363,9 +330,7 @@ pub(crate) fn handle_set_picture_clip_region(state: &mut ClientState, data: &[u8
 
 /// 28: ExpandRegion
 pub(crate) fn handle_expand_region(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
-    if data.len() < 20 {
-        return crate::xserver::core::build_error_bo(crate::xserver::core::BAD_LENGTH, seq, data.len() as u32, 138, 28, state.msb_first);
-    }
+    require_len!(data, 20, seq, 138, 28, state.msb_first);
     let src = state.read_u32(data, 4);
     let dst = state.read_u32(data, 8);
     let left = state.read_u16(data, 12) as i16;

@@ -1,15 +1,14 @@
 //! SendEvent handler — opcode 25.
 
 use super::*;
+use crate::xserver::core::require_len;
 
 // ---------------------------------------------------------------------------
 // Opcode 25: SendEvent
 // ---------------------------------------------------------------------------
 
 pub(crate) fn handle_send_event(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
-    if data.len() < 44 {
-        return build_error(BAD_LENGTH, state.sequence, 0, 25, 0);
-    }
+    require_len!(data, 44, state.sequence, 25);
 
     let propagate = data[1] != 0;
     let destination = state.read_u32(data, 4);

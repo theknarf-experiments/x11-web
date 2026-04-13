@@ -3,14 +3,12 @@
 use tracing::debug;
 
 use super::super::super::client::ClientState;
-use super::super::super::core::BAD_LENGTH;
 use super::SyncAlarm;
+use crate::xserver::core::require_len;
 
 /// Minor opcode 8: CreateAlarm
 pub(crate) fn create_alarm(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
-    if data.len() < 8 {
-        return crate::xserver::core::build_error_bo(BAD_LENGTH, seq, 0, 134, data[1] as u16, state.msb_first);
-    }
+    require_len!(data, 8, seq, 134, data[1] as u16, state.msb_first);
     let alarm_id = state.read_u32(data, 4);
     let value_mask = if data.len() >= 12 { state.read_u32(data, 8) } else { 0 };
 
@@ -66,9 +64,7 @@ pub(crate) fn create_alarm(state: &mut ClientState, data: &[u8], seq: u16) -> Ve
 
 /// Minor opcode 9: ChangeAlarm
 pub(crate) fn change_alarm(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
-    if data.len() < 8 {
-        return crate::xserver::core::build_error_bo(BAD_LENGTH, seq, 0, 134, data[1] as u16, state.msb_first);
-    }
+    require_len!(data, 8, seq, 134, data[1] as u16, state.msb_first);
     let bo = state.msb_first;
     let alarm_id = state.read_u32(data, 4);
     let value_mask = if data.len() >= 12 { state.read_u32(data, 8) } else { 0 };
@@ -113,9 +109,7 @@ pub(crate) fn change_alarm(state: &mut ClientState, data: &[u8], seq: u16) -> Ve
 
 /// Minor opcode 10: QueryAlarm
 pub(crate) fn query_alarm(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
-    if data.len() < 8 {
-        return crate::xserver::core::build_error_bo(BAD_LENGTH, seq, 0, 134, data[1] as u16, state.msb_first);
-    }
+    require_len!(data, 8, seq, 134, data[1] as u16, state.msb_first);
     let alarm_id = state.read_u32(data, 4);
     debug!("SYNC QueryAlarm: id={alarm_id:#x}");
 

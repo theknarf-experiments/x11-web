@@ -7,6 +7,7 @@ mod barrier;
 use tracing::debug;
 
 use super::super::client::ClientState;
+use crate::xserver::core::require_len;
 
 pub(crate) fn handle_xfixes_request(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
     let minor = data[1];
@@ -25,12 +26,7 @@ pub(crate) fn handle_xfixes_request(state: &mut ClientState, data: &[u8], seq: u
 
         // 1: ChangeSaveSet (extended)
         1 => {
-            if data.len() < 12 {
-                return crate::xserver::core::build_error_bo(
-                    crate::xserver::core::BAD_LENGTH, seq, 0,
-                    138, 1, state.msb_first,
-                );
-            }
+            require_len!(data, 12, seq, 138, 1, state.msb_first);
             let window = state.read_u32(data, 4);
             let mode   = data[8];
             let _target = if data.len() > 9 { data[9] } else { 0 };

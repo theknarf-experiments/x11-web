@@ -5,6 +5,7 @@ use tracing::{debug, info, warn};
 use super::super::client::ClientState;
 use super::super::core::{OVERLAY_WINDOW, ROOT_COLORMAP};
 use super::super::types::{DamageInfo, PixmapState, WindowState, WindowType};
+use crate::xserver::core::require_len;
 
 pub(crate) fn handle_damage_request(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
     let minor = data[1];
@@ -22,12 +23,7 @@ pub(crate) fn handle_damage_request(state: &mut ClientState, data: &[u8], seq: u
         }
         1 => {
             // DamageCreate: data[4..8] = damage_id, data[8..12] = drawable, data[12] = level
-            if data.len() < 13 {
-                return crate::xserver::core::build_error_bo(
-                    crate::xserver::core::BAD_LENGTH, seq, 0,
-                    143, minor as u16, state.msb_first,
-                );
-            }
+            require_len!(data, 13, seq, 143, minor as u16, state.msb_first);
             let damage_id = state.read_u32(data, 4);
             let drawable = state.read_u32(data, 8);
             let level = data[12];
@@ -37,12 +33,7 @@ pub(crate) fn handle_damage_request(state: &mut ClientState, data: &[u8], seq: u
         }
         2 => {
             // DamageDestroy: data[4..8] = damage_id
-            if data.len() < 8 {
-                return crate::xserver::core::build_error_bo(
-                    crate::xserver::core::BAD_LENGTH, seq, 0,
-                    143, minor as u16, state.msb_first,
-                );
-            }
+            require_len!(data, 8, seq, 143, minor as u16, state.msb_first);
             let damage_id = state.read_u32(data, 4);
             debug!("DAMAGE Destroy: id={damage_id:#x}");
             state.damage_regions.remove(&damage_id);
@@ -52,12 +43,7 @@ pub(crate) fn handle_damage_request(state: &mut ClientState, data: &[u8], seq: u
             // DamageSubtract: data[4..8] = damage_id, data[8..12] = repair_region, data[12..16] = parts_region
             // Per spec: subtract 'repair' from damage, store remainder in 'parts'.
             // The repair region is what the client has already processed.
-            if data.len() < 16 {
-                return crate::xserver::core::build_error_bo(
-                    crate::xserver::core::BAD_LENGTH, seq, 0,
-                    143, minor as u16, state.msb_first,
-                );
-            }
+            require_len!(data, 16, seq, 143, minor as u16, state.msb_first);
             let damage_id = state.read_u32(data, 4);
             let repair = state.read_u32(data, 8);
             let parts = state.read_u32(data, 12);
@@ -78,12 +64,7 @@ pub(crate) fn handle_damage_request(state: &mut ClientState, data: &[u8], seq: u
         }
         4 => {
             // DamageAdd: manually add damage to a drawable
-            if data.len() < 12 {
-                return crate::xserver::core::build_error_bo(
-                    crate::xserver::core::BAD_LENGTH, seq, 0,
-                    143, minor as u16, state.msb_first,
-                );
-            }
+            require_len!(data, 12, seq, 143, minor as u16, state.msb_first);
             let drawable = state.read_u32(data, 4);
             let region = state.read_u32(data, 8);
             debug!("DAMAGE Add: drawable={drawable:#x} region={region:#x}");
@@ -120,12 +101,7 @@ pub(crate) fn handle_x_composite_request(state: &mut ClientState, data: &[u8], s
         }
         1 => {
             // RedirectWindow: data[4..8] = window, data[8] = update
-            if data.len() < 9 {
-                return crate::xserver::core::build_error_bo(
-                    crate::xserver::core::BAD_LENGTH, seq, 0,
-                    142, minor as u16, state.msb_first,
-                );
-            }
+            require_len!(data, 9, seq, 142, minor as u16, state.msb_first);
             let window = state.read_u32(data, 4);
             let update = data[8];
             info!("Composite RedirectWindow: window={window:#x} update={update}");
@@ -141,12 +117,7 @@ pub(crate) fn handle_x_composite_request(state: &mut ClientState, data: &[u8], s
         }
         2 => {
             // RedirectSubwindows: data[4..8] = window, data[8] = update
-            if data.len() < 9 {
-                return crate::xserver::core::build_error_bo(
-                    crate::xserver::core::BAD_LENGTH, seq, 0,
-                    142, minor as u16, state.msb_first,
-                );
-            }
+            require_len!(data, 9, seq, 142, minor as u16, state.msb_first);
             let window = state.read_u32(data, 4);
             let update = data[8];
             info!("Composite RedirectSubwindows: window={window:#x} update={update}");
@@ -170,12 +141,7 @@ pub(crate) fn handle_x_composite_request(state: &mut ClientState, data: &[u8], s
         }
         3 => {
             // UnredirectWindow: data[4..8] = window
-            if data.len() < 8 {
-                return crate::xserver::core::build_error_bo(
-                    crate::xserver::core::BAD_LENGTH, seq, 0,
-                    142, minor as u16, state.msb_first,
-                );
-            }
+            require_len!(data, 8, seq, 142, minor as u16, state.msb_first);
             let window = state.read_u32(data, 4);
             debug!("Composite UnredirectWindow: window={window:#x}");
             if let Some(win) = state.windows.get_mut(&window) {
@@ -190,12 +156,7 @@ pub(crate) fn handle_x_composite_request(state: &mut ClientState, data: &[u8], s
         }
         4 => {
             // UnredirectSubwindows: data[4..8] = window
-            if data.len() < 8 {
-                return crate::xserver::core::build_error_bo(
-                    crate::xserver::core::BAD_LENGTH, seq, 0,
-                    142, minor as u16, state.msb_first,
-                );
-            }
+            require_len!(data, 8, seq, 142, minor as u16, state.msb_first);
             let window = state.read_u32(data, 4);
             debug!("Composite UnredirectSubwindows: window={window:#x}");
             if !state.windows.contains_key(&window) {
@@ -217,12 +178,7 @@ pub(crate) fn handle_x_composite_request(state: &mut ClientState, data: &[u8], s
         }
         5 => {
             // CreateRegionFromBorderClip: data[4..8] = region, data[8..12] = window
-            if data.len() < 12 {
-                return crate::xserver::core::build_error_bo(
-                    crate::xserver::core::BAD_LENGTH, seq, 0,
-                    142, minor as u16, state.msb_first,
-                );
-            }
+            require_len!(data, 12, seq, 142, minor as u16, state.msb_first);
             let region_id = state.read_u32(data, 4);
             let window = state.read_u32(data, 8);
             debug!("Composite CreateRegionFromBorderClip: region={region_id:#x} window={window:#x}");
@@ -253,12 +209,7 @@ pub(crate) fn handle_x_composite_request(state: &mut ClientState, data: &[u8], s
             // CopyArea) see the real pixel data and writes go to the snapshot.
             // The alias_window link is kept so that damage notifications and
             // resolve_drawable still route correctly.
-            if data.len() < 12 {
-                return crate::xserver::core::build_error_bo(
-                    crate::xserver::core::BAD_LENGTH, seq, 0,
-                    142, minor as u16, state.msb_first,
-                );
-            }
+            require_len!(data, 12, seq, 142, minor as u16, state.msb_first);
             let window = state.read_u32(data, 4);
             let pixmap = state.read_u32(data, 8);
             if let Some(win) = state.windows.get(&window) {
@@ -355,12 +306,7 @@ pub(crate) fn handle_x_composite_request(state: &mut ClientState, data: &[u8], s
             // ReleaseOverlayWindow: data[4..8] = window
             // Decrements the internal reference count on the overlay window.
             // When the count reaches zero the overlay is no longer in use.
-            if data.len() < 8 {
-                return crate::xserver::core::build_error_bo(
-                    crate::xserver::core::BAD_LENGTH, seq, 0,
-                    142, minor as u16, state.msb_first,
-                );
-            }
+            require_len!(data, 8, seq, 142, minor as u16, state.msb_first);
             let window = state.read_u32(data, 4);
             if state.overlay_ref_count > 0 {
                 state.overlay_ref_count -= 1;

@@ -1,15 +1,14 @@
 //! Pixmap operations (opcodes 53-54).
 
 use super::*;
+use crate::xserver::core::require_len;
 
 // ---------------------------------------------------------------------------
 // Opcode 53: CreatePixmap
 // ---------------------------------------------------------------------------
 
 pub(crate) fn handle_create_pixmap(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
-    if data.len() < 16 {
-        return build_error(BAD_LENGTH, state.sequence, 0, 53, 0);
-    }
+    require_len!(data, 16, state.sequence, 53);
 
     let depth = data[1];
     let pid = state.read_u32(data, 4);
@@ -66,9 +65,7 @@ pub(crate) fn handle_create_pixmap(state: &mut ClientState, data: &[u8]) -> Vec<
 // ---------------------------------------------------------------------------
 
 pub(crate) fn handle_free_pixmap(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
-    if data.len() < 8 {
-        return build_error(BAD_LENGTH, state.sequence, 0, 54, 0);
-    }
+    require_len!(data, 8, state.sequence, 54);
     let pid = state.read_u32(data, 4);
     if !state.pixmaps.contains_key(&pid) {
         return build_error(BAD_PIXMAP, state.sequence, pid, 54, 0);

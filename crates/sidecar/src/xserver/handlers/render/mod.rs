@@ -3,6 +3,7 @@ use tracing::{debug, info};
 
 use crate::xserver::ClientState;
 use crate::xserver::core::read_u32_bo;
+use crate::xserver::core::require_len;
 
 mod picture;
 mod composite;
@@ -523,11 +524,7 @@ fn reject_gradient_destination(
 
 pub fn handle_render_request(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
     let bo = state.msb_first;
-    if data.len() < 4 {
-        return crate::xserver::core::build_error_bo(
-            crate::xserver::core::BAD_LENGTH, seq, 0, 139, 0, bo,
-        );
-    }
+    require_len!(data, 4, seq, 139, 0, bo);
 
     let minor = data[1];
     info!("Render op minor={minor}");

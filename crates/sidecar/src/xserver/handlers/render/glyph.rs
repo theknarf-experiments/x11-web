@@ -3,6 +3,7 @@ use tracing::debug;
 
 use crate::xserver::ClientState;
 use crate::xserver::core::{read_u16_bo, read_u32_bo, read_i16_bo};
+use crate::xserver::core::require_len;
 use super::{
     PICTFORMAT_ARGB32, PICTFORMAT_A8, PICTFORMAT_A1,
     pict_format_has_alpha, pad4,
@@ -12,11 +13,7 @@ use super::{
 
 pub(crate) fn handle_create_glyphset(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
     let bo = state.msb_first;
-    if data.len() < 12 {
-        return crate::xserver::core::build_error_bo(
-            crate::xserver::core::BAD_LENGTH, seq, 0, 139, data[1] as u16, bo,
-        );
-    }
+    require_len!(data, 12, seq, 139, data[1] as u16, bo);
     let gsid = read_u32_bo(data, 4, bo);
     let format_id = read_u32_bo(data, 8, bo);
 
@@ -34,11 +31,7 @@ pub(crate) fn handle_create_glyphset(state: &mut ClientState, data: &[u8], seq: 
 
 pub(crate) fn handle_free_glyphset(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
     let bo = state.msb_first;
-    if data.len() < 8 {
-        return crate::xserver::core::build_error_bo(
-            crate::xserver::core::BAD_LENGTH, seq, 0, 139, data[1] as u16, bo,
-        );
-    }
+    require_len!(data, 8, seq, 139, data[1] as u16, bo);
     let gsid = read_u32_bo(data, 4, bo);
     state.render.glyphsets.remove(&gsid);
     Vec::new()
@@ -48,11 +41,7 @@ pub(crate) fn handle_free_glyphset(state: &mut ClientState, data: &[u8], seq: u1
 /// Creates a new glyphset that shares glyphs with an existing one.
 pub(crate) fn handle_reference_glyphset(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
     let bo = state.msb_first;
-    if data.len() < 12 {
-        return crate::xserver::core::build_error_bo(
-            crate::xserver::core::BAD_LENGTH, seq, 0, 139, data[1] as u16, bo,
-        );
-    }
+    require_len!(data, 12, seq, 139, data[1] as u16, bo);
     let new_gsid = read_u32_bo(data, 4, bo);
     let existing_gsid = read_u32_bo(data, 8, bo);
 
@@ -81,22 +70,14 @@ pub(crate) fn handle_reference_glyphset(state: &mut ClientState, data: &[u8], se
 pub(crate) fn handle_add_glyphs(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
     let bo = state.msb_first;
     let minor = data[1] as u16;
-    if data.len() < 12 {
-        return crate::xserver::core::build_error_bo(
-            crate::xserver::core::BAD_LENGTH, seq, 0, 139, minor, bo,
-        );
-    }
+    require_len!(data, 12, seq, 139, minor, bo);
 
     let gsid = read_u32_bo(data, 4, bo);
     let num_glyphs = read_u32_bo(data, 8, bo) as usize;
 
     debug!("Render AddGlyphs: gsid={gsid:#x} num={num_glyphs}");
 
-    if data.len() < 12 + num_glyphs * 4 {
-        return crate::xserver::core::build_error_bo(
-            crate::xserver::core::BAD_LENGTH, seq, 0, 139, minor, bo,
-        );
-    }
+    require_len!(data, 12 + num_glyphs * 4, seq, 139, minor, bo);
 
     // Read glyph IDs
     let mut glyph_ids = Vec::with_capacity(num_glyphs);
@@ -105,11 +86,7 @@ pub(crate) fn handle_add_glyphs(state: &mut ClientState, data: &[u8], seq: u16) 
     }
 
     let info_start = 12 + num_glyphs * 4;
-    if data.len() < info_start + num_glyphs * 12 {
-        return crate::xserver::core::build_error_bo(
-            crate::xserver::core::BAD_LENGTH, seq, 0, 139, minor, bo,
-        );
-    }
+    require_len!(data, info_start + num_glyphs * 12, seq, 139, minor, bo);
 
     // Read GlyphInfo entries (12 bytes each)
     let mut glyph_infos = Vec::with_capacity(num_glyphs);
@@ -231,11 +208,7 @@ pub(crate) fn handle_add_glyphs(state: &mut ClientState, data: &[u8], seq: u16) 
 pub(crate) fn handle_add_glyphs_from_picture(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
     let bo = state.msb_first;
     let minor = data[1] as u16;
-    if data.len() < 16 {
-        return crate::xserver::core::build_error_bo(
-            crate::xserver::core::BAD_LENGTH, seq, 0, 139, minor, bo,
-        );
-    }
+    require_len!(data, 16, seq, 139, minor, bo);
 
     let gsid = read_u32_bo(data, 4, bo);
     let src_picture = read_u32_bo(data, 8, bo);
@@ -243,11 +216,7 @@ pub(crate) fn handle_add_glyphs_from_picture(state: &mut ClientState, data: &[u8
 
     debug!("Render AddGlyphsFromPicture: gsid={gsid:#x} src={src_picture:#x} num={num_glyphs}");
 
-    if data.len() < 16 + num_glyphs * 4 {
-        return crate::xserver::core::build_error_bo(
-            crate::xserver::core::BAD_LENGTH, seq, 0, 139, minor, bo,
-        );
-    }
+    require_len!(data, 16 + num_glyphs * 4, seq, 139, minor, bo);
 
     // Read glyph IDs
     let mut glyph_ids = Vec::with_capacity(num_glyphs);
@@ -256,11 +225,7 @@ pub(crate) fn handle_add_glyphs_from_picture(state: &mut ClientState, data: &[u8
     }
 
     let info_start = 16 + num_glyphs * 4;
-    if data.len() < info_start + num_glyphs * 12 {
-        return crate::xserver::core::build_error_bo(
-            crate::xserver::core::BAD_LENGTH, seq, 0, 139, minor, bo,
-        );
-    }
+    require_len!(data, info_start + num_glyphs * 12, seq, 139, minor, bo);
 
     // Read GlyphInfo entries (12 bytes each)
     let mut glyph_infos = Vec::with_capacity(num_glyphs);
@@ -393,11 +358,7 @@ pub(crate) fn handle_add_glyphs_from_picture(state: &mut ClientState, data: &[u8
 
 pub(crate) fn handle_free_glyphs(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
     let bo = state.msb_first;
-    if data.len() < 8 {
-        return crate::xserver::core::build_error_bo(
-            crate::xserver::core::BAD_LENGTH, seq, 0, 139, data[1] as u16, bo,
-        );
-    }
+    require_len!(data, 8, seq, 139, data[1] as u16, bo);
     let gsid = read_u32_bo(data, 4, bo);
     let num_glyphs = (data.len() - 8) / 4;
 
@@ -414,11 +375,7 @@ pub(crate) fn handle_free_glyphs(state: &mut ClientState, data: &[u8], seq: u16)
 pub(crate) fn handle_composite_glyphs(state: &mut ClientState, data: &[u8], glyph_id_size: usize, seq: u16) -> Vec<u8> {
     let bo = state.msb_first;
     let minor = data[1] as u16;
-    if data.len() < 28 {
-        return crate::xserver::core::build_error_bo(
-            crate::xserver::core::BAD_LENGTH, seq, 0, 139, minor, bo,
-        );
-    }
+    require_len!(data, 28, seq, 139, minor, bo);
 
     let pict_op = data[4];
     let src_pic = read_u32_bo(data, 8, bo);

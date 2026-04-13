@@ -4,6 +4,7 @@ use tracing::{debug, info};
 
 use super::super::client::ClientState;
 use super::super::types::PresentSubscription;
+use crate::xserver::core::require_len;
 
 // Present event mask bits (from the Present extension spec).
 const PRESENT_COMPLETE_NOTIFY_MASK: u32 = 1;
@@ -104,13 +105,7 @@ pub(crate) fn handle_present_request(state: &mut ClientState, data: &[u8], seq: 
         }
         // Pixmap (PresentPixmap) — the critical operation
         1 => {
-            if data.len() < 72 {
-                debug!("PresentPixmap: request too short ({} bytes)", data.len());
-                return crate::xserver::core::build_error_bo(
-                    crate::xserver::core::BAD_LENGTH, seq, 0,
-                    148, minor as u16, state.msb_first,
-                );
-            }
+            require_len!(data, 72, seq, 148, minor as u16, state.msb_first);
             let window = state.read_u32(data, 4);
             let pixmap = state.read_u32(data, 8);
             let serial = state.read_u32(data, 12);
@@ -457,13 +452,7 @@ pub(crate) fn handle_present_request(state: &mut ClientState, data: &[u8], seq: 
         }
         // NotifyMSC
         2 => {
-            if data.len() < 40 {
-                debug!("PresentNotifyMSC: request too short");
-                return crate::xserver::core::build_error_bo(
-                    crate::xserver::core::BAD_LENGTH, seq, 0,
-                    148, minor as u16, state.msb_first,
-                );
-            }
+            require_len!(data, 40, seq, 148, minor as u16, state.msb_first);
             let window = state.read_u32(data, 4);
             let serial = state.read_u32(data, 8);
             // target_msc at bytes 16-23, divisor at 24-31, remainder at 32-39
@@ -516,13 +505,7 @@ pub(crate) fn handle_present_request(state: &mut ClientState, data: &[u8], seq: 
         }
         // SelectInput
         3 => {
-            if data.len() < 16 {
-                debug!("PresentSelectInput: request too short ({} bytes)", data.len());
-                return crate::xserver::core::build_error_bo(
-                    crate::xserver::core::BAD_LENGTH, seq, 0,
-                    148, minor as u16, state.msb_first,
-                );
-            }
+            require_len!(data, 16, seq, 148, minor as u16, state.msb_first);
             let event_id = state.read_u32(data, 4);
             let window = state.read_u32(data, 8);
             let event_mask = state.read_u32(data, 12);

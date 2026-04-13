@@ -1,6 +1,7 @@
 //! Input, keyboard, and pointer handlers (opcodes 38-44, 100-119).
 
 use super::*;
+use crate::xserver::core::require_len;
 
 // ---------------------------------------------------------------------------
 // Opcode 104: Bell
@@ -31,9 +32,7 @@ pub(crate) fn handle_bell(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
 
 pub(crate) fn handle_query_pointer(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
     state.motion_hint_suppressed = false;
-    if data.len() < 8 {
-        return build_error(BAD_LENGTH, seq, 0, 38, 0);
-    }
+    require_len!(data, 8, seq, 38);
     // Read the window parameter from the request (offset 4, u32)
     let window = state.read_u32(data, 4);
 
@@ -95,9 +94,7 @@ pub(crate) fn handle_query_pointer(state: &mut ClientState, data: &[u8], seq: u1
 
 pub(crate) fn handle_get_motion_events(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
     state.motion_hint_suppressed = false;
-    if data.len() < 16 {
-        return build_error(BAD_LENGTH, seq, 0, 39, 0);
-    }
+    require_len!(data, 16, seq, 39);
     // Parse time range from request
     let start_time = state.read_u32(data, 8);
     let stop_time = state.read_u32(data, 12);
@@ -134,9 +131,7 @@ pub(crate) fn handle_get_motion_events(state: &mut ClientState, data: &[u8], seq
 // ---------------------------------------------------------------------------
 
 pub(crate) fn handle_translate_coordinates(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
-    if data.len() < 16 {
-        return build_error(BAD_LENGTH, seq, 0, 40, 0);
-    }
+    require_len!(data, 16, seq, 40);
 
     let src_window = state.read_u32(data, 4);
     let dst_window = state.read_u32(data, 8);
@@ -211,9 +206,7 @@ pub(crate) fn handle_translate_coordinates(state: &mut ClientState, data: &[u8],
 // ---------------------------------------------------------------------------
 
 pub(crate) fn handle_warp_pointer(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
-    if data.len() < 24 {
-        return build_error(BAD_LENGTH, seq, 0, 41, 0);
-    }
+    require_len!(data, 24, seq, 41);
 
     let _src_window = state.read_u32(data, 4);
     let dst_window = state.read_u32(data, 8);
@@ -285,9 +278,7 @@ pub(crate) fn handle_warp_pointer(state: &mut ClientState, data: &[u8], seq: u16
 // ---------------------------------------------------------------------------
 
 pub(crate) fn handle_set_input_focus(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
-    if data.len() < 8 {
-        return build_error(BAD_LENGTH, state.sequence, 0, 42, 0);
-    }
+    require_len!(data, 8, state.sequence, 42);
     // data[1] = revert_to (0=None, 1=PointerRoot, 2=Parent)
     let revert_to = data[1];
     if revert_to > 2 {
@@ -337,9 +328,7 @@ pub(crate) fn handle_query_keymap(state: &ClientState, seq: u16) -> Vec<u8> {
 // ---------------------------------------------------------------------------
 
 pub(crate) fn handle_change_keyboard_mapping(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
-    if data.len() < 8 {
-        return build_error(BAD_LENGTH, seq, 0, 100, 0);
-    }
+    require_len!(data, 8, seq, 100);
 
     let keycode_count = data[1] as usize;
     let first_keycode = data[4];
@@ -391,9 +380,7 @@ pub(crate) fn handle_change_keyboard_mapping(state: &mut ClientState, data: &[u8
 // ---------------------------------------------------------------------------
 
 pub(crate) fn handle_get_keyboard_mapping(state: &ClientState, data: &[u8], seq: u16) -> Vec<u8> {
-    if data.len() < 8 {
-        return build_error(BAD_LENGTH, seq, 0, 101, 0);
-    }
+    require_len!(data, 8, seq, 101);
     let first_keycode = data[4];
     let count = data[5];
 
@@ -436,9 +423,7 @@ pub(crate) fn handle_get_keyboard_mapping(state: &ClientState, data: &[u8], seq:
 // ---------------------------------------------------------------------------
 
 pub(crate) fn handle_change_keyboard_control(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
-    if data.len() < 8 {
-        return build_error(BAD_LENGTH, state.sequence, 0, 102, 0);
-    }
+    require_len!(data, 8, state.sequence, 102);
 
     let value_mask = state.read_u32(data, 4);
     let mut offset = 8;
@@ -491,9 +476,7 @@ pub(crate) fn handle_get_keyboard_control(state: &ClientState, seq: u16) -> Vec<
 // ---------------------------------------------------------------------------
 
 pub(crate) fn handle_change_pointer_control(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
-    if data.len() < 12 {
-        return build_error(BAD_LENGTH, state.sequence, 0, 105, 0);
-    }
+    require_len!(data, 12, state.sequence, 105);
 
     let accel_num = state.read_i16(data, 4);
     let accel_den = state.read_i16(data, 6);
@@ -536,9 +519,7 @@ pub(crate) fn handle_get_pointer_control(state: &ClientState, seq: u16) -> Vec<u
 // ---------------------------------------------------------------------------
 
 pub(crate) fn handle_set_screen_saver(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
-    if data.len() < 10 {
-        return build_error(BAD_LENGTH, state.sequence, 0, 107, 0);
-    }
+    require_len!(data, 10, state.sequence, 107);
 
     let timeout = state.read_i16(data, 4);
     let interval = state.read_i16(data, 6);
@@ -732,15 +713,11 @@ pub(crate) fn handle_list_hosts(state: &ClientState, seq: u16) -> Vec<u8> {
 pub(crate) fn handle_change_hosts(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
     use super::super::client::AccessHost;
 
-    if data.len() < 8 {
-        return build_error(BAD_LENGTH, state.sequence, 0, 109, 0);
-    }
+    require_len!(data, 8, state.sequence, 109);
     let mode = data[1]; // 0 = Insert, 1 = Delete
     let family = data[4];
     let addr_len = state.read_u16(data, 6) as usize;
-    if data.len() < 8 + addr_len {
-        return build_error(BAD_LENGTH, state.sequence, 0, 109, 0);
-    }
+    require_len!(data, 8 + addr_len, state.sequence, 109);
     let address = data[8..8 + addr_len].to_vec();
 
     // Validate mode: per X11 spec, only 0 (Insert) and 1 (Delete) are valid
@@ -810,9 +787,7 @@ pub(crate) fn handle_change_hosts(state: &mut ClientState, data: &[u8]) -> Vec<u
 // ---------------------------------------------------------------------------
 
 pub(crate) fn handle_set_access_control(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
-    if data.len() < 4 {
-        return build_error(BAD_LENGTH, state.sequence, 0, 111, 0);
-    }
+    require_len!(data, 4, state.sequence, 111);
     state.access_control_enabled = data[1] != 0;
     debug!("SetAccessControl: enabled={}", state.access_control_enabled);
 
@@ -829,9 +804,7 @@ pub(crate) fn handle_set_access_control(state: &mut ClientState, data: &[u8]) ->
 // ---------------------------------------------------------------------------
 
 pub(crate) fn handle_set_close_down_mode(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
-    if data.len() < 4 {
-        return build_error(BAD_LENGTH, state.sequence, 0, 112, 0);
-    }
+    require_len!(data, 4, state.sequence, 112);
     state.close_down_mode = data[1];
     debug!("SetCloseDownMode: mode={}", data[1]);
     Vec::new()
@@ -842,9 +815,7 @@ pub(crate) fn handle_set_close_down_mode(state: &mut ClientState, data: &[u8]) -
 // ---------------------------------------------------------------------------
 
 pub(crate) fn handle_kill_client(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
-    if data.len() < 8 {
-        return build_error(BAD_LENGTH, state.sequence, 0, 113, 0);
-    }
+    require_len!(data, 8, state.sequence, 113);
 
     let resource = state.read_u32(data, 4);
 
@@ -902,9 +873,7 @@ pub(crate) fn handle_kill_client(state: &mut ClientState, data: &[u8]) -> Vec<u8
 // ---------------------------------------------------------------------------
 
 pub(crate) fn handle_rotate_properties(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
-    if data.len() < 12 {
-        return build_error(BAD_LENGTH, state.sequence, 0, 114, 0);
-    }
+    require_len!(data, 12, state.sequence, 114);
 
     let window = state.read_u32(data, 4);
     if !state.windows.contains_key(&window) {
@@ -920,9 +889,7 @@ pub(crate) fn handle_rotate_properties(state: &mut ClientState, data: &[u8]) -> 
 
     // Validate that the atom list fits within the request data
     let required_len = 12 + n_atoms * 4;
-    if data.len() < required_len {
-        return build_error(BAD_LENGTH, state.sequence, 0, 114, 0);
-    }
+    require_len!(data, required_len, state.sequence, 114);
 
     // Read the atom list
     let mut atoms = Vec::with_capacity(n_atoms);
@@ -989,9 +956,7 @@ pub(crate) fn handle_rotate_properties(state: &mut ClientState, data: &[u8]) -> 
 // ---------------------------------------------------------------------------
 
 pub(crate) fn handle_set_pointer_mapping(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
-    if data.len() < 4 {
-        return build_error(BAD_LENGTH, seq, 0, 116, 0);
-    }
+    require_len!(data, 4, seq, 116);
     let n_buttons = data[1] as usize;
     // Parse the new mapping from the request data
     if data.len() >= 4 + n_buttons && n_buttons <= 5 {
@@ -1046,9 +1011,7 @@ pub(crate) fn handle_get_pointer_mapping(state: &ClientState, seq: u16) -> Vec<u
 // ---------------------------------------------------------------------------
 
 pub(crate) fn handle_set_modifier_mapping(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
-    if data.len() < 4 {
-        return build_error(BAD_LENGTH, seq, 0, 118, 0);
-    }
+    require_len!(data, 4, seq, 118);
     let keycodes_per_modifier = data[1] as usize;
     let total_keycodes = 8 * keycodes_per_modifier;
 

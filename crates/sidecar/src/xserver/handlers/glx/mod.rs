@@ -29,6 +29,7 @@ use crate::osmesa;
 use crate::osmesa::MesaContext;
 
 use super::super::client::ClientState;
+use crate::xserver::core::require_len;
 
 // ---------------------------------------------------------------------------
 // GLX extension constants
@@ -188,12 +189,7 @@ impl Drop for GlxContext {
 // ---------------------------------------------------------------------------
 
 pub(crate) fn handle_glx_request(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
-    if data.len() < 4 {
-        return crate::xserver::core::build_error_bo(
-            crate::xserver::core::BAD_LENGTH, seq, data.len() as u32,
-            159, 0, state.msb_first,
-        );
-    }
+    require_len!(data, 4, seq, 159, 0, state.msb_first);
     let minor = data[1];
     debug!("GLX minor opcode: {minor}");
 

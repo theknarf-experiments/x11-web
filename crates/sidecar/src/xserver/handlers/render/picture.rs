@@ -2,6 +2,7 @@ use tracing::debug;
 
 use crate::xserver::ClientState;
 use crate::xserver::core::{read_u16_bo, read_u32_bo, read_i16_bo, write_u16_bo, write_u32_bo};
+use crate::xserver::core::require_len;
 use super::{
     PICTFORMAT_ARGB32, PICTFORMAT_RGB24, PICTFORMAT_A8, PICTFORMAT_A1,
     PICTFORMAT_XRGB32, PICTFORMAT_XBGR32,
@@ -250,11 +251,7 @@ fn write_pictforminfo(
 
 pub(crate) fn handle_create_picture(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
     let bo = state.msb_first;
-    if data.len() < 20 {
-        return crate::xserver::core::build_error_bo(
-            crate::xserver::core::BAD_LENGTH, seq, 0, 139, data[1] as u16, bo,
-        );
-    }
+    require_len!(data, 20, seq, 139, data[1] as u16, bo);
     let pid = read_u32_bo(data, 4, bo);
     let drawable = read_u32_bo(data, 8, bo);
     let format_id = read_u32_bo(data, 12, bo);
@@ -357,11 +354,7 @@ pub(crate) fn handle_create_picture(state: &mut ClientState, data: &[u8], seq: u
 
 pub(crate) fn handle_change_picture(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
     let bo = state.msb_first;
-    if data.len() < 12 {
-        return crate::xserver::core::build_error_bo(
-            crate::xserver::core::BAD_LENGTH, seq, 0, 139, data[1] as u16, bo,
-        );
-    }
+    require_len!(data, 12, seq, 139, data[1] as u16, bo);
     let pid = read_u32_bo(data, 4, bo);
     let value_mask = read_u32_bo(data, 8, bo);
 
@@ -400,11 +393,7 @@ pub(crate) fn handle_change_picture(state: &mut ClientState, data: &[u8], seq: u
 
 pub(crate) fn handle_set_picture_clip_rectangles(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
     let bo = state.msb_first;
-    if data.len() < 12 {
-        return crate::xserver::core::build_error_bo(
-            crate::xserver::core::BAD_LENGTH, seq, 0, 139, data[1] as u16, bo,
-        );
-    }
+    require_len!(data, 12, seq, 139, data[1] as u16, bo);
     let pid = read_u32_bo(data, 4, bo);
     let clip_x = read_i16_bo(data, 8, bo);
     let clip_y = read_i16_bo(data, 10, bo);
@@ -450,11 +439,7 @@ pub(crate) fn handle_create_cursor(state: &mut ClientState, data: &[u8], seq: u1
     use crate::xserver::types::CursorInfo;
 
     let bo = state.msb_first;
-    if data.len() < 16 {
-        return crate::xserver::core::build_error_bo(
-            crate::xserver::core::BAD_LENGTH, seq, 0, 139, data[1] as u16, bo,
-        );
-    }
+    require_len!(data, 16, seq, 139, data[1] as u16, bo);
     let cursor_id = read_u32_bo(data, 4, bo);
     let src_picture = read_u32_bo(data, 8, bo);
     let hotspot_x = read_u16_bo(data, 12, bo);
@@ -524,11 +509,7 @@ pub(crate) fn handle_create_cursor(state: &mut ClientState, data: &[u8], seq: u1
 /// a full animation sequence sent to the frontend via CursorAnimated.
 pub(crate) fn handle_create_anim_cursor(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
     let bo = state.msb_first;
-    if data.len() < 8 {
-        return crate::xserver::core::build_error_bo(
-            crate::xserver::core::BAD_LENGTH, seq, 0, 139, data[1] as u16, bo,
-        );
-    }
+    require_len!(data, 8, seq, 139, data[1] as u16, bo);
     let cursor_id = read_u32_bo(data, 4, bo);
     let num_frames = (data.len() - 8) / 8; // each frame: cursor_id(4) + delay(4)
     debug!("Render CreateAnimCursor: cursor_id={cursor_id:#x} frames={num_frames}");
@@ -597,11 +578,7 @@ pub(crate) fn handle_create_anim_cursor(state: &mut ClientState, data: &[u8], se
 /// Since we only support TrueColor/DirectColor formats, return an empty list.
 pub(crate) fn handle_query_pict_index_values(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
     let bo = state.msb_first;
-    if data.len() < 8 {
-        return crate::xserver::core::build_error_bo(
-            crate::xserver::core::BAD_LENGTH, seq, 0, 139, data[1] as u16, bo,
-        );
-    }
+    require_len!(data, 8, seq, 139, data[1] as u16, bo);
     let _format = read_u32_bo(data, 4, bo);
 
     // Reply with 0 index values (we don't have indexed formats)

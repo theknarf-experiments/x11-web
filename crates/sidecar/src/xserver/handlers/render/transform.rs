@@ -3,6 +3,7 @@ use tracing::debug;
 use crate::xserver::ClientState;
 use crate::xserver::core::read_u32_bo;
 use super::read_fixed_bo;
+use crate::xserver::core::require_len;
 
 /// SetPictureTransform (RENDER minor opcode 28).
 ///
@@ -22,11 +23,7 @@ use super::read_fixed_bo;
 /// larger destination region.
 pub(crate) fn handle_set_picture_transform(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
     let bo = state.msb_first;
-    if data.len() < 8 + 9 * 4 {
-        return crate::xserver::core::build_error_bo(
-            crate::xserver::core::BAD_LENGTH, seq, 0, 139, data[1] as u16, bo,
-        );
-    }
+    require_len!(data, 8 + 9 * 4, seq, 139, data[1] as u16, bo);
     let pid = read_u32_bo(data, 4, bo);
     let mut tx = [0f64; 9];
     for (i, slot) in tx.iter_mut().enumerate() {

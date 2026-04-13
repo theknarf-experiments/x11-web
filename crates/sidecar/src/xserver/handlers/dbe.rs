@@ -4,6 +4,7 @@ use tracing::debug;
 
 use super::super::client::ClientState;
 use crate::framebuffer::Framebuffer;
+use crate::xserver::core::require_len;
 
 /// DBE - Double Buffer Extension (opcode 157)
 pub(crate) fn handle_dbe_request(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
@@ -18,12 +19,7 @@ pub(crate) fn handle_dbe_request(state: &mut ClientState, data: &[u8], seq: u16)
             reply.to_vec()
         }
         1 => { // AllocateBackBufferName
-            if data.len() < 16 {
-                return crate::xserver::core::build_error_bo(
-                    crate::xserver::core::BAD_LENGTH, seq, 0,
-                    157, minor as u16, state.msb_first,
-                );
-            }
+            require_len!(data, 16, seq, 157, minor as u16, state.msb_first);
             let window_id = state.read_u32(data, 4);
             let back_buffer_id = state.read_u32(data, 8);
             let _swap_action = data[12]; // Undefined, Background, Untouched, Copied
@@ -53,12 +49,7 @@ pub(crate) fn handle_dbe_request(state: &mut ClientState, data: &[u8], seq: u16)
             Vec::new()
         }
         2 => { // DeallocateBackBufferName
-            if data.len() < 8 {
-                return crate::xserver::core::build_error_bo(
-                    crate::xserver::core::BAD_LENGTH, seq, 0,
-                    157, minor as u16, state.msb_first,
-                );
-            }
+            require_len!(data, 8, seq, 157, minor as u16, state.msb_first);
             let back_buffer_id = state.read_u32(data, 4);
             debug!("DBE DeallocateBackBuffer: buffer={back_buffer_id:#x}");
             state.pixmaps.remove(&back_buffer_id);
@@ -66,12 +57,7 @@ pub(crate) fn handle_dbe_request(state: &mut ClientState, data: &[u8], seq: u16)
             Vec::new()
         }
         3 => { // SwapBuffers
-            if data.len() < 8 {
-                return crate::xserver::core::build_error_bo(
-                    crate::xserver::core::BAD_LENGTH, seq, 0,
-                    157, minor as u16, state.msb_first,
-                );
-            }
+            require_len!(data, 8, seq, 157, minor as u16, state.msb_first);
             let n_windows = state.read_u32(data, 4) as usize;
             for i in 0..n_windows {
                 let off = 8 + i * 8;
@@ -195,12 +181,7 @@ pub(crate) fn handle_dbe_request(state: &mut ClientState, data: &[u8], seq: u16)
             reply
         }
         7 => { // GetBackBufferAttributes
-            if data.len() < 8 {
-                return crate::xserver::core::build_error_bo(
-                    crate::xserver::core::BAD_LENGTH, seq, 0,
-                    157, minor as u16, state.msb_first,
-                );
-            }
+            require_len!(data, 8, seq, 157, minor as u16, state.msb_first);
             let back_buffer_id = state.read_u32(data, 4);
             let window_id = state.back_buffers.get(&back_buffer_id).copied().unwrap_or(0);
             let mut reply = [0u8; 32];

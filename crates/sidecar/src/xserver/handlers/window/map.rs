@@ -1,6 +1,7 @@
 //! Map/unmap window handlers (opcodes 8, 9, 10, 11).
 
 use super::*;
+use crate::xserver::core::require_len;
 use super::update_sibling_visibility;
 
 // ---------------------------------------------------------------------------
@@ -8,7 +9,7 @@ use super::update_sibling_visibility;
 // ---------------------------------------------------------------------------
 
 pub(crate) fn handle_map_window(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
-    if data.len() < 8 { return build_error(BAD_LENGTH, seq, 0, 8, 0); }
+    require_len!(data, 8, seq, 8);
     let wid = state.read_u32(data, 4);
     info!("MapWindow called: wid={wid:#x} exists={}", state.windows.contains_key(&wid));
 
@@ -365,7 +366,7 @@ pub(crate) fn handle_map_window(state: &mut ClientState, data: &[u8], seq: u16) 
 // ---------------------------------------------------------------------------
 
 pub(crate) fn handle_map_subwindows(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
-    if data.len() < 8 { return build_error(BAD_LENGTH, seq, 0, 9, 0); }
+    require_len!(data, 8, seq, 9);
     let parent = state.read_u32(data, 4);
 
     if !state.windows.contains_key(&parent) {
@@ -399,7 +400,7 @@ pub(crate) fn handle_map_subwindows(state: &mut ClientState, data: &[u8], seq: u
 // ---------------------------------------------------------------------------
 
 pub(crate) fn handle_unmap_window(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
-    if data.len() < 8 { return build_error(BAD_LENGTH, seq, 0, 10, 0); }
+    require_len!(data, 8, seq, 10);
     let wid = state.read_u32(data, 4);
 
     if !state.windows.contains_key(&wid) {
@@ -515,9 +516,7 @@ pub(crate) fn handle_unmap_window(state: &mut ClientState, data: &[u8], seq: u16
 // ---------------------------------------------------------------------------
 
 pub(crate) fn handle_unmap_subwindows(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
-    if data.len() < 8 {
-        return build_error(BAD_LENGTH, seq, 0, 11, 0);
-    }
+    require_len!(data, 8, seq, 11);
     let parent = state.read_u32(data, 4);
 
     if !state.windows.contains_key(&parent) {

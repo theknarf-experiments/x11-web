@@ -1,15 +1,14 @@
 //! Drawing primitive operations (opcodes 61-71).
 
 use super::*;
+use crate::xserver::core::require_len;
 
 // ---------------------------------------------------------------------------
 // Opcode 61: ClearArea
 // ---------------------------------------------------------------------------
 
 pub(crate) fn handle_clear_area(state: &mut ClientState, data: &[u8], _seq: u16) -> Vec<u8> {
-    if data.len() < 16 {
-        return build_error(BAD_LENGTH, state.sequence, 0, 61, 0);
-    }
+    require_len!(data, 16, state.sequence, 61);
 
     let exposures = data[1] != 0;
     let wid = state.read_u32(data, 4);
@@ -67,9 +66,7 @@ pub(crate) fn handle_clear_area(state: &mut ClientState, data: &[u8], _seq: u16)
 // ---------------------------------------------------------------------------
 
 pub(crate) fn handle_copy_area(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
-    if data.len() < 28 {
-        return build_error(BAD_LENGTH, state.sequence, 0, 62, 0);
-    }
+    require_len!(data, 28, state.sequence, 62);
 
     let src = state.read_u32(data, 4);
     let dst = state.read_u32(data, 8);
@@ -232,9 +229,7 @@ pub(crate) fn handle_copy_area(state: &mut ClientState, data: &[u8]) -> Vec<u8> 
 // ---------------------------------------------------------------------------
 
 pub(crate) fn handle_copy_plane(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
-    if data.len() < 32 {
-        return build_error(BAD_LENGTH, state.sequence, 0, 63, 0);
-    }
+    require_len!(data, 32, state.sequence, 63);
 
     let src = state.read_u32(data, 4);
     let dst = state.read_u32(data, 8);
@@ -364,9 +359,7 @@ pub(crate) fn handle_copy_plane(state: &mut ClientState, data: &[u8]) -> Vec<u8>
 // ---------------------------------------------------------------------------
 
 pub(crate) fn handle_poly_point(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
-    if data.len() < 12 {
-        return build_error(BAD_LENGTH, state.sequence, 0, 64, 0);
-    }
+    require_len!(data, 12, state.sequence, 64);
 
     let coord_mode = data[1];
     let drawable = state.read_u32(data, 4);
@@ -422,9 +415,7 @@ pub(crate) fn handle_poly_point(state: &mut ClientState, data: &[u8]) -> Vec<u8>
 // ---------------------------------------------------------------------------
 
 pub(crate) fn handle_poly_line(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
-    if data.len() < 12 {
-        return build_error(BAD_LENGTH, state.sequence, 0, 65, 0);
-    }
+    require_len!(data, 12, state.sequence, 65);
 
     let coord_mode = data[1];
     let drawable = state.read_u32(data, 4);
@@ -485,9 +476,7 @@ pub(crate) fn handle_poly_line(state: &mut ClientState, data: &[u8]) -> Vec<u8> 
 // ---------------------------------------------------------------------------
 
 pub(crate) fn handle_poly_segment(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
-    if data.len() < 12 {
-        return build_error(BAD_LENGTH, state.sequence, 0, 66, 0);
-    }
+    require_len!(data, 12, state.sequence, 66);
 
     let drawable = state.read_u32(data, 4);
     let gc_id = state.read_u32(data, 8);
@@ -546,9 +535,7 @@ pub(crate) fn handle_poly_segment(state: &mut ClientState, data: &[u8]) -> Vec<u
 // ---------------------------------------------------------------------------
 
 pub(crate) fn handle_poly_rectangle(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
-    if data.len() < 12 {
-        return build_error(BAD_LENGTH, state.sequence, 0, 67, 0);
-    }
+    require_len!(data, 12, state.sequence, 67);
 
     let drawable = state.read_u32(data, 4);
     let gc_id = state.read_u32(data, 8);
@@ -608,9 +595,7 @@ pub(crate) fn handle_poly_rectangle(state: &mut ClientState, data: &[u8]) -> Vec
 // ---------------------------------------------------------------------------
 
 pub(crate) fn handle_poly_arc(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
-    if data.len() < 12 {
-        return build_error(BAD_LENGTH, state.sequence, 0, 68, 0);
-    }
+    require_len!(data, 12, state.sequence, 68);
 
     let drawable = state.read_u32(data, 4);
     let gc_id = state.read_u32(data, 8);
@@ -662,9 +647,7 @@ pub(crate) fn handle_poly_arc(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
 // ---------------------------------------------------------------------------
 
 pub(crate) fn handle_fill_poly(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
-    if data.len() < 16 {
-        return build_error(BAD_LENGTH, state.sequence, 0, 69, 0);
-    }
+    require_len!(data, 16, state.sequence, 69);
 
     let drawable = state.read_u32(data, 4);
     let gc_id = state.read_u32(data, 8);
@@ -756,9 +739,7 @@ pub(crate) fn handle_fill_poly(state: &mut ClientState, data: &[u8]) -> Vec<u8> 
 // ---------------------------------------------------------------------------
 
 pub(crate) fn handle_poly_fill_rectangle(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
-    if data.len() < 12 {
-        return build_error(BAD_LENGTH, state.sequence, 0, 70, 0);
-    }
+    require_len!(data, 12, state.sequence, 70);
 
     let drawable = state.read_u32(data, 4);
     let gc_id = state.read_u32(data, 8);
@@ -866,9 +847,7 @@ pub(crate) fn handle_poly_fill_rectangle(state: &mut ClientState, data: &[u8]) -
 // ---------------------------------------------------------------------------
 
 pub(crate) fn handle_poly_fill_arc(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
-    if data.len() < 12 {
-        return build_error(BAD_LENGTH, state.sequence, 0, 71, 0);
-    }
+    require_len!(data, 12, state.sequence, 71);
 
     let drawable = state.read_u32(data, 4);
     let gc_id = state.read_u32(data, 8);

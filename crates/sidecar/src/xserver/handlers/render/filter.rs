@@ -3,16 +3,13 @@ use tracing::debug;
 use crate::xserver::ClientState;
 use crate::xserver::core::{read_u16_bo, read_u32_bo, write_u16_bo, write_u32_bo};
 use super::{pad4, PictFilter};
+use crate::xserver::core::require_len;
 
 /// SetPictureFilter (RENDER minor opcode 30).
 /// Sets the filter on a picture (nearest, bilinear, etc.).
 pub(crate) fn handle_set_picture_filter(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
     let bo = state.msb_first;
-    if data.len() < 12 {
-        return crate::xserver::core::build_error_bo(
-            crate::xserver::core::BAD_LENGTH, seq, 0, 139, data[1] as u16, bo,
-        );
-    }
+    require_len!(data, 12, seq, 139, data[1] as u16, bo);
     let pic_id = read_u32_bo(data, 4, bo);
     let name_len = read_u16_bo(data, 8, bo) as usize;
     let filter = if data.len() >= 10 + name_len {

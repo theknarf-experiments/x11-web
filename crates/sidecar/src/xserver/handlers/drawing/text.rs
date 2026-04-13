@@ -1,15 +1,14 @@
 //! Text operations (opcodes 74-77).
 
 use super::*;
+use crate::xserver::core::require_len;
 
 // ---------------------------------------------------------------------------
 // Opcode 74: PolyText8
 // ---------------------------------------------------------------------------
 
 pub(crate) fn handle_poly_text8(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
-    if data.len() < 16 {
-        return build_error(BAD_LENGTH, state.sequence, 0, 74, 0);
-    }
+    require_len!(data, 16, state.sequence, 74);
 
     let drawable = state.read_u32(data, 4);
     let gc_id = state.read_u32(data, 8);
@@ -89,9 +88,7 @@ pub(crate) fn handle_poly_text8(state: &mut ClientState, data: &[u8]) -> Vec<u8>
 // ---------------------------------------------------------------------------
 
 pub(crate) fn handle_poly_text16(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
-    if data.len() < 16 {
-        return build_error(BAD_LENGTH, state.sequence, 0, 75, 0);
-    }
+    require_len!(data, 16, state.sequence, 75);
 
     let drawable = state.read_u32(data, 4);
     let gc_id = state.read_u32(data, 8);
@@ -239,9 +236,7 @@ pub(crate) fn handle_poly_text16(state: &mut ClientState, data: &[u8]) -> Vec<u8
 // ---------------------------------------------------------------------------
 
 pub(crate) fn handle_image_text8(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
-    if data.len() < 16 {
-        return build_error(BAD_LENGTH, state.sequence, 0, 76, 0);
-    }
+    require_len!(data, 16, state.sequence, 76);
     let str_len = data[1] as usize;
     let drawable = state.read_u32(data, 4);
     let gc_id = state.read_u32(data, 8);
@@ -292,9 +287,7 @@ pub(crate) fn handle_image_text8(state: &mut ClientState, data: &[u8]) -> Vec<u8
 // ---------------------------------------------------------------------------
 
 pub(crate) fn handle_image_text16(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
-    if data.len() < 16 {
-        return build_error(BAD_LENGTH, state.sequence, 0, 77, 0);
-    }
+    require_len!(data, 16, state.sequence, 77);
 
     let drawable = state.read_u32(data, 4);
     let gc_id = state.read_u32(data, 8);

@@ -6,6 +6,7 @@ use super::super::client::ClientState;
 use super::super::core::ROOT_VISUAL;
 use super::super::types::{PixmapState, ShmPixmapBacking, ShmSegment};
 use crate::framebuffer::Framebuffer;
+use crate::xserver::core::require_len;
 
 /// Handle MIT-SHM extension requests (major opcode 130).
 pub(crate) fn handle_shm_request(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
@@ -30,12 +31,7 @@ pub(crate) fn handle_shm_request(state: &mut ClientState, data: &[u8], seq: u16)
 
         // Attach
         1 => {
-            if data.len() < 16 {
-                return crate::xserver::core::build_error_bo(
-                    crate::xserver::core::BAD_LENGTH, seq, 0,
-                    130, minor as u16, state.msb_first,
-                );
-            }
+            require_len!(data, 16, seq, 130, minor as u16, state.msb_first);
             let shmseg = state.read_u32(data, 4);
             let shmid = state.read_u32(data, 8) as i32;
             let read_only = data[12] != 0;
@@ -76,12 +72,7 @@ pub(crate) fn handle_shm_request(state: &mut ClientState, data: &[u8], seq: u16)
 
         // Detach
         2 => {
-            if data.len() < 8 {
-                return crate::xserver::core::build_error_bo(
-                    crate::xserver::core::BAD_LENGTH, seq, 0,
-                    130, minor as u16, state.msb_first,
-                );
-            }
+            require_len!(data, 8, seq, 130, minor as u16, state.msb_first);
             let shmseg = state.read_u32(data, 4);
             info!("SHM Detach: shmseg={shmseg}");
 
@@ -96,12 +87,7 @@ pub(crate) fn handle_shm_request(state: &mut ClientState, data: &[u8], seq: u16)
 
         // PutImage
         3 => {
-            if data.len() < 40 {
-                return crate::xserver::core::build_error_bo(
-                    crate::xserver::core::BAD_LENGTH, seq, 0,
-                    130, minor as u16, state.msb_first,
-                );
-            }
+            require_len!(data, 40, seq, 130, minor as u16, state.msb_first);
 
             let drawable = state.read_u32(data, 4);
             let _gc = state.read_u32(data, 8);
@@ -189,12 +175,7 @@ pub(crate) fn handle_shm_request(state: &mut ClientState, data: &[u8], seq: u16)
 
         // GetImage
         4 => {
-            if data.len() < 32 {
-                return crate::xserver::core::build_error_bo(
-                    crate::xserver::core::BAD_LENGTH, seq, 0,
-                    130, minor as u16, state.msb_first,
-                );
-            }
+            require_len!(data, 32, seq, 130, minor as u16, state.msb_first);
             let drawable = state.read_u32(data, 4);
             let src_x = state.read_i16(data, 8);
             let src_y = state.read_i16(data, 10);
@@ -245,12 +226,7 @@ pub(crate) fn handle_shm_request(state: &mut ClientState, data: &[u8], seq: u16)
 
         // CreatePixmap
         5 => {
-            if data.len() < 28 {
-                return crate::xserver::core::build_error_bo(
-                    crate::xserver::core::BAD_LENGTH, seq, 0,
-                    130, minor as u16, state.msb_first,
-                );
-            }
+            require_len!(data, 28, seq, 130, minor as u16, state.msb_first);
             let pid = state.read_u32(data, 4);
             let width = state.read_u16(data, 12);
             let height = state.read_u16(data, 14);
@@ -281,12 +257,7 @@ pub(crate) fn handle_shm_request(state: &mut ClientState, data: &[u8], seq: u16)
 
         // AttachFd (minor 6) — MIT-SHM 1.2+ with fd passing
         6 => {
-            if data.len() < 12 {
-                return crate::xserver::core::build_error_bo(
-                    crate::xserver::core::BAD_LENGTH, seq, 0,
-                    130, minor as u16, state.msb_first,
-                );
-            }
+            require_len!(data, 12, seq, 130, minor as u16, state.msb_first);
             let shmseg = state.read_u32(data, 4);
             let read_only = data[8] != 0;
 
@@ -356,12 +327,7 @@ pub(crate) fn handle_shm_request(state: &mut ClientState, data: &[u8], seq: u16)
         // CreateSegment (minor 7) — MIT-SHM 1.2+
         // Server creates an SHM segment and returns the fd to the client.
         7 => {
-            if data.len() < 16 {
-                return crate::xserver::core::build_error_bo(
-                    crate::xserver::core::BAD_LENGTH, seq, 0,
-                    130, minor as u16, state.msb_first,
-                );
-            }
+            require_len!(data, 16, seq, 130, minor as u16, state.msb_first);
             let shmseg = state.read_u32(data, 4);
             let size = state.read_u32(data, 8) as usize;
             let read_only = data[12] != 0;

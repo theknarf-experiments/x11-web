@@ -3,6 +3,7 @@
 use tracing::debug;
 
 use super::super::client::ClientState;
+use crate::xserver::core::require_len;
 
 /// DPMS (opcode 151)
 pub(crate) fn handle_dpms_request(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
@@ -33,12 +34,7 @@ pub(crate) fn handle_dpms_request(state: &mut ClientState, data: &[u8], seq: u16
             reply.to_vec()
         }
         3 => { // SetTimeouts
-            if data.len() < 10 {
-                return crate::xserver::core::build_error_bo(
-                    crate::xserver::core::BAD_LENGTH, seq, 0,
-                    151, minor as u16, state.msb_first,
-                );
-            }
+            require_len!(data, 10, seq, 151, minor as u16, state.msb_first);
             state.dpms_standby_timeout = state.read_u16(data, 4);
             state.dpms_suspend_timeout = state.read_u16(data, 6);
             state.dpms_off_timeout = state.read_u16(data, 8);
@@ -60,12 +56,7 @@ pub(crate) fn handle_dpms_request(state: &mut ClientState, data: &[u8], seq: u16
             Vec::new()
         }
         6 => { // ForceLevel
-            if data.len() < 6 {
-                return crate::xserver::core::build_error_bo(
-                    crate::xserver::core::BAD_LENGTH, seq, 0,
-                    151, minor as u16, state.msb_first,
-                );
-            }
+            require_len!(data, 6, seq, 151, minor as u16, state.msb_first);
             let level = state.read_u16(data, 4);
             // 0=On, 1=Standby, 2=Suspend, 3=Off
             if level <= 3 {

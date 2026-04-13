@@ -52,9 +52,7 @@ pub(crate) fn handle_fd_from_fence(
     seq: u16,
     bo: bool,
 ) -> Vec<u8> {
-    if data.len() < 12 {
-        return build_error_bo(BAD_LENGTH, seq, 0, DRI3_MAJOR_OPCODE, 5, bo);
-    }
+    require_len!(data, 12, seq, DRI3_MAJOR_OPCODE, 5, bo);
 
     let _drawable = read_u32_bo(data, 4, bo);
     let fence_id = read_u32_bo(data, 8, bo);

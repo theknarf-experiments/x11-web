@@ -1,15 +1,14 @@
 //! Image operations (opcodes 72-73).
 
 use super::*;
+use crate::xserver::core::require_len;
 
 // ---------------------------------------------------------------------------
 // Opcode 72: PutImage
 // ---------------------------------------------------------------------------
 
 pub(crate) fn handle_put_image(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
-    if data.len() < 24 {
-        return build_error(BAD_LENGTH, state.sequence, 0, 72, 0);
-    }
+    require_len!(data, 24, state.sequence, 72);
 
     let format = data[1]; // 0=Bitmap, 1=XYPixmap, 2=ZPixmap
     let drawable = state.read_u32(data, 4);
@@ -369,9 +368,7 @@ pub(crate) fn handle_put_image(state: &mut ClientState, data: &[u8]) -> Vec<u8> 
 // ---------------------------------------------------------------------------
 
 pub(crate) fn handle_get_image(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
-    if data.len() < 20 {
-        return build_error(BAD_LENGTH, seq, 0, 73, 0);
-    }
+    require_len!(data, 20, seq, 73);
 
     let format = data[1]; // 1=XYPixmap, 2=ZPixmap
     let drawable = state.read_u32(data, 4);

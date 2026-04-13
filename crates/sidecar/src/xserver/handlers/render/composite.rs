@@ -2,6 +2,7 @@ use tracing::{debug, info};
 
 use crate::xserver::ClientState;
 use crate::xserver::core::{read_u16_bo, read_u32_bo, read_i16_bo};
+use crate::xserver::core::require_len;
 use super::{
     pict_format_has_alpha, zero_src_has_no_effect, point_in_triangle,
     composite_pixel, composite_pixel_ca, read_fixed_bo,
@@ -11,11 +12,7 @@ use super::{
 /// The main compositing operation.
 pub(crate) fn handle_composite(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
     let bo = state.msb_first;
-    if data.len() < 36 {
-        return crate::xserver::core::build_error_bo(
-            crate::xserver::core::BAD_LENGTH, seq, 0, 139, data[1] as u16, bo,
-        );
-    }
+    require_len!(data, 36, seq, 139, data[1] as u16, bo);
 
     let op = data[4];
     let src_pic = read_u32_bo(data, 8, bo);
@@ -210,11 +207,7 @@ pub(crate) fn handle_composite(state: &mut ClientState, data: &[u8], seq: u16) -
 pub(crate) fn handle_trapezoids(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
     let bo = state.msb_first;
     let minor = data[1] as u16;
-    if data.len() < 24 {
-        return crate::xserver::core::build_error_bo(
-            crate::xserver::core::BAD_LENGTH, seq, 0, 139, minor, bo,
-        );
-    }
+    require_len!(data, 24, seq, 139, minor, bo);
 
     let op = data[4];
     let src_pic = read_u32_bo(data, 8, bo);
@@ -403,11 +396,7 @@ fn rasterize_trapezoid(
 pub(crate) fn handle_triangles(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
     let bo = state.msb_first;
     let minor = data[1] as u16;
-    if data.len() < 24 {
-        return crate::xserver::core::build_error_bo(
-            crate::xserver::core::BAD_LENGTH, seq, 0, 139, minor, bo,
-        );
-    }
+    require_len!(data, 24, seq, 139, minor, bo);
 
     let op = data[4];
     let src_pic = read_u32_bo(data, 8, bo);
@@ -594,11 +583,7 @@ fn rasterize_triangle(
 pub(crate) fn handle_tri_strip(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
     let bo = state.msb_first;
     let minor = data[1] as u16;
-    if data.len() < 24 {
-        return crate::xserver::core::build_error_bo(
-            crate::xserver::core::BAD_LENGTH, seq, 0, 139, minor, bo,
-        );
-    }
+    require_len!(data, 24, seq, 139, minor, bo);
 
     let op = data[4];
     let src_pic = read_u32_bo(data, 8, bo);
@@ -676,11 +661,7 @@ pub(crate) fn handle_tri_strip(state: &mut ClientState, data: &[u8], seq: u16) -
 pub(crate) fn handle_tri_fan(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
     let bo = state.msb_first;
     let minor = data[1] as u16;
-    if data.len() < 24 {
-        return crate::xserver::core::build_error_bo(
-            crate::xserver::core::BAD_LENGTH, seq, 0, 139, minor, bo,
-        );
-    }
+    require_len!(data, 24, seq, 139, minor, bo);
 
     let op = data[4];
     let src_pic = read_u32_bo(data, 8, bo);
@@ -756,11 +737,7 @@ pub(crate) fn handle_tri_fan(state: &mut ClientState, data: &[u8], seq: u16) -> 
 pub(crate) fn handle_fill_rectangles(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
     let bo = state.msb_first;
     let minor = data[1] as u16;
-    if data.len() < 24 {
-        return crate::xserver::core::build_error_bo(
-            crate::xserver::core::BAD_LENGTH, seq, 0, 139, minor, bo,
-        );
-    }
+    require_len!(data, 24, seq, 139, minor, bo);
 
     let op = data[4];
     let dst_pic = read_u32_bo(data, 8, bo);
@@ -862,11 +839,7 @@ pub(crate) fn handle_fill_rectangles(state: &mut ClientState, data: &[u8], seq: 
 pub(crate) fn handle_add_traps(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
     let bo = state.msb_first;
     let minor = data[1] as u16;
-    if data.len() < 12 {
-        return crate::xserver::core::build_error_bo(
-            crate::xserver::core::BAD_LENGTH, seq, 0, 139, minor, bo,
-        );
-    }
+    require_len!(data, 12, seq, 139, minor, bo);
     let pic_id = read_u32_bo(data, 4, bo);
     let x_off = read_i16_bo(data, 8, bo);
     let y_off = read_i16_bo(data, 10, bo);

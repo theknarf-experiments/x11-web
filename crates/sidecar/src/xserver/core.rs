@@ -95,6 +95,29 @@ pub(crate) const BAD_NAME: u8 = 15;
 pub(crate) const BAD_LENGTH: u8 = 16;
 pub(crate) const BAD_IMPLEMENTATION: u8 = 17;
 
+/// Validate minimum request length; returns early with a BAD_LENGTH error if too short.
+///
+/// Core handler usage:   `require_len!(data, 8, seq, opcode);`
+/// Extension handler:    `require_len!(data, 12, seq, ext_opcode, minor, state.msb_first);`
+macro_rules! require_len {
+    ($data:expr, $min:expr, $seq:expr, $major:expr) => {
+        if $data.len() < $min {
+            return $crate::xserver::core::build_error(
+                $crate::xserver::core::BAD_LENGTH, $seq, 0, $major, 0,
+            );
+        }
+    };
+    ($data:expr, $min:expr, $seq:expr, $major:expr, $minor:expr, $msb:expr) => {
+        if $data.len() < $min {
+            return $crate::xserver::core::build_error_bo(
+                $crate::xserver::core::BAD_LENGTH, $seq, $data.len() as u32,
+                $major, $minor as u16, $msb,
+            );
+        }
+    };
+}
+pub(crate) use require_len;
+
 /// Build an X11 error reply (32 bytes) in little-endian byte order.
 pub(crate) fn build_error(error_code: u8, seq: u16, bad_value: u32, major_opcode: u8, minor_opcode: u16) -> Vec<u8> {
     build_error_bo(error_code, seq, bad_value, major_opcode, minor_opcode, false)

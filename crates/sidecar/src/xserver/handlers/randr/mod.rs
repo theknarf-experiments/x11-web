@@ -7,6 +7,7 @@ mod screen;
 use tracing::{debug, info};
 
 use super::super::client::ClientState;
+use crate::xserver::core::require_len;
 
 pub(crate) fn handle_randr_request(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
     let minor = data[1];
@@ -29,12 +30,7 @@ pub(crate) fn handle_randr_request(state: &mut ClientState, data: &[u8], seq: u1
         // RRSetScreenConfig (2) — legacy screen configuration
         // ---------------------------------------------------------------
         2 => {
-            if data.len() < 24 {
-                return crate::xserver::core::build_error_bo(
-                    crate::xserver::core::BAD_LENGTH, seq, data.len() as u32,
-                    140, 2, state.msb_first,
-                );
-            }
+            require_len!(data, 24, seq, 140, 2, state.msb_first);
 
             let _drawable = state.read_u32(data, 4);
             let _timestamp = state.read_u32(data, 8);

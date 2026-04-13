@@ -3,6 +3,7 @@
 use tracing::debug;
 
 use super::super::client::ClientState;
+use crate::xserver::core::require_len;
 
 /// Screen saver window attributes stored by MIT-SCREEN-SAVER SetAttributes.
 #[allow(dead_code)]
@@ -47,12 +48,7 @@ pub(crate) fn handle_screen_saver_request(state: &mut ClientState, data: &[u8], 
             reply.to_vec()
         }
         2 => { // SelectInput
-            if data.len() < 12 {
-                return crate::xserver::core::build_error_bo(
-                    crate::xserver::core::BAD_LENGTH, seq, 0,
-                    152, minor as u16, state.msb_first,
-                );
-            }
+            require_len!(data, 12, seq, 152, minor as u16, state.msb_first);
             let _drawable = state.read_u32(data, 4);
             let event_mask = state.read_u32(data, 8);
             state.screen_saver_event_mask = event_mask;
@@ -62,12 +58,7 @@ pub(crate) fn handle_screen_saver_request(state: &mut ClientState, data: &[u8], 
         3 => { // SetAttributes
             // Store screen saver window attributes for when the saver activates.
             // Parse the same value-list as CreateWindow.
-            if data.len() < 24 {
-                return crate::xserver::core::build_error_bo(
-                    crate::xserver::core::BAD_LENGTH, seq, 0,
-                    152, minor as u16, state.msb_first,
-                );
-            }
+            require_len!(data, 24, seq, 152, minor as u16, state.msb_first);
             {
                 let _drawable = state.read_u32(data, 4);
                 let x = state.read_i16(data, 8);

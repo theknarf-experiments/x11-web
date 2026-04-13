@@ -11,18 +11,14 @@ mod render_texture;
 
 use super::super::super::client::ClientState;
 use tracing::warn;
+use crate::xserver::core::require_len;
 
 // ---------------------------------------------------------------------------
 // GLX_RENDER (minor 1) -- batched GL commands
 // ---------------------------------------------------------------------------
 
 pub(crate) fn handle_render(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
-    if data.len() < 8 {
-        return crate::xserver::core::build_error_bo(
-            crate::xserver::core::BAD_LENGTH, seq, data.len() as u32,
-            159, 1, state.msb_first,
-        );
-    }
+    require_len!(data, 8, seq, 159, 1, state.msb_first);
     let _tag = u32::from_le_bytes([data[4], data[5], data[6], data[7]]);
 
     #[cfg(feature = "osmesa")]
@@ -70,12 +66,7 @@ pub(crate) fn handle_render(state: &mut ClientState, data: &[u8], seq: u16) -> V
 pub(crate) fn handle_render_large(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
     // RenderLarge has: tag(4), request_num(2), request_total(2), data_len(4), data(...)
     // For simplicity, treat same as Render with the payload starting at offset 16
-    if data.len() < 16 {
-        return crate::xserver::core::build_error_bo(
-            crate::xserver::core::BAD_LENGTH, seq, data.len() as u32,
-            159, 2, state.msb_first,
-        );
-    }
+    require_len!(data, 16, seq, 159, 2, state.msb_first);
 
     #[cfg(feature = "osmesa")]
     {

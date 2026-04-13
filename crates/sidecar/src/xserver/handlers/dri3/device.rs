@@ -5,6 +5,7 @@ use tracing::debug;
 use super::super::super::client::ClientState;
 use super::super::super::core::*;
 use super::DRI3_MAJOR_OPCODE;
+use crate::xserver::core::require_len;
 
 // -----------------------------------------------------------------
 // 6: GetSupportedModifiers (DRI3 1.2)
@@ -16,9 +17,7 @@ pub(crate) fn handle_get_supported_modifiers(
     minor: u8,
     bo: bool,
 ) -> Vec<u8> {
-    if data.len() < 12 {
-        return build_error_bo(BAD_LENGTH, seq, 0, DRI3_MAJOR_OPCODE, minor as u16, bo);
-    }
+    require_len!(data, 12, seq, DRI3_MAJOR_OPCODE, minor as u16, bo);
     debug!("DRI3 GetSupportedModifiers");
 
     // Return DRM_FORMAT_MOD_LINEAR (0) and DRM_FORMAT_MOD_INVALID
@@ -72,9 +71,7 @@ pub(crate) fn handle_set_drm_device_in_use(
     bo: bool,
 ) -> Vec<u8> {
     // Request: window(4), drmMajor(4), drmMinor(4)
-    if data.len() < 16 {
-        return build_error_bo(BAD_LENGTH, seq, 0, DRI3_MAJOR_OPCODE, minor as u16, bo);
-    }
+    require_len!(data, 16, seq, DRI3_MAJOR_OPCODE, minor as u16, bo);
 
     let _window = read_u32_bo(data, 4, bo);
     let drm_major = read_u32_bo(data, 8, bo);
