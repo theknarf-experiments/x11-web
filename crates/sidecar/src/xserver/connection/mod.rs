@@ -1178,11 +1178,83 @@ pub(crate) async fn handle_client(
                                         continue;
                                     }
 
+                                    // MouseKeys: convert numpad keys to pointer events
+                                    const XKB_MOUSE_KEYS_MASK: u32 = 1 << 4;
+                                    if (state.xkb_state.controls.enabled_ctrls & XKB_MOUSE_KEYS_MASK) != 0 {
+                                        use crate::xserver::client::xkb_state::{mousekeys_movement, mousekeys_is_click};
+                                        if let Some((dx, dy)) = mousekeys_movement(kc as u8) {
+                                            // Convert to pointer motion
+                                            let speed = state.xkb_state.controls.mk_max_speed.max(1) as i16;
+                                            let new_x = (state.pointer_x + dx * speed).max(0);
+                                            let new_y = (state.pointer_y + dy * speed).max(0);
+                                            let motion = x11_web_protocol::InputEvent::MotionNotify {
+                                                x: new_x,
+                                                y: new_y,
+                                                state: *mask,
+                                            };
+                                            state.pointer_x = new_x;
+                                            state.pointer_y = new_y;
+                                            state.xi.valuators.x = new_x as i32;
+                                            state.xi.valuators.y = new_y as i32;
+                                            let ts = state.timestamp();
+                                            if state.motion_history.len() >= 256 {
+                                                state.motion_history.remove(0);
+                                            }
+                                            state.motion_history.push((ts, new_x, new_y));
+                                            let event_bytes = build_x11_input_event(&mut state, &motion, x11_wid);
+                                            if !event_bytes.is_empty() {
+                                                stream.write_all(&event_bytes).await?;
+                                            }
+                                            let chain = ancestor_chain(&state.windows, x11_wid);
+                                            let xi_evts = crate::xinput2::build_xi_events_for(
+                                                &mut state.xi.valuators,
+                                                &state.xi.selections,
+                                                &chain,
+                                                state.sequence,
+                                                state.root_window,
+                                                &motion,
+                                                state.msb_first,
+                                            );
+                                            for ev in xi_evts {
+                                                stream.write_all(&ev).await?;
+                                            }
+                                            continue;
+                                        } else if mousekeys_is_click(kc as u8) {
+                                            // KP_5: generate ButtonPress for the default button
+                                            let btn = state.xkb_state.controls.mk_dflt_btn.max(1);
+                                            let press = x11_web_protocol::InputEvent::ButtonPress {
+                                                button: btn,
+                                                x: state.pointer_x,
+                                                y: state.pointer_y,
+                                                state: *mask,
+                                            };
+                                            state.pointer_button_mask |= 1u16 << (7 + btn as u16);
+                                            let event_bytes = build_x11_input_event(&mut state, &press, x11_wid);
+                                            if !event_bytes.is_empty() {
+                                                stream.write_all(&event_bytes).await?;
+                                            }
+                                            let chain = ancestor_chain(&state.windows, x11_wid);
+                                            let xi_evts = crate::xinput2::build_xi_events_for(
+                                                &mut state.xi.valuators,
+                                                &state.xi.selections,
+                                                &chain,
+                                                state.sequence,
+                                                state.root_window,
+                                                &press,
+                                                state.msb_first,
+                                            );
+                                            for ev in xi_evts {
+                                                stream.write_all(&ev).await?;
+                                            }
+                                            continue;
+                                        }
+                                    }
+
                                     // SlowKeys: reject key press if it hasn't been held long enough.
                                     // (Simplified synchronous check — a full implementation would use
                                     // an async timer to accept the key after slow_keys_delay.)
                                     // For now we track first-press time and accept on subsequent events.
-                                    const XKB_SLOW_KEYS_MASK: u32 = 1 << 5;
+                                    const XKB_SLOW_KEYS_MASK: u32 = 1 << 1;
                                     if (state.xkb_state.controls.enabled_ctrls & XKB_SLOW_KEYS_MASK) != 0 {
                                         let delay = state.xkb_state.controls.slow_keys_delay;
                                         // Use the auto-repeat mechanism: a slow key press is only
@@ -1214,7 +1286,7 @@ pub(crate) async fn handle_client(
                                     }
                                     handlers::xkb::maybe_send_xkb_state_notify(&mut state, &xkb_before, kc as u8, 2);
                                     // Start auto-repeat if enabled for this key.
-                                    let repeat_enabled = (state.xkb_state.controls.enabled_ctrls & (1 << 10)) != 0; // XkbRepeatKeysMask
+                                    let repeat_enabled = (state.xkb_state.controls.enabled_ctrls & (1 << 0)) != 0; // XkbRepeatKeysMask
                                     let key_repeats = kc < 256 && (state.xkb_state.controls.per_key_repeat[kc / 8] & (1 << (kc % 8))) != 0;
                                     if repeat_enabled && key_repeats {
                                         let delay = state.xkb_state.controls.repeat_delay as u64;
@@ -1231,8 +1303,46 @@ pub(crate) async fn handle_client(
                                         repeat_timer.as_mut().reset(tokio::time::Instant::now() + Duration::from_secs(86400));
                                     }
                                 }
-                                x11_web_protocol::InputEvent::KeyRelease { keycode, .. } => {
+                                x11_web_protocol::InputEvent::KeyRelease { keycode, state: mask } => {
                                     let kc = *keycode as usize;
+
+                                    // MouseKeys: convert KP_5 release to ButtonRelease
+                                    const XKB_MOUSE_KEYS_MASK_REL: u32 = 1 << 4;
+                                    if (state.xkb_state.controls.enabled_ctrls & XKB_MOUSE_KEYS_MASK_REL) != 0 {
+                                        use crate::xserver::client::xkb_state::{mousekeys_movement, mousekeys_is_click};
+                                        if mousekeys_movement(kc as u8).is_some() {
+                                            // Movement key release: nothing to do (motion has no release)
+                                            continue;
+                                        } else if mousekeys_is_click(kc as u8) {
+                                            let btn = state.xkb_state.controls.mk_dflt_btn.max(1);
+                                            let release = x11_web_protocol::InputEvent::ButtonRelease {
+                                                button: btn,
+                                                x: state.pointer_x,
+                                                y: state.pointer_y,
+                                                state: *mask,
+                                            };
+                                            state.pointer_button_mask &= !(1u16 << (7 + btn as u16));
+                                            let event_bytes = build_x11_input_event(&mut state, &release, x11_wid);
+                                            if !event_bytes.is_empty() {
+                                                stream.write_all(&event_bytes).await?;
+                                            }
+                                            let chain = ancestor_chain(&state.windows, x11_wid);
+                                            let xi_evts = crate::xinput2::build_xi_events_for(
+                                                &mut state.xi.valuators,
+                                                &state.xi.selections,
+                                                &chain,
+                                                state.sequence,
+                                                state.root_window,
+                                                &release,
+                                                state.msb_first,
+                                            );
+                                            for ev in xi_evts {
+                                                stream.write_all(&ev).await?;
+                                            }
+                                            continue;
+                                        }
+                                    }
+
                                     let xkb_before = handlers::xkb::XkbStateSnapshot::capture(&state);
                                     if kc < 256 {
                                         state.pressed_keys[kc / 8] &= !(1 << (kc % 8));

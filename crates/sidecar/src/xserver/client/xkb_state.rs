@@ -56,7 +56,7 @@ impl XkbState {
     /// Check if BounceKeys should reject this key press (debounce).
     /// Returns true if the key should be rejected.
     pub(crate) fn bounce_keys_reject(&self, keycode: u8) -> bool {
-        const XKB_BOUNCE_KEYS_MASK: u32 = 1 << 4;
+        const XKB_BOUNCE_KEYS_MASK: u32 = 1 << 2;
         if (self.controls.enabled_ctrls & XKB_BOUNCE_KEYS_MASK) == 0 {
             return false;
         }
@@ -71,7 +71,7 @@ impl XkbState {
     /// Update modifier state when a key is pressed.
     /// Returns the modifier mask for the keycode, if any.
     pub(crate) fn key_press(&mut self, keycode: u8) -> u8 {
-        const XKB_STICKY_KEYS_MASK: u32 = 1 << 6;
+        const XKB_STICKY_KEYS_MASK: u32 = 1 << 3;
         let sticky_enabled = (self.controls.enabled_ctrls & XKB_STICKY_KEYS_MASK) != 0;
 
         let mod_bit = keycode_to_modifier(keycode);
@@ -97,7 +97,7 @@ impl XkbState {
 
     /// Update modifier state when a key is released.
     pub(crate) fn key_release(&mut self, keycode: u8) {
-        const XKB_STICKY_KEYS_MASK: u32 = 1 << 6;
+        const XKB_STICKY_KEYS_MASK: u32 = 1 << 3;
         let sticky_enabled = (self.controls.enabled_ctrls & XKB_STICKY_KEYS_MASK) != 0;
 
         let mod_bit = keycode_to_modifier(keycode);
@@ -111,7 +111,7 @@ impl XkbState {
         }
 
         // BounceKeys: record release time for debounce
-        const XKB_BOUNCE_KEYS_MASK: u32 = 1 << 4;
+        const XKB_BOUNCE_KEYS_MASK: u32 = 1 << 2;
         if (self.controls.enabled_ctrls & XKB_BOUNCE_KEYS_MASK) != 0 {
             self.bounce_key_release_time.insert(keycode, Instant::now());
         }
@@ -348,8 +348,8 @@ impl Default for XkbControls {
         per_key_repeat[134 / 8] &= !(1 << (134 % 8)); // Super_R
 
         Self {
-            // RepeatKeys enabled by default
-            enabled_ctrls: 1 << 10, // XkbRepeatKeysMask
+            // RepeatKeys enabled by default (bit 0 = XkbRepeatKeysMask)
+            enabled_ctrls: 1 << 0, // XkbRepeatKeysMask
             repeat_delay: 660,
             repeat_interval: 40,
             slow_keys_delay: 300,
@@ -471,7 +471,7 @@ mod tests {
     #[test]
     fn controls_default_has_repeat_keys() {
         let c = XkbControls::default();
-        assert_ne!(c.enabled_ctrls & (1 << 10), 0); // RepeatKeys enabled
+        assert_ne!(c.enabled_ctrls & (1 << 0), 0); // RepeatKeys enabled
         assert_eq!(c.repeat_delay, 660);
         assert_eq!(c.repeat_interval, 40);
         assert_eq!(c.num_groups, 1);
@@ -495,7 +495,7 @@ mod tests {
     #[test]
     fn sticky_keys_latches_modifier_on_press() {
         let mut s = XkbState::default();
-        s.controls.enabled_ctrls |= 1 << 6; // StickyKeys
+        s.controls.enabled_ctrls |= 1 << 3; // StickyKeys
         // Press Shift_L
         s.key_press(50);
         assert_eq!(s.sticky_mods, 0x01);
@@ -506,7 +506,7 @@ mod tests {
     #[test]
     fn sticky_keys_clears_on_non_modifier_press() {
         let mut s = XkbState::default();
-        s.controls.enabled_ctrls |= 1 << 6; // StickyKeys
+        s.controls.enabled_ctrls |= 1 << 3; // StickyKeys
         // Press and release Shift_L
         s.key_press(50);
         s.key_release(50);
@@ -520,7 +520,7 @@ mod tests {
     #[test]
     fn sticky_keys_modifier_persists_until_non_modifier() {
         let mut s = XkbState::default();
-        s.controls.enabled_ctrls |= 1 << 6;
+        s.controls.enabled_ctrls |= 1 << 3; // StickyKeys
         // Press Shift, release, press Ctrl — both should be latched
         s.key_press(50); // Shift
         s.key_release(50);
@@ -536,7 +536,7 @@ mod tests {
     #[test]
     fn bounce_keys_rejects_rapid_repress() {
         let mut s = XkbState::default();
-        s.controls.enabled_ctrls |= 1 << 4; // BounceKeys
+        s.controls.enabled_ctrls |= 1 << 2; // BounceKeys
         s.controls.debounce_delay = 300;
         // Simulate release of key 38
         s.key_release(38);
@@ -547,7 +547,7 @@ mod tests {
     #[test]
     fn bounce_keys_accepts_after_delay() {
         let mut s = XkbState::default();
-        s.controls.enabled_ctrls |= 1 << 4; // BounceKeys
+        s.controls.enabled_ctrls |= 1 << 2; // BounceKeys
         s.controls.debounce_delay = 1; // 1ms
         // Simulate release
         s.bounce_key_release_time.insert(38, Instant::now() - std::time::Duration::from_millis(10));
