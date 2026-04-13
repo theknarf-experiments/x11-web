@@ -1172,6 +1172,41 @@ pub(crate) async fn handle_client(
                             match &input {
                                 x11_web_protocol::InputEvent::KeyPress { keycode, state: mask } => {
                                     let kc = *keycode as usize;
+
+                                    // BounceKeys: reject key press if within debounce interval
+                                    if state.xkb_state.bounce_keys_reject(kc as u8) {
+                                        continue;
+                                    }
+
+                                    // SlowKeys: reject key press if it hasn't been held long enough.
+                                    // (Simplified synchronous check — a full implementation would use
+                                    // an async timer to accept the key after slow_keys_delay.)
+                                    // For now we track first-press time and accept on subsequent events.
+                                    const XKB_SLOW_KEYS_MASK: u32 = 1 << 5;
+                                    if (state.xkb_state.controls.enabled_ctrls & XKB_SLOW_KEYS_MASK) != 0 {
+                                        let delay = state.xkb_state.controls.slow_keys_delay;
+                                        // Use the auto-repeat mechanism: a slow key press is only
+                                        // accepted if the key is already being held (repeat event).
+                                        // First press is "pending" until auto-repeat fires after delay.
+                                        if kc < 256 && (state.pressed_keys[kc / 8] & (1 << (kc % 8))) == 0 {
+                                            // First press: set the key as pressed but DON'T deliver
+                                            // the event yet. Instead, set up a repeat timer with
+                                            // slow_keys_delay and the first repeat will be the accepted press.
+                                            state.pressed_keys[kc / 8] |= 1 << (kc % 8);
+                                            let xkb_before = handlers::xkb::XkbStateSnapshot::capture(&state);
+                                            state.xkb_state.key_press(kc as u8);
+                                            handlers::xkb::maybe_send_xkb_state_notify(&mut state, &xkb_before, kc as u8, 2);
+                                            key_repeat = Some(RepeatState {
+                                                keycode: kc as u8,
+                                                mask: *mask,
+                                                target_wid: x11_wid,
+                                                in_delay_phase: true,
+                                            });
+                                            repeat_timer.as_mut().reset(tokio::time::Instant::now() + Duration::from_millis(delay as u64));
+                                            continue; // Don't deliver the initial key press event
+                                        }
+                                    }
+
                                     let xkb_before = handlers::xkb::XkbStateSnapshot::capture(&state);
                                     if kc < 256 {
                                         state.pressed_keys[kc / 8] |= 1 << (kc % 8);

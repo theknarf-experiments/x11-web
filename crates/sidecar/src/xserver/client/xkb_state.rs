@@ -1,7 +1,9 @@
 //! XKB modifier and group state tracking types and helpers.
 
+use std::time::Instant;
+
 /// XKB modifier and group state tracking.
-#[derive(Clone, Default)]
+#[derive(Clone)]
 pub(crate) struct XkbState {
     /// Base modifiers (from currently pressed modifier keys).
     pub(crate) base_mods: u8,
@@ -17,6 +19,27 @@ pub(crate) struct XkbState {
     pub(crate) locked_group: i16,
     /// XKB controls state.
     pub(crate) controls: XkbControls,
+    /// BounceKeys: timestamp of last release per keycode (for debounce).
+    pub(crate) bounce_key_release_time: std::collections::HashMap<u8, Instant>,
+    /// StickyKeys: modifiers that have been "stuck" (latched by press-release)
+    /// and will apply to the next non-modifier key, then clear.
+    pub(crate) sticky_mods: u8,
+}
+
+impl Default for XkbState {
+    fn default() -> Self {
+        Self {
+            base_mods: 0,
+            latched_mods: 0,
+            locked_mods: 0,
+            base_group: 0,
+            latched_group: 0,
+            locked_group: 0,
+            controls: XkbControls::default(),
+            bounce_key_release_time: std::collections::HashMap::new(),
+            sticky_mods: 0,
+        }
+    }
 }
 
 impl XkbState {
@@ -30,30 +53,92 @@ impl XkbState {
         (self.base_group + self.latched_group + self.locked_group).clamp(0, 3)
     }
 
+    /// Check if BounceKeys should reject this key press (debounce).
+    /// Returns true if the key should be rejected.
+    pub(crate) fn bounce_keys_reject(&self, keycode: u8) -> bool {
+        const XKB_BOUNCE_KEYS_MASK: u32 = 1 << 4;
+        if (self.controls.enabled_ctrls & XKB_BOUNCE_KEYS_MASK) == 0 {
+            return false;
+        }
+        if let Some(&release_time) = self.bounce_key_release_time.get(&keycode) {
+            let elapsed = release_time.elapsed().as_millis() as u16;
+            elapsed < self.controls.debounce_delay
+        } else {
+            false
+        }
+    }
+
     /// Update modifier state when a key is pressed.
     /// Returns the modifier mask for the keycode, if any.
     pub(crate) fn key_press(&mut self, keycode: u8) -> u8 {
+        const XKB_STICKY_KEYS_MASK: u32 = 1 << 6;
+        let sticky_enabled = (self.controls.enabled_ctrls & XKB_STICKY_KEYS_MASK) != 0;
+
         let mod_bit = keycode_to_modifier(keycode);
         if mod_bit != 0 {
             if is_lock_key(keycode) {
                 // Lock keys toggle on press
                 self.locked_mods ^= mod_bit;
+            } else if sticky_enabled {
+                // StickyKeys: latch the modifier instead of requiring it held
+                self.sticky_mods |= mod_bit;
+                self.latched_mods |= mod_bit;
             } else {
                 self.base_mods |= mod_bit;
             }
+        } else if sticky_enabled && self.sticky_mods != 0 {
+            // Non-modifier key with StickyKeys active: clear sticky state after use
+            // (the latched_mods will be applied to this key event, then cleared)
+            self.sticky_mods = 0;
+            self.latched_mods = 0;
         }
         mod_bit
     }
 
     /// Update modifier state when a key is released.
     pub(crate) fn key_release(&mut self, keycode: u8) {
+        const XKB_STICKY_KEYS_MASK: u32 = 1 << 6;
+        let sticky_enabled = (self.controls.enabled_ctrls & XKB_STICKY_KEYS_MASK) != 0;
+
         let mod_bit = keycode_to_modifier(keycode);
         if mod_bit != 0 && !is_lock_key(keycode) {
-            self.base_mods &= !mod_bit;
-            // Clear latched modifiers on release of the modifier key
-            self.latched_mods &= !mod_bit;
+            if !sticky_enabled {
+                self.base_mods &= !mod_bit;
+                // Clear latched modifiers on release of the modifier key
+                self.latched_mods &= !mod_bit;
+            }
+            // For StickyKeys: modifier stays latched until a non-modifier is pressed
+        }
+
+        // BounceKeys: record release time for debounce
+        const XKB_BOUNCE_KEYS_MASK: u32 = 1 << 4;
+        if (self.controls.enabled_ctrls & XKB_BOUNCE_KEYS_MASK) != 0 {
+            self.bounce_key_release_time.insert(keycode, Instant::now());
         }
     }
+}
+
+/// MouseKeys: map numpad keycodes to pointer delta (dx, dy).
+/// Returns Some((dx, dy)) if this key is a mouse movement key, None otherwise.
+/// Uses the KP_ keys from evdev keycodes.
+pub(crate) fn mousekeys_movement(keycode: u8) -> Option<(i16, i16)> {
+    match keycode {
+        79 => Some((-1, -1)), // KP_7 (Home) → up-left
+        80 => Some(( 0, -1)), // KP_8 (Up) → up
+        81 => Some(( 1, -1)), // KP_9 (PgUp) → up-right
+        83 => Some((-1,  0)), // KP_4 (Left) → left
+        // 84 = KP_5 (Begin) → button click (not movement)
+        85 => Some(( 1,  0)), // KP_6 (Right) → right
+        87 => Some((-1,  1)), // KP_1 (End) → down-left
+        88 => Some(( 0,  1)), // KP_2 (Down) → down
+        89 => Some(( 1,  1)), // KP_3 (PgDn) → down-right
+        _ => None,
+    }
+}
+
+/// MouseKeys: check if this keycode triggers a button click (KP_5/KP_Begin).
+pub(crate) fn mousekeys_is_click(keycode: u8) -> bool {
+    keycode == 84 // KP_5 (Begin)
 }
 
 /// Map a keycode to its X11 modifier bit, or 0 if not a modifier.
@@ -401,5 +486,104 @@ mod tests {
         assert_eq!(c.per_key_repeat[66 / 8] & (1 << (66 % 8)), 0);
         // Regular key (keycode 38 = 'a') SHOULD repeat
         assert_ne!(c.per_key_repeat[38 / 8] & (1 << (38 % 8)), 0);
+    }
+
+    // -----------------------------------------------------------------------
+    // StickyKeys tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn sticky_keys_latches_modifier_on_press() {
+        let mut s = XkbState::default();
+        s.controls.enabled_ctrls |= 1 << 6; // StickyKeys
+        // Press Shift_L
+        s.key_press(50);
+        assert_eq!(s.sticky_mods, 0x01);
+        assert_eq!(s.latched_mods, 0x01);
+        assert_eq!(s.base_mods, 0); // StickyKeys: NOT in base_mods
+    }
+
+    #[test]
+    fn sticky_keys_clears_on_non_modifier_press() {
+        let mut s = XkbState::default();
+        s.controls.enabled_ctrls |= 1 << 6; // StickyKeys
+        // Press and release Shift_L
+        s.key_press(50);
+        s.key_release(50);
+        assert_eq!(s.latched_mods, 0x01); // Still latched
+        // Now press 'a' — sticky should clear
+        s.key_press(38);
+        assert_eq!(s.sticky_mods, 0);
+        assert_eq!(s.latched_mods, 0);
+    }
+
+    #[test]
+    fn sticky_keys_modifier_persists_until_non_modifier() {
+        let mut s = XkbState::default();
+        s.controls.enabled_ctrls |= 1 << 6;
+        // Press Shift, release, press Ctrl — both should be latched
+        s.key_press(50); // Shift
+        s.key_release(50);
+        s.key_press(37); // Ctrl
+        assert_eq!(s.sticky_mods, 0x01 | 0x04);
+        assert_eq!(s.latched_mods, 0x01 | 0x04);
+    }
+
+    // -----------------------------------------------------------------------
+    // BounceKeys tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn bounce_keys_rejects_rapid_repress() {
+        let mut s = XkbState::default();
+        s.controls.enabled_ctrls |= 1 << 4; // BounceKeys
+        s.controls.debounce_delay = 300;
+        // Simulate release of key 38
+        s.key_release(38);
+        // Immediately try to press again — should be rejected
+        assert!(s.bounce_keys_reject(38));
+    }
+
+    #[test]
+    fn bounce_keys_accepts_after_delay() {
+        let mut s = XkbState::default();
+        s.controls.enabled_ctrls |= 1 << 4; // BounceKeys
+        s.controls.debounce_delay = 1; // 1ms
+        // Simulate release
+        s.bounce_key_release_time.insert(38, Instant::now() - std::time::Duration::from_millis(10));
+        // After 10ms > 1ms debounce — should be accepted
+        assert!(!s.bounce_keys_reject(38));
+    }
+
+    #[test]
+    fn bounce_keys_disabled_does_not_reject() {
+        let mut s = XkbState::default();
+        // BounceKeys NOT enabled
+        s.key_release(38);
+        assert!(!s.bounce_keys_reject(38));
+    }
+
+    // -----------------------------------------------------------------------
+    // MouseKeys tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn mousekeys_numpad_movement() {
+        assert_eq!(mousekeys_movement(80), Some((0, -1)));  // KP_8 = Up
+        assert_eq!(mousekeys_movement(88), Some((0, 1)));   // KP_2 = Down
+        assert_eq!(mousekeys_movement(83), Some((-1, 0)));  // KP_4 = Left
+        assert_eq!(mousekeys_movement(85), Some((1, 0)));   // KP_6 = Right
+        assert_eq!(mousekeys_movement(79), Some((-1, -1))); // KP_7 = Up-Left
+        assert_eq!(mousekeys_movement(81), Some((1, -1)));  // KP_9 = Up-Right
+        assert_eq!(mousekeys_movement(87), Some((-1, 1)));  // KP_1 = Down-Left
+        assert_eq!(mousekeys_movement(89), Some((1, 1)));   // KP_3 = Down-Right
+        assert_eq!(mousekeys_movement(38), None);           // 'a' = not a mouse key
+    }
+
+    #[test]
+    fn mousekeys_click_is_kp5() {
+        assert!(mousekeys_is_click(84));  // KP_5
+        assert!(!mousekeys_is_click(80)); // KP_8 is movement, not click
+        assert!(!mousekeys_is_click(38)); // 'a' is not a mouse key
     }
 }
