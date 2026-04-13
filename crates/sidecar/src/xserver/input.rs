@@ -519,7 +519,8 @@ fn resolve_keyboard_event_target(
         if grab.owner_events {
             // owner_events=true: try normal delivery (focus window propagation)
             let focus = state.focus_window;
-            if focus != 0 && focus != state.root_window {
+            // Per X11 spec: focus=1 is PointerRoot — deliver to window under pointer.
+            if focus != 0 && focus != 1 && focus != state.root_window {
                 let target = propagate_keyboard_event(&state.windows, focus, required_mask);
                 let selects = state.windows.get(&target)
                     .map(|w| w.event_mask & required_mask != 0)
@@ -537,15 +538,21 @@ fn resolve_keyboard_event_target(
     }
     // No active grab — normal keyboard delivery
     let focus = state.focus_window;
-    let target = if focus != 0 && focus != state.root_window {
+    // Per X11 spec: focus=0 is None (discard), focus=1 is PointerRoot
+    // (deliver to window under pointer), focus=root is same as PointerRoot.
+    let target = if focus == 0 {
+        // Focus is None — per X11 spec, keyboard events are discarded
+        return (0, 0, 0);
+    } else if focus == 1 || focus == state.root_window {
+        // PointerRoot or root: deliver to window under pointer
+        top_level
+    } else {
         let prop = propagate_keyboard_event(&state.windows, focus, required_mask);
         if prop == 0 {
             // Blocked by do_not_propagate — discard event
             return (0, 0, 0);
         }
         prop
-    } else {
-        top_level
     };
     (target, 0, 0)
 }

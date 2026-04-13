@@ -298,6 +298,27 @@ pub(crate) fn handle_warp_pointer(state: &mut ClientState, data: &[u8], seq: u16
         state.pointer_y = by;
     }
 
+    // Per X11 spec: WarpPointer must generate EnterNotify/LeaveNotify crossing
+    // events if the pointer moves between different windows.
+    let new_x = state.pointer_x;
+    let new_y = state.pointer_y;
+
+    // Find the deepest window under the new pointer position
+    let new_window = {
+        let (w, _, _) = super::super::input::find_event_subwindow(
+            &state.windows, state.root_window, new_x, new_y, ENTER_WINDOW_MASK | LEAVE_WINDOW_MASK,
+        );
+        if w != 0 { w } else { state.root_window }
+    };
+
+    // Generate crossing events for the pointer move
+    let crossing = super::super::input::build_crossing_events(
+        state, new_window, new_x, new_y, new_x, new_y,
+    );
+    for chunk in crossing.chunks_exact(32) {
+        state.pending_events.push(chunk.to_vec());
+    }
+
     // Send MotionNotify event to let the client know the pointer moved
     let mut event = [0u8; 32];
     event[0] = MOTION_NOTIFY_EVENT;
@@ -305,8 +326,8 @@ pub(crate) fn handle_warp_pointer(state: &mut ClientState, data: &[u8], seq: u16
     state.write_u16(&mut event, 2, seq);
     state.write_u32(&mut event, 4, state.timestamp()); // timestamp
     state.write_u32(&mut event, 8, state.root_window); // root
-    // event window = focus_window
-    state.write_u32(&mut event, 12, state.focus_window);
+    // event window = window under pointer (not focus_window, which may differ)
+    state.write_u32(&mut event, 12, new_window);
     state.write_i16(&mut event, 20, state.pointer_x); // root_x
     state.write_i16(&mut event, 22, state.pointer_y); // root_y
     state.write_i16(&mut event, 24, state.pointer_x); // event_x

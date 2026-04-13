@@ -342,6 +342,30 @@ pub(crate) fn handle_send_event(state: &mut ClientState, data: &[u8]) -> Vec<u8>
                             },
                         ));
                     }
+                } else if desired_state == 1 {
+                    // NormalState: restore/un-minimize the window
+                    let net_wm_state_atom = state.intern_atom("_NET_WM_STATE", false);
+                    let hidden_atom = state.intern_atom("_NET_WM_STATE_HIDDEN", false);
+                    // Remove _NET_WM_STATE_HIDDEN from the state
+                    if let Some(win) = state.windows.get_mut(&source_window) {
+                        if let Some(prop) = win.properties.get_mut(&net_wm_state_atom) {
+                            // Remove hidden atom from the state list
+                            let atoms: Vec<u32> = prop.data.chunks_exact(4)
+                                .map(|c| u32::from_le_bytes([c[0], c[1], c[2], c[3]]))
+                                .filter(|&a| a != hidden_atom)
+                                .collect();
+                            prop.data = atoms.iter().flat_map(|a| a.to_le_bytes()).collect();
+                        }
+                    }
+                    if let Some(uuid) = state.window_uuid(source_window) {
+                        let _ = state.update_tx.send((
+                            state.client_id.clone(),
+                            DisplayUpdate::WindowStateChanged {
+                                window_id: uuid,
+                                state: x11_web_protocol::WindowWmState::Normal,
+                            },
+                        ));
+                    }
                 }
                 return Vec::new();
             }
