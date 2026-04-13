@@ -572,8 +572,36 @@ pub(crate) fn dispatch(opcode: u16, data: &[u8]) -> Option<bool> {
                 osmesa::gl_push_name(name);
             }
         }
-        // Render opcodes 147-149: uncommon selection/feedback operations
-        147..=149 => {}
+        // glMapGrid1d (opcode 147)
+        147 => {
+            if data.len() >= 20 {
+                let un = i32::from_le_bytes([data[0], data[1], data[2], data[3]]);
+                let u1 = f64::from_le_bytes(data[4..12].try_into().unwrap());
+                let u2 = f64::from_le_bytes(data[12..20].try_into().unwrap());
+                osmesa::gl_map_grid1d(un, u1, u2);
+            }
+        }
+        // glMapGrid1f (opcode 148)
+        148 => {
+            if data.len() >= 12 {
+                let un = i32::from_le_bytes([data[0], data[1], data[2], data[3]]);
+                let u1 = f32::from_le_bytes([data[4], data[5], data[6], data[7]]);
+                let u2 = f32::from_le_bytes([data[8], data[9], data[10], data[11]]);
+                osmesa::gl_map_grid1f(un, u1, u2);
+            }
+        }
+        // glMapGrid2d (opcode 149)
+        149 => {
+            if data.len() >= 40 {
+                let un = i32::from_le_bytes([data[0], data[1], data[2], data[3]]);
+                let u1 = f64::from_le_bytes(data[4..12].try_into().unwrap());
+                let u2 = f64::from_le_bytes(data[12..20].try_into().unwrap());
+                let vn = i32::from_le_bytes([data[20], data[21], data[22], data[23]]);
+                let v1 = f64::from_le_bytes(data[24..32].try_into().unwrap());
+                let v2 = f64::from_le_bytes(data[32..40].try_into().unwrap());
+                osmesa::gl_map_grid2d(un, u1, u2, vn, v1, v2);
+            }
+        }
         // glPushAttrib (opcode 150)
         150 => {
             if data.len() >= 4 {
@@ -605,9 +633,90 @@ pub(crate) fn dispatch(opcode: u16, data: &[u8]) -> Option<bool> {
                 osmesa::gl_polygon_offset(factor, units);
             }
         }
-        // Opcodes 210-215, 222-228: remaining GL 1.3-1.5 render opcodes
-        210..=215 | 222..=228 => {
-            // Various uncommon render opcodes -- silently accepted for now
+        // glMultiTexCoord4dv (opcode 210): target(4) + s(8) + t(8) + r(8) + q(8) = 36 bytes
+        210 => {
+            if data.len() >= 36 {
+                let target = u32::from_le_bytes([data[0], data[1], data[2], data[3]]);
+                let s = f64::from_le_bytes(data[4..12].try_into().unwrap()) as f32;
+                let t = f64::from_le_bytes(data[12..20].try_into().unwrap()) as f32;
+                let r = f64::from_le_bytes(data[20..28].try_into().unwrap()) as f32;
+                let q = f64::from_le_bytes(data[28..36].try_into().unwrap()) as f32;
+                osmesa::gl_multi_tex_coord4f(target, s, t, r, q);
+            }
+        }
+        // glMultiTexCoord4iv (opcode 211): target(4) + s(4) + t(4) + r(4) + q(4) = 20 bytes
+        211 => {
+            if data.len() >= 20 {
+                let target = u32::from_le_bytes([data[0], data[1], data[2], data[3]]);
+                let s = i32::from_le_bytes([data[4], data[5], data[6], data[7]]) as f32;
+                let t = i32::from_le_bytes([data[8], data[9], data[10], data[11]]) as f32;
+                let r = i32::from_le_bytes([data[12], data[13], data[14], data[15]]) as f32;
+                let q = i32::from_le_bytes([data[16], data[17], data[18], data[19]]) as f32;
+                osmesa::gl_multi_tex_coord4f(target, s, t, r, q);
+            }
+        }
+        // glMultiTexCoord4sv (opcode 212): target(4) + s(2) + t(2) + r(2) + q(2) = 12 bytes
+        212 => {
+            if data.len() >= 12 {
+                let target = u32::from_le_bytes([data[0], data[1], data[2], data[3]]);
+                let s = i16::from_le_bytes([data[4], data[5]]) as f32;
+                let t = i16::from_le_bytes([data[6], data[7]]) as f32;
+                let r = i16::from_le_bytes([data[8], data[9]]) as f32;
+                let q = i16::from_le_bytes([data[10], data[11]]) as f32;
+                osmesa::gl_multi_tex_coord4f(target, s, t, r, q);
+            }
+        }
+        // glCompressedTexImage1D (opcode 213): pixel header(20) + target(4) + level(4)
+        //   + internalformat(4) + width(4) + border(4) + imageSize(4) + data...
+        213 => {
+            if data.len() >= 44 {
+                let target = u32::from_le_bytes([data[20], data[21], data[22], data[23]]);
+                let level = i32::from_le_bytes([data[24], data[25], data[26], data[27]]);
+                let internalformat = u32::from_le_bytes([data[28], data[29], data[30], data[31]]);
+                let width = i32::from_le_bytes([data[32], data[33], data[34], data[35]]);
+                let border = i32::from_le_bytes([data[36], data[37], data[38], data[39]]);
+                let image_size = i32::from_le_bytes([data[40], data[41], data[42], data[43]]);
+                let pixel_data = if data.len() > 44 { &data[44..] } else { &[] };
+                osmesa::gl_compressed_tex_image_1d(target, level, internalformat, width, border, image_size, pixel_data);
+            }
+        }
+        // glCompressedTexImage2D (opcode 214): pixel header(20) + target(4) + level(4)
+        //   + internalformat(4) + width(4) + height(4) + border(4) + imageSize(4) + data...
+        214 => {
+            if data.len() >= 48 {
+                let target = u32::from_le_bytes([data[20], data[21], data[22], data[23]]);
+                let level = i32::from_le_bytes([data[24], data[25], data[26], data[27]]);
+                let internalformat = u32::from_le_bytes([data[28], data[29], data[30], data[31]]);
+                let width = i32::from_le_bytes([data[32], data[33], data[34], data[35]]);
+                let height = i32::from_le_bytes([data[36], data[37], data[38], data[39]]);
+                let border = i32::from_le_bytes([data[40], data[41], data[42], data[43]]);
+                let image_size = i32::from_le_bytes([data[44], data[45], data[46], data[47]]);
+                let pixel_data = if data.len() > 48 { &data[48..] } else { &[] };
+                osmesa::gl_compressed_tex_image_2d(target, level, internalformat, width, height, border, image_size, pixel_data);
+            }
+        }
+        // glCompressedTexImage3D (opcode 215): pixel header(20) + target(4) + level(4)
+        //   + internalformat(4) + width(4) + height(4) + depth(4) + border(4) + imageSize(4) + data...
+        215 => {
+            if data.len() >= 52 {
+                let target = u32::from_le_bytes([data[20], data[21], data[22], data[23]]);
+                let level = i32::from_le_bytes([data[24], data[25], data[26], data[27]]);
+                let internalformat = u32::from_le_bytes([data[28], data[29], data[30], data[31]]);
+                let width = i32::from_le_bytes([data[32], data[33], data[34], data[35]]);
+                let height = i32::from_le_bytes([data[36], data[37], data[38], data[39]]);
+                let depth = i32::from_le_bytes([data[40], data[41], data[42], data[43]]);
+                let border = i32::from_le_bytes([data[44], data[45], data[46], data[47]]);
+                let image_size = i32::from_le_bytes([data[48], data[49], data[50], data[51]]);
+                let pixel_data = if data.len() > 52 { &data[52..] } else { &[] };
+                osmesa::gl_compressed_tex_image_3d(target, level, internalformat, width, height, depth, border, image_size, pixel_data);
+            }
+        }
+        // ARB_vertex_blend opcodes 222-228: Weight functions
+        // These are from a rarely-used ARB extension. Accept silently as
+        // OSMesa's software renderer doesn't support vertex blending hardware.
+        222..=228 => {
+            // ARB_vertex_blend: glWeight[bsiu]v, glVertexBlend, glWeightfv, glWeightdv
+            // These operations are effectively no-ops in software rendering.
         }
         // glSampleCoverage (opcode 229)
         229 => {

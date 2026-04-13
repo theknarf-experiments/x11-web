@@ -863,9 +863,62 @@ pub(crate) fn dispatch(opcode: u16, data: &[u8]) -> Option<bool> {
                 osmesa::gl_array_element(i);
             }
         }
-        // Opcodes 202-205, 207-208: MultiTexCoord variants (double, int, short)
-        202..=205 | 207..=208 => {
-            // Multi-texture coordinate variants (non-float) -- silently accepted
+        // glMultiTexCoord2dv (opcode 202): target(4) + s(8) + t(8) = 20 bytes
+        202 => {
+            if data.len() >= 20 {
+                let target = u32::from_le_bytes([data[0], data[1], data[2], data[3]]);
+                let s = f64::from_le_bytes(data[4..12].try_into().unwrap()) as f32;
+                let t = f64::from_le_bytes(data[12..20].try_into().unwrap()) as f32;
+                osmesa::gl_multi_tex_coord2f(target, s, t);
+            }
+        }
+        // glMultiTexCoord2iv (opcode 203): target(4) + s(4) + t(4) = 12 bytes
+        203 => {
+            if data.len() >= 12 {
+                let target = u32::from_le_bytes([data[0], data[1], data[2], data[3]]);
+                let s = i32::from_le_bytes([data[4], data[5], data[6], data[7]]) as f32;
+                let t = i32::from_le_bytes([data[8], data[9], data[10], data[11]]) as f32;
+                osmesa::gl_multi_tex_coord2f(target, s, t);
+            }
+        }
+        // glMultiTexCoord2sv (opcode 204): target(4) + s(2) + t(2) = 8 bytes
+        204 => {
+            if data.len() >= 8 {
+                let target = u32::from_le_bytes([data[0], data[1], data[2], data[3]]);
+                let s = i16::from_le_bytes([data[4], data[5]]) as f32;
+                let t = i16::from_le_bytes([data[6], data[7]]) as f32;
+                osmesa::gl_multi_tex_coord2f(target, s, t);
+            }
+        }
+        // glMultiTexCoord3dv (opcode 205): target(4) + s(8) + t(8) + r(8) = 28 bytes
+        205 => {
+            if data.len() >= 28 {
+                let target = u32::from_le_bytes([data[0], data[1], data[2], data[3]]);
+                let s = f64::from_le_bytes(data[4..12].try_into().unwrap()) as f32;
+                let t = f64::from_le_bytes(data[12..20].try_into().unwrap()) as f32;
+                let r = f64::from_le_bytes(data[20..28].try_into().unwrap()) as f32;
+                osmesa::gl_multi_tex_coord3f(target, s, t, r);
+            }
+        }
+        // glMultiTexCoord3iv (opcode 207): target(4) + s(4) + t(4) + r(4) = 16 bytes
+        207 => {
+            if data.len() >= 16 {
+                let target = u32::from_le_bytes([data[0], data[1], data[2], data[3]]);
+                let s = i32::from_le_bytes([data[4], data[5], data[6], data[7]]) as f32;
+                let t = i32::from_le_bytes([data[8], data[9], data[10], data[11]]) as f32;
+                let r = i32::from_le_bytes([data[12], data[13], data[14], data[15]]) as f32;
+                osmesa::gl_multi_tex_coord3f(target, s, t, r);
+            }
+        }
+        // glMultiTexCoord3sv (opcode 208): target(4) + s(2) + t(2) + r(2) + pad(2) = 12 bytes
+        208 => {
+            if data.len() >= 10 {
+                let target = u32::from_le_bytes([data[0], data[1], data[2], data[3]]);
+                let s = i16::from_le_bytes([data[4], data[5]]) as f32;
+                let t = i16::from_le_bytes([data[6], data[7]]) as f32;
+                let r = i16::from_le_bytes([data[8], data[9]]) as f32;
+                osmesa::gl_multi_tex_coord3f(target, s, t, r);
+            }
         }
         // glDrawPixels (opcode 4107)
         4107 => {
