@@ -40,3 +40,10 @@ yeslogic-fontconfig-sys = { version = "6", features = ["dlopen"] }
 # `org.gtk.Menus` and `com.canonical.dbusmenu`. Brought in here so the
 # Phase 0 dbus-daemon plumbing can verify it links cleanly.
 zbus = { version = "4", default-features = false, features = ["tokio"] }
+# WebRTC (Sans-IO) for peer-to-peer data channel + audio streaming
+str0m = { version = "0.18", default-features = false, features = ["openssl"] }
+# Opus codec for audio encoding/decoding
+opus = "0.3"
+# PulseAudio client for audio capture/playback
+libpulse-binding = "2"
+libpulse-simple-binding = "2"

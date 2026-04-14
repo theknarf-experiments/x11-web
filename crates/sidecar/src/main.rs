@@ -1,3 +1,4 @@
+mod audio;
 mod colors;
 #[allow(dead_code)]
 mod compose;
@@ -7,6 +8,7 @@ mod menus;
 #[cfg(feature = "osmesa")]
 #[allow(dead_code)]
 mod osmesa;
+mod webrtc;
 mod xinput2;
 mod xserver;
 
@@ -23,6 +25,7 @@ use tokio_tungstenite::tungstenite::Message;
 use tracing::{error, info, warn};
 use x11_web_protocol::*;
 
+use crate::webrtc::{RtcCommand, RtcEvent, WebRtcManager};
 use crate::xserver::{TaggedDisplayUpdate, X11Server};
 
 struct ProcessManager {
@@ -286,6 +289,9 @@ async fn main() {
         }
     });
 
+    // Start PulseAudio for audio capture/playback.
+    let _pulse_daemon = audio::start_pulseaudio().await;
+
     info!("Connecting to backend at {}", backend_url);
 
     loop {
@@ -346,6 +352,17 @@ async fn run_session(
     // Channel for outgoing messages
     let (tx, mut rx) = mpsc::unbounded_channel::<SidecarToBackend>();
 
+    // Spawn WebRTC manager for peer-to-peer data channel + audio.
+    let (rtc_mgr, mut rtc_rx) = WebRtcManager::spawn();
+
+    // Spawn audio capture: reads from PulseAudio monitor, sends Opus to WebRTC.
+    let rtc_mgr_audio = rtc_mgr.cmd_tx_clone();
+    tokio::spawn(audio::run_audio_capture(rtc_mgr_audio));
+
+    // Channel for mic audio from WebRTC → PulseAudio virtual source.
+    let (mic_tx, mic_rx) = mpsc::unbounded_channel::<Vec<u8>>();
+    tokio::spawn(audio::run_audio_playback(mic_rx));
+
     // Heartbeat task
     let tx_heartbeat = tx.clone();
     let heartbeat_task = tokio::spawn(async move {
@@ -376,7 +393,7 @@ async fn run_session(
                 match msg {
                     Some(Ok(Message::Text(text))) => {
                         if let Ok(cmd) = serde_json::from_str::<BackendToSidecar>(&text) {
-                            handle_command(cmd, &mut process_manager, &tx, window_router, screen_size_tx, shared_clipboard, shared_selections).await;
+                            handle_command(cmd, &mut process_manager, &tx, window_router, screen_size_tx, shared_clipboard, shared_selections, &rtc_mgr).await;
                         }
                     }
                     Some(Ok(Message::Close(_))) | None => break,
@@ -384,18 +401,19 @@ async fn run_session(
                 }
             }
             Some((client_id, update)) = display_rx.recv() => {
-                let _ = tx.send(SidecarToBackend::DisplayUpdate { client_id, update });
+                // Send via WebSocket (existing path) AND WebRTC data channel.
+                let _ = tx.send(SidecarToBackend::DisplayUpdate { client_id: client_id.clone(), update: update.clone() });
+                rtc_mgr.send(RtcCommand::DisplayUpdate { client_id, update });
             }
             Some((client_id, peer_pid)) = client_connected_rx.recv() => {
-                // Find which spawned process this X11 client belongs to by
-                // walking up the process tree from the peer PID.
                 let spawned_pids: Vec<u32> = process_manager.list().iter().map(|p| p.pid).collect();
                 let pid = find_ancestor_pid(peer_pid, &spawned_pids);
 
                 if let Some(pid) = pid {
                     let command = process_manager.get_command(pid).unwrap_or("").to_string();
                     info!("Process {pid} ({command}) (peer {peer_pid}) connected as X11 client {client_id}");
-                    let _ = tx.send(SidecarToBackend::ProcessConnected { pid, client_id, command });
+                    let _ = tx.send(SidecarToBackend::ProcessConnected { pid, client_id: client_id.clone(), command: command.clone() });
+                    rtc_mgr.send(RtcCommand::ProcessConnected { pid, client_id, command });
                 } else {
                     info!("X11 client {client_id} connected (peer PID {peer_pid}, no matching spawned process)");
                 }
@@ -404,26 +422,32 @@ async fn run_session(
                 match clipboard_event {
                     crate::xserver::types::ClipboardEvent::OwnerChanged { selection, owner } => {
                         if owner != 0 {
-                            // An X11 client now owns this selection — advertise it to the frontend.
+                            let mime_types = vec!["text/plain".into(), "UTF8_STRING".into()];
                             let _ = tx.send(SidecarToBackend::ClipboardOffer {
                                 selection: selection.clone(),
-                                mime_types: vec!["text/plain".into(), "UTF8_STRING".into()],
+                                mime_types: mime_types.clone(),
                             });
+                            rtc_mgr.send(RtcCommand::ClipboardOffer { selection, mime_types });
                         }
                     }
                     crate::xserver::types::ClipboardEvent::Data { selection, mime_type, data } => {
                         let _ = tx.send(SidecarToBackend::ClipboardData {
-                            selection,
-                            mime_type,
-                            data,
+                            selection: selection.clone(),
+                            mime_type: mime_type.clone(),
+                            data: data.clone(),
                         });
+                        rtc_mgr.send(RtcCommand::ClipboardData { selection, mime_type, data });
                     }
                 }
+            }
+            Some(rtc_event) = rtc_rx.recv() => {
+                handle_rtc_event(rtc_event, &mut process_manager, &tx, window_router, screen_size_tx, shared_clipboard, shared_selections, &rtc_mgr, &mic_tx).await;
             }
             _ = check_interval.tick() => {
                 let exited = process_manager.check_exited().await;
                 for (pid, exit_code) in exited {
-                    let _ = tx.send(SidecarToBackend::ProcessExited { pid, exit_code });
+                    let _ = tx.send(SidecarToBackend::ProcessExited { pid, exit_code: exit_code });
+                    rtc_mgr.send(RtcCommand::ProcessExited { pid, exit_code });
                 }
             }
         }
@@ -441,6 +465,7 @@ async fn handle_command(
     screen_size_tx: &crate::xserver::types::ScreenSizeTx,
     shared_clipboard: &crate::xserver::types::SharedClipboard,
     shared_selections: &crate::xserver::types::SharedSelections,
+    rtc_mgr: &WebRtcManager,
 ) {
     match cmd {
         BackendToSidecar::SpawnProcess {
@@ -543,6 +568,105 @@ async fn handle_command(
                 info!("Screen resize request: {width}x{height}");
                 let _ = screen_size_tx.send((width, height));
             }
+        }
+        BackendToSidecar::RtcAnswer { frontend_id, sdp } => {
+            rtc_mgr.send(RtcCommand::Answer { frontend_id, sdp });
+        }
+        BackendToSidecar::RtcIceCandidate { frontend_id, candidate, .. } => {
+            rtc_mgr.send(RtcCommand::IceCandidate { frontend_id, candidate });
+        }
+    }
+}
+
+/// Handle events from the WebRTC manager (data channel input, mic audio, signaling).
+async fn handle_rtc_event(
+    event: RtcEvent,
+    pm: &mut ProcessManager,
+    tx: &mpsc::UnboundedSender<SidecarToBackend>,
+    window_router: &crate::xserver::WindowRouter,
+    screen_size_tx: &crate::xserver::types::ScreenSizeTx,
+    shared_clipboard: &crate::xserver::types::SharedClipboard,
+    _shared_selections: &crate::xserver::types::SharedSelections,
+    rtc_mgr: &WebRtcManager,
+    mic_tx: &mpsc::UnboundedSender<Vec<u8>>,
+) {
+    match event {
+        RtcEvent::Signal(msg) => {
+            // Forward signaling messages (SDP offer, ICE candidates) to backend via WS.
+            let _ = tx.send(msg);
+        }
+        RtcEvent::Input { window_id, event } => {
+            if !window_router.send_input(&window_id, event) {
+                rtc_mgr.send(RtcCommand::InputDropped {
+                    window_id,
+                    reason: "no route entry for window UUID".into(),
+                });
+            }
+        }
+        RtcEvent::Redraw { window_id } => {
+            window_router.send_resize(&window_id, 0, 0);
+        }
+        RtcEvent::ResizeWindow {
+            window_id,
+            width,
+            height,
+        } => {
+            window_router.send_resize(&window_id, width, height);
+        }
+        RtcEvent::ResizeScreen { width, height } => {
+            if width > 0 && height > 0 {
+                let _ = screen_size_tx.send((width, height));
+            }
+        }
+        RtcEvent::SetClipboard {
+            selection,
+            mime_type,
+            data,
+        } => {
+            if let Ok(mut cb) = shared_clipboard.lock() {
+                cb.insert(
+                    selection,
+                    crate::xserver::types::ServerClipboardData { mime_type, data },
+                );
+            }
+        }
+        RtcEvent::RequestClipboard { selection, mime_type } => {
+            info!("WebRTC clipboard request: selection={selection} mime={mime_type}");
+        }
+        RtcEvent::SpawnProcess {
+            request_id,
+            command,
+            args,
+        } => match pm.spawn(&command, &args).await {
+            Ok(pid) => {
+                let _ = tx.send(SidecarToBackend::ProcessSpawned {
+                    request_id,
+                    pid,
+                });
+            }
+            Err(message) => {
+                let _ = tx.send(SidecarToBackend::Error {
+                    request_id: Some(request_id),
+                    message,
+                });
+            }
+        },
+        RtcEvent::KillProcess { request_id, pid } => match pm.kill(pid).await {
+            Ok(()) => {
+                let _ = tx.send(SidecarToBackend::ProcessKilled {
+                    request_id,
+                    pid,
+                });
+            }
+            Err(message) => {
+                let _ = tx.send(SidecarToBackend::Error {
+                    request_id: Some(request_id),
+                    message,
+                });
+            }
+        },
+        RtcEvent::MicAudio { data } => {
+            let _ = mic_tx.send(data);
         }
     }
 }

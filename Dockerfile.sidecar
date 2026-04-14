@@ -4,6 +4,12 @@ FROM rust:1-bookworm AS builder
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libosmesa6-dev \
     cmake \
+    # OpenSSL for str0m WebRTC DTLS
+    libssl-dev pkg-config \
+    # PulseAudio client dev libs for audio capture
+    libpulse-dev \
+    # Opus codec dev libs
+    libopus-dev \
     && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 COPY Cargo.toml Cargo.lock ./
@@ -114,6 +120,17 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libavcodec-extra \
     # CJK fonts for XIM CJK input testing
     fonts-noto-cjk \
+    # PulseAudio for audio capture/playback (WebRTC audio)
+    pulseaudio \
+    libpulse0 \
+    # Opus codec runtime
+    libopus0 \
+    # OpenSSL runtime for str0m WebRTC
+    libssl3 \
+    # VLC for audio/video e2e tests
+    vlc \
+    # Audacity for recording e2e tests (CLI mode)
+    audacity \
     # GLX testing (not available on all architectures; install if present)
     && rm -rf /var/lib/apt/lists/* \
     && apt-get update && apt-get install -y --no-install-recommends glmark2 2>/dev/null; \
@@ -150,6 +167,17 @@ RUN cp /opt/test-video.mp4 /opt/test-content/test-video.mp4 2>/dev/null || true
 COPY --from=xts-builder /opt/xts /opt/xts
 COPY --from=xts-builder /opt/xts-src /opt/xts-src
 COPY --from=dbusmenu-builder /usr/local/bin/dbusmenu-test /usr/local/bin/dbusmenu-test
+# PulseAudio configuration: run in system mode, allow anonymous connections
+RUN mkdir -p /etc/pulse /run/pulse && \
+    echo "load-module module-native-protocol-unix auth-anonymous=1" > /etc/pulse/default.pa && \
+    echo "load-module module-null-sink sink_name=virtual_out sink_properties=device.description=VirtualOutput" >> /etc/pulse/default.pa && \
+    echo "load-module module-null-sink sink_name=virtual_in sink_properties=device.description=VirtualInput" >> /etc/pulse/default.pa && \
+    echo "load-module module-virtual-source source_name=virtual_mic master=virtual_in.monitor" >> /etc/pulse/default.pa && \
+    echo "set-default-sink virtual_out" >> /etc/pulse/default.pa && \
+    echo "set-default-source virtual_mic" >> /etc/pulse/default.pa && \
+    echo "autospawn = no" > /etc/pulse/client.conf && \
+    echo "daemon-binary = /usr/bin/pulseaudio" >> /etc/pulse/client.conf
+
 RUN mkdir -p /tmp/.X11-unix
 # Fixed hostname so xterm/vim prompts are deterministic in e2e snapshot tests
 RUN echo "x11web" > /etc/hostname
@@ -162,4 +190,6 @@ ENV HOSTNAME=x11web
 # GLX driver loading failures in containers without GPU access.
 ENV LIBGL_ALWAYS_SOFTWARE=1
 ENV MOZ_X11_EGL=0
+# PulseAudio: apps connect to the local daemon via default socket.
+ENV PULSE_SERVER=unix:/run/pulse/native
 CMD ["x11-web-sidecar"]

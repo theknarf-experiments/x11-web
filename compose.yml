@@ -15,6 +15,9 @@ services:
     hostname: x11web
     depends_on:
       - backend
+    ports:
+      # WebRTC UDP port range for ICE
+      - "10000-10010:10000-10010/udp"
     environment:
       BACKEND_URL: ws://backend:3001/ws/sidecar
       SIDECAR_NAME: local-sidecar

@@ -56,6 +56,18 @@ pub enum BackendToSidecar {
     },
     /// Resize the virtual screen (RandR-driven).
     ResizeScreen { width: u16, height: u16 },
+    /// WebRTC signaling: forward SDP answer from frontend to sidecar.
+    RtcAnswer {
+        frontend_id: String,
+        sdp: String,
+    },
+    /// WebRTC signaling: forward ICE candidate from frontend to sidecar.
+    RtcIceCandidate {
+        frontend_id: String,
+        candidate: String,
+        sdp_mid: Option<String>,
+        sdp_mline_index: Option<u16>,
+    },
 }
 
 /// Messages sent from a sidecar to the backend.
@@ -109,6 +121,18 @@ pub enum SidecarToBackend {
     ClipboardOffer {
         selection: String,
         mime_types: Vec<String>,
+    },
+    /// WebRTC signaling: SDP offer from sidecar for a specific frontend.
+    RtcOffer {
+        frontend_id: String,
+        sdp: String,
+    },
+    /// WebRTC signaling: ICE candidate from sidecar for a specific frontend.
+    RtcIceCandidate {
+        frontend_id: String,
+        candidate: String,
+        sdp_mid: Option<String>,
+        sdp_mline_index: Option<u16>,
     },
 }
 
@@ -188,6 +212,18 @@ pub enum BackendToFrontend {
         selection: String,
         mime_types: Vec<String>,
     },
+    /// WebRTC signaling: SDP offer from sidecar, relayed to this frontend.
+    RtcOffer {
+        sidecar_id: String,
+        sdp: String,
+    },
+    /// WebRTC signaling: ICE candidate from sidecar, relayed to this frontend.
+    RtcIceCandidate {
+        sidecar_id: String,
+        candidate: String,
+        sdp_mid: Option<String>,
+        sdp_mline_index: Option<u16>,
+    },
 }
 
 /// Messages sent from a frontend client to the backend.
@@ -259,6 +295,22 @@ pub enum FrontendToBackend {
         sidecar_id: String,
         width: u16,
         height: u16,
+    },
+    /// WebRTC signaling: SDP answer from this frontend for a sidecar.
+    RtcAnswer {
+        sidecar_id: String,
+        sdp: String,
+    },
+    /// WebRTC signaling: ICE candidate from this frontend for a sidecar.
+    RtcIceCandidate {
+        sidecar_id: String,
+        candidate: String,
+        sdp_mid: Option<String>,
+        sdp_mline_index: Option<u16>,
+    },
+    /// WebRTC signaling: request the sidecar to initiate a WebRTC offer.
+    RtcConnect {
+        sidecar_id: String,
     },
 }
 
@@ -726,4 +778,116 @@ pub enum InputEvent {
         phase: String,
         text: String,
     },
+}
+
+// ---------------------------------------------------------------------------
+// Data channel messages (binary msgpack, sent over WebRTC DataChannel)
+// ---------------------------------------------------------------------------
+
+/// Message sent from sidecar to frontend over WebRTC data channel.
+/// Serialized as msgpack (not JSON) for efficiency — binary data is
+/// included inline without base64 encoding.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "t")]
+pub enum DcServerMsg {
+    /// Display update (same semantics as DisplayUpdate but binary-native).
+    #[serde(rename = "d")]
+    Display {
+        #[serde(rename = "c")]
+        client_id: String,
+        #[serde(rename = "u")]
+        update: DisplayUpdate,
+    },
+    /// Clipboard data.
+    #[serde(rename = "cb")]
+    Clipboard {
+        selection: String,
+        mime_type: String,
+        data: Vec<u8>,
+    },
+    /// Clipboard offer (new selection owner).
+    #[serde(rename = "co")]
+    ClipboardOffer {
+        selection: String,
+        mime_types: Vec<String>,
+    },
+    /// Process connected to X11 server.
+    #[serde(rename = "pc")]
+    ProcessConnected {
+        pid: u32,
+        client_id: String,
+        command: String,
+    },
+    /// Process exited.
+    #[serde(rename = "pe")]
+    ProcessExited {
+        pid: u32,
+        exit_code: Option<i32>,
+    },
+    /// Input was dropped (no route for window).
+    #[serde(rename = "id")]
+    InputDropped {
+        window_id: String,
+        reason: String,
+    },
+}
+
+/// Message sent from frontend to sidecar over WebRTC data channel.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "t")]
+pub enum DcClientMsg {
+    /// Input event for a window.
+    #[serde(rename = "i")]
+    Input {
+        #[serde(rename = "w")]
+        window_id: String,
+        #[serde(rename = "e")]
+        event: InputEvent,
+    },
+    /// Request redraw of a window.
+    #[serde(rename = "r")]
+    Redraw { window_id: String },
+    /// Resize a window.
+    #[serde(rename = "rw")]
+    ResizeWindow {
+        window_id: String,
+        width: u16,
+        height: u16,
+    },
+    /// Resize the virtual screen.
+    #[serde(rename = "rs")]
+    ResizeScreen { width: u16, height: u16 },
+    /// Set clipboard from browser.
+    #[serde(rename = "sc")]
+    SetClipboard {
+        selection: String,
+        mime_type: String,
+        data: Vec<u8>,
+    },
+    /// Request clipboard data.
+    #[serde(rename = "rc")]
+    RequestClipboard {
+        selection: String,
+        mime_type: String,
+    },
+    /// Spawn a process.
+    #[serde(rename = "sp")]
+    SpawnProcess {
+        request_id: String,
+        command: String,
+        args: Vec<String>,
+    },
+    /// Kill a process.
+    #[serde(rename = "kp")]
+    KillProcess { request_id: String, pid: u32 },
+}
+
+/// Encode a message as msgpack bytes.
+pub fn dc_encode<T: Serialize>(msg: &T) -> Result<Vec<u8>, rmp_serde::encode::Error> {
+    rmp_serde::to_vec_named(msg)
+}
+
+/// Decode a message from msgpack bytes.
+pub fn dc_decode<'de, T: Deserialize<'de>>(data: &'de [u8]) -> Result<T, rmp_serde::decode::Error> {
+    rmp_serde::from_slice(data)
 }

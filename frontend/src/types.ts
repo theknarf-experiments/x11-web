@@ -86,6 +86,18 @@ export type BackendToFrontend =
 			sidecar_id: string;
 			selection: string;
 			mime_types: string[];
+	  }
+	| {
+			type: "RtcOffer";
+			sidecar_id: string;
+			sdp: string;
+	  }
+	| {
+			type: "RtcIceCandidate";
+			sidecar_id: string;
+			candidate: string;
+			sdp_mid: string | null;
+			sdp_mline_index: number | null;
 	  };
 
 // Frontend -> Backend messages
@@ -139,6 +151,22 @@ export type FrontendToBackend =
 			sidecar_id: string;
 			width: number;
 			height: number;
+	  }
+	| {
+			type: "RtcConnect";
+			sidecar_id: string;
+	  }
+	| {
+			type: "RtcAnswer";
+			sidecar_id: string;
+			sdp: string;
+	  }
+	| {
+			type: "RtcIceCandidate";
+			sidecar_id: string;
+			candidate: string;
+			sdp_mid: string | null;
+			sdp_mline_index: number | null;
 	  };
 
 /** Animated cursor frame. */

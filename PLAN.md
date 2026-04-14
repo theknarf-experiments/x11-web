@@ -57,11 +57,48 @@
 - [x] 684 unit tests passing, 91 advanced-compliance e2e tests passing
 - [ ] Git fetch, rebase against origin/main, fix any merge conflicts and push up
 
-### Phase 17: WebRTC
+### Phase 17: WebRTC Transport & Audio
 
-- [ ] Replace WebSocket's with a custom binary protocol over WebRTC
-- [ ] Add support for audio streaming
-- [ ] e2e tests with VLC streaming a test video with audio
-- [ ] Add support for microphone streaming from the browser
-- [ ] e2e test with Audacity testing recording
+Architecture: Frontend ↔ WebRTC ↔ Sidecar (peer-to-peer), Backend as signaling relay only.
+- Data channel: binary msgpack protocol for display updates + input events
+- Audio tracks: Opus-encoded PulseAudio output (sidecar→browser) and mic input (browser→sidecar)
+- Libraries: `str0m` (Rust WebRTC, Sans-IO), browser native `RTCPeerConnection`
+
+#### 17a: WebRTC Signaling Infrastructure
+- [ ] Add signaling message types to protocol crate (SDP offer/answer, ICE candidates)
+- [ ] Add signaling relay to backend (frontend↔sidecar SDP/ICE exchange via existing WS)
+- [ ] Frontend: send/receive signaling messages through existing WebSocket
+
+#### 17b: Sidecar WebRTC Endpoint
+- [ ] Add `str0m` dependency to sidecar
+- [ ] Create `webrtc.rs` module: UDP socket, str0m Rtc agent, ICE handling
+- [ ] Create data channel for display updates (binary msgpack, no base64)
+- [ ] Receive input events over data channel
+- [ ] Keep WebSocket for signaling + process management only
+
+#### 17c: Frontend WebRTC Client
+- [ ] Create `useWebRTC.ts` hook: RTCPeerConnection, data channel, audio tracks
+- [ ] Binary msgpack decode for display updates on data channel
+- [ ] Send input events as binary msgpack on data channel
+- [ ] Integrate with existing App.tsx (swap display path from WS to WebRTC)
+- [ ] Fallback: keep WS path working for process/sidecar management
+
+#### 17d: PulseAudio Integration & Audio Streaming
+- [ ] Add PulseAudio to sidecar Dockerfile + startup
+- [ ] Capture audio via PulseAudio monitor source in sidecar
+- [ ] Encode as Opus, send via WebRTC audio track (str0m media)
+- [ ] Frontend: play incoming audio track via HTMLAudioElement / AudioContext
+- [ ] E2e test: VLC playing test video with audio, verify audio track received
+
+#### 17e: Microphone Support (Browser → Sidecar)
+- [ ] Frontend: capture mic via getUserMedia, add as WebRTC audio track
+- [ ] Sidecar: receive audio track, decode Opus, pipe to PulseAudio virtual source
+- [ ] E2e test: Audacity recording from virtual mic input
+- [ ] Update Dockerfiles: add pulseaudio, audacity packages
+
+#### 17f: Final Integration & Tests
+- [ ] E2e: WebRTC data channel works for xeyes, xterm (display + input)
+- [ ] E2e: VLC test video plays with audio heard by browser
+- [ ] E2e: Audacity records from browser mic
+- [ ] All existing e2e tests still pass (backward compat via WS fallback)
 - [ ] git commit and push

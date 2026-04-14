@@ -45,6 +45,8 @@ export type ClipboardDataCallback = (
 	data: string,
 ) => void;
 
+export type RtcSignalingCallback = (msg: BackendToFrontend) => void;
+
 export type ClipboardOfferCallback = (
 	sidecarId: string,
 	selection: string,
@@ -81,6 +83,7 @@ export function useBackendSocket() {
 	const windowStateCallbackRef = useRef<WindowStateChangeCallback | null>(null);
 	const clipboardDataCallbackRef = useRef<ClipboardDataCallback | null>(null);
 	const clipboardOfferCallbackRef = useRef<ClipboardOfferCallback | null>(null);
+	const rtcSignalingCallbackRef = useRef<RtcSignalingCallback | null>(null);
 	const [connected, setConnected] = useState(false);
 	const [sidecars, setSidecars] = useState<SidecarInfo[]>([]);
 	const [processes, setProcesses] = useState<Record<string, ProcessInfo[]>>({});
@@ -267,6 +270,11 @@ export function useBackendSocket() {
 							msg.mime_types,
 						);
 						break;
+					case "RtcOffer":
+					case "RtcIceCandidate":
+						// Forward WebRTC signaling messages to the callback.
+						rtcSignalingCallbackRef.current?.(msg);
+						break;
 				}
 			};
 		}
@@ -321,6 +329,13 @@ export function useBackendSocket() {
 		[],
 	);
 
+	const onRtcSignaling = useCallback(
+		(cb: RtcSignalingCallback | null) => {
+			rtcSignalingCallbackRef.current = cb;
+		},
+		[],
+	);
+
 	return {
 		connected,
 		sidecars,
@@ -332,6 +347,7 @@ export function useBackendSocket() {
 		onWindowStateChange,
 		onClipboardData,
 		onClipboardOffer,
+		onRtcSignaling,
 		diagnostics,
 		dismissDiagnostic,
 		clearDiagnostics,

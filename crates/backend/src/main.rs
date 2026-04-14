@@ -318,6 +318,35 @@ async fn handle_sidecar_ws(socket: WebSocket, state: AppState) {
                 }
             }
             SidecarToBackend::Register { .. } => {} // Already handled
+            SidecarToBackend::RtcOffer {
+                frontend_id,
+                sdp,
+            } => {
+                // Relay SDP offer from sidecar to the specific frontend.
+                let frontends = state.frontends.read().await;
+                if let Some(frontend) = frontends.get(&frontend_id) {
+                    let _ = frontend.tx.send(BackendToFrontend::RtcOffer {
+                        sidecar_id: sidecar_id.clone(),
+                        sdp,
+                    });
+                }
+            }
+            SidecarToBackend::RtcIceCandidate {
+                frontend_id,
+                candidate,
+                sdp_mid,
+                sdp_mline_index,
+            } => {
+                let frontends = state.frontends.read().await;
+                if let Some(frontend) = frontends.get(&frontend_id) {
+                    let _ = frontend.tx.send(BackendToFrontend::RtcIceCandidate {
+                        sidecar_id: sidecar_id.clone(),
+                        candidate,
+                        sdp_mid,
+                        sdp_mline_index,
+                    });
+                }
+            }
         }
     }
 
@@ -589,6 +618,49 @@ async fn handle_frontend_ws(socket: WebSocket, state: AppState) {
                     &state,
                     &sidecar_id,
                     BackendToSidecar::ResizeScreen { width, height },
+                )
+                .await;
+            }
+            FrontendToBackend::RtcConnect { sidecar_id } => {
+                // Tell the sidecar to create an offer for this frontend.
+                // We pass the frontend_id so the sidecar knows who to address.
+                forward_to_sidecar(
+                    &state,
+                    &sidecar_id,
+                    BackendToSidecar::RtcAnswer {
+                        frontend_id: frontend_id.clone(),
+                        // Empty SDP = "please create an offer for me"
+                        sdp: String::new(),
+                    },
+                )
+                .await;
+            }
+            FrontendToBackend::RtcAnswer { sidecar_id, sdp } => {
+                forward_to_sidecar(
+                    &state,
+                    &sidecar_id,
+                    BackendToSidecar::RtcAnswer {
+                        frontend_id: frontend_id.clone(),
+                        sdp,
+                    },
+                )
+                .await;
+            }
+            FrontendToBackend::RtcIceCandidate {
+                sidecar_id,
+                candidate,
+                sdp_mid,
+                sdp_mline_index,
+            } => {
+                forward_to_sidecar(
+                    &state,
+                    &sidecar_id,
+                    BackendToSidecar::RtcIceCandidate {
+                        frontend_id: frontend_id.clone(),
+                        candidate,
+                        sdp_mid,
+                        sdp_mline_index,
+                    },
                 )
                 .await;
             }
