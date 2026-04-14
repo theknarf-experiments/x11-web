@@ -5,9 +5,7 @@
 //! - Receives decoded audio from WebRTC (browser mic) and pipes to PulseAudio virtual source.
 
 use std::process::Stdio;
-use std::sync::Arc;
 
-use tokio::io::AsyncBufReadExt;
 use tokio::process::{Child, Command};
 use tokio::sync::mpsc;
 use tracing::{error, info, warn};

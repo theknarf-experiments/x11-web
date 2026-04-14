@@ -101,7 +101,7 @@ impl ExtensionRegistry {
         };
 
         // Helper closure to avoid repetition.
-        let mut add = |reg: &mut Self, id, wire_name, major_opcode, first_event, first_error| {
+        let add = |reg: &mut Self, id, wire_name, major_opcode, first_event, first_error| {
             let idx = reg.entries.len();
             reg.entries.push(ExtensionInfo {
                 id,
@@ -197,6 +197,7 @@ impl ExtensionRegistry {
 
     /// Enable or disable an extension at runtime.  Returns `true` if the
     /// extension was found (regardless of its previous state).
+    #[cfg(test)]
     pub fn set_enabled(&mut self, id: ExtensionId, enabled: bool) -> bool {
         for entry in &mut self.entries {
             if entry.id == id {

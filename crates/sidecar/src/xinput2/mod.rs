@@ -49,7 +49,9 @@ pub use state::XiState;
 pub const XI_MAJOR_OPCODE: u8 = 131;
 /// Range reserved for XI legacy events. We never emit those (we use the
 /// XI2 generic-event path) but the value still has to be advertised.
+#[allow(dead_code)]
 pub const XI_FIRST_EVENT: u8 = 105;
+#[allow(dead_code)]
 pub const XI_FIRST_ERROR: u8 = 152;
 
 /// Device IDs we expose. Two master devices is the minimum modern XI

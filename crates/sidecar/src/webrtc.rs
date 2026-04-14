@@ -69,7 +69,8 @@ pub enum RtcCommand {
         data: Vec<u8>,
         duration_ms: u32,
     },
-    /// UDP packet received from a peer's socket.
+    /// UDP packet received from a peer's socket (used once UDP receive loop is wired up).
+    #[allow(dead_code)]
     UdpInput {
         local_addr: SocketAddr,
         source: SocketAddr,
