@@ -561,3 +561,46 @@ d.close()
 		}
 	});
 });
+
+test.describe.serial("SDL2 application compatibility", () => {
+	test("SDL2 initializes video subsystem and creates window", async ({
+		sidecarContainer,
+	}) => {
+		test.setTimeout(60_000);
+		const output = await execInSidecar(
+			sidecarContainer,
+			[
+				`timeout 15 python3 -c '`,
+				`import ctypes, sys, time, os`,
+				`os.environ["DISPLAY"] = ":99"`,
+				`try:`,
+				`    sdl = ctypes.CDLL("libSDL2-2.0.so.0")`,
+				`except OSError:`,
+				`    print("SKIP: libSDL2 not available")`,
+				`    sys.exit(0)`,
+				`SDL_INIT_VIDEO = 0x00000020`,
+				`SDL_WINDOW_SHOWN = 0x00000004`,
+				`if sdl.SDL_Init(SDL_INIT_VIDEO) != 0:`,
+				`    err_fn = sdl.SDL_GetError`,
+				`    err_fn.restype = ctypes.c_char_p`,
+				`    print(f"FAIL: SDL_Init failed: {err_fn()}")`,
+				`    sys.exit(1)`,
+				`print("PASS: SDL2 initialized")`,
+				`sdl.SDL_CreateWindow.restype = ctypes.c_void_p`,
+				`win = sdl.SDL_CreateWindow(b"SDL2_Test", 100, 100, 320, 240, SDL_WINDOW_SHOWN)`,
+				`if not win:`,
+				`    print("FAIL: SDL_CreateWindow returned NULL")`,
+				`    sdl.SDL_Quit()`,
+				`    sys.exit(1)`,
+				`print("PASS: SDL2 window created")`,
+				`time.sleep(1)`,
+				`sdl.SDL_DestroyWindow(ctypes.c_void_p(win))`,
+				`sdl.SDL_Quit()`,
+				`print("PASS: SDL2 cleanup complete")`,
+				`' 2>&1`,
+			].join("\n"),
+		);
+		// Either SDL2 works or isn't available (both acceptable)
+		expect(output).toMatch(/PASS: SDL2 window created|SKIP: libSDL2 not available/);
+	});
+});

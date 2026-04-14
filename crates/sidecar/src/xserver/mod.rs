@@ -187,7 +187,7 @@ impl X11Server {
         let client_registry: types::SharedClientRegistry = Arc::new(Mutex::new(Vec::new()));
         let event_broadcaster = types::EventBroadcaster::new();
         let server_grab: types::ServerGrabLock =
-            Arc::new((tokio::sync::Mutex::new(None), tokio::sync::Notify::new()));
+            Arc::new((Mutex::new(None), tokio::sync::Notify::new()));
         let shared_record_contexts: types::SharedRecordContexts =
             Arc::new(Mutex::new(HashMap::new()));
 

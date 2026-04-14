@@ -128,13 +128,18 @@ pub(crate) async fn handle_client(
     // the new connection setup.  Per X11 spec, GrabServer blocks ALL
     // request processing from other clients, including initial connections.
     {
+        let (lock, notify) = &*server_grab;
         loop {
-            let holder = server_grab.0.lock().await;
-            if holder.is_none() {
-                break;
+            // Register for notification BEFORE checking the lock to avoid
+            // a race where UngrabServer fires between our check and await.
+            let notified = notify.notified();
+            {
+                let holder = lock.lock().unwrap_or_else(|e| e.into_inner());
+                if holder.is_none() {
+                    break;
+                }
             }
-            drop(holder);
-            tokio::time::sleep(Duration::from_millis(5)).await;
+            notified.await;
         }
     }
 
@@ -544,7 +549,7 @@ pub(crate) async fn handle_client(
                     // Release server grab if this client held it
                     if state.grabs.server_grab_count > 0 {
                         let (lock, notify) = &*state.server_grab;
-                        if let Ok(mut holder) = lock.try_lock() {
+                        if let Ok(mut holder) = lock.lock() {
                             if holder.as_deref() == Some(&state.client_id) {
                                 *holder = None;
                             }
@@ -906,14 +911,19 @@ pub(crate) async fn handle_client(
                 // Server grab check: if another client holds a GrabServer,
                 // wait until it releases before processing our requests.
                 {
-                    let (lock, _notify) = &*state.server_grab;
+                    let (lock, notify) = &*state.server_grab;
                     loop {
-                        let holder = lock.lock().await;
-                        if holder.is_none() || holder.as_deref() == Some(&state.client_id) {
-                            break;
+                        // Register for notification BEFORE checking the lock to
+                        // avoid a race where UngrabServer fires between our
+                        // check and await.
+                        let notified = notify.notified();
+                        {
+                            let holder = lock.lock().unwrap_or_else(|e| e.into_inner());
+                            if holder.is_none() || holder.as_deref() == Some(&state.client_id) {
+                                break;
+                            }
                         }
-                        drop(holder);
-                        tokio::time::sleep(Duration::from_millis(5)).await;
+                        notified.await;
                     }
                 }
 

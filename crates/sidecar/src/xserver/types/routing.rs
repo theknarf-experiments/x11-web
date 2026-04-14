@@ -16,8 +16,10 @@ pub type ScreenSizeRx = watch::Receiver<(u16, u16)>;
 
 /// Shared server grab lock. When Some(client_id), that client holds the server
 /// grab and all other clients must wait before processing requests.
-/// The Notify is signaled when the grab is released so waiters don't busy-poll.
-pub(crate) type ServerGrabLock = Arc<(tokio::sync::Mutex<Option<String>>, tokio::sync::Notify)>;
+/// Uses std::sync::Mutex (not tokio) so it can be locked from synchronous
+/// handler code (GrabServer/UngrabServer) without `try_lock()` spin loops.
+/// The Notify is signaled when the grab is released so waiters wake immediately.
+pub(crate) type ServerGrabLock = Arc<(Mutex<Option<String>>, tokio::sync::Notify)>;
 
 /// Shared window registry, keyed by window ID.
 /// All connections share a single window namespace, as required by X11.
