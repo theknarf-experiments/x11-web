@@ -83,7 +83,7 @@ pub(super) fn load_pcf_gz_font(path: &Path) -> Option<BitmapFont> {
     parse_pcf_data(&data, path)
 }
 
-fn parse_pcf_data(data: &[u8], path: &Path) -> Option<BitmapFont> {
+pub(super) fn parse_pcf_data(data: &[u8], path: &Path) -> Option<BitmapFont> {
     if data.len() < 8 {
         return None;
     }
@@ -138,7 +138,7 @@ fn parse_pcf_data(data: &[u8], path: &Path) -> Option<BitmapFont> {
 
     // Parse bitmaps
     let bitmaps_table = find_table(PCF_BITMAPS)?;
-    let bitmaps = parse_pcf_bitmaps(data, bitmaps_table, metrics.len())?;
+    let bitmaps = parse_pcf_bitmaps(data, bitmaps_table, metrics.len(), &metrics)?;
 
     // Parse encodings
     let encodings_table = find_table(PCF_BDF_ENCODINGS)?;
@@ -326,7 +326,12 @@ fn parse_pcf_metrics(data: &[u8], table: &PcfTable) -> Option<Vec<PcfMetric>> {
     Some(metrics)
 }
 
-fn parse_pcf_bitmaps(data: &[u8], table: &PcfTable, glyph_count: usize) -> Option<Vec<Vec<u8>>> {
+fn parse_pcf_bitmaps(
+    data: &[u8],
+    table: &PcfTable,
+    glyph_count: usize,
+    metrics: &[PcfMetric],
+) -> Option<Vec<Vec<u8>>> {
     let off = table.offset as usize;
     if off + 4 > data.len() {
         return None;
@@ -334,7 +339,7 @@ fn parse_pcf_bitmaps(data: &[u8], table: &PcfTable, glyph_count: usize) -> Optio
     let format = pcf_read_u32(data, off, false);
     let msb = format & PCF_BYTE_MASK != 0;
     let msb_bits = format & PCF_BIT_MASK != 0;
-    let _glyph_pad = 1 << (format & PCF_GLYPH_PAD_MASK);
+    let glyph_pad = 1usize << (format & PCF_GLYPH_PAD_MASK);
 
     let mut pos = off + 4;
 
@@ -364,31 +369,46 @@ fn parse_pcf_bitmaps(data: &[u8], table: &PcfTable, glyph_count: usize) -> Optio
 
     let bitmap_data_start = pos;
 
-    // Extract bitmaps
+    // Extract bitmaps, repacking from PCF's native row padding to 1-byte padding.
+    // PCF stores each row padded to `glyph_pad` bytes (1, 2, or 4).
+    // Our internal format uses 1-byte padding (row_bytes = ceil(width/8)).
     let mut bitmaps = Vec::with_capacity(count);
     for i in 0..count {
         let bm_off = bitmap_data_start + offsets[i];
-        // We need to figure out the size from metrics (height * stride)
-        // For now, just copy the raw bitmap data between this offset and the next
-        let next_off = if i + 1 < count {
-            bitmap_data_start + offsets[i + 1]
-        } else {
-            data.len().min(off + table.size as usize)
-        };
 
-        let size = next_off
-            .saturating_sub(bm_off)
-            .min(data.len() - bm_off.min(data.len()));
-        let mut bitmap = if bm_off + size <= data.len() {
-            data[bm_off..bm_off + size].to_vec()
-        } else {
-            Vec::new()
-        };
+        if i >= metrics.len() {
+            bitmaps.push(Vec::new());
+            continue;
+        }
 
-        // If bit order is LSB-first, reverse bits in each byte
-        if !msb_bits {
-            for byte in &mut bitmap {
-                *byte = byte.reverse_bits();
+        let m = &metrics[i];
+        let w = (m.right_side_bearing - m.left_side_bearing).max(0) as usize;
+        let h = (m.ascent + m.descent).max(0) as usize;
+
+        if w == 0 || h == 0 {
+            bitmaps.push(Vec::new());
+            continue;
+        }
+
+        // Row stride in the PCF file: ceil(ceil(w/8) / glyph_pad) * glyph_pad
+        let pcf_row_bytes = (w.div_ceil(8) + glyph_pad - 1) / glyph_pad * glyph_pad;
+        // Our internal row stride: ceil(w/8)
+        let dst_row_bytes = w.div_ceil(8);
+
+        let mut bitmap = vec![0u8; dst_row_bytes * h];
+        for row in 0..h {
+            let src_start = bm_off + row * pcf_row_bytes;
+            let dst_start = row * dst_row_bytes;
+            for b in 0..dst_row_bytes {
+                let src_idx = src_start + b;
+                if src_idx < data.len() {
+                    let mut byte = data[src_idx];
+                    // If bit order is LSB-first, reverse bits
+                    if !msb_bits {
+                        byte = byte.reverse_bits();
+                    }
+                    bitmap[dst_start + b] = byte;
+                }
             }
         }
 

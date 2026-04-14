@@ -182,6 +182,8 @@ export async function spawnApp(
 	page: Page,
 	args = "",
 	command = "xeyes",
+	/** Timeout in ms for the window frame to appear (default 15s, use longer for Firefox/GIMP). */
+	windowTimeout = 15_000,
 ): Promise<Locator> {
 	const windowFrames = page.locator('[data-testid="window-frame"]');
 	const countBefore = await windowFrames.count();
@@ -199,7 +201,7 @@ export async function spawnApp(
 	await page.locator("button", { hasText: "Spawn" }).click();
 
 	await expect(windowFrames).toHaveCount(countBefore + 1, {
-		timeout: 15_000,
+		timeout: windowTimeout,
 	});
 	return windowFrames.nth(countBefore);
 }

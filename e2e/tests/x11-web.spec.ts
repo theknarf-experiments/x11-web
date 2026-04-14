@@ -7146,6 +7146,7 @@ print('msb-test-complete')
 				page,
 				"--no-remote --new-instance about:blank",
 				"firefox-esr",
+				120_000,
 			);
 			const canvas = win.locator('[data-testid="x11-canvas"]');
 			await expect(canvas).toBeVisible({ timeout: 120_000 });

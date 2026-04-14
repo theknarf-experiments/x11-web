@@ -33,7 +33,7 @@ async function spawnFirefoxAndWait(
 	page: Page,
 	args = "--no-remote --new-instance about:blank",
 ): Promise<Locator> {
-	const win = await spawnApp(page, args, "firefox-esr");
+	const win = await spawnApp(page, args, "firefox-esr", FIREFOX_STARTUP_TIMEOUT);
 	const canvas = win.locator('[data-testid="x11-canvas"]');
 	await expect(canvas).toBeVisible({ timeout: FIREFOX_STARTUP_TIMEOUT });
 
