@@ -1,3 +1,5 @@
+# Multi-arch build: works natively on both amd64 and arm64.
+# Build with: docker buildx build --platform linux/amd64,linux/arm64 ...
 FROM rust:1-bookworm AS builder
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libosmesa6-dev \
@@ -107,9 +109,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     tk \
     # dbusmenu runtime library for test helper
     libdbusmenu-glib4 \
-    # GLX testing
-    glmark2 \
-    && rm -rf /var/lib/apt/lists/*
+    # GLX testing (not available on all architectures; install if present)
+    && rm -rf /var/lib/apt/lists/* \
+    && apt-get update && apt-get install -y --no-install-recommends glmark2 2>/dev/null; \
+       rm -rf /var/lib/apt/lists/*
 # Copy Xts test suite from builder
 COPY --from=xts-builder /opt/xts /opt/xts
 COPY --from=xts-builder /opt/xts-src /opt/xts-src
