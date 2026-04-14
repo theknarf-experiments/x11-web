@@ -74,6 +74,11 @@ pub(crate) fn handle_create_gc(state: &mut ClientState, data: &[u8]) -> Vec<u8> 
         return build_error(BAD_ID_CHOICE, state.sequence, gc_id, 55, 0);
     }
 
+    // Enforce per-client GC resource limit
+    if !state.can_create_gc() {
+        return build_error(BAD_ALLOC, state.sequence, gc_id, 55, 0);
+    }
+
     let drawable = state.read_u32(data, 8);
     let value_mask = state.read_u32(data, 12);
 

@@ -25,6 +25,32 @@ use super::types::*;
 pub(crate) use types::*;
 pub(crate) use xkb_state::*;
 
+/// Per-client resource limits. These prevent a single client from exhausting
+/// server memory by creating unbounded numbers of X11 resources.
+pub(crate) struct ResourceLimits {
+    pub(crate) max_windows: usize,
+    pub(crate) max_pixmaps: usize,
+    pub(crate) max_gcs: usize,
+    pub(crate) max_colormaps: usize,
+    pub(crate) max_cursors: usize,
+    pub(crate) max_pending_events: usize,
+    pub(crate) max_motion_history: usize,
+}
+
+impl Default for ResourceLimits {
+    fn default() -> Self {
+        Self {
+            max_windows: 4096,
+            max_pixmaps: 4096,
+            max_gcs: 4096,
+            max_colormaps: 256,
+            max_cursors: 1024,
+            max_pending_events: 65536,
+            max_motion_history: 256,
+        }
+    }
+}
+
 /// Per-connection state for an X11 client.
 pub(crate) struct ClientState {
     pub(crate) client_id: String,
@@ -325,4 +351,6 @@ pub(crate) struct ClientState {
     /// Shared extension registry — single source of truth for which extensions
     /// are available, their opcodes, event/error bases, and enabled state.
     pub(crate) extension_registry: std::sync::Arc<super::extensions::ExtensionRegistry>,
+    /// Per-client resource limits to prevent memory exhaustion.
+    pub(crate) resource_limits: ResourceLimits,
 }

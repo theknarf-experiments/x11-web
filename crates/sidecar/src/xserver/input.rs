@@ -904,10 +904,7 @@ pub(crate) fn build_x11_input_event(
             // Record motion history for GetMotionEvents
             if matches!(input, InputEvent::MotionNotify { .. }) {
                 let ts = state.timestamp();
-                if state.motion_history.len() >= 256 {
-                    state.motion_history.remove(0);
-                }
-                state.motion_history.push((ts, *x, *y));
+                state.record_motion_history(ts, *x, *y);
             }
         }
         _ => {}

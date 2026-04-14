@@ -6,6 +6,58 @@ use uuid::Uuid;
 use super::ClientState;
 
 impl ClientState {
+    // -----------------------------------------------------------------------
+    // Resource limit checks
+    // -----------------------------------------------------------------------
+
+    /// Returns true if the client can create another window.
+    pub(crate) fn can_create_window(&self) -> bool {
+        self.windows.len() < self.resource_limits.max_windows
+    }
+
+    /// Returns true if the client can create another pixmap.
+    pub(crate) fn can_create_pixmap(&self) -> bool {
+        self.pixmaps.len() < self.resource_limits.max_pixmaps
+    }
+
+    /// Returns true if the client can create another GC.
+    pub(crate) fn can_create_gc(&self) -> bool {
+        self.gcs.len() < self.resource_limits.max_gcs
+    }
+
+    /// Returns true if the client can create another colormap.
+    pub(crate) fn can_create_colormap(&self) -> bool {
+        self.colormaps.len() < self.resource_limits.max_colormaps
+    }
+
+    /// Returns true if the client can create another cursor.
+    pub(crate) fn can_create_cursor(&self) -> bool {
+        self.cursors.len() < self.resource_limits.max_cursors
+    }
+
+    /// Push an event to the pending_events queue, enforcing the max limit.
+    /// When the limit is exceeded, the oldest event is dropped.
+    pub(crate) fn push_pending_event(&mut self, event: Vec<u8>) {
+        if self.pending_events.len() >= self.resource_limits.max_pending_events {
+            // Drop oldest events to make room
+            let drop_count = self.pending_events.len() / 8 + 1;
+            self.pending_events.drain(..drop_count.min(self.pending_events.len()));
+            tracing::warn!(
+                client_id = %self.client_id,
+                "pending_events overflow: dropped {drop_count} oldest events"
+            );
+        }
+        self.pending_events.push(event);
+    }
+
+    /// Record a motion history entry, enforcing the max limit.
+    pub(crate) fn record_motion_history(&mut self, timestamp: u32, x: i16, y: i16) {
+        if self.motion_history.len() >= self.resource_limits.max_motion_history {
+            self.motion_history.remove(0);
+        }
+        self.motion_history.push((timestamp, x, y));
+    }
+
     /// Remove INCR transfers that have been inactive for longer than `timeout`.
     /// Per X11 spec, stale incremental selection transfers should be cleaned up
     /// if the requestor stops consuming chunks.

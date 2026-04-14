@@ -449,6 +449,7 @@ pub(crate) async fn handle_client(
         dri3_drm_device: None,
         overlay_ref_count: 0,
         extension_registry,
+        resource_limits: super::client::ResourceLimits::default(),
     };
 
     // Initialize default RandR monitor model.
@@ -1017,6 +1018,16 @@ pub(crate) async fn handle_client(
                 }
 
                 state.sync_windows();
+                // Enforce pending event queue limit to prevent unbounded memory growth.
+                if state.pending_events.len() > state.resource_limits.max_pending_events {
+                    let overflow = state.pending_events.len() - state.resource_limits.max_pending_events;
+                    state.pending_events.drain(..overflow);
+                    tracing::warn!(
+                        client_id = %state.client_id,
+                        dropped = overflow,
+                        "pending_events overflow: dropped oldest events"
+                    );
+                }
                 // Pending events still need immediate delivery, with RECORD interception.
                 // Patch sequence numbers to the current value so xcb sees
                 // monotonically non-decreasing sequences.
@@ -1186,10 +1197,7 @@ pub(crate) async fn handle_client(
                                             state.pointer_y = fy;
                                             // Record in motion history
                                             let ts = state.timestamp();
-                                            if state.motion_history.len() >= 256 {
-                                                state.motion_history.remove(0);
-                                            }
-                                            state.motion_history.push((ts, fx, fy));
+                                            state.record_motion_history(ts, fx, fy);
                                         }
                                         continue;
                                     }
@@ -1253,10 +1261,7 @@ pub(crate) async fn handle_client(
                                             state.xi.valuators.x = new_x as i32;
                                             state.xi.valuators.y = new_y as i32;
                                             let ts = state.timestamp();
-                                            if state.motion_history.len() >= 256 {
-                                                state.motion_history.remove(0);
-                                            }
-                                            state.motion_history.push((ts, new_x, new_y));
+                                            state.record_motion_history(ts, new_x, new_y);
                                             let event_bytes = build_x11_input_event(&mut state, &motion, x11_wid);
                                             if !event_bytes.is_empty() {
                                                 stream.write_all(&event_bytes).await?;

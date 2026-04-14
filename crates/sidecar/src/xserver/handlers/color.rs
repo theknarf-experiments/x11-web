@@ -18,6 +18,11 @@ pub(crate) fn handle_create_colormap(state: &mut ClientState, data: &[u8]) -> Ve
         return build_error(BAD_ID_CHOICE, state.sequence, mid, 78, 0);
     }
 
+    // Enforce per-client colormap resource limit
+    if !state.can_create_colormap() {
+        return build_error(BAD_ALLOC, state.sequence, mid, 78, 0);
+    }
+
     let _window = state.read_u32(data, 8);
     let visual = state.read_u32(data, 12);
 
@@ -718,6 +723,10 @@ pub(crate) fn handle_create_cursor(state: &mut ClientState, data: &[u8]) -> Vec<
     if !state.validate_resource_id(cid) {
         return build_error(BAD_ID_CHOICE, state.sequence, cid, 93, 0);
     }
+    // Enforce per-client cursor resource limit
+    if !state.can_create_cursor() {
+        return build_error(BAD_ALLOC, state.sequence, cid, 93, 0);
+    }
     // Per X11 spec: reject duplicate cursor IDs
     if state.cursors.contains_key(&cid) || state.cursor_info.contains_key(&cid) {
         return build_error(BAD_ID_CHOICE, state.sequence, cid, 93, 0);
@@ -887,6 +896,10 @@ pub(crate) fn handle_create_glyph_cursor(state: &mut ClientState, data: &[u8]) -
     // Validate resource ID is within this client's allocated range
     if !state.validate_resource_id(cid) {
         return build_error(BAD_ID_CHOICE, state.sequence, cid, 94, 0);
+    }
+    // Enforce per-client cursor resource limit
+    if !state.can_create_cursor() {
+        return build_error(BAD_ALLOC, state.sequence, cid, 94, 0);
     }
     // Per X11 spec: reject duplicate cursor IDs
     if state.cursors.contains_key(&cid) || state.cursor_info.contains_key(&cid) {

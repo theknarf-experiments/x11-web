@@ -218,7 +218,10 @@ impl Framebuffer {
 
         let mut encoder = DeflateEncoder::new(Vec::new(), Compression::fast());
         let _ = encoder.write_all(&pixels);
-        let compressed = encoder.finish().unwrap_or(pixels);
+        let compressed = encoder.finish().unwrap_or_else(|e| {
+            tracing::warn!("framebuffer compression failed, sending uncompressed: {e}");
+            pixels
+        });
 
         Some((dx as i16, dy as i16, dw as u16, dh as u16, compressed))
     }

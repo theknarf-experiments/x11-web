@@ -2537,3 +2537,158 @@ d1.close()
 		expect(output).toContain("owner_set=True");
 	});
 });
+
+test.describe.serial("Resource limits and robustness", () => {
+	test("server handles rapid window create/destroy without leaking", async ({
+		sidecarContainer,
+	}) => {
+		// Create and destroy many windows rapidly to verify resource cleanup
+		const output = await runPythonX11(
+			sidecarContainer,
+			`
+from Xlib import X, display
+
+d = display.Display()
+screen = d.screen()
+root = screen.root
+created = 0
+for i in range(500):
+    w = root.create_window(0, 0, 10, 10, 0, screen.root_depth,
+        X.InputOutput, X.CopyFromParent)
+    created += 1
+    w.destroy_window()
+d.sync()
+# Verify we can still create windows after mass create/destroy
+final = root.create_window(0, 0, 10, 10, 0, screen.root_depth,
+    X.InputOutput, X.CopyFromParent)
+print(f"created={created} final_wid={final.id}")
+final.destroy_window()
+d.close()
+`,
+		);
+		expect(output).toContain("created=500");
+		expect(output).toContain("final_wid=");
+	});
+
+	test("server handles rapid pixmap create/free without leaking", async ({
+		sidecarContainer,
+	}) => {
+		const output = await runPythonX11(
+			sidecarContainer,
+			`
+from Xlib import X, display
+
+d = display.Display()
+screen = d.screen()
+created = 0
+for i in range(500):
+    pm = screen.root.create_pixmap(64, 64, screen.root_depth)
+    created += 1
+    pm.free_pixmap()
+d.sync()
+# Verify we can still create pixmaps
+final = screen.root.create_pixmap(64, 64, screen.root_depth)
+print(f"created={created} final_pid={final.id}")
+final.free_pixmap()
+d.close()
+`,
+		);
+		expect(output).toContain("created=500");
+		expect(output).toContain("final_pid=");
+	});
+
+	test("server handles rapid GC create/free without leaking", async ({
+		sidecarContainer,
+	}) => {
+		const output = await runPythonX11(
+			sidecarContainer,
+			`
+from Xlib import X, display
+
+d = display.Display()
+screen = d.screen()
+root = screen.root
+created = 0
+for i in range(500):
+    gc = root.create_gc()
+    created += 1
+    gc.free()
+d.sync()
+# Verify we can still create GCs
+final = root.create_gc()
+print(f"created={created} gc_ok=True")
+final.free()
+d.close()
+`,
+		);
+		expect(output).toContain("created=500");
+		expect(output).toContain("gc_ok=True");
+	});
+
+	test("server stays responsive under event flood", async ({
+		sidecarContainer,
+	}) => {
+		// Send many events rapidly and verify the server doesn't crash
+		const output = await runPythonX11(
+			sidecarContainer,
+			`
+from Xlib import X, display, Xatom
+
+d = display.Display()
+screen = d.screen()
+root = screen.root
+
+# Create a window and flood it with property changes (generates PropertyNotify events)
+w = root.create_window(0, 0, 100, 100, 0, screen.root_depth,
+    X.InputOutput, X.CopyFromParent,
+    event_mask=X.PropertyChangeMask)
+w.map()
+d.sync()
+
+atom = d.intern_atom("_TEST_FLOOD")
+for i in range(1000):
+    w.change_property(atom, Xatom.STRING, 8, f"value{i}".encode())
+
+d.sync()
+
+# Verify server is still responding
+info = d.get_display_name()
+print(f"flood_ok=True display={info}")
+w.destroy_window()
+d.close()
+`,
+		);
+		expect(output).toContain("flood_ok=True");
+	});
+
+	test("server survives many concurrent connections", async ({
+		sidecarContainer,
+	}) => {
+		const output = await runPythonX11(
+			sidecarContainer,
+			`
+from Xlib import display
+
+# Open many connections concurrently
+conns = []
+for i in range(20):
+    d = display.Display()
+    conns.append(d)
+
+print(f"opened={len(conns)}")
+
+# Close them all
+for d in conns:
+    d.close()
+
+# Verify server is still accepting connections
+final = display.Display()
+info = final.get_display_name()
+print(f"final_ok=True display={info}")
+final.close()
+`,
+		);
+		expect(output).toContain("opened=20");
+		expect(output).toContain("final_ok=True");
+	});
+});

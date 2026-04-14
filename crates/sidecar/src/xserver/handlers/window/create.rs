@@ -17,6 +17,11 @@ pub(crate) fn handle_create_window(state: &mut ClientState, data: &[u8], _seq: u
         return build_error(BAD_ID_CHOICE, _seq, wid, 1, 0);
     }
 
+    // Enforce per-client window resource limit
+    if !state.can_create_window() {
+        return build_error(BAD_ALLOC, _seq, wid, 1, 0);
+    }
+
     let parent = state.read_u32(data, 8);
     let x = state.read_i16(data, 12);
     let y = state.read_i16(data, 14);

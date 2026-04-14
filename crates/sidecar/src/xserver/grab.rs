@@ -12,7 +12,7 @@ use super::core::build_error;
 use super::core::{read_u16_bo, read_u32_bo, require_len, BAD_CURSOR, BAD_LENGTH, BAD_WINDOW};
 use super::types::WindowState;
 use super::{CROSSING_MODE_GRAB, CROSSING_MODE_UNGRAB};
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use tracing::{debug, info};
 
 /// Generate crossing events for a grab activation.
@@ -93,9 +93,9 @@ pub(crate) struct GrabState {
     /// Re-freeze keyboard after delivering one event (SyncKeyboard / SyncBoth mode).
     pub(crate) keyboard_sync_pending: bool,
     /// Frozen pointer events, queued until AllowEvents thaws them.
-    pub(crate) frozen_pointer_events: Vec<Vec<u8>>,
+    pub(crate) frozen_pointer_events: VecDeque<Vec<u8>>,
     /// Frozen keyboard events, queued until AllowEvents thaws them.
-    pub(crate) frozen_keyboard_events: Vec<Vec<u8>>,
+    pub(crate) frozen_keyboard_events: VecDeque<Vec<u8>>,
 }
 
 #[derive(Clone)]
@@ -919,9 +919,9 @@ pub(crate) fn check_pointer_sync_freeze(state: &mut ClientState, event: &[u8]) -
     if state.grabs.pointer_frozen {
         // Already frozen — queue the event (with bounded capacity)
         if state.grabs.frozen_pointer_events.len() >= MAX_FROZEN_EVENTS {
-            state.grabs.frozen_pointer_events.remove(0);
+            state.grabs.frozen_pointer_events.pop_front();
         }
-        state.grabs.frozen_pointer_events.push(event.to_vec());
+        state.grabs.frozen_pointer_events.push_back(event.to_vec());
         return true;
     }
     if state.grabs.pointer_sync_pending {
@@ -938,9 +938,9 @@ pub(crate) fn check_pointer_sync_freeze(state: &mut ClientState, event: &[u8]) -
 pub(crate) fn check_keyboard_sync_freeze(state: &mut ClientState, event: &[u8]) -> bool {
     if state.grabs.keyboard_frozen {
         if state.grabs.frozen_keyboard_events.len() >= MAX_FROZEN_EVENTS {
-            state.grabs.frozen_keyboard_events.remove(0);
+            state.grabs.frozen_keyboard_events.pop_front();
         }
-        state.grabs.frozen_keyboard_events.push(event.to_vec());
+        state.grabs.frozen_keyboard_events.push_back(event.to_vec());
         return true;
     }
     if state.grabs.keyboard_sync_pending {
@@ -1039,7 +1039,7 @@ mod tests {
         let mut gs = make_grab_state();
         gs.pointer_frozen = true;
         // Simulate a frozen event
-        gs.frozen_pointer_events.push(vec![0u8; 32]);
+        gs.frozen_pointer_events.push_back(vec![0u8; 32]);
         assert_eq!(gs.frozen_pointer_events.len(), 1);
     }
 
@@ -1048,7 +1048,7 @@ mod tests {
         let mut gs = make_grab_state();
         gs.pointer_frozen = true;
         gs.pointer_sync_pending = true;
-        gs.frozen_pointer_events.push(vec![0u8; 32]);
+        gs.frozen_pointer_events.push_back(vec![0u8; 32]);
 
         // Simulate AllowEvents(AsyncPointer): mode 0
         gs.pointer_frozen = false;
@@ -1063,7 +1063,7 @@ mod tests {
     fn allow_events_sync_pointer_refreeze() {
         let mut gs = make_grab_state();
         gs.pointer_frozen = true;
-        gs.frozen_pointer_events.push(vec![0u8; 32]);
+        gs.frozen_pointer_events.push_back(vec![0u8; 32]);
 
         // Simulate AllowEvents(SyncPointer): mode 1
         gs.pointer_frozen = false;
@@ -1086,7 +1086,7 @@ mod tests {
             owner_events: false,
         });
         gs.pointer_frozen = true;
-        gs.frozen_pointer_events.push(vec![0u8; 32]);
+        gs.frozen_pointer_events.push_back(vec![0u8; 32]);
 
         // Simulate UngrabKeyboard
         let grab = gs.keyboard_grab.take().unwrap();
@@ -1153,7 +1153,7 @@ mod tests {
             confine_bounds: None,
         });
         gs.pointer_frozen = true;
-        gs.frozen_pointer_events.push(vec![0u8; 32]);
+        gs.frozen_pointer_events.push_back(vec![0u8; 32]);
 
         // Simulate all buttons released (button_mask = 0)
         let any_buttons_held = (0u16 & 0x1F00) != 0;
@@ -1344,9 +1344,9 @@ mod tests {
         gs.pointer_frozen = true;
         for _ in 0..MAX_FROZEN_EVENTS + 10 {
             if gs.frozen_pointer_events.len() >= MAX_FROZEN_EVENTS {
-                gs.frozen_pointer_events.remove(0);
+                gs.frozen_pointer_events.pop_front();
             }
-            gs.frozen_pointer_events.push(vec![0u8; 32]);
+            gs.frozen_pointer_events.push_back(vec![0u8; 32]);
         }
         assert_eq!(gs.frozen_pointer_events.len(), MAX_FROZEN_EVENTS);
     }

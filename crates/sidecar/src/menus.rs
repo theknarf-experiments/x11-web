@@ -57,18 +57,18 @@ impl WindowIndex {
     }
 
     pub fn register(&self, xid: u32, uuid: String, client_id: String) {
-        let mut map = self.inner.lock().unwrap();
+        let mut map = self.inner.lock().unwrap_or_else(|e| e.into_inner());
         map.insert(xid, WindowEntry { uuid, client_id });
     }
 
     pub fn unregister(&self, xid: u32) {
-        let mut map = self.inner.lock().unwrap();
+        let mut map = self.inner.lock().unwrap_or_else(|e| e.into_inner());
         map.remove(&xid);
     }
 
     /// Look up the window UUID and X11 client id for a raw xid.
     pub fn lookup(&self, xid: u32) -> Option<(String, String)> {
-        let map = self.inner.lock().unwrap();
+        let map = self.inner.lock().unwrap_or_else(|e| e.into_inner());
         map.get(&xid).map(|e| (e.uuid.clone(), e.client_id.clone()))
     }
 }
@@ -228,7 +228,7 @@ impl MenuTracker {
             update_tx,
         ));
 
-        let mut windows = self.inner.windows.lock().unwrap();
+        let mut windows = self.inner.windows.lock().unwrap_or_else(|e| e.into_inner());
         if let Some(prev) = windows.insert(window_uuid, TrackerWindow { cmd_tx, task }) {
             let _ = prev.cmd_tx.send(TrackerCommand::Stop);
             prev.task.abort();
@@ -237,7 +237,7 @@ impl MenuTracker {
 
     /// Stop tracking a window. Called when the X11 window is destroyed.
     pub fn detach(&self, window_uuid: &str) {
-        let mut windows = self.inner.windows.lock().unwrap();
+        let mut windows = self.inner.windows.lock().unwrap_or_else(|e| e.into_inner());
         if let Some(entry) = windows.remove(window_uuid) {
             let _ = entry.cmd_tx.send(TrackerCommand::Stop);
             entry.task.abort();
@@ -246,7 +246,7 @@ impl MenuTracker {
 
     /// Forward a menu activation from the frontend to the right tracker.
     pub fn activate(&self, window_uuid: &str, action: MenuAction) {
-        let windows = self.inner.windows.lock().unwrap();
+        let windows = self.inner.windows.lock().unwrap_or_else(|e| e.into_inner());
         if let Some(entry) = windows.get(window_uuid) {
             let _ = entry.cmd_tx.send(TrackerCommand::Activate { action });
         } else {
@@ -287,7 +287,7 @@ impl MenuTracker {
             update_tx,
         ));
 
-        let mut windows = self.inner.windows.lock().unwrap();
+        let mut windows = self.inner.windows.lock().unwrap_or_else(|e| e.into_inner());
         if let Some(prev) = windows.insert(window_uuid, TrackerWindow { cmd_tx, task }) {
             let _ = prev.cmd_tx.send(TrackerCommand::Stop);
             prev.task.abort();
@@ -355,7 +355,7 @@ impl AppMenuRegistrar {
             }
         }
 
-        self.registrations.lock().unwrap().insert(
+        self.registrations.lock().unwrap_or_else(|e| e.into_inner()).insert(
             window_id,
             Registration {
                 service: sender,
@@ -366,7 +366,7 @@ impl AppMenuRegistrar {
 
     async fn unregister_window(&self, window_id: u32) {
         info!("AppMenu.UnregisterWindow: xid={window_id:#x}");
-        let removed = self.registrations.lock().unwrap().remove(&window_id);
+        let removed = self.registrations.lock().unwrap_or_else(|e| e.into_inner()).remove(&window_id);
         if removed.is_some() {
             if let Some((uuid, _)) = self.tracker.window_index().lookup(window_id) {
                 self.tracker.detach(&uuid);
@@ -378,7 +378,7 @@ impl AppMenuRegistrar {
         &self,
         window_id: u32,
     ) -> (String, zbus::zvariant::OwnedObjectPath) {
-        let regs = self.registrations.lock().unwrap();
+        let regs = self.registrations.lock().unwrap_or_else(|e| e.into_inner());
         match regs.get(&window_id) {
             Some(r) => (r.service.clone(), r.object_path.clone()),
             None => (
@@ -389,7 +389,7 @@ impl AppMenuRegistrar {
     }
 
     async fn get_menus(&self) -> Vec<(u32, String, zbus::zvariant::OwnedObjectPath)> {
-        let regs = self.registrations.lock().unwrap();
+        let regs = self.registrations.lock().unwrap_or_else(|e| e.into_inner());
         regs.iter()
             .map(|(&xid, r)| (xid, r.service.clone(), r.object_path.clone()))
             .collect()

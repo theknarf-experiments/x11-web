@@ -18,6 +18,11 @@ pub(crate) fn handle_create_pixmap(state: &mut ClientState, data: &[u8]) -> Vec<
         return build_error(BAD_ID_CHOICE, state.sequence, pid, 53, 0);
     }
 
+    // Enforce per-client pixmap resource limit
+    if !state.can_create_pixmap() {
+        return build_error(BAD_ALLOC, state.sequence, pid, 53, 0);
+    }
+
     let _drawable = state.read_u32(data, 8);
     let width = state.read_u16(data, 12);
     let height = state.read_u16(data, 14);

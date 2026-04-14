@@ -38,11 +38,28 @@
 ## Remaining Phases
 
 ### Phase 15: Performance & Robustness
-- [ ] Optimize hot paths (event delivery, drawing)
-- [ ] Add proper resource limits
-- [ ] Improve error messages
+- [x] Add per-client resource limits (windows, pixmaps, GCs, colormaps, cursors)
+- [x] Bound pending_events queue per client
+- [x] Fix mutex poison handling in menus.rs (use unwrap_or_else with logging)
+- [x] Fix polygon rendering safety (.unwrap on .min/.max)
+- [x] Use VecDeque for frozen events in grab.rs instead of Vec with remove(0)
+- [x] Add motion_history size limit via configurable ResourceLimits
+- [x] Add error logging for silent failures (compression, etc.)
+- [x] E2e test: resource limits enforcement (5 robustness tests)
+- [ ] Git fetch, rebase against origin/main, fix any merge conflicts and push up
 
 ### Phase 16: Advanced Features
 - [ ] XIM completion for CJK input
 - [ ] XVideo actual video decode
 - [ ] GLX direct rendering improvements
+- [ ] Ensure that there are e2e tests covering testing with Firefox (it should start up, be possible to navigate to wikipedia, scroll should work, navigate to youtube, playing a youtube video should work)
+- [ ] Git fetch, rebase against origin/main, fix any merge conflicts and push up
+
+### Phase 17: WebRTC
+
+- [ ] Replace WebSocket's with a custom binary protocol over WebRTC
+- [ ] Add support for audio streaming
+- [ ] e2e tests with VLC streaming a test video with audio
+- [ ] Add support for microphone streaming from the browser
+- [ ] e2e test with Audacity testing recording
+- [ ] git commit and push

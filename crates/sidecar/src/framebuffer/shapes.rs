@@ -745,12 +745,15 @@ impl Framebuffer {
             return;
         }
 
-        let min_y = points.iter().map(|p| p.1).min().unwrap().max(0) as i32;
+        let Some(min_y) = points.iter().map(|p| p.1).min() else {
+            return;
+        };
+        let min_y = min_y.max(0) as i32;
         let max_y = points
             .iter()
             .map(|p| p.1)
             .max()
-            .unwrap()
+            .unwrap_or(0)
             .min(self.height as i16 - 1) as i32;
 
         for y in min_y..=max_y {
@@ -947,12 +950,15 @@ impl Framebuffer {
         points: &[(i16, i16)],
         fill_rule: u8,
     ) -> Vec<(i16, Vec<(i16, i16)>)> {
-        let min_y = points.iter().map(|p| p.1).min().unwrap().max(0);
+        let Some(min_y) = points.iter().map(|p| p.1).min() else {
+            return Vec::new();
+        };
+        let min_y = min_y.max(0);
         let max_y = points
             .iter()
             .map(|p| p.1)
             .max()
-            .unwrap()
+            .unwrap_or(0)
             .min(self.height as i16 - 1);
         let n = points.len();
         let mut result = Vec::new();
