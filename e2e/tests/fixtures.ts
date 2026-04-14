@@ -101,16 +101,21 @@ async function ensureSetup() {
 	});
 
 	frontendPort = await findFreePort();
-	await new Promise<void>((resolve) => {
+	await new Promise<void>((resolve, reject) => {
 		frontendServer = exec(
 			`${SERVE_BIN} dist -l ${frontendPort} --no-clipboard`,
 			{ cwd: FRONTEND_DIR },
 		);
+		const timeout = setTimeout(() => {
+			clearInterval(check);
+			reject(new Error("Frontend server failed to start within 30s"));
+		}, 30_000);
 		const check = setInterval(async () => {
 			try {
 				const res = await fetch(`http://localhost:${frontendPort}`);
 				if (res.ok) {
 					clearInterval(check);
+					clearTimeout(timeout);
 					resolve();
 				}
 			} catch {
@@ -124,10 +129,16 @@ async function ensureSetup() {
 }
 
 async function teardownAll() {
-	frontendServer?.kill();
-	await sidecarContainer?.stop();
-	await backendContainer?.stop();
-	await network?.stop();
+	if (frontendServer?.pid && !frontendServer.killed) {
+		frontendServer.kill("SIGTERM");
+		// Give it a moment, then force-kill if still alive
+		await new Promise((r) => setTimeout(r, 500));
+		if (!frontendServer.killed) frontendServer.kill("SIGKILL");
+	}
+	await sidecarContainer?.stop().catch(() => {});
+	await backendContainer?.stop().catch(() => {});
+	await network?.stop().catch(() => {});
+	setupDone = false;
 }
 
 function findFreePort(): Promise<number> {
@@ -289,7 +300,12 @@ export async function cleanupApps(
 	await new Promise((r) => setTimeout(r, 2000));
 }
 
-// Register global teardown
-process.on("beforeExit", () => {
-	teardownAll().catch(() => {});
-});
+// Register cleanup on process termination signals.
+// `beforeExit` is unreliable in test runners — use SIGINT/SIGTERM instead.
+for (const signal of ["SIGINT", "SIGTERM"] as const) {
+	process.on(signal, () => {
+		teardownAll()
+			.catch(() => {})
+			.finally(() => process.exit());
+	});
+}

@@ -199,16 +199,21 @@ test.describe
 			});
 
 			frontendPort = await findFreePort();
-			await new Promise<void>((resolve) => {
+			await new Promise<void>((resolve, reject) => {
 				frontendServer = exec(
 					`${SERVE_BIN} dist -l ${frontendPort} --no-clipboard`,
 					{ cwd: FRONTEND_DIR },
 				);
+				const timeout = setTimeout(() => {
+					clearInterval(check);
+					reject(new Error("Frontend server failed to start within 30s"));
+				}, 30_000);
 				const check = setInterval(async () => {
 					try {
 						const res = await fetch(`http://localhost:${frontendPort}`);
 						if (res.ok) {
 							clearInterval(check);
+							clearTimeout(timeout);
 							resolve();
 						}
 					} catch {
