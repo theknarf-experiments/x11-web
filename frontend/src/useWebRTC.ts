@@ -101,7 +101,8 @@ export function useWebRTC(options: UseWebRTCOptions): WebRTCHandle {
 	const sendDc = useCallback((msg: DcClientMsg) => {
 		const dc = dcRef.current;
 		if (dc && dc.readyState === "open") {
-			dc.send(encode(msg) as Uint8Array);
+			const encoded = encode(msg);
+			dc.send(encoded);
 		}
 	}, []);
 
