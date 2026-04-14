@@ -868,7 +868,15 @@ impl X11Server {
                 PropertyValue {
                     prop_type: 31, // STRING
                     format: 8,
-                    data: b"@locale=C,en,en_US,en_US.UTF-8,POSIX".to_vec(),
+                    data: b"@locale=C,en,en_US,en_US.UTF-8,POSIX,\
+zh_CN,zh_CN.UTF-8,zh_TW,zh_TW.UTF-8,\
+ja_JP,ja_JP.UTF-8,ja_JP.eucJP,\
+ko_KR,ko_KR.UTF-8,\
+de_DE,de_DE.UTF-8,fr_FR,fr_FR.UTF-8,\
+es_ES,es_ES.UTF-8,pt_BR,pt_BR.UTF-8,\
+ru_RU,ru_RU.UTF-8,ar_SA,ar_SA.UTF-8,\
+hi_IN,hi_IN.UTF-8,th_TH,th_TH.UTF-8,\
+vi_VN,vi_VN.UTF-8".to_vec(),
                 },
             );
             xim_properties.insert(
