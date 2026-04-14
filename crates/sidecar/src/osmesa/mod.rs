@@ -580,7 +580,7 @@ macro_rules! ffi_fn {
 ffi_fn!(FnOSMesaCreateContextExt, (format: u32, depth_bits: i32, stencil_bits: i32, accum_bits: i32, share_list: OSMesaContext) -> OSMesaContext);
 ffi_fn!(FnOSMesaDestroyContext, (ctx: OSMesaContext));
 ffi_fn!(FnOSMesaMakeCurrent, (ctx: OSMesaContext, buffer: *mut c_void, type_: u32, width: i32, height: i32) -> u8);
-ffi_fn!(FnOSMesaGetProcAddress, (func_name: *const i8) -> *const c_void);
+ffi_fn!(FnOSMesaGetProcAddress, (func_name: *const std::ffi::c_char) -> *const c_void);
 ffi_fn!(FnOSMesaPixelStore, (pname: u32, value: i32));
 
 // GL 1.0-1.1 functions (always available in OSMesa)
@@ -914,7 +914,7 @@ ffi_fn!(FnGlBlendColor, (r: f32, g: f32, b: f32, a: f32));
 // GL 2.0 Shader functions (optional)
 ffi_fn!(FnGlCreateShader, (type_: u32) -> u32);
 ffi_fn!(FnGlDeleteShader, (shader: u32));
-ffi_fn!(FnGlShaderSource, (shader: u32, count: i32, string: *const *const i8, length: *const i32));
+ffi_fn!(FnGlShaderSource, (shader: u32, count: i32, string: *const *const std::ffi::c_char, length: *const i32));
 ffi_fn!(FnGlCompileShader, (shader: u32));
 ffi_fn!(FnGlGetShaderiv, (shader: u32, pname: u32, params: *mut i32));
 ffi_fn!(FnGlGetShaderInfoLog, (shader: u32, max_length: i32, length: *mut i32, info_log: *mut i8));
@@ -926,7 +926,7 @@ ffi_fn!(FnGlLinkProgram, (program: u32));
 ffi_fn!(FnGlUseProgram, (program: u32));
 ffi_fn!(FnGlGetProgramiv, (program: u32, pname: u32, params: *mut i32));
 ffi_fn!(FnGlGetProgramInfoLog, (program: u32, max_length: i32, length: *mut i32, info_log: *mut i8));
-ffi_fn!(FnGlGetUniformLocation, (program: u32, name: *const i8) -> i32);
+ffi_fn!(FnGlGetUniformLocation, (program: u32, name: *const std::ffi::c_char) -> i32);
 ffi_fn!(FnGlUniform1f, (location: i32, v0: f32));
 ffi_fn!(FnGlUniform2f, (location: i32, v0: f32, v1: f32));
 ffi_fn!(FnGlUniform3f, (location: i32, v0: f32, v1: f32, v2: f32));
@@ -936,7 +936,7 @@ ffi_fn!(FnGlUniform2i, (location: i32, v0: i32, v1: i32));
 ffi_fn!(FnGlUniform3i, (location: i32, v0: i32, v1: i32, v2: i32));
 ffi_fn!(FnGlUniform4i, (location: i32, v0: i32, v1: i32, v2: i32, v3: i32));
 ffi_fn!(FnGlUniformMatrix4fv, (location: i32, count: i32, transpose: u8, value: *const f32));
-ffi_fn!(FnGlGetAttribLocation, (program: u32, name: *const i8) -> i32);
+ffi_fn!(FnGlGetAttribLocation, (program: u32, name: *const std::ffi::c_char) -> i32);
 ffi_fn!(FnGlVertexAttribPointer, (index: u32, size: i32, type_: u32, normalized: u8, stride: i32, pointer: *const c_void));
 ffi_fn!(FnGlEnableVertexAttribArray, (index: u32));
 ffi_fn!(FnGlDisableVertexAttribArray, (index: u32));

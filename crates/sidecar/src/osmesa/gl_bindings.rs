@@ -481,7 +481,7 @@ pub fn gl_get_string(name: u32) -> String {
         return String::new();
     }
     unsafe {
-        CStr::from_ptr(ptr as *const i8)
+        CStr::from_ptr(ptr as *const std::ffi::c_char)
             .to_string_lossy()
             .into_owned()
     }
@@ -2306,7 +2306,7 @@ pub fn gl_delete_shader(shader: u32) {
 pub unsafe fn gl_shader_source(
     shader: u32,
     count: i32,
-    string: *const *const i8,
+    string: *const *const std::ffi::c_char,
     length: *const i32,
 ) {
     if let Some(f) = fns().shader_source {

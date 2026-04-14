@@ -31,12 +31,12 @@ pub(crate) fn send_with_fds(sock_fd: i32, data: &[u8], fds: &[i32]) -> io::Resul
         msg.msg_iov = &mut iov;
         msg.msg_iovlen = 1;
         msg.msg_control = cmsg_buf.as_mut_ptr() as *mut libc::c_void;
-        msg.msg_controllen = cmsg_space;
+        msg.msg_controllen = cmsg_space as _;
 
         let cmsg = libc::CMSG_FIRSTHDR(&msg);
         (*cmsg).cmsg_level = libc::SOL_SOCKET;
         (*cmsg).cmsg_type = libc::SCM_RIGHTS;
-        (*cmsg).cmsg_len = libc::CMSG_LEN(fd_bytes as u32) as usize;
+        (*cmsg).cmsg_len = libc::CMSG_LEN(fd_bytes as u32) as _;
         let data_ptr = libc::CMSG_DATA(cmsg);
         std::ptr::copy_nonoverlapping(fds.as_ptr() as *const u8, data_ptr, fd_bytes);
 
@@ -64,7 +64,7 @@ pub(crate) fn recv_with_fds(fd: i32, buf: &mut [u8]) -> io::Result<(usize, Vec<i
         msg.msg_iov = &mut iov;
         msg.msg_iovlen = 1;
         msg.msg_control = cmsg_buf.as_mut_ptr() as *mut libc::c_void;
-        msg.msg_controllen = cmsg_buf.len();
+        msg.msg_controllen = cmsg_buf.len() as _;
 
         let n = libc::recvmsg(fd, &mut msg, libc::MSG_DONTWAIT);
         if n < 0 {
@@ -81,7 +81,7 @@ pub(crate) fn recv_with_fds(fd: i32, buf: &mut [u8]) -> io::Result<(usize, Vec<i
         while !cmsg.is_null() {
             if (*cmsg).cmsg_level == libc::SOL_SOCKET && (*cmsg).cmsg_type == libc::SCM_RIGHTS {
                 let data_ptr = libc::CMSG_DATA(cmsg);
-                let data_len = (*cmsg).cmsg_len - libc::CMSG_LEN(0) as usize;
+                let data_len = ((*cmsg).cmsg_len as usize) - (libc::CMSG_LEN(0) as usize);
                 let num_fds = data_len / std::mem::size_of::<i32>();
                 let fd_slice = std::slice::from_raw_parts(data_ptr as *const i32, num_fds);
                 fds.extend_from_slice(fd_slice);
