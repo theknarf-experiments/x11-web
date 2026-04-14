@@ -19,10 +19,12 @@ use crate::webrtc::RtcCommand;
 pub async fn start_pulseaudio() -> Option<Child> {
     let child = match Command::new("pulseaudio")
         .args([
-            "--start",
+            "--system",
+            "--disallow-exit",
             "--exit-idle-time=-1",
             "--log-level=error",
-            "--disallow-exit",
+            "--use-pid-file=false",
+            "--daemonize",
         ])
         .stdin(Stdio::null())
         .stdout(Stdio::null())

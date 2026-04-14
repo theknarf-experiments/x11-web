@@ -167,16 +167,18 @@ RUN cp /opt/test-video.mp4 /opt/test-content/test-video.mp4 2>/dev/null || true
 COPY --from=xts-builder /opt/xts /opt/xts
 COPY --from=xts-builder /opt/xts-src /opt/xts-src
 COPY --from=dbusmenu-builder /usr/local/bin/dbusmenu-test /usr/local/bin/dbusmenu-test
-# PulseAudio configuration: run in system mode, allow anonymous connections
-RUN mkdir -p /etc/pulse /run/pulse && \
-    echo "load-module module-native-protocol-unix auth-anonymous=1" > /etc/pulse/default.pa && \
-    echo "load-module module-null-sink sink_name=virtual_out sink_properties=device.description=VirtualOutput" >> /etc/pulse/default.pa && \
-    echo "load-module module-null-sink sink_name=virtual_in sink_properties=device.description=VirtualInput" >> /etc/pulse/default.pa && \
-    echo "load-module module-virtual-source source_name=virtual_mic master=virtual_in.monitor" >> /etc/pulse/default.pa && \
-    echo "set-default-sink virtual_out" >> /etc/pulse/default.pa && \
-    echo "set-default-source virtual_mic" >> /etc/pulse/default.pa && \
-    echo "autospawn = no" > /etc/pulse/client.conf && \
-    echo "daemon-binary = /usr/bin/pulseaudio" >> /etc/pulse/client.conf
+# PulseAudio: run in system mode (as root in container), allow anonymous.
+RUN mkdir -p /etc/pulse /run/pulse /var/run/pulse && \
+    printf '%s\n' \
+      "load-module module-native-protocol-unix auth-anonymous=1" \
+      "load-module module-null-sink sink_name=virtual_out sink_properties=device.description=VirtualOutput" \
+      "load-module module-null-sink sink_name=virtual_in sink_properties=device.description=VirtualInput" \
+      "set-default-sink virtual_out" \
+      > /etc/pulse/system.pa && \
+    printf '%s\n' \
+      "autospawn = no" \
+      "default-server = unix:/var/run/pulse/native" \
+      > /etc/pulse/client.conf
 
 RUN mkdir -p /tmp/.X11-unix
 # Fixed hostname so xterm/vim prompts are deterministic in e2e snapshot tests
@@ -191,5 +193,5 @@ ENV HOSTNAME=x11web
 ENV LIBGL_ALWAYS_SOFTWARE=1
 ENV MOZ_X11_EGL=0
 # PulseAudio: apps connect to the local daemon via default socket.
-ENV PULSE_SERVER=unix:/run/pulse/native
+ENV PULSE_SERVER=unix:/var/run/pulse/native
 CMD ["x11-web-sidecar"]
