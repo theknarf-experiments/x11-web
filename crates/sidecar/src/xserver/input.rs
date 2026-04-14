@@ -160,7 +160,7 @@ pub(crate) fn find_event_subwindow(
 
 /// Find the deepest mapped window containing the given point, ignoring event masks.
 /// Used as the first step of X11 event targeting per spec Section 7.
-fn find_deepest_window(
+pub(crate) fn find_deepest_window(
     windows: &HashMap<u32, WindowState>,
     parent: u32,
     rel_x: i16,

@@ -383,12 +383,12 @@ w = screen.root.create_window(100, 100, 200, 200, 0, screen.root_depth,
 w.map()
 d.sync()
 
-# Warp into the window
-d.warp_pointer(0, 0, 0, 0, 0, 0, 150, 150)
+# Warp into the window (use w.warp_pointer for absolute coordinates)
+w.warp_pointer(50, 50)  # warp to (50,50) relative to w = (150,150) absolute
 d.sync()
 
 import time
-time.sleep(0.1)
+time.sleep(0.2)
 d.sync()
 
 events = []
@@ -1102,12 +1102,15 @@ w1.map()
 w2.map()
 d.sync()
 
-# Warp pointer into w1
-screen.root.warp_pointer(0, 0, 0, 0, 50, 50)
+# Warp pointer into w1 (absolute, relative to root)
+screen.root.warp_pointer(50, 50)
 d.sync()
+import time; time.sleep(0.1)
 
-# Warp pointer into w2
-screen.root.warp_pointer(0, 0, 0, 0, 250, 50)
+# Warp pointer into w2 (absolute, relative to root)
+screen.root.warp_pointer(250, 50)
+d.sync()
+time.sleep(0.1)
 d.sync()
 
 # Check for crossing events
@@ -1566,8 +1569,8 @@ d = Xlib.display.Display()
 screen = d.screen()
 root = screen.root
 
-# Warp pointer to a specific location
-d.warp_pointer(0, 0, 0, 0, 0, 0, 100, 200)
+# Warp pointer to a specific location (absolute, relative to root)
+root.warp_pointer(100, 200)
 d.sync()
 
 # Query pointer to verify position

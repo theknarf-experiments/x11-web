@@ -325,20 +325,19 @@ pub(crate) fn handle_warp_pointer(state: &mut ClientState, data: &[u8], seq: u16
     let new_x = state.pointer_x;
     let new_y = state.pointer_y;
 
-    // Find the deepest window under the new pointer position
+    // Find the deepest mapped window under the new pointer position.
+    // Use find_deepest_window (geometry-only) rather than find_event_subwindow
+    // because crossing events must be generated based on which window the
+    // pointer is IN, regardless of whether that window selects for crossing
+    // events.  The emit_crossing helper filters by event mask later.
     let new_window = {
-        let (w, _, _) = super::super::input::find_event_subwindow(
+        let (w, _, _) = super::super::input::find_deepest_window(
             &state.windows,
             state.root_window,
             new_x,
             new_y,
-            ENTER_WINDOW_MASK | LEAVE_WINDOW_MASK,
         );
-        if w != 0 {
-            w
-        } else {
-            state.root_window
-        }
+        w
     };
 
     // Generate crossing events for the pointer move
