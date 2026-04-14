@@ -125,25 +125,6 @@ pub(crate) async fn handle_client(
     shared_security_tokens: super::types::SharedSecurityTokens,
     extension_registry: Arc<super::extensions::ExtensionRegistry>,
 ) -> io::Result<()> {
-    // Wait for any active GrabServer to be released before processing
-    // the new connection setup.  Per X11 spec, GrabServer blocks ALL
-    // request processing from other clients, including initial connections.
-    {
-        let (lock, notify) = &*server_grab;
-        loop {
-            // Register for notification BEFORE checking the lock to avoid
-            // a race where UngrabServer fires between our check and await.
-            let notified = notify.notified();
-            {
-                let holder = lock.lock().unwrap_or_else(|e| e.into_inner());
-                if holder.is_none() {
-                    break;
-                }
-            }
-            notified.await;
-        }
-    }
-
     // Phase 1: Read client setup request
     let mut header_buf = [0u8; 12];
     stream.read_exact(&mut header_buf).await?;
@@ -269,6 +250,25 @@ pub(crate) async fn handle_client(
     stream.write_all(&reply_bytes).await?;
 
     info!("X11 client connected: {client_id}");
+
+    // Wait for any active GrabServer to be released before processing
+    // requests.  Per X11 spec, GrabServer blocks request processing from
+    // all other clients.  We allow the connection handshake (above) to
+    // complete so the TCP/Unix socket doesn't time out, then block here
+    // before the request loop.
+    {
+        let (lock, _notify) = &*server_grab;
+        loop {
+            {
+                let holder = lock.lock().unwrap_or_else(|e| e.into_inner());
+                if holder.is_none() {
+                    break;
+                }
+            }
+            // Poll every 5ms until the grab is released.
+            tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+        }
+    }
 
     // Phase 3: Handle requests
     let local_windows = shared_windows.lock().unwrap().clone();
@@ -506,6 +506,7 @@ pub(crate) async fn handle_client(
     let mut buf = vec![0u8; 256 * 1024];
     let mut pending = Vec::new();
     let mut frame_interval = tokio::time::interval(Duration::from_millis(16));
+    frame_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
 
     // Key auto-repeat state.
     // When a key is held down, we generate synthetic KeyPress events after
@@ -531,6 +532,11 @@ pub(crate) async fn handle_client(
     };
 
     loop {
+        // Cooperative yield: let other tasks (e.g. newly spawned client
+        // handlers) run between select iterations.  Without this, the
+        // 16ms frame_interval tick can monopolise the worker thread.
+        tokio::task::yield_now().await;
+
         tokio::select! {
             result = stream.readable() => {
                 result?;
@@ -914,19 +920,16 @@ pub(crate) async fn handle_client(
                 // Server grab check: if another client holds a GrabServer,
                 // wait until it releases before processing our requests.
                 {
-                    let (lock, notify) = &*state.server_grab;
+                    let (lock, _notify) = &*state.server_grab;
                     loop {
-                        // Register for notification BEFORE checking the lock to
-                        // avoid a race where UngrabServer fires between our
-                        // check and await.
-                        let notified = notify.notified();
                         {
                             let holder = lock.lock().unwrap_or_else(|e| e.into_inner());
                             if holder.is_none() || holder.as_deref() == Some(&state.client_id) {
                                 break;
                             }
                         }
-                        notified.await;
+                        // Poll every 5ms until the grab is released.
+                        tokio::time::sleep(std::time::Duration::from_millis(5)).await;
                     }
                 }
 

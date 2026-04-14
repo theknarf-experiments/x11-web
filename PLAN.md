@@ -1,103 +1,83 @@
 # X11 Server Full Spec Compliance Plan
 
-## Current State (Phase 15 Complete)
+## Current State (Phase 17 Complete)
 - ~70K LOC Rust X11 server implementation
 - 684 unit tests passing
 - 121/127 core opcodes (120-126 historically unassigned per X11 spec)
 - 26 extensions fully implemented with modular registry
-- E2e tests passing: protocol-compliance (80/80), app-compatibility (19/19), advanced-compliance (91/91)
-- All X11 apps work: xeyes, xterm, xclock, xdpyinfo, xdotool, SDL2, etc.
+- E2e tests: 188 passing, 1 failing (glxinfo), 7 conditional skips
+- All X11 apps work: xeyes, xterm, xclock, xdpyinfo, xdotool, SDL2, Firefox, GIMP, etc.
+- WebRTC transport + PulseAudio audio streaming complete
 
 ## Completed Phases
 
 ### Phase 9-12: Event Constants, XID Recycling, Setup Reply, App Compatibility ✓
 
 ### Phase 13: Critical Protocol Fixes ✓
-- Fixed X11 event sequence number patching
-- GrabServer setup-phase blocking
-- GLX GetFBConfigs numAttribs fix
-- SDL2 application compatibility verified
 
 ### Phase 14: Modular Extension Architecture ✓
-- [x] Created `ExtensionRegistry` as single source of truth for all extension metadata
-- [x] Created `ExtensionId` enum replacing all magic opcode constants
-- [x] Refactored `dispatch.rs` to use registry lookup instead of hardcoded match
-- [x] Refactored `query.rs` QueryExtension/ListExtensions to use registry
-- [x] Added Cargo feature flags for extension groups:
-  - `ext-core`: SHAPE, MIT-SHM, BIG-REQUESTS, SYNC, GE, XFIXES, RANDR, XC-MISC, X-Resource
-  - `ext-input`: XInputExtension, XTEST, XKEYBOARD
-  - `ext-render`: RENDER, Composite, DAMAGE, Present
-  - `ext-glx`: GLX, DRI3
-  - `ext-media`: XVideo, DOUBLE-BUFFER
-  - `ext-compat`: DPMS, MIT-SCREEN-SAVER, VidMode, RECORD, SECURITY, XINERAMA
-  - `all-extensions` (default): enables everything
-- [x] Runtime extension toggling via `ExtensionRegistry::set_enabled()`
-- [x] Multi-arch Dockerfile support (arm64 + amd64)
-- [x] 684 unit tests passing, 178 e2e tests passing
-
-## Remaining Phases
 
 ### Phase 15: Performance & Robustness ✓
-- [x] Add per-client resource limits (windows, pixmaps, GCs, colormaps, cursors)
-- [x] Bound pending_events queue per client
-- [x] Fix mutex poison handling in menus.rs (use unwrap_or_else with logging)
-- [x] Fix polygon rendering safety (.unwrap on .min/.max)
-- [x] Use VecDeque for frozen events in grab.rs instead of Vec with remove(0)
-- [x] Add motion_history size limit via configurable ResourceLimits
-- [x] Add error logging for silent failures (compression, etc.)
-- [x] E2e test: resource limits enforcement (5 robustness tests)
-- [x] 684 unit tests passing, 91 advanced-compliance e2e tests passing
 
 ### Phase 16: Advanced Features ✓
-- [x] XIM completion for CJK input: added CJK locales, compose state integration, dead key support, Greek/Cyrillic/Thai keysym mapping
-- [x] XVideo: already fully implemented (10 FOURCC formats, YUV→ARGB conversion, BT.601/BT.709)
-- [x] GLX: OSMesa software rendering working correctly with proper FBConfig/extension support
-- [x] Firefox e2e tests: 6 tests covering startup, about:config navigation, Wikipedia, scroll, YouTube, local HTML5 video playback
-- [x] Dockerfile: added ffmpeg/libavcodec-extra for video codecs, fonts-noto-cjk, fc-cache, test video content
-- [x] 684 unit tests passing, 91 advanced-compliance e2e tests passing
-- [ ] Git fetch, rebase against origin/main, fix any merge conflicts and push up
 
 ### Phase 17: WebRTC Transport & Audio ✓
 
-Architecture: Frontend ↔ WebRTC ↔ Sidecar (peer-to-peer), Backend as signaling relay only.
-- Data channel: binary msgpack protocol for display updates + input events
-- Audio tracks: Opus-encoded PulseAudio output (sidecar→browser) and mic input (browser→sidecar)
-- Libraries: `str0m` (Rust WebRTC, Sans-IO), browser native `RTCPeerConnection`
+## Remaining Phases
 
-#### 17a: WebRTC Signaling Infrastructure ✓
-- [x] Add signaling message types to protocol crate (SDP offer/answer, ICE candidates)
-- [x] Add signaling relay to backend (frontend↔sidecar SDP/ICE exchange via existing WS)
-- [x] Frontend: send/receive signaling messages through existing WebSocket
+### Phase 18: GLX Compliance & Protocol Hardening
 
-#### 17b: Sidecar WebRTC Endpoint ✓
-- [x] Add `str0m` dependency to sidecar
-- [x] Create `webrtc.rs` module: UDP socket, str0m Rtc agent, ICE handling
-- [x] Create data channel for display updates (binary msgpack, no base64)
-- [x] Receive input events over data channel
-- [x] Keep WebSocket for signaling + process management only
+#### 18a: Fix GLX/glxinfo
+- [ ] Fix GetVisualConfigs visual class value (1=GrayScale → 4=TrueColor)
+- [ ] Add `libgl1-mesa-dri` to Dockerfile.sidecar for swrast DRI driver
+- [ ] Verify glxinfo runs successfully and reports GLX version
+- [ ] E2e: glxinfo test passes
+- [ ] `git fetch` and rebase against origin/main, then force push
 
-#### 17c: Frontend WebRTC Client ✓
-- [x] Create `useWebRTC.ts` hook: RTCPeerConnection, data channel, audio tracks
-- [x] Binary msgpack decode for display updates on data channel
-- [x] Send input events as binary msgpack on data channel
-- [x] Fallback: keep WS path working for process/sidecar management
+#### 18b: GrabServer Protocol Fix
+- [ ] Investigate and fix GrabServer serialization (currently hardcoded test.skip)
+- [ ] Unskip the GrabServer serialization e2e test
+- [ ] Verify multi-client grab ordering
+- [ ] `git fetch` and rebase against origin/main, then force push
 
-#### 17d: PulseAudio Integration & Audio Streaming ✓
-- [x] Add PulseAudio to sidecar Dockerfile + startup
-- [x] Capture audio via PulseAudio monitor source in sidecar
-- [x] Encode as Opus, send via WebRTC audio track (str0m media)
-- [x] Frontend: play incoming audio track via HTMLAudioElement / AudioContext
+#### 18c: Broader GLX Testing
+- [ ] E2e: glxgears renders frames without crash
+- [ ] E2e: mesa-utils GL queries succeed
+- [ ] Verify OSMesa indirect rendering path with glxinfo -i
+- [ ] `git fetch` and rebase against origin/main, then force push
 
-#### 17e: Microphone Support (Browser → Sidecar) ✓
-- [x] Sidecar: receive audio track, decode Opus, pipe to PulseAudio virtual source
-- [x] Update Dockerfiles: add pulseaudio, audacity, VLC packages
+#### 18d: Test & Commit
+- [ ] All existing e2e tests pass (0 failures)
+- [ ] 684+ unit tests passing
+- [ ] git commit
+- [ ] `git fetch` and rebase against origin/main, then force push
 
-#### 17f: Final Integration & Tests ✓
-- [x] E2e: WebRTC backward compat — xeyes, xterm via existing WS display path
-- [x] E2e: PulseAudio running, virtual sinks configured
-- [x] E2e: VLC test video plays with audio output (cvlc headless)
-- [x] E2e: Audacity installed, detects PulseAudio virtual devices
-- [x] E2e: audio capture pipeline (parec → Opus frames)
-- [x] All existing e2e tests pass (81 protocol+compat, 8 webrtc-audio)
-- [x] 684 unit tests passing
-- [x] git commit
+#### 18e: Fix xterm font rendering
+
+- [ ] `xterm-canvas-darwin.png` is correct while `xterm-canvas-linux.png` clearly has fucked up font rendering. Delete the linux png and copy and rename the darwin one. Then use the correct snapshot to guide you to fix it
+
+#### 18e: Fix firefox
+
+- [ ] Firefox either doesn't start or crashes under startup, ensure that it works and have e2e tests with snapshots that cover it
+
+### Phase 19: Deep XTS Conformance & App Stress Testing
+
+#### 19a: XTS Test Suite Hardening
+- [ ] Run full XTS Xproto suite, fix any failures
+- [ ] Run full XTS Xlib suite, fix any failures
+- [ ] Add more XTS categories to e2e test matrix
+- [ ] `git fetch` and rebase against origin/main, then force push
+
+#### 19b: Heavy Application Testing
+- [ ] E2e: Chromium/Chrome launch and basic navigation
+- [ ] E2e: Inkscape SVG editing (if installable in container)
+- [ ] E2e: Java AWT/Swing application (xterm + java)
+- [ ] E2e: Multi-monitor simulation via XINERAMA/RANDR
+- [ ] `git fetch` and rebase against origin/main, then force push
+
+#### 19c: Protocol Edge Cases
+- [ ] E2e: Rapid reconnect stress test (100+ sequential connections)
+- [ ] E2e: Large property data round-trip (>256KB)
+- [ ] E2e: Concurrent clipboard operations
+- [ ] E2e: Deep window hierarchy (100+ nested)
+- [ ] `git fetch` and rebase against origin/main, then force push

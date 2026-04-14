@@ -46,10 +46,15 @@ pub(crate) fn handle_get_visual_configs(_data: &[u8], seq: u16) -> Vec<u8> {
     reply[12..16].copy_from_slice(&props_per_config.to_le_bytes());
 
     // Visual config properties: one RGBA config, depth=24, stencil=8
+    // Property order matches Mesa's positional GetVisualConfigs parser:
+    // [0]=visual_id, [1]=class, [2]=rgba, [3..6]=RGBA sizes, [7..10]=accum sizes,
+    // [11]=doublebuf, [12]=stereo, [13]=bufsize, [14]=depth, [15]=stencil,
+    // [16]=aux, [17]=level, [18..]=extended
+    const X_VISUAL_CLASS_TRUE_COLOR: u32 = 4;
     let props: [u32; 28] = [
-        ROOT_VISUAL, // visual id
-        1,           // class (TrueColor)
-        1,           // rgba (True)
+        ROOT_VISUAL,               // visual id
+        X_VISUAL_CLASS_TRUE_COLOR, // class (TrueColor = 4)
+        1,                         // rgba (True)
         8,           // red size
         8,           // green size
         8,           // blue size
@@ -65,15 +70,15 @@ pub(crate) fn handle_get_visual_configs(_data: &[u8], seq: u16) -> Vec<u8> {
         8,           // stencil size
         0,           // aux buffers
         0,           // level
-        0,           // visual caveat (None)
-        0x23,        // transparent type (None = 0x8000 but wire uses 0)
-        0,
-        0,
-        0,
-        0, // transparent r, g, b, a
-        0,
-        0,
-        0,
+        0, // visual caveat (GLX_NONE)
+        0, // transparent type (0 = none, 0x8008 = RGB, 0x8009 = Index)
+        0, // transparent red
+        0, // transparent green
+        0, // transparent blue
+        0, // transparent alpha
+        0, // pad
+        0, // pad
+        0, // pad
         0, // pad
     ];
     for (i, &v) in props.iter().enumerate() {
@@ -197,16 +202,16 @@ pub(crate) fn handle_query_extensions_string(_data: &[u8], seq: u16) -> Vec<u8> 
     let ext_string = b"GLX_ARB_create_context GLX_ARB_create_context_profile GLX_EXT_visual_info GLX_EXT_visual_rating GLX_MESA_copy_sub_buffer";
     let n = ext_string.len() as u32;
     let padded = ((n as usize) + 3) & !3;
-    let extra = 4 + padded; // 4 bytes for length, then string
 
-    let mut reply = vec![0u8; 32 + extra];
+    // GLX QueryExtensionsString reply layout:
+    //   [0]=Reply [2..4]=seq [4..8]=reply_length(padded/4)
+    //   [12..16]=string_length(n) [32..32+n]=string data
+    let mut reply = vec![0u8; 32 + padded];
     reply[0] = 1;
     reply[2..4].copy_from_slice(&seq.to_le_bytes());
-    reply[4..8].copy_from_slice(&((extra / 4) as u32).to_le_bytes());
-    // n at byte 12 (after pad)
+    reply[4..8].copy_from_slice(&((padded / 4) as u32).to_le_bytes());
     reply[12..16].copy_from_slice(&n.to_le_bytes());
-    reply[32..36].copy_from_slice(&n.to_le_bytes());
-    reply[36..36 + n as usize].copy_from_slice(ext_string);
+    reply[32..32 + n as usize].copy_from_slice(ext_string);
 
     reply
 }
@@ -231,16 +236,17 @@ pub(crate) fn handle_query_server_string(data: &[u8], seq: u16) -> Vec<u8> {
 
     let n = string.len() as u32;
     let padded = ((n as usize) + 3) & !3;
-    let extra = 4 + padded;
 
-    let mut reply = vec![0u8; 32 + extra];
+    // GLX QueryServerString reply layout:
+    //   [0]=Reply [2..4]=seq [4..8]=reply_length(padded/4)
+    //   [12..16]=string_length(n) [32..32+n]=string data
+    let mut reply = vec![0u8; 32 + padded];
     reply[0] = 1;
     reply[2..4].copy_from_slice(&seq.to_le_bytes());
-    reply[4..8].copy_from_slice(&((extra / 4) as u32).to_le_bytes());
+    reply[4..8].copy_from_slice(&((padded / 4) as u32).to_le_bytes());
     reply[12..16].copy_from_slice(&n.to_le_bytes());
-    reply[32..36].copy_from_slice(&n.to_le_bytes());
     if !string.is_empty() {
-        reply[36..36 + n as usize].copy_from_slice(string);
+        reply[32..32 + n as usize].copy_from_slice(string);
     }
 
     reply
