@@ -123,6 +123,7 @@ pub(crate) async fn handle_client(
     mut screen_size_rx: super::types::ScreenSizeRx,
     shared_access_control: super::types::SharedAccessControl,
     shared_security_tokens: super::types::SharedSecurityTokens,
+    extension_registry: Arc<super::extensions::ExtensionRegistry>,
 ) -> io::Result<()> {
     // Wait for any active GrabServer to be released before processing
     // the new connection setup.  Per X11 spec, GrabServer blocks ALL
@@ -447,6 +448,7 @@ pub(crate) async fn handle_client(
         xkb_named_indicators: HashMap::new(),
         dri3_drm_device: None,
         overlay_ref_count: 0,
+        extension_registry,
     };
 
     // Initialize default RandR monitor model.

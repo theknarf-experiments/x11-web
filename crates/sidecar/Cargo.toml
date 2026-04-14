@@ -4,8 +4,16 @@ version = "0.1.0"
 edition = "2021"
 
 [features]
-default = ["osmesa"]
+default = ["osmesa", "all-extensions"]
 osmesa = []
+# Extension groups — each gates a set of X11 extensions at compile time.
+all-extensions = ["ext-core", "ext-input", "ext-render", "ext-glx", "ext-media", "ext-compat"]
+ext-core    = []  # SHAPE, MIT-SHM, BIG-REQUESTS, SYNC, GE, XFIXES, RANDR, XC-MISC, X-Resource
+ext-input   = []  # XInputExtension, XTEST, XKEYBOARD
+ext-render  = []  # RENDER, Composite, DAMAGE, Present
+ext-glx     = []  # GLX, DRI3
+ext-media   = []  # XVideo, DOUBLE-BUFFER
+ext-compat  = []  # DPMS, MIT-SCREEN-SAVER, VidMode, RECORD, SECURITY, XINERAMA
 
 [dependencies]
 x11-web-protocol = { path = "../protocol" }

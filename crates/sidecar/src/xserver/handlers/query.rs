@@ -76,167 +76,17 @@ pub(crate) fn handle_query_extension(_state: &mut ClientState, data: &[u8], seq:
     reply[0] = 1; // Reply
     _state.write_u16(&mut reply, 2, seq);
 
-    match name {
-        "RENDER" => {
+    // Look up the extension in the registry.
+    if let Some(info) = _state.extension_registry.by_name(name) {
+        if info.enabled {
             reply[8] = 1; // present = true
-            reply[9] = 139; // major_opcode
-            reply[10] = 0; // first_event (RENDER has no events)
-            reply[11] = 142; // first_error: BadPictFormat=142, BadPicture=143, BadPictOp=144, BadGlyphSet=145, BadGlyph=146
+            reply[9] = info.major_opcode;
+            reply[10] = info.first_event;
+            reply[11] = info.first_error;
         }
-        "MIT-SHM" => {
-            reply[8] = 1;
-            reply[9] = 130;
-            reply[10] = 65; // ShmCompletion
-            reply[11] = 128;
-        }
-        "BIG-REQUESTS" => {
-            reply[8] = 1;
-            reply[9] = 133;
-            reply[10] = 0;
-            reply[11] = 0;
-        }
-        "XFIXES" => {
-            reply[8] = 1;
-            reply[9] = 138;
-            reply[10] = 87;
-            reply[11] = 0;
-        }
-        "SHAPE" => {
-            reply[8] = 1;
-            reply[9] = 128;
-            reply[10] = 64;
-            reply[11] = 0;
-        }
-        "SYNC" => {
-            reply[8] = 1;
-            reply[9] = 134;
-            reply[10] = 83; // first_event: AlarmNotify (must match handler event code)
-            reply[11] = 0;
-        }
-        "Generic Event Extension" => {
-            reply[8] = 1;
-            reply[9] = 135;
-            reply[10] = 0;
-            reply[11] = 0;
-        }
-        "Composite" => {
-            reply[8] = 1;
-            reply[9] = 142;
-            reply[10] = 0; // first_event (no events; Composite uses Damage events)
-            reply[11] = 0; // first_error (no extension-specific errors)
-        }
-        "DAMAGE" => {
-            reply[8] = 1;
-            reply[9] = 143;
-            reply[10] = 91;
-            reply[11] = 152;
-        }
-        "RANDR" => {
-            reply[8] = 1;
-            reply[9] = 140;
-            reply[10] = crate::xserver::types::RANDR_EVENT_BASE;
-            reply[11] = 0;
-        }
-        "XKEYBOARD" => {
-            reply[8] = 1;
-            reply[9] = 136;
-            reply[10] = 85; // first_event: XkbEventCode
-            reply[11] = 0;
-        }
-        "XC-MISC" => {
-            reply[8] = 1;
-            reply[9] = 141;
-            reply[10] = 0;
-            reply[11] = 0;
-        }
-        "Present" => {
-            reply[8] = 1;
-            reply[9] = 148;
-            reply[10] = 0;
-            reply[11] = 0;
-        }
-        "XInputExtension" => {
-            reply[8] = 1;
-            reply[9] = crate::xinput2::XI_MAJOR_OPCODE;
-            reply[10] = crate::xinput2::XI_FIRST_EVENT;
-            reply[11] = crate::xinput2::XI_FIRST_ERROR;
-        }
-        "XTEST" => {
-            reply[8] = 1;
-            reply[9] = 150;
-            reply[10] = 0;
-            reply[11] = 0;
-        }
-        "DPMS" => {
-            reply[8] = 1;
-            reply[9] = 151;
-            reply[10] = 0;
-            reply[11] = 0;
-        }
-        "MIT-SCREEN-SAVER" => {
-            reply[8] = 1;
-            reply[9] = 152;
-            reply[10] = 92; // first_event: ScreenSaverNotify event base
-            reply[11] = 0;
-        }
-        "XFree86-VidModeExtension" => {
-            reply[8] = 1;
-            reply[9] = 153;
-            reply[10] = 0;
-            reply[11] = 0;
-        }
-        "RECORD" => {
-            reply[8] = 1;
-            reply[9] = 154;
-            reply[10] = 0; // first_event (no events)
-            reply[11] = 154; // first_error: BadContext
-        }
-        "SECURITY" => {
-            reply[8] = 1;
-            reply[9] = 155;
-            reply[10] = 93; // first_event: SecurityAuthorizationRevoked
-            reply[11] = 155; // first_error: BadAuthorization
-        }
-        "XVideo" => {
-            reply[8] = 1;
-            reply[9] = 156;
-            reply[10] = 95; // first_event: XvVideoNotify=95, XvPortNotify=96
-            reply[11] = 156; // first_error: XvBadPort, XvBadEncoding, XvBadControl
-        }
-        "DOUBLE-BUFFER" => {
-            reply[8] = 1;
-            reply[9] = 157;
-            reply[10] = 0; // first_event (no events)
-            reply[11] = 157; // first_error: BadBuffer
-        }
-        "XINERAMA" => {
-            reply[8] = 1;
-            reply[9] = 158;
-            reply[10] = 0; // first_event (no events)
-            reply[11] = 0; // first_error (no errors)
-        }
-        "GLX" => {
-            reply[8] = 1;
-            reply[9] = 159;
-            reply[10] = 0; // first_event (GLX uses GenericEvent via GE)
-            reply[11] = 159; // first_error: GLXBadContext=159, GLXBadContextState=160, etc.
-        }
-        "X-Resource" => {
-            reply[8] = 1;
-            reply[9] = 160;
-            reply[10] = 0;
-            reply[11] = 0;
-        }
-        "DRI3" => {
-            reply[8] = 1;
-            reply[9] = 149;
-            reply[10] = 0;
-            reply[11] = 0;
-        }
-        _ => {
-            // present = false (byte 8 = 0) -- already zero
-        }
+        // else: present = false (byte 8 = 0) — extension disabled
     }
+    // else: present = false — extension unknown
 
     reply.to_vec()
 }
@@ -246,37 +96,15 @@ pub(crate) fn handle_query_extension(_state: &mut ClientState, data: &[u8], seq:
 // ---------------------------------------------------------------------------
 
 pub(crate) fn handle_list_extensions(state: &ClientState, seq: u16) -> Vec<u8> {
-    let extensions: &[&str] = &[
-        "BIG-REQUESTS",
-        "MIT-SHM",
-        "RENDER",
-        "XFIXES",
-        "SHAPE",
-        "SYNC",
-        "Generic Event Extension",
-        "XC-MISC",
-        "Composite",
-        "DAMAGE",
-        "Present",
-        "RANDR",
-        "XInputExtension",
-        "XKEYBOARD",
-        "XTEST",
-        "DPMS",
-        "MIT-SCREEN-SAVER",
-        "XFree86-VidModeExtension",
-        "RECORD",
-        "SECURITY",
-        "XVideo",
-        "DOUBLE-BUFFER",
-        "XINERAMA",
-        "GLX",
-        "DRI3",
-        "X-Resource",
-    ];
+    // Collect enabled extension wire names from the registry.
+    let extensions: Vec<&str> = state
+        .extension_registry
+        .enabled_extensions()
+        .map(|info| info.wire_name)
+        .collect();
 
     let mut names_data = Vec::new();
-    for ext in extensions {
+    for ext in &extensions {
         names_data.push(ext.len() as u8);
         names_data.extend_from_slice(ext.as_bytes());
     }

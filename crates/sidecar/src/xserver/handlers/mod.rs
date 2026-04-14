@@ -951,40 +951,16 @@ mod tests {
 
     #[test]
     fn extension_major_opcodes_are_unique() {
-        let opcodes: &[(u8, &str)] = &[
-            (128, "SHAPE"),
-            (130, "MIT-SHM"),
-            (131, "XInputExtension"),
-            (133, "BIG-REQUESTS"),
-            (134, "SYNC"),
-            (135, "GE"),
-            (136, "XKB"),
-            (138, "XFIXES"),
-            (139, "RENDER"),
-            (140, "RANDR"),
-            (141, "XC-MISC"),
-            (142, "Composite"),
-            (143, "DAMAGE"),
-            (148, "Present"),
-            (149, "DRI3"),
-            (150, "XTEST"),
-            (151, "DPMS"),
-            (152, "MIT-SCREEN-SAVER"),
-            (153, "VidMode"),
-            (154, "RECORD"),
-            (155, "SECURITY"),
-            (156, "XVideo"),
-            (157, "DBE"),
-            (158, "XINERAMA"),
-            (159, "GLX"),
-            (160, "X-Resource"),
-        ];
+        // Delegate to the registry's own uniqueness test — the registry is
+        // now the single source of truth for opcodes.
+        use crate::xserver::extensions::ExtensionRegistry;
+        let reg = ExtensionRegistry::new();
         let mut seen = std::collections::HashMap::new();
-        for &(opcode, name) in opcodes {
-            if let Some(prev) = seen.insert(opcode, name) {
+        for ext in reg.enabled_extensions() {
+            if let Some(prev) = seen.insert(ext.major_opcode, ext.wire_name) {
                 panic!(
                     "Opcode collision: {} and {} both use major opcode {}",
-                    prev, name, opcode
+                    prev, ext.wire_name, ext.major_opcode
                 );
             }
         }
@@ -1496,53 +1472,24 @@ mod tests {
 
     #[test]
     fn query_extension_opcodes_match_dispatch() {
-        // Ensure QueryExtension returns the same major opcodes used by dispatch.
-        // This catches mismatches that would cause clients to send requests to
-        // the wrong extension handler.
-        let query_dispatch: &[(&str, u8)] = &[
-            ("SHAPE", 128),
-            ("MIT-SHM", 130),
-            ("XInputExtension", 131),
-            ("BIG-REQUESTS", 133),
-            ("SYNC", 134),
-            ("Generic Event Extension", 135),
-            ("XKEYBOARD", 136),
-            ("XFIXES", 138),
-            ("RENDER", 139),
-            ("RANDR", 140),
-            ("XC-MISC", 141),
-            ("Composite", 142),
-            ("DAMAGE", 143),
-            ("Present", 148),
-            ("DRI3", 149),
-            ("XTEST", 150),
-            ("DPMS", 151),
-            ("MIT-SCREEN-SAVER", 152),
-            ("XFree86-VidModeExtension", 153),
-            ("RECORD", 154),
-            ("SECURITY", 155),
-            ("XVideo", 156),
-            ("DOUBLE-BUFFER", 157),
-            ("XINERAMA", 158),
-            ("GLX", 159),
-            ("X-Resource", 160),
-        ];
-        // Verify all opcodes are in valid extension range (128-255)
-        for &(name, opcode) in query_dispatch {
+        // The extension registry is now the single source of truth.
+        // Verify all registered opcodes are in the valid extension range.
+        use crate::xserver::extensions::ExtensionRegistry;
+        let reg = ExtensionRegistry::new();
+        for ext in reg.enabled_extensions() {
             assert!(
-                opcode >= 128,
-                "Extension '{name}' has opcode {opcode} < 128 (must be in extension range)"
+                ext.major_opcode >= 128,
+                "Extension '{}' has opcode {} < 128 (must be in extension range)",
+                ext.wire_name,
+                ext.major_opcode,
             );
         }
-        // Verify no gaps between 128-160 that might indicate missing extensions
-        let mut opcodes: Vec<u8> = query_dispatch.iter().map(|&(_, op)| op).collect();
+        // Verify all opcodes are unique
+        let mut opcodes: Vec<u8> = reg.enabled_extensions().map(|e| e.major_opcode).collect();
+        let total = opcodes.len();
         opcodes.sort();
         opcodes.dedup();
-        assert_eq!(
-            opcodes.len(),
-            query_dispatch.len(),
-            "Extension opcodes must all be unique"
-        );
+        assert_eq!(opcodes.len(), total, "Extension opcodes must all be unique");
     }
 
     // -----------------------------------------------------------------------
@@ -1551,67 +1498,27 @@ mod tests {
 
     #[test]
     fn list_extensions_complete() {
-        // All extensions supported by QueryExtension must also appear in ListExtensions
-        let query_names: &[&str] = &[
-            "RENDER",
+        // With the registry, QueryExtension and ListExtensions both use the
+        // same data source, so they are consistent by construction.
+        // Verify the registry contains at least the expected core set.
+        use crate::xserver::extensions::ExtensionRegistry;
+        let reg = ExtensionRegistry::new();
+        let names: Vec<&str> = reg.enabled_extensions().map(|e| e.wire_name).collect();
+        let expected_core = &[
+            "SHAPE",
             "MIT-SHM",
             "BIG-REQUESTS",
-            "XFIXES",
-            "SHAPE",
             "SYNC",
             "Generic Event Extension",
-            "Composite",
-            "DAMAGE",
-            "RANDR",
-            "XInputExtension",
-            "XKEYBOARD",
-            "XTEST",
-            "DPMS",
-            "MIT-SCREEN-SAVER",
-            "XFree86-VidModeExtension",
-            "RECORD",
-            "SECURITY",
-            "XVideo",
-            "DOUBLE-BUFFER",
-            "XINERAMA",
-            "GLX",
-            "DRI3",
-            "X-Resource",
-            "XC-MISC",
-            "Present",
-        ];
-        let list_extensions: &[&str] = &[
-            "BIG-REQUESTS",
-            "MIT-SHM",
-            "RENDER",
             "XFIXES",
-            "SHAPE",
-            "SYNC",
-            "Generic Event Extension",
-            "XC-MISC",
-            "Composite",
-            "DAMAGE",
-            "Present",
             "RANDR",
-            "XInputExtension",
-            "XKEYBOARD",
-            "XTEST",
-            "DPMS",
-            "MIT-SCREEN-SAVER",
-            "XFree86-VidModeExtension",
-            "RECORD",
-            "SECURITY",
-            "XVideo",
-            "DOUBLE-BUFFER",
-            "XINERAMA",
-            "GLX",
-            "DRI3",
+            "XC-MISC",
             "X-Resource",
         ];
-        for &name in query_names {
+        for &name in expected_core {
             assert!(
-                list_extensions.contains(&name),
-                "Extension '{name}' is in QueryExtension but missing from ListExtensions"
+                names.contains(&name),
+                "Expected core extension '{name}' missing from registry"
             );
         }
     }

@@ -9,6 +9,7 @@ pub(crate) mod connection;
 #[allow(dead_code)]
 pub(crate) mod core;
 mod dispatch;
+pub(crate) mod extensions;
 #[allow(dead_code)]
 pub(crate) mod grab;
 pub(crate) mod handlers;
@@ -67,6 +68,8 @@ pub struct X11Server {
     shared_access_control: types::SharedAccessControl,
     /// Shared SECURITY authorization tokens (for cross-connection token validation).
     shared_security_tokens: types::SharedSecurityTokens,
+    /// Extension registry — central source of truth for all X11 extensions.
+    extension_registry: Arc<extensions::ExtensionRegistry>,
 }
 
 impl X11Server {
@@ -107,6 +110,7 @@ impl X11Server {
             screen_size_rx,
             shared_access_control: Arc::new(Mutex::new(types::AccessControlState::new())),
             shared_security_tokens: Arc::new(Mutex::new(HashMap::new())),
+            extension_registry: Arc::new(extensions::ExtensionRegistry::new()),
         }
     }
 
@@ -990,12 +994,13 @@ impl X11Server {
                 let ssr = self.screen_size_rx.clone();
                 let sacl = self.shared_access_control.clone();
                 let sst = self.shared_security_tokens.clone();
+                let exr = self.extension_registry.clone();
                 let stream = $stream;
                 tokio::spawn(async move {
                     if let Err(e) = connection::handle_client(
                         stream, client_id, update_tx, message_tx, message_rx, conn_index, peer_pid,
                         sw, wm, sa, wr, mt, er, ss, cn, sc, sp, spf, sg, cr, eb, sgl, src, pc, ac,
-                        ssr, sacl, sst,
+                        ssr, sacl, sst, exr,
                     )
                     .await
                     {

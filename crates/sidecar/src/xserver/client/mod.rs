@@ -322,4 +322,7 @@ pub(crate) struct ClientState {
     /// Composite: overlay window reference count (GetOverlayWindow increments,
     /// ReleaseOverlayWindow decrements).
     pub(crate) overlay_ref_count: u32,
+    /// Shared extension registry — single source of truth for which extensions
+    /// are available, their opcodes, event/error bases, and enabled state.
+    pub(crate) extension_registry: std::sync::Arc<super::extensions::ExtensionRegistry>,
 }
