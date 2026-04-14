@@ -23,7 +23,14 @@ pub(crate) fn handle_create_window(state: &mut ClientState, data: &[u8], _seq: u
     let width = state.read_u16(data, 16);
     let height = state.read_u16(data, 18);
     let border_width = state.read_u16(data, 20);
-    let class = state.read_u16(data, 22);
+    let raw_class = state.read_u16(data, 22);
+    // Per X11 spec: class 0 = CopyFromParent, resolved to parent's class.
+    // Root window is always InputOutput (1).
+    let class = if raw_class == 0 {
+        state.windows.get(&parent).map(|w| w.class).unwrap_or(1)
+    } else {
+        raw_class
+    };
     let req_depth = data[1];
     let visual = state.read_u32(data, 24);
     let value_mask = state.read_u32(data, 28);
