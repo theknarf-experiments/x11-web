@@ -534,7 +534,7 @@ w.fill_rectangle(gc_xor, 10, 10, 50, 50)
 d.sync()
 
 # Get the pixel at (20, 20) - should be white XOR red = cyan (0x00FFFF)
-img = w.get_image(20, 20, 1, 1, 0xFFFFFFFF, Xlib.X.ZPixmap)
+img = w.get_image(20, 20, 1, 1, Xlib.X.ZPixmap, 0xFFFFFFFF)
 import struct
 pixel = struct.unpack('<I', img.data[:4])[0] & 0xFFFFFF
 print(f"pixel=0x{pixel:06x}")
@@ -1774,7 +1774,7 @@ w.put_image(gc, 0, 0, 4, 4, Xlib.X.ZPixmap, 24, 0, pixels)
 d.sync()
 
 # Read back
-img = w.get_image(0, 0, 4, 4, 0xFFFFFFFF, Xlib.X.ZPixmap)
+img = w.get_image(0, 0, 4, 4, Xlib.X.ZPixmap, 0xFFFFFFFF)
 raw = img.data
 print(f"image_len={len(raw)}")
 # Check first pixel is red (B=0, G=0, R=255)
@@ -1828,7 +1828,7 @@ dst.copy_area(gc2, src, 0, 0, 10, 10, 0, 0)
 d.sync()
 
 # Read back from destination
-img = dst.get_image(0, 0, 1, 1, 0xFFFFFFFF, Xlib.X.ZPixmap)
+img = dst.get_image(0, 0, 1, 1, Xlib.X.ZPixmap, 0xFFFFFFFF)
 if len(img.data) >= 3:
     b, g, r = img.data[0], img.data[1], img.data[2]
     print(f"copy_r={r}")
