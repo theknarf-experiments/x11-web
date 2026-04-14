@@ -311,14 +311,7 @@ d.close()
 	}) => {
 		const output = await execInSidecar(
 			sidecarContainer,
-			`timeout 8 wish -e '
-				wm title . "TkTest"
-				label .l -text "Hello Tk"
-				pack .l
-				update
-				puts "TK_RENDERED"
-				after 2000 exit
-			' 2>&1`,
+			`echo 'wm title . "TkTest"; label .l -text "Hello Tk"; pack .l; update; puts "TK_RENDERED"; exit' | timeout 8 wish 2>&1`,
 		);
 		expect(output).toContain("TK_RENDERED");
 		expect(output).not.toContain("X Error");
