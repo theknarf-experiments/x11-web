@@ -1,11 +1,11 @@
 # X11 Server Full Spec Compliance Plan
 
-## Current State (Phase 14 Complete)
+## Current State (Phase 15 Complete)
 - ~70K LOC Rust X11 server implementation
 - 684 unit tests passing
 - 121/127 core opcodes (120-126 historically unassigned per X11 spec)
 - 26 extensions fully implemented with modular registry
-- E2e tests passing: protocol-compliance (80/80), app-compatibility (19/19), advanced-compliance (86/86)
+- E2e tests passing: protocol-compliance (80/80), app-compatibility (19/19), advanced-compliance (91/91)
 - All X11 apps work: xeyes, xterm, xclock, xdpyinfo, xdotool, SDL2, etc.
 
 ## Completed Phases
@@ -37,7 +37,7 @@
 
 ## Remaining Phases
 
-### Phase 15: Performance & Robustness
+### Phase 15: Performance & Robustness ✓
 - [x] Add per-client resource limits (windows, pixmaps, GCs, colormaps, cursors)
 - [x] Bound pending_events queue per client
 - [x] Fix mutex poison handling in menus.rs (use unwrap_or_else with logging)
@@ -46,7 +46,7 @@
 - [x] Add motion_history size limit via configurable ResourceLimits
 - [x] Add error logging for silent failures (compression, etc.)
 - [x] E2e test: resource limits enforcement (5 robustness tests)
-- [ ] Git fetch, rebase against origin/main, fix any merge conflicts and push up
+- [x] 684 unit tests passing, 91 advanced-compliance e2e tests passing
 
 ### Phase 16: Advanced Features
 - [ ] XIM completion for CJK input
