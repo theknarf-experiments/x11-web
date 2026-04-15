@@ -24,23 +24,35 @@
 ### Phase 18a: Fix GLX/glxinfo ✓
 - [x] Fix GetVisualConfigs visual class value (1=GrayScale → 4=TrueColor)
 - [x] Add `libgl1-mesa-dri` to Dockerfile.sidecar for swrast DRI driver
-- [x] Verify glxinfo runs successfully and reports GLX version
-- [x] E2e: glxinfo test passes
+- [x] Fix GLX QueryExtensionsString/QueryServerString reply layout
 
 ### Phase 18b: GrabServer Protocol Fix ✓
 - [x] Fix GrabServer wait timing (moved after handshake, 5ms polling)
-- [x] GrabServer e2e test passes (no longer skipped)
 
 ### Phase 18e-1: Fix xterm font rendering ✓
-- [x] Fix PCF font bitmap row padding (glyph_pad was computed but ignored — 4-byte padded rows were read as 1-byte padded, garbling all glyphs)
-- [x] Delete broken linux snapshot, will regenerate with fixed rendering
-- [x] Unit test for PCF 4-byte padding repack
+- [x] Fix PCF font bitmap row padding (glyph_pad was computed but ignored)
+- [x] Regenerated Linux snapshots with correct font rendering
+- [x] Unit test for PCF 4-byte padding repack (685 total unit tests)
 
-### Phase 18e-2: Fix Firefox ✓
+### Phase 18e-2: Fix COMPOSITE redirect ✓
+- [x] Forward redirected windows to frontend (we ARE the final display)
+- [x] Firefox/GTK apps using CompositeRedirectWindow now render correctly
+
+### Phase 18e-3: Fix Firefox container environment ✓
 - [x] Fix spawnApp window timeout (15s → configurable, 120s for Firefox)
-- [x] Firefox e2e tests use proper startup timeout
+- [x] Remove DRI3 extension (no GPU/DRM in Docker containers)
+- [x] Add MOZ_DISABLE_CONTENT_SANDBOX, MOZ_DISABLE_GMP_SANDBOX env vars
+- [x] Add diagnostic non-headless Firefox window creation test
 
 ## Remaining Phases
+
+### Phase 18f: Fix GLX reply format for Firefox/glxinfo
+- [ ] Debug `[xcb] Extra reply data still left in queue` error from GLX initialization
+  - Firefox segfaults during GLX init; swrast driver can't match FBConfigs
+  - glxinfo also crashes with same error
+  - GLX reply length fields appear correct — may be a protocol framing issue
+- [ ] Fix the underlying GLX reply or protocol issue
+- [ ] Verify glxinfo and Firefox non-headless work without crash
 
 ### Phase 18c: Broader GLX Testing
 - [ ] E2e: glxgears renders frames without crash
