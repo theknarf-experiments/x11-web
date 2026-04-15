@@ -187,18 +187,19 @@ impl ClientState {
         }
 
         // Phase 2: Flush top-level (root children) windows.
-        // Redirected top-level windows: still accumulate damage but do NOT send
-        // PutImage to the frontend display — the compositor manages their presentation.
-        let window_ids: Vec<(u32, bool)> = self
+        // All mapped, dirty top-level windows are forwarded to the frontend.
+        // Even COMPOSITE-redirected windows are sent — our server IS the final
+        // display stage, so the frontend must receive all window content.
+        let window_ids: Vec<u32> = self
             .windows
             .iter()
             .filter(|(_, w)| {
                 w.mapped && w.framebuffer.is_dirty() && w.parent == self.root_window && w.class == 1
             })
-            .map(|(id, w)| (*id, w.redirected))
+            .map(|(id, _)| *id)
             .collect();
 
-        for (wid, redirected) in window_ids {
+        for wid in window_ids {
             let Some(wid_str) = self.window_uuid(wid) else {
                 continue;
             };
@@ -241,12 +242,6 @@ impl ClientState {
                         write_u16_bo(&mut event, 26, win_width, bo);
                         write_u16_bo(&mut event, 28, win_height, bo);
                         self.pending_events.push(event.to_vec());
-                    }
-
-                    // Redirected windows: skip sending to frontend display.
-                    // The compositor reads their content via NameWindowPixmap/RENDER.
-                    if redirected {
-                        continue;
                     }
 
                     // Apply shape clipping: mask pixels outside the bounding/clip shape
