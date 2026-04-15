@@ -149,7 +149,9 @@ impl ExtensionRegistry {
         #[cfg(feature = "ext-glx")]
         {
             add(&mut reg, Glx, "GLX", 159, 0, 159);
-            add(&mut reg, Dri3, "DRI3", 149, 0, 0);
+            // DRI3 is NOT registered: our server does not provide GPU/DRM
+            // access, so advertising DRI3 causes Mesa to attempt (and fail)
+            // hardware-accelerated DRI rendering before falling back.
         }
 
         // --- ext-media -------------------------------------------------------

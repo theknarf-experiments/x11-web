@@ -582,6 +582,33 @@ echo EXIT_CODE=$?`,
 		// Firefox --screenshot mode doesn't require rendering but tests X11 init
 	});
 
+	test("Firefox ESR creates X11 window (non-headless)", async ({
+		sidecarContainer,
+	}) => {
+		// Firefox needs sandbox disabled in Docker (no user namespaces) and
+		// LIBGL_ALWAYS_SOFTWARE=1 (no GPU). These are set in the Dockerfile.
+		const output = await execInSidecar(
+			sidecarContainer,
+			`firefox-esr --no-remote --new-instance about:blank &
+FF_PID=$!
+# Wait up to 30s for Firefox to create a window
+for i in $(seq 1 30); do
+  WID=$(xdotool search --pid $FF_PID 2>/dev/null | grep -v '^$' || true)
+  if [ -n "$WID" ]; then
+    echo "FIREFOX_WINDOW_FOUND=$WID"
+    break
+  fi
+  sleep 1
+done
+if [ -z "$WID" ]; then
+  echo "FIREFOX_NO_WINDOW"
+  kill -0 $FF_PID 2>/dev/null && echo "FIREFOX_STILL_RUNNING" || echo "FIREFOX_CRASHED"
+fi
+kill $FF_PID 2>/dev/null; sleep 1; kill -9 $FF_PID 2>/dev/null; true`,
+		);
+		expect(output).toContain("FIREFOX_WINDOW_FOUND");
+	});
+
 	test("GIMP starts without segfault", async ({ sidecarContainer }) => {
 		const output = await execInSidecar(
 			sidecarContainer,

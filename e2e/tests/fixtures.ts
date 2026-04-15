@@ -77,6 +77,9 @@ async function ensureSetup() {
 					RUST_LOG: "info",
 					NO_AT_BRIDGE: "1",
 					MOZ_USE_XINPUT2: "1",
+					// Firefox sandbox requires user namespaces, unavailable in Docker
+					MOZ_DISABLE_CONTENT_SANDBOX: "1",
+					MOZ_DISABLE_GMP_SANDBOX: "1",
 				})
 				.withWaitStrategy(Wait.forLogMessage(/Connected to backend/))
 				.start(),
