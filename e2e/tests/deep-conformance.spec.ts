@@ -582,10 +582,10 @@ echo EXIT_CODE=$?`,
 		// Firefox --screenshot mode doesn't require rendering but tests X11 init
 	});
 
-	// Firefox non-headless: currently segfaults during X11/GLX initialization.
-	// The crash happens in Firefox's GLX probe (xcb extra reply data error)
-	// regardless of sandbox settings or rendering mode.
-	// TODO: debug with core dump analysis to find the exact X11 protocol issue.
+	// Firefox non-headless: segfaults during GLX initialization.
+	// The xcb reply data bug (GetString .max(1)) is fixed, but Firefox still
+	// crashes in its GLX probe — likely an unhandled render opcode or FBConfig
+	// matching issue causing a NULL deref in Mesa's indirect GLX path.
 	test.skip("Firefox ESR creates X11 window (non-headless)", async ({
 		sidecarContainer,
 	}) => {

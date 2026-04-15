@@ -233,10 +233,11 @@ fn do_make_current(state: &mut ClientState, ctx_id: u32, drawable: u32) -> u32 {
 
 pub(crate) fn handle_is_direct(seq: u16) -> Vec<u8> {
     // Indirect rendering (is_direct = false)
+    // GLX IsDirect reply: byte 0 = reply type, byte 1 = is_direct (BOOL)
     let mut reply = [0u8; 32];
     reply[0] = 1;
+    reply[1] = 0; // is_direct = false (byte 1 per GLX spec)
     reply[2..4].copy_from_slice(&seq.to_le_bytes());
-    reply[8] = 0; // is_direct = false
     reply.to_vec()
 }
 

@@ -173,7 +173,7 @@ pub(crate) fn handle_get_string(payload: &[u8], seq: u16) -> Vec<u8> {
     let bytes = s.as_bytes();
     let n = bytes.len() as u32;
     let padded = (bytes.len() + 3) & !3;
-    let extra_words = (padded / 4).max(1);
+    let extra_words = padded / 4;
     let mut reply = vec![0u8; 32 + extra_words * 4];
     reply[0] = 1;
     reply[2..4].copy_from_slice(&seq.to_le_bytes());

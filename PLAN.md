@@ -38,21 +38,26 @@
 - [x] Forward redirected windows to frontend (we ARE the final display)
 - [x] Firefox/GTK apps using CompositeRedirectWindow now render correctly
 
-### Phase 18e-3: Fix Firefox container environment ✓
-- [x] Fix spawnApp window timeout (15s → configurable, 120s for Firefox)
+### Phase 18e-3: Container environment cleanup ✓
 - [x] Remove DRI3 extension (no GPU/DRM in Docker containers)
-- [x] Add MOZ_DISABLE_CONTENT_SANDBOX, MOZ_DISABLE_GMP_SANDBOX env vars
-- [x] Add diagnostic non-headless Firefox window creation test
+
+### Phase 18f: Fix GLX reply format ✓
+- [x] Root cause: GLX GetString handler had `.max(1)` on reply_length, adding 4
+      spurious bytes for empty strings. Mesa's indirect GLX calls _XReply(extra=0)
+      leaving unconsumed data that crashes the next _XReply call.
+- [x] Fix: Remove `.max(1)` — empty strings correctly return reply_length=0
+- [x] Fix IsDirect reply field offset (is_direct at byte 1, not byte 8)
+- [x] glxinfo and glxgears now work without crash
+- [x] Remove app-specific env vars (MOZ_*, MOZ_USE_XINPUT2, MOZ_X11_EGL)
+- [ ] Firefox non-headless still segfaults in Mesa's indirect GLX path
+      (unhandled render opcode 32768 or FBConfig matching issue)
 
 ## Remaining Phases
 
-### Phase 18f: Fix GLX reply format for Firefox/glxinfo
-- [ ] Debug `[xcb] Extra reply data still left in queue` error from GLX initialization
-  - Firefox segfaults during GLX init; swrast driver can't match FBConfigs
-  - glxinfo also crashes with same error
-  - GLX reply length fields appear correct — may be a protocol framing issue
-- [ ] Fix the underlying GLX reply or protocol issue
-- [ ] Verify glxinfo and Firefox non-headless work without crash
+### Phase 18g: Fix Firefox non-headless GLX segfault
+- [ ] Debug Mesa indirect GLX segfault (unrelated to xcb reply data bug)
+- [ ] Handle GLX render opcode 32768 (currently returns BAD_REQUEST error)
+- [ ] Investigate FBConfig matching so swrast driver loads successfully
 
 ### Phase 18c: Broader GLX Testing
 - [ ] E2e: glxgears renders frames without crash

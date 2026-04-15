@@ -94,7 +94,6 @@ pub(crate) fn handle_get_visual_configs(_data: &[u8], seq: u16) -> Vec<u8> {
 // ---------------------------------------------------------------------------
 
 pub(crate) fn handle_get_fb_configs(_data: &[u8], seq: u16) -> Vec<u8> {
-    // Return two FBConfigs: one for depth-24 (XRGB) and one for depth-32 (ARGB)
     let num_configs: u32 = 2;
     // numAttribs in the GLX wire protocol is the number of attribute *pairs*
     // (key-value), NOT the number of u32 words.  Each attribute occupies

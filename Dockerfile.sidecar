@@ -189,13 +189,8 @@ COPY crates/sidecar/fonts/ /usr/local/share/fonts/bdf/
 ENV DISPLAY_NUMBER=99
 ENV NO_AT_BRIDGE=1
 ENV HOSTNAME=x11web
-# Force software rendering for Mesa clients (Firefox, etc.) to avoid
-# GLX driver loading failures in containers without GPU access.
+# Force software rendering for Mesa clients in containers without GPU access.
 ENV LIBGL_ALWAYS_SOFTWARE=1
-ENV MOZ_X11_EGL=0
-# Disable Firefox sandboxing in Docker containers (running as root, no user namespaces)
-ENV MOZ_DISABLE_CONTENT_SANDBOX=1
-ENV MOZ_DISABLE_GMP_SANDBOX=1
 # PulseAudio: apps connect to the local daemon via default socket.
 ENV PULSE_SERVER=unix:/var/run/pulse/native
 CMD ["x11-web-sidecar"]

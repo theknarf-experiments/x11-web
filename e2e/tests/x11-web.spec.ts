@@ -174,7 +174,6 @@ test.describe
 							DISPLAY_NUMBER: "99",
 							RUST_LOG: "info",
 							NO_AT_BRIDGE: "1",
-							MOZ_USE_XINPUT2: "1",
 						})
 						.withWaitStrategy(Wait.forLogMessage(/Connected to backend/))
 						.start(),
@@ -1278,8 +1277,6 @@ test.describe
 			expect(after).not.toBe(before);
 		});
 
-		// Firefox uses XInput2 smooth scrolling when MOZ_USE_XINPUT2=1 is set
-		// (configured in the sidecar container environment).
 		test("firefox responds to scroll wheel input", async ({ page }) => {
 			await page.goto(`http://localhost:${frontendPort}`);
 			await waitForDock(page);
