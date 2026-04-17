@@ -202,7 +202,10 @@ pub(crate) fn handle_get_fb_configs(_data: &[u8], seq: u16) -> Vec<u8> {
 // ---------------------------------------------------------------------------
 
 pub(crate) fn handle_query_extensions_string(_data: &[u8], seq: u16) -> Vec<u8> {
-    let ext_string = b"GLX_ARB_create_context GLX_ARB_create_context_profile GLX_EXT_visual_info GLX_EXT_visual_rating GLX_MESA_copy_sub_buffer";
+    // Don't advertise GLX_ARB_create_context — it triggers Mesa code paths
+    // (glXCreateContextAttribsARB) that require a DRI stack we don't have.
+    // Without it, clients use glXCreateContext() which works via our handlers.
+    let ext_string = b"GLX_EXT_visual_info GLX_EXT_visual_rating GLX_MESA_copy_sub_buffer";
     let n = ext_string.len() as u32;
     let padded = ((n as usize) + 3) & !3;
 
@@ -233,7 +236,7 @@ pub(crate) fn handle_query_server_string(data: &[u8], seq: u16) -> Vec<u8> {
     let string = match name {
         1 => b"x11-web OSMesa" as &[u8],  // GLX_VENDOR
         2 => b"1.4" as &[u8],              // GLX_VERSION
-        3 => b"GLX_ARB_create_context GLX_ARB_create_context_profile GLX_EXT_visual_info GLX_EXT_visual_rating GLX_MESA_copy_sub_buffer" as &[u8],  // GLX_EXTENSIONS
+        3 => b"GLX_EXT_visual_info GLX_EXT_visual_rating GLX_MESA_copy_sub_buffer" as &[u8],  // GLX_EXTENSIONS
         _ => b"" as &[u8],
     };
 

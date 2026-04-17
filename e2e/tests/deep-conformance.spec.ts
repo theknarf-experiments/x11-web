@@ -689,8 +689,55 @@ echo EXIT_CODE=$?`,
 			`ls /dev/dri 2>&1 || echo "no /dev/dri"
 echo "--- Python GLX protocol test ---"
 python3 /tmp/glx_test.py 2>&1
-echo "--- glxinfo full ---"
-LIBGL_DEBUG=verbose timeout 15 glxinfo 2>&1 | head -60 || true
+echo "--- glxinfo -B ---"
+LIBGL_DEBUG=verbose timeout 15 glxinfo -B 2>&1 | head -20 || true
+echo "--- Python GLX context test ---"
+python3 -c "
+import socket, struct, sys
+def rx(s, n):
+    b = b''
+    while len(b) < n:
+        c = s.recv(n - len(b))
+        if not c: break
+        b += c
+    return b
+s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+s.settimeout(5)
+s.connect('/tmp/.X11-unix/X99')
+s.sendall(struct.pack('BBHHHHxx', 0x6c, 0, 11, 0, 0, 0))
+hdr = rx(s, 8)
+extra = struct.unpack_from('<H', hdr, 6)[0]
+rx(s, extra * 4)
+print('CONN_OK')
+# QueryExtension GLX
+n = b'GLX'
+p = (4 - len(n) % 4) % 4
+req = struct.pack('<BBH', 98, 0, (8+len(n)+p)//4) + struct.pack('<HH', len(n), 0) + n + b'\\x00'*p
+s.sendall(req)
+rep = rx(s, 32)
+glx_op = rep[9]
+print(f'GLX_OP={glx_op}')
+# GLX CreateContext (minor=3)
+ctx_id = 0x02000001
+req = struct.pack('<BBHIIIII', glx_op, 3, 6, ctx_id, 0x21, 0, 0, 0)
+s.sendall(req)
+# No reply for CreateContext
+print('CTX_CREATED')
+# GLX MakeCurrent (minor=5)
+wid = 0x65  # root window
+req = struct.pack('<BBHIII', glx_op, 5, 4, wid, ctx_id, 0)
+s.sendall(req)
+rep = rx(s, 32)
+tag = struct.unpack_from('<I', rep, 8)[0]
+print(f'MAKE_CURRENT tag={tag}')
+# GLX IsDirect (minor=6)
+req = struct.pack('<BBHI', glx_op, 6, 2, ctx_id)
+s.sendall(req)
+rep = rx(s, 32)
+print(f'IS_DIRECT={rep[8]}')
+print('ALL_OK')
+s.close()
+" 2>&1 || true
 echo "DONE"`,
 			120_000,
 		);
