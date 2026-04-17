@@ -70,6 +70,10 @@ async function ensureSetup() {
 				.withNetwork(network)
 				.withNetworkAliases("sidecar")
 				.withHostname("x11web")
+				// Privileged mode lets apps that use Linux user-namespaces for
+				// sandboxing (browsers, etc.) work the same as on a normal desktop.
+				// This is a container environment requirement, not app-specific.
+				.withPrivilegedMode()
 				.withEnvironment({
 					BACKEND_URL: "ws://backend:3001/ws/sidecar",
 					SIDECAR_NAME: "test-sidecar",

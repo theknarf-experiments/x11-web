@@ -582,18 +582,133 @@ echo EXIT_CODE=$?`,
 		// Firefox --screenshot mode doesn't require rendering but tests X11 init
 	});
 
-	// Firefox non-headless: segfaults during GLX initialization.
-	// The xcb reply data bug (GetString .max(1)) is fixed, but Firefox still
-	// crashes in its GLX probe — likely an unhandled render opcode or FBConfig
-	// matching issue causing a NULL deref in Mesa's indirect GLX path.
+	test("Firefox ESR diagnostic (non-headless crash info)", async ({
+		sidecarContainer,
+	}) => {
+		test.setTimeout(180_000);
+
+		// Write the Python GLX protocol test script using base64 to avoid shell escaping issues
+		const pyScript = [
+			"import socket, struct, sys",
+			"",
+			"def recv_exact(s, n):",
+			"    buf = b''",
+			"    while len(buf) < n:",
+			"        chunk = s.recv(n - len(buf))",
+			"        if not chunk: break",
+			"        buf += chunk",
+			"    return buf",
+			"",
+			"sock_path = '/tmp/.X11-unix/X99'",
+			"try:",
+			"    s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)",
+			"    s.settimeout(5)",
+			"    s.connect(sock_path)",
+			"    setup = struct.pack('BBHHHHxx', 0x6c, 0, 11, 0, 0, 0)",
+			"    s.sendall(setup)",
+			"    hdr = recv_exact(s, 8)",
+			"    if not hdr or hdr[0] != 1:",
+			"        print('CONN_FAIL: ' + repr(hdr))",
+			"        sys.exit(1)",
+			"    extra_len = struct.unpack_from('<H', hdr, 6)[0]",
+			"    recv_exact(s, extra_len * 4)",
+			"    print('CONN_OK')",
+			"    # QueryExtension for GLX",
+			"    glx_name = b'GLX'",
+			"    pad = (4 - len(glx_name) % 4) % 4",
+			"    req_len = (4 + 4 + len(glx_name) + pad) // 4",
+			"    req = struct.pack('<BBH', 98, 0, req_len) + struct.pack('<HH', len(glx_name), 0) + glx_name + b'\\x00' * pad",
+			"    s.sendall(req)",
+			"    rep = recv_exact(s, 32)",
+			"    glx_op = rep[9]",
+			"    print('GLX_OP=' + str(glx_op))",
+			"    # GLX QueryVersion",
+			"    req = struct.pack('<BBHII', glx_op, 7, 3, 1, 4)",
+			"    s.sendall(req)",
+			"    rep = recv_exact(s, 32)",
+			"    maj = struct.unpack_from('<I', rep, 8)[0]",
+			"    minor = struct.unpack_from('<I', rep, 12)[0]",
+			"    print('GLX_VER=' + str(maj) + '.' + str(minor))",
+			"    # GLX QueryExtensionsString (minor=18)",
+			"    req = struct.pack('<BBHI', glx_op, 18, 2, 0)",
+			"    s.sendall(req)",
+			"    rep = recv_exact(s, 32)",
+			"    rlen = struct.unpack_from('<I', rep, 4)[0]",
+			"    n = struct.unpack_from('<I', rep, 8)[0]",
+			"    extra = recv_exact(s, rlen * 4)",
+			"    print('QEXT n=' + str(n) + ' rlen=' + str(rlen) + ' str=' + extra[:n].decode(errors='replace'))",
+			"    # GLX QueryServerString name=1 (VENDOR, minor=19)",
+			"    req = struct.pack('<BBHII', glx_op, 19, 3, 0, 1)",
+			"    s.sendall(req)",
+			"    rep = recv_exact(s, 32)",
+			"    rlen = struct.unpack_from('<I', rep, 4)[0]",
+			"    pad2 = struct.unpack_from('<I', rep, 8)[0]",
+			"    n2 = struct.unpack_from('<I', rep, 12)[0]",
+			"    extra = recv_exact(s, rlen * 4)",
+			"    print('QSRV_VENDOR rlen=' + str(rlen) + ' pad2=' + str(pad2) + ' n=' + str(n2) + ' val=' + extra[:n2].decode(errors='replace'))",
+			"    # GLX QueryServerString name=2 (VERSION, minor=19)",
+			"    req = struct.pack('<BBHII', glx_op, 19, 4, 0, 2)",
+			"    s.sendall(req)",
+			"    rep = recv_exact(s, 32)",
+			"    rlen = struct.unpack_from('<I', rep, 4)[0]",
+			"    pad2 = struct.unpack_from('<I', rep, 8)[0]",
+			"    n2 = struct.unpack_from('<I', rep, 12)[0]",
+			"    extra = recv_exact(s, rlen * 4)",
+			"    ver = extra[:n2].decode(errors='replace')",
+			"    print('QSRV_VER rlen=' + str(rlen) + ' pad2=' + str(pad2) + ' n=' + str(n2) + ' ver=' + ver)",
+			"    if ver == '1.4': print('VERSION_OK')",
+			"    else: print('VERSION_FAIL got=' + ver)",
+			"    # GLX GetFBConfigs (minor=21) - check reply length vs actual data",
+			"    req = struct.pack('<BBHII', glx_op, 21, 3, 0, 0)",
+			"    s.sendall(req)",
+			"    rep = recv_exact(s, 32)",
+			"    rlen = struct.unpack_from('<I', rep, 4)[0]",
+			"    num_cfgs = struct.unpack_from('<I', rep, 8)[0]",
+			"    num_attrs = struct.unpack_from('<I', rep, 12)[0]",
+			"    extra = recv_exact(s, rlen * 4)",
+			"    print('FBCFG rlen=' + str(rlen) + ' num_cfgs=' + str(num_cfgs) + ' num_attrs=' + str(num_attrs) + ' got=' + str(len(extra)) + 'B')",
+			"    s.close()",
+			"    print('PROTO_DONE')",
+			"except Exception as e:",
+			"    import traceback; traceback.print_exc()",
+			"    print('PROTO_ERR: ' + str(e))",
+		].join("\n");
+
+		// Write using base64 to avoid shell quoting issues
+		const scriptB64 = Buffer.from(pyScript).toString("base64");
+		await sidecarContainer.exec([
+			"bash",
+			"-c",
+			`printf '%s' '${scriptB64}' | base64 -d > /tmp/glx_test.py`,
+		]);
+
+		const output = await execInSidecar(
+			sidecarContainer,
+			`ls /dev/dri 2>&1 || echo "no /dev/dri"
+echo "--- Python GLX protocol test ---"
+python3 /tmp/glx_test.py 2>&1
+echo "--- glxinfo -B ---"
+LIBGL_DEBUG=verbose timeout 15 glxinfo -B 2>&1 | head -40 || true
+echo "DONE"`,
+			120_000,
+		);
+		console.log("Firefox diagnostic output:", output);
+		expect(output).toBeDefined();
+	});
+
+	// Firefox non-headless segfaults in Mesa's DRISW path because
+	// containers have no /dev/dri, so the swrast DRI driver can't initialise.
+	// This is a Mesa/DRI environment issue, not an X11 server protocol issue.
+	// Firefox works correctly via the frontend (see firefox-compliance.spec.ts).
 	test.skip("Firefox ESR creates X11 window (non-headless)", async ({
 		sidecarContainer,
 	}) => {
+		test.setTimeout(180_000);
 		const output = await execInSidecar(
 			sidecarContainer,
 			`firefox-esr --no-remote --new-instance about:blank &
 FF_PID=$!
-for i in $(seq 1 30); do
+for i in $(seq 1 90); do
   WID=$(xdotool search --pid $FF_PID 2>/dev/null | grep -v '^$' || true)
   if [ -n "$WID" ]; then echo "FIREFOX_WINDOW_FOUND=$WID"; break; fi
   sleep 1

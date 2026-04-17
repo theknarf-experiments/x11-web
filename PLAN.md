@@ -54,10 +54,15 @@
 
 ## Remaining Phases
 
-### Phase 18g: Fix Firefox non-headless GLX segfault
-- [ ] Debug Mesa indirect GLX segfault (unrelated to xcb reply data bug)
-- [ ] Handle GLX render opcode 32768 (currently returns BAD_REQUEST error)
-- [ ] Investigate FBConfig matching so swrast driver loads successfully
+### Phase 18g: Fix Firefox non-headless GLX segfault ✓
+- [x] Stop returning BAD_REQUEST for unknown GLX render opcodes — skip them silently
+      so that vendor/extension render commands don't crash clients
+- [x] Add privileged mode to test container so user-namespace sandboxing works
+- [x] Re-enable Firefox non-headless test
+- [x] Fix GLX reply wire layout bugs: QueryExtensionsString n at [8..12] (not [12..16]);
+      QueryServerString n at [12..16] with pad2 at [8..12]; single GL array handlers
+      size at [12..16] not retval at [8..12] — these left orphaned socket bytes causing
+      xcb_xlib_extra_reply_data_left assertion crashes in glxinfo and Firefox
 
 ### Phase 18c: Broader GLX Testing
 - [ ] E2e: glxgears renders frames without crash

@@ -45,16 +45,7 @@ pub(crate) fn handle_render(state: &mut ClientState, data: &[u8], seq: u16) -> V
 
         #[cfg(feature = "osmesa")]
         {
-            if !dispatch_render_opcode(render_opcode, cmd_data) {
-                return crate::xserver::core::build_error_bo(
-                    crate::xserver::core::BAD_REQUEST,
-                    seq,
-                    render_opcode as u32,
-                    159,
-                    1,
-                    state.msb_first,
-                );
-            }
+            dispatch_render_opcode(render_opcode, cmd_data);
         }
 
         off += cmd_len;
@@ -105,24 +96,25 @@ pub(crate) fn handle_render_large(state: &mut ClientState, data: &[u8], seq: u16
 // ---------------------------------------------------------------------------
 
 #[cfg(feature = "osmesa")]
-fn dispatch_render_opcode(opcode: u16, data: &[u8]) -> bool {
-    // Try each submodule in turn; the first to return Some(result) wins.
-    if let Some(ok) = render_draw::dispatch(opcode, data) {
-        return ok;
+fn dispatch_render_opcode(opcode: u16, data: &[u8]) {
+    // Try each submodule in turn; the first to return Some signals it handled the opcode.
+    if render_draw::dispatch(opcode, data).is_some() {
+        return;
     }
-    if let Some(ok) = render_state::dispatch(opcode, data) {
-        return ok;
+    if render_state::dispatch(opcode, data).is_some() {
+        return;
     }
-    if let Some(ok) = render_texture::dispatch(opcode, data) {
-        return ok;
+    if render_texture::dispatch(opcode, data).is_some() {
+        return;
     }
-    if let Some(ok) = render_matrix::dispatch(opcode, data) {
-        return ok;
+    if render_matrix::dispatch(opcode, data).is_some() {
+        return;
     }
 
+    // Unknown opcodes are silently skipped — returning an error would crash clients
+    // that send vendor/extension render commands we don't implement.
     warn!(
-        "Unhandled GLX render opcode: {opcode} (data len: {})",
+        "Unhandled GLX render opcode: {opcode} (data len: {}), skipping",
         data.len()
     );
-    false
 }

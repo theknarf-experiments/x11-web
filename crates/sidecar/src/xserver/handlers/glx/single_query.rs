@@ -1,4 +1,20 @@
 //! GLX single GL query/info operations (glGet*, glIs*, glGenTextures, glGenLists, etc.).
+//!
+//! ## Reply layout note
+//!
+//! The `xGLXSingleReply` struct has these wire fields:
+//!   bytes 0-3:   type(1) + pad + sequence(2)
+//!   bytes 4-7:   reply_length  (extra 4-byte words beyond the 32-byte header)
+//!   bytes 8-11:  retval        (single scalar return value — GetError, IsList, etc.)
+//!   bytes 12-15: size          (element/byte count for array/string returns)
+//!   bytes 16-31: unused padding
+//!   bytes 32+:   variable-length data
+//!
+//! For scalar returns (GetError, IsEnabled, GenLists …) the value goes in `retval` (8-11).
+//! For array/string returns (GetIntegerv, GetString …) the count goes in `size` (12-15)
+//! and `retval` must be left as 0 — Mesa reads `reply.size`, not `reply.retval`, for
+//! variable-length replies.  Getting this wrong leaves orphaned bytes in the socket that
+//! corrupt every subsequent read.
 
 #[cfg(feature = "osmesa")]
 use crate::osmesa;
@@ -6,7 +22,7 @@ use crate::osmesa;
 use super::context::glx_single_empty_reply;
 
 // ---------------------------------------------------------------------------
-// glGetError (opcode 116)
+// glGetError (opcode 116) — scalar return in retval (bytes 8-11)
 // ---------------------------------------------------------------------------
 
 pub(crate) fn handle_get_error(seq: u16) -> Vec<u8> {
@@ -17,7 +33,7 @@ pub(crate) fn handle_get_error(seq: u16) -> Vec<u8> {
             let mut reply = [0u8; 32];
             reply[0] = 1;
             reply[2..4].copy_from_slice(&seq.to_le_bytes());
-            reply[8..12].copy_from_slice(&err.to_le_bytes());
+            reply[8..12].copy_from_slice(&err.to_le_bytes()); // retval
             return reply.to_vec();
         }
     }
@@ -49,8 +65,8 @@ pub(crate) fn handle_get_integerv(payload: &[u8], seq: u16) -> Vec<u8> {
     let mut reply = vec![0u8; 32 + extra_words * 4];
     reply[0] = 1;
     reply[2..4].copy_from_slice(&seq.to_le_bytes());
-    reply[4..8].copy_from_slice(&(extra_words as u32).to_le_bytes());
-    reply[8..12].copy_from_slice(&(n as u32).to_le_bytes());
+    reply[4..8].copy_from_slice(&(extra_words as u32).to_le_bytes()); // reply_length
+    reply[12..16].copy_from_slice(&(n as u32).to_le_bytes());         // size (element count)
     for (i, &v) in params.iter().enumerate() {
         let off = 32 + i * 4;
         reply[off..off + 4].copy_from_slice(&v.to_le_bytes());
@@ -80,8 +96,8 @@ pub(crate) fn handle_get_floatv(payload: &[u8], seq: u16) -> Vec<u8> {
     let mut reply = vec![0u8; 32 + extra_words * 4];
     reply[0] = 1;
     reply[2..4].copy_from_slice(&seq.to_le_bytes());
-    reply[4..8].copy_from_slice(&(extra_words as u32).to_le_bytes());
-    reply[8..12].copy_from_slice(&(n as u32).to_le_bytes());
+    reply[4..8].copy_from_slice(&(extra_words as u32).to_le_bytes()); // reply_length
+    reply[12..16].copy_from_slice(&(n as u32).to_le_bytes());         // size
     for (i, &v) in params.iter().enumerate() {
         let off = 32 + i * 4;
         reply[off..off + 4].copy_from_slice(&v.to_le_bytes());
@@ -111,8 +127,8 @@ pub(crate) fn handle_get_doublev(payload: &[u8], seq: u16) -> Vec<u8> {
     let mut reply = vec![0u8; 32 + extra_words * 4];
     reply[0] = 1;
     reply[2..4].copy_from_slice(&seq.to_le_bytes());
-    reply[4..8].copy_from_slice(&(extra_words as u32).to_le_bytes());
-    reply[8..12].copy_from_slice(&(n as u32).to_le_bytes());
+    reply[4..8].copy_from_slice(&(extra_words as u32).to_le_bytes()); // reply_length
+    reply[12..16].copy_from_slice(&(n as u32).to_le_bytes());         // size
     for (i, &v) in params.iter().enumerate() {
         let off = 32 + i * 8;
         reply[off..off + 8].copy_from_slice(&v.to_le_bytes());
@@ -141,8 +157,8 @@ pub(crate) fn handle_get_booleanv(payload: &[u8], seq: u16) -> Vec<u8> {
     let mut reply = vec![0u8; 32 + extra_words * 4];
     reply[0] = 1;
     reply[2..4].copy_from_slice(&seq.to_le_bytes());
-    reply[4..8].copy_from_slice(&(extra_words as u32).to_le_bytes());
-    reply[8..12].copy_from_slice(&(n as u32).to_le_bytes());
+    reply[4..8].copy_from_slice(&(extra_words as u32).to_le_bytes()); // reply_length
+    reply[12..16].copy_from_slice(&(n as u32).to_le_bytes());         // size
     reply[32..32 + n].copy_from_slice(&params);
     reply
 }
@@ -174,11 +190,11 @@ pub(crate) fn handle_get_string(payload: &[u8], seq: u16) -> Vec<u8> {
     let n = bytes.len() as u32;
     let padded = (bytes.len() + 3) & !3;
     let extra_words = padded / 4;
-    let mut reply = vec![0u8; 32 + extra_words * 4];
+    let mut reply = vec![0u8; 32 + padded];
     reply[0] = 1;
     reply[2..4].copy_from_slice(&seq.to_le_bytes());
-    reply[4..8].copy_from_slice(&(extra_words as u32).to_le_bytes());
-    reply[8..12].copy_from_slice(&n.to_le_bytes());
+    reply[4..8].copy_from_slice(&(extra_words as u32).to_le_bytes()); // reply_length
+    reply[12..16].copy_from_slice(&n.to_le_bytes());                  // size (byte count)
     if !bytes.is_empty() {
         reply[32..32 + bytes.len()].copy_from_slice(bytes);
     }
@@ -186,7 +202,7 @@ pub(crate) fn handle_get_string(payload: &[u8], seq: u16) -> Vec<u8> {
 }
 
 // ---------------------------------------------------------------------------
-// glIsEnabled (opcode 118)
+// glIsEnabled (opcode 118) — scalar boolean in retval (bytes 8-11)
 // ---------------------------------------------------------------------------
 
 pub(crate) fn handle_is_enabled(payload: &[u8], seq: u16) -> Vec<u8> {
@@ -215,12 +231,12 @@ pub(crate) fn handle_is_enabled(payload: &[u8], seq: u16) -> Vec<u8> {
     let mut reply = [0u8; 32];
     reply[0] = 1;
     reply[2..4].copy_from_slice(&seq.to_le_bytes());
-    reply[8] = enabled;
+    reply[8] = enabled; // retval LSB
     reply.to_vec()
 }
 
 // ---------------------------------------------------------------------------
-// glIsTexture (opcode 119)
+// glIsTexture (opcode 119) — scalar boolean in retval
 // ---------------------------------------------------------------------------
 
 pub(crate) fn handle_is_texture(payload: &[u8], seq: u16) -> Vec<u8> {
@@ -249,7 +265,7 @@ pub(crate) fn handle_is_texture(payload: &[u8], seq: u16) -> Vec<u8> {
     let mut reply = [0u8; 32];
     reply[0] = 1;
     reply[2..4].copy_from_slice(&seq.to_le_bytes());
-    reply[8] = result;
+    reply[8] = result; // retval LSB
     reply.to_vec()
 }
 
@@ -274,8 +290,8 @@ pub(crate) fn handle_gen_textures(payload: &[u8], seq: u16) -> Vec<u8> {
     let mut reply = vec![0u8; 32 + extra_words * 4];
     reply[0] = 1;
     reply[2..4].copy_from_slice(&seq.to_le_bytes());
-    reply[4..8].copy_from_slice(&(extra_words as u32).to_le_bytes());
-    reply[8..12].copy_from_slice(&(n as u32).to_le_bytes());
+    reply[4..8].copy_from_slice(&(extra_words as u32).to_le_bytes()); // reply_length
+    reply[12..16].copy_from_slice(&(n as u32).to_le_bytes());         // size
     for (i, &t) in textures.iter().enumerate() {
         let off = 32 + i * 4;
         reply[off..off + 4].copy_from_slice(&t.to_le_bytes());
@@ -301,11 +317,12 @@ pub(crate) fn handle_get_tex_parameteriv(payload: &[u8], seq: u16) -> Vec<u8> {
             osmesa::gl_get_tex_parameteriv(target, pname, &mut params);
         }
     }
+    let extra_words = n;
     let mut reply = vec![0u8; 32 + n * 4];
     reply[0] = 1;
     reply[2..4].copy_from_slice(&seq.to_le_bytes());
-    reply[4..8].copy_from_slice(&(n as u32).to_le_bytes());
-    reply[8..12].copy_from_slice(&(n as u32).to_le_bytes());
+    reply[4..8].copy_from_slice(&(extra_words as u32).to_le_bytes()); // reply_length
+    reply[12..16].copy_from_slice(&(n as u32).to_le_bytes());         // size
     for (i, &v) in params.iter().enumerate() {
         let off = 32 + i * 4;
         reply[off..off + 4].copy_from_slice(&v.to_le_bytes());
@@ -331,11 +348,12 @@ pub(crate) fn handle_get_tex_parameterfv(payload: &[u8], seq: u16) -> Vec<u8> {
             osmesa::gl_get_tex_parameterfv(target, pname, &mut params);
         }
     }
+    let extra_words = n;
     let mut reply = vec![0u8; 32 + n * 4];
     reply[0] = 1;
     reply[2..4].copy_from_slice(&seq.to_le_bytes());
-    reply[4..8].copy_from_slice(&(n as u32).to_le_bytes());
-    reply[8..12].copy_from_slice(&(n as u32).to_le_bytes());
+    reply[4..8].copy_from_slice(&(extra_words as u32).to_le_bytes()); // reply_length
+    reply[12..16].copy_from_slice(&(n as u32).to_le_bytes());         // size
     for (i, &v) in params.iter().enumerate() {
         let off = 32 + i * 4;
         reply[off..off + 4].copy_from_slice(&v.to_le_bytes());
@@ -366,8 +384,8 @@ pub(crate) fn handle_get_tex_level_parameteriv(payload: &[u8], seq: u16) -> Vec<
     let mut reply = vec![0u8; 32 + extra_words * 4];
     reply[0] = 1;
     reply[2..4].copy_from_slice(&seq.to_le_bytes());
-    reply[4..8].copy_from_slice(&(extra_words as u32).to_le_bytes());
-    reply[8..12].copy_from_slice(&(n as u32).to_le_bytes());
+    reply[4..8].copy_from_slice(&(extra_words as u32).to_le_bytes()); // reply_length
+    reply[12..16].copy_from_slice(&(n as u32).to_le_bytes());         // size
     for (i, &v) in params.iter().enumerate() {
         let off = 32 + i * 4;
         reply[off..off + 4].copy_from_slice(&v.to_le_bytes());
@@ -398,8 +416,8 @@ pub(crate) fn handle_get_tex_level_parameterfv(payload: &[u8], seq: u16) -> Vec<
     let mut reply = vec![0u8; 32 + extra_words * 4];
     reply[0] = 1;
     reply[2..4].copy_from_slice(&seq.to_le_bytes());
-    reply[4..8].copy_from_slice(&(extra_words as u32).to_le_bytes());
-    reply[8..12].copy_from_slice(&(n as u32).to_le_bytes());
+    reply[4..8].copy_from_slice(&(extra_words as u32).to_le_bytes()); // reply_length
+    reply[12..16].copy_from_slice(&(n as u32).to_le_bytes());         // size
     for (i, &v) in params.iter().enumerate() {
         let off = 32 + i * 4;
         reply[off..off + 4].copy_from_slice(&v.to_le_bytes());
@@ -455,8 +473,8 @@ pub(crate) fn handle_get_tex_image(payload: &[u8], seq: u16) -> Vec<u8> {
     let mut reply = vec![0u8; 32 + extra_words * 4];
     reply[0] = 1;
     reply[2..4].copy_from_slice(&seq.to_le_bytes());
-    reply[4..8].copy_from_slice(&(extra_words as u32).to_le_bytes());
-    reply[8..12].copy_from_slice(&(image_size as u32).to_le_bytes());
+    reply[4..8].copy_from_slice(&(extra_words as u32).to_le_bytes()); // reply_length
+    reply[12..16].copy_from_slice(&(image_size as u32).to_le_bytes()); // size (byte count)
     reply[32..32 + image_size].copy_from_slice(&pixels);
     reply
 }
@@ -483,8 +501,8 @@ pub(crate) fn handle_get_lightfv(payload: &[u8], seq: u16) -> Vec<u8> {
     let mut reply = vec![0u8; 32 + extra_words * 4];
     reply[0] = 1;
     reply[2..4].copy_from_slice(&seq.to_le_bytes());
-    reply[4..8].copy_from_slice(&(extra_words as u32).to_le_bytes());
-    reply[8..12].copy_from_slice(&(n as u32).to_le_bytes());
+    reply[4..8].copy_from_slice(&(extra_words as u32).to_le_bytes()); // reply_length
+    reply[12..16].copy_from_slice(&(n as u32).to_le_bytes());         // size
     for (i, &v) in params.iter().enumerate() {
         let off = 32 + i * 4;
         reply[off..off + 4].copy_from_slice(&v.to_le_bytes());
@@ -514,8 +532,8 @@ pub(crate) fn handle_get_lightiv(payload: &[u8], seq: u16) -> Vec<u8> {
     let mut reply = vec![0u8; 32 + extra_words * 4];
     reply[0] = 1;
     reply[2..4].copy_from_slice(&seq.to_le_bytes());
-    reply[4..8].copy_from_slice(&(extra_words as u32).to_le_bytes());
-    reply[8..12].copy_from_slice(&(n as u32).to_le_bytes());
+    reply[4..8].copy_from_slice(&(extra_words as u32).to_le_bytes()); // reply_length
+    reply[12..16].copy_from_slice(&(n as u32).to_le_bytes());         // size
     for (i, &v) in params.iter().enumerate() {
         let off = 32 + i * 4;
         reply[off..off + 4].copy_from_slice(&v.to_le_bytes());
@@ -545,8 +563,8 @@ pub(crate) fn handle_get_materialfv(payload: &[u8], seq: u16) -> Vec<u8> {
     let mut reply = vec![0u8; 32 + extra_words * 4];
     reply[0] = 1;
     reply[2..4].copy_from_slice(&seq.to_le_bytes());
-    reply[4..8].copy_from_slice(&(extra_words as u32).to_le_bytes());
-    reply[8..12].copy_from_slice(&(n as u32).to_le_bytes());
+    reply[4..8].copy_from_slice(&(extra_words as u32).to_le_bytes()); // reply_length
+    reply[12..16].copy_from_slice(&(n as u32).to_le_bytes());         // size
     for (i, &v) in params.iter().enumerate() {
         let off = 32 + i * 4;
         reply[off..off + 4].copy_from_slice(&v.to_le_bytes());
@@ -576,8 +594,8 @@ pub(crate) fn handle_get_materialiv(payload: &[u8], seq: u16) -> Vec<u8> {
     let mut reply = vec![0u8; 32 + extra_words * 4];
     reply[0] = 1;
     reply[2..4].copy_from_slice(&seq.to_le_bytes());
-    reply[4..8].copy_from_slice(&(extra_words as u32).to_le_bytes());
-    reply[8..12].copy_from_slice(&(n as u32).to_le_bytes());
+    reply[4..8].copy_from_slice(&(extra_words as u32).to_le_bytes()); // reply_length
+    reply[12..16].copy_from_slice(&(n as u32).to_le_bytes());         // size
     for (i, &v) in params.iter().enumerate() {
         let off = 32 + i * 4;
         reply[off..off + 4].copy_from_slice(&v.to_le_bytes());
@@ -607,8 +625,8 @@ pub(crate) fn handle_get_tex_envfv(payload: &[u8], seq: u16) -> Vec<u8> {
     let mut reply = vec![0u8; 32 + extra_words * 4];
     reply[0] = 1;
     reply[2..4].copy_from_slice(&seq.to_le_bytes());
-    reply[4..8].copy_from_slice(&(extra_words as u32).to_le_bytes());
-    reply[8..12].copy_from_slice(&(n as u32).to_le_bytes());
+    reply[4..8].copy_from_slice(&(extra_words as u32).to_le_bytes()); // reply_length
+    reply[12..16].copy_from_slice(&(n as u32).to_le_bytes());         // size
     for (i, &v) in params.iter().enumerate() {
         let off = 32 + i * 4;
         reply[off..off + 4].copy_from_slice(&v.to_le_bytes());
@@ -638,8 +656,8 @@ pub(crate) fn handle_get_tex_enviv(payload: &[u8], seq: u16) -> Vec<u8> {
     let mut reply = vec![0u8; 32 + extra_words * 4];
     reply[0] = 1;
     reply[2..4].copy_from_slice(&seq.to_le_bytes());
-    reply[4..8].copy_from_slice(&(extra_words as u32).to_le_bytes());
-    reply[8..12].copy_from_slice(&(n as u32).to_le_bytes());
+    reply[4..8].copy_from_slice(&(extra_words as u32).to_le_bytes()); // reply_length
+    reply[12..16].copy_from_slice(&(n as u32).to_le_bytes());         // size
     for (i, &v) in params.iter().enumerate() {
         let off = 32 + i * 4;
         reply[off..off + 4].copy_from_slice(&v.to_le_bytes());
@@ -670,8 +688,8 @@ pub(crate) fn handle_get_tex_gendv(payload: &[u8], seq: u16) -> Vec<u8> {
     let mut reply = vec![0u8; 32 + extra_words * 4];
     reply[0] = 1;
     reply[2..4].copy_from_slice(&seq.to_le_bytes());
-    reply[4..8].copy_from_slice(&(extra_words as u32).to_le_bytes());
-    reply[8..12].copy_from_slice(&(n as u32).to_le_bytes());
+    reply[4..8].copy_from_slice(&(extra_words as u32).to_le_bytes()); // reply_length
+    reply[12..16].copy_from_slice(&(n as u32).to_le_bytes());         // size
     for (i, &v) in params.iter().enumerate() {
         let off = 32 + i * 8;
         reply[off..off + 8].copy_from_slice(&v.to_le_bytes());
@@ -701,8 +719,8 @@ pub(crate) fn handle_get_tex_genfv(payload: &[u8], seq: u16) -> Vec<u8> {
     let mut reply = vec![0u8; 32 + extra_words * 4];
     reply[0] = 1;
     reply[2..4].copy_from_slice(&seq.to_le_bytes());
-    reply[4..8].copy_from_slice(&(extra_words as u32).to_le_bytes());
-    reply[8..12].copy_from_slice(&(n as u32).to_le_bytes());
+    reply[4..8].copy_from_slice(&(extra_words as u32).to_le_bytes()); // reply_length
+    reply[12..16].copy_from_slice(&(n as u32).to_le_bytes());         // size
     for (i, &v) in params.iter().enumerate() {
         let off = 32 + i * 4;
         reply[off..off + 4].copy_from_slice(&v.to_le_bytes());
@@ -732,8 +750,8 @@ pub(crate) fn handle_get_tex_geniv(payload: &[u8], seq: u16) -> Vec<u8> {
     let mut reply = vec![0u8; 32 + extra_words * 4];
     reply[0] = 1;
     reply[2..4].copy_from_slice(&seq.to_le_bytes());
-    reply[4..8].copy_from_slice(&(extra_words as u32).to_le_bytes());
-    reply[8..12].copy_from_slice(&(n as u32).to_le_bytes());
+    reply[4..8].copy_from_slice(&(extra_words as u32).to_le_bytes()); // reply_length
+    reply[12..16].copy_from_slice(&(n as u32).to_le_bytes());         // size
     for (i, &v) in params.iter().enumerate() {
         let off = 32 + i * 4;
         reply[off..off + 4].copy_from_slice(&v.to_le_bytes());
@@ -779,8 +797,8 @@ pub(crate) fn handle_get_pixel_mapfv(payload: &[u8], seq: u16) -> Vec<u8> {
     let mut reply = vec![0u8; 32 + extra_words * 4];
     reply[0] = 1;
     reply[2..4].copy_from_slice(&seq.to_le_bytes());
-    reply[4..8].copy_from_slice(&(extra_words as u32).to_le_bytes());
-    reply[8..12].copy_from_slice(&(n as u32).to_le_bytes());
+    reply[4..8].copy_from_slice(&(extra_words as u32).to_le_bytes()); // reply_length
+    reply[12..16].copy_from_slice(&(n as u32).to_le_bytes());         // size
     for (i, &v) in values.iter().enumerate() {
         let off = 32 + i * 4;
         reply[off..off + 4].copy_from_slice(&v.to_le_bytes());
@@ -810,8 +828,8 @@ pub(crate) fn handle_get_clip_plane(payload: &[u8], seq: u16) -> Vec<u8> {
     let mut reply = vec![0u8; 32 + extra_words * 4];
     reply[0] = 1;
     reply[2..4].copy_from_slice(&seq.to_le_bytes());
-    reply[4..8].copy_from_slice(&(extra_words as u32).to_le_bytes());
-    reply[8..12].copy_from_slice(&(n as u32).to_le_bytes());
+    reply[4..8].copy_from_slice(&(extra_words as u32).to_le_bytes()); // reply_length
+    reply[12..16].copy_from_slice(&(n as u32).to_le_bytes());         // size
     for (i, &v) in equation.iter().enumerate() {
         let off = 32 + i * 8;
         reply[off..off + 8].copy_from_slice(&v.to_le_bytes());
@@ -821,6 +839,7 @@ pub(crate) fn handle_get_clip_plane(payload: &[u8], seq: u16) -> Vec<u8> {
 
 // ---------------------------------------------------------------------------
 // glGetPolygonStipple (opcode 128)
+// Mesa reads reply.length * 4 bytes for this call (not reply.size).
 // ---------------------------------------------------------------------------
 
 pub(crate) fn handle_get_polygon_stipple(seq: u16) -> Vec<u8> {
@@ -835,14 +854,14 @@ pub(crate) fn handle_get_polygon_stipple(seq: u16) -> Vec<u8> {
     let mut reply = vec![0u8; 32 + 128];
     reply[0] = 1;
     reply[2..4].copy_from_slice(&seq.to_le_bytes());
-    reply[4..8].copy_from_slice(&(extra_words as u32).to_le_bytes());
-    reply[8..12].copy_from_slice(&128u32.to_le_bytes());
+    reply[4..8].copy_from_slice(&(extra_words as u32).to_le_bytes()); // reply_length = 32
+    // Mesa reads reply.length * 4 = 128 bytes for stipple data; reply.size unused here.
     reply[32..32 + 128].copy_from_slice(&mask);
     reply
 }
 
 // ---------------------------------------------------------------------------
-// glGenLists (opcode 104)
+// glGenLists (opcode 104) — scalar return in retval (bytes 8-11)
 // ---------------------------------------------------------------------------
 
 pub(crate) fn handle_gen_lists(payload: &[u8], seq: u16) -> Vec<u8> {
@@ -867,12 +886,12 @@ pub(crate) fn handle_gen_lists(payload: &[u8], seq: u16) -> Vec<u8> {
     let mut reply = [0u8; 32];
     reply[0] = 1;
     reply[2..4].copy_from_slice(&seq.to_le_bytes());
-    reply[8..12].copy_from_slice(&result.to_le_bytes());
+    reply[8..12].copy_from_slice(&result.to_le_bytes()); // retval
     reply.to_vec()
 }
 
 // ---------------------------------------------------------------------------
-// glIsList (opcode 141)
+// glIsList (opcode 141) — scalar boolean in retval
 // ---------------------------------------------------------------------------
 
 pub(crate) fn handle_is_list(payload: &[u8], seq: u16) -> Vec<u8> {
@@ -901,7 +920,7 @@ pub(crate) fn handle_is_list(payload: &[u8], seq: u16) -> Vec<u8> {
     let mut reply = [0u8; 32];
     reply[0] = 1;
     reply[2..4].copy_from_slice(&seq.to_le_bytes());
-    reply[8] = result;
+    reply[8] = result; // retval LSB
     reply.to_vec()
 }
 
