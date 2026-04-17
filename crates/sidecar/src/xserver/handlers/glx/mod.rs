@@ -15,6 +15,7 @@
 
 mod context;
 mod drawable;
+pub(crate) mod opcodes;
 mod query;
 mod render;
 mod single_ops;
