@@ -3,52 +3,53 @@
 ## Current Status
 
 - 120/120 core X11 opcodes implemented
-- 22 extensions (SHAPE, MIT-SHM, XFIXES, RANDR, SYNC, XInput2, XKB, XTEST, RENDER, Composite, DAMAGE, Present, GLX, XVideo, DBE, DPMS, ScreenSaver, Record, Xinerama, etc.)
+- 22 extensions implemented
 - GLX software rendering works via DRISW/llvmpipe (glxinfo shows OpenGL 4.5)
-- 70+ deep-conformance tests passing
+- GLX opcode dispatch table corrected to match Mesa's glxproto.h
+- GLX reply handlers refactored to use GlxSingleReply struct (no more magic offsets)
+- GLX opcode constants module generated from Mesa headers (no more magic numbers in dispatch)
+- 71 deep-conformance tests passing, 2 skipped (Firefox/GTK3 GL crash)
 
 ## Known Issues
 
-### Firefox/GTK3 GL apps segfault in DRISW
-Firefox and GTK3 apps that use OpenGL crash in Mesa's DRISW software renderer.
-glxinfo works (simple context creation + queries), but Firefox's GPU process
-crashes during more complex GL initialization. Likely cause: our GLX single
-opcode dispatch table doesn't match Mesa's glxproto.h spec (opcodes 111-150
-are mismatched), or we mishandle specific GLX render commands that Firefox's
-compositor sends during startup.
+### glxinfo XCB assertion (intermittent)
+Docker build caching makes it hard to verify GLX changes. After pruning build
+cache and rebuilding, glxinfo sometimes crashes with `xcb_xlib_extra_reply_data_left`.
+This may be a stale binary issue or a subtle reply padding bug in one of the GLX
+query handlers. The Python protocol test passes all GLX operations correctly.
+Need to isolate which specific reply leaves unconsumed data.
 
-### GLX single opcode table wrong
-The dispatch table in context.rs maps opcodes 111-127 to wrong handlers
-(e.g., opcode 112 dispatches GetFloatv instead of GetBooleanv). Since DRISW
-renders locally these aren't hit by glxinfo, but Firefox's multi-process
-architecture or pure indirect rendering would be affected.
+### Firefox/GTK3 GL apps segfault in DRISW
+Firefox headless works (produces screenshots). Non-headless Firefox and GTK3 GL
+apps crash in Mesa's DRISW software renderer before creating any windows. This is
+a Mesa/DRISW initialization crash, not a protocol error — all GLX protocol tests
+pass. Likely related to SHM buffer setup or DRI screen creation in the container.
+
+### GLX render opcode table needs audit
+The render dispatch tables (render_draw.rs, render_state.rs, etc.) have ~300
+magic numbers, some of which may be wrong (e.g., glEnable mapped to opcode 69
+instead of X_GLrop_Enable=139). Only affects pure indirect rendering (not DRISW).
 
 ## Remaining Work
 
-### Fix GLX for Firefox/GTK3 (highest priority)
-- [ ] Correct GLX single opcode dispatch table to match Mesa glxproto.h
-- [ ] Fix single_query.rs reply field positions (size at [12..16] per xGLXSingleReply spec)
-- [ ] Investigate Firefox GPU process crash — capture what X11/GLX messages it sends
-- [ ] Get Firefox ESR to create a window without segfault
-- [ ] Get gtk3-demo to run without segfault
-- [ ] Un-skip Firefox and GTK3 tests
+### Fix glxinfo XCB assertion
+- [ ] Add protocol-level tracing to identify which reply leaves extra data
+- [ ] Compare wire bytes from our server vs real Xorg for same operations
+- [ ] Verify QueryExtensionsString/QueryServerString padding consumption
 
-### Broader GLX Testing
-- [ ] E2e: glxgears renders frames without crash
-- [ ] E2e: mesa-utils GL queries succeed
-- [ ] Verify OSMesa indirect rendering path with glxinfo -i
+### Fix Firefox/GTK3 DRISW crash
+- [ ] Investigate Firefox GPU process crash with strace (install in container)
+- [ ] Check if SHM buffer operations work correctly during DRISW init
+- [ ] Test with different Mesa debug flags (MESA_DEBUG, LIBGL_DEBUG)
+- [ ] Un-skip Firefox and GTK3 tests once fixed
 
-### XTS Test Suite Hardening
-- [ ] Run full XTS Xproto suite, fix any failures
-- [ ] Run full XTS Xlib suite, fix any failures
+### Audit GLX render opcode table
+- [ ] Compare all ~300 render opcodes against Mesa's X_GLrop_* constants
+- [ ] Fix mismatched entries (currently only affects indirect rendering)
+- [ ] Replace magic numbers with named constants from opcodes.rs
 
-### Heavy Application Testing
-- [ ] E2e: Chromium/Chrome launch and basic navigation
-- [ ] E2e: Java AWT/Swing application
-- [ ] E2e: Multi-monitor simulation via RANDR
-
-### Protocol Edge Cases
-- [ ] Rapid reconnect stress test (100+ sequential connections)
-- [ ] Large property data round-trip (>256KB)
-- [ ] Concurrent clipboard operations
-- [ ] Deep window hierarchy (100+ nested)
+### Broader Testing
+- [ ] glxgears renders frames
+- [ ] Chromium/Chrome launch
+- [ ] XTS Xproto/Xlib full suite
+- [ ] Stress testing (rapid reconnects, deep window hierarchies)
