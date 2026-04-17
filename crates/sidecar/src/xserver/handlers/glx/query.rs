@@ -201,25 +201,29 @@ pub(crate) fn handle_get_fb_configs(_data: &[u8], seq: u16) -> Vec<u8> {
 // GLX_QUERY_EXTENSIONS_STRING (minor 18)
 // ---------------------------------------------------------------------------
 
-pub(crate) fn handle_query_extensions_string(_data: &[u8], seq: u16) -> Vec<u8> {
-    // Don't advertise GLX_ARB_create_context — it triggers Mesa code paths
-    // (glXCreateContextAttribsARB) that require a DRI stack we don't have.
-    // Without it, clients use glXCreateContext() which works via our handlers.
-    let ext_string = b"GLX_EXT_visual_info GLX_EXT_visual_rating GLX_MESA_copy_sub_buffer";
-    let n = ext_string.len() as u32;
+/// Build a GLX string reply (QueryExtensionsString or QueryServerString).
+/// Both use the same wire layout: n at [12..16], string data at [32..].
+/// Xorg includes the null terminator in the string data and count.
+fn build_glx_string_reply(seq: u16, string: &[u8]) -> Vec<u8> {
+    // Include null terminator — Mesa's __glXQueryServerString allocates
+    // exactly `n` bytes and does NOT null-terminate, so n must include '\0'.
+    let n = (string.len() + 1) as u32; // +1 for null terminator
     let padded = ((n as usize) + 3) & !3;
-
-    // GLX QueryExtensionsString reply layout:
-    //   [0]=Reply [2..4]=seq [4..8]=reply_length(padded/4)
-    //   [12..16]=string_length(n) [32..32+n]=string data
     let mut reply = vec![0u8; 32 + padded];
     reply[0] = 1;
     reply[2..4].copy_from_slice(&seq.to_le_bytes());
     reply[4..8].copy_from_slice(&((padded / 4) as u32).to_le_bytes());
     reply[12..16].copy_from_slice(&n.to_le_bytes());
-    reply[32..32 + n as usize].copy_from_slice(ext_string);
-
+    if !string.is_empty() {
+        reply[32..32 + string.len()].copy_from_slice(string);
+    }
+    // Null terminator at reply[32 + string.len()] is already 0 from vec![0u8; ...]
     reply
+}
+
+pub(crate) fn handle_query_extensions_string(_data: &[u8], seq: u16) -> Vec<u8> {
+    let ext_string = b"GLX_EXT_visual_info GLX_EXT_visual_rating GLX_MESA_copy_sub_buffer";
+    build_glx_string_reply(seq, ext_string)
 }
 
 // ---------------------------------------------------------------------------
@@ -240,20 +244,5 @@ pub(crate) fn handle_query_server_string(data: &[u8], seq: u16) -> Vec<u8> {
         _ => b"" as &[u8],
     };
 
-    let n = string.len() as u32;
-    let padded = ((n as usize) + 3) & !3;
-
-    // GLX QueryServerString reply layout:
-    //   [0]=Reply [2..4]=seq [4..8]=reply_length(padded/4)
-    //   [12..16]=string_length(n) [32..32+n]=string data
-    let mut reply = vec![0u8; 32 + padded];
-    reply[0] = 1;
-    reply[2..4].copy_from_slice(&seq.to_le_bytes());
-    reply[4..8].copy_from_slice(&((padded / 4) as u32).to_le_bytes());
-    reply[12..16].copy_from_slice(&n.to_le_bytes());
-    if !string.is_empty() {
-        reply[32..32 + n as usize].copy_from_slice(string);
-    }
-
-    reply
+    build_glx_string_reply(seq, string)
 }

@@ -669,6 +669,27 @@ echo EXIT_CODE=$?`,
 			"    num_attrs = struct.unpack_from('<I', rep, 12)[0]",
 			"    extra = recv_exact(s, rlen * 4)",
 			"    print('FBCFG rlen=' + str(rlen) + ' num_cfgs=' + str(num_cfgs) + ' num_attrs=' + str(num_attrs) + ' got=' + str(len(extra)) + 'B')",
+			"    # Decode FBConfig attributes",
+			"    NAMES = {0x8013:'FBCONFIG_ID', 0x800D:'VISUAL_ID', 0x8012:'X_RENDERABLE',",
+			"             0x8011:'RENDER_TYPE', 0x8010:'DRAWABLE_TYPE', 0x22:'X_VISUAL_TYPE',",
+			"             0x20:'CONFIG_CAVEAT', 0x8008:'RED_SIZE', 0x8009:'GREEN_SIZE',",
+			"             0x800A:'BLUE_SIZE', 0x800B:'ALPHA_SIZE', 0x8015:'BUFFER_SIZE',",
+			"             0x5:'DOUBLEBUFFER', 0x8012:'DEPTH_SIZE', 0x8:'STENCIL_SIZE',",
+			"             0x8014:'MAX_PBUFFER_WIDTH', 0x8016:'MAX_PBUFFER_HEIGHT',",
+			"             0x8017:'MAX_PBUFFER_PIXELS', 0x8006:'SAMPLES', 0x8005:'SAMPLE_BUFFERS'}",
+			"    for cfg_i in range(num_cfgs):",
+			"        off = cfg_i * num_attrs * 8",
+			"        attrs = {}",
+			"        for j in range(num_attrs):",
+			"            k = struct.unpack_from('<I', extra, off + j*8)[0]",
+			"            v = struct.unpack_from('<I', extra, off + j*8 + 4)[0]",
+			"            name = NAMES.get(k, hex(k))",
+			"            attrs[name] = v",
+			"        bufsz = attrs.get('BUFFER_SIZE', '?')",
+			"        alpha = attrs.get('ALPHA_SIZE', '?')",
+			"        vid = attrs.get('VISUAL_ID', '?')",
+			"        fbid = attrs.get('FBCONFIG_ID', '?')",
+			"        print(f'  CFG{cfg_i+1}: fbid={fbid} vid={hex(vid) if isinstance(vid,int) else vid} bufsz={bufsz} alpha={alpha}')",
 			"    s.close()",
 			"    print('PROTO_DONE')",
 			"except Exception as e:",
@@ -684,13 +705,71 @@ echo EXIT_CODE=$?`,
 			`printf '%s' '${scriptB64}' | base64 -d > /tmp/glx_test.py`,
 		]);
 
+		// Write ctypes GLX test script — tests each call individually
+		const ctypesScript = [
+			"import ctypes, ctypes.util, sys, os, signal",
+			"os.environ['LIBGL_ALWAYS_SOFTWARE'] = '1'",
+			"os.environ['LIBGL_DEBUG'] = 'verbose'",
+			"signal.signal(signal.SIGABRT, lambda *a: (print('ABORTED'), sys.exit(134)))",
+			"X11 = ctypes.CDLL(ctypes.util.find_library('X11'))",
+			"GL = ctypes.CDLL(ctypes.util.find_library('GL'))",
+			"X11.XOpenDisplay.restype = ctypes.c_void_p",
+			"dpy = X11.XOpenDisplay(b':99')",
+			"if not dpy: print('FAIL_DISPLAY'); sys.exit(1)",
+			"print('STEP1_XOpenDisplay=OK')",
+			"err = ctypes.c_int(); ev = ctypes.c_int()",
+			"ok = GL.glXQueryExtension(dpy, ctypes.byref(err), ctypes.byref(ev))",
+			"print(f'STEP2_QueryExtension ok={ok} err={err.value} ev={ev.value}')",
+			"maj = ctypes.c_int(); minor = ctypes.c_int()",
+			"GL.glXQueryVersion(dpy, ctypes.byref(maj), ctypes.byref(minor))",
+			"print(f'STEP3_QueryVersion={maj.value}.{minor.value}')",
+			"GL.glXQueryServerString.restype = ctypes.c_char_p",
+			"vendor = GL.glXQueryServerString(dpy, 0, 1)",
+			"print(f'STEP4_ServerVendor={vendor}')",
+			"version = GL.glXQueryServerString(dpy, 0, 2)",
+			"print(f'STEP5_ServerVersion={version}')",
+			"exts = GL.glXQueryServerString(dpy, 0, 3)",
+			"print(f'STEP6_ServerExtensions={exts}')",
+			"GL.glXQueryExtensionsString.restype = ctypes.c_char_p",
+			"cexts = GL.glXQueryExtensionsString(dpy, 0)",
+			"print(f'STEP7_ExtensionsString={cexts}')",
+			"n = ctypes.c_int()",
+			"GL.glXGetFBConfigs.restype = ctypes.POINTER(ctypes.c_void_p)",
+			"cfgs = GL.glXGetFBConfigs(dpy, 0, ctypes.byref(n))",
+			"print(f'STEP8_GetFBConfigs count={n.value}')",
+			"# Force GetVisualConfigs via glXGetVisualConfigs (internal Xlib _XReply path)",
+			"# This mirrors what DRISW does during initialization",
+			"GL.glXChooseFBConfig.restype = ctypes.POINTER(ctypes.c_void_p)",
+			"fb_attrs = (ctypes.c_int * 7)(0x8011, 1, 5, 1, 12, 24, 0)",
+			"fb_n = ctypes.c_int()",
+			"fb_cfgs = GL.glXChooseFBConfig(dpy, 0, fb_attrs, ctypes.byref(fb_n))",
+			"print(f'STEP9_ChooseFBConfig={\"OK\" if fb_cfgs else \"FAIL\"} count={fb_n.value}')",
+			"attrs = (ctypes.c_int * 15)(4, 1, 5, 1, 8, 8, 9, 8, 10, 8, 12, 24, 0)",
+			"GL.glXChooseVisual.restype = ctypes.c_void_p",
+			"vi = GL.glXChooseVisual(dpy, 0, attrs)",
+			"print(f'STEP10_ChooseVisual={\"OK\" if vi else \"FAIL\"}')",
+			"X11.XCloseDisplay(dpy)",
+			"print('ALL_DONE')",
+		].join("\n");
+		const ctypesB64 = Buffer.from(ctypesScript).toString("base64");
+		await sidecarContainer.exec([
+			"bash",
+			"-c",
+			`printf '%s' '${ctypesB64}' | base64 -d > /tmp/glx_ctypes.py`,
+		]);
+
 		const output = await execInSidecar(
 			sidecarContainer,
 			`ls /dev/dri 2>&1 || echo "no /dev/dri"
 echo "--- Python GLX protocol test ---"
 python3 /tmp/glx_test.py 2>&1
-echo "--- glxinfo -B ---"
-LIBGL_DEBUG=verbose timeout 15 glxinfo -B 2>&1 | head -20 || true
+echo "--- glmark2 on-screen test ---"
+LIBGL_DEBUG=verbose timeout 15 glmark2 -b build 2>&1 | head -30 || true
+echo "--- glxinfo ---"
+LIBGL_DEBUG=verbose timeout 10 glxinfo 2>&1 | head -40 || true
+echo "--- ctypes GLX test ---"
+python3 /tmp/glx_ctypes.py 2>&1 || true
+
 echo "--- Python GLX context test ---"
 python3 -c "
 import socket, struct, sys

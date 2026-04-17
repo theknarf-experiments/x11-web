@@ -12,6 +12,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libopus-dev \
     && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
+ARG CACHE_BUST=0
 COPY Cargo.toml Cargo.lock ./
 COPY crates/ crates/
 RUN cargo build --release --bin x11-web-sidecar
