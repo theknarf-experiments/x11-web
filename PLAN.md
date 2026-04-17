@@ -1,94 +1,54 @@
 # X11 Server Full Spec Compliance Plan
 
-## Current State (Phase 18 In Progress)
-- ~70K LOC Rust X11 server implementation
-- 685 unit tests passing
-- 121/127 core opcodes (120-126 historically unassigned per X11 spec)
-- 26 extensions fully implemented with modular registry
-- WebRTC transport + PulseAudio audio streaming complete
+## Current Status
 
-## Completed Phases
+- 120/120 core X11 opcodes implemented
+- 22 extensions (SHAPE, MIT-SHM, XFIXES, RANDR, SYNC, XInput2, XKB, XTEST, RENDER, Composite, DAMAGE, Present, GLX, XVideo, DBE, DPMS, ScreenSaver, Record, Xinerama, etc.)
+- GLX software rendering works via DRISW/llvmpipe (glxinfo shows OpenGL 4.5)
+- 70+ deep-conformance tests passing
 
-### Phase 9-12: Event Constants, XID Recycling, Setup Reply, App Compatibility ✓
+## Known Issues
 
-### Phase 13: Critical Protocol Fixes ✓
+### Firefox/GTK3 GL apps segfault in DRISW
+Firefox and GTK3 apps that use OpenGL crash in Mesa's DRISW software renderer.
+glxinfo works (simple context creation + queries), but Firefox's GPU process
+crashes during more complex GL initialization. Likely cause: our GLX single
+opcode dispatch table doesn't match Mesa's glxproto.h spec (opcodes 111-150
+are mismatched), or we mishandle specific GLX render commands that Firefox's
+compositor sends during startup.
 
-### Phase 14: Modular Extension Architecture ✓
+### GLX single opcode table wrong
+The dispatch table in context.rs maps opcodes 111-127 to wrong handlers
+(e.g., opcode 112 dispatches GetFloatv instead of GetBooleanv). Since DRISW
+renders locally these aren't hit by glxinfo, but Firefox's multi-process
+architecture or pure indirect rendering would be affected.
 
-### Phase 15: Performance & Robustness ✓
+## Remaining Work
 
-### Phase 16: Advanced Features ✓
+### Fix GLX for Firefox/GTK3 (highest priority)
+- [ ] Correct GLX single opcode dispatch table to match Mesa glxproto.h
+- [ ] Fix single_query.rs reply field positions (size at [12..16] per xGLXSingleReply spec)
+- [ ] Investigate Firefox GPU process crash — capture what X11/GLX messages it sends
+- [ ] Get Firefox ESR to create a window without segfault
+- [ ] Get gtk3-demo to run without segfault
+- [ ] Un-skip Firefox and GTK3 tests
 
-### Phase 17: WebRTC Transport & Audio ✓
-
-### Phase 18a: Fix GLX/glxinfo ✓
-- [x] Fix GetVisualConfigs visual class value (1=GrayScale → 4=TrueColor)
-- [x] Add `libgl1-mesa-dri` to Dockerfile.sidecar for swrast DRI driver
-- [x] Fix GLX QueryExtensionsString/QueryServerString reply layout
-
-### Phase 18b: GrabServer Protocol Fix ✓
-- [x] Fix GrabServer wait timing (moved after handshake, 5ms polling)
-
-### Phase 18e-1: Fix xterm font rendering ✓
-- [x] Fix PCF font bitmap row padding (glyph_pad was computed but ignored)
-- [x] Regenerated Linux snapshots with correct font rendering
-- [x] Unit test for PCF 4-byte padding repack (685 total unit tests)
-
-### Phase 18e-2: Fix COMPOSITE redirect ✓
-- [x] Forward redirected windows to frontend (we ARE the final display)
-- [x] Firefox/GTK apps using CompositeRedirectWindow now render correctly
-
-### Phase 18e-3: Container environment cleanup ✓
-- [x] Remove DRI3 extension (no GPU/DRM in Docker containers)
-
-### Phase 18f: Fix GLX reply format ✓
-- [x] Root cause: GLX GetString handler had `.max(1)` on reply_length, adding 4
-      spurious bytes for empty strings. Mesa's indirect GLX calls _XReply(extra=0)
-      leaving unconsumed data that crashes the next _XReply call.
-- [x] Fix: Remove `.max(1)` — empty strings correctly return reply_length=0
-- [x] Fix IsDirect reply field offset (is_direct at byte 1, not byte 8)
-- [x] glxinfo and glxgears now work without crash
-- [x] Remove app-specific env vars (MOZ_*, MOZ_USE_XINPUT2, MOZ_X11_EGL)
-- [ ] Firefox non-headless still segfaults in Mesa's indirect GLX path
-      (unhandled render opcode 32768 or FBConfig matching issue)
-
-## Remaining Phases
-
-### Phase 18g: Fix Firefox non-headless GLX segfault ✓
-- [x] Stop returning BAD_REQUEST for unknown GLX render opcodes — skip them silently
-      so that vendor/extension render commands don't crash clients
-- [x] Add privileged mode to test container so user-namespace sandboxing works
-- [x] Re-enable Firefox non-headless test
-- [x] Fix GLX reply wire layout bugs: QueryExtensionsString n at [8..12] (not [12..16]);
-      QueryServerString n at [12..16] with pad2 at [8..12]; single GL array handlers
-      size at [12..16] not retval at [8..12] — these left orphaned socket bytes causing
-      xcb_xlib_extra_reply_data_left assertion crashes in glxinfo and Firefox
-
-### Phase 18c: Broader GLX Testing
+### Broader GLX Testing
 - [ ] E2e: glxgears renders frames without crash
 - [ ] E2e: mesa-utils GL queries succeed
 - [ ] Verify OSMesa indirect rendering path with glxinfo -i
 
-### Phase 18d: Test & Commit
-- [ ] All existing e2e tests pass (0 failures)
-- [ ] 685+ unit tests passing
-- [ ] git commit
-
-### Phase 19: Deep XTS Conformance & App Stress Testing
-
-#### 19a: XTS Test Suite Hardening
+### XTS Test Suite Hardening
 - [ ] Run full XTS Xproto suite, fix any failures
 - [ ] Run full XTS Xlib suite, fix any failures
-- [ ] Add more XTS categories to e2e test matrix
 
-#### 19b: Heavy Application Testing
+### Heavy Application Testing
 - [ ] E2e: Chromium/Chrome launch and basic navigation
-- [ ] E2e: Inkscape SVG editing (if installable in container)
-- [ ] E2e: Java AWT/Swing application (xterm + java)
-- [ ] E2e: Multi-monitor simulation via XINERAMA/RANDR
+- [ ] E2e: Java AWT/Swing application
+- [ ] E2e: Multi-monitor simulation via RANDR
 
-#### 19c: Protocol Edge Cases
-- [ ] E2e: Rapid reconnect stress test (100+ sequential connections)
-- [ ] E2e: Large property data round-trip (>256KB)
-- [ ] E2e: Concurrent clipboard operations
-- [ ] E2e: Deep window hierarchy (100+ nested)
+### Protocol Edge Cases
+- [ ] Rapid reconnect stress test (100+ sequential connections)
+- [ ] Large property data round-trip (>256KB)
+- [ ] Concurrent clipboard operations
+- [ ] Deep window hierarchy (100+ nested)

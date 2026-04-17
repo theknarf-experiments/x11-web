@@ -293,44 +293,48 @@ pub(crate) fn handle_glx_single(state: &mut ClientState, data: &[u8], seq: u16) 
     }
 
     match gl_opcode {
-        // --- Query/info operations (delegated to single_query) ---
-        111 => single_query::handle_get_booleanv(payload, seq),
-        112 => single_query::handle_get_floatv(payload, seq),
-        113 => single_query::handle_get_doublev(payload, seq),
-        115 => single_query::handle_get_string(payload, seq),
-        116 => single_query::handle_get_error(seq),
-        117 => single_query::handle_get_integerv(payload, seq),
-        118 => single_query::handle_is_enabled(payload, seq),
-        119 => single_query::handle_is_texture(payload, seq),
-        123 => single_query::handle_get_materialfv(payload, seq),
-        124 => single_query::handle_get_materialiv(payload, seq),
-        125 => single_query::handle_gen_textures(payload, seq),
-        126 => single_query::handle_get_pixel_mapfv(payload, seq),
-        127 => single_query::handle_get_clip_plane(payload, seq),
-        128 => single_query::handle_get_polygon_stipple(seq),
-        130 => single_query::handle_get_tex_envfv(payload, seq),
-        131 => single_query::handle_get_tex_enviv(payload, seq),
-        132 => single_query::handle_get_tex_gendv(payload, seq),
-        133 => single_query::handle_get_tex_genfv(payload, seq),
-        134 => single_query::handle_get_tex_geniv(payload, seq),
-        135 => single_query::handle_get_tex_image(payload, seq),
-        136 => single_query::handle_get_tex_parameteriv(payload, seq),
-        137 => single_query::handle_get_tex_parameterfv(payload, seq),
-        138 => single_query::handle_get_tex_level_parameteriv(payload, seq),
-        139 => single_query::handle_get_tex_level_parameterfv(payload, seq),
-        141 => single_query::handle_is_list(payload, seq),
-        149 => single_query::handle_get_lightfv(payload, seq),
-        150 => single_query::handle_get_lightiv(payload, seq),
-        104 => single_query::handle_gen_lists(payload, seq),
-
+        // Opcodes match X_GLsop_* from Mesa's include/GL/glxproto.h exactly.
         // --- Single-shot GL operations (delegated to single_ops) ---
-        103 => single_ops::handle_delete_lists(payload, seq),
-        107 => single_ops::handle_render_mode(payload, seq),
-        108 => single_ops::handle_finish(seq),
-        109 => single_ops::handle_pixel_storef(payload, seq),
-        110 => single_ops::handle_pixel_storei(payload, seq),
-        143 => single_ops::handle_are_textures_resident(payload, seq),
-        144 => single_ops::handle_delete_textures(payload, seq),
+        103 => single_ops::handle_delete_lists(payload, seq),       // X_GLsop_DeleteLists
+        107 => single_ops::handle_render_mode(payload, seq),        // X_GLsop_RenderMode
+        108 => single_ops::handle_finish(seq),                      // X_GLsop_Finish
+        109 => single_ops::handle_pixel_storef(payload, seq),       // X_GLsop_PixelStoref
+        110 => single_ops::handle_pixel_storei(payload, seq),       // X_GLsop_PixelStorei
+        143 => single_ops::handle_are_textures_resident(payload, seq), // X_GLsop_AreTexturesResident
+        144 => single_ops::handle_delete_textures(payload, seq),    // X_GLsop_DeleteTextures
+
+        // --- Query/info operations (delegated to single_query) ---
+        104 => single_query::handle_gen_lists(payload, seq),        // X_GLsop_GenLists        = 104
+        // 111 = X_GLsop_ReadPixels (complex; return empty for now)
+        112 => single_query::handle_get_booleanv(payload, seq),     // X_GLsop_GetBooleanv     = 112
+        113 => single_query::handle_get_clip_plane(payload, seq),   // X_GLsop_GetClipPlane    = 113
+        114 => single_query::handle_get_doublev(payload, seq),      // X_GLsop_GetDoublev      = 114
+        115 => single_query::handle_get_error(seq),                 // X_GLsop_GetError        = 115
+        116 => single_query::handle_get_floatv(payload, seq),       // X_GLsop_GetFloatv       = 116
+        117 => single_query::handle_get_integerv(payload, seq),     // X_GLsop_GetIntegerv     = 117
+        118 => single_query::handle_get_lightfv(payload, seq),      // X_GLsop_GetLightfv      = 118
+        119 => single_query::handle_get_lightiv(payload, seq),      // X_GLsop_GetLightiv      = 119
+        // 120-122: GetMapdv/fv/iv — return empty
+        123 => single_query::handle_get_materialfv(payload, seq),   // X_GLsop_GetMaterialfv   = 123
+        124 => single_query::handle_get_materialiv(payload, seq),   // X_GLsop_GetMaterialiv   = 124
+        125 => single_query::handle_get_pixel_mapfv(payload, seq),  // X_GLsop_GetPixelMapfv   = 125
+        // 126-127: GetPixelMapuiv/usv — return empty
+        128 => single_query::handle_get_polygon_stipple(seq),       // X_GLsop_GetPolygonStipple = 128
+        129 => single_query::handle_get_string(payload, seq),       // X_GLsop_GetString       = 129
+        130 => single_query::handle_get_tex_envfv(payload, seq),    // X_GLsop_GetTexEnvfv     = 130
+        131 => single_query::handle_get_tex_enviv(payload, seq),    // X_GLsop_GetTexEnviv     = 131
+        132 => single_query::handle_get_tex_gendv(payload, seq),    // X_GLsop_GetTexGendv     = 132
+        133 => single_query::handle_get_tex_genfv(payload, seq),    // X_GLsop_GetTexGenfv     = 133
+        134 => single_query::handle_get_tex_geniv(payload, seq),    // X_GLsop_GetTexGeniv     = 134
+        135 => single_query::handle_get_tex_image(payload, seq),    // X_GLsop_GetTexImage     = 135
+        136 => single_query::handle_get_tex_parameterfv(payload, seq), // X_GLsop_GetTexParameterfv = 136
+        137 => single_query::handle_get_tex_parameteriv(payload, seq), // X_GLsop_GetTexParameteriv = 137
+        138 => single_query::handle_get_tex_level_parameterfv(payload, seq), // X_GLsop_GetTexLevelParameterfv = 138
+        139 => single_query::handle_get_tex_level_parameteriv(payload, seq), // X_GLsop_GetTexLevelParameteriv = 139
+        140 => single_query::handle_is_enabled(payload, seq),       // X_GLsop_IsEnabled       = 140
+        141 => single_query::handle_is_list(payload, seq),          // X_GLsop_IsList          = 141
+        145 => single_query::handle_gen_textures(payload, seq),     // X_GLsop_GenTextures     = 145
+        146 => single_query::handle_is_texture(payload, seq),       // X_GLsop_IsTexture       = 146
 
         _ => {
             debug!("Unhandled GLX single opcode: {gl_opcode}");

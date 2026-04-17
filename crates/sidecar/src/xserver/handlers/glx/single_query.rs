@@ -1,46 +1,61 @@
 //! GLX single GL query/info operations (glGet*, glIs*, glGenTextures, glGenLists, etc.).
-//!
-//! ## Reply layout note
-//!
-//! The `xGLXSingleReply` struct has these wire fields:
-//!   bytes 0-3:   type(1) + pad + sequence(2)
-//!   bytes 4-7:   reply_length  (extra 4-byte words beyond the 32-byte header)
-//!   bytes 8-11:  retval        (single scalar return value — GetError, IsList, etc.)
-//!   bytes 12-15: size          (element/byte count for array/string returns)
-//!   bytes 16-31: unused padding
-//!   bytes 32+:   variable-length data
-//!
-//! For scalar returns (GetError, IsEnabled, GenLists …) the value goes in `retval` (8-11).
-//! For array/string returns (GetIntegerv, GetString …) the count goes in `size` (12-15)
-//! and `retval` must be left as 0 — Mesa reads `reply.size`, not `reply.retval`, for
-//! variable-length replies.  Getting this wrong leaves orphaned bytes in the socket that
-//! corrupt every subsequent read.
 
 #[cfg(feature = "osmesa")]
 use crate::osmesa;
 
 use super::context::glx_single_empty_reply;
 
+/// xGLXSingleReply — the 32-byte header used by all GLX single-command replies.
+///
+/// Scalar queries (GetError, IsEnabled, …) put the value in `retval`.
+/// Array/string queries (GetIntegerv, GetString, …) put the count in `size`
+/// and append variable-length data after the header.
+struct GlxSingleReply {
+    reply_type: u8,      // 0: always 1 (X_Reply)
+    _pad1: u8,           // 1
+    sequence: u16,       // 2..4
+    length: u32,         // 4..8  extra 4-byte words beyond header
+    retval: u32,         // 8..12  scalar return value
+    size: u32,           // 12..16 element/byte count for variable data
+    _pad3: [u32; 4],     // 16..32
+}
+
+impl GlxSingleReply {
+    fn new_scalar(seq: u16, retval: u32) -> Vec<u8> {
+        let mut buf = [0u8; 32];
+        buf[0] = 1;
+        buf[2..4].copy_from_slice(&seq.to_le_bytes());
+        buf[8..12].copy_from_slice(&retval.to_le_bytes());
+        buf.to_vec()
+    }
+
+    fn new_array(seq: u16, element_count: u32, data: &[u8]) -> Vec<u8> {
+        let padded = (data.len() + 3) & !3;
+        let extra_words = padded / 4;
+        let mut buf = vec![0u8; 32 + padded];
+        buf[0] = 1;
+        buf[2..4].copy_from_slice(&seq.to_le_bytes());
+        buf[4..8].copy_from_slice(&(extra_words as u32).to_le_bytes());
+        buf[12..16].copy_from_slice(&element_count.to_le_bytes());
+        if !data.is_empty() {
+            buf[32..32 + data.len()].copy_from_slice(data);
+        }
+        buf
+    }
+}
+
 // ---------------------------------------------------------------------------
-// glGetError (opcode 116) — scalar return in retval (bytes 8-11)
+// glGetError (opcode 115)
 // ---------------------------------------------------------------------------
 
 pub(crate) fn handle_get_error(seq: u16) -> Vec<u8> {
-    #[cfg(feature = "osmesa")]
-    {
-        if osmesa::is_available() {
-            let err = osmesa::gl_get_error();
-            let mut reply = [0u8; 32];
-            reply[0] = 1;
-            reply[2..4].copy_from_slice(&seq.to_le_bytes());
-            reply[8..12].copy_from_slice(&err.to_le_bytes()); // retval
-            return reply.to_vec();
-        }
-    }
-    let mut reply = [0u8; 32];
-    reply[0] = 1;
-    reply[2..4].copy_from_slice(&seq.to_le_bytes());
-    reply.to_vec()
+    let err = {
+        #[cfg(feature = "osmesa")]
+        { if osmesa::is_available() { osmesa::gl_get_error() } else { 0 } }
+        #[cfg(not(feature = "osmesa"))]
+        { 0u32 }
+    };
+    GlxSingleReply::new_scalar(seq, err)
 }
 
 // ---------------------------------------------------------------------------
@@ -60,22 +75,12 @@ pub(crate) fn handle_get_integerv(payload: &[u8], seq: u16) -> Vec<u8> {
             osmesa::gl_get_integerv(pname, &mut params);
         }
     }
-    let data_bytes = n * 4;
-    let extra_words = data_bytes.div_ceil(4);
-    let mut reply = vec![0u8; 32 + extra_words * 4];
-    reply[0] = 1;
-    reply[2..4].copy_from_slice(&seq.to_le_bytes());
-    reply[4..8].copy_from_slice(&(extra_words as u32).to_le_bytes()); // reply_length
-    reply[12..16].copy_from_slice(&(n as u32).to_le_bytes());         // size (element count)
-    for (i, &v) in params.iter().enumerate() {
-        let off = 32 + i * 4;
-        reply[off..off + 4].copy_from_slice(&v.to_le_bytes());
-    }
-    reply
+    let data: Vec<u8> = params.iter().flat_map(|v| v.to_le_bytes()).collect();
+    GlxSingleReply::new_array(seq, n as u32, &data)
 }
 
 // ---------------------------------------------------------------------------
-// glGetFloatv (opcode 112)
+// glGetFloatv (opcode 116)
 // ---------------------------------------------------------------------------
 
 pub(crate) fn handle_get_floatv(payload: &[u8], seq: u16) -> Vec<u8> {
@@ -91,22 +96,12 @@ pub(crate) fn handle_get_floatv(payload: &[u8], seq: u16) -> Vec<u8> {
             osmesa::gl_get_floatv(pname, &mut params);
         }
     }
-    let data_bytes = n * 4;
-    let extra_words = data_bytes.div_ceil(4);
-    let mut reply = vec![0u8; 32 + extra_words * 4];
-    reply[0] = 1;
-    reply[2..4].copy_from_slice(&seq.to_le_bytes());
-    reply[4..8].copy_from_slice(&(extra_words as u32).to_le_bytes()); // reply_length
-    reply[12..16].copy_from_slice(&(n as u32).to_le_bytes());         // size
-    for (i, &v) in params.iter().enumerate() {
-        let off = 32 + i * 4;
-        reply[off..off + 4].copy_from_slice(&v.to_le_bytes());
-    }
-    reply
+    let data: Vec<u8> = params.iter().flat_map(|v| v.to_le_bytes()).collect();
+    GlxSingleReply::new_array(seq, n as u32, &data)
 }
 
 // ---------------------------------------------------------------------------
-// glGetDoublev (opcode 113)
+// glGetDoublev (opcode 114)
 // ---------------------------------------------------------------------------
 
 pub(crate) fn handle_get_doublev(payload: &[u8], seq: u16) -> Vec<u8> {
@@ -122,22 +117,12 @@ pub(crate) fn handle_get_doublev(payload: &[u8], seq: u16) -> Vec<u8> {
             osmesa::gl_get_doublev(pname, &mut params);
         }
     }
-    let data_bytes = n * 8;
-    let extra_words = data_bytes.div_ceil(4);
-    let mut reply = vec![0u8; 32 + extra_words * 4];
-    reply[0] = 1;
-    reply[2..4].copy_from_slice(&seq.to_le_bytes());
-    reply[4..8].copy_from_slice(&(extra_words as u32).to_le_bytes()); // reply_length
-    reply[12..16].copy_from_slice(&(n as u32).to_le_bytes());         // size
-    for (i, &v) in params.iter().enumerate() {
-        let off = 32 + i * 8;
-        reply[off..off + 8].copy_from_slice(&v.to_le_bytes());
-    }
-    reply
+    let data: Vec<u8> = params.iter().flat_map(|v| v.to_le_bytes()).collect();
+    GlxSingleReply::new_array(seq, n as u32, &data)
 }
 
 // ---------------------------------------------------------------------------
-// glGetBooleanv (opcode 111)
+// glGetBooleanv (opcode 112)
 // ---------------------------------------------------------------------------
 
 pub(crate) fn handle_get_booleanv(payload: &[u8], seq: u16) -> Vec<u8> {
@@ -153,18 +138,11 @@ pub(crate) fn handle_get_booleanv(payload: &[u8], seq: u16) -> Vec<u8> {
             osmesa::gl_get_booleanv(pname, &mut params);
         }
     }
-    let extra_words = n.div_ceil(4);
-    let mut reply = vec![0u8; 32 + extra_words * 4];
-    reply[0] = 1;
-    reply[2..4].copy_from_slice(&seq.to_le_bytes());
-    reply[4..8].copy_from_slice(&(extra_words as u32).to_le_bytes()); // reply_length
-    reply[12..16].copy_from_slice(&(n as u32).to_le_bytes());         // size
-    reply[32..32 + n].copy_from_slice(&params);
-    reply
+    GlxSingleReply::new_array(seq, n as u32, &params)
 }
 
 // ---------------------------------------------------------------------------
-// glGetString (opcode 115)
+// glGetString (opcode 129)
 // ---------------------------------------------------------------------------
 
 pub(crate) fn handle_get_string(payload: &[u8], seq: u16) -> Vec<u8> {
@@ -188,21 +166,11 @@ pub(crate) fn handle_get_string(payload: &[u8], seq: u16) -> Vec<u8> {
     };
     let bytes = s.as_bytes();
     let n = bytes.len() as u32;
-    let padded = (bytes.len() + 3) & !3;
-    let extra_words = padded / 4;
-    let mut reply = vec![0u8; 32 + padded];
-    reply[0] = 1;
-    reply[2..4].copy_from_slice(&seq.to_le_bytes());
-    reply[4..8].copy_from_slice(&(extra_words as u32).to_le_bytes()); // reply_length
-    reply[12..16].copy_from_slice(&n.to_le_bytes());                  // size (byte count)
-    if !bytes.is_empty() {
-        reply[32..32 + bytes.len()].copy_from_slice(bytes);
-    }
-    reply
+    GlxSingleReply::new_array(seq, n, bytes)
 }
 
 // ---------------------------------------------------------------------------
-// glIsEnabled (opcode 118) — scalar boolean in retval (bytes 8-11)
+// glIsEnabled (opcode 140)
 // ---------------------------------------------------------------------------
 
 pub(crate) fn handle_is_enabled(payload: &[u8], seq: u16) -> Vec<u8> {
@@ -210,7 +178,7 @@ pub(crate) fn handle_is_enabled(payload: &[u8], seq: u16) -> Vec<u8> {
         return glx_single_empty_reply(seq);
     }
     let cap = u32::from_le_bytes([payload[0], payload[1], payload[2], payload[3]]);
-    let enabled: u8 = {
+    let enabled: u32 = {
         #[cfg(feature = "osmesa")]
         {
             if osmesa::is_available() {
@@ -228,15 +196,11 @@ pub(crate) fn handle_is_enabled(payload: &[u8], seq: u16) -> Vec<u8> {
             0
         }
     };
-    let mut reply = [0u8; 32];
-    reply[0] = 1;
-    reply[2..4].copy_from_slice(&seq.to_le_bytes());
-    reply[8] = enabled; // retval LSB
-    reply.to_vec()
+    GlxSingleReply::new_scalar(seq, enabled)
 }
 
 // ---------------------------------------------------------------------------
-// glIsTexture (opcode 119) — scalar boolean in retval
+// glIsTexture (opcode 146)
 // ---------------------------------------------------------------------------
 
 pub(crate) fn handle_is_texture(payload: &[u8], seq: u16) -> Vec<u8> {
@@ -244,7 +208,7 @@ pub(crate) fn handle_is_texture(payload: &[u8], seq: u16) -> Vec<u8> {
         return glx_single_empty_reply(seq);
     }
     let texture = u32::from_le_bytes([payload[0], payload[1], payload[2], payload[3]]);
-    let result: u8 = {
+    let result: u32 = {
         #[cfg(feature = "osmesa")]
         {
             if osmesa::is_available() {
@@ -262,15 +226,11 @@ pub(crate) fn handle_is_texture(payload: &[u8], seq: u16) -> Vec<u8> {
             0
         }
     };
-    let mut reply = [0u8; 32];
-    reply[0] = 1;
-    reply[2..4].copy_from_slice(&seq.to_le_bytes());
-    reply[8] = result; // retval LSB
-    reply.to_vec()
+    GlxSingleReply::new_scalar(seq, result)
 }
 
 // ---------------------------------------------------------------------------
-// glGenTextures (opcode 125)
+// glGenTextures (opcode 145)
 // ---------------------------------------------------------------------------
 
 pub(crate) fn handle_gen_textures(payload: &[u8], seq: u16) -> Vec<u8> {
@@ -286,21 +246,12 @@ pub(crate) fn handle_gen_textures(payload: &[u8], seq: u16) -> Vec<u8> {
             osmesa::gl_gen_textures(n as i32, &mut textures);
         }
     }
-    let extra_words = n;
-    let mut reply = vec![0u8; 32 + extra_words * 4];
-    reply[0] = 1;
-    reply[2..4].copy_from_slice(&seq.to_le_bytes());
-    reply[4..8].copy_from_slice(&(extra_words as u32).to_le_bytes()); // reply_length
-    reply[12..16].copy_from_slice(&(n as u32).to_le_bytes());         // size
-    for (i, &t) in textures.iter().enumerate() {
-        let off = 32 + i * 4;
-        reply[off..off + 4].copy_from_slice(&t.to_le_bytes());
-    }
-    reply
+    let data: Vec<u8> = textures.iter().flat_map(|v| v.to_le_bytes()).collect();
+    GlxSingleReply::new_array(seq, n as u32, &data)
 }
 
 // ---------------------------------------------------------------------------
-// glGetTexParameteriv (opcode 136)
+// glGetTexParameteriv (opcode 137)
 // ---------------------------------------------------------------------------
 
 pub(crate) fn handle_get_tex_parameteriv(payload: &[u8], seq: u16) -> Vec<u8> {
@@ -317,21 +268,12 @@ pub(crate) fn handle_get_tex_parameteriv(payload: &[u8], seq: u16) -> Vec<u8> {
             osmesa::gl_get_tex_parameteriv(target, pname, &mut params);
         }
     }
-    let extra_words = n;
-    let mut reply = vec![0u8; 32 + n * 4];
-    reply[0] = 1;
-    reply[2..4].copy_from_slice(&seq.to_le_bytes());
-    reply[4..8].copy_from_slice(&(extra_words as u32).to_le_bytes()); // reply_length
-    reply[12..16].copy_from_slice(&(n as u32).to_le_bytes());         // size
-    for (i, &v) in params.iter().enumerate() {
-        let off = 32 + i * 4;
-        reply[off..off + 4].copy_from_slice(&v.to_le_bytes());
-    }
-    reply
+    let data: Vec<u8> = params.iter().flat_map(|v| v.to_le_bytes()).collect();
+    GlxSingleReply::new_array(seq, n as u32, &data)
 }
 
 // ---------------------------------------------------------------------------
-// glGetTexParameterfv (opcode 137)
+// glGetTexParameterfv (opcode 136)
 // ---------------------------------------------------------------------------
 
 pub(crate) fn handle_get_tex_parameterfv(payload: &[u8], seq: u16) -> Vec<u8> {
@@ -348,21 +290,12 @@ pub(crate) fn handle_get_tex_parameterfv(payload: &[u8], seq: u16) -> Vec<u8> {
             osmesa::gl_get_tex_parameterfv(target, pname, &mut params);
         }
     }
-    let extra_words = n;
-    let mut reply = vec![0u8; 32 + n * 4];
-    reply[0] = 1;
-    reply[2..4].copy_from_slice(&seq.to_le_bytes());
-    reply[4..8].copy_from_slice(&(extra_words as u32).to_le_bytes()); // reply_length
-    reply[12..16].copy_from_slice(&(n as u32).to_le_bytes());         // size
-    for (i, &v) in params.iter().enumerate() {
-        let off = 32 + i * 4;
-        reply[off..off + 4].copy_from_slice(&v.to_le_bytes());
-    }
-    reply
+    let data: Vec<u8> = params.iter().flat_map(|v| v.to_le_bytes()).collect();
+    GlxSingleReply::new_array(seq, n as u32, &data)
 }
 
 // ---------------------------------------------------------------------------
-// glGetTexLevelParameteriv (opcode 138)
+// glGetTexLevelParameteriv (opcode 139)
 // ---------------------------------------------------------------------------
 
 pub(crate) fn handle_get_tex_level_parameteriv(payload: &[u8], seq: u16) -> Vec<u8> {
@@ -380,21 +313,12 @@ pub(crate) fn handle_get_tex_level_parameteriv(payload: &[u8], seq: u16) -> Vec<
             osmesa::gl_get_tex_level_parameteriv(target, level, pname, &mut params);
         }
     }
-    let extra_words = n;
-    let mut reply = vec![0u8; 32 + extra_words * 4];
-    reply[0] = 1;
-    reply[2..4].copy_from_slice(&seq.to_le_bytes());
-    reply[4..8].copy_from_slice(&(extra_words as u32).to_le_bytes()); // reply_length
-    reply[12..16].copy_from_slice(&(n as u32).to_le_bytes());         // size
-    for (i, &v) in params.iter().enumerate() {
-        let off = 32 + i * 4;
-        reply[off..off + 4].copy_from_slice(&v.to_le_bytes());
-    }
-    reply
+    let data: Vec<u8> = params.iter().flat_map(|v| v.to_le_bytes()).collect();
+    GlxSingleReply::new_array(seq, n as u32, &data)
 }
 
 // ---------------------------------------------------------------------------
-// glGetTexLevelParameterfv (opcode 139)
+// glGetTexLevelParameterfv (opcode 138)
 // ---------------------------------------------------------------------------
 
 pub(crate) fn handle_get_tex_level_parameterfv(payload: &[u8], seq: u16) -> Vec<u8> {
@@ -412,17 +336,8 @@ pub(crate) fn handle_get_tex_level_parameterfv(payload: &[u8], seq: u16) -> Vec<
             osmesa::gl_get_tex_level_parameterfv(target, level, pname, &mut params);
         }
     }
-    let extra_words = n;
-    let mut reply = vec![0u8; 32 + extra_words * 4];
-    reply[0] = 1;
-    reply[2..4].copy_from_slice(&seq.to_le_bytes());
-    reply[4..8].copy_from_slice(&(extra_words as u32).to_le_bytes()); // reply_length
-    reply[12..16].copy_from_slice(&(n as u32).to_le_bytes());         // size
-    for (i, &v) in params.iter().enumerate() {
-        let off = 32 + i * 4;
-        reply[off..off + 4].copy_from_slice(&v.to_le_bytes());
-    }
-    reply
+    let data: Vec<u8> = params.iter().flat_map(|v| v.to_le_bytes()).collect();
+    GlxSingleReply::new_array(seq, n as u32, &data)
 }
 
 // ---------------------------------------------------------------------------
@@ -469,18 +384,11 @@ pub(crate) fn handle_get_tex_image(payload: &[u8], seq: u16) -> Vec<u8> {
             osmesa::gl_get_tex_image(target, level, format, type_, &mut pixels);
         }
     }
-    let extra_words = image_size.div_ceil(4);
-    let mut reply = vec![0u8; 32 + extra_words * 4];
-    reply[0] = 1;
-    reply[2..4].copy_from_slice(&seq.to_le_bytes());
-    reply[4..8].copy_from_slice(&(extra_words as u32).to_le_bytes()); // reply_length
-    reply[12..16].copy_from_slice(&(image_size as u32).to_le_bytes()); // size (byte count)
-    reply[32..32 + image_size].copy_from_slice(&pixels);
-    reply
+    GlxSingleReply::new_array(seq, image_size as u32, &pixels)
 }
 
 // ---------------------------------------------------------------------------
-// glGetLightfv (opcode 149)
+// glGetLightfv (opcode 118)
 // ---------------------------------------------------------------------------
 
 pub(crate) fn handle_get_lightfv(payload: &[u8], seq: u16) -> Vec<u8> {
@@ -497,21 +405,12 @@ pub(crate) fn handle_get_lightfv(payload: &[u8], seq: u16) -> Vec<u8> {
             osmesa::gl_get_lightfv(light, pname, &mut params);
         }
     }
-    let extra_words = n;
-    let mut reply = vec![0u8; 32 + extra_words * 4];
-    reply[0] = 1;
-    reply[2..4].copy_from_slice(&seq.to_le_bytes());
-    reply[4..8].copy_from_slice(&(extra_words as u32).to_le_bytes()); // reply_length
-    reply[12..16].copy_from_slice(&(n as u32).to_le_bytes());         // size
-    for (i, &v) in params.iter().enumerate() {
-        let off = 32 + i * 4;
-        reply[off..off + 4].copy_from_slice(&v.to_le_bytes());
-    }
-    reply
+    let data: Vec<u8> = params.iter().flat_map(|v| v.to_le_bytes()).collect();
+    GlxSingleReply::new_array(seq, n as u32, &data)
 }
 
 // ---------------------------------------------------------------------------
-// glGetLightiv (opcode 150)
+// glGetLightiv (opcode 119)
 // ---------------------------------------------------------------------------
 
 pub(crate) fn handle_get_lightiv(payload: &[u8], seq: u16) -> Vec<u8> {
@@ -528,17 +427,8 @@ pub(crate) fn handle_get_lightiv(payload: &[u8], seq: u16) -> Vec<u8> {
             osmesa::gl_get_lightiv(light, pname, &mut params);
         }
     }
-    let extra_words = n;
-    let mut reply = vec![0u8; 32 + extra_words * 4];
-    reply[0] = 1;
-    reply[2..4].copy_from_slice(&seq.to_le_bytes());
-    reply[4..8].copy_from_slice(&(extra_words as u32).to_le_bytes()); // reply_length
-    reply[12..16].copy_from_slice(&(n as u32).to_le_bytes());         // size
-    for (i, &v) in params.iter().enumerate() {
-        let off = 32 + i * 4;
-        reply[off..off + 4].copy_from_slice(&v.to_le_bytes());
-    }
-    reply
+    let data: Vec<u8> = params.iter().flat_map(|v| v.to_le_bytes()).collect();
+    GlxSingleReply::new_array(seq, n as u32, &data)
 }
 
 // ---------------------------------------------------------------------------
@@ -559,17 +449,8 @@ pub(crate) fn handle_get_materialfv(payload: &[u8], seq: u16) -> Vec<u8> {
             osmesa::gl_get_materialfv(face, pname, &mut params);
         }
     }
-    let extra_words = n;
-    let mut reply = vec![0u8; 32 + extra_words * 4];
-    reply[0] = 1;
-    reply[2..4].copy_from_slice(&seq.to_le_bytes());
-    reply[4..8].copy_from_slice(&(extra_words as u32).to_le_bytes()); // reply_length
-    reply[12..16].copy_from_slice(&(n as u32).to_le_bytes());         // size
-    for (i, &v) in params.iter().enumerate() {
-        let off = 32 + i * 4;
-        reply[off..off + 4].copy_from_slice(&v.to_le_bytes());
-    }
-    reply
+    let data: Vec<u8> = params.iter().flat_map(|v| v.to_le_bytes()).collect();
+    GlxSingleReply::new_array(seq, n as u32, &data)
 }
 
 // ---------------------------------------------------------------------------
@@ -590,17 +471,8 @@ pub(crate) fn handle_get_materialiv(payload: &[u8], seq: u16) -> Vec<u8> {
             osmesa::gl_get_materialiv(face, pname, &mut params);
         }
     }
-    let extra_words = n;
-    let mut reply = vec![0u8; 32 + extra_words * 4];
-    reply[0] = 1;
-    reply[2..4].copy_from_slice(&seq.to_le_bytes());
-    reply[4..8].copy_from_slice(&(extra_words as u32).to_le_bytes()); // reply_length
-    reply[12..16].copy_from_slice(&(n as u32).to_le_bytes());         // size
-    for (i, &v) in params.iter().enumerate() {
-        let off = 32 + i * 4;
-        reply[off..off + 4].copy_from_slice(&v.to_le_bytes());
-    }
-    reply
+    let data: Vec<u8> = params.iter().flat_map(|v| v.to_le_bytes()).collect();
+    GlxSingleReply::new_array(seq, n as u32, &data)
 }
 
 // ---------------------------------------------------------------------------
@@ -621,17 +493,8 @@ pub(crate) fn handle_get_tex_envfv(payload: &[u8], seq: u16) -> Vec<u8> {
             osmesa::gl_get_tex_envfv(target, pname, &mut params);
         }
     }
-    let extra_words = n;
-    let mut reply = vec![0u8; 32 + extra_words * 4];
-    reply[0] = 1;
-    reply[2..4].copy_from_slice(&seq.to_le_bytes());
-    reply[4..8].copy_from_slice(&(extra_words as u32).to_le_bytes()); // reply_length
-    reply[12..16].copy_from_slice(&(n as u32).to_le_bytes());         // size
-    for (i, &v) in params.iter().enumerate() {
-        let off = 32 + i * 4;
-        reply[off..off + 4].copy_from_slice(&v.to_le_bytes());
-    }
-    reply
+    let data: Vec<u8> = params.iter().flat_map(|v| v.to_le_bytes()).collect();
+    GlxSingleReply::new_array(seq, n as u32, &data)
 }
 
 // ---------------------------------------------------------------------------
@@ -652,17 +515,8 @@ pub(crate) fn handle_get_tex_enviv(payload: &[u8], seq: u16) -> Vec<u8> {
             osmesa::gl_get_tex_enviv(target, pname, &mut params);
         }
     }
-    let extra_words = n;
-    let mut reply = vec![0u8; 32 + extra_words * 4];
-    reply[0] = 1;
-    reply[2..4].copy_from_slice(&seq.to_le_bytes());
-    reply[4..8].copy_from_slice(&(extra_words as u32).to_le_bytes()); // reply_length
-    reply[12..16].copy_from_slice(&(n as u32).to_le_bytes());         // size
-    for (i, &v) in params.iter().enumerate() {
-        let off = 32 + i * 4;
-        reply[off..off + 4].copy_from_slice(&v.to_le_bytes());
-    }
-    reply
+    let data: Vec<u8> = params.iter().flat_map(|v| v.to_le_bytes()).collect();
+    GlxSingleReply::new_array(seq, n as u32, &data)
 }
 
 // ---------------------------------------------------------------------------
@@ -683,18 +537,8 @@ pub(crate) fn handle_get_tex_gendv(payload: &[u8], seq: u16) -> Vec<u8> {
             osmesa::gl_get_tex_gendv(coord, pname, &mut params);
         }
     }
-    let data_bytes = n * 8;
-    let extra_words = data_bytes.div_ceil(4);
-    let mut reply = vec![0u8; 32 + extra_words * 4];
-    reply[0] = 1;
-    reply[2..4].copy_from_slice(&seq.to_le_bytes());
-    reply[4..8].copy_from_slice(&(extra_words as u32).to_le_bytes()); // reply_length
-    reply[12..16].copy_from_slice(&(n as u32).to_le_bytes());         // size
-    for (i, &v) in params.iter().enumerate() {
-        let off = 32 + i * 8;
-        reply[off..off + 8].copy_from_slice(&v.to_le_bytes());
-    }
-    reply
+    let data: Vec<u8> = params.iter().flat_map(|v| v.to_le_bytes()).collect();
+    GlxSingleReply::new_array(seq, n as u32, &data)
 }
 
 // ---------------------------------------------------------------------------
@@ -715,17 +559,8 @@ pub(crate) fn handle_get_tex_genfv(payload: &[u8], seq: u16) -> Vec<u8> {
             osmesa::gl_get_tex_genfv(coord, pname, &mut params);
         }
     }
-    let extra_words = n;
-    let mut reply = vec![0u8; 32 + extra_words * 4];
-    reply[0] = 1;
-    reply[2..4].copy_from_slice(&seq.to_le_bytes());
-    reply[4..8].copy_from_slice(&(extra_words as u32).to_le_bytes()); // reply_length
-    reply[12..16].copy_from_slice(&(n as u32).to_le_bytes());         // size
-    for (i, &v) in params.iter().enumerate() {
-        let off = 32 + i * 4;
-        reply[off..off + 4].copy_from_slice(&v.to_le_bytes());
-    }
-    reply
+    let data: Vec<u8> = params.iter().flat_map(|v| v.to_le_bytes()).collect();
+    GlxSingleReply::new_array(seq, n as u32, &data)
 }
 
 // ---------------------------------------------------------------------------
@@ -746,21 +581,12 @@ pub(crate) fn handle_get_tex_geniv(payload: &[u8], seq: u16) -> Vec<u8> {
             osmesa::gl_get_tex_geniv(coord, pname, &mut params);
         }
     }
-    let extra_words = n;
-    let mut reply = vec![0u8; 32 + extra_words * 4];
-    reply[0] = 1;
-    reply[2..4].copy_from_slice(&seq.to_le_bytes());
-    reply[4..8].copy_from_slice(&(extra_words as u32).to_le_bytes()); // reply_length
-    reply[12..16].copy_from_slice(&(n as u32).to_le_bytes());         // size
-    for (i, &v) in params.iter().enumerate() {
-        let off = 32 + i * 4;
-        reply[off..off + 4].copy_from_slice(&v.to_le_bytes());
-    }
-    reply
+    let data: Vec<u8> = params.iter().flat_map(|v| v.to_le_bytes()).collect();
+    GlxSingleReply::new_array(seq, n as u32, &data)
 }
 
 // ---------------------------------------------------------------------------
-// glGetPixelMapfv (opcode 126)
+// glGetPixelMapfv (opcode 125)
 // ---------------------------------------------------------------------------
 
 pub(crate) fn handle_get_pixel_mapfv(payload: &[u8], seq: u16) -> Vec<u8> {
@@ -793,21 +619,12 @@ pub(crate) fn handle_get_pixel_mapfv(payload: &[u8], seq: u16) -> Vec<u8> {
             osmesa::gl_get_pixel_mapfv(map, &mut values);
         }
     }
-    let extra_words = n;
-    let mut reply = vec![0u8; 32 + extra_words * 4];
-    reply[0] = 1;
-    reply[2..4].copy_from_slice(&seq.to_le_bytes());
-    reply[4..8].copy_from_slice(&(extra_words as u32).to_le_bytes()); // reply_length
-    reply[12..16].copy_from_slice(&(n as u32).to_le_bytes());         // size
-    for (i, &v) in values.iter().enumerate() {
-        let off = 32 + i * 4;
-        reply[off..off + 4].copy_from_slice(&v.to_le_bytes());
-    }
-    reply
+    let data: Vec<u8> = values.iter().flat_map(|v| v.to_le_bytes()).collect();
+    GlxSingleReply::new_array(seq, n as u32, &data)
 }
 
 // ---------------------------------------------------------------------------
-// glGetClipPlane (opcode 127)
+// glGetClipPlane (opcode 113)
 // ---------------------------------------------------------------------------
 
 pub(crate) fn handle_get_clip_plane(payload: &[u8], seq: u16) -> Vec<u8> {
@@ -822,24 +639,12 @@ pub(crate) fn handle_get_clip_plane(payload: &[u8], seq: u16) -> Vec<u8> {
             osmesa::gl_get_clip_plane(plane, &mut equation);
         }
     }
-    let n = 4usize;
-    let data_bytes = n * 8;
-    let extra_words = data_bytes.div_ceil(4);
-    let mut reply = vec![0u8; 32 + extra_words * 4];
-    reply[0] = 1;
-    reply[2..4].copy_from_slice(&seq.to_le_bytes());
-    reply[4..8].copy_from_slice(&(extra_words as u32).to_le_bytes()); // reply_length
-    reply[12..16].copy_from_slice(&(n as u32).to_le_bytes());         // size
-    for (i, &v) in equation.iter().enumerate() {
-        let off = 32 + i * 8;
-        reply[off..off + 8].copy_from_slice(&v.to_le_bytes());
-    }
-    reply
+    let data: Vec<u8> = equation.iter().flat_map(|v| v.to_le_bytes()).collect();
+    GlxSingleReply::new_array(seq, 4, &data)
 }
 
 // ---------------------------------------------------------------------------
 // glGetPolygonStipple (opcode 128)
-// Mesa reads reply.length * 4 bytes for this call (not reply.size).
 // ---------------------------------------------------------------------------
 
 pub(crate) fn handle_get_polygon_stipple(seq: u16) -> Vec<u8> {
@@ -850,18 +655,11 @@ pub(crate) fn handle_get_polygon_stipple(seq: u16) -> Vec<u8> {
             osmesa::gl_get_polygon_stipple(&mut mask);
         }
     }
-    let extra_words = 128 / 4; // 32 words
-    let mut reply = vec![0u8; 32 + 128];
-    reply[0] = 1;
-    reply[2..4].copy_from_slice(&seq.to_le_bytes());
-    reply[4..8].copy_from_slice(&(extra_words as u32).to_le_bytes()); // reply_length = 32
-    // Mesa reads reply.length * 4 = 128 bytes for stipple data; reply.size unused here.
-    reply[32..32 + 128].copy_from_slice(&mask);
-    reply
+    GlxSingleReply::new_array(seq, 128, &mask)
 }
 
 // ---------------------------------------------------------------------------
-// glGenLists (opcode 104) — scalar return in retval (bytes 8-11)
+// glGenLists (opcode 104)
 // ---------------------------------------------------------------------------
 
 pub(crate) fn handle_gen_lists(payload: &[u8], seq: u16) -> Vec<u8> {
@@ -883,15 +681,11 @@ pub(crate) fn handle_gen_lists(payload: &[u8], seq: u16) -> Vec<u8> {
             0
         }
     };
-    let mut reply = [0u8; 32];
-    reply[0] = 1;
-    reply[2..4].copy_from_slice(&seq.to_le_bytes());
-    reply[8..12].copy_from_slice(&result.to_le_bytes()); // retval
-    reply.to_vec()
+    GlxSingleReply::new_scalar(seq, result)
 }
 
 // ---------------------------------------------------------------------------
-// glIsList (opcode 141) — scalar boolean in retval
+// glIsList (opcode 141)
 // ---------------------------------------------------------------------------
 
 pub(crate) fn handle_is_list(payload: &[u8], seq: u16) -> Vec<u8> {
@@ -899,7 +693,7 @@ pub(crate) fn handle_is_list(payload: &[u8], seq: u16) -> Vec<u8> {
         return glx_single_empty_reply(seq);
     }
     let list = u32::from_le_bytes([payload[0], payload[1], payload[2], payload[3]]);
-    let result: u8 = {
+    let result: u32 = {
         #[cfg(feature = "osmesa")]
         {
             if osmesa::is_available() {
@@ -917,11 +711,7 @@ pub(crate) fn handle_is_list(payload: &[u8], seq: u16) -> Vec<u8> {
             0
         }
     };
-    let mut reply = [0u8; 32];
-    reply[0] = 1;
-    reply[2..4].copy_from_slice(&seq.to_le_bytes());
-    reply[8] = result; // retval LSB
-    reply.to_vec()
+    GlxSingleReply::new_scalar(seq, result)
 }
 
 // ---------------------------------------------------------------------------

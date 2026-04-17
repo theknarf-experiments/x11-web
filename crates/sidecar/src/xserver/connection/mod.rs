@@ -466,40 +466,11 @@ pub(crate) async fn handle_client(
     // RECORD: notify any enabled contexts about the new client connection
     state.record_notify_client_started();
 
-    // Send MANAGER client message to announce the XSETTINGS manager.
-    // Per the XSETTINGS spec, clients discover the settings manager by
-    // listening for this ClientMessage on the root window.
-    {
-        let bo = state.msb_first;
-        let timestamp = state.server_start.elapsed().as_millis() as u32;
-        let mut ev = vec![0u8; 32];
-        ev[0] = 33; // ClientMessage event code
-        ev[1] = 32; // format = 32
-        write_u16_bo(&mut ev, 2, 0, bo); // sequence 0 for server-initiated
-        write_u32_bo(&mut ev, 4, ROOT_WINDOW, bo);
-        write_u32_bo(&mut ev, 8, 165, bo); // MANAGER atom
-        write_u32_bo(&mut ev, 12, timestamp, bo);
-        write_u32_bo(&mut ev, 16, 164, bo); // _XSETTINGS_S0
-        write_u32_bo(&mut ev, 20, XSETTINGS_WINDOW, bo);
-        state.pending_events.push(ev);
-    }
-
-    // Send MANAGER client message to announce the system tray manager.
-    // Apps listen for this on the root to discover _NET_SYSTEM_TRAY_S0.
-    {
-        let bo = state.msb_first;
-        let timestamp = state.server_start.elapsed().as_millis() as u32;
-        let mut ev = vec![0u8; 32];
-        ev[0] = 33; // ClientMessage event code
-        ev[1] = 32; // format = 32
-        write_u16_bo(&mut ev, 2, 0, bo); // sequence 0 for server-initiated
-        write_u32_bo(&mut ev, 4, ROOT_WINDOW, bo);
-        write_u32_bo(&mut ev, 8, 165, bo); // MANAGER atom
-        write_u32_bo(&mut ev, 12, timestamp, bo);
-        write_u32_bo(&mut ev, 16, 186, bo); // _NET_SYSTEM_TRAY_S0
-        write_u32_bo(&mut ev, 20, crate::xserver::types::SYSTEM_TRAY_WINDOW, bo);
-        state.pending_events.push(ev);
-    }
+    // NOTE: MANAGER ClientMessages (XSETTINGS, system tray) are NOT sent here.
+    // New clients discover the XSETTINGS manager via XGetSelectionOwner("_XSETTINGS_S0"),
+    // not by receiving MANAGER events. Sending unsolicited ClientMessages to every new
+    // connection interleaves with expected replies and triggers xcb_xlib_extra_reply_data_left
+    // assertions in GLX clients (glxinfo, Mesa, Firefox).
 
     let mut compose = crate::compose::ComposeState::new();
 

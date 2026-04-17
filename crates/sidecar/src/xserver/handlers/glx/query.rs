@@ -65,7 +65,7 @@ pub(crate) fn handle_get_visual_configs(_data: &[u8], seq: u16) -> Vec<u8> {
         0,           // accum alpha
         1,           // double buffer
         0,           // stereo
-        32,          // buffer size
+        24,          // buffer size (R+G+B+A = 8+8+8+0 = 24)
         24,          // depth size
         8,           // stencil size
         0,           // aux buffers
@@ -112,7 +112,11 @@ pub(crate) fn handle_get_fb_configs(_data: &[u8], seq: u16) -> Vec<u8> {
     reply[8..12].copy_from_slice(&num_configs.to_le_bytes());
     reply[12..16].copy_from_slice(&num_attribs.to_le_bytes());
 
-    // FBConfig 1: 24-bit XRGB
+    // FBConfig 1: 24-bit XRGB (no alpha)
+    // GLX_BUFFER_SIZE must equal R+G+B+A = 8+8+8+0 = 24.
+    // Mesa's driConvertConfigs matches DRI configs against server configs by
+    // comparing rgbBits; setting 32 here causes "No matching fbConfigs" because
+    // swrast's 24-bit RGB DRI config has rgbBits=24, not 32.
     let config1: [(u32, u32); FBCONFIG_ATTRIB_COUNT] = [
         (GLX_FBCONFIG_ID, 1),
         (GLX_VISUAL_ID, ROOT_VISUAL),
@@ -128,7 +132,7 @@ pub(crate) fn handle_get_fb_configs(_data: &[u8], seq: u16) -> Vec<u8> {
         (GLX_GREEN_SIZE, 8),
         (GLX_BLUE_SIZE, 8),
         (GLX_ALPHA_SIZE, 0),
-        (GLX_BUFFER_SIZE, 32),
+        (GLX_BUFFER_SIZE, 24),
         (GLX_DOUBLEBUFFER, 1),
         (GLX_DEPTH_SIZE, 24),
         (GLX_STENCIL_SIZE, 8),
@@ -198,22 +202,18 @@ pub(crate) fn handle_get_fb_configs(_data: &[u8], seq: u16) -> Vec<u8> {
 // ---------------------------------------------------------------------------
 
 pub(crate) fn handle_query_extensions_string(_data: &[u8], seq: u16) -> Vec<u8> {
-    // Do NOT advertise GLX_ARB_create_context — that extension requires a working
-    // DRI stack (no /dev/dri in containers).  Without it, clients like Firefox fall
-    // back to the older glXCreateContext() which supports indirect rendering through
-    // our GLX protocol handlers.
-    let ext_string = b"GLX_EXT_visual_info GLX_EXT_visual_rating GLX_MESA_copy_sub_buffer";
+    let ext_string = b"GLX_ARB_create_context GLX_ARB_create_context_profile GLX_EXT_visual_info GLX_EXT_visual_rating GLX_MESA_copy_sub_buffer";
     let n = ext_string.len() as u32;
     let padded = ((n as usize) + 3) & !3;
 
-    // GLX QueryExtensionsString reply (xGLXQueryExtensionsStringReply):
+    // GLX QueryExtensionsString reply layout:
     //   [0]=Reply [2..4]=seq [4..8]=reply_length(padded/4)
-    //   [8..12]=n (string byte count)  [32..32+n]=string data
+    //   [12..16]=string_length(n) [32..32+n]=string data
     let mut reply = vec![0u8; 32 + padded];
     reply[0] = 1;
     reply[2..4].copy_from_slice(&seq.to_le_bytes());
     reply[4..8].copy_from_slice(&((padded / 4) as u32).to_le_bytes());
-    reply[8..12].copy_from_slice(&n.to_le_bytes());
+    reply[12..16].copy_from_slice(&n.to_le_bytes());
     reply[32..32 + n as usize].copy_from_slice(ext_string);
 
     reply
@@ -233,27 +233,21 @@ pub(crate) fn handle_query_server_string(data: &[u8], seq: u16) -> Vec<u8> {
     let string = match name {
         1 => b"x11-web OSMesa" as &[u8],  // GLX_VENDOR
         2 => b"1.4" as &[u8],              // GLX_VERSION
-        3 => b"GLX_EXT_visual_info GLX_EXT_visual_rating GLX_MESA_copy_sub_buffer" as &[u8],  // GLX_EXTENSIONS
+        3 => b"GLX_ARB_create_context GLX_ARB_create_context_profile GLX_EXT_visual_info GLX_EXT_visual_rating GLX_MESA_copy_sub_buffer" as &[u8],  // GLX_EXTENSIONS
         _ => b"" as &[u8],
     };
 
     let n = string.len() as u32;
     let padded = ((n as usize) + 3) & !3;
 
-    // xGLXQueryServerStringReply wire layout (DIFFERENT from QueryExtensionsString!):
+    // GLX QueryServerString reply layout:
     //   [0]=Reply [2..4]=seq [4..8]=reply_length(padded/4)
-    //   [8..12]=pad2 (zero)  [12..16]=n (string byte count)  [32..32+padded]=string data
-    // Note: xGLXQueryExtensionsStringReply has n at [8..12] (no pad2 field).
-    //       xGLXQueryServerStringReply has an extra pad2 word, pushing n to [12..16].
-    //       Mesa reads reply.n via the struct field at [12..16]; if we put n at [8..12]
-    //       Mesa sees pad2=0, reads 0 bytes, and our padded data stays buffered causing
-    //       the xcb_xlib_extra_reply_data_left assertion on the next _XReply call.
+    //   [12..16]=string_length(n) [32..32+n]=string data
     let mut reply = vec![0u8; 32 + padded];
     reply[0] = 1;
     reply[2..4].copy_from_slice(&seq.to_le_bytes());
     reply[4..8].copy_from_slice(&((padded / 4) as u32).to_le_bytes());
-    // [8..12] = pad2, leave as zero
-    reply[12..16].copy_from_slice(&n.to_le_bytes());  // n at correct offset
+    reply[12..16].copy_from_slice(&n.to_le_bytes());
     if !string.is_empty() {
         reply[32..32 + n as usize].copy_from_slice(string);
     }
