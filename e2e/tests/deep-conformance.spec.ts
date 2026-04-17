@@ -748,6 +748,22 @@ echo EXIT_CODE=$?`,
 			"GL.glXChooseVisual.restype = ctypes.c_void_p",
 			"vi = GL.glXChooseVisual(dpy, 0, attrs)",
 			"print(f'STEP10_ChooseVisual={\"OK\" if vi else \"FAIL\"}')",
+			"sys.stdout.flush()",
+			"if fb_cfgs and fb_n.value > 0:",
+			"    print('STEP11_calling_CreateNewContext...'); sys.stdout.flush()",
+			"    GL.glXCreateNewContext.restype = ctypes.c_void_p",
+			"    ctx13 = GL.glXCreateNewContext(dpy, fb_cfgs[0], 0x8014, None, 0)",
+			"    print(f'STEP11_CreateNewContext={\"OK\" if ctx13 else \"FAIL\"}'); sys.stdout.flush()",
+			"    if ctx13:",
+			"        root = X11.XDefaultRootWindow(dpy)",
+			"        print('STEP11b_calling_MakeContextCurrent_with_root...'); sys.stdout.flush()",
+			"        GL.glXMakeContextCurrent.restype = ctypes.c_int",
+			"        ok = GL.glXMakeContextCurrent(dpy, root, root, ctx13)",
+			"        print(f'STEP12_MakeContextCurrent={\"OK\" if ok else \"FAIL\"}'); sys.stdout.flush()",
+			"        if ok:",
+			"            GL.glGetString.restype = ctypes.c_char_p",
+			"            print(f'GL_RENDERER={GL.glGetString(0x1F01)}')",
+			"            print(f'GL_VERSION={GL.glGetString(0x1F02)}')",
 			"X11.XCloseDisplay(dpy)",
 			"print('ALL_DONE')",
 		].join("\n");
@@ -765,8 +781,8 @@ echo "--- Python GLX protocol test ---"
 python3 /tmp/glx_test.py 2>&1
 echo "--- glmark2 on-screen test ---"
 LIBGL_DEBUG=verbose timeout 15 glmark2 -b build 2>&1 | head -30 || true
-echo "--- glxinfo ---"
-LIBGL_DEBUG=verbose timeout 10 glxinfo 2>&1 | head -40 || true
+echo "--- glxinfo with XCB trace ---"
+MESA_DEBUG=1 LIBGL_DEBUG=verbose timeout 10 glxinfo 2>&1 | head -50 || true
 echo "--- ctypes GLX test ---"
 python3 /tmp/glx_ctypes.py 2>&1 || true
 
