@@ -243,8 +243,21 @@ pub(crate) async fn handle_client(
     }
     let mut reply_bytes = Vec::new();
     setup.serialize_into(&mut reply_bytes);
+    // Verify setup length consistency and log to debug file
+    let declared_len = u16::from_le_bytes([reply_bytes[6], reply_bytes[7]]) as usize;
+    let actual_extra = reply_bytes.len() - 8;
+    {
+        use std::io::Write as _;
+        if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open("/tmp/glx_replies.log") {
+            if declared_len * 4 != actual_extra {
+                let _ = writeln!(f, "SETUP_MISMATCH declared={}({}B) actual_extra={}B total={}B",
+                                 declared_len, declared_len * 4, actual_extra, reply_bytes.len());
+            } else {
+                let _ = writeln!(f, "SETUP_OK total={}B extra={}B", reply_bytes.len(), declared_len * 4);
+            }
+        }
+    }
     if msb_first {
-        // x11rb always serializes little-endian; byte-swap for MSB-first clients
         byteswap_setup_reply(&mut reply_bytes);
     }
     stream.write_all(&reply_bytes).await?;

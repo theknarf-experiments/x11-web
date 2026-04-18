@@ -764,6 +764,105 @@ echo EXIT_CODE=$?`,
 			`printf '%s' '${ctypesB64}' | base64 -d > /tmp/glx_ctypes.py`,
 		]);
 
+		// Minimal test: just XOpenDisplay + glXChooseVisual
+		const minimalScript = [
+			"import ctypes, ctypes.util, sys",
+			"X11 = ctypes.CDLL(ctypes.util.find_library('X11'))",
+			"GL = ctypes.CDLL(ctypes.util.find_library('GL'))",
+			"X11.XOpenDisplay.restype = ctypes.c_void_p",
+			"dpy = X11.XOpenDisplay(b':99')",
+			"print('dpy=' + ('OK' if dpy else 'FAIL'), flush=True)",
+			"attrs = (ctypes.c_int * 3)(5, 1, 0)",
+			"GL.glXChooseVisual.restype = ctypes.c_void_p",
+			"vi = GL.glXChooseVisual(dpy, 0, attrs)",
+			"print('vi=' + ('OK' if vi else 'FAIL'), flush=True)",
+			"X11.XCloseDisplay(dpy)",
+			"print('DONE', flush=True)",
+		].join("\n");
+		const minB64 = Buffer.from(minimalScript).toString("base64");
+		await sidecarContainer.exec([
+			"bash",
+			"-c",
+			`printf '%s' '${minB64}' | base64 -d > /tmp/glx_minimal.py`,
+		]);
+
+		// Trace comparison script
+		const diffScript = [
+			"import re, sys",
+			"def parse(path):",
+			"    results = []",
+			"    with open(path) as f:",
+			"        for line in f:",
+			"            m = re.search(r'recvmsg.*= (\\d+)$', line)",
+			"            if m:",
+			"                sz = int(m.group(1))",
+			"                results.append(sz)",
+			"    return results",
+			"try:",
+			"    x = parse('/tmp/xvfb_trace.log')",
+			"    o = parse('/tmp/ours_trace.log')",
+			"    print(f'Xvfb recvs: {len(x)}, Ours: {len(o)}')",
+			"    for i in range(max(len(x), len(o))):",
+			"        xv = x[i] if i < len(x) else '?'",
+			"        ov = o[i] if i < len(o) else '?'",
+			"        d = ' <<<' if xv != ov else ''",
+			"        print(f'  [{i:2d}] Xvfb={xv:>6}  Ours={ov:>6}{d}')",
+			"except Exception as e:",
+			"    print(f'Error: {e}')",
+		].join("\n");
+		const diffB64 = Buffer.from(diffScript).toString("base64");
+		await sidecarContainer.exec([
+			"bash",
+			"-c",
+			`printf '%s' '${diffB64}' | base64 -d > /tmp/diff_traces.py`,
+		]);
+
+		// Setup comparison script
+		const setupCmpScript = [
+			"import socket, struct",
+			"def get_setup(path):",
+			"    s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)",
+			"    s.settimeout(5)",
+			"    s.connect(path)",
+			"    s.sendall(struct.pack('BBHHHHxx', 0x6c, 0, 11, 0, 0, 0))",
+			"    hdr = b''",
+			"    while len(hdr) < 8:",
+			"        hdr += s.recv(8 - len(hdr))",
+			"    extra_words = struct.unpack_from('<H', hdr, 6)[0]",
+			"    extra = b''",
+			"    while len(extra) < extra_words * 4:",
+			"        extra += s.recv(extra_words * 4 - len(extra))",
+			"    s.close()",
+			"    return hdr + extra",
+			"xvfb = get_setup('/tmp/.X11-unix/X98')",
+			"ours = get_setup('/tmp/.X11-unix/X99')",
+			"print(f'Xvfb setup: {len(xvfb)} bytes')",
+			"print(f'Ours setup: {len(ours)} bytes')",
+			"# Compare header fields",
+			"for name, off, sz in [('status',0,1),('proto_major',2,2),('proto_minor',4,2),('extra_len',6,2)]:",
+			"    xv = int.from_bytes(xvfb[off:off+sz], 'little')",
+			"    ov = int.from_bytes(ours[off:off+sz], 'little')",
+			"    d = ' <<<' if xv != ov else ''",
+			"    print(f'  {name}: Xvfb={xv} Ours={ov}{d}')",
+			"# Compare vendor string",
+			"xv_vlen = struct.unpack_from('<H', xvfb, 24)[0]",
+			"ov_vlen = struct.unpack_from('<H', ours, 24)[0]",
+			"print(f'  vendor_len: Xvfb={xv_vlen} Ours={ov_vlen}')",
+			"# Number of formats",
+			"xv_nfmt = xvfb[29]",
+			"ov_nfmt = ours[29]",
+			"d = ' <<<' if xv_nfmt != ov_nfmt else ''",
+			"print(f'  num_formats: Xvfb={xv_nfmt} Ours={ov_nfmt}{d}')",
+			"# Number of screens (always 1)",
+			"print(f'  num_screens: Xvfb={xvfb[20]} Ours={ours[20]}')",
+		].join("\n");
+		const setupB64 = Buffer.from(setupCmpScript).toString("base64");
+		await sidecarContainer.exec([
+			"bash",
+			"-c",
+			`printf '%s' '${setupB64}' | base64 -d > /tmp/compare_setup.py`,
+		]);
+
 		const output = await execInSidecar(
 			sidecarContainer,
 			`ls /dev/dri 2>&1 || echo "no /dev/dri"
@@ -771,11 +870,11 @@ echo "--- Python GLX protocol test ---"
 python3 /tmp/glx_test.py 2>&1
 echo "--- glmark2 on-screen test ---"
 LIBGL_DEBUG=verbose timeout 15 glmark2 -b build 2>&1 | head -30 || true
-echo "--- strace ctypes recvmsg ---"
-rm -f /tmp/glx_strace.log /tmp/glx_replies.log
-strace -o /tmp/glx_strace.log -s 64 -e trace=recvmsg -f timeout 5 python3 /tmp/glx_ctypes.py 2>&1 | head -10 || true
-echo "--- ALL recvmsg with data ---"
-grep "recvmsg.*= [0-9]" /tmp/glx_strace.log 2>/dev/null || echo "no strace"
+echo "--- Compare setup: Xvfb vs Ours ---"
+Xvfb :98 -screen 0 1024x768x24 +extension GLX &
+sleep 1
+python3 /tmp/compare_setup.py 2>&1 || true
+kill %1 2>/dev/null || true
 echo "--- ctypes GLX test ---"
 rm -f /tmp/glx_replies.log
 python3 /tmp/glx_ctypes.py 2>&1 || true
