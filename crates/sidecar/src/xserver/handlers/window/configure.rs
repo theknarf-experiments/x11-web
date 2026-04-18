@@ -3,6 +3,8 @@
 use super::*;
 use super::{update_sibling_visibility, win_gravity_delta};
 use crate::xserver::core::require_len;
+use crate::xserver::event::serialize_event;
+use x11rb_protocol::protocol::xproto::UnmapNotifyEvent;
 
 // ---------------------------------------------------------------------------
 // Opcode 7: ReparentWindow
@@ -39,27 +41,31 @@ pub(crate) fn handle_reparent_window(state: &mut ClientState, data: &[u8], seq: 
     if was_mapped {
         // Generate UnmapNotify to the window itself (StructureNotifyMask)
         {
-            let mut unmap_event = [0u8; 32];
-            unmap_event[0] = UNMAP_NOTIFY_EVENT;
-            write_u16_bo(&mut unmap_event, 2, seq, bo);
-            write_u32_bo(&mut unmap_event, 4, window, bo);
-            write_u32_bo(&mut unmap_event, 8, window, bo);
+            let unmap_event = serialize_event(&UnmapNotifyEvent {
+                response_type: UNMAP_NOTIFY_EVENT,
+                sequence: seq,
+                event: window,
+                window,
+                from_configure: false,
+            }, bo);
             if state
                 .windows
                 .get(&window)
                 .is_some_and(|w| w.event_mask & STRUCTURE_NOTIFY_MASK != 0)
             {
-                state.pending_events.push(unmap_event.to_vec());
+                state.pending_events.push(unmap_event.clone());
             }
             state.broadcast_event(window, STRUCTURE_NOTIFY_MASK, &unmap_event);
         }
         // Generate UnmapNotify to the old parent (SubstructureNotifyMask)
         if old_parent != 0 {
-            let mut parent_unmap = [0u8; 32];
-            parent_unmap[0] = UNMAP_NOTIFY_EVENT;
-            write_u16_bo(&mut parent_unmap, 2, seq, bo);
-            write_u32_bo(&mut parent_unmap, 4, old_parent, bo);
-            write_u32_bo(&mut parent_unmap, 8, window, bo);
+            let parent_unmap = serialize_event(&UnmapNotifyEvent {
+                response_type: UNMAP_NOTIFY_EVENT,
+                sequence: seq,
+                event: old_parent,
+                window,
+                from_configure: false,
+            }, bo);
             if state
                 .windows
                 .get(&old_parent)

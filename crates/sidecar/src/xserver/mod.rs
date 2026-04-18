@@ -13,6 +13,7 @@ pub(crate) mod extensions;
 #[allow(dead_code)]
 pub(crate) mod grab;
 pub(crate) mod handlers;
+pub(crate) mod event;
 pub(crate) mod input;
 pub(crate) mod reply;
 pub(crate) mod setup;
