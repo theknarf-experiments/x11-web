@@ -3,6 +3,11 @@
 use super::update_sibling_visibility;
 use super::*;
 use crate::xserver::core::require_len;
+use crate::xserver::event::serialize_event;
+use x11rb_protocol::protocol::xproto::{
+    ExposeEvent, MapNotifyEvent, MapRequestEvent, UnmapNotifyEvent, VisibilityNotifyEvent,
+    Visibility,
+};
 
 // ---------------------------------------------------------------------------
 // Opcode 8: MapWindow
@@ -55,10 +60,12 @@ pub(crate) fn handle_map_window(state: &mut ClientState, data: &[u8], seq: u16) 
         if should_redirect || parent_has_redirect {
             info!("MapWindow: redirecting wid={wid:#x} as MapRequest (parent={parent_id:#x})");
             // Build MapRequest event (code 20)
-            let mut map_request = [0u8; 32];
-            map_request[0] = MAP_REQUEST_EVENT;
-            state.write_u32(&mut map_request, 4, parent_id); // parent
-            state.write_u32(&mut map_request, 8, wid); // window
+            let map_request = serialize_event(&MapRequestEvent {
+                response_type: MAP_REQUEST_EVENT,
+                sequence: 0,
+                parent: parent_id,
+                window: wid,
+            }, state.msb_first);
 
             // Deliver MapRequest to the WM if registered
             if let Ok(wm) = state.wm_state.lock() {
@@ -253,12 +260,13 @@ pub(crate) fn handle_map_window(state: &mut ClientState, data: &[u8], seq: u16) 
         }
 
         // Send MapNotify to the window itself (StructureNotifyMask)
-        let mut map_event = [0u8; 32];
-        map_event[0] = MAP_NOTIFY_EVENT;
-        write_u16_bo(&mut map_event, 2, seq, msb_first);
-        write_u32_bo(&mut map_event, 4, wid, msb_first); // event window
-        write_u32_bo(&mut map_event, 8, wid, msb_first); // window
-        map_event[12] = if override_redirect { 1 } else { 0 };
+        let map_event = serialize_event(&MapNotifyEvent {
+            response_type: MAP_NOTIFY_EVENT,
+            sequence: seq,
+            event: wid,
+            window: wid,
+            override_redirect,
+        }, msb_first);
         if event_mask & STRUCTURE_NOTIFY_MASK != 0 {
             events.extend_from_slice(&map_event);
         }
@@ -266,12 +274,13 @@ pub(crate) fn handle_map_window(state: &mut ClientState, data: &[u8], seq: u16) 
         // Send MapNotify to parent (SubstructureNotifyMask)
         let parent_id = win.parent;
         {
-            let mut parent_event = [0u8; 32];
-            parent_event[0] = MAP_NOTIFY_EVENT;
-            write_u16_bo(&mut parent_event, 2, seq, msb_first);
-            write_u32_bo(&mut parent_event, 4, parent_id, msb_first); // event = parent
-            write_u32_bo(&mut parent_event, 8, wid, msb_first); // window = child
-            parent_event[12] = if override_redirect { 1 } else { 0 };
+            let parent_event = serialize_event(&MapNotifyEvent {
+                response_type: MAP_NOTIFY_EVENT,
+                sequence: seq,
+                event: parent_id,
+                window: wid,
+                override_redirect,
+            }, msb_first);
 
             // Local delivery
             if let Some(parent_win) = state.windows.get(&parent_id) {
@@ -293,11 +302,12 @@ pub(crate) fn handle_map_window(state: &mut ClientState, data: &[u8], seq: u16) 
                 win.visibility = vis_state;
             }
             if event_mask & VISIBILITY_CHANGE_MASK != 0 {
-                let mut vis_event = [0u8; 32];
-                vis_event[0] = VISIBILITY_NOTIFY_EVENT;
-                write_u16_bo(&mut vis_event, 2, seq, msb_first);
-                write_u32_bo(&mut vis_event, 4, wid, msb_first);
-                vis_event[8] = vis_state;
+                let vis_event = serialize_event(&VisibilityNotifyEvent {
+                    response_type: VISIBILITY_NOTIFY_EVENT,
+                    sequence: seq,
+                    window: wid,
+                    state: Visibility::from(vis_state),
+                }, msb_first);
                 events.extend_from_slice(&vis_event);
             }
         }
@@ -316,19 +326,16 @@ pub(crate) fn handle_map_window(state: &mut ClientState, data: &[u8], seq: u16) 
             // Total expose events: 1 (self, if selected) + descendants.len()
             let total = if self_selected { 1 } else { 0 } + descendants.len();
 
-            let mut expose_event = [0u8; 32];
-            expose_event[0] = EXPOSE_EVENT;
-            write_u16_bo(&mut expose_event, 2, seq, msb_first);
-            write_u32_bo(&mut expose_event, 4, wid, msb_first);
-            // x=0, y=0 already zero
-            write_u16_bo(&mut expose_event, 12, width, msb_first);
-            write_u16_bo(&mut expose_event, 14, height, msb_first);
-            write_u16_bo(
-                &mut expose_event,
-                16,
-                total.saturating_sub(1) as u16,
-                msb_first,
-            ); // count: remaining
+            let expose_event = serialize_event(&ExposeEvent {
+                response_type: EXPOSE_EVENT,
+                sequence: seq,
+                window: wid,
+                x: 0,
+                y: 0,
+                width,
+                height,
+                count: total.saturating_sub(1) as u16,
+            }, msb_first);
             if self_selected {
                 events.extend_from_slice(&expose_event);
             }
@@ -340,15 +347,18 @@ pub(crate) fn handle_map_window(state: &mut ClientState, data: &[u8], seq: u16) 
                     .map(|w| w.event_mask)
                     .unwrap_or(0);
                 if desc_mask & EXPOSURE_MASK != 0 {
-                    let mut exp = [0u8; 32];
-                    exp[0] = EXPOSE_EVENT;
-                    write_u16_bo(&mut exp, 2, seq, msb_first);
-                    write_u32_bo(&mut exp, 4, *desc_id, msb_first);
-                    write_u16_bo(&mut exp, 12, *dw, msb_first);
-                    write_u16_bo(&mut exp, 14, *dh, msb_first);
                     let base = if self_selected { 1 } else { 0 };
                     let remaining = total.saturating_sub(base + 1 + i) as u16;
-                    write_u16_bo(&mut exp, 16, remaining, msb_first); // count: remaining
+                    let exp = serialize_event(&ExposeEvent {
+                        response_type: EXPOSE_EVENT,
+                        sequence: seq,
+                        window: *desc_id,
+                        x: 0,
+                        y: 0,
+                        width: *dw,
+                        height: *dh,
+                        count: remaining,
+                    }, msb_first);
                     events.extend_from_slice(&exp);
                 }
             }
@@ -567,11 +577,13 @@ pub(crate) fn handle_unmap_window(state: &mut ClientState, data: &[u8], seq: u16
 
     // UnmapNotify to the window itself (StructureNotifyMask)
     let unmap_event = {
-        let mut event = [0u8; 32];
-        event[0] = UNMAP_NOTIFY_EVENT;
-        write_u16_bo(&mut event, 2, seq, bo);
-        write_u32_bo(&mut event, 4, wid, bo);
-        write_u32_bo(&mut event, 8, wid, bo);
+        let event = serialize_event(&UnmapNotifyEvent {
+            response_type: UNMAP_NOTIFY_EVENT,
+            sequence: seq,
+            event: wid,
+            window: wid,
+            from_configure: false,
+        }, bo);
         let win_mask = state.windows.get(&wid).map(|w| w.event_mask).unwrap_or(0);
         if win_mask & STRUCTURE_NOTIFY_MASK != 0 {
             events.extend_from_slice(&event);
@@ -581,11 +593,13 @@ pub(crate) fn handle_unmap_window(state: &mut ClientState, data: &[u8], seq: u16
 
     // Send UnmapNotify to parent (SubstructureNotifyMask)
     if parent_id != 0 {
-        let mut parent_event = [0u8; 32];
-        parent_event[0] = UNMAP_NOTIFY_EVENT;
-        write_u16_bo(&mut parent_event, 2, seq, bo);
-        write_u32_bo(&mut parent_event, 4, parent_id, bo);
-        write_u32_bo(&mut parent_event, 8, wid, bo);
+        let parent_event = serialize_event(&UnmapNotifyEvent {
+            response_type: UNMAP_NOTIFY_EVENT,
+            sequence: seq,
+            event: parent_id,
+            window: wid,
+            from_configure: false,
+        }, bo);
 
         let parent_wants_notify = state
             .windows

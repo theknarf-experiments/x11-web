@@ -1,8 +1,12 @@
 use super::client::ClientState;
 use super::core::*;
 use super::types::*;
+use crate::xserver::event::serialize_event;
 use std::collections::HashMap;
 use x11_web_protocol::{DisplayUpdate, InputEvent};
+use x11rb_protocol::protocol::xproto::{
+    ButtonPressEvent, EnterNotifyEvent, KeyPressEvent, MotionNotifyEvent,
+};
 
 /// Emit a PropertyNotify event for a window property change.
 /// Used when the server internally modifies properties (e.g. _NET_WM_STATE).
@@ -430,20 +434,27 @@ fn make_crossing_event(
         found
     };
 
+    let bytes = serialize_event(
+        &EnterNotifyEvent {
+            response_type: event_code,
+            detail: detail.into(),
+            sequence: seq,
+            time: timestamp,
+            root: root_window,
+            event: event_window,
+            child,
+            root_x: abs_x,
+            root_y: abs_y,
+            event_x: ev_x,
+            event_y: ev_y,
+            state: 0u16.into(),
+            mode: mode.into(),
+            same_screen_focus: 0x01 | if has_focus { 0x01 } else { 0x00 },
+        },
+        bo,
+    );
     let mut event = [0u8; 32];
-    event[0] = event_code;
-    event[1] = detail;
-    write_u16_bo(&mut event, 2, seq, bo);
-    write_u32_bo(&mut event, 4, timestamp, bo);
-    write_u32_bo(&mut event, 8, root_window, bo);
-    write_u32_bo(&mut event, 12, event_window, bo);
-    write_u32_bo(&mut event, 16, child, bo);
-    write_i16_bo(&mut event, 20, abs_x, bo); // root_x
-    write_i16_bo(&mut event, 22, abs_y, bo); // root_y
-    write_i16_bo(&mut event, 24, ev_x, bo); // event_x
-    write_i16_bo(&mut event, 26, ev_y, bo); // event_y
-    event[30] = mode;
-    event[31] = 0x01 | if has_focus { 0x01 } else { 0x00 }; // same_screen=1, focus
+    event.copy_from_slice(&bytes);
     event
 }
 
@@ -992,19 +1003,25 @@ pub(crate) fn build_x11_input_event(
 
     match input {
         InputEvent::MotionNotify { x, y, state: mask } => {
-            event[0] = MOTION_NOTIFY_EVENT;
-            event[1] = 0;
-            write_u16_bo(&mut event, 2, seq, bo);
-            write_u32_bo(&mut event, 4, timestamp, bo);
-            write_u32_bo(&mut event, 8, root_window, bo);
-            write_u32_bo(&mut event, 12, event_window, bo);
-            write_u32_bo(&mut event, 16, 0u32, bo);
-            write_i16_bo(&mut event, 20, *x, bo);
-            write_i16_bo(&mut event, 22, *y, bo);
-            write_i16_bo(&mut event, 24, event_x, bo);
-            write_i16_bo(&mut event, 26, event_y, bo);
-            write_u16_bo(&mut event, 28, *mask, bo);
-            event[30] = 1;
+            let bytes = serialize_event(
+                &MotionNotifyEvent {
+                    response_type: MOTION_NOTIFY_EVENT,
+                    detail: 0u8.into(),
+                    sequence: seq,
+                    time: timestamp,
+                    root: root_window,
+                    event: event_window,
+                    child: 0,
+                    root_x: *x,
+                    root_y: *y,
+                    event_x,
+                    event_y,
+                    state: (*mask).into(),
+                    same_screen: true,
+                },
+                bo,
+            );
+            event.copy_from_slice(&bytes);
         }
         InputEvent::ButtonPress {
             button,
@@ -1013,19 +1030,25 @@ pub(crate) fn build_x11_input_event(
             state: mask,
         } => {
             state.motion_hint_suppressed = false;
-            event[0] = BUTTON_PRESS_EVENT;
-            event[1] = *button;
-            write_u16_bo(&mut event, 2, seq, bo);
-            write_u32_bo(&mut event, 4, timestamp, bo);
-            write_u32_bo(&mut event, 8, root_window, bo);
-            write_u32_bo(&mut event, 12, event_window, bo);
-            write_u32_bo(&mut event, 16, 0u32, bo);
-            write_i16_bo(&mut event, 20, *x, bo);
-            write_i16_bo(&mut event, 22, *y, bo);
-            write_i16_bo(&mut event, 24, event_x, bo);
-            write_i16_bo(&mut event, 26, event_y, bo);
-            write_u16_bo(&mut event, 28, *mask, bo);
-            event[30] = 1;
+            let bytes = serialize_event(
+                &ButtonPressEvent {
+                    response_type: BUTTON_PRESS_EVENT,
+                    detail: *button,
+                    sequence: seq,
+                    time: timestamp,
+                    root: root_window,
+                    event: event_window,
+                    child: 0,
+                    root_x: *x,
+                    root_y: *y,
+                    event_x,
+                    event_y,
+                    state: (*mask).into(),
+                    same_screen: true,
+                },
+                bo,
+            );
+            event.copy_from_slice(&bytes);
         }
         InputEvent::ButtonRelease {
             button,
@@ -1034,34 +1057,31 @@ pub(crate) fn build_x11_input_event(
             state: mask,
         } => {
             state.motion_hint_suppressed = false;
-            event[0] = BUTTON_RELEASE_EVENT;
-            event[1] = *button;
-            write_u16_bo(&mut event, 2, seq, bo);
-            write_u32_bo(&mut event, 4, timestamp, bo);
-            write_u32_bo(&mut event, 8, root_window, bo);
-            write_u32_bo(&mut event, 12, event_window, bo);
-            write_u32_bo(&mut event, 16, 0u32, bo);
-            write_i16_bo(&mut event, 20, *x, bo);
-            write_i16_bo(&mut event, 22, *y, bo);
-            write_i16_bo(&mut event, 24, event_x, bo);
-            write_i16_bo(&mut event, 26, event_y, bo);
-            write_u16_bo(&mut event, 28, *mask, bo);
-            event[30] = 1;
+            let bytes = serialize_event(
+                &ButtonPressEvent {
+                    response_type: BUTTON_RELEASE_EVENT,
+                    detail: *button,
+                    sequence: seq,
+                    time: timestamp,
+                    root: root_window,
+                    event: event_window,
+                    child: 0,
+                    root_x: *x,
+                    root_y: *y,
+                    event_x,
+                    event_y,
+                    state: (*mask).into(),
+                    same_screen: true,
+                },
+                bo,
+            );
+            event.copy_from_slice(&bytes);
         }
         InputEvent::KeyPress {
             keycode,
             state: mask,
         } => {
-            event[0] = KEY_PRESS_EVENT;
-            event[1] = *keycode as u8;
-            write_u16_bo(&mut event, 2, seq, bo);
-            write_u32_bo(&mut event, 4, timestamp, bo);
-            write_u32_bo(&mut event, 8, root_window, bo);
-            write_u32_bo(&mut event, 12, event_window, bo);
             let child = keyboard_event_child(&state.windows, event_window, state.focus_window);
-            write_u32_bo(&mut event, 16, child, bo);
-            write_i16_bo(&mut event, 20, state.pointer_x, bo); // root_x
-            write_i16_bo(&mut event, 22, state.pointer_y, bo); // root_y
             let (kev_x, kev_y) = window_local_coords(
                 &state.windows,
                 event_window,
@@ -1069,25 +1089,31 @@ pub(crate) fn build_x11_input_event(
                 state.pointer_x,
                 state.pointer_y,
             );
-            write_i16_bo(&mut event, 24, kev_x, bo); // event_x
-            write_i16_bo(&mut event, 26, kev_y, bo); // event_y
-            write_u16_bo(&mut event, 28, *mask, bo);
-            event[30] = 1;
+            let bytes = serialize_event(
+                &KeyPressEvent {
+                    response_type: KEY_PRESS_EVENT,
+                    detail: *keycode as u8,
+                    sequence: seq,
+                    time: timestamp,
+                    root: root_window,
+                    event: event_window,
+                    child,
+                    root_x: state.pointer_x,
+                    root_y: state.pointer_y,
+                    event_x: kev_x,
+                    event_y: kev_y,
+                    state: (*mask).into(),
+                    same_screen: true,
+                },
+                bo,
+            );
+            event.copy_from_slice(&bytes);
         }
         InputEvent::KeyRelease {
             keycode,
             state: mask,
         } => {
-            event[0] = KEY_RELEASE_EVENT;
-            event[1] = *keycode as u8;
-            write_u16_bo(&mut event, 2, seq, bo);
-            write_u32_bo(&mut event, 4, timestamp, bo);
-            write_u32_bo(&mut event, 8, root_window, bo);
-            write_u32_bo(&mut event, 12, event_window, bo);
             let child = keyboard_event_child(&state.windows, event_window, state.focus_window);
-            write_u32_bo(&mut event, 16, child, bo);
-            write_i16_bo(&mut event, 20, state.pointer_x, bo); // root_x
-            write_i16_bo(&mut event, 22, state.pointer_y, bo); // root_y
             let (kev_x, kev_y) = window_local_coords(
                 &state.windows,
                 event_window,
@@ -1095,10 +1121,25 @@ pub(crate) fn build_x11_input_event(
                 state.pointer_x,
                 state.pointer_y,
             );
-            write_i16_bo(&mut event, 24, kev_x, bo); // event_x
-            write_i16_bo(&mut event, 26, kev_y, bo); // event_y
-            write_u16_bo(&mut event, 28, *mask, bo);
-            event[30] = 1;
+            let bytes = serialize_event(
+                &KeyPressEvent {
+                    response_type: KEY_RELEASE_EVENT,
+                    detail: *keycode as u8,
+                    sequence: seq,
+                    time: timestamp,
+                    root: root_window,
+                    event: event_window,
+                    child,
+                    root_x: state.pointer_x,
+                    root_y: state.pointer_y,
+                    event_x: kev_x,
+                    event_y: kev_y,
+                    state: (*mask).into(),
+                    same_screen: true,
+                },
+                bo,
+            );
+            event.copy_from_slice(&bytes);
         }
         InputEvent::WindowManage { action } => {
             // Handle window management actions via ICCCM/EWMH protocols.
