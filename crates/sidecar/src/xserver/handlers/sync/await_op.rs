@@ -5,6 +5,7 @@ use tracing::debug;
 use super::super::super::client::ClientState;
 use super::{is_trigger_satisfied, AwaitTrigger, PendingAwait};
 use crate::xserver::core::require_len;
+use crate::xserver::reply::ReplyBuf;
 
 /// Minor opcode 7: Await
 pub(crate) fn await_op(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
@@ -107,9 +108,7 @@ pub(crate) fn get_priority(state: &mut ClientState, data: &[u8], seq: u16) -> Ve
         .copied()
         .unwrap_or(0);
     debug!("SYNC GetPriority: resource={resource_id:#x} priority={priority}");
-    let mut reply = [0u8; 32];
-    reply[0] = 1;
-    state.write_u16(&mut reply, 2, seq);
-    state.write_u32(&mut reply, 8, priority as u32);
-    reply.to_vec()
+    ReplyBuf::fixed(seq, state.msb_first)
+        .set_u32(8, priority as u32)
+        .build()
 }

@@ -2,6 +2,7 @@
 
 use super::*;
 use crate::xserver::core::require_len;
+use crate::xserver::reply::ReplyBuf;
 
 // ---------------------------------------------------------------------------
 // Opcode 72: PutImage
@@ -631,15 +632,11 @@ pub(crate) fn handle_get_image(state: &mut ClientState, data: &[u8], seq: u16) -
     let data_len = image_data.len();
     // Pad data to 4-byte boundary per X11 protocol
     let padded_len = (data_len + 3) & !3;
-    let length_field = (padded_len / 4) as u32;
 
-    let mut reply = vec![0u8; 32 + padded_len];
-    reply[0] = 1; // Reply
-    reply[1] = depth;
-    state.write_u16(&mut reply, 2, seq);
-    state.write_u32(&mut reply, 4, length_field);
-    state.write_u32(&mut reply, 8, visual);
-    reply[32..32 + data_len].copy_from_slice(&image_data);
+    let mut reply = ReplyBuf::with_extra(seq, padded_len, state.msb_first)
+        .set_data_byte(depth)
+        .set_u32(8, visual);
+    reply.buf_mut()[32..32 + data_len].copy_from_slice(&image_data);
 
-    reply
+    reply.build()
 }

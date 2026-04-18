@@ -1,5 +1,6 @@
 //! XKB Geometry model: data structures, default PC-105 layout,
 //! wire serialization for GetGeometry (opcode 19) and SetGeometry (opcode 20).
+use crate::xserver::reply::ReplyBuf;
 
 use std::sync::{Arc, Mutex};
 
@@ -977,30 +978,27 @@ pub(crate) fn build_xkb_get_geometry_reply(
 ) -> Vec<u8> {
     let geom = default_pc105_geometry(&state.atoms);
     let body = serialize_geometry_body(&geom);
-    let length_words = (body.len() / 4) as u32;
-    let total_len = 32 + body.len();
 
-    let mut reply = vec![0u8; total_len];
-    reply[0] = 1; // Reply
-    reply[1] = device_id;
-    reply[2..4].copy_from_slice(&seq.to_le_bytes());
-    reply[4..8].copy_from_slice(&length_words.to_le_bytes());
-    reply[8..12].copy_from_slice(&geom.name.to_le_bytes()); // name ATOM
-    reply[12] = 1; // foundGeometry = TRUE
-    reply[13] = 0; // pad
-    reply[14..16].copy_from_slice(&geom.width_mm.to_le_bytes());
-    reply[16..18].copy_from_slice(&geom.height_mm.to_le_bytes());
-    reply[18..20].copy_from_slice(&(geom.properties.len() as u16).to_le_bytes());
-    reply[20..22].copy_from_slice(&(geom.colors.len() as u16).to_le_bytes());
-    reply[22..24].copy_from_slice(&(geom.shapes.len() as u16).to_le_bytes());
-    reply[24..26].copy_from_slice(&(geom.sections.len() as u16).to_le_bytes());
-    reply[26..28].copy_from_slice(&(geom.doodads.len() as u16).to_le_bytes());
-    reply[28..30].copy_from_slice(&(geom.key_aliases.len() as u16).to_le_bytes());
-    reply[30] = 0; // baseColorNdx
-    reply[31] = 1; // labelColorNdx
-
-    reply[32..].copy_from_slice(&body);
-    reply
+    let mut reply = ReplyBuf::with_extra(seq, body.len(), false) // geometry uses LE
+        .set_data_byte(device_id);
+    {
+        let buf = reply.buf_mut();
+        buf[8..12].copy_from_slice(&geom.name.to_le_bytes()); // name ATOM
+        buf[12] = 1; // foundGeometry = TRUE
+        buf[13] = 0; // pad
+        buf[14..16].copy_from_slice(&geom.width_mm.to_le_bytes());
+        buf[16..18].copy_from_slice(&geom.height_mm.to_le_bytes());
+        buf[18..20].copy_from_slice(&(geom.properties.len() as u16).to_le_bytes());
+        buf[20..22].copy_from_slice(&(geom.colors.len() as u16).to_le_bytes());
+        buf[22..24].copy_from_slice(&(geom.shapes.len() as u16).to_le_bytes());
+        buf[24..26].copy_from_slice(&(geom.sections.len() as u16).to_le_bytes());
+        buf[26..28].copy_from_slice(&(geom.doodads.len() as u16).to_le_bytes());
+        buf[28..30].copy_from_slice(&(geom.key_aliases.len() as u16).to_le_bytes());
+        buf[30] = 0; // baseColorNdx
+        buf[31] = 1; // labelColorNdx
+        buf[32..].copy_from_slice(&body);
+    }
+    reply.build()
 }
 
 // ---------------------------------------------------------------------------
@@ -1077,24 +1075,25 @@ mod tests {
         let length_words = (body.len() / 4) as u32;
         let total_len = 32 + body.len();
 
-        let mut reply = vec![0u8; total_len];
-        reply[0] = 1;
-        reply[1] = 3; // device_id
-        reply[2..4].copy_from_slice(&42u16.to_le_bytes());
-        reply[4..8].copy_from_slice(&length_words.to_le_bytes());
-        reply[8..12].copy_from_slice(&geom.name.to_le_bytes());
-        reply[12] = 1; // foundGeometry
-        reply[14..16].copy_from_slice(&geom.width_mm.to_le_bytes());
-        reply[16..18].copy_from_slice(&geom.height_mm.to_le_bytes());
-        reply[18..20].copy_from_slice(&(geom.properties.len() as u16).to_le_bytes());
-        reply[20..22].copy_from_slice(&(geom.colors.len() as u16).to_le_bytes());
-        reply[22..24].copy_from_slice(&(geom.shapes.len() as u16).to_le_bytes());
-        reply[24..26].copy_from_slice(&(geom.sections.len() as u16).to_le_bytes());
-        reply[26..28].copy_from_slice(&(geom.doodads.len() as u16).to_le_bytes());
-        reply[28..30].copy_from_slice(&(geom.key_aliases.len() as u16).to_le_bytes());
-        reply[30] = 0;
-        reply[31] = 1;
-        reply[32..].copy_from_slice(&body);
+        let mut reply = ReplyBuf::with_extra(42u16, body.len(), false)
+            .set_data_byte(3); // device_id
+        {
+            let buf = reply.buf_mut();
+            buf[8..12].copy_from_slice(&geom.name.to_le_bytes());
+            buf[12] = 1; // foundGeometry
+            buf[14..16].copy_from_slice(&geom.width_mm.to_le_bytes());
+            buf[16..18].copy_from_slice(&geom.height_mm.to_le_bytes());
+            buf[18..20].copy_from_slice(&(geom.properties.len() as u16).to_le_bytes());
+            buf[20..22].copy_from_slice(&(geom.colors.len() as u16).to_le_bytes());
+            buf[22..24].copy_from_slice(&(geom.shapes.len() as u16).to_le_bytes());
+            buf[24..26].copy_from_slice(&(geom.sections.len() as u16).to_le_bytes());
+            buf[26..28].copy_from_slice(&(geom.doodads.len() as u16).to_le_bytes());
+            buf[28..30].copy_from_slice(&(geom.key_aliases.len() as u16).to_le_bytes());
+            buf[30] = 0;
+            buf[31] = 1;
+            buf[32..].copy_from_slice(&body);
+        }
+        let reply = reply.build();
 
         // Check reply header
         assert_eq!(reply[0], 1, "first byte should be Reply");

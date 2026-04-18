@@ -7,6 +7,7 @@ use super::super::super::client::ClientState;
 use super::super::super::core::BAD_VALUE;
 use super::{check_alarms, check_pending_awaits_ext, SyncCounter};
 use crate::xserver::core::require_len;
+use crate::xserver::reply::ReplyBuf;
 
 /// Minor opcode 1: ListSystemCounters
 pub(crate) fn list_system_counters(state: &mut ClientState, seq: u16) -> Vec<u8> {
@@ -16,19 +17,15 @@ pub(crate) fn list_system_counters(state: &mut ClientState, seq: u16) -> Vec<u8>
     let name_pad = (4 - (name_len % 4)) % 4;
     let entry_size = 4 + 4 + 4 + 2 + name_len + name_pad;
     let extra = entry_size;
-    let total = 32 + extra;
-    let mut reply = vec![0u8; total];
-    reply[0] = 1;
-    state.write_u16(&mut reply, 2, seq);
-    state.write_u32(&mut reply, 4, (extra / 4) as u32);
-    state.write_u32(&mut reply, 8, 1u32); // num_counters = 1
+    let mut reply = ReplyBuf::with_extra(seq, extra, state.msb_first)
+        .set_u32(8, 1u32); // num_counters = 1
     let off = 32;
-    state.write_u32(&mut reply, off, 1u32); // counter ID = 1 (SERVERTIME)
-    state.write_u32(&mut reply, off + 4, 0u32); // resolution_hi
-    state.write_u32(&mut reply, off + 8, 1u32); // resolution_lo = 1ms
-    state.write_u16(&mut reply, off + 12, name_len as u16);
-    reply[off + 14..off + 14 + name_len].copy_from_slice(counter_name);
-    reply
+    reply = reply.set_u32(off, 1u32) // counter ID = 1 (SERVERTIME)
+        .set_u32(off + 4, 0u32) // resolution_hi
+        .set_u32(off + 8, 1u32) // resolution_lo = 1ms
+        .set_u16(off + 12, name_len as u16);
+    reply.buf_mut()[off + 14..off + 14 + name_len].copy_from_slice(counter_name);
+    reply.build()
 }
 
 /// Minor opcode 2: CreateCounter
@@ -127,18 +124,16 @@ pub(crate) fn query_counter(state: &mut ClientState, data: &[u8], seq: u16) -> V
     let counter_id = state.read_u32(data, 4);
     debug!("SYNC QueryCounter: id={counter_id:#x}");
 
-    let mut reply = [0u8; 32];
-    reply[0] = 1;
-    state.write_u16(&mut reply, 2, seq);
+    let mut reply = ReplyBuf::fixed(seq, state.msb_first);
 
     if counter_id == 1 {
         // SERVERTIME: return current elapsed time in ms
         let ms = state.timestamp();
-        state.write_u32(&mut reply, 8, 0u32); // value_hi
-        state.write_u32(&mut reply, 12, ms); // value_lo
+        reply = reply.set_u32(8, 0u32) // value_hi
+            .set_u32(12, ms); // value_lo
     } else if let Some(counter) = state.sync_state.counters.get(&counter_id) {
-        state.write_u32(&mut reply, 8, counter.value_hi as u32);
-        state.write_u32(&mut reply, 12, counter.value_lo);
+        reply = reply.set_u32(8, counter.value_hi as u32)
+            .set_u32(12, counter.value_lo);
     } else {
         // BadCounter
         return super::super::super::core::build_error_bo(
@@ -150,7 +145,7 @@ pub(crate) fn query_counter(state: &mut ClientState, data: &[u8], seq: u16) -> V
             state.msb_first,
         );
     }
-    reply.to_vec()
+    reply.build()
 }
 
 /// Minor opcode 6: DestroyCounter

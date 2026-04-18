@@ -4,6 +4,7 @@ use tracing::debug;
 
 use super::super::client::ClientState;
 use crate::xserver::core::require_len;
+use crate::xserver::reply::ReplyBuf;
 
 /// Screen saver window attributes stored by MIT-SCREEN-SAVER SetAttributes.
 #[allow(dead_code)]
@@ -24,17 +25,13 @@ pub(crate) fn handle_screen_saver_request(
     match minor {
         0 => {
             // QueryVersion
-            let mut reply = [0u8; 32];
-            reply[0] = 1;
-            state.write_u16(&mut reply, 2, seq);
-            state.write_u16(&mut reply, 8, 1); // server_major
-            state.write_u16(&mut reply, 10, 1); // server_minor
-            reply.to_vec()
+            ReplyBuf::fixed(seq, state.msb_first)
+                .set_u16(8, 1) // server_major
+                .set_u16(10, 1) // server_minor
+                .build()
         }
         1 => {
             // QueryInfo
-            let mut reply = [0u8; 32];
-            reply[0] = 1;
             // state: 0=Off, 1=On, 2=Cycle, 3=Disabled
             let saver_state = if state.screen_saver_suspend_count > 0 {
                 3u8 // Disabled
@@ -43,15 +40,14 @@ pub(crate) fn handle_screen_saver_request(
             } else {
                 0u8 // Off
             };
-            reply[1] = saver_state;
-            state.write_u16(&mut reply, 2, seq);
-            state.write_u32(&mut reply, 4, 0); // length
-            state.write_u32(&mut reply, 8, state.screen_saver_window); // saver_window
-            state.write_u32(&mut reply, 12, 0); // ms_until_server
-            state.write_u32(&mut reply, 16, state.timestamp()); // ms_since_user_input
-            state.write_u32(&mut reply, 20, state.screen_saver_event_mask); // event_mask
-            reply[24] = 0; // kind = Blanked
-            reply.to_vec()
+            ReplyBuf::fixed(seq, state.msb_first)
+                .set_data_byte(saver_state)
+                .set_u32(8, state.screen_saver_window) // saver_window
+                .set_u32(12, 0) // ms_until_server
+                .set_u32(16, state.timestamp()) // ms_since_user_input
+                .set_u32(20, state.screen_saver_event_mask) // event_mask
+                .set_u8(24, 0) // kind = Blanked
+                .build()
         }
         2 => {
             // SelectInput

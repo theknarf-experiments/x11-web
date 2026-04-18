@@ -5,6 +5,7 @@ use tracing::{debug, info};
 use super::super::client::ClientState;
 use super::super::types::PresentSubscription;
 use crate::xserver::core::require_len;
+use crate::xserver::reply::ReplyBuf;
 
 // Present event mask bits (from the Present extension spec).
 const PRESENT_COMPLETE_NOTIFY_MASK: u32 = 1;
@@ -25,12 +26,10 @@ pub(crate) fn handle_xc_misc_request(state: &mut ClientState, data: &[u8], seq: 
     match minor {
         0 => {
             // GetVersion: reply with version 1.1
-            let mut reply = [0u8; 32];
-            reply[0] = 1; // Reply
-            state.write_u16(&mut reply, 2, seq);
-            state.write_u16(&mut reply, 8, 1); // major version
-            state.write_u16(&mut reply, 10, 1); // minor version
-            reply.to_vec()
+            ReplyBuf::fixed(seq, state.msb_first)
+                .set_u16(8, 1) // major version
+                .set_u16(10, 1) // minor version
+                .build()
         }
         1 => {
             // GetXIDRange: reply with a contiguous range of resource IDs.
@@ -45,12 +44,10 @@ pub(crate) fn handle_xc_misc_request(state: &mut ClientState, data: &[u8], seq: 
             // Advance the counter
             state.next_xid = state.resource_id_base | ((current_offset + range_size) & mask);
 
-            let mut reply = [0u8; 32];
-            reply[0] = 1; // Reply
-            state.write_u16(&mut reply, 2, seq);
-            state.write_u32(&mut reply, 8, start_id); // start_id
-            state.write_u32(&mut reply, 12, range_size); // count
-            reply.to_vec()
+            ReplyBuf::fixed(seq, state.msb_first)
+                .set_u32(8, start_id) // start_id
+                .set_u32(12, range_size) // count
+                .build()
         }
         2 => {
             // GetXIDList: return requested number of individual resource IDs.
@@ -87,16 +84,13 @@ pub(crate) fn handle_xc_misc_request(state: &mut ClientState, data: &[u8], seq: 
             let actual_count = ids.len() as u32;
             let extra_bytes = (actual_count as usize) * 4;
             let padded = (extra_bytes + 3) & !3;
-            let mut reply = vec![0u8; 32 + padded];
-            reply[0] = 1; // Reply
-            state.write_u16(&mut reply, 2, seq);
-            state.write_u32(&mut reply, 4, (padded / 4) as u32);
-            state.write_u32(&mut reply, 8, actual_count); // ids_count
+            let mut reply = ReplyBuf::with_extra(seq, padded, state.msb_first)
+                .set_u32(8, actual_count); // ids_count
             for (i, &id) in ids.iter().enumerate() {
                 let offset = 32 + i * 4;
-                state.write_u32(&mut reply, offset, id);
+                reply = reply.set_u32(offset, id);
             }
-            reply
+            reply.build()
         }
         _ => {
             debug!("Unhandled XC-MISC minor opcode: {minor}");
@@ -120,12 +114,10 @@ pub(crate) fn handle_present_request(state: &mut ClientState, data: &[u8], seq: 
     match minor {
         // QueryVersion
         0 => {
-            let mut reply = [0u8; 32];
-            reply[0] = 1; // Reply
-            state.write_u16(&mut reply, 2, seq);
-            state.write_u32(&mut reply, 8, 1); // major version
-            state.write_u32(&mut reply, 12, 2); // minor version
-            reply.to_vec()
+            ReplyBuf::fixed(seq, state.msb_first)
+                .set_u32(8, 1) // major version
+                .set_u32(12, 2) // minor version
+                .build()
         }
         // Pixmap (PresentPixmap) — the critical operation
         1 => {
@@ -589,11 +581,9 @@ pub(crate) fn handle_present_request(state: &mut ClientState, data: &[u8], seq: 
             } else {
                 0
             };
-            let mut reply = [0u8; 32];
-            reply[0] = 1; // Reply
-            state.write_u16(&mut reply, 2, seq);
-            state.write_u32(&mut reply, 8, PRESENT_CAPABILITY_ASYNC); // async: we always present asynchronously
-            reply.to_vec()
+            ReplyBuf::fixed(seq, state.msb_first)
+                .set_u32(8, PRESENT_CAPABILITY_ASYNC) // async: we always present asynchronously
+                .build()
         }
         _ => {
             debug!("Unhandled Present minor opcode: {minor}");

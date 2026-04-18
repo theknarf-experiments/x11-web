@@ -4,6 +4,7 @@ use tracing::{debug, warn};
 
 use super::super::super::client::ClientState;
 use super::super::super::core::*;
+use crate::xserver::reply::ReplyBuf;
 use super::DRI3_MAJOR_OPCODE;
 
 // -----------------------------------------------------------------
@@ -72,12 +73,9 @@ pub(crate) fn handle_fd_from_fence(
             let dup_fd = unsafe { libc::dup(fence.fd) };
             if dup_fd >= 0 {
                 state.reply_fds.push(dup_fd);
-                let mut reply = [0u8; 32];
-                reply[0] = 1; // Reply
-                reply[1] = 1; // nfd
-                write_u16_bo(&mut reply, 2, seq, bo);
-                write_u32_bo(&mut reply, 4, 0, bo); // length
-                return reply.to_vec();
+                return ReplyBuf::fixed(seq, bo)
+                    .set_data_byte(1) // nfd
+                    .build();
             }
         }
         // No fd backing — create an eventfd to represent the fence state
@@ -87,12 +85,9 @@ pub(crate) fn handle_fd_from_fence(
         };
         if efd >= 0 {
             state.reply_fds.push(efd);
-            let mut reply = [0u8; 32];
-            reply[0] = 1; // Reply
-            reply[1] = 1; // nfd
-            write_u16_bo(&mut reply, 2, seq, bo);
-            write_u32_bo(&mut reply, 4, 0, bo); // length
-            reply.to_vec()
+            ReplyBuf::fixed(seq, bo)
+                .set_data_byte(1) // nfd
+                .build()
         } else {
             warn!("DRI3 FDFromFence: eventfd creation failed");
             build_error_bo(BAD_ALLOC, seq, fence_id, DRI3_MAJOR_OPCODE, 5, bo)

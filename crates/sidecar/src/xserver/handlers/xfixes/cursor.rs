@@ -1,4 +1,5 @@
 //! XFIXES cursor operations.
+use crate::xserver::reply::ReplyBuf;
 
 use tracing::debug;
 
@@ -50,23 +51,20 @@ pub(crate) fn handle_get_cursor_image(state: &mut ClientState, data: &[u8], seq:
 
     let pixels_len = (width as usize) * (height as usize) * 4;
     let extra = 24 + pixels_len;
-    let total = 32 + extra;
-    let length_units = (extra / 4) as u32;
-    let mut reply = vec![0u8; total];
-    reply[0] = 1;
-    state.write_u16(&mut reply, 2, seq);
-    state.write_u32(&mut reply, 4, length_units);
-    state.write_i16(&mut reply, 8, state.pointer_x); // x
-    state.write_i16(&mut reply, 10, state.pointer_y); // y
-    state.write_u16(&mut reply, 12, width);
-    state.write_u16(&mut reply, 14, height);
-    state.write_u16(&mut reply, 16, hotspot_x);
-    state.write_u16(&mut reply, 18, hotspot_y);
-    state.write_u32(&mut reply, 20, state.cursor_serial);
+    let _total = 32 + extra;
+    let _length_units = (extra / 4) as u32;
+    let mut reply = ReplyBuf::with_extra(seq, extra, state.msb_first)
+        .set_i16(8, state.pointer_x) // x
+        .set_i16(10, state.pointer_y) // y
+        .set_u16(12, width)
+        .set_u16(14, height)
+        .set_u16(16, hotspot_x)
+        .set_u16(18, hotspot_y)
+        .set_u32(20, state.cursor_serial);
     // Copy ARGB pixel data
     let copy_len = pixels_len.min(argb_data.len());
-    reply[32..32 + copy_len].copy_from_slice(&argb_data[..copy_len]);
-    reply
+    reply.buf_mut()[32..32 + copy_len].copy_from_slice(&argb_data[..copy_len]);
+    reply.build()
 }
 
 /// 23: SetCursorName
@@ -131,18 +129,15 @@ pub(crate) fn handle_get_cursor_name(state: &mut ClientState, data: &[u8], seq: 
     let name_len = name_bytes.len();
     let pad = (4 - (name_len % 4)) % 4;
     let extra = name_len + pad;
-    let total = 32 + extra;
-    let length_units = (extra / 4) as u32;
-    let mut reply = vec![0u8; total];
-    reply[0] = 1;
-    state.write_u16(&mut reply, 2, seq);
-    state.write_u32(&mut reply, 4, length_units);
-    state.write_u32(&mut reply, 8, atom); // cursor name atom
-    state.write_u16(&mut reply, 12, name_len as u16); // nbytes
+    let _total = 32 + extra;
+    let _length_units = (extra / 4) as u32;
+    let mut reply = ReplyBuf::with_extra(seq, extra, state.msb_first)
+        .set_u32(8, atom) // cursor name atom
+        .set_u16(12, name_len as u16); // nbytes
     if !name_bytes.is_empty() {
-        reply[32..32 + name_len].copy_from_slice(name_bytes);
+        reply.buf_mut()[32..32 + name_len].copy_from_slice(name_bytes);
     }
-    reply
+    reply.build()
 }
 
 /// 25: GetCursorImageAndName
@@ -188,30 +183,27 @@ pub(crate) fn handle_get_cursor_image_and_name(
     //   x(2) y(2) width(2) height(2) hotspot_x(2) hotspot_y(2) serial(4) atom(4) name_len(2) pad(2)
     //   = 24 bytes of fields, then pixels, then name + padding
     let extra = 24 + pixels_len + name_len + name_pad;
-    let total = 32 + extra;
-    let length_units = (extra / 4) as u32;
-    let mut reply = vec![0u8; total];
-    reply[0] = 1;
-    state.write_u16(&mut reply, 2, seq);
-    state.write_u32(&mut reply, 4, length_units);
-    state.write_i16(&mut reply, 8, state.pointer_x); // x
-    state.write_i16(&mut reply, 10, state.pointer_y); // y
-    state.write_u16(&mut reply, 12, width);
-    state.write_u16(&mut reply, 14, height);
-    state.write_u16(&mut reply, 16, hotspot_x);
-    state.write_u16(&mut reply, 18, hotspot_y);
-    state.write_u32(&mut reply, 20, state.cursor_serial);
-    state.write_u32(&mut reply, 24, name_atom);
-    state.write_u16(&mut reply, 28, name_len as u16);
+    let _total = 32 + extra;
+    let _length_units = (extra / 4) as u32;
+    let mut reply = ReplyBuf::with_extra(seq, extra, state.msb_first)
+        .set_i16(8, state.pointer_x) // x
+        .set_i16(10, state.pointer_y) // y
+        .set_u16(12, width)
+        .set_u16(14, height)
+        .set_u16(16, hotspot_x)
+        .set_u16(18, hotspot_y)
+        .set_u32(20, state.cursor_serial)
+        .set_u32(24, name_atom)
+        .set_u16(28, name_len as u16);
     // Pixel data starts at 32
     let copy_len = pixels_len.min(argb_data.len());
-    reply[32..32 + copy_len].copy_from_slice(&argb_data[..copy_len]);
+    reply.buf_mut()[32..32 + copy_len].copy_from_slice(&argb_data[..copy_len]);
     // Name data follows pixels
     let name_offset = 32 + pixels_len;
     if !name_bytes.is_empty() {
-        reply[name_offset..name_offset + name_len].copy_from_slice(name_bytes);
+        reply.buf_mut()[name_offset..name_offset + name_len].copy_from_slice(name_bytes);
     }
-    reply
+    reply.build()
 }
 
 /// 26: ChangeCursor

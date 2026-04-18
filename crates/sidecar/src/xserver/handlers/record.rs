@@ -5,6 +5,7 @@
 //! registers ranges of protocol elements to intercept, then enables the
 //! context. While enabled, matching events/requests/replies/errors from
 //! OTHER clients are forwarded to the recording client as data replies.
+use crate::xserver::reply::ReplyBuf;
 
 use tracing::debug;
 
@@ -323,12 +324,10 @@ pub(crate) fn handle_record_request(state: &mut ClientState, data: &[u8], seq: u
     match minor {
         0 => {
             // QueryVersion
-            let mut reply = [0u8; 32];
-            reply[0] = 1;
-            reply[2..4].copy_from_slice(&seq.to_le_bytes());
-            reply[8..10].copy_from_slice(&1u16.to_le_bytes()); // major
-            reply[10..12].copy_from_slice(&13u16.to_le_bytes()); // minor
-            reply.to_vec()
+            ReplyBuf::fixed(seq, false) // RECORD uses LE byte order
+                .set_u16(8, 1) // major
+                .set_u16(10, 13) // minor
+                .build()
         }
         1 => {
             // CreateContext
@@ -532,52 +531,46 @@ pub(crate) fn handle_record_request(state: &mut ClientState, data: &[u8], seq: u
                     let padded = (client_info_bytes + 3) & !3;
                     let extra_words = padded / 4;
 
-                    let mut reply = vec![0u8; 32 + padded];
-                    reply[0] = 1;
-                    reply[1] = if ctx.enabled { 1 } else { 0 };
-                    reply[2..4].copy_from_slice(&seq.to_le_bytes());
-                    reply[4..8].copy_from_slice(&(extra_words as u32).to_le_bytes());
-                    reply[8] = ctx.element_header;
-                    reply[12..16].copy_from_slice(&num_clients.to_le_bytes());
+                    let mut reply = ReplyBuf::with_extra(seq, padded, false)
+                        .set_data_byte(if ctx.enabled { 1 } else { 0 })
+                        .set_u8(8, ctx.element_header)
+                        .set_u32(12, num_clients);
 
                     if num_clients > 0 {
                         // Write client info
                         let spec = ctx.client_specs.first().copied().unwrap_or(3);
-                        reply[32..36].copy_from_slice(&spec.to_le_bytes());
-                        reply[36..40].copy_from_slice(&ranges_per_client.to_le_bytes());
+                        reply.buf_mut()[32..36].copy_from_slice(&spec.to_le_bytes());
+                        reply.buf_mut()[36..40].copy_from_slice(&ranges_per_client.to_le_bytes());
 
                         // Write ranges
                         for (i, range) in ctx.ranges.iter().enumerate() {
                             let off = 40 + i * 24;
-                            if off + 24 <= reply.len() {
-                                reply[off] = range.core_requests.0;
-                                reply[off + 1] = range.core_requests.1;
-                                reply[off + 2] = range.core_replies.0;
-                                reply[off + 3] = range.core_replies.1;
-                                reply[off + 4] = range.ext_requests.0;
-                                reply[off + 5] = range.ext_requests.1;
-                                reply[off + 6] = range.ext_requests.2;
-                                reply[off + 8] = range.ext_replies.0;
-                                reply[off + 9] = range.ext_replies.1;
-                                reply[off + 10] = range.ext_replies.2;
-                                reply[off + 12] = range.delivered_events.0;
-                                reply[off + 13] = range.delivered_events.1;
-                                reply[off + 14] = range.device_events.0;
-                                reply[off + 15] = range.device_events.1;
-                                reply[off + 16] = range.errors.0;
-                                reply[off + 17] = range.errors.1;
-                                reply[off + 18] = if range.client_started { 1 } else { 0 };
-                                reply[off + 20] = if range.client_died { 1 } else { 0 };
+                            if off + 24 <= reply.buf_mut().len() {
+                                reply.buf_mut()[off] = range.core_requests.0;
+                                reply.buf_mut()[off + 1] = range.core_requests.1;
+                                reply.buf_mut()[off + 2] = range.core_replies.0;
+                                reply.buf_mut()[off + 3] = range.core_replies.1;
+                                reply.buf_mut()[off + 4] = range.ext_requests.0;
+                                reply.buf_mut()[off + 5] = range.ext_requests.1;
+                                reply.buf_mut()[off + 6] = range.ext_requests.2;
+                                reply.buf_mut()[off + 8] = range.ext_replies.0;
+                                reply.buf_mut()[off + 9] = range.ext_replies.1;
+                                reply.buf_mut()[off + 10] = range.ext_replies.2;
+                                reply.buf_mut()[off + 12] = range.delivered_events.0;
+                                reply.buf_mut()[off + 13] = range.delivered_events.1;
+                                reply.buf_mut()[off + 14] = range.device_events.0;
+                                reply.buf_mut()[off + 15] = range.device_events.1;
+                                reply.buf_mut()[off + 16] = range.errors.0;
+                                reply.buf_mut()[off + 17] = range.errors.1;
+                                reply.buf_mut()[off + 18] = if range.client_started { 1 } else { 0 };
+                                reply.buf_mut()[off + 20] = if range.client_died { 1 } else { 0 };
                             }
                         }
                     }
 
-                    reply
+                    reply.build()
                 } else {
-                    let mut reply = [0u8; 32];
-                    reply[0] = 1;
-                    reply[2..4].copy_from_slice(&seq.to_le_bytes());
-                    reply.to_vec()
+                    ReplyBuf::fixed(seq, false).build()
                 }
             } else {
                 crate::xserver::core::build_error_bo(

@@ -3,6 +3,7 @@
 //! DRI3 enables zero-copy buffer sharing between the X server and GPU clients
 //! via DMA-BUF file descriptors. Our implementation provides version negotiation
 //! and basic fd-backed pixmap import so Mesa's software fallback path works.
+use crate::xserver::reply::ReplyBuf;
 
 // DRI3 minor opcodes:
 // 0 = QueryVersion
@@ -61,13 +62,10 @@ pub(crate) fn handle_dri3_request(state: &mut ClientState, data: &[u8], seq: u16
 
             debug!("DRI3 QueryVersion: client={client_major}.{client_minor} -> reply={reply_major}.{reply_minor}");
 
-            let mut reply = [0u8; 32];
-            reply[0] = 1; // Reply
-            write_u16_bo(&mut reply, 2, seq, bo);
-            write_u32_bo(&mut reply, 4, 0, bo); // length
-            write_u32_bo(&mut reply, 8, reply_major, bo);
-            write_u32_bo(&mut reply, 12, reply_minor, bo);
-            reply.to_vec()
+            ReplyBuf::fixed(seq, bo)
+                .set_u32(8, reply_major)
+                .set_u32(12, reply_minor)
+                .build()
         }
 
         // -----------------------------------------------------------------
@@ -96,12 +94,9 @@ pub(crate) fn handle_dri3_request(state: &mut ClientState, data: &[u8], seq: u16
             state.reply_fds.push(fd);
 
             // Build the reply: 1 byte nfd (in unused/pad area), then 32-byte reply
-            let mut reply = [0u8; 32];
-            reply[0] = 1; // Reply
-            reply[1] = 1; // nfd
-            write_u16_bo(&mut reply, 2, seq, bo);
-            write_u32_bo(&mut reply, 4, 0, bo); // length
-            reply.to_vec()
+            ReplyBuf::fixed(seq, bo)
+                .set_data_byte(1) // nfd
+                .build()
         }
 
         // Pixmap operations

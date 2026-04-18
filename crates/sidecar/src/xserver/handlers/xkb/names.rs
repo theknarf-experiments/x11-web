@@ -4,6 +4,7 @@ use super::super::super::client::ClientState;
 use super::{MAX_KEY_CODE, MIN_KEY_CODE, N_KEYS};
 use crate::xserver::core::require_len;
 use crate::xserver::core::{read_u16_bo as read_u16, read_u32_bo as read_u32};
+use crate::xserver::reply::ReplyBuf;
 use tracing::debug;
 
 /// Build an XKB GetNames reply.
@@ -255,29 +256,26 @@ pub(crate) fn build_xkb_get_names_reply(
         }
     }
 
-    let total_len = 32 + data.len();
-    let length_words = (data.len() / 4) as u32;
-
-    let mut reply = vec![0u8; total_len];
-    reply[0] = 1;
-    reply[1] = device_id;
-    state.write_u16(&mut reply, 2, seq);
-    state.write_u32(&mut reply, 4, length_words);
-    state.write_u32(&mut reply, 8, which);
-    reply[12] = MIN_KEY_CODE;
-    reply[13] = MAX_KEY_CODE;
-    reply[14] = N_TYPES;
-    reply[15] = group_names_present;
-    state.write_u16(&mut reply, 16, virtual_mods);
-    reply[18] = MIN_KEY_CODE; // firstKey
-    reply[19] = N_KEYS as u8; // nKeys
-    state.write_u32(&mut reply, 20, indicators_present);
-    reply[24] = 0; // nRadioGroups
-    reply[25] = n_key_aliases as u8;
-    state.write_u16(&mut reply, 26, u16::from(total_levels)); // nKTLevels
-                                                              // 28-31: pad
-    reply[32..32 + data.len()].copy_from_slice(&data);
-    reply
+    let mut reply = ReplyBuf::with_extra(seq, data.len(), state.msb_first)
+        .set_data_byte(device_id)
+        .set_u32(8, which)
+        .set_u16(16, virtual_mods)
+        .set_u32(20, indicators_present)
+        .set_u16(26, u16::from(total_levels)); // nKTLevels
+    {
+        let buf = reply.buf_mut();
+        buf[12] = MIN_KEY_CODE;
+        buf[13] = MAX_KEY_CODE;
+        buf[14] = N_TYPES;
+        buf[15] = group_names_present;
+        buf[18] = MIN_KEY_CODE; // firstKey
+        buf[19] = N_KEYS as u8; // nKeys
+        buf[24] = 0; // nRadioGroups
+        buf[25] = n_key_aliases as u8;
+        // 28-31: pad
+        buf[32..32 + data.len()].copy_from_slice(&data);
+    }
+    reply.build()
 }
 
 /// Handle XKB SetNames request (minor opcode 18).

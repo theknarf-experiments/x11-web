@@ -11,6 +11,7 @@ use crate::xserver::core::{
     read_i16_bo as read_i16, read_u16_bo as read_u16, read_u32_bo as read_u32,
 };
 use tracing::debug;
+use crate::xserver::reply::ReplyBuf;
 
 /// Build an XKB GetState reply with real modifier/group state.
 pub(crate) fn build_xkb_get_state_reply(state: &ClientState, seq: u16, device_id: u8) -> Vec<u8> {
@@ -39,27 +40,24 @@ pub(crate) fn build_xkb_get_state_reply(state: &ClientState, seq: u16, device_id
     //  23: pad
     //  24-25: ptrBtnState (pointer button state)
     //  26-31: pad
-    let mut reply = [0u8; 32];
-    reply[0] = 1;
-    reply[1] = device_id;
-    state.write_u16(&mut reply, 2, seq);
-    // length = 0 (fits in 32 bytes)
-    reply[8] = effective_mods;
-    reply[9] = xkb.base_mods;
-    reply[10] = xkb.latched_mods;
-    reply[11] = xkb.locked_mods;
-    reply[12] = effective_group;
-    reply[13] = xkb.locked_group as u8;
-    state.write_i16(&mut reply, 14, xkb.base_group);
-    state.write_i16(&mut reply, 16, xkb.latched_group);
-    reply[18] = effective_mods; // compatState
-    reply[19] = effective_mods; // grabMods
-    reply[20] = effective_mods; // compatGrabMods
-    reply[21] = effective_mods; // lookupMods
-    reply[22] = effective_mods; // compatLookupMods
-                                // 23 = pad
-                                // 24-25: ptrBtnState = 0 (no pointer button state tracked here)
-    reply.to_vec()
+    ReplyBuf::fixed(seq, state.msb_first)
+        .set_data_byte(device_id)
+        .set_u8(8, effective_mods)
+        .set_u8(9, xkb.base_mods)
+        .set_u8(10, xkb.latched_mods)
+        .set_u8(11, xkb.locked_mods)
+        .set_u8(12, effective_group)
+        .set_u8(13, xkb.locked_group as u8)
+        .set_i16(14, xkb.base_group)
+        .set_i16(16, xkb.latched_group)
+        .set_u8(18, effective_mods) // compatState
+        .set_u8(19, effective_mods) // grabMods
+        .set_u8(20, effective_mods) // compatGrabMods
+        .set_u8(21, effective_mods) // lookupMods
+        .set_u8(22, effective_mods) // compatLookupMods
+        // 23 = pad
+        // 24-25: ptrBtnState = 0 (no pointer button state tracked here)
+        .build()
 }
 
 /// Handle XKB LatchLockState request.
@@ -136,17 +134,10 @@ pub(crate) fn build_xkb_get_controls_reply(
     let ctrls = &state.xkb_state.controls;
 
     // GetControls reply: 92 bytes total (32 header + 60 body)
-    let mut reply = vec![0u8; 92];
-    reply[0] = 1;
-    reply[1] = device_id;
-    state.write_u16(&mut reply, 2, seq);
-    // length = (92 - 32) / 4 = 15
-    state.write_u32(&mut reply, 4, 15);
-
-    // Byte 8: mouseKeysDfltBtn
-    reply[8] = ctrls.mk_dflt_btn;
-    // Byte 9: numGroups (must be >= 1)
-    reply[9] = ctrls.num_groups.max(1);
+    let mut reply = ReplyBuf::with_extra(seq, 60, state.msb_first)
+        .set_data_byte(device_id)
+        .set_u8(8, ctrls.mk_dflt_btn) // mouseKeysDfltBtn
+        .set_u8(9, ctrls.num_groups.max(1)); // numGroups (must be >= 1)
     // Byte 10: groupsWrap = 0 (Wrap)
     // Byte 11: internalMods mask
     // Byte 12: ignoreLockMods mask
@@ -155,47 +146,25 @@ pub(crate) fn build_xkb_get_controls_reply(
     // Bytes 15-16: internalMods vmods (CARD16)
     // Bytes 17-18: ignoreLockMods vmods (CARD16)
 
-    // Byte 20-21: repeatDelay
-    state.write_u16(&mut reply, 20, ctrls.repeat_delay);
-    // Byte 22-23: repeatInterval
-    state.write_u16(&mut reply, 22, ctrls.repeat_interval);
-
-    // Bytes 24-25: slowKeysDelay
-    state.write_u16(&mut reply, 24, ctrls.slow_keys_delay);
-    // Bytes 26-27: debounceDelay
-    state.write_u16(&mut reply, 26, ctrls.debounce_delay);
-
-    // Bytes 28-29: mouseKeysDelay
-    state.write_u16(&mut reply, 28, ctrls.mk_delay);
-    // Bytes 30-31: mouseKeysInterval
-    state.write_u16(&mut reply, 30, ctrls.mk_interval);
-    // Bytes 32-33: mouseKeysTimeToMax
-    state.write_u16(&mut reply, 32, ctrls.mk_time_to_max);
-    // Bytes 34-35: mouseKeysMaxSpeed
-    state.write_u16(&mut reply, 34, ctrls.mk_max_speed);
-    // Bytes 36-37: mouseKeysCurve (INT16)
-    state.write_i16(&mut reply, 36, ctrls.mk_curve);
-
-    // Bytes 38-39: accessXOption (CARD16)
-    state.write_u16(&mut reply, 38, ctrls.ax_options as u16);
-
-    // Bytes 40-41: accessXTimeout
-    state.write_u16(&mut reply, 40, ctrls.ax_timeout);
-
-    // Bytes 42-43: accessXTimeoutOptionsMask
-    // Bytes 44-45: accessXTimeoutOptionsValues
-    // Bytes 46-47: pad
-
-    // Bytes 48-51: accessXTimeoutMask (CARD32)
-    // Bytes 52-55: accessXTimeoutValues (CARD32)
-
-    // Bytes 56-59: enabledControls (CARD32)
-    state.write_u32(&mut reply, 56, ctrls.enabled_ctrls);
+    reply = reply
+        .set_u16(20, ctrls.repeat_delay) // repeatDelay
+        .set_u16(22, ctrls.repeat_interval) // repeatInterval
+        .set_u16(24, ctrls.slow_keys_delay) // slowKeysDelay
+        .set_u16(26, ctrls.debounce_delay) // debounceDelay
+        .set_u16(28, ctrls.mk_delay) // mouseKeysDelay
+        .set_u16(30, ctrls.mk_interval) // mouseKeysInterval
+        .set_u16(32, ctrls.mk_time_to_max) // mouseKeysTimeToMax
+        .set_u16(34, ctrls.mk_max_speed) // mouseKeysMaxSpeed
+        .set_i16(36, ctrls.mk_curve) // mouseKeysCurve (INT16)
+        .set_u16(38, ctrls.ax_options as u16) // accessXOption (CARD16)
+        .set_u16(40, ctrls.ax_timeout) // accessXTimeout
+        // Bytes 42-55: various timeout masks/values (zero)
+        .set_u32(56, ctrls.enabled_ctrls); // enabledControls (CARD32)
 
     // Bytes 60-91: perKeyRepeat (32 bytes)
-    reply[60..92].copy_from_slice(&ctrls.per_key_repeat);
+    reply.buf_mut()[60..92].copy_from_slice(&ctrls.per_key_repeat);
 
-    reply
+    reply.build()
 }
 
 /// Handle XKB SetControls request.

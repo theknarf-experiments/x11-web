@@ -1,4 +1,5 @@
 //! XKB compatibility map: GetCompatMap, SetCompatMap, and compat compilation.
+use crate::xserver::reply::ReplyBuf;
 
 use tracing::debug;
 
@@ -221,19 +222,15 @@ pub(crate) fn build_xkb_get_compat_map_reply(
     }
 
     let body = [si_data.as_slice(), group_data.as_slice()].concat();
-    let length_words = (body.len() / 4) as u32;
 
-    let mut reply = vec![0u8; 32 + body.len()];
-    reply[0] = 1; // Reply
-    reply[1] = device_id;
-    state.write_u16(&mut reply, 2, seq);
-    state.write_u32(&mut reply, 4, length_words);
-    reply[8] = 0x0F; // groupsRtrn: all 4 groups
-                     // 10-11: firstSIRtrn (CARD16) = 0
-    state.write_u16(&mut reply, 12, n_si); // nSIRtrn
-    state.write_u16(&mut reply, 14, n_si); // nTotalSI
-    reply[32..].copy_from_slice(&body);
-    reply
+    let mut reply = ReplyBuf::with_extra(seq, body.len(), state.msb_first)
+        .set_data_byte(device_id)
+        .set_u8(8, 0x0F) // groupsRtrn: all 4 groups
+        // 10-11: firstSIRtrn (CARD16) = 0
+        .set_u16(12, n_si) // nSIRtrn
+        .set_u16(14, n_si); // nTotalSI
+    reply.buf_mut()[32..].copy_from_slice(&body);
+    reply.build()
 }
 
 /// Parse and apply a SetCompatMap request.

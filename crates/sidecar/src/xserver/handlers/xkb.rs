@@ -7,6 +7,7 @@
 //!   compat     — GetCompatMap, SetCompatMap, compat compilation
 //!   indicators — GetIndicatorState, GetIndicatorMap, SetIndicatorMap, GetNamedIndicator
 //!   device     — ListComponents, GetDeviceInfo, SetDeviceInfo
+use crate::xserver::reply::ReplyBuf;
 
 mod compat;
 mod controls;
@@ -244,12 +245,10 @@ pub(crate) fn handle_ge_request(state: &mut ClientState, data: &[u8], seq: u16) 
     match minor {
         0 => {
             // QueryVersion: reply with version 1.0
-            let mut reply = [0u8; 32];
-            reply[0] = 1; // Reply
-            state.write_u16(&mut reply, 2, seq);
-            state.write_u16(&mut reply, 8, 1); // major version
-            state.write_u16(&mut reply, 10, 0); // minor version
-            reply.to_vec()
+            ReplyBuf::fixed(seq, state.msb_first)
+                .set_u16(8, 1) // major version
+                .set_u16(10, 0) // minor version
+                .build()
         }
         _ => {
             debug!("Unhandled GE minor opcode: {minor}");
@@ -278,13 +277,11 @@ pub(crate) fn handle_xkb_request(state: &mut ClientState, data: &[u8], seq: u16)
     match minor {
         0 => {
             // UseExtension: reply with supported=true, version 1.0
-            let mut reply = [0u8; 32];
-            reply[0] = 1; // Reply
-            reply[1] = 1; // supported = true
-            state.write_u16(&mut reply, 2, seq);
-            state.write_u16(&mut reply, 8, 1); // server major version
-            state.write_u16(&mut reply, 10, 0); // server minor version
-            reply.to_vec()
+            ReplyBuf::fixed(seq, state.msb_first)
+                .set_data_byte(1) // supported = true
+                .set_u16(8, 1) // server major version
+                .set_u16(10, 0) // server minor version
+                .build()
         }
         1 => handle_xkb_select_events(state, data), // SelectEvents
         3 => {
@@ -336,10 +333,8 @@ pub(crate) fn handle_xkb_request(state: &mut ClientState, data: &[u8], seq: u16)
             // PerClientFlags: parse change/value/ctrls and reply with supported flags.
             // Wire: 4-5=device_spec, 8-11=change, 12-15=value,
             //       16-19=ctrls_to_change, 20-23=auto_ctrls, 24-27=auto_ctrls_values
-            let mut reply = [0u8; 32];
-            reply[0] = 1;
-            reply[1] = device_id_byte;
-            state.write_u16(&mut reply, 2, seq);
+            let mut reply = ReplyBuf::fixed(seq, state.msb_first)
+                .set_data_byte(device_id_byte);
             if data.len() >= 28 {
                 let change = state.read_u32(data, 8);
                 let value = state.read_u32(data, 12);
@@ -348,19 +343,21 @@ pub(crate) fn handle_xkb_request(state: &mut ClientState, data: &[u8], seq: u16)
                 let auto_ctrls_values = state.read_u32(data, 24);
                 let result = value & change;
                 let supported: u32 = 0x1F; // all per-client flags supported
-                state.write_u32(&mut reply, 8, supported); // supported
-                state.write_u32(&mut reply, 12, result); // value
-                state.write_u32(&mut reply, 16, auto_ctrls); // autoCtrls
-                state.write_u32(&mut reply, 20, auto_ctrls_values); // autoCtrlsValues
+                reply = reply
+                    .set_u32(8, supported) // supported
+                    .set_u32(12, result) // value
+                    .set_u32(16, auto_ctrls) // autoCtrls
+                    .set_u32(20, auto_ctrls_values); // autoCtrlsValues
             } else if data.len() >= 16 {
                 let change = state.read_u32(data, 8);
                 let value = state.read_u32(data, 12);
                 let result = value & change;
-                state.write_u32(&mut reply, 8, 0x1F); // supported
-                state.write_u32(&mut reply, 12, result);
+                reply = reply
+                    .set_u32(8, 0x1F) // supported
+                    .set_u32(12, result);
             }
             debug!("PerClientFlags reply");
-            reply.to_vec()
+            reply.build()
         }
         22 => device::handle_list_components(state, seq, device_id_byte),
         23 => map::handle_xkb_get_kbd_by_name(state, data, seq, device_id_byte),
@@ -370,17 +367,15 @@ pub(crate) fn handle_xkb_request(state: &mut ClientState, data: &[u8], seq: u16)
             // SetDebuggingFlags: reply with all-zero flags/ctrls.
             // Wire: 4-7=msg_length, 8-11=affect_flags, 12-15=flags,
             //       16-19=affect_ctrls, 20-23=ctrls, then message.
-            let mut reply = [0u8; 32];
-            reply[0] = 1;
-            reply[1] = device_id_byte;
-            state.write_u16(&mut reply, 2, seq);
             // 8-11: currentFlags = 0
             // 12-15: supportedFlags = 0
             // 16-19: currentCtrls = 0
             // 20-23: supportedCtrls = 0
             // All zeros already.
             debug!("SetDebuggingFlags: returning zeros");
-            reply.to_vec()
+            ReplyBuf::fixed(seq, state.msb_first)
+                .set_data_byte(device_id_byte)
+                .build()
         }
         _ => {
             debug!("Unhandled XKB minor opcode: {minor}");

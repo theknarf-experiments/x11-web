@@ -6,6 +6,7 @@ use super::super::client::ClientState;
 use super::super::core::{OVERLAY_WINDOW, ROOT_COLORMAP};
 use super::super::types::{DamageInfo, PixmapState, WindowState, WindowType};
 use crate::xserver::core::require_len;
+use crate::xserver::reply::ReplyBuf;
 
 pub(crate) fn handle_damage_request(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
     let minor = data[1];
@@ -14,12 +15,10 @@ pub(crate) fn handle_damage_request(state: &mut ClientState, data: &[u8], seq: u
     match minor {
         0 => {
             // QueryVersion: reply with version 1.1
-            let mut reply = [0u8; 32];
-            reply[0] = 1; // Reply
-            state.write_u16(&mut reply, 2, seq);
-            state.write_u32(&mut reply, 8, 1); // major version
-            state.write_u32(&mut reply, 12, 1); // minor version
-            reply.to_vec()
+            ReplyBuf::fixed(seq, state.msb_first)
+                .set_u32(8, 1) // major version
+                .set_u32(12, 1) // minor version
+                .build()
         }
         1 => {
             // DamageCreate: data[4..8] = damage_id, data[8..12] = drawable, data[12] = level
@@ -124,12 +123,10 @@ pub(crate) fn handle_x_composite_request(
     match minor {
         0 => {
             // QueryVersion: reply with version 0.4
-            let mut reply = [0u8; 32];
-            reply[0] = 1; // Reply
-            state.write_u16(&mut reply, 2, seq);
-            state.write_u32(&mut reply, 8, 0); // major version
-            state.write_u32(&mut reply, 12, 4); // minor version
-            reply.to_vec()
+            ReplyBuf::fixed(seq, state.msb_first)
+                .set_u32(8, 0) // major version
+                .set_u32(12, 4) // minor version
+                .build()
         }
         1 => {
             // RedirectWindow: data[4..8] = window, data[8] = update
@@ -382,11 +379,9 @@ pub(crate) fn handle_x_composite_request(
                 "Overlay window ref count incremented to {}",
                 state.overlay_ref_count
             );
-            let mut reply = [0u8; 32];
-            reply[0] = 1; // Reply
-            state.write_u16(&mut reply, 2, seq);
-            state.write_u32(&mut reply, 8, OVERLAY_WINDOW);
-            reply.to_vec()
+            ReplyBuf::fixed(seq, state.msb_first)
+                .set_u32(8, OVERLAY_WINDOW)
+                .build()
         }
         8 => {
             // ReleaseOverlayWindow: data[4..8] = window

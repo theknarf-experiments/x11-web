@@ -5,6 +5,7 @@ mod notify;
 mod port;
 
 use super::super::client::ClientState;
+use crate::xserver::reply::ReplyBuf;
 
 /// XVideo (Xv) (opcode 156)
 ///
@@ -85,12 +86,10 @@ pub(crate) fn handle_xvideo_request(state: &mut ClientState, data: &[u8], seq: u
     match minor {
         0 => {
             // XvQueryExtension
-            let mut reply = [0u8; 32];
-            reply[0] = 1;
-            state.write_u16(&mut reply, 2, seq);
-            state.write_u16(&mut reply, 8, 2); // major
-            state.write_u16(&mut reply, 10, 2); // minor
-            reply.to_vec()
+            ReplyBuf::fixed(seq, state.msb_first)
+                .set_u16(8, 2) // major
+                .set_u16(10, 2) // minor
+                .build()
         }
         1 => {
             // XvQueryAdaptors
@@ -104,31 +103,30 @@ pub(crate) fn handle_xvideo_request(state: &mut ClientState, data: &[u8], seq: u
             // + format list: visual(4) + depth(1) + pad(3) per format
             let format_entry_size = 8; // visual(4) + depth(1) + pad(3)
             let adaptor_size = 12 + name_padded + format_entry_size; // 1 format
-            let extra_words = (adaptor_size / 4) as u32;
 
-            let mut reply = vec![0u8; 32 + adaptor_size];
-            reply[0] = 1;
-            state.write_u16(&mut reply, 2, seq);
-            state.write_u32(&mut reply, 4, extra_words);
-            state.write_u16(&mut reply, 8, 1); // num_adaptors
+            let mut reply = ReplyBuf::with_extra(seq, adaptor_size, state.msb_first)
+                .set_u16(8, 1); // num_adaptors
 
             // Adaptor info
             let off = 32;
-            state.write_u32(&mut reply[off..], 0, XV_PORT_BASE); // base_id
-            state.write_u16(&mut reply[off..], 4, name_len as u16); // name_size
-            state.write_u16(&mut reply[off..], 6, XV_NUM_PORTS as u16); // num_ports
-            state.write_u16(&mut reply[off..], 8, 1); // num_formats
-            reply[off + 10] = 0x06; // type = InputMask | ImageMask (video input + image)
+            {
+                let buf = reply.buf_mut();
+                state.write_u32(&mut buf[off..], 0, XV_PORT_BASE); // base_id
+                state.write_u16(&mut buf[off..], 4, name_len as u16); // name_size
+                state.write_u16(&mut buf[off..], 6, XV_NUM_PORTS as u16); // num_ports
+                state.write_u16(&mut buf[off..], 8, 1); // num_formats
+                buf[off + 10] = 0x06; // type = InputMask | ImageMask (video input + image)
 
-            // Name
-            reply[off + 12..off + 12 + name_len].copy_from_slice(adaptor_name);
+                // Name
+                buf[off + 12..off + 12 + name_len].copy_from_slice(adaptor_name);
 
-            // Format: visual + depth
-            let fmt_off = off + 12 + name_padded;
-            state.write_u32(&mut reply[fmt_off..], 0, 0x21); // root visual
-            reply[fmt_off + 4] = 24; // depth
+                // Format: visual + depth
+                let fmt_off = off + 12 + name_padded;
+                state.write_u32(&mut buf[fmt_off..], 0, 0x21); // root visual
+                buf[fmt_off + 4] = 24; // depth
+            }
 
-            reply
+            reply.build()
         }
         2 => {
             // XvQueryEncodings
@@ -137,24 +135,23 @@ pub(crate) fn handle_xvideo_request(state: &mut ClientState, data: &[u8], seq: u
             let name_len = enc_name.len();
             let name_padded = (name_len + 3) & !3;
             let enc_size = 16 + name_padded; // id(4) + name_size(2) + width(2) + height(2) + rate_num(4) + rate_den(4) + name
-            let extra_words = (enc_size / 4) as u32;
 
-            let mut reply = vec![0u8; 32 + enc_size];
-            reply[0] = 1;
-            state.write_u16(&mut reply, 2, seq);
-            state.write_u32(&mut reply, 4, extra_words);
-            state.write_u16(&mut reply, 8, 1); // num_encodings
+            let mut reply = ReplyBuf::with_extra(seq, enc_size, state.msb_first)
+                .set_u16(8, 1); // num_encodings
 
             let off = 32;
-            state.write_u32(&mut reply[off..], 0, 0); // encoding_id
-            state.write_u16(&mut reply[off..], 4, name_len as u16);
-            state.write_u16(&mut reply[off..], 6, state.screen_width);
-            state.write_u16(&mut reply[off..], 8, state.screen_height);
-            // rate = 30/1
-            state.write_u32(&mut reply[off..], 12, 30); // numerator
-            state.write_u32(&mut reply[off..], 16, 1); // denominator (skip 10-11 padding)
-            reply[off + 20..off + 20 + name_len].copy_from_slice(enc_name);
-            reply
+            {
+                let buf = reply.buf_mut();
+                state.write_u32(&mut buf[off..], 0, 0); // encoding_id
+                state.write_u16(&mut buf[off..], 4, name_len as u16);
+                state.write_u16(&mut buf[off..], 6, state.screen_width);
+                state.write_u16(&mut buf[off..], 8, state.screen_height);
+                // rate = 30/1
+                state.write_u32(&mut buf[off..], 12, 30); // numerator
+                state.write_u32(&mut buf[off..], 16, 1); // denominator (skip 10-11 padding)
+                buf[off + 20..off + 20 + name_len].copy_from_slice(enc_name);
+            }
+            reply.build()
         }
         3 | 4 | 9 | 10 | 11 | 15 => port::handle_port_request(state, data, seq, minor),
         5 | 6 | 7 | 8 | 12 | 16 | 17 | 18 | 19 | 20 => {

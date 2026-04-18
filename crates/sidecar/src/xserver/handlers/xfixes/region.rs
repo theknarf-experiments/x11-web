@@ -5,6 +5,7 @@ use tracing::debug;
 use super::super::super::client::ClientState;
 use super::super::super::types::{RegionRect, XFixesRegion};
 use crate::xserver::core::require_len;
+use crate::xserver::reply::ReplyBuf;
 
 /// 5: CreateRegion
 pub(crate) fn handle_create_region(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
@@ -345,26 +346,22 @@ pub(crate) fn handle_fetch_region(state: &mut ClientState, data: &[u8], seq: u16
     };
     let rects_bytes = rects.len() * 8;
     let extra = 8 + rects_bytes; // 8 bytes extents + rect data
-    let total = 32 + extra;
-    let length_units = (extra / 4) as u32;
-    let mut reply = vec![0u8; total];
-    reply[0] = 1; // Reply
-    state.write_u16(&mut reply, 2, seq);
-    state.write_u32(&mut reply, 4, length_units);
-    // Extents: x1, y1, x2, y2 as i16
-    state.write_i16(&mut reply, 8, ext.x);
-    state.write_i16(&mut reply, 10, ext.y);
-    state.write_i16(&mut reply, 12, ext.x + ext.width as i16);
-    state.write_i16(&mut reply, 14, ext.y + ext.height as i16);
+    let mut reply = ReplyBuf::with_extra(seq, extra, state.msb_first)
+        // Extents: x1, y1, x2, y2 as i16
+        .set_i16(8, ext.x)
+        .set_i16(10, ext.y)
+        .set_i16(12, ext.x + ext.width as i16)
+        .set_i16(14, ext.y + ext.height as i16);
     // Rectangles
     for (i, r) in rects.iter().enumerate() {
         let off = 32 + 8 + i * 8;
-        state.write_i16(&mut reply, off, r.x);
-        state.write_i16(&mut reply, off + 2, r.y);
-        state.write_u16(&mut reply, off + 4, r.width);
-        state.write_u16(&mut reply, off + 6, r.height);
+        reply = reply
+            .set_i16(off, r.x)
+            .set_i16(off + 2, r.y)
+            .set_u16(off + 4, r.width)
+            .set_u16(off + 6, r.height);
     }
-    reply
+    reply.build()
 }
 
 /// 20: SetGCClipRegion

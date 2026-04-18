@@ -2,6 +2,7 @@
 
 use super::*;
 use crate::xserver::core::require_len;
+use crate::xserver::reply::ReplyBuf;
 
 // ---------------------------------------------------------------------------
 // Opcode 2: ChangeWindowAttributes
@@ -189,36 +190,35 @@ pub(crate) fn handle_get_window_attributes(
         None => return build_error(BAD_WINDOW, seq, wid, 3, 0),
     };
 
-    let mut reply = vec![0u8; 44];
-    reply[0] = 1; // Reply
-    reply[1] = win.backing_store;
-    state.write_u16(&mut reply, 2, seq);
-    state.write_u32(&mut reply, 4, 3u32); // length = 3 extra u32s
-    state.write_u32(&mut reply, 8, win.visual); // visual (4 bytes)
-    state.write_u16(&mut reply, 12, win.class); // class (2 bytes)
-    reply[14] = state.bit_gravity.get(&wid).copied().unwrap_or(0); // bit_gravity
-    reply[15] = state.win_gravity.get(&wid).copied().unwrap_or(1); // win_gravity
-    state.write_u32(&mut reply, 16, win.backing_planes); // backing_planes
-    state.write_u32(&mut reply, 20, win.backing_pixel); // backing_pixel
-    reply[24] = if win.save_under { 1 } else { 0 };
-    reply[25] = 1; // map_is_installed = true
-    reply[26] = if win.mapped { 2 } else { 0 }; // map_state: Viewable or Unmapped
-    reply[27] = if win.override_redirect { 1 } else { 0 };
+    let bit_gravity = state.bit_gravity.get(&wid).copied().unwrap_or(0);
+    let win_gravity = state.win_gravity.get(&wid).copied().unwrap_or(1);
+    let mut reply = ReplyBuf::with_extra(seq, 12, state.msb_first)
+        .set_data_byte(win.backing_store)
+        .set_u32(8, win.visual) // visual (4 bytes)
+        .set_u16(12, win.class) // class (2 bytes)
+        .set_u8(14, bit_gravity) // bit_gravity
+        .set_u8(15, win_gravity) // win_gravity
+        .set_u32(16, win.backing_planes); // backing_planes
     let cmap = if win.colormap != 0 {
         win.colormap
     } else {
         ROOT_COLORMAP
     };
-    state.write_u32(&mut reply, 28, cmap); // colormap
-                                           // all_event_masks: union of all clients' event masks (own + remote)
+    // all_event_masks: union of all clients' event masks (own + remote)
     let remote_masks = state.event_broadcaster.all_event_masks(wid);
-    state.write_u32(&mut reply, 32, win.event_mask | remote_masks);
-    // your_event_mask: this client's own event mask
-    state.write_u32(&mut reply, 36, win.event_mask);
-    state.write_u16(&mut reply, 40, win.do_not_propagate_mask as u16); // do_not_propagate_mask
-                                                                       // bytes 42-43: unused padding
+    reply = reply
+        .set_u32(20, win.backing_pixel) // backing_pixel
+        .set_u8(24, if win.save_under { 1 } else { 0 })
+        .set_u8(25, 1) // map_is_installed = true
+        .set_u8(26, if win.mapped { 2 } else { 0 }) // map_state: Viewable or Unmapped
+        .set_u8(27, if win.override_redirect { 1 } else { 0 })
+        .set_u32(28, cmap) // colormap
+        .set_u32(32, win.event_mask | remote_masks) // all_event_masks
+        .set_u32(36, win.event_mask) // your_event_mask
+        .set_u16(40, win.do_not_propagate_mask as u16); // do_not_propagate_mask
+    // bytes 42-43: unused padding
 
-    reply
+    reply.build()
 }
 
 // ---------------------------------------------------------------------------

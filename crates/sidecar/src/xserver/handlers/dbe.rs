@@ -5,6 +5,7 @@ use tracing::debug;
 use super::super::client::ClientState;
 use crate::framebuffer::Framebuffer;
 use crate::xserver::core::require_len;
+use crate::xserver::reply::ReplyBuf;
 
 /// DBE - Double Buffer Extension (opcode 157)
 pub(crate) fn handle_dbe_request(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
@@ -12,12 +13,10 @@ pub(crate) fn handle_dbe_request(state: &mut ClientState, data: &[u8], seq: u16)
     match minor {
         0 => {
             // GetVersion
-            let mut reply = [0u8; 32];
-            reply[0] = 1;
-            state.write_u16(&mut reply, 2, seq);
-            reply[8] = 1; // major_version
-            reply[9] = 0; // minor_version
-            reply.to_vec()
+            ReplyBuf::fixed(seq, state.msb_first)
+                .set_u8(8, 1) // major_version
+                .set_u8(9, 0) // minor_version
+                .build()
         }
         1 => {
             // AllocateBackBufferName
@@ -175,33 +174,30 @@ pub(crate) fn handle_dbe_request(state: &mut ClientState, data: &[u8], seq: u16)
             let screen_info_size = 4 + per_depth_size; // n_perfdepth(4) + depths
             let extra = 4 + screen_info_size; // n_screens already in header, then screen data
             let padded = (extra + 3) & !3;
-            let mut reply = vec![0u8; 32 + padded];
-            reply[0] = 1;
-            state.write_u16(&mut reply, 2, seq);
-            state.write_u32(&mut reply, 4, (padded / 4) as u32);
-            state.write_u32(&mut reply, 8, n_screens);
+            let mut reply = ReplyBuf::with_extra(seq, padded, state.msb_first)
+                .set_u32(8, n_screens);
             // Screen 0
             let off = 32;
-            state.write_u32(&mut reply, off, 1); // n_perfdepth = 1
+            reply = reply.set_u32(off, 1); // n_perfdepth = 1
 
             // PerflDepthInfo
             let doff = off + 4;
-            reply[doff] = 24; // depth
-            state.write_u16(&mut reply, doff + 2, n_visuals);
+            reply = reply.set_u8(doff, 24) // depth
+                .set_u16(doff + 2, n_visuals);
 
             // Visual 0: ROOT_VISUAL (24-bit)
             let voff = doff + 4;
-            state.write_u32(&mut reply, voff, 0x21); // ROOT_VISUAL
-            reply[voff + 4] = 24; // depth
-            reply[voff + 5] = 0; // performance level
+            reply = reply.set_u32(voff, 0x21) // ROOT_VISUAL
+                .set_u8(voff + 4, 24) // depth
+                .set_u8(voff + 5, 0); // performance level
 
             // Visual 1: ARGB visual (32-bit)
             let voff2 = voff + 8;
-            state.write_u32(&mut reply, voff2, 0x40); // ARGB visual
-            reply[voff2 + 4] = 32;
-            reply[voff2 + 5] = 0;
+            reply = reply.set_u32(voff2, 0x40) // ARGB visual
+                .set_u8(voff2 + 4, 32)
+                .set_u8(voff2 + 5, 0);
 
-            reply
+            reply.build()
         }
         7 => {
             // GetBackBufferAttributes
@@ -212,11 +208,9 @@ pub(crate) fn handle_dbe_request(state: &mut ClientState, data: &[u8], seq: u16)
                 .get(&back_buffer_id)
                 .copied()
                 .unwrap_or(0);
-            let mut reply = [0u8; 32];
-            reply[0] = 1;
-            state.write_u16(&mut reply, 2, seq);
-            state.write_u32(&mut reply, 8, window_id);
-            reply.to_vec()
+            ReplyBuf::fixed(seq, state.msb_first)
+                .set_u32(8, window_id)
+                .build()
         }
         _ => {
             debug!("DBE: unhandled minor opcode {minor}");

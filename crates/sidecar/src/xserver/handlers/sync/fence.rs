@@ -7,6 +7,7 @@ use super::super::super::client::ClientState;
 use super::super::super::core::{BAD_MATCH, BAD_VALUE};
 use super::{check_pending_fence_awaits_ext, FenceState, PendingFenceAwait};
 use crate::xserver::core::require_len;
+use crate::xserver::reply::ReplyBuf;
 
 /// Minor opcode 14: CreateFence
 pub(crate) fn create_fence(state: &mut ClientState, data: &[u8], _seq: u16) -> Vec<u8> {
@@ -127,11 +128,9 @@ pub(crate) fn query_fence(state: &mut ClientState, data: &[u8], seq: u16) -> Vec
         .unwrap_or(true);
     debug!("SYNC QueryFence: id={fence_id:#x} triggered={triggered}");
 
-    let mut reply = [0u8; 32];
-    reply[0] = 1;
-    state.write_u16(&mut reply, 2, seq);
-    reply[8] = if triggered { 1 } else { 0 };
-    reply.to_vec()
+    ReplyBuf::fixed(seq, state.msb_first)
+        .set_u8(8, if triggered { 1 } else { 0 })
+        .build()
 }
 
 /// Minor opcode 19: AwaitFence

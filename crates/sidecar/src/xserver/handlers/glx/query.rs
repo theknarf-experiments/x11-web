@@ -2,6 +2,7 @@
 //! QueryExtensionsString, QueryServerString).
 
 use super::super::super::core::ROOT_VISUAL;
+use crate::xserver::reply::ReplyBuf;
 use super::{
     FBCONFIG_ATTRIB_COUNT, GLX_ACCUM_ALPHA_SIZE, GLX_ACCUM_BLUE_SIZE, GLX_ACCUM_GREEN_SIZE,
     GLX_ACCUM_RED_SIZE, GLX_ALPHA_SIZE, GLX_AUX_BUFFERS, GLX_BLUE_SIZE, GLX_BUFFER_SIZE,
@@ -34,12 +35,9 @@ pub(crate) fn handle_get_visual_configs(_data: &[u8], seq: u16) -> Vec<u8> {
     let total_props = num_configs * props_per_config;
 
     let extra_bytes = total_props as usize * 4;
-    let mut reply = vec![0u8; 32 + extra_bytes];
-    reply[0] = 1; // Reply
-    reply[2..4].copy_from_slice(&seq.to_le_bytes());
-    reply[4..8].copy_from_slice(&total_props.to_le_bytes());
-    reply[8..12].copy_from_slice(&num_configs.to_le_bytes());
-    reply[12..16].copy_from_slice(&props_per_config.to_le_bytes());
+    let mut reply = ReplyBuf::with_extra(seq, extra_bytes, false)
+        .set_u32(8, num_configs)
+        .set_u32(12, props_per_config);
 
     // Visual config properties — positional format per Mesa's GetVisualConfigs parser.
     // First 18 properties are the standard ones. Order must match Mesa exactly:
@@ -69,10 +67,10 @@ pub(crate) fn handle_get_visual_configs(_data: &[u8], seq: u16) -> Vec<u8> {
     ];
     for (i, &v) in props.iter().enumerate() {
         let off = 32 + i * 4;
-        reply[off..off + 4].copy_from_slice(&v.to_le_bytes());
+        reply.buf_mut()[off..off + 4].copy_from_slice(&v.to_le_bytes());
     }
 
-    reply
+    reply.build()
 }
 
 // ---------------------------------------------------------------------------
@@ -91,12 +89,9 @@ pub(crate) fn handle_get_fb_configs(_data: &[u8], seq: u16) -> Vec<u8> {
 
     let total_u32s = num_configs * u32s_per_config;
     let extra_bytes = total_u32s as usize * 4;
-    let mut reply = vec![0u8; 32 + extra_bytes];
-    reply[0] = 1; // Reply
-    reply[2..4].copy_from_slice(&seq.to_le_bytes());
-    reply[4..8].copy_from_slice(&total_u32s.to_le_bytes());
-    reply[8..12].copy_from_slice(&num_configs.to_le_bytes());
-    reply[12..16].copy_from_slice(&num_attribs.to_le_bytes());
+    let mut reply = ReplyBuf::with_extra(seq, extra_bytes, false)
+        .set_u32(8, num_configs)
+        .set_u32(12, num_attribs);
 
     // FBConfig 1: 24-bit XRGB (no alpha)
     // GLX_BUFFER_SIZE must equal R+G+B+A = 8+8+8+0 = 24.
@@ -174,13 +169,13 @@ pub(crate) fn handle_get_fb_configs(_data: &[u8], seq: u16) -> Vec<u8> {
 
     let mut off = 32;
     for &(key, val) in config1.iter().chain(config2.iter()) {
-        reply[off..off + 4].copy_from_slice(&key.to_le_bytes());
+        reply.buf_mut()[off..off + 4].copy_from_slice(&key.to_le_bytes());
         off += 4;
-        reply[off..off + 4].copy_from_slice(&val.to_le_bytes());
+        reply.buf_mut()[off..off + 4].copy_from_slice(&val.to_le_bytes());
         off += 4;
     }
 
-    reply
+    reply.build()
 }
 
 // ---------------------------------------------------------------------------

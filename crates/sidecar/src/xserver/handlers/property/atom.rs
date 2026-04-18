@@ -2,6 +2,7 @@
 
 use super::*;
 use crate::xserver::core::require_len;
+use crate::xserver::reply::ReplyBuf;
 
 // ---------------------------------------------------------------------------
 // Opcode 16: InternAtom
@@ -19,12 +20,9 @@ pub(crate) fn handle_intern_atom(state: &mut ClientState, data: &[u8], seq: u16)
 
     let atom = state.intern_atom(&name, only_if_exists);
 
-    let mut reply = [0u8; 32];
-    reply[0] = 1;
-    state.write_u16(&mut reply, 2, seq);
-    state.write_u32(&mut reply, 8, atom);
-
-    reply.to_vec()
+    ReplyBuf::fixed(seq, state.msb_first)
+        .set_u32(8, atom)
+        .build()
 }
 
 // ---------------------------------------------------------------------------
@@ -42,12 +40,9 @@ pub(crate) fn handle_get_atom_name(state: &mut ClientState, data: &[u8], seq: u1
     let name_bytes = name.as_bytes();
     let padded_len = (name_bytes.len() + 3) & !3;
 
-    let mut reply = vec![0u8; 32 + padded_len];
-    reply[0] = 1;
-    state.write_u16(&mut reply, 2, seq);
-    state.write_u32(&mut reply, 4, (padded_len / 4) as u32);
-    state.write_u16(&mut reply, 8, name_bytes.len() as u16);
-    reply[32..32 + name_bytes.len()].copy_from_slice(name_bytes);
+    let mut reply = ReplyBuf::with_extra(seq, padded_len, state.msb_first)
+        .set_u16(8, name_bytes.len() as u16);
+    reply.buf_mut()[32..32 + name_bytes.len()].copy_from_slice(name_bytes);
 
-    reply
+    reply.build()
 }

@@ -2,6 +2,7 @@
 
 use super::super::super::client::ClientState;
 use tracing::debug;
+use crate::xserver::reply::ReplyBuf;
 
 /// Handle ListComponents (minor opcode 22).
 pub(crate) fn handle_list_components(
@@ -40,15 +41,12 @@ pub(crate) fn handle_list_components(
     // Pad to 4-byte boundary
     let padded = (body_size + 3) & !3;
 
-    let mut reply = vec![0u8; 32 + padded];
-    reply[0] = 1; // Reply
-    reply[1] = device_id_byte;
-    state.write_u16(&mut reply, 2, seq);
-    state.write_u32(&mut reply, 4, (padded / 4) as u32);
+    let mut reply = ReplyBuf::with_extra(seq, padded, state.msb_first)
+        .set_data_byte(device_id_byte);
 
     // Encode header fields: nKeymaps..nGeometries at bytes 8-19
     for (i, list) in lists.iter().enumerate() {
-        state.write_u16(&mut reply, 8 + i * 2, list.len() as u16);
+        reply = reply.set_u16(8 + i * 2, list.len() as u16);
     }
 
     // Encode list entries starting at byte 32
@@ -56,13 +54,13 @@ pub(crate) fn handle_list_components(
     for list in &lists {
         for name in *list {
             // flags = 0 (no LC_* flags — plain component listing)
-            state.write_u16(&mut reply, off, 0);
+            reply = reply.set_u16(off, 0);
             off += 2;
             // name length (1 byte)
-            reply[off] = name.len() as u8;
+            reply.buf_mut()[off] = name.len() as u8;
             off += 1;
             // name bytes
-            reply[off..off + name.len()].copy_from_slice(name.as_bytes());
+            reply.buf_mut()[off..off + name.len()].copy_from_slice(name.as_bytes());
             off += name.len();
         }
     }
@@ -75,7 +73,7 @@ pub(crate) fn handle_list_components(
         symbols.len(),
         geometry.len()
     );
-    reply
+    reply.build()
 }
 
 /// Handle GetDeviceInfo (minor opcode 24).
@@ -91,16 +89,12 @@ pub(crate) fn handle_get_device_info(
     let name_len = device_name.len();
     let name_pad = (4 - (name_len % 4)) % 4;
     let body_len = 24 + name_len + name_pad; // fixed fields + name
-    let length_words = body_len / 4;
-    let mut reply = vec![0u8; 32 + body_len];
-    reply[0] = 1;
-    reply[1] = device_id_byte;
-    state.write_u16(&mut reply, 2, seq);
-    state.write_u32(&mut reply, 4, length_words as u32);
+    let mut reply = ReplyBuf::with_extra(seq, body_len, state.msb_first)
+        .set_data_byte(device_id_byte);
     // Byte 8-9: present (what we return): 0 = nothing extra
-    state.write_u16(&mut reply, 8, 0);
+    reply = reply.set_u16(8, 0);
     // Byte 10: supported (bitmask of supported features)
-    state.write_u16(&mut reply, 10, 0);
+    reply = reply.set_u16(10, 0);
     // Byte 12-13: unsupported (0)
     // Byte 14-15: nDeviceLedFBs (0)
     // Byte 16: firstBtnWanted (0)
@@ -109,21 +103,21 @@ pub(crate) fn handle_get_device_info(
     // Byte 19: nBtnsRtrn (0)
     // Byte 20: totalBtns (0)
     // Byte 21: hasOwnState (1)
-    reply[21] = 1;
+    reply.buf_mut()[21] = 1;
     // Byte 22-23: dfltKbdFB (0)
     // Byte 24-25: dfltLedFB (0)
     // Byte 28-29: devType (0)
     // Byte 26-27: nDeviceLedFBs (already 0)
     // Byte 30-31: nameLen
-    state.write_u16(&mut reply, 30, name_len as u16);
+    reply = reply.set_u16(30, name_len as u16);
     // Name starts at byte 32 + 24 = 56 in our layout
     // Actually, the body starts at 32, and after the 24 fixed body bytes:
-    reply[56..56 + name_len].copy_from_slice(device_name);
+    reply.buf_mut()[56..56 + name_len].copy_from_slice(device_name);
     debug!(
         "GetDeviceInfo: returning '{}'",
         std::str::from_utf8(device_name).unwrap_or("?")
     );
-    reply
+    reply.build()
 }
 
 /// Handle SetDeviceInfo (minor opcode 25).

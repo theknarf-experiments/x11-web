@@ -6,17 +6,15 @@ use super::{
 };
 use crate::xserver::core::require_len;
 use crate::xserver::core::{read_i16_bo, read_u16_bo, read_u32_bo, write_u16_bo, write_u32_bo};
+use crate::xserver::reply::ReplyBuf;
 use crate::xserver::ClientState;
 
 /// QueryVersion: reply with version 0.11
 pub(crate) fn handle_query_version(seq: u16, bo: bool) -> Vec<u8> {
-    let mut reply = [0u8; 32];
-    reply[0] = 1; // Reply
-    write_u16_bo(&mut reply, 2, seq, bo);
-    // length = 0 (no extra data beyond 32 bytes)
-    write_u32_bo(&mut reply, 8, 0, bo); // major version
-    write_u32_bo(&mut reply, 12, 11, bo); // minor version
-    reply.to_vec()
+    ReplyBuf::fixed(seq, bo)
+        .set_u32(8, 0) // major version
+        .set_u32(12, 11) // minor version
+        .build()
 }
 
 /// QueryPictFormats: reply with ARGB32, RGB24, A8, A1, xRGB32, xBGR32
@@ -47,24 +45,22 @@ pub(crate) fn handle_query_pict_formats(seq: u16, bo: bool) -> Vec<u8> {
     let screen_bytes = screen_header + depth24_bytes + depth32_bytes;
     let subpixel_bytes = num_subpixel as usize * 4;
     let extra = formats_bytes + screen_bytes + subpixel_bytes;
-    let total = 32 + extra;
+    let _total = 32 + extra;
 
-    let mut reply = vec![0u8; total];
-    reply[0] = 1; // Reply
-    write_u16_bo(&mut reply, 2, seq, bo);
-    write_u32_bo(&mut reply, 4, (extra / 4) as u32, bo); // length in 4-byte units
-    write_u32_bo(&mut reply, 8, num_formats, bo); // num_formats
-    write_u32_bo(&mut reply, 12, num_screens, bo); // num_screens
-    write_u32_bo(&mut reply, 16, num_depths, bo); // num_depths
-                                                  // reply[20..24] = num_visuals (we have 1 visual across all depths)
-    write_u32_bo(&mut reply, 20, 1, bo);
-    write_u32_bo(&mut reply, 24, num_subpixel, bo); // num_subpixel
+    let mut reply = ReplyBuf::with_extra(seq, extra, bo)
+        .set_u32(8, num_formats) // num_formats
+        .set_u32(12, num_screens) // num_screens
+        .set_u32(16, num_depths) // num_depths
+        // reply[20..24] = num_visuals (we have 1 visual across all depths)
+        .set_u32(20, 1)
+        .set_u32(24, num_subpixel); // num_subpixel
 
     let mut off = 32;
+    let buf = reply.buf_mut();
 
     // Format 1: ARGB32 (type=PictTypeDirect=1, depth=32)
     write_pictforminfo(
-        &mut reply,
+        buf,
         &mut off,
         PICTFORMAT_ARGB32,
         1,
@@ -82,7 +78,7 @@ pub(crate) fn handle_query_pict_formats(seq: u16, bo: bool) -> Vec<u8> {
 
     // Format 2: RGB24 (type=PictTypeDirect=1, depth=24)
     write_pictforminfo(
-        &mut reply,
+        buf,
         &mut off,
         PICTFORMAT_RGB24,
         1,
@@ -100,7 +96,7 @@ pub(crate) fn handle_query_pict_formats(seq: u16, bo: bool) -> Vec<u8> {
 
     // Format 3: A8 (type=PictTypeDirect=1, depth=8)
     write_pictforminfo(
-        &mut reply,
+        buf,
         &mut off,
         PICTFORMAT_A8,
         1,
@@ -118,7 +114,7 @@ pub(crate) fn handle_query_pict_formats(seq: u16, bo: bool) -> Vec<u8> {
 
     // Format 4: A1 (type=PictTypeDirect=1, depth=1)
     write_pictforminfo(
-        &mut reply,
+        buf,
         &mut off,
         PICTFORMAT_A1,
         1,
@@ -139,7 +135,7 @@ pub(crate) fn handle_query_pict_formats(seq: u16, bo: bool) -> Vec<u8> {
     // rendercheck libreoffice test wants this to verify that the
     // server doesn't peek at the unused byte.
     write_pictforminfo(
-        &mut reply,
+        buf,
         &mut off,
         PICTFORMAT_XRGB32,
         1,
@@ -161,7 +157,7 @@ pub(crate) fn handle_query_pict_formats(seq: u16, bo: bool) -> Vec<u8> {
     // through its declared format rather than blindly assuming a
     // canonical byte order.
     write_pictforminfo(
-        &mut reply,
+        buf,
         &mut off,
         PICTFORMAT_XBGR32,
         1,
@@ -180,39 +176,39 @@ pub(crate) fn handle_query_pict_formats(seq: u16, bo: bool) -> Vec<u8> {
     // Screen info (8 bytes header)
     let num_depths_for_screen: u32 = 2;
     // fallback pictformat for the screen
-    write_u32_bo(&mut reply, off, num_depths_for_screen, bo);
+    write_u32_bo(buf, off, num_depths_for_screen, bo);
     off += 4;
-    write_u32_bo(&mut reply, off, PICTFORMAT_RGB24, bo); // fallback
+    write_u32_bo(buf, off, PICTFORMAT_RGB24, bo); // fallback
     off += 4;
 
     // Depth 24: header (8 bytes) + 1 PictVisual (8 bytes)
-    reply[off] = 24; // depth
+    buf[off] = 24; // depth
     off += 1;
-    reply[off] = 0; // pad
+    buf[off] = 0; // pad
     off += 1;
-    write_u16_bo(&mut reply, off, 1, bo); // num_visuals
+    write_u16_bo(buf, off, 1, bo); // num_visuals
     off += 2;
     off += 4; // pad
 
     // PictVisual for depth 24: visual(4) + format(4)
-    write_u32_bo(&mut reply, off, 0x00000021, bo); // ROOT_VISUAL
+    write_u32_bo(buf, off, 0x00000021, bo); // ROOT_VISUAL
     off += 4;
-    write_u32_bo(&mut reply, off, PICTFORMAT_RGB24, bo);
+    write_u32_bo(buf, off, PICTFORMAT_RGB24, bo);
     off += 4;
 
     // Depth 32: header (8 bytes) + 0 PictVisuals
-    reply[off] = 32; // depth
+    buf[off] = 32; // depth
     off += 1;
-    reply[off] = 0; // pad
+    buf[off] = 0; // pad
     off += 1;
-    write_u16_bo(&mut reply, off, 0, bo); // num_visuals
+    write_u16_bo(buf, off, 0, bo); // num_visuals
     off += 2;
     off += 4; // pad
 
     // Subpixel order (4 bytes): 0 = Unknown
-    write_u32_bo(&mut reply, off, 0, bo);
+    write_u32_bo(buf, off, 0, bo);
 
-    reply
+    reply.build()
 }
 
 fn write_pictforminfo(
@@ -645,12 +641,7 @@ pub(crate) fn handle_query_pict_index_values(
     let _format = read_u32_bo(data, 4, bo);
 
     // Reply with 0 index values (we don't have indexed formats)
-    let mut reply = [0u8; 32];
-    reply[0] = 1; // Reply
-    write_u16_bo(&mut reply, 2, seq, bo);
-    // length = 0 extra words
-    write_u32_bo(&mut reply, 4, 0, bo);
-    // num_values = 0
-    write_u32_bo(&mut reply, 8, 0, bo);
-    reply.to_vec()
+    ReplyBuf::fixed(seq, bo)
+        .set_u32(8, 0) // num_values = 0
+        .build()
 }

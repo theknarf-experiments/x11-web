@@ -7,6 +7,7 @@ use super::super::core::ROOT_VISUAL;
 use super::super::types::{PixmapState, ShmPixmapBacking, ShmSegment};
 use crate::framebuffer::Framebuffer;
 use crate::xserver::core::require_len;
+use crate::xserver::reply::ReplyBuf;
 
 /// Handle MIT-SHM extension requests (major opcode 130).
 pub(crate) fn handle_shm_request(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
@@ -16,17 +17,14 @@ pub(crate) fn handle_shm_request(state: &mut ClientState, data: &[u8], seq: u16)
         // QueryVersion
         0 => {
             info!("SHM QueryVersion");
-            let mut reply = [0u8; 32];
-            reply[0] = 1; // Reply
-            reply[1] = 1; // shared_pixmaps = true
-            state.write_u16(&mut reply, 2, seq);
-            // reply[4..8] = additional data length = 0
-            state.write_u16(&mut reply, 8, 1u16); // major version
-            state.write_u16(&mut reply, 10, 2u16); // minor version
-            state.write_u16(&mut reply, 12, 0u16); // uid
-            state.write_u16(&mut reply, 14, 0u16); // gid
-            reply[16] = 2; // pixmap_format = ZPixmap
-            reply.to_vec()
+            ReplyBuf::fixed(seq, state.msb_first)
+                .set_data_byte(1) // shared_pixmaps = true
+                .set_u16(8, 1u16) // major version
+                .set_u16(10, 2u16) // minor version
+                .set_u16(12, 0u16) // uid
+                .set_u16(14, 0u16) // gid
+                .set_u8(16, 2) // pixmap_format = ZPixmap
+                .build()
         }
 
         // Attach
@@ -238,13 +236,11 @@ pub(crate) fn handle_shm_request(state: &mut ClientState, data: &[u8], seq: u16)
             }
 
             // Reply
-            let mut reply = [0u8; 32];
-            reply[0] = 1; // Reply
-            reply[1] = 24; // depth
-            state.write_u16(&mut reply, 2, seq);
-            state.write_u32(&mut reply, 8, ROOT_VISUAL);
-            state.write_u32(&mut reply, 12, width as u32 * height as u32); // size
-            reply.to_vec()
+            ReplyBuf::fixed(seq, state.msb_first)
+                .set_data_byte(24) // depth
+                .set_u32(8, ROOT_VISUAL)
+                .set_u32(12, width as u32 * height as u32) // size
+                .build()
         }
 
         // CreatePixmap
@@ -440,16 +436,12 @@ pub(crate) fn handle_shm_request(state: &mut ClientState, data: &[u8], seq: u16)
 
                 // Build reply with fd
                 // The fd needs to be sent via SCM_RIGHTS ancillary data
-                let mut reply = [0u8; 32];
-                reply[0] = 1; // Reply
-                reply[1] = 0; // nfd = 1 (but encoded differently in newer protocol)
-                state.write_u16(&mut reply, 2, seq);
-                state.write_u32(&mut reply, 4, 0); // length
-
                 // Queue the fd for sending via SCM_RIGHTS
                 state.reply_fds.push(fd);
 
-                reply.to_vec()
+                ReplyBuf::fixed(seq, state.msb_first)
+                    .set_data_byte(0) // nfd = 1 (but encoded differently in newer protocol)
+                    .build()
             }
         }
 

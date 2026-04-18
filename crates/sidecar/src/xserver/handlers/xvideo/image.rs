@@ -4,6 +4,7 @@
 use tracing::debug;
 
 use super::super::super::client::ClientState;
+use crate::xserver::reply::ReplyBuf;
 use super::{
     CapturedFrame, FOURCC_I420, FOURCC_NV12, FOURCC_NV21, FOURCC_RGB3, FOURCC_RV32, FOURCC_UYVY,
     FOURCC_Y800, FOURCC_YUY2, FOURCC_YV12, FOURCC_YV16,
@@ -1076,16 +1077,12 @@ pub(crate) fn handle_image_request(
             // Report all supported formats
             let num_formats: u32 = 10;
             let extra_bytes = (num_formats * 128) as usize;
-            let extra_words = extra_bytes / 4;
-            let mut reply = vec![0u8; 32 + extra_bytes];
-            reply[0] = 1;
-            state.write_u16(&mut reply, 2, seq);
-            state.write_u32(&mut reply, 4, extra_words as u32);
-            state.write_u32(&mut reply, 8, num_formats);
+            let mut reply = ReplyBuf::with_extra(seq, extra_bytes, state.msb_first)
+                .set_u32(8, num_formats);
 
             // Helper to fill an ImageFormatInfo at a given offset
             // format_type: 1 = XvYUV, 0 = XvRGB
-            let fill_format = |reply: &mut Vec<u8>,
+            let fill_format = |reply: &mut ReplyBuf,
                                idx: usize,
                                fourcc: u32,
                                name: &[u8; 4],
@@ -1097,19 +1094,20 @@ pub(crate) fn handle_image_request(
                                horz_v: u32,
                                vert_v: u32| {
                 let off = 32 + idx * 128;
-                state.write_u32(&mut reply[off..], 0, fourcc);
-                state.write_u32(&mut reply[off..], 4, format_type);
-                reply[off + 8] = 0; // byte_order = LSBFirst
-                reply[off + 16] = bpp; // bits_per_pixel
-                reply[off + 9..off + 9 + 4].copy_from_slice(name);
-                state.write_u32(&mut reply[off..], 20, num_planes);
-                reply[off + 24] = 0; // depth = 0
-                state.write_u32(&mut reply[off..], 40, 1); // horz_y_period
-                state.write_u32(&mut reply[off..], 44, 1); // vert_y_period
-                state.write_u32(&mut reply[off..], 48, horz_u);
-                state.write_u32(&mut reply[off..], 52, vert_u);
-                state.write_u32(&mut reply[off..], 56, horz_v);
-                state.write_u32(&mut reply[off..], 60, vert_v);
+                let buf = reply.buf_mut();
+                state.write_u32(&mut buf[off..], 0, fourcc);
+                state.write_u32(&mut buf[off..], 4, format_type);
+                buf[off + 8] = 0; // byte_order = LSBFirst
+                buf[off + 16] = bpp; // bits_per_pixel
+                buf[off + 9..off + 9 + 4].copy_from_slice(name);
+                state.write_u32(&mut buf[off..], 20, num_planes);
+                buf[off + 24] = 0; // depth = 0
+                state.write_u32(&mut buf[off..], 40, 1); // horz_y_period
+                state.write_u32(&mut buf[off..], 44, 1); // vert_y_period
+                state.write_u32(&mut buf[off..], 48, horz_u);
+                state.write_u32(&mut buf[off..], 52, vert_u);
+                state.write_u32(&mut buf[off..], 56, horz_v);
+                state.write_u32(&mut buf[off..], 60, vert_v);
             };
 
             // Format 0: YUY2 (packed 4:2:2)
@@ -1133,7 +1131,7 @@ pub(crate) fn handle_image_request(
             // Format 9: Y800 (8-bit grayscale)
             fill_format(&mut reply, 9, FOURCC_Y800, b"Y800", 8, 1, 1, 0, 0, 0, 0);
 
-            reply
+            reply.build()
         }
         17 => {
             // XvQueryImageAttributes
@@ -1155,27 +1153,23 @@ pub(crate) fn handle_image_request(
 
                 // Reply: 32 header + num_planes * 4 (pitches) + num_planes * 4 (offsets)
                 let extra = (num_planes * 4 * 2) as usize;
-                let extra_words = extra / 4;
-                let mut reply = vec![0u8; 32 + extra];
-                reply[0] = 1;
-                state.write_u16(&mut reply, 2, seq);
-                state.write_u32(&mut reply, 4, extra_words as u32);
-                state.write_u32(&mut reply, 8, num_planes);
-                state.write_u32(&mut reply, 12, data_size);
-                state.write_u16(&mut reply, 16, width as u16);
-                state.write_u16(&mut reply, 18, height as u16);
+                let mut reply = ReplyBuf::with_extra(seq, extra, state.msb_first)
+                    .set_u32(8, num_planes)
+                    .set_u32(12, data_size)
+                    .set_u16(16, width as u16)
+                    .set_u16(18, height as u16);
 
                 // Write pitches
                 for (i, &pitch) in pitches.iter().take(num_planes as usize).enumerate() {
-                    state.write_u32(&mut reply, 32 + i * 4, pitch);
+                    reply = reply.set_u32(32 + i * 4, pitch);
                 }
                 // Write offsets
                 let off_base = 32 + num_planes as usize * 4;
                 for (i, &offset) in offsets.iter().take(num_planes as usize).enumerate() {
-                    state.write_u32(&mut reply, off_base + i * 4, offset);
+                    reply = reply.set_u32(off_base + i * 4, offset);
                 }
 
-                reply
+                reply.build()
             } else {
                 Vec::new()
             }

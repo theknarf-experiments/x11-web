@@ -9,6 +9,7 @@ use super::super::super::types::PixmapState;
 use super::DRI3_MAJOR_OPCODE;
 use crate::framebuffer::Framebuffer;
 use crate::xserver::core::require_len;
+use crate::xserver::reply::ReplyBuf;
 
 // DRM fourcc codes for YUV formats
 const FOURCC_NV12: u32 = 0x3231564E; // 'NV12'
@@ -372,18 +373,15 @@ pub(crate) fn handle_buffer_from_pixmap(
     let size = data_bytes.len() as u32;
     let bpp = if depth == 1 { 1 } else { 32 };
 
-    let mut reply = [0u8; 32];
-    reply[0] = 1; // Reply
-    reply[1] = 1; // nfd
-    write_u16_bo(&mut reply, 2, seq, bo);
-    write_u32_bo(&mut reply, 4, 0, bo); // length
-    write_u32_bo(&mut reply, 8, size, bo);
-    write_u16_bo(&mut reply, 12, width, bo);
-    write_u16_bo(&mut reply, 14, height, bo);
-    write_u16_bo(&mut reply, 16, stride as u16, bo);
-    reply[18] = depth;
-    reply[19] = bpp;
-    reply.to_vec()
+    ReplyBuf::fixed(seq, bo)
+        .set_data_byte(1) // nfd
+        .set_u32(8, size)
+        .set_u16(12, width)
+        .set_u16(14, height)
+        .set_u16(16, stride as u16)
+        .set_u8(18, depth)
+        .set_u8(19, bpp)
+        .build()
 }
 
 // -----------------------------------------------------------------
@@ -601,22 +599,17 @@ pub(crate) fn handle_buffers_from_pixmap(
     let bpp = if depth == 1 { 1 } else { 32 };
 
     // Reply: nfd=1, num_buffers=1, then one stride(4) + one offset(4) = 8 bytes extra
-    let mut reply = vec![0u8; 32 + 8];
-    reply[0] = 1; // Reply
-    reply[1] = 1; // nfd
-    write_u16_bo(&mut reply, 2, seq, bo);
-    write_u32_bo(&mut reply, 4, 2, bo); // length = 8/4 = 2 words
-    write_u16_bo(&mut reply, 8, width, bo);
-    write_u16_bo(&mut reply, 10, height, bo);
-    // reply[12..16] = pad/modifier (0 for LINEAR)
-    write_u32_bo(&mut reply, 12, 0, bo);
-    // reply[16..24] = modifier high bits
-    write_u32_bo(&mut reply, 16, 0, bo);
-    reply[20] = depth;
-    reply[21] = bpp;
-    reply[22] = 1; // num_buffers
-                   // Extra data: stride0 (4 bytes) + offset0 (4 bytes)
-    write_u32_bo(&mut reply, 32, stride, bo);
-    write_u32_bo(&mut reply, 36, 0, bo); // offset = 0
-    reply
+    ReplyBuf::with_extra(seq, 8, bo)
+        .set_data_byte(1) // nfd
+        .set_u16(8, width)
+        .set_u16(10, height)
+        .set_u32(12, 0) // pad/modifier (0 for LINEAR)
+        .set_u32(16, 0) // modifier high bits
+        .set_u8(20, depth)
+        .set_u8(21, bpp)
+        .set_u8(22, 1) // num_buffers
+        // Extra data: stride0 (4 bytes) + offset0 (4 bytes)
+        .set_u32(32, stride)
+        .set_u32(36, 0) // offset = 0
+        .build()
 }

@@ -5,6 +5,7 @@
 //! - Client-created counters with get/set/change
 //! - Alarms that trigger on counter value transitions
 //! - Fences for synchronization primitives
+use crate::xserver::reply::ReplyBuf;
 
 mod alarm;
 mod await_op;
@@ -318,12 +319,10 @@ pub(crate) fn handle_sync_request(state: &mut ClientState, data: &[u8], seq: u16
         0 => {
             // Initialize: reply with version 3.1
             debug!("SYNC Initialize");
-            let mut reply = [0u8; 32];
-            reply[0] = 1;
-            state.write_u16(&mut reply, 2, seq);
-            reply[8] = 3; // major version
-            reply[9] = 1; // minor version
-            reply.to_vec()
+            ReplyBuf::fixed(seq, state.msb_first)
+                .set_u8(8, 3) // major version
+                .set_u8(9, 1) // minor version
+                .build()
         }
         1 => counter::list_system_counters(state, seq),
         2 => counter::create_counter(state, data, seq),

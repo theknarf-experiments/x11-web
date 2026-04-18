@@ -7,6 +7,7 @@ use super::{
 };
 use crate::xserver::core::require_len;
 use tracing::debug;
+use crate::xserver::reply::ReplyBuf;
 
 /// Build an XKB GetMap reply with full sections: KeyTypes, KeySyms,
 /// KeyActions, KeyBehaviors, VirtualMods, ExplicitComponents,
@@ -329,43 +330,39 @@ pub(crate) fn build_xkb_get_map_reply(state: &mut ClientState, seq: u16) -> Vec<
     }
 
     // ----- Header -----
-    let total_len = 40 + data.len();
-    let mut reply = vec![0u8; total_len];
-    reply[0] = 1; // Reply
-    reply[1] = 3; // deviceID (matches Xvfb's default core kbd)
-    state.write_u16(&mut reply, 2, seq);
-    let length_words = ((8 + data.len()) / 4) as u32;
-    state.write_u32(&mut reply, 4, length_words);
-    reply[10] = MIN_KEY_CODE;
-    reply[11] = MAX_KEY_CODE;
+    let total_extra = 8 + data.len();
+    let mut reply = ReplyBuf::with_extra(seq, total_extra, state.msb_first)
+        .set_data_byte(3); // deviceID (matches Xvfb's default core kbd)
+    reply.buf_mut()[10] = MIN_KEY_CODE;
+    reply.buf_mut()[11] = MAX_KEY_CODE;
     let present: u16 = 0x00ff;
-    state.write_u16(&mut reply, 12, present);
-    reply[14] = 0; // firstType
-    reply[15] = n_types;
-    reply[16] = n_types; // totalTypes
-    reply[17] = MIN_KEY_CODE; // firstKeySym
-    state.write_u16(&mut reply, 18, total_syms_count);
-    reply[20] = N_KEYS as u8; // nKeySyms
-    reply[21] = MIN_KEY_CODE; // firstKeyAction
-    state.write_u16(&mut reply, 22, total_actions);
-    reply[24] = N_KEYS as u8; // nKeyActions (full range)
-    reply[25] = MIN_KEY_CODE; // firstKeyBehavior
-    reply[26] = n_key_behaviors;
-    reply[27] = total_key_behaviors;
-    reply[28] = MIN_KEY_CODE; // firstKeyExplicit
-    reply[29] = n_key_explicit;
-    reply[30] = total_key_explicit;
-    reply[31] = MIN_KEY_CODE; // firstModMapKey
-    reply[32] = n_mod_map_keys;
-    reply[33] = total_mod_map_keys;
-    reply[34] = MIN_KEY_CODE; // firstVModMapKey
-    reply[35] = n_vmod_map_keys;
-    reply[36] = total_vmod_map_keys;
+    reply = reply.set_u16(12, present);
+    reply.buf_mut()[14] = 0; // firstType
+    reply.buf_mut()[15] = n_types;
+    reply.buf_mut()[16] = n_types; // totalTypes
+    reply.buf_mut()[17] = MIN_KEY_CODE; // firstKeySym
+    reply = reply.set_u16(18, total_syms_count);
+    reply.buf_mut()[20] = N_KEYS as u8; // nKeySyms
+    reply.buf_mut()[21] = MIN_KEY_CODE; // firstKeyAction
+    reply = reply.set_u16(22, total_actions);
+    reply.buf_mut()[24] = N_KEYS as u8; // nKeyActions (full range)
+    reply.buf_mut()[25] = MIN_KEY_CODE; // firstKeyBehavior
+    reply.buf_mut()[26] = n_key_behaviors;
+    reply.buf_mut()[27] = total_key_behaviors;
+    reply.buf_mut()[28] = MIN_KEY_CODE; // firstKeyExplicit
+    reply.buf_mut()[29] = n_key_explicit;
+    reply.buf_mut()[30] = total_key_explicit;
+    reply.buf_mut()[31] = MIN_KEY_CODE; // firstModMapKey
+    reply.buf_mut()[32] = n_mod_map_keys;
+    reply.buf_mut()[33] = total_mod_map_keys;
+    reply.buf_mut()[34] = MIN_KEY_CODE; // firstVModMapKey
+    reply.buf_mut()[35] = n_vmod_map_keys;
+    reply.buf_mut()[36] = total_vmod_map_keys;
     // 37 = pad2
-    state.write_u16(&mut reply, 38, virtual_mods);
+    reply = reply.set_u16(38, virtual_mods);
 
-    reply[40..].copy_from_slice(&data);
-    reply
+    reply.buf_mut()[40..].copy_from_slice(&data);
+    reply.build()
 }
 
 /// Handle XKB SetMap request: allow clients to change key type assignments
@@ -717,29 +714,24 @@ pub(crate) fn handle_xkb_get_kbd_by_name(
     //  16-17: reported (CARD16) — which sub-replies follow
     //  18-31: pad
     let total_body_len = body.len();
-    let length_words = (total_body_len / 4) as u32;
-    let total = 32 + total_body_len;
-    let mut reply = vec![0u8; total];
-    reply[0] = 1;
-    reply[1] = device_id;
-    state.write_u16(&mut reply, 2, seq);
-    state.write_u32(&mut reply, 4, length_words);
-    reply[8] = MIN_KEY_CODE;
-    reply[9] = MAX_KEY_CODE;
-    reply[12] = 1; // loaded = true
-    reply[13] = 0; // newKeyboard = false
-    state.write_u16(&mut reply, 14, reported); // found
-    state.write_u16(&mut reply, 16, reported); // reported
+    let mut reply = ReplyBuf::with_extra(seq, total_body_len, state.msb_first)
+        .set_data_byte(device_id)
+        .set_u8(8, MIN_KEY_CODE)
+        .set_u8(9, MAX_KEY_CODE)
+        .set_u8(12, 1) // loaded = true
+        .set_u8(13, 0) // newKeyboard = false
+        .set_u16(14, reported) // found
+        .set_u16(16, reported); // reported
 
     if total_body_len > 0 {
-        reply[32..].copy_from_slice(&body);
+        reply.buf_mut()[32..].copy_from_slice(&body);
     }
 
     debug!(
         "XKB GetKbdByName: need=0x{need:04x} want=0x{want:04x} reported=0x{reported:04x} body={}B",
         total_body_len
     );
-    reply
+    reply.build()
 }
 
 /// 4-character XKB key names for keycodes 8..255.

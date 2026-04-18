@@ -4,6 +4,7 @@
 use tracing::debug;
 
 use super::super::super::client::ClientState;
+use crate::xserver::reply::ReplyBuf;
 use super::{
     XV_ATTR_BRIGHTNESS, XV_ATTR_COLORSPACE, XV_ATTR_CONTRAST, XV_ATTR_HUE, XV_ATTR_SATURATION,
 };
@@ -24,18 +25,14 @@ pub(crate) fn handle_port_request(
                 let ps = state.xv_ports.entry(port).or_default();
                 if ps.grabbed {
                     // Already grabbed — return AlreadyGrabbed (1)
-                    let mut reply = [0u8; 32];
-                    reply[0] = 1;
-                    reply[1] = 1; // result = AlreadyGrabbed
-                    state.write_u16(&mut reply, 2, seq);
-                    return reply.to_vec();
+                    return ReplyBuf::fixed(seq, state.msb_first)
+                        .set_data_byte(1) // result = AlreadyGrabbed
+                        .build();
                 }
                 ps.grabbed = true;
-                let mut reply = [0u8; 32];
-                reply[0] = 1;
-                reply[1] = 0; // result = Success
-                state.write_u16(&mut reply, 2, seq);
-                reply.to_vec()
+                ReplyBuf::fixed(seq, state.msb_first)
+                    .set_data_byte(0) // result = Success
+                    .build()
             } else {
                 Vec::new()
             }
@@ -53,16 +50,13 @@ pub(crate) fn handle_port_request(
         }
         9 => {
             // XvQueryBestSize
-            let mut reply = [0u8; 32];
-            reply[0] = 1;
-            state.write_u16(&mut reply, 2, seq);
+            let mut reply = ReplyBuf::fixed(seq, state.msb_first);
             if data.len() >= 16 {
                 let w = state.read_u16(data, 8);
                 let h = state.read_u16(data, 10);
-                state.write_u16(&mut reply, 8, w);
-                state.write_u16(&mut reply, 10, h);
+                reply = reply.set_u16(8, w).set_u16(10, h);
             }
-            reply.to_vec()
+            reply.build()
         }
         10 => {
             // XvSetPortAttribute
@@ -124,11 +118,9 @@ pub(crate) fn handle_port_request(
                     }
                 };
 
-                let mut reply = [0u8; 32];
-                reply[0] = 1;
-                state.write_u16(&mut reply, 2, seq);
-                state.write_u32(&mut reply, 8, value as u32);
-                reply.to_vec()
+                ReplyBuf::fixed(seq, state.msb_first)
+                    .set_u32(8, value as u32)
+                    .build()
             } else {
                 Vec::new()
             }
@@ -187,15 +179,10 @@ pub(crate) fn handle_port_request(
                 buf[16..16 + attr.name.len()].copy_from_slice(attr.name);
                 extra_data.extend_from_slice(&buf);
             }
-
-            let extra_words = extra_data.len() / 4;
-            let mut reply = vec![0u8; 32 + extra_data.len()];
-            reply[0] = 1;
-            state.write_u16(&mut reply, 2, seq);
-            state.write_u32(&mut reply, 4, extra_words as u32);
-            state.write_u32(&mut reply, 8, attrs.len() as u32); // num_attributes
-            reply[32..].copy_from_slice(&extra_data);
-            reply
+            let reply = ReplyBuf::with_extra(seq, extra_data.len(), state.msb_first)
+                .set_u32(8, attrs.len() as u32) // num_attributes
+                .set_bytes(32, &extra_data);
+            reply.build()
         }
         _ => {
             debug!("XVideo port: unhandled minor opcode {minor}");

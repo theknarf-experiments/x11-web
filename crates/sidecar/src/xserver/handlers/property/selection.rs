@@ -3,6 +3,7 @@
 
 use super::*;
 use crate::xserver::core::require_len;
+use crate::xserver::reply::ReplyBuf;
 
 // ---------------------------------------------------------------------------
 // Opcode 22: SetSelectionOwner
@@ -130,10 +131,8 @@ pub(crate) fn handle_get_selection_owner(
     seq: u16,
 ) -> Vec<u8> {
     require_len!(data, 8, seq, 23);
-    let mut reply = [0u8; 32];
-    reply[0] = 1;
-    state.write_u16(&mut reply, 2, seq);
     let selection = state.read_u32(data, 4);
+    let mut reply_buf = ReplyBuf::fixed(seq, state.msb_first);
     // Check local selections first, then shared (cross-connection).
     let owner = state
         .selections
@@ -147,8 +146,8 @@ pub(crate) fn handle_get_selection_owner(
                 .and_then(|sels| sels.get(&selection).map(|e| e.owner))
         })
         .unwrap_or(0);
-    state.write_u32(&mut reply, 8, owner);
-    reply.to_vec()
+    reply_buf = reply_buf.set_u32(8, owner);
+    reply_buf.build()
 }
 
 // ---------------------------------------------------------------------------

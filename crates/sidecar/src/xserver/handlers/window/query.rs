@@ -2,6 +2,7 @@
 
 use super::*;
 use crate::xserver::core::require_len;
+use crate::xserver::reply::ReplyBuf;
 
 // ---------------------------------------------------------------------------
 // Opcode 14: GetGeometry
@@ -13,28 +14,24 @@ pub(crate) fn handle_get_geometry(state: &mut ClientState, data: &[u8], seq: u16
 
     // Check windows first, then pixmaps
     if let Some(win) = state.windows.get(&drawable) {
-        let mut reply = [0u8; 32];
-        reply[0] = 1; // Reply
-        reply[1] = win.depth;
-        state.write_u16(&mut reply, 2, seq);
-        state.write_u32(&mut reply, 8, state.root_window);
-        state.write_i16(&mut reply, 12, win.x);
-        state.write_i16(&mut reply, 14, win.y);
-        state.write_u16(&mut reply, 16, win.width);
-        state.write_u16(&mut reply, 18, win.height);
-        state.write_u16(&mut reply, 20, win.border_width);
-        return reply.to_vec();
+        return ReplyBuf::fixed(seq, state.msb_first)
+            .set_data_byte(win.depth)
+            .set_u32(8, state.root_window)
+            .set_i16(12, win.x)
+            .set_i16(14, win.y)
+            .set_u16(16, win.width)
+            .set_u16(18, win.height)
+            .set_u16(20, win.border_width)
+            .build();
     }
 
     if let Some(pixmap) = state.pixmaps.get(&drawable) {
-        let mut reply = [0u8; 32];
-        reply[0] = 1; // Reply
-        reply[1] = pixmap.depth;
-        state.write_u16(&mut reply, 2, seq);
-        state.write_u32(&mut reply, 8, state.root_window);
-        state.write_u16(&mut reply, 16, pixmap.width);
-        state.write_u16(&mut reply, 18, pixmap.height);
-        return reply.to_vec();
+        return ReplyBuf::fixed(seq, state.msb_first)
+            .set_data_byte(pixmap.depth)
+            .set_u32(8, state.root_window)
+            .set_u16(16, pixmap.width)
+            .set_u16(18, pixmap.height)
+            .build();
     }
 
     // Drawable not found - return BadDrawable error
@@ -74,21 +71,17 @@ pub(crate) fn handle_query_tree(state: &mut ClientState, data: &[u8], seq: u16) 
         .unwrap_or_default();
 
     let n_children = children.len() as u16;
-    let reply_len = 32 + children.len() * 4;
-    let mut reply = vec![0u8; reply_len];
-    reply[0] = 1;
-    state.write_u16(&mut reply, 2, seq);
-    state.write_u32(&mut reply, 4, children.len() as u32);
-    state.write_u32(&mut reply, 8, state.root_window);
+    let mut reply = ReplyBuf::with_extra(seq, children.len() * 4, state.msb_first)
+        .set_u32(8, state.root_window);
 
     let parent = state.windows.get(&wid).map(|w| w.parent).unwrap_or(0);
-    state.write_u32(&mut reply, 12, parent);
-    state.write_u16(&mut reply, 16, n_children);
+    reply = reply.set_u32(12, parent)
+        .set_u16(16, n_children);
 
     for (i, &child) in children.iter().enumerate() {
         let off = 32 + i * 4;
-        state.write_u32(&mut reply, off, child);
+        reply = reply.set_u32(off, child);
     }
 
-    reply
+    reply.build()
 }

@@ -3,6 +3,7 @@
 
 use super::*;
 use crate::xserver::core::require_len;
+use crate::xserver::reply::ReplyBuf;
 
 // ---------------------------------------------------------------------------
 // Opcode 18: ChangeProperty
@@ -557,18 +558,13 @@ pub(crate) fn handle_get_property(state: &mut ClientState, data: &[u8], seq: u16
         };
 
         let padded_len = (return_data.len() + 3) & !3;
-        let extra_words = padded_len / 4;
-        let total_reply = 32 + padded_len;
 
-        let mut reply = vec![0u8; total_reply];
-        reply[0] = 1; // Reply
-        reply[1] = prop_val.format;
-        state.write_u16(&mut reply, 2, seq);
-        state.write_u32(&mut reply, 4, extra_words as u32); // length
-        state.write_u32(&mut reply, 8, prop_val.prop_type); // type
-        state.write_u32(&mut reply, 12, bytes_after as u32); // bytes_after
-        state.write_u32(&mut reply, 16, value_length); // value_length
-        reply[32..32 + return_data.len()].copy_from_slice(return_data);
+        let mut reply = ReplyBuf::with_extra(seq, padded_len, state.msb_first)
+            .set_data_byte(prop_val.format)
+            .set_u32(8, prop_val.prop_type) // type
+            .set_u32(12, bytes_after as u32) // bytes_after
+            .set_u32(16, value_length); // value_length
+        reply.buf_mut()[32..32 + return_data.len()].copy_from_slice(return_data);
 
         // Delete property if requested and we returned all of it
         if delete && bytes_after == 0 {
@@ -595,14 +591,12 @@ pub(crate) fn handle_get_property(state: &mut ClientState, data: &[u8], seq: u16
             advance_incr_transfer(state, window, property_atom);
         }
 
-        reply
+        reply.build()
     } else {
         // Property not found
-        let mut reply = [0u8; 32];
-        reply[0] = 1;
-        state.write_u16(&mut reply, 2, seq);
-        // type = 0 (None), format = 0, bytes_after = 0, value_length = 0
-        reply.to_vec()
+        ReplyBuf::fixed(seq, state.msb_first)
+            // type = 0 (None), format = 0, bytes_after = 0, value_length = 0
+            .build()
     }
 }
 
@@ -643,13 +637,10 @@ pub(crate) fn handle_list_properties(state: &ClientState, data: &[u8], seq: u16)
 
     let n = atoms.len();
     let extra_bytes = n * 4;
-    let mut reply = vec![0u8; 32 + extra_bytes];
-    reply[0] = 1; // Reply
-    state.write_u16(&mut reply, 2, seq);
-    state.write_u32(&mut reply, 4, n as u32); // length in 4-byte units
-    state.write_u16(&mut reply, 8, n as u16); // num_atoms
+    let mut reply = ReplyBuf::with_extra(seq, extra_bytes, state.msb_first)
+        .set_u16(8, n as u16); // num_atoms
     for (i, atom) in atoms.iter().enumerate() {
-        state.write_u32(&mut reply, 32 + i * 4, *atom);
+        reply = reply.set_u32(32 + i * 4, *atom);
     }
-    reply
+    reply.build()
 }

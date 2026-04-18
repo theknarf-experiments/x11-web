@@ -5,6 +5,7 @@ use tracing::debug;
 use super::super::super::client::ClientState;
 use super::SyncAlarm;
 use crate::xserver::core::require_len;
+use crate::xserver::reply::ReplyBuf;
 
 /// Minor opcode 8: CreateAlarm
 pub(crate) fn create_alarm(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
@@ -124,24 +125,21 @@ pub(crate) fn query_alarm(state: &mut ClientState, data: &[u8], seq: u16) -> Vec
     let alarm_id = state.read_u32(data, 4);
     debug!("SYNC QueryAlarm: id={alarm_id:#x}");
 
-    let mut reply = vec![0u8; 40];
-    reply[0] = 1;
-    state.write_u16(&mut reply, 2, seq);
-    state.write_u32(&mut reply, 4, 2u32); // length = 2 extra u32s
+    let mut reply = ReplyBuf::with_extra(seq, 8, state.msb_first);
 
     if let Some(alarm) = state.sync_state.alarms.get(&alarm_id) {
         // trigger: counter(4) + value_type(4) + value(8) + test_type(4) + delta(8) + events(4) + state(4)
-        state.write_u32(&mut reply, 8, alarm.counter);
-        state.write_u32(&mut reply, 12, alarm.value_type as u32);
-        state.write_u32(&mut reply, 16, alarm.value_hi as u32);
-        state.write_u32(&mut reply, 20, alarm.value_lo);
-        state.write_u32(&mut reply, 24, alarm.test_type as u32);
-        state.write_u32(&mut reply, 28, alarm.delta_hi as u32);
-        state.write_u32(&mut reply, 32, alarm.delta_lo);
-        reply[36] = if alarm.events { 1 } else { 0 };
-        reply[37] = alarm.state;
+        reply = reply.set_u32(8, alarm.counter)
+            .set_u32(12, alarm.value_type as u32)
+            .set_u32(16, alarm.value_hi as u32);
+        reply = reply.set_u32(20, alarm.value_lo)
+            .set_u32(24, alarm.test_type as u32)
+            .set_u32(28, alarm.delta_hi as u32)
+            .set_u32(32, alarm.delta_lo);
+        reply.buf_mut()[36] = if alarm.events { 1 } else { 0 };
+        reply.buf_mut()[37] = alarm.state;
     }
-    reply
+    reply.build()
 }
 
 /// Minor opcode 11: DestroyAlarm

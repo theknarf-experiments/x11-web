@@ -3,6 +3,7 @@
 use tracing::debug;
 
 use super::super::super::client::ClientState;
+use crate::xserver::reply::ReplyBuf;
 
 /// 31: CreatePointerBarrier
 pub(crate) fn handle_create_pointer_barrier(
@@ -95,9 +96,7 @@ pub(crate) fn handle_get_client_disconnect_mode(
     _data: &[u8],
     seq: u16,
 ) -> Vec<u8> {
-    let mut reply = [0u8; 32];
-    reply[0] = 1;
-    state.write_u16(&mut reply, 2, seq);
-    state.write_u32(&mut reply, 8, state.disconnect_mode);
-    reply.to_vec()
+    ReplyBuf::fixed(seq, state.msb_first)
+        .set_u32(8, state.disconnect_mode)
+        .build()
 }

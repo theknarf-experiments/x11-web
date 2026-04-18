@@ -8,6 +8,7 @@ use tracing::debug;
 
 use super::super::client::ClientState;
 use crate::xserver::core::require_len;
+use crate::xserver::reply::ReplyBuf;
 
 pub(crate) fn handle_xfixes_request(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
     let minor = data[1];
@@ -16,12 +17,10 @@ pub(crate) fn handle_xfixes_request(state: &mut ClientState, data: &[u8], seq: u
     match minor {
         // 0: QueryVersion
         0 => {
-            let mut reply = [0u8; 32];
-            reply[0] = 1;
-            state.write_u16(&mut reply, 2, seq);
-            state.write_u32(&mut reply, 8, 5u32);
-            state.write_u32(&mut reply, 12, 0u32);
-            reply.to_vec()
+            ReplyBuf::fixed(seq, state.msb_first)
+                .set_u32(8, 5u32)
+                .set_u32(12, 0u32)
+                .build()
         }
 
         // 1: ChangeSaveSet (extended)

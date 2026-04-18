@@ -2,8 +2,9 @@ use tracing::debug;
 
 use super::{pad4, PictFilter};
 use crate::xserver::core::require_len;
-use crate::xserver::core::{read_u16_bo, read_u32_bo, write_u16_bo, write_u32_bo};
+use crate::xserver::core::{read_u16_bo, read_u32_bo};
 use crate::xserver::ClientState;
+use crate::xserver::reply::ReplyBuf;
 
 /// SetPictureFilter (RENDER minor opcode 30).
 /// Sets the filter on a picture (nearest, bilinear, etc.).
@@ -43,26 +44,22 @@ pub(crate) fn handle_query_filters(seq: u16, bo: bool) -> Vec<u8> {
     let filter2_bytes = 1 + filter2.len();
     let filters_bytes = pad4(filter1_bytes) + pad4(filter2_bytes);
     let extra = aliases_bytes + filters_bytes;
-    let total = 32 + extra;
 
-    let mut reply = vec![0u8; total];
-    reply[0] = 1; // Reply
-    write_u16_bo(&mut reply, 2, seq, bo);
-    write_u32_bo(&mut reply, 4, (extra / 4) as u32, bo);
-    write_u32_bo(&mut reply, 8, num_aliases, bo);
-    write_u32_bo(&mut reply, 12, num_filters, bo);
+    let mut reply = ReplyBuf::with_extra(seq, extra, bo)
+        .set_u32(8, num_aliases)
+        .set_u32(12, num_filters);
 
     // Filter 1: "nearest"
     let mut off = 32;
-    reply[off] = filter1.len() as u8;
+    reply.buf_mut()[off] = filter1.len() as u8;
     off += 1;
-    reply[off..off + filter1.len()].copy_from_slice(filter1);
+    reply.buf_mut()[off..off + filter1.len()].copy_from_slice(filter1);
     off = 32 + pad4(filter1_bytes);
 
     // Filter 2: "bilinear"
-    reply[off] = filter2.len() as u8;
+    reply.buf_mut()[off] = filter2.len() as u8;
     off += 1;
-    reply[off..off + filter2.len()].copy_from_slice(filter2);
+    reply.buf_mut()[off..off + filter2.len()].copy_from_slice(filter2);
 
-    reply
+    reply.build()
 }

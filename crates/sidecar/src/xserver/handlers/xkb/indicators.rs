@@ -2,6 +2,7 @@
 
 use super::super::super::client::ClientState;
 use crate::xserver::core::read_u32_bo as read_u32;
+use crate::xserver::reply::ReplyBuf;
 
 /// Handle GetIndicatorState (minor opcode 12).
 pub(crate) fn handle_get_indicator_state(
@@ -29,12 +30,10 @@ pub(crate) fn handle_get_indicator_state(
     }
     state.xkb_indicators = ind_state;
 
-    let mut reply = [0u8; 32];
-    reply[0] = 1;
-    reply[1] = device_id_byte;
-    state.write_u16(&mut reply, 2, seq);
-    state.write_u32(&mut reply, 8, ind_state);
-    reply.to_vec()
+    ReplyBuf::fixed(seq, state.msb_first)
+        .set_data_byte(device_id_byte)
+        .set_u32(8, ind_state)
+        .build()
 }
 
 /// Handle GetIndicatorMap (minor opcode 13).
@@ -53,12 +52,9 @@ pub(crate) fn handle_get_indicator_map(
     let n_indicators = which.count_ones() as usize;
     let map_size = 12; // XkbIndicatorMapWireDesc = 12 bytes
     let body_len = n_indicators * map_size;
-    let mut reply = vec![0u8; 32 + body_len];
-    reply[0] = 1;
-    reply[1] = device_id_byte;
-    state.write_u16(&mut reply, 2, seq);
-    state.write_u32(&mut reply, 4, (body_len / 4) as u32);
-    state.write_u32(&mut reply, 8, which); // which indicators
+    let mut reply = ReplyBuf::with_extra(seq, body_len, state.msb_first)
+        .set_data_byte(device_id_byte)
+        .set_u32(8, which); // which indicators
                                            // Indicator 12-byte maps: flags(1), whichGroups(1), groups(1), whichMods(1),
                                            //                         mods(1), realMods(1), vmods(2), ctrls(4)
     let mut off = 32;
@@ -66,41 +62,41 @@ pub(crate) fn handle_get_indicator_map(
         if which & (1 << bit) == 0 {
             continue;
         }
-        if off + map_size > reply.len() {
+        if off + map_size > reply.buf_mut().len() {
             break;
         }
         match bit {
             0 => {
                 // Caps Lock: driven by Lock modifier (0x02)
-                reply[off] = 0; // flags
-                reply[off + 1] = 0; // whichGroups
-                reply[off + 2] = 0; // groups
-                reply[off + 3] = 0x04; // whichMods: UseLocked
-                reply[off + 4] = 0x02; // mods: Lock
-                reply[off + 5] = 0x02; // realMods: Lock
+                reply.buf_mut()[off] = 0; // flags
+                reply.buf_mut()[off + 1] = 0; // whichGroups
+                reply.buf_mut()[off + 2] = 0; // groups
+                reply.buf_mut()[off + 3] = 0x04; // whichMods: UseLocked
+                reply.buf_mut()[off + 4] = 0x02; // mods: Lock
+                reply.buf_mut()[off + 5] = 0x02; // realMods: Lock
             }
             1 => {
                 // Num Lock: driven by Mod2 (0x10)
-                reply[off + 3] = 0x04; // whichMods: UseLocked
-                reply[off + 4] = 0x10; // mods: Mod2
-                reply[off + 5] = 0x10; // realMods: Mod2
+                reply.buf_mut()[off + 3] = 0x04; // whichMods: UseLocked
+                reply.buf_mut()[off + 4] = 0x10; // mods: Mod2
+                reply.buf_mut()[off + 5] = 0x10; // realMods: Mod2
             }
             2 => {
                 // Scroll Lock: driven by Mod3 (0x20)
-                reply[off + 3] = 0x04;
-                reply[off + 4] = 0x20;
-                reply[off + 5] = 0x20;
+                reply.buf_mut()[off + 3] = 0x04;
+                reply.buf_mut()[off + 4] = 0x20;
+                reply.buf_mut()[off + 5] = 0x20;
             }
             3 => {
                 // Group indicator: driven by effective group != 0
-                reply[off + 1] = 0x80; // whichGroups: UseEffective
-                reply[off + 2] = 0x0E; // groups: 1|2|3 (lit when not group 0)
+                reply.buf_mut()[off + 1] = 0x80; // whichGroups: UseEffective
+                reply.buf_mut()[off + 2] = 0x0E; // groups: 1|2|3 (lit when not group 0)
             }
             _ => {}
         }
         off += map_size;
     }
-    reply
+    reply.build()
 }
 
 /// Handle SetIndicatorMap (minor opcode 14).
@@ -146,15 +142,11 @@ pub(crate) fn handle_get_named_indicator(
     } else {
         0
     };
-    let mut reply = vec![0u8; 32];
-    reply[0] = 1;
-    reply[1] = device_id_byte;
-    state.write_u16(&mut reply, 2, seq);
-    // Return the indicator atom and current state
-    state.write_u32(&mut reply, 8, indicator_atom);
-    // found = true if it's one of our known indicators
-    reply[12] = 1; // found
-                   // on = check current indicator state
+    let mut reply = ReplyBuf::fixed(seq, state.msb_first)
+        .set_data_byte(device_id_byte)
+        .set_u32(8, indicator_atom)
+        .set_u8(12, 1); // found
+    // on = check current indicator state
     let eff_mods = state.xkb_state.effective_mods();
     let on = if indicator_atom == 0 {
         false
@@ -174,6 +166,6 @@ pub(crate) fn handle_get_named_indicator(
             _ => false,
         }
     };
-    reply[13] = on as u8;
-    reply.to_vec()
+    reply = reply.set_u8(13, on as u8);
+    reply.build()
 }

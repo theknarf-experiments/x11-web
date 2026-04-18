@@ -8,17 +8,16 @@ use super::super::client::ClientState;
 pub(crate) fn handle_security_request(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
     use super::super::client::SecurityAuthorization;
     use crate::xserver::core::require_len;
+use crate::xserver::reply::ReplyBuf;
 
     let minor = data[1];
     match minor {
         0 => {
             // QueryVersion
-            let mut reply = [0u8; 32];
-            reply[0] = 1;
-            state.write_u16(&mut reply, 2, seq);
-            state.write_u16(&mut reply, 8, 1); // major
-            state.write_u16(&mut reply, 10, 0); // minor
-            reply.to_vec()
+            ReplyBuf::fixed(seq, state.msb_first)
+                .set_u16(8, 1) // major
+                .set_u16(10, 0) // minor
+                .build()
         }
         1 => {
             // GenerateAuthorization
@@ -91,14 +90,11 @@ pub(crate) fn handle_security_request(state: &mut ClientState, data: &[u8], seq:
 
                 let auth_data_len = auth_data.len() as u32;
                 let extra_words = auth_data_len.div_ceil(4);
-                let mut reply = vec![0u8; 32 + (extra_words * 4) as usize];
-                reply[0] = 1;
-                state.write_u16(&mut reply, 2, seq);
-                state.write_u32(&mut reply, 4, extra_words); // length
-                state.write_u32(&mut reply, 8, auth_id);
-                state.write_u16(&mut reply, 12, auth_data_len as u16);
-                reply[16..16 + auth_data.len()].copy_from_slice(&auth_data);
-                reply
+                let mut reply = ReplyBuf::with_extra(seq, (extra_words * 4) as usize, state.msb_first)
+                    .set_u32(8, auth_id)
+                    .set_u16(12, auth_data_len as u16);
+                reply.buf_mut()[16..16 + auth_data.len()].copy_from_slice(&auth_data);
+                reply.build()
             } else {
                 crate::xserver::core::build_error_bo(
                     crate::xserver::core::BAD_LENGTH,

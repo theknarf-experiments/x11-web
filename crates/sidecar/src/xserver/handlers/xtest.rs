@@ -4,6 +4,7 @@ use tracing::{debug, warn};
 
 use super::super::client::ClientState;
 use crate::xserver::core::require_len;
+use crate::xserver::reply::ReplyBuf;
 
 /// XTEST (opcode 150)
 pub(crate) fn handle_xtest_request(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
@@ -11,12 +12,10 @@ pub(crate) fn handle_xtest_request(state: &mut ClientState, data: &[u8], seq: u1
     match minor {
         0 => {
             // GetVersion
-            let mut reply = [0u8; 32];
-            reply[0] = 1;
-            reply[1] = 2; // major_version in data byte
-            state.write_u16(&mut reply, 2, seq);
-            state.write_u16(&mut reply, 8, 2); // minor_version
-            reply.to_vec()
+            ReplyBuf::fixed(seq, state.msb_first)
+                .set_data_byte(2) // major_version in data byte
+                .set_u16(8, 2) // minor_version
+                .build()
         }
         1 => {
             // CompareCursor
@@ -38,11 +37,9 @@ pub(crate) fn handle_xtest_request(state: &mut ClientState, data: &[u8], seq: u1
                 win_cursor == cursor_id
             };
 
-            let mut reply = [0u8; 32];
-            reply[0] = 1;
-            reply[1] = if same { 1 } else { 0 };
-            state.write_u16(&mut reply, 2, seq);
-            reply.to_vec()
+            ReplyBuf::fixed(seq, state.msb_first)
+                .set_data_byte(if same { 1 } else { 0 })
+                .build()
         }
         2 => {
             // FakeInput

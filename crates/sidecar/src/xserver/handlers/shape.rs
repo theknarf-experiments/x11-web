@@ -10,6 +10,7 @@ use super::super::client::ClientState;
 use super::super::core::{write_u16_bo, write_u32_bo};
 use super::super::types::RegionRect;
 use crate::xserver::core::require_len;
+use crate::xserver::reply::ReplyBuf;
 
 /// SHAPE kind constants.
 const SHAPE_BOUNDING: u8 = 0;
@@ -33,12 +34,10 @@ pub(crate) fn handle_shape_request(state: &mut ClientState, data: &[u8], seq: u1
     match minor {
         // 0: QueryVersion
         0 => {
-            let mut reply = [0u8; 32];
-            reply[0] = 1; // Reply
-            state.write_u16(&mut reply, 2, seq);
-            state.write_u16(&mut reply, 8, 1); // major version
-            state.write_u16(&mut reply, 10, 1); // minor version
-            reply.to_vec()
+            ReplyBuf::fixed(seq, state.msb_first)
+                .set_u16(8, 1) // major version
+                .set_u16(10, 1) // minor version
+                .build()
         }
 
         // 1: Rectangles — set shape from a list of rectangles
@@ -225,20 +224,18 @@ pub(crate) fn handle_shape_request(state: &mut ClientState, data: &[u8], seq: u1
                 (false, bx, by, bw, bh)
             };
 
-            let mut reply = [0u8; 32];
-            reply[0] = 1; // Reply
-            state.write_u16(&mut reply, 2, seq);
-            reply[8] = bounding_shaped as u8;
-            reply[9] = clip_shaped as u8;
-            state.write_i16(&mut reply, 12, bx);
-            state.write_i16(&mut reply, 14, by);
-            state.write_u16(&mut reply, 16, bw);
-            state.write_u16(&mut reply, 18, bh);
-            state.write_i16(&mut reply, 20, cx);
-            state.write_i16(&mut reply, 22, cy);
-            state.write_u16(&mut reply, 24, cw);
-            state.write_u16(&mut reply, 26, ch);
-            reply.to_vec()
+            ReplyBuf::fixed(seq, state.msb_first)
+                .set_u8(8, bounding_shaped as u8)
+                .set_u8(9, clip_shaped as u8)
+                .set_i16(12, bx)
+                .set_i16(14, by)
+                .set_u16(16, bw)
+                .set_u16(18, bh)
+                .set_i16(20, cx)
+                .set_i16(22, cy)
+                .set_u16(24, cw)
+                .set_u16(26, ch)
+                .build()
         }
 
         // 6: SelectInput — subscribe to ShapeNotify events
@@ -273,11 +270,9 @@ pub(crate) fn handle_shape_request(state: &mut ClientState, data: &[u8], seq: u1
                 .map(|w| !w.shape_select_clients.is_empty())
                 .unwrap_or(false);
 
-            let mut reply = [0u8; 32];
-            reply[0] = 1; // Reply
-            reply[1] = enabled as u8;
-            state.write_u16(&mut reply, 2, seq);
-            reply.to_vec()
+            ReplyBuf::fixed(seq, state.msb_first)
+                .set_data_byte(enabled as u8)
+                .build()
         }
 
         // 8: GetRectangles — get the shape rectangles for a window
@@ -318,21 +313,19 @@ pub(crate) fn handle_shape_request(state: &mut ClientState, data: &[u8], seq: u1
             let n_rects = rects.len() as u32;
             let rects_bytes = rects.len() * 8;
             let padded = (rects_bytes + 3) & !3;
-            let mut reply = vec![0u8; 32 + padded];
-            reply[0] = 1; // Reply
-            reply[1] = 0; // ordering = UnSorted
-            state.write_u16(&mut reply, 2, seq);
-            state.write_u32(&mut reply, 4, (padded / 4) as u32);
-            state.write_u32(&mut reply, 8, n_rects);
+            let mut reply = ReplyBuf::with_extra(seq, padded, state.msb_first)
+                .set_data_byte(0) // ordering = UnSorted
+                .set_u32(8, n_rects);
 
             for (i, r) in rects.iter().enumerate() {
                 let off = 32 + i * 8;
-                state.write_i16(&mut reply, off, r.x);
-                state.write_i16(&mut reply, off + 2, r.y);
-                state.write_u16(&mut reply, off + 4, r.width);
-                state.write_u16(&mut reply, off + 6, r.height);
+                reply = reply
+                    .set_i16(off, r.x)
+                    .set_i16(off + 2, r.y)
+                    .set_u16(off + 4, r.width)
+                    .set_u16(off + 6, r.height);
             }
-            reply
+            reply.build()
         }
 
         _ => {

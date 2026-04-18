@@ -4,6 +4,7 @@ use tracing::debug;
 
 use super::super::client::ClientState;
 use crate::xserver::core::require_len;
+use crate::xserver::reply::ReplyBuf;
 
 /// DPMS (opcode 151)
 pub(crate) fn handle_dpms_request(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
@@ -11,30 +12,24 @@ pub(crate) fn handle_dpms_request(state: &mut ClientState, data: &[u8], seq: u16
     match minor {
         0 => {
             // GetVersion
-            let mut reply = [0u8; 32];
-            reply[0] = 1;
-            state.write_u16(&mut reply, 2, seq);
-            state.write_u16(&mut reply, 8, 1); // major
-            state.write_u16(&mut reply, 10, 2); // minor
-            reply.to_vec()
+            ReplyBuf::fixed(seq, state.msb_first)
+                .set_u16(8, 1) // major
+                .set_u16(10, 2) // minor
+                .build()
         }
         1 => {
             // Capable
-            let mut reply = [0u8; 32];
-            reply[0] = 1;
-            state.write_u16(&mut reply, 2, seq);
-            reply[8] = 1; // capable = true
-            reply.to_vec()
+            ReplyBuf::fixed(seq, state.msb_first)
+                .set_u8(8, 1) // capable = true
+                .build()
         }
         2 => {
             // GetTimeouts
-            let mut reply = [0u8; 32];
-            reply[0] = 1;
-            state.write_u16(&mut reply, 2, seq);
-            state.write_u16(&mut reply, 8, state.dpms_standby_timeout);
-            state.write_u16(&mut reply, 10, state.dpms_suspend_timeout);
-            state.write_u16(&mut reply, 12, state.dpms_off_timeout);
-            reply.to_vec()
+            ReplyBuf::fixed(seq, state.msb_first)
+                .set_u16(8, state.dpms_standby_timeout)
+                .set_u16(10, state.dpms_suspend_timeout)
+                .set_u16(12, state.dpms_off_timeout)
+                .build()
         }
         3 => {
             // SetTimeouts
@@ -94,12 +89,10 @@ pub(crate) fn handle_dpms_request(state: &mut ClientState, data: &[u8], seq: u16
         }
         7 => {
             // Info
-            let mut reply = [0u8; 32];
-            reply[0] = 1;
-            state.write_u16(&mut reply, 2, seq);
-            state.write_u16(&mut reply, 8, state.dpms_power_level);
-            reply[10] = if state.dpms_enabled { 1 } else { 0 };
-            reply.to_vec()
+            ReplyBuf::fixed(seq, state.msb_first)
+                .set_u16(8, state.dpms_power_level)
+                .set_u8(10, if state.dpms_enabled { 1 } else { 0 })
+                .build()
         }
         _ => {
             debug!("DPMS: unhandled minor opcode {minor}");
