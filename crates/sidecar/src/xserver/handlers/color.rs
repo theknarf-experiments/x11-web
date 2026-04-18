@@ -2,6 +2,7 @@
 
 use super::*;
 use crate::xserver::core::require_len;
+use crate::xserver::reply::ReplyBuf;
 
 // ---------------------------------------------------------------------------
 // Opcode 78: CreateColormap
@@ -225,20 +226,16 @@ pub(crate) fn handle_list_installed_colormaps(state: &ClientState, seq: u16) -> 
     let n_cmaps = cmaps.len();
     let extra_bytes = n_cmaps * 4;
     let padded = (extra_bytes + 3) & !3;
-    let length_field = (padded / 4) as u32;
 
-    let mut reply = vec![0u8; 32 + padded];
-    reply[0] = 1; // Reply
-    state.write_u16(&mut reply, 2, seq);
-    state.write_u32(&mut reply, 4, length_field);
-    state.write_u16(&mut reply, 8, n_cmaps as u16);
+    let mut reply = ReplyBuf::with_extra(seq, padded, state.msb_first)
+        .set_u16(8, n_cmaps as u16);
 
     for (i, &cid) in cmaps.iter().enumerate() {
         let off = 32 + i * 4;
-        state.write_u32(&mut reply, off, cid);
+        reply = reply.set_u32(off, cid);
     }
 
-    reply
+    reply.build()
 }
 
 // ---------------------------------------------------------------------------
@@ -274,15 +271,12 @@ pub(crate) fn handle_alloc_color(state: &mut ClientState, data: &[u8], seq: u16)
         None => return build_error(BAD_ALLOC, seq, 0, 84, 0),
     };
 
-    let mut reply = [0u8; 32];
-    reply[0] = 1; // Reply
-    state.write_u16(&mut reply, 2, seq);
-    state.write_u16(&mut reply, 8, red);
-    state.write_u16(&mut reply, 10, green);
-    state.write_u16(&mut reply, 12, blue);
-    state.write_u32(&mut reply, 16, pixel);
-
-    reply.to_vec()
+    ReplyBuf::fixed(seq, state.msb_first)
+        .set_u16(8, red)
+        .set_u16(10, green)
+        .set_u16(12, blue)
+        .set_u32(16, pixel)
+        .build()
 }
 
 // ---------------------------------------------------------------------------
@@ -318,18 +312,15 @@ pub(crate) fn handle_alloc_named_color(state: &mut ClientState, data: &[u8], seq
 
     info!("AllocNamedColor: name={name:?} -> pixel={pixel:#x}");
 
-    let mut reply = [0u8; 32];
-    reply[0] = 1;
-    state.write_u16(&mut reply, 2, seq);
-    state.write_u32(&mut reply, 8, pixel);
-    state.write_u16(&mut reply, 12, r16); // exact red
-    state.write_u16(&mut reply, 14, g16); // exact green
-    state.write_u16(&mut reply, 16, b16); // exact blue
-    state.write_u16(&mut reply, 18, r16); // visual red
-    state.write_u16(&mut reply, 20, g16); // visual green
-    state.write_u16(&mut reply, 22, b16); // visual blue
-
-    reply.to_vec()
+    ReplyBuf::fixed(seq, state.msb_first)
+        .set_u32(8, pixel)
+        .set_u16(12, r16) // exact red
+        .set_u16(14, g16) // exact green
+        .set_u16(16, b16) // exact blue
+        .set_u16(18, r16) // visual red
+        .set_u16(20, g16) // visual green
+        .set_u16(22, b16) // visual blue
+        .build()
 }
 
 // ---------------------------------------------------------------------------
@@ -391,21 +382,18 @@ pub(crate) fn handle_alloc_color_cells(state: &mut ClientState, data: &[u8], seq
             let n_mask = if n_planes > 0 { n_planes as usize } else { 0 };
             let data_len = (n_pix + n_mask) * 4;
             let padded = (data_len + 3) & !3;
-            let mut reply = vec![0u8; 32 + padded];
-            reply[0] = 1;
-            state.write_u16(&mut reply, 2, seq);
-            state.write_u32(&mut reply, 4, (padded / 4) as u32);
-            state.write_u16(&mut reply, 8, n_pix as u16);
-            state.write_u16(&mut reply, 10, n_mask as u16);
+            let mut reply = ReplyBuf::with_extra(seq, padded, state.msb_first)
+                .set_u16(8, n_pix as u16)
+                .set_u16(10, n_mask as u16);
             for (i, &p) in pix.iter().take(n_pix).enumerate() {
-                state.write_u32(&mut reply, 32 + i * 4, p);
+                reply = reply.set_u32(32 + i * 4, p);
             }
             // Plane masks: for each plane bit, set that bit position
             for i in 0..n_mask {
                 let mask = 1u32 << i;
-                state.write_u32(&mut reply, 32 + (n_pix + i) * 4, mask);
+                reply = reply.set_u32(32 + (n_pix + i) * 4, mask);
             }
-            reply
+            reply.build()
         }
         None => build_error(BAD_ALLOC, seq, 0, 86, 0),
     }
@@ -464,11 +452,6 @@ pub(crate) fn handle_alloc_color_planes(state: &mut ClientState, data: &[u8], se
         Some(pix) => {
             let data_len = n_colors as usize * 4;
             let padded = (data_len + 3) & !3;
-            let mut reply = vec![0u8; 32 + padded];
-            reply[0] = 1;
-            state.write_u16(&mut reply, 2, seq);
-            state.write_u32(&mut reply, 4, (padded / 4) as u32);
-            state.write_u16(&mut reply, 8, n_colors);
             // Red/green/blue masks at offsets 12, 16, 20
             let mut bit = 0u32;
             let mut red_mask = 0u32;
@@ -486,13 +469,15 @@ pub(crate) fn handle_alloc_color_planes(state: &mut ClientState, data: &[u8], se
                 blue_mask |= 1 << bit;
                 bit += 1;
             }
-            state.write_u32(&mut reply, 12, red_mask);
-            state.write_u32(&mut reply, 16, green_mask);
-            state.write_u32(&mut reply, 20, blue_mask);
+            let mut reply = ReplyBuf::with_extra(seq, padded, state.msb_first)
+                .set_u16(8, n_colors)
+                .set_u32(12, red_mask)
+                .set_u32(16, green_mask)
+                .set_u32(20, blue_mask);
             for (i, &p) in pix.iter().take(n_colors as usize).enumerate() {
-                state.write_u32(&mut reply, 32 + i * 4, p);
+                reply = reply.set_u32(32 + i * 4, p);
             }
-            reply
+            reply.build()
         }
         None => build_error(BAD_ALLOC, seq, 0, 87, 0),
     }
@@ -535,23 +520,19 @@ pub(crate) fn handle_query_colors(state: &mut ClientState, data: &[u8], seq: u16
 
     let data_len = n_pixels * 8; // Each RGB is 8 bytes (r2, g2, b2, pad2)
     let padded = (data_len + 3) & !3;
-    let length_field = (padded / 4) as u32;
 
-    let mut reply = vec![0u8; 32 + padded];
-    reply[0] = 1;
-    state.write_u16(&mut reply, 2, seq);
-    state.write_u32(&mut reply, 4, length_field);
-    state.write_u16(&mut reply, 8, n_pixels as u16);
+    let mut reply = ReplyBuf::with_extra(seq, padded, state.msb_first)
+        .set_u16(8, n_pixels as u16);
 
     for (i, &(r, g, b)) in colors.iter().enumerate() {
         let off = 32 + i * 8;
-        state.write_u16(&mut reply, off, r);
-        state.write_u16(&mut reply, off + 2, g);
-        state.write_u16(&mut reply, off + 4, b);
+        reply = reply.set_u16(off, r)
+            .set_u16(off + 2, g)
+            .set_u16(off + 4, b);
         // pad at off+6..off+8
     }
 
-    reply
+    reply.build()
 }
 
 // ---------------------------------------------------------------------------
@@ -582,17 +563,14 @@ pub(crate) fn handle_lookup_color(state: &mut ClientState, data: &[u8], seq: u16
     };
 
     // Reply: exact and visual colors
-    let mut reply = [0u8; 32];
-    reply[0] = 1;
-    state.write_u16(&mut reply, 2, seq);
-    state.write_u16(&mut reply, 8, r16);
-    state.write_u16(&mut reply, 10, g16);
-    state.write_u16(&mut reply, 12, b16);
-    state.write_u16(&mut reply, 14, r16);
-    state.write_u16(&mut reply, 16, g16);
-    state.write_u16(&mut reply, 18, b16);
-
-    reply.to_vec()
+    ReplyBuf::fixed(seq, state.msb_first)
+        .set_u16(8, r16)
+        .set_u16(10, g16)
+        .set_u16(12, b16)
+        .set_u16(14, r16)
+        .set_u16(16, g16)
+        .set_u16(18, b16)
+        .build()
 }
 
 // ---------------------------------------------------------------------------

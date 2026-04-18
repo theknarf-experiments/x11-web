@@ -2,6 +2,7 @@
 
 use super::*;
 use crate::xserver::core::require_len;
+use crate::xserver::reply::ReplyBuf;
 
 // ---------------------------------------------------------------------------
 // Opcode 97: QueryBestSize
@@ -39,12 +40,10 @@ pub(crate) fn handle_query_best_size(state: &ClientState, data: &[u8], seq: u16)
         _ => (width, height),
     };
 
-    let mut reply = [0u8; 32];
-    reply[0] = 1;
-    state.write_u16(&mut reply, 2, seq);
-    state.write_u16(&mut reply, 8, best_w);
-    state.write_u16(&mut reply, 10, best_h);
-    reply.to_vec()
+    ReplyBuf::fixed(seq, state.msb_first)
+        .set_u16(8, best_w)
+        .set_u16(10, best_h)
+        .build()
 }
 
 /// Round up to the nearest power of two, with a minimum of 1.
@@ -72,23 +71,22 @@ pub(crate) fn handle_query_extension(_state: &mut ClientState, data: &[u8], seq:
 
     debug!("QueryExtension: \"{}\"", name);
 
-    let mut reply = [0u8; 32];
-    reply[0] = 1; // Reply
-    _state.write_u16(&mut reply, 2, seq);
+    let mut reply = ReplyBuf::fixed(seq, _state.msb_first);
 
     // Look up the extension in the registry.
     if let Some(info) = _state.extension_registry.by_name(name) {
         if info.enabled {
-            reply[8] = 1; // present = true
-            reply[9] = info.major_opcode;
-            reply[10] = info.first_event;
-            reply[11] = info.first_error;
+            reply = reply
+                .set_u8(8, 1) // present = true
+                .set_u8(9, info.major_opcode)
+                .set_u8(10, info.first_event)
+                .set_u8(11, info.first_error);
         }
         // else: present = false (byte 8 = 0) — extension disabled
     }
     // else: present = false — extension unknown
 
-    reply.to_vec()
+    reply.build()
 }
 
 // ---------------------------------------------------------------------------
@@ -113,12 +111,8 @@ pub(crate) fn handle_list_extensions(state: &ClientState, seq: u16) -> Vec<u8> {
     }
 
     let extra_len = names_data.len();
-    let mut reply = vec![0u8; 32 + extra_len];
-    reply[0] = 1; // Reply
-    reply[1] = extensions.len() as u8;
-    state.write_u16(&mut reply, 2, seq);
-    state.write_u32(&mut reply, 4, (extra_len / 4) as u32);
-    reply[32..].copy_from_slice(&names_data);
-
-    reply
+    ReplyBuf::with_extra(seq, extra_len, state.msb_first)
+        .set_data_byte(extensions.len() as u8)
+        .set_bytes(32, &names_data)
+        .build()
 }
