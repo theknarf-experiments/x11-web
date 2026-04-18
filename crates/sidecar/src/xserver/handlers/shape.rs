@@ -595,6 +595,8 @@ fn send_shape_notify(state: &mut ClientState, window_id: u32, kind: u8, seq: u16
         .unwrap_or(false);
 
     if has_subscribers {
+        // ShapeNotify is an extension-specific event — no x11rb struct available,
+        // keep as raw bytes.
         let bo = state.msb_first;
         let mut event = [0u8; 32];
         event[0] = SHAPE_NOTIFY_EVENT;

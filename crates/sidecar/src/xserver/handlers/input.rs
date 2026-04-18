@@ -2,7 +2,11 @@
 
 use super::*;
 use crate::xserver::core::require_len;
+use crate::xserver::event::serialize_event;
 use crate::xserver::reply::ReplyBuf;
+use x11rb_protocol::protocol::xproto::{
+    ExposeEvent, MappingNotifyEvent, MotionNotifyEvent, PropertyNotifyEvent,
+};
 
 // ---------------------------------------------------------------------------
 // Opcode 104: Bell
@@ -340,20 +344,22 @@ pub(crate) fn handle_warp_pointer(state: &mut ClientState, data: &[u8], seq: u16
     }
 
     // Send MotionNotify event to let the client know the pointer moved
-    let mut event = [0u8; 32];
-    event[0] = MOTION_NOTIFY_EVENT;
-    event[1] = 0; // detail = Normal
-    state.write_u16(&mut event, 2, seq);
-    state.write_u32(&mut event, 4, state.timestamp()); // timestamp
-    state.write_u32(&mut event, 8, state.root_window); // root
-                                                       // event window = window under pointer (not focus_window, which may differ)
-    state.write_u32(&mut event, 12, new_window);
-    state.write_i16(&mut event, 20, state.pointer_x); // root_x
-    state.write_i16(&mut event, 22, state.pointer_y); // root_y
-    state.write_i16(&mut event, 24, state.pointer_x); // event_x
-    state.write_i16(&mut event, 26, state.pointer_y); // event_y
-    event[30] = 1; // same_screen = true
-    state.pending_events.push(event.to_vec());
+    let event = serialize_event(&MotionNotifyEvent {
+        response_type: MOTION_NOTIFY_EVENT,
+        detail: 0u8.into(), // Normal
+        sequence: seq,
+        time: state.timestamp(),
+        root: state.root_window,
+        event: new_window,
+        child: 0,
+        root_x: state.pointer_x,
+        root_y: state.pointer_y,
+        event_x: state.pointer_x,
+        event_y: state.pointer_y,
+        state: 0u16.into(),
+        same_screen: true,
+    }, state.msb_first);
+    state.pending_events.push(event);
 
     Vec::new()
 }
@@ -450,13 +456,14 @@ pub(crate) fn handle_change_keyboard_mapping(
 
     // MappingNotify must be sent to ALL clients per X11 spec (section 12.7).
     // The requesting client gets it via pending_events, all others via broadcast.
-    let mut event = [0u8; 32];
-    event[0] = MAPPING_NOTIFY_EVENT;
-    state.write_u16(&mut event, 2, seq);
-    event[4] = 1; // request = Keyboard
-    event[5] = first_keycode;
-    event[6] = keycode_count as u8;
-    state.pending_events.push(event.to_vec());
+    let event = serialize_event(&MappingNotifyEvent {
+        response_type: MAPPING_NOTIFY_EVENT,
+        sequence: seq,
+        request: 1u8.into(), // Keyboard
+        first_keycode: first_keycode,
+        count: keycode_count as u8,
+    }, state.msb_first);
+    state.pending_events.push(event.clone());
     state
         .event_broadcaster
         .broadcast_global(&event, &state.client_id);
@@ -728,16 +735,18 @@ pub(crate) fn handle_force_screen_saver(state: &mut ClientState, data: &[u8], se
                     .map(|w| (w.id, w.width, w.height, w.event_mask))
                     .collect();
                 for (wid, w, h, mask) in &expose_targets {
-                    let mut expose = [0u8; 32];
-                    expose[0] = EXPOSE_EVENT;
-                    write_u16_bo(&mut expose, 2, seq, bo);
-                    write_u32_bo(&mut expose, 4, *wid, bo);
-                    // x=0, y=0 already zero
-                    write_u16_bo(&mut expose, 12, *w, bo);
-                    write_u16_bo(&mut expose, 14, *h, bo);
-                    write_u16_bo(&mut expose, 16, 0, bo); // count = 0
+                    let expose = serialize_event(&ExposeEvent {
+                        response_type: EXPOSE_EVENT,
+                        sequence: seq,
+                        window: *wid,
+                        x: 0,
+                        y: 0,
+                        width: *w,
+                        height: *h,
+                        count: 0,
+                    }, bo);
                     if mask & EXPOSURE_MASK != 0 {
-                        state.pending_events.push(expose.to_vec());
+                        state.pending_events.push(expose.clone());
                     }
                     state.broadcast_event(*wid, EXPOSURE_MASK, &expose);
                 }
@@ -783,8 +792,9 @@ fn build_screen_saver_notify(state: &ClientState, saver_state: u8) -> Vec<u8> {
     //   byte 16: kind (0=Blanked, 1=Internal, 2=External)
     //   byte 17: forced (1 = forced via ForceScreenSaver)
     //   bytes 18-31: pad
+    // ScreenSaverNotify is an extension-specific event (MIT-SCREEN-SAVER) —
+    // no x11rb struct available, keep as raw bytes.
     let mut event = [0u8; 32];
-    // MIT-SCREEN-SAVER ScreenSaverNotify event code = extension base (92) + 0
     event[0] = 92;
     event[1] = saver_state;
     state.write_u16(&mut event, 2, state.sequence);
@@ -1125,15 +1135,16 @@ pub(crate) fn handle_rotate_properties(state: &mut ClientState, data: &[u8]) -> 
         .map(|w| w.event_mask)
         .unwrap_or(0);
     for &atom in &atoms {
-        let mut event = [0u8; 32];
-        event[0] = PROPERTY_NOTIFY_EVENT;
-        state.write_u16(&mut event, 2, seq);
-        state.write_u32(&mut event, 4, window);
-        state.write_u32(&mut event, 8, atom);
-        state.write_u32(&mut event, 12, timestamp);
-        event[16] = 0; // NewValue
+        let event = serialize_event(&PropertyNotifyEvent {
+            response_type: PROPERTY_NOTIFY_EVENT,
+            sequence: seq,
+            window,
+            atom,
+            time: timestamp,
+            state: 0u8.into(), // NewValue
+        }, state.msb_first);
         if win_mask & PROPERTY_CHANGE_MASK != 0 {
-            state.pending_events.push(event.to_vec());
+            state.pending_events.push(event.clone());
         }
         state.broadcast_event(window, PROPERTY_CHANGE_MASK, &event);
     }
@@ -1162,11 +1173,14 @@ pub(crate) fn handle_set_pointer_mapping(
         );
 
         // MappingNotify (request=Pointer) must be sent to ALL clients per X11 spec.
-        let mut event = [0u8; 32];
-        event[0] = MAPPING_NOTIFY_EVENT;
-        state.write_u16(&mut event, 2, seq);
-        event[4] = 2; // request = Pointer
-        state.pending_events.push(event.to_vec());
+        let event = serialize_event(&MappingNotifyEvent {
+            response_type: MAPPING_NOTIFY_EVENT,
+            sequence: seq,
+            request: 2u8.into(), // Pointer
+            first_keycode: 0,
+            count: 0,
+        }, state.msb_first);
+        state.pending_events.push(event.clone());
         state
             .event_broadcaster
             .broadcast_global(&event, &state.client_id);
@@ -1222,11 +1236,14 @@ pub(crate) fn handle_set_modifier_mapping(
         );
 
         // MappingNotify must be sent to ALL clients per X11 spec.
-        let mut event = [0u8; 32];
-        event[0] = MAPPING_NOTIFY_EVENT;
-        state.write_u16(&mut event, 2, state.sequence);
-        event[4] = 0; // request = Modifier
-        state.pending_events.push(event.to_vec());
+        let event = serialize_event(&MappingNotifyEvent {
+            response_type: MAPPING_NOTIFY_EVENT,
+            sequence: state.sequence,
+            request: 0u8.into(), // Modifier
+            first_keycode: 0,
+            count: 0,
+        }, state.msb_first);
+        state.pending_events.push(event.clone());
         state
             .event_broadcaster
             .broadcast_global(&event, &state.client_id);

@@ -46,7 +46,7 @@ use super::types::*;
 use crate::framebuffer::Framebuffer;
 
 // Re-export byte-order helpers for use in handler submodules
-pub(crate) use super::core::{read_u32_bo, write_i16_bo, write_u16_bo, write_u32_bo};
+pub(crate) use super::core::{read_u32_bo, write_u16_bo, write_u32_bo};
 
 // Re-export window stacking helpers for use by property handlers
 pub(crate) use window::restack_by_window_type;
@@ -361,6 +361,8 @@ fn emit_cursor_changed(state: &mut ClientState, wid: u32) {
             .collect();
 
         for sub_win in subscribers {
+            // XFixesCursorNotify is an extension-specific event (XFIXES) —
+            // no x11rb struct available, keep as raw bytes.
             let mut event = [0u8; 32];
             event[0] = XFIXES_CURSOR_NOTIFY;
             event[1] = 0; // subtype: DisplayCursor

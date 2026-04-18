@@ -175,14 +175,8 @@ fn check_alarms(
         .collect();
 
     for alarm_id in triggered {
-        // Build AlarmNotify event (XSyncAlarmNotifyEvent)
-        // Event code = SYNC base event (extension event, typically base + 0)
-        // We use 83 as the SYNC alarm notify event code (134 base - 51 offset...
-        // Actually the event is extension_base + 0. SYNC is opcode 134,
-        // XSyncAlarmNotify is the only event = extension's first_event)
-        // For our server, SYNC events are delivered via pending_events using the
-        // event number registered in QueryExtension.
-        // SYNC first_event = 83 (matches what we report in query.rs)
+        // SyncAlarmNotify is an extension-specific event (SYNC first_event=83) —
+        // no x11rb struct available, keep as raw bytes.
         let mut event = [0u8; 32];
         event[0] = 83; // SyncAlarmNotify event code
         event[1] = 0; // sub-code

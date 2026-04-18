@@ -3,7 +3,9 @@
 
 use super::*;
 use crate::xserver::core::require_len;
+use crate::xserver::event::serialize_event;
 use crate::xserver::reply::ReplyBuf;
+use x11rb_protocol::protocol::xproto::PropertyNotifyEvent;
 
 // ---------------------------------------------------------------------------
 // Opcode 18: ChangeProperty
@@ -138,18 +140,19 @@ pub(crate) fn handle_change_property(state: &mut ClientState, data: &[u8]) -> Ve
     // Generate PropertyNotify event if PropertyChangeMask is set
     let property_change_mask: u32 = 0x0040_0000;
     {
-        let mut event = [0u8; 32];
-        event[0] = PROPERTY_NOTIFY_EVENT;
-        state.write_u16(&mut event, 2, state.sequence);
-        state.write_u32(&mut event, 4, window);
-        state.write_u32(&mut event, 8, property_atom);
-        state.write_u32(&mut event, 12, state.timestamp());
-        event[16] = 0; // NewValue
+        let event = serialize_event(&PropertyNotifyEvent {
+            response_type: PROPERTY_NOTIFY_EVENT,
+            sequence: state.sequence,
+            window,
+            atom: property_atom,
+            time: state.timestamp(),
+            state: 0u8.into(), // NewValue
+        }, state.msb_first);
 
         // Deliver to local client if it selected PropertyChangeMask
         if let Some(win) = state.windows.get(&window) {
             if win.event_mask & property_change_mask != 0 {
-                state.pending_events.push(event.to_vec());
+                state.pending_events.push(event.clone());
             }
         }
 
@@ -467,17 +470,18 @@ pub(crate) fn handle_delete_property(state: &mut ClientState, data: &[u8]) -> Ve
 
         // Generate PropertyNotify event if PropertyChangeMask is set
         {
-            let mut event = [0u8; 32];
-            event[0] = PROPERTY_NOTIFY_EVENT;
-            state.write_u16(&mut event, 2, state.sequence);
-            state.write_u32(&mut event, 4, window);
-            state.write_u32(&mut event, 8, property);
-            state.write_u32(&mut event, 12, state.timestamp());
-            event[16] = 1; // Deleted
+            let event = serialize_event(&PropertyNotifyEvent {
+                response_type: PROPERTY_NOTIFY_EVENT,
+                sequence: state.sequence,
+                window,
+                atom: property,
+                time: state.timestamp(),
+                state: 1u8.into(), // Deleted
+            }, state.msb_first);
 
             if let Some(win) = state.windows.get(&window) {
                 if win.event_mask & PROPERTY_CHANGE_MASK != 0 {
-                    state.pending_events.push(event.to_vec());
+                    state.pending_events.push(event.clone());
                 }
             }
 
@@ -576,14 +580,15 @@ pub(crate) fn handle_get_property(state: &mut ClientState, data: &[u8], seq: u16
             let property_change_mask: u32 = 0x0040_0000;
             if let Some(win) = state.windows.get(&window) {
                 if win.event_mask & property_change_mask != 0 {
-                    let mut event = [0u8; 32];
-                    event[0] = PROPERTY_NOTIFY_EVENT;
-                    state.write_u16(&mut event, 2, seq);
-                    state.write_u32(&mut event, 4, window);
-                    state.write_u32(&mut event, 8, property_atom);
-                    state.write_u32(&mut event, 12, state.timestamp());
-                    event[16] = 1; // PropertyDelete
-                    state.pending_events.push(event.to_vec());
+                    let event = serialize_event(&PropertyNotifyEvent {
+                        response_type: PROPERTY_NOTIFY_EVENT,
+                        sequence: seq,
+                        window,
+                        atom: property_atom,
+                        time: state.timestamp(),
+                        state: 1u8.into(), // PropertyDelete
+                    }, state.msb_first);
+                    state.pending_events.push(event);
                 }
             }
 

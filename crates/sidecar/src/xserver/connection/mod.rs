@@ -7,6 +7,7 @@ pub(crate) mod scm_io;
 use self::resize::apply_screen_resize;
 pub(crate) use self::resize::resize_window;
 use self::scm_io::{recv_with_fds, send_with_fds};
+use crate::xserver::event::serialize_event;
 
 use crate::fonts::FontManager;
 use std::collections::HashMap;
@@ -17,6 +18,7 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::sync::mpsc;
 use tokio::time::Duration;
 use tracing::{debug, info, warn};
+use x11rb_protocol::protocol::xfixes::{SelectionEvent, SelectionNotifyEvent};
 use x11rb_protocol::protocol::xproto::{ImageOrder, SetupRequest};
 use x11rb_protocol::x11_utils::{Serialize, TryParse};
 
@@ -715,15 +717,19 @@ pub(crate) async fn handle_client(
                                 if let Some(&event_mask) = state.selection_event_subscribers.get(sel_atom) {
                                     if event_mask & 1 != 0 {
                                         const XFIXES_SELECTION_NOTIFY: u8 = 87;
-                                        let mut event = [0u8; 32];
-                                        event[0] = XFIXES_SELECTION_NOTIFY;
-                                        event[1] = 0; // subtype: SetSelectionOwner
-                                        state.write_u16(&mut event, 2, state.sequence);
-                                        state.write_u32(&mut event, 4, state.root_window);
-                                        state.write_u32(&mut event, 8, new_owner);
-                                        state.write_u32(&mut event, 12, *sel_atom);
-                                        state.write_u32(&mut event, 16, timestamp);
-                                        state.write_u32(&mut event, 20, timestamp);
+                                        let event = serialize_event(
+                                            &SelectionNotifyEvent {
+                                                response_type: XFIXES_SELECTION_NOTIFY,
+                                                subtype: SelectionEvent::SET_SELECTION_OWNER,
+                                                sequence: state.sequence,
+                                                window: state.root_window,
+                                                owner: new_owner,
+                                                selection: *sel_atom,
+                                                timestamp,
+                                                selection_timestamp: timestamp,
+                                            },
+                                            state.msb_first,
+                                        );
                                         state.pending_events.push(event.to_vec());
                                     }
                                 }
@@ -731,15 +737,19 @@ pub(crate) async fn handle_client(
                                 // via the event broadcaster.
                                 {
                                     const XFIXES_SEL_NOTIFY: u8 = 87;
-                                    let mut bcast_event = [0u8; 32];
-                                    bcast_event[0] = XFIXES_SEL_NOTIFY;
-                                    bcast_event[1] = 0;
-                                    state.write_u16(&mut bcast_event, 2, state.sequence);
-                                    state.write_u32(&mut bcast_event, 4, state.root_window);
-                                    state.write_u32(&mut bcast_event, 8, new_owner);
-                                    state.write_u32(&mut bcast_event, 12, *sel_atom);
-                                    state.write_u32(&mut bcast_event, 16, timestamp);
-                                    state.write_u32(&mut bcast_event, 20, timestamp);
+                                    let bcast_event = serialize_event(
+                                        &SelectionNotifyEvent {
+                                            response_type: XFIXES_SEL_NOTIFY,
+                                            subtype: SelectionEvent::SET_SELECTION_OWNER,
+                                            sequence: state.sequence,
+                                            window: state.root_window,
+                                            owner: new_owner,
+                                            selection: *sel_atom,
+                                            timestamp,
+                                            selection_timestamp: timestamp,
+                                        },
+                                        state.msb_first,
+                                    );
                                     state.event_broadcaster.broadcast_global(
                                         &bcast_event, &state.client_id,
                                     );

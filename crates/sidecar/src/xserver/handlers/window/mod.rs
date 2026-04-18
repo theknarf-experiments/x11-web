@@ -3,6 +3,9 @@
 // Re-export parent scope for submodules
 pub(super) use super::*;
 
+use crate::xserver::event::serialize_event;
+use x11rb_protocol::protocol::xproto::{ExposeEvent, VisibilityNotifyEvent};
+
 mod attributes;
 mod configure;
 mod create;
@@ -155,20 +158,22 @@ pub(crate) fn update_sibling_visibility(
             if let Some(win) = state.windows.get_mut(&sib_id) {
                 win.visibility = new_vis;
                 if win.event_mask & VISIBILITY_CHANGE_MASK != 0 {
-                    let mut vis_event = [0u8; 32];
-                    vis_event[0] = VISIBILITY_NOTIFY_EVENT;
-                    write_u16_bo(&mut vis_event, 2, seq, msb_first);
-                    write_u32_bo(&mut vis_event, 4, sib_id, msb_first);
-                    vis_event[8] = new_vis;
-                    state.pending_events.push(vis_event.to_vec());
+                    let vis_event = serialize_event(&VisibilityNotifyEvent {
+                        response_type: VISIBILITY_NOTIFY_EVENT,
+                        sequence: seq,
+                        window: sib_id,
+                        state: new_vis.into(),
+                    }, msb_first);
+                    state.pending_events.push(vis_event);
                 }
             }
             // Broadcast to other clients watching this window
-            let mut vis_event = [0u8; 32];
-            vis_event[0] = VISIBILITY_NOTIFY_EVENT;
-            write_u16_bo(&mut vis_event, 2, seq, msb_first);
-            write_u32_bo(&mut vis_event, 4, sib_id, msb_first);
-            vis_event[8] = new_vis;
+            let vis_event = serialize_event(&VisibilityNotifyEvent {
+                response_type: VISIBILITY_NOTIFY_EVENT,
+                sequence: seq,
+                window: sib_id,
+                state: new_vis.into(),
+            }, msb_first);
             state.broadcast_event(sib_id, VISIBILITY_CHANGE_MASK, &vis_event);
 
             // Generate Expose events for siblings that became more visible
@@ -198,26 +203,32 @@ pub(crate) fn update_sibling_visibility(
                         .map(|w| (w.width, w.height, w.event_mask))
                         .unwrap_or((0, 0, 0));
                     if sib_mask & EXPOSURE_MASK != 0 {
-                        let mut expose = [0u8; 32];
-                        expose[0] = EXPOSE_EVENT;
-                        write_u16_bo(&mut expose, 2, seq, msb_first);
-                        write_u32_bo(&mut expose, 4, sib_id, msb_first);
-                        // x=0, y=0 already zero
-                        write_u16_bo(&mut expose, 12, sib_w, msb_first);
-                        write_u16_bo(&mut expose, 14, sib_h, msb_first);
-                        write_u16_bo(&mut expose, 16, 0, msb_first); // count = 0 (last in series)
-                        state.pending_events.push(expose.to_vec());
+                        let expose = serialize_event(&ExposeEvent {
+                            response_type: EXPOSE_EVENT,
+                            sequence: seq,
+                            window: sib_id,
+                            x: 0,
+                            y: 0,
+                            width: sib_w,
+                            height: sib_h,
+                            count: 0,
+                        }, msb_first);
+                        state.pending_events.push(expose);
                     }
                     // Also broadcast to other clients that selected ExposureMask
-                    let mut expose_bc = [0u8; 32];
-                    expose_bc[0] = EXPOSE_EVENT;
-                    write_u16_bo(&mut expose_bc, 2, seq, msb_first);
-                    write_u32_bo(&mut expose_bc, 4, sib_id, msb_first);
-                    if let Some(w) = state.windows.get(&sib_id) {
-                        write_u16_bo(&mut expose_bc, 12, w.width, msb_first);
-                        write_u16_bo(&mut expose_bc, 14, w.height, msb_first);
-                    }
-                    // count = 0
+                    let (bc_w, bc_h) = state.windows.get(&sib_id)
+                        .map(|w| (w.width, w.height))
+                        .unwrap_or((0, 0));
+                    let expose_bc = serialize_event(&ExposeEvent {
+                        response_type: EXPOSE_EVENT,
+                        sequence: seq,
+                        window: sib_id,
+                        x: 0,
+                        y: 0,
+                        width: bc_w,
+                        height: bc_h,
+                        count: 0,
+                    }, msb_first);
                     state.broadcast_event(sib_id, EXPOSURE_MASK, &expose_bc);
                 }
             }

@@ -3,7 +3,11 @@
 
 use super::*;
 use crate::xserver::core::require_len;
+use crate::xserver::event::serialize_event;
 use crate::xserver::reply::ReplyBuf;
+use x11rb_protocol::protocol::xproto::{
+    SelectionClearEvent, SelectionNotifyEvent, SelectionRequestEvent,
+};
 
 // ---------------------------------------------------------------------------
 // Opcode 22: SetSelectionOwner
@@ -38,17 +42,18 @@ pub(crate) fn handle_set_selection_owner(state: &mut ClientState, data: &[u8]) -
         // Skip sending SelectionClear to the clipboard manager window since
         // it's a server-internal pseudo-window with no real client.
         if prev_owner != 0 && prev_owner != owner && prev_owner != CLIPBOARD_MANAGER_WINDOW {
-            let mut event = [0u8; 32];
-            event[0] = SELECTION_CLEAR_EVENT;
-            state.write_u16(&mut event, 2, state.sequence);
-            state.write_u32(&mut event, 4, state.timestamp()); // timestamp
-            state.write_u32(&mut event, 8, prev_owner); // window
-            state.write_u32(&mut event, 12, selection); // selection atom
-                                                        // Deliver to the previous owner — may be on another connection.
+            let event = serialize_event(&SelectionClearEvent {
+                response_type: SELECTION_CLEAR_EVENT,
+                sequence: state.sequence,
+                time: state.timestamp(),
+                owner: prev_owner,
+                selection,
+            }, state.msb_first);
+            // Deliver to the previous owner — may be on another connection.
             if state.x11_to_uuid.contains_key(&prev_owner) {
-                state.pending_events.push(event.to_vec());
+                state.pending_events.push(event);
             } else {
-                state.event_router.send_event(prev_owner, event.to_vec());
+                state.event_router.send_event(prev_owner, event);
             }
         }
 
@@ -94,6 +99,8 @@ pub(crate) fn handle_set_selection_owner(state: &mut ClientState, data: &[u8]) -
                 // The subscribing window was passed in SelectSelectionInput but we only
                 // stored the mask. We need to deliver to all subscribers. For now, deliver
                 // as a pending event (the subscribing client is this connection).
+                // XFixesSelectionNotify is an extension-specific event (XFIXES) —
+                // no x11rb struct available, keep as raw bytes.
                 const XFIXES_SELECTION_NOTIFY: u8 = 87; // first_event + 0
                 let mut event = [0u8; 32];
                 event[0] = XFIXES_SELECTION_NOTIFY;
@@ -187,16 +194,17 @@ pub(crate) fn handle_convert_selection(state: &mut ClientState, data: &[u8], _se
             }
 
             // Send SelectionNotify with property set (success).
-            let mut event = [0u8; 32];
-            event[0] = SELECTION_NOTIFY_EVENT;
-            state.write_u16(&mut event, 2, state.sequence);
-            state.write_u32(&mut event, 4, state.timestamp());
-            state.write_u32(&mut event, 8, requestor);
-            state.write_u32(&mut event, 12, selection);
-            state.write_u32(&mut event, 16, target);
-            state.write_u32(&mut event, 20, effective_property);
-            if !state.event_router.send_event(requestor, event.to_vec()) {
-                state.pending_events.push(event.to_vec());
+            let event = serialize_event(&SelectionNotifyEvent {
+                response_type: SELECTION_NOTIFY_EVENT,
+                sequence: state.sequence,
+                time: state.timestamp(),
+                requestor,
+                selection,
+                target,
+                property: effective_property,
+            }, state.msb_first);
+            if !state.event_router.send_event(requestor, event.clone()) {
+                state.pending_events.push(event);
             }
             return Vec::new();
         }
@@ -237,16 +245,17 @@ pub(crate) fn handle_convert_selection(state: &mut ClientState, data: &[u8], _se
                 0 // None — conversion failed
             };
 
-            let mut event = [0u8; 32];
-            event[0] = SELECTION_NOTIFY_EVENT;
-            state.write_u16(&mut event, 2, state.sequence);
-            state.write_u32(&mut event, 4, state.timestamp());
-            state.write_u32(&mut event, 8, requestor);
-            state.write_u32(&mut event, 12, selection);
-            state.write_u32(&mut event, 16, target);
-            state.write_u32(&mut event, 20, reply_property);
-            if !state.event_router.send_event(requestor, event.to_vec()) {
-                state.pending_events.push(event.to_vec());
+            let event = serialize_event(&SelectionNotifyEvent {
+                response_type: SELECTION_NOTIFY_EVENT,
+                sequence: state.sequence,
+                time: state.timestamp(),
+                requestor,
+                selection,
+                target,
+                property: reply_property,
+            }, state.msb_first);
+            if !state.event_router.send_event(requestor, event.clone()) {
+                state.pending_events.push(event);
             }
             return Vec::new();
         }
@@ -276,16 +285,17 @@ pub(crate) fn handle_convert_selection(state: &mut ClientState, data: &[u8], _se
 
             if pairs.is_empty() {
                 // No pairs found — send failure notification.
-                let mut event = [0u8; 32];
-                event[0] = SELECTION_NOTIFY_EVENT;
-                state.write_u16(&mut event, 2, state.sequence);
-                state.write_u32(&mut event, 4, state.timestamp());
-                state.write_u32(&mut event, 8, requestor);
-                state.write_u32(&mut event, 12, selection);
-                state.write_u32(&mut event, 16, target);
-                state.write_u32(&mut event, 20, 0u32); // property = None
-                if !state.event_router.send_event(requestor, event.to_vec()) {
-                    state.pending_events.push(event.to_vec());
+                let event = serialize_event(&SelectionNotifyEvent {
+                    response_type: SELECTION_NOTIFY_EVENT,
+                    sequence: state.sequence,
+                    time: state.timestamp(),
+                    requestor,
+                    selection,
+                    target,
+                    property: 0, // None
+                }, state.msb_first);
+                if !state.event_router.send_event(requestor, event.clone()) {
+                    state.pending_events.push(event);
                 }
                 return Vec::new();
             }
@@ -367,29 +377,31 @@ pub(crate) fn handle_convert_selection(state: &mut ClientState, data: &[u8], _se
                     }
                 } else if let Some(owner) = owner_local {
                     // Forward as individual SelectionRequest to local owner.
-                    let mut sel_request = [0u8; 32];
-                    sel_request[0] = SELECTION_REQUEST_EVENT;
-                    state.write_u16(&mut sel_request, 2, state.sequence);
-                    state.write_u32(&mut sel_request, 4, state.timestamp());
-                    state.write_u32(&mut sel_request, 8, owner);
-                    state.write_u32(&mut sel_request, 12, requestor);
-                    state.write_u32(&mut sel_request, 16, selection);
-                    state.write_u32(&mut sel_request, 20, pt);
-                    state.write_u32(&mut sel_request, 24, pp);
-                    state.pending_events.push(sel_request.to_vec());
+                    let sel_request = serialize_event(&SelectionRequestEvent {
+                        response_type: SELECTION_REQUEST_EVENT,
+                        sequence: state.sequence,
+                        time: state.timestamp(),
+                        owner,
+                        requestor,
+                        selection,
+                        target: pt,
+                        property: pp,
+                    }, state.msb_first);
+                    state.pending_events.push(sel_request);
                     result_pairs.push((pt, pp));
                 } else if let Some((owner, ref event_tx, _)) = remote_entry {
                     // Forward to remote owner.
-                    let mut sel_request = [0u8; 32];
-                    sel_request[0] = SELECTION_REQUEST_EVENT;
-                    state.write_u16(&mut sel_request, 2, state.sequence);
-                    state.write_u32(&mut sel_request, 4, state.timestamp());
-                    state.write_u32(&mut sel_request, 8, owner);
-                    state.write_u32(&mut sel_request, 12, requestor);
-                    state.write_u32(&mut sel_request, 16, selection);
-                    state.write_u32(&mut sel_request, 20, pt);
-                    state.write_u32(&mut sel_request, 24, pp);
-                    let _ = event_tx.send(sel_request.to_vec());
+                    let sel_request = serialize_event(&SelectionRequestEvent {
+                        response_type: SELECTION_REQUEST_EVENT,
+                        sequence: state.sequence,
+                        time: state.timestamp(),
+                        owner,
+                        requestor,
+                        selection,
+                        target: pt,
+                        property: pp,
+                    }, state.msb_first);
+                    let _ = event_tx.send(sel_request);
                     result_pairs.push((pt, pp));
                 } else {
                     // No owner — mark as failed.
@@ -415,16 +427,17 @@ pub(crate) fn handle_convert_selection(state: &mut ClientState, data: &[u8], _se
             }
 
             // Send SelectionNotify with target=MULTIPLE
-            let mut event = [0u8; 32];
-            event[0] = SELECTION_NOTIFY_EVENT;
-            state.write_u16(&mut event, 2, state.sequence);
-            state.write_u32(&mut event, 4, state.timestamp());
-            state.write_u32(&mut event, 8, requestor);
-            state.write_u32(&mut event, 12, selection);
-            state.write_u32(&mut event, 16, MULTIPLE_ATOM);
-            state.write_u32(&mut event, 20, effective_property);
-            if !state.event_router.send_event(requestor, event.to_vec()) {
-                state.pending_events.push(event.to_vec());
+            let event = serialize_event(&SelectionNotifyEvent {
+                response_type: SELECTION_NOTIFY_EVENT,
+                sequence: state.sequence,
+                time: state.timestamp(),
+                requestor,
+                selection,
+                target: MULTIPLE_ATOM,
+                property: effective_property,
+            }, state.msb_first);
+            if !state.event_router.send_event(requestor, event.clone()) {
+                state.pending_events.push(event);
             }
             return Vec::new();
         }
@@ -454,20 +467,19 @@ pub(crate) fn handle_convert_selection(state: &mut ClientState, data: &[u8], _se
             // Fall through to failure if we don't have the requested target.
         }
 
-        // Build the SelectionRequest event to send to the owner.
-        let mut sel_request = [0u8; 32];
-        sel_request[0] = SELECTION_REQUEST_EVENT;
-        state.write_u16(&mut sel_request, 2, state.sequence);
-        state.write_u32(&mut sel_request, 4, state.timestamp());
-        state.write_u32(&mut sel_request, 12, requestor);
-        state.write_u32(&mut sel_request, 16, selection);
-        state.write_u32(&mut sel_request, 20, target);
-        state.write_u32(&mut sel_request, 24, property);
-
         // Check local selections first.
         if let Some(&owner) = state.selections.get(&selection) {
-            state.write_u32(&mut sel_request, 8, owner);
-            state.pending_events.push(sel_request.to_vec());
+            let sel_request = serialize_event(&SelectionRequestEvent {
+                response_type: SELECTION_REQUEST_EVENT,
+                sequence: state.sequence,
+                time: state.timestamp(),
+                owner,
+                requestor,
+                selection,
+                target,
+                property,
+            }, state.msb_first);
+            state.pending_events.push(sel_request);
         } else {
             // Check shared (cross-connection) selections.
             let remote_entry = state.shared_selections.lock().ok().and_then(|sels| {
@@ -480,22 +492,32 @@ pub(crate) fn handle_convert_selection(state: &mut ClientState, data: &[u8], _se
             if let Some((owner, event_tx)) = remote_entry {
                 // Owner is on another connection — forward SelectionRequest
                 // via the owner's event channel.
-                state.write_u32(&mut sel_request, 8, owner);
-                let _ = event_tx.send(sel_request.to_vec());
+                let sel_request = serialize_event(&SelectionRequestEvent {
+                    response_type: SELECTION_REQUEST_EVENT,
+                    sequence: state.sequence,
+                    time: state.timestamp(),
+                    owner,
+                    requestor,
+                    selection,
+                    target,
+                    property,
+                }, state.msb_first);
+                let _ = event_tx.send(sel_request);
             } else {
                 // No owner: send SelectionNotify with property=None to the
                 // requestor to indicate conversion failed.
-                let mut event = [0u8; 32];
-                event[0] = SELECTION_NOTIFY_EVENT;
-                state.write_u16(&mut event, 2, state.sequence);
-                state.write_u32(&mut event, 4, state.timestamp());
-                state.write_u32(&mut event, 8, requestor);
-                state.write_u32(&mut event, 12, selection);
-                state.write_u32(&mut event, 16, target);
-                state.write_u32(&mut event, 20, 0u32); // property = None
-                                                       // Try cross-connection delivery first, fall back to local
-                if !state.event_router.send_event(requestor, event.to_vec()) {
-                    state.pending_events.push(event.to_vec());
+                let event = serialize_event(&SelectionNotifyEvent {
+                    response_type: SELECTION_NOTIFY_EVENT,
+                    sequence: state.sequence,
+                    time: state.timestamp(),
+                    requestor,
+                    selection,
+                    target,
+                    property: 0, // None
+                }, state.msb_first);
+                // Try cross-connection delivery first, fall back to local
+                if !state.event_router.send_event(requestor, event.clone()) {
+                    state.pending_events.push(event);
                 }
             }
         }

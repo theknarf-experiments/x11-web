@@ -2,6 +2,10 @@
 
 use super::*;
 use crate::xserver::core::{require_len, GRAPHICS_EXPOSURE_EVENT, NO_EXPOSURE_EVENT};
+use crate::xserver::event::serialize_event;
+use x11rb_protocol::protocol::xproto::{
+    ExposeEvent, GraphicsExposureEvent, NoExposureEvent,
+};
 
 // ---------------------------------------------------------------------------
 // Opcode 61: ClearArea
@@ -46,21 +50,22 @@ pub(crate) fn handle_clear_area(state: &mut ClientState, data: &[u8], _seq: u16)
     if exposures {
         let bo = state.msb_first;
         let seq = state.sequence;
-        let mut event = [0u8; 32];
-        event[0] = EXPOSE_EVENT;
-        write_u16_bo(&mut event, 2, seq, bo);
-        write_u32_bo(&mut event, 4, wid, bo);
-        write_i16_bo(&mut event, 8, x, bo);
-        write_i16_bo(&mut event, 10, y, bo);
-        write_u16_bo(&mut event, 12, width, bo);
-        write_u16_bo(&mut event, 14, height, bo);
-        // count = 0 (last in sequence)
+        let event = serialize_event(&ExposeEvent {
+            response_type: EXPOSE_EVENT,
+            sequence: seq,
+            window: wid,
+            x: x as u16,
+            y: y as u16,
+            width,
+            height,
+            count: 0,
+        }, bo);
         if state
             .windows
             .get(&wid)
             .is_some_and(|w| w.event_mask & EXPOSURE_MASK != 0)
         {
-            state.pending_events.push(event.to_vec());
+            state.pending_events.push(event.clone());
         }
         // Broadcast to other clients that selected ExposureMask on this window
         state.broadcast_event(wid, EXPOSURE_MASK, &event);
@@ -223,30 +228,32 @@ pub(crate) fn handle_copy_area(state: &mut ClientState, data: &[u8]) -> Vec<u8> 
 
         if exposed_rects.is_empty() {
             // NoExposure event (type 14)
-            let mut event = [0u8; 32];
-            event[0] = NO_EXPOSURE_EVENT;
-            state.write_u16(&mut event, 2, state.sequence);
-            state.write_u32(&mut event, 4, dst);
-            state.write_u16(&mut event, 8, 0u16); // minor_opcode: 0 for core protocol
-            event[10] = 62; // major_opcode: CopyArea
-            state.pending_events.push(event.to_vec());
+            let event = serialize_event(&NoExposureEvent {
+                response_type: NO_EXPOSURE_EVENT,
+                sequence: state.sequence,
+                drawable: dst,
+                minor_opcode: 0, // core protocol
+                major_opcode: 62, // CopyArea
+            }, state.msb_first);
+            state.pending_events.push(event);
         } else {
             // GraphicsExposure events (type 13) for each exposed region
             let last_idx = exposed_rects.len() - 1;
             for (i, &(ex, ey, ew, eh)) in exposed_rects.iter().enumerate() {
-                let mut event = [0u8; 32];
-                event[0] = GRAPHICS_EXPOSURE_EVENT;
-                state.write_u16(&mut event, 2, state.sequence);
-                state.write_u32(&mut event, 4, dst);
-                state.write_u16(&mut event, 8, ex as u16);
-                state.write_u16(&mut event, 10, ey as u16);
-                state.write_u16(&mut event, 12, ew);
-                state.write_u16(&mut event, 14, eh);
-                state.write_u16(&mut event, 16, 0u16); // minor_opcode: 0 for core protocol
-                let count = (last_idx - i) as u16; // remaining events
-                state.write_u16(&mut event, 18, count);
-                event[20] = 62; // major_opcode: CopyArea
-                state.pending_events.push(event.to_vec());
+                let count = (last_idx - i) as u16;
+                let event = serialize_event(&GraphicsExposureEvent {
+                    response_type: GRAPHICS_EXPOSURE_EVENT,
+                    sequence: state.sequence,
+                    drawable: dst,
+                    x: ex as u16,
+                    y: ey as u16,
+                    width: ew,
+                    height: eh,
+                    minor_opcode: 0, // core protocol
+                    count,
+                    major_opcode: 62, // CopyArea
+                }, state.msb_first);
+                state.pending_events.push(event);
             }
         }
     }
@@ -358,29 +365,31 @@ pub(crate) fn handle_copy_plane(state: &mut ClientState, data: &[u8]) -> Vec<u8>
         }
 
         if exposed_rects.is_empty() {
-            let mut event = [0u8; 32];
-            event[0] = NO_EXPOSURE_EVENT;
-            state.write_u16(&mut event, 2, state.sequence);
-            state.write_u32(&mut event, 4, dst);
-            state.write_u16(&mut event, 8, 0u16); // minor_opcode: 0 for core protocol
-            event[10] = 63; // major_opcode: CopyPlane
-            state.pending_events.push(event.to_vec());
+            let event = serialize_event(&NoExposureEvent {
+                response_type: NO_EXPOSURE_EVENT,
+                sequence: state.sequence,
+                drawable: dst,
+                minor_opcode: 0, // core protocol
+                major_opcode: 63, // CopyPlane
+            }, state.msb_first);
+            state.pending_events.push(event);
         } else {
             let last_idx = exposed_rects.len() - 1;
             for (i, &(ex, ey, ew, eh)) in exposed_rects.iter().enumerate() {
-                let mut event = [0u8; 32];
-                event[0] = GRAPHICS_EXPOSURE_EVENT;
-                state.write_u16(&mut event, 2, state.sequence);
-                state.write_u32(&mut event, 4, dst);
-                state.write_u16(&mut event, 8, ex as u16);
-                state.write_u16(&mut event, 10, ey as u16);
-                state.write_u16(&mut event, 12, ew);
-                state.write_u16(&mut event, 14, eh);
-                state.write_u16(&mut event, 16, 0u16); // minor_opcode: 0 for core protocol
                 let count = (last_idx - i) as u16;
-                state.write_u16(&mut event, 18, count);
-                event[20] = 63; // major_opcode: CopyPlane
-                state.pending_events.push(event.to_vec());
+                let event = serialize_event(&GraphicsExposureEvent {
+                    response_type: GRAPHICS_EXPOSURE_EVENT,
+                    sequence: state.sequence,
+                    drawable: dst,
+                    x: ex as u16,
+                    y: ey as u16,
+                    width: ew,
+                    height: eh,
+                    minor_opcode: 0, // core protocol
+                    count,
+                    major_opcode: 63, // CopyPlane
+                }, state.msb_first);
+                state.pending_events.push(event);
             }
         }
     }

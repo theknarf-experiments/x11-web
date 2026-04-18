@@ -2,10 +2,14 @@
 
 use tracing::info;
 use x11_web_protocol::DisplayUpdate;
+use x11rb_protocol::protocol::xproto::{
+    ClientMessageData, ClientMessageEvent, ConfigureNotifyEvent, ExposeEvent,
+};
 
 use crate::framebuffer::Framebuffer;
 use crate::xserver::client::ClientState;
 use crate::xserver::core::*;
+use crate::xserver::event::serialize_event;
 use crate::xserver::is_descendant_of;
 use crate::xserver::types::{generate_edid, PropertyValue, RandrMode};
 
@@ -79,16 +83,23 @@ pub(crate) fn resize_window(
 
                 // Send _NET_WM_SYNC_REQUEST ClientMessage
                 let timestamp = state.timestamp();
-                let mut cm = [0u8; 32];
-                cm[0] = CLIENT_MESSAGE_EVENT;
-                cm[1] = 32; // format
-                write_u16_bo(&mut cm, 2, seq, bo);
-                write_u32_bo(&mut cm, 4, window_id, bo);
-                write_u32_bo(&mut cm, 8, wm_protocols_atom, bo);
-                write_u32_bo(&mut cm, 12, net_wm_sync_request_atom, bo);
-                write_u32_bo(&mut cm, 16, timestamp, bo);
-                write_u32_bo(&mut cm, 20, lo, bo); // counter value lo
-                write_u32_bo(&mut cm, 24, hi as u32, bo); // counter value hi
+                let cm = serialize_event(
+                    &ClientMessageEvent {
+                        response_type: CLIENT_MESSAGE_EVENT,
+                        format: 32,
+                        sequence: seq,
+                        window: window_id,
+                        type_: wm_protocols_atom,
+                        data: ClientMessageData::from([
+                            net_wm_sync_request_atom,
+                            timestamp,
+                            lo,
+                            hi as u32,
+                            0,
+                        ]),
+                    },
+                    bo,
+                );
                 events.extend_from_slice(&cm);
             }
         }
@@ -99,17 +110,22 @@ pub(crate) fn resize_window(
         win.height = height;
         win.framebuffer = Framebuffer::new(width as u32, height as u32);
 
-        let mut event = [0u8; 32];
-        event[0] = CONFIGURE_NOTIFY_EVENT;
-        write_u16_bo(&mut event, 2, seq, bo);
-        write_u32_bo(&mut event, 4, window_id, bo);
-        write_u32_bo(&mut event, 8, window_id, bo);
-        write_u32_bo(&mut event, 12, above_sib, bo);
-        write_i16_bo(&mut event, 16, win.x, bo);
-        write_i16_bo(&mut event, 18, win.y, bo);
-        write_u16_bo(&mut event, 20, width, bo);
-        write_u16_bo(&mut event, 22, height, bo);
-        write_u16_bo(&mut event, 24, win.border_width, bo);
+        let event = serialize_event(
+            &ConfigureNotifyEvent {
+                response_type: CONFIGURE_NOTIFY_EVENT,
+                sequence: seq,
+                event: window_id,
+                window: window_id,
+                above_sibling: above_sib,
+                x: win.x,
+                y: win.y,
+                width,
+                height,
+                border_width: win.border_width,
+                override_redirect: false,
+            },
+            bo,
+        );
         events.extend_from_slice(&event);
     }
 
@@ -129,14 +145,20 @@ pub(crate) fn resize_window(
         .collect();
     let expose_total = exposed.len();
     for (i, (wid, w, h)) in exposed.iter().enumerate() {
-        let mut expose = [0u8; 32];
-        expose[0] = EXPOSE_EVENT;
-        write_u16_bo(&mut expose, 2, seq, bo);
-        write_u32_bo(&mut expose, 4, *wid, bo);
-        write_u16_bo(&mut expose, 12, *w, bo);
-        write_u16_bo(&mut expose, 14, *h, bo);
         let remaining = (expose_total - 1 - i) as u16;
-        write_u16_bo(&mut expose, 16, remaining, bo); // count: remaining Expose events
+        let expose = serialize_event(
+            &ExposeEvent {
+                response_type: EXPOSE_EVENT,
+                sequence: seq,
+                window: *wid,
+                x: 0,
+                y: 0,
+                width: *w,
+                height: *h,
+                count: remaining,
+            },
+            bo,
+        );
         events.extend_from_slice(&expose);
     }
 
@@ -274,17 +296,22 @@ pub(super) fn apply_screen_resize(state: &mut ClientState, new_w: u16, new_h: u1
 
     // ConfigureNotify for root window
     {
-        let mut event = [0u8; 32];
-        event[0] = CONFIGURE_NOTIFY_EVENT;
-        write_u16_bo(&mut event, 2, seq, bo);
-        write_u32_bo(&mut event, 4, state.root_window, bo); // event window
-        write_u32_bo(&mut event, 8, state.root_window, bo); // window
-                                                            // above_sibling = 0 (root window has no parent/siblings)
-        write_i16_bo(&mut event, 16, 0, bo); // x
-        write_i16_bo(&mut event, 18, 0, bo); // y
-        write_u16_bo(&mut event, 20, new_w, bo);
-        write_u16_bo(&mut event, 22, new_h, bo);
-        write_u16_bo(&mut event, 24, 0, bo); // border_width
+        let event = serialize_event(
+            &ConfigureNotifyEvent {
+                response_type: CONFIGURE_NOTIFY_EVENT,
+                sequence: seq,
+                event: state.root_window,
+                window: state.root_window,
+                above_sibling: 0,
+                x: 0,
+                y: 0,
+                width: new_w,
+                height: new_h,
+                border_width: 0,
+                override_redirect: false,
+            },
+            bo,
+        );
         events.extend_from_slice(&event);
     }
 
@@ -302,13 +329,19 @@ pub(super) fn apply_screen_resize(state: &mut ClientState, new_w: u16, new_h: u1
 
     // Expose on root so clients can redraw
     {
-        let mut expose = [0u8; 32];
-        expose[0] = EXPOSE_EVENT;
-        write_u16_bo(&mut expose, 2, seq, bo);
-        write_u32_bo(&mut expose, 4, state.root_window, bo);
-        write_u16_bo(&mut expose, 12, new_w, bo);
-        write_u16_bo(&mut expose, 14, new_h, bo);
-        write_u16_bo(&mut expose, 16, 0, bo); // count = 0 (last Expose)
+        let expose = serialize_event(
+            &ExposeEvent {
+                response_type: EXPOSE_EVENT,
+                sequence: seq,
+                window: state.root_window,
+                x: 0,
+                y: 0,
+                width: new_w,
+                height: new_h,
+                count: 0,
+            },
+            bo,
+        );
         events.extend_from_slice(&expose);
     }
 

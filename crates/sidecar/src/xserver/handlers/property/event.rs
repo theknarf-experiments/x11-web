@@ -2,6 +2,10 @@
 
 use super::*;
 use crate::xserver::core::require_len;
+use crate::xserver::event::serialize_event;
+use x11rb_protocol::protocol::xproto::{
+    ConfigureNotifyEvent, ExposeEvent, PropertyNotifyEvent,
+};
 
 // ---------------------------------------------------------------------------
 // Opcode 25: SendEvent
@@ -171,16 +175,17 @@ pub(crate) fn handle_send_event(state: &mut ClientState, data: &[u8]) -> Vec<u8>
                 // Generate PropertyNotify for clients watching PropertyChangeMask
                 {
                     let property_change_mask: u32 = 0x0040_0000;
-                    let mut pn_event = [0u8; 32];
-                    pn_event[0] = PROPERTY_NOTIFY_EVENT;
-                    state.write_u16(&mut pn_event, 2, state.sequence);
-                    state.write_u32(&mut pn_event, 4, source_window);
-                    state.write_u32(&mut pn_event, 8, net_wm_state_atom);
-                    state.write_u32(&mut pn_event, 12, state.timestamp());
-                    pn_event[16] = 0; // NewValue
+                    let pn_event = serialize_event(&PropertyNotifyEvent {
+                        response_type: PROPERTY_NOTIFY_EVENT,
+                        sequence: state.sequence,
+                        window: source_window,
+                        atom: net_wm_state_atom,
+                        time: state.timestamp(),
+                        state: 0u8.into(), // NewValue
+                    }, state.msb_first);
                     if let Some(win) = state.windows.get(&source_window) {
                         if win.event_mask & property_change_mask != 0 {
-                            state.pending_events.push(pn_event.to_vec());
+                            state.pending_events.push(pn_event.clone());
                         }
                     }
                     state.broadcast_event(source_window, property_change_mask, &pn_event);
@@ -239,24 +244,25 @@ pub(crate) fn handle_send_event(state: &mut ClientState, data: &[u8]) -> Vec<u8>
                             .get(&source_window)
                             .map(|w| w.border_width)
                             .unwrap_or(0);
-                        let mut cn = [0u8; 32];
-                        cn[0] = CONFIGURE_NOTIFY_EVENT;
-                        state.write_u16(&mut cn, 2, state.sequence);
-                        state.write_u32(&mut cn, 4, source_window);
-                        state.write_u32(&mut cn, 8, source_window);
-                        // above-sibling = 0
-                        state.write_i16(&mut cn, 16, 0);
-                        state.write_i16(&mut cn, 18, 0);
-                        state.write_u16(&mut cn, 20, sw);
-                        state.write_u16(&mut cn, 22, sh);
-                        state.write_u16(&mut cn, 24, border_width);
-                        cn[26] = if override_redirect { 1 } else { 0 };
+                        let cn = serialize_event(&ConfigureNotifyEvent {
+                            response_type: CONFIGURE_NOTIFY_EVENT,
+                            sequence: state.sequence,
+                            event: source_window,
+                            window: source_window,
+                            above_sibling: 0,
+                            x: 0,
+                            y: 0,
+                            width: sw,
+                            height: sh,
+                            border_width,
+                            override_redirect,
+                        }, state.msb_first);
                         if state
                             .windows
                             .get(&source_window)
                             .is_some_and(|w| w.event_mask & STRUCTURE_NOTIFY_MASK != 0)
                         {
-                            state.pending_events.push(cn.to_vec());
+                            state.pending_events.push(cn.clone());
                         }
                         state.broadcast_event(source_window, STRUCTURE_NOTIFY_MASK, &cn);
 
@@ -266,13 +272,17 @@ pub(crate) fn handle_send_event(state: &mut ClientState, data: &[u8]) -> Vec<u8>
                             .get(&source_window)
                             .is_some_and(|w| w.event_mask & EXPOSURE_MASK != 0)
                         {
-                            let mut expose = [0u8; 32];
-                            expose[0] = EXPOSE_EVENT;
-                            state.write_u16(&mut expose, 2, state.sequence);
-                            state.write_u32(&mut expose, 4, source_window);
-                            state.write_u16(&mut expose, 12, sw);
-                            state.write_u16(&mut expose, 14, sh);
-                            state.pending_events.push(expose.to_vec());
+                            let expose = serialize_event(&ExposeEvent {
+                                response_type: EXPOSE_EVENT,
+                                sequence: state.sequence,
+                                window: source_window,
+                                x: 0,
+                                y: 0,
+                                width: sw,
+                                height: sh,
+                                count: 0,
+                            }, state.msb_first);
+                            state.pending_events.push(expose);
                         }
                     }
                     // Notify frontend of new geometry
@@ -326,23 +336,25 @@ pub(crate) fn handle_send_event(state: &mut ClientState, data: &[u8]) -> Vec<u8>
                                 .get(&source_window)
                                 .map(|w| w.border_width)
                                 .unwrap_or(0);
-                            let mut cn = [0u8; 32];
-                            cn[0] = CONFIGURE_NOTIFY_EVENT;
-                            state.write_u16(&mut cn, 2, state.sequence);
-                            state.write_u32(&mut cn, 4, source_window);
-                            state.write_u32(&mut cn, 8, source_window);
-                            state.write_i16(&mut cn, 16, sx);
-                            state.write_i16(&mut cn, 18, sy);
-                            state.write_u16(&mut cn, 20, sw);
-                            state.write_u16(&mut cn, 22, sh);
-                            state.write_u16(&mut cn, 24, border_width);
-                            cn[26] = if override_redirect { 1 } else { 0 };
+                            let cn = serialize_event(&ConfigureNotifyEvent {
+                                response_type: CONFIGURE_NOTIFY_EVENT,
+                                sequence: state.sequence,
+                                event: source_window,
+                                window: source_window,
+                                above_sibling: 0,
+                                x: sx,
+                                y: sy,
+                                width: sw,
+                                height: sh,
+                                border_width,
+                                override_redirect,
+                            }, state.msb_first);
                             if state
                                 .windows
                                 .get(&source_window)
                                 .is_some_and(|w| w.event_mask & STRUCTURE_NOTIFY_MASK != 0)
                             {
-                                state.pending_events.push(cn.to_vec());
+                                state.pending_events.push(cn.clone());
                             }
                             state.broadcast_event(source_window, STRUCTURE_NOTIFY_MASK, &cn);
 
@@ -352,13 +364,17 @@ pub(crate) fn handle_send_event(state: &mut ClientState, data: &[u8]) -> Vec<u8>
                                 .get(&source_window)
                                 .is_some_and(|w| w.event_mask & EXPOSURE_MASK != 0)
                             {
-                                let mut expose = [0u8; 32];
-                                expose[0] = EXPOSE_EVENT;
-                                state.write_u16(&mut expose, 2, state.sequence);
-                                state.write_u32(&mut expose, 4, source_window);
-                                state.write_u16(&mut expose, 12, sw);
-                                state.write_u16(&mut expose, 14, sh);
-                                state.pending_events.push(expose.to_vec());
+                                let expose = serialize_event(&ExposeEvent {
+                                    response_type: EXPOSE_EVENT,
+                                    sequence: state.sequence,
+                                    window: source_window,
+                                    x: 0,
+                                    y: 0,
+                                    width: sw,
+                                    height: sh,
+                                    count: 0,
+                                }, state.msb_first);
+                                state.pending_events.push(expose);
                             }
                         }
                         // Notify frontend
@@ -457,6 +473,7 @@ pub(crate) fn handle_send_event(state: &mut ClientState, data: &[u8]) -> Vec<u8>
                 let wm_protocols_atom = state.intern_atom("WM_PROTOCOLS", false);
                 let wm_delete_atom = state.intern_atom("WM_DELETE_WINDOW", false);
                 if state.window_supports_protocol(source_window, wm_delete_atom) {
+                    // ClientMessage has format-dependent payloads — keep as raw bytes
                     let bo = state.msb_first;
                     let mut cm = [0u8; 32];
                     cm[0] = CLIENT_MESSAGE_EVENT;
@@ -504,16 +521,17 @@ pub(crate) fn handle_send_event(state: &mut ClientState, data: &[u8]) -> Vec<u8>
                 // Generate PropertyNotify for the frame extents change
                 {
                     let property_change_mask: u32 = 0x0040_0000;
-                    let mut pn_event = [0u8; 32];
-                    pn_event[0] = PROPERTY_NOTIFY_EVENT;
-                    state.write_u16(&mut pn_event, 2, state.sequence);
-                    state.write_u32(&mut pn_event, 4, source_window);
-                    state.write_u32(&mut pn_event, 8, atom_frame);
-                    state.write_u32(&mut pn_event, 12, state.timestamp());
-                    pn_event[16] = 0; // NewValue
+                    let pn_event = serialize_event(&PropertyNotifyEvent {
+                        response_type: PROPERTY_NOTIFY_EVENT,
+                        sequence: state.sequence,
+                        window: source_window,
+                        atom: atom_frame,
+                        time: state.timestamp(),
+                        state: 0u8.into(), // NewValue
+                    }, state.msb_first);
                     if let Some(win) = state.windows.get(&source_window) {
                         if win.event_mask & property_change_mask != 0 {
-                            state.pending_events.push(pn_event.to_vec());
+                            state.pending_events.push(pn_event.clone());
                         }
                     }
                     state.broadcast_event(source_window, property_change_mask, &pn_event);
@@ -653,19 +671,20 @@ pub(crate) fn handle_send_event(state: &mut ClientState, data: &[u8]) -> Vec<u8>
                     // Generate PropertyNotify for the state change
                     {
                         let pcm: u32 = 0x0040_0000;
-                        let mut pn = [0u8; 32];
-                        pn[0] = PROPERTY_NOTIFY_EVENT;
-                        state.write_u16(&mut pn, 2, state.sequence);
-                        state.write_u32(&mut pn, 4, source_window);
-                        state.write_u32(&mut pn, 8, net_wm_state_atom);
-                        state.write_u32(&mut pn, 12, state.timestamp());
-                        pn[16] = 0;
+                        let pn = serialize_event(&PropertyNotifyEvent {
+                            response_type: PROPERTY_NOTIFY_EVENT,
+                            sequence: state.sequence,
+                            window: source_window,
+                            atom: net_wm_state_atom,
+                            time: state.timestamp(),
+                            state: 0u8.into(), // NewValue
+                        }, state.msb_first);
                         if state
                             .windows
                             .get(&source_window)
                             .is_some_and(|w| w.event_mask & pcm != 0)
                         {
-                            state.pending_events.push(pn.to_vec());
+                            state.pending_events.push(pn.clone());
                         }
                         state.broadcast_event(source_window, pcm, &pn);
                     }
@@ -697,19 +716,20 @@ pub(crate) fn handle_send_event(state: &mut ClientState, data: &[u8]) -> Vec<u8>
                     // Generate PropertyNotify for the state change
                     {
                         let pcm: u32 = 0x0040_0000;
-                        let mut pn = [0u8; 32];
-                        pn[0] = PROPERTY_NOTIFY_EVENT;
-                        state.write_u16(&mut pn, 2, state.sequence);
-                        state.write_u32(&mut pn, 4, source_window);
-                        state.write_u32(&mut pn, 8, net_wm_state_atom);
-                        state.write_u32(&mut pn, 12, state.timestamp());
-                        pn[16] = 0;
+                        let pn = serialize_event(&PropertyNotifyEvent {
+                            response_type: PROPERTY_NOTIFY_EVENT,
+                            sequence: state.sequence,
+                            window: source_window,
+                            atom: net_wm_state_atom,
+                            time: state.timestamp(),
+                            state: 0u8.into(), // NewValue
+                        }, state.msb_first);
                         if state
                             .windows
                             .get(&source_window)
                             .is_some_and(|w| w.event_mask & pcm != 0)
                         {
-                            state.pending_events.push(pn.to_vec());
+                            state.pending_events.push(pn.clone());
                         }
                         state.broadcast_event(source_window, pcm, &pn);
                     }
@@ -749,6 +769,7 @@ pub(crate) fn handle_send_event(state: &mut ClientState, data: &[u8]) -> Vec<u8>
                     // XEmbed message format: ClientMessage with _XEMBED type
                     // data[0] = timestamp, data[1] = XEMBED_EMBEDDED_NOTIFY (0),
                     // data[2] = embedder window
+                    // ClientMessage has format-dependent payloads — keep as raw bytes
                     let xembed_atom = state.intern_atom("_XEMBED", false);
                     let timestamp = state.timestamp();
                     let mut xembed_event = [0u8; 32];
@@ -824,6 +845,7 @@ pub(crate) fn handle_send_event(state: &mut ClientState, data: &[u8]) -> Vec<u8>
                     XEMBED_REQUEST_FOCUS => {
                         debug!("XEMBED_REQUEST_FOCUS: target={target:#x}");
                         // An embedded window requests focus. Send XEMBED_FOCUS_IN back.
+                        // ClientMessage has format-dependent payloads — keep as raw bytes
                         let reply_xembed_atom = state.intern_atom("_XEMBED", false);
                         let ts = state.timestamp();
                         let mut focus_event = [0u8; 32];

@@ -10,6 +10,7 @@ use super::client::ClientState;
 use super::core::*;
 use super::extensions::ExtensionId;
 use super::handlers;
+use super::reply::ReplyBuf;
 
 /// Dispatch an X11 request to the appropriate handler based on the major opcode.
 pub(super) fn handle_request(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
@@ -68,12 +69,9 @@ fn dispatch_extension(state: &mut ClientState, data: &[u8], seq: u16, id: Extens
         ExtensionId::BigRequests => {
             // BigReqEnable: mark BIG-REQUESTS as enabled and return max request length.
             state.big_requests_enabled = true;
-            let bo = state.msb_first;
-            let mut reply = [0u8; 32];
-            reply[0] = 1;
-            write_u16_bo(&mut reply, 2, seq, bo);
-            write_u32_bo(&mut reply, 8, 4_194_304u32, bo); // 16 MB / 4
-            reply.to_vec()
+            ReplyBuf::fixed(seq, state.msb_first)
+                .set_u32(8, 4_194_304u32) // 16 MB / 4
+                .build()
         }
         ExtensionId::Shape => handlers::extensions::handle_shape_request(state, data, seq),
         ExtensionId::MitShm => handlers::extensions::handle_shm_request(state, data, seq),

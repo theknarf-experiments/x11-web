@@ -5,20 +5,25 @@ use crate::xserver::event::serialize_event;
 use std::collections::HashMap;
 use x11_web_protocol::{DisplayUpdate, InputEvent};
 use x11rb_protocol::protocol::xproto::{
-    ButtonPressEvent, EnterNotifyEvent, KeyPressEvent, MotionNotifyEvent,
+    ButtonPressEvent, ClientMessageData, ClientMessageEvent, EnterNotifyEvent, KeyPressEvent,
+    MotionNotifyEvent, PropertyNotifyEvent,
 };
 
 /// Emit a PropertyNotify event for a window property change.
 /// Used when the server internally modifies properties (e.g. _NET_WM_STATE).
 fn emit_property_notify(state: &mut ClientState, window: u32, atom: u32) {
     let property_change_mask: u32 = 0x0040_0000;
-    let mut event = [0u8; 32];
-    event[0] = PROPERTY_NOTIFY_EVENT;
-    state.write_u16(&mut event, 2, state.sequence);
-    state.write_u32(&mut event, 4, window);
-    state.write_u32(&mut event, 8, atom);
-    state.write_u32(&mut event, 12, state.timestamp());
-    event[16] = 0; // NewValue
+    let event = serialize_event(
+        &PropertyNotifyEvent {
+            response_type: PROPERTY_NOTIFY_EVENT,
+            sequence: state.sequence,
+            window,
+            atom,
+            time: state.timestamp(),
+            state: x11rb_protocol::protocol::xproto::Property::NEW_VALUE,
+        },
+        state.msb_first,
+    );
     if let Some(win) = state.windows.get(&window) {
         if win.event_mask & property_change_mask != 0 {
             state.pending_events.push(event.to_vec());
@@ -1256,14 +1261,23 @@ pub(crate) fn build_x11_input_event(
                 WindowWmState::Close => {
                     // ICCCM graceful close: send WM_DELETE_WINDOW ClientMessage
                     if supports_delete {
-                        let mut cm = [0u8; 32];
-                        cm[0] = CLIENT_MESSAGE_EVENT;
-                        cm[1] = 32; // format
-                        write_u16_bo(&mut cm, 2, seq, bo);
-                        write_u32_bo(&mut cm, 4, top_level, bo);
-                        write_u32_bo(&mut cm, 8, wm_protocols_atom, bo);
-                        write_u32_bo(&mut cm, 12, wm_delete_atom, bo);
-                        write_u32_bo(&mut cm, 16, timestamp, bo);
+                        let cm = serialize_event(
+                            &ClientMessageEvent {
+                                response_type: CLIENT_MESSAGE_EVENT,
+                                format: 32,
+                                sequence: seq,
+                                window: top_level,
+                                type_: wm_protocols_atom,
+                                data: ClientMessageData::from([
+                                    wm_delete_atom,
+                                    timestamp,
+                                    0,
+                                    0,
+                                    0,
+                                ]),
+                            },
+                            bo,
+                        );
                         return cm.to_vec();
                     }
                     // Window doesn't support WM_DELETE_WINDOW -- destroy it directly
@@ -1279,12 +1293,17 @@ pub(crate) fn build_x11_input_event(
             }
 
             // Send a _NET_WM_STATE ClientMessage to the window per EWMH
-            let mut cm = [0u8; 32];
-            cm[0] = CLIENT_MESSAGE_EVENT;
-            cm[1] = 32; // format
-            write_u16_bo(&mut cm, 2, seq, bo);
-            write_u32_bo(&mut cm, 4, top_level, bo);
-            write_u32_bo(&mut cm, 8, net_wm_state_atom, bo);
+            let cm = serialize_event(
+                &ClientMessageEvent {
+                    response_type: CLIENT_MESSAGE_EVENT,
+                    format: 32,
+                    sequence: seq,
+                    window: top_level,
+                    type_: net_wm_state_atom,
+                    data: ClientMessageData::from([0u32, 0, 0, 0, 0]),
+                },
+                bo,
+            );
             return cm.to_vec();
         }
         InputEvent::CompositionEvent { phase, text } => {

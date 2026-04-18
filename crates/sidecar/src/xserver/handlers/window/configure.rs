@@ -373,6 +373,7 @@ pub(crate) fn handle_configure_window(state: &mut ClientState, data: &[u8], seq:
                 }
 
                 // Send _NET_WM_SYNC_REQUEST ClientMessage
+                // (ClientMessage has format-dependent payloads — keep as raw bytes)
                 let bo = state.msb_first;
                 let seq_num = state.sequence;
                 let timestamp = state.timestamp();
@@ -971,6 +972,7 @@ pub(crate) fn handle_configure_window(state: &mut ClientState, data: &[u8], seq:
                     let hi = (new_value >> 32) as u32;
                     let timestamp = state.timestamp();
 
+                    // ClientMessage has format-dependent payloads — keep as raw bytes
                     let mut sync_msg = [0u8; 32];
                     sync_msg[0] = CLIENT_MESSAGE_EVENT;
                     sync_msg[1] = 32; // format

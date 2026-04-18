@@ -1,13 +1,18 @@
 //! Focus and window management helpers for ClientState.
 
 use x11_web_protocol::DisplayUpdate;
+use x11rb_protocol::protocol::xproto::{
+    ClientMessageData, ClientMessageEvent, FocusInEvent, KeymapNotifyEvent, NotifyDetail,
+    NotifyMode,
+};
 
 use super::super::core::{
-    write_u16_bo, write_u32_bo, CLIENT_MESSAGE_EVENT, FOCUS_CHANGE_MASK, FOCUS_IN_EVENT,
-    FOCUS_OUT_EVENT, KEYMAP_NOTIFY_EVENT, KEYMAP_STATE_MASK,
+    CLIENT_MESSAGE_EVENT, FOCUS_CHANGE_MASK, FOCUS_IN_EVENT, FOCUS_OUT_EVENT, KEYMAP_NOTIFY_EVENT,
+    KEYMAP_STATE_MASK,
 };
 use super::super::types::*;
 use super::ClientState;
+use crate::xserver::event::serialize_event;
 
 impl ClientState {
     /// Revert focus away from the given window (called when it's destroyed or unmapped).
@@ -123,10 +128,16 @@ impl ClientState {
                 // KeymapNotify after FocusIn if selected
                 if let Some(win) = self.windows.get(&new_focus) {
                     if win.event_mask & KEYMAP_STATE_MASK != 0 {
-                        let mut km_event = [0u8; 32];
-                        km_event[0] = KEYMAP_NOTIFY_EVENT;
-                        km_event[1..32].copy_from_slice(&self.pressed_keys[1..32]);
-                        self.pending_events.push(km_event.to_vec());
+                        let mut keys = [0u8; 31];
+                        keys.copy_from_slice(&self.pressed_keys[1..32]);
+                        let km_event = serialize_event(
+                            &KeymapNotifyEvent {
+                                response_type: KEYMAP_NOTIFY_EVENT,
+                                keys,
+                            },
+                            bo,
+                        );
+                        self.pending_events.push(km_event);
                     }
                 }
             } else if new_focus == 1 {
@@ -143,13 +154,17 @@ impl ClientState {
             .get(&window)
             .is_some_and(|w| w.event_mask & FOCUS_CHANGE_MASK != 0);
         if has_mask || window == self.root_window {
-            let mut event = [0u8; 32];
-            event[0] = event_type;
-            event[1] = detail;
-            write_u16_bo(&mut event, 2, seq, bo);
-            write_u32_bo(&mut event, 4, window, bo);
-            event[8] = 0; // mode = Normal
-            self.pending_events.push(event.to_vec());
+            let event = serialize_event(
+                &FocusInEvent {
+                    response_type: event_type,
+                    detail: NotifyDetail::from(detail),
+                    sequence: seq,
+                    event: window,
+                    mode: NotifyMode::NORMAL,
+                },
+                bo,
+            );
+            self.pending_events.push(event);
         }
     }
 
@@ -405,15 +420,24 @@ impl ClientState {
             let seq = self.sequence;
             let timestamp = self.timestamp();
 
-            let mut cm = [0u8; 32];
-            cm[0] = CLIENT_MESSAGE_EVENT;
-            cm[1] = 32; // format
-            write_u16_bo(&mut cm, 2, seq, bo);
-            write_u32_bo(&mut cm, 4, window, bo);
-            write_u32_bo(&mut cm, 8, wm_protocols_atom, bo);
-            write_u32_bo(&mut cm, 12, wm_take_focus_atom, bo);
-            write_u32_bo(&mut cm, 16, timestamp, bo);
-            self.pending_events.push(cm.to_vec());
+            let cm = serialize_event(
+                &ClientMessageEvent {
+                    response_type: CLIENT_MESSAGE_EVENT,
+                    format: 32,
+                    sequence: seq,
+                    window,
+                    type_: wm_protocols_atom,
+                    data: ClientMessageData::from([
+                        wm_take_focus_atom,
+                        timestamp,
+                        0,
+                        0,
+                        0,
+                    ]),
+                },
+                bo,
+            );
+            self.pending_events.push(cm);
         }
     }
 
@@ -424,18 +448,28 @@ impl ClientState {
         let net_wm_ping_atom = self.intern_atom("_NET_WM_PING", false);
         if self.window_supports_protocol(window, net_wm_ping_atom) {
             let wm_protocols_atom = self.intern_atom("WM_PROTOCOLS", false);
+            let bo = self.msb_first;
+            let seq = self.sequence;
             let timestamp = self.timestamp();
 
-            let mut cm = [0u8; 32];
-            cm[0] = CLIENT_MESSAGE_EVENT;
-            cm[1] = 32; // format
-            self.write_u16(&mut cm, 2, self.sequence);
-            self.write_u32(&mut cm, 4, window);
-            self.write_u32(&mut cm, 8, wm_protocols_atom);
-            self.write_u32(&mut cm, 12, net_wm_ping_atom);
-            self.write_u32(&mut cm, 16, timestamp);
-            self.write_u32(&mut cm, 20, window); // window being pinged
-            self.pending_events.push(cm.to_vec());
+            let cm = serialize_event(
+                &ClientMessageEvent {
+                    response_type: CLIENT_MESSAGE_EVENT,
+                    format: 32,
+                    sequence: seq,
+                    window,
+                    type_: wm_protocols_atom,
+                    data: ClientMessageData::from([
+                        net_wm_ping_atom,
+                        timestamp,
+                        window, // window being pinged
+                        0,
+                        0,
+                    ]),
+                },
+                bo,
+            );
+            self.pending_events.push(cm);
         }
     }
 

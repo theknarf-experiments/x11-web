@@ -19,6 +19,9 @@ pub(super) use selection::*;
 // Re-export the parent scope into this module so submodules can use `use super::*;`
 pub(super) use super::*;
 
+use crate::xserver::event::serialize_event;
+use x11rb_protocol::protocol::xproto::{PropertyNotifyEvent, SelectionNotifyEvent};
+
 // ---------------------------------------------------------------------------
 // INCR transfer helpers (used by crud and selection submodules)
 // ---------------------------------------------------------------------------
@@ -65,17 +68,18 @@ pub(crate) fn start_incr_transfer(
 
     // Generate PropertyNotify(NewValue) so the requestor is notified.
     {
-        let mut event = [0u8; 32];
-        event[0] = PROPERTY_NOTIFY_EVENT;
-        state.write_u16(&mut event, 2, state.sequence);
-        state.write_u32(&mut event, 4, requestor);
-        state.write_u32(&mut event, 8, property);
-        state.write_u32(&mut event, 12, state.timestamp());
-        event[16] = 0; // NewValue
+        let event = serialize_event(&PropertyNotifyEvent {
+            response_type: PROPERTY_NOTIFY_EVENT,
+            sequence: state.sequence,
+            window: requestor,
+            atom: property,
+            time: state.timestamp(),
+            state: 0u8.into(), // NewValue
+        }, state.msb_first);
 
         if let Some(win) = state.windows.get(&requestor) {
             if win.event_mask & PROPERTY_CHANGE_MASK != 0 {
-                state.pending_events.push(event.to_vec());
+                state.pending_events.push(event.clone());
             }
         }
         state.broadcast_event(requestor, PROPERTY_CHANGE_MASK, &event);
@@ -153,17 +157,18 @@ pub(crate) fn advance_incr_transfer(state: &mut ClientState, window: u32, proper
     // Generate PropertyNotify(NewValue) so the requestor knows data is ready.
     // Deliver to all clients that selected PropertyChangeMask on this window.
     {
-        let mut event = [0u8; 32];
-        event[0] = PROPERTY_NOTIFY_EVENT;
-        state.write_u16(&mut event, 2, state.sequence);
-        state.write_u32(&mut event, 4, window);
-        state.write_u32(&mut event, 8, property);
-        state.write_u32(&mut event, 12, state.timestamp());
-        event[16] = 0; // NewValue
+        let event = serialize_event(&PropertyNotifyEvent {
+            response_type: PROPERTY_NOTIFY_EVENT,
+            sequence: state.sequence,
+            window,
+            atom: property,
+            time: state.timestamp(),
+            state: 0u8.into(), // NewValue
+        }, state.msb_first);
 
         if let Some(win) = state.windows.get(&window) {
             if win.event_mask & PROPERTY_CHANGE_MASK != 0 {
-                state.pending_events.push(event.to_vec());
+                state.pending_events.push(event.clone());
             }
         }
 
@@ -245,16 +250,17 @@ pub(crate) fn serve_persistent_clipboard(
             );
         }
 
-        let mut event = [0u8; 32];
-        event[0] = SELECTION_NOTIFY_EVENT;
-        state.write_u16(&mut event, 2, state.sequence);
-        state.write_u32(&mut event, 4, state.timestamp());
-        state.write_u32(&mut event, 8, requestor);
-        state.write_u32(&mut event, 12, selection);
-        state.write_u32(&mut event, 16, TARGETS_ATOM);
-        state.write_u32(&mut event, 20, property);
-        if !state.event_router.send_event(requestor, event.to_vec()) {
-            state.pending_events.push(event.to_vec());
+        let event = serialize_event(&SelectionNotifyEvent {
+            response_type: SELECTION_NOTIFY_EVENT,
+            sequence: state.sequence,
+            time: state.timestamp(),
+            requestor,
+            selection,
+            target: TARGETS_ATOM,
+            property,
+        }, state.msb_first);
+        if !state.event_router.send_event(requestor, event.clone()) {
+            state.pending_events.push(event);
         }
         return true;
     }
@@ -277,16 +283,17 @@ pub(crate) fn serve_persistent_clipboard(
             );
         }
 
-        let mut event = [0u8; 32];
-        event[0] = SELECTION_NOTIFY_EVENT;
-        state.write_u16(&mut event, 2, state.sequence);
-        state.write_u32(&mut event, 4, state.timestamp());
-        state.write_u32(&mut event, 8, requestor);
-        state.write_u32(&mut event, 12, selection);
-        state.write_u32(&mut event, 16, TIMESTAMP_ATOM);
-        state.write_u32(&mut event, 20, property);
-        if !state.event_router.send_event(requestor, event.to_vec()) {
-            state.pending_events.push(event.to_vec());
+        let event = serialize_event(&SelectionNotifyEvent {
+            response_type: SELECTION_NOTIFY_EVENT,
+            sequence: state.sequence,
+            time: state.timestamp(),
+            requestor,
+            selection,
+            target: TIMESTAMP_ATOM,
+            property,
+        }, state.msb_first);
+        if !state.event_router.send_event(requestor, event.clone()) {
+            state.pending_events.push(event);
         }
         return true;
     }
@@ -305,16 +312,17 @@ pub(crate) fn serve_persistent_clipboard(
             // with the property so the requestor knows to begin consuming.
             start_incr_transfer(state, requestor, property, selection, target, data);
 
-            let mut event = [0u8; 32];
-            event[0] = SELECTION_NOTIFY_EVENT;
-            state.write_u16(&mut event, 2, state.sequence);
-            state.write_u32(&mut event, 4, state.timestamp());
-            state.write_u32(&mut event, 8, requestor);
-            state.write_u32(&mut event, 12, selection);
-            state.write_u32(&mut event, 16, target);
-            state.write_u32(&mut event, 20, property);
-            if !state.event_router.send_event(requestor, event.to_vec()) {
-                state.pending_events.push(event.to_vec());
+            let event = serialize_event(&SelectionNotifyEvent {
+                response_type: SELECTION_NOTIFY_EVENT,
+                sequence: state.sequence,
+                time: state.timestamp(),
+                requestor,
+                selection,
+                target,
+                property,
+            }, state.msb_first);
+            if !state.event_router.send_event(requestor, event.clone()) {
+                state.pending_events.push(event);
             }
         } else {
             // Small data: set property inline (normal transfer).
@@ -329,16 +337,17 @@ pub(crate) fn serve_persistent_clipboard(
                 );
             }
 
-            let mut event = [0u8; 32];
-            event[0] = SELECTION_NOTIFY_EVENT;
-            state.write_u16(&mut event, 2, state.sequence);
-            state.write_u32(&mut event, 4, state.timestamp());
-            state.write_u32(&mut event, 8, requestor);
-            state.write_u32(&mut event, 12, selection);
-            state.write_u32(&mut event, 16, target);
-            state.write_u32(&mut event, 20, property);
-            if !state.event_router.send_event(requestor, event.to_vec()) {
-                state.pending_events.push(event.to_vec());
+            let event = serialize_event(&SelectionNotifyEvent {
+                response_type: SELECTION_NOTIFY_EVENT,
+                sequence: state.sequence,
+                time: state.timestamp(),
+                requestor,
+                selection,
+                target,
+                property,
+            }, state.msb_first);
+            if !state.event_router.send_event(requestor, event.clone()) {
+                state.pending_events.push(event);
             }
         }
         return true;
@@ -373,16 +382,17 @@ pub(crate) fn serve_persistent_clipboard(
                     );
                 }
 
-                let mut event = [0u8; 32];
-                event[0] = SELECTION_NOTIFY_EVENT;
-                state.write_u16(&mut event, 2, state.sequence);
-                state.write_u32(&mut event, 4, state.timestamp());
-                state.write_u32(&mut event, 8, requestor);
-                state.write_u32(&mut event, 12, selection);
-                state.write_u32(&mut event, 16, target);
-                state.write_u32(&mut event, 20, property);
-                if !state.event_router.send_event(requestor, event.to_vec()) {
-                    state.pending_events.push(event.to_vec());
+                let event = serialize_event(&SelectionNotifyEvent {
+                    response_type: SELECTION_NOTIFY_EVENT,
+                    sequence: state.sequence,
+                    time: state.timestamp(),
+                    requestor,
+                    selection,
+                    target,
+                    property,
+                }, state.msb_first);
+                if !state.event_router.send_event(requestor, event.clone()) {
+                    state.pending_events.push(event);
                 }
                 return true;
             }
