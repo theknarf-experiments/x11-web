@@ -55,6 +55,7 @@ RUN gcc -o /usr/local/bin/dbusmenu-test /tmp/dbusmenu-test.c \
 
 FROM debian:bookworm-slim
 RUN apt-get update && apt-get install -y --no-install-recommends \
+    strace \
     libosmesa6 \
     libgl1-mesa-dri \
     x11-apps \

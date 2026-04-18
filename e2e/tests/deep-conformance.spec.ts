@@ -733,37 +733,27 @@ echo EXIT_CODE=$?`,
 			"GL.glXQueryExtensionsString.restype = ctypes.c_char_p",
 			"cexts = GL.glXQueryExtensionsString(dpy, 0)",
 			"print(f'STEP7_ExtensionsString={cexts}')",
-			"n = ctypes.c_int()",
-			"GL.glXGetFBConfigs.restype = ctypes.POINTER(ctypes.c_void_p)",
-			"cfgs = GL.glXGetFBConfigs(dpy, 0, ctypes.byref(n))",
-			"print(f'STEP8_GetFBConfigs count={n.value}')",
-			"# Force GetVisualConfigs via glXGetVisualConfigs (internal Xlib _XReply path)",
-			"# This mirrors what DRISW does during initialization",
+			"# Minimal GLX 1.3 test: CreateNewContext + MakeContextCurrent",
 			"GL.glXChooseFBConfig.restype = ctypes.POINTER(ctypes.c_void_p)",
-			"fb_attrs = (ctypes.c_int * 7)(0x8011, 1, 5, 1, 12, 24, 0)",
+			"fb_attrs = (ctypes.c_int * 3)(5, 1, 0)",
 			"fb_n = ctypes.c_int()",
 			"fb_cfgs = GL.glXChooseFBConfig(dpy, 0, fb_attrs, ctypes.byref(fb_n))",
-			"print(f'STEP9_ChooseFBConfig={\"OK\" if fb_cfgs else \"FAIL\"} count={fb_n.value}')",
-			"attrs = (ctypes.c_int * 15)(4, 1, 5, 1, 8, 8, 9, 8, 10, 8, 12, 24, 0)",
-			"GL.glXChooseVisual.restype = ctypes.c_void_p",
-			"vi = GL.glXChooseVisual(dpy, 0, attrs)",
-			"print(f'STEP10_ChooseVisual={\"OK\" if vi else \"FAIL\"}')",
-			"sys.stdout.flush()",
+			"print(f'FBCONFIGS={fb_n.value}', flush=True)",
 			"if fb_cfgs and fb_n.value > 0:",
-			"    print('STEP11_calling_CreateNewContext...'); sys.stdout.flush()",
 			"    GL.glXCreateNewContext.restype = ctypes.c_void_p",
-			"    ctx13 = GL.glXCreateNewContext(dpy, fb_cfgs[0], 0x8014, None, 0)",
-			"    print(f'STEP11_CreateNewContext={\"OK\" if ctx13 else \"FAIL\"}'); sys.stdout.flush()",
-			"    if ctx13:",
-			"        root = X11.XDefaultRootWindow(dpy)",
-			"        print('STEP11b_calling_MakeContextCurrent_with_root...'); sys.stdout.flush()",
-			"        GL.glXMakeContextCurrent.restype = ctypes.c_int",
-			"        ok = GL.glXMakeContextCurrent(dpy, root, root, ctx13)",
-			"        print(f'STEP12_MakeContextCurrent={\"OK\" if ok else \"FAIL\"}'); sys.stdout.flush()",
-			"        if ok:",
-			"            GL.glGetString.restype = ctypes.c_char_p",
-			"            print(f'GL_RENDERER={GL.glGetString(0x1F01)}')",
-			"            print(f'GL_VERSION={GL.glGetString(0x1F02)}')",
+			"    ctx = GL.glXCreateNewContext(dpy, fb_cfgs[0], 0x8014, None, 0)",
+			"    print(f'CTX={\"OK\" if ctx else \"FAIL\"}', flush=True)",
+			"    root = X11.XDefaultRootWindow(dpy)",
+			"    # Test GLX 1.0 MakeCurrent first (known to work)",
+			"    GL.glXMakeCurrent.restype = ctypes.c_int",
+			"    ok1 = GL.glXMakeCurrent(dpy, root, ctx)",
+			"    print(f'MakeCurrent_1_0={ok1}', flush=True)",
+			"    GL.glGetString.restype = ctypes.c_char_p",
+			"    print(f'Renderer_1_0={GL.glGetString(0x1F01)}', flush=True)",
+			"    # Now test GLX 1.3 MakeContextCurrent (crashes in DRISW)",
+			"    GL.glXMakeContextCurrent.restype = ctypes.c_int",
+			"    ok2 = GL.glXMakeContextCurrent(dpy, root, root, ctx)",
+			"    print(f'MakeCtxCur_1_3={ok2}', flush=True)",
 			"X11.XCloseDisplay(dpy)",
 			"print('ALL_DONE')",
 		].join("\n");
@@ -781,11 +771,16 @@ echo "--- Python GLX protocol test ---"
 python3 /tmp/glx_test.py 2>&1
 echo "--- glmark2 on-screen test ---"
 LIBGL_DEBUG=verbose timeout 15 glmark2 -b build 2>&1 | head -30 || true
-echo "--- glxinfo with XCB trace ---"
-MESA_DEBUG=1 LIBGL_DEBUG=verbose timeout 10 glxinfo 2>&1 | head -50 || true
+echo "--- strace ctypes recvmsg ---"
+rm -f /tmp/glx_strace.log /tmp/glx_replies.log
+strace -o /tmp/glx_strace.log -s 64 -e trace=recvmsg -f timeout 5 python3 /tmp/glx_ctypes.py 2>&1 | head -10 || true
+echo "--- ALL recvmsg with data ---"
+grep "recvmsg.*= [0-9]" /tmp/glx_strace.log 2>/dev/null || echo "no strace"
 echo "--- ctypes GLX test ---"
+rm -f /tmp/glx_replies.log
 python3 /tmp/glx_ctypes.py 2>&1 || true
-
+echo "--- GLX replies during ctypes test ---"
+cat /tmp/glx_replies.log 2>/dev/null || echo "no reply log"
 echo "--- Python GLX context test ---"
 python3 -c "
 import socket, struct, sys
@@ -837,6 +832,16 @@ echo "DONE"`,
 			120_000,
 		);
 		console.log("Firefox diagnostic output:", output);
+
+		// Capture sidecar container logs (includes REPLY debug lines)
+		const logs = await sidecarContainer.logs();
+		const logStr = logs.toString();
+		// Extract REPLY lines from sidecar debug logs
+		const replyLines = logStr.split('\n').filter((l: string) => l.includes('REPLY') || l.includes('ERROR seq='));
+		if (replyLines.length > 0) {
+			console.log("Sidecar REPLY log (last 30):", replyLines.slice(-30).join('\n'));
+		}
+
 		expect(output).toBeDefined();
 	});
 

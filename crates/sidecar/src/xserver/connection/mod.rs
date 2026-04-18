@@ -969,9 +969,23 @@ pub(crate) async fn handle_client(
 
                     let response = handle_request(&mut state, &request_data);
                     if !response.is_empty() {
-                        // RECORD: intercept reply/error
+                        // Log reply details for protocol debugging
                         let major_opcode = request_data[0];
                         let minor_opcode = if request_data.len() > 1 { request_data[1] } else { 0 };
+                        // Write ALL reply info to a debug file for protocol analysis
+                        {
+                            use std::io::Write;
+                            if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open("/tmp/glx_replies.log") {
+                                let cid = &state.client_id;
+                                if response[0] == 1 {
+                                    let rlen = u32::from_le_bytes([response[4], response[5], response[6], response[7]]);
+                                    let _ = writeln!(f, "REPLY c={cid} seq={} op={major_opcode}/{minor_opcode} bytes={} rlen={rlen}", state.sequence, response.len());
+                                } else if response[0] == 0 {
+                                    let _ = writeln!(f, "ERROR c={cid} seq={} op={major_opcode}/{minor_opcode} code={}", state.sequence, response[1]);
+                                }
+                            }
+                        }
+                        // RECORD: intercept reply/error
                         state.record_intercept_response(&response, major_opcode, minor_opcode);
                         // If there are fds to send (e.g., SHM CreateSegment),
                         // use sendmsg with SCM_RIGHTS ancillary data.
