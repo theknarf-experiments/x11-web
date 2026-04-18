@@ -34,7 +34,9 @@ pub(crate) fn handle_query_version(seq: u16) -> Vec<u8> {
 pub(crate) fn handle_get_visual_configs(_data: &[u8], seq: u16) -> Vec<u8> {
     // Return a single visual config matching ROOT_VISUAL
     let num_configs: u32 = 1;
-    let props_per_config: u32 = 28;
+    // Use exactly __GLX_MIN_CONFIG_PROPS (18) properties per config.
+    // Mesa's createConfigsFromProperties reads exactly numProps * 4 bytes.
+    let props_per_config: u32 = 18;
     let total_props = num_configs * props_per_config;
 
     let extra_bytes = total_props as usize * 4;
@@ -45,41 +47,31 @@ pub(crate) fn handle_get_visual_configs(_data: &[u8], seq: u16) -> Vec<u8> {
     reply[8..12].copy_from_slice(&num_configs.to_le_bytes());
     reply[12..16].copy_from_slice(&props_per_config.to_le_bytes());
 
-    // Visual config properties: one RGBA config, depth=24, stencil=8
-    // Property order matches Mesa's positional GetVisualConfigs parser:
-    // [0]=visual_id, [1]=class, [2]=rgba, [3..6]=RGBA sizes, [7..10]=accum sizes,
-    // [11]=doublebuf, [12]=stereo, [13]=bufsize, [14]=depth, [15]=stencil,
-    // [16]=aux, [17]=level, [18..]=extended
+    // Visual config properties — positional format per Mesa's GetVisualConfigs parser.
+    // First 18 properties are the standard ones. Order must match Mesa exactly:
+    // [0]=visual_id, [1]=class, [2]=rgba, [3]=red, [4]=green, [5]=blue, [6]=alpha,
+    // [7..10]=accum RGBA, [11]=doublebuf, [12]=stereo, [13]=bufsize, [14]=depth,
+    // [15]=stencil, [16]=aux, [17]=level
     const X_VISUAL_CLASS_TRUE_COLOR: u32 = 4;
-    let props: [u32; 28] = [
-        ROOT_VISUAL,               // visual id
-        X_VISUAL_CLASS_TRUE_COLOR, // class (TrueColor = 4)
-        1,                         // rgba (True)
-        8,           // red size
-        8,           // green size
-        8,           // blue size
-        0,           // alpha size
-        0,           // accum red
-        0,           // accum green
-        0,           // accum blue
-        0,           // accum alpha
-        1,           // double buffer
-        0,           // stereo
-        24,          // buffer size (R+G+B+A = 8+8+8+0 = 24)
-        24,          // depth size
-        8,           // stencil size
-        0,           // aux buffers
-        0,           // level
-        0, // visual caveat (GLX_NONE)
-        0, // transparent type (0 = none, 0x8008 = RGB, 0x8009 = Index)
-        0, // transparent red
-        0, // transparent green
-        0, // transparent blue
-        0, // transparent alpha
-        0, // pad
-        0, // pad
-        0, // pad
-        0, // pad
+    let props: [u32; 18] = [
+        ROOT_VISUAL,               // [0] visual id
+        X_VISUAL_CLASS_TRUE_COLOR, // [1] class (TrueColor = 4)
+        1,                         // [2] rgba (True)
+        8,           // [3] red size
+        8,           // [4] green size
+        8,           // [5] blue size
+        0,           // [6] alpha size
+        0,           // [7] accum red
+        0,           // [8] accum green
+        0,           // [9] accum blue
+        0,           // [10] accum alpha
+        1,           // [11] double buffer
+        0,           // [12] stereo
+        24,          // [13] buffer size (R+G+B+A = 8+8+8+0 = 24)
+        24,          // [14] depth size
+        8,           // [15] stencil size
+        0,           // [16] aux buffers
+        0,           // [17] level
     ];
     for (i, &v) in props.iter().enumerate() {
         let off = 32 + i * 4;

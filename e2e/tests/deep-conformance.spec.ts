@@ -708,7 +708,7 @@ echo EXIT_CODE=$?`,
 		// Write ctypes GLX test script — tests each call individually
 		const ctypesScript = [
 			"import ctypes, ctypes.util, sys, os, signal",
-			"os.environ['LIBGL_ALWAYS_SOFTWARE'] = '1'",
+			"os.environ['LIBGL_ALWAYS_INDIRECT'] = '1'",
 			"os.environ['LIBGL_DEBUG'] = 'verbose'",
 			"signal.signal(signal.SIGABRT, lambda *a: (print('ABORTED'), sys.exit(134)))",
 			"X11 = ctypes.CDLL(ctypes.util.find_library('X11'))",
@@ -870,11 +870,9 @@ echo "--- Python GLX protocol test ---"
 python3 /tmp/glx_test.py 2>&1
 echo "--- glmark2 on-screen test ---"
 LIBGL_DEBUG=verbose timeout 15 glmark2 -b build 2>&1 | head -30 || true
-echo "--- Compare setup: Xvfb vs Ours ---"
-Xvfb :98 -screen 0 1024x768x24 +extension GLX &
-sleep 1
-python3 /tmp/compare_setup.py 2>&1 || true
-kill %1 2>/dev/null || true
+echo "--- GDB backtrace at XCB assertion ---"
+apt-get update -qq && apt-get install -y -qq gdb libx11-6-dbg 2>/dev/null
+DISPLAY=:99 LIBGL_ALWAYS_INDIRECT=1 timeout 10 gdb -batch -ex run -ex bt -ex quit --args glxinfo -B 2>&1 | tail -30 || true
 echo "--- ctypes GLX test ---"
 rm -f /tmp/glx_replies.log
 python3 /tmp/glx_ctypes.py 2>&1 || true
