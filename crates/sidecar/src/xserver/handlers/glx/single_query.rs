@@ -29,7 +29,33 @@ impl GlxSingleReply {
         buf.to_vec()
     }
 
+    /// Build a reply for variable-length data (multiple values or strings).
+    ///
+    /// Mesa's indirect GL macros check `reply.size`:
+    /// - If size == 1: read single value from `reply.retval` (bytes 8-12),
+    ///   do NOT call `_XRead`. `reply.length` MUST be 0.
+    /// - If size > 1: read `size` elements from extra data via `_XRead`.
+    ///   `reply.length` = padded data size in u32 words.
+    ///
+    /// So for single-element queries (e.g. glGetIntegerv with 1 param),
+    /// the value goes in retval, not in extra data.
     fn new_array(seq: u16, element_count: u32, data: &[u8]) -> Vec<u8> {
+        // Single 4-byte value: pack into retval (bytes 8-12) with length=0
+        if element_count == 1 && data.len() <= 4 {
+            let mut buf = [0u8; 32];
+            buf[0] = 1;
+            buf[2..4].copy_from_slice(&seq.to_le_bytes());
+            // size = 1
+            buf[12..16].copy_from_slice(&1u32.to_le_bytes());
+            // value in retval
+            if !data.is_empty() {
+                buf[8..8 + data.len()].copy_from_slice(data);
+            }
+            // reply.length = 0 (no extra data after header)
+            return buf.to_vec();
+        }
+
+        // Multi-value or string: extra data after 32-byte header
         let padded = (data.len() + 3) & !3;
         let extra_words = padded / 4;
         let mut buf = vec![0u8; 32 + padded];
