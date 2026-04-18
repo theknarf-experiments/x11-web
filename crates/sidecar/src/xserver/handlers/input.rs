@@ -777,33 +777,24 @@ pub(crate) fn handle_force_screen_saver(state: &mut ClientState, data: &[u8], se
 /// selected for it (event_mask != 0). The `saver_state` parameter is
 /// 0 = Off, 1 = On, 2 = Cycle.
 fn build_screen_saver_notify(state: &ClientState, saver_state: u8) -> Vec<u8> {
+    use x11rb_protocol::protocol::screensaver::{
+        Kind as SsKind, NotifyEvent as ScreenSaverNotifyEvent, State as SsState,
+    };
+
     if state.screen_saver_event_mask == 0 {
         return Vec::new();
     }
 
-    // ScreenSaverNotify is event code 0 from the MIT-SCREEN-SAVER extension.
-    // The event is 32 bytes:
-    //   byte 0:   event code (extension base event + 0)
-    //   byte 1:   saver state (0=Off, 1=On, 2=Cycle)
-    //   bytes 2-3: sequence number
-    //   bytes 4-7: timestamp
-    //   bytes 8-11: root window
-    //   bytes 12-15: saver window (or 0)
-    //   byte 16: kind (0=Blanked, 1=Internal, 2=External)
-    //   byte 17: forced (1 = forced via ForceScreenSaver)
-    //   bytes 18-31: pad
-    // ScreenSaverNotify is an extension-specific event (MIT-SCREEN-SAVER) —
-    // no x11rb struct available, keep as raw bytes.
-    let mut event = [0u8; 32];
-    event[0] = 92;
-    event[1] = saver_state;
-    state.write_u16(&mut event, 2, state.sequence);
-    state.write_u32(&mut event, 4, state.timestamp());
-    state.write_u32(&mut event, 8, state.root_window);
-    state.write_u32(&mut event, 12, state.screen_saver_window);
-    event[16] = 0; // kind = Blanked
-    event[17] = 1; // forced = true (ForceScreenSaver)
-    event.to_vec()
+    serialize_event(&ScreenSaverNotifyEvent {
+        response_type: 92,
+        state: SsState::from(saver_state),
+        sequence: state.sequence,
+        time: state.timestamp(),
+        root: state.root_window,
+        window: state.screen_saver_window,
+        kind: SsKind::from(0u8), // Blanked
+        forced: true,
+    }, state.msb_first)
 }
 
 /// Build a ScreenSaverNotify (Off) event for automatic deactivation on input.

@@ -7,10 +7,11 @@
 use tracing::debug;
 
 use super::super::client::ClientState;
-use super::super::core::{write_u16_bo, write_u32_bo};
 use super::super::types::RegionRect;
 use crate::xserver::core::require_len;
+use crate::xserver::event::serialize_event;
 use crate::xserver::reply::ReplyBuf;
+use x11rb_protocol::protocol::shape::{NotifyEvent as ShapeNotifyEvent, SK};
 
 /// SHAPE kind constants.
 const SHAPE_BOUNDING: u8 = 0;
@@ -595,21 +596,20 @@ fn send_shape_notify(state: &mut ClientState, window_id: u32, kind: u8, seq: u16
         .unwrap_or(false);
 
     if has_subscribers {
-        // ShapeNotify is an extension-specific event — no x11rb struct available,
-        // keep as raw bytes.
         let bo = state.msb_first;
-        let mut event = [0u8; 32];
-        event[0] = SHAPE_NOTIFY_EVENT;
-        event[1] = kind;
-        write_u16_bo(&mut event, 2, seq, bo);
-        write_u32_bo(&mut event, 4, window_id, bo);
-        write_i16_bo(&mut event, 8, ext.x, bo);
-        write_i16_bo(&mut event, 10, ext.y, bo);
-        write_u16_bo(&mut event, 12, ext.width, bo);
-        write_u16_bo(&mut event, 14, ext.height, bo);
-        write_u32_bo(&mut event, 16, state.timestamp(), bo);
-        event[20] = shaped as u8;
-        state.pending_events.push(event.to_vec());
+        let event = serialize_event(&ShapeNotifyEvent {
+            response_type: SHAPE_NOTIFY_EVENT,
+            shape_kind: SK::from(kind),
+            sequence: seq,
+            affected_window: window_id,
+            extents_x: ext.x,
+            extents_y: ext.y,
+            extents_width: ext.width,
+            extents_height: ext.height,
+            server_time: state.timestamp(),
+            shaped,
+        }, bo);
+        state.pending_events.push(event);
     }
 }
 
@@ -732,11 +732,3 @@ fn subtract_single_rect(r: &RegionRect, sub: &RegionRect, out: &mut Vec<RegionRe
     }
 }
 
-fn write_i16_bo(buf: &mut [u8], offset: usize, val: i16, msb_first: bool) {
-    let bytes = if msb_first {
-        val.to_be_bytes()
-    } else {
-        val.to_le_bytes()
-    };
-    buf[offset..offset + 2].copy_from_slice(&bytes);
-}

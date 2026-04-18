@@ -17,7 +17,12 @@ ext-compat  = []  # DPMS, MIT-SCREEN-SAVER, VidMode, RECORD, SECURITY, XINERAMA
 
 [dependencies]
 x11-web-protocol = { path = "../protocol" }
-x11rb-protocol = { version = "0.13", features = ["request-parsing", "render", "xinput"] }
+x11rb-protocol = { version = "0.13", features = [
+    "request-parsing",
+    "composite", "damage", "dbe", "dpms", "dri3", "glx", "present",
+    "randr", "record", "render", "res", "screensaver", "shape", "shm",
+    "sync", "xf86vidmode", "xfixes", "xinerama", "xinput", "xkb", "xtest", "xv",
+] }
 # pixman removed — using pure-Rust framebuffer to avoid heap corruption
 tokio = { version = "1", features = ["full"] }
 tokio-tungstenite = "0.26"

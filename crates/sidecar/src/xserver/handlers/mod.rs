@@ -46,7 +46,7 @@ use super::types::*;
 use crate::framebuffer::Framebuffer;
 
 // Re-export byte-order helpers for use in handler submodules
-pub(crate) use super::core::{read_u32_bo, write_u16_bo, write_u32_bo};
+pub(crate) use super::core::{read_u32_bo, write_u32_bo};
 
 // Re-export window stacking helpers for use by property handlers
 pub(crate) use window::restack_by_window_type;
@@ -347,6 +347,11 @@ fn emit_cursor_changed(state: &mut ClientState, wid: u32) {
 
     // Send XFixesCursorNotify to subscribers if the cursor actually changed.
     if new_cursor_id != old_cursor_id && !state.cursor_event_subscribers.is_empty() {
+        use crate::xserver::event::serialize_event;
+        use x11rb_protocol::protocol::xfixes::{
+            CursorNotify as CursorNotifySubtype, CursorNotifyEvent,
+        };
+
         // XFIXES event base = 87, CursorNotify subtype = 1, so event code = 87 + 1 = 88
         const XFIXES_CURSOR_NOTIFY: u8 = 88;
         let timestamp = state.timestamp();
@@ -361,17 +366,16 @@ fn emit_cursor_changed(state: &mut ClientState, wid: u32) {
             .collect();
 
         for sub_win in subscribers {
-            // XFixesCursorNotify is an extension-specific event (XFIXES) —
-            // no x11rb struct available, keep as raw bytes.
-            let mut event = [0u8; 32];
-            event[0] = XFIXES_CURSOR_NOTIFY;
-            event[1] = 0; // subtype: DisplayCursor
-            state.write_u16(&mut event, 2, state.sequence);
-            state.write_u32(&mut event, 4, sub_win); // window
-            state.write_u32(&mut event, 8, cursor_serial); // cursor-serial
-            state.write_u32(&mut event, 12, timestamp); // timestamp
-                                                        // 16-19: cursor-name (ATOM, 0 for unnamed)
-            state.pending_events.push(event.to_vec());
+            let event = serialize_event(&CursorNotifyEvent {
+                response_type: XFIXES_CURSOR_NOTIFY,
+                subtype: CursorNotifySubtype::from(0u8), // DisplayCursor
+                sequence: state.sequence,
+                window: sub_win,
+                cursor_serial,
+                timestamp,
+                name: 0, // unnamed
+            }, state.msb_first);
+            state.pending_events.push(event);
         }
     }
 }

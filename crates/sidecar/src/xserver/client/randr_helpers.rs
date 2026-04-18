@@ -1,8 +1,12 @@
 //! RandR model helpers for ClientState.
 
-use super::super::core::{write_u16_bo, write_u32_bo};
 use super::super::types::*;
 use super::ClientState;
+use crate::xserver::event::serialize_event;
+use x11rb_protocol::protocol::randr::{
+    CrtcChange, Notify, NotifyData, NotifyEvent, Rotation, ScreenChangeNotifyEvent,
+};
+use x11rb_protocol::protocol::render::SubPixel;
 
 impl ClientState {
     /// Initialize the default single-monitor RandR model.
@@ -105,26 +109,26 @@ impl ClientState {
         let bo = self.msb_first;
         let seq = self.sequence;
         let ts = self.timestamp();
-        let mut event = [0u8; 32];
-        event[0] = RANDR_EVENT_BASE; // RRScreenChangeNotify
-        event[1] = 1; // rotation = Rotate_0
-        write_u16_bo(&mut event, 2, seq, bo);
-        write_u32_bo(&mut event, 4, ts, bo);
-        write_u32_bo(&mut event, 8, ts, bo);
-        write_u32_bo(&mut event, 12, self.root_window, bo);
-        write_u32_bo(&mut event, 16, 0, bo);
-        write_u16_bo(&mut event, 20, 0, bo);
-        write_u16_bo(&mut event, 22, 0, bo);
-        write_u16_bo(&mut event, 24, self.screen_width, bo);
-        write_u16_bo(&mut event, 26, self.screen_height, bo);
-        write_u16_bo(&mut event, 28, 270, bo);
-        write_u16_bo(&mut event, 30, 203, bo);
-        self.pending_events.push(event.to_vec());
+        let event = serialize_event(&ScreenChangeNotifyEvent {
+            response_type: RANDR_EVENT_BASE,
+            rotation: Rotation::ROTATE0,
+            sequence: seq,
+            timestamp: ts,
+            config_timestamp: ts,
+            root: self.root_window,
+            request_window: 0,
+            size_id: 0,
+            subpixel_order: SubPixel::from(0u8),
+            width: self.screen_width,
+            height: self.screen_height,
+            mwidth: 270,
+            mheight: 203,
+        }, bo);
+        self.pending_events.push(event);
     }
 
     /// Queue an RRCrtcChangeNotify event if the client selected that mask.
     pub(crate) fn randr_queue_crtc_change_notify(&mut self, crtc_id: u32) {
-        use super::super::core::write_i16_bo;
         use super::super::types::{RANDR_EVENT_BASE, RR_CRTC_CHANGE_NOTIFY_MASK};
 
         if self.randr_event_mask & RR_CRTC_CHANGE_NOTIFY_MASK == 0 {
@@ -140,19 +144,22 @@ impl ClientState {
         let seq = self.sequence;
         let ts = self.timestamp();
 
-        let mut event = [0u8; 32];
-        event[0] = RANDR_EVENT_BASE + 1; // RRNotify
-        event[1] = 0; // subtype: CrtcChange
-        write_u16_bo(&mut event, 2, seq, bo);
-        write_u32_bo(&mut event, 4, ts, bo);
-        write_u32_bo(&mut event, 8, self.root_window, bo);
-        write_u32_bo(&mut event, 12, crtc.id, bo);
-        write_u32_bo(&mut event, 16, crtc.mode_id, bo);
-        write_u16_bo(&mut event, 20, crtc.rotation, bo);
-        write_i16_bo(&mut event, 24, crtc.x, bo);
-        write_i16_bo(&mut event, 26, crtc.y, bo);
-        write_u16_bo(&mut event, 28, crtc.width, bo);
-        write_u16_bo(&mut event, 30, crtc.height, bo);
-        self.pending_events.push(event.to_vec());
+        let event = serialize_event(&NotifyEvent {
+            response_type: RANDR_EVENT_BASE + 1,
+            sub_code: Notify::CRTC_CHANGE,
+            sequence: seq,
+            u: NotifyData::from(CrtcChange {
+                timestamp: ts,
+                window: self.root_window,
+                crtc: crtc.id,
+                mode: crtc.mode_id,
+                rotation: Rotation::from(crtc.rotation),
+                x: crtc.x,
+                y: crtc.y,
+                width: crtc.width,
+                height: crtc.height,
+            }),
+        }, bo);
+        self.pending_events.push(event);
     }
 }

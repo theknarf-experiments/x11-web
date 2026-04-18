@@ -5,9 +5,9 @@ use super::{update_sibling_visibility, win_gravity_delta};
 use crate::xserver::core::require_len;
 use crate::xserver::event::serialize_event;
 use x11rb_protocol::protocol::xproto::{
-    CirculateNotifyEvent, ConfigureNotifyEvent, ConfigureRequestEvent, ExposeEvent,
-    GravityNotifyEvent, MapNotifyEvent, ReparentNotifyEvent, ResizeRequestEvent,
-    UnmapNotifyEvent,
+    CirculateNotifyEvent, ClientMessageData, ClientMessageEvent, ConfigureNotifyEvent,
+    ConfigureRequestEvent, ExposeEvent, GravityNotifyEvent, MapNotifyEvent, ReparentNotifyEvent,
+    ResizeRequestEvent, UnmapNotifyEvent,
 };
 
 // ---------------------------------------------------------------------------
@@ -373,21 +373,24 @@ pub(crate) fn handle_configure_window(state: &mut ClientState, data: &[u8], seq:
                 }
 
                 // Send _NET_WM_SYNC_REQUEST ClientMessage
-                // (ClientMessage has format-dependent payloads — keep as raw bytes)
                 let bo = state.msb_first;
                 let seq_num = state.sequence;
                 let timestamp = state.timestamp();
-                let mut cm = [0u8; 32];
-                cm[0] = CLIENT_MESSAGE_EVENT;
-                cm[1] = 32; // format
-                write_u16_bo(&mut cm, 2, seq_num, bo);
-                write_u32_bo(&mut cm, 4, wid, bo);
-                write_u32_bo(&mut cm, 8, wm_protocols_atom, bo);
-                write_u32_bo(&mut cm, 12, net_wm_sync_request_atom, bo);
-                write_u32_bo(&mut cm, 16, timestamp, bo);
-                write_u32_bo(&mut cm, 20, lo, bo); // counter value lo
-                write_u32_bo(&mut cm, 24, hi as u32, bo); // counter value hi
-                state.pending_events.push(cm.to_vec());
+                let cm = serialize_event(&ClientMessageEvent {
+                    response_type: CLIENT_MESSAGE_EVENT,
+                    format: 32,
+                    sequence: seq_num,
+                    window: wid,
+                    type_: wm_protocols_atom,
+                    data: ClientMessageData::from([
+                        net_wm_sync_request_atom,
+                        timestamp,
+                        lo,
+                        hi as u32,
+                        0,
+                    ]),
+                }, bo);
+                state.pending_events.push(cm);
             }
         }
     }
@@ -972,18 +975,22 @@ pub(crate) fn handle_configure_window(state: &mut ClientState, data: &[u8], seq:
                     let hi = (new_value >> 32) as u32;
                     let timestamp = state.timestamp();
 
-                    // ClientMessage has format-dependent payloads — keep as raw bytes
-                    let mut sync_msg = [0u8; 32];
-                    sync_msg[0] = CLIENT_MESSAGE_EVENT;
-                    sync_msg[1] = 32; // format
-                    write_u32_bo(&mut sync_msg, 4, wid, msb_first);
-                    write_u32_bo(&mut sync_msg, 8, wm_protocols_atom, msb_first);
-                    write_u32_bo(&mut sync_msg, 12, sync_request_atom, msb_first);
-                    write_u32_bo(&mut sync_msg, 16, timestamp, msb_first);
-                    write_u32_bo(&mut sync_msg, 20, lo, msb_first);
-                    write_u32_bo(&mut sync_msg, 24, hi, msb_first);
+                    let sync_msg = serialize_event(&ClientMessageEvent {
+                        response_type: CLIENT_MESSAGE_EVENT,
+                        format: 32,
+                        sequence: 0,
+                        window: wid,
+                        type_: wm_protocols_atom,
+                        data: ClientMessageData::from([
+                            sync_request_atom,
+                            timestamp,
+                            lo,
+                            hi,
+                            0,
+                        ]),
+                    }, msb_first);
 
-                    state.pending_events.push(sync_msg.to_vec());
+                    state.pending_events.push(sync_msg.clone());
                     // Also deliver to cross-connection clients
                     state.broadcast_event(wid, STRUCTURE_NOTIFY_MASK, &sync_msg);
                 }

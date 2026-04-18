@@ -2,9 +2,11 @@
 
 use x11_web_protocol::DisplayUpdate;
 
-use super::super::core::{write_u16_bo, write_u32_bo};
 use super::super::types::*;
 use super::ClientState;
+use crate::xserver::event::serialize_event;
+use x11rb_protocol::protocol::damage::{self, ReportLevel};
+use x11rb_protocol::protocol::xproto::Rectangle;
 
 impl ClientState {
     /// Sync SHM-backed pixmap data before reading.
@@ -229,19 +231,17 @@ impl ClientState {
                     let bo = self.msb_first;
                     let seq = self.sequence;
                     for (damage_id, level) in damage_matches {
-                        let mut event = [0u8; 32];
-                        event[0] = 91;
-                        event[1] = level;
-                        write_u16_bo(&mut event, 2, seq, bo);
-                        write_u32_bo(&mut event, 4, wid, bo);
-                        write_u32_bo(&mut event, 8, damage_id, bo);
-                        write_u16_bo(&mut event, 14, x as u16, bo);
-                        write_u16_bo(&mut event, 16, y as u16, bo);
-                        write_u16_bo(&mut event, 18, w, bo);
-                        write_u16_bo(&mut event, 20, h, bo);
-                        write_u16_bo(&mut event, 26, win_width, bo);
-                        write_u16_bo(&mut event, 28, win_height, bo);
-                        self.pending_events.push(event.to_vec());
+                        let event = serialize_event(&damage::NotifyEvent {
+                            response_type: 91,
+                            level: ReportLevel::from(level),
+                            sequence: seq,
+                            drawable: wid,
+                            damage: damage_id,
+                            timestamp: 0,
+                            area: Rectangle { x: x as i16, y: y as i16, width: w, height: h },
+                            geometry: Rectangle { x: 0, y: 0, width: win_width, height: win_height },
+                        }, bo);
+                        self.pending_events.push(event);
                     }
 
                     // Apply shape clipping: mask pixels outside the bounding/clip shape
@@ -325,24 +325,17 @@ impl ClientState {
         };
 
         for (damage_id, level) in matches {
-            let mut event = [0u8; 32];
-            event[0] = 91; // DamageNotify event code
-            event[1] = level;
-            write_u16_bo(&mut event, 2, seq, bo);
-            write_u32_bo(&mut event, 4, resolved, bo);
-            write_u32_bo(&mut event, 8, damage_id, bo);
-            write_u32_bo(&mut event, 12, timestamp, bo);
-            // area: damaged region
-            super::super::core::write_i16_bo(&mut event, 16, x, bo);
-            super::super::core::write_i16_bo(&mut event, 18, y, bo);
-            write_u16_bo(&mut event, 20, width, bo);
-            write_u16_bo(&mut event, 22, height, bo);
-            // geometry: full drawable geometry
-            super::super::core::write_i16_bo(&mut event, 24, geom_x, bo);
-            super::super::core::write_i16_bo(&mut event, 26, geom_y, bo);
-            write_u16_bo(&mut event, 28, geom_w, bo);
-            write_u16_bo(&mut event, 30, geom_h, bo);
-            self.pending_events.push(event.to_vec());
+            let event = serialize_event(&damage::NotifyEvent {
+                response_type: 91,
+                level: ReportLevel::from(level),
+                sequence: seq,
+                drawable: resolved,
+                damage: damage_id,
+                timestamp,
+                area: Rectangle { x, y, width, height },
+                geometry: Rectangle { x: geom_x, y: geom_y, width: geom_w, height: geom_h },
+            }, bo);
+            self.pending_events.push(event);
         }
     }
 }

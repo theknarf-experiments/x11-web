@@ -16,7 +16,8 @@ use std::collections::HashMap;
 use tracing::{debug, warn};
 
 use super::super::client::ClientState;
-use super::super::core::{write_u16_bo, write_u32_bo};
+use crate::xserver::event::serialize_event;
+use x11rb_protocol::protocol::sync::{AlarmNotifyEvent, Int64, ALARMSTATE};
 
 /// A SYNC counter (system or client-created).
 #[derive(Clone, Debug)]
@@ -175,27 +176,26 @@ fn check_alarms(
         .collect();
 
     for alarm_id in triggered {
-        // SyncAlarmNotify is an extension-specific event (SYNC first_event=83) —
-        // no x11rb struct available, keep as raw bytes.
-        let mut event = [0u8; 32];
-        event[0] = 83; // SyncAlarmNotify event code
-        event[1] = 0; // sub-code
-        write_u16_bo(&mut event, 2, seq, msb_first);
-        write_u32_bo(&mut event, 4, alarm_id, msb_first);
-        // counter value (bytes 8-15)
         let Some(alarm) = alarms.get(&alarm_id) else {
             return;
         };
-        write_u32_bo(&mut event, 8, new_value as u32, msb_first); // value_lo
-        write_u32_bo(&mut event, 12, (new_value >> 32) as u32, msb_first); // value_hi
-                                                                           // alarm value (bytes 16-23)
-        write_u32_bo(&mut event, 16, alarm.value_lo, msb_first);
-        write_u32_bo(&mut event, 20, alarm.value_hi as u32, msb_first);
-        // timestamp
-        write_u32_bo(&mut event, 24, 0, msb_first);
-        // state
-        event[28] = alarm.state;
-        pending_events.push(event.to_vec());
+        let event = serialize_event(&AlarmNotifyEvent {
+            response_type: 83,
+            kind: 0,
+            sequence: seq,
+            alarm: alarm_id,
+            counter_value: Int64 {
+                hi: (new_value >> 32) as i32,
+                lo: new_value as u32,
+            },
+            alarm_value: Int64 {
+                hi: alarm.value_hi,
+                lo: alarm.value_lo,
+            },
+            timestamp: 0,
+            state: ALARMSTATE::from(alarm.state),
+        }, msb_first);
+        pending_events.push(event);
 
         // Update alarm: add delta to threshold for next trigger
         if let Some(alarm) = alarms.get_mut(&alarm_id) {
