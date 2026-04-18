@@ -3,6 +3,7 @@
 use tracing::{debug, info};
 
 use super::super::super::client::ClientState;
+use crate::xserver::reply::ReplyBuf;
 
 /// RRGetCrtcInfo (20).
 pub(crate) fn handle_get_crtc_info(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
@@ -28,11 +29,9 @@ pub(crate) fn handle_set_crtc_config(state: &mut ClientState, data: &[u8], seq: 
     //  28+: output list (CARD32 each)
 
     if data.len() < 28 {
-        let mut reply = [0u8; 32];
-        reply[0] = 1;
-        reply[1] = 1; // InvalidConfig
-        state.write_u16(&mut reply, 2, seq);
-        return reply.to_vec();
+        return ReplyBuf::fixed(seq, state.msb_first)
+            .set_data_byte(1) // InvalidConfig
+            .build();
     }
 
     let crtc_id = state.read_u32(data, 4);
@@ -84,12 +83,10 @@ pub(crate) fn handle_set_crtc_config(state: &mut ClientState, data: &[u8], seq: 
     }
 
     let ts = state.timestamp();
-    let mut reply = [0u8; 32];
-    reply[0] = 1;
-    reply[1] = 0; // Success
-    state.write_u16(&mut reply, 2, seq);
-    state.write_u32(&mut reply, 8, ts);
-    reply.to_vec()
+    ReplyBuf::fixed(seq, state.msb_first)
+        .set_data_byte(0) // Success
+        .set_u32(8, ts)
+        .build()
 }
 
 /// RRGetCrtcGammaSize (22).
@@ -108,11 +105,9 @@ pub(crate) fn handle_get_crtc_gamma_size(
     } else {
         0
     };
-    let mut reply = [0u8; 32];
-    reply[0] = 1;
-    state.write_u16(&mut reply, 2, seq);
-    state.write_u16(&mut reply, 8, size);
-    reply.to_vec()
+    ReplyBuf::fixed(seq, state.msb_first)
+        .set_u16(8, size)
+        .build()
 }
 
 /// RRGetCrtcGamma (23).
@@ -162,11 +157,9 @@ pub(crate) fn handle_set_crtc_transform(
 
 /// RRGetPanning (27).
 pub(crate) fn handle_get_panning(state: &mut ClientState, _data: &[u8], seq: u16) -> Vec<u8> {
-    let mut reply = [0u8; 32];
-    reply[0] = 1;
-    reply[1] = 0; // Success
-    state.write_u16(&mut reply, 2, seq);
-    reply.to_vec()
+    ReplyBuf::fixed(seq, state.msb_first)
+        .set_data_byte(0) // Success
+        .build()
 }
 
 /// RRSetPanning (28).
@@ -177,13 +170,10 @@ pub(crate) fn handle_set_panning(state: &mut ClientState, data: &[u8], seq: u16)
         0
     };
     debug!("RRSetPanning crtc={crtc_id} -> Success");
-    let mut reply = [0u8; 32];
-    reply[0] = 1; // reply
-    reply[1] = 0; // Success
-    state.write_u16(&mut reply, 2, seq);
-    state.write_u32(&mut reply, 4, 0); // no extra data
-    state.write_u32(&mut reply, 8, state.timestamp());
-    reply.to_vec()
+    ReplyBuf::fixed(seq, state.msb_first)
+        .set_data_byte(0) // Success
+        .set_u32(8, state.timestamp())
+        .build()
 }
 
 /// RRGetCrtcTransform (29).
@@ -203,24 +193,21 @@ pub(crate) fn handle_get_crtc_transform(state: &mut ClientState, data: &[u8], se
     // Reply: 32-byte header + 36 (pending matrix) + 2 (namelen) + 2 (pad)
     //        + 36 (current matrix) + 2 (namelen) + 2 (pad) = 32 + 80 = 112
     // But the length field counts words after the first 32 bytes: 80/4 = 20.
-    let mut reply = vec![0u8; 112];
-    reply[0] = 1;
-    state.write_u16(&mut reply, 2, seq);
-    state.write_u32(&mut reply, 4, 20); // 20 words of extra data
+    let mut reply = ReplyBuf::with_extra(seq, 80, state.msb_first);
 
-    // Write pending transform at offset 8 (state.write_u32 handles byte-order)
+    // Write pending transform at offset 8
     for (i, &val) in transform.iter().enumerate() {
-        state.write_u32(&mut reply, 8 + i * 4, val as u32);
+        reply = reply.set_u32(8 + i * 4, val as u32);
     }
     // pending filter name length = 0 at offset 44, padding at 46-47: already 0
 
     // Write current transform at offset 48
     for (i, &val) in transform.iter().enumerate() {
-        state.write_u32(&mut reply, 48 + i * 4, val as u32);
+        reply = reply.set_u32(48 + i * 4, val as u32);
     }
     // current filter name length = 0 at offset 84, padding at 86-87: already 0
 
-    reply
+    reply.build()
 }
 
 // ===========================================================================
@@ -232,11 +219,9 @@ fn build_crtc_info_reply(state: &ClientState, seq: u16, crtc_id: u32) -> Vec<u8>
     let crtc = match state.randr_find_crtc(crtc_id) {
         Some(c) => c.clone(),
         None => {
-            let mut reply = [0u8; 32];
-            reply[0] = 1;
-            reply[1] = 1; // InvalidConfig
-            state.write_u16(&mut reply, 2, seq);
-            return reply.to_vec();
+            return ReplyBuf::fixed(seq, state.msb_first)
+                .set_data_byte(1) // InvalidConfig
+                .build();
         }
     };
 
@@ -245,38 +230,34 @@ fn build_crtc_info_reply(state: &ClientState, seq: u16, crtc_id: u32) -> Vec<u8>
     let num_possible = state.randr_outputs.len() as u16;
     let var_data = (num_outputs as usize + num_possible as usize) * 4;
     let inline_header = 24;
-    let length = (inline_header + var_data) / 4;
-    let total = 32 + inline_header + var_data;
-    let mut reply = vec![0u8; total];
+    let extra_bytes = inline_header + var_data;
 
-    reply[0] = 1;
-    reply[1] = 0; // Success
-    state.write_u16(&mut reply, 2, seq);
-    state.write_u32(&mut reply, 4, length as u32);
-    state.write_u32(&mut reply, 8, state.timestamp());
-    state.write_i16(&mut reply, 12, crtc.x);
-    state.write_i16(&mut reply, 14, crtc.y);
-    state.write_u16(&mut reply, 16, crtc.width);
-    state.write_u16(&mut reply, 18, crtc.height);
-    state.write_u32(&mut reply, 20, crtc.mode_id);
-    state.write_u16(&mut reply, 24, crtc.rotation);
-    state.write_u16(&mut reply, 26, 1); // rotations supported: Rotate_0
-    state.write_u16(&mut reply, 28, num_outputs);
-    state.write_u16(&mut reply, 30, num_possible);
+    let mut reply = ReplyBuf::with_extra(seq, extra_bytes, state.msb_first)
+        .set_data_byte(0) // Success
+        .set_u32(8, state.timestamp())
+        .set_i16(12, crtc.x)
+        .set_i16(14, crtc.y)
+        .set_u16(16, crtc.width)
+        .set_u16(18, crtc.height)
+        .set_u32(20, crtc.mode_id)
+        .set_u16(24, crtc.rotation)
+        .set_u16(26, 1) // rotations supported: Rotate_0
+        .set_u16(28, num_outputs)
+        .set_u16(30, num_possible);
 
     let mut off = 32;
     // Current outputs
     for &oid in &crtc.outputs {
-        state.write_u32(&mut reply, off, oid);
+        reply = reply.set_u32(off, oid);
         off += 4;
     }
     // Possible outputs
     for output in &state.randr_outputs {
-        state.write_u32(&mut reply, off, output.id);
+        reply = reply.set_u32(off, output.id);
         off += 4;
     }
 
-    reply
+    reply.build()
 }
 
 /// Build the reply for RRGetCrtcGamma.
@@ -285,11 +266,9 @@ fn build_get_crtc_gamma_reply(state: &ClientState, seq: u16, crtc_id: u32) -> Ve
         Some(c) => c,
         None => {
             // Empty gamma reply.
-            let mut reply = [0u8; 32];
-            reply[0] = 1;
-            state.write_u16(&mut reply, 2, seq);
-            state.write_u16(&mut reply, 8, 0);
-            return reply.to_vec();
+            return ReplyBuf::fixed(seq, state.msb_first)
+                .set_u16(8, 0)
+                .build();
         }
     };
 
@@ -299,33 +278,28 @@ fn build_get_crtc_gamma_reply(state: &ClientState, seq: u16, crtc_id: u32) -> Ve
     let gamma_data_len = 3 * size as usize * 2;
     let pad = (4 - (gamma_data_len % 4)) % 4;
     let var_len = gamma_data_len + pad;
-    let length_field = var_len / 4;
-    let total = 32 + var_len;
 
-    let mut reply = vec![0u8; total];
-    reply[0] = 1;
-    state.write_u16(&mut reply, 2, seq);
-    state.write_u32(&mut reply, 4, length_field as u32);
-    state.write_u16(&mut reply, 8, size);
+    let mut reply = ReplyBuf::with_extra(seq, var_len, state.msb_first)
+        .set_u16(8, size);
 
     let mut off = 32;
     // Red
     for &v in &crtc.gamma_red {
-        state.write_u16(&mut reply, off, v);
+        reply = reply.set_u16(off, v);
         off += 2;
     }
     // Green
     for &v in &crtc.gamma_green {
-        state.write_u16(&mut reply, off, v);
+        reply = reply.set_u16(off, v);
         off += 2;
     }
     // Blue
     for &v in &crtc.gamma_blue {
-        state.write_u16(&mut reply, off, v);
+        reply = reply.set_u16(off, v);
         off += 2;
     }
 
-    reply
+    reply.build()
 }
 
 /// Handle RRSetCrtcGamma: store the gamma LUT.

@@ -4,6 +4,7 @@ use tracing::{debug, info};
 
 use super::super::super::client::ClientState;
 use super::super::super::types::{OutputPropertyConfig, PropertyValue, RandrMode, RandrMonitor};
+use crate::xserver::reply::ReplyBuf;
 
 /// RRGetOutputInfo (9).
 pub(crate) fn handle_get_output_info(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
@@ -36,10 +37,7 @@ pub(crate) fn handle_query_output_property(
     seq: u16,
 ) -> Vec<u8> {
     if data.len() < 12 {
-        let mut reply = [0u8; 32];
-        reply[0] = 1;
-        state.write_u16(&mut reply, 2, seq);
-        return reply.to_vec();
+        return ReplyBuf::fixed(seq, state.msb_first).build();
     }
     let output_id = state.read_u32(data, 4);
     let property_atom = state.read_u32(data, 8);
@@ -69,20 +67,16 @@ pub(crate) fn handle_query_output_property(
 
     let num_values = values.len() as u32;
     let extra_bytes = (num_values as usize) * 4;
-    let length_words = num_values;
-    let mut reply = vec![0u8; 32 + extra_bytes];
-    reply[0] = 1; // Reply
-    state.write_u16(&mut reply, 2, seq);
-    state.write_u32(&mut reply, 4, length_words);
-    reply[8] = if pending { 1 } else { 0 };
-    reply[9] = if range { 1 } else { 0 };
-    reply[10] = if immutable { 1 } else { 0 };
+    let mut reply = ReplyBuf::with_extra(seq, extra_bytes, state.msb_first)
+        .set_u8(8, if pending { 1 } else { 0 })
+        .set_u8(9, if range { 1 } else { 0 })
+        .set_u8(10, if immutable { 1 } else { 0 });
     // values follow the 32-byte header
     for (i, &val) in values.iter().enumerate() {
         let off = 32 + i * 4;
-        state.write_u32(&mut reply, off, val);
+        reply = reply.set_u32(off, val);
     }
-    reply
+    reply.build()
 }
 
 /// RRConfigureOutputProperty (12).
@@ -205,10 +199,7 @@ pub(crate) fn handle_create_mode(state: &mut ClientState, data: &[u8], seq: u16)
     //   40+: name bytes (nameLen)
 
     if data.len() < 40 {
-        let mut reply = [0u8; 32];
-        reply[0] = 1;
-        state.write_u16(&mut reply, 2, seq);
-        return reply.to_vec();
+        return ReplyBuf::fixed(seq, state.msb_first).build();
     }
 
     let width = state.read_u16(data, 12);
@@ -251,11 +242,9 @@ pub(crate) fn handle_create_mode(state: &mut ClientState, data: &[u8], seq: u16)
     info!("RRCreateMode: {width}x{height} -> mode_id={mode_id}");
 
     // Reply: 32 bytes, mode_id at offset 8.
-    let mut reply = [0u8; 32];
-    reply[0] = 1;
-    state.write_u16(&mut reply, 2, seq);
-    state.write_u32(&mut reply, 8, mode_id);
-    reply.to_vec()
+    ReplyBuf::fixed(seq, state.msb_first)
+        .set_u32(8, mode_id)
+        .build()
 }
 
 /// RRDestroyMode (17).
@@ -327,31 +316,24 @@ pub(crate) fn handle_get_output_primary(
     } else {
         state.randr_outputs.first().map(|o| o.id).unwrap_or(0)
     };
-    let mut reply = [0u8; 32];
-    reply[0] = 1;
-    state.write_u16(&mut reply, 2, seq);
-    state.write_u32(&mut reply, 8, primary_output);
-    reply.to_vec()
+    ReplyBuf::fixed(seq, state.msb_first)
+        .set_u32(8, primary_output)
+        .build()
 }
 
 /// RRGetProviders (32).
 pub(crate) fn handle_get_providers(state: &mut ClientState, _data: &[u8], seq: u16) -> Vec<u8> {
     let num_providers = state.randr_providers.len() as u16;
     let var_len = num_providers as usize * 4;
-    let length_field = var_len / 4;
-    let total = 32 + var_len;
-    let mut reply = vec![0u8; total];
-    reply[0] = 1;
-    state.write_u16(&mut reply, 2, seq);
-    state.write_u32(&mut reply, 4, length_field as u32);
-    state.write_u32(&mut reply, 8, state.timestamp());
-    state.write_u16(&mut reply, 12, num_providers);
+    let mut reply = ReplyBuf::with_extra(seq, var_len, state.msb_first)
+        .set_u32(8, state.timestamp())
+        .set_u16(12, num_providers);
     let mut off = 32;
     for p in &state.randr_providers {
-        state.write_u32(&mut reply, off, p.id);
+        reply = reply.set_u32(off, p.id);
         off += 4;
     }
-    reply
+    reply.build()
 }
 
 /// RRGetProviderInfo (33).
@@ -404,12 +386,10 @@ pub(crate) fn handle_list_provider_properties(
     _data: &[u8],
     seq: u16,
 ) -> Vec<u8> {
-    let mut reply = [0u8; 32];
-    reply[0] = 1;
-    state.write_u16(&mut reply, 2, seq);
-    // length = 0, num_atoms = 0
-    state.write_u16(&mut reply, 8, 0);
-    reply.to_vec()
+    ReplyBuf::fixed(seq, state.msb_first)
+        // length = 0, num_atoms = 0
+        .set_u16(8, 0)
+        .build()
 }
 
 /// RRQueryProviderProperty (37).
@@ -419,10 +399,7 @@ pub(crate) fn handle_query_provider_property(
     seq: u16,
 ) -> Vec<u8> {
     // Reply with empty constraints (pending=0, range=0, immutable=0, no values)
-    let mut reply = [0u8; 32];
-    reply[0] = 1;
-    state.write_u16(&mut reply, 2, seq);
-    reply.to_vec()
+    ReplyBuf::fixed(seq, state.msb_first).build()
 }
 
 /// RRConfigureProviderProperty (38).
@@ -462,11 +439,8 @@ pub(crate) fn handle_get_provider_property(
     seq: u16,
 ) -> Vec<u8> {
     // Reply with type=None, format=0, length=0, bytes_after=0
-    let mut reply = [0u8; 32];
-    reply[0] = 1;
-    state.write_u16(&mut reply, 2, seq);
     // All fields default to 0: type=None, bytes_after=0, num_items=0
-    reply.to_vec()
+    ReplyBuf::fixed(seq, state.msb_first).build()
 }
 
 /// RRGetMonitors (42).
@@ -563,13 +537,10 @@ fn build_output_info_reply(state: &ClientState, seq: u16, output_id: u32) -> Vec
         Some(o) => o.clone(),
         None => {
             // Return a minimal "disconnected" reply.
-            let mut reply = vec![0u8; 32 + 24];
-            reply[0] = 1;
-            reply[1] = 0;
-            state.write_u16(&mut reply, 2, seq);
-            state.write_u32(&mut reply, 4, 6); // length
-            reply[24] = 1; // Disconnected
-            return reply;
+            return ReplyBuf::with_extra(seq, 24, state.msb_first)
+                .set_data_byte(0)
+                .set_u8(24, 1) // Disconnected
+                .build();
         }
     };
 
@@ -585,42 +556,38 @@ fn build_output_info_reply(state: &ClientState, seq: u16, output_id: u32) -> Vec
         + output_name.len()
         + name_pad;
     let inline_header = 24; // bytes 8-31
-    let length = (inline_header + var_data) / 4;
-    let total = 32 + inline_header + var_data;
-    let mut reply = vec![0u8; total];
+    let extra_bytes = inline_header + var_data;
 
-    reply[0] = 1; // Reply
-    reply[1] = 0; // Success
-    state.write_u16(&mut reply, 2, seq);
-    state.write_u32(&mut reply, 4, length as u32);
-    state.write_u32(&mut reply, 8, state.timestamp());
-    state.write_u32(&mut reply, 12, output.crtc_id);
-    state.write_u32(&mut reply, 16, output.mm_width);
-    state.write_u32(&mut reply, 20, output.mm_height);
-    reply[24] = output.connection_status;
-    reply[25] = 0; // subpixel_order: Unknown
-    state.write_u16(&mut reply, 26, num_crtcs);
-    state.write_u16(&mut reply, 28, num_modes);
-    state.write_u16(&mut reply, 30, 1); // num_preferred
-    state.write_u16(&mut reply, 32, num_clones);
-    state.write_u16(&mut reply, 34, output_name.len() as u16);
+    let mut reply = ReplyBuf::with_extra(seq, extra_bytes, state.msb_first)
+        .set_data_byte(0) // Success
+        .set_u32(8, state.timestamp())
+        .set_u32(12, output.crtc_id)
+        .set_u32(16, output.mm_width)
+        .set_u32(20, output.mm_height)
+        .set_u8(24, output.connection_status)
+        .set_u8(25, 0) // subpixel_order: Unknown
+        .set_u16(26, num_crtcs)
+        .set_u16(28, num_modes)
+        .set_u16(30, 1) // num_preferred
+        .set_u16(32, num_clones)
+        .set_u16(34, output_name.len() as u16);
 
     let mut off = 36;
     // CRTC IDs (possible CRTCs)
     for &crtc_id in &output.possible_crtcs {
-        state.write_u32(&mut reply, off, crtc_id);
+        reply = reply.set_u32(off, crtc_id);
         off += 4;
     }
     // Mode IDs
     for &mode_id in &output.modes {
-        state.write_u32(&mut reply, off, mode_id);
+        reply = reply.set_u32(off, mode_id);
         off += 4;
     }
     // Clone IDs (none)
     // Output name
-    reply[off..off + output_name.len()].copy_from_slice(output_name);
+    reply = reply.set_bytes(off, output_name);
 
-    reply
+    reply.build()
 }
 
 /// Build the reply for RRListOutputProperties.
@@ -632,21 +599,16 @@ fn build_list_output_properties_reply(state: &ClientState, seq: u16, output_id: 
 
     let num_atoms = atoms.len() as u16;
     let var_len = atoms.len() * 4;
-    let length_field = var_len / 4;
-    let total = 32 + var_len;
-    let mut reply = vec![0u8; total];
-    reply[0] = 1;
-    state.write_u16(&mut reply, 2, seq);
-    state.write_u32(&mut reply, 4, length_field as u32);
-    state.write_u16(&mut reply, 8, num_atoms);
+    let mut reply = ReplyBuf::with_extra(seq, var_len, state.msb_first)
+        .set_u16(8, num_atoms);
 
     let mut off = 32;
     for atom in atoms {
-        state.write_u32(&mut reply, off, atom);
+        reply = reply.set_u32(off, atom);
         off += 4;
     }
 
-    reply
+    reply.build()
 }
 
 /// Build the reply for RRGetOutputProperty.
@@ -661,10 +623,7 @@ fn build_get_output_property_reply(state: &ClientState, data: &[u8], seq: u16) -
     //  25: pending (BOOL) + pad
 
     if data.len() < 24 {
-        let mut reply = [0u8; 32];
-        reply[0] = 1;
-        state.write_u16(&mut reply, 2, seq);
-        return reply.to_vec();
+        return ReplyBuf::fixed(seq, state.msb_first).build();
     }
 
     let output_id = state.read_u32(data, 4);
@@ -676,10 +635,7 @@ fn build_get_output_property_reply(state: &ClientState, data: &[u8], seq: u16) -
     let output = match state.randr_find_output(output_id) {
         Some(o) => o,
         None => {
-            let mut reply = [0u8; 32];
-            reply[0] = 1;
-            state.write_u16(&mut reply, 2, seq);
-            return reply.to_vec();
+            return ReplyBuf::fixed(seq, state.msb_first).build();
         }
     };
 
@@ -687,23 +643,18 @@ fn build_get_output_property_reply(state: &ClientState, data: &[u8], seq: u16) -
         Some(p) => p,
         None => {
             // Property not found.
-            let mut reply = [0u8; 32];
-            reply[0] = 1;
-            state.write_u16(&mut reply, 2, seq);
             // type = None (0), format = 0, length = 0, bytes_after = 0
-            return reply.to_vec();
+            return ReplyBuf::fixed(seq, state.msb_first).build();
         }
     };
 
     // Type mismatch check.
     if req_type != 0 && req_type != prop.prop_type {
-        let mut reply = [0u8; 32];
-        reply[0] = 1;
-        state.write_u16(&mut reply, 2, seq);
-        state.write_u32(&mut reply, 8, prop.prop_type); // actual type
-                                                        // bytes_after = total data length
-        state.write_u32(&mut reply, 12, prop.data.len() as u32);
-        return reply.to_vec();
+        return ReplyBuf::fixed(seq, state.msb_first)
+            .set_u32(8, prop.prop_type) // actual type
+            // bytes_after = total data length
+            .set_u32(12, prop.data.len() as u32)
+            .build();
     }
 
     let bytes_per_item = match prop.format {
@@ -733,21 +684,15 @@ fn build_get_output_property_reply(state: &ClientState, data: &[u8], seq: u16) -
 
     let pad = (4 - (returned_data.len() % 4)) % 4;
     let var_len = returned_data.len() + pad;
-    let length_field = var_len / 4;
-    let total_reply = 32 + var_len;
 
-    let mut reply = vec![0u8; total_reply];
-    reply[0] = 1;
-    reply[1] = prop.format;
-    state.write_u16(&mut reply, 2, seq);
-    state.write_u32(&mut reply, 4, length_field as u32);
-    state.write_u32(&mut reply, 8, prop.prop_type);
-    state.write_u32(&mut reply, 12, bytes_after as u32);
-    state.write_u32(&mut reply, 16, num_items as u32);
+    let reply = ReplyBuf::with_extra(seq, var_len, state.msb_first)
+        .set_data_byte(prop.format)
+        .set_u32(8, prop.prop_type)
+        .set_u32(12, bytes_after as u32)
+        .set_u32(16, num_items as u32)
+        .set_bytes(32, returned_data);
 
-    reply[32..32 + returned_data.len()].copy_from_slice(returned_data);
-
-    reply
+    reply.build()
 }
 
 /// Build the reply for RRGetProviderInfo.
@@ -755,10 +700,7 @@ fn build_provider_info_reply(state: &ClientState, seq: u16, provider_id: u32) ->
     let provider = match state.randr_providers.iter().find(|p| p.id == provider_id) {
         Some(p) => p.clone(),
         None => {
-            let mut reply = [0u8; 32];
-            reply[0] = 1;
-            state.write_u16(&mut reply, 2, seq);
-            return reply.to_vec();
+            return ReplyBuf::fixed(seq, state.msb_first).build();
         }
     };
 
@@ -773,31 +715,26 @@ fn build_provider_info_reply(state: &ClientState, seq: u16, provider_id: u32) ->
     //         capabilities, num_crtcs, num_outputs, num_associated, name_len, pad)
     //   32+:  variable data (crtc IDs, output IDs, associated providers, name)
     let var_len = num_crtcs as usize * 4 + num_outputs as usize * 4 + name_bytes.len() + name_pad;
-    let length_field = var_len / 4;
-    let total = 32 + var_len;
 
-    let mut reply = vec![0u8; total];
-    reply[0] = 1;
-    state.write_u16(&mut reply, 2, seq);
-    state.write_u32(&mut reply, 4, length_field as u32);
-    state.write_u32(&mut reply, 8, state.timestamp());
-    state.write_u32(&mut reply, 12, provider.capabilities);
-    state.write_u16(&mut reply, 16, num_crtcs);
-    state.write_u16(&mut reply, 18, num_outputs);
-    state.write_u16(&mut reply, 20, num_associated);
-    state.write_u16(&mut reply, 22, name_bytes.len() as u16);
+    let mut reply = ReplyBuf::with_extra(seq, var_len, state.msb_first)
+        .set_u32(8, state.timestamp())
+        .set_u32(12, provider.capabilities)
+        .set_u16(16, num_crtcs)
+        .set_u16(18, num_outputs)
+        .set_u16(20, num_associated)
+        .set_u16(22, name_bytes.len() as u16);
 
     let mut off = 32;
     for &cid in &provider.crtcs {
-        state.write_u32(&mut reply, off, cid);
+        reply = reply.set_u32(off, cid);
         off += 4;
     }
     for &oid in &provider.outputs {
-        state.write_u32(&mut reply, off, oid);
+        reply = reply.set_u32(off, oid);
         off += 4;
     }
     // No associated providers.
-    reply[off..off + name_bytes.len()].copy_from_slice(name_bytes);
+    reply = reply.set_bytes(off, name_bytes);
 
-    reply
+    reply.build()
 }

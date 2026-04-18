@@ -7,6 +7,7 @@ use tracing::debug;
 
 use super::super::client::ClientState;
 use super::super::core::*;
+use crate::xserver::reply::ReplyBuf;
 
 /// X-Resource major opcode (assigned in QueryExtension).
 const XRES_MAJOR_OPCODE: u8 = 160;
@@ -19,12 +20,10 @@ pub(crate) fn handle_xresource_request(state: &mut ClientState, data: &[u8], seq
     match minor {
         // 0: QueryVersion
         0 => {
-            let mut reply = [0u8; 32];
-            reply[0] = 1; // Reply
-            write_u16_bo(&mut reply, 2, seq, bo);
-            write_u16_bo(&mut reply, 8, 1, bo); // server_major = 1
-            write_u16_bo(&mut reply, 10, 2, bo); // server_minor = 2
-            reply.to_vec()
+            ReplyBuf::fixed(seq, bo)
+                .set_u16(8, 1) // server_major = 1
+                .set_u16(10, 2) // server_minor = 2
+                .build()
         }
 
         // 1: QueryClients — return list of connected client XIDs
@@ -32,21 +31,19 @@ pub(crate) fn handle_xresource_request(state: &mut ClientState, data: &[u8], seq
             // Read all connected client resource bases from the shared registry.
             let client_bases = state.client_registry.lock().unwrap().clone();
             let num_clients = client_bases.len() as u32;
-            let extra_words = num_clients * 2; // each client entry = 8 bytes = 2 words
-            let mut reply = vec![0u8; 32 + (extra_words as usize) * 4];
-            reply[0] = 1; // Reply
-            write_u16_bo(&mut reply, 2, seq, bo);
-            write_u32_bo(&mut reply, 4, extra_words, bo); // reply length in 4-byte words
-            write_u32_bo(&mut reply, 8, num_clients, bo); // num_clients
+            let extra_bytes = (num_clients as usize) * 8; // each client entry = 8 bytes
 
             // Client entries: resource_base (4 bytes) + resource_mask (4 bytes) each
+            let mut reply = ReplyBuf::with_extra(seq, extra_bytes, bo)
+                .set_u32(8, num_clients); // num_clients
             for (i, &resource_base) in client_bases.iter().enumerate() {
                 let off = 32 + i * 8;
-                write_u32_bo(&mut reply, off, resource_base, bo);
-                write_u32_bo(&mut reply, off + 4, 0x003FFFFF, bo);
+                reply = reply
+                    .set_u32(off, resource_base)
+                    .set_u32(off + 4, 0x003FFFFF);
             }
 
-            reply
+            reply.build()
         }
 
         // 2: QueryClientResources — return resource type counts for a client
@@ -108,12 +105,9 @@ pub(crate) fn handle_xresource_request(state: &mut ClientState, data: &[u8], seq
             // Only include types with count > 0
             let active_types: Vec<&TypeCount> = types.iter().filter(|t| t.count > 0).collect();
             let num_types = active_types.len() as u32;
-            let extra_words = num_types * 2;
-            let mut reply = vec![0u8; 32 + (extra_words as usize) * 4];
-            reply[0] = 1; // Reply
-            write_u16_bo(&mut reply, 2, seq, bo);
-            write_u32_bo(&mut reply, 4, extra_words, bo);
-            write_u32_bo(&mut reply, 8, num_types, bo);
+            let extra_bytes = (num_types as usize) * 8;
+            let mut reply = ReplyBuf::with_extra(seq, extra_bytes, bo)
+                .set_u32(8, num_types);
 
             let mut off = 32;
             for t in active_types {
@@ -121,12 +115,13 @@ pub(crate) fn handle_xresource_request(state: &mut ClientState, data: &[u8], seq
                     let mut atoms = state.atoms.lock().unwrap();
                     atoms.intern(t.type_name, false)
                 };
-                write_u32_bo(&mut reply, off, atom, bo);
-                write_u32_bo(&mut reply, off + 4, t.count, bo);
+                reply = reply
+                    .set_u32(off, atom)
+                    .set_u32(off + 4, t.count);
                 off += 8;
             }
 
-            reply
+            reply.build()
         }
 
         // 3: QueryClientPixmapBytes — total pixmap memory for a client
@@ -141,12 +136,10 @@ pub(crate) fn handle_xresource_request(state: &mut ClientState, data: &[u8], seq
                 .map(|p| (p.width as u64) * (p.height as u64) * (p.depth as u64 / 8).max(1))
                 .sum();
 
-            let mut reply = [0u8; 32];
-            reply[0] = 1; // Reply
-            write_u16_bo(&mut reply, 2, seq, bo);
-            write_u32_bo(&mut reply, 8, total_bytes as u32, bo); // bytes (low 32)
-            write_u32_bo(&mut reply, 12, (total_bytes >> 32) as u32, bo); // bytes_overflow (high 32)
-            reply.to_vec()
+            ReplyBuf::fixed(seq, bo)
+                .set_u32(8, total_bytes as u32) // bytes (low 32)
+                .set_u32(12, (total_bytes >> 32) as u32) // bytes_overflow (high 32)
+                .build()
         }
 
         // 4: QueryClientIds (XRes 1.2) — return client IDs with their types
@@ -203,25 +196,22 @@ pub(crate) fn handle_xresource_request(state: &mut ClientState, data: &[u8], seq
             // Each ClientIdValue: spec (8 bytes) + length (4) + value (4) = 16 bytes
             let num_ids = ids.len() as u32;
             let data_bytes = num_ids as usize * 16;
-            let extra_words = data_bytes / 4;
-            let mut reply = vec![0u8; 32 + data_bytes];
-            reply[0] = 1; // Reply
-            write_u16_bo(&mut reply, 2, seq, bo);
-            write_u32_bo(&mut reply, 4, extra_words as u32, bo);
-            write_u32_bo(&mut reply, 8, num_ids, bo);
+            let mut reply = ReplyBuf::with_extra(seq, data_bytes, bo)
+                .set_u32(8, num_ids);
 
             let mut off = 32;
             for (base, value) in &ids {
                 // ClientIdValue: client (4), mask (4), length (4), value (4)
-                write_u32_bo(&mut reply, off, *base, bo);
                 let id_mask = if *value == 0 { 1u32 } else { 2u32 };
-                write_u32_bo(&mut reply, off + 4, id_mask, bo);
-                write_u32_bo(&mut reply, off + 8, 4, bo); // length = 4 bytes
-                write_u32_bo(&mut reply, off + 12, *value, bo);
+                reply = reply
+                    .set_u32(off, *base)
+                    .set_u32(off + 4, id_mask)
+                    .set_u32(off + 8, 4) // length = 4 bytes
+                    .set_u32(off + 12, *value);
                 off += 16;
             }
 
-            reply
+            reply.build()
         }
 
         // 5: QueryResourceBytes (XRes 1.2) — total bytes used by resource types
@@ -282,12 +272,8 @@ pub(crate) fn handle_xresource_request(state: &mut ClientState, data: &[u8], seq
             // Each ResourceSizeValue: spec (8) + bytes (4) + ref_count (4) + use_count (4) = 20 bytes
             let data_bytes = num_sizes as usize * 20;
             let padded = (data_bytes + 3) & !3;
-            let extra_words = padded / 4;
-            let mut reply = vec![0u8; 32 + padded];
-            reply[0] = 1; // Reply
-            write_u16_bo(&mut reply, 2, seq, bo);
-            write_u32_bo(&mut reply, 4, extra_words as u32, bo);
-            write_u32_bo(&mut reply, 8, num_sizes, bo);
+            let mut reply = ReplyBuf::with_extra(seq, padded, bo)
+                .set_u32(8, num_sizes);
 
             let mut off = 32;
             for e in entries {
@@ -295,15 +281,16 @@ pub(crate) fn handle_xresource_request(state: &mut ClientState, data: &[u8], seq
                     let mut atoms = state.atoms.lock().unwrap();
                     atoms.intern(e.type_name, false)
                 };
-                write_u32_bo(&mut reply, off, atom, bo); // resource_type
-                write_u32_bo(&mut reply, off + 4, e.count, bo); // count
-                write_u32_bo(&mut reply, off + 8, e.bytes as u32, bo); // bytes (low)
-                write_u32_bo(&mut reply, off + 12, (e.bytes >> 32) as u32, bo); // bytes (high)
-                write_u32_bo(&mut reply, off + 16, 0, bo); // ref_count
+                reply = reply
+                    .set_u32(off, atom) // resource_type
+                    .set_u32(off + 4, e.count) // count
+                    .set_u32(off + 8, e.bytes as u32) // bytes (low)
+                    .set_u32(off + 12, (e.bytes >> 32) as u32) // bytes (high)
+                    .set_u32(off + 16, 0); // ref_count
                 off += 20;
             }
 
-            reply
+            reply.build()
         }
 
         _ => {

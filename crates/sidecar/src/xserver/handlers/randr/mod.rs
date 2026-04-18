@@ -8,6 +8,7 @@ use tracing::{debug, info};
 
 use super::super::client::ClientState;
 use crate::xserver::core::require_len;
+use crate::xserver::reply::ReplyBuf;
 
 pub(crate) fn handle_randr_request(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
     let minor = data[1];
@@ -18,12 +19,10 @@ pub(crate) fn handle_randr_request(state: &mut ClientState, data: &[u8], seq: u1
         // RRQueryVersion (0)
         // ---------------------------------------------------------------
         0 => {
-            let mut reply = [0u8; 32];
-            reply[0] = 1;
-            state.write_u16(&mut reply, 2, seq);
-            state.write_u32(&mut reply, 8, 1); // major version
-            state.write_u32(&mut reply, 12, 5); // minor version
-            reply.to_vec()
+            ReplyBuf::fixed(seq, state.msb_first)
+                .set_u32(8, 1)  // major version
+                .set_u32(12, 5) // minor version
+                .build()
         }
 
         // ---------------------------------------------------------------
@@ -46,17 +45,14 @@ pub(crate) fn handle_randr_request(state: &mut ClientState, data: &[u8], seq: u1
                     0 // Success
                 };
 
-            let mut reply = [0u8; 32];
-            reply[0] = 1;
-            reply[1] = status;
-            state.write_u16(&mut reply, 2, seq);
-            state.write_u32(&mut reply, 8, state.timestamp());
-            state.write_u32(&mut reply, 12, state.randr_config_timestamp);
-            state.write_u32(&mut reply, 16, state.root_window);
-            // subpixel_order at byte 20 (0 = Unknown, already zero)
-
             debug!("RRSetScreenConfig: status={status} config_ts={config_timestamp}");
-            reply.to_vec()
+            ReplyBuf::fixed(seq, state.msb_first)
+                .set_data_byte(status)
+                .set_u32(8, state.timestamp())
+                .set_u32(12, state.randr_config_timestamp)
+                .set_u32(16, state.root_window)
+                // subpixel_order at byte 20 (0 = Unknown, already zero)
+                .build()
         }
 
         // Screen operations

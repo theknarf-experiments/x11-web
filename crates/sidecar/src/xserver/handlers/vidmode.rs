@@ -4,6 +4,7 @@ use tracing::debug;
 
 use super::super::client::ClientState;
 use crate::xserver::core::require_len;
+use crate::xserver::reply::ReplyBuf;
 
 /// XFree86-VidMode mode information.
 #[derive(Clone, Debug, PartialEq)]
@@ -78,12 +79,10 @@ pub(crate) fn handle_vidmode_request(state: &mut ClientState, data: &[u8], seq: 
     match minor {
         0 => {
             // QueryVersion
-            let mut reply = [0u8; 32];
-            reply[0] = 1;
-            state.write_u16(&mut reply, 2, seq);
-            state.write_u16(&mut reply, 8, 2); // major
-            state.write_u16(&mut reply, 10, 2); // minor
-            reply.to_vec()
+            ReplyBuf::fixed(seq, state.msb_first)
+                .set_u16(8, 2) // major
+                .set_u16(10, 2) // minor
+                .build()
         }
         1 => {
             // GetModeLine
@@ -95,23 +94,20 @@ pub(crate) fn handle_vidmode_request(state: &mut ClientState, data: &[u8], seq: 
                 .unwrap_or_else(|| {
                     VidModeInfo::default_for_screen(state.screen_width, state.screen_height)
                 });
-            let mut reply = vec![0u8; 52]; // 32 header + 20 modeline data
-            reply[0] = 1;
-            state.write_u16(&mut reply, 2, seq);
-            state.write_u32(&mut reply, 4, 5); // length = 5 extra u32s
-            state.write_u32(&mut reply, 8, mode.dotclock); // dotclock
-            state.write_u16(&mut reply, 12, mode.hdisplay); // hdisplay
-            state.write_u16(&mut reply, 14, mode.hsyncstart); // hsyncstart
-            state.write_u16(&mut reply, 16, mode.hsyncend); // hsyncend
-            state.write_u16(&mut reply, 18, mode.htotal); // htotal
-            state.write_u16(&mut reply, 20, 0); // hskew
-            state.write_u16(&mut reply, 22, mode.vdisplay); // vdisplay
-            state.write_u16(&mut reply, 24, mode.vsyncstart); // vsyncstart
-            state.write_u16(&mut reply, 26, mode.vsyncend); // vsyncend
-            state.write_u16(&mut reply, 28, mode.vtotal); // vtotal
-            state.write_u32(&mut reply, 32, mode.flags); // flags
-                                                         // privsize at 36..40 = 0
-            reply
+            ReplyBuf::with_extra(seq, 20, state.msb_first) // 32 header + 20 modeline data
+                .set_u32(8, mode.dotclock) // dotclock
+                .set_u16(12, mode.hdisplay) // hdisplay
+                .set_u16(14, mode.hsyncstart) // hsyncstart
+                .set_u16(16, mode.hsyncend) // hsyncend
+                .set_u16(18, mode.htotal) // htotal
+                .set_u16(20, 0) // hskew
+                .set_u16(22, mode.vdisplay) // vdisplay
+                .set_u16(24, mode.vsyncstart) // vsyncstart
+                .set_u16(26, mode.vsyncend) // vsyncend
+                .set_u16(28, mode.vtotal) // vtotal
+                .set_u32(32, mode.flags) // flags
+                // privsize at 36..40 = 0
+                .build()
         }
         6 => {
             // GetAllModeLines
@@ -120,33 +116,28 @@ pub(crate) fn handle_vidmode_request(state: &mut ClientState, data: &[u8], seq: 
             let mode_size = 48; // bytes per mode line info
             let extra = 4 + mode_size * mode_count; // 4 bytes for count + modes
             let padded = (extra + 3) & !3;
-            let mut reply = vec![0u8; 32 + padded];
-            reply[0] = 1;
-            state.write_u16(&mut reply, 2, seq);
-            state.write_u32(&mut reply, 4, (padded / 4) as u32);
-            state.write_u32(&mut reply, 8, mode_count as u32);
+            let mut reply = ReplyBuf::with_extra(seq, padded, state.msb_first)
+                .set_u32(8, mode_count as u32);
             for (i, mode) in state.vidmode_modes.iter().enumerate() {
                 let off = 36 + i * mode_size;
-                state.write_u32(&mut reply, off, mode.dotclock);
-                state.write_u16(&mut reply, off + 4, mode.hdisplay);
-                state.write_u16(&mut reply, off + 6, mode.hsyncstart);
-                state.write_u16(&mut reply, off + 8, mode.hsyncend);
-                state.write_u16(&mut reply, off + 10, mode.htotal);
-                // hskew at off + 12 = 0
-                state.write_u16(&mut reply, off + 14, mode.vdisplay);
-                state.write_u16(&mut reply, off + 16, mode.vsyncstart);
-                state.write_u16(&mut reply, off + 18, mode.vsyncend);
-                state.write_u16(&mut reply, off + 20, mode.vtotal);
-                // pad at off + 22..26 = 0
-                state.write_u32(&mut reply, off + 26, mode.flags);
+                reply = reply
+                    .set_u32(off, mode.dotclock)
+                    .set_u16(off + 4, mode.hdisplay)
+                    .set_u16(off + 6, mode.hsyncstart)
+                    .set_u16(off + 8, mode.hsyncend)
+                    .set_u16(off + 10, mode.htotal)
+                    // hskew at off + 12 = 0
+                    .set_u16(off + 14, mode.vdisplay)
+                    .set_u16(off + 16, mode.vsyncstart)
+                    .set_u16(off + 18, mode.vsyncend)
+                    .set_u16(off + 20, mode.vtotal)
+                    // pad at off + 22..26 = 0
+                    .set_u32(off + 26, mode.flags);
             }
-            reply
+            reply.build()
         }
         14 => {
             // GetGamma
-            let mut reply = [0u8; 32];
-            reply[0] = 1;
-            state.write_u16(&mut reply, 2, seq);
             // Approximate gamma from stored ramp midpoint:
             // gamma = log(ramp[128]/65535) / log(128/255)
             let (gamma_r, gamma_g, gamma_b) = if let Some(crtc) = state.randr_crtcs.first() {
@@ -172,10 +163,11 @@ pub(crate) fn handle_vidmode_request(state: &mut ClientState, data: &[u8], seq: 
                 (1.0, 1.0, 1.0)
             };
             // Gamma is 16.16 fixed point, 1.0 = 65536
-            state.write_u32(&mut reply, 8, (gamma_r * 65536.0) as u32); // red
-            state.write_u32(&mut reply, 12, (gamma_g * 65536.0) as u32); // green
-            state.write_u32(&mut reply, 16, (gamma_b * 65536.0) as u32); // blue
-            reply.to_vec()
+            ReplyBuf::fixed(seq, state.msb_first)
+                .set_u32(8, (gamma_r * 65536.0) as u32) // red
+                .set_u32(12, (gamma_g * 65536.0) as u32) // green
+                .set_u32(16, (gamma_b * 65536.0) as u32) // blue
+                .build()
         }
         15 => {
             // SetGamma
@@ -219,12 +211,9 @@ pub(crate) fn handle_vidmode_request(state: &mut ClientState, data: &[u8], seq: 
             let ramp_bytes = size * 2; // each value is u16
             let padded = (ramp_bytes + 3) & !3;
             let total_extra = padded * 3; // R, G, B
-            let mut reply = vec![0u8; 32 + total_extra];
-            reply[0] = 1;
-            state.write_u16(&mut reply, 2, seq);
-            state.write_u32(&mut reply, 4, (total_extra / 4) as u32);
-            state.write_u16(&mut reply, 8, size as u16); // size
-                                                         // Return stored ramp from CRTC, referencing directly to avoid clones
+            let mut reply = ReplyBuf::with_extra(seq, total_extra, state.msb_first)
+                .set_u16(8, size as u16); // size
+            // Return stored ramp from CRTC, referencing directly to avoid clones
             let linear_ramp: Vec<u16>;
             let ramps: [&[u16]; 3] = if let Some(crtc) = state.randr_crtcs.first() {
                 [&crtc.gamma_red, &crtc.gamma_green, &crtc.gamma_blue]
@@ -234,22 +223,30 @@ pub(crate) fn handle_vidmode_request(state: &mut ClientState, data: &[u8], seq: 
                     .collect();
                 [&linear_ramp, &linear_ramp, &linear_ramp]
             };
-            for (channel, ramp) in ramps.iter().enumerate() {
-                let base = 32 + channel * padded;
-                for i in 0..size {
-                    let val = if i < ramp.len() {
-                        ramp[i]
-                    } else {
-                        // Extrapolate linearly if requested size exceeds stored ramp
-                        ((i as u32 * 65535) / (size.max(1) as u32 - 1).max(1)) as u16
-                    };
-                    let off = base + i * 2;
-                    if off + 2 <= reply.len() {
-                        state.write_u16(&mut reply, off, val);
+            {
+                let buf = reply.buf_mut();
+                for (channel, ramp) in ramps.iter().enumerate() {
+                    let base = 32 + channel * padded;
+                    for i in 0..size {
+                        let val = if i < ramp.len() {
+                            ramp[i]
+                        } else {
+                            // Extrapolate linearly if requested size exceeds stored ramp
+                            ((i as u32 * 65535) / (size.max(1) as u32 - 1).max(1)) as u16
+                        };
+                        let off = base + i * 2;
+                        if off + 2 <= buf.len() {
+                            let bytes = if state.msb_first {
+                                val.to_be_bytes()
+                            } else {
+                                val.to_le_bytes()
+                            };
+                            buf[off..off + 2].copy_from_slice(&bytes);
+                        }
                     }
                 }
             }
-            reply
+            reply.build()
         }
         17 => {
             // SetGammaRamp
@@ -290,11 +287,9 @@ pub(crate) fn handle_vidmode_request(state: &mut ClientState, data: &[u8], seq: 
         }
         18 => {
             // GetGammaRampSize
-            let mut reply = [0u8; 32];
-            reply[0] = 1;
-            state.write_u16(&mut reply, 2, seq);
-            state.write_u16(&mut reply, 8, 256); // size = 256
-            reply.to_vec()
+            ReplyBuf::fixed(seq, state.msb_first)
+                .set_u16(8, 256) // size = 256
+                .build()
         }
         2 => {
             // GetModeLine (legacy alias)
@@ -306,21 +301,18 @@ pub(crate) fn handle_vidmode_request(state: &mut ClientState, data: &[u8], seq: 
                 .unwrap_or_else(|| {
                     VidModeInfo::default_for_screen(state.screen_width, state.screen_height)
                 });
-            let mut reply = vec![0u8; 52];
-            reply[0] = 1;
-            state.write_u16(&mut reply, 2, seq);
-            state.write_u32(&mut reply, 4, 5);
-            state.write_u32(&mut reply, 8, mode.dotclock);
-            state.write_u16(&mut reply, 12, mode.hdisplay);
-            state.write_u16(&mut reply, 14, mode.hsyncstart);
-            state.write_u16(&mut reply, 16, mode.hsyncend);
-            state.write_u16(&mut reply, 18, mode.htotal);
-            state.write_u16(&mut reply, 22, mode.vdisplay);
-            state.write_u16(&mut reply, 24, mode.vsyncstart);
-            state.write_u16(&mut reply, 26, mode.vsyncend);
-            state.write_u16(&mut reply, 28, mode.vtotal);
-            state.write_u32(&mut reply, 32, mode.flags);
-            reply
+            ReplyBuf::with_extra(seq, 20, state.msb_first)
+                .set_u32(8, mode.dotclock)
+                .set_u16(12, mode.hdisplay)
+                .set_u16(14, mode.hsyncstart)
+                .set_u16(16, mode.hsyncend)
+                .set_u16(18, mode.htotal)
+                .set_u16(22, mode.vdisplay)
+                .set_u16(24, mode.vsyncstart)
+                .set_u16(26, mode.vsyncend)
+                .set_u16(28, mode.vtotal)
+                .set_u32(32, mode.flags)
+                .build()
         }
         3 => {
             // SwitchToMode — attempt to switch to a matching mode in the mode list
@@ -371,27 +363,26 @@ pub(crate) fn handle_vidmode_request(state: &mut ClientState, data: &[u8], seq: 
                 + (hsync_count as usize * 8)
                 + (vsync_count as usize * 8);
             let padded_extra = (extra + 3) & !3;
-            let mut reply = vec![0u8; 32 + padded_extra];
-            reply[0] = 1;
-            state.write_u16(&mut reply, 2, seq);
-            state.write_u32(&mut reply, 4, (padded_extra / 4) as u32);
-            state.write_u32(&mut reply, 8, vendor_len);
-            state.write_u32(&mut reply, 12, model_len);
-            state.write_u32(&mut reply, 16, hsync_count);
-            state.write_u32(&mut reply, 20, vsync_count);
             let mut off = 32;
-            reply[off..off + vendor.len()].copy_from_slice(vendor);
+            let reply = ReplyBuf::with_extra(seq, padded_extra, state.msb_first)
+                .set_u32(8, vendor_len)
+                .set_u32(12, model_len)
+                .set_u32(16, hsync_count)
+                .set_u32(20, vsync_count)
+                .set_bytes(off, vendor);
             off += vendor_padded;
-            reply[off..off + model.len()].copy_from_slice(model);
+            let reply = reply.set_bytes(off, model);
             off += model_padded;
             // HSync range: 31.5 - 80.0 kHz (as 16.16 fixed point * 100)
-            state.write_u32(&mut reply, off, 3150); // low = 31.50 kHz
-            state.write_u32(&mut reply, off + 4, 8000); // high = 80.00 kHz
+            let reply = reply
+                .set_u32(off, 3150) // low = 31.50 kHz
+                .set_u32(off + 4, 8000); // high = 80.00 kHz
             off += 8;
             // VSync range: 56 - 75 Hz
-            state.write_u32(&mut reply, off, 5600); // low = 56.00 Hz
-            state.write_u32(&mut reply, off + 4, 7500); // high = 75.00 Hz
             reply
+                .set_u32(off, 5600) // low = 56.00 Hz
+                .set_u32(off + 4, 7500) // high = 75.00 Hz
+                .build()
         }
         5 => {
             // LockModeSwitch — store the lock state
@@ -451,11 +442,9 @@ pub(crate) fn handle_vidmode_request(state: &mut ClientState, data: &[u8], seq: 
         }
         9 => {
             // ValidateModeLine — always return MODE_OK
-            let mut reply = [0u8; 32];
-            reply[0] = 1;
-            state.write_u16(&mut reply, 2, seq);
-            state.write_u32(&mut reply, 8, 0); // status = MODE_OK
-            reply.to_vec()
+            ReplyBuf::fixed(seq, state.msb_first)
+                .set_u32(8, 0) // status = MODE_OK
+                .build()
         }
         10 => {
             // SwitchMode — cycle through mode list by zoom direction
@@ -484,12 +473,10 @@ pub(crate) fn handle_vidmode_request(state: &mut ClientState, data: &[u8], seq: 
         }
         11 => {
             // GetViewPort
-            let mut reply = [0u8; 32];
-            reply[0] = 1;
-            state.write_u16(&mut reply, 2, seq);
-            state.write_u32(&mut reply, 8, state.vidmode_viewport_x);
-            state.write_u32(&mut reply, 12, state.vidmode_viewport_y);
-            reply.to_vec()
+            ReplyBuf::fixed(seq, state.msb_first)
+                .set_u32(8, state.vidmode_viewport_x)
+                .set_u32(12, state.vidmode_viewport_y)
+                .build()
         }
         12 => {
             // SetViewPort — store offset (clamped to screen bounds) and log
@@ -505,25 +492,15 @@ pub(crate) fn handle_vidmode_request(state: &mut ClientState, data: &[u8], seq: 
         }
         13 => {
             // GetDotClocks
-            let mut reply = vec![0u8; 36]; // 32 header + 4 clock value
-            reply[0] = 1;
-            state.write_u16(&mut reply, 2, seq);
-            state.write_u32(&mut reply, 4, 1); // length = 1 extra u32
-            state.write_u32(&mut reply, 8, 0); // flags = 0
-            state.write_u32(&mut reply, 12, 1); // clocks = 1
-            state.write_u32(
-                &mut reply,
-                16,
-                state.screen_width as u32 * state.screen_height as u32 * 60,
-            ); // maxclocks
-               // Padding at 20..32 is zero
-               // clock[0] = dot clock of the mode
-            state.write_u32(
-                &mut reply,
-                32,
-                state.screen_width as u32 * state.screen_height as u32 * 60,
-            );
-            reply
+            let dotclock = state.screen_width as u32 * state.screen_height as u32 * 60;
+            ReplyBuf::with_extra(seq, 4, state.msb_first) // 32 header + 4 clock value
+                .set_u32(8, 0) // flags = 0
+                .set_u32(12, 1) // clocks = 1
+                .set_u32(16, dotclock) // maxclocks
+                // Padding at 20..32 is zero
+                // clock[0] = dot clock of the mode
+                .set_u32(32, dotclock)
+                .build()
         }
         _ => crate::xserver::core::build_error_bo(
             crate::xserver::core::BAD_REQUEST,
