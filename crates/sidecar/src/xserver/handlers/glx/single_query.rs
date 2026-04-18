@@ -1,74 +1,12 @@
 //! GLX single GL query/info operations (glGet*, glIs*, glGenTextures, glGenLists, etc.).
+//!
+//! All reply construction uses [`GlxReply`] from `super::reply`, which encodes
+//! the xGLXSingleReply wire format rules (retval vs extra data, size==1 semantics, etc.).
 
 #[cfg(feature = "osmesa")]
 use crate::osmesa;
 
-use super::context::glx_single_empty_reply;
-
-/// xGLXSingleReply — the 32-byte header used by all GLX single-command replies.
-///
-/// Scalar queries (GetError, IsEnabled, …) put the value in `retval`.
-/// Array/string queries (GetIntegerv, GetString, …) put the count in `size`
-/// and append variable-length data after the header.
-struct GlxSingleReply {
-    reply_type: u8,      // 0: always 1 (X_Reply)
-    _pad1: u8,           // 1
-    sequence: u16,       // 2..4
-    length: u32,         // 4..8  extra 4-byte words beyond header
-    retval: u32,         // 8..12  scalar return value
-    size: u32,           // 12..16 element/byte count for variable data
-    _pad3: [u32; 4],     // 16..32
-}
-
-impl GlxSingleReply {
-    fn new_scalar(seq: u16, retval: u32) -> Vec<u8> {
-        let mut buf = [0u8; 32];
-        buf[0] = 1;
-        buf[2..4].copy_from_slice(&seq.to_le_bytes());
-        buf[8..12].copy_from_slice(&retval.to_le_bytes());
-        buf.to_vec()
-    }
-
-    /// Build a reply for variable-length data (multiple values or strings).
-    ///
-    /// Mesa's indirect GL macros check `reply.size`:
-    /// - If size == 1: read single value from `reply.retval` (bytes 8-12),
-    ///   do NOT call `_XRead`. `reply.length` MUST be 0.
-    /// - If size > 1: read `size` elements from extra data via `_XRead`.
-    ///   `reply.length` = padded data size in u32 words.
-    ///
-    /// So for single-element queries (e.g. glGetIntegerv with 1 param),
-    /// the value goes in retval, not in extra data.
-    fn new_array(seq: u16, element_count: u32, data: &[u8]) -> Vec<u8> {
-        // Single 4-byte value: pack into retval (bytes 8-12) with length=0
-        if element_count == 1 && data.len() <= 4 {
-            let mut buf = [0u8; 32];
-            buf[0] = 1;
-            buf[2..4].copy_from_slice(&seq.to_le_bytes());
-            // size = 1
-            buf[12..16].copy_from_slice(&1u32.to_le_bytes());
-            // value in retval
-            if !data.is_empty() {
-                buf[8..8 + data.len()].copy_from_slice(data);
-            }
-            // reply.length = 0 (no extra data after header)
-            return buf.to_vec();
-        }
-
-        // Multi-value or string: extra data after 32-byte header
-        let padded = (data.len() + 3) & !3;
-        let extra_words = padded / 4;
-        let mut buf = vec![0u8; 32 + padded];
-        buf[0] = 1;
-        buf[2..4].copy_from_slice(&seq.to_le_bytes());
-        buf[4..8].copy_from_slice(&(extra_words as u32).to_le_bytes());
-        buf[12..16].copy_from_slice(&element_count.to_le_bytes());
-        if !data.is_empty() {
-            buf[32..32 + data.len()].copy_from_slice(data);
-        }
-        buf
-    }
-}
+use super::reply::GlxReply;
 
 // ---------------------------------------------------------------------------
 // glGetError (opcode 115)
@@ -81,7 +19,7 @@ pub(crate) fn handle_get_error(seq: u16) -> Vec<u8> {
         #[cfg(not(feature = "osmesa"))]
         { 0u32 }
     };
-    GlxSingleReply::new_scalar(seq, err)
+    GlxReply::Scalar(err).encode(seq)
 }
 
 // ---------------------------------------------------------------------------
@@ -90,7 +28,7 @@ pub(crate) fn handle_get_error(seq: u16) -> Vec<u8> {
 
 pub(crate) fn handle_get_integerv(payload: &[u8], seq: u16) -> Vec<u8> {
     if payload.len() < 4 {
-        return glx_single_empty_reply(seq);
+        return GlxReply::Empty.encode(seq);
     }
     let pname = u32::from_le_bytes([payload[0], payload[1], payload[2], payload[3]]);
     let n: usize = gl_integer_count(pname);
@@ -101,8 +39,7 @@ pub(crate) fn handle_get_integerv(payload: &[u8], seq: u16) -> Vec<u8> {
             osmesa::gl_get_integerv(pname, &mut params);
         }
     }
-    let data: Vec<u8> = params.iter().flat_map(|v| v.to_le_bytes()).collect();
-    GlxSingleReply::new_array(seq, n as u32, &data)
+    GlxReply::from_i32s(&params).encode(seq)
 }
 
 // ---------------------------------------------------------------------------
@@ -111,7 +48,7 @@ pub(crate) fn handle_get_integerv(payload: &[u8], seq: u16) -> Vec<u8> {
 
 pub(crate) fn handle_get_floatv(payload: &[u8], seq: u16) -> Vec<u8> {
     if payload.len() < 4 {
-        return glx_single_empty_reply(seq);
+        return GlxReply::Empty.encode(seq);
     }
     let pname = u32::from_le_bytes([payload[0], payload[1], payload[2], payload[3]]);
     let n: usize = gl_float_count(pname);
@@ -122,8 +59,7 @@ pub(crate) fn handle_get_floatv(payload: &[u8], seq: u16) -> Vec<u8> {
             osmesa::gl_get_floatv(pname, &mut params);
         }
     }
-    let data: Vec<u8> = params.iter().flat_map(|v| v.to_le_bytes()).collect();
-    GlxSingleReply::new_array(seq, n as u32, &data)
+    GlxReply::from_f32s(&params).encode(seq)
 }
 
 // ---------------------------------------------------------------------------
@@ -132,7 +68,7 @@ pub(crate) fn handle_get_floatv(payload: &[u8], seq: u16) -> Vec<u8> {
 
 pub(crate) fn handle_get_doublev(payload: &[u8], seq: u16) -> Vec<u8> {
     if payload.len() < 4 {
-        return glx_single_empty_reply(seq);
+        return GlxReply::Empty.encode(seq);
     }
     let pname = u32::from_le_bytes([payload[0], payload[1], payload[2], payload[3]]);
     let n: usize = gl_float_count(pname);
@@ -143,8 +79,7 @@ pub(crate) fn handle_get_doublev(payload: &[u8], seq: u16) -> Vec<u8> {
             osmesa::gl_get_doublev(pname, &mut params);
         }
     }
-    let data: Vec<u8> = params.iter().flat_map(|v| v.to_le_bytes()).collect();
-    GlxSingleReply::new_array(seq, n as u32, &data)
+    GlxReply::from_f64s(&params).encode(seq)
 }
 
 // ---------------------------------------------------------------------------
@@ -153,7 +88,7 @@ pub(crate) fn handle_get_doublev(payload: &[u8], seq: u16) -> Vec<u8> {
 
 pub(crate) fn handle_get_booleanv(payload: &[u8], seq: u16) -> Vec<u8> {
     if payload.len() < 4 {
-        return glx_single_empty_reply(seq);
+        return GlxReply::Empty.encode(seq);
     }
     let pname = u32::from_le_bytes([payload[0], payload[1], payload[2], payload[3]]);
     let n: usize = gl_float_count(pname);
@@ -164,7 +99,7 @@ pub(crate) fn handle_get_booleanv(payload: &[u8], seq: u16) -> Vec<u8> {
             osmesa::gl_get_booleanv(pname, &mut params);
         }
     }
-    GlxSingleReply::new_array(seq, n as u32, &params)
+    GlxReply::from_bools(&params).encode(seq)
 }
 
 // ---------------------------------------------------------------------------
@@ -173,7 +108,7 @@ pub(crate) fn handle_get_booleanv(payload: &[u8], seq: u16) -> Vec<u8> {
 
 pub(crate) fn handle_get_string(payload: &[u8], seq: u16) -> Vec<u8> {
     if payload.len() < 4 {
-        return glx_single_empty_reply(seq);
+        return GlxReply::Empty.encode(seq);
     }
     let name = u32::from_le_bytes([payload[0], payload[1], payload[2], payload[3]]);
     let s = {
@@ -192,7 +127,7 @@ pub(crate) fn handle_get_string(payload: &[u8], seq: u16) -> Vec<u8> {
     };
     let bytes = s.as_bytes();
     let n = bytes.len() as u32;
-    GlxSingleReply::new_array(seq, n, bytes)
+    GlxReply::from_bytes(n, bytes.to_vec()).encode(seq)
 }
 
 // ---------------------------------------------------------------------------
@@ -201,7 +136,7 @@ pub(crate) fn handle_get_string(payload: &[u8], seq: u16) -> Vec<u8> {
 
 pub(crate) fn handle_is_enabled(payload: &[u8], seq: u16) -> Vec<u8> {
     if payload.len() < 4 {
-        return glx_single_empty_reply(seq);
+        return GlxReply::Empty.encode(seq);
     }
     let cap = u32::from_le_bytes([payload[0], payload[1], payload[2], payload[3]]);
     let enabled: u32 = {
@@ -222,7 +157,7 @@ pub(crate) fn handle_is_enabled(payload: &[u8], seq: u16) -> Vec<u8> {
             0
         }
     };
-    GlxSingleReply::new_scalar(seq, enabled)
+    GlxReply::Scalar(enabled).encode(seq)
 }
 
 // ---------------------------------------------------------------------------
@@ -231,7 +166,7 @@ pub(crate) fn handle_is_enabled(payload: &[u8], seq: u16) -> Vec<u8> {
 
 pub(crate) fn handle_is_texture(payload: &[u8], seq: u16) -> Vec<u8> {
     if payload.len() < 4 {
-        return glx_single_empty_reply(seq);
+        return GlxReply::Empty.encode(seq);
     }
     let texture = u32::from_le_bytes([payload[0], payload[1], payload[2], payload[3]]);
     let result: u32 = {
@@ -252,7 +187,7 @@ pub(crate) fn handle_is_texture(payload: &[u8], seq: u16) -> Vec<u8> {
             0
         }
     };
-    GlxSingleReply::new_scalar(seq, result)
+    GlxReply::Scalar(result).encode(seq)
 }
 
 // ---------------------------------------------------------------------------
@@ -261,7 +196,7 @@ pub(crate) fn handle_is_texture(payload: &[u8], seq: u16) -> Vec<u8> {
 
 pub(crate) fn handle_gen_textures(payload: &[u8], seq: u16) -> Vec<u8> {
     if payload.len() < 4 {
-        return glx_single_empty_reply(seq);
+        return GlxReply::Empty.encode(seq);
     }
     let n = i32::from_le_bytes([payload[0], payload[1], payload[2], payload[3]]);
     let n = n.max(0) as usize;
@@ -272,8 +207,7 @@ pub(crate) fn handle_gen_textures(payload: &[u8], seq: u16) -> Vec<u8> {
             osmesa::gl_gen_textures(n as i32, &mut textures);
         }
     }
-    let data: Vec<u8> = textures.iter().flat_map(|v| v.to_le_bytes()).collect();
-    GlxSingleReply::new_array(seq, n as u32, &data)
+    GlxReply::from_u32s(&textures).encode(seq)
 }
 
 // ---------------------------------------------------------------------------
@@ -282,7 +216,7 @@ pub(crate) fn handle_gen_textures(payload: &[u8], seq: u16) -> Vec<u8> {
 
 pub(crate) fn handle_get_tex_parameteriv(payload: &[u8], seq: u16) -> Vec<u8> {
     if payload.len() < 8 {
-        return glx_single_empty_reply(seq);
+        return GlxReply::Empty.encode(seq);
     }
     let target = u32::from_le_bytes([payload[0], payload[1], payload[2], payload[3]]);
     let pname = u32::from_le_bytes([payload[4], payload[5], payload[6], payload[7]]);
@@ -294,8 +228,7 @@ pub(crate) fn handle_get_tex_parameteriv(payload: &[u8], seq: u16) -> Vec<u8> {
             osmesa::gl_get_tex_parameteriv(target, pname, &mut params);
         }
     }
-    let data: Vec<u8> = params.iter().flat_map(|v| v.to_le_bytes()).collect();
-    GlxSingleReply::new_array(seq, n as u32, &data)
+    GlxReply::from_i32s(&params).encode(seq)
 }
 
 // ---------------------------------------------------------------------------
@@ -304,7 +237,7 @@ pub(crate) fn handle_get_tex_parameteriv(payload: &[u8], seq: u16) -> Vec<u8> {
 
 pub(crate) fn handle_get_tex_parameterfv(payload: &[u8], seq: u16) -> Vec<u8> {
     if payload.len() < 8 {
-        return glx_single_empty_reply(seq);
+        return GlxReply::Empty.encode(seq);
     }
     let target = u32::from_le_bytes([payload[0], payload[1], payload[2], payload[3]]);
     let pname = u32::from_le_bytes([payload[4], payload[5], payload[6], payload[7]]);
@@ -316,8 +249,7 @@ pub(crate) fn handle_get_tex_parameterfv(payload: &[u8], seq: u16) -> Vec<u8> {
             osmesa::gl_get_tex_parameterfv(target, pname, &mut params);
         }
     }
-    let data: Vec<u8> = params.iter().flat_map(|v| v.to_le_bytes()).collect();
-    GlxSingleReply::new_array(seq, n as u32, &data)
+    GlxReply::from_f32s(&params).encode(seq)
 }
 
 // ---------------------------------------------------------------------------
@@ -326,7 +258,7 @@ pub(crate) fn handle_get_tex_parameterfv(payload: &[u8], seq: u16) -> Vec<u8> {
 
 pub(crate) fn handle_get_tex_level_parameteriv(payload: &[u8], seq: u16) -> Vec<u8> {
     if payload.len() < 12 {
-        return glx_single_empty_reply(seq);
+        return GlxReply::Empty.encode(seq);
     }
     let target = u32::from_le_bytes([payload[0], payload[1], payload[2], payload[3]]);
     let level = i32::from_le_bytes([payload[4], payload[5], payload[6], payload[7]]);
@@ -339,8 +271,7 @@ pub(crate) fn handle_get_tex_level_parameteriv(payload: &[u8], seq: u16) -> Vec<
             osmesa::gl_get_tex_level_parameteriv(target, level, pname, &mut params);
         }
     }
-    let data: Vec<u8> = params.iter().flat_map(|v| v.to_le_bytes()).collect();
-    GlxSingleReply::new_array(seq, n as u32, &data)
+    GlxReply::from_i32s(&params).encode(seq)
 }
 
 // ---------------------------------------------------------------------------
@@ -349,7 +280,7 @@ pub(crate) fn handle_get_tex_level_parameteriv(payload: &[u8], seq: u16) -> Vec<
 
 pub(crate) fn handle_get_tex_level_parameterfv(payload: &[u8], seq: u16) -> Vec<u8> {
     if payload.len() < 12 {
-        return glx_single_empty_reply(seq);
+        return GlxReply::Empty.encode(seq);
     }
     let target = u32::from_le_bytes([payload[0], payload[1], payload[2], payload[3]]);
     let level = i32::from_le_bytes([payload[4], payload[5], payload[6], payload[7]]);
@@ -362,8 +293,7 @@ pub(crate) fn handle_get_tex_level_parameterfv(payload: &[u8], seq: u16) -> Vec<
             osmesa::gl_get_tex_level_parameterfv(target, level, pname, &mut params);
         }
     }
-    let data: Vec<u8> = params.iter().flat_map(|v| v.to_le_bytes()).collect();
-    GlxSingleReply::new_array(seq, n as u32, &data)
+    GlxReply::from_f32s(&params).encode(seq)
 }
 
 // ---------------------------------------------------------------------------
@@ -372,7 +302,7 @@ pub(crate) fn handle_get_tex_level_parameterfv(payload: &[u8], seq: u16) -> Vec<
 
 pub(crate) fn handle_get_tex_image(payload: &[u8], seq: u16) -> Vec<u8> {
     if payload.len() < 16 {
-        return glx_single_empty_reply(seq);
+        return GlxReply::Empty.encode(seq);
     }
     let target = u32::from_le_bytes([payload[0], payload[1], payload[2], payload[3]]);
     let level = i32::from_le_bytes([payload[4], payload[5], payload[6], payload[7]]);
@@ -401,7 +331,7 @@ pub(crate) fn handle_get_tex_image(payload: &[u8], seq: u16) -> Vec<u8> {
     let type_size = gl_type_size(type_);
     let image_size = (width.max(0) as usize) * (height.max(0) as usize) * components * type_size;
     if image_size == 0 {
-        return glx_single_empty_reply(seq);
+        return GlxReply::Empty.encode(seq);
     }
     let mut pixels = vec![0u8; image_size];
     #[cfg(feature = "osmesa")]
@@ -410,7 +340,7 @@ pub(crate) fn handle_get_tex_image(payload: &[u8], seq: u16) -> Vec<u8> {
             osmesa::gl_get_tex_image(target, level, format, type_, &mut pixels);
         }
     }
-    GlxSingleReply::new_array(seq, image_size as u32, &pixels)
+    GlxReply::from_bytes(image_size as u32, pixels).encode(seq)
 }
 
 // ---------------------------------------------------------------------------
@@ -419,7 +349,7 @@ pub(crate) fn handle_get_tex_image(payload: &[u8], seq: u16) -> Vec<u8> {
 
 pub(crate) fn handle_get_lightfv(payload: &[u8], seq: u16) -> Vec<u8> {
     if payload.len() < 8 {
-        return glx_single_empty_reply(seq);
+        return GlxReply::Empty.encode(seq);
     }
     let light = u32::from_le_bytes([payload[0], payload[1], payload[2], payload[3]]);
     let pname = u32::from_le_bytes([payload[4], payload[5], payload[6], payload[7]]);
@@ -431,8 +361,7 @@ pub(crate) fn handle_get_lightfv(payload: &[u8], seq: u16) -> Vec<u8> {
             osmesa::gl_get_lightfv(light, pname, &mut params);
         }
     }
-    let data: Vec<u8> = params.iter().flat_map(|v| v.to_le_bytes()).collect();
-    GlxSingleReply::new_array(seq, n as u32, &data)
+    GlxReply::from_f32s(&params).encode(seq)
 }
 
 // ---------------------------------------------------------------------------
@@ -441,7 +370,7 @@ pub(crate) fn handle_get_lightfv(payload: &[u8], seq: u16) -> Vec<u8> {
 
 pub(crate) fn handle_get_lightiv(payload: &[u8], seq: u16) -> Vec<u8> {
     if payload.len() < 8 {
-        return glx_single_empty_reply(seq);
+        return GlxReply::Empty.encode(seq);
     }
     let light = u32::from_le_bytes([payload[0], payload[1], payload[2], payload[3]]);
     let pname = u32::from_le_bytes([payload[4], payload[5], payload[6], payload[7]]);
@@ -453,8 +382,7 @@ pub(crate) fn handle_get_lightiv(payload: &[u8], seq: u16) -> Vec<u8> {
             osmesa::gl_get_lightiv(light, pname, &mut params);
         }
     }
-    let data: Vec<u8> = params.iter().flat_map(|v| v.to_le_bytes()).collect();
-    GlxSingleReply::new_array(seq, n as u32, &data)
+    GlxReply::from_i32s(&params).encode(seq)
 }
 
 // ---------------------------------------------------------------------------
@@ -463,7 +391,7 @@ pub(crate) fn handle_get_lightiv(payload: &[u8], seq: u16) -> Vec<u8> {
 
 pub(crate) fn handle_get_materialfv(payload: &[u8], seq: u16) -> Vec<u8> {
     if payload.len() < 8 {
-        return glx_single_empty_reply(seq);
+        return GlxReply::Empty.encode(seq);
     }
     let face = u32::from_le_bytes([payload[0], payload[1], payload[2], payload[3]]);
     let pname = u32::from_le_bytes([payload[4], payload[5], payload[6], payload[7]]);
@@ -475,8 +403,7 @@ pub(crate) fn handle_get_materialfv(payload: &[u8], seq: u16) -> Vec<u8> {
             osmesa::gl_get_materialfv(face, pname, &mut params);
         }
     }
-    let data: Vec<u8> = params.iter().flat_map(|v| v.to_le_bytes()).collect();
-    GlxSingleReply::new_array(seq, n as u32, &data)
+    GlxReply::from_f32s(&params).encode(seq)
 }
 
 // ---------------------------------------------------------------------------
@@ -485,7 +412,7 @@ pub(crate) fn handle_get_materialfv(payload: &[u8], seq: u16) -> Vec<u8> {
 
 pub(crate) fn handle_get_materialiv(payload: &[u8], seq: u16) -> Vec<u8> {
     if payload.len() < 8 {
-        return glx_single_empty_reply(seq);
+        return GlxReply::Empty.encode(seq);
     }
     let face = u32::from_le_bytes([payload[0], payload[1], payload[2], payload[3]]);
     let pname = u32::from_le_bytes([payload[4], payload[5], payload[6], payload[7]]);
@@ -497,8 +424,7 @@ pub(crate) fn handle_get_materialiv(payload: &[u8], seq: u16) -> Vec<u8> {
             osmesa::gl_get_materialiv(face, pname, &mut params);
         }
     }
-    let data: Vec<u8> = params.iter().flat_map(|v| v.to_le_bytes()).collect();
-    GlxSingleReply::new_array(seq, n as u32, &data)
+    GlxReply::from_i32s(&params).encode(seq)
 }
 
 // ---------------------------------------------------------------------------
@@ -507,7 +433,7 @@ pub(crate) fn handle_get_materialiv(payload: &[u8], seq: u16) -> Vec<u8> {
 
 pub(crate) fn handle_get_tex_envfv(payload: &[u8], seq: u16) -> Vec<u8> {
     if payload.len() < 8 {
-        return glx_single_empty_reply(seq);
+        return GlxReply::Empty.encode(seq);
     }
     let target = u32::from_le_bytes([payload[0], payload[1], payload[2], payload[3]]);
     let pname = u32::from_le_bytes([payload[4], payload[5], payload[6], payload[7]]);
@@ -519,8 +445,7 @@ pub(crate) fn handle_get_tex_envfv(payload: &[u8], seq: u16) -> Vec<u8> {
             osmesa::gl_get_tex_envfv(target, pname, &mut params);
         }
     }
-    let data: Vec<u8> = params.iter().flat_map(|v| v.to_le_bytes()).collect();
-    GlxSingleReply::new_array(seq, n as u32, &data)
+    GlxReply::from_f32s(&params).encode(seq)
 }
 
 // ---------------------------------------------------------------------------
@@ -529,7 +454,7 @@ pub(crate) fn handle_get_tex_envfv(payload: &[u8], seq: u16) -> Vec<u8> {
 
 pub(crate) fn handle_get_tex_enviv(payload: &[u8], seq: u16) -> Vec<u8> {
     if payload.len() < 8 {
-        return glx_single_empty_reply(seq);
+        return GlxReply::Empty.encode(seq);
     }
     let target = u32::from_le_bytes([payload[0], payload[1], payload[2], payload[3]]);
     let pname = u32::from_le_bytes([payload[4], payload[5], payload[6], payload[7]]);
@@ -541,8 +466,7 @@ pub(crate) fn handle_get_tex_enviv(payload: &[u8], seq: u16) -> Vec<u8> {
             osmesa::gl_get_tex_enviv(target, pname, &mut params);
         }
     }
-    let data: Vec<u8> = params.iter().flat_map(|v| v.to_le_bytes()).collect();
-    GlxSingleReply::new_array(seq, n as u32, &data)
+    GlxReply::from_i32s(&params).encode(seq)
 }
 
 // ---------------------------------------------------------------------------
@@ -551,7 +475,7 @@ pub(crate) fn handle_get_tex_enviv(payload: &[u8], seq: u16) -> Vec<u8> {
 
 pub(crate) fn handle_get_tex_gendv(payload: &[u8], seq: u16) -> Vec<u8> {
     if payload.len() < 8 {
-        return glx_single_empty_reply(seq);
+        return GlxReply::Empty.encode(seq);
     }
     let coord = u32::from_le_bytes([payload[0], payload[1], payload[2], payload[3]]);
     let pname = u32::from_le_bytes([payload[4], payload[5], payload[6], payload[7]]);
@@ -563,8 +487,7 @@ pub(crate) fn handle_get_tex_gendv(payload: &[u8], seq: u16) -> Vec<u8> {
             osmesa::gl_get_tex_gendv(coord, pname, &mut params);
         }
     }
-    let data: Vec<u8> = params.iter().flat_map(|v| v.to_le_bytes()).collect();
-    GlxSingleReply::new_array(seq, n as u32, &data)
+    GlxReply::from_f64s(&params).encode(seq)
 }
 
 // ---------------------------------------------------------------------------
@@ -573,7 +496,7 @@ pub(crate) fn handle_get_tex_gendv(payload: &[u8], seq: u16) -> Vec<u8> {
 
 pub(crate) fn handle_get_tex_genfv(payload: &[u8], seq: u16) -> Vec<u8> {
     if payload.len() < 8 {
-        return glx_single_empty_reply(seq);
+        return GlxReply::Empty.encode(seq);
     }
     let coord = u32::from_le_bytes([payload[0], payload[1], payload[2], payload[3]]);
     let pname = u32::from_le_bytes([payload[4], payload[5], payload[6], payload[7]]);
@@ -585,8 +508,7 @@ pub(crate) fn handle_get_tex_genfv(payload: &[u8], seq: u16) -> Vec<u8> {
             osmesa::gl_get_tex_genfv(coord, pname, &mut params);
         }
     }
-    let data: Vec<u8> = params.iter().flat_map(|v| v.to_le_bytes()).collect();
-    GlxSingleReply::new_array(seq, n as u32, &data)
+    GlxReply::from_f32s(&params).encode(seq)
 }
 
 // ---------------------------------------------------------------------------
@@ -595,7 +517,7 @@ pub(crate) fn handle_get_tex_genfv(payload: &[u8], seq: u16) -> Vec<u8> {
 
 pub(crate) fn handle_get_tex_geniv(payload: &[u8], seq: u16) -> Vec<u8> {
     if payload.len() < 8 {
-        return glx_single_empty_reply(seq);
+        return GlxReply::Empty.encode(seq);
     }
     let coord = u32::from_le_bytes([payload[0], payload[1], payload[2], payload[3]]);
     let pname = u32::from_le_bytes([payload[4], payload[5], payload[6], payload[7]]);
@@ -607,8 +529,7 @@ pub(crate) fn handle_get_tex_geniv(payload: &[u8], seq: u16) -> Vec<u8> {
             osmesa::gl_get_tex_geniv(coord, pname, &mut params);
         }
     }
-    let data: Vec<u8> = params.iter().flat_map(|v| v.to_le_bytes()).collect();
-    GlxSingleReply::new_array(seq, n as u32, &data)
+    GlxReply::from_i32s(&params).encode(seq)
 }
 
 // ---------------------------------------------------------------------------
@@ -617,7 +538,7 @@ pub(crate) fn handle_get_tex_geniv(payload: &[u8], seq: u16) -> Vec<u8> {
 
 pub(crate) fn handle_get_pixel_mapfv(payload: &[u8], seq: u16) -> Vec<u8> {
     if payload.len() < 4 {
-        return glx_single_empty_reply(seq);
+        return GlxReply::Empty.encode(seq);
     }
     let map = u32::from_le_bytes([payload[0], payload[1], payload[2], payload[3]]);
     // Query the map size first via glGetIntegerv on the corresponding GL_PIXEL_MAP_*_SIZE
@@ -645,8 +566,7 @@ pub(crate) fn handle_get_pixel_mapfv(payload: &[u8], seq: u16) -> Vec<u8> {
             osmesa::gl_get_pixel_mapfv(map, &mut values);
         }
     }
-    let data: Vec<u8> = values.iter().flat_map(|v| v.to_le_bytes()).collect();
-    GlxSingleReply::new_array(seq, n as u32, &data)
+    GlxReply::from_f32s(&values).encode(seq)
 }
 
 // ---------------------------------------------------------------------------
@@ -655,7 +575,7 @@ pub(crate) fn handle_get_pixel_mapfv(payload: &[u8], seq: u16) -> Vec<u8> {
 
 pub(crate) fn handle_get_clip_plane(payload: &[u8], seq: u16) -> Vec<u8> {
     if payload.len() < 4 {
-        return glx_single_empty_reply(seq);
+        return GlxReply::Empty.encode(seq);
     }
     let plane = u32::from_le_bytes([payload[0], payload[1], payload[2], payload[3]]);
     let mut equation = [0f64; 4];
@@ -665,8 +585,7 @@ pub(crate) fn handle_get_clip_plane(payload: &[u8], seq: u16) -> Vec<u8> {
             osmesa::gl_get_clip_plane(plane, &mut equation);
         }
     }
-    let data: Vec<u8> = equation.iter().flat_map(|v| v.to_le_bytes()).collect();
-    GlxSingleReply::new_array(seq, 4, &data)
+    GlxReply::from_f64s(&equation).encode(seq)
 }
 
 // ---------------------------------------------------------------------------
@@ -681,7 +600,7 @@ pub(crate) fn handle_get_polygon_stipple(seq: u16) -> Vec<u8> {
             osmesa::gl_get_polygon_stipple(&mut mask);
         }
     }
-    GlxSingleReply::new_array(seq, 128, &mask)
+    GlxReply::from_bytes(128, mask.to_vec()).encode(seq)
 }
 
 // ---------------------------------------------------------------------------
@@ -690,7 +609,7 @@ pub(crate) fn handle_get_polygon_stipple(seq: u16) -> Vec<u8> {
 
 pub(crate) fn handle_gen_lists(payload: &[u8], seq: u16) -> Vec<u8> {
     if payload.len() < 4 {
-        return glx_single_empty_reply(seq);
+        return GlxReply::Empty.encode(seq);
     }
     let range = i32::from_le_bytes([payload[0], payload[1], payload[2], payload[3]]);
     let result: u32 = {
@@ -707,7 +626,7 @@ pub(crate) fn handle_gen_lists(payload: &[u8], seq: u16) -> Vec<u8> {
             0
         }
     };
-    GlxSingleReply::new_scalar(seq, result)
+    GlxReply::Scalar(result).encode(seq)
 }
 
 // ---------------------------------------------------------------------------
@@ -716,7 +635,7 @@ pub(crate) fn handle_gen_lists(payload: &[u8], seq: u16) -> Vec<u8> {
 
 pub(crate) fn handle_is_list(payload: &[u8], seq: u16) -> Vec<u8> {
     if payload.len() < 4 {
-        return glx_single_empty_reply(seq);
+        return GlxReply::Empty.encode(seq);
     }
     let list = u32::from_le_bytes([payload[0], payload[1], payload[2], payload[3]]);
     let result: u32 = {
@@ -737,7 +656,7 @@ pub(crate) fn handle_is_list(payload: &[u8], seq: u16) -> Vec<u8> {
             0
         }
     };
-    GlxSingleReply::new_scalar(seq, result)
+    GlxReply::Scalar(result).encode(seq)
 }
 
 // ---------------------------------------------------------------------------

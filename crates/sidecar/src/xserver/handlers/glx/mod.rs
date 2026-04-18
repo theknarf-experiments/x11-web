@@ -18,6 +18,7 @@ mod drawable;
 pub(crate) mod opcodes;
 mod query;
 mod render;
+pub(crate) mod reply;
 mod single_ops;
 mod single_query;
 

@@ -336,16 +336,9 @@ pub(crate) fn handle_glx_single(state: &mut ClientState, data: &[u8], seq: u16) 
 
         _ => {
             debug!("Unhandled GLX single opcode: {gl_opcode}");
-            glx_single_empty_reply(seq)
+            super::reply::GlxReply::Empty.encode(seq)
         }
     }
-}
-
-pub(crate) fn glx_single_empty_reply(seq: u16) -> Vec<u8> {
-    let mut reply = [0u8; 32];
-    reply[0] = 1;
-    reply[2..4].copy_from_slice(&seq.to_le_bytes());
-    reply.to_vec()
 }
 
 // ---------------------------------------------------------------------------
@@ -355,7 +348,7 @@ pub(crate) fn glx_single_empty_reply(seq: u16) -> Vec<u8> {
 pub(crate) fn handle_vendor_private_with_reply(data: &[u8], seq: u16) -> Vec<u8> {
     // Wire: major(1) minor=17(1) req_len(2) vendor_code(4) context_tag(4) payload(...)
     if data.len() < 12 {
-        return glx_single_empty_reply(seq);
+        return super::reply::GlxReply::Empty.encode(seq);
     }
     let vendor_code = u32::from_le_bytes([data[4], data[5], data[6], data[7]]);
 
@@ -373,7 +366,7 @@ pub(crate) fn handle_vendor_private_with_reply(data: &[u8], seq: u16) -> Vec<u8>
         }
         _ => {
             debug!("Unhandled GLX vendor private with reply: {vendor_code}");
-            glx_single_empty_reply(seq)
+            super::reply::GlxReply::Empty.encode(seq)
         }
     }
 }

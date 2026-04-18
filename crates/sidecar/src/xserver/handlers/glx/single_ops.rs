@@ -4,7 +4,7 @@
 #[cfg(feature = "osmesa")]
 use crate::osmesa;
 
-use super::context::glx_single_empty_reply;
+use super::reply::GlxReply;
 
 // ---------------------------------------------------------------------------
 // glDeleteLists (opcode 103)
@@ -21,7 +21,7 @@ pub(crate) fn handle_delete_lists(payload: &[u8], seq: u16) -> Vec<u8> {
             }
         }
     }
-    glx_single_empty_reply(seq)
+    GlxReply::Empty.encode(seq)
 }
 
 // ---------------------------------------------------------------------------
@@ -30,7 +30,7 @@ pub(crate) fn handle_delete_lists(payload: &[u8], seq: u16) -> Vec<u8> {
 
 pub(crate) fn handle_render_mode(payload: &[u8], seq: u16) -> Vec<u8> {
     if payload.len() < 4 {
-        return glx_single_empty_reply(seq);
+        return GlxReply::Empty.encode(seq);
     }
     let mode = u32::from_le_bytes([payload[0], payload[1], payload[2], payload[3]]);
     let result: i32 = {
@@ -65,7 +65,7 @@ pub(crate) fn handle_finish(seq: u16) -> Vec<u8> {
             osmesa::gl_finish();
         }
     }
-    glx_single_empty_reply(seq)
+    GlxReply::Empty.encode(seq)
 }
 
 // ---------------------------------------------------------------------------
@@ -74,7 +74,7 @@ pub(crate) fn handle_finish(seq: u16) -> Vec<u8> {
 
 pub(crate) fn handle_pixel_storef(payload: &[u8], seq: u16) -> Vec<u8> {
     if payload.len() < 8 {
-        return glx_single_empty_reply(seq);
+        return GlxReply::Empty.encode(seq);
     }
     let pname = u32::from_le_bytes([payload[0], payload[1], payload[2], payload[3]]);
     let param = f32::from_le_bytes([payload[4], payload[5], payload[6], payload[7]]);
@@ -84,7 +84,7 @@ pub(crate) fn handle_pixel_storef(payload: &[u8], seq: u16) -> Vec<u8> {
             osmesa::gl_pixel_storef(pname, param);
         }
     }
-    glx_single_empty_reply(seq)
+    GlxReply::Empty.encode(seq)
 }
 
 // ---------------------------------------------------------------------------
@@ -93,7 +93,7 @@ pub(crate) fn handle_pixel_storef(payload: &[u8], seq: u16) -> Vec<u8> {
 
 pub(crate) fn handle_pixel_storei(payload: &[u8], seq: u16) -> Vec<u8> {
     if payload.len() < 8 {
-        return glx_single_empty_reply(seq);
+        return GlxReply::Empty.encode(seq);
     }
     let pname = u32::from_le_bytes([payload[0], payload[1], payload[2], payload[3]]);
     let param = i32::from_le_bytes([payload[4], payload[5], payload[6], payload[7]]);
@@ -103,7 +103,7 @@ pub(crate) fn handle_pixel_storei(payload: &[u8], seq: u16) -> Vec<u8> {
             osmesa::gl_pixel_storei(pname, param);
         }
     }
-    glx_single_empty_reply(seq)
+    GlxReply::Empty.encode(seq)
 }
 
 // ---------------------------------------------------------------------------
@@ -112,12 +112,12 @@ pub(crate) fn handle_pixel_storei(payload: &[u8], seq: u16) -> Vec<u8> {
 
 pub(crate) fn handle_are_textures_resident(payload: &[u8], seq: u16) -> Vec<u8> {
     if payload.len() < 4 {
-        return glx_single_empty_reply(seq);
+        return GlxReply::Empty.encode(seq);
     }
     let n = i32::from_le_bytes([payload[0], payload[1], payload[2], payload[3]]);
     let n = n.max(0) as usize;
     if payload.len() < 4 + n * 4 {
-        return glx_single_empty_reply(seq);
+        return GlxReply::Empty.encode(seq);
     }
     let textures: Vec<u32> = (0..n)
         .map(|i| {
@@ -165,7 +165,7 @@ pub(crate) fn handle_are_textures_resident(payload: &[u8], seq: u16) -> Vec<u8> 
 
 pub(crate) fn handle_delete_textures(payload: &[u8], seq: u16) -> Vec<u8> {
     if payload.len() < 4 {
-        return glx_single_empty_reply(seq);
+        return GlxReply::Empty.encode(seq);
     }
     let n = i32::from_le_bytes([payload[0], payload[1], payload[2], payload[3]]);
     let n = n.max(0) as usize;
@@ -188,5 +188,5 @@ pub(crate) fn handle_delete_textures(payload: &[u8], seq: u16) -> Vec<u8> {
             }
         }
     }
-    glx_single_empty_reply(seq)
+    GlxReply::Empty.encode(seq)
 }
