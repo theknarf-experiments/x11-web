@@ -2,6 +2,7 @@
 
 use super::*;
 use crate::xserver::core::require_len;
+use crate::xserver::reply::ReplyBuf;
 
 // ---------------------------------------------------------------------------
 // Opcode 104: Bell
@@ -76,18 +77,16 @@ pub(crate) fn handle_query_pointer(state: &mut ClientState, data: &[u8], seq: u1
     // Build modifier/button mask: low byte = keyboard modifiers, bits 8-12 = buttons 1-5
     let mask = state.xkb_state.effective_mods() as u16 | state.pointer_button_mask;
 
-    let mut reply = [0u8; 32];
-    reply[0] = 1;
-    reply[1] = 1; // same_screen
-    state.write_u16(&mut reply, 2, seq);
-    state.write_u32(&mut reply, 8, state.root_window); // root
-    state.write_u32(&mut reply, 12, child); // child
-    state.write_i16(&mut reply, 16, state.pointer_x); // root_x
-    state.write_i16(&mut reply, 18, state.pointer_y); // root_y
-    state.write_i16(&mut reply, 20, win_x); // win_x
-    state.write_i16(&mut reply, 22, win_y); // win_y
-    state.write_u16(&mut reply, 24, mask); // mask
-    reply.to_vec()
+    ReplyBuf::fixed(seq, state.msb_first)
+        .set_data_byte(1) // same_screen
+        .set_u32(8, state.root_window)
+        .set_u32(12, child)
+        .set_i16(16, state.pointer_x)
+        .set_i16(18, state.pointer_y)
+        .set_i16(20, win_x)
+        .set_i16(22, win_y)
+        .set_u16(24, mask)
+        .build()
 }
 
 // ---------------------------------------------------------------------------
@@ -114,20 +113,15 @@ pub(crate) fn handle_get_motion_events(state: &mut ClientState, data: &[u8], seq
     // Each motion event is 8 bytes: timestamp(4) + x(2) + y(2)
     let data_bytes = n_events as usize * 8;
     let data_padded = (data_bytes + 3) & !3;
-    let mut reply = vec![0u8; 32 + data_padded];
-    reply[0] = 1;
-    state.write_u16(&mut reply, 2, seq);
-    state.write_u32(&mut reply, 4, (data_padded / 4) as u32);
-    state.write_u32(&mut reply, 8, n_events);
+    let mut reply = ReplyBuf::with_extra(seq, data_padded, state.msb_first)
+        .set_u32(8, n_events);
 
     for (i, (ts, x, y)) in events.iter().enumerate() {
         let off = 32 + i * 8;
-        state.write_u32(&mut reply, off, *ts);
-        state.write_i16(&mut reply, off + 4, *x);
-        state.write_i16(&mut reply, off + 6, *y);
+        reply = reply.set_u32(off, *ts).set_i16(off + 4, *x).set_i16(off + 6, *y);
     }
 
-    reply
+    reply.build()
 }
 
 // ---------------------------------------------------------------------------
@@ -199,14 +193,12 @@ pub(crate) fn handle_translate_coordinates(
         .map(|w| w.id)
         .unwrap_or(0);
 
-    let mut reply = [0u8; 32];
-    reply[0] = 1;
-    reply[1] = 1; // same_screen
-    state.write_u16(&mut reply, 2, seq);
-    state.write_u32(&mut reply, 8, child);
-    state.write_i16(&mut reply, 12, dst_x);
-    state.write_i16(&mut reply, 14, dst_y);
-    reply.to_vec()
+    ReplyBuf::fixed(seq, state.msb_first)
+        .set_data_byte(1) // same_screen
+        .set_u32(8, child)
+        .set_i16(12, dst_x)
+        .set_i16(14, dst_y)
+        .build()
 }
 
 // ---------------------------------------------------------------------------
@@ -393,12 +385,10 @@ pub(crate) fn handle_set_input_focus(state: &mut ClientState, data: &[u8]) -> Ve
 // ---------------------------------------------------------------------------
 
 pub(crate) fn handle_get_input_focus(state: &mut ClientState, _data: &[u8], seq: u16) -> Vec<u8> {
-    let mut reply = [0u8; 32];
-    reply[0] = 1;
-    reply[1] = state.focus_revert_to;
-    state.write_u16(&mut reply, 2, seq);
-    state.write_u32(&mut reply, 8, state.focus_window);
-    reply.to_vec()
+    ReplyBuf::fixed(seq, state.msb_first)
+        .set_data_byte(state.focus_revert_to)
+        .set_u32(8, state.focus_window)
+        .build()
 }
 
 // ---------------------------------------------------------------------------
@@ -407,13 +397,9 @@ pub(crate) fn handle_get_input_focus(state: &mut ClientState, _data: &[u8], seq:
 
 pub(crate) fn handle_query_keymap(state: &ClientState, seq: u16) -> Vec<u8> {
     // Return actual pressed keys state
-    let mut reply = [0u8; 40]; // 32 + 8 bytes of keymap
-    reply[0] = 1;
-    state.write_u16(&mut reply, 2, seq);
-    state.write_u32(&mut reply, 4, 2u32); // length = 2 (8 extra bytes)
-                                          // Copy the pressed_keys bitmap into the reply
-    reply[32..40].copy_from_slice(&state.pressed_keys[0..8]);
-    reply.to_vec()
+    ReplyBuf::with_extra(seq, 8, state.msb_first)
+        .set_bytes(32, &state.pressed_keys[0..8])
+        .build()
 }
 
 // ---------------------------------------------------------------------------
@@ -496,12 +482,10 @@ pub(crate) fn handle_get_keyboard_mapping(state: &ClientState, data: &[u8], seq:
         .unwrap_or(0);
     let keysyms_per_keycode = max_custom.max(4) as u8;
     let total_syms = count as u32 * keysyms_per_keycode as u32;
-    let reply_len = 32 + total_syms as usize * 4;
-    let mut reply = vec![0u8; reply_len];
-    reply[0] = 1; // Reply
-    reply[1] = keysyms_per_keycode;
-    state.write_u16(&mut reply, 2, seq);
-    state.write_u32(&mut reply, 4, total_syms);
+    let extra_bytes = total_syms as usize * 4;
+
+    let mut reply = ReplyBuf::with_extra(seq, extra_bytes, state.msb_first)
+        .set_data_byte(keysyms_per_keycode);
 
     for i in 0..count as usize {
         let keycode = first_keycode.wrapping_add(i as u8);
@@ -511,19 +495,18 @@ pub(crate) fn handle_get_keyboard_mapping(state: &ClientState, data: &[u8], seq:
             // Use the custom mapping set by ChangeKeyboardMapping
             for (j, &sym) in custom_syms.iter().enumerate() {
                 if j < keysyms_per_keycode as usize {
-                    state.write_u32(&mut reply, offset + j * 4, sym);
+                    reply = reply.set_u32(offset + j * 4, sym);
                 }
             }
         } else {
             // Fall back to built-in US layout
             let (normal, shifted) = keycode_to_keysym(keycode);
-            state.write_u32(&mut reply, offset, normal);
-            state.write_u32(&mut reply, offset + 4, shifted);
+            reply = reply.set_u32(offset, normal).set_u32(offset + 4, shifted);
             // Remaining slots (mode switch, mode+shift) left as 0 (NoSymbol)
         }
     }
 
-    reply
+    reply.build()
 }
 
 // ---------------------------------------------------------------------------
@@ -620,19 +603,15 @@ pub(crate) fn handle_change_keyboard_control(state: &mut ClientState, data: &[u8
 
 pub(crate) fn handle_get_keyboard_control(state: &ClientState, seq: u16) -> Vec<u8> {
     let kc = &state.keyboard_control;
-    let mut reply = [0u8; 52]; // 32 + 20 extra
-    reply[0] = 1;
-    reply[1] = kc.global_auto_repeat;
-    state.write_u16(&mut reply, 2, seq);
-    state.write_u32(&mut reply, 4, 5u32); // length = 5 (20 extra bytes)
-    state.write_u32(&mut reply, 8, kc.led_mask);
-    reply[12] = kc.key_click_percent;
-    reply[13] = kc.bell_percent;
-    state.write_u16(&mut reply, 14, kc.bell_pitch);
-    state.write_u16(&mut reply, 16, kc.bell_duration);
-    // auto_repeats: 32 bytes at offset 20
-    reply[20..52].copy_from_slice(&kc.auto_repeats);
-    reply.to_vec()
+    ReplyBuf::with_extra(seq, 20, state.msb_first)
+        .set_data_byte(kc.global_auto_repeat)
+        .set_u32(8, kc.led_mask)
+        .set_u8(12, kc.key_click_percent)
+        .set_u8(13, kc.bell_percent)
+        .set_u16(14, kc.bell_pitch)
+        .set_u16(16, kc.bell_duration)
+        .set_bytes(20, &kc.auto_repeats)
+        .build()
 }
 
 // ---------------------------------------------------------------------------
@@ -669,13 +648,11 @@ pub(crate) fn handle_change_pointer_control(state: &mut ClientState, data: &[u8]
 
 pub(crate) fn handle_get_pointer_control(state: &ClientState, seq: u16) -> Vec<u8> {
     let pc = &state.pointer_control;
-    let mut reply = [0u8; 32];
-    reply[0] = 1;
-    state.write_u16(&mut reply, 2, seq);
-    state.write_u16(&mut reply, 8, pc.acceleration_numerator);
-    state.write_u16(&mut reply, 10, pc.acceleration_denominator);
-    state.write_u16(&mut reply, 12, pc.threshold);
-    reply.to_vec()
+    ReplyBuf::fixed(seq, state.msb_first)
+        .set_u16(8, pc.acceleration_numerator)
+        .set_u16(10, pc.acceleration_denominator)
+        .set_u16(12, pc.threshold)
+        .build()
 }
 
 // ---------------------------------------------------------------------------
@@ -712,14 +689,12 @@ pub(crate) fn handle_set_screen_saver(state: &mut ClientState, data: &[u8]) -> V
 
 pub(crate) fn handle_get_screen_saver(state: &ClientState, seq: u16) -> Vec<u8> {
     let ss = &state.screen_saver;
-    let mut reply = [0u8; 32];
-    reply[0] = 1;
-    state.write_u16(&mut reply, 2, seq);
-    state.write_u16(&mut reply, 8, ss.timeout);
-    state.write_u16(&mut reply, 10, ss.interval);
-    reply[12] = ss.prefer_blanking;
-    reply[13] = ss.allow_exposures;
-    reply.to_vec()
+    ReplyBuf::fixed(seq, state.msb_first)
+        .set_u16(8, ss.timeout)
+        .set_u16(10, ss.interval)
+        .set_u8(12, ss.prefer_blanking)
+        .set_u8(13, ss.allow_exposures)
+        .build()
 }
 
 // ---------------------------------------------------------------------------
@@ -851,15 +826,12 @@ pub(crate) fn handle_list_hosts(state: &ClientState, seq: u16) -> Vec<u8> {
         host_entries.extend_from_slice(&entry);
     }
 
-    let extra_words = (host_entries.len() / 4) as u32;
-    let mut reply = vec![0u8; 32 + host_entries.len()];
-    reply[0] = 1;
-    reply[1] = if state.access_control_enabled { 1 } else { 0 };
-    state.write_u16(&mut reply, 2, seq);
-    state.write_u32(&mut reply, 4, extra_words);
-    state.write_u16(&mut reply, 8, state.access_hosts.len() as u16);
-    reply[32..].copy_from_slice(&host_entries);
-    reply
+    let extra_padded = (host_entries.len() + 3) & !3;
+    ReplyBuf::with_extra(seq, extra_padded, state.msb_first)
+        .set_data_byte(if state.access_control_enabled { 1 } else { 0 })
+        .set_u16(8, state.access_hosts.len() as u16)
+        .set_bytes(32, &host_entries)
+        .build()
 }
 
 // ---------------------------------------------------------------------------
@@ -1200,11 +1172,9 @@ pub(crate) fn handle_set_pointer_mapping(
             .broadcast_global(&event, &state.client_id);
     }
 
-    let mut reply = [0u8; 32];
-    reply[0] = 1;
-    reply[1] = 0; // MappingSuccess
-    state.write_u16(&mut reply, 2, seq);
-    reply.to_vec()
+    ReplyBuf::fixed(seq, state.msb_first)
+        .set_data_byte(0) // MappingSuccess
+        .build()
 }
 
 // ---------------------------------------------------------------------------
@@ -1215,14 +1185,10 @@ pub(crate) fn handle_get_pointer_mapping(state: &ClientState, seq: u16) -> Vec<u
     let map = &state.pointer_mapping;
     let n = map.len() as u8;
     let padded_len = (n as usize + 3) & !3;
-    let reply_extra_units = (padded_len / 4) as u32;
-    let mut reply = vec![0u8; 32 + padded_len];
-    reply[0] = 1; // Reply
-    reply[1] = n;
-    state.write_u16(&mut reply, 2, seq);
-    state.write_u32(&mut reply, 4, reply_extra_units);
-    reply[32..32 + n as usize].copy_from_slice(map);
-    reply
+    ReplyBuf::with_extra(seq, padded_len, state.msb_first)
+        .set_data_byte(n)
+        .set_bytes(32, map)
+        .build()
 }
 
 // ---------------------------------------------------------------------------
@@ -1266,11 +1232,9 @@ pub(crate) fn handle_set_modifier_mapping(
             .broadcast_global(&event, &state.client_id);
     }
 
-    let mut reply = [0u8; 32];
-    reply[0] = 1;
-    reply[1] = 0; // MappingSuccess
-    state.write_u16(&mut reply, 2, seq);
-    reply.to_vec()
+    ReplyBuf::fixed(seq, state.msb_first)
+        .set_data_byte(0) // MappingSuccess
+        .build()
 }
 
 // ---------------------------------------------------------------------------
@@ -1289,20 +1253,16 @@ pub(crate) fn handle_get_modifier_mapping(state: &ClientState, seq: u16) -> Vec<
     let keycodes_per_modifier = max_keycodes as u8;
 
     let data_len = 8 * keycodes_per_modifier as usize;
-    let reply_len = 32 + data_len;
-    let mut reply = vec![0u8; reply_len];
-    reply[0] = 1;
-    reply[1] = keycodes_per_modifier;
-    state.write_u16(&mut reply, 2, seq);
-    state.write_u32(&mut reply, 4, (data_len / 4) as u32);
+    let mut reply = ReplyBuf::with_extra(seq, data_len, state.msb_first)
+        .set_data_byte(keycodes_per_modifier);
 
     for (i, keycodes) in state.modifier_map.iter().enumerate() {
         let off = 32 + i * keycodes_per_modifier as usize;
         for (j, &kc) in keycodes.iter().enumerate() {
             if j < keycodes_per_modifier as usize {
-                reply[off + j] = kc;
+                reply = reply.set_u8(off + j, kc);
             }
         }
     }
-    reply
+    reply.build()
 }

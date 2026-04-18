@@ -14,6 +14,7 @@ pub(crate) mod extensions;
 pub(crate) mod grab;
 pub(crate) mod handlers;
 pub(crate) mod input;
+pub(crate) mod reply;
 pub(crate) mod setup;
 pub(crate) mod types;
 pub(crate) mod window_tree;
