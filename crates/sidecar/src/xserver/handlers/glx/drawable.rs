@@ -299,15 +299,11 @@ pub(crate) fn handle_get_drawable_attributes(
     seq: u16,
 ) -> Vec<u8> {
     if data.len() < 8 {
-        let mut reply = [0u8; 32];
-        reply[0] = 1;
-        reply[2..4].copy_from_slice(&seq.to_le_bytes());
-        return reply.to_vec();
+        return super::reply::attrib_pairs_reply(seq, &[]);
     }
     let drawable_id = u32::from_le_bytes([data[4], data[5], data[6], data[7]]);
 
     if let Some(drawable) = state.glx.drawables.get(&drawable_id) {
-        // Return stored attributes plus the fbconfig id
         let mut pairs: Vec<(u32, u32)> = Vec::new();
         pairs.push((GLX_FBCONFIG_ID, drawable.fbconfig));
         for (&k, &v) in &drawable.attributes {
@@ -315,29 +311,9 @@ pub(crate) fn handle_get_drawable_attributes(
                 pairs.push((k, v));
             }
         }
-
-        let num_attribs = pairs.len() as u32;
-        let extra_bytes = pairs.len() * 8;
-        let mut reply = vec![0u8; 32 + extra_bytes];
-        reply[0] = 1;
-        reply[2..4].copy_from_slice(&seq.to_le_bytes());
-        reply[4..8].copy_from_slice(&((extra_bytes / 4) as u32).to_le_bytes());
-        reply[8..12].copy_from_slice(&num_attribs.to_le_bytes());
-
-        for (i, &(key, val)) in pairs.iter().enumerate() {
-            let off = 32 + i * 8;
-            reply[off..off + 4].copy_from_slice(&key.to_le_bytes());
-            reply[off + 4..off + 8].copy_from_slice(&val.to_le_bytes());
-        }
-        reply
+        super::reply::attrib_pairs_reply(seq, &pairs)
     } else {
-        // Unknown drawable -- return empty attribute list
-        let num_attribs: u32 = 0;
-        let mut reply = [0u8; 32];
-        reply[0] = 1;
-        reply[2..4].copy_from_slice(&seq.to_le_bytes());
-        reply[8..12].copy_from_slice(&num_attribs.to_le_bytes());
-        reply.to_vec()
+        super::reply::attrib_pairs_reply(seq, &[])
     }
 }
 
@@ -385,32 +361,16 @@ pub(crate) fn handle_query_context(state: &mut ClientState, data: &[u8], seq: u1
     require_len!(data, 8, seq, 159, 25, state.msb_first);
     let ctx_id = u32::from_le_bytes([data[4], data[5], data[6], data[7]]);
 
-    // Return 4 attributes: FBCONFIG_ID, RENDER_TYPE, SCREEN, SHARE_CONTEXT
-    let num_attribs: u32 = 4;
-    let extra = num_attribs as usize * 8; // 2 u32s each
-    let mut reply = vec![0u8; 32 + extra];
-    reply[0] = 1;
-    reply[2..4].copy_from_slice(&seq.to_le_bytes());
-    reply[4..8].copy_from_slice(&((extra / 4) as u32).to_le_bytes());
-    reply[8..12].copy_from_slice(&num_attribs.to_le_bytes());
-
     let ctx = state.glx.contexts.get(&ctx_id);
     let screen = ctx.map(|c| c.screen).unwrap_or(0);
     let visual = ctx.map(|c| c.visual).unwrap_or(ROOT_VISUAL);
     let share_list = ctx.map(|c| c.share_list).unwrap_or(0);
 
-    // FBCONFIG_ID
-    reply[32..36].copy_from_slice(&GLX_FBCONFIG_ID.to_le_bytes());
-    reply[36..40].copy_from_slice(&(if visual == 0x40 { 2u32 } else { 1u32 }).to_le_bytes());
-    // RENDER_TYPE
-    reply[40..44].copy_from_slice(&GLX_RENDER_TYPE.to_le_bytes());
-    reply[44..48].copy_from_slice(&GLX_RGBA_BIT.to_le_bytes());
-    // SCREEN
-    reply[48..52].copy_from_slice(&0x3u32.to_le_bytes()); // GLX_SCREEN = 0x3
-    reply[52..56].copy_from_slice(&screen.to_le_bytes());
-    // SHARE_CONTEXT_EXT (0x800A)
-    reply[56..60].copy_from_slice(&0x800Au32.to_le_bytes());
-    reply[60..64].copy_from_slice(&share_list.to_le_bytes());
-
-    reply
+    let pairs = [
+        (GLX_FBCONFIG_ID, if visual == 0x40 { 2u32 } else { 1u32 }),
+        (GLX_RENDER_TYPE, GLX_RGBA_BIT),
+        (0x3, screen),       // GLX_SCREEN
+        (0x800A, share_list), // GLX_SHARE_CONTEXT_EXT
+    ];
+    super::reply::attrib_pairs_reply(seq, &pairs)
 }

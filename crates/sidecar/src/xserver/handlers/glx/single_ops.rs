@@ -47,11 +47,7 @@ pub(crate) fn handle_render_mode(payload: &[u8], seq: u16) -> Vec<u8> {
             0
         }
     };
-    let mut reply = [0u8; 32];
-    reply[0] = 1;
-    reply[2..4].copy_from_slice(&seq.to_le_bytes());
-    reply[8..12].copy_from_slice(&result.to_le_bytes());
-    reply.to_vec()
+    GlxReply::Scalar(result as u32).encode(seq)
 }
 
 // ---------------------------------------------------------------------------
@@ -149,14 +145,7 @@ pub(crate) fn handle_are_textures_resident(payload: &[u8], seq: u16) -> Vec<u8> 
             1
         }
     };
-    let extra_words = n.div_ceil(4);
-    let mut reply = vec![0u8; 32 + extra_words * 4];
-    reply[0] = 1;
-    reply[2..4].copy_from_slice(&seq.to_le_bytes());
-    reply[4..8].copy_from_slice(&(extra_words as u32).to_le_bytes());
-    reply[8..12].copy_from_slice(&(all_resident as u32).to_le_bytes());
-    reply[32..32 + n].copy_from_slice(&residences);
-    reply
+    super::reply::are_textures_resident_reply(seq, all_resident != 0, &residences)
 }
 
 // ---------------------------------------------------------------------------

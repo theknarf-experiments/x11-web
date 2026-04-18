@@ -161,6 +161,73 @@ impl GlxReply {
     }
 }
 
+// ---------------------------------------------------------------------------
+// GLX management reply builders (non-single-command replies)
+// ---------------------------------------------------------------------------
+
+/// MakeCurrent / MakeContextCurrent reply.
+/// contextTag in retval[8..12], length=0.
+pub(crate) fn make_current_reply(seq: u16, context_tag: u32) -> Vec<u8> {
+    let mut buf = [0u8; 32];
+    buf[0] = 1;
+    buf[2..4].copy_from_slice(&seq.to_le_bytes());
+    buf[8..12].copy_from_slice(&context_tag.to_le_bytes());
+    buf.to_vec()
+}
+
+/// IsDirect reply.
+/// is_direct at byte[1] (not byte[8]!), length=0.
+pub(crate) fn is_direct_reply(seq: u16, is_direct: bool) -> Vec<u8> {
+    let mut buf = [0u8; 32];
+    buf[0] = 1;
+    buf[1] = if is_direct { 1 } else { 0 };
+    buf[2..4].copy_from_slice(&seq.to_le_bytes());
+    buf.to_vec()
+}
+
+/// QueryVersion reply.
+/// major at [8..12], minor at [12..16], length=0.
+pub(crate) fn query_version_reply(seq: u16, major: u32, minor: u32) -> Vec<u8> {
+    let mut buf = [0u8; 32];
+    buf[0] = 1;
+    buf[2..4].copy_from_slice(&seq.to_le_bytes());
+    buf[8..12].copy_from_slice(&major.to_le_bytes());
+    buf[12..16].copy_from_slice(&minor.to_le_bytes());
+    buf.to_vec()
+}
+
+/// GetDrawableAttributes / QueryContext reply.
+/// numAttribs at [8..12], key-value pairs at [32..].
+pub(crate) fn attrib_pairs_reply(seq: u16, pairs: &[(u32, u32)]) -> Vec<u8> {
+    let num_attribs = pairs.len() as u32;
+    let extra_bytes = pairs.len() * 8;
+    let mut buf = vec![0u8; 32 + extra_bytes];
+    buf[0] = 1;
+    buf[2..4].copy_from_slice(&seq.to_le_bytes());
+    buf[4..8].copy_from_slice(&((extra_bytes / 4) as u32).to_le_bytes());
+    buf[8..12].copy_from_slice(&num_attribs.to_le_bytes());
+    for (i, &(key, val)) in pairs.iter().enumerate() {
+        let off = 32 + i * 8;
+        buf[off..off + 4].copy_from_slice(&key.to_le_bytes());
+        buf[off + 4..off + 8].copy_from_slice(&val.to_le_bytes());
+    }
+    buf
+}
+
+/// AreTexturesResident reply.
+/// all_resident in retval[8..12], per-texture residences in extra data.
+pub(crate) fn are_textures_resident_reply(seq: u16, all_resident: bool, residences: &[u8]) -> Vec<u8> {
+    let n = residences.len();
+    let extra_words = n.div_ceil(4);
+    let mut buf = vec![0u8; 32 + extra_words * 4];
+    buf[0] = 1;
+    buf[2..4].copy_from_slice(&seq.to_le_bytes());
+    buf[4..8].copy_from_slice(&(extra_words as u32).to_le_bytes());
+    buf[8..12].copy_from_slice(&(if all_resident { 1u32 } else { 0u32 }).to_le_bytes());
+    buf[32..32 + n].copy_from_slice(residences);
+    buf
+}
+
 /// GLX query string reply builder.
 ///
 /// Used by QueryExtensionsString (minor 18) and QueryServerString (minor 19).

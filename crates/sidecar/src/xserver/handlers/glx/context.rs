@@ -152,12 +152,7 @@ pub(crate) fn handle_make_current(state: &mut ClientState, data: &[u8], seq: u16
 
     let tag = do_make_current(state, ctx_id, drawable);
 
-    // Reply: context_tag
-    let mut reply = [0u8; 32];
-    reply[0] = 1;
-    reply[2..4].copy_from_slice(&seq.to_le_bytes());
-    reply[8..12].copy_from_slice(&tag.to_le_bytes());
-    reply.to_vec()
+    super::reply::make_current_reply(seq, tag)
 }
 
 // ---------------------------------------------------------------------------
@@ -170,18 +165,13 @@ pub(crate) fn handle_make_context_current(
     seq: u16,
 ) -> Vec<u8> {
     require_len!(data, 20, seq, 159, 26, state.msb_first);
-    // draw drawable, read drawable, context
     let drawable = u32::from_le_bytes([data[4], data[5], data[6], data[7]]);
     let _read_drawable = u32::from_le_bytes([data[8], data[9], data[10], data[11]]);
     let ctx_id = u32::from_le_bytes([data[12], data[13], data[14], data[15]]);
 
     let tag = do_make_current(state, ctx_id, drawable);
 
-    let mut reply = [0u8; 32];
-    reply[0] = 1;
-    reply[2..4].copy_from_slice(&seq.to_le_bytes());
-    reply[8..12].copy_from_slice(&tag.to_le_bytes());
-    reply.to_vec()
+    super::reply::make_current_reply(seq, tag)
 }
 
 /// Common logic for MakeCurrent and MakeContextCurrent.
@@ -234,13 +224,7 @@ fn do_make_current(state: &mut ClientState, ctx_id: u32, drawable: u32) -> u32 {
 // ---------------------------------------------------------------------------
 
 pub(crate) fn handle_is_direct(seq: u16) -> Vec<u8> {
-    // Indirect rendering (is_direct = false)
-    // GLX IsDirect reply: byte 0 = reply type, byte 1 = is_direct (BOOL)
-    let mut reply = [0u8; 32];
-    reply[0] = 1;
-    reply[1] = 0; // is_direct = false (byte 1 per GLX spec)
-    reply[2..4].copy_from_slice(&seq.to_le_bytes());
-    reply.to_vec()
+    super::reply::is_direct_reply(seq, false)
 }
 
 // ---------------------------------------------------------------------------
@@ -355,14 +339,8 @@ pub(crate) fn handle_vendor_private_with_reply(data: &[u8], seq: u16) -> Vec<u8>
     match vendor_code {
         // glXGetProcAddressARB (vendor code 1296)
         1296 => {
-            // Client wants a function pointer. For indirect rendering we just
-            // return a non-NULL stub -- the actual pointer lives in the client library.
-            let mut reply = [0u8; 32];
-            reply[0] = 1;
-            reply[2..4].copy_from_slice(&seq.to_le_bytes());
-            // Return a dummy non-zero proc address (1 = "supported but opaque")
-            reply[8..12].copy_from_slice(&1u32.to_le_bytes());
-            reply.to_vec()
+            // glXGetProcAddressARB: return non-zero stub (actual pointer is client-side)
+            super::reply::GlxReply::Scalar(1).encode(seq)
         }
         _ => {
             debug!("Unhandled GLX vendor private with reply: {vendor_code}");

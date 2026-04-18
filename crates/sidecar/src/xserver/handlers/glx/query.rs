@@ -18,13 +18,7 @@ use super::{
 // ---------------------------------------------------------------------------
 
 pub(crate) fn handle_query_version(seq: u16) -> Vec<u8> {
-    // Return GLX 1.4
-    let mut reply = [0u8; 32];
-    reply[0] = 1; // Reply
-    reply[2..4].copy_from_slice(&seq.to_le_bytes());
-    reply[8..12].copy_from_slice(&1u32.to_le_bytes()); // major
-    reply[12..16].copy_from_slice(&4u32.to_le_bytes()); // minor
-    reply.to_vec()
+    super::reply::query_version_reply(seq, 1, 4) // GLX 1.4
 }
 
 // ---------------------------------------------------------------------------
