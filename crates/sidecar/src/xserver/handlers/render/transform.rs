@@ -1,24 +1,19 @@
 use tracing::debug;
 
-use super::read_fixed_bo;
-use crate::xserver::core::read_u32_bo;
 use crate::xserver::core::require_len;
+use crate::xserver::request::request_header;
 use crate::xserver::ClientState;
+use x11rb_protocol::protocol::render::{Fixed, SetPictureTransformRequest};
+
+/// Convert a 16.16 fixed-point i32 (x11rb `Fixed`) to f64.
+fn fixed_to_f64(f: Fixed) -> f64 {
+    f as f64 / 65536.0
+}
 
 /// SetPictureTransform (RENDER minor opcode 28).
 ///
-/// Wire layout:
-///
-/// ```text
-///   1   opcode (139)
-///   1   minor (28)
-///   2   length
-///   4   PICTURE  picture
-///   9*4 FIXED    transform (3x3 row-major matrix)
-/// ```
-///
 /// The transform maps *destination* coordinates to *source*
-/// coordinates: `(sx*sw, sy*sw, sw) = T · (dx, dy, 1)`. Used by
+/// coordinates: `(sx*sw, sy*sw, sw) = T * (dx, dy, 1)`. Used by
 /// rendercheck (and Cairo) to project a small gradient over a much
 /// larger destination region.
 pub(crate) fn handle_set_picture_transform(
@@ -28,16 +23,42 @@ pub(crate) fn handle_set_picture_transform(
 ) -> Vec<u8> {
     let bo = state.msb_first;
     require_len!(data, 8 + 9 * 4, seq, 139, data[1] as u16, bo);
-    let pid = read_u32_bo(data, 4, bo);
-    let mut tx = [0f64; 9];
-    for (i, slot) in tx.iter_mut().enumerate() {
-        *slot = read_fixed_bo(data, 8 + i * 4, bo);
-    }
+
+    let req =
+        match SetPictureTransformRequest::try_parse_request(request_header(data), &data[4..]) {
+            Ok(r) => r,
+            Err(_) => {
+                return crate::xserver::core::build_error_bo(
+                    crate::xserver::core::LENGTH_ERROR,
+                    seq,
+                    0,
+                    139,
+                    data[1] as u16,
+                    bo,
+                )
+            }
+        };
+
+    let pid = req.picture;
+    let t = &req.transform;
+    let tx = [
+        fixed_to_f64(t.matrix11),
+        fixed_to_f64(t.matrix12),
+        fixed_to_f64(t.matrix13),
+        fixed_to_f64(t.matrix21),
+        fixed_to_f64(t.matrix22),
+        fixed_to_f64(t.matrix23),
+        fixed_to_f64(t.matrix31),
+        fixed_to_f64(t.matrix32),
+        fixed_to_f64(t.matrix33),
+    ];
+
     debug!(
         "SetPictureTransform: pid={pid:#x} m=[[{:.2},{:.2},{:.2}],[{:.2},{:.2},{:.2}],[{:.2},{:.2},{:.2}]]",
         tx[0], tx[1], tx[2], tx[3], tx[4], tx[5], tx[6], tx[7], tx[8]
     );
-    // Identity matrix is the most common "reset" — drop the entry
+
+    // Identity matrix is the most common "reset" -- drop the entry
     // so the lookup short-circuits to the no-op fast path.
     let is_identity = (tx[0] - 1.0).abs() < 1e-9
         && tx[1].abs() < 1e-9

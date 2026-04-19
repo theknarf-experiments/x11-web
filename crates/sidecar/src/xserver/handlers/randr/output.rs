@@ -5,11 +5,22 @@ use tracing::{debug, info};
 use super::super::super::client::ClientState;
 use super::super::super::types::{OutputPropertyConfig, PropertyValue, RandrMode, RandrMonitor};
 use crate::xserver::reply::ReplyBuf;
+use crate::xserver::request::request_header;
+use x11rb_protocol::protocol::randr::{
+    AddOutputModeRequest, ChangeOutputPropertyRequest, ConfigureOutputPropertyRequest,
+    CreateModeRequest, DeleteMonitorRequest, DeleteOutputModeRequest, DeleteOutputPropertyRequest,
+    DestroyModeRequest, GetOutputInfoRequest, GetOutputPropertyRequest, GetProviderInfoRequest,
+    ListOutputPropertiesRequest, QueryOutputPropertyRequest, SetMonitorRequest,
+    SetOutputPrimaryRequest, SetProviderOffloadSinkRequest, SetProviderOutputSourceRequest,
+};
 
 /// RRGetOutputInfo (9).
 pub(crate) fn handle_get_output_info(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
     let output_id = if data.len() >= 8 {
-        state.read_u32(data, 4)
+        match GetOutputInfoRequest::try_parse_request(request_header(data), &data[4..]) {
+            Ok(r) => r.output,
+            Err(_) => 0,
+        }
     } else {
         0
     };
@@ -23,7 +34,10 @@ pub(crate) fn handle_list_output_properties(
     seq: u16,
 ) -> Vec<u8> {
     let output_id = if data.len() >= 8 {
-        state.read_u32(data, 4)
+        match ListOutputPropertiesRequest::try_parse_request(request_header(data), &data[4..]) {
+            Ok(r) => r.output,
+            Err(_) => 0,
+        }
     } else {
         0
     };
@@ -39,8 +53,12 @@ pub(crate) fn handle_query_output_property(
     if data.len() < 12 {
         return ReplyBuf::fixed(seq, state.msb_first).build();
     }
-    let output_id = state.read_u32(data, 4);
-    let property_atom = state.read_u32(data, 8);
+    let req = match QueryOutputPropertyRequest::try_parse_request(request_header(data), &data[4..]) {
+        Ok(r) => r,
+        Err(_) => return ReplyBuf::fixed(seq, state.msb_first).build(),
+    };
+    let output_id = req.output;
+    let property_atom = req.property;
 
     // Check if the output has an explicit property config (set by ConfigureOutputProperty)
     let (pending, range, immutable, values) =
@@ -86,17 +104,15 @@ pub(crate) fn handle_configure_output_property(
     _seq: u16,
 ) -> Vec<u8> {
     if data.len() >= 14 {
-        let output_id = state.read_u32(data, 4);
-        let property_atom = state.read_u32(data, 8);
-        let pending = data[12] != 0;
-        let range = data[13] != 0;
-        // Parse valid values (u32 values after the fixed header)
-        let mut values = Vec::new();
-        let mut off = 16; // values start after padding
-        while off + 4 <= data.len() {
-            values.push(state.read_u32(data, off));
-            off += 4;
-        }
+        let req = match ConfigureOutputPropertyRequest::try_parse_request(request_header(data), &data[4..]) {
+            Ok(r) => r,
+            Err(_) => return Vec::new(),
+        };
+        let output_id = req.output;
+        let property_atom = req.property;
+        let pending = req.pending;
+        let range = req.range;
+        let values: Vec<u32> = req.values.iter().map(|&v| v as u32).collect();
         if let Some(output) = state.randr_find_output_mut(output_id) {
             output.property_configs.insert(
                 property_atom,
@@ -119,24 +135,15 @@ pub(crate) fn handle_change_output_property(
     _seq: u16,
 ) -> Vec<u8> {
     if data.len() >= 24 {
-        let output_id = state.read_u32(data, 4);
-        let property = state.read_u32(data, 8);
-        let prop_type = state.read_u32(data, 12);
-        let format = data[16];
-        let _mode = data[17]; // 0=Replace, 1=Prepend, 2=Append
-        let num_items = state.read_u32(data, 20) as usize;
-        let bytes_per_item = match format {
-            8 => 1,
-            16 => 2,
-            32 => 4,
-            _ => 1,
+        let req = match ChangeOutputPropertyRequest::try_parse_request(request_header(data), &data[4..]) {
+            Ok(r) => r,
+            Err(_) => return Vec::new(),
         };
-        let data_len = num_items * bytes_per_item;
-        let prop_data = if data.len() >= 24 + data_len {
-            data[24..24 + data_len].to_vec()
-        } else {
-            Vec::new()
-        };
+        let output_id = req.output;
+        let property = req.property;
+        let prop_type = req.type_;
+        let format = req.format;
+        let prop_data = req.data.into_owned();
         if let Some(output) = state.randr_find_output_mut(output_id) {
             output.properties.insert(
                 property,
@@ -158,8 +165,12 @@ pub(crate) fn handle_delete_output_property(
     _seq: u16,
 ) -> Vec<u8> {
     if data.len() >= 12 {
-        let output_id = state.read_u32(data, 4);
-        let property = state.read_u32(data, 8);
+        let req = match DeleteOutputPropertyRequest::try_parse_request(request_header(data), &data[4..]) {
+            Ok(r) => r,
+            Err(_) => return Vec::new(),
+        };
+        let output_id = req.output;
+        let property = req.property;
         if let Some(output) = state.randr_find_output_mut(output_id) {
             output.properties.remove(&property);
             output.property_configs.remove(&property);
@@ -180,42 +191,29 @@ pub(crate) fn handle_get_output_property(
 
 /// RRCreateMode (16).
 pub(crate) fn handle_create_mode(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
-    // Request layout:
-    //   4-7: window (unused, but must be present)
-    //   8-39: XRRModeInfo (32 bytes):
-    //     8-11: id (ignored, server assigns)
-    //    12-13: width
-    //    14-15: height
-    //    16-19: dotClock
-    //    20-21: hSyncStart
-    //    22-23: hSyncEnd
-    //    24-25: hTotal
-    //    26-27: hSkew (unused)
-    //    28-29: vSyncStart
-    //    30-31: vSyncEnd
-    //    32-33: vTotal
-    //    34-35: nameLen
-    //    36-39: modeFlags
-    //   40+: name bytes (nameLen)
-
     if data.len() < 40 {
         return ReplyBuf::fixed(seq, state.msb_first).build();
     }
 
-    let width = state.read_u16(data, 12);
-    let height = state.read_u16(data, 14);
-    let dot_clock = state.read_u32(data, 16);
-    let h_sync_start = state.read_u16(data, 20);
-    let h_sync_end = state.read_u16(data, 22);
-    let h_total = state.read_u16(data, 24);
-    let v_sync_start = state.read_u16(data, 28);
-    let v_sync_end = state.read_u16(data, 30);
-    let v_total = state.read_u16(data, 32);
-    let name_len = state.read_u16(data, 34) as usize;
-    let flags = state.read_u32(data, 36);
+    let req = match CreateModeRequest::try_parse_request(request_header(data), &data[4..]) {
+        Ok(r) => r,
+        Err(_) => return ReplyBuf::fixed(seq, state.msb_first).build(),
+    };
 
-    let name = if data.len() >= 40 + name_len && name_len > 0 {
-        String::from_utf8_lossy(&data[40..40 + name_len]).to_string()
+    let mi = &req.mode_info;
+    let width = mi.width;
+    let height = mi.height;
+    let dot_clock = mi.dot_clock;
+    let h_sync_start = mi.hsync_start;
+    let h_sync_end = mi.hsync_end;
+    let h_total = mi.htotal;
+    let v_sync_start = mi.vsync_start;
+    let v_sync_end = mi.vsync_end;
+    let v_total = mi.vtotal;
+    let flags: u32 = mi.mode_flags.into();
+
+    let name = if !req.name.is_empty() {
+        String::from_utf8_lossy(&req.name).to_string()
     } else {
         format!("{}x{}", width, height)
     };
@@ -250,7 +248,11 @@ pub(crate) fn handle_create_mode(state: &mut ClientState, data: &[u8], seq: u16)
 /// RRDestroyMode (17).
 pub(crate) fn handle_destroy_mode(state: &mut ClientState, data: &[u8], _seq: u16) -> Vec<u8> {
     if data.len() >= 8 {
-        let mode_id = state.read_u32(data, 4);
+        let req = match DestroyModeRequest::try_parse_request(request_header(data), &data[4..]) {
+            Ok(r) => r,
+            Err(_) => return Vec::new(),
+        };
+        let mode_id = req.mode;
         state.randr_modes.retain(|m| m.id != mode_id);
         debug!("RRDestroyMode mode_id={mode_id}");
     }
@@ -260,8 +262,12 @@ pub(crate) fn handle_destroy_mode(state: &mut ClientState, data: &[u8], _seq: u1
 /// RRAddOutputMode (18).
 pub(crate) fn handle_add_output_mode(state: &mut ClientState, data: &[u8], _seq: u16) -> Vec<u8> {
     if data.len() >= 12 {
-        let output_id = state.read_u32(data, 4);
-        let mode_id = state.read_u32(data, 8);
+        let req = match AddOutputModeRequest::try_parse_request(request_header(data), &data[4..]) {
+            Ok(r) => r,
+            Err(_) => return Vec::new(),
+        };
+        let output_id = req.output;
+        let mode_id = req.mode;
         if let Some(output) = state.randr_find_output_mut(output_id) {
             if !output.modes.contains(&mode_id) {
                 output.modes.push(mode_id);
@@ -279,8 +285,12 @@ pub(crate) fn handle_delete_output_mode(
     _seq: u16,
 ) -> Vec<u8> {
     if data.len() >= 12 {
-        let output_id = state.read_u32(data, 4);
-        let mode_id = state.read_u32(data, 8);
+        let req = match DeleteOutputModeRequest::try_parse_request(request_header(data), &data[4..]) {
+            Ok(r) => r,
+            Err(_) => return Vec::new(),
+        };
+        let output_id = req.output;
+        let mode_id = req.mode;
         if let Some(output) = state.randr_find_output_mut(output_id) {
             output.modes.retain(|&m| m != mode_id);
         }
@@ -296,7 +306,11 @@ pub(crate) fn handle_set_output_primary(
     _seq: u16,
 ) -> Vec<u8> {
     if data.len() >= 12 {
-        let output_id = state.read_u32(data, 8);
+        let req = match SetOutputPrimaryRequest::try_parse_request(request_header(data), &data[4..]) {
+            Ok(r) => r,
+            Err(_) => return Vec::new(),
+        };
+        let output_id = req.output;
         state.randr_primary_output = output_id;
         debug!("RRSetOutputPrimary output={output_id}");
     }
@@ -339,7 +353,10 @@ pub(crate) fn handle_get_providers(state: &mut ClientState, _data: &[u8], seq: u
 /// RRGetProviderInfo (33).
 pub(crate) fn handle_get_provider_info(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
     let provider_id = if data.len() >= 8 {
-        state.read_u32(data, 4)
+        match GetProviderInfoRequest::try_parse_request(request_header(data), &data[4..]) {
+            Ok(r) => r.provider,
+            Err(_) => 0,
+        }
     } else {
         0
     };
@@ -354,10 +371,12 @@ pub(crate) fn handle_set_provider_offload_sink(
     _seq: u16,
 ) -> Vec<u8> {
     if data.len() >= 16 {
-        let provider = _state.read_u32(data, 4);
-        let sink = _state.read_u32(data, 8);
-        let config_ts = _state.read_u32(data, 12);
-        debug!("RRSetProviderOffloadSink: provider={provider:#x} sink={sink:#x} ts={config_ts}");
+        if let Ok(req) = SetProviderOffloadSinkRequest::try_parse_request(request_header(data), &data[4..]) {
+            let provider = req.provider;
+            let sink = req.sink_provider;
+            let config_ts = req.config_timestamp;
+            debug!("RRSetProviderOffloadSink: provider={provider:#x} sink={sink:#x} ts={config_ts}");
+        }
     }
     Vec::new()
 }
@@ -370,12 +389,14 @@ pub(crate) fn handle_set_provider_output_source(
     _seq: u16,
 ) -> Vec<u8> {
     if data.len() >= 16 {
-        let provider = _state.read_u32(data, 4);
-        let source = _state.read_u32(data, 8);
-        let config_ts = _state.read_u32(data, 12);
-        debug!(
-            "RRSetProviderOutputSource: provider={provider:#x} source={source:#x} ts={config_ts}"
-        );
+        if let Ok(req) = SetProviderOutputSourceRequest::try_parse_request(request_header(data), &data[4..]) {
+            let provider = req.provider;
+            let source = req.source_provider;
+            let config_ts = req.config_timestamp;
+            debug!(
+                "RRSetProviderOutputSource: provider={provider:#x} source={source:#x} ts={config_ts}"
+            );
+        }
     }
     Vec::new()
 }
@@ -450,35 +471,21 @@ pub(crate) fn handle_get_monitors(state: &mut ClientState, _data: &[u8], seq: u1
 
 /// RRSetMonitor (43).
 pub(crate) fn handle_set_monitor(state: &mut ClientState, data: &[u8], _seq: u16) -> Vec<u8> {
-    // MonitorInfo layout at byte 4:
-    //   0-3: name (ATOM)
-    //   4: primary (BOOL)
-    //   5: automatic (BOOL)
-    //   6-7: nOutput (CARD16)
-    //   8-9: x (INT16)
-    //  10-11: y (INT16)
-    //  12-13: width (CARD16)
-    //  14-15: height (CARD16)
-    //  16-19: mmWidth (CARD32)
-    //  20-23: mmHeight (CARD32)
-    //  24+: output IDs
     if data.len() >= 28 {
-        let name_atom = state.read_u32(data, 4);
-        let primary = data[8] != 0;
-        let automatic = data[9] != 0;
-        let n_output = state.read_u16(data, 10) as usize;
-        let x = state.read_i16(data, 12);
-        let y = state.read_i16(data, 14);
-        let width = state.read_u16(data, 16);
-        let height = state.read_u16(data, 18);
-        // mmWidth at 20, mmHeight at 24 (we skip these for storage)
-        let mut output_ids = Vec::with_capacity(n_output);
-        let outputs_start = 28;
-        for i in 0..n_output {
-            if outputs_start + i * 4 + 4 <= data.len() {
-                output_ids.push(state.read_u32(data, outputs_start + i * 4));
-            }
-        }
+        let req = match SetMonitorRequest::try_parse_request(request_header(data), &data[4..]) {
+            Ok(r) => r,
+            Err(_) => return Vec::new(),
+        };
+        let mi = &req.monitorinfo;
+        let name_atom = mi.name;
+        let primary = mi.primary;
+        let automatic = mi.automatic;
+        let x = mi.x;
+        let y = mi.y;
+        let width = mi.width;
+        let height = mi.height;
+        let output_ids: Vec<u32> = mi.outputs.clone();
+
         // Remove any existing monitor with the same name
         state.randr_monitors.retain(|m| m.name_atom != name_atom);
         state.randr_monitors.push(RandrMonitor {
@@ -499,8 +506,11 @@ pub(crate) fn handle_set_monitor(state: &mut ClientState, data: &[u8], _seq: u16
 /// RRDeleteMonitor (44).
 pub(crate) fn handle_delete_monitor(state: &mut ClientState, data: &[u8], _seq: u16) -> Vec<u8> {
     if data.len() >= 12 {
-        let _window = state.read_u32(data, 4);
-        let name_atom = state.read_u32(data, 8);
+        let req = match DeleteMonitorRequest::try_parse_request(request_header(data), &data[4..]) {
+            Ok(r) => r,
+            Err(_) => return Vec::new(),
+        };
+        let name_atom = req.name;
         state.randr_monitors.retain(|m| m.name_atom != name_atom);
         debug!("RRDeleteMonitor name_atom={name_atom}");
     }
@@ -613,24 +623,19 @@ fn build_list_output_properties_reply(state: &ClientState, seq: u16, output_id: 
 
 /// Build the reply for RRGetOutputProperty.
 fn build_get_output_property_reply(state: &ClientState, data: &[u8], seq: u16) -> Vec<u8> {
-    // Request layout:
-    //   4: output (CARD32)
-    //   8: property (ATOM)
-    //  12: type (ATOM) — 0 = AnyPropertyType
-    //  16: long_offset (CARD32)
-    //  20: long_length (CARD32)
-    //  24: delete (BOOL) + pad
-    //  25: pending (BOOL) + pad
-
     if data.len() < 24 {
         return ReplyBuf::fixed(seq, state.msb_first).build();
     }
 
-    let output_id = state.read_u32(data, 4);
-    let property = state.read_u32(data, 8);
-    let req_type = state.read_u32(data, 12);
-    let long_offset = state.read_u32(data, 16) as usize;
-    let long_length = state.read_u32(data, 20) as usize;
+    let req = match GetOutputPropertyRequest::try_parse_request(request_header(data), &data[4..]) {
+        Ok(r) => r,
+        Err(_) => return ReplyBuf::fixed(seq, state.msb_first).build(),
+    };
+    let output_id = req.output;
+    let property = req.property;
+    let req_type = req.type_;
+    let long_offset = req.long_offset as usize;
+    let long_length = req.long_length as usize;
 
     let output = match state.randr_find_output(output_id) {
         Some(o) => o,

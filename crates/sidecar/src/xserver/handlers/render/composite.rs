@@ -1,30 +1,48 @@
 use tracing::{debug, info};
 
 use super::{
-    composite_pixel, composite_pixel_ca, pict_format_has_alpha, point_in_triangle, read_fixed_bo,
+    composite_pixel, composite_pixel_ca, pict_format_has_alpha, point_in_triangle,
     resolve_source_color, resolve_source_pixels, zero_src_has_no_effect, ClipSnapshot,
 };
 use crate::xserver::core::require_len;
-use crate::xserver::core::{read_i16_bo, read_u16_bo, read_u32_bo};
+use crate::xserver::request::request_header;
 use crate::xserver::ClientState;
+use x11rb_protocol::protocol::render::{
+    AddTrapsRequest, CompositeRequest, FillRectanglesRequest, Fixed, TrapezoidsRequest,
+    TriFanRequest, TriStripRequest, TrianglesRequest,
+};
 
 /// The main compositing operation.
 pub(crate) fn handle_composite(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
     let bo = state.msb_first;
     require_len!(data, 36, seq, 139, data[1] as u16, bo);
 
-    let op = data[4];
-    let src_pic = read_u32_bo(data, 8, bo);
-    let mask_pic = read_u32_bo(data, 12, bo);
-    let dst_pic = read_u32_bo(data, 16, bo);
-    let src_x = read_i16_bo(data, 20, bo);
-    let src_y = read_i16_bo(data, 22, bo);
-    let mask_x = read_i16_bo(data, 24, bo);
-    let mask_y = read_i16_bo(data, 26, bo);
-    let dst_x = read_i16_bo(data, 28, bo);
-    let dst_y = read_i16_bo(data, 30, bo);
-    let width = read_u16_bo(data, 32, bo);
-    let height = read_u16_bo(data, 34, bo);
+    let req = match CompositeRequest::try_parse_request(request_header(data), &data[4..]) {
+        Ok(r) => r,
+        Err(_) => {
+            return crate::xserver::core::build_error_bo(
+                crate::xserver::core::LENGTH_ERROR,
+                seq,
+                0,
+                139,
+                data[1] as u16,
+                bo,
+            )
+        }
+    };
+
+    let op = u8::from(req.op);
+    let src_pic = req.src;
+    let mask_pic = req.mask;
+    let dst_pic = req.dst;
+    let src_x = req.src_x;
+    let src_y = req.src_y;
+    let mask_x = req.mask_x;
+    let mask_y = req.mask_y;
+    let dst_x = req.dst_x;
+    let dst_y = req.dst_y;
+    let width = req.width;
+    let height = req.height;
 
     info!(
         "Render Composite: op={op} src={src_pic:#x} mask={mask_pic:#x} dst={dst_pic:#x} src=({src_x},{src_y}) dst=({dst_x},{dst_y}) {width}x{height}"
@@ -188,40 +206,34 @@ pub(crate) fn handle_composite(state: &mut ClientState, data: &[u8], seq: u16) -
     Vec::new()
 }
 
+/// Convert a 16.16 fixed-point i32 (x11rb `Fixed`) to f64.
+fn fixed_to_f64(f: Fixed) -> f64 {
+    f as f64 / 65536.0
+}
+
 /// Handle XRender Trapezoids (minor opcode 10).
-///
-/// Request format:
-///   1  CARD8    op
-///   3           unused
-///   4  Picture  src
-///   4  Picture  dst
-///   4  PictFormat mask-format
-///   2  INT16    src-x
-///   2  INT16    src-y
-///   N  list of TRAPEZOID (40 bytes each)
-///
-/// Each TRAPEZOID:
-///   4  FIXED  top
-///   4  FIXED  bottom
-///   4  FIXED  left.p1.x
-///   4  FIXED  left.p1.y
-///   4  FIXED  left.p2.x
-///   4  FIXED  left.p2.y
-///   4  FIXED  right.p1.x
-///   4  FIXED  right.p1.y
-///   4  FIXED  right.p2.x
-///   4  FIXED  right.p2.y
 pub(crate) fn handle_trapezoids(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
     let bo = state.msb_first;
     let minor = data[1] as u16;
     require_len!(data, 24, seq, 139, minor, bo);
 
-    let op = data[4];
-    let src_pic = read_u32_bo(data, 8, bo);
-    let dst_pic = read_u32_bo(data, 12, bo);
-    let _mask_format = read_u32_bo(data, 16, bo);
-    let _src_x = read_i16_bo(data, 20, bo);
-    let _src_y = read_i16_bo(data, 22, bo);
+    let req = match TrapezoidsRequest::try_parse_request(request_header(data), &data[4..]) {
+        Ok(r) => r,
+        Err(_) => {
+            return crate::xserver::core::build_error_bo(
+                crate::xserver::core::LENGTH_ERROR,
+                seq,
+                0,
+                139,
+                minor,
+                bo,
+            )
+        }
+    };
+
+    let op = u8::from(req.op);
+    let src_pic = req.src;
+    let dst_pic = req.dst;
 
     // Resolve source color
     let (sr, sg, sb, sa) = resolve_source_color(state, src_pic);
@@ -252,25 +264,27 @@ pub(crate) fn handle_trapezoids(state: &mut ClientState, data: &[u8], seq: u16) 
     };
     let clip = ClipSnapshot::from_picture(state, dst_pic);
 
-    // Parse trapezoids (40 bytes each starting at offset 24)
-    let mut off = 24;
-    let mut traps = Vec::new();
-    while off + 40 <= data.len() {
-        let top = read_fixed_bo(data, off, bo);
-        let bottom = read_fixed_bo(data, off + 4, bo);
-        let left_x1 = read_fixed_bo(data, off + 8, bo);
-        let left_y1 = read_fixed_bo(data, off + 12, bo);
-        let left_x2 = read_fixed_bo(data, off + 16, bo);
-        let left_y2 = read_fixed_bo(data, off + 20, bo);
-        let right_x1 = read_fixed_bo(data, off + 24, bo);
-        let right_y1 = read_fixed_bo(data, off + 28, bo);
-        let right_x2 = read_fixed_bo(data, off + 32, bo);
-        let right_y2 = read_fixed_bo(data, off + 36, bo);
-        traps.push((
-            top, bottom, left_x1, left_y1, left_x2, left_y2, right_x1, right_y1, right_x2, right_y2,
-        ));
-        off += 40;
-    }
+    // Convert x11rb Trapezoid structs to the (f64, ...) tuples used downstream
+    let traps: Vec<_> = req
+        .traps
+        .iter()
+        .map(|t| {
+            let top = fixed_to_f64(t.top);
+            let bottom = fixed_to_f64(t.bottom);
+            let left_x1 = fixed_to_f64(t.left.p1.x);
+            let left_y1 = fixed_to_f64(t.left.p1.y);
+            let left_x2 = fixed_to_f64(t.left.p2.x);
+            let left_y2 = fixed_to_f64(t.left.p2.y);
+            let right_x1 = fixed_to_f64(t.right.p1.x);
+            let right_y1 = fixed_to_f64(t.right.p1.y);
+            let right_x2 = fixed_to_f64(t.right.p2.x);
+            let right_y2 = fixed_to_f64(t.right.p2.y);
+            (
+                top, bottom, left_x1, left_y1, left_x2, left_y2, right_x1, right_y1, right_x2,
+                right_y2,
+            )
+        })
+        .collect();
 
     if !traps.is_empty() {
         // Compute bounding box for damage notification
@@ -431,12 +445,23 @@ pub(crate) fn handle_triangles(state: &mut ClientState, data: &[u8], seq: u16) -
     let minor = data[1] as u16;
     require_len!(data, 24, seq, 139, minor, bo);
 
-    let op = data[4];
-    let src_pic = read_u32_bo(data, 8, bo);
-    let dst_pic = read_u32_bo(data, 12, bo);
-    let _mask_format = read_u32_bo(data, 16, bo);
-    let _src_x = read_i16_bo(data, 20, bo);
-    let _src_y = read_i16_bo(data, 22, bo);
+    let req = match TrianglesRequest::try_parse_request(request_header(data), &data[4..]) {
+        Ok(r) => r,
+        Err(_) => {
+            return crate::xserver::core::build_error_bo(
+                crate::xserver::core::LENGTH_ERROR,
+                seq,
+                0,
+                139,
+                minor,
+                bo,
+            )
+        }
+    };
+
+    let op = u8::from(req.op);
+    let src_pic = req.src;
+    let dst_pic = req.dst;
 
     debug!("Render Triangles: op={op} src={src_pic:#x} dst={dst_pic:#x}");
 
@@ -463,19 +488,21 @@ pub(crate) fn handle_triangles(state: &mut ClientState, data: &[u8], seq: u16) -
     };
     let clip = ClipSnapshot::from_picture(state, dst_pic);
 
-    // Each triangle = 3 POINTFIX (each 8 bytes = x FIXED + y FIXED) = 24 bytes
-    let mut off = 24;
-    let mut triangles = Vec::new();
-    while off + 24 <= data.len() {
-        let x1 = read_fixed_bo(data, off, bo);
-        let y1 = read_fixed_bo(data, off + 4, bo);
-        let x2 = read_fixed_bo(data, off + 8, bo);
-        let y2 = read_fixed_bo(data, off + 12, bo);
-        let x3 = read_fixed_bo(data, off + 16, bo);
-        let y3 = read_fixed_bo(data, off + 20, bo);
-        triangles.push((x1, y1, x2, y2, x3, y3));
-        off += 24;
-    }
+    // Convert x11rb Triangle structs to f64 tuples
+    let triangles: Vec<_> = req
+        .triangles
+        .iter()
+        .map(|t| {
+            (
+                fixed_to_f64(t.p1.x),
+                fixed_to_f64(t.p1.y),
+                fixed_to_f64(t.p2.x),
+                fixed_to_f64(t.p2.y),
+                fixed_to_f64(t.p3.x),
+                fixed_to_f64(t.p3.y),
+            )
+        })
+        .collect();
 
     if let Some(fb) = state.get_framebuffer_mut(dst_draw) {
         let fb_w = fb.width() as i32;
@@ -686,12 +713,23 @@ pub(crate) fn handle_tri_strip(state: &mut ClientState, data: &[u8], seq: u16) -
     let minor = data[1] as u16;
     require_len!(data, 24, seq, 139, minor, bo);
 
-    let op = data[4];
-    let src_pic = read_u32_bo(data, 8, bo);
-    let dst_pic = read_u32_bo(data, 12, bo);
-    let _mask_format = read_u32_bo(data, 16, bo);
-    let _src_x = read_i16_bo(data, 20, bo);
-    let _src_y = read_i16_bo(data, 22, bo);
+    let req = match TriStripRequest::try_parse_request(request_header(data), &data[4..]) {
+        Ok(r) => r,
+        Err(_) => {
+            return crate::xserver::core::build_error_bo(
+                crate::xserver::core::LENGTH_ERROR,
+                seq,
+                0,
+                139,
+                minor,
+                bo,
+            )
+        }
+    };
+
+    let op = u8::from(req.op);
+    let src_pic = req.src;
+    let dst_pic = req.dst;
 
     info!("Render TriStrip: op={op} src={src_pic:#x} dst={dst_pic:#x}");
 
@@ -718,15 +756,12 @@ pub(crate) fn handle_tri_strip(state: &mut ClientState, data: &[u8], seq: u16) -
     };
     let clip = ClipSnapshot::from_picture(state, dst_pic);
 
-    // Points: 8 bytes each (FIXED x + FIXED y)
-    let mut points = Vec::new();
-    let mut off = 24;
-    while off + 8 <= data.len() {
-        let x = read_fixed_bo(data, off, bo);
-        let y = read_fixed_bo(data, off + 4, bo);
-        points.push((x, y));
-        off += 8;
-    }
+    // Convert Pointfix to f64 pairs
+    let points: Vec<_> = req
+        .points
+        .iter()
+        .map(|p| (fixed_to_f64(p.x), fixed_to_f64(p.y)))
+        .collect();
 
     if points.len() < 3 {
         return crate::xserver::core::build_error_bo(
@@ -799,12 +834,23 @@ pub(crate) fn handle_tri_fan(state: &mut ClientState, data: &[u8], seq: u16) -> 
     let minor = data[1] as u16;
     require_len!(data, 24, seq, 139, minor, bo);
 
-    let op = data[4];
-    let src_pic = read_u32_bo(data, 8, bo);
-    let dst_pic = read_u32_bo(data, 12, bo);
-    let _mask_format = read_u32_bo(data, 16, bo);
-    let _src_x = read_i16_bo(data, 20, bo);
-    let _src_y = read_i16_bo(data, 22, bo);
+    let req = match TriFanRequest::try_parse_request(request_header(data), &data[4..]) {
+        Ok(r) => r,
+        Err(_) => {
+            return crate::xserver::core::build_error_bo(
+                crate::xserver::core::LENGTH_ERROR,
+                seq,
+                0,
+                139,
+                minor,
+                bo,
+            )
+        }
+    };
+
+    let op = u8::from(req.op);
+    let src_pic = req.src;
+    let dst_pic = req.dst;
 
     info!("Render TriFan: op={op} src={src_pic:#x} dst={dst_pic:#x}");
 
@@ -831,14 +877,12 @@ pub(crate) fn handle_tri_fan(state: &mut ClientState, data: &[u8], seq: u16) -> 
     };
     let clip = ClipSnapshot::from_picture(state, dst_pic);
 
-    let mut points = Vec::new();
-    let mut off = 24;
-    while off + 8 <= data.len() {
-        let x = read_fixed_bo(data, off, bo);
-        let y = read_fixed_bo(data, off + 4, bo);
-        points.push((x, y));
-        off += 8;
-    }
+    // Convert Pointfix to f64 pairs
+    let points: Vec<_> = req
+        .points
+        .iter()
+        .map(|p| (fixed_to_f64(p.x), fixed_to_f64(p.y)))
+        .collect();
 
     if points.len() < 3 {
         return crate::xserver::core::build_error_bo(
@@ -910,21 +954,28 @@ pub(crate) fn handle_fill_rectangles(state: &mut ClientState, data: &[u8], seq: 
     let minor = data[1] as u16;
     require_len!(data, 24, seq, 139, minor, bo);
 
-    let op = data[4];
-    let dst_pic = read_u32_bo(data, 8, bo);
-    // Color is in the request at offset 12..20 (CARD16 each: red,
-    // green, blue, alpha). XRenderColor is *already* premultiplied
-    // per the X RENDER spec, so we just truncate 16-bit -> 8-bit;
-    // no extra alpha multiply.
-    let red = read_u16_bo(data, 12, bo);
-    let green = read_u16_bo(data, 14, bo);
-    let blue = read_u16_bo(data, 16, bo);
-    let alpha = read_u16_bo(data, 18, bo);
+    let req = match FillRectanglesRequest::try_parse_request(request_header(data), &data[4..]) {
+        Ok(r) => r,
+        Err(_) => {
+            return crate::xserver::core::build_error_bo(
+                crate::xserver::core::LENGTH_ERROR,
+                seq,
+                0,
+                139,
+                minor,
+                bo,
+            )
+        }
+    };
 
-    let r = (red >> 8) as u8;
-    let g = (green >> 8) as u8;
-    let b = (blue >> 8) as u8;
-    let a = (alpha >> 8) as u8;
+    let op = u8::from(req.op);
+    let dst_pic = req.dst;
+    // Color: XRenderColor is *already* premultiplied per the X RENDER spec,
+    // so we just truncate 16-bit -> 8-bit; no extra alpha multiply.
+    let r = (req.color.red >> 8) as u8;
+    let g = (req.color.green >> 8) as u8;
+    let b = (req.color.blue >> 8) as u8;
+    let a = (req.color.alpha >> 8) as u8;
 
     let (dst_drawable, dst_has_alpha) = state
         .render
@@ -947,32 +998,27 @@ pub(crate) fn handle_fill_rectangles(state: &mut ClientState, data: &[u8], seq: 
     };
     let clip = ClipSnapshot::from_picture(state, dst_pic);
 
-    // Parse rectangles (8 bytes each: x(2) y(2) w(2) h(2))
-    let mut off = 20;
-    let mut rects = Vec::new();
-    while off + 8 <= data.len() {
-        let x = read_i16_bo(data, off, bo);
-        let y = read_i16_bo(data, off + 2, bo);
-        let w = read_u16_bo(data, off + 4, bo);
-        let h = read_u16_bo(data, off + 6, bo);
-        rects.push((x, y, w, h));
-        off += 8;
-    }
+    // Use the rectangles from the parsed request
+    let rects: Vec<_> = req
+        .rects
+        .iter()
+        .map(|rect| (rect.x, rect.y, rect.width, rect.height))
+        .collect();
 
     if let Some(fb) = state.get_framebuffer_mut(dst_draw) {
         let fb_w = fb.width() as i32;
         let fb_h = fb.height() as i32;
         let fb_stride = fb.stride();
 
-        for (rx, ry, rw, rh) in &rects {
+        for &(rx, ry, rw, rh) in &rects {
             let fb_data = fb.data_mut();
-            for row in 0..*rh as i32 {
-                let dy = *ry as i32 + row;
+            for row in 0..rh as i32 {
+                let dy = ry as i32 + row;
                 if dy < 0 || dy >= fb_h {
                     continue;
                 }
-                for col in 0..*rw as i32 {
-                    let dx = *rx as i32 + col;
+                for col in 0..rw as i32 {
+                    let dx = rx as i32 + col;
                     if dx < 0 || dx >= fb_w {
                         continue;
                     }
@@ -994,7 +1040,7 @@ pub(crate) fn handle_fill_rectangles(state: &mut ClientState, data: &[u8], seq: 
                     );
                 }
             }
-            fb.mark_dirty(*rx as i32, *ry as i32, *rw as u32, *rh as u32);
+            fb.mark_dirty(rx as i32, ry as i32, rw as u32, rh as u32);
         }
     }
 
@@ -1011,21 +1057,33 @@ pub(crate) fn handle_fill_rectangles(state: &mut ClientState, data: &[u8], seq: 
 // ---------------------------------------------------------------------------
 
 /// AddTraps adds trapezoids to an existing picture's geometry.
-/// Each trap is: top(Fixed), bottom(Fixed), left_x1(Fixed), left_y1(Fixed),
-/// left_x2(Fixed), left_y2(Fixed), right_x1(Fixed), right_y1(Fixed),
-/// right_x2(Fixed), right_y2(Fixed) = 40 bytes.
 pub(crate) fn handle_add_traps(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
     let bo = state.msb_first;
     let minor = data[1] as u16;
     require_len!(data, 12, seq, 139, minor, bo);
-    let pic_id = read_u32_bo(data, 4, bo);
-    let x_off = read_i16_bo(data, 8, bo);
-    let y_off = read_i16_bo(data, 10, bo);
 
-    let trap_data = &data[12..];
-    let num_traps = trap_data.len() / 40;
+    let req = match AddTrapsRequest::try_parse_request(request_header(data), &data[4..]) {
+        Ok(r) => r,
+        Err(_) => {
+            return crate::xserver::core::build_error_bo(
+                crate::xserver::core::LENGTH_ERROR,
+                seq,
+                0,
+                139,
+                minor,
+                bo,
+            )
+        }
+    };
 
-    debug!("Render AddTraps: pic={pic_id:#x} offset=({x_off},{y_off}) traps={num_traps}");
+    let pic_id = req.picture;
+    let x_off = req.x_off;
+    let y_off = req.y_off;
+
+    debug!(
+        "Render AddTraps: pic={pic_id:#x} offset=({x_off},{y_off}) traps={}",
+        req.traps.len()
+    );
 
     let (target, fb_w) = {
         let pic = match state.render.pictures.get(&pic_id) {
@@ -1059,40 +1117,33 @@ pub(crate) fn handle_add_traps(state: &mut ClientState, data: &[u8], seq: u16) -
         (d, w)
     };
 
-    for i in 0..num_traps {
-        let base = i * 40;
-        if base + 40 > trap_data.len() {
-            break;
-        }
+    for trap in req.traps.iter() {
+        // Each Trap has top: Spanfix and bot: Spanfix
+        // Spanfix has { l: Fixed, r: Fixed, y: Fixed }
+        let top_y = fixed_to_f64(trap.top.y);
+        let top_l = fixed_to_f64(trap.top.l) + x_off as f64;
+        let top_r = fixed_to_f64(trap.top.r) + x_off as f64;
+        let bot_y = fixed_to_f64(trap.bot.y);
+        let bot_l = fixed_to_f64(trap.bot.l) + x_off as f64;
+        let bot_r = fixed_to_f64(trap.bot.r) + x_off as f64;
 
-        let top = read_fixed_bo(trap_data, base, bo);
-        let bottom = read_fixed_bo(trap_data, base + 4, bo);
-        let l_x1 = read_fixed_bo(trap_data, base + 8, bo) + x_off as f64;
-        let l_y1 = read_fixed_bo(trap_data, base + 12, bo) + y_off as f64;
-        let l_x2 = read_fixed_bo(trap_data, base + 16, bo) + x_off as f64;
-        let l_y2 = read_fixed_bo(trap_data, base + 20, bo) + y_off as f64;
-        let r_x1 = read_fixed_bo(trap_data, base + 24, bo) + x_off as f64;
-        let r_y1 = read_fixed_bo(trap_data, base + 28, bo) + y_off as f64;
-        let r_x2 = read_fixed_bo(trap_data, base + 32, bo) + x_off as f64;
-        let r_y2 = read_fixed_bo(trap_data, base + 36, bo) + y_off as f64;
-
-        let y_start = (top + y_off as f64).floor().max(0.0) as u32;
-        let y_end = (bottom + y_off as f64).ceil().max(0.0) as u32;
+        let y_start = (top_y + y_off as f64).floor().max(0.0) as u32;
+        let y_end = (bot_y + y_off as f64).ceil().max(0.0) as u32;
 
         if let Some(fb) = state.get_framebuffer_mut(target) {
             for y in y_start..y_end {
                 let yf = y as f64 + 0.5;
                 // Interpolate left edge
-                let left_x = if (l_y2 - l_y1).abs() > 0.001 {
-                    l_x1 + (l_x2 - l_x1) * (yf - l_y1) / (l_y2 - l_y1)
+                let left_x = if (bot_y - top_y).abs() > 0.001 {
+                    top_l + (bot_l - top_l) * (yf - top_y - y_off as f64) / (bot_y - top_y)
                 } else {
-                    l_x1
+                    top_l
                 };
                 // Interpolate right edge
-                let right_x = if (r_y2 - r_y1).abs() > 0.001 {
-                    r_x1 + (r_x2 - r_x1) * (yf - r_y1) / (r_y2 - r_y1)
+                let right_x = if (bot_y - top_y).abs() > 0.001 {
+                    top_r + (bot_r - top_r) * (yf - top_y - y_off as f64) / (bot_y - top_y)
                 } else {
-                    r_x1
+                    top_r
                 };
 
                 let x_start = (left_x.floor() as i32).max(0) as u32;

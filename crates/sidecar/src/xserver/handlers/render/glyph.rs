@@ -7,13 +7,33 @@ use super::{
 };
 use crate::xserver::core::require_len;
 use crate::xserver::core::{read_i16_bo, read_u16_bo, read_u32_bo};
+use crate::xserver::request::request_header;
 use crate::xserver::ClientState;
+use x11rb_protocol::protocol::render::{
+    AddGlyphsRequest, CreateGlyphSetRequest, FreeGlyphSetRequest, FreeGlyphsRequest,
+    ReferenceGlyphSetRequest,
+};
 
 pub(crate) fn handle_create_glyphset(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
     let bo = state.msb_first;
     require_len!(data, 12, seq, 139, data[1] as u16, bo);
-    let gsid = read_u32_bo(data, 4, bo);
-    let format_id = read_u32_bo(data, 8, bo);
+
+    let req = match CreateGlyphSetRequest::try_parse_request(request_header(data), &data[4..]) {
+        Ok(r) => r,
+        Err(_) => {
+            return crate::xserver::core::build_error_bo(
+                crate::xserver::core::LENGTH_ERROR,
+                seq,
+                0,
+                139,
+                data[1] as u16,
+                bo,
+            )
+        }
+    };
+
+    let gsid = req.gsid;
+    let format_id = req.format;
 
     debug!("Render CreateGlyphSet: gsid={gsid:#x} format={format_id:#x}");
 
@@ -30,7 +50,22 @@ pub(crate) fn handle_create_glyphset(state: &mut ClientState, data: &[u8], seq: 
 pub(crate) fn handle_free_glyphset(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
     let bo = state.msb_first;
     require_len!(data, 8, seq, 139, data[1] as u16, bo);
-    let gsid = read_u32_bo(data, 4, bo);
+
+    let req = match FreeGlyphSetRequest::try_parse_request(request_header(data), &data[4..]) {
+        Ok(r) => r,
+        Err(_) => {
+            return crate::xserver::core::build_error_bo(
+                crate::xserver::core::LENGTH_ERROR,
+                seq,
+                0,
+                139,
+                data[1] as u16,
+                bo,
+            )
+        }
+    };
+
+    let gsid = req.glyphset;
     state.render.glyphsets.remove(&gsid);
     state.recycle_xid(gsid);
     Vec::new()
@@ -41,8 +76,23 @@ pub(crate) fn handle_free_glyphset(state: &mut ClientState, data: &[u8], seq: u1
 pub(crate) fn handle_reference_glyphset(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
     let bo = state.msb_first;
     require_len!(data, 12, seq, 139, data[1] as u16, bo);
-    let new_gsid = read_u32_bo(data, 4, bo);
-    let existing_gsid = read_u32_bo(data, 8, bo);
+
+    let req = match ReferenceGlyphSetRequest::try_parse_request(request_header(data), &data[4..]) {
+        Ok(r) => r,
+        Err(_) => {
+            return crate::xserver::core::build_error_bo(
+                crate::xserver::core::LENGTH_ERROR,
+                seq,
+                0,
+                139,
+                data[1] as u16,
+                bo,
+            )
+        }
+    };
+
+    let new_gsid = req.gsid;
+    let existing_gsid = req.existing;
 
     debug!("Render ReferenceGlyphSet: new={new_gsid:#x} existing={existing_gsid:#x}");
 
@@ -71,53 +121,51 @@ pub(crate) fn handle_add_glyphs(state: &mut ClientState, data: &[u8], seq: u16) 
     let minor = data[1] as u16;
     require_len!(data, 12, seq, 139, minor, bo);
 
-    let gsid = read_u32_bo(data, 4, bo);
-    let num_glyphs = read_u32_bo(data, 8, bo) as usize;
+    let req = match AddGlyphsRequest::try_parse_request(request_header(data), &data[4..]) {
+        Ok(r) => r,
+        Err(_) => {
+            return crate::xserver::core::build_error_bo(
+                crate::xserver::core::LENGTH_ERROR,
+                seq,
+                0,
+                139,
+                minor,
+                bo,
+            )
+        }
+    };
+
+    let gsid = req.glyphset;
+    let num_glyphs = req.glyphids.len();
 
     debug!("Render AddGlyphs: gsid={gsid:#x} num={num_glyphs}");
-
-    require_len!(data, 12 + num_glyphs * 4, seq, 139, minor, bo);
-
-    // Read glyph IDs
-    let mut glyph_ids = Vec::with_capacity(num_glyphs);
-    for i in 0..num_glyphs {
-        glyph_ids.push(read_u32_bo(data, 12 + i * 4, bo));
-    }
-
-    let info_start = 12 + num_glyphs * 4;
-    require_len!(data, info_start + num_glyphs * 12, seq, 139, minor, bo);
-
-    // Read GlyphInfo entries (12 bytes each)
-    let mut glyph_infos = Vec::with_capacity(num_glyphs);
-    for i in 0..num_glyphs {
-        let off = info_start + i * 12;
-        let width = read_u16_bo(data, off, bo);
-        let height = read_u16_bo(data, off + 2, bo);
-        let x = read_i16_bo(data, off + 4, bo);
-        let y = read_i16_bo(data, off + 6, bo);
-        let x_off = read_i16_bo(data, off + 8, bo);
-        let y_off = read_i16_bo(data, off + 10, bo);
-        glyph_infos.push((width, height, x, y, x_off, y_off));
-    }
-
-    let pixel_start = info_start + num_glyphs * 12;
 
     // Determine the format to know how to read pixel data
     let format_id = state.render.glyphsets.get(&gsid).map(|gs| gs.format_id);
 
-    let mut pixel_off = pixel_start;
-    let glyphs_to_store: Vec<(u32, StoredGlyph)> = glyph_ids
+    // The x11rb parser gives us glyphids, glyphs (GlyphInfo), and raw data.
+    // We need to slice the raw data according to each glyph's dimensions.
+    let mut pixel_off = 0usize;
+    let raw_data = &req.data;
+    let glyphs_to_store: Vec<(u32, StoredGlyph)> = req
+        .glyphids
         .iter()
-        .zip(glyph_infos.iter())
-        .map(|(&gid, &(width, height, x, y, x_off, y_off))| {
+        .zip(req.glyphs.iter())
+        .map(|(&gid, gi)| {
+            let width = gi.width;
+            let height = gi.height;
+            let x = gi.x;
+            let y = gi.y;
+            let x_off = gi.x_off;
+            let y_off = gi.y_off;
+
             let glyph_data = if width > 0 && height > 0 {
                 match format_id {
                     Some(fmt) if fmt == PICTFORMAT_A8 => {
-                        // A8: each row padded to 4 bytes
                         let row_bytes = pad4(width as usize);
                         let total = row_bytes * height as usize;
-                        let d = if pixel_off + total <= data.len() {
-                            data[pixel_off..pixel_off + total].to_vec()
+                        let d = if pixel_off + total <= raw_data.len() {
+                            raw_data[pixel_off..pixel_off + total].to_vec()
                         } else {
                             vec![0u8; total]
                         };
@@ -125,11 +173,10 @@ pub(crate) fn handle_add_glyphs(state: &mut ClientState, data: &[u8], seq: u16) 
                         d
                     }
                     Some(fmt) if fmt == PICTFORMAT_A1 => {
-                        // A1: each row padded to 4 bytes (in bits)
                         let row_bytes = pad4((width as usize).div_ceil(8));
                         let total = row_bytes * height as usize;
-                        let d = if pixel_off + total <= data.len() {
-                            data[pixel_off..pixel_off + total].to_vec()
+                        let d = if pixel_off + total <= raw_data.len() {
+                            raw_data[pixel_off..pixel_off + total].to_vec()
                         } else {
                             vec![0u8; total]
                         };
@@ -137,11 +184,10 @@ pub(crate) fn handle_add_glyphs(state: &mut ClientState, data: &[u8], seq: u16) 
                         d
                     }
                     Some(fmt) if fmt == PICTFORMAT_ARGB32 => {
-                        // ARGB32: 4 bytes per pixel, rows padded to 4 bytes
                         let row_bytes = width as usize * 4;
                         let total = row_bytes * height as usize;
-                        let d = if pixel_off + total <= data.len() {
-                            data[pixel_off..pixel_off + total].to_vec()
+                        let d = if pixel_off + total <= raw_data.len() {
+                            raw_data[pixel_off..pixel_off + total].to_vec()
                         } else {
                             vec![0u8; total]
                         };
@@ -152,8 +198,8 @@ pub(crate) fn handle_add_glyphs(state: &mut ClientState, data: &[u8], seq: u16) 
                         // Default to A8
                         let row_bytes = pad4(width as usize);
                         let total = row_bytes * height as usize;
-                        let d = if pixel_off + total <= data.len() {
-                            data[pixel_off..pixel_off + total].to_vec()
+                        let d = if pixel_off + total <= raw_data.len() {
+                            raw_data[pixel_off..pixel_off + total].to_vec()
                         } else {
                             vec![0u8; total]
                         };
@@ -193,17 +239,8 @@ pub(crate) fn handle_add_glyphs(state: &mut ClientState, data: &[u8], seq: u16) 
 ///
 /// Like AddGlyphs but reads pixel data from a Picture resource at a
 /// given (x, y) position rather than from inline data in the request.
-/// Each glyph's pixel region is extracted from the source picture's
-/// drawable at the offset computed from the glyph metrics.
-///
-/// Wire format:
-///   4-7:  glyphset (GLYPHSET)
-///   8-11: src_picture (PICTURE)
-///   12-15: num_glyphs (CARD32)
-///   Then for each glyph:
-///     glyph_id (CARD32)
-///   Then for each glyph:
-///     GlyphInfo (12 bytes): width(2), height(2), x(2), y(2), x_off(2), y_off(2)
+/// Note: There is no x11rb AddGlyphsFromPictureRequest struct, so we
+/// keep manual parsing here.
 pub(crate) fn handle_add_glyphs_from_picture(
     state: &mut ClientState,
     data: &[u8],
@@ -244,10 +281,8 @@ pub(crate) fn handle_add_glyphs_from_picture(
     }
 
     // Resolve the source picture's drawable to extract pixel data.
-    // The picture must reference a drawable (window or pixmap).
     let src_drawable = state.render.pictures.get(&src_picture).and_then(|p| {
         let did = p.drawable;
-        // Get the framebuffer data from the drawable
         if let Some(px) = state.pixmaps.get(&did) {
             Some((
                 px.framebuffer.data().to_vec(),
@@ -265,19 +300,15 @@ pub(crate) fn handle_add_glyphs_from_picture(
 
     let format_id = state.render.glyphsets.get(&gsid).map(|gs| gs.format_id);
 
-    // Extract each glyph's pixels from the source drawable.
-    // Glyphs are laid out sequentially in the source picture: glyph i
-    // starts at (sum of previous widths, 0) unless the metrics say otherwise.
     let mut src_x_cursor: usize = 0;
     let mut glyphs_to_store: Vec<(u32, StoredGlyph)> = Vec::with_capacity(num_glyphs);
 
     for (&gid, &(width, height, x, y, x_off, y_off)) in glyph_ids.iter().zip(glyph_infos.iter()) {
         let glyph_data = if width > 0 && height > 0 {
             if let Some((ref fb_data, fb_stride)) = src_drawable {
-                let bpp = 4usize; // BGRA framebuffer
+                let bpp = 4usize;
                 let mut pixels = Vec::new();
 
-                // Determine bytes-per-pixel for the glyph format
                 match format_id {
                     Some(fmt) if fmt == PICTFORMAT_A8 => {
                         let row_bytes = pad4(width as usize);
@@ -286,7 +317,6 @@ pub(crate) fn handle_add_glyphs_from_picture(
                             for col in 0..width as usize {
                                 let sx = src_x_cursor + col;
                                 let fb_off = sy * fb_stride * bpp + sx * bpp;
-                                // Extract alpha byte from BGRA
                                 let alpha = if fb_off + 3 < fb_data.len() {
                                     fb_data[fb_off + 3]
                                 } else {
@@ -294,7 +324,6 @@ pub(crate) fn handle_add_glyphs_from_picture(
                                 };
                                 pixels.push(alpha);
                             }
-                            // Pad row to 4 bytes
                             let pad = row_bytes - width as usize;
                             pixels.extend(std::iter::repeat_n(0u8, pad));
                         }
@@ -314,7 +343,6 @@ pub(crate) fn handle_add_glyphs_from_picture(
                         }
                     }
                     _ => {
-                        // Default to A8
                         let row_bytes = pad4(width as usize);
                         for row in 0..height as usize {
                             let sy = row;
@@ -335,7 +363,6 @@ pub(crate) fn handle_add_glyphs_from_picture(
                 }
                 pixels
             } else {
-                // Source picture not found or has no drawable - store empty
                 Vec::new()
             }
         } else {
@@ -370,12 +397,24 @@ pub(crate) fn handle_add_glyphs_from_picture(
 pub(crate) fn handle_free_glyphs(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
     let bo = state.msb_first;
     require_len!(data, 8, seq, 139, data[1] as u16, bo);
-    let gsid = read_u32_bo(data, 4, bo);
-    let num_glyphs = (data.len() - 8) / 4;
 
+    let req = match FreeGlyphsRequest::try_parse_request(request_header(data), &data[4..]) {
+        Ok(r) => r,
+        Err(_) => {
+            return crate::xserver::core::build_error_bo(
+                crate::xserver::core::LENGTH_ERROR,
+                seq,
+                0,
+                139,
+                data[1] as u16,
+                bo,
+            )
+        }
+    };
+
+    let gsid = req.glyphset;
     if let Some(gs) = state.render.glyphsets.get_mut(&gsid) {
-        for i in 0..num_glyphs {
-            let gid = read_u32_bo(data, 8 + i * 4, bo);
+        for &gid in req.glyphs.iter() {
             gs.glyphs.remove(&gid);
         }
     }
@@ -383,6 +422,12 @@ pub(crate) fn handle_free_glyphs(state: &mut ClientState, data: &[u8], seq: u16)
 }
 
 /// Handle CompositeGlyphs8/16/32
+///
+/// Note: CompositeGlyphs8/16/32Request all have the same structure but
+/// the `glyphcmds` field is raw bytes. The actual glyph ID size (1/2/4)
+/// is embedded in the glyphcmd parsing, not the x11rb struct, so we parse
+/// the header fields from the typed struct and continue to manually parse
+/// the glyphcmds using the glyph_id_size parameter.
 pub(crate) fn handle_composite_glyphs(
     state: &mut ClientState,
     data: &[u8],
@@ -393,13 +438,30 @@ pub(crate) fn handle_composite_glyphs(
     let minor = data[1] as u16;
     require_len!(data, 28, seq, 139, minor, bo);
 
-    let pict_op = data[4];
-    let src_pic = read_u32_bo(data, 8, bo);
-    let dst_pic = read_u32_bo(data, 12, bo);
-    let _mask_format = read_u32_bo(data, 16, bo);
-    let mut current_gsid = read_u32_bo(data, 20, bo);
-    let _src_x = read_i16_bo(data, 24, bo);
-    let _src_y = read_i16_bo(data, 26, bo);
+    // All three CompositeGlyphs variants have the same field layout.
+    // We parse the header fields manually from the typed struct's perspective
+    // but use a single code path. The CompositeGlyphs8Request struct works
+    // for all three since the header is identical.
+    use x11rb_protocol::protocol::render::CompositeGlyphs8Request;
+
+    let req = match CompositeGlyphs8Request::try_parse_request(request_header(data), &data[4..]) {
+        Ok(r) => r,
+        Err(_) => {
+            return crate::xserver::core::build_error_bo(
+                crate::xserver::core::LENGTH_ERROR,
+                seq,
+                0,
+                139,
+                minor,
+                bo,
+            )
+        }
+    };
+
+    let pict_op = u8::from(req.op);
+    let src_pic = req.src;
+    let dst_pic = req.dst;
+    let mut current_gsid = req.glyphset;
 
     debug!(
         "Render CompositeGlyphs{}: op={pict_op} src={src_pic:#x} dst={dst_pic:#x} gs={current_gsid:#x}",
@@ -431,8 +493,9 @@ pub(crate) fn handle_composite_glyphs(
     };
     let clip = ClipSnapshot::from_picture(state, dst_pic);
 
-    // Parse glyphcmds
-    let mut off = 28;
+    // Parse glyphcmds from the raw bytes provided by x11rb
+    let glyphcmds = &req.glyphcmds;
+    let mut off = 0usize;
     let mut pen_x: i32 = 0;
     let mut pen_y: i32 = 0;
     let mut first_element = true;
@@ -448,11 +511,8 @@ pub(crate) fn handle_composite_glyphs(
     }
     let mut ops: Vec<GlyphOp> = Vec::new();
 
-    while off < data.len() {
-        if off >= data.len() {
-            break;
-        }
-        let len = data[off] as usize;
+    while off < glyphcmds.len() {
+        let len = glyphcmds[off] as usize;
 
         if len == 0 {
             break;
@@ -460,8 +520,14 @@ pub(crate) fn handle_composite_glyphs(
 
         if len == 255 {
             // Glyphset switch
-            if off + 8 <= data.len() {
-                current_gsid = read_u32_bo(data, off + 4, bo);
+            if off + 8 <= glyphcmds.len() {
+                // Read the new glyphset ID from the raw glyphcmds bytes (LE)
+                current_gsid = u32::from_le_bytes([
+                    glyphcmds[off + 4],
+                    glyphcmds[off + 5],
+                    glyphcmds[off + 6],
+                    glyphcmds[off + 7],
+                ]);
                 off = pad4(off + 8);
             } else {
                 break;
@@ -470,12 +536,12 @@ pub(crate) fn handle_composite_glyphs(
         }
 
         // Regular glyph element
-        if off + 8 > data.len() {
+        if off + 8 > glyphcmds.len() {
             break;
         }
         // bytes 1..3 = padding
-        let delta_x = read_i16_bo(data, off + 4, bo);
-        let delta_y = read_i16_bo(data, off + 6, bo);
+        let delta_x = i16::from_le_bytes([glyphcmds[off + 4], glyphcmds[off + 5]]);
+        let delta_y = i16::from_le_bytes([glyphcmds[off + 6], glyphcmds[off + 7]]);
 
         if first_element {
             pen_x = delta_x as i32;
@@ -488,18 +554,23 @@ pub(crate) fn handle_composite_glyphs(
 
         let glyph_data_start = off + 8;
         let glyph_data_bytes = len * glyph_id_size;
-        if glyph_data_start + glyph_data_bytes > data.len() {
+        if glyph_data_start + glyph_data_bytes > glyphcmds.len() {
             break;
         }
 
-        // Read glyph IDs
+        // Read glyph IDs from the raw glyphcmds bytes
         let mut glyph_ids = Vec::with_capacity(len);
         for i in 0..len {
             let gid_off = glyph_data_start + i * glyph_id_size;
             let gid = match glyph_id_size {
-                1 => data[gid_off] as u32,
-                2 => read_u16_bo(data, gid_off, bo) as u32,
-                4 => read_u32_bo(data, gid_off, bo),
+                1 => glyphcmds[gid_off] as u32,
+                2 => u16::from_le_bytes([glyphcmds[gid_off], glyphcmds[gid_off + 1]]) as u32,
+                4 => u32::from_le_bytes([
+                    glyphcmds[gid_off],
+                    glyphcmds[gid_off + 1],
+                    glyphcmds[gid_off + 2],
+                    glyphcmds[gid_off + 3],
+                ]),
                 _ => 0,
             };
             glyph_ids.push(gid);
@@ -538,10 +609,6 @@ pub(crate) fn handle_composite_glyphs(
 
         for op in &ops {
             let fb_data = fb.data_mut();
-            // ARGB32-format glyphs carry per-channel alpha for sub-pixel
-            // (LCD) text rendering. Each channel of the glyph mask
-            // independently modulates the corresponding source channel,
-            // matching the RENDER spec's component-alpha behaviour.
             let is_argb = op.format_id == PICTFORMAT_ARGB32;
 
             for row in 0..op.height as i32 {
@@ -564,8 +631,6 @@ pub(crate) fn handle_composite_glyphs(
                     }
 
                     if is_argb {
-                        // Component-alpha: each glyph channel modulates
-                        // the corresponding source channel independently.
                         let (mb, mg, mr, ma) =
                             get_glyph_argb(&op.alpha_data, op.width, col as u16, row as u16);
                         if mb == 0 && mg == 0 && mr == 0 && ma == 0 {
@@ -575,7 +640,6 @@ pub(crate) fn handle_composite_glyphs(
                         let eff_g = ((sg as u32 * mg as u32 + 127) / 255) as u8;
                         let eff_r = ((sr as u32 * mr as u32 + 127) / 255) as u8;
                         let eff_a = ((sa as u32 * ma as u32 + 127) / 255) as u8;
-                        // Per-channel effective source alpha for CA compositing.
                         let sa_b = ((sa as u32 * mb as u32 + 127) / 255) as u8;
                         let sa_g = ((sa as u32 * mg as u32 + 127) / 255) as u8;
                         let sa_r = ((sa as u32 * mr as u32 + 127) / 255) as u8;
@@ -594,8 +658,6 @@ pub(crate) fn handle_composite_glyphs(
                             dst_has_alpha,
                         );
                     } else {
-                        // Uniform alpha (A8/A1): single alpha modulates
-                        // all source channels equally.
                         let alpha = get_glyph_alpha(
                             &op.alpha_data,
                             op.width,
@@ -683,12 +745,9 @@ fn get_glyph_alpha(data: &[u8], width: u16, x: u16, y: u16, format_id: u32) -> u
 }
 
 /// Extract per-channel BGRA values from an ARGB32-format glyph at a given position.
-/// Used for component-alpha (sub-pixel) text rendering where each channel
-/// of the glyph mask independently modulates the corresponding source channel.
 fn get_glyph_argb(data: &[u8], width: u16, x: u16, y: u16) -> (u8, u8, u8, u8) {
     let off = (y as usize * width as usize + x as usize) * 4;
     if off + 3 < data.len() {
-        // Glyph data is stored in BGRA order (matching our framebuffer layout).
         (data[off], data[off + 1], data[off + 2], data[off + 3])
     } else {
         (0, 0, 0, 0)
@@ -706,7 +765,6 @@ pub(super) mod tests {
 
     #[test]
     fn glyph_argb_second_pixel() {
-        // Two ARGB32 pixels at (0,0) and (1,0)
         let data = vec![
             10, 20, 30, 200, // pixel (0,0)
             50, 60, 70, 100, // pixel (1,0)
@@ -717,8 +775,7 @@ pub(super) mod tests {
 
     #[test]
     fn glyph_a8_alpha_extraction() {
-        // A8 format: one byte per pixel, padded to 4 bytes per row
-        let data = vec![128, 64, 32, 0]; // 4 pixels in one padded row
+        let data = vec![128, 64, 32, 0];
         let a = get_glyph_alpha(&data, 4, 0, 0, PICTFORMAT_A8);
         assert_eq!(a, 128);
         let a = get_glyph_alpha(&data, 4, 1, 0, PICTFORMAT_A8);
@@ -727,13 +784,12 @@ pub(super) mod tests {
 
     #[test]
     fn glyph_a1_bit_extraction() {
-        // A1 format: bit-packed, LSB first
-        let data = vec![0b00000101, 0, 0, 0]; // bits 0 and 2 are set
+        let data = vec![0b00000101, 0, 0, 0];
         let a = get_glyph_alpha(&data, 8, 0, 0, PICTFORMAT_A1);
-        assert_eq!(a, 255); // bit 0 set
+        assert_eq!(a, 255);
         let a = get_glyph_alpha(&data, 8, 1, 0, PICTFORMAT_A1);
-        assert_eq!(a, 0); // bit 1 not set
+        assert_eq!(a, 0);
         let a = get_glyph_alpha(&data, 8, 2, 0, PICTFORMAT_A1);
-        assert_eq!(a, 255); // bit 2 set
+        assert_eq!(a, 255);
     }
 }

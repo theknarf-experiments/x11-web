@@ -5,9 +5,15 @@ use tracing::debug;
 
 use super::super::super::client::ClientState;
 use crate::xserver::reply::ReplyBuf;
+use crate::xserver::request::request_header;
 use super::{
     CapturedFrame, FOURCC_I420, FOURCC_NV12, FOURCC_NV21, FOURCC_RGB3, FOURCC_RV32, FOURCC_UYVY,
     FOURCC_Y800, FOURCC_YUY2, FOURCC_YV12, FOURCC_YV16,
+};
+use x11rb_protocol::protocol::xv::{
+    GetStillRequest, GetVideoRequest, PutImageRequest, PutStillRequest, PutVideoRequest,
+    QueryImageAttributesRequest as XvQueryImageAttributesRequest, ShmPutImageRequest,
+    StopVideoRequest,
 };
 
 // ---------------------------------------------------------------------------
@@ -944,7 +950,9 @@ pub(crate) fn handle_image_request(
             // PutVideo — not supported (software adaptor has no video capture)
             // Per XVideo spec §4.3: return BadMatch for unsupported port operations.
             let port = if data.len() >= 8 {
-                state.read_u32(data, 4)
+                PutVideoRequest::try_parse_request(request_header(data), &data[4..])
+                    .map(|r| r.port)
+                    .unwrap_or(0)
             } else {
                 0
             };
@@ -962,7 +970,9 @@ pub(crate) fn handle_image_request(
             // PutStill — not supported (software adaptor has no video capture)
             // Per XVideo spec §4.4: return BadMatch for unsupported port operations.
             let port = if data.len() >= 8 {
-                state.read_u32(data, 4)
+                PutStillRequest::try_parse_request(request_header(data), &data[4..])
+                    .map(|r| r.port)
+                    .unwrap_or(0)
             } else {
                 0
             };
@@ -980,7 +990,9 @@ pub(crate) fn handle_image_request(
             // GetVideo — not supported (software adaptor has no video capture output)
             // Per XVideo spec §4.5: return BadMatch for unsupported port operations.
             let port = if data.len() >= 8 {
-                state.read_u32(data, 4)
+                GetVideoRequest::try_parse_request(request_header(data), &data[4..])
+                    .map(|r| r.port)
+                    .unwrap_or(0)
             } else {
                 0
             };
@@ -999,17 +1011,21 @@ pub(crate) fn handle_image_request(
             if data.len() < 32 {
                 return Vec::new();
             }
-            let port = state.read_u32(data, 4);
-            let drawable = state.read_u32(data, 8);
-            let gc_id = state.read_u32(data, 12);
-            let vid_x = state.read_i16(data, 16);
-            let vid_y = state.read_i16(data, 18);
-            let vid_w = state.read_u16(data, 20);
-            let vid_h = state.read_u16(data, 22);
-            let drw_x = state.read_i16(data, 24);
-            let drw_y = state.read_i16(data, 26);
-            let drw_w = state.read_u16(data, 28);
-            let drw_h = state.read_u16(data, 30);
+            let req = match GetStillRequest::try_parse_request(request_header(data), &data[4..]) {
+                Ok(r) => r,
+                Err(_) => return Vec::new(),
+            };
+            let port = req.port;
+            let drawable = req.drawable;
+            let gc_id = req.gc;
+            let vid_x = req.vid_x;
+            let vid_y = req.vid_y;
+            let vid_w = req.vid_w;
+            let vid_h = req.vid_h;
+            let drw_x = req.drw_x;
+            let drw_y = req.drw_y;
+            let drw_w = req.drw_w;
+            let drw_h = req.drw_h;
 
             debug!(
                 "XVideo GetStill: port={port} drawable={drawable:#x} gc={gc_id:#x} \
@@ -1067,8 +1083,10 @@ pub(crate) fn handle_image_request(
         12 => {
             // XvStopVideo
             if data.len() >= 8 {
-                let port = state.read_u32(data, 4);
-                debug!("XVideo StopVideo: port={port}");
+                if let Ok(req) = StopVideoRequest::try_parse_request(request_header(data), &data[4..]) {
+                    let port = req.port;
+                    debug!("XVideo StopVideo: port={port}");
+                }
             }
             Vec::new()
         }
@@ -1136,10 +1154,13 @@ pub(crate) fn handle_image_request(
         17 => {
             // XvQueryImageAttributes
             if data.len() >= 16 {
-                let _port = state.read_u32(data, 4);
-                let fourcc = state.read_u32(data, 8);
-                let width = state.read_u16(data, 12) as u32;
-                let height = state.read_u16(data, 14) as u32;
+                let req = match XvQueryImageAttributesRequest::try_parse_request(request_header(data), &data[4..]) {
+                    Ok(r) => r,
+                    Err(_) => return Vec::new(),
+                };
+                let fourcc = req.id;
+                let width = req.width as u32;
+                let height = req.height as u32;
 
                 let (data_size, pitches, offsets) = query_image_attributes(fourcc, width, height);
 
@@ -1176,42 +1197,24 @@ pub(crate) fn handle_image_request(
         }
         18 => {
             // XvPutImage
-            // XvPutImage request layout:
-            // [0]: major opcode
-            // [1]: minor opcode (18)
-            // [2..4]: request length
-            // [4..8]: port
-            // [8..12]: drawable
-            // [12..16]: gc
-            // [16..20]: id (FOURCC)
-            // [20..22]: src_x
-            // [22..24]: src_y
-            // [24..26]: src_w
-            // [26..28]: src_h
-            // [28..30]: drw_x
-            // [30..32]: drw_y
-            // [32..34]: drw_w
-            // [34..36]: drw_h
-            // [36..38]: width (image width)
-            // [38..40]: height (image height)
-            // [40..]: image data
             if data.len() >= 40 {
-                let port = state.read_u32(data, 4);
-                let drawable = state.read_u32(data, 8);
-                let _gc = state.read_u32(data, 12);
-                let fourcc = state.read_u32(data, 16);
-                let _src_x = state.read_i16(data, 20);
-                let _src_y = state.read_i16(data, 22);
-                let src_w = state.read_u16(data, 24);
-                let src_h = state.read_u16(data, 26);
-                let drw_x = state.read_i16(data, 28);
-                let drw_y = state.read_i16(data, 30);
-                let drw_w = state.read_u16(data, 32);
-                let drw_h = state.read_u16(data, 34);
-                let img_w = state.read_u16(data, 36);
-                let img_h = state.read_u16(data, 38);
+                let req = match PutImageRequest::try_parse_request(request_header(data), &data[4..]) {
+                    Ok(r) => r,
+                    Err(_) => return Vec::new(),
+                };
+                let port = req.port;
+                let drawable = req.drawable;
+                let fourcc = req.id;
+                let src_w = req.src_w;
+                let src_h = req.src_h;
+                let drw_x = req.drw_x;
+                let drw_y = req.drw_y;
+                let drw_w = req.drw_w;
+                let drw_h = req.drw_h;
+                let img_w = req.width;
+                let img_h = req.height;
 
-                let yuv_data = &data[40..];
+                let yuv_data = &*req.data;
 
                 // Use image dimensions for conversion, then scale to drw dimensions
                 xv_put_image_impl(
@@ -1232,42 +1235,25 @@ pub(crate) fn handle_image_request(
         }
         19 => {
             // XvShmPutImage
-            // XvShmPutImage request layout:
-            // [4..8]: port
-            // [8..12]: drawable
-            // [12..16]: gc
-            // [16..20]: shmseg
-            // [20..24]: id (FOURCC)
-            // [24..28]: offset
-            // [28..30]: src_x
-            // [30..32]: src_y
-            // [32..34]: src_w
-            // [34..36]: src_h
-            // [36..38]: drw_x
-            // [38..40]: drw_y
-            // [40..42]: drw_w
-            // [42..44]: drw_h
-            // [44..46]: width (image width)
-            // [46..48]: height (image height)
-            // [48]: send_event
             if data.len() >= 49 {
-                let port = state.read_u32(data, 4);
-                let drawable = state.read_u32(data, 8);
-                let _gc = state.read_u32(data, 12);
-                let shmseg = state.read_u32(data, 16);
-                let fourcc = state.read_u32(data, 20);
-                let offset = state.read_u32(data, 24) as usize;
-                let _src_x = state.read_i16(data, 28);
-                let _src_y = state.read_i16(data, 30);
-                let src_w = state.read_u16(data, 32);
-                let src_h = state.read_u16(data, 34);
-                let drw_x = state.read_i16(data, 36);
-                let drw_y = state.read_i16(data, 38);
-                let drw_w = state.read_u16(data, 40);
-                let drw_h = state.read_u16(data, 42);
-                let img_w = state.read_u16(data, 44);
-                let img_h = state.read_u16(data, 46);
-                let send_event = data[48] != 0;
+                let req = match ShmPutImageRequest::try_parse_request(request_header(data), &data[4..]) {
+                    Ok(r) => r,
+                    Err(_) => return Vec::new(),
+                };
+                let port = req.port;
+                let drawable = req.drawable;
+                let shmseg = req.shmseg;
+                let fourcc = req.id;
+                let offset = req.offset as usize;
+                let src_w = req.src_w;
+                let src_h = req.src_h;
+                let drw_x = req.drw_x;
+                let drw_y = req.drw_y;
+                let drw_w = req.drw_w;
+                let drw_h = req.drw_h;
+                let img_w = req.width;
+                let img_h = req.height;
+                let send_event = req.send_event != 0;
 
                 debug!(
                     "XVideo ShmPutImage: port={port} drawable={drawable:#x} shmseg={shmseg} \

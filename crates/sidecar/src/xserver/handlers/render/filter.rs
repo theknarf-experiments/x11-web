@@ -2,27 +2,40 @@ use tracing::debug;
 
 use super::{pad4, PictFilter};
 use crate::xserver::core::require_len;
-use crate::xserver::core::{read_u16_bo, read_u32_bo};
+use crate::xserver::request::request_header;
 use crate::xserver::ClientState;
 use crate::xserver::reply::ReplyBuf;
+use x11rb_protocol::protocol::render::SetPictureFilterRequest;
 
 /// SetPictureFilter (RENDER minor opcode 30).
 /// Sets the filter on a picture (nearest, bilinear, etc.).
 pub(crate) fn handle_set_picture_filter(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
     let bo = state.msb_first;
     require_len!(data, 12, seq, 139, data[1] as u16, bo);
-    let pic_id = read_u32_bo(data, 4, bo);
-    let name_len = read_u16_bo(data, 8, bo) as usize;
-    let filter = if data.len() >= 10 + name_len {
-        let filter_name = std::str::from_utf8(&data[10..10 + name_len]).unwrap_or("nearest");
-        debug!("Render SetPictureFilter: pic={pic_id:#x} filter={filter_name}");
-        match filter_name {
-            "bilinear" | "best" | "good" => PictFilter::Bilinear,
-            _ => PictFilter::Nearest,
+
+    let req = match SetPictureFilterRequest::try_parse_request(request_header(data), &data[4..]) {
+        Ok(r) => r,
+        Err(_) => {
+            return crate::xserver::core::build_error_bo(
+                crate::xserver::core::LENGTH_ERROR,
+                seq,
+                0,
+                139,
+                data[1] as u16,
+                bo,
+            )
         }
-    } else {
-        PictFilter::Nearest
     };
+
+    let pic_id = req.picture;
+    let filter_name = std::str::from_utf8(&req.filter).unwrap_or("nearest");
+    debug!("Render SetPictureFilter: pic={pic_id:#x} filter={filter_name}");
+
+    let filter = match filter_name {
+        "bilinear" | "best" | "good" => PictFilter::Bilinear,
+        _ => PictFilter::Nearest,
+    };
+
     if let Some(pic) = state.render.pictures.get_mut(&pic_id) {
         pic.filter = filter;
     }

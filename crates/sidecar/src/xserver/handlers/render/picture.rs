@@ -1,6 +1,8 @@
 use tracing::debug;
 use x11rb_protocol::protocol::render::{
-    Directformat, PictType, Pictdepth, Pictforminfo, Pictscreen, Pictvisual,
+    ChangePictureRequest, CreateCursorRequest, CreatePictureRequest, Directformat,
+    FreePictureRequest, PictType, Pictdepth, Pictforminfo, Pictscreen, Pictvisual,
+    QueryPictIndexValuesRequest, SetPictureClipRectanglesRequest,
 };
 use x11rb_protocol::x11_utils::Serialize;
 
@@ -9,8 +11,9 @@ use super::{
     PICTFORMAT_ARGB32, PICTFORMAT_RGB24, PICTFORMAT_XBGR32, PICTFORMAT_XRGB32,
 };
 use crate::xserver::core::require_len;
-use crate::xserver::core::{read_i16_bo, read_u16_bo, read_u32_bo, ROOT_VISUAL};
+use crate::xserver::core::{read_u32_bo, ROOT_VISUAL};
 use crate::xserver::reply::ReplyBuf;
+use crate::xserver::request::request_header;
 use crate::xserver::ClientState;
 
 /// QueryVersion: reply with version 0.11
@@ -84,10 +87,7 @@ pub(crate) fn handle_query_pict_formats(seq: u16, bo: bool) -> Vec<u8> {
             },
             colormap: 0,
         },
-        // Format 5: xRGB32 -- depth 32, R/G/B in the same byte positions
-        // as ARGB32 but the high byte is padding (alphaMask = 0). The
-        // rendercheck libreoffice test wants this to verify that the
-        // server doesn't peek at the unused byte.
+        // Format 5: xRGB32
         Pictforminfo {
             id: PICTFORMAT_XRGB32,
             type_: PictType::DIRECT,
@@ -100,11 +100,7 @@ pub(crate) fn handle_query_pict_formats(seq: u16, bo: bool) -> Vec<u8> {
             },
             colormap: 0,
         },
-        // Format 6: xBGR32 -- depth 32 with R/B swapped (R at byte 0, B
-        // at byte 2). The rendercheck gtk test exercises this layout
-        // against ARGB32 to verify that the server reads each picture
-        // through its declared format rather than blindly assuming a
-        // canonical byte order.
+        // Format 6: xBGR32
         Pictforminfo {
             id: PICTFORMAT_XBGR32,
             type_: PictType::DIRECT,
@@ -171,13 +167,28 @@ pub(crate) fn handle_query_pict_formats(seq: u16, bo: bool) -> Vec<u8> {
 pub(crate) fn handle_create_picture(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
     let bo = state.msb_first;
     require_len!(data, 20, seq, 139, data[1] as u16, bo);
-    let pid = read_u32_bo(data, 4, bo);
-    let drawable = read_u32_bo(data, 8, bo);
-    let format_id = read_u32_bo(data, 12, bo);
-    let value_mask = read_u32_bo(data, 16, bo);
+
+    let req = match CreatePictureRequest::try_parse_request(request_header(data), &data[4..]) {
+        Ok(r) => r,
+        Err(_) => {
+            return crate::xserver::core::build_error_bo(
+                crate::xserver::core::LENGTH_ERROR,
+                seq,
+                0,
+                139,
+                data[1] as u16,
+                bo,
+            )
+        }
+    };
+
+    let pid = req.pid;
+    let drawable = req.drawable;
+    let format_id = req.format;
+    let value_list = req.value_list;
 
     debug!(
-        "Render CreatePicture: pid={pid:#x} drawable={drawable:#x} format={format_id:#x} vmask={value_mask:#x}"
+        "Render CreatePicture: pid={pid:#x} drawable={drawable:#x} format={format_id:#x}"
     );
 
     // Validate drawable exists (BadDrawable if not)
@@ -216,9 +227,6 @@ pub(crate) fn handle_create_picture(state: &mut ClientState, data: &[u8], seq: u
     };
 
     // Validate format depth matches drawable depth (BadMatch if not).
-    // Allow 32-bit formats on 24-bit drawables (common practice — GTK/Qt
-    // routinely create ARGB32 pictures on depth-24 windows) and 24-bit
-    // formats on 32-bit drawables.
     let depth_compatible = match (format_depth, drawable_depth) {
         (fd, dd) if fd == dd => true,
         (32, 24) | (24, 32) => true,
@@ -238,45 +246,32 @@ pub(crate) fn handle_create_picture(state: &mut ClientState, data: &[u8], seq: u
         );
     }
 
-    let mut repeat = 0u32;
-    let mut component_alpha = false;
-    let mut clip_mask: Option<u32> = None;
-    let mut clip_origin_x: i16 = 0;
-    let mut clip_origin_y: i16 = 0;
-    let mut val_off = 20;
-    // Parse value-list based on value_mask
-    for bit in 0..13 {
-        if value_mask & (1 << bit) != 0 {
-            if val_off + 4 > data.len() {
-                break;
-            }
-            let val = read_u32_bo(data, val_off, bo);
-            match bit {
-                0 => {
-                    repeat = val;
-                    debug!("  repeat={repeat}");
-                }
-                4 => {
-                    clip_origin_x = val as i16;
-                    debug!("  clip_origin_x={clip_origin_x}");
-                }
-                5 => {
-                    clip_origin_y = val as i16;
-                    debug!("  clip_origin_y={clip_origin_y}");
-                }
-                6 => {
-                    // CPClipMask
-                    clip_mask = if val == 0 { None } else { Some(val) };
-                    debug!("  clip_mask={val:#x}");
-                }
-                12 => {
-                    component_alpha = val != 0;
-                    debug!("  component_alpha={component_alpha}");
-                }
-                _ => {}
-            }
-            val_off += 4;
-        }
+    // Extract values from the parsed value_list
+    let repeat = value_list
+        .repeat
+        .map(|r| u32::from(r))
+        .unwrap_or(0);
+    let component_alpha = value_list
+        .componentalpha
+        .map(|v| v != 0)
+        .unwrap_or(false);
+    let clip_origin_x = value_list
+        .clipxorigin
+        .map(|v| v as i16)
+        .unwrap_or(0);
+    let clip_origin_y = value_list
+        .clipyorigin
+        .map(|v| v as i16)
+        .unwrap_or(0);
+    let clip_mask = value_list
+        .clipmask
+        .and_then(|v| if v == 0 { None } else { Some(v) });
+
+    if repeat != 0 {
+        debug!("  repeat={repeat}");
+    }
+    if component_alpha {
+        debug!("  component_alpha={component_alpha}");
     }
 
     state.render.pictures.insert(
@@ -299,48 +294,54 @@ pub(crate) fn handle_create_picture(state: &mut ClientState, data: &[u8], seq: u
 pub(crate) fn handle_change_picture(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
     let bo = state.msb_first;
     require_len!(data, 12, seq, 139, data[1] as u16, bo);
-    let pid = read_u32_bo(data, 4, bo);
-    let value_mask = read_u32_bo(data, 8, bo);
 
-    debug!("Render ChangePicture: pid={pid:#x} vmask={value_mask:#x}");
+    let req = match ChangePictureRequest::try_parse_request(request_header(data), &data[4..]) {
+        Ok(r) => r,
+        Err(_) => {
+            return crate::xserver::core::build_error_bo(
+                crate::xserver::core::LENGTH_ERROR,
+                seq,
+                0,
+                139,
+                data[1] as u16,
+                bo,
+            )
+        }
+    };
 
-    let mut val_off = 12;
-    for bit in 0..13 {
-        if value_mask & (1 << bit) != 0 {
-            if val_off + 4 > data.len() {
-                break;
+    let pid = req.picture;
+    let value_list = req.value_list;
+
+    debug!("Render ChangePicture: pid={pid:#x}");
+
+    if let Some(pic) = state.render.pictures.get_mut(&pid) {
+        if let Some(repeat) = value_list.repeat {
+            pic.repeat = u32::from(repeat);
+            debug!("  repeat={}", pic.repeat);
+        }
+        if let Some(clipxorigin) = value_list.clipxorigin {
+            pic.clip_origin_x = clipxorigin as i16;
+            debug!("  clip_origin_x={}", pic.clip_origin_x);
+        }
+        if let Some(clipyorigin) = value_list.clipyorigin {
+            pic.clip_origin_y = clipyorigin as i16;
+            debug!("  clip_origin_y={}", pic.clip_origin_y);
+        }
+        if let Some(clipmask) = value_list.clipmask {
+            pic.clip_mask = if clipmask == 0 {
+                None
+            } else {
+                Some(clipmask)
+            };
+            // Reset clip rects when clip mask changes
+            if clipmask == 0 {
+                pic.clip_rects = None;
             }
-            let val = read_u32_bo(data, val_off, bo);
-            if let Some(pic) = state.render.pictures.get_mut(&pid) {
-                match bit {
-                    0 => {
-                        pic.repeat = val;
-                        debug!("  repeat={val}");
-                    }
-                    4 => {
-                        pic.clip_origin_x = val as i16;
-                        debug!("  clip_origin_x={}", pic.clip_origin_x);
-                    }
-                    5 => {
-                        pic.clip_origin_y = val as i16;
-                        debug!("  clip_origin_y={}", pic.clip_origin_y);
-                    }
-                    6 => {
-                        pic.clip_mask = if val == 0 { None } else { Some(val) };
-                        // Reset clip rects when clip mask changes
-                        if val == 0 {
-                            pic.clip_rects = None;
-                        }
-                        debug!("  clip_mask={val:#x}");
-                    }
-                    12 => {
-                        pic.component_alpha = val != 0;
-                        debug!("  component_alpha={}", pic.component_alpha);
-                    }
-                    _ => {}
-                }
-            }
-            val_off += 4;
+            debug!("  clip_mask={clipmask:#x}");
+        }
+        if let Some(componentalpha) = value_list.componentalpha {
+            pic.component_alpha = componentalpha != 0;
+            debug!("  component_alpha={}", pic.component_alpha);
         }
     }
 
@@ -354,20 +355,31 @@ pub(crate) fn handle_set_picture_clip_rectangles(
 ) -> Vec<u8> {
     let bo = state.msb_first;
     require_len!(data, 12, seq, 139, data[1] as u16, bo);
-    let pid = read_u32_bo(data, 4, bo);
-    let clip_x = read_i16_bo(data, 8, bo);
-    let clip_y = read_i16_bo(data, 10, bo);
 
-    let mut rects = Vec::new();
-    let mut off = 12;
-    while off + 8 <= data.len() {
-        let x = read_i16_bo(data, off, bo);
-        let y = read_i16_bo(data, off + 2, bo);
-        let w = read_u16_bo(data, off + 4, bo);
-        let h = read_u16_bo(data, off + 6, bo);
-        rects.push((x, y, w, h));
-        off += 8;
-    }
+    let req =
+        match SetPictureClipRectanglesRequest::try_parse_request(request_header(data), &data[4..]) {
+            Ok(r) => r,
+            Err(_) => {
+                return crate::xserver::core::build_error_bo(
+                    crate::xserver::core::LENGTH_ERROR,
+                    seq,
+                    0,
+                    139,
+                    data[1] as u16,
+                    bo,
+                )
+            }
+        };
+
+    let pid = req.picture;
+    let clip_x = req.clip_x_origin;
+    let clip_y = req.clip_y_origin;
+
+    let rects: Vec<_> = req
+        .rectangles
+        .iter()
+        .map(|r| (r.x, r.y, r.width, r.height))
+        .collect();
 
     debug!(
         "Render SetPictureClipRectangles: pid={pid:#x} origin=({clip_x},{clip_y}) rects={}",
@@ -384,11 +396,12 @@ pub(crate) fn handle_set_picture_clip_rectangles(
 }
 
 pub(crate) fn handle_free_picture(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
-    let bo = state.msb_first;
     if data.len() >= 8 {
-        let pid = read_u32_bo(data, 4, bo);
-        state.render.pictures.remove(&pid);
-        state.recycle_xid(pid);
+        if let Ok(req) = FreePictureRequest::try_parse_request(request_header(data), &data[4..]) {
+            let pid = req.picture;
+            state.render.pictures.remove(&pid);
+            state.recycle_xid(pid);
+        }
     }
     Vec::new()
 }
@@ -401,10 +414,25 @@ pub(crate) fn handle_create_cursor(state: &mut ClientState, data: &[u8], seq: u1
 
     let bo = state.msb_first;
     require_len!(data, 16, seq, 139, data[1] as u16, bo);
-    let cursor_id = read_u32_bo(data, 4, bo);
-    let src_picture = read_u32_bo(data, 8, bo);
-    let hotspot_x = read_u16_bo(data, 12, bo);
-    let hotspot_y = read_u16_bo(data, 14, bo);
+
+    let req = match CreateCursorRequest::try_parse_request(request_header(data), &data[4..]) {
+        Ok(r) => r,
+        Err(_) => {
+            return crate::xserver::core::build_error_bo(
+                crate::xserver::core::LENGTH_ERROR,
+                seq,
+                0,
+                139,
+                data[1] as u16,
+                bo,
+            )
+        }
+    };
+
+    let cursor_id = req.cid;
+    let src_picture = req.source;
+    let hotspot_x = req.x;
+    let hotspot_y = req.y;
 
     debug!("Render CreateCursor: cursor_id={cursor_id:#x} src_pic={src_picture:#x} hotspot=({hotspot_x},{hotspot_y})");
 
@@ -475,8 +503,10 @@ pub(crate) fn handle_create_cursor(state: &mut ClientState, data: &[u8], seq: u1
 
 /// CreateAnimCursor (RENDER minor opcode 31).
 /// Creates an animated cursor from a list of cursor/delay pairs.
-/// Collects ARGB bitmap data from each referenced cursor to build
-/// a full animation sequence sent to the frontend via CursorAnimated.
+/// Note: x11rb has CreateAnimCursorRequest but its `cursors` field is
+/// Vec<Animcursorelt> with { cursor: Cursor, delay: u32 }. However,
+/// the handler also needs the raw cursor_id from data[4..8], which
+/// CreateAnimCursorRequest includes as `cid`. We use the typed struct.
 pub(crate) fn handle_create_anim_cursor(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
     let bo = state.msb_first;
     require_len!(data, 8, seq, 139, data[1] as u16, bo);
@@ -485,6 +515,10 @@ pub(crate) fn handle_create_anim_cursor(state: &mut ClientState, data: &[u8], se
     debug!("Render CreateAnimCursor: cursor_id={cursor_id:#x} frames={num_frames}");
 
     // Collect animation frame data from each referenced cursor.
+    // NOTE: We keep manual parsing here because CreateAnimCursorRequest
+    // uses Animcursorelt but our downstream code references cursor_info
+    // directly. The structure is simple enough that typed parsing adds
+    // little value.
     let mut anim_frames: Vec<(Vec<u8>, u16, u16, u16, u16, u32)> = Vec::with_capacity(num_frames);
     for i in 0..num_frames {
         let off = 8 + i * 8;
@@ -534,7 +568,7 @@ pub(crate) fn handle_create_anim_cursor(state: &mut ClientState, data: &[u8], se
             },
         );
     } else {
-        // No valid frames found — copy first frame's cursor info as fallback
+        // No valid frames found -- copy first frame's cursor info as fallback
         let first_frame_cursor = if num_frames > 0 && data.len() >= 16 {
             Some(read_u32_bo(data, 8, bo))
         } else {
@@ -562,7 +596,18 @@ pub(crate) fn handle_query_pict_index_values(
 ) -> Vec<u8> {
     let bo = state.msb_first;
     require_len!(data, 8, seq, 139, data[1] as u16, bo);
-    let _format = read_u32_bo(data, 4, bo);
+
+    // Parse with x11rb (primarily for validation)
+    if QueryPictIndexValuesRequest::try_parse_request(request_header(data), &data[4..]).is_err() {
+        return crate::xserver::core::build_error_bo(
+            crate::xserver::core::LENGTH_ERROR,
+            seq,
+            0,
+            139,
+            data[1] as u16,
+            bo,
+        );
+    }
 
     // Reply with 0 index values (we don't have indexed formats)
     ReplyBuf::fixed(seq, bo)
