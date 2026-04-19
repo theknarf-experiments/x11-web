@@ -1293,23 +1293,29 @@ d.close()
 test.describe.serial("GLX and OpenGL", () => {
 	test.setTimeout(120_000);
 
-	test("glxinfo reports server and client info", async ({
+	test("glxinfo reports GLX version and extensions", async ({
 		sidecarContainer,
 	}) => {
 		const output = await execInSidecar(
 			sidecarContainer,
-			"glxinfo 2>&1 | head -30",
+			"LIBGL_ALWAYS_INDIRECT=1 glxinfo 2>&1 | head -30",
 		);
-		// Should show some GLX info even with software rendering
-		expect(output).not.toContain("unable to open display");
+		expect(output).toContain("server glx version string: 1.4");
+		expect(output).toContain("server glx vendor string: x11-web OSMesa");
+		expect(output).not.toContain("[xcb] Extra reply data");
+		expect(output).not.toContain("Segmentation fault");
 	});
 
-	test("mesa-utils glxgears smoke test", async ({ sidecarContainer }) => {
+	test("glxgears renders frames without crash (indirect)", async ({
+		sidecarContainer,
+	}) => {
 		const output = await execInSidecar(
 			sidecarContainer,
-			"timeout 5 glxgears -info 2>&1 | head -20 || true",
+			"LIBGL_ALWAYS_INDIRECT=1 timeout 2 glxgears -info 2>&1 | head -20 || true",
 		);
+		expect(output).not.toContain("glXCreateContext failed");
 		expect(output).not.toContain("Segmentation fault");
+		expect(output).not.toContain("[xcb] Extra reply data");
 	});
 });
 
