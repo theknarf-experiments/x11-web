@@ -3,6 +3,7 @@
 use super::*;
 use crate::xserver::core::require_len;
 use crate::xserver::reply::ReplyBuf;
+use crate::xserver::request::request_header;
 
 // ---------------------------------------------------------------------------
 // Opcode 78: CreateColormap
@@ -11,8 +12,13 @@ use crate::xserver::reply::ReplyBuf;
 pub(crate) fn handle_create_colormap(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
     require_len!(data, 16, state.sequence, 78);
 
-    let _alloc = data[1]; // 0=None, 1=All (for writable colormaps, pre-allocate all cells)
-    let mid = state.read_u32(data, 4);
+    use x11rb_protocol::protocol::xproto::CreateColormapRequest;
+    let req = match CreateColormapRequest::try_parse_request(request_header(data), &data[4..]) {
+        Ok(r) => r,
+        Err(_) => return build_error(LENGTH_ERROR, state.sequence, 0, 78, 0),
+    };
+    let _alloc = u8::from(req.alloc);
+    let mid = req.mid;
 
     // Validate resource ID is within this client's allocated range
     if !state.validate_resource_id(mid) {
@@ -24,8 +30,8 @@ pub(crate) fn handle_create_colormap(state: &mut ClientState, data: &[u8]) -> Ve
         return build_error(ALLOC_ERROR, state.sequence, mid, 78, 0);
     }
 
-    let _window = state.read_u32(data, 8);
-    let visual = state.read_u32(data, 12);
+    let _window = req.window;
+    let visual = req.visual;
 
     // Map visual ID to visual class and create appropriate colormap.
     // Visual IDs defined in our server setup:
@@ -68,7 +74,13 @@ pub(crate) fn handle_create_colormap(state: &mut ClientState, data: &[u8]) -> Ve
 
 pub(crate) fn handle_free_colormap(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
     require_len!(data, 8, state.sequence, 79);
-    let mid = state.read_u32(data, 4);
+
+    use x11rb_protocol::protocol::xproto::FreeColormapRequest;
+    let req = match FreeColormapRequest::try_parse_request(request_header(data), &data[4..]) {
+        Ok(r) => r,
+        Err(_) => return build_error(LENGTH_ERROR, state.sequence, 0, 79, 0),
+    };
+    let mid = req.cmap;
     // Validate colormap exists (not the default, which cannot be freed)
     if mid != ROOT_COLORMAP && !state.colormaps.contains_key(&mid) {
         return build_error(COLORMAP_ERROR, state.sequence, mid, 79, 0);
@@ -90,8 +102,14 @@ pub(crate) fn handle_copy_colormap_and_free(
     _seq: u16,
 ) -> Vec<u8> {
     require_len!(data, 12, _seq, 80);
-    let mid = state.read_u32(data, 4);
-    let src = state.read_u32(data, 8);
+
+    use x11rb_protocol::protocol::xproto::CopyColormapAndFreeRequest;
+    let req = match CopyColormapAndFreeRequest::try_parse_request(request_header(data), &data[4..]) {
+        Ok(r) => r,
+        Err(_) => return build_error(LENGTH_ERROR, _seq, 0, 80, 0),
+    };
+    let mid = req.mid;
+    let src = req.src_cmap;
     // Validate source colormap exists
     if src != ROOT_COLORMAP && !state.colormaps.contains_key(&src) {
         return build_error(COLORMAP_ERROR, _seq, src, 80, 0);
@@ -119,7 +137,13 @@ pub(crate) fn handle_copy_colormap_and_free(
 
 pub(crate) fn handle_install_colormap(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
     require_len!(data, 8, state.sequence, 81);
-    let mid = state.read_u32(data, 4);
+
+    use x11rb_protocol::protocol::xproto::InstallColormapRequest;
+    let req = match InstallColormapRequest::try_parse_request(request_header(data), &data[4..]) {
+        Ok(r) => r,
+        Err(_) => return build_error(LENGTH_ERROR, state.sequence, 0, 81, 0),
+    };
+    let mid = req.cmap;
     // Validate colormap exists
     if mid != ROOT_COLORMAP && !state.colormaps.contains_key(&mid) {
         return build_error(COLORMAP_ERROR, state.sequence, mid, 81, 0);
@@ -159,7 +183,13 @@ pub(crate) fn handle_install_colormap(state: &mut ClientState, data: &[u8]) -> V
 
 pub(crate) fn handle_uninstall_colormap(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
     require_len!(data, 8, state.sequence, 82);
-    let mid = state.read_u32(data, 4);
+
+    use x11rb_protocol::protocol::xproto::UninstallColormapRequest;
+    let req = match UninstallColormapRequest::try_parse_request(request_header(data), &data[4..]) {
+        Ok(r) => r,
+        Err(_) => return build_error(LENGTH_ERROR, state.sequence, 0, 82, 0),
+    };
+    let mid = req.cmap;
     // Validate colormap exists
     if mid != ROOT_COLORMAP && !state.colormaps.contains_key(&mid) {
         return build_error(COLORMAP_ERROR, state.sequence, mid, 82, 0);
@@ -218,7 +248,13 @@ pub(crate) fn handle_uninstall_colormap(state: &mut ClientState, data: &[u8]) ->
 // Opcode 83: ListInstalledColormaps
 // ---------------------------------------------------------------------------
 
-pub(crate) fn handle_list_installed_colormaps(state: &ClientState, seq: u16) -> Vec<u8> {
+pub(crate) fn handle_list_installed_colormaps(state: &ClientState, data: &[u8], seq: u16) -> Vec<u8> {
+    use x11rb_protocol::protocol::xproto::ListInstalledColormapsRequest;
+    let _req = match ListInstalledColormapsRequest::try_parse_request(request_header(data), &data[4..]) {
+        Ok(r) => r,
+        Err(_) => return build_error(LENGTH_ERROR, seq, 0, 83, 0),
+    };
+    // _req.window is available but currently unused — we return all installed colormaps.
     // Return only colormaps that have been explicitly installed
     // (the default colormap ROOT_COLORMAP is always installed).
     let cmaps: Vec<u32> = state.installed_colormaps.iter().copied().collect();
@@ -245,10 +281,15 @@ pub(crate) fn handle_list_installed_colormaps(state: &ClientState, seq: u16) -> 
 pub(crate) fn handle_alloc_color(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
     require_len!(data, 16, seq, 84);
 
-    let cmap_id = state.read_u32(data, 4);
-    let red = state.read_u16(data, 8);
-    let green = state.read_u16(data, 10);
-    let blue = state.read_u16(data, 12);
+    use x11rb_protocol::protocol::xproto::AllocColorRequest;
+    let req = match AllocColorRequest::try_parse_request(request_header(data), &data[4..]) {
+        Ok(r) => r,
+        Err(_) => return build_error(LENGTH_ERROR, seq, 0, 84, 0),
+    };
+    let cmap_id = req.cmap;
+    let red = req.red;
+    let green = req.green;
+    let blue = req.blue;
 
     // Validate colormap exists
     if cmap_id != ROOT_COLORMAP && !state.colormaps.contains_key(&cmap_id) {
@@ -286,17 +327,18 @@ pub(crate) fn handle_alloc_color(state: &mut ClientState, data: &[u8], seq: u16)
 pub(crate) fn handle_alloc_named_color(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
     require_len!(data, 12, seq, 85);
 
-    let cmap_id = state.read_u32(data, 4);
+    use x11rb_protocol::protocol::xproto::AllocNamedColorRequest;
+    let req = match AllocNamedColorRequest::try_parse_request(request_header(data), &data[4..]) {
+        Ok(r) => r,
+        Err(_) => return build_error(LENGTH_ERROR, seq, 0, 85, 0),
+    };
+    let cmap_id = req.cmap;
     // Validate colormap exists
     if cmap_id != ROOT_COLORMAP && !state.colormaps.contains_key(&cmap_id) {
         return build_error(COLORMAP_ERROR, seq, cmap_id, 85, 0);
     }
 
-    let name_len = state.read_u16(data, 8) as usize;
-    if 12 + name_len > data.len() {
-        return build_error(LENGTH_ERROR, seq, 0, 85, 0);
-    }
-    let name = std::str::from_utf8(&data[12..12 + name_len]).unwrap_or("");
+    let name = std::str::from_utf8(&req.name).unwrap_or("");
 
     let (r16, g16, b16) = match crate::colors::lookup_color(name) {
         Some(c) => c,
@@ -330,10 +372,15 @@ pub(crate) fn handle_alloc_named_color(state: &mut ClientState, data: &[u8], seq
 pub(crate) fn handle_alloc_color_cells(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
     require_len!(data, 12, seq, 86);
 
-    let contiguous = data[1] != 0;
-    let cmap_id = state.read_u32(data, 4);
-    let n_colors = state.read_u16(data, 8);
-    let n_planes = state.read_u16(data, 10);
+    use x11rb_protocol::protocol::xproto::AllocColorCellsRequest;
+    let req = match AllocColorCellsRequest::try_parse_request(request_header(data), &data[4..]) {
+        Ok(r) => r,
+        Err(_) => return build_error(LENGTH_ERROR, seq, 0, 86, 0),
+    };
+    let contiguous = req.contiguous;
+    let cmap_id = req.cmap;
+    let n_colors = req.colors;
+    let n_planes = req.planes;
 
     // Per X11 spec: n_colors must be non-zero
     if n_colors == 0 {
@@ -406,12 +453,17 @@ pub(crate) fn handle_alloc_color_cells(state: &mut ClientState, data: &[u8], seq
 pub(crate) fn handle_alloc_color_planes(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
     require_len!(data, 16, seq, 87);
 
-    let contiguous = data[1] != 0;
-    let cmap_id = state.read_u32(data, 4);
-    let n_colors = state.read_u16(data, 8);
-    let n_reds = state.read_u16(data, 10);
-    let n_greens = state.read_u16(data, 12);
-    let n_blues = state.read_u16(data, 14);
+    use x11rb_protocol::protocol::xproto::AllocColorPlanesRequest;
+    let req = match AllocColorPlanesRequest::try_parse_request(request_header(data), &data[4..]) {
+        Ok(r) => r,
+        Err(_) => return build_error(LENGTH_ERROR, seq, 0, 87, 0),
+    };
+    let contiguous = req.contiguous;
+    let cmap_id = req.cmap;
+    let n_colors = req.colors;
+    let n_reds = req.reds;
+    let n_greens = req.greens;
+    let n_blues = req.blues;
 
     // Per X11 spec: n_colors must be non-zero
     if n_colors == 0 {
@@ -490,20 +542,22 @@ pub(crate) fn handle_alloc_color_planes(state: &mut ClientState, data: &[u8], se
 pub(crate) fn handle_query_colors(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
     require_len!(data, 8, seq, 91);
 
-    let cmap_id = state.read_u32(data, 4);
+    use x11rb_protocol::protocol::xproto::QueryColorsRequest;
+    let req = match QueryColorsRequest::try_parse_request(request_header(data), &data[4..]) {
+        Ok(r) => r,
+        Err(_) => return build_error(LENGTH_ERROR, seq, 0, 91, 0),
+    };
+    let cmap_id = req.cmap;
 
     // Validate colormap exists
     if cmap_id != ROOT_COLORMAP && !state.colormaps.contains_key(&cmap_id) {
         return build_error(COLORMAP_ERROR, seq, cmap_id, 91, 0);
     }
 
-    let n_pixels = (data.len() - 8) / 4;
+    let n_pixels = req.pixels.len();
     let mut colors = Vec::with_capacity(n_pixels);
 
-    for i in 0..n_pixels {
-        let offset = 8 + i * 4;
-        let pixel = state.read_u32(data, offset);
-
+    for &pixel in req.pixels.iter() {
         // Look up in the colormap (handles both PseudoColor and TrueColor)
         let (r, g, b) = if let Some(cmap) = state.colormaps.get(&cmap_id) {
             cmap.lookup(pixel)
@@ -542,17 +596,18 @@ pub(crate) fn handle_query_colors(state: &mut ClientState, data: &[u8], seq: u16
 pub(crate) fn handle_lookup_color(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
     require_len!(data, 12, seq, 92);
 
-    let cmap_id = state.read_u32(data, 4);
+    use x11rb_protocol::protocol::xproto::LookupColorRequest;
+    let req = match LookupColorRequest::try_parse_request(request_header(data), &data[4..]) {
+        Ok(r) => r,
+        Err(_) => return build_error(LENGTH_ERROR, seq, 0, 92, 0),
+    };
+    let cmap_id = req.cmap;
     // Validate colormap exists
     if cmap_id != ROOT_COLORMAP && !state.colormaps.contains_key(&cmap_id) {
         return build_error(COLORMAP_ERROR, seq, cmap_id, 92, 0);
     }
 
-    let name_len = state.read_u16(data, 8) as usize;
-    if 12 + name_len > data.len() {
-        return build_error(LENGTH_ERROR, seq, 0, 92, 0);
-    }
-    let name = std::str::from_utf8(&data[12..12 + name_len]).unwrap_or("");
+    let name = std::str::from_utf8(&req.name).unwrap_or("");
 
     let (r16, g16, b16) = match crate::colors::lookup_color(name) {
         Some(c) => c,
@@ -580,7 +635,12 @@ pub(crate) fn handle_lookup_color(state: &mut ClientState, data: &[u8], seq: u16
 pub(crate) fn handle_free_colors(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
     require_len!(data, 12, state.sequence, 88);
 
-    let cmap_id = state.read_u32(data, 4);
+    use x11rb_protocol::protocol::xproto::FreeColorsRequest;
+    let req = match FreeColorsRequest::try_parse_request(request_header(data), &data[4..]) {
+        Ok(r) => r,
+        Err(_) => return build_error(LENGTH_ERROR, state.sequence, 0, 88, 0),
+    };
+    let cmap_id = req.cmap;
     // Validate colormap exists
     if cmap_id != ROOT_COLORMAP && !state.colormaps.contains_key(&cmap_id) {
         return build_error(COLORMAP_ERROR, state.sequence, cmap_id, 88, 0);
@@ -592,13 +652,10 @@ pub(crate) fn handle_free_colors(state: &mut ClientState, data: &[u8]) -> Vec<u8
         }
     }
 
-    let _plane_mask = state.read_u32(data, 8);
-    let n_pixels = (data.len() - 12) / 4;
+    let _plane_mask = req.plane_mask;
+    let pixels: Vec<u32> = req.pixels.into_owned();
+    let n_pixels = pixels.len();
 
-    let mut pixels = Vec::with_capacity(n_pixels);
-    for i in 0..n_pixels {
-        pixels.push(state.read_u32(data, 12 + i * 4));
-    }
     if let Some(cmap) = state.colormaps.get_mut(&cmap_id) {
         cmap.free_cells(&pixels);
         debug!("FreeColors: cmap={cmap_id:#x} freed {} pixels", n_pixels);
@@ -613,7 +670,12 @@ pub(crate) fn handle_free_colors(state: &mut ClientState, data: &[u8]) -> Vec<u8
 pub(crate) fn handle_store_colors(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
     require_len!(data, 8, state.sequence, 89);
 
-    let cmap_id = state.read_u32(data, 4);
+    use x11rb_protocol::protocol::xproto::StoreColorsRequest;
+    let req = match StoreColorsRequest::try_parse_request(request_header(data), &data[4..]) {
+        Ok(r) => r,
+        Err(_) => return build_error(LENGTH_ERROR, state.sequence, 0, 89, 0),
+    };
+    let cmap_id = req.cmap;
     // Validate colormap exists
     if cmap_id != ROOT_COLORMAP && !state.colormaps.contains_key(&cmap_id) {
         return build_error(COLORMAP_ERROR, state.sequence, cmap_id, 89, 0);
@@ -625,21 +687,11 @@ pub(crate) fn handle_store_colors(state: &mut ClientState, data: &[u8]) -> Vec<u
         }
     }
 
-    // Each ColorItem is 12 bytes: pixel(4) + red(2) + green(2) + blue(2) + flags(1) + pad(1)
-    let n_items = (data.len() - 8) / 12;
-
-    let mut items = Vec::with_capacity(n_items);
-    for i in 0..n_items {
-        let off = 8 + i * 12;
-        if off + 12 <= data.len() {
-            let pixel = state.read_u32(data, off);
-            let r = state.read_u16(data, off + 4);
-            let g = state.read_u16(data, off + 6);
-            let b = state.read_u16(data, off + 8);
-            let flags = data[off + 10];
-            items.push((pixel, r, g, b, flags));
-        }
-    }
+    let items: Vec<(u32, u16, u16, u16, u8)> = req
+        .items
+        .iter()
+        .map(|ci| (ci.pixel, ci.red, ci.green, ci.blue, u8::from(ci.flags)))
+        .collect();
 
     if let Some(cmap) = state.colormaps.get_mut(&cmap_id) {
         cmap.store_colors(&items);
@@ -658,8 +710,13 @@ pub(crate) fn handle_store_colors(state: &mut ClientState, data: &[u8]) -> Vec<u
 pub(crate) fn handle_store_named_color(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
     require_len!(data, 16, state.sequence, 90);
 
-    let flags = data[1];
-    let cmap_id = state.read_u32(data, 4);
+    use x11rb_protocol::protocol::xproto::StoreNamedColorRequest;
+    let req = match StoreNamedColorRequest::try_parse_request(request_header(data), &data[4..]) {
+        Ok(r) => r,
+        Err(_) => return build_error(LENGTH_ERROR, state.sequence, 0, 90, 0),
+    };
+    let flags = u8::from(req.flags);
+    let cmap_id = req.cmap;
     // Validate colormap exists
     if cmap_id != ROOT_COLORMAP && !state.colormaps.contains_key(&cmap_id) {
         return build_error(COLORMAP_ERROR, state.sequence, cmap_id, 90, 0);
@@ -671,13 +728,8 @@ pub(crate) fn handle_store_named_color(state: &mut ClientState, data: &[u8]) -> 
         }
     }
 
-    let pixel = state.read_u32(data, 8);
-    let name_len = state.read_u16(data, 12) as usize;
-    let name = if 16 + name_len <= data.len() {
-        std::str::from_utf8(&data[16..16 + name_len]).unwrap_or("")
-    } else {
-        ""
-    };
+    let pixel = req.pixel;
+    let name = std::str::from_utf8(&req.name).unwrap_or("");
 
     if let Some((r, g, b)) = crate::colors::lookup_color(name) {
         if let Some(cmap) = state.colormaps.get_mut(&cmap_id) {

@@ -163,7 +163,7 @@ pub(crate) fn handle_core_request(state: &mut ClientState, data: &[u8]) -> Vec<u
         80 => color::handle_copy_colormap_and_free(state, data, seq),
         81 => color::handle_install_colormap(state, data),
         82 => color::handle_uninstall_colormap(state, data),
-        83 => color::handle_list_installed_colormaps(state, seq),
+        83 => color::handle_list_installed_colormaps(state, data, seq),
         84 => color::handle_alloc_color(state, data, seq),
         85 => color::handle_alloc_named_color(state, data, seq),
         86 => color::handle_alloc_color_cells(state, data, seq),

@@ -1,60 +1,64 @@
 //! Window attributes and save-set handlers (opcodes 2, 3, 6).
 
 use super::*;
-use crate::xserver::core::require_len;
 use crate::xserver::reply::ReplyBuf;
+use crate::xserver::request::request_header;
+use x11rb_protocol::protocol::xproto::{
+    ChangeWindowAttributesRequest, ChangeSaveSetRequest, GetWindowAttributesRequest,
+};
 
 // ---------------------------------------------------------------------------
 // Opcode 2: ChangeWindowAttributes
 // ---------------------------------------------------------------------------
 
 pub(crate) fn handle_change_window_attributes(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
-    require_len!(data, 12, state.sequence, 2);
+    let seq = state.sequence;
+    let req = match ChangeWindowAttributesRequest::try_parse_request(request_header(data), &data[4..]) {
+        Ok(r) => r,
+        Err(_) => return build_error(LENGTH_ERROR, seq, 0, 2, 0),
+    };
 
-    let wid = state.read_u32(data, 4);
-    let value_mask = state.read_u32(data, 8);
-
-    // Validate value-list length matches the bitmask
-    let n_values = value_mask.count_ones() as usize;
-    let required_len = 12 + n_values * 4;
-    require_len!(data, required_len, state.sequence, 2);
+    let wid = req.window;
+    let vl = &*req.value_list;
 
     if !state.windows.contains_key(&wid) {
-        return build_error(WINDOW_ERROR, state.sequence, wid, 2, 0);
+        return build_error(WINDOW_ERROR, seq, wid, 2, 0);
     }
 
     // Pre-validate enumerated attributes before mutating state
-    let msb_first = state.msb_first;
-    {
-        let mut voff = 12;
-        for bit in 0..15 {
-            if value_mask & (1 << bit) != 0 && voff + 4 <= data.len() {
-                let val = read_u32_bo(data, voff, msb_first);
-                match bit {
-                    4 if val > 10 => return build_error(VALUE_ERROR, state.sequence, val, 2, 0),
-                    5 if val > 10 => return build_error(VALUE_ERROR, state.sequence, val, 2, 0),
-                    6 if val > 2 => return build_error(VALUE_ERROR, state.sequence, val, 2, 0),
-                    // bit 11 = event-mask: check SubstructureRedirect/ResizeRedirect
-                    // mutual exclusion per X11 spec Section 12.3
-                    11 => {
-                        if let Some(_conflict) = state.event_broadcaster.check_redirect_conflict(
-                            wid,
-                            val,
-                            &state.client_id,
-                        ) {
-                            return build_error(ACCESS_ERROR, state.sequence, 0, 2, 0);
-                        }
-                    }
-                    // bit 14 = cursor: validate cursor ID exists
-                    14 if val != 0 => {
-                        if !state.cursors.contains_key(&val) {
-                            return build_error(CURSOR_ERROR, state.sequence, val, 2, 0);
-                        }
-                    }
-                    _ => {}
-                }
-                voff += 4;
-            }
+    if let Some(g) = vl.bit_gravity {
+        let val = u32::from(g);
+        if val > 10 {
+            return build_error(VALUE_ERROR, seq, val, 2, 0);
+        }
+    }
+    if let Some(g) = vl.win_gravity {
+        let val = u32::from(g);
+        if val > 10 {
+            return build_error(VALUE_ERROR, seq, val, 2, 0);
+        }
+    }
+    if let Some(bs) = vl.backing_store {
+        let val = u32::from(bs);
+        if val > 2 {
+            return build_error(VALUE_ERROR, seq, val, 2, 0);
+        }
+    }
+    // event-mask: check SubstructureRedirect/ResizeRedirect mutual exclusion per X11 spec Section 12.3
+    if let Some(em) = vl.event_mask {
+        let val = u32::from(em);
+        if let Some(_conflict) = state.event_broadcaster.check_redirect_conflict(
+            wid,
+            val,
+            &state.client_id,
+        ) {
+            return build_error(ACCESS_ERROR, seq, 0, 2, 0);
+        }
+    }
+    // cursor: validate cursor ID exists
+    if let Some(c) = vl.cursor {
+        if c != 0 && !state.cursors.contains_key(&c) {
+            return build_error(CURSOR_ERROR, seq, c, 2, 0);
         }
     }
 
@@ -62,67 +66,74 @@ pub(crate) fn handle_change_window_attributes(state: &mut ClientState, data: &[u
     let mut deferred_event_mask: Option<u32> = None;
     let mut deferred_colormap_notify: Option<(u32, u32)> = None; // (old_cmap, new_cmap)
     if let Some(win) = state.windows.get_mut(&wid) {
-        let mut offset = 12;
-        for bit in 0..15 {
-            if value_mask & (1 << bit) != 0 && offset + 4 <= data.len() {
-                let val = read_u32_bo(data, offset, msb_first);
-                match bit {
-                    0 => {
-                        // background-pixmap: 0=None, 1=ParentRelative, else pixmap ID
-                        win.background_pixmap = Some(val);
-                    }
-                    1 => win.background_pixel = val,
-                    2 => {
-                        // border-pixmap: 0=CopyFromParent, else pixmap ID
-                        win.border_pixmap = Some(val);
-                    }
-                    3 => win.border_pixel = val,
-                    4 => {
-                        state.bit_gravity.insert(wid, val as u8);
-                    }
-                    5 => {
-                        state.win_gravity.insert(wid, val as u8);
-                    }
-                    6 => win.backing_store = val as u8,
-                    7 => win.backing_planes = val,
-                    8 => win.backing_pixel = val,
-                    9 => win.override_redirect = val != 0,
-                    10 => win.save_under = val != 0,
-                    11 => {
-                        win.event_mask = val;
-                        // SubstructureRedirectMask = bit 20 = 0x0010_0000
-                        if wid == state.root_window && (val & EventMask::SUBSTRUCTURE_REDIRECT != EventMask::NO_EVENT) {
-                            info!(
-                                    "Client {} registering as window manager (SubstructureRedirectMask on root)",
-                                    state.client_id
-                                );
-                            if let Ok(mut wm) = state.wm_state.lock() {
-                                wm.client_id = Some(state.client_id.clone());
-                                wm.event_tx = Some(state.wm_events_tx.clone());
-                            }
-                        }
-                        // Defer cross-connection subscription until after mutable borrow ends
-                        deferred_event_mask = Some(val);
-                    }
-                    12 => win.do_not_propagate_mask = val,
-                    13 => {
-                        // Colormap: 0 = CopyFromParent
-                        let old_cmap = win.colormap;
-                        win.colormap = val;
-                        if val != old_cmap && (win.event_mask & EventMask::COLOR_MAP_CHANGE != EventMask::NO_EVENT) {
-                            deferred_colormap_notify = Some((old_cmap, val));
-                        }
-                    }
-                    14 => {
-                        let new_cursor = if val == 0 { None } else { Some(val) };
-                        if win.cursor != new_cursor {
-                            win.cursor = new_cursor;
-                            cursor_changed = true;
-                        }
-                    }
-                    _ => {}
+        if let Some(val) = vl.background_pixmap {
+            // background-pixmap: 0=None, 1=ParentRelative, else pixmap ID
+            win.background_pixmap = Some(val);
+        }
+        if let Some(val) = vl.background_pixel {
+            win.background_pixel = val;
+        }
+        if let Some(val) = vl.border_pixmap {
+            // border-pixmap: 0=CopyFromParent, else pixmap ID
+            win.border_pixmap = Some(val);
+        }
+        if let Some(val) = vl.border_pixel {
+            win.border_pixel = val;
+        }
+        if let Some(g) = vl.bit_gravity {
+            state.bit_gravity.insert(wid, u32::from(g) as u8);
+        }
+        if let Some(g) = vl.win_gravity {
+            state.win_gravity.insert(wid, u32::from(g) as u8);
+        }
+        if let Some(bs) = vl.backing_store {
+            win.backing_store = u32::from(bs) as u8;
+        }
+        if let Some(val) = vl.backing_planes {
+            win.backing_planes = val;
+        }
+        if let Some(val) = vl.backing_pixel {
+            win.backing_pixel = val;
+        }
+        if let Some(val) = vl.override_redirect {
+            win.override_redirect = val != 0;
+        }
+        if let Some(val) = vl.save_under {
+            win.save_under = val != 0;
+        }
+        if let Some(em) = vl.event_mask {
+            let val = u32::from(em);
+            win.event_mask = val;
+            // SubstructureRedirectMask = bit 20 = 0x0010_0000
+            if wid == state.root_window && (val & EventMask::SUBSTRUCTURE_REDIRECT != EventMask::NO_EVENT) {
+                info!(
+                        "Client {} registering as window manager (SubstructureRedirectMask on root)",
+                        state.client_id
+                    );
+                if let Ok(mut wm) = state.wm_state.lock() {
+                    wm.client_id = Some(state.client_id.clone());
+                    wm.event_tx = Some(state.wm_events_tx.clone());
                 }
-                offset += 4;
+            }
+            // Defer cross-connection subscription until after mutable borrow ends
+            deferred_event_mask = Some(val);
+        }
+        if let Some(em) = vl.do_not_propogate_mask {
+            win.do_not_propagate_mask = u32::from(em);
+        }
+        if let Some(val) = vl.colormap {
+            // Colormap: 0 = CopyFromParent
+            let old_cmap = win.colormap;
+            win.colormap = val;
+            if val != old_cmap && (win.event_mask & EventMask::COLOR_MAP_CHANGE != EventMask::NO_EVENT) {
+                deferred_colormap_notify = Some((old_cmap, val));
+            }
+        }
+        if let Some(val) = vl.cursor {
+            let new_cursor = if val == 0 { None } else { Some(val) };
+            if win.cursor != new_cursor {
+                win.cursor = new_cursor;
+                cursor_changed = true;
             }
         }
     }
@@ -150,7 +161,7 @@ pub(crate) fn handle_change_window_attributes(state: &mut ClientState, data: &[u
 
     // If border attributes changed, send a WindowConfigured update so the
     // frontend can re-render the border.
-    if value_mask & ((1 << 2) | (1 << 3)) != 0 {
+    if vl.border_pixmap.is_some() || vl.border_pixel.is_some() {
         if let Some(win) = state.windows.get(&wid) {
             if let Some(uuid) = state.window_uuid(wid) {
                 let _ = state.update_tx.send((
@@ -181,8 +192,11 @@ pub(crate) fn handle_get_window_attributes(
     data: &[u8],
     seq: u16,
 ) -> Vec<u8> {
-    require_len!(data, 8, seq, 3);
-    let wid = state.read_u32(data, 4);
+    let req = match GetWindowAttributesRequest::try_parse_request(request_header(data), &data[4..]) {
+        Ok(r) => r,
+        Err(_) => return build_error(LENGTH_ERROR, seq, 0, 3, 0),
+    };
+    let wid = req.window;
 
     let win = match state.windows.get(&wid) {
         Some(w) => w,
@@ -225,9 +239,13 @@ pub(crate) fn handle_get_window_attributes(
 // ---------------------------------------------------------------------------
 
 pub(crate) fn handle_change_save_set(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
-    require_len!(data, 8, state.sequence, 6);
-    let mode = data[1]; // 0 = Insert, 1 = Delete
-    let window = state.read_u32(data, 4);
+    let seq = state.sequence;
+    let req = match ChangeSaveSetRequest::try_parse_request(request_header(data), &data[4..]) {
+        Ok(r) => r,
+        Err(_) => return build_error(LENGTH_ERROR, seq, 0, 6, 0),
+    };
+    let mode: u8 = req.mode.into();
+    let window = req.window;
 
     // Per X11 spec, validate the window exists (cannot add root window to save set)
     if !state.windows.contains_key(&window) || window == state.root_window {

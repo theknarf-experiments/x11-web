@@ -2,11 +2,12 @@
 
 use super::*;
 use super::{update_sibling_visibility, win_gravity_delta};
-use crate::xserver::core::require_len;
 use crate::xserver::event::serialize_event;
+use crate::xserver::request::request_header;
 use x11rb_protocol::protocol::xproto::{
-    CirculateNotifyEvent, ClientMessageData, ClientMessageEvent, ConfigureNotifyEvent,
-    ConfigureRequestEvent, ExposeEvent, GravityNotifyEvent, MapNotifyEvent, ReparentNotifyEvent,
+    CirculateNotifyEvent, CirculateWindowRequest, ClientMessageData, ClientMessageEvent,
+    ConfigureNotifyEvent, ConfigureRequestEvent, ConfigureWindowRequest, ExposeEvent,
+    GravityNotifyEvent, MapNotifyEvent, ReparentNotifyEvent, ReparentWindowRequest,
     ResizeRequestEvent, UnmapNotifyEvent,
 };
 
@@ -15,12 +16,15 @@ use x11rb_protocol::protocol::xproto::{
 // ---------------------------------------------------------------------------
 
 pub(crate) fn handle_reparent_window(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
-    require_len!(data, 16, seq, 7);
+    let req = match ReparentWindowRequest::try_parse_request(request_header(data), &data[4..]) {
+        Ok(r) => r,
+        Err(_) => return build_error(LENGTH_ERROR, seq, 0, 7, 0),
+    };
 
-    let window = state.read_u32(data, 4);
-    let new_parent = state.read_u32(data, 8);
-    let x = state.read_i16(data, 12);
-    let y = state.read_i16(data, 14);
+    let window = req.window;
+    let new_parent = req.parent;
+    let x = req.x;
+    let y = req.y;
 
     if !state.windows.contains_key(&window) {
         return build_error(WINDOW_ERROR, state.sequence, window, 7, 0);
@@ -183,20 +187,31 @@ pub(crate) fn handle_reparent_window(state: &mut ClientState, data: &[u8], seq: 
 // ---------------------------------------------------------------------------
 
 pub(crate) fn handle_configure_window(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
-    require_len!(data, 12, seq, 12);
+    let req = match ConfigureWindowRequest::try_parse_request(request_header(data), &data[4..]) {
+        Ok(r) => r,
+        Err(_) => return build_error(LENGTH_ERROR, seq, 0, 12, 0),
+    };
 
-    let wid = state.read_u32(data, 4);
-    let value_mask = state.read_u16(data, 8);
+    let wid = req.window;
+    let cvl = &*req.value_list;
+
+    // Reconstruct the value_mask from the parsed aux fields (same bit positions as ConfigWindow)
+    let value_mask: u16 = {
+        let mut m: u16 = 0;
+        if cvl.x.is_some()            { m |= 1 << 0; }
+        if cvl.y.is_some()            { m |= 1 << 1; }
+        if cvl.width.is_some()        { m |= 1 << 2; }
+        if cvl.height.is_some()       { m |= 1 << 3; }
+        if cvl.border_width.is_some() { m |= 1 << 4; }
+        if cvl.sibling.is_some()      { m |= 1 << 5; }
+        if cvl.stack_mode.is_some()   { m |= 1 << 6; }
+        m
+    };
 
     // Validate window exists.
     if wid != state.root_window && !state.windows.contains_key(&wid) {
         return build_error(WINDOW_ERROR, seq, wid, 12, 0);
     }
-
-    // Validate value-list length matches the bitmask
-    let n_values = (value_mask as u32).count_ones() as usize;
-    let required_len = 12 + n_values * 4;
-    require_len!(data, required_len, seq, 12);
 
     // Per X11 spec: if the window's parent has SubstructureRedirectMask set by
     // another client, ConfigureWindow generates ConfigureRequest instead of
@@ -225,41 +240,24 @@ pub(crate) fn handle_configure_window(state: &mut ClientState, data: &[u8], seq:
         if should_redirect || parent_has_redirect {
             info!("ConfigureWindow: redirecting wid={wid:#x} as ConfigureRequest (parent={parent_id:#x})");
 
-            // Parse the values from the request to populate the ConfigureRequest event.
-            let mut x: i16 = 0;
-            let mut y: i16 = 0;
-            let mut width: u16 = 0;
-            let mut height: u16 = 0;
-            let mut border_width: u16 = 0;
+            // Extract the values from the parsed request to populate the ConfigureRequest event.
+            // Pre-fill with current values from the window
+            let (mut x, mut y, mut width, mut height, mut border_width) =
+                if let Some(win) = state.windows.get(&wid) {
+                    (win.x, win.y, win.width, win.height, win.border_width)
+                } else {
+                    (0, 0, 0, 0, 0)
+                };
             let mut sibling: u32 = 0;
             let mut stack_mode: u8 = 0;
 
-            // Pre-fill with current values from the window
-            if let Some(win) = state.windows.get(&wid) {
-                x = win.x;
-                y = win.y;
-                width = win.width;
-                height = win.height;
-                border_width = win.border_width;
-            }
-
-            let mut offset = 12;
-            for bit in 0..7u16 {
-                if value_mask & (1 << bit) != 0 && offset + 4 <= data.len() {
-                    let val = state.read_u32(data, offset);
-                    match bit {
-                        0 => x = val as i16,
-                        1 => y = val as i16,
-                        2 => width = val as u16,
-                        3 => height = val as u16,
-                        4 => border_width = val as u16,
-                        5 => sibling = val,
-                        6 => stack_mode = val as u8,
-                        _ => {}
-                    }
-                    offset += 4;
-                }
-            }
+            if let Some(v) = cvl.x { x = v as i16; }
+            if let Some(v) = cvl.y { y = v as i16; }
+            if let Some(v) = cvl.width { width = v as u16; }
+            if let Some(v) = cvl.height { height = v as u16; }
+            if let Some(v) = cvl.border_width { border_width = v as u16; }
+            if let Some(v) = cvl.sibling { sibling = v; }
+            if let Some(v) = cvl.stack_mode { stack_mode = u32::from(v) as u8; }
 
             // Build ConfigureRequest event (code 23)
             let event = serialize_event(&ConfigureRequestEvent {
@@ -302,22 +300,13 @@ pub(crate) fn handle_configure_window(state: &mut ClientState, data: &[u8], seq:
     };
     // Strip width/height bits from value_mask if resize is redirected
     let value_mask = if resize_redirected {
-        // Parse the requested width/height for the ResizeRequest event
-        let mut req_width = state.windows.get(&wid).map(|w| w.width).unwrap_or(1);
-        let mut req_height = state.windows.get(&wid).map(|w| w.height).unwrap_or(1);
-        let mut scan_offset = 12;
-        for bit in 0..7u16 {
-            if value_mask & (1 << bit) != 0 && scan_offset + 4 <= data.len() {
-                let val = state.read_u32(data, scan_offset);
-                if bit == 2 {
-                    req_width = val as u16;
-                }
-                if bit == 3 {
-                    req_height = val as u16;
-                }
-                scan_offset += 4;
-            }
-        }
+        // Extract the requested width/height for the ResizeRequest event
+        let req_width = cvl.width.map(|v| v as u16).unwrap_or_else(|| {
+            state.windows.get(&wid).map(|w| w.width).unwrap_or(1)
+        });
+        let req_height = cvl.height.map(|v| v as u16).unwrap_or_else(|| {
+            state.windows.get(&wid).map(|w| w.height).unwrap_or(1)
+        });
 
         let bo = state.msb_first;
         let event = serialize_event(&ResizeRequestEvent {
@@ -335,7 +324,6 @@ pub(crate) fn handle_configure_window(state: &mut ClientState, data: &[u8], seq:
         value_mask
     };
 
-    let mut offset = 12;
     let mut changed = false;
     let mut sibling: u32 = 0;
     let mut stack_mode: Option<u8> = None;
@@ -402,98 +390,99 @@ pub(crate) fn handle_configure_window(state: &mut ClientState, data: &[u8], seq:
         .map(|w| (w.width, w.height, w.children_order.clone()))
         .unwrap_or((0, 0, Vec::new()));
 
+    // When resize_redirected, width/height bits were stripped from value_mask
+    // and we must not apply them to the window.
+    let apply_width = !resize_redirected && cvl.width.is_some();
+    let apply_height = !resize_redirected && cvl.height.is_some();
+
     if let Some(win) = state.windows.get_mut(&wid) {
-        for bit in 0..7 {
-            if value_mask & (1 << bit) != 0 && offset + 4 <= data.len() {
-                let val = read_u32_bo(data, offset, msb_first);
-                match bit {
-                    0 => {
-                        win.x = val as i16;
-                        changed = true;
-                    }
-                    1 => {
-                        win.y = val as i16;
-                        changed = true;
-                    }
-                    2 => {
-                        // Per X11 spec: width must be non-zero
-                        if val == 0 {
-                            return build_error(VALUE_ERROR, seq, 0, 12, 0);
-                        }
-                        let mut w = val as u16;
-                        // Apply size hints (ICCCM §4.1.2.3)
-                        if let Some(ref hints) = size_hints {
-                            // Round to width_inc steps relative to base_width
-                            if hints.width_inc > 1 {
-                                let base = if hints.base_width > 0 {
-                                    hints.base_width
-                                } else {
-                                    hints.min_width
-                                };
-                                if w > base {
-                                    let over = (w - base) % hints.width_inc;
-                                    if over != 0 {
-                                        w -= over;
-                                    }
-                                }
-                            }
-                            if hints.min_width > 0 && w < hints.min_width {
-                                w = hints.min_width;
-                            }
-                            if hints.max_width > 0 && w > hints.max_width {
-                                w = hints.max_width;
-                            }
-                        }
-                        win.width = w;
-                        changed = true;
-                    }
-                    3 => {
-                        // Per X11 spec: height must be non-zero
-                        if val == 0 {
-                            return build_error(VALUE_ERROR, seq, 0, 12, 0);
-                        }
-                        let mut h = val as u16;
-                        // Apply size hints (ICCCM §4.1.2.3)
-                        if let Some(ref hints) = size_hints {
-                            // Round to height_inc steps relative to base_height
-                            if hints.height_inc > 1 {
-                                let base = if hints.base_height > 0 {
-                                    hints.base_height
-                                } else {
-                                    hints.min_height
-                                };
-                                if h > base {
-                                    let over = (h - base) % hints.height_inc;
-                                    if over != 0 {
-                                        h -= over;
-                                    }
-                                }
-                            }
-                            if hints.min_height > 0 && h < hints.min_height {
-                                h = hints.min_height;
-                            }
-                            if hints.max_height > 0 && h > hints.max_height {
-                                h = hints.max_height;
-                            }
-                        }
-                        win.height = h;
-                        changed = true;
-                    }
-                    4 => {
-                        win.border_width = val as u16;
-                    }
-                    5 => sibling = val,
-                    6 => {
-                        // Per X11 spec: valid stack modes are 0-4
-                        if val > 4 {
-                            return build_error(VALUE_ERROR, seq, val, 12, 0);
-                        }
-                        stack_mode = Some(val as u8);
-                    }
-                    _ => {}
-                }
-                offset += 4;
+        if let Some(val) = cvl.x {
+            win.x = val as i16;
+            changed = true;
+        }
+        if let Some(val) = cvl.y {
+            win.y = val as i16;
+            changed = true;
+        }
+        if apply_width {
+            let val = cvl.width.unwrap();
+            // Per X11 spec: width must be non-zero
+            if val == 0 {
+                return build_error(VALUE_ERROR, seq, 0, 12, 0);
             }
+            let mut w = val as u16;
+            // Apply size hints (ICCCM §4.1.2.3)
+            if let Some(ref hints) = size_hints {
+                // Round to width_inc steps relative to base_width
+                if hints.width_inc > 1 {
+                    let base = if hints.base_width > 0 {
+                        hints.base_width
+                    } else {
+                        hints.min_width
+                    };
+                    if w > base {
+                        let over = (w - base) % hints.width_inc;
+                        if over != 0 {
+                            w -= over;
+                        }
+                    }
+                }
+                if hints.min_width > 0 && w < hints.min_width {
+                    w = hints.min_width;
+                }
+                if hints.max_width > 0 && w > hints.max_width {
+                    w = hints.max_width;
+                }
+            }
+            win.width = w;
+            changed = true;
+        }
+        if apply_height {
+            let val = cvl.height.unwrap();
+            // Per X11 spec: height must be non-zero
+            if val == 0 {
+                return build_error(VALUE_ERROR, seq, 0, 12, 0);
+            }
+            let mut h = val as u16;
+            // Apply size hints (ICCCM §4.1.2.3)
+            if let Some(ref hints) = size_hints {
+                // Round to height_inc steps relative to base_height
+                if hints.height_inc > 1 {
+                    let base = if hints.base_height > 0 {
+                        hints.base_height
+                    } else {
+                        hints.min_height
+                    };
+                    if h > base {
+                        let over = (h - base) % hints.height_inc;
+                        if over != 0 {
+                            h -= over;
+                        }
+                    }
+                }
+                if hints.min_height > 0 && h < hints.min_height {
+                    h = hints.min_height;
+                }
+                if hints.max_height > 0 && h > hints.max_height {
+                    h = hints.max_height;
+                }
+            }
+            win.height = h;
+            changed = true;
+        }
+        if let Some(val) = cvl.border_width {
+            win.border_width = val as u16;
+        }
+        if let Some(val) = cvl.sibling {
+            sibling = val;
+        }
+        if let Some(val) = cvl.stack_mode {
+            // Per X11 spec: valid stack modes are 0-4
+            let val_u32 = u32::from(val);
+            if val_u32 > 4 {
+                return build_error(VALUE_ERROR, seq, val_u32, 12, 0);
+            }
+            stack_mode = Some(val_u32 as u8);
         }
 
         if changed {
@@ -1123,10 +1112,13 @@ pub(crate) fn handle_configure_window(state: &mut ClientState, data: &[u8], seq:
 // ---------------------------------------------------------------------------
 
 pub(crate) fn handle_circulate_window(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
-    require_len!(data, 8, seq, 13);
+    let req = match CirculateWindowRequest::try_parse_request(request_header(data), &data[4..]) {
+        Ok(r) => r,
+        Err(_) => return build_error(LENGTH_ERROR, seq, 0, 13, 0),
+    };
 
-    let direction = data[1]; // 0 = RaiseLowest, 1 = LowerHighest
-    let window = state.read_u32(data, 4);
+    let direction: u8 = req.direction.into(); // 0 = RaiseLowest, 1 = LowerHighest
+    let window = req.window;
 
     if !state.windows.contains_key(&window) {
         return build_error_bo(WINDOW_ERROR, seq, window, 13, 0, state.msb_first);
