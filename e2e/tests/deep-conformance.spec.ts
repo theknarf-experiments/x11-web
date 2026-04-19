@@ -583,363 +583,112 @@ echo EXIT_CODE=$?`,
 		// Firefox --screenshot mode doesn't require rendering but tests X11 init
 	});
 
-	test("Firefox ESR diagnostic (non-headless crash info)", async ({
+	test("glxinfo works with indirect rendering", async ({
 		sidecarContainer,
 	}) => {
-		test.setTimeout(180_000);
+		const output = await execInSidecar(
+			sidecarContainer,
+			"LIBGL_ALWAYS_INDIRECT=1 timeout 10 glxinfo -B 2>&1",
+		);
+		expect(output).toContain("OpenGL renderer string:");
+		expect(output).toContain("llvmpipe");
+		expect(output).not.toContain("[xcb] Extra reply data");
+		expect(output).not.toContain("Segmentation fault");
+	});
 
-		// Write the Python GLX protocol test script using base64 to avoid shell escaping issues
-		const pyScript = [
-			"import socket, struct, sys",
-			"",
-			"def recv_exact(s, n):",
-			"    buf = b''",
-			"    while len(buf) < n:",
-			"        chunk = s.recv(n - len(buf))",
-			"        if not chunk: break",
-			"        buf += chunk",
-			"    return buf",
-			"",
-			"sock_path = '/tmp/.X11-unix/X99'",
-			"try:",
-			"    s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)",
-			"    s.settimeout(5)",
-			"    s.connect(sock_path)",
-			"    setup = struct.pack('BBHHHHxx', 0x6c, 0, 11, 0, 0, 0)",
-			"    s.sendall(setup)",
-			"    hdr = recv_exact(s, 8)",
-			"    if not hdr or hdr[0] != 1:",
-			"        print('CONN_FAIL: ' + repr(hdr))",
-			"        sys.exit(1)",
-			"    extra_len = struct.unpack_from('<H', hdr, 6)[0]",
-			"    recv_exact(s, extra_len * 4)",
-			"    print('CONN_OK')",
-			"    # QueryExtension for GLX",
-			"    glx_name = b'GLX'",
-			"    pad = (4 - len(glx_name) % 4) % 4",
-			"    req_len = (4 + 4 + len(glx_name) + pad) // 4",
-			"    req = struct.pack('<BBH', 98, 0, req_len) + struct.pack('<HH', len(glx_name), 0) + glx_name + b'\\x00' * pad",
-			"    s.sendall(req)",
-			"    rep = recv_exact(s, 32)",
-			"    glx_op = rep[9]",
-			"    print('GLX_OP=' + str(glx_op))",
-			"    # GLX QueryVersion",
-			"    req = struct.pack('<BBHII', glx_op, 7, 3, 1, 4)",
-			"    s.sendall(req)",
-			"    rep = recv_exact(s, 32)",
-			"    maj = struct.unpack_from('<I', rep, 8)[0]",
-			"    minor = struct.unpack_from('<I', rep, 12)[0]",
-			"    print('GLX_VER=' + str(maj) + '.' + str(minor))",
-			"    # GLX QueryExtensionsString (minor=18)",
-			"    req = struct.pack('<BBHI', glx_op, 18, 2, 0)",
-			"    s.sendall(req)",
-			"    rep = recv_exact(s, 32)",
-			"    rlen = struct.unpack_from('<I', rep, 4)[0]",
-			"    pad1 = struct.unpack_from('<I', rep, 8)[0]",
-			"    n = struct.unpack_from('<I', rep, 12)[0]",
-			"    extra = recv_exact(s, rlen * 4)",
-			"    print('QEXT pad1=' + str(pad1) + ' n=' + str(n) + ' rlen=' + str(rlen) + ' str=' + extra[:n].decode(errors='replace'))",
-			"    # GLX QueryServerString name=1 (VENDOR, minor=19)",
-			"    req = struct.pack('<BBHII', glx_op, 19, 3, 0, 1)",
-			"    s.sendall(req)",
-			"    rep = recv_exact(s, 32)",
-			"    rlen = struct.unpack_from('<I', rep, 4)[0]",
-			"    pad2 = struct.unpack_from('<I', rep, 8)[0]",
-			"    n2 = struct.unpack_from('<I', rep, 12)[0]",
-			"    extra = recv_exact(s, rlen * 4)",
-			"    print('QSRV_VENDOR rlen=' + str(rlen) + ' pad2=' + str(pad2) + ' n=' + str(n2) + ' val=' + extra[:n2].decode(errors='replace'))",
-			"    # GLX QueryServerString name=2 (VERSION, minor=19)",
-			"    req = struct.pack('<BBHII', glx_op, 19, 3, 0, 2)",
-			"    s.sendall(req)",
-			"    rep = recv_exact(s, 32)",
-			"    rlen = struct.unpack_from('<I', rep, 4)[0]",
-			"    pad2 = struct.unpack_from('<I', rep, 8)[0]",
-			"    n2 = struct.unpack_from('<I', rep, 12)[0]",
-			"    extra = recv_exact(s, rlen * 4)",
-			"    ver = extra[:n2].decode(errors='replace')",
-			"    print('QSRV_VER rlen=' + str(rlen) + ' pad2=' + str(pad2) + ' n=' + str(n2) + ' ver=' + ver)",
-			"    if ver == '1.4': print('VERSION_OK')",
-			"    else: print('VERSION_FAIL got=' + ver)",
-			"    # GLX GetFBConfigs (minor=21) - check reply length vs actual data",
-			"    req = struct.pack('<BBHII', glx_op, 21, 3, 0, 0)",
-			"    s.sendall(req)",
-			"    rep = recv_exact(s, 32)",
-			"    rlen = struct.unpack_from('<I', rep, 4)[0]",
-			"    num_cfgs = struct.unpack_from('<I', rep, 8)[0]",
-			"    num_attrs = struct.unpack_from('<I', rep, 12)[0]",
-			"    extra = recv_exact(s, rlen * 4)",
-			"    print('FBCFG rlen=' + str(rlen) + ' num_cfgs=' + str(num_cfgs) + ' num_attrs=' + str(num_attrs) + ' got=' + str(len(extra)) + 'B')",
-			"    # Decode FBConfig attributes",
-			"    NAMES = {0x8013:'FBCONFIG_ID', 0x800D:'VISUAL_ID', 0x8012:'X_RENDERABLE',",
-			"             0x8011:'RENDER_TYPE', 0x8010:'DRAWABLE_TYPE', 0x22:'X_VISUAL_TYPE',",
-			"             0x20:'CONFIG_CAVEAT', 0x8008:'RED_SIZE', 0x8009:'GREEN_SIZE',",
-			"             0x800A:'BLUE_SIZE', 0x800B:'ALPHA_SIZE', 0x8015:'BUFFER_SIZE',",
-			"             0x5:'DOUBLEBUFFER', 0x8012:'DEPTH_SIZE', 0x8:'STENCIL_SIZE',",
-			"             0x8014:'MAX_PBUFFER_WIDTH', 0x8016:'MAX_PBUFFER_HEIGHT',",
-			"             0x8017:'MAX_PBUFFER_PIXELS', 0x8006:'SAMPLES', 0x8005:'SAMPLE_BUFFERS'}",
-			"    for cfg_i in range(num_cfgs):",
-			"        off = cfg_i * num_attrs * 8",
-			"        attrs = {}",
-			"        for j in range(num_attrs):",
-			"            k = struct.unpack_from('<I', extra, off + j*8)[0]",
-			"            v = struct.unpack_from('<I', extra, off + j*8 + 4)[0]",
-			"            name = NAMES.get(k, hex(k))",
-			"            attrs[name] = v",
-			"        bufsz = attrs.get('BUFFER_SIZE', '?')",
-			"        alpha = attrs.get('ALPHA_SIZE', '?')",
-			"        vid = attrs.get('VISUAL_ID', '?')",
-			"        fbid = attrs.get('FBCONFIG_ID', '?')",
-			"        print(f'  CFG{cfg_i+1}: fbid={fbid} vid={hex(vid) if isinstance(vid,int) else vid} bufsz={bufsz} alpha={alpha}')",
-			"    s.close()",
-			"    print('PROTO_DONE')",
-			"except Exception as e:",
-			"    import traceback; traceback.print_exc()",
-			"    print('PROTO_ERR: ' + str(e))",
-		].join("\n");
+	test("glxgears creates context without crash (indirect)", async ({
+		sidecarContainer,
+	}) => {
+		// Run for only 1 second — enough to verify context creation works.
+		// Longer runs send GL render commands that may crash the server
+		// (indirect rendering render opcode handling is incomplete).
+		const output = await execInSidecar(
+			sidecarContainer,
+			`LIBGL_ALWAYS_INDIRECT=1 timeout 1 glxgears -info 2>&1 | head -10 || true`,
+		);
+		expect(output).not.toContain("glXCreateContext failed");
+		expect(output).not.toContain("Segmentation fault");
+		expect(output).not.toContain("[xcb] Extra reply data");
+	});
 
-		// Write using base64 to avoid shell quoting issues
-		const scriptB64 = Buffer.from(pyScript).toString("base64");
-		await sidecarContainer.exec([
-			"bash",
-			"-c",
-			`printf '%s' '${scriptB64}' | base64 -d > /tmp/glx_test.py`,
-		]);
+	test("GLX context creation and MakeCurrent (GLX 1.0 + 1.3)", async ({
+		sidecarContainer,
+	}) => {
+		test.setTimeout(60_000);
 
-		// Write ctypes GLX test script — tests each call individually
+		// ctypes test that exercises both GLX 1.0 and 1.3 context creation paths
 		const ctypesScript = [
 			"import ctypes, ctypes.util, sys, os, signal",
 			"os.environ['LIBGL_ALWAYS_INDIRECT'] = '1'",
-			"os.environ['LIBGL_DEBUG'] = 'verbose'",
 			"signal.signal(signal.SIGABRT, lambda *a: (print('ABORTED'), sys.exit(134)))",
 			"X11 = ctypes.CDLL(ctypes.util.find_library('X11'))",
 			"GL = ctypes.CDLL(ctypes.util.find_library('GL'))",
 			"X11.XOpenDisplay.restype = ctypes.c_void_p",
 			"dpy = X11.XOpenDisplay(b':99')",
-			"if not dpy: print('FAIL_DISPLAY'); sys.exit(1)",
-			"print('STEP1_XOpenDisplay=OK')",
+			"if not dpy: print('FAIL:XOpenDisplay'); sys.exit(1)",
+			"print('OK:XOpenDisplay')",
 			"err = ctypes.c_int(); ev = ctypes.c_int()",
 			"ok = GL.glXQueryExtension(dpy, ctypes.byref(err), ctypes.byref(ev))",
-			"print(f'STEP2_QueryExtension ok={ok} err={err.value} ev={ev.value}')",
+			"if not ok: print('FAIL:QueryExtension'); sys.exit(1)",
+			"print('OK:QueryExtension')",
 			"maj = ctypes.c_int(); minor = ctypes.c_int()",
 			"GL.glXQueryVersion(dpy, ctypes.byref(maj), ctypes.byref(minor))",
-			"print(f'STEP3_QueryVersion={maj.value}.{minor.value}')",
-			"GL.glXQueryServerString.restype = ctypes.c_char_p",
-			"vendor = GL.glXQueryServerString(dpy, 0, 1)",
-			"print(f'STEP4_ServerVendor={vendor}')",
-			"version = GL.glXQueryServerString(dpy, 0, 2)",
-			"print(f'STEP5_ServerVersion={version}')",
-			"exts = GL.glXQueryServerString(dpy, 0, 3)",
-			"print(f'STEP6_ServerExtensions={exts}')",
-			"GL.glXQueryExtensionsString.restype = ctypes.c_char_p",
-			"cexts = GL.glXQueryExtensionsString(dpy, 0)",
-			"print(f'STEP7_ExtensionsString={cexts}')",
-			"# Minimal GLX 1.3 test: CreateNewContext + MakeContextCurrent",
+			"print(f'OK:QueryVersion={maj.value}.{minor.value}')",
+			"n = ctypes.c_int()",
+			"GL.glXGetFBConfigs.restype = ctypes.POINTER(ctypes.c_void_p)",
+			"cfgs = GL.glXGetFBConfigs(dpy, 0, ctypes.byref(n))",
+			"if not cfgs or n.value == 0: print('FAIL:GetFBConfigs'); sys.exit(1)",
+			"print(f'OK:GetFBConfigs={n.value}')",
 			"GL.glXChooseFBConfig.restype = ctypes.POINTER(ctypes.c_void_p)",
 			"fb_attrs = (ctypes.c_int * 3)(5, 1, 0)",
 			"fb_n = ctypes.c_int()",
 			"fb_cfgs = GL.glXChooseFBConfig(dpy, 0, fb_attrs, ctypes.byref(fb_n))",
-			"print(f'FBCONFIGS={fb_n.value}', flush=True)",
-			"if fb_cfgs and fb_n.value > 0:",
-			"    GL.glXCreateNewContext.restype = ctypes.c_void_p",
-			"    ctx = GL.glXCreateNewContext(dpy, fb_cfgs[0], 0x8014, None, 0)",
-			"    print(f'CTX={\"OK\" if ctx else \"FAIL\"}', flush=True)",
-			"    root = X11.XDefaultRootWindow(dpy)",
-			"    # Test GLX 1.0 MakeCurrent first (known to work)",
-			"    GL.glXMakeCurrent.restype = ctypes.c_int",
-			"    ok1 = GL.glXMakeCurrent(dpy, root, ctx)",
-			"    print(f'MakeCurrent_1_0={ok1}', flush=True)",
-			"    GL.glGetString.restype = ctypes.c_char_p",
-			"    print(f'Renderer_1_0={GL.glGetString(0x1F01)}', flush=True)",
-			"    # Now test GLX 1.3 MakeContextCurrent (crashes in DRISW)",
-			"    GL.glXMakeContextCurrent.restype = ctypes.c_int",
-			"    ok2 = GL.glXMakeContextCurrent(dpy, root, root, ctx)",
-			"    print(f'MakeCtxCur_1_3={ok2}', flush=True)",
+			"if not fb_cfgs: print('FAIL:ChooseFBConfig'); sys.exit(1)",
+			"print(f'OK:ChooseFBConfig={fb_n.value}')",
+			"GL.glXCreateNewContext.restype = ctypes.c_void_p",
+			"ctx = GL.glXCreateNewContext(dpy, fb_cfgs[0], 0x8014, None, 0)",
+			"if not ctx: print('FAIL:CreateNewContext'); sys.exit(1)",
+			"print('OK:CreateNewContext')",
+			"root = X11.XDefaultRootWindow(dpy)",
+			"GL.glXMakeCurrent.restype = ctypes.c_int",
+			"ok = GL.glXMakeCurrent(dpy, root, ctx)",
+			"if not ok: print('FAIL:MakeCurrent'); sys.exit(1)",
+			"print('OK:MakeCurrent')",
+			"GL.glXMakeContextCurrent.restype = ctypes.c_int",
+			"ok = GL.glXMakeContextCurrent(dpy, root, root, ctx)",
+			"if not ok: print('FAIL:MakeContextCurrent'); sys.exit(1)",
+			"print('OK:MakeContextCurrent')",
+			"GL.glGetString.restype = ctypes.c_char_p",
+			"renderer = GL.glGetString(0x1F01)",
+			"if not renderer: print('FAIL:glGetString'); sys.exit(1)",
+			"print(f'OK:Renderer={renderer.decode()}')",
 			"X11.XCloseDisplay(dpy)",
-			"print('ALL_DONE')",
+			"print('ALL_PASSED')",
 		].join("\n");
-		const ctypesB64 = Buffer.from(ctypesScript).toString("base64");
+		const b64 = Buffer.from(ctypesScript).toString("base64");
 		await sidecarContainer.exec([
 			"bash",
 			"-c",
-			`printf '%s' '${ctypesB64}' | base64 -d > /tmp/glx_ctypes.py`,
-		]);
-
-		// Minimal test: just XOpenDisplay + glXChooseVisual
-		const minimalScript = [
-			"import ctypes, ctypes.util, sys",
-			"X11 = ctypes.CDLL(ctypes.util.find_library('X11'))",
-			"GL = ctypes.CDLL(ctypes.util.find_library('GL'))",
-			"X11.XOpenDisplay.restype = ctypes.c_void_p",
-			"dpy = X11.XOpenDisplay(b':99')",
-			"print('dpy=' + ('OK' if dpy else 'FAIL'), flush=True)",
-			"attrs = (ctypes.c_int * 3)(5, 1, 0)",
-			"GL.glXChooseVisual.restype = ctypes.c_void_p",
-			"vi = GL.glXChooseVisual(dpy, 0, attrs)",
-			"print('vi=' + ('OK' if vi else 'FAIL'), flush=True)",
-			"X11.XCloseDisplay(dpy)",
-			"print('DONE', flush=True)",
-		].join("\n");
-		const minB64 = Buffer.from(minimalScript).toString("base64");
-		await sidecarContainer.exec([
-			"bash",
-			"-c",
-			`printf '%s' '${minB64}' | base64 -d > /tmp/glx_minimal.py`,
-		]);
-
-		// Trace comparison script
-		const diffScript = [
-			"import re, sys",
-			"def parse(path):",
-			"    results = []",
-			"    with open(path) as f:",
-			"        for line in f:",
-			"            m = re.search(r'recvmsg.*= (\\d+)$', line)",
-			"            if m:",
-			"                sz = int(m.group(1))",
-			"                results.append(sz)",
-			"    return results",
-			"try:",
-			"    x = parse('/tmp/xvfb_trace.log')",
-			"    o = parse('/tmp/ours_trace.log')",
-			"    print(f'Xvfb recvs: {len(x)}, Ours: {len(o)}')",
-			"    for i in range(max(len(x), len(o))):",
-			"        xv = x[i] if i < len(x) else '?'",
-			"        ov = o[i] if i < len(o) else '?'",
-			"        d = ' <<<' if xv != ov else ''",
-			"        print(f'  [{i:2d}] Xvfb={xv:>6}  Ours={ov:>6}{d}')",
-			"except Exception as e:",
-			"    print(f'Error: {e}')",
-		].join("\n");
-		const diffB64 = Buffer.from(diffScript).toString("base64");
-		await sidecarContainer.exec([
-			"bash",
-			"-c",
-			`printf '%s' '${diffB64}' | base64 -d > /tmp/diff_traces.py`,
-		]);
-
-		// Setup comparison script
-		const setupCmpScript = [
-			"import socket, struct",
-			"def get_setup(path):",
-			"    s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)",
-			"    s.settimeout(5)",
-			"    s.connect(path)",
-			"    s.sendall(struct.pack('BBHHHHxx', 0x6c, 0, 11, 0, 0, 0))",
-			"    hdr = b''",
-			"    while len(hdr) < 8:",
-			"        hdr += s.recv(8 - len(hdr))",
-			"    extra_words = struct.unpack_from('<H', hdr, 6)[0]",
-			"    extra = b''",
-			"    while len(extra) < extra_words * 4:",
-			"        extra += s.recv(extra_words * 4 - len(extra))",
-			"    s.close()",
-			"    return hdr + extra",
-			"xvfb = get_setup('/tmp/.X11-unix/X98')",
-			"ours = get_setup('/tmp/.X11-unix/X99')",
-			"print(f'Xvfb setup: {len(xvfb)} bytes')",
-			"print(f'Ours setup: {len(ours)} bytes')",
-			"# Compare header fields",
-			"for name, off, sz in [('status',0,1),('proto_major',2,2),('proto_minor',4,2),('extra_len',6,2)]:",
-			"    xv = int.from_bytes(xvfb[off:off+sz], 'little')",
-			"    ov = int.from_bytes(ours[off:off+sz], 'little')",
-			"    d = ' <<<' if xv != ov else ''",
-			"    print(f'  {name}: Xvfb={xv} Ours={ov}{d}')",
-			"# Compare vendor string",
-			"xv_vlen = struct.unpack_from('<H', xvfb, 24)[0]",
-			"ov_vlen = struct.unpack_from('<H', ours, 24)[0]",
-			"print(f'  vendor_len: Xvfb={xv_vlen} Ours={ov_vlen}')",
-			"# Number of formats",
-			"xv_nfmt = xvfb[29]",
-			"ov_nfmt = ours[29]",
-			"d = ' <<<' if xv_nfmt != ov_nfmt else ''",
-			"print(f'  num_formats: Xvfb={xv_nfmt} Ours={ov_nfmt}{d}')",
-			"# Number of screens (always 1)",
-			"print(f'  num_screens: Xvfb={xvfb[20]} Ours={ours[20]}')",
-		].join("\n");
-		const setupB64 = Buffer.from(setupCmpScript).toString("base64");
-		await sidecarContainer.exec([
-			"bash",
-			"-c",
-			`printf '%s' '${setupB64}' | base64 -d > /tmp/compare_setup.py`,
+			`printf '%s' '${b64}' | base64 -d > /tmp/glx_test_ctx.py`,
 		]);
 
 		const output = await execInSidecar(
 			sidecarContainer,
-			`ls /dev/dri 2>&1 || echo "no /dev/dri"
-echo "--- Python GLX protocol test ---"
-python3 /tmp/glx_test.py 2>&1
-echo "--- glmark2 on-screen test ---"
-LIBGL_DEBUG=verbose timeout 15 glmark2 -b build 2>&1 | head -30 || true
-echo "--- GDB backtrace at XCB assertion ---"
-apt-get update -qq && apt-get install -y -qq gdb libx11-6-dbg 2>/dev/null
-DISPLAY=:99 LIBGL_ALWAYS_INDIRECT=1 timeout 10 gdb -batch -ex run -ex bt -ex quit --args glxinfo -B 2>&1 | tail -30 || true
-echo "--- ctypes GLX test ---"
-rm -f /tmp/glx_replies.log
-python3 /tmp/glx_ctypes.py 2>&1 || true
-echo "--- GLX replies during ctypes test ---"
-cat /tmp/glx_replies.log 2>/dev/null || echo "no reply log"
-echo "--- Python GLX context test ---"
-python3 -c "
-import socket, struct, sys
-def rx(s, n):
-    b = b''
-    while len(b) < n:
-        c = s.recv(n - len(b))
-        if not c: break
-        b += c
-    return b
-s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-s.settimeout(5)
-s.connect('/tmp/.X11-unix/X99')
-s.sendall(struct.pack('BBHHHHxx', 0x6c, 0, 11, 0, 0, 0))
-hdr = rx(s, 8)
-extra = struct.unpack_from('<H', hdr, 6)[0]
-rx(s, extra * 4)
-print('CONN_OK')
-# QueryExtension GLX
-n = b'GLX'
-p = (4 - len(n) % 4) % 4
-req = struct.pack('<BBH', 98, 0, (8+len(n)+p)//4) + struct.pack('<HH', len(n), 0) + n + b'\\x00'*p
-s.sendall(req)
-rep = rx(s, 32)
-glx_op = rep[9]
-print(f'GLX_OP={glx_op}')
-# GLX CreateContext (minor=3)
-ctx_id = 0x02000001
-req = struct.pack('<BBHIIIII', glx_op, 3, 6, ctx_id, 0x21, 0, 0, 0)
-s.sendall(req)
-# No reply for CreateContext
-print('CTX_CREATED')
-# GLX MakeCurrent (minor=5)
-wid = 0x65  # root window
-req = struct.pack('<BBHIII', glx_op, 5, 4, wid, ctx_id, 0)
-s.sendall(req)
-rep = rx(s, 32)
-tag = struct.unpack_from('<I', rep, 8)[0]
-print(f'MAKE_CURRENT tag={tag}')
-# GLX IsDirect (minor=6)
-req = struct.pack('<BBHI', glx_op, 6, 2, ctx_id)
-s.sendall(req)
-rep = rx(s, 32)
-print(f'IS_DIRECT={rep[8]}')
-print('ALL_OK')
-s.close()
-" 2>&1 || true
-echo "DONE"`,
-			120_000,
+			"python3 /tmp/glx_test_ctx.py 2>&1",
+			60_000,
 		);
-		console.log("Firefox diagnostic output:", output);
-
-		// Capture sidecar container logs (includes REPLY debug lines)
-		const logs = await sidecarContainer.logs();
-		const logStr = logs.toString();
-		// Extract REPLY lines from sidecar debug logs
-		const replyLines = logStr.split('\n').filter((l: string) => l.includes('REPLY') || l.includes('ERROR seq='));
-		if (replyLines.length > 0) {
-			console.log("Sidecar REPLY log (last 30):", replyLines.slice(-30).join('\n'));
-		}
-
-		expect(output).toBeDefined();
+		expect(output).toContain("OK:XOpenDisplay");
+		expect(output).toContain("OK:QueryExtension");
+		expect(output).toContain("OK:QueryVersion=1.4");
+		expect(output).toContain("OK:GetFBConfigs=");
+		expect(output).toContain("OK:ChooseFBConfig=");
+		expect(output).toContain("OK:CreateNewContext");
+		expect(output).toContain("OK:MakeCurrent");
+		expect(output).toContain("OK:MakeContextCurrent");
+		expect(output).toContain("OK:Renderer=");
+		expect(output).toContain("ALL_PASSED");
+		expect(output).not.toContain("FAIL:");
+		expect(output).not.toContain("ABORTED");
 	});
 
 	// Firefox non-headless segfaults in Mesa's DRISW path because
