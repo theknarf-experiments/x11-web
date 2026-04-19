@@ -16,6 +16,7 @@ pub(crate) mod handlers;
 pub(crate) mod event;
 pub(crate) mod input;
 pub(crate) mod reply;
+pub(crate) mod request;
 pub(crate) mod setup;
 pub(crate) mod types;
 pub(crate) mod window_tree;

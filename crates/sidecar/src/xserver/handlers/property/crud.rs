@@ -502,12 +502,18 @@ pub(crate) fn handle_delete_property(state: &mut ClientState, data: &[u8]) -> Ve
 pub(crate) fn handle_get_property(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
     require_len!(data, 24, seq, 20);
 
-    let delete = data[1] != 0;
-    let window = state.read_u32(data, 4);
-    let property_atom = state.read_u32(data, 8);
-    let _req_type = state.read_u32(data, 12);
-    let long_offset = state.read_u32(data, 16) as usize;
-    let long_length = state.read_u32(data, 20) as usize;
+    use x11rb_protocol::protocol::xproto::GetPropertyRequest;
+    use crate::xserver::request::request_header;
+    let req = match GetPropertyRequest::try_parse_request(request_header(data), &data[4..]) {
+        Ok(r) => r,
+        Err(_) => return build_error(LENGTH_ERROR, seq, 0, 20, 0),
+    };
+    let delete = req.delete;
+    let window = req.window;
+    let property_atom = req.property;
+    let _req_type = req.type_;
+    let long_offset = req.long_offset as usize;
+    let long_length = req.long_length as usize;
 
     // Validate property atom
     if property_atom != 0 && state.get_atom_name(property_atom).is_none() {
