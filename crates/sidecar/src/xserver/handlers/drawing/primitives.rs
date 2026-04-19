@@ -3,8 +3,12 @@
 use super::*;
 use crate::xserver::core::{require_len, GRAPHICS_EXPOSURE_EVENT, NO_EXPOSURE_EVENT};
 use crate::xserver::event::serialize_event;
+use crate::xserver::request::request_header;
 use x11rb_protocol::protocol::xproto::{
-    ExposeEvent, GraphicsExposureEvent, NoExposureEvent,
+    ClearAreaRequest, CopyAreaRequest, CopyPlaneRequest,
+    ExposeEvent, FillPolyRequest, GraphicsExposureEvent, NoExposureEvent,
+    PolyArcRequest, PolyFillArcRequest, PolyFillRectangleRequest,
+    PolyLineRequest, PolyPointRequest, PolyRectangleRequest, PolySegmentRequest,
 };
 
 // ---------------------------------------------------------------------------
@@ -14,8 +18,12 @@ use x11rb_protocol::protocol::xproto::{
 pub(crate) fn handle_clear_area(state: &mut ClientState, data: &[u8], _seq: u16) -> Vec<u8> {
     require_len!(data, 16, state.sequence, 61);
 
-    let exposures = data[1] != 0;
-    let wid = state.read_u32(data, 4);
+    let req = match ClearAreaRequest::try_parse_request(request_header(data), &data[4..]) {
+        Ok(r) => r,
+        Err(_) => return build_error(LENGTH_ERROR, state.sequence, 0, 61, 0),
+    };
+    let exposures = req.exposures;
+    let wid = req.window;
 
     if !state.windows.contains_key(&wid) {
         return build_error(WINDOW_ERROR, state.sequence, wid, 61, 0);
@@ -25,10 +33,10 @@ pub(crate) fn handle_clear_area(state: &mut ClientState, data: &[u8], _seq: u16)
         return build_error(MATCH_ERROR, state.sequence, wid, 61, 0);
     }
 
-    let x = state.read_i16(data, 8);
-    let y = state.read_i16(data, 10);
-    let mut width = state.read_u16(data, 12);
-    let mut height = state.read_u16(data, 14);
+    let x = req.x;
+    let y = req.y;
+    let mut width = req.width;
+    let mut height = req.height;
 
     let bg = state.windows.get(&wid).map(|w| {
         if width == 0 {
@@ -81,15 +89,19 @@ pub(crate) fn handle_clear_area(state: &mut ClientState, data: &[u8], _seq: u16)
 pub(crate) fn handle_copy_area(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
     require_len!(data, 28, state.sequence, 62);
 
-    let src = state.read_u32(data, 4);
-    let dst = state.read_u32(data, 8);
-    let gc_id = state.read_u32(data, 12);
-    let src_x = state.read_i16(data, 16);
-    let src_y = state.read_i16(data, 18);
-    let dst_x = state.read_i16(data, 20);
-    let dst_y = state.read_i16(data, 22);
-    let width = state.read_u16(data, 24);
-    let height = state.read_u16(data, 26);
+    let req = match CopyAreaRequest::try_parse_request(request_header(data), &data[4..]) {
+        Ok(r) => r,
+        Err(_) => return build_error(LENGTH_ERROR, state.sequence, 0, 62, 0),
+    };
+    let src = req.src_drawable;
+    let dst = req.dst_drawable;
+    let gc_id = req.gc;
+    let src_x = req.src_x;
+    let src_y = req.src_y;
+    let dst_x = req.dst_x;
+    let dst_y = req.dst_y;
+    let width = req.width;
+    let height = req.height;
 
     // Validate resources
     let has_src = state.windows.contains_key(&src) || state.pixmaps.contains_key(&src);
@@ -269,16 +281,20 @@ pub(crate) fn handle_copy_area(state: &mut ClientState, data: &[u8]) -> Vec<u8> 
 pub(crate) fn handle_copy_plane(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
     require_len!(data, 32, state.sequence, 63);
 
-    let src = state.read_u32(data, 4);
-    let dst = state.read_u32(data, 8);
-    let gc_id = state.read_u32(data, 12);
-    let src_x = state.read_i16(data, 16);
-    let src_y = state.read_i16(data, 18);
-    let dst_x = state.read_i16(data, 20);
-    let dst_y = state.read_i16(data, 22);
-    let width = state.read_u16(data, 24);
-    let height = state.read_u16(data, 26);
-    let bit_plane = state.read_u32(data, 28);
+    let req = match CopyPlaneRequest::try_parse_request(request_header(data), &data[4..]) {
+        Ok(r) => r,
+        Err(_) => return build_error(LENGTH_ERROR, state.sequence, 0, 63, 0),
+    };
+    let src = req.src_drawable;
+    let dst = req.dst_drawable;
+    let gc_id = req.gc;
+    let src_x = req.src_x;
+    let src_y = req.src_y;
+    let dst_x = req.dst_x;
+    let dst_y = req.dst_y;
+    let width = req.width;
+    let height = req.height;
+    let bit_plane = req.bit_plane;
 
     // Validate: bit_plane must have exactly one bit set
     if bit_plane == 0 || (bit_plane & (bit_plane - 1)) != 0 {
@@ -405,9 +421,13 @@ pub(crate) fn handle_copy_plane(state: &mut ClientState, data: &[u8]) -> Vec<u8>
 pub(crate) fn handle_poly_point(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
     require_len!(data, 12, state.sequence, 64);
 
-    let coord_mode = data[1];
-    let drawable = state.read_u32(data, 4);
-    let gc_id = state.read_u32(data, 8);
+    let req = match PolyPointRequest::try_parse_request(request_header(data), &data[4..]) {
+        Ok(r) => r,
+        Err(_) => return build_error(LENGTH_ERROR, state.sequence, 0, 64, 0),
+    };
+    let coord_mode = u8::from(req.coordinate_mode);
+    let drawable = req.drawable;
+    let gc_id = req.gc;
 
     if !state.windows.contains_key(&drawable) && !state.pixmaps.contains_key(&drawable) {
         return build_error(DRAWABLE_ERROR, state.sequence, drawable, 64, 0);
@@ -421,10 +441,9 @@ pub(crate) fn handle_poly_point(state: &mut ClientState, data: &[u8]) -> Vec<u8>
     let mut points = Vec::new();
     let mut last_x: i16 = 0;
     let mut last_y: i16 = 0;
-    let mut offset = 12;
-    while offset + 4 <= data.len() {
-        let mut x = state.read_i16(data, offset);
-        let mut y = state.read_i16(data, offset + 2);
+    for pt in req.points.iter() {
+        let mut x = pt.x;
+        let mut y = pt.y;
         if coord_mode == 1 {
             x += last_x;
             y += last_y;
@@ -432,7 +451,6 @@ pub(crate) fn handle_poly_point(state: &mut ClientState, data: &[u8]) -> Vec<u8>
         last_x = x;
         last_y = y;
         points.push((x, y));
-        offset += 4;
     }
 
     let fg = state.map_color_for_drawable(drawable, gc.foreground);
@@ -476,9 +494,13 @@ pub(crate) fn handle_poly_point(state: &mut ClientState, data: &[u8]) -> Vec<u8>
 pub(crate) fn handle_poly_line(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
     require_len!(data, 12, state.sequence, 65);
 
-    let coord_mode = data[1];
-    let drawable = state.read_u32(data, 4);
-    let gc_id = state.read_u32(data, 8);
+    let req = match PolyLineRequest::try_parse_request(request_header(data), &data[4..]) {
+        Ok(r) => r,
+        Err(_) => return build_error(LENGTH_ERROR, state.sequence, 0, 65, 0),
+    };
+    let coord_mode = u8::from(req.coordinate_mode);
+    let drawable = req.drawable;
+    let gc_id = req.gc;
 
     if !state.windows.contains_key(&drawable) && !state.pixmaps.contains_key(&drawable) {
         return build_error(DRAWABLE_ERROR, state.sequence, drawable, 65, 0);
@@ -490,17 +512,15 @@ pub(crate) fn handle_poly_line(state: &mut ClientState, data: &[u8]) -> Vec<u8> 
     let gc = state.gcs.get(&gc_id).cloned().unwrap_or_default();
 
     let mut points: Vec<(i16, i16)> = Vec::new();
-    let mut offset = 12;
-    while offset + 4 <= data.len() {
-        let x = state.read_i16(data, offset);
-        let y = state.read_i16(data, offset + 2);
+    for pt in req.points.iter() {
+        let x = pt.x;
+        let y = pt.y;
         if coord_mode == 1 && !points.is_empty() {
             let (px, py) = points[points.len() - 1];
             points.push((px + x, py + y));
         } else {
             points.push((x, y));
         }
-        offset += 4;
     }
 
     let fg = state.map_color_for_drawable(drawable, gc.foreground);
@@ -659,8 +679,12 @@ pub(crate) fn handle_poly_line(state: &mut ClientState, data: &[u8]) -> Vec<u8> 
 pub(crate) fn handle_poly_segment(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
     require_len!(data, 12, state.sequence, 66);
 
-    let drawable = state.read_u32(data, 4);
-    let gc_id = state.read_u32(data, 8);
+    let req = match PolySegmentRequest::try_parse_request(request_header(data), &data[4..]) {
+        Ok(r) => r,
+        Err(_) => return build_error(LENGTH_ERROR, state.sequence, 0, 66, 0),
+    };
+    let drawable = req.drawable;
+    let gc_id = req.gc;
 
     if !state.windows.contains_key(&drawable) && !state.pixmaps.contains_key(&drawable) {
         return build_error(DRAWABLE_ERROR, state.sequence, drawable, 66, 0);
@@ -671,16 +695,11 @@ pub(crate) fn handle_poly_segment(state: &mut ClientState, data: &[u8]) -> Vec<u
 
     let gc = state.gcs.get(&gc_id).cloned().unwrap_or_default();
 
-    let mut segments = Vec::new();
-    let mut offset = 12;
-    while offset + 8 <= data.len() {
-        let x1 = state.read_i16(data, offset);
-        let y1 = state.read_i16(data, offset + 2);
-        let x2 = state.read_i16(data, offset + 4);
-        let y2 = state.read_i16(data, offset + 6);
-        segments.push((x1, y1, x2, y2));
-        offset += 8;
-    }
+    let segments: Vec<(i16, i16, i16, i16)> = req
+        .segments
+        .iter()
+        .map(|s| (s.x1, s.y1, s.x2, s.y2))
+        .collect();
 
     let fg = state.map_color_for_drawable(drawable, gc.foreground);
     let bg = state.map_color_for_drawable(drawable, gc.background);
@@ -843,8 +862,12 @@ pub(crate) fn handle_poly_segment(state: &mut ClientState, data: &[u8]) -> Vec<u
 pub(crate) fn handle_poly_rectangle(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
     require_len!(data, 12, state.sequence, 67);
 
-    let drawable = state.read_u32(data, 4);
-    let gc_id = state.read_u32(data, 8);
+    let req = match PolyRectangleRequest::try_parse_request(request_header(data), &data[4..]) {
+        Ok(r) => r,
+        Err(_) => return build_error(LENGTH_ERROR, state.sequence, 0, 67, 0),
+    };
+    let drawable = req.drawable;
+    let gc_id = req.gc;
 
     if !state.windows.contains_key(&drawable) && !state.pixmaps.contains_key(&drawable) {
         return build_error(DRAWABLE_ERROR, state.sequence, drawable, 67, 0);
@@ -855,16 +878,11 @@ pub(crate) fn handle_poly_rectangle(state: &mut ClientState, data: &[u8]) -> Vec
 
     let gc = state.gcs.get(&gc_id).cloned().unwrap_or_default();
 
-    let mut rects = Vec::new();
-    let mut offset = 12;
-    while offset + 8 <= data.len() {
-        let x = state.read_i16(data, offset);
-        let y = state.read_i16(data, offset + 2);
-        let width = state.read_u16(data, offset + 4);
-        let height = state.read_u16(data, offset + 6);
-        rects.push((x, y, width, height));
-        offset += 8;
-    }
+    let rects: Vec<(i16, i16, u16, u16)> = req
+        .rectangles
+        .iter()
+        .map(|r| (r.x, r.y, r.width, r.height))
+        .collect();
 
     let fg = state.map_color_for_drawable(drawable, gc.foreground);
     let bg = state.map_color_for_drawable(drawable, gc.background);
@@ -1035,8 +1053,12 @@ pub(crate) fn handle_poly_rectangle(state: &mut ClientState, data: &[u8]) -> Vec
 pub(crate) fn handle_poly_arc(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
     require_len!(data, 12, state.sequence, 68);
 
-    let drawable = state.read_u32(data, 4);
-    let gc_id = state.read_u32(data, 8);
+    let req = match PolyArcRequest::try_parse_request(request_header(data), &data[4..]) {
+        Ok(r) => r,
+        Err(_) => return build_error(LENGTH_ERROR, state.sequence, 0, 68, 0),
+    };
+    let drawable = req.drawable;
+    let gc_id = req.gc;
 
     if !state.windows.contains_key(&drawable) && !state.pixmaps.contains_key(&drawable) {
         return build_error(DRAWABLE_ERROR, state.sequence, drawable, 68, 0);
@@ -1047,18 +1069,11 @@ pub(crate) fn handle_poly_arc(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
 
     let gc = state.gcs.get(&gc_id).cloned().unwrap_or_default();
 
-    let mut arcs = Vec::new();
-    let mut offset = 12;
-    while offset + 12 <= data.len() {
-        let x = state.read_i16(data, offset);
-        let y = state.read_i16(data, offset + 2);
-        let width = state.read_u16(data, offset + 4);
-        let height = state.read_u16(data, offset + 6);
-        let angle1 = state.read_i16(data, offset + 8);
-        let angle2 = state.read_i16(data, offset + 10);
-        arcs.push((x, y, width, height, angle1, angle2));
-        offset += 12;
-    }
+    let arcs: Vec<(i16, i16, u16, u16, i16, i16)> = req
+        .arcs
+        .iter()
+        .map(|a| (a.x, a.y, a.width, a.height, a.angle1, a.angle2))
+        .collect();
 
     let fg = state.map_color_for_drawable(drawable, gc.foreground);
     let bg = state.map_color_for_drawable(drawable, gc.background);
@@ -1106,8 +1121,12 @@ pub(crate) fn handle_poly_arc(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
 pub(crate) fn handle_fill_poly(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
     require_len!(data, 16, state.sequence, 69);
 
-    let drawable = state.read_u32(data, 4);
-    let gc_id = state.read_u32(data, 8);
+    let req = match FillPolyRequest::try_parse_request(request_header(data), &data[4..]) {
+        Ok(r) => r,
+        Err(_) => return build_error(LENGTH_ERROR, state.sequence, 0, 69, 0),
+    };
+    let drawable = req.drawable;
+    let gc_id = req.gc;
 
     if !state.windows.contains_key(&drawable) && !state.pixmaps.contains_key(&drawable) {
         return build_error(DRAWABLE_ERROR, state.sequence, drawable, 69, 0);
@@ -1117,20 +1136,18 @@ pub(crate) fn handle_fill_poly(state: &mut ClientState, data: &[u8]) -> Vec<u8> 
     }
 
     let gc = state.gcs.get(&gc_id).cloned().unwrap_or_default();
-    let coord_mode = data[13]; // 0 = Origin, 1 = Previous
+    let coord_mode = u8::from(req.coordinate_mode); // 0 = Origin, 1 = Previous
 
     let mut points = Vec::new();
-    let mut offset = 16;
-    while offset + 4 <= data.len() {
-        let x = state.read_i16(data, offset);
-        let y = state.read_i16(data, offset + 2);
+    for pt in req.points.iter() {
+        let x = pt.x;
+        let y = pt.y;
         if coord_mode == 1 && !points.is_empty() {
             let (px, py): (i16, i16) = points[points.len() - 1];
             points.push((px + x, py + y));
         } else {
             points.push((x, y));
         }
-        offset += 4;
     }
 
     let fg = state.map_color_for_drawable(drawable, gc.foreground);
@@ -1258,8 +1275,12 @@ pub(crate) fn handle_fill_poly(state: &mut ClientState, data: &[u8]) -> Vec<u8> 
 pub(crate) fn handle_poly_fill_rectangle(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
     require_len!(data, 12, state.sequence, 70);
 
-    let drawable = state.read_u32(data, 4);
-    let gc_id = state.read_u32(data, 8);
+    let req = match PolyFillRectangleRequest::try_parse_request(request_header(data), &data[4..]) {
+        Ok(r) => r,
+        Err(_) => return build_error(LENGTH_ERROR, state.sequence, 0, 70, 0),
+    };
+    let drawable = req.drawable;
+    let gc_id = req.gc;
 
     if !state.windows.contains_key(&drawable) && !state.pixmaps.contains_key(&drawable) {
         return build_error(DRAWABLE_ERROR, state.sequence, drawable, 70, 0);
@@ -1270,16 +1291,11 @@ pub(crate) fn handle_poly_fill_rectangle(state: &mut ClientState, data: &[u8]) -
 
     let gc = state.gcs.get(&gc_id).cloned().unwrap_or_default();
 
-    let mut rects = Vec::new();
-    let mut offset = 12;
-    while offset + 8 <= data.len() {
-        let x = state.read_i16(data, offset);
-        let y = state.read_i16(data, offset + 2);
-        let width = state.read_u16(data, offset + 4);
-        let height = state.read_u16(data, offset + 6);
-        rects.push((x, y, width, height));
-        offset += 8;
-    }
+    let rects: Vec<(i16, i16, u16, u16)> = req
+        .rectangles
+        .iter()
+        .map(|r| (r.x, r.y, r.width, r.height))
+        .collect();
 
     let fg = state.map_color_for_drawable(drawable, gc.foreground);
     let bg = state.map_color_for_drawable(drawable, gc.background);
@@ -1454,8 +1470,12 @@ pub(crate) fn handle_poly_fill_rectangle(state: &mut ClientState, data: &[u8]) -
 pub(crate) fn handle_poly_fill_arc(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
     require_len!(data, 12, state.sequence, 71);
 
-    let drawable = state.read_u32(data, 4);
-    let gc_id = state.read_u32(data, 8);
+    let req = match PolyFillArcRequest::try_parse_request(request_header(data), &data[4..]) {
+        Ok(r) => r,
+        Err(_) => return build_error(LENGTH_ERROR, state.sequence, 0, 71, 0),
+    };
+    let drawable = req.drawable;
+    let gc_id = req.gc;
 
     if !state.windows.contains_key(&drawable) && !state.pixmaps.contains_key(&drawable) {
         return build_error(DRAWABLE_ERROR, state.sequence, drawable, 71, 0);
@@ -1466,18 +1486,11 @@ pub(crate) fn handle_poly_fill_arc(state: &mut ClientState, data: &[u8]) -> Vec<
 
     let gc = state.gcs.get(&gc_id).cloned().unwrap_or_default();
 
-    let mut arcs = Vec::new();
-    let mut offset = 12;
-    while offset + 12 <= data.len() {
-        let x = state.read_i16(data, offset);
-        let y = state.read_i16(data, offset + 2);
-        let width = state.read_u16(data, offset + 4);
-        let height = state.read_u16(data, offset + 6);
-        let angle1 = state.read_i16(data, offset + 8);
-        let angle2 = state.read_i16(data, offset + 10);
-        arcs.push((x, y, width, height, angle1, angle2));
-        offset += 12;
-    }
+    let arcs: Vec<(i16, i16, u16, u16, i16, i16)> = req
+        .arcs
+        .iter()
+        .map(|a| (a.x, a.y, a.width, a.height, a.angle1, a.angle2))
+        .collect();
 
     let fg = state.map_color_for_drawable(drawable, gc.foreground);
     let bg = state.map_color_for_drawable(drawable, gc.background);

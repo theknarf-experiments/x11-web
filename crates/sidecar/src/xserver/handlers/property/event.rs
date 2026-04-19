@@ -3,8 +3,9 @@
 use super::*;
 use crate::xserver::core::require_len;
 use crate::xserver::event::serialize_event;
+use crate::xserver::request::request_header;
 use x11rb_protocol::protocol::xproto::{
-    ConfigureNotifyEvent, ExposeEvent, PropertyNotifyEvent,
+    ConfigureNotifyEvent, ExposeEvent, PropertyNotifyEvent, SendEventRequest,
 };
 
 // ---------------------------------------------------------------------------
@@ -14,12 +15,16 @@ use x11rb_protocol::protocol::xproto::{
 pub(crate) fn handle_send_event(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
     require_len!(data, 44, state.sequence, 25);
 
-    let propagate = data[1] != 0;
-    let destination = state.read_u32(data, 4);
-    let event_mask = state.read_u32(data, 8);
+    let req = match SendEventRequest::try_parse_request(request_header(data), &data[4..]) {
+        Ok(r) => r,
+        Err(_) => return build_error(LENGTH_ERROR, state.sequence, 0, 25, 0),
+    };
+    let propagate = req.propagate;
+    let destination = req.destination;
+    let event_mask = u32::from(req.event_mask);
 
-    // The event data is 32 bytes starting at offset 12
-    let mut event = data[12..44].to_vec();
+    // The event data is 32 bytes parsed by x11rb
+    let mut event = req.event.into_owned().to_vec();
     // Mark as synthetic (bit 7 of the event code)
     event[0] |= 0x80;
 

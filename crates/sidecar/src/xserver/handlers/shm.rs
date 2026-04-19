@@ -8,6 +8,11 @@ use super::super::types::{PixmapState, ShmPixmapBacking, ShmSegment};
 use crate::framebuffer::Framebuffer;
 use crate::xserver::core::require_len;
 use crate::xserver::reply::ReplyBuf;
+use crate::xserver::request::request_header;
+use x11rb_protocol::protocol::shm::{
+    AttachRequest, CreatePixmapRequest, CreateSegmentRequest, DetachRequest, GetImageRequest,
+    PutImageRequest,
+};
 
 /// Handle MIT-SHM extension requests (major opcode 130).
 pub(crate) fn handle_shm_request(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
@@ -30,9 +35,15 @@ pub(crate) fn handle_shm_request(state: &mut ClientState, data: &[u8], seq: u16)
         // Attach
         1 => {
             require_len!(data, 16, seq, 130, minor as u16, state.msb_first);
-            let shmseg = state.read_u32(data, 4);
-            let shmid = state.read_u32(data, 8) as i32;
-            let read_only = data[12] != 0;
+            let req = match AttachRequest::try_parse_request(request_header(data), &data[4..]) {
+                Ok(r) => r,
+                Err(_) => return crate::xserver::core::build_error_bo(
+                    crate::xserver::core::LENGTH_ERROR, seq, 0, 130, minor as u16, state.msb_first,
+                ),
+            };
+            let shmseg = req.shmseg;
+            let shmid = req.shmid as i32;
+            let read_only = req.read_only;
 
             info!("SHM Attach: shmseg={shmseg} shmid={shmid} read_only={read_only}");
 
@@ -82,7 +93,13 @@ pub(crate) fn handle_shm_request(state: &mut ClientState, data: &[u8], seq: u16)
         // Detach
         2 => {
             require_len!(data, 8, seq, 130, minor as u16, state.msb_first);
-            let shmseg = state.read_u32(data, 4);
+            let req = match DetachRequest::try_parse_request(request_header(data), &data[4..]) {
+                Ok(r) => r,
+                Err(_) => return crate::xserver::core::build_error_bo(
+                    crate::xserver::core::LENGTH_ERROR, seq, 0, 130, minor as u16, state.msb_first,
+                ),
+            };
+            let shmseg = req.shmseg;
             info!("SHM Detach: shmseg={shmseg}");
 
             if let Some(seg) = state.shm_segments.remove(&shmseg) {
@@ -98,21 +115,27 @@ pub(crate) fn handle_shm_request(state: &mut ClientState, data: &[u8], seq: u16)
         3 => {
             require_len!(data, 40, seq, 130, minor as u16, state.msb_first);
 
-            let drawable = state.read_u32(data, 4);
-            let _gc = state.read_u32(data, 8);
-            let total_width = state.read_u16(data, 12) as usize;
-            let _total_height = state.read_u16(data, 14);
-            let src_x = state.read_u16(data, 16) as usize;
-            let src_y = state.read_u16(data, 18) as usize;
-            let src_width = state.read_u16(data, 20);
-            let src_height = state.read_u16(data, 22);
-            let dst_x = state.read_i16(data, 24);
-            let dst_y = state.read_i16(data, 26);
-            let _depth = data[28];
-            let _format = data[29];
-            let send_event = data[30] != 0;
-            let shmseg = state.read_u32(data, 32);
-            let offset = state.read_u32(data, 36) as usize;
+            let req = match PutImageRequest::try_parse_request(request_header(data), &data[4..]) {
+                Ok(r) => r,
+                Err(_) => return crate::xserver::core::build_error_bo(
+                    crate::xserver::core::LENGTH_ERROR, seq, 0, 130, minor as u16, state.msb_first,
+                ),
+            };
+            let drawable = req.drawable;
+            let _gc = req.gc;
+            let total_width = req.total_width as usize;
+            let _total_height = req.total_height;
+            let src_x = req.src_x as usize;
+            let src_y = req.src_y as usize;
+            let src_width = req.src_width;
+            let src_height = req.src_height;
+            let dst_x = req.dst_x;
+            let dst_y = req.dst_y;
+            let _depth = req.depth;
+            let _format = req.format;
+            let send_event = req.send_event;
+            let shmseg = req.shmseg;
+            let offset = req.offset as usize;
 
             info!(
                 "SHM PutImage: drawable={drawable:#x} shmseg={shmseg} offset={offset} \
@@ -197,15 +220,21 @@ pub(crate) fn handle_shm_request(state: &mut ClientState, data: &[u8], seq: u16)
         // GetImage
         4 => {
             require_len!(data, 32, seq, 130, minor as u16, state.msb_first);
-            let drawable = state.read_u32(data, 4);
-            let src_x = state.read_i16(data, 8);
-            let src_y = state.read_i16(data, 10);
-            let width = state.read_u16(data, 12);
-            let height = state.read_u16(data, 14);
-            let _plane_mask = state.read_u32(data, 16);
-            let _format = data[20];
-            let shmseg = state.read_u32(data, 24);
-            let shm_offset = state.read_u32(data, 28) as usize;
+            let req = match GetImageRequest::try_parse_request(request_header(data), &data[4..]) {
+                Ok(r) => r,
+                Err(_) => return crate::xserver::core::build_error_bo(
+                    crate::xserver::core::LENGTH_ERROR, seq, 0, 130, minor as u16, state.msb_first,
+                ),
+            };
+            let drawable = req.drawable;
+            let src_x = req.x;
+            let src_y = req.y;
+            let width = req.width;
+            let height = req.height;
+            let _plane_mask = req.plane_mask;
+            let _format = req.format;
+            let shmseg = req.shmseg;
+            let shm_offset = req.offset as usize;
 
             info!("SHM GetImage: drawable={drawable:#x} ({src_x},{src_y}) {width}x{height} shmseg={shmseg} offset={shm_offset}");
 
@@ -246,12 +275,18 @@ pub(crate) fn handle_shm_request(state: &mut ClientState, data: &[u8], seq: u16)
         // CreatePixmap
         5 => {
             require_len!(data, 28, seq, 130, minor as u16, state.msb_first);
-            let pid = state.read_u32(data, 4);
-            let width = state.read_u16(data, 12);
-            let height = state.read_u16(data, 14);
-            let depth = data[16];
-            let shmseg = state.read_u32(data, 20);
-            let shm_offset = state.read_u32(data, 24) as usize;
+            let req = match CreatePixmapRequest::try_parse_request(request_header(data), &data[4..]) {
+                Ok(r) => r,
+                Err(_) => return crate::xserver::core::build_error_bo(
+                    crate::xserver::core::LENGTH_ERROR, seq, 0, 130, minor as u16, state.msb_first,
+                ),
+            };
+            let pid = req.pid;
+            let width = req.width;
+            let height = req.height;
+            let depth = req.depth;
+            let shmseg = req.shmseg;
+            let shm_offset = req.offset as usize;
 
             info!("SHM CreatePixmap: pid={pid:#x} {width}x{height} depth={depth} shmseg={shmseg} offset={shm_offset}");
 
@@ -360,9 +395,15 @@ pub(crate) fn handle_shm_request(state: &mut ClientState, data: &[u8], seq: u16)
         // Server creates an SHM segment and returns the fd to the client.
         7 => {
             require_len!(data, 16, seq, 130, minor as u16, state.msb_first);
-            let shmseg = state.read_u32(data, 4);
-            let size = state.read_u32(data, 8) as usize;
-            let read_only = data[12] != 0;
+            let req = match CreateSegmentRequest::try_parse_request(request_header(data), &data[4..]) {
+                Ok(r) => r,
+                Err(_) => return crate::xserver::core::build_error_bo(
+                    crate::xserver::core::LENGTH_ERROR, seq, 0, 130, minor as u16, state.msb_first,
+                ),
+            };
+            let shmseg = req.shmseg;
+            let size = req.size as usize;
+            let read_only = req.read_only;
 
             info!("SHM CreateSegment: shmseg={shmseg:#x} size={size} read_only={read_only}");
 

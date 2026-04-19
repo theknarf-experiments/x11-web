@@ -5,8 +5,10 @@ use super::*;
 use crate::xserver::core::require_len;
 use crate::xserver::event::serialize_event;
 use crate::xserver::reply::ReplyBuf;
+use crate::xserver::request::request_header;
 use x11rb_protocol::protocol::xproto::{
-    SelectionClearEvent, SelectionNotifyEvent, SelectionRequestEvent,
+    ConvertSelectionRequest, GetSelectionOwnerRequest, SelectionClearEvent, SelectionNotifyEvent,
+    SelectionRequestEvent, SetSelectionOwnerRequest,
 };
 
 // ---------------------------------------------------------------------------
@@ -16,8 +18,12 @@ use x11rb_protocol::protocol::xproto::{
 pub(crate) fn handle_set_selection_owner(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
     require_len!(data, 16, state.sequence, 22);
     {
-        let owner = state.read_u32(data, 4);
-        let selection = state.read_u32(data, 8);
+        let req = match SetSelectionOwnerRequest::try_parse_request(request_header(data), &data[4..]) {
+            Ok(r) => r,
+            Err(_) => return build_error(LENGTH_ERROR, state.sequence, 0, 22, 0),
+        };
+        let owner = req.owner;
+        let selection = req.selection;
 
         // Validate selection atom
         if selection != 0 && state.get_atom_name(selection).is_none() {
@@ -138,7 +144,11 @@ pub(crate) fn handle_get_selection_owner(
     seq: u16,
 ) -> Vec<u8> {
     require_len!(data, 8, seq, 23);
-    let selection = state.read_u32(data, 4);
+    let req = match GetSelectionOwnerRequest::try_parse_request(request_header(data), &data[4..]) {
+        Ok(r) => r,
+        Err(_) => return build_error(LENGTH_ERROR, seq, 0, 23, 0),
+    };
+    let selection = req.selection;
     let mut reply_buf = ReplyBuf::fixed(seq, state.msb_first);
     // Check local selections first, then shared (cross-connection).
     let owner = state
@@ -164,10 +174,14 @@ pub(crate) fn handle_get_selection_owner(
 pub(crate) fn handle_convert_selection(state: &mut ClientState, data: &[u8], _seq: u16) -> Vec<u8> {
     require_len!(data, 24, _seq, 24);
     {
-        let requestor = state.read_u32(data, 4);
-        let selection = state.read_u32(data, 8);
-        let target = state.read_u32(data, 12);
-        let property = state.read_u32(data, 16);
+        let req = match ConvertSelectionRequest::try_parse_request(request_header(data), &data[4..]) {
+            Ok(r) => r,
+            Err(_) => return build_error(LENGTH_ERROR, _seq, 0, 24, 0),
+        };
+        let requestor = req.requestor;
+        let selection = req.selection;
+        let target = req.target;
+        let property = req.property;
 
         // Validate selection and target atoms
         if selection != 0 && state.get_atom_name(selection).is_none() {

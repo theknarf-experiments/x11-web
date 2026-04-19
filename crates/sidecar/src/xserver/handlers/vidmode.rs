@@ -5,6 +5,15 @@ use tracing::debug;
 use super::super::client::ClientState;
 use crate::xserver::core::require_len;
 use crate::xserver::reply::ReplyBuf;
+use crate::xserver::request::request_header;
+use x11rb_protocol::protocol::xf86vidmode::{
+    AddModeLineRequest, DeleteModeLineRequest, GetAllModeLinesRequest, GetDotClocksRequest,
+    GetGammaRampRequest, GetGammaRampSizeRequest, GetGammaRequest, GetModeLineRequest,
+    GetMonitorRequest, GetViewPortRequest, LockModeSwitchRequest, QueryVersionRequest,
+    SetGammaRampRequest, SetGammaRequest, SetViewPortRequest, SwitchModeRequest,
+    SwitchToModeRequest, ValidateModeLineRequest,
+};
+use x11rb_protocol::x11_utils::RequestHeader;
 
 /// XFree86-VidMode mode information.
 #[derive(Clone, Debug, PartialEq)]
@@ -38,27 +47,6 @@ impl VidModeInfo {
         }
     }
 
-    /// Parse a VidModeInfo from raw X11 request data at the given offset.
-    /// The ModeInfo struct layout: dotclock(4) + hdisplay(2) + hsyncstart(2)
-    /// + hsyncend(2) + htotal(2) + hskew(2) + vdisplay(2) + vsyncstart(2)
-    /// + vsyncend(2) + vtotal(2) + pad(4) + flags(4) = 32 bytes minimum.
-    fn parse(state: &ClientState, data: &[u8], offset: usize) -> Self {
-        Self {
-            dotclock: state.read_u32(data, offset),
-            hdisplay: state.read_u16(data, offset + 4),
-            hsyncstart: state.read_u16(data, offset + 6),
-            hsyncend: state.read_u16(data, offset + 8),
-            htotal: state.read_u16(data, offset + 10),
-            // hskew at offset + 12, skip
-            vdisplay: state.read_u16(data, offset + 14),
-            vsyncstart: state.read_u16(data, offset + 16),
-            vsyncend: state.read_u16(data, offset + 18),
-            vtotal: state.read_u16(data, offset + 20),
-            // pad at offset + 22..26
-            flags: state.read_u32(data, offset + 26),
-        }
-    }
-
     /// Check if two modes match (same timing parameters, ignoring flags).
     fn matches(&self, other: &VidModeInfo) -> bool {
         self.dotclock == other.dotclock
@@ -73,12 +61,33 @@ impl VidModeInfo {
     }
 }
 
+/// Build a RequestHeader with a custom minor opcode (for cases where the
+/// current code's minor numbering differs from x11rb's constants).
+#[inline]
+fn vidmode_header(data: &[u8], minor_override: u8) -> RequestHeader {
+    RequestHeader {
+        major_opcode: data[0],
+        minor_opcode: minor_override,
+        remaining_length: 0,
+    }
+}
+
 /// XFree86-VidModeExtension (opcode 153)
 pub(crate) fn handle_vidmode_request(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
     let minor = data[1];
     match minor {
         0 => {
             // QueryVersion
+            if QueryVersionRequest::try_parse_request(request_header(data), &data[4..]).is_err() {
+                return crate::xserver::core::build_error_bo(
+                    crate::xserver::core::LENGTH_ERROR,
+                    seq,
+                    0,
+                    153,
+                    minor as u16,
+                    state.msb_first,
+                );
+            }
             ReplyBuf::fixed(seq, state.msb_first)
                 .set_u16(8, 2) // major
                 .set_u16(10, 2) // minor
@@ -87,6 +96,20 @@ pub(crate) fn handle_vidmode_request(state: &mut ClientState, data: &[u8], seq: 
         1 => {
             // GetModeLine
             // Return the current mode from the mode list.
+            let _req = match GetModeLineRequest::try_parse_request(request_header(data), &data[4..])
+            {
+                Ok(r) => r,
+                Err(_) => {
+                    return crate::xserver::core::build_error_bo(
+                        crate::xserver::core::LENGTH_ERROR,
+                        seq,
+                        0,
+                        153,
+                        minor as u16,
+                        state.msb_first,
+                    )
+                }
+            };
             let mode = state
                 .vidmode_modes
                 .get(state.vidmode_current_mode)
@@ -112,6 +135,22 @@ pub(crate) fn handle_vidmode_request(state: &mut ClientState, data: &[u8], seq: 
         6 => {
             // GetAllModeLines
             // Return all modes from the mode list.
+            let _req = match GetAllModeLinesRequest::try_parse_request(
+                request_header(data),
+                &data[4..],
+            ) {
+                Ok(r) => r,
+                Err(_) => {
+                    return crate::xserver::core::build_error_bo(
+                        crate::xserver::core::LENGTH_ERROR,
+                        seq,
+                        0,
+                        153,
+                        minor as u16,
+                        state.msb_first,
+                    )
+                }
+            };
             let mode_count = state.vidmode_modes.len();
             let mode_size = 48; // bytes per mode line info
             let extra = 4 + mode_size * mode_count; // 4 bytes for count + modes
@@ -138,6 +177,23 @@ pub(crate) fn handle_vidmode_request(state: &mut ClientState, data: &[u8], seq: 
         }
         14 => {
             // GetGamma
+            // x11rb uses minor opcode 16 for GetGamma; override header.
+            let _req = match GetGammaRequest::try_parse_request(
+                vidmode_header(data, 16),
+                &data[4..],
+            ) {
+                Ok(r) => r,
+                Err(_) => {
+                    return crate::xserver::core::build_error_bo(
+                        crate::xserver::core::LENGTH_ERROR,
+                        seq,
+                        0,
+                        153,
+                        minor as u16,
+                        state.msb_first,
+                    )
+                }
+            };
             // Approximate gamma from stored ramp midpoint:
             // gamma = log(ramp[128]/65535) / log(128/255)
             let (gamma_r, gamma_g, gamma_b) = if let Some(crtc) = state.randr_crtcs.first() {
@@ -173,9 +229,22 @@ pub(crate) fn handle_vidmode_request(state: &mut ClientState, data: &[u8], seq: 
             // SetGamma
             // Parse three 16.16 fixed-point gamma values from request
             require_len!(data, 20, seq, 153, minor as u16, state.msb_first);
-            let red_fp = state.read_u32(data, 8);
-            let green_fp = state.read_u32(data, 12);
-            let blue_fp = state.read_u32(data, 16);
+            let req = match SetGammaRequest::try_parse_request(request_header(data), &data[4..]) {
+                Ok(r) => r,
+                Err(_) => {
+                    return crate::xserver::core::build_error_bo(
+                        crate::xserver::core::LENGTH_ERROR,
+                        seq,
+                        0,
+                        153,
+                        minor as u16,
+                        state.msb_first,
+                    )
+                }
+            };
+            let red_fp = req.red;
+            let green_fp = req.green;
+            let blue_fp = req.blue;
             let gamma_r = red_fp as f64 / 65536.0;
             let gamma_g = green_fp as f64 / 65536.0;
             let gamma_b = blue_fp as f64 / 65536.0;
@@ -202,12 +271,21 @@ pub(crate) fn handle_vidmode_request(state: &mut ClientState, data: &[u8], seq: 
         }
         16 => {
             // GetGammaRamp
-            // Parse ramp size from request
-            let size = if data.len() >= 8 {
-                state.read_u16(data, 4) as usize
-            } else {
-                256
+            // x11rb uses minor opcode 17 for GetGammaRamp; override header.
+            let req = match GetGammaRampRequest::try_parse_request(
+                vidmode_header(data, 17),
+                &data[4..],
+            ) {
+                Ok(r) => r,
+                Err(_) => {
+                    // Fallback to default size if parsing fails
+                    GetGammaRampRequest {
+                        screen: 0,
+                        size: 256,
+                    }
+                }
             };
+            let size = req.size as usize;
             let ramp_bytes = size * 2; // each value is u16
             let padded = (ramp_bytes + 3) & !3;
             let total_extra = padded * 3; // R, G, B
@@ -250,14 +328,26 @@ pub(crate) fn handle_vidmode_request(state: &mut ClientState, data: &[u8], seq: 
         }
         17 => {
             // SetGammaRamp
-            // Parse ramp size and ramp data from request
+            // x11rb uses minor opcode 18 for SetGammaRamp; override header.
             require_len!(data, 8, seq, 153, minor as u16, state.msb_first);
-            let size = state.read_u16(data, 4) as usize;
-            let ramp_bytes = size * 2;
-            let padded = (ramp_bytes + 3) & !3;
-            let ramp_start = 8; // ramp data starts after 8-byte header
-            let needed = ramp_start + padded * 3;
-            if data.len() < needed || size == 0 {
+            let req = match SetGammaRampRequest::try_parse_request(
+                vidmode_header(data, 18),
+                &data[4..],
+            ) {
+                Ok(r) => r,
+                Err(_) => {
+                    return crate::xserver::core::build_error_bo(
+                        crate::xserver::core::LENGTH_ERROR,
+                        seq,
+                        0,
+                        153,
+                        minor as u16,
+                        state.msb_first,
+                    )
+                }
+            };
+            let size = req.size as usize;
+            if size == 0 {
                 return crate::xserver::core::build_error_bo(
                     crate::xserver::core::LENGTH_ERROR,
                     seq,
@@ -267,17 +357,9 @@ pub(crate) fn handle_vidmode_request(state: &mut ClientState, data: &[u8], seq: 
                     state.msb_first,
                 );
             }
-            let parse_channel = |offset: usize| -> Vec<u16> {
-                (0..size)
-                    .map(|i| {
-                        let pos = offset + i * 2;
-                        state.read_u16(data, pos)
-                    })
-                    .collect()
-            };
-            let red = parse_channel(ramp_start);
-            let green = parse_channel(ramp_start + padded);
-            let blue = parse_channel(ramp_start + padded * 2);
+            let red: Vec<u16> = req.red.iter().take(size).copied().collect();
+            let green: Vec<u16> = req.green.iter().take(size).copied().collect();
+            let blue: Vec<u16> = req.blue.iter().take(size).copied().collect();
             if let Some(crtc) = state.randr_crtcs.get_mut(0) {
                 crtc.gamma_red = red;
                 crtc.gamma_green = green;
@@ -287,6 +369,23 @@ pub(crate) fn handle_vidmode_request(state: &mut ClientState, data: &[u8], seq: 
         }
         18 => {
             // GetGammaRampSize
+            // x11rb uses minor opcode 19 for GetGammaRampSize; override header.
+            let _req = match GetGammaRampSizeRequest::try_parse_request(
+                vidmode_header(data, 19),
+                &data[4..],
+            ) {
+                Ok(r) => r,
+                Err(_) => {
+                    return crate::xserver::core::build_error_bo(
+                        crate::xserver::core::LENGTH_ERROR,
+                        seq,
+                        0,
+                        153,
+                        minor as u16,
+                        state.msb_first,
+                    )
+                }
+            };
             ReplyBuf::fixed(seq, state.msb_first)
                 .set_u16(8, 256) // size = 256
                 .build()
@@ -316,10 +415,37 @@ pub(crate) fn handle_vidmode_request(state: &mut ClientState, data: &[u8], seq: 
         }
         3 => {
             // SwitchToMode — attempt to switch to a matching mode in the mode list
-            // XF86VidModeSwitchToMode: screen(2) + pad(2) + ModeInfo starting at offset 8.
+            // x11rb uses minor opcode 10 for SwitchToMode; override header.
             require_len!(data, 52, seq, 153, minor as u16, state.msb_first);
-            let screen = state.read_u16(data, 4);
-            let requested = VidModeInfo::parse(state, data, 8);
+            let req = match SwitchToModeRequest::try_parse_request(
+                vidmode_header(data, 10),
+                &data[4..],
+            ) {
+                Ok(r) => r,
+                Err(_) => {
+                    return crate::xserver::core::build_error_bo(
+                        crate::xserver::core::LENGTH_ERROR,
+                        seq,
+                        0,
+                        153,
+                        minor as u16,
+                        state.msb_first,
+                    )
+                }
+            };
+            let screen = req.screen;
+            let requested = VidModeInfo {
+                dotclock: req.dotclock,
+                hdisplay: req.hdisplay,
+                hsyncstart: req.hsyncstart,
+                hsyncend: req.hsyncend,
+                htotal: req.htotal,
+                vdisplay: req.vdisplay,
+                vsyncstart: req.vsyncstart,
+                vsyncend: req.vsyncend,
+                vtotal: req.vtotal,
+                flags: u32::from(req.flags),
+            };
             if state.vidmode_locked {
                 debug!(
                     "VidMode SwitchToMode: screen={screen} {}x{} rejected — mode switching is locked",
@@ -348,6 +474,22 @@ pub(crate) fn handle_vidmode_request(state: &mut ClientState, data: &[u8], seq: 
         4 => {
             // GetMonitor
             // Return a single monitor with vendor/model strings
+            let _req = match GetMonitorRequest::try_parse_request(
+                request_header(data),
+                &data[4..],
+            ) {
+                Ok(r) => r,
+                Err(_) => {
+                    return crate::xserver::core::build_error_bo(
+                        crate::xserver::core::LENGTH_ERROR,
+                        seq,
+                        0,
+                        153,
+                        minor as u16,
+                        state.msb_first,
+                    )
+                }
+            };
             let vendor = b"x11web";
             let model = b"virtual";
             let vendor_len = vendor.len() as u32;
@@ -386,10 +528,23 @@ pub(crate) fn handle_vidmode_request(state: &mut ClientState, data: &[u8], seq: 
         }
         5 => {
             // LockModeSwitch — store the lock state
-            // XF86VidModeLockModeSwitch: screen(2) + lock(2)
             require_len!(data, 8, seq, 153, minor as u16, state.msb_first);
-            let screen = state.read_u16(data, 4);
-            let lock = state.read_u16(data, 6);
+            let req =
+                match LockModeSwitchRequest::try_parse_request(request_header(data), &data[4..]) {
+                    Ok(r) => r,
+                    Err(_) => {
+                        return crate::xserver::core::build_error_bo(
+                            crate::xserver::core::LENGTH_ERROR,
+                            seq,
+                            0,
+                            153,
+                            minor as u16,
+                            state.msb_first,
+                        )
+                    }
+                };
+            let screen = req.screen;
+            let lock = req.lock;
             state.vidmode_locked = lock != 0;
             debug!(
                 "VidMode LockModeSwitch: screen={screen} locked={}",
@@ -399,11 +554,34 @@ pub(crate) fn handle_vidmode_request(state: &mut ClientState, data: &[u8], seq: 
         }
         7 => {
             // AddModeLine — parse and add to mode list
-            // XF86VidModeAddModeLine: screen(2) + pad(2) + ModeInfo starting at offset 8.
-            // The "after" mode info follows at offset 8 + 32 = 40, but we only need the new mode.
             require_len!(data, 54, seq, 153, minor as u16, state.msb_first);
-            let screen = state.read_u16(data, 4);
-            let new_mode = VidModeInfo::parse(state, data, 8);
+            let req = match AddModeLineRequest::try_parse_request(request_header(data), &data[4..])
+            {
+                Ok(r) => r,
+                Err(_) => {
+                    return crate::xserver::core::build_error_bo(
+                        crate::xserver::core::LENGTH_ERROR,
+                        seq,
+                        0,
+                        153,
+                        minor as u16,
+                        state.msb_first,
+                    )
+                }
+            };
+            let screen = req.screen;
+            let new_mode = VidModeInfo {
+                dotclock: req.dotclock,
+                hdisplay: req.hdisplay,
+                hsyncstart: req.hsyncstart,
+                hsyncend: req.hsyncend,
+                htotal: req.htotal,
+                vdisplay: req.vdisplay,
+                vsyncstart: req.vsyncstart,
+                vsyncend: req.vsyncend,
+                vtotal: req.vtotal,
+                flags: u32::from(req.flags),
+            };
             debug!(
                 "VidMode AddModeLine: screen={screen} {}x{} dotclock={}",
                 new_mode.hdisplay, new_mode.vdisplay, new_mode.dotclock,
@@ -416,10 +594,34 @@ pub(crate) fn handle_vidmode_request(state: &mut ClientState, data: &[u8], seq: 
         }
         8 => {
             // DeleteModeLine — remove matching mode from the list
-            // XF86VidModeDeleteModeLine: screen(2) + pad(2) + ModeInfo starting at offset 8.
             require_len!(data, 50, seq, 153, minor as u16, state.msb_first);
-            let screen = state.read_u16(data, 4);
-            let target = VidModeInfo::parse(state, data, 8);
+            let req =
+                match DeleteModeLineRequest::try_parse_request(request_header(data), &data[4..]) {
+                    Ok(r) => r,
+                    Err(_) => {
+                        return crate::xserver::core::build_error_bo(
+                            crate::xserver::core::LENGTH_ERROR,
+                            seq,
+                            0,
+                            153,
+                            minor as u16,
+                            state.msb_first,
+                        )
+                    }
+                };
+            let screen = req.screen;
+            let target = VidModeInfo {
+                dotclock: req.dotclock,
+                hdisplay: req.hdisplay,
+                hsyncstart: req.hsyncstart,
+                hsyncend: req.hsyncend,
+                htotal: req.htotal,
+                vdisplay: req.vdisplay,
+                vsyncstart: req.vsyncstart,
+                vsyncend: req.vsyncend,
+                vtotal: req.vtotal,
+                flags: u32::from(req.flags),
+            };
             debug!(
                 "VidMode DeleteModeLine: screen={screen} {}x{} dotclock={}",
                 target.hdisplay, target.vdisplay, target.dotclock,
@@ -442,16 +644,48 @@ pub(crate) fn handle_vidmode_request(state: &mut ClientState, data: &[u8], seq: 
         }
         9 => {
             // ValidateModeLine — always return MODE_OK
+            let _req = match ValidateModeLineRequest::try_parse_request(
+                request_header(data),
+                &data[4..],
+            ) {
+                Ok(_) => {}
+                Err(_) => {
+                    return crate::xserver::core::build_error_bo(
+                        crate::xserver::core::LENGTH_ERROR,
+                        seq,
+                        0,
+                        153,
+                        minor as u16,
+                        state.msb_first,
+                    )
+                }
+            };
             ReplyBuf::fixed(seq, state.msb_first)
                 .set_u32(8, 0) // status = MODE_OK
                 .build()
         }
         10 => {
             // SwitchMode — cycle through mode list by zoom direction
-            // XF86VidModeSwitchMode: screen(2) + zoom(2)
+            // x11rb uses minor opcode 3 for SwitchMode; override header.
             require_len!(data, 8, seq, 153, minor as u16, state.msb_first);
-            let screen = state.read_u16(data, 4);
-            let zoom = state.read_i16(data, 6);
+            let req = match SwitchModeRequest::try_parse_request(
+                vidmode_header(data, 3),
+                &data[4..],
+            ) {
+                Ok(r) => r,
+                Err(_) => {
+                    return crate::xserver::core::build_error_bo(
+                        crate::xserver::core::LENGTH_ERROR,
+                        seq,
+                        0,
+                        153,
+                        minor as u16,
+                        state.msb_first,
+                    )
+                }
+            };
+            let screen = req.screen;
+            let zoom = req.zoom as i16;
             if state.vidmode_locked {
                 debug!("VidMode SwitchMode: screen={screen} zoom={zoom} rejected — mode switching is locked");
                 return Vec::new();
@@ -473,6 +707,22 @@ pub(crate) fn handle_vidmode_request(state: &mut ClientState, data: &[u8], seq: 
         }
         11 => {
             // GetViewPort
+            let _req = match GetViewPortRequest::try_parse_request(
+                request_header(data),
+                &data[4..],
+            ) {
+                Ok(r) => r,
+                Err(_) => {
+                    return crate::xserver::core::build_error_bo(
+                        crate::xserver::core::LENGTH_ERROR,
+                        seq,
+                        0,
+                        153,
+                        minor as u16,
+                        state.msb_first,
+                    )
+                }
+            };
             ReplyBuf::fixed(seq, state.msb_first)
                 .set_u32(8, state.vidmode_viewport_x)
                 .set_u32(12, state.vidmode_viewport_y)
@@ -480,11 +730,24 @@ pub(crate) fn handle_vidmode_request(state: &mut ClientState, data: &[u8], seq: 
         }
         12 => {
             // SetViewPort — store offset (clamped to screen bounds) and log
-            // XF86VidModeSetViewPort: screen(2) + pad(2) + x(4) + y(4)
             require_len!(data, 16, seq, 153, minor as u16, state.msb_first);
-            let screen = state.read_u16(data, 4);
-            let x = state.read_u32(data, 8);
-            let y = state.read_u32(data, 12);
+            let req =
+                match SetViewPortRequest::try_parse_request(request_header(data), &data[4..]) {
+                    Ok(r) => r,
+                    Err(_) => {
+                        return crate::xserver::core::build_error_bo(
+                            crate::xserver::core::LENGTH_ERROR,
+                            seq,
+                            0,
+                            153,
+                            minor as u16,
+                            state.msb_first,
+                        )
+                    }
+                };
+            let screen = req.screen;
+            let x = req.x;
+            let y = req.y;
             state.vidmode_viewport_x = x;
             state.vidmode_viewport_y = y;
             debug!("VidMode SetViewPort: screen={screen} x={x} y={y} (stored; virtual display always at 0,0)");
@@ -492,6 +755,22 @@ pub(crate) fn handle_vidmode_request(state: &mut ClientState, data: &[u8], seq: 
         }
         13 => {
             // GetDotClocks
+            let _req = match GetDotClocksRequest::try_parse_request(
+                request_header(data),
+                &data[4..],
+            ) {
+                Ok(r) => r,
+                Err(_) => {
+                    return crate::xserver::core::build_error_bo(
+                        crate::xserver::core::LENGTH_ERROR,
+                        seq,
+                        0,
+                        153,
+                        minor as u16,
+                        state.msb_first,
+                    )
+                }
+            };
             let dotclock = state.screen_width as u32 * state.screen_height as u32 * 60;
             ReplyBuf::with_extra(seq, 4, state.msb_first) // 32 header + 4 clock value
                 .set_u32(8, 0) // flags = 0
