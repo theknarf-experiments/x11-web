@@ -4,57 +4,67 @@ use tracing::debug;
 
 use super::super::super::client::ClientState;
 use crate::xserver::reply::ReplyBuf;
+use crate::xserver::request::request_header;
+use x11rb_protocol::protocol::xfixes::{
+    CreatePointerBarrierRequest, DeletePointerBarrierRequest, GetClientDisconnectModeRequest,
+    SetClientDisconnectModeRequest,
+};
 
 /// 31: CreatePointerBarrier
 pub(crate) fn handle_create_pointer_barrier(
     state: &mut ClientState,
     data: &[u8],
-    _seq: u16,
+    seq: u16,
 ) -> Vec<u8> {
-    if data.len() >= 28 {
-        let barrier_id = state.read_u32(data, 4);
-        let window = state.read_u32(data, 8);
-        // Per XFIXES spec: validate window exists
-        if window != state.root_window && !state.windows.contains_key(&window) {
-            return crate::xserver::core::build_error(
-                crate::xserver::core::WINDOW_ERROR,
-                _seq,
-                window,
-                138,
-                31, // XFIXES major opcode = 138
-            );
-        }
-        let x1 = state.read_i16(data, 12);
-        let y1 = state.read_i16(data, 14);
-        let x2 = state.read_i16(data, 16);
-        let y2 = state.read_i16(data, 18);
-        let directions = state.read_u32(data, 20);
-        // Per XFIXES spec: valid direction bits are 0-3 (PositiveX, PositiveY, NegativeX, NegativeY)
-        // Silently mask invalid bits to prevent client errors while remaining compliant.
-        let directions = directions & 0xF;
-        let num_devices = state.read_u16(data, 24) as usize;
-        let mut device_ids = Vec::with_capacity(num_devices);
-        for i in 0..num_devices {
-            let off = 28 + i * 2;
-            if off + 2 <= data.len() {
-                device_ids.push(state.read_u16(data, off));
+    let req =
+        match CreatePointerBarrierRequest::try_parse_request(request_header(data), &data[4..]) {
+            Ok(r) => r,
+            Err(_) => {
+                return crate::xserver::core::build_error_bo(
+                    crate::xserver::core::LENGTH_ERROR,
+                    seq,
+                    0,
+                    138,
+                    31,
+                    state.msb_first,
+                )
             }
-        }
-        debug!("XFIXES CreatePointerBarrier: id={barrier_id:#x} window={window:#x} ({x1},{y1})-({x2},{y2}) dirs={directions:#x} devices={num_devices}");
-        state.barriers.insert(
-            barrier_id,
-            super::super::super::types::PointerBarrier {
-                barrier_id,
-                window,
-                x1,
-                y1,
-                x2,
-                y2,
-                directions,
-                device_ids,
-            },
+        };
+    let barrier_id = req.barrier;
+    let window = req.window;
+    // Per XFIXES spec: validate window exists
+    if window != state.root_window && !state.windows.contains_key(&window) {
+        return crate::xserver::core::build_error(
+            crate::xserver::core::WINDOW_ERROR,
+            seq,
+            window,
+            138,
+            31, // XFIXES major opcode = 138
         );
     }
+    let x1 = req.x1 as i16;
+    let y1 = req.y1 as i16;
+    let x2 = req.x2 as i16;
+    let y2 = req.y2 as i16;
+    // Per XFIXES spec: valid direction bits are 0-3 (PositiveX, PositiveY, NegativeX, NegativeY)
+    // Silently mask invalid bits to prevent client errors while remaining compliant.
+    let directions = req.directions.bits() & 0xF;
+    let device_ids: Vec<u16> = req.devices.iter().copied().collect();
+    let num_devices = device_ids.len();
+    debug!("XFIXES CreatePointerBarrier: id={barrier_id:#x} window={window:#x} ({x1},{y1})-({x2},{y2}) dirs={directions:#x} devices={num_devices}");
+    state.barriers.insert(
+        barrier_id,
+        super::super::super::types::PointerBarrier {
+            barrier_id,
+            window,
+            x1,
+            y1,
+            x2,
+            y2,
+            directions,
+            device_ids,
+        },
+    );
     Vec::new()
 }
 
@@ -62,14 +72,26 @@ pub(crate) fn handle_create_pointer_barrier(
 pub(crate) fn handle_delete_pointer_barrier(
     state: &mut ClientState,
     data: &[u8],
-    _seq: u16,
+    seq: u16,
 ) -> Vec<u8> {
-    if data.len() >= 8 {
-        let barrier_id = state.read_u32(data, 4);
-        debug!("XFIXES DeletePointerBarrier: id={barrier_id:#x}");
-        state.barriers.remove(&barrier_id);
-        state.recycle_xid(barrier_id);
-    }
+    let req =
+        match DeletePointerBarrierRequest::try_parse_request(request_header(data), &data[4..]) {
+            Ok(r) => r,
+            Err(_) => {
+                return crate::xserver::core::build_error_bo(
+                    crate::xserver::core::LENGTH_ERROR,
+                    seq,
+                    0,
+                    138,
+                    32,
+                    state.msb_first,
+                )
+            }
+        };
+    let barrier_id = req.barrier;
+    debug!("XFIXES DeletePointerBarrier: id={barrier_id:#x}");
+    state.barriers.remove(&barrier_id);
+    state.recycle_xid(barrier_id);
     Vec::new()
 }
 
@@ -80,22 +102,48 @@ pub(crate) fn handle_delete_pointer_barrier(
 pub(crate) fn handle_set_client_disconnect_mode(
     state: &mut ClientState,
     data: &[u8],
-    _seq: u16,
+    seq: u16,
 ) -> Vec<u8> {
-    if data.len() >= 8 {
-        let mode = state.read_u32(data, 4) & 0x1; // Only bit 0 is defined
-        debug!("XFIXES SetClientDisconnectMode: mode={mode:#x}");
-        state.disconnect_mode = mode;
-    }
+    let req =
+        match SetClientDisconnectModeRequest::try_parse_request(request_header(data), &data[4..]) {
+            Ok(r) => r,
+            Err(_) => {
+                return crate::xserver::core::build_error_bo(
+                    crate::xserver::core::LENGTH_ERROR,
+                    seq,
+                    0,
+                    138,
+                    33,
+                    state.msb_first,
+                )
+            }
+        };
+    let mode = req.disconnect_mode.bits() & 0x1; // Only bit 0 is defined
+    debug!("XFIXES SetClientDisconnectMode: mode={mode:#x}");
+    state.disconnect_mode = mode;
     Vec::new()
 }
 
 /// 34: GetClientDisconnectMode
 pub(crate) fn handle_get_client_disconnect_mode(
     state: &mut ClientState,
-    _data: &[u8],
+    data: &[u8],
     seq: u16,
 ) -> Vec<u8> {
+    let _req =
+        match GetClientDisconnectModeRequest::try_parse_request(request_header(data), &data[4..]) {
+            Ok(r) => r,
+            Err(_) => {
+                return crate::xserver::core::build_error_bo(
+                    crate::xserver::core::LENGTH_ERROR,
+                    seq,
+                    0,
+                    138,
+                    34,
+                    state.msb_first,
+                )
+            }
+        };
     ReplyBuf::fixed(seq, state.msb_first)
         .set_u32(8, state.disconnect_mode)
         .build()

@@ -2,62 +2,83 @@
 
 use super::*;
 use crate::xserver::core::require_len;
+use crate::xserver::request::request_header;
+use x11rb_protocol::protocol::xproto::{
+    ChangeGCRequest, CopyGCRequest, CreateGCAux, CreateGCRequest, FreeGCRequest, GC,
+    SetClipRectanglesRequest, SetDashesRequest,
+};
 
-/// Parse GC value-list and apply to `gc`.
-/// Returns `Some((error_bit, bad_value))` if a value fails X11 spec validation,
-/// or `None` when all values are valid.
-fn parse_gc_values(
-    gc: &mut GcState,
-    value_mask: u32,
-    data: &[u8],
-    msb_first: bool,
-) -> Option<(u8, u32)> {
-    let mut offset = 0;
-    for bit in 0..23 {
-        if value_mask & (1 << bit) != 0 && offset + 4 <= data.len() {
-            let val = read_u32_bo(data, offset, msb_first);
-            // Validate enumerated fields per the X11 protocol spec
-            match bit {
-                0 if val > 15 => return Some((bit as u8, val)),
-                5 if val > 2 => return Some((bit as u8, val)),
-                6 if val > 3 => return Some((bit as u8, val)),
-                7 if val > 2 => return Some((bit as u8, val)),
-                8 if val > 3 => return Some((bit as u8, val)),
-                9 if val > 1 => return Some((bit as u8, val)),
-                15 if val > 1 => return Some((bit as u8, val)),
-                22 if val > 1 => return Some((bit as u8, val)),
-                _ => {}
-            }
-            match bit {
-                0 => gc.function = val as u8,
-                1 => gc.plane_mask = val,
-                2 => gc.foreground = val,
-                3 => gc.background = val,
-                4 => gc.line_width = val as u16,
-                5 => gc.line_style = val as u8,
-                6 => gc.cap_style = val as u8,
-                7 => gc.join_style = val as u8,
-                8 => gc.fill_style = val as u8,
-                9 => gc.fill_rule = val as u8,
-                10 => gc.tile = val,
-                11 => gc.stipple = val,
-                12 => gc.ts_x = val as i16,
-                13 => gc.ts_y = val as i16,
-                14 => gc.font_id = val,
-                15 => gc.subwindow_mode = val as u8,
-                16 => gc.graphics_exposures = val != 0,
-                17 => gc.clip_x = val as i16,
-                18 => gc.clip_y = val as i16,
-                19 => gc.clip_mask = val,
-                20 => gc.dash_offset = val as u16,
-                21 => gc.dashes = val as u8,
-                22 => gc.arc_mode = val as u8,
-                _ => {}
-            }
-            offset += 4;
-        }
+/// Apply parsed GC value-list fields to a `GcState`.
+fn apply_create_gc_aux(gc: &mut GcState, aux: &CreateGCAux) {
+    if let Some(f) = aux.function {
+        gc.function = u32::from(f) as u8;
     }
-    None
+    if let Some(v) = aux.plane_mask {
+        gc.plane_mask = v;
+    }
+    if let Some(v) = aux.foreground {
+        gc.foreground = v;
+    }
+    if let Some(v) = aux.background {
+        gc.background = v;
+    }
+    if let Some(v) = aux.line_width {
+        gc.line_width = v as u16;
+    }
+    if let Some(v) = aux.line_style {
+        gc.line_style = u32::from(v) as u8;
+    }
+    if let Some(v) = aux.cap_style {
+        gc.cap_style = u32::from(v) as u8;
+    }
+    if let Some(v) = aux.join_style {
+        gc.join_style = u32::from(v) as u8;
+    }
+    if let Some(v) = aux.fill_style {
+        gc.fill_style = u32::from(v) as u8;
+    }
+    if let Some(v) = aux.fill_rule {
+        gc.fill_rule = u32::from(v) as u8;
+    }
+    if let Some(v) = aux.tile {
+        gc.tile = v;
+    }
+    if let Some(v) = aux.stipple {
+        gc.stipple = v;
+    }
+    if let Some(v) = aux.tile_stipple_x_origin {
+        gc.ts_x = v as i16;
+    }
+    if let Some(v) = aux.tile_stipple_y_origin {
+        gc.ts_y = v as i16;
+    }
+    if let Some(v) = aux.font {
+        gc.font_id = v;
+    }
+    if let Some(v) = aux.subwindow_mode {
+        gc.subwindow_mode = u32::from(v) as u8;
+    }
+    if let Some(v) = aux.graphics_exposures {
+        gc.graphics_exposures = u32::from(v) != 0;
+    }
+    if let Some(v) = aux.clip_x_origin {
+        gc.clip_x = v as i16;
+    }
+    if let Some(v) = aux.clip_y_origin {
+        gc.clip_y = v as i16;
+    }
+    if let Some(v) = aux.clip_mask {
+        gc.clip_mask = v;
+    }
+    if let Some(v) = aux.dash_offset {
+        gc.dash_offset = v as u16;
+    }
+    if let Some(v) = aux.dashes {
+        gc.dashes = v as u8;
+    }
+    if let Some(v) = aux.arc_mode {
+        gc.arc_mode = u32::from(v) as u8;
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -67,7 +88,14 @@ fn parse_gc_values(
 pub(crate) fn handle_create_gc(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
     require_len!(data, 16, state.sequence, 55);
 
-    let gc_id = state.read_u32(data, 4);
+    let req = match CreateGCRequest::try_parse_request(request_header(data), &data[4..]) {
+        Ok(r) => r,
+        Err(_) => return build_error(LENGTH_ERROR, state.sequence, 0, 55, 0),
+    };
+
+    let gc_id = req.cid;
+    let drawable = req.drawable;
+    let value_list = req.value_list;
 
     // Validate resource ID is within this client's allocated range
     if !state.validate_resource_id(gc_id) {
@@ -78,9 +106,6 @@ pub(crate) fn handle_create_gc(state: &mut ClientState, data: &[u8]) -> Vec<u8> 
     if !state.can_create_gc() {
         return build_error(ALLOC_ERROR, state.sequence, gc_id, 55, 0);
     }
-
-    let drawable = state.read_u32(data, 8);
-    let value_mask = state.read_u32(data, 12);
 
     // Per X11 spec, the drawable determines the root and depth for the GC.
     // It must be a valid window or pixmap.
@@ -94,16 +119,12 @@ pub(crate) fn handle_create_gc(state: &mut ClientState, data: &[u8]) -> Vec<u8> 
     }
 
     let mut gc = GcState::default();
-    if let Some((_error_bit, bad_value)) =
-        parse_gc_values(&mut gc, value_mask, &data[16..], state.msb_first)
-    {
-        return build_error(VALUE_ERROR, state.sequence, bad_value, 55, 0);
-    }
+    apply_create_gc_aux(&mut gc, &value_list);
 
     // If clip_mask was set to a pixmap, resolve it to a bitmap and
     // populate clip_rects from the bitmap so all drawing code works.
     // Setting clip_mask replaces any clip rectangles per X11 spec.
-    if value_mask & (1 << 19) != 0 {
+    if value_list.clip_mask.is_some() {
         if gc.clip_mask != 0 {
             gc.clip_mask_bitmap = state.resolve_clip_mask(gc.clip_mask);
             if let Some(ref bm) = gc.clip_mask_bitmap {
@@ -132,24 +153,53 @@ pub(crate) fn handle_create_gc(state: &mut ClientState, data: &[u8]) -> Vec<u8> 
 pub(crate) fn handle_change_gc(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
     require_len!(data, 12, state.sequence, 56);
 
-    let gc_id = state.read_u32(data, 4);
-    let value_mask = state.read_u32(data, 8);
+    let req = match ChangeGCRequest::try_parse_request(request_header(data), &data[4..]) {
+        Ok(r) => r,
+        Err(_) => return build_error(LENGTH_ERROR, state.sequence, 0, 56, 0),
+    };
+
+    let gc_id = req.gc;
+    let value_list = req.value_list;
 
     if !state.gcs.contains_key(&gc_id) {
         return build_error(G_CONTEXT_ERROR, state.sequence, gc_id, 56, 0);
     }
 
+    // ChangeGCAux has the same fields as CreateGCAux -- reuse apply helper
+    // by constructing a CreateGCAux from the ChangeGCAux fields.
+    let aux = CreateGCAux {
+        function: value_list.function,
+        plane_mask: value_list.plane_mask,
+        foreground: value_list.foreground,
+        background: value_list.background,
+        line_width: value_list.line_width,
+        line_style: value_list.line_style,
+        cap_style: value_list.cap_style,
+        join_style: value_list.join_style,
+        fill_style: value_list.fill_style,
+        fill_rule: value_list.fill_rule,
+        tile: value_list.tile,
+        stipple: value_list.stipple,
+        tile_stipple_x_origin: value_list.tile_stipple_x_origin,
+        tile_stipple_y_origin: value_list.tile_stipple_y_origin,
+        font: value_list.font,
+        subwindow_mode: value_list.subwindow_mode,
+        graphics_exposures: value_list.graphics_exposures,
+        clip_x_origin: value_list.clip_x_origin,
+        clip_y_origin: value_list.clip_y_origin,
+        clip_mask: value_list.clip_mask,
+        dash_offset: value_list.dash_offset,
+        dashes: value_list.dashes,
+        arc_mode: value_list.arc_mode,
+    };
+
     if let Some(gc) = state.gcs.get_mut(&gc_id) {
-        if let Some((_error_bit, bad_value)) =
-            parse_gc_values(gc, value_mask, &data[12..], state.msb_first)
-        {
-            return build_error(VALUE_ERROR, state.sequence, bad_value, 56, 0);
-        }
+        apply_create_gc_aux(gc, &aux);
     }
 
     // If clip_mask was changed, resolve it to a bitmap and populate clip_rects.
     // Setting clip_mask replaces any clip rectangles per X11 spec.
-    if value_mask & (1 << 19) != 0 {
+    if value_list.clip_mask.is_some() {
         let mask_id = state.gcs.get(&gc_id).map(|gc| gc.clip_mask).unwrap_or(0);
         let clip_x = state.gcs.get(&gc_id).map(|gc| gc.clip_x).unwrap_or(0);
         let clip_y = state.gcs.get(&gc_id).map(|gc| gc.clip_y).unwrap_or(0);
@@ -168,7 +218,9 @@ pub(crate) fn handle_change_gc(state: &mut ClientState, data: &[u8]) -> Vec<u8> 
         }
     }
     // If clip_x/clip_y changed but clip_mask wasn't re-set, update bitmap rects.
-    if (value_mask & ((1 << 17) | (1 << 18)) != 0) && (value_mask & (1 << 19) == 0) {
+    let clip_origin_changed =
+        value_list.clip_x_origin.is_some() || value_list.clip_y_origin.is_some();
+    if clip_origin_changed && value_list.clip_mask.is_none() {
         if let Some(gc) = state.gcs.get_mut(&gc_id) {
             if let Some(ref bm) = gc.clip_mask_bitmap {
                 gc.clip_rects = bm.to_clip_rects(gc.clip_x, gc.clip_y);
@@ -186,9 +238,14 @@ pub(crate) fn handle_change_gc(state: &mut ClientState, data: &[u8]) -> Vec<u8> 
 pub(crate) fn handle_copy_gc(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
     require_len!(data, 16, state.sequence, 57);
 
-    let src_gc = state.read_u32(data, 4);
-    let dst_gc = state.read_u32(data, 8);
-    let value_mask = state.read_u32(data, 12);
+    let req = match CopyGCRequest::try_parse_request(request_header(data), &data[4..]) {
+        Ok(r) => r,
+        Err(_) => return build_error(LENGTH_ERROR, state.sequence, 0, 57, 0),
+    };
+
+    let src_gc = req.src_gc;
+    let dst_gc = req.dst_gc;
+    let value_mask = u32::from(req.value_mask);
 
     if !state.gcs.contains_key(&src_gc) {
         return build_error(G_CONTEXT_ERROR, state.sequence, src_gc, 57, 0);
@@ -203,79 +260,82 @@ pub(crate) fn handle_copy_gc(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
     };
 
     if let Some(dst) = state.gcs.get_mut(&dst_gc) {
-        if value_mask & (1 << 0) != 0 {
+        if value_mask & u32::from(GC::FUNCTION) != 0 {
             dst.function = src.function;
         }
-        if value_mask & (1 << 1) != 0 {
+        if value_mask & u32::from(GC::PLANE_MASK) != 0 {
             dst.plane_mask = src.plane_mask;
         }
-        if value_mask & (1 << 2) != 0 {
+        if value_mask & u32::from(GC::FOREGROUND) != 0 {
             dst.foreground = src.foreground;
         }
-        if value_mask & (1 << 3) != 0 {
+        if value_mask & u32::from(GC::BACKGROUND) != 0 {
             dst.background = src.background;
         }
-        if value_mask & (1 << 4) != 0 {
+        if value_mask & u32::from(GC::LINE_WIDTH) != 0 {
             dst.line_width = src.line_width;
         }
-        if value_mask & (1 << 5) != 0 {
+        if value_mask & u32::from(GC::LINE_STYLE) != 0 {
             dst.line_style = src.line_style;
         }
-        if value_mask & (1 << 6) != 0 {
+        if value_mask & u32::from(GC::CAP_STYLE) != 0 {
             dst.cap_style = src.cap_style;
         }
-        if value_mask & (1 << 7) != 0 {
+        if value_mask & u32::from(GC::JOIN_STYLE) != 0 {
             dst.join_style = src.join_style;
         }
-        if value_mask & (1 << 8) != 0 {
+        if value_mask & u32::from(GC::FILL_STYLE) != 0 {
             dst.fill_style = src.fill_style;
         }
-        if value_mask & (1 << 9) != 0 {
+        if value_mask & u32::from(GC::FILL_RULE) != 0 {
             dst.fill_rule = src.fill_rule;
         }
-        if value_mask & (1 << 10) != 0 {
+        if value_mask & u32::from(GC::TILE) != 0 {
             dst.tile = src.tile;
         }
-        if value_mask & (1 << 11) != 0 {
+        if value_mask & u32::from(GC::STIPPLE) != 0 {
             dst.stipple = src.stipple;
         }
-        if value_mask & (1 << 12) != 0 {
+        if value_mask & u32::from(GC::TILE_STIPPLE_ORIGIN_X) != 0 {
             dst.ts_x = src.ts_x;
         }
-        if value_mask & (1 << 13) != 0 {
+        if value_mask & u32::from(GC::TILE_STIPPLE_ORIGIN_Y) != 0 {
             dst.ts_y = src.ts_y;
         }
-        if value_mask & (1 << 14) != 0 {
+        if value_mask & u32::from(GC::FONT) != 0 {
             dst.font_id = src.font_id;
         }
-        if value_mask & (1 << 15) != 0 {
+        if value_mask & u32::from(GC::SUBWINDOW_MODE) != 0 {
             dst.subwindow_mode = src.subwindow_mode;
         }
-        if value_mask & (1 << 16) != 0 {
+        if value_mask & u32::from(GC::GRAPHICS_EXPOSURES) != 0 {
             dst.graphics_exposures = src.graphics_exposures;
         }
-        if value_mask & (1 << 17) != 0 {
+        if value_mask & u32::from(GC::CLIP_ORIGIN_X) != 0 {
             dst.clip_x = src.clip_x;
         }
-        if value_mask & (1 << 18) != 0 {
+        if value_mask & u32::from(GC::CLIP_ORIGIN_Y) != 0 {
             dst.clip_y = src.clip_y;
         }
-        if value_mask & (1 << 19) != 0 {
+        if value_mask & u32::from(GC::CLIP_MASK) != 0 {
             dst.clip_mask = src.clip_mask;
             dst.clip_mask_bitmap = src.clip_mask_bitmap.clone();
         }
-        if value_mask & (1 << 20) != 0 {
+        if value_mask & u32::from(GC::DASH_OFFSET) != 0 {
             dst.dash_offset = src.dash_offset;
         }
-        if value_mask & (1 << 21) != 0 {
+        if value_mask & u32::from(GC::DASH_LIST) != 0 {
             dst.dashes = src.dashes;
             dst.dash_list = src.dash_list.clone();
         }
-        if value_mask & (1 << 22) != 0 {
+        if value_mask & u32::from(GC::ARC_MODE) != 0 {
             dst.arc_mode = src.arc_mode;
         }
-        // clip_rects follow the clip origin fields (bits 17-19)
-        if value_mask & ((1 << 17) | (1 << 18) | (1 << 19)) != 0 {
+        // clip_rects follow the clip origin fields
+        let clip_bits = u32::from(GC::CLIP_ORIGIN_X)
+            | u32::from(GC::CLIP_ORIGIN_Y)
+            | u32::from(GC::CLIP_MASK);
+        if value_mask & clip_bits != 0 {
             dst.clip_rects = src.clip_rects.clone();
         }
     }
@@ -290,31 +350,28 @@ pub(crate) fn handle_copy_gc(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
 pub(crate) fn handle_set_dashes(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
     require_len!(data, 12, state.sequence, 58);
 
-    let gc_id = state.read_u32(data, 4);
-    let dash_offset = state.read_u16(data, 8);
-    let n_dashes = state.read_u16(data, 10) as usize;
+    let req = match SetDashesRequest::try_parse_request(request_header(data), &data[4..]) {
+        Ok(r) => r,
+        Err(_) => return build_error(LENGTH_ERROR, state.sequence, 0, 58, 0),
+    };
+
+    let gc_id = req.gc;
 
     if !state.gcs.contains_key(&gc_id) {
         return build_error(G_CONTEXT_ERROR, state.sequence, gc_id, 58, 0);
     }
 
-    // Validate that the declared dash data fits within the request
-    if 12 + n_dashes > data.len() {
-        return build_error(LENGTH_ERROR, state.sequence, 0, 58, 0);
-    }
-
     // Per X11 spec: n_dashes must be > 0 and each dash value must be non-zero.
-    if n_dashes == 0 {
+    if req.dashes.is_empty() {
         return build_error(VALUE_ERROR, state.sequence, 0, 58, 0);
     }
-    let dash_data = &data[12..12 + n_dashes];
-    if dash_data.contains(&0) {
+    if req.dashes.contains(&0) {
         return build_error(VALUE_ERROR, state.sequence, 0, 58, 0);
     }
 
     if let Some(gc) = state.gcs.get_mut(&gc_id) {
-        gc.dash_offset = dash_offset;
-        gc.dash_list = dash_data.to_vec();
+        gc.dash_offset = req.dash_offset;
+        gc.dash_list = req.dashes.to_vec();
     }
 
     Vec::new()
@@ -327,28 +384,27 @@ pub(crate) fn handle_set_dashes(state: &mut ClientState, data: &[u8]) -> Vec<u8>
 pub(crate) fn handle_set_clip_rectangles(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
     require_len!(data, 12, state.sequence, 59);
 
-    let _ordering = data[1];
-    let gc_id = state.read_u32(data, 4);
+    let req = match SetClipRectanglesRequest::try_parse_request(request_header(data), &data[4..]) {
+        Ok(r) => r,
+        Err(_) => return build_error(LENGTH_ERROR, state.sequence, 0, 59, 0),
+    };
+
+    let gc_id = req.gc;
 
     if !state.gcs.contains_key(&gc_id) {
         return build_error(G_CONTEXT_ERROR, state.sequence, gc_id, 59, 0);
     }
 
-    let clip_x = state.read_i16(data, 8);
-    let clip_y = state.read_i16(data, 10);
+    let clip_x = req.clip_x_origin;
+    let clip_y = req.clip_y_origin;
 
-    let mut rects = Vec::new();
-    let mut offset = 12;
-    while offset + 8 <= data.len() {
-        let x = state.read_i16(data, offset);
-        let y = state.read_i16(data, offset + 2);
-        let w = state.read_u16(data, offset + 4);
-        let h = state.read_u16(data, offset + 6);
-        // Apply clip origin offset per X11 spec: each rectangle is relative
-        // to the clip origin (clip_x, clip_y).
-        rects.push((x + clip_x, y + clip_y, w, h));
-        offset += 8;
-    }
+    // Apply clip origin offset per X11 spec: each rectangle is relative
+    // to the clip origin (clip_x, clip_y).
+    let rects: Vec<(i16, i16, u16, u16)> = req
+        .rectangles
+        .iter()
+        .map(|r| (r.x + clip_x, r.y + clip_y, r.width, r.height))
+        .collect();
 
     if let Some(gc) = state.gcs.get_mut(&gc_id) {
         gc.clip_x = clip_x;
@@ -368,7 +424,13 @@ pub(crate) fn handle_set_clip_rectangles(state: &mut ClientState, data: &[u8]) -
 
 pub(crate) fn handle_free_gc(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
     require_len!(data, 8, state.sequence, 60);
-    let gc_id = state.read_u32(data, 4);
+
+    let req = match FreeGCRequest::try_parse_request(request_header(data), &data[4..]) {
+        Ok(r) => r,
+        Err(_) => return build_error(LENGTH_ERROR, state.sequence, 0, 60, 0),
+    };
+
+    let gc_id = req.gc;
     if !state.gcs.contains_key(&gc_id) {
         return build_error(G_CONTEXT_ERROR, state.sequence, gc_id, 60, 0);
     }

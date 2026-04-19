@@ -2,6 +2,10 @@
 
 use super::*;
 use crate::xserver::core::require_len;
+use crate::xserver::request::request_header;
+use x11rb_protocol::protocol::xproto::{
+    ImageText16Request, ImageText8Request, PolyText16Request, PolyText8Request,
+};
 
 // ---------------------------------------------------------------------------
 // Opcode 74: PolyText8
@@ -10,8 +14,13 @@ use crate::xserver::core::require_len;
 pub(crate) fn handle_poly_text8(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
     require_len!(data, 16, state.sequence, 74);
 
-    let drawable = state.read_u32(data, 4);
-    let gc_id = state.read_u32(data, 8);
+    let req = match PolyText8Request::try_parse_request(request_header(data), &data[4..]) {
+        Ok(r) => r,
+        Err(_) => return build_error(LENGTH_ERROR, state.sequence, 0, 74, 0),
+    };
+
+    let drawable = req.drawable;
+    let gc_id = req.gc;
 
     if !state.windows.contains_key(&drawable) && !state.pixmaps.contains_key(&drawable) {
         return build_error(DRAWABLE_ERROR, state.sequence, drawable, 74, 0);
@@ -20,8 +29,8 @@ pub(crate) fn handle_poly_text8(state: &mut ClientState, data: &[u8]) -> Vec<u8>
         return build_error(G_CONTEXT_ERROR, state.sequence, gc_id, 74, 0);
     }
 
-    let mut cursor_x = state.read_i16(data, 12);
-    let y = state.read_i16(data, 14);
+    let mut cursor_x = req.x;
+    let y = req.y;
     let gc = state.gcs.get(&gc_id).cloned().unwrap_or_default();
 
     let mut font = state
@@ -35,17 +44,18 @@ pub(crate) fn handle_poly_text8(state: &mut ClientState, data: &[u8]) -> Vec<u8>
 
     // Collect text items first to avoid borrow issues
     let mut items: Vec<(i16, i16, u16, u16, Vec<u8>)> = Vec::new();
-    let mut offset = 16;
-    let end = data.len();
+    let items_data = &*req.items;
+    let mut offset = 0;
+    let end = items_data.len();
 
     while offset < end {
-        let item_len = data[offset] as usize;
+        let item_len = items_data[offset] as usize;
 
         if item_len == 255 {
             // Font-switch item: length=255, then 4-byte font ID.
             // Per X11 spec, change the active font for subsequent text items.
             if offset + 5 <= end {
-                let new_font_id = state.read_u32(data, offset + 1);
+                let new_font_id = state.read_u32(items_data, offset + 1);
                 if let Some(f) = state.font_manager.get_font(new_font_id) {
                     font = Some(f);
                 }
@@ -60,11 +70,11 @@ pub(crate) fn handle_poly_text8(state: &mut ClientState, data: &[u8]) -> Vec<u8>
             break;
         }
 
-        let delta = data[offset + 1] as i8;
+        let delta = items_data[offset + 1] as i8;
         cursor_x += delta as i16;
 
         if let Some(ref f) = font {
-            let text = &data[offset + 2..offset + 2 + item_len];
+            let text = &items_data[offset + 2..offset + 2 + item_len];
             let (img_w, img_h, pixels) = f.render_text_transparent(text, gc.foreground);
 
             if img_w > 0 && img_h > 0 {
@@ -108,8 +118,13 @@ pub(crate) fn handle_poly_text8(state: &mut ClientState, data: &[u8]) -> Vec<u8>
 pub(crate) fn handle_poly_text16(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
     require_len!(data, 16, state.sequence, 75);
 
-    let drawable = state.read_u32(data, 4);
-    let gc_id = state.read_u32(data, 8);
+    let req = match PolyText16Request::try_parse_request(request_header(data), &data[4..]) {
+        Ok(r) => r,
+        Err(_) => return build_error(LENGTH_ERROR, state.sequence, 0, 75, 0),
+    };
+
+    let drawable = req.drawable;
+    let gc_id = req.gc;
 
     if !state.windows.contains_key(&drawable) && !state.pixmaps.contains_key(&drawable) {
         return build_error(DRAWABLE_ERROR, state.sequence, drawable, 75, 0);
@@ -118,8 +133,8 @@ pub(crate) fn handle_poly_text16(state: &mut ClientState, data: &[u8]) -> Vec<u8
         return build_error(G_CONTEXT_ERROR, state.sequence, gc_id, 75, 0);
     }
 
-    let mut cursor_x = state.read_i16(data, 12);
-    let y = state.read_i16(data, 14);
+    let mut cursor_x = req.x;
+    let y = req.y;
     let gc = state.gcs.get(&gc_id).cloned().unwrap_or_default();
 
     let mut font = state
@@ -132,16 +147,17 @@ pub(crate) fn handle_poly_text16(state: &mut ClientState, data: &[u8]) -> Vec<u8
     }
 
     let mut items: Vec<(i16, i16, u16, u16, Vec<u8>)> = Vec::new();
-    let mut offset = 16;
-    let end = data.len();
+    let items_data = &*req.items;
+    let mut offset = 0;
+    let end = items_data.len();
 
     while offset < end {
-        let item_len = data[offset] as usize;
+        let item_len = items_data[offset] as usize;
 
         if item_len == 255 {
             // Font-switch item: change active font for subsequent text items.
             if offset + 5 <= end {
-                let new_font_id = state.read_u32(data, offset + 1);
+                let new_font_id = state.read_u32(items_data, offset + 1);
                 if let Some(f) = state.font_manager.get_font(new_font_id) {
                     font = Some(f);
                 }
@@ -156,7 +172,7 @@ pub(crate) fn handle_poly_text16(state: &mut ClientState, data: &[u8]) -> Vec<u8
             break;
         }
 
-        let delta = data[offset + 1] as i8;
+        let delta = items_data[offset + 1] as i8;
         cursor_x += delta as i16;
 
         if let Some(ref font) = font {
@@ -164,8 +180,8 @@ pub(crate) fn handle_poly_text16(state: &mut ClientState, data: &[u8]) -> Vec<u8
             let mut char_codes: Vec<u16> = Vec::with_capacity(item_len);
             for i in 0..item_len {
                 let char_offset = offset + 2 + i * 2;
-                let hi = data[char_offset] as u16;
-                let lo = data[char_offset + 1] as u16;
+                let hi = items_data[char_offset] as u16;
+                let lo = items_data[char_offset + 1] as u16;
                 char_codes.push((hi << 8) | lo);
             }
 
@@ -276,9 +292,14 @@ pub(crate) fn handle_poly_text16(state: &mut ClientState, data: &[u8]) -> Vec<u8
 
 pub(crate) fn handle_image_text8(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
     require_len!(data, 16, state.sequence, 76);
-    let str_len = data[1] as usize;
-    let drawable = state.read_u32(data, 4);
-    let gc_id = state.read_u32(data, 8);
+
+    let req = match ImageText8Request::try_parse_request(request_header(data), &data[4..]) {
+        Ok(r) => r,
+        Err(_) => return build_error(LENGTH_ERROR, state.sequence, 0, 76, 0),
+    };
+
+    let drawable = req.drawable;
+    let gc_id = req.gc;
 
     if !state.windows.contains_key(&drawable) && !state.pixmaps.contains_key(&drawable) {
         return build_error(DRAWABLE_ERROR, state.sequence, drawable, 76, 0);
@@ -287,15 +308,11 @@ pub(crate) fn handle_image_text8(state: &mut ClientState, data: &[u8]) -> Vec<u8
         return build_error(G_CONTEXT_ERROR, state.sequence, gc_id, 76, 0);
     }
 
-    let x = state.read_i16(data, 12);
-    let y = state.read_i16(data, 14);
+    let x = req.x;
+    let y = req.y;
     let gc = state.gcs.get(&gc_id).cloned().unwrap_or_default();
 
-    let text = if 16 + str_len <= data.len() {
-        &data[16..16 + str_len]
-    } else {
-        return Vec::new();
-    };
+    let text = &*req.string;
 
     let font = state
         .font_manager
@@ -337,8 +354,13 @@ pub(crate) fn handle_image_text8(state: &mut ClientState, data: &[u8]) -> Vec<u8
 pub(crate) fn handle_image_text16(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
     require_len!(data, 16, state.sequence, 77);
 
-    let drawable = state.read_u32(data, 4);
-    let gc_id = state.read_u32(data, 8);
+    let req = match ImageText16Request::try_parse_request(request_header(data), &data[4..]) {
+        Ok(r) => r,
+        Err(_) => return build_error(LENGTH_ERROR, state.sequence, 0, 77, 0),
+    };
+
+    let drawable = req.drawable;
+    let gc_id = req.gc;
 
     if !state.windows.contains_key(&drawable) && !state.pixmaps.contains_key(&drawable) {
         return build_error(DRAWABLE_ERROR, state.sequence, drawable, 77, 0);
@@ -347,38 +369,25 @@ pub(crate) fn handle_image_text16(state: &mut ClientState, data: &[u8]) -> Vec<u
         return build_error(G_CONTEXT_ERROR, state.sequence, gc_id, 77, 0);
     }
 
-    let str_len = data[1] as usize;
-    let text_start = 16;
-    let text_end = text_start + str_len * 2;
-    if text_end > data.len() {
-        return Vec::new();
-    }
+    let str_len = req.string.len();
 
     // Check if all characters are in the basic Latin-1 range
-    let mut all_basic = true;
-    for i in 0..str_len {
-        let offset = text_start + i * 2;
-        if data[offset] != 0 {
-            all_basic = false;
-            break;
-        }
-    }
+    let all_basic = req.string.iter().all(|c| c.byte1 == 0);
 
     if all_basic {
         // Optimization: all chars have high byte 0, delegate to ImageText8
         let mut fake_data = Vec::with_capacity(16 + str_len);
         fake_data.extend_from_slice(&data[0..16]);
-        for i in 0..str_len {
-            let offset = text_start + i * 2;
-            fake_data.push(data[offset + 1]);
+        for c in req.string.iter() {
+            fake_data.push(c.byte2);
         }
         fake_data[1] = str_len as u8;
         return handle_image_text8(state, &fake_data);
     }
 
     // Extended characters present — render with 2-byte codes
-    let x = state.read_i16(data, 12);
-    let y = state.read_i16(data, 14);
+    let x = req.x;
+    let y = req.y;
     let gc = state.gcs.get(&gc_id).cloned().unwrap_or_default();
 
     let font = state
@@ -394,9 +403,8 @@ pub(crate) fn handle_image_text16(state: &mut ClientState, data: &[u8]) -> Vec<u
     // Calculate total width for all characters
     let mut total_width: i32 = 0;
     let mut char_codes = Vec::with_capacity(str_len);
-    for i in 0..str_len {
-        let offset = text_start + i * 2;
-        let code = ((data[offset] as u16) << 8) | (data[offset + 1] as u16);
+    for c in req.string.iter() {
+        let code = ((c.byte1 as u16) << 8) | (c.byte2 as u16);
         char_codes.push(code);
         if code <= font.max_char {
             total_width += font.char_info(code).character_width as i32;

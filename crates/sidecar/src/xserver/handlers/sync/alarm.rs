@@ -4,60 +4,50 @@ use tracing::debug;
 
 use super::super::super::client::ClientState;
 use super::SyncAlarm;
-use crate::xserver::core::require_len;
 use crate::xserver::reply::ReplyBuf;
+use crate::xserver::request::request_header;
+use x11rb_protocol::protocol::sync::{
+    ChangeAlarmRequest, CreateAlarmRequest, DestroyAlarmRequest, QueryAlarmRequest,
+};
 
 /// Minor opcode 8: CreateAlarm
 pub(crate) fn create_alarm(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
-    require_len!(data, 8, seq, 134, data[1] as u16, state.msb_first);
-    let alarm_id = state.read_u32(data, 4);
-    let value_mask = if data.len() >= 12 {
-        state.read_u32(data, 8)
-    } else {
-        0
+    let req = match CreateAlarmRequest::try_parse_request(request_header(data), &data[4..]) {
+        Ok(r) => r,
+        Err(_) => {
+            return crate::xserver::core::build_error_bo(
+                crate::xserver::core::LENGTH_ERROR,
+                seq,
+                0,
+                134,
+                8,
+                state.msb_first,
+            )
+        }
     };
+    let alarm_id = req.id;
+    let vl = &*req.value_list;
 
     let mut alarm = SyncAlarm {
-        counter: 0,
-        value_type: 0, // Absolute
-        value_hi: 0,
-        value_lo: 0,
-        test_type: 0, // PositiveTransition
-        delta_hi: 0,
-        delta_lo: 1, // Default delta = 1
-        events: true,
+        counter: vl.counter.unwrap_or(0),
+        value_type: vl.value_type.map(|v| u32::from(v) as u8).unwrap_or(0), // Absolute
+        value_hi: vl.value.map(|v| v.hi).unwrap_or(0),
+        value_lo: vl.value.map(|v| v.lo).unwrap_or(0),
+        test_type: vl.test_type.map(|v| u32::from(v) as u8).unwrap_or(0), // PositiveTransition
+        delta_hi: vl.delta.map(|v| v.hi).unwrap_or(0),
+        delta_lo: vl.delta.map(|v| v.lo).unwrap_or(1), // Default delta = 1
+        events: vl.events.map(|v| v != 0).unwrap_or(true),
         state: 0, // Active
     };
 
-    let mut offset = 12;
-    for bit in 0..4 {
-        if value_mask & (1 << bit) != 0 && offset + 4 <= data.len() {
-            let val = state.read_u32(data, offset);
-            match bit {
-                0 => alarm.counter = val,
-                1 => alarm.value_type = val as u8,
-                2 => alarm.test_type = val as u8,
-                3 => {
-                    // Value is 64-bit (hi, lo)
-                    alarm.value_hi = val as i32;
-                    if offset + 8 <= data.len() {
-                        alarm.value_lo = state.read_u32(data, offset + 4);
-                        offset += 4; // extra 4 bytes for 64-bit value
-                    }
-                }
-                _ => {}
-            }
-            offset += 4;
-        }
-    }
-    // Parse delta if present (bits 4+)
-    if value_mask & 0x10 != 0 && offset + 8 <= data.len() {
-        alarm.delta_hi = state.read_u32(data, offset) as i32;
-        alarm.delta_lo = state.read_u32(data, offset + 4);
-        offset += 8;
-    }
-    if value_mask & 0x20 != 0 && offset + 4 <= data.len() {
-        alarm.events = state.read_u32(data, offset) != 0;
+    // If delta is present, both hi and lo come from it; if not, defaults are (0, 1).
+    // But if only delta is set, the above handles it correctly already.
+    // If delta is not in the value_list at all, keep defaults (0, 1).
+    if vl.delta.is_some() {
+        // delta was explicitly provided, values already set above
+    } else {
+        alarm.delta_hi = 0;
+        alarm.delta_lo = 1;
     }
 
     debug!(
@@ -71,44 +61,42 @@ pub(crate) fn create_alarm(state: &mut ClientState, data: &[u8], seq: u16) -> Ve
 
 /// Minor opcode 9: ChangeAlarm
 pub(crate) fn change_alarm(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
-    require_len!(data, 8, seq, 134, data[1] as u16, state.msb_first);
-    let bo = state.msb_first;
-    let alarm_id = state.read_u32(data, 4);
-    let value_mask = if data.len() >= 12 {
-        state.read_u32(data, 8)
-    } else {
-        0
+    let req = match ChangeAlarmRequest::try_parse_request(request_header(data), &data[4..]) {
+        Ok(r) => r,
+        Err(_) => {
+            return crate::xserver::core::build_error_bo(
+                crate::xserver::core::LENGTH_ERROR,
+                seq,
+                0,
+                134,
+                9,
+                state.msb_first,
+            )
+        }
     };
+    let alarm_id = req.id;
+    let vl = &*req.value_list;
 
     if let Some(alarm) = state.sync_state.alarms.get_mut(&alarm_id) {
-        let mut offset = 12;
-        for bit in 0..4 {
-            if value_mask & (1 << bit) != 0 && offset + 4 <= data.len() {
-                let val = super::super::super::core::read_u32_bo(data, offset, bo);
-                match bit {
-                    0 => alarm.counter = val,
-                    1 => alarm.value_type = val as u8,
-                    2 => alarm.test_type = val as u8,
-                    3 => {
-                        alarm.value_hi = val as i32;
-                        if offset + 8 <= data.len() {
-                            alarm.value_lo =
-                                super::super::super::core::read_u32_bo(data, offset + 4, bo);
-                            offset += 4;
-                        }
-                    }
-                    _ => {}
-                }
-                offset += 4;
-            }
+        if let Some(counter) = vl.counter {
+            alarm.counter = counter;
         }
-        if value_mask & 0x10 != 0 && offset + 8 <= data.len() {
-            alarm.delta_hi = super::super::super::core::read_u32_bo(data, offset, bo) as i32;
-            alarm.delta_lo = super::super::super::core::read_u32_bo(data, offset + 4, bo);
-            offset += 8;
+        if let Some(vt) = vl.value_type {
+            alarm.value_type = u32::from(vt) as u8;
         }
-        if value_mask & 0x20 != 0 && offset + 4 <= data.len() {
-            alarm.events = super::super::super::core::read_u32_bo(data, offset, bo) != 0;
+        if let Some(val) = vl.value {
+            alarm.value_hi = val.hi;
+            alarm.value_lo = val.lo;
+        }
+        if let Some(tt) = vl.test_type {
+            alarm.test_type = u32::from(tt) as u8;
+        }
+        if let Some(d) = vl.delta {
+            alarm.delta_hi = d.hi;
+            alarm.delta_lo = d.lo;
+        }
+        if let Some(ev) = vl.events {
+            alarm.events = ev != 0;
         }
         // Re-activate if it was inactive
         if alarm.state == 1 {
@@ -121,8 +109,20 @@ pub(crate) fn change_alarm(state: &mut ClientState, data: &[u8], seq: u16) -> Ve
 
 /// Minor opcode 10: QueryAlarm
 pub(crate) fn query_alarm(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
-    require_len!(data, 8, seq, 134, data[1] as u16, state.msb_first);
-    let alarm_id = state.read_u32(data, 4);
+    let req = match QueryAlarmRequest::try_parse_request(request_header(data), &data[4..]) {
+        Ok(r) => r,
+        Err(_) => {
+            return crate::xserver::core::build_error_bo(
+                crate::xserver::core::LENGTH_ERROR,
+                seq,
+                0,
+                134,
+                10,
+                state.msb_first,
+            )
+        }
+    };
+    let alarm_id = req.alarm;
     debug!("SYNC QueryAlarm: id={alarm_id:#x}");
 
     let mut reply = ReplyBuf::with_extra(seq, 8, state.msb_first);
@@ -143,12 +143,23 @@ pub(crate) fn query_alarm(state: &mut ClientState, data: &[u8], seq: u16) -> Vec
 }
 
 /// Minor opcode 11: DestroyAlarm
-pub(crate) fn destroy_alarm(state: &mut ClientState, data: &[u8], _seq: u16) -> Vec<u8> {
-    if data.len() >= 8 {
-        let alarm_id = state.read_u32(data, 4);
-        debug!("SYNC DestroyAlarm: id={alarm_id:#x}");
-        state.sync_state.alarms.remove(&alarm_id);
-        state.recycle_xid(alarm_id);
-    }
+pub(crate) fn destroy_alarm(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
+    let req = match DestroyAlarmRequest::try_parse_request(request_header(data), &data[4..]) {
+        Ok(r) => r,
+        Err(_) => {
+            return crate::xserver::core::build_error_bo(
+                crate::xserver::core::LENGTH_ERROR,
+                seq,
+                0,
+                134,
+                11,
+                state.msb_first,
+            )
+        }
+    };
+    let alarm_id = req.alarm;
+    debug!("SYNC DestroyAlarm: id={alarm_id:#x}");
+    state.sync_state.alarms.remove(&alarm_id);
+    state.recycle_xid(alarm_id);
     Vec::new()
 }

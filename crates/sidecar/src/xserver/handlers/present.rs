@@ -4,8 +4,13 @@ use tracing::{debug, info};
 
 use super::super::client::ClientState;
 use super::super::types::PresentSubscription;
-use crate::xserver::core::require_len;
 use crate::xserver::reply::ReplyBuf;
+use crate::xserver::request::request_header;
+use x11rb_protocol::protocol::present::{
+    NotifyMSCRequest, PixmapRequest as PresentPixmapRequest, QueryCapabilitiesRequest,
+    SelectInputRequest as PresentSelectInputRequest,
+};
+use x11rb_protocol::protocol::xc_misc::GetXIDListRequest;
 
 // Present event mask bits (from the Present extension spec).
 const PRESENT_COMPLETE_NOTIFY_MASK: u32 = 1;
@@ -52,10 +57,9 @@ pub(crate) fn handle_xc_misc_request(state: &mut ClientState, data: &[u8], seq: 
         2 => {
             // GetXIDList: return requested number of individual resource IDs.
             // Prefer recycled (freed) IDs over allocating new sequential ones.
-            let count = if data.len() >= 8 {
-                state.read_u32(data, 4)
-            } else {
-                0
+            let count = match GetXIDListRequest::try_parse_request(request_header(data), &data[4..]) {
+                Ok(r) => r.count,
+                Err(_) => 0,
             };
             let ids_to_return = count.min(4096) as usize;
 
@@ -119,20 +123,24 @@ pub(crate) fn handle_present_request(state: &mut ClientState, data: &[u8], seq: 
                 .set_u32(12, 2) // minor version
                 .build()
         }
-        // Pixmap (PresentPixmap) — the critical operation
+        // Pixmap (PresentPixmap) -- the critical operation
         1 => {
-            require_len!(data, 72, seq, 148, minor as u16, state.msb_first);
-            let window = state.read_u32(data, 4);
-            let pixmap = state.read_u32(data, 8);
-            let serial = state.read_u32(data, 12);
-            let valid_area = state.read_u32(data, 16);
-            let update_area = state.read_u32(data, 20);
-            let x_off = state.read_i16(data, 24);
-            let y_off = state.read_i16(data, 26);
-            // target_crtc at 28..32, wait_fence at 32..36, idle_fence at 36..40
-            let wait_fence = state.read_u32(data, 32);
-            let idle_fence = state.read_u32(data, 36);
-            let options = state.read_u32(data, 40);
+            let req = match PresentPixmapRequest::try_parse_request(request_header(data), &data[4..]) {
+                Ok(r) => r,
+                Err(_) => return crate::xserver::core::build_error_bo(
+                    crate::xserver::core::LENGTH_ERROR, seq, 0, 148, minor as u16, state.msb_first,
+                ),
+            };
+            let window = req.window;
+            let pixmap = req.pixmap;
+            let serial = req.serial;
+            let valid_area = req.valid;
+            let update_area = req.update;
+            let x_off = req.x_off;
+            let y_off = req.y_off;
+            let wait_fence = req.wait_fence;
+            let idle_fence = req.idle_fence;
+            let options = req.options;
 
             // Handle wait_fence: software server has no hardware vblank, so we
             // trigger untriggered fences immediately and proceed.  Per spec,
@@ -499,14 +507,17 @@ pub(crate) fn handle_present_request(state: &mut ClientState, data: &[u8], seq: 
         }
         // NotifyMSC
         2 => {
-            require_len!(data, 40, seq, 148, minor as u16, state.msb_first);
-            let window = state.read_u32(data, 4);
-            let serial = state.read_u32(data, 8);
-            // target_msc at bytes 16-23, divisor at 24-31, remainder at 32-39
-            // (64-bit values, we only use the low 32 bits)
-            let _target_msc = state.read_u32(data, 16);
-            let _divisor = state.read_u32(data, 24);
-            let _remainder = state.read_u32(data, 32);
+            let req = match NotifyMSCRequest::try_parse_request(request_header(data), &data[4..]) {
+                Ok(r) => r,
+                Err(_) => return crate::xserver::core::build_error_bo(
+                    crate::xserver::core::LENGTH_ERROR, seq, 0, 148, minor as u16, state.msb_first,
+                ),
+            };
+            let window = req.window;
+            let serial = req.serial;
+            let _target_msc = req.target_msc;
+            let _divisor = req.divisor;
+            let _remainder = req.remainder;
 
             debug!(
                 "PresentNotifyMSC: window={:#x} serial={} msc={}",
@@ -554,10 +565,15 @@ pub(crate) fn handle_present_request(state: &mut ClientState, data: &[u8], seq: 
         }
         // SelectInput
         3 => {
-            require_len!(data, 16, seq, 148, minor as u16, state.msb_first);
-            let event_id = state.read_u32(data, 4);
-            let window = state.read_u32(data, 8);
-            let event_mask = state.read_u32(data, 12);
+            let req = match PresentSelectInputRequest::try_parse_request(request_header(data), &data[4..]) {
+                Ok(r) => r,
+                Err(_) => return crate::xserver::core::build_error_bo(
+                    crate::xserver::core::LENGTH_ERROR, seq, 0, 148, minor as u16, state.msb_first,
+                ),
+            };
+            let event_id = req.eid;
+            let window = req.window;
+            let event_mask = u32::from(req.event_mask);
 
             debug!(
                 "PresentSelectInput: event_id={:#x} window={:#x} event_mask={:#x}",
@@ -576,10 +592,9 @@ pub(crate) fn handle_present_request(state: &mut ClientState, data: &[u8], seq: 
         }
         // QueryCapabilities
         4 => {
-            let _target = if data.len() >= 8 {
-                state.read_u32(data, 4)
-            } else {
-                0
+            let _target = match QueryCapabilitiesRequest::try_parse_request(request_header(data), &data[4..]) {
+                Ok(r) => r.target,
+                Err(_) => 0,
             };
             ReplyBuf::fixed(seq, state.msb_first)
                 .set_u32(8, PRESENT_CAPABILITY_ASYNC) // async: we always present asynchronously

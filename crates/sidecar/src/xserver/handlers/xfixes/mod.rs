@@ -7,8 +7,11 @@ mod region;
 use tracing::debug;
 
 use super::super::client::ClientState;
-use crate::xserver::core::require_len;
 use crate::xserver::reply::ReplyBuf;
+use crate::xserver::request::request_header;
+use x11rb_protocol::protocol::xfixes::{
+    ChangeSaveSetRequest, QueryVersionRequest, SelectSelectionInputRequest,
+};
 
 pub(crate) fn handle_xfixes_request(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
     let minor = data[1];
@@ -17,6 +20,20 @@ pub(crate) fn handle_xfixes_request(state: &mut ClientState, data: &[u8], seq: u
     match minor {
         // 0: QueryVersion
         0 => {
+            let _req =
+                match QueryVersionRequest::try_parse_request(request_header(data), &data[4..]) {
+                    Ok(r) => r,
+                    Err(_) => {
+                        return crate::xserver::core::build_error_bo(
+                            crate::xserver::core::LENGTH_ERROR,
+                            seq,
+                            0,
+                            138,
+                            0,
+                            state.msb_first,
+                        )
+                    }
+                };
             ReplyBuf::fixed(seq, state.msb_first)
                 .set_u32(8, 5u32)
                 .set_u32(12, 0u32)
@@ -25,11 +42,22 @@ pub(crate) fn handle_xfixes_request(state: &mut ClientState, data: &[u8], seq: u
 
         // 1: ChangeSaveSet (extended)
         1 => {
-            require_len!(data, 12, seq, 138, 1, state.msb_first);
-            let window = state.read_u32(data, 4);
-            let mode = data[8];
-            let _target = if data.len() > 9 { data[9] } else { 0 };
-            let _map = if data.len() > 10 { data[10] } else { 0 };
+            let req =
+                match ChangeSaveSetRequest::try_parse_request(request_header(data), &data[4..]) {
+                    Ok(r) => r,
+                    Err(_) => {
+                        return crate::xserver::core::build_error_bo(
+                            crate::xserver::core::LENGTH_ERROR,
+                            seq,
+                            0,
+                            138,
+                            1,
+                            state.msb_first,
+                        )
+                    }
+                };
+            let window = req.window;
+            let mode: u8 = req.mode.into();
 
             match mode {
                 0 => {
@@ -59,18 +87,32 @@ pub(crate) fn handle_xfixes_request(state: &mut ClientState, data: &[u8], seq: u
 
         // 2: SelectSelectionInput
         2 => {
-            if data.len() >= 16 {
-                let window = state.read_u32(data, 4);
-                let selection = state.read_u32(data, 8);
-                let event_mask = state.read_u32(data, 12);
-                debug!("XFIXES SelectSelectionInput: window={window:#x} selection={selection:#x} mask={event_mask:#x}");
-                if event_mask != 0 {
-                    state
-                        .selection_event_subscribers
-                        .insert(selection, event_mask);
-                } else {
-                    state.selection_event_subscribers.remove(&selection);
+            let req = match SelectSelectionInputRequest::try_parse_request(
+                request_header(data),
+                &data[4..],
+            ) {
+                Ok(r) => r,
+                Err(_) => {
+                    return crate::xserver::core::build_error_bo(
+                        crate::xserver::core::LENGTH_ERROR,
+                        seq,
+                        0,
+                        138,
+                        2,
+                        state.msb_first,
+                    )
                 }
+            };
+            let window = req.window;
+            let selection = req.selection;
+            let event_mask = req.event_mask.bits();
+            debug!("XFIXES SelectSelectionInput: window={window:#x} selection={selection:#x} mask={event_mask:#x}");
+            if event_mask != 0 {
+                state
+                    .selection_event_subscribers
+                    .insert(selection, event_mask);
+            } else {
+                state.selection_event_subscribers.remove(&selection);
             }
             Vec::new()
         }

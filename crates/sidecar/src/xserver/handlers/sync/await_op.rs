@@ -4,41 +4,42 @@ use tracing::debug;
 
 use super::super::super::client::ClientState;
 use super::{is_trigger_satisfied, AwaitTrigger, PendingAwait};
-use crate::xserver::core::require_len;
 use crate::xserver::reply::ReplyBuf;
+use crate::xserver::request::request_header;
+use x11rb_protocol::protocol::sync::{AwaitRequest, GetPriorityRequest, SetPriorityRequest};
 
 /// Minor opcode 7: Await
 pub(crate) fn await_op(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
+    let req = match AwaitRequest::try_parse_request(request_header(data), &data[4..]) {
+        Ok(r) => r,
+        Err(_) => {
+            return crate::xserver::core::build_error_bo(
+                crate::xserver::core::LENGTH_ERROR,
+                seq,
+                0,
+                134,
+                7,
+                state.msb_first,
+            )
+        }
+    };
+
     // Await: wait for one or more counter conditions.
-    // Each wait condition is 28 bytes:
-    //   counter(4) + value_type(4) + value_hi(4) + value_lo(4) +
-    //   test_type(4) + event_threshold_hi(4) + event_threshold_lo(4)
-    //
     // Per X11 SYNC spec, Await blocks the connection until at least one
     // trigger is satisfied. We check immediately; if none are satisfied,
     // we store the request and set the blocked flag so the request
     // processing loop stops until a counter update satisfies a trigger.
 
-    // Parse the total request length to derive the number of triggers.
-    // The request is: 1 byte opcode + 1 byte minor + 2 bytes length.
-    // The triggers start at offset 4, each 28 bytes.
-    let triggers_data_len = data.len().saturating_sub(4);
-    let n_triggers = triggers_data_len / 28;
-
     let mut any_satisfied = false;
-    let mut triggers = Vec::with_capacity(n_triggers);
-    let mut offset = 4;
-    for _ in 0..n_triggers {
-        if offset + 28 > data.len() {
-            break;
-        }
-        let counter_id = state.read_u32(data, offset);
-        let value_type = state.read_u32(data, offset + 4);
-        let wait_value = ((state.read_u32(data, offset + 8) as i64) << 32)
-            | (state.read_u32(data, offset + 12) as i64);
-        let test_type = state.read_u32(data, offset + 16);
-        let event_threshold = ((state.read_u32(data, offset + 20) as i64) << 32)
-            | (state.read_u32(data, offset + 24) as i64);
+    let mut triggers = Vec::with_capacity(req.wait_list.len());
+    for wc in req.wait_list.iter() {
+        let counter_id = wc.trigger.counter;
+        let value_type = u32::from(wc.trigger.wait_type);
+        let wait_value = ((wc.trigger.wait_value.hi as i64) << 32)
+            | (wc.trigger.wait_value.lo as i64);
+        let test_type = u32::from(wc.trigger.test_type);
+        let event_threshold = ((wc.event_threshold.hi as i64) << 32)
+            | (wc.event_threshold.lo as i64);
 
         // Get current counter value
         let current = if counter_id == 1 {
@@ -64,7 +65,6 @@ pub(crate) fn await_op(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8
             any_satisfied = true;
         }
         triggers.push(trigger);
-        offset += 28;
     }
 
     if any_satisfied || triggers.is_empty() {
@@ -87,20 +87,43 @@ pub(crate) fn await_op(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8
 }
 
 /// Minor opcode 12: SetPriority
-pub(crate) fn set_priority(state: &mut ClientState, data: &[u8], _seq: u16) -> Vec<u8> {
-    if data.len() >= 12 {
-        let resource_id = state.read_u32(data, 4);
-        let priority = state.read_u32(data, 8) as i32;
-        debug!("SYNC SetPriority: resource={resource_id:#x} priority={priority}");
-        state.sync_state.priorities.insert(resource_id, priority);
-    }
+pub(crate) fn set_priority(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
+    let req = match SetPriorityRequest::try_parse_request(request_header(data), &data[4..]) {
+        Ok(r) => r,
+        Err(_) => {
+            return crate::xserver::core::build_error_bo(
+                crate::xserver::core::LENGTH_ERROR,
+                seq,
+                0,
+                134,
+                12,
+                state.msb_first,
+            )
+        }
+    };
+    let resource_id = req.id;
+    let priority = req.priority;
+    debug!("SYNC SetPriority: resource={resource_id:#x} priority={priority}");
+    state.sync_state.priorities.insert(resource_id, priority);
     Vec::new()
 }
 
 /// Minor opcode 13: GetPriority
 pub(crate) fn get_priority(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
-    require_len!(data, 8, seq, 134, data[1] as u16, state.msb_first);
-    let resource_id = state.read_u32(data, 4);
+    let req = match GetPriorityRequest::try_parse_request(request_header(data), &data[4..]) {
+        Ok(r) => r,
+        Err(_) => {
+            return crate::xserver::core::build_error_bo(
+                crate::xserver::core::LENGTH_ERROR,
+                seq,
+                0,
+                134,
+                13,
+                state.msb_first,
+            )
+        }
+    };
+    let resource_id = req.id;
     let priority = state
         .sync_state
         .priorities

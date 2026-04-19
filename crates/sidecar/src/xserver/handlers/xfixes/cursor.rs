@@ -1,30 +1,59 @@
 //! XFIXES cursor operations.
 use crate::xserver::reply::ReplyBuf;
+use crate::xserver::request::request_header;
 
 use tracing::debug;
 
 use super::super::super::client::ClientState;
+use x11rb_protocol::protocol::xfixes::{
+    ChangeCursorByNameRequest, ChangeCursorRequest, GetCursorImageAndNameRequest,
+    GetCursorImageRequest, GetCursorNameRequest, HideCursorRequest, SelectCursorInputRequest,
+    SetCursorNameRequest, ShowCursorRequest,
+};
 
 /// 3: SelectCursorInput
 pub(crate) fn handle_select_cursor_input(
     state: &mut ClientState,
     data: &[u8],
-    _seq: u16,
+    seq: u16,
 ) -> Vec<u8> {
-    if data.len() >= 12 {
-        let window = state.read_u32(data, 4);
-        let event_mask = state.read_u32(data, 8);
-        debug!("XFIXES SelectCursorInput: window={window:#x} mask={event_mask:#x}");
-        state
-            .cursor_event_subscribers
-            .insert(window, event_mask != 0);
-    }
+    let req = match SelectCursorInputRequest::try_parse_request(request_header(data), &data[4..]) {
+        Ok(r) => r,
+        Err(_) => {
+            return crate::xserver::core::build_error_bo(
+                crate::xserver::core::LENGTH_ERROR,
+                seq,
+                0,
+                138,
+                3,
+                state.msb_first,
+            )
+        }
+    };
+    let window = req.window;
+    let event_mask = req.event_mask;
+    debug!("XFIXES SelectCursorInput: window={window:#x} mask={event_mask:?}");
+    state
+        .cursor_event_subscribers
+        .insert(window, event_mask.bits() != 0);
     Vec::new()
 }
 
 /// 4: GetCursorImage
 pub(crate) fn handle_get_cursor_image(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
-    let _ = data;
+    let _req = match GetCursorImageRequest::try_parse_request(request_header(data), &data[4..]) {
+        Ok(r) => r,
+        Err(_) => {
+            return crate::xserver::core::build_error_bo(
+                crate::xserver::core::LENGTH_ERROR,
+                seq,
+                0,
+                138,
+                4,
+                state.msb_first,
+            )
+        }
+    };
     // Try to find current cursor info
     let cursor_id = state.current_cursor;
     let (width, height, hotspot_x, hotspot_y, argb_data) = if cursor_id != 0 {
@@ -68,52 +97,69 @@ pub(crate) fn handle_get_cursor_image(state: &mut ClientState, data: &[u8], seq:
 }
 
 /// 23: SetCursorName
-pub(crate) fn handle_set_cursor_name(state: &mut ClientState, data: &[u8], _seq: u16) -> Vec<u8> {
-    if data.len() >= 12 {
-        let cursor_id = state.read_u32(data, 4);
-        let name_len = state.read_u16(data, 8) as usize;
-        if data.len() >= 12 + name_len {
-            let name = String::from_utf8_lossy(&data[12..12 + name_len]).to_string();
-            debug!("XFIXES SetCursorName: cursor={cursor_id:#x} name={name:?}");
-            // Store name in existing cursor info, or create a minimal entry
-            if let Some(info) = state.cursor_info.get_mut(&cursor_id) {
-                info.name = name;
-            } else {
-                use super::super::super::types::CursorInfo;
-                state.cursor_info.insert(
-                    cursor_id,
-                    CursorInfo {
-                        css_name: String::new(),
-                        source_pixmap: 0,
-                        mask_pixmap: 0,
-                        fore_red: 0,
-                        fore_green: 0,
-                        fore_blue: 0,
-                        back_red: 0,
-                        back_green: 0,
-                        back_blue: 0,
-                        hotspot_x: 0,
-                        hotspot_y: 0,
-                        argb_data: Vec::new(),
-                        width: 0,
-                        height: 0,
-                        name,
-                        anim_frames: Vec::new(),
-                    },
-                );
-            }
+pub(crate) fn handle_set_cursor_name(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
+    let req = match SetCursorNameRequest::try_parse_request(request_header(data), &data[4..]) {
+        Ok(r) => r,
+        Err(_) => {
+            return crate::xserver::core::build_error_bo(
+                crate::xserver::core::LENGTH_ERROR,
+                seq,
+                0,
+                138,
+                23,
+                state.msb_first,
+            )
         }
+    };
+    let cursor_id = req.cursor;
+    let name = String::from_utf8_lossy(&req.name).to_string();
+    debug!("XFIXES SetCursorName: cursor={cursor_id:#x} name={name:?}");
+    // Store name in existing cursor info, or create a minimal entry
+    if let Some(info) = state.cursor_info.get_mut(&cursor_id) {
+        info.name = name;
+    } else {
+        use super::super::super::types::CursorInfo;
+        state.cursor_info.insert(
+            cursor_id,
+            CursorInfo {
+                css_name: String::new(),
+                source_pixmap: 0,
+                mask_pixmap: 0,
+                fore_red: 0,
+                fore_green: 0,
+                fore_blue: 0,
+                back_red: 0,
+                back_green: 0,
+                back_blue: 0,
+                hotspot_x: 0,
+                hotspot_y: 0,
+                argb_data: Vec::new(),
+                width: 0,
+                height: 0,
+                name,
+                anim_frames: Vec::new(),
+            },
+        );
     }
     Vec::new()
 }
 
 /// 24: GetCursorName
 pub(crate) fn handle_get_cursor_name(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
-    let cursor_id = if data.len() >= 8 {
-        state.read_u32(data, 4)
-    } else {
-        0
+    let req = match GetCursorNameRequest::try_parse_request(request_header(data), &data[4..]) {
+        Ok(r) => r,
+        Err(_) => {
+            return crate::xserver::core::build_error_bo(
+                crate::xserver::core::LENGTH_ERROR,
+                seq,
+                0,
+                138,
+                24,
+                state.msb_first,
+            )
+        }
     };
+    let cursor_id = req.cursor;
     let name = state
         .cursor_info
         .get(&cursor_id)
@@ -146,7 +192,20 @@ pub(crate) fn handle_get_cursor_image_and_name(
     data: &[u8],
     seq: u16,
 ) -> Vec<u8> {
-    let _ = data;
+    let _req =
+        match GetCursorImageAndNameRequest::try_parse_request(request_header(data), &data[4..]) {
+            Ok(r) => r,
+            Err(_) => {
+                return crate::xserver::core::build_error_bo(
+                    crate::xserver::core::LENGTH_ERROR,
+                    seq,
+                    0,
+                    138,
+                    25,
+                    state.msb_first,
+                )
+            }
+        };
     let cursor_id = state.current_cursor;
     let (width, height, hotspot_x, hotspot_y, argb_data, name) = if cursor_id != 0 {
         if let Some(info) = state.cursor_info.get(&cursor_id) {
@@ -207,30 +266,41 @@ pub(crate) fn handle_get_cursor_image_and_name(
 }
 
 /// 26: ChangeCursor
-pub(crate) fn handle_change_cursor(state: &mut ClientState, data: &[u8], _seq: u16) -> Vec<u8> {
-    if data.len() >= 12 {
-        let source_cursor = state.read_u32(data, 4);
-        let dest_cursor = state.read_u32(data, 8);
-        debug!("XFIXES ChangeCursor: source={source_cursor:#x} dest={dest_cursor:#x}");
-        // Update all windows that use dest_cursor to use source_cursor instead
-        let windows_to_update: Vec<u32> = state
-            .windows
-            .iter()
-            .filter(|(_, w)| w.cursor == Some(dest_cursor))
-            .map(|(id, _)| *id)
-            .collect();
-        for wid in windows_to_update {
-            if let Some(w) = state.windows.get_mut(&wid) {
-                w.cursor = Some(source_cursor);
-            }
+pub(crate) fn handle_change_cursor(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
+    let req = match ChangeCursorRequest::try_parse_request(request_header(data), &data[4..]) {
+        Ok(r) => r,
+        Err(_) => {
+            return crate::xserver::core::build_error_bo(
+                crate::xserver::core::LENGTH_ERROR,
+                seq,
+                0,
+                138,
+                26,
+                state.msb_first,
+            )
         }
-        // Copy cursor info from source to dest
-        if let Some(info) = state.cursor_info.get(&source_cursor).cloned() {
-            state.cursor_info.insert(dest_cursor, info);
+    };
+    let source_cursor = req.source;
+    let dest_cursor = req.destination;
+    debug!("XFIXES ChangeCursor: source={source_cursor:#x} dest={dest_cursor:#x}");
+    // Update all windows that use dest_cursor to use source_cursor instead
+    let windows_to_update: Vec<u32> = state
+        .windows
+        .iter()
+        .filter(|(_, w)| w.cursor == Some(dest_cursor))
+        .map(|(id, _)| *id)
+        .collect();
+    for wid in windows_to_update {
+        if let Some(w) = state.windows.get_mut(&wid) {
+            w.cursor = Some(source_cursor);
         }
-        if let Some(css) = state.cursors.get(&source_cursor).cloned() {
-            state.cursors.insert(dest_cursor, css);
-        }
+    }
+    // Copy cursor info from source to dest
+    if let Some(info) = state.cursor_info.get(&source_cursor).cloned() {
+        state.cursor_info.insert(dest_cursor, info);
+    }
+    if let Some(css) = state.cursors.get(&source_cursor).cloned() {
+        state.cursors.insert(dest_cursor, css);
     }
     Vec::new()
 }
@@ -239,41 +309,49 @@ pub(crate) fn handle_change_cursor(state: &mut ClientState, data: &[u8], _seq: u
 pub(crate) fn handle_change_cursor_by_name(
     state: &mut ClientState,
     data: &[u8],
-    _seq: u16,
+    seq: u16,
 ) -> Vec<u8> {
-    if data.len() >= 12 {
-        let source_cursor = state.read_u32(data, 4);
-        let name_len = state.read_u16(data, 8) as usize;
-        if data.len() >= 12 + name_len {
-            let name = String::from_utf8_lossy(&data[12..12 + name_len]).to_string();
-            debug!("XFIXES ChangeCursorByName: source={source_cursor:#x} name={name:?}");
-            // Find all cursors that have the matching name
-            let matching_cursor_ids: Vec<u32> = state
-                .cursor_info
+    let req = match ChangeCursorByNameRequest::try_parse_request(request_header(data), &data[4..]) {
+        Ok(r) => r,
+        Err(_) => {
+            return crate::xserver::core::build_error_bo(
+                crate::xserver::core::LENGTH_ERROR,
+                seq,
+                0,
+                138,
+                27,
+                state.msb_first,
+            )
+        }
+    };
+    let source_cursor = req.src;
+    let name = String::from_utf8_lossy(&req.name).to_string();
+    debug!("XFIXES ChangeCursorByName: source={source_cursor:#x} name={name:?}");
+    // Find all cursors that have the matching name
+    let matching_cursor_ids: Vec<u32> = state
+        .cursor_info
+        .iter()
+        .filter(|(_, info)| info.name == name)
+        .map(|(id, _)| *id)
+        .collect();
+    // Replace each matching cursor with source_cursor's info
+    if let Some(source_info) = state.cursor_info.get(&source_cursor).cloned() {
+        let source_css = state.cursors.get(&source_cursor).cloned();
+        for cid in &matching_cursor_ids {
+            state.cursor_info.insert(*cid, source_info.clone());
+            if let Some(ref css) = source_css {
+                state.cursors.insert(*cid, css.clone());
+            }
+            // Update windows using this cursor
+            let windows_to_update: Vec<u32> = state
+                .windows
                 .iter()
-                .filter(|(_, info)| info.name == name)
+                .filter(|(_, w)| w.cursor == Some(*cid))
                 .map(|(id, _)| *id)
                 .collect();
-            // Replace each matching cursor with source_cursor's info
-            if let Some(source_info) = state.cursor_info.get(&source_cursor).cloned() {
-                let source_css = state.cursors.get(&source_cursor).cloned();
-                for cid in &matching_cursor_ids {
-                    state.cursor_info.insert(*cid, source_info.clone());
-                    if let Some(ref css) = source_css {
-                        state.cursors.insert(*cid, css.clone());
-                    }
-                    // Update windows using this cursor
-                    let windows_to_update: Vec<u32> = state
-                        .windows
-                        .iter()
-                        .filter(|(_, w)| w.cursor == Some(*cid))
-                        .map(|(id, _)| *id)
-                        .collect();
-                    for wid in windows_to_update {
-                        if let Some(w) = state.windows.get_mut(&wid) {
-                            w.cursor = Some(source_cursor);
-                        }
-                    }
+            for wid in windows_to_update {
+                if let Some(w) = state.windows.get_mut(&wid) {
+                    w.cursor = Some(source_cursor);
                 }
             }
         }
@@ -282,72 +360,94 @@ pub(crate) fn handle_change_cursor_by_name(
 }
 
 /// 29: HideCursor
-pub(crate) fn handle_hide_cursor(state: &mut ClientState, data: &[u8], _seq: u16) -> Vec<u8> {
-    if data.len() >= 8 {
-        let window_id = state.read_u32(data, 4);
-        state.cursor_hidden = state.cursor_hidden.saturating_add(1);
-        debug!(
-            "XFIXES HideCursor: window={window_id:#x} nesting={}",
-            state.cursor_hidden
-        );
-        // On first hide, send cursor changed to "none"
-        if state.cursor_hidden == 1 {
-            if let Some(uuid) = state
-                .top_level_uuid_for(window_id)
-                .or_else(|| state.window_uuid(window_id))
-            {
-                let _ = state.update_tx.send((
-                    state.client_id.clone(),
-                    x11_web_protocol::DisplayUpdate::CursorChanged {
-                        window_id: uuid,
-                        cursor: "none".to_string(),
-                    },
-                ));
-            }
+pub(crate) fn handle_hide_cursor(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
+    let req = match HideCursorRequest::try_parse_request(request_header(data), &data[4..]) {
+        Ok(r) => r,
+        Err(_) => {
+            return crate::xserver::core::build_error_bo(
+                crate::xserver::core::LENGTH_ERROR,
+                seq,
+                0,
+                138,
+                29,
+                state.msb_first,
+            )
+        }
+    };
+    let window_id = req.window;
+    state.cursor_hidden = state.cursor_hidden.saturating_add(1);
+    debug!(
+        "XFIXES HideCursor: window={window_id:#x} nesting={}",
+        state.cursor_hidden
+    );
+    // On first hide, send cursor changed to "none"
+    if state.cursor_hidden == 1 {
+        if let Some(uuid) = state
+            .top_level_uuid_for(window_id)
+            .or_else(|| state.window_uuid(window_id))
+        {
+            let _ = state.update_tx.send((
+                state.client_id.clone(),
+                x11_web_protocol::DisplayUpdate::CursorChanged {
+                    window_id: uuid,
+                    cursor: "none".to_string(),
+                },
+            ));
         }
     }
     Vec::new()
 }
 
 /// 30: ShowCursor
-pub(crate) fn handle_show_cursor(state: &mut ClientState, data: &[u8], _seq: u16) -> Vec<u8> {
-    if data.len() >= 8 {
-        let window_id = state.read_u32(data, 4);
-        state.cursor_hidden = state.cursor_hidden.saturating_sub(1);
-        debug!(
-            "XFIXES ShowCursor: window={window_id:#x} nesting={}",
-            state.cursor_hidden
-        );
-        // When nesting reaches 0, restore the real cursor
-        if state.cursor_hidden == 0 {
-            // Resolve the real cursor name from current_cursor or fall back to "default"
-            let real_cursor = if state.current_cursor != 0 {
-                state
-                    .cursors
-                    .get(&state.current_cursor)
-                    .cloned()
-                    .or_else(|| {
-                        state
-                            .cursor_info
-                            .get(&state.current_cursor)
-                            .map(|i| i.css_name.clone())
-                    })
-                    .unwrap_or_else(|| "default".to_string())
-            } else {
-                "default".to_string()
-            };
-            if let Some(uuid) = state
-                .top_level_uuid_for(window_id)
-                .or_else(|| state.window_uuid(window_id))
-            {
-                let _ = state.update_tx.send((
-                    state.client_id.clone(),
-                    x11_web_protocol::DisplayUpdate::CursorChanged {
-                        window_id: uuid,
-                        cursor: real_cursor,
-                    },
-                ));
-            }
+pub(crate) fn handle_show_cursor(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
+    let req = match ShowCursorRequest::try_parse_request(request_header(data), &data[4..]) {
+        Ok(r) => r,
+        Err(_) => {
+            return crate::xserver::core::build_error_bo(
+                crate::xserver::core::LENGTH_ERROR,
+                seq,
+                0,
+                138,
+                30,
+                state.msb_first,
+            )
+        }
+    };
+    let window_id = req.window;
+    state.cursor_hidden = state.cursor_hidden.saturating_sub(1);
+    debug!(
+        "XFIXES ShowCursor: window={window_id:#x} nesting={}",
+        state.cursor_hidden
+    );
+    // When nesting reaches 0, restore the real cursor
+    if state.cursor_hidden == 0 {
+        // Resolve the real cursor name from current_cursor or fall back to "default"
+        let real_cursor = if state.current_cursor != 0 {
+            state
+                .cursors
+                .get(&state.current_cursor)
+                .cloned()
+                .or_else(|| {
+                    state
+                        .cursor_info
+                        .get(&state.current_cursor)
+                        .map(|i| i.css_name.clone())
+                })
+                .unwrap_or_else(|| "default".to_string())
+        } else {
+            "default".to_string()
+        };
+        if let Some(uuid) = state
+            .top_level_uuid_for(window_id)
+            .or_else(|| state.window_uuid(window_id))
+        {
+            let _ = state.update_tx.send((
+                state.client_id.clone(),
+                x11_web_protocol::DisplayUpdate::CursorChanged {
+                    window_id: uuid,
+                    cursor: real_cursor,
+                },
+            ));
         }
     }
     Vec::new()

@@ -3,6 +3,8 @@
 use super::*;
 use crate::xserver::core::require_len;
 use crate::xserver::reply::ReplyBuf;
+use crate::xserver::request::request_header;
+use x11rb_protocol::protocol::xproto::{GetImageRequest, PutImageRequest};
 
 // ---------------------------------------------------------------------------
 // Opcode 72: PutImage
@@ -11,9 +13,14 @@ use crate::xserver::reply::ReplyBuf;
 pub(crate) fn handle_put_image(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
     require_len!(data, 24, state.sequence, 72);
 
-    let format = data[1]; // 0=Bitmap, 1=XYPixmap, 2=ZPixmap
-    let drawable = state.read_u32(data, 4);
-    let gc_id = state.read_u32(data, 8);
+    let req = match PutImageRequest::try_parse_request(request_header(data), &data[4..]) {
+        Ok(r) => r,
+        Err(_) => return build_error(LENGTH_ERROR, state.sequence, 0, 72, 0),
+    };
+
+    let format = u8::from(req.format);
+    let drawable = req.drawable;
+    let gc_id = req.gc;
 
     if !state.windows.contains_key(&drawable) && !state.pixmaps.contains_key(&drawable) {
         return build_error(DRAWABLE_ERROR, state.sequence, drawable, 72, 0);
@@ -24,19 +31,19 @@ pub(crate) fn handle_put_image(state: &mut ClientState, data: &[u8]) -> Vec<u8> 
     if format > 2 {
         return build_error(VALUE_ERROR, state.sequence, format as u32, 72, 0);
     }
-    let width = state.read_u16(data, 12);
-    let height = state.read_u16(data, 14);
-    let dst_x = state.read_i16(data, 16);
-    let dst_y = state.read_i16(data, 18);
-    let left_pad = data[20] as usize;
-    let depth = data[21];
+    let width = req.width;
+    let height = req.height;
+    let dst_x = req.dst_x;
+    let dst_y = req.dst_y;
+    let left_pad = req.left_pad as usize;
+    let depth = req.depth;
 
     // Validate image dimensions are within reasonable bounds
     if width > 32767 || height > 32767 {
         return build_error(VALUE_ERROR, state.sequence, width as u32, 72, 0);
     }
 
-    let pixel_data = &data[24..];
+    let pixel_data = &*req.data;
 
     // Validate that pixel data is present (at least 1 byte for non-zero images)
     if width > 0 && height > 0 && pixel_data.is_empty() {
@@ -442,8 +449,13 @@ pub(crate) fn handle_put_image(state: &mut ClientState, data: &[u8]) -> Vec<u8> 
 pub(crate) fn handle_get_image(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
     require_len!(data, 20, seq, 73);
 
-    let format = data[1]; // 1=XYPixmap, 2=ZPixmap
-    let drawable = state.read_u32(data, 4);
+    let req = match GetImageRequest::try_parse_request(request_header(data), &data[4..]) {
+        Ok(r) => r,
+        Err(_) => return build_error(LENGTH_ERROR, seq, 0, 73, 0),
+    };
+
+    let format = u8::from(req.format);
+    let drawable = req.drawable;
 
     if !state.windows.contains_key(&drawable) && !state.pixmaps.contains_key(&drawable) {
         return build_error(DRAWABLE_ERROR, seq, drawable, 73, 0);
@@ -473,11 +485,11 @@ pub(crate) fn handle_get_image(state: &mut ClientState, data: &[u8], seq: u16) -
     if format != 1 && format != 2 {
         return build_error(VALUE_ERROR, seq, format as u32, 73, 0);
     }
-    let x = state.read_i16(data, 8);
-    let y = state.read_i16(data, 10);
-    let width = state.read_u16(data, 12);
-    let height = state.read_u16(data, 14);
-    let plane_mask = state.read_u32(data, 16);
+    let x = req.x;
+    let y = req.y;
+    let width = req.width;
+    let height = req.height;
+    let plane_mask = req.plane_mask;
 
     // Sync SHM pixmaps before reading
     state.sync_shm_pixmap(drawable);

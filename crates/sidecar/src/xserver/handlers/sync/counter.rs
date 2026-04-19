@@ -6,8 +6,12 @@ use tracing::debug;
 use super::super::super::client::ClientState;
 use super::super::super::core::VALUE_ERROR;
 use super::{check_alarms, check_pending_awaits_ext, SyncCounter};
-use crate::xserver::core::require_len;
 use crate::xserver::reply::ReplyBuf;
+use crate::xserver::request::request_header;
+use x11rb_protocol::protocol::sync::{
+    ChangeCounterRequest, CreateCounterRequest, DestroyCounterRequest, QueryCounterRequest,
+    SetCounterRequest,
+};
 
 /// Minor opcode 1: ListSystemCounters
 pub(crate) fn list_system_counters(state: &mut ClientState, seq: u16) -> Vec<u8> {
@@ -30,10 +34,22 @@ pub(crate) fn list_system_counters(state: &mut ClientState, seq: u16) -> Vec<u8>
 
 /// Minor opcode 2: CreateCounter
 pub(crate) fn create_counter(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
-    require_len!(data, 16, seq, 134, data[1] as u16, state.msb_first);
-    let counter_id = state.read_u32(data, 4);
-    let value_hi = state.read_u32(data, 8) as i32;
-    let value_lo = state.read_u32(data, 12);
+    let req = match CreateCounterRequest::try_parse_request(request_header(data), &data[4..]) {
+        Ok(r) => r,
+        Err(_) => {
+            return crate::xserver::core::build_error_bo(
+                crate::xserver::core::LENGTH_ERROR,
+                seq,
+                0,
+                134,
+                2,
+                state.msb_first,
+            )
+        }
+    };
+    let counter_id = req.id;
+    let value_hi = req.initial_value.hi;
+    let value_lo = req.initial_value.lo;
     debug!("SYNC CreateCounter: id={counter_id:#x} value={value_hi}:{value_lo}");
     state.sync_state.counters.insert(
         counter_id,
@@ -48,10 +64,22 @@ pub(crate) fn create_counter(state: &mut ClientState, data: &[u8], seq: u16) -> 
 
 /// Minor opcode 3: SetCounter
 pub(crate) fn set_counter(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
-    require_len!(data, 16, seq, 134, data[1] as u16, state.msb_first);
-    let counter_id = state.read_u32(data, 4);
-    let value_hi = state.read_u32(data, 8) as i32;
-    let value_lo = state.read_u32(data, 12);
+    let req = match SetCounterRequest::try_parse_request(request_header(data), &data[4..]) {
+        Ok(r) => r,
+        Err(_) => {
+            return crate::xserver::core::build_error_bo(
+                crate::xserver::core::LENGTH_ERROR,
+                seq,
+                0,
+                134,
+                3,
+                state.msb_first,
+            )
+        }
+    };
+    let counter_id = req.counter;
+    let value_hi = req.value.hi;
+    let value_lo = req.value.lo;
     debug!("SYNC SetCounter: id={counter_id:#x} value={value_hi}:{value_lo}");
 
     let old_value = state
@@ -84,10 +112,22 @@ pub(crate) fn set_counter(state: &mut ClientState, data: &[u8], seq: u16) -> Vec
 
 /// Minor opcode 4: ChangeCounter
 pub(crate) fn change_counter(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
-    require_len!(data, 16, seq, 134, data[1] as u16, state.msb_first);
-    let counter_id = state.read_u32(data, 4);
-    let delta_hi = state.read_u32(data, 8) as i32;
-    let delta_lo = state.read_u32(data, 12);
+    let req = match ChangeCounterRequest::try_parse_request(request_header(data), &data[4..]) {
+        Ok(r) => r,
+        Err(_) => {
+            return crate::xserver::core::build_error_bo(
+                crate::xserver::core::LENGTH_ERROR,
+                seq,
+                0,
+                134,
+                4,
+                state.msb_first,
+            )
+        }
+    };
+    let counter_id = req.counter;
+    let delta_hi = req.amount.hi;
+    let delta_lo = req.amount.lo;
     let delta = ((delta_hi as i64) << 32) | (delta_lo as i64);
     debug!("SYNC ChangeCounter: id={counter_id:#x} delta={delta}");
 
@@ -120,8 +160,20 @@ pub(crate) fn change_counter(state: &mut ClientState, data: &[u8], seq: u16) -> 
 
 /// Minor opcode 5: QueryCounter
 pub(crate) fn query_counter(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
-    require_len!(data, 8, seq, 134, data[1] as u16, state.msb_first);
-    let counter_id = state.read_u32(data, 4);
+    let req = match QueryCounterRequest::try_parse_request(request_header(data), &data[4..]) {
+        Ok(r) => r,
+        Err(_) => {
+            return crate::xserver::core::build_error_bo(
+                crate::xserver::core::LENGTH_ERROR,
+                seq,
+                0,
+                134,
+                5,
+                state.msb_first,
+            )
+        }
+    };
+    let counter_id = req.counter;
     debug!("SYNC QueryCounter: id={counter_id:#x}");
 
     let mut reply = ReplyBuf::fixed(seq, state.msb_first);
@@ -149,42 +201,53 @@ pub(crate) fn query_counter(state: &mut ClientState, data: &[u8], seq: u16) -> V
 }
 
 /// Minor opcode 6: DestroyCounter
-pub(crate) fn destroy_counter(state: &mut ClientState, data: &[u8], _seq: u16) -> Vec<u8> {
-    if data.len() >= 8 {
-        let counter_id = state.read_u32(data, 4);
-        debug!("SYNC DestroyCounter: id={counter_id:#x}");
-        state.sync_state.counters.remove(&counter_id);
-        state.recycle_xid(counter_id);
-        // Deactivate any alarms referencing this counter
-        for alarm in state.sync_state.alarms.values_mut() {
-            if alarm.counter == counter_id {
-                alarm.state = 1; // Inactive
-            }
+pub(crate) fn destroy_counter(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
+    let req = match DestroyCounterRequest::try_parse_request(request_header(data), &data[4..]) {
+        Ok(r) => r,
+        Err(_) => {
+            return crate::xserver::core::build_error_bo(
+                crate::xserver::core::LENGTH_ERROR,
+                seq,
+                0,
+                134,
+                6,
+                state.msb_first,
+            )
         }
-        // Cancel any pending Await requests that reference this counter.
-        // Per X11 SYNC spec, destroying a counter while an Await references it
-        // should unblock the client (the trigger can never be satisfied).
-        let had_pending = !state.sync_state.pending_awaits.is_empty();
-        state.sync_state.pending_awaits.retain(|pa| {
-            // Remove awaits where ALL triggers reference only destroyed/missing counters,
-            // or where at least one trigger references the destroyed counter.
-            // Per spec: if the counter is destroyed, the trigger condition becomes
-            // immediately True, so any await with a trigger on this counter is satisfied.
-            let references_destroyed = pa.triggers.iter().any(|t| t.counter_id == counter_id);
-            if references_destroyed {
-                debug!(
-                    "SYNC DestroyCounter: cancelling pending Await (seq={})",
-                    pa.seq
-                );
-            }
-            !references_destroyed
-        });
-        if had_pending
-            && state.sync_state.pending_awaits.is_empty()
-            && state.sync_state.pending_fence_awaits.is_empty()
-        {
-            state.sync_state.blocked = false;
+    };
+    let counter_id = req.counter;
+    debug!("SYNC DestroyCounter: id={counter_id:#x}");
+    state.sync_state.counters.remove(&counter_id);
+    state.recycle_xid(counter_id);
+    // Deactivate any alarms referencing this counter
+    for alarm in state.sync_state.alarms.values_mut() {
+        if alarm.counter == counter_id {
+            alarm.state = 1; // Inactive
         }
+    }
+    // Cancel any pending Await requests that reference this counter.
+    // Per X11 SYNC spec, destroying a counter while an Await references it
+    // should unblock the client (the trigger can never be satisfied).
+    let had_pending = !state.sync_state.pending_awaits.is_empty();
+    state.sync_state.pending_awaits.retain(|pa| {
+        // Remove awaits where ALL triggers reference only destroyed/missing counters,
+        // or where at least one trigger references the destroyed counter.
+        // Per spec: if the counter is destroyed, the trigger condition becomes
+        // immediately True, so any await with a trigger on this counter is satisfied.
+        let references_destroyed = pa.triggers.iter().any(|t| t.counter_id == counter_id);
+        if references_destroyed {
+            debug!(
+                "SYNC DestroyCounter: cancelling pending Await (seq={})",
+                pa.seq
+            );
+        }
+        !references_destroyed
+    });
+    if had_pending
+        && state.sync_state.pending_awaits.is_empty()
+        && state.sync_state.pending_fence_awaits.is_empty()
+    {
+        state.sync_state.blocked = false;
     }
     Vec::new()
 }
