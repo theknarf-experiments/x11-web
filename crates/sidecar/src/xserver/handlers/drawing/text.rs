@@ -14,10 +14,10 @@ pub(crate) fn handle_poly_text8(state: &mut ClientState, data: &[u8]) -> Vec<u8>
     let gc_id = state.read_u32(data, 8);
 
     if !state.windows.contains_key(&drawable) && !state.pixmaps.contains_key(&drawable) {
-        return build_error(BAD_DRAWABLE, state.sequence, drawable, 74, 0);
+        return build_error(DRAWABLE_ERROR, state.sequence, drawable, 74, 0);
     }
     if !state.gcs.contains_key(&gc_id) {
-        return build_error(BAD_GC, state.sequence, gc_id, 74, 0);
+        return build_error(G_CONTEXT_ERROR, state.sequence, gc_id, 74, 0);
     }
 
     let mut cursor_x = state.read_i16(data, 12);
@@ -112,10 +112,10 @@ pub(crate) fn handle_poly_text16(state: &mut ClientState, data: &[u8]) -> Vec<u8
     let gc_id = state.read_u32(data, 8);
 
     if !state.windows.contains_key(&drawable) && !state.pixmaps.contains_key(&drawable) {
-        return build_error(BAD_DRAWABLE, state.sequence, drawable, 75, 0);
+        return build_error(DRAWABLE_ERROR, state.sequence, drawable, 75, 0);
     }
     if !state.gcs.contains_key(&gc_id) {
-        return build_error(BAD_GC, state.sequence, gc_id, 75, 0);
+        return build_error(G_CONTEXT_ERROR, state.sequence, gc_id, 75, 0);
     }
 
     let mut cursor_x = state.read_i16(data, 12);
@@ -281,10 +281,10 @@ pub(crate) fn handle_image_text8(state: &mut ClientState, data: &[u8]) -> Vec<u8
     let gc_id = state.read_u32(data, 8);
 
     if !state.windows.contains_key(&drawable) && !state.pixmaps.contains_key(&drawable) {
-        return build_error(BAD_DRAWABLE, state.sequence, drawable, 76, 0);
+        return build_error(DRAWABLE_ERROR, state.sequence, drawable, 76, 0);
     }
     if !state.gcs.contains_key(&gc_id) {
-        return build_error(BAD_GC, state.sequence, gc_id, 76, 0);
+        return build_error(G_CONTEXT_ERROR, state.sequence, gc_id, 76, 0);
     }
 
     let x = state.read_i16(data, 12);
@@ -341,10 +341,10 @@ pub(crate) fn handle_image_text16(state: &mut ClientState, data: &[u8]) -> Vec<u
     let gc_id = state.read_u32(data, 8);
 
     if !state.windows.contains_key(&drawable) && !state.pixmaps.contains_key(&drawable) {
-        return build_error(BAD_DRAWABLE, state.sequence, drawable, 77, 0);
+        return build_error(DRAWABLE_ERROR, state.sequence, drawable, 77, 0);
     }
     if !state.gcs.contains_key(&gc_id) {
-        return build_error(BAD_GC, state.sequence, gc_id, 77, 0);
+        return build_error(G_CONTEXT_ERROR, state.sequence, gc_id, 77, 0);
     }
 
     let str_len = data[1] as usize;

@@ -947,7 +947,7 @@ pub(crate) async fn handle_client(
                         // Reject if the client hasn't enabled BIG-REQUESTS.
                         if !state.big_requests_enabled {
                             state.sequence = state.sequence.wrapping_add(1);
-                            let err = build_error_bo(BAD_LENGTH, state.sequence, 0, pending[0], 0, state.msb_first);
+                            let err = build_error_bo(LENGTH_ERROR, state.sequence, 0, pending[0], 0, state.msb_first);
                             stream.write_all(&err).await?;
                             // Skip the 4-byte header we already peeked at.
                             pending.drain(..4);

@@ -46,7 +46,7 @@ pub(crate) fn handle_dbe_request(state: &mut ClientState, data: &[u8], seq: u16)
                 state.back_buffers.insert(back_buffer_id, window_id);
             } else {
                 return crate::xserver::core::build_error_bo(
-                    crate::xserver::core::BAD_WINDOW,
+                    crate::xserver::core::WINDOW_ERROR,
                     seq,
                     window_id,
                     157,
@@ -215,7 +215,7 @@ pub(crate) fn handle_dbe_request(state: &mut ClientState, data: &[u8], seq: u16)
         _ => {
             debug!("DBE: unhandled minor opcode {minor}");
             crate::xserver::core::build_error_bo(
-                crate::xserver::core::BAD_REQUEST,
+                crate::xserver::core::REQUEST_ERROR,
                 seq,
                 minor as u32,
                 157,

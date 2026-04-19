@@ -14,11 +14,11 @@ pub(crate) fn handle_open_font(state: &mut ClientState, data: &[u8]) -> Vec<u8> 
 
     // Validate resource ID is within this client's allocated range
     if !state.validate_resource_id(fid) {
-        return build_error(BAD_ID_CHOICE, state.sequence, fid, 45, 0);
+        return build_error(ID_CHOICE_ERROR, state.sequence, fid, 45, 0);
     }
-    // Per X11 spec: BAD_ID_CHOICE if the font ID is already in use
+    // Per X11 spec: ID_CHOICE_ERROR if the font ID is already in use
     if state.font_manager.get_font(fid).is_some() {
-        return build_error(BAD_ID_CHOICE, state.sequence, fid, 45, 0);
+        return build_error(ID_CHOICE_ERROR, state.sequence, fid, 45, 0);
     }
 
     let name_len = state.read_u16(data, 8) as usize;
@@ -41,7 +41,7 @@ pub(crate) fn handle_close_font(state: &mut ClientState, data: &[u8]) -> Vec<u8>
     let fid = state.read_u32(data, 4);
     // Validate font exists
     if state.font_manager.get_font(fid).is_none() {
-        return build_error(BAD_FONT, state.sequence, fid, 46, 0);
+        return build_error(FONT_ERROR, state.sequence, fid, 46, 0);
     }
     state.font_manager.close_font(fid);
     state.recycle_xid(fid);
@@ -61,7 +61,7 @@ pub(crate) fn handle_query_font(state: &mut ClientState, data: &[u8], seq: u16) 
         state.font_manager.get_font(fontable).is_some() || state.gcs.contains_key(&fontable);
 
     if !is_valid_fontable {
-        return build_error(BAD_FONT, seq, fontable, 47, 0);
+        return build_error(FONT_ERROR, seq, fontable, 47, 0);
     }
 
     let font = state

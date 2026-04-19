@@ -74,7 +74,7 @@ pub(crate) fn handle_send_event(state: &mut ClientState, data: &[u8]) -> Vec<u8>
 
     // Per X11 spec: event type must be >= 2 (types 0-1 are errors/replies, not events)
     if event_type < 2 {
-        return build_error(BAD_VALUE, state.sequence, event_type as u32, 25, 0);
+        return build_error(VALUE_ERROR, state.sequence, event_type as u32, 25, 0);
     }
 
     debug!(

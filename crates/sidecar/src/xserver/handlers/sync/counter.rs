@@ -4,7 +4,7 @@
 use tracing::debug;
 
 use super::super::super::client::ClientState;
-use super::super::super::core::BAD_VALUE;
+use super::super::super::core::VALUE_ERROR;
 use super::{check_alarms, check_pending_awaits_ext, SyncCounter};
 use crate::xserver::core::require_len;
 use crate::xserver::reply::ReplyBuf;
@@ -137,7 +137,7 @@ pub(crate) fn query_counter(state: &mut ClientState, data: &[u8], seq: u16) -> V
     } else {
         // BadCounter
         return super::super::super::core::build_error_bo(
-            BAD_VALUE,
+            VALUE_ERROR,
             seq,
             counter_id,
             134,

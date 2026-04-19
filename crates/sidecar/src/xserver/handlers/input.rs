@@ -373,13 +373,13 @@ pub(crate) fn handle_set_input_focus(state: &mut ClientState, data: &[u8]) -> Ve
     // data[1] = revert_to (0=None, 1=PointerRoot, 2=Parent)
     let revert_to = data[1];
     if revert_to > 2 {
-        return build_error(BAD_VALUE, state.sequence, revert_to as u32, 42, 0);
+        return build_error(VALUE_ERROR, state.sequence, revert_to as u32, 42, 0);
     }
     let focus = state.read_u32(data, 4);
     // Per X11 spec: focus can be 0 (None), 1 (PointerRoot), or a valid window ID.
     // If it's a specific window, validate it exists.
     if focus > 1 && !state.windows.contains_key(&focus) {
-        return build_error(BAD_WINDOW, state.sequence, focus, 42, 0);
+        return build_error(WINDOW_ERROR, state.sequence, focus, 42, 0);
     }
     state.focus_revert_to = revert_to;
     state.set_focus_window(focus);
@@ -424,7 +424,7 @@ pub(crate) fn handle_change_keyboard_mapping(
     let keysyms_per_keycode = data[5] as usize;
 
     if keysyms_per_keycode == 0 {
-        return build_error(BAD_VALUE, seq, 0, 100, 0);
+        return build_error(VALUE_ERROR, seq, 0, 100, 0);
     }
 
     // Parse and store the new keycode->keysym mappings
@@ -435,7 +435,7 @@ pub(crate) fn handle_change_keyboard_mapping(
             data.len(),
             8 + total_syms * 4
         );
-        return build_error(BAD_LENGTH, seq, 0, 100, 0);
+        return build_error(LENGTH_ERROR, seq, 0, 100, 0);
     }
 
     for i in 0..keycode_count {
@@ -549,7 +549,7 @@ pub(crate) fn handle_change_keyboard_control(state: &mut ClientState, data: &[u8
                 5 => {
                     // led_mode: 0=Off, 1=On for the LED specified by led (bit 4)
                     if val > 1 {
-                        return build_error(BAD_VALUE, state.sequence, val, 102, 0);
+                        return build_error(VALUE_ERROR, state.sequence, val, 102, 0);
                     }
                     if let Some(led) = led_value {
                         if led >= 1 && led <= 32 {
@@ -576,7 +576,7 @@ pub(crate) fn handle_change_keyboard_control(state: &mut ClientState, data: &[u8
                 7 => {
                     // auto_repeat_mode: 0=Off, 1=On, 2=Default
                     if val > 2 {
-                        return build_error(BAD_VALUE, state.sequence, val, 102, 0);
+                        return build_error(VALUE_ERROR, state.sequence, val, 102, 0);
                     }
                     if let Some(key) = key_value {
                         // Per spec: key must be a valid keycode (8-255)
@@ -768,7 +768,7 @@ pub(crate) fn handle_force_screen_saver(state: &mut ClientState, data: &[u8], se
         }
         _ => {
             // Invalid mode value
-            build_error(BAD_VALUE, seq, mode as u32, 115, 0)
+            build_error(VALUE_ERROR, seq, mode as u32, 115, 0)
         }
     }
 }
@@ -851,7 +851,7 @@ pub(crate) fn handle_change_hosts(state: &mut ClientState, data: &[u8]) -> Vec<u
 
     // Validate mode: per X11 spec, only 0 (Insert) and 1 (Delete) are valid
     if mode > 1 {
-        return build_error(BAD_VALUE, state.sequence, mode as u32, 109, 0);
+        return build_error(VALUE_ERROR, state.sequence, mode as u32, 109, 0);
     }
 
     // Validate address family and address length per X11 spec:
@@ -865,32 +865,32 @@ pub(crate) fn handle_change_hosts(state: &mut ClientState, data: &[u8]) -> Vec<u
         0 => {
             // Internet (IPv4)
             if addr_len != 4 {
-                return build_error(BAD_VALUE, state.sequence, addr_len as u32, 109, 0);
+                return build_error(VALUE_ERROR, state.sequence, addr_len as u32, 109, 0);
             }
         }
         6 => {
             // Internet6 (IPv6)
             if addr_len != 16 {
-                return build_error(BAD_VALUE, state.sequence, addr_len as u32, 109, 0);
+                return build_error(VALUE_ERROR, state.sequence, addr_len as u32, 109, 0);
             }
         }
         1 => {
             // DECnet
             if addr_len != 2 {
-                return build_error(BAD_VALUE, state.sequence, addr_len as u32, 109, 0);
+                return build_error(VALUE_ERROR, state.sequence, addr_len as u32, 109, 0);
             }
         }
         5 => {
             // ServerInterpreted - variable length, must have at least type+NUL+value
             if addr_len < 1 {
-                return build_error(BAD_VALUE, state.sequence, addr_len as u32, 109, 0);
+                return build_error(VALUE_ERROR, state.sequence, addr_len as u32, 109, 0);
             }
         }
         254 => { /* Local - accept any length */ }
         2 => { /* Chaos - accept any length (protocol-defined, uncommon) */ }
         _ => {
             // Unknown address family
-            return build_error(BAD_VALUE, state.sequence, family as u32, 109, 0);
+            return build_error(VALUE_ERROR, state.sequence, family as u32, 109, 0);
         }
     }
 
@@ -952,7 +952,7 @@ pub(crate) fn handle_set_close_down_mode(state: &mut ClientState, data: &[u8]) -
     let mode = data[1];
     // Per X11 spec: mode must be 0 (Destroy), 1 (RetainPermanent), or 2 (RetainTemporary).
     if mode > 2 {
-        return build_error(BAD_VALUE, state.sequence, mode as u32, 112, 0);
+        return build_error(VALUE_ERROR, state.sequence, mode as u32, 112, 0);
     }
     state.close_down_mode = mode;
     debug!("SetCloseDownMode: mode={mode}");
@@ -1054,7 +1054,7 @@ pub(crate) fn handle_rotate_properties(state: &mut ClientState, data: &[u8]) -> 
 
     let window = state.read_u32(data, 4);
     if !state.windows.contains_key(&window) {
-        return build_error(BAD_WINDOW, state.sequence, window, 114, 0);
+        return build_error(WINDOW_ERROR, state.sequence, window, 114, 0);
     }
 
     let n_atoms = state.read_u16(data, 8) as usize;
@@ -1081,7 +1081,7 @@ pub(crate) fn handle_rotate_properties(state: &mut ClientState, data: &[u8]) -> 
         let mut seen = std::collections::HashSet::with_capacity(atoms.len());
         for &atom in &atoms {
             if !seen.insert(atom) {
-                return build_error(BAD_MATCH, state.sequence, atom, 114, 0);
+                return build_error(MATCH_ERROR, state.sequence, atom, 114, 0);
             }
         }
     }

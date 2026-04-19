@@ -71,12 +71,12 @@ pub(crate) fn handle_create_gc(state: &mut ClientState, data: &[u8]) -> Vec<u8> 
 
     // Validate resource ID is within this client's allocated range
     if !state.validate_resource_id(gc_id) {
-        return build_error(BAD_ID_CHOICE, state.sequence, gc_id, 55, 0);
+        return build_error(ID_CHOICE_ERROR, state.sequence, gc_id, 55, 0);
     }
 
     // Enforce per-client GC resource limit
     if !state.can_create_gc() {
-        return build_error(BAD_ALLOC, state.sequence, gc_id, 55, 0);
+        return build_error(ALLOC_ERROR, state.sequence, gc_id, 55, 0);
     }
 
     let drawable = state.read_u32(data, 8);
@@ -85,19 +85,19 @@ pub(crate) fn handle_create_gc(state: &mut ClientState, data: &[u8]) -> Vec<u8> 
     // Per X11 spec, the drawable determines the root and depth for the GC.
     // It must be a valid window or pixmap.
     if !state.windows.contains_key(&drawable) && !state.pixmaps.contains_key(&drawable) {
-        return build_error(BAD_DRAWABLE, state.sequence, drawable, 55, 0);
+        return build_error(DRAWABLE_ERROR, state.sequence, drawable, 55, 0);
     }
 
     // Validate: ID must not already be in use
     if state.gcs.contains_key(&gc_id) {
-        return build_error(BAD_ID_CHOICE, state.sequence, gc_id, 55, 0);
+        return build_error(ID_CHOICE_ERROR, state.sequence, gc_id, 55, 0);
     }
 
     let mut gc = GcState::default();
     if let Some((_error_bit, bad_value)) =
         parse_gc_values(&mut gc, value_mask, &data[16..], state.msb_first)
     {
-        return build_error(BAD_VALUE, state.sequence, bad_value, 55, 0);
+        return build_error(VALUE_ERROR, state.sequence, bad_value, 55, 0);
     }
 
     // If clip_mask was set to a pixmap, resolve it to a bitmap and
@@ -136,14 +136,14 @@ pub(crate) fn handle_change_gc(state: &mut ClientState, data: &[u8]) -> Vec<u8> 
     let value_mask = state.read_u32(data, 8);
 
     if !state.gcs.contains_key(&gc_id) {
-        return build_error(BAD_GC, state.sequence, gc_id, 56, 0);
+        return build_error(G_CONTEXT_ERROR, state.sequence, gc_id, 56, 0);
     }
 
     if let Some(gc) = state.gcs.get_mut(&gc_id) {
         if let Some((_error_bit, bad_value)) =
             parse_gc_values(gc, value_mask, &data[12..], state.msb_first)
         {
-            return build_error(BAD_VALUE, state.sequence, bad_value, 56, 0);
+            return build_error(VALUE_ERROR, state.sequence, bad_value, 56, 0);
         }
     }
 
@@ -191,10 +191,10 @@ pub(crate) fn handle_copy_gc(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
     let value_mask = state.read_u32(data, 12);
 
     if !state.gcs.contains_key(&src_gc) {
-        return build_error(BAD_GC, state.sequence, src_gc, 57, 0);
+        return build_error(G_CONTEXT_ERROR, state.sequence, src_gc, 57, 0);
     }
     if !state.gcs.contains_key(&dst_gc) {
-        return build_error(BAD_GC, state.sequence, dst_gc, 57, 0);
+        return build_error(G_CONTEXT_ERROR, state.sequence, dst_gc, 57, 0);
     }
 
     let src = match state.gcs.get(&src_gc) {
@@ -295,21 +295,21 @@ pub(crate) fn handle_set_dashes(state: &mut ClientState, data: &[u8]) -> Vec<u8>
     let n_dashes = state.read_u16(data, 10) as usize;
 
     if !state.gcs.contains_key(&gc_id) {
-        return build_error(BAD_GC, state.sequence, gc_id, 58, 0);
+        return build_error(G_CONTEXT_ERROR, state.sequence, gc_id, 58, 0);
     }
 
     // Validate that the declared dash data fits within the request
     if 12 + n_dashes > data.len() {
-        return build_error(BAD_LENGTH, state.sequence, 0, 58, 0);
+        return build_error(LENGTH_ERROR, state.sequence, 0, 58, 0);
     }
 
     // Per X11 spec: n_dashes must be > 0 and each dash value must be non-zero.
     if n_dashes == 0 {
-        return build_error(BAD_VALUE, state.sequence, 0, 58, 0);
+        return build_error(VALUE_ERROR, state.sequence, 0, 58, 0);
     }
     let dash_data = &data[12..12 + n_dashes];
     if dash_data.contains(&0) {
-        return build_error(BAD_VALUE, state.sequence, 0, 58, 0);
+        return build_error(VALUE_ERROR, state.sequence, 0, 58, 0);
     }
 
     if let Some(gc) = state.gcs.get_mut(&gc_id) {
@@ -331,7 +331,7 @@ pub(crate) fn handle_set_clip_rectangles(state: &mut ClientState, data: &[u8]) -
     let gc_id = state.read_u32(data, 4);
 
     if !state.gcs.contains_key(&gc_id) {
-        return build_error(BAD_GC, state.sequence, gc_id, 59, 0);
+        return build_error(G_CONTEXT_ERROR, state.sequence, gc_id, 59, 0);
     }
 
     let clip_x = state.read_i16(data, 8);
@@ -370,7 +370,7 @@ pub(crate) fn handle_free_gc(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
     require_len!(data, 8, state.sequence, 60);
     let gc_id = state.read_u32(data, 4);
     if !state.gcs.contains_key(&gc_id) {
-        return build_error(BAD_GC, state.sequence, gc_id, 60, 0);
+        return build_error(G_CONTEXT_ERROR, state.sequence, gc_id, 60, 0);
     }
     state.gcs.remove(&gc_id);
     // Unregister from shared registry

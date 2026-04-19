@@ -51,26 +51,15 @@ pub(crate) const COLOURMAP_NOTIFY_EVENT: u8 = COLORMAP_NOTIFY_EVENT;
 // X11 event masks — re-exported directly from x11rb.
 pub(crate) use x11rb_protocol::protocol::xproto::EventMask;
 
-// X11 error codes
-pub(crate) const BAD_REQUEST: u8 = 1;
-pub(crate) const BAD_VALUE: u8 = 2;
-pub(crate) const BAD_WINDOW: u8 = 3;
-pub(crate) const BAD_PIXMAP: u8 = 4;
-pub(crate) const BAD_ATOM: u8 = 5;
-pub(crate) const BAD_CURSOR: u8 = 6;
-pub(crate) const BAD_FONT: u8 = 7;
-pub(crate) const BAD_MATCH: u8 = 8;
-pub(crate) const BAD_DRAWABLE: u8 = 9;
-pub(crate) const BAD_ACCESS: u8 = 10;
-pub(crate) const BAD_ALLOC: u8 = 11;
-pub(crate) const BAD_COLOR: u8 = 12;
-pub(crate) const BAD_GC: u8 = 13;
-pub(crate) const BAD_ID_CHOICE: u8 = 14;
-pub(crate) const BAD_NAME: u8 = 15;
-pub(crate) const BAD_LENGTH: u8 = 16;
-pub(crate) const BAD_IMPLEMENTATION: u8 = 17;
+// X11 error codes — re-exported from x11rb-protocol.
+pub(crate) use x11rb_protocol::protocol::xproto::{
+    REQUEST_ERROR, VALUE_ERROR, WINDOW_ERROR, PIXMAP_ERROR, ATOM_ERROR,
+    CURSOR_ERROR, FONT_ERROR, MATCH_ERROR, DRAWABLE_ERROR, ACCESS_ERROR,
+    ALLOC_ERROR, COLORMAP_ERROR, G_CONTEXT_ERROR, ID_CHOICE_ERROR,
+    NAME_ERROR, LENGTH_ERROR, IMPLEMENTATION_ERROR,
+};
 
-/// Validate minimum request length; returns early with a BAD_LENGTH error if too short.
+/// Validate minimum request length; returns early with a LENGTH_ERROR error if too short.
 ///
 /// Core handler usage:   `require_len!(data, 8, seq, opcode);`
 /// Extension handler:    `require_len!(data, 12, seq, ext_opcode, minor, state.msb_first);`
@@ -78,7 +67,7 @@ macro_rules! require_len {
     ($data:expr, $min:expr, $seq:expr, $major:expr) => {
         if $data.len() < $min {
             return $crate::xserver::core::build_error(
-                $crate::xserver::core::BAD_LENGTH,
+                $crate::xserver::core::LENGTH_ERROR,
                 $seq,
                 0,
                 $major,
@@ -89,7 +78,7 @@ macro_rules! require_len {
     ($data:expr, $min:expr, $seq:expr, $major:expr, $minor:expr, $msb:expr) => {
         if $data.len() < $min {
             return $crate::xserver::core::build_error_bo(
-                $crate::xserver::core::BAD_LENGTH,
+                $crate::xserver::core::LENGTH_ERROR,
                 $seq,
                 $data.len() as u32,
                 $major,
@@ -557,26 +546,26 @@ mod tests {
 
     #[test]
     fn build_error_length() {
-        let err = build_error(BAD_REQUEST, 1, 0, 1, 0);
+        let err = build_error(REQUEST_ERROR, 1, 0, 1, 0);
         assert_eq!(err.len(), 32, "error reply must be exactly 32 bytes");
     }
 
     #[test]
     fn build_error_byte0_is_zero() {
-        let err = build_error(BAD_WINDOW, 5, 42, 10, 3);
+        let err = build_error(WINDOW_ERROR, 5, 42, 10, 3);
         assert_eq!(err[0], 0, "byte 0 must be 0 (error indicator)");
     }
 
     #[test]
     fn build_error_byte1_is_error_code() {
-        let err = build_error(BAD_WINDOW, 5, 42, 10, 3);
-        assert_eq!(err[1], BAD_WINDOW, "byte 1 must be the error code");
+        let err = build_error(WINDOW_ERROR, 5, 42, 10, 3);
+        assert_eq!(err[1], WINDOW_ERROR, "byte 1 must be the error code");
     }
 
     #[test]
     fn build_error_seq_bytes_2_3_little_endian() {
         // seq = 0x1234; LE: bytes [2..4] = [0x34, 0x12]
-        let err = build_error(BAD_REQUEST, 0x1234, 0, 1, 0);
+        let err = build_error(REQUEST_ERROR, 0x1234, 0, 1, 0);
         assert_eq!(err[2], 0x34);
         assert_eq!(err[3], 0x12);
     }
@@ -584,27 +573,27 @@ mod tests {
     #[test]
     fn build_error_bad_value_bytes_4_7_little_endian() {
         // bad_value = 0xDEADBEEF; LE: bytes [4..8] = [0xEF, 0xBE, 0xAD, 0xDE]
-        let err = build_error(BAD_VALUE, 1, 0xDEADBEEF, 2, 0);
+        let err = build_error(VALUE_ERROR, 1, 0xDEADBEEF, 2, 0);
         assert_eq!(&err[4..8], &[0xEF, 0xBE, 0xAD, 0xDE]);
     }
 
     #[test]
     fn build_error_minor_opcode_bytes_8_9_little_endian() {
         // minor_opcode = 0x0102; LE: bytes [8..10] = [0x02, 0x01]
-        let err = build_error(BAD_REQUEST, 1, 0, 5, 0x0102);
+        let err = build_error(REQUEST_ERROR, 1, 0, 5, 0x0102);
         assert_eq!(err[8], 0x02);
         assert_eq!(err[9], 0x01);
     }
 
     #[test]
     fn build_error_major_opcode_byte10() {
-        let err = build_error(BAD_REQUEST, 1, 0, 42, 0);
+        let err = build_error(REQUEST_ERROR, 1, 0, 42, 0);
         assert_eq!(err[10], 42, "byte 10 must be the major opcode");
     }
 
     #[test]
     fn build_error_remaining_bytes_are_zero() {
-        let err = build_error(BAD_REQUEST, 1, 0, 1, 0);
+        let err = build_error(REQUEST_ERROR, 1, 0, 1, 0);
         for i in 11..32 {
             assert_eq!(err[i], 0, "padding byte {i} must be zero");
         }
@@ -612,9 +601,9 @@ mod tests {
 
     #[test]
     fn build_error_full_structure() {
-        let err = build_error(BAD_ATOM, 0xABCD, 0x11223344, 16, 7);
+        let err = build_error(ATOM_ERROR, 0xABCD, 0x11223344, 16, 7);
         assert_eq!(err[0], 0);
-        assert_eq!(err[1], BAD_ATOM);
+        assert_eq!(err[1], ATOM_ERROR);
         // seq 0xABCD LE
         assert_eq!(err[2], 0xCD);
         assert_eq!(err[3], 0xAB);
@@ -633,20 +622,20 @@ mod tests {
 
     #[test]
     fn build_error_bo_msb_length() {
-        let err = build_error_bo(BAD_REQUEST, 1, 0, 1, 0, true);
+        let err = build_error_bo(REQUEST_ERROR, 1, 0, 1, 0, true);
         assert_eq!(err.len(), 32);
     }
 
     #[test]
     fn build_error_bo_msb_byte0_zero() {
-        let err = build_error_bo(BAD_WINDOW, 5, 42, 10, 3, true);
+        let err = build_error_bo(WINDOW_ERROR, 5, 42, 10, 3, true);
         assert_eq!(err[0], 0);
     }
 
     #[test]
     fn build_error_bo_msb_seq_big_endian() {
         // seq = 0x1234; BE: bytes [2..4] = [0x12, 0x34]
-        let err = build_error_bo(BAD_REQUEST, 0x1234, 0, 1, 0, true);
+        let err = build_error_bo(REQUEST_ERROR, 0x1234, 0, 1, 0, true);
         assert_eq!(err[2], 0x12);
         assert_eq!(err[3], 0x34);
     }
@@ -654,21 +643,21 @@ mod tests {
     #[test]
     fn build_error_bo_msb_bad_value_big_endian() {
         // bad_value = 0x11223344; BE: bytes [4..8] = [0x11, 0x22, 0x33, 0x44]
-        let err = build_error_bo(BAD_VALUE, 1, 0x11223344, 2, 0, true);
+        let err = build_error_bo(VALUE_ERROR, 1, 0x11223344, 2, 0, true);
         assert_eq!(&err[4..8], &[0x11, 0x22, 0x33, 0x44]);
     }
 
     #[test]
     fn build_error_bo_msb_minor_opcode_big_endian() {
         // minor_opcode = 0x0102; BE: bytes [8..10] = [0x01, 0x02]
-        let err = build_error_bo(BAD_REQUEST, 1, 0, 5, 0x0102, true);
+        let err = build_error_bo(REQUEST_ERROR, 1, 0, 5, 0x0102, true);
         assert_eq!(err[8], 0x01);
         assert_eq!(err[9], 0x02);
     }
 
     #[test]
     fn build_error_bo_msb_major_opcode_byte10() {
-        let err = build_error_bo(BAD_REQUEST, 1, 0, 77, 0, true);
+        let err = build_error_bo(REQUEST_ERROR, 1, 0, 77, 0, true);
         assert_eq!(err[10], 77);
     }
 
@@ -679,23 +668,23 @@ mod tests {
     #[test]
     fn error_codes_are_unique_and_in_range() {
         let codes: &[u8] = &[
-            BAD_REQUEST,
-            BAD_VALUE,
-            BAD_WINDOW,
-            BAD_PIXMAP,
-            BAD_ATOM,
-            BAD_CURSOR,
-            BAD_FONT,
-            BAD_MATCH,
-            BAD_DRAWABLE,
-            BAD_ACCESS,
-            BAD_ALLOC,
-            BAD_COLOR,
-            BAD_GC,
-            BAD_ID_CHOICE,
-            BAD_NAME,
-            BAD_LENGTH,
-            BAD_IMPLEMENTATION,
+            REQUEST_ERROR,
+            VALUE_ERROR,
+            WINDOW_ERROR,
+            PIXMAP_ERROR,
+            ATOM_ERROR,
+            CURSOR_ERROR,
+            FONT_ERROR,
+            MATCH_ERROR,
+            DRAWABLE_ERROR,
+            ACCESS_ERROR,
+            ALLOC_ERROR,
+            COLORMAP_ERROR,
+            G_CONTEXT_ERROR,
+            ID_CHOICE_ERROR,
+            NAME_ERROR,
+            LENGTH_ERROR,
+            IMPLEMENTATION_ERROR,
         ];
         // All 17 codes
         assert_eq!(codes.len(), 17);
@@ -712,23 +701,23 @@ mod tests {
 
     #[test]
     fn error_codes_match_x11_spec_values() {
-        assert_eq!(BAD_REQUEST, 1);
-        assert_eq!(BAD_VALUE, 2);
-        assert_eq!(BAD_WINDOW, 3);
-        assert_eq!(BAD_PIXMAP, 4);
-        assert_eq!(BAD_ATOM, 5);
-        assert_eq!(BAD_CURSOR, 6);
-        assert_eq!(BAD_FONT, 7);
-        assert_eq!(BAD_MATCH, 8);
-        assert_eq!(BAD_DRAWABLE, 9);
-        assert_eq!(BAD_ACCESS, 10);
-        assert_eq!(BAD_ALLOC, 11);
-        assert_eq!(BAD_COLOR, 12);
-        assert_eq!(BAD_GC, 13);
-        assert_eq!(BAD_ID_CHOICE, 14);
-        assert_eq!(BAD_NAME, 15);
-        assert_eq!(BAD_LENGTH, 16);
-        assert_eq!(BAD_IMPLEMENTATION, 17);
+        assert_eq!(REQUEST_ERROR, 1);
+        assert_eq!(VALUE_ERROR, 2);
+        assert_eq!(WINDOW_ERROR, 3);
+        assert_eq!(PIXMAP_ERROR, 4);
+        assert_eq!(ATOM_ERROR, 5);
+        assert_eq!(CURSOR_ERROR, 6);
+        assert_eq!(FONT_ERROR, 7);
+        assert_eq!(MATCH_ERROR, 8);
+        assert_eq!(DRAWABLE_ERROR, 9);
+        assert_eq!(ACCESS_ERROR, 10);
+        assert_eq!(ALLOC_ERROR, 11);
+        assert_eq!(COLORMAP_ERROR, 12);
+        assert_eq!(G_CONTEXT_ERROR, 13);
+        assert_eq!(ID_CHOICE_ERROR, 14);
+        assert_eq!(NAME_ERROR, 15);
+        assert_eq!(LENGTH_ERROR, 16);
+        assert_eq!(IMPLEMENTATION_ERROR, 17);
     }
 
     // -----------------------------------------------------------------------
@@ -793,10 +782,10 @@ mod tests {
 
     #[test]
     fn build_error_format() {
-        let err = build_error(BAD_WINDOW, 42, 0x12345678, 12, 0);
+        let err = build_error(WINDOW_ERROR, 42, 0x12345678, 12, 0);
         assert_eq!(err.len(), 32);
         assert_eq!(err[0], 0); // Error indicator
-        assert_eq!(err[1], BAD_WINDOW); // Error code
+        assert_eq!(err[1], WINDOW_ERROR); // Error code
         assert_eq!(u16::from_le_bytes([err[2], err[3]]), 42); // Sequence
         assert_eq!(
             u32::from_le_bytes([err[4], err[5], err[6], err[7]]),
@@ -807,18 +796,18 @@ mod tests {
 
     #[test]
     fn build_error_bad_length() {
-        let err = build_error(BAD_LENGTH, 100, 0, 28, 0);
-        assert_eq!(err[1], BAD_LENGTH);
+        let err = build_error(LENGTH_ERROR, 100, 0, 28, 0);
+        assert_eq!(err[1], LENGTH_ERROR);
         assert_eq!(u16::from_le_bytes([err[2], err[3]]), 100);
         assert_eq!(err[10], 28);
     }
 
     #[test]
     fn build_error_bo_big_endian() {
-        let err = build_error_bo(BAD_VALUE, 0x1234, 0xDEADBEEF, 33, 0, true);
+        let err = build_error_bo(VALUE_ERROR, 0x1234, 0xDEADBEEF, 33, 0, true);
         assert_eq!(err.len(), 32);
         assert_eq!(err[0], 0); // Error indicator
-        assert_eq!(err[1], BAD_VALUE);
+        assert_eq!(err[1], VALUE_ERROR);
         assert_eq!(u16::from_be_bytes([err[2], err[3]]), 0x1234); // Sequence (big-endian)
         assert_eq!(
             u32::from_be_bytes([err[4], err[5], err[6], err[7]]),

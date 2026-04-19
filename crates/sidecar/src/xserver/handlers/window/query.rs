@@ -35,7 +35,7 @@ pub(crate) fn handle_get_geometry(state: &mut ClientState, data: &[u8], seq: u16
     }
 
     // Drawable not found - return BadDrawable error
-    build_error(BAD_DRAWABLE, seq, drawable, 14, 0)
+    build_error(DRAWABLE_ERROR, seq, drawable, 14, 0)
 }
 
 // ---------------------------------------------------------------------------
@@ -47,7 +47,7 @@ pub(crate) fn handle_query_tree(state: &mut ClientState, data: &[u8], seq: u16) 
     let wid = state.read_u32(data, 4);
 
     if !state.windows.contains_key(&wid) {
-        return build_error(BAD_WINDOW, seq, wid, 15, 0);
+        return build_error(WINDOW_ERROR, seq, wid, 15, 0);
     }
 
     // Return children in bottom-to-top stacking order per X11 spec.

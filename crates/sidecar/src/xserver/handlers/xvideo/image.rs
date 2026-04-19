@@ -950,7 +950,7 @@ pub(crate) fn handle_image_request(
             };
             debug!("XVideo PutVideo: port={port} — returning BadMatch (capture not supported)");
             crate::xserver::core::build_error_bo(
-                crate::xserver::core::BAD_MATCH,
+                crate::xserver::core::MATCH_ERROR,
                 seq,
                 port,
                 156,
@@ -968,7 +968,7 @@ pub(crate) fn handle_image_request(
             };
             debug!("XVideo PutStill: port={port} — returning BadMatch (capture not supported)");
             crate::xserver::core::build_error_bo(
-                crate::xserver::core::BAD_MATCH,
+                crate::xserver::core::MATCH_ERROR,
                 seq,
                 port,
                 156,
@@ -986,7 +986,7 @@ pub(crate) fn handle_image_request(
             };
             debug!("XVideo GetVideo: port={port} — returning BadMatch (capture not supported)");
             crate::xserver::core::build_error_bo(
-                crate::xserver::core::BAD_MATCH,
+                crate::xserver::core::MATCH_ERROR,
                 seq,
                 port,
                 156,
@@ -1019,7 +1019,7 @@ pub(crate) fn handle_image_request(
             // Validate the drawable exists (window or pixmap).
             if !state.windows.contains_key(&drawable) && !state.pixmaps.contains_key(&drawable) {
                 return crate::xserver::core::build_error_bo(
-                    crate::xserver::core::BAD_DRAWABLE,
+                    crate::xserver::core::DRAWABLE_ERROR,
                     seq,
                     drawable,
                     156,
@@ -1031,7 +1031,7 @@ pub(crate) fn handle_image_request(
             // Validate the GC exists.
             if !state.gcs.contains_key(&gc_id) {
                 return crate::xserver::core::build_error_bo(
-                    crate::xserver::core::BAD_GC,
+                    crate::xserver::core::G_CONTEXT_ERROR,
                     seq,
                     gc_id,
                     156,
@@ -1317,7 +1317,7 @@ pub(crate) fn handle_image_request(
         _ => {
             debug!("XVideo image: unhandled minor opcode {minor}");
             crate::xserver::core::build_error_bo(
-                crate::xserver::core::BAD_REQUEST,
+                crate::xserver::core::REQUEST_ERROR,
                 seq,
                 minor as u32,
                 156,

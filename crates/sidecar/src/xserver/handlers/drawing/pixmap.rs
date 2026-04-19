@@ -15,12 +15,12 @@ pub(crate) fn handle_create_pixmap(state: &mut ClientState, data: &[u8]) -> Vec<
 
     // Validate resource ID is within this client's allocated range
     if !state.validate_resource_id(pid) {
-        return build_error(BAD_ID_CHOICE, state.sequence, pid, 53, 0);
+        return build_error(ID_CHOICE_ERROR, state.sequence, pid, 53, 0);
     }
 
     // Enforce per-client pixmap resource limit
     if !state.can_create_pixmap() {
-        return build_error(BAD_ALLOC, state.sequence, pid, 53, 0);
+        return build_error(ALLOC_ERROR, state.sequence, pid, 53, 0);
     }
 
     let _drawable = state.read_u32(data, 8);
@@ -29,20 +29,20 @@ pub(crate) fn handle_create_pixmap(state: &mut ClientState, data: &[u8]) -> Vec<
 
     // Validate: width and height must be non-zero and within bounds
     if width == 0 || height == 0 {
-        return build_error(BAD_VALUE, state.sequence, 0, 53, 0);
+        return build_error(VALUE_ERROR, state.sequence, 0, 53, 0);
     }
     if width > 32767 || height > 32767 {
-        return build_error(BAD_VALUE, state.sequence, width as u32, 53, 0);
+        return build_error(VALUE_ERROR, state.sequence, width as u32, 53, 0);
     }
     // Validate: depth must match one of the supported pixmap formats.
     // Per X11 spec, the server advertises supported depths in the Setup reply.
     // We support: 1 (bitmap), 4, 8 (PseudoColor), 16 (HighColor), 24, 32 (TrueColor).
     if !matches!(depth, 1 | 4 | 8 | 16 | 24 | 32) {
-        return build_error(BAD_VALUE, state.sequence, depth as u32, 53, 0);
+        return build_error(VALUE_ERROR, state.sequence, depth as u32, 53, 0);
     }
     // Validate: ID must not already be in use
     if state.pixmaps.contains_key(&pid) || state.windows.contains_key(&pid) {
-        return build_error(BAD_ID_CHOICE, state.sequence, pid, 53, 0);
+        return build_error(ID_CHOICE_ERROR, state.sequence, pid, 53, 0);
     }
 
     info!(
@@ -76,7 +76,7 @@ pub(crate) fn handle_free_pixmap(state: &mut ClientState, data: &[u8]) -> Vec<u8
     require_len!(data, 8, state.sequence, 54);
     let pid = state.read_u32(data, 4);
     if !state.pixmaps.contains_key(&pid) {
-        return build_error(BAD_PIXMAP, state.sequence, pid, 54, 0);
+        return build_error(PIXMAP_ERROR, state.sequence, pid, 54, 0);
     }
     state.pixmaps.remove(&pid);
     // Unregister from shared registry

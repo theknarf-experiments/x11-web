@@ -259,7 +259,7 @@ pub(crate) fn handle_vidmode_request(state: &mut ClientState, data: &[u8], seq: 
             let needed = ramp_start + padded * 3;
             if data.len() < needed || size == 0 {
                 return crate::xserver::core::build_error_bo(
-                    crate::xserver::core::BAD_LENGTH,
+                    crate::xserver::core::LENGTH_ERROR,
                     seq,
                     0,
                     153,
@@ -503,7 +503,7 @@ pub(crate) fn handle_vidmode_request(state: &mut ClientState, data: &[u8], seq: 
                 .build()
         }
         _ => crate::xserver::core::build_error_bo(
-            crate::xserver::core::BAD_REQUEST,
+            crate::xserver::core::REQUEST_ERROR,
             seq,
             0,
             153,

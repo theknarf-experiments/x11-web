@@ -23,17 +23,17 @@ pub(crate) fn handle_reparent_window(state: &mut ClientState, data: &[u8], seq: 
     let y = state.read_i16(data, 14);
 
     if !state.windows.contains_key(&window) {
-        return build_error(BAD_WINDOW, state.sequence, window, 7, 0);
+        return build_error(WINDOW_ERROR, state.sequence, window, 7, 0);
     }
     if !state.windows.contains_key(&new_parent) {
-        return build_error(BAD_WINDOW, state.sequence, new_parent, 7, 0);
+        return build_error(WINDOW_ERROR, state.sequence, new_parent, 7, 0);
     }
 
     // Per X11 spec: it is a BadMatch error to reparent a window to itself
     // or to one of its own descendants (would create a circular tree).
     if window == new_parent || crate::xserver::is_descendant_of(&state.windows, new_parent, window)
     {
-        return build_error(BAD_MATCH, state.sequence, window, 7, 0);
+        return build_error(MATCH_ERROR, state.sequence, window, 7, 0);
     }
 
     let bo = state.msb_first;
@@ -190,7 +190,7 @@ pub(crate) fn handle_configure_window(state: &mut ClientState, data: &[u8], seq:
 
     // Validate window exists.
     if wid != state.root_window && !state.windows.contains_key(&wid) {
-        return build_error(BAD_WINDOW, seq, wid, 12, 0);
+        return build_error(WINDOW_ERROR, seq, wid, 12, 0);
     }
 
     // Validate value-list length matches the bitmask
@@ -418,7 +418,7 @@ pub(crate) fn handle_configure_window(state: &mut ClientState, data: &[u8], seq:
                     2 => {
                         // Per X11 spec: width must be non-zero
                         if val == 0 {
-                            return build_error(BAD_VALUE, seq, 0, 12, 0);
+                            return build_error(VALUE_ERROR, seq, 0, 12, 0);
                         }
                         let mut w = val as u16;
                         // Apply size hints (ICCCM §4.1.2.3)
@@ -450,7 +450,7 @@ pub(crate) fn handle_configure_window(state: &mut ClientState, data: &[u8], seq:
                     3 => {
                         // Per X11 spec: height must be non-zero
                         if val == 0 {
-                            return build_error(BAD_VALUE, seq, 0, 12, 0);
+                            return build_error(VALUE_ERROR, seq, 0, 12, 0);
                         }
                         let mut h = val as u16;
                         // Apply size hints (ICCCM §4.1.2.3)
@@ -486,7 +486,7 @@ pub(crate) fn handle_configure_window(state: &mut ClientState, data: &[u8], seq:
                     6 => {
                         // Per X11 spec: valid stack modes are 0-4
                         if val > 4 {
-                            return build_error(BAD_VALUE, seq, val, 12, 0);
+                            return build_error(VALUE_ERROR, seq, val, 12, 0);
                         }
                         stack_mode = Some(val as u8);
                     }
@@ -649,7 +649,7 @@ pub(crate) fn handle_configure_window(state: &mut ClientState, data: &[u8], seq:
                     .map(|s| s.parent == pid)
                     .unwrap_or(false);
                 if !sibling_is_sibling {
-                    return build_error(BAD_MATCH, seq, 0, 12, 0);
+                    return build_error(MATCH_ERROR, seq, 0, 12, 0);
                 }
             }
         }
@@ -1129,7 +1129,7 @@ pub(crate) fn handle_circulate_window(state: &mut ClientState, data: &[u8], seq:
     let window = state.read_u32(data, 4);
 
     if !state.windows.contains_key(&window) {
-        return build_error_bo(BAD_WINDOW, seq, window, 13, 0, state.msb_first);
+        return build_error_bo(WINDOW_ERROR, seq, window, 13, 0, state.msb_first);
     }
 
     // Get the parent's children_order to find the target child

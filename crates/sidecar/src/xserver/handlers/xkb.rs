@@ -253,7 +253,7 @@ pub(crate) fn handle_ge_request(state: &mut ClientState, data: &[u8], seq: u16) 
         _ => {
             debug!("Unhandled GE minor opcode: {minor}");
             crate::xserver::core::build_error_bo(
-                crate::xserver::core::BAD_REQUEST,
+                crate::xserver::core::REQUEST_ERROR,
                 seq,
                 minor as u32,
                 135,
@@ -380,7 +380,7 @@ pub(crate) fn handle_xkb_request(state: &mut ClientState, data: &[u8], seq: u16)
         _ => {
             debug!("Unhandled XKB minor opcode: {minor}");
             crate::xserver::core::build_error_bo(
-                crate::xserver::core::BAD_REQUEST,
+                crate::xserver::core::REQUEST_ERROR,
                 seq,
                 minor as u32,
                 136,

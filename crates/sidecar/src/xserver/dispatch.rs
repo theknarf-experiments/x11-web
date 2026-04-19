@@ -37,7 +37,7 @@ pub(super) fn handle_request(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
                 info.wire_name
             );
             build_error_bo(
-                BAD_REQUEST,
+                REQUEST_ERROR,
                 seq,
                 major_opcode as u32,
                 major_opcode,
@@ -49,7 +49,7 @@ pub(super) fn handle_request(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
         None => {
             warn!("Unhandled X11 request opcode: {major_opcode} minor: {_minor}");
             build_error_bo(
-                BAD_REQUEST,
+                REQUEST_ERROR,
                 seq,
                 major_opcode as u32,
                 major_opcode,
@@ -170,7 +170,7 @@ fn dispatch_extension(state: &mut ClientState, data: &[u8], seq: u16, id: Extens
         _ => {
             warn!("Extension {:?} compiled out", id);
             build_error_bo(
-                BAD_REQUEST,
+                REQUEST_ERROR,
                 seq,
                 data[0] as u32,
                 data[0],

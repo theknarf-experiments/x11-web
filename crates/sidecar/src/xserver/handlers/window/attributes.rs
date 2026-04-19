@@ -20,7 +20,7 @@ pub(crate) fn handle_change_window_attributes(state: &mut ClientState, data: &[u
     require_len!(data, required_len, state.sequence, 2);
 
     if !state.windows.contains_key(&wid) {
-        return build_error(BAD_WINDOW, state.sequence, wid, 2, 0);
+        return build_error(WINDOW_ERROR, state.sequence, wid, 2, 0);
     }
 
     // Pre-validate enumerated attributes before mutating state
@@ -31,9 +31,9 @@ pub(crate) fn handle_change_window_attributes(state: &mut ClientState, data: &[u
             if value_mask & (1 << bit) != 0 && voff + 4 <= data.len() {
                 let val = read_u32_bo(data, voff, msb_first);
                 match bit {
-                    4 if val > 10 => return build_error(BAD_VALUE, state.sequence, val, 2, 0),
-                    5 if val > 10 => return build_error(BAD_VALUE, state.sequence, val, 2, 0),
-                    6 if val > 2 => return build_error(BAD_VALUE, state.sequence, val, 2, 0),
+                    4 if val > 10 => return build_error(VALUE_ERROR, state.sequence, val, 2, 0),
+                    5 if val > 10 => return build_error(VALUE_ERROR, state.sequence, val, 2, 0),
+                    6 if val > 2 => return build_error(VALUE_ERROR, state.sequence, val, 2, 0),
                     // bit 11 = event-mask: check SubstructureRedirect/ResizeRedirect
                     // mutual exclusion per X11 spec Section 12.3
                     11 => {
@@ -42,13 +42,13 @@ pub(crate) fn handle_change_window_attributes(state: &mut ClientState, data: &[u
                             val,
                             &state.client_id,
                         ) {
-                            return build_error(BAD_ACCESS, state.sequence, 0, 2, 0);
+                            return build_error(ACCESS_ERROR, state.sequence, 0, 2, 0);
                         }
                     }
                     // bit 14 = cursor: validate cursor ID exists
                     14 if val != 0 => {
                         if !state.cursors.contains_key(&val) {
-                            return build_error(BAD_CURSOR, state.sequence, val, 2, 0);
+                            return build_error(CURSOR_ERROR, state.sequence, val, 2, 0);
                         }
                     }
                     _ => {}
@@ -186,7 +186,7 @@ pub(crate) fn handle_get_window_attributes(
 
     let win = match state.windows.get(&wid) {
         Some(w) => w,
-        None => return build_error(BAD_WINDOW, seq, wid, 3, 0),
+        None => return build_error(WINDOW_ERROR, seq, wid, 3, 0),
     };
 
     let bit_gravity = state.bit_gravity.get(&wid).copied().unwrap_or(0);
@@ -231,12 +231,12 @@ pub(crate) fn handle_change_save_set(state: &mut ClientState, data: &[u8]) -> Ve
 
     // Per X11 spec, validate the window exists (cannot add root window to save set)
     if !state.windows.contains_key(&window) || window == state.root_window {
-        return build_error(BAD_WINDOW, state.sequence, window, 6, 0);
+        return build_error(WINDOW_ERROR, state.sequence, window, 6, 0);
     }
 
     // Per X11 spec, mode must be 0 (Insert) or 1 (Delete)
     if mode > 1 {
-        return build_error(BAD_VALUE, state.sequence, mode as u32, 6, 0);
+        return build_error(VALUE_ERROR, state.sequence, mode as u32, 6, 0);
     }
 
     match mode {

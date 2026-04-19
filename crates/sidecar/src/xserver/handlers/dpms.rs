@@ -63,7 +63,7 @@ pub(crate) fn handle_dpms_request(state: &mut ClientState, data: &[u8], seq: u16
             // Per DPMS spec: level must be 0-3 (On, Standby, Suspend, Off)
             if level > 3 {
                 return crate::xserver::core::build_error_bo(
-                    crate::xserver::core::BAD_VALUE,
+                    crate::xserver::core::VALUE_ERROR,
                     seq,
                     level as u32,
                     151,
@@ -75,7 +75,7 @@ pub(crate) fn handle_dpms_request(state: &mut ClientState, data: &[u8], seq: u16
             // and the requested level is not DPMSModeOn (0)
             if !state.dpms_enabled && level != 0 {
                 return crate::xserver::core::build_error_bo(
-                    crate::xserver::core::BAD_VALUE,
+                    crate::xserver::core::VALUE_ERROR,
                     seq,
                     level as u32,
                     151,
@@ -97,7 +97,7 @@ pub(crate) fn handle_dpms_request(state: &mut ClientState, data: &[u8], seq: u16
         _ => {
             debug!("DPMS: unhandled minor opcode {minor}");
             crate::xserver::core::build_error_bo(
-                crate::xserver::core::BAD_REQUEST,
+                crate::xserver::core::REQUEST_ERROR,
                 seq,
                 minor as u32,
                 151,

@@ -4,7 +4,7 @@
 use tracing::{debug, warn};
 
 use super::super::super::client::ClientState;
-use super::super::super::core::{BAD_MATCH, BAD_VALUE};
+use super::super::super::core::{MATCH_ERROR, VALUE_ERROR};
 use super::{check_pending_fence_awaits_ext, FenceState, PendingFenceAwait};
 use crate::xserver::core::require_len;
 use crate::xserver::reply::ReplyBuf;
@@ -56,7 +56,7 @@ pub(crate) fn reset_fence(state: &mut ClientState, data: &[u8], seq: u16) -> Vec
         if let Some(fence) = state.sync_state.fences.get_mut(&fence_id) {
             if !fence.triggered {
                 return super::super::super::core::build_error_bo(
-                    BAD_MATCH,
+                    MATCH_ERROR,
                     seq,
                     fence_id,
                     134,
@@ -67,7 +67,7 @@ pub(crate) fn reset_fence(state: &mut ClientState, data: &[u8], seq: u16) -> Vec
             fence.triggered = false;
         } else {
             return super::super::super::core::build_error_bo(
-                BAD_VALUE,
+                VALUE_ERROR,
                 seq,
                 fence_id,
                 134,

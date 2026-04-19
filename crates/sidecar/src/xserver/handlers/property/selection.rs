@@ -21,7 +21,7 @@ pub(crate) fn handle_set_selection_owner(state: &mut ClientState, data: &[u8]) -
 
         // Validate selection atom
         if selection != 0 && state.get_atom_name(selection).is_none() {
-            return build_error(BAD_ATOM, state.sequence, selection, 22, 0);
+            return build_error(ATOM_ERROR, state.sequence, selection, 22, 0);
         }
 
         // Check if there was a previous owner (local or cross-connection).
@@ -171,10 +171,10 @@ pub(crate) fn handle_convert_selection(state: &mut ClientState, data: &[u8], _se
 
         // Validate selection and target atoms
         if selection != 0 && state.get_atom_name(selection).is_none() {
-            return build_error(BAD_ATOM, _seq, selection, 24, 0);
+            return build_error(ATOM_ERROR, _seq, selection, 24, 0);
         }
         if target != 0 && state.get_atom_name(target).is_none() {
-            return build_error(BAD_ATOM, _seq, target, 24, 0);
+            return build_error(ATOM_ERROR, _seq, target, 24, 0);
         }
 
         // Use property = target if property is None (per ICCCM convention).

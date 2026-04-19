@@ -17,7 +17,7 @@ pub(crate) fn handle_create_pointer_barrier(
         // Per XFIXES spec: validate window exists
         if window != state.root_window && !state.windows.contains_key(&window) {
             return crate::xserver::core::build_error(
-                crate::xserver::core::BAD_WINDOW,
+                crate::xserver::core::WINDOW_ERROR,
                 _seq,
                 window,
                 138,

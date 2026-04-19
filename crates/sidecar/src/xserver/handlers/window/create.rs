@@ -14,12 +14,12 @@ pub(crate) fn handle_create_window(state: &mut ClientState, data: &[u8], _seq: u
 
     // Validate resource ID is within this client's allocated range
     if !state.validate_resource_id(wid) {
-        return build_error(BAD_ID_CHOICE, _seq, wid, 1, 0);
+        return build_error(ID_CHOICE_ERROR, _seq, wid, 1, 0);
     }
 
     // Enforce per-client window resource limit
     if !state.can_create_window() {
-        return build_error(BAD_ALLOC, _seq, wid, 1, 0);
+        return build_error(ALLOC_ERROR, _seq, wid, 1, 0);
     }
 
     let parent = state.read_u32(data, 8);
@@ -49,7 +49,7 @@ pub(crate) fn handle_create_window(state: &mut ClientState, data: &[u8], _seq: u
             .ok()
             .is_some_and(|s| s.contains_key(&parent));
         if !parent_exists {
-            return build_error(BAD_WINDOW, _seq, parent, 1, 0);
+            return build_error(WINDOW_ERROR, _seq, parent, 1, 0);
         }
     }
 
@@ -62,7 +62,7 @@ pub(crate) fn handle_create_window(state: &mut ClientState, data: &[u8], _seq: u
     // Zero-size windows are rejected with BadValue.
     if width == 0 || height == 0 || width > 32767 || height > 32767 {
         return build_error(
-            BAD_VALUE,
+            VALUE_ERROR,
             _seq,
             if width == 0 { 0 } else { width as u32 },
             1,
@@ -77,7 +77,7 @@ pub(crate) fn handle_create_window(state: &mut ClientState, data: &[u8], _seq: u
         let use_visual = if visual == 0 { ROOT_VISUAL } else { visual };
         let visual_depth = crate::xserver::core::depth_for_visual(use_visual);
         if req_depth != visual_depth {
-            return build_error(BAD_MATCH, _seq, 0, 1, 0);
+            return build_error(MATCH_ERROR, _seq, 0, 1, 0);
         }
     }
 
@@ -115,19 +115,19 @@ pub(crate) fn handle_create_window(state: &mut ClientState, data: &[u8], _seq: u
                 3 => border_pixel = val,
                 4 => {
                     if val > 10 {
-                        return build_error(BAD_VALUE, _seq, val, 1, 0);
+                        return build_error(VALUE_ERROR, _seq, val, 1, 0);
                     }
                     bit_gravity = val as u8;
                 }
                 5 => {
                     if val > 10 {
-                        return build_error(BAD_VALUE, _seq, val, 1, 0);
+                        return build_error(VALUE_ERROR, _seq, val, 1, 0);
                     }
                     win_gravity = val as u8;
                 }
                 6 => {
                     if val > 2 {
-                        return build_error(BAD_VALUE, _seq, val, 1, 0);
+                        return build_error(VALUE_ERROR, _seq, val, 1, 0);
                     }
                     backing_store = val as u8;
                 }
@@ -142,7 +142,7 @@ pub(crate) fn handle_create_window(state: &mut ClientState, data: &[u8], _seq: u
                     if val != 0 {
                         // Validate cursor ID exists
                         if !state.cursors.contains_key(&val) {
-                            return build_error(BAD_CURSOR, _seq, val, 1, 0);
+                            return build_error(CURSOR_ERROR, _seq, val, 1, 0);
                         }
                         cursor_id = Some(val);
                     }
@@ -162,7 +162,7 @@ pub(crate) fn handle_create_window(state: &mut ClientState, data: &[u8], _seq: u
                 .event_broadcaster
                 .check_redirect_conflict(parent, event_mask, &state.client_id)
         {
-            return build_error(BAD_ACCESS, _seq, 0, 1, 0);
+            return build_error(ACCESS_ERROR, _seq, 0, 1, 0);
         }
         // Also check on the new window itself (no other client can have selected
         // the redirect masks on wid yet since wid is brand-new, but validate
@@ -354,7 +354,7 @@ pub(crate) fn handle_destroy_window(state: &mut ClientState, data: &[u8]) -> Vec
     let wid = state.read_u32(data, 4);
 
     if !state.windows.contains_key(&wid) {
-        return build_error(BAD_WINDOW, state.sequence, wid, 4, 0);
+        return build_error(WINDOW_ERROR, state.sequence, wid, 4, 0);
     }
 
     // Check if window had struts (for workarea recalculation after removal)
@@ -518,7 +518,7 @@ pub(crate) fn handle_destroy_subwindows(state: &mut ClientState, data: &[u8]) ->
     let parent = state.read_u32(data, 4);
 
     if !state.windows.contains_key(&parent) {
-        return build_error(BAD_WINDOW, state.sequence, parent, 5, 0);
+        return build_error(WINDOW_ERROR, state.sequence, parent, 5, 0);
     }
 
     // Collect all direct children first

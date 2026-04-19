@@ -23,15 +23,15 @@ pub(crate) fn handle_change_property(state: &mut ClientState, data: &[u8]) -> Ve
 
     // Validate property and type atoms exist
     if property_atom != 0 && state.get_atom_name(property_atom).is_none() {
-        return build_error(BAD_ATOM, state.sequence, property_atom, 18, 0);
+        return build_error(ATOM_ERROR, state.sequence, property_atom, 18, 0);
     }
     if prop_type != 0 && state.get_atom_name(prop_type).is_none() {
-        return build_error(BAD_ATOM, state.sequence, prop_type, 18, 0);
+        return build_error(ATOM_ERROR, state.sequence, prop_type, 18, 0);
     }
 
     // Validate format is one of the legal values
     if !matches!(format, 8 | 16 | 32) {
-        return build_error(BAD_VALUE, state.sequence, format as u32, 18, 0);
+        return build_error(VALUE_ERROR, state.sequence, format as u32, 18, 0);
     }
 
     // Calculate actual byte length based on format
@@ -47,7 +47,7 @@ pub(crate) fn handle_change_property(state: &mut ClientState, data: &[u8]) -> Ve
 
     // Validate window exists
     if !state.windows.contains_key(&window) {
-        return build_error(BAD_WINDOW, state.sequence, window, 18, 0);
+        return build_error(WINDOW_ERROR, state.sequence, window, 18, 0);
     }
 
     // Store the property value, honoring Replace/Prepend/Append modes
@@ -451,12 +451,12 @@ pub(crate) fn handle_delete_property(state: &mut ClientState, data: &[u8]) -> Ve
                 .ok()
                 .is_some_and(|s| s.contains_key(&window));
         if !window_exists {
-            return build_error(BAD_WINDOW, state.sequence, window, 19, 0);
+            return build_error(WINDOW_ERROR, state.sequence, window, 19, 0);
         }
         let property = state.read_u32(data, 8);
         // Validate property atom
         if property != 0 && state.get_atom_name(property).is_none() {
-            return build_error(BAD_ATOM, state.sequence, property, 19, 0);
+            return build_error(ATOM_ERROR, state.sequence, property, 19, 0);
         }
         if let Some(win) = state.windows.get_mut(&window) {
             win.properties.remove(&property);
@@ -511,7 +511,7 @@ pub(crate) fn handle_get_property(state: &mut ClientState, data: &[u8], seq: u16
 
     // Validate property atom
     if property_atom != 0 && state.get_atom_name(property_atom).is_none() {
-        return build_error(BAD_ATOM, seq, property_atom, 20, 0);
+        return build_error(ATOM_ERROR, seq, property_atom, 20, 0);
     }
 
     // Validate window exists (local or shared)
@@ -522,7 +522,7 @@ pub(crate) fn handle_get_property(state: &mut ClientState, data: &[u8], seq: u16
             .ok()
             .is_some_and(|s| s.contains_key(&window));
     if !window_exists {
-        return build_error(BAD_WINDOW, seq, window, 20, 0);
+        return build_error(WINDOW_ERROR, seq, window, 20, 0);
     }
 
     // Check local copy first, then shared store for cross-client access.
@@ -620,7 +620,7 @@ pub(crate) fn handle_list_properties(state: &ClientState, data: &[u8], seq: u16)
             .ok()
             .is_some_and(|s| s.contains_key(&window));
     if !window_exists {
-        return build_error(BAD_WINDOW, seq, window, 21, 0);
+        return build_error(WINDOW_ERROR, seq, window, 21, 0);
     }
 
     // Merge atoms from local and shared window stores.

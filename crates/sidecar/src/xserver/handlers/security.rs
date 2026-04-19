@@ -97,7 +97,7 @@ use crate::xserver::reply::ReplyBuf;
                 reply.build()
             } else {
                 crate::xserver::core::build_error_bo(
-                    crate::xserver::core::BAD_LENGTH,
+                    crate::xserver::core::LENGTH_ERROR,
                     seq,
                     0,
                     155,
@@ -122,7 +122,7 @@ use crate::xserver::reply::ReplyBuf;
         _ => {
             debug!("SECURITY: unhandled minor opcode {minor}");
             crate::xserver::core::build_error_bo(
-                crate::xserver::core::BAD_REQUEST,
+                crate::xserver::core::REQUEST_ERROR,
                 seq,
                 minor as u32,
                 155,

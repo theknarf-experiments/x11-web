@@ -18,11 +18,11 @@ pub(crate) fn handle_clear_area(state: &mut ClientState, data: &[u8], _seq: u16)
     let wid = state.read_u32(data, 4);
 
     if !state.windows.contains_key(&wid) {
-        return build_error(BAD_WINDOW, state.sequence, wid, 61, 0);
+        return build_error(WINDOW_ERROR, state.sequence, wid, 61, 0);
     }
     // Per X11 spec: ClearArea on an InputOnly window generates BadMatch.
     if state.windows.get(&wid).is_some_and(|w| w.class == 2) {
-        return build_error(BAD_MATCH, state.sequence, wid, 61, 0);
+        return build_error(MATCH_ERROR, state.sequence, wid, 61, 0);
     }
 
     let x = state.read_i16(data, 8);
@@ -95,13 +95,13 @@ pub(crate) fn handle_copy_area(state: &mut ClientState, data: &[u8]) -> Vec<u8> 
     let has_src = state.windows.contains_key(&src) || state.pixmaps.contains_key(&src);
     let has_dst = state.windows.contains_key(&dst) || state.pixmaps.contains_key(&dst);
     if !has_src {
-        return build_error(BAD_DRAWABLE, state.sequence, src, 62, 0);
+        return build_error(DRAWABLE_ERROR, state.sequence, src, 62, 0);
     }
     if !has_dst {
-        return build_error(BAD_DRAWABLE, state.sequence, dst, 62, 0);
+        return build_error(DRAWABLE_ERROR, state.sequence, dst, 62, 0);
     }
     if !state.gcs.contains_key(&gc_id) {
-        return build_error(BAD_GC, state.sequence, gc_id, 62, 0);
+        return build_error(G_CONTEXT_ERROR, state.sequence, gc_id, 62, 0);
     }
 
     let gc = state.gcs.get(&gc_id).cloned().unwrap_or_default();
@@ -282,20 +282,20 @@ pub(crate) fn handle_copy_plane(state: &mut ClientState, data: &[u8]) -> Vec<u8>
 
     // Validate: bit_plane must have exactly one bit set
     if bit_plane == 0 || (bit_plane & (bit_plane - 1)) != 0 {
-        return build_error(BAD_VALUE, state.sequence, bit_plane, 63, 0);
+        return build_error(VALUE_ERROR, state.sequence, bit_plane, 63, 0);
     }
 
     // Validate resources
     let has_src = state.windows.contains_key(&src) || state.pixmaps.contains_key(&src);
     let has_dst = state.windows.contains_key(&dst) || state.pixmaps.contains_key(&dst);
     if !has_src {
-        return build_error(BAD_DRAWABLE, state.sequence, src, 63, 0);
+        return build_error(DRAWABLE_ERROR, state.sequence, src, 63, 0);
     }
     if !has_dst {
-        return build_error(BAD_DRAWABLE, state.sequence, dst, 63, 0);
+        return build_error(DRAWABLE_ERROR, state.sequence, dst, 63, 0);
     }
     if !state.gcs.contains_key(&gc_id) {
-        return build_error(BAD_GC, state.sequence, gc_id, 63, 0);
+        return build_error(G_CONTEXT_ERROR, state.sequence, gc_id, 63, 0);
     }
 
     let gc = state.gcs.get(&gc_id).cloned().unwrap_or_default();
@@ -410,10 +410,10 @@ pub(crate) fn handle_poly_point(state: &mut ClientState, data: &[u8]) -> Vec<u8>
     let gc_id = state.read_u32(data, 8);
 
     if !state.windows.contains_key(&drawable) && !state.pixmaps.contains_key(&drawable) {
-        return build_error(BAD_DRAWABLE, state.sequence, drawable, 64, 0);
+        return build_error(DRAWABLE_ERROR, state.sequence, drawable, 64, 0);
     }
     if !state.gcs.contains_key(&gc_id) {
-        return build_error(BAD_GC, state.sequence, gc_id, 64, 0);
+        return build_error(G_CONTEXT_ERROR, state.sequence, gc_id, 64, 0);
     }
 
     let gc = state.gcs.get(&gc_id).cloned().unwrap_or_default();
@@ -481,10 +481,10 @@ pub(crate) fn handle_poly_line(state: &mut ClientState, data: &[u8]) -> Vec<u8> 
     let gc_id = state.read_u32(data, 8);
 
     if !state.windows.contains_key(&drawable) && !state.pixmaps.contains_key(&drawable) {
-        return build_error(BAD_DRAWABLE, state.sequence, drawable, 65, 0);
+        return build_error(DRAWABLE_ERROR, state.sequence, drawable, 65, 0);
     }
     if !state.gcs.contains_key(&gc_id) {
-        return build_error(BAD_GC, state.sequence, gc_id, 65, 0);
+        return build_error(G_CONTEXT_ERROR, state.sequence, gc_id, 65, 0);
     }
 
     let gc = state.gcs.get(&gc_id).cloned().unwrap_or_default();
@@ -663,10 +663,10 @@ pub(crate) fn handle_poly_segment(state: &mut ClientState, data: &[u8]) -> Vec<u
     let gc_id = state.read_u32(data, 8);
 
     if !state.windows.contains_key(&drawable) && !state.pixmaps.contains_key(&drawable) {
-        return build_error(BAD_DRAWABLE, state.sequence, drawable, 66, 0);
+        return build_error(DRAWABLE_ERROR, state.sequence, drawable, 66, 0);
     }
     if !state.gcs.contains_key(&gc_id) {
-        return build_error(BAD_GC, state.sequence, gc_id, 66, 0);
+        return build_error(G_CONTEXT_ERROR, state.sequence, gc_id, 66, 0);
     }
 
     let gc = state.gcs.get(&gc_id).cloned().unwrap_or_default();
@@ -847,10 +847,10 @@ pub(crate) fn handle_poly_rectangle(state: &mut ClientState, data: &[u8]) -> Vec
     let gc_id = state.read_u32(data, 8);
 
     if !state.windows.contains_key(&drawable) && !state.pixmaps.contains_key(&drawable) {
-        return build_error(BAD_DRAWABLE, state.sequence, drawable, 67, 0);
+        return build_error(DRAWABLE_ERROR, state.sequence, drawable, 67, 0);
     }
     if !state.gcs.contains_key(&gc_id) {
-        return build_error(BAD_GC, state.sequence, gc_id, 67, 0);
+        return build_error(G_CONTEXT_ERROR, state.sequence, gc_id, 67, 0);
     }
 
     let gc = state.gcs.get(&gc_id).cloned().unwrap_or_default();
@@ -1039,10 +1039,10 @@ pub(crate) fn handle_poly_arc(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
     let gc_id = state.read_u32(data, 8);
 
     if !state.windows.contains_key(&drawable) && !state.pixmaps.contains_key(&drawable) {
-        return build_error(BAD_DRAWABLE, state.sequence, drawable, 68, 0);
+        return build_error(DRAWABLE_ERROR, state.sequence, drawable, 68, 0);
     }
     if !state.gcs.contains_key(&gc_id) {
-        return build_error(BAD_GC, state.sequence, gc_id, 68, 0);
+        return build_error(G_CONTEXT_ERROR, state.sequence, gc_id, 68, 0);
     }
 
     let gc = state.gcs.get(&gc_id).cloned().unwrap_or_default();
@@ -1110,10 +1110,10 @@ pub(crate) fn handle_fill_poly(state: &mut ClientState, data: &[u8]) -> Vec<u8> 
     let gc_id = state.read_u32(data, 8);
 
     if !state.windows.contains_key(&drawable) && !state.pixmaps.contains_key(&drawable) {
-        return build_error(BAD_DRAWABLE, state.sequence, drawable, 69, 0);
+        return build_error(DRAWABLE_ERROR, state.sequence, drawable, 69, 0);
     }
     if !state.gcs.contains_key(&gc_id) {
-        return build_error(BAD_GC, state.sequence, gc_id, 69, 0);
+        return build_error(G_CONTEXT_ERROR, state.sequence, gc_id, 69, 0);
     }
 
     let gc = state.gcs.get(&gc_id).cloned().unwrap_or_default();
@@ -1262,10 +1262,10 @@ pub(crate) fn handle_poly_fill_rectangle(state: &mut ClientState, data: &[u8]) -
     let gc_id = state.read_u32(data, 8);
 
     if !state.windows.contains_key(&drawable) && !state.pixmaps.contains_key(&drawable) {
-        return build_error(BAD_DRAWABLE, state.sequence, drawable, 70, 0);
+        return build_error(DRAWABLE_ERROR, state.sequence, drawable, 70, 0);
     }
     if !state.gcs.contains_key(&gc_id) {
-        return build_error(BAD_GC, state.sequence, gc_id, 70, 0);
+        return build_error(G_CONTEXT_ERROR, state.sequence, gc_id, 70, 0);
     }
 
     let gc = state.gcs.get(&gc_id).cloned().unwrap_or_default();
@@ -1458,10 +1458,10 @@ pub(crate) fn handle_poly_fill_arc(state: &mut ClientState, data: &[u8]) -> Vec<
     let gc_id = state.read_u32(data, 8);
 
     if !state.windows.contains_key(&drawable) && !state.pixmaps.contains_key(&drawable) {
-        return build_error(BAD_DRAWABLE, state.sequence, drawable, 71, 0);
+        return build_error(DRAWABLE_ERROR, state.sequence, drawable, 71, 0);
     }
     if !state.gcs.contains_key(&gc_id) {
-        return build_error(BAD_GC, state.sequence, gc_id, 71, 0);
+        return build_error(G_CONTEXT_ERROR, state.sequence, gc_id, 71, 0);
     }
 
     let gc = state.gcs.get(&gc_id).cloned().unwrap_or_default();

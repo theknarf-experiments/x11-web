@@ -241,7 +241,7 @@ pub(crate) fn handle_trapezoids(state: &mut ClientState, data: &[u8], seq: u16) 
         Some(d) => d,
         None => {
             return crate::xserver::core::build_error_bo(
-                crate::xserver::core::BAD_VALUE,
+                crate::xserver::core::VALUE_ERROR,
                 seq,
                 dst_pic,
                 139,
@@ -452,7 +452,7 @@ pub(crate) fn handle_triangles(state: &mut ClientState, data: &[u8], seq: u16) -
         Some(d) => d,
         None => {
             return crate::xserver::core::build_error_bo(
-                crate::xserver::core::BAD_VALUE,
+                crate::xserver::core::VALUE_ERROR,
                 seq,
                 dst_pic,
                 139,
@@ -707,7 +707,7 @@ pub(crate) fn handle_tri_strip(state: &mut ClientState, data: &[u8], seq: u16) -
         Some(d) => d,
         None => {
             return crate::xserver::core::build_error_bo(
-                crate::xserver::core::BAD_VALUE,
+                crate::xserver::core::VALUE_ERROR,
                 seq,
                 dst_pic,
                 139,
@@ -730,7 +730,7 @@ pub(crate) fn handle_tri_strip(state: &mut ClientState, data: &[u8], seq: u16) -
 
     if points.len() < 3 {
         return crate::xserver::core::build_error_bo(
-            crate::xserver::core::BAD_LENGTH,
+            crate::xserver::core::LENGTH_ERROR,
             seq,
             0,
             139,
@@ -820,7 +820,7 @@ pub(crate) fn handle_tri_fan(state: &mut ClientState, data: &[u8], seq: u16) -> 
         Some(d) => d,
         None => {
             return crate::xserver::core::build_error_bo(
-                crate::xserver::core::BAD_VALUE,
+                crate::xserver::core::VALUE_ERROR,
                 seq,
                 dst_pic,
                 139,
@@ -842,7 +842,7 @@ pub(crate) fn handle_tri_fan(state: &mut ClientState, data: &[u8], seq: u16) -> 
 
     if points.len() < 3 {
         return crate::xserver::core::build_error_bo(
-            crate::xserver::core::BAD_LENGTH,
+            crate::xserver::core::LENGTH_ERROR,
             seq,
             0,
             139,
@@ -936,7 +936,7 @@ pub(crate) fn handle_fill_rectangles(state: &mut ClientState, data: &[u8], seq: 
         Some(d) => d,
         None => {
             return crate::xserver::core::build_error_bo(
-                crate::xserver::core::BAD_VALUE,
+                crate::xserver::core::VALUE_ERROR,
                 seq,
                 dst_pic,
                 139,
@@ -1032,7 +1032,7 @@ pub(crate) fn handle_add_traps(state: &mut ClientState, data: &[u8], seq: u16) -
             Some(p) => p,
             None => {
                 return crate::xserver::core::build_error_bo(
-                    crate::xserver::core::BAD_VALUE,
+                    crate::xserver::core::VALUE_ERROR,
                     seq,
                     pic_id,
                     139,
@@ -1048,7 +1048,7 @@ pub(crate) fn handle_add_traps(state: &mut ClientState, data: &[u8], seq: u16) -
             win.framebuffer.width()
         } else {
             return crate::xserver::core::build_error_bo(
-                crate::xserver::core::BAD_VALUE,
+                crate::xserver::core::VALUE_ERROR,
                 seq,
                 d,
                 139,

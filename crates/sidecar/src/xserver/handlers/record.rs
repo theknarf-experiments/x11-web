@@ -334,7 +334,7 @@ pub(crate) fn handle_record_request(state: &mut ClientState, data: &[u8], seq: u
             // SECURITY: untrusted clients are denied CreateContext (BadAccess)
             if state.trust_level > 0 {
                 return crate::xserver::core::build_error_bo(
-                    crate::xserver::core::BAD_ACCESS,
+                    crate::xserver::core::ACCESS_ERROR,
                     seq,
                     0,
                     154,
@@ -401,7 +401,7 @@ pub(crate) fn handle_record_request(state: &mut ClientState, data: &[u8], seq: u
                 Vec::new()
             } else {
                 crate::xserver::core::build_error_bo(
-                    crate::xserver::core::BAD_LENGTH,
+                    crate::xserver::core::LENGTH_ERROR,
                     seq,
                     0,
                     154,
@@ -456,7 +456,7 @@ pub(crate) fn handle_record_request(state: &mut ClientState, data: &[u8], seq: u
                 Vec::new()
             } else {
                 crate::xserver::core::build_error_bo(
-                    crate::xserver::core::BAD_LENGTH,
+                    crate::xserver::core::LENGTH_ERROR,
                     seq,
                     0,
                     154,
@@ -500,7 +500,7 @@ pub(crate) fn handle_record_request(state: &mut ClientState, data: &[u8], seq: u
                 Vec::new()
             } else {
                 crate::xserver::core::build_error_bo(
-                    crate::xserver::core::BAD_LENGTH,
+                    crate::xserver::core::LENGTH_ERROR,
                     seq,
                     0,
                     154,
@@ -574,7 +574,7 @@ pub(crate) fn handle_record_request(state: &mut ClientState, data: &[u8], seq: u
                 }
             } else {
                 crate::xserver::core::build_error_bo(
-                    crate::xserver::core::BAD_LENGTH,
+                    crate::xserver::core::LENGTH_ERROR,
                     seq,
                     0,
                     154,
@@ -612,7 +612,7 @@ pub(crate) fn handle_record_request(state: &mut ClientState, data: &[u8], seq: u
                 build_record_status_reply(RECORD_START_OF_DATA, seq, element_header, server_time)
             } else {
                 crate::xserver::core::build_error_bo(
-                    crate::xserver::core::BAD_LENGTH,
+                    crate::xserver::core::LENGTH_ERROR,
                     seq,
                     0,
                     154,
@@ -653,7 +653,7 @@ pub(crate) fn handle_record_request(state: &mut ClientState, data: &[u8], seq: u
                 )
             } else {
                 crate::xserver::core::build_error_bo(
-                    crate::xserver::core::BAD_LENGTH,
+                    crate::xserver::core::LENGTH_ERROR,
                     seq,
                     0,
                     154,
@@ -676,7 +676,7 @@ pub(crate) fn handle_record_request(state: &mut ClientState, data: &[u8], seq: u
                 Vec::new()
             } else {
                 crate::xserver::core::build_error_bo(
-                    crate::xserver::core::BAD_LENGTH,
+                    crate::xserver::core::LENGTH_ERROR,
                     seq,
                     0,
                     154,
@@ -688,7 +688,7 @@ pub(crate) fn handle_record_request(state: &mut ClientState, data: &[u8], seq: u
         _ => {
             debug!("RECORD: unhandled minor opcode {minor}");
             crate::xserver::core::build_error_bo(
-                crate::xserver::core::BAD_REQUEST,
+                crate::xserver::core::REQUEST_ERROR,
                 seq,
                 minor as u32,
                 154,

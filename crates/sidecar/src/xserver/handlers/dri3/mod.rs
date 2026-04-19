@@ -87,7 +87,7 @@ pub(crate) fn handle_dri3_request(state: &mut ClientState, data: &[u8], seq: u16
             if fd < 0 {
                 // No GPU available — return BadAlloc
                 warn!("DRI3 Open: failed to open /dev/dri/renderD128");
-                return build_error_bo(BAD_ALLOC, seq, 0, DRI3_MAJOR_OPCODE, 1, bo);
+                return build_error_bo(ALLOC_ERROR, seq, 0, DRI3_MAJOR_OPCODE, 1, bo);
             }
 
             // Queue the fd for sending via SCM_RIGHTS
@@ -116,7 +116,7 @@ pub(crate) fn handle_dri3_request(state: &mut ClientState, data: &[u8], seq: u16
         _ => {
             warn!("Unhandled DRI3 minor opcode: {minor}");
             crate::xserver::core::build_error_bo(
-                crate::xserver::core::BAD_REQUEST,
+                crate::xserver::core::REQUEST_ERROR,
                 seq,
                 minor as u32,
                 149,

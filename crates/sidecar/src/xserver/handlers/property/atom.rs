@@ -14,7 +14,7 @@ pub(crate) fn handle_intern_atom(state: &mut ClientState, data: &[u8], seq: u16)
     let name_len = state.read_u16(data, 4) as usize;
 
     if 8 + name_len > data.len() {
-        return build_error(BAD_LENGTH, seq, 0, 16, 0);
+        return build_error(LENGTH_ERROR, seq, 0, 16, 0);
     }
     let name = String::from_utf8_lossy(&data[8..8 + name_len]).to_string();
 
@@ -35,7 +35,7 @@ pub(crate) fn handle_get_atom_name(state: &mut ClientState, data: &[u8], seq: u1
 
     // BadAtom (error code 5) for unknown atoms
     let Some(name) = state.get_atom_name(atom) else {
-        return build_error(BAD_ATOM, seq, atom, 17, 0);
+        return build_error(ATOM_ERROR, seq, atom, 17, 0);
     };
     let name_bytes = name.as_bytes();
     let padded_len = (name_bytes.len() + 3) & !3;

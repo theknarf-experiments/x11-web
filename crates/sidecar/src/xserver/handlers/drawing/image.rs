@@ -16,13 +16,13 @@ pub(crate) fn handle_put_image(state: &mut ClientState, data: &[u8]) -> Vec<u8> 
     let gc_id = state.read_u32(data, 8);
 
     if !state.windows.contains_key(&drawable) && !state.pixmaps.contains_key(&drawable) {
-        return build_error(BAD_DRAWABLE, state.sequence, drawable, 72, 0);
+        return build_error(DRAWABLE_ERROR, state.sequence, drawable, 72, 0);
     }
     if !state.gcs.contains_key(&gc_id) {
-        return build_error(BAD_GC, state.sequence, gc_id, 72, 0);
+        return build_error(G_CONTEXT_ERROR, state.sequence, gc_id, 72, 0);
     }
     if format > 2 {
-        return build_error(BAD_VALUE, state.sequence, format as u32, 72, 0);
+        return build_error(VALUE_ERROR, state.sequence, format as u32, 72, 0);
     }
     let width = state.read_u16(data, 12);
     let height = state.read_u16(data, 14);
@@ -33,14 +33,14 @@ pub(crate) fn handle_put_image(state: &mut ClientState, data: &[u8]) -> Vec<u8> 
 
     // Validate image dimensions are within reasonable bounds
     if width > 32767 || height > 32767 {
-        return build_error(BAD_VALUE, state.sequence, width as u32, 72, 0);
+        return build_error(VALUE_ERROR, state.sequence, width as u32, 72, 0);
     }
 
     let pixel_data = &data[24..];
 
     // Validate that pixel data is present (at least 1 byte for non-zero images)
     if width > 0 && height > 0 && pixel_data.is_empty() {
-        return build_error(BAD_LENGTH, state.sequence, 0, 72, 0);
+        return build_error(LENGTH_ERROR, state.sequence, 0, 72, 0);
     }
 
     debug!("PutImage: fmt={format} depth={depth} drawable={drawable:#x} {width}x{height} at ({dst_x},{dst_y}) data={}", pixel_data.len());
@@ -428,7 +428,7 @@ pub(crate) fn handle_put_image(state: &mut ClientState, data: &[u8]) -> Vec<u8> 
             height,
             pixel_data.len()
         );
-        return build_error(BAD_MATCH, state.sequence, format as u32, 72, 0);
+        return build_error(MATCH_ERROR, state.sequence, format as u32, 72, 0);
     }
     state.notify_damage(drawable, dst_x, dst_y, width, height);
 
@@ -446,13 +446,13 @@ pub(crate) fn handle_get_image(state: &mut ClientState, data: &[u8], seq: u16) -
     let drawable = state.read_u32(data, 4);
 
     if !state.windows.contains_key(&drawable) && !state.pixmaps.contains_key(&drawable) {
-        return build_error(BAD_DRAWABLE, seq, drawable, 73, 0);
+        return build_error(DRAWABLE_ERROR, seq, drawable, 73, 0);
     }
     // Per X11 spec: GetImage on an InputOutput window that is unmapped or
     // has an unmapped ancestor generates BadMatch. Pixmaps are always OK.
     if let Some(win) = state.windows.get(&drawable) {
         if win.class == 1 && !win.mapped {
-            return build_error(BAD_MATCH, seq, drawable, 73, 0);
+            return build_error(MATCH_ERROR, seq, drawable, 73, 0);
         }
         // Also check ancestors are mapped
         let mut parent = win.parent;
@@ -462,7 +462,7 @@ pub(crate) fn handle_get_image(state: &mut ClientState, data: &[u8], seq: u16) -
             }
             if let Some(pw) = state.windows.get(&parent) {
                 if !pw.mapped {
-                    return build_error(BAD_MATCH, seq, drawable, 73, 0);
+                    return build_error(MATCH_ERROR, seq, drawable, 73, 0);
                 }
                 parent = pw.parent;
             } else {
@@ -471,7 +471,7 @@ pub(crate) fn handle_get_image(state: &mut ClientState, data: &[u8], seq: u16) -
         }
     }
     if format != 1 && format != 2 {
-        return build_error(BAD_VALUE, seq, format as u32, 73, 0);
+        return build_error(VALUE_ERROR, seq, format as u32, 73, 0);
     }
     let x = state.read_i16(data, 8);
     let y = state.read_i16(data, 10);

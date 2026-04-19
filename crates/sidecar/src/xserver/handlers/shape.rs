@@ -52,7 +52,7 @@ pub(crate) fn handle_shape_request(state: &mut ClientState, data: &[u8], seq: u1
             // out-of-range values with BadValue per the SHAPE 1.1 spec.
             if ordering > 3 {
                 return crate::xserver::core::build_error_bo(
-                    crate::xserver::core::BAD_VALUE,
+                    crate::xserver::core::VALUE_ERROR,
                     seq,
                     ordering as u32,
                     128,
@@ -111,7 +111,7 @@ pub(crate) fn handle_shape_request(state: &mut ClientState, data: &[u8], seq: u1
                 None
             } else if !state.pixmaps.contains_key(&pixmap_id) {
                 return crate::xserver::core::build_error_bo(
-                    crate::xserver::core::BAD_PIXMAP,
+                    crate::xserver::core::PIXMAP_ERROR,
                     seq,
                     pixmap_id,
                     128,
@@ -175,7 +175,7 @@ pub(crate) fn handle_shape_request(state: &mut ClientState, data: &[u8], seq: u1
                     SHAPE_INPUT => &mut win.input_shape,
                     _ => {
                         return crate::xserver::core::build_error_bo(
-                            crate::xserver::core::BAD_VALUE,
+                            crate::xserver::core::VALUE_ERROR,
                             seq,
                             kind as u32,
                             128,
@@ -332,7 +332,7 @@ pub(crate) fn handle_shape_request(state: &mut ClientState, data: &[u8], seq: u1
         _ => {
             debug!("SHAPE: unhandled minor opcode {minor}");
             crate::xserver::core::build_error_bo(
-                crate::xserver::core::BAD_REQUEST,
+                crate::xserver::core::REQUEST_ERROR,
                 seq,
                 minor as u32,
                 128,

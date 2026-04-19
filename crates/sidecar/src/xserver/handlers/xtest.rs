@@ -46,7 +46,7 @@ pub(crate) fn handle_xtest_request(state: &mut ClientState, data: &[u8], seq: u1
             // SECURITY: untrusted clients are denied FakeInput (BadAccess)
             if state.trust_level > 0 {
                 return crate::xserver::core::build_error_bo(
-                    crate::xserver::core::BAD_ACCESS,
+                    crate::xserver::core::ACCESS_ERROR,
                     seq,
                     0,
                     150,
@@ -172,7 +172,7 @@ pub(crate) fn handle_xtest_request(state: &mut ClientState, data: &[u8], seq: u1
                     _ => {
                         warn!("XTEST FakeInput: unknown event type {event_type}");
                         return crate::xserver::core::build_error_bo(
-                            crate::xserver::core::BAD_VALUE,
+                            crate::xserver::core::VALUE_ERROR,
                             seq,
                             event_type as u32,
                             150,
@@ -198,7 +198,7 @@ pub(crate) fn handle_xtest_request(state: &mut ClientState, data: &[u8], seq: u1
         _ => {
             debug!("XTEST: unhandled minor opcode {minor}");
             crate::xserver::core::build_error_bo(
-                crate::xserver::core::BAD_REQUEST,
+                crate::xserver::core::REQUEST_ERROR,
                 seq,
                 minor as u32,
                 150,

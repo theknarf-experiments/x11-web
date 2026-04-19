@@ -101,7 +101,7 @@ pub(crate) fn handle_damage_request(state: &mut ClientState, data: &[u8], seq: u
         _ => {
             debug!("Unhandled DAMAGE minor opcode: {minor}");
             crate::xserver::core::build_error_bo(
-                crate::xserver::core::BAD_REQUEST,
+                crate::xserver::core::REQUEST_ERROR,
                 seq,
                 minor as u32,
                 143,
@@ -138,7 +138,7 @@ pub(crate) fn handle_x_composite_request(
                 win.redirected = true;
             } else {
                 return crate::xserver::core::build_error_bo(
-                    crate::xserver::core::BAD_WINDOW,
+                    crate::xserver::core::WINDOW_ERROR,
                     seq,
                     window,
                     142,
@@ -156,7 +156,7 @@ pub(crate) fn handle_x_composite_request(
             info!("Composite RedirectSubwindows: window={window:#x} update={update}");
             if !state.windows.contains_key(&window) {
                 return crate::xserver::core::build_error_bo(
-                    crate::xserver::core::BAD_WINDOW,
+                    crate::xserver::core::WINDOW_ERROR,
                     seq,
                     window,
                     142,
@@ -187,7 +187,7 @@ pub(crate) fn handle_x_composite_request(
                 win.redirected = false;
             } else {
                 return crate::xserver::core::build_error_bo(
-                    crate::xserver::core::BAD_WINDOW,
+                    crate::xserver::core::WINDOW_ERROR,
                     seq,
                     window,
                     142,
@@ -204,7 +204,7 @@ pub(crate) fn handle_x_composite_request(
             debug!("Composite UnredirectSubwindows: window={window:#x}");
             if !state.windows.contains_key(&window) {
                 return crate::xserver::core::build_error_bo(
-                    crate::xserver::core::BAD_WINDOW,
+                    crate::xserver::core::WINDOW_ERROR,
                     seq,
                     window,
                     142,
@@ -242,7 +242,7 @@ pub(crate) fn handle_x_composite_request(
                 }
             } else {
                 return crate::xserver::core::build_error_bo(
-                    crate::xserver::core::BAD_WINDOW,
+                    crate::xserver::core::WINDOW_ERROR,
                     seq,
                     window,
                     142,
@@ -302,7 +302,7 @@ pub(crate) fn handle_x_composite_request(
                 info!("NameWindowPixmap: window={window:#x} -> pixmap={pixmap:#x} {w}x{h} depth={depth} redirected={redirected}");
             } else {
                 return crate::xserver::core::build_error_bo(
-                    crate::xserver::core::BAD_WINDOW,
+                    crate::xserver::core::WINDOW_ERROR,
                     seq,
                     window,
                     142,
@@ -403,7 +403,7 @@ pub(crate) fn handle_x_composite_request(
         _ => {
             debug!("Unhandled Composite minor opcode: {minor}");
             crate::xserver::core::build_error_bo(
-                crate::xserver::core::BAD_REQUEST,
+                crate::xserver::core::REQUEST_ERROR,
                 seq,
                 minor as u32,
                 142,

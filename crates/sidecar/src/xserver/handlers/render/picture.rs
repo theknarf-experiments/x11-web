@@ -188,7 +188,7 @@ pub(crate) fn handle_create_picture(state: &mut ClientState, data: &[u8], seq: u
         p.depth
     } else {
         return crate::xserver::core::build_error_bo(
-            crate::xserver::core::BAD_DRAWABLE,
+            crate::xserver::core::DRAWABLE_ERROR,
             seq,
             drawable,
             139,
@@ -205,7 +205,7 @@ pub(crate) fn handle_create_picture(state: &mut ClientState, data: &[u8], seq: u
         PICTFORMAT_A1 => 1,
         _ => {
             return crate::xserver::core::build_error_bo(
-                crate::xserver::core::BAD_MATCH,
+                crate::xserver::core::MATCH_ERROR,
                 seq,
                 format_id,
                 139,
@@ -229,7 +229,7 @@ pub(crate) fn handle_create_picture(state: &mut ClientState, data: &[u8], seq: u
             "CreatePicture: format depth {format_depth} incompatible with drawable depth {drawable_depth}"
         );
         return crate::xserver::core::build_error_bo(
-            crate::xserver::core::BAD_MATCH,
+            crate::xserver::core::MATCH_ERROR,
             seq,
             format_id,
             139,

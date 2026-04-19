@@ -69,11 +69,11 @@ pub(crate) fn handle_core_request(state: &mut ClientState, data: &[u8]) -> Vec<u
         match major_opcode {
             // ChangeHosts: untrusted clients cannot modify host access control
             109 => {
-                return build_error(BAD_ACCESS, seq, 0, major_opcode, 0);
+                return build_error(ACCESS_ERROR, seq, 0, major_opcode, 0);
             }
             // SetAccessControl: untrusted clients cannot change access control mode
             111 => {
-                return build_error(BAD_ACCESS, seq, 0, major_opcode, 0);
+                return build_error(ACCESS_ERROR, seq, 0, major_opcode, 0);
             }
             _ => {}
         }
@@ -208,7 +208,7 @@ pub(crate) fn handle_core_request(state: &mut ClientState, data: &[u8]) -> Vec<u
             warn!("Unhandled core X11 request opcode: {major_opcode} minor: {_minor}");
             // Return BadRequest error for unrecognized opcodes per X11 spec
             super::core::build_error_bo(
-                BAD_REQUEST,
+                REQUEST_ERROR,
                 seq,
                 major_opcode as u32,
                 major_opcode,
@@ -1021,7 +1021,7 @@ mod tests {
         // Opcodes 1-119 and 127 should be handled
         let handled: Vec<u8> = (1..=119).chain(std::iter::once(127u8)).collect();
         assert_eq!(handled.len(), 120, "119 core opcodes + NoOperation = 120");
-        // Opcodes 120-126 are undefined in X11 spec and should return BAD_REQUEST
+        // Opcodes 120-126 are undefined in X11 spec and should return REQUEST_ERROR
         // (which is the correct behavior for unknown opcodes)
     }
 
@@ -1345,7 +1345,7 @@ mod tests {
 
     #[test]
     fn change_keyboard_control_led_mode_validates_range() {
-        // led_mode must be 0 or 1; values > 1 should be BAD_VALUE
+        // led_mode must be 0 or 1; values > 1 should be VALUE_ERROR
         // Testing the validation logic: val > 1 should trigger error
         assert!(2u32 > 1); // Just verifying the threshold
     }

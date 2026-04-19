@@ -9,7 +9,7 @@
 
 use super::client::ClientState;
 use super::core::build_error;
-use super::core::{read_u16_bo, read_u32_bo, require_len, BAD_CURSOR, BAD_LENGTH, BAD_WINDOW};
+use super::core::{read_u16_bo, read_u32_bo, require_len, CURSOR_ERROR, LENGTH_ERROR, WINDOW_ERROR};
 use super::types::WindowState;
 use super::{CROSSING_MODE_GRAB, CROSSING_MODE_UNGRAB};
 use std::collections::{HashMap, VecDeque};
@@ -198,7 +198,7 @@ pub(crate) struct PassiveKeyGrab {
 ///               3=NotViewable, 4=Frozen
 pub(crate) fn handle_grab_pointer(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
     if data.len() < 24 {
-        return build_error(BAD_LENGTH, seq, 0, 26, 0);
+        return build_error(LENGTH_ERROR, seq, 0, 26, 0);
     }
 
     let owner_events = data[1] != 0;
@@ -212,12 +212,12 @@ pub(crate) fn handle_grab_pointer(state: &mut ClientState, data: &[u8], seq: u16
 
     // Validate grab_window exists
     if !state.windows.contains_key(&grab_window) && grab_window != state.root_window {
-        return build_error(BAD_WINDOW, seq, grab_window, 26, 0);
+        return build_error(WINDOW_ERROR, seq, grab_window, 26, 0);
     }
 
     // Validate cursor ID if specified (0 = None)
     if cursor != 0 && !state.cursors.contains_key(&cursor) {
-        return build_error(BAD_CURSOR, seq, cursor, 26, 0);
+        return build_error(CURSOR_ERROR, seq, cursor, 26, 0);
     }
 
     info!("GrabPointer: window={grab_window:#x} owner_events={owner_events} event_mask={event_mask:#x}");
@@ -344,7 +344,7 @@ pub(crate) fn handle_grab_button(state: &mut ClientState, data: &[u8], seq: u16)
 
     // Validate grab_window exists
     if !state.windows.contains_key(&grab_window) && grab_window != state.root_window {
-        return build_error(BAD_WINDOW, seq, grab_window, 28, 0);
+        return build_error(WINDOW_ERROR, seq, grab_window, 28, 0);
     }
 
     let event_mask = state.read_u16(data, 8) as u32;
@@ -355,7 +355,7 @@ pub(crate) fn handle_grab_button(state: &mut ClientState, data: &[u8], seq: u16)
 
     // Validate cursor if non-zero
     if cursor != 0 && !state.cursors.contains_key(&cursor) {
-        return build_error(BAD_CURSOR, seq, cursor, 28, 0);
+        return build_error(CURSOR_ERROR, seq, cursor, 28, 0);
     }
 
     let button = data[20];
@@ -426,7 +426,7 @@ pub(crate) fn handle_change_active_pointer_grab(
 
     // Validate cursor ID if specified (0 = None)
     if cursor != 0 && !state.cursors.contains_key(&cursor) {
-        return build_error(BAD_CURSOR, seq, cursor, 30, 0);
+        return build_error(CURSOR_ERROR, seq, cursor, 30, 0);
     }
 
     if let Some(ref mut grab) = state.grabs.pointer_grab {
@@ -445,7 +445,7 @@ pub(crate) fn handle_change_active_pointer_grab(
 ///               3=NotViewable, 4=Frozen
 pub(crate) fn handle_grab_keyboard(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
     if data.len() < 16 {
-        return build_error(BAD_LENGTH, seq, 0, 31, 0);
+        return build_error(LENGTH_ERROR, seq, 0, 31, 0);
     }
 
     let owner_events = data[1] != 0;
@@ -455,7 +455,7 @@ pub(crate) fn handle_grab_keyboard(state: &mut ClientState, data: &[u8], seq: u1
     let keyboard_mode = data[13];
 
     if !state.windows.contains_key(&grab_window) && grab_window != state.root_window {
-        return build_error(BAD_WINDOW, seq, grab_window, 31, 0);
+        return build_error(WINDOW_ERROR, seq, grab_window, 31, 0);
     }
 
     info!("GrabKeyboard: window={grab_window:#x} owner_events={owner_events}");
@@ -557,7 +557,7 @@ pub(crate) fn handle_grab_key(state: &mut ClientState, data: &[u8], seq: u16) ->
 
     // Validate grab_window exists
     if !state.windows.contains_key(&grab_window) && grab_window != state.root_window {
-        return build_error(BAD_WINDOW, seq, grab_window, 33, 0);
+        return build_error(WINDOW_ERROR, seq, grab_window, 33, 0);
     }
     let modifiers = state.read_u16(data, 8);
     let key = data[10];

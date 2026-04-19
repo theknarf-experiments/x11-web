@@ -159,7 +159,7 @@ pub(crate) fn handle_xvideo_request(state: &mut ClientState, data: &[u8], seq: u
         }
         13 | 14 => notify::handle_notify_request(state, data, seq, minor),
         _ => crate::xserver::core::build_error_bo(
-            crate::xserver::core::BAD_REQUEST,
+            crate::xserver::core::REQUEST_ERROR,
             seq,
             minor as u32,
             156,

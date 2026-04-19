@@ -77,7 +77,7 @@ pub(crate) fn handle_port_request(
                     _ => {
                         debug!("XVideo SetPortAttribute: unknown attr {name} (atom={atom})");
                         return crate::xserver::core::build_error_bo(
-                            crate::xserver::core::BAD_MATCH,
+                            crate::xserver::core::MATCH_ERROR,
                             seq,
                             atom,
                             156,
@@ -108,7 +108,7 @@ pub(crate) fn handle_port_request(
                     _ => {
                         debug!("XVideo GetPortAttribute: unknown attr {name} (atom={atom})");
                         return crate::xserver::core::build_error_bo(
-                            crate::xserver::core::BAD_MATCH,
+                            crate::xserver::core::MATCH_ERROR,
                             seq,
                             atom,
                             156,
@@ -187,7 +187,7 @@ pub(crate) fn handle_port_request(
         _ => {
             debug!("XVideo port: unhandled minor opcode {minor}");
             crate::xserver::core::build_error_bo(
-                crate::xserver::core::BAD_REQUEST,
+                crate::xserver::core::REQUEST_ERROR,
                 seq,
                 minor as u32,
                 156,

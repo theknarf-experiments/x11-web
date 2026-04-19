@@ -43,7 +43,7 @@ pub(crate) fn handle_create_gradient_fill(
         _ => {
             // Unreachable from dispatch, but return proper error if called directly
             crate::xserver::core::build_error_bo(
-                crate::xserver::core::BAD_REQUEST,
+                crate::xserver::core::REQUEST_ERROR,
                 0,
                 minor as u32,
                 139,
@@ -84,7 +84,7 @@ fn handle_create_linear_gradient(state: &mut ClientState, data: &[u8], seq: u16)
     // absurd before we allocate.
     if num_stops > 1024 {
         return crate::xserver::core::build_error_bo(
-            crate::xserver::core::BAD_VALUE,
+            crate::xserver::core::VALUE_ERROR,
             seq,
             num_stops as u32,
             139,
@@ -97,7 +97,7 @@ fn handle_create_linear_gradient(state: &mut ClientState, data: &[u8], seq: u16)
     let colors_start = stops_start + num_stops * 4;
     if colors_start + num_stops * 8 > data.len() {
         return crate::xserver::core::build_error_bo(
-            crate::xserver::core::BAD_LENGTH,
+            crate::xserver::core::LENGTH_ERROR,
             seq,
             0,
             139,
@@ -318,7 +318,7 @@ fn handle_create_radial_gradient(state: &mut ClientState, data: &[u8], seq: u16)
 
     if num_stops > 1024 {
         return crate::xserver::core::build_error_bo(
-            crate::xserver::core::BAD_VALUE,
+            crate::xserver::core::VALUE_ERROR,
             seq,
             num_stops as u32,
             139,
@@ -331,7 +331,7 @@ fn handle_create_radial_gradient(state: &mut ClientState, data: &[u8], seq: u16)
     let colors_start = stops_start + num_stops * 4;
     if colors_start + num_stops * 8 > data.len() {
         return crate::xserver::core::build_error_bo(
-            crate::xserver::core::BAD_LENGTH,
+            crate::xserver::core::LENGTH_ERROR,
             seq,
             0,
             139,
@@ -508,7 +508,7 @@ fn handle_create_conical_gradient(state: &mut ClientState, data: &[u8], seq: u16
 
     if num_stops > 1024 {
         return crate::xserver::core::build_error_bo(
-            crate::xserver::core::BAD_VALUE,
+            crate::xserver::core::VALUE_ERROR,
             seq,
             num_stops as u32,
             139,
@@ -521,7 +521,7 @@ fn handle_create_conical_gradient(state: &mut ClientState, data: &[u8], seq: u16
     let colors_start = stops_start + num_stops * 4;
     if colors_start + num_stops * 8 > data.len() {
         return crate::xserver::core::build_error_bo(
-            crate::xserver::core::BAD_LENGTH,
+            crate::xserver::core::LENGTH_ERROR,
             seq,
             0,
             139,

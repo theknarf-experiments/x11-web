@@ -283,7 +283,7 @@ pub(crate) fn handle_glx_request(state: &mut ClientState, data: &[u8], seq: u16)
         _ => {
             warn!("Unhandled GLX minor opcode: {minor}");
             crate::xserver::core::build_error_bo(
-                crate::xserver::core::BAD_REQUEST,
+                crate::xserver::core::REQUEST_ERROR,
                 seq,
                 minor as u32,
                 159,

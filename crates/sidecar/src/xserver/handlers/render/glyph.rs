@@ -420,7 +420,7 @@ pub(crate) fn handle_composite_glyphs(
         Some(d) => d,
         None => {
             return crate::xserver::core::build_error_bo(
-                crate::xserver::core::BAD_VALUE,
+                crate::xserver::core::VALUE_ERROR,
                 seq,
                 dst_pic,
                 139,

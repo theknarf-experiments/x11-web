@@ -512,7 +512,7 @@ pub(crate) fn handle_create_lease(state: &mut ClientState, _data: &[u8], seq: u1
     let minor = 45u8;
     debug!("RRCreateLease: not supported on virtual display");
     crate::xserver::core::build_error_bo(
-        crate::xserver::core::BAD_ACCESS,
+        crate::xserver::core::ACCESS_ERROR,
         seq,
         0,
         140,

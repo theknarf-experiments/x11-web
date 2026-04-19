@@ -28,7 +28,7 @@ pub(crate) fn handle_map_window(state: &mut ClientState, data: &[u8], seq: u16) 
             "MapWindow: id={wid:#x} NOT FOUND in client {}",
             state.client_id
         );
-        return build_error(BAD_WINDOW, seq, wid, 8, 0);
+        return build_error(WINDOW_ERROR, seq, wid, 8, 0);
     }
 
     // Per X11 spec: if the window's parent has SubstructureRedirectMask set by
@@ -487,7 +487,7 @@ pub(crate) fn handle_map_subwindows(state: &mut ClientState, data: &[u8], seq: u
     let parent = state.read_u32(data, 4);
 
     if !state.windows.contains_key(&parent) {
-        return build_error(BAD_WINDOW, seq, parent, 9, 0);
+        return build_error(WINDOW_ERROR, seq, parent, 9, 0);
     }
 
     // Collect child window IDs first to avoid borrow issues
@@ -521,7 +521,7 @@ pub(crate) fn handle_unmap_window(state: &mut ClientState, data: &[u8], seq: u16
     let wid = state.read_u32(data, 4);
 
     if !state.windows.contains_key(&wid) {
-        return build_error(BAD_WINDOW, seq, wid, 10, 0);
+        return build_error(WINDOW_ERROR, seq, wid, 10, 0);
     }
 
     // Per X11 spec: "If the window is already unmapped, the request has no effect."
@@ -674,7 +674,7 @@ pub(crate) fn handle_unmap_subwindows(state: &mut ClientState, data: &[u8], seq:
     let parent = state.read_u32(data, 4);
 
     if !state.windows.contains_key(&parent) {
-        return build_error(BAD_WINDOW, seq, parent, 11, 0);
+        return build_error(WINDOW_ERROR, seq, parent, 11, 0);
     }
 
     // Collect all mapped children

@@ -44,7 +44,7 @@ pub(crate) fn handle_xfixes_request(state: &mut ClientState, data: &[u8], seq: u
                 }
                 _ => {
                     return crate::xserver::core::build_error_bo(
-                        crate::xserver::core::BAD_VALUE,
+                        crate::xserver::core::VALUE_ERROR,
                         seq,
                         mode as u32,
                         138,
@@ -116,7 +116,7 @@ pub(crate) fn handle_xfixes_request(state: &mut ClientState, data: &[u8], seq: u
         _ => {
             debug!("XFIXES: unhandled minor opcode {minor}");
             crate::xserver::core::build_error_bo(
-                crate::xserver::core::BAD_REQUEST,
+                crate::xserver::core::REQUEST_ERROR,
                 seq,
                 minor as u32,
                 138,

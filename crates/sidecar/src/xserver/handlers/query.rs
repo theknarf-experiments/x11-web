@@ -22,7 +22,7 @@ pub(crate) fn handle_query_best_size(state: &ClientState, data: &[u8], seq: u16)
     // - Stipple: similar to Tile.
     // Validate class is 0, 1, or 2.
     if class > 2 {
-        return build_error(BAD_VALUE, seq, class as u32, 97, 0);
+        return build_error(VALUE_ERROR, seq, class as u32, 97, 0);
     }
 
     let (best_w, best_h) = match class {
