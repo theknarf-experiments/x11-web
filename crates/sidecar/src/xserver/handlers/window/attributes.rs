@@ -4,7 +4,7 @@ use super::*;
 use crate::xserver::reply::ReplyBuf;
 use crate::xserver::request::request_header;
 use x11rb_protocol::protocol::xproto::{
-    ChangeWindowAttributesRequest, ChangeSaveSetRequest, GetWindowAttributesRequest,
+    BackingStore, ChangeWindowAttributesRequest, ChangeSaveSetRequest, GetWindowAttributesRequest,
 };
 
 // ---------------------------------------------------------------------------
@@ -40,7 +40,7 @@ pub(crate) fn handle_change_window_attributes(state: &mut ClientState, data: &[u
     }
     if let Some(bs) = vl.backing_store {
         let val = u32::from(bs);
-        if val > 2 {
+        if val > u32::from(BackingStore::ALWAYS) {
             return build_error(VALUE_ERROR, seq, val, 2, 0);
         }
     }

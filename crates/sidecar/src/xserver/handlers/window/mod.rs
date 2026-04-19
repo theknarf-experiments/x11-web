@@ -4,7 +4,7 @@
 pub(super) use super::*;
 
 use crate::xserver::event::serialize_event;
-use x11rb_protocol::protocol::xproto::{ExposeEvent, VisibilityNotifyEvent};
+use x11rb_protocol::protocol::xproto::{BackingStore, ExposeEvent, VisibilityNotifyEvent};
 
 mod attributes;
 mod configure;
@@ -185,7 +185,7 @@ pub(crate) fn update_sibling_visibility(
             // Per X11 spec: if the server maintains backing store for this window,
             // the contents are preserved and Expose events are NOT generated.
             // In our architecture each window has its own Framebuffer, so when
-            // backing_store > 0 the pixels are already intact — skip Expose.
+            // backing_store != NOT_USEFUL the pixels are already intact — skip Expose.
             //
             // Save-under suppression: if the triggering window had save_under=true,
             // the server preserved sibling contents, so no Expose is needed.
@@ -193,7 +193,7 @@ pub(crate) fn update_sibling_visibility(
                 let has_backing = state
                     .windows
                     .get(&sib_id)
-                    .map(|w| w.backing_store > 0)
+                    .map(|w| w.backing_store != u32::from(BackingStore::NOT_USEFUL) as u8)
                     .unwrap_or(false);
 
                 if !has_backing {

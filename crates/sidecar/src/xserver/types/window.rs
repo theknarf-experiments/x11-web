@@ -141,7 +141,7 @@ pub(crate) struct WindowState {
     pub(crate) shape_select_clients: Vec<u32>,
     /// Colormap ID assigned to this window (0 = default/root colormap).
     pub(crate) colormap: u32,
-    /// Backing store mode: 0=NotUseful, 1=WhenMapped, 2=Always.
+    /// Backing store mode (BackingStore::NOT_USEFUL, WHEN_MAPPED, or ALWAYS).
     pub(crate) backing_store: u8,
     /// Backing planes mask: which bit planes to preserve in backing store.
     pub(crate) backing_planes: u32,
@@ -152,7 +152,7 @@ pub(crate) struct WindowState {
     /// Visibility state: 0=Unobscured, 1=PartiallyObscured, 2=FullyObscured.
     pub(crate) visibility: u8,
     /// Saved framebuffer pixels for backing store (when obscured).
-    /// Only populated when backing_store > 0 (WhenMapped or Always).
+    /// Only populated when backing_store != NOT_USEFUL (WhenMapped or Always).
     pub(crate) backing_pixmap: Option<Vec<u8>>,
     /// WM_HINTS initial_state: 1=NormalState, 3=IconicState. Set by ChangeProperty for WM_HINTS.
     pub(crate) wm_hints_initial_state: Option<u32>,

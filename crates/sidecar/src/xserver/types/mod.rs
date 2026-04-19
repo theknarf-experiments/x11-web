@@ -383,14 +383,14 @@ mod tests {
     fn colormap_truecolor_is_not_writable() {
         let cm = ColormapState::new_truecolor(0x21);
         assert!(!cm.is_writable(), "TrueColor colormap must not be writable");
-        assert_eq!(cm.visual_class, 4);
+        assert_eq!(cm.visual_class, x11rb_protocol::protocol::xproto::VisualClass::TRUE_COLOR);
     }
 
     #[test]
     fn colormap_pseudocolor_is_writable() {
         let cm = ColormapState::new_pseudocolor(0x21, 256);
         assert!(cm.is_writable(), "PseudoColor colormap must be writable");
-        assert_eq!(cm.visual_class, 3);
+        assert_eq!(cm.visual_class, x11rb_protocol::protocol::xproto::VisualClass::PSEUDO_COLOR);
         assert_eq!(cm.entries.len(), 256);
     }
 
@@ -398,21 +398,21 @@ mod tests {
     fn colormap_grayscale_is_writable() {
         let cm = ColormapState::new_grayscale(0x21, 256);
         assert!(cm.is_writable());
-        assert_eq!(cm.visual_class, 1);
+        assert_eq!(cm.visual_class, x11rb_protocol::protocol::xproto::VisualClass::GRAY_SCALE);
     }
 
     #[test]
     fn colormap_directcolor_is_writable() {
         let cm = ColormapState::new_directcolor(0x21, 256);
         assert!(cm.is_writable());
-        assert_eq!(cm.visual_class, 5);
+        assert_eq!(cm.visual_class, x11rb_protocol::protocol::xproto::VisualClass::DIRECT_COLOR);
     }
 
     #[test]
     fn colormap_staticgray_is_not_writable() {
         let cm = ColormapState::new_staticgray(0x21, 256);
         assert!(!cm.is_writable());
-        assert_eq!(cm.visual_class, 0);
+        assert_eq!(cm.visual_class, x11rb_protocol::protocol::xproto::VisualClass::STATIC_GRAY);
         // All cells pre-allocated for read-only maps
         assert!(cm.allocated.iter().all(|&a| a));
     }
@@ -424,7 +424,7 @@ mod tests {
         let n = 4;
         let cm = ColormapState {
             visual: 0x21,
-            visual_class: 2, // StaticColor
+            visual_class: x11rb_protocol::protocol::xproto::VisualClass::STATIC_COLOR,
             entries: vec![(0, 0, 0); n],
             allocated: vec![true; n], // read-only: all pre-allocated
             next_free: n,
@@ -433,7 +433,7 @@ mod tests {
             !cm.is_writable(),
             "StaticColor colormap must not be writable"
         );
-        assert_eq!(cm.visual_class, 2);
+        assert_eq!(cm.visual_class, x11rb_protocol::protocol::xproto::VisualClass::STATIC_COLOR);
         // All pre-allocated (read-only)
         assert!(cm.allocated.iter().all(|&a| a));
     }
@@ -855,6 +855,7 @@ mod tests {
 
     fn make_test_window(id: u32, parent: u32) -> WindowState {
         use crate::framebuffer::Framebuffer;
+        use x11rb_protocol::protocol::xproto::{BackingStore, WindowClass};
         WindowState {
             id,
             parent,
@@ -865,7 +866,7 @@ mod tests {
             border_width: 0,
             visual: 0x21,
             depth: 24,
-            class: 1,
+            class: u16::from(WindowClass::INPUT_OUTPUT),
             mapped: false,
             event_mask: 0,
             do_not_propagate_mask: 0,
@@ -886,7 +887,7 @@ mod tests {
             input_shape: None,
             shape_select_clients: Vec::new(),
             colormap: 0,
-            backing_store: 0,
+            backing_store: u32::from(BackingStore::NOT_USEFUL) as u8,
             backing_planes: 0xFFFFFFFF,
             backing_pixel: 0,
             save_under: false,

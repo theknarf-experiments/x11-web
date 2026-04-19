@@ -1328,6 +1328,7 @@ pub(crate) fn build_x11_input_event(
 mod tests {
     use super::*;
     use crate::framebuffer::Framebuffer;
+    use x11rb_protocol::protocol::xproto::{BackingStore, WindowClass};
 
     /// Create a minimal WindowState for testing.
     fn test_window(
@@ -1349,7 +1350,7 @@ mod tests {
             border_width: 0,
             visual: 0x21,
             depth: 24,
-            class: 1,
+            class: u16::from(WindowClass::INPUT_OUTPUT),
             mapped: true,
             event_mask,
             do_not_propagate_mask: 0,
@@ -1370,7 +1371,7 @@ mod tests {
             input_shape: None,
             shape_select_clients: Vec::new(),
             colormap: 0,
-            backing_store: 0,
+            backing_store: u32::from(BackingStore::NOT_USEFUL) as u8,
             backing_planes: 0xFFFFFFFF,
             backing_pixel: 0,
             save_under: false,

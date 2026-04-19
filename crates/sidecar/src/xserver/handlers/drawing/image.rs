@@ -4,7 +4,7 @@ use super::*;
 use crate::xserver::core::require_len;
 use crate::xserver::reply::ReplyBuf;
 use crate::xserver::request::request_header;
-use x11rb_protocol::protocol::xproto::{GetImageRequest, PutImageRequest};
+use x11rb_protocol::protocol::xproto::{GetImageRequest, PutImageRequest, WindowClass};
 
 // ---------------------------------------------------------------------------
 // Opcode 72: PutImage
@@ -463,7 +463,7 @@ pub(crate) fn handle_get_image(state: &mut ClientState, data: &[u8], seq: u16) -
     // Per X11 spec: GetImage on an InputOutput window that is unmapped or
     // has an unmapped ancestor generates BadMatch. Pixmaps are always OK.
     if let Some(win) = state.windows.get(&drawable) {
-        if win.class == 1 && !win.mapped {
+        if win.class == u16::from(WindowClass::INPUT_OUTPUT) && !win.mapped {
             return build_error(MATCH_ERROR, seq, drawable, 73, 0);
         }
         // Also check ancestors are mapped

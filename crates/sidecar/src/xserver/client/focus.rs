@@ -3,7 +3,7 @@
 use x11_web_protocol::DisplayUpdate;
 use x11rb_protocol::protocol::xproto::{
     ClientMessageData, ClientMessageEvent, FocusInEvent, KeymapNotifyEvent, NotifyDetail,
-    NotifyMode,
+    NotifyMode, WindowClass,
 };
 
 use super::super::core::{
@@ -287,7 +287,7 @@ impl ClientState {
         let mut client_windows: Vec<u32> = self
             .windows
             .values()
-            .filter(|w| w.parent == self.root_window && w.class == 1 && w.mapped)
+            .filter(|w| w.parent == self.root_window && w.class == u16::from(WindowClass::INPUT_OUTPUT) && w.mapped)
             .map(|w| w.id)
             .collect();
         client_windows.sort(); // Deterministic order
@@ -308,7 +308,7 @@ impl ClientState {
                     .filter(|&&cid| {
                         self.windows
                             .get(&cid)
-                            .is_some_and(|w| w.class == 1 && w.mapped)
+                            .is_some_and(|w| w.class == u16::from(WindowClass::INPUT_OUTPUT) && w.mapped)
                     })
                     .copied()
                     .collect()

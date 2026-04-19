@@ -1,14 +1,16 @@
 //! Colormap state for TrueColor, PseudoColor, DirectColor, GrayScale,
 //! StaticGray, and StaticColor visuals.
 
+use x11rb_protocol::protocol::xproto::VisualClass;
+
 /// Colormap state for both TrueColor (read-only) and PseudoColor (writable) visuals.
 #[derive(Clone)]
 pub(crate) struct ColormapState {
     /// Visual ID this colormap is associated with.
     #[allow(dead_code)]
     pub(crate) visual: u32,
-    /// Visual class: 0=StaticGray, 1=GrayScale, 2=StaticColor, 3=PseudoColor, 4=TrueColor, 5=DirectColor
-    pub(crate) visual_class: u8,
+    /// Visual class of this colormap.
+    pub(crate) visual_class: VisualClass,
     /// Color table entries for PseudoColor/GrayScale (index → RGB). Up to 256 entries for depth 8.
     pub(crate) entries: Vec<(u16, u16, u16)>,
     /// Flags for whether each cell has been allocated (PseudoColor).
@@ -22,7 +24,7 @@ impl ColormapState {
     pub(crate) fn new_truecolor(visual: u32) -> Self {
         Self {
             visual,
-            visual_class: 4, // TrueColor
+            visual_class: VisualClass::TRUE_COLOR,
             entries: Vec::new(),
             allocated: Vec::new(),
             next_free: 0,
@@ -40,7 +42,7 @@ impl ColormapState {
         }
         Self {
             visual,
-            visual_class: 3, // PseudoColor
+            visual_class: VisualClass::PSEUDO_COLOR,
             entries,
             allocated: vec![false; n_entries],
             next_free: 0,
@@ -56,7 +58,7 @@ impl ColormapState {
         }
         Self {
             visual,
-            visual_class: 5, // DirectColor
+            visual_class: VisualClass::DIRECT_COLOR,
             entries,
             allocated: vec![false; n_entries],
             next_free: 0,
@@ -72,7 +74,7 @@ impl ColormapState {
         }
         Self {
             visual,
-            visual_class: 1, // GrayScale
+            visual_class: VisualClass::GRAY_SCALE,
             entries,
             allocated: vec![false; n_entries],
             next_free: 0,
@@ -88,7 +90,7 @@ impl ColormapState {
         }
         Self {
             visual,
-            visual_class: 0, // StaticGray
+            visual_class: VisualClass::STATIC_GRAY,
             entries,
             allocated: vec![true; n_entries], // read-only: all pre-allocated
             next_free: n_entries,
@@ -111,7 +113,7 @@ impl ColormapState {
         }
         Self {
             visual,
-            visual_class: 2, // StaticColor
+            visual_class: VisualClass::STATIC_COLOR,
             entries,
             allocated: vec![true; n_entries], // read-only: all pre-allocated
             next_free: n_entries,
@@ -120,12 +122,16 @@ impl ColormapState {
 
     /// Is this a writable colormap (PseudoColor, GrayScale, or DirectColor)?
     pub(crate) fn is_writable(&self) -> bool {
-        matches!(self.visual_class, 1 | 3 | 5) // GrayScale, PseudoColor, DirectColor
+        matches!(
+            self.visual_class,
+            VisualClass::GRAY_SCALE | VisualClass::PSEUDO_COLOR | VisualClass::DIRECT_COLOR
+        )
     }
 
     /// Look up the RGB value for a pixel index.
     pub(crate) fn lookup(&self, pixel: u32) -> (u16, u16, u16) {
-        match self.visual_class {
+        let vc = u8::from(self.visual_class);
+        match vc {
             5 => {
                 // DirectColor: decompose pixel into per-channel indices and look up each
                 let ri = ((pixel >> 16) & 0xFF) as usize;
@@ -169,7 +175,8 @@ impl ColormapState {
 
     /// Allocate a color cell and return the pixel index.
     pub(crate) fn alloc_color(&mut self, r: u16, g: u16, b: u16) -> Option<u32> {
-        match self.visual_class {
+        let vc = u8::from(self.visual_class);
+        match vc {
             4 => {
                 // TrueColor: compute pixel directly
                 let pixel =

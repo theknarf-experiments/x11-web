@@ -4,7 +4,7 @@ use super::*;
 use crate::xserver::core::require_len;
 use crate::xserver::request::request_header;
 use x11rb_protocol::protocol::xproto::{
-    CreateWindowRequest, DestroySubwindowsRequest, DestroyWindowRequest,
+    BackingStore, CreateWindowRequest, DestroySubwindowsRequest, DestroyWindowRequest, WindowClass,
 };
 
 // ---------------------------------------------------------------------------
@@ -41,9 +41,13 @@ pub(crate) fn handle_create_window(state: &mut ClientState, data: &[u8], _seq: u
     }
 
     // Per X11 spec: class 0 = CopyFromParent, resolved to parent's class.
-    // Root window is always InputOutput (1).
-    let class = if raw_class == 0 {
-        state.windows.get(&parent).map(|w| w.class).unwrap_or(1)
+    // Root window is always InputOutput.
+    let class = if raw_class == u16::from(WindowClass::COPY_FROM_PARENT) {
+        state
+            .windows
+            .get(&parent)
+            .map(|w| w.class)
+            .unwrap_or(u16::from(WindowClass::INPUT_OUTPUT))
     } else {
         raw_class
     };
@@ -75,7 +79,7 @@ pub(crate) fn handle_create_window(state: &mut ClientState, data: &[u8], _seq: u
 
     // Per X11 spec: if depth is specified (non-zero) and doesn't match the
     // visual's depth, return BadMatch.  0 means CopyFromParent.
-    let is_input_only_class = class == 2;
+    let is_input_only_class = class == u16::from(WindowClass::INPUT_ONLY);
     if req_depth != 0 && !is_input_only_class {
         let use_visual = if visual == 0 { ROOT_VISUAL } else { visual };
         let visual_depth = crate::xserver::core::depth_for_visual(use_visual);
@@ -104,8 +108,8 @@ pub(crate) fn handle_create_window(state: &mut ClientState, data: &[u8], _seq: u
     }
     let win_gravity: u8 = win_gravity_val as u8; // default NorthWest (1)
 
-    let backing_store_val: u32 = vl.backing_store.map(u32::from).unwrap_or(0);
-    if vl.backing_store.is_some() && backing_store_val > 2 {
+    let backing_store_val: u32 = vl.backing_store.map(u32::from).unwrap_or(u32::from(BackingStore::NOT_USEFUL));
+    if vl.backing_store.is_some() && backing_store_val > u32::from(BackingStore::ALWAYS) {
         return build_error(VALUE_ERROR, _seq, backing_store_val, 1, 0);
     }
     let backing_store: u8 = backing_store_val as u8;
@@ -153,9 +157,9 @@ pub(crate) fn handle_create_window(state: &mut ClientState, data: &[u8], _seq: u
 
     info!("CreateWindow: id={wid:#x} parent={parent:#x} {x},{y} {width}x{height} depth={req_depth} class={class} visual={visual:#x} bg={background_pixel:#x}");
 
-    // InputOnly windows (class=2) must not have backgrounds, borders, or framebuffers.
+    // InputOnly windows must not have backgrounds, borders, or framebuffers.
     // They exist only to receive events. Per spec, depth must be 0 for InputOnly.
-    let is_input_only = class == 2;
+    let is_input_only = class == u16::from(WindowClass::INPUT_ONLY);
     let use_depth = if is_input_only {
         0
     } else {
@@ -204,7 +208,7 @@ pub(crate) fn handle_create_window(state: &mut ClientState, data: &[u8], _seq: u
             input_shape: None,
             shape_select_clients: Vec::new(),
             colormap: colormap_id,
-            backing_store: if is_input_only { 0 } else { backing_store },
+            backing_store: if is_input_only { u32::from(BackingStore::NOT_USEFUL) as u8 } else { backing_store },
             backing_planes: if is_input_only {
                 0xFFFFFFFF
             } else {
@@ -284,7 +288,8 @@ pub(crate) fn handle_create_window(state: &mut ClientState, data: &[u8], _seq: u
         );
     }
 
-    let is_top_level = parent == state.root_window && class == 1 && !override_redirect;
+    let is_top_level =
+        parent == state.root_window && class == u16::from(WindowClass::INPUT_OUTPUT) && !override_redirect;
     let wid_str = state.get_or_create_window_uuid(wid);
     let _ = state.update_tx.send((
         state.client_id.clone(),

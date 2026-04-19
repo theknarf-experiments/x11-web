@@ -6,9 +6,9 @@ use crate::xserver::core::require_len;
 use crate::xserver::event::serialize_event;
 use crate::xserver::request::request_header;
 use x11rb_protocol::protocol::xproto::{
-    ExposeEvent, MapNotifyEvent, MapRequestEvent, MapWindowRequest,
+    BackingStore, ExposeEvent, MapNotifyEvent, MapRequestEvent, MapWindowRequest,
     UnmapNotifyEvent, UnmapWindowRequest, MapSubwindowsRequest, UnmapSubwindowsRequest,
-    VisibilityNotifyEvent, Visibility,
+    VisibilityNotifyEvent, Visibility, WindowClass,
 };
 
 // ---------------------------------------------------------------------------
@@ -143,8 +143,9 @@ pub(crate) fn handle_map_window(state: &mut ClientState, data: &[u8], seq: u16) 
             "MapWindow: id={wid:#x} {}x{} mapped={}",
             win.width, win.height, win.mapped
         );
-        let is_top_level =
-            win.parent == state.root_window && win.class == 1 && !win.override_redirect;
+        let is_top_level = win.parent == state.root_window
+            && win.class == u16::from(WindowClass::INPUT_OUTPUT)
+            && !win.override_redirect;
         win.mapped = true;
 
         let w = win.width;
@@ -152,7 +153,7 @@ pub(crate) fn handle_map_window(state: &mut ClientState, data: &[u8], seq: u16) 
         let bs = win.backing_store;
 
         // Backing store: restore saved pixels instead of filling with background
-        let restored = if bs > 0 {
+        let restored = if bs != u32::from(BackingStore::NOT_USEFUL) as u8 {
             if let Some(saved) = win.backing_pixmap.take() {
                 let fb_w = win.framebuffer.width();
                 let fb_h = win.framebuffer.height();
@@ -378,7 +379,11 @@ pub(crate) fn handle_map_window(state: &mut ClientState, data: &[u8], seq: u16) 
     let is_top_level_for_ewmh = state
         .windows
         .get(&wid)
-        .is_some_and(|w| w.parent == state.root_window && w.class == 1 && !w.override_redirect);
+        .is_some_and(|w| {
+            w.parent == state.root_window
+                && w.class == u16::from(WindowClass::INPUT_OUTPUT)
+                && !w.override_redirect
+        });
 
     // Set _NET_WM_STATE to empty (NormalState) if not already set
     let net_wm_state_atom = state.intern_atom("_NET_WM_STATE", false);
@@ -558,7 +563,7 @@ pub(crate) fn handle_unmap_window(state: &mut ClientState, data: &[u8], seq: u16
         // Save framebuffer pixels if backing store is enabled.
         // Apply backing_planes mask: only preserve bits in backing_planes,
         // filling other bits with backing_pixel on restore.
-        if win.backing_store > 0 && win.mapped {
+        if win.backing_store != u32::from(BackingStore::NOT_USEFUL) as u8 && win.mapped {
             let planes = win.backing_planes;
             if planes == 0xFFFFFFFF {
                 // All planes — simple full copy

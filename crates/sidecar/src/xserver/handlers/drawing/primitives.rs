@@ -9,6 +9,7 @@ use x11rb_protocol::protocol::xproto::{
     ExposeEvent, FillPolyRequest, GraphicsExposureEvent, NoExposureEvent,
     PolyArcRequest, PolyFillArcRequest, PolyFillRectangleRequest,
     PolyLineRequest, PolyPointRequest, PolyRectangleRequest, PolySegmentRequest,
+    WindowClass,
 };
 
 // ---------------------------------------------------------------------------
@@ -29,7 +30,7 @@ pub(crate) fn handle_clear_area(state: &mut ClientState, data: &[u8], _seq: u16)
         return build_error(WINDOW_ERROR, state.sequence, wid, 61, 0);
     }
     // Per X11 spec: ClearArea on an InputOnly window generates BadMatch.
-    if state.windows.get(&wid).is_some_and(|w| w.class == 2) {
+    if state.windows.get(&wid).is_some_and(|w| w.class == u16::from(WindowClass::INPUT_ONLY)) {
         return build_error(MATCH_ERROR, state.sequence, wid, 61, 0);
     }
 

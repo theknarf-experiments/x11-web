@@ -5,7 +5,7 @@ use super::*;
 use crate::xserver::core::require_len;
 use crate::xserver::event::serialize_event;
 use crate::xserver::reply::ReplyBuf;
-use x11rb_protocol::protocol::xproto::PropertyNotifyEvent;
+use x11rb_protocol::protocol::xproto::{PropMode, PropertyNotifyEvent};
 
 // ---------------------------------------------------------------------------
 // Opcode 18: ChangeProperty
@@ -57,8 +57,9 @@ pub(crate) fn handle_change_property(state: &mut ClientState, data: &[u8]) -> Ve
     {
         let new_data = req.data[..byte_len].to_vec();
         if let Some(win) = state.windows.get_mut(&window) {
-            match mode {
-                1 => {
+            let prop_mode = PropMode::from(mode);
+            match prop_mode {
+                PropMode::PREPEND => {
                     // Prepend: new data before existing data (must match type and format)
                     if let Some(existing) = win.properties.get_mut(&property_atom) {
                         if existing.prop_type == prop_type && existing.format == format {
@@ -87,7 +88,7 @@ pub(crate) fn handle_change_property(state: &mut ClientState, data: &[u8]) -> Ve
                         );
                     }
                 }
-                2 => {
+                PropMode::APPEND => {
                     // Append: existing data before new data (must match type and format)
                     if let Some(existing) = win.properties.get_mut(&property_atom) {
                         if existing.prop_type == prop_type && existing.format == format {
@@ -114,7 +115,7 @@ pub(crate) fn handle_change_property(state: &mut ClientState, data: &[u8]) -> Ve
                     }
                 }
                 _ => {
-                    // Replace (mode 0 or any other value)
+                    // Replace (PropMode::REPLACE or any other value)
                     win.properties.insert(
                         property_atom,
                         PropertyValue {

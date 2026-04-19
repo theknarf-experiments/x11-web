@@ -42,6 +42,7 @@ use tracing::{debug, error, info, warn};
 use uuid::Uuid;
 
 use crate::framebuffer::Framebuffer;
+use x11rb_protocol::protocol::xproto::{BackingStore, WindowClass};
 
 use self::atoms::AtomManager;
 use self::core::*;
@@ -545,7 +546,7 @@ impl X11Server {
                     border_width: 0,
                     visual: ROOT_VISUAL,
                     depth: 24,
-                    class: 1,
+                    class: u16::from(WindowClass::INPUT_OUTPUT),
                     mapped: true,
                     event_mask: 0,
                     do_not_propagate_mask: 0,
@@ -566,7 +567,7 @@ impl X11Server {
                     input_shape: None,
                     shape_select_clients: Vec::new(),
                     colormap: ROOT_COLORMAP,
-                    backing_store: 0,
+                    backing_store: u32::from(BackingStore::NOT_USEFUL) as u8,
                     backing_planes: 0xFFFFFFFF,
                     backing_pixel: 0,
                     save_under: false,
@@ -600,7 +601,7 @@ impl X11Server {
                     border_width: 0,
                     visual: 0,
                     depth: 0,
-                    class: 2, // InputOnly
+                    class: u16::from(WindowClass::INPUT_ONLY),
                     mapped: false,
                     event_mask: 0,
                     do_not_propagate_mask: 0,
@@ -621,7 +622,7 @@ impl X11Server {
                     input_shape: None,
                     shape_select_clients: Vec::new(),
                     colormap: ROOT_COLORMAP,
-                    backing_store: 0,
+                    backing_store: u32::from(BackingStore::NOT_USEFUL) as u8,
                     backing_planes: 0xFFFFFFFF,
                     backing_pixel: 0,
                     save_under: false,
@@ -669,7 +670,7 @@ impl X11Server {
                     border_width: 0,
                     visual: 0,
                     depth: 0,
-                    class: 2, // InputOnly
+                    class: u16::from(WindowClass::INPUT_ONLY),
                     mapped: false,
                     event_mask: 0,
                     do_not_propagate_mask: 0,
@@ -690,7 +691,7 @@ impl X11Server {
                     input_shape: None,
                     shape_select_clients: Vec::new(),
                     colormap: ROOT_COLORMAP,
-                    backing_store: 0,
+                    backing_store: u32::from(BackingStore::NOT_USEFUL) as u8,
                     backing_planes: 0xFFFFFFFF,
                     backing_pixel: 0,
                     save_under: false,
@@ -794,7 +795,7 @@ impl X11Server {
                     border_width: 0,
                     visual: 0,
                     depth: 0,
-                    class: 2, // InputOnly
+                    class: u16::from(WindowClass::INPUT_ONLY),
                     mapped: false,
                     event_mask: 0,
                     do_not_propagate_mask: 0,
@@ -815,7 +816,7 @@ impl X11Server {
                     input_shape: None,
                     shape_select_clients: Vec::new(),
                     colormap: ROOT_COLORMAP,
-                    backing_store: 0,
+                    backing_store: u32::from(BackingStore::NOT_USEFUL) as u8,
                     backing_planes: 0xFFFFFFFF,
                     backing_pixel: 0,
                     save_under: false,
@@ -905,7 +906,7 @@ vi_VN,vi_VN.UTF-8".to_vec(),
                     border_width: 0,
                     visual: 0,
                     depth: 0,
-                    class: 2, // InputOnly
+                    class: u16::from(WindowClass::INPUT_ONLY),
                     mapped: false,
                     event_mask: 0,
                     do_not_propagate_mask: 0,
@@ -926,7 +927,7 @@ vi_VN,vi_VN.UTF-8".to_vec(),
                     input_shape: None,
                     shape_select_clients: Vec::new(),
                     colormap: ROOT_COLORMAP,
-                    backing_store: 0,
+                    backing_store: u32::from(BackingStore::NOT_USEFUL) as u8,
                     backing_planes: 0xFFFFFFFF,
                     backing_pixel: 0,
                     save_under: false,

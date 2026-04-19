@@ -5,6 +5,7 @@ use tracing::{debug, info, warn};
 use super::super::client::ClientState;
 use super::super::core::{OVERLAY_WINDOW, ROOT_COLORMAP};
 use super::super::types::{DamageInfo, PixmapState, WindowState, WindowType};
+use x11rb_protocol::protocol::xproto::{BackingStore, WindowClass};
 use crate::xserver::reply::ReplyBuf;
 use crate::xserver::request::request_header;
 use x11rb_protocol::protocol::composite::{
@@ -392,7 +393,7 @@ pub(crate) fn handle_x_composite_request(
                     border_width: 0,
                     visual: 0x40, // 32-bit ARGB visual for compositing
                     depth: 32,
-                    class: 1, // InputOutput
+                    class: u16::from(WindowClass::INPUT_OUTPUT),
                     mapped: true,
                     event_mask: 0,
                     do_not_propagate_mask: 0,
@@ -413,7 +414,7 @@ pub(crate) fn handle_x_composite_request(
                     input_shape: None,
                     shape_select_clients: Vec::new(),
                     colormap: ROOT_COLORMAP,
-                    backing_store: 0,
+                    backing_store: u32::from(BackingStore::NOT_USEFUL) as u8,
                     backing_planes: 0xFFFFFFFF,
                     backing_pixel: 0,
                     save_under: false,

@@ -6,7 +6,7 @@ use super::super::types::*;
 use super::ClientState;
 use crate::xserver::event::serialize_event;
 use x11rb_protocol::protocol::damage::{self, ReportLevel};
-use x11rb_protocol::protocol::xproto::Rectangle;
+use x11rb_protocol::protocol::xproto::{Rectangle, WindowClass};
 
 impl ClientState {
     /// Sync SHM-backed pixmap data before reading.
@@ -136,7 +136,7 @@ impl ClientState {
                     && w.framebuffer.is_dirty()
                     && w.parent != self.root_window
                     && w.parent != 0
-                    && w.class == 1
+                    && w.class == u16::from(WindowClass::INPUT_OUTPUT)
             })
             .map(|(_, w)| (w.id, w.width, w.height, w.redirected))
             .collect();
@@ -196,7 +196,7 @@ impl ClientState {
             .windows
             .iter()
             .filter(|(_, w)| {
-                w.mapped && w.framebuffer.is_dirty() && w.parent == self.root_window && w.class == 1
+                w.mapped && w.framebuffer.is_dirty() && w.parent == self.root_window && w.class == u16::from(WindowClass::INPUT_OUTPUT)
             })
             .map(|(id, _)| *id)
             .collect();
