@@ -32,6 +32,7 @@ use crate::osmesa::MesaContext;
 
 use super::super::client::ClientState;
 use crate::xserver::core::require_len;
+use crate::xserver::request::request_header;
 
 // ---------------------------------------------------------------------------
 // GLX extension constants
@@ -218,36 +219,28 @@ pub(crate) fn handle_glx_request(state: &mut ClientState, data: &[u8], seq: u16)
         GLX_QUERY_EXTENSIONS_STRING => query::handle_query_extensions_string(data, seq),
         GLX_QUERY_SERVER_STRING => query::handle_query_server_string(data, seq),
         GLX_CLIENT_INFO => {
-            if data.len() >= 16 {
-                let major = state.read_u32(data, 4);
-                let minor = state.read_u32(data, 8);
-                let str_len = state.read_u32(data, 12) as usize;
-                let client_str = if data.len() >= 16 + str_len && str_len > 0 {
-                    String::from_utf8_lossy(&data[16..16 + str_len])
-                        .trim_end_matches('\0')
-                        .to_string()
-                } else {
-                    String::new()
-                };
+            use x11rb_protocol::protocol::glx::ClientInfoRequest;
+            if let Ok(req) = ClientInfoRequest::try_parse_request(request_header(data), &data[4..]) {
+                let major = req.major_version;
+                let minor = req.minor_version;
+                let client_str = String::from_utf8_lossy(&req.string)
+                    .trim_end_matches('\0')
+                    .to_string();
                 debug!("GLX ClientInfo: version {major}.{minor}, extensions: {client_str}");
             }
             Vec::new()
         }
         GLX_SET_CLIENT_INFO_ARB | GLX_SET_CLIENT_INFO_2ARB => {
-            if data.len() >= 20 {
-                let major = state.read_u32(data, 4);
-                let minor = state.read_u32(data, 8);
-                let num_versions = state.read_u32(data, 12);
-                let str_len = state.read_u32(data, 16) as usize;
-                let versions_bytes = (num_versions as usize) * 8; // each version pair is 2 x u32
-                let str_offset = 20 + versions_bytes;
-                let client_str = if data.len() >= str_offset + str_len && str_len > 0 {
-                    String::from_utf8_lossy(&data[str_offset..str_offset + str_len])
-                        .trim_end_matches('\0')
-                        .to_string()
-                } else {
-                    String::new()
-                };
+            // SetClientInfoARB and SetClientInfo2ARB have the same overall structure.
+            // Use SetClientInfoArbRequest for parsing (works for both minor opcodes).
+            use x11rb_protocol::protocol::glx::SetClientInfoARBRequest;
+            if let Ok(req) = SetClientInfoARBRequest::try_parse_request(request_header(data), &data[4..]) {
+                let major = req.major_version;
+                let minor = req.minor_version;
+                let num_versions = req.gl_versions.len();
+                let client_str = String::from_utf8_lossy(&req.gl_extension_string)
+                    .trim_end_matches('\0')
+                    .to_string();
                 debug!(
                     "GLX SetClientInfo: version {major}.{minor}, num_versions: {num_versions}, extensions: {client_str}"
                 );
@@ -271,8 +264,9 @@ pub(crate) fn handle_glx_request(state: &mut ClientState, data: &[u8], seq: u16)
             // Vendor private requests have no reply per the GLX spec.
             // Log the vendor code for diagnostics but otherwise succeed silently
             // since returning an error would break clients using common vendor ops.
-            if data.len() >= 8 {
-                let vendor_code = state.read_u32(data, 4);
+            use x11rb_protocol::protocol::glx::VendorPrivateRequest;
+            if let Ok(req) = VendorPrivateRequest::try_parse_request(request_header(data), &data[4..]) {
+                let vendor_code = req.vendor_code;
                 debug!("GLX VendorPrivate: vendor_code={vendor_code}");
             }
             Vec::new()

@@ -5,6 +5,7 @@ use tracing::debug;
 
 use super::super::super::client::ClientState;
 use crate::xserver::reply::ReplyBuf;
+use crate::xserver::request::request_header;
 use super::{
     XV_ATTR_BRIGHTNESS, XV_ATTR_COLORSPACE, XV_ATTR_CONTRAST, XV_ATTR_HUE, XV_ATTR_SATURATION,
 };
@@ -19,7 +20,12 @@ pub(crate) fn handle_port_request(
         3 => {
             // XvGrabPort
             if data.len() >= 8 {
-                let port = state.read_u32(data, 4);
+                use x11rb_protocol::protocol::xv::GrabPortRequest;
+                let req = match GrabPortRequest::try_parse_request(request_header(data), &data[4..]) {
+                    Ok(r) => r,
+                    Err(_) => return Vec::new(),
+                };
+                let port = req.port;
                 debug!("XVideo GrabPort: port={port}");
                 // Ensure port state exists and mark as grabbed
                 let ps = state.xv_ports.entry(port).or_default();
@@ -40,7 +46,12 @@ pub(crate) fn handle_port_request(
         4 => {
             // XvUngrabPort
             if data.len() >= 8 {
-                let port = state.read_u32(data, 4);
+                use x11rb_protocol::protocol::xv::UngrabPortRequest;
+                let req = match UngrabPortRequest::try_parse_request(request_header(data), &data[4..]) {
+                    Ok(r) => r,
+                    Err(_) => return Vec::new(),
+                };
+                let port = req.port;
                 debug!("XVideo UngrabPort: port={port}");
                 if let Some(ps) = state.xv_ports.get_mut(&port) {
                     ps.grabbed = false;
@@ -50,20 +61,24 @@ pub(crate) fn handle_port_request(
         }
         9 => {
             // XvQueryBestSize
+            use x11rb_protocol::protocol::xv::QueryBestSizeRequest;
             let mut reply = ReplyBuf::fixed(seq, state.msb_first);
-            if data.len() >= 16 {
-                let w = state.read_u16(data, 8);
-                let h = state.read_u16(data, 10);
-                reply = reply.set_u16(8, w).set_u16(10, h);
+            if let Ok(req) = QueryBestSizeRequest::try_parse_request(request_header(data), &data[4..]) {
+                reply = reply.set_u16(8, req.vid_w).set_u16(10, req.vid_h);
             }
             reply.build()
         }
         10 => {
             // XvSetPortAttribute
             if data.len() >= 16 {
-                let port = state.read_u32(data, 4);
-                let atom = state.read_u32(data, 8);
-                let value = state.read_u32(data, 12) as i32;
+                use x11rb_protocol::protocol::xv::SetPortAttributeRequest;
+                let req = match SetPortAttributeRequest::try_parse_request(request_header(data), &data[4..]) {
+                    Ok(r) => r,
+                    Err(_) => return Vec::new(),
+                };
+                let port = req.port;
+                let atom = req.attribute;
+                let value = req.value;
 
                 let name = state.get_atom_name(atom).unwrap_or_default();
                 let ps = state.xv_ports.entry(port).or_default();
@@ -93,8 +108,13 @@ pub(crate) fn handle_port_request(
         11 => {
             // XvGetPortAttribute
             if data.len() >= 12 {
-                let port = state.read_u32(data, 4);
-                let atom = state.read_u32(data, 8);
+                use x11rb_protocol::protocol::xv::GetPortAttributeRequest;
+                let req = match GetPortAttributeRequest::try_parse_request(request_header(data), &data[4..]) {
+                    Ok(r) => r,
+                    Err(_) => return Vec::new(),
+                };
+                let port = req.port;
+                let atom = req.attribute;
 
                 let name = state.get_atom_name(atom).unwrap_or_default();
                 let ps = state.xv_ports.entry(port).or_default();

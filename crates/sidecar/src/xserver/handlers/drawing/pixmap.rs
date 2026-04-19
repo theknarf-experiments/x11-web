@@ -2,6 +2,7 @@
 
 use super::*;
 use crate::xserver::core::require_len;
+use crate::xserver::request::request_header;
 
 // ---------------------------------------------------------------------------
 // Opcode 53: CreatePixmap
@@ -10,8 +11,13 @@ use crate::xserver::core::require_len;
 pub(crate) fn handle_create_pixmap(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
     require_len!(data, 16, state.sequence, 53);
 
-    let depth = data[1];
-    let pid = state.read_u32(data, 4);
+    use x11rb_protocol::protocol::xproto::CreatePixmapRequest;
+    let req = match CreatePixmapRequest::try_parse_request(request_header(data), &data[4..]) {
+        Ok(r) => r,
+        Err(_) => return build_error(LENGTH_ERROR, state.sequence, 0, 53, 0),
+    };
+    let depth = req.depth;
+    let pid = req.pid;
 
     // Validate resource ID is within this client's allocated range
     if !state.validate_resource_id(pid) {
@@ -23,9 +29,9 @@ pub(crate) fn handle_create_pixmap(state: &mut ClientState, data: &[u8]) -> Vec<
         return build_error(ALLOC_ERROR, state.sequence, pid, 53, 0);
     }
 
-    let _drawable = state.read_u32(data, 8);
-    let width = state.read_u16(data, 12);
-    let height = state.read_u16(data, 14);
+    let _drawable = req.drawable;
+    let width = req.width;
+    let height = req.height;
 
     // Validate: width and height must be non-zero and within bounds
     if width == 0 || height == 0 {
@@ -74,7 +80,12 @@ pub(crate) fn handle_create_pixmap(state: &mut ClientState, data: &[u8]) -> Vec<
 
 pub(crate) fn handle_free_pixmap(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
     require_len!(data, 8, state.sequence, 54);
-    let pid = state.read_u32(data, 4);
+    use x11rb_protocol::protocol::xproto::FreePixmapRequest;
+    let req = match FreePixmapRequest::try_parse_request(request_header(data), &data[4..]) {
+        Ok(r) => r,
+        Err(_) => return build_error(LENGTH_ERROR, state.sequence, 0, 54, 0),
+    };
+    let pid = req.pixmap;
     if !state.pixmaps.contains_key(&pid) {
         return build_error(PIXMAP_ERROR, state.sequence, pid, 54, 0);
     }

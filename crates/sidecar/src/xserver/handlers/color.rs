@@ -747,7 +747,12 @@ pub(crate) fn handle_store_named_color(state: &mut ClientState, data: &[u8]) -> 
 pub(crate) fn handle_create_cursor(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
     require_len!(data, 32, state.sequence, 93);
 
-    let cid = state.read_u32(data, 4);
+    use x11rb_protocol::protocol::xproto::CreateCursorRequest;
+    let req = match CreateCursorRequest::try_parse_request(request_header(data), &data[4..]) {
+        Ok(r) => r,
+        Err(_) => return build_error(LENGTH_ERROR, state.sequence, 0, 93, 0),
+    };
+    let cid = req.cid;
 
     // Validate resource ID is within this client's allocated range
     if !state.validate_resource_id(cid) {
@@ -762,8 +767,8 @@ pub(crate) fn handle_create_cursor(state: &mut ClientState, data: &[u8]) -> Vec<
         return build_error(ID_CHOICE_ERROR, state.sequence, cid, 93, 0);
     }
 
-    let source_pixmap = state.read_u32(data, 8);
-    let mask_pixmap = state.read_u32(data, 12);
+    let source_pixmap = req.source;
+    let mask_pixmap = req.mask;
 
     // Per X11 spec: source pixmap must exist and have depth 1
     if !state.pixmaps.contains_key(&source_pixmap) {
@@ -774,14 +779,14 @@ pub(crate) fn handle_create_cursor(state: &mut ClientState, data: &[u8]) -> Vec<
         return build_error(PIXMAP_ERROR, state.sequence, mask_pixmap, 93, 0);
     }
 
-    let fore_red = state.read_u16(data, 16);
-    let fore_green = state.read_u16(data, 18);
-    let fore_blue = state.read_u16(data, 20);
-    let back_red = state.read_u16(data, 22);
-    let back_green = state.read_u16(data, 24);
-    let back_blue = state.read_u16(data, 26);
-    let hotspot_x = state.read_u16(data, 28);
-    let hotspot_y = state.read_u16(data, 30);
+    let fore_red = req.fore_red;
+    let fore_green = req.fore_green;
+    let fore_blue = req.fore_blue;
+    let back_red = req.back_red;
+    let back_green = req.back_green;
+    let back_blue = req.back_blue;
+    let hotspot_x = req.x;
+    let hotspot_y = req.y;
 
     // Read the source pixmap dimensions and pixel data to build ARGB cursor bitmap.
     let (width, height, argb_data) = build_cursor_argb(
@@ -921,7 +926,12 @@ fn build_cursor_argb(
 
 pub(crate) fn handle_create_glyph_cursor(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
     require_len!(data, 32, state.sequence, 94);
-    let cid = state.read_u32(data, 4);
+    use x11rb_protocol::protocol::xproto::CreateGlyphCursorRequest;
+    let req = match CreateGlyphCursorRequest::try_parse_request(request_header(data), &data[4..]) {
+        Ok(r) => r,
+        Err(_) => return build_error(LENGTH_ERROR, state.sequence, 0, 94, 0),
+    };
+    let cid = req.cid;
 
     // Validate resource ID is within this client's allocated range
     if !state.validate_resource_id(cid) {
@@ -936,13 +946,13 @@ pub(crate) fn handle_create_glyph_cursor(state: &mut ClientState, data: &[u8]) -
         return build_error(ID_CHOICE_ERROR, state.sequence, cid, 94, 0);
     }
 
-    let source_char = state.read_u16(data, 16);
-    let fore_red = state.read_u16(data, 20);
-    let fore_green = state.read_u16(data, 22);
-    let fore_blue = state.read_u16(data, 24);
-    let back_red = state.read_u16(data, 26);
-    let back_green = state.read_u16(data, 28);
-    let back_blue = state.read_u16(data, 30);
+    let source_char = req.source_char;
+    let fore_red = req.fore_red;
+    let fore_green = req.fore_green;
+    let fore_blue = req.fore_blue;
+    let back_red = req.back_red;
+    let back_green = req.back_green;
+    let back_blue = req.back_blue;
 
     let css_name = glyph_to_css_cursor(source_char).to_string();
     info!("CreateGlyphCursor: id={cid:#x} glyph={source_char} -> \"{css_name}\"");
@@ -978,7 +988,12 @@ pub(crate) fn handle_create_glyph_cursor(state: &mut ClientState, data: &[u8]) -
 
 pub(crate) fn handle_free_cursor(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
     require_len!(data, 8, state.sequence, 95);
-    let cid = state.read_u32(data, 4);
+    use x11rb_protocol::protocol::xproto::FreeCursorRequest;
+    let req = match FreeCursorRequest::try_parse_request(request_header(data), &data[4..]) {
+        Ok(r) => r,
+        Err(_) => return build_error(LENGTH_ERROR, state.sequence, 0, 95, 0),
+    };
+    let cid = req.cursor;
     // Validate cursor exists
     if !state.cursors.contains_key(&cid) {
         return build_error(CURSOR_ERROR, state.sequence, cid, 95, 0);
@@ -996,17 +1011,22 @@ pub(crate) fn handle_free_cursor(state: &mut ClientState, data: &[u8]) -> Vec<u8
 pub(crate) fn handle_recolor_cursor(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
     require_len!(data, 20, state.sequence, 96);
 
-    let cid = state.read_u32(data, 4);
+    use x11rb_protocol::protocol::xproto::RecolorCursorRequest;
+    let req = match RecolorCursorRequest::try_parse_request(request_header(data), &data[4..]) {
+        Ok(r) => r,
+        Err(_) => return build_error(LENGTH_ERROR, state.sequence, 0, 96, 0),
+    };
+    let cid = req.cursor;
     // Validate cursor exists
     if !state.cursors.contains_key(&cid) {
         return build_error(CURSOR_ERROR, state.sequence, cid, 96, 0);
     }
-    let fore_red = state.read_u16(data, 8);
-    let fore_green = state.read_u16(data, 10);
-    let fore_blue = state.read_u16(data, 12);
-    let back_red = state.read_u16(data, 14);
-    let back_green = state.read_u16(data, 16);
-    let back_blue = state.read_u16(data, 18);
+    let fore_red = req.fore_red;
+    let fore_green = req.fore_green;
+    let fore_blue = req.fore_blue;
+    let back_red = req.back_red;
+    let back_green = req.back_green;
+    let back_blue = req.back_blue;
 
     // First, rebuild ARGB data if this is a bitmap cursor
     let rebuilt = state.cursor_info.get(&cid).and_then(|info| {

@@ -4,12 +4,13 @@ use tracing::{debug, info};
 
 use super::super::super::client::ClientState;
 use crate::xserver::reply::ReplyBuf;
+use crate::xserver::request::request_header;
 
 /// RRSelectInput (4) — select RandR events.
 pub(crate) fn handle_select_input(state: &mut ClientState, data: &[u8], _seq: u16) -> Vec<u8> {
-    if data.len() >= 12 {
-        let _window = state.read_u32(data, 4);
-        let enable = state.read_u16(data, 8);
+    use x11rb_protocol::protocol::randr::SelectInputRequest;
+    if let Ok(req) = SelectInputRequest::try_parse_request(request_header(data), &data[4..]) {
+        let enable = u16::from(req.enable);
         state.randr_event_mask = enable as u32;
         debug!("RRSelectInput mask=0x{:04x}", enable);
     }
@@ -52,9 +53,10 @@ pub(crate) fn handle_get_screen_size_range(
 
 /// RRSetScreenSize (7).
 pub(crate) fn handle_set_screen_size(state: &mut ClientState, data: &[u8], _seq: u16) -> Vec<u8> {
-    if data.len() >= 12 {
-        let new_w = state.read_u16(data, 4);
-        let new_h = state.read_u16(data, 6);
+    use x11rb_protocol::protocol::randr::SetScreenSizeRequest;
+    if let Ok(req) = SetScreenSizeRequest::try_parse_request(request_header(data), &data[4..]) {
+        let new_w = req.width;
+        let new_h = req.height;
         if new_w > 0 && new_h > 0 {
             info!(
                 "RandR SetScreenSize: {}x{} -> {}x{}",

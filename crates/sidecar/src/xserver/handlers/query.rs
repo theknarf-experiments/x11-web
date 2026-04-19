@@ -3,6 +3,7 @@
 use super::*;
 use crate::xserver::core::require_len;
 use crate::xserver::reply::ReplyBuf;
+use crate::xserver::request::request_header;
 
 // ---------------------------------------------------------------------------
 // Opcode 97: QueryBestSize
@@ -10,9 +11,14 @@ use crate::xserver::reply::ReplyBuf;
 
 pub(crate) fn handle_query_best_size(state: &ClientState, data: &[u8], seq: u16) -> Vec<u8> {
     require_len!(data, 12, seq, 97);
-    let class = data[1]; // 0=Cursor, 1=Tile, 2=Stipple
-    let width = state.read_u16(data, 8);
-    let height = state.read_u16(data, 10);
+    use x11rb_protocol::protocol::xproto::QueryBestSizeRequest;
+    let req = match QueryBestSizeRequest::try_parse_request(request_header(data), &data[4..]) {
+        Ok(r) => r,
+        Err(_) => return build_error(LENGTH_ERROR, seq, 0, 97, 0),
+    };
+    let class = u8::from(req.class); // 0=Cursor, 1=Tile, 2=Stipple
+    let width = req.width;
+    let height = req.height;
 
     // Per X11 spec §8.5.2:
     // - Cursor: return the closest size that the display can support.
@@ -61,13 +67,12 @@ fn next_power_of_two(v: u16) -> u16 {
 
 pub(crate) fn handle_query_extension(_state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
     require_len!(data, 8, seq, 98);
-    // Parse extension name from the request
-    let name_len = _state.read_u16(data, 4) as usize;
-    let name = if data.len() >= 8 + name_len {
-        std::str::from_utf8(&data[8..8 + name_len]).unwrap_or("")
-    } else {
-        ""
+    use x11rb_protocol::protocol::xproto::QueryExtensionRequest;
+    let req = match QueryExtensionRequest::try_parse_request(request_header(data), &data[4..]) {
+        Ok(r) => r,
+        Err(_) => return build_error(LENGTH_ERROR, seq, 0, 98, 0),
     };
+    let name = std::str::from_utf8(&req.name).unwrap_or("");
 
     debug!("QueryExtension: \"{}\"", name);
 

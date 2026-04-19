@@ -45,8 +45,6 @@ use super::core::*;
 use super::types::*;
 use crate::framebuffer::Framebuffer;
 
-// Re-export byte-order read helper for use in handler submodules
-pub(crate) use super::core::read_u32_bo;
 
 // Re-export window stacking helpers for use by property handlers
 pub(crate) use window::restack_by_window_type;

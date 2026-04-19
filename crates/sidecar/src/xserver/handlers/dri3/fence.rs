@@ -5,6 +5,7 @@ use tracing::{debug, warn};
 use super::super::super::client::ClientState;
 use super::super::super::core::*;
 use crate::xserver::reply::ReplyBuf;
+use crate::xserver::request::request_header;
 use super::DRI3_MAJOR_OPCODE;
 
 // -----------------------------------------------------------------
@@ -62,8 +63,12 @@ pub(crate) fn handle_fd_from_fence(
 ) -> Vec<u8> {
     require_len!(data, 12, seq, DRI3_MAJOR_OPCODE, 5, bo);
 
-    let _drawable = read_u32_bo(data, 4, bo);
-    let fence_id = read_u32_bo(data, 8, bo);
+    use x11rb_protocol::protocol::dri3::FDFromFenceRequest;
+    let req = match FDFromFenceRequest::try_parse_request(request_header(data), &data[4..]) {
+        Ok(r) => r,
+        Err(_) => return build_error_bo(LENGTH_ERROR, seq, 0, DRI3_MAJOR_OPCODE, 5, bo),
+    };
+    let fence_id = req.fence;
     debug!("DRI3 FDFromFence: fence={fence_id:#x}");
 
     // Look up the fence in SYNC state

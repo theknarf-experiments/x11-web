@@ -8,6 +8,7 @@ use tracing::debug;
 use super::super::client::ClientState;
 use super::super::core::*;
 use crate::xserver::reply::ReplyBuf;
+use crate::xserver::request::request_header;
 
 /// X-Resource major opcode (assigned in QueryExtension).
 const XRES_MAJOR_OPCODE: u8 = 160;
@@ -144,23 +145,19 @@ pub(crate) fn handle_xresource_request(state: &mut ClientState, data: &[u8], seq
 
         // 4: QueryClientIds (XRes 1.2) — return client IDs with their types
         4 => {
-            if data.len() < 8 {
-                return build_error_bo(REQUEST_ERROR, seq, 0, XRES_MAJOR_OPCODE, minor as u16, bo);
-            }
-            let num_specs = read_u32_bo(data, 4, bo) as usize;
-            // Each spec is 8 bytes: client (4) + mask (4)
-            if data.len() < 8 + num_specs * 8 {
-                return build_error_bo(REQUEST_ERROR, seq, 0, XRES_MAJOR_OPCODE, minor as u16, bo);
-            }
+            use x11rb_protocol::protocol::res::QueryClientIdsRequest;
+            let req = match QueryClientIdsRequest::try_parse_request(request_header(data), &data[4..]) {
+                Ok(r) => r,
+                Err(_) => return build_error_bo(REQUEST_ERROR, seq, 0, XRES_MAJOR_OPCODE, minor as u16, bo),
+            };
 
             // Collect client IDs from the request specs
             let client_bases = state.client_registry.lock().unwrap().clone();
             let mut ids: Vec<(u32, u32)> = Vec::new(); // (resource_base, pid)
 
-            for i in 0..num_specs {
-                let off = 8 + i * 8;
-                let client_xid = read_u32_bo(data, off, bo);
-                let mask = read_u32_bo(data, off + 4, bo);
+            for spec in req.specs.iter() {
+                let client_xid = spec.client;
+                let mask = u32::from(spec.mask);
 
                 // mask bit 0 = X_RES_CLIENT_ID_NR (client number)
                 // mask bit 1 = X_RES_CLIENT_ID_PID (process id)
@@ -216,11 +213,13 @@ pub(crate) fn handle_xresource_request(state: &mut ClientState, data: &[u8], seq
 
         // 5: QueryResourceBytes (XRes 1.2) — total bytes used by resource types
         5 => {
-            if data.len() < 8 {
-                return build_error_bo(REQUEST_ERROR, seq, 0, XRES_MAJOR_OPCODE, minor as u16, bo);
-            }
-            let _client_xid = read_u32_bo(data, 4, bo);
-            let num_specs = read_u32_bo(data, 8, bo) as usize;
+            use x11rb_protocol::protocol::res::QueryResourceBytesRequest;
+            let req = match QueryResourceBytesRequest::try_parse_request(request_header(data), &data[4..]) {
+                Ok(r) => r,
+                Err(_) => return build_error_bo(REQUEST_ERROR, seq, 0, XRES_MAJOR_OPCODE, minor as u16, bo),
+            };
+            let _client_xid = req.client;
+            let num_specs = req.specs.len();
 
             // Compute byte counts for all resource types
             let window_bytes: u64 = state.windows.len() as u64 * 256; // estimate per window

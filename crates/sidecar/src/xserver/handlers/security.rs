@@ -5,6 +5,8 @@ use tracing::debug;
 use super::super::client::ClientState;
 
 /// SECURITY (opcode 155)
+/// Note: x11rb-protocol does not include the SECURITY extension, so these
+/// requests use manual parsing.
 pub(crate) fn handle_security_request(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
     use super::super::client::SecurityAuthorization;
     use crate::xserver::core::require_len;

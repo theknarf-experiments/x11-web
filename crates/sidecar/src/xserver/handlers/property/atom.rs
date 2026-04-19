@@ -3,6 +3,7 @@
 use super::*;
 use crate::xserver::core::require_len;
 use crate::xserver::reply::ReplyBuf;
+use crate::xserver::request::request_header;
 
 // ---------------------------------------------------------------------------
 // Opcode 16: InternAtom
@@ -10,13 +11,13 @@ use crate::xserver::reply::ReplyBuf;
 
 pub(crate) fn handle_intern_atom(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
     require_len!(data, 8, seq, 16);
-    let only_if_exists = data[1] != 0;
-    let name_len = state.read_u16(data, 4) as usize;
-
-    if 8 + name_len > data.len() {
-        return build_error(LENGTH_ERROR, seq, 0, 16, 0);
-    }
-    let name = String::from_utf8_lossy(&data[8..8 + name_len]).to_string();
+    use x11rb_protocol::protocol::xproto::InternAtomRequest;
+    let req = match InternAtomRequest::try_parse_request(request_header(data), &data[4..]) {
+        Ok(r) => r,
+        Err(_) => return build_error(LENGTH_ERROR, seq, 0, 16, 0),
+    };
+    let only_if_exists = req.only_if_exists;
+    let name = String::from_utf8_lossy(&req.name).to_string();
 
     let atom = state.intern_atom(&name, only_if_exists);
 
@@ -31,7 +32,12 @@ pub(crate) fn handle_intern_atom(state: &mut ClientState, data: &[u8], seq: u16)
 
 pub(crate) fn handle_get_atom_name(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
     require_len!(data, 8, seq, 17);
-    let atom = state.read_u32(data, 4);
+    use x11rb_protocol::protocol::xproto::GetAtomNameRequest;
+    let req = match GetAtomNameRequest::try_parse_request(request_header(data), &data[4..]) {
+        Ok(r) => r,
+        Err(_) => return build_error(LENGTH_ERROR, seq, 0, 17, 0),
+    };
+    let atom = req.atom;
 
     // BadAtom (error code 5) for unknown atoms
     let Some(name) = state.get_atom_name(atom) else {

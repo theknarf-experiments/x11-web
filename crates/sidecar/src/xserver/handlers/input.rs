@@ -44,8 +44,12 @@ pub(crate) fn handle_bell(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
 pub(crate) fn handle_query_pointer(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
     state.motion_hint_suppressed = false;
     require_len!(data, 8, seq, 38);
-    // Read the window parameter from the request (offset 4, u32)
-    let window = state.read_u32(data, 4);
+    use x11rb_protocol::protocol::xproto::QueryPointerRequest;
+    let req = match QueryPointerRequest::try_parse_request(request_header(data), &data[4..]) {
+        Ok(r) => r,
+        Err(_) => return build_error(LENGTH_ERROR, seq, 0, 38, 0),
+    };
+    let window = req.window;
 
     // Calculate window-relative coordinates by walking up from window to root
     let mut win_origin_x = 0i32;
@@ -104,9 +108,13 @@ pub(crate) fn handle_query_pointer(state: &mut ClientState, data: &[u8], seq: u1
 pub(crate) fn handle_get_motion_events(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
     state.motion_hint_suppressed = false;
     require_len!(data, 16, seq, 39);
-    // Parse time range from request
-    let start_time = state.read_u32(data, 8);
-    let stop_time = state.read_u32(data, 12);
+    use x11rb_protocol::protocol::xproto::GetMotionEventsRequest;
+    let req = match GetMotionEventsRequest::try_parse_request(request_header(data), &data[4..]) {
+        Ok(r) => r,
+        Err(_) => return build_error(LENGTH_ERROR, seq, 0, 39, 0),
+    };
+    let start_time = req.start;
+    let stop_time = req.stop;
 
     // Filter motion history by time range
     let events: Vec<&(u32, i16, i16)> = state
@@ -143,10 +151,15 @@ pub(crate) fn handle_translate_coordinates(
 ) -> Vec<u8> {
     require_len!(data, 16, seq, 40);
 
-    let src_window = state.read_u32(data, 4);
-    let dst_window = state.read_u32(data, 8);
-    let src_x = state.read_i16(data, 12);
-    let src_y = state.read_i16(data, 14);
+    use x11rb_protocol::protocol::xproto::TranslateCoordinatesRequest;
+    let req = match TranslateCoordinatesRequest::try_parse_request(request_header(data), &data[4..]) {
+        Ok(r) => r,
+        Err(_) => return build_error(LENGTH_ERROR, seq, 0, 40, 0),
+    };
+    let src_window = req.src_window;
+    let dst_window = req.dst_window;
+    let src_x = req.src_x;
+    let src_y = req.src_y;
 
     // Convert src_x, src_y from src_window coordinate space to root, then to dst_window.
     let mut sx = src_x as i32;
@@ -975,7 +988,12 @@ pub(crate) fn handle_set_close_down_mode(state: &mut ClientState, data: &[u8]) -
 pub(crate) fn handle_kill_client(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
     require_len!(data, 8, state.sequence, 113);
 
-    let resource = state.read_u32(data, 4);
+    use x11rb_protocol::protocol::xproto::KillClientRequest;
+    let req = match KillClientRequest::try_parse_request(request_header(data), &data[4..]) {
+        Ok(r) => r,
+        Err(_) => return build_error(LENGTH_ERROR, state.sequence, 0, 113, 0),
+    };
+    let resource = req.resource;
 
     if resource == 0 {
         // AllTemporary: destroy all windows retained from clients that
@@ -1061,29 +1079,24 @@ pub(crate) fn handle_kill_client(state: &mut ClientState, data: &[u8]) -> Vec<u8
 pub(crate) fn handle_rotate_properties(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
     require_len!(data, 12, state.sequence, 114);
 
-    let window = state.read_u32(data, 4);
+    use x11rb_protocol::protocol::xproto::RotatePropertiesRequest;
+    let req = match RotatePropertiesRequest::try_parse_request(request_header(data), &data[4..]) {
+        Ok(r) => r,
+        Err(_) => return build_error(LENGTH_ERROR, state.sequence, 0, 114, 0),
+    };
+    let window = req.window;
     if !state.windows.contains_key(&window) {
         return build_error(WINDOW_ERROR, state.sequence, window, 114, 0);
     }
 
-    let n_atoms = state.read_u16(data, 8) as usize;
-    let delta = state.read_i16(data, 10);
+    let n_atoms = req.atoms.len();
+    let delta = req.delta;
 
     if n_atoms == 0 || delta == 0 {
         return Vec::new();
     }
 
-    // Validate that the atom list fits within the request data
-    let required_len = 12 + n_atoms * 4;
-    require_len!(data, required_len, state.sequence, 114);
-
-    // Read the atom list
-    let mut atoms = Vec::with_capacity(n_atoms);
-    for i in 0..n_atoms {
-        let off = 12 + i * 4;
-        let atom = state.read_u32(data, off);
-        atoms.push(atom);
-    }
+    let atoms: Vec<u32> = req.atoms.into_owned();
 
     // Per X11 spec, duplicate atoms in the list generate BadMatch.
     {

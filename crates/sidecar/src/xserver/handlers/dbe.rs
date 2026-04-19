@@ -6,6 +6,7 @@ use super::super::client::ClientState;
 use crate::framebuffer::Framebuffer;
 use crate::xserver::core::require_len;
 use crate::xserver::reply::ReplyBuf;
+use crate::xserver::request::request_header;
 
 /// DBE - Double Buffer Extension (opcode 157)
 pub(crate) fn handle_dbe_request(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
@@ -21,9 +22,16 @@ pub(crate) fn handle_dbe_request(state: &mut ClientState, data: &[u8], seq: u16)
         1 => {
             // AllocateBackBufferName
             require_len!(data, 16, seq, 157, minor as u16, state.msb_first);
-            let window_id = state.read_u32(data, 4);
-            let back_buffer_id = state.read_u32(data, 8);
-            let _swap_action = data[12]; // Undefined, Background, Untouched, Copied
+            use x11rb_protocol::protocol::dbe::AllocateBackBufferRequest;
+            let req = match AllocateBackBufferRequest::try_parse_request(request_header(data), &data[4..]) {
+                Ok(r) => r,
+                Err(_) => return crate::xserver::core::build_error_bo(
+                    crate::xserver::core::LENGTH_ERROR, seq, 0, 157, minor as u16, state.msb_first,
+                ),
+            };
+            let window_id = req.window;
+            let back_buffer_id = req.buffer;
+            let _swap_action = u8::from(req.swap_action); // Undefined, Background, Untouched, Copied
 
             debug!("DBE AllocateBackBuffer: window={window_id:#x} buffer={back_buffer_id:#x}");
 
@@ -59,7 +67,14 @@ pub(crate) fn handle_dbe_request(state: &mut ClientState, data: &[u8], seq: u16)
         2 => {
             // DeallocateBackBufferName
             require_len!(data, 8, seq, 157, minor as u16, state.msb_first);
-            let back_buffer_id = state.read_u32(data, 4);
+            use x11rb_protocol::protocol::dbe::DeallocateBackBufferRequest;
+            let req = match DeallocateBackBufferRequest::try_parse_request(request_header(data), &data[4..]) {
+                Ok(r) => r,
+                Err(_) => return crate::xserver::core::build_error_bo(
+                    crate::xserver::core::LENGTH_ERROR, seq, 0, 157, minor as u16, state.msb_first,
+                ),
+            };
+            let back_buffer_id = req.buffer;
             debug!("DBE DeallocateBackBuffer: buffer={back_buffer_id:#x}");
             state.pixmaps.remove(&back_buffer_id);
             state.back_buffers.remove(&back_buffer_id);
@@ -69,14 +84,16 @@ pub(crate) fn handle_dbe_request(state: &mut ClientState, data: &[u8], seq: u16)
         3 => {
             // SwapBuffers
             require_len!(data, 8, seq, 157, minor as u16, state.msb_first);
-            let n_windows = state.read_u32(data, 4) as usize;
-            for i in 0..n_windows {
-                let off = 8 + i * 8;
-                if off + 8 > data.len() {
-                    break;
-                }
-                let window_id = state.read_u32(data, off);
-                let swap_action = state.read_u32(data, off + 4) as u8;
+            use x11rb_protocol::protocol::dbe::SwapBuffersRequest;
+            let req = match SwapBuffersRequest::try_parse_request(request_header(data), &data[4..]) {
+                Ok(r) => r,
+                Err(_) => return crate::xserver::core::build_error_bo(
+                    crate::xserver::core::LENGTH_ERROR, seq, 0, 157, minor as u16, state.msb_first,
+                ),
+            };
+            for action in req.actions.iter() {
+                let window_id = action.window;
+                let swap_action = u8::from(action.swap_action);
                 // swap_action: 0=Undefined, 1=Background, 2=Untouched, 3=Copied
 
                 debug!("DBE SwapBuffers: window={window_id:#x} action={swap_action}");
@@ -202,7 +219,14 @@ pub(crate) fn handle_dbe_request(state: &mut ClientState, data: &[u8], seq: u16)
         7 => {
             // GetBackBufferAttributes
             require_len!(data, 8, seq, 157, minor as u16, state.msb_first);
-            let back_buffer_id = state.read_u32(data, 4);
+            use x11rb_protocol::protocol::dbe::GetBackBufferAttributesRequest;
+            let req = match GetBackBufferAttributesRequest::try_parse_request(request_header(data), &data[4..]) {
+                Ok(r) => r,
+                Err(_) => return crate::xserver::core::build_error_bo(
+                    crate::xserver::core::LENGTH_ERROR, seq, 0, 157, minor as u16, state.msb_first,
+                ),
+            };
+            let back_buffer_id = req.buffer;
             let window_id = state
                 .back_buffers
                 .get(&back_buffer_id)

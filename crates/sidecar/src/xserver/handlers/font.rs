@@ -3,6 +3,7 @@
 use super::*;
 use crate::xserver::core::require_len;
 use crate::xserver::reply::ReplyBuf;
+use crate::xserver::request::request_header;
 
 // ---------------------------------------------------------------------------
 // Opcode 45: OpenFont
@@ -10,7 +11,12 @@ use crate::xserver::reply::ReplyBuf;
 
 pub(crate) fn handle_open_font(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
     require_len!(data, 12, state.sequence, 45);
-    let fid = state.read_u32(data, 4);
+    use x11rb_protocol::protocol::xproto::OpenFontRequest;
+    let req = match OpenFontRequest::try_parse_request(request_header(data), &data[4..]) {
+        Ok(r) => r,
+        Err(_) => return build_error(LENGTH_ERROR, state.sequence, 0, 45, 0),
+    };
+    let fid = req.fid;
 
     // Validate resource ID is within this client's allocated range
     if !state.validate_resource_id(fid) {
@@ -21,12 +27,7 @@ pub(crate) fn handle_open_font(state: &mut ClientState, data: &[u8]) -> Vec<u8> 
         return build_error(ID_CHOICE_ERROR, state.sequence, fid, 45, 0);
     }
 
-    let name_len = state.read_u16(data, 8) as usize;
-    let name = if 12 + name_len <= data.len() {
-        String::from_utf8_lossy(&data[12..12 + name_len]).to_string()
-    } else {
-        "fixed".to_string()
-    };
+    let name = String::from_utf8_lossy(&req.name).to_string();
     debug!("OpenFont: fid={fid:#x} name={name}");
     state.font_manager.open_font(fid, &name);
     Vec::new()
@@ -38,7 +39,12 @@ pub(crate) fn handle_open_font(state: &mut ClientState, data: &[u8]) -> Vec<u8> 
 
 pub(crate) fn handle_close_font(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
     require_len!(data, 8, state.sequence, 46);
-    let fid = state.read_u32(data, 4);
+    use x11rb_protocol::protocol::xproto::CloseFontRequest;
+    let req = match CloseFontRequest::try_parse_request(request_header(data), &data[4..]) {
+        Ok(r) => r,
+        Err(_) => return build_error(LENGTH_ERROR, state.sequence, 0, 46, 0),
+    };
+    let fid = req.font;
     // Validate font exists
     if state.font_manager.get_font(fid).is_none() {
         return build_error(FONT_ERROR, state.sequence, fid, 46, 0);
@@ -54,7 +60,12 @@ pub(crate) fn handle_close_font(state: &mut ClientState, data: &[u8]) -> Vec<u8>
 
 pub(crate) fn handle_query_font(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
     require_len!(data, 8, seq, 47);
-    let fontable = state.read_u32(data, 4);
+    use x11rb_protocol::protocol::xproto::QueryFontRequest;
+    let req = match QueryFontRequest::try_parse_request(request_header(data), &data[4..]) {
+        Ok(r) => r,
+        Err(_) => return build_error(LENGTH_ERROR, seq, 0, 47, 0),
+    };
+    let fontable = req.font;
 
     // fontable can be a font ID or a GC ID (containing a font)
     let is_valid_fontable =
@@ -246,7 +257,12 @@ pub(crate) fn handle_query_font(state: &mut ClientState, data: &[u8], seq: u16) 
 pub(crate) fn handle_query_text_extents(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
     require_len!(data, 8, seq, 48);
 
-    let fontable = state.read_u32(data, 4);
+    use x11rb_protocol::protocol::xproto::QueryTextExtentsRequest;
+    let req = match QueryTextExtentsRequest::try_parse_request(request_header(data), &data[4..]) {
+        Ok(r) => r,
+        Err(_) => return build_error(LENGTH_ERROR, seq, 0, 48, 0),
+    };
+    let fontable = req.font;
 
     // Try to get actual font metrics
     let font = state
@@ -321,13 +337,16 @@ pub(crate) fn handle_query_text_extents(state: &mut ClientState, data: &[u8], se
 
 pub(crate) fn handle_list_fonts(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
     require_len!(data, 8, seq, 49);
-    // Parse the request: max_names (2 bytes), pattern_len (2 bytes), pattern
-    let max_names = state.read_u16(data, 4);
-    let pattern_len = state.read_u16(data, 6) as usize;
-    let pattern = if pattern_len > 0 && data.len() >= 8 + pattern_len {
-        String::from_utf8_lossy(&data[8..8 + pattern_len]).to_string()
-    } else {
+    use x11rb_protocol::protocol::xproto::ListFontsRequest;
+    let req = match ListFontsRequest::try_parse_request(request_header(data), &data[4..]) {
+        Ok(r) => r,
+        Err(_) => return build_error(LENGTH_ERROR, seq, 0, 49, 0),
+    };
+    let max_names = req.max_names;
+    let pattern = if req.pattern.is_empty() {
         "*".to_string()
+    } else {
+        String::from_utf8_lossy(&req.pattern).to_string()
     };
 
     let names = state.font_manager.list_fonts(&pattern, max_names);
@@ -360,12 +379,16 @@ pub(crate) fn handle_list_fonts_with_info(
 ) -> Vec<u8> {
     // Parse request: max_names(2) + pattern_length(2) + pattern(variable)
     require_len!(data, 8, seq, 50);
-    let max_names = state.read_u16(data, 4);
-    let pattern_len = state.read_u16(data, 6) as usize;
-    let pattern = if pattern_len > 0 && data.len() >= 8 + pattern_len {
-        std::str::from_utf8(&data[8..8 + pattern_len]).unwrap_or("*")
-    } else {
+    use x11rb_protocol::protocol::xproto::ListFontsWithInfoRequest;
+    let req = match ListFontsWithInfoRequest::try_parse_request(request_header(data), &data[4..]) {
+        Ok(r) => r,
+        Err(_) => return build_error(LENGTH_ERROR, seq, 0, 50, 0),
+    };
+    let max_names = req.max_names;
+    let pattern = if req.pattern.is_empty() {
         "*"
+    } else {
+        std::str::from_utf8(&req.pattern).unwrap_or("*")
     };
 
     let font_names = state.font_manager.list_fonts(pattern, max_names);
@@ -493,22 +516,17 @@ pub(crate) fn handle_get_font_path(state: &ClientState, seq: u16) -> Vec<u8> {
 
 pub(crate) fn handle_set_font_path(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
     require_len!(data, 8, state.sequence, 51);
-    let num_paths = state.read_u16(data, 4) as usize;
-    let mut paths = Vec::with_capacity(num_paths);
-    let mut off = 8;
-    for _ in 0..num_paths {
-        if off >= data.len() {
-            break;
+    use x11rb_protocol::protocol::xproto::SetFontPathRequest;
+    let req = match SetFontPathRequest::try_parse_request(request_header(data), &data[4..]) {
+        Ok(r) => r,
+        Err(_) => return build_error(LENGTH_ERROR, state.sequence, 0, 51, 0),
+    };
+    let font_list = req.font.into_owned();
+    let mut paths = Vec::with_capacity(font_list.len());
+    for s in font_list.iter() {
+        if let Ok(name) = std::str::from_utf8(&s.name) {
+            paths.push(name.to_string());
         }
-        let len = data[off] as usize;
-        off += 1;
-        if off + len > data.len() {
-            break;
-        }
-        if let Ok(s) = std::str::from_utf8(&data[off..off + len]) {
-            paths.push(s.to_string());
-        }
-        off += len;
     }
     debug!("SetFontPath: {} paths", paths.len());
     state.font_path = paths;

@@ -5,6 +5,7 @@ use tracing::debug;
 use super::super::client::ClientState;
 use crate::xserver::core::require_len;
 use crate::xserver::reply::ReplyBuf;
+use crate::xserver::request::request_header;
 
 /// Screen saver window attributes stored by MIT-SCREEN-SAVER SetAttributes.
 #[allow(dead_code)]
@@ -52,8 +53,14 @@ pub(crate) fn handle_screen_saver_request(
         2 => {
             // SelectInput
             require_len!(data, 12, seq, 152, minor as u16, state.msb_first);
-            let _drawable = state.read_u32(data, 4);
-            let event_mask = state.read_u32(data, 8);
+            use x11rb_protocol::protocol::screensaver::SelectInputRequest;
+            let req = match SelectInputRequest::try_parse_request(request_header(data), &data[4..]) {
+                Ok(r) => r,
+                Err(_) => return crate::xserver::core::build_error_bo(
+                    crate::xserver::core::LENGTH_ERROR, seq, 0, 152, minor as u16, state.msb_first,
+                ),
+            };
+            let event_mask = u32::from(req.event_mask);
             state.screen_saver_event_mask = event_mask;
             debug!("ScreenSaver SelectInput: event_mask=0x{event_mask:08x}");
             Vec::new()
@@ -64,16 +71,17 @@ pub(crate) fn handle_screen_saver_request(
             // Parse the same value-list as CreateWindow.
             require_len!(data, 24, seq, 152, minor as u16, state.msb_first);
             {
-                let _drawable = state.read_u32(data, 4);
-                let x = state.read_i16(data, 8);
-                let y = state.read_i16(data, 10);
-                let width = state.read_u16(data, 12);
-                let height = state.read_u16(data, 14);
-                let _border_width = state.read_u16(data, 16);
-                let _class = data[18];
-                let _depth = data[19];
-                let _visual = state.read_u32(data, 20);
-                let _value_mask = state.read_u32(data, 24);
+                use x11rb_protocol::protocol::screensaver::SetAttributesRequest;
+                let req = match SetAttributesRequest::try_parse_request(request_header(data), &data[4..]) {
+                    Ok(r) => r,
+                    Err(_) => return crate::xserver::core::build_error_bo(
+                        crate::xserver::core::LENGTH_ERROR, seq, 0, 152, minor as u16, state.msb_first,
+                    ),
+                };
+                let x = req.x;
+                let y = req.y;
+                let width = req.width;
+                let height = req.height;
                 state.screen_saver_attrs = Some(ScreenSaverAttrs {
                     x,
                     y,

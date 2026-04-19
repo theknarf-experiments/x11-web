@@ -5,6 +5,7 @@ use tracing::{debug, warn};
 use super::super::client::ClientState;
 use crate::xserver::core::require_len;
 use crate::xserver::reply::ReplyBuf;
+use crate::xserver::request::request_header;
 
 /// XTEST (opcode 150)
 pub(crate) fn handle_xtest_request(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
@@ -20,8 +21,15 @@ pub(crate) fn handle_xtest_request(state: &mut ClientState, data: &[u8], seq: u1
         1 => {
             // CompareCursor
             require_len!(data, 12, seq, 150, minor as u16, state.msb_first);
-            let window = state.read_u32(data, 4);
-            let cursor_id = state.read_u32(data, 8);
+            use x11rb_protocol::protocol::xtest::CompareCursorRequest;
+            let req = match CompareCursorRequest::try_parse_request(request_header(data), &data[4..]) {
+                Ok(r) => r,
+                Err(_) => return crate::xserver::core::build_error_bo(
+                    crate::xserver::core::LENGTH_ERROR, seq, 0, 150, minor as u16, state.msb_first,
+                ),
+            };
+            let window = req.window;
+            let cursor_id = req.cursor;
 
             // Compare the cursor currently set on the window against cursor_id.
             // cursor_id=0 means "current cursor" (always same).
@@ -56,10 +64,20 @@ pub(crate) fn handle_xtest_request(state: &mut ClientState, data: &[u8], seq: u1
             }
             require_len!(data, 24, seq, 150, minor as u16, state.msb_first);
             {
-                let event_type = data[4];
-                let detail = data[5];
-                let root_x = state.read_i16(data, 20);
-                let root_y = state.read_i16(data, 22);
+                // FakeInput uses a complex wire format; x11rb's FakeInputRequest
+                // parses the fields we need. However the event_type/detail are
+                // embedded at specific offsets that the typed struct exposes.
+                use x11rb_protocol::protocol::xtest::FakeInputRequest;
+                let req = match FakeInputRequest::try_parse_request(request_header(data), &data[4..]) {
+                    Ok(r) => r,
+                    Err(_) => return crate::xserver::core::build_error_bo(
+                        crate::xserver::core::LENGTH_ERROR, seq, 0, 150, minor as u16, state.msb_first,
+                    ),
+                };
+                let event_type = req.type_;
+                let detail = req.detail;
+                let root_x = req.root_x;
+                let root_y = req.root_y;
 
                 debug!("XTEST FakeInput: type={event_type} detail={detail} rootX={root_x} rootY={root_y}");
 

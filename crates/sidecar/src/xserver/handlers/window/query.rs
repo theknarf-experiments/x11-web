@@ -3,6 +3,7 @@
 use super::*;
 use crate::xserver::core::require_len;
 use crate::xserver::reply::ReplyBuf;
+use crate::xserver::request::request_header;
 
 // ---------------------------------------------------------------------------
 // Opcode 14: GetGeometry
@@ -10,7 +11,12 @@ use crate::xserver::reply::ReplyBuf;
 
 pub(crate) fn handle_get_geometry(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
     require_len!(data, 8, seq, 14);
-    let drawable = state.read_u32(data, 4);
+    use x11rb_protocol::protocol::xproto::GetGeometryRequest;
+    let req = match GetGeometryRequest::try_parse_request(request_header(data), &data[4..]) {
+        Ok(r) => r,
+        Err(_) => return build_error(LENGTH_ERROR, seq, 0, 14, 0),
+    };
+    let drawable = req.drawable;
 
     // Check windows first, then pixmaps
     if let Some(win) = state.windows.get(&drawable) {
@@ -44,7 +50,12 @@ pub(crate) fn handle_get_geometry(state: &mut ClientState, data: &[u8], seq: u16
 
 pub(crate) fn handle_query_tree(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
     require_len!(data, 8, seq, 15);
-    let wid = state.read_u32(data, 4);
+    use x11rb_protocol::protocol::xproto::QueryTreeRequest;
+    let req = match QueryTreeRequest::try_parse_request(request_header(data), &data[4..]) {
+        Ok(r) => r,
+        Err(_) => return build_error(LENGTH_ERROR, seq, 0, 15, 0),
+    };
+    let wid = req.window;
 
     if !state.windows.contains_key(&wid) {
         return build_error(WINDOW_ERROR, seq, wid, 15, 0);

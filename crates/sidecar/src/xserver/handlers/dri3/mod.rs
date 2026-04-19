@@ -28,6 +28,7 @@ use tracing::{debug, warn};
 use super::super::client::ClientState;
 use super::super::core::*;
 use crate::xserver::core::require_len;
+use crate::xserver::request::request_header;
 
 /// DRI3 major opcode (assigned in QueryExtension).
 #[allow(dead_code)]
@@ -48,8 +49,13 @@ pub(crate) fn handle_dri3_request(state: &mut ClientState, data: &[u8], seq: u16
         // -----------------------------------------------------------------
         0 => {
             require_len!(data, 12, seq, DRI3_MAJOR_OPCODE, minor as u16, bo);
-            let client_major = read_u32_bo(data, 4, bo);
-            let client_minor = read_u32_bo(data, 8, bo);
+            use x11rb_protocol::protocol::dri3::QueryVersionRequest;
+            let req = match QueryVersionRequest::try_parse_request(request_header(data), &data[4..]) {
+                Ok(r) => r,
+                Err(_) => return build_error_bo(LENGTH_ERROR, seq, 0, DRI3_MAJOR_OPCODE, minor as u16, bo),
+            };
+            let client_major = req.major_version;
+            let client_minor = req.minor_version;
 
             let reply_major = client_major.min(DRI3_MAJOR_VERSION);
             let reply_minor = if client_major == DRI3_MAJOR_VERSION {

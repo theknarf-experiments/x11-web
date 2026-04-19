@@ -4,9 +4,11 @@ use super::update_sibling_visibility;
 use super::*;
 use crate::xserver::core::require_len;
 use crate::xserver::event::serialize_event;
+use crate::xserver::request::request_header;
 use x11rb_protocol::protocol::xproto::{
-    ExposeEvent, MapNotifyEvent, MapRequestEvent, UnmapNotifyEvent, VisibilityNotifyEvent,
-    Visibility,
+    ExposeEvent, MapNotifyEvent, MapRequestEvent, MapWindowRequest,
+    UnmapNotifyEvent, UnmapWindowRequest, MapSubwindowsRequest, UnmapSubwindowsRequest,
+    VisibilityNotifyEvent, Visibility,
 };
 
 // ---------------------------------------------------------------------------
@@ -15,7 +17,11 @@ use x11rb_protocol::protocol::xproto::{
 
 pub(crate) fn handle_map_window(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
     require_len!(data, 8, seq, 8);
-    let wid = state.read_u32(data, 4);
+    let req = match MapWindowRequest::try_parse_request(request_header(data), &data[4..]) {
+        Ok(r) => r,
+        Err(_) => return build_error(LENGTH_ERROR, seq, 0, 8, 0),
+    };
+    let wid = req.window;
     info!(
         "MapWindow called: wid={wid:#x} exists={}",
         state.windows.contains_key(&wid)
@@ -484,7 +490,11 @@ pub(crate) fn handle_map_window(state: &mut ClientState, data: &[u8], seq: u16) 
 
 pub(crate) fn handle_map_subwindows(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
     require_len!(data, 8, seq, 9);
-    let parent = state.read_u32(data, 4);
+    let req = match MapSubwindowsRequest::try_parse_request(request_header(data), &data[4..]) {
+        Ok(r) => r,
+        Err(_) => return build_error(LENGTH_ERROR, seq, 0, 9, 0),
+    };
+    let parent = req.window;
 
     if !state.windows.contains_key(&parent) {
         return build_error(WINDOW_ERROR, seq, parent, 9, 0);
@@ -518,7 +528,11 @@ pub(crate) fn handle_map_subwindows(state: &mut ClientState, data: &[u8], seq: u
 
 pub(crate) fn handle_unmap_window(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
     require_len!(data, 8, seq, 10);
-    let wid = state.read_u32(data, 4);
+    let req = match UnmapWindowRequest::try_parse_request(request_header(data), &data[4..]) {
+        Ok(r) => r,
+        Err(_) => return build_error(LENGTH_ERROR, seq, 0, 10, 0),
+    };
+    let wid = req.window;
 
     if !state.windows.contains_key(&wid) {
         return build_error(WINDOW_ERROR, seq, wid, 10, 0);
@@ -671,7 +685,11 @@ pub(crate) fn handle_unmap_window(state: &mut ClientState, data: &[u8], seq: u16
 
 pub(crate) fn handle_unmap_subwindows(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
     require_len!(data, 8, seq, 11);
-    let parent = state.read_u32(data, 4);
+    let req = match UnmapSubwindowsRequest::try_parse_request(request_header(data), &data[4..]) {
+        Ok(r) => r,
+        Err(_) => return build_error(LENGTH_ERROR, seq, 0, 11, 0),
+    };
+    let parent = req.window;
 
     if !state.windows.contains_key(&parent) {
         return build_error(WINDOW_ERROR, seq, parent, 11, 0);

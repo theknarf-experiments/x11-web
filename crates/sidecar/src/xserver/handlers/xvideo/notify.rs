@@ -3,6 +3,7 @@
 use tracing::debug;
 
 use super::super::super::client::ClientState;
+use crate::xserver::request::request_header;
 
 pub(crate) fn handle_notify_request(
     state: &mut ClientState,
@@ -16,8 +17,13 @@ pub(crate) fn handle_notify_request(
             // This is a void request. Track the subscription in client state so we can
             // deliver VideoNotify events if/when video operations complete on that drawable.
             if data.len() >= 9 {
-                let drawable = state.read_u32(data, 4);
-                let on_off = data[8] != 0;
+                use x11rb_protocol::protocol::xv::SelectVideoNotifyRequest;
+                let req = match SelectVideoNotifyRequest::try_parse_request(request_header(data), &data[4..]) {
+                    Ok(r) => r,
+                    Err(_) => return Vec::new(),
+                };
+                let drawable = req.drawable;
+                let on_off = req.onoff;
                 if on_off {
                     state.xv_video_notify_drawables.insert(drawable);
                 } else {
@@ -37,8 +43,13 @@ pub(crate) fn handle_notify_request(
             // This is a void request. Track the subscription so we can deliver
             // PortNotify events when port attributes change.
             if data.len() >= 9 {
-                let port = state.read_u32(data, 4);
-                let on_off = data[8] != 0;
+                use x11rb_protocol::protocol::xv::SelectPortNotifyRequest;
+                let req = match SelectPortNotifyRequest::try_parse_request(request_header(data), &data[4..]) {
+                    Ok(r) => r,
+                    Err(_) => return Vec::new(),
+                };
+                let port = req.port;
+                let on_off = req.onoff;
                 if on_off {
                     state.xv_port_notify_ports.insert(port);
                 } else {
