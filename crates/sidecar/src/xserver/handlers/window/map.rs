@@ -223,7 +223,7 @@ pub(crate) fn handle_map_window(state: &mut ClientState, data: &[u8], seq: u16) 
                 1u32
             };
             let mut wm_state_data = vec![0u8; 8];
-            write_u32_bo(&mut wm_state_data, 0, wm_state_val, false); // LE
+            wm_state_data[0..4].copy_from_slice(&wm_state_val.to_le_bytes());
             win.properties.insert(
                 wm_state_atom,
                 PropertyValue {

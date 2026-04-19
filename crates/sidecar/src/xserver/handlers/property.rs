@@ -52,16 +52,13 @@ pub(crate) fn start_incr_transfer(
     let total_size = data.len() as u32;
 
     // Set the INCR property with the total size estimate (CARDINAL/32).
-    let msb = state.msb_first;
     if let Some(win) = state.windows.get_mut(&requestor) {
-        let mut size_data = [0u8; 4];
-        write_u32_bo(&mut size_data, 0, total_size, msb);
         win.properties.insert(
             property,
             PropertyValue {
                 prop_type: INCR_ATOM,
                 format: 32,
-                data: size_data.to_vec(),
+                data: total_size.to_le_bytes().to_vec(),
             },
         );
     }

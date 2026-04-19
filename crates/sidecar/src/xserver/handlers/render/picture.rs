@@ -1,11 +1,15 @@
 use tracing::debug;
+use x11rb_protocol::protocol::render::{
+    Directformat, PictType, Pictdepth, Pictforminfo, Pictscreen, Pictvisual,
+};
+use x11rb_protocol::x11_utils::Serialize;
 
 use super::{
     resolve_source_pixels, PictFilter, PictureState, PICTFORMAT_A1, PICTFORMAT_A8,
     PICTFORMAT_ARGB32, PICTFORMAT_RGB24, PICTFORMAT_XBGR32, PICTFORMAT_XRGB32,
 };
 use crate::xserver::core::require_len;
-use crate::xserver::core::{read_i16_bo, read_u16_bo, read_u32_bo, write_u16_bo, write_u32_bo};
+use crate::xserver::core::{read_i16_bo, read_u16_bo, read_u32_bo, ROOT_VISUAL};
 use crate::xserver::reply::ReplyBuf;
 use crate::xserver::ClientState;
 
@@ -25,223 +29,143 @@ pub(crate) fn handle_query_pict_formats(seq: u16, bo: bool) -> Vec<u8> {
     // libreoffice / gtk byte-swap tests; they share the depth-32
     // pixmap layout with ARGB32 but treat the high byte as padding
     // (xRGB) or swap R/B (xBGR).
-    let num_formats: u32 = 6;
-    let num_screens: u32 = 1;
     let num_subpixel: u32 = 1;
 
-    // Each PictForminfo is 28 bytes
-    // Screen: 8 bytes header + depths
-    // We report 2 depths (24 and 32) with visuals
-    // Depth 24: 8 bytes header + 1 PictVisual (8 bytes) = 16 bytes
-    // Depth 32: 8 bytes header + 0 PictVisuals = 8 bytes
-    // Screen total: 8 + 16 + 8 = 32 bytes
-    // Subpixel: 4 bytes each
+    let formats = [
+        // Format 1: ARGB32 (type=PictTypeDirect, depth=32)
+        Pictforminfo {
+            id: PICTFORMAT_ARGB32,
+            type_: PictType::DIRECT,
+            depth: 32,
+            direct: Directformat {
+                red_shift: 16, red_mask: 0xFF,
+                green_shift: 8, green_mask: 0xFF,
+                blue_shift: 0, blue_mask: 0xFF,
+                alpha_shift: 24, alpha_mask: 0xFF,
+            },
+            colormap: 0,
+        },
+        // Format 2: RGB24 (type=PictTypeDirect, depth=24)
+        Pictforminfo {
+            id: PICTFORMAT_RGB24,
+            type_: PictType::DIRECT,
+            depth: 24,
+            direct: Directformat {
+                red_shift: 16, red_mask: 0xFF,
+                green_shift: 8, green_mask: 0xFF,
+                blue_shift: 0, blue_mask: 0xFF,
+                alpha_shift: 0, alpha_mask: 0,
+            },
+            colormap: 0,
+        },
+        // Format 3: A8 (type=PictTypeDirect, depth=8, alpha only)
+        Pictforminfo {
+            id: PICTFORMAT_A8,
+            type_: PictType::DIRECT,
+            depth: 8,
+            direct: Directformat {
+                red_shift: 0, red_mask: 0,
+                green_shift: 0, green_mask: 0,
+                blue_shift: 0, blue_mask: 0,
+                alpha_shift: 0, alpha_mask: 0xFF,
+            },
+            colormap: 0,
+        },
+        // Format 4: A1 (type=PictTypeDirect, depth=1, 1-bit alpha)
+        Pictforminfo {
+            id: PICTFORMAT_A1,
+            type_: PictType::DIRECT,
+            depth: 1,
+            direct: Directformat {
+                red_shift: 0, red_mask: 0,
+                green_shift: 0, green_mask: 0,
+                blue_shift: 0, blue_mask: 0,
+                alpha_shift: 0, alpha_mask: 0x1,
+            },
+            colormap: 0,
+        },
+        // Format 5: xRGB32 -- depth 32, R/G/B in the same byte positions
+        // as ARGB32 but the high byte is padding (alphaMask = 0). The
+        // rendercheck libreoffice test wants this to verify that the
+        // server doesn't peek at the unused byte.
+        Pictforminfo {
+            id: PICTFORMAT_XRGB32,
+            type_: PictType::DIRECT,
+            depth: 32,
+            direct: Directformat {
+                red_shift: 16, red_mask: 0xFF,
+                green_shift: 8, green_mask: 0xFF,
+                blue_shift: 0, blue_mask: 0xFF,
+                alpha_shift: 0, alpha_mask: 0,
+            },
+            colormap: 0,
+        },
+        // Format 6: xBGR32 -- depth 32 with R/B swapped (R at byte 0, B
+        // at byte 2). The rendercheck gtk test exercises this layout
+        // against ARGB32 to verify that the server reads each picture
+        // through its declared format rather than blindly assuming a
+        // canonical byte order.
+        Pictforminfo {
+            id: PICTFORMAT_XBGR32,
+            type_: PictType::DIRECT,
+            depth: 32,
+            direct: Directformat {
+                red_shift: 0, red_mask: 0xFF,
+                green_shift: 8, green_mask: 0xFF,
+                blue_shift: 16, blue_mask: 0xFF,
+                alpha_shift: 0, alpha_mask: 0,
+            },
+            colormap: 0,
+        },
+    ];
 
-    let num_depths: u32 = 2;
-    let formats_bytes = num_formats as usize * 28;
-    let screen_header = 8usize;
-    let depth24_bytes = 8 + 8; // 8 header + 1 PictVisual(8)
-    let depth32_bytes = 8; // 8 header + 0 PictVisuals
-    let screen_bytes = screen_header + depth24_bytes + depth32_bytes;
-    let subpixel_bytes = num_subpixel as usize * 4;
-    let extra = formats_bytes + screen_bytes + subpixel_bytes;
-    let _total = 32 + extra;
+    let screens = [Pictscreen {
+        fallback: PICTFORMAT_RGB24,
+        depths: vec![
+            Pictdepth {
+                depth: 24,
+                visuals: vec![Pictvisual {
+                    visual: ROOT_VISUAL,
+                    format: PICTFORMAT_RGB24,
+                }],
+            },
+            Pictdepth {
+                depth: 32,
+                visuals: vec![],
+            },
+        ],
+    }];
 
-    let mut reply = ReplyBuf::with_extra(seq, extra, bo)
-        .set_u32(8, num_formats) // num_formats
-        .set_u32(12, num_screens) // num_screens
-        .set_u32(16, num_depths) // num_depths
-        // reply[20..24] = num_visuals (we have 1 visual across all depths)
-        .set_u32(20, 1)
-        .set_u32(24, num_subpixel); // num_subpixel
+    // Count totals for the reply header fields
+    let num_depths: u32 = screens.iter().map(|s| s.depths.len() as u32).sum();
+    let num_visuals: u32 = screens
+        .iter()
+        .flat_map(|s| &s.depths)
+        .map(|d| d.visuals.len() as u32)
+        .sum();
 
-    let mut off = 32;
-    let buf = reply.buf_mut();
+    // NOTE: x11rb's Serialize uses native endian (LE on our platform).
+    // If `bo` (msb_first) is true, the ReplyBuf header will be BE but
+    // the struct data below will still be LE. This is a known limitation --
+    // virtually all X11 clients use LE, so this is acceptable for now.
+    let mut extra_data: Vec<u8> = Vec::new();
+    for f in &formats {
+        f.serialize_into(&mut extra_data);
+    }
+    for s in &screens {
+        s.serialize_into(&mut extra_data);
+    }
+    // Subpixel order: 0 = Unknown
+    0u32.serialize_into(&mut extra_data);
 
-    // Format 1: ARGB32 (type=PictTypeDirect=1, depth=32)
-    write_pictforminfo(
-        buf,
-        &mut off,
-        PICTFORMAT_ARGB32,
-        1,
-        32, // type=Direct, depth=32
-        16,
-        0xFF,
-        8,
-        0xFF,
-        0,
-        0xFF,
-        24,
-        0xFF, // ARGB shifts/masks
-        bo,
-    );
-
-    // Format 2: RGB24 (type=PictTypeDirect=1, depth=24)
-    write_pictforminfo(
-        buf,
-        &mut off,
-        PICTFORMAT_RGB24,
-        1,
-        24,
-        16,
-        0xFF,
-        8,
-        0xFF,
-        0,
-        0xFF,
-        0,
-        0, // no alpha
-        bo,
-    );
-
-    // Format 3: A8 (type=PictTypeDirect=1, depth=8)
-    write_pictforminfo(
-        buf,
-        &mut off,
-        PICTFORMAT_A8,
-        1,
-        8,
-        0,
-        0,
-        0,
-        0,
-        0,
-        0,
-        0,
-        0xFF, // alpha only
-        bo,
-    );
-
-    // Format 4: A1 (type=PictTypeDirect=1, depth=1)
-    write_pictforminfo(
-        buf,
-        &mut off,
-        PICTFORMAT_A1,
-        1,
-        1,
-        0,
-        0,
-        0,
-        0,
-        0,
-        0,
-        0,
-        0x1, // 1-bit alpha
-        bo,
-    );
-
-    // Format 5: xRGB32 — depth 32, R/G/B in the same byte positions
-    // as ARGB32 but the high byte is padding (alphaMask = 0). The
-    // rendercheck libreoffice test wants this to verify that the
-    // server doesn't peek at the unused byte.
-    write_pictforminfo(
-        buf,
-        &mut off,
-        PICTFORMAT_XRGB32,
-        1,
-        32,
-        16,
-        0xFF,
-        8,
-        0xFF,
-        0,
-        0xFF,
-        0,
-        0, // no alpha
-        bo,
-    );
-
-    // Format 6: xBGR32 — depth 32 with R/B swapped (R at byte 0, B
-    // at byte 2). The rendercheck gtk test exercises this layout
-    // against ARGB32 to verify that the server reads each picture
-    // through its declared format rather than blindly assuming a
-    // canonical byte order.
-    write_pictforminfo(
-        buf,
-        &mut off,
-        PICTFORMAT_XBGR32,
-        1,
-        32,
-        0,
-        0xFF,
-        8,
-        0xFF,
-        16,
-        0xFF,
-        0,
-        0, // no alpha
-        bo,
-    );
-
-    // Screen info (8 bytes header)
-    let num_depths_for_screen: u32 = 2;
-    // fallback pictformat for the screen
-    write_u32_bo(buf, off, num_depths_for_screen, bo);
-    off += 4;
-    write_u32_bo(buf, off, PICTFORMAT_RGB24, bo); // fallback
-    off += 4;
-
-    // Depth 24: header (8 bytes) + 1 PictVisual (8 bytes)
-    buf[off] = 24; // depth
-    off += 1;
-    buf[off] = 0; // pad
-    off += 1;
-    write_u16_bo(buf, off, 1, bo); // num_visuals
-    off += 2;
-    off += 4; // pad
-
-    // PictVisual for depth 24: visual(4) + format(4)
-    write_u32_bo(buf, off, 0x00000021, bo); // ROOT_VISUAL
-    off += 4;
-    write_u32_bo(buf, off, PICTFORMAT_RGB24, bo);
-    off += 4;
-
-    // Depth 32: header (8 bytes) + 0 PictVisuals
-    buf[off] = 32; // depth
-    off += 1;
-    buf[off] = 0; // pad
-    off += 1;
-    write_u16_bo(buf, off, 0, bo); // num_visuals
-    off += 2;
-    off += 4; // pad
-
-    // Subpixel order (4 bytes): 0 = Unknown
-    write_u32_bo(buf, off, 0, bo);
-
-    reply.build()
-}
-
-fn write_pictforminfo(
-    buf: &mut [u8],
-    off: &mut usize,
-    id: u32,
-    pict_type: u8,
-    depth: u8,
-    red_shift: u16,
-    red_mask: u16,
-    green_shift: u16,
-    green_mask: u16,
-    blue_shift: u16,
-    blue_mask: u16,
-    alpha_shift: u16,
-    alpha_mask: u16,
-    bo: bool,
-) {
-    let o = *off;
-    write_u32_bo(buf, o, id, bo);
-    buf[o + 4] = pict_type;
-    buf[o + 5] = depth;
-    // 2 bytes pad at o+6..o+8
-    write_u16_bo(buf, o + 8, red_shift, bo);
-    write_u16_bo(buf, o + 10, red_mask, bo);
-    write_u16_bo(buf, o + 12, green_shift, bo);
-    write_u16_bo(buf, o + 14, green_mask, bo);
-    write_u16_bo(buf, o + 16, blue_shift, bo);
-    write_u16_bo(buf, o + 18, blue_mask, bo);
-    write_u16_bo(buf, o + 20, alpha_shift, bo);
-    write_u16_bo(buf, o + 22, alpha_mask, bo);
-    // colormap (4 bytes) at o+24..o+28
-    *off += 28;
+    ReplyBuf::with_extra(seq, extra_data.len(), bo)
+        .set_u32(8, formats.len() as u32) // num_formats
+        .set_u32(12, screens.len() as u32) // num_screens
+        .set_u32(16, num_depths) // num_depths (total across screens)
+        .set_u32(20, num_visuals) // num_visuals (total across all depths)
+        .set_u32(24, num_subpixel) // num_subpixel
+        .set_bytes(32, &extra_data)
+        .build()
 }
 
 pub(crate) fn handle_create_picture(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {

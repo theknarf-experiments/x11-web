@@ -80,6 +80,15 @@ impl ReplyBuf {
         self
     }
 
+    /// Set a u64 at the given offset (byte-order aware).
+    ///
+    /// X11 wire format stores 64-bit values as two u32 words (low half first,
+    /// high half second), each in the client's byte order.
+    pub(crate) fn set_u64(mut self, offset: usize, val: u64) -> Self {
+        write_u64(&mut self.buf, offset, val, self.msb_first);
+        self
+    }
+
     /// Copy raw bytes into the buffer at the given offset.
     pub(crate) fn set_bytes(mut self, offset: usize, data: &[u8]) -> Self {
         self.buf[offset..offset + data.len()].copy_from_slice(data);
@@ -122,6 +131,14 @@ fn write_i32(buf: &mut [u8], offset: usize, val: i32, msb_first: bool) {
     buf[offset..offset + 4].copy_from_slice(&bytes);
 }
 
+/// Write a u64 as two u32 words (low half first, high half second) in the
+/// client's byte order — this is the X11 wire encoding for 64-bit values.
+#[inline]
+fn write_u64(buf: &mut [u8], offset: usize, val: u64, msb_first: bool) {
+    write_u32(buf, offset, val as u32, msb_first);
+    write_u32(buf, offset + 4, (val >> 32) as u32, msb_first);
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -149,6 +166,24 @@ mod tests {
 
         let be = ReplyBuf::fixed(0, true).set_u32(8, 0x12345678).build();
         assert_eq!(&be[8..12], &[0x12, 0x34, 0x56, 0x78]);
+    }
+
+    #[test]
+    fn set_u64_le_stores_low_word_first() {
+        let reply = ReplyBuf::with_extra(0, 8, false)
+            .set_u64(32, 0x00FF_FFFF_FFFF_FFFF)
+            .build();
+        // Low u32 (0xFFFFFFFF) in LE, then high u32 (0x00FFFFFF) in LE
+        assert_eq!(&reply[32..40], &[0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x00]);
+    }
+
+    #[test]
+    fn set_u64_be_stores_low_word_first_in_be() {
+        let reply = ReplyBuf::with_extra(0, 8, true)
+            .set_u64(32, 0x00FF_FFFF_FFFF_FFFF)
+            .build();
+        // Low u32 (0xFFFFFFFF) in BE, then high u32 (0x00FFFFFF) in BE
+        assert_eq!(&reply[32..40], &[0xFF, 0xFF, 0xFF, 0xFF, 0x00, 0xFF, 0xFF, 0xFF]);
     }
 
     #[test]

@@ -34,57 +34,15 @@ pub(crate) fn handle_get_supported_modifiers(
     // Extra data: window modifiers (1 * 8 bytes) + screen modifiers (2 * 8 bytes) = 24 bytes
     // 24 / 4 = 6 words
     let extra_bytes = ((num_window_modifiers + num_screen_modifiers) as usize) * 8;
-    let mut reply = ReplyBuf::with_extra(seq, extra_bytes, bo)
+    ReplyBuf::with_extra(seq, extra_bytes, bo)
         .set_u32(8, num_window_modifiers)
-        .set_u32(12, num_screen_modifiers);
-
-    // Window modifiers (u64 each), starting at offset 32
-    let mut off = 32;
-    // LINEAR
-    write_u32_bo(
-        reply.buf_mut(),
-        off,
-        (DRM_FORMAT_MOD_LINEAR & 0xFFFF_FFFF) as u32,
-        bo,
-    );
-    write_u32_bo(
-        reply.buf_mut(),
-        off + 4,
-        (DRM_FORMAT_MOD_LINEAR >> 32) as u32,
-        bo,
-    );
-    off += 8;
-
-    // Screen modifiers (u64 each)
-    // LINEAR
-    write_u32_bo(
-        reply.buf_mut(),
-        off,
-        (DRM_FORMAT_MOD_LINEAR & 0xFFFF_FFFF) as u32,
-        bo,
-    );
-    write_u32_bo(
-        reply.buf_mut(),
-        off + 4,
-        (DRM_FORMAT_MOD_LINEAR >> 32) as u32,
-        bo,
-    );
-    off += 8;
-    // INVALID (used by Mesa as a fallback/any-modifier sentinel)
-    write_u32_bo(
-        reply.buf_mut(),
-        off,
-        (DRM_FORMAT_MOD_INVALID & 0xFFFF_FFFF) as u32,
-        bo,
-    );
-    write_u32_bo(
-        reply.buf_mut(),
-        off + 4,
-        (DRM_FORMAT_MOD_INVALID >> 32) as u32,
-        bo,
-    );
-
-    reply.build()
+        .set_u32(12, num_screen_modifiers)
+        // Window modifiers (u64 each), starting at offset 32
+        .set_u64(32, DRM_FORMAT_MOD_LINEAR)
+        // Screen modifiers (u64 each)
+        .set_u64(40, DRM_FORMAT_MOD_LINEAR)
+        .set_u64(48, DRM_FORMAT_MOD_INVALID) // fallback/any-modifier sentinel
+        .build()
 }
 
 // -----------------------------------------------------------------
