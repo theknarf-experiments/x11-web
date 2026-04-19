@@ -48,32 +48,33 @@ pub(crate) use x11rb_protocol::protocol::xproto::{
 // Alias for British spelling used throughout codebase
 pub(crate) const COLOURMAP_NOTIFY_EVENT: u8 = COLORMAP_NOTIFY_EVENT;
 
-// X11 event masks (complete per X11 protocol spec)
-pub(crate) const KEY_PRESS_MASK: u32 = 0x0000_0001;
-pub(crate) const KEY_RELEASE_MASK: u32 = 0x0000_0002;
-pub(crate) const BUTTON_PRESS_MASK: u32 = 0x0000_0004;
-pub(crate) const BUTTON_RELEASE_MASK: u32 = 0x0000_0008;
-pub(crate) const ENTER_WINDOW_MASK: u32 = 0x0000_0010;
-pub(crate) const LEAVE_WINDOW_MASK: u32 = 0x0000_0020;
-pub(crate) const POINTER_MOTION_MASK: u32 = 0x0000_0040;
-pub(crate) const POINTER_MOTION_HINT_MASK: u32 = 0x0000_0080;
-pub(crate) const BUTTON1_MOTION_MASK: u32 = 0x0000_0100;
-pub(crate) const BUTTON2_MOTION_MASK: u32 = 0x0000_0200;
-pub(crate) const BUTTON3_MOTION_MASK: u32 = 0x0000_0400;
-pub(crate) const BUTTON4_MOTION_MASK: u32 = 0x0000_0800;
-pub(crate) const BUTTON5_MOTION_MASK: u32 = 0x0000_1000;
-pub(crate) const BUTTON_MOTION_MASK: u32 = 0x0000_2000;
-pub(crate) const KEYMAP_STATE_MASK: u32 = 0x0000_4000;
-pub(crate) const EXPOSURE_MASK: u32 = 0x0000_8000;
-pub(crate) const VISIBILITY_CHANGE_MASK: u32 = 0x0001_0000;
-pub(crate) const STRUCTURE_NOTIFY_MASK: u32 = 0x0002_0000;
-pub(crate) const RESIZE_REDIRECT_MASK: u32 = 0x0004_0000;
-pub(crate) const SUBSTRUCTURE_NOTIFY_MASK: u32 = 0x0008_0000;
-pub(crate) const SUBSTRUCTURE_REDIRECT_MASK: u32 = 0x0010_0000;
-pub(crate) const FOCUS_CHANGE_MASK: u32 = 0x0020_0000;
-pub(crate) const PROPERTY_CHANGE_MASK: u32 = 0x0040_0000;
-pub(crate) const COLOURMAP_CHANGE_MASK: u32 = 0x0080_0000;
-pub(crate) const OWNER_GRAB_BUTTON_MASK: u32 = 0x0100_0000;
+// X11 event masks — values match x11rb_protocol::protocol::xproto::EventMask.
+// Verified by test_event_masks_match_x11rb below.
+pub(crate) const KEY_PRESS_MASK: u32 = 1 << 0;
+pub(crate) const KEY_RELEASE_MASK: u32 = 1 << 1;
+pub(crate) const BUTTON_PRESS_MASK: u32 = 1 << 2;
+pub(crate) const BUTTON_RELEASE_MASK: u32 = 1 << 3;
+pub(crate) const ENTER_WINDOW_MASK: u32 = 1 << 4;
+pub(crate) const LEAVE_WINDOW_MASK: u32 = 1 << 5;
+pub(crate) const POINTER_MOTION_MASK: u32 = 1 << 6;
+pub(crate) const POINTER_MOTION_HINT_MASK: u32 = 1 << 7;
+pub(crate) const BUTTON1_MOTION_MASK: u32 = 1 << 8;
+pub(crate) const BUTTON2_MOTION_MASK: u32 = 1 << 9;
+pub(crate) const BUTTON3_MOTION_MASK: u32 = 1 << 10;
+pub(crate) const BUTTON4_MOTION_MASK: u32 = 1 << 11;
+pub(crate) const BUTTON5_MOTION_MASK: u32 = 1 << 12;
+pub(crate) const BUTTON_MOTION_MASK: u32 = 1 << 13;
+pub(crate) const KEYMAP_STATE_MASK: u32 = 1 << 14;
+pub(crate) const EXPOSURE_MASK: u32 = 1 << 15;
+pub(crate) const VISIBILITY_CHANGE_MASK: u32 = 1 << 16;
+pub(crate) const STRUCTURE_NOTIFY_MASK: u32 = 1 << 17;
+pub(crate) const RESIZE_REDIRECT_MASK: u32 = 1 << 18;
+pub(crate) const SUBSTRUCTURE_NOTIFY_MASK: u32 = 1 << 19;
+pub(crate) const SUBSTRUCTURE_REDIRECT_MASK: u32 = 1 << 20;
+pub(crate) const FOCUS_CHANGE_MASK: u32 = 1 << 21;
+pub(crate) const PROPERTY_CHANGE_MASK: u32 = 1 << 22;
+pub(crate) const COLOURMAP_CHANGE_MASK: u32 = 1 << 23;
+pub(crate) const OWNER_GRAB_BUTTON_MASK: u32 = 1 << 24;
 
 // X11 error codes
 pub(crate) const BAD_REQUEST: u8 = 1;
@@ -1066,5 +1067,28 @@ mod tests {
     fn root_visual_and_colormap_are_non_zero() {
         assert_ne!(ROOT_VISUAL, 0);
         assert_ne!(ROOT_COLORMAP, 0);
+    }
+
+    #[test]
+    fn event_masks_match_x11rb() {
+        use x11rb_protocol::protocol::xproto::EventMask;
+        assert_eq!(KEY_PRESS_MASK, u32::from(EventMask::KEY_PRESS));
+        assert_eq!(KEY_RELEASE_MASK, u32::from(EventMask::KEY_RELEASE));
+        assert_eq!(BUTTON_PRESS_MASK, u32::from(EventMask::BUTTON_PRESS));
+        assert_eq!(BUTTON_RELEASE_MASK, u32::from(EventMask::BUTTON_RELEASE));
+        assert_eq!(ENTER_WINDOW_MASK, u32::from(EventMask::ENTER_WINDOW));
+        assert_eq!(LEAVE_WINDOW_MASK, u32::from(EventMask::LEAVE_WINDOW));
+        assert_eq!(POINTER_MOTION_MASK, u32::from(EventMask::POINTER_MOTION));
+        assert_eq!(POINTER_MOTION_HINT_MASK, u32::from(EventMask::POINTER_MOTION_HINT));
+        assert_eq!(EXPOSURE_MASK, u32::from(EventMask::EXPOSURE));
+        assert_eq!(VISIBILITY_CHANGE_MASK, u32::from(EventMask::VISIBILITY_CHANGE));
+        assert_eq!(STRUCTURE_NOTIFY_MASK, u32::from(EventMask::STRUCTURE_NOTIFY));
+        assert_eq!(RESIZE_REDIRECT_MASK, u32::from(EventMask::RESIZE_REDIRECT));
+        assert_eq!(SUBSTRUCTURE_NOTIFY_MASK, u32::from(EventMask::SUBSTRUCTURE_NOTIFY));
+        assert_eq!(SUBSTRUCTURE_REDIRECT_MASK, u32::from(EventMask::SUBSTRUCTURE_REDIRECT));
+        assert_eq!(FOCUS_CHANGE_MASK, u32::from(EventMask::FOCUS_CHANGE));
+        assert_eq!(PROPERTY_CHANGE_MASK, u32::from(EventMask::PROPERTY_CHANGE));
+        assert_eq!(COLOURMAP_CHANGE_MASK, u32::from(EventMask::COLOR_MAP_CHANGE));
+        assert_eq!(OWNER_GRAB_BUTTON_MASK, u32::from(EventMask::OWNER_GRAB_BUTTON));
     }
 }
