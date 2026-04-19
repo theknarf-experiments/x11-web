@@ -30,40 +30,23 @@ pub(crate) fn depth_for_visual(visual: u32) -> u8 {
     }
 }
 
-// X11 event type codes
-pub(crate) const KEY_PRESS_EVENT: u8 = 2;
-pub(crate) const KEY_RELEASE_EVENT: u8 = 3;
-pub(crate) const BUTTON_PRESS_EVENT: u8 = 4;
-pub(crate) const BUTTON_RELEASE_EVENT: u8 = 5;
-pub(crate) const MOTION_NOTIFY_EVENT: u8 = 6;
-pub(crate) const ENTER_NOTIFY_EVENT: u8 = 7;
-pub(crate) const LEAVE_NOTIFY_EVENT: u8 = 8;
-pub(crate) const FOCUS_IN_EVENT: u8 = 9;
-pub(crate) const FOCUS_OUT_EVENT: u8 = 10;
-pub(crate) const KEYMAP_NOTIFY_EVENT: u8 = 11;
-pub(crate) const EXPOSE_EVENT: u8 = 12;
-pub(crate) const GRAPHICS_EXPOSURE_EVENT: u8 = 13;
-pub(crate) const NO_EXPOSURE_EVENT: u8 = 14;
-pub(crate) const VISIBILITY_NOTIFY_EVENT: u8 = 15;
-pub(crate) const CREATE_NOTIFY_EVENT: u8 = 16;
-pub(crate) const DESTROY_NOTIFY_EVENT: u8 = 17;
-pub(crate) const UNMAP_NOTIFY_EVENT: u8 = 18;
-pub(crate) const MAP_NOTIFY_EVENT: u8 = 19;
-pub(crate) const MAP_REQUEST_EVENT: u8 = 20;
-pub(crate) const REPARENT_NOTIFY_EVENT: u8 = 21;
-pub(crate) const CONFIGURE_NOTIFY_EVENT: u8 = 22;
-pub(crate) const CONFIGURE_REQUEST_EVENT: u8 = 23;
-pub(crate) const GRAVITY_NOTIFY_EVENT: u8 = 24;
-pub(crate) const RESIZE_REQUEST_EVENT: u8 = 25;
-pub(crate) const CIRCULATE_NOTIFY_EVENT: u8 = 26;
-pub(crate) const CIRCULATE_REQUEST_EVENT: u8 = 27;
-pub(crate) const PROPERTY_NOTIFY_EVENT: u8 = 28;
-pub(crate) const SELECTION_CLEAR_EVENT: u8 = 29;
-pub(crate) const SELECTION_REQUEST_EVENT: u8 = 30;
-pub(crate) const SELECTION_NOTIFY_EVENT: u8 = 31;
-pub(crate) const COLOURMAP_NOTIFY_EVENT: u8 = 32;
-pub(crate) const CLIENT_MESSAGE_EVENT: u8 = 33;
-pub(crate) const MAPPING_NOTIFY_EVENT: u8 = 34;
+// X11 event type codes — re-exported from x11rb-protocol (single source of truth).
+pub(crate) use x11rb_protocol::protocol::xproto::{
+    KEY_PRESS_EVENT, KEY_RELEASE_EVENT, BUTTON_PRESS_EVENT, BUTTON_RELEASE_EVENT,
+    MOTION_NOTIFY_EVENT, ENTER_NOTIFY_EVENT, LEAVE_NOTIFY_EVENT,
+    FOCUS_IN_EVENT, FOCUS_OUT_EVENT, KEYMAP_NOTIFY_EVENT,
+    EXPOSE_EVENT, GRAPHICS_EXPOSURE_EVENT, NO_EXPOSURE_EVENT,
+    VISIBILITY_NOTIFY_EVENT, CREATE_NOTIFY_EVENT, DESTROY_NOTIFY_EVENT,
+    UNMAP_NOTIFY_EVENT, MAP_NOTIFY_EVENT, MAP_REQUEST_EVENT,
+    REPARENT_NOTIFY_EVENT, CONFIGURE_NOTIFY_EVENT, CONFIGURE_REQUEST_EVENT,
+    GRAVITY_NOTIFY_EVENT, RESIZE_REQUEST_EVENT,
+    CIRCULATE_NOTIFY_EVENT, CIRCULATE_REQUEST_EVENT,
+    PROPERTY_NOTIFY_EVENT, SELECTION_CLEAR_EVENT, SELECTION_REQUEST_EVENT,
+    SELECTION_NOTIFY_EVENT, COLORMAP_NOTIFY_EVENT, CLIENT_MESSAGE_EVENT,
+    MAPPING_NOTIFY_EVENT,
+};
+// Alias for British spelling used throughout codebase
+pub(crate) const COLOURMAP_NOTIFY_EVENT: u8 = COLORMAP_NOTIFY_EVENT;
 
 // X11 event masks (complete per X11 protocol spec)
 pub(crate) const KEY_PRESS_MASK: u32 = 0x0000_0001;
