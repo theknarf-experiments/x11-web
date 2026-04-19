@@ -165,7 +165,8 @@ pub(crate) fn handle_change_property(state: &mut ClientState, data: &[u8]) -> Ve
     }
 
     // Check if this is WM_TRANSIENT_FOR — store transient parent in WindowState (ICCCM §4.1.2.6)
-    let is_wm_transient_for = property_atom == 68 // WM_TRANSIENT_FOR predefined atom
+    use x11rb_protocol::protocol::xproto::AtomEnum;
+    let is_wm_transient_for = property_atom == u32::from(AtomEnum::WM_TRANSIENT_FOR)
         || state
             .get_atom_name(property_atom)
             .map(|n| n == "WM_TRANSIENT_FOR")
@@ -253,7 +254,7 @@ pub(crate) fn handle_change_property(state: &mut ClientState, data: &[u8]) -> Ve
     }
 
     // Check if this is WM_NAME (atom 39) or _NET_WM_NAME
-    let is_wm_name = property_atom == 39
+    let is_wm_name = property_atom == u32::from(AtomEnum::WM_NAME)
         || state
             .get_atom_name(property_atom)
             .map(|n| n == "_NET_WM_NAME" || n == "WM_NAME")
@@ -315,7 +316,7 @@ pub(crate) fn handle_change_property(state: &mut ClientState, data: &[u8]) -> Ve
     }
 
     // Check if this is WM_HINTS (atom 35) — parse urgency and icon hints.
-    let is_wm_hints = property_atom == 35
+    let is_wm_hints = property_atom == u32::from(AtomEnum::WM_HINTS)
         || state
             .get_atom_name(property_atom)
             .map(|n| n == "WM_HINTS")
