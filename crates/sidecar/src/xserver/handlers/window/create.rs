@@ -2,6 +2,10 @@
 
 use super::*;
 use crate::xserver::core::require_len;
+use crate::xserver::request::request_header;
+use x11rb_protocol::protocol::xproto::{
+    CreateWindowRequest, DestroySubwindowsRequest, DestroyWindowRequest,
+};
 
 // ---------------------------------------------------------------------------
 // Opcode 1: CreateWindow
@@ -10,7 +14,21 @@ use crate::xserver::core::require_len;
 pub(crate) fn handle_create_window(state: &mut ClientState, data: &[u8], _seq: u16) -> Vec<u8> {
     require_len!(data, 32, _seq, 1);
 
-    let wid = state.read_u32(data, 4);
+    let req = match CreateWindowRequest::try_parse_request(request_header(data), &data[4..]) {
+        Ok(r) => r,
+        Err(_) => return build_error(LENGTH_ERROR, _seq, 0, 1, 0),
+    };
+
+    let wid = req.wid;
+    let parent = req.parent;
+    let x = req.x;
+    let y = req.y;
+    let width = req.width;
+    let height = req.height;
+    let border_width = req.border_width;
+    let raw_class: u16 = req.class.into();
+    let req_depth = req.depth;
+    let visual = req.visual;
 
     // Validate resource ID is within this client's allocated range
     if !state.validate_resource_id(wid) {
@@ -22,13 +40,6 @@ pub(crate) fn handle_create_window(state: &mut ClientState, data: &[u8], _seq: u
         return build_error(ALLOC_ERROR, _seq, wid, 1, 0);
     }
 
-    let parent = state.read_u32(data, 8);
-    let x = state.read_i16(data, 12);
-    let y = state.read_i16(data, 14);
-    let width = state.read_u16(data, 16);
-    let height = state.read_u16(data, 18);
-    let border_width = state.read_u16(data, 20);
-    let raw_class = state.read_u16(data, 22);
     // Per X11 spec: class 0 = CopyFromParent, resolved to parent's class.
     // Root window is always InputOutput (1).
     let class = if raw_class == 0 {
@@ -36,9 +47,6 @@ pub(crate) fn handle_create_window(state: &mut ClientState, data: &[u8], _seq: u
     } else {
         raw_class
     };
-    let req_depth = data[1];
-    let visual = state.read_u32(data, 24);
-    let value_mask = state.read_u32(data, 28);
 
     // Validate parent window exists (root window or a window we know about).
     if parent != state.root_window && !state.windows.contains_key(&parent) {
@@ -52,11 +60,6 @@ pub(crate) fn handle_create_window(state: &mut ClientState, data: &[u8], _seq: u
             return build_error(WINDOW_ERROR, _seq, parent, 1, 0);
         }
     }
-
-    // Validate value-list length matches the bitmask
-    let n_values = value_mask.count_ones() as usize;
-    let required_len = 32 + n_values * 4;
-    require_len!(data, required_len, _seq, 1);
 
     // Per X11 spec: width and height must be non-zero and fit in 16 bits.
     // Zero-size windows are rejected with BadValue.
@@ -81,77 +84,54 @@ pub(crate) fn handle_create_window(state: &mut ClientState, data: &[u8], _seq: u
         }
     }
 
-    let mut background_pixel = 0u32;
-    let mut background_pixmap: Option<u32> = None;
-    let mut border_pixel = 0u32;
-    let mut border_pixmap: Option<u32> = None;
-    let mut bit_gravity: u8 = 0; // Forget
-    let mut win_gravity: u8 = 1; // NorthWest (default per spec)
-    let mut backing_store: u8 = 0; // NotUseful
-    let mut backing_planes: u32 = 0xFFFFFFFF; // all planes
-    let mut backing_pixel: u32 = 0;
-    let mut save_under = false;
-    let mut event_mask = 0u32;
-    let mut do_not_propagate_mask = 0u32;
-    let mut override_redirect = false;
-    let mut cursor_id: Option<u32> = None;
-    let mut colormap_id: u32 = 0; // 0 = CopyFromParent (inherits parent's colormap)
+    // Extract value_list fields from the parsed request
+    let vl = &*req.value_list;
 
-    // Parse value list
-    let mut offset = 32;
-    for bit in 0..15 {
-        if value_mask & (1 << bit) != 0 && offset + 4 <= data.len() {
-            let val = state.read_u32(data, offset);
-            match bit {
-                0 => {
-                    // background-pixmap: 0=None, 1=ParentRelative, else pixmap ID
-                    background_pixmap = Some(val);
-                }
-                1 => background_pixel = val,
-                2 => {
-                    // border-pixmap: 0=CopyFromParent, else pixmap ID
-                    border_pixmap = Some(val);
-                }
-                3 => border_pixel = val,
-                4 => {
-                    if val > 10 {
-                        return build_error(VALUE_ERROR, _seq, val, 1, 0);
-                    }
-                    bit_gravity = val as u8;
-                }
-                5 => {
-                    if val > 10 {
-                        return build_error(VALUE_ERROR, _seq, val, 1, 0);
-                    }
-                    win_gravity = val as u8;
-                }
-                6 => {
-                    if val > 2 {
-                        return build_error(VALUE_ERROR, _seq, val, 1, 0);
-                    }
-                    backing_store = val as u8;
-                }
-                7 => backing_planes = val,
-                8 => backing_pixel = val,
-                9 => override_redirect = val != 0,
-                10 => save_under = val != 0,
-                11 => event_mask = val,
-                12 => do_not_propagate_mask = val,
-                13 => colormap_id = val, // colormap
-                14 => {
-                    if val != 0 {
-                        // Validate cursor ID exists
-                        if !state.cursors.contains_key(&val) {
-                            return build_error(CURSOR_ERROR, _seq, val, 1, 0);
-                        }
-                        cursor_id = Some(val);
-                    }
-                }
-                _ => {}
-            }
-            offset += 4;
-        }
+    let background_pixmap: Option<u32> = vl.background_pixmap;
+    let background_pixel: u32 = vl.background_pixel.unwrap_or(0);
+    let border_pixmap: Option<u32> = vl.border_pixmap;
+    let border_pixel: u32 = vl.border_pixel.unwrap_or(0);
+
+    let bit_gravity_val: u32 = vl.bit_gravity.map(u32::from).unwrap_or(0);
+    if vl.bit_gravity.is_some() && bit_gravity_val > 10 {
+        return build_error(VALUE_ERROR, _seq, bit_gravity_val, 1, 0);
     }
+    let bit_gravity: u8 = bit_gravity_val as u8;
+
+    let win_gravity_val: u32 = vl.win_gravity.map(u32::from).unwrap_or(1);
+    if vl.win_gravity.is_some() && win_gravity_val > 10 {
+        return build_error(VALUE_ERROR, _seq, win_gravity_val, 1, 0);
+    }
+    let win_gravity: u8 = win_gravity_val as u8; // default NorthWest (1)
+
+    let backing_store_val: u32 = vl.backing_store.map(u32::from).unwrap_or(0);
+    if vl.backing_store.is_some() && backing_store_val > 2 {
+        return build_error(VALUE_ERROR, _seq, backing_store_val, 1, 0);
+    }
+    let backing_store: u8 = backing_store_val as u8;
+
+    let backing_planes: u32 = vl.backing_planes.unwrap_or(0xFFFFFFFF);
+    let backing_pixel: u32 = vl.backing_pixel.unwrap_or(0);
+    let override_redirect: bool = vl.override_redirect.unwrap_or(0) != 0;
+    let save_under: bool = vl.save_under.unwrap_or(0) != 0;
+    let event_mask: u32 = vl.event_mask.map(u32::from).unwrap_or(0);
+    // Note: x11rb spells this "do_not_propogate_mask" (upstream typo)
+    let do_not_propagate_mask: u32 = vl.do_not_propogate_mask.map(u32::from).unwrap_or(0);
+    let colormap_id: u32 = vl.colormap.unwrap_or(0);
+
+    let cursor_id: Option<u32> = if let Some(c) = vl.cursor {
+        if c != 0 {
+            // Validate cursor ID exists
+            if !state.cursors.contains_key(&c) {
+                return build_error(CURSOR_ERROR, _seq, c, 1, 0);
+            }
+            Some(c)
+        } else {
+            None
+        }
+    } else {
+        None
+    };
 
     // Per X11 spec Section 12.3: SubstructureRedirectMask and ResizeRedirectMask
     // may only be selected by ONE client on a given window.  Check for conflicts
@@ -171,7 +151,7 @@ pub(crate) fn handle_create_window(state: &mut ClientState, data: &[u8], _seq: u
 
     let use_visual = if visual == 0 { ROOT_VISUAL } else { visual };
 
-    info!("CreateWindow: id={wid:#x} parent={parent:#x} {x},{y} {width}x{height} depth={} class={class} visual={visual:#x} bg={background_pixel:#x}", data[1]);
+    info!("CreateWindow: id={wid:#x} parent={parent:#x} {x},{y} {width}x{height} depth={req_depth} class={class} visual={visual:#x} bg={background_pixel:#x}");
 
     // InputOnly windows (class=2) must not have backgrounds, borders, or framebuffers.
     // They exist only to receive events. Per spec, depth must be 0 for InputOnly.
@@ -350,8 +330,11 @@ pub(crate) fn handle_create_window(state: &mut ClientState, data: &[u8], _seq: u
 // ---------------------------------------------------------------------------
 
 pub(crate) fn handle_destroy_window(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
-    require_len!(data, 8, state.sequence, 4);
-    let wid = state.read_u32(data, 4);
+    let req = match DestroyWindowRequest::try_parse_request(request_header(data), &data[4..]) {
+        Ok(r) => r,
+        Err(_) => return build_error(LENGTH_ERROR, state.sequence, 0, 4, 0),
+    };
+    let wid = req.window;
 
     if !state.windows.contains_key(&wid) {
         return build_error(WINDOW_ERROR, state.sequence, wid, 4, 0);
@@ -514,8 +497,11 @@ pub(crate) fn handle_destroy_window(state: &mut ClientState, data: &[u8]) -> Vec
 // ---------------------------------------------------------------------------
 
 pub(crate) fn handle_destroy_subwindows(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
-    require_len!(data, 8, state.sequence, 5);
-    let parent = state.read_u32(data, 4);
+    let req = match DestroySubwindowsRequest::try_parse_request(request_header(data), &data[4..]) {
+        Ok(r) => r,
+        Err(_) => return build_error(LENGTH_ERROR, state.sequence, 0, 5, 0),
+    };
+    let parent = req.window;
 
     if !state.windows.contains_key(&parent) {
         return build_error(WINDOW_ERROR, state.sequence, parent, 5, 0);

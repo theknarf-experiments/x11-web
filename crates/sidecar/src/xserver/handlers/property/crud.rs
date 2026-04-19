@@ -14,12 +14,18 @@ use x11rb_protocol::protocol::xproto::PropertyNotifyEvent;
 pub(crate) fn handle_change_property(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
     require_len!(data, 24, state.sequence, 18);
 
-    let mode = data[1]; // 0=Replace, 1=Prepend, 2=Append
-    let window = state.read_u32(data, 4);
-    let property_atom = state.read_u32(data, 8);
-    let prop_type = state.read_u32(data, 12);
-    let format = data[16];
-    let data_len = state.read_u32(data, 20) as usize;
+    use x11rb_protocol::protocol::xproto::ChangePropertyRequest;
+    use crate::xserver::request::request_header;
+    let req = match ChangePropertyRequest::try_parse_request(request_header(data), &data[4..]) {
+        Ok(r) => r,
+        Err(_) => return build_error(LENGTH_ERROR, state.sequence, 0, 18, 0),
+    };
+    let mode = u8::from(req.mode);
+    let window = req.window;
+    let property_atom = req.property;
+    let prop_type = req.type_;
+    let format = req.format;
+    let data_len = req.data_len as usize;
 
     // Validate property and type atoms exist
     if property_atom != 0 && state.get_atom_name(property_atom).is_none() {
@@ -42,9 +48,6 @@ pub(crate) fn handle_change_property(state: &mut ClientState, data: &[u8]) -> Ve
         _ => data_len,
     };
 
-    // Validate that the declared data fits within the request
-    require_len!(data, 24 + byte_len, state.sequence, 18);
-
     // Validate window exists
     if !state.windows.contains_key(&window) {
         return build_error(WINDOW_ERROR, state.sequence, window, 18, 0);
@@ -52,7 +55,7 @@ pub(crate) fn handle_change_property(state: &mut ClientState, data: &[u8]) -> Ve
 
     // Store the property value, honoring Replace/Prepend/Append modes
     {
-        let new_data = data[24..24 + byte_len].to_vec();
+        let new_data = req.data[..byte_len].to_vec();
         if let Some(win) = state.windows.get_mut(&window) {
             match mode {
                 1 => {
@@ -168,7 +171,7 @@ pub(crate) fn handle_change_property(state: &mut ClientState, data: &[u8]) -> Ve
             .unwrap_or(false);
 
     if is_wm_transient_for && format == 32 && byte_len >= 4 {
-        let transient_data = &data[24..24 + byte_len.min(data.len() - 24)];
+        let transient_data = &req.data[..byte_len.min(req.data.len())];
         if transient_data.len() >= 4 {
             let parent_wid = state.read_u32_from(transient_data, 0);
             if let Some(win) = state.windows.get_mut(&window) {
@@ -188,7 +191,7 @@ pub(crate) fn handle_change_property(state: &mut ClientState, data: &[u8]) -> Ve
         .unwrap_or(false);
 
     if is_sync_counter && format == 32 && byte_len >= 4 {
-        let counter_data = &data[24..24 + byte_len.min(data.len() - 24)];
+        let counter_data = &req.data[..byte_len.min(req.data.len())];
         if counter_data.len() >= 4 {
             let counter_id = state.read_u32_from(counter_data, 0);
             if let Some(win) = state.windows.get_mut(&window) {
@@ -209,7 +212,7 @@ pub(crate) fn handle_change_property(state: &mut ClientState, data: &[u8]) -> Ve
             .unwrap_or(false);
 
     if is_window_type && format == 32 && byte_len >= 4 {
-        let type_data = &data[24..24 + byte_len.min(data.len() - 24)];
+        let type_data = &req.data[..byte_len.min(req.data.len())];
         let mut atom_ids = Vec::new();
         for chunk in type_data.chunks_exact(4) {
             atom_ids.push(state.read_u32_from(chunk, 0));
@@ -235,7 +238,7 @@ pub(crate) fn handle_change_property(state: &mut ClientState, data: &[u8]) -> Ve
             .unwrap_or(false);
 
     if is_strut && format == 32 && byte_len >= 16 {
-        let strut_data = &data[24..24 + byte_len.min(data.len() - 24)];
+        let strut_data = &req.data[..byte_len.min(req.data.len())];
         if strut_data.len() >= 16 {
             let left = state.read_u32_from(strut_data, 0);
             let right = state.read_u32_from(strut_data, 4);
@@ -255,8 +258,8 @@ pub(crate) fn handle_change_property(state: &mut ClientState, data: &[u8]) -> Ve
             .map(|n| n == "_NET_WM_NAME" || n == "WM_NAME")
             .unwrap_or(false);
 
-    if is_wm_name && format == 8 && data.len() >= 24 + byte_len {
-        let title = String::from_utf8_lossy(&data[24..24 + byte_len]).to_string();
+    if is_wm_name && format == 8 && req.data.len() >= byte_len {
+        let title = String::from_utf8_lossy(&req.data[..byte_len]).to_string();
         if !title.is_empty() {
             if let Some(uuid) = state.window_uuid(window) {
                 let _ = state.update_tx.send((
@@ -271,7 +274,7 @@ pub(crate) fn handle_change_property(state: &mut ClientState, data: &[u8]) -> Ve
     }
 
     // Detect GTK application menu export.
-    if format == 8 && data.len() >= 24 + byte_len {
+    if format == 8 && req.data.len() >= byte_len {
         let atom_name = state.get_atom_name(property_atom);
         if let Some(name) = atom_name {
             let is_gtk_menu_atom = matches!(
@@ -283,7 +286,7 @@ pub(crate) fn handle_change_property(state: &mut ClientState, data: &[u8]) -> Ve
                     | "_GTK_WINDOW_OBJECT_PATH"
             );
             if is_gtk_menu_atom {
-                let value = String::from_utf8_lossy(&data[24..24 + byte_len])
+                let value = String::from_utf8_lossy(&req.data[..byte_len])
                     .trim_end_matches('\0')
                     .to_string();
                 let entry = state.gtk_menu_paths.entry(window).or_default();
@@ -318,7 +321,7 @@ pub(crate) fn handle_change_property(state: &mut ClientState, data: &[u8]) -> Ve
             .unwrap_or(false);
 
     if is_wm_hints && format == 32 && byte_len >= 4 {
-        let hint_data = &data[24..24 + byte_len.min(data.len() - 24)];
+        let hint_data = &req.data[..byte_len.min(req.data.len())];
         if hint_data.len() >= 4 {
             let flags = state.read_u32_from(hint_data, 0);
             // Bit 8 = UrgencyHint
@@ -397,7 +400,7 @@ pub(crate) fn handle_change_property(state: &mut ClientState, data: &[u8]) -> Ve
         .unwrap_or(false);
 
     if is_net_wm_icon && format == 32 && byte_len >= 8 {
-        let icon_data = &data[24..24 + byte_len.min(data.len() - 24)];
+        let icon_data = &req.data[..byte_len.min(req.data.len())];
         // _NET_WM_ICON format: width(CARD32) height(CARD32) ARGB_pixels...
         if icon_data.len() >= 8 {
             let w = state.read_u32_from(icon_data, 0);
@@ -442,8 +445,16 @@ pub(crate) fn handle_change_property(state: &mut ClientState, data: &[u8]) -> Ve
 
 pub(crate) fn handle_delete_property(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
     require_len!(data, 12, state.sequence, 19);
+
+    use x11rb_protocol::protocol::xproto::DeletePropertyRequest;
+    use crate::xserver::request::request_header;
+    let req = match DeletePropertyRequest::try_parse_request(request_header(data), &data[4..]) {
+        Ok(r) => r,
+        Err(_) => return build_error(LENGTH_ERROR, state.sequence, 0, 19, 0),
+    };
+    let window = req.window;
+    let property = req.property;
     {
-        let window = state.read_u32(data, 4);
         let window_exists = state.windows.contains_key(&window)
             || state
                 .shared_windows
@@ -453,7 +464,6 @@ pub(crate) fn handle_delete_property(state: &mut ClientState, data: &[u8]) -> Ve
         if !window_exists {
             return build_error(WINDOW_ERROR, state.sequence, window, 19, 0);
         }
-        let property = state.read_u32(data, 8);
         // Validate property atom
         if property != 0 && state.get_atom_name(property).is_none() {
             return build_error(ATOM_ERROR, state.sequence, property, 19, 0);
@@ -617,7 +627,14 @@ pub(crate) fn handle_get_property(state: &mut ClientState, data: &[u8], seq: u16
 
 pub(crate) fn handle_list_properties(state: &ClientState, data: &[u8], seq: u16) -> Vec<u8> {
     require_len!(data, 8, seq, 21);
-    let window = state.read_u32(data, 4);
+
+    use x11rb_protocol::protocol::xproto::ListPropertiesRequest;
+    use crate::xserver::request::request_header;
+    let req = match ListPropertiesRequest::try_parse_request(request_header(data), &data[4..]) {
+        Ok(r) => r,
+        Err(_) => return build_error(LENGTH_ERROR, seq, 0, 21, 0),
+    };
+    let window = req.window;
 
     let window_exists = state.windows.contains_key(&window)
         || state
