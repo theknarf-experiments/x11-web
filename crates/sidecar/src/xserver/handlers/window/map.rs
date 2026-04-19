@@ -55,7 +55,7 @@ pub(crate) fn handle_map_window(state: &mut ClientState, data: &[u8], seq: u16) 
         let parent_has_redirect = state
             .windows
             .get(&parent_id)
-            .is_some_and(|p| p.event_mask & SUBSTRUCTURE_REDIRECT_MASK != 0);
+            .is_some_and(|p| p.event_mask & EventMask::SUBSTRUCTURE_REDIRECT != EventMask::NO_EVENT);
 
         if should_redirect || parent_has_redirect {
             info!("MapWindow: redirecting wid={wid:#x} as MapRequest (parent={parent_id:#x})");
@@ -74,7 +74,7 @@ pub(crate) fn handle_map_window(state: &mut ClientState, data: &[u8], seq: u16) 
                 }
             }
             // Also broadcast to any other clients with SubstructureRedirectMask on parent
-            state.broadcast_event(parent_id, SUBSTRUCTURE_REDIRECT_MASK, &map_request);
+            state.broadcast_event(parent_id, u32::from(EventMask::SUBSTRUCTURE_REDIRECT), &map_request);
             // Don't map the window -- the WM/redirector will do it.
             return events;
         }
@@ -267,7 +267,7 @@ pub(crate) fn handle_map_window(state: &mut ClientState, data: &[u8], seq: u16) 
             window: wid,
             override_redirect,
         }, msb_first);
-        if event_mask & STRUCTURE_NOTIFY_MASK != 0 {
+        if event_mask & EventMask::STRUCTURE_NOTIFY != EventMask::NO_EVENT {
             events.extend_from_slice(&map_event);
         }
 
@@ -284,15 +284,15 @@ pub(crate) fn handle_map_window(state: &mut ClientState, data: &[u8], seq: u16) 
 
             // Local delivery
             if let Some(parent_win) = state.windows.get(&parent_id) {
-                if parent_win.event_mask & SUBSTRUCTURE_NOTIFY_MASK != 0 {
+                if parent_win.event_mask & EventMask::SUBSTRUCTURE_NOTIFY != EventMask::NO_EVENT {
                     state.pending_events.push(parent_event.to_vec());
                 }
             }
 
             // Cross-connection broadcast to other clients watching this parent
-            state.broadcast_event(parent_id, SUBSTRUCTURE_NOTIFY_MASK, &parent_event);
+            state.broadcast_event(parent_id, u32::from(EventMask::SUBSTRUCTURE_NOTIFY), &parent_event);
             // Also broadcast StructureNotify to other clients watching the window itself
-            state.broadcast_event(wid, STRUCTURE_NOTIFY_MASK, &map_event);
+            state.broadcast_event(wid, u32::from(EventMask::STRUCTURE_NOTIFY), &map_event);
         }
 
         // Send VisibilityNotify with real occlusion computation
@@ -301,7 +301,7 @@ pub(crate) fn handle_map_window(state: &mut ClientState, data: &[u8], seq: u16) 
             if let Some(win) = state.windows.get_mut(&wid) {
                 win.visibility = vis_state;
             }
-            if event_mask & VISIBILITY_CHANGE_MASK != 0 {
+            if event_mask & EventMask::VISIBILITY_CHANGE != EventMask::NO_EVENT {
                 let vis_event = serialize_event(&VisibilityNotifyEvent {
                     response_type: VISIBILITY_NOTIFY_EVENT,
                     sequence: seq,
@@ -322,7 +322,7 @@ pub(crate) fn handle_map_window(state: &mut ClientState, data: &[u8], seq: u16) 
                 .map(|w| (w.id, w.width, w.height))
                 .collect();
 
-            let self_selected = event_mask & EXPOSURE_MASK != 0;
+            let self_selected = event_mask & EventMask::EXPOSURE != EventMask::NO_EVENT;
             // Total expose events: 1 (self, if selected) + descendants.len()
             let total = if self_selected { 1 } else { 0 } + descendants.len();
 
@@ -346,7 +346,7 @@ pub(crate) fn handle_map_window(state: &mut ClientState, data: &[u8], seq: u16) 
                     .get(desc_id)
                     .map(|w| w.event_mask)
                     .unwrap_or(0);
-                if desc_mask & EXPOSURE_MASK != 0 {
+                if desc_mask & EventMask::EXPOSURE != EventMask::NO_EVENT {
                     let base = if self_selected { 1 } else { 0 };
                     let remaining = total.saturating_sub(base + 1 + i) as u16;
                     let exp = serialize_event(&ExposeEvent {
@@ -364,7 +364,7 @@ pub(crate) fn handle_map_window(state: &mut ClientState, data: &[u8], seq: u16) 
             }
 
             // Broadcast Expose to other clients that selected ExposureMask on this window
-            state.broadcast_event(wid, EXPOSURE_MASK, &expose_event);
+            state.broadcast_event(wid, u32::from(EventMask::EXPOSURE), &expose_event);
         }
     }
 
@@ -585,7 +585,7 @@ pub(crate) fn handle_unmap_window(state: &mut ClientState, data: &[u8], seq: u16
             from_configure: false,
         }, bo);
         let win_mask = state.windows.get(&wid).map(|w| w.event_mask).unwrap_or(0);
-        if win_mask & STRUCTURE_NOTIFY_MASK != 0 {
+        if win_mask & EventMask::STRUCTURE_NOTIFY != EventMask::NO_EVENT {
             events.extend_from_slice(&event);
         }
         event
@@ -604,14 +604,14 @@ pub(crate) fn handle_unmap_window(state: &mut ClientState, data: &[u8], seq: u16
         let parent_wants_notify = state
             .windows
             .get(&parent_id)
-            .is_some_and(|w| w.event_mask & SUBSTRUCTURE_NOTIFY_MASK != 0);
+            .is_some_and(|w| w.event_mask & EventMask::SUBSTRUCTURE_NOTIFY != EventMask::NO_EVENT);
         if parent_wants_notify {
             events.extend_from_slice(&parent_event);
         }
 
         // Cross-connection broadcast
-        state.broadcast_event(parent_id, SUBSTRUCTURE_NOTIFY_MASK, &parent_event);
-        state.broadcast_event(wid, STRUCTURE_NOTIFY_MASK, &unmap_event);
+        state.broadcast_event(parent_id, u32::from(EventMask::SUBSTRUCTURE_NOTIFY), &parent_event);
+        state.broadcast_event(wid, u32::from(EventMask::STRUCTURE_NOTIFY), &unmap_event);
     }
 
     // Set WM_STATE = WithdrawnState for top-level windows (ICCCM)

@@ -55,11 +55,11 @@ pub(crate) fn handle_reparent_window(state: &mut ClientState, data: &[u8], seq: 
             if state
                 .windows
                 .get(&window)
-                .is_some_and(|w| w.event_mask & STRUCTURE_NOTIFY_MASK != 0)
+                .is_some_and(|w| w.event_mask & EventMask::STRUCTURE_NOTIFY != EventMask::NO_EVENT)
             {
                 state.pending_events.push(unmap_event.clone());
             }
-            state.broadcast_event(window, STRUCTURE_NOTIFY_MASK, &unmap_event);
+            state.broadcast_event(window, u32::from(EventMask::STRUCTURE_NOTIFY), &unmap_event);
         }
         // Generate UnmapNotify to the old parent (SubstructureNotifyMask)
         if old_parent != 0 {
@@ -73,11 +73,11 @@ pub(crate) fn handle_reparent_window(state: &mut ClientState, data: &[u8], seq: 
             if state
                 .windows
                 .get(&old_parent)
-                .is_some_and(|w| w.event_mask & SUBSTRUCTURE_NOTIFY_MASK != 0)
+                .is_some_and(|w| w.event_mask & EventMask::SUBSTRUCTURE_NOTIFY != EventMask::NO_EVENT)
             {
                 state.pending_events.push(parent_unmap.clone());
             }
-            state.broadcast_event(old_parent, SUBSTRUCTURE_NOTIFY_MASK, &parent_unmap);
+            state.broadcast_event(old_parent, u32::from(EventMask::SUBSTRUCTURE_NOTIFY), &parent_unmap);
         }
 
         if let Some(win) = state.windows.get_mut(&window) {
@@ -129,11 +129,11 @@ pub(crate) fn handle_reparent_window(state: &mut ClientState, data: &[u8], seq: 
         if state
             .windows
             .get(&window)
-            .is_some_and(|w| w.event_mask & STRUCTURE_NOTIFY_MASK != 0)
+            .is_some_and(|w| w.event_mask & EventMask::STRUCTURE_NOTIFY != EventMask::NO_EVENT)
         {
             events.extend_from_slice(&event);
         }
-        state.broadcast_event(window, STRUCTURE_NOTIFY_MASK, &event);
+        state.broadcast_event(window, u32::from(EventMask::STRUCTURE_NOTIFY), &event);
     }
 
     // Send ReparentNotify to old parent (SubstructureNotifyMask)
@@ -142,11 +142,11 @@ pub(crate) fn handle_reparent_window(state: &mut ClientState, data: &[u8], seq: 
         if state
             .windows
             .get(&old_parent)
-            .is_some_and(|w| w.event_mask & SUBSTRUCTURE_NOTIFY_MASK != 0)
+            .is_some_and(|w| w.event_mask & EventMask::SUBSTRUCTURE_NOTIFY != EventMask::NO_EVENT)
         {
             state.pending_events.push(event.clone());
         }
-        state.broadcast_event(old_parent, SUBSTRUCTURE_NOTIFY_MASK, &event);
+        state.broadcast_event(old_parent, u32::from(EventMask::SUBSTRUCTURE_NOTIFY), &event);
     }
 
     // Send ReparentNotify to new parent (SubstructureNotifyMask)
@@ -155,11 +155,11 @@ pub(crate) fn handle_reparent_window(state: &mut ClientState, data: &[u8], seq: 
         if state
             .windows
             .get(&new_parent)
-            .is_some_and(|w| w.event_mask & SUBSTRUCTURE_NOTIFY_MASK != 0)
+            .is_some_and(|w| w.event_mask & EventMask::SUBSTRUCTURE_NOTIFY != EventMask::NO_EVENT)
         {
             state.pending_events.push(event.clone());
         }
-        state.broadcast_event(new_parent, SUBSTRUCTURE_NOTIFY_MASK, &event);
+        state.broadcast_event(new_parent, u32::from(EventMask::SUBSTRUCTURE_NOTIFY), &event);
     }
 
     // Per X11 spec: if the window was originally mapped, perform an automatic
@@ -220,7 +220,7 @@ pub(crate) fn handle_configure_window(state: &mut ClientState, data: &[u8], seq:
         let parent_has_redirect = state
             .windows
             .get(&parent_id)
-            .is_some_and(|p| p.event_mask & SUBSTRUCTURE_REDIRECT_MASK != 0);
+            .is_some_and(|p| p.event_mask & EventMask::SUBSTRUCTURE_REDIRECT != EventMask::NO_EVENT);
 
         if should_redirect || parent_has_redirect {
             info!("ConfigureWindow: redirecting wid={wid:#x} as ConfigureRequest (parent={parent_id:#x})");
@@ -284,7 +284,7 @@ pub(crate) fn handle_configure_window(state: &mut ClientState, data: &[u8], seq:
                     let _ = tx.send(event.clone());
                 }
             }
-            state.broadcast_event(parent_id, SUBSTRUCTURE_REDIRECT_MASK, &event);
+            state.broadcast_event(parent_id, u32::from(EventMask::SUBSTRUCTURE_REDIRECT), &event);
             return Vec::new();
         }
     }
@@ -295,7 +295,7 @@ pub(crate) fn handle_configure_window(state: &mut ClientState, data: &[u8], seq:
     let resize_redirected = {
         let has_resize_redirect = state.event_broadcaster.has_mask_subscriber(
             wid,
-            RESIZE_REDIRECT_MASK,
+            u32::from(EventMask::RESIZE_REDIRECT),
             &state.client_id,
         );
         has_resize_redirect && (value_mask & 0x0C != 0) // bits 2 (width) or 3 (height)
@@ -327,7 +327,7 @@ pub(crate) fn handle_configure_window(state: &mut ClientState, data: &[u8], seq:
             width: req_width,
             height: req_height,
         }, bo);
-        state.broadcast_event(wid, RESIZE_REDIRECT_MASK, &event);
+        state.broadcast_event(wid, u32::from(EventMask::RESIZE_REDIRECT), &event);
 
         // Clear width (bit 2) and height (bit 3) from mask so they aren't applied
         value_mask & !0x0C
@@ -556,7 +556,7 @@ pub(crate) fn handle_configure_window(state: &mut ClientState, data: &[u8], seq:
                                 from_configure: false,
                             }, bo);
                             state.pending_events.push(unmap_evt.clone());
-                            state.broadcast_event(*child_id, STRUCTURE_NOTIFY_MASK, &unmap_evt);
+                            state.broadcast_event(*child_id, u32::from(EventMask::STRUCTURE_NOTIFY), &unmap_evt);
 
                             let parent_unmap = serialize_event(&UnmapNotifyEvent {
                                 response_type: UNMAP_NOTIFY_EVENT,
@@ -565,7 +565,7 @@ pub(crate) fn handle_configure_window(state: &mut ClientState, data: &[u8], seq:
                                 window: *child_id,
                                 from_configure: false,
                             }, bo);
-                            state.broadcast_event(wid, SUBSTRUCTURE_NOTIFY_MASK, &parent_unmap);
+                            state.broadcast_event(wid, u32::from(EventMask::SUBSTRUCTURE_NOTIFY), &parent_unmap);
                         }
                     }
                     continue;
@@ -591,7 +591,7 @@ pub(crate) fn handle_configure_window(state: &mut ClientState, data: &[u8], seq:
                     state.pending_events.push(event.clone());
 
                     // Cross-connection broadcast: StructureNotify on the child
-                    state.broadcast_event(*child_id, STRUCTURE_NOTIFY_MASK, &event);
+                    state.broadcast_event(*child_id, u32::from(EventMask::STRUCTURE_NOTIFY), &event);
                     // Cross-connection broadcast: SubstructureNotify on the parent
                     let parent_event = serialize_event(&GravityNotifyEvent {
                         response_type: GRAVITY_NOTIFY_EVENT,
@@ -601,7 +601,7 @@ pub(crate) fn handle_configure_window(state: &mut ClientState, data: &[u8], seq:
                         x: cx,
                         y: cy,
                     }, bo);
-                    state.broadcast_event(wid, SUBSTRUCTURE_NOTIFY_MASK, &parent_event);
+                    state.broadcast_event(wid, u32::from(EventMask::SUBSTRUCTURE_NOTIFY), &parent_event);
                 }
             }
 
@@ -619,7 +619,7 @@ pub(crate) fn handle_configure_window(state: &mut ClientState, data: &[u8], seq:
                     override_redirect: false,
                 }, bo);
                 state.pending_events.push(map_evt.clone());
-                state.broadcast_event(*child_id, STRUCTURE_NOTIFY_MASK, &map_evt);
+                state.broadcast_event(*child_id, u32::from(EventMask::STRUCTURE_NOTIFY), &map_evt);
 
                 let parent_map = serialize_event(&MapNotifyEvent {
                     response_type: MAP_NOTIFY_EVENT,
@@ -628,7 +628,7 @@ pub(crate) fn handle_configure_window(state: &mut ClientState, data: &[u8], seq:
                     window: *child_id,
                     override_redirect: false,
                 }, bo);
-                state.broadcast_event(wid, SUBSTRUCTURE_NOTIFY_MASK, &parent_map);
+                state.broadcast_event(wid, u32::from(EventMask::SUBSTRUCTURE_NOTIFY), &parent_map);
             }
         }
     }
@@ -992,7 +992,7 @@ pub(crate) fn handle_configure_window(state: &mut ClientState, data: &[u8], seq:
 
                     state.pending_events.push(sync_msg.clone());
                     // Also deliver to cross-connection clients
-                    state.broadcast_event(wid, STRUCTURE_NOTIFY_MASK, &sync_msg);
+                    state.broadcast_event(wid, u32::from(EventMask::STRUCTURE_NOTIFY), &sync_msg);
                 }
             }
 
@@ -1027,21 +1027,21 @@ pub(crate) fn handle_configure_window(state: &mut ClientState, data: &[u8], seq:
                     override_redirect,
                 }, msb_first);
                 if let Some(parent_win) = state.windows.get(&parent_id) {
-                    if parent_win.event_mask & SUBSTRUCTURE_NOTIFY_MASK != 0 {
+                    if parent_win.event_mask & EventMask::SUBSTRUCTURE_NOTIFY != EventMask::NO_EVENT {
                         state.pending_events.push(parent_event.clone());
                     }
                 }
                 // Cross-connection broadcast: SubstructureNotify on parent
-                state.broadcast_event(parent_id, SUBSTRUCTURE_NOTIFY_MASK, &parent_event);
+                state.broadcast_event(parent_id, u32::from(EventMask::SUBSTRUCTURE_NOTIFY), &parent_event);
             }
             // Deliver StructureNotify to the window's own client if subscribed
             if let Some(win) = state.windows.get(&wid) {
-                if win.event_mask & STRUCTURE_NOTIFY_MASK != 0 {
+                if win.event_mask & EventMask::STRUCTURE_NOTIFY != EventMask::NO_EVENT {
                     state.pending_events.push(event.clone());
                 }
             }
             // Cross-connection broadcast: StructureNotify on the window itself
-            state.broadcast_event(wid, STRUCTURE_NOTIFY_MASK, &event);
+            state.broadcast_event(wid, u32::from(EventMask::STRUCTURE_NOTIFY), &event);
 
             // Generate Expose event when window size changed (apps need this to redraw)
             let size_changed = width != old_w || height != old_h;
@@ -1055,12 +1055,12 @@ pub(crate) fn handle_configure_window(state: &mut ClientState, data: &[u8], seq:
                     .filter(|w| {
                         w.mapped && w.id != wid && is_descendant_of(&state.windows, w.id, wid)
                     })
-                    .filter(|w| w.event_mask & EXPOSURE_MASK != 0)
+                    .filter(|w| w.event_mask & EventMask::EXPOSURE != EventMask::NO_EVENT)
                     .map(|w| (w.id, w.width, w.height))
                     .collect();
 
                 // Total expose events: 1 (self, if selected) + descendants.len()
-                let self_selected = win_mask & EXPOSURE_MASK != 0;
+                let self_selected = win_mask & EventMask::EXPOSURE != EventMask::NO_EVENT;
                 let total = if self_selected { 1 } else { 0 } + descendants.len();
 
                 // Build the Expose event for cross-connection broadcast
@@ -1078,7 +1078,7 @@ pub(crate) fn handle_configure_window(state: &mut ClientState, data: &[u8], seq:
                     state.pending_events.push(expose.clone());
                 }
                 // Broadcast to other clients that selected ExposureMask
-                state.broadcast_event(wid, EXPOSURE_MASK, &expose);
+                state.broadcast_event(wid, u32::from(EventMask::EXPOSURE), &expose);
 
                 for (i, (desc_id, dw, dh)) in descendants.iter().enumerate() {
                     let base = if self_selected { 1 } else { 0 };
@@ -1167,7 +1167,7 @@ pub(crate) fn handle_circulate_window(state: &mut ClientState, data: &[u8], seq:
     let parent_redirect = state
         .windows
         .get(&window)
-        .map(|w| w.event_mask & SUBSTRUCTURE_REDIRECT_MASK != 0)
+        .map(|w| w.event_mask & EventMask::SUBSTRUCTURE_REDIRECT != EventMask::NO_EVENT)
         .unwrap_or(false);
 
     let bo = state.msb_first;
@@ -1183,7 +1183,7 @@ pub(crate) fn handle_circulate_window(state: &mut ClientState, data: &[u8], seq:
         }, bo);
         state.pending_events.push(event.clone());
         // Per X11 spec, deliver CirculateRequest to all SubstructureRedirectMask selectors
-        state.broadcast_event(window, SUBSTRUCTURE_REDIRECT_MASK, &event);
+        state.broadcast_event(window, u32::from(EventMask::SUBSTRUCTURE_REDIRECT), &event);
         return Vec::new();
     }
 
@@ -1216,12 +1216,12 @@ pub(crate) fn handle_circulate_window(state: &mut ClientState, data: &[u8], seq:
     let structure_mask = state
         .windows
         .get(&target_child)
-        .map(|w| w.event_mask & STRUCTURE_NOTIFY_MASK != 0)
+        .map(|w| w.event_mask & EventMask::STRUCTURE_NOTIFY != EventMask::NO_EVENT)
         .unwrap_or(false);
     let substructure_mask = state
         .windows
         .get(&window)
-        .map(|w| w.event_mask & SUBSTRUCTURE_NOTIFY_MASK != 0)
+        .map(|w| w.event_mask & EventMask::SUBSTRUCTURE_NOTIFY != EventMask::NO_EVENT)
         .unwrap_or(false);
 
     {
@@ -1236,7 +1236,7 @@ pub(crate) fn handle_circulate_window(state: &mut ClientState, data: &[u8], seq:
             state.pending_events.push(event.clone());
         }
         // Cross-connection broadcast: StructureNotify on the circulated child
-        state.broadcast_event(target_child, STRUCTURE_NOTIFY_MASK, &event);
+        state.broadcast_event(target_child, u32::from(EventMask::STRUCTURE_NOTIFY), &event);
     }
 
     {
@@ -1251,7 +1251,7 @@ pub(crate) fn handle_circulate_window(state: &mut ClientState, data: &[u8], seq:
             state.pending_events.push(event.clone());
         }
         // Cross-connection broadcast: SubstructureNotify on the parent
-        state.broadcast_event(window, SUBSTRUCTURE_NOTIFY_MASK, &event);
+        state.broadcast_event(window, u32::from(EventMask::SUBSTRUCTURE_NOTIFY), &event);
     }
 
     Vec::new()

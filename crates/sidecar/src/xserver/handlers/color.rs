@@ -130,12 +130,12 @@ pub(crate) fn handle_install_colormap(state: &mut ClientState, data: &[u8]) -> V
     state.installed_colormaps.insert(mid);
 
     // Per X11 spec, generate ColormapNotify for ALL windows that have
-    // ColormapChangeMask (COLOURMAP_CHANGE_MASK) selected, notifying that this
+    // ColormapChangeMask (EventMask::COLOR_MAP_CHANGE) selected, notifying that this
     // colormap is now installed.
     let notify_windows: Vec<u32> = state
         .windows
         .iter()
-        .filter(|(_, w)| w.event_mask & COLOURMAP_CHANGE_MASK != 0)
+        .filter(|(_, w)| w.event_mask & EventMask::COLOR_MAP_CHANGE != EventMask::NO_EVENT)
         .map(|(&id, _)| id)
         .collect();
 
@@ -148,7 +148,7 @@ pub(crate) fn handle_install_colormap(state: &mut ClientState, data: &[u8]) -> V
         event[13] = 1; // state = Installed
         state.pending_events.push(event.to_vec());
         // Also broadcast to other connections selecting on this window
-        state.broadcast_event(wid, COLOURMAP_CHANGE_MASK, &event);
+        state.broadcast_event(wid, u32::from(EventMask::COLOR_MAP_CHANGE), &event);
     }
     Vec::new()
 }
@@ -175,7 +175,7 @@ pub(crate) fn handle_uninstall_colormap(state: &mut ClientState, data: &[u8]) ->
     let notify_windows: Vec<u32> = state
         .windows
         .iter()
-        .filter(|(_, w)| w.event_mask & COLOURMAP_CHANGE_MASK != 0)
+        .filter(|(_, w)| w.event_mask & EventMask::COLOR_MAP_CHANGE != EventMask::NO_EVENT)
         .map(|(&id, _)| id)
         .collect();
 
@@ -187,7 +187,7 @@ pub(crate) fn handle_uninstall_colormap(state: &mut ClientState, data: &[u8]) ->
         event[12] = 1; // new = true
         event[13] = 0; // state = Uninstalled
         state.pending_events.push(event.to_vec());
-        state.broadcast_event(wid, COLOURMAP_CHANGE_MASK, &event);
+        state.broadcast_event(wid, u32::from(EventMask::COLOR_MAP_CHANGE), &event);
     }
 
     // Per spec, when a colormap is uninstalled, the default colormap
@@ -197,7 +197,7 @@ pub(crate) fn handle_uninstall_colormap(state: &mut ClientState, data: &[u8]) ->
         let notify_windows2: Vec<u32> = state
             .windows
             .iter()
-            .filter(|(_, w)| w.event_mask & COLOURMAP_CHANGE_MASK != 0)
+            .filter(|(_, w)| w.event_mask & EventMask::COLOR_MAP_CHANGE != EventMask::NO_EVENT)
             .map(|(&id, _)| id)
             .collect();
         for wid in notify_windows2 {
@@ -208,7 +208,7 @@ pub(crate) fn handle_uninstall_colormap(state: &mut ClientState, data: &[u8]) ->
             event[12] = 1; // new = true
             event[13] = 1; // state = Installed
             state.pending_events.push(event.to_vec());
-            state.broadcast_event(wid, COLOURMAP_CHANGE_MASK, &event);
+            state.broadcast_event(wid, u32::from(EventMask::COLOR_MAP_CHANGE), &event);
         }
     }
     Vec::new()

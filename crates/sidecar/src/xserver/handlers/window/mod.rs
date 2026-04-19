@@ -157,7 +157,7 @@ pub(crate) fn update_sibling_visibility(
         if new_vis != old_vis {
             if let Some(win) = state.windows.get_mut(&sib_id) {
                 win.visibility = new_vis;
-                if win.event_mask & VISIBILITY_CHANGE_MASK != 0 {
+                if win.event_mask & EventMask::VISIBILITY_CHANGE != EventMask::NO_EVENT {
                     let vis_event = serialize_event(&VisibilityNotifyEvent {
                         response_type: VISIBILITY_NOTIFY_EVENT,
                         sequence: seq,
@@ -174,7 +174,7 @@ pub(crate) fn update_sibling_visibility(
                 window: sib_id,
                 state: new_vis.into(),
             }, msb_first);
-            state.broadcast_event(sib_id, VISIBILITY_CHANGE_MASK, &vis_event);
+            state.broadcast_event(sib_id, u32::from(EventMask::VISIBILITY_CHANGE), &vis_event);
 
             // Generate Expose events for siblings that became more visible
             // (newly-uncovered regions need repainting).
@@ -202,7 +202,7 @@ pub(crate) fn update_sibling_visibility(
                         .get(&sib_id)
                         .map(|w| (w.width, w.height, w.event_mask))
                         .unwrap_or((0, 0, 0));
-                    if sib_mask & EXPOSURE_MASK != 0 {
+                    if sib_mask & EventMask::EXPOSURE != EventMask::NO_EVENT {
                         let expose = serialize_event(&ExposeEvent {
                             response_type: EXPOSE_EVENT,
                             sequence: seq,
@@ -229,7 +229,7 @@ pub(crate) fn update_sibling_visibility(
                         height: bc_h,
                         count: 0,
                     }, msb_first);
-                    state.broadcast_event(sib_id, EXPOSURE_MASK, &expose_bc);
+                    state.broadcast_event(sib_id, u32::from(EventMask::EXPOSURE), &expose_bc);
                 }
             }
         }

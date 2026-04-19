@@ -480,13 +480,13 @@ pub(crate) fn handle_delete_property(state: &mut ClientState, data: &[u8]) -> Ve
             }, state.msb_first);
 
             if let Some(win) = state.windows.get(&window) {
-                if win.event_mask & PROPERTY_CHANGE_MASK != 0 {
+                if win.event_mask & EventMask::PROPERTY_CHANGE != EventMask::NO_EVENT {
                     state.pending_events.push(event.clone());
                 }
             }
 
             // Broadcast to other connections that selected PropertyChangeMask
-            state.broadcast_event(window, PROPERTY_CHANGE_MASK, &event);
+            state.broadcast_event(window, u32::from(EventMask::PROPERTY_CHANGE), &event);
         }
 
         // Advance any pending INCR transfer for this window+property.

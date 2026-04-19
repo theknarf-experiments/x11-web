@@ -323,7 +323,7 @@ pub(crate) fn handle_create_window(state: &mut ClientState, data: &[u8], _seq: u
 
     // Send CreateNotify to parent if it has SubstructureNotifyMask
     if let Some(parent_win) = state.windows.get(&parent) {
-        if parent_win.event_mask & SUBSTRUCTURE_NOTIFY_MASK != 0 {
+        if parent_win.event_mask & EventMask::SUBSTRUCTURE_NOTIFY != EventMask::NO_EVENT {
             let mut event = [0u8; 32];
             event[0] = CREATE_NOTIFY_EVENT;
             state.write_u16(&mut event, 2, _seq);
@@ -338,7 +338,7 @@ pub(crate) fn handle_create_window(state: &mut ClientState, data: &[u8], _seq: u
             state.pending_events.push(event.to_vec());
 
             // Cross-connection broadcast: other clients watching SubstructureNotify on parent
-            state.broadcast_event(parent, SUBSTRUCTURE_NOTIFY_MASK, &event);
+            state.broadcast_event(parent, u32::from(EventMask::SUBSTRUCTURE_NOTIFY), &event);
         }
     }
 
@@ -372,12 +372,12 @@ pub(crate) fn handle_destroy_window(state: &mut ClientState, data: &[u8]) -> Vec
             state.write_u32(&mut event, 8, wid);
 
             if let Some(win) = state.windows.get(&wid) {
-                if win.event_mask & STRUCTURE_NOTIFY_MASK != 0 {
+                if win.event_mask & EventMask::STRUCTURE_NOTIFY != EventMask::NO_EVENT {
                     state.pending_events.push(event.to_vec());
                 }
             }
             // Cross-connection broadcast: StructureNotify on the window
-            state.broadcast_event(wid, STRUCTURE_NOTIFY_MASK, &event);
+            state.broadcast_event(wid, u32::from(EventMask::STRUCTURE_NOTIFY), &event);
         }
 
         // Send DestroyNotify to parent (SubstructureNotifyMask)
@@ -389,12 +389,12 @@ pub(crate) fn handle_destroy_window(state: &mut ClientState, data: &[u8]) -> Vec
             state.write_u32(&mut event, 8, wid);
 
             if let Some(parent_win) = state.windows.get(&parent_id) {
-                if parent_win.event_mask & SUBSTRUCTURE_NOTIFY_MASK != 0 {
+                if parent_win.event_mask & EventMask::SUBSTRUCTURE_NOTIFY != EventMask::NO_EVENT {
                     state.pending_events.push(event.to_vec());
                 }
             }
             // Cross-connection broadcast: SubstructureNotify on the parent
-            state.broadcast_event(parent_id, SUBSTRUCTURE_NOTIFY_MASK, &event);
+            state.broadcast_event(parent_id, u32::from(EventMask::SUBSTRUCTURE_NOTIFY), &event);
         }
     }
 
@@ -436,11 +436,11 @@ pub(crate) fn handle_destroy_window(state: &mut ClientState, data: &[u8]) -> Vec
             state.write_u32(&mut event, 4, desc);
             state.write_u32(&mut event, 8, desc);
             if let Some(w) = state.windows.get(&desc) {
-                if w.event_mask & STRUCTURE_NOTIFY_MASK != 0 {
+                if w.event_mask & EventMask::STRUCTURE_NOTIFY != EventMask::NO_EVENT {
                     state.pending_events.push(event.to_vec());
                 }
             }
-            state.broadcast_event(desc, STRUCTURE_NOTIFY_MASK, &event);
+            state.broadcast_event(desc, u32::from(EventMask::STRUCTURE_NOTIFY), &event);
 
             // SubstructureNotify on the parent
             let mut pevent = [0u8; 32];
@@ -448,7 +448,7 @@ pub(crate) fn handle_destroy_window(state: &mut ClientState, data: &[u8]) -> Vec
             state.write_u16(&mut pevent, 2, state.sequence);
             state.write_u32(&mut pevent, 4, desc_parent);
             state.write_u32(&mut pevent, 8, desc);
-            state.broadcast_event(desc_parent, SUBSTRUCTURE_NOTIFY_MASK, &pevent);
+            state.broadcast_event(desc_parent, u32::from(EventMask::SUBSTRUCTURE_NOTIFY), &pevent);
         }
 
         state.windows.remove(&desc);

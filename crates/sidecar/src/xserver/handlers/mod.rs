@@ -1420,9 +1420,9 @@ mod tests {
         // Per X11 spec: when a parent has SubstructureRedirectMask set,
         // MapWindow on a child generates MapRequest instead of actually mapping.
         // This applies to ALL windows, not just top-level.
-        let parent_mask: u32 = super::SUBSTRUCTURE_REDIRECT_MASK;
+        let parent_mask: u32 = u32::from(super::EventMask::SUBSTRUCTURE_REDIRECT);
         let override_redirect = false;
-        let has_redirect = parent_mask & super::SUBSTRUCTURE_REDIRECT_MASK != 0;
+        let has_redirect = parent_mask & super::EventMask::SUBSTRUCTURE_REDIRECT != super::EventMask::NO_EVENT;
         assert!(
             has_redirect && !override_redirect,
             "Non-OR child of redirect parent should generate MapRequest"
@@ -1432,10 +1432,10 @@ mod tests {
     #[test]
     fn override_redirect_bypasses_substructure_redirect() {
         // override_redirect windows must bypass SubstructureRedirect
-        let parent_mask: u32 = super::SUBSTRUCTURE_REDIRECT_MASK;
+        let parent_mask: u32 = u32::from(super::EventMask::SUBSTRUCTURE_REDIRECT);
         let override_redirect = true;
         let should_redirect =
-            (parent_mask & super::SUBSTRUCTURE_REDIRECT_MASK != 0) && !override_redirect;
+            (parent_mask & super::EventMask::SUBSTRUCTURE_REDIRECT != super::EventMask::NO_EVENT) && !override_redirect;
         assert!(
             !should_redirect,
             "Override-redirect windows must not be redirected"
@@ -1446,9 +1446,9 @@ mod tests {
     fn configure_request_sent_for_non_toplevel_with_redirect() {
         // Per X11 spec: ConfigureWindow on ANY child generates ConfigureRequest
         // when parent has SubstructureRedirectMask, not just top-level.
-        let parent_mask: u32 = super::SUBSTRUCTURE_REDIRECT_MASK;
+        let parent_mask: u32 = u32::from(super::EventMask::SUBSTRUCTURE_REDIRECT);
         let is_override_redirect = false;
-        let parent_has_redirect = parent_mask & super::SUBSTRUCTURE_REDIRECT_MASK != 0;
+        let parent_has_redirect = parent_mask & super::EventMask::SUBSTRUCTURE_REDIRECT != super::EventMask::NO_EVENT;
         assert!(
             parent_has_redirect && !is_override_redirect,
             "Non-OR child should generate ConfigureRequest when parent has redirect"

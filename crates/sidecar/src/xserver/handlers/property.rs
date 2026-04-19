@@ -75,11 +75,11 @@ pub(crate) fn start_incr_transfer(
         }, state.msb_first);
 
         if let Some(win) = state.windows.get(&requestor) {
-            if win.event_mask & PROPERTY_CHANGE_MASK != 0 {
+            if win.event_mask & EventMask::PROPERTY_CHANGE != EventMask::NO_EVENT {
                 state.pending_events.push(event.clone());
             }
         }
-        state.broadcast_event(requestor, PROPERTY_CHANGE_MASK, &event);
+        state.broadcast_event(requestor, u32::from(EventMask::PROPERTY_CHANGE), &event);
     }
 
     // Default chunk size: ~64KB (standard INCR chunk).
@@ -164,13 +164,13 @@ pub(crate) fn advance_incr_transfer(state: &mut ClientState, window: u32, proper
         }, state.msb_first);
 
         if let Some(win) = state.windows.get(&window) {
-            if win.event_mask & PROPERTY_CHANGE_MASK != 0 {
+            if win.event_mask & EventMask::PROPERTY_CHANGE != EventMask::NO_EVENT {
                 state.pending_events.push(event.clone());
             }
         }
 
         // Broadcast to other connections that selected PropertyChangeMask
-        state.broadcast_event(window, PROPERTY_CHANGE_MASK, &event);
+        state.broadcast_event(window, u32::from(EventMask::PROPERTY_CHANGE), &event);
     }
 }
 
@@ -406,31 +406,31 @@ pub(crate) fn serve_persistent_clipboard(
 /// SelectionNotify, MappingNotify).
 pub(crate) fn event_type_to_mask(event_type: u8) -> u32 {
     match event_type {
-        KEY_PRESS_EVENT => KEY_PRESS_MASK,
-        KEY_RELEASE_EVENT => KEY_RELEASE_MASK,
-        BUTTON_PRESS_EVENT => BUTTON_PRESS_MASK,
-        BUTTON_RELEASE_EVENT => BUTTON_RELEASE_MASK,
-        MOTION_NOTIFY_EVENT => POINTER_MOTION_MASK,
-        ENTER_NOTIFY_EVENT => ENTER_WINDOW_MASK,
-        LEAVE_NOTIFY_EVENT => LEAVE_WINDOW_MASK,
-        FOCUS_IN_EVENT | FOCUS_OUT_EVENT => FOCUS_CHANGE_MASK,
-        KEYMAP_NOTIFY_EVENT => KEYMAP_STATE_MASK,
-        EXPOSE_EVENT => EXPOSURE_MASK,
-        VISIBILITY_NOTIFY_EVENT => VISIBILITY_CHANGE_MASK,
+        KEY_PRESS_EVENT => u32::from(EventMask::KEY_PRESS),
+        KEY_RELEASE_EVENT => u32::from(EventMask::KEY_RELEASE),
+        BUTTON_PRESS_EVENT => u32::from(EventMask::BUTTON_PRESS),
+        BUTTON_RELEASE_EVENT => u32::from(EventMask::BUTTON_RELEASE),
+        MOTION_NOTIFY_EVENT => u32::from(EventMask::POINTER_MOTION),
+        ENTER_NOTIFY_EVENT => u32::from(EventMask::ENTER_WINDOW),
+        LEAVE_NOTIFY_EVENT => u32::from(EventMask::LEAVE_WINDOW),
+        FOCUS_IN_EVENT | FOCUS_OUT_EVENT => u32::from(EventMask::FOCUS_CHANGE),
+        KEYMAP_NOTIFY_EVENT => u32::from(EventMask::KEYMAP_STATE),
+        EXPOSE_EVENT => u32::from(EventMask::EXPOSURE),
+        VISIBILITY_NOTIFY_EVENT => u32::from(EventMask::VISIBILITY_CHANGE),
         CREATE_NOTIFY_EVENT
         | DESTROY_NOTIFY_EVENT
         | UNMAP_NOTIFY_EVENT
         | MAP_NOTIFY_EVENT
         | REPARENT_NOTIFY_EVENT
         | CONFIGURE_NOTIFY_EVENT
-        | GRAVITY_NOTIFY_EVENT => STRUCTURE_NOTIFY_MASK,
+        | GRAVITY_NOTIFY_EVENT => u32::from(EventMask::STRUCTURE_NOTIFY),
         MAP_REQUEST_EVENT | CONFIGURE_REQUEST_EVENT | CIRCULATE_REQUEST_EVENT => {
-            SUBSTRUCTURE_REDIRECT_MASK
+            u32::from(EventMask::SUBSTRUCTURE_REDIRECT)
         }
-        RESIZE_REQUEST_EVENT => RESIZE_REDIRECT_MASK,
-        CIRCULATE_NOTIFY_EVENT => SUBSTRUCTURE_NOTIFY_MASK,
-        PROPERTY_NOTIFY_EVENT => PROPERTY_CHANGE_MASK,
-        COLOURMAP_NOTIFY_EVENT => COLOURMAP_CHANGE_MASK,
+        RESIZE_REQUEST_EVENT => u32::from(EventMask::RESIZE_REDIRECT),
+        CIRCULATE_NOTIFY_EVENT => u32::from(EventMask::SUBSTRUCTURE_NOTIFY),
+        PROPERTY_NOTIFY_EVENT => u32::from(EventMask::PROPERTY_CHANGE),
+        COLOURMAP_NOTIFY_EVENT => u32::from(EventMask::COLOR_MAP_CHANGE),
         _ => 0, // ClientMessage, Selection*, MappingNotify, etc.
     }
 }
@@ -445,43 +445,43 @@ mod tests {
 
     #[test]
     fn device_events_map_to_correct_masks() {
-        assert_eq!(event_type_to_mask(KEY_PRESS_EVENT), KEY_PRESS_MASK);
-        assert_eq!(event_type_to_mask(KEY_RELEASE_EVENT), KEY_RELEASE_MASK);
-        assert_eq!(event_type_to_mask(BUTTON_PRESS_EVENT), BUTTON_PRESS_MASK);
+        assert_eq!(event_type_to_mask(KEY_PRESS_EVENT), u32::from(EventMask::KEY_PRESS));
+        assert_eq!(event_type_to_mask(KEY_RELEASE_EVENT), u32::from(EventMask::KEY_RELEASE));
+        assert_eq!(event_type_to_mask(BUTTON_PRESS_EVENT), u32::from(EventMask::BUTTON_PRESS));
         assert_eq!(
             event_type_to_mask(BUTTON_RELEASE_EVENT),
-            BUTTON_RELEASE_MASK
+            u32::from(EventMask::BUTTON_RELEASE)
         );
-        assert_eq!(event_type_to_mask(MOTION_NOTIFY_EVENT), POINTER_MOTION_MASK);
+        assert_eq!(event_type_to_mask(MOTION_NOTIFY_EVENT), u32::from(EventMask::POINTER_MOTION));
     }
 
     #[test]
     fn crossing_events_map_to_correct_masks() {
-        assert_eq!(event_type_to_mask(ENTER_NOTIFY_EVENT), ENTER_WINDOW_MASK);
-        assert_eq!(event_type_to_mask(LEAVE_NOTIFY_EVENT), LEAVE_WINDOW_MASK);
+        assert_eq!(event_type_to_mask(ENTER_NOTIFY_EVENT), u32::from(EventMask::ENTER_WINDOW));
+        assert_eq!(event_type_to_mask(LEAVE_NOTIFY_EVENT), u32::from(EventMask::LEAVE_WINDOW));
     }
 
     #[test]
     fn focus_events_share_mask() {
-        assert_eq!(event_type_to_mask(FOCUS_IN_EVENT), FOCUS_CHANGE_MASK);
-        assert_eq!(event_type_to_mask(FOCUS_OUT_EVENT), FOCUS_CHANGE_MASK);
+        assert_eq!(event_type_to_mask(FOCUS_IN_EVENT), u32::from(EventMask::FOCUS_CHANGE));
+        assert_eq!(event_type_to_mask(FOCUS_OUT_EVENT), u32::from(EventMask::FOCUS_CHANGE));
     }
 
     #[test]
     fn keymap_notify_maps_to_keymap_state_mask() {
-        assert_eq!(event_type_to_mask(KEYMAP_NOTIFY_EVENT), KEYMAP_STATE_MASK);
+        assert_eq!(event_type_to_mask(KEYMAP_NOTIFY_EVENT), u32::from(EventMask::KEYMAP_STATE));
     }
 
     #[test]
     fn expose_maps_to_exposure_mask() {
-        assert_eq!(event_type_to_mask(EXPOSE_EVENT), EXPOSURE_MASK);
+        assert_eq!(event_type_to_mask(EXPOSE_EVENT), u32::from(EventMask::EXPOSURE));
     }
 
     #[test]
     fn visibility_notify_maps_to_visibility_change_mask() {
         assert_eq!(
             event_type_to_mask(VISIBILITY_NOTIFY_EVENT),
-            VISIBILITY_CHANGE_MASK
+            u32::from(EventMask::VISIBILITY_CHANGE)
         );
     }
 
@@ -499,7 +499,7 @@ mod tests {
         for ev in structure_events {
             assert_eq!(
                 event_type_to_mask(ev),
-                STRUCTURE_NOTIFY_MASK,
+                u32::from(EventMask::STRUCTURE_NOTIFY),
                 "event type {ev} should map to STRUCTURE_NOTIFY_MASK"
             );
         }
@@ -515,7 +515,7 @@ mod tests {
         for ev in redirect_events {
             assert_eq!(
                 event_type_to_mask(ev),
-                SUBSTRUCTURE_REDIRECT_MASK,
+                u32::from(EventMask::SUBSTRUCTURE_REDIRECT),
                 "event type {ev} should map to SUBSTRUCTURE_REDIRECT_MASK"
             );
         }
@@ -525,7 +525,7 @@ mod tests {
     fn resize_request_maps_to_resize_redirect_mask() {
         assert_eq!(
             event_type_to_mask(RESIZE_REQUEST_EVENT),
-            RESIZE_REDIRECT_MASK
+            u32::from(EventMask::RESIZE_REDIRECT)
         );
     }
 
@@ -533,7 +533,7 @@ mod tests {
     fn circulate_notify_maps_to_substructure_notify_mask() {
         assert_eq!(
             event_type_to_mask(CIRCULATE_NOTIFY_EVENT),
-            SUBSTRUCTURE_NOTIFY_MASK
+            u32::from(EventMask::SUBSTRUCTURE_NOTIFY)
         );
     }
 
@@ -541,7 +541,7 @@ mod tests {
     fn property_notify_maps_to_property_change_mask() {
         assert_eq!(
             event_type_to_mask(PROPERTY_NOTIFY_EVENT),
-            PROPERTY_CHANGE_MASK
+            u32::from(EventMask::PROPERTY_CHANGE)
         );
     }
 
@@ -549,7 +549,7 @@ mod tests {
     fn colourmap_notify_maps_to_colourmap_change_mask() {
         assert_eq!(
             event_type_to_mask(COLOURMAP_NOTIFY_EVENT),
-            COLOURMAP_CHANGE_MASK
+            u32::from(EventMask::COLOR_MAP_CHANGE)
         );
     }
 

@@ -745,10 +745,10 @@ pub(crate) fn handle_force_screen_saver(state: &mut ClientState, data: &[u8], se
                         height: *h,
                         count: 0,
                     }, bo);
-                    if mask & EXPOSURE_MASK != 0 {
+                    if *mask & EventMask::EXPOSURE != EventMask::NO_EVENT {
                         state.pending_events.push(expose.clone());
                     }
-                    state.broadcast_event(*wid, EXPOSURE_MASK, &expose);
+                    state.broadcast_event(*wid, u32::from(EventMask::EXPOSURE), &expose);
                 }
 
                 // Send ScreenSaverNotify (state=Off) to interested clients.
@@ -1134,10 +1134,10 @@ pub(crate) fn handle_rotate_properties(state: &mut ClientState, data: &[u8]) -> 
             time: timestamp,
             state: 0u8.into(), // NewValue
         }, state.msb_first);
-        if win_mask & PROPERTY_CHANGE_MASK != 0 {
+        if win_mask & EventMask::PROPERTY_CHANGE != EventMask::NO_EVENT {
             state.pending_events.push(event.clone());
         }
-        state.broadcast_event(window, PROPERTY_CHANGE_MASK, &event);
+        state.broadcast_event(window, u32::from(EventMask::PROPERTY_CHANGE), &event);
     }
 
     Vec::new()

@@ -91,8 +91,7 @@ pub(crate) fn handle_change_window_attributes(state: &mut ClientState, data: &[u
                     11 => {
                         win.event_mask = val;
                         // SubstructureRedirectMask = bit 20 = 0x0010_0000
-                        const SUBSTRUCTURE_REDIRECT_MASK: u32 = 0x0010_0000;
-                        if wid == state.root_window && (val & SUBSTRUCTURE_REDIRECT_MASK) != 0 {
+                        if wid == state.root_window && (val & EventMask::SUBSTRUCTURE_REDIRECT != EventMask::NO_EVENT) {
                             info!(
                                     "Client {} registering as window manager (SubstructureRedirectMask on root)",
                                     state.client_id
@@ -110,7 +109,7 @@ pub(crate) fn handle_change_window_attributes(state: &mut ClientState, data: &[u
                         // Colormap: 0 = CopyFromParent
                         let old_cmap = win.colormap;
                         win.colormap = val;
-                        if val != old_cmap && (win.event_mask & COLOURMAP_CHANGE_MASK != 0) {
+                        if val != old_cmap && (win.event_mask & EventMask::COLOR_MAP_CHANGE != EventMask::NO_EVENT) {
                             deferred_colormap_notify = Some((old_cmap, val));
                         }
                     }
@@ -142,7 +141,7 @@ pub(crate) fn handle_change_window_attributes(state: &mut ClientState, data: &[u
         event[12] = 1; // new = true
         event[13] = 1; // state = Installed
         state.pending_events.push(event.to_vec());
-        state.broadcast_event(wid, COLOURMAP_CHANGE_MASK, &event);
+        state.broadcast_event(wid, u32::from(EventMask::COLOR_MAP_CHANGE), &event);
     }
 
     if cursor_changed {

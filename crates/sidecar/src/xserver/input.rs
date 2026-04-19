@@ -480,12 +480,12 @@ fn emit_crossing(
     focus_window: u32,
 ) {
     let required_mask = if event_code == ENTER_NOTIFY_EVENT {
-        ENTER_WINDOW_MASK
+        EventMask::ENTER_WINDOW
     } else {
-        LEAVE_WINDOW_MASK
+        EventMask::LEAVE_WINDOW
     };
     if let Some(win) = windows.get(&window) {
-        if win.event_mask & required_mask != 0 {
+        if win.event_mask & required_mask != EventMask::NO_EVENT {
             let ev = make_crossing_event(
                 windows,
                 event_code,
@@ -739,7 +739,7 @@ pub(crate) fn build_crossing_events_with_mode(
 
     // KeymapNotify follows EnterNotify per X11 spec.
     if let Some(win) = state.windows.get(&new_window) {
-        if win.event_mask & KEYMAP_STATE_MASK != 0 {
+        if win.event_mask & EventMask::KEYMAP_STATE != EventMask::NO_EVENT {
             let mut km_event = [0u8; 32];
             km_event[0] = KEYMAP_NOTIFY_EVENT;
             km_event[1..32].copy_from_slice(&state.pressed_keys[1..32]);
@@ -942,19 +942,19 @@ pub(crate) fn build_x11_input_event(
     // Pointer events check pointer_grab; keyboard events check keyboard_grab.
     let (event_window, event_x, event_y) = match input {
         InputEvent::MotionNotify { x, y, .. } => {
-            resolve_pointer_event_target(state, top_level, *x, *y, POINTER_MOTION_MASK)
+            resolve_pointer_event_target(state, top_level, *x, *y, u32::from(EventMask::POINTER_MOTION))
         }
         InputEvent::ButtonPress { x, y, .. } => {
-            resolve_pointer_event_target(state, top_level, *x, *y, BUTTON_PRESS_MASK)
+            resolve_pointer_event_target(state, top_level, *x, *y, u32::from(EventMask::BUTTON_PRESS))
         }
         InputEvent::ButtonRelease { x, y, .. } => {
-            resolve_pointer_event_target(state, top_level, *x, *y, BUTTON_RELEASE_MASK)
+            resolve_pointer_event_target(state, top_level, *x, *y, u32::from(EventMask::BUTTON_RELEASE))
         }
         InputEvent::KeyPress { .. } => {
-            resolve_keyboard_event_target(state, top_level, KEY_PRESS_MASK)
+            resolve_keyboard_event_target(state, top_level, u32::from(EventMask::KEY_PRESS))
         }
         InputEvent::KeyRelease { .. } => {
-            resolve_keyboard_event_target(state, top_level, KEY_RELEASE_MASK)
+            resolve_keyboard_event_target(state, top_level, u32::from(EventMask::KEY_RELEASE))
         }
         _ => (top_level, 0, 0),
     };
@@ -996,7 +996,7 @@ pub(crate) fn build_x11_input_event(
         let has_hint = state
             .windows
             .get(&event_window)
-            .map(|w| w.event_mask & POINTER_MOTION_HINT_MASK != 0)
+            .map(|w| w.event_mask & EventMask::POINTER_MOTION_HINT != EventMask::NO_EVENT)
             .unwrap_or(false);
         if has_hint {
             if state.motion_hint_suppressed {
@@ -1416,7 +1416,7 @@ mod tests {
         // Two sibling windows under root. Moving between them = Nonlinear.
         let mut windows = HashMap::new();
         let root = 0x62;
-        let both_mask = ENTER_WINDOW_MASK | LEAVE_WINDOW_MASK;
+        let both_mask = u32::from(EventMask::ENTER_WINDOW | EventMask::LEAVE_WINDOW);
         let mut root_win = test_window(root, 0, 0, 0, 1024, 768, 0);
         root_win.children_order = vec![10, 20];
         windows.insert(root, root_win);
@@ -1438,7 +1438,7 @@ mod tests {
         // Parent -> child crossing = Inferior (for parent) / Ancestor (for child)
         let mut windows = HashMap::new();
         let root = 0x62;
-        let both_mask = ENTER_WINDOW_MASK | LEAVE_WINDOW_MASK;
+        let both_mask = u32::from(EventMask::ENTER_WINDOW | EventMask::LEAVE_WINDOW);
         let mut root_win = test_window(root, 0, 0, 0, 1024, 768, both_mask);
         root_win.children_order = vec![10];
         windows.insert(root, root_win);
@@ -1465,7 +1465,7 @@ mod tests {
         // Move from root to C: should generate Virtual events for A and B.
         let mut windows = HashMap::new();
         let root = 0x62;
-        let both_mask = ENTER_WINDOW_MASK | LEAVE_WINDOW_MASK;
+        let both_mask = u32::from(EventMask::ENTER_WINDOW | EventMask::LEAVE_WINDOW);
         let mut root_win = test_window(root, 0, 0, 0, 1024, 768, both_mask);
         root_win.children_order = vec![100];
         windows.insert(root, root_win);
@@ -1498,7 +1498,7 @@ mod tests {
         // Move from C to D: Nonlinear, with NonlinearVirtual for A and B.
         let mut windows = HashMap::new();
         let root = 0x62;
-        let both_mask = ENTER_WINDOW_MASK | LEAVE_WINDOW_MASK;
+        let both_mask = u32::from(EventMask::ENTER_WINDOW | EventMask::LEAVE_WINDOW);
         let mut root_win = test_window(root, 0, 0, 0, 1024, 768, both_mask);
         root_win.children_order = vec![100, 200];
         windows.insert(root, root_win);
@@ -1594,7 +1594,7 @@ mod tests {
     fn test_propagate_keyboard_event_finds_selecting_ancestor() {
         let mut windows = HashMap::new();
         let root = 0x62;
-        let mut root_win = test_window(root, 0, 0, 0, 1024, 768, KEY_PRESS_MASK);
+        let mut root_win = test_window(root, 0, 0, 0, 1024, 768, u32::from(EventMask::KEY_PRESS));
         root_win.children_order = vec![10];
         windows.insert(root, root_win);
         let mut parent = test_window(10, root, 0, 0, 200, 200, 0); // doesn't select
@@ -1603,7 +1603,7 @@ mod tests {
         windows.insert(20, test_window(20, 10, 0, 0, 50, 50, 0)); // doesn't select
 
         // Keyboard event on window 20 should propagate up to root.
-        let target = propagate_keyboard_event(&windows, 20, KEY_PRESS_MASK);
+        let target = propagate_keyboard_event(&windows, 20, u32::from(EventMask::KEY_PRESS));
         assert_eq!(target, root);
     }
 
@@ -1611,17 +1611,17 @@ mod tests {
     fn test_propagate_keyboard_blocked_by_do_not_propagate() {
         let mut windows = HashMap::new();
         let root = 0x62;
-        let mut root_win = test_window(root, 0, 0, 0, 1024, 768, KEY_PRESS_MASK);
+        let mut root_win = test_window(root, 0, 0, 0, 1024, 768, u32::from(EventMask::KEY_PRESS));
         root_win.children_order = vec![10];
         windows.insert(root, root_win);
         let mut parent = test_window(10, root, 0, 0, 200, 200, 0);
-        parent.do_not_propagate_mask = KEY_PRESS_MASK; // blocks propagation
+        parent.do_not_propagate_mask = u32::from(EventMask::KEY_PRESS); // blocks propagation
         parent.children_order = vec![20];
         windows.insert(10, parent);
         windows.insert(20, test_window(20, 10, 0, 0, 50, 50, 0));
 
         // Should be blocked at window 10, returning 0 (event discarded).
-        let target = propagate_keyboard_event(&windows, 20, KEY_PRESS_MASK);
+        let target = propagate_keyboard_event(&windows, 20, u32::from(EventMask::KEY_PRESS));
         assert_eq!(target, 0);
     }
 
@@ -1685,7 +1685,7 @@ mod tests {
         let mut windows = HashMap::new();
         let root = 0x62;
         windows.insert(root, test_window(root, 0, 0, 0, 1024, 768, 0));
-        windows.insert(10, test_window(10, root, 0, 0, 100, 100, KEY_PRESS_MASK));
+        windows.insert(10, test_window(10, root, 0, 0, 100, 100, u32::from(EventMask::KEY_PRESS)));
         assert_eq!(keyboard_event_child(&windows, 10, 10), 0);
     }
 
@@ -1694,7 +1694,7 @@ mod tests {
         // event_window=root, focus_window=child => child field = direct child of root on path
         let mut windows = HashMap::new();
         let root = 0x62;
-        windows.insert(root, test_window(root, 0, 0, 0, 1024, 768, KEY_PRESS_MASK));
+        windows.insert(root, test_window(root, 0, 0, 0, 1024, 768, u32::from(EventMask::KEY_PRESS)));
         windows.insert(10, test_window(10, root, 0, 0, 200, 200, 0));
         windows.insert(20, test_window(20, 10, 0, 0, 50, 50, 0));
 
@@ -1709,7 +1709,7 @@ mod tests {
         let mut windows = HashMap::new();
         let root = 0x62;
         windows.insert(root, test_window(root, 0, 0, 0, 1024, 768, 0));
-        windows.insert(10, test_window(10, root, 0, 0, 100, 100, KEY_PRESS_MASK));
+        windows.insert(10, test_window(10, root, 0, 0, 100, 100, u32::from(EventMask::KEY_PRESS)));
         windows.insert(20, test_window(20, root, 200, 0, 100, 100, 0));
 
         // 10 is sibling of 20, not ancestor
@@ -1721,10 +1721,10 @@ mod tests {
         // Focus window doesn't select KeyPress, parent does => propagate to parent
         let mut windows = HashMap::new();
         let root = 0x62;
-        windows.insert(root, test_window(root, 0, 0, 0, 1024, 768, KEY_PRESS_MASK));
+        windows.insert(root, test_window(root, 0, 0, 0, 1024, 768, u32::from(EventMask::KEY_PRESS)));
         windows.insert(10, test_window(10, root, 0, 0, 100, 100, 0)); // no KeyPressMask
 
-        let target = propagate_keyboard_event(&windows, 10, KEY_PRESS_MASK);
+        let target = propagate_keyboard_event(&windows, 10, u32::from(EventMask::KEY_PRESS));
         assert_eq!(target, root);
     }
 
@@ -1733,12 +1733,12 @@ mod tests {
         // Focus window has do_not_propagate blocking KeyPress
         let mut windows = HashMap::new();
         let root = 0x62;
-        windows.insert(root, test_window(root, 0, 0, 0, 1024, 768, KEY_PRESS_MASK));
+        windows.insert(root, test_window(root, 0, 0, 0, 1024, 768, u32::from(EventMask::KEY_PRESS)));
         let mut child = test_window(10, root, 0, 0, 100, 100, 0);
-        child.do_not_propagate_mask = KEY_PRESS_MASK;
+        child.do_not_propagate_mask = u32::from(EventMask::KEY_PRESS);
         windows.insert(10, child);
 
-        let target = propagate_keyboard_event(&windows, 10, KEY_PRESS_MASK);
+        let target = propagate_keyboard_event(&windows, 10, u32::from(EventMask::KEY_PRESS));
         // Should return 0 (blocked by do_not_propagate, event discarded)
         assert_eq!(target, 0);
     }
@@ -1753,25 +1753,25 @@ mod tests {
         windows.insert(root, root_win);
 
         // Window 10 at (0,0,200,200)
-        let mut w10 = test_window(10, root, 0, 0, 200, 200, BUTTON_PRESS_MASK);
+        let mut w10 = test_window(10, root, 0, 0, 200, 200, u32::from(EventMask::BUTTON_PRESS));
         w10.children_order = vec![30];
         windows.insert(10, w10);
 
         // Window 30 nested in 10 at (10,10,50,50)
-        windows.insert(30, test_window(30, 10, 10, 10, 50, 50, BUTTON_PRESS_MASK));
+        windows.insert(30, test_window(30, 10, 10, 10, 50, 50, u32::from(EventMask::BUTTON_PRESS)));
 
         // Window 20 at (300,300,100,100)
         windows.insert(
             20,
-            test_window(20, root, 300, 300, 100, 100, BUTTON_PRESS_MASK),
+            test_window(20, root, 300, 300, 100, 100, u32::from(EventMask::BUTTON_PRESS)),
         );
 
         // Click at (15, 15) should find window 30 (nested child of 10)
-        let (target, _rx, _ry) = find_event_subwindow(&windows, root, 15, 15, BUTTON_PRESS_MASK);
+        let (target, _rx, _ry) = find_event_subwindow(&windows, root, 15, 15, u32::from(EventMask::BUTTON_PRESS));
         assert_eq!(target, 30);
 
         // Click at (350, 350) should find window 20
-        let (target2, _, _) = find_event_subwindow(&windows, root, 350, 350, BUTTON_PRESS_MASK);
+        let (target2, _, _) = find_event_subwindow(&windows, root, 350, 350, u32::from(EventMask::BUTTON_PRESS));
         assert_eq!(target2, 20);
     }
 
@@ -1779,17 +1779,17 @@ mod tests {
     fn test_find_event_subwindow_unmapped_skipped() {
         let mut windows = HashMap::new();
         let root = 0x62;
-        let mut root_win = test_window(root, 0, 0, 0, 1024, 768, BUTTON_PRESS_MASK);
+        let mut root_win = test_window(root, 0, 0, 0, 1024, 768, u32::from(EventMask::BUTTON_PRESS));
         root_win.children_order = vec![10];
         windows.insert(root, root_win);
 
         // Unmapped window — should be skipped
-        let mut w10 = test_window(10, root, 0, 0, 200, 200, BUTTON_PRESS_MASK);
+        let mut w10 = test_window(10, root, 0, 0, 200, 200, u32::from(EventMask::BUTTON_PRESS));
         w10.mapped = false;
         windows.insert(10, w10);
 
         // Click should fall through to root
-        let (target, _, _) = find_event_subwindow(&windows, root, 50, 50, BUTTON_PRESS_MASK);
+        let (target, _, _) = find_event_subwindow(&windows, root, 50, 50, u32::from(EventMask::BUTTON_PRESS));
         assert_eq!(target, root);
     }
 
@@ -1806,10 +1806,10 @@ mod tests {
         windows.insert(root, root_win);
 
         // Parent window
-        windows.insert(10, test_window(10, root, 0, 0, 400, 400, BUTTON_PRESS_MASK));
+        windows.insert(10, test_window(10, root, 0, 0, 400, 400, u32::from(EventMask::BUTTON_PRESS)));
 
         // Modal child window (transient_for=10, modal=true)
-        let mut modal_win = test_window(20, root, 100, 100, 200, 200, BUTTON_PRESS_MASK);
+        let mut modal_win = test_window(20, root, 100, 100, 200, 200, u32::from(EventMask::BUTTON_PRESS));
         modal_win.transient_for = Some(10);
         modal_win.modal = true;
         windows.insert(20, modal_win);
@@ -1832,10 +1832,10 @@ mod tests {
         root_win.children_order = vec![10, 20];
         windows.insert(root, root_win);
 
-        windows.insert(10, test_window(10, root, 0, 0, 400, 400, BUTTON_PRESS_MASK));
+        windows.insert(10, test_window(10, root, 0, 0, 400, 400, u32::from(EventMask::BUTTON_PRESS)));
 
         // Non-modal transient child
-        let mut child = test_window(20, root, 100, 100, 200, 200, BUTTON_PRESS_MASK);
+        let mut child = test_window(20, root, 100, 100, 200, 200, u32::from(EventMask::BUTTON_PRESS));
         child.transient_for = Some(10);
         child.modal = false;
         windows.insert(20, child);
@@ -1852,10 +1852,10 @@ mod tests {
         root_win.children_order = vec![10, 20];
         windows.insert(root, root_win);
 
-        windows.insert(10, test_window(10, root, 0, 0, 400, 400, BUTTON_PRESS_MASK));
+        windows.insert(10, test_window(10, root, 0, 0, 400, 400, u32::from(EventMask::BUTTON_PRESS)));
 
         // Modal but unmapped child should not block
-        let mut modal_win = test_window(20, root, 100, 100, 200, 200, BUTTON_PRESS_MASK);
+        let mut modal_win = test_window(20, root, 100, 100, 200, 200, u32::from(EventMask::BUTTON_PRESS));
         modal_win.transient_for = Some(10);
         modal_win.modal = true;
         modal_win.mapped = false;
@@ -1873,15 +1873,15 @@ mod tests {
         windows.insert(root, root_win);
 
         // Parent with child
-        let mut parent = test_window(10, root, 0, 0, 400, 400, BUTTON_PRESS_MASK);
+        let mut parent = test_window(10, root, 0, 0, 400, 400, u32::from(EventMask::BUTTON_PRESS));
         parent.children_order = vec![30];
         windows.insert(10, parent);
 
         // Subwindow of parent
-        windows.insert(30, test_window(30, 10, 0, 0, 100, 100, BUTTON_PRESS_MASK));
+        windows.insert(30, test_window(30, 10, 0, 0, 100, 100, u32::from(EventMask::BUTTON_PRESS)));
 
         // Modal dialog transient for parent (10)
-        let mut modal_win = test_window(20, root, 100, 100, 200, 200, BUTTON_PRESS_MASK);
+        let mut modal_win = test_window(20, root, 100, 100, 200, 200, u32::from(EventMask::BUTTON_PRESS));
         modal_win.transient_for = Some(10);
         modal_win.modal = true;
         windows.insert(20, modal_win);

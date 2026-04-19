@@ -7,6 +7,7 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use tokio::sync::{mpsc, watch};
 use x11_web_protocol::{DisplayUpdate, InputEvent};
+use x11rb_protocol::protocol::xproto::EventMask;
 /// A display update tagged with the client_id that produced it.
 pub type TaggedDisplayUpdate = (String, DisplayUpdate);
 
@@ -305,9 +306,7 @@ impl EventBroadcaster {
         client_id: &str,
     ) -> Option<u32> {
         // Bit positions for the two exclusive redirect masks
-        const SUBSTRUCTURE_REDIRECT_MASK: u32 = 0x0010_0000;
-        const RESIZE_REDIRECT_MASK: u32 = 0x0004_0000;
-        let redirect_bits = SUBSTRUCTURE_REDIRECT_MASK | RESIZE_REDIRECT_MASK;
+        let redirect_bits = u32::from(EventMask::SUBSTRUCTURE_REDIRECT | EventMask::RESIZE_REDIRECT);
         let requested_redirects = new_mask & redirect_bits;
         if requested_redirects == 0 {
             return None; // No redirect masks requested, no conflict possible

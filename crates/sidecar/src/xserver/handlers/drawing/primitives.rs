@@ -63,12 +63,12 @@ pub(crate) fn handle_clear_area(state: &mut ClientState, data: &[u8], _seq: u16)
         if state
             .windows
             .get(&wid)
-            .is_some_and(|w| w.event_mask & EXPOSURE_MASK != 0)
+            .is_some_and(|w| w.event_mask & EventMask::EXPOSURE != EventMask::NO_EVENT)
         {
             state.pending_events.push(event.clone());
         }
         // Broadcast to other clients that selected ExposureMask on this window
-        state.broadcast_event(wid, EXPOSURE_MASK, &event);
+        state.broadcast_event(wid, u32::from(EventMask::EXPOSURE), &event);
     }
 
     Vec::new()

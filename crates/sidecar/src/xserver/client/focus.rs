@@ -7,9 +7,9 @@ use x11rb_protocol::protocol::xproto::{
 };
 
 use super::super::core::{
-    CLIENT_MESSAGE_EVENT, FOCUS_CHANGE_MASK, FOCUS_IN_EVENT, FOCUS_OUT_EVENT, KEYMAP_NOTIFY_EVENT,
-    KEYMAP_STATE_MASK,
+    CLIENT_MESSAGE_EVENT, FOCUS_IN_EVENT, FOCUS_OUT_EVENT, KEYMAP_NOTIFY_EVENT,
 };
+use super::super::core::EventMask;
 use super::super::types::*;
 use super::ClientState;
 use crate::xserver::event::serialize_event;
@@ -127,7 +127,7 @@ impl ClientState {
 
                 // KeymapNotify after FocusIn if selected
                 if let Some(win) = self.windows.get(&new_focus) {
-                    if win.event_mask & KEYMAP_STATE_MASK != 0 {
+                    if win.event_mask & EventMask::KEYMAP_STATE != EventMask::NO_EVENT {
                         let mut keys = [0u8; 31];
                         keys.copy_from_slice(&self.pressed_keys[1..32]);
                         let km_event = serialize_event(
@@ -152,7 +152,7 @@ impl ClientState {
         let has_mask = self
             .windows
             .get(&window)
-            .is_some_and(|w| w.event_mask & FOCUS_CHANGE_MASK != 0);
+            .is_some_and(|w| w.event_mask & EventMask::FOCUS_CHANGE != EventMask::NO_EVENT);
         if has_mask || window == self.root_window {
             let event = serialize_event(
                 &FocusInEvent {

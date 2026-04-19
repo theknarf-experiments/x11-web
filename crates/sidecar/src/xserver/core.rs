@@ -48,33 +48,8 @@ pub(crate) use x11rb_protocol::protocol::xproto::{
 // Alias for British spelling used throughout codebase
 pub(crate) const COLOURMAP_NOTIFY_EVENT: u8 = COLORMAP_NOTIFY_EVENT;
 
-// X11 event masks — values match x11rb_protocol::protocol::xproto::EventMask.
-// Verified by test_event_masks_match_x11rb below.
-pub(crate) const KEY_PRESS_MASK: u32 = 1 << 0;
-pub(crate) const KEY_RELEASE_MASK: u32 = 1 << 1;
-pub(crate) const BUTTON_PRESS_MASK: u32 = 1 << 2;
-pub(crate) const BUTTON_RELEASE_MASK: u32 = 1 << 3;
-pub(crate) const ENTER_WINDOW_MASK: u32 = 1 << 4;
-pub(crate) const LEAVE_WINDOW_MASK: u32 = 1 << 5;
-pub(crate) const POINTER_MOTION_MASK: u32 = 1 << 6;
-pub(crate) const POINTER_MOTION_HINT_MASK: u32 = 1 << 7;
-pub(crate) const BUTTON1_MOTION_MASK: u32 = 1 << 8;
-pub(crate) const BUTTON2_MOTION_MASK: u32 = 1 << 9;
-pub(crate) const BUTTON3_MOTION_MASK: u32 = 1 << 10;
-pub(crate) const BUTTON4_MOTION_MASK: u32 = 1 << 11;
-pub(crate) const BUTTON5_MOTION_MASK: u32 = 1 << 12;
-pub(crate) const BUTTON_MOTION_MASK: u32 = 1 << 13;
-pub(crate) const KEYMAP_STATE_MASK: u32 = 1 << 14;
-pub(crate) const EXPOSURE_MASK: u32 = 1 << 15;
-pub(crate) const VISIBILITY_CHANGE_MASK: u32 = 1 << 16;
-pub(crate) const STRUCTURE_NOTIFY_MASK: u32 = 1 << 17;
-pub(crate) const RESIZE_REDIRECT_MASK: u32 = 1 << 18;
-pub(crate) const SUBSTRUCTURE_NOTIFY_MASK: u32 = 1 << 19;
-pub(crate) const SUBSTRUCTURE_REDIRECT_MASK: u32 = 1 << 20;
-pub(crate) const FOCUS_CHANGE_MASK: u32 = 1 << 21;
-pub(crate) const PROPERTY_CHANGE_MASK: u32 = 1 << 22;
-pub(crate) const COLOURMAP_CHANGE_MASK: u32 = 1 << 23;
-pub(crate) const OWNER_GRAB_BUTTON_MASK: u32 = 1 << 24;
+// X11 event masks — re-exported directly from x11rb.
+pub(crate) use x11rb_protocol::protocol::xproto::EventMask;
 
 // X11 error codes
 pub(crate) const BAD_REQUEST: u8 = 1;
@@ -942,109 +917,6 @@ mod tests {
     }
 
     // -----------------------------------------------------------------------
-    // Event masks — X11 protocol spec compliance
-    // -----------------------------------------------------------------------
-
-    #[test]
-    fn event_masks_are_powers_of_two() {
-        let masks = [
-            KEY_PRESS_MASK,
-            KEY_RELEASE_MASK,
-            BUTTON_PRESS_MASK,
-            BUTTON_RELEASE_MASK,
-            ENTER_WINDOW_MASK,
-            LEAVE_WINDOW_MASK,
-            POINTER_MOTION_MASK,
-            POINTER_MOTION_HINT_MASK,
-            BUTTON1_MOTION_MASK,
-            BUTTON2_MOTION_MASK,
-            BUTTON3_MOTION_MASK,
-            BUTTON4_MOTION_MASK,
-            BUTTON5_MOTION_MASK,
-            BUTTON_MOTION_MASK,
-            KEYMAP_STATE_MASK,
-            EXPOSURE_MASK,
-            VISIBILITY_CHANGE_MASK,
-            STRUCTURE_NOTIFY_MASK,
-            RESIZE_REDIRECT_MASK,
-            SUBSTRUCTURE_NOTIFY_MASK,
-            SUBSTRUCTURE_REDIRECT_MASK,
-            FOCUS_CHANGE_MASK,
-            PROPERTY_CHANGE_MASK,
-            COLOURMAP_CHANGE_MASK,
-            OWNER_GRAB_BUTTON_MASK,
-        ];
-        for &m in &masks {
-            assert!(m.is_power_of_two(), "mask {m:#010x} is not a power of two");
-        }
-    }
-
-    #[test]
-    fn event_masks_match_x11_spec_bit_positions() {
-        assert_eq!(KEY_PRESS_MASK, 1 << 0);
-        assert_eq!(KEY_RELEASE_MASK, 1 << 1);
-        assert_eq!(BUTTON_PRESS_MASK, 1 << 2);
-        assert_eq!(BUTTON_RELEASE_MASK, 1 << 3);
-        assert_eq!(ENTER_WINDOW_MASK, 1 << 4);
-        assert_eq!(LEAVE_WINDOW_MASK, 1 << 5);
-        assert_eq!(POINTER_MOTION_MASK, 1 << 6);
-        assert_eq!(POINTER_MOTION_HINT_MASK, 1 << 7);
-        assert_eq!(BUTTON1_MOTION_MASK, 1 << 8);
-        assert_eq!(BUTTON2_MOTION_MASK, 1 << 9);
-        assert_eq!(BUTTON3_MOTION_MASK, 1 << 10);
-        assert_eq!(BUTTON4_MOTION_MASK, 1 << 11);
-        assert_eq!(BUTTON5_MOTION_MASK, 1 << 12);
-        assert_eq!(BUTTON_MOTION_MASK, 1 << 13);
-        assert_eq!(KEYMAP_STATE_MASK, 1 << 14);
-        assert_eq!(EXPOSURE_MASK, 1 << 15);
-        assert_eq!(VISIBILITY_CHANGE_MASK, 1 << 16);
-        assert_eq!(STRUCTURE_NOTIFY_MASK, 1 << 17);
-        assert_eq!(RESIZE_REDIRECT_MASK, 1 << 18);
-        assert_eq!(SUBSTRUCTURE_NOTIFY_MASK, 1 << 19);
-        assert_eq!(SUBSTRUCTURE_REDIRECT_MASK, 1 << 20);
-        assert_eq!(FOCUS_CHANGE_MASK, 1 << 21);
-        assert_eq!(PROPERTY_CHANGE_MASK, 1 << 22);
-        assert_eq!(COLOURMAP_CHANGE_MASK, 1 << 23);
-        assert_eq!(OWNER_GRAB_BUTTON_MASK, 1 << 24);
-    }
-
-    #[test]
-    fn event_masks_are_all_unique() {
-        let masks = [
-            KEY_PRESS_MASK,
-            KEY_RELEASE_MASK,
-            BUTTON_PRESS_MASK,
-            BUTTON_RELEASE_MASK,
-            ENTER_WINDOW_MASK,
-            LEAVE_WINDOW_MASK,
-            POINTER_MOTION_MASK,
-            POINTER_MOTION_HINT_MASK,
-            BUTTON1_MOTION_MASK,
-            BUTTON2_MOTION_MASK,
-            BUTTON3_MOTION_MASK,
-            BUTTON4_MOTION_MASK,
-            BUTTON5_MOTION_MASK,
-            BUTTON_MOTION_MASK,
-            KEYMAP_STATE_MASK,
-            EXPOSURE_MASK,
-            VISIBILITY_CHANGE_MASK,
-            STRUCTURE_NOTIFY_MASK,
-            RESIZE_REDIRECT_MASK,
-            SUBSTRUCTURE_NOTIFY_MASK,
-            SUBSTRUCTURE_REDIRECT_MASK,
-            FOCUS_CHANGE_MASK,
-            PROPERTY_CHANGE_MASK,
-            COLOURMAP_CHANGE_MASK,
-            OWNER_GRAB_BUTTON_MASK,
-        ];
-        let mut seen = std::collections::HashSet::new();
-        for &m in &masks {
-            assert!(seen.insert(m), "mask {m:#010x} is duplicated");
-        }
-        assert_eq!(seen.len(), 25, "should have exactly 25 unique masks");
-    }
-
-    // -----------------------------------------------------------------------
     // Root window and visual constants
     // -----------------------------------------------------------------------
 
@@ -1069,26 +941,4 @@ mod tests {
         assert_ne!(ROOT_COLORMAP, 0);
     }
 
-    #[test]
-    fn event_masks_match_x11rb() {
-        use x11rb_protocol::protocol::xproto::EventMask;
-        assert_eq!(KEY_PRESS_MASK, u32::from(EventMask::KEY_PRESS));
-        assert_eq!(KEY_RELEASE_MASK, u32::from(EventMask::KEY_RELEASE));
-        assert_eq!(BUTTON_PRESS_MASK, u32::from(EventMask::BUTTON_PRESS));
-        assert_eq!(BUTTON_RELEASE_MASK, u32::from(EventMask::BUTTON_RELEASE));
-        assert_eq!(ENTER_WINDOW_MASK, u32::from(EventMask::ENTER_WINDOW));
-        assert_eq!(LEAVE_WINDOW_MASK, u32::from(EventMask::LEAVE_WINDOW));
-        assert_eq!(POINTER_MOTION_MASK, u32::from(EventMask::POINTER_MOTION));
-        assert_eq!(POINTER_MOTION_HINT_MASK, u32::from(EventMask::POINTER_MOTION_HINT));
-        assert_eq!(EXPOSURE_MASK, u32::from(EventMask::EXPOSURE));
-        assert_eq!(VISIBILITY_CHANGE_MASK, u32::from(EventMask::VISIBILITY_CHANGE));
-        assert_eq!(STRUCTURE_NOTIFY_MASK, u32::from(EventMask::STRUCTURE_NOTIFY));
-        assert_eq!(RESIZE_REDIRECT_MASK, u32::from(EventMask::RESIZE_REDIRECT));
-        assert_eq!(SUBSTRUCTURE_NOTIFY_MASK, u32::from(EventMask::SUBSTRUCTURE_NOTIFY));
-        assert_eq!(SUBSTRUCTURE_REDIRECT_MASK, u32::from(EventMask::SUBSTRUCTURE_REDIRECT));
-        assert_eq!(FOCUS_CHANGE_MASK, u32::from(EventMask::FOCUS_CHANGE));
-        assert_eq!(PROPERTY_CHANGE_MASK, u32::from(EventMask::PROPERTY_CHANGE));
-        assert_eq!(COLOURMAP_CHANGE_MASK, u32::from(EventMask::COLOR_MAP_CHANGE));
-        assert_eq!(OWNER_GRAB_BUTTON_MASK, u32::from(EventMask::OWNER_GRAB_BUTTON));
-    }
 }
