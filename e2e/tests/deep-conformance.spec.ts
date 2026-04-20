@@ -693,27 +693,25 @@ echo EXIT_CODE=$?`,
 		expect(output).not.toContain("ABORTED");
 	});
 
-	// Firefox still segfaults in its GPU process during DRISW initialization.
-	// glxinfo and glxgears work (both indirect and DRISW), but Firefox's
-	// more complex GL usage triggers a crash — likely in render commands
-	// or SHM buffer operations that our server doesn't fully handle.
-	test.skip("Firefox ESR creates X11 window (non-headless)", async ({
+	// Firefox crashes at XVisualIDFromVisual (NULL visual pointer).
+	// GDK's gdk_x11_window_foreign_new_for_display can't find the root
+	// window's visual in Xlib's internal table. Root cause: our connection
+	// setup visual data may be malformed or depth/visual association is wrong.
+	test.skip("Firefox ESR starts without crash (non-headless)", async ({
 		sidecarContainer,
 	}) => {
-		test.setTimeout(180_000);
+		test.setTimeout(60_000);
+		// Run Firefox under GDB to capture crash backtrace
 		const output = await execInSidecar(
 			sidecarContainer,
-			`firefox-esr --no-remote --new-instance about:blank &
-FF_PID=$!
-for i in $(seq 1 90); do
-  WID=$(xdotool search --pid $FF_PID 2>/dev/null | grep -v '^$' || true)
-  if [ -n "$WID" ]; then echo "FIREFOX_WINDOW_FOUND=$WID"; break; fi
-  sleep 1
-done
-[ -z "$WID" ] && echo "FIREFOX_NO_WINDOW"
-kill $FF_PID 2>/dev/null; sleep 1; kill -9 $FF_PID 2>/dev/null; true`,
+			`timeout 15 gdb -batch -ex run -ex bt -ex quit --args firefox-esr --no-remote --new-instance about:blank 2>&1 | tail -25 || true`,
+			30_000,
 		);
-		expect(output).toContain("FIREFOX_WINDOW_FOUND");
+		console.log("Firefox GDB output:", output);
+		// Assert Firefox doesn't crash
+		expect(output).not.toContain("SIGABRT");
+		expect(output).not.toContain("SIGSEGV");
+		expect(output).not.toContain("Segmentation fault");
 	});
 
 	test("GIMP starts without segfault", async ({ sidecarContainer }) => {
