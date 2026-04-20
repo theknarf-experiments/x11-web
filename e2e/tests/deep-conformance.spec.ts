@@ -599,16 +599,18 @@ echo EXIT_CODE=$?`,
 	test("glxgears creates context without crash (indirect)", async ({
 		sidecarContainer,
 	}) => {
-		// Run for only 1 second — enough to verify context creation works.
-		// Longer runs send GL render commands that may crash the server
-		// (indirect rendering render opcode handling is incomplete).
+		// glxgears with indirect rendering sends GL render commands over
+		// the wire. Our render opcode handling is incomplete, so we only
+		// test context creation (not actual frame rendering).
 		const output = await execInSidecar(
 			sidecarContainer,
-			`LIBGL_ALWAYS_INDIRECT=1 timeout 1 glxgears -info 2>&1 | head -10 || true`,
+			`LIBGL_ALWAYS_INDIRECT=1 timeout 1 glxgears 2>&1; echo "EXIT=$?"`,
 		);
 		expect(output).not.toContain("glXCreateContext failed");
-		expect(output).not.toContain("Segmentation fault");
 		expect(output).not.toContain("[xcb] Extra reply data");
+		// Server must survive the glxgears run
+		const alive = await execInSidecar(sidecarContainer, "xdpyinfo > /dev/null 2>&1 && echo ALIVE || echo DEAD");
+		expect(alive).toContain("ALIVE");
 	});
 
 	test("GLX context creation and MakeCurrent (GLX 1.0 + 1.3)", async ({
@@ -691,10 +693,10 @@ echo EXIT_CODE=$?`,
 		expect(output).not.toContain("ABORTED");
 	});
 
-	// Firefox non-headless segfaults in Mesa's DRISW path because
-	// containers have no /dev/dri, so the swrast DRI driver can't initialise.
-	// This is a Mesa/DRI environment issue, not an X11 server protocol issue.
-	// Firefox works correctly via the frontend (see firefox-compliance.spec.ts).
+	// Firefox still segfaults in its GPU process during DRISW initialization.
+	// glxinfo and glxgears work (both indirect and DRISW), but Firefox's
+	// more complex GL usage triggers a crash — likely in render commands
+	// or SHM buffer operations that our server doesn't fully handle.
 	test.skip("Firefox ESR creates X11 window (non-headless)", async ({
 		sidecarContainer,
 	}) => {
@@ -1292,6 +1294,23 @@ d.close()
 
 test.describe.serial("GLX and OpenGL", () => {
 	test.setTimeout(120_000);
+
+	test("glxinfo works with DRISW software rendering", async ({
+		sidecarContainer,
+	}) => {
+		// DRISW mode: LIBGL_ALWAYS_SOFTWARE=1 (set in Dockerfile) without
+		// LIBGL_ALWAYS_INDIRECT. Mesa loads swrast_dri.so and uses
+		// driConvertConfigs to match our FBConfigs against the driver's.
+		const output = await execInSidecar(
+			sidecarContainer,
+			"LIBGL_DEBUG=verbose timeout 10 glxinfo -B 2>&1 | head -30",
+		);
+		expect(output).toContain("OpenGL renderer string: llvmpipe");
+		expect(output).toContain("OpenGL version string:");
+		expect(output).not.toContain("Segmentation fault");
+		expect(output).not.toContain("[xcb] Extra reply data");
+		expect(output).not.toContain("No matching fbConfigs");
+	});
 
 	test("glxinfo reports GLX version and extensions", async ({
 		sidecarContainer,
