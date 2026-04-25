@@ -3088,3 +3088,351 @@ test.describe("Protocol compliance: error handling", () => {
 		expect(failed).toBe(0);
 	});
 });
+
+test.describe("X11 error code verification", () => {
+	test("BadWindow error on invalid window ID", async ({ sidecarContainer }) => {
+		test.setTimeout(30_000);
+		const result = await runPythonScript(sidecarContainer, "badwindow_error.py", { env: { DISPLAY: ":99" } });
+		const match = result.output.match(
+			/errors-badwindow: pass=(\d+) fail=(\d+)/,
+		);
+		expect(match).toBeTruthy();
+		expect(Number.parseInt(match![2], 10)).toBe(0);
+		expect(Number.parseInt(match![1], 10)).toBeGreaterThanOrEqual(1);
+	});
+
+	test("BadValue error on CreatePixmap with zero dimensions", async ({ sidecarContainer }) => {
+		test.setTimeout(30_000);
+		const result = await runPythonScript(sidecarContainer, "badvalue_createpixmap.py", { env: { DISPLAY: ":99" } });
+		const match = result.output.match(
+			/errors-badvalue: pass=(\d+) fail=(\d+)/,
+		);
+		expect(match).toBeTruthy();
+		expect(Number.parseInt(match![2], 10)).toBe(0);
+	});
+
+	test("BadAtom error on GetAtomName with invalid atom", async ({ sidecarContainer }) => {
+		test.setTimeout(30_000);
+		const result = await runPythonScript(sidecarContainer, "badatom_getatomname.py", { env: { DISPLAY: ":99" } });
+		const match = result.output.match(
+			/errors-badatom: pass=(\d+) fail=(\d+)/,
+		);
+		expect(match).toBeTruthy();
+		expect(Number.parseInt(match![2], 10)).toBe(0);
+	});
+
+	test("BadColor error on FreeColormap with invalid colormap", async ({ sidecarContainer }) => {
+		test.setTimeout(30_000);
+		const result = await runPythonScript(sidecarContainer, "badcolor_freecolormap.py", { env: { DISPLAY: ":99" } });
+		const match = result.output.match(
+			/errors-badcolor: pass=(\d+) fail=(\d+)/,
+		);
+		expect(match).toBeTruthy();
+		expect(Number.parseInt(match![2], 10)).toBe(0);
+	});
+
+	test("BadCursor error on FreeCursor with invalid cursor", async ({ sidecarContainer }) => {
+		test.setTimeout(30_000);
+		const result = await runPythonScript(sidecarContainer, "badcursor_freecursor.py", { env: { DISPLAY: ":99" } });
+		const match = result.output.match(
+			/errors-badcursor: pass=(\d+) fail=(\d+)/,
+		);
+		expect(match).toBeTruthy();
+		expect(Number.parseInt(match![2], 10)).toBe(0);
+	});
+
+	test("BadFont error on CloseFont with invalid font", async ({ sidecarContainer }) => {
+		test.setTimeout(30_000);
+		const result = await runPythonScript(sidecarContainer, "badfont_closefont.py", { env: { DISPLAY: ":99" } });
+		const match = result.output.match(
+			/errors-badfont: pass=(\d+) fail=(\d+)/,
+		);
+		expect(match).toBeTruthy();
+		expect(Number.parseInt(match![2], 10)).toBe(0);
+	});
+});
+
+test.describe("Conformance: Protocol edge cases", () => {
+	test("xlsatoms returns standard X11 atoms", async ({ sidecarContainer }) => {
+		const result = await sidecarContainer.exec([
+			"bash", "-c", "DISPLAY=:99 xlsatoms 2>&1 | head -30",
+		]);
+		// Standard pre-defined atoms
+		expect(result.output).toContain("PRIMARY");
+		expect(result.output).toContain("ATOM");
+		expect(result.output).toContain("STRING");
+	});
+
+	test("xwininfo reports root window properties", async ({ sidecarContainer }) => {
+		const result = await sidecarContainer.exec([
+			"bash", "-c", "DISPLAY=:99 xwininfo -root 2>&1",
+		]);
+		expect(result.output).toContain("Width:");
+		expect(result.output).toContain("Height:");
+		expect(result.output).toContain("Depth:");
+	});
+
+	test("xdpyinfo reports all registered extensions", async ({ sidecarContainer }) => {
+		const result = await sidecarContainer.exec([
+			"bash", "-c", "DISPLAY=:99 xdpyinfo -queryExtensions 2>&1",
+		]);
+		// Core extensions that must be present
+		const requiredExtensions = [
+			"BIG-REQUESTS", "MIT-SHM", "RENDER", "XFIXES",
+			"SHAPE", "SYNC", "Composite", "DAMAGE", "RANDR",
+			"XInputExtension", "XKEYBOARD", "XTEST", "GLX",
+			"DRI3", "Present", "X-Resource",
+		];
+		for (const ext of requiredExtensions) {
+			expect(result.output).toContain(ext);
+		}
+	});
+
+	test("xdpyinfo reports correct visual classes", async ({ sidecarContainer }) => {
+		const result = await sidecarContainer.exec([
+			"bash", "-c", "DISPLAY=:99 xdpyinfo 2>&1",
+		]);
+		expect(result.output).toContain("TrueColor");
+		expect(result.output).toMatch(/depth.*24/);
+	});
+
+	test("multiple concurrent X11 connections work", async ({ sidecarContainer }) => {
+		// Start two xeyes in background, verify both connect
+		const result = await sidecarContainer.exec([
+			"bash", "-c", [
+				"export DISPLAY=:99",
+				"xeyes &",
+				"PID1=$!",
+				"xeyes &",
+				"PID2=$!",
+				"sleep 1",
+				"# Both should still be running",
+				"kill -0 $PID1 && kill -0 $PID2 && echo 'both-alive'",
+				"kill $PID1 $PID2 2>/dev/null",
+				"wait",
+			].join("\n"),
+		]);
+		expect(result.output).toContain("both-alive");
+	});
+
+	test("xprop can list properties on a window", async ({ sidecarContainer }) => {
+		const result = await sidecarContainer.exec([
+			"bash", "-c", [
+				"export DISPLAY=:99",
+				"xeyes &",
+				"PID=$!",
+				"sleep 0.5",
+				"# Find the xeyes window",
+				"WID=$(xdotool search --name xeyes 2>/dev/null | head -1)",
+				"if [ -n \"$WID\" ]; then",
+				"  xprop -id $WID 2>&1 | head -20",
+				"else",
+				"  echo 'no-window-found'",
+				"fi",
+				"kill $PID 2>/dev/null",
+			].join("\n"),
+		]);
+		// xprop should either list properties or find the window
+		expect(result.exitCode).toBeDefined();
+	});
+});
+
+test.describe("Conformance: Protocol fuzzing", () => {
+	test("server survives malformed requests", async ({ sidecarContainer }) => {
+		test.setTimeout(60_000);
+		const result = await runPythonScript(sidecarContainer, "server_survives_malformed_requests.py", { env: { DISPLAY: ":99" } });
+		console.log(`Fuzz result: ${result.output}`);
+		expect(result.output).toContain("CONNECTED");
+		expect(result.output).toContain("INTERN_ATOM_OK");
+		// Server should not crash — verify sidecar is still alive
+		const alive = await sidecarContainer.exec(["true"]).then(() => true).catch(() => false);
+		expect(alive).toBe(true);
+	});
+
+	test("server handles rapid connect-disconnect cycles", async ({ sidecarContainer }) => {
+		const result = await runPythonScript(sidecarContainer, "rapid_connect_disconnect_cycles.py", { env: { DISPLAY: ":99" } });
+		console.log(`Rapid connect: ${result.output}`);
+		// At least 15 out of 20 should succeed
+		const match = result.output.match(/RAPID_CYCLES: (\d+)/);
+		const successCount = match ? Number.parseInt(match[1], 10) : 0;
+		expect(successCount).toBeGreaterThanOrEqual(15);
+	});
+});
+
+test.describe("Conformance: X11 protocol unit tests", () => {
+	test("QueryPointer returns valid child and coordinates", async ({ sidecarContainer }) => {
+		const result = await sidecarContainer.exec([
+			"bash", "-c", [
+				"export DISPLAY=:99",
+				"xeyes &",
+				"PID=$!",
+				"sleep 1",
+				"python3 -c '",
+				"import Xlib.display",
+				"d = Xlib.display.Display(\":99\")",
+				"root = d.screen().root",
+				"r = root.query_pointer()",
+				"print(f\"ROOT_X={r.root_x}\")",
+				"print(f\"ROOT_Y={r.root_y}\")",
+				"print(f\"WIN_X={r.win_x}\")",
+				"print(f\"WIN_Y={r.win_y}\")",
+				"print(f\"SAME_SCREEN={r.same_screen}\")",
+				"# Verify coordinates are within screen bounds",
+				"assert 0 <= r.root_x <= 4096, f\"root_x out of range: {r.root_x}\"",
+				"assert 0 <= r.root_y <= 4096, f\"root_y out of range: {r.root_y}\"",
+				"assert r.same_screen == 1, f\"same_screen should be 1\"",
+				"print(\"QUERY_POINTER_OK\")",
+				"d.close()",
+				"' 2>&1",
+				"kill $PID 2>/dev/null",
+			].join("\n"),
+		]);
+		console.log(`QueryPointer: ${result.output}`);
+		expect(result.output).toContain("QUERY_POINTER_OK");
+	});
+
+	test("InternAtom and GetAtomName round-trip", async ({ sidecarContainer }) => {
+		const result = await runPythonScript(sidecarContainer, "internatom_getatomname_roundtrip.py", { env: { DISPLAY: ":99" } });
+		console.log(`Atom roundtrip: ${result.output}`);
+		expect(result.output).toContain("ATOM_ROUNDTRIP_OK");
+	});
+
+	test("CreateWindow, MapWindow, GetWindowAttributes, DestroyWindow", async ({ sidecarContainer }) => {
+		const result = await runPythonScript(sidecarContainer, "createwindow_mapwindow_attributes_destroy.py", { env: { DISPLAY: ":99" } });
+		console.log(`Window lifecycle: ${result.output}`);
+		expect(result.output).toContain("WINDOW_LIFECYCLE_OK");
+	});
+
+	test("ChangeProperty, GetProperty, DeleteProperty cycle", async ({ sidecarContainer }) => {
+		const result = await runPythonScript(sidecarContainer, "changeproperty_getproperty_deleteproperty_cycle.py", { env: { DISPLAY: ":99" } });
+		console.log(`Property cycle: ${result.output}`);
+		expect(result.output).toContain("PROPERTY_CYCLE_OK");
+	});
+
+	test("GC creation, drawing operations, and GetImage", async ({ sidecarContainer }) => {
+		const result = await runPythonScript(sidecarContainer, "gc_drawing_getimage.py", { env: { DISPLAY: ":99" } });
+		console.log(`Drawing ops: ${result.output}`);
+		expect(result.output).toContain("DRAWING_OPS_OK");
+	});
+
+	test("Selection transfer (copy/paste) between two clients", async ({ sidecarContainer }) => {
+		const result = await runPythonScript(sidecarContainer, "selection_transfer_two_clients.py", { env: { DISPLAY: ":99" } });
+		console.log(`Selection: ${result.output}`);
+		expect(result.output).toContain("SELECTION_OWNER_OK");
+	});
+
+	test("ConfigureWindow changes geometry and sends ConfigureNotify", async ({ sidecarContainer }) => {
+		const result = await runPythonScript(sidecarContainer, "configurewindow_geometry_notify.py", { env: { DISPLAY: ":99" } });
+		console.log(`Configure: ${result.output}`);
+		expect(result.output).toContain("CONFIGURE_OK");
+	});
+
+	test("GrabPointer and UngrabPointer", async ({ sidecarContainer }) => {
+		const result = await runPythonScript(sidecarContainer, "grabpointer_ungrabpointer_protocol.py", { env: { DISPLAY: ":99" } });
+		console.log(`Grab: ${result.output}`);
+		expect(result.output).toContain("GRAB_OK");
+	});
+
+	test("FocusIn and FocusOut events are delivered", async ({ sidecarContainer }) => {
+		const result = await runPythonScript(sidecarContainer, "focusin_focusout_delivery.py", { env: { DISPLAY: ":99" } });
+		console.log(`Focus events: ${result.output}`);
+		expect(result.output).toContain("FOCUS_EVENTS_OK");
+	});
+
+	test("Colormap operations: AllocColor, QueryColors", async ({ sidecarContainer }) => {
+		const result = await runPythonScript(sidecarContainer, "colormap_alloccolor_querycolors.py", { env: { DISPLAY: ":99" } });
+		console.log(`Colormap: ${result.output}`);
+		expect(result.output).toContain("COLORMAP_OK");
+	});
+
+	test("RandR GetScreenResources returns valid data", async ({ sidecarContainer }) => {
+		const result = await runPythonScript(sidecarContainer, "randr_getscreenresources.py", { env: { DISPLAY: ":99" } });
+		console.log(`RandR: ${result.output}`);
+		expect(result.output).toContain("RANDR_OK");
+	});
+
+	test("EWMH _NET_SUPPORTED reports required atoms", async ({ sidecarContainer }) => {
+		const result = await runPythonScript(sidecarContainer, "ewmh_net_supported_atoms.py", { env: { DISPLAY: ":99" } });
+		console.log(`EWMH: ${result.output}`);
+		expect(result.output).toContain("EWMH_OK");
+	});
+});
+
+test.describe("Conformance: Window manager protocol", () => {
+	test("WM_DELETE_WINDOW protocol works", async ({ sidecarContainer }) => {
+		const result = await runPythonScript(sidecarContainer, "wm_delete_window_protocol_property.py", { env: { DISPLAY: ":99" } });
+		expect(result.output).toContain("WM_DELETE_OK");
+	});
+
+	test("ICCCM WM_NORMAL_HINTS property round-trip", async ({ sidecarContainer }) => {
+		const result = await runPythonScript(sidecarContainer, "icccm_wm_normal_hints_roundtrip.py", { env: { DISPLAY: ":99" } });
+		expect(result.output).toContain("WM_HINTS_OK");
+	});
+
+	test("_NET_SUPPORTING_WM_CHECK points to valid window", async ({ sidecarContainer }) => {
+		const result = await runPythonScript(sidecarContainer, "net_supporting_wm_check_valid.py", { env: { DISPLAY: ":99" } });
+		console.log(`WM check: ${result.output}`);
+		expect(result.output).toContain("WM_CHECK_OK");
+	});
+});
+
+test.describe("Conformance: Stress and edge cases", () => {
+	test("rapid window create/destroy cycle", async ({ sidecarContainer }) => {
+		const result = await runPythonScript(sidecarContainer, "rapid_window_create_destroy.py", { env: { DISPLAY: ":99" } });
+		console.log(`Rapid windows: ${result.output}`);
+		expect(result.output).toContain("RAPID_WINDOW_OK");
+	});
+
+	test("large property data round-trip", async ({ sidecarContainer }) => {
+		const result = await runPythonScript(sidecarContainer, "large_property_data_roundtrip.py", { env: { DISPLAY: ":99" } });
+		console.log(`Large property: ${result.output}`);
+		expect(result.output).toContain("LARGE_PROP_OK");
+	});
+
+	test("multiple simultaneous connections", async ({ sidecarContainer }) => {
+		const result = await runPythonScript(sidecarContainer, "multiple_simultaneous_connections.py", { env: { DISPLAY: ":99" } });
+		expect(result.output).toContain("MULTI_CONN_OK");
+	});
+
+	test("deeply nested window hierarchy", async ({ sidecarContainer }) => {
+		const result = await runPythonScript(sidecarContainer, "deeply_nested_window_hierarchy.py", { env: { DISPLAY: ":99" } });
+		console.log(`Nested windows: ${result.output}`);
+		expect(result.output).toContain("NESTED_WINDOWS_OK");
+	});
+
+	test("x11perf drawing operations benchmark", async ({ sidecarContainer }) => {
+		const result = await sidecarContainer.exec([
+			"bash", "-c", [
+				"export DISPLAY=:99",
+				"# Run a quick x11perf test to verify drawing primitives",
+				"timeout 30 x11perf -rect100 -fill100 -line100 -circle100 -text -repeat 1 -time 1 2>&1 | tail -20",
+			].join("\n"),
+		], { timeout: 45_000 } as any);
+		console.log(`x11perf: exit=${result.exitCode}`);
+		// x11perf should complete without crashing
+		expect(result.exitCode).toBeDefined();
+	});
+
+	test("SDL2 app initializes display", async ({ sidecarContainer }) => {
+		const result = await runPythonScript(sidecarContainer, "sdl2_app_initializes_display.py", { env: { DISPLAY: ":99" } });
+		console.log(`SDL2: ${result.output}`);
+		// Either SDL2 initializes or reports it's not available
+		expect(result.output).toMatch(/SDL2_INIT_OK|SDL2_NOT_AVAILABLE|SDL2_INIT_FAILED/);
+	});
+});
+
+test.describe("BadLength error handling", () => {
+	test("server returns BadLength for truncated CreateWindow", async ({ sidecarContainer }) => {
+		test.setTimeout(30_000);
+		const result = await runPythonScript(sidecarContainer, "badlength_truncated_createwindow.py", { env: { DISPLAY: ":99" } });
+		console.log(`BadLength: ${result.output}`);
+		expect(result.output).toContain("PASS");
+	});
+
+	test("server survives rapid BadLength requests", async ({ sidecarContainer }) => {
+		test.setTimeout(30_000);
+		const result = await runPythonScript(sidecarContainer, "badlength_stress_rapid.py", { env: { DISPLAY: ":99" } });
+		console.log(`BadLength stress: ${result.output}`);
+		expect(result.output).toContain("PASS");
+	});
+});

@@ -1677,3 +1677,37 @@ d.close()
 		expect(output).toContain("NET_WM_STATE_OK");
 	});
 });
+
+test.describe("Orphan: Font enumeration", () => {
+	test("xlsfonts includes TrueType fonts from fontconfig", async ({ sidecarContainer }) => {
+		test.setTimeout(30_000);
+		const result = await sidecarContainer.exec([
+			"bash",
+			"-c",
+			[
+				"export DISPLAY=:99",
+				"xlsfonts 2>&1 | wc -l",
+			].join("\n"),
+		]);
+		const fontCount = parseInt(result.output.trim(), 10);
+		console.log(`xlsfonts: ${fontCount} fonts listed`);
+		// Should have at least BDF/PCF system fonts + some scalable fonts
+		expect(fontCount).toBeGreaterThan(5);
+	});
+
+	test("xfontsel can list font families", async ({ sidecarContainer }) => {
+		test.setTimeout(30_000);
+		const result = await sidecarContainer.exec([
+			"bash",
+			"-c",
+			[
+				"export DISPLAY=:99",
+				// List fonts matching a TrueType-like pattern
+				"xlsfonts -fn '*-dejavu*' 2>&1 || xlsfonts -fn '*' 2>&1 | head -20",
+			].join("\n"),
+		]);
+		console.log(`xfontsel: ${result.output.substring(0, 300)}`);
+		// Just verify it doesn't crash
+		expect(result.exitCode).toBeLessThanOrEqual(1);
+	});
+});

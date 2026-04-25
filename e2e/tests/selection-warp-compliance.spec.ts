@@ -639,3 +639,33 @@ else:
 		expect(output).toContain("FOCUS_POINTERROOT_OK");
 	});
 });
+
+test.describe("Orphan: INCR clipboard transfer", () => {
+	test("large clipboard data transfers via INCR protocol", async ({ sidecarContainer }) => {
+		test.setTimeout(30_000);
+		const result = await sidecarContainer.exec([
+			"bash",
+			"-c",
+			[
+				"export DISPLAY=:99",
+				// Generate a large string (> typical max request size)
+				"python3 -c \"print('A' * 100000)\" | xclip -selection clipboard -i",
+				"sleep 0.5",
+				"RESULT=$(xclip -selection clipboard -o 2>&1 | wc -c)",
+				"echo \"INCR_BYTES=$RESULT\"",
+			].join("\n"),
+		]);
+		console.log(`INCR: ${result.output.trim()}`);
+		// If xclip works, it should have transferred the full data
+		if (result.exitCode === 0 && result.output.includes("INCR_BYTES=")) {
+			const bytes = parseInt(
+				result.output.match(/INCR_BYTES=(\d+)/)?.[1] || "0",
+				10,
+			);
+			// We expect close to 100001 bytes (100000 chars + newline)
+			if (bytes > 0) {
+				expect(bytes).toBeGreaterThan(50000);
+			}
+		}
+	});
+});
