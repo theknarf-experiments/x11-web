@@ -9,6 +9,7 @@
  */
 
 import { type ChildProcess, exec } from "node:child_process";
+import * as fs from "node:fs";
 import * as http from "node:http";
 import * as path from "node:path";
 import {
@@ -23,6 +24,7 @@ import { GenericContainer, Network, Wait } from "testcontainers";
 const PROJECT_ROOT = path.resolve(import.meta.dirname, "../..");
 const E2E_DIR = path.resolve(import.meta.dirname, "..");
 const FRONTEND_DIR = path.join(PROJECT_ROOT, "frontend");
+const SCRIPTS_DIR = path.join(E2E_DIR, "scripts");
 const SERVE_BIN = path.join(E2E_DIR, "node_modules", ".bin", "serve");
 
 // ---------------------------------------------------------------------------
@@ -282,6 +284,38 @@ export async function waitForCanvasStable(
 		}
 		await new Promise((r) => setTimeout(r, pollMs));
 	}
+}
+
+/**
+ * Run a Python script (loaded from `e2e/scripts/<name>`) inside the sidecar
+ * container. The script is staged into `/tmp/<name>` via a heredoc so the
+ * container doesn't need a bind mount.
+ *
+ * `env` is rendered as a `KEY=VAL` prefix (most callers want `DISPLAY=:99`).
+ */
+export async function runPythonScript(
+	container: StartedTestContainer,
+	scriptName: string,
+	{
+		env = {},
+		args = [],
+	}: { env?: Record<string, string>; args?: string[] } = {},
+): Promise<{ output: string; exitCode: number }> {
+	const script = fs.readFileSync(path.join(SCRIPTS_DIR, scriptName), "utf8");
+	const tmpPath = `/tmp/${scriptName}`;
+	await container.exec([
+		"bash",
+		"-c",
+		`cat > ${tmpPath} << 'PYEOF'\n${script}\nPYEOF`,
+	]);
+	const envPrefix = Object.entries(env)
+		.map(([k, v]) => `${k}=${v}`)
+		.join(" ");
+	const argsStr = args.join(" ");
+	const cmd = [envPrefix, "python3", tmpPath, argsStr, "2>&1"]
+		.filter(Boolean)
+		.join(" ");
+	return container.exec(["bash", "-c", cmd]);
 }
 
 /** Kill all spawned X11 apps between tests. */
