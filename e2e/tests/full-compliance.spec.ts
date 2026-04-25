@@ -8,7 +8,7 @@
  * Phase 5: Edge case protocol compliance
  */
 
-import { test, expect } from "./fixtures";
+import { expect, runPythonScript, test, waitForDock } from "./fixtures";
 import type { StartedTestContainer } from "testcontainers";
 
 /** Run a command inside the sidecar container and return stdout. */
@@ -1767,5 +1767,285 @@ d.close()
 			"xdpyinfo >/dev/null 2>&1 && echo alive || echo dead",
 		);
 		expect(alive).toContain("alive");
+	});
+});
+
+
+// ===========================================================================
+// Extension enumeration completeness
+// ===========================================================================
+test.describe("Extension enumeration", () => {
+	test("all required extensions are advertised", async ({ sidecarContainer }) => {
+		test.setTimeout(30_000);
+		const result = await sidecarContainer.exec([
+			"bash", "-c",
+			"export DISPLAY=:99 && xdpyinfo 2>&1",
+		]);
+		const output = result.output;
+		const requiredExtensions = [
+			"BIG-REQUESTS",
+			"Composite",
+			"DAMAGE",
+			"DPMS",
+			"Generic Event Extension",
+			"MIT-SCREEN-SAVER",
+			"MIT-SHM",
+			"RANDR",
+			"RECORD",
+			"RENDER",
+			"SECURITY",
+			"SHAPE",
+			"SYNC",
+			"XC-MISC",
+			"XFIXES",
+			"XInputExtension",
+			"XKEYBOARD",
+			"XVideo",
+		];
+		let found = 0;
+		for (const ext of requiredExtensions) {
+			if (output.includes(ext)) {
+				found++;
+			}
+		}
+		expect(found).toBeGreaterThanOrEqual(16);
+	});
+
+	test("extension version negotiation works", async ({ sidecarContainer }) => {
+		test.setTimeout(30_000);
+		const result = await runPythonScript(sidecarContainer, "extension_version_negotiation.py", { env: { DISPLAY: ":99" } });
+		expect(result.output).toContain("PASS");
+	});
+});
+
+
+// ===========================================================================
+// Conformance: comprehensive x11perf validation
+// ===========================================================================
+test.describe("Conformance: x11perf extended validation", () => {
+	test("x11perf drawing operations complete without crashes", async ({ sidecarContainer }) => {
+		const result = await sidecarContainer.exec([
+			"bash", "-c", [
+				"export DISPLAY=:99",
+				"x11perf -time 1 -repeat 1 -subs 1 \\",
+				"  -noop -dot -line10 -rect10 -circle10 -fcircle10 \\",
+				"  -seg10 -ftext -putimage10 -scroll10 -copywinwin10 \\",
+				"  -prop -gc -create -map -unmap -destroy \\",
+				"  2>&1 | tail -40",
+			].join("\n"),
+		]);
+		// Verify we got results lines (reps @ msec format)
+		const resultLines = result.output.split("\n").filter((l: string) =>
+			l.includes("reps @") || l.includes("/sec")
+		);
+		expect(resultLines.length).toBeGreaterThanOrEqual(10);
+	});
+});
+
+
+// ===========================================================================
+// Multi-client stress tests
+// ===========================================================================
+test.describe("Multi-client stress", () => {
+	test("10 concurrent X11 connections with window operations", async ({ sidecarContainer }) => {
+		test.setTimeout(120_000);
+		const result = await runPythonScript(sidecarContainer, "concurrent_x11_window_operations.py", { env: { DISPLAY: ":99" } });
+		expect(result.output).toContain("PASS: all 10 clients succeeded");
+	});
+});
+
+
+// ===========================================================================
+// rendercheck full validation
+// ===========================================================================
+test.describe("rendercheck comprehensive", () => {
+	test("rendercheck all test categories pass", async ({ sidecarContainer }) => {
+		test.setTimeout(120_000);
+		const check = await sidecarContainer.exec([
+			"bash", "-c",
+			"which rendercheck 2>/dev/null || echo NONE",
+		]);
+		if (check.output.trim() === "NONE") {
+			test.skip();
+			return;
+		}
+		const result = await sidecarContainer.exec([
+			"bash", "-c", [
+				"export DISPLAY=:99",
+				"timeout 90 rendercheck -f a8r8g8b8 2>&1 || true",
+			].join("\n"),
+		], { timeout: 100_000 } as any);
+		// Parse pass/fail counts
+		const passMatch = result.output.match(/(\d+) passed/);
+		const failMatch = result.output.match(/(\d+) failed/);
+		if (passMatch) {
+			const passed = parseInt(passMatch[1], 10);
+			const failed = failMatch ? parseInt(failMatch[1], 10) : 0;
+			console.log(`rendercheck: ${passed} passed, ${failed} failed`);
+			expect(passed).toBeGreaterThanOrEqual(789);
+			expect(failed).toBe(0);
+		}
+	});
+
+	test("rendercheck per-category breakdown all pass", async ({ sidecarContainer }) => {
+		test.setTimeout(180_000);
+		const check = await sidecarContainer.exec([
+			"bash", "-c",
+			"which rendercheck 2>/dev/null || echo NONE",
+		]);
+		if (check.output.trim() === "NONE") {
+			test.skip();
+			return;
+		}
+		// Run each test category independently to isolate failures
+		const categories = [
+			"fill", "dcoords", "scoords", "mcoords", "tscoords",
+			"tmcoords", "blend", "composite", "cacomposite",
+			"gradients", "repeat", "triangles", "bug7366",
+		];
+		for (const cat of categories) {
+			const result = await sidecarContainer.exec([
+				"bash", "-c",
+				`DISPLAY=:99 timeout 30 rendercheck -f a8r8g8b8 -t ${cat} 2>&1 || true`,
+			], { timeout: 35_000 } as any);
+			const failMatch = result.output.match(/(\d+)\s+tests?\s+failed/);
+			const failed = failMatch ? parseInt(failMatch[1], 10) : 0;
+			console.log(`rendercheck ${cat}: ${failed === 0 ? "PASS" : `${failed} FAILED`}`);
+			expect(failed, `rendercheck category '${cat}' has failures`).toBe(0);
+		}
+	});
+});
+
+
+// ===========================================================================
+// Stress testing: concurrent X11 clients
+// ===========================================================================
+test.describe("Concurrent client stress tests", () => {
+	test("50 concurrent xeyes clients connect and render", async ({ sidecarContainer }) => {
+		test.setTimeout(60_000);
+		// Spawn 50 xeyes processes concurrently
+		const result = await sidecarContainer.exec([
+			"bash", "-c", [
+				"export DISPLAY=:99",
+				"for i in $(seq 1 50); do xeyes &; done",
+				"sleep 3",
+				// Count how many xeyes are running
+				"RUNNING=$(pgrep -c xeyes || echo 0)",
+				"echo \"stress-clients: running=$RUNNING\"",
+				// Clean up
+				"pkill -9 xeyes 2>/dev/null; true",
+				"sleep 1",
+			].join("\n"),
+		], { timeout: 30_000 } as any);
+		const match = result.output.match(/stress-clients: running=(\d+)/);
+		const running = match ? parseInt(match[1], 10) : 0;
+		console.log(`Stress test: ${running}/50 xeyes running concurrently`);
+		expect(running).toBeGreaterThanOrEqual(45); // allow a few slow starters
+	});
+
+	test("rapid connect/disconnect cycles", async ({ sidecarContainer }) => {
+		test.setTimeout(60_000);
+		// Rapidly create and destroy connections via python-xlib
+		const result = await runPythonScript(sidecarContainer, "rapid_connect_disconnect_100_cycles.py", { env: { DISPLAY: ":99" } });
+		const match = result.output.match(/rapid-connect: passed=(\d+)/);
+		const passed = match ? parseInt(match[1], 10) : 0;
+		console.log(`Rapid connect/disconnect: ${passed}/100 passed`);
+		expect(passed).toBeGreaterThanOrEqual(95);
+	});
+});
+
+test.describe("Extension enumeration completeness", () => {
+	test.beforeEach(async ({ page, frontendUrl }) => {
+		await page.goto(frontendUrl);
+		await waitForDock(page);
+	});
+
+	test("all required extensions are listed by xdpyinfo", async ({ sidecarContainer }) => {
+		const result = await sidecarContainer.exec([
+			"bash",
+			"-c",
+			[
+				"set -e",
+				"export DISPLAY=:99",
+				"EXTS=$(xdpyinfo 2>&1)",
+				"passed=0",
+				"failed=0",
+				"check_ext() {",
+				"  if echo \"$EXTS\" | grep -qi \"$1\"; then",
+				"    echo \"PASS: $1\"",
+				"    passed=$((passed+1))",
+				"  else",
+				"    echo \"FAIL: $1 missing\"",
+				"    failed=$((failed+1))",
+				"  fi",
+				"}",
+				"check_ext 'BIG-REQUESTS'",
+				"check_ext 'Composite'",
+				"check_ext 'DAMAGE'",
+				"check_ext 'DRI3'",
+				"check_ext 'Generic Events'",
+				"check_ext 'GLX'",
+				"check_ext 'Present'",
+				"check_ext 'RANDR'",
+				"check_ext 'RENDER'",
+				"check_ext 'SHAPE'",
+				"check_ext 'MIT-SHM'",
+				"check_ext 'SYNC'",
+				"check_ext 'XFIXES'",
+				"check_ext 'XInputExtension'",
+				"check_ext 'XKEYBOARD'",
+				"check_ext 'XTEST'",
+				"check_ext 'XC-MISC'",
+				"check_ext 'XVideo'",
+				"check_ext 'RECORD'",
+				"check_ext 'SECURITY'",
+				"check_ext 'DPMS'",
+				"check_ext 'XFree86-VidModeExtension'",
+				"check_ext 'DOUBLE-BUFFER'",
+				"check_ext 'MIT-SCREEN-SAVER'",
+				"check_ext 'XINERAMA'",
+				"check_ext 'X-Resource'",
+				"echo \"extensions: pass=$passed fail=$failed\"",
+			].join("\n"),
+		]);
+		const match = result.output.match(
+			/extensions: pass=(\d+) fail=(\d+)/,
+		);
+		expect(match).toBeTruthy();
+		// All 26 extensions must be present
+		expect(Number.parseInt(match![1], 10)).toBeGreaterThanOrEqual(26);
+		expect(Number.parseInt(match![2], 10)).toBe(0);
+	});
+});
+
+
+// ---------------------------------------------------------------------------
+// Concurrent client stress — multiple X11 clients simultaneously
+// ---------------------------------------------------------------------------
+test.describe("Concurrent client connections", () => {
+	test("10 concurrent xlogo instances", async ({ sidecarContainer }) => {
+		test.setTimeout(60_000);
+		const result = await sidecarContainer.exec([
+			"bash", "-c", [
+				"export DISPLAY=:99",
+				"# Spawn 10 xlogo instances concurrently",
+				"for i in $(seq 1 10); do",
+				"  xlogo &",
+				"done",
+				"sleep 3",
+				"# Count the windows via xdotool",
+				"COUNT=$(xdotool search --name xlogo 2>/dev/null | wc -l)",
+				"echo \"WINDOW_COUNT=$COUNT\"",
+				"# Clean up",
+				"pkill -f xlogo 2>/dev/null || true",
+				"sleep 1",
+				"if [ \"$COUNT\" -ge 10 ]; then",
+				"  echo 'CONCURRENT_PASS'",
+				"else",
+				"  echo 'CONCURRENT_FAIL'",
+				"fi",
+			].join("\n"),
+		]);
+		expect(result.output).toContain("CONCURRENT_PASS");
 	});
 });

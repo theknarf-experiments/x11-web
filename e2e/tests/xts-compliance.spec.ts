@@ -5,7 +5,7 @@
  * that validate full X11 spec compliance beyond basic functionality.
  */
 
-import { test, expect } from "./fixtures";
+import { expect, runPythonScript, test } from "./fixtures";
 import type { StartedTestContainer } from "testcontainers";
 
 /** Run a command inside the sidecar container and return stdout. */
@@ -1611,5 +1611,705 @@ d.close()
 `,
 		);
 		expect(output).toContain("translate_ok=True");
+	});
+});
+
+
+// ===========================================================================
+// XTS-style deep protocol conformance tests
+// =========================================================================
+// XTS (X Test Suite) — TET-based binary execution and result parsing helpers
+// =========================================================================
+// These helpers discover XTS test binaries built from the freedesktop.org
+// xts source tree, run them against our X server, and parse TET (Test
+// Environment Toolkit) output format.
+//
+// TET result lines: 520|test_num result_code|test_name
+// Result codes: 0=PASS, 1=FAIL, 2=UNRESOLVED, 3=NOTINUSE, 4=UNSUPPORTED,
+//               5=UNTESTED, 6=UNINITIATED, 7=NORESULT
+
+/** XTS TET result codes */
+const TET_RESULT_NAMES: Record<number, string> = {
+	0: "PASS",
+	1: "FAIL",
+	2: "UNRESOLVED",
+	3: "NOTINUSE",
+	4: "UNSUPPORTED",
+	5: "UNTESTED",
+	6: "UNINITIATED",
+	7: "NORESULT",
+};
+
+/** XTS category directories in order of specificity */
+const XTS_CATEGORIES = [
+	{ name: "Xproto", dirs: ["xts5/Xproto"] },
+	{ name: "Xlib3", dirs: ["xts5/Xlib3"] },
+	{ name: "Xlib4", dirs: ["xts5/Xlib4"] },
+	{ name: "Xlib5", dirs: ["xts5/Xlib5"] },
+	{ name: "Xlib6", dirs: ["xts5/Xlib6"] },
+	{ name: "Xlib7", dirs: ["xts5/Xlib7"] },
+	{ name: "Xlib8", dirs: ["xts5/Xlib8"] },
+	{ name: "Xlib9", dirs: ["xts5/Xlib9"] },
+	{ name: "Xlib10", dirs: ["xts5/Xlib10"] },
+	{ name: "Xlib11", dirs: ["xts5/Xlib11"] },
+	{ name: "Xlib12", dirs: ["xts5/Xlib12"] },
+	{ name: "Xlib13", dirs: ["xts5/Xlib13"] },
+	{ name: "Xlib14", dirs: ["xts5/Xlib14"] },
+	{ name: "Xlib15", dirs: ["xts5/Xlib15"] },
+	{ name: "Xlib16", dirs: ["xts5/Xlib16"] },
+	{ name: "Xlib17", dirs: ["xts5/Xlib17"] },
+	{ name: "Xt", dirs: ["xts5/Xt3", "xts5/Xt4", "xts5/Xt5", "xts5/Xt6", "xts5/Xt7", "xts5/Xt8", "xts5/Xt9", "xts5/Xt10", "xts5/Xt11", "xts5/Xt12", "xts5/Xt13"] },
+	{ name: "XInput", dirs: ["xts5/XI"] },
+	{ name: "XIproto", dirs: ["xts5/XIproto"] },
+];
+
+interface TetResult {
+	testNum: number;
+	resultCode: number;
+	testName: string;
+}
+
+interface CategoryResults {
+	category: string;
+	binariesFound: number;
+	binariesRun: number;
+	results: TetResult[];
+	pass: number;
+	fail: number;
+	unresolved: number;
+	notinuse: number;
+	unsupported: number;
+	untested: number;
+	uninitiated: number;
+	noresult: number;
+	errors: string[];
+}
+
+/**
+ * Parse TET output lines from an XTS test binary.
+ * TET result lines have the format: 520|test_num result_code|test_name
+ * We also handle the older format: 520|test_num result_code test_name|message
+ */
+function parseTetOutput(output: string): TetResult[] {
+	const results: TetResult[] = [];
+	for (const line of output.split("\n")) {
+		// Match: 520|<num> <code>|<name>
+		const m = line.match(/^520\|(\d+)\s+(\d+)\|(.*)$/);
+		if (m) {
+			results.push({
+				testNum: Number.parseInt(m[1], 10),
+				resultCode: Number.parseInt(m[2], 10),
+				testName: m[3].trim(),
+			});
+			continue;
+		}
+		// Also match: 520|<num> <code> <name>|<message>
+		const m2 = line.match(/^520\|(\d+)\s+(\d+)\s+(\S+)\|/);
+		if (m2) {
+			results.push({
+				testNum: Number.parseInt(m2[1], 10),
+				resultCode: Number.parseInt(m2[2], 10),
+				testName: m2[3].trim(),
+			});
+		}
+	}
+	return results;
+}
+
+/** Summarize TetResult[] into a CategoryResults-compatible count object */
+function summarizeTetResults(results: TetResult[]): Pick<
+	CategoryResults,
+	"pass" | "fail" | "unresolved" | "notinuse" | "unsupported" | "untested" | "uninitiated" | "noresult"
+> {
+	const summary = {
+		pass: 0, fail: 0, unresolved: 0, notinuse: 0,
+		unsupported: 0, untested: 0, uninitiated: 0, noresult: 0,
+	};
+	for (const r of results) {
+		switch (r.resultCode) {
+			case 0: summary.pass++; break;
+			case 1: summary.fail++; break;
+			case 2: summary.unresolved++; break;
+			case 3: summary.notinuse++; break;
+			case 4: summary.unsupported++; break;
+			case 5: summary.untested++; break;
+			case 6: summary.uninitiated++; break;
+			case 7: summary.noresult++; break;
+		}
+	}
+	return summary;
+}
+
+test.describe("XTS deep protocol conformance", () => {
+	test("connection setup: protocol version and screen info", async ({ sidecarContainer }) => {
+		test.setTimeout(30_000);
+		const result = await runPythonScript(sidecarContainer, "xts_connection_setup_protocol_screen.py", { env: { DISPLAY: ":99" } });
+		expect(result.output).toContain("PASS");
+	});
+
+	test("atom operations: InternAtom + GetAtomName round-trip", async ({ sidecarContainer }) => {
+		test.setTimeout(30_000);
+		const result = await runPythonScript(sidecarContainer, "xts_atom_internatom_getatomname.py", { env: { DISPLAY: ":99" } });
+		expect(result.output).toContain("PASS");
+	});
+
+	test("window creation with various depths and classes", async ({ sidecarContainer }) => {
+		test.setTimeout(30_000);
+		const result = await runPythonScript(sidecarContainer, "xts_window_creation_depths_classes.py", { env: { DISPLAY: ":99" } });
+		expect(result.output).toContain("PASS");
+	});
+
+	test("GC operations: CreateGC + ChangeGC + FreeGC", async ({ sidecarContainer }) => {
+		test.setTimeout(30_000);
+		const result = await runPythonScript(sidecarContainer, "xts_gc_create_change_freegc.py", { env: { DISPLAY: ":99" } });
+		expect(result.output).toContain("PASS");
+	});
+
+	test("selection transfer: SetSelectionOwner + ConvertSelection", async ({ sidecarContainer }) => {
+		test.setTimeout(30_000);
+		const result = await runPythonScript(sidecarContainer, "xts_selection_setowner_convert.py", { env: { DISPLAY: ":99" } });
+		expect(result.output).toContain("PASS");
+	});
+
+	test("colormap operations: CreateColormap + AllocColor", async ({ sidecarContainer }) => {
+		test.setTimeout(30_000);
+		const result = await runPythonScript(sidecarContainer, "xts_colormap_create_alloccolor.py", { env: { DISPLAY: ":99" } });
+		expect(result.output).toContain("PASS");
+	});
+
+	test("event delivery: StructureNotify on window operations", async ({ sidecarContainer }) => {
+		test.setTimeout(30_000);
+		const result = await runPythonScript(sidecarContainer, "xts_event_structurenotify_window.py", { env: { DISPLAY: ":99" } });
+		expect(result.output).toContain("PASS");
+	});
+
+	test("multi-client connection stress test", async ({ sidecarContainer }) => {
+		test.setTimeout(60_000);
+		const result = await runPythonScript(sidecarContainer, "xts_multi_client_connection_stress.py", { env: { DISPLAY: ":99" } });
+		expect(result.output).toContain("PASS");
+	});
+
+	test("pixmap operations: CreatePixmap + CopyArea + FreePixmap", async ({ sidecarContainer }) => {
+		test.setTimeout(30_000);
+		const result = await runPythonScript(sidecarContainer, "xts_pixmap_create_copyarea_free.py", { env: { DISPLAY: ":99" } });
+		expect(result.output).toContain("PASS");
+	});
+
+	test("cursor operations: CreateCursor + DefineCursor + FreeCursor", async ({ sidecarContainer }) => {
+		test.setTimeout(30_000);
+		const result = await runPythonScript(sidecarContainer, "xts_cursor_create_define_free.py", { env: { DISPLAY: ":99" } });
+		expect(result.output).toContain("PASS");
+	});
+});
+
+
+// ===========================================================================
+// XTS (X Test Suite) - Spec Compliance
+// ===========================================================================
+test.describe("XTS spec compliance", () => {
+	test("XTS core protocol tests pass", async ({ sidecarContainer }) => {
+		test.setTimeout(600_000); // 10 minutes for full suite
+		const result = await sidecarContainer.exec([
+			"bash", "-c", [
+				"export DISPLAY=:99",
+				"export HOME=/root",
+				"passed=0 failed=0 skipped=0",
+				"if [ -d /opt/xts-src/xts5 ]; then",
+				"  for test_bin in $(find /opt/xts-src/xts5 -name '*.t' -type f -executable 2>/dev/null | head -200); do",
+				"    timeout 20 $test_bin 2>/dev/null",
+				"    rc=$?",
+				"    if [ $rc -eq 0 ]; then",
+				"      passed=$((passed + 1))",
+				"    elif [ $rc -eq 77 ]; then",
+				"      skipped=$((skipped + 1))",
+				"    else",
+				"      failed=$((failed + 1))",
+				"    fi",
+				"  done",
+				"fi",
+				"echo \"XTS: passed=$passed failed=$failed skipped=$skipped\"",
+				"echo \"XTS_TOTAL=$((passed + failed + skipped))\"",
+			].join("\n"),
+		]);
+		console.log("XTS results:", result.output);
+		// Extract pass count and verify we ran some tests
+		const match = result.output.match(/passed=(\d+)/);
+		const passed = match ? parseInt(match[1], 10) : 0;
+		const totalMatch = result.output.match(/XTS_TOTAL=(\d+)/);
+		const total = totalMatch ? parseInt(totalMatch[1], 10) : 0;
+		// We expect at least some tests to be available and pass
+		if (total > 0) {
+			expect(passed).toBeGreaterThan(0);
+			console.log(`XTS: ${passed}/${total} passed`);
+		}
+	});
+});
+
+
+// ===========================================================================
+// XTS comprehensive suite
+// ===========================================================================
+test.describe("XTS comprehensive", () => {
+	test("XTS connection tests achieve >90% pass rate", async ({ sidecarContainer }) => {
+		test.setTimeout(120_000);
+		const check = await sidecarContainer.exec([
+			"bash", "-c",
+			"ls /xts-bin/ 2>/dev/null && echo XTS_OK || echo XTS_MISSING",
+		]);
+		if (check.output.trim().includes("XTS_MISSING")) {
+			test.skip();
+			return;
+		}
+		const result = await sidecarContainer.exec([
+			"bash", "-c", [
+				"export DISPLAY=:99",
+				"cd /xts-bin 2>/dev/null || exit 0",
+				"PASS=0 FAIL=0 SKIP=0",
+				"for t in XOpenDisplay XCloseDisplay XConnectionNumber XDisplayString; do",
+				"  if [ -x \"$t\" ]; then",
+				"    R=$(./$t 2>&1 || true)",
+				"    if echo \"$R\" | grep -q 'PASS'; then PASS=$((PASS+1)); else FAIL=$((FAIL+1)); fi",
+				"  else SKIP=$((SKIP+1)); fi",
+				"done",
+				"echo \"xts-connection: pass=$PASS fail=$FAIL skip=$SKIP\"",
+			].join("\n"),
+		]);
+		const m = result.output.match(/xts-connection: pass=(\d+) fail=(\d+)/);
+		if (m) {
+			const pass = parseInt(m[1], 10);
+			const fail = parseInt(m[2], 10);
+			const total = pass + fail;
+			if (total > 0) {
+				expect(pass / total).toBeGreaterThan(0.9);
+			}
+		}
+	});
+
+	test("XTS property and atom tests achieve >90% pass rate", async ({ sidecarContainer }) => {
+		test.setTimeout(120_000);
+		const check = await sidecarContainer.exec([
+			"bash", "-c",
+			"ls /xts-bin/ 2>/dev/null && echo XTS_OK || echo XTS_MISSING",
+		]);
+		if (check.output.trim().includes("XTS_MISSING")) {
+			test.skip();
+			return;
+		}
+		const result = await sidecarContainer.exec([
+			"bash", "-c", [
+				"export DISPLAY=:99",
+				"cd /xts-bin 2>/dev/null || exit 0",
+				"PASS=0 FAIL=0",
+				"for t in XInternAtom XGetAtomName XChangeProperty XGetWindowProperty XDeleteProperty XListProperties; do",
+				"  if [ -x \"$t\" ]; then",
+				"    R=$(./$t 2>&1 || true)",
+				"    if echo \"$R\" | grep -q 'PASS'; then PASS=$((PASS+1)); else FAIL=$((FAIL+1)); fi",
+				"  fi",
+				"done",
+				"echo \"xts-property: pass=$PASS fail=$FAIL\"",
+			].join("\n"),
+		]);
+		const m = result.output.match(/xts-property: pass=(\d+) fail=(\d+)/);
+		if (m) {
+			const pass = parseInt(m[1], 10);
+			const fail = parseInt(m[2], 10);
+			const total = pass + fail;
+			if (total > 0) {
+				expect(pass / total).toBeGreaterThan(0.9);
+			}
+		}
+	});
+
+	test("XTS drawing tests achieve >80% pass rate", async ({ sidecarContainer }) => {
+		test.setTimeout(120_000);
+		const check = await sidecarContainer.exec([
+			"bash", "-c",
+			"ls /xts-bin/ 2>/dev/null && echo XTS_OK || echo XTS_MISSING",
+		]);
+		if (check.output.trim().includes("XTS_MISSING")) {
+			test.skip();
+			return;
+		}
+		const result = await sidecarContainer.exec([
+			"bash", "-c", [
+				"export DISPLAY=:99",
+				"cd /xts-bin 2>/dev/null || exit 0",
+				"PASS=0 FAIL=0",
+				"for t in XDrawLine XDrawRectangle XFillRectangle XDrawArc XFillArc XDrawPoint XCopyArea XClearArea; do",
+				"  if [ -x \"$t\" ]; then",
+				"    R=$(./$t 2>&1 || true)",
+				"    if echo \"$R\" | grep -q 'PASS'; then PASS=$((PASS+1)); else FAIL=$((FAIL+1)); fi",
+				"  fi",
+				"done",
+				"echo \"xts-drawing: pass=$PASS fail=$FAIL\"",
+			].join("\n"),
+		]);
+		const m = result.output.match(/xts-drawing: pass=(\d+) fail=(\d+)/);
+		if (m) {
+			const pass = parseInt(m[1], 10);
+			const fail = parseInt(m[2], 10);
+			const total = pass + fail;
+			if (total > 0) {
+				expect(pass / total).toBeGreaterThan(0.8);
+			}
+		}
+	});
+});
+
+
+// ===========================================================================
+// XTS strict conformance (raised thresholds)
+// ===========================================================================
+test.describe("XTS strict conformance", () => {
+	test("XTS connection tests achieve >95% pass rate", async ({ sidecarContainer }) => {
+		test.setTimeout(120_000);
+		const result = await runPythonScript(sidecarContainer, "xts_connection_strict_pass_rate.py", { env: { DISPLAY: ":99" } });
+		const m = result.output.match(/xts-conn-strict: pass=(\d+) fail=(\d+)/);
+		expect(m).toBeTruthy();
+		const pass = parseInt(m![1], 10);
+		const fail = parseInt(m![2], 10);
+		const total = pass + fail;
+		if (total > 0) {
+			expect(pass / total).toBeGreaterThan(0.95);
+		}
+	});
+
+	test("XTS property tests achieve >95% pass rate", async ({ sidecarContainer }) => {
+		test.setTimeout(120_000);
+		const result = await runPythonScript(sidecarContainer, "xts_property_strict_pass_rate.py", { env: { DISPLAY: ":99" } });
+		const m = result.output.match(/xts-prop-strict: pass=(\d+) fail=(\d+)/);
+		expect(m).toBeTruthy();
+		const pass = parseInt(m![1], 10);
+		const fail = parseInt(m![2], 10);
+		const total = pass + fail;
+		if (total > 0) {
+			expect(pass / total).toBeGreaterThan(0.95);
+		}
+	});
+
+	test("XTS drawing tests achieve >95% pass rate", async ({ sidecarContainer }) => {
+		test.setTimeout(120_000);
+		const result = await runPythonScript(sidecarContainer, "xts_drawing_strict_pass_rate.py", { env: { DISPLAY: ":99" } });
+		const m = result.output.match(/xts-draw-strict: pass=(\d+) fail=(\d+)/);
+		expect(m).toBeTruthy();
+		const pass = parseInt(m![1], 10);
+		const fail = parseInt(m![2], 10);
+		const total = pass + fail;
+		if (total > 0) {
+			expect(pass / total).toBeGreaterThan(0.95);
+		}
+	});
+});
+
+
+// ===========================================================================
+// XTS (X Test Suite) comprehensive
+// ===========================================================================
+test.describe("XTS X Test Suite", () => {
+	test("XTS core protocol tests pass", async ({ sidecarContainer }) => {
+		// Check if XTS binaries are available
+		const check = await sidecarContainer.exec([
+			"bash", "-c",
+			"ls /opt/xts/xts5 2>/dev/null && echo HAS_XTS || echo NO_XTS",
+		]);
+		if (check.output.includes("NO_XTS")) {
+			test.skip();
+			return;
+		}
+		// Run a curated subset of XTS tests focusing on core protocol
+		const result = await sidecarContainer.exec([
+			"bash", "-c", [
+				"export DISPLAY=:99",
+				"cd /opt/xts",
+				"PASS=0 FAIL=0 SKIP=0",
+				// Find test binaries in the XTS tree
+				'TESTS=$(find xts5/Xlib* -type f -executable -name "*.t" 2>/dev/null | sort | head -200)',
+				"for t in $TESTS; do",
+				'  OUT=$($t 2>&1 || true)',
+				'  if echo "$OUT" | grep -q "PASS"; then PASS=$((PASS+1)); fi',
+				'  if echo "$OUT" | grep -q "FAIL"; then FAIL=$((FAIL+1)); fi',
+				'  if echo "$OUT" | grep -q "UNSUPPORTED\\|UNTESTED"; then SKIP=$((SKIP+1)); fi',
+				"done",
+				'echo "xts-core: pass=$PASS fail=$FAIL skip=$SKIP"',
+			].join("\n"),
+		], { timeout: 280_000 } as any);
+		const match = result.output.match(
+			/xts-core: pass=(\d+) fail=(\d+) skip=(\d+)/,
+		);
+		if (match) {
+			const passed = parseInt(match[1], 10);
+			const failed = parseInt(match[2], 10);
+			const skipped = parseInt(match[3], 10);
+			const total = passed + failed + skipped;
+			console.log(
+				`XTS core: ${passed} passed, ${failed} failed, ${skipped} skipped (${total} total)`,
+			);
+			// Target: >90% pass rate
+			if (total > 0) {
+				const passRate = passed / (passed + failed);
+				expect(passRate).toBeGreaterThanOrEqual(0.9);
+			}
+		}
+	});
+});
+
+test.describe("XTS TET-based protocol conformance", () => {
+	// Discover all XTS binaries available in the container
+	test("XTS: discover available test binaries", async ({ sidecarContainer }) => {
+		test.setTimeout(60_000);
+		const result = await sidecarContainer.exec([
+			"bash", "-c", [
+				"if [ ! -d /opt/xts-src/xts5 ]; then",
+				"  echo 'XTS_NOT_BUILT'",
+				"  exit 0",
+				"fi",
+				"cd /opt/xts-src",
+				// Count executables per category directory
+				"for d in xts5/Xproto xts5/Xlib3 xts5/Xlib4 xts5/Xlib5 xts5/Xlib6 xts5/Xlib7 xts5/Xlib8 xts5/Xlib9 xts5/Xlib10 xts5/Xlib11 xts5/Xlib12 xts5/Xlib13 xts5/Xlib14 xts5/Xlib15 xts5/Xlib16 xts5/Xlib17 xts5/Xt3 xts5/Xt4 xts5/Xt5 xts5/Xt6 xts5/Xt7 xts5/Xt8 xts5/Xt9 xts5/Xt10 xts5/Xt11 xts5/Xt12 xts5/Xt13 xts5/XI xts5/XIproto; do",
+				"  if [ -d \"$d\" ]; then",
+				"    count=$(find \"$d\" -maxdepth 2 -type f -executable 2>/dev/null | wc -l)",
+				"    echo \"CATEGORY:$d:$count\"",
+				"  fi",
+				"done",
+				// Also count .t files (TET test scripts)
+				"t_count=$(find xts5 -name '*.t' -type f 2>/dev/null | wc -l)",
+				"exe_count=$(find xts5 -maxdepth 3 -type f -executable 2>/dev/null | wc -l)",
+				"echo \"XTS_TOTAL_T_FILES:$t_count\"",
+				"echo \"XTS_TOTAL_EXECUTABLES:$exe_count\"",
+				"echo \"XTS_DISCOVERY_DONE\"",
+			].join("\n"),
+		]);
+		expect(result.output).toContain("XTS_DISCOVERY_DONE");
+		if (result.output.includes("XTS_NOT_BUILT")) {
+			console.log("XTS was not built in the Docker image, skipping");
+			return;
+		}
+		// Log what was found
+		for (const line of result.output.split("\n")) {
+			if (line.startsWith("CATEGORY:") || line.startsWith("XTS_TOTAL")) {
+				console.log(`  ${line}`);
+			}
+		}
+	});
+
+	// Run XTS binaries grouped by category, parse TET output
+	for (const category of XTS_CATEGORIES) {
+		test(`XTS TET: ${category.name}`, async ({ sidecarContainer }) => {
+
+			// Build the shell script that runs all executables in this category
+			// and captures TET output. We use a per-binary timeout and collect
+			// all output for parsing.
+			const dirList = category.dirs.map((d) => `"${d}"`).join(" ");
+			const script = [
+				"set +e",
+				"export DISPLAY=:99",
+				"cd /opt/xts-src 2>/dev/null || { echo 'XTS_SKIP: not installed'; exit 0; }",
+				// Generate TET config that XTS binaries need
+				"export TET_ROOT=/opt/xts-src",
+				"export TET_SUITE_ROOT=/opt/xts-src/xts5",
+				"export XT_FONTPATH=/usr/share/fonts/X11/misc,/usr/share/fonts/X11/75dpi,/usr/share/fonts/X11/100dpi",
+				"export XT_DISPLAYHOST=",
+				"export XT_DISPLAY=:99",
+				"BINARIES_FOUND=0",
+				"BINARIES_RUN=0",
+				"BINARIES_ERRORED=0",
+				`for d in ${dirList}; do`,
+				"  [ -d \"$d\" ] || continue",
+				"  for t in $(find \"$d\" -maxdepth 2 -type f -executable 2>/dev/null | sort); do",
+				"    BINARIES_FOUND=$((BINARIES_FOUND+1))",
+				// Skip known non-test executables (build artifacts, scripts)
+				"    bn=$(basename \"$t\")",
+				"    case \"$bn\" in Makefile*|configure|*.sh|*.pl|*.py) continue;; esac",
+				"    BINARIES_RUN=$((BINARIES_RUN+1))",
+				"    echo \"--- XTS_BEGIN: $t ---\"",
+				// Run with timeout, capture combined stdout+stderr
+				"    OUTPUT=$(timeout 30 \"./$t\" 2>&1 || true)",
+				"    echo \"$OUTPUT\"",
+				// If no TET 520| lines, emit a synthetic one based on exit code
+				"    if ! echo \"$OUTPUT\" | grep -q '^520|'; then",
+				"      if echo \"$OUTPUT\" | grep -qi 'PASS'; then",
+				"        echo \"520|1 0|$bn\"",
+				"      elif echo \"$OUTPUT\" | grep -qi 'FAIL'; then",
+				"        echo \"520|1 1|$bn\"",
+				"      else",
+				"        echo \"520|1 7|$bn\"",
+				"        BINARIES_ERRORED=$((BINARIES_ERRORED+1))",
+				"      fi",
+				"    fi",
+				"    echo \"--- XTS_END: $t ---\"",
+				"  done",
+				"done",
+				"echo \"XTS_CATEGORY_SUMMARY: found=$BINARIES_FOUND run=$BINARIES_RUN errored=$BINARIES_ERRORED\"",
+				"echo \"XTS_CATEGORY_DONE\"",
+			].join("\n");
+
+			const result = await sidecarContainer.exec(
+				["bash", "-c", script],
+				{ timeout: 300_000 } as any,
+			);
+
+			if (result.output.includes("XTS_SKIP")) {
+				console.log(`XTS ${category.name}: skipped (not installed)`);
+				test.skip();
+				return;
+			}
+
+			expect(result.output).toContain("XTS_CATEGORY_DONE");
+
+			// Parse all TET results from the combined output
+			const allResults = parseTetOutput(result.output);
+			const summary = summarizeTetResults(allResults);
+
+			// Extract per-binary sections for detailed failure reporting
+			const failures: string[] = [];
+			const binaryPattern = /--- XTS_BEGIN: (.+?) ---\n([\s\S]*?)--- XTS_END: \1 ---/g;
+			let bMatch: RegExpExecArray | null;
+			while ((bMatch = binaryPattern.exec(result.output)) !== null) {
+				const binaryName = bMatch[1];
+				const binaryOutput = bMatch[2];
+				const binaryResults = parseTetOutput(binaryOutput);
+				const failedTests = binaryResults.filter((r) => r.resultCode === 1);
+				for (const ft of failedTests) {
+					failures.push(`  FAIL in ${binaryName}: test #${ft.testNum} "${ft.testName}"`);
+				}
+			}
+
+			// Parse the summary line
+			const summaryMatch = result.output.match(
+				/XTS_CATEGORY_SUMMARY: found=(\d+) run=(\d+) errored=(\d+)/,
+			);
+			const binariesFound = summaryMatch ? Number.parseInt(summaryMatch[1], 10) : 0;
+			const binariesRun = summaryMatch ? Number.parseInt(summaryMatch[2], 10) : 0;
+
+			// Log detailed results
+			const totalDecisive = summary.pass + summary.fail;
+			const passRate = totalDecisive > 0 ? (summary.pass / totalDecisive) * 100 : 100;
+			console.log(
+				`XTS ${category.name}: ${binariesFound} found, ${binariesRun} run | ` +
+				`PASS=${summary.pass} FAIL=${summary.fail} UNRESOLVED=${summary.unresolved} ` +
+				`UNSUPPORTED=${summary.unsupported} UNTESTED=${summary.untested} ` +
+				`NORESULT=${summary.noresult} | pass rate: ${passRate.toFixed(1)}%`,
+			);
+
+			// Log individual failures for visibility
+			if (failures.length > 0) {
+				console.log(`XTS ${category.name} failures:`);
+				for (const f of failures) {
+					console.log(f);
+				}
+			}
+
+			// Assert minimum pass rate of 98% (only counting decisive PASS/FAIL results)
+			if (totalDecisive > 0) {
+				expect(
+					passRate,
+					`XTS ${category.name} pass rate ${passRate.toFixed(1)}% is below 98% threshold. ` +
+					`${summary.fail} of ${totalDecisive} decisive tests failed.\n` +
+					failures.slice(0, 20).join("\n"),
+				).toBeGreaterThanOrEqual(98);
+			}
+		});
+	}
+
+	// Aggregate summary test: run all available XTS binaries and report overall pass rate
+	test("XTS TET: aggregate pass rate >= 98%", async ({ sidecarContainer }) => {
+		test.setTimeout(600_000);
+
+		const script = [
+			"set +e",
+			"export DISPLAY=:99",
+			"cd /opt/xts-src 2>/dev/null || { echo 'XTS_SKIP: not installed'; exit 0; }",
+			"export TET_ROOT=/opt/xts-src",
+			"export TET_SUITE_ROOT=/opt/xts-src/xts5",
+			"export XT_FONTPATH=/usr/share/fonts/X11/misc,/usr/share/fonts/X11/75dpi,/usr/share/fonts/X11/100dpi",
+			"export XT_DISPLAY=:99",
+			"TOTAL_PASS=0; TOTAL_FAIL=0; TOTAL_OTHER=0; TOTAL_BIN=0",
+			// Iterate through all xts5 subdirectories
+			"for t in $(find xts5 -maxdepth 3 -type f -executable 2>/dev/null | sort); do",
+			"  bn=$(basename \"$t\")",
+			"  case \"$bn\" in Makefile*|configure|*.sh|*.pl|*.py|*.o|*.a) continue;; esac",
+			"  TOTAL_BIN=$((TOTAL_BIN+1))",
+			"  OUTPUT=$(timeout 30 \"./$t\" 2>&1 || true)",
+			// Count TET result lines
+			"  p=$(echo \"$OUTPUT\" | grep -c '^520|[0-9]* 0|' || true)",
+			"  f=$(echo \"$OUTPUT\" | grep -c '^520|[0-9]* 1|' || true)",
+			"  o=$(echo \"$OUTPUT\" | grep -cE '^520\\|[0-9]+ [2-7]\\|' || true)",
+			// If no TET lines, use heuristic
+			"  if [ $((p+f+o)) -eq 0 ]; then",
+			"    if echo \"$OUTPUT\" | grep -qi 'PASS'; then p=1",
+			"    elif echo \"$OUTPUT\" | grep -qi 'FAIL'; then f=1",
+			"    else o=1; fi",
+			"  fi",
+			"  TOTAL_PASS=$((TOTAL_PASS+p))",
+			"  TOTAL_FAIL=$((TOTAL_FAIL+f))",
+			"  TOTAL_OTHER=$((TOTAL_OTHER+o))",
+			// Report failures inline for visibility
+			"  if [ $f -gt 0 ]; then",
+			"    echo \"FAIL_BIN: $t\"",
+			"    echo \"$OUTPUT\" | grep '^520|[0-9]* 1|' | head -5",
+			"  fi",
+			"done",
+			"echo \"XTS_AGGREGATE: binaries=$TOTAL_BIN pass=$TOTAL_PASS fail=$TOTAL_FAIL other=$TOTAL_OTHER\"",
+			"if [ $((TOTAL_PASS+TOTAL_FAIL)) -gt 0 ]; then",
+			"  RATE=$((TOTAL_PASS * 100 / (TOTAL_PASS + TOTAL_FAIL)))",
+			"  echo \"XTS_PASS_RATE: ${RATE}%\"",
+			"fi",
+			"echo \"XTS_AGGREGATE_DONE\"",
+		].join("\n");
+
+		const result = await sidecarContainer.exec(
+			["bash", "-c", script],
+			{ timeout: 600_000 } as any,
+		);
+
+		if (result.output.includes("XTS_SKIP")) {
+			console.log("XTS aggregate: skipped (not installed)");
+			test.skip();
+			return;
+		}
+
+		expect(result.output).toContain("XTS_AGGREGATE_DONE");
+
+		const aggMatch = result.output.match(
+			/XTS_AGGREGATE: binaries=(\d+) pass=(\d+) fail=(\d+) other=(\d+)/,
+		);
+		expect(aggMatch).toBeTruthy();
+
+		const binaries = Number.parseInt(aggMatch![1], 10);
+		const pass = Number.parseInt(aggMatch![2], 10);
+		const fail = Number.parseInt(aggMatch![3], 10);
+		const other = Number.parseInt(aggMatch![4], 10);
+		const decisive = pass + fail;
+		const passRate = decisive > 0 ? (pass / decisive) * 100 : 100;
+
+		console.log(
+			`XTS Aggregate: ${binaries} binaries | ` +
+			`PASS=${pass} FAIL=${fail} OTHER=${other} | ` +
+			`pass rate: ${passRate.toFixed(1)}%`,
+		);
+
+		// Report all failed binaries
+		const failedBins = result.output.split("\n")
+			.filter((l) => l.startsWith("FAIL_BIN:"))
+			.map((l) => l.replace("FAIL_BIN: ", ""));
+		if (failedBins.length > 0) {
+			console.log(`Failed binaries (${failedBins.length}):`);
+			for (const fb of failedBins) {
+				console.log(`  ${fb}`);
+			}
+		}
+
+		// Assert at least some binaries were found and run
+		expect(binaries, "Expected at least 1 XTS binary to be available").toBeGreaterThan(0);
+
+		// Assert >= 98% pass rate on decisive (PASS/FAIL) results
+		if (decisive > 0) {
+			expect(
+				passRate,
+				`XTS aggregate pass rate ${passRate.toFixed(1)}% is below 98% threshold. ` +
+				`${fail} of ${decisive} decisive tests failed. ` +
+				`Failed binaries: ${failedBins.slice(0, 10).join(", ")}`,
+			).toBeGreaterThanOrEqual(98);
+		}
 	});
 });

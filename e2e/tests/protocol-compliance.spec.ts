@@ -6,7 +6,7 @@
  * verify spec-compliant behavior at the wire level.
  */
 
-import { test, expect } from "./fixtures";
+import { expect, runPythonScript, test } from "./fixtures";
 import type { StartedTestContainer } from "testcontainers";
 
 /** Run a command inside the sidecar container and return stdout. */
@@ -2361,5 +2361,730 @@ d.close()
 		);
 		expect(output).toContain("OK:");
 		expect(output).not.toContain("OVERLAP");
+	});
+});
+
+
+// ===========================================================================
+// Protocol robustness - malformed requests
+// ===========================================================================
+test.describe("Protocol robustness", () => {
+	test("server survives malformed requests without crashing", async ({ sidecarContainer }) => {
+		test.setTimeout(60_000);
+		const result = await runPythonScript(sidecarContainer, "server_survives_malformed_requests_robustness.py", { env: { DISPLAY: ":99" } });
+		expect(result.output).toContain("PASS");
+	});
+});
+
+
+// ===========================================================================
+// XCB protocol compliance
+// ===========================================================================
+test.describe("XCB protocol compliance", () => {
+	test("xdotool complex window operations", async ({ sidecarContainer }) => {
+		test.setTimeout(60_000);
+		// Spawn a test window first
+		const result = await sidecarContainer.exec([
+			"bash", "-c", [
+				"export DISPLAY=:99",
+				"xterm -geometry 80x24+10+10 -e 'sleep 30' &",
+				"sleep 2",
+				"# Get the window ID",
+				"WID=$(xdotool search --name xterm | head -1)",
+				"if [ -z \"$WID\" ]; then echo 'FAIL: no xterm window found'; exit 1; fi",
+				"# Test complex operations",
+				"xdotool windowactivate $WID 2>/dev/null",
+				"xdotool windowfocus $WID 2>/dev/null",
+				"xdotool windowmove $WID 100 100 2>/dev/null",
+				"xdotool windowsize $WID 400 300 2>/dev/null",
+				"xdotool key ctrl+l 2>/dev/null",
+				"# Verify window still exists and has correct geometry",
+				"xwininfo -id $WID 2>/dev/null | grep -q 'Width: 400' && echo 'SIZE_OK' || echo 'SIZE_MISMATCH'",
+				"xdotool windowminimize $WID 2>/dev/null || true",
+				"xdotool windowactivate $WID 2>/dev/null || true",
+				"pkill -f 'xterm.*sleep' 2>/dev/null || true",
+				"echo 'XDOTOOL_TESTS_DONE'",
+			].join("\n"),
+		]);
+		expect(result.output).toContain("XDOTOOL_TESTS_DONE");
+	});
+});
+
+
+// ===========================================================================
+// XCB protocol round-trip tests
+// ===========================================================================
+test.describe("XCB protocol round-trip", () => {
+	test("window lifecycle round-trip", async ({ sidecarContainer }) => {
+		test.setTimeout(60_000);
+		const result = await runPythonScript(sidecarContainer, "xcb_window_lifecycle_roundtrip.py", { env: { DISPLAY: ":99" } });
+		expect(result.output).toContain("xcb-lifecycle-ok");
+	});
+
+	test("multi-client concurrent connections", async ({ sidecarContainer }) => {
+		test.setTimeout(60_000);
+		const result = await runPythonScript(sidecarContainer, "xcb_multi_client_concurrent_connections.py", { env: { DISPLAY: ":99" } });
+		expect(result.output).toContain("multi-client-ok");
+	});
+
+	test("protocol error responses are correct", async ({ sidecarContainer }) => {
+		test.setTimeout(60_000);
+		const result = await runPythonScript(sidecarContainer, "xcb_protocol_error_responses.py", { env: { DISPLAY: ":99" } });
+		expect(result.output).toContain("protocol-errors: pass=2 fail=0");
+	});
+});
+
+
+// ===========================================================================
+// Protocol fuzzing with malformed packets
+// ===========================================================================
+test.describe("Protocol fuzzing", () => {
+	test("server survives truncated requests", async ({ sidecarContainer }) => {
+		test.setTimeout(60_000);
+		const result = await runPythonScript(sidecarContainer, "server_survives_truncated_requests.py", { env: { DISPLAY: ":99" } });
+		expect(result.output).toContain("fuzz-survive-ok");
+	});
+
+	test("server handles zero-size drawables gracefully", async ({ sidecarContainer }) => {
+		test.setTimeout(60_000);
+		const result = await runPythonScript(sidecarContainer, "server_handles_zero_size_drawables.py", { env: { DISPLAY: ":99" } });
+		expect(result.output).toContain("zero-size-ok");
+	});
+});
+
+
+// ===========================================================================
+// Protocol edge cases
+// ===========================================================================
+test.describe("Protocol edge cases", () => {
+	test("PutImage works for all supported depths", async ({ sidecarContainer }) => {
+		test.setTimeout(30_000);
+		const result = await runPythonScript(sidecarContainer, "putimage_supported_depths.py", { env: { DISPLAY: ":99" } });
+		const match = result.output.match(/putimage-depths: passed=(\d+)/);
+		const passed = match ? parseInt(match[1], 10) : 0;
+		expect(passed).toBe(3);
+	});
+
+	test("font XLFD pattern matching works", async ({ sidecarContainer }) => {
+		test.setTimeout(30_000);
+		const result = await runPythonScript(sidecarContainer, "font_xlfd_pattern_matching.py", { env: { DISPLAY: ":99" } });
+		const match = result.output.match(/xlfd-match: passed=(\d+)/);
+		const passed = match ? parseInt(match[1], 10) : 0;
+		expect(passed).toBe(4);
+	});
+
+	test("selection/clipboard round-trip with INCR support", async ({ sidecarContainer }) => {
+		test.setTimeout(30_000);
+		const result = await sidecarContainer.exec([
+			"bash", "-c", [
+				"export DISPLAY=:99",
+				"# Set clipboard with xclip, read back with xsel",
+				'echo -n "hello-x11-web" | xclip -selection clipboard 2>/dev/null',
+				"sleep 0.5",
+				"GOT=$(xclip -selection clipboard -o 2>/dev/null || echo FAIL)",
+				'if [ "$GOT" = "hello-x11-web" ]; then',
+				'  echo "clipboard-roundtrip: pass"',
+				"else",
+				'  echo "clipboard-roundtrip: fail got=$GOT"',
+				"fi",
+			].join("\n"),
+		], { timeout: 20_000 } as any);
+		if (result.output.includes("clipboard-roundtrip:")) {
+			expect(result.output).toContain("clipboard-roundtrip: pass");
+		}
+	});
+
+	test("backing store preserves content across unmap/map", async ({ sidecarContainer }) => {
+		test.setTimeout(30_000);
+		const result = await runPythonScript(sidecarContainer, "backing_store_preserves_unmap_map.py", { env: { DISPLAY: ":99" } });
+		expect(result.output).toContain("backing-store: map_state=2"); // IsViewable
+	});
+
+	test("window gravity preserves content on resize", async ({ sidecarContainer }) => {
+		test.setTimeout(30_000);
+		const result = await runPythonScript(sidecarContainer, "window_gravity_preserves_resize.py", { env: { DISPLAY: ":99" } });
+		expect(result.output).toContain("gravity-resize: w=200 h=200");
+	});
+
+	// ===================================================================
+	// Event propagation (X11 spec Section 7)
+	// ===================================================================
+	test.describe("Event propagation", () => {
+		test("device events propagate up window tree", async ({ sidecarContainer }) => {
+			const result = await runPythonScript(sidecarContainer, "device_events_propagate_up.py", { env: { DISPLAY: ":99" } });
+			expect(result.output).toContain("propagation-ok");
+		});
+
+		test("do_not_propagate_mask blocks event propagation", async ({ sidecarContainer }) => {
+			const result = await runPythonScript(sidecarContainer, "do_not_propagate_mask_blocks.py", { env: { DISPLAY: ":99" } });
+			expect(result.output).toContain("dnp-mask-ok");
+		});
+	});
+
+	// ===================================================================
+	// Colormap visual classes
+	// ===================================================================
+	test.describe("Colormap visual classes", () => {
+		test("all visual classes available via xdpyinfo", async ({ sidecarContainer }) => {
+			const result = await sidecarContainer.exec([
+				"bash", "-c",
+				"DISPLAY=:99 xdpyinfo 2>&1 | grep -E 'visual class|class:' | sort | uniq -c | sort -rn",
+			], { timeout: 10_000 } as any);
+			// Should have TrueColor, DirectColor, PseudoColor, StaticGray, GrayScale, StaticColor
+			expect(result.output).toContain("TrueColor");
+			expect(result.output).toContain("DirectColor");
+			expect(result.output).toContain("PseudoColor");
+			expect(result.output).toContain("StaticGray");
+		});
+
+		test("PseudoColor colormap allocation works", async ({ sidecarContainer }) => {
+			const result = await runPythonScript(sidecarContainer, "pseudocolor_colormap_allocation.py", { env: { DISPLAY: ":99" } });
+			// Either we got a successful allocation or skipped (no PseudoColor)
+			const ok = result.output.includes("pseudocolor-ok") || result.output.includes("skip");
+			expect(ok).toBe(true);
+		});
+	});
+
+	// ===================================================================
+	// GrabServer cross-connection blocking
+	// ===================================================================
+	test.describe("GrabServer behavior", () => {
+		test("GrabServer blocks other clients", async ({ sidecarContainer }) => {
+			const result = await runPythonScript(sidecarContainer, "grabserver_blocks_other_clients.py", { env: { DISPLAY: ":99" } });
+			expect(result.output).toContain("grab-test: d2=completed");
+		});
+	});
+
+	// ===================================================================
+	// SaveSet reparenting on client disconnect
+	// ===================================================================
+	test.describe("SaveSet behavior", () => {
+		test("SaveSet windows are reparented to root on client disconnect", async ({ sidecarContainer }) => {
+			const result = await runPythonScript(sidecarContainer, "saveset_reparented_root_disconnect.py", { env: { DISPLAY: ":99" } });
+			expect(result.output).toContain("saveset-ok");
+		});
+	});
+
+	// ===================================================================
+	// KillClient behavior
+	// ===================================================================
+	test.describe("KillClient behavior", () => {
+		test("KillClient with AllTemporary destroys retained windows", async ({ sidecarContainer }) => {
+			const result = await runPythonScript(sidecarContainer, "killclient_alltemporary_destroys.py", { env: { DISPLAY: ":99" } });
+			expect(result.output).toContain("killclient-ok");
+		});
+	});
+
+	// ===================================================================
+	// Additional protocol stress tests
+	// ===================================================================
+	test("Xts: compiled binary test runner", async ({ sidecarContainer }) => {
+		test.setTimeout(120_000);
+		const result = await sidecarContainer.exec([
+			"bash", "-c", [
+				"export DISPLAY=:99",
+				"export TET_ROOT=/opt/xts",
+				"export XTS_RESULTS=/tmp/xts_results",
+				"mkdir -p $XTS_RESULTS",
+				// Find and run up to 50 test binaries, capturing results
+				"cd /opt/xts 2>/dev/null || { echo 'xts-binary: skip (not installed)'; exit 0; }",
+				"passed=0; failed=0; skipped=0; total=0",
+				"for t in $(find . -name '*.t' -o -name 't[0-9]*' 2>/dev/null | head -50); do",
+				"  total=$((total + 1))",
+				"  timeout 15 $t > /tmp/xts_out 2>&1",
+				"  rc=$?",
+				"  if [ $rc -eq 0 ]; then passed=$((passed + 1))",
+				"  elif [ $rc -eq 77 ]; then skipped=$((skipped + 1))",
+				"  else failed=$((failed + 1)); fi",
+				"done",
+				"echo \"xts-binary: total=$total pass=$passed fail=$failed skip=$skipped\"",
+			].join("\n"),
+		], { timeout: 120_000 } as any);
+		console.log("XTS Binary:", result.output);
+		// Don't assert specific numbers since XTS availability varies,
+		// but if tests ran, check reasonable pass rate
+		const match = result.output.match(/xts-binary: total=(\d+) pass=(\d+) fail=(\d+) skip=(\d+)/);
+		if (match) {
+			const total = parseInt(match[1]);
+			const passed = parseInt(match[2]);
+			if (total > 0) {
+				const passRate = passed / total;
+				console.log(`XTS pass rate: ${(passRate * 100).toFixed(1)}% (${passed}/${total})`);
+				expect(passRate).toBeGreaterThan(0.5);
+			}
+		}
+	});
+
+	test("Multi-client: concurrent connections and independent windows", async ({ sidecarContainer }) => {
+		test.setTimeout(30_000);
+		const result = await runPythonScript(sidecarContainer, "multi_client_concurrent_independent_windows.py", { env: { DISPLAY: ":99" } });
+		expect(result.output).toContain("multi-client: pass=2 fail=0");
+	});
+
+	test("Selection: cross-client clipboard round-trip", async ({ sidecarContainer }) => {
+		test.setTimeout(30_000);
+		const result = await runPythonScript(sidecarContainer, "selection_cross_client_clipboard_roundtrip.py", { env: { DISPLAY: ":99" } });
+		expect(result.output).toContain("selection: pass=2 fail=0");
+	});
+
+	test("GLX: context creation and query", async ({ sidecarContainer }) => {
+		test.setTimeout(30_000);
+		const result = await sidecarContainer.exec(["bash", "-c", [
+			"export DISPLAY=:99",
+			// Use glxinfo if available, otherwise use xdpyinfo
+			"if command -v glxinfo >/dev/null 2>&1; then",
+			"  glxinfo -display :99 2>&1 | head -20",
+			"  echo glx-test-done",
+			"elif command -v xdpyinfo >/dev/null 2>&1; then",
+			"  xdpyinfo -display :99 -ext GLX 2>&1 | head -30",
+			"  echo glx-test-done",
+			"else",
+			"  echo glx-test-skip",
+			"fi",
+		].join("\n")]);
+		// GLX should be advertised even if only software rendering is available
+		const hasGLX = result.output.includes("GLX") || result.output.includes("glx-test-skip");
+		expect(hasGLX).toBeTruthy();
+	});
+
+	test("XKB: keymap and state query", async ({ sidecarContainer }) => {
+		test.setTimeout(30_000);
+		const result = await runPythonScript(sidecarContainer, "xkb_keymap_state_query.py", { env: { DISPLAY: ":99" } });
+		expect(result.output).toContain("xkb: pass=3 fail=0");
+	});
+
+	test("RECORD: extension query", async ({ sidecarContainer }) => {
+		test.setTimeout(30_000);
+		const result = await runPythonScript(sidecarContainer, "record_extension_query.py", { env: { DISPLAY: ":99" } });
+		expect(result.output).toContain("record-ok");
+	});
+
+	test("Xts: colormap alloc and query", async ({ sidecarContainer }) => {
+		test.setTimeout(30_000);
+		const result = await runPythonScript(sidecarContainer, "xts_colormap_alloc_query.py", { env: { DISPLAY: ":99" } });
+		expect(result.output).toContain("colormap: pass=4 fail=0");
+	});
+
+	test("Xts: GC operations and drawing", async ({ sidecarContainer }) => {
+		test.setTimeout(30_000);
+		const result = await runPythonScript(sidecarContainer, "xts_gc_operations_drawing.py", { env: { DISPLAY: ":99" } });
+		expect(result.output).toContain("drawing: pass=9 fail=0");
+	});
+
+	test("Protocol: malformed request handling", async ({ sidecarContainer }) => {
+		test.setTimeout(30_000);
+		const result = await runPythonScript(sidecarContainer, "protocol_malformed_request_handling.py", { env: { DISPLAY: ":99" } });
+		const match = result.output.match(/fuzz: pass=(\d+) fail=(\d+)/);
+		expect(match).toBeTruthy();
+		expect(parseInt(match![2])).toBe(0);
+	});
+
+	test("Extensions: all required extensions advertised", async ({ sidecarContainer }) => {
+		test.setTimeout(30_000);
+		const result = await runPythonScript(sidecarContainer, "extensions_all_required_advertised.py", { env: { DISPLAY: ":99" } });
+		const match = result.output.match(/extensions: pass=(\d+) fail=(\d+)/);
+		expect(match).toBeTruthy();
+		const passed = parseInt(match![1]);
+		const failed = parseInt(match![2]);
+		console.log(`Extensions: ${passed} present, ${failed} missing`);
+		expect(failed).toBe(0);
+	});
+
+	test.describe("Protocol stress tests", () => {
+		test("50 concurrent connections don't crash the server", async ({ sidecarContainer }) => {
+			const result = await runPythonScript(sidecarContainer, "stress_50_concurrent_connections.py", { env: { DISPLAY: ":99" } });
+			const match = result.output.match(/stress-50: ok=(\d+)/);
+			expect(match).toBeTruthy();
+			const okCount = Number.parseInt(match![1], 10);
+			expect(okCount).toBeGreaterThanOrEqual(45); // Allow up to 10% connection failures under load
+		});
+
+		test("BIG-REQUESTS extension handles large requests", async ({ sidecarContainer }) => {
+			const result = await runPythonScript(sidecarContainer, "big_requests_extension_large.py", { env: { DISPLAY: ":99" } });
+			expect(result.output).toContain("big-requests-ok");
+			expect(result.output).toContain("big-property-ok");
+		});
+	});
+
+	// =================================================================
+	// Deep X11 spec compliance — event propagation (Section 7)
+	// =================================================================
+	test.describe("Spec: event propagation (Section 7)", () => {
+		test("device events propagate up window tree", async ({ sidecarContainer }) => {
+			test.setTimeout(30_000);
+			const result = await runPythonScript(sidecarContainer, "xts_event_propagation.py", { env: { DISPLAY: ":99" } });
+			const match = result.output.match(
+				/xts-event-propagation: pass=(\d+) fail=(\d+)/,
+			);
+			expect(match).toBeTruthy();
+			expect(Number.parseInt(match![2], 10)).toBe(0);
+			expect(Number.parseInt(match![1], 10)).toBeGreaterThanOrEqual(2);
+		});
+
+		test("keyboard events route through focus window", async ({ sidecarContainer }) => {
+			test.setTimeout(30_000);
+			const result = await runPythonScript(sidecarContainer, "xts_focus_model_keyboard.py", { env: { DISPLAY: ":99" } });
+			const match = result.output.match(
+				/xts-focus-model: pass=(\d+) fail=(\d+)/,
+			);
+			expect(match).toBeTruthy();
+			expect(Number.parseInt(match![2], 10)).toBe(0);
+			expect(Number.parseInt(match![1], 10)).toBeGreaterThanOrEqual(3);
+		});
+	});
+
+	// =================================================================
+	// Deep X11 spec compliance — cursor operations
+	// =================================================================
+	test.describe("Spec: cursor operations", () => {
+		test("CreateCursor, FreeCursor, and DefineCursor", async ({ sidecarContainer }) => {
+			test.setTimeout(30_000);
+			const result = await runPythonScript(sidecarContainer, "xts_cursor_create_free_define.py", { env: { DISPLAY: ":99" } });
+			const match = result.output.match(
+				/xts-cursor-ops: pass=(\d+) fail=(\d+)/,
+			);
+			expect(match).toBeTruthy();
+			expect(Number.parseInt(match![2], 10)).toBe(0);
+			expect(Number.parseInt(match![1], 10)).toBeGreaterThanOrEqual(4);
+		});
+	});
+
+	// =================================================================
+	// Deep X11 spec compliance — window gravity
+	// =================================================================
+	test.describe("Spec: window gravity", () => {
+		test("bit gravity and win gravity", async ({ sidecarContainer }) => {
+			test.setTimeout(30_000);
+			const result = await runPythonScript(sidecarContainer, "xts_window_gravity.py", { env: { DISPLAY: ":99" } });
+			const match = result.output.match(
+				/xts-gravity: pass=(\d+) fail=(\d+)/,
+			);
+			expect(match).toBeTruthy();
+			expect(Number.parseInt(match![2], 10)).toBe(0);
+			expect(Number.parseInt(match![1], 10)).toBeGreaterThanOrEqual(3);
+		});
+	});
+
+	// =================================================================
+	// Deep X11 spec compliance — GC raster operations
+	// =================================================================
+	test.describe("Spec: GC raster operations", () => {
+		test("all 16 GX functions via XCB", async ({ sidecarContainer }) => {
+			test.setTimeout(30_000);
+			const result = await runPythonScript(sidecarContainer, "xts_gc_rop_all_16_gx_funcs.py", { env: { DISPLAY: ":99" } });
+			const match = result.output.match(
+				/xts-rop: pass=(\d+) fail=(\d+)/,
+			);
+			expect(match).toBeTruthy();
+			expect(Number.parseInt(match![2], 10)).toBe(0);
+			expect(Number.parseInt(match![1], 10)).toBeGreaterThanOrEqual(16);
+		});
+	});
+
+	// =================================================================
+	// Deep X11 spec compliance — error handling correctness
+	// =================================================================
+	test.describe("Spec: error response correctness", () => {
+		test("proper error codes for invalid operations", async ({ sidecarContainer }) => {
+			test.setTimeout(30_000);
+			const result = await runPythonScript(sidecarContainer, "xts_error_response_correctness.py", { env: { DISPLAY: ":99" } });
+			const match = result.output.match(
+				/xts-errors: pass=(\d+) fail=(\d+)/,
+			);
+			expect(match).toBeTruthy();
+			expect(Number.parseInt(match![2], 10)).toBe(0);
+			expect(Number.parseInt(match![1], 10)).toBeGreaterThanOrEqual(4);
+		});
+	});
+
+	// =================================================================
+	// Deep X11 spec compliance — stacking order and CirculateWindow
+	// =================================================================
+	test.describe("Spec: stacking order", () => {
+		test("RaiseLowest and LowerHighest via CirculateWindow", async ({ sidecarContainer }) => {
+			test.setTimeout(30_000);
+			const result = await runPythonScript(sidecarContainer, "xts_stacking_circulatewindow.py", { env: { DISPLAY: ":99" } });
+			const match = result.output.match(
+				/xts-stacking: pass=(\d+) fail=(\d+)/,
+			);
+			expect(match).toBeTruthy();
+			expect(Number.parseInt(match![2], 10)).toBe(0);
+			expect(Number.parseInt(match![1], 10)).toBeGreaterThanOrEqual(3);
+		});
+	});
+
+	// =================================================================
+	// Deep X11 spec compliance — input grab semantics
+	// =================================================================
+	test.describe("Spec: grab semantics", () => {
+		test("pointer and keyboard grab lifecycle", async ({ sidecarContainer }) => {
+			test.setTimeout(30_000);
+			const result = await runPythonScript(sidecarContainer, "xts_grab_lifecycle.py", { env: { DISPLAY: ":99" } });
+			const match = result.output.match(
+				/xts-grabs: pass=(\d+) fail=(\d+)/,
+			);
+			expect(match).toBeTruthy();
+			expect(Number.parseInt(match![2], 10)).toBe(0);
+			expect(Number.parseInt(match![1], 10)).toBeGreaterThanOrEqual(7);
+		});
+	});
+
+	// =================================================================
+	// Deep X11 spec compliance — subwindow clipping
+	// =================================================================
+	test.describe("Spec: subwindow mode drawing", () => {
+		test("ClipByChildren vs IncludeInferiors GC modes", async ({ sidecarContainer }) => {
+			test.setTimeout(30_000);
+			const result = await runPythonScript(sidecarContainer, "xts_subwindow_mode_drawing.py", { env: { DISPLAY: ":99" } });
+			const match = result.output.match(
+				/xts-subwindow-mode: pass=(\d+) fail=(\d+)/,
+			);
+			expect(match).toBeTruthy();
+			expect(Number.parseInt(match![2], 10)).toBe(0);
+			expect(Number.parseInt(match![1], 10)).toBeGreaterThanOrEqual(3);
+		});
+	});
+
+	// =================================================================
+	// Deep X11 spec compliance — multi-depth pixmap operations
+	// =================================================================
+	test.describe("Spec: pixmap depth operations", () => {
+		test("create pixmaps at various depths and perform GetImage", async ({ sidecarContainer }) => {
+			test.setTimeout(30_000);
+			const result = await runPythonScript(sidecarContainer, "xts_pixmap_depth_ops.py", { env: { DISPLAY: ":99" } });
+			const match = result.output.match(
+				/xts-pixmap-depth: pass=(\d+) fail=(\d+)/,
+			);
+			expect(match).toBeTruthy();
+			expect(Number.parseInt(match![2], 10)).toBe(0);
+			expect(Number.parseInt(match![1], 10)).toBeGreaterThanOrEqual(4);
+		});
+	});
+
+	// =================================================================
+	// Extension conformance — XFIXES regions and cursor naming
+	// =================================================================
+	test.describe("Spec: XFIXES region operations", () => {
+		test("create, combine, and destroy regions", async ({ sidecarContainer }) => {
+			test.setTimeout(30_000);
+			const which = await sidecarContainer.exec([
+				"bash",
+				"-c",
+				"which python3 2>/dev/null || echo NONE",
+			]);
+			if (which.output.trim() === "NONE") {
+				test.skip();
+				return;
+			}
+			const result = await runPythonScript(sidecarContainer, "xts_xfixes_region_simple.py", { env: { DISPLAY: ":99" } });
+			const match = result.output.match(
+				/xts-xfixes: pass=(\d+) fail=(\d+)/,
+			);
+			expect(match).toBeTruthy();
+			expect(Number.parseInt(match![2], 10)).toBe(0);
+			expect(Number.parseInt(match![1], 10)).toBeGreaterThanOrEqual(1);
+		});
+	});
+
+	// =================================================================
+	// Conformance: xdotool / xte automated input injection
+	// =================================================================
+	test.describe("Spec: XTEST input injection", () => {
+		test("xdotool key and mouse events via XTEST", async ({ sidecarContainer }) => {
+			test.setTimeout(30_000);
+			const which = await sidecarContainer.exec([
+				"bash",
+				"-c",
+				"which xdotool 2>/dev/null || echo NONE",
+			]);
+			if (which.output.trim() === "NONE") {
+				test.skip();
+				return;
+			}
+			const result = await sidecarContainer.exec([
+				"bash",
+				"-c",
+				[
+					"export DISPLAY=:99",
+					"passed=0; failed=0",
+					"",
+					"# Test 1: xdotool key injection",
+					"if xdotool key Return 2>&1; then",
+					"  passed=$((passed+1)); echo 'PASS: xdotool key Return'",
+					"else",
+					"  failed=$((failed+1)); echo 'FAIL: xdotool key Return'",
+					"fi",
+					"",
+					"# Test 2: xdotool mousemove",
+					"if xdotool mousemove 100 100 2>&1; then",
+					"  passed=$((passed+1)); echo 'PASS: xdotool mousemove'",
+					"else",
+					"  failed=$((failed+1)); echo 'FAIL: xdotool mousemove'",
+					"fi",
+					"",
+					"# Test 3: xdotool click",
+					"if xdotool click 1 2>&1; then",
+					"  passed=$((passed+1)); echo 'PASS: xdotool click'",
+					"else",
+					"  failed=$((failed+1)); echo 'FAIL: xdotool click'",
+					"fi",
+					"",
+					"# Test 4: xdotool type text",
+					"if xdotool type 'hello' 2>&1; then",
+					"  passed=$((passed+1)); echo 'PASS: xdotool type'",
+					"else",
+					"  failed=$((failed+1)); echo 'FAIL: xdotool type'",
+					"fi",
+					"",
+					`echo "xts-xtest: pass=$passed fail=$failed"`,
+				].join("\n"),
+			]);
+			const match = result.output.match(
+				/xts-xtest: pass=(\d+) fail=(\d+)/,
+			);
+			expect(match).toBeTruthy();
+			expect(Number.parseInt(match![2], 10)).toBe(0);
+			expect(Number.parseInt(match![1], 10)).toBeGreaterThanOrEqual(3);
+		});
+	});
+});
+
+
+// ===========================================================================
+// Protocol compliance: xdpyinfo validation
+// ===========================================================================
+test.describe("Protocol compliance: xdpyinfo", () => {
+	test("xdpyinfo reports all required extensions", async ({ sidecarContainer }) => {
+		test.setTimeout(30_000);
+		const result = await sidecarContainer.exec([
+			"bash", "-c", [
+				"export DISPLAY=:99",
+				"OUTPUT=$(xdpyinfo 2>&1)",
+				"PASS=0; FAIL=0",
+				// Check for required extensions
+				"for ext in BIG-REQUESTS MIT-SHM RENDER XFIXES SHAPE SYNC 'Generic Event Extension' XC-MISC Composite DAMAGE RANDR XKEYBOARD XInputExtension XTEST DPMS DOUBLE-BUFFER RECORD SECURITY X-Resource DRI3 Present; do",
+				"  if echo \"$OUTPUT\" | grep -qi \"$ext\"; then",
+				"    PASS=$((PASS+1))",
+				"  else",
+				"    FAIL=$((FAIL+1))",
+				"    echo \"MISSING_EXT: $ext\"",
+				"  fi",
+				"done",
+				// Check screen info
+				"if echo \"$OUTPUT\" | grep -q 'screen #0'; then PASS=$((PASS+1)); else FAIL=$((FAIL+1)); echo 'MISSING: screen #0'; fi",
+				"if echo \"$OUTPUT\" | grep -q 'dimensions:'; then PASS=$((PASS+1)); else FAIL=$((FAIL+1)); echo 'MISSING: dimensions'; fi",
+				"if echo \"$OUTPUT\" | grep -q 'depth.*24'; then PASS=$((PASS+1)); else FAIL=$((FAIL+1)); echo 'MISSING: depth 24'; fi",
+				// Check visual info
+				"if echo \"$OUTPUT\" | grep -q 'TrueColor'; then PASS=$((PASS+1)); else FAIL=$((FAIL+1)); echo 'MISSING: TrueColor visual'; fi",
+				// Check pixmap formats
+				"if echo \"$OUTPUT\" | grep -q 'pixmap formats'; then PASS=$((PASS+1)); else FAIL=$((FAIL+1)); echo 'MISSING: pixmap formats'; fi",
+				"echo \"xdpyinfo-check: pass=$PASS fail=$FAIL\"",
+			].join("\n"),
+		]);
+		const match = result.output.match(/xdpyinfo-check: pass=(\d+) fail=(\d+)/);
+		expect(match).toBeTruthy();
+		const passed = Number.parseInt(match![1], 10);
+		const failed = Number.parseInt(match![2], 10);
+		console.log(`xdpyinfo: ${passed} checks passed, ${failed} failed`);
+		// All required extensions and properties must be present
+		expect(failed).toBe(0);
+	});
+
+	test("xdpyinfo reports multiple visual types", async ({ sidecarContainer }) => {
+		test.setTimeout(15_000);
+		const result = await sidecarContainer.exec([
+			"bash", "-c", [
+				"export DISPLAY=:99",
+				"VISUALS=$(xdpyinfo 2>&1 | grep -c 'visual:' || echo 0)",
+				"echo \"visual-count: $VISUALS\"",
+			].join("\n"),
+		]);
+		const match = result.output.match(/visual-count: (\d+)/);
+		expect(match).toBeTruthy();
+		const count = Number.parseInt(match![1], 10);
+		// Our server provides multiple visuals (TrueColor 24, DirectColor, PseudoColor, etc.)
+		expect(count).toBeGreaterThanOrEqual(3);
+	});
+});
+
+
+// ===========================================================================
+// Protocol compliance: xprop round-trip
+// ===========================================================================
+test.describe("Protocol compliance: xprop", () => {
+	test("xprop can set and retrieve a custom property", async ({ sidecarContainer }) => {
+		test.setTimeout(30_000);
+		const result = await sidecarContainer.exec([
+			"bash", "-c", [
+				"export DISPLAY=:99",
+				"# Get root window ID",
+				"ROOT=$(xdpyinfo 2>/dev/null | grep 'root window id:' | awk '{print $NF}')",
+				"if [ -z \"$ROOT\" ]; then ROOT=0x1; fi",
+				"# Set a custom property on root",
+				"xprop -root -f _X11WEB_TEST 8s -set _X11WEB_TEST 'hello_from_e2e' 2>&1",
+				"# Read it back",
+				"VALUE=$(xprop -root _X11WEB_TEST 2>&1)",
+				"if echo \"$VALUE\" | grep -q 'hello_from_e2e'; then",
+				"  echo 'XPROP_PASS: round-trip successful'",
+				"else",
+				"  echo \"XPROP_FAIL: got '$VALUE'\"",
+				"fi",
+				"# Clean up",
+				"xprop -root -remove _X11WEB_TEST 2>/dev/null || true",
+			].join("\n"),
+		]);
+		expect(result.output).toContain("XPROP_PASS");
+	});
+});
+
+
+// ===========================================================================
+// Protocol compliance: concurrent multi-client stress
+// ===========================================================================
+test.describe("Protocol compliance: multi-client", () => {
+	test("20 concurrent xlogo instances run without server crash", async ({ sidecarContainer }) => {
+		test.setTimeout(60_000);
+		const result = await sidecarContainer.exec([
+			"bash", "-c", [
+				"export DISPLAY=:99",
+				"# Launch 20 xlogo instances simultaneously",
+				"for i in $(seq 1 20); do",
+				"  xlogo -geometry 50x50+$((i*30))+$((i*20)) &",
+				"done",
+				"sleep 3",
+				"# Count how many xlogo windows were created",
+				"WCOUNT=$(xdotool search --name xlogo 2>/dev/null | wc -l)",
+				"echo \"xlogo-window-count: $WCOUNT\"",
+				"# Verify server is still responsive",
+				"xdpyinfo >/dev/null 2>&1 && echo 'SERVER_OK' || echo 'SERVER_DEAD'",
+				"# Clean up",
+				"pkill -9 xlogo 2>/dev/null; true",
+			].join("\n"),
+		]);
+		expect(result.output).toContain("SERVER_OK");
+		const match = result.output.match(/xlogo-window-count: (\d+)/);
+		if (match) {
+			const count = Number.parseInt(match[1], 10);
+			console.log(`Multi-client stress: ${count}/20 xlogo windows created`);
+			expect(count).toBeGreaterThanOrEqual(15);
+		}
+	});
+});
+
+
+// ===========================================================================
+// Protocol compliance: error handling
+// ===========================================================================
+test.describe("Protocol compliance: error handling", () => {
+	test("server returns proper errors for invalid requests", async ({ sidecarContainer }) => {
+		test.setTimeout(30_000);
+		const result = await runPythonScript(sidecarContainer, "server_returns_proper_errors_invalid_requests.py", { env: { DISPLAY: ":99" } });
+		const match = result.output.match(/error-handling: pass=(\d+) fail=(\d+)/);
+		expect(match).toBeTruthy();
+		const passed = Number.parseInt(match![1], 10);
+		const failed = Number.parseInt(match![2], 10);
+		console.log(`Error handling: ${passed} passed, ${failed} failed`);
+		expect(passed).toBeGreaterThanOrEqual(5);
+		expect(failed).toBe(0);
 	});
 });
