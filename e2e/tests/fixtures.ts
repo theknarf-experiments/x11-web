@@ -8,18 +8,19 @@
  *   import { test, expect } from "./fixtures";
  */
 
-import { type ChildProcess, exec } from "node:child_process";
+import { exec, execSync, spawn } from "node:child_process";
 import * as fs from "node:fs";
 import * as http from "node:http";
 import * as path from "node:path";
+import * as os from "node:os";
 import {
 	type Locator,
 	type Page,
 	test as base,
 	expect,
 } from "@playwright/test";
-import type { StartedNetwork, StartedTestContainer } from "testcontainers";
-import { GenericContainer, Network, Wait } from "testcontainers";
+import type { StartedTestContainer } from "testcontainers";
+import { GenericContainer, Wait } from "testcontainers";
 
 const PROJECT_ROOT = path.resolve(import.meta.dirname, "../..");
 const E2E_DIR = path.resolve(import.meta.dirname, "..");
@@ -30,18 +31,26 @@ const SERVE_BIN = path.join(E2E_DIR, "node_modules", ".bin", "serve");
 // ---------------------------------------------------------------------------
 // Container state (shared across all tests in a single worker)
 // ---------------------------------------------------------------------------
-let network: StartedNetwork;
+//
+// Playwright respawns the worker process after each test failure. Without
+// container reuse this would burn one Docker network + container trio per
+// failure and exhaust the subnet pool within a couple of dozen failures.
+// We use:
+//   - A FIXED-NAME Docker network created idempotently via `docker network`
+//     (testcontainers' `Network` class generates UUIDs and can't be reused).
+//   - `.withReuse()` on each container so the second worker's setup attaches
+//     to the existing one instead of building/starting a fresh copy.
+//   - A FIXED frontend port + lockfile so workers reuse a single `serve`
+//     process rather than spawning one per worker.
+const SHARED_NETWORK = "x11web-shared-network";
+const STATE_FILE = path.join(os.tmpdir(), "x11web-test-state.json");
+type SharedState = { backendPort: number; frontendPort: number };
+
 let backendContainer: StartedTestContainer;
 let sidecarContainer: StartedTestContainer;
-let frontendServer: ChildProcess;
 let frontendPort: number;
 let backendPort: number;
 let setupDone = false;
-// Setup is awaited concurrently by `sidecarContainer` and `frontendUrl`
-// fixtures on the same test. Without this in-flight promise, both calls
-// pass the `if (setupDone) return` check and start setup in parallel,
-// burning two Docker networks per test and exhausting the subnet pool
-// after ~30 spec files.
 let setupPromise: Promise<void> | null = null;
 
 async function ensureSetup() {
@@ -51,8 +60,16 @@ async function ensureSetup() {
 	return setupPromise;
 }
 
+function ensureSharedNetwork(): void {
+	try {
+		execSync(`docker network inspect ${SHARED_NETWORK}`, { stdio: "pipe" });
+	} catch {
+		execSync(`docker network create ${SHARED_NETWORK}`, { stdio: "pipe" });
+	}
+}
+
 async function doSetup() {
-	network = await new Network().start();
+	ensureSharedNetwork();
 
 	backendContainer = await GenericContainer.fromDockerfile(
 		PROJECT_ROOT,
@@ -61,12 +78,13 @@ async function doSetup() {
 		.build("x11-web-backend-test", { deleteOnExit: false })
 		.then((image) =>
 			image
-				.withNetwork(network)
+				.withNetworkMode(SHARED_NETWORK)
 				.withNetworkAliases("backend")
 				.withExposedPorts(3001)
 				.withWaitStrategy(
 					Wait.forHttp("/health", 3001).forStatusCode(200),
 				)
+				.withReuse()
 				.start(),
 		);
 
@@ -80,7 +98,7 @@ async function doSetup() {
 		.build("x11-web-sidecar-test", { deleteOnExit: false })
 		.then((image) =>
 			image
-				.withNetwork(network)
+				.withNetworkMode(SHARED_NETWORK)
 				.withNetworkAliases("sidecar")
 				.withHostname("x11web")
 				// Privileged mode lets apps that use Linux user-namespaces for
@@ -95,12 +113,37 @@ async function doSetup() {
 					NO_AT_BRIDGE: "1",
 				})
 				.withWaitStrategy(Wait.forLogMessage(/Connected to backend/))
+				.withReuse()
 				.start(),
 		);
 
 	console.log("Sidecar connected to backend");
 
-	const wsUrl = `ws://localhost:${backendPort}/ws/frontend`;
+	frontendPort = await ensureFrontendServer(backendPort);
+	console.log(`Frontend running at http://localhost:${frontendPort}`);
+	setupDone = true;
+}
+
+/**
+ * Build the frontend (idempotent — the build dir survives) and ensure a
+ * `serve` process is running. If a previous worker started one and it's
+ * still alive, reuse its port via the lockfile. Otherwise build + spawn a
+ * fresh one and persist the port for future workers.
+ */
+async function ensureFrontendServer(backend: number): Promise<number> {
+	if (fs.existsSync(STATE_FILE)) {
+		try {
+			const state = JSON.parse(fs.readFileSync(STATE_FILE, "utf8")) as SharedState;
+			const res = await fetch(`http://localhost:${state.frontendPort}`).catch(() => null);
+			if (res?.ok && state.backendPort === backend) {
+				return state.frontendPort;
+			}
+		} catch {
+			// stale or malformed; fall through to fresh build
+		}
+	}
+
+	const wsUrl = `ws://localhost:${backend}/ws/frontend`;
 	await new Promise<void>((resolve, reject) => {
 		exec(
 			`VITE_WS_URL=${wsUrl} pnpm run build`,
@@ -116,19 +159,24 @@ async function doSetup() {
 		);
 	});
 
-	frontendPort = await findFreePort();
+	const port = await findFreePort();
+	// Detach so the serve process survives across worker restarts. The
+	// global-teardown hook kills it via the `pkill -f 'serve dist -l'`
+	// pattern at the end of the run.
+	const child = spawn(SERVE_BIN, ["dist", "-l", `${port}`, "--no-clipboard"], {
+		cwd: FRONTEND_DIR,
+		detached: true,
+		stdio: "ignore",
+	});
+	child.unref();
 	await new Promise<void>((resolve, reject) => {
-		frontendServer = exec(
-			`${SERVE_BIN} dist -l ${frontendPort} --no-clipboard`,
-			{ cwd: FRONTEND_DIR },
-		);
 		const timeout = setTimeout(() => {
 			clearInterval(check);
 			reject(new Error("Frontend server failed to start within 30s"));
 		}, 30_000);
 		const check = setInterval(async () => {
 			try {
-				const res = await fetch(`http://localhost:${frontendPort}`);
+				const res = await fetch(`http://localhost:${port}`);
 				if (res.ok) {
 					clearInterval(check);
 					clearTimeout(timeout);
@@ -140,20 +188,15 @@ async function doSetup() {
 		}, 200);
 	});
 
-	console.log(`Frontend running at http://localhost:${frontendPort}`);
-	setupDone = true;
+	const state: SharedState = { backendPort: backend, frontendPort: port };
+	fs.writeFileSync(STATE_FILE, JSON.stringify(state));
+	return port;
 }
 
 async function teardownAll() {
-	if (frontendServer?.pid && !frontendServer.killed) {
-		frontendServer.kill("SIGTERM");
-		// Give it a moment, then force-kill if still alive
-		await new Promise((r) => setTimeout(r, 500));
-		if (!frontendServer.killed) frontendServer.kill("SIGKILL");
-	}
-	await sidecarContainer?.stop().catch(() => {});
-	await backendContainer?.stop().catch(() => {});
-	await network?.stop().catch(() => {});
+	// The frontend serve process and the reused containers/network are
+	// owned by the test session, not this worker. Final cleanup happens
+	// in global-teardown.ts via the testcontainers label and pkill.
 	setupDone = false;
 	setupPromise = null;
 }
@@ -176,15 +219,21 @@ export type X11Fixtures = {
 	frontendUrl: string;
 };
 
-export const test = base.extend<X11Fixtures>({
-	sidecarContainer: async ({}, use) => {
-		await ensureSetup();
-		await use(sidecarContainer);
-	},
-	frontendUrl: async ({}, use) => {
-		await ensureSetup();
-		await use(`http://localhost:${frontendPort}`);
-	},
+export const test = base.extend<{}, X11Fixtures>({
+	sidecarContainer: [
+		async ({}, use) => {
+			await ensureSetup();
+			await use(sidecarContainer);
+		},
+		{ scope: "worker" },
+	],
+	frontendUrl: [
+		async ({}, use) => {
+			await ensureSetup();
+			await use(`http://localhost:${frontendPort}`);
+		},
+		{ scope: "worker" },
+	],
 });
 
 // Re-export expect for convenience

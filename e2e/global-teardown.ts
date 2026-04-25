@@ -6,6 +6,9 @@
  */
 
 import { execSync } from "node:child_process";
+import * as fs from "node:fs";
+import * as os from "node:os";
+import * as path from "node:path";
 
 function run(cmd: string) {
 	try {
@@ -16,6 +19,13 @@ function run(cmd: string) {
 }
 
 export default function globalTeardown() {
+	// Drop the shared-state lockfile and shared network used by fixtures.ts
+	// for cross-worker container reuse.
+	try {
+		fs.unlinkSync(path.join(os.tmpdir(), "x11web-test-state.json"));
+	} catch {
+		/* not present */
+	}
 	// Stop all containers created by testcontainers (includes backend,
 	// sidecar, and Ryuk).  The label filter is reliable regardless of
 	// whether the image was tagged or referenced by hash.
@@ -38,6 +48,10 @@ export default function globalTeardown() {
 
 	// Kill any orphaned `serve` processes spawned from e2e
 	run("pkill -f 'serve dist -l .* --no-clipboard' || true");
+
+	// Drop the shared network reused across worker restarts (fine to fail
+	// if other containers are still attached — prune handles the rest).
+	run("docker network rm x11web-shared-network");
 
 	// Prune orphaned Docker networks created by testcontainers
 	run("docker network prune -f");
