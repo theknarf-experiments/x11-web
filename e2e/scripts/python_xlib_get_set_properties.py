@@ -1,0 +1,13 @@
+from Xlib import display, X, Xatom
+d = display.Display()
+s = d.screen()
+w = s.root.create_window(0, 0, 1, 1, 0, s.root_depth)
+test_atom = d.intern_atom('_X11WEB_TEST')
+w.change_property(test_atom, Xatom.STRING, 8, b'hello world')
+d.sync()
+prop = w.get_full_property(test_atom, Xatom.STRING)
+print(f'property: {prop.value}')
+w.destroy()
+d.sync()
+print('PROPERTY_OK')
+d.close()

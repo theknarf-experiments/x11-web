@@ -3631,100 +3631,7 @@ print('fuzz-complete')
 		// MSB-first (big-endian) byte order client test
 		// -------------------------------------------------------------------
 		test("MSB-first client connects and exchanges data", async () => {
-			const result = await sidecarContainer.exec(
-				[
-					"bash",
-					"-c",
-					[
-						"set -e",
-						'export DISPLAY=:99',
-						`python3 -c "
-import socket, struct, os
-
-sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-sock.connect('/tmp/.X11-unix/X99')
-
-# Send MSB-first (big-endian) connection setup
-auth_name = b'MIT-MAGIC-COOKIE-1'
-auth_cookie = b''
-try:
-    with open(os.environ.get('XAUTHORITY', '/tmp/.x11-web-Xauthority'), 'rb') as f:
-        data = f.read()
-        if len(data) > 20:
-            auth_cookie = data[-16:]
-except:
-    pass
-
-setup = struct.pack('>BxHHHH2x',
-    0x42,  # MSB first (big-endian)
-    11, 0,
-    len(auth_name),
-    len(auth_cookie))
-setup += auth_name
-while len(setup) % 4: setup += b'\\x00'
-setup += auth_cookie
-while len(setup) % 4: setup += b'\\x00'
-sock.sendall(setup)
-
-# Read setup reply (should be in big-endian)
-reply = sock.recv(8)
-status = reply[0]
-if status != 1:
-    print(f'setup failed: status={status}')
-    sock.close()
-    exit(1)
-
-# Parse big-endian setup reply
-proto_major = struct.unpack_from('>H', reply, 2)[0]
-proto_minor = struct.unpack_from('>H', reply, 4)[0]
-extra_len = struct.unpack_from('>H', reply, 6)[0] * 4
-
-rest = b''
-while len(rest) < extra_len:
-    rest += sock.recv(extra_len - len(rest))
-
-# Parse key fields (big-endian)
-release = struct.unpack_from('>I', rest, 0)[0]
-resource_base = struct.unpack_from('>I', rest, 4)[0]
-resource_mask = struct.unpack_from('>I', rest, 8)[0]
-
-print(f'MSB setup: proto={proto_major}.{proto_minor} base={resource_base:#x} mask={resource_mask:#x}')
-
-# Send InternAtom (big-endian): opcode 16, length 3
-atom_name = b'TEST_ATOM'
-name_len = len(atom_name)
-padded = (name_len + 3) & ~3
-req_len = (8 + padded) // 4
-req = struct.pack('>BBH', 16, 0, req_len)
-req += struct.pack('>H2x', name_len)
-req += atom_name
-while len(req) % 4: req += b'\\x00'
-sock.sendall(req)
-
-# Read reply (should be big-endian)
-resp = sock.recv(32)
-if resp[0] == 1:  # Reply
-    atom_id = struct.unpack_from('>I', resp, 8)[0]
-    print(f'InternAtom reply: atom={atom_id}')
-else:
-    print(f'unexpected response type: {resp[0]}')
-
-# Send GetAtomName for that atom (big-endian)
-req2 = struct.pack('>BBH', 17, 0, 2) + struct.pack('>I', atom_id)
-sock.sendall(req2)
-resp2 = sock.recv(64)
-if resp2[0] == 1:
-    name_len2 = struct.unpack_from('>H', resp2, 8)[0]
-    name_bytes = resp2[32:32+name_len2]
-    print(f'GetAtomName reply: name={name_bytes.decode()}')
-
-sock.close()
-print('msb-test-complete')
-" 2>&1`,
-					].join("\n"),
-				],
-				{ timeout: 30_000 } as any,
-			);
+			const result = await runPythonScript(sidecarContainer, "msb_first_client_connect_exchange.py", { env: { DISPLAY: ":99" } });
 			expect(result.output).toContain("msb-test-complete");
 			expect(result.output).toContain("proto=11.0");
 			expect(result.output).toContain("TEST_ATOM");
@@ -6729,22 +6636,7 @@ print('msb-test-complete')
 
 		test("python3-xlib can connect and query the server", async () => {
 			test.setTimeout(30_000);
-			const result = await sidecarContainer.exec([
-				"bash",
-				"-c",
-				[
-					"export DISPLAY=:99",
-					"python3 -c \"" +
-					"from Xlib import display; " +
-					"d = display.Display(); " +
-					"s = d.screen(); " +
-					"print(f'screen: {s.width_in_pixels}x{s.height_in_pixels}'); " +
-					"print(f'root: {s.root.id:#x}'); " +
-					"print(f'depth: {s.root_depth}'); " +
-					"print('PYTHON_XLIB_OK'); " +
-					"d.close()\"",
-				].join("\n"),
-			]);
+			const result = await runPythonScript(sidecarContainer, "python_xlib_connect_query.py", { env: { DISPLAY: ":99" } });
 			console.log(`python-xlib: ${result.output.trim()}`);
 			expect(result.output).toContain("PYTHON_XLIB_OK");
 			expect(result.output).toContain("1024x768");
@@ -6752,27 +6644,7 @@ print('msb-test-complete')
 
 		test("python3-xlib can create and destroy windows", async () => {
 			test.setTimeout(30_000);
-			const result = await sidecarContainer.exec([
-				"bash",
-				"-c",
-				[
-					"export DISPLAY=:99",
-					"python3 -c \"" +
-					"from Xlib import display, X; " +
-					"d = display.Display(); " +
-					"s = d.screen(); " +
-					"w = s.root.create_window(10, 10, 100, 100, 0, s.root_depth, " +
-					"  X.InputOutput, X.CopyFromParent); " +
-					"w.map(); " +
-					"d.sync(); " +
-					"geom = w.get_geometry(); " +
-					"print(f'window {w.id:#x}: {geom.width}x{geom.height}'); " +
-					"w.destroy(); " +
-					"d.sync(); " +
-					"print('WINDOW_LIFECYCLE_OK'); " +
-					"d.close()\"",
-				].join("\n"),
-			]);
+			const result = await runPythonScript(sidecarContainer, "python_xlib_window_lifecycle.py", { env: { DISPLAY: ":99" } });
 			console.log(`python-xlib window: ${result.output.trim()}`);
 			expect(result.output).toContain("WINDOW_LIFECYCLE_OK");
 			expect(result.output).toContain("100x100");
@@ -6780,27 +6652,7 @@ print('msb-test-complete')
 
 		test("python3-xlib can get/set properties", async () => {
 			test.setTimeout(30_000);
-			const result = await sidecarContainer.exec([
-				"bash",
-				"-c",
-				[
-					"export DISPLAY=:99",
-					"python3 -c \"" +
-					"from Xlib import display, X, Xatom; " +
-					"d = display.Display(); " +
-					"s = d.screen(); " +
-					"w = s.root.create_window(0, 0, 1, 1, 0, s.root_depth); " +
-					"test_atom = d.intern_atom('_X11WEB_TEST'); " +
-					"w.change_property(test_atom, Xatom.STRING, 8, b'hello world'); " +
-					"d.sync(); " +
-					"prop = w.get_full_property(test_atom, Xatom.STRING); " +
-					"print(f'property: {prop.value}'); " +
-					"w.destroy(); " +
-					"d.sync(); " +
-					"print('PROPERTY_OK'); " +
-					"d.close()\"",
-				].join("\n"),
-			]);
+			const result = await runPythonScript(sidecarContainer, "python_xlib_get_set_properties.py", { env: { DISPLAY: ":99" } });
 			console.log(`python-xlib property: ${result.output.trim()}`);
 			expect(result.output).toContain("PROPERTY_OK");
 			expect(result.output).toContain("hello world");
@@ -6808,23 +6660,7 @@ print('msb-test-complete')
 
 		test("python3-xlib can query extensions", async () => {
 			test.setTimeout(30_000);
-			const result = await sidecarContainer.exec([
-				"bash",
-				"-c",
-				[
-					"export DISPLAY=:99",
-					"python3 -c \"" +
-					"from Xlib import display; " +
-					"d = display.Display(); " +
-					"exts = d.list_extensions(); " +
-					"ext_names = [e.name for e in exts]; " +
-					"print(f'extensions: {len(ext_names)}'); " +
-					"for name in sorted(ext_names): print(f'  {name}'); " +
-					"assert b'RANDR' in ext_names or 'RANDR' in [n.decode() if isinstance(n, bytes) else n for n in ext_names], 'RANDR missing'; " +
-					"print('EXTENSIONS_OK'); " +
-					"d.close()\"",
-				].join("\n"),
-			]);
+			const result = await runPythonScript(sidecarContainer, "python_xlib_query_extensions.py", { env: { DISPLAY: ":99" } });
 			console.log(`python-xlib extensions: exit=${result.exitCode}`);
 			expect(result.output).toContain("EXTENSIONS_OK");
 		});
@@ -7128,21 +6964,7 @@ print('msb-test-complete')
 
 		test("AllocColor works in TrueColor colormap", async () => {
 			// python3-xlib test that allocates a color
-			const result = await sidecarContainer.exec([
-				"bash",
-				"-c",
-				[
-					"export DISPLAY=:99",
-					"python3 -c \"",
-					"from Xlib import X, display",
-					"d = display.Display()",
-					"screen = d.screen()",
-					"cmap = screen.default_colormap",
-					"color = cmap.alloc_color(65535, 0, 0)",
-					"print(f'pixel={color.pixel}')",
-					"d.close()\"",
-				].join(" "),
-			]);
+			const result = await runPythonScript(sidecarContainer, "alloccolor_truecolor_colormap.py", { env: { DISPLAY: ":99" } });
 			console.log(`AllocColor: ${result.output.trim()}`);
 			expect(result.exitCode).toBe(0);
 			expect(result.output).toContain("pixel=");
@@ -7182,81 +7004,21 @@ print('msb-test-complete')
 		});
 
 		test("SYNC counter query returns SERVERTIME value", async () => {
-			const result = await sidecarContainer.exec([
-				"bash",
-				"-c",
-				[
-					"export DISPLAY=:99",
-					"python3 -c \"",
-					"from Xlib import X, display",
-					"d = display.Display()",
-					"# Query the SYNC extension",
-					"ext = d.query_extension('SYNC')",
-					"print(f'SYNC ext present={ext is not None}')",
-					"d.close()\"",
-				].join(" "),
-			]);
+			const result = await runPythonScript(sidecarContainer, "sync_counter_query_servertime.py", { env: { DISPLAY: ":99" } });
 			console.log(`SYNC query: ${result.output.trim()}`);
 			expect(result.exitCode).toBe(0);
 		});
 
 		test("WM_HINTS property is accepted without errors", async () => {
 			// Set WM_HINTS on a window via python3-xlib
-			const result = await sidecarContainer.exec([
-				"bash",
-				"-c",
-				[
-					"export DISPLAY=:99",
-					"python3 -c \"",
-					"from Xlib import X, display, Xutil",
-					"d = display.Display()",
-					"screen = d.screen()",
-					"w = screen.root.create_window(0, 0, 100, 100, 0, screen.root_depth,",
-					"    X.InputOutput, X.CopyFromParent)",
-					"# Set WM_HINTS with urgency flag",
-					"hints = Xutil.Hints(flags=256)  # UrgencyHint = bit 8",
-					"w.set_wm_hints(hints)",
-					"d.sync()",
-					"# Read back and verify",
-					"got = w.get_wm_hints()",
-					"print(f'flags={got.flags if got else 0}')",
-					"w.destroy()",
-					"d.close()\"",
-				].join(" "),
-			]);
+			const result = await runPythonScript(sidecarContainer, "wm_hints_property_accepted.py", { env: { DISPLAY: ":99" } });
 			console.log(`WM_HINTS: ${result.output.trim()}`);
 			expect(result.exitCode).toBe(0);
 		});
 
 		test("StoreColors works on PseudoColor colormap", async () => {
 			// Test that StoreColors doesn't crash for PseudoColor visual
-			const result = await sidecarContainer.exec([
-				"bash",
-				"-c",
-				[
-					"export DISPLAY=:99",
-					"python3 -c \"",
-					"from Xlib import X, display",
-					"d = display.Display()",
-					"screen = d.screen()",
-					"# Find PseudoColor visual",
-					"pc_visual = None",
-					"for depth_info in screen.allowed_depths:",
-					"    for v in depth_info.visuals:",
-					"        if v.visual_class == X.PseudoColor:",
-					"            pc_visual = v.visual_id",
-					"            break",
-					"if pc_visual:",
-					"    print(f'found PseudoColor visual={pc_visual:#x}')",
-					"    cmap = d.create_colormap(screen.root, pc_visual, X.AllocNone)",
-					"    color = cmap.alloc_color(0, 65535, 0)",
-					"    print(f'alloc_color pixel={color.pixel}')",
-					"    cmap.free()",
-					"else:",
-					"    print('no PseudoColor visual found')",
-					"d.close()\"",
-				].join(" "),
-			]);
+			const result = await runPythonScript(sidecarContainer, "storecolors_pseudocolor_colormap.py", { env: { DISPLAY: ":99" } });
 			console.log(`PseudoColor: ${result.output.trim()}`);
 			expect(result.exitCode).toBe(0);
 		});
@@ -7315,42 +7077,7 @@ print('msb-test-complete')
 		});
 
 		test("python3-xlib: full protocol round-trip with new features", async () => {
-			const result = await sidecarContainer.exec([
-				"bash",
-				"-c",
-				[
-					"export DISPLAY=:99",
-					"python3 -c \"",
-					"from Xlib import X, display, Xutil",
-					"d = display.Display()",
-					"screen = d.screen()",
-					"# 1. Create window",
-					"w = screen.root.create_window(10, 10, 200, 150, 0, screen.root_depth,",
-					"    X.InputOutput, X.CopyFromParent,",
-					"    event_mask=X.StructureNotifyMask | X.ExposureMask)",
-					"# 2. Set WM_HINTS with NormalState",
-					"hints = Xutil.Hints(flags=3, input=1, initial_state=1)",
-					"w.set_wm_hints(hints)",
-					"# 3. Map window",
-					"w.map()",
-					"d.sync()",
-					"# 4. Query window attributes",
-					"attrs = w.get_attributes()",
-					"print(f'map_state={attrs.map_state}')",
-					"# 5. Test colormap",
-					"cmap = screen.default_colormap",
-					"color = cmap.alloc_color(0, 0, 65535)",
-					"print(f'blue_pixel={color.pixel}')",
-					"# 6. Query extension",
-					"sync_ext = d.query_extension('SYNC')",
-					"dbe_ext = d.query_extension('DOUBLE-BUFFER')",
-					"print(f'SYNC={sync_ext is not None} DBE={dbe_ext is not None}')",
-					"# 7. Cleanup",
-					"w.destroy()",
-					"d.close()",
-					"print('ALL_OK')\"",
-				].join(" "),
-			]);
+			const result = await runPythonScript(sidecarContainer, "python_xlib_full_protocol_roundtrip.py", { env: { DISPLAY: ":99" } });
 			console.log(`Full round-trip: ${result.output.trim()}`);
 			expect(result.exitCode).toBe(0);
 			expect(result.output).toContain("ALL_OK");
@@ -7977,35 +7704,13 @@ print("done")
 		});
 
 		test("DBE: allocate back buffer, swap, verify content", async () => {
-			const result = await sidecarContainer.exec([
-				"bash", "-c", `python3 -c "
-import subprocess, sys
-# xdpyinfo should list DBE as a supported extension
-result = subprocess.run(['xdpyinfo'], capture_output=True, text=True, env={'DISPLAY': ':99'})
-if 'DOUBLE-BUFFER' in result.stdout:
-    print('dbe_supported_ok')
-else:
-    print('dbe_not_found')
-print('done')
-"`,
-			]);
+			const result = await runPythonScript(sidecarContainer, "dbe_allocate_back_buffer_swap.py", { env: { DISPLAY: ":99" } });
 			expect(result.output).toContain("dbe_supported_ok");
 			expect(result.output).toContain("done");
 		});
 
 		test("SECURITY: GenerateAuthorization returns unique tokens", async () => {
-			const result = await sidecarContainer.exec([
-				"bash", "-c", `python3 -c "
-import subprocess
-# Use xdpyinfo to verify SECURITY is listed
-result = subprocess.run(['xdpyinfo'], capture_output=True, text=True, env={'DISPLAY': ':99'})
-if 'SECURITY' in result.stdout:
-    print('security_supported_ok')
-else:
-    print('security_not_found')
-print('done')
-"`,
-			]);
+			const result = await runPythonScript(sidecarContainer, "security_generateauthorization_unique.py", { env: { DISPLAY: ":99" } });
 			expect(result.output).toContain("security_supported_ok");
 			expect(result.output).toContain("done");
 		});
@@ -10906,95 +10611,17 @@ test.describe("XCB protocol compliance", () => {
 // ===========================================================================
 test.describe("XSETTINGS manager", () => {
 	test("XSETTINGS_S0 selection owner exists", async () => {
-		const result = await sidecarContainer.exec([
-			"bash", "-c", [
-				"export DISPLAY=:99",
-				"python3 -c \"" +
-				"import Xlib, Xlib.display\\n" +
-				"d = Xlib.display.Display()\\n" +
-				"atom = d.intern_atom('_XSETTINGS_S0')\\n" +
-				"owner = d.get_selection_owner(atom)\\n" +
-				"print(f'xsettings-owner: {owner.id}' if owner else 'xsettings-owner: none')\\n" +
-				"if owner and owner.id != 0: print('xsettings-owner-ok')\\n" +
-				"\" 2>&1",
-			].join("\n"),
-		]);
+		const result = await runPythonScript(sidecarContainer, "xsettings_s0_owner_exists.py", { env: { DISPLAY: ":99" } });
 		expect(result.output).toContain("xsettings-owner-ok");
 	});
 
 	test("XSETTINGS_SETTINGS property is set in binary format", async () => {
-		const result = await sidecarContainer.exec([
-			"bash", "-c", [
-				"export DISPLAY=:99",
-				"python3 -c \"" +
-				"import Xlib, Xlib.display, struct\\n" +
-				"d = Xlib.display.Display()\\n" +
-				"settings_atom = d.intern_atom('_XSETTINGS_SETTINGS')\\n" +
-				"s0_atom = d.intern_atom('_XSETTINGS_S0')\\n" +
-				"owner = d.get_selection_owner(s0_atom)\\n" +
-				"if not owner or owner.id == 0:\\n" +
-				"    print('no-owner')\\n" +
-				"    exit(0)\\n" +
-				"prop = owner.get_full_property(settings_atom, 0)\\n" +
-				"if not prop:\\n" +
-				"    print('no-property')\\n" +
-				"    exit(0)\\n" +
-				"data = bytes(prop.value)\\n" +
-				"if len(data) < 12:\\n" +
-				"    print(f'too-short: {len(data)}')\\n" +
-				"    exit(0)\\n" +
-				"byte_order = data[0]\\n" +
-				"serial = struct.unpack_from('<I' if byte_order == 0 else '>I', data, 4)[0]\\n" +
-				"n_settings = struct.unpack_from('<I' if byte_order == 0 else '>I', data, 8)[0]\\n" +
-				"print(f'xsettings-byte-order: {byte_order}')\\n" +
-				"print(f'xsettings-serial: {serial}')\\n" +
-				"print(f'xsettings-count: {n_settings}')\\n" +
-				"if n_settings >= 10: print('xsettings-format-ok')\\n" +
-				"\" 2>&1",
-			].join("\n"),
-		]);
+		const result = await runPythonScript(sidecarContainer, "xsettings_settings_binary_format.py", { env: { DISPLAY: ":99" } });
 		expect(result.output).toContain("xsettings-format-ok");
 	});
 
 	test("Xft/DPI setting is 96 DPI (98304 in 1024ths)", async () => {
-		const result = await sidecarContainer.exec([
-			"bash", "-c", [
-				"export DISPLAY=:99",
-				"python3 -c \"" +
-				"import Xlib, Xlib.display, struct\\n" +
-				"d = Xlib.display.Display()\\n" +
-				"settings_atom = d.intern_atom('_XSETTINGS_SETTINGS')\\n" +
-				"s0_atom = d.intern_atom('_XSETTINGS_S0')\\n" +
-				"owner = d.get_selection_owner(s0_atom)\\n" +
-				"if not owner or owner.id == 0: exit(1)\\n" +
-				"prop = owner.get_full_property(settings_atom, 0)\\n" +
-				"data = bytes(prop.value)\\n" +
-				"bo = '<' if data[0] == 0 else '>'\\n" +
-				"n = struct.unpack_from(bo + 'I', data, 8)[0]\\n" +
-				"off = 12\\n" +
-				"for i in range(n):\\n" +
-				"    if off + 4 > len(data): break\\n" +
-				"    typ = data[off]\\n" +
-				"    name_len = struct.unpack_from(bo + 'H', data, off + 2)[0]\\n" +
-				"    name_pad = (name_len + 3) & ~3\\n" +
-				"    name = data[off + 4:off + 4 + name_len].decode('ascii', errors='replace')\\n" +
-				"    val_off = off + 4 + name_pad + 4\\n" +
-				"    if typ == 0 and val_off + 4 <= len(data):\\n" +
-				"        val = struct.unpack_from(bo + 'I', data, val_off)[0]\\n" +
-				"        if name == 'Xft/DPI':\\n" +
-				"            print(f'xft-dpi: {val}')\\n" +
-				"            if val == 98304: print('xft-dpi-ok')\\n" +
-				"        off = val_off + 4\\n" +
-				"    elif typ == 1 and val_off + 4 <= len(data):\\n" +
-				"        slen = struct.unpack_from(bo + 'I', data, val_off)[0]\\n" +
-				"        off = val_off + 4 + ((slen + 3) & ~3)\\n" +
-				"    elif typ == 2:\\n" +
-				"        off = val_off + 8\\n" +
-				"    else:\\n" +
-				"        break\\n" +
-				"\" 2>&1",
-			].join("\n"),
-		]);
+		const result = await runPythonScript(sidecarContainer, "xft_dpi_setting_96.py", { env: { DISPLAY: ":99" } });
 		expect(result.output).toContain("xft-dpi-ok");
 	});
 
@@ -11024,23 +10651,7 @@ test.describe("XIM protocol", () => {
 	});
 
 	test("XIM server window exists and has LOCALES property", async () => {
-		const result = await sidecarContainer.exec([
-			"bash", "-c", [
-				"export DISPLAY=:99",
-				"python3 -c \"" +
-				"import Xlib, Xlib.display\\n" +
-				"d = Xlib.display.Display()\\n" +
-				"root = d.screen().root\\n" +
-				"xim_atom = d.intern_atom('XIM_SERVERS')\\n" +
-				"prop = root.get_full_property(xim_atom, Xlib.X.AnyPropertyType)\\n" +
-				"if prop:\\n" +
-				"    print(f'xim-servers-property-type: {prop.property_type}')\\n" +
-				"    print('xim-server-found')\\n" +
-				"else:\\n" +
-				"    print('xim-no-servers')\\n" +
-				"\" 2>&1",
-			].join("\n"),
-		]);
+		const result = await runPythonScript(sidecarContainer, "xim_server_window_locales.py", { env: { DISPLAY: ":99" } });
 		expect(result.output).toContain("xim-server-found");
 	});
 });
@@ -11050,19 +10661,7 @@ test.describe("XIM protocol", () => {
 // ===========================================================================
 test.describe("Clipboard manager", () => {
 	test("CLIPBOARD_MANAGER selection has an owner", async () => {
-		const result = await sidecarContainer.exec([
-			"bash", "-c", [
-				"export DISPLAY=:99",
-				"python3 -c \"" +
-				"import Xlib, Xlib.display\\n" +
-				"d = Xlib.display.Display()\\n" +
-				"atom = d.intern_atom('CLIPBOARD_MANAGER')\\n" +
-				"owner = d.get_selection_owner(atom)\\n" +
-				"print(f'clipboard-mgr-owner: {owner.id}' if owner else 'clipboard-mgr-owner: none')\\n" +
-				"if owner and owner.id != 0: print('clipboard-mgr-ok')\\n" +
-				"\" 2>&1",
-			].join("\n"),
-		]);
+		const result = await runPythonScript(sidecarContainer, "clipboard_manager_owner.py", { env: { DISPLAY: ":99" } });
 		expect(result.output).toContain("clipboard-mgr-ok");
 	});
 
@@ -11113,20 +10712,7 @@ test.describe("VidMode gamma", () => {
 	});
 
 	test("VidMode GetModeLine returns screen dimensions", async () => {
-		const result = await sidecarContainer.exec([
-			"bash", "-c", [
-				"export DISPLAY=:99",
-				"python3 -c \"" +
-				"import Xlib, Xlib.display\\n" +
-				"d = Xlib.display.Display()\\n" +
-				"root = d.screen().root\\n" +
-				"w = root.get_geometry().width\\n" +
-				"h = root.get_geometry().height\\n" +
-				"print(f'screen-dimensions: {w}x{h}')\\n" +
-				"if w > 0 and h > 0: print('vidmode-dimensions-ok')\\n" +
-				"\" 2>&1",
-			].join("\n"),
-		]);
+		const result = await runPythonScript(sidecarContainer, "vidmode_getmodeline_screen_dims.py", { env: { DISPLAY: ":99" } });
 		expect(result.output).toContain("vidmode-dimensions-ok");
 	});
 });
@@ -11158,48 +10744,13 @@ test.describe("Backing store", () => {
 	test("GetWindowAttributes reports backing-store attribute", async () => {
 		// Create a window with backing-store=Always using python3-xlib,
 		// then verify GetWindowAttributes reports it back correctly.
-		const result = await sidecarContainer.exec([
-			"bash", "-c", [
-				"export DISPLAY=:99",
-				"python3 -c \"" +
-				"from Xlib import X, display\\n" +
-				"d = display.Display()\\n" +
-				"root = d.screen().root\\n" +
-				"w = root.create_window(0, 0, 100, 100, 0, d.screen().root_depth,\\n" +
-				"    X.InputOutput, X.CopyFromParent,\\n" +
-				"    backing_store=X.Always)\\n" +
-				"attrs = w.get_attributes()\\n" +
-				"print(f'backing_store={attrs.backing_store}')\\n" +
-				"w.destroy()\\n" +
-				"d.close()\\n" +
-				"\" 2>&1",
-			].join("\n"),
-		]);
+		const result = await runPythonScript(sidecarContainer, "getwindowattrs_backing_store.py", { env: { DISPLAY: ":99" } });
 		// X.Always = 2
 		expect(result.output).toContain("backing_store=2");
 	});
 
 	test("backing-planes and backing-pixel are stored", async () => {
-		const result = await sidecarContainer.exec([
-			"bash", "-c", [
-				"export DISPLAY=:99",
-				"python3 -c \"" +
-				"from Xlib import X, display\\n" +
-				"d = display.Display()\\n" +
-				"root = d.screen().root\\n" +
-				"w = root.create_window(0, 0, 100, 100, 0, d.screen().root_depth,\\n" +
-				"    X.InputOutput, X.CopyFromParent,\\n" +
-				"    backing_store=X.Always,\\n" +
-				"    backing_planes=0xFF0000,\\n" +
-				"    backing_pixel=0x00FF00)\\n" +
-				"attrs = w.get_attributes()\\n" +
-				"print(f'planes={attrs.backing_planes:#x}')\\n" +
-				"print(f'pixel={attrs.backing_pixel:#x}')\\n" +
-				"w.destroy()\\n" +
-				"d.close()\\n" +
-				"\" 2>&1",
-			].join("\n"),
-		]);
+		const result = await runPythonScript(sidecarContainer, "backing_planes_pixel_stored.py", { env: { DISPLAY: ":99" } });
 		expect(result.output).toContain("planes=0xff0000");
 		expect(result.output).toContain("pixel=0xff00");
 	});
@@ -11566,44 +11117,12 @@ test.describe("Multi-app interaction", () => {
 	});
 
 	test("20 rapid window create/destroy cycles don't crash", async () => {
-		const result = await sidecarContainer.exec([
-			"bash", "-c", [
-				"export DISPLAY=:99",
-				"python3 -c \"" +
-				"from Xlib import X, display\\n" +
-				"d = display.Display()\\n" +
-				"root = d.screen().root\\n" +
-				"for i in range(20):\\n" +
-				"    w = root.create_window(0, 0, 100+i, 100+i, 0, d.screen().root_depth)\\n" +
-				"    w.map()\\n" +
-				"    d.sync()\\n" +
-				"    w.destroy()\\n" +
-				"    d.sync()\\n" +
-				"print('rapid-create-destroy-ok')\\n" +
-				"d.close()\\n" +
-				"\" 2>&1",
-			].join("\n"),
-		]);
+		const result = await runPythonScript(sidecarContainer, "rapid_window_create_destroy_20_cycles.py", { env: { DISPLAY: ":99" } });
 		expect(result.output).toContain("rapid-create-destroy-ok");
 	});
 
 	test("shared memory image transfer via SHM", async () => {
-		const result = await sidecarContainer.exec([
-			"bash", "-c", [
-				"export DISPLAY=:99",
-				"python3 -c \"" +
-				"from Xlib import X, display, Xutil\\n" +
-				"d = display.Display()\\n" +
-				"# Check if MIT-SHM is available\\n" +
-				"ext = d.query_extension('MIT-SHM')\\n" +
-				"if ext and ext.present:\\n" +
-				"    print('shm-extension-present')\\n" +
-				"else:\\n" +
-				"    print('shm-extension-missing')\\n" +
-				"d.close()\\n" +
-				"\" 2>&1",
-			].join("\n"),
-		]);
+		const result = await runPythonScript(sidecarContainer, "shm_image_transfer.py", { env: { DISPLAY: ":99" } });
 		expect(result.output).toContain("shm-extension-present");
 	});
 });
@@ -11933,21 +11452,7 @@ test.describe("Concurrent client stress tests", () => {
 	test("rapid connect/disconnect cycles", async () => {
 		test.setTimeout(60_000);
 		// Rapidly create and destroy connections via python-xlib
-		const result = await sidecarContainer.exec([
-			"bash", "-c", [
-				"export DISPLAY=:99",
-				"python3 -c \"",
-				"import Xlib.display",
-				"passed = 0",
-				"for i in range(100):",
-				"    try:",
-				"        d = Xlib.display.Display()",
-				"        d.close()",
-				"        passed += 1",
-				"    except: pass",
-				"print(f'rapid-connect: passed={passed}')\"",
-			].join("\n"),
-		], { timeout: 30_000 } as any);
+		const result = await runPythonScript(sidecarContainer, "rapid_connect_disconnect_100_cycles.py", { env: { DISPLAY: ":99" } });
 		const match = result.output.match(/rapid-connect: passed=(\d+)/);
 		const passed = match ? parseInt(match[1], 10) : 0;
 		console.log(`Rapid connect/disconnect: ${passed}/100 passed`);
@@ -12013,36 +11518,7 @@ test.describe("XTS X Test Suite", () => {
 test.describe("Protocol edge cases", () => {
 	test("PutImage works for all supported depths", async () => {
 		test.setTimeout(30_000);
-		const result = await sidecarContainer.exec([
-			"bash", "-c", [
-				"export DISPLAY=:99",
-				"python3 -c \"",
-				"import Xlib.display, Xlib.X, Xlib.Xutil",
-				"d = Xlib.display.Display()",
-				"s = d.screen()",
-				"root = s.root",
-				"passed = 0",
-				"# Test depth-24 pixmap",
-				"pm = root.create_pixmap(10, 10, 24)",
-				"gc = root.create_gc()",
-				"# Fill with solid color",
-				"gc.change(foreground=0xFF0000)",
-				"pm.fill_rectangle(gc, 0, 0, 10, 10)",
-				"pm.free()",
-				"gc.free()",
-				"passed += 1",
-				"# Test depth-1 pixmap",
-				"pm1 = root.create_pixmap(8, 8, 1)",
-				"pm1.free()",
-				"passed += 1",
-				"# Test depth-8 pixmap",
-				"pm8 = root.create_pixmap(8, 8, 8)",
-				"pm8.free()",
-				"passed += 1",
-				"d.close()",
-				"print(f'putimage-depths: passed={passed}')\"",
-			].join("\n"),
-		], { timeout: 20_000 } as any);
+		const result = await runPythonScript(sidecarContainer, "putimage_supported_depths.py", { env: { DISPLAY: ":99" } });
 		const match = result.output.match(/putimage-depths: passed=(\d+)/);
 		const passed = match ? parseInt(match[1], 10) : 0;
 		expect(passed).toBe(3);
@@ -12050,29 +11526,7 @@ test.describe("Protocol edge cases", () => {
 
 	test("font XLFD pattern matching works", async () => {
 		test.setTimeout(30_000);
-		const result = await sidecarContainer.exec([
-			"bash", "-c", [
-				"export DISPLAY=:99",
-				"python3 -c \"",
-				"import Xlib.display",
-				"d = Xlib.display.Display()",
-				"passed = 0",
-				"# Wildcard pattern should return results",
-				"fonts = d.list_fonts('*', 100)",
-				"if len(fonts) > 0: passed += 1",
-				"# Fixed font should be available",
-				"fonts2 = d.list_fonts('fixed', 10)",
-				"if len(fonts2) > 0: passed += 1",
-				"# Full XLFD wildcard pattern",
-				"fonts3 = d.list_fonts('-*-*-*-*-*-*-*-*-*-*-*-*-*-*', 100)",
-				"if len(fonts3) > 0: passed += 1",
-				"# Specific XLFD pattern",
-				"fonts4 = d.list_fonts('-misc-fixed-*-*-*-*-13-*-*-*-*-*-*-*', 10)",
-				"if len(fonts4) > 0: passed += 1",
-				"d.close()",
-				"print(f'xlfd-match: passed={passed}')\"",
-			].join("\n"),
-		], { timeout: 20_000 } as any);
+		const result = await runPythonScript(sidecarContainer, "font_xlfd_pattern_matching.py", { env: { DISPLAY: ":99" } });
 		const match = result.output.match(/xlfd-match: passed=(\d+)/);
 		const passed = match ? parseInt(match[1], 10) : 0;
 		expect(passed).toBe(4);
@@ -12101,77 +11555,13 @@ test.describe("Protocol edge cases", () => {
 
 	test("backing store preserves content across unmap/map", async () => {
 		test.setTimeout(30_000);
-		const result = await sidecarContainer.exec([
-			"bash", "-c", [
-				"export DISPLAY=:99",
-				"python3 -c \"",
-				"import Xlib.display, Xlib.X",
-				"d = Xlib.display.Display()",
-				"s = d.screen()",
-				"root = s.root",
-				"# Create window with backing store",
-				"w = root.create_window(",
-				"    10, 10, 100, 100, 0,",
-				"    s.root_depth,",
-				"    Xlib.X.InputOutput,",
-				"    Xlib.X.CopyFromParent,",
-				"    backing_store=Xlib.X.Always,",
-				"    event_mask=Xlib.X.ExposureMask | Xlib.X.StructureNotifyMask,",
-				")",
-				"w.map()",
-				"d.sync()",
-				"# Draw something",
-				"gc = w.create_gc(foreground=0xFF0000)",
-				"w.fill_rectangle(gc, 0, 0, 50, 50)",
-				"d.sync()",
-				"# Unmap and remap",
-				"w.unmap()",
-				"d.sync()",
-				"import time; time.sleep(0.1)",
-				"w.map()",
-				"d.sync()",
-				"import time; time.sleep(0.1)",
-				"# Verify window is still mapped",
-				"attrs = w.get_attributes()",
-				"print(f'backing-store: map_state={attrs.map_state}')",
-				"w.destroy()",
-				"gc.free()",
-				"d.close()\"",
-			].join("\n"),
-		], { timeout: 20_000 } as any);
+		const result = await runPythonScript(sidecarContainer, "backing_store_preserves_unmap_map.py", { env: { DISPLAY: ":99" } });
 		expect(result.output).toContain("backing-store: map_state=2"); // IsViewable
 	});
 
 	test("window gravity preserves content on resize", async () => {
 		test.setTimeout(30_000);
-		const result = await sidecarContainer.exec([
-			"bash", "-c", [
-				"export DISPLAY=:99",
-				"python3 -c \"",
-				"import Xlib.display, Xlib.X",
-				"d = Xlib.display.Display()",
-				"s = d.screen()",
-				"root = s.root",
-				"# Create window with center gravity",
-				"w = root.create_window(",
-				"    10, 10, 100, 100, 0,",
-				"    s.root_depth,",
-				"    Xlib.X.InputOutput,",
-				"    Xlib.X.CopyFromParent,",
-				"    bit_gravity=Xlib.X.CenterGravity,",
-				"    event_mask=Xlib.X.ExposureMask,",
-				")",
-				"w.map()",
-				"d.sync()",
-				"# Resize",
-				"w.configure(width=200, height=200)",
-				"d.sync()",
-				"g = w.get_geometry()",
-				"print(f'gravity-resize: w={g.width} h={g.height}')",
-				"w.destroy()",
-				"d.close()\"",
-			].join("\n"),
-		], { timeout: 20_000 } as any);
+		const result = await runPythonScript(sidecarContainer, "window_gravity_preserves_resize.py", { env: { DISPLAY: ":99" } });
 		expect(result.output).toContain("gravity-resize: w=200 h=200");
 	});
 
@@ -12180,101 +11570,12 @@ test.describe("Protocol edge cases", () => {
 	// ===================================================================
 	test.describe("Event propagation", () => {
 		test("device events propagate up window tree", async () => {
-			const result = await sidecarContainer.exec([
-				"bash", "-c", [
-					"export DISPLAY=:99",
-					`python3 -c "
-import Xlib.display, Xlib.X, Xlib.protocol.event
-d = Xlib.display.Display()
-s = d.screen()
-root = s.root
-
-# Create parent that selects ButtonPress
-parent = root.create_window(
-    0, 0, 200, 200, 0,
-    s.root_depth, Xlib.X.InputOutput, Xlib.X.CopyFromParent,
-    event_mask=Xlib.X.ButtonPressMask | Xlib.X.StructureNotifyMask,
-)
-parent.map()
-d.sync()
-
-# Create child that does NOT select ButtonPress
-child = parent.create_window(
-    10, 10, 50, 50, 0,
-    s.root_depth, Xlib.X.InputOutput, Xlib.X.CopyFromParent,
-    event_mask=Xlib.X.ExposureMask,  # no ButtonPressMask
-)
-child.map()
-d.sync()
-
-# Simulate a button press via XTEST on the child's coordinates
-# The event should propagate up to parent
-import subprocess
-subprocess.run(['xdotool', 'mousemove', '15', '15'], check=True)
-subprocess.run(['xdotool', 'click', '1'], check=True)
-
-# Check if parent received the button press event
-import time
-time.sleep(0.2)
-d.sync()
-ev = None
-while d.pending_events() > 0:
-    e = d.next_event()
-    if e.type == Xlib.X.ButtonPress:
-        ev = e
-        break
-
-if ev:
-    print(f'propagation-ok: event_window={ev.window.id:#x}')
-else:
-    print('propagation-ok: no-event-but-no-crash')
-
-child.destroy()
-parent.destroy()
-d.close()
-" 2>&1`,
-				].join("\n"),
-			], { timeout: 20_000 } as any);
+			const result = await runPythonScript(sidecarContainer, "device_events_propagate_up.py", { env: { DISPLAY: ":99" } });
 			expect(result.output).toContain("propagation-ok");
 		});
 
 		test("do_not_propagate_mask blocks event propagation", async () => {
-			const result = await sidecarContainer.exec([
-				"bash", "-c", [
-					"export DISPLAY=:99",
-					`python3 -c "
-import Xlib.display, Xlib.X
-d = Xlib.display.Display()
-s = d.screen()
-root = s.root
-
-# Create parent selecting ButtonPress
-parent = root.create_window(
-    0, 0, 200, 200, 0,
-    s.root_depth, Xlib.X.InputOutput, Xlib.X.CopyFromParent,
-    event_mask=Xlib.X.ButtonPressMask | Xlib.X.StructureNotifyMask,
-)
-parent.map()
-d.sync()
-
-# Create child with do_not_propagate_mask including ButtonPress
-child = parent.create_window(
-    10, 10, 50, 50, 0,
-    s.root_depth, Xlib.X.InputOutput, Xlib.X.CopyFromParent,
-    event_mask=Xlib.X.ExposureMask,
-)
-child.change_attributes(do_not_propagate_mask=Xlib.X.ButtonPressMask)
-child.map()
-d.sync()
-
-print('dnp-mask-ok: created windows with do_not_propagate_mask')
-
-child.destroy()
-parent.destroy()
-d.close()
-" 2>&1`,
-				].join("\n"),
-			], { timeout: 20_000 } as any);
+			const result = await runPythonScript(sidecarContainer, "do_not_propagate_mask_blocks.py", { env: { DISPLAY: ":99" } });
 			expect(result.output).toContain("dnp-mask-ok");
 		});
 	});
@@ -12296,37 +11597,7 @@ d.close()
 		});
 
 		test("PseudoColor colormap allocation works", async () => {
-			const result = await sidecarContainer.exec([
-				"bash", "-c", [
-					"export DISPLAY=:99",
-					`python3 -c "
-import Xlib.display, Xlib.X
-d = Xlib.display.Display()
-s = d.screen()
-
-# Find the PseudoColor visual
-visuals = s.allowed_depths
-pseudo_vis = None
-for depth_info in visuals:
-    for vis in depth_info.visuals:
-        if vis.visual_class == Xlib.X.PseudoColor:
-            pseudo_vis = vis
-            break
-    if pseudo_vis: break
-
-if not pseudo_vis:
-    print('skip: no PseudoColor visual')
-else:
-    # Create a colormap for PseudoColor
-    cmap = d.screen().root.create_colormap(pseudo_vis.visual_id, Xlib.X.AllocNone)
-    # Allocate a color
-    color = cmap.alloc_color(65535, 0, 0)  # red
-    print(f'pseudocolor-ok: pixel={color.pixel}')
-    cmap.free()
-d.close()
-" 2>&1`,
-				].join("\n"),
-			], { timeout: 10_000 } as any);
+			const result = await runPythonScript(sidecarContainer, "pseudocolor_colormap_allocation.py", { env: { DISPLAY: ":99" } });
 			// Either we got a successful allocation or skipped (no PseudoColor)
 			const ok = result.output.includes("pseudocolor-ok") || result.output.includes("skip");
 			expect(ok).toBe(true);
@@ -12338,51 +11609,7 @@ d.close()
 	// ===================================================================
 	test.describe("GrabServer behavior", () => {
 		test("GrabServer blocks other clients", async () => {
-			const result = await sidecarContainer.exec([
-				"bash", "-c", [
-					"export DISPLAY=:99",
-					`python3 -c "
-import Xlib.display, Xlib.X
-import threading, time
-
-# First connection grabs the server
-d1 = Xlib.display.Display()
-d1.grab_server()
-d1.sync()
-
-grabbed = True
-d2_result = [None]
-
-def try_second_connection():
-    try:
-        d2 = Xlib.display.Display()
-        # This should block while server is grabbed
-        s = d2.screen()
-        root = s.root
-        # Try a simple request
-        g = root.get_geometry()
-        d2_result[0] = 'completed'
-        d2.close()
-    except Exception as e:
-        d2_result[0] = f'error: {e}'
-
-t = threading.Thread(target=try_second_connection)
-t.start()
-
-# Give the second connection a chance to start
-time.sleep(0.3)
-
-# Ungrab and let the second connection proceed
-d1.ungrab_server()
-d1.sync()
-
-# Wait for the second connection to complete
-t.join(timeout=5)
-print(f'grab-test: d2={d2_result[0]}')
-d1.close()
-" 2>&1`,
-				].join("\n"),
-			], { timeout: 20_000 } as any);
+			const result = await runPythonScript(sidecarContainer, "grabserver_blocks_other_clients.py", { env: { DISPLAY: ":99" } });
 			expect(result.output).toContain("grab-test: d2=completed");
 		});
 	});
@@ -12392,50 +11619,7 @@ d1.close()
 	// ===================================================================
 	test.describe("SaveSet behavior", () => {
 		test("SaveSet windows are reparented to root on client disconnect", async () => {
-			const result = await sidecarContainer.exec([
-				"bash", "-c", [
-					"export DISPLAY=:99",
-					`python3 -c "
-import Xlib.display, Xlib.X
-import time
-
-# Create a window with one connection
-d1 = Xlib.display.Display()
-s = d1.screen()
-root = s.root
-w = root.create_window(
-    0, 0, 100, 100, 0,
-    s.root_depth, Xlib.X.InputOutput, Xlib.X.CopyFromParent,
-    event_mask=Xlib.X.ExposureMask,
-)
-w.map()
-d1.sync()
-wid = w.id
-print(f'created: wid={wid:#x}')
-
-# A second connection (WM-like) adds this window to its SaveSet
-d2 = Xlib.display.Display()
-# Reparent window under a WM frame
-frame = root.create_window(
-    0, 0, 110, 110, 0,
-    s.root_depth, Xlib.X.InputOutput, Xlib.X.CopyFromParent,
-)
-frame.map()
-d2.sync()
-
-# The WM would add the client window to its save set
-# then reparent it under the frame
-# (We test that the server doesn't crash on these operations)
-d2.close()
-time.sleep(0.1)
-
-# Clean up
-w.destroy()
-d1.close()
-print('saveset-ok')
-" 2>&1`,
-				].join("\n"),
-			], { timeout: 20_000 } as any);
+			const result = await runPythonScript(sidecarContainer, "saveset_reparented_root_disconnect.py", { env: { DISPLAY: ":99" } });
 			expect(result.output).toContain("saveset-ok");
 		});
 	});
@@ -12445,36 +11629,7 @@ print('saveset-ok')
 	// ===================================================================
 	test.describe("KillClient behavior", () => {
 		test("KillClient with AllTemporary destroys retained windows", async () => {
-			const result = await sidecarContainer.exec([
-				"bash", "-c", [
-					"export DISPLAY=:99",
-					`python3 -c "
-import Xlib.display, Xlib.X
-
-d = Xlib.display.Display()
-s = d.screen()
-root = s.root
-
-# Create a window
-w = root.create_window(
-    0, 0, 100, 100, 0,
-    s.root_depth, Xlib.X.InputOutput, Xlib.X.CopyFromParent,
-    event_mask=Xlib.X.ExposureMask,
-)
-w.map()
-d.sync()
-
-# Set close-down mode to RetainTemporary
-d.set_close_down_mode(Xlib.X.RetainTemporary)
-d.sync()
-
-print('killclient-ok: set RetainTemporary mode')
-
-w.destroy()
-d.close()
-" 2>&1`,
-				].join("\n"),
-			], { timeout: 20_000 } as any);
+			const result = await runPythonScript(sidecarContainer, "killclient_alltemporary_destroys.py", { env: { DISPLAY: ":99" } });
 			expect(result.output).toContain("killclient-ok");
 		});
 	});
@@ -12596,49 +11751,7 @@ d.close()
 
 	test.describe("Protocol stress tests", () => {
 		test("50 concurrent connections don't crash the server", async () => {
-			const result = await sidecarContainer.exec([
-				"bash", "-c", [
-					"export DISPLAY=:99",
-					`python3 -c "
-import Xlib.display, Xlib.X
-import threading
-
-results = []
-
-def connect_and_query(idx):
-    try:
-        d = Xlib.display.Display()
-        s = d.screen()
-        root = s.root
-        g = root.get_geometry()
-        # Create a window, map it, destroy it
-        w = root.create_window(
-            idx * 2, idx * 2, 50, 50, 0,
-            s.root_depth, Xlib.X.InputOutput, Xlib.X.CopyFromParent,
-        )
-        w.map()
-        d.sync()
-        w.destroy()
-        d.close()
-        results.append('ok')
-    except Exception as e:
-        results.append(f'err:{e}')
-
-threads = []
-for i in range(50):
-    t = threading.Thread(target=connect_and_query, args=(i,))
-    threads.append(t)
-    t.start()
-
-for t in threads:
-    t.join(timeout=30)
-
-ok_count = sum(1 for r in results if r == 'ok')
-err_count = len(results) - ok_count
-print(f'stress-50: ok={ok_count} err={err_count}')
-" 2>&1`,
-				].join("\n"),
-			], { timeout: 60_000 } as any);
+			const result = await runPythonScript(sidecarContainer, "stress_50_concurrent_connections.py", { env: { DISPLAY: ":99" } });
 			const match = result.output.match(/stress-50: ok=(\d+)/);
 			expect(match).toBeTruthy();
 			const okCount = Number.parseInt(match![1], 10);
@@ -12646,49 +11759,7 @@ print(f'stress-50: ok={ok_count} err={err_count}')
 		});
 
 		test("BIG-REQUESTS extension handles large requests", async () => {
-			const result = await sidecarContainer.exec([
-				"bash", "-c", [
-					"export DISPLAY=:99",
-					`python3 -c "
-import Xlib.display, Xlib.X
-
-d = Xlib.display.Display()
-s = d.screen()
-root = s.root
-
-# Check that BIG-REQUESTS extension is available
-try:
-    ext = d.query_extension('BIG-REQUESTS')
-    if ext and ext.present:
-        print('big-requests-ok: extension present')
-    else:
-        print('big-requests-ok: extension not present (acceptable)')
-except:
-    print('big-requests-ok: query succeeded without crash')
-
-# Create a large property (256KB) to test big request handling
-w = root.create_window(
-    0, 0, 1, 1, 0,
-    s.root_depth, Xlib.X.InputOutput, Xlib.X.CopyFromParent,
-)
-big_data = bytes(range(256)) * 1024  # 256KB
-atom = d.intern_atom('_BIG_TEST_PROP')
-w.change_property(atom, Xlib.X.STRING, 8, big_data)
-d.sync()
-
-# Read it back
-prop = w.get_property(atom, Xlib.X.STRING, 0, len(big_data))
-if prop and len(prop.value) == len(big_data):
-    print(f'big-property-ok: wrote and read {len(big_data)} bytes')
-else:
-    got = len(prop.value) if prop else 0
-    print(f'big-property-partial: got {got} of {len(big_data)} bytes')
-
-w.destroy()
-d.close()
-" 2>&1`,
-				].join("\n"),
-			], { timeout: 20_000 } as any);
+			const result = await runPythonScript(sidecarContainer, "big_requests_extension_large.py", { env: { DISPLAY: ":99" } });
 			expect(result.output).toContain("big-requests-ok");
 			expect(result.output).toContain("big-property-ok");
 		});
@@ -12700,86 +11771,7 @@ d.close()
 	test.describe("Spec: event propagation (Section 7)", () => {
 		test("device events propagate up window tree", async () => {
 			test.setTimeout(30_000);
-			const result = await sidecarContainer.exec([
-				"bash",
-				"-c",
-				[
-					"export DISPLAY=:99",
-					`python3 -c '
-import Xlib.display, Xlib.X, sys
-passed = 0; failed = 0
-d = Xlib.display.Display()
-root = d.screen().root
-
-# Create parent -> child hierarchy
-parent = root.create_window(0, 0, 200, 200, 0,
-    d.screen().root_depth,
-    Xlib.X.InputOutput, Xlib.X.CopyFromParent,
-    event_mask=Xlib.X.ButtonPressMask | Xlib.X.SubstructureNotifyMask)
-parent.map()
-d.sync()
-
-child = parent.create_window(10, 10, 50, 50, 0,
-    d.screen().root_depth,
-    Xlib.X.InputOutput, Xlib.X.CopyFromParent,
-    event_mask=0)  # No event mask on child
-child.map()
-d.sync()
-
-# Test 1: event mask inheritance - parent should get button events from child
-# Use XSendEvent to simulate (we cannot warp+click atomically from python)
-import Xlib.protocol.event
-ev = Xlib.protocol.event.ButtonPress(
-    time=Xlib.X.CurrentTime,
-    root=root,
-    window=child,
-    child=Xlib.X.NONE,
-    root_x=15, root_y=15,
-    event_x=5, event_y=5,
-    state=0, detail=1,
-    same_screen=1)
-child.send_event(ev, event_mask=0, propagate=True)
-d.sync()
-
-import time; time.sleep(0.1)
-got_event = False
-while d.pending_events():
-    e = d.next_event()
-    if e.type == Xlib.X.ButtonPress:
-        got_event = True
-        break
-
-if got_event:
-    passed += 1; print("PASS: ButtonPress propagated to parent")
-else:
-    failed += 1; print("FAIL: ButtonPress did not propagate")
-
-# Test 2: do_not_propagate_mask blocks propagation
-child.change_attributes(do_not_propagate_mask=Xlib.X.ButtonPressMask)
-d.sync()
-
-child.send_event(ev, event_mask=0, propagate=True)
-d.sync()
-time.sleep(0.1)
-got_event2 = False
-while d.pending_events():
-    e = d.next_event()
-    if e.type == Xlib.X.ButtonPress:
-        got_event2 = True
-        break
-
-if not got_event2:
-    passed += 1; print("PASS: do_not_propagate_mask blocks propagation")
-else:
-    failed += 1; print("FAIL: event propagated despite do_not_propagate_mask")
-
-parent.destroy()
-d.close()
-print(f"xts-event-propagation: pass={passed} fail={failed}")
-sys.exit(1 if failed > 0 else 0)
-' 2>&1`,
-				].join("\n"),
-			]);
+			const result = await runPythonScript(sidecarContainer, "xts_event_propagation.py", { env: { DISPLAY: ":99" } });
 			const match = result.output.match(
 				/xts-event-propagation: pass=(\d+) fail=(\d+)/,
 			);
@@ -12790,90 +11782,7 @@ sys.exit(1 if failed > 0 else 0)
 
 		test("keyboard events route through focus window", async () => {
 			test.setTimeout(30_000);
-			const result = await sidecarContainer.exec([
-				"bash",
-				"-c",
-				[
-					"export DISPLAY=:99",
-					`python3 -c '
-import Xlib.display, Xlib.X, sys, time
-passed = 0; failed = 0
-d = Xlib.display.Display()
-root = d.screen().root
-
-w1 = root.create_window(0, 0, 100, 100, 0,
-    d.screen().root_depth,
-    Xlib.X.InputOutput, Xlib.X.CopyFromParent,
-    event_mask=Xlib.X.KeyPressMask | Xlib.X.FocusChangeMask)
-w1.map()
-d.sync()
-
-w2 = root.create_window(200, 0, 100, 100, 0,
-    d.screen().root_depth,
-    Xlib.X.InputOutput, Xlib.X.CopyFromParent,
-    event_mask=Xlib.X.KeyPressMask | Xlib.X.FocusChangeMask)
-w2.map()
-d.sync()
-
-# Set focus to w1
-d.set_input_focus(w1, Xlib.X.RevertToParent, Xlib.X.CurrentTime)
-d.sync()
-time.sleep(0.1)
-
-# Check focus is on w1
-focus = d.get_input_focus()
-if focus.focus.id == w1.id:
-    passed += 1; print("PASS: focus set to w1")
-else:
-    failed += 1; print(f"FAIL: expected focus on {w1.id:#x}, got {focus.focus.id:#x}")
-
-# Set focus to w2 with RevertToPointerRoot
-d.set_input_focus(w2, Xlib.X.RevertToPointerRoot, Xlib.X.CurrentTime)
-d.sync()
-time.sleep(0.1)
-
-focus = d.get_input_focus()
-if focus.focus.id == w2.id:
-    passed += 1; print("PASS: focus moved to w2")
-else:
-    failed += 1; print(f"FAIL: expected focus on {w2.id:#x}, got {focus.focus.id:#x}")
-
-# Drain FocusIn/FocusOut events
-got_focus_in = False
-got_focus_out = False
-while d.pending_events():
-    e = d.next_event()
-    if e.type == Xlib.X.FocusIn:
-        got_focus_in = True
-    elif e.type == Xlib.X.FocusOut:
-        got_focus_out = True
-
-if got_focus_in and got_focus_out:
-    passed += 1; print("PASS: FocusIn and FocusOut events generated")
-elif got_focus_in or got_focus_out:
-    passed += 1; print("PASS: at least one focus event generated")
-else:
-    failed += 1; print("FAIL: no focus events generated")
-
-# Test revert-to: destroy w2, focus should revert to PointerRoot
-w2.destroy()
-d.sync()
-time.sleep(0.1)
-
-focus = d.get_input_focus()
-if focus.focus.id in (Xlib.X.PointerRoot, 1):
-    passed += 1; print("PASS: focus reverted to PointerRoot after destroy")
-else:
-    # Might revert to root or None - also acceptable per spec
-    passed += 1; print(f"PASS: focus reverted to {focus.focus.id:#x} after destroy")
-
-w1.destroy()
-d.close()
-print(f"xts-focus-model: pass={passed} fail={failed}")
-sys.exit(1 if failed > 0 else 0)
-' 2>&1`,
-				].join("\n"),
-			]);
+			const result = await runPythonScript(sidecarContainer, "xts_focus_model_keyboard.py", { env: { DISPLAY: ":99" } });
 			const match = result.output.match(
 				/xts-focus-model: pass=(\d+) fail=(\d+)/,
 			);
@@ -12889,67 +11798,7 @@ sys.exit(1 if failed > 0 else 0)
 	test.describe("Spec: cursor operations", () => {
 		test("CreateCursor, FreeCursor, and DefineCursor", async () => {
 			test.setTimeout(30_000);
-			const result = await sidecarContainer.exec([
-				"bash",
-				"-c",
-				[
-					"export DISPLAY=:99",
-					`python3 -c '
-import Xlib.display, Xlib.X, Xlib.Xcursorfont, sys
-passed = 0; failed = 0
-d = Xlib.display.Display()
-root = d.screen().root
-
-# Test 1: Create cursor from font
-try:
-    font = d.open_font("cursor")
-    cursor = font.create_glyph_cursor(
-        font, Xlib.Xcursorfont.left_ptr, Xlib.Xcursorfont.left_ptr + 1,
-        (0, 0, 0), (65535, 65535, 65535))
-    passed += 1; print("PASS: create glyph cursor")
-except Exception as e:
-    failed += 1; print(f"FAIL: create glyph cursor: {e}")
-
-# Test 2: Define cursor on window
-try:
-    w = root.create_window(0, 0, 50, 50, 0,
-        d.screen().root_depth,
-        Xlib.X.InputOutput, Xlib.X.CopyFromParent,
-        cursor=cursor)
-    w.map()
-    d.sync()
-    passed += 1; print("PASS: define cursor on window")
-except Exception as e:
-    failed += 1; print(f"FAIL: define cursor on window: {e}")
-
-# Test 3: Change cursor via ChangeWindowAttributes
-try:
-    font2 = d.open_font("cursor")
-    cursor2 = font2.create_glyph_cursor(
-        font2, Xlib.Xcursorfont.crosshair, Xlib.Xcursorfont.crosshair + 1,
-        (65535, 0, 0), (0, 0, 0))
-    w.change_attributes(cursor=cursor2)
-    d.sync()
-    passed += 1; print("PASS: change cursor via ChangeWindowAttributes")
-except Exception as e:
-    failed += 1; print(f"FAIL: change cursor: {e}")
-
-# Test 4: Free cursor (should not error)
-try:
-    cursor.free(onerror=None)
-    cursor2.free(onerror=None)
-    d.sync()
-    passed += 1; print("PASS: free cursors")
-except Exception as e:
-    failed += 1; print(f"FAIL: free cursors: {e}")
-
-w.destroy()
-d.close()
-print(f"xts-cursor-ops: pass={passed} fail={failed}")
-sys.exit(1 if failed > 0 else 0)
-' 2>&1`,
-				].join("\n"),
-			]);
+			const result = await runPythonScript(sidecarContainer, "xts_cursor_create_free_define.py", { env: { DISPLAY: ":99" } });
 			const match = result.output.match(
 				/xts-cursor-ops: pass=(\d+) fail=(\d+)/,
 			);
@@ -12965,78 +11814,7 @@ sys.exit(1 if failed > 0 else 0)
 	test.describe("Spec: window gravity", () => {
 		test("bit gravity and win gravity", async () => {
 			test.setTimeout(30_000);
-			const result = await sidecarContainer.exec([
-				"bash",
-				"-c",
-				[
-					"export DISPLAY=:99",
-					`python3 -c '
-import Xlib.display, Xlib.X, sys, time
-passed = 0; failed = 0
-d = Xlib.display.Display()
-root = d.screen().root
-
-# Test 1: Create window with NorthWest gravity (default)
-w = root.create_window(100, 100, 200, 200, 2,
-    d.screen().root_depth,
-    Xlib.X.InputOutput, Xlib.X.CopyFromParent,
-    event_mask=Xlib.X.StructureNotifyMask)
-w.map()
-d.sync()
-time.sleep(0.1)
-
-geom = w.get_geometry()
-if geom.width == 200 and geom.height == 200:
-    passed += 1; print("PASS: window created with correct geometry")
-else:
-    failed += 1; print(f"FAIL: geometry mismatch: {geom.width}x{geom.height}")
-
-# Test 2: Set win_gravity to Static
-w.change_attributes(win_gravity=Xlib.X.StaticGravity)
-d.sync()
-
-# Configure with border change
-w.configure(border_width=4)
-d.sync()
-time.sleep(0.1)
-
-geom2 = w.get_geometry()
-if geom2.border_width == 4:
-    passed += 1; print("PASS: border width changed")
-else:
-    failed += 1; print(f"FAIL: border width {geom2.border_width} != 4")
-
-# Test 3: Set bit_gravity to Center
-w.change_attributes(bit_gravity=Xlib.X.CenterGravity)
-d.sync()
-passed += 1; print("PASS: bit_gravity set to Center")
-
-# Test 4: Resize should trigger ConfigureNotify
-w.configure(width=300, height=300)
-d.sync()
-time.sleep(0.1)
-
-got_configure = False
-while d.pending_events():
-    e = d.next_event()
-    if e.type == Xlib.X.ConfigureNotify:
-        got_configure = True
-        if e.width == 300 and e.height == 300:
-            passed += 1; print("PASS: ConfigureNotify with correct size")
-        else:
-            failed += 1; print(f"FAIL: ConfigureNotify size {e.width}x{e.height}")
-        break
-
-if not got_configure:
-    failed += 1; print("FAIL: no ConfigureNotify after resize")
-
-w.destroy()
-d.close()
-print(f"xts-gravity: pass={passed} fail={failed}")
-sys.exit(1 if failed > 0 else 0)
-' 2>&1`,
-				].join("\n"),
-			]);
+			const result = await runPythonScript(sidecarContainer, "xts_window_gravity.py", { env: { DISPLAY: ":99" } });
 			const match = result.output.match(
 				/xts-gravity: pass=(\d+) fail=(\d+)/,
 			);
@@ -13052,49 +11830,7 @@ sys.exit(1 if failed > 0 else 0)
 	test.describe("Spec: GC raster operations", () => {
 		test("all 16 GX functions via XCB", async () => {
 			test.setTimeout(30_000);
-			const result = await sidecarContainer.exec([
-				"bash",
-				"-c",
-				[
-					"export DISPLAY=:99",
-					`python3 -c '
-import Xlib.display, Xlib.X, sys
-passed = 0; failed = 0
-d = Xlib.display.Display()
-root = d.screen().root
-
-# Create a pixmap to test ROP operations
-pm = root.create_pixmap(32, 32, d.screen().root_depth)
-
-gx_names = [
-    "GXclear", "GXand", "GXandReverse", "GXcopy",
-    "GXandInverted", "GXnoop", "GXxor", "GXor",
-    "GXnor", "GXequiv", "GXinvert", "GXorReverse",
-    "GXcopyInverted", "GXorInverted", "GXnand", "GXset"
-]
-
-for gx_func in range(16):
-    try:
-        gc = root.create_gc(function=gx_func, foreground=0xFFFFFF, background=0x000000)
-        pm.fill_rectangle(gc, 0, 0, 32, 32)
-        d.sync()
-        gc.free()
-        passed += 1
-    except Exception as e:
-        failed += 1; print(f"FAIL: {gx_names[gx_func]}: {e}")
-
-if passed == 16:
-    print("PASS: all 16 GX functions accepted")
-else:
-    print(f"PARTIAL: {passed}/16 GX functions ok")
-
-pm.free()
-d.close()
-print(f"xts-rop: pass={passed} fail={failed}")
-sys.exit(1 if failed > 0 else 0)
-' 2>&1`,
-				].join("\n"),
-			]);
+			const result = await runPythonScript(sidecarContainer, "xts_gc_rop_all_16_gx_funcs.py", { env: { DISPLAY: ":99" } });
 			const match = result.output.match(
 				/xts-rop: pass=(\d+) fail=(\d+)/,
 			);
@@ -13110,74 +11846,7 @@ sys.exit(1 if failed > 0 else 0)
 	test.describe("Spec: error response correctness", () => {
 		test("proper error codes for invalid operations", async () => {
 			test.setTimeout(30_000);
-			const result = await sidecarContainer.exec([
-				"bash",
-				"-c",
-				[
-					"export DISPLAY=:99",
-					`python3 -c '
-import Xlib.display, Xlib.X, Xlib.error, sys
-passed = 0; failed = 0
-d = Xlib.display.Display()
-root = d.screen().root
-
-# Test 1: BadWindow error for invalid window ID
-try:
-    bogus = d.create_resource_object("window", 0xDEAD)
-    bogus.get_geometry()
-    d.sync()
-    failed += 1; print("FAIL: no error for invalid window")
-except Xlib.error.BadWindow:
-    passed += 1; print("PASS: BadWindow for invalid window ID")
-except Exception as e:
-    # Any X error is acceptable here
-    passed += 1; print(f"PASS: got error for invalid window: {type(e).__name__}")
-
-# Test 2: BadAtom error for invalid atom
-try:
-    bogus_atom = 0xFFFFFFF
-    root.get_property(bogus_atom, Xlib.X.AnyPropertyType, 0, 1024)
-    d.sync()
-    failed += 1; print("FAIL: no error for invalid atom")
-except Xlib.error.BadAtom:
-    passed += 1; print("PASS: BadAtom for invalid atom")
-except Exception as e:
-    passed += 1; print(f"PASS: got error for invalid atom: {type(e).__name__}")
-
-# Test 3: BadValue error for invalid GC function
-try:
-    gc = root.create_gc(function=99)
-    d.sync()
-    failed += 1; print("FAIL: no error for invalid GC function")
-except Xlib.error.BadValue:
-    passed += 1; print("PASS: BadValue for invalid GC function value")
-except Exception as e:
-    passed += 1; print(f"PASS: got error for bad GC value: {type(e).__name__}")
-
-# Test 4: BadPixmap for invalid pixmap
-try:
-    bogus_pm = d.create_resource_object("pixmap", 0xBEEF)
-    bogus_pm.free()
-    d.sync()
-    failed += 1; print("FAIL: no error for invalid pixmap")
-except Xlib.error.BadPixmap:
-    passed += 1; print("PASS: BadPixmap for invalid pixmap ID")
-except Exception as e:
-    passed += 1; print(f"PASS: got error for invalid pixmap: {type(e).__name__}")
-
-# Test 5: InternAtom with only_if_exists for non-existent atom
-atom = d.intern_atom("_NONEXISTENT_TEST_ATOM_12345", only_if_exists=True)
-if atom == 0:
-    passed += 1; print("PASS: InternAtom returns None for non-existent atom")
-else:
-    failed += 1; print(f"FAIL: InternAtom returned {atom} for non-existent atom")
-
-d.close()
-print(f"xts-errors: pass={passed} fail={failed}")
-sys.exit(1 if failed > 0 else 0)
-' 2>&1`,
-				].join("\n"),
-			]);
+			const result = await runPythonScript(sidecarContainer, "xts_error_response_correctness.py", { env: { DISPLAY: ":99" } });
 			const match = result.output.match(
 				/xts-errors: pass=(\d+) fail=(\d+)/,
 			);
@@ -13193,71 +11862,7 @@ sys.exit(1 if failed > 0 else 0)
 	test.describe("Spec: stacking order", () => {
 		test("RaiseLowest and LowerHighest via CirculateWindow", async () => {
 			test.setTimeout(30_000);
-			const result = await sidecarContainer.exec([
-				"bash",
-				"-c",
-				[
-					"export DISPLAY=:99",
-					`python3 -c '
-import Xlib.display, Xlib.X, sys, time
-passed = 0; failed = 0
-d = Xlib.display.Display()
-root = d.screen().root
-
-# Create 3 overlapping sibling windows
-wins = []
-for i in range(3):
-    w = root.create_window(i*30, i*30, 100, 100, 0,
-        d.screen().root_depth,
-        Xlib.X.InputOutput, Xlib.X.CopyFromParent,
-        event_mask=Xlib.X.StructureNotifyMask | Xlib.X.VisibilityChangeMask)
-    w.map()
-    wins.append(w)
-d.sync()
-time.sleep(0.2)
-
-# Test 1: QueryTree returns children in stacking order
-tree = root.query_tree()
-mapped_ids = [w.id for w in wins]
-child_ids = [c.id for c in tree.children if c.id in mapped_ids]
-if len(child_ids) == 3:
-    passed += 1; print("PASS: all 3 windows in QueryTree")
-else:
-    failed += 1; print(f"FAIL: expected 3 windows in QueryTree, got {len(child_ids)}")
-
-# Test 2: Raise bottom window
-wins[0].raise_window()
-d.sync()
-time.sleep(0.1)
-
-tree2 = root.query_tree()
-child_ids2 = [c.id for c in tree2.children if c.id in mapped_ids]
-if child_ids2[-1] == wins[0].id:
-    passed += 1; print("PASS: raise_window moved win[0] to top")
-else:
-    passed += 1; print("PASS: raise_window changed stacking")
-
-# Test 3: Configure with stack_mode=Below
-wins[0].configure(stack_mode=Xlib.X.Below)
-d.sync()
-time.sleep(0.1)
-
-tree3 = root.query_tree()
-child_ids3 = [c.id for c in tree3.children if c.id in mapped_ids]
-if child_ids3[0] == wins[0].id:
-    passed += 1; print("PASS: stack_mode=Below lowered window")
-else:
-    passed += 1; print("PASS: stack_mode=Below changed stacking")
-
-# Cleanup
-for w in wins:
-    w.destroy()
-d.close()
-print(f"xts-stacking: pass={passed} fail={failed}")
-sys.exit(1 if failed > 0 else 0)
-' 2>&1`,
-				].join("\n"),
-			]);
+			const result = await runPythonScript(sidecarContainer, "xts_stacking_circulatewindow.py", { env: { DISPLAY: ":99" } });
 			const match = result.output.match(
 				/xts-stacking: pass=(\d+) fail=(\d+)/,
 			);
@@ -13273,108 +11878,7 @@ sys.exit(1 if failed > 0 else 0)
 	test.describe("Spec: grab semantics", () => {
 		test("pointer and keyboard grab lifecycle", async () => {
 			test.setTimeout(30_000);
-			const result = await sidecarContainer.exec([
-				"bash",
-				"-c",
-				[
-					"export DISPLAY=:99",
-					`python3 -c '
-import Xlib.display, Xlib.X, sys, time
-passed = 0; failed = 0
-d = Xlib.display.Display()
-root = d.screen().root
-
-w = root.create_window(0, 0, 200, 200, 0,
-    d.screen().root_depth,
-    Xlib.X.InputOutput, Xlib.X.CopyFromParent,
-    event_mask=Xlib.X.ButtonPressMask | Xlib.X.KeyPressMask)
-w.map()
-d.sync()
-time.sleep(0.2)
-
-# Test 1: GrabPointer
-status = w.grab_pointer(
-    True,
-    Xlib.X.ButtonPressMask | Xlib.X.ButtonReleaseMask,
-    Xlib.X.GrabModeAsync,
-    Xlib.X.GrabModeAsync,
-    Xlib.X.NONE,
-    Xlib.X.NONE,
-    Xlib.X.CurrentTime)
-if status == Xlib.X.GrabSuccess:
-    passed += 1; print("PASS: GrabPointer succeeded")
-else:
-    failed += 1; print(f"FAIL: GrabPointer returned {status}")
-
-# Test 2: UngrabPointer
-d.ungrab_pointer(Xlib.X.CurrentTime)
-d.sync()
-passed += 1; print("PASS: UngrabPointer completed")
-
-# Test 3: GrabKeyboard
-status = w.grab_keyboard(
-    True,
-    Xlib.X.GrabModeAsync,
-    Xlib.X.GrabModeAsync,
-    Xlib.X.CurrentTime)
-if status == Xlib.X.GrabSuccess:
-    passed += 1; print("PASS: GrabKeyboard succeeded")
-else:
-    failed += 1; print(f"FAIL: GrabKeyboard returned {status}")
-
-# Test 4: UngrabKeyboard
-d.ungrab_keyboard(Xlib.X.CurrentTime)
-d.sync()
-passed += 1; print("PASS: UngrabKeyboard completed")
-
-# Test 5: GrabButton (passive grab)
-try:
-    w.grab_button(
-        Xlib.X.AnyButton,
-        Xlib.X.AnyModifier,
-        True,
-        Xlib.X.ButtonPressMask,
-        Xlib.X.GrabModeAsync,
-        Xlib.X.GrabModeAsync,
-        Xlib.X.NONE,
-        Xlib.X.NONE)
-    d.sync()
-    passed += 1; print("PASS: GrabButton passive grab set")
-except Exception as e:
-    failed += 1; print(f"FAIL: GrabButton: {e}")
-
-# Test 6: UngrabButton
-try:
-    w.ungrab_button(Xlib.X.AnyButton, Xlib.X.AnyModifier)
-    d.sync()
-    passed += 1; print("PASS: UngrabButton completed")
-except Exception as e:
-    failed += 1; print(f"FAIL: UngrabButton: {e}")
-
-# Test 7: GrabKey (passive grab)
-try:
-    w.grab_key(Xlib.X.AnyKey, Xlib.X.AnyModifier,
-        True, Xlib.X.GrabModeAsync, Xlib.X.GrabModeAsync)
-    d.sync()
-    passed += 1; print("PASS: GrabKey passive grab set")
-except Exception as e:
-    failed += 1; print(f"FAIL: GrabKey: {e}")
-
-# Test 8: UngrabKey
-try:
-    w.ungrab_key(Xlib.X.AnyKey, Xlib.X.AnyModifier)
-    d.sync()
-    passed += 1; print("PASS: UngrabKey completed")
-except Exception as e:
-    failed += 1; print(f"FAIL: UngrabKey: {e}")
-
-w.destroy()
-d.close()
-print(f"xts-grabs: pass={passed} fail={failed}")
-sys.exit(1 if failed > 0 else 0)
-' 2>&1`,
-				].join("\n"),
-			]);
+			const result = await runPythonScript(sidecarContainer, "xts_grab_lifecycle.py", { env: { DISPLAY: ":99" } });
 			const match = result.output.match(
 				/xts-grabs: pass=(\d+) fail=(\d+)/,
 			);
@@ -13390,67 +11894,7 @@ sys.exit(1 if failed > 0 else 0)
 	test.describe("Spec: subwindow mode drawing", () => {
 		test("ClipByChildren vs IncludeInferiors GC modes", async () => {
 			test.setTimeout(30_000);
-			const result = await sidecarContainer.exec([
-				"bash",
-				"-c",
-				[
-					"export DISPLAY=:99",
-					`python3 -c '
-import Xlib.display, Xlib.X, sys, time
-passed = 0; failed = 0
-d = Xlib.display.Display()
-root = d.screen().root
-
-parent = root.create_window(0, 0, 200, 200, 0,
-    d.screen().root_depth,
-    Xlib.X.InputOutput, Xlib.X.CopyFromParent,
-    background_pixel=0x000000,
-    event_mask=Xlib.X.ExposureMask)
-parent.map()
-d.sync()
-time.sleep(0.1)
-
-child = parent.create_window(50, 50, 100, 100, 0,
-    d.screen().root_depth,
-    Xlib.X.InputOutput, Xlib.X.CopyFromParent,
-    background_pixel=0xFF0000)
-child.map()
-d.sync()
-time.sleep(0.1)
-
-# Test 1: Default GC (ClipByChildren) - drawing on parent clips around child
-gc_clip = parent.create_gc(
-    foreground=0x00FF00,
-    subwindow_mode=Xlib.X.ClipByChildren)
-parent.fill_rectangle(gc_clip, 0, 0, 200, 200)
-d.sync()
-passed += 1; print("PASS: ClipByChildren fill accepted")
-
-# Test 2: IncludeInferiors GC - drawing overlaps children
-gc_incl = parent.create_gc(
-    foreground=0x0000FF,
-    subwindow_mode=Xlib.X.IncludeInferiors)
-parent.fill_rectangle(gc_incl, 0, 0, 200, 200)
-d.sync()
-passed += 1; print("PASS: IncludeInferiors fill accepted")
-
-# Test 3: CopyGC copies subwindow_mode
-gc_copy = parent.create_gc()
-gc_copy.copy(gc_incl, Xlib.X.GCSubwindowMode)
-d.sync()
-passed += 1; print("PASS: CopyGC with GCSubwindowMode")
-
-gc_clip.free()
-gc_incl.free()
-gc_copy.free()
-child.destroy()
-parent.destroy()
-d.close()
-print(f"xts-subwindow-mode: pass={passed} fail={failed}")
-sys.exit(1 if failed > 0 else 0)
-' 2>&1`,
-				].join("\n"),
-			]);
+			const result = await runPythonScript(sidecarContainer, "xts_subwindow_mode_drawing.py", { env: { DISPLAY: ":99" } });
 			const match = result.output.match(
 				/xts-subwindow-mode: pass=(\d+) fail=(\d+)/,
 			);
@@ -13466,70 +11910,7 @@ sys.exit(1 if failed > 0 else 0)
 	test.describe("Spec: pixmap depth operations", () => {
 		test("create pixmaps at various depths and perform GetImage", async () => {
 			test.setTimeout(30_000);
-			const result = await sidecarContainer.exec([
-				"bash",
-				"-c",
-				[
-					"export DISPLAY=:99",
-					`python3 -c '
-import Xlib.display, Xlib.X, sys
-passed = 0; failed = 0
-d = Xlib.display.Display()
-root = d.screen().root
-depth = d.screen().root_depth
-
-# Test 1: Create pixmap at screen depth
-try:
-    pm = root.create_pixmap(64, 64, depth)
-    gc = root.create_gc(foreground=0xFF0000)
-    pm.fill_rectangle(gc, 0, 0, 64, 64)
-    d.sync()
-    passed += 1; print(f"PASS: create pixmap at depth {depth}")
-except Exception as e:
-    failed += 1; print(f"FAIL: pixmap at depth {depth}: {e}")
-
-# Test 2: Create pixmap at depth 1 (bitmap)
-try:
-    pm1 = root.create_pixmap(32, 32, 1)
-    gc1 = pm1.create_gc(foreground=1, background=0)
-    pm1.fill_rectangle(gc1, 0, 0, 32, 32)
-    d.sync()
-    passed += 1; print("PASS: create depth-1 bitmap pixmap")
-    gc1.free()
-    pm1.free()
-except Exception as e:
-    failed += 1; print(f"FAIL: depth-1 pixmap: {e}")
-
-# Test 3: GetImage from pixmap
-try:
-    img = pm.get_image(0, 0, 64, 64, 0xFFFFFFFF, Xlib.X.ZPixmap)
-    if img and len(img.data) > 0:
-        passed += 1; print(f"PASS: GetImage returned {len(img.data)} bytes")
-    else:
-        failed += 1; print("FAIL: GetImage returned empty data")
-except Exception as e:
-    failed += 1; print(f"FAIL: GetImage: {e}")
-
-# Test 4: CopyArea between pixmaps
-try:
-    pm2 = root.create_pixmap(64, 64, depth)
-    gc2 = root.create_gc()
-    pm2.copy_area(gc2, pm, 0, 0, 64, 64, 0, 0)
-    d.sync()
-    passed += 1; print("PASS: CopyArea between pixmaps")
-    gc2.free()
-    pm2.free()
-except Exception as e:
-    failed += 1; print(f"FAIL: CopyArea: {e}")
-
-gc.free()
-pm.free()
-d.close()
-print(f"xts-pixmap-depth: pass={passed} fail={failed}")
-sys.exit(1 if failed > 0 else 0)
-' 2>&1`,
-				].join("\n"),
-			]);
+			const result = await runPythonScript(sidecarContainer, "xts_pixmap_depth_ops.py", { env: { DISPLAY: ":99" } });
 			const match = result.output.match(
 				/xts-pixmap-depth: pass=(\d+) fail=(\d+)/,
 			);
@@ -13554,46 +11935,7 @@ sys.exit(1 if failed > 0 else 0)
 				test.skip();
 				return;
 			}
-			const result = await sidecarContainer.exec([
-				"bash",
-				"-c",
-				[
-					"export DISPLAY=:99",
-					`python3 -c '
-import Xlib.display, Xlib.X, sys
-import Xlib.ext.xfixes as xfixes
-passed = 0; failed = 0
-d = Xlib.display.Display()
-
-# Check XFIXES extension
-try:
-    ver = d.xfixes_query_version()
-    if ver.major_version >= 2:
-        passed += 1; print(f"PASS: XFIXES version {ver.major_version}.{ver.minor_version}")
-    else:
-        failed += 1; print(f"FAIL: XFIXES too old: {ver.major_version}")
-except Exception as e:
-    failed += 1; print(f"FAIL: XFIXES query: {e}")
-    d.close()
-    print(f"xts-xfixes: pass={passed} fail={failed}")
-    sys.exit(1 if failed > 0 else 0)
-
-# Test: cursor name setting
-root = d.screen().root
-try:
-    d.xfixes_select_cursor_input(root, xfixes.XFixesDisplayCursorNotifyMask)
-    d.sync()
-    passed += 1; print("PASS: SelectCursorInput accepted")
-except Exception as e:
-    # XFIXES cursor operations may not be exposed by python-xlib
-    passed += 1; print(f"PASS: XFIXES present (cursor ops: {e})")
-
-d.close()
-print(f"xts-xfixes: pass={passed} fail={failed}")
-sys.exit(1 if failed > 0 else 0)
-' 2>&1`,
-				].join("\n"),
-			]);
+			const result = await runPythonScript(sidecarContainer, "xts_xfixes_region_simple.py", { env: { DISPLAY: ":99" } });
 			const match = result.output.match(
 				/xts-xfixes: pass=(\d+) fail=(\d+)/,
 			);
@@ -14713,59 +13055,12 @@ test.describe("VidMode extension mode management", () => {
 	});
 
 	test("VidMode GetAllModeLines returns at least one mode", async () => {
-		const result = await sidecarContainer.exec([
-			"bash",
-			"-c",
-			[
-				"set -e",
-				"export DISPLAY=:99",
-				"python3 -c \"",
-				"import ctypes, ctypes.util",
-				"lib = ctypes.CDLL(ctypes.util.find_library('Xxf86vm'))",
-				"xlib = ctypes.CDLL(ctypes.util.find_library('X11'))",
-				"xlib.XOpenDisplay.restype = ctypes.c_void_p",
-				"d = xlib.XOpenDisplay(b':99')",
-				"assert d, 'Failed to open display'",
-				"count = ctypes.c_int(0)",
-				"modes = ctypes.c_void_p(0)",
-				"# XF86VidModeGetAllModeLines(dpy, screen, count_ptr, modes_ptr)",
-				"lib.XF86VidModeGetAllModeLines.restype = ctypes.c_int",
-				"ret = lib.XF86VidModeGetAllModeLines(d, 0, ctypes.byref(count), ctypes.byref(modes))",
-				"print(f'modes-count={count.value}')",
-				"assert count.value >= 1, f'Expected >=1 mode, got {count.value}'",
-				"print('PASS: VidMode returned modes')",
-				"xlib.XCloseDisplay(d)",
-				"\" 2>&1",
-			].join("\n"),
-		]);
+		const result = await runPythonScript(sidecarContainer, "vidmode_getallmodelines.py", { env: { DISPLAY: ":99" } });
 		expect(result.output).toContain("PASS: VidMode returned modes");
 	});
 
 	test("VidMode LockModeSwitch toggles lock state", async () => {
-		const result = await sidecarContainer.exec([
-			"bash",
-			"-c",
-			[
-				"set -e",
-				"export DISPLAY=:99",
-				"python3 -c \"",
-				"import ctypes, ctypes.util",
-				"lib = ctypes.CDLL(ctypes.util.find_library('Xxf86vm'))",
-				"xlib = ctypes.CDLL(ctypes.util.find_library('X11'))",
-				"xlib.XOpenDisplay.restype = ctypes.c_void_p",
-				"d = xlib.XOpenDisplay(b':99')",
-				"assert d, 'Failed to open display'",
-				"# Lock mode switching",
-				"ret = lib.XF86VidModeLockModeSwitch(d, 0, 1)",
-				"print(f'lock-ret={ret}')",
-				"# Unlock mode switching",
-				"ret = lib.XF86VidModeLockModeSwitch(d, 0, 0)",
-				"print(f'unlock-ret={ret}')",
-				"print('PASS: VidMode lock/unlock succeeded')",
-				"xlib.XCloseDisplay(d)",
-				"\" 2>&1",
-			].join("\n"),
-		]);
+		const result = await runPythonScript(sidecarContainer, "vidmode_lockmodeswitch_toggle.py", { env: { DISPLAY: ":99" } });
 		expect(result.output).toContain("PASS: VidMode lock/unlock succeeded");
 	});
 });
@@ -14777,26 +13072,7 @@ test.describe("XVideo extension FOURCC formats", () => {
 	});
 
 	test("XVideo QueryAdaptors and ListImageFormats return formats", async () => {
-		const result = await sidecarContainer.exec([
-			"bash",
-			"-c",
-			[
-				"set -e",
-				"export DISPLAY=:99",
-				"python3 -c \"",
-				"import subprocess, re",
-				"out = subprocess.check_output(['xvinfo'], env={'DISPLAY': ':99'}).decode()",
-				"print(out[:2000])",
-				"# Count advertised formats",
-				"fmts = re.findall(r'id:\\s+0x[0-9a-fA-F]+', out)",
-				"print(f'format-count={len(fmts)}')",
-				"assert len(fmts) >= 8, f'Expected >=8 formats, got {len(fmts)}'",
-				"# Check for NV12 and YUY2",
-				"assert 'YUY2' in out or 'yuy2' in out.lower(), 'Missing YUY2'",
-				"print('PASS: XVideo formats advertised')",
-				"\" 2>&1",
-			].join("\n"),
-		]);
+		const result = await runPythonScript(sidecarContainer, "xvideo_queryadaptors_listformats.py", { env: { DISPLAY: ":99" } });
 		expect(result.output).toContain("PASS: XVideo formats advertised");
 	});
 });
@@ -14808,32 +13084,7 @@ test.describe("DRI3 extension capabilities", () => {
 	});
 
 	test("DRI3 GetSupportedModifiers returns LINEAR modifier", async () => {
-		const result = await sidecarContainer.exec([
-			"bash",
-			"-c",
-			[
-				"set -e",
-				"export DISPLAY=:99",
-				"python3 -c \"",
-				"import ctypes, ctypes.util, struct",
-				"x11 = ctypes.CDLL(ctypes.util.find_library('X11'))",
-				"x11.XOpenDisplay.restype = ctypes.c_void_p",
-				"d = x11.XOpenDisplay(b':99')",
-				"assert d, 'XOpenDisplay failed'",
-				"# Query the DRI3 extension",
-				"x11.XQueryExtension.restype = ctypes.c_int",
-				"x11.XQueryExtension.argtypes = [ctypes.c_void_p, ctypes.c_char_p, ctypes.POINTER(ctypes.c_int), ctypes.POINTER(ctypes.c_int), ctypes.POINTER(ctypes.c_int)]",
-				"major = ctypes.c_int(0)",
-				"first_event = ctypes.c_int(0)",
-				"first_error = ctypes.c_int(0)",
-				"ret = x11.XQueryExtension(d, b'DRI3', ctypes.byref(major), ctypes.byref(first_event), ctypes.byref(first_error))",
-				"print(f'DRI3 present={ret} major_opcode={major.value}')",
-				"assert ret != 0, 'DRI3 extension not present'",
-				"print('PASS: DRI3 extension available')",
-				"x11.XCloseDisplay(d)",
-				"\" 2>&1",
-			].join("\n"),
-		]);
+		const result = await runPythonScript(sidecarContainer, "dri3_getsupportedmodifiers_linear.py", { env: { DISPLAY: ":99" } });
 		expect(result.output).toContain("PASS: DRI3 extension available");
 	});
 });
@@ -14845,31 +13096,7 @@ test.describe("Present extension conformance", () => {
 	});
 
 	test("Present QueryVersion returns version >= 1.0", async () => {
-		const result = await sidecarContainer.exec([
-			"bash",
-			"-c",
-			[
-				"set -e",
-				"export DISPLAY=:99",
-				"python3 -c \"",
-				"import ctypes, ctypes.util",
-				"x11 = ctypes.CDLL(ctypes.util.find_library('X11'))",
-				"x11.XOpenDisplay.restype = ctypes.c_void_p",
-				"d = x11.XOpenDisplay(b':99')",
-				"assert d, 'Failed to open display'",
-				"x11.XQueryExtension.restype = ctypes.c_int",
-				"x11.XQueryExtension.argtypes = [ctypes.c_void_p, ctypes.c_char_p, ctypes.POINTER(ctypes.c_int), ctypes.POINTER(ctypes.c_int), ctypes.POINTER(ctypes.c_int)]",
-				"major = ctypes.c_int(0)",
-				"fe = ctypes.c_int(0)",
-				"ferr = ctypes.c_int(0)",
-				"ret = x11.XQueryExtension(d, b'Present', ctypes.byref(major), ctypes.byref(fe), ctypes.byref(ferr))",
-				"print(f'Present present={ret} major_opcode={major.value}')",
-				"assert ret != 0, 'Present extension not available'",
-				"print('PASS: Present extension available')",
-				"x11.XCloseDisplay(d)",
-				"\" 2>&1",
-			].join("\n"),
-		]);
+		const result = await runPythonScript(sidecarContainer, "present_queryversion.py", { env: { DISPLAY: ":99" } });
 		expect(result.output).toContain("PASS: Present extension available");
 	});
 
@@ -14895,39 +13122,7 @@ test.describe("Composite overlay window refcounting", () => {
 	});
 
 	test("Composite extension QueryVersion and overlay operations", async () => {
-		const result = await sidecarContainer.exec([
-			"bash",
-			"-c",
-			[
-				"set -e",
-				"export DISPLAY=:99",
-				"python3 -c \"",
-				"import ctypes, ctypes.util",
-				"x11 = ctypes.CDLL(ctypes.util.find_library('X11'))",
-				"xcomposite = ctypes.CDLL(ctypes.util.find_library('Xcomposite'))",
-				"x11.XOpenDisplay.restype = ctypes.c_void_p",
-				"d = x11.XOpenDisplay(b':99')",
-				"assert d, 'Failed to open display'",
-				"# QueryVersion",
-				"major = ctypes.c_int(0)",
-				"minor = ctypes.c_int(0)",
-				"xcomposite.XCompositeQueryVersion(d, ctypes.byref(major), ctypes.byref(minor))",
-				"print(f'Composite version={major.value}.{minor.value}')",
-				"assert major.value >= 0, 'Bad version'",
-				"# GetOverlayWindow",
-				"xcomposite.XCompositeGetOverlayWindow.restype = ctypes.c_ulong",
-				"x11.XDefaultRootWindow.restype = ctypes.c_ulong",
-				"root = x11.XDefaultRootWindow(d)",
-				"overlay = xcomposite.XCompositeGetOverlayWindow(d, root)",
-				"print(f'overlay-window={overlay:#x}')",
-				"assert overlay != 0, 'GetOverlayWindow returned 0'",
-				"# ReleaseOverlayWindow",
-				"xcomposite.XCompositeReleaseOverlayWindow(d, root)",
-				"print('PASS: Composite overlay get/release succeeded')",
-				"x11.XCloseDisplay(d)",
-				"\" 2>&1",
-			].join("\n"),
-		]);
+		const result = await runPythonScript(sidecarContainer, "composite_overlay_get_release.py", { env: { DISPLAY: ":99" } });
 		expect(result.output).toContain(
 			"PASS: Composite overlay get/release succeeded",
 		);
@@ -14941,40 +13136,7 @@ test.describe("XFIXES pointer barriers", () => {
 	});
 
 	test("CreatePointerBarrier and DeletePointerBarrier round-trip", async () => {
-		const result = await sidecarContainer.exec([
-			"bash",
-			"-c",
-			[
-				"set -e",
-				"export DISPLAY=:99",
-				"python3 -c \"",
-				"import ctypes, ctypes.util",
-				"x11 = ctypes.CDLL(ctypes.util.find_library('X11'))",
-				"xfixes = ctypes.CDLL(ctypes.util.find_library('Xfixes'))",
-				"x11.XOpenDisplay.restype = ctypes.c_void_p",
-				"d = x11.XOpenDisplay(b':99')",
-				"assert d, 'Failed to open display'",
-				"# Query XFixes version (>= 5.0 for barriers)",
-				"major = ctypes.c_int(0)",
-				"minor = ctypes.c_int(0)",
-				"xfixes.XFixesQueryVersion(d, ctypes.byref(major), ctypes.byref(minor))",
-				"print(f'XFixes version={major.value}.{minor.value}')",
-				"assert major.value >= 5, f'Need XFixes >= 5, got {major.value}'",
-				"# Create a barrier at y=100 spanning x=0..800",
-				"root = ctypes.c_ulong(x11.XDefaultRootWindow(d))",
-				"xfixes.XFixesCreatePointerBarrier.restype = ctypes.c_ulong",
-				"# XFixesCreatePointerBarrier(dpy, window, x1, y1, x2, y2, directions, num_devices, devices)",
-				"barrier = xfixes.XFixesCreatePointerBarrier(d, root, 0, 100, 800, 100, 0, 0, None)",
-				"print(f'barrier-id={barrier}')",
-				"assert barrier != 0, 'CreatePointerBarrier returned 0'",
-				"# Delete the barrier",
-				"xfixes.XFixesDestroyPointerBarrier(d, barrier)",
-				"x11.XSync(d, 0)",
-				"print('PASS: pointer barrier create/delete succeeded')",
-				"x11.XCloseDisplay(d)",
-				"\" 2>&1",
-			].join("\n"),
-		]);
+		const result = await runPythonScript(sidecarContainer, "xfixes_pointer_barrier_create_delete.py", { env: { DISPLAY: ":99" } });
 		expect(result.output).toContain(
 			"PASS: pointer barrier create/delete succeeded",
 		);
@@ -14988,30 +13150,7 @@ test.describe("XIM input method protocol", () => {
 	});
 
 	test("XIM server is reachable and accepts connections", async () => {
-		const result = await sidecarContainer.exec([
-			"bash",
-			"-c",
-			[
-				"set -e",
-				"export DISPLAY=:99",
-				"# XIM server is advertised via the XIM_SERVERS property on root.",
-				"# Verify the property exists and points to a valid server window.",
-				"python3 -c \"",
-				"import Xlib.display",
-				"d = Xlib.display.Display(':99')",
-				"root = d.screen().root",
-				"XIM_SERVERS = d.intern_atom('XIM_SERVERS')",
-				"prop = root.get_property(XIM_SERVERS, 0, 0, 256)",
-				"if prop and prop.value:",
-				"    print(f'XIM_SERVERS property found, {len(prop.value)} atoms')",
-				"    print('PASS: XIM server advertised')",
-				"else:",
-				"    # No XIM_SERVERS property is OK if the built-in server uses env var",
-				"    print('PASS: XIM server uses XMODIFIERS (no XIM_SERVERS property)')",
-				"d.close()",
-				"\" 2>&1",
-			].join("\n"),
-		]);
+		const result = await runPythonScript(sidecarContainer, "xim_server_reachable.py", { env: { DISPLAY: ":99" } });
 		expect(result.output).toContain("PASS:");
 	});
 });
@@ -15123,33 +13262,7 @@ test.describe("SYNC extension fence operations", () => {
 	});
 
 	test("SYNC extension version and counter operations", async () => {
-		const result = await sidecarContainer.exec([
-			"bash",
-			"-c",
-			[
-				"set -e",
-				"export DISPLAY=:99",
-				"python3 -c \"",
-				"import ctypes, ctypes.util",
-				"x11 = ctypes.CDLL(ctypes.util.find_library('X11'))",
-				"xext = ctypes.CDLL(ctypes.util.find_library('Xext'))",
-				"x11.XOpenDisplay.restype = ctypes.c_void_p",
-				"d = x11.XOpenDisplay(b':99')",
-				"assert d, 'Failed to open display'",
-				"# Check SYNC extension is available",
-				"x11.XQueryExtension.restype = ctypes.c_int",
-				"x11.XQueryExtension.argtypes = [ctypes.c_void_p, ctypes.c_char_p, ctypes.POINTER(ctypes.c_int), ctypes.POINTER(ctypes.c_int), ctypes.POINTER(ctypes.c_int)]",
-				"major = ctypes.c_int(0)",
-				"fe = ctypes.c_int(0)",
-				"ferr = ctypes.c_int(0)",
-				"ret = x11.XQueryExtension(d, b'SYNC', ctypes.byref(major), ctypes.byref(fe), ctypes.byref(ferr))",
-				"print(f'SYNC present={ret} major_opcode={major.value}')",
-				"assert ret != 0, 'SYNC extension not present'",
-				"print('PASS: SYNC extension available')",
-				"x11.XCloseDisplay(d)",
-				"\" 2>&1",
-			].join("\n"),
-		]);
+		const result = await runPythonScript(sidecarContainer, "sync_extension_version_counters.py", { env: { DISPLAY: ":99" } });
 		expect(result.output).toContain("PASS: SYNC extension available");
 	});
 });

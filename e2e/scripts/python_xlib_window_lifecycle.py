@@ -1,0 +1,12 @@
+from Xlib import display, X
+d = display.Display()
+s = d.screen()
+w = s.root.create_window(10, 10, 100, 100, 0, s.root_depth,   X.InputOutput, X.CopyFromParent)
+w.map()
+d.sync()
+geom = w.get_geometry()
+print(f'window {w.id:#x}: {geom.width}x{geom.height}')
+w.destroy()
+d.sync()
+print('WINDOW_LIFECYCLE_OK')
+d.close()
