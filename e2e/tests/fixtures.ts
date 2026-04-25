@@ -37,10 +37,21 @@ let frontendServer: ChildProcess;
 let frontendPort: number;
 let backendPort: number;
 let setupDone = false;
+// Setup is awaited concurrently by `sidecarContainer` and `frontendUrl`
+// fixtures on the same test. Without this in-flight promise, both calls
+// pass the `if (setupDone) return` check and start setup in parallel,
+// burning two Docker networks per test and exhausting the subnet pool
+// after ~30 spec files.
+let setupPromise: Promise<void> | null = null;
 
 async function ensureSetup() {
 	if (setupDone) return;
+	if (setupPromise) return setupPromise;
+	setupPromise = doSetup();
+	return setupPromise;
+}
 
+async function doSetup() {
 	network = await new Network().start();
 
 	backendContainer = await GenericContainer.fromDockerfile(
@@ -144,6 +155,7 @@ async function teardownAll() {
 	await backendContainer?.stop().catch(() => {});
 	await network?.stop().catch(() => {});
 	setupDone = false;
+	setupPromise = null;
 }
 
 function findFreePort(): Promise<number> {
