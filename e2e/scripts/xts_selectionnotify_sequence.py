@@ -7,13 +7,14 @@ w = s.root.create_window(0, 0, 1, 1, 0, s.root_depth,
 w.map()
 d.sync()
 time.sleep(0.1)
-# Request selection with no owner — should get SelectionNotify with None
+# Request selection conversion when no owner exists. The server should
+# reply with a SelectionNotify whose property field is None (0).
+# (The earlier draft also called d.send_event with a hand-rolled
+# SelectionRequest, but that's redundant — convert_selection is what
+# the server actually responds to — and python-xlib's SelectionRequest
+# constructor requires an `owner` field which the test wasn't passing.)
 clipboard = d.intern_atom("CLIPBOARD")
 prop = d.intern_atom("_TEST_SEL")
-d.send_event(w, Xlib.protocol.event.SelectionRequest(
-    type=30, requestor=w.id, selection=clipboard,
-    target=Xlib.Xatom.STRING, property=prop, time=0), event_mask=0)
-# Actually use convert_selection
 w.convert_selection(clipboard, Xlib.Xatom.STRING, prop, 0)
 d.sync()
 time.sleep(0.2)

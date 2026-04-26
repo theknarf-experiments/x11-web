@@ -1,29 +1,19 @@
 import Xlib.display, Xlib.X, sys
-from Xlib.protocol import request
 passed = 0; failed = 0
 d = Xlib.display.Display()
 root = d.screen().root
-try:
-    # QueryBestSize for Cursor (class 0)
-    reply = d.query_best_size(0, root, 32, 32)
-    if reply.width > 0 and reply.height > 0:
-        passed += 1; print(f"PASS: cursor best={reply.width}x{reply.height}")
-    else:
-        failed += 1; print(f"FAIL: cursor best={reply.width}x{reply.height}")
-    # QueryBestSize for Tile (class 1)
-    reply = d.query_best_size(1, root, 16, 16)
-    if reply.width > 0 and reply.height > 0:
-        passed += 1; print(f"PASS: tile best={reply.width}x{reply.height}")
-    else:
-        failed += 1; print(f"FAIL: tile best={reply.width}x{reply.height}")
-    # QueryBestSize for Stipple (class 2)
-    reply = d.query_best_size(2, root, 8, 8)
-    if reply.width > 0 and reply.height > 0:
-        passed += 1; print(f"PASS: stipple best={reply.width}x{reply.height}")
-    else:
-        failed += 1; print(f"FAIL: stipple best={reply.width}x{reply.height}")
-except Exception as e:
-    failed += 1; print(f"FAIL: {e}")
+# QueryBestSize is a per-drawable request in python-xlib —
+# Drawable.query_best_size(class_, width, height), not a method on
+# Display. The class enum is Cursor=0, Tile=1, Stipple=2.
+for class_id, name, w, h in [(0, "cursor", 32, 32), (1, "tile", 16, 16), (2, "stipple", 8, 8)]:
+    try:
+        reply = root.query_best_size(class_id, w, h)
+        if reply.width > 0 and reply.height > 0:
+            passed += 1; print(f"PASS: {name} best={reply.width}x{reply.height}")
+        else:
+            failed += 1; print(f"FAIL: {name} best={reply.width}x{reply.height}")
+    except Exception as e:
+        failed += 1; print(f"FAIL: {name}: {type(e).__name__}: {e}")
 d.close()
 print(f"xts-bestsize: pass={passed} fail={failed}")
 sys.exit(1 if failed > 0 else 0)
