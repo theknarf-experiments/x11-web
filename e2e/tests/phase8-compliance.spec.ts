@@ -455,6 +455,7 @@ test.describe("Resource cleanup on client disconnect", () => {
 	test("windows are destroyed when client disconnects in Destroy mode", async ({ sidecarContainer }) => {
 		test.setTimeout(30_000);
 		const result = await runPythonScript(sidecarContainer, "client_disconnect_destroy_windows.py", { env: { DISPLAY: ":99" } });
+		console.log(`Destroy-mode test output: ${result.output}`);
 		const match = result.output.match(
 			/cleanup-destroy: pass=(\d+) fail=(\d+)/,
 		);

@@ -804,9 +804,18 @@ pub(crate) async fn handle_client(
                                 .collect();
                             state.window_router.unregister_all(&uuids);
 
-                            // Remove from shared window registry and notify frontend
+                            // Remove from shared window registry and notify frontend.
+                            // Also unlink each dying window from its parent's
+                            // children_order so QueryTree from a fresh client
+                            // (which clones shared on connect) doesn't keep
+                            // returning the dead id.
                             if let Ok(mut shared) = state.shared_windows.lock() {
                                 for &wid in &wids {
+                                    if let Some(parent_id) = shared.get(&wid).map(|w| w.parent) {
+                                        if let Some(parent) = shared.get_mut(&parent_id) {
+                                            parent.children_order.retain(|&c| c != wid);
+                                        }
+                                    }
                                     shared.remove(&wid);
                                 }
                             }
@@ -818,6 +827,14 @@ pub(crate) async fn handle_client(
                                             window_id: uuid.clone(),
                                         },
                                     ));
+                                }
+                                // Same unlink in our own local view, in case
+                                // anything below reads from state.windows
+                                // before the per-client teardown wipes it.
+                                if let Some(parent_id) = state.windows.get(&wid).map(|w| w.parent) {
+                                    if let Some(parent) = state.windows.get_mut(&parent_id) {
+                                        parent.children_order.retain(|&c| c != wid);
+                                    }
                                 }
                                 state.windows.remove(&wid);
                             }
