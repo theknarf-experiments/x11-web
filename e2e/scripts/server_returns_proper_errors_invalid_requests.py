@@ -14,10 +14,11 @@ except Exception as e:
 try:
     root = d.screen().root
     tree = root.query_tree()
-    if tree.root == root.id:
+    # tree.root is a Window resource, not an int — compare via .id
+    if tree.root.id == root.id:
         passed += 1; print("PASS: QueryTree root matches")
     else:
-        failed += 1; print(f"FAIL: root mismatch {tree.root} != {root.id}")
+        failed += 1; print(f"FAIL: root mismatch {tree.root.id} != {root.id}")
 except Exception as e:
     failed += 1; print(f"FAIL: QueryTree: {e}")
 

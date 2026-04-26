@@ -22,12 +22,13 @@ XSEL_DATA = d1.intern_atom("XSEL_DATA")
 owner.set_selection_owner(CLIPBOARD, Xlib.X.CurrentTime)
 d1.sync()
 
-# Verify ownership
+# Verify ownership (get_selection_owner returns a Window resource, not an int)
 sel_owner = d1.get_selection_owner(CLIPBOARD)
-if sel_owner == owner.id:
+sel_owner_id = sel_owner.id if hasattr(sel_owner, "id") else sel_owner
+if sel_owner_id == owner.id:
     passed += 1; print("PASS: selection owner set")
 else:
-    failed += 1; print(f"FAIL: owner is {sel_owner:#x}, expected {owner.id:#x}")
+    failed += 1; print(f"FAIL: owner is {sel_owner_id:#x}, expected {owner.id:#x}")
 
 # Request conversion
 requestor.convert_selection(CLIPBOARD, UTF8_STRING, XSEL_DATA, Xlib.X.CurrentTime)
