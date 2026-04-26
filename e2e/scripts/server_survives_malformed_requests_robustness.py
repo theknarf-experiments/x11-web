@@ -45,14 +45,18 @@ try:
         tests_passed += 1
 except: pass
 sock.close()
-# Verify server still works after malformed requests
-import Xlib.display
+# Verify server still works after malformed requests by opening a fresh
+# connection and issuing a real request that requires a reply.
+import Xlib.display, Xlib.X
 try:
     d = Xlib.display.Display()
-    info = d.display_name()
+    root = d.screen().root
+    geom = root.get_geometry()  # forces a round-trip, raises on bad reply
+    if geom.width == 0:
+        raise RuntimeError("root reported zero width")
     d.close()
     tests_passed += 1
 except Exception as e:
-    print(f"FAIL: server crashed after fuzzing: {e}")
+    print(f"FAIL: server crashed after fuzzing: {type(e).__name__}: {e}")
     exit(1)
 print(f"PASS: {tests_passed} robustness tests passed, server still responsive")
