@@ -21,8 +21,21 @@ pub(crate) fn handle_change_window_attributes(state: &mut ClientState, data: &[u
     let wid = req.window;
     let vl = &*req.value_list;
 
+    // Cross-connection: another client may want to set attributes (typically
+    // event_mask) on a window owned by a different client. The owning
+    // client's window lives in shared_windows; pull it into our local view
+    // first so the rest of the handler can operate on it.
     if !state.windows.contains_key(&wid) {
-        return build_error(WINDOW_ERROR, seq, wid, 2, 0);
+        let shared_win = state
+            .shared_windows
+            .lock()
+            .ok()
+            .and_then(|sw| sw.get(&wid).cloned());
+        if let Some(sw) = shared_win {
+            state.windows.insert(wid, sw);
+        } else {
+            return build_error(WINDOW_ERROR, seq, wid, 2, 0);
+        }
     }
 
     // Pre-validate enumerated attributes before mutating state
