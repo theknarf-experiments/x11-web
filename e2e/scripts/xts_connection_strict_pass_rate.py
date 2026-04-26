@@ -1,6 +1,11 @@
 import Xlib.display, Xlib.X, sys
 d = Xlib.display.Display()
 pass_count = 0; fail_count = 0
+# python-xlib's connection-setup info is a DictWrapper backed by
+# _data, with field names that differ from the Xlib C names
+# (protocol_major not protocol_major_version, release_number not
+# vendor_release, etc.).
+info = d.display.info._data
 # XOpenDisplay
 try:
     assert d is not None; pass_count += 1
@@ -23,39 +28,39 @@ try:
 except: fail_count += 1
 # XProtocolVersion
 try:
-    assert d.display.info.protocol_major_version == 11; pass_count += 1
+    assert info["protocol_major"] == 11; pass_count += 1
 except: fail_count += 1
 # XProtocolRevision
 try:
-    assert d.display.info.protocol_minor_version == 0; pass_count += 1
+    assert info["protocol_minor"] == 0; pass_count += 1
 except: fail_count += 1
 # XServerVendor
 try:
-    v = d.display.info.vendor; assert len(v) > 0; pass_count += 1
+    v = info["vendor"]; assert len(v) > 0; pass_count += 1
 except: fail_count += 1
 # XVendorRelease
 try:
-    r = d.display.info.vendor_release; assert r >= 0; pass_count += 1
+    r = info["release_number"]; assert r >= 0; pass_count += 1
 except: fail_count += 1
 # XImageByteOrder
 try:
-    bo = d.display.info.image_byte_order; assert bo in (0, 1); pass_count += 1
+    bo = info["image_byte_order"]; assert bo in (0, 1); pass_count += 1
 except: fail_count += 1
 # XBitmapUnit
 try:
-    bu = d.display.info.bitmap_format_scanline_unit; assert bu in (8, 16, 32); pass_count += 1
+    bu = info["bitmap_format_scanline_unit"]; assert bu in (8, 16, 32); pass_count += 1
 except: fail_count += 1
 # XBitmapBitOrder
 try:
-    bbo = d.display.info.bitmap_format_bit_order; assert bbo in (0, 1); pass_count += 1
+    bbo = info["bitmap_format_bit_order"]; assert bbo in (0, 1); pass_count += 1
 except: fail_count += 1
 # XBitmapPad
 try:
-    bp = d.display.info.bitmap_format_scanline_pad; assert bp in (8, 16, 32); pass_count += 1
+    bp = info["bitmap_format_scanline_pad"]; assert bp in (8, 16, 32); pass_count += 1
 except: fail_count += 1
 # MaxRequestSize
 try:
-    mrl = d.display.info.max_request_length; assert mrl >= 4096; pass_count += 1
+    mrl = info["max_request_length"]; assert mrl >= 4096; pass_count += 1
 except: fail_count += 1
 # Root depth check
 try:
@@ -65,9 +70,12 @@ except: fail_count += 1
 try:
     rv = d.screen().root_visual; assert rv > 0; pass_count += 1
 except: fail_count += 1
-# DefaultColormap
+# DefaultColormap — python-xlib wraps it as a Colormap object (not an
+# int), so compare via .id.
 try:
-    cm = d.screen().default_colormap; assert cm > 0; pass_count += 1
+    cm = d.screen().default_colormap
+    cm_id = cm.id if hasattr(cm, "id") else cm
+    assert cm_id > 0; pass_count += 1
 except: fail_count += 1
 # WhitePixel / BlackPixel
 try:

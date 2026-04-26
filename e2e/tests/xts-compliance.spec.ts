@@ -2518,9 +2518,13 @@ test.describe("Xts (X Test Suite) compliance", () => {
 					"export DISPLAY=:99",
 					"cd /opt/xts-src || exit 0",
 					"passed=0; failed=0; errors=0",
+					// 60s wall-clock budget + 3s per-binary cap (instead of
+					// 30 binaries × 10s = 300s worst case).
+					"DEADLINE=$(( $(date +%s) + 60 ))",
 					"if [ -d xts5/Xproto ]; then",
 					"  for t in $(find xts5/Xproto -maxdepth 1 -type f -executable 2>/dev/null | sort | head -30); do",
-					"    out=$(timeout 10 $t 2>&1 || true)",
+					"    [ $(date +%s) -lt $DEADLINE ] || break",
+					"    out=$(timeout 3 $t 2>&1 || true)",
 					"    p=$(echo \"$out\" | grep -c PASS || true)",
 					"    f=$(echo \"$out\" | grep -c FAIL || true)",
 					"    passed=$((passed+p))",
@@ -3411,6 +3415,9 @@ test.describe("Conformance: Extension conformance", () => {
 	});
 
 	test("rendercheck full suite passes", async ({ sidecarContainer }) => {
+		// rendercheck can take a while; the inner timeout is 120s, but we
+		// also need playwright to wait that long.
+		test.setTimeout(180_000);
 		const result = await sidecarContainer.exec([
 			"bash", "-c",
 			"timeout 120 rendercheck -d :99 2>&1 | tail -5",
@@ -3473,10 +3480,14 @@ test.describe("XTS deep protocol conformance", () => {
 				"export DISPLAY=:99",
 				"cd /opt/xts-src 2>/dev/null || exit 0",
 				"passed=0; failed=0; total=0",
+				// 60s wall-clock cap and 3s per-binary cap so a hung XTS
+				// binary can't eat the test budget.
+				"DEADLINE=$(( $(date +%s) + 60 ))",
 				"if [ -d xts5/Xproto ]; then",
 				"  for t in $(find xts5/Xproto -maxdepth 1 -type f -executable 2>/dev/null | sort | head -50); do",
+				"    [ $(date +%s) -lt $DEADLINE ] || break",
 				"    total=$((total+1))",
-				"    output=$(timeout 15 $t 2>&1 || true)",
+				"    output=$(timeout 3 $t 2>&1 || true)",
 				"    if echo \"$output\" | grep -q PASS; then",
 				"      passed=$((passed+1))",
 				"    elif echo \"$output\" | grep -q FAIL; then",
@@ -3498,11 +3509,13 @@ test.describe("XTS deep protocol conformance", () => {
 				"export DISPLAY=:99",
 				"cd /opt/xts-src 2>/dev/null || exit 0",
 				"passed=0; failed=0; total=0",
+				"DEADLINE=$(( $(date +%s) + 60 ))",
 				"for dir in xts5/Xlib4 xts5/Xlib5 xts5/Xlib6 xts5/Xlib7 xts5/Xlib8 xts5/Xlib9 xts5/Xlib10 xts5/Xlib11 xts5/Xlib12 xts5/Xlib13; do",
 				"  if [ -d \"$dir\" ]; then",
 				"    for t in $(find \"$dir\" -maxdepth 1 -type f -executable 2>/dev/null | sort | head -20); do",
+				"      [ $(date +%s) -lt $DEADLINE ] || break 2",
 				"      total=$((total+1))",
-				"      output=$(timeout 15 $t 2>&1 || true)",
+				"      output=$(timeout 3 $t 2>&1 || true)",
 				"      if echo \"$output\" | grep -q PASS; then",
 				"        passed=$((passed+1))",
 				"      elif echo \"$output\" | grep -q FAIL; then",

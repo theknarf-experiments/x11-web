@@ -48,14 +48,17 @@ try:
     assert p is not None and len(p.value) >= 2; pass_count += 1
     root.delete_property(ca)
 except Exception as e: fail_count += 1; print(f"FAIL cardinal: {e}")
-# Selection owner
+# Selection owner — get_selection_owner returns a Window object (not
+# a raw XID); compare via .id.
 try:
     sel = d.intern_atom("XTS_SELECTION")
     w = root.create_window(0, 0, 1, 1, 0, d.screen().root_depth)
     w.set_selection_owner(sel, Xlib.X.CurrentTime)
     d.sync()
     owner = d.get_selection_owner(sel)
-    assert owner == w.id; pass_count += 1
+    owner_id = owner.id if hasattr(owner, "id") else owner
+    assert owner_id == w.id, f"owner_id={owner_id:#x} expected {w.id:#x}"
+    pass_count += 1
     w.destroy()
 except Exception as e: fail_count += 1; print(f"FAIL selection: {e}")
 d.close()
