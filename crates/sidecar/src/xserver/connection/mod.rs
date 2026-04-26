@@ -329,6 +329,8 @@ pub(crate) async fn handle_client(
         grabs: GrabState::default(),
         save_set: Vec::new(),
         close_down_mode: 0,
+        close_down_mode_atomic: std::sync::Arc::new(std::sync::atomic::AtomicU8::new(0)),
+        disconnect_cleanup_done: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
         last_entered_window: ROOT_WINDOW,
         pressed_keys: [0u8; 32],
         server_start: std::time::Instant::now(),
@@ -515,6 +517,19 @@ pub(crate) async fn handle_client(
     let _client_reg_guard = ClientRegistryGuard {
         registry: client_registry,
         resource_id_base,
+    };
+    // Fallback cleanup for the case where the request loop exits via a write
+    // error (broken pipe) instead of n==0. Without it, the explicit cleanup
+    // path is skipped and the client's windows leak into shared_windows
+    // forever, where the next-connecting client clones them.
+    let _resources_guard = ClientResourcesCleanupGuard {
+        shared_windows: state.shared_windows.clone(),
+        shared_pixmaps: state.shared_pixmaps.clone(),
+        shared_gcs: state.shared_gcs.clone(),
+        event_broadcaster: state.event_broadcaster.clone(),
+        client_id: client_id.clone(),
+        close_down_mode: state.close_down_mode_atomic.clone(),
+        cleanup_done: state.disconnect_cleanup_done.clone(),
     };
 
     loop {
@@ -922,6 +937,11 @@ pub(crate) async fn handle_client(
                             state.window_router.unregister_all(&uuids);
                         }
                     }
+                    // Tell the cleanup guard to skip — we've already done the
+                    // close-down-mode-aware teardown here.
+                    state
+                        .disconnect_cleanup_done
+                        .store(true, std::sync::atomic::Ordering::SeqCst);
                     return Ok(());
                 }
 

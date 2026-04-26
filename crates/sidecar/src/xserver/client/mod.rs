@@ -99,6 +99,13 @@ pub(crate) struct ClientState {
     pub(crate) save_set: Vec<u32>,
     /// Close-down mode for this client (0=Destroy, 1=RetainPermanent, 2=RetainTemporary).
     pub(crate) close_down_mode: u8,
+    /// Atomic mirror of `close_down_mode`, shared with the disconnect cleanup
+    /// guard so it can decide whether to tear down shared resources without
+    /// touching ClientState (which is not Sync).
+    pub(crate) close_down_mode_atomic: std::sync::Arc<std::sync::atomic::AtomicU8>,
+    /// Set to true by the explicit `n == 0` cleanup path so the disconnect
+    /// guard skips its fallback sweep.
+    pub(crate) disconnect_cleanup_done: std::sync::Arc<std::sync::atomic::AtomicBool>,
     /// Last window the pointer entered (for crossing events).
     pub(crate) last_entered_window: u32,
     /// Currently pressed keys (for QueryKeymap).

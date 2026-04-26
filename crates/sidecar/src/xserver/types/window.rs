@@ -1,10 +1,13 @@
 //! Window state, property storage, WM state, and RAII guards.
 
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 use std::sync::{Arc, Mutex};
 use tokio::sync::mpsc;
 
 use super::region::RegionRect;
+use super::routing::{EventBroadcaster, SharedWindows};
+use super::pixmap::{SharedGcs, SharedPixmaps};
 use crate::framebuffer::Framebuffer;
 
 /// EWMH window type, used for stacking layer and focus/decoration policy.
@@ -253,5 +256,68 @@ impl Drop for ClientRegistryGuard {
         if let Ok(mut reg) = self.registry.lock() {
             reg.retain(|&base| base != self.resource_id_base);
         }
+    }
+}
+
+/// RAII guard that runs shared-registry cleanup when a client connection task
+/// exits. Without this, a client that disconnects via a write error (broken
+/// pipe) bypasses the explicit `n == 0` cleanup path inside the request loop —
+/// its windows leak into [`SharedWindows`] forever, and any future client that
+/// clones the shared map sees the orphaned entries.
+///
+/// The guard is a fallback: when the explicit `n == 0` cleanup runs to
+/// completion, it sets `cleanup_done` to true and the guard becomes a no-op.
+/// If the connection task exits any other way (panic, write error, future
+/// drop), the guard sweeps the shared registries based on the last known
+/// close-down mode.
+pub(crate) struct ClientResourcesCleanupGuard {
+    pub(crate) shared_windows: SharedWindows,
+    pub(crate) shared_pixmaps: SharedPixmaps,
+    pub(crate) shared_gcs: SharedGcs,
+    pub(crate) event_broadcaster: EventBroadcaster,
+    pub(crate) client_id: String,
+    /// Last value of `state.close_down_mode` written by the request loop.
+    /// 0 = Destroy (default), 1 = RetainPermanent, 2 = RetainTemporary.
+    pub(crate) close_down_mode: Arc<AtomicU8>,
+    /// Set by the explicit `n == 0` cleanup path so the guard skips on Drop.
+    pub(crate) cleanup_done: Arc<AtomicBool>,
+}
+
+impl Drop for ClientResourcesCleanupGuard {
+    fn drop(&mut self) {
+        if self.cleanup_done.load(Ordering::SeqCst) {
+            return;
+        }
+        // Always unsubscribe — broadcaster references the dead channel
+        // otherwise, which causes broadcasts to silently drop.
+        self.event_broadcaster.unsubscribe_client(&self.client_id);
+
+        // Only Destroy mode tears down the windows in the shared registry.
+        // RetainPermanent/RetainTemporary leave them alive on purpose.
+        if self.close_down_mode.load(Ordering::SeqCst) != 0 {
+            return;
+        }
+        if let Ok(mut shared) = self.shared_windows.lock() {
+            let owned: Vec<u32> = shared
+                .iter()
+                .filter(|(_, w)| w.owner_client_id == self.client_id)
+                .map(|(&wid, _)| wid)
+                .collect();
+            for &wid in &owned {
+                if let Some(parent_id) = shared.get(&wid).map(|w| w.parent) {
+                    if let Some(parent) = shared.get_mut(&parent_id) {
+                        parent.children_order.retain(|&c| c != wid);
+                    }
+                }
+                shared.remove(&wid);
+            }
+        }
+        if let Ok(mut shared) = self.shared_pixmaps.lock() {
+            shared.retain(|_, p| p.owner_client_id != self.client_id);
+        }
+        // SharedGcs has no per-client owner field, so we conservatively leave
+        // GCs alone here. Per-client GCs in state.gcs are already dropped
+        // when ClientState drops.
+        let _ = &self.shared_gcs;
     }
 }

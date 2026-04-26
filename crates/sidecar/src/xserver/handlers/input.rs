@@ -977,6 +977,9 @@ pub(crate) fn handle_set_close_down_mode(state: &mut ClientState, data: &[u8]) -
         return build_error(VALUE_ERROR, state.sequence, mode as u32, 112, 0);
     }
     state.close_down_mode = mode;
+    state
+        .close_down_mode_atomic
+        .store(mode, std::sync::atomic::Ordering::SeqCst);
     debug!("SetCloseDownMode: mode={mode}");
     Vec::new()
 }
