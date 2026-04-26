@@ -71,6 +71,28 @@ impl ClientState {
     /// Sync local windows with the shared store.
     pub(crate) fn sync_windows(&mut self) {
         if let Ok(mut shared) = self.shared_windows.lock() {
+            // 1. shared → local: pull in foreign windows we don't yet have, and
+            //    drop foreign windows that have disappeared from shared (their
+            //    owning client disconnected and removed them).
+            let shared_keys: std::collections::HashSet<u32> = shared.keys().copied().collect();
+            let foreign_to_remove: Vec<u32> = self
+                .windows
+                .iter()
+                .filter(|(wid, win)| {
+                    // A window is "foreign" if some other client created it.
+                    // If that client disconnects in Destroy mode, shared_windows
+                    // loses the entry; we have to drop our cached copy too,
+                    // otherwise step 3 below will resurrect it.
+                    !win.owner_client_id.is_empty()
+                        && win.owner_client_id != self.client_id
+                        && !shared_keys.contains(wid)
+                })
+                .map(|(wid, _)| *wid)
+                .collect();
+            for wid in foreign_to_remove {
+                self.windows.remove(&wid);
+            }
+
             for (&wid, shared_win) in shared.iter() {
                 if let Some(local_win) = self.windows.get_mut(&wid) {
                     if shared_win.mapped && !local_win.mapped {
@@ -90,7 +112,12 @@ impl ClientState {
                 }
             }
 
+            // 2. local → shared: push our owned windows into the shared store.
+            //    Don't re-publish foreign windows we cached — that would
+            //    resurrect entries the owning client already destroyed.
             for (&wid, local_win) in self.windows.iter() {
+                let is_mine = local_win.owner_client_id.is_empty()
+                    || local_win.owner_client_id == self.client_id;
                 if let Some(shared_win) = shared.get_mut(&wid) {
                     if local_win.mapped {
                         shared_win.mapped = true;
@@ -105,15 +132,27 @@ impl ClientState {
                     shared_win.y = local_win.y;
                     shared_win.width = local_win.width;
                     shared_win.height = local_win.height;
-                } else {
+                } else if is_mine {
                     shared.insert(wid, local_win.clone());
                 }
             }
 
+            // 3. Drop shared entries that no client has locally any more.
+            //    Only safe for windows we own (otherwise we'd evict another
+            //    client's window from shared just because we don't have it
+            //    cached locally).
             let shared_ids: Vec<u32> = shared.keys().copied().collect();
             for wid in shared_ids {
                 if !self.windows.contains_key(&wid) {
-                    shared.remove(&wid);
+                    let owner_is_me = shared
+                        .get(&wid)
+                        .map(|w| {
+                            w.owner_client_id.is_empty() || w.owner_client_id == self.client_id
+                        })
+                        .unwrap_or(false);
+                    if owner_is_me {
+                        shared.remove(&wid);
+                    }
                 }
             }
         }
