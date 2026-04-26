@@ -63,11 +63,14 @@ d.sync()
 time.sleep(0.1)
 
 focus = d.get_input_focus()
-if focus.focus.id in (Xlib.X.PointerRoot, 1):
+# focus.focus may surface as either a Window resource or the integer
+# PointerRoot (1); coerce to an int either way before comparing.
+focus_id = focus.focus.id if hasattr(focus.focus, "id") else focus.focus
+if focus_id in (Xlib.X.PointerRoot, 1):
     passed += 1; print("PASS: focus reverted to PointerRoot after destroy")
 else:
     # Might revert to root or None - also acceptable per spec
-    passed += 1; print(f"PASS: focus reverted to {focus.focus.id:#x} after destroy")
+    passed += 1; print(f"PASS: focus reverted to {focus_id:#x} after destroy")
 
 w1.destroy()
 d.close()
