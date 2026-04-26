@@ -21,8 +21,9 @@ w = root.create_window(0, 0, 100, 100, 0, screen.root_depth,
 w.map()
 d.sync()
 w.fill_rectangle(gc, 10, 10, 80, 80)
-w.draw_line(gc, 0, 0, 100, 100)
-w.draw_rectangle(gc, 5, 5, 90, 90)
+# python-xlib has no draw_line/draw_rectangle — use the actual methods.
+w.line(gc, 0, 0, 100, 100)
+w.rectangle(gc, 5, 5, 90, 90)
 d.sync()
 gc.free()
 w.destroy()

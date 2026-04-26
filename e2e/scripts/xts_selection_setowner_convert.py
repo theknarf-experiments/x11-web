@@ -11,11 +11,13 @@ d.sync()
 clipboard = d.intern_atom("CLIPBOARD")
 w.set_selection_owner(clipboard, X.CurrentTime)
 d.sync()
-# Verify we own it
+# Verify we own it. python-xlib returns a Window object from
+# get_selection_owner, not a raw XID — compare via .id.
 owner = d.get_selection_owner(clipboard)
-if owner == w.id:
+owner_id = owner.id if hasattr(owner, "id") else owner
+if owner_id == w.id:
     print("PASS: SetSelectionOwner + GetSelectionOwner round-trip")
 else:
-    print(f"FAIL: expected owner={w.id:#x}, got {owner:#x}")
+    print(f"FAIL: expected owner={w.id:#x}, got {owner_id:#x}")
 w.destroy()
 d.close()

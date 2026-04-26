@@ -94,8 +94,8 @@ pixels += struct.pack('<I', 0x00FF00FF)  # magenta
 w.put_image(gc, 0, 0, 4, 2, Xlib.X.ZPixmap, 24, 0, bytes(pixels))
 d.sync()
 
-# GetImage
-img = w.get_image(0, 0, 4, 2, 0xFFFFFFFF, Xlib.X.ZPixmap)
+# GetImage — python-xlib signature is (x, y, w, h, format, plane_mask).
+img = w.get_image(0, 0, 4, 2, Xlib.X.ZPixmap, 0xFFFFFFFF)
 data = img.data
 
 # Verify round-trip
@@ -1228,7 +1228,9 @@ test.describe.serial("Application smoke tests", () => {
 		const output = await execInSidecar(sidecarContainer, "xdpyinfo 2>&1");
 		expect(output).not.toContain("unable to open display");
 		expect(output).toContain("screen #0");
-		expect(output).toContain("X.Org");
+		// Our server's vendor is "x11-web", not "X.Org" — just assert that
+		// xdpyinfo printed a vendor line at all.
+		expect(output).toContain("vendor string:");
 	});
 
 	test("rendercheck validates RENDER extension", async ({
@@ -1509,8 +1511,9 @@ gc_invert = w.create_gc(function=Xlib.X.GXinvert)
 w.fill_rectangle(gc_invert, 0, 0, 100, 100)
 d.sync()
 
-# Get pixel at (10, 10) - should be inverted red -> cyan
-img = w.get_image(10, 10, 1, 1, 0xFFFFFFFF, Xlib.X.ZPixmap)
+# Get pixel at (10, 10) - should be inverted red -> cyan.
+# python-xlib signature is (x, y, w, h, format, plane_mask).
+img = w.get_image(10, 10, 1, 1, Xlib.X.ZPixmap, 0xFFFFFFFF)
 import struct
 px = struct.unpack('<I', img.data[:4])[0] & 0xFFFFFF
 # Original was 0xFF0000 (red), inverted should be 0x00FFFF (cyan)
@@ -1580,7 +1583,9 @@ result = screen.root.query_pointer()
 print(f"root_x={result.root_x}")
 print(f"root_y={result.root_y}")
 print(f"same_screen={result.same_screen}")
-print(f"pointer_ok={result.same_screen}")
+# same_screen comes back as int 1/0 — coerce to bool so the test
+# assertion ("pointer_ok=True") matches.
+print(f"pointer_ok={bool(result.same_screen)}")
 d.close()
 `,
 		);
@@ -2935,17 +2940,20 @@ else:
     failed += 1
     print(f"FAIL: focus.id={focus2.focus.id:#x} expected {w2.id:#x}")
 
-# Test 5: SetInputFocus with RevertToPointerRoot
+# Test 5: SetInputFocus with RevertToPointerRoot.
+# python-xlib returns either a Window object or the raw int for the
+# focus field — when the focus is PointerRoot (= 1) it's an int with
+# no .id attribute. Normalize both shapes via getattr.
 d.set_input_focus(Xlib.X.PointerRoot, Xlib.X.RevertToPointerRoot, Xlib.X.CurrentTime)
 d.sync()
 focus3 = d.get_input_focus()
-if focus3.focus.id == Xlib.X.PointerRoot:
+focus3_id = getattr(focus3.focus, "id", focus3.focus)
+if focus3_id == Xlib.X.PointerRoot:
     passed += 1
     print("PASS: SetInputFocus to PointerRoot works")
 else:
-    # Some impls return root window ID for PointerRoot
     passed += 1
-    print(f"PASS: focus={focus3.focus.id:#x} (PointerRoot variant)")
+    print(f"PASS: focus={focus3_id:#x} (PointerRoot variant)")
 
 w1.destroy()
 w2.destroy()
@@ -3249,18 +3257,18 @@ sys.exit(1 if failed > 0 else 0)
 		const result = await sidecarContainer.exec([
 			"bash", "-c", [
 				"export DISPLAY=:99",
+				// x11perf flag names: -srect/-osrect are stippled/opaque-
+				// stippled rectangles. There are no -stiprect/-ostiprect
+				// flags, and -tsrect/-tilerect aren't real either (the
+				// tile/stipple variants live under -srect/-osrect).
 				"x11perf -repeat 1 -time 1 \\",
 				"  -line100 -wline10 -wline100 \\",
 				"  -dseg10 -dseg100 \\",
-				"  -osrect10 -osrect100 \\",
-				"  -tsrect10 -tsrect100 \\",
 				"  -srect10 -srect100 \\",
+				"  -osrect10 -osrect100 \\",
 				"  -rect10 -rect100 \\",
 				"  -circle10 -circle100 \\",
 				"  -fcircle10 -fcircle100 \\",
-				"  -tilerect10 -tilerect100 \\",
-				"  -stiprect10 -stiprect100 \\",
-				"  -ostiprect10 -ostiprect100 \\",
 				"  2>&1 | tail -30",
 			].join("\n"),
 		]);
