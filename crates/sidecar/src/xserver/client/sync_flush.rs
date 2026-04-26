@@ -95,11 +95,20 @@ impl ClientState {
 
             for (&wid, shared_win) in shared.iter() {
                 if let Some(local_win) = self.windows.get_mut(&wid) {
-                    if shared_win.mapped && !local_win.mapped {
-                        local_win.mapped = true;
-                    }
-                    if shared_win.redirected {
-                        local_win.redirected = true;
+                    let is_mine = local_win.owner_client_id.is_empty()
+                        || local_win.owner_client_id == self.client_id;
+                    // For our own windows, the local view is authoritative —
+                    // pulling mapped=true from shared here would resurrect
+                    // unmapped state immediately after handle_unmap_window
+                    // wrote mapped=false. Only foreign windows need the
+                    // monotonic visibility promotion.
+                    if !is_mine {
+                        if shared_win.mapped && !local_win.mapped {
+                            local_win.mapped = true;
+                        }
+                        if shared_win.redirected {
+                            local_win.redirected = true;
+                        }
                     }
                     for (&atom, val) in shared_win.properties.iter() {
                         local_win
@@ -119,11 +128,25 @@ impl ClientState {
                 let is_mine = local_win.owner_client_id.is_empty()
                     || local_win.owner_client_id == self.client_id;
                 if let Some(shared_win) = shared.get_mut(&wid) {
-                    if local_win.mapped {
-                        shared_win.mapped = true;
-                    }
-                    if local_win.redirected {
-                        shared_win.redirected = true;
+                    if is_mine {
+                        // For our own windows, propagate the full mapped /
+                        // redirected state — including transitions back to
+                        // false. Without this, an UnmapWindow on a window we
+                        // own would set local mapped=false but leave shared
+                        // mapped=true; the next sync_windows step 1 would then
+                        // re-mount mapped=true from shared, defeating unmap.
+                        shared_win.mapped = local_win.mapped;
+                        shared_win.redirected = local_win.redirected;
+                    } else {
+                        // Foreign windows: only ever monotonically promote
+                        // visibility flags. We must never demote another
+                        // client's window state from our cached view.
+                        if local_win.mapped {
+                            shared_win.mapped = true;
+                        }
+                        if local_win.redirected {
+                            shared_win.redirected = true;
+                        }
                     }
                     for (&atom, val) in local_win.properties.iter() {
                         shared_win.properties.insert(atom, val.clone());
