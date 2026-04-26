@@ -1,4 +1,4 @@
-import Xlib.display, Xlib.X, Xlib.protocol.event, sys
+import Xlib.display, Xlib.X, Xlib.protocol.event, sys, Xlib.Xatom
 passed = 0; failed = 0
 d = Xlib.display.Display()
 root = d.screen().root
@@ -17,7 +17,7 @@ try:
     passed += 1; print("PASS: sent _NET_WM_STATE ClientMessage to root")
     # Verify the state was applied
     import time; time.sleep(0.2)
-    prop = w.get_full_property(NET_WM_STATE, Xlib.X.Atom("ATOM", d))
+    prop = w.get_full_property(NET_WM_STATE, Xlib.Xatom.ATOM)
     if prop is not None:
         atoms = list(prop.value)
         if NET_WM_STATE_FULLSCREEN in atoms:

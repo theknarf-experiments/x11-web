@@ -1,4 +1,4 @@
-import Xlib.display, Xlib.X, sys
+import Xlib.display, Xlib.X, sys, Xlib.Xatom
 passed = 0; failed = 0
 d = Xlib.display.Display()
 root = d.screen().root
@@ -11,12 +11,12 @@ try:
     w.map()
     d.sync()
     # Set fullscreen state via property
-    w.change_property(NET_WM_STATE, Xlib.X.Atom("ATOM", d), 32,
+    w.change_property(NET_WM_STATE, Xlib.Xatom.ATOM, 32,
         [NET_WM_STATE_FULLSCREEN])
     d.sync()
     passed += 1; print("PASS: set _NET_WM_STATE_FULLSCREEN")
     # Read back state
-    prop = w.get_full_property(NET_WM_STATE, Xlib.X.Atom("ATOM", d))
+    prop = w.get_full_property(NET_WM_STATE, Xlib.Xatom.ATOM)
     if prop is not None:
         atoms = list(prop.value)
         if NET_WM_STATE_FULLSCREEN in atoms:

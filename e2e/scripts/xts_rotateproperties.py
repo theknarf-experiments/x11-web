@@ -1,4 +1,4 @@
-import Xlib.display, Xlib.X, sys
+import Xlib.display, Xlib.X, sys, Xlib.Xatom
 passed = 0; failed = 0
 d = Xlib.display.Display()
 root = d.screen().root
@@ -8,9 +8,9 @@ try:
     a1 = d.intern_atom("_TEST_PROP_A")
     a2 = d.intern_atom("_TEST_PROP_B")
     a3 = d.intern_atom("_TEST_PROP_C")
-    w.change_property(a1, Xlib.X.Atom("STRING", d), 8, b"alpha")
-    w.change_property(a2, Xlib.X.Atom("STRING", d), 8, b"beta")
-    w.change_property(a3, Xlib.X.Atom("STRING", d), 8, b"gamma")
+    w.change_property(a1, Xlib.Xatom.STRING, 8, b"alpha")
+    w.change_property(a2, Xlib.Xatom.STRING, 8, b"beta")
+    w.change_property(a3, Xlib.Xatom.STRING, 8, b"gamma")
     d.sync()
     passed += 1; print("PASS: set 3 properties")
     # Rotate: shift by 1
@@ -18,9 +18,9 @@ try:
     d.sync()
     passed += 1; print("PASS: RotateProperties completed")
     # After rotate by 1: a1 should have gamma, a2 alpha, a3 beta
-    p1 = w.get_full_property(a1, Xlib.X.Atom("STRING", d))
-    p2 = w.get_full_property(a2, Xlib.X.Atom("STRING", d))
-    p3 = w.get_full_property(a3, Xlib.X.Atom("STRING", d))
+    p1 = w.get_full_property(a1, Xlib.Xatom.STRING)
+    p2 = w.get_full_property(a2, Xlib.Xatom.STRING)
+    p3 = w.get_full_property(a3, Xlib.Xatom.STRING)
     v1 = bytes(p1.value) if p1 else b""
     v2 = bytes(p2.value) if p2 else b""
     v3 = bytes(p3.value) if p3 else b""

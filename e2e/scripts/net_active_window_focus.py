@@ -1,4 +1,4 @@
-import Xlib.display, Xlib.X, sys
+import Xlib.display, Xlib.X, sys, Xlib.Xatom
 passed = 0; failed = 0
 d = Xlib.display.Display()
 root = d.screen().root
@@ -11,7 +11,7 @@ try:
     # Focus w1
     d.set_input_focus(w1, Xlib.X.RevertToParent, Xlib.X.CurrentTime)
     d.sync()
-    prop = root.get_full_property(NET_ACTIVE, Xlib.X.Atom("WINDOW", d))
+    prop = root.get_full_property(NET_ACTIVE, Xlib.Xatom.WINDOW)
     if prop is not None and list(prop.value)[0] == w1.id:
         passed += 1; print(f"PASS: active={w1.id:#x}")
     else:
@@ -19,7 +19,7 @@ try:
     # Focus w2
     d.set_input_focus(w2, Xlib.X.RevertToParent, Xlib.X.CurrentTime)
     d.sync()
-    prop = root.get_full_property(NET_ACTIVE, Xlib.X.Atom("WINDOW", d))
+    prop = root.get_full_property(NET_ACTIVE, Xlib.Xatom.WINDOW)
     if prop is not None and list(prop.value)[0] == w2.id:
         passed += 1; print(f"PASS: active={w2.id:#x}")
     else:

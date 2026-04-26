@@ -1,4 +1,4 @@
-import Xlib.display, Xlib.X, sys
+import Xlib.display, Xlib.X, sys, Xlib.Xatom
 passed = 0; failed = 0
 d = Xlib.display.Display()
 root = d.screen().root
@@ -6,8 +6,8 @@ try:
     w = root.create_window(0, 0, 100, 100, 0, 24, Xlib.X.InputOutput)
     a1 = d.intern_atom("_LP_TEST_1")
     a2 = d.intern_atom("_LP_TEST_2")
-    w.change_property(a1, Xlib.X.Atom("STRING", d), 8, b"one")
-    w.change_property(a2, Xlib.X.Atom("STRING", d), 8, b"two")
+    w.change_property(a1, Xlib.Xatom.STRING, 8, b"one")
+    w.change_property(a2, Xlib.Xatom.STRING, 8, b"two")
     d.sync()
     props = w.list_properties()
     prop_ids = [p.id if hasattr(p, "id") else p for p in props]

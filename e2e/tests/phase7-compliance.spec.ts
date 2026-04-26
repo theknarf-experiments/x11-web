@@ -64,7 +64,7 @@ d.close()
 from Xlib import display
 d = display.Display()
 ext = d.query_extension('XKEYBOARD')
-print(f"present={ext.present if ext else False}")
+print(f"present={bool(ext.present) if ext else False}")
 d.close()
 `,
 		);
@@ -240,7 +240,7 @@ test.describe.serial("RENDER extension (Phase 7)", () => {
 from Xlib import display
 d = display.Display()
 ext = d.query_extension('RENDER')
-print(f"render_present={ext.present if ext else False}")
+print(f"render_present={bool(ext.present) if ext else False}")
 d.close()
 `,
 		);
@@ -284,7 +284,7 @@ test.describe.serial("COMPOSITE extension (Phase 7)", () => {
 from Xlib import display
 d = display.Display()
 ext = d.query_extension('Composite')
-print(f"composite_present={ext.present if ext else False}")
+print(f"composite_present={bool(ext.present) if ext else False}")
 d.close()
 `,
 		);
@@ -391,7 +391,7 @@ from Xlib import display, X, Xatom
 d = display.Display()
 root = d.screen().root
 net_supported = d.intern_atom('_NET_SUPPORTED')
-prop = root.get_full_property(net_supported, Xatom.Atom)
+prop = root.get_full_property(net_supported, Xatom.ATOM)
 if prop and prop.value:
     atoms = list(prop.value)
     wm_name = d.intern_atom('_NET_WM_NAME')
@@ -435,7 +435,7 @@ w.set_wm_protocols([wm_delete])
 w.map()
 d.sync()
 # Verify the property was set
-prop = w.get_full_property(wm_protocols, Xatom.Atom)
+prop = w.get_full_property(wm_protocols, Xatom.ATOM)
 if prop and prop.value:
     protocols = list(prop.value)
     print(f"delete_protocol_set={wm_delete in protocols}")
@@ -461,7 +461,7 @@ test.describe.serial("XInput2 extension (Phase 7)", () => {
 from Xlib import display
 d = display.Display()
 ext = d.query_extension('XInputExtension')
-print(f"xi_present={ext.present if ext else False}")
+print(f"xi_present={bool(ext.present) if ext else False}")
 d.close()
 `,
 		);
@@ -492,7 +492,7 @@ child2 = parent.create_window(70, 10, 50, 50, 0, screen.root_depth)
 d.sync()
 # QueryTree
 tree = parent.query_tree()
-print(f"parent_of_parent={tree.parent == root.id}")
+print(f"parent_of_parent={tree.parent.id == root.id}")
 print(f"num_children={len(tree.children)}")
 child_ids = [c.id for c in tree.children]
 print(f"child1_in_tree={child1.id in child_ids}")
@@ -735,7 +735,7 @@ test.describe.serial("MIT-SHM extension (Phase 7)", () => {
 from Xlib import display
 d = display.Display()
 ext = d.query_extension('MIT-SHM')
-print(f"shm_present={ext.present if ext else False}")
+print(f"shm_present={bool(ext.present) if ext else False}")
 d.close()
 `,
 		);
@@ -755,7 +755,7 @@ test.describe.serial("SYNC extension (Phase 7)", () => {
 from Xlib import display
 d = display.Display()
 ext = d.query_extension('SYNC')
-print(f"sync_present={ext.present if ext else False}")
+print(f"sync_present={bool(ext.present) if ext else False}")
 d.close()
 `,
 		);
