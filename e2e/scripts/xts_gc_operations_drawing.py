@@ -38,7 +38,9 @@ except Exception as e:
     failed += 1; print(f"FAIL: PolySegment: {e}")
 
 try:
-    w.draw_arc(gc, 20, 20, 60, 60, 0, 360*64)
+    # python-xlib's drawable method is arc(gc, x, y, w, h, a1, a2) — a
+    # single PolyArc with one arc. There is no draw_arc.
+    w.arc(gc, 20, 20, 60, 60, 0, 360*64)
     passed += 1; print("PASS: PolyArc")
 except Exception as e:
     failed += 1; print(f"FAIL: PolyArc: {e}")
