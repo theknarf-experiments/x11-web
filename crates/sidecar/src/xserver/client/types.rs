@@ -32,8 +32,33 @@ pub(crate) struct KeyboardControl {
 
 impl Default for KeyboardControl {
     fn default() -> Self {
-        // Match Xvfb defaults: all keys auto-repeat except modifiers
-        let auto_repeats = [0xFFu8; 32];
+        // Match Xvfb defaults: all keys auto-repeat EXCEPT modifiers and lock keys.
+        // The auto_repeats vector is a bitmap indexed by keycode (bit n of byte
+        // n/8 is keycode n). Per X11 spec §6.5 modifier keys must not auto-repeat
+        // — otherwise holding Shift would emit a stream of Shift events.
+        // Standard XKB modifier keycodes from the default `pc105+inet(evdev)`
+        // layout that ships with the keymap helper.
+        let mut auto_repeats = [0xFFu8; 32];
+        const MODIFIER_KEYCODES: &[u8] = &[
+            37,  // Control_L
+            50,  // Shift_L
+            62,  // Shift_R
+            64,  // Alt_L (Meta_L)
+            66,  // Caps_Lock
+            77,  // Num_Lock
+            105, // Control_R
+            108, // Alt_R (ISO_Level3_Shift)
+            133, // Super_L
+            134, // Super_R
+            135, // Menu
+            203, // Meta_L (alt mapping)
+            204, // Meta_R (alt mapping)
+            207, // Hyper_L
+            208, // Hyper_R
+        ];
+        for &kc in MODIFIER_KEYCODES {
+            auto_repeats[(kc / 8) as usize] &= !(1u8 << (kc % 8));
+        }
         Self {
             key_click_percent: 0,
             bell_percent: 50,
