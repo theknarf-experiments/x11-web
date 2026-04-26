@@ -1,8 +1,11 @@
-import sys
+import sys, os
 passed = 0; failed = 0
+# Inherit env so PATH/LD_* etc. survive — adding only DISPLAY would
+# strip those and the binaries can't find their libraries.
+env = {**os.environ, "DISPLAY": ":99"}
 try:
     import subprocess
-    out = subprocess.check_output(["xset", "q"], env={"DISPLAY": ":99"}).decode()
+    out = subprocess.check_output(["xset", "q"], env=env).decode()
     # xset q reports auto repeat delay and rate
     if "auto repeat delay" in out:
         passed += 1; print("PASS: xset reports auto repeat settings")
@@ -11,7 +14,7 @@ try:
     # Check xkbcomp can read the keyboard map
     xkb_out = subprocess.check_output(
         ["xkbcomp", ":99", "-"],
-        env={"DISPLAY": ":99"},
+        env=env,
         stderr=subprocess.DEVNULL
     ).decode()
     if "repeat" in xkb_out.lower():

@@ -1,5 +1,6 @@
 import subprocess, re
-out = subprocess.check_output(['xvinfo'], env={'DISPLAY': ':99'}).decode()
+import os
+out = subprocess.check_output(['xvinfo'], env={**os.environ, 'DISPLAY': ':99'}).decode()
 print(out[:2000])
 # Count advertised formats
 fmts = re.findall(r'id:\s+0x[0-9a-fA-F]+', out)

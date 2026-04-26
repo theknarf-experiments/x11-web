@@ -1219,9 +1219,9 @@ if not xfixes_ext:
 print(f"xfixes_present=true")
 print(f"major_opcode={xfixes_ext.major_opcode}")
 
-# Use xfixesinfo to verify version
-import subprocess
-result = subprocess.run(['xdotool', 'getactivewindow'], capture_output=True, text=True, env={'DISPLAY': ':99'}, timeout=5)
+# Use xfixesinfo to verify version (inherit env)
+import subprocess, os
+result = subprocess.run(['xdotool', 'getactivewindow'], capture_output=True, text=True, env={**os.environ, 'DISPLAY': ':99'}, timeout=5)
 print(f"xdotool_works={'error' not in result.stderr.lower() or True}")
 
 d.close()
@@ -3383,9 +3383,9 @@ test.describe("Visual depth support", () => {
 				"found_pseudo = False",
 				"for depth_info in screen.root.query_tree().parent.get_attributes()._data.get('visual', []) or []:",
 				"    pass  # not the right API",
-				"# Use xdpyinfo parsing instead",
-				"import subprocess",
-				"out = subprocess.check_output(['xdpyinfo'], env={'DISPLAY': ':99'}).decode()",
+				"# Use xdpyinfo parsing instead (inherit env)",
+				"import subprocess, os",
+				"out = subprocess.check_output(['xdpyinfo'], env={**os.environ, 'DISPLAY': ':99'}).decode()",
 				"found_pseudo = 'PseudoColor' in out",
 				"found_depth8 = 'depth 8' in out",
 				"print(f'pseudo_color={found_pseudo} depth_8={found_depth8}')",

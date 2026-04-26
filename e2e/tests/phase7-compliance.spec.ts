@@ -347,7 +347,7 @@ w.set_selection_owner(clip, X.CurrentTime)
 d.sync()
 # Get selection owner
 owner = d.get_selection_owner(clip)
-print(f"owner_matches={owner == w.id}")
+print(f"owner_matches={owner.id == w.id}")
 w.destroy()
 d.close()
 `,
@@ -709,8 +709,9 @@ d.close()
 from Xlib import display
 d = display.Display()
 font = d.open_font('fixed')
-# query_text_extents lives on the Font/Fontable, not Display
-extents = font.query_text_extents('Hello World')
+# query_text_extents lives on the Font/Fontable, not Display, and
+# wants a list of CARD16 codepoints, not a Python string.
+extents = font.query_text_extents([ord(c) for c in 'Hello World'])
 print(f"ascent={extents.font_ascent}")
 print(f"descent={extents.font_descent}")
 print(f"width={extents.overall_width}")

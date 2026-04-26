@@ -1,6 +1,7 @@
 import subprocess
+import os
 # Use xdpyinfo to verify SECURITY is listed
-result = subprocess.run(['xdpyinfo'], capture_output=True, text=True, env={'DISPLAY': ':99'})
+result = subprocess.run(['xdpyinfo'], capture_output=True, text=True, env={**os.environ, 'DISPLAY': ':99'})
 if 'SECURITY' in result.stdout:
     print('security_supported_ok')
 else:

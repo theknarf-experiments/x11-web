@@ -1,5 +1,8 @@
-import subprocess, re
-out = subprocess.check_output(["xrandr", "--query"], env={"DISPLAY": ":99"}).decode()
+import subprocess, re, os
+# Inherit env so PATH/LD_* survive — only adding DISPLAY would break
+# library loading for the spawned binaries.
+env = {**os.environ, "DISPLAY": ":99"}
+out = subprocess.check_output(["xrandr", "--query"], env=env).decode()
 print(out)
 # Should contain a connected output
 assert "connected" in out, "No connected output"

@@ -1229,10 +1229,10 @@ d.sync()
 d.set_input_focus(w, Xlib.X.RevertToParent, Xlib.X.CurrentTime)
 d.sync()
 
-# Use xdotool to send a key press
-import subprocess
+# Use xdotool to send a key press (inherit env so PATH/LD_* survive)
+import subprocess, os
 subprocess.run(['xdotool', 'key', '--window', str(w.id), 'a'],
-    env={'DISPLAY': ':99'}, capture_output=True, timeout=5)
+    env={**os.environ, 'DISPLAY': ':99'}, capture_output=True, timeout=5)
 
 time.sleep(0.5)
 d.sync()
