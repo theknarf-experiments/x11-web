@@ -50,7 +50,7 @@ d.sync()
 
 # Read back WM_HINTS to verify
 read_hints = w.get_wm_hints()
-input_val = read_hints.get('input', -1) if read_hints else -1
+input_val = getattr(read_hints, 'input', -1) if read_hints else -1
 print(f"input={input_val}")
 w.destroy()
 d.close()
@@ -73,7 +73,7 @@ w.set_wm_hints(flags=Xutil.InputHint, input=0)
 d.sync()
 
 read_hints = w.get_wm_hints()
-input_val = read_hints.get('input', -1) if read_hints else -1
+input_val = getattr(read_hints, 'input', -1) if read_hints else -1
 print(f"input={input_val}")
 w.destroy()
 d.close()
@@ -102,7 +102,7 @@ child.set_wm_hints(hints)
 d.sync()
 
 read_hints = child.get_wm_hints()
-group = read_hints.get('window_group', 0) if read_hints else 0
+group = getattr(read_hints, 'window_group', 0) if read_hints else 0
 print(f"group_matches={group == leader.id}")
 leader.destroy()
 child.destroy()
@@ -128,7 +128,7 @@ w.set_wm_hints(hints)
 d.sync()
 
 read_hints = w.get_wm_hints()
-flags = read_hints.get('flags', 0) if read_hints else 0
+flags = getattr(read_hints, 'flags', 0) if read_hints else 0
 urgent = bool(flags & Xutil.UrgencyHint)
 print(f"urgent={urgent}")
 w.destroy()
