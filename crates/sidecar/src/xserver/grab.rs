@@ -278,9 +278,10 @@ pub(crate) fn handle_grab_pointer(state: &mut ClientState, data: &[u8], seq: u16
         }
     }
 
-    // Synchronous mode (1) freezes the device
-    state.grabs.pointer_frozen = pointer_mode == 1;
-    if keyboard_mode == 1 {
+    // X11 spec: GrabModeSync=0 freezes the device, GrabModeAsync=1 does not.
+    // (Yes, the constants are counter-intuitive — Sync==0, Async==1.)
+    state.grabs.pointer_frozen = pointer_mode == 0;
+    if keyboard_mode == 0 {
         state.grabs.keyboard_frozen = true;
     }
 
@@ -495,9 +496,9 @@ pub(crate) fn handle_grab_keyboard(state: &mut ClientState, data: &[u8], seq: u1
         }
     }
 
-    // Synchronous mode (1) freezes the device
-    state.grabs.keyboard_frozen = keyboard_mode == 1;
-    if pointer_mode == 1 {
+    // X11 spec: GrabModeSync=0 freezes, GrabModeAsync=1 does not.
+    state.grabs.keyboard_frozen = keyboard_mode == 0;
+    if pointer_mode == 0 {
         state.grabs.pointer_frozen = true;
     }
 
@@ -533,9 +534,10 @@ pub(crate) fn handle_ungrab_keyboard(state: &mut ClientState, _data: &[u8]) -> V
         for e in events {
             state.pending_events.push(e);
         }
-        // Per X11 spec: if this keyboard grab had pointer_mode=Synchronous,
-        // the pointer was frozen by this grab — unfreeze it now.
-        if pointer_mode == 1 && state.grabs.pointer_grab.is_none() {
+        // Per X11 spec: if this keyboard grab had pointer_mode=Synchronous
+        // (GrabModeSync==0), the pointer was frozen by this grab — unfreeze
+        // it now.
+        if pointer_mode == 0 && state.grabs.pointer_grab.is_none() {
             state.grabs.pointer_frozen = false;
             state.grabs.pointer_sync_pending = false;
             let pevents = std::mem::take(&mut state.grabs.frozen_pointer_events);
@@ -762,11 +764,12 @@ pub(crate) fn check_passive_button_grab(
                 None
             };
             // Per X11 spec §11.4: when a passive grab activates, synchronous
-            // modes take effect immediately — freeze the appropriate devices.
-            if grab.pointer_mode == 1 {
+            // modes (GrabModeSync==0) take effect immediately — freeze the
+            // appropriate devices.
+            if grab.pointer_mode == 0 {
                 state.grabs.pointer_frozen = true;
             }
-            if grab.keyboard_mode == 1 {
+            if grab.keyboard_mode == 0 {
                 state.grabs.keyboard_frozen = true;
             }
             state.grabs.pointer_grab = Some(ActivePointerGrab {
@@ -818,11 +821,12 @@ pub(crate) fn check_passive_key_grab(
             let gw = grab.grab_window;
             debug!("Passive key grab activated: window={gw:#x} key={keycode}");
             // Per X11 spec §11.4: when a passive grab activates, synchronous
-            // modes take effect immediately — freeze the appropriate devices.
-            if grab.keyboard_mode == 1 {
+            // modes (GrabModeSync==0) take effect immediately — freeze the
+            // appropriate devices.
+            if grab.keyboard_mode == 0 {
                 state.grabs.keyboard_frozen = true;
             }
-            if grab.pointer_mode == 1 {
+            if grab.pointer_mode == 0 {
                 state.grabs.pointer_frozen = true;
             }
             state.grabs.keyboard_grab = Some(ActiveKeyboardGrab {
@@ -1078,11 +1082,11 @@ mod tests {
     #[test]
     fn ungrab_keyboard_unfreezes_pointer_if_sync() {
         let mut gs = make_grab_state();
-        // Simulate a keyboard grab with pointer_mode=Synchronous
+        // Simulate a keyboard grab with pointer_mode=Synchronous (==0).
         gs.keyboard_grab = Some(ActiveKeyboardGrab {
             grab_window: 100,
-            pointer_mode: 1, // Synchronous — froze the pointer
-            keyboard_mode: 0,
+            pointer_mode: 0, // GrabModeSync — froze the pointer
+            keyboard_mode: 1, // GrabModeAsync
             owner_events: false,
         });
         gs.pointer_frozen = true;
@@ -1094,7 +1098,7 @@ mod tests {
         gs.keyboard_sync_pending = false;
         // Per spec: if keyboard grab had pointer_mode=Sync and no pointer grab,
         // unfreeze pointer too.
-        if grab.pointer_mode == 1 && gs.pointer_grab.is_none() {
+        if grab.pointer_mode == 0 && gs.pointer_grab.is_none() {
             gs.pointer_frozen = false;
             gs.pointer_sync_pending = false;
             let pevents = std::mem::take(&mut gs.frozen_pointer_events);
@@ -1108,16 +1112,16 @@ mod tests {
         let mut gs = make_grab_state();
         gs.keyboard_grab = Some(ActiveKeyboardGrab {
             grab_window: 100,
-            pointer_mode: 1,
-            keyboard_mode: 0,
+            pointer_mode: 0, // GrabModeSync
+            keyboard_mode: 1,
             owner_events: false,
         });
         // Also have an active pointer grab (so we shouldn't unfreeze)
         gs.pointer_grab = Some(ActivePointerGrab {
             grab_window: 200,
             event_mask: 0x04,
-            pointer_mode: 1,
-            keyboard_mode: 0,
+            pointer_mode: 0, // GrabModeSync
+            keyboard_mode: 1,
             confine_to: 0,
             cursor: 0,
             owner_events: false,
@@ -1128,7 +1132,7 @@ mod tests {
         let grab = gs.keyboard_grab.take().unwrap();
         gs.keyboard_frozen = false;
         // Per spec: don't unfreeze if pointer_grab is still active
-        if grab.pointer_mode == 1 && gs.pointer_grab.is_none() {
+        if grab.pointer_mode == 0 && gs.pointer_grab.is_none() {
             gs.pointer_frozen = false;
         }
         // Pointer should still be frozen because pointer_grab is active

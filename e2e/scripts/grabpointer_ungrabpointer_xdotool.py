@@ -14,10 +14,12 @@ try:
         Xlib.X.CurrentTime
     )
     d.sync()
-    if status.status == 0:
+    # python-xlib returns the integer status code directly, not a struct.
+    status_code = status.status if hasattr(status, "status") else status
+    if status_code == 0:
         passed += 1; print("PASS: GrabPointer succeeded")
     else:
-        failed += 1; print(f"FAIL: GrabPointer status={status.status}")
+        failed += 1; print(f"FAIL: GrabPointer status={status_code}")
     # UngrabPointer
     d.ungrab_pointer(Xlib.X.CurrentTime)
     d.sync()
@@ -33,10 +35,11 @@ try:
         Xlib.X.CurrentTime
     )
     d.sync()
-    if status.status == 0:
+    status_code = status.status if hasattr(status, "status") else status
+    if status_code == 0:
         passed += 1; print("PASS: GrabKeyboard succeeded")
     else:
-        failed += 1; print(f"FAIL: GrabKeyboard status={status.status}")
+        failed += 1; print(f"FAIL: GrabKeyboard status={status_code}")
     d.ungrab_keyboard(Xlib.X.CurrentTime)
     d.sync()
     passed += 1; print("PASS: UngrabKeyboard completed")
