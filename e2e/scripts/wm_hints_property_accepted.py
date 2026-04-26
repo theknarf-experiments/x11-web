@@ -3,9 +3,9 @@ d = display.Display()
 screen = d.screen()
 w = screen.root.create_window(0, 0, 100, 100, 0, screen.root_depth,
     X.InputOutput, X.CopyFromParent)
-# Set WM_HINTS with urgency flag
-hints = Xutil.Hints(flags=256)  # UrgencyHint = bit 8
-w.set_wm_hints(hints)
+# Set WM_HINTS with urgency flag (UrgencyHint = bit 8). python-xlib
+# doesn't expose Xutil.Hints; set_wm_hints accepts kwargs directly.
+w.set_wm_hints(flags=Xutil.UrgencyHint)
 d.sync()
 # Read back and verify
 got = w.get_wm_hints()

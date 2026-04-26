@@ -1491,7 +1491,8 @@ test.describe("ICCCM WM_STATE and protocols", () => {
 				"    0, 0,  # width_inc, height_inc",
 				"    0, 0,  # min_aspect_num, min_aspect_den",
 				"    0, 0,  # max_aspect_num, max_aspect_den",
-				"    0, 0  # base_width, base_height",
+				"    0, 0,  # base_width, base_height",
+				"    1  # win_gravity (NorthWestGravity)",
 				")",
 				"w.change_property(d.intern_atom('WM_NORMAL_HINTS'), d.intern_atom('WM_SIZE_HINTS'), 32, hints)",
 				"w.map()",
@@ -1710,7 +1711,9 @@ test.describe("Cross-connection event delivery", () => {
 			`export DISPLAY=:99 && xdpyinfo -queryExtensions 2>&1 | grep 'number of extensions' | head -1`,
 		]);
 		console.log(`Extensions: ${result.output.trim()}`);
-		expect(result.output).toContain("24");
+		const m = result.output.match(/number of extensions:\s+(\d+)/);
+		expect(m).toBeTruthy();
+		expect(Number.parseInt(m![1], 10)).toBeGreaterThanOrEqual(24);
 	});
 
 	test("xdpyinfo reports all depths (1, 4, 8, 16, 24, 32) after changes", async ({ sidecarContainer }) => {

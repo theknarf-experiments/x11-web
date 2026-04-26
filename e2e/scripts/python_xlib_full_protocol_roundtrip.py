@@ -5,9 +5,8 @@ screen = d.screen()
 w = screen.root.create_window(10, 10, 200, 150, 0, screen.root_depth,
     X.InputOutput, X.CopyFromParent,
     event_mask=X.StructureNotifyMask | X.ExposureMask)
-# 2. Set WM_HINTS with NormalState
-hints = Xutil.Hints(flags=3, input=1, initial_state=1)
-w.set_wm_hints(hints)
+# 2. Set WM_HINTS with NormalState (kwargs form — no Xutil.Hints class)
+w.set_wm_hints(flags=Xutil.InputHint | Xutil.StateHint, input=1, initial_state=1)
 # 3. Map window
 w.map()
 d.sync()

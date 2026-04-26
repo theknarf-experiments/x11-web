@@ -36,10 +36,12 @@ try:
     d.set_input_focus(Xlib.X.PointerRoot, Xlib.X.RevertToNone, Xlib.X.CurrentTime)
     d.sync()
     focus = d.get_input_focus()
-    if focus.focus.id == 1:
+    # PointerRoot may surface as either an int (1) or a Window with id=1
+    focus_id = focus.focus.id if hasattr(focus.focus, "id") else focus.focus
+    if focus_id == 1:
         passed += 1; print("PASS: focus=PointerRoot")
     else:
-        failed += 1; print(f"FAIL: focus={focus.focus.id} expected PointerRoot")
+        failed += 1; print(f"FAIL: focus={focus_id} expected PointerRoot")
     w1.destroy()
     w2.destroy()
     d.sync()
