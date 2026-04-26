@@ -16,7 +16,9 @@ for i in range(20):
         s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
         s.settimeout(2)
         s.connect("/tmp/.X11-unix/X99")
-        setup = struct.pack("<BxHHHH", 0x6c, 11, 0, len(auth_name), len(cookie))
+        # Trailing "xx" — X11 connection setup is 12 bytes; without it
+        # the server keeps waiting for the rest and we time out.
+        setup = struct.pack("<BxHHHHxx", 0x6c, 11, 0, len(auth_name), len(cookie))
         name_pad = (4 - len(auth_name) % 4) % 4
         cookie_pad = (4 - len(cookie) % 4) % 4
         setup += auth_name + b"\x00" * name_pad

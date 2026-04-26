@@ -285,6 +285,7 @@ d.sync()
 child = parent.create_window(10, 10, 50, 50, 0, screen.root_depth,
     Xlib.X.InputOutput, Xlib.X.CopyFromParent)
 d.sync()
+import time; time.sleep(0.2)  # event delivery is async
 
 got_create_notify = False
 while d.pending_events() > 0:

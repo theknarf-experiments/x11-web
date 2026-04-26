@@ -3425,8 +3425,9 @@ test("protocol fuzzing: server survives malformed requests", async ({
 				`python3 -c "
 import socket, struct, os, random
 
-# Connect to X11 server
+# Connect to X11 server (timeout so a missing server reply can't hang)
 sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+sock.settimeout(2.0)
 sock.connect('/tmp/.X11-unix/X99')
 
 # Send valid connection setup (LSB-first)
@@ -3490,13 +3491,17 @@ random.seed(42)
 for i, pkt in enumerate(fuzz_cases):
     try:
         sock.sendall(pkt)
-        # Read any response (reply, error, or event)
-        resp = sock.recv(1024)
-        if resp:
-            print(f'fuzz-{i}: got {len(resp)} bytes, type={resp[0]}')
-        else:
-            print(f'fuzz-{i}: connection closed')
-            break
+        # Read any response (reply, error, or event); a recv timeout
+        # just means the server chose not to respond — keep going.
+        try:
+            resp = sock.recv(1024)
+            if resp:
+                print(f'fuzz-{i}: got {len(resp)} bytes, type={resp[0]}')
+            else:
+                print(f'fuzz-{i}: connection closed')
+                break
+        except socket.timeout:
+            print(f'fuzz-{i}: no reply (timeout)')
     except Exception as e:
         print(f'fuzz-{i}: error {e}')
         break
@@ -3509,7 +3514,10 @@ for i in range(100):
     pkt += bytes(random.getrandbits(8) for _ in range((length - 1) * 4))
     try:
         sock.sendall(pkt)
-        sock.recv(4096)  # drain responses
+        try:
+            sock.recv(4096)  # drain responses
+        except socket.timeout:
+            pass  # OK, server may not respond to garbage
     except:
         break
 

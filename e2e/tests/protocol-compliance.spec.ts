@@ -3155,9 +3155,9 @@ test.describe("X11 error code verification", () => {
 test.describe("Conformance: Protocol edge cases", () => {
 	test("xlsatoms returns standard X11 atoms", async ({ sidecarContainer }) => {
 		const result = await sidecarContainer.exec([
-			"bash", "-c", "DISPLAY=:99 xlsatoms 2>&1 | head -30",
+			"bash", "-c", "DISPLAY=:99 xlsatoms 2>&1 | head -50",
 		]);
-		// Standard pre-defined atoms
+		// Standard pre-defined atoms (PRIMARY=1, ATOM=4, STRING=31)
 		expect(result.output).toContain("PRIMARY");
 		expect(result.output).toContain("ATOM");
 		expect(result.output).toContain("STRING");

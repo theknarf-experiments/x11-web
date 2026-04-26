@@ -11,7 +11,9 @@ d.sync()
 # Get attributes before mapping
 attrs = w.get_attributes()
 assert attrs.map_state == 0, f"Should be unmapped, got {attrs.map_state}"
-print(f"DEPTH={attrs.depth}")
+# Window depth is on GetGeometry, not GetWindowAttributes
+geom_pre = w.get_geometry()
+print(f"DEPTH={geom_pre.depth}")
 # Map the window
 w.map()
 d.sync()
@@ -24,7 +26,9 @@ assert geom.border_width == 2, f"border mismatch: {geom.border_width}"
 # QueryTree
 tree = root.query_tree()
 print(f"CHILDREN_COUNT={len(tree.children)}")
-assert w in tree.children, "Window not in root children"
+# tree.children is a list of Window resources; compare by id
+child_ids = [c.id for c in tree.children]
+assert w.id in child_ids, "Window not in root children"
 # Destroy
 w.destroy()
 d.sync()

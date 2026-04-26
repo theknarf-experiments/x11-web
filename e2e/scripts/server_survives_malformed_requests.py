@@ -16,8 +16,10 @@ except:
     cookie = b""
     auth_name = b""
 
-# Send connection setup with auth
-setup = struct.pack("<BxHHHH",
+# Send connection setup with auth (12-byte header — note the trailing
+# "xx" for the unused word at the end; without it we send 10 bytes and
+# the server keeps waiting for the rest, which times out the recv).
+setup = struct.pack("<BxHHHHxx",
     0x6c,  # LSB first
     11,    # major version
     0,     # minor version
