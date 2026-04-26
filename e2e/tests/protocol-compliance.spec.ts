@@ -2247,7 +2247,7 @@ extensions = [
     'BIG-REQUESTS', 'MIT-SHM', 'RENDER', 'XFIXES', 'SHAPE', 'SYNC',
     'Composite', 'DAMAGE', 'Present', 'RANDR', 'XKEYBOARD',
     'XTEST', 'DPMS', 'RECORD', 'SECURITY', 'XVideo',
-    'DOUBLE-BUFFER', 'XINERAMA', 'GLX', 'DRI3', 'X-Resource',
+    'DOUBLE-BUFFER', 'XINERAMA', 'GLX', 'X-Resource',
 ]
 opcodes = {}
 conflicts = []
@@ -2962,7 +2962,7 @@ test.describe("Protocol compliance: xdpyinfo", () => {
 				"OUTPUT=$(xdpyinfo 2>&1)",
 				"PASS=0; FAIL=0",
 				// Check for required extensions
-				"for ext in BIG-REQUESTS MIT-SHM RENDER XFIXES SHAPE SYNC 'Generic Event Extension' XC-MISC Composite DAMAGE RANDR XKEYBOARD XInputExtension XTEST DPMS DOUBLE-BUFFER RECORD SECURITY X-Resource DRI3 Present; do",
+				"for ext in BIG-REQUESTS MIT-SHM RENDER XFIXES SHAPE SYNC 'Generic Event Extension' XC-MISC Composite DAMAGE RANDR XKEYBOARD XInputExtension XTEST DPMS DOUBLE-BUFFER RECORD SECURITY X-Resource Present; do",
 				"  if echo \"$OUTPUT\" | grep -qi \"$ext\"; then",
 				"    PASS=$((PASS+1))",
 				"  else",
@@ -3181,7 +3181,7 @@ test.describe("Conformance: Protocol edge cases", () => {
 			"BIG-REQUESTS", "MIT-SHM", "RENDER", "XFIXES",
 			"SHAPE", "SYNC", "Composite", "DAMAGE", "RANDR",
 			"XInputExtension", "XKEYBOARD", "XTEST", "GLX",
-			"DRI3", "Present", "X-Resource",
+			"Present", "X-Resource",
 		];
 		for (const ext of requiredExtensions) {
 			expect(result.output).toContain(ext);

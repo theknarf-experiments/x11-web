@@ -2897,7 +2897,9 @@ test.describe("DRI3 extension capabilities", () => {
 		await waitForDock(page);
 	});
 
-	test("DRI3 GetSupportedModifiers returns LINEAR modifier", async ({ sidecarContainer }) => {
+	// DRI3 was removed from the server (commit 60b4bd3). This test is
+	// kept skipped as a placeholder in case DRI3 ever returns.
+	test.skip("DRI3 GetSupportedModifiers returns LINEAR modifier", async ({ sidecarContainer }) => {
 		const result = await runPythonScript(sidecarContainer, "dri3_getsupportedmodifiers_linear.py", { env: { DISPLAY: ":99" } });
 		expect(result.output).toContain("PASS: DRI3 extension available");
 	});

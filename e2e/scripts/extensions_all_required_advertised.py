@@ -6,7 +6,7 @@ required_extensions = [
     "RENDER", "RANDR", "SHAPE", "MIT-SHM", "SYNC",
     "COMPOSITE", "DAMAGE", "XFIXES", "XKEYBOARD",
     "DOUBLE-BUFFER", "RECORD", "GLX", "PRESENT",
-    "DRI3", "Generic Event Extension", "X-Resource",
+    "Generic Event Extension", "X-Resource",
     "XTEST", "SECURITY", "XINERAMA",
 ]
 

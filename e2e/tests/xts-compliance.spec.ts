@@ -969,7 +969,8 @@ d.close()
 		expect(output).toContain("dbe_present=True");
 	});
 
-	test("DRI3 extension is available", async ({ sidecarContainer }) => {
+	// DRI3 was removed from the server (commit 60b4bd3).
+	test.skip("DRI3 extension is available", async ({ sidecarContainer }) => {
 		const output = await runPythonX11(
 			sidecarContainer,
 			`

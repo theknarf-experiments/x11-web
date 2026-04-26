@@ -103,7 +103,8 @@ d.sync()
 
 read_hints = child.get_wm_hints()
 group = getattr(read_hints, 'window_group', 0) if read_hints else 0
-print(f"group_matches={group == leader.id}")
+group_id = group.id if hasattr(group, 'id') else group
+print(f"group_matches={group_id == leader.id}")
 leader.destroy()
 child.destroy()
 d.close()
@@ -572,7 +573,8 @@ test.describe("Phase 8: Background pixmap, VisibilityNotify, grab sync, DRI3 fen
 		expect(result.output).toContain("SYNC_GRAB_OK");
 	});
 
-	test("DRI3 QueryVersion returns 1.2", async ({ sidecarContainer }) => {
+	// DRI3 was removed from the server (commit 60b4bd3).
+	test.skip("DRI3 QueryVersion returns 1.2", async ({ sidecarContainer }) => {
 		const result = await sidecarContainer.exec([
 			"python3",
 			"-c",
