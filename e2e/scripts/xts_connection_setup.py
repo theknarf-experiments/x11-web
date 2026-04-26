@@ -6,7 +6,7 @@ try:
     passed += 1
     print("PASS: connection established")
     # Test 2: protocol version
-    v = d.info.protocol_major_version
+    v = d.display.info.protocol_major_version
     if v == 11:
         passed += 1; print(f"PASS: protocol version {v}")
     else:
@@ -35,7 +35,7 @@ try:
     else:
         failed += 1; print(f"FAIL: root depth {geom.depth}")
     # Test 7: vendor string is non-empty
-    vendor = d.info.vendor
+    vendor = d.display.info.vendor
     if len(vendor) > 0:
         passed += 1; print(f"PASS: vendor = {vendor}")
     else:

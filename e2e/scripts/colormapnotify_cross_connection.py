@@ -14,7 +14,7 @@ d2.sync()
 visual = d1.screen().root_visual
 cmap = d1.screen().default_colormap
 # Just installing the default colormap should still trigger events
-d1.install_colormap(cmap)
+cmap.install_colormap()
 d1.sync()
 time.sleep(0.5)
 # Check both clients got events

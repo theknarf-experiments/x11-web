@@ -4,16 +4,14 @@ d = Xlib.display.Display()
 root = d.screen().root
 try:
     w = root.create_window(0, 0, 300, 200, 0, 24, Xlib.X.InputOutput)
-    # Set WM_NORMAL_HINTS with min/max sizes
-    hints = Xlib.Xutil.WMNormalHints()
-    hints.flags = Xlib.Xutil.PMinSize | Xlib.Xutil.PMaxSize | Xlib.Xutil.PResizeInc
-    hints.min_width = 100
-    hints.min_height = 80
-    hints.max_width = 800
-    hints.max_height = 600
-    hints.width_inc = 10
-    hints.height_inc = 10
-    w.set_wm_normal_hints(hints)
+    # Set WM_NORMAL_HINTS with min/max sizes (kwargs form, since
+    # python-xlib's set_wm_normal_hints doesn't accept a class instance)
+    w.set_wm_normal_hints(
+        flags=Xlib.Xutil.PMinSize | Xlib.Xutil.PMaxSize | Xlib.Xutil.PResizeInc,
+        min_width=100, min_height=80,
+        max_width=800, max_height=600,
+        width_inc=10, height_inc=10,
+    )
     d.sync()
     passed += 1; print("PASS: set WM_NORMAL_HINTS")
     # Read back

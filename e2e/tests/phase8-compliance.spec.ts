@@ -611,7 +611,7 @@ test.describe("Phase 8: Background pixmap, VisibilityNotify, grab sync, DRI3 fen
 				"    + 'd = Xlib.display.Display()\\n'",
 				"    + '# Verify SYNC extension is available\\n'",
 				"    + 'exts = d.list_extensions()\\n'",
-				"    + 'sync_found = any(b\"SYNC\" in e for e in exts)\\n'",
+				"    + 'sync_found = any(\"SYNC\" in e for e in exts)\\n'",
 				"    + 'if sync_found:\\n'",
 				"    + '    print(\"SYNC_EXT_OK\")\\n'",
 				"    + 'else:\\n'",

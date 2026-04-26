@@ -31,7 +31,7 @@ except Exception as e:
 
 # Test 4: GetKeyboardMapping returns valid data
 try:
-    mapping = d.display.get_keyboard_mapping(8, 248)
+    mapping = d.get_keyboard_mapping(8, 248)
     if len(mapping) > 0:
         passed += 1; print(f"PASS: GetKeyboardMapping returned {len(mapping)} codes")
     else:

@@ -29,7 +29,7 @@ for i in range(N):
     # Alternate between two positions to ensure actual movement
     x = 50 + (i % 100)
     y = 50 + (i // 10) % 100
-    d.warp_pointer(x, y, w, owindow=w)
+    w.warp_pointer(x, y)
     if i % 100 == 0:
         d.sync()
 

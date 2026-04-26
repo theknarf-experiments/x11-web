@@ -1,10 +1,19 @@
 import Xlib.display, Xlib.X, Xlib.Xatom, sys
 import time
+from Xlib.protocol import request as xrequest
 passed = 0; failed = 0
 
 d = Xlib.display.Display()
 root = d.screen().root
 CLIPBOARD = d.intern_atom("CLIPBOARD")
+
+def clear_owner(selection):
+    xrequest.SetSelectionOwner(
+        display=d.display,
+        window=Xlib.X.NONE,
+        selection=selection,
+        time=Xlib.X.CurrentTime,
+    )
 
 # Create two windows
 w1 = root.create_window(0, 0, 1, 1, 0, d.screen().root_depth,
@@ -67,7 +76,7 @@ except Exception as e:
 
 # Test 4: Release ownership (set to None) and verify
 try:
-    d.set_selection_owner(CLIPBOARD, Xlib.X.NONE, Xlib.X.CurrentTime)
+    clear_owner(CLIPBOARD)
     d.sync()
     time.sleep(0.2)
     owner = d.get_selection_owner(CLIPBOARD)

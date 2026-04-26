@@ -15,6 +15,7 @@ for i in range(50):
     d.close()
 # Verify server is still responsive
 d = display.Display()
-info = d.info
-print(f"PASS: server healthy after 50 cycles, vendor={info.vendor}")
+# python-xlib's Display only exposes `info` via the inner _Display
+vendor = d.display.info.vendor
+print(f"PASS: server healthy after 50 cycles, vendor={vendor}")
 d.close()

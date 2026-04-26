@@ -10,7 +10,7 @@ for depth_info in screen.allowed_depths:
             break
 if pc_visual:
     print(f'found PseudoColor visual={pc_visual:#x}')
-    cmap = d.create_colormap(screen.root, pc_visual, X.AllocNone)
+    cmap = screen.root.create_colormap(pc_visual, X.AllocNone)
     color = cmap.alloc_color(0, 65535, 0)
     print(f'alloc_color pixel={color.pixel}')
     cmap.free()

@@ -56,8 +56,9 @@ cmap = screen.default_colormap
 result = cmap.alloc_color(0xFFFF, 0, 0)  # Red
 pixel = result.pixel
 
-# CopyColormapAndFree creates a new colormap as a copy
-new_cmap = cmap.copy_colormap_and_free()
+# CopyColormapAndFree creates a new colormap as a copy of cmap
+# (python-xlib quirk: self is just for display access; scr_cmap is the source)
+new_cmap = cmap.copy_colormap_and_free(cmap)
 d.sync()
 
 # The new colormap should be valid and usable

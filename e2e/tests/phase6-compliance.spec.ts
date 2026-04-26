@@ -221,9 +221,9 @@ test.describe.serial("XKB controls and accessibility", () => {
 			sidecarContainer,
 			`
 from Xlib import display
-from Xlib.ext import xkb
 d = display.Display()
-# Check XKB extension
+# Check XKB extension via raw query (the python-xlib build in the
+# sidecar doesn't ship Xlib.ext.xkb)
 try:
     xkb_info = d.query_extension("XKEYBOARD")
     if xkb_info:
