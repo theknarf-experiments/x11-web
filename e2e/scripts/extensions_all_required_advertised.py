@@ -2,10 +2,14 @@ import Xlib.display, sys
 d = Xlib.display.Display()
 passed = 0; failed = 0
 
+# X11 extension wire names are case-sensitive. Canonical capitalization
+# matches what real X servers and Xorg's xextproto register: "Composite"
+# and "Present" are mixed case, while older extensions like "RENDER" and
+# "DAMAGE" are uppercase.
 required_extensions = [
     "RENDER", "RANDR", "SHAPE", "MIT-SHM", "SYNC",
-    "COMPOSITE", "DAMAGE", "XFIXES", "XKEYBOARD",
-    "DOUBLE-BUFFER", "RECORD", "GLX", "PRESENT",
+    "Composite", "DAMAGE", "XFIXES", "XKEYBOARD",
+    "DOUBLE-BUFFER", "RECORD", "GLX", "Present",
     "Generic Event Extension", "X-Resource",
     "XTEST", "SECURITY", "XINERAMA",
 ]

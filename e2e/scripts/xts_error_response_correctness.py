@@ -36,14 +36,16 @@ except Xlib.error.BadValue:
 except Exception as e:
     passed += 1; print(f"PASS: got error for bad GC value: {type(e).__name__}")
 
-# Test 4: BadPixmap for invalid pixmap
+# Test 4: BadPixmap for invalid pixmap. python-xlib doesn't raise async
+# errors from no-reply requests like FreePixmap, so use get_geometry
+# (which DOES expect a reply) to force the error to surface as an
+# exception in the calling thread.
 try:
     bogus_pm = d.create_resource_object("pixmap", 0xBEEF)
-    bogus_pm.free()
-    d.sync()
+    bogus_pm.get_geometry()
     failed += 1; print("FAIL: no error for invalid pixmap")
-except Xlib.error.BadPixmap:
-    passed += 1; print("PASS: BadPixmap for invalid pixmap ID")
+except (Xlib.error.BadPixmap, Xlib.error.BadDrawable):
+    passed += 1; print("PASS: BadPixmap/BadDrawable for invalid pixmap ID")
 except Exception as e:
     passed += 1; print(f"PASS: got error for invalid pixmap: {type(e).__name__}")
 
