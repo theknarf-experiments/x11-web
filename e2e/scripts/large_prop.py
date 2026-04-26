@@ -17,8 +17,17 @@ data = bytes(range(256)) * (size // 256)
 expected_hash = hashlib.sha256(data).hexdigest()
 print(f"PASS: generated {len(data)} bytes, sha256={expected_hash[:16]}...")
 
-# Set the property
-root.change_property(test_atom, Xlib.Xatom.STRING, 8, data)
+# Set the property. ChangeProperty's length field is a 16-bit count of
+# 32-bit words, so a single request maxes out around 256KB; we chunk
+# 1MB across Replace + multiple Append calls (BIG-REQUESTS would also
+# work, but Append is a portable fallback).
+CHUNK = 128 * 1024
+root.change_property(test_atom, Xlib.Xatom.STRING, 8, data[:CHUNK],
+                     mode=Xlib.X.PropModeReplace)
+for off in range(CHUNK, len(data), CHUNK):
+    root.change_property(test_atom, Xlib.Xatom.STRING, 8,
+                         data[off:off + CHUNK],
+                         mode=Xlib.X.PropModeAppend)
 d.sync()
 print("PASS: ChangeProperty with 1MB data completed")
 
