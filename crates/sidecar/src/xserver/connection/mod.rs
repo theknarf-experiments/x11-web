@@ -1011,6 +1011,11 @@ pub(crate) async fn handle_client(
                         let request_data: Vec<u8> = pending.drain(..big_bytes).collect();
                         state.sequence = state.sequence.wrapping_add(1);
                         let response = handle_request(&mut state, &request_data);
+                        // Publish state mutations to the shared registry BEFORE
+                        // sending the reply, so peers waiting on this reply
+                        // (which can immediately race in with their own
+                        // requests) see the updated shared view.
+                        state.sync_windows();
                         if !response.is_empty() {
                             stream.write_all(&response).await?;
                         }
@@ -1028,6 +1033,13 @@ pub(crate) async fn handle_client(
                     state.record_intercept_request(&request_data);
 
                     let response = handle_request(&mut state, &request_data);
+                    // Publish state mutations to the shared registry BEFORE
+                    // sending the reply. Without this, a peer waiting on this
+                    // reply (e.g., python-xlib's GetInputFocus inside
+                    // Display.sync()) can race in with its next request before
+                    // sync_windows runs at line ~1068, and observe a stale
+                    // shared view that's missing the window we just created.
+                    state.sync_windows();
                     if !response.is_empty() {
                         // Log reply details for protocol debugging
                         let major_opcode = request_data[0];
