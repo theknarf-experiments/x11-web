@@ -109,6 +109,10 @@ async function doSetup() {
 					BACKEND_URL: "ws://backend:3001/ws/sidecar",
 					SIDECAR_NAME: "test-sidecar",
 					DISPLAY_NUMBER: "99",
+					// Set DISPLAY too — many tests run subprocess.run([...])
+					// inside python that doesn't propagate explicit env, so
+					// they pick up the container default.
+					DISPLAY: ":99",
 					RUST_LOG: "info",
 					NO_AT_BRIDGE: "1",
 				})
