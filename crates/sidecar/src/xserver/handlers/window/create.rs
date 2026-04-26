@@ -306,26 +306,39 @@ pub(crate) fn handle_create_window(state: &mut ClientState, data: &[u8], _seq: u
         },
     ));
 
-    // Send CreateNotify to parent if it has SubstructureNotifyMask
-    if let Some(parent_win) = state.windows.get(&parent) {
-        if parent_win.event_mask & EventMask::SUBSTRUCTURE_NOTIFY != EventMask::NO_EVENT {
-            let mut event = [0u8; 32];
-            event[0] = CREATE_NOTIFY_EVENT;
-            state.write_u16(&mut event, 2, _seq);
-            state.write_u32(&mut event, 4, parent);
-            state.write_u32(&mut event, 8, wid);
-            state.write_i16(&mut event, 12, x);
-            state.write_i16(&mut event, 14, y);
-            state.write_u16(&mut event, 16, width);
-            state.write_u16(&mut event, 18, height);
-            state.write_u16(&mut event, 20, border_width);
-            event[22] = if override_redirect { 1 } else { 0 };
-            state.pending_events.push(event.to_vec());
+    // Send CreateNotify (SubstructureNotifyMask on parent). Build the event
+    // unconditionally so we can broadcast across connections — the local-mask
+    // check only gates whether THIS client also wants the event in its own
+    // queue. Without the unconditional broadcast, a window manager / observer
+    // sitting on a different connection never sees CreateNotify, only the
+    // subsequent MapNotify, breaking ICCCM substructure tracking.
+    let mut event = [0u8; 32];
+    event[0] = CREATE_NOTIFY_EVENT;
+    state.write_u16(&mut event, 2, _seq);
+    state.write_u32(&mut event, 4, parent);
+    state.write_u32(&mut event, 8, wid);
+    state.write_i16(&mut event, 12, x);
+    state.write_i16(&mut event, 14, y);
+    state.write_u16(&mut event, 16, width);
+    state.write_u16(&mut event, 18, height);
+    state.write_u16(&mut event, 20, border_width);
+    event[22] = if override_redirect { 1 } else { 0 };
 
-            // Cross-connection broadcast: other clients watching SubstructureNotify on parent
-            state.broadcast_event(parent, u32::from(EventMask::SUBSTRUCTURE_NOTIFY), &event);
-        }
+    // Local delivery: only if this client itself selected SubstructureNotify
+    // on the parent.
+    if state
+        .windows
+        .get(&parent)
+        .is_some_and(|p| p.event_mask & EventMask::SUBSTRUCTURE_NOTIFY != EventMask::NO_EVENT)
+    {
+        state.pending_events.push(event.to_vec());
     }
+
+    // Cross-connection broadcast: any other client watching SubstructureNotify
+    // on the parent sees the event regardless of whether THIS client selected
+    // it. broadcast_event already filters by source_client_id so we don't
+    // double-deliver to ourselves.
+    state.broadcast_event(parent, u32::from(EventMask::SUBSTRUCTURE_NOTIFY), &event);
 
     Vec::new() // No reply for CreateWindow
 }

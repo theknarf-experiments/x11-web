@@ -229,14 +229,18 @@ export const test = base.extend<{}, X11Fixtures>({
 			await ensureSetup();
 			await use(sidecarContainer);
 		},
-		{ scope: "worker" },
+		// First-time setup builds two Dockerfiles and a frontend bundle —
+		// always more than the per-test 60s budget. Subsequent worker
+		// restarts re-attach via withReuse() so this only matters once
+		// per session.
+		{ scope: "worker", timeout: 600_000 },
 	],
 	frontendUrl: [
 		async ({}, use) => {
 			await ensureSetup();
 			await use(`http://localhost:${frontendPort}`);
 		},
-		{ scope: "worker" },
+		{ scope: "worker", timeout: 600_000 },
 	],
 });
 
