@@ -161,12 +161,15 @@ w = screen.root.create_window(0, 0, 100, 100, 0, screen.root_depth,
     Xlib.X.InputOutput, Xlib.X.CopyFromParent)
 w.map()
 d.sync()
+import time; time.sleep(0.2)  # let the server set the property
 
-# Check WM_STATE property
+# Check WM_STATE property. python-xlib decodes format=32 properties into
+# an array.array('I', ...), so len(prop.value) is the count of CARDINALs
+# (2: state + icon_window), not bytes.
 wm_state_atom = d.intern_atom("WM_STATE")
 prop = w.get_full_property(wm_state_atom, wm_state_atom)
-if prop and len(prop.value) >= 4:
-    state_val = struct.unpack("<I", prop.value[:4])[0]
+if prop and len(prop.value) >= 1:
+    state_val = int(prop.value[0])
     print(f"wm_state={state_val}")
     if state_val == 1:  # NormalState
         print("WM_STATE_OK")
@@ -202,11 +205,12 @@ child = parent.create_window(10, 10, 50, 50, 0, screen.root_depth,
 child.map()
 d.sync()
 
-# Check WM_STATE on child
+# Check WM_STATE on child (format=32 → array.array of CARDINALs, len in elements)
+import time; time.sleep(0.2)
 wm_state_atom = d.intern_atom("WM_STATE")
 prop = child.get_full_property(wm_state_atom, wm_state_atom)
-if prop and len(prop.value) >= 4:
-    state_val = struct.unpack("<I", prop.value[:4])[0]
+if prop and len(prop.value) >= 1:
+    state_val = int(prop.value[0])
     if state_val == 1:  # NormalState
         print("CHILD_WM_STATE_OK")
     else:
@@ -323,6 +327,8 @@ while d.pending_events() > 0:
 # Destroy window
 w.destroy()
 d.sync()
+# Events are async — give the server a moment to deliver before checking
+import time; time.sleep(0.3)
 
 got_destroy = False
 while d.pending_events() > 0:
