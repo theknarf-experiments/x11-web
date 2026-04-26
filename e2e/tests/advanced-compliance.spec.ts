@@ -3953,9 +3953,9 @@ root = screen.root
 root.change_attributes(event_mask=Xlib.X.ColormapChangeMask)
 d.sync()
 
-# Create and install a new colormap
+# Create and install a new colormap (install_colormap is on Colormap)
 cmap = root.create_colormap(screen.root_visual, Xlib.X.AllocNone)
-d.install_colormap(cmap)
+cmap.install_colormap()
 d.sync()
 
 import time; time.sleep(0.1)

@@ -708,13 +708,14 @@ d.close()
 			`
 from Xlib import display
 d = display.Display()
-fid = d.open_font('fixed')
-extents = d.query_text_extents(fid, 'Hello World')
+font = d.open_font('fixed')
+# query_text_extents lives on the Font/Fontable, not Display
+extents = font.query_text_extents('Hello World')
 print(f"ascent={extents.font_ascent}")
 print(f"descent={extents.font_descent}")
 print(f"width={extents.overall_width}")
 print(f"valid={extents.font_ascent > 0 and extents.overall_width > 0}")
-d.close_font(fid)
+font.close()
 d.close()
 `,
 		);

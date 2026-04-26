@@ -154,8 +154,8 @@ import Xlib.display, Xlib.X
 d = Xlib.display.Display()
 root = d.screen().root
 
-# Warp pointer to specific coordinates
-d.warp_pointer(0, root, 0, 0, 0, 0, 200, 150)
+# Warp pointer to specific coordinates (absolute on root)
+d.warp_pointer(200, 150)
 d.sync()
 
 # Query pointer position
