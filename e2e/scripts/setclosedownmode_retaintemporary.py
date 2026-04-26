@@ -21,7 +21,8 @@ if wid in child_ids:
 else:
     failed += 1; print(f"FAIL: window {wid:#x} not retained")
 # Clean up: KillClient to destroy retained resources
-d2.kill_client(wid)
+# (kill_client is on the Resource object, not Display)
+d2.create_resource_object("window", wid).kill_client()
 d2.sync()
 passed += 1; print("PASS: KillClient on retained window")
 d2.close()

@@ -45,12 +45,7 @@ d = display.Display()
 root = d.screen().root
 w = root.create_window(10, 10, 200, 200, 0, d.screen().root_depth)
 # Set WM_HINTS with input=True (flags bit 0 = InputHint)
-hints = w.wm_hints
-if hints is None:
-    hints = {}
-hints['flags'] = Xutil.InputHint
-hints['input'] = 1
-w.set_wm_hints(hints)
+w.set_wm_hints(flags=Xutil.InputHint, input=1)
 d.sync()
 
 # Read back WM_HINTS to verify
@@ -74,10 +69,7 @@ from Xlib import display, X, Xutil
 d = display.Display()
 root = d.screen().root
 w = root.create_window(10, 10, 200, 200, 0, d.screen().root_depth)
-hints = {}
-hints['flags'] = Xutil.InputHint
-hints['input'] = 0
-w.set_wm_hints(hints)
+w.set_wm_hints(flags=Xutil.InputHint, input=0)
 d.sync()
 
 read_hints = w.get_wm_hints()
