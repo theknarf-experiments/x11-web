@@ -19,7 +19,6 @@ use x11rb_protocol::protocol::xfixes::{
 
 /// 5: CreateRegion
 pub(crate) fn handle_create_region(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
-    require_len!(data, 8, seq, 138, 5, state.msb_first);
     let req = parse_minor!(CreateRegionRequest, data, state, seq, 138, 5);
     let region_id = req.region;
     let rects: Vec<RegionRect> = req.rectangles.iter().map(|r| RegionRect {
@@ -42,7 +41,6 @@ pub(crate) fn handle_create_region_from_bitmap(
     data: &[u8],
     seq: u16,
 ) -> Vec<u8> {
-    require_len!(data, 12, seq, 138, 6, state.msb_first);
     let req = parse_minor!(CreateRegionFromBitmapRequest, data, state, seq, 138, 6);
     let region_id = req.region;
     let bitmap_id = req.bitmap;
@@ -67,7 +65,6 @@ pub(crate) fn handle_create_region_from_window(
     data: &[u8],
     seq: u16,
 ) -> Vec<u8> {
-    require_len!(data, 12, seq, 138, 7, state.msb_first);
     let req = parse_minor!(CreateRegionFromWindowRequest, data, state, seq, 138, 7);
     let region_id = req.region;
     let window_id = req.window;
@@ -91,7 +88,6 @@ pub(crate) fn handle_create_region_from_gc(
     data: &[u8],
     seq: u16,
 ) -> Vec<u8> {
-    require_len!(data, 12, seq, 138, 8, state.msb_first);
     let req = parse_minor!(CreateRegionFromGCRequest, data, state, seq, 138, 8);
     let region_id = req.region;
     let gc_id = req.gc;
@@ -124,7 +120,6 @@ pub(crate) fn handle_create_region_from_picture(
     data: &[u8],
     seq: u16,
 ) -> Vec<u8> {
-    require_len!(data, 12, seq, 138, 9, state.msb_first);
     let req = parse_minor!(CreateRegionFromPictureRequest, data, state, seq, 138, 9);
     let region_id = req.region;
     let picture_id = req.picture;
@@ -170,7 +165,6 @@ pub(crate) fn handle_create_region_from_picture(
 
 /// 10: DestroyRegion
 pub(crate) fn handle_destroy_region(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
-    require_len!(data, 8, seq, 138, 10, state.msb_first);
     let req = parse_minor!(DestroyRegionRequest, data, state, seq, 138, 10);
     let region_id = req.region;
     state.xfixes_regions.remove(&region_id);
@@ -181,7 +175,6 @@ pub(crate) fn handle_destroy_region(state: &mut ClientState, data: &[u8], seq: u
 
 /// 11: SetRegion
 pub(crate) fn handle_set_region(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
-    require_len!(data, 8, seq, 138, 11, state.msb_first);
     let req = parse_minor!(SetRegionRequest, data, state, seq, 138, 11);
     let region_id = req.region;
     let rects: Vec<RegionRect> = req.rectangles.iter().map(|r| RegionRect {
@@ -198,7 +191,6 @@ pub(crate) fn handle_set_region(state: &mut ClientState, data: &[u8], seq: u16) 
 
 /// 12: CopyRegion
 pub(crate) fn handle_copy_region(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
-    require_len!(data, 12, seq, 138, 12, state.msb_first);
     let req = parse_minor!(CopyRegionRequest, data, state, seq, 138, 12);
     let src_id = req.source;
     let dst_id = req.destination;
@@ -213,7 +205,6 @@ pub(crate) fn handle_copy_region(state: &mut ClientState, data: &[u8], seq: u16)
 
 /// 13: UnionRegion
 pub(crate) fn handle_union_region(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
-    require_len!(data, 16, seq, 138, 13, state.msb_first);
     let req = parse_minor!(UnionRegionRequest, data, state, seq, 138, 13);
     let src1 = req.source1;
     let src2 = req.source2;
@@ -234,7 +225,6 @@ pub(crate) fn handle_union_region(state: &mut ClientState, data: &[u8], seq: u16
 
 /// 14: IntersectRegion
 pub(crate) fn handle_intersect_region(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
-    require_len!(data, 16, seq, 138, 14, state.msb_first);
     let req = parse_minor!(IntersectRegionRequest, data, state, seq, 138, 14);
     let src1 = req.source1;
     let src2 = req.source2;
@@ -255,7 +245,6 @@ pub(crate) fn handle_intersect_region(state: &mut ClientState, data: &[u8], seq:
 
 /// 15: SubtractRegion
 pub(crate) fn handle_subtract_region(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
-    require_len!(data, 16, seq, 138, 15, state.msb_first);
     let req = parse_minor!(SubtractRegionRequest, data, state, seq, 138, 15);
     let src1 = req.source1;
     let src2 = req.source2;
@@ -276,7 +265,6 @@ pub(crate) fn handle_subtract_region(state: &mut ClientState, data: &[u8], seq: 
 
 /// 16: InvertRegion
 pub(crate) fn handle_invert_region(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
-    require_len!(data, 20, seq, 138, 16, state.msb_first);
     let req = parse_minor!(InvertRegionRequest, data, state, seq, 138, 16);
     let src = req.source;
     let dst = req.destination;
@@ -297,7 +285,6 @@ pub(crate) fn handle_invert_region(state: &mut ClientState, data: &[u8], seq: u1
 
 /// 17: TranslateRegion
 pub(crate) fn handle_translate_region(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
-    require_len!(data, 12, seq, 138, 17, state.msb_first);
     let req = parse_minor!(TranslateRegionRequest, data, state, seq, 138, 17);
     let region_id = req.region;
     let dx = req.dx;
@@ -310,7 +297,6 @@ pub(crate) fn handle_translate_region(state: &mut ClientState, data: &[u8], seq:
 
 /// 18: RegionExtents
 pub(crate) fn handle_region_extents(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
-    require_len!(data, 12, seq, 138, 18, state.msb_first);
     let req = parse_minor!(RegionExtentsRequest, data, state, seq, 138, 18);
     let src = req.source;
     let dst = req.destination;
@@ -332,7 +318,6 @@ pub(crate) fn handle_region_extents(state: &mut ClientState, data: &[u8], seq: u
 
 /// 19: FetchRegion
 pub(crate) fn handle_fetch_region(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
-    require_len!(data, 8, seq, 138, 19, state.msb_first);
     let req = parse_minor!(FetchRegionRequest, data, state, seq, 138, 19);
     let region_id = req.region;
     let region = state.xfixes_regions.get(&region_id);
@@ -370,7 +355,6 @@ pub(crate) fn handle_fetch_region(state: &mut ClientState, data: &[u8], seq: u16
 
 /// 20: SetGCClipRegion
 pub(crate) fn handle_set_gc_clip_region(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
-    require_len!(data, 16, seq, 138, 20, state.msb_first);
     let req = parse_minor!(SetGCClipRegionRequest, data, state, seq, 138, 20);
     let gc_id = req.gc;
     let region_id = req.region;
@@ -450,7 +434,6 @@ pub(crate) fn handle_set_picture_clip_region(
     data: &[u8],
     seq: u16,
 ) -> Vec<u8> {
-    require_len!(data, 16, seq, 138, 22, state.msb_first);
     let req = parse_minor!(SetPictureClipRegionRequest, data, state, seq, 138, 22);
     let pic_id = req.picture;
     let region_id = req.region;
@@ -473,7 +456,6 @@ pub(crate) fn handle_set_picture_clip_region(
 
 /// 28: ExpandRegion
 pub(crate) fn handle_expand_region(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
-    require_len!(data, 20, seq, 138, 28, state.msb_first);
     let req = parse_minor!(ExpandRegionRequest, data, state, seq, 138, 28);
     let src = req.source;
     let dst = req.destination;

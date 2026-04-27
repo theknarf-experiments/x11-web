@@ -35,7 +35,6 @@ pub(crate) fn handle_shm_request(state: &mut ClientState, data: &[u8], seq: u16)
 
         // Attach
         1 => {
-            require_len!(data, 16, seq, 130, minor as u16, state.msb_first);
             let req = parse_minor!(AttachRequest, data, state, seq, 130, minor as u16);
             let shmseg = req.shmseg;
             let shmid = req.shmid as i32;
@@ -88,7 +87,6 @@ pub(crate) fn handle_shm_request(state: &mut ClientState, data: &[u8], seq: u16)
 
         // Detach
         2 => {
-            require_len!(data, 8, seq, 130, minor as u16, state.msb_first);
             let req = parse_minor!(DetachRequest, data, state, seq, 130, minor as u16);
             let shmseg = req.shmseg;
             info!("SHM Detach: shmseg={shmseg}");
@@ -104,7 +102,6 @@ pub(crate) fn handle_shm_request(state: &mut ClientState, data: &[u8], seq: u16)
 
         // PutImage
         3 => {
-            require_len!(data, 40, seq, 130, minor as u16, state.msb_first);
 
             let req = parse_minor!(PutImageRequest, data, state, seq, 130, minor as u16);
             let drawable = req.drawable;
@@ -205,7 +202,6 @@ pub(crate) fn handle_shm_request(state: &mut ClientState, data: &[u8], seq: u16)
 
         // GetImage
         4 => {
-            require_len!(data, 32, seq, 130, minor as u16, state.msb_first);
             let req = parse_minor!(GetImageRequest, data, state, seq, 130, minor as u16);
             let drawable = req.drawable;
             let src_x = req.x;
@@ -255,7 +251,6 @@ pub(crate) fn handle_shm_request(state: &mut ClientState, data: &[u8], seq: u16)
 
         // CreatePixmap
         5 => {
-            require_len!(data, 28, seq, 130, minor as u16, state.msb_first);
             let req = parse_minor!(CreatePixmapRequest, data, state, seq, 130, minor as u16);
             let pid = req.pid;
             let width = req.width;
@@ -370,7 +365,6 @@ pub(crate) fn handle_shm_request(state: &mut ClientState, data: &[u8], seq: u16)
         // CreateSegment (minor 7) — MIT-SHM 1.2+
         // Server creates an SHM segment and returns the fd to the client.
         7 => {
-            require_len!(data, 16, seq, 130, minor as u16, state.msb_first);
             let req = parse_minor!(CreateSegmentRequest, data, state, seq, 130, minor as u16);
             let shmseg = req.shmseg;
             let size = req.size as usize;

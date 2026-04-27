@@ -11,7 +11,6 @@ use x11rb_protocol::protocol::render::SetPictureFilterRequest;
 /// Sets the filter on a picture (nearest, bilinear, etc.).
 pub(crate) fn handle_set_picture_filter(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
     let bo = state.msb_first;
-    require_len!(data, 12, seq, 139, data[1] as u16, bo);
 
     let req = parse_minor!(SetPictureFilterRequest, data, state, seq, 139, data[1] as u16);
 

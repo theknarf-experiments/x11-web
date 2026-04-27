@@ -19,7 +19,6 @@ fn fixed_to_f64(f: Fixed) -> f64 {
 
 pub(crate) fn handle_create_solid_fill(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
     let bo = state.msb_first;
-    require_len!(data, 16, seq, 139, data[1] as u16, bo);
 
     let req = parse_minor!(CreateSolidFillRequest, data, state, seq, 139, data[1] as u16);
 
@@ -69,7 +68,6 @@ pub(crate) fn handle_create_gradient_fill(
 fn handle_create_linear_gradient(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
     let bo = state.msb_first;
     let minor = data[1] as u16;
-    require_len!(data, 32, seq, 139, minor, bo);
 
     let req = parse_minor!(CreateLinearGradientRequest, data, state, seq, 139, minor);
 
@@ -259,7 +257,6 @@ pub(crate) fn rasterize_linear_gradient(
 fn handle_create_radial_gradient(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
     let bo = state.msb_first;
     let minor = data[1] as u16;
-    require_len!(data, 40, seq, 139, minor, bo);
 
     let req = parse_minor!(CreateRadialGradientRequest, data, state, seq, 139, minor);
 
@@ -411,7 +408,6 @@ pub(crate) fn rasterize_radial_gradient(
 fn handle_create_conical_gradient(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
     let bo = state.msb_first;
     let minor = data[1] as u16;
-    require_len!(data, 24, seq, 139, minor, bo);
 
     let req = parse_minor!(CreateConicalGradientRequest, data, state, seq, 139, minor);
 

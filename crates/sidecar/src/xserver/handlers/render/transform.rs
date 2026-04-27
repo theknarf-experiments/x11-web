@@ -22,7 +22,6 @@ pub(crate) fn handle_set_picture_transform(
     seq: u16,
 ) -> Vec<u8> {
     let bo = state.msb_first;
-    require_len!(data, 8 + 9 * 4, seq, 139, data[1] as u16, bo);
 
     let req = parse_minor!(SetPictureTransformRequest, data, state, seq, 139, data[1] as u16);
 

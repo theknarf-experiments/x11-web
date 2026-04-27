@@ -15,7 +15,6 @@ use x11rb_protocol::protocol::render::{
 /// The main compositing operation.
 pub(crate) fn handle_composite(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
     let bo = state.msb_first;
-    require_len!(data, 36, seq, 139, data[1] as u16, bo);
 
     let req = parse_minor!(CompositeRequest, data, state, seq, 139, data[1] as u16);
 
@@ -203,7 +202,6 @@ fn fixed_to_f64(f: Fixed) -> f64 {
 pub(crate) fn handle_trapezoids(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
     let bo = state.msb_first;
     let minor = data[1] as u16;
-    require_len!(data, 24, seq, 139, minor, bo);
 
     let req = parse_minor!(TrapezoidsRequest, data, state, seq, 139, minor);
 
@@ -419,7 +417,6 @@ fn rasterize_trapezoid(
 pub(crate) fn handle_triangles(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
     let bo = state.msb_first;
     let minor = data[1] as u16;
-    require_len!(data, 24, seq, 139, minor, bo);
 
     let req = parse_minor!(TrianglesRequest, data, state, seq, 139, minor);
 
@@ -675,7 +672,6 @@ fn rasterize_triangle(
 pub(crate) fn handle_tri_strip(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
     let bo = state.msb_first;
     let minor = data[1] as u16;
-    require_len!(data, 24, seq, 139, minor, bo);
 
     let req = parse_minor!(TriStripRequest, data, state, seq, 139, minor);
 
@@ -784,7 +780,6 @@ pub(crate) fn handle_tri_strip(state: &mut ClientState, data: &[u8], seq: u16) -
 pub(crate) fn handle_tri_fan(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
     let bo = state.msb_first;
     let minor = data[1] as u16;
-    require_len!(data, 24, seq, 139, minor, bo);
 
     let req = parse_minor!(TriFanRequest, data, state, seq, 139, minor);
 
@@ -892,7 +887,6 @@ pub(crate) fn handle_tri_fan(state: &mut ClientState, data: &[u8], seq: u16) -> 
 pub(crate) fn handle_fill_rectangles(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
     let bo = state.msb_first;
     let minor = data[1] as u16;
-    require_len!(data, 24, seq, 139, minor, bo);
 
     let req = parse_minor!(FillRectanglesRequest, data, state, seq, 139, minor);
 
@@ -988,7 +982,6 @@ pub(crate) fn handle_fill_rectangles(state: &mut ClientState, data: &[u8], seq: 
 pub(crate) fn handle_add_traps(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
     let bo = state.msb_first;
     let minor = data[1] as u16;
-    require_len!(data, 12, seq, 139, minor, bo);
 
     let req = parse_minor!(AddTrapsRequest, data, state, seq, 139, minor);
 

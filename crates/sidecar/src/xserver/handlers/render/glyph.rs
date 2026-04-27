@@ -16,7 +16,6 @@ use x11rb_protocol::protocol::render::{
 
 pub(crate) fn handle_create_glyphset(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
     let bo = state.msb_first;
-    require_len!(data, 12, seq, 139, data[1] as u16, bo);
 
     let req = parse_minor!(CreateGlyphSetRequest, data, state, seq, 139, data[1] as u16);
 
@@ -37,7 +36,6 @@ pub(crate) fn handle_create_glyphset(state: &mut ClientState, data: &[u8], seq: 
 
 pub(crate) fn handle_free_glyphset(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
     let bo = state.msb_first;
-    require_len!(data, 8, seq, 139, data[1] as u16, bo);
 
     let req = parse_minor!(FreeGlyphSetRequest, data, state, seq, 139, data[1] as u16);
 
@@ -51,7 +49,6 @@ pub(crate) fn handle_free_glyphset(state: &mut ClientState, data: &[u8], seq: u1
 /// Creates a new glyphset that shares glyphs with an existing one.
 pub(crate) fn handle_reference_glyphset(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
     let bo = state.msb_first;
-    require_len!(data, 12, seq, 139, data[1] as u16, bo);
 
     let req = parse_minor!(ReferenceGlyphSetRequest, data, state, seq, 139, data[1] as u16);
 
@@ -83,7 +80,6 @@ pub(crate) fn handle_reference_glyphset(state: &mut ClientState, data: &[u8], se
 pub(crate) fn handle_add_glyphs(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
     let bo = state.msb_first;
     let minor = data[1] as u16;
-    require_len!(data, 12, seq, 139, minor, bo);
 
     let req = parse_minor!(AddGlyphsRequest, data, state, seq, 139, minor);
 
@@ -348,7 +344,6 @@ pub(crate) fn handle_add_glyphs_from_picture(
 
 pub(crate) fn handle_free_glyphs(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
     let bo = state.msb_first;
-    require_len!(data, 8, seq, 139, data[1] as u16, bo);
 
     let req = parse_minor!(FreeGlyphsRequest, data, state, seq, 139, data[1] as u16);
 

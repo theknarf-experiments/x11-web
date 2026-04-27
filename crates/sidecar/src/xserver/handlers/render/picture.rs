@@ -166,7 +166,6 @@ pub(crate) fn handle_query_pict_formats(seq: u16, bo: bool) -> Vec<u8> {
 
 pub(crate) fn handle_create_picture(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
     let bo = state.msb_first;
-    require_len!(data, 20, seq, 139, data[1] as u16, bo);
 
     let req = parse_minor!(CreatePictureRequest, data, state, seq, 139, data[1] as u16);
 
@@ -281,7 +280,6 @@ pub(crate) fn handle_create_picture(state: &mut ClientState, data: &[u8], seq: u
 
 pub(crate) fn handle_change_picture(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
     let bo = state.msb_first;
-    require_len!(data, 12, seq, 139, data[1] as u16, bo);
 
     let req = parse_minor!(ChangePictureRequest, data, state, seq, 139, data[1] as u16);
 
@@ -330,7 +328,6 @@ pub(crate) fn handle_set_picture_clip_rectangles(
     seq: u16,
 ) -> Vec<u8> {
     let bo = state.msb_first;
-    require_len!(data, 12, seq, 139, data[1] as u16, bo);
 
     let req = parse_minor!(SetPictureClipRectanglesRequest, data, state, seq, 139, data[1] as u16);
 
@@ -376,7 +373,6 @@ pub(crate) fn handle_create_cursor(state: &mut ClientState, data: &[u8], seq: u1
     use crate::xserver::types::CursorInfo;
 
     let bo = state.msb_first;
-    require_len!(data, 16, seq, 139, data[1] as u16, bo);
 
     let req = parse_minor!(CreateCursorRequest, data, state, seq, 139, data[1] as u16);
 

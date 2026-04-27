@@ -176,7 +176,6 @@ pub(crate) fn handle_vidmode_request(state: &mut ClientState, data: &[u8], seq: 
         15 => {
             // SetGamma
             // Parse three 16.16 fixed-point gamma values from request
-            require_len!(data, 20, seq, 153, minor as u16, state.msb_first);
             let req = parse_minor!(SetGammaRequest, data, state, seq, 153, minor);
             let red_fp = req.red;
             let green_fp = req.green;
@@ -265,7 +264,6 @@ pub(crate) fn handle_vidmode_request(state: &mut ClientState, data: &[u8], seq: 
         17 => {
             // SetGammaRamp
             // x11rb uses minor opcode 18 for SetGammaRamp; override header.
-            require_len!(data, 8, seq, 153, minor as u16, state.msb_first);
             let req = parse_minor!(SetGammaRampRequest, data, state, seq, 153, minor, vidmode_header(data, 18));
             let size = req.size as usize;
             if size == 0 {
@@ -322,7 +320,6 @@ pub(crate) fn handle_vidmode_request(state: &mut ClientState, data: &[u8], seq: 
         3 => {
             // SwitchToMode — attempt to switch to a matching mode in the mode list
             // x11rb uses minor opcode 10 for SwitchToMode; override header.
-            require_len!(data, 52, seq, 153, minor as u16, state.msb_first);
             let req = parse_minor!(SwitchToModeRequest, data, state, seq, 153, minor, vidmode_header(data, 10));
             let screen = req.screen;
             let requested = VidModeInfo {
@@ -404,7 +401,6 @@ pub(crate) fn handle_vidmode_request(state: &mut ClientState, data: &[u8], seq: 
         }
         5 => {
             // LockModeSwitch — store the lock state
-            require_len!(data, 8, seq, 153, minor as u16, state.msb_first);
             let req = parse_minor!(LockModeSwitchRequest, data, state, seq, 153, minor);
             let screen = req.screen;
             let lock = req.lock;
@@ -417,7 +413,6 @@ pub(crate) fn handle_vidmode_request(state: &mut ClientState, data: &[u8], seq: 
         }
         7 => {
             // AddModeLine — parse and add to mode list
-            require_len!(data, 54, seq, 153, minor as u16, state.msb_first);
             let req = parse_minor!(AddModeLineRequest, data, state, seq, 153, minor);
             let screen = req.screen;
             let new_mode = VidModeInfo {
@@ -444,7 +439,6 @@ pub(crate) fn handle_vidmode_request(state: &mut ClientState, data: &[u8], seq: 
         }
         8 => {
             // DeleteModeLine — remove matching mode from the list
-            require_len!(data, 50, seq, 153, minor as u16, state.msb_first);
             let req = parse_minor!(DeleteModeLineRequest, data, state, seq, 153, minor);
             let screen = req.screen;
             let target = VidModeInfo {
@@ -489,7 +483,6 @@ pub(crate) fn handle_vidmode_request(state: &mut ClientState, data: &[u8], seq: 
         10 => {
             // SwitchMode — cycle through mode list by zoom direction
             // x11rb uses minor opcode 3 for SwitchMode; override header.
-            require_len!(data, 8, seq, 153, minor as u16, state.msb_first);
             let req = parse_minor!(SwitchModeRequest, data, state, seq, 153, minor, vidmode_header(data, 3));
             let screen = req.screen;
             let zoom = req.zoom as i16;
@@ -522,7 +515,6 @@ pub(crate) fn handle_vidmode_request(state: &mut ClientState, data: &[u8], seq: 
         }
         12 => {
             // SetViewPort — store offset (clamped to screen bounds) and log
-            require_len!(data, 16, seq, 153, minor as u16, state.msb_first);
             let req = parse_minor!(SetViewPortRequest, data, state, seq, 153, minor);
             let screen = req.screen;
             let x = req.x;
