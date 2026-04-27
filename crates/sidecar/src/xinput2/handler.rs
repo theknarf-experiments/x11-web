@@ -145,11 +145,9 @@ pub fn handle_request(
         }
 
         xi::XI_SET_CLIENT_POINTER_REQUEST => {
-            // XISetClientPointer: body is window(4) + deviceid(2) + pad(2)
-            if body.len() >= 6 {
-                let deviceid = read_u16_bo(body, 4, msb_first);
-                debug!("XISetClientPointer: deviceid={deviceid}");
-                *client_pointer = deviceid;
+            if let Ok(req) = xi::XISetClientPointerRequest::try_parse_request(header, body) {
+                debug!("XISetClientPointer: deviceid={}", req.deviceid);
+                *client_pointer = req.deviceid;
             }
             Vec::new()
         }
@@ -197,33 +195,22 @@ pub fn handle_request(
         }
 
         xi::XI_SET_FOCUS_REQUEST => {
-            // XISetFocus: body is window(4) + time(4) + deviceid(2) + pad(2)
-            if body.len() >= 4 {
-                let window = read_u32_bo(body, 0, msb_first);
-                debug!("XISetFocus: window={window:#x}");
-                *focus_window = window;
+            if let Ok(req) = xi::XISetFocusRequest::try_parse_request(header, body) {
+                debug!("XISetFocus: window={:#x}", req.window);
+                *focus_window = req.window;
             }
             Vec::new()
         }
 
         xi::XI_GRAB_DEVICE_REQUEST => {
-            // XIGrabDevice: window(4) + time(4) + cursor(4) + deviceid(2) +
-            //   mode(1) + paired_device_mode(1) + owner_events(1) + pad(1) +
-            //   mask_len(2) + mask...
-            let status = if body.len() >= 18 {
-                let grab_window = read_u32_bo(body, 0, msb_first);
-                let deviceid = read_u16_bo(body, 12, msb_first);
-                let grab_mode = body[14];
-                let paired_device_mode = body[15];
-                let owner_events = body[16] != 0;
-                let mask_len = read_u16_bo(body, 18, msb_first) as usize;
-                let mut event_mask = Vec::new();
-                for i in 0..mask_len {
-                    let off = 20 + i * 4;
-                    if off + 4 <= body.len() {
-                        event_mask.push(read_u32_bo(body, off, msb_first).into());
-                    }
-                }
+            let status = if let Ok(req) = xi::XIGrabDeviceRequest::try_parse_request(header, body) {
+                let deviceid = req.deviceid;
+                let grab_window = req.window;
+                let grab_mode = u8::from(req.mode);
+                let paired_device_mode = u8::from(req.paired_device_mode);
+                let owner_events = u8::from(req.owner_events) != 0;
+                let event_mask: Vec<xi::XIEventMask> =
+                    req.mask.iter().map(|&m| m.into()).collect();
 
                 // Check if device is already grabbed by this client.
                 if let std::collections::hash_map::Entry::Vacant(e) = active_grabs.entry(deviceid) {
@@ -235,7 +222,6 @@ pub fn handle_request(
                         paired_device_mode,
                         grab_mode,
                     };
-                    // Freeze events if synchronous mode.
                     if grab_mode == 0 {
                         if deviceid == MASTER_POINTER_ID || deviceid == 0 || deviceid == 1 {
                             *pointer_frozen = true;
@@ -262,9 +248,8 @@ pub fn handle_request(
             serialize_xi_reply(&reply, msb_first)
         }
         xi::XI_UNGRAB_DEVICE_REQUEST => {
-            // XIUngrabDevice: time(4) + deviceid(2) + pad(2)
-            if body.len() >= 6 {
-                let deviceid = read_u16_bo(body, 4, msb_first);
+            if let Ok(req) = xi::XIUngrabDeviceRequest::try_parse_request(header, body) {
+                let deviceid = req.deviceid;
                 debug!("XIUngrabDevice: releasing device={deviceid}");
                 active_grabs.remove(&deviceid);
                 // Thaw any frozen events for this device.
@@ -278,10 +263,9 @@ pub fn handle_request(
             Vec::new()
         }
         xi::XI_ALLOW_EVENTS_REQUEST => {
-            // XIAllowEvents: time(4) + deviceid(2) + mode(1) + pad(1)
-            if body.len() >= 7 {
-                let deviceid = read_u16_bo(body, 4, msb_first);
-                let mode = body[6];
+            if let Ok(req) = xi::XIAllowEventsRequest::try_parse_request(header, body) {
+                let deviceid = req.deviceid;
+                let mode = u8::from(req.event_mode);
                 debug!("XIAllowEvents: device={deviceid} mode={mode}");
                 match mode {
                     // AsyncDevice (0): thaw device, deliver frozen, no re-freeze.
