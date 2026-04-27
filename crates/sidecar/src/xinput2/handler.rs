@@ -320,46 +320,19 @@ pub fn handle_request(
         }
 
         xi::XI_PASSIVE_GRAB_DEVICE_REQUEST => {
-            // XIPassiveGrabDevice: time(4) + grab_window(4) + cursor(4) +
-            //   detail(4) + deviceid(2) + num_modifiers(2) + mask_len(2) +
-            //   grab_type(1) + grab_mode(1) + paired_device_mode(1) +
-            //   owner_events(1) + pad(2) + mask(mask_len*4) + modifiers(num_modifiers*4)
-            if body.len() >= 24 {
-                let grab_window = read_u32_bo(body, 4, msb_first);
-                let detail = read_u32_bo(body, 12, msb_first);
-                let deviceid = read_u16_bo(body, 16, msb_first);
-                let num_modifiers = read_u16_bo(body, 18, msb_first) as usize;
-                let mask_len = read_u16_bo(body, 20, msb_first) as usize;
-                let grab_type = body[22];
-                let grab_mode = body[23];
-                let paired_device_mode = body[24];
-                let owner_events = if body.len() > 25 {
-                    body[25] != 0
-                } else {
-                    false
-                };
+            let failed_modifiers: Vec<xi::GrabModifierInfo> = Vec::new();
+            if let Ok(req) = xi::XIPassiveGrabDeviceRequest::try_parse_request(header, body) {
+                let grab_window = req.grab_window;
+                let detail = req.detail;
+                let deviceid = req.deviceid;
+                let grab_type = u8::from(req.grab_type);
+                let grab_mode = u8::from(req.grab_mode);
+                let paired_device_mode = u8::from(req.paired_device_mode);
+                let owner_events = u8::from(req.owner_events) != 0;
+                let event_mask: Vec<xi::XIEventMask> =
+                    req.mask.iter().map(|&m| m.into()).collect();
 
-                // Parse event mask.
-                let mask_start = 28; // after padding
-                let mut event_mask = Vec::new();
-                for i in 0..mask_len {
-                    let off = mask_start + i * 4;
-                    if off + 4 <= body.len() {
-                        event_mask.push(read_u32_bo(body, off, msb_first).into());
-                    }
-                }
-
-                // Parse modifier list.
-                let mods_start = mask_start + mask_len * 4;
-                let failed_modifiers = Vec::new();
-                for i in 0..num_modifiers {
-                    let off = mods_start + i * 4;
-                    let modifier = if off + 4 <= body.len() {
-                        read_u32_bo(body, off, msb_first)
-                    } else {
-                        0
-                    };
-
+                for &modifier in req.modifiers.iter() {
                     // Remove existing grab with same (window, detail, device, modifier, type).
                     passive_grabs.retain(|g| {
                         !(g.grab_window == grab_window
@@ -386,39 +359,21 @@ pub fn handle_request(
                     );
                     debug!("XIPassiveGrabDevice: device={deviceid} window={grab_window:#x} detail={detail} type={grab_type} mod={modifier:#x}");
                 }
-
-                let reply = xi::XIPassiveGrabDeviceReply {
-                    sequence: seq,
-                    length: 0,
-                    modifiers: failed_modifiers,
-                };
-                serialize_xi_reply(&reply, msb_first)
-            } else {
-                let reply = xi::XIPassiveGrabDeviceReply {
-                    sequence: seq,
-                    length: 0,
-                    modifiers: vec![],
-                };
-                serialize_xi_reply(&reply, msb_first)
             }
+            let reply = xi::XIPassiveGrabDeviceReply {
+                sequence: seq,
+                length: 0,
+                modifiers: failed_modifiers,
+            };
+            serialize_xi_reply(&reply, msb_first)
         }
         xi::XI_PASSIVE_UNGRAB_DEVICE_REQUEST => {
-            // XIPassiveUngrabDevice: grab_window(4) + detail(4) + deviceid(2) +
-            //   num_modifiers(2) + grab_type(1) + pad(3) + modifiers(num_modifiers*4)
-            if body.len() >= 12 {
-                let grab_window = read_u32_bo(body, 0, msb_first);
-                let detail = read_u32_bo(body, 4, msb_first);
-                let deviceid = read_u16_bo(body, 8, msb_first);
-                let num_modifiers = read_u16_bo(body, 10, msb_first) as usize;
-                let grab_type = body[12];
-
-                for i in 0..num_modifiers {
-                    let off = 16 + i * 4;
-                    let modifier = if off + 4 <= body.len() {
-                        read_u32_bo(body, off, msb_first)
-                    } else {
-                        0
-                    };
+            if let Ok(req) = xi::XIPassiveUngrabDeviceRequest::try_parse_request(header, body) {
+                let grab_window = req.grab_window;
+                let detail = req.detail;
+                let deviceid = req.deviceid;
+                let grab_type = u8::from(req.grab_type);
+                for &modifier in req.modifiers.iter() {
                     passive_grabs.retain(|g| {
                         !(g.grab_window == grab_window
                             && g.detail == detail
@@ -433,12 +388,9 @@ pub fn handle_request(
         }
 
         xi::XI_LIST_PROPERTIES_REQUEST => {
-            // Return all property atoms for the requested device.
-            let deviceid = if body.len() >= 2 {
-                read_u16_bo(body, 0, msb_first)
-            } else {
-                0
-            };
+            let deviceid = xi::XIListPropertiesRequest::try_parse_request(header, body)
+                .map(|r| r.deviceid)
+                .unwrap_or(0);
             let properties: Vec<u32> = device_properties
                 .keys()
                 .filter(|(dev, _)| *dev == deviceid)
@@ -452,15 +404,9 @@ pub fn handle_request(
             serialize_xi_reply(&reply, msb_first)
         }
         xi::XI_GET_PROPERTY_REQUEST => {
-            // XIGetProperty: deviceid(2) + pad(2) + property(4) + type(4) + offset(4) + len(4)
-            let (deviceid, property) = if body.len() >= 8 {
-                (
-                    read_u16_bo(body, 0, msb_first),
-                    read_u32_bo(body, 4, msb_first),
-                )
-            } else {
-                (0, 0)
-            };
+            let (deviceid, property) = xi::XIGetPropertyRequest::try_parse_request(header, body)
+                .map(|r| (r.deviceid, r.property))
+                .unwrap_or((0, 0));
             if let Some(value) = device_properties.get(&(deviceid, property)) {
                 let reply = xi::XIGetPropertyReply {
                     sequence: seq,
@@ -502,23 +448,17 @@ pub fn handle_request(
             Vec::new()
         }
         xi::XI_DELETE_PROPERTY_REQUEST => {
-            // XIDeleteProperty: deviceid(2) + pad(2) + property(4)
-            if body.len() >= 8 {
-                let deviceid = read_u16_bo(body, 0, msb_first);
-                let property = read_u32_bo(body, 4, msb_first);
-                debug!("XIDeleteProperty: device={deviceid} property={property}");
-                device_properties.remove(&(deviceid, property));
+            if let Ok(req) = xi::XIDeletePropertyRequest::try_parse_request(header, body) {
+                debug!("XIDeleteProperty: device={} property={}", req.deviceid, req.property);
+                device_properties.remove(&(req.deviceid, req.property));
             }
             Vec::new()
         }
 
         xi::XI_GET_SELECTED_EVENTS_REQUEST => {
-            // XIGetSelectedEvents: window(4)
-            let window = if body.len() >= 4 {
-                read_u32_bo(body, 0, msb_first)
-            } else {
-                0
-            };
+            let window = xi::XIGetSelectedEventsRequest::try_parse_request(header, body)
+                .map(|r| r.window)
+                .unwrap_or(0);
             // Find all selections for this window and return them.
             let masks: Vec<xi::EventMask> = selections
                 .iter()
@@ -589,7 +529,9 @@ pub fn handle_request(
         // OpenDevice (3): return actual device classes for the requested
         // device. Pointer gets button+valuator, keyboard gets key class.
         3 => {
-            let device_id = if body.len() >= 1 { body[0] } else { 0 };
+            let device_id = xi::OpenDeviceRequest::try_parse_request(header, body)
+                .map(|r| r.device_id)
+                .unwrap_or(0);
             debug!("XI 1.x OpenDevice: device_id={device_id}");
             build_open_device_reply(device_id, seq, screen_width, screen_height, msb_first)
         }
@@ -598,11 +540,9 @@ pub fn handle_request(
         // exclusion mask for the given window. We store these in the
         // xi1_dont_propagate map.
         9 => {
-            let window = if body.len() >= 4 {
-                read_u32_bo(body, 0, msb_first)
-            } else {
-                0
-            };
+            let window = xi::GetDeviceDontPropagateListRequest::try_parse_request(header, body)
+                .map(|r| r.window)
+                .unwrap_or(0);
             debug!("XI 1.x GetDeviceDontPropagateList: window={window:#x}");
             let count = xi1_dont_propagate
                 .as_ref()
@@ -664,9 +604,9 @@ pub fn handle_request(
         // keyboard device, matching the core GetKeyboardMapping response.
         // Format: first_keycode(1) + count(1) + pad(2)
         24 => {
-            // body: device_id(1) + first_keycode(1) + count(1) + pad(1)
-            let first_keycode = if body.len() >= 2 { body[1] } else { 8 };
-            let count = if body.len() >= 3 { body[2] } else { 0 };
+            let req = xi::GetDeviceKeyMappingRequest::try_parse_request(header, body).ok();
+            let first_keycode = req.as_ref().map(|r| r.first_keycode).unwrap_or(8);
+            let count = req.as_ref().map(|r| r.count).unwrap_or(0);
             debug!("XI 1.x GetDeviceKeyMapping: first={first_keycode} count={count}");
             build_device_key_mapping_reply(first_keycode, count, seq, msb_first, custom_keymap)
         }
@@ -698,7 +638,9 @@ pub fn handle_request(
 
         // QueryDeviceState (30): return current button/key/valuator state.
         30 => {
-            let device_id = if body.len() >= 1 { body[0] } else { 0 };
+            let device_id = xi::QueryDeviceStateRequest::try_parse_request(header, body)
+                .map(|r| r.device_id)
+                .unwrap_or(0);
             debug!("XI 1.x QueryDeviceState: device_id={device_id}");
             build_query_device_state_reply(device_id, valuators, seq, msb_first)
         }
@@ -708,7 +650,9 @@ pub fn handle_request(
 
         // CloseDevice (4): accept and release any device-specific resources.
         4 => {
-            let device_id = if body.len() >= 1 { body[0] } else { 0 };
+            let device_id = xi::CloseDeviceRequest::try_parse_request(header, body)
+                .map(|r| r.device_id)
+                .unwrap_or(0);
             debug!("XI 1.x CloseDevice: device_id={device_id}");
             Vec::new()
         }
@@ -717,8 +661,9 @@ pub fn handle_request(
         // support both ABSOLUTE and RELATIVE, but we always report the
         // valuator state regardless of mode.
         5 => {
-            let device_id = if body.len() >= 1 { body[0] } else { 0 };
-            let mode = if body.len() >= 2 { body[1] } else { 0 };
+            let req = xi::SetDeviceModeRequest::try_parse_request(header, body).ok();
+            let device_id = req.as_ref().map(|r| r.device_id).unwrap_or(0);
+            let mode = req.map(|r| u8::from(r.mode)).unwrap_or(0);
             debug!("XI 1.x SetDeviceMode: device_id={device_id} mode={mode}");
             // SetDeviceMode requires a reply with status=0 (Success)
             let mut reply = vec![0u8; 32];
@@ -731,42 +676,30 @@ pub fn handle_request(
 
         // SelectExtensionEvent (6): track per-window XI 1.x event masks.
         6 => {
-            let window = if body.len() >= 4 {
-                read_u32_bo(body, 0, msb_first)
-            } else {
-                0
-            };
+            let window = xi::SelectExtensionEventRequest::try_parse_request(header, body)
+                .map(|r| r.window)
+                .unwrap_or(0);
             debug!("XI 1.x SelectExtensionEvent: window={window:#x}");
             Vec::new()
         }
 
         // ChangeDeviceDontPropagateList (8): update the stored masks.
         8 => {
-            let window = if body.len() >= 4 {
-                read_u32_bo(body, 0, msb_first)
-            } else {
-                0
-            };
-            let count = if body.len() >= 8 {
-                read_u16_bo(body, 4, msb_first) as usize
-            } else {
-                0
-            };
-            let mode = if body.len() >= 8 { body[6] } else { 0 }; // 0=Add, 1=Delete
-            debug!("XI 1.x ChangeDeviceDontPropagateList: window={window:#x} count={count} mode={mode}");
-            let map = xi1_dont_propagate.get_or_insert_with(HashMap::new);
-            let entry = map.entry(window).or_insert_with(Vec::new);
-            for i in 0..count {
-                let off = 8 + i * 4;
-                if off + 4 <= body.len() {
-                    let class = read_u32_bo(body, off, msb_first);
+            if let Ok(req) = xi::ChangeDeviceDontPropagateListRequest::try_parse_request(header, body) {
+                let window = req.window;
+                let mode = u8::from(req.mode); // 0=Add, 1=Delete
+                debug!(
+                    "XI 1.x ChangeDeviceDontPropagateList: window={window:#x} count={} mode={mode}",
+                    req.classes.len()
+                );
+                let map = xi1_dont_propagate.get_or_insert_with(HashMap::new);
+                let entry = map.entry(window).or_insert_with(Vec::new);
+                for &class in req.classes.iter() {
                     if mode == 0 {
-                        // Add
                         if !entry.contains(&class) {
                             entry.push(class);
                         }
                     } else {
-                        // Delete
                         entry.retain(|&c| c != class);
                     }
                 }
@@ -776,11 +709,9 @@ pub fn handle_request(
 
         // SetDeviceFocus (21): update device focus.
         21 => {
-            let w = if body.len() >= 4 {
-                read_u32_bo(body, 0, msb_first)
-            } else {
-                0
-            };
+            let w = xi::SetDeviceFocusRequest::try_parse_request(header, body)
+                .map(|r| r.focus)
+                .unwrap_or(0);
             debug!("XI 1.x SetDeviceFocus: window={w:#x}");
             *focus_window = w;
             Vec::new()
