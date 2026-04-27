@@ -163,13 +163,19 @@ pub(crate) fn handle_shm_request(state: &mut ClientState, data: &[u8], seq: u16)
 
             // If send_event, return a ShmCompletion event
             if send_event {
-                let mut event = [0u8; 32];
-                event[0] = 65; // ShmCompletion event type (first_event + 0)
-                state.write_u16(&mut event, 2, seq);
-                state.write_u32(&mut event, 4, drawable);
-                state.write_u32(&mut event, 8, shmseg);
-                state.write_u32(&mut event, 16, offset as u32);
-                event.to_vec()
+                use x11rb_protocol::protocol::shm::CompletionEvent;
+                crate::xserver::event::serialize_event(
+                    &CompletionEvent {
+                        response_type: 65, // ShmCompletion (first_event + 0)
+                        sequence: seq,
+                        drawable,
+                        minor_event: 0,
+                        major_event: 0,
+                        shmseg,
+                        offset: offset as u32,
+                    },
+                    state.msb_first,
+                )
             } else {
                 Vec::new()
             }

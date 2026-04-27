@@ -75,6 +75,10 @@ fn vidmode_header(data: &[u8], minor_override: u8) -> RequestHeader {
 /// XFree86-VidModeExtension (opcode 153)
 pub(crate) fn handle_vidmode_request(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
     let minor = data[1];
+    let bo = state.msb_first;
+    let vidmode_err = |code: u8, bad_value: u32| {
+        crate::xserver::core::build_error_bo(code, seq, bad_value, 153, minor as u16, bo)
+    };
     match minor {
         0 => {
             // QueryVersion
@@ -258,14 +262,7 @@ pub(crate) fn handle_vidmode_request(state: &mut ClientState, data: &[u8], seq: 
             let req = parse_minor!(SetGammaRampRequest, data, state, seq, 153, minor, vidmode_header(data, 18));
             let size = req.size as usize;
             if size == 0 {
-                return crate::xserver::core::build_error_bo(
-                    crate::xserver::core::LENGTH_ERROR,
-                    seq,
-                    0,
-                    153,
-                    minor as u16,
-                    state.msb_first,
-                );
+                return vidmode_err(crate::xserver::core::LENGTH_ERROR, 0);
             }
             let red: Vec<u16> = req.red.iter().take(size).copied().collect();
             let green: Vec<u16> = req.green.iter().take(size).copied().collect();
@@ -528,13 +525,6 @@ pub(crate) fn handle_vidmode_request(state: &mut ClientState, data: &[u8], seq: 
                 .set_u32(32, dotclock)
                 .build()
         }
-        _ => crate::xserver::core::build_error_bo(
-            crate::xserver::core::REQUEST_ERROR,
-            seq,
-            0,
-            153,
-            minor as u16,
-            state.msb_first,
-        ),
+        _ => vidmode_err(crate::xserver::core::REQUEST_ERROR, 0),
     }
 }

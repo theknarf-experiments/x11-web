@@ -151,12 +151,7 @@ pub(crate) fn handle_xc_misc_request(state: &mut ClientState, data: &[u8], seq: 
         _ => {
             debug!("Unhandled XC-MISC minor opcode: {minor}");
             crate::xserver::core::build_error_bo(
-                crate::xserver::core::REQUEST_ERROR,
-                seq,
-                minor as u32,
-                141,
-                minor as u16,
-                state.msb_first,
+                crate::xserver::core::REQUEST_ERROR, seq, minor as u32, 141, minor as u16, state.msb_first,
             )
         }
     }
@@ -634,12 +629,7 @@ pub(crate) fn handle_present_request(state: &mut ClientState, data: &[u8], seq: 
         _ => {
             debug!("Unhandled Present minor opcode: {minor}");
             crate::xserver::core::build_error_bo(
-                crate::xserver::core::REQUEST_ERROR,
-                seq,
-                minor as u32,
-                148,
-                minor as u16,
-                state.msb_first,
+                crate::xserver::core::REQUEST_ERROR, seq, minor as u32, 148, minor as u16, state.msb_first,
             )
         }
     }

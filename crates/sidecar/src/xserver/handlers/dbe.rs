@@ -11,6 +11,10 @@ use crate::xserver::reply::ReplyBuf;
 /// DBE - Double Buffer Extension (opcode 157)
 pub(crate) fn handle_dbe_request(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
     let minor = data[1];
+    let bo = state.msb_first;
+    let dbe_err = |code: u8, bad_value: u32| {
+        crate::xserver::core::build_error_bo(code, seq, bad_value, 157, minor as u16, bo)
+    };
     match minor {
         0 => {
             // GetVersion
@@ -48,14 +52,7 @@ pub(crate) fn handle_dbe_request(state: &mut ClientState, data: &[u8], seq: u16)
                 );
                 state.back_buffers.insert(back_buffer_id, window_id);
             } else {
-                return crate::xserver::core::build_error_bo(
-                    crate::xserver::core::WINDOW_ERROR,
-                    seq,
-                    window_id,
-                    157,
-                    minor as u16,
-                    state.msb_first,
-                );
+                return dbe_err(crate::xserver::core::WINDOW_ERROR, window_id);
             }
             Vec::new()
         }
@@ -218,14 +215,7 @@ pub(crate) fn handle_dbe_request(state: &mut ClientState, data: &[u8], seq: u16)
         }
         _ => {
             debug!("DBE: unhandled minor opcode {minor}");
-            crate::xserver::core::build_error_bo(
-                crate::xserver::core::REQUEST_ERROR,
-                seq,
-                minor as u32,
-                157,
-                minor as u16,
-                state.msb_first,
-            )
+            dbe_err(crate::xserver::core::REQUEST_ERROR, minor as u32)
         }
     }
 }

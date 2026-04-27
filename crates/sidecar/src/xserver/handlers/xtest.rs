@@ -68,12 +68,36 @@ pub(crate) fn handle_xtest_request(state: &mut ClientState, data: &[u8], seq: u1
 
                 debug!("XTEST FakeInput: type={event_type} detail={detail} rootX={root_x} rootY={root_y}");
 
+                // Builder for the KeyButtonPointer-class wire layout shared by
+                // KeyPress, KeyRelease, ButtonPress, ButtonRelease, MotionNotify.
+                let build_kbp_event = |state: &super::super::client::ClientState,
+                                       response_type: u8,
+                                       detail: u8|
+                 -> Vec<u8> {
+                    use x11rb_protocol::protocol::xproto::KeyPressEvent;
+                    let ev = KeyPressEvent {
+                        response_type,
+                        detail,
+                        sequence: seq,
+                        time: state.timestamp(),
+                        root: state.root_window,
+                        event: state.focus_window,
+                        child: state.focus_window,
+                        root_x: state.pointer_x,
+                        root_y: state.pointer_y,
+                        event_x: state.pointer_x,
+                        event_y: state.pointer_y,
+                        state: 0u16.into(),
+                        same_screen: true,
+                    };
+                    crate::xserver::event::serialize_event(&ev, state.msb_first)
+                };
+
                 match event_type {
                     2 | 3 => {
                         // KeyPress (2) / KeyRelease (3)
                         let keycode = detail;
 
-                        // Update pressed_keys bitmap + XKB modifier state
                         let xkb_before = super::xkb::XkbStateSnapshot::capture(state);
                         let byte_idx = (keycode / 8) as usize;
                         let bit_mask = 1u8 << (keycode % 8);
@@ -86,65 +110,27 @@ pub(crate) fn handle_xtest_request(state: &mut ClientState, data: &[u8], seq: u1
                                 state.xkb_state.key_release(keycode);
                             }
                         }
-                        super::xkb::maybe_send_xkb_state_notify(
-                            state,
-                            &xkb_before,
-                            keycode,
-                            event_type,
-                        );
+                        super::xkb::maybe_send_xkb_state_notify(state, &xkb_before, keycode, event_type);
 
-                        let mut event = [0u8; 32];
-                        event[0] = event_type;
-                        event[1] = keycode;
-                        state.write_u16(&mut event, 2, seq);
-                        state.write_u32(&mut event, 4, state.timestamp());
-                        state.write_u32(&mut event, 8, state.root_window);
-                        state.write_u32(&mut event, 12, state.focus_window);
-                        state.write_u32(&mut event, 16, state.focus_window);
-                        state.write_i16(&mut event, 20, state.pointer_x);
-                        state.write_i16(&mut event, 22, state.pointer_y);
-                        state.write_i16(&mut event, 24, state.pointer_x);
-                        state.write_i16(&mut event, 26, state.pointer_y);
-                        state.write_u16(&mut event, 28, 0);
-                        event[30] = 1; // same_screen = true
-
-                        state.pending_events.push(event.to_vec());
+                        let event = build_kbp_event(state, event_type, keycode);
+                        state.pending_events.push(event);
                     }
                     4 | 5 => {
                         // ButtonPress (4) / ButtonRelease (5)
-                        let button = detail;
-
-                        let mut event = [0u8; 32];
-                        event[0] = event_type;
-                        event[1] = button;
-                        state.write_u16(&mut event, 2, seq);
-                        state.write_u32(&mut event, 4, state.timestamp());
-                        state.write_u32(&mut event, 8, state.root_window);
-                        state.write_u32(&mut event, 12, state.focus_window);
-                        state.write_u32(&mut event, 16, state.focus_window);
-                        state.write_i16(&mut event, 20, state.pointer_x);
-                        state.write_i16(&mut event, 22, state.pointer_y);
-                        state.write_i16(&mut event, 24, state.pointer_x);
-                        state.write_i16(&mut event, 26, state.pointer_y);
-                        state.write_u16(&mut event, 28, 0);
-                        event[30] = 1; // same_screen = true
-
-                        state.pending_events.push(event.to_vec());
+                        let event = build_kbp_event(state, event_type, detail);
+                        state.pending_events.push(event);
                     }
                     6 => {
                         // MotionNotify
                         let old_px = state.pointer_x;
                         let old_py = state.pointer_y;
                         if detail == 0 {
-                            // Relative motion
                             state.pointer_x = state.pointer_x.saturating_add(root_x);
                             state.pointer_y = state.pointer_y.saturating_add(root_y);
                         } else {
-                            // Absolute motion
                             state.pointer_x = root_x;
                             state.pointer_y = root_y;
                         }
-                        // Enforce XFIXES pointer barriers
                         if !state.barriers.is_empty() {
                             let (bx, by) = super::super::input::enforce_barriers(
                                 &state.barriers,
@@ -156,23 +142,8 @@ pub(crate) fn handle_xtest_request(state: &mut ClientState, data: &[u8], seq: u1
                             state.pointer_x = bx;
                             state.pointer_y = by;
                         }
-
-                        let mut event = [0u8; 32];
-                        event[0] = 6;
-                        event[1] = 0; // detail for motion
-                        state.write_u16(&mut event, 2, seq);
-                        state.write_u32(&mut event, 4, state.timestamp());
-                        state.write_u32(&mut event, 8, state.root_window);
-                        state.write_u32(&mut event, 12, state.focus_window);
-                        state.write_u32(&mut event, 16, state.focus_window);
-                        state.write_i16(&mut event, 20, state.pointer_x);
-                        state.write_i16(&mut event, 22, state.pointer_y);
-                        state.write_i16(&mut event, 24, state.pointer_x);
-                        state.write_i16(&mut event, 26, state.pointer_y);
-                        state.write_u16(&mut event, 28, 0);
-                        event[30] = 1; // same_screen = true
-
-                        state.pending_events.push(event.to_vec());
+                        let event = build_kbp_event(state, 6, 0);
+                        state.pending_events.push(event);
                     }
                     _ => {
                         warn!("XTEST FakeInput: unknown event type {event_type}");

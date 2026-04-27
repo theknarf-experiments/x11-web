@@ -346,7 +346,7 @@ pub(crate) fn handle_buffer_from_pixmap(
         )
     } else {
         warn!("DRI3 BufferFromPixmap: unknown pixmap {pixmap_id:#x}");
-        return build_error_bo(PIXMAP_ERROR, seq, pixmap_id, DRI3_MAJOR_OPCODE, 3, bo);
+        return super::dri3_err(PIXMAP_ERROR, seq, pixmap_id, 3, bo);
     };
 
     // Create a memfd and write the pixmap data into it
@@ -367,7 +367,7 @@ pub(crate) fn handle_buffer_from_pixmap(
 
     if fd < 0 {
         warn!("DRI3 BufferFromPixmap: memfd_create failed");
-        return build_error_bo(ALLOC_ERROR, seq, pixmap_id, DRI3_MAJOR_OPCODE, 3, bo);
+        return super::dri3_err(ALLOC_ERROR, seq, pixmap_id, 3, bo);
     }
 
     state.reply_fds.push(fd);
@@ -423,7 +423,7 @@ pub(crate) fn handle_pixmap_from_buffers(
                 libc::close(fd);
             }
         }
-        return build_error_bo(LENGTH_ERROR, seq, 0, DRI3_MAJOR_OPCODE, minor as u16, bo);
+        return super::dri3_err(LENGTH_ERROR, seq, 0, minor, bo);
     }
 
     let pixmap_id = read_u32_bo(data, 4, bo);
@@ -574,7 +574,7 @@ pub(crate) fn handle_buffers_from_pixmap(
         )
     } else {
         warn!("DRI3 BuffersFromPixmap: unknown pixmap {pixmap_id:#x}");
-        return build_error_bo(PIXMAP_ERROR, seq, pixmap_id, DRI3_MAJOR_OPCODE, 8, bo);
+        return super::dri3_err(PIXMAP_ERROR, seq, pixmap_id, 8, bo);
     };
 
     // Create a memfd with the pixmap data (single plane)
@@ -595,7 +595,7 @@ pub(crate) fn handle_buffers_from_pixmap(
 
     if fd < 0 {
         warn!("DRI3 BuffersFromPixmap: memfd_create failed");
-        return build_error_bo(ALLOC_ERROR, seq, pixmap_id, DRI3_MAJOR_OPCODE, 8, bo);
+        return super::dri3_err(ALLOC_ERROR, seq, pixmap_id, 8, bo);
     }
 
     state.reply_fds.push(fd);

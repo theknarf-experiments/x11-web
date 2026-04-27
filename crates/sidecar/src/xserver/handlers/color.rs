@@ -1,13 +1,15 @@
 //! Color/colormap and cursor handlers (opcodes 78-96).
 
 use super::*;
+use crate::xserver::event::serialize_event;
 use crate::xserver::reply::ReplyBuf;
 use x11rb_protocol::protocol::xproto::{
     AllocColorCellsRequest, AllocColorPlanesRequest, AllocColorRequest, AllocNamedColorRequest,
-    CopyColormapAndFreeRequest, CreateColormapRequest, CreateCursorRequest,
-    CreateGlyphCursorRequest, FreeColormapRequest, FreeColorsRequest, FreeCursorRequest,
-    InstallColormapRequest, ListInstalledColormapsRequest, LookupColorRequest, QueryColorsRequest,
-    RecolorCursorRequest, StoreColorsRequest, StoreNamedColorRequest, UninstallColormapRequest,
+    ColormapNotifyEvent, ColormapState as XColormapState, CopyColormapAndFreeRequest,
+    CreateColormapRequest, CreateCursorRequest, CreateGlyphCursorRequest, FreeColormapRequest,
+    FreeColorsRequest, FreeCursorRequest, InstallColormapRequest, ListInstalledColormapsRequest,
+    LookupColorRequest, QueryColorsRequest, RecolorCursorRequest, StoreColorsRequest,
+    StoreNamedColorRequest, UninstallColormapRequest,
 };
 
 // ---------------------------------------------------------------------------
@@ -141,13 +143,15 @@ pub(crate) fn handle_install_colormap(state: &mut ClientState, req: &InstallColo
         .collect();
 
     for wid in notify_windows {
-        let mut event = [0u8; 32];
-        event[0] = COLOURMAP_NOTIFY_EVENT;
-        state.write_u32(&mut event, 4, wid);
-        state.write_u32(&mut event, 8, mid);
-        event[12] = 1; // new = true
-        event[13] = 1; // state = Installed
-        state.pending_events.push(event.to_vec());
+        let event = serialize_event(&ColormapNotifyEvent {
+            response_type: COLOURMAP_NOTIFY_EVENT,
+            sequence: 0,
+            window: wid,
+            colormap: mid,
+            new: true,
+            state: XColormapState::INSTALLED,
+        }, state.msb_first);
+        state.pending_events.push(event.clone());
         // Also broadcast to other connections selecting on this window
         state.broadcast_event(wid, u32::from(EventMask::COLOR_MAP_CHANGE), &event);
     }
@@ -180,13 +184,15 @@ pub(crate) fn handle_uninstall_colormap(state: &mut ClientState, req: &Uninstall
         .collect();
 
     for wid in notify_windows {
-        let mut event = [0u8; 32];
-        event[0] = COLOURMAP_NOTIFY_EVENT;
-        state.write_u32(&mut event, 4, wid);
-        state.write_u32(&mut event, 8, mid);
-        event[12] = 1; // new = true
-        event[13] = 0; // state = Uninstalled
-        state.pending_events.push(event.to_vec());
+        let event = serialize_event(&ColormapNotifyEvent {
+            response_type: COLOURMAP_NOTIFY_EVENT,
+            sequence: 0,
+            window: wid,
+            colormap: mid,
+            new: true,
+            state: XColormapState::UNINSTALLED,
+        }, state.msb_first);
+        state.pending_events.push(event.clone());
         state.broadcast_event(wid, u32::from(EventMask::COLOR_MAP_CHANGE), &event);
     }
 
@@ -201,13 +207,15 @@ pub(crate) fn handle_uninstall_colormap(state: &mut ClientState, req: &Uninstall
             .map(|(&id, _)| id)
             .collect();
         for wid in notify_windows2 {
-            let mut event = [0u8; 32];
-            event[0] = COLOURMAP_NOTIFY_EVENT;
-            state.write_u32(&mut event, 4, wid);
-            state.write_u32(&mut event, 8, default_cmap);
-            event[12] = 1; // new = true
-            event[13] = 1; // state = Installed
-            state.pending_events.push(event.to_vec());
+            let event = serialize_event(&ColormapNotifyEvent {
+            response_type: COLOURMAP_NOTIFY_EVENT,
+            sequence: 0,
+            window: wid,
+            colormap: default_cmap,
+            new: true,
+            state: XColormapState::INSTALLED,
+        }, state.msb_first);
+        state.pending_events.push(event.clone());
             state.broadcast_event(wid, u32::from(EventMask::COLOR_MAP_CHANGE), &event);
         }
     }

@@ -1,9 +1,11 @@
 //! Window attributes and save-set handlers (opcodes 2, 3, 6).
 
 use super::*;
+use crate::xserver::event::serialize_event;
 use crate::xserver::reply::ReplyBuf;
 use x11rb_protocol::protocol::xproto::{
-    BackingStore, ChangeWindowAttributesRequest, ChangeSaveSetRequest, GetWindowAttributesRequest,
+    BackingStore, ChangeSaveSetRequest, ChangeWindowAttributesRequest, ColormapNotifyEvent,
+    ColormapState as XColormapState, GetWindowAttributesRequest,
 };
 
 // ---------------------------------------------------------------------------
@@ -152,13 +154,15 @@ pub(crate) fn handle_change_window_attributes(state: &mut ClientState, req: &Cha
 
     // Generate ColormapNotify when the window's colormap attribute changes
     if let Some((_old_cmap, new_cmap)) = deferred_colormap_notify {
-        let mut event = [0u8; 32];
-        event[0] = COLOURMAP_NOTIFY_EVENT;
-        state.write_u32(&mut event, 4, wid);
-        state.write_u32(&mut event, 8, new_cmap);
-        event[12] = 1; // new = true
-        event[13] = 1; // state = Installed
-        state.pending_events.push(event.to_vec());
+        let event = serialize_event(&ColormapNotifyEvent {
+            response_type: COLOURMAP_NOTIFY_EVENT,
+            sequence: 0,
+            window: wid,
+            colormap: new_cmap,
+            new: true,
+            state: XColormapState::INSTALLED,
+        }, state.msb_first);
+        state.pending_events.push(event.clone());
         state.broadcast_event(wid, u32::from(EventMask::COLOR_MAP_CHANGE), &event);
     }
 

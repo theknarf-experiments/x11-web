@@ -1,8 +1,10 @@
 //! Create/destroy window handlers (opcodes 1, 4, 5).
 
 use super::*;
+use crate::xserver::event::serialize_event;
 use x11rb_protocol::protocol::xproto::{
-    BackingStore, CreateWindowRequest, DestroySubwindowsRequest, DestroyWindowRequest, WindowClass,
+    BackingStore, CreateNotifyEvent, CreateWindowRequest, DestroyNotifyEvent,
+    DestroySubwindowsRequest, DestroyWindowRequest, WindowClass,
 };
 
 // ---------------------------------------------------------------------------
@@ -316,17 +318,18 @@ pub(crate) fn handle_create_window(state: &mut ClientState, req: &CreateWindowRe
     // queue. Without the unconditional broadcast, a window manager / observer
     // sitting on a different connection never sees CreateNotify, only the
     // subsequent MapNotify, breaking ICCCM substructure tracking.
-    let mut event = [0u8; 32];
-    event[0] = CREATE_NOTIFY_EVENT;
-    state.write_u16(&mut event, 2, _seq);
-    state.write_u32(&mut event, 4, parent);
-    state.write_u32(&mut event, 8, wid);
-    state.write_i16(&mut event, 12, x);
-    state.write_i16(&mut event, 14, y);
-    state.write_u16(&mut event, 16, width);
-    state.write_u16(&mut event, 18, height);
-    state.write_u16(&mut event, 20, border_width);
-    event[22] = if override_redirect { 1 } else { 0 };
+    let event = serialize_event(&CreateNotifyEvent {
+        response_type: CREATE_NOTIFY_EVENT,
+        sequence: _seq,
+        parent,
+        window: wid,
+        x,
+        y,
+        width,
+        height,
+        border_width,
+        override_redirect,
+    }, state.msb_first);
 
     // Local delivery: only if this client itself selected SubstructureNotify
     // on the parent.
@@ -366,15 +369,16 @@ pub(crate) fn handle_destroy_window(state: &mut ClientState, req: &DestroyWindow
     if let Some(parent_id) = parent_id {
         // Send DestroyNotify to the window itself (StructureNotifyMask)
         {
-            let mut event = [0u8; 32];
-            event[0] = DESTROY_NOTIFY_EVENT;
-            state.write_u16(&mut event, 2, state.sequence);
-            state.write_u32(&mut event, 4, wid);
-            state.write_u32(&mut event, 8, wid);
+            let event = serialize_event(&DestroyNotifyEvent {
+                response_type: DESTROY_NOTIFY_EVENT,
+                sequence: state.sequence,
+                event: wid,
+                window: wid,
+            }, state.msb_first);
 
             if let Some(win) = state.windows.get(&wid) {
                 if win.event_mask & EventMask::STRUCTURE_NOTIFY != EventMask::NO_EVENT {
-                    state.pending_events.push(event.to_vec());
+                    state.pending_events.push(event.clone());
                 }
             }
             // Cross-connection broadcast: StructureNotify on the window

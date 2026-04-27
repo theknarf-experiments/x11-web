@@ -98,19 +98,21 @@ pub(crate) fn handle_set_selection_owner(state: &mut ClientState, req: &SetSelec
                 // The subscribing window was passed in SelectSelectionInput but we only
                 // stored the mask. We need to deliver to all subscribers. For now, deliver
                 // as a pending event (the subscribing client is this connection).
-                // XFixesSelectionNotify is an extension-specific event (XFIXES) —
-                // no x11rb struct available, keep as raw bytes.
+                use x11rb_protocol::protocol::xfixes::{SelectionEvent, SelectionNotifyEvent};
                 const XFIXES_SELECTION_NOTIFY: u8 = 87; // first_event + 0
-                let mut event = [0u8; 32];
-                event[0] = XFIXES_SELECTION_NOTIFY;
-                event[1] = 0; // subtype: SetSelectionOwner
-                state.write_u16(&mut event, 2, state.sequence);
-                state.write_u32(&mut event, 4, state.root_window); // window (subscriber)
-                state.write_u32(&mut event, 8, owner); // new owner
-                state.write_u32(&mut event, 12, selection); // selection atom
-                state.write_u32(&mut event, 16, timestamp); // timestamp
-                state.write_u32(&mut event, 20, timestamp); // selection_timestamp
-                state.pending_events.push(event.to_vec());
+                state.pending_events.push(crate::xserver::event::serialize_event(
+                    &SelectionNotifyEvent {
+                        response_type: XFIXES_SELECTION_NOTIFY,
+                        subtype: SelectionEvent::SET_SELECTION_OWNER,
+                        sequence: state.sequence,
+                        window: state.root_window,
+                        owner,
+                        selection,
+                        timestamp,
+                        selection_timestamp: timestamp,
+                    },
+                    state.msb_first,
+                ));
             }
         }
 

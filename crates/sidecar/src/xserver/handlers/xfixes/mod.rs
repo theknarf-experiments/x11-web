@@ -16,6 +16,10 @@ use x11rb_protocol::protocol::xfixes::{
 pub(crate) fn handle_xfixes_request(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
     let minor = data[1];
     debug!("XFIXES minor opcode: {minor}");
+    let bo = state.msb_first;
+    let xfixes_err = |code: u8, bad_value: u32| {
+        crate::xserver::core::build_error_bo(code, seq, bad_value, 138, minor as u16, bo)
+    };
 
     match minor {
         // 0: QueryVersion
@@ -45,14 +49,7 @@ pub(crate) fn handle_xfixes_request(state: &mut ClientState, data: &[u8], seq: u
                     state.save_set.retain(|&w| w != window);
                 }
                 _ => {
-                    return crate::xserver::core::build_error_bo(
-                        crate::xserver::core::VALUE_ERROR,
-                        seq,
-                        mode as u32,
-                        138,
-                        1,
-                        state.msb_first,
-                    );
+                    return xfixes_err(crate::xserver::core::VALUE_ERROR, mode as u32);
                 }
             }
             debug!("XFIXES ChangeSaveSet: window={window:#x} mode={mode}");
@@ -116,14 +113,7 @@ pub(crate) fn handle_xfixes_request(state: &mut ClientState, data: &[u8], seq: u
 
         _ => {
             debug!("XFIXES: unhandled minor opcode {minor}");
-            crate::xserver::core::build_error_bo(
-                crate::xserver::core::REQUEST_ERROR,
-                seq,
-                minor as u32,
-                138,
-                minor as u16,
-                state.msb_first,
-            )
+            xfixes_err(crate::xserver::core::REQUEST_ERROR, minor as u32)
         }
     }
 }

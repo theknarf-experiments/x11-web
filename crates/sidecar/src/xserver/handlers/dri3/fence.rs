@@ -25,7 +25,7 @@ pub(crate) fn handle_fence_from_fd(
                 libc::close(fd);
             }
         }
-        return build_error_bo(LENGTH_ERROR, seq, 0, DRI3_MAJOR_OPCODE, minor as u16, bo);
+        return super::dri3_err(LENGTH_ERROR, seq, 0, minor, bo);
     }
 
     let _drawable = read_u32_bo(data, 4, bo);
@@ -92,10 +92,10 @@ pub(crate) fn handle_fd_from_fence(
                 .build()
         } else {
             warn!("DRI3 FDFromFence: eventfd creation failed");
-            build_error_bo(ALLOC_ERROR, seq, fence_id, DRI3_MAJOR_OPCODE, 5, bo)
+            super::dri3_err(ALLOC_ERROR, seq, fence_id, 5, bo)
         }
     } else {
         warn!("DRI3 FDFromFence: unknown fence {fence_id:#x}");
-        build_error_bo(VALUE_ERROR, seq, fence_id, DRI3_MAJOR_OPCODE, 5, bo)
+        super::dri3_err(VALUE_ERROR, seq, fence_id, 5, bo)
     }
 }
