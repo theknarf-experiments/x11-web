@@ -1,23 +1,26 @@
 //! Input, keyboard, and pointer handlers (opcodes 38-44, 100-119).
 
 use super::*;
-use crate::xserver::core::require_len;
 use crate::xserver::event::serialize_event;
 use crate::xserver::reply::ReplyBuf;
-use crate::xserver::request::request_header;
 use x11rb_protocol::protocol::xproto::{
-    ChangeHostsRequest, ChangeKeyboardControlRequest, ChangeKeyboardMappingRequest,
-    ChangePointerControlRequest, ExposeEvent, GetKeyboardMappingRequest, MappingNotifyEvent,
-    MotionNotifyEvent, PropertyNotifyEvent, SetInputFocusRequest, SetModifierMappingRequest,
-    SetPointerMappingRequest, SetScreenSaverRequest, WarpPointerRequest,
+    BellRequest, ChangeHostsRequest, ChangeKeyboardControlRequest, ChangeKeyboardMappingRequest,
+    ChangePointerControlRequest, ExposeEvent, ForceScreenSaverRequest, GetInputFocusRequest,
+    GetKeyboardControlRequest, GetKeyboardMappingRequest, GetModifierMappingRequest,
+    GetMotionEventsRequest, GetPointerControlRequest, GetPointerMappingRequest,
+    GetScreenSaverRequest, KillClientRequest, ListHostsRequest, MappingNotifyEvent,
+    MotionNotifyEvent, PropertyNotifyEvent, QueryKeymapRequest, QueryPointerRequest,
+    RotatePropertiesRequest, SetAccessControlRequest, SetCloseDownModeRequest,
+    SetInputFocusRequest, SetModifierMappingRequest, SetPointerMappingRequest,
+    SetScreenSaverRequest, TranslateCoordinatesRequest, WarpPointerRequest,
 };
 
 // ---------------------------------------------------------------------------
 // Opcode 104: Bell
 // ---------------------------------------------------------------------------
 
-pub(crate) fn handle_bell(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
-    let percent = if data.len() >= 2 { data[1] } else { 0 };
+pub(crate) fn handle_bell(state: &mut ClientState, req: &BellRequest) -> Vec<u8> {
+    let percent = req.percent as u8;
     let effective_percent = if percent == 0 {
         state.keyboard_control.bell_percent
     } else if percent > 0 && percent <= 100 {
@@ -41,14 +44,9 @@ pub(crate) fn handle_bell(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
 // Opcode 38: QueryPointer
 // ---------------------------------------------------------------------------
 
-pub(crate) fn handle_query_pointer(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
+pub(crate) fn handle_query_pointer(state: &mut ClientState, req: &QueryPointerRequest) -> Vec<u8> {
+    let seq = state.sequence;
     state.motion_hint_suppressed = false;
-    require_len!(data, 8, seq, 38);
-    use x11rb_protocol::protocol::xproto::QueryPointerRequest;
-    let req = match QueryPointerRequest::try_parse_request(request_header(data), &data[4..]) {
-        Ok(r) => r,
-        Err(_) => return build_error(LENGTH_ERROR, seq, 0, 38, 0),
-    };
     let window = req.window;
 
     // Calculate window-relative coordinates by walking up from window to root
@@ -105,14 +103,9 @@ pub(crate) fn handle_query_pointer(state: &mut ClientState, data: &[u8], seq: u1
 // Opcode 39: GetMotionEvents
 // ---------------------------------------------------------------------------
 
-pub(crate) fn handle_get_motion_events(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
+pub(crate) fn handle_get_motion_events(state: &mut ClientState, req: &GetMotionEventsRequest) -> Vec<u8> {
+    let seq = state.sequence;
     state.motion_hint_suppressed = false;
-    require_len!(data, 16, seq, 39);
-    use x11rb_protocol::protocol::xproto::GetMotionEventsRequest;
-    let req = match GetMotionEventsRequest::try_parse_request(request_header(data), &data[4..]) {
-        Ok(r) => r,
-        Err(_) => return build_error(LENGTH_ERROR, seq, 0, 39, 0),
-    };
     let start_time = req.start;
     let stop_time = req.stop;
 
@@ -146,16 +139,9 @@ pub(crate) fn handle_get_motion_events(state: &mut ClientState, data: &[u8], seq
 
 pub(crate) fn handle_translate_coordinates(
     state: &mut ClientState,
-    data: &[u8],
-    seq: u16,
+    req: &TranslateCoordinatesRequest,
 ) -> Vec<u8> {
-    require_len!(data, 16, seq, 40);
-
-    use x11rb_protocol::protocol::xproto::TranslateCoordinatesRequest;
-    let req = match TranslateCoordinatesRequest::try_parse_request(request_header(data), &data[4..]) {
-        Ok(r) => r,
-        Err(_) => return build_error(LENGTH_ERROR, seq, 0, 40, 0),
-    };
+    let seq = state.sequence;
     let src_window = req.src_window;
     let dst_window = req.dst_window;
     let src_x = req.src_x;
@@ -226,13 +212,8 @@ pub(crate) fn handle_translate_coordinates(
 // Opcode 41: WarpPointer
 // ---------------------------------------------------------------------------
 
-pub(crate) fn handle_warp_pointer(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
-    require_len!(data, 24, seq, 41);
-
-    let req = match WarpPointerRequest::try_parse_request(request_header(data), &data[4..]) {
-        Ok(r) => r,
-        Err(_) => return build_error(LENGTH_ERROR, seq, 0, 41, 0),
-    };
+pub(crate) fn handle_warp_pointer(state: &mut ClientState, req: &WarpPointerRequest) -> Vec<u8> {
+    let seq = state.sequence;
     let src_window = req.src_window;
     let dst_window = req.dst_window;
     let src_x = req.src_x;
@@ -389,12 +370,7 @@ pub(crate) fn handle_warp_pointer(state: &mut ClientState, data: &[u8], seq: u16
 // Opcode 42: SetInputFocus
 // ---------------------------------------------------------------------------
 
-pub(crate) fn handle_set_input_focus(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
-    require_len!(data, 8, state.sequence, 42);
-    let req = match SetInputFocusRequest::try_parse_request(request_header(data), &data[4..]) {
-        Ok(r) => r,
-        Err(_) => return build_error(LENGTH_ERROR, state.sequence, 0, 42, 0),
-    };
+pub(crate) fn handle_set_input_focus(state: &mut ClientState, req: &SetInputFocusRequest) -> Vec<u8> {
     // revert_to (0=None, 1=PointerRoot, 2=Parent)
     let revert_to = u8::from(req.revert_to);
     if revert_to > 2 {
@@ -415,7 +391,8 @@ pub(crate) fn handle_set_input_focus(state: &mut ClientState, data: &[u8]) -> Ve
 // Opcode 43: GetInputFocus
 // ---------------------------------------------------------------------------
 
-pub(crate) fn handle_get_input_focus(state: &mut ClientState, _data: &[u8], seq: u16) -> Vec<u8> {
+pub(crate) fn handle_get_input_focus(state: &mut ClientState, _req: &GetInputFocusRequest) -> Vec<u8> {
+    let seq = state.sequence;
     ReplyBuf::fixed(seq, state.msb_first)
         .set_data_byte(state.focus_revert_to)
         .set_u32(8, state.focus_window)
@@ -426,8 +403,8 @@ pub(crate) fn handle_get_input_focus(state: &mut ClientState, _data: &[u8], seq:
 // Opcode 44: QueryKeymap
 // ---------------------------------------------------------------------------
 
-pub(crate) fn handle_query_keymap(state: &ClientState, seq: u16) -> Vec<u8> {
-    // Return actual pressed keys state
+pub(crate) fn handle_query_keymap(state: &ClientState, _req: &QueryKeymapRequest) -> Vec<u8> {
+    let seq = state.sequence;
     ReplyBuf::with_extra(seq, 8, state.msb_first)
         .set_bytes(32, &state.pressed_keys[0..8])
         .build()
@@ -439,15 +416,9 @@ pub(crate) fn handle_query_keymap(state: &ClientState, seq: u16) -> Vec<u8> {
 
 pub(crate) fn handle_change_keyboard_mapping(
     state: &mut ClientState,
-    data: &[u8],
-    seq: u16,
+    req: &ChangeKeyboardMappingRequest,
 ) -> Vec<u8> {
-    require_len!(data, 8, seq, 100);
-
-    let req = match ChangeKeyboardMappingRequest::try_parse_request(request_header(data), &data[4..]) {
-        Ok(r) => r,
-        Err(_) => return build_error(LENGTH_ERROR, seq, 0, 100, 0),
-    };
+    let seq = state.sequence;
     let keycode_count = req.keycode_count as usize;
     let first_keycode = req.first_keycode;
     let keysyms_per_keycode = req.keysyms_per_keycode as usize;
@@ -491,12 +462,8 @@ pub(crate) fn handle_change_keyboard_mapping(
 // Opcode 101: GetKeyboardMapping
 // ---------------------------------------------------------------------------
 
-pub(crate) fn handle_get_keyboard_mapping(state: &ClientState, data: &[u8], seq: u16) -> Vec<u8> {
-    require_len!(data, 8, seq, 101);
-    let req = match GetKeyboardMappingRequest::try_parse_request(request_header(data), &data[4..]) {
-        Ok(r) => r,
-        Err(_) => return build_error(LENGTH_ERROR, seq, 0, 101, 0),
-    };
+pub(crate) fn handle_get_keyboard_mapping(state: &ClientState, req: &GetKeyboardMappingRequest) -> Vec<u8> {
+    let seq = state.sequence;
     let first_keycode = req.first_keycode;
     let count = req.count;
 
@@ -540,13 +507,7 @@ pub(crate) fn handle_get_keyboard_mapping(state: &ClientState, data: &[u8], seq:
 // Opcode 102: ChangeKeyboardControl
 // ---------------------------------------------------------------------------
 
-pub(crate) fn handle_change_keyboard_control(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
-    require_len!(data, 8, state.sequence, 102);
-
-    let req = match ChangeKeyboardControlRequest::try_parse_request(request_header(data), &data[4..]) {
-        Ok(r) => r,
-        Err(_) => return build_error(LENGTH_ERROR, state.sequence, 0, 102, 0),
-    };
+pub(crate) fn handle_change_keyboard_control(state: &mut ClientState, req: &ChangeKeyboardControlRequest) -> Vec<u8> {
     let vl = &*req.value_list;
 
     // Per X11 spec, led (bit 4) and led_mode (bit 5) work together,
@@ -619,7 +580,8 @@ pub(crate) fn handle_change_keyboard_control(state: &mut ClientState, data: &[u8
 // Opcode 103: GetKeyboardControl
 // ---------------------------------------------------------------------------
 
-pub(crate) fn handle_get_keyboard_control(state: &ClientState, seq: u16) -> Vec<u8> {
+pub(crate) fn handle_get_keyboard_control(state: &ClientState, _req: &GetKeyboardControlRequest) -> Vec<u8> {
+    let seq = state.sequence;
     let kc = &state.keyboard_control;
     ReplyBuf::with_extra(seq, 20, state.msb_first)
         .set_data_byte(kc.global_auto_repeat)
@@ -636,13 +598,7 @@ pub(crate) fn handle_get_keyboard_control(state: &ClientState, seq: u16) -> Vec<
 // Opcode 105: ChangePointerControl
 // ---------------------------------------------------------------------------
 
-pub(crate) fn handle_change_pointer_control(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
-    require_len!(data, 12, state.sequence, 105);
-
-    let req = match ChangePointerControlRequest::try_parse_request(request_header(data), &data[4..]) {
-        Ok(r) => r,
-        Err(_) => return build_error(LENGTH_ERROR, state.sequence, 0, 105, 0),
-    };
+pub(crate) fn handle_change_pointer_control(state: &mut ClientState, req: &ChangePointerControlRequest) -> Vec<u8> {
     let accel_num = req.acceleration_numerator;
     let accel_den = req.acceleration_denominator;
     let threshold = req.threshold;
@@ -668,7 +624,8 @@ pub(crate) fn handle_change_pointer_control(state: &mut ClientState, data: &[u8]
 // Opcode 106: GetPointerControl
 // ---------------------------------------------------------------------------
 
-pub(crate) fn handle_get_pointer_control(state: &ClientState, seq: u16) -> Vec<u8> {
+pub(crate) fn handle_get_pointer_control(state: &ClientState, _req: &GetPointerControlRequest) -> Vec<u8> {
+    let seq = state.sequence;
     let pc = &state.pointer_control;
     ReplyBuf::fixed(seq, state.msb_first)
         .set_u16(8, pc.acceleration_numerator)
@@ -681,13 +638,7 @@ pub(crate) fn handle_get_pointer_control(state: &ClientState, seq: u16) -> Vec<u
 // Opcode 107: SetScreenSaver
 // ---------------------------------------------------------------------------
 
-pub(crate) fn handle_set_screen_saver(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
-    require_len!(data, 10, state.sequence, 107);
-
-    let req = match SetScreenSaverRequest::try_parse_request(request_header(data), &data[4..]) {
-        Ok(r) => r,
-        Err(_) => return build_error(LENGTH_ERROR, state.sequence, 0, 107, 0),
-    };
+pub(crate) fn handle_set_screen_saver(state: &mut ClientState, req: &SetScreenSaverRequest) -> Vec<u8> {
     let timeout = req.timeout;
     let interval = req.interval;
     let prefer_blanking = u8::from(req.prefer_blanking);
@@ -713,7 +664,8 @@ pub(crate) fn handle_set_screen_saver(state: &mut ClientState, data: &[u8]) -> V
 // Opcode 108: GetScreenSaver
 // ---------------------------------------------------------------------------
 
-pub(crate) fn handle_get_screen_saver(state: &ClientState, seq: u16) -> Vec<u8> {
+pub(crate) fn handle_get_screen_saver(state: &ClientState, _req: &GetScreenSaverRequest) -> Vec<u8> {
+    let seq = state.sequence;
     let ss = &state.screen_saver;
     ReplyBuf::fixed(seq, state.msb_first)
         .set_u16(8, ss.timeout)
@@ -727,10 +679,9 @@ pub(crate) fn handle_get_screen_saver(state: &ClientState, seq: u16) -> Vec<u8> 
 // Opcode 115: ForceScreenSaver
 // ---------------------------------------------------------------------------
 
-pub(crate) fn handle_force_screen_saver(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
-    // data[1] contains the mode field (per X11 spec, it's in the second byte
-    // of the request header, not the request body).
-    let mode = data[1];
+pub(crate) fn handle_force_screen_saver(state: &mut ClientState, req: &ForceScreenSaverRequest) -> Vec<u8> {
+    let seq = state.sequence;
+    let mode: u8 = req.mode.into();
 
     match mode {
         0 => {
@@ -831,7 +782,8 @@ pub(crate) fn build_screen_saver_on_event(state: &ClientState) -> Vec<u8> {
 // Opcode 110: ListHosts
 // ---------------------------------------------------------------------------
 
-pub(crate) fn handle_list_hosts(state: &ClientState, seq: u16) -> Vec<u8> {
+pub(crate) fn handle_list_hosts(state: &ClientState, _req: &ListHostsRequest) -> Vec<u8> {
+    let seq = state.sequence;
     // Build host list from access_hosts
     let mut host_entries = Vec::new();
     for host in &state.access_hosts {
@@ -858,18 +810,13 @@ pub(crate) fn handle_list_hosts(state: &ClientState, seq: u16) -> Vec<u8> {
 // Opcode 109: ChangeHosts
 // ---------------------------------------------------------------------------
 
-pub(crate) fn handle_change_hosts(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
+pub(crate) fn handle_change_hosts(state: &mut ClientState, req: &ChangeHostsRequest) -> Vec<u8> {
     use super::super::client::AccessHost;
 
-    require_len!(data, 8, state.sequence, 109);
-    let req = match ChangeHostsRequest::try_parse_request(request_header(data), &data[4..]) {
-        Ok(r) => r,
-        Err(_) => return build_error(LENGTH_ERROR, state.sequence, 0, 109, 0),
-    };
     let mode = u8::from(req.mode);
     let family = u8::from(req.family);
     let addr_len = req.address.len();
-    let address = req.address.into_owned();
+    let address = req.address.to_vec();
 
     // Validate mode: per X11 spec, only 0 (Insert) and 1 (Delete) are valid
     if mode > 1 {
@@ -952,9 +899,8 @@ pub(crate) fn handle_change_hosts(state: &mut ClientState, data: &[u8]) -> Vec<u
 // Opcode 111: SetAccessControl
 // ---------------------------------------------------------------------------
 
-pub(crate) fn handle_set_access_control(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
-    require_len!(data, 4, state.sequence, 111);
-    state.access_control_enabled = data[1] != 0;
+pub(crate) fn handle_set_access_control(state: &mut ClientState, req: &SetAccessControlRequest) -> Vec<u8> {
+    state.access_control_enabled = u8::from(req.mode) != 0;
     debug!("SetAccessControl: enabled={}", state.access_control_enabled);
 
     // Sync to shared server-wide access control for TCP enforcement
@@ -969,9 +915,8 @@ pub(crate) fn handle_set_access_control(state: &mut ClientState, data: &[u8]) ->
 // Opcode 112: SetCloseDownMode
 // ---------------------------------------------------------------------------
 
-pub(crate) fn handle_set_close_down_mode(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
-    require_len!(data, 4, state.sequence, 112);
-    let mode = data[1];
+pub(crate) fn handle_set_close_down_mode(state: &mut ClientState, req: &SetCloseDownModeRequest) -> Vec<u8> {
+    let mode = u8::from(req.mode);
     // Per X11 spec: mode must be 0 (Destroy), 1 (RetainPermanent), or 2 (RetainTemporary).
     if mode > 2 {
         return build_error(VALUE_ERROR, state.sequence, mode as u32, 112, 0);
@@ -988,14 +933,7 @@ pub(crate) fn handle_set_close_down_mode(state: &mut ClientState, data: &[u8]) -
 // Opcode 113: KillClient
 // ---------------------------------------------------------------------------
 
-pub(crate) fn handle_kill_client(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
-    require_len!(data, 8, state.sequence, 113);
-
-    use x11rb_protocol::protocol::xproto::KillClientRequest;
-    let req = match KillClientRequest::try_parse_request(request_header(data), &data[4..]) {
-        Ok(r) => r,
-        Err(_) => return build_error(LENGTH_ERROR, state.sequence, 0, 113, 0),
-    };
+pub(crate) fn handle_kill_client(state: &mut ClientState, req: &KillClientRequest) -> Vec<u8> {
     let resource = req.resource;
 
     if resource == 0 {
@@ -1079,14 +1017,7 @@ pub(crate) fn handle_kill_client(state: &mut ClientState, data: &[u8]) -> Vec<u8
 // Opcode 114: RotateProperties
 // ---------------------------------------------------------------------------
 
-pub(crate) fn handle_rotate_properties(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
-    require_len!(data, 12, state.sequence, 114);
-
-    use x11rb_protocol::protocol::xproto::RotatePropertiesRequest;
-    let req = match RotatePropertiesRequest::try_parse_request(request_header(data), &data[4..]) {
-        Ok(r) => r,
-        Err(_) => return build_error(LENGTH_ERROR, state.sequence, 0, 114, 0),
-    };
+pub(crate) fn handle_rotate_properties(state: &mut ClientState, req: &RotatePropertiesRequest) -> Vec<u8> {
     let window = req.window;
     if !state.windows.contains_key(&window) {
         return build_error(WINDOW_ERROR, state.sequence, window, 114, 0);
@@ -1099,7 +1030,7 @@ pub(crate) fn handle_rotate_properties(state: &mut ClientState, data: &[u8]) -> 
         return Vec::new();
     }
 
-    let atoms: Vec<u32> = req.atoms.into_owned();
+    let atoms: Vec<u32> = req.atoms.to_vec();
 
     // Per X11 spec, duplicate atoms in the list generate BadMatch.
     {
@@ -1174,14 +1105,9 @@ pub(crate) fn handle_rotate_properties(state: &mut ClientState, data: &[u8]) -> 
 
 pub(crate) fn handle_set_pointer_mapping(
     state: &mut ClientState,
-    data: &[u8],
-    seq: u16,
+    req: &SetPointerMappingRequest,
 ) -> Vec<u8> {
-    require_len!(data, 4, seq, 116);
-    let req = match SetPointerMappingRequest::try_parse_request(request_header(data), &data[4..]) {
-        Ok(r) => r,
-        Err(_) => return build_error(LENGTH_ERROR, seq, 0, 116, 0),
-    };
+    let seq = state.sequence;
     let n_buttons = req.map.len();
     // Parse the new mapping from the request data (support up to 7 buttons)
     let max_buttons = state.pointer_mapping.len();
@@ -1215,7 +1141,8 @@ pub(crate) fn handle_set_pointer_mapping(
 // Opcode 117: GetPointerMapping
 // ---------------------------------------------------------------------------
 
-pub(crate) fn handle_get_pointer_mapping(state: &ClientState, seq: u16) -> Vec<u8> {
+pub(crate) fn handle_get_pointer_mapping(state: &ClientState, _req: &GetPointerMappingRequest) -> Vec<u8> {
+    let seq = state.sequence;
     let map = &state.pointer_mapping;
     let n = map.len() as u8;
     let padded_len = (n as usize + 3) & !3;
@@ -1231,14 +1158,9 @@ pub(crate) fn handle_get_pointer_mapping(state: &ClientState, seq: u16) -> Vec<u
 
 pub(crate) fn handle_set_modifier_mapping(
     state: &mut ClientState,
-    data: &[u8],
-    seq: u16,
+    req: &SetModifierMappingRequest,
 ) -> Vec<u8> {
-    require_len!(data, 4, seq, 118);
-    let req = match SetModifierMappingRequest::try_parse_request(request_header(data), &data[4..]) {
-        Ok(r) => r,
-        Err(_) => return build_error(LENGTH_ERROR, seq, 0, 118, 0),
-    };
+    let seq = state.sequence;
     let keycodes_per_modifier = req.keycodes.len() / 8;
 
     if keycodes_per_modifier > 0 {
@@ -1281,7 +1203,8 @@ pub(crate) fn handle_set_modifier_mapping(
 // Opcode 119: GetModifierMapping
 // ---------------------------------------------------------------------------
 
-pub(crate) fn handle_get_modifier_mapping(state: &ClientState, seq: u16) -> Vec<u8> {
+pub(crate) fn handle_get_modifier_mapping(state: &ClientState, _req: &GetModifierMappingRequest) -> Vec<u8> {
+    let seq = state.sequence;
     // Find the max keycodes per modifier to determine padding
     let max_keycodes = state
         .modifier_map
