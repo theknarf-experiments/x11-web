@@ -27,35 +27,19 @@ pub(super) fn handle_request(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
     }
 
     // Extension protocol requests (opcodes 128+).
-    // Look up the opcode in the registry.
-    let ext_info = state.extension_registry.by_opcode(major_opcode);
-    match ext_info {
+    let bad_request = || {
+        build_error_bo(REQUEST_ERROR, seq, major_opcode as u32, major_opcode,
+                       _minor as u16, state.msb_first)
+    };
+    match state.extension_registry.by_opcode(major_opcode) {
         Some(info) if !info.enabled => {
-            // Extension exists but has been disabled at runtime.
-            warn!(
-                "Request for disabled extension {:?} (opcode {major_opcode})",
-                info.wire_name
-            );
-            build_error_bo(
-                REQUEST_ERROR,
-                seq,
-                major_opcode as u32,
-                major_opcode,
-                _minor as u16,
-                state.msb_first,
-            )
+            warn!("Request for disabled extension {:?} (opcode {major_opcode})", info.wire_name);
+            bad_request()
         }
         Some(info) => dispatch_extension(state, data, seq, info.id),
         None => {
             warn!("Unhandled X11 request opcode: {major_opcode} minor: {_minor}");
-            build_error_bo(
-                REQUEST_ERROR,
-                seq,
-                major_opcode as u32,
-                major_opcode,
-                _minor as u16,
-                state.msb_first,
-            )
+            bad_request()
         }
     }
 }
