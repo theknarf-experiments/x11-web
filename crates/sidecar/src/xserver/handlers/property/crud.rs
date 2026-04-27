@@ -136,7 +136,6 @@ pub(crate) fn handle_change_property(state: &mut ClientState, req: &ChangeProper
     }
 
     // Generate PropertyNotify event if PropertyChangeMask is set
-    let property_change_mask: u32 = 0x0040_0000;
     {
         let event = serialize_event(&PropertyNotifyEvent {
             response_type: PROPERTY_NOTIFY_EVENT,
@@ -147,15 +146,10 @@ pub(crate) fn handle_change_property(state: &mut ClientState, req: &ChangeProper
             state: 0u8.into(), // NewValue
         }, state.msb_first);
 
-        // Deliver to local client if it selected PropertyChangeMask
-        if let Some(win) = state.windows.get(&window) {
-            if win.event_mask & property_change_mask != 0 {
-                state.pending_events.push(event.clone());
-            }
+        if state.window_selects(window, EventMask::PROPERTY_CHANGE) {
+            state.pending_events.push(event.clone());
         }
-
-        // Broadcast to other connections that selected PropertyChangeMask
-        state.broadcast_event(window, property_change_mask, &event);
+        state.broadcast_event(window, u32::from(EventMask::PROPERTY_CHANGE), &event);
     }
 
     // Check if this is WM_TRANSIENT_FOR — store transient parent in WindowState (ICCCM §4.1.2.6)
@@ -574,19 +568,16 @@ pub(crate) fn handle_get_property(state: &mut ClientState, req: &GetPropertyRequ
             }
 
             // Generate PropertyNotify(Deleted) per spec
-            let property_change_mask: u32 = 0x0040_0000;
-            if let Some(win) = state.windows.get(&window) {
-                if win.event_mask & property_change_mask != 0 {
-                    let event = serialize_event(&PropertyNotifyEvent {
-                        response_type: PROPERTY_NOTIFY_EVENT,
-                        sequence: seq,
-                        window,
-                        atom: property_atom,
-                        time: state.timestamp(),
-                        state: 1u8.into(), // PropertyDelete
-                    }, state.msb_first);
-                    state.pending_events.push(event);
-                }
+            if state.window_selects(window, EventMask::PROPERTY_CHANGE) {
+                let event = serialize_event(&PropertyNotifyEvent {
+                    response_type: PROPERTY_NOTIFY_EVENT,
+                    sequence: seq,
+                    window,
+                    atom: property_atom,
+                    time: state.timestamp(),
+                    state: 1u8.into(), // PropertyDelete
+                }, state.msb_first);
+                state.pending_events.push(event);
             }
 
             // Advance INCR transfer if this was an incremental selection

@@ -74,10 +74,8 @@ pub(crate) fn start_incr_transfer(
             state: 0u8.into(), // NewValue
         }, state.msb_first);
 
-        if let Some(win) = state.windows.get(&requestor) {
-            if win.event_mask & EventMask::PROPERTY_CHANGE != EventMask::NO_EVENT {
-                state.pending_events.push(event.clone());
-            }
+        if state.window_selects(requestor, EventMask::PROPERTY_CHANGE) {
+            state.pending_events.push(event.clone());
         }
         state.broadcast_event(requestor, u32::from(EventMask::PROPERTY_CHANGE), &event);
     }
@@ -163,10 +161,8 @@ pub(crate) fn advance_incr_transfer(state: &mut ClientState, window: u32, proper
             state: 0u8.into(), // NewValue
         }, state.msb_first);
 
-        if let Some(win) = state.windows.get(&window) {
-            if win.event_mask & EventMask::PROPERTY_CHANGE != EventMask::NO_EVENT {
-                state.pending_events.push(event.clone());
-            }
+        if state.window_selects(window, EventMask::PROPERTY_CHANGE) {
+            state.pending_events.push(event.clone());
         }
 
         // Broadcast to other connections that selected PropertyChangeMask

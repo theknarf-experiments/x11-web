@@ -171,7 +171,6 @@ pub(crate) fn handle_send_event(state: &mut ClientState, req: &SendEventRequest)
 
                 // Generate PropertyNotify for clients watching PropertyChangeMask
                 {
-                    let property_change_mask: u32 = 0x0040_0000;
                     let pn_event = serialize_event(&PropertyNotifyEvent {
                         response_type: PROPERTY_NOTIFY_EVENT,
                         sequence: state.sequence,
@@ -180,12 +179,10 @@ pub(crate) fn handle_send_event(state: &mut ClientState, req: &SendEventRequest)
                         time: state.timestamp(),
                         state: 0u8.into(), // NewValue
                     }, state.msb_first);
-                    if let Some(win) = state.windows.get(&source_window) {
-                        if win.event_mask & property_change_mask != 0 {
-                            state.pending_events.push(pn_event.clone());
-                        }
+                    if state.window_selects(source_window, EventMask::PROPERTY_CHANGE) {
+                        state.pending_events.push(pn_event.clone());
                     }
-                    state.broadcast_event(source_window, property_change_mask, &pn_event);
+                    state.broadcast_event(source_window, u32::from(EventMask::PROPERTY_CHANGE), &pn_event);
                 }
 
                 // Determine the new WM state and broadcast to frontend
@@ -502,7 +499,6 @@ pub(crate) fn handle_send_event(state: &mut ClientState, req: &SendEventRequest)
                 }
                 // Generate PropertyNotify for the frame extents change
                 {
-                    let property_change_mask: u32 = 0x0040_0000;
                     let pn_event = serialize_event(&PropertyNotifyEvent {
                         response_type: PROPERTY_NOTIFY_EVENT,
                         sequence: state.sequence,
@@ -511,12 +507,10 @@ pub(crate) fn handle_send_event(state: &mut ClientState, req: &SendEventRequest)
                         time: state.timestamp(),
                         state: 0u8.into(), // NewValue
                     }, state.msb_first);
-                    if let Some(win) = state.windows.get(&source_window) {
-                        if win.event_mask & property_change_mask != 0 {
-                            state.pending_events.push(pn_event.clone());
-                        }
+                    if state.window_selects(source_window, EventMask::PROPERTY_CHANGE) {
+                        state.pending_events.push(pn_event.clone());
                     }
-                    state.broadcast_event(source_window, property_change_mask, &pn_event);
+                    state.broadcast_event(source_window, u32::from(EventMask::PROPERTY_CHANGE), &pn_event);
                 }
                 return Vec::new();
             }
