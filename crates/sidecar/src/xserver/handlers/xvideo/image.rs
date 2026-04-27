@@ -4,6 +4,7 @@
 use tracing::debug;
 
 use super::super::super::client::ClientState;
+use super::super::parse_or_void;
 use crate::xserver::reply::ReplyBuf;
 use crate::xserver::request::request_header;
 use super::{
@@ -1011,10 +1012,7 @@ pub(crate) fn handle_image_request(
             if data.len() < 32 {
                 return Vec::new();
             }
-            let req = match GetStillRequest::try_parse_request(request_header(data), &data[4..]) {
-                Ok(r) => r,
-                Err(_) => return Vec::new(),
-            };
+            let req = parse_or_void!(GetStillRequest, data);
             let port = req.port;
             let drawable = req.drawable;
             let gc_id = req.gc;
@@ -1154,10 +1152,7 @@ pub(crate) fn handle_image_request(
         17 => {
             // XvQueryImageAttributes
             if data.len() >= 16 {
-                let req = match XvQueryImageAttributesRequest::try_parse_request(request_header(data), &data[4..]) {
-                    Ok(r) => r,
-                    Err(_) => return Vec::new(),
-                };
+                let req = parse_or_void!(XvQueryImageAttributesRequest, data);
                 let fourcc = req.id;
                 let width = req.width as u32;
                 let height = req.height as u32;
@@ -1198,10 +1193,7 @@ pub(crate) fn handle_image_request(
         18 => {
             // XvPutImage
             if data.len() >= 40 {
-                let req = match PutImageRequest::try_parse_request(request_header(data), &data[4..]) {
-                    Ok(r) => r,
-                    Err(_) => return Vec::new(),
-                };
+                let req = parse_or_void!(PutImageRequest, data);
                 let port = req.port;
                 let drawable = req.drawable;
                 let fourcc = req.id;
@@ -1236,10 +1228,7 @@ pub(crate) fn handle_image_request(
         19 => {
             // XvShmPutImage
             if data.len() >= 49 {
-                let req = match ShmPutImageRequest::try_parse_request(request_header(data), &data[4..]) {
-                    Ok(r) => r,
-                    Err(_) => return Vec::new(),
-                };
+                let req = parse_or_void!(ShmPutImageRequest, data);
                 let port = req.port;
                 let drawable = req.drawable;
                 let shmseg = req.shmseg;

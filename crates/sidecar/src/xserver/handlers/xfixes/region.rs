@@ -1,12 +1,11 @@
 //! XFIXES region operations.
 
 use tracing::debug;
-use super::super::parse_minor;
+use super::super::{parse_minor, parse_or_void};
 
 use super::super::super::client::ClientState;
 use super::super::super::types::{RegionRect, XFixesRegion};
 use crate::xserver::reply::ReplyBuf;
-use crate::xserver::request::request_header;
 use x11rb_protocol::protocol::xfixes::{
     CopyRegionRequest, CreateRegionFromBitmapRequest, CreateRegionFromGCRequest,
     CreateRegionFromPictureRequest, CreateRegionFromWindowRequest, CreateRegionRequest,
@@ -387,10 +386,7 @@ pub(crate) fn handle_set_window_shape_region(
     if data.len() < 20 {
         return Vec::new();
     }
-    let req = match SetWindowShapeRegionRequest::try_parse_request(request_header(data), &data[4..]) {
-        Ok(r) => r,
-        Err(_) => return Vec::new(),
-    };
+    let req = parse_or_void!(SetWindowShapeRegionRequest, data);
     let window_id = req.dest;
     let kind: u8 = req.dest_kind.into();
     let x_offset = req.x_offset;

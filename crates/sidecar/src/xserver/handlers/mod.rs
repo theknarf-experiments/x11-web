@@ -112,6 +112,25 @@ macro_rules! parse_minor {
 #[allow(unused_imports)]
 pub(crate) use parse_minor;
 
+/// Parse a request body into a typed x11rb struct, returning early
+/// with an empty `Vec<u8>` on parse failure. Use this for void or
+/// reply-less extension requests where a malformed packet should be
+/// silently dropped rather than reported as a protocol error.
+#[allow(unused_macros)]
+macro_rules! parse_or_void {
+    ($T:ty, $data:ident) => {
+        match <$T>::try_parse_request(
+            crate::xserver::request::request_header($data),
+            &$data[4..],
+        ) {
+            Ok(r) => r,
+            Err(_) => return Vec::new(),
+        }
+    };
+}
+#[allow(unused_imports)]
+pub(crate) use parse_or_void;
+
 /// Dispatch a core X11 protocol request (opcodes 1-127) to the appropriate
 /// handler function. Returns the response bytes (reply, event, or empty for
 /// void requests).

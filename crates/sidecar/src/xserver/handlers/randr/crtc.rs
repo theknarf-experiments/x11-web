@@ -13,10 +13,9 @@ use x11rb_protocol::protocol::randr::{
 
 /// RRGetCrtcInfo (20).
 pub(crate) fn handle_get_crtc_info(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
-    let crtc_id = match GetCrtcInfoRequest::try_parse_request(request_header(data), &data[4..]) {
-        Ok(r) => r.crtc,
-        Err(_) => 0,
-    };
+    let crtc_id = GetCrtcInfoRequest::try_parse_request(request_header(data), &data[4..])
+        .map(|r| r.crtc)
+        .unwrap_or(0);
     build_crtc_info_reply(state, seq, crtc_id)
 }
 
@@ -85,10 +84,9 @@ pub(crate) fn handle_get_crtc_gamma_size(
     data: &[u8],
     seq: u16,
 ) -> Vec<u8> {
-    let crtc_id = match GetCrtcGammaSizeRequest::try_parse_request(request_header(data), &data[4..]) {
-        Ok(r) => r.crtc,
-        Err(_) => 0,
-    };
+    let crtc_id = GetCrtcGammaSizeRequest::try_parse_request(request_header(data), &data[4..])
+        .map(|r| r.crtc)
+        .unwrap_or(0);
     let size: u16 = if state.randr_find_crtc(crtc_id).is_some() {
         256
     } else {
@@ -101,10 +99,9 @@ pub(crate) fn handle_get_crtc_gamma_size(
 
 /// RRGetCrtcGamma (23).
 pub(crate) fn handle_get_crtc_gamma(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
-    let crtc_id = match GetCrtcGammaRequest::try_parse_request(request_header(data), &data[4..]) {
-        Ok(r) => r.crtc,
-        Err(_) => 0,
-    };
+    let crtc_id = GetCrtcGammaRequest::try_parse_request(request_header(data), &data[4..])
+        .map(|r| r.crtc)
+        .unwrap_or(0);
     build_get_crtc_gamma_reply(state, seq, crtc_id)
 }
 
@@ -161,10 +158,9 @@ pub(crate) fn handle_get_panning(state: &mut ClientState, data: &[u8], seq: u16)
 
 /// RRSetPanning (28).
 pub(crate) fn handle_set_panning(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
-    let crtc_id = match SetPanningRequest::try_parse_request(request_header(data), &data[4..]) {
-        Ok(r) => r.crtc,
-        Err(_) => 0,
-    };
+    let crtc_id = SetPanningRequest::try_parse_request(request_header(data), &data[4..])
+        .map(|r| r.crtc)
+        .unwrap_or(0);
     debug!("RRSetPanning crtc={crtc_id} -> Success");
     ReplyBuf::fixed(seq, state.msb_first)
         .set_data_byte(0) // Success
@@ -174,10 +170,9 @@ pub(crate) fn handle_set_panning(state: &mut ClientState, data: &[u8], seq: u16)
 
 /// RRGetCrtcTransform (29).
 pub(crate) fn handle_get_crtc_transform(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
-    let crtc_id = match GetCrtcTransformRequest::try_parse_request(request_header(data), &data[4..]) {
-        Ok(r) => r.crtc,
-        Err(_) => 0,
-    };
+    let crtc_id = GetCrtcTransformRequest::try_parse_request(request_header(data), &data[4..])
+        .map(|r| r.crtc)
+        .unwrap_or(0);
     // Retrieve transform or fall back to identity.
     let identity = [65536i32, 0, 0, 0, 65536, 0, 0, 0, 65536];
     let transform = state

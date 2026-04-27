@@ -4,6 +4,7 @@ use tracing::{debug, info};
 
 use super::super::super::client::ClientState;
 use super::super::super::types::{OutputPropertyConfig, PropertyValue, RandrMode, RandrMonitor};
+use super::super::parse_or_void;
 use crate::xserver::reply::ReplyBuf;
 use crate::xserver::request::request_header;
 use x11rb_protocol::protocol::randr::{
@@ -16,14 +17,9 @@ use x11rb_protocol::protocol::randr::{
 
 /// RRGetOutputInfo (9).
 pub(crate) fn handle_get_output_info(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
-    let output_id = if data.len() >= 8 {
-        match GetOutputInfoRequest::try_parse_request(request_header(data), &data[4..]) {
-            Ok(r) => r.output,
-            Err(_) => 0,
-        }
-    } else {
-        0
-    };
+    let output_id = GetOutputInfoRequest::try_parse_request(request_header(data), &data[4..])
+        .map(|r| r.output)
+        .unwrap_or(0);
     build_output_info_reply(state, seq, output_id)
 }
 
@@ -33,14 +29,9 @@ pub(crate) fn handle_list_output_properties(
     data: &[u8],
     seq: u16,
 ) -> Vec<u8> {
-    let output_id = if data.len() >= 8 {
-        match ListOutputPropertiesRequest::try_parse_request(request_header(data), &data[4..]) {
-            Ok(r) => r.output,
-            Err(_) => 0,
-        }
-    } else {
-        0
-    };
+    let output_id = ListOutputPropertiesRequest::try_parse_request(request_header(data), &data[4..])
+        .map(|r| r.output)
+        .unwrap_or(0);
     build_list_output_properties_reply(state, seq, output_id)
 }
 
@@ -104,10 +95,7 @@ pub(crate) fn handle_configure_output_property(
     _seq: u16,
 ) -> Vec<u8> {
     if data.len() >= 14 {
-        let req = match ConfigureOutputPropertyRequest::try_parse_request(request_header(data), &data[4..]) {
-            Ok(r) => r,
-            Err(_) => return Vec::new(),
-        };
+        let req = parse_or_void!(ConfigureOutputPropertyRequest, data);
         let output_id = req.output;
         let property_atom = req.property;
         let pending = req.pending;
@@ -135,10 +123,7 @@ pub(crate) fn handle_change_output_property(
     _seq: u16,
 ) -> Vec<u8> {
     if data.len() >= 24 {
-        let req = match ChangeOutputPropertyRequest::try_parse_request(request_header(data), &data[4..]) {
-            Ok(r) => r,
-            Err(_) => return Vec::new(),
-        };
+        let req = parse_or_void!(ChangeOutputPropertyRequest, data);
         let output_id = req.output;
         let property = req.property;
         let prop_type = req.type_;
@@ -165,10 +150,7 @@ pub(crate) fn handle_delete_output_property(
     _seq: u16,
 ) -> Vec<u8> {
     if data.len() >= 12 {
-        let req = match DeleteOutputPropertyRequest::try_parse_request(request_header(data), &data[4..]) {
-            Ok(r) => r,
-            Err(_) => return Vec::new(),
-        };
+        let req = parse_or_void!(DeleteOutputPropertyRequest, data);
         let output_id = req.output;
         let property = req.property;
         if let Some(output) = state.randr_find_output_mut(output_id) {
@@ -248,10 +230,7 @@ pub(crate) fn handle_create_mode(state: &mut ClientState, data: &[u8], seq: u16)
 /// RRDestroyMode (17).
 pub(crate) fn handle_destroy_mode(state: &mut ClientState, data: &[u8], _seq: u16) -> Vec<u8> {
     if data.len() >= 8 {
-        let req = match DestroyModeRequest::try_parse_request(request_header(data), &data[4..]) {
-            Ok(r) => r,
-            Err(_) => return Vec::new(),
-        };
+        let req = parse_or_void!(DestroyModeRequest, data);
         let mode_id = req.mode;
         state.randr_modes.retain(|m| m.id != mode_id);
         debug!("RRDestroyMode mode_id={mode_id}");
@@ -262,10 +241,7 @@ pub(crate) fn handle_destroy_mode(state: &mut ClientState, data: &[u8], _seq: u1
 /// RRAddOutputMode (18).
 pub(crate) fn handle_add_output_mode(state: &mut ClientState, data: &[u8], _seq: u16) -> Vec<u8> {
     if data.len() >= 12 {
-        let req = match AddOutputModeRequest::try_parse_request(request_header(data), &data[4..]) {
-            Ok(r) => r,
-            Err(_) => return Vec::new(),
-        };
+        let req = parse_or_void!(AddOutputModeRequest, data);
         let output_id = req.output;
         let mode_id = req.mode;
         if let Some(output) = state.randr_find_output_mut(output_id) {
@@ -285,10 +261,7 @@ pub(crate) fn handle_delete_output_mode(
     _seq: u16,
 ) -> Vec<u8> {
     if data.len() >= 12 {
-        let req = match DeleteOutputModeRequest::try_parse_request(request_header(data), &data[4..]) {
-            Ok(r) => r,
-            Err(_) => return Vec::new(),
-        };
+        let req = parse_or_void!(DeleteOutputModeRequest, data);
         let output_id = req.output;
         let mode_id = req.mode;
         if let Some(output) = state.randr_find_output_mut(output_id) {
@@ -306,10 +279,7 @@ pub(crate) fn handle_set_output_primary(
     _seq: u16,
 ) -> Vec<u8> {
     if data.len() >= 12 {
-        let req = match SetOutputPrimaryRequest::try_parse_request(request_header(data), &data[4..]) {
-            Ok(r) => r,
-            Err(_) => return Vec::new(),
-        };
+        let req = parse_or_void!(SetOutputPrimaryRequest, data);
         let output_id = req.output;
         state.randr_primary_output = output_id;
         debug!("RRSetOutputPrimary output={output_id}");
@@ -472,10 +442,7 @@ pub(crate) fn handle_get_monitors(state: &mut ClientState, _data: &[u8], seq: u1
 /// RRSetMonitor (43).
 pub(crate) fn handle_set_monitor(state: &mut ClientState, data: &[u8], _seq: u16) -> Vec<u8> {
     if data.len() >= 28 {
-        let req = match SetMonitorRequest::try_parse_request(request_header(data), &data[4..]) {
-            Ok(r) => r,
-            Err(_) => return Vec::new(),
-        };
+        let req = parse_or_void!(SetMonitorRequest, data);
         let mi = &req.monitorinfo;
         let name_atom = mi.name;
         let primary = mi.primary;
@@ -506,10 +473,7 @@ pub(crate) fn handle_set_monitor(state: &mut ClientState, data: &[u8], _seq: u16
 /// RRDeleteMonitor (44).
 pub(crate) fn handle_delete_monitor(state: &mut ClientState, data: &[u8], _seq: u16) -> Vec<u8> {
     if data.len() >= 12 {
-        let req = match DeleteMonitorRequest::try_parse_request(request_header(data), &data[4..]) {
-            Ok(r) => r,
-            Err(_) => return Vec::new(),
-        };
+        let req = parse_or_void!(DeleteMonitorRequest, data);
         let name_atom = req.name;
         state.randr_monitors.retain(|m| m.name_atom != name_atom);
         debug!("RRDeleteMonitor name_atom={name_atom}");

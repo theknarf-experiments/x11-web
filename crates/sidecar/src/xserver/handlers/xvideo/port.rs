@@ -4,6 +4,7 @@
 use tracing::debug;
 
 use super::super::super::client::ClientState;
+use super::super::parse_or_void;
 use crate::xserver::reply::ReplyBuf;
 use crate::xserver::request::request_header;
 use super::{
@@ -21,10 +22,7 @@ pub(crate) fn handle_port_request(
             // XvGrabPort
             if data.len() >= 8 {
                 use x11rb_protocol::protocol::xv::GrabPortRequest;
-                let req = match GrabPortRequest::try_parse_request(request_header(data), &data[4..]) {
-                    Ok(r) => r,
-                    Err(_) => return Vec::new(),
-                };
+                let req = parse_or_void!(GrabPortRequest, data);
                 let port = req.port;
                 debug!("XVideo GrabPort: port={port}");
                 // Ensure port state exists and mark as grabbed
@@ -47,10 +45,7 @@ pub(crate) fn handle_port_request(
             // XvUngrabPort
             if data.len() >= 8 {
                 use x11rb_protocol::protocol::xv::UngrabPortRequest;
-                let req = match UngrabPortRequest::try_parse_request(request_header(data), &data[4..]) {
-                    Ok(r) => r,
-                    Err(_) => return Vec::new(),
-                };
+                let req = parse_or_void!(UngrabPortRequest, data);
                 let port = req.port;
                 debug!("XVideo UngrabPort: port={port}");
                 if let Some(ps) = state.xv_ports.get_mut(&port) {
@@ -72,10 +67,7 @@ pub(crate) fn handle_port_request(
             // XvSetPortAttribute
             if data.len() >= 16 {
                 use x11rb_protocol::protocol::xv::SetPortAttributeRequest;
-                let req = match SetPortAttributeRequest::try_parse_request(request_header(data), &data[4..]) {
-                    Ok(r) => r,
-                    Err(_) => return Vec::new(),
-                };
+                let req = parse_or_void!(SetPortAttributeRequest, data);
                 let port = req.port;
                 let atom = req.attribute;
                 let value = req.value;
@@ -109,10 +101,7 @@ pub(crate) fn handle_port_request(
             // XvGetPortAttribute
             if data.len() >= 12 {
                 use x11rb_protocol::protocol::xv::GetPortAttributeRequest;
-                let req = match GetPortAttributeRequest::try_parse_request(request_header(data), &data[4..]) {
-                    Ok(r) => r,
-                    Err(_) => return Vec::new(),
-                };
+                let req = parse_or_void!(GetPortAttributeRequest, data);
                 let port = req.port;
                 let atom = req.attribute;
 
