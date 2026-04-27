@@ -3,7 +3,6 @@
 use super::*;
 use super::{update_sibling_visibility, win_gravity_delta};
 use crate::xserver::event::serialize_event;
-use crate::xserver::request::request_header;
 use x11rb_protocol::protocol::xproto::{
     CirculateNotifyEvent, CirculateWindowRequest, ClientMessageData, ClientMessageEvent,
     ConfigureNotifyEvent, ConfigureRequestEvent, ConfigureWindowRequest, ExposeEvent,
@@ -15,12 +14,8 @@ use x11rb_protocol::protocol::xproto::{
 // Opcode 7: ReparentWindow
 // ---------------------------------------------------------------------------
 
-pub(crate) fn handle_reparent_window(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
-    let req = match ReparentWindowRequest::try_parse_request(request_header(data), &data[4..]) {
-        Ok(r) => r,
-        Err(_) => return build_error(LENGTH_ERROR, seq, 0, 7, 0),
-    };
-
+pub(crate) fn handle_reparent_window(state: &mut ClientState, req: &ReparentWindowRequest) -> Vec<u8> {
+    let _seq = state.sequence;
     let window = req.window;
     let new_parent = req.parent;
     let x = req.x;
@@ -186,12 +181,8 @@ pub(crate) fn handle_reparent_window(state: &mut ClientState, data: &[u8], seq: 
 // Opcode 12: ConfigureWindow
 // ---------------------------------------------------------------------------
 
-pub(crate) fn handle_configure_window(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
-    let req = match ConfigureWindowRequest::try_parse_request(request_header(data), &data[4..]) {
-        Ok(r) => r,
-        Err(_) => return build_error(LENGTH_ERROR, seq, 0, 12, 0),
-    };
-
+pub(crate) fn handle_configure_window(state: &mut ClientState, req: &ConfigureWindowRequest) -> Vec<u8> {
+    let seq = state.sequence;
     let wid = req.window;
     let cvl = &*req.value_list;
 
@@ -1111,12 +1102,8 @@ pub(crate) fn handle_configure_window(state: &mut ClientState, data: &[u8], seq:
 // Opcode 13: CirculateWindow
 // ---------------------------------------------------------------------------
 
-pub(crate) fn handle_circulate_window(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
-    let req = match CirculateWindowRequest::try_parse_request(request_header(data), &data[4..]) {
-        Ok(r) => r,
-        Err(_) => return build_error(LENGTH_ERROR, seq, 0, 13, 0),
-    };
-
+pub(crate) fn handle_circulate_window(state: &mut ClientState, req: &CirculateWindowRequest) -> Vec<u8> {
+    let _seq = state.sequence;
     let direction: u8 = req.direction.into(); // 0 = RaiseLowest, 1 = LowerHighest
     let window = req.window;
 

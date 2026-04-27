@@ -211,6 +211,54 @@ impl ExtensionRegistry {
     }
 }
 
+// Adapter so x11rb's `Request::parse` can dispatch to extensions by
+// looking up their major opcode / event / error ranges in our registry.
+impl x11rb_protocol::x11_utils::ExtInfoProvider for ExtensionRegistry {
+    fn get_from_major_opcode(
+        &self,
+        major_opcode: u8,
+    ) -> Option<(&str, x11rb_protocol::x11_utils::ExtensionInformation)> {
+        let info = self.by_opcode(major_opcode)?;
+        if !info.enabled {
+            return None;
+        }
+        Some((info.wire_name, x11rb_protocol::x11_utils::ExtensionInformation {
+            major_opcode: info.major_opcode,
+            first_event: info.first_event,
+            first_error: info.first_error,
+        }))
+    }
+
+    fn get_from_event_code(
+        &self,
+        event_code: u8,
+    ) -> Option<(&str, x11rb_protocol::x11_utils::ExtensionInformation)> {
+        // Linear scan — the registry is small (<30 entries).
+        let info = self.entries.iter().find(|e| {
+            e.enabled && e.first_event != 0 && event_code >= e.first_event
+        })?;
+        Some((info.wire_name, x11rb_protocol::x11_utils::ExtensionInformation {
+            major_opcode: info.major_opcode,
+            first_event: info.first_event,
+            first_error: info.first_error,
+        }))
+    }
+
+    fn get_from_error_code(
+        &self,
+        error_code: u8,
+    ) -> Option<(&str, x11rb_protocol::x11_utils::ExtensionInformation)> {
+        let info = self.entries.iter().find(|e| {
+            e.enabled && e.first_error != 0 && error_code >= e.first_error
+        })?;
+        Some((info.wire_name, x11rb_protocol::x11_utils::ExtensionInformation {
+            major_opcode: info.major_opcode,
+            first_event: info.first_event,
+            first_error: info.first_error,
+        }))
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------

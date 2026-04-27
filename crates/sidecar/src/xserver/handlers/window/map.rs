@@ -2,9 +2,7 @@
 
 use super::update_sibling_visibility;
 use super::*;
-use crate::xserver::core::require_len;
 use crate::xserver::event::serialize_event;
-use crate::xserver::request::request_header;
 use x11rb_protocol::protocol::xproto::{
     BackingStore, ExposeEvent, MapNotifyEvent, MapRequestEvent, MapWindowRequest,
     UnmapNotifyEvent, UnmapWindowRequest, MapSubwindowsRequest, UnmapSubwindowsRequest,
@@ -15,12 +13,8 @@ use x11rb_protocol::protocol::xproto::{
 // Opcode 8: MapWindow
 // ---------------------------------------------------------------------------
 
-pub(crate) fn handle_map_window(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
-    require_len!(data, 8, seq, 8);
-    let req = match MapWindowRequest::try_parse_request(request_header(data), &data[4..]) {
-        Ok(r) => r,
-        Err(_) => return build_error(LENGTH_ERROR, seq, 0, 8, 0),
-    };
+pub(crate) fn handle_map_window(state: &mut ClientState, req: &MapWindowRequest) -> Vec<u8> {
+    let seq = state.sequence;
     let wid = req.window;
     info!(
         "MapWindow called: wid={wid:#x} exists={}",
@@ -493,12 +487,8 @@ pub(crate) fn handle_map_window(state: &mut ClientState, data: &[u8], seq: u16) 
 // Opcode 9: MapSubwindows
 // ---------------------------------------------------------------------------
 
-pub(crate) fn handle_map_subwindows(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
-    require_len!(data, 8, seq, 9);
-    let req = match MapSubwindowsRequest::try_parse_request(request_header(data), &data[4..]) {
-        Ok(r) => r,
-        Err(_) => return build_error(LENGTH_ERROR, seq, 0, 9, 0),
-    };
+pub(crate) fn handle_map_subwindows(state: &mut ClientState, req: &MapSubwindowsRequest) -> Vec<u8> {
+    let seq = state.sequence;
     let parent = req.window;
 
     if !state.windows.contains_key(&parent) {
@@ -515,13 +505,8 @@ pub(crate) fn handle_map_subwindows(state: &mut ClientState, data: &[u8], seq: u
 
     let mut all_events = Vec::new();
     for child_id in children {
-        // Construct a fake MapWindow request for each child
-        let mut fake_data = [0u8; 8];
-        fake_data[0] = 8; // MapWindow opcode
-        state.write_u16(&mut fake_data, 2, 2u16); // length = 2
-        state.write_u32(&mut fake_data, 4, child_id);
-        let events = handle_map_window(state, &fake_data, seq);
-        all_events.extend(events);
+        let child_req = MapWindowRequest { window: child_id };
+        all_events.extend(handle_map_window(state, &child_req));
     }
 
     all_events
@@ -531,12 +516,8 @@ pub(crate) fn handle_map_subwindows(state: &mut ClientState, data: &[u8], seq: u
 // Opcode 10: UnmapWindow
 // ---------------------------------------------------------------------------
 
-pub(crate) fn handle_unmap_window(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
-    require_len!(data, 8, seq, 10);
-    let req = match UnmapWindowRequest::try_parse_request(request_header(data), &data[4..]) {
-        Ok(r) => r,
-        Err(_) => return build_error(LENGTH_ERROR, seq, 0, 10, 0),
-    };
+pub(crate) fn handle_unmap_window(state: &mut ClientState, req: &UnmapWindowRequest) -> Vec<u8> {
+    let seq = state.sequence;
     let wid = req.window;
 
     if !state.windows.contains_key(&wid) {
@@ -688,12 +669,8 @@ pub(crate) fn handle_unmap_window(state: &mut ClientState, data: &[u8], seq: u16
 // Opcode 11: UnmapSubwindows
 // ---------------------------------------------------------------------------
 
-pub(crate) fn handle_unmap_subwindows(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
-    require_len!(data, 8, seq, 11);
-    let req = match UnmapSubwindowsRequest::try_parse_request(request_header(data), &data[4..]) {
-        Ok(r) => r,
-        Err(_) => return build_error(LENGTH_ERROR, seq, 0, 11, 0),
-    };
+pub(crate) fn handle_unmap_subwindows(state: &mut ClientState, req: &UnmapSubwindowsRequest) -> Vec<u8> {
+    let seq = state.sequence;
     let parent = req.window;
 
     if !state.windows.contains_key(&parent) {
@@ -710,12 +687,8 @@ pub(crate) fn handle_unmap_subwindows(state: &mut ClientState, data: &[u8], seq:
 
     let mut all_events = Vec::new();
     for child_id in children {
-        let mut fake_data = [0u8; 8];
-        fake_data[0] = 10; // UnmapWindow opcode
-        state.write_u16(&mut fake_data, 2, 2u16);
-        state.write_u32(&mut fake_data, 4, child_id);
-        let events = handle_unmap_window(state, &fake_data, seq);
-        all_events.extend(events);
+        let child_req = UnmapWindowRequest { window: child_id };
+        all_events.extend(handle_unmap_window(state, &child_req));
     }
 
     all_events

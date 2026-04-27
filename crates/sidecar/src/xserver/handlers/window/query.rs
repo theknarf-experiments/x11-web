@@ -1,21 +1,15 @@
 //! Query/geometry window handlers (opcodes 14, 15).
 
 use super::*;
-use crate::xserver::core::require_len;
 use crate::xserver::reply::ReplyBuf;
-use crate::xserver::request::request_header;
+use x11rb_protocol::protocol::xproto::{GetGeometryRequest, QueryTreeRequest};
 
 // ---------------------------------------------------------------------------
 // Opcode 14: GetGeometry
 // ---------------------------------------------------------------------------
 
-pub(crate) fn handle_get_geometry(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
-    require_len!(data, 8, seq, 14);
-    use x11rb_protocol::protocol::xproto::GetGeometryRequest;
-    let req = match GetGeometryRequest::try_parse_request(request_header(data), &data[4..]) {
-        Ok(r) => r,
-        Err(_) => return build_error(LENGTH_ERROR, seq, 0, 14, 0),
-    };
+pub(crate) fn handle_get_geometry(state: &mut ClientState, req: &GetGeometryRequest) -> Vec<u8> {
+    let seq = state.sequence;
     let drawable = req.drawable;
 
     // Check windows first, then pixmaps
@@ -48,13 +42,8 @@ pub(crate) fn handle_get_geometry(state: &mut ClientState, data: &[u8], seq: u16
 // Opcode 15: QueryTree
 // ---------------------------------------------------------------------------
 
-pub(crate) fn handle_query_tree(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
-    require_len!(data, 8, seq, 15);
-    use x11rb_protocol::protocol::xproto::QueryTreeRequest;
-    let req = match QueryTreeRequest::try_parse_request(request_header(data), &data[4..]) {
-        Ok(r) => r,
-        Err(_) => return build_error(LENGTH_ERROR, seq, 0, 15, 0),
-    };
+pub(crate) fn handle_query_tree(state: &mut ClientState, req: &QueryTreeRequest) -> Vec<u8> {
+    let seq = state.sequence;
     let wid = req.window;
 
     if !state.windows.contains_key(&wid) {

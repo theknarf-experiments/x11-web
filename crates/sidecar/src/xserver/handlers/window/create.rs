@@ -1,8 +1,6 @@
 //! Create/destroy window handlers (opcodes 1, 4, 5).
 
 use super::*;
-use crate::xserver::core::require_len;
-use crate::xserver::request::request_header;
 use x11rb_protocol::protocol::xproto::{
     BackingStore, CreateWindowRequest, DestroySubwindowsRequest, DestroyWindowRequest, WindowClass,
 };
@@ -11,14 +9,8 @@ use x11rb_protocol::protocol::xproto::{
 // Opcode 1: CreateWindow
 // ---------------------------------------------------------------------------
 
-pub(crate) fn handle_create_window(state: &mut ClientState, data: &[u8], _seq: u16) -> Vec<u8> {
-    require_len!(data, 32, _seq, 1);
-
-    let req = match CreateWindowRequest::try_parse_request(request_header(data), &data[4..]) {
-        Ok(r) => r,
-        Err(_) => return build_error(LENGTH_ERROR, _seq, 0, 1, 0),
-    };
-
+pub(crate) fn handle_create_window(state: &mut ClientState, req: &CreateWindowRequest) -> Vec<u8> {
+    let _seq = state.sequence;
     let wid = req.wid;
     let parent = req.parent;
     let x = req.x;
@@ -359,11 +351,7 @@ pub(crate) fn handle_create_window(state: &mut ClientState, data: &[u8], _seq: u
 // Opcode 4: DestroyWindow
 // ---------------------------------------------------------------------------
 
-pub(crate) fn handle_destroy_window(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
-    let req = match DestroyWindowRequest::try_parse_request(request_header(data), &data[4..]) {
-        Ok(r) => r,
-        Err(_) => return build_error(LENGTH_ERROR, state.sequence, 0, 4, 0),
-    };
+pub(crate) fn handle_destroy_window(state: &mut ClientState, req: &DestroyWindowRequest) -> Vec<u8> {
     let wid = req.window;
 
     if !state.windows.contains_key(&wid) {
@@ -526,11 +514,7 @@ pub(crate) fn handle_destroy_window(state: &mut ClientState, data: &[u8]) -> Vec
 // Opcode 5: DestroySubwindows
 // ---------------------------------------------------------------------------
 
-pub(crate) fn handle_destroy_subwindows(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
-    let req = match DestroySubwindowsRequest::try_parse_request(request_header(data), &data[4..]) {
-        Ok(r) => r,
-        Err(_) => return build_error(LENGTH_ERROR, state.sequence, 0, 5, 0),
-    };
+pub(crate) fn handle_destroy_subwindows(state: &mut ClientState, req: &DestroySubwindowsRequest) -> Vec<u8> {
     let parent = req.window;
 
     if !state.windows.contains_key(&parent) {

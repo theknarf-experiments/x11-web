@@ -2,7 +2,6 @@
 
 use super::*;
 use crate::xserver::reply::ReplyBuf;
-use crate::xserver::request::request_header;
 use x11rb_protocol::protocol::xproto::{
     BackingStore, ChangeWindowAttributesRequest, ChangeSaveSetRequest, GetWindowAttributesRequest,
 };
@@ -11,13 +10,8 @@ use x11rb_protocol::protocol::xproto::{
 // Opcode 2: ChangeWindowAttributes
 // ---------------------------------------------------------------------------
 
-pub(crate) fn handle_change_window_attributes(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
+pub(crate) fn handle_change_window_attributes(state: &mut ClientState, req: &ChangeWindowAttributesRequest) -> Vec<u8> {
     let seq = state.sequence;
-    let req = match ChangeWindowAttributesRequest::try_parse_request(request_header(data), &data[4..]) {
-        Ok(r) => r,
-        Err(_) => return build_error(LENGTH_ERROR, seq, 0, 2, 0),
-    };
-
     let wid = req.window;
     let vl = &*req.value_list;
 
@@ -202,13 +196,9 @@ pub(crate) fn handle_change_window_attributes(state: &mut ClientState, data: &[u
 
 pub(crate) fn handle_get_window_attributes(
     state: &mut ClientState,
-    data: &[u8],
-    seq: u16,
+    req: &GetWindowAttributesRequest,
 ) -> Vec<u8> {
-    let req = match GetWindowAttributesRequest::try_parse_request(request_header(data), &data[4..]) {
-        Ok(r) => r,
-        Err(_) => return build_error(LENGTH_ERROR, seq, 0, 3, 0),
-    };
+    let seq = state.sequence;
     let wid = req.window;
 
     let win = match state.windows.get(&wid) {
@@ -251,12 +241,8 @@ pub(crate) fn handle_get_window_attributes(
 // Opcode 6: ChangeSaveSet
 // ---------------------------------------------------------------------------
 
-pub(crate) fn handle_change_save_set(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
-    let seq = state.sequence;
-    let req = match ChangeSaveSetRequest::try_parse_request(request_header(data), &data[4..]) {
-        Ok(r) => r,
-        Err(_) => return build_error(LENGTH_ERROR, seq, 0, 6, 0),
-    };
+pub(crate) fn handle_change_save_set(state: &mut ClientState, req: &ChangeSaveSetRequest) -> Vec<u8> {
+    let _seq = state.sequence;
     let mode: u8 = req.mode.into();
     let window = req.window;
 

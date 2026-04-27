@@ -53,10 +53,33 @@ pub(crate) use window::restack_by_window_type;
 // Dispatcher
 // ---------------------------------------------------------------------------
 
+/// Parse the request body into a typed x11rb request struct, then call the
+/// handler with `(state, &req)`. If the parse fails (typically because the
+/// wire length doesn't match the struct), emit a BadLength error. This
+/// centralises the boilerplate that used to live at the top of every handler.
+macro_rules! typed {
+    ($T:ty, $handler:path, $opcode:literal, $data:ident, $state:ident) => {{
+        match <$T>::try_parse_request(
+            crate::xserver::request::request_header($data),
+            &$data[4..],
+        ) {
+            Ok(req) => $handler($state, &req),
+            Err(_) => crate::xserver::core::build_error(
+                crate::xserver::core::LENGTH_ERROR,
+                $state.sequence,
+                0,
+                $opcode,
+                0,
+            ),
+        }
+    }};
+}
+
 /// Dispatch a core X11 protocol request (opcodes 1-127) to the appropriate
 /// handler function. Returns the response bytes (reply, event, or empty for
 /// void requests).
 pub(crate) fn handle_core_request(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
+    use x11rb_protocol::protocol::xproto::*;
     let major_opcode = data[0];
     let _minor = data[1];
     let seq = state.sequence;
@@ -78,21 +101,21 @@ pub(crate) fn handle_core_request(state: &mut ClientState, data: &[u8]) -> Vec<u
     }
 
     match major_opcode {
-        1 => window::handle_create_window(state, data, seq),
-        2 => window::handle_change_window_attributes(state, data),
-        3 => window::handle_get_window_attributes(state, data, seq),
-        4 => window::handle_destroy_window(state, data),
-        5 => window::handle_destroy_subwindows(state, data),
-        6 => window::handle_change_save_set(state, data),
-        7 => window::handle_reparent_window(state, data, seq),
-        8 => window::handle_map_window(state, data, seq),
-        9 => window::handle_map_subwindows(state, data, seq),
-        10 => window::handle_unmap_window(state, data, seq),
-        11 => window::handle_unmap_subwindows(state, data, seq),
-        12 => window::handle_configure_window(state, data, seq),
-        13 => window::handle_circulate_window(state, data, seq),
-        14 => window::handle_get_geometry(state, data, seq),
-        15 => window::handle_query_tree(state, data, seq),
+        1 => typed!(CreateWindowRequest, window::handle_create_window, 1, data, state),
+        2 => typed!(ChangeWindowAttributesRequest, window::handle_change_window_attributes, 2, data, state),
+        3 => typed!(GetWindowAttributesRequest, window::handle_get_window_attributes, 3, data, state),
+        4 => typed!(DestroyWindowRequest, window::handle_destroy_window, 4, data, state),
+        5 => typed!(DestroySubwindowsRequest, window::handle_destroy_subwindows, 5, data, state),
+        6 => typed!(ChangeSaveSetRequest, window::handle_change_save_set, 6, data, state),
+        7 => typed!(ReparentWindowRequest, window::handle_reparent_window, 7, data, state),
+        8 => typed!(MapWindowRequest, window::handle_map_window, 8, data, state),
+        9 => typed!(MapSubwindowsRequest, window::handle_map_subwindows, 9, data, state),
+        10 => typed!(UnmapWindowRequest, window::handle_unmap_window, 10, data, state),
+        11 => typed!(UnmapSubwindowsRequest, window::handle_unmap_subwindows, 11, data, state),
+        12 => typed!(ConfigureWindowRequest, window::handle_configure_window, 12, data, state),
+        13 => typed!(CirculateWindowRequest, window::handle_circulate_window, 13, data, state),
+        14 => typed!(GetGeometryRequest, window::handle_get_geometry, 14, data, state),
+        15 => typed!(QueryTreeRequest, window::handle_query_tree, 15, data, state),
         16 => property::handle_intern_atom(state, data, seq),
         17 => property::handle_get_atom_name(state, data, seq),
         18 => property::handle_change_property(state, data),
