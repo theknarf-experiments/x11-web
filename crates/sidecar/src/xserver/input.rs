@@ -388,7 +388,7 @@ fn make_crossing_event(
     abs_y: i16,
     bo: bool,
     focus_window: u32,
-) -> [u8; 32] {
+) -> Vec<u8> {
     let (ev_x, ev_y) = window_local_coords(windows, event_window, root_window, abs_x, abs_y);
 
     // Per X11 spec: child field is the child of event_window that contains the
@@ -439,7 +439,7 @@ fn make_crossing_event(
         found
     };
 
-    let bytes = serialize_event(
+    serialize_event(
         &EnterNotifyEvent {
             response_type: event_code,
             detail: detail.into(),
@@ -457,10 +457,7 @@ fn make_crossing_event(
             same_screen_focus: 0x01 | if has_focus { 0x01 } else { 0x00 },
         },
         bo,
-    );
-    let mut event = [0u8; 32];
-    event.copy_from_slice(&bytes);
-    event
+    )
 }
 
 /// Emit a crossing event if the window selects for it.
@@ -929,7 +926,7 @@ pub(crate) fn build_x11_input_event(
     let seq = state.sequence;
     let bo = state.msb_first;
     let root_window = state.root_window;
-    let mut event = [0u8; 32];
+    let event: Vec<u8>;
     let timestamp: u32 = state.timestamp();
 
     // Determine event target, respecting active grabs and owner_events per X11 spec §11.5.
@@ -1008,7 +1005,7 @@ pub(crate) fn build_x11_input_event(
 
     match input {
         InputEvent::MotionNotify { x, y, state: mask } => {
-            let bytes = serialize_event(
+            event = serialize_event(
                 &MotionNotifyEvent {
                     response_type: MOTION_NOTIFY_EVENT,
                     detail: 0u8.into(),
@@ -1026,7 +1023,6 @@ pub(crate) fn build_x11_input_event(
                 },
                 bo,
             );
-            event.copy_from_slice(&bytes);
         }
         InputEvent::ButtonPress {
             button,
@@ -1035,7 +1031,7 @@ pub(crate) fn build_x11_input_event(
             state: mask,
         } => {
             state.motion_hint_suppressed = false;
-            let bytes = serialize_event(
+            event = serialize_event(
                 &ButtonPressEvent {
                     response_type: BUTTON_PRESS_EVENT,
                     detail: *button,
@@ -1053,7 +1049,6 @@ pub(crate) fn build_x11_input_event(
                 },
                 bo,
             );
-            event.copy_from_slice(&bytes);
         }
         InputEvent::ButtonRelease {
             button,
@@ -1062,7 +1057,7 @@ pub(crate) fn build_x11_input_event(
             state: mask,
         } => {
             state.motion_hint_suppressed = false;
-            let bytes = serialize_event(
+            event = serialize_event(
                 &ButtonPressEvent {
                     response_type: BUTTON_RELEASE_EVENT,
                     detail: *button,
@@ -1080,7 +1075,6 @@ pub(crate) fn build_x11_input_event(
                 },
                 bo,
             );
-            event.copy_from_slice(&bytes);
         }
         InputEvent::KeyPress {
             keycode,
@@ -1094,7 +1088,7 @@ pub(crate) fn build_x11_input_event(
                 state.pointer_x,
                 state.pointer_y,
             );
-            let bytes = serialize_event(
+            event = serialize_event(
                 &KeyPressEvent {
                     response_type: KEY_PRESS_EVENT,
                     detail: *keycode as u8,
@@ -1112,7 +1106,6 @@ pub(crate) fn build_x11_input_event(
                 },
                 bo,
             );
-            event.copy_from_slice(&bytes);
         }
         InputEvent::KeyRelease {
             keycode,
@@ -1126,7 +1119,7 @@ pub(crate) fn build_x11_input_event(
                 state.pointer_x,
                 state.pointer_y,
             );
-            let bytes = serialize_event(
+            event = serialize_event(
                 &KeyPressEvent {
                     response_type: KEY_RELEASE_EVENT,
                     detail: *keycode as u8,
@@ -1144,7 +1137,6 @@ pub(crate) fn build_x11_input_event(
                 },
                 bo,
             );
-            event.copy_from_slice(&bytes);
         }
         InputEvent::WindowManage { action } => {
             // Handle window management actions via ICCCM/EWMH protocols.
@@ -1261,7 +1253,7 @@ pub(crate) fn build_x11_input_event(
                 WindowWmState::Close => {
                     // ICCCM graceful close: send WM_DELETE_WINDOW ClientMessage
                     if supports_delete {
-                        let cm = serialize_event(
+                        return serialize_event(
                             &ClientMessageEvent {
                                 response_type: CLIENT_MESSAGE_EVENT,
                                 format: 32,
@@ -1278,7 +1270,6 @@ pub(crate) fn build_x11_input_event(
                             },
                             bo,
                         );
-                        return cm.to_vec();
                     }
                     // Window doesn't support WM_DELETE_WINDOW -- destroy it directly
                     let destroy_data = {
@@ -1293,7 +1284,7 @@ pub(crate) fn build_x11_input_event(
             }
 
             // Send a _NET_WM_STATE ClientMessage to the window per EWMH
-            let cm = serialize_event(
+            return serialize_event(
                 &ClientMessageEvent {
                     response_type: CLIENT_MESSAGE_EVENT,
                     format: 32,
@@ -1304,7 +1295,6 @@ pub(crate) fn build_x11_input_event(
                 },
                 bo,
             );
-            return cm.to_vec();
         }
         InputEvent::CompositionEvent { phase, text } => {
             super::handlers::xim::handle_composition_event(state, phase, text);

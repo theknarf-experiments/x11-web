@@ -8,7 +8,11 @@
 //!   indicators — GetIndicatorState, GetIndicatorMap, SetIndicatorMap, GetNamedIndicator
 //!   device     — ListComponents, GetDeviceInfo, SetDeviceInfo
 use super::parse_minor;
+use crate::xserver::event::serialize_event_with_layout;
 use crate::xserver::reply::ReplyBuf;
+use x11rb_protocol::protocol::xkb::{
+    ControlsNotifyEvent, MapNotifyEvent, StateNotifyEvent,
+};
 
 mod compat;
 mod controls;
@@ -459,56 +463,48 @@ pub(crate) fn maybe_send_xkb_state_notify(
         changed |= 1 << 5;
     }
 
-    // XkbStateNotify event layout (32 bytes):
-    //   0: event code (XKB_EVENT_BASE)
-    //   1: xkbType (0 = StateNotify)
-    //   2-3: sequence number
-    //   4-7: time (CARD32)
-    //   8: deviceID
-    //   9: mods (effective)
-    //  10: baseMods
-    //  11: latchedMods
-    //  12: lockedMods
-    //  13: group (effective)
-    //  14: baseGroup (INT16, low byte)
-    //  15: baseGroup (INT16, high byte)
-    //  16-17: latchedGroup (INT16)
-    //  18: compatState
-    //  19: grabMods
-    //  20: compatGrabMods
-    //  21: lookupMods
-    //  22: compatLookupMods
-    //  23: ptrBtnState (high byte)
-    //  24-25: changed (CARD16)
-    //  26: keycode
-    //  27: eventType (what triggered: KeyPress=2, KeyRelease=3)
-    //  28-29: requestMajor (CARD8) / requestMinor (CARD8)
-    //  30-31: pad
-    let mut event = [0u8; 32];
-    event[0] = XKB_EVENT_BASE;
-    event[1] = XKB_STATE_NOTIFY;
-    state.write_u16(&mut event, 2, state.sequence);
-    state.write_u32(&mut event, 4, state.timestamp());
-    event[8] = 0; // deviceID = core keyboard
-    event[9] = effective_mods;
-    event[10] = after.base_mods;
-    event[11] = after.latched_mods;
-    event[12] = after.locked_mods;
-    event[13] = effective_group;
-    state.write_i16(&mut event, 14, after.base_group);
-    state.write_i16(&mut event, 16, after.latched_group);
-    event[18] = effective_mods; // compatState
-    event[19] = effective_mods; // grabMods
-    event[20] = effective_mods; // compatGrabMods
-    event[21] = effective_mods; // lookupMods
-    event[22] = effective_mods; // compatLookupMods
-                                // 23: ptrBtnState high byte = 0
-    state.write_u16(&mut event, 24, changed);
-    event[26] = keycode;
-    event[27] = event_type;
-
-    state.pending_events.push(event.to_vec());
+    let event = serialize_event_with_layout(
+        &StateNotifyEvent {
+            response_type: XKB_EVENT_BASE,
+            xkb_type: XKB_STATE_NOTIFY,
+            sequence: state.sequence,
+            time: state.timestamp(),
+            device_id: 0, // core keyboard
+            mods: effective_mods.into(),
+            base_mods: after.base_mods.into(),
+            latched_mods: after.latched_mods.into(),
+            locked_mods: after.locked_mods.into(),
+            group: effective_group.into(),
+            base_group: after.base_group,
+            latched_group: after.latched_group,
+            locked_group: 0u8.into(),
+            compat_state: effective_mods.into(),
+            grab_mods: effective_mods.into(),
+            compat_grab_mods: effective_mods.into(),
+            lookup_mods: effective_mods.into(),
+            compat_loockup_mods: effective_mods.into(),
+            ptr_btn_state: 0u16.into(),
+            changed: changed.into(),
+            keycode,
+            event_type,
+            request_major: 0,
+            request_minor: 0,
+        },
+        state.msb_first,
+        STATE_NOTIFY_LAYOUT,
+    );
+    state.pending_events.push(event);
 }
+
+/// Wire-field layout for `xkb::StateNotifyEvent` (32 bytes).
+const STATE_NOTIFY_LAYOUT: &[(usize, usize)] = &[
+    (2, 2),  // sequence (u16)
+    (4, 4),  // time (u32)
+    (14, 2), // baseGroup (i16)
+    (16, 2), // latchedGroup (i16)
+    (18, 2), // ptrBtnState (u16)
+    (24, 2), // changed (u16)
+];
 
 /// Build and enqueue an XkbMapNotify event if the client subscribed.
 ///
@@ -519,51 +515,46 @@ pub(crate) fn maybe_send_xkb_map_notify(state: &mut ClientState, changed: u16) {
         return;
     }
 
-    // XkbMapNotify event layout (32 bytes):
-    //   0: event code (XKB_EVENT_BASE)
-    //   1: xkbType (1 = MapNotify)
-    //   2-3: sequence number
-    //   4-7: time
-    //   8: deviceID
-    //   9: ptrBtnActions
-    //  10-11: changed (CARD16)
-    //  12: minKeyCode
-    //  13: maxKeyCode
-    //  14: firstType
-    //  15: nTypes
-    //  16: firstKeySym
-    //  17: nKeySyms
-    //  18: firstKeyAct
-    //  19: nKeyActs
-    //  20: firstKeyBehavior
-    //  21: nKeyBehaviors
-    //  22: firstKeyExplicit
-    //  23: nKeyExplicit
-    //  24: firstModMapKey
-    //  25: nModMapKeys
-    //  26: firstVModMapKey
-    //  27: nVModMapKeys
-    //  28-29: virtualMods (CARD16)
-    //  30-31: pad
-    let mut event = [0u8; 32];
-    event[0] = XKB_EVENT_BASE;
-    event[1] = XKB_MAP_NOTIFY;
-    state.write_u16(&mut event, 2, state.sequence);
-    state.write_u32(&mut event, 4, state.timestamp());
-    event[8] = 0; // deviceID
-    state.write_u16(&mut event, 10, changed);
-    event[12] = MIN_KEY_CODE;
-    event[13] = MAX_KEY_CODE;
-    // For simplicity, report the full range for all components.
-    event[14] = 0; // firstType
-    event[15] = 4; // nTypes (typical)
-    event[16] = MIN_KEY_CODE; // firstKeySym
-    event[17] = MAX_KEY_CODE - MIN_KEY_CODE + 1; // nKeySyms
-    event[18] = MIN_KEY_CODE; // firstKeyAct
-    event[19] = MAX_KEY_CODE - MIN_KEY_CODE + 1; // nKeyActs
-
-    state.pending_events.push(event.to_vec());
+    let event = serialize_event_with_layout(
+        &MapNotifyEvent {
+            response_type: XKB_EVENT_BASE,
+            xkb_type: XKB_MAP_NOTIFY,
+            sequence: state.sequence,
+            time: state.timestamp(),
+            device_id: 0,
+            ptr_btn_actions: 0,
+            changed: changed.into(),
+            min_key_code: MIN_KEY_CODE,
+            max_key_code: MAX_KEY_CODE,
+            first_type: 0,
+            n_types: 4,
+            first_key_sym: MIN_KEY_CODE,
+            n_key_syms: MAX_KEY_CODE - MIN_KEY_CODE + 1,
+            first_key_act: MIN_KEY_CODE,
+            n_key_acts: MAX_KEY_CODE - MIN_KEY_CODE + 1,
+            first_key_behavior: 0,
+            n_key_behavior: 0,
+            first_key_explicit: 0,
+            n_key_explicit: 0,
+            first_mod_map_key: 0,
+            n_mod_map_keys: 0,
+            first_v_mod_map_key: 0,
+            n_v_mod_map_keys: 0,
+            virtual_mods: 0u16.into(),
+        },
+        state.msb_first,
+        MAP_NOTIFY_LAYOUT,
+    );
+    state.pending_events.push(event);
 }
+
+/// Wire-field layout for `xkb::MapNotifyEvent` (32 bytes).
+const MAP_NOTIFY_LAYOUT: &[(usize, usize)] = &[
+    (2, 2),  // sequence (u16)
+    (4, 4),  // time (u32)
+    (10, 2), // changed (u16)
+    (28, 2), // virtualMods (u16)
+];
 
 /// Build and enqueue an XkbControlsNotify event if the client subscribed.
 ///
@@ -579,31 +570,33 @@ pub(crate) fn maybe_send_xkb_controls_notify(
 
     let enabled_changes = state.xkb_state.controls.enabled_ctrls ^ enabled_ctrls_before;
 
-    // XkbControlsNotify event layout (32 bytes):
-    //   0: event code (XKB_EVENT_BASE)
-    //   1: xkbType (3 = ControlsNotify)
-    //   2-3: sequence number
-    //   4-7: time
-    //   8: deviceID
-    //   9: numGroups
-    //  10-11: pad
-    //  12-15: changedControls (CARD32)
-    //  16-19: enabledControls (CARD32)
-    //  20-23: enabledControlChanges (CARD32)
-    //  24: keycode
-    //  25: eventType
-    //  26-27: requestMajor/requestMinor
-    //  28-31: pad
-    let mut event = [0u8; 32];
-    event[0] = XKB_EVENT_BASE;
-    event[1] = XKB_CONTROLS_NOTIFY;
-    state.write_u16(&mut event, 2, state.sequence);
-    state.write_u32(&mut event, 4, state.timestamp());
-    event[8] = 0; // deviceID
-    event[9] = state.xkb_state.controls.num_groups;
-    state.write_u32(&mut event, 12, changed_ctrls);
-    state.write_u32(&mut event, 16, state.xkb_state.controls.enabled_ctrls);
-    state.write_u32(&mut event, 20, enabled_changes);
-
-    state.pending_events.push(event.to_vec());
+    let event = serialize_event_with_layout(
+        &ControlsNotifyEvent {
+            response_type: XKB_EVENT_BASE,
+            xkb_type: XKB_CONTROLS_NOTIFY,
+            sequence: state.sequence,
+            time: state.timestamp(),
+            device_id: 0,
+            num_groups: state.xkb_state.controls.num_groups,
+            changed_controls: changed_ctrls.into(),
+            enabled_controls: state.xkb_state.controls.enabled_ctrls.into(),
+            enabled_control_changes: enabled_changes.into(),
+            keycode: 0,
+            event_type: 0,
+            request_major: 0,
+            request_minor: 0,
+        },
+        state.msb_first,
+        CONTROLS_NOTIFY_LAYOUT,
+    );
+    state.pending_events.push(event);
 }
+
+/// Wire-field layout for `xkb::ControlsNotifyEvent` (32 bytes).
+const CONTROLS_NOTIFY_LAYOUT: &[(usize, usize)] = &[
+    (2, 2),  // sequence (u16)
+    (4, 4),  // time (u32)
+    (12, 4), // changedControls (u32)
+    (16, 4), // enabledControls (u32)
+    (20, 4), // enabledControlChanges (u32)
+];

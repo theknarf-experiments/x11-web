@@ -14,6 +14,16 @@ use tracing::debug;
 
 use super::*;
 use crate::compose::{ComposeResult, ComposeState};
+use crate::xserver::event::{serialize_event, serialize_event_with_layout};
+use x11rb_protocol::protocol::xproto::ClientMessageEvent;
+
+/// Wire-field layout for `ClientMessageEvent` with format=8 — only header is
+/// byteswapped; the 20-byte data payload is opaque bytes.
+const CLIENT_MESSAGE_FORMAT8_LAYOUT: &[(usize, usize)] = &[
+    (2, 2), // sequence
+    (4, 4), // window
+    (8, 4), // type
+];
 
 // ---------------------------------------------------------------------------
 // XIM protocol major opcodes
@@ -158,24 +168,18 @@ pub(crate) fn handle_xim_xconnect(state: &mut ClientState, event: &[u8]) -> Vec<
     // data.l[3] = divide size (max client message data = 20 bytes)
     let xim_xconnect_atom = state.intern_atom("_XIM_XCONNECT", false);
 
-    let mut reply = [0u8; 32];
-    reply[0] = CLIENT_MESSAGE_EVENT | 0x80; // synthetic
-    reply[1] = 32; // format
-    state.write_u16(&mut reply, 2, state.sequence);
-    state.write_u32(&mut reply, 4, client_comm_window);
-    state.write_u32(&mut reply, 8, xim_xconnect_atom);
-    state.write_u32(&mut reply, 12, state.xim.window); // server comm window
-    state.write_u32(&mut reply, 16, 0); // major transport version
-    state.write_u32(&mut reply, 20, 0); // minor transport version
-    state.write_u32(&mut reply, 24, 20); // divide size
+    let reply = serialize_event(&ClientMessageEvent {
+        response_type: CLIENT_MESSAGE_EVENT | 0x80, // synthetic
+        format: 32,
+        sequence: state.sequence,
+        window: client_comm_window,
+        type_: xim_xconnect_atom,
+        // server comm window, major xport, minor xport, divide size, pad
+        data: [state.xim.window, 0, 0, 20, 0].into(),
+    }, state.msb_first);
 
-    // Route the reply to the client's communication window.
-    if !state
-        .event_router
-        .send_event(client_comm_window, reply.to_vec())
-    {
-        // Client window is on this connection -- deliver locally.
-        state.pending_events.push(reply.to_vec());
+    if !state.event_router.send_event(client_comm_window, reply.clone()) {
+        state.pending_events.push(reply);
     }
 
     Vec::new()
@@ -288,17 +292,22 @@ fn send_xim_reply_to(state: &mut ClientState, client_window: u32, reply_data: &[
 
     if reply_data.len() <= 20 {
         // Fits in a single client message (format 8).
-        let mut cm = [0u8; 32];
-        cm[0] = CLIENT_MESSAGE_EVENT | 0x80;
-        cm[1] = 8; // format 8
-        state.write_u16(&mut cm, 2, state.sequence);
-        state.write_u32(&mut cm, 4, client_window);
-        state.write_u32(&mut cm, 8, xim_protocol_atom);
-        let copy_len = reply_data.len().min(20);
-        cm[12..12 + copy_len].copy_from_slice(&reply_data[..copy_len]);
-
-        if !state.event_router.send_event(client_window, cm.to_vec()) {
-            state.pending_events.push(cm.to_vec());
+        let mut data = [0u8; 20];
+        data[..reply_data.len()].copy_from_slice(reply_data);
+        let cm = serialize_event_with_layout(
+            &ClientMessageEvent {
+                response_type: CLIENT_MESSAGE_EVENT | 0x80,
+                format: 8,
+                sequence: state.sequence,
+                window: client_window,
+                type_: xim_protocol_atom,
+                data: data.into(),
+            },
+            state.msb_first,
+            CLIENT_MESSAGE_FORMAT8_LAYOUT,
+        );
+        if !state.event_router.send_event(client_window, cm.clone()) {
+            state.pending_events.push(cm);
         }
     } else {
         // Large message: use the property-based XIM transport.
@@ -326,17 +335,19 @@ fn send_xim_reply_to(state: &mut ClientState, client_window: u32, reply_data: &[
         }
 
         // Send a format=32 ClientMessage pointing to the property.
-        let mut cm = [0u8; 32];
-        cm[0] = CLIENT_MESSAGE_EVENT | 0x80;
-        cm[1] = 32; // format 32
-        state.write_u16(&mut cm, 2, state.sequence);
-        state.write_u32(&mut cm, 4, client_window);
-        state.write_u32(&mut cm, 8, xim_protocol_atom);
-        state.write_u32(&mut cm, 12, reply_data.len() as u32); // data.l[0] = length
-        state.write_u32(&mut cm, 16, prop_atom); // data.l[1] = property atom
-
-        if !state.event_router.send_event(client_window, cm.to_vec()) {
-            state.pending_events.push(cm.to_vec());
+        let cm = serialize_event(
+            &ClientMessageEvent {
+                response_type: CLIENT_MESSAGE_EVENT | 0x80,
+                format: 32,
+                sequence: state.sequence,
+                window: client_window,
+                type_: xim_protocol_atom,
+                data: [reply_data.len() as u32, prop_atom, 0, 0, 0].into(),
+            },
+            state.msb_first,
+        );
+        if !state.event_router.send_event(client_window, cm.clone()) {
+            state.pending_events.push(cm);
         }
     }
 }
@@ -366,22 +377,29 @@ fn handle_xim_connect(state: &mut ClientState, _data: &[u8]) -> Vec<u8> {
 
     // We don't have an im_id yet (that comes with XIM_OPEN), so send to
     // all pending events for the current client.
-    let xim_protocol_atom = state.intern_atom("_XIM_PROTOCOL", false);
-    let mut cm = [0u8; 32];
-    cm[0] = CLIENT_MESSAGE_EVENT | 0x80;
-    cm[1] = 8;
-    state.write_u16(&mut cm, 2, state.sequence);
     // We need to figure out the client window. For XIM_CONNECT, we don't
     // have a registered connection yet. The client sent the message to our
     // XIM window, and we need to reply to *their* window. The client window
     // was communicated in the _XIM_XCONNECT handshake.
     // For now, push to pending_events (the client is on this connection).
-    state.write_u32(&mut cm, 4, 0); // will be overwritten below
-    state.write_u32(&mut cm, 8, xim_protocol_atom);
-    cm[12..12 + reply.len()].copy_from_slice(&reply);
+    let xim_protocol_atom = state.intern_atom("_XIM_PROTOCOL", false);
+    let mut data = [0u8; 20];
+    data[..reply.len()].copy_from_slice(&reply);
+    let cm = serialize_event_with_layout(
+        &ClientMessageEvent {
+            response_type: CLIENT_MESSAGE_EVENT | 0x80,
+            format: 8,
+            sequence: state.sequence,
+            window: 0, // overwritten by event router
+            type_: xim_protocol_atom,
+            data: data.into(),
+        },
+        state.msb_first,
+        CLIENT_MESSAGE_FORMAT8_LAYOUT,
+    );
 
     // Push directly to pending events -- the reply goes to the same connection.
-    state.pending_events.push(cm.to_vec());
+    state.pending_events.push(cm);
 
     Vec::new()
 }

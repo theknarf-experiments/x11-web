@@ -5,6 +5,7 @@ use super::parse_minor;
 
 use super::super::client::ClientState;
 use super::super::types::PresentSubscription;
+use crate::xserver::event::serialize_event_with_layout;
 use crate::xserver::reply::ReplyBuf;
 use crate::xserver::request::request_header;
 use x11rb_protocol::protocol::present::{
@@ -13,7 +14,6 @@ use x11rb_protocol::protocol::present::{
     QueryCapabilitiesRequest, SelectInputRequest as PresentSelectInputRequest,
 };
 use x11rb_protocol::protocol::xc_misc::GetXIDListRequest;
-use x11rb_protocol::x11_utils::Serialize;
 
 /// Present major opcode (assigned at QueryExtension time).
 const PRESENT_MAJOR_OPCODE: u8 = 148;
@@ -31,27 +31,6 @@ const PRESENT_OPTION_COPY: u32 = 2;
 
 // Present capability flags.
 const PRESENT_CAPABILITY_ASYNC: u32 = 1;
-
-/// Serialize a Present XGE event and apply MSB byteswapping per its layout.
-///
-/// x11rb serializes in native (little) endian; for MSB clients we walk
-/// the field map and byte-reverse each entry. Each `(offset, size)` pair
-/// describes a multi-byte wire field. For the X11 CARD64 wire format
-/// (two CARD32 words, low first), pass two consecutive 4-byte entries.
-fn serialize_present_event<E: Serialize>(
-    event: &E,
-    msb_first: bool,
-    field_layout: &[(usize, usize)],
-) -> Vec<u8> {
-    let mut buf = Vec::new();
-    event.serialize_into(&mut buf);
-    if msb_first {
-        for &(off, sz) in field_layout {
-            buf[off..off + sz].reverse();
-        }
-    }
-    buf
-}
 
 /// Wire-field layout for `present::CompleteNotifyEvent` (40 bytes).
 const COMPLETE_NOTIFY_LAYOUT: &[(usize, usize)] = &[
@@ -522,7 +501,7 @@ pub(crate) fn handle_present_request(state: &mut ClientState, data: &[u8], seq: 
                     ust,
                     msc,
                 };
-                state.pending_events.push(serialize_present_event(
+                state.pending_events.push(serialize_event_with_layout(
                     &ev, state.msb_first, COMPLETE_NOTIFY_LAYOUT,
                 ));
             }
@@ -553,7 +532,7 @@ pub(crate) fn handle_present_request(state: &mut ClientState, data: &[u8], seq: 
                         pixmap,
                         idle_fence,
                     };
-                    state.pending_events.push(serialize_present_event(
+                    state.pending_events.push(serialize_event_with_layout(
                         &ev, state.msb_first, IDLE_NOTIFY_LAYOUT,
                     ));
                 }
@@ -605,7 +584,7 @@ pub(crate) fn handle_present_request(state: &mut ClientState, data: &[u8], seq: 
                     ust,
                     msc,
                 };
-                state.pending_events.push(serialize_present_event(
+                state.pending_events.push(serialize_event_with_layout(
                     &ev, state.msb_first, COMPLETE_NOTIFY_LAYOUT,
                 ));
             }
@@ -698,7 +677,7 @@ pub(crate) fn send_present_config_notify(
             pixmap_height,
             pixmap_flags,
         };
-        state.pending_events.push(serialize_present_event(
+        state.pending_events.push(serialize_event_with_layout(
             &ev, state.msb_first, CONFIGURE_NOTIFY_LAYOUT,
         ));
     }

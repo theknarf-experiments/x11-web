@@ -16,7 +16,7 @@ pub(crate) fn create_alarm(state: &mut ClientState, data: &[u8], seq: u16) -> Ve
     let alarm_id = req.id;
     let vl = &*req.value_list;
 
-    let mut alarm = SyncAlarm {
+    let alarm = SyncAlarm {
         counter: vl.counter.unwrap_or(0),
         value_type: vl.value_type.map(|v| u32::from(v) as u8).unwrap_or(0), // Absolute
         value_hi: vl.value.map(|v| v.hi).unwrap_or(0),
@@ -27,16 +27,6 @@ pub(crate) fn create_alarm(state: &mut ClientState, data: &[u8], seq: u16) -> Ve
         events: vl.events.map(|v| v != 0).unwrap_or(true),
         state: 0, // Active
     };
-
-    // If delta is present, both hi and lo come from it; if not, defaults are (0, 1).
-    // But if only delta is set, the above handles it correctly already.
-    // If delta is not in the value_list at all, keep defaults (0, 1).
-    if vl.delta.is_some() {
-        // delta was explicitly provided, values already set above
-    } else {
-        alarm.delta_hi = 0;
-        alarm.delta_lo = 1;
-    }
 
     debug!(
         "SYNC CreateAlarm: id={alarm_id:#x} counter={:#x} test_type={} events={}",

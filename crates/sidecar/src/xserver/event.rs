@@ -38,6 +38,33 @@ pub(crate) fn serialize_event<E: Serialize>(event: &E, msb_first: bool) -> Vec<u
     bytes
 }
 
+/// Serialize an event using a wire-field layout for byteswapping.
+///
+/// Use this for events where the default `serialize_event` byteswap (which
+/// assumes u32 alignment from byte 4) would corrupt mixed-width fields like
+/// CARD16/INT16 or raw byte payloads (XKB events, ClientMessage format=8/16,
+/// XGE events). Each `(offset, size)` pair describes a multi-byte wire field;
+/// for 64-bit values, pass two consecutive 4-byte entries (low first).
+///
+/// The output buffer is padded to at least 32 bytes for core X11 events.
+pub(crate) fn serialize_event_with_layout<E: Serialize>(
+    event: &E,
+    msb_first: bool,
+    field_layout: &[(usize, usize)],
+) -> Vec<u8> {
+    let mut buf = Vec::new();
+    event.serialize_into(&mut buf);
+    if buf.len() < 32 {
+        buf.resize(32, 0);
+    }
+    if msb_first {
+        for &(off, sz) in field_layout {
+            buf[off..off + sz].reverse();
+        }
+    }
+    buf
+}
+
 /// Byte-swap a 32-byte X11 event for MSB-first clients.
 ///
 /// X11 events have a known field layout: the first byte is the event type,
