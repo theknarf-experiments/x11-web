@@ -90,7 +90,10 @@ macro_rules! require_len {
 }
 pub(crate) use require_len;
 
-/// Build an X11 error reply (32 bytes) in little-endian byte order.
+/// Build an X11 error reply (32 bytes) in canonical little-endian byte
+/// order. The connection write loop calls [`byteswap_error_in_place`] on
+/// the response before sending if the client negotiated MSB-first byte
+/// order, so handlers don't need to know the client's byte order.
 pub(crate) fn build_error(
     error_code: u8,
     seq: u16,
@@ -98,39 +101,42 @@ pub(crate) fn build_error(
     major_opcode: u8,
     minor_opcode: u16,
 ) -> Vec<u8> {
-    build_error_bo(
-        error_code,
-        seq,
-        bad_value,
-        major_opcode,
-        minor_opcode,
-        false,
-    )
+    let mut err = [0u8; 32];
+    err[0] = 0; // Error indicator
+    err[1] = error_code;
+    err[2..4].copy_from_slice(&seq.to_le_bytes());
+    err[4..8].copy_from_slice(&bad_value.to_le_bytes());
+    err[8..10].copy_from_slice(&minor_opcode.to_le_bytes());
+    err[10] = major_opcode;
+    err.to_vec()
 }
 
-/// Build an X11 error reply (32 bytes) with specified byte order.
+/// Backward-compatible alias — historically callers passed an explicit
+/// byte order, but errors are always built in LE and swapped at the
+/// write point. The `_msb_first` argument is intentionally ignored.
+#[inline]
 pub(crate) fn build_error_bo(
     error_code: u8,
     seq: u16,
     bad_value: u32,
     major_opcode: u8,
     minor_opcode: u16,
-    msb_first: bool,
+    _msb_first: bool,
 ) -> Vec<u8> {
-    let mut err = [0u8; 32];
-    err[0] = 0; // Error indicator
-    err[1] = error_code;
-    if msb_first {
-        err[2..4].copy_from_slice(&seq.to_be_bytes());
-        err[4..8].copy_from_slice(&bad_value.to_be_bytes());
-        err[8..10].copy_from_slice(&minor_opcode.to_be_bytes());
-    } else {
-        err[2..4].copy_from_slice(&seq.to_le_bytes());
-        err[4..8].copy_from_slice(&bad_value.to_le_bytes());
-        err[8..10].copy_from_slice(&minor_opcode.to_le_bytes());
+    build_error(error_code, seq, bad_value, major_opcode, minor_opcode)
+}
+
+/// Convert an LE-formatted X11 error reply (built by [`build_error`])
+/// into MSB-first byte order in place. Safe to call on a 32-byte error
+/// buffer; field offsets follow the X11 wire format (seq @ 2..4,
+/// bad_value @ 4..8, minor_opcode @ 8..10).
+pub(crate) fn byteswap_error_in_place(err: &mut [u8]) {
+    if err.len() < 32 || err[0] != 0 {
+        return;
     }
-    err[10] = major_opcode;
-    err.to_vec()
+    err[2..4].reverse();
+    err[4..8].reverse();
+    err[8..10].reverse();
 }
 
 /// Helper to read a u16 from a buffer in the specified byte order.

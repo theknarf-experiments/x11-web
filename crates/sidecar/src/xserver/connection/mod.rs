@@ -984,7 +984,10 @@ pub(crate) async fn handle_client(
                         // Reject if the client hasn't enabled BIG-REQUESTS.
                         if !state.big_requests_enabled {
                             state.sequence = state.sequence.wrapping_add(1);
-                            let err = build_error_bo(LENGTH_ERROR, state.sequence, 0, pending[0], 0, state.msb_first);
+                            let mut err = build_error_bo(LENGTH_ERROR, state.sequence, 0, pending[0], 0, state.msb_first);
+                            if state.msb_first {
+                                super::core::byteswap_error_in_place(&mut err);
+                            }
                             stream.write_all(&err).await?;
                             // Skip the 4-byte header we already peeked at.
                             pending.drain(..4);
@@ -1008,9 +1011,34 @@ pub(crate) async fn handle_client(
                         if pending.len() < big_bytes {
                             break;
                         }
-                        let request_data: Vec<u8> = pending.drain(..big_bytes).collect();
+                        let raw: Vec<u8> = pending.drain(..big_bytes).collect();
                         state.sequence = state.sequence.wrapping_add(1);
-                        let response = handle_request(&mut state, &request_data);
+                        // BIG-REQUESTS layout: opcode(1), data(1), 0(2),
+                        // big_length(4), body. Convert to standard layout
+                        // by removing the 4-byte big_length and patching
+                        // the length field to big_len if it fits in u16,
+                        // else 0 (handler should treat as oversized).
+                        let mut request_data = Vec::with_capacity(raw.len() - 4);
+                        request_data.extend_from_slice(&raw[..2]);
+                        let len_words = (raw.len() - 4) / 4;
+                        let len_field: u16 = if len_words <= u16::MAX as usize {
+                            len_words as u16
+                        } else {
+                            0
+                        };
+                        request_data.extend_from_slice(&len_field.to_le_bytes());
+                        request_data.extend_from_slice(&raw[8..]);
+                        // MSB-first clients send multi-byte fields in
+                        // big-endian; our handlers expect LE.
+                        if state.msb_first {
+                            super::byteswap::byteswap_request_in_place(&mut request_data);
+                        }
+                        let mut response = handle_request(&mut state, &request_data);
+                        // Errors are built in canonical LE; swap into MSB
+                        // for clients that negotiated big-endian byte order.
+                        if state.msb_first && !response.is_empty() && response[0] == 0 {
+                            super::core::byteswap_error_in_place(&mut response);
+                        }
                         // Publish state mutations to the shared registry BEFORE
                         // sending the reply, so peers waiting on this reply
                         // (which can immediately race in with their own
@@ -1026,13 +1054,24 @@ pub(crate) async fn handle_client(
                         break;
                     }
 
-                    let request_data: Vec<u8> = pending.drain(..req_len_bytes).collect();
+                    let mut request_data: Vec<u8> = pending.drain(..req_len_bytes).collect();
                     state.sequence = state.sequence.wrapping_add(1);
+
+                    // MSB-first clients send multi-byte fields in big-endian;
+                    // our handlers (and x11rb_protocol parsers) expect LE.
+                    if state.msb_first {
+                        super::byteswap::byteswap_request_in_place(&mut request_data);
+                    }
 
                     // RECORD: intercept request from this client
                     state.record_intercept_request(&request_data);
 
-                    let response = handle_request(&mut state, &request_data);
+                    let mut response = handle_request(&mut state, &request_data);
+                    // Errors are built in canonical LE; swap into MSB for
+                    // clients that negotiated big-endian byte order.
+                    if state.msb_first && !response.is_empty() && response[0] == 0 {
+                        super::core::byteswap_error_in_place(&mut response);
+                    }
                     // Publish state mutations to the shared registry BEFORE
                     // sending the reply. Without this, a peer waiting on this
                     // reply (e.g., python-xlib's GetInputFocus inside

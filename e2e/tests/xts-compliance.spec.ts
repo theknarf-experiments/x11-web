@@ -2069,14 +2069,11 @@ test.describe("XTS X Test Suite", () => {
 	});
 });
 
-// XTS TET-based protocol conformance is a comprehensive third-party
-// X11 conformance suite (~1000 binaries across 17 categories). It
-// exercises corner cases of the wire protocol that go far beyond what
-// a typical desktop client requires, and our server is a partial
-// implementation by design — getting these to 98% would be weeks of
-// focused work per category, not in scope for the e2e harness. Skip
-// the whole block until/unless it becomes a maintained workstream.
-test.describe.skip("XTS TET-based protocol conformance", () => {
+// XTS TET-based protocol conformance is the upstream X.Org conformance
+// suite (~1000 binaries across 17 categories). The goal is to drive
+// these to passing — they are the source of truth for X11 wire-protocol
+// correctness. Failures here are tracked as real X server bugs.
+test.describe("XTS TET-based protocol conformance", () => {
 	// Discover all XTS binaries available in the container
 	test("XTS: discover available test binaries", async ({ sidecarContainer }) => {
 		test.setTimeout(60_000);

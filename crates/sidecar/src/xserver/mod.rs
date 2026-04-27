@@ -4,6 +4,7 @@
 //! translates X11 protocol requests into DisplayUpdate messages for the frontend.
 
 pub(crate) mod atoms;
+pub(crate) mod byteswap;
 pub(crate) mod client;
 pub(crate) mod connection;
 #[allow(dead_code)]
