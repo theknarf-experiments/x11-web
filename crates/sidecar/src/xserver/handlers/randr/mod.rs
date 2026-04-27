@@ -7,9 +7,8 @@ mod screen;
 use tracing::{debug, info};
 
 use super::super::client::ClientState;
-use crate::xserver::core::require_len;
+use super::parse_minor;
 use crate::xserver::reply::ReplyBuf;
-use crate::xserver::request::request_header;
 
 pub(crate) fn handle_randr_request(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
     let minor = data[1];
@@ -30,14 +29,8 @@ pub(crate) fn handle_randr_request(state: &mut ClientState, data: &[u8], seq: u1
         // RRSetScreenConfig (2) — legacy screen configuration
         // ---------------------------------------------------------------
         2 => {
-            require_len!(data, 24, seq, 140, 2, state.msb_first);
             use x11rb_protocol::protocol::randr::SetScreenConfigRequest;
-            let req = match SetScreenConfigRequest::try_parse_request(request_header(data), &data[4..]) {
-                Ok(r) => r,
-                Err(_) => return crate::xserver::core::build_error_bo(
-                    crate::xserver::core::LENGTH_ERROR, seq, 0, 140, 2, state.msb_first,
-                ),
-            };
+            let req = parse_minor!(SetScreenConfigRequest, data, state, seq, 140, 2);
             let config_timestamp = req.config_timestamp;
 
             // Check config timestamp — if it doesn't match, reply InvalidConfigTime
