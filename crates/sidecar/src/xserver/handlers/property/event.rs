@@ -3,7 +3,7 @@
 use super::*;
 use crate::xserver::event::serialize_event;
 use x11rb_protocol::protocol::xproto::{
-    ConfigureNotifyEvent, ExposeEvent, PropertyNotifyEvent, SendEventRequest,
+    ClientMessageEvent, ConfigureNotifyEvent, ExposeEvent, PropertyNotifyEvent, SendEventRequest,
 };
 
 // ---------------------------------------------------------------------------
@@ -470,18 +470,15 @@ pub(crate) fn handle_send_event(state: &mut ClientState, req: &SendEventRequest)
                 let wm_protocols_atom = state.intern_atom("WM_PROTOCOLS", false);
                 let wm_delete_atom = state.intern_atom("WM_DELETE_WINDOW", false);
                 if state.window_supports_protocol(source_window, wm_delete_atom) {
-                    // ClientMessage has format-dependent payloads — keep as raw bytes
-                    let bo = state.msb_first;
-                    let mut cm = [0u8; 32];
-                    cm[0] = CLIENT_MESSAGE_EVENT;
-                    cm[1] = 32;
-                    state.write_u16(&mut cm, 2, state.sequence);
-                    state.write_u32(&mut cm, 4, source_window);
-                    state.write_u32(&mut cm, 8, wm_protocols_atom);
-                    state.write_u32(&mut cm, 12, wm_delete_atom);
-                    state.write_u32(&mut cm, 16, state.timestamp());
-                    let _ = bo; // byte order already used by write_u32
-                    state.pending_events.push(cm.to_vec());
+                    let cm = serialize_event(&ClientMessageEvent {
+                        response_type: CLIENT_MESSAGE_EVENT,
+                        format: 32,
+                        sequence: state.sequence,
+                        window: source_window,
+                        type_: wm_protocols_atom,
+                        data: [wm_delete_atom, state.timestamp(), 0, 0, 0].into(),
+                    }, state.msb_first);
+                    state.pending_events.push(cm);
                 }
                 return Vec::new();
             }
@@ -762,31 +759,20 @@ pub(crate) fn handle_send_event(state: &mut ClientState, req: &SendEventRequest)
                         }
                     }
 
-                    // Send XEMBED_EMBEDDED_NOTIFY to the icon window
-                    // XEmbed message format: ClientMessage with _XEMBED type
-                    // data[0] = timestamp, data[1] = XEMBED_EMBEDDED_NOTIFY (0),
-                    // data[2] = embedder window
-                    // ClientMessage has format-dependent payloads — keep as raw bytes
+                    // Send XEMBED_EMBEDDED_NOTIFY to the icon window via _XEMBED ClientMessage.
                     let xembed_atom = state.intern_atom("_XEMBED", false);
                     let timestamp = state.timestamp();
-                    let mut xembed_event = [0u8; 32];
-                    xembed_event[0] = CLIENT_MESSAGE_EVENT;
-                    xembed_event[1] = 32; // format
-                    state.write_u32(&mut xembed_event, 4, icon_window);
-                    state.write_u32(&mut xembed_event, 8, xembed_atom);
-                    state.write_u32(&mut xembed_event, 12, timestamp);
-                    state.write_u32(&mut xembed_event, 16, 0); // XEMBED_EMBEDDED_NOTIFY
-                    state.write_u32(
-                        &mut xembed_event,
-                        20,
-                        crate::xserver::types::SYSTEM_TRAY_WINDOW,
-                    );
+                    let xembed_event = serialize_event(&ClientMessageEvent {
+                        response_type: CLIENT_MESSAGE_EVENT,
+                        format: 32,
+                        sequence: 0,
+                        window: icon_window,
+                        type_: xembed_atom,
+                        data: [timestamp, 0 /* XEMBED_EMBEDDED_NOTIFY */, crate::xserver::types::SYSTEM_TRAY_WINDOW, 0, 0].into(),
+                    }, state.msb_first);
 
-                    if !state
-                        .event_router
-                        .send_event(icon_window, xembed_event.to_vec())
-                    {
-                        state.pending_events.push(xembed_event.to_vec());
+                    if !state.event_router.send_event(icon_window, xembed_event.clone()) {
+                        state.pending_events.push(xembed_event);
                     }
                 }
                 return Vec::new();
@@ -842,19 +828,18 @@ pub(crate) fn handle_send_event(state: &mut ClientState, req: &SendEventRequest)
                     XEMBED_REQUEST_FOCUS => {
                         debug!("XEMBED_REQUEST_FOCUS: target={target:#x}");
                         // An embedded window requests focus. Send XEMBED_FOCUS_IN back.
-                        // ClientMessage has format-dependent payloads — keep as raw bytes
                         let reply_xembed_atom = state.intern_atom("_XEMBED", false);
                         let ts = state.timestamp();
-                        let mut focus_event = [0u8; 32];
-                        focus_event[0] = CLIENT_MESSAGE_EVENT;
-                        focus_event[1] = 32;
-                        state.write_u32(&mut focus_event, 4, target);
-                        state.write_u32(&mut focus_event, 8, reply_xembed_atom);
-                        state.write_u32(&mut focus_event, 12, ts);
-                        state.write_u32(&mut focus_event, 16, XEMBED_FOCUS_IN);
-                        state.write_u32(&mut focus_event, 20, 1); // XEMBED_FOCUS_CURRENT
-                        if !state.event_router.send_event(target, focus_event.to_vec()) {
-                            state.pending_events.push(focus_event.to_vec());
+                        let focus_event = serialize_event(&ClientMessageEvent {
+                            response_type: CLIENT_MESSAGE_EVENT,
+                            format: 32,
+                            sequence: 0,
+                            window: target,
+                            type_: reply_xembed_atom,
+                            data: [ts, XEMBED_FOCUS_IN, 1 /* XEMBED_FOCUS_CURRENT */, 0, 0].into(),
+                        }, state.msb_first);
+                        if !state.event_router.send_event(target, focus_event.clone()) {
+                            state.pending_events.push(focus_event);
                         }
                     }
                     XEMBED_FOCUS_IN => {
