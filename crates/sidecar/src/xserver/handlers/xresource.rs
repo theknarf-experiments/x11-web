@@ -146,9 +146,9 @@ pub(crate) fn handle_xresource_request(state: &mut ClientState, data: &[u8], seq
         // 4: QueryClientIds (XRes 1.2) — return client IDs with their types
         4 => {
             use x11rb_protocol::protocol::res::QueryClientIdsRequest;
-            let req = match QueryClientIdsRequest::try_parse_request(request_header(data), &data[4..]) {
-                Ok(r) => r,
-                Err(_) => return build_error_bo(REQUEST_ERROR, seq, 0, XRES_MAJOR_OPCODE, minor as u16, bo),
+            let Ok(req) = QueryClientIdsRequest::try_parse_request(request_header(data), &data[4..])
+            else {
+                return build_error_bo(REQUEST_ERROR, seq, 0, XRES_MAJOR_OPCODE, minor as u16, bo);
             };
 
             // Collect client IDs from the request specs
@@ -214,9 +214,9 @@ pub(crate) fn handle_xresource_request(state: &mut ClientState, data: &[u8], seq
         // 5: QueryResourceBytes (XRes 1.2) — total bytes used by resource types
         5 => {
             use x11rb_protocol::protocol::res::QueryResourceBytesRequest;
-            let req = match QueryResourceBytesRequest::try_parse_request(request_header(data), &data[4..]) {
-                Ok(r) => r,
-                Err(_) => return build_error_bo(REQUEST_ERROR, seq, 0, XRES_MAJOR_OPCODE, minor as u16, bo),
+            let Ok(req) = QueryResourceBytesRequest::try_parse_request(request_header(data), &data[4..])
+            else {
+                return build_error_bo(REQUEST_ERROR, seq, 0, XRES_MAJOR_OPCODE, minor as u16, bo);
             };
             let _client_xid = req.client;
             let num_specs = req.specs.len();

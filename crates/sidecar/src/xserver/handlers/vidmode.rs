@@ -206,19 +206,11 @@ pub(crate) fn handle_vidmode_request(state: &mut ClientState, data: &[u8], seq: 
         16 => {
             // GetGammaRamp
             // x11rb uses minor opcode 17 for GetGammaRamp; override header.
-            let req = match GetGammaRampRequest::try_parse_request(
+            let req = GetGammaRampRequest::try_parse_request(
                 vidmode_header(data, 17),
                 &data[4..],
-            ) {
-                Ok(r) => r,
-                Err(_) => {
-                    // Fallback to default size if parsing fails
-                    GetGammaRampRequest {
-                        screen: 0,
-                        size: 256,
-                    }
-                }
-            };
+            )
+            .unwrap_or(GetGammaRampRequest { screen: 0, size: 256 });
             let size = req.size as usize;
             let ramp_bytes = size * 2; // each value is u16
             let padded = (ramp_bytes + 3) & !3;
