@@ -536,23 +536,9 @@ pub(crate) fn handle_query_pict_index_values(
     data: &[u8],
     seq: u16,
 ) -> Vec<u8> {
-    let bo = state.msb_first;
-    require_len!(data, 8, seq, 139, data[1] as u16, bo);
-
-    // Parse with x11rb (primarily for validation)
-    if QueryPictIndexValuesRequest::try_parse_request(request_header(data), &data[4..]).is_err() {
-        return crate::xserver::core::build_error_bo(
-            crate::xserver::core::LENGTH_ERROR,
-            seq,
-            0,
-            139,
-            data[1] as u16,
-            bo,
-        );
-    }
-
+    let _req = parse_minor!(QueryPictIndexValuesRequest, data, state, seq, 139, data[1] as u16);
     // Reply with 0 index values (we don't have indexed formats)
-    ReplyBuf::fixed(seq, bo)
+    ReplyBuf::fixed(seq, state.msb_first)
         .set_u32(8, 0) // num_values = 0
         .build()
 }
