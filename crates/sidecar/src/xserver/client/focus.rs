@@ -149,11 +149,7 @@ impl ClientState {
 
     /// Helper to send a single focus event if the window has FocusChangeMask selected.
     fn send_focus_event(&mut self, event_type: u8, detail: u8, window: u32, bo: bool, seq: u16) {
-        let has_mask = self
-            .windows
-            .get(&window)
-            .is_some_and(|w| w.event_mask & EventMask::FOCUS_CHANGE != EventMask::NO_EVENT);
-        if has_mask || window == self.root_window {
+        if self.window_selects(window, EventMask::FOCUS_CHANGE) || window == self.root_window {
             let event = serialize_event(
                 &FocusInEvent {
                     response_type: event_type,

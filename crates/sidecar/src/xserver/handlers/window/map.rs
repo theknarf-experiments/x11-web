@@ -284,10 +284,8 @@ pub(crate) fn handle_map_window(state: &mut ClientState, req: &MapWindowRequest)
             }, msb_first);
 
             // Local delivery
-            if let Some(parent_win) = state.windows.get(&parent_id) {
-                if parent_win.event_mask & EventMask::SUBSTRUCTURE_NOTIFY != EventMask::NO_EVENT {
-                    state.pending_events.push(parent_event.to_vec());
-                }
+            if state.window_selects(parent_id, EventMask::SUBSTRUCTURE_NOTIFY) {
+                state.pending_events.push(parent_event.to_vec());
             }
 
             // Cross-connection broadcast to other clients watching this parent

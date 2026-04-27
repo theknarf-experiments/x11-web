@@ -646,7 +646,6 @@ pub(crate) fn handle_send_event(state: &mut ClientState, req: &SendEventRequest)
                     }
                     // Generate PropertyNotify for the state change
                     {
-                        let pcm: u32 = 0x0040_0000;
                         let pn = serialize_event(&PropertyNotifyEvent {
                             response_type: PROPERTY_NOTIFY_EVENT,
                             sequence: state.sequence,
@@ -655,14 +654,10 @@ pub(crate) fn handle_send_event(state: &mut ClientState, req: &SendEventRequest)
                             time: state.timestamp(),
                             state: 0u8.into(), // NewValue
                         }, state.msb_first);
-                        if state
-                            .windows
-                            .get(&source_window)
-                            .is_some_and(|w| w.event_mask & pcm != 0)
-                        {
+                        if state.window_selects(source_window, EventMask::PROPERTY_CHANGE) {
                             state.pending_events.push(pn.clone());
                         }
-                        state.broadcast_event(source_window, pcm, &pn);
+                        state.broadcast_event(source_window, u32::from(EventMask::PROPERTY_CHANGE), &pn);
                     }
                     if let Some(uuid) = state.window_uuid(source_window) {
                         let _ = state.update_tx.send((
@@ -691,7 +686,6 @@ pub(crate) fn handle_send_event(state: &mut ClientState, req: &SendEventRequest)
                     }
                     // Generate PropertyNotify for the state change
                     {
-                        let pcm: u32 = 0x0040_0000;
                         let pn = serialize_event(&PropertyNotifyEvent {
                             response_type: PROPERTY_NOTIFY_EVENT,
                             sequence: state.sequence,
@@ -700,14 +694,10 @@ pub(crate) fn handle_send_event(state: &mut ClientState, req: &SendEventRequest)
                             time: state.timestamp(),
                             state: 0u8.into(), // NewValue
                         }, state.msb_first);
-                        if state
-                            .windows
-                            .get(&source_window)
-                            .is_some_and(|w| w.event_mask & pcm != 0)
-                        {
+                        if state.window_selects(source_window, EventMask::PROPERTY_CHANGE) {
                             state.pending_events.push(pn.clone());
                         }
-                        state.broadcast_event(source_window, pcm, &pn);
+                        state.broadcast_event(source_window, u32::from(EventMask::PROPERTY_CHANGE), &pn);
                     }
                     if let Some(uuid) = state.window_uuid(source_window) {
                         let _ = state.update_tx.send((
