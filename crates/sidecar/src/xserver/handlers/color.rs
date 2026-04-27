@@ -1,22 +1,20 @@
 //! Color/colormap and cursor handlers (opcodes 78-96).
 
 use super::*;
-use crate::xserver::core::require_len;
 use crate::xserver::reply::ReplyBuf;
-use crate::xserver::request::request_header;
+use x11rb_protocol::protocol::xproto::{
+    AllocColorCellsRequest, AllocColorPlanesRequest, AllocColorRequest, AllocNamedColorRequest,
+    CopyColormapAndFreeRequest, CreateColormapRequest, CreateCursorRequest,
+    CreateGlyphCursorRequest, FreeColormapRequest, FreeColorsRequest, FreeCursorRequest,
+    InstallColormapRequest, ListInstalledColormapsRequest, LookupColorRequest, QueryColorsRequest,
+    RecolorCursorRequest, StoreColorsRequest, StoreNamedColorRequest, UninstallColormapRequest,
+};
 
 // ---------------------------------------------------------------------------
 // Opcode 78: CreateColormap
 // ---------------------------------------------------------------------------
 
-pub(crate) fn handle_create_colormap(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
-    require_len!(data, 16, state.sequence, 78);
-
-    use x11rb_protocol::protocol::xproto::CreateColormapRequest;
-    let req = match CreateColormapRequest::try_parse_request(request_header(data), &data[4..]) {
-        Ok(r) => r,
-        Err(_) => return build_error(LENGTH_ERROR, state.sequence, 0, 78, 0),
-    };
+pub(crate) fn handle_create_colormap(state: &mut ClientState, req: &CreateColormapRequest) -> Vec<u8> {
     let _alloc = u8::from(req.alloc);
     let mid = req.mid;
 
@@ -72,14 +70,7 @@ pub(crate) fn handle_create_colormap(state: &mut ClientState, data: &[u8]) -> Ve
 // Opcode 79: FreeColormap
 // ---------------------------------------------------------------------------
 
-pub(crate) fn handle_free_colormap(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
-    require_len!(data, 8, state.sequence, 79);
-
-    use x11rb_protocol::protocol::xproto::FreeColormapRequest;
-    let req = match FreeColormapRequest::try_parse_request(request_header(data), &data[4..]) {
-        Ok(r) => r,
-        Err(_) => return build_error(LENGTH_ERROR, state.sequence, 0, 79, 0),
-    };
+pub(crate) fn handle_free_colormap(state: &mut ClientState, req: &FreeColormapRequest) -> Vec<u8> {
     let mid = req.cmap;
     // Validate colormap exists (not the default, which cannot be freed)
     if mid != ROOT_COLORMAP && !state.colormaps.contains_key(&mid) {
@@ -98,16 +89,9 @@ pub(crate) fn handle_free_colormap(state: &mut ClientState, data: &[u8]) -> Vec<
 
 pub(crate) fn handle_copy_colormap_and_free(
     state: &mut ClientState,
-    data: &[u8],
-    _seq: u16,
+    req: &CopyColormapAndFreeRequest,
 ) -> Vec<u8> {
-    require_len!(data, 12, _seq, 80);
-
-    use x11rb_protocol::protocol::xproto::CopyColormapAndFreeRequest;
-    let req = match CopyColormapAndFreeRequest::try_parse_request(request_header(data), &data[4..]) {
-        Ok(r) => r,
-        Err(_) => return build_error(LENGTH_ERROR, _seq, 0, 80, 0),
-    };
+    let _seq = state.sequence;
     let mid = req.mid;
     let src = req.src_cmap;
     // Validate source colormap exists
@@ -135,14 +119,7 @@ pub(crate) fn handle_copy_colormap_and_free(
 // Opcode 81: InstallColormap
 // ---------------------------------------------------------------------------
 
-pub(crate) fn handle_install_colormap(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
-    require_len!(data, 8, state.sequence, 81);
-
-    use x11rb_protocol::protocol::xproto::InstallColormapRequest;
-    let req = match InstallColormapRequest::try_parse_request(request_header(data), &data[4..]) {
-        Ok(r) => r,
-        Err(_) => return build_error(LENGTH_ERROR, state.sequence, 0, 81, 0),
-    };
+pub(crate) fn handle_install_colormap(state: &mut ClientState, req: &InstallColormapRequest) -> Vec<u8> {
     let mid = req.cmap;
     // Validate colormap exists
     if mid != ROOT_COLORMAP && !state.colormaps.contains_key(&mid) {
@@ -181,14 +158,7 @@ pub(crate) fn handle_install_colormap(state: &mut ClientState, data: &[u8]) -> V
 // Opcode 82: UninstallColormap
 // ---------------------------------------------------------------------------
 
-pub(crate) fn handle_uninstall_colormap(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
-    require_len!(data, 8, state.sequence, 82);
-
-    use x11rb_protocol::protocol::xproto::UninstallColormapRequest;
-    let req = match UninstallColormapRequest::try_parse_request(request_header(data), &data[4..]) {
-        Ok(r) => r,
-        Err(_) => return build_error(LENGTH_ERROR, state.sequence, 0, 82, 0),
-    };
+pub(crate) fn handle_uninstall_colormap(state: &mut ClientState, req: &UninstallColormapRequest) -> Vec<u8> {
     let mid = req.cmap;
     // Validate colormap exists
     if mid != ROOT_COLORMAP && !state.colormaps.contains_key(&mid) {
@@ -248,12 +218,8 @@ pub(crate) fn handle_uninstall_colormap(state: &mut ClientState, data: &[u8]) ->
 // Opcode 83: ListInstalledColormaps
 // ---------------------------------------------------------------------------
 
-pub(crate) fn handle_list_installed_colormaps(state: &ClientState, data: &[u8], seq: u16) -> Vec<u8> {
-    use x11rb_protocol::protocol::xproto::ListInstalledColormapsRequest;
-    let _req = match ListInstalledColormapsRequest::try_parse_request(request_header(data), &data[4..]) {
-        Ok(r) => r,
-        Err(_) => return build_error(LENGTH_ERROR, seq, 0, 83, 0),
-    };
+pub(crate) fn handle_list_installed_colormaps(state: &ClientState, _req: &ListInstalledColormapsRequest) -> Vec<u8> {
+    let seq = state.sequence;
     // _req.window is available but currently unused — we return all installed colormaps.
     // Return only colormaps that have been explicitly installed
     // (the default colormap ROOT_COLORMAP is always installed).
@@ -278,14 +244,8 @@ pub(crate) fn handle_list_installed_colormaps(state: &ClientState, data: &[u8], 
 // Opcode 84: AllocColor
 // ---------------------------------------------------------------------------
 
-pub(crate) fn handle_alloc_color(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
-    require_len!(data, 16, seq, 84);
-
-    use x11rb_protocol::protocol::xproto::AllocColorRequest;
-    let req = match AllocColorRequest::try_parse_request(request_header(data), &data[4..]) {
-        Ok(r) => r,
-        Err(_) => return build_error(LENGTH_ERROR, seq, 0, 84, 0),
-    };
+pub(crate) fn handle_alloc_color(state: &mut ClientState, req: &AllocColorRequest) -> Vec<u8> {
+    let seq = state.sequence;
     let cmap_id = req.cmap;
     let red = req.red;
     let green = req.green;
@@ -324,14 +284,8 @@ pub(crate) fn handle_alloc_color(state: &mut ClientState, data: &[u8], seq: u16)
 // Opcode 85: AllocNamedColor
 // ---------------------------------------------------------------------------
 
-pub(crate) fn handle_alloc_named_color(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
-    require_len!(data, 12, seq, 85);
-
-    use x11rb_protocol::protocol::xproto::AllocNamedColorRequest;
-    let req = match AllocNamedColorRequest::try_parse_request(request_header(data), &data[4..]) {
-        Ok(r) => r,
-        Err(_) => return build_error(LENGTH_ERROR, seq, 0, 85, 0),
-    };
+pub(crate) fn handle_alloc_named_color(state: &mut ClientState, req: &AllocNamedColorRequest) -> Vec<u8> {
+    let seq = state.sequence;
     let cmap_id = req.cmap;
     // Validate colormap exists
     if cmap_id != ROOT_COLORMAP && !state.colormaps.contains_key(&cmap_id) {
@@ -369,14 +323,8 @@ pub(crate) fn handle_alloc_named_color(state: &mut ClientState, data: &[u8], seq
 // Opcode 86: AllocColorCells
 // ---------------------------------------------------------------------------
 
-pub(crate) fn handle_alloc_color_cells(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
-    require_len!(data, 12, seq, 86);
-
-    use x11rb_protocol::protocol::xproto::AllocColorCellsRequest;
-    let req = match AllocColorCellsRequest::try_parse_request(request_header(data), &data[4..]) {
-        Ok(r) => r,
-        Err(_) => return build_error(LENGTH_ERROR, seq, 0, 86, 0),
-    };
+pub(crate) fn handle_alloc_color_cells(state: &mut ClientState, req: &AllocColorCellsRequest) -> Vec<u8> {
+    let seq = state.sequence;
     let contiguous = req.contiguous;
     let cmap_id = req.cmap;
     let n_colors = req.colors;
@@ -450,14 +398,8 @@ pub(crate) fn handle_alloc_color_cells(state: &mut ClientState, data: &[u8], seq
 // Opcode 87: AllocColorPlanes
 // ---------------------------------------------------------------------------
 
-pub(crate) fn handle_alloc_color_planes(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
-    require_len!(data, 16, seq, 87);
-
-    use x11rb_protocol::protocol::xproto::AllocColorPlanesRequest;
-    let req = match AllocColorPlanesRequest::try_parse_request(request_header(data), &data[4..]) {
-        Ok(r) => r,
-        Err(_) => return build_error(LENGTH_ERROR, seq, 0, 87, 0),
-    };
+pub(crate) fn handle_alloc_color_planes(state: &mut ClientState, req: &AllocColorPlanesRequest) -> Vec<u8> {
+    let seq = state.sequence;
     let contiguous = req.contiguous;
     let cmap_id = req.cmap;
     let n_colors = req.colors;
@@ -539,14 +481,8 @@ pub(crate) fn handle_alloc_color_planes(state: &mut ClientState, data: &[u8], se
 // Opcode 91: QueryColors
 // ---------------------------------------------------------------------------
 
-pub(crate) fn handle_query_colors(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
-    require_len!(data, 8, seq, 91);
-
-    use x11rb_protocol::protocol::xproto::QueryColorsRequest;
-    let req = match QueryColorsRequest::try_parse_request(request_header(data), &data[4..]) {
-        Ok(r) => r,
-        Err(_) => return build_error(LENGTH_ERROR, seq, 0, 91, 0),
-    };
+pub(crate) fn handle_query_colors(state: &mut ClientState, req: &QueryColorsRequest) -> Vec<u8> {
+    let seq = state.sequence;
     let cmap_id = req.cmap;
 
     // Validate colormap exists
@@ -593,14 +529,8 @@ pub(crate) fn handle_query_colors(state: &mut ClientState, data: &[u8], seq: u16
 // Opcode 92: LookupColor
 // ---------------------------------------------------------------------------
 
-pub(crate) fn handle_lookup_color(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
-    require_len!(data, 12, seq, 92);
-
-    use x11rb_protocol::protocol::xproto::LookupColorRequest;
-    let req = match LookupColorRequest::try_parse_request(request_header(data), &data[4..]) {
-        Ok(r) => r,
-        Err(_) => return build_error(LENGTH_ERROR, seq, 0, 92, 0),
-    };
+pub(crate) fn handle_lookup_color(state: &mut ClientState, req: &LookupColorRequest) -> Vec<u8> {
+    let seq = state.sequence;
     let cmap_id = req.cmap;
     // Validate colormap exists
     if cmap_id != ROOT_COLORMAP && !state.colormaps.contains_key(&cmap_id) {
@@ -632,14 +562,7 @@ pub(crate) fn handle_lookup_color(state: &mut ClientState, data: &[u8], seq: u16
 // Opcode 88: FreeColors
 // ---------------------------------------------------------------------------
 
-pub(crate) fn handle_free_colors(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
-    require_len!(data, 12, state.sequence, 88);
-
-    use x11rb_protocol::protocol::xproto::FreeColorsRequest;
-    let req = match FreeColorsRequest::try_parse_request(request_header(data), &data[4..]) {
-        Ok(r) => r,
-        Err(_) => return build_error(LENGTH_ERROR, state.sequence, 0, 88, 0),
-    };
+pub(crate) fn handle_free_colors(state: &mut ClientState, req: &FreeColorsRequest) -> Vec<u8> {
     let cmap_id = req.cmap;
     // Validate colormap exists
     if cmap_id != ROOT_COLORMAP && !state.colormaps.contains_key(&cmap_id) {
@@ -667,14 +590,7 @@ pub(crate) fn handle_free_colors(state: &mut ClientState, data: &[u8]) -> Vec<u8
 // Opcode 89: StoreColors
 // ---------------------------------------------------------------------------
 
-pub(crate) fn handle_store_colors(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
-    require_len!(data, 8, state.sequence, 89);
-
-    use x11rb_protocol::protocol::xproto::StoreColorsRequest;
-    let req = match StoreColorsRequest::try_parse_request(request_header(data), &data[4..]) {
-        Ok(r) => r,
-        Err(_) => return build_error(LENGTH_ERROR, state.sequence, 0, 89, 0),
-    };
+pub(crate) fn handle_store_colors(state: &mut ClientState, req: &StoreColorsRequest) -> Vec<u8> {
     let cmap_id = req.cmap;
     // Validate colormap exists
     if cmap_id != ROOT_COLORMAP && !state.colormaps.contains_key(&cmap_id) {
@@ -707,14 +623,7 @@ pub(crate) fn handle_store_colors(state: &mut ClientState, data: &[u8]) -> Vec<u
 // Opcode 90: StoreNamedColor
 // ---------------------------------------------------------------------------
 
-pub(crate) fn handle_store_named_color(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
-    require_len!(data, 16, state.sequence, 90);
-
-    use x11rb_protocol::protocol::xproto::StoreNamedColorRequest;
-    let req = match StoreNamedColorRequest::try_parse_request(request_header(data), &data[4..]) {
-        Ok(r) => r,
-        Err(_) => return build_error(LENGTH_ERROR, state.sequence, 0, 90, 0),
-    };
+pub(crate) fn handle_store_named_color(state: &mut ClientState, req: &StoreNamedColorRequest) -> Vec<u8> {
     let flags = u8::from(req.flags);
     let cmap_id = req.cmap;
     // Validate colormap exists
@@ -744,14 +653,7 @@ pub(crate) fn handle_store_named_color(state: &mut ClientState, data: &[u8]) -> 
 // Opcode 93: CreateCursor
 // ---------------------------------------------------------------------------
 
-pub(crate) fn handle_create_cursor(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
-    require_len!(data, 32, state.sequence, 93);
-
-    use x11rb_protocol::protocol::xproto::CreateCursorRequest;
-    let req = match CreateCursorRequest::try_parse_request(request_header(data), &data[4..]) {
-        Ok(r) => r,
-        Err(_) => return build_error(LENGTH_ERROR, state.sequence, 0, 93, 0),
-    };
+pub(crate) fn handle_create_cursor(state: &mut ClientState, req: &CreateCursorRequest) -> Vec<u8> {
     let cid = req.cid;
 
     // Validate resource ID is within this client's allocated range
@@ -924,13 +826,7 @@ fn build_cursor_argb(
 // Opcode 94: CreateGlyphCursor
 // ---------------------------------------------------------------------------
 
-pub(crate) fn handle_create_glyph_cursor(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
-    require_len!(data, 32, state.sequence, 94);
-    use x11rb_protocol::protocol::xproto::CreateGlyphCursorRequest;
-    let req = match CreateGlyphCursorRequest::try_parse_request(request_header(data), &data[4..]) {
-        Ok(r) => r,
-        Err(_) => return build_error(LENGTH_ERROR, state.sequence, 0, 94, 0),
-    };
+pub(crate) fn handle_create_glyph_cursor(state: &mut ClientState, req: &CreateGlyphCursorRequest) -> Vec<u8> {
     let cid = req.cid;
 
     // Validate resource ID is within this client's allocated range
@@ -986,13 +882,7 @@ pub(crate) fn handle_create_glyph_cursor(state: &mut ClientState, data: &[u8]) -
 // Opcode 95: FreeCursor
 // ---------------------------------------------------------------------------
 
-pub(crate) fn handle_free_cursor(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
-    require_len!(data, 8, state.sequence, 95);
-    use x11rb_protocol::protocol::xproto::FreeCursorRequest;
-    let req = match FreeCursorRequest::try_parse_request(request_header(data), &data[4..]) {
-        Ok(r) => r,
-        Err(_) => return build_error(LENGTH_ERROR, state.sequence, 0, 95, 0),
-    };
+pub(crate) fn handle_free_cursor(state: &mut ClientState, req: &FreeCursorRequest) -> Vec<u8> {
     let cid = req.cursor;
     // Validate cursor exists
     if !state.cursors.contains_key(&cid) {
@@ -1008,14 +898,7 @@ pub(crate) fn handle_free_cursor(state: &mut ClientState, data: &[u8]) -> Vec<u8
 // Opcode 96: RecolorCursor
 // ---------------------------------------------------------------------------
 
-pub(crate) fn handle_recolor_cursor(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
-    require_len!(data, 20, state.sequence, 96);
-
-    use x11rb_protocol::protocol::xproto::RecolorCursorRequest;
-    let req = match RecolorCursorRequest::try_parse_request(request_header(data), &data[4..]) {
-        Ok(r) => r,
-        Err(_) => return build_error(LENGTH_ERROR, state.sequence, 0, 96, 0),
-    };
+pub(crate) fn handle_recolor_cursor(state: &mut ClientState, req: &RecolorCursorRequest) -> Vec<u8> {
     let cid = req.cursor;
     // Validate cursor exists
     if !state.cursors.contains_key(&cid) {
