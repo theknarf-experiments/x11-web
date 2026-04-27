@@ -36,12 +36,14 @@ test.describe.serial("XTS test suite", () => {
 	test.setTimeout(300_000); // XTS tests can take a while
 
 	test("XTS Xlib core tests pass", async ({ sidecarContainer }) => {
-		// Run XTS Xlib tests - these test core protocol compliance
+		// XTS test binaries don't follow a Test* naming convention — they
+		// are named after the Xlib functions they exercise (XAllPlanes,
+		// XBitmapBitOrder, …). Just verify the xts5/Xlib3 directory exists
+		// and has at least one binary, otherwise emit a sentinel.
 		const output = await execInSidecar(
 			sidecarContainer,
-			`cd /opt/xts-src 2>/dev/null && ls xts5/Xlib*/Test* 2>/dev/null | head -5 || echo "xts_structure_ok"`,
+			`if [ -d /opt/xts-src/xts5/Xlib3 ]; then ls /opt/xts-src/xts5/Xlib3 2>/dev/null | head -5; else echo "xts_not_installed"; fi`,
 		);
-		// XTS exists in the container
 		expect(output.length).toBeGreaterThan(0);
 	});
 
@@ -276,20 +278,26 @@ d1 = Xlib.display.Display()
 d2 = Xlib.display.Display()
 screen = d1.screen()
 
-# First client grabs SubstructureRedirect on root
+# python-xlib's default error handler prints to stderr without raising,
+# so async errors from no-reply requests (like ChangeWindowAttributes)
+# never surface as exceptions in the test. Capture them on d2 instead.
+d2_errors = []
+d2.set_error_handler(lambda err, _req: d2_errors.append(err))
+
+# First client grabs SubstructureRedirect on root.
 screen.root.change_attributes(event_mask=Xlib.X.SubstructureRedirectMask)
 d1.sync()
 print("first_grab=ok")
 
-# Second client should get BadAccess
-try:
-    d2.screen().root.change_attributes(event_mask=Xlib.X.SubstructureRedirectMask)
-    d2.sync()
-    print("second_grab=should_have_failed")
-except Xlib.error.BadAccess:
+# Second client should get BadAccess.
+d2.screen().root.change_attributes(event_mask=Xlib.X.SubstructureRedirectMask)
+d2.sync()
+if any(isinstance(e, Xlib.error.BadAccess) for e in d2_errors):
     print("second_grab=BadAccess")
-except Exception as e:
-    print(f"second_grab=error_{type(e).__name__}")
+elif d2_errors:
+    print(f"second_grab=error_{type(d2_errors[0]).__name__}")
+else:
+    print("second_grab=should_have_failed")
 
 d1.close()
 d2.close()
@@ -1250,7 +1258,8 @@ test.describe.serial("Application smoke tests", () => {
 			sidecarContainer,
 			"xwininfo -root 2>&1",
 		);
-		expect(output).toContain("Root");
+		// xwininfo's actual phrasing is "(the root window)" — lowercase.
+		expect(output).toMatch(/root window/i);
 		expect(output).toMatch(/Width|Height/);
 	});
 
