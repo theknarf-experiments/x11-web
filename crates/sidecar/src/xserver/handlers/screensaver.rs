@@ -6,7 +6,6 @@ use super::parse_minor;
 use super::super::client::ClientState;
 use crate::xserver::core::require_len;
 use crate::xserver::reply::ReplyBuf;
-use crate::xserver::request::request_header;
 
 /// Screen saver window attributes stored by MIT-SCREEN-SAVER SetAttributes.
 #[allow(dead_code)]

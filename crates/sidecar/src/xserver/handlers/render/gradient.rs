@@ -6,7 +6,6 @@ use super::{
     RadialGradientState, SolidFillState, PICTFORMAT_ARGB32,
 };
 use crate::xserver::core::require_len;
-use crate::xserver::request::request_header;
 use crate::xserver::ClientState;
 use x11rb_protocol::protocol::render::{
     CreateConicalGradientRequest, CreateLinearGradientRequest, CreateRadialGradientRequest,

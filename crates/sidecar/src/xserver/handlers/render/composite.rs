@@ -5,8 +5,6 @@ use super::{
     composite_pixel, composite_pixel_ca, pict_format_has_alpha, point_in_triangle,
     resolve_source_color, resolve_source_pixels, zero_src_has_no_effect, ClipSnapshot,
 };
-use crate::xserver::core::require_len;
-use crate::xserver::request::request_header;
 use crate::xserver::ClientState;
 use x11rb_protocol::protocol::render::{
     AddTrapsRequest, CompositeRequest, FillRectanglesRequest, Fixed, TrapezoidsRequest,

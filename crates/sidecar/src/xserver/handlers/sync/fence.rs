@@ -8,7 +8,6 @@ use super::super::super::client::ClientState;
 use super::super::super::core::{MATCH_ERROR, VALUE_ERROR};
 use super::{check_pending_fence_awaits_ext, FenceState, PendingFenceAwait};
 use crate::xserver::reply::ReplyBuf;
-use crate::xserver::request::request_header;
 use x11rb_protocol::protocol::sync::{
     AwaitFenceRequest, CreateFenceRequest, DestroyFenceRequest, QueryFenceRequest,
     ResetFenceRequest, TriggerFenceRequest,

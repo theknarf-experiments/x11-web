@@ -3,7 +3,6 @@
 use tracing::debug;
 
 use super::super::client::ClientState;
-use crate::xserver::core::require_len;
 use crate::xserver::reply::ReplyBuf;
 use x11rb_protocol::protocol::xf86vidmode::{
     AddModeLineRequest, DeleteModeLineRequest, GetAllModeLinesRequest, GetDotClocksRequest,

@@ -6,7 +6,6 @@ use super::super::parse_minor;
 use super::super::super::client::ClientState;
 use super::SyncAlarm;
 use crate::xserver::reply::ReplyBuf;
-use crate::xserver::request::request_header;
 use x11rb_protocol::protocol::sync::{
     ChangeAlarmRequest, CreateAlarmRequest, DestroyAlarmRequest, QueryAlarmRequest,
 };

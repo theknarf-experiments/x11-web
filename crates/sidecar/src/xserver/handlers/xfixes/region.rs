@@ -5,7 +5,6 @@ use super::super::parse_minor;
 
 use super::super::super::client::ClientState;
 use super::super::super::types::{RegionRect, XFixesRegion};
-use crate::xserver::core::require_len;
 use crate::xserver::reply::ReplyBuf;
 use crate::xserver::request::request_header;
 use x11rb_protocol::protocol::xfixes::{

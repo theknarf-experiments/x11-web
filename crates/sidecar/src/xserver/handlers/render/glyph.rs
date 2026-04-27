@@ -8,7 +8,6 @@ use super::{
 };
 use crate::xserver::core::require_len;
 use crate::xserver::core::{read_i16_bo, read_u16_bo, read_u32_bo};
-use crate::xserver::request::request_header;
 use crate::xserver::ClientState;
 use x11rb_protocol::protocol::render::{
     AddGlyphsRequest, CreateGlyphSetRequest, FreeGlyphSetRequest, FreeGlyphsRequest,

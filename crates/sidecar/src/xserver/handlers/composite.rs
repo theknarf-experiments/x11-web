@@ -8,7 +8,6 @@ use super::super::core::{OVERLAY_WINDOW, ROOT_COLORMAP};
 use super::super::types::{DamageInfo, PixmapState, WindowState, WindowType};
 use x11rb_protocol::protocol::xproto::{BackingStore, WindowClass};
 use crate::xserver::reply::ReplyBuf;
-use crate::xserver::request::request_header;
 use x11rb_protocol::protocol::composite::{
     CreateRegionFromBorderClipRequest, GetOverlayWindowRequest, NameWindowPixmapRequest,
     RedirectSubwindowsRequest, RedirectWindowRequest, ReleaseOverlayWindowRequest,

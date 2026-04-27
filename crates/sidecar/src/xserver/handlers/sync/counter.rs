@@ -8,7 +8,6 @@ use super::super::super::client::ClientState;
 use super::super::super::core::VALUE_ERROR;
 use super::{check_alarms, check_pending_awaits_ext, SyncCounter};
 use crate::xserver::reply::ReplyBuf;
-use crate::xserver::request::request_header;
 use x11rb_protocol::protocol::sync::{
     ChangeCounterRequest, CreateCounterRequest, DestroyCounterRequest, QueryCounterRequest,
     SetCounterRequest,

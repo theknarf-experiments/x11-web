@@ -2,8 +2,6 @@ use tracing::debug;
 
 use super::super::parse_minor;
 use super::{pad4, PictFilter};
-use crate::xserver::core::require_len;
-use crate::xserver::request::request_header;
 use crate::xserver::ClientState;
 use crate::xserver::reply::ReplyBuf;
 use x11rb_protocol::protocol::render::SetPictureFilterRequest;

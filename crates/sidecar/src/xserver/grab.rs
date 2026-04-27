@@ -9,7 +9,7 @@
 
 use super::client::ClientState;
 use super::core::build_error;
-use super::core::{read_u16_bo, read_u32_bo, require_len, CURSOR_ERROR, LENGTH_ERROR, WINDOW_ERROR};
+use super::core::{CURSOR_ERROR, WINDOW_ERROR};
 use super::types::WindowState;
 use super::{CROSSING_MODE_GRAB, CROSSING_MODE_UNGRAB};
 use std::collections::{HashMap, VecDeque};

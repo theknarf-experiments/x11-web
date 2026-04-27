@@ -9,7 +9,6 @@ use super::parse_minor;
 
 use super::super::client::ClientState;
 use super::super::types::RegionRect;
-use crate::xserver::core::require_len;
 use crate::xserver::event::serialize_event;
 use crate::xserver::reply::ReplyBuf;
 use crate::xserver::request::request_header;

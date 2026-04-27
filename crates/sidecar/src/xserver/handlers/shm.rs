@@ -9,7 +9,6 @@ use super::super::types::{PixmapState, ShmPixmapBacking, ShmSegment};
 use crate::framebuffer::Framebuffer;
 use crate::xserver::core::require_len;
 use crate::xserver::reply::ReplyBuf;
-use crate::xserver::request::request_header;
 use x11rb_protocol::protocol::shm::{
     AttachRequest, CreatePixmapRequest, CreateSegmentRequest, DetachRequest, GetImageRequest,
     PutImageRequest,

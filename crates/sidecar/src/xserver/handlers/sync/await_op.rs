@@ -6,7 +6,6 @@ use super::super::parse_minor;
 use super::super::super::client::ClientState;
 use super::{is_trigger_satisfied, AwaitTrigger, PendingAwait};
 use crate::xserver::reply::ReplyBuf;
-use crate::xserver::request::request_header;
 use x11rb_protocol::protocol::sync::{AwaitRequest, GetPriorityRequest, SetPriorityRequest};
 
 /// Minor opcode 7: Await
