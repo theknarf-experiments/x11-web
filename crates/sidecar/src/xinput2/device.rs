@@ -1,8 +1,6 @@
 use x11rb_protocol::protocol::xinput as xi;
 use x11rb_protocol::x11_utils::Serialize as _;
 
-use crate::xserver::core::{write_u16_bo, write_u32_bo};
-
 use super::{
     fp3232, serialize_xi_reply, ValuatorState, AXIS_SCROLL_H, AXIS_SCROLL_V, MASTER_KEYBOARD_ID,
     MASTER_POINTER_ID,
@@ -122,40 +120,22 @@ pub(crate) fn build_open_device_reply(
     _screen_height: u16,
     msb_first: bool,
 ) -> Vec<u8> {
-    // OpenDevice reply: 32-byte header
-    //   byte 0  = 1 (Reply)
-    //   byte 1  = xi_reply_type (3)
-    //   bytes 2-3 = sequence
-    //   bytes 4-7 = length (in 4-byte units after header)
-    //   byte 8  = num_classes
-    //   bytes 9-31 = pad
-    //   followed by InputClassInfo structs (2 bytes each: class_id + event_type_base)
-
     let is_keyboard = device_id == MASTER_KEYBOARD_ID as u8;
-
-    // Each InputClassInfo is 2 bytes: class_id(1) + event_type_base(1)
-    let classes: Vec<(u8, u8)> = if is_keyboard {
-        vec![(0 /* KEY */, 0)]
+    let class_info: Vec<xi::InputClassInfo> = if is_keyboard {
+        vec![xi::InputClassInfo { class_id: xi::InputClass::KEY, event_type_base: 0 }]
     } else {
-        vec![(1 /* BUTTON */, 0), (2 /* VALUATOR */, 0)]
+        vec![
+            xi::InputClassInfo { class_id: xi::InputClass::BUTTON, event_type_base: 0 },
+            xi::InputClassInfo { class_id: xi::InputClass::VALUATOR, event_type_base: 0 },
+        ]
     };
-
-    let num_classes = classes.len() as u8;
-    let extra_bytes = (classes.len() * 2 + 3) & !3; // pad to 4
-    let length_units = extra_bytes / 4;
-
-    let mut reply = vec![0u8; 32 + extra_bytes];
-    reply[0] = 1;
-    reply[1] = 3; // xi_reply_type = OpenDevice
-    write_u16_bo(&mut reply, 2, seq, msb_first);
-    write_u32_bo(&mut reply, 4, length_units as u32, msb_first);
-    reply[8] = num_classes;
-
-    for (i, (class_id, event_base)) in classes.iter().enumerate() {
-        reply[32 + i * 2] = *class_id;
-        reply[32 + i * 2 + 1] = *event_base;
-    }
-    reply
+    let reply = xi::OpenDeviceReply {
+        xi_reply_type: 3,
+        sequence: seq,
+        length: 0,
+        class_info,
+    };
+    crate::xinput2::serialize_xi_reply(&reply, msb_first)
 }
 
 /// Build a GetDeviceKeyMapping reply that mirrors the core keyboard mapping.
@@ -167,38 +147,27 @@ pub(crate) fn build_device_key_mapping_reply(
     msb_first: bool,
     custom_keymap: &std::collections::HashMap<u8, Vec<u32>>,
 ) -> Vec<u8> {
-    // We use 4 keysyms per keycode (normal, shift, altgr, shift+altgr)
-    // matching the core GetKeyboardMapping format.
+    // 4 keysyms per keycode (normal, shift, altgr, shift+altgr)
     let keysyms_per_keycode: u8 = 4;
-    let n_keycodes = count as usize;
-    let n_keysyms = n_keycodes * keysyms_per_keycode as usize;
-    let length_units = n_keysyms as u32; // each keysym is 4 bytes = 1 unit
-
-    let mut reply = vec![0u8; 32 + n_keysyms * 4];
-    reply[0] = 1;
-    reply[1] = keysyms_per_keycode;
-    write_u16_bo(&mut reply, 2, seq, msb_first);
-    write_u32_bo(&mut reply, 4, length_units, msb_first);
-    reply[8] = 24; // xi_reply_type
-
-    // Fill in keysyms, consulting custom_keymap first, then built-in US layout.
-    for i in 0..n_keycodes {
+    let mut keysyms: Vec<u32> = Vec::with_capacity(count as usize * keysyms_per_keycode as usize);
+    for i in 0..count as usize {
         let kc = first_keycode.wrapping_add(i as u8);
-        let offset = 32 + i * keysyms_per_keycode as usize * 4;
         if let Some(syms) = custom_keymap.get(&kc) {
-            for (j, &sym) in syms.iter().enumerate().take(keysyms_per_keycode as usize) {
-                write_u32_bo(&mut reply, offset + j * 4, sym, msb_first);
+            for j in 0..keysyms_per_keycode as usize {
+                keysyms.push(syms.get(j).copied().unwrap_or(0));
             }
         } else {
             let (normal, shifted) = keycode_to_keysym_xi(kc);
-            write_u32_bo(&mut reply, offset, normal, msb_first);
-            write_u32_bo(&mut reply, offset + 4, shifted, msb_first);
-            // altgr and shift+altgr are NoSymbol
-            write_u32_bo(&mut reply, offset + 8, 0, msb_first);
-            write_u32_bo(&mut reply, offset + 12, 0, msb_first);
+            keysyms.extend_from_slice(&[normal, shifted, 0, 0]);
         }
     }
-    reply
+    let reply = xi::GetDeviceKeyMappingReply {
+        xi_reply_type: 24,
+        sequence: seq,
+        keysyms_per_keycode,
+        keysyms,
+    };
+    crate::xinput2::serialize_xi_reply(&reply, msb_first)
 }
 
 /// Minimal US keyboard layout mapping for XI 1.x GetDeviceKeyMapping.
@@ -290,36 +259,26 @@ pub(crate) fn keycode_to_keysym_xi(keycode: u8) -> (u32, u32) {
 
 /// Build a GetDeviceModifierMapping reply with the standard modifier map.
 pub(crate) fn build_device_modifier_mapping_reply(seq: u16, msb_first: bool) -> Vec<u8> {
-    // Standard modifier map: 8 modifiers, each can have up to N keycodes.
-    // We use 2 keycodes per modifier (padded).
-    let keycodes_per_modifier: u8 = 2;
-    let map_size = 8 * keycodes_per_modifier as usize;
-    let length_units = (map_size + 3) / 4;
-
-    let mut reply = vec![0u8; 32 + length_units * 4];
-    reply[0] = 1;
-    reply[1] = keycodes_per_modifier;
-    write_u16_bo(&mut reply, 2, seq, msb_first);
-    write_u32_bo(&mut reply, 4, length_units as u32, msb_first);
-    reply[8] = 26; // xi_reply_type
-
     // Modifier map: [Shift, Lock, Control, Mod1(Alt), Mod2(Num), Mod3, Mod4(Super), Mod5]
-    let modifier_keycodes: [(u8, u8); 8] = [
-        (50, 62),   // Shift: Shift_L(50), Shift_R(62)
-        (66, 0),    // Lock: Caps_Lock(66)
-        (37, 105),  // Control: Control_L(37), Control_R(105)
-        (64, 108),  // Mod1 (Alt): Alt_L(64), Alt_R(108)
-        (77, 0),    // Mod2 (Num Lock): Num_Lock(77)
-        (0, 0),     // Mod3: unused
-        (133, 134), // Mod4 (Super): Super_L(133), Super_R(134)
-        (0, 0),     // Mod5: unused
+    // 8 modifiers × 2 keycodes per modifier (the xi_reply_type byte is set
+    // to keycodes-per-modifier; serialize_xi_reply patches the length).
+    let keymaps: Vec<u8> = vec![
+        50, 62,   // Shift: Shift_L(50), Shift_R(62)
+        66, 0,    // Lock: Caps_Lock(66)
+        37, 105,  // Control: Control_L(37), Control_R(105)
+        64, 108,  // Mod1 (Alt): Alt_L(64), Alt_R(108)
+        77, 0,    // Mod2 (Num Lock): Num_Lock(77)
+        0, 0,     // Mod3: unused
+        133, 134, // Mod4 (Super): Super_L(133), Super_R(134)
+        0, 0,     // Mod5: unused
     ];
-
-    for (i, (kc1, kc2)) in modifier_keycodes.iter().enumerate() {
-        reply[32 + i * 2] = *kc1;
-        reply[32 + i * 2 + 1] = *kc2;
-    }
-    reply
+    let reply = xi::GetDeviceModifierMappingReply {
+        xi_reply_type: 26,
+        sequence: seq,
+        length: 0,
+        keymaps,
+    };
+    crate::xinput2::serialize_xi_reply(&reply, msb_first)
 }
 
 /// Build a QueryDeviceState reply with current button/key/valuator state.
@@ -330,60 +289,47 @@ pub(crate) fn build_query_device_state_reply(
     msb_first: bool,
 ) -> Vec<u8> {
     let is_keyboard = device_id == MASTER_KEYBOARD_ID as u8;
-
-    if is_keyboard {
-        // Key class state: class(1) + length(1) + num_keys(1) + pad(1) + keys[32]
-        let class_len: u8 = 36;
-        let length_units = (1 + class_len as usize + 3) / 4;
-        let mut reply = vec![0u8; 32 + length_units * 4];
-        reply[0] = 1;
-        write_u16_bo(&mut reply, 2, seq, msb_first);
-        write_u32_bo(&mut reply, 4, length_units as u32, msb_first);
-        reply[8] = 30;
-        reply[12] = 1; // num_classes
-                       // Key state class
-        reply[32] = 0; // class_id = KEY
-        reply[33] = class_len;
-        reply[34] = 248; // num_keys = MAX - MIN + 1
-                         // keys[32] = all zeros (no keys pressed)
-        reply
+    let classes: Vec<xi::InputState> = if is_keyboard {
+        vec![xi::InputState {
+            len: 36, // class_id + len + InputStateDataKey(34) = 36
+            data: xi::InputStateData::Key(xi::InputStateDataKey {
+                num_keys: 248,
+                keys: [0u8; 32],
+            }),
+        }]
     } else {
-        // Button class: class(1) + length(1) + num_buttons(1) + pad(1) + buttons[4]
-        // Valuator class: class(1) + length(1) + num_valuators(1) + mode(1) + valuators[4*4]
-        let button_class_len: u8 = 8;
-        let valuator_class_len: u8 = 4 + 4 * 4; // header(4) + 4 valuators × 4 bytes
-        let total_extra = button_class_len as usize + valuator_class_len as usize;
-        let length_units = (total_extra + 3) / 4;
-
-        let mut reply = vec![0u8; 32 + length_units * 4];
-        reply[0] = 1;
-        write_u16_bo(&mut reply, 2, seq, msb_first);
-        write_u32_bo(&mut reply, 4, length_units as u32, msb_first);
-        reply[8] = 30;
-        reply[12] = 2; // num_classes
-
-        // Button state class
-        let off = 32;
-        reply[off] = 1; // class_id = BUTTON
-        reply[off + 1] = button_class_len;
-        reply[off + 2] = N_POINTER_BUTTONS as u8;
-        // buttons[4] = all zeros (no buttons pressed)
-
-        // Valuator state class
-        let voff = off + button_class_len as usize;
-        reply[voff] = 2; // class_id = VALUATOR
-        reply[voff + 1] = valuator_class_len;
-        reply[voff + 2] = 4; // num_valuators: X, Y, ScrollV, ScrollH
-        reply[voff + 3] = 0; // mode = Relative
-
-        // Valuator values (4 bytes each, matching device axis order)
-        write_u32_bo(&mut reply, voff + 4, valuators.x as u32, msb_first);
-        write_u32_bo(&mut reply, voff + 8, valuators.y as u32, msb_first);
-        write_u32_bo(&mut reply, voff + 12, valuators.scroll_v as u32, msb_first);
-        write_u32_bo(&mut reply, voff + 16, valuators.scroll_h as u32, msb_first);
-
-        reply
-    }
+        vec![
+            xi::InputState {
+                len: 8,
+                data: xi::InputStateData::Button(xi::InputStateDataButton {
+                    num_buttons: N_POINTER_BUTTONS as u8,
+                    // Only the first 4 bytes (32 bits) ever go on the wire
+                    // for our 7-button pointer; the rest is padding.
+                    buttons: [0u8; 32],
+                }),
+            },
+            xi::InputState {
+                len: 4 + 4 * 4, // header + 4 valuators × 4 bytes
+                data: xi::InputStateData::Valuator(xi::InputStateDataValuator {
+                    // bitmask: 0 = Relative mode, in proximity
+                    mode: 0u8.into(),
+                    valuators: vec![
+                        valuators.x,
+                        valuators.y,
+                        valuators.scroll_v,
+                        valuators.scroll_h,
+                    ],
+                }),
+            },
+        ]
+    };
+    let reply = xi::QueryDeviceStateReply {
+        xi_reply_type: 30,
+        sequence: seq,
+        length: 0,
+        classes,
+    };
+    crate::xinput2::serialize_xi_reply(&reply, msb_first)
 }
 
 /// Build the bytes for the master pointer's `XIDeviceInfo`. The screen
