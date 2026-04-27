@@ -28,8 +28,7 @@ pub(super) fn handle_request(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
 
     // Extension protocol requests (opcodes 128+).
     let bad_request = || {
-        build_error_bo(REQUEST_ERROR, seq, major_opcode as u32, major_opcode,
-                       _minor as u16, state.msb_first)
+        build_error(REQUEST_ERROR, seq, major_opcode as u32, major_opcode, _minor as u16)
     };
     match state.extension_registry.by_opcode(major_opcode) {
         Some(info) if !info.enabled => {
@@ -153,14 +152,7 @@ fn dispatch_extension(state: &mut ClientState, data: &[u8], seq: u16, id: Extens
         #[allow(unreachable_patterns)]
         _ => {
             warn!("Extension {:?} compiled out", id);
-            build_error_bo(
-                REQUEST_ERROR,
-                seq,
-                data[0] as u32,
-                data[0],
-                data[1] as u16,
-                state.msb_first,
-            )
+            build_error(REQUEST_ERROR, seq, data[0] as u32, data[0], data[1] as u16)
         }
     }
 }

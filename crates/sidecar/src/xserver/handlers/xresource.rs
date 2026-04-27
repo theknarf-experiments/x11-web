@@ -18,7 +18,7 @@ pub(crate) fn handle_xresource_request(state: &mut ClientState, data: &[u8], seq
     let bo = state.msb_first;
     debug!("X-Resource minor opcode: {minor}");
     let bad_request = |bad_value: u32| {
-        build_error_bo(REQUEST_ERROR, seq, bad_value, XRES_MAJOR_OPCODE, minor as u16, bo)
+        build_error(REQUEST_ERROR, seq, bad_value, XRES_MAJOR_OPCODE, minor as u16)
     };
 
     match minor {

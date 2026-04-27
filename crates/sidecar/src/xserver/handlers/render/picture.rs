@@ -166,7 +166,6 @@ pub(crate) fn handle_query_pict_formats(seq: u16, bo: bool) -> Vec<u8> {
 }
 
 pub(crate) fn handle_create_picture(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
-    let bo = state.msb_first;
 
     let req = parse_minor!(CreatePictureRequest, data, state, seq, 139, data[1] as u16);
 
@@ -186,7 +185,7 @@ pub(crate) fn handle_create_picture(state: &mut ClientState, data: &[u8], seq: u
     } else if let Some(p) = state.pixmaps.get(&drawable) {
         p.depth
     } else {
-        return render_err(crate::xserver::core::DRAWABLE_ERROR, seq, drawable, data[1] as u16, bo);
+        return render_err(crate::xserver::core::DRAWABLE_ERROR, seq, drawable, data[1] as u16);
     };
 
     // Validate format ID is known
@@ -196,7 +195,7 @@ pub(crate) fn handle_create_picture(state: &mut ClientState, data: &[u8], seq: u
         PICTFORMAT_A8 => 8,
         PICTFORMAT_A1 => 1,
         _ => {
-            return render_err(crate::xserver::core::MATCH_ERROR, seq, format_id, data[1] as u16, bo);
+            return render_err(crate::xserver::core::MATCH_ERROR, seq, format_id, data[1] as u16);
         }
     };
 
@@ -210,7 +209,7 @@ pub(crate) fn handle_create_picture(state: &mut ClientState, data: &[u8], seq: u
         debug!(
             "CreatePicture: format depth {format_depth} incompatible with drawable depth {drawable_depth}"
         );
-        return render_err(crate::xserver::core::MATCH_ERROR, seq, format_id, data[1] as u16, bo);
+        return render_err(crate::xserver::core::MATCH_ERROR, seq, format_id, data[1] as u16);
     }
 
     // Extract values from the parsed value_list

@@ -140,14 +140,7 @@ pub(crate) fn query_counter(state: &mut ClientState, data: &[u8], seq: u16) -> V
             .set_u32(12, counter.value_lo);
     } else {
         // BadCounter
-        return super::super::super::core::build_error_bo(
-            VALUE_ERROR,
-            seq,
-            counter_id,
-            134,
-            5,
-            state.msb_first,
-        );
+        return super::super::super::core::build_error(VALUE_ERROR, seq, counter_id, 134, 5);
     }
     reply.build()
 }

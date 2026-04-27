@@ -946,9 +946,8 @@ pub(crate) fn handle_image_request(
     seq: u16,
     minor: u8,
 ) -> Vec<u8> {
-    let bo = state.msb_first;
     let xv_err = |code: u8, bad_value: u32| {
-        crate::xserver::core::build_error_bo(code, seq, bad_value, 156, minor as u16, bo)
+        crate::xserver::core::build_error(code, seq, bad_value, 156, minor as u16)
     };
     match minor {
         5 => {

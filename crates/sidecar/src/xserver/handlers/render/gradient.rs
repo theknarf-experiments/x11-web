@@ -50,14 +50,13 @@ pub(crate) fn handle_create_gradient_fill(
         36 => handle_create_conical_gradient(state, data, seq),
         _ => {
             // Unreachable from dispatch, but return proper error if called directly
-            render_err(crate::xserver::core::REQUEST_ERROR, 0, minor as u32, minor as u16, state.msb_first)
+            render_err(crate::xserver::core::REQUEST_ERROR, 0, minor as u32, minor as u16)
         }
     }
 }
 
 /// CreateLinearGradient (RENDER minor opcode 34).
 fn handle_create_linear_gradient(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
-    let bo = state.msb_first;
     let minor = data[1] as u16;
 
     let req = parse_minor!(CreateLinearGradientRequest, data, state, seq, 139, minor);
@@ -71,7 +70,7 @@ fn handle_create_linear_gradient(state: &mut ClientState, data: &[u8], seq: u16)
 
     // Sanity bound
     if num_stops > 1024 {
-        return render_err(crate::xserver::core::VALUE_ERROR, seq, num_stops as u32, minor, bo);
+        return render_err(crate::xserver::core::VALUE_ERROR, seq, num_stops as u32, minor);
     }
 
     let mut stops = Vec::with_capacity(num_stops);
@@ -239,7 +238,6 @@ pub(crate) fn rasterize_linear_gradient(
 
 /// CreateRadialGradient (RENDER minor opcode 35).
 fn handle_create_radial_gradient(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
-    let bo = state.msb_first;
     let minor = data[1] as u16;
 
     let req = parse_minor!(CreateRadialGradientRequest, data, state, seq, 139, minor);
@@ -254,7 +252,7 @@ fn handle_create_radial_gradient(state: &mut ClientState, data: &[u8], seq: u16)
     let num_stops = req.stops.len();
 
     if num_stops > 1024 {
-        return render_err(crate::xserver::core::VALUE_ERROR, seq, num_stops as u32, minor, bo);
+        return render_err(crate::xserver::core::VALUE_ERROR, seq, num_stops as u32, minor);
     }
 
     let mut stops = Vec::with_capacity(num_stops);
@@ -383,7 +381,6 @@ pub(crate) fn rasterize_radial_gradient(
 
 /// CreateConicalGradient (RENDER minor opcode 36).
 fn handle_create_conical_gradient(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
-    let bo = state.msb_first;
     let minor = data[1] as u16;
 
     let req = parse_minor!(CreateConicalGradientRequest, data, state, seq, 139, minor);
@@ -397,7 +394,7 @@ fn handle_create_conical_gradient(state: &mut ClientState, data: &[u8], seq: u16
     let num_stops = req.stops.len();
 
     if num_stops > 1024 {
-        return render_err(crate::xserver::core::VALUE_ERROR, seq, num_stops as u32, minor, bo);
+        return render_err(crate::xserver::core::VALUE_ERROR, seq, num_stops as u32, minor);
     }
 
     let mut stops = Vec::with_capacity(num_stops);

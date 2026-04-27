@@ -16,9 +16,8 @@ use x11rb_protocol::protocol::xfixes::{
 pub(crate) fn handle_xfixes_request(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
     let minor = data[1];
     debug!("XFIXES minor opcode: {minor}");
-    let bo = state.msb_first;
     let xfixes_err = |code: u8, bad_value: u32| {
-        crate::xserver::core::build_error_bo(code, seq, bad_value, 138, minor as u16, bo)
+        crate::xserver::core::build_error(code, seq, bad_value, 138, minor as u16)
     };
 
     match minor {

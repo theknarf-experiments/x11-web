@@ -11,9 +11,8 @@ use crate::xserver::reply::ReplyBuf;
 /// DBE - Double Buffer Extension (opcode 157)
 pub(crate) fn handle_dbe_request(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
     let minor = data[1];
-    let bo = state.msb_first;
     let dbe_err = |code: u8, bad_value: u32| {
-        crate::xserver::core::build_error_bo(code, seq, bad_value, 157, minor as u16, bo)
+        crate::xserver::core::build_error(code, seq, bad_value, 157, minor as u16)
     };
     match minor {
         0 => {

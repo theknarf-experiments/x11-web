@@ -75,9 +75,8 @@ fn vidmode_header(data: &[u8], minor_override: u8) -> RequestHeader {
 /// XFree86-VidModeExtension (opcode 153)
 pub(crate) fn handle_vidmode_request(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
     let minor = data[1];
-    let bo = state.msb_first;
     let vidmode_err = |code: u8, bad_value: u32| {
-        crate::xserver::core::build_error_bo(code, seq, bad_value, 153, minor as u16, bo)
+        crate::xserver::core::build_error(code, seq, bad_value, 153, minor as u16)
     };
     match minor {
         0 => {

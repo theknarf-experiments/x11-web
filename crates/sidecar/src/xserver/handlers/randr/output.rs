@@ -476,17 +476,10 @@ pub(crate) fn handle_delete_monitor(state: &mut ClientState, data: &[u8], _seq: 
 }
 
 /// RRCreateLease (45).
-pub(crate) fn handle_create_lease(state: &mut ClientState, _data: &[u8], seq: u16) -> Vec<u8> {
+pub(crate) fn handle_create_lease(_state: &mut ClientState, _data: &[u8], seq: u16) -> Vec<u8> {
     let minor = 45u8;
     debug!("RRCreateLease: not supported on virtual display");
-    crate::xserver::core::build_error_bo(
-        crate::xserver::core::ACCESS_ERROR,
-        seq,
-        0,
-        140,
-        minor as u16,
-        state.msb_first,
-    )
+    crate::xserver::core::build_error(crate::xserver::core::ACCESS_ERROR, seq, 0, 140, minor as u16)
 }
 
 /// RRFreeLease (46).

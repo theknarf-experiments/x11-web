@@ -341,14 +341,7 @@ pub(crate) fn handle_sync_request(state: &mut ClientState, data: &[u8], seq: u16
         19 => fence::await_fence(state, data, seq),
         _ => {
             warn!("Unhandled SYNC minor opcode: {minor}");
-            crate::xserver::core::build_error_bo(
-                crate::xserver::core::REQUEST_ERROR,
-                seq,
-                minor as u32,
-                134,
-                minor as u16,
-                state.msb_first,
-            )
+            crate::xserver::core::build_error(crate::xserver::core::REQUEST_ERROR, seq, minor as u32, 134, minor as u16)
         }
     }
 }

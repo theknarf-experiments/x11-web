@@ -984,7 +984,7 @@ pub(crate) async fn handle_client(
                         // Reject if the client hasn't enabled BIG-REQUESTS.
                         if !state.big_requests_enabled {
                             state.sequence = state.sequence.wrapping_add(1);
-                            let mut err = build_error_bo(LENGTH_ERROR, state.sequence, 0, pending[0], 0, state.msb_first);
+                            let mut err = build_error(LENGTH_ERROR, state.sequence, 0, pending[0], 0);
                             if state.msb_first {
                                 super::core::byteswap_error_in_place(&mut err);
                             }

@@ -246,10 +246,10 @@ pub(crate) fn handle_copy_context(state: &mut ClientState, data: &[u8], seq: u16
     // Validate both contexts exist
     if !state.glx.contexts.contains_key(&src_ctx) {
         // GLXBadContext error (first error code for GLX extension = 160 by convention)
-        return crate::xserver::core::build_error_bo(160, seq, src_ctx, 159, 10, state.msb_first);
+        return crate::xserver::core::build_error(160, seq, src_ctx, 159, 10);
     }
     if !state.glx.contexts.contains_key(&dst_ctx) {
-        return crate::xserver::core::build_error_bo(160, seq, dst_ctx, 159, 10, state.msb_first);
+        return crate::xserver::core::build_error(160, seq, dst_ctx, 159, 10);
     }
 
     debug!("GLX CopyContext: src={src_ctx:#x} dst={dst_ctx:#x}");

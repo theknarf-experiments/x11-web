@@ -346,10 +346,7 @@ pub(crate) fn build_record_status_reply(
 pub(crate) fn handle_record_request(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
     let minor = data[1];
     let bad_length = || {
-        crate::xserver::core::build_error_bo(
-            crate::xserver::core::LENGTH_ERROR,
-            seq, 0, 154, minor as u16, state.msb_first,
-        )
+        crate::xserver::core::build_error(crate::xserver::core::LENGTH_ERROR, seq, 0, 154, minor as u16)
     };
     match minor {
         0 => {
@@ -363,14 +360,7 @@ pub(crate) fn handle_record_request(state: &mut ClientState, data: &[u8], seq: u
             // CreateContext
             // SECURITY: untrusted clients are denied CreateContext (BadAccess)
             if state.trust_level > 0 {
-                return crate::xserver::core::build_error_bo(
-                    crate::xserver::core::ACCESS_ERROR,
-                    seq,
-                    0,
-                    154,
-                    minor as u16,
-                    state.msb_first,
-                );
+                return crate::xserver::core::build_error(crate::xserver::core::ACCESS_ERROR, seq, 0, 154, minor as u16);
             }
             use x11rb_protocol::protocol::record::CreateContextRequest;
             let Ok(req) = CreateContextRequest::try_parse_request(
@@ -615,14 +605,7 @@ pub(crate) fn handle_record_request(state: &mut ClientState, data: &[u8], seq: u
         }
         _ => {
             debug!("RECORD: unhandled minor opcode {minor}");
-            crate::xserver::core::build_error_bo(
-                crate::xserver::core::REQUEST_ERROR,
-                seq,
-                minor as u32,
-                154,
-                minor as u16,
-                state.msb_first,
-            )
+            crate::xserver::core::build_error(crate::xserver::core::REQUEST_ERROR, seq, minor as u32, 154, minor as u16)
         }
     }
 }

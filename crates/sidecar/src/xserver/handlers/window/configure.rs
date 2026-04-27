@@ -1104,7 +1104,7 @@ pub(crate) fn handle_circulate_window(state: &mut ClientState, req: &CirculateWi
     let window = req.window;
 
     if !state.windows.contains_key(&window) {
-        return build_error_bo(WINDOW_ERROR, seq, window, 13, 0, state.msb_first);
+        return build_error(WINDOW_ERROR, seq, window, 13, 0);
     }
 
     // Get the parent's children_order to find the target child

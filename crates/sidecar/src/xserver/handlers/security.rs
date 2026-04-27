@@ -98,14 +98,7 @@ use crate::xserver::reply::ReplyBuf;
                 reply.buf_mut()[16..16 + auth_data.len()].copy_from_slice(&auth_data);
                 reply.build()
             } else {
-                crate::xserver::core::build_error_bo(
-                    crate::xserver::core::LENGTH_ERROR,
-                    seq,
-                    0,
-                    155,
-                    minor as u16,
-                    state.msb_first,
-                )
+                crate::xserver::core::build_error(crate::xserver::core::LENGTH_ERROR, seq, 0, 155, minor as u16)
             }
         }
         2 => {
@@ -123,14 +116,7 @@ use crate::xserver::reply::ReplyBuf;
         }
         _ => {
             debug!("SECURITY: unhandled minor opcode {minor}");
-            crate::xserver::core::build_error_bo(
-                crate::xserver::core::REQUEST_ERROR,
-                seq,
-                minor as u32,
-                155,
-                minor as u16,
-                state.msb_first,
-            )
+            crate::xserver::core::build_error(crate::xserver::core::REQUEST_ERROR, seq, minor as u32, 155, minor as u16)
         }
     }
 }

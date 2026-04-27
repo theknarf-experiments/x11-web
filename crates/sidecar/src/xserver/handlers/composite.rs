@@ -109,9 +109,7 @@ pub(crate) fn handle_damage_request(state: &mut ClientState, data: &[u8], seq: u
         }
         _ => {
             debug!("Unhandled DAMAGE minor opcode: {minor}");
-            crate::xserver::core::build_error_bo(
-                crate::xserver::core::REQUEST_ERROR, seq, minor as u32, 143, minor as u16, state.msb_first,
-            )
+            crate::xserver::core::build_error(crate::xserver::core::REQUEST_ERROR, seq, minor as u32, 143, minor as u16)
         }
     }
 }
@@ -124,10 +122,7 @@ pub(crate) fn handle_x_composite_request(
     let minor = data[1];
     info!("Composite minor opcode: {minor}");
     let bad_window = |window: u32| {
-        crate::xserver::core::build_error_bo(
-            crate::xserver::core::WINDOW_ERROR,
-            seq, window, 142, minor as u16, state.msb_first,
-        )
+        crate::xserver::core::build_error(crate::xserver::core::WINDOW_ERROR, seq, window, 142, minor as u16)
     };
 
     match minor {
@@ -370,9 +365,7 @@ pub(crate) fn handle_x_composite_request(
         }
         _ => {
             debug!("Unhandled Composite minor opcode: {minor}");
-            crate::xserver::core::build_error_bo(
-                crate::xserver::core::REQUEST_ERROR, seq, minor as u32, 142, minor as u16, state.msb_first,
-            )
+            crate::xserver::core::build_error(crate::xserver::core::REQUEST_ERROR, seq, minor as u32, 142, minor as u16)
         }
     }
 }

@@ -395,7 +395,7 @@ pub(crate) fn handle_composite_glyphs(
     let dst_draw = match dst_drawable {
         Some(d) => d,
         None => {
-            return render_err(crate::xserver::core::VALUE_ERROR, seq, dst_pic, minor, bo);
+            return render_err(crate::xserver::core::VALUE_ERROR, seq, dst_pic, minor);
         }
     };
     let clip = ClipSnapshot::from_picture(state, dst_pic);

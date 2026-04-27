@@ -36,8 +36,8 @@ pub(crate) const DRI3_MAJOR_OPCODE: u8 = 149;
 
 /// Build a DRI3 protocol error reply.
 #[inline]
-pub(crate) fn dri3_err(code: u8, seq: u16, bad_value: u32, minor: u8, msb_first: bool) -> Vec<u8> {
-    crate::xserver::core::build_error_bo(code, seq, bad_value, DRI3_MAJOR_OPCODE, minor as u16, msb_first)
+pub(crate) fn dri3_err(code: u8, seq: u16, bad_value: u32, minor: u8) -> Vec<u8> {
+    crate::xserver::core::build_error(code, seq, bad_value, DRI3_MAJOR_OPCODE, minor as u16)
 }
 
 // Supported DRI3 version
@@ -95,7 +95,7 @@ pub(crate) fn handle_dri3_request(state: &mut ClientState, data: &[u8], seq: u16
             if fd < 0 {
                 // No GPU available — return BadAlloc
                 warn!("DRI3 Open: failed to open /dev/dri/renderD128");
-                return dri3_err(ALLOC_ERROR, seq, 0, 1, bo);
+                return dri3_err(ALLOC_ERROR, seq, 0, 1);
             }
 
             // Queue the fd for sending via SCM_RIGHTS
@@ -123,7 +123,7 @@ pub(crate) fn handle_dri3_request(state: &mut ClientState, data: &[u8], seq: u16
 
         _ => {
             warn!("Unhandled DRI3 minor opcode: {minor}");
-            dri3_err(REQUEST_ERROR, seq, minor as u32, minor, state.msb_first)
+            dri3_err(REQUEST_ERROR, seq, minor as u32, minor)
         }
     }
 }

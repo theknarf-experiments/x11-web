@@ -69,23 +69,15 @@ macro_rules! require_len {
     ($data:expr, $min:expr, $seq:expr, $major:expr) => {
         if $data.len() < $min {
             return $crate::xserver::core::build_error(
-                $crate::xserver::core::LENGTH_ERROR,
-                $seq,
-                0,
-                $major,
-                0,
+                $crate::xserver::core::LENGTH_ERROR, $seq, 0, $major, 0,
             );
         }
     };
     ($data:expr, $min:expr, $seq:expr, $major:expr, $minor:expr, $msb:expr) => {
         if $data.len() < $min {
-            return $crate::xserver::core::build_error_bo(
-                $crate::xserver::core::LENGTH_ERROR,
-                $seq,
-                $data.len() as u32,
-                $major,
-                $minor as u16,
-                $msb,
+            let _ = $msb; // back-compat shim — byte order is patched at the write point
+            return $crate::xserver::core::build_error(
+                $crate::xserver::core::LENGTH_ERROR, $seq, $data.len() as u32, $major, $minor as u16,
             );
         }
     };
@@ -111,21 +103,6 @@ pub(crate) fn build_error(
     err[8..10].copy_from_slice(&minor_opcode.to_le_bytes());
     err[10] = major_opcode;
     err.to_vec()
-}
-
-/// Backward-compatible alias — historically callers passed an explicit
-/// byte order, but errors are always built in LE and swapped at the
-/// write point. The `_msb_first` argument is intentionally ignored.
-#[inline]
-pub(crate) fn build_error_bo(
-    error_code: u8,
-    seq: u16,
-    bad_value: u32,
-    major_opcode: u8,
-    minor_opcode: u16,
-    _msb_first: bool,
-) -> Vec<u8> {
-    build_error(error_code, seq, bad_value, major_opcode, minor_opcode)
 }
 
 /// Convert an LE-formatted X11 error reply (built by [`build_error`])
@@ -625,49 +602,9 @@ mod tests {
     }
 
     // -----------------------------------------------------------------------
-    // build_error_bo (MSB / big-endian mode)
+    // build_error always emits LE; MSB clients get byteswap_error_in_place
+    // applied at the connection write point. See those tests below.
     // -----------------------------------------------------------------------
-
-    #[test]
-    fn build_error_bo_msb_length() {
-        let err = build_error_bo(REQUEST_ERROR, 1, 0, 1, 0, true);
-        assert_eq!(err.len(), 32);
-    }
-
-    #[test]
-    fn build_error_bo_msb_byte0_zero() {
-        let err = build_error_bo(WINDOW_ERROR, 5, 42, 10, 3, true);
-        assert_eq!(err[0], 0);
-    }
-
-    #[test]
-    fn build_error_bo_msb_seq_big_endian() {
-        // seq = 0x1234; BE: bytes [2..4] = [0x12, 0x34]
-        let err = build_error_bo(REQUEST_ERROR, 0x1234, 0, 1, 0, true);
-        assert_eq!(err[2], 0x12);
-        assert_eq!(err[3], 0x34);
-    }
-
-    #[test]
-    fn build_error_bo_msb_bad_value_big_endian() {
-        // bad_value = 0x11223344; BE: bytes [4..8] = [0x11, 0x22, 0x33, 0x44]
-        let err = build_error_bo(VALUE_ERROR, 1, 0x11223344, 2, 0, true);
-        assert_eq!(&err[4..8], &[0x11, 0x22, 0x33, 0x44]);
-    }
-
-    #[test]
-    fn build_error_bo_msb_minor_opcode_big_endian() {
-        // minor_opcode = 0x0102; BE: bytes [8..10] = [0x01, 0x02]
-        let err = build_error_bo(REQUEST_ERROR, 1, 0, 5, 0x0102, true);
-        assert_eq!(err[8], 0x01);
-        assert_eq!(err[9], 0x02);
-    }
-
-    #[test]
-    fn build_error_bo_msb_major_opcode_byte10() {
-        let err = build_error_bo(REQUEST_ERROR, 1, 0, 77, 0, true);
-        assert_eq!(err[10], 77);
-    }
 
     // -----------------------------------------------------------------------
     // Error codes are unique and in range 1–17
@@ -808,19 +745,6 @@ mod tests {
         assert_eq!(err[1], LENGTH_ERROR);
         assert_eq!(u16::from_le_bytes([err[2], err[3]]), 100);
         assert_eq!(err[10], 28);
-    }
-
-    #[test]
-    fn build_error_bo_big_endian() {
-        let err = build_error_bo(VALUE_ERROR, 0x1234, 0xDEADBEEF, 33, 0, true);
-        assert_eq!(err.len(), 32);
-        assert_eq!(err[0], 0); // Error indicator
-        assert_eq!(err[1], VALUE_ERROR);
-        assert_eq!(u16::from_be_bytes([err[2], err[3]]), 0x1234); // Sequence (big-endian)
-        assert_eq!(
-            u32::from_be_bytes([err[4], err[5], err[6], err[7]]),
-            0xDEADBEEF
-        );
     }
 
     // -----------------------------------------------------------------------

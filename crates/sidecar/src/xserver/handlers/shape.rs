@@ -35,9 +35,8 @@ const SHAPE_NOTIFY_EVENT: u8 = 64;
 pub(crate) fn handle_shape_request(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
     let minor = data[1];
     debug!("SHAPE minor opcode: {minor}");
-    let bo = state.msb_first;
     let shape_err = |code: u8, bad_value: u32| {
-        crate::xserver::core::build_error_bo(code, seq, bad_value, 128, minor as u16, bo)
+        crate::xserver::core::build_error(code, seq, bad_value, 128, minor as u16)
     };
 
     match minor {
@@ -566,7 +565,6 @@ fn send_shape_notify(state: &mut ClientState, window_id: u32, kind: u8, seq: u16
         .unwrap_or(false);
 
     if has_subscribers {
-        let bo = state.msb_first;
         let event = serialize_event(&ShapeNotifyEvent {
             response_type: SHAPE_NOTIFY_EVENT,
             shape_kind: SK::from(kind),
@@ -578,7 +576,7 @@ fn send_shape_notify(state: &mut ClientState, window_id: u32, kind: u8, seq: u16
             extents_height: ext.height,
             server_time: state.timestamp(),
             shaped,
-        }, bo);
+        }, state.msb_first);
         state.pending_events.push(event);
     }
 }

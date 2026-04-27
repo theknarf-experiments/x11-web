@@ -97,14 +97,7 @@ macro_rules! parse_minor {
         match <$T>::try_parse_request($header, &$data[4..]) {
             Ok(r) => r,
             Err(_) => {
-                return crate::xserver::core::build_error_bo(
-                    crate::xserver::core::LENGTH_ERROR,
-                    $seq,
-                    0,
-                    $major,
-                    $minor as u16,
-                    $state.msb_first,
-                )
+                return crate::xserver::core::build_error(crate::xserver::core::LENGTH_ERROR, $seq, 0, $major, $minor as u16)
             }
         }
     };
@@ -284,14 +277,7 @@ pub(crate) fn handle_core_request(state: &mut ClientState, data: &[u8]) -> Vec<u
         _ => {
             warn!("Unhandled core X11 request opcode: {major_opcode} minor: {_minor}");
             // Return BadRequest error for unrecognized opcodes per X11 spec
-            super::core::build_error_bo(
-                REQUEST_ERROR,
-                seq,
-                major_opcode as u32,
-                major_opcode,
-                _minor as u16,
-                state.msb_first,
-            )
+            super::core::build_error(REQUEST_ERROR, seq, major_opcode as u32, major_opcode, _minor as u16)
         }
     }
 }

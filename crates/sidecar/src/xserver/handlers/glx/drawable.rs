@@ -119,14 +119,7 @@ pub(crate) fn handle_create_pixmap(state: &mut ClientState, data: &[u8], seq: u1
 
     // Validate the X pixmap exists
     if !state.pixmaps.contains_key(&x_pixmap) {
-        return crate::xserver::core::build_error_bo(
-            crate::xserver::core::PIXMAP_ERROR,
-            seq,
-            x_pixmap,
-            159,
-            22,
-            state.msb_first,
-        );
+        return crate::xserver::core::build_error(crate::xserver::core::PIXMAP_ERROR, seq, x_pixmap, 159, 22);
     }
 
     // Parse attribute pairs (terminated by key=0 or end of data)
