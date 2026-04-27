@@ -6,7 +6,7 @@ use x11rb_protocol::protocol::xinput as xi;
 use x11rb_protocol::protocol::xproto;
 use x11rb_protocol::x11_utils::RequestHeader;
 
-use crate::xserver::core::{read_u16_bo, read_u32_bo, write_u16_bo, write_u32_bo};
+use crate::xserver::core::{read_u16_bo, read_u32_bo, write_u16_bo};
 
 use super::device::*;
 use super::{
@@ -544,32 +544,18 @@ pub fn handle_request(
                 .map(|r| r.window)
                 .unwrap_or(0);
             debug!("XI 1.x GetDeviceDontPropagateList: window={window:#x}");
-            let count = xi1_dont_propagate
+            let classes = xi1_dont_propagate
                 .as_ref()
                 .and_then(|m| m.get(&window))
-                .map(|v| v.len() as u16)
-                .unwrap_or(0);
-            let mut reply = vec![0u8; 32];
-            reply[0] = 1;
-            write_u16_bo(&mut reply, 2, seq, msb_first);
-            reply[8] = 9;
-            write_u16_bo(&mut reply, 12, count, msb_first);
-            // If there are entries, append the event class list after the header.
-            if let Some(classes) = xi1_dont_propagate.as_ref().and_then(|m| m.get(&window)) {
-                let extra_bytes = classes.len() * 4;
-                let extra_units = ((extra_bytes + 3) / 4) as u32;
-                write_u32_bo(&mut reply, 4, extra_units, msb_first);
-                for &class in classes {
-                    let mut buf = [0u8; 4];
-                    if msb_first {
-                        buf[..4].copy_from_slice(&class.to_be_bytes());
-                    } else {
-                        buf[..4].copy_from_slice(&class.to_le_bytes());
-                    }
-                    reply.extend_from_slice(&buf);
-                }
-            }
-            reply
+                .cloned()
+                .unwrap_or_default();
+            let reply = xi::GetDeviceDontPropagateListReply {
+                xi_reply_type: 9,
+                sequence: seq,
+                length: 0,
+                classes,
+            };
+            serialize_xi_reply(&reply, msb_first)
         }
 
         // GetDeviceMotionEvents (10): return empty event list since we
@@ -577,27 +563,29 @@ pub fn handle_request(
         // spec-compliant — the motion_size in our ValuatorInfo is 0.
         10 => {
             debug!("XI 1.x GetDeviceMotionEvents: no motion history (virtual display)");
-            let mut reply = vec![0u8; 32];
-            reply[0] = 1;
-            write_u16_bo(&mut reply, 2, seq, msb_first);
-            reply[8] = 10;
-            // num_events = 0 (already zero), length = 0
-            reply
+            let reply = xi::GetDeviceMotionEventsReply {
+                xi_reply_type: 10,
+                sequence: seq,
+                length: 0,
+                num_axes: 0,
+                device_mode: xi::ValuatorMode::ABSOLUTE,
+                events: Vec::new(),
+            };
+            serialize_xi_reply(&reply, msb_first)
         }
 
         // GetDeviceFocus (20): return current focus window and RevertTo.
         20 => {
             debug!("XI 1.x GetDeviceFocus: focus={:#x}", *focus_window);
-            let mut reply = vec![0u8; 32];
-            reply[0] = 1;
-            write_u16_bo(&mut reply, 2, seq, msb_first);
-            reply[8] = 20;
-            // focus window
-            write_u32_bo(&mut reply, 12, *focus_window, msb_first);
-            // revert_to: PointerRoot=1
-            reply[16] = 1;
-            // time = CurrentTime (0)
-            reply
+            let reply = xi::GetDeviceFocusReply {
+                xi_reply_type: 20,
+                sequence: seq,
+                length: 0,
+                focus: *focus_window,
+                time: 0,
+                revert_to: xproto::InputFocus::POINTER_ROOT,
+            };
+            serialize_xi_reply(&reply, msb_first)
         }
 
         // GetDeviceKeyMapping (24): return the actual keymap for the
@@ -622,18 +610,13 @@ pub fn handle_request(
         // buttons (3 physical + 4 scroll).
         28 => {
             debug!("XI 1.x GetDeviceButtonMapping: returning identity");
-            let n_buttons = 7u8; // left/mid/right + scroll up/down/left/right
-            let map_len = ((n_buttons as usize + 3) & !3) / 4;
-            let mut reply = vec![0u8; 32 + map_len * 4];
-            reply[0] = 1;
-            reply[1] = n_buttons;
-            write_u16_bo(&mut reply, 2, seq, msb_first);
-            write_u32_bo(&mut reply, 4, map_len as u32, msb_first);
-            reply[8] = 28;
-            for i in 0..n_buttons as usize {
-                reply[32 + i] = (i + 1) as u8;
-            }
-            reply
+            let reply = xi::GetDeviceButtonMappingReply {
+                xi_reply_type: 28,
+                sequence: seq,
+                length: 0,
+                map: (1..=7).collect(),
+            };
+            serialize_xi_reply(&reply, msb_first)
         }
 
         // QueryDeviceState (30): return current button/key/valuator state.
@@ -665,13 +648,13 @@ pub fn handle_request(
             let device_id = req.as_ref().map(|r| r.device_id).unwrap_or(0);
             let mode = req.map(|r| u8::from(r.mode)).unwrap_or(0);
             debug!("XI 1.x SetDeviceMode: device_id={device_id} mode={mode}");
-            // SetDeviceMode requires a reply with status=0 (Success)
-            let mut reply = vec![0u8; 32];
-            reply[0] = 1;
-            write_u16_bo(&mut reply, 2, seq, msb_first);
-            reply[8] = 5;
-            reply[12] = 0; // status = Success
-            reply
+            let reply = xi::SetDeviceModeReply {
+                xi_reply_type: 5,
+                sequence: seq,
+                length: 0,
+                status: xproto::GrabStatus::SUCCESS,
+            };
+            serialize_xi_reply(&reply, msb_first)
         }
 
         // SelectExtensionEvent (6): track per-window XI 1.x event masks.
@@ -727,24 +710,26 @@ pub fn handle_request(
         // with status=Success.
         27 => {
             debug!("XI 1.x SetDeviceModifierMapping");
-            let mut reply = vec![0u8; 32];
-            reply[0] = 1;
-            write_u16_bo(&mut reply, 2, seq, msb_first);
-            reply[8] = 27;
-            reply[12] = 0; // status = MappingSuccess
-            reply
+            let reply = xi::SetDeviceModifierMappingReply {
+                xi_reply_type: 27,
+                sequence: seq,
+                length: 0,
+                status: xproto::MappingStatus::SUCCESS,
+            };
+            serialize_xi_reply(&reply, msb_first)
         }
 
         // SetDeviceButtonMapping (29): accept button mapping, reply with
         // status=Success.
         29 => {
             debug!("XI 1.x SetDeviceButtonMapping");
-            let mut reply = vec![0u8; 32];
-            reply[0] = 1;
-            write_u16_bo(&mut reply, 2, seq, msb_first);
-            reply[8] = 29;
-            reply[12] = 0; // status = MappingSuccess
-            reply
+            let reply = xi::SetDeviceButtonMappingReply {
+                xi_reply_type: 29,
+                sequence: seq,
+                length: 0,
+                status: xproto::MappingStatus::SUCCESS,
+            };
+            serialize_xi_reply(&reply, msb_first)
         }
 
         other => {
