@@ -1,6 +1,7 @@
 //! MIT-SCREEN-SAVER extension handler (opcode 152).
 
 use tracing::debug;
+use super::parse_minor;
 
 use super::super::client::ClientState;
 use crate::xserver::core::require_len;
@@ -54,12 +55,7 @@ pub(crate) fn handle_screen_saver_request(
             // SelectInput
             require_len!(data, 12, seq, 152, minor as u16, state.msb_first);
             use x11rb_protocol::protocol::screensaver::SelectInputRequest;
-            let req = match SelectInputRequest::try_parse_request(request_header(data), &data[4..]) {
-                Ok(r) => r,
-                Err(_) => return crate::xserver::core::build_error_bo(
-                    crate::xserver::core::LENGTH_ERROR, seq, 0, 152, minor as u16, state.msb_first,
-                ),
-            };
+            let req = parse_minor!(SelectInputRequest, data, state, seq, 152, minor as u16);
             let event_mask = u32::from(req.event_mask);
             state.screen_saver_event_mask = event_mask;
             debug!("ScreenSaver SelectInput: event_mask=0x{event_mask:08x}");
@@ -72,12 +68,7 @@ pub(crate) fn handle_screen_saver_request(
             require_len!(data, 24, seq, 152, minor as u16, state.msb_first);
             {
                 use x11rb_protocol::protocol::screensaver::SetAttributesRequest;
-                let req = match SetAttributesRequest::try_parse_request(request_header(data), &data[4..]) {
-                    Ok(r) => r,
-                    Err(_) => return crate::xserver::core::build_error_bo(
-                        crate::xserver::core::LENGTH_ERROR, seq, 0, 152, minor as u16, state.msb_first,
-                    ),
-                };
+                let req = parse_minor!(SetAttributesRequest, data, state, seq, 152, minor as u16);
                 let x = req.x;
                 let y = req.y;
                 let width = req.width;

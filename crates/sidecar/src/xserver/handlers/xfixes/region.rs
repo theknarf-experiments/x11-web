@@ -1,6 +1,7 @@
 //! XFIXES region operations.
 
 use tracing::debug;
+use super::super::parse_minor;
 
 use super::super::super::client::ClientState;
 use super::super::super::types::{RegionRect, XFixesRegion};
@@ -19,12 +20,7 @@ use x11rb_protocol::protocol::xfixes::{
 /// 5: CreateRegion
 pub(crate) fn handle_create_region(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
     require_len!(data, 8, seq, 138, 5, state.msb_first);
-    let req = match CreateRegionRequest::try_parse_request(request_header(data), &data[4..]) {
-        Ok(r) => r,
-        Err(_) => return crate::xserver::core::build_error_bo(
-            crate::xserver::core::LENGTH_ERROR, seq, 0, 138, 5, state.msb_first,
-        ),
-    };
+    let req = parse_minor!(CreateRegionRequest, data, state, seq, 138, 5);
     let region_id = req.region;
     let rects: Vec<RegionRect> = req.rectangles.iter().map(|r| RegionRect {
         x: r.x,
@@ -47,12 +43,7 @@ pub(crate) fn handle_create_region_from_bitmap(
     seq: u16,
 ) -> Vec<u8> {
     require_len!(data, 12, seq, 138, 6, state.msb_first);
-    let req = match CreateRegionFromBitmapRequest::try_parse_request(request_header(data), &data[4..]) {
-        Ok(r) => r,
-        Err(_) => return crate::xserver::core::build_error_bo(
-            crate::xserver::core::LENGTH_ERROR, seq, 0, 138, 6, state.msb_first,
-        ),
-    };
+    let req = parse_minor!(CreateRegionFromBitmapRequest, data, state, seq, 138, 6);
     let region_id = req.region;
     let bitmap_id = req.bitmap;
     // Create region from pixmap bitmap — use full pixmap bounds
@@ -77,12 +68,7 @@ pub(crate) fn handle_create_region_from_window(
     seq: u16,
 ) -> Vec<u8> {
     require_len!(data, 12, seq, 138, 7, state.msb_first);
-    let req = match CreateRegionFromWindowRequest::try_parse_request(request_header(data), &data[4..]) {
-        Ok(r) => r,
-        Err(_) => return crate::xserver::core::build_error_bo(
-            crate::xserver::core::LENGTH_ERROR, seq, 0, 138, 7, state.msb_first,
-        ),
-    };
+    let req = parse_minor!(CreateRegionFromWindowRequest, data, state, seq, 138, 7);
     let region_id = req.region;
     let window_id = req.window;
     let region = if let Some(w) = state.windows.get(&window_id) {
@@ -106,12 +92,7 @@ pub(crate) fn handle_create_region_from_gc(
     seq: u16,
 ) -> Vec<u8> {
     require_len!(data, 12, seq, 138, 8, state.msb_first);
-    let req = match CreateRegionFromGCRequest::try_parse_request(request_header(data), &data[4..]) {
-        Ok(r) => r,
-        Err(_) => return crate::xserver::core::build_error_bo(
-            crate::xserver::core::LENGTH_ERROR, seq, 0, 138, 8, state.msb_first,
-        ),
-    };
+    let req = parse_minor!(CreateRegionFromGCRequest, data, state, seq, 138, 8);
     let region_id = req.region;
     let gc_id = req.gc;
     let region = if let Some(gc) = state.gcs.get(&gc_id) {
@@ -144,12 +125,7 @@ pub(crate) fn handle_create_region_from_picture(
     seq: u16,
 ) -> Vec<u8> {
     require_len!(data, 12, seq, 138, 9, state.msb_first);
-    let req = match CreateRegionFromPictureRequest::try_parse_request(request_header(data), &data[4..]) {
-        Ok(r) => r,
-        Err(_) => return crate::xserver::core::build_error_bo(
-            crate::xserver::core::LENGTH_ERROR, seq, 0, 138, 9, state.msb_first,
-        ),
-    };
+    let req = parse_minor!(CreateRegionFromPictureRequest, data, state, seq, 138, 9);
     let region_id = req.region;
     let picture_id = req.picture;
     // Try to use the picture's clip region first; fall back to drawable bounds.
@@ -195,12 +171,7 @@ pub(crate) fn handle_create_region_from_picture(
 /// 10: DestroyRegion
 pub(crate) fn handle_destroy_region(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
     require_len!(data, 8, seq, 138, 10, state.msb_first);
-    let req = match DestroyRegionRequest::try_parse_request(request_header(data), &data[4..]) {
-        Ok(r) => r,
-        Err(_) => return crate::xserver::core::build_error_bo(
-            crate::xserver::core::LENGTH_ERROR, seq, 0, 138, 10, state.msb_first,
-        ),
-    };
+    let req = parse_minor!(DestroyRegionRequest, data, state, seq, 138, 10);
     let region_id = req.region;
     state.xfixes_regions.remove(&region_id);
     state.recycle_xid(region_id);
@@ -211,12 +182,7 @@ pub(crate) fn handle_destroy_region(state: &mut ClientState, data: &[u8], seq: u
 /// 11: SetRegion
 pub(crate) fn handle_set_region(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
     require_len!(data, 8, seq, 138, 11, state.msb_first);
-    let req = match SetRegionRequest::try_parse_request(request_header(data), &data[4..]) {
-        Ok(r) => r,
-        Err(_) => return crate::xserver::core::build_error_bo(
-            crate::xserver::core::LENGTH_ERROR, seq, 0, 138, 11, state.msb_first,
-        ),
-    };
+    let req = parse_minor!(SetRegionRequest, data, state, seq, 138, 11);
     let region_id = req.region;
     let rects: Vec<RegionRect> = req.rectangles.iter().map(|r| RegionRect {
         x: r.x,
@@ -233,12 +199,7 @@ pub(crate) fn handle_set_region(state: &mut ClientState, data: &[u8], seq: u16) 
 /// 12: CopyRegion
 pub(crate) fn handle_copy_region(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
     require_len!(data, 12, seq, 138, 12, state.msb_first);
-    let req = match CopyRegionRequest::try_parse_request(request_header(data), &data[4..]) {
-        Ok(r) => r,
-        Err(_) => return crate::xserver::core::build_error_bo(
-            crate::xserver::core::LENGTH_ERROR, seq, 0, 138, 12, state.msb_first,
-        ),
-    };
+    let req = parse_minor!(CopyRegionRequest, data, state, seq, 138, 12);
     let src_id = req.source;
     let dst_id = req.destination;
     let region = state
@@ -253,12 +214,7 @@ pub(crate) fn handle_copy_region(state: &mut ClientState, data: &[u8], seq: u16)
 /// 13: UnionRegion
 pub(crate) fn handle_union_region(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
     require_len!(data, 16, seq, 138, 13, state.msb_first);
-    let req = match UnionRegionRequest::try_parse_request(request_header(data), &data[4..]) {
-        Ok(r) => r,
-        Err(_) => return crate::xserver::core::build_error_bo(
-            crate::xserver::core::LENGTH_ERROR, seq, 0, 138, 13, state.msb_first,
-        ),
-    };
+    let req = parse_minor!(UnionRegionRequest, data, state, seq, 138, 13);
     let src1 = req.source1;
     let src2 = req.source2;
     let dst = req.destination;
@@ -279,12 +235,7 @@ pub(crate) fn handle_union_region(state: &mut ClientState, data: &[u8], seq: u16
 /// 14: IntersectRegion
 pub(crate) fn handle_intersect_region(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
     require_len!(data, 16, seq, 138, 14, state.msb_first);
-    let req = match IntersectRegionRequest::try_parse_request(request_header(data), &data[4..]) {
-        Ok(r) => r,
-        Err(_) => return crate::xserver::core::build_error_bo(
-            crate::xserver::core::LENGTH_ERROR, seq, 0, 138, 14, state.msb_first,
-        ),
-    };
+    let req = parse_minor!(IntersectRegionRequest, data, state, seq, 138, 14);
     let src1 = req.source1;
     let src2 = req.source2;
     let dst = req.destination;
@@ -305,12 +256,7 @@ pub(crate) fn handle_intersect_region(state: &mut ClientState, data: &[u8], seq:
 /// 15: SubtractRegion
 pub(crate) fn handle_subtract_region(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
     require_len!(data, 16, seq, 138, 15, state.msb_first);
-    let req = match SubtractRegionRequest::try_parse_request(request_header(data), &data[4..]) {
-        Ok(r) => r,
-        Err(_) => return crate::xserver::core::build_error_bo(
-            crate::xserver::core::LENGTH_ERROR, seq, 0, 138, 15, state.msb_first,
-        ),
-    };
+    let req = parse_minor!(SubtractRegionRequest, data, state, seq, 138, 15);
     let src1 = req.source1;
     let src2 = req.source2;
     let dst = req.destination;
@@ -331,12 +277,7 @@ pub(crate) fn handle_subtract_region(state: &mut ClientState, data: &[u8], seq: 
 /// 16: InvertRegion
 pub(crate) fn handle_invert_region(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
     require_len!(data, 20, seq, 138, 16, state.msb_first);
-    let req = match InvertRegionRequest::try_parse_request(request_header(data), &data[4..]) {
-        Ok(r) => r,
-        Err(_) => return crate::xserver::core::build_error_bo(
-            crate::xserver::core::LENGTH_ERROR, seq, 0, 138, 16, state.msb_first,
-        ),
-    };
+    let req = parse_minor!(InvertRegionRequest, data, state, seq, 138, 16);
     let src = req.source;
     let dst = req.destination;
     let r = state
@@ -357,12 +298,7 @@ pub(crate) fn handle_invert_region(state: &mut ClientState, data: &[u8], seq: u1
 /// 17: TranslateRegion
 pub(crate) fn handle_translate_region(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
     require_len!(data, 12, seq, 138, 17, state.msb_first);
-    let req = match TranslateRegionRequest::try_parse_request(request_header(data), &data[4..]) {
-        Ok(r) => r,
-        Err(_) => return crate::xserver::core::build_error_bo(
-            crate::xserver::core::LENGTH_ERROR, seq, 0, 138, 17, state.msb_first,
-        ),
-    };
+    let req = parse_minor!(TranslateRegionRequest, data, state, seq, 138, 17);
     let region_id = req.region;
     let dx = req.dx;
     let dy = req.dy;
@@ -375,12 +311,7 @@ pub(crate) fn handle_translate_region(state: &mut ClientState, data: &[u8], seq:
 /// 18: RegionExtents
 pub(crate) fn handle_region_extents(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
     require_len!(data, 12, seq, 138, 18, state.msb_first);
-    let req = match RegionExtentsRequest::try_parse_request(request_header(data), &data[4..]) {
-        Ok(r) => r,
-        Err(_) => return crate::xserver::core::build_error_bo(
-            crate::xserver::core::LENGTH_ERROR, seq, 0, 138, 18, state.msb_first,
-        ),
-    };
+    let req = parse_minor!(RegionExtentsRequest, data, state, seq, 138, 18);
     let src = req.source;
     let dst = req.destination;
     let ext = state
@@ -402,12 +333,7 @@ pub(crate) fn handle_region_extents(state: &mut ClientState, data: &[u8], seq: u
 /// 19: FetchRegion
 pub(crate) fn handle_fetch_region(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
     require_len!(data, 8, seq, 138, 19, state.msb_first);
-    let req = match FetchRegionRequest::try_parse_request(request_header(data), &data[4..]) {
-        Ok(r) => r,
-        Err(_) => return crate::xserver::core::build_error_bo(
-            crate::xserver::core::LENGTH_ERROR, seq, 0, 138, 19, state.msb_first,
-        ),
-    };
+    let req = parse_minor!(FetchRegionRequest, data, state, seq, 138, 19);
     let region_id = req.region;
     let region = state.xfixes_regions.get(&region_id);
     let (ext, rects) = match region {
@@ -445,12 +371,7 @@ pub(crate) fn handle_fetch_region(state: &mut ClientState, data: &[u8], seq: u16
 /// 20: SetGCClipRegion
 pub(crate) fn handle_set_gc_clip_region(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
     require_len!(data, 16, seq, 138, 20, state.msb_first);
-    let req = match SetGCClipRegionRequest::try_parse_request(request_header(data), &data[4..]) {
-        Ok(r) => r,
-        Err(_) => return crate::xserver::core::build_error_bo(
-            crate::xserver::core::LENGTH_ERROR, seq, 0, 138, 20, state.msb_first,
-        ),
-    };
+    let req = parse_minor!(SetGCClipRegionRequest, data, state, seq, 138, 20);
     let gc_id = req.gc;
     let region_id = req.region;
     let x_origin = req.x_origin;
@@ -530,12 +451,7 @@ pub(crate) fn handle_set_picture_clip_region(
     seq: u16,
 ) -> Vec<u8> {
     require_len!(data, 16, seq, 138, 22, state.msb_first);
-    let req = match SetPictureClipRegionRequest::try_parse_request(request_header(data), &data[4..]) {
-        Ok(r) => r,
-        Err(_) => return crate::xserver::core::build_error_bo(
-            crate::xserver::core::LENGTH_ERROR, seq, 0, 138, 22, state.msb_first,
-        ),
-    };
+    let req = parse_minor!(SetPictureClipRegionRequest, data, state, seq, 138, 22);
     let pic_id = req.picture;
     let region_id = req.region;
     let x_origin = req.x_origin;
@@ -558,12 +474,7 @@ pub(crate) fn handle_set_picture_clip_region(
 /// 28: ExpandRegion
 pub(crate) fn handle_expand_region(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
     require_len!(data, 20, seq, 138, 28, state.msb_first);
-    let req = match ExpandRegionRequest::try_parse_request(request_header(data), &data[4..]) {
-        Ok(r) => r,
-        Err(_) => return crate::xserver::core::build_error_bo(
-            crate::xserver::core::LENGTH_ERROR, seq, 0, 138, 28, state.msb_first,
-        ),
-    };
+    let req = parse_minor!(ExpandRegionRequest, data, state, seq, 138, 28);
     let src = req.source;
     let dst = req.destination;
     let left = req.left as i16;

@@ -1,6 +1,7 @@
 //! XC-MISC and Present extension handlers.
 
 use tracing::{debug, info};
+use super::parse_minor;
 
 use super::super::client::ClientState;
 use super::super::types::PresentSubscription;
@@ -125,12 +126,7 @@ pub(crate) fn handle_present_request(state: &mut ClientState, data: &[u8], seq: 
         }
         // Pixmap (PresentPixmap) -- the critical operation
         1 => {
-            let req = match PresentPixmapRequest::try_parse_request(request_header(data), &data[4..]) {
-                Ok(r) => r,
-                Err(_) => return crate::xserver::core::build_error_bo(
-                    crate::xserver::core::LENGTH_ERROR, seq, 0, 148, minor as u16, state.msb_first,
-                ),
-            };
+            let req = parse_minor!(PresentPixmapRequest, data, state, seq, 148, minor as u16);
             let window = req.window;
             let pixmap = req.pixmap;
             let serial = req.serial;
@@ -507,12 +503,7 @@ pub(crate) fn handle_present_request(state: &mut ClientState, data: &[u8], seq: 
         }
         // NotifyMSC
         2 => {
-            let req = match NotifyMSCRequest::try_parse_request(request_header(data), &data[4..]) {
-                Ok(r) => r,
-                Err(_) => return crate::xserver::core::build_error_bo(
-                    crate::xserver::core::LENGTH_ERROR, seq, 0, 148, minor as u16, state.msb_first,
-                ),
-            };
+            let req = parse_minor!(NotifyMSCRequest, data, state, seq, 148, minor as u16);
             let window = req.window;
             let serial = req.serial;
             let _target_msc = req.target_msc;
@@ -565,12 +556,7 @@ pub(crate) fn handle_present_request(state: &mut ClientState, data: &[u8], seq: 
         }
         // SelectInput
         3 => {
-            let req = match PresentSelectInputRequest::try_parse_request(request_header(data), &data[4..]) {
-                Ok(r) => r,
-                Err(_) => return crate::xserver::core::build_error_bo(
-                    crate::xserver::core::LENGTH_ERROR, seq, 0, 148, minor as u16, state.msb_first,
-                ),
-            };
+            let req = parse_minor!(PresentSelectInputRequest, data, state, seq, 148, minor as u16);
             let event_id = req.eid;
             let window = req.window;
             let event_mask = u32::from(req.event_mask);

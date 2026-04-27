@@ -1,6 +1,7 @@
 //! XTEST extension handler (opcode 150).
 
 use tracing::{debug, warn};
+use super::parse_minor;
 
 use super::super::client::ClientState;
 use crate::xserver::core::require_len;
@@ -22,12 +23,7 @@ pub(crate) fn handle_xtest_request(state: &mut ClientState, data: &[u8], seq: u1
             // CompareCursor
             require_len!(data, 12, seq, 150, minor as u16, state.msb_first);
             use x11rb_protocol::protocol::xtest::CompareCursorRequest;
-            let req = match CompareCursorRequest::try_parse_request(request_header(data), &data[4..]) {
-                Ok(r) => r,
-                Err(_) => return crate::xserver::core::build_error_bo(
-                    crate::xserver::core::LENGTH_ERROR, seq, 0, 150, minor as u16, state.msb_first,
-                ),
-            };
+            let req = parse_minor!(CompareCursorRequest, data, state, seq, 150, minor as u16);
             let window = req.window;
             let cursor_id = req.cursor;
 
@@ -68,12 +64,7 @@ pub(crate) fn handle_xtest_request(state: &mut ClientState, data: &[u8], seq: u1
                 // parses the fields we need. However the event_type/detail are
                 // embedded at specific offsets that the typed struct exposes.
                 use x11rb_protocol::protocol::xtest::FakeInputRequest;
-                let req = match FakeInputRequest::try_parse_request(request_header(data), &data[4..]) {
-                    Ok(r) => r,
-                    Err(_) => return crate::xserver::core::build_error_bo(
-                        crate::xserver::core::LENGTH_ERROR, seq, 0, 150, minor as u16, state.msb_first,
-                    ),
-                };
+                let req = parse_minor!(FakeInputRequest, data, state, seq, 150, minor as u16);
                 let event_type = req.type_;
                 let detail = req.detail;
                 let root_x = req.root_x;

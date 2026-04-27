@@ -1,6 +1,7 @@
 //! MIT-SHM (Shared Memory) extension handler.
 
 use tracing::{info, warn};
+use super::parse_minor;
 
 use super::super::client::ClientState;
 use super::super::core::ROOT_VISUAL;
@@ -35,12 +36,7 @@ pub(crate) fn handle_shm_request(state: &mut ClientState, data: &[u8], seq: u16)
         // Attach
         1 => {
             require_len!(data, 16, seq, 130, minor as u16, state.msb_first);
-            let req = match AttachRequest::try_parse_request(request_header(data), &data[4..]) {
-                Ok(r) => r,
-                Err(_) => return crate::xserver::core::build_error_bo(
-                    crate::xserver::core::LENGTH_ERROR, seq, 0, 130, minor as u16, state.msb_first,
-                ),
-            };
+            let req = parse_minor!(AttachRequest, data, state, seq, 130, minor as u16);
             let shmseg = req.shmseg;
             let shmid = req.shmid as i32;
             let read_only = req.read_only;
@@ -93,12 +89,7 @@ pub(crate) fn handle_shm_request(state: &mut ClientState, data: &[u8], seq: u16)
         // Detach
         2 => {
             require_len!(data, 8, seq, 130, minor as u16, state.msb_first);
-            let req = match DetachRequest::try_parse_request(request_header(data), &data[4..]) {
-                Ok(r) => r,
-                Err(_) => return crate::xserver::core::build_error_bo(
-                    crate::xserver::core::LENGTH_ERROR, seq, 0, 130, minor as u16, state.msb_first,
-                ),
-            };
+            let req = parse_minor!(DetachRequest, data, state, seq, 130, minor as u16);
             let shmseg = req.shmseg;
             info!("SHM Detach: shmseg={shmseg}");
 
@@ -115,12 +106,7 @@ pub(crate) fn handle_shm_request(state: &mut ClientState, data: &[u8], seq: u16)
         3 => {
             require_len!(data, 40, seq, 130, minor as u16, state.msb_first);
 
-            let req = match PutImageRequest::try_parse_request(request_header(data), &data[4..]) {
-                Ok(r) => r,
-                Err(_) => return crate::xserver::core::build_error_bo(
-                    crate::xserver::core::LENGTH_ERROR, seq, 0, 130, minor as u16, state.msb_first,
-                ),
-            };
+            let req = parse_minor!(PutImageRequest, data, state, seq, 130, minor as u16);
             let drawable = req.drawable;
             let _gc = req.gc;
             let total_width = req.total_width as usize;
@@ -220,12 +206,7 @@ pub(crate) fn handle_shm_request(state: &mut ClientState, data: &[u8], seq: u16)
         // GetImage
         4 => {
             require_len!(data, 32, seq, 130, minor as u16, state.msb_first);
-            let req = match GetImageRequest::try_parse_request(request_header(data), &data[4..]) {
-                Ok(r) => r,
-                Err(_) => return crate::xserver::core::build_error_bo(
-                    crate::xserver::core::LENGTH_ERROR, seq, 0, 130, minor as u16, state.msb_first,
-                ),
-            };
+            let req = parse_minor!(GetImageRequest, data, state, seq, 130, minor as u16);
             let drawable = req.drawable;
             let src_x = req.x;
             let src_y = req.y;
@@ -275,12 +256,7 @@ pub(crate) fn handle_shm_request(state: &mut ClientState, data: &[u8], seq: u16)
         // CreatePixmap
         5 => {
             require_len!(data, 28, seq, 130, minor as u16, state.msb_first);
-            let req = match CreatePixmapRequest::try_parse_request(request_header(data), &data[4..]) {
-                Ok(r) => r,
-                Err(_) => return crate::xserver::core::build_error_bo(
-                    crate::xserver::core::LENGTH_ERROR, seq, 0, 130, minor as u16, state.msb_first,
-                ),
-            };
+            let req = parse_minor!(CreatePixmapRequest, data, state, seq, 130, minor as u16);
             let pid = req.pid;
             let width = req.width;
             let height = req.height;
@@ -395,12 +371,7 @@ pub(crate) fn handle_shm_request(state: &mut ClientState, data: &[u8], seq: u16)
         // Server creates an SHM segment and returns the fd to the client.
         7 => {
             require_len!(data, 16, seq, 130, minor as u16, state.msb_first);
-            let req = match CreateSegmentRequest::try_parse_request(request_header(data), &data[4..]) {
-                Ok(r) => r,
-                Err(_) => return crate::xserver::core::build_error_bo(
-                    crate::xserver::core::LENGTH_ERROR, seq, 0, 130, minor as u16, state.msb_first,
-                ),
-            };
+            let req = parse_minor!(CreateSegmentRequest, data, state, seq, 130, minor as u16);
             let shmseg = req.shmseg;
             let size = req.size as usize;
             let read_only = req.read_only;

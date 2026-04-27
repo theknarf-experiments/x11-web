@@ -1,6 +1,7 @@
 //! DPMS (Display Power Management Signaling) extension handler (opcode 151).
 
 use tracing::debug;
+use super::parse_minor;
 
 use super::super::client::ClientState;
 use crate::xserver::core::require_len;
@@ -36,12 +37,7 @@ pub(crate) fn handle_dpms_request(state: &mut ClientState, data: &[u8], seq: u16
             // SetTimeouts
             require_len!(data, 10, seq, 151, minor as u16, state.msb_first);
             use x11rb_protocol::protocol::dpms::SetTimeoutsRequest;
-            let req = match SetTimeoutsRequest::try_parse_request(request_header(data), &data[4..]) {
-                Ok(r) => r,
-                Err(_) => return crate::xserver::core::build_error_bo(
-                    crate::xserver::core::LENGTH_ERROR, seq, 0, 151, minor as u16, state.msb_first,
-                ),
-            };
+            let req = parse_minor!(SetTimeoutsRequest, data, state, seq, 151, minor as u16);
             state.dpms_standby_timeout = req.standby_timeout;
             state.dpms_suspend_timeout = req.suspend_timeout;
             state.dpms_off_timeout = req.off_timeout;
@@ -68,12 +64,7 @@ pub(crate) fn handle_dpms_request(state: &mut ClientState, data: &[u8], seq: u16
             // ForceLevel
             require_len!(data, 6, seq, 151, minor as u16, state.msb_first);
             use x11rb_protocol::protocol::dpms::ForceLevelRequest;
-            let req = match ForceLevelRequest::try_parse_request(request_header(data), &data[4..]) {
-                Ok(r) => r,
-                Err(_) => return crate::xserver::core::build_error_bo(
-                    crate::xserver::core::LENGTH_ERROR, seq, 0, 151, minor as u16, state.msb_first,
-                ),
-            };
+            let req = parse_minor!(ForceLevelRequest, data, state, seq, 151, minor as u16);
             let level = u16::from(req.power_level);
             // Per DPMS spec: level must be 0-3 (On, Standby, Suspend, Off)
             if level > 3 {

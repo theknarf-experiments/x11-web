@@ -1,6 +1,7 @@
 //! Composite and DAMAGE extension handlers.
 
 use tracing::{debug, info, warn};
+use super::parse_minor;
 
 use super::super::client::ClientState;
 use super::super::core::{OVERLAY_WINDOW, ROOT_COLORMAP};
@@ -32,12 +33,7 @@ pub(crate) fn handle_damage_request(state: &mut ClientState, data: &[u8], seq: u
         }
         1 => {
             // DamageCreate
-            let req = match DamageCreateRequest::try_parse_request(request_header(data), &data[4..]) {
-                Ok(r) => r,
-                Err(_) => return crate::xserver::core::build_error_bo(
-                    crate::xserver::core::LENGTH_ERROR, seq, 0, 143, minor as u16, state.msb_first,
-                ),
-            };
+            let req = parse_minor!(DamageCreateRequest, data, state, seq, 143, minor as u16);
             let damage_id = req.damage;
             let drawable = req.drawable;
             let level = u8::from(req.level);
@@ -54,12 +50,7 @@ pub(crate) fn handle_damage_request(state: &mut ClientState, data: &[u8], seq: u
         }
         2 => {
             // DamageDestroy
-            let req = match DamageDestroyRequest::try_parse_request(request_header(data), &data[4..]) {
-                Ok(r) => r,
-                Err(_) => return crate::xserver::core::build_error_bo(
-                    crate::xserver::core::LENGTH_ERROR, seq, 0, 143, minor as u16, state.msb_first,
-                ),
-            };
+            let req = parse_minor!(DamageDestroyRequest, data, state, seq, 143, minor as u16);
             let damage_id = req.damage;
             debug!("DAMAGE Destroy: id={damage_id:#x}");
             state.damage_regions.remove(&damage_id);
@@ -68,12 +59,7 @@ pub(crate) fn handle_damage_request(state: &mut ClientState, data: &[u8], seq: u
         }
         3 => {
             // DamageSubtract
-            let req = match DamageSubtractRequest::try_parse_request(request_header(data), &data[4..]) {
-                Ok(r) => r,
-                Err(_) => return crate::xserver::core::build_error_bo(
-                    crate::xserver::core::LENGTH_ERROR, seq, 0, 143, minor as u16, state.msb_first,
-                ),
-            };
+            let req = parse_minor!(DamageSubtractRequest, data, state, seq, 143, minor as u16);
             let damage_id = req.damage;
             let repair = req.repair;
             let parts = req.parts;
@@ -111,12 +97,7 @@ pub(crate) fn handle_damage_request(state: &mut ClientState, data: &[u8], seq: u
         }
         4 => {
             // DamageAdd: manually add damage to a drawable
-            let req = match DamageAddRequest::try_parse_request(request_header(data), &data[4..]) {
-                Ok(r) => r,
-                Err(_) => return crate::xserver::core::build_error_bo(
-                    crate::xserver::core::LENGTH_ERROR, seq, 0, 143, minor as u16, state.msb_first,
-                ),
-            };
+            let req = parse_minor!(DamageAddRequest, data, state, seq, 143, minor as u16);
             let drawable = req.drawable;
             let region = req.region;
             debug!("DAMAGE Add: drawable={drawable:#x} region={region:#x}");
@@ -159,12 +140,7 @@ pub(crate) fn handle_x_composite_request(
         }
         1 => {
             // RedirectWindow
-            let req = match RedirectWindowRequest::try_parse_request(request_header(data), &data[4..]) {
-                Ok(r) => r,
-                Err(_) => return crate::xserver::core::build_error_bo(
-                    crate::xserver::core::LENGTH_ERROR, seq, 0, 142, minor as u16, state.msb_first,
-                ),
-            };
+            let req = parse_minor!(RedirectWindowRequest, data, state, seq, 142, minor as u16);
             let window = req.window;
             let update = u8::from(req.update);
             info!("Composite RedirectWindow: window={window:#x} update={update}");
@@ -184,12 +160,7 @@ pub(crate) fn handle_x_composite_request(
         }
         2 => {
             // RedirectSubwindows
-            let req = match RedirectSubwindowsRequest::try_parse_request(request_header(data), &data[4..]) {
-                Ok(r) => r,
-                Err(_) => return crate::xserver::core::build_error_bo(
-                    crate::xserver::core::LENGTH_ERROR, seq, 0, 142, minor as u16, state.msb_first,
-                ),
-            };
+            let req = parse_minor!(RedirectSubwindowsRequest, data, state, seq, 142, minor as u16);
             let window = req.window;
             let update = u8::from(req.update);
             info!("Composite RedirectSubwindows: window={window:#x} update={update}");
@@ -219,12 +190,7 @@ pub(crate) fn handle_x_composite_request(
         }
         3 => {
             // UnredirectWindow
-            let req = match UnredirectWindowRequest::try_parse_request(request_header(data), &data[4..]) {
-                Ok(r) => r,
-                Err(_) => return crate::xserver::core::build_error_bo(
-                    crate::xserver::core::LENGTH_ERROR, seq, 0, 142, minor as u16, state.msb_first,
-                ),
-            };
+            let req = parse_minor!(UnredirectWindowRequest, data, state, seq, 142, minor as u16);
             let window = req.window;
             debug!("Composite UnredirectWindow: window={window:#x}");
             if let Some(win) = state.windows.get_mut(&window) {
@@ -243,12 +209,7 @@ pub(crate) fn handle_x_composite_request(
         }
         4 => {
             // UnredirectSubwindows
-            let req = match UnredirectSubwindowsRequest::try_parse_request(request_header(data), &data[4..]) {
-                Ok(r) => r,
-                Err(_) => return crate::xserver::core::build_error_bo(
-                    crate::xserver::core::LENGTH_ERROR, seq, 0, 142, minor as u16, state.msb_first,
-                ),
-            };
+            let req = parse_minor!(UnredirectSubwindowsRequest, data, state, seq, 142, minor as u16);
             let window = req.window;
             debug!("Composite UnredirectSubwindows: window={window:#x}");
             if !state.windows.contains_key(&window) {
@@ -276,12 +237,7 @@ pub(crate) fn handle_x_composite_request(
         }
         5 => {
             // CreateRegionFromBorderClip
-            let req = match CreateRegionFromBorderClipRequest::try_parse_request(request_header(data), &data[4..]) {
-                Ok(r) => r,
-                Err(_) => return crate::xserver::core::build_error_bo(
-                    crate::xserver::core::LENGTH_ERROR, seq, 0, 142, minor as u16, state.msb_first,
-                ),
-            };
+            let req = parse_minor!(CreateRegionFromBorderClipRequest, data, state, seq, 142, minor as u16);
             let region_id = req.region;
             let window = req.window;
             debug!(
@@ -322,12 +278,7 @@ pub(crate) fn handle_x_composite_request(
             //
             // For redirected windows this is the live off-screen surface.
             // For non-redirected windows we clone a snapshot (legacy compat).
-            let req = match NameWindowPixmapRequest::try_parse_request(request_header(data), &data[4..]) {
-                Ok(r) => r,
-                Err(_) => return crate::xserver::core::build_error_bo(
-                    crate::xserver::core::LENGTH_ERROR, seq, 0, 142, minor as u16, state.msb_first,
-                ),
-            };
+            let req = parse_minor!(NameWindowPixmapRequest, data, state, seq, 142, minor as u16);
             let window = req.window;
             let pixmap = req.pixmap;
             if let Some(win) = state.windows.get(&window) {
@@ -374,12 +325,7 @@ pub(crate) fn handle_x_composite_request(
             // GetOverlayWindow: create (if needed) and return an InputOutput overlay
             // window positioned above all other windows at the root level.
             // The overlay window is transparent and covers the entire screen.
-            let _req = match GetOverlayWindowRequest::try_parse_request(request_header(data), &data[4..]) {
-                Ok(r) => r,
-                Err(_) => return crate::xserver::core::build_error_bo(
-                    crate::xserver::core::LENGTH_ERROR, seq, 0, 142, minor as u16, state.msb_first,
-                ),
-            };
+            let _req = parse_minor!(GetOverlayWindowRequest, data, state, seq, 142, minor as u16);
             if !state.windows.contains_key(&OVERLAY_WINDOW) {
                 let w = state.screen_width;
                 let h = state.screen_height;
@@ -451,12 +397,7 @@ pub(crate) fn handle_x_composite_request(
             // ReleaseOverlayWindow
             // Decrements the internal reference count on the overlay window.
             // When the count reaches zero the overlay is no longer in use.
-            let req = match ReleaseOverlayWindowRequest::try_parse_request(request_header(data), &data[4..]) {
-                Ok(r) => r,
-                Err(_) => return crate::xserver::core::build_error_bo(
-                    crate::xserver::core::LENGTH_ERROR, seq, 0, 142, minor as u16, state.msb_first,
-                ),
-            };
+            let req = parse_minor!(ReleaseOverlayWindowRequest, data, state, seq, 142, minor as u16);
             let window = req.window;
             if state.overlay_ref_count > 0 {
                 state.overlay_ref_count -= 1;
