@@ -3,22 +3,13 @@ use tracing::{debug, info};
 use super::super::parse_minor;
 use super::{
     composite_pixel, composite_pixel_ca, pict_format_has_alpha, point_in_triangle,
-    resolve_source_color, resolve_source_pixels, zero_src_has_no_effect, ClipSnapshot,
+    render_err, resolve_source_color, resolve_source_pixels, zero_src_has_no_effect, ClipSnapshot,
 };
 use crate::xserver::ClientState;
 use x11rb_protocol::protocol::render::{
     AddTrapsRequest, CompositeRequest, FillRectanglesRequest, Fixed, TrapezoidsRequest,
     TriFanRequest, TriStripRequest, TrianglesRequest,
 };
-
-/// RENDER major opcode (assigned at QueryExtension).
-const RENDER_MAJOR_OPCODE: u8 = 139;
-
-/// Build a RENDER protocol error reply.
-#[inline]
-fn render_err(code: u8, seq: u16, bad_value: u32, minor: u16, msb_first: bool) -> Vec<u8> {
-    crate::xserver::core::build_error_bo(code, seq, bad_value, RENDER_MAJOR_OPCODE, minor, msb_first)
-}
 
 /// The main compositing operation.
 pub(crate) fn handle_composite(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {

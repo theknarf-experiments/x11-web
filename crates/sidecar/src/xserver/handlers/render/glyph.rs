@@ -3,8 +3,9 @@ use tracing::debug;
 
 use super::super::parse_minor;
 use super::{
-    composite_pixel, composite_pixel_ca, pad4, pict_format_has_alpha, resolve_source_color,
-    ClipSnapshot, GlyphSetState, StoredGlyph, PICTFORMAT_A1, PICTFORMAT_A8, PICTFORMAT_ARGB32,
+    composite_pixel, composite_pixel_ca, pad4, pict_format_has_alpha, render_err,
+    resolve_source_color, ClipSnapshot, GlyphSetState, StoredGlyph, PICTFORMAT_A1, PICTFORMAT_A8,
+    PICTFORMAT_ARGB32,
 };
 use crate::xserver::core::require_len;
 use crate::xserver::core::{read_i16_bo, read_u16_bo, read_u32_bo};
@@ -394,14 +395,7 @@ pub(crate) fn handle_composite_glyphs(
     let dst_draw = match dst_drawable {
         Some(d) => d,
         None => {
-            return crate::xserver::core::build_error_bo(
-                crate::xserver::core::VALUE_ERROR,
-                seq,
-                dst_pic,
-                139,
-                minor,
-                bo,
-            )
+            return render_err(crate::xserver::core::VALUE_ERROR, seq, dst_pic, minor, bo);
         }
     };
     let clip = ClipSnapshot::from_picture(state, dst_pic);

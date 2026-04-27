@@ -2,7 +2,7 @@ use tracing::debug;
 
 use super::super::parse_minor;
 use super::{
-    ConicalGradientState, GradientStop, LinearGradientState, PictFilter, PictureState,
+    render_err, ConicalGradientState, GradientStop, LinearGradientState, PictFilter, PictureState,
     RadialGradientState, SolidFillState, PICTFORMAT_ARGB32,
 };
 use crate::xserver::core::require_len;
@@ -50,14 +50,7 @@ pub(crate) fn handle_create_gradient_fill(
         36 => handle_create_conical_gradient(state, data, seq),
         _ => {
             // Unreachable from dispatch, but return proper error if called directly
-            crate::xserver::core::build_error_bo(
-                crate::xserver::core::REQUEST_ERROR,
-                0,
-                minor as u32,
-                139,
-                minor as u16,
-                state.msb_first,
-            )
+            render_err(crate::xserver::core::REQUEST_ERROR, 0, minor as u32, minor as u16, state.msb_first)
         }
     }
 }
@@ -78,14 +71,7 @@ fn handle_create_linear_gradient(state: &mut ClientState, data: &[u8], seq: u16)
 
     // Sanity bound
     if num_stops > 1024 {
-        return crate::xserver::core::build_error_bo(
-            crate::xserver::core::VALUE_ERROR,
-            seq,
-            num_stops as u32,
-            139,
-            minor,
-            bo,
-        );
+        return render_err(crate::xserver::core::VALUE_ERROR, seq, num_stops as u32, minor, bo);
     }
 
     let mut stops = Vec::with_capacity(num_stops);
@@ -268,14 +254,7 @@ fn handle_create_radial_gradient(state: &mut ClientState, data: &[u8], seq: u16)
     let num_stops = req.stops.len();
 
     if num_stops > 1024 {
-        return crate::xserver::core::build_error_bo(
-            crate::xserver::core::VALUE_ERROR,
-            seq,
-            num_stops as u32,
-            139,
-            minor,
-            bo,
-        );
+        return render_err(crate::xserver::core::VALUE_ERROR, seq, num_stops as u32, minor, bo);
     }
 
     let mut stops = Vec::with_capacity(num_stops);
@@ -418,14 +397,7 @@ fn handle_create_conical_gradient(state: &mut ClientState, data: &[u8], seq: u16
     let num_stops = req.stops.len();
 
     if num_stops > 1024 {
-        return crate::xserver::core::build_error_bo(
-            crate::xserver::core::VALUE_ERROR,
-            seq,
-            num_stops as u32,
-            139,
-            minor,
-            bo,
-        );
+        return render_err(crate::xserver::core::VALUE_ERROR, seq, num_stops as u32, minor, bo);
     }
 
     let mut stops = Vec::with_capacity(num_stops);

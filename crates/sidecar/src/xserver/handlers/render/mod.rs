@@ -12,6 +12,15 @@ mod gradient;
 mod picture;
 mod transform;
 
+/// RENDER major opcode (assigned at QueryExtension).
+pub(super) const RENDER_MAJOR_OPCODE: u8 = 139;
+
+/// Build a RENDER protocol error reply.
+#[inline]
+pub(super) fn render_err(code: u8, seq: u16, bad_value: u32, minor: u16, msb_first: bool) -> Vec<u8> {
+    crate::xserver::core::build_error_bo(code, seq, bad_value, RENDER_MAJOR_OPCODE, minor, msb_first)
+}
+
 // PictFormat IDs
 pub(super) const PICTFORMAT_ARGB32: u32 = 0x24;
 pub(super) const PICTFORMAT_RGB24: u32 = 0x25;
@@ -525,14 +534,7 @@ fn reject_gradient_destination(
         // BadDrawable = 9; the X RENDER major opcode is 139, which
         // we don't actually need to fill in here — clients only key
         // off the error code and the bad-value field.
-        return Some(crate::xserver::core::build_error_bo(
-            9,
-            seq,
-            dst_pic,
-            139,
-            minor as u16,
-            state.msb_first,
-        ));
+        return Some(render_err(9, seq, dst_pic, minor as u16, state.msb_first));
     }
     None
 }
@@ -585,14 +587,7 @@ pub fn handle_render_request(state: &mut ClientState, data: &[u8], seq: u16) -> 
         2 => picture::handle_query_pict_index_values(state, data, seq),
         _ => {
             debug!("Unhandled RENDER minor opcode: {minor}");
-            crate::xserver::core::build_error_bo(
-                crate::xserver::core::REQUEST_ERROR,
-                seq,
-                minor as u32,
-                139,
-                minor as u16,
-                bo,
-            )
+            render_err(crate::xserver::core::REQUEST_ERROR, seq, minor as u32, minor as u16, bo)
         }
     }
 }

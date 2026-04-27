@@ -8,7 +8,7 @@ use x11rb_protocol::x11_utils::Serialize;
 
 use super::super::parse_minor;
 use super::{
-    resolve_source_pixels, PictFilter, PictureState, PICTFORMAT_A1, PICTFORMAT_A8,
+    render_err, resolve_source_pixels, PictFilter, PictureState, PICTFORMAT_A1, PICTFORMAT_A8,
     PICTFORMAT_ARGB32, PICTFORMAT_RGB24, PICTFORMAT_XBGR32, PICTFORMAT_XRGB32,
 };
 use crate::xserver::core::require_len;
@@ -186,14 +186,7 @@ pub(crate) fn handle_create_picture(state: &mut ClientState, data: &[u8], seq: u
     } else if let Some(p) = state.pixmaps.get(&drawable) {
         p.depth
     } else {
-        return crate::xserver::core::build_error_bo(
-            crate::xserver::core::DRAWABLE_ERROR,
-            seq,
-            drawable,
-            139,
-            data[1] as u16,
-            bo,
-        );
+        return render_err(crate::xserver::core::DRAWABLE_ERROR, seq, drawable, data[1] as u16, bo);
     };
 
     // Validate format ID is known
@@ -203,14 +196,7 @@ pub(crate) fn handle_create_picture(state: &mut ClientState, data: &[u8], seq: u
         PICTFORMAT_A8 => 8,
         PICTFORMAT_A1 => 1,
         _ => {
-            return crate::xserver::core::build_error_bo(
-                crate::xserver::core::MATCH_ERROR,
-                seq,
-                format_id,
-                139,
-                data[1] as u16,
-                bo,
-            );
+            return render_err(crate::xserver::core::MATCH_ERROR, seq, format_id, data[1] as u16, bo);
         }
     };
 
@@ -224,14 +210,7 @@ pub(crate) fn handle_create_picture(state: &mut ClientState, data: &[u8], seq: u
         debug!(
             "CreatePicture: format depth {format_depth} incompatible with drawable depth {drawable_depth}"
         );
-        return crate::xserver::core::build_error_bo(
-            crate::xserver::core::MATCH_ERROR,
-            seq,
-            format_id,
-            139,
-            data[1] as u16,
-            bo,
-        );
+        return render_err(crate::xserver::core::MATCH_ERROR, seq, format_id, data[1] as u16, bo);
     }
 
     // Extract values from the parsed value_list
