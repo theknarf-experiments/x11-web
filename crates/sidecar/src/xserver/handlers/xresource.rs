@@ -17,6 +17,9 @@ pub(crate) fn handle_xresource_request(state: &mut ClientState, data: &[u8], seq
     let minor = data[1];
     let bo = state.msb_first;
     debug!("X-Resource minor opcode: {minor}");
+    let bad_request = |bad_value: u32| {
+        build_error_bo(REQUEST_ERROR, seq, bad_value, XRES_MAJOR_OPCODE, minor as u16, bo)
+    };
 
     match minor {
         // 0: QueryVersion
@@ -50,7 +53,7 @@ pub(crate) fn handle_xresource_request(state: &mut ClientState, data: &[u8], seq
         // 2: QueryClientResources — return resource type counts for a client
         2 => {
             if data.len() < 8 {
-                return build_error_bo(REQUEST_ERROR, seq, 0, XRES_MAJOR_OPCODE, minor as u16, bo);
+                return bad_request(0);
             }
 
             // Count resources by type
@@ -128,7 +131,7 @@ pub(crate) fn handle_xresource_request(state: &mut ClientState, data: &[u8], seq
         // 3: QueryClientPixmapBytes — total pixmap memory for a client
         3 => {
             if data.len() < 8 {
-                return build_error_bo(REQUEST_ERROR, seq, 0, XRES_MAJOR_OPCODE, minor as u16, bo);
+                return bad_request(0);
             }
 
             let total_bytes: u64 = state
@@ -148,7 +151,7 @@ pub(crate) fn handle_xresource_request(state: &mut ClientState, data: &[u8], seq
             use x11rb_protocol::protocol::res::QueryClientIdsRequest;
             let Ok(req) = QueryClientIdsRequest::try_parse_request(request_header(data), &data[4..])
             else {
-                return build_error_bo(REQUEST_ERROR, seq, 0, XRES_MAJOR_OPCODE, minor as u16, bo);
+                return bad_request(0);
             };
 
             // Collect client IDs from the request specs
@@ -216,7 +219,7 @@ pub(crate) fn handle_xresource_request(state: &mut ClientState, data: &[u8], seq
             use x11rb_protocol::protocol::res::QueryResourceBytesRequest;
             let Ok(req) = QueryResourceBytesRequest::try_parse_request(request_header(data), &data[4..])
             else {
-                return build_error_bo(REQUEST_ERROR, seq, 0, XRES_MAJOR_OPCODE, minor as u16, bo);
+                return bad_request(0);
             };
             let _client_xid = req.client;
             let num_specs = req.specs.len();
@@ -294,14 +297,7 @@ pub(crate) fn handle_xresource_request(state: &mut ClientState, data: &[u8], seq
 
         _ => {
             debug!("Unhandled X-Resource minor opcode: {minor}");
-            build_error_bo(
-                REQUEST_ERROR,
-                seq,
-                minor as u32,
-                XRES_MAJOR_OPCODE,
-                minor as u16,
-                bo,
-            )
+            bad_request(minor as u32)
         }
     }
 }
