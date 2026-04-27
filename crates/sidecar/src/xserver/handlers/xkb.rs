@@ -318,12 +318,14 @@ pub(crate) fn handle_xkb_request(state: &mut ClientState, data: &[u8], seq: u16)
         15 => indicators::handle_get_named_indicator(state, data, seq, device_id_byte),
         16 => handle_xkb_set_named_indicator(state, data), // SetNamedIndicator
         17 => {
-            // GetNames: request bytes 8-11 contain the `which` bitmask.
-            let req_which: u32 = if data.len() >= 12 {
-                state.read_u32(data, 8)
-            } else {
-                0x0FFF
-            };
+            // GetNames: which-name bitmask selects which strings to return.
+            use x11rb_protocol::protocol::xkb::GetNamesRequest;
+            let req_which = GetNamesRequest::try_parse_request(
+                crate::xserver::request::request_header(data),
+                &data[4..],
+            )
+            .map(|r| u32::from(r.which))
+            .unwrap_or(0x0FFF);
             names::build_xkb_get_names_reply(state, seq, device_id_byte, req_which)
         }
         18 => names::handle_xkb_set_names(state, data, seq), // SetNames

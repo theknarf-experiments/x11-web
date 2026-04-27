@@ -6,7 +6,7 @@ use x11rb_protocol::protocol::xinput as xi;
 use x11rb_protocol::protocol::xproto;
 use x11rb_protocol::x11_utils::RequestHeader;
 
-use crate::xserver::core::{read_u16_bo, read_u32_bo, write_u16_bo};
+use crate::xserver::core::{read_u16_bo, read_u32_bo};
 
 use super::device::*;
 use super::{
@@ -734,12 +734,8 @@ pub fn handle_request(
 
         other => {
             debug!("XInput minor opcode {other} unhandled — returning empty reply");
-            // For unknown opcodes, return a minimal reply to prevent hangs
-            // in case the client expects one.
-            let mut reply = vec![0u8; 32];
-            reply[0] = 1; // reply
-            write_u16_bo(&mut reply, 2, seq, msb_first);
-            reply
+            // Minimal reply to prevent hangs if the client expects one.
+            crate::xserver::reply::ReplyBuf::fixed(seq, msb_first).build()
         }
     }
 }
