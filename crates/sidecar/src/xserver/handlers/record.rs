@@ -463,8 +463,18 @@ pub(crate) fn handle_record_request(state: &mut ClientState, data: &[u8], seq: u
         }
         4 => {
             // GetContext
-            if data.len() >= 8 {
-                let context_id = u32::from_le_bytes([data[4], data[5], data[6], data[7]]);
+            use x11rb_protocol::protocol::record::GetContextRequest;
+            let Ok(req) = GetContextRequest::try_parse_request(
+                crate::xserver::request::request_header(data),
+                &data[4..],
+            ) else {
+                return crate::xserver::core::build_error_bo(
+                    crate::xserver::core::LENGTH_ERROR,
+                    seq, 0, 154, minor as u16, state.msb_first,
+                );
+            };
+            let context_id = req.context;
+            {
                 if let Some(ctx) = state.record_contexts.get(&context_id) {
                     // Build reply with intercepted client info
                     let num_clients = if ctx.client_specs.is_empty() {
@@ -523,21 +533,22 @@ pub(crate) fn handle_record_request(state: &mut ClientState, data: &[u8], seq: u
                 } else {
                     ReplyBuf::fixed(seq, false).build()
                 }
-            } else {
-                crate::xserver::core::build_error_bo(
-                    crate::xserver::core::LENGTH_ERROR,
-                    seq,
-                    0,
-                    154,
-                    minor as u16,
-                    state.msb_first,
-                )
             }
         }
         5 => {
             // EnableContext
-            if data.len() >= 8 {
-                let context_id = u32::from_le_bytes([data[4], data[5], data[6], data[7]]);
+            use x11rb_protocol::protocol::record::EnableContextRequest;
+            let Ok(req) = EnableContextRequest::try_parse_request(
+                crate::xserver::request::request_header(data),
+                &data[4..],
+            ) else {
+                return crate::xserver::core::build_error_bo(
+                    crate::xserver::core::LENGTH_ERROR,
+                    seq, 0, 154, minor as u16, state.msb_first,
+                );
+            };
+            let context_id = req.context;
+            {
                 if let Some(ctx) = state.record_contexts.get_mut(&context_id) {
                     ctx.enabled = true;
                     ctx.enable_sequence = seq;
@@ -561,80 +572,61 @@ pub(crate) fn handle_record_request(state: &mut ClientState, data: &[u8], seq: u
                     .unwrap_or(0);
                 let server_time = state.server_start.elapsed().as_millis() as u32;
                 build_record_status_reply(RECORD_START_OF_DATA, seq, element_header, server_time)
-            } else {
-                crate::xserver::core::build_error_bo(
-                    crate::xserver::core::LENGTH_ERROR,
-                    seq,
-                    0,
-                    154,
-                    minor as u16,
-                    state.msb_first,
-                )
             }
         }
         6 => {
             // DisableContext
-            if data.len() >= 8 {
-                let context_id = u32::from_le_bytes([data[4], data[5], data[6], data[7]]);
-                let (enable_seq, element_header) = state
-                    .record_contexts
-                    .get(&context_id)
-                    .map(|c| (c.enable_sequence, c.element_header))
-                    .unwrap_or((0, 0));
-
-                if let Some(ctx) = state.record_contexts.get_mut(&context_id) {
-                    ctx.enabled = false;
-                    debug!("RECORD DisableContext: id={context_id:#x}");
-                }
-
-                // Update shared context
-                if let Ok(mut shared) = state.shared_record_contexts.lock() {
-                    if let Some(entry) = shared.get_mut(&context_id) {
-                        entry.context.enabled = false;
-                    }
-                }
-
-                // Return EndOfData reply
-                let server_time = state.server_start.elapsed().as_millis() as u32;
-                build_record_status_reply(
-                    RECORD_END_OF_DATA,
-                    enable_seq,
-                    element_header,
-                    server_time,
-                )
-            } else {
-                crate::xserver::core::build_error_bo(
+            use x11rb_protocol::protocol::record::DisableContextRequest;
+            let Ok(req) = DisableContextRequest::try_parse_request(
+                crate::xserver::request::request_header(data),
+                &data[4..],
+            ) else {
+                return crate::xserver::core::build_error_bo(
                     crate::xserver::core::LENGTH_ERROR,
-                    seq,
-                    0,
-                    154,
-                    minor as u16,
-                    state.msb_first,
-                )
+                    seq, 0, 154, minor as u16, state.msb_first,
+                );
+            };
+            let context_id = req.context;
+            let (enable_seq, element_header) = state
+                .record_contexts
+                .get(&context_id)
+                .map(|c| (c.enable_sequence, c.element_header))
+                .unwrap_or((0, 0));
+
+            if let Some(ctx) = state.record_contexts.get_mut(&context_id) {
+                ctx.enabled = false;
+                debug!("RECORD DisableContext: id={context_id:#x}");
             }
+            if let Ok(mut shared) = state.shared_record_contexts.lock() {
+                if let Some(entry) = shared.get_mut(&context_id) {
+                    entry.context.enabled = false;
+                }
+            }
+
+            // Return EndOfData reply
+            let server_time = state.server_start.elapsed().as_millis() as u32;
+            build_record_status_reply(RECORD_END_OF_DATA, enable_seq, element_header, server_time)
         }
         7 => {
             // FreeContext
-            if data.len() >= 8 {
-                let context_id = u32::from_le_bytes([data[4], data[5], data[6], data[7]]);
-                state.record_contexts.remove(&context_id);
-                state.recycle_xid(context_id);
-                // Remove from shared registry
-                if let Ok(mut shared) = state.shared_record_contexts.lock() {
-                    shared.remove(&context_id);
-                }
-                debug!("RECORD FreeContext: id={context_id:#x}");
-                Vec::new()
-            } else {
-                crate::xserver::core::build_error_bo(
+            use x11rb_protocol::protocol::record::FreeContextRequest;
+            let Ok(req) = FreeContextRequest::try_parse_request(
+                crate::xserver::request::request_header(data),
+                &data[4..],
+            ) else {
+                return crate::xserver::core::build_error_bo(
                     crate::xserver::core::LENGTH_ERROR,
-                    seq,
-                    0,
-                    154,
-                    minor as u16,
-                    state.msb_first,
-                )
+                    seq, 0, 154, minor as u16, state.msb_first,
+                );
+            };
+            let context_id = req.context;
+            state.record_contexts.remove(&context_id);
+            state.recycle_xid(context_id);
+            if let Ok(mut shared) = state.shared_record_contexts.lock() {
+                shared.remove(&context_id);
             }
+            debug!("RECORD FreeContext: id={context_id:#x}");
+            Vec::new()
         }
         _ => {
             debug!("RECORD: unhandled minor opcode {minor}");
