@@ -117,6 +117,15 @@ impl ClientState {
             .broadcast(window_id, event_mask_bit, event, &self.client_id);
     }
 
+    /// Returns true if this client has selected `mask` (one or more bits) on `wid`.
+    /// Used to gate local delivery of generated events.
+    #[inline]
+    pub(crate) fn window_selects(&self, wid: u32, mask: crate::xserver::core::EventMask) -> bool {
+        self.windows
+            .get(&wid)
+            .is_some_and(|w| w.event_mask & mask != crate::xserver::core::EventMask::NO_EVENT)
+    }
+
     /// Subscribe this client to cross-connection events on a window.
     /// Called when ChangeWindowAttributes sets an event_mask on a window
     /// that this client doesn't own.

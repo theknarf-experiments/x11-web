@@ -254,20 +254,14 @@ pub(crate) fn handle_send_event(state: &mut ClientState, req: &SendEventRequest)
                             border_width,
                             override_redirect,
                         }, state.msb_first);
-                        if state
-                            .windows
-                            .get(&source_window)
-                            .is_some_and(|w| w.event_mask & EventMask::STRUCTURE_NOTIFY != EventMask::NO_EVENT)
+                        if state.window_selects(source_window, EventMask::STRUCTURE_NOTIFY)
                         {
                             state.pending_events.push(cn.clone());
                         }
                         state.broadcast_event(source_window, u32::from(EventMask::STRUCTURE_NOTIFY), &cn);
 
                         // Send Expose so the client redraws at the new size
-                        if state
-                            .windows
-                            .get(&source_window)
-                            .is_some_and(|w| w.event_mask & EventMask::EXPOSURE != EventMask::NO_EVENT)
+                        if state.window_selects(source_window, EventMask::EXPOSURE)
                         {
                             let expose = serialize_event(&ExposeEvent {
                                 response_type: EXPOSE_EVENT,
@@ -346,20 +340,14 @@ pub(crate) fn handle_send_event(state: &mut ClientState, req: &SendEventRequest)
                                 border_width,
                                 override_redirect,
                             }, state.msb_first);
-                            if state
-                                .windows
-                                .get(&source_window)
-                                .is_some_and(|w| w.event_mask & EventMask::STRUCTURE_NOTIFY != EventMask::NO_EVENT)
+                            if state.window_selects(source_window, EventMask::STRUCTURE_NOTIFY)
                             {
                                 state.pending_events.push(cn.clone());
                             }
                             state.broadcast_event(source_window, u32::from(EventMask::STRUCTURE_NOTIFY), &cn);
 
                             // Expose for redraw
-                            if state
-                                .windows
-                                .get(&source_window)
-                                .is_some_and(|w| w.event_mask & EventMask::EXPOSURE != EventMask::NO_EVENT)
+                            if state.window_selects(source_window, EventMask::EXPOSURE)
                             {
                                 let expose = serialize_event(&ExposeEvent {
                                     response_type: EXPOSE_EVENT,

@@ -601,10 +601,7 @@ pub(crate) fn handle_unmap_window(state: &mut ClientState, req: &UnmapWindowRequ
             from_configure: false,
         }, bo);
 
-        let parent_wants_notify = state
-            .windows
-            .get(&parent_id)
-            .is_some_and(|w| w.event_mask & EventMask::SUBSTRUCTURE_NOTIFY != EventMask::NO_EVENT);
+        let parent_wants_notify = state.window_selects(parent_id, EventMask::SUBSTRUCTURE_NOTIFY);
         if parent_wants_notify {
             events.extend_from_slice(&parent_event);
         }

@@ -51,10 +51,7 @@ pub(crate) fn handle_reparent_window(state: &mut ClientState, req: &ReparentWind
                 window,
                 from_configure: false,
             }, bo);
-            if state
-                .windows
-                .get(&window)
-                .is_some_and(|w| w.event_mask & EventMask::STRUCTURE_NOTIFY != EventMask::NO_EVENT)
+            if state.window_selects(window, EventMask::STRUCTURE_NOTIFY)
             {
                 state.pending_events.push(unmap_event.clone());
             }
@@ -69,10 +66,7 @@ pub(crate) fn handle_reparent_window(state: &mut ClientState, req: &ReparentWind
                 window,
                 from_configure: false,
             }, bo);
-            if state
-                .windows
-                .get(&old_parent)
-                .is_some_and(|w| w.event_mask & EventMask::SUBSTRUCTURE_NOTIFY != EventMask::NO_EVENT)
+            if state.window_selects(old_parent, EventMask::SUBSTRUCTURE_NOTIFY)
             {
                 state.pending_events.push(parent_unmap.clone());
             }
@@ -125,10 +119,7 @@ pub(crate) fn handle_reparent_window(state: &mut ClientState, req: &ReparentWind
     // Send ReparentNotify to the window itself (StructureNotifyMask)
     {
         let event = build_reparent_notify(window);
-        if state
-            .windows
-            .get(&window)
-            .is_some_and(|w| w.event_mask & EventMask::STRUCTURE_NOTIFY != EventMask::NO_EVENT)
+        if state.window_selects(window, EventMask::STRUCTURE_NOTIFY)
         {
             events.extend_from_slice(&event);
         }
@@ -138,10 +129,7 @@ pub(crate) fn handle_reparent_window(state: &mut ClientState, req: &ReparentWind
     // Send ReparentNotify to old parent (SubstructureNotifyMask)
     {
         let event = build_reparent_notify(old_parent);
-        if state
-            .windows
-            .get(&old_parent)
-            .is_some_and(|w| w.event_mask & EventMask::SUBSTRUCTURE_NOTIFY != EventMask::NO_EVENT)
+        if state.window_selects(old_parent, EventMask::SUBSTRUCTURE_NOTIFY)
         {
             state.pending_events.push(event.clone());
         }
@@ -151,10 +139,7 @@ pub(crate) fn handle_reparent_window(state: &mut ClientState, req: &ReparentWind
     // Send ReparentNotify to new parent (SubstructureNotifyMask)
     if old_parent != new_parent {
         let event = build_reparent_notify(new_parent);
-        if state
-            .windows
-            .get(&new_parent)
-            .is_some_and(|w| w.event_mask & EventMask::SUBSTRUCTURE_NOTIFY != EventMask::NO_EVENT)
+        if state.window_selects(new_parent, EventMask::SUBSTRUCTURE_NOTIFY)
         {
             state.pending_events.push(event.clone());
         }

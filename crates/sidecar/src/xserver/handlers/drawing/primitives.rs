@@ -62,10 +62,7 @@ pub(crate) fn handle_clear_area(state: &mut ClientState, req: &ClearAreaRequest)
             height,
             count: 0,
         }, bo);
-        if state
-            .windows
-            .get(&wid)
-            .is_some_and(|w| w.event_mask & EventMask::EXPOSURE != EventMask::NO_EVENT)
+        if state.window_selects(wid, EventMask::EXPOSURE)
         {
             state.pending_events.push(event.clone());
         }
