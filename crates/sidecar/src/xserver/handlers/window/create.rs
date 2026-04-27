@@ -376,11 +376,7 @@ pub(crate) fn handle_destroy_window(state: &mut ClientState, req: &DestroyWindow
                 window: wid,
             }, state.msb_first);
 
-            if state.window_selects(wid, EventMask::STRUCTURE_NOTIFY) {
-                state.pending_events.push(event.clone());
-            }
-            // Cross-connection broadcast: StructureNotify on the window
-            state.broadcast_event(wid, EventMask::STRUCTURE_NOTIFY, &event);
+            state.deliver_event(wid, EventMask::STRUCTURE_NOTIFY, &event);
         }
 
         // Send DestroyNotify to parent (SubstructureNotifyMask)
@@ -391,12 +387,7 @@ pub(crate) fn handle_destroy_window(state: &mut ClientState, req: &DestroyWindow
                 event: parent_id,
                 window: wid,
             }, state.msb_first);
-
-            if state.window_selects(parent_id, EventMask::SUBSTRUCTURE_NOTIFY) {
-                state.pending_events.push(event.clone());
-            }
-            // Cross-connection broadcast: SubstructureNotify on the parent
-            state.broadcast_event(parent_id, EventMask::SUBSTRUCTURE_NOTIFY, &event);
+            state.deliver_event(parent_id, EventMask::SUBSTRUCTURE_NOTIFY, &event);
         }
     }
 

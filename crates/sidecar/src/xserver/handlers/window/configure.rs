@@ -51,11 +51,7 @@ pub(crate) fn handle_reparent_window(state: &mut ClientState, req: &ReparentWind
                 window,
                 from_configure: false,
             }, bo);
-            if state.window_selects(window, EventMask::STRUCTURE_NOTIFY)
-            {
-                state.pending_events.push(unmap_event.clone());
-            }
-            state.broadcast_event(window, EventMask::STRUCTURE_NOTIFY, &unmap_event);
+            state.deliver_event(window, EventMask::STRUCTURE_NOTIFY, &unmap_event);
         }
         // Generate UnmapNotify to the old parent (SubstructureNotifyMask)
         if old_parent != 0 {
@@ -66,11 +62,7 @@ pub(crate) fn handle_reparent_window(state: &mut ClientState, req: &ReparentWind
                 window,
                 from_configure: false,
             }, bo);
-            if state.window_selects(old_parent, EventMask::SUBSTRUCTURE_NOTIFY)
-            {
-                state.pending_events.push(parent_unmap.clone());
-            }
-            state.broadcast_event(old_parent, EventMask::SUBSTRUCTURE_NOTIFY, &parent_unmap);
+            state.deliver_event(old_parent, EventMask::SUBSTRUCTURE_NOTIFY, &parent_unmap);
         }
 
         if let Some(win) = state.windows.get_mut(&window) {
@@ -129,21 +121,13 @@ pub(crate) fn handle_reparent_window(state: &mut ClientState, req: &ReparentWind
     // Send ReparentNotify to old parent (SubstructureNotifyMask)
     {
         let event = build_reparent_notify(old_parent);
-        if state.window_selects(old_parent, EventMask::SUBSTRUCTURE_NOTIFY)
-        {
-            state.pending_events.push(event.clone());
-        }
-        state.broadcast_event(old_parent, EventMask::SUBSTRUCTURE_NOTIFY, &event);
+        state.deliver_event(old_parent, EventMask::SUBSTRUCTURE_NOTIFY, &event);
     }
 
     // Send ReparentNotify to new parent (SubstructureNotifyMask)
     if old_parent != new_parent {
         let event = build_reparent_notify(new_parent);
-        if state.window_selects(new_parent, EventMask::SUBSTRUCTURE_NOTIFY)
-        {
-            state.pending_events.push(event.clone());
-        }
-        state.broadcast_event(new_parent, EventMask::SUBSTRUCTURE_NOTIFY, &event);
+        state.deliver_event(new_parent, EventMask::SUBSTRUCTURE_NOTIFY, &event);
     }
 
     // Per X11 spec: if the window was originally mapped, perform an automatic
@@ -987,18 +971,9 @@ pub(crate) fn handle_configure_window(state: &mut ClientState, req: &ConfigureWi
                     border_width,
                     override_redirect,
                 }, msb_first);
-                if state.window_selects(parent_id, EventMask::SUBSTRUCTURE_NOTIFY) {
-                    state.pending_events.push(parent_event.clone());
-                }
-                // Cross-connection broadcast: SubstructureNotify on parent
-                state.broadcast_event(parent_id, EventMask::SUBSTRUCTURE_NOTIFY, &parent_event);
+                state.deliver_event(parent_id, EventMask::SUBSTRUCTURE_NOTIFY, &parent_event);
             }
-            // Deliver StructureNotify to the window's own client if subscribed
-            if state.window_selects(wid, EventMask::STRUCTURE_NOTIFY) {
-                state.pending_events.push(event.clone());
-            }
-            // Cross-connection broadcast: StructureNotify on the window itself
-            state.broadcast_event(wid, EventMask::STRUCTURE_NOTIFY, &event);
+            state.deliver_event(wid, EventMask::STRUCTURE_NOTIFY, &event);
 
             // Generate Expose event when window size changed (apps need this to redraw)
             let size_changed = width != old_w || height != old_h;

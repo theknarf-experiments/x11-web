@@ -179,10 +179,7 @@ pub(crate) fn handle_send_event(state: &mut ClientState, req: &SendEventRequest)
                         time: state.timestamp(),
                         state: 0u8.into(), // NewValue
                     }, state.msb_first);
-                    if state.window_selects(source_window, EventMask::PROPERTY_CHANGE) {
-                        state.pending_events.push(pn_event.clone());
-                    }
-                    state.broadcast_event(source_window, EventMask::PROPERTY_CHANGE, &pn_event);
+                    state.deliver_event(source_window, EventMask::PROPERTY_CHANGE, &pn_event);
                 }
 
                 // Determine the new WM state and broadcast to frontend
@@ -251,11 +248,7 @@ pub(crate) fn handle_send_event(state: &mut ClientState, req: &SendEventRequest)
                             border_width,
                             override_redirect,
                         }, state.msb_first);
-                        if state.window_selects(source_window, EventMask::STRUCTURE_NOTIFY)
-                        {
-                            state.pending_events.push(cn.clone());
-                        }
-                        state.broadcast_event(source_window, EventMask::STRUCTURE_NOTIFY, &cn);
+                        state.deliver_event(source_window, EventMask::STRUCTURE_NOTIFY, &cn);
 
                         // Send Expose so the client redraws at the new size
                         if state.window_selects(source_window, EventMask::EXPOSURE)
@@ -337,11 +330,7 @@ pub(crate) fn handle_send_event(state: &mut ClientState, req: &SendEventRequest)
                                 border_width,
                                 override_redirect,
                             }, state.msb_first);
-                            if state.window_selects(source_window, EventMask::STRUCTURE_NOTIFY)
-                            {
-                                state.pending_events.push(cn.clone());
-                            }
-                            state.broadcast_event(source_window, EventMask::STRUCTURE_NOTIFY, &cn);
+                            state.deliver_event(source_window, EventMask::STRUCTURE_NOTIFY, &cn);
 
                             // Expose for redraw
                             if state.window_selects(source_window, EventMask::EXPOSURE)
@@ -507,10 +496,7 @@ pub(crate) fn handle_send_event(state: &mut ClientState, req: &SendEventRequest)
                         time: state.timestamp(),
                         state: 0u8.into(), // NewValue
                     }, state.msb_first);
-                    if state.window_selects(source_window, EventMask::PROPERTY_CHANGE) {
-                        state.pending_events.push(pn_event.clone());
-                    }
-                    state.broadcast_event(source_window, EventMask::PROPERTY_CHANGE, &pn_event);
+                    state.deliver_event(source_window, EventMask::PROPERTY_CHANGE, &pn_event);
                 }
                 return Vec::new();
             }
@@ -654,10 +640,7 @@ pub(crate) fn handle_send_event(state: &mut ClientState, req: &SendEventRequest)
                             time: state.timestamp(),
                             state: 0u8.into(), // NewValue
                         }, state.msb_first);
-                        if state.window_selects(source_window, EventMask::PROPERTY_CHANGE) {
-                            state.pending_events.push(pn.clone());
-                        }
-                        state.broadcast_event(source_window, EventMask::PROPERTY_CHANGE, &pn);
+                        state.deliver_event(source_window, EventMask::PROPERTY_CHANGE, &pn);
                     }
                     if let Some(uuid) = state.window_uuid(source_window) {
                         let _ = state.update_tx.send((
@@ -694,10 +677,7 @@ pub(crate) fn handle_send_event(state: &mut ClientState, req: &SendEventRequest)
                             time: state.timestamp(),
                             state: 0u8.into(), // NewValue
                         }, state.msb_first);
-                        if state.window_selects(source_window, EventMask::PROPERTY_CHANGE) {
-                            state.pending_events.push(pn.clone());
-                        }
-                        state.broadcast_event(source_window, EventMask::PROPERTY_CHANGE, &pn);
+                        state.deliver_event(source_window, EventMask::PROPERTY_CHANGE, &pn);
                     }
                     if let Some(uuid) = state.window_uuid(source_window) {
                         let _ = state.update_tx.send((

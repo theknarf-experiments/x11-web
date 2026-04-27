@@ -62,12 +62,7 @@ pub(crate) fn handle_clear_area(state: &mut ClientState, req: &ClearAreaRequest)
             height,
             count: 0,
         }, bo);
-        if state.window_selects(wid, EventMask::EXPOSURE)
-        {
-            state.pending_events.push(event.clone());
-        }
-        // Broadcast to other clients that selected ExposureMask on this window
-        state.broadcast_event(wid, EventMask::EXPOSURE, &event);
+        state.deliver_event(wid, EventMask::EXPOSURE, &event);
     }
 
     Vec::new()

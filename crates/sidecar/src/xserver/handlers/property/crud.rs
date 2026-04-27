@@ -146,10 +146,7 @@ pub(crate) fn handle_change_property(state: &mut ClientState, req: &ChangeProper
             state: 0u8.into(), // NewValue
         }, state.msb_first);
 
-        if state.window_selects(window, EventMask::PROPERTY_CHANGE) {
-            state.pending_events.push(event.clone());
-        }
-        state.broadcast_event(window, EventMask::PROPERTY_CHANGE, &event);
+        state.deliver_event(window, EventMask::PROPERTY_CHANGE, &event);
     }
 
     // Check if this is WM_TRANSIENT_FOR — store transient parent in WindowState (ICCCM §4.1.2.6)

@@ -132,6 +132,21 @@ impl ClientState {
             .is_some_and(|w| w.event_mask & mask != crate::xserver::core::EventMask::NO_EVENT)
     }
 
+    /// Push `event` to local pending if this client selected `mask` on `window`,
+    /// then broadcast to all other clients that selected `mask` on `window`.
+    /// Convenience wrapper over the recurring window_selects + broadcast pair.
+    pub(crate) fn deliver_event(
+        &mut self,
+        window: u32,
+        mask: crate::xserver::core::EventMask,
+        event: &[u8],
+    ) {
+        if self.window_selects(window, mask) {
+            self.pending_events.push(event.to_vec());
+        }
+        self.broadcast_event(window, mask, event);
+    }
+
     /// Subscribe this client to cross-connection events on a window.
     /// Called when ChangeWindowAttributes sets an event_mask on a window
     /// that this client doesn't own.

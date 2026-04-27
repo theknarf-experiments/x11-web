@@ -283,13 +283,7 @@ pub(crate) fn handle_map_window(state: &mut ClientState, req: &MapWindowRequest)
                 override_redirect,
             }, msb_first);
 
-            // Local delivery
-            if state.window_selects(parent_id, EventMask::SUBSTRUCTURE_NOTIFY) {
-                state.pending_events.push(parent_event.to_vec());
-            }
-
-            // Cross-connection broadcast to other clients watching this parent
-            state.broadcast_event(parent_id, EventMask::SUBSTRUCTURE_NOTIFY, &parent_event);
+            state.deliver_event(parent_id, EventMask::SUBSTRUCTURE_NOTIFY, &parent_event);
             // Also broadcast StructureNotify to other clients watching the window itself
             state.broadcast_event(wid, EventMask::STRUCTURE_NOTIFY, &map_event);
         }

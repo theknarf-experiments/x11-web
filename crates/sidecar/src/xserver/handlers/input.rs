@@ -698,13 +698,13 @@ pub(crate) fn handle_force_screen_saver(state: &mut ClientState, req: &ForceScre
                 // Expose events must be generated for all mapped windows that
                 // select ExposureMask, since the screen content needs repainting.
                 let bo = state.msb_first;
-                let expose_targets: Vec<(u32, u16, u16, u32)> = state
+                let expose_targets: Vec<(u32, u16, u16)> = state
                     .windows
                     .values()
                     .filter(|w| w.mapped && w.id != state.root_window)
-                    .map(|w| (w.id, w.width, w.height, w.event_mask))
+                    .map(|w| (w.id, w.width, w.height))
                     .collect();
-                for (wid, w, h, mask) in &expose_targets {
+                for (wid, w, h) in &expose_targets {
                     let expose = serialize_event(&ExposeEvent {
                         response_type: EXPOSE_EVENT,
                         sequence: seq,
@@ -715,10 +715,7 @@ pub(crate) fn handle_force_screen_saver(state: &mut ClientState, req: &ForceScre
                         height: *h,
                         count: 0,
                     }, bo);
-                    if *mask & EventMask::EXPOSURE != EventMask::NO_EVENT {
-                        state.pending_events.push(expose.clone());
-                    }
-                    state.broadcast_event(*wid, EventMask::EXPOSURE, &expose);
+                    state.deliver_event(*wid, EventMask::EXPOSURE, &expose);
                 }
 
                 // Send ScreenSaverNotify (state=Off) to interested clients.
@@ -1076,11 +1073,6 @@ pub(crate) fn handle_rotate_properties(state: &mut ClientState, req: &RotateProp
     // each property in the list, with state=NewValue (0).
     let seq = state.sequence;
     let timestamp = state.timestamp();
-    let win_mask = state
-        .windows
-        .get(&window)
-        .map(|w| w.event_mask)
-        .unwrap_or(0);
     for &atom in &atoms {
         let event = serialize_event(&PropertyNotifyEvent {
             response_type: PROPERTY_NOTIFY_EVENT,
@@ -1090,10 +1082,7 @@ pub(crate) fn handle_rotate_properties(state: &mut ClientState, req: &RotateProp
             time: timestamp,
             state: 0u8.into(), // NewValue
         }, state.msb_first);
-        if win_mask & EventMask::PROPERTY_CHANGE != EventMask::NO_EVENT {
-            state.pending_events.push(event.clone());
-        }
-        state.broadcast_event(window, EventMask::PROPERTY_CHANGE, &event);
+        state.deliver_event(window, EventMask::PROPERTY_CHANGE, &event);
     }
 
     Vec::new()
