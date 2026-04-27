@@ -18,8 +18,6 @@ fn fixed_to_f64(f: Fixed) -> f64 {
 }
 
 pub(crate) fn handle_create_solid_fill(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
-    let bo = state.msb_first;
-
     let req = parse_minor!(CreateSolidFillRequest, data, state, seq, 139, data[1] as u16);
 
     let pid = req.picture;

@@ -280,8 +280,6 @@ pub(crate) fn handle_create_picture(state: &mut ClientState, data: &[u8], seq: u
 }
 
 pub(crate) fn handle_change_picture(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
-    let bo = state.msb_first;
-
     let req = parse_minor!(ChangePictureRequest, data, state, seq, 139, data[1] as u16);
 
     let pid = req.picture;
@@ -328,8 +326,6 @@ pub(crate) fn handle_set_picture_clip_rectangles(
     data: &[u8],
     seq: u16,
 ) -> Vec<u8> {
-    let bo = state.msb_first;
-
     let req = parse_minor!(SetPictureClipRectanglesRequest, data, state, seq, 139, data[1] as u16);
 
     let pid = req.picture;
@@ -372,8 +368,6 @@ pub(crate) fn handle_free_picture(state: &mut ClientState, data: &[u8]) -> Vec<u
 /// to an ARGB bitmap and stores it as a CursorInfo for later use.
 pub(crate) fn handle_create_cursor(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
     use crate::xserver::types::CursorInfo;
-
-    let bo = state.msb_first;
 
     let req = parse_minor!(CreateCursorRequest, data, state, seq, 139, data[1] as u16);
 

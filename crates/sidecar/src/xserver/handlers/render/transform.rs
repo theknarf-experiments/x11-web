@@ -20,8 +20,6 @@ pub(crate) fn handle_set_picture_transform(
     data: &[u8],
     seq: u16,
 ) -> Vec<u8> {
-    let bo = state.msb_first;
-
     let req = parse_minor!(SetPictureTransformRequest, data, state, seq, 139, data[1] as u16);
 
     let pid = req.picture;

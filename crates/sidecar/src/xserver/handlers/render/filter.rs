@@ -9,8 +9,6 @@ use x11rb_protocol::protocol::render::SetPictureFilterRequest;
 /// SetPictureFilter (RENDER minor opcode 30).
 /// Sets the filter on a picture (nearest, bilinear, etc.).
 pub(crate) fn handle_set_picture_filter(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
-    let bo = state.msb_first;
-
     let req = parse_minor!(SetPictureFilterRequest, data, state, seq, 139, data[1] as u16);
 
     let pic_id = req.picture;
