@@ -418,12 +418,7 @@ pub(crate) fn handle_destroy_window(state: &mut ClientState, req: &DestroyWindow
                 event: desc,
                 window: desc,
             }, state.msb_first);
-            if let Some(w) = state.windows.get(&desc) {
-                if w.event_mask & EventMask::STRUCTURE_NOTIFY != EventMask::NO_EVENT {
-                    state.pending_events.push(event.clone());
-                }
-            }
-            state.broadcast_event(desc, EventMask::STRUCTURE_NOTIFY, &event);
+            state.deliver_event(desc, EventMask::STRUCTURE_NOTIFY, &event);
 
             // SubstructureNotify on the parent
             let pevent = serialize_event(&DestroyNotifyEvent {
