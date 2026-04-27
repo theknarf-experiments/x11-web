@@ -87,6 +87,22 @@ const XN_PREEDIT_ATTRIBUTES: u16 = 3;
 const XN_STATUS_ATTRIBUTES: u16 = 4;
 const XN_SPOT_LOCATION: u16 = 5;
 
+// XIM message header layout (after the 4-byte ClientMessage type/format/seq
+// trailer): major (1), minor (1), length-in-words (u16 LE), then the payload.
+// Most handlers begin with the IM ID at offset 4, optionally followed by IC ID.
+fn xim_im_id(data: &[u8]) -> Option<u16> {
+    let b = data.get(4..6)?;
+    Some(u16::from_le_bytes([b[0], b[1]]))
+}
+
+fn xim_im_ic(data: &[u8]) -> Option<(u16, u16)> {
+    let b = data.get(4..8)?;
+    Some((
+        u16::from_le_bytes([b[0], b[1]]),
+        u16::from_le_bytes([b[2], b[3]]),
+    ))
+}
+
 // ---------------------------------------------------------------------------
 // XIM server state
 // ---------------------------------------------------------------------------
@@ -192,36 +208,17 @@ pub(crate) fn handle_xim_xconnect(state: &mut ClientState, event: &[u8]) -> Vec<
 /// Handle an `_XIM_PROTOCOL` client message containing an XIM protocol message.
 /// The protocol data is packed into the 20-byte client message data area.
 pub(crate) fn handle_xim_protocol(state: &mut ClientState, event: &[u8]) -> Vec<u8> {
-    // ClientMessage data area starts at byte 12, format is 8 (byte-packed).
-    // XIM protocol header: major_opcode (1 byte), minor_opcode (1 byte),
-    // length (2 bytes, in 4-byte units).
+    // ClientMessage data area starts at byte 12 and contains the XIM protocol
+    // message. Header: major_opcode (1), minor_opcode (1), length (u16, words).
     if event.len() < 16 {
         return Vec::new();
     }
-
-    let format = event[1] & 0x7F;
-
-    // XIM protocol data is in the client message data area (bytes 12-31).
-    let xim_data = if format == 8 {
-        // Format 8: raw bytes
-        &event[12..]
-    } else {
-        // Format 32: data is in 32-bit words at bytes 12-31
-        &event[12..]
-    };
-
-    if xim_data.len() < 4 {
-        return Vec::new();
-    }
+    let xim_data = &event[12..];
 
     let major_opcode = xim_data[0];
-    let _minor_opcode = xim_data[1];
-    // Length is always little-endian in XIM protocol (XIM uses its own byte order)
-    let _length = u16::from_le_bytes([xim_data[2], xim_data[3]]);
-
     debug!(
         "XIM: protocol message major={} minor={}",
-        major_opcode, _minor_opcode
+        major_opcode, xim_data[1]
     );
 
     match major_opcode {
@@ -405,7 +402,7 @@ fn handle_xim_connect(state: &mut ClientState, _data: &[u8]) -> Vec<u8> {
 }
 
 /// XIM_OPEN (30): Client opens an input method.
-fn handle_xim_open(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
+fn handle_xim_open(state: &mut ClientState, _data: &[u8]) -> Vec<u8> {
     // XIM_OPEN payload (after 4-byte header):
     //   locale name length (2 bytes), locale name (variable), pad
     //
@@ -414,20 +411,12 @@ fn handle_xim_open(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
     let im_id = state.xim.next_im_id;
     state.xim.next_im_id += 1;
 
-    // We need a client_window, which should have been set during _XIM_XCONNECT.
-    // Since we may not have stored it yet, use 0 and rely on local delivery.
-    // In practice, the client that sent XIM_OPEN is the same connection.
-    let client_window = if data.len() >= 8 {
-        // Some implementations pack the client window in the open message
-        0u32
-    } else {
-        0u32
-    };
-
+    // We don't track per-im client_window; rely on local delivery via the
+    // connection that sent XIM_OPEN. _XIM_XCONNECT carries the actual window.
     state.xim.connections.insert(
         im_id,
         XimConnection {
-            client_window,
+            client_window: 0,
             contexts: HashMap::new(),
         },
     );
@@ -520,11 +509,7 @@ fn build_xim_attr(id: u16, attr_type: u16, name: &[u8]) -> Vec<u8> {
 
 /// XIM_CLOSE (32): Client closes an input method.
 fn handle_xim_close(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
-    let im_id = if data.len() >= 6 {
-        u16::from_le_bytes([data[4], data[5]])
-    } else {
-        return Vec::new();
-    };
+    let Some(im_id) = xim_im_id(data) else { return Vec::new(); };
 
     debug!("XIM: CLOSE im_id={}", im_id);
     state.xim.connections.remove(&im_id);
@@ -544,11 +529,7 @@ fn handle_xim_close(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
 
 /// XIM_QUERY_EXTENSION (40): Client queries supported XIM extensions.
 fn handle_xim_query_extension(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
-    let im_id = if data.len() >= 6 {
-        u16::from_le_bytes([data[4], data[5]])
-    } else {
-        return Vec::new();
-    };
+    let Some(im_id) = xim_im_id(data) else { return Vec::new(); };
 
     debug!("XIM: QUERY_EXTENSION im_id={}", im_id);
 
@@ -570,11 +551,7 @@ fn handle_xim_query_extension(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
 
 /// XIM_ENCODING_NEGOTIATION (50): Client negotiates encoding.
 fn handle_xim_encoding_negotiation(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
-    let im_id = if data.len() >= 6 {
-        u16::from_le_bytes([data[4], data[5]])
-    } else {
-        return Vec::new();
-    };
+    let Some(im_id) = xim_im_id(data) else { return Vec::new(); };
 
     debug!("XIM: ENCODING_NEGOTIATION im_id={}", im_id);
 
@@ -595,11 +572,7 @@ fn handle_xim_encoding_negotiation(state: &mut ClientState, data: &[u8]) -> Vec<
 
 /// XIM_CREATE_IC (56): Client creates an input context.
 fn handle_xim_create_ic(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
-    let im_id = if data.len() >= 6 {
-        u16::from_le_bytes([data[4], data[5]])
-    } else {
-        return Vec::new();
-    };
+    let Some(im_id) = xim_im_id(data) else { return Vec::new(); };
 
     let ic_id = state.xim.next_ic_id;
     state.xim.next_ic_id += 1;
@@ -753,11 +726,7 @@ fn parse_preedit_sub_attributes(data: &[u8], spot_x: &mut i16, spot_y: &mut i16)
 
 /// XIM_DESTROY_IC (58): Client destroys an input context.
 fn handle_xim_destroy_ic(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
-    if data.len() < 8 {
-        return Vec::new();
-    }
-    let im_id = u16::from_le_bytes([data[4], data[5]]);
-    let ic_id = u16::from_le_bytes([data[6], data[7]]);
+    let Some((im_id, ic_id)) = xim_im_ic(data) else { return Vec::new(); };
 
     debug!("XIM: DESTROY_IC im_id={} ic_id={}", im_id, ic_id);
 
@@ -780,11 +749,7 @@ fn handle_xim_destroy_ic(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
 
 /// XIM_SET_IC_VALUES (60): Client sets IC attribute values.
 fn handle_xim_set_ic_values(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
-    if data.len() < 8 {
-        return Vec::new();
-    }
-    let im_id = u16::from_le_bytes([data[4], data[5]]);
-    let ic_id = u16::from_le_bytes([data[6], data[7]]);
+    let Some((im_id, ic_id)) = xim_im_ic(data) else { return Vec::new(); };
 
     debug!("XIM: SET_IC_VALUES im_id={} ic_id={}", im_id, ic_id);
 
@@ -841,11 +806,7 @@ fn handle_xim_set_ic_values(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
 
 /// XIM_GET_IC_VALUES (62): Client queries IC attribute values.
 fn handle_xim_get_ic_values(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
-    if data.len() < 8 {
-        return Vec::new();
-    }
-    let im_id = u16::from_le_bytes([data[4], data[5]]);
-    let ic_id = u16::from_le_bytes([data[6], data[7]]);
+    let Some((im_id, ic_id)) = xim_im_ic(data) else { return Vec::new(); };
 
     debug!("XIM: GET_IC_VALUES im_id={} ic_id={}", im_id, ic_id);
 
@@ -890,9 +851,7 @@ fn handle_xim_get_ic_values(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
 
 /// XIM_SET_IC_FOCUS (68): Client sets focus to an IC.
 fn handle_xim_set_ic_focus(_state: &mut ClientState, data: &[u8]) -> Vec<u8> {
-    if data.len() >= 8 {
-        let im_id = u16::from_le_bytes([data[4], data[5]]);
-        let ic_id = u16::from_le_bytes([data[6], data[7]]);
+    if let Some((im_id, ic_id)) = xim_im_ic(data) {
         debug!("XIM: SET_IC_FOCUS im_id={} ic_id={}", im_id, ic_id);
     }
     // No reply required for SET_IC_FOCUS.
@@ -901,9 +860,7 @@ fn handle_xim_set_ic_focus(_state: &mut ClientState, data: &[u8]) -> Vec<u8> {
 
 /// XIM_UNSET_IC_FOCUS (69): Client unsets focus from an IC.
 fn handle_xim_unset_ic_focus(_state: &mut ClientState, data: &[u8]) -> Vec<u8> {
-    if data.len() >= 8 {
-        let im_id = u16::from_le_bytes([data[4], data[5]]);
-        let ic_id = u16::from_le_bytes([data[6], data[7]]);
+    if let Some((im_id, ic_id)) = xim_im_ic(data) {
         debug!("XIM: UNSET_IC_FOCUS im_id={} ic_id={}", im_id, ic_id);
     }
     // No reply required for UNSET_IC_FOCUS.
@@ -919,21 +876,12 @@ fn handle_xim_forward_event(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
     // XIM_FORWARD_EVENT payload (after 4-byte header):
     //   im_id (2), ic_id (2), flag (2), serial (2),
     //   xEvent (32 bytes -- a KeyPress/KeyRelease event)
-    if data.len() < 12 {
-        return Vec::new();
-    }
-
-    let im_id = u16::from_le_bytes([data[4], data[5]]);
-    let ic_id = u16::from_le_bytes([data[6], data[7]]);
-    let _flag = u16::from_le_bytes([data[8], data[9]]);
-    let _serial = u16::from_le_bytes([data[10], data[11]]);
-
-    debug!("XIM: FORWARD_EVENT im_id={} ic_id={}", im_id, ic_id);
-
-    // The xEvent starts at offset 12 and is 32 bytes (X11 wire format).
+    let Some((im_id, ic_id)) = xim_im_ic(data) else { return Vec::new(); };
     if data.len() < 44 {
         return Vec::new();
     }
+    debug!("XIM: FORWARD_EVENT im_id={} ic_id={}", im_id, ic_id);
+    // The xEvent starts at offset 12 and is 32 bytes (X11 wire format).
 
     let x_event = &data[12..44];
     let event_type = x_event[0] & 0x7F;
@@ -1145,11 +1093,7 @@ fn send_xim_commit(state: &mut ClientState, im_id: u16, ic_id: u16, text: &str) 
 /// XIM_RESET_IC (64): Client resets an input context. If there is any
 /// in-progress preedit text, it should be returned and the preedit ended.
 fn handle_xim_reset_ic(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
-    if data.len() < 8 {
-        return Vec::new();
-    }
-    let im_id = u16::from_le_bytes([data[4], data[5]]);
-    let ic_id = u16::from_le_bytes([data[6], data[7]]);
+    let Some((im_id, ic_id)) = xim_im_ic(data) else { return Vec::new(); };
 
     debug!("XIM: RESET_IC im_id={} ic_id={}", im_id, ic_id);
 
@@ -1190,12 +1134,9 @@ fn handle_xim_reset_ic(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
 /// XIM_TRIGGER_NOTIFY (35): Client notifies IM of trigger key activation.
 /// Reply with XIM_TRIGGER_NOTIFY_REPLY to accept the on/off switch.
 fn handle_xim_trigger_notify(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
-    if data.len() < 12 {
-        return Vec::new();
-    }
-    let im_id = u16::from_le_bytes([data[4], data[5]]);
-    let ic_id = u16::from_le_bytes([data[6], data[7]]);
-    let flag = u32::from_le_bytes([data[8], data[9], data[10], data[11]]);
+    let Some((im_id, ic_id)) = xim_im_ic(data) else { return Vec::new(); };
+    let Some(b) = data.get(8..12) else { return Vec::new(); };
+    let flag = u32::from_le_bytes([b[0], b[1], b[2], b[3]]);
 
     debug!(
         "XIM: TRIGGER_NOTIFY im_id={} ic_id={} flag={}",
@@ -1218,11 +1159,7 @@ fn handle_xim_trigger_notify(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
 /// XIM_SYNC (38): Server asks client to sync. Reply immediately with
 /// XIM_SYNC_REPLY since our passthrough IM doesn't need synchronization.
 fn handle_xim_sync(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
-    if data.len() < 8 {
-        return Vec::new();
-    }
-    let im_id = u16::from_le_bytes([data[4], data[5]]);
-    let ic_id = u16::from_le_bytes([data[6], data[7]]);
+    let Some((im_id, ic_id)) = xim_im_ic(data) else { return Vec::new(); };
 
     debug!("XIM: SYNC im_id={} ic_id={}", im_id, ic_id);
 
@@ -1562,9 +1499,7 @@ fn legacy_keysym_to_unicode(keysym: u32) -> Option<u32> {
 
 /// XIM_PREEDIT_START_REPLY (71): Client acknowledges preedit start.
 fn handle_xim_preedit_start_reply(_state: &mut ClientState, data: &[u8]) -> Vec<u8> {
-    if data.len() >= 8 {
-        let im_id = u16::from_le_bytes([data[4], data[5]]);
-        let ic_id = u16::from_le_bytes([data[6], data[7]]);
+    if let Some((im_id, ic_id)) = xim_im_ic(data) {
         // data[8..12] contains the return value (max preedit length), but we
         // don't need to act on it for basic preedit callback support.
         debug!("XIM: PREEDIT_START_REPLY im_id={} ic_id={}", im_id, ic_id);
