@@ -230,27 +230,16 @@ pub(crate) fn handle_vidmode_request(state: &mut ClientState, data: &[u8], seq: 
                     .collect();
                 [&linear_ramp, &linear_ramp, &linear_ramp]
             };
-            {
-                let buf = reply.buf_mut();
-                for (channel, ramp) in ramps.iter().enumerate() {
-                    let base = 32 + channel * padded;
-                    for i in 0..size {
-                        let val = if i < ramp.len() {
-                            ramp[i]
-                        } else {
-                            // Extrapolate linearly if requested size exceeds stored ramp
-                            ((i as u32 * 65535) / (size.max(1) as u32 - 1).max(1)) as u16
-                        };
-                        let off = base + i * 2;
-                        if off + 2 <= buf.len() {
-                            let bytes = if state.msb_first {
-                                val.to_be_bytes()
-                            } else {
-                                val.to_le_bytes()
-                            };
-                            buf[off..off + 2].copy_from_slice(&bytes);
-                        }
-                    }
+            for (channel, ramp) in ramps.iter().enumerate() {
+                let base = 32 + channel * padded;
+                for i in 0..size {
+                    let val = if i < ramp.len() {
+                        ramp[i]
+                    } else {
+                        // Extrapolate linearly if requested size exceeds stored ramp
+                        ((i as u32 * 65535) / (size.max(1) as u32 - 1).max(1)) as u16
+                    };
+                    reply = reply.set_u16(base + i * 2, val);
                 }
             }
             reply.build()
