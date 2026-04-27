@@ -3,7 +3,8 @@ use tracing::{debug, info};
 use super::super::parse_minor;
 use super::{
     composite_pixel, composite_pixel_ca, pict_format_has_alpha, point_in_triangle,
-    render_err, resolve_source_color, resolve_source_pixels, zero_src_has_no_effect, ClipSnapshot,
+    render_length_err, render_value_err, resolve_source_color, resolve_source_pixels,
+    zero_src_has_no_effect, ClipSnapshot,
 };
 use crate::xserver::ClientState;
 use x11rb_protocol::protocol::render::{
@@ -222,7 +223,7 @@ pub(crate) fn handle_trapezoids(state: &mut ClientState, data: &[u8], seq: u16) 
     let dst_draw = match dst_drawable {
         Some(d) => d,
         None => {
-            return render_err(crate::xserver::core::VALUE_ERROR, seq, dst_pic, minor)
+            return render_value_err(seq, dst_pic, minor)
         }
     };
     let clip = ClipSnapshot::from_picture(state, dst_pic);
@@ -425,7 +426,7 @@ pub(crate) fn handle_triangles(state: &mut ClientState, data: &[u8], seq: u16) -
     let dst_draw = match dst_drawable {
         Some(d) => d,
         None => {
-            return render_err(crate::xserver::core::VALUE_ERROR, seq, dst_pic, minor)
+            return render_value_err(seq, dst_pic, minor)
         }
     };
     let clip = ClipSnapshot::from_picture(state, dst_pic);
@@ -672,7 +673,7 @@ pub(crate) fn handle_tri_strip(state: &mut ClientState, data: &[u8], seq: u16) -
     let dst_draw = match dst_drawable {
         Some(d) => d,
         None => {
-            return render_err(crate::xserver::core::VALUE_ERROR, seq, dst_pic, minor)
+            return render_value_err(seq, dst_pic, minor)
         }
     };
     let clip = ClipSnapshot::from_picture(state, dst_pic);
@@ -685,7 +686,7 @@ pub(crate) fn handle_tri_strip(state: &mut ClientState, data: &[u8], seq: u16) -
         .collect();
 
     if points.len() < 3 {
-        return render_err(crate::xserver::core::LENGTH_ERROR, seq, 0, minor);
+        return render_length_err(seq, minor);
     }
 
     if let Some(fb) = state.get_framebuffer_mut(dst_draw) {
@@ -765,7 +766,7 @@ pub(crate) fn handle_tri_fan(state: &mut ClientState, data: &[u8], seq: u16) -> 
     let dst_draw = match dst_drawable {
         Some(d) => d,
         None => {
-            return render_err(crate::xserver::core::VALUE_ERROR, seq, dst_pic, minor)
+            return render_value_err(seq, dst_pic, minor)
         }
     };
     let clip = ClipSnapshot::from_picture(state, dst_pic);
@@ -778,7 +779,7 @@ pub(crate) fn handle_tri_fan(state: &mut ClientState, data: &[u8], seq: u16) -> 
         .collect();
 
     if points.len() < 3 {
-        return render_err(crate::xserver::core::LENGTH_ERROR, seq, 0, minor);
+        return render_length_err(seq, minor);
     }
 
     if let Some(fb) = state.get_framebuffer_mut(dst_draw) {
@@ -858,7 +859,7 @@ pub(crate) fn handle_fill_rectangles(state: &mut ClientState, data: &[u8], seq: 
     let dst_draw = match dst_drawable {
         Some(d) => d,
         None => {
-            return render_err(crate::xserver::core::VALUE_ERROR, seq, dst_pic, minor)
+            return render_value_err(seq, dst_pic, minor)
         }
     };
     let clip = ClipSnapshot::from_picture(state, dst_pic);
@@ -940,7 +941,7 @@ pub(crate) fn handle_add_traps(state: &mut ClientState, data: &[u8], seq: u16) -
         let pic = match state.render.pictures.get(&pic_id) {
             Some(p) => p,
             None => {
-                return render_err(crate::xserver::core::VALUE_ERROR, seq, pic_id, minor)
+                return render_value_err(seq, pic_id, minor)
             }
         };
         let d = pic.drawable;
@@ -949,7 +950,7 @@ pub(crate) fn handle_add_traps(state: &mut ClientState, data: &[u8], seq: u16) -
         } else if let Some(win) = state.windows.get(&d) {
             win.framebuffer.width()
         } else {
-            return render_err(crate::xserver::core::VALUE_ERROR, seq, d, minor);
+            return render_value_err(seq, d, minor);
         };
         (d, w)
     };

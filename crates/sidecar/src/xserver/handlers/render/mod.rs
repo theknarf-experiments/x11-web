@@ -21,6 +21,19 @@ pub(super) fn render_err(code: u8, seq: u16, bad_value: u32, minor: u16) -> Vec<
     crate::xserver::core::build_error(code, seq, bad_value, RENDER_MAJOR_OPCODE, minor)
 }
 
+/// Build a RENDER `BadValue` error — by far the most common RENDER error,
+/// used whenever a picture id, format, num-stops, etc. fails validation.
+#[inline]
+pub(super) fn render_value_err(seq: u16, bad_value: u32, minor: u16) -> Vec<u8> {
+    render_err(crate::xserver::core::VALUE_ERROR, seq, bad_value, minor)
+}
+
+/// Build a RENDER `BadLength` error.
+#[inline]
+pub(super) fn render_length_err(seq: u16, minor: u16) -> Vec<u8> {
+    render_err(crate::xserver::core::LENGTH_ERROR, seq, 0, minor)
+}
+
 // PictFormat IDs
 pub(super) const PICTFORMAT_ARGB32: u32 = 0x24;
 pub(super) const PICTFORMAT_RGB24: u32 = 0x25;
