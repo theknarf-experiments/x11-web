@@ -1,8 +1,6 @@
 //! Text operations (opcodes 74-77).
 
 use super::*;
-use crate::xserver::core::require_len;
-use crate::xserver::request::request_header;
 use x11rb_protocol::protocol::xproto::{
     ImageText16Request, ImageText8Request, PolyText16Request, PolyText8Request,
 };
@@ -11,14 +9,7 @@ use x11rb_protocol::protocol::xproto::{
 // Opcode 74: PolyText8
 // ---------------------------------------------------------------------------
 
-pub(crate) fn handle_poly_text8(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
-    require_len!(data, 16, state.sequence, 74);
-
-    let req = match PolyText8Request::try_parse_request(request_header(data), &data[4..]) {
-        Ok(r) => r,
-        Err(_) => return build_error(LENGTH_ERROR, state.sequence, 0, 74, 0),
-    };
-
+pub(crate) fn handle_poly_text8(state: &mut ClientState, req: &PolyText8Request) -> Vec<u8> {
     let drawable = req.drawable;
     let gc_id = req.gc;
 
@@ -115,13 +106,7 @@ pub(crate) fn handle_poly_text8(state: &mut ClientState, data: &[u8]) -> Vec<u8>
 // Opcode 75: PolyText16
 // ---------------------------------------------------------------------------
 
-pub(crate) fn handle_poly_text16(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
-    require_len!(data, 16, state.sequence, 75);
-
-    let req = match PolyText16Request::try_parse_request(request_header(data), &data[4..]) {
-        Ok(r) => r,
-        Err(_) => return build_error(LENGTH_ERROR, state.sequence, 0, 75, 0),
-    };
+pub(crate) fn handle_poly_text16(state: &mut ClientState, req: &PolyText16Request) -> Vec<u8> {
 
     let drawable = req.drawable;
     let gc_id = req.gc;
@@ -290,13 +275,7 @@ pub(crate) fn handle_poly_text16(state: &mut ClientState, data: &[u8]) -> Vec<u8
 // Opcode 76: ImageText8
 // ---------------------------------------------------------------------------
 
-pub(crate) fn handle_image_text8(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
-    require_len!(data, 16, state.sequence, 76);
-
-    let req = match ImageText8Request::try_parse_request(request_header(data), &data[4..]) {
-        Ok(r) => r,
-        Err(_) => return build_error(LENGTH_ERROR, state.sequence, 0, 76, 0),
-    };
+pub(crate) fn handle_image_text8(state: &mut ClientState, req: &ImageText8Request) -> Vec<u8> {
 
     let drawable = req.drawable;
     let gc_id = req.gc;
@@ -351,13 +330,7 @@ pub(crate) fn handle_image_text8(state: &mut ClientState, data: &[u8]) -> Vec<u8
 // Opcode 77: ImageText16
 // ---------------------------------------------------------------------------
 
-pub(crate) fn handle_image_text16(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
-    require_len!(data, 16, state.sequence, 77);
-
-    let req = match ImageText16Request::try_parse_request(request_header(data), &data[4..]) {
-        Ok(r) => r,
-        Err(_) => return build_error(LENGTH_ERROR, state.sequence, 0, 77, 0),
-    };
+pub(crate) fn handle_image_text16(state: &mut ClientState, req: &ImageText16Request) -> Vec<u8> {
 
     let drawable = req.drawable;
     let gc_id = req.gc;

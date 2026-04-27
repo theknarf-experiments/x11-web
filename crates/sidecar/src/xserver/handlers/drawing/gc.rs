@@ -1,8 +1,6 @@
 //! GC operations (opcodes 55-60).
 
 use super::*;
-use crate::xserver::core::require_len;
-use crate::xserver::request::request_header;
 use x11rb_protocol::protocol::xproto::{
     ChangeGCRequest, CopyGCRequest, CreateGCAux, CreateGCRequest, FreeGCRequest, GC,
     SetClipRectanglesRequest, SetDashesRequest,
@@ -85,17 +83,10 @@ fn apply_create_gc_aux(gc: &mut GcState, aux: &CreateGCAux) {
 // Opcode 55: CreateGC
 // ---------------------------------------------------------------------------
 
-pub(crate) fn handle_create_gc(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
-    require_len!(data, 16, state.sequence, 55);
-
-    let req = match CreateGCRequest::try_parse_request(request_header(data), &data[4..]) {
-        Ok(r) => r,
-        Err(_) => return build_error(LENGTH_ERROR, state.sequence, 0, 55, 0),
-    };
-
+pub(crate) fn handle_create_gc(state: &mut ClientState, req: &CreateGCRequest) -> Vec<u8> {
     let gc_id = req.cid;
     let drawable = req.drawable;
-    let value_list = req.value_list;
+    let value_list = &req.value_list;
 
     // Validate resource ID is within this client's allocated range
     if !state.validate_resource_id(gc_id) {
@@ -150,16 +141,9 @@ pub(crate) fn handle_create_gc(state: &mut ClientState, data: &[u8]) -> Vec<u8> 
 // Opcode 56: ChangeGC
 // ---------------------------------------------------------------------------
 
-pub(crate) fn handle_change_gc(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
-    require_len!(data, 12, state.sequence, 56);
-
-    let req = match ChangeGCRequest::try_parse_request(request_header(data), &data[4..]) {
-        Ok(r) => r,
-        Err(_) => return build_error(LENGTH_ERROR, state.sequence, 0, 56, 0),
-    };
-
+pub(crate) fn handle_change_gc(state: &mut ClientState, req: &ChangeGCRequest) -> Vec<u8> {
     let gc_id = req.gc;
-    let value_list = req.value_list;
+    let value_list = &req.value_list;
 
     if !state.gcs.contains_key(&gc_id) {
         return build_error(G_CONTEXT_ERROR, state.sequence, gc_id, 56, 0);
@@ -235,14 +219,7 @@ pub(crate) fn handle_change_gc(state: &mut ClientState, data: &[u8]) -> Vec<u8> 
 // Opcode 57: CopyGC
 // ---------------------------------------------------------------------------
 
-pub(crate) fn handle_copy_gc(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
-    require_len!(data, 16, state.sequence, 57);
-
-    let req = match CopyGCRequest::try_parse_request(request_header(data), &data[4..]) {
-        Ok(r) => r,
-        Err(_) => return build_error(LENGTH_ERROR, state.sequence, 0, 57, 0),
-    };
-
+pub(crate) fn handle_copy_gc(state: &mut ClientState, req: &CopyGCRequest) -> Vec<u8> {
     let src_gc = req.src_gc;
     let dst_gc = req.dst_gc;
     let value_mask = u32::from(req.value_mask);
@@ -347,14 +324,7 @@ pub(crate) fn handle_copy_gc(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
 // Opcode 58: SetDashes
 // ---------------------------------------------------------------------------
 
-pub(crate) fn handle_set_dashes(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
-    require_len!(data, 12, state.sequence, 58);
-
-    let req = match SetDashesRequest::try_parse_request(request_header(data), &data[4..]) {
-        Ok(r) => r,
-        Err(_) => return build_error(LENGTH_ERROR, state.sequence, 0, 58, 0),
-    };
-
+pub(crate) fn handle_set_dashes(state: &mut ClientState, req: &SetDashesRequest) -> Vec<u8> {
     let gc_id = req.gc;
 
     if !state.gcs.contains_key(&gc_id) {
@@ -381,14 +351,7 @@ pub(crate) fn handle_set_dashes(state: &mut ClientState, data: &[u8]) -> Vec<u8>
 // Opcode 59: SetClipRectangles
 // ---------------------------------------------------------------------------
 
-pub(crate) fn handle_set_clip_rectangles(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
-    require_len!(data, 12, state.sequence, 59);
-
-    let req = match SetClipRectanglesRequest::try_parse_request(request_header(data), &data[4..]) {
-        Ok(r) => r,
-        Err(_) => return build_error(LENGTH_ERROR, state.sequence, 0, 59, 0),
-    };
-
+pub(crate) fn handle_set_clip_rectangles(state: &mut ClientState, req: &SetClipRectanglesRequest) -> Vec<u8> {
     let gc_id = req.gc;
 
     if !state.gcs.contains_key(&gc_id) {
@@ -422,14 +385,7 @@ pub(crate) fn handle_set_clip_rectangles(state: &mut ClientState, data: &[u8]) -
 // Opcode 60: FreeGC
 // ---------------------------------------------------------------------------
 
-pub(crate) fn handle_free_gc(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
-    require_len!(data, 8, state.sequence, 60);
-
-    let req = match FreeGCRequest::try_parse_request(request_header(data), &data[4..]) {
-        Ok(r) => r,
-        Err(_) => return build_error(LENGTH_ERROR, state.sequence, 0, 60, 0),
-    };
-
+pub(crate) fn handle_free_gc(state: &mut ClientState, req: &FreeGCRequest) -> Vec<u8> {
     let gc_id = req.gc;
     if !state.gcs.contains_key(&gc_id) {
         return build_error(G_CONTEXT_ERROR, state.sequence, gc_id, 60, 0);

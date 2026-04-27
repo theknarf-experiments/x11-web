@@ -1,21 +1,13 @@
 //! Pixmap operations (opcodes 53-54).
 
 use super::*;
-use crate::xserver::core::require_len;
-use crate::xserver::request::request_header;
+use x11rb_protocol::protocol::xproto::{CreatePixmapRequest, FreePixmapRequest};
 
 // ---------------------------------------------------------------------------
 // Opcode 53: CreatePixmap
 // ---------------------------------------------------------------------------
 
-pub(crate) fn handle_create_pixmap(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
-    require_len!(data, 16, state.sequence, 53);
-
-    use x11rb_protocol::protocol::xproto::CreatePixmapRequest;
-    let req = match CreatePixmapRequest::try_parse_request(request_header(data), &data[4..]) {
-        Ok(r) => r,
-        Err(_) => return build_error(LENGTH_ERROR, state.sequence, 0, 53, 0),
-    };
+pub(crate) fn handle_create_pixmap(state: &mut ClientState, req: &CreatePixmapRequest) -> Vec<u8> {
     let depth = req.depth;
     let pid = req.pid;
 
@@ -78,13 +70,7 @@ pub(crate) fn handle_create_pixmap(state: &mut ClientState, data: &[u8]) -> Vec<
 // Opcode 54: FreePixmap
 // ---------------------------------------------------------------------------
 
-pub(crate) fn handle_free_pixmap(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
-    require_len!(data, 8, state.sequence, 54);
-    use x11rb_protocol::protocol::xproto::FreePixmapRequest;
-    let req = match FreePixmapRequest::try_parse_request(request_header(data), &data[4..]) {
-        Ok(r) => r,
-        Err(_) => return build_error(LENGTH_ERROR, state.sequence, 0, 54, 0),
-    };
+pub(crate) fn handle_free_pixmap(state: &mut ClientState, req: &FreePixmapRequest) -> Vec<u8> {
     let pid = req.pixmap;
     if !state.pixmaps.contains_key(&pid) {
         return build_error(PIXMAP_ERROR, state.sequence, pid, 54, 0);

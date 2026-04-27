@@ -1,23 +1,14 @@
 //! Image operations (opcodes 72-73).
 
 use super::*;
-use crate::xserver::core::require_len;
 use crate::xserver::reply::ReplyBuf;
-use crate::xserver::request::request_header;
 use x11rb_protocol::protocol::xproto::{GetImageRequest, PutImageRequest, WindowClass};
 
 // ---------------------------------------------------------------------------
 // Opcode 72: PutImage
 // ---------------------------------------------------------------------------
 
-pub(crate) fn handle_put_image(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
-    require_len!(data, 24, state.sequence, 72);
-
-    let req = match PutImageRequest::try_parse_request(request_header(data), &data[4..]) {
-        Ok(r) => r,
-        Err(_) => return build_error(LENGTH_ERROR, state.sequence, 0, 72, 0),
-    };
-
+pub(crate) fn handle_put_image(state: &mut ClientState, req: &PutImageRequest) -> Vec<u8> {
     let format = u8::from(req.format);
     let drawable = req.drawable;
     let gc_id = req.gc;
@@ -446,14 +437,8 @@ pub(crate) fn handle_put_image(state: &mut ClientState, data: &[u8]) -> Vec<u8> 
 // Opcode 73: GetImage
 // ---------------------------------------------------------------------------
 
-pub(crate) fn handle_get_image(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
-    require_len!(data, 20, seq, 73);
-
-    let req = match GetImageRequest::try_parse_request(request_header(data), &data[4..]) {
-        Ok(r) => r,
-        Err(_) => return build_error(LENGTH_ERROR, seq, 0, 73, 0),
-    };
-
+pub(crate) fn handle_get_image(state: &mut ClientState, req: &GetImageRequest) -> Vec<u8> {
+    let seq = state.sequence;
     let format = u8::from(req.format);
     let drawable = req.drawable;
 

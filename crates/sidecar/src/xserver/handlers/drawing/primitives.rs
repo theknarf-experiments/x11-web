@@ -1,9 +1,8 @@
 //! Drawing primitive operations (opcodes 61-71).
 
 use super::*;
-use crate::xserver::core::{require_len, GRAPHICS_EXPOSURE_EVENT, NO_EXPOSURE_EVENT};
+use crate::xserver::core::{GRAPHICS_EXPOSURE_EVENT, NO_EXPOSURE_EVENT};
 use crate::xserver::event::serialize_event;
-use crate::xserver::request::request_header;
 use x11rb_protocol::protocol::xproto::{
     ClearAreaRequest, CopyAreaRequest, CopyPlaneRequest,
     ExposeEvent, FillPolyRequest, GraphicsExposureEvent, NoExposureEvent,
@@ -16,13 +15,7 @@ use x11rb_protocol::protocol::xproto::{
 // Opcode 61: ClearArea
 // ---------------------------------------------------------------------------
 
-pub(crate) fn handle_clear_area(state: &mut ClientState, data: &[u8], _seq: u16) -> Vec<u8> {
-    require_len!(data, 16, state.sequence, 61);
-
-    let req = match ClearAreaRequest::try_parse_request(request_header(data), &data[4..]) {
-        Ok(r) => r,
-        Err(_) => return build_error(LENGTH_ERROR, state.sequence, 0, 61, 0),
-    };
+pub(crate) fn handle_clear_area(state: &mut ClientState, req: &ClearAreaRequest) -> Vec<u8> {
     let exposures = req.exposures;
     let wid = req.window;
 
@@ -87,13 +80,7 @@ pub(crate) fn handle_clear_area(state: &mut ClientState, data: &[u8], _seq: u16)
 // Opcode 62: CopyArea
 // ---------------------------------------------------------------------------
 
-pub(crate) fn handle_copy_area(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
-    require_len!(data, 28, state.sequence, 62);
-
-    let req = match CopyAreaRequest::try_parse_request(request_header(data), &data[4..]) {
-        Ok(r) => r,
-        Err(_) => return build_error(LENGTH_ERROR, state.sequence, 0, 62, 0),
-    };
+pub(crate) fn handle_copy_area(state: &mut ClientState, req: &CopyAreaRequest) -> Vec<u8> {
     let src = req.src_drawable;
     let dst = req.dst_drawable;
     let gc_id = req.gc;
@@ -279,13 +266,7 @@ pub(crate) fn handle_copy_area(state: &mut ClientState, data: &[u8]) -> Vec<u8> 
 // Opcode 63: CopyPlane
 // ---------------------------------------------------------------------------
 
-pub(crate) fn handle_copy_plane(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
-    require_len!(data, 32, state.sequence, 63);
-
-    let req = match CopyPlaneRequest::try_parse_request(request_header(data), &data[4..]) {
-        Ok(r) => r,
-        Err(_) => return build_error(LENGTH_ERROR, state.sequence, 0, 63, 0),
-    };
+pub(crate) fn handle_copy_plane(state: &mut ClientState, req: &CopyPlaneRequest) -> Vec<u8> {
     let src = req.src_drawable;
     let dst = req.dst_drawable;
     let gc_id = req.gc;
@@ -419,13 +400,7 @@ pub(crate) fn handle_copy_plane(state: &mut ClientState, data: &[u8]) -> Vec<u8>
 // Opcode 64: PolyPoint
 // ---------------------------------------------------------------------------
 
-pub(crate) fn handle_poly_point(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
-    require_len!(data, 12, state.sequence, 64);
-
-    let req = match PolyPointRequest::try_parse_request(request_header(data), &data[4..]) {
-        Ok(r) => r,
-        Err(_) => return build_error(LENGTH_ERROR, state.sequence, 0, 64, 0),
-    };
+pub(crate) fn handle_poly_point(state: &mut ClientState, req: &PolyPointRequest) -> Vec<u8> {
     let coord_mode = u8::from(req.coordinate_mode);
     let drawable = req.drawable;
     let gc_id = req.gc;
@@ -492,13 +467,7 @@ pub(crate) fn handle_poly_point(state: &mut ClientState, data: &[u8]) -> Vec<u8>
 // Opcode 65: PolyLine
 // ---------------------------------------------------------------------------
 
-pub(crate) fn handle_poly_line(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
-    require_len!(data, 12, state.sequence, 65);
-
-    let req = match PolyLineRequest::try_parse_request(request_header(data), &data[4..]) {
-        Ok(r) => r,
-        Err(_) => return build_error(LENGTH_ERROR, state.sequence, 0, 65, 0),
-    };
+pub(crate) fn handle_poly_line(state: &mut ClientState, req: &PolyLineRequest) -> Vec<u8> {
     let coord_mode = u8::from(req.coordinate_mode);
     let drawable = req.drawable;
     let gc_id = req.gc;
@@ -677,13 +646,7 @@ pub(crate) fn handle_poly_line(state: &mut ClientState, data: &[u8]) -> Vec<u8> 
 // Opcode 66: PolySegment
 // ---------------------------------------------------------------------------
 
-pub(crate) fn handle_poly_segment(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
-    require_len!(data, 12, state.sequence, 66);
-
-    let req = match PolySegmentRequest::try_parse_request(request_header(data), &data[4..]) {
-        Ok(r) => r,
-        Err(_) => return build_error(LENGTH_ERROR, state.sequence, 0, 66, 0),
-    };
+pub(crate) fn handle_poly_segment(state: &mut ClientState, req: &PolySegmentRequest) -> Vec<u8> {
     let drawable = req.drawable;
     let gc_id = req.gc;
 
@@ -860,13 +823,7 @@ pub(crate) fn handle_poly_segment(state: &mut ClientState, data: &[u8]) -> Vec<u
 // Opcode 67: PolyRectangle
 // ---------------------------------------------------------------------------
 
-pub(crate) fn handle_poly_rectangle(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
-    require_len!(data, 12, state.sequence, 67);
-
-    let req = match PolyRectangleRequest::try_parse_request(request_header(data), &data[4..]) {
-        Ok(r) => r,
-        Err(_) => return build_error(LENGTH_ERROR, state.sequence, 0, 67, 0),
-    };
+pub(crate) fn handle_poly_rectangle(state: &mut ClientState, req: &PolyRectangleRequest) -> Vec<u8> {
     let drawable = req.drawable;
     let gc_id = req.gc;
 
@@ -1051,13 +1008,7 @@ pub(crate) fn handle_poly_rectangle(state: &mut ClientState, data: &[u8]) -> Vec
 // Opcode 68: PolyArc
 // ---------------------------------------------------------------------------
 
-pub(crate) fn handle_poly_arc(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
-    require_len!(data, 12, state.sequence, 68);
-
-    let req = match PolyArcRequest::try_parse_request(request_header(data), &data[4..]) {
-        Ok(r) => r,
-        Err(_) => return build_error(LENGTH_ERROR, state.sequence, 0, 68, 0),
-    };
+pub(crate) fn handle_poly_arc(state: &mut ClientState, req: &PolyArcRequest) -> Vec<u8> {
     let drawable = req.drawable;
     let gc_id = req.gc;
 
@@ -1119,13 +1070,7 @@ pub(crate) fn handle_poly_arc(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
 // Opcode 69: FillPoly
 // ---------------------------------------------------------------------------
 
-pub(crate) fn handle_fill_poly(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
-    require_len!(data, 16, state.sequence, 69);
-
-    let req = match FillPolyRequest::try_parse_request(request_header(data), &data[4..]) {
-        Ok(r) => r,
-        Err(_) => return build_error(LENGTH_ERROR, state.sequence, 0, 69, 0),
-    };
+pub(crate) fn handle_fill_poly(state: &mut ClientState, req: &FillPolyRequest) -> Vec<u8> {
     let drawable = req.drawable;
     let gc_id = req.gc;
 
@@ -1273,13 +1218,7 @@ pub(crate) fn handle_fill_poly(state: &mut ClientState, data: &[u8]) -> Vec<u8> 
 // Opcode 70: PolyFillRectangle
 // ---------------------------------------------------------------------------
 
-pub(crate) fn handle_poly_fill_rectangle(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
-    require_len!(data, 12, state.sequence, 70);
-
-    let req = match PolyFillRectangleRequest::try_parse_request(request_header(data), &data[4..]) {
-        Ok(r) => r,
-        Err(_) => return build_error(LENGTH_ERROR, state.sequence, 0, 70, 0),
-    };
+pub(crate) fn handle_poly_fill_rectangle(state: &mut ClientState, req: &PolyFillRectangleRequest) -> Vec<u8> {
     let drawable = req.drawable;
     let gc_id = req.gc;
 
@@ -1468,13 +1407,7 @@ pub(crate) fn handle_poly_fill_rectangle(state: &mut ClientState, data: &[u8]) -
 // Opcode 71: PolyFillArc
 // ---------------------------------------------------------------------------
 
-pub(crate) fn handle_poly_fill_arc(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
-    require_len!(data, 12, state.sequence, 71);
-
-    let req = match PolyFillArcRequest::try_parse_request(request_header(data), &data[4..]) {
-        Ok(r) => r,
-        Err(_) => return build_error(LENGTH_ERROR, state.sequence, 0, 71, 0),
-    };
+pub(crate) fn handle_poly_fill_arc(state: &mut ClientState, req: &PolyFillArcRequest) -> Vec<u8> {
     let drawable = req.drawable;
     let gc_id = req.gc;
 
