@@ -12,7 +12,6 @@ use x11rb_protocol::protocol::xproto::{
 /// Emit a PropertyNotify event for a window property change.
 /// Used when the server internally modifies properties (e.g. _NET_WM_STATE).
 fn emit_property_notify(state: &mut ClientState, window: u32, atom: u32) {
-    let property_change_mask: u32 = 0x0040_0000;
     let event = serialize_event(
         &PropertyNotifyEvent {
             response_type: PROPERTY_NOTIFY_EVENT,
@@ -24,12 +23,7 @@ fn emit_property_notify(state: &mut ClientState, window: u32, atom: u32) {
         },
         state.msb_first,
     );
-    if let Some(win) = state.windows.get(&window) {
-        if win.event_mask & property_change_mask != 0 {
-            state.pending_events.push(event.to_vec());
-        }
-    }
-    state.broadcast_event(window, property_change_mask, &event);
+    state.deliver_event(window, EventMask::PROPERTY_CHANGE, &event);
 }
 
 /// Crossing event mode constants.

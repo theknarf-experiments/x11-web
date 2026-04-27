@@ -1144,16 +1144,6 @@ pub(crate) fn handle_circulate_window(state: &mut ClientState, req: &CirculateWi
     // Generate CirculateNotify event (code 26)
     // Deliver to: the window itself (StructureNotify) and parent (SubstructureNotify)
     let place = if direction == 0 { 0u8 } else { 1u8 }; // 0=Top, 1=Bottom
-    let structure_mask = state
-        .windows
-        .get(&target_child)
-        .map(|w| w.event_mask & EventMask::STRUCTURE_NOTIFY != EventMask::NO_EVENT)
-        .unwrap_or(false);
-    let substructure_mask = state
-        .windows
-        .get(&window)
-        .map(|w| w.event_mask & EventMask::SUBSTRUCTURE_NOTIFY != EventMask::NO_EVENT)
-        .unwrap_or(false);
 
     {
         let event = serialize_event(&CirculateNotifyEvent {
@@ -1163,11 +1153,7 @@ pub(crate) fn handle_circulate_window(state: &mut ClientState, req: &CirculateWi
             window: target_child,
             place: place.into(),
         }, bo);
-        if structure_mask {
-            state.pending_events.push(event.clone());
-        }
-        // Cross-connection broadcast: StructureNotify on the circulated child
-        state.broadcast_event(target_child, EventMask::STRUCTURE_NOTIFY, &event);
+        state.deliver_event(target_child, EventMask::STRUCTURE_NOTIFY, &event);
     }
 
     {
@@ -1178,11 +1164,7 @@ pub(crate) fn handle_circulate_window(state: &mut ClientState, req: &CirculateWi
             window: target_child,
             place: place.into(),
         }, bo);
-        if substructure_mask {
-            state.pending_events.push(event.clone());
-        }
-        // Cross-connection broadcast: SubstructureNotify on the parent
-        state.broadcast_event(window, EventMask::SUBSTRUCTURE_NOTIFY, &event);
+        state.deliver_event(window, EventMask::SUBSTRUCTURE_NOTIFY, &event);
     }
 
     Vec::new()
