@@ -14,6 +14,11 @@ use super::types::WindowState;
 use super::{CROSSING_MODE_GRAB, CROSSING_MODE_UNGRAB};
 use std::collections::{HashMap, VecDeque};
 use tracing::{debug, info};
+use x11rb_protocol::protocol::xproto::{
+    AllowEventsRequest, ChangeActivePointerGrabRequest, GrabButtonRequest, GrabKeyRequest,
+    GrabKeyboardRequest, GrabPointerRequest, GrabServerRequest, UngrabButtonRequest,
+    UngrabKeyRequest, UngrabKeyboardRequest, UngrabPointerRequest, UngrabServerRequest,
+};
 
 /// Generate crossing events for a grab activation.
 /// Per X11 spec §11.3, uses mode=Grab and computes proper detail
@@ -196,19 +201,16 @@ pub(crate) struct PassiveKeyGrab {
 ///
 /// Status codes: 0=Success, 1=AlreadyGrabbed, 2=InvalidTime,
 ///               3=NotViewable, 4=Frozen
-pub(crate) fn handle_grab_pointer(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
-    if data.len() < 24 {
-        return build_error(LENGTH_ERROR, seq, 0, 26, 0);
-    }
-
-    let owner_events = data[1] != 0;
-    let grab_window = state.read_u32(data, 4);
-    let event_mask = state.read_u16(data, 8) as u32;
-    let pointer_mode = data[10];
-    let keyboard_mode = data[11];
-    let confine_to = state.read_u32(data, 12);
-    let cursor = state.read_u32(data, 16);
-    let timestamp = state.read_u32(data, 20); // 0 = CurrentTime
+pub(crate) fn handle_grab_pointer(state: &mut ClientState, req: &GrabPointerRequest) -> Vec<u8> {
+    let seq = state.sequence;
+    let owner_events = req.owner_events;
+    let grab_window = req.grab_window;
+    let event_mask = u32::from(req.event_mask);
+    let pointer_mode: u8 = req.pointer_mode.into();
+    let keyboard_mode: u8 = req.keyboard_mode.into();
+    let confine_to = req.confine_to;
+    let cursor = req.cursor;
+    let timestamp = req.time; // 0 = CurrentTime
 
     // Validate grab_window exists
     if !state.windows.contains_key(&grab_window) && grab_window != state.root_window {
@@ -319,7 +321,7 @@ pub(crate) fn handle_grab_pointer(state: &mut ClientState, data: &[u8], seq: u16
 }
 
 /// UngrabPointer (opcode 27)
-pub(crate) fn handle_ungrab_pointer(state: &mut ClientState, _data: &[u8]) -> Vec<u8> {
+pub(crate) fn handle_ungrab_pointer(state: &mut ClientState, _req: &UngrabPointerRequest) -> Vec<u8> {
     if let Some(ref grab) = state.grabs.pointer_grab {
         let grab_window = grab.grab_window;
         debug!("UngrabPointer: releasing active pointer grab");
@@ -337,30 +339,29 @@ pub(crate) fn handle_ungrab_pointer(state: &mut ClientState, _data: &[u8]) -> Ve
 }
 
 /// GrabButton (opcode 28)
-pub(crate) fn handle_grab_button(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
-    require_len!(data, 24, seq, 28);
-
-    let owner_events = data[1] != 0;
-    let grab_window = state.read_u32(data, 4);
+pub(crate) fn handle_grab_button(state: &mut ClientState, req: &GrabButtonRequest) -> Vec<u8> {
+    let seq = state.sequence;
+    let owner_events = req.owner_events;
+    let grab_window = req.grab_window;
 
     // Validate grab_window exists
     if !state.windows.contains_key(&grab_window) && grab_window != state.root_window {
         return build_error(WINDOW_ERROR, seq, grab_window, 28, 0);
     }
 
-    let event_mask = state.read_u16(data, 8) as u32;
-    let pointer_mode = data[10];
-    let keyboard_mode = data[11];
-    let confine_to = state.read_u32(data, 12);
-    let cursor = state.read_u32(data, 16);
+    let event_mask = u32::from(req.event_mask);
+    let pointer_mode: u8 = req.pointer_mode.into();
+    let keyboard_mode: u8 = req.keyboard_mode.into();
+    let confine_to = req.confine_to;
+    let cursor = req.cursor;
 
     // Validate cursor if non-zero
     if cursor != 0 && !state.cursors.contains_key(&cursor) {
         return build_error(CURSOR_ERROR, seq, cursor, 28, 0);
     }
 
-    let button = data[20];
-    let modifiers = state.read_u16(data, 22);
+    let button: u8 = req.button.into();
+    let modifiers = u16::from(req.modifiers);
 
     debug!("GrabButton: window={grab_window:#x} button={button} modifiers={modifiers:#x}");
 
@@ -390,12 +391,11 @@ pub(crate) fn handle_grab_button(state: &mut ClientState, data: &[u8], seq: u16)
 }
 
 /// UngrabButton (opcode 29)
-pub(crate) fn handle_ungrab_button(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
-    require_len!(data, 12, seq, 29);
-
-    let button = data[1];
-    let grab_window = state.read_u32(data, 4);
-    let modifiers = state.read_u16(data, 8);
+pub(crate) fn handle_ungrab_button(state: &mut ClientState, req: &UngrabButtonRequest) -> Vec<u8> {
+    let _seq = state.sequence;
+    let button: u8 = req.button.into();
+    let grab_window = req.grab_window;
+    let modifiers = u16::from(req.modifiers);
 
     debug!("UngrabButton: window={grab_window:#x} button={button} modifiers={modifiers:#x}");
 
@@ -417,13 +417,10 @@ pub(crate) fn handle_ungrab_button(state: &mut ClientState, data: &[u8], seq: u1
 /// ChangeActivePointerGrab (opcode 30)
 pub(crate) fn handle_change_active_pointer_grab(
     state: &mut ClientState,
-    data: &[u8],
-    seq: u16,
+    req: &ChangeActivePointerGrabRequest,
 ) -> Vec<u8> {
-    require_len!(data, 16, seq, 30);
-
-    let bo = state.msb_first;
-    let cursor = read_u32_bo(data, 4, bo);
+    let seq = state.sequence;
+    let cursor = req.cursor;
 
     // Validate cursor ID if specified (0 = None)
     if cursor != 0 && !state.cursors.contains_key(&cursor) {
@@ -431,7 +428,7 @@ pub(crate) fn handle_change_active_pointer_grab(
     }
 
     if let Some(ref mut grab) = state.grabs.pointer_grab {
-        let event_mask = read_u16_bo(data, 12, bo) as u32;
+        let event_mask = u32::from(req.event_mask);
         grab.cursor = cursor;
         grab.event_mask = event_mask;
         debug!("ChangeActivePointerGrab: cursor={cursor:#x} event_mask={event_mask:#x}");
@@ -444,16 +441,13 @@ pub(crate) fn handle_change_active_pointer_grab(
 ///
 /// Status codes: 0=Success, 1=AlreadyGrabbed, 2=InvalidTime,
 ///               3=NotViewable, 4=Frozen
-pub(crate) fn handle_grab_keyboard(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
-    if data.len() < 16 {
-        return build_error(LENGTH_ERROR, seq, 0, 31, 0);
-    }
-
-    let owner_events = data[1] != 0;
-    let grab_window = state.read_u32(data, 4);
-    let timestamp = state.read_u32(data, 8); // 0 = CurrentTime
-    let pointer_mode = data[12];
-    let keyboard_mode = data[13];
+pub(crate) fn handle_grab_keyboard(state: &mut ClientState, req: &GrabKeyboardRequest) -> Vec<u8> {
+    let seq = state.sequence;
+    let owner_events = req.owner_events;
+    let grab_window = req.grab_window;
+    let timestamp = req.time; // 0 = CurrentTime
+    let pointer_mode: u8 = req.pointer_mode.into();
+    let keyboard_mode: u8 = req.keyboard_mode.into();
 
     if !state.windows.contains_key(&grab_window) && grab_window != state.root_window {
         return build_error(WINDOW_ERROR, seq, grab_window, 31, 0);
@@ -520,7 +514,7 @@ pub(crate) fn handle_grab_keyboard(state: &mut ClientState, data: &[u8], seq: u1
 }
 
 /// UngrabKeyboard (opcode 32)
-pub(crate) fn handle_ungrab_keyboard(state: &mut ClientState, _data: &[u8]) -> Vec<u8> {
+pub(crate) fn handle_ungrab_keyboard(state: &mut ClientState, _req: &UngrabKeyboardRequest) -> Vec<u8> {
     if let Some(ref grab) = state.grabs.keyboard_grab {
         let grab_window = grab.grab_window;
         let pointer_mode = grab.pointer_mode;
@@ -551,20 +545,19 @@ pub(crate) fn handle_ungrab_keyboard(state: &mut ClientState, _data: &[u8]) -> V
 }
 
 /// GrabKey (opcode 33)
-pub(crate) fn handle_grab_key(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
-    require_len!(data, 16, seq, 33);
-
-    let owner_events = data[1] != 0;
-    let grab_window = state.read_u32(data, 4);
+pub(crate) fn handle_grab_key(state: &mut ClientState, req: &GrabKeyRequest) -> Vec<u8> {
+    let seq = state.sequence;
+    let owner_events = req.owner_events;
+    let grab_window = req.grab_window;
 
     // Validate grab_window exists
     if !state.windows.contains_key(&grab_window) && grab_window != state.root_window {
         return build_error(WINDOW_ERROR, seq, grab_window, 33, 0);
     }
-    let modifiers = state.read_u16(data, 8);
-    let key = data[10];
-    let pointer_mode = data[11];
-    let keyboard_mode = data[12];
+    let modifiers = u16::from(req.modifiers);
+    let key = req.key;
+    let pointer_mode: u8 = req.pointer_mode.into();
+    let keyboard_mode: u8 = req.keyboard_mode.into();
 
     debug!("GrabKey: window={grab_window:#x} key={key} modifiers={modifiers:#x}");
 
@@ -592,12 +585,11 @@ pub(crate) fn handle_grab_key(state: &mut ClientState, data: &[u8], seq: u16) ->
 }
 
 /// UngrabKey (opcode 34)
-pub(crate) fn handle_ungrab_key(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
-    require_len!(data, 12, seq, 34);
-
-    let key = data[1];
-    let grab_window = state.read_u32(data, 4);
-    let modifiers = state.read_u16(data, 8);
+pub(crate) fn handle_ungrab_key(state: &mut ClientState, req: &UngrabKeyRequest) -> Vec<u8> {
+    let _seq = state.sequence;
+    let key = req.key;
+    let grab_window = req.grab_window;
+    let modifiers = u16::from(req.modifiers);
 
     debug!("UngrabKey: window={grab_window:#x} key={key} modifiers={modifiers:#x}");
 
@@ -620,11 +612,8 @@ pub(crate) fn handle_ungrab_key(state: &mut ClientState, data: &[u8], seq: u16) 
 /// Modes: 0=AsyncPointer, 1=SyncPointer, 2=ReplayPointer,
 ///        3=AsyncKeyboard, 4=SyncKeyboard, 5=ReplayKeyboard,
 ///        6=AsyncBoth, 7=SyncBoth
-pub(crate) fn handle_allow_events(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
-    if data.len() < 4 {
-        return Vec::new();
-    }
-    let mode = data[1];
+pub(crate) fn handle_allow_events(state: &mut ClientState, req: &AllowEventsRequest) -> Vec<u8> {
+    let mode: u8 = req.mode.into();
     debug!("AllowEvents: mode={mode}");
 
     match mode {
@@ -877,7 +866,7 @@ pub(crate) fn check_button_release_ungrab(state: &mut ClientState, _button: u8, 
 /// Per X11 spec, GrabServer freezes processing of requests from all other
 /// clients until UngrabServer is issued. We record the grab in the shared
 /// ServerGrabLock so the per-client request loops can block.
-pub(crate) fn handle_grab_server(state: &mut ClientState, _data: &[u8]) -> Vec<u8> {
+pub(crate) fn handle_grab_server(state: &mut ClientState, _req: &GrabServerRequest) -> Vec<u8> {
     state.grabs.server_grab_count += 1;
     // Set the shared grab lock so other clients' request loops will block.
     // Uses std::sync::Mutex so lock() always succeeds (no try_lock spin).
@@ -893,7 +882,7 @@ pub(crate) fn handle_grab_server(state: &mut ClientState, _data: &[u8]) -> Vec<u
 }
 
 /// UngrabServer (opcode 37)
-pub(crate) fn handle_ungrab_server(state: &mut ClientState, _data: &[u8]) -> Vec<u8> {
+pub(crate) fn handle_ungrab_server(state: &mut ClientState, _req: &UngrabServerRequest) -> Vec<u8> {
     if state.grabs.server_grab_count > 0 {
         state.grabs.server_grab_count -= 1;
     }
