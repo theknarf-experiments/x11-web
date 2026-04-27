@@ -11,7 +11,6 @@ use super::super::client::ClientState;
 use super::super::types::RegionRect;
 use crate::xserver::event::serialize_event;
 use crate::xserver::reply::ReplyBuf;
-use crate::xserver::request::request_header;
 use x11rb_protocol::protocol::shape::{
     CombineRequest, GetRectanglesRequest, InputSelectedRequest, MaskRequest, NotifyEvent as ShapeNotifyEvent,
     OffsetRequest, QueryExtentsRequest, QueryVersionRequest, RectanglesRequest, SelectInputRequest,
@@ -40,16 +39,7 @@ pub(crate) fn handle_shape_request(state: &mut ClientState, data: &[u8], seq: u1
     match minor {
         // 0: QueryVersion
         0 => {
-            if QueryVersionRequest::try_parse_request(request_header(data), &data[4..]).is_err() {
-                return crate::xserver::core::build_error_bo(
-                    crate::xserver::core::LENGTH_ERROR,
-                    seq,
-                    0,
-                    128,
-                    0,
-                    state.msb_first,
-                );
-            }
+            let _req = parse_minor!(QueryVersionRequest, data, state, seq, 128, 0);
             ReplyBuf::fixed(seq, state.msb_first)
                 .set_u16(8, 1) // major version
                 .set_u16(10, 1) // minor version
