@@ -332,20 +332,9 @@ pub(crate) fn handle_create_window(state: &mut ClientState, req: &CreateWindowRe
     }, state.msb_first);
 
     // Local delivery: only if this client itself selected SubstructureNotify
-    // on the parent.
-    if state
-        .windows
-        .get(&parent)
-        .is_some_and(|p| p.event_mask & EventMask::SUBSTRUCTURE_NOTIFY != EventMask::NO_EVENT)
-    {
-        state.pending_events.push(event.to_vec());
-    }
-
-    // Cross-connection broadcast: any other client watching SubstructureNotify
-    // on the parent sees the event regardless of whether THIS client selected
-    // it. broadcast_event already filters by source_client_id so we don't
-    // double-deliver to ourselves.
-    state.broadcast_event(parent, EventMask::SUBSTRUCTURE_NOTIFY, &event);
+    // on the parent. Cross-connection broadcast already filters by
+    // source_client_id so we don't double-deliver to ourselves.
+    state.deliver_event(parent, EventMask::SUBSTRUCTURE_NOTIFY, &event);
 
     Vec::new() // No reply for CreateWindow
 }

@@ -52,12 +52,7 @@ pub(crate) fn handle_map_window(state: &mut ClientState, req: &MapWindowRequest)
         // Also check if any client has SubstructureRedirectMask on the parent
         // (even without a formal WM registration — per X11 spec the mask is
         // what matters, not a WM registration handshake).
-        let parent_has_redirect = state
-            .windows
-            .get(&parent_id)
-            .is_some_and(|p| p.event_mask & EventMask::SUBSTRUCTURE_REDIRECT != EventMask::NO_EVENT);
-
-        if should_redirect || parent_has_redirect {
+        if should_redirect || state.window_selects(parent_id, EventMask::SUBSTRUCTURE_REDIRECT) {
             info!("MapWindow: redirecting wid={wid:#x} as MapRequest (parent={parent_id:#x})");
             // Build MapRequest event (code 20)
             let map_request = serialize_event(&MapRequestEvent {

@@ -187,13 +187,7 @@ pub(crate) fn handle_configure_window(state: &mut ClientState, req: &ConfigureWi
             }
         };
 
-        // Also check if any client has SubstructureRedirectMask on the parent
-        let parent_has_redirect = state
-            .windows
-            .get(&parent_id)
-            .is_some_and(|p| p.event_mask & EventMask::SUBSTRUCTURE_REDIRECT != EventMask::NO_EVENT);
-
-        if should_redirect || parent_has_redirect {
+        if should_redirect || state.window_selects(parent_id, EventMask::SUBSTRUCTURE_REDIRECT) {
             info!("ConfigureWindow: redirecting wid={wid:#x} as ConfigureRequest (parent={parent_id:#x})");
 
             // Extract the values from the parsed request to populate the ConfigureRequest event.
@@ -1094,16 +1088,10 @@ pub(crate) fn handle_circulate_window(state: &mut ClientState, req: &CirculateWi
         mapped_children[mapped_children.len() - 1]
     };
 
-    // Check if parent has SubstructureRedirectMask - if so, generate CirculateRequest instead
-    let parent_redirect = state
-        .windows
-        .get(&window)
-        .map(|w| w.event_mask & EventMask::SUBSTRUCTURE_REDIRECT != EventMask::NO_EVENT)
-        .unwrap_or(false);
-
     let bo = state.msb_first;
 
-    if parent_redirect {
+    // Check if parent has SubstructureRedirectMask - if so, generate CirculateRequest instead
+    if state.window_selects(window, EventMask::SUBSTRUCTURE_REDIRECT) {
         // Generate CirculateRequest event (code 27) instead of performing the operation
         let event = serialize_event(&CirculateNotifyEvent {
             response_type: CIRCULATE_REQUEST_EVENT,
