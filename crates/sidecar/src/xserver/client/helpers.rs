@@ -111,10 +111,16 @@ impl ClientState {
     }
 
     /// Broadcast an event to other connections that have selected the given
-    /// event mask on the specified window.
-    pub(crate) fn broadcast_event(&self, window_id: u32, event_mask_bit: u32, event: &[u8]) {
+    /// event mask on the specified window. Accepts either a raw u32 bit set
+    /// or an `EventMask` (which converts to u32).
+    pub(crate) fn broadcast_event(
+        &self,
+        window_id: u32,
+        event_mask_bit: impl Into<u32>,
+        event: &[u8],
+    ) {
         self.event_broadcaster
-            .broadcast(window_id, event_mask_bit, event, &self.client_id);
+            .broadcast(window_id, event_mask_bit.into(), event, &self.client_id);
     }
 
     /// Returns true if this client has selected `mask` (one or more bits) on `wid`.

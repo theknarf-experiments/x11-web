@@ -74,7 +74,7 @@ pub(crate) fn handle_map_window(state: &mut ClientState, req: &MapWindowRequest)
                 }
             }
             // Also broadcast to any other clients with SubstructureRedirectMask on parent
-            state.broadcast_event(parent_id, u32::from(EventMask::SUBSTRUCTURE_REDIRECT), &map_request);
+            state.broadcast_event(parent_id, EventMask::SUBSTRUCTURE_REDIRECT, &map_request);
             // Don't map the window -- the WM/redirector will do it.
             return events;
         }
@@ -289,9 +289,9 @@ pub(crate) fn handle_map_window(state: &mut ClientState, req: &MapWindowRequest)
             }
 
             // Cross-connection broadcast to other clients watching this parent
-            state.broadcast_event(parent_id, u32::from(EventMask::SUBSTRUCTURE_NOTIFY), &parent_event);
+            state.broadcast_event(parent_id, EventMask::SUBSTRUCTURE_NOTIFY, &parent_event);
             // Also broadcast StructureNotify to other clients watching the window itself
-            state.broadcast_event(wid, u32::from(EventMask::STRUCTURE_NOTIFY), &map_event);
+            state.broadcast_event(wid, EventMask::STRUCTURE_NOTIFY, &map_event);
         }
 
         // Send VisibilityNotify with real occlusion computation
@@ -363,7 +363,7 @@ pub(crate) fn handle_map_window(state: &mut ClientState, req: &MapWindowRequest)
             }
 
             // Broadcast Expose to other clients that selected ExposureMask on this window
-            state.broadcast_event(wid, u32::from(EventMask::EXPOSURE), &expose_event);
+            state.broadcast_event(wid, EventMask::EXPOSURE, &expose_event);
         }
     }
 
@@ -605,8 +605,8 @@ pub(crate) fn handle_unmap_window(state: &mut ClientState, req: &UnmapWindowRequ
         }
 
         // Cross-connection broadcast
-        state.broadcast_event(parent_id, u32::from(EventMask::SUBSTRUCTURE_NOTIFY), &parent_event);
-        state.broadcast_event(wid, u32::from(EventMask::STRUCTURE_NOTIFY), &unmap_event);
+        state.broadcast_event(parent_id, EventMask::SUBSTRUCTURE_NOTIFY, &parent_event);
+        state.broadcast_event(wid, EventMask::STRUCTURE_NOTIFY, &unmap_event);
     }
 
     // Set WM_STATE = WithdrawnState for top-level windows (ICCCM)

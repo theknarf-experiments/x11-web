@@ -77,7 +77,7 @@ pub(crate) fn start_incr_transfer(
         if state.window_selects(requestor, EventMask::PROPERTY_CHANGE) {
             state.pending_events.push(event.clone());
         }
-        state.broadcast_event(requestor, u32::from(EventMask::PROPERTY_CHANGE), &event);
+        state.broadcast_event(requestor, EventMask::PROPERTY_CHANGE, &event);
     }
 
     // Default chunk size: ~64KB (standard INCR chunk).
@@ -166,7 +166,7 @@ pub(crate) fn advance_incr_transfer(state: &mut ClientState, window: u32, proper
         }
 
         // Broadcast to other connections that selected PropertyChangeMask
-        state.broadcast_event(window, u32::from(EventMask::PROPERTY_CHANGE), &event);
+        state.broadcast_event(window, EventMask::PROPERTY_CHANGE, &event);
     }
 }
 

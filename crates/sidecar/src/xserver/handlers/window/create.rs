@@ -345,7 +345,7 @@ pub(crate) fn handle_create_window(state: &mut ClientState, req: &CreateWindowRe
     // on the parent sees the event regardless of whether THIS client selected
     // it. broadcast_event already filters by source_client_id so we don't
     // double-deliver to ourselves.
-    state.broadcast_event(parent, u32::from(EventMask::SUBSTRUCTURE_NOTIFY), &event);
+    state.broadcast_event(parent, EventMask::SUBSTRUCTURE_NOTIFY, &event);
 
     Vec::new() // No reply for CreateWindow
 }
@@ -380,7 +380,7 @@ pub(crate) fn handle_destroy_window(state: &mut ClientState, req: &DestroyWindow
                 state.pending_events.push(event.clone());
             }
             // Cross-connection broadcast: StructureNotify on the window
-            state.broadcast_event(wid, u32::from(EventMask::STRUCTURE_NOTIFY), &event);
+            state.broadcast_event(wid, EventMask::STRUCTURE_NOTIFY, &event);
         }
 
         // Send DestroyNotify to parent (SubstructureNotifyMask)
@@ -396,7 +396,7 @@ pub(crate) fn handle_destroy_window(state: &mut ClientState, req: &DestroyWindow
                 state.pending_events.push(event.clone());
             }
             // Cross-connection broadcast: SubstructureNotify on the parent
-            state.broadcast_event(parent_id, u32::from(EventMask::SUBSTRUCTURE_NOTIFY), &event);
+            state.broadcast_event(parent_id, EventMask::SUBSTRUCTURE_NOTIFY, &event);
         }
     }
 
@@ -443,7 +443,7 @@ pub(crate) fn handle_destroy_window(state: &mut ClientState, req: &DestroyWindow
                     state.pending_events.push(event.clone());
                 }
             }
-            state.broadcast_event(desc, u32::from(EventMask::STRUCTURE_NOTIFY), &event);
+            state.broadcast_event(desc, EventMask::STRUCTURE_NOTIFY, &event);
 
             // SubstructureNotify on the parent
             let pevent = serialize_event(&DestroyNotifyEvent {
@@ -452,7 +452,7 @@ pub(crate) fn handle_destroy_window(state: &mut ClientState, req: &DestroyWindow
                 event: desc_parent,
                 window: desc,
             }, state.msb_first);
-            state.broadcast_event(desc_parent, u32::from(EventMask::SUBSTRUCTURE_NOTIFY), &pevent);
+            state.broadcast_event(desc_parent, EventMask::SUBSTRUCTURE_NOTIFY, &pevent);
         }
 
         state.windows.remove(&desc);

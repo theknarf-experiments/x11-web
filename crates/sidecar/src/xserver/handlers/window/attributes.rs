@@ -163,7 +163,7 @@ pub(crate) fn handle_change_window_attributes(state: &mut ClientState, req: &Cha
             state: XColormapState::INSTALLED,
         }, state.msb_first);
         state.pending_events.push(event.clone());
-        state.broadcast_event(wid, u32::from(EventMask::COLOR_MAP_CHANGE), &event);
+        state.broadcast_event(wid, EventMask::COLOR_MAP_CHANGE, &event);
     }
 
     if cursor_changed {

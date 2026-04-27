@@ -174,7 +174,7 @@ pub(crate) fn update_sibling_visibility(
                 window: sib_id,
                 state: new_vis.into(),
             }, msb_first);
-            state.broadcast_event(sib_id, u32::from(EventMask::VISIBILITY_CHANGE), &vis_event);
+            state.broadcast_event(sib_id, EventMask::VISIBILITY_CHANGE, &vis_event);
 
             // Generate Expose events for siblings that became more visible
             // (newly-uncovered regions need repainting).
@@ -229,7 +229,7 @@ pub(crate) fn update_sibling_visibility(
                         height: bc_h,
                         count: 0,
                     }, msb_first);
-                    state.broadcast_event(sib_id, u32::from(EventMask::EXPOSURE), &expose_bc);
+                    state.broadcast_event(sib_id, EventMask::EXPOSURE, &expose_bc);
                 }
             }
         }

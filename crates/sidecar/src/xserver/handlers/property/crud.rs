@@ -149,7 +149,7 @@ pub(crate) fn handle_change_property(state: &mut ClientState, req: &ChangeProper
         if state.window_selects(window, EventMask::PROPERTY_CHANGE) {
             state.pending_events.push(event.clone());
         }
-        state.broadcast_event(window, u32::from(EventMask::PROPERTY_CHANGE), &event);
+        state.broadcast_event(window, EventMask::PROPERTY_CHANGE, &event);
     }
 
     // Check if this is WM_TRANSIENT_FOR — store transient parent in WindowState (ICCCM §4.1.2.6)
@@ -478,7 +478,7 @@ pub(crate) fn handle_delete_property(state: &mut ClientState, req: &DeleteProper
             }
 
             // Broadcast to other connections that selected PropertyChangeMask
-            state.broadcast_event(window, u32::from(EventMask::PROPERTY_CHANGE), &event);
+            state.broadcast_event(window, EventMask::PROPERTY_CHANGE, &event);
         }
 
         // Advance any pending INCR transfer for this window+property.
