@@ -103,6 +103,17 @@ fn xim_im_ic(data: &[u8]) -> Option<(u16, u16)> {
     ))
 }
 
+/// Build an XIM reply: 4-byte header (major opcode, minor=0, length-in-4-byte-
+/// words u16 LE) followed by the payload bytes.
+fn build_xim_reply(major: u8, length_words: u16, payload: &[u8]) -> Vec<u8> {
+    let mut reply = Vec::with_capacity(4 + payload.len());
+    reply.push(major);
+    reply.push(0);
+    reply.extend_from_slice(&length_words.to_le_bytes());
+    reply.extend_from_slice(payload);
+    reply
+}
+
 // ---------------------------------------------------------------------------
 // XIM server state
 // ---------------------------------------------------------------------------
@@ -460,11 +471,7 @@ fn handle_xim_open(state: &mut ClientState, _data: &[u8]) -> Vec<u8> {
     reply_body.extend_from_slice(&ic_attr_4);
 
     let length_words = reply_body.len().div_ceil(4) as u16;
-    let mut reply = Vec::with_capacity(4 + reply_body.len());
-    reply.push(XIM_OPEN_REPLY);
-    reply.push(0);
-    reply.extend_from_slice(&length_words.to_le_bytes());
-    reply.extend_from_slice(&reply_body);
+    let reply = build_xim_reply(XIM_OPEN_REPLY, length_words, &reply_body);
 
     // Send XIM_SET_EVENT_MASK to tell the client which events we want forwarded.
     // We want KeyPress (bit 0) and KeyRelease (bit 1) forwarded.
@@ -514,15 +521,10 @@ fn handle_xim_close(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
     debug!("XIM: CLOSE im_id={}", im_id);
     state.xim.connections.remove(&im_id);
 
-    // XIM_CLOSE_REPLY: major=33, minor=0, length=1
-    //   im_id (2), pad (2)
-    let mut reply = Vec::with_capacity(8);
-    reply.push(XIM_CLOSE_REPLY);
-    reply.push(0);
-    reply.extend_from_slice(&1u16.to_le_bytes());
-    reply.extend_from_slice(&im_id.to_le_bytes());
-    reply.extend_from_slice(&[0, 0]);
-
+    // XIM_CLOSE_REPLY: major=33, minor=0, length=1: im_id (2), pad (2)
+    let mut payload = im_id.to_le_bytes().to_vec();
+    payload.extend_from_slice(&[0, 0]);
+    let reply = build_xim_reply(XIM_CLOSE_REPLY, 1, &payload);
     send_xim_reply(state, im_id, &reply);
     Vec::new()
 }
@@ -533,18 +535,11 @@ fn handle_xim_query_extension(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
 
     debug!("XIM: QUERY_EXTENSION im_id={}", im_id);
 
-    // XIM_QUERY_EXTENSION_REPLY: major=41, minor=0
-    //   im_id (2), pad (2)
-    //   number of extensions (2) = 0, pad (2)
-    let mut reply = Vec::with_capacity(12);
-    reply.push(XIM_QUERY_EXTENSION_REPLY);
-    reply.push(0);
-    reply.extend_from_slice(&2u16.to_le_bytes()); // length = 2 (8 bytes)
-    reply.extend_from_slice(&im_id.to_le_bytes());
-    reply.extend_from_slice(&[0, 0]); // pad
-    reply.extend_from_slice(&0u16.to_le_bytes()); // 0 extensions
-    reply.extend_from_slice(&[0, 0]); // pad
-
+    // XIM_QUERY_EXTENSION_REPLY: major=41, minor=0, length=2:
+    //   im_id (2), pad (2), number of extensions (2) = 0, pad (2)
+    let mut payload = im_id.to_le_bytes().to_vec();
+    payload.extend_from_slice(&[0, 0, 0, 0, 0, 0]);
+    let reply = build_xim_reply(XIM_QUERY_EXTENSION_REPLY, 2, &payload);
     send_xim_reply(state, im_id, &reply);
     Vec::new()
 }
@@ -555,17 +550,11 @@ fn handle_xim_encoding_negotiation(state: &mut ClientState, data: &[u8]) -> Vec<
 
     debug!("XIM: ENCODING_NEGOTIATION im_id={}", im_id);
 
-    // XIM_ENCODING_NEGOTIATION_REPLY: major=51, minor=0
+    // XIM_ENCODING_NEGOTIATION_REPLY: major=51, minor=0, length=2:
     //   im_id (2), category (2) = 0 (name), encoding_index (2) = 0, pad (2)
-    let mut reply = Vec::with_capacity(12);
-    reply.push(XIM_ENCODING_NEGOTIATION_REPLY);
-    reply.push(0);
-    reply.extend_from_slice(&2u16.to_le_bytes()); // length = 2 (8 bytes)
-    reply.extend_from_slice(&im_id.to_le_bytes());
-    reply.extend_from_slice(&0u16.to_le_bytes()); // category = name
-    reply.extend_from_slice(&0u16.to_le_bytes()); // encoding index = 0 (first offered)
-    reply.extend_from_slice(&[0, 0]); // pad
-
+    let mut payload = im_id.to_le_bytes().to_vec();
+    payload.extend_from_slice(&[0, 0, 0, 0, 0, 0]);
+    let reply = build_xim_reply(XIM_ENCODING_NEGOTIATION_REPLY, 2, &payload);
     send_xim_reply(state, im_id, &reply);
     Vec::new()
 }
@@ -627,15 +616,10 @@ fn handle_xim_create_ic(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
         }
     }
 
-    // XIM_CREATE_IC_REPLY: major=57, minor=0, length=1
-    //   im_id (2), ic_id (2)
-    let mut reply = Vec::with_capacity(8);
-    reply.push(XIM_CREATE_IC_REPLY);
-    reply.push(0);
-    reply.extend_from_slice(&1u16.to_le_bytes()); // length = 1 (4 bytes)
-    reply.extend_from_slice(&im_id.to_le_bytes());
-    reply.extend_from_slice(&ic_id.to_le_bytes());
-
+    // XIM_CREATE_IC_REPLY: major=57, minor=0, length=1: im_id (2), ic_id (2)
+    let mut payload = im_id.to_le_bytes().to_vec();
+    payload.extend_from_slice(&ic_id.to_le_bytes());
+    let reply = build_xim_reply(XIM_CREATE_IC_REPLY, 1, &payload);
     send_xim_reply(state, im_id, &reply);
     Vec::new()
 }
@@ -734,15 +718,10 @@ fn handle_xim_destroy_ic(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
         conn.contexts.remove(&ic_id);
     }
 
-    // XIM_DESTROY_IC_REPLY: major=59, minor=0, length=1
-    //   im_id (2), ic_id (2)
-    let mut reply = Vec::with_capacity(8);
-    reply.push(XIM_DESTROY_IC_REPLY);
-    reply.push(0);
-    reply.extend_from_slice(&1u16.to_le_bytes());
-    reply.extend_from_slice(&im_id.to_le_bytes());
-    reply.extend_from_slice(&ic_id.to_le_bytes());
-
+    // XIM_DESTROY_IC_REPLY: major=59, minor=0, length=1: im_id (2), ic_id (2)
+    let mut payload = im_id.to_le_bytes().to_vec();
+    payload.extend_from_slice(&ic_id.to_le_bytes());
+    let reply = build_xim_reply(XIM_DESTROY_IC_REPLY, 1, &payload);
     send_xim_reply(state, im_id, &reply);
     Vec::new()
 }
@@ -791,15 +770,10 @@ fn handle_xim_set_ic_values(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
         }
     }
 
-    // XIM_SET_IC_VALUES_REPLY: major=61, minor=0, length=1
-    //   im_id (2), ic_id (2)
-    let mut reply = Vec::with_capacity(8);
-    reply.push(XIM_SET_IC_VALUES_REPLY);
-    reply.push(0);
-    reply.extend_from_slice(&1u16.to_le_bytes());
-    reply.extend_from_slice(&im_id.to_le_bytes());
-    reply.extend_from_slice(&ic_id.to_le_bytes());
-
+    // XIM_SET_IC_VALUES_REPLY: major=61, minor=0, length=1: im_id (2), ic_id (2)
+    let mut payload = im_id.to_le_bytes().to_vec();
+    payload.extend_from_slice(&ic_id.to_le_bytes());
+    let reply = build_xim_reply(XIM_SET_IC_VALUES_REPLY, 1, &payload);
     send_xim_reply(state, im_id, &reply);
     Vec::new()
 }
@@ -839,12 +813,7 @@ fn handle_xim_get_ic_values(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
     reply_body.extend_from_slice(&ic_attrs);
 
     let length_words = reply_body.len().div_ceil(4) as u16;
-    let mut reply = Vec::with_capacity(4 + reply_body.len());
-    reply.push(XIM_GET_IC_VALUES_REPLY);
-    reply.push(0);
-    reply.extend_from_slice(&length_words.to_le_bytes());
-    reply.extend_from_slice(&reply_body);
-
+    let reply = build_xim_reply(XIM_GET_IC_VALUES_REPLY, length_words, &reply_body);
     send_xim_reply(state, im_id, &reply);
     Vec::new()
 }
@@ -1121,12 +1090,7 @@ fn handle_xim_reset_ic(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
     reply_body.extend_from_slice(&[0, 0]); // pad
 
     let length_words = reply_body.len().div_ceil(4) as u16;
-    let mut reply = Vec::with_capacity(4 + reply_body.len());
-    reply.push(XIM_RESET_IC_REPLY);
-    reply.push(0);
-    reply.extend_from_slice(&length_words.to_le_bytes());
-    reply.extend_from_slice(&reply_body);
-
+    let reply = build_xim_reply(XIM_RESET_IC_REPLY, length_words, &reply_body);
     send_xim_reply(state, im_id, &reply);
     Vec::new()
 }
@@ -1143,15 +1107,10 @@ fn handle_xim_trigger_notify(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
         im_id, ic_id, flag
     );
 
-    // XIM_TRIGGER_NOTIFY_REPLY: major=36, minor=0, length=1
-    //   im_id(2), ic_id(2)
-    let mut reply = Vec::with_capacity(8);
-    reply.push(XIM_TRIGGER_NOTIFY_REPLY);
-    reply.push(0);
-    reply.extend_from_slice(&1u16.to_le_bytes());
-    reply.extend_from_slice(&im_id.to_le_bytes());
-    reply.extend_from_slice(&ic_id.to_le_bytes());
-
+    // XIM_TRIGGER_NOTIFY_REPLY: major=36, minor=0, length=1: im_id(2), ic_id(2)
+    let mut payload = im_id.to_le_bytes().to_vec();
+    payload.extend_from_slice(&ic_id.to_le_bytes());
+    let reply = build_xim_reply(XIM_TRIGGER_NOTIFY_REPLY, 1, &payload);
     send_xim_reply(state, im_id, &reply);
     Vec::new()
 }
@@ -1163,15 +1122,10 @@ fn handle_xim_sync(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
 
     debug!("XIM: SYNC im_id={} ic_id={}", im_id, ic_id);
 
-    // XIM_SYNC_REPLY: major=39, minor=0, length=1
-    //   im_id(2), ic_id(2)
-    let mut reply = Vec::with_capacity(8);
-    reply.push(XIM_SYNC_REPLY);
-    reply.push(0);
-    reply.extend_from_slice(&1u16.to_le_bytes());
-    reply.extend_from_slice(&im_id.to_le_bytes());
-    reply.extend_from_slice(&ic_id.to_le_bytes());
-
+    // XIM_SYNC_REPLY: major=39, minor=0, length=1: im_id(2), ic_id(2)
+    let mut payload = im_id.to_le_bytes().to_vec();
+    payload.extend_from_slice(&ic_id.to_le_bytes());
+    let reply = build_xim_reply(XIM_SYNC_REPLY, 1, &payload);
     send_xim_reply(state, im_id, &reply);
     Vec::new()
 }
