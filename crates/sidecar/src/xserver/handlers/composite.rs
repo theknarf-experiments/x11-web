@@ -128,6 +128,12 @@ pub(crate) fn handle_x_composite_request(
 ) -> Vec<u8> {
     let minor = data[1];
     info!("Composite minor opcode: {minor}");
+    let bad_window = |window: u32| {
+        crate::xserver::core::build_error_bo(
+            crate::xserver::core::WINDOW_ERROR,
+            seq, window, 142, minor as u16, state.msb_first,
+        )
+    };
 
     match minor {
         0 => {
@@ -146,14 +152,7 @@ pub(crate) fn handle_x_composite_request(
             if let Some(win) = state.windows.get_mut(&window) {
                 win.redirected = true;
             } else {
-                return crate::xserver::core::build_error_bo(
-                    crate::xserver::core::WINDOW_ERROR,
-                    seq,
-                    window,
-                    142,
-                    minor as u16,
-                    state.msb_first,
-                );
+                return bad_window(window);
             }
             Vec::new()
         }
@@ -164,14 +163,7 @@ pub(crate) fn handle_x_composite_request(
             let update = u8::from(req.update);
             info!("Composite RedirectSubwindows: window={window:#x} update={update}");
             if !state.windows.contains_key(&window) {
-                return crate::xserver::core::build_error_bo(
-                    crate::xserver::core::WINDOW_ERROR,
-                    seq,
-                    window,
-                    142,
-                    minor as u16,
-                    state.msb_first,
-                );
+                return bad_window(window);
             }
             // Mark all children as redirected
             let children: Vec<u32> = state
@@ -195,14 +187,7 @@ pub(crate) fn handle_x_composite_request(
             if let Some(win) = state.windows.get_mut(&window) {
                 win.redirected = false;
             } else {
-                return crate::xserver::core::build_error_bo(
-                    crate::xserver::core::WINDOW_ERROR,
-                    seq,
-                    window,
-                    142,
-                    minor as u16,
-                    state.msb_first,
-                );
+                return bad_window(window);
             }
             Vec::new()
         }
@@ -212,14 +197,7 @@ pub(crate) fn handle_x_composite_request(
             let window = req.window;
             debug!("Composite UnredirectSubwindows: window={window:#x}");
             if !state.windows.contains_key(&window) {
-                return crate::xserver::core::build_error_bo(
-                    crate::xserver::core::WINDOW_ERROR,
-                    seq,
-                    window,
-                    142,
-                    minor as u16,
-                    state.msb_first,
-                );
+                return bad_window(window);
             }
             let children: Vec<u32> = state
                 .windows
@@ -250,14 +228,7 @@ pub(crate) fn handle_x_composite_request(
                     height: win.height,
                 }
             } else {
-                return crate::xserver::core::build_error_bo(
-                    crate::xserver::core::WINDOW_ERROR,
-                    seq,
-                    window,
-                    142,
-                    minor as u16,
-                    state.msb_first,
-                );
+                return bad_window(window);
             };
             state.xfixes_regions.insert(
                 region_id,
@@ -309,14 +280,7 @@ pub(crate) fn handle_x_composite_request(
                 );
                 info!("NameWindowPixmap: window={window:#x} -> pixmap={pixmap:#x} {w}x{h} depth={depth} redirected={redirected}");
             } else {
-                return crate::xserver::core::build_error_bo(
-                    crate::xserver::core::WINDOW_ERROR,
-                    seq,
-                    window,
-                    142,
-                    minor as u16,
-                    state.msb_first,
-                );
+                return bad_window(window);
             }
             Vec::new()
         }
