@@ -529,7 +529,6 @@ pub(crate) fn handle_record_request(state: &mut ClientState, data: &[u8], seq: u
                         0
                     };
                     let padded = (client_info_bytes + 3) & !3;
-                    let extra_words = padded / 4;
 
                     let mut reply = ReplyBuf::with_extra(seq, padded, false)
                         .set_data_byte(if ctx.enabled { 1 } else { 0 })

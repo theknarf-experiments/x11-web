@@ -56,8 +56,10 @@ pub(crate) use x11rb_protocol::protocol::xproto::{
     REQUEST_ERROR, VALUE_ERROR, WINDOW_ERROR, PIXMAP_ERROR, ATOM_ERROR,
     CURSOR_ERROR, FONT_ERROR, MATCH_ERROR, DRAWABLE_ERROR, ACCESS_ERROR,
     ALLOC_ERROR, COLORMAP_ERROR, G_CONTEXT_ERROR, ID_CHOICE_ERROR,
-    NAME_ERROR, LENGTH_ERROR, IMPLEMENTATION_ERROR,
+    NAME_ERROR, LENGTH_ERROR,
 };
+#[cfg(test)]
+use x11rb_protocol::protocol::xproto::IMPLEMENTATION_ERROR;
 
 /// Validate minimum request length; returns early with a LENGTH_ERROR error if too short.
 ///
