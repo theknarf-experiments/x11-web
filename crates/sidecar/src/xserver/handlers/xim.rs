@@ -114,6 +114,14 @@ fn build_xim_reply(major: u8, length_words: u16, payload: &[u8]) -> Vec<u8> {
     reply
 }
 
+/// Many XIM messages start with `im_id (u16 LE) + ic_id (u16 LE)`.
+fn im_ic_bytes(im_id: u16, ic_id: u16) -> [u8; 4] {
+    let mut b = [0u8; 4];
+    b[..2].copy_from_slice(&im_id.to_le_bytes());
+    b[2..].copy_from_slice(&ic_id.to_le_bytes());
+    b
+}
+
 // ---------------------------------------------------------------------------
 // XIM server state
 // ---------------------------------------------------------------------------
@@ -611,9 +619,7 @@ fn handle_xim_create_ic(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
     }
 
     // XIM_CREATE_IC_REPLY: major=57, minor=0, length=1: im_id (2), ic_id (2)
-    let mut payload = im_id.to_le_bytes().to_vec();
-    payload.extend_from_slice(&ic_id.to_le_bytes());
-    let reply = build_xim_reply(XIM_CREATE_IC_REPLY, 1, &payload);
+    let reply = build_xim_reply(XIM_CREATE_IC_REPLY, 1, &im_ic_bytes(im_id, ic_id));
     send_xim_reply(state, im_id, &reply);
     Vec::new()
 }
@@ -713,9 +719,7 @@ fn handle_xim_destroy_ic(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
     }
 
     // XIM_DESTROY_IC_REPLY: major=59, minor=0, length=1: im_id (2), ic_id (2)
-    let mut payload = im_id.to_le_bytes().to_vec();
-    payload.extend_from_slice(&ic_id.to_le_bytes());
-    let reply = build_xim_reply(XIM_DESTROY_IC_REPLY, 1, &payload);
+    let reply = build_xim_reply(XIM_DESTROY_IC_REPLY, 1, &im_ic_bytes(im_id, ic_id));
     send_xim_reply(state, im_id, &reply);
     Vec::new()
 }
@@ -765,9 +769,7 @@ fn handle_xim_set_ic_values(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
     }
 
     // XIM_SET_IC_VALUES_REPLY: major=61, minor=0, length=1: im_id (2), ic_id (2)
-    let mut payload = im_id.to_le_bytes().to_vec();
-    payload.extend_from_slice(&ic_id.to_le_bytes());
-    let reply = build_xim_reply(XIM_SET_IC_VALUES_REPLY, 1, &payload);
+    let reply = build_xim_reply(XIM_SET_IC_VALUES_REPLY, 1, &im_ic_bytes(im_id, ic_id));
     send_xim_reply(state, im_id, &reply);
     Vec::new()
 }
@@ -1092,9 +1094,7 @@ fn handle_xim_trigger_notify(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
     );
 
     // XIM_TRIGGER_NOTIFY_REPLY: major=36, minor=0, length=1: im_id(2), ic_id(2)
-    let mut payload = im_id.to_le_bytes().to_vec();
-    payload.extend_from_slice(&ic_id.to_le_bytes());
-    let reply = build_xim_reply(XIM_TRIGGER_NOTIFY_REPLY, 1, &payload);
+    let reply = build_xim_reply(XIM_TRIGGER_NOTIFY_REPLY, 1, &im_ic_bytes(im_id, ic_id));
     send_xim_reply(state, im_id, &reply);
     Vec::new()
 }
@@ -1107,9 +1107,7 @@ fn handle_xim_sync(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
     debug!("XIM: SYNC im_id={} ic_id={}", im_id, ic_id);
 
     // XIM_SYNC_REPLY: major=39, minor=0, length=1: im_id(2), ic_id(2)
-    let mut payload = im_id.to_le_bytes().to_vec();
-    payload.extend_from_slice(&ic_id.to_le_bytes());
-    let reply = build_xim_reply(XIM_SYNC_REPLY, 1, &payload);
+    let reply = build_xim_reply(XIM_SYNC_REPLY, 1, &im_ic_bytes(im_id, ic_id));
     send_xim_reply(state, im_id, &reply);
     Vec::new()
 }
@@ -1443,9 +1441,7 @@ fn handle_xim_preedit_start_reply(_state: &mut ClientState, data: &[u8]) -> Vec<
 /// Start preedit composition for an IC.
 fn send_xim_preedit_start(state: &mut ClientState, im_id: u16, ic_id: u16) {
     // XIM_PREEDIT_START: major=70, minor=0, length=1: im_id(2), ic_id(2)
-    let mut payload = im_id.to_le_bytes().to_vec();
-    payload.extend_from_slice(&ic_id.to_le_bytes());
-    let msg = build_xim_reply(XIM_PREEDIT_START, 1, &payload);
+    let msg = build_xim_reply(XIM_PREEDIT_START, 1, &im_ic_bytes(im_id, ic_id));
     send_xim_reply(state, im_id, &msg);
 
     // Mark the IC as having an active preedit session.
@@ -1500,9 +1496,7 @@ fn send_xim_preedit_draw(state: &mut ClientState, im_id: u16, ic_id: u16, text: 
 /// End preedit composition for an IC.
 fn send_xim_preedit_done(state: &mut ClientState, im_id: u16, ic_id: u16) {
     // XIM_PREEDIT_DONE: major=74, minor=0, length=1: im_id(2), ic_id(2)
-    let mut payload = im_id.to_le_bytes().to_vec();
-    payload.extend_from_slice(&ic_id.to_le_bytes());
-    let msg = build_xim_reply(XIM_PREEDIT_DONE, 1, &payload);
+    let msg = build_xim_reply(XIM_PREEDIT_DONE, 1, &im_ic_bytes(im_id, ic_id));
     send_xim_reply(state, im_id, &msg);
 
     // Mark the IC as no longer having an active preedit session.
