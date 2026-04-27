@@ -44,9 +44,9 @@ pub(crate) fn handle_query_output_property(
     if data.len() < 12 {
         return ReplyBuf::fixed(seq, state.msb_first).build();
     }
-    let req = match QueryOutputPropertyRequest::try_parse_request(request_header(data), &data[4..]) {
-        Ok(r) => r,
-        Err(_) => return ReplyBuf::fixed(seq, state.msb_first).build(),
+    let Ok(req) = QueryOutputPropertyRequest::try_parse_request(request_header(data), &data[4..])
+    else {
+        return ReplyBuf::fixed(seq, state.msb_first).build();
     };
     let output_id = req.output;
     let property_atom = req.property;
@@ -177,9 +177,8 @@ pub(crate) fn handle_create_mode(state: &mut ClientState, data: &[u8], seq: u16)
         return ReplyBuf::fixed(seq, state.msb_first).build();
     }
 
-    let req = match CreateModeRequest::try_parse_request(request_header(data), &data[4..]) {
-        Ok(r) => r,
-        Err(_) => return ReplyBuf::fixed(seq, state.msb_first).build(),
+    let Ok(req) = CreateModeRequest::try_parse_request(request_header(data), &data[4..]) else {
+        return ReplyBuf::fixed(seq, state.msb_first).build();
     };
 
     let mi = &req.mode_info;
@@ -322,14 +321,9 @@ pub(crate) fn handle_get_providers(state: &mut ClientState, _data: &[u8], seq: u
 
 /// RRGetProviderInfo (33).
 pub(crate) fn handle_get_provider_info(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
-    let provider_id = if data.len() >= 8 {
-        match GetProviderInfoRequest::try_parse_request(request_header(data), &data[4..]) {
-            Ok(r) => r.provider,
-            Err(_) => 0,
-        }
-    } else {
-        0
-    };
+    let provider_id = GetProviderInfoRequest::try_parse_request(request_header(data), &data[4..])
+        .map(|r| r.provider)
+        .unwrap_or(0);
     build_provider_info_reply(state, seq, provider_id)
 }
 
@@ -591,9 +585,9 @@ fn build_get_output_property_reply(state: &ClientState, data: &[u8], seq: u16) -
         return ReplyBuf::fixed(seq, state.msb_first).build();
     }
 
-    let req = match GetOutputPropertyRequest::try_parse_request(request_header(data), &data[4..]) {
-        Ok(r) => r,
-        Err(_) => return ReplyBuf::fixed(seq, state.msb_first).build(),
+    let Ok(req) = GetOutputPropertyRequest::try_parse_request(request_header(data), &data[4..])
+    else {
+        return ReplyBuf::fixed(seq, state.msb_first).build();
     };
     let output_id = req.output;
     let property = req.property;

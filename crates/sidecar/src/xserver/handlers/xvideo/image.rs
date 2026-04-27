@@ -950,13 +950,9 @@ pub(crate) fn handle_image_request(
         5 => {
             // PutVideo — not supported (software adaptor has no video capture)
             // Per XVideo spec §4.3: return BadMatch for unsupported port operations.
-            let port = if data.len() >= 8 {
-                PutVideoRequest::try_parse_request(request_header(data), &data[4..])
-                    .map(|r| r.port)
-                    .unwrap_or(0)
-            } else {
-                0
-            };
+            let port = PutVideoRequest::try_parse_request(request_header(data), &data[4..])
+                .map(|r| r.port)
+                .unwrap_or(0);
             debug!("XVideo PutVideo: port={port} — returning BadMatch (capture not supported)");
             crate::xserver::core::build_error_bo(
                 crate::xserver::core::MATCH_ERROR,
@@ -970,13 +966,9 @@ pub(crate) fn handle_image_request(
         6 => {
             // PutStill — not supported (software adaptor has no video capture)
             // Per XVideo spec §4.4: return BadMatch for unsupported port operations.
-            let port = if data.len() >= 8 {
-                PutStillRequest::try_parse_request(request_header(data), &data[4..])
-                    .map(|r| r.port)
-                    .unwrap_or(0)
-            } else {
-                0
-            };
+            let port = PutStillRequest::try_parse_request(request_header(data), &data[4..])
+                .map(|r| r.port)
+                .unwrap_or(0);
             debug!("XVideo PutStill: port={port} — returning BadMatch (capture not supported)");
             crate::xserver::core::build_error_bo(
                 crate::xserver::core::MATCH_ERROR,
@@ -990,13 +982,9 @@ pub(crate) fn handle_image_request(
         7 => {
             // GetVideo — not supported (software adaptor has no video capture output)
             // Per XVideo spec §4.5: return BadMatch for unsupported port operations.
-            let port = if data.len() >= 8 {
-                GetVideoRequest::try_parse_request(request_header(data), &data[4..])
-                    .map(|r| r.port)
-                    .unwrap_or(0)
-            } else {
-                0
-            };
+            let port = GetVideoRequest::try_parse_request(request_header(data), &data[4..])
+                .map(|r| r.port)
+                .unwrap_or(0);
             debug!("XVideo GetVideo: port={port} — returning BadMatch (capture not supported)");
             crate::xserver::core::build_error_bo(
                 crate::xserver::core::MATCH_ERROR,

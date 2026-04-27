@@ -21,13 +21,10 @@ pub(crate) fn handle_get_crtc_info(state: &mut ClientState, data: &[u8], seq: u1
 
 /// RRSetCrtcConfig (21).
 pub(crate) fn handle_set_crtc_config(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
-    let req = match SetCrtcConfigRequest::try_parse_request(request_header(data), &data[4..]) {
-        Ok(r) => r,
-        Err(_) => {
-            return ReplyBuf::fixed(seq, state.msb_first)
-                .set_data_byte(1) // InvalidConfig
-                .build();
-        }
+    let Ok(req) = SetCrtcConfigRequest::try_parse_request(request_header(data), &data[4..]) else {
+        return ReplyBuf::fixed(seq, state.msb_first)
+            .set_data_byte(1) // InvalidConfig
+            .build();
     };
 
     let crtc_id = req.crtc;
