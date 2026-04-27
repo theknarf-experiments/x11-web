@@ -6,7 +6,7 @@ use x11rb_protocol::protocol::xinput as xi;
 use x11rb_protocol::protocol::xproto;
 use x11rb_protocol::x11_utils::RequestHeader;
 
-use crate::xserver::core::{read_u16_bo, read_u32_bo};
+use crate::xserver::core::read_u16_bo;
 
 use super::device::*;
 use super::{
@@ -430,20 +430,16 @@ pub fn handle_request(
             }
         }
         xi::XI_CHANGE_PROPERTY_REQUEST => {
-            // XIChangeProperty: deviceid(2) + mode(1) + format(1) + property(4) + type(4) + num_items(4) + data...
-            if body.len() >= 16 {
-                let deviceid = read_u16_bo(body, 0, msb_first);
-                let property = read_u32_bo(body, 4, msb_first);
-                let value = if body.len() > 16 {
-                    body[16..].to_vec()
-                } else {
-                    Vec::new()
-                };
+            if let Ok(req) = xi::XIChangePropertyRequest::try_parse_request(header, body) {
+                // The typed parser already validated deviceid/property/format/num_items.
+                // We keep the raw items bytes (post-16-byte header) so XIGetProperty
+                // can echo them back unchanged.
+                let value = body.get(16..).map(|s| s.to_vec()).unwrap_or_default();
                 debug!(
-                    "XIChangeProperty: device={deviceid} property={property} len={}",
-                    value.len()
+                    "XIChangeProperty: device={} property={} len={}",
+                    req.deviceid, req.property, value.len()
                 );
-                device_properties.insert((deviceid, property), value);
+                device_properties.insert((req.deviceid, req.property), value);
             }
             Vec::new()
         }
