@@ -24,20 +24,7 @@ pub(crate) fn handle_set_picture_transform(
     let bo = state.msb_first;
     require_len!(data, 8 + 9 * 4, seq, 139, data[1] as u16, bo);
 
-    let req =
-        match SetPictureTransformRequest::try_parse_request(request_header(data), &data[4..]) {
-            Ok(r) => r,
-            Err(_) => {
-                return crate::xserver::core::build_error_bo(
-                    crate::xserver::core::LENGTH_ERROR,
-                    seq,
-                    0,
-                    139,
-                    data[1] as u16,
-                    bo,
-                )
-            }
-        };
+    let req = parse_minor!(SetPictureTransformRequest, data, state, seq, 139, data[1] as u16);
 
     let pid = req.picture;
     let t = &req.transform;

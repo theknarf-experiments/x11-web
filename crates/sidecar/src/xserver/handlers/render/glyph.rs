@@ -18,19 +18,7 @@ pub(crate) fn handle_create_glyphset(state: &mut ClientState, data: &[u8], seq: 
     let bo = state.msb_first;
     require_len!(data, 12, seq, 139, data[1] as u16, bo);
 
-    let req = match CreateGlyphSetRequest::try_parse_request(request_header(data), &data[4..]) {
-        Ok(r) => r,
-        Err(_) => {
-            return crate::xserver::core::build_error_bo(
-                crate::xserver::core::LENGTH_ERROR,
-                seq,
-                0,
-                139,
-                data[1] as u16,
-                bo,
-            )
-        }
-    };
+    let req = parse_minor!(CreateGlyphSetRequest, data, state, seq, 139, data[1] as u16);
 
     let gsid = req.gsid;
     let format_id = req.format;
@@ -51,19 +39,7 @@ pub(crate) fn handle_free_glyphset(state: &mut ClientState, data: &[u8], seq: u1
     let bo = state.msb_first;
     require_len!(data, 8, seq, 139, data[1] as u16, bo);
 
-    let req = match FreeGlyphSetRequest::try_parse_request(request_header(data), &data[4..]) {
-        Ok(r) => r,
-        Err(_) => {
-            return crate::xserver::core::build_error_bo(
-                crate::xserver::core::LENGTH_ERROR,
-                seq,
-                0,
-                139,
-                data[1] as u16,
-                bo,
-            )
-        }
-    };
+    let req = parse_minor!(FreeGlyphSetRequest, data, state, seq, 139, data[1] as u16);
 
     let gsid = req.glyphset;
     state.render.glyphsets.remove(&gsid);
@@ -77,19 +53,7 @@ pub(crate) fn handle_reference_glyphset(state: &mut ClientState, data: &[u8], se
     let bo = state.msb_first;
     require_len!(data, 12, seq, 139, data[1] as u16, bo);
 
-    let req = match ReferenceGlyphSetRequest::try_parse_request(request_header(data), &data[4..]) {
-        Ok(r) => r,
-        Err(_) => {
-            return crate::xserver::core::build_error_bo(
-                crate::xserver::core::LENGTH_ERROR,
-                seq,
-                0,
-                139,
-                data[1] as u16,
-                bo,
-            )
-        }
-    };
+    let req = parse_minor!(ReferenceGlyphSetRequest, data, state, seq, 139, data[1] as u16);
 
     let new_gsid = req.gsid;
     let existing_gsid = req.existing;
@@ -121,19 +85,7 @@ pub(crate) fn handle_add_glyphs(state: &mut ClientState, data: &[u8], seq: u16) 
     let minor = data[1] as u16;
     require_len!(data, 12, seq, 139, minor, bo);
 
-    let req = match AddGlyphsRequest::try_parse_request(request_header(data), &data[4..]) {
-        Ok(r) => r,
-        Err(_) => {
-            return crate::xserver::core::build_error_bo(
-                crate::xserver::core::LENGTH_ERROR,
-                seq,
-                0,
-                139,
-                minor,
-                bo,
-            )
-        }
-    };
+    let req = parse_minor!(AddGlyphsRequest, data, state, seq, 139, minor);
 
     let gsid = req.glyphset;
     let num_glyphs = req.glyphids.len();
@@ -398,19 +350,7 @@ pub(crate) fn handle_free_glyphs(state: &mut ClientState, data: &[u8], seq: u16)
     let bo = state.msb_first;
     require_len!(data, 8, seq, 139, data[1] as u16, bo);
 
-    let req = match FreeGlyphsRequest::try_parse_request(request_header(data), &data[4..]) {
-        Ok(r) => r,
-        Err(_) => {
-            return crate::xserver::core::build_error_bo(
-                crate::xserver::core::LENGTH_ERROR,
-                seq,
-                0,
-                139,
-                data[1] as u16,
-                bo,
-            )
-        }
-    };
+    let req = parse_minor!(FreeGlyphsRequest, data, state, seq, 139, data[1] as u16);
 
     let gsid = req.glyphset;
     if let Some(gs) = state.render.glyphsets.get_mut(&gsid) {
@@ -444,19 +384,7 @@ pub(crate) fn handle_composite_glyphs(
     // for all three since the header is identical.
     use x11rb_protocol::protocol::render::CompositeGlyphs8Request;
 
-    let req = match CompositeGlyphs8Request::try_parse_request(request_header(data), &data[4..]) {
-        Ok(r) => r,
-        Err(_) => {
-            return crate::xserver::core::build_error_bo(
-                crate::xserver::core::LENGTH_ERROR,
-                seq,
-                0,
-                139,
-                minor,
-                bo,
-            )
-        }
-    };
+    let req = parse_minor!(CompositeGlyphs8Request, data, state, seq, 139, minor);
 
     let pict_op = u8::from(req.op);
     let src_pic = req.src;

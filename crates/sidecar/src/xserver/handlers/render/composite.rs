@@ -17,19 +17,7 @@ pub(crate) fn handle_composite(state: &mut ClientState, data: &[u8], seq: u16) -
     let bo = state.msb_first;
     require_len!(data, 36, seq, 139, data[1] as u16, bo);
 
-    let req = match CompositeRequest::try_parse_request(request_header(data), &data[4..]) {
-        Ok(r) => r,
-        Err(_) => {
-            return crate::xserver::core::build_error_bo(
-                crate::xserver::core::LENGTH_ERROR,
-                seq,
-                0,
-                139,
-                data[1] as u16,
-                bo,
-            )
-        }
-    };
+    let req = parse_minor!(CompositeRequest, data, state, seq, 139, data[1] as u16);
 
     let op = u8::from(req.op);
     let src_pic = req.src;
@@ -217,19 +205,7 @@ pub(crate) fn handle_trapezoids(state: &mut ClientState, data: &[u8], seq: u16) 
     let minor = data[1] as u16;
     require_len!(data, 24, seq, 139, minor, bo);
 
-    let req = match TrapezoidsRequest::try_parse_request(request_header(data), &data[4..]) {
-        Ok(r) => r,
-        Err(_) => {
-            return crate::xserver::core::build_error_bo(
-                crate::xserver::core::LENGTH_ERROR,
-                seq,
-                0,
-                139,
-                minor,
-                bo,
-            )
-        }
-    };
+    let req = parse_minor!(TrapezoidsRequest, data, state, seq, 139, minor);
 
     let op = u8::from(req.op);
     let src_pic = req.src;
@@ -445,19 +421,7 @@ pub(crate) fn handle_triangles(state: &mut ClientState, data: &[u8], seq: u16) -
     let minor = data[1] as u16;
     require_len!(data, 24, seq, 139, minor, bo);
 
-    let req = match TrianglesRequest::try_parse_request(request_header(data), &data[4..]) {
-        Ok(r) => r,
-        Err(_) => {
-            return crate::xserver::core::build_error_bo(
-                crate::xserver::core::LENGTH_ERROR,
-                seq,
-                0,
-                139,
-                minor,
-                bo,
-            )
-        }
-    };
+    let req = parse_minor!(TrianglesRequest, data, state, seq, 139, minor);
 
     let op = u8::from(req.op);
     let src_pic = req.src;
@@ -713,19 +677,7 @@ pub(crate) fn handle_tri_strip(state: &mut ClientState, data: &[u8], seq: u16) -
     let minor = data[1] as u16;
     require_len!(data, 24, seq, 139, minor, bo);
 
-    let req = match TriStripRequest::try_parse_request(request_header(data), &data[4..]) {
-        Ok(r) => r,
-        Err(_) => {
-            return crate::xserver::core::build_error_bo(
-                crate::xserver::core::LENGTH_ERROR,
-                seq,
-                0,
-                139,
-                minor,
-                bo,
-            )
-        }
-    };
+    let req = parse_minor!(TriStripRequest, data, state, seq, 139, minor);
 
     let op = u8::from(req.op);
     let src_pic = req.src;
@@ -834,19 +786,7 @@ pub(crate) fn handle_tri_fan(state: &mut ClientState, data: &[u8], seq: u16) -> 
     let minor = data[1] as u16;
     require_len!(data, 24, seq, 139, minor, bo);
 
-    let req = match TriFanRequest::try_parse_request(request_header(data), &data[4..]) {
-        Ok(r) => r,
-        Err(_) => {
-            return crate::xserver::core::build_error_bo(
-                crate::xserver::core::LENGTH_ERROR,
-                seq,
-                0,
-                139,
-                minor,
-                bo,
-            )
-        }
-    };
+    let req = parse_minor!(TriFanRequest, data, state, seq, 139, minor);
 
     let op = u8::from(req.op);
     let src_pic = req.src;
@@ -954,19 +894,7 @@ pub(crate) fn handle_fill_rectangles(state: &mut ClientState, data: &[u8], seq: 
     let minor = data[1] as u16;
     require_len!(data, 24, seq, 139, minor, bo);
 
-    let req = match FillRectanglesRequest::try_parse_request(request_header(data), &data[4..]) {
-        Ok(r) => r,
-        Err(_) => {
-            return crate::xserver::core::build_error_bo(
-                crate::xserver::core::LENGTH_ERROR,
-                seq,
-                0,
-                139,
-                minor,
-                bo,
-            )
-        }
-    };
+    let req = parse_minor!(FillRectanglesRequest, data, state, seq, 139, minor);
 
     let op = u8::from(req.op);
     let dst_pic = req.dst;
@@ -1062,19 +990,7 @@ pub(crate) fn handle_add_traps(state: &mut ClientState, data: &[u8], seq: u16) -
     let minor = data[1] as u16;
     require_len!(data, 12, seq, 139, minor, bo);
 
-    let req = match AddTrapsRequest::try_parse_request(request_header(data), &data[4..]) {
-        Ok(r) => r,
-        Err(_) => {
-            return crate::xserver::core::build_error_bo(
-                crate::xserver::core::LENGTH_ERROR,
-                seq,
-                0,
-                139,
-                minor,
-                bo,
-            )
-        }
-    };
+    let req = parse_minor!(AddTrapsRequest, data, state, seq, 139, minor);
 
     let pic_id = req.picture;
     let x_off = req.x_off;

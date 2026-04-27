@@ -21,19 +21,7 @@ pub(crate) fn handle_create_solid_fill(state: &mut ClientState, data: &[u8], seq
     let bo = state.msb_first;
     require_len!(data, 16, seq, 139, data[1] as u16, bo);
 
-    let req = match CreateSolidFillRequest::try_parse_request(request_header(data), &data[4..]) {
-        Ok(r) => r,
-        Err(_) => {
-            return crate::xserver::core::build_error_bo(
-                crate::xserver::core::LENGTH_ERROR,
-                seq,
-                0,
-                139,
-                data[1] as u16,
-                bo,
-            )
-        }
-    };
+    let req = parse_minor!(CreateSolidFillRequest, data, state, seq, 139, data[1] as u16);
 
     let pid = req.picture;
     // XRenderColor is already premultiplied per the X RENDER spec --
@@ -83,20 +71,7 @@ fn handle_create_linear_gradient(state: &mut ClientState, data: &[u8], seq: u16)
     let minor = data[1] as u16;
     require_len!(data, 32, seq, 139, minor, bo);
 
-    let req =
-        match CreateLinearGradientRequest::try_parse_request(request_header(data), &data[4..]) {
-            Ok(r) => r,
-            Err(_) => {
-                return crate::xserver::core::build_error_bo(
-                    crate::xserver::core::LENGTH_ERROR,
-                    seq,
-                    0,
-                    139,
-                    minor,
-                    bo,
-                )
-            }
-        };
+    let req = parse_minor!(CreateLinearGradientRequest, data, state, seq, 139, minor);
 
     let pid = req.picture;
     let p1x = fixed_to_f64(req.p1.x);
@@ -286,20 +261,7 @@ fn handle_create_radial_gradient(state: &mut ClientState, data: &[u8], seq: u16)
     let minor = data[1] as u16;
     require_len!(data, 40, seq, 139, minor, bo);
 
-    let req =
-        match CreateRadialGradientRequest::try_parse_request(request_header(data), &data[4..]) {
-            Ok(r) => r,
-            Err(_) => {
-                return crate::xserver::core::build_error_bo(
-                    crate::xserver::core::LENGTH_ERROR,
-                    seq,
-                    0,
-                    139,
-                    minor,
-                    bo,
-                )
-            }
-        };
+    let req = parse_minor!(CreateRadialGradientRequest, data, state, seq, 139, minor);
 
     let pid = req.picture;
     let inner_cx = fixed_to_f64(req.inner.x);
@@ -451,20 +413,7 @@ fn handle_create_conical_gradient(state: &mut ClientState, data: &[u8], seq: u16
     let minor = data[1] as u16;
     require_len!(data, 24, seq, 139, minor, bo);
 
-    let req =
-        match CreateConicalGradientRequest::try_parse_request(request_header(data), &data[4..]) {
-            Ok(r) => r,
-            Err(_) => {
-                return crate::xserver::core::build_error_bo(
-                    crate::xserver::core::LENGTH_ERROR,
-                    seq,
-                    0,
-                    139,
-                    minor,
-                    bo,
-                )
-            }
-        };
+    let req = parse_minor!(CreateConicalGradientRequest, data, state, seq, 139, minor);
 
     let pid = req.picture;
     let cx = fixed_to_f64(req.center.x);

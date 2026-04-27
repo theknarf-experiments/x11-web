@@ -168,19 +168,7 @@ pub(crate) fn handle_create_picture(state: &mut ClientState, data: &[u8], seq: u
     let bo = state.msb_first;
     require_len!(data, 20, seq, 139, data[1] as u16, bo);
 
-    let req = match CreatePictureRequest::try_parse_request(request_header(data), &data[4..]) {
-        Ok(r) => r,
-        Err(_) => {
-            return crate::xserver::core::build_error_bo(
-                crate::xserver::core::LENGTH_ERROR,
-                seq,
-                0,
-                139,
-                data[1] as u16,
-                bo,
-            )
-        }
-    };
+    let req = parse_minor!(CreatePictureRequest, data, state, seq, 139, data[1] as u16);
 
     let pid = req.pid;
     let drawable = req.drawable;
@@ -295,19 +283,7 @@ pub(crate) fn handle_change_picture(state: &mut ClientState, data: &[u8], seq: u
     let bo = state.msb_first;
     require_len!(data, 12, seq, 139, data[1] as u16, bo);
 
-    let req = match ChangePictureRequest::try_parse_request(request_header(data), &data[4..]) {
-        Ok(r) => r,
-        Err(_) => {
-            return crate::xserver::core::build_error_bo(
-                crate::xserver::core::LENGTH_ERROR,
-                seq,
-                0,
-                139,
-                data[1] as u16,
-                bo,
-            )
-        }
-    };
+    let req = parse_minor!(ChangePictureRequest, data, state, seq, 139, data[1] as u16);
 
     let pid = req.picture;
     let value_list = req.value_list;
@@ -356,20 +332,7 @@ pub(crate) fn handle_set_picture_clip_rectangles(
     let bo = state.msb_first;
     require_len!(data, 12, seq, 139, data[1] as u16, bo);
 
-    let req =
-        match SetPictureClipRectanglesRequest::try_parse_request(request_header(data), &data[4..]) {
-            Ok(r) => r,
-            Err(_) => {
-                return crate::xserver::core::build_error_bo(
-                    crate::xserver::core::LENGTH_ERROR,
-                    seq,
-                    0,
-                    139,
-                    data[1] as u16,
-                    bo,
-                )
-            }
-        };
+    let req = parse_minor!(SetPictureClipRectanglesRequest, data, state, seq, 139, data[1] as u16);
 
     let pid = req.picture;
     let clip_x = req.clip_x_origin;
@@ -415,19 +378,7 @@ pub(crate) fn handle_create_cursor(state: &mut ClientState, data: &[u8], seq: u1
     let bo = state.msb_first;
     require_len!(data, 16, seq, 139, data[1] as u16, bo);
 
-    let req = match CreateCursorRequest::try_parse_request(request_header(data), &data[4..]) {
-        Ok(r) => r,
-        Err(_) => {
-            return crate::xserver::core::build_error_bo(
-                crate::xserver::core::LENGTH_ERROR,
-                seq,
-                0,
-                139,
-                data[1] as u16,
-                bo,
-            )
-        }
-    };
+    let req = parse_minor!(CreateCursorRequest, data, state, seq, 139, data[1] as u16);
 
     let cursor_id = req.cid;
     let src_picture = req.source;

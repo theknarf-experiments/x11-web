@@ -13,19 +13,7 @@ pub(crate) fn handle_set_picture_filter(state: &mut ClientState, data: &[u8], se
     let bo = state.msb_first;
     require_len!(data, 12, seq, 139, data[1] as u16, bo);
 
-    let req = match SetPictureFilterRequest::try_parse_request(request_header(data), &data[4..]) {
-        Ok(r) => r,
-        Err(_) => {
-            return crate::xserver::core::build_error_bo(
-                crate::xserver::core::LENGTH_ERROR,
-                seq,
-                0,
-                139,
-                data[1] as u16,
-                bo,
-            )
-        }
-    };
+    let req = parse_minor!(SetPictureFilterRequest, data, state, seq, 139, data[1] as u16);
 
     let pic_id = req.picture;
     let filter_name = std::str::from_utf8(&req.filter).unwrap_or("nearest");
