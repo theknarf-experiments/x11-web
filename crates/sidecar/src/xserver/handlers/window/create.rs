@@ -387,15 +387,16 @@ pub(crate) fn handle_destroy_window(state: &mut ClientState, req: &DestroyWindow
 
         // Send DestroyNotify to parent (SubstructureNotifyMask)
         {
-            let mut event = [0u8; 32];
-            event[0] = DESTROY_NOTIFY_EVENT;
-            state.write_u16(&mut event, 2, state.sequence);
-            state.write_u32(&mut event, 4, parent_id);
-            state.write_u32(&mut event, 8, wid);
+            let event = serialize_event(&DestroyNotifyEvent {
+                response_type: DESTROY_NOTIFY_EVENT,
+                sequence: state.sequence,
+                event: parent_id,
+                window: wid,
+            }, state.msb_first);
 
             if let Some(parent_win) = state.windows.get(&parent_id) {
                 if parent_win.event_mask & EventMask::SUBSTRUCTURE_NOTIFY != EventMask::NO_EVENT {
-                    state.pending_events.push(event.to_vec());
+                    state.pending_events.push(event.clone());
                 }
             }
             // Cross-connection broadcast: SubstructureNotify on the parent
@@ -435,24 +436,26 @@ pub(crate) fn handle_destroy_window(state: &mut ClientState, req: &DestroyWindow
         let desc = *desc;
         // Send DestroyNotify for each descendant
         if let Some(desc_parent) = state.windows.get(&desc).map(|w| w.parent) {
-            let mut event = [0u8; 32];
-            event[0] = DESTROY_NOTIFY_EVENT;
-            state.write_u16(&mut event, 2, state.sequence);
-            state.write_u32(&mut event, 4, desc);
-            state.write_u32(&mut event, 8, desc);
+            let event = serialize_event(&DestroyNotifyEvent {
+                response_type: DESTROY_NOTIFY_EVENT,
+                sequence: state.sequence,
+                event: desc,
+                window: desc,
+            }, state.msb_first);
             if let Some(w) = state.windows.get(&desc) {
                 if w.event_mask & EventMask::STRUCTURE_NOTIFY != EventMask::NO_EVENT {
-                    state.pending_events.push(event.to_vec());
+                    state.pending_events.push(event.clone());
                 }
             }
             state.broadcast_event(desc, u32::from(EventMask::STRUCTURE_NOTIFY), &event);
 
             // SubstructureNotify on the parent
-            let mut pevent = [0u8; 32];
-            pevent[0] = DESTROY_NOTIFY_EVENT;
-            state.write_u16(&mut pevent, 2, state.sequence);
-            state.write_u32(&mut pevent, 4, desc_parent);
-            state.write_u32(&mut pevent, 8, desc);
+            let pevent = serialize_event(&DestroyNotifyEvent {
+                response_type: DESTROY_NOTIFY_EVENT,
+                sequence: state.sequence,
+                event: desc_parent,
+                window: desc,
+            }, state.msb_first);
             state.broadcast_event(desc_parent, u32::from(EventMask::SUBSTRUCTURE_NOTIFY), &pevent);
         }
 
