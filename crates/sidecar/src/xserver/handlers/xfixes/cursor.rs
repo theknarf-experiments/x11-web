@@ -1,6 +1,7 @@
 //! XFIXES cursor operations.
 use crate::xserver::reply::ReplyBuf;
 use crate::xserver::request::request_header;
+use super::super::parse_minor;
 
 use tracing::debug;
 
@@ -17,19 +18,7 @@ pub(crate) fn handle_select_cursor_input(
     data: &[u8],
     seq: u16,
 ) -> Vec<u8> {
-    let req = match SelectCursorInputRequest::try_parse_request(request_header(data), &data[4..]) {
-        Ok(r) => r,
-        Err(_) => {
-            return crate::xserver::core::build_error_bo(
-                crate::xserver::core::LENGTH_ERROR,
-                seq,
-                0,
-                138,
-                3,
-                state.msb_first,
-            )
-        }
-    };
+    let req = parse_minor!(SelectCursorInputRequest, data, state, seq, 138, 3);
     let window = req.window;
     let event_mask = req.event_mask;
     debug!("XFIXES SelectCursorInput: window={window:#x} mask={event_mask:?}");
@@ -41,19 +30,7 @@ pub(crate) fn handle_select_cursor_input(
 
 /// 4: GetCursorImage
 pub(crate) fn handle_get_cursor_image(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
-    let _req = match GetCursorImageRequest::try_parse_request(request_header(data), &data[4..]) {
-        Ok(r) => r,
-        Err(_) => {
-            return crate::xserver::core::build_error_bo(
-                crate::xserver::core::LENGTH_ERROR,
-                seq,
-                0,
-                138,
-                4,
-                state.msb_first,
-            )
-        }
-    };
+    let _req = parse_minor!(GetCursorImageRequest, data, state, seq, 138, 4);
     // Try to find current cursor info
     let cursor_id = state.current_cursor;
     let (width, height, hotspot_x, hotspot_y, argb_data) = if cursor_id != 0 {
@@ -98,19 +75,7 @@ pub(crate) fn handle_get_cursor_image(state: &mut ClientState, data: &[u8], seq:
 
 /// 23: SetCursorName
 pub(crate) fn handle_set_cursor_name(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
-    let req = match SetCursorNameRequest::try_parse_request(request_header(data), &data[4..]) {
-        Ok(r) => r,
-        Err(_) => {
-            return crate::xserver::core::build_error_bo(
-                crate::xserver::core::LENGTH_ERROR,
-                seq,
-                0,
-                138,
-                23,
-                state.msb_first,
-            )
-        }
-    };
+    let req = parse_minor!(SetCursorNameRequest, data, state, seq, 138, 23);
     let cursor_id = req.cursor;
     let name = String::from_utf8_lossy(&req.name).to_string();
     debug!("XFIXES SetCursorName: cursor={cursor_id:#x} name={name:?}");
@@ -146,19 +111,7 @@ pub(crate) fn handle_set_cursor_name(state: &mut ClientState, data: &[u8], seq: 
 
 /// 24: GetCursorName
 pub(crate) fn handle_get_cursor_name(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
-    let req = match GetCursorNameRequest::try_parse_request(request_header(data), &data[4..]) {
-        Ok(r) => r,
-        Err(_) => {
-            return crate::xserver::core::build_error_bo(
-                crate::xserver::core::LENGTH_ERROR,
-                seq,
-                0,
-                138,
-                24,
-                state.msb_first,
-            )
-        }
-    };
+    let req = parse_minor!(GetCursorNameRequest, data, state, seq, 138, 24);
     let cursor_id = req.cursor;
     let name = state
         .cursor_info
@@ -192,20 +145,7 @@ pub(crate) fn handle_get_cursor_image_and_name(
     data: &[u8],
     seq: u16,
 ) -> Vec<u8> {
-    let _req =
-        match GetCursorImageAndNameRequest::try_parse_request(request_header(data), &data[4..]) {
-            Ok(r) => r,
-            Err(_) => {
-                return crate::xserver::core::build_error_bo(
-                    crate::xserver::core::LENGTH_ERROR,
-                    seq,
-                    0,
-                    138,
-                    25,
-                    state.msb_first,
-                )
-            }
-        };
+    let _req = parse_minor!(GetCursorImageAndNameRequest, data, state, seq, 138, 25);
     let cursor_id = state.current_cursor;
     let (width, height, hotspot_x, hotspot_y, argb_data, name) = if cursor_id != 0 {
         if let Some(info) = state.cursor_info.get(&cursor_id) {
@@ -267,19 +207,7 @@ pub(crate) fn handle_get_cursor_image_and_name(
 
 /// 26: ChangeCursor
 pub(crate) fn handle_change_cursor(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
-    let req = match ChangeCursorRequest::try_parse_request(request_header(data), &data[4..]) {
-        Ok(r) => r,
-        Err(_) => {
-            return crate::xserver::core::build_error_bo(
-                crate::xserver::core::LENGTH_ERROR,
-                seq,
-                0,
-                138,
-                26,
-                state.msb_first,
-            )
-        }
-    };
+    let req = parse_minor!(ChangeCursorRequest, data, state, seq, 138, 26);
     let source_cursor = req.source;
     let dest_cursor = req.destination;
     debug!("XFIXES ChangeCursor: source={source_cursor:#x} dest={dest_cursor:#x}");
@@ -311,19 +239,7 @@ pub(crate) fn handle_change_cursor_by_name(
     data: &[u8],
     seq: u16,
 ) -> Vec<u8> {
-    let req = match ChangeCursorByNameRequest::try_parse_request(request_header(data), &data[4..]) {
-        Ok(r) => r,
-        Err(_) => {
-            return crate::xserver::core::build_error_bo(
-                crate::xserver::core::LENGTH_ERROR,
-                seq,
-                0,
-                138,
-                27,
-                state.msb_first,
-            )
-        }
-    };
+    let req = parse_minor!(ChangeCursorByNameRequest, data, state, seq, 138, 27);
     let source_cursor = req.src;
     let name = String::from_utf8_lossy(&req.name).to_string();
     debug!("XFIXES ChangeCursorByName: source={source_cursor:#x} name={name:?}");
@@ -361,19 +277,7 @@ pub(crate) fn handle_change_cursor_by_name(
 
 /// 29: HideCursor
 pub(crate) fn handle_hide_cursor(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
-    let req = match HideCursorRequest::try_parse_request(request_header(data), &data[4..]) {
-        Ok(r) => r,
-        Err(_) => {
-            return crate::xserver::core::build_error_bo(
-                crate::xserver::core::LENGTH_ERROR,
-                seq,
-                0,
-                138,
-                29,
-                state.msb_first,
-            )
-        }
-    };
+    let req = parse_minor!(HideCursorRequest, data, state, seq, 138, 29);
     let window_id = req.window;
     state.cursor_hidden = state.cursor_hidden.saturating_add(1);
     debug!(
@@ -400,19 +304,7 @@ pub(crate) fn handle_hide_cursor(state: &mut ClientState, data: &[u8], seq: u16)
 
 /// 30: ShowCursor
 pub(crate) fn handle_show_cursor(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
-    let req = match ShowCursorRequest::try_parse_request(request_header(data), &data[4..]) {
-        Ok(r) => r,
-        Err(_) => {
-            return crate::xserver::core::build_error_bo(
-                crate::xserver::core::LENGTH_ERROR,
-                seq,
-                0,
-                138,
-                30,
-                state.msb_first,
-            )
-        }
-    };
+    let req = parse_minor!(ShowCursorRequest, data, state, seq, 138, 30);
     let window_id = req.window;
     state.cursor_hidden = state.cursor_hidden.saturating_sub(1);
     debug!(

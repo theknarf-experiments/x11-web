@@ -1,6 +1,7 @@
 //! XFIXES barrier and misc operations.
 
 use tracing::debug;
+use super::super::parse_minor;
 
 use super::super::super::client::ClientState;
 use crate::xserver::reply::ReplyBuf;
@@ -16,20 +17,7 @@ pub(crate) fn handle_create_pointer_barrier(
     data: &[u8],
     seq: u16,
 ) -> Vec<u8> {
-    let req =
-        match CreatePointerBarrierRequest::try_parse_request(request_header(data), &data[4..]) {
-            Ok(r) => r,
-            Err(_) => {
-                return crate::xserver::core::build_error_bo(
-                    crate::xserver::core::LENGTH_ERROR,
-                    seq,
-                    0,
-                    138,
-                    31,
-                    state.msb_first,
-                )
-            }
-        };
+    let req = parse_minor!(CreatePointerBarrierRequest, data, state, seq, 138, 31);
     let barrier_id = req.barrier;
     let window = req.window;
     // Per XFIXES spec: validate window exists
@@ -74,20 +62,7 @@ pub(crate) fn handle_delete_pointer_barrier(
     data: &[u8],
     seq: u16,
 ) -> Vec<u8> {
-    let req =
-        match DeletePointerBarrierRequest::try_parse_request(request_header(data), &data[4..]) {
-            Ok(r) => r,
-            Err(_) => {
-                return crate::xserver::core::build_error_bo(
-                    crate::xserver::core::LENGTH_ERROR,
-                    seq,
-                    0,
-                    138,
-                    32,
-                    state.msb_first,
-                )
-            }
-        };
+    let req = parse_minor!(DeletePointerBarrierRequest, data, state, seq, 138, 32);
     let barrier_id = req.barrier;
     debug!("XFIXES DeletePointerBarrier: id={barrier_id:#x}");
     state.barriers.remove(&barrier_id);
@@ -104,20 +79,7 @@ pub(crate) fn handle_set_client_disconnect_mode(
     data: &[u8],
     seq: u16,
 ) -> Vec<u8> {
-    let req =
-        match SetClientDisconnectModeRequest::try_parse_request(request_header(data), &data[4..]) {
-            Ok(r) => r,
-            Err(_) => {
-                return crate::xserver::core::build_error_bo(
-                    crate::xserver::core::LENGTH_ERROR,
-                    seq,
-                    0,
-                    138,
-                    33,
-                    state.msb_first,
-                )
-            }
-        };
+    let req = parse_minor!(SetClientDisconnectModeRequest, data, state, seq, 138, 33);
     let mode = req.disconnect_mode.bits() & 0x1; // Only bit 0 is defined
     debug!("XFIXES SetClientDisconnectMode: mode={mode:#x}");
     state.disconnect_mode = mode;
@@ -130,20 +92,7 @@ pub(crate) fn handle_get_client_disconnect_mode(
     data: &[u8],
     seq: u16,
 ) -> Vec<u8> {
-    let _req =
-        match GetClientDisconnectModeRequest::try_parse_request(request_header(data), &data[4..]) {
-            Ok(r) => r,
-            Err(_) => {
-                return crate::xserver::core::build_error_bo(
-                    crate::xserver::core::LENGTH_ERROR,
-                    seq,
-                    0,
-                    138,
-                    34,
-                    state.msb_first,
-                )
-            }
-        };
+    let _req = parse_minor!(GetClientDisconnectModeRequest, data, state, seq, 138, 34);
     ReplyBuf::fixed(seq, state.msb_first)
         .set_u32(8, state.disconnect_mode)
         .build()

@@ -5,6 +5,7 @@
 //! clients.
 
 use tracing::debug;
+use super::parse_minor;
 
 use super::super::client::ClientState;
 use super::super::types::RegionRect;
@@ -59,19 +60,7 @@ pub(crate) fn handle_shape_request(state: &mut ClientState, data: &[u8], seq: u1
         // 1: Rectangles — set shape from a list of rectangles
         1 => {
             require_len!(data, 16, seq, 128, 1, state.msb_first);
-            let req = match RectanglesRequest::try_parse_request(request_header(data), &data[4..]) {
-                Ok(r) => r,
-                Err(_) => {
-                    return crate::xserver::core::build_error_bo(
-                        crate::xserver::core::LENGTH_ERROR,
-                        seq,
-                        0,
-                        128,
-                        1,
-                        state.msb_first,
-                    )
-                }
-            };
+            let req = parse_minor!(RectanglesRequest, data, state, seq, 128, 1);
             let operation = u8::from(req.operation);
             let kind = u8::from(req.destination_kind);
             let ordering = u8::from(req.ordering);
@@ -119,19 +108,7 @@ pub(crate) fn handle_shape_request(state: &mut ClientState, data: &[u8], seq: u1
         // 2: Mask — set shape from a pixmap bitmap
         2 => {
             require_len!(data, 16, seq, 128, 2, state.msb_first);
-            let req = match MaskRequest::try_parse_request(request_header(data), &data[4..]) {
-                Ok(r) => r,
-                Err(_) => {
-                    return crate::xserver::core::build_error_bo(
-                        crate::xserver::core::LENGTH_ERROR,
-                        seq,
-                        0,
-                        128,
-                        2,
-                        state.msb_first,
-                    )
-                }
-            };
+            let req = parse_minor!(MaskRequest, data, state, seq, 128, 2);
             let operation = u8::from(req.operation);
             let kind = u8::from(req.destination_kind);
             let window_id = req.destination_window;
@@ -166,19 +143,7 @@ pub(crate) fn handle_shape_request(state: &mut ClientState, data: &[u8], seq: u1
         // 3: Combine — combine shapes from another window
         3 => {
             require_len!(data, 20, seq, 128, 3, state.msb_first);
-            let req = match CombineRequest::try_parse_request(request_header(data), &data[4..]) {
-                Ok(r) => r,
-                Err(_) => {
-                    return crate::xserver::core::build_error_bo(
-                        crate::xserver::core::LENGTH_ERROR,
-                        seq,
-                        0,
-                        128,
-                        3,
-                        state.msb_first,
-                    )
-                }
-            };
+            let req = parse_minor!(CombineRequest, data, state, seq, 128, 3);
             let operation = u8::from(req.operation);
             let dest_kind = u8::from(req.destination_kind);
             let src_kind = u8::from(req.source_kind);
@@ -209,19 +174,7 @@ pub(crate) fn handle_shape_request(state: &mut ClientState, data: &[u8], seq: u1
         // 4: Offset — translate a shape
         4 => {
             require_len!(data, 12, seq, 128, 4, state.msb_first);
-            let req = match OffsetRequest::try_parse_request(request_header(data), &data[4..]) {
-                Ok(r) => r,
-                Err(_) => {
-                    return crate::xserver::core::build_error_bo(
-                        crate::xserver::core::LENGTH_ERROR,
-                        seq,
-                        0,
-                        128,
-                        4,
-                        state.msb_first,
-                    )
-                }
-            };
+            let req = parse_minor!(OffsetRequest, data, state, seq, 128, 4);
             let kind = u8::from(req.destination_kind);
             let window_id = req.destination_window;
             let x_offset = req.x_offset;
@@ -259,20 +212,7 @@ pub(crate) fn handle_shape_request(state: &mut ClientState, data: &[u8], seq: u1
         // 5: QueryExtents — get bounding and clip shape extents
         5 => {
             require_len!(data, 8, seq, 128, 5, state.msb_first);
-            let req =
-                match QueryExtentsRequest::try_parse_request(request_header(data), &data[4..]) {
-                    Ok(r) => r,
-                    Err(_) => {
-                        return crate::xserver::core::build_error_bo(
-                            crate::xserver::core::LENGTH_ERROR,
-                            seq,
-                            0,
-                            128,
-                            5,
-                            state.msb_first,
-                        )
-                    }
-                };
+            let req = parse_minor!(QueryExtentsRequest, data, state, seq, 128, 5);
             let window_id = req.destination_window;
 
             let (bounding_shaped, bx, by, bw, bh) = if let Some(win) = state.windows.get(&window_id)
@@ -315,20 +255,7 @@ pub(crate) fn handle_shape_request(state: &mut ClientState, data: &[u8], seq: u1
         // 6: SelectInput — subscribe to ShapeNotify events
         6 => {
             require_len!(data, 12, seq, 128, 6, state.msb_first);
-            let req =
-                match SelectInputRequest::try_parse_request(request_header(data), &data[4..]) {
-                    Ok(r) => r,
-                    Err(_) => {
-                        return crate::xserver::core::build_error_bo(
-                            crate::xserver::core::LENGTH_ERROR,
-                            seq,
-                            0,
-                            128,
-                            6,
-                            state.msb_first,
-                        )
-                    }
-                };
+            let req = parse_minor!(SelectInputRequest, data, state, seq, 128, 6);
             let window_id = req.destination_window;
             let enable = req.enable;
 
@@ -350,20 +277,7 @@ pub(crate) fn handle_shape_request(state: &mut ClientState, data: &[u8], seq: u1
         // 7: InputSelected — query if shape events are selected
         7 => {
             require_len!(data, 8, seq, 128, 7, state.msb_first);
-            let req =
-                match InputSelectedRequest::try_parse_request(request_header(data), &data[4..]) {
-                    Ok(r) => r,
-                    Err(_) => {
-                        return crate::xserver::core::build_error_bo(
-                            crate::xserver::core::LENGTH_ERROR,
-                            seq,
-                            0,
-                            128,
-                            7,
-                            state.msb_first,
-                        )
-                    }
-                };
+            let req = parse_minor!(InputSelectedRequest, data, state, seq, 128, 7);
             let window_id = req.destination_window;
 
             let enabled = state
@@ -380,20 +294,7 @@ pub(crate) fn handle_shape_request(state: &mut ClientState, data: &[u8], seq: u1
         // 8: GetRectangles — get the shape rectangles for a window
         8 => {
             require_len!(data, 8, seq, 128, 8, state.msb_first);
-            let req =
-                match GetRectanglesRequest::try_parse_request(request_header(data), &data[4..]) {
-                    Ok(r) => r,
-                    Err(_) => {
-                        return crate::xserver::core::build_error_bo(
-                            crate::xserver::core::LENGTH_ERROR,
-                            seq,
-                            0,
-                            128,
-                            8,
-                            state.msb_first,
-                        )
-                    }
-                };
+            let req = parse_minor!(GetRectanglesRequest, data, state, seq, 128, 8);
             let window_id = req.window;
             let kind = u8::from(req.source_kind);
 

@@ -2,6 +2,7 @@
 //! DestroyFence, QueryFence, AwaitFence.
 
 use tracing::{debug, warn};
+use super::super::parse_minor;
 
 use super::super::super::client::ClientState;
 use super::super::super::core::{MATCH_ERROR, VALUE_ERROR};
@@ -15,19 +16,7 @@ use x11rb_protocol::protocol::sync::{
 
 /// Minor opcode 14: CreateFence
 pub(crate) fn create_fence(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
-    let req = match CreateFenceRequest::try_parse_request(request_header(data), &data[4..]) {
-        Ok(r) => r,
-        Err(_) => {
-            return crate::xserver::core::build_error_bo(
-                crate::xserver::core::LENGTH_ERROR,
-                seq,
-                0,
-                134,
-                14,
-                state.msb_first,
-            )
-        }
-    };
+    let req = parse_minor!(CreateFenceRequest, data, state, seq, 134, 14);
     let fence_id = req.fence;
     let initially_triggered = req.initially_triggered;
     debug!("SYNC CreateFence: id={fence_id:#x} initially_triggered={initially_triggered}");
@@ -45,19 +34,7 @@ pub(crate) fn create_fence(state: &mut ClientState, data: &[u8], seq: u16) -> Ve
 
 /// Minor opcode 15: TriggerFence
 pub(crate) fn trigger_fence(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
-    let req = match TriggerFenceRequest::try_parse_request(request_header(data), &data[4..]) {
-        Ok(r) => r,
-        Err(_) => {
-            return crate::xserver::core::build_error_bo(
-                crate::xserver::core::LENGTH_ERROR,
-                seq,
-                0,
-                134,
-                15,
-                state.msb_first,
-            )
-        }
-    };
+    let req = parse_minor!(TriggerFenceRequest, data, state, seq, 134, 15);
     let fence_id = req.fence;
     debug!("SYNC TriggerFence: id={fence_id:#x}");
     if let Some(fence) = state.sync_state.fences.get_mut(&fence_id) {
@@ -72,19 +49,7 @@ pub(crate) fn trigger_fence(state: &mut ClientState, data: &[u8], seq: u16) -> V
 
 /// Minor opcode 16: ResetFence
 pub(crate) fn reset_fence(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
-    let req = match ResetFenceRequest::try_parse_request(request_header(data), &data[4..]) {
-        Ok(r) => r,
-        Err(_) => {
-            return crate::xserver::core::build_error_bo(
-                crate::xserver::core::LENGTH_ERROR,
-                seq,
-                0,
-                134,
-                16,
-                state.msb_first,
-            )
-        }
-    };
+    let req = parse_minor!(ResetFenceRequest, data, state, seq, 134, 16);
     let fence_id = req.fence;
     debug!("SYNC ResetFence: id={fence_id:#x}");
     // Per spec, fence must be triggered to reset; return BadMatch otherwise.
@@ -115,19 +80,7 @@ pub(crate) fn reset_fence(state: &mut ClientState, data: &[u8], seq: u16) -> Vec
 
 /// Minor opcode 17: DestroyFence
 pub(crate) fn destroy_fence(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
-    let req = match DestroyFenceRequest::try_parse_request(request_header(data), &data[4..]) {
-        Ok(r) => r,
-        Err(_) => {
-            return crate::xserver::core::build_error_bo(
-                crate::xserver::core::LENGTH_ERROR,
-                seq,
-                0,
-                134,
-                17,
-                state.msb_first,
-            )
-        }
-    };
+    let req = parse_minor!(DestroyFenceRequest, data, state, seq, 134, 17);
     let fence_id = req.fence;
     debug!("SYNC DestroyFence: id={fence_id:#x}");
     state.recycle_xid(fence_id);
@@ -163,19 +116,7 @@ pub(crate) fn destroy_fence(state: &mut ClientState, data: &[u8], seq: u16) -> V
 
 /// Minor opcode 18: QueryFence
 pub(crate) fn query_fence(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
-    let req = match QueryFenceRequest::try_parse_request(request_header(data), &data[4..]) {
-        Ok(r) => r,
-        Err(_) => {
-            return crate::xserver::core::build_error_bo(
-                crate::xserver::core::LENGTH_ERROR,
-                seq,
-                0,
-                134,
-                18,
-                state.msb_first,
-            )
-        }
-    };
+    let req = parse_minor!(QueryFenceRequest, data, state, seq, 134, 18);
     let fence_id = req.fence;
     let triggered = state
         .sync_state
@@ -192,19 +133,7 @@ pub(crate) fn query_fence(state: &mut ClientState, data: &[u8], seq: u16) -> Vec
 
 /// Minor opcode 19: AwaitFence
 pub(crate) fn await_fence(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
-    let req = match AwaitFenceRequest::try_parse_request(request_header(data), &data[4..]) {
-        Ok(r) => r,
-        Err(_) => {
-            return crate::xserver::core::build_error_bo(
-                crate::xserver::core::LENGTH_ERROR,
-                seq,
-                0,
-                134,
-                19,
-                state.msb_first,
-            )
-        }
-    };
+    let req = parse_minor!(AwaitFenceRequest, data, state, seq, 134, 19);
     // Block until at least one fence is triggered.
     let fence_ids: Vec<u32> = req.fence_list.iter().copied().collect();
     let any_triggered = fence_ids.iter().any(|&fid| {

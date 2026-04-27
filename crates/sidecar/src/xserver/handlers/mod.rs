@@ -75,6 +75,43 @@ macro_rules! typed {
     }};
 }
 
+/// Parse a minor-opcode extension request body into a typed x11rb
+/// request struct, returning early with a BadLength error reply on
+/// failure. The optional last argument lets callers substitute a
+/// different `RequestHeader` (used when our wire numbering differs from
+/// x11rb's constants for a given minor opcode).
+#[allow(unused_macros)]
+macro_rules! parse_minor {
+    ($T:ty, $data:ident, $state:ident, $seq:ident, $major:literal, $minor:expr) => {
+        parse_minor!(
+            $T,
+            $data,
+            $state,
+            $seq,
+            $major,
+            $minor,
+            crate::xserver::request::request_header($data)
+        )
+    };
+    ($T:ty, $data:ident, $state:ident, $seq:ident, $major:literal, $minor:expr, $header:expr) => {
+        match <$T>::try_parse_request($header, &$data[4..]) {
+            Ok(r) => r,
+            Err(_) => {
+                return crate::xserver::core::build_error_bo(
+                    crate::xserver::core::LENGTH_ERROR,
+                    $seq,
+                    0,
+                    $major,
+                    $minor as u16,
+                    $state.msb_first,
+                )
+            }
+        }
+    };
+}
+#[allow(unused_imports)]
+pub(crate) use parse_minor;
+
 /// Dispatch a core X11 protocol request (opcodes 1-127) to the appropriate
 /// handler function. Returns the response bytes (reply, event, or empty for
 /// void requests).

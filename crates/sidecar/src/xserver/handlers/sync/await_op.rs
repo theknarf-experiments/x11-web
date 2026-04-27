@@ -1,6 +1,7 @@
 //! SYNC Await and priority operations: Await (7), SetPriority (12), GetPriority (13).
 
 use tracing::debug;
+use super::super::parse_minor;
 
 use super::super::super::client::ClientState;
 use super::{is_trigger_satisfied, AwaitTrigger, PendingAwait};
@@ -10,19 +11,7 @@ use x11rb_protocol::protocol::sync::{AwaitRequest, GetPriorityRequest, SetPriori
 
 /// Minor opcode 7: Await
 pub(crate) fn await_op(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
-    let req = match AwaitRequest::try_parse_request(request_header(data), &data[4..]) {
-        Ok(r) => r,
-        Err(_) => {
-            return crate::xserver::core::build_error_bo(
-                crate::xserver::core::LENGTH_ERROR,
-                seq,
-                0,
-                134,
-                7,
-                state.msb_first,
-            )
-        }
-    };
+    let req = parse_minor!(AwaitRequest, data, state, seq, 134, 7);
 
     // Await: wait for one or more counter conditions.
     // Per X11 SYNC spec, Await blocks the connection until at least one
@@ -88,19 +77,7 @@ pub(crate) fn await_op(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8
 
 /// Minor opcode 12: SetPriority
 pub(crate) fn set_priority(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
-    let req = match SetPriorityRequest::try_parse_request(request_header(data), &data[4..]) {
-        Ok(r) => r,
-        Err(_) => {
-            return crate::xserver::core::build_error_bo(
-                crate::xserver::core::LENGTH_ERROR,
-                seq,
-                0,
-                134,
-                12,
-                state.msb_first,
-            )
-        }
-    };
+    let req = parse_minor!(SetPriorityRequest, data, state, seq, 134, 12);
     let resource_id = req.id;
     let priority = req.priority;
     debug!("SYNC SetPriority: resource={resource_id:#x} priority={priority}");
@@ -110,19 +87,7 @@ pub(crate) fn set_priority(state: &mut ClientState, data: &[u8], seq: u16) -> Ve
 
 /// Minor opcode 13: GetPriority
 pub(crate) fn get_priority(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
-    let req = match GetPriorityRequest::try_parse_request(request_header(data), &data[4..]) {
-        Ok(r) => r,
-        Err(_) => {
-            return crate::xserver::core::build_error_bo(
-                crate::xserver::core::LENGTH_ERROR,
-                seq,
-                0,
-                134,
-                13,
-                state.msb_first,
-            )
-        }
-    };
+    let req = parse_minor!(GetPriorityRequest, data, state, seq, 134, 13);
     let resource_id = req.id;
     let priority = state
         .sync_state

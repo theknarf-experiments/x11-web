@@ -1,6 +1,7 @@
 //! SYNC alarm operations: CreateAlarm, ChangeAlarm, QueryAlarm, DestroyAlarm.
 
 use tracing::debug;
+use super::super::parse_minor;
 
 use super::super::super::client::ClientState;
 use super::SyncAlarm;
@@ -12,19 +13,7 @@ use x11rb_protocol::protocol::sync::{
 
 /// Minor opcode 8: CreateAlarm
 pub(crate) fn create_alarm(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
-    let req = match CreateAlarmRequest::try_parse_request(request_header(data), &data[4..]) {
-        Ok(r) => r,
-        Err(_) => {
-            return crate::xserver::core::build_error_bo(
-                crate::xserver::core::LENGTH_ERROR,
-                seq,
-                0,
-                134,
-                8,
-                state.msb_first,
-            )
-        }
-    };
+    let req = parse_minor!(CreateAlarmRequest, data, state, seq, 134, 8);
     let alarm_id = req.id;
     let vl = &*req.value_list;
 
@@ -61,19 +50,7 @@ pub(crate) fn create_alarm(state: &mut ClientState, data: &[u8], seq: u16) -> Ve
 
 /// Minor opcode 9: ChangeAlarm
 pub(crate) fn change_alarm(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
-    let req = match ChangeAlarmRequest::try_parse_request(request_header(data), &data[4..]) {
-        Ok(r) => r,
-        Err(_) => {
-            return crate::xserver::core::build_error_bo(
-                crate::xserver::core::LENGTH_ERROR,
-                seq,
-                0,
-                134,
-                9,
-                state.msb_first,
-            )
-        }
-    };
+    let req = parse_minor!(ChangeAlarmRequest, data, state, seq, 134, 9);
     let alarm_id = req.id;
     let vl = &*req.value_list;
 
@@ -109,19 +86,7 @@ pub(crate) fn change_alarm(state: &mut ClientState, data: &[u8], seq: u16) -> Ve
 
 /// Minor opcode 10: QueryAlarm
 pub(crate) fn query_alarm(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
-    let req = match QueryAlarmRequest::try_parse_request(request_header(data), &data[4..]) {
-        Ok(r) => r,
-        Err(_) => {
-            return crate::xserver::core::build_error_bo(
-                crate::xserver::core::LENGTH_ERROR,
-                seq,
-                0,
-                134,
-                10,
-                state.msb_first,
-            )
-        }
-    };
+    let req = parse_minor!(QueryAlarmRequest, data, state, seq, 134, 10);
     let alarm_id = req.alarm;
     debug!("SYNC QueryAlarm: id={alarm_id:#x}");
 
@@ -144,19 +109,7 @@ pub(crate) fn query_alarm(state: &mut ClientState, data: &[u8], seq: u16) -> Vec
 
 /// Minor opcode 11: DestroyAlarm
 pub(crate) fn destroy_alarm(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
-    let req = match DestroyAlarmRequest::try_parse_request(request_header(data), &data[4..]) {
-        Ok(r) => r,
-        Err(_) => {
-            return crate::xserver::core::build_error_bo(
-                crate::xserver::core::LENGTH_ERROR,
-                seq,
-                0,
-                134,
-                11,
-                state.msb_first,
-            )
-        }
-    };
+    let req = parse_minor!(DestroyAlarmRequest, data, state, seq, 134, 11);
     let alarm_id = req.alarm;
     debug!("SYNC DestroyAlarm: id={alarm_id:#x}");
     state.sync_state.alarms.remove(&alarm_id);

@@ -2,6 +2,7 @@
 //! ChangeCounter, QueryCounter, DestroyCounter.
 
 use tracing::debug;
+use super::super::parse_minor;
 
 use super::super::super::client::ClientState;
 use super::super::super::core::VALUE_ERROR;
@@ -34,19 +35,7 @@ pub(crate) fn list_system_counters(state: &mut ClientState, seq: u16) -> Vec<u8>
 
 /// Minor opcode 2: CreateCounter
 pub(crate) fn create_counter(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
-    let req = match CreateCounterRequest::try_parse_request(request_header(data), &data[4..]) {
-        Ok(r) => r,
-        Err(_) => {
-            return crate::xserver::core::build_error_bo(
-                crate::xserver::core::LENGTH_ERROR,
-                seq,
-                0,
-                134,
-                2,
-                state.msb_first,
-            )
-        }
-    };
+    let req = parse_minor!(CreateCounterRequest, data, state, seq, 134, 2);
     let counter_id = req.id;
     let value_hi = req.initial_value.hi;
     let value_lo = req.initial_value.lo;
@@ -64,19 +53,7 @@ pub(crate) fn create_counter(state: &mut ClientState, data: &[u8], seq: u16) -> 
 
 /// Minor opcode 3: SetCounter
 pub(crate) fn set_counter(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
-    let req = match SetCounterRequest::try_parse_request(request_header(data), &data[4..]) {
-        Ok(r) => r,
-        Err(_) => {
-            return crate::xserver::core::build_error_bo(
-                crate::xserver::core::LENGTH_ERROR,
-                seq,
-                0,
-                134,
-                3,
-                state.msb_first,
-            )
-        }
-    };
+    let req = parse_minor!(SetCounterRequest, data, state, seq, 134, 3);
     let counter_id = req.counter;
     let value_hi = req.value.hi;
     let value_lo = req.value.lo;
@@ -112,19 +89,7 @@ pub(crate) fn set_counter(state: &mut ClientState, data: &[u8], seq: u16) -> Vec
 
 /// Minor opcode 4: ChangeCounter
 pub(crate) fn change_counter(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
-    let req = match ChangeCounterRequest::try_parse_request(request_header(data), &data[4..]) {
-        Ok(r) => r,
-        Err(_) => {
-            return crate::xserver::core::build_error_bo(
-                crate::xserver::core::LENGTH_ERROR,
-                seq,
-                0,
-                134,
-                4,
-                state.msb_first,
-            )
-        }
-    };
+    let req = parse_minor!(ChangeCounterRequest, data, state, seq, 134, 4);
     let counter_id = req.counter;
     let delta_hi = req.amount.hi;
     let delta_lo = req.amount.lo;
@@ -160,19 +125,7 @@ pub(crate) fn change_counter(state: &mut ClientState, data: &[u8], seq: u16) -> 
 
 /// Minor opcode 5: QueryCounter
 pub(crate) fn query_counter(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
-    let req = match QueryCounterRequest::try_parse_request(request_header(data), &data[4..]) {
-        Ok(r) => r,
-        Err(_) => {
-            return crate::xserver::core::build_error_bo(
-                crate::xserver::core::LENGTH_ERROR,
-                seq,
-                0,
-                134,
-                5,
-                state.msb_first,
-            )
-        }
-    };
+    let req = parse_minor!(QueryCounterRequest, data, state, seq, 134, 5);
     let counter_id = req.counter;
     debug!("SYNC QueryCounter: id={counter_id:#x}");
 
@@ -202,19 +155,7 @@ pub(crate) fn query_counter(state: &mut ClientState, data: &[u8], seq: u16) -> V
 
 /// Minor opcode 6: DestroyCounter
 pub(crate) fn destroy_counter(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
-    let req = match DestroyCounterRequest::try_parse_request(request_header(data), &data[4..]) {
-        Ok(r) => r,
-        Err(_) => {
-            return crate::xserver::core::build_error_bo(
-                crate::xserver::core::LENGTH_ERROR,
-                seq,
-                0,
-                134,
-                6,
-                state.msb_first,
-            )
-        }
-    };
+    let req = parse_minor!(DestroyCounterRequest, data, state, seq, 134, 6);
     let counter_id = req.counter;
     debug!("SYNC DestroyCounter: id={counter_id:#x}");
     state.sync_state.counters.remove(&counter_id);
