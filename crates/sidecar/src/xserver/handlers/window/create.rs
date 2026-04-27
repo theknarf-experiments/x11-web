@@ -14,23 +14,6 @@ use x11rb_protocol::protocol::xproto::{
 pub(crate) fn handle_create_window(state: &mut ClientState, data: &[u8], _seq: u16) -> Vec<u8> {
     require_len!(data, 32, _seq, 1);
 
-    // Per X11 spec: the request length must exactly match the
-    // header (8 bytes) + popcount(value_mask) * 4 bytes. Any other
-    // length is BadLength. value_mask sits at bytes 28..32 in LE.
-    let value_mask = u32::from_le_bytes([data[28], data[29], data[30], data[31]]);
-    let n_values = value_mask.count_ones() as usize;
-    let expected_len = 32 + n_values * 4;
-    if data.len() != expected_len {
-        return build_error(LENGTH_ERROR, _seq, 0, 1, 0);
-    }
-
-    // Per X11 spec: only bits 0..=14 (CWBackPixmap..CWCursor) are
-    // defined in the CreateWindow value mask. Any other bit is BadValue.
-    const CREATE_WINDOW_MASK_VALID: u32 = (1 << 15) - 1; // bits 0..=14
-    if value_mask & !CREATE_WINDOW_MASK_VALID != 0 {
-        return build_error(VALUE_ERROR, _seq, value_mask, 1, 0);
-    }
-
     let req = match CreateWindowRequest::try_parse_request(request_header(data), &data[4..]) {
         Ok(r) => r,
         Err(_) => return build_error(LENGTH_ERROR, _seq, 0, 1, 0),
