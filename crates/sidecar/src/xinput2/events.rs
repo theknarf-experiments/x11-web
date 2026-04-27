@@ -1,5 +1,4 @@
 use x11rb_protocol::protocol::xinput as xi;
-use x11rb_protocol::x11_utils::Serialize as _;
 
 use x11_web_protocol::InputEvent;
 
@@ -37,14 +36,7 @@ pub fn build_raw_motion_event(sequence: u16, msb_first: bool) -> Vec<u8> {
         axisvalues: vec![],
         axisvalues_raw: vec![],
     };
-    let mut buf = Vec::new();
-    event.serialize_into(&mut buf);
-    while buf.len() % 4 != 0 {
-        buf.push(0);
-    }
-    let length_units = ((buf.len() - 32) / 4) as u32;
-    write_u32_bo(&mut buf, 4, length_units, msb_first);
-    buf
+    super::serialize_xi_reply(&event, msb_first)
 }
 
 /// Build an XI2 `ButtonPressEvent` for the wire (also used for
@@ -134,19 +126,7 @@ pub(crate) fn build_xi_pointer_event(
         valuator_mask,
         axisvalues,
     };
-
-    let mut buf = Vec::new();
-    event.serialize_into(&mut buf);
-    // Pad to a 4-byte boundary.
-    while buf.len() % 4 != 0 {
-        buf.push(0);
-    }
-    // X events are 32 bytes for legacy events; for GenericEvent the
-    // `length` field counts additional 4-byte units beyond the 32-byte
-    // header. Patch it.
-    let length_units = ((buf.len() - 32) / 4) as u32;
-    write_u32_bo(&mut buf, 4, length_units, msb_first);
-    buf
+    super::serialize_xi_reply(&event, msb_first)
 }
 
 /// For an InputEvent, build all XI2 GenericEvent bytes that should be
@@ -458,14 +438,7 @@ pub fn build_raw_pointer_event(
         axisvalues: vec![],
         axisvalues_raw: vec![],
     };
-    let mut buf = Vec::new();
-    event.serialize_into(&mut buf);
-    while buf.len() % 4 != 0 {
-        buf.push(0);
-    }
-    let length_units = ((buf.len() - 32) / 4) as u32;
-    write_u32_bo(&mut buf, 4, length_units, msb_first);
-    buf
+    super::serialize_xi_reply(&event, msb_first)
 }
 
 /// Patch `root_window` into the `root` field of an XIQueryPointer reply

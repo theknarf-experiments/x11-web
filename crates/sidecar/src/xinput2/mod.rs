@@ -129,11 +129,14 @@ fn xi_reply_header(seq: u16, xi_reply_type: u8, length_units: u32, msb_first: bo
     buf
 }
 
-/// Serialize an x11rb XInput reply, then patch up its `length` field
-/// (in 4-byte units after the 32-byte header). x11rb's `Serialize` impls
-/// don't compute `length` automatically — it has to match the actual
-/// number of trailing bytes or XCB hits "Too much data requested".
-fn serialize_xi_reply<R: x11rb_protocol::x11_utils::Serialize>(
+/// Serialize any x11rb XInput value with a 32-byte header, then patch
+/// the `length` field (4-byte units after the header). x11rb's
+/// `Serialize` impls don't compute `length` automatically — it has to
+/// match the actual trailing-bytes count or XCB rejects the message
+/// with "Too much data requested".
+///
+/// Used for both XI replies and XI GenericEvent (XGE) events.
+pub(crate) fn serialize_xi_reply<R: x11rb_protocol::x11_utils::Serialize>(
     reply: &R,
     msb_first: bool,
 ) -> Vec<u8> {
@@ -142,7 +145,7 @@ fn serialize_xi_reply<R: x11rb_protocol::x11_utils::Serialize>(
     while buf.len() % 4 != 0 {
         buf.push(0);
     }
-    debug_assert!(buf.len() >= 32, "XI reply must be at least 32 bytes");
+    debug_assert!(buf.len() >= 32, "XI reply/event must be at least 32 bytes");
     let length_units = ((buf.len() - 32) / 4) as u32;
     write_u32_bo(&mut buf, 4, length_units, msb_first);
     buf
