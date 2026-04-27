@@ -7,6 +7,7 @@
 //!   compat     — GetCompatMap, SetCompatMap, compat compilation
 //!   indicators — GetIndicatorState, GetIndicatorMap, SetIndicatorMap, GetNamedIndicator
 //!   device     — ListComponents, GetDeviceInfo, SetDeviceInfo
+use super::parse_minor;
 use crate::xserver::reply::ReplyBuf;
 
 mod compat;
@@ -165,31 +166,31 @@ fn handle_xkb_select_events(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
 ///  27-28  map.vmods (CARD16)
 ///  29-32  map.ctrls (CARD32)
 fn handle_xkb_set_named_indicator(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
-    if data.len() < 20 {
-        debug!(
-            "XKB SetNamedIndicator: request too short ({} bytes)",
-            data.len()
-        );
+    use x11rb_protocol::protocol::xkb::SetNamedIndicatorRequest;
+    let Ok(req) = SetNamedIndicatorRequest::try_parse_request(
+        crate::xserver::request::request_header(data),
+        &data[4..],
+    ) else {
+        debug!("XKB SetNamedIndicator: parse failed ({}B)", data.len());
         return Vec::new();
-    }
+    };
 
-    let indicator_atom = state.read_u32(data, 12);
-    let set_state = data.get(16).copied().unwrap_or(0) != 0;
-    let on = data.get(17).copied().unwrap_or(0) != 0;
-    let set_map = data.get(18).copied().unwrap_or(0) != 0;
+    let indicator_atom = req.indicator;
+    let set_state = req.set_state;
+    let on = req.on;
+    let set_map = req.set_map;
 
-    // Parse the indicator map if setMap is true and we have enough bytes.
-    let map = if set_map && data.len() >= 33 {
-        let ctrls = state.read_u32(data, 29);
+    // Parse the indicator map if setMap is true; otherwise preserve the
+    // existing map for this indicator (or default).
+    let map = if set_map {
         XkbIndicatorMap {
-            which_groups: data[22],
-            groups: data[23],
-            which_mods: data[24],
-            mods: data[25],
-            ctrls,
+            which_groups: u8::from(req.map_which_groups),
+            groups: u8::from(req.map_groups),
+            which_mods: u8::from(req.map_which_mods),
+            mods: u16::from(req.map_real_mods) as u8,
+            ctrls: u32::from(req.map_ctrls),
         }
     } else {
-        // Preserve the existing map for this indicator, or default.
         state
             .xkb_named_indicators
             .get(&indicator_atom)
@@ -210,8 +211,8 @@ fn handle_xkb_set_named_indicator(state: &mut ClientState, data: &[u8]) -> Vec<u
         index,
         change_state: set_state,
         led_state: on,
-        affect_which: data.get(21).copied().unwrap_or(0),
-        change_which: data.get(18).copied().unwrap_or(0),
+        affect_which: u8::from(req.map_flags),
+        change_which: u8::from(set_map),
         map,
     };
 
@@ -222,7 +223,6 @@ fn handle_xkb_set_named_indicator(state: &mut ClientState, data: &[u8]) -> Vec<u
 
     state.xkb_named_indicators.insert(indicator_atom, entry);
 
-    // If the caller requested an explicit LED state change, apply it.
     if set_state {
         if on {
             state.xkb_indicators |= 1 << index;
@@ -330,34 +330,20 @@ pub(crate) fn handle_xkb_request(state: &mut ClientState, data: &[u8], seq: u16)
         19 => geometry::build_xkb_get_geometry_reply(state, seq, device_id_byte),
         20 => geometry::handle_xkb_set_geometry(state, data, seq),
         21 => {
-            // PerClientFlags: parse change/value/ctrls and reply with supported flags.
-            // Wire: 4-5=device_spec, 8-11=change, 12-15=value,
-            //       16-19=ctrls_to_change, 20-23=auto_ctrls, 24-27=auto_ctrls_values
-            let mut reply = ReplyBuf::fixed(seq, state.msb_first)
-                .set_data_byte(device_id_byte);
-            if data.len() >= 28 {
-                let change = state.read_u32(data, 8);
-                let value = state.read_u32(data, 12);
-                let _ctrls_to_change = state.read_u32(data, 16);
-                let auto_ctrls = state.read_u32(data, 20);
-                let auto_ctrls_values = state.read_u32(data, 24);
-                let result = value & change;
-                let supported: u32 = 0x1F; // all per-client flags supported
-                reply = reply
-                    .set_u32(8, supported) // supported
-                    .set_u32(12, result) // value
-                    .set_u32(16, auto_ctrls) // autoCtrls
-                    .set_u32(20, auto_ctrls_values); // autoCtrlsValues
-            } else if data.len() >= 16 {
-                let change = state.read_u32(data, 8);
-                let value = state.read_u32(data, 12);
-                let result = value & change;
-                reply = reply
-                    .set_u32(8, 0x1F) // supported
-                    .set_u32(12, result);
-            }
+            // PerClientFlags: reply with `value & change` and the supported mask.
+            use x11rb_protocol::protocol::xkb::PerClientFlagsRequest;
+            let req = parse_minor!(PerClientFlagsRequest, data, state, seq, 135, 21);
+            let change = u32::from(req.change);
+            let value = u32::from(req.value);
+            let result = value & change;
             debug!("PerClientFlags reply");
-            reply.build()
+            ReplyBuf::fixed(seq, state.msb_first)
+                .set_data_byte(device_id_byte)
+                .set_u32(8, 0x1F) // supported flags (all per-client flags)
+                .set_u32(12, result)
+                .set_u32(16, u32::from(req.auto_ctrls))
+                .set_u32(20, u32::from(req.auto_ctrls_values))
+                .build()
         }
         22 => device::handle_list_components(state, seq, device_id_byte),
         23 => map::handle_xkb_get_kbd_by_name(state, data, seq, device_id_byte),
