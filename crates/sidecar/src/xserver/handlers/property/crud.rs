@@ -2,24 +2,18 @@
 //! GetProperty (20), ListProperties (21).
 
 use super::*;
-use crate::xserver::core::require_len;
 use crate::xserver::event::serialize_event;
 use crate::xserver::reply::ReplyBuf;
-use x11rb_protocol::protocol::xproto::{PropMode, PropertyNotifyEvent};
+use x11rb_protocol::protocol::xproto::{
+    ChangePropertyRequest, DeletePropertyRequest, GetPropertyRequest, ListPropertiesRequest,
+    PropMode, PropertyNotifyEvent,
+};
 
 // ---------------------------------------------------------------------------
 // Opcode 18: ChangeProperty
 // ---------------------------------------------------------------------------
 
-pub(crate) fn handle_change_property(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
-    require_len!(data, 24, state.sequence, 18);
-
-    use x11rb_protocol::protocol::xproto::ChangePropertyRequest;
-    use crate::xserver::request::request_header;
-    let req = match ChangePropertyRequest::try_parse_request(request_header(data), &data[4..]) {
-        Ok(r) => r,
-        Err(_) => return build_error(LENGTH_ERROR, state.sequence, 0, 18, 0),
-    };
+pub(crate) fn handle_change_property(state: &mut ClientState, req: &ChangePropertyRequest) -> Vec<u8> {
     let mode = u8::from(req.mode);
     let window = req.window;
     let property_atom = req.property;
@@ -445,15 +439,7 @@ pub(crate) fn handle_change_property(state: &mut ClientState, data: &[u8]) -> Ve
 // Opcode 19: DeleteProperty
 // ---------------------------------------------------------------------------
 
-pub(crate) fn handle_delete_property(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
-    require_len!(data, 12, state.sequence, 19);
-
-    use x11rb_protocol::protocol::xproto::DeletePropertyRequest;
-    use crate::xserver::request::request_header;
-    let req = match DeletePropertyRequest::try_parse_request(request_header(data), &data[4..]) {
-        Ok(r) => r,
-        Err(_) => return build_error(LENGTH_ERROR, state.sequence, 0, 19, 0),
-    };
+pub(crate) fn handle_delete_property(state: &mut ClientState, req: &DeletePropertyRequest) -> Vec<u8> {
     let window = req.window;
     let property = req.property;
     {
@@ -511,15 +497,8 @@ pub(crate) fn handle_delete_property(state: &mut ClientState, data: &[u8]) -> Ve
 // Opcode 20: GetProperty
 // ---------------------------------------------------------------------------
 
-pub(crate) fn handle_get_property(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
-    require_len!(data, 24, seq, 20);
-
-    use x11rb_protocol::protocol::xproto::GetPropertyRequest;
-    use crate::xserver::request::request_header;
-    let req = match GetPropertyRequest::try_parse_request(request_header(data), &data[4..]) {
-        Ok(r) => r,
-        Err(_) => return build_error(LENGTH_ERROR, seq, 0, 20, 0),
-    };
+pub(crate) fn handle_get_property(state: &mut ClientState, req: &GetPropertyRequest) -> Vec<u8> {
+    let seq = state.sequence;
     let delete = req.delete;
     let window = req.window;
     let property_atom = req.property;
@@ -627,15 +606,8 @@ pub(crate) fn handle_get_property(state: &mut ClientState, data: &[u8], seq: u16
 // Opcode 21: ListProperties
 // ---------------------------------------------------------------------------
 
-pub(crate) fn handle_list_properties(state: &ClientState, data: &[u8], seq: u16) -> Vec<u8> {
-    require_len!(data, 8, seq, 21);
-
-    use x11rb_protocol::protocol::xproto::ListPropertiesRequest;
-    use crate::xserver::request::request_header;
-    let req = match ListPropertiesRequest::try_parse_request(request_header(data), &data[4..]) {
-        Ok(r) => r,
-        Err(_) => return build_error(LENGTH_ERROR, seq, 0, 21, 0),
-    };
+pub(crate) fn handle_list_properties(state: &ClientState, req: &ListPropertiesRequest) -> Vec<u8> {
+    let seq = state.sequence;
     let window = req.window;
 
     let window_exists = state.windows.contains_key(&window)

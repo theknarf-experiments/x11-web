@@ -1,9 +1,7 @@
 //! SendEvent handler — opcode 25.
 
 use super::*;
-use crate::xserver::core::require_len;
 use crate::xserver::event::serialize_event;
-use crate::xserver::request::request_header;
 use x11rb_protocol::protocol::xproto::{
     ConfigureNotifyEvent, ExposeEvent, PropertyNotifyEvent, SendEventRequest,
 };
@@ -12,13 +10,7 @@ use x11rb_protocol::protocol::xproto::{
 // Opcode 25: SendEvent
 // ---------------------------------------------------------------------------
 
-pub(crate) fn handle_send_event(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
-    require_len!(data, 44, state.sequence, 25);
-
-    let req = match SendEventRequest::try_parse_request(request_header(data), &data[4..]) {
-        Ok(r) => r,
-        Err(_) => return build_error(LENGTH_ERROR, state.sequence, 0, 25, 0),
-    };
+pub(crate) fn handle_send_event(state: &mut ClientState, req: &SendEventRequest) -> Vec<u8> {
     let propagate = req.propagate;
     let destination = req.destination;
     let event_mask = u32::from(req.event_mask);

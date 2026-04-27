@@ -1,25 +1,17 @@
 //! Atom operations — InternAtom (opcode 16), GetAtomName (opcode 17).
 
 use super::*;
-use crate::xserver::core::require_len;
 use crate::xserver::reply::ReplyBuf;
-use crate::xserver::request::request_header;
+use x11rb_protocol::protocol::xproto::{GetAtomNameRequest, InternAtomRequest};
 
 // ---------------------------------------------------------------------------
 // Opcode 16: InternAtom
 // ---------------------------------------------------------------------------
 
-pub(crate) fn handle_intern_atom(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
-    require_len!(data, 8, seq, 16);
-    use x11rb_protocol::protocol::xproto::InternAtomRequest;
-    let req = match InternAtomRequest::try_parse_request(request_header(data), &data[4..]) {
-        Ok(r) => r,
-        Err(_) => return build_error(LENGTH_ERROR, seq, 0, 16, 0),
-    };
-    let only_if_exists = req.only_if_exists;
+pub(crate) fn handle_intern_atom(state: &mut ClientState, req: &InternAtomRequest) -> Vec<u8> {
+    let seq = state.sequence;
     let name = String::from_utf8_lossy(&req.name).to_string();
-
-    let atom = state.intern_atom(&name, only_if_exists);
+    let atom = state.intern_atom(&name, req.only_if_exists);
 
     ReplyBuf::fixed(seq, state.msb_first)
         .set_u32(8, atom)
@@ -30,13 +22,8 @@ pub(crate) fn handle_intern_atom(state: &mut ClientState, data: &[u8], seq: u16)
 // Opcode 17: GetAtomName
 // ---------------------------------------------------------------------------
 
-pub(crate) fn handle_get_atom_name(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
-    require_len!(data, 8, seq, 17);
-    use x11rb_protocol::protocol::xproto::GetAtomNameRequest;
-    let req = match GetAtomNameRequest::try_parse_request(request_header(data), &data[4..]) {
-        Ok(r) => r,
-        Err(_) => return build_error(LENGTH_ERROR, seq, 0, 17, 0),
-    };
+pub(crate) fn handle_get_atom_name(state: &mut ClientState, req: &GetAtomNameRequest) -> Vec<u8> {
+    let seq = state.sequence;
     let atom = req.atom;
 
     // BadAtom (error code 5) for unknown atoms
