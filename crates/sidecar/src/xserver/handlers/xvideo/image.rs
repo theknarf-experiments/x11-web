@@ -946,6 +946,10 @@ pub(crate) fn handle_image_request(
     seq: u16,
     minor: u8,
 ) -> Vec<u8> {
+    let bo = state.msb_first;
+    let xv_err = |code: u8, bad_value: u32| {
+        crate::xserver::core::build_error_bo(code, seq, bad_value, 156, minor as u16, bo)
+    };
     match minor {
         5 => {
             // PutVideo — not supported (software adaptor has no video capture)
@@ -954,14 +958,7 @@ pub(crate) fn handle_image_request(
                 .map(|r| r.port)
                 .unwrap_or(0);
             debug!("XVideo PutVideo: port={port} — returning BadMatch (capture not supported)");
-            crate::xserver::core::build_error_bo(
-                crate::xserver::core::MATCH_ERROR,
-                seq,
-                port,
-                156,
-                minor as u16,
-                state.msb_first,
-            )
+            xv_err(crate::xserver::core::MATCH_ERROR, port)
         }
         6 => {
             // PutStill — not supported (software adaptor has no video capture)
@@ -970,14 +967,7 @@ pub(crate) fn handle_image_request(
                 .map(|r| r.port)
                 .unwrap_or(0);
             debug!("XVideo PutStill: port={port} — returning BadMatch (capture not supported)");
-            crate::xserver::core::build_error_bo(
-                crate::xserver::core::MATCH_ERROR,
-                seq,
-                port,
-                156,
-                minor as u16,
-                state.msb_first,
-            )
+            xv_err(crate::xserver::core::MATCH_ERROR, port)
         }
         7 => {
             // GetVideo — not supported (software adaptor has no video capture output)
@@ -986,14 +976,7 @@ pub(crate) fn handle_image_request(
                 .map(|r| r.port)
                 .unwrap_or(0);
             debug!("XVideo GetVideo: port={port} — returning BadMatch (capture not supported)");
-            crate::xserver::core::build_error_bo(
-                crate::xserver::core::MATCH_ERROR,
-                seq,
-                port,
-                156,
-                minor as u16,
-                state.msb_first,
-            )
+            xv_err(crate::xserver::core::MATCH_ERROR, port)
         }
         8 => {
             // GetStill — capture current pixels from a drawable region
@@ -1020,26 +1003,12 @@ pub(crate) fn handle_image_request(
 
             // Validate the drawable exists (window or pixmap).
             if !state.windows.contains_key(&drawable) && !state.pixmaps.contains_key(&drawable) {
-                return crate::xserver::core::build_error_bo(
-                    crate::xserver::core::DRAWABLE_ERROR,
-                    seq,
-                    drawable,
-                    156,
-                    minor as u16,
-                    state.msb_first,
-                );
+                return xv_err(crate::xserver::core::DRAWABLE_ERROR, drawable);
             }
 
             // Validate the GC exists.
             if !state.gcs.contains_key(&gc_id) {
-                return crate::xserver::core::build_error_bo(
-                    crate::xserver::core::G_CONTEXT_ERROR,
-                    seq,
-                    gc_id,
-                    156,
-                    minor as u16,
-                    state.msb_first,
-                );
+                return xv_err(crate::xserver::core::G_CONTEXT_ERROR, gc_id);
             }
 
             // Extract ARGB32 pixels from the drawable's framebuffer at the
@@ -1279,14 +1248,7 @@ pub(crate) fn handle_image_request(
         }
         _ => {
             debug!("XVideo image: unhandled minor opcode {minor}");
-            crate::xserver::core::build_error_bo(
-                crate::xserver::core::REQUEST_ERROR,
-                seq,
-                minor as u32,
-                156,
-                minor as u16,
-                state.msb_first,
-            )
+            xv_err(crate::xserver::core::REQUEST_ERROR, minor as u32)
         }
     }
 }
