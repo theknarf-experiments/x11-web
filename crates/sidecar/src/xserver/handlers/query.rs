@@ -1,21 +1,17 @@
 //! Query and miscellaneous handlers (opcodes 97-99).
 
 use super::*;
-use crate::xserver::core::require_len;
 use crate::xserver::reply::ReplyBuf;
-use crate::xserver::request::request_header;
+use x11rb_protocol::protocol::xproto::{
+    ListExtensionsRequest, QueryBestSizeRequest, QueryExtensionRequest,
+};
 
 // ---------------------------------------------------------------------------
 // Opcode 97: QueryBestSize
 // ---------------------------------------------------------------------------
 
-pub(crate) fn handle_query_best_size(state: &ClientState, data: &[u8], seq: u16) -> Vec<u8> {
-    require_len!(data, 12, seq, 97);
-    use x11rb_protocol::protocol::xproto::QueryBestSizeRequest;
-    let req = match QueryBestSizeRequest::try_parse_request(request_header(data), &data[4..]) {
-        Ok(r) => r,
-        Err(_) => return build_error(LENGTH_ERROR, seq, 0, 97, 0),
-    };
+pub(crate) fn handle_query_best_size(state: &ClientState, req: &QueryBestSizeRequest) -> Vec<u8> {
+    let seq = state.sequence;
     let class = u8::from(req.class); // 0=Cursor, 1=Tile, 2=Stipple
     let width = req.width;
     let height = req.height;
@@ -65,13 +61,8 @@ fn next_power_of_two(v: u16) -> u16 {
 // Opcode 98: QueryExtension
 // ---------------------------------------------------------------------------
 
-pub(crate) fn handle_query_extension(_state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
-    require_len!(data, 8, seq, 98);
-    use x11rb_protocol::protocol::xproto::QueryExtensionRequest;
-    let req = match QueryExtensionRequest::try_parse_request(request_header(data), &data[4..]) {
-        Ok(r) => r,
-        Err(_) => return build_error(LENGTH_ERROR, seq, 0, 98, 0),
-    };
+pub(crate) fn handle_query_extension(_state: &mut ClientState, req: &QueryExtensionRequest) -> Vec<u8> {
+    let seq = _state.sequence;
     let name = std::str::from_utf8(&req.name).unwrap_or("");
 
     debug!("QueryExtension: \"{}\"", name);
@@ -98,7 +89,8 @@ pub(crate) fn handle_query_extension(_state: &mut ClientState, data: &[u8], seq:
 // Opcode 99: ListExtensions
 // ---------------------------------------------------------------------------
 
-pub(crate) fn handle_list_extensions(state: &ClientState, seq: u16) -> Vec<u8> {
+pub(crate) fn handle_list_extensions(state: &ClientState, _req: &ListExtensionsRequest) -> Vec<u8> {
+    let seq = state.sequence;
     // Collect enabled extension wire names from the registry.
     let extensions: Vec<&str> = state
         .extension_registry

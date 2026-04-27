@@ -1,21 +1,17 @@
 //! Font handlers (opcodes 45-52).
 
 use super::*;
-use crate::xserver::core::require_len;
 use crate::xserver::reply::ReplyBuf;
-use crate::xserver::request::request_header;
+use x11rb_protocol::protocol::xproto::{
+    CloseFontRequest, GetFontPathRequest, ListFontsRequest, ListFontsWithInfoRequest,
+    OpenFontRequest, QueryFontRequest, QueryTextExtentsRequest, SetFontPathRequest,
+};
 
 // ---------------------------------------------------------------------------
 // Opcode 45: OpenFont
 // ---------------------------------------------------------------------------
 
-pub(crate) fn handle_open_font(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
-    require_len!(data, 12, state.sequence, 45);
-    use x11rb_protocol::protocol::xproto::OpenFontRequest;
-    let req = match OpenFontRequest::try_parse_request(request_header(data), &data[4..]) {
-        Ok(r) => r,
-        Err(_) => return build_error(LENGTH_ERROR, state.sequence, 0, 45, 0),
-    };
+pub(crate) fn handle_open_font(state: &mut ClientState, req: &OpenFontRequest) -> Vec<u8> {
     let fid = req.fid;
 
     // Validate resource ID is within this client's allocated range
@@ -37,13 +33,7 @@ pub(crate) fn handle_open_font(state: &mut ClientState, data: &[u8]) -> Vec<u8> 
 // Opcode 46: CloseFont
 // ---------------------------------------------------------------------------
 
-pub(crate) fn handle_close_font(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
-    require_len!(data, 8, state.sequence, 46);
-    use x11rb_protocol::protocol::xproto::CloseFontRequest;
-    let req = match CloseFontRequest::try_parse_request(request_header(data), &data[4..]) {
-        Ok(r) => r,
-        Err(_) => return build_error(LENGTH_ERROR, state.sequence, 0, 46, 0),
-    };
+pub(crate) fn handle_close_font(state: &mut ClientState, req: &CloseFontRequest) -> Vec<u8> {
     let fid = req.font;
     // Validate font exists
     if state.font_manager.get_font(fid).is_none() {
@@ -58,13 +48,8 @@ pub(crate) fn handle_close_font(state: &mut ClientState, data: &[u8]) -> Vec<u8>
 // Opcode 47: QueryFont
 // ---------------------------------------------------------------------------
 
-pub(crate) fn handle_query_font(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
-    require_len!(data, 8, seq, 47);
-    use x11rb_protocol::protocol::xproto::QueryFontRequest;
-    let req = match QueryFontRequest::try_parse_request(request_header(data), &data[4..]) {
-        Ok(r) => r,
-        Err(_) => return build_error(LENGTH_ERROR, seq, 0, 47, 0),
-    };
+pub(crate) fn handle_query_font(state: &mut ClientState, req: &QueryFontRequest) -> Vec<u8> {
+    let seq = state.sequence;
     let fontable = req.font;
 
     // fontable can be a font ID or a GC ID (containing a font)
@@ -254,14 +239,8 @@ pub(crate) fn handle_query_font(state: &mut ClientState, data: &[u8], seq: u16) 
 // Opcode 48: QueryTextExtents
 // ---------------------------------------------------------------------------
 
-pub(crate) fn handle_query_text_extents(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
-    require_len!(data, 8, seq, 48);
-
-    use x11rb_protocol::protocol::xproto::QueryTextExtentsRequest;
-    let req = match QueryTextExtentsRequest::try_parse_request(request_header(data), &data[4..]) {
-        Ok(r) => r,
-        Err(_) => return build_error(LENGTH_ERROR, seq, 0, 48, 0),
-    };
+pub(crate) fn handle_query_text_extents(state: &mut ClientState, req: &QueryTextExtentsRequest) -> Vec<u8> {
+    let seq = state.sequence;
     let fontable = req.font;
 
     // Try to get actual font metrics
@@ -275,23 +254,13 @@ pub(crate) fn handle_query_text_extents(state: &mut ClientState, data: &[u8], se
         .or_else(|| state.font_manager.get_default_font());
 
     let (ascent, descent, overall_width, overall_left, overall_right) = if let Some(font) = &font {
-        // Calculate width from the text in the request
-        // Text starts at offset 8, each char is 2 bytes (CHAR2B format)
-        let odd_length = data[1] != 0;
-        let text_bytes = data.len() - 8;
-        let char_count = if odd_length {
-            (text_bytes - 2) / 2
-        } else {
-            text_bytes / 2
-        };
+        // Each char is 2 bytes (CHAR2B format) — req.string is &[Char2b].
         let mut width: i32 = 0;
         let mut left: i32 = 0;
         let mut right: i32 = 0;
         let mut pos: i32 = 0;
-        for i in 0..char_count {
-            let _byte1 = data[8 + i * 2];
-            let byte2 = data[8 + i * 2 + 1];
-            let ci = font.char_info(byte2 as u16);
+        for (i, ch) in req.string.iter().enumerate() {
+            let ci = font.char_info(ch.byte2 as u16);
             let lbearing = ci.left_side_bearing as i32;
             let rbearing = ci.right_side_bearing as i32;
             let char_w = ci.character_width as i32;
@@ -335,13 +304,8 @@ pub(crate) fn handle_query_text_extents(state: &mut ClientState, data: &[u8], se
 // Opcode 49: ListFonts
 // ---------------------------------------------------------------------------
 
-pub(crate) fn handle_list_fonts(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
-    require_len!(data, 8, seq, 49);
-    use x11rb_protocol::protocol::xproto::ListFontsRequest;
-    let req = match ListFontsRequest::try_parse_request(request_header(data), &data[4..]) {
-        Ok(r) => r,
-        Err(_) => return build_error(LENGTH_ERROR, seq, 0, 49, 0),
-    };
+pub(crate) fn handle_list_fonts(state: &mut ClientState, req: &ListFontsRequest) -> Vec<u8> {
+    let seq = state.sequence;
     let max_names = req.max_names;
     let pattern = if req.pattern.is_empty() {
         "*".to_string()
@@ -374,16 +338,9 @@ pub(crate) fn handle_list_fonts(state: &mut ClientState, data: &[u8], seq: u16) 
 
 pub(crate) fn handle_list_fonts_with_info(
     state: &mut ClientState,
-    data: &[u8],
-    seq: u16,
+    req: &ListFontsWithInfoRequest,
 ) -> Vec<u8> {
-    // Parse request: max_names(2) + pattern_length(2) + pattern(variable)
-    require_len!(data, 8, seq, 50);
-    use x11rb_protocol::protocol::xproto::ListFontsWithInfoRequest;
-    let req = match ListFontsWithInfoRequest::try_parse_request(request_header(data), &data[4..]) {
-        Ok(r) => r,
-        Err(_) => return build_error(LENGTH_ERROR, seq, 0, 50, 0),
-    };
+    let seq = state.sequence;
     let max_names = req.max_names;
     let pattern = if req.pattern.is_empty() {
         "*"
@@ -495,7 +452,8 @@ pub(crate) fn handle_list_fonts_with_info(
 // Opcode 52: GetFontPath
 // ---------------------------------------------------------------------------
 
-pub(crate) fn handle_get_font_path(state: &ClientState, seq: u16) -> Vec<u8> {
+pub(crate) fn handle_get_font_path(state: &ClientState, _req: &GetFontPathRequest) -> Vec<u8> {
+    let seq = state.sequence;
     // Build STR8 list of font paths
     let mut path_data = Vec::new();
     for path in &state.font_path {
@@ -514,16 +472,9 @@ pub(crate) fn handle_get_font_path(state: &ClientState, seq: u16) -> Vec<u8> {
         .build()
 }
 
-pub(crate) fn handle_set_font_path(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
-    require_len!(data, 8, state.sequence, 51);
-    use x11rb_protocol::protocol::xproto::SetFontPathRequest;
-    let req = match SetFontPathRequest::try_parse_request(request_header(data), &data[4..]) {
-        Ok(r) => r,
-        Err(_) => return build_error(LENGTH_ERROR, state.sequence, 0, 51, 0),
-    };
-    let font_list = req.font.into_owned();
-    let mut paths = Vec::with_capacity(font_list.len());
-    for s in font_list.iter() {
+pub(crate) fn handle_set_font_path(state: &mut ClientState, req: &SetFontPathRequest) -> Vec<u8> {
+    let mut paths = Vec::with_capacity(req.font.len());
+    for s in req.font.iter() {
         if let Ok(name) = std::str::from_utf8(&s.name) {
             paths.push(name.to_string());
         }
