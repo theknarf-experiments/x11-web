@@ -82,7 +82,7 @@ macro_rules! typed {
 /// x11rb's constants for a given minor opcode).
 #[allow(unused_macros)]
 macro_rules! parse_minor {
-    ($T:ty, $data:ident, $state:ident, $seq:ident, $major:literal, $minor:expr) => {
+    ($T:ty, $data:ident, $state:ident, $seq:ident, $major:expr, $minor:expr) => {
         parse_minor!(
             $T,
             $data,
@@ -93,7 +93,7 @@ macro_rules! parse_minor {
             crate::xserver::request::request_header($data)
         )
     };
-    ($T:ty, $data:ident, $state:ident, $seq:ident, $major:literal, $minor:expr, $header:expr) => {
+    ($T:ty, $data:ident, $state:ident, $seq:ident, $major:expr, $minor:expr, $header:expr) => {
         match <$T>::try_parse_request($header, &$data[4..]) {
             Ok(r) => r,
             Err(_) => {

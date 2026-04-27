@@ -5,8 +5,8 @@
 //! - Client-created counters with get/set/change
 //! - Alarms that trigger on counter value transitions
 //! - Fences for synchronization primitives
+use super::parse_minor;
 use crate::xserver::reply::ReplyBuf;
-use crate::xserver::request::request_header;
 
 mod alarm;
 mod await_op;
@@ -313,19 +313,7 @@ pub(crate) fn handle_sync_request(state: &mut ClientState, data: &[u8], seq: u16
     match minor {
         0 => {
             // Initialize: reply with version 3.1
-            let _req = match InitializeRequest::try_parse_request(request_header(data), &data[4..]) {
-                Ok(r) => r,
-                Err(_) => {
-                    return crate::xserver::core::build_error_bo(
-                        crate::xserver::core::LENGTH_ERROR,
-                        seq,
-                        0,
-                        134,
-                        0,
-                        state.msb_first,
-                    )
-                }
-            };
+            let _req = parse_minor!(InitializeRequest, data, state, seq, 134, 0);
             debug!("SYNC Initialize");
             ReplyBuf::fixed(seq, state.msb_first)
                 .set_u8(8, 3) // major version

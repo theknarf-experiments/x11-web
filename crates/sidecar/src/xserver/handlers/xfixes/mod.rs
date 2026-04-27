@@ -7,8 +7,8 @@ mod region;
 use tracing::debug;
 
 use super::super::client::ClientState;
+use super::parse_minor;
 use crate::xserver::reply::ReplyBuf;
-use crate::xserver::request::request_header;
 use x11rb_protocol::protocol::xfixes::{
     ChangeSaveSetRequest, QueryVersionRequest, SelectSelectionInputRequest,
 };
@@ -20,20 +20,7 @@ pub(crate) fn handle_xfixes_request(state: &mut ClientState, data: &[u8], seq: u
     match minor {
         // 0: QueryVersion
         0 => {
-            let _req =
-                match QueryVersionRequest::try_parse_request(request_header(data), &data[4..]) {
-                    Ok(r) => r,
-                    Err(_) => {
-                        return crate::xserver::core::build_error_bo(
-                            crate::xserver::core::LENGTH_ERROR,
-                            seq,
-                            0,
-                            138,
-                            0,
-                            state.msb_first,
-                        )
-                    }
-                };
+            let _req = parse_minor!(QueryVersionRequest, data, state, seq, 138, 0);
             ReplyBuf::fixed(seq, state.msb_first)
                 .set_u32(8, 5u32)
                 .set_u32(12, 0u32)
@@ -42,20 +29,7 @@ pub(crate) fn handle_xfixes_request(state: &mut ClientState, data: &[u8], seq: u
 
         // 1: ChangeSaveSet (extended)
         1 => {
-            let req =
-                match ChangeSaveSetRequest::try_parse_request(request_header(data), &data[4..]) {
-                    Ok(r) => r,
-                    Err(_) => {
-                        return crate::xserver::core::build_error_bo(
-                            crate::xserver::core::LENGTH_ERROR,
-                            seq,
-                            0,
-                            138,
-                            1,
-                            state.msb_first,
-                        )
-                    }
-                };
+            let req = parse_minor!(ChangeSaveSetRequest, data, state, seq, 138, 1);
             let window = req.window;
             let mode: u8 = req.mode.into();
 
@@ -87,22 +61,7 @@ pub(crate) fn handle_xfixes_request(state: &mut ClientState, data: &[u8], seq: u
 
         // 2: SelectSelectionInput
         2 => {
-            let req = match SelectSelectionInputRequest::try_parse_request(
-                request_header(data),
-                &data[4..],
-            ) {
-                Ok(r) => r,
-                Err(_) => {
-                    return crate::xserver::core::build_error_bo(
-                        crate::xserver::core::LENGTH_ERROR,
-                        seq,
-                        0,
-                        138,
-                        2,
-                        state.msb_first,
-                    )
-                }
-            };
+            let req = parse_minor!(SelectSelectionInputRequest, data, state, seq, 138, 2);
             let window = req.window;
             let selection = req.selection;
             let event_mask = req.event_mask.bits();

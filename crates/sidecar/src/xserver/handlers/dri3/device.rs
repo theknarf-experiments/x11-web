@@ -3,11 +3,10 @@
 use tracing::debug;
 
 use super::super::super::client::ClientState;
-use super::super::super::core::*;
+use super::super::parse_minor;
 use super::DRI3_MAJOR_OPCODE;
 use crate::xserver::core::require_len;
 use crate::xserver::reply::ReplyBuf;
-use crate::xserver::request::request_header;
 
 // -----------------------------------------------------------------
 // 6: GetSupportedModifiers (DRI3 1.2)
@@ -60,10 +59,7 @@ pub(crate) fn handle_set_drm_device_in_use(
     require_len!(data, 16, seq, DRI3_MAJOR_OPCODE, minor as u16, bo);
 
     use x11rb_protocol::protocol::dri3::SetDRMDeviceInUseRequest;
-    let req = match SetDRMDeviceInUseRequest::try_parse_request(request_header(data), &data[4..]) {
-        Ok(r) => r,
-        Err(_) => return build_error_bo(LENGTH_ERROR, seq, 0, DRI3_MAJOR_OPCODE, minor as u16, bo),
-    };
+    let req = parse_minor!(SetDRMDeviceInUseRequest, data, state, seq, DRI3_MAJOR_OPCODE, minor);
     let _window = req.window;
     let drm_major = req.drm_major;
     let drm_minor = req.drm_minor;

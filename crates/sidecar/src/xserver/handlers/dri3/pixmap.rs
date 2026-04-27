@@ -6,11 +6,11 @@ use tracing::{debug, warn};
 use super::super::super::client::ClientState;
 use super::super::super::core::*;
 use super::super::super::types::PixmapState;
+use super::super::parse_minor;
 use super::DRI3_MAJOR_OPCODE;
 use crate::framebuffer::Framebuffer;
 use crate::xserver::core::require_len;
 use crate::xserver::reply::ReplyBuf;
-use crate::xserver::request::request_header;
 
 // DRM fourcc codes for YUV formats
 const FOURCC_NV12: u32 = 0x3231564E; // 'NV12'
@@ -333,10 +333,7 @@ pub(crate) fn handle_buffer_from_pixmap(
     require_len!(data, 8, seq, DRI3_MAJOR_OPCODE, 3, bo);
 
     use x11rb_protocol::protocol::dri3::BufferFromPixmapRequest;
-    let req = match BufferFromPixmapRequest::try_parse_request(request_header(data), &data[4..]) {
-        Ok(r) => r,
-        Err(_) => return build_error_bo(LENGTH_ERROR, seq, 0, DRI3_MAJOR_OPCODE, 3, bo),
-    };
+    let req = parse_minor!(BufferFromPixmapRequest, data, state, seq, DRI3_MAJOR_OPCODE, 3u8);
     let pixmap_id = req.pixmap;
     debug!("DRI3 BufferFromPixmap: pid={pixmap_id:#x}");
 
@@ -564,10 +561,7 @@ pub(crate) fn handle_buffers_from_pixmap(
     require_len!(data, 8, seq, DRI3_MAJOR_OPCODE, 8, bo);
 
     use x11rb_protocol::protocol::dri3::BuffersFromPixmapRequest;
-    let req = match BuffersFromPixmapRequest::try_parse_request(request_header(data), &data[4..]) {
-        Ok(r) => r,
-        Err(_) => return build_error_bo(LENGTH_ERROR, seq, 0, DRI3_MAJOR_OPCODE, 8, bo),
-    };
+    let req = parse_minor!(BuffersFromPixmapRequest, data, state, seq, DRI3_MAJOR_OPCODE, 8u8);
     let pixmap_id = req.pixmap;
     debug!("DRI3 BuffersFromPixmap: pid={pixmap_id:#x}");
 

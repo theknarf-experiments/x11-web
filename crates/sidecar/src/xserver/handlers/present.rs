@@ -58,10 +58,9 @@ pub(crate) fn handle_xc_misc_request(state: &mut ClientState, data: &[u8], seq: 
         2 => {
             // GetXIDList: return requested number of individual resource IDs.
             // Prefer recycled (freed) IDs over allocating new sequential ones.
-            let count = match GetXIDListRequest::try_parse_request(request_header(data), &data[4..]) {
-                Ok(r) => r.count,
-                Err(_) => 0,
-            };
+            let count = GetXIDListRequest::try_parse_request(request_header(data), &data[4..])
+                .map(|r| r.count)
+                .unwrap_or(0);
             let ids_to_return = count.min(4096) as usize;
 
             // Collect IDs: first from freed pool, then from sequential allocation
@@ -578,10 +577,9 @@ pub(crate) fn handle_present_request(state: &mut ClientState, data: &[u8], seq: 
         }
         // QueryCapabilities
         4 => {
-            let _target = match QueryCapabilitiesRequest::try_parse_request(request_header(data), &data[4..]) {
-                Ok(r) => r.target,
-                Err(_) => 0,
-            };
+            let _target = QueryCapabilitiesRequest::try_parse_request(request_header(data), &data[4..])
+                .map(|r| r.target)
+                .unwrap_or(0);
             ReplyBuf::fixed(seq, state.msb_first)
                 .set_u32(8, PRESENT_CAPABILITY_ASYNC) // async: we always present asynchronously
                 .build()
