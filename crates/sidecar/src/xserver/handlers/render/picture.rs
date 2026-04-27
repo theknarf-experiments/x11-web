@@ -6,6 +6,7 @@ use x11rb_protocol::protocol::render::{
 };
 use x11rb_protocol::x11_utils::Serialize;
 
+use super::super::parse_minor;
 use super::{
     resolve_source_pixels, PictFilter, PictureState, PICTFORMAT_A1, PICTFORMAT_A8,
     PICTFORMAT_ARGB32, PICTFORMAT_RGB24, PICTFORMAT_XBGR32, PICTFORMAT_XRGB32,

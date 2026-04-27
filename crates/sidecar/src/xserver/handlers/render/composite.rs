@@ -1,5 +1,6 @@
 use tracing::{debug, info};
 
+use super::super::parse_minor;
 use super::{
     composite_pixel, composite_pixel_ca, pict_format_has_alpha, point_in_triangle,
     resolve_source_color, resolve_source_pixels, zero_src_has_no_effect, ClipSnapshot,

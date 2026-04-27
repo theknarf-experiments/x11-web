@@ -1,5 +1,6 @@
 use tracing::debug;
 
+use super::super::parse_minor;
 use super::{
     ConicalGradientState, GradientStop, LinearGradientState, PictFilter, PictureState,
     RadialGradientState, SolidFillState, PICTFORMAT_ARGB32,

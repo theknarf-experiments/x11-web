@@ -1,5 +1,6 @@
 use tracing::debug;
 
+use super::super::parse_minor;
 use super::{pad4, PictFilter};
 use crate::xserver::core::require_len;
 use crate::xserver::request::request_header;

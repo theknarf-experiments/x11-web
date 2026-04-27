@@ -349,13 +349,16 @@ pub(crate) fn handle_image_text16(state: &mut ClientState, req: &ImageText16Requ
 
     if all_basic {
         // Optimization: all chars have high byte 0, delegate to ImageText8
-        let mut fake_data = Vec::with_capacity(16 + str_len);
-        fake_data.extend_from_slice(&data[0..16]);
-        for c in req.string.iter() {
-            fake_data.push(c.byte2);
-        }
-        fake_data[1] = str_len as u8;
-        return handle_image_text8(state, &fake_data);
+        let bytes: Vec<u8> = req.string.iter().map(|c| c.byte2).collect();
+        let req8 = ImageText8Request {
+            drawable: req.drawable,
+            gc: req.gc,
+            x: req.x,
+            y: req.y,
+            string: std::borrow::Cow::Owned(bytes),
+        };
+        let _ = str_len;
+        return handle_image_text8(state, &req8);
     }
 
     // Extended characters present — render with 2-byte codes

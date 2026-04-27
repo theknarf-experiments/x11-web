@@ -16,7 +16,7 @@ pub(crate) fn handle_send_event(state: &mut ClientState, req: &SendEventRequest)
     let event_mask = u32::from(req.event_mask);
 
     // The event data is 32 bytes parsed by x11rb
-    let mut event = req.event.into_owned().to_vec();
+    let mut event: Vec<u8> = req.event.to_vec();
     // Mark as synthetic (bit 7 of the event code)
     event[0] |= 0x80;
 

@@ -15,7 +15,7 @@ use x11rb_protocol::protocol::xproto::{
 // ---------------------------------------------------------------------------
 
 pub(crate) fn handle_reparent_window(state: &mut ClientState, req: &ReparentWindowRequest) -> Vec<u8> {
-    let _seq = state.sequence;
+    let seq = state.sequence;
     let window = req.window;
     let new_parent = req.parent;
     let x = req.x;
@@ -165,12 +165,8 @@ pub(crate) fn handle_reparent_window(state: &mut ClientState, req: &ReparentWind
     // MapWindow on it after the reparent. This generates proper MapNotify events
     // and handles SubstructureRedirect (WM redirect) for the new parent.
     if was_mapped {
-        // Build a synthetic MapWindow request and dispatch it
-        let mut map_data = [0u8; 8];
-        map_data[0] = 8; // MapWindow opcode
-        state.write_u16(&mut map_data, 2, 2); // request length = 2
-        state.write_u32(&mut map_data, 4, window);
-        let map_events = super::map::handle_map_window(state, &map_data, seq);
+        let map_req = x11rb_protocol::protocol::xproto::MapWindowRequest { window };
+        let map_events = super::map::handle_map_window(state, &map_req);
         events.extend_from_slice(&map_events);
     }
 
@@ -1103,7 +1099,7 @@ pub(crate) fn handle_configure_window(state: &mut ClientState, req: &ConfigureWi
 // ---------------------------------------------------------------------------
 
 pub(crate) fn handle_circulate_window(state: &mut ClientState, req: &CirculateWindowRequest) -> Vec<u8> {
-    let _seq = state.sequence;
+    let seq = state.sequence;
     let direction: u8 = req.direction.into(); // 0 = RaiseLowest, 1 = LowerHighest
     let window = req.window;
 

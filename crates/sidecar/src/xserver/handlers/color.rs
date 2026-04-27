@@ -576,7 +576,7 @@ pub(crate) fn handle_free_colors(state: &mut ClientState, req: &FreeColorsReques
     }
 
     let _plane_mask = req.plane_mask;
-    let pixels: Vec<u32> = req.pixels.into_owned();
+    let pixels: Vec<u32> = req.pixels.to_vec();
     let n_pixels = pixels.len();
 
     if let Some(cmap) = state.colormaps.get_mut(&cmap_id) {

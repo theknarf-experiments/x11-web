@@ -628,11 +628,8 @@ pub(crate) fn handle_unmap_window(state: &mut ClientState, req: &UnmapWindowRequ
         .map(|w| w.id)
         .collect();
     for child_id in transient_children {
-        let mut fake_data = [0u8; 8];
-        fake_data[0] = 10; // UnmapWindow opcode
-        state.write_u16(&mut fake_data, 2, 2u16);
-        state.write_u32(&mut fake_data, 4, child_id);
-        let _child_events = handle_unmap_window(state, &fake_data, seq);
+        let unmap_req = UnmapWindowRequest { window: child_id };
+        let _child_events = handle_unmap_window(state, &unmap_req);
     }
 
     // Update _NET_CLIENT_LIST on root

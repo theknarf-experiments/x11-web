@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use tracing::debug;
 
+use super::super::parse_minor;
 use super::{
     composite_pixel, composite_pixel_ca, pad4, pict_format_has_alpha, resolve_source_color,
     ClipSnapshot, GlyphSetState, StoredGlyph, PICTFORMAT_A1, PICTFORMAT_A8, PICTFORMAT_ARGB32,
