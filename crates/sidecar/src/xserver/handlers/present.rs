@@ -8,9 +8,9 @@ use super::super::types::PresentSubscription;
 use crate::xserver::reply::ReplyBuf;
 use crate::xserver::request::request_header;
 use x11rb_protocol::protocol::present::{
-    CompleteKind, CompleteMode, CompleteNotifyEvent, IdleNotifyEvent, NotifyMSCRequest,
-    PixmapRequest as PresentPixmapRequest, QueryCapabilitiesRequest,
-    SelectInputRequest as PresentSelectInputRequest,
+    CompleteKind, CompleteMode, CompleteNotifyEvent, ConfigureNotifyEvent as PresentConfigureNotifyEvent,
+    IdleNotifyEvent, NotifyMSCRequest, PixmapRequest as PresentPixmapRequest,
+    QueryCapabilitiesRequest, SelectInputRequest as PresentSelectInputRequest,
 };
 use x11rb_protocol::protocol::xc_misc::GetXIDListRequest;
 use x11rb_protocol::x11_utils::Serialize;
@@ -75,6 +75,24 @@ const IDLE_NOTIFY_LAYOUT: &[(usize, usize)] = &[
     (20, 4), // serial
     (24, 4), // pixmap
     (28, 4), // idle_fence
+];
+
+/// Wire-field layout for `present::ConfigureNotifyEvent` (48 bytes).
+const CONFIGURE_NOTIFY_LAYOUT: &[(usize, usize)] = &[
+    (2, 2),  // sequence
+    (4, 4),  // length
+    (8, 2),  // event_type
+    (12, 4), // event
+    (16, 4), // window
+    (20, 2), // x (i16)
+    (22, 2), // y (i16)
+    (24, 2), // width
+    (26, 2), // height
+    (28, 2), // off_x (i16)
+    (30, 2), // off_y (i16)
+    (32, 2), // pixmap_width
+    (34, 2), // pixmap_height
+    (36, 4), // pixmap_flags
 ];
 
 pub(crate) fn handle_xc_misc_request(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
@@ -662,29 +680,26 @@ pub(crate) fn send_present_config_notify(
     let seq = state.sequence;
 
     for event_id in subs {
-        // PresentConfigNotify uses the XGE (GenericEvent) wire format.
-        // Full layout is 48 bytes = 32-byte header + 16 bytes extra.
-        // extra_length = (48 - 32) / 4 = 4 words.
-        let mut event = vec![0u8; 48];
-        event[0] = 35; // GenericEvent
-        event[1] = 148; // Present major opcode
-        state.write_u16(&mut event, 2, seq);
-        state.write_u32(&mut event, 4, 4); // extra length in 4-byte words
-        state.write_u16(&mut event, 8, 3); // evtype = ConfigNotify
-                                           // bytes 10-11: pad
-        state.write_u32(&mut event, 12, event_id);
-        state.write_u32(&mut event, 16, window);
-        state.write_i16(&mut event, 20, x);
-        state.write_i16(&mut event, 22, y);
-        state.write_u16(&mut event, 24, width);
-        state.write_u16(&mut event, 26, height);
-        state.write_i16(&mut event, 28, off_x);
-        state.write_i16(&mut event, 30, off_y);
-        // Extended fields (bytes 32-47):
-        state.write_u16(&mut event, 32, pixmap_width);
-        state.write_u16(&mut event, 34, pixmap_height);
-        state.write_u32(&mut event, 36, pixmap_flags);
-        // bytes 40-47: pad (already zero)
-        state.pending_events.push(event);
+        let ev = PresentConfigureNotifyEvent {
+            response_type: GENERIC_EVENT,
+            extension: PRESENT_MAJOR_OPCODE,
+            sequence: seq,
+            length: 4, // extra 4-byte words after the 32-byte header
+            event_type: 3, // ConfigureNotify
+            event: event_id,
+            window,
+            x,
+            y,
+            width,
+            height,
+            off_x,
+            off_y,
+            pixmap_width,
+            pixmap_height,
+            pixmap_flags,
+        };
+        state.pending_events.push(serialize_present_event(
+            &ev, state.msb_first, CONFIGURE_NOTIFY_LAYOUT,
+        ));
     }
 }
