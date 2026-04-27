@@ -483,20 +483,14 @@ fn handle_xim_open(state: &mut ClientState, _data: &[u8]) -> Vec<u8> {
 
 /// Send XIM_SET_EVENT_MASK to the client, requesting key events be forwarded.
 fn send_xim_set_event_mask(state: &mut ClientState, im_id: u16, ic_id: u16) {
-    // XIM_SET_EVENT_MASK:
-    //   major = 37, minor = 0, length = 3 (12 bytes)
-    //   im_id (2), ic_id (2),
+    // XIM_SET_EVENT_MASK: im_id (2), ic_id (2),
     //   forward_event_mask (4) = KeyPressMask | KeyReleaseMask
     //   synchronous_event_mask (4) = 0
-    let mut msg = Vec::with_capacity(16);
-    msg.push(XIM_SET_EVENT_MASK);
-    msg.push(0);
-    msg.extend_from_slice(&3u16.to_le_bytes()); // length in 4-byte units
-    msg.extend_from_slice(&im_id.to_le_bytes());
-    msg.extend_from_slice(&ic_id.to_le_bytes());
-    msg.extend_from_slice(&0x0000_0003u32.to_le_bytes()); // KeyPress | KeyRelease
-    msg.extend_from_slice(&0x0000_0000u32.to_le_bytes()); // no sync events
-
+    let mut payload = im_id.to_le_bytes().to_vec();
+    payload.extend_from_slice(&ic_id.to_le_bytes());
+    payload.extend_from_slice(&0x0000_0003u32.to_le_bytes());
+    payload.extend_from_slice(&0x0000_0000u32.to_le_bytes());
+    let msg = build_xim_reply(XIM_SET_EVENT_MASK, 3, &payload);
     send_xim_reply(state, im_id, &msg);
 }
 
@@ -995,12 +989,7 @@ fn forward_key_event_to_client(state: &mut ClientState, im_id: u16, ic_id: u16, 
     reply_body.extend_from_slice(&data[12..44]);
 
     let length_words = reply_body.len().div_ceil(4) as u16;
-    let mut msg = Vec::with_capacity(4 + reply_body.len());
-    msg.push(XIM_FORWARD_EVENT);
-    msg.push(0);
-    msg.extend_from_slice(&length_words.to_le_bytes());
-    msg.extend_from_slice(&reply_body);
-
+    let msg = build_xim_reply(XIM_FORWARD_EVENT, length_words, &reply_body);
     send_xim_reply(state, im_id, &msg);
 }
 
@@ -1050,12 +1039,7 @@ fn send_xim_commit(state: &mut ClientState, im_id: u16, ic_id: u16, text: &str) 
     body.resize(body.len() + padded_len - text_bytes.len(), 0);
 
     let length_words = body.len().div_ceil(4) as u16;
-    let mut msg = Vec::with_capacity(4 + body.len());
-    msg.push(XIM_COMMIT);
-    msg.push(0);
-    msg.extend_from_slice(&length_words.to_le_bytes());
-    msg.extend_from_slice(&body);
-
+    let msg = build_xim_reply(XIM_COMMIT, length_words, &body);
     send_xim_reply(state, im_id, &msg);
 }
 
@@ -1151,12 +1135,7 @@ pub(crate) fn send_xim_preedit_caret(
     body.extend_from_slice(&style.to_le_bytes());
 
     let length_words = body.len().div_ceil(4) as u16;
-    let mut msg = Vec::with_capacity(4 + body.len());
-    msg.push(XIM_PREEDIT_CARET);
-    msg.push(0);
-    msg.extend_from_slice(&length_words.to_le_bytes());
-    msg.extend_from_slice(&body);
-
+    let msg = build_xim_reply(XIM_PREEDIT_CARET, length_words, &body);
     send_xim_reply(state, im_id, &msg);
 }
 
@@ -1463,15 +1442,10 @@ fn handle_xim_preedit_start_reply(_state: &mut ClientState, data: &[u8]) -> Vec<
 
 /// Start preedit composition for an IC.
 fn send_xim_preedit_start(state: &mut ClientState, im_id: u16, ic_id: u16) {
-    // XIM_PREEDIT_START: major=70, minor=0, length=1
-    //   im_id(2), ic_id(2)
-    let mut msg = Vec::with_capacity(8);
-    msg.push(XIM_PREEDIT_START);
-    msg.push(0);
-    msg.extend_from_slice(&1u16.to_le_bytes()); // length = 1 (4 bytes)
-    msg.extend_from_slice(&im_id.to_le_bytes());
-    msg.extend_from_slice(&ic_id.to_le_bytes());
-
+    // XIM_PREEDIT_START: major=70, minor=0, length=1: im_id(2), ic_id(2)
+    let mut payload = im_id.to_le_bytes().to_vec();
+    payload.extend_from_slice(&ic_id.to_le_bytes());
+    let msg = build_xim_reply(XIM_PREEDIT_START, 1, &payload);
     send_xim_reply(state, im_id, &msg);
 
     // Mark the IC as having an active preedit session.
@@ -1519,26 +1493,16 @@ fn send_xim_preedit_draw(state: &mut ClientState, im_id: u16, ic_id: u16, text: 
     }
 
     let length_words = body.len().div_ceil(4) as u16;
-    let mut msg = Vec::with_capacity(4 + body.len());
-    msg.push(XIM_PREEDIT_DRAW);
-    msg.push(0);
-    msg.extend_from_slice(&length_words.to_le_bytes());
-    msg.extend_from_slice(&body);
-
+    let msg = build_xim_reply(XIM_PREEDIT_DRAW, length_words, &body);
     send_xim_reply(state, im_id, &msg);
 }
 
 /// End preedit composition for an IC.
 fn send_xim_preedit_done(state: &mut ClientState, im_id: u16, ic_id: u16) {
-    // XIM_PREEDIT_DONE: major=74, minor=0, length=1
-    //   im_id(2), ic_id(2)
-    let mut msg = Vec::with_capacity(8);
-    msg.push(XIM_PREEDIT_DONE);
-    msg.push(0);
-    msg.extend_from_slice(&1u16.to_le_bytes()); // length = 1 (4 bytes)
-    msg.extend_from_slice(&im_id.to_le_bytes());
-    msg.extend_from_slice(&ic_id.to_le_bytes());
-
+    // XIM_PREEDIT_DONE: major=74, minor=0, length=1: im_id(2), ic_id(2)
+    let mut payload = im_id.to_le_bytes().to_vec();
+    payload.extend_from_slice(&ic_id.to_le_bytes());
+    let msg = build_xim_reply(XIM_PREEDIT_DONE, 1, &payload);
     send_xim_reply(state, im_id, &msg);
 
     // Mark the IC as no longer having an active preedit session.
