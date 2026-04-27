@@ -35,6 +35,10 @@ const SHAPE_NOTIFY_EVENT: u8 = 64;
 pub(crate) fn handle_shape_request(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
     let minor = data[1];
     debug!("SHAPE minor opcode: {minor}");
+    let bo = state.msb_first;
+    let shape_err = |code: u8, bad_value: u32| {
+        crate::xserver::core::build_error_bo(code, seq, bad_value, 128, minor as u16, bo)
+    };
 
     match minor {
         // 0: QueryVersion
@@ -56,14 +60,7 @@ pub(crate) fn handle_shape_request(state: &mut ClientState, data: &[u8], seq: u1
             // 3=YXBanded).  We don't reorder internally, but we must reject
             // out-of-range values with BadValue per the SHAPE 1.1 spec.
             if ordering > 3 {
-                return crate::xserver::core::build_error_bo(
-                    crate::xserver::core::VALUE_ERROR,
-                    seq,
-                    ordering as u32,
-                    128,
-                    1,
-                    state.msb_first,
-                );
+                return shape_err(crate::xserver::core::VALUE_ERROR, ordering as u32);
             }
             let window_id = req.destination_window;
             let x_offset = req.x_offset;
@@ -107,14 +104,7 @@ pub(crate) fn handle_shape_request(state: &mut ClientState, data: &[u8], seq: u1
                 // None pixmap => reset to default shape
                 None
             } else if !state.pixmaps.contains_key(&pixmap_id) {
-                return crate::xserver::core::build_error_bo(
-                    crate::xserver::core::PIXMAP_ERROR,
-                    seq,
-                    pixmap_id,
-                    128,
-                    2,
-                    state.msb_first,
-                );
+                return shape_err(crate::xserver::core::PIXMAP_ERROR, pixmap_id);
             } else {
                 // Extract shape from pixmap: non-zero pixels form the shape
                 let shape = extract_shape_from_pixmap(state, pixmap_id, x_offset, y_offset);
@@ -171,14 +161,7 @@ pub(crate) fn handle_shape_request(state: &mut ClientState, data: &[u8], seq: u1
                     SHAPE_CLIP => &mut win.clip_shape,
                     SHAPE_INPUT => &mut win.input_shape,
                     _ => {
-                        return crate::xserver::core::build_error_bo(
-                            crate::xserver::core::VALUE_ERROR,
-                            seq,
-                            kind as u32,
-                            128,
-                            4,
-                            state.msb_first,
-                        )
+                        return shape_err(crate::xserver::core::VALUE_ERROR, kind as u32)
                     }
                 };
                 if let Some(rects) = shape {
@@ -325,14 +308,7 @@ pub(crate) fn handle_shape_request(state: &mut ClientState, data: &[u8], seq: u1
 
         _ => {
             debug!("SHAPE: unhandled minor opcode {minor}");
-            crate::xserver::core::build_error_bo(
-                crate::xserver::core::REQUEST_ERROR,
-                seq,
-                minor as u32,
-                128,
-                minor as u16,
-                state.msb_first,
-            )
+            shape_err(crate::xserver::core::REQUEST_ERROR, minor as u32)
         }
     }
 }

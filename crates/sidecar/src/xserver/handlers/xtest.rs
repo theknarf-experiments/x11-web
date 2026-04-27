@@ -10,6 +10,10 @@ use crate::xserver::reply::ReplyBuf;
 /// XTEST (opcode 150)
 pub(crate) fn handle_xtest_request(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
     let minor = data[1];
+    let bo = state.msb_first;
+    let xtest_err = |code: u8, bad_value: u32| {
+        crate::xserver::core::build_error_bo(code, seq, bad_value, 150, minor as u16, bo)
+    };
     match minor {
         0 => {
             // GetVersion
@@ -48,14 +52,7 @@ pub(crate) fn handle_xtest_request(state: &mut ClientState, data: &[u8], seq: u1
             // FakeInput
             // SECURITY: untrusted clients are denied FakeInput (BadAccess)
             if state.trust_level > 0 {
-                return crate::xserver::core::build_error_bo(
-                    crate::xserver::core::ACCESS_ERROR,
-                    seq,
-                    0,
-                    150,
-                    minor as u16,
-                    state.msb_first,
-                );
+                return xtest_err(crate::xserver::core::ACCESS_ERROR, 0);
             }
             require_len!(data, 24, seq, 150, minor as u16, state.msb_first);
             {
@@ -179,14 +176,7 @@ pub(crate) fn handle_xtest_request(state: &mut ClientState, data: &[u8], seq: u1
                     }
                     _ => {
                         warn!("XTEST FakeInput: unknown event type {event_type}");
-                        return crate::xserver::core::build_error_bo(
-                            crate::xserver::core::VALUE_ERROR,
-                            seq,
-                            event_type as u32,
-                            150,
-                            minor as u16,
-                            state.msb_first,
-                        );
+                        return xtest_err(crate::xserver::core::VALUE_ERROR, event_type as u32);
                     }
                 }
             }
@@ -205,14 +195,7 @@ pub(crate) fn handle_xtest_request(state: &mut ClientState, data: &[u8], seq: u1
         }
         _ => {
             debug!("XTEST: unhandled minor opcode {minor}");
-            crate::xserver::core::build_error_bo(
-                crate::xserver::core::REQUEST_ERROR,
-                seq,
-                minor as u32,
-                150,
-                minor as u16,
-                state.msb_first,
-            )
+            xtest_err(crate::xserver::core::REQUEST_ERROR, minor as u32)
         }
     }
 }

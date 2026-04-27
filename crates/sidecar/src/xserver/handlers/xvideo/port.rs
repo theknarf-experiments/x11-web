@@ -17,6 +17,10 @@ pub(crate) fn handle_port_request(
     seq: u16,
     minor: u8,
 ) -> Vec<u8> {
+    let bo = state.msb_first;
+    let xv_err = |code: u8, bad_value: u32| {
+        crate::xserver::core::build_error_bo(code, seq, bad_value, 156, minor as u16, bo)
+    };
     match minor {
         3 => {
             // XvGrabPort
@@ -83,14 +87,7 @@ pub(crate) fn handle_port_request(
                     XV_ATTR_COLORSPACE => ps.colorspace = value.clamp(0, 1),
                     _ => {
                         debug!("XVideo SetPortAttribute: unknown attr {name} (atom={atom})");
-                        return crate::xserver::core::build_error_bo(
-                            crate::xserver::core::MATCH_ERROR,
-                            seq,
-                            atom,
-                            156,
-                            10,
-                            state.msb_first,
-                        );
+                        return xv_err(crate::xserver::core::MATCH_ERROR, atom);
                     }
                 }
                 debug!("XVideo SetPortAttribute: port={port} {name}={value}");
@@ -116,14 +113,7 @@ pub(crate) fn handle_port_request(
                     XV_ATTR_COLORSPACE => ps.colorspace,
                     _ => {
                         debug!("XVideo GetPortAttribute: unknown attr {name} (atom={atom})");
-                        return crate::xserver::core::build_error_bo(
-                            crate::xserver::core::MATCH_ERROR,
-                            seq,
-                            atom,
-                            156,
-                            11,
-                            state.msb_first,
-                        );
+                        return xv_err(crate::xserver::core::MATCH_ERROR, atom);
                     }
                 };
 
@@ -195,14 +185,7 @@ pub(crate) fn handle_port_request(
         }
         _ => {
             debug!("XVideo port: unhandled minor opcode {minor}");
-            crate::xserver::core::build_error_bo(
-                crate::xserver::core::REQUEST_ERROR,
-                seq,
-                minor as u32,
-                156,
-                minor as u16,
-                state.msb_first,
-            )
+            xv_err(crate::xserver::core::REQUEST_ERROR, minor as u32)
         }
     }
 }

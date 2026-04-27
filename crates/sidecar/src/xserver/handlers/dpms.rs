@@ -10,6 +10,10 @@ use crate::xserver::reply::ReplyBuf;
 /// DPMS (opcode 151)
 pub(crate) fn handle_dpms_request(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
     let minor = data[1];
+    let bo = state.msb_first;
+    let dpms_err = |code: u8, bad_value: u32| {
+        crate::xserver::core::build_error_bo(code, seq, bad_value, 151, minor as u16, bo)
+    };
     match minor {
         0 => {
             // GetVersion
@@ -67,26 +71,12 @@ pub(crate) fn handle_dpms_request(state: &mut ClientState, data: &[u8], seq: u16
             let level = u16::from(req.power_level);
             // Per DPMS spec: level must be 0-3 (On, Standby, Suspend, Off)
             if level > 3 {
-                return crate::xserver::core::build_error_bo(
-                    crate::xserver::core::VALUE_ERROR,
-                    seq,
-                    level as u32,
-                    151,
-                    minor as u16,
-                    state.msb_first,
-                );
+                return dpms_err(crate::xserver::core::VALUE_ERROR, level as u32);
             }
             // Per DPMS spec: ForceLevel should fail if DPMS is disabled
             // and the requested level is not DPMSModeOn (0)
             if !state.dpms_enabled && level != 0 {
-                return crate::xserver::core::build_error_bo(
-                    crate::xserver::core::VALUE_ERROR,
-                    seq,
-                    level as u32,
-                    151,
-                    minor as u16,
-                    state.msb_first,
-                );
+                return dpms_err(crate::xserver::core::VALUE_ERROR, level as u32);
             }
             state.dpms_power_level = level;
             debug!("DPMS ForceLevel: level={level}");
@@ -101,14 +91,7 @@ pub(crate) fn handle_dpms_request(state: &mut ClientState, data: &[u8], seq: u16
         }
         _ => {
             debug!("DPMS: unhandled minor opcode {minor}");
-            crate::xserver::core::build_error_bo(
-                crate::xserver::core::REQUEST_ERROR,
-                seq,
-                minor as u32,
-                151,
-                minor as u16,
-                state.msb_first,
-            )
+            dpms_err(crate::xserver::core::REQUEST_ERROR, minor as u32)
         }
     }
 }
