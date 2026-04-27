@@ -256,6 +256,30 @@ fn parse_record_range(data: &[u8]) -> RecordRange {
     }
 }
 
+impl From<&x11rb_protocol::protocol::record::Range> for RecordRange {
+    fn from(r: &x11rb_protocol::protocol::record::Range) -> Self {
+        RecordRange {
+            core_requests: (r.core_requests.first, r.core_requests.last),
+            core_replies: (r.core_replies.first, r.core_replies.last),
+            ext_requests: (
+                r.ext_requests.major.first,
+                r.ext_requests.minor.first as u8,
+                r.ext_requests.minor.last as u8,
+            ),
+            ext_replies: (
+                r.ext_replies.major.first,
+                r.ext_replies.minor.first as u8,
+                r.ext_replies.minor.last as u8,
+            ),
+            delivered_events: (r.delivered_events.first, r.delivered_events.last),
+            device_events: (r.device_events.first, r.device_events.last),
+            errors: (r.errors.first, r.errors.last),
+            client_started: r.client_started,
+            client_died: r.client_died,
+        }
+    }
+}
+
 /// Build a RECORD intercept data reply.
 ///
 /// The RECORD protocol sends intercepted data as X11 replies to the
@@ -342,172 +366,100 @@ pub(crate) fn handle_record_request(state: &mut ClientState, data: &[u8], seq: u
                     state.msb_first,
                 );
             }
-            if data.len() >= 20 {
-                let context_id = u32::from_le_bytes([data[4], data[5], data[6], data[7]]);
-                let element_header = data[8];
-                let num_client_specs =
-                    u32::from_le_bytes([data[12], data[13], data[14], data[15]]) as usize;
-                let num_ranges =
-                    u32::from_le_bytes([data[16], data[17], data[18], data[19]]) as usize;
-
-                // Parse client specs (each 4 bytes)
-                let mut client_specs = Vec::with_capacity(num_client_specs);
-                for i in 0..num_client_specs {
-                    let off = 20 + i * 4;
-                    if off + 4 <= data.len() {
-                        client_specs.push(u32::from_le_bytes([
-                            data[off],
-                            data[off + 1],
-                            data[off + 2],
-                            data[off + 3],
-                        ]));
-                    }
-                }
-
-                // Parse ranges (each 24 bytes, after client specs)
-                let specs_offset = 20 + num_client_specs * 4;
-                let mut ranges = Vec::with_capacity(num_ranges);
-                for i in 0..num_ranges {
-                    let range_off = specs_offset + i * 24;
-                    if range_off + 24 <= data.len() {
-                        ranges.push(parse_record_range(&data[range_off..]));
-                    }
-                }
-
-                debug!(
-                    "RECORD CreateContext: id={context_id:#x} specs={num_client_specs} ranges={num_ranges}"
-                );
-                let ctx = RecordContext {
-                    id: context_id,
-                    enabled: false,
-                    element_header,
-                    ranges,
-                    client_specs,
-                    enable_sequence: 0,
-                };
-                // Insert into shared registry for cross-client interception
-                if let Ok(mut shared) = state.shared_record_contexts.lock() {
-                    shared.insert(
-                        context_id,
-                        super::super::types::SharedRecordEntry {
-                            recording_client_id: state.client_id.clone(),
-                            recording_resource_base: state.resource_id_base,
-                            context: ctx.clone(),
-                            event_tx: state.wm_events_tx.clone(),
-                        },
-                    );
-                }
-                state.record_contexts.insert(context_id, ctx);
-                Vec::new()
-            } else {
-                crate::xserver::core::build_error_bo(
+            use x11rb_protocol::protocol::record::CreateContextRequest;
+            let Ok(req) = CreateContextRequest::try_parse_request(
+                crate::xserver::request::request_header(data),
+                &data[4..],
+            ) else {
+                return crate::xserver::core::build_error_bo(
                     crate::xserver::core::LENGTH_ERROR,
-                    seq,
-                    0,
-                    154,
-                    minor as u16,
-                    state.msb_first,
-                )
+                    seq, 0, 154, minor as u16, state.msb_first,
+                );
+            };
+            let context_id = req.context;
+            let element_header = u8::from(req.element_header);
+            let client_specs: Vec<u32> = req.client_specs.iter().map(|&s| u32::from(s)).collect();
+            let ranges: Vec<RecordRange> = req.ranges.iter().map(RecordRange::from).collect();
+
+            debug!(
+                "RECORD CreateContext: id={context_id:#x} specs={} ranges={}",
+                client_specs.len(), ranges.len()
+            );
+            let ctx = RecordContext {
+                id: context_id,
+                enabled: false,
+                element_header,
+                ranges,
+                client_specs,
+                enable_sequence: 0,
+            };
+            if let Ok(mut shared) = state.shared_record_contexts.lock() {
+                shared.insert(
+                    context_id,
+                    super::super::types::SharedRecordEntry {
+                        recording_client_id: state.client_id.clone(),
+                        recording_resource_base: state.resource_id_base,
+                        context: ctx.clone(),
+                        event_tx: state.wm_events_tx.clone(),
+                    },
+                );
             }
+            state.record_contexts.insert(context_id, ctx);
+            Vec::new()
         }
         2 => {
             // RegisterClients
-            if data.len() >= 20 {
-                let context_id = u32::from_le_bytes([data[4], data[5], data[6], data[7]]);
-                let element_header = data[8];
-                let num_client_specs =
-                    u32::from_le_bytes([data[12], data[13], data[14], data[15]]) as usize;
-                let num_ranges =
-                    u32::from_le_bytes([data[16], data[17], data[18], data[19]]) as usize;
-
-                let mut client_specs = Vec::with_capacity(num_client_specs);
-                for i in 0..num_client_specs {
-                    let off = 20 + i * 4;
-                    if off + 4 <= data.len() {
-                        client_specs.push(u32::from_le_bytes([
-                            data[off],
-                            data[off + 1],
-                            data[off + 2],
-                            data[off + 3],
-                        ]));
-                    }
-                }
-
-                let specs_offset = 20 + num_client_specs * 4;
-                let mut ranges = Vec::with_capacity(num_ranges);
-                for i in 0..num_ranges {
-                    let range_off = specs_offset + i * 24;
-                    if range_off + 24 <= data.len() {
-                        ranges.push(parse_record_range(&data[range_off..]));
-                    }
-                }
-
-                if let Some(ctx) = state.record_contexts.get_mut(&context_id) {
-                    ctx.element_header = element_header;
-                    ctx.ranges.extend(ranges);
-                    ctx.client_specs.extend(client_specs);
-                    // Sync to shared registry
-                    if let Ok(mut shared) = state.shared_record_contexts.lock() {
-                        if let Some(entry) = shared.get_mut(&context_id) {
-                            entry.context = ctx.clone();
-                        }
-                    }
-                }
-                Vec::new()
-            } else {
-                crate::xserver::core::build_error_bo(
+            use x11rb_protocol::protocol::record::RegisterClientsRequest;
+            let Ok(req) = RegisterClientsRequest::try_parse_request(
+                crate::xserver::request::request_header(data),
+                &data[4..],
+            ) else {
+                return crate::xserver::core::build_error_bo(
                     crate::xserver::core::LENGTH_ERROR,
-                    seq,
-                    0,
-                    154,
-                    minor as u16,
-                    state.msb_first,
-                )
+                    seq, 0, 154, minor as u16, state.msb_first,
+                );
+            };
+            let context_id = req.context;
+            let client_specs: Vec<u32> = req.client_specs.iter().map(|&s| u32::from(s)).collect();
+            let ranges: Vec<RecordRange> = req.ranges.iter().map(RecordRange::from).collect();
+            if let Some(ctx) = state.record_contexts.get_mut(&context_id) {
+                ctx.element_header = u8::from(req.element_header);
+                ctx.ranges.extend(ranges);
+                ctx.client_specs.extend(client_specs);
+                if let Ok(mut shared) = state.shared_record_contexts.lock() {
+                    if let Some(entry) = shared.get_mut(&context_id) {
+                        entry.context = ctx.clone();
+                    }
+                }
             }
+            Vec::new()
         }
         3 => {
             // UnregisterClients
-            if data.len() >= 12 {
-                let context_id = u32::from_le_bytes([data[4], data[5], data[6], data[7]]);
-                let num_client_specs =
-                    u32::from_le_bytes([data[8], data[9], data[10], data[11]]) as usize;
-
-                if let Some(ctx) = state.record_contexts.get_mut(&context_id) {
-                    // Remove matching client specs
-                    for i in 0..num_client_specs {
-                        let off = 12 + i * 4;
-                        if off + 4 <= data.len() {
-                            let spec = u32::from_le_bytes([
-                                data[off],
-                                data[off + 1],
-                                data[off + 2],
-                                data[off + 3],
-                            ]);
-                            ctx.client_specs.retain(|&s| s != spec);
-                        }
-                    }
-                    // If no client specs remain, clear ranges too
-                    if ctx.client_specs.is_empty() {
-                        ctx.ranges.clear();
-                    }
-                    // Sync to shared registry
-                    if let Ok(mut shared) = state.shared_record_contexts.lock() {
-                        if let Some(entry) = shared.get_mut(&context_id) {
-                            entry.context = ctx.clone();
-                        }
+            use x11rb_protocol::protocol::record::UnregisterClientsRequest;
+            let Ok(req) = UnregisterClientsRequest::try_parse_request(
+                crate::xserver::request::request_header(data),
+                &data[4..],
+            ) else {
+                return crate::xserver::core::build_error_bo(
+                    crate::xserver::core::LENGTH_ERROR,
+                    seq, 0, 154, minor as u16, state.msb_first,
+                );
+            };
+            if let Some(ctx) = state.record_contexts.get_mut(&req.context) {
+                for &spec in req.client_specs.iter() {
+                    ctx.client_specs.retain(|&s| s != u32::from(spec));
+                }
+                if ctx.client_specs.is_empty() {
+                    ctx.ranges.clear();
+                }
+                if let Ok(mut shared) = state.shared_record_contexts.lock() {
+                    if let Some(entry) = shared.get_mut(&req.context) {
+                        entry.context = ctx.clone();
                     }
                 }
-                Vec::new()
-            } else {
-                crate::xserver::core::build_error_bo(
-                    crate::xserver::core::LENGTH_ERROR,
-                    seq,
-                    0,
-                    154,
-                    minor as u16,
-                    state.msb_first,
-                )
             }
+            Vec::new()
         }
         4 => {
             // GetContext
