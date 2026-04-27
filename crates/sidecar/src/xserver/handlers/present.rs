@@ -8,10 +8,17 @@ use super::super::types::PresentSubscription;
 use crate::xserver::reply::ReplyBuf;
 use crate::xserver::request::request_header;
 use x11rb_protocol::protocol::present::{
-    NotifyMSCRequest, PixmapRequest as PresentPixmapRequest, QueryCapabilitiesRequest,
+    CompleteKind, CompleteMode, CompleteNotifyEvent, IdleNotifyEvent, NotifyMSCRequest,
+    PixmapRequest as PresentPixmapRequest, QueryCapabilitiesRequest,
     SelectInputRequest as PresentSelectInputRequest,
 };
 use x11rb_protocol::protocol::xc_misc::GetXIDListRequest;
+use x11rb_protocol::x11_utils::Serialize;
+
+/// Present major opcode (assigned at QueryExtension time).
+const PRESENT_MAJOR_OPCODE: u8 = 148;
+/// XGE response_type for all Present events.
+const GENERIC_EVENT: u8 = 35;
 
 // Present event mask bits (from the Present extension spec).
 const PRESENT_COMPLETE_NOTIFY_MASK: u32 = 1;
@@ -24,6 +31,51 @@ const PRESENT_OPTION_COPY: u32 = 2;
 
 // Present capability flags.
 const PRESENT_CAPABILITY_ASYNC: u32 = 1;
+
+/// Serialize a Present XGE event and apply MSB byteswapping per its layout.
+///
+/// x11rb serializes in native (little) endian; for MSB clients we walk
+/// the field map and byte-reverse each entry. Each `(offset, size)` pair
+/// describes a multi-byte wire field. For the X11 CARD64 wire format
+/// (two CARD32 words, low first), pass two consecutive 4-byte entries.
+fn serialize_present_event<E: Serialize>(
+    event: &E,
+    msb_first: bool,
+    field_layout: &[(usize, usize)],
+) -> Vec<u8> {
+    let mut buf = Vec::new();
+    event.serialize_into(&mut buf);
+    if msb_first {
+        for &(off, sz) in field_layout {
+            buf[off..off + sz].reverse();
+        }
+    }
+    buf
+}
+
+/// Wire-field layout for `present::CompleteNotifyEvent` (40 bytes).
+const COMPLETE_NOTIFY_LAYOUT: &[(usize, usize)] = &[
+    (2, 2),  // sequence (u16)
+    (4, 4),  // length (u32)
+    (8, 2),  // event_type (u16)
+    (12, 4), // event (u32)
+    (16, 4), // window (u32)
+    (20, 4), // serial (u32)
+    (24, 4), (28, 4), // ust (CARD64 = two CARD32, low first)
+    (32, 4), (36, 4), // msc (CARD64)
+];
+
+/// Wire-field layout for `present::IdleNotifyEvent` (32 bytes).
+const IDLE_NOTIFY_LAYOUT: &[(usize, usize)] = &[
+    (2, 2),  // sequence
+    (4, 4),  // length
+    (8, 2),  // event_type
+    (12, 4), // event
+    (16, 4), // window
+    (20, 4), // serial
+    (24, 4), // pixmap
+    (28, 4), // idle_fence
+];
 
 pub(crate) fn handle_xc_misc_request(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
     let minor = data[1];
@@ -445,27 +497,23 @@ pub(crate) fn handle_present_request(state: &mut ClientState, data: &[u8], seq: 
             let ust = state.server_start.elapsed().as_micros() as u64;
             let msc = state.present_msc;
             for (event_id, _win) in &matching_subs {
-                // GenericEvent format for PresentCompleteNotify (XGE wire format):
-                // 32 bytes header + extra words for UST/MSC fields.
-                // Total = 40 bytes => extra_length = (40 - 32) / 4 = 2 words.
-                let mut event = vec![0u8; 40];
-                event[0] = 35; // GenericEvent
-                event[1] = 148; // Present extension major opcode
-                state.write_u16(&mut event, 2, seq);
-                state.write_u32(&mut event, 4, 2); // extra length in 4-byte words
-                state.write_u16(&mut event, 8, 1); // CompleteNotify event type
-                event[10] = 0; // kind = Pixmap
-                event[11] = if is_copy { 1 } else { 0 }; // mode: 0=Copy, 1=Flip
-                state.write_u32(&mut event, 12, *event_id); // event_id
-                state.write_u32(&mut event, 16, window); // window
-                state.write_u32(&mut event, 20, serial); // serial
-                                                         // UST: 64-bit microseconds since server start
-                state.write_u32(&mut event, 24, (ust & 0xFFFF_FFFF) as u32); // UST low
-                state.write_u32(&mut event, 28, (ust >> 32) as u32); // UST high
-                                                                     // MSC: 64-bit in extra data
-                state.write_u32(&mut event, 32, (msc & 0xFFFF_FFFF) as u32); // MSC low
-                state.write_u32(&mut event, 36, (msc >> 32) as u32); // MSC high
-                state.pending_events.push(event);
+                let ev = CompleteNotifyEvent {
+                    response_type: GENERIC_EVENT,
+                    extension: PRESENT_MAJOR_OPCODE,
+                    sequence: seq,
+                    length: 2, // extra 4-byte words after the 32-byte header
+                    event_type: 1, // CompleteNotify
+                    kind: CompleteKind::PIXMAP,
+                    mode: if is_copy { CompleteMode::COPY } else { CompleteMode::FLIP },
+                    event: *event_id,
+                    window,
+                    serial,
+                    ust,
+                    msc,
+                };
+                state.pending_events.push(serialize_present_event(
+                    &ev, state.msb_first, COMPLETE_NOTIFY_LAYOUT,
+                ));
             }
 
             // Send PresentIdleNotify: the pixmap is no longer in use.
@@ -482,19 +530,21 @@ pub(crate) fn handle_present_request(state: &mut ClientState, data: &[u8], seq: 
                     .collect();
 
                 for event_id in idle_subs {
-                    let mut event = [0u8; 32];
-                    event[0] = 35; // GenericEvent
-                    event[1] = 148; // Present major opcode
-                    state.write_u16(&mut event, 2, seq);
-                    // bytes 4-7: length = 0 (no extra data beyond 32 bytes)
-                    state.write_u16(&mut event, 8, 2); // evtype = IdleNotify
-                                                       // bytes 10-11: pad
-                    state.write_u32(&mut event, 12, event_id); // event id
-                    state.write_u32(&mut event, 16, window); // window
-                    state.write_u32(&mut event, 20, serial); // serial
-                    state.write_u32(&mut event, 24, pixmap); // pixmap
-                    state.write_u32(&mut event, 28, idle_fence); // idle_fence (0 if none)
-                    state.pending_events.push(event.to_vec());
+                    let ev = IdleNotifyEvent {
+                        response_type: GENERIC_EVENT,
+                        extension: PRESENT_MAJOR_OPCODE,
+                        sequence: seq,
+                        length: 0, // no extra data beyond the 32-byte header
+                        event_type: 2, // IdleNotify
+                        event: event_id,
+                        window,
+                        serial,
+                        pixmap,
+                        idle_fence,
+                    };
+                    state.pending_events.push(serialize_present_event(
+                        &ev, state.msb_first, IDLE_NOTIFY_LAYOUT,
+                    ));
                 }
             }
 
@@ -530,26 +580,23 @@ pub(crate) fn handle_present_request(state: &mut ClientState, data: &[u8], seq: 
             let msc = state.present_msc;
             let ust = state.server_start.elapsed().as_micros() as u64;
             for (event_id, _win) in matching_subs {
-                // GenericEvent for PresentCompleteNotify (XGE wire format):
-                // 40 bytes total => extra_length = 2 words.
-                let mut event = vec![0u8; 40];
-                event[0] = 35; // GenericEvent
-                event[1] = 148; // Present extension major opcode
-                state.write_u16(&mut event, 2, seq);
-                state.write_u32(&mut event, 4, 2); // extra length in 4-byte words
-                state.write_u16(&mut event, 8, 1); // CompleteNotify event type
-                event[10] = 1; // kind = MSC
-                event[11] = 0; // mode
-                state.write_u32(&mut event, 12, event_id);
-                state.write_u32(&mut event, 16, window);
-                state.write_u32(&mut event, 20, serial);
-                // UST: 64-bit microseconds since server start
-                state.write_u32(&mut event, 24, (ust & 0xFFFF_FFFF) as u32);
-                state.write_u32(&mut event, 28, (ust >> 32) as u32);
-                // MSC: 64-bit
-                state.write_u32(&mut event, 32, (msc & 0xFFFF_FFFF) as u32);
-                state.write_u32(&mut event, 36, (msc >> 32) as u32);
-                state.pending_events.push(event);
+                let ev = CompleteNotifyEvent {
+                    response_type: GENERIC_EVENT,
+                    extension: PRESENT_MAJOR_OPCODE,
+                    sequence: seq,
+                    length: 2,
+                    event_type: 1, // CompleteNotify
+                    kind: CompleteKind::NOTIFY_MSC,
+                    mode: CompleteMode::COPY,
+                    event: event_id,
+                    window,
+                    serial,
+                    ust,
+                    msc,
+                };
+                state.pending_events.push(serialize_present_event(
+                    &ev, state.msb_first, COMPLETE_NOTIFY_LAYOUT,
+                ));
             }
             Vec::new()
         }
