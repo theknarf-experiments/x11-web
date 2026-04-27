@@ -345,6 +345,12 @@ pub(crate) fn build_record_status_reply(
 
 pub(crate) fn handle_record_request(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
     let minor = data[1];
+    let bad_length = || {
+        crate::xserver::core::build_error_bo(
+            crate::xserver::core::LENGTH_ERROR,
+            seq, 0, 154, minor as u16, state.msb_first,
+        )
+    };
     match minor {
         0 => {
             // QueryVersion
@@ -371,10 +377,7 @@ pub(crate) fn handle_record_request(state: &mut ClientState, data: &[u8], seq: u
                 crate::xserver::request::request_header(data),
                 &data[4..],
             ) else {
-                return crate::xserver::core::build_error_bo(
-                    crate::xserver::core::LENGTH_ERROR,
-                    seq, 0, 154, minor as u16, state.msb_first,
-                );
+                return bad_length();
             };
             let context_id = req.context;
             let element_header = u8::from(req.element_header);
@@ -414,10 +417,7 @@ pub(crate) fn handle_record_request(state: &mut ClientState, data: &[u8], seq: u
                 crate::xserver::request::request_header(data),
                 &data[4..],
             ) else {
-                return crate::xserver::core::build_error_bo(
-                    crate::xserver::core::LENGTH_ERROR,
-                    seq, 0, 154, minor as u16, state.msb_first,
-                );
+                return bad_length();
             };
             let context_id = req.context;
             let client_specs: Vec<u32> = req.client_specs.iter().map(|&s| u32::from(s)).collect();
@@ -441,10 +441,7 @@ pub(crate) fn handle_record_request(state: &mut ClientState, data: &[u8], seq: u
                 crate::xserver::request::request_header(data),
                 &data[4..],
             ) else {
-                return crate::xserver::core::build_error_bo(
-                    crate::xserver::core::LENGTH_ERROR,
-                    seq, 0, 154, minor as u16, state.msb_first,
-                );
+                return bad_length();
             };
             if let Some(ctx) = state.record_contexts.get_mut(&req.context) {
                 for &spec in req.client_specs.iter() {
@@ -468,10 +465,7 @@ pub(crate) fn handle_record_request(state: &mut ClientState, data: &[u8], seq: u
                 crate::xserver::request::request_header(data),
                 &data[4..],
             ) else {
-                return crate::xserver::core::build_error_bo(
-                    crate::xserver::core::LENGTH_ERROR,
-                    seq, 0, 154, minor as u16, state.msb_first,
-                );
+                return bad_length();
             };
             let context_id = req.context;
             {
@@ -542,10 +536,7 @@ pub(crate) fn handle_record_request(state: &mut ClientState, data: &[u8], seq: u
                 crate::xserver::request::request_header(data),
                 &data[4..],
             ) else {
-                return crate::xserver::core::build_error_bo(
-                    crate::xserver::core::LENGTH_ERROR,
-                    seq, 0, 154, minor as u16, state.msb_first,
-                );
+                return bad_length();
             };
             let context_id = req.context;
             {
@@ -581,10 +572,7 @@ pub(crate) fn handle_record_request(state: &mut ClientState, data: &[u8], seq: u
                 crate::xserver::request::request_header(data),
                 &data[4..],
             ) else {
-                return crate::xserver::core::build_error_bo(
-                    crate::xserver::core::LENGTH_ERROR,
-                    seq, 0, 154, minor as u16, state.msb_first,
-                );
+                return bad_length();
             };
             let context_id = req.context;
             let (enable_seq, element_header) = state
@@ -614,10 +602,7 @@ pub(crate) fn handle_record_request(state: &mut ClientState, data: &[u8], seq: u
                 crate::xserver::request::request_header(data),
                 &data[4..],
             ) else {
-                return crate::xserver::core::build_error_bo(
-                    crate::xserver::core::LENGTH_ERROR,
-                    seq, 0, 154, minor as u16, state.msb_first,
-                );
+                return bad_length();
             };
             let context_id = req.context;
             state.record_contexts.remove(&context_id);
