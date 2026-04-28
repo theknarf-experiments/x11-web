@@ -1,13 +1,14 @@
 //! XKB keymap operations: GetMap, SetMap, GetKbdByName, key name/sym tables.
 
 use super::super::super::client::{is_lock_key, ClientState};
+use super::super::parse_minor;
 use super::{
     KB_LOCK, MAX_GROUPS, MAX_KEY_CODE, MIN_KEY_CODE, MODIFIER_KEYS, N_KEYS, SA_LOCK_GROUP,
     SA_LOCK_MODS, SA_SET_GROUP, SA_SET_MODS,
 };
-use crate::xserver::core::require_len;
-use tracing::debug;
 use crate::xserver::reply::ReplyBuf;
+use tracing::debug;
+use x11rb_protocol::x11_utils::Serialize;
 
 /// Build an XKB GetMap reply with full sections: KeyTypes, KeySyms,
 /// KeyActions, KeyBehaviors, VirtualMods, ExplicitComponents,
@@ -365,273 +366,155 @@ pub(crate) fn build_xkb_get_map_reply(state: &mut ClientState, seq: u16) -> Vec<
     reply.build()
 }
 
-/// Handle XKB SetMap request: allow clients to change key type assignments
-/// and symbol mappings.
+/// Handle XKB SetMap request: allow clients to change key type assignments,
+/// symbol mappings, key actions, behaviors, vmods, explicit flags, modmap and
+/// vmod-map. Parses via the typed `xkb::SetMapRequest`.
 pub(crate) fn handle_xkb_set_map(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
-    require_len!(data, 36, seq, 136, data[1] as u16, state.msb_first);
+    use super::super::super::client::{
+        XkbAction, XkbKTMapEntry, XkbKeyBehavior, XkbKeyType, XkbModsWire,
+    };
+    use x11rb_protocol::protocol::xkb::{MapPart, SetMapRequest};
 
-    let present = state.read_u16(data, 8);
-    let _flags = state.read_u16(data, 10);
-    let _min_key_code = data[12];
-    let _max_key_code = data[13];
-    let first_type = data[14];
-    let n_types = data[15];
-    let first_key_sym = data[16];
-    let _n_key_syms = data[17];
-    // totalActs at 18-19
-    let first_key_act = data[20];
-    let n_key_acts = data[21];
-    // firstKeyBehavior, nKeyBehaviors at 22-23
-    let first_key_behavior = data[22];
-    let n_key_behaviors = data[23];
-    // firstKeyExplicit, nKeyExplicit at 24-25
-    // firstModMapKey, nModMapKeys at 26-27
-    // firstVModMapKey, nVModMapKeys at 28-29
-    // virtualMods at 30-31
+    let req = parse_minor!(SetMapRequest, data, state, seq, 136, data[1] as u16);
+    let aux = req.values.into_owned();
+    let mut present: u16 = 0;
 
-    let mut offset = 36;
-
-    // Parse KeyTypes if present (bit 0)
-    if present & 0x01 != 0 && n_types > 0 {
-        use super::super::super::client::{XkbKTMapEntry, XkbKeyType, XkbModsWire};
-        for type_idx in first_type..first_type.wrapping_add(n_types) {
-            if offset + 8 > data.len() {
-                break;
-            }
-            let mods_mask = data[offset];
-            let mods_mods = data[offset + 1];
-            // vmods at offset+2..4
-            let num_levels = data[offset + 4];
-            let n_map_entries = data[offset + 5] as usize;
-            let has_preserve = data[offset + 6] != 0;
-            offset += 8; // XkbKeyTypeWireDesc
-
-            let mut map = Vec::with_capacity(n_map_entries);
-            for _ in 0..n_map_entries {
-                if offset + 8 > data.len() {
-                    break;
-                }
-                let active = data[offset] != 0;
-                let entry_mask = data[offset + 1];
-                let level = data[offset + 2];
-                let entry_mods = data[offset + 3];
-                let entry_vmods = state.read_u16(data, offset + 4);
-                map.push(XkbKTMapEntry {
-                    active,
-                    mods_mask: entry_mask,
-                    level,
-                    mods_mods: entry_mods,
-                    mods_vmods: entry_vmods,
-                });
-                offset += 8;
-            }
-
-            let mut preserve = Vec::new();
-            if has_preserve {
-                for _ in 0..n_map_entries {
-                    if offset + 4 > data.len() {
-                        break;
-                    }
-                    preserve.push(XkbModsWire {
-                        mask: data[offset],
-                        real_mods: data[offset + 1],
-                        vmods: state.read_u16(data, offset + 2),
-                    });
-                    offset += 4;
-                }
-            }
-
+    if let Some(types) = aux.types {
+        present |= u16::from(MapPart::KEY_TYPES);
+        let count = types.len();
+        for (i, t) in types.into_iter().enumerate() {
+            let type_idx = req.first_type.wrapping_add(i as u8);
+            let map: Vec<XkbKTMapEntry> = t
+                .entries
+                .iter()
+                .map(|e| XkbKTMapEntry {
+                    active: true,
+                    mods_mask: u16::from(e.real_mods) as u8,
+                    level: e.level,
+                    mods_mods: u16::from(e.real_mods) as u8,
+                    mods_vmods: u16::from(e.virtual_mods),
+                })
+                .collect();
+            let preserve: Vec<XkbModsWire> = t
+                .preserve_entries
+                .iter()
+                .map(|e| XkbModsWire {
+                    mask: u16::from(e.real_mods) as u8,
+                    real_mods: u16::from(e.real_mods) as u8,
+                    vmods: u16::from(e.virtual_mods),
+                })
+                .collect();
             state.xkb_key_types.insert(
                 type_idx,
                 XkbKeyType {
-                    mods_mask,
-                    mods_mods,
-                    num_levels,
+                    mods_mask: u16::from(t.mask) as u8,
+                    mods_mods: u16::from(t.real_mods) as u8,
+                    num_levels: t.num_levels,
                     map,
                     preserve,
                 },
             );
         }
-        debug!("SetMap: stored {n_types} key types starting at {first_type}");
+        debug!("SetMap: stored {count} key types starting at {}", req.first_type);
     }
 
-    // Parse KeySyms if present (bit 1)
-    if present & 0x02 != 0 {
-        let mut kc = first_key_sym;
-        while offset + 8 <= data.len() {
-            let _group_info = data[offset + 4];
-            let _width = data[offset + 5];
-            let n_syms = state.read_u16(data, offset + 6) as usize;
-            offset += 8;
-
-            if n_syms > 0 && offset + n_syms * 4 <= data.len() {
-                let mut syms = Vec::with_capacity(n_syms);
-                for i in 0..n_syms {
-                    syms.push(state.read_u32(data, offset + i * 4));
-                }
-                state.custom_keymap.insert(kc, syms);
-                offset += n_syms * 4;
-            }
-
+    if let Some(syms) = aux.syms {
+        present |= u16::from(MapPart::KEY_SYMS);
+        let mut kc = req.first_key_sym;
+        for sm in syms {
+            state.custom_keymap.insert(kc, sm.syms);
             kc = kc.wrapping_add(1);
             if kc == 0 {
                 break;
             }
         }
-        debug!("SetMap: updated keysym mappings starting at keycode {first_key_sym}");
+        debug!("SetMap: updated keysym mappings starting at keycode {}", req.first_key_sym);
     }
 
-    // Parse KeyActions if present (bit 2)
-    if present & 0x04 != 0 && n_key_acts > 0 {
-        use super::super::super::client::XkbAction;
-        // Read per-key nActs array
-        let n_acts_start = offset;
-        let mut per_key_counts = Vec::with_capacity(n_key_acts as usize);
-        for i in 0..n_key_acts as usize {
-            if n_acts_start + i < data.len() {
-                per_key_counts.push(data[n_acts_start + i]);
-            } else {
-                per_key_counts.push(0);
-            }
-        }
-        offset += n_key_acts as usize;
-        // Pad to 4-byte boundary
-        offset = (offset + 3) & !3;
-        // Parse action records (8 bytes each)
-        for (i, &count) in per_key_counts.iter().enumerate() {
-            let kc = first_key_act.wrapping_add(i as u8);
-            let mut actions = Vec::with_capacity(count as usize);
-            for _ in 0..count {
-                if offset + 8 > data.len() {
-                    break;
-                }
-                let mut raw = [0u8; 8];
-                raw.copy_from_slice(&data[offset..offset + 8]);
-                actions.push(XkbAction { raw });
-                offset += 8;
-            }
+    if let Some(key_actions) = aux.key_actions {
+        present |= u16::from(MapPart::KEY_ACTIONS);
+        let total: usize = key_actions.actions_count.iter().map(|c| *c as usize).sum();
+        let mut act_iter = key_actions.actions.into_iter();
+        for (i, &count) in key_actions.actions_count.iter().enumerate() {
+            let kc = req.first_key_action.wrapping_add(i as u8);
+            let actions: Vec<XkbAction> = (0..count)
+                .filter_map(|_| act_iter.next().map(|a| XkbAction { raw: a.serialize() }))
+                .collect();
             if !actions.is_empty() {
                 state.xkb_key_actions.insert(kc, actions);
             }
         }
-        debug!(
-            "SetMap: stored {} key actions starting at {first_key_act}",
-            per_key_counts.iter().map(|c| *c as usize).sum::<usize>()
-        );
+        debug!("SetMap: stored {total} key actions starting at {}", req.first_key_action);
     }
 
-    // Parse KeyBehaviors if present (bit 3)
-    if present & 0x08 != 0 && n_key_behaviors > 0 {
-        use super::super::super::client::XkbKeyBehavior;
-        for i in 0..n_key_behaviors as usize {
-            if offset + 4 > data.len() {
-                break;
-            }
-            let kc = first_key_behavior.wrapping_add(i as u8);
-            let behavior_type = data[offset];
-            let behavior_data = data[offset + 1];
-            // bytes 2-3 are padding
-            if behavior_type != 0 {
+    if let Some(behaviors) = aux.behaviors {
+        present |= u16::from(MapPart::KEY_BEHAVIORS);
+        let count = behaviors.len();
+        for b in behaviors {
+            let common = b.behavior.as_common();
+            if common.type_ != 0 {
                 state.xkb_key_behaviors.insert(
-                    kc,
+                    b.keycode,
                     XkbKeyBehavior {
-                        behavior_type,
-                        data: behavior_data,
+                        behavior_type: common.type_,
+                        data: common.data,
                     },
                 );
             }
-            offset += 4;
         }
-        debug!("SetMap: stored {n_key_behaviors} key behaviors starting at {first_key_behavior}");
+        debug!("SetMap: stored {count} key behaviors");
     }
 
-    // Parse VirtualMods if present (bit 4)
-    if present & 0x10 != 0 {
-        let vmods_mask = state.read_u16(data, 30);
-        let n_vmods = vmods_mask.count_ones() as usize;
-        for i in 0..n_vmods {
-            if offset + 1 > data.len() {
-                break;
-            }
-            // Find which vmod index this corresponds to
-            let mut vmod_idx = 0u8;
-            let mut count = 0;
-            for bit in 0..16u16 {
-                if vmods_mask & (1 << bit) != 0 {
-                    if count == i {
-                        vmod_idx = bit as u8;
-                        break;
-                    }
-                    count += 1;
+    if let Some(vmods) = aux.vmods {
+        present |= u16::from(MapPart::VIRTUAL_MODS);
+        let mask = u16::from(req.virtual_mods);
+        let mut iter = vmods.into_iter();
+        for bit in 0..16u8 {
+            if mask & (1u16 << bit) != 0 {
+                if let Some(b) = iter.next() {
+                    state.xkb_vmod_bindings[bit as usize] = b;
                 }
             }
-            state.xkb_vmod_bindings[vmod_idx as usize] = data[offset];
-            offset += 1;
         }
-        // Pad to 4-byte boundary
-        offset = (offset + 3) & !3;
-        debug!("SetMap: stored {n_vmods} virtual modifier bindings");
+        debug!("SetMap: stored virtual modifier bindings (mask={mask:#06x})");
     }
 
-    // Parse Explicit if present (bit 5)
-    if present & 0x20 != 0 {
-        let first_key_explicit = data[24];
-        let n_key_explicit = data[25] as usize;
-        for i in 0..n_key_explicit {
-            if offset + 2 > data.len() {
-                break;
+    if let Some(explicit) = aux.explicit {
+        present |= u16::from(MapPart::EXPLICIT_COMPONENTS);
+        let count = explicit.len();
+        for e in explicit {
+            let flags = u8::from(e.explicit);
+            if flags != 0 {
+                state.xkb_explicit.insert(e.keycode, flags);
             }
-            let kc = first_key_explicit.wrapping_add(i as u8);
-            let explicit_flags = data[offset];
-            if explicit_flags != 0 {
-                state.xkb_explicit.insert(kc, explicit_flags);
-            }
-            offset += 2; // keycode (implicit) + explicit byte, padded to 2
         }
-        // Pad to 4-byte boundary
-        offset = (offset + 3) & !3;
-        debug!("SetMap: stored {n_key_explicit} explicit flags");
+        debug!("SetMap: stored {count} explicit flags");
     }
 
-    // Parse ModMap if present (bit 6)
-    if present & 0x40 != 0 {
-        let first_mod_map_key = data[26];
-        let n_mod_map_keys = data[27] as usize;
-        for i in 0..n_mod_map_keys {
-            if offset + 2 > data.len() {
-                break;
-            }
-            let kc = first_mod_map_key.wrapping_add(i as u8);
-            let mods = data[offset];
+    if let Some(modmap) = aux.modmap {
+        present |= u16::from(MapPart::MODIFIER_MAP);
+        let count = modmap.len();
+        for m in modmap {
+            let mods = u16::from(m.mods) as u8;
             if mods != 0 {
-                state.xkb_modmap.insert(kc, mods);
+                state.xkb_modmap.insert(m.keycode, mods);
             }
-            offset += 2;
         }
-        // Pad to 4-byte boundary
-        offset = (offset + 3) & !3;
-        debug!("SetMap: stored {n_mod_map_keys} modifier map entries");
+        debug!("SetMap: stored {count} modifier map entries");
     }
 
-    // Parse VModMap if present (bit 7)
-    if present & 0x80 != 0 {
-        let first_vmod_map_key = data[28];
-        let n_vmod_map_keys = data[29] as usize;
-        for i in 0..n_vmod_map_keys {
-            if offset + 4 > data.len() {
-                break;
+    if let Some(vmodmap) = aux.vmodmap {
+        present |= u16::from(MapPart::VIRTUAL_MOD_MAP);
+        let count = vmodmap.len();
+        for v in vmodmap {
+            let bits = u16::from(v.vmods);
+            if bits != 0 {
+                state.xkb_vmodmap.insert(v.keycode, bits);
             }
-            let kc = first_vmod_map_key.wrapping_add(i as u8);
-            let vmods = state.read_u16(data, offset + 2);
-            if vmods != 0 {
-                state.xkb_vmodmap.insert(kc, vmods);
-            }
-            offset += 4;
         }
-        debug!("SetMap: stored {n_vmod_map_keys} virtual modifier map entries");
+        debug!("SetMap: stored {count} virtual modifier map entries");
     }
 
-    let _ = offset;
     debug!("SetMap: present=0x{present:04x} fully processed");
 
     // Send XkbMapNotify if client subscribed.
