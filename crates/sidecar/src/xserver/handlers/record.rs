@@ -306,27 +306,19 @@ pub(crate) fn build_record_data_reply(
     server_time: u32,
     intercepted_seq: u16,
 ) -> Vec<u8> {
+    use crate::xserver::reply::ReplyBuf;
     let data_len = intercepted_data.len();
     let padded = (data_len + 3) & !3;
-    let extra_words = padded / 4;
-    let mut reply = vec![0u8; 32 + padded];
-
-    reply[0] = 1; // Reply
-    reply[1] = category;
-    reply[2..4].copy_from_slice(&enable_seq.to_le_bytes());
-    reply[4..8].copy_from_slice(&(extra_words as u32).to_le_bytes());
-    reply[8] = element_header;
-    // client_swapped = 0 at bytes 12-15 (already zero)
-    // xid_base = 0 at bytes 16-19 (already zero)
-    reply[20..24].copy_from_slice(&server_time.to_le_bytes());
-    reply[24..26].copy_from_slice(&intercepted_seq.to_le_bytes());
-    // bytes 26-31: padding (already zero)
-
-    if !intercepted_data.is_empty() {
-        reply[32..32 + data_len].copy_from_slice(intercepted_data);
-    }
-
-    reply
+    // RECORD intentionally writes everything LE regardless of the client's
+    // byte order — the client_swapped field at offset 12 signals which it is.
+    let mut reply = ReplyBuf::with_extra(enable_seq, padded, false)
+        .set_data_byte(category)
+        .set_u8(8, element_header)
+        // client_swapped @ 12, xid_base @ 16 stay zero
+        .set_u32(20, server_time)
+        .set_u16(24, intercepted_seq);
+    reply.buf_mut()[32..32 + data_len].copy_from_slice(intercepted_data);
+    reply.build()
 }
 
 /// Build a StartOfData or EndOfData reply (no intercepted data payload).

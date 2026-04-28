@@ -780,19 +780,16 @@ pub(crate) fn build_screen_saver_on_event(state: &ClientState) -> Vec<u8> {
 // ---------------------------------------------------------------------------
 
 pub(crate) fn handle_list_hosts(state: &ClientState, _req: &ListHostsRequest) -> Vec<u8> {
+    use x11rb_protocol::protocol::xproto::Host as XprotoHost;
+    use x11rb_protocol::x11_utils::Serialize;
     let seq = state.sequence;
-    // Build host list from access_hosts
     let mut host_entries = Vec::new();
     for host in &state.access_hosts {
-        // Each host entry: family(1) + pad(1) + address_length(2) + address(padded)
-        let addr_len = host.address.len();
-        let padded = (addr_len + 3) & !3;
-        let mut entry = vec![0u8; 4 + padded];
-        entry[0] = host.family;
-        entry[2] = (addr_len & 0xFF) as u8;
-        entry[3] = ((addr_len >> 8) & 0xFF) as u8;
-        entry[4..4 + addr_len].copy_from_slice(&host.address);
-        host_entries.extend_from_slice(&entry);
+        XprotoHost {
+            family: host.family.into(),
+            address: host.address.clone(),
+        }
+        .serialize_into(&mut host_entries);
     }
 
     let extra_padded = (host_entries.len() + 3) & !3;

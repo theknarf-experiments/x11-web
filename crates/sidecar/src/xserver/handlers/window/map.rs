@@ -218,8 +218,8 @@ pub(crate) fn handle_map_window(state: &mut ClientState, req: &MapWindowRequest)
             } else {
                 1u32
             };
-            let mut wm_state_data = vec![0u8; 8];
-            wm_state_data[0..4].copy_from_slice(&wm_state_val.to_le_bytes());
+            let mut wm_state_data = wm_state_val.to_le_bytes().to_vec();
+            wm_state_data.extend_from_slice(&[0; 4]); // icon_window = None
             win.properties.insert(
                 wm_state_atom,
                 PropertyValue {

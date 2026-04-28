@@ -61,46 +61,28 @@ pub(crate) enum GlxReply {
 }
 
 impl GlxReply {
-    /// Serialize to wire bytes.
+    /// Serialize to wire bytes. GLX always writes LE on the wire (it's a
+    /// pre-byteswap-aware protocol; clients adapt themselves).
     pub(crate) fn encode(self, seq: u16) -> Vec<u8> {
+        use crate::xserver::reply::ReplyBuf;
         match self {
-            GlxReply::Empty => {
-                let mut buf = [0u8; 32];
-                buf[0] = 1;
-                buf[2..4].copy_from_slice(&seq.to_le_bytes());
-                buf.to_vec()
-            }
+            GlxReply::Empty => ReplyBuf::fixed(seq, false).build(),
 
-            GlxReply::Scalar(value) => {
-                let mut buf = [0u8; 32];
-                buf[0] = 1;
-                buf[2..4].copy_from_slice(&seq.to_le_bytes());
-                buf[8..12].copy_from_slice(&value.to_le_bytes()); // retval
-                buf.to_vec()
-            }
+            GlxReply::Scalar(value) => ReplyBuf::fixed(seq, false)
+                .set_u32(8, value)
+                .build(),
 
-            GlxReply::SingleValue(bytes) => {
-                let mut buf = [0u8; 32];
-                buf[0] = 1;
-                buf[2..4].copy_from_slice(&seq.to_le_bytes());
-                buf[8..8 + bytes.len()].copy_from_slice(&bytes); // retval
-                buf[12..16].copy_from_slice(&1u32.to_le_bytes()); // size = 1
-                // length = 0 — NO extra data
-                buf.to_vec()
-            }
+            GlxReply::SingleValue(bytes) => ReplyBuf::fixed(seq, false)
+                .set_bytes(8, &bytes)
+                .set_u32(12, 1) // size = 1
+                .build(),
 
             GlxReply::Values { count, data } | GlxReply::Bytes { count, data } => {
                 let padded = (data.len() + 3) & !3;
-                let extra_words = padded / 4;
-                let mut buf = vec![0u8; 32 + padded];
-                buf[0] = 1;
-                buf[2..4].copy_from_slice(&seq.to_le_bytes());
-                buf[4..8].copy_from_slice(&(extra_words as u32).to_le_bytes()); // length
-                buf[12..16].copy_from_slice(&count.to_le_bytes()); // size
-                if !data.is_empty() {
-                    buf[32..32 + data.len()].copy_from_slice(&data);
-                }
-                buf
+                let mut buf = ReplyBuf::with_extra(seq, padded, false)
+                    .set_u32(12, count);
+                buf.buf_mut()[32..32 + data.len()].copy_from_slice(&data);
+                buf.build()
             }
         }
     }
@@ -165,67 +147,48 @@ impl GlxReply {
 // GLX management reply builders (non-single-command replies)
 // ---------------------------------------------------------------------------
 
-/// MakeCurrent / MakeContextCurrent reply.
-/// contextTag in retval[8..12], length=0.
+/// MakeCurrent / MakeContextCurrent reply: contextTag in retval[8..12].
 pub(crate) fn make_current_reply(seq: u16, context_tag: u32) -> Vec<u8> {
-    let mut buf = [0u8; 32];
-    buf[0] = 1;
-    buf[2..4].copy_from_slice(&seq.to_le_bytes());
-    buf[8..12].copy_from_slice(&context_tag.to_le_bytes());
-    buf.to_vec()
+    crate::xserver::reply::ReplyBuf::fixed(seq, false)
+        .set_u32(8, context_tag)
+        .build()
 }
 
-/// IsDirect reply.
-/// is_direct at byte[1] (not byte[8]!), length=0.
+/// IsDirect reply: is_direct at byte[1] (not byte[8]!).
 pub(crate) fn is_direct_reply(seq: u16, is_direct: bool) -> Vec<u8> {
-    let mut buf = [0u8; 32];
-    buf[0] = 1;
-    buf[1] = if is_direct { 1 } else { 0 };
-    buf[2..4].copy_from_slice(&seq.to_le_bytes());
-    buf.to_vec()
+    crate::xserver::reply::ReplyBuf::fixed(seq, false)
+        .set_data_byte(if is_direct { 1 } else { 0 })
+        .build()
 }
 
-/// QueryVersion reply.
-/// major at [8..12], minor at [12..16], length=0.
+/// QueryVersion reply: major at [8..12], minor at [12..16].
 pub(crate) fn query_version_reply(seq: u16, major: u32, minor: u32) -> Vec<u8> {
-    let mut buf = [0u8; 32];
-    buf[0] = 1;
-    buf[2..4].copy_from_slice(&seq.to_le_bytes());
-    buf[8..12].copy_from_slice(&major.to_le_bytes());
-    buf[12..16].copy_from_slice(&minor.to_le_bytes());
-    buf.to_vec()
+    crate::xserver::reply::ReplyBuf::fixed(seq, false)
+        .set_u32(8, major)
+        .set_u32(12, minor)
+        .build()
 }
 
 /// GetDrawableAttributes / QueryContext reply.
 /// numAttribs at [8..12], key-value pairs at [32..].
 pub(crate) fn attrib_pairs_reply(seq: u16, pairs: &[(u32, u32)]) -> Vec<u8> {
-    let num_attribs = pairs.len() as u32;
     let extra_bytes = pairs.len() * 8;
-    let mut buf = vec![0u8; 32 + extra_bytes];
-    buf[0] = 1;
-    buf[2..4].copy_from_slice(&seq.to_le_bytes());
-    buf[4..8].copy_from_slice(&((extra_bytes / 4) as u32).to_le_bytes());
-    buf[8..12].copy_from_slice(&num_attribs.to_le_bytes());
+    let mut buf = crate::xserver::reply::ReplyBuf::with_extra(seq, extra_bytes, false)
+        .set_u32(8, pairs.len() as u32);
     for (i, &(key, val)) in pairs.iter().enumerate() {
-        let off = 32 + i * 8;
-        buf[off..off + 4].copy_from_slice(&key.to_le_bytes());
-        buf[off + 4..off + 8].copy_from_slice(&val.to_le_bytes());
+        buf = buf.set_u32(32 + i * 8, key).set_u32(32 + i * 8 + 4, val);
     }
-    buf
+    buf.build()
 }
 
 /// AreTexturesResident reply.
 /// all_resident in retval[8..12], per-texture residences in extra data.
 pub(crate) fn are_textures_resident_reply(seq: u16, all_resident: bool, residences: &[u8]) -> Vec<u8> {
-    let n = residences.len();
-    let extra_words = n.div_ceil(4);
-    let mut buf = vec![0u8; 32 + extra_words * 4];
-    buf[0] = 1;
-    buf[2..4].copy_from_slice(&seq.to_le_bytes());
-    buf[4..8].copy_from_slice(&(extra_words as u32).to_le_bytes());
-    buf[8..12].copy_from_slice(&(if all_resident { 1u32 } else { 0u32 }).to_le_bytes());
-    buf[32..32 + n].copy_from_slice(residences);
-    buf
+    let extra_padded = residences.len().div_ceil(4) * 4;
+    let mut buf = crate::xserver::reply::ReplyBuf::with_extra(seq, extra_padded, false)
+        .set_u32(8, if all_resident { 1 } else { 0 });
+    buf.buf_mut()[32..32 + residences.len()].copy_from_slice(residences);
+    buf.build()
 }
 
 /// GLX query string reply builder.
@@ -235,17 +198,11 @@ pub(crate) fn are_textures_resident_reply(seq: u16, all_resident: bool, residenc
 /// The string MUST include the null terminator in `n` (Xorg convention).
 pub(crate) fn build_glx_string_reply(seq: u16, string: &[u8]) -> Vec<u8> {
     // Include null terminator — Mesa allocates exactly n bytes without adding '\0'.
-    let n = (string.len() + 1) as u32;
-    let padded = ((n as usize) + 3) & !3;
-    let mut reply = vec![0u8; 32 + padded];
-    reply[0] = 1;
-    reply[2..4].copy_from_slice(&seq.to_le_bytes());
-    reply[4..8].copy_from_slice(&((padded / 4) as u32).to_le_bytes());
-    // [8..12] = pad, leave as zero
-    reply[12..16].copy_from_slice(&n.to_le_bytes());
-    if !string.is_empty() {
-        reply[32..32 + string.len()].copy_from_slice(string);
-    }
-    // Null terminator at [32 + string.len()] is already 0 from vec![0u8; ...]
-    reply
+    let n = string.len() + 1;
+    let padded = (n + 3) & !3;
+    let mut reply = crate::xserver::reply::ReplyBuf::with_extra(seq, padded, false)
+        .set_u32(12, n as u32);
+    reply.buf_mut()[32..32 + string.len()].copy_from_slice(string);
+    // Null terminator at [32 + string.len()] is already 0 from ReplyBuf init.
+    reply.build()
 }
