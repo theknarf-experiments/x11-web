@@ -2073,7 +2073,12 @@ test.describe("XTS X Test Suite", () => {
 // suite (~1000 binaries across 17 categories). The goal is to drive
 // these to passing — they are the source of truth for X11 wire-protocol
 // correctness. Failures here are tracked as real X server bugs.
+//
+// Each `XTS TET: <category>` test is independent (own bash invocation,
+// only touches its own X11 connections). With per-worker sidecars they
+// can safely run in parallel — opt-in via parallel mode for this block.
 test.describe("XTS TET-based protocol conformance", () => {
+	test.describe.configure({ mode: "parallel" });
 	// Discover all XTS binaries available in the container
 	test("XTS: discover available test binaries", async ({ sidecarContainer }) => {
 		test.setTimeout(60_000);

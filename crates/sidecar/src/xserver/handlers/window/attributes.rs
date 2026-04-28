@@ -212,6 +212,33 @@ pub(crate) fn handle_get_window_attributes(
 
     let bit_gravity = state.bit_gravity.get(&wid).copied().unwrap_or(0);
     let win_gravity = state.win_gravity.get(&wid).copied().unwrap_or(1);
+    // Per X11 spec: map_state is one of
+    //   0 IsUnmapped   (this window is unmapped)
+    //   1 IsUnviewable (this window is mapped but some ancestor is unmapped)
+    //   2 IsViewable   (this window and all its ancestors are mapped)
+    let map_state: u8 = if !win.mapped {
+        0
+    } else {
+        // Walk parents (root is implicitly mapped; bail at root or missing).
+        let mut cur = win.parent;
+        let mut viewable = true;
+        for _ in 0..256 {
+            if cur == 0 || cur == state.root_window {
+                break;
+            }
+            match state.windows.get(&cur) {
+                Some(p) => {
+                    if !p.mapped {
+                        viewable = false;
+                        break;
+                    }
+                    cur = p.parent;
+                }
+                None => break,
+            }
+        }
+        if viewable { 2 } else { 1 }
+    };
     let mut reply = ReplyBuf::with_extra(seq, 12, state.msb_first)
         .set_data_byte(win.backing_store)
         .set_u32(8, win.visual) // visual (4 bytes)
@@ -230,7 +257,7 @@ pub(crate) fn handle_get_window_attributes(
         .set_u32(20, win.backing_pixel) // backing_pixel
         .set_u8(24, if win.save_under { 1 } else { 0 })
         .set_u8(25, 1) // map_is_installed = true
-        .set_u8(26, if win.mapped { 2 } else { 0 }) // map_state: Viewable or Unmapped
+        .set_u8(26, map_state) // map_state: see above
         .set_u8(27, if win.override_redirect { 1 } else { 0 })
         .set_u32(28, cmap) // colormap
         .set_u32(32, win.event_mask | remote_masks) // all_event_masks
