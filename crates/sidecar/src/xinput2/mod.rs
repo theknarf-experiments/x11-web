@@ -10,7 +10,7 @@
 
 use x11rb_protocol::protocol::xinput as xi;
 
-use crate::xserver::core::{write_u16_bo, write_u32_bo};
+use crate::xserver::core::write_u32_bo;
 
 mod device;
 mod events;
@@ -121,12 +121,9 @@ pub const AXIS_SCROLL_H: u16 = 3;
 /// xserver convention).
 #[allow(dead_code)]
 fn xi_reply_header(seq: u16, xi_reply_type: u8, length_units: u32, msb_first: bool) -> Vec<u8> {
-    let mut buf = vec![0u8; 32 + (length_units as usize) * 4];
-    buf[0] = 1; // X_Reply
-    buf[1] = xi_reply_type;
-    write_u16_bo(&mut buf, 2, seq, msb_first);
-    write_u32_bo(&mut buf, 4, length_units, msb_first);
-    buf
+    crate::xserver::reply::ReplyBuf::with_extra(seq, (length_units as usize) * 4, msb_first)
+        .set_data_byte(xi_reply_type)
+        .build()
 }
 
 /// Serialize any x11rb XInput value with a 32-byte header, then patch

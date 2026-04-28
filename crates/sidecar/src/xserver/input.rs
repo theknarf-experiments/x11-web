@@ -1266,13 +1266,9 @@ pub(crate) fn build_x11_input_event(
                         );
                     }
                     // Window doesn't support WM_DELETE_WINDOW -- destroy it directly
-                    let destroy_data = {
-                        let mut d = [0u8; 8];
-                        d[0] = 4; // DestroyWindow opcode
-                        state.write_u16(&mut d, 2, 2u16);
-                        state.write_u32(&mut d, 4, top_level);
-                        d
-                    };
+                    use x11rb_protocol::protocol::xproto::DestroyWindowRequest;
+                    let (bufs, _) = DestroyWindowRequest { window: top_level }.serialize();
+                    let destroy_data: Vec<u8> = bufs[0].to_vec();
                     return super::handle_request(state, &destroy_data);
                 }
             }

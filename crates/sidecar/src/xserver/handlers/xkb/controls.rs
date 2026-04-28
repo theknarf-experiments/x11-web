@@ -7,9 +7,7 @@ use super::{
     XKB_SLOW_KEYS_MASK,
 };
 use crate::xserver::core::require_len;
-use crate::xserver::core::{
-    read_i16_bo as read_i16, read_u16_bo as read_u16, read_u32_bo as read_u32,
-};
+use crate::xserver::core::{read_i16_bo as read_i16, read_u16_bo as read_u16};
 use tracing::debug;
 use crate::xserver::reply::ReplyBuf;
 
@@ -167,87 +165,63 @@ pub(crate) fn build_xkb_get_controls_reply(
     reply.build()
 }
 
-/// Handle XKB SetControls request.
+/// Handle XKB SetControls request via the typed `xkb::SetControlsRequest`.
 pub(crate) fn handle_xkb_set_controls(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
-    require_len!(data, 92, seq, 136, data[1] as u16, state.msb_first);
+    use super::super::parse_minor;
+    use x11rb_protocol::protocol::xkb::SetControlsRequest;
 
+    let req = parse_minor!(SetControlsRequest, data, state, seq, 136, data[1] as u16);
+    let change_ctrls = u32::from(req.change_controls);
     let enabled_ctrls_before = state.xkb_state.controls.enabled_ctrls;
-
-    // Read all values upfront to avoid borrow conflicts
-    let msb = state.msb_first;
-    let change_ctrls = read_u32(data, 8, msb);
-    let repeat_delay = read_u16(data, 24, msb);
-    let repeat_interval = read_u16(data, 26, msb);
-    let slow_keys_delay = read_u16(data, 28, msb);
-    let debounce_delay = read_u16(data, 30, msb);
-    let mk_delay = read_u16(data, 32, msb);
-    let mk_interval = read_u16(data, 34, msb);
-    let mk_time_to_max = read_u16(data, 36, msb);
-    let mk_max_speed = read_u16(data, 38, msb);
-    let mk_curve = read_i16(data, 40, msb);
-    let ax_timeout = read_u16(data, 44, msb);
-    let ax_options = read_u32(data, 48, msb);
-    let enable_ctrls = read_u32(data, 56, msb);
-    let disable_ctrls = read_u32(data, 60, msb);
-
     let ctrls = &mut state.xkb_state.controls;
 
-    // Byte 12: mouseKeysDfltBtn
     if change_ctrls & XKB_MOUSE_KEYS_MASK != 0 {
-        ctrls.mk_dflt_btn = data[12];
+        ctrls.mk_dflt_btn = req.mouse_keys_dflt_btn;
     }
 
-    // Byte 13: numGroups
-    let new_groups = data[13];
-    if (1..=4).contains(&new_groups) {
-        ctrls.num_groups = new_groups;
+    if (1..=4).contains(&req.groups_wrap) {
+        ctrls.num_groups = req.groups_wrap;
     }
 
-    // RepeatKeys controls
     if change_ctrls & XKB_REPEAT_KEYS_MASK != 0 {
-        if repeat_delay > 0 {
-            ctrls.repeat_delay = repeat_delay;
+        if req.repeat_delay > 0 {
+            ctrls.repeat_delay = req.repeat_delay;
         }
-        if repeat_interval > 0 {
-            ctrls.repeat_interval = repeat_interval;
+        if req.repeat_interval > 0 {
+            ctrls.repeat_interval = req.repeat_interval;
         }
     }
 
-    // SlowKeys
     if change_ctrls & XKB_SLOW_KEYS_MASK != 0 {
-        ctrls.slow_keys_delay = slow_keys_delay;
+        ctrls.slow_keys_delay = req.slow_keys_delay;
     }
-
-    // BounceKeys
     if change_ctrls & XKB_BOUNCE_KEYS_MASK != 0 {
-        ctrls.debounce_delay = debounce_delay;
+        ctrls.debounce_delay = req.debounce_delay;
     }
 
-    // MouseKeys
     if change_ctrls & XKB_MOUSE_KEYS_MASK != 0 {
-        ctrls.mk_delay = mk_delay;
-        ctrls.mk_interval = mk_interval;
-        ctrls.mk_time_to_max = mk_time_to_max;
-        ctrls.mk_max_speed = mk_max_speed;
-        ctrls.mk_curve = mk_curve;
+        ctrls.mk_delay = req.mouse_keys_delay;
+        ctrls.mk_interval = req.mouse_keys_interval;
+        ctrls.mk_time_to_max = req.mouse_keys_time_to_max;
+        ctrls.mk_max_speed = req.mouse_keys_max_speed;
+        ctrls.mk_curve = req.mouse_keys_curve;
     }
 
-    // AccessX settings
     if change_ctrls
         & (XKB_ACCESS_X_KEYS_MASK | XKB_ACCESS_X_TIMEOUT_MASK | XKB_ACCESS_X_FEEDBACK_MASK)
         != 0
     {
-        ctrls.ax_timeout = ax_timeout;
-        ctrls.ax_options = ax_options & 0xFFFF;
+        ctrls.ax_timeout = req.access_x_timeout;
+        ctrls.ax_options = u32::from(u16::from(req.access_x_options));
     }
 
-    // Enabled controls bitmask
+    let enable_ctrls = u32::from(req.enabled_controls);
+    let disable_ctrls = u32::from(req.affect_enabled_controls) & !enable_ctrls;
     ctrls.enabled_ctrls = (ctrls.enabled_ctrls | enable_ctrls) & !disable_ctrls;
     ctrls.enabled_ctrls &= XKB_ALL_BOOLEAN_CTRLS_MASK;
 
-    // Per-key repeat bitmap (32 bytes at offset 64)
-    if change_ctrls & XKB_REPEAT_KEYS_MASK != 0 && data.len() >= 96 {
-        ctrls.per_key_repeat.copy_from_slice(&data[64..96]);
+    if change_ctrls & XKB_REPEAT_KEYS_MASK != 0 {
+        ctrls.per_key_repeat.copy_from_slice(&req.per_key_repeat[..]);
     }
 
     debug!(
@@ -255,7 +229,6 @@ pub(crate) fn handle_xkb_set_controls(state: &mut ClientState, data: &[u8], seq:
         ctrls.enabled_ctrls, ctrls.repeat_delay, ctrls.repeat_interval
     );
 
-    // Send XkbControlsNotify if client subscribed.
     super::maybe_send_xkb_controls_notify(state, change_ctrls, enabled_ctrls_before);
 
     Vec::new()

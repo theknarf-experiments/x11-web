@@ -233,80 +233,50 @@ pub(crate) fn build_xkb_get_compat_map_reply(
     reply.build()
 }
 
-/// Parse and apply a SetCompatMap request.
-///
-/// Wire layout (bytes):
-///   0-1   major/minor opcode
-///   2-3   request length
-///   4-5   deviceSpec (u16)
-///   6     pad
-///   7     recomputeActions (BOOL)
-///   8     truncateSI (BOOL)
-///   9     groups (CARD8) — group compat bitmask (bits 0-3)
-///  10-11  firstSI (CARD16)
-///  12-13  nSI (CARD16)
-///  14-15  pad
-///  [16..] SI entries (16 bytes each), then group compat (4 bytes per group bit)
+/// Parse and apply a SetCompatMap request via the typed `xkb::SetCompatMapRequest`.
 pub(crate) fn handle_xkb_set_compat_map(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
-    if data.len() < 16 {
-        debug!("XKB SetCompatMap: request too short ({} bytes)", data.len());
-        return Vec::new();
-    }
+    use x11rb_protocol::protocol::xkb::SetCompatMapRequest;
+    use x11rb_protocol::x11_utils::Serialize;
 
-    let recompute = data[7] != 0;
-    let truncate = data[8] != 0;
-    let groups = data[9];
-    let first_si = state.read_u16(data, 10) as usize;
-    let n_si = state.read_u16(data, 12) as usize;
+    let req = match SetCompatMapRequest::try_parse_request(
+        crate::xserver::request::request_header(data),
+        &data[4..],
+    ) {
+        Ok(r) => r,
+        Err(_) => {
+            debug!("XKB SetCompatMap: parse error");
+            return Vec::new();
+        }
+    };
 
+    let recompute = req.recompute_actions;
+    let truncate = req.truncate_si;
+    let groups = u8::from(req.groups);
+    let first_si = req.first_si as usize;
+    let n_si = req.si.len();
     debug!(
         "XKB SetCompatMap: recompute={recompute} truncate={truncate} \
          groups={groups:#04x} firstSI={first_si} nSI={n_si}"
     );
 
-    // Parse SI entries (16 bytes each)
-    let si_start = 16;
-    let si_end = si_start + n_si * 16;
-    if data.len() < si_end {
-        debug!(
-            "XKB SetCompatMap: not enough data for {} SI entries (need {} bytes, have {})",
-            n_si,
-            si_end,
-            data.len()
-        );
-        return Vec::new();
-    }
+    let new_entries: Vec<XkbSymInterpretation> = req
+        .si
+        .iter()
+        .map(|si| XkbSymInterpretation {
+            sym: si.sym,
+            mods: u16::from(si.mods) as u8,
+            match_op: si.match_,
+            virtual_mod: u8::from(si.virtual_mod),
+            flags: si.flags,
+            action: si.action.serialize(),
+        })
+        .collect();
 
-    let mut new_entries = Vec::with_capacity(n_si);
-    for i in 0..n_si {
-        let base = si_start + i * 16;
-        let sym = state.read_u32(data, base);
-        let mods = data[base + 4];
-        let match_op = data[base + 5];
-        let virtual_mod = data[base + 6];
-        let flags = data[base + 7];
-        let mut action = [0u8; 8];
-        action.copy_from_slice(&data[base + 8..base + 16]);
-
-        new_entries.push(XkbSymInterpretation {
-            sym,
-            mods,
-            match_op,
-            virtual_mod,
-            flags,
-            action,
-        });
-    }
-
-    // Apply SI entries to the compat map
     if truncate {
-        // Replace entire list starting at firstSI
         state.xkb_compat_si.truncate(first_si);
         state.xkb_compat_si.extend(new_entries);
     } else {
-        // Insert/replace starting at firstSI
         let end = first_si + n_si;
-        // Extend if needed
         while state.xkb_compat_si.len() < end {
             state.xkb_compat_si.push(XkbSymInterpretation {
                 sym: 0,
@@ -322,29 +292,25 @@ pub(crate) fn handle_xkb_set_compat_map(state: &mut ClientState, data: &[u8]) ->
         }
     }
 
-    // Parse group compat entries (4 bytes per group)
-    let mut offset = si_end;
+    // Apply per-group compat entries (one ModDef per set bit in `groups`).
+    let mut group_iter = req.group_maps.iter();
     for g in 0..4u8 {
         if groups & (1 << g) != 0 {
-            if offset + 4 > data.len() {
-                debug!("XKB SetCompatMap: not enough data for group {g} compat");
-                break;
+            if let Some(gm) = group_iter.next() {
+                state.xkb_group_compat[g as usize] = XkbGroupCompat {
+                    mods: u16::from(gm.mask) as u8,
+                    real_mods: u16::from(gm.real_mods) as u8,
+                    vmods: u16::from(gm.vmods),
+                };
             }
-            state.xkb_group_compat[g as usize] = XkbGroupCompat {
-                mods: data[offset],
-                real_mods: data[offset + 1],
-                vmods: ((data[offset + 2] as u16) << 8) | (data[offset + 3] as u16),
-            };
-            offset += 4;
         }
     }
 
-    // Recompute key→action mappings if requested
     if recompute {
         recompute_compat_actions(state);
     }
 
-    Vec::new() // void request
+    Vec::new()
 }
 
 /// Recompute per-key actions from the compat map.
