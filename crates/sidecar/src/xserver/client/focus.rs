@@ -147,9 +147,13 @@ impl ClientState {
         }
     }
 
-    /// Helper to send a single focus event if the window has FocusChangeMask selected.
+    /// Helper to send a single focus event if the window has FocusChangeMask
+    /// selected. Per X11 spec §12.1, FocusIn/FocusOut events are delivered
+    /// only to clients that selected `FocusChangeMask` on the affected
+    /// window — root is no exception (XTS catches us if we push to root
+    /// unconditionally).
     fn send_focus_event(&mut self, event_type: u8, detail: u8, window: u32, bo: bool, seq: u16) {
-        if self.window_selects(window, EventMask::FOCUS_CHANGE) || window == self.root_window {
+        if self.window_selects(window, EventMask::FOCUS_CHANGE) {
             let event = serialize_event(
                 &FocusInEvent {
                     response_type: event_type,
