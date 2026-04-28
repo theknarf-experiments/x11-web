@@ -8,11 +8,10 @@
  *   import { test, expect } from "./fixtures";
  */
 
-import { exec, execSync, spawn } from "node:child_process";
+import { execSync, spawn } from "node:child_process";
 import * as fs from "node:fs";
 import * as http from "node:http";
 import * as path from "node:path";
-import * as os from "node:os";
 import {
 	type Locator,
 	type Page,
@@ -29,22 +28,20 @@ const SCRIPTS_DIR = path.join(E2E_DIR, "scripts");
 const SERVE_BIN = path.join(E2E_DIR, "node_modules", ".bin", "serve");
 
 // ---------------------------------------------------------------------------
-// Container state (shared across all tests in a single worker)
+// Per-worker container state
 // ---------------------------------------------------------------------------
 //
-// Playwright respawns the worker process after each test failure. Without
-// container reuse this would burn one Docker network + container trio per
-// failure and exhaust the subnet pool within a couple of dozen failures.
-// We use:
-//   - A FIXED-NAME Docker network created idempotently via `docker network`
-//     (testcontainers' `Network` class generates UUIDs and can't be reused).
-//   - `.withReuse()` on each container so the second worker's setup attaches
-//     to the existing one instead of building/starting a fresh copy.
-//   - A FIXED frontend port + lockfile so workers reuse a single `serve`
-//     process rather than spawning one per worker.
-const SHARED_NETWORK = "x11web-shared-network";
-const STATE_FILE = path.join(os.tmpdir(), "x11web-test-state.json");
-type SharedState = { backendPort: number; frontendPort: number };
+// Each Playwright worker process gets its own (backend, sidecar, frontend
+// `serve`) trio so tests can run in parallel without colliding on the X
+// server, atom table, dock UI, etc. The frontend build itself is shared
+// across workers (produced once by global-setup.ts); the runtime backend
+// WS URL is passed per-page via a `?ws=` query param baked into
+// `frontendUrl` below — see `useBackendSocket.ts`.
+//
+// Every worker uses its own private Docker network (so the alias `backend`
+// resolves to *its* backend) named after the Playwright worker index.
+const WORKER_INDEX = process.env.TEST_WORKER_INDEX ?? "0";
+const WORKER_NETWORK = `x11web-worker-${WORKER_INDEX}-${process.pid}`;
 
 let backendContainer: StartedTestContainer;
 let sidecarContainer: StartedTestContainer;
@@ -60,16 +57,16 @@ async function ensureSetup() {
 	return setupPromise;
 }
 
-function ensureSharedNetwork(): void {
+function ensureWorkerNetwork(): void {
 	try {
-		execSync(`docker network inspect ${SHARED_NETWORK}`, { stdio: "pipe" });
+		execSync(`docker network inspect ${WORKER_NETWORK}`, { stdio: "pipe" });
 	} catch {
-		execSync(`docker network create ${SHARED_NETWORK}`, { stdio: "pipe" });
+		execSync(`docker network create ${WORKER_NETWORK}`, { stdio: "pipe" });
 	}
 }
 
 async function doSetup() {
-	ensureSharedNetwork();
+	ensureWorkerNetwork();
 
 	backendContainer = await GenericContainer.fromDockerfile(
 		PROJECT_ROOT,
@@ -78,18 +75,19 @@ async function doSetup() {
 		.build("x11-web-backend-test", { deleteOnExit: false })
 		.then((image) =>
 			image
-				.withNetworkMode(SHARED_NETWORK)
+				.withNetworkMode(WORKER_NETWORK)
 				.withNetworkAliases("backend")
 				.withExposedPorts(3001)
 				.withWaitStrategy(
 					Wait.forHttp("/health", 3001).forStatusCode(200),
 				)
-				.withReuse()
 				.start(),
 		);
 
 	backendPort = backendContainer.getMappedPort(3001);
-	console.log(`Backend running at localhost:${backendPort}`);
+	console.log(
+		`[worker ${WORKER_INDEX}] Backend running at localhost:${backendPort}`,
+	);
 
 	sidecarContainer = await GenericContainer.fromDockerfile(
 		PROJECT_ROOT,
@@ -98,7 +96,7 @@ async function doSetup() {
 		.build("x11-web-sidecar-test", { deleteOnExit: false })
 		.then((image) =>
 			image
-				.withNetworkMode(SHARED_NETWORK)
+				.withNetworkMode(WORKER_NETWORK)
 				.withNetworkAliases("sidecar")
 				.withHostname("x11web")
 				// Privileged mode lets apps that use Linux user-namespaces for
@@ -107,7 +105,7 @@ async function doSetup() {
 				.withPrivilegedMode()
 				.withEnvironment({
 					BACKEND_URL: "ws://backend:3001/ws/sidecar",
-					SIDECAR_NAME: "test-sidecar",
+					SIDECAR_NAME: `test-sidecar-${WORKER_INDEX}`,
 					DISPLAY_NUMBER: "99",
 					// Set DISPLAY too — many tests run subprocess.run([...])
 					// inside python that doesn't propagate explicit env, so
@@ -117,56 +115,26 @@ async function doSetup() {
 					NO_AT_BRIDGE: "1",
 				})
 				.withWaitStrategy(Wait.forLogMessage(/Connected to backend/))
-				.withReuse()
 				.start(),
 		);
 
-	console.log("Sidecar connected to backend");
+	console.log(`[worker ${WORKER_INDEX}] Sidecar connected to backend`);
 
-	frontendPort = await ensureFrontendServer(backendPort);
-	console.log(`Frontend running at http://localhost:${frontendPort}`);
+	frontendPort = await spawnFrontendServer();
+	console.log(
+		`[worker ${WORKER_INDEX}] Frontend running at http://localhost:${frontendPort}`,
+	);
 	setupDone = true;
 }
 
 /**
- * Build the frontend (idempotent — the build dir survives) and ensure a
- * `serve` process is running. If a previous worker started one and it's
- * still alive, reuse its port via the lockfile. Otherwise build + spawn a
- * fresh one and persist the port for future workers.
+ * Spawn a fresh `serve` process for this worker against the prebuilt
+ * `frontend/dist` (built once by `global-setup.ts`). Returns the bound
+ * port. The runtime WS URL is supplied to each browser page via the
+ * `?ws=...` query param baked into `frontendUrl`.
  */
-async function ensureFrontendServer(backend: number): Promise<number> {
-	if (fs.existsSync(STATE_FILE)) {
-		try {
-			const state = JSON.parse(fs.readFileSync(STATE_FILE, "utf8")) as SharedState;
-			const res = await fetch(`http://localhost:${state.frontendPort}`).catch(() => null);
-			if (res?.ok && state.backendPort === backend) {
-				return state.frontendPort;
-			}
-		} catch {
-			// stale or malformed; fall through to fresh build
-		}
-	}
-
-	const wsUrl = `ws://localhost:${backend}/ws/frontend`;
-	await new Promise<void>((resolve, reject) => {
-		exec(
-			`VITE_WS_URL=${wsUrl} pnpm run build`,
-			{ cwd: FRONTEND_DIR },
-			(error, _stdout, stderr) => {
-				if (error) {
-					console.error("Frontend build failed:", stderr);
-					reject(error);
-				} else {
-					resolve();
-				}
-			},
-		);
-	});
-
+async function spawnFrontendServer(): Promise<number> {
 	const port = await findFreePort();
-	// Detach so the serve process survives across worker restarts. The
-	// global-teardown hook kills it via the `pkill -f 'serve dist -l'`
-	// pattern at the end of the run.
 	const child = spawn(SERVE_BIN, ["dist", "-l", `${port}`, "--no-clipboard"], {
 		cwd: FRONTEND_DIR,
 		detached: true,
@@ -191,16 +159,13 @@ async function ensureFrontendServer(backend: number): Promise<number> {
 			}
 		}, 200);
 	});
-
-	const state: SharedState = { backendPort: backend, frontendPort: port };
-	fs.writeFileSync(STATE_FILE, JSON.stringify(state));
 	return port;
 }
 
 async function teardownAll() {
-	// The frontend serve process and the reused containers/network are
-	// owned by the test session, not this worker. Final cleanup happens
-	// in global-teardown.ts via the testcontainers label and pkill.
+	// Per-worker containers are torn down by testcontainers' Ryuk on session
+	// exit; the per-worker network is removed by global-teardown.ts via the
+	// `x11web-worker-*` prefix match.
 	setupDone = false;
 	setupPromise = null;
 }
@@ -229,16 +194,21 @@ export const test = base.extend<{}, X11Fixtures>({
 			await ensureSetup();
 			await use(sidecarContainer);
 		},
-		// First-time setup builds two Dockerfiles and a frontend bundle —
-		// always more than the per-test 60s budget. Subsequent worker
-		// restarts re-attach via withReuse() so this only matters once
-		// per session.
+		// First-time setup builds two Dockerfiles per worker — always more
+		// than the per-test 60s budget. Cached image layers from previous
+		// runs make subsequent setups much faster.
 		{ scope: "worker", timeout: 600_000 },
 	],
 	frontendUrl: [
 		async ({}, use) => {
 			await ensureSetup();
-			await use(`http://localhost:${frontendPort}`);
+			// Bake the per-worker backend WS URL into the URL as a query
+			// param; the frontend bundle picks it up at runtime so workers
+			// can share one prebuilt `dist`.
+			const wsUrl = `ws://localhost:${backendPort}/ws/frontend`;
+			await use(
+				`http://localhost:${frontendPort}/?ws=${encodeURIComponent(wsUrl)}`,
+			);
 		},
 		{ scope: "worker", timeout: 600_000 },
 	],

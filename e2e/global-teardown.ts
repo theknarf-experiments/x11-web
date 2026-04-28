@@ -6,9 +6,6 @@
  */
 
 import { execSync } from "node:child_process";
-import * as fs from "node:fs";
-import * as os from "node:os";
-import * as path from "node:path";
 
 function run(cmd: string) {
 	try {
@@ -19,16 +16,9 @@ function run(cmd: string) {
 }
 
 export default function globalTeardown() {
-	// Drop the shared-state lockfile and shared network used by fixtures.ts
-	// for cross-worker container reuse.
-	try {
-		fs.unlinkSync(path.join(os.tmpdir(), "x11web-test-state.json"));
-	} catch {
-		/* not present */
-	}
-	// Stop all containers created by testcontainers (includes backend,
-	// sidecar, and Ryuk).  The label filter is reliable regardless of
-	// whether the image was tagged or referenced by hash.
+	// Stop all containers created by testcontainers (includes per-worker
+	// backend, sidecar, and Ryuk).  The label filter is reliable regardless
+	// of whether the image was tagged or referenced by hash.
 	const containerIds = (() => {
 		try {
 			return execSync(
@@ -46,13 +36,26 @@ export default function globalTeardown() {
 		}
 	}
 
-	// Kill any orphaned `serve` processes spawned from e2e
+	// Kill any orphaned `serve` processes spawned from e2e (one per worker).
 	run("pkill -f 'serve dist -l .* --no-clipboard' || true");
 
-	// Drop the shared network reused across worker restarts (fine to fail
-	// if other containers are still attached — prune handles the rest).
-	run("docker network rm x11web-shared-network");
+	// Drop the per-worker Docker networks created by fixtures.ts.
+	const networks = (() => {
+		try {
+			return execSync(
+				`docker network ls --filter "name=x11web-worker-" -q`,
+				{ encoding: "utf-8", timeout: 10_000 },
+			).trim();
+		} catch {
+			return "";
+		}
+	})();
+	if (networks) {
+		for (const id of networks.split("\n").filter(Boolean)) {
+			run(`docker network rm ${id}`);
+		}
+	}
 
-	// Prune orphaned Docker networks created by testcontainers
+	// Prune any other orphaned Docker networks created by testcontainers
 	run("docker network prune -f");
 }

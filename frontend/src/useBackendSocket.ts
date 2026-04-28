@@ -7,7 +7,16 @@ import type {
 	SidecarInfo,
 } from "./types";
 
-const WS_URL = import.meta.env.VITE_WS_URL || "ws://localhost:3001/ws/frontend";
+// Resolve order: ?ws=... query param > VITE_WS_URL build-time env > default.
+// The query-param branch lets parallel e2e workers share a single built
+// bundle but route each browser page to its own backend.
+const WS_URL = (() => {
+	if (typeof window !== "undefined") {
+		const fromQuery = new URLSearchParams(window.location.search).get("ws");
+		if (fromQuery) return fromQuery;
+	}
+	return import.meta.env.VITE_WS_URL || "ws://localhost:3001/ws/frontend";
+})();
 
 export type DisplayUpdateCallback = (
 	sidecarId: string,
