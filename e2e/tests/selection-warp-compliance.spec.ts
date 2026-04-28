@@ -222,7 +222,8 @@ else:
 		const output = await runPythonX11(
 			sidecarContainer,
 			`
-import Xlib.display, Xlib.X, struct
+import Xlib.display, Xlib.X
+import Xlib.protocol.request as req
 d = Xlib.display.Display()
 root = d.screen().root
 screen = d.screen()
@@ -234,26 +235,19 @@ w = root.create_window(100, 100, 200, 200, 0, screen.root_depth,
 w.map()
 d.sync()
 
+# Conditional WarpPointer with src_window+src rect: only warps if pointer
+# is currently inside that rect. python-xlib's Window.warp_pointer wrapper
+# always uses src_window=None; the underlying request supports it though.
+def conditional_warp(src_id, dx, dy):
+    req.WarpPointer(display=d.display,
+        src_window=src_id, dst_window=0,
+        src_x=0, src_y=0, src_width=200, src_height=200,
+        dst_x=dx, dst_y=dy)
+
 # First test: pointer inside src window -> warp should happen
 root.warp_pointer(200, 200)  # inside the window
 d.sync()
-
-# WarpPointer with src_window=w, src rect (0,0,200,200), dst relative (+10,+10)
-# python-xlib doesn't directly expose src_window warp, so we use low-level
-# We craft the raw request: opcode 41, pad, length=6, src_window, dst_window=0,
-# src_x=0, src_y=0, src_width=200, src_height=200, dst_x=10, dst_y=10
-import Xlib.protocol.rq
-req = struct.pack("=BBHIIhhHHhh",
-    41,  # opcode
-    0,   # unused
-    6,   # length in 4-byte units
-    w.id,  # src_window
-    0,     # dst_window (0 = relative)
-    0, 0,  # src_x, src_y
-    200, 200,  # src_width, src_height
-    10, 10,    # dst_x, dst_y
-)
-d.display.send_request(Xlib.protocol.rq.RawRequest(req), True)
+conditional_warp(w.id, 10, 10)
 d.sync()
 
 qp = root.query_pointer()
@@ -268,18 +262,7 @@ else:
 # Second test: pointer outside src window -> warp should NOT happen
 root.warp_pointer(50, 50)  # outside the window (100,100,200,200)
 d.sync()
-
-req2 = struct.pack("=BBHIIhhHHhh",
-    41,    # opcode
-    0,     # unused
-    6,     # length
-    w.id,  # src_window
-    0,     # dst_window (0 = relative)
-    0, 0,  # src_x, src_y
-    200, 200,  # src_width, src_height
-    99, 99,    # dst_x, dst_y
-)
-d.display.send_request(Xlib.protocol.rq.RawRequest(req2), True)
+conditional_warp(w.id, 99, 99)
 d.sync()
 
 qp2 = root.query_pointer()
@@ -309,7 +292,7 @@ test.describe.serial("DELETE selection target", () => {
 		const output = await runPythonX11(
 			sidecarContainer,
 			`
-import Xlib.display, Xlib.X
+import Xlib.display, Xlib.X, Xlib.Xatom
 d = Xlib.display.Display()
 root = d.screen().root
 
@@ -319,11 +302,12 @@ w = root.create_window(0, 0, 10, 10, 0, d.screen().root_depth,
 w.map()
 d.sync()
 
-# Take PRIMARY ownership (set_selection_owner is on the Window)
-w.set_selection_owner(Xlib.X.XA_PRIMARY, Xlib.X.CurrentTime)
+# Take PRIMARY ownership (set_selection_owner is on the Window).
+# Predefined atoms live in Xlib.Xatom, not Xlib.X.
+w.set_selection_owner(Xlib.Xatom.PRIMARY, Xlib.X.CurrentTime)
 d.sync()
 
-owner = d.get_selection_owner(Xlib.X.XA_PRIMARY)
+owner = d.get_selection_owner(Xlib.Xatom.PRIMARY)
 if owner == w:
     print("OWNER_SET_OK")
 else:
@@ -395,12 +379,13 @@ test.describe.serial("Protocol validation tools", () => {
 	test("xlsatoms returns predefined atoms", async ({
 		sidecarContainer,
 	}) => {
+		// STRING is predefined atom 31, so we need to peek past the
+		// first 20 entries.
 		const output = await execInSidecar(
 			sidecarContainer,
-			"xlsatoms 2>&1 | head -20",
+			"xlsatoms 2>&1 | head -40",
 		);
 		expect(output).not.toContain("Error");
-		// Standard atoms should be present
 		expect(output).toContain("PRIMARY");
 		expect(output).toContain("STRING");
 	});

@@ -171,9 +171,11 @@ primary = d1.intern_atom("PRIMARY")
 w1.set_selection_owner(primary, X.CurrentTime)
 d1.sync()
 
-# d2 checks owner
+# d2 checks owner. get_selection_owner returns a Window object (or 0 if
+# unowned), so compare its .id to w1.id.
 owner = d2.get_selection_owner(primary)
-print(f"owner_matches={owner == w1.id}")
+owner_id = owner.id if owner != 0 else 0
+print(f"owner_matches={owner_id == w1.id}")
 
 # Cleanup
 w1.destroy()
@@ -397,8 +399,10 @@ tree = parent.query_tree()
 initial_order = [w.id for w in tree.children]
 print(f"initial_count={len(initial_order)}")
 
-# CirculateWindow: RaiseLowest (0) — bring bottom child to top
-parent.circulate_window(X.RaiseLowest)
+# CirculateWindow: RaiseLowest (0) - bring bottom child to top.
+# python-xlib exposes the protocol request as Window.circulate(direction);
+# circulate_window does not exist on the Window object.
+parent.circulate(X.RaiseLowest)
 d.sync()
 
 tree2 = parent.query_tree()
@@ -743,9 +747,11 @@ d.close()
 	});
 
 	test("GLX extension is available", async ({ sidecarContainer }) => {
+		// `glxinfo`'s "OpenGL vendor/renderer/version" lines come well past
+		// the first 5 lines of header — just look for them anywhere.
 		const output = await execInSidecar(
 			sidecarContainer,
-			`glxinfo 2>/dev/null | head -5 || echo "glxinfo_not_available"`,
+			`glxinfo 2>/dev/null || echo "glxinfo_not_available"`,
 		);
 		if (!output.includes("glxinfo_not_available")) {
 			expect(output.toLowerCase()).toContain("opengl");

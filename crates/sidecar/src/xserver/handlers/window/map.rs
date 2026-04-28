@@ -68,8 +68,12 @@ pub(crate) fn handle_map_window(state: &mut ClientState, req: &MapWindowRequest)
                     let _ = tx.send(map_request.to_vec());
                 }
             }
-            // Also broadcast to any other clients with SubstructureRedirectMask on parent
-            state.broadcast_event(parent_id, EventMask::SUBSTRUCTURE_REDIRECT, &map_request);
+            // Per X11 spec, MapRequest is delivered to ALL clients with
+            // SubstructureRedirectMask on the parent — including the same
+            // client that issued the MapWindow. `deliver_event` handles
+            // both local pending-events queue and the cross-connection
+            // broadcast.
+            state.deliver_event(parent_id, EventMask::SUBSTRUCTURE_REDIRECT, &map_request);
             // Don't map the window -- the WM/redirector will do it.
             return events;
         }
