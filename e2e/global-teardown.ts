@@ -6,6 +6,9 @@
  */
 
 import { execSync } from "node:child_process";
+import * as fs from "node:fs";
+import * as os from "node:os";
+import * as path from "node:path";
 
 function run(cmd: string) {
 	try {
@@ -16,6 +19,17 @@ function run(cmd: string) {
 }
 
 export default function globalTeardown() {
+	// Drop per-worker frontend lockfiles created by fixtures.ts.
+	for (const f of fs.readdirSync(os.tmpdir())) {
+		if (/^x11web-worker-\d+\.json$/.test(f)) {
+			try {
+				fs.unlinkSync(path.join(os.tmpdir(), f));
+			} catch {
+				/* not present */
+			}
+		}
+	}
+
 	// Stop all containers created by testcontainers (includes per-worker
 	// backend, sidecar, and Ryuk).  The label filter is reliable regardless
 	// of whether the image was tagged or referenced by hash.

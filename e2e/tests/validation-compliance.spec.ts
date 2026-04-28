@@ -387,8 +387,8 @@ w = root.create_window(10, 10, 100, 100, 0, d.screen().root_depth,
 w.map()
 d.sync()
 
-# GrabKeyboard: active grab
-status = d.grab_keyboard(w, True,
+# GrabKeyboard: in python-xlib the method lives on Window, not Display.
+status = w.grab_keyboard(True,
     Xlib.X.GrabModeAsync, Xlib.X.GrabModeAsync,
     Xlib.X.CurrentTime)
 if status == 0:  # GrabSuccess
@@ -396,7 +396,7 @@ if status == 0:  # GrabSuccess
 else:
     print(f"GRAB_KEYBOARD_STATUS:{status}")
 
-# UngrabKeyboard
+# UngrabKeyboard is on Display.
 d.ungrab_keyboard(Xlib.X.CurrentTime)
 d.sync()
 print("UNGRAB_KEYBOARD_OK")

@@ -11,6 +11,7 @@
 import { execSync, spawn } from "node:child_process";
 import * as fs from "node:fs";
 import * as http from "node:http";
+import * as os from "node:os";
 import * as path from "node:path";
 import {
 	type Locator,
@@ -39,9 +40,18 @@ const SERVE_BIN = path.join(E2E_DIR, "node_modules", ".bin", "serve");
 // `frontendUrl` below — see `useBackendSocket.ts`.
 //
 // Every worker uses its own private Docker network (so the alias `backend`
-// resolves to *its* backend) named after the Playwright worker index.
+// resolves to *its* backend) named after the Playwright worker index. The
+// network name and `.withReuse()` keys MUST be stable across worker respawns
+// (Playwright respawns workers on test failure) — otherwise each respawn
+// would leak the previous network/containers. Worker index is stable; pid is
+// not, so we use index only.
 const WORKER_INDEX = process.env.TEST_WORKER_INDEX ?? "0";
-const WORKER_NETWORK = `x11web-worker-${WORKER_INDEX}-${process.pid}`;
+const WORKER_NETWORK = `x11web-worker-${WORKER_INDEX}`;
+// Sticky frontend port per worker, persisted to a tmp lockfile so that
+// worker respawns reattach to the existing `serve` process instead of
+// spawning a leaked one.
+const FRONTEND_LOCK = path.join(os.tmpdir(), `x11web-worker-${WORKER_INDEX}.json`);
+type FrontendLock = { port: number };
 
 let backendContainer: StartedTestContainer;
 let sidecarContainer: StartedTestContainer;
@@ -81,6 +91,9 @@ async function doSetup() {
 				.withWaitStrategy(
 					Wait.forHttp("/health", 3001).forStatusCode(200),
 				)
+				// Reuse on worker respawn — keyed by image+env+network, all
+				// stable per worker — so we re-attach instead of leaking.
+				.withReuse()
 				.start(),
 		);
 
@@ -114,13 +127,23 @@ async function doSetup() {
 					RUST_LOG: "info",
 					NO_AT_BRIDGE: "1",
 				})
-				.withWaitStrategy(Wait.forLogMessage(/Connected to backend/))
+				// Use a shell-based readiness probe (X socket + backend WS
+				// still alive) instead of `Wait.forLogMessage`. Log-based
+				// waits search the container's stdout buffer, which on
+				// .withReuse() may have already scrolled past the target
+				// line — causing 60s timeouts on every worker respawn.
+				.withWaitStrategy(
+					Wait.forSuccessfulCommand(
+						"test -S /tmp/.X11-unix/X99 && pgrep -x x11-web-sidecar >/dev/null",
+					),
+				)
+				.withReuse()
 				.start(),
 		);
 
 	console.log(`[worker ${WORKER_INDEX}] Sidecar connected to backend`);
 
-	frontendPort = await spawnFrontendServer();
+	frontendPort = await ensureFrontendServer();
 	console.log(
 		`[worker ${WORKER_INDEX}] Frontend running at http://localhost:${frontendPort}`,
 	);
@@ -128,12 +151,27 @@ async function doSetup() {
 }
 
 /**
- * Spawn a fresh `serve` process for this worker against the prebuilt
- * `frontend/dist` (built once by `global-setup.ts`). Returns the bound
- * port. The runtime WS URL is supplied to each browser page via the
- * `?ws=...` query param baked into `frontendUrl`.
+ * Ensure a `serve` process for this worker is running against the prebuilt
+ * `frontend/dist` (built once by `global-setup.ts`). The port is persisted
+ * in `FRONTEND_LOCK` so that worker respawns reattach to the existing
+ * `serve` process instead of leaking one per respawn. The runtime WS URL
+ * is supplied to each browser page via the `?ws=...` query param baked
+ * into `frontendUrl`.
  */
-async function spawnFrontendServer(): Promise<number> {
+async function ensureFrontendServer(): Promise<number> {
+	if (fs.existsSync(FRONTEND_LOCK)) {
+		try {
+			const lock = JSON.parse(
+				fs.readFileSync(FRONTEND_LOCK, "utf8"),
+			) as FrontendLock;
+			const res = await fetch(`http://localhost:${lock.port}`).catch(
+				() => null,
+			);
+			if (res?.ok) return lock.port;
+		} catch {
+			// stale; fall through to spawn fresh
+		}
+	}
 	const port = await findFreePort();
 	const child = spawn(SERVE_BIN, ["dist", "-l", `${port}`, "--no-clipboard"], {
 		cwd: FRONTEND_DIR,
@@ -159,6 +197,7 @@ async function spawnFrontendServer(): Promise<number> {
 			}
 		}, 200);
 	});
+	fs.writeFileSync(FRONTEND_LOCK, JSON.stringify({ port }));
 	return port;
 }
 

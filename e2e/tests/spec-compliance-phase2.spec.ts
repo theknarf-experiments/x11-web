@@ -44,29 +44,34 @@ test.describe.serial("CopyColormapAndFree spec compliance", () => {
 	test("CopyColormapAndFree copies source and is usable", async ({
 		sidecarContainer,
 	}) => {
+		// python-xlib's `Colormap.copy_colormap_and_free` wrapper has an
+		// upstream typo (references `src_cmap` while the parameter is
+		// `scr_cmap`), so we issue the raw protocol request via
+		// `Xlib.protocol.request.CopyColormapAndFree` directly.
 		const output = await runPythonX11(
 			sidecarContainer,
 			`
-import Xlib.display, Xlib.X
+import Xlib.display
+import Xlib.protocol.request as req
+
 d = Xlib.display.Display()
-screen = d.screen()
-cmap = screen.default_colormap
+src = d.screen().default_colormap
 
-# Allocate a color on the default colormap
-result = cmap.alloc_color(0xFFFF, 0, 0)  # Red
-pixel = result.pixel
+# Allocate red on the source colormap so we can verify the spec'd
+# "free source allocations" behavior on the round-trip side.
+src.alloc_color(0xFFFF, 0, 0)
 
-# CopyColormapAndFree creates a new colormap as a copy of cmap
-# (python-xlib quirk: self is just for display access; scr_cmap is the source)
-new_cmap = cmap.copy_colormap_and_free(cmap)
+# Issue CopyColormapAndFree (opcode 80) directly with a freshly
+# allocated XID; bypasses the broken Colormap.copy_colormap_and_free
+# wrapper.
+new_id = d.display.allocate_resource_id()
+req.CopyColormapAndFree(display=d.display, mid=new_id, src_cmap=src.id)
 d.sync()
 
-# The new colormap should be valid and usable
-try:
-    result2 = new_cmap.alloc_color(0, 0xFFFF, 0)  # Green
-    print(f"COPY_CMAP_OK pixel={result2.pixel:#x}")
-except Exception as e:
-    print(f"COPY_CMAP_FAIL: {e}")
+# The new colormap should be valid and usable for further allocations.
+new_cmap = d.create_resource_object("colormap", new_id)
+green = new_cmap.alloc_color(0, 0xFFFF, 0)
+print(f"COPY_CMAP_OK pixel={green.pixel:#x}")
 `,
 		);
 		expect(output).toContain("COPY_CMAP_OK");
