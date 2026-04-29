@@ -83,10 +83,28 @@ cat > "$CONTENTS/Info.plist" <<EOF
 </plist>
 EOF
 
-# Ad-hoc sign the bundle. With CFBundleIdentifier set, the codesign
-# identifier derives from the bundle ID, not from a content hash —
-# stable across rebuilds.
-codesign --force --sign - "$APP"
+# Sign the bundle. With CFBundleIdentifier set, the codesign
+# identifier derives from the bundle ID, but the *designated
+# requirement* (which TCC actually keys against) depends on the
+# signing identity. Ad-hoc burns the binary's cdhash into the
+# requirement → TCC grants reset on every rebuild. A stable
+# identity (our self-signed cert in login keychain) satisfies any
+# rebuild. Falls back to ad-hoc if the cert isn't there yet.
+SIGN_CERT="x11-web-sidecar-dev"
+if security find-certificate -c "$SIGN_CERT" >/dev/null 2>&1; then
+    SIGN_IDENTITY="$SIGN_CERT"
+else
+    cat <<'EOF'
+
+Note: signing identity 'x11-web-sidecar-dev' not found in keychain.
+      Bundle will be ad-hoc signed, which means each rebuild forces
+      you to re-grant Screen Recording in System Settings.
+      Run scripts/setup-signing.sh once to create a stable identity.
+
+EOF
+    SIGN_IDENTITY="-"
+fi
+codesign --force --sign "$SIGN_IDENTITY" "$APP"
 
 echo "Built $APP"
 codesign -dv "$APP" 2>&1 | sed 's/^/  /'
