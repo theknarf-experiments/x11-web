@@ -10,6 +10,7 @@ mod filter;
 mod glyph;
 mod gradient;
 mod picture;
+mod skia_gradient;
 mod skia_raster;
 mod transform;
 
@@ -719,19 +720,37 @@ pub(crate) fn resolve_gradient_pixels(
         .unwrap_or(0);
 
     if let Some(grad) = state.render.linear_gradients.get(&grad_id) {
-        return Some(gradient::rasterize_linear_gradient(
-            grad, tx, rep, src_x, src_y, width, height,
-        ));
+        let w = width as u32;
+        let h = height as u32;
+        // Prefer the SIMD-accelerated tiny-skia shader path; fall back to
+        // the per-pixel Cairo-style implementation when tiny-skia rejects
+        // the parameters or the transform is non-affine.
+        let buf = skia_gradient::rasterize_linear(grad, tx, rep, src_x, src_y, width, height)
+            .map(|b| (b, w, h))
+            .unwrap_or_else(|| {
+                gradient::rasterize_linear_gradient(grad, tx, rep, src_x, src_y, width, height)
+            });
+        return Some(buf);
     }
     if let Some(grad) = state.render.radial_gradients.get(&grad_id) {
-        return Some(gradient::rasterize_radial_gradient(
-            grad, tx, rep, src_x, src_y, width, height,
-        ));
+        let w = width as u32;
+        let h = height as u32;
+        let buf = skia_gradient::rasterize_radial(grad, tx, rep, src_x, src_y, width, height)
+            .map(|b| (b, w, h))
+            .unwrap_or_else(|| {
+                gradient::rasterize_radial_gradient(grad, tx, rep, src_x, src_y, width, height)
+            });
+        return Some(buf);
     }
     if let Some(grad) = state.render.conical_gradients.get(&grad_id) {
-        return Some(gradient::rasterize_conical_gradient(
-            grad, tx, rep, src_x, src_y, width, height,
-        ));
+        let w = width as u32;
+        let h = height as u32;
+        let buf = skia_gradient::rasterize_conical(grad, tx, rep, src_x, src_y, width, height)
+            .map(|b| (b, w, h))
+            .unwrap_or_else(|| {
+                gradient::rasterize_conical_gradient(grad, tx, rep, src_x, src_y, width, height)
+            });
+        return Some(buf);
     }
     None
 }
