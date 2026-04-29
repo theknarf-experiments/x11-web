@@ -1,4 +1,4 @@
-import Xlib.display, Xlib.X, threading, time
+import Xlib.display, Xlib.X, Xlib.Xatom, threading, time
 results = []
 def client_work(idx):
     try:
@@ -10,12 +10,15 @@ def client_work(idx):
             Xlib.X.CopyFromParent)
         w.map()
         d.sync()
-        # Set property
-        w.change_property(d.intern_atom("TEST_PROP"), Xlib.X.AnyPropertyType, 8,
+        # Set property. Use STRING (a real type atom): if we passed
+        # AnyPropertyType (= NoneAtom = 0), python-xlib's
+        # `get_full_property` would treat the round-tripped reply as
+        # "no such property" since the reply's type field would also be 0.
+        w.change_property(d.intern_atom("TEST_PROP"), Xlib.Xatom.STRING, 8,
             f"client{idx}".encode())
         d.sync()
         # Read back
-        prop = w.get_full_property(d.intern_atom("TEST_PROP"), Xlib.X.AnyPropertyType)
+        prop = w.get_full_property(d.intern_atom("TEST_PROP"), Xlib.Xatom.STRING)
         assert prop is not None, f"Property missing for client {idx}"
         # Create pixmap
         pm = w.create_pixmap(50, 50, d.screen().root_depth)

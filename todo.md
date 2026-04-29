@@ -143,12 +143,6 @@ Also:
   **`10 concurrent xlogo instances`**: spawning many clients
   concurrently saturates the test container. Either xeyes/xlogo fails
   to launch or fails to register in our window list quickly enough.
-- **`10 concurrent X11 connections with window operations`**: 10
-  threads each create a window, ChangeProperty and read back. All 10
-  see "Property missing" on the read. Suspect that `ChangeProperty`
-  silently no-ops when the window only lives in `shared_windows` (not
-  in the local `state.windows`); the cross-client window registration
-  path needs a real fix here.
 
 ### `tests/deep-conformance.spec.ts:213` — `x11perf window operations` skipped
 

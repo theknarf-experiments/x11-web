@@ -1860,11 +1860,7 @@ test.describe("Conformance: x11perf extended validation", () => {
 // Multi-client stress tests
 // ===========================================================================
 test.describe("Multi-client stress", () => {
-	// Pre-existing: ChangeProperty(type=AnyPropertyType=0) + GetProperty
-	// reads back None for every client. Either we silently drop the type=0
-	// ChangeProperty or our property store doesn't match it back.
-	// Documented in todo.md.
-	test.skip("10 concurrent X11 connections with window operations", async ({ sidecarContainer }) => {
+	test("10 concurrent X11 connections with window operations", async ({ sidecarContainer }) => {
 		test.setTimeout(120_000);
 		const result = await runPythonScript(sidecarContainer, "concurrent_x11_window_operations.py", { env: { DISPLAY: ":99" } });
 		expect(result.output).toContain("PASS: all 10 clients succeeded");
