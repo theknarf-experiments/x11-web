@@ -44,6 +44,60 @@ fn build() -> Option<DefaultKeymap> {
     })
 }
 
+/// 256-entry cache of `(modifier_bit, is_lock)` derived from the default
+/// xkb_state. The first call simulates a key press for every keycode and
+/// reads back the depressed / locked modifier masks.
+fn cached_modifier_table() -> &'static [(u8, bool); 256] {
+    static CACHE: OnceLock<[(u8, bool); 256]> = OnceLock::new();
+    CACHE.get_or_init(|| {
+        let entry = DEFAULT.get_or_init(build);
+        let Some(km) = entry else {
+            return legacy_modifier_table();
+        };
+        let mut arr = [(0u8, false); 256];
+        let min = km.keymap.min_keycode().raw();
+        let max = km.keymap.max_keycode().raw();
+        for kc in 0u32..256 {
+            if kc < min || kc > max {
+                continue;
+            }
+            let mut state = xkb::State::new(&km.keymap);
+            state.update_key(xkb::Keycode::new(kc), xkb::KeyDirection::Down);
+            let depressed = state.serialize_mods(xkb::STATE_MODS_DEPRESSED) as u8;
+            let locked = state.serialize_mods(xkb::STATE_MODS_LOCKED) as u8;
+            arr[kc as usize] = (depressed | locked, locked != 0);
+        }
+        arr
+    })
+}
+
+fn legacy_modifier_table() -> [(u8, bool); 256] {
+    let mut arr = [(0u8, false); 256];
+    arr[50] = (0x01, false);
+    arr[62] = (0x01, false);
+    arr[66] = (0x02, true);
+    arr[37] = (0x04, false);
+    arr[105] = (0x04, false);
+    arr[64] = (0x08, false);
+    arr[108] = (0x08, false);
+    arr[77] = (0x10, true);
+    arr[133] = (0x40, false);
+    arr[134] = (0x40, false);
+    arr
+}
+
+/// X11 modifier bit set when this keycode is pressed, derived from
+/// libxkbcommon's evdev/us layout. Returns 0 for non-modifier keys.
+pub(crate) fn keycode_to_modifier_bit(keycode: u8) -> u8 {
+    cached_modifier_table()[keycode as usize].0
+}
+
+/// Whether `keycode` is a "lock" key (CapsLock / NumLock) that toggles the
+/// locked-mods set on press rather than the depressed-mods set.
+pub(crate) fn is_lock_keycode(keycode: u8) -> bool {
+    cached_modifier_table()[keycode as usize].1
+}
+
 /// Resolve a single keycode's XKB name (e.g. `"AE10"`) padded to 4 bytes
 /// with trailing spaces, matching X11's `KeyName` wire format. Returns
 /// `*b"K   "` when xkbcommon has no name for the keycode (truly unmapped).

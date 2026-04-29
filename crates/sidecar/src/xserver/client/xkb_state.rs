@@ -143,30 +143,15 @@ pub(crate) fn mousekeys_is_click(keycode: u8) -> bool {
 
 /// Map a keycode to its X11 modifier bit, or 0 if not a modifier.
 ///
-/// Standard modifier bit assignments:
-///   Shift   = 0x01 (bit 0)
-///   Lock    = 0x02 (bit 1) - CapsLock
-///   Control = 0x04 (bit 2)
-///   Mod1    = 0x08 (bit 3) - Alt
-///   Mod2    = 0x10 (bit 4) - NumLock
-///   Mod3    = 0x20 (bit 5) - unused
-///   Mod4    = 0x40 (bit 6) - Super
-///   Mod5    = 0x80 (bit 7) - unused
+/// Backed by libxkbcommon's evdev/us layout, so any keymap-recognised
+/// modifier key (including layout-specific ones) is reported correctly.
 pub(crate) fn keycode_to_modifier(keycode: u8) -> u8 {
-    match keycode {
-        50 | 62 => 0x01,   // Shift_L, Shift_R
-        66 => 0x02,        // Caps_Lock
-        37 | 105 => 0x04,  // Control_L, Control_R
-        64 | 108 => 0x08,  // Alt_L, Alt_R → Mod1
-        77 => 0x10,        // Num_Lock → Mod2
-        133 | 134 => 0x40, // Super_L, Super_R → Mod4
-        _ => 0,
-    }
+    crate::xserver::handlers::default_keymap::keycode_to_modifier_bit(keycode)
 }
 
 /// Whether a keycode is a lock-type key (toggles on press, doesn't track release).
 pub(crate) fn is_lock_key(keycode: u8) -> bool {
-    matches!(keycode, 66 | 77) // CapsLock, NumLock
+    crate::xserver::handlers::default_keymap::is_lock_keycode(keycode)
 }
 
 /// XKB indicator map entry: ties an indicator (LED) to modifier/group state.

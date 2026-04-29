@@ -4,7 +4,7 @@
 //! dispatcher [`handle_core_request`] routes based on the major opcode.
 
 mod color;
-mod default_keymap;
+pub(crate) mod default_keymap;
 mod drawing;
 pub(crate) mod extensions;
 mod font;
