@@ -10,6 +10,7 @@ mod filter;
 mod glyph;
 mod gradient;
 mod picture;
+mod skia_raster;
 mod transform;
 
 /// RENDER major opcode (assigned at QueryExtension).

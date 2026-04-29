@@ -1,6 +1,7 @@
 use tracing::{debug, info};
 
 use super::super::parse_minor;
+use super::skia_raster::composite_polygon_aa;
 use super::{
     composite_pixel, composite_pixel_ca, pict_format_has_alpha, point_in_triangle,
     render_length_err, render_value_err, resolve_source_color, resolve_source_pixels,
@@ -268,7 +269,20 @@ pub(crate) fn handle_trapezoids(state: &mut ClientState, data: &[u8], seq: u16) 
             let fb_h = fb.height() as i32;
 
             for &(top, bottom, lx1, ly1, lx2, ly2, rx1, ry1, rx2, ry2) in &traps {
-                rasterize_trapezoid(
+                // Convert the trapezoid (top/bottom + two slanted edges)
+                // into a 4-vertex polygon for AA rasterization. X at the
+                // top/bottom is the linear interpolation along each edge.
+                let l_top = interp_x(lx1, ly1, lx2, ly2, top);
+                let l_bot = interp_x(lx1, ly1, lx2, ly2, bottom);
+                let r_top = interp_x(rx1, ry1, rx2, ry2, top);
+                let r_bot = interp_x(rx1, ry1, rx2, ry2, bottom);
+                let poly = [
+                    (l_top, top),
+                    (r_top, top),
+                    (r_bot, bottom),
+                    (l_bot, bottom),
+                ];
+                composite_polygon_aa(
                     fb,
                     fb_w,
                     fb_h,
@@ -278,16 +292,7 @@ pub(crate) fn handle_trapezoids(state: &mut ClientState, data: &[u8], seq: u16) 
                     sb,
                     sa,
                     dst_has_alpha,
-                    top,
-                    bottom,
-                    lx1,
-                    ly1,
-                    lx2,
-                    ly2,
-                    rx1,
-                    ry1,
-                    rx2,
-                    ry2,
+                    &poly,
                     &clip,
                 );
             }
@@ -304,104 +309,18 @@ pub(crate) fn handle_trapezoids(state: &mut ClientState, data: &[u8], seq: u16) 
     Vec::new()
 }
 
-/// Rasterize a single trapezoid into the framebuffer using scanline conversion.
-#[allow(clippy::too_many_arguments)]
-fn rasterize_trapezoid(
-    fb: &mut crate::framebuffer::Framebuffer,
-    fb_w: i32,
-    fb_h: i32,
-    op: u8,
-    sr: u8,
-    sg: u8,
-    sb: u8,
-    sa: u8,
-    dst_has_alpha: bool,
-    top: f64,
-    bottom: f64,
-    lx1: f64,
-    ly1: f64,
-    lx2: f64,
-    ly2: f64,
-    rx1: f64,
-    ry1: f64,
-    rx2: f64,
-    ry2: f64,
-    clip: &ClipSnapshot,
-) {
-    // Half-open pixel-center sampling. A pixel at integer (x, y) is
-    // covered if its centre (x+0.5, y+0.5) lies inside the trapezoid.
-    // Equivalently, the row range is `ceil(top - 0.5) .. ceil(bottom
-    // - 0.5)` (exclusive on the upper bound) and the same for the
-    // column range. This matches pixman / X RENDER and avoids the
-    // off-by-one overdraw the old `..=floor(bottom)` form caused.
-    let y_start = (top - 0.5).ceil() as i32;
-    let y_end = (bottom - 0.5).ceil() as i32;
-
-    if y_start >= y_end {
-        return;
-    }
-
-    let fb_stride = fb.stride();
-    let fb_data = fb.data_mut();
-
-    // Precompute edge deltas
-    let left_dy = ly2 - ly1;
-    let right_dy = ry2 - ry1;
-
-    for y in y_start..y_end {
-        if y < 0 || y >= fb_h {
-            continue;
-        }
-
-        let yf = y as f64 + 0.5; // sample at pixel center
-
-        // Interpolate left edge X at this Y
-        let left_x = if left_dy.abs() < 1e-9 {
-            lx1
-        } else {
-            lx1 + (lx2 - lx1) * (yf - ly1) / left_dy
-        };
-
-        // Interpolate right edge X at this Y
-        let right_x = if right_dy.abs() < 1e-9 {
-            rx1
-        } else {
-            rx1 + (rx2 - rx1) * (yf - ry1) / right_dy
-        };
-
-        let x_start = (left_x - 0.5).ceil() as i32;
-        let x_end = (right_x - 0.5).ceil() as i32;
-
-        for x in x_start..x_end {
-            if x < 0 || x >= fb_w {
-                continue;
-            }
-            if !clip.allows(x, y) {
-                continue;
-            }
-            let dst_off = y as usize * fb_stride + x as usize * 4;
-            if dst_off + 3 >= fb_data.len() {
-                continue;
-            }
-            composite_pixel(
-                op,
-                &mut fb_data[dst_off..dst_off + 4],
-                sb,
-                sg,
-                sr,
-                sa,
-                dst_has_alpha,
-            );
-        }
-    }
-
-    // Mark entire affected region dirty
-    let min_y = top.floor().max(0.0) as i32;
-    let max_y = (bottom.ceil() as i32).min(fb_h);
-    if min_y < max_y {
-        fb.mark_dirty(0, min_y, fb_w as u32, (max_y - min_y) as u32);
+/// Linear-interpolate the X coordinate along an edge `(x1,y1)->(x2,y2)` at
+/// the given Y. Falls back to `x1` when the edge is horizontal.
+#[inline]
+fn interp_x(x1: f64, y1: f64, x2: f64, y2: f64, y: f64) -> f64 {
+    let dy = y2 - y1;
+    if dy.abs() < 1e-9 {
+        x1
+    } else {
+        x1 + (x2 - x1) * (y - y1) / dy
     }
 }
+
 
 /// Handle XRender Triangles (minor opcode 11).
 pub(crate) fn handle_triangles(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
@@ -556,7 +475,7 @@ fn composite_triangles_full_dst(
     fb.mark_dirty(0, 0, fb_w as u32, fb_h as u32);
 }
 
-/// Rasterize a single triangle using scanline conversion.
+/// Rasterize a single triangle with anti-aliased coverage via tiny-skia.
 #[allow(clippy::too_many_arguments)]
 fn rasterize_triangle(
     fb: &mut crate::framebuffer::Framebuffer,
@@ -576,78 +495,20 @@ fn rasterize_triangle(
     y3: f64,
     clip: &ClipSnapshot,
 ) {
-    // Convert triangle to trapezoids by sorting vertices by Y
-    let mut verts = [(x1, y1), (x2, y2), (x3, y3)];
-    verts.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal));
-    let (vx0, vy0) = verts[0];
-    let (vx1, vy1) = verts[1];
-    let (vx2, vy2) = verts[2];
-
-    // Top half: vy0 to vy1
-    if (vy1 - vy0).abs() > 1e-9 {
-        // Long edge from v0 to v2, short edge from v0 to v1
-        let mid_x = vx0 + (vx2 - vx0) * (vy1 - vy0) / (vy2 - vy0);
-        let (llx, rrx) = if mid_x < vx1 {
-            // Left edge is v0->v2 segment, right edge is v0->v1
-            ((vx0, vy0, vx2, vy2), (vx0, vy0, vx1, vy1))
-        } else {
-            ((vx0, vy0, vx1, vy1), (vx0, vy0, vx2, vy2))
-        };
-        rasterize_trapezoid(
-            fb,
-            fb_w,
-            fb_h,
-            op,
-            sr,
-            sg,
-            sb,
-            sa,
-            dst_has_alpha,
-            vy0,
-            vy1,
-            llx.0,
-            llx.1,
-            llx.2,
-            llx.3,
-            rrx.0,
-            rrx.1,
-            rrx.2,
-            rrx.3,
-            clip,
-        );
-    }
-
-    // Bottom half: vy1 to vy2
-    if (vy2 - vy1).abs() > 1e-9 {
-        let mid_x = vx0 + (vx2 - vx0) * (vy1 - vy0) / (vy2 - vy0);
-        let (llx, rrx) = if mid_x < vx1 {
-            ((vx0, vy0, vx2, vy2), (vx1, vy1, vx2, vy2))
-        } else {
-            ((vx1, vy1, vx2, vy2), (vx0, vy0, vx2, vy2))
-        };
-        rasterize_trapezoid(
-            fb,
-            fb_w,
-            fb_h,
-            op,
-            sr,
-            sg,
-            sb,
-            sa,
-            dst_has_alpha,
-            vy1,
-            vy2,
-            llx.0,
-            llx.1,
-            llx.2,
-            llx.3,
-            rrx.0,
-            rrx.1,
-            rrx.2,
-            rrx.3,
-            clip,
-        );
-    }
+    let poly = [(x1, y1), (x2, y2), (x3, y3)];
+    composite_polygon_aa(
+        fb,
+        fb_w,
+        fb_h,
+        op,
+        sr,
+        sg,
+        sb,
+        sa,
+        dst_has_alpha,
+        &poly,
+        clip,
+    );
 }
 
 /// Handle XRender TriStrip (minor opcode 12).
