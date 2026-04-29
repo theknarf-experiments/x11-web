@@ -23,10 +23,12 @@ use x11_web_protocol::{DisplayUpdate, SidecarToBackend};
 use crate::capture::capture_window;
 use crate::windows::{visible_windows, WindowBounds, WindowInfo};
 
-/// Cap the longer side of each capture (in points). Keeps WS payload
-/// per frame bounded — RGBA at 800×600 is ~1.9 MB, comfortable for
-/// JSON+base64 over WebSocket at the cadence we run at.
-const CAPTURE_MAX_DIM: u32 = 800;
+/// Cap the longer side of each capture (in points). `0` means no
+/// cap — captures come out at the window's full logical-point
+/// dimensions, which is what the frontend canvas is sized to. Set a
+/// non-zero value if WebSocket bandwidth becomes a problem; once we
+/// move pixels onto the WebRTC data channel the cap can stay off.
+const CAPTURE_MAX_DIM: u32 = 0;
 
 /// Period between successive captures of the same window. Low-rate
 /// for v0.2 — once we move pixels onto the WebRTC data channel we'll
