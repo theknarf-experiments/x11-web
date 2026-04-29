@@ -11,6 +11,8 @@
 //! `CuaDriverCore` module.
 
 #[cfg(target_os = "macos")]
+pub mod capture;
+#[cfg(target_os = "macos")]
 pub mod enumerator;
 #[cfg(target_os = "macos")]
 pub mod skylight;

@@ -33,6 +33,57 @@ mod macos {
             sky.post_to_pid, sky.auth_message, sky.window_location
         );
 
+        // Trigger the Screen Recording TCC prompt if it hasn't been
+        // granted yet. The first call surfaces the system dialog;
+        // subsequent calls just return the cached grant state. The
+        // sidecar can still register and enumerate windows without
+        // it — we just won't be able to capture pixels.
+        if objc2_core_graphics::CGRequestScreenCaptureAccess() {
+            info!("Screen Recording permission: granted");
+        } else {
+            warn!(
+                "Screen Recording permission: not granted. \
+                 Open System Settings → Privacy & Security → Screen Recording \
+                 and enable the entry for this binary, then restart the sidecar."
+            );
+        }
+
+        // Smoke-test capture against the first layer-0 window we find.
+        // Try both paths so we can see at a glance which one works on
+        // this host's macOS / TCC state.
+        if let Some(w) = x11_web_sidecar_macos::windows::visible_windows()
+            .into_iter()
+            .find(|w| w.layer == 0 && w.bounds.width > 50.0 && w.bounds.height > 50.0)
+        {
+            let started = std::time::Instant::now();
+            match x11_web_sidecar_macos::capture::capture_window_legacy(w.id) {
+                Ok(frame) => info!(
+                    "Legacy capture: window {} ({}) → {}x{} ({} bytes RGBA) in {:?}",
+                    w.id,
+                    w.owner,
+                    frame.width,
+                    frame.height,
+                    frame.rgba.len(),
+                    started.elapsed()
+                ),
+                Err(e) => warn!("Legacy capture failed for window {}: {e}", w.id),
+            }
+
+            let started = std::time::Instant::now();
+            match x11_web_sidecar_macos::capture::capture_window(w.id).await {
+                Ok(frame) => info!(
+                    "SCK capture: window {} ({}) → {}x{} ({} bytes RGBA) in {:?}",
+                    w.id,
+                    w.owner,
+                    frame.width,
+                    frame.height,
+                    frame.rgba.len(),
+                    started.elapsed()
+                ),
+                Err(e) => warn!("SCK capture failed for window {}: {e}", w.id),
+            }
+        }
+
         let backend_url = std::env::var("BACKEND_URL")
             .unwrap_or_else(|_| "ws://127.0.0.1:3001/ws/sidecar".into());
         let sidecar_name = std::env::var("SIDECAR_NAME")
