@@ -235,27 +235,6 @@ impl RecordContext {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Wire format helpers
-// ---------------------------------------------------------------------------
-
-fn parse_record_range(data: &[u8]) -> RecordRange {
-    if data.len() < 24 {
-        return RecordRange::default();
-    }
-    RecordRange {
-        core_requests: (data[0], data[1]),
-        core_replies: (data[2], data[3]),
-        ext_requests: (data[4], data[5], data[6]),
-        ext_replies: (data[8], data[9], data[10]),
-        delivered_events: (data[12], data[13]),
-        device_events: (data[14], data[15]),
-        errors: (data[16], data[17]),
-        client_started: data[18] != 0,
-        client_died: data[20] != 0,
-    }
-}
-
 impl From<&x11rb_protocol::protocol::record::Range> for RecordRange {
     fn from(r: &x11rb_protocol::protocol::record::Range) -> Self {
         RecordRange {
@@ -1038,29 +1017,4 @@ mod tests {
         assert_eq!(results[0][1], RECORD_FROM_CLIENT);
     }
 
-    #[test]
-    fn parse_record_range_wire_format() {
-        let mut wire = [0u8; 24];
-        wire[0] = 1; // core_requests first
-        wire[1] = 127; // core_requests last
-        wire[2] = 3; // core_replies first
-        wire[3] = 50; // core_replies last
-        wire[12] = 2; // delivered_events first
-        wire[13] = 34; // delivered_events last
-        wire[14] = 2; // device_events first
-        wire[15] = 6; // device_events last
-        wire[16] = 1; // errors first
-        wire[17] = 17; // errors last
-        wire[18] = 1; // client_started
-        wire[20] = 1; // client_died
-
-        let range = parse_record_range(&wire);
-        assert_eq!(range.core_requests, (1, 127));
-        assert_eq!(range.core_replies, (3, 50));
-        assert_eq!(range.delivered_events, (2, 34));
-        assert_eq!(range.device_events, (2, 6));
-        assert_eq!(range.errors, (1, 17));
-        assert!(range.client_started);
-        assert!(range.client_died);
-    }
 }

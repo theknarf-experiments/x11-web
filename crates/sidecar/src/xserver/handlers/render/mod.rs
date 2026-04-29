@@ -510,12 +510,6 @@ pub(crate) fn pad4(n: usize) -> usize {
     (n + 3) & !3
 }
 
-/// Read a FIXED (16.16 fixed-point) value from protocol data, respecting byte order.
-pub(crate) fn read_fixed_bo(data: &[u8], off: usize, msb_first: bool) -> f64 {
-    let raw = read_u32_bo(data, off, msb_first) as i32;
-    raw as f64 / 65536.0
-}
-
 /// Returns `Some(error_reply)` if the given Render request would
 /// target a *gradient* picture as its destination — those are
 /// source-only and X RENDER mandates a `BadDrawable` error. Returns
