@@ -3,5 +3,6 @@ members = [
     "crates/protocol",
     "crates/backend",
     "crates/sidecar",
+    "crates/sidecar-macos",
 ]
 resolver = "2"
