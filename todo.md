@@ -41,6 +41,41 @@ of `x11-web.spec.ts` still needs sweeping.
 believes there is leftover payload after parsing. Pre-existing on
 `origin/main`.
 
+### `tests/phase7-compliance.spec.ts` — 4 tests skipped
+
+- **`GetControls reports correct repeat delay and interval`**: Asserts on
+  `xkbcomp :99 -` output. xkbcomp currently exits 1; same fix as the
+  `xkbcomp dumps` failure above will unblock this.
+- **`xterm renders CJK characters via xdotool`**: After typing "你好世界"
+  the canvas hash is unchanged, meaning no CJK glyphs land on screen.
+  Need to confirm whether xterm-with-`-fn fixed` actually requests CJK
+  glyphs and whether our font path serves them. The runtime image has
+  `fonts-noto-cjk`; we may not be advertising the right XLFDs for
+  xterm to pick them up.
+- **`GTK text entry (zenity --entry) launches`**: Same spawnApp /
+  window-frame timeout root cause as the firefox suite.
+- **`window stacking order via xdotool windowraise`**: After spawning
+  xeyes + xclock, only the first window appears in the frontend's
+  window list. Same spawnApp issue scoped to a second concurrent
+  spawn.
+- **`window resize via xdotool windowsize`**: `xdotool windowsize`
+  sends ConfigureWindow against xeyes, but the canvas size doesn't
+  change. matchbox-WM should be redirecting via
+  SubstructureRedirectMask and re-issuing the configure on the inner
+  window — somewhere in that chain the resize is dropped. Investigate
+  whether our ConfigureRequest delivery to the WM is correct, and
+  whether the WM's response actually maps to a canvas-size update on
+  the frontend.
+
+### `tests/deep-conformance.spec.ts:213` — `x11perf window operations` skipped
+
+`x11perf -create -map -unmap -destroy -resize -move` runs past
+Playwright's 5-minute test timeout (the other x11perf benchmarks in
+the same suite finish well under the limit). One of those sub-tests
+is hanging. Likely candidates: our `MapSubwindows` /
+`UnmapSubwindows` traversal, or the resize-then-immediately-destroy
+pattern racing against expose-event delivery.
+
 ### Various `rendercheck` extended-suite tests — flaky timeouts
 
 Tests under `advanced-compliance.spec.ts:3570` (`rendercheck composite
