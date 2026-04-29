@@ -2450,12 +2450,7 @@ test.describe("Xts formal test suite", () => {
 		expect(Number.parseInt(match![1], 10)).toBeGreaterThanOrEqual(3);
 	});
 
-	// Pre-existing: ClearArea(exposures=True) doesn't deliver an Expose
-	// event to the requesting client. Either our handler isn't reading
-	// the `exposures` byte from the wire (it's at offset 1, the data-byte
-	// slot — easy to miss) or the deliver_event path is filtering us out.
-	// Documented in todo.md.
-	test.skip("Xts: ClearArea with exposures generates Expose event", async ({ sidecarContainer }) => {
+	test("Xts: ClearArea with exposures generates Expose event", async ({ sidecarContainer }) => {
 		test.setTimeout(30_000);
 		const result = await runPythonScript(sidecarContainer, "xts_cleararea_expose.py", { env: { DISPLAY: ":99" } });
 		const match = result.output.match(

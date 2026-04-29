@@ -28,11 +28,28 @@ Re-enable by removing the `test.skip(` wrappers and getting at least
 
 ### `tests/x11-web.spec.ts:1157` — `xkbcomp dumps a parseable XKB keymap`
 
-`xkbcomp -xkb :99 -` exits with status 1 and produces 6 lines of error
-output instead of a keymap dump. Pre-existing on origin/main. Likely
-related to our XKB SetMap / GetMap wire format not surviving xkbcomp's
-strict validation. Not skipped yet — left unmarked because the rest
-of `x11-web.spec.ts` still needs sweeping.
+`xkbcomp -xkb :99 -` exits with status 1. Captured error output:
+
+```
+Internal error:   Could not load names
+Warning:          Could not load keyboard geometry for :99
+                  BadName (named color or font does not exist)
+                  Resulting keymap file will not describe geometry
+xkb_keymap {
+};
+Error:            key names not defined in XkbWriteXKBKeycodes
+                  Output file "stdout" removed
+```
+
+The first error is libxkbfile's `_XkbReadGetNames` rejecting our
+`XkbGetNames` reply — likely a length, atom-id, or count-field
+mismatch in the variable-length sections (KeyTypeNames /
+KTLevelNames / KeyNames / KeyAliases). Without names loaded, xkbcomp
+can't emit the keycodes section and bails with the second error.
+
+(I tried stripping the embedded sub-reply headers in
+`handle_xkb_get_kbd_by_name`; the test then hung. Needs careful
+byte-level comparison against a known-good X server response.)
 
 ### `tests/advanced-compliance.spec.ts:2888` — `XVideo QueryAdaptors and ListImageFormats return formats`
 
