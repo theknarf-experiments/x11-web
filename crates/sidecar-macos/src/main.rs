@@ -92,8 +92,13 @@ mod macos {
             }
         });
 
-        // v0.1 minimum: just keep the connection alive. Window
-        // enumeration, capture, and input come in subsequent commits.
+        // Window enumeration → DisplayUpdate stream. Per-session so the
+        // backend gets a fresh "everything that exists" announcement
+        // each time we reconnect.
+        x11_web_sidecar_macos::enumerator::spawn(tx.clone());
+
+        // v0.1 minimum: keep the connection alive while the enumerator
+        // streams updates. Capture and input come in subsequent commits.
         loop {
             match ws_rx.next().await {
                 Some(Ok(Message::Close(_))) | None => break,
