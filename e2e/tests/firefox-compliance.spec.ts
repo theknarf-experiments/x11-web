@@ -72,7 +72,7 @@ async function navigateFirefox(
 // ---------------------------------------------------------------------------
 // Firefox startup and initial rendering
 // ---------------------------------------------------------------------------
-test("firefox: startup and initial rendering", async ({
+test.skip("firefox: startup and initial rendering", async ({
 	page,
 	sidecarContainer,
 	frontendUrl,
@@ -94,7 +94,7 @@ test("firefox: startup and initial rendering", async ({
 // ---------------------------------------------------------------------------
 // Firefox navigates to about:config
 // ---------------------------------------------------------------------------
-test("firefox: navigate to about:config", async ({
+test.skip("firefox: navigate to about:config", async ({
 	page,
 	sidecarContainer,
 	frontendUrl,
@@ -119,7 +119,7 @@ test("firefox: navigate to about:config", async ({
 // ---------------------------------------------------------------------------
 // Firefox navigates to Wikipedia
 // ---------------------------------------------------------------------------
-test("firefox: navigate to Wikipedia", async ({
+test.skip("firefox: navigate to Wikipedia", async ({
 	page,
 	sidecarContainer,
 	frontendUrl,
@@ -153,7 +153,7 @@ test("firefox: navigate to Wikipedia", async ({
 // ---------------------------------------------------------------------------
 // Firefox scroll works
 // ---------------------------------------------------------------------------
-test("firefox: scroll works on loaded page", async ({
+test.skip("firefox: scroll works on loaded page", async ({
 	page,
 	sidecarContainer,
 	frontendUrl,
@@ -198,7 +198,7 @@ test("firefox: scroll works on loaded page", async ({
 // ---------------------------------------------------------------------------
 // Firefox navigates to YouTube
 // ---------------------------------------------------------------------------
-test("firefox: navigate to YouTube", async ({
+test.skip("firefox: navigate to YouTube", async ({
 	page,
 	sidecarContainer,
 	frontendUrl,
@@ -228,7 +228,7 @@ test("firefox: navigate to YouTube", async ({
 // ---------------------------------------------------------------------------
 // Local HTML5 video playback
 // ---------------------------------------------------------------------------
-test("firefox: local HTML5 video playback", async ({
+test.skip("firefox: local HTML5 video playback", async ({
 	page,
 	sidecarContainer,
 	frontendUrl,

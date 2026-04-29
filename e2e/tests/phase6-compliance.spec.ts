@@ -452,8 +452,12 @@ d.close()
 `,
 		);
 		expect(output).toContain("deepest_width=10");
-		expect(output).toContain("translate_x=50"); // 50 levels * 1 pixel offset
-		expect(output).toContain("translate_y=50");
+		// `windows[-1].translate_coords(root, 0, 0)` translates root's
+		// origin into the deepest window's local frame. The deepest
+		// window sits 50 px below/right of root, so root's (0,0) is at
+		// (-50, -50) in its local coords.
+		expect(output).toContain("translate_x=-50");
+		expect(output).toContain("translate_y=-50");
 	});
 });
 
