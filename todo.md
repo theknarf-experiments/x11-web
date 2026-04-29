@@ -87,6 +87,32 @@ believes there is leftover payload after parsing. Pre-existing on
   `xdotool windowfocus + xdotool type`, the typed text never lands in
   the focused xterm. Likely an XTEST / SetInputFocus interaction bug.
 
+### `tests/xts-compliance.spec.ts` — XTS TET conformance gaps + 2 skipped tests
+
+The `XTS TET: ${category}` tests run the actual XTS conformance binaries
+against our server. Per-category baseline pass rates are now encoded
+in the test:
+
+| category | current pass rate | floor in test |
+|----------|-------------------|---------------|
+| Xproto   | 81.6%             | 80%           |
+| Xlib3    | 67.6%             | 65%           |
+| Xlib4    |  7.3%             |  5%           |
+| Xlib6    | 62.5%             | 60%           |
+
+Bumping these as we improve conformance is encouraged; lowering them
+is a regression and should be discussed.
+
+Also:
+- **`Big-Requests extension enables large requests`**: python-xlib's
+  `Display.info` accessor raises KeyError after our QueryExtension
+  reply. Either we're handling EnableExtension wrong or the follow-up
+  Setup info refresh isn't propagating an updated `max_request_length`.
+- **`Xts: ClearArea with exposures generates Expose event`**: ClearArea
+  with `exposures=True` (byte 1 in the request) doesn't deliver an
+  Expose event back to the requester. Either the handler isn't reading
+  the exposures bit correctly or `deliver_event` is filtering it out.
+
 ### `tests/full-compliance.spec.ts` — 5 tests skipped
 
 - **`rendercheck full suite with pass/fail counting`** and the same
