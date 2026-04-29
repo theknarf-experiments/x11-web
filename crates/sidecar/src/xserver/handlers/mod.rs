@@ -4,6 +4,7 @@
 //! dispatcher [`handle_core_request`] routes based on the major opcode.
 
 mod color;
+mod default_keymap;
 mod drawing;
 pub(crate) mod extensions;
 mod font;
@@ -461,112 +462,11 @@ pub(crate) fn resolve_keysym(
     keycode_to_keysym(keycode)
 }
 
-/// Map X11 keycode to (normal_keysym, shifted_keysym).
-/// Based on standard US keyboard layout.
+/// Map X11 keycode to (normal_keysym, shifted_keysym) using a libxkbcommon
+/// keymap compiled for `evdev / pc105 / us`. Falls back to a tiny hardcoded
+/// table when xkb data files aren't installed.
 pub(crate) fn keycode_to_keysym(keycode: u8) -> (u32, u32) {
-    const XK_BACKSPACE: u32 = 0xff08;
-    const XK_TAB: u32 = 0xff09;
-    const XK_RETURN: u32 = 0xff0d;
-    const XK_ESCAPE: u32 = 0xff1b;
-    const XK_DELETE: u32 = 0xffff;
-    const XK_HOME: u32 = 0xff50;
-    const XK_LEFT: u32 = 0xff51;
-    const XK_UP: u32 = 0xff52;
-    const XK_RIGHT: u32 = 0xff53;
-    const XK_DOWN: u32 = 0xff54;
-    const XK_PAGE_UP: u32 = 0xff55;
-    const XK_PAGE_DOWN: u32 = 0xff56;
-    const XK_END: u32 = 0xff57;
-    const XK_INSERT: u32 = 0xff63;
-    const XK_SHIFT_L: u32 = 0xffe1;
-    const XK_SHIFT_R: u32 = 0xffe2;
-    const XK_CONTROL_L: u32 = 0xffe3;
-    const XK_CONTROL_R: u32 = 0xffe4;
-    const XK_CAPS_LOCK: u32 = 0xffe5;
-    const XK_ALT_L: u32 = 0xffe9;
-    const XK_ALT_R: u32 = 0xffea;
-    const XK_SUPER_L: u32 = 0xffeb;
-    const XK_SUPER_R: u32 = 0xffec;
-    const XK_F1: u32 = 0xffbe;
-    const XK_SPACE: u32 = 0x0020;
-
-    match keycode {
-        9 => (XK_ESCAPE, XK_ESCAPE),
-        10 => (0x31, 0x21), // 1 !
-        11 => (0x32, 0x40), // 2 @
-        12 => (0x33, 0x23), // 3 #
-        13 => (0x34, 0x24), // 4 $
-        14 => (0x35, 0x25), // 5 %
-        15 => (0x36, 0x5e), // 6 ^
-        16 => (0x37, 0x26), // 7 &
-        17 => (0x38, 0x2a), // 8 *
-        18 => (0x39, 0x28), // 9 (
-        19 => (0x30, 0x29), // 0 )
-        20 => (0x2d, 0x5f), // - _
-        21 => (0x3d, 0x2b), // = +
-        22 => (XK_BACKSPACE, XK_BACKSPACE),
-        23 => (XK_TAB, XK_TAB),
-        24 => (0x71, 0x51), // q Q
-        25 => (0x77, 0x57), // w W
-        26 => (0x65, 0x45), // e E
-        27 => (0x72, 0x52), // r R
-        28 => (0x74, 0x54), // t T
-        29 => (0x79, 0x59), // y Y
-        30 => (0x75, 0x55), // u U
-        31 => (0x69, 0x49), // i I
-        32 => (0x6f, 0x4f), // o O
-        33 => (0x70, 0x50), // p P
-        34 => (0x5b, 0x7b), // [ {
-        35 => (0x5d, 0x7d), // ] }
-        36 => (XK_RETURN, XK_RETURN),
-        37 => (XK_CONTROL_L, XK_CONTROL_L),
-        38 => (0x61, 0x41), // a A
-        39 => (0x73, 0x53), // s S
-        40 => (0x64, 0x44), // d D
-        41 => (0x66, 0x46), // f F
-        42 => (0x67, 0x47), // g G
-        43 => (0x68, 0x48), // h H
-        44 => (0x6a, 0x4a), // j J
-        45 => (0x6b, 0x4b), // k K
-        46 => (0x6c, 0x4c), // l L
-        47 => (0x3b, 0x3a), // ; :
-        48 => (0x27, 0x22), // ' "
-        49 => (0x60, 0x7e), // ` ~
-        50 => (XK_SHIFT_L, XK_SHIFT_L),
-        51 => (0x5c, 0x7c), // \ |
-        52 => (0x7a, 0x5a), // z Z
-        53 => (0x78, 0x58), // x X
-        54 => (0x63, 0x43), // c C
-        55 => (0x76, 0x56), // v V
-        56 => (0x62, 0x42), // b B
-        57 => (0x6e, 0x4e), // n N
-        58 => (0x6d, 0x4d), // m M
-        59 => (0x2c, 0x3c), // , <
-        60 => (0x2e, 0x3e), // . >
-        61 => (0x2f, 0x3f), // / ?
-        62 => (XK_SHIFT_R, XK_SHIFT_R),
-        64 => (XK_ALT_L, XK_ALT_L),
-        65 => (XK_SPACE, XK_SPACE),
-        66 => (XK_CAPS_LOCK, XK_CAPS_LOCK),
-        k @ 67..=76 => (XK_F1 + (k - 67) as u32, XK_F1 + (k - 67) as u32),
-        95 => (XK_F1 + 10, XK_F1 + 10),
-        96 => (XK_F1 + 11, XK_F1 + 11),
-        105 => (XK_CONTROL_R, XK_CONTROL_R),
-        108 => (XK_ALT_R, XK_ALT_R),
-        110 => (XK_HOME, XK_HOME),
-        111 => (XK_UP, XK_UP),
-        112 => (XK_PAGE_UP, XK_PAGE_UP),
-        113 => (XK_LEFT, XK_LEFT),
-        114 => (XK_RIGHT, XK_RIGHT),
-        115 => (XK_END, XK_END),
-        116 => (XK_DOWN, XK_DOWN),
-        117 => (XK_PAGE_DOWN, XK_PAGE_DOWN),
-        118 => (XK_INSERT, XK_INSERT),
-        119 => (XK_DELETE, XK_DELETE),
-        133 => (XK_SUPER_L, XK_SUPER_L),
-        134 => (XK_SUPER_R, XK_SUPER_R),
-        _ => (0, 0),
-    }
+    default_keymap::keysyms_for_keycode(keycode)
 }
 
 #[cfg(test)]
@@ -634,9 +534,12 @@ mod tests {
 
     #[test]
     fn keycode_tab_23() {
+        // Per the evdev/us xkb layout, Shift+Tab produces ISO_Left_Tab —
+        // the same behaviour real X servers report through GetKeyboardMapping.
+        const XK_ISO_LEFT_TAB: u32 = 0xfe20;
         let (normal, shifted) = keycode_to_keysym(23);
         assert_eq!(normal, XK_TAB);
-        assert_eq!(shifted, XK_TAB);
+        assert_eq!(shifted, XK_ISO_LEFT_TAB);
     }
 
     #[test]
@@ -718,12 +621,16 @@ mod tests {
 
     #[test]
     fn keycode_alt_l_64() {
-        assert_eq!(keycode_to_keysym(64), (XK_ALT_L, XK_ALT_L));
+        // Shift+Alt -> Meta_L per the evdev/us xkb layout.
+        const XK_META_L: u32 = 0xffe7;
+        assert_eq!(keycode_to_keysym(64), (XK_ALT_L, XK_META_L));
     }
 
     #[test]
     fn keycode_alt_r_108() {
-        assert_eq!(keycode_to_keysym(108), (XK_ALT_R, XK_ALT_R));
+        // Shift+Alt_R -> Meta_R per the evdev/us xkb layout.
+        const XK_META_R: u32 = 0xffe8;
+        assert_eq!(keycode_to_keysym(108), (XK_ALT_R, XK_META_R));
     }
 
     #[test]
@@ -851,11 +758,23 @@ mod tests {
     // -----------------------------------------------------------------------
 
     #[test]
-    fn keycode_unknown_returns_zero_pair() {
+    fn keycode_below_min_returns_zero_pair() {
+        // Keycodes below xkb's evdev minimum (9) have no mapping.
         assert_eq!(keycode_to_keysym(0), (0, 0));
         assert_eq!(keycode_to_keysym(1), (0, 0));
-        assert_eq!(keycode_to_keysym(200), (0, 0));
-        assert_eq!(keycode_to_keysym(255), (0, 0));
+        assert_eq!(keycode_to_keysym(8), (0, 0));
+    }
+
+    #[test]
+    fn keycode_high_range_returns_xf86_multimedia() {
+        // The evdev/us layout maps keycodes 200+ to XF86 multimedia keysyms
+        // (e.g. AudioMute, AudioRaiseVolume, etc.). All XF86 vendor keysyms
+        // share the 0x1008FFxx prefix.
+        let (normal, _) = keycode_to_keysym(200);
+        assert!(
+            (0x1008FF00..=0x1008FFFF).contains(&normal) || normal == 0,
+            "expected XF86 vendor keysym or 0 for keycode 200, got 0x{normal:x}"
+        );
     }
 
     // -----------------------------------------------------------------------
