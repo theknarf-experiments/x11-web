@@ -16,11 +16,22 @@ use std::time::Duration;
 use core_graphics::window::CGWindowID;
 use tokio::sync::mpsc;
 use tokio::time::interval;
-use tracing::info;
+use tracing::{info, warn};
 use uuid::Uuid;
 use x11_web_protocol::{DisplayUpdate, SidecarToBackend};
 
+use crate::capture::capture_window;
 use crate::windows::{visible_windows, WindowBounds, WindowInfo};
+
+/// Cap the longer side of each capture (in points). Keeps WS payload
+/// per frame bounded — RGBA at 800×600 is ~1.9 MB, comfortable for
+/// JSON+base64 over WebSocket at the cadence we run at.
+const CAPTURE_MAX_DIM: u32 = 800;
+
+/// Period between successive captures of the same window. Low-rate
+/// for v0.2 — once we move pixels onto the WebRTC data channel we'll
+/// crank this up.
+const CAPTURE_PERIOD: Duration = Duration::from_secs(1);
 
 /// Layer 0 = "normal" application windows. Higher layers are menubar
 /// items (25), the dock (20), tooltips/popovers, etc. cua-driver uses
@@ -31,16 +42,18 @@ const TOP_LEVEL_LAYER: i32 = 0;
 /// for some system services that we don't want to surface as frames.
 const MIN_DIMENSION: f64 = 2.0;
 
-#[derive(Clone)]
 struct Tracked {
     uuid: String,
     pid: i32,
     bounds: WindowBounds,
     title: String,
+    capture_handle: tokio::task::JoinHandle<()>,
 }
 
 /// Spawn the enumeration task. Sends `SidecarToBackend` messages on
-/// `tx` for every window state change.
+/// `tx` for every window state change, and a per-window capture task
+/// per tracked window that streams `PutImage` updates at
+/// `CAPTURE_PERIOD`.
 pub fn spawn(tx: mpsc::UnboundedSender<SidecarToBackend>) {
     tokio::spawn(async move {
         let mut tracked: HashMap<CGWindowID, Tracked> = HashMap::new();
@@ -63,6 +76,7 @@ pub fn spawn(tx: mpsc::UnboundedSender<SidecarToBackend>) {
                 let uuid = Uuid::new_v4().to_string();
                 announce_pid_if_new(&mut announced_pids, win, &tx);
                 emit_created(&tx, &uuid, win);
+                let capture_handle = spawn_capture_loop(*id, uuid.clone(), win.pid, tx.clone());
                 tracked.insert(
                     *id,
                     Tracked {
@@ -70,6 +84,7 @@ pub fn spawn(tx: mpsc::UnboundedSender<SidecarToBackend>) {
                         pid: win.pid,
                         bounds: win.bounds,
                         title: win.name.clone(),
+                        capture_handle,
                     },
                 );
             }
@@ -93,6 +108,7 @@ pub fn spawn(tx: mpsc::UnboundedSender<SidecarToBackend>) {
                 if current.contains_key(id) {
                     true
                 } else {
+                    prev.capture_handle.abort();
                     let _ = tx.send(SidecarToBackend::DisplayUpdate {
                         client_id: client_id_for_pid(prev.pid),
                         update: DisplayUpdate::WindowDestroyed {
@@ -104,6 +120,47 @@ pub fn spawn(tx: mpsc::UnboundedSender<SidecarToBackend>) {
             });
         }
     });
+}
+
+/// Per-window capture task: every `CAPTURE_PERIOD`, capture and emit
+/// a `PutImage` covering the whole window. Aborted by the enumerator
+/// when the window vanishes.
+fn spawn_capture_loop(
+    cg_id: CGWindowID,
+    uuid: String,
+    pid: i32,
+    tx: mpsc::UnboundedSender<SidecarToBackend>,
+) -> tokio::task::JoinHandle<()> {
+    let client_id = client_id_for_pid(pid);
+    tokio::spawn(async move {
+        let mut tick = interval(CAPTURE_PERIOD);
+        // Skip the first tick — `interval` fires immediately, and we
+        // already raced the WindowCreated/Mapped emit; let the
+        // frontend draw the empty frame first to avoid the canvas
+        // flickering between sizes.
+        tick.tick().await;
+        loop {
+            tick.tick().await;
+            match capture_window(cg_id, CAPTURE_MAX_DIM).await {
+                Ok(frame) => {
+                    let _ = tx.send(SidecarToBackend::DisplayUpdate {
+                        client_id: client_id.clone(),
+                        update: DisplayUpdate::PutImage {
+                            window_id: uuid.clone(),
+                            x: 0,
+                            y: 0,
+                            width: frame.width.min(u16::MAX as u32) as u16,
+                            height: frame.height.min(u16::MAX as u32) as u16,
+                            data: frame.rgba,
+                        },
+                    });
+                }
+                Err(e) => {
+                    warn!("capture failed for window {cg_id} ({client_id}): {e}");
+                }
+            }
+        }
+    })
 }
 
 fn is_renderable(w: &WindowInfo) -> bool {

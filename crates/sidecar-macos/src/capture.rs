@@ -15,33 +15,32 @@
 //!   5. Drain CGImage's data provider, swap channels into RGBA, drop
 //!      any per-row padding.
 //!
-//! Both Apple async entrypoints in step 1 and 4 deliver via ObjC
-//! completion blocks; we bridge to Rust async with `tokio::sync::
-//! oneshot` and a `Mutex<Option<Sender>>` to satisfy `RcBlock`'s `Fn`
-//! constraint (the block is structurally callable many times even
-//! though Apple only ever calls it once).
+//! The chain is structured as **nested ObjC completion handlers** —
+//! `getShareableContent`'s callback synchronously kicks off
+//! `captureImage`'s callback, which extracts pixels and sends the
+//! resulting `CapturedFrame` through a single `oneshot`. This shape
+//! keeps every ObjC type (SCShareableContent, SCWindow,
+//! SCContentFilter, CGImage) inside the ObjC-owned thread context,
+//! so the only thing crossing Rust's `.await` boundary is
+//! `oneshot::Receiver<Result<CapturedFrame, String>>` — which IS
+//! `Send`, allowing `capture_window` to be called from
+//! `tokio::spawn`'d tasks.
 
 use std::ptr::NonNull;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
 use block2::RcBlock;
 use objc2::rc::Retained;
 use objc2::AllocAnyThread;
-use objc2_core_foundation::{CFData, CFRetained};
+use objc2_core_foundation::CFRetained;
 use objc2_core_graphics::{
     CGDataProvider, CGImage, CGImageAlphaInfo, CGImageByteOrderInfo,
 };
 use objc2_foundation::NSError;
 use objc2_screen_capture_kit::{
-    SCContentFilter, SCScreenshotManager, SCShareableContent, SCStreamConfiguration, SCWindow,
+    SCContentFilter, SCScreenshotManager, SCShareableContent, SCStreamConfiguration,
 };
 use tokio::sync::oneshot;
-
-// Pulled in for the deprecated `capture_window_legacy` path that
-// uses `CGWindowListCreateImage`. Kept alongside the SCK code so
-// callers can pick whichever works on the host's macOS / TCC state.
-use core_graphics::geometry::CGRect as LegacyRect;
-use core_graphics::window as legacy_win;
 
 #[derive(Debug)]
 pub enum CaptureError {
@@ -70,6 +69,7 @@ impl std::fmt::Display for CaptureError {
 
 impl std::error::Error for CaptureError {}
 
+#[derive(Debug, Clone)]
 pub struct CapturedFrame {
     pub width: u32,
     pub height: u32,
@@ -77,94 +77,150 @@ pub struct CapturedFrame {
     pub rgba: Vec<u8>,
 }
 
-pub async fn capture_window(window_id: u32) -> Result<CapturedFrame, CaptureError> {
-    let content = fetch_shareable_content().await?;
-    let target = find_window(&content, window_id)?;
+/// One-shot completion delivered by the nested ObjC blocks.
+type FrameSender = oneshot::Sender<Result<CapturedFrame, String>>;
+type SharedSender = Arc<Mutex<Option<FrameSender>>>;
 
-    let filter = unsafe {
-        SCContentFilter::initWithDesktopIndependentWindow(SCContentFilter::alloc(), &target)
-    };
+/// Capture `window_id` and return its pixels as packed RGBA.
+///
+/// `max_dim`, if non-zero, caps the longer side of the captured
+/// image (in points) — SCK does the downscale internally during
+/// capture, so neither the wire payload nor our extract loop pay
+/// for the extra pixels. A typical desktop window at 1600×1000
+/// emits ~6.4 MB of RGBA at full size; capping to `max_dim = 800`
+/// brings that to ~1.6 MB which JSON-over-WebSocket can carry at
+/// a couple Hz without choking.
+///
+/// Send-friendly: holds only `oneshot::Receiver` across `.await`,
+/// never ObjC types.
+pub async fn capture_window(window_id: u32, max_dim: u32) -> Result<CapturedFrame, CaptureError> {
+    let (tx, rx) = oneshot::channel::<Result<CapturedFrame, String>>();
+    let sender: SharedSender = Arc::new(Mutex::new(Some(tx)));
 
-    // SCK takes points (logical pixels). The window's `frame` is
-    // already in points — we let SCK do the scale-up to physical
-    // pixels via the display's `backingScaleFactor`. Multiplying
-    // here would double-apply the scale on Retina.
-    let frame = unsafe { target.frame() };
-    let width = frame.size.width.max(1.0) as usize;
-    let height = frame.size.height.max(1.0) as usize;
-
-    let config = unsafe { SCStreamConfiguration::new() };
-    unsafe {
-        config.setWidth(width);
-        config.setHeight(height);
-        config.setShowsCursor(false);
-    }
-
-    let image = capture_image(&filter, &config).await?;
-    extract_rgba(&image)
-}
-
-async fn fetch_shareable_content() -> Result<Retained<SCShareableContent>, CaptureError> {
-    let (tx, rx) = oneshot::channel();
-    let tx = Mutex::new(Some(tx));
-    let block = RcBlock::new(move |content: *mut SCShareableContent, err: *mut NSError| {
-        let result = if let Some(c) = NonNull::new(content) {
-            Ok(unsafe { Retained::retain(c.as_ptr()).unwrap() })
-        } else {
-            Err(error_message(err))
-        };
-        if let Some(s) = tx.lock().unwrap().take() {
-            let _ = s.send(result);
+    // Tight scope around the !Send `RcBlock` so Rust's drop-tracker
+    // can prove it doesn't outlive the SCK call; without this the
+    // compiler keeps it alive across the `.await` and the future
+    // becomes non-`Send`, blocking `tokio::spawn`. SCK calls
+    // `Block_copy` internally, so it owns its own retain — dropping
+    // our `RcBlock` here is safe.
+    {
+        let outer = build_outer_block(window_id, max_dim, sender);
+        unsafe {
+            SCShareableContent::getShareableContentWithCompletionHandler(&outer);
         }
-    });
-    unsafe {
-        SCShareableContent::getShareableContentWithCompletionHandler(&block);
     }
-    rx.await
-        .map_err(|_| CaptureError::NoContent("completion handler dropped".into()))?
-        .map_err(CaptureError::NoContent)
-}
 
-async fn capture_image(
-    filter: &SCContentFilter,
-    config: &SCStreamConfiguration,
-) -> Result<CFRetained<CGImage>, CaptureError> {
-    let (tx, rx) = oneshot::channel();
-    let tx = Mutex::new(Some(tx));
-    let block = RcBlock::new(move |image: *mut CGImage, err: *mut NSError| {
-        let result = if let Some(p) = NonNull::new(image) {
-            Ok(unsafe { CFRetained::retain(p) })
-        } else {
-            Err(error_message(err))
-        };
-        if let Some(s) = tx.lock().unwrap().take() {
-            let _ = s.send(result);
-        }
-    });
-    unsafe {
-        SCScreenshotManager::captureImageWithFilter_configuration_completionHandler(
-            filter,
-            config,
-            Some(&block),
-        );
-    }
     rx.await
         .map_err(|_| CaptureError::CaptureFailed("completion handler dropped".into()))?
-        .map_err(CaptureError::CaptureFailed)
+        .map_err(|e| {
+            // Heuristic: TCC failures are routed through `NoContent`
+            // so callers can offer the right log message.
+            if e.contains("declined") || e.contains("authorized") || e.contains("permission") {
+                CaptureError::NoContent(e)
+            } else if let Some(rest) = e.strip_prefix("window-not-found:") {
+                CaptureError::WindowNotFound(rest.parse().unwrap_or(0))
+            } else {
+                CaptureError::CaptureFailed(e)
+            }
+        })
+}
+
+fn build_outer_block(
+    window_id: u32,
+    max_dim: u32,
+    sender: SharedSender,
+) -> RcBlock<dyn Fn(*mut SCShareableContent, *mut NSError)> {
+    RcBlock::new(move |content: *mut SCShareableContent, err: *mut NSError| {
+        let Some(content_nn) = NonNull::new(content) else {
+            send_err(&sender, error_message(err));
+            return;
+        };
+        // SAFETY: `getShareableContent`'s contract: when err is null,
+        // content is a valid SCShareableContent. We're inside that
+        // callback path.
+        let content_ref: &SCShareableContent = unsafe { content_nn.as_ref() };
+
+        let target = match find_window(content_ref, window_id) {
+            Some(w) => w,
+            None => {
+                send_err(&sender, format!("window-not-found:{window_id}"));
+                return;
+            }
+        };
+
+        let filter = unsafe {
+            SCContentFilter::initWithDesktopIndependentWindow(SCContentFilter::alloc(), &target)
+        };
+        // SCK takes points (logical pixels). The window's `frame` is
+        // already in points — SCK does the scale-up to physical
+        // pixels internally via the display's backing scale.
+        let frame = unsafe { target.frame() };
+        let (width, height) =
+            constrained_size(frame.size.width, frame.size.height, max_dim);
+        let config = unsafe { SCStreamConfiguration::new() };
+        unsafe {
+            config.setWidth(width);
+            config.setHeight(height);
+            config.setShowsCursor(false);
+        }
+
+        // Nested completion: extract bytes inside ObjC, ship Vec<u8>
+        // out — never a !Send ObjC type — through the same sender.
+        let inner = build_inner_block(sender.clone());
+        unsafe {
+            SCScreenshotManager::captureImageWithFilter_configuration_completionHandler(
+                &filter,
+                &config,
+                Some(&inner),
+            );
+        }
+        // inner drops here; SCK's Block_copy keeps it alive.
+    })
+}
+
+fn build_inner_block(sender: SharedSender) -> RcBlock<dyn Fn(*mut CGImage, *mut NSError)> {
+    RcBlock::new(move |image: *mut CGImage, err: *mut NSError| {
+        let result = match NonNull::new(image) {
+            Some(p) => {
+                // SAFETY: We're in the captureImage completion
+                // callback; when image is non-null, it points to a
+                // valid CGImage. We don't keep it past this scope.
+                let img: &CGImage = unsafe { p.as_ref() };
+                extract_rgba(img).map_err(|e| format!("{e}"))
+            }
+            None => Err(error_message(err)),
+        };
+        send_result(&sender, result);
+    })
+}
+
+fn constrained_size(width: f64, height: f64, max_dim: u32) -> (usize, usize) {
+    let w = width.max(1.0);
+    let h = height.max(1.0);
+    if max_dim == 0 {
+        return (w as usize, h as usize);
+    }
+    let cap = max_dim as f64;
+    let larger = w.max(h);
+    if larger <= cap {
+        return (w as usize, h as usize);
+    }
+    let scale = cap / larger;
+    ((w * scale).max(1.0) as usize, (h * scale).max(1.0) as usize)
 }
 
 fn find_window(
     content: &SCShareableContent,
     window_id: u32,
-) -> Result<Retained<SCWindow>, CaptureError> {
+) -> Option<Retained<objc2_screen_capture_kit::SCWindow>> {
     let windows = unsafe { content.windows() };
     for i in 0..windows.count() {
         let w = windows.objectAtIndex(i);
         if unsafe { w.windowID() } == window_id {
-            return Ok(w);
+            return Some(w);
         }
     }
-    Err(CaptureError::WindowNotFound(window_id))
+    None
 }
 
 fn extract_rgba(image: &CGImage) -> Result<CapturedFrame, CaptureError> {
@@ -177,7 +233,7 @@ fn extract_rgba(image: &CGImage) -> Result<CapturedFrame, CaptureError> {
     }
 
     let provider = CGImage::data_provider(Some(image)).ok_or(CaptureError::BadImage)?;
-    let data: CFRetained<CFData> =
+    let data: CFRetained<objc2_core_foundation::CFData> =
         CGDataProvider::data(Some(&provider)).ok_or(CaptureError::BadImage)?;
 
     let len = data.length() as usize;
@@ -209,8 +265,7 @@ fn extract_rgba(image: &CGImage) -> Result<CapturedFrame, CaptureError> {
                 rgba.extend_from_slice(&[px[2], px[1], px[0], px[3]]);
             }
         } else {
-            // Trust the source — already RGBA-shaped. Defensive
-            // because cua-driver assumes BGRA, but on non-Retina
+            // Defensive: cua-driver assumes BGRA, but on non-Retina
             // / non-SDR captures the layout can shift.
             rgba.extend_from_slice(row_bytes);
         }
@@ -223,67 +278,16 @@ fn extract_rgba(image: &CGImage) -> Result<CapturedFrame, CaptureError> {
     })
 }
 
-/// Synchronous fallback capture using `CGWindowListCreateImage`. The
-/// API is deprecated as of macOS 14 — Apple's intent is for everything
-/// to flow through ScreenCaptureKit + Screen Recording TCC — but the
-/// shim still ships, and on systems where it works it sidesteps the
-/// async-block dance entirely. Useful for verifying the rest of the
-/// pipeline (encode → wire → frontend canvas) without first solving
-/// TCC for the SCK path.
-///
-/// Caveats per Apple's deprecation notice:
-///   - Returns blank/clipped images for occluded windows on macOS 14+
-///   - Future macOS versions are expected to remove it entirely
-///   - Doesn't capture off-Space windows reliably
-///
-/// All of which is why cua uses ScreenCaptureKit. We keep this around
-/// as a smoke-test affordance.
-pub fn capture_window_legacy(window_id: u32) -> Result<CapturedFrame, CaptureError> {
-    let opts = legacy_win::kCGWindowListOptionIncludingWindow
-        | legacy_win::kCGWindowListExcludeDesktopElements;
-    let image_opts = legacy_win::kCGWindowImageBoundsIgnoreFraming
-        | legacy_win::kCGWindowImageBestResolution;
-    // Passing `CGRectNull` (all zeros sentinel) requests the window's
-    // own bounds. core-graphics 0.24 doesn't export the constant, so
-    // we hand-construct the equivalent: width/height = infinity.
-    let null_rect = LegacyRect::new(
-        &core_graphics::geometry::CGPoint::new(f64::INFINITY, f64::INFINITY),
-        &core_graphics::geometry::CGSize::new(0.0, 0.0),
-    );
-    let img = legacy_win::create_image(null_rect, opts, window_id, image_opts)
-        .ok_or_else(|| CaptureError::CaptureFailed(
-            "CGWindowListCreateImage returned null".into(),
-        ))?;
+fn send_err(sender: &SharedSender, msg: String) {
+    send_result(sender, Err(msg));
+}
 
-    let width = img.width();
-    let height = img.height();
-    let bytes_per_row = img.bytes_per_row();
-    let bits_per_pixel = img.bits_per_pixel();
-    if width == 0 || height == 0 || bits_per_pixel != 32 {
-        return Err(CaptureError::BadImage);
-    }
-    let data = img.data();
-    let raw: &[u8] = data.bytes();
-    if raw.len() < bytes_per_row * height {
-        return Err(CaptureError::BadImage);
-    }
-
-    // CGWindowListCreateImage returns BGRA premultiplied, same as SCK
-    // SDR captures.
-    let mut rgba = Vec::with_capacity(width * height * 4);
-    for row in 0..height {
-        let start = row * bytes_per_row;
-        let row_bytes = &raw[start..start + width * 4];
-        for px in row_bytes.chunks_exact(4) {
-            rgba.extend_from_slice(&[px[2], px[1], px[0], px[3]]);
+fn send_result(sender: &SharedSender, result: Result<CapturedFrame, String>) {
+    if let Ok(mut guard) = sender.lock() {
+        if let Some(s) = guard.take() {
+            let _ = s.send(result);
         }
     }
-
-    Ok(CapturedFrame {
-        width: width as u32,
-        height: height as u32,
-        rgba,
-    })
 }
 
 fn error_message(err: *mut NSError) -> String {
