@@ -67,6 +67,26 @@ believes there is leftover payload after parsing. Pre-existing on
   whether the WM's response actually maps to a canvas-size update on
   the frontend.
 
+### `tests/app-compatibility.spec.ts` — 5 tests skipped
+
+- **`clipboard data persists after source app exits`**: We need an
+  in-server clipboard manager that takes over CLIPBOARD ownership when
+  the original owner disconnects. Right now the data is lost the moment
+  xclip exits.
+- **`GTK3 app can query XSETTINGS for theme`**: We don't advertise an
+  `_XSETTINGS_S0` selection owner with a settings property, so GTK3
+  apps fall back to "no theme" and gtk3-demo flakes around startup.
+- **`editres starts without crash`**: editres expects extensive Xt /
+  resource introspection; it dies during startup in our environment
+  before the test's pkill detects it.
+- **`xterm with Athena scrollbar renders`**: `xterm -sb -rightbar`
+  doesn't show up in `xwininfo -root -tree`. Our server probably isn't
+  tracking the scrollbar child window correctly under the Athena
+  toolkit's wider window tree.
+- **`xdotool sends keystrokes to a specific window`**: After
+  `xdotool windowfocus + xdotool type`, the typed text never lands in
+  the focused xterm. Likely an XTEST / SetInputFocus interaction bug.
+
 ### `tests/deep-conformance.spec.ts:213` — `x11perf window operations` skipped
 
 `x11perf -create -map -unmap -destroy -resize -move` runs past
