@@ -170,91 +170,11 @@ pub(crate) fn build_device_key_mapping_reply(
     crate::xinput2::serialize_xi_reply(&reply, msb_first)
 }
 
-/// Minimal US keyboard layout mapping for XI 1.x GetDeviceKeyMapping.
-/// Returns (normal_keysym, shifted_keysym) for a given keycode.
+/// US keyboard layout mapping for XI 1.x GetDeviceKeyMapping. Delegates to
+/// the shared libxkbcommon-driven `keycode_to_keysym` so both the core and
+/// XInput key-mapping replies stay consistent.
 pub(crate) fn keycode_to_keysym_xi(keycode: u8) -> (u32, u32) {
-    match keycode {
-        9 => (0xff1b, 0xff1b),  // Escape
-        10 => (0x31, 0x21),     // 1 / !
-        11 => (0x32, 0x40),     // 2 / @
-        12 => (0x33, 0x23),     // 3 / #
-        13 => (0x34, 0x24),     // 4 / $
-        14 => (0x35, 0x25),     // 5 / %
-        15 => (0x36, 0x5e),     // 6 / ^
-        16 => (0x37, 0x26),     // 7 / &
-        17 => (0x38, 0x2a),     // 8 / *
-        18 => (0x39, 0x28),     // 9 / (
-        19 => (0x30, 0x29),     // 0 / )
-        20 => (0x2d, 0x5f),     // - / _
-        21 => (0x3d, 0x2b),     // = / +
-        22 => (0xff08, 0xff08), // BackSpace
-        23 => (0xff09, 0xfe20), // Tab / ISO_Left_Tab
-        24 => (0x71, 0x51),     // q / Q
-        25 => (0x77, 0x57),     // w / W
-        26 => (0x65, 0x45),     // e / E
-        27 => (0x72, 0x52),     // r / R
-        28 => (0x74, 0x54),     // t / T
-        29 => (0x79, 0x59),     // y / Y
-        30 => (0x75, 0x55),     // u / U
-        31 => (0x69, 0x49),     // i / I
-        32 => (0x6f, 0x4f),     // o / O
-        33 => (0x70, 0x50),     // p / P
-        34 => (0x5b, 0x7b),     // [ / {
-        35 => (0x5d, 0x7d),     // ] / }
-        36 => (0xff0d, 0xff0d), // Return
-        37 => (0xffe3, 0xffe3), // Control_L
-        38 => (0x61, 0x41),     // a / A
-        39 => (0x73, 0x53),     // s / S
-        40 => (0x64, 0x44),     // d / D
-        41 => (0x66, 0x46),     // f / F
-        42 => (0x67, 0x47),     // g / G
-        43 => (0x68, 0x48),     // h / H
-        44 => (0x6a, 0x4a),     // j / J
-        45 => (0x6b, 0x4b),     // k / K
-        46 => (0x6c, 0x4c),     // l / L
-        47 => (0x3b, 0x3a),     // ; / :
-        48 => (0x27, 0x22),     // ' / "
-        49 => (0x60, 0x7e),     // ` / ~
-        50 => (0xffe1, 0xffe1), // Shift_L
-        51 => (0x5c, 0x7c),     // \ / |
-        52 => (0x7a, 0x5a),     // z / Z
-        53 => (0x78, 0x58),     // x / X
-        54 => (0x63, 0x43),     // c / C
-        55 => (0x76, 0x56),     // v / V
-        56 => (0x62, 0x42),     // b / B
-        57 => (0x6e, 0x4e),     // n / N
-        58 => (0x6d, 0x4d),     // m / M
-        59 => (0x2c, 0x3c),     // , / <
-        60 => (0x2e, 0x3e),     // . / >
-        61 => (0x2f, 0x3f),     // / / ?
-        62 => (0xffe2, 0xffe2), // Shift_R
-        63 => (0xffaa, 0xffaa), // KP_Multiply
-        64 => (0xffe9, 0xffe9), // Alt_L
-        65 => (0x20, 0x20),     // space
-        66 => (0xffe5, 0xffe5), // Caps_Lock
-        67..=76 => {
-            // F1-F10
-            let fkey = 0xffbe + (keycode - 67) as u32;
-            (fkey, fkey)
-        }
-        95 => (0xffc8, 0xffc8),  // F11
-        96 => (0xffc9, 0xffc9),  // F12
-        105 => (0xffe4, 0xffe4), // Control_R
-        108 => (0xffea, 0xffea), // Alt_R
-        110 => (0xff50, 0xff50), // Home
-        111 => (0xff52, 0xff52), // Up
-        112 => (0xff55, 0xff55), // Prior/PageUp
-        113 => (0xff51, 0xff51), // Left
-        114 => (0xff53, 0xff53), // Right
-        115 => (0xff57, 0xff57), // End
-        116 => (0xff54, 0xff54), // Down
-        117 => (0xff56, 0xff56), // Next/PageDown
-        118 => (0xff63, 0xff63), // Insert
-        119 => (0xffff, 0xffff), // Delete
-        133 => (0xffeb, 0xffeb), // Super_L
-        134 => (0xffec, 0xffec), // Super_R
-        _ => (0, 0),             // NoSymbol
-    }
+    crate::xserver::handlers::keycode_to_keysym(keycode)
 }
 
 /// Build a GetDeviceModifierMapping reply with the standard modifier map.
