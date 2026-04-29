@@ -614,12 +614,16 @@ fn xi_allow_events_async_thaws_pointer() {
     xi_state.pointer_frozen = true;
     xi_state.frozen_pointer_events.push(vec![1, 2, 3]);
 
-    // XIAllowEvents: [major, minor, length, time(4), deviceid(2), mode(1), pad(1)]
-    let mut req = vec![XI_MAJOR_OPCODE, xi::XI_ALLOW_EVENTS_REQUEST, 3, 0];
+    // XIAllowEvents wire layout per x11rb: time(4) + deviceid(2) + mode(1)
+    // + pad(1) + touchid(4) + grab_window(4) = 16 bytes body, plus 4 byte
+    // header = length 5.
+    let mut req = vec![XI_MAJOR_OPCODE, xi::XI_ALLOW_EVENTS_REQUEST, 5, 0];
     req.extend_from_slice(&0u32.to_le_bytes()); // time
     req.extend_from_slice(&MASTER_POINTER_ID.to_le_bytes()); // deviceid
     req.push(0); // mode = AsyncDevice
     req.push(0); // pad
+    req.extend_from_slice(&0u32.to_le_bytes()); // touchid
+    req.extend_from_slice(&0u32.to_le_bytes()); // grab_window
 
     call_handle_request(&req, 6, &mut xi_state, &mut focus);
     assert!(!xi_state.pointer_frozen);
@@ -858,7 +862,8 @@ fn get_device_key_mapping_returns_keysyms() {
         reply.len() >= 48,
         "should have 32-byte header + 4 keysyms × 4 bytes"
     );
-    assert_eq!(reply[1], 4); // keysyms_per_keycode = 4
+    // keysyms_per_keycode sits at offset 8 (after the 8-byte XI reply header).
+    assert_eq!(reply[8], 4, "keysyms_per_keycode = 4");
 
     // First keysym for keycode 38 should be 'a' (0x61)
     let keysym0 = u32::from_le_bytes([reply[32], reply[33], reply[34], reply[35]]);
@@ -880,7 +885,8 @@ fn query_device_state_pointer_returns_valuators() {
 
     let reply = call_handle_request(&req, 4, &mut xi_state, &mut focus);
     assert!(reply.len() >= 32);
-    assert_eq!(reply[12], 2); // num_classes = 2 (button + valuator)
+    // num_classes (u8) sits at offset 8.
+    assert_eq!(reply[8], 2, "num_classes should be 2 (button + valuator)");
 }
 
 #[test]
@@ -888,17 +894,18 @@ fn dont_propagate_list_roundtrip() {
     let mut xi_state = XiState::default();
     let mut focus = 0x62u32;
 
-    // ChangeDeviceDontPropagateList: add event class 42 to window 0x100
+    // ChangeDeviceDontPropagateList: add event class 42 to window 0x100.
+    // Request length is 4 words (16 bytes) once a single class is included.
     let mut req = vec![
         XI_MAJOR_OPCODE,
         8, // ChangeDeviceDontPropagateList
-        3,
-        0, // length
+        4,
+        0, // length = 4 words = 16 bytes
     ];
     req.extend_from_slice(&0x100u32.to_le_bytes()); // window
     req.extend_from_slice(&1u16.to_le_bytes()); // count = 1
     req.push(0); // mode = Add
-    req.push(0); // pad
+    req.push(0); // device_id (unused)
     req.extend_from_slice(&42u32.to_le_bytes()); // event class
 
     call_handle_request(&req, 5, &mut xi_state, &mut focus);
@@ -914,8 +921,9 @@ fn dont_propagate_list_roundtrip() {
 
     let reply = call_handle_request(&get_req, 6, &mut xi_state, &mut focus);
     assert!(reply.len() >= 32);
-    // count should be 1
-    let count = u16::from_le_bytes([reply[12], reply[13]]);
+    // num_classes lives right after the 8-byte reply header (type, xi_reply,
+    // sequence, length).
+    let count = u16::from_le_bytes([reply[8], reply[9]]);
     assert_eq!(count, 1, "should have 1 event class in the list");
 }
 
@@ -937,10 +945,11 @@ fn get_device_button_mapping_identity() {
 
     let reply = call_handle_request(&req, 7, &mut xi_state, &mut focus);
     assert!(reply.len() >= 32);
-    // n_buttons is in reply[1]
-    let n_buttons = reply[1];
+    // n_buttons sits at offset 8 (after response_type + xi_reply_type +
+    // sequence + length, total 8 bytes).
+    let n_buttons = reply[8];
     assert_eq!(n_buttons, 7, "should have 7 buttons");
-    // Check identity mapping
+    // Identity mapping: reply[32..32+n_buttons] = [1, 2, ..., n_buttons].
     for i in 0..n_buttons as usize {
         assert_eq!(
             reply[32 + i],
@@ -969,7 +978,9 @@ fn get_device_modifier_mapping_has_modifiers() {
 
     let reply = call_handle_request(&req, 8, &mut xi_state, &mut focus);
     assert!(reply.len() >= 32);
-    let keycodes_per_mod = reply[1];
+    // keycodes_per_modifier sits at offset 8 (right after the 8-byte XI
+    // reply header).
+    let keycodes_per_mod = reply[8];
     assert_eq!(keycodes_per_mod, 2, "should have 2 keycodes per modifier");
     // Shift modifier should map to keycodes 50 and 62
     assert_eq!(reply[32], 50, "Shift_L");
