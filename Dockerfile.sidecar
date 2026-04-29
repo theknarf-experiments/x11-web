@@ -10,6 +10,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libpulse-dev \
     # Opus codec dev libs
     libopus-dev \
+    # libxkbcommon for keymap compilation + compose
+    libxkbcommon-dev \
     && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 ARG CACHE_BUST=0

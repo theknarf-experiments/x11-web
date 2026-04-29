@@ -53,6 +53,8 @@ opus = "0.3"
 dcv-color-primitives = "1"
 # 2D rasterizer used for RENDER trapezoid/triangle anti-aliased coverage
 tiny-skia = { version = "0.12", default-features = false, features = ["std", "simd"] }
+# libxkbcommon bindings — keysym resolution + compose state machine
+xkbcommon = "0.9"
 # PulseAudio client for audio capture/playback
 libpulse-binding = "2"
 libpulse-simple-binding = "2"
