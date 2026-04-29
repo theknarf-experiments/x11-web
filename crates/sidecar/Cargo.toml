@@ -49,6 +49,8 @@ zbus = { version = "4", default-features = false, features = ["tokio"] }
 str0m = { version = "0.18", default-features = false, features = ["openssl"] }
 # Opus codec for audio encoding/decoding
 opus = "0.3"
+# SIMD-optimized YUV<->RGB color conversion for XVideo
+dcv-color-primitives = "1"
 # PulseAudio client for audio capture/playback
 libpulse-binding = "2"
 libpulse-simple-binding = "2"

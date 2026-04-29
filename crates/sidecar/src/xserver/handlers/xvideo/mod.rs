@@ -1,5 +1,6 @@
 //! XVideo (Xv) extension handler.
 
+mod dcv_convert;
 mod image;
 mod notify;
 mod port;

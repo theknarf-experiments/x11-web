@@ -83,81 +83,6 @@ fn select_converter(colorspace: i32) -> YuvToRgb {
     }
 }
 
-/// Convert I420 (planar YUV 4:2:0) data to ARGB32.
-///
-/// Layout: Y plane (width * height), U plane (width/2 * height/2), V plane (width/2 * height/2).
-fn convert_i420_to_argb(yuv: &[u8], width: u32, height: u32, conv: YuvToRgb) -> Vec<u8> {
-    let w = width as usize;
-    let h = height as usize;
-    let y_size = w * h;
-    let uv_stride = w.div_ceil(2);
-    let uv_size = uv_stride * h.div_ceil(2);
-
-    if yuv.len() < y_size + 2 * uv_size {
-        return vec![0u8; w * h * 4];
-    }
-
-    let y_plane = &yuv[..y_size];
-    let u_plane = &yuv[y_size..y_size + uv_size];
-    let v_plane = &yuv[y_size + uv_size..y_size + 2 * uv_size];
-
-    let mut argb = vec![0u8; w * h * 4];
-    for row in 0..h {
-        for col in 0..w {
-            let y = y_plane[row * w + col];
-            let uv_row = row / 2;
-            let uv_col = col / 2;
-            let u = u_plane[uv_row * uv_stride + uv_col];
-            let v = v_plane[uv_row * uv_stride + uv_col];
-            let (r, g, b) = conv(y, u, v);
-            let off = (row * w + col) * 4;
-            argb[off] = b; // B
-            argb[off + 1] = g; // G
-            argb[off + 2] = r; // R
-            argb[off + 3] = 0xFF; // A
-        }
-    }
-    argb
-}
-
-/// Convert YV12 (planar YUV 4:2:0, V before U) data to ARGB32.
-///
-/// Layout: Y plane (width * height), V plane (width/2 * height/2), U plane (width/2 * height/2).
-fn convert_yv12_to_argb(yuv: &[u8], width: u32, height: u32, conv: YuvToRgb) -> Vec<u8> {
-    let w = width as usize;
-    let h = height as usize;
-    let y_size = w * h;
-    let uv_stride = w.div_ceil(2);
-    let uv_size = uv_stride * h.div_ceil(2);
-
-    if yuv.len() < y_size + 2 * uv_size {
-        return vec![0u8; w * h * 4];
-    }
-
-    let y_plane = &yuv[..y_size];
-    // YV12: V before U
-    let v_plane = &yuv[y_size..y_size + uv_size];
-    let u_plane = &yuv[y_size + uv_size..y_size + 2 * uv_size];
-
-    let mut argb = vec![0u8; w * h * 4];
-    for row in 0..h {
-        for col in 0..w {
-            let y = y_plane[row * w + col];
-            let uv_row = row / 2;
-            let uv_col = col / 2;
-            let u = u_plane[uv_row * uv_stride + uv_col];
-            let v = v_plane[uv_row * uv_stride + uv_col];
-            let (r, g, b) = conv(y, u, v);
-            let off = (row * w + col) * 4;
-            argb[off] = b;
-            argb[off + 1] = g;
-            argb[off + 2] = r;
-            argb[off + 3] = 0xFF;
-        }
-    }
-    argb
-}
-
 /// Convert YUY2 (packed YUV 4:2:2) data to ARGB32.
 ///
 /// Layout: [Y0, U0, Y1, V0] repeated. Each 4-byte macro-pixel encodes 2 horizontal pixels.
@@ -263,81 +188,6 @@ fn convert_uyvy_to_argb(yuv: &[u8], width: u32, height: u32, conv: YuvToRgb) -> 
                 argb[dst + 2] = r;
                 argb[dst + 3] = 0xFF;
             }
-        }
-    }
-    argb
-}
-
-/// Convert NV12 (semi-planar YUV 4:2:0, interleaved UV) data to ARGB32.
-///
-/// Layout: Y plane (width * height), then interleaved UV pairs (width/2 * height/2 * 2 bytes).
-fn convert_nv12_to_argb(data: &[u8], width: u32, height: u32, conv: YuvToRgb) -> Vec<u8> {
-    let w = width as usize;
-    let h = height as usize;
-    let y_size = w * h;
-    let uv_stride = w.div_ceil(2) * 2; // interleaved UV, so stride is width (rounded up to even)
-    let uv_rows = h.div_ceil(2);
-    let uv_size = uv_stride * uv_rows;
-
-    if data.len() < y_size + uv_size {
-        return vec![0u8; w * h * 4];
-    }
-
-    let y_plane = &data[..y_size];
-    let uv_plane = &data[y_size..y_size + uv_size];
-
-    let mut argb = vec![0u8; w * h * 4];
-    for row in 0..h {
-        for col in 0..w {
-            let y = y_plane[row * w + col];
-            let uv_row = row / 2;
-            let uv_col = col / 2;
-            let u = uv_plane[uv_row * uv_stride + uv_col * 2];
-            let v = uv_plane[uv_row * uv_stride + uv_col * 2 + 1];
-            let (r, g, b) = conv(y, u, v);
-            let off = (row * w + col) * 4;
-            argb[off] = b;
-            argb[off + 1] = g;
-            argb[off + 2] = r;
-            argb[off + 3] = 0xFF;
-        }
-    }
-    argb
-}
-
-/// Convert NV21 (semi-planar YUV 4:2:0, interleaved VU) data to ARGB32.
-///
-/// Layout: Y plane (width * height), then interleaved VU pairs (width/2 * height/2 * 2 bytes).
-/// Same as NV12 but with V and U swapped in the interleaved plane.
-fn convert_nv21_to_argb(data: &[u8], width: u32, height: u32, conv: YuvToRgb) -> Vec<u8> {
-    let w = width as usize;
-    let h = height as usize;
-    let y_size = w * h;
-    let uv_stride = w.div_ceil(2) * 2;
-    let uv_rows = h.div_ceil(2);
-    let uv_size = uv_stride * uv_rows;
-
-    if data.len() < y_size + uv_size {
-        return vec![0u8; w * h * 4];
-    }
-
-    let y_plane = &data[..y_size];
-    let vu_plane = &data[y_size..y_size + uv_size];
-
-    let mut argb = vec![0u8; w * h * 4];
-    for row in 0..h {
-        for col in 0..w {
-            let y = y_plane[row * w + col];
-            let uv_row = row / 2;
-            let uv_col = col / 2;
-            let v = vu_plane[uv_row * uv_stride + uv_col * 2];
-            let u = vu_plane[uv_row * uv_stride + uv_col * 2 + 1];
-            let (r, g, b) = conv(y, u, v);
-            let off = (row * w + col) * 4;
-            argb[off] = b;
-            argb[off + 1] = g;
-            argb[off + 2] = r;
-            argb[off + 3] = 0xFF;
         }
     }
     argb
@@ -467,13 +317,16 @@ fn convert_yuv_to_argb(
 ) -> Option<Vec<u8>> {
     let conv = select_converter(colorspace);
     match fourcc {
-        FOURCC_I420 => Some(convert_i420_to_argb(yuv, width, height, conv)),
-        FOURCC_YV12 => Some(convert_yv12_to_argb(yuv, width, height, conv)),
+        // SIMD-optimized planar paths via dcv-color-primitives.
+        FOURCC_I420 => Some(super::dcv_convert::i420_to_bgra(yuv, width, height, colorspace)),
+        FOURCC_YV12 => Some(super::dcv_convert::yv12_to_bgra(yuv, width, height, colorspace)),
+        FOURCC_NV12 => Some(super::dcv_convert::nv12_to_bgra(yuv, width, height, colorspace)),
+        FOURCC_NV21 => Some(super::dcv_convert::nv21_to_bgra(yuv, width, height, colorspace)),
+        // Packed 4:2:2 and 4:2:2 planar formats — dcv 1.0 doesn't support these.
         FOURCC_YUY2 => Some(convert_yuy2_to_argb(yuv, width, height, conv)),
         FOURCC_UYVY => Some(convert_uyvy_to_argb(yuv, width, height, conv)),
-        FOURCC_NV12 => Some(convert_nv12_to_argb(yuv, width, height, conv)),
-        FOURCC_NV21 => Some(convert_nv21_to_argb(yuv, width, height, conv)),
         FOURCC_YV16 => Some(convert_yv16_to_argb(yuv, width, height, conv)),
+        // Trivial / non-YUV formats.
         FOURCC_RGB3 => Some(convert_rgb3_to_argb(yuv, width, height)),
         FOURCC_RV32 => Some(convert_rv32_to_argb(yuv, width, height)),
         FOURCC_Y800 => Some(convert_grey_to_argb(yuv, width, height)),
