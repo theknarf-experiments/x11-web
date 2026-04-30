@@ -50,7 +50,9 @@ use objc2_app_kit::{
     NSApplicationActivationOptions, NSEvent, NSEventType, NSRunningApplication, NSWorkspace,
 };
 use objc2_core_foundation::CGPoint;
-use objc2_core_graphics::{CGEvent, CGEventField, CGEventFlags, CGEventType, CGMouseButton};
+use objc2_core_graphics::{
+    CGEvent, CGEventField, CGEventFlags, CGEventType, CGMouseButton, CGScrollEventUnit,
+};
 use tracing::warn;
 use x11_web_protocol::InputEvent;
 
@@ -85,6 +87,14 @@ const PRIMER_POINT: CGPoint = CGPoint { x: -1.0, y: -1.0 };
 pub fn inject(route: WindowRoute, event: InputEvent) {
     match event {
         InputEvent::ButtonPress { button, x, y, .. } => {
+            // Scroll-wheel buttons (X11 convention: 4/5 vertical,
+            // 6/7 horizontal). Frontend emits one Press/Release
+            // pair per wheel tick, so each ButtonPress becomes one
+            // line-scroll event.
+            if let Some((dy, dx)) = scroll_delta_for_button(button) {
+                send_scroll(&route, dy, dx);
+                return;
+            }
             let Some(cg_button) = map_button(button) else {
                 return;
             };
@@ -105,7 +115,9 @@ pub fn inject(route: WindowRoute, event: InputEvent) {
             }
         }
         InputEvent::ButtonRelease { .. } => {
-            // No-op for AX-only mode.
+            // No-op — scroll-button release is part of the
+            // press/release pair the frontend synthesizes per tick;
+            // we already emitted the wheel event on Press.
         }
         InputEvent::MotionNotify { x, y, .. } => {
             let _ = (x, y);
@@ -709,8 +721,70 @@ fn window_local_to_screen(route: &WindowRoute, x: i16, y: i16) -> CGPoint {
     }
 }
 
+/// X11 scroll-button → (vertical_delta, horizontal_delta) pair in
+/// "line" units. Frontend's wheel handler emits a Press/Release
+/// pair every `THRESHOLD` deltaY of the user's wheel, mapping
+/// vertical scroll to buttons 4/5 and horizontal to 6/7. Each tick
+/// becomes one line-scroll event on our side.
+fn scroll_delta_for_button(x11_button: u8) -> Option<(i32, i32)> {
+    match x11_button {
+        4 => Some((1, 0)),   // wheel up — positive y for natural scroll
+        5 => Some((-1, 0)),  // wheel down
+        6 => Some((0, -1)),  // horizontal left
+        7 => Some((0, 1)),   // horizontal right
+        _ => None,
+    }
+}
+
+/// Synthesize a `CGEventCreateScrollWheelEvent2` line-tick and post
+/// it to `route.pid` through SkyLight (with auth-message envelope,
+/// same path as keyboard).
+///
+/// Compatibility (per cua's `ScrollTool.swift` documentation):
+///   - **AppKit-native** (TextEdit, Finder, Cocoa scroll views):
+///     scrolls cleanly.
+///   - **Chromium** (Arc, Chrome): silently dropped. SkyLight has
+///     no Scroll-specific auth subclass, the factory falls back to
+///     the parent class, and Chromium rejects parent-authed wheel
+///     events. cua works around this with synthesized PageDown /
+///     ArrowDown keystrokes — we may add that later as a fallback.
+fn send_scroll(route: &WindowRoute, dy: i32, dx: i32) {
+    let Some(cg_event) = CGEvent::new_scroll_wheel_event2(
+        None,
+        CGScrollEventUnit::Line,
+        2,
+        dy,
+        dx,
+        0,
+    ) else {
+        warn!("CGEventCreateScrollWheelEvent2 returned null (dy={dy} dx={dx})");
+        return;
+    };
+
+    let raw_event_ptr: *mut std::os::raw::c_void =
+        (&*cg_event as *const CGEvent) as *mut std::os::raw::c_void;
+    // Skip the auth message — same reason the mouse path skips it
+    // (cua's `SkyLightEventPost.swift` lines 240-250). The auth
+    // envelope forks SkyLight onto a direct-mach delivery path
+    // that bypasses `IOHIDPostEvent`, and AppKit's NSScrollView is
+    // wired to the IOHIDPostEvent pipeline. Plain unsigned post
+    // hits the pipeline scroll handlers actually listen on.
+
+    let sky = probe();
+    let posted_via_skylight = if let Some(post) = sky.fns.as_ref().map(|f| f.post_to_pid) {
+        unsafe { post(route.pid, raw_event_ptr) };
+        true
+    } else {
+        false
+    };
+    if !posted_via_skylight {
+        CGEvent::post_to_pid(route.pid, Some(&cg_event));
+    }
+}
+
 /// Map an X11-style button index to a `CGMouseButton`. Returns
-/// `None` for indices we don't translate (scroll buttons 4/5/6/7).
+/// `None` for indices we don't translate (scroll buttons 4/5/6/7
+/// are intercepted at the dispatch site).
 fn map_button(x11_button: u8) -> Option<CGMouseButton> {
     match x11_button {
         1 => Some(CGMouseButton::Left),
