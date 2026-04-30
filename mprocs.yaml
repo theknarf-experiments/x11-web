@@ -4,8 +4,48 @@ procs:
     env:
       RUST_LOG: info
 
-  sidecar:
+  # X11 sidecar (Linux container) — still on WebSocket :3001 until
+  # we migrate it to the QUIC + Cap'n Proto wire protocol the
+  # macOS sidecar uses.
+  sidecar-x11:
     shell: "docker compose -f compose.dev.yml up --build; docker compose -f compose.dev.yml down"
+
+  # macOS sidecar — connects to the backend over QUIC :3002. Builds
+  # the .app bundle (stable codesign identity for TCC), waits for
+  # the backend to write its fingerprint to
+  # `$HOME/.x11web-fingerprint`, then launches via `open` so the
+  # bundle context (and Screen Recording / Accessibility grants)
+  # apply. The fingerprint lives under `$HOME` rather than `target/`
+  # because `open` launches the .app from `/` — relative paths
+  # don't resolve once we cross that boundary.
+  # `open --wait-apps` keeps mprocs blocking so its panel reflects
+  # the sidecar lifecycle.
+  sidecar-macos:
+    shell: |
+      set -e
+      crates/sidecar-macos/scripts/build-app.sh
+      printf 'Waiting for backend fingerprint at %s/.x11web-fingerprint…\n' "$HOME"
+      while [ ! -s "$HOME/.x11web-fingerprint" ]; do sleep 0.2; done
+      printf 'Fingerprint ready: %s\n' "$(cat "$HOME/.x11web-fingerprint")"
+      LOG=/tmp/x11web-sidecar-macos.log
+      : > "$LOG"  # truncate
+      printf 'Sidecar log: %s\n' "$LOG"
+      # `open --stdout /dev/stdout` makes LaunchServices reject the
+      # launch with -10810 — it can't resolve magic /dev paths for
+      # the launched app. Redirect to a real file and tail it so
+      # mprocs's panel still shows the sidecar's output.
+      # Kill the app when this shell exits (mprocs Ctrl+C / restart)
+      # so we don't accumulate stale instances. Registered BEFORE
+      # the launch so even an early failure cleans up. We do NOT
+      # `exec tail` — that would replace the shell process and
+      # discard the trap.
+      trap 'pkill -f X11WebSidecar.app/Contents/MacOS/x11-web-sidecar-macos 2>/dev/null; rm -f "$LOG"' EXIT INT TERM
+      open --stdout "$LOG" --stderr "$LOG" ./target/debug/X11WebSidecar.app
+      tail -f "$LOG" &
+      TAIL_PID=$!
+      # Block on the tail; when mprocs signals us, the trap above
+      # tears down the launched app.
+      wait "$TAIL_PID"
 
   frontend:
     cmd: ["pnpm", "--filter", "frontend", "dev"]

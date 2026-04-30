@@ -33,9 +33,7 @@ use block2::RcBlock;
 use objc2::rc::Retained;
 use objc2::AllocAnyThread;
 use objc2_core_foundation::CFRetained;
-use objc2_core_graphics::{
-    CGDataProvider, CGImage, CGImageAlphaInfo, CGImageByteOrderInfo,
-};
+use objc2_core_graphics::{CGDataProvider, CGImage, CGImageAlphaInfo, CGImageByteOrderInfo};
 use objc2_foundation::NSError;
 use objc2_screen_capture_kit::{
     SCContentFilter, SCScreenshotManager, SCShareableContent, SCStreamConfiguration,
@@ -155,8 +153,7 @@ fn build_outer_block(
         // already in points — SCK does the scale-up to physical
         // pixels internally via the display's backing scale.
         let frame = unsafe { target.frame() };
-        let (width, height) =
-            constrained_size(frame.size.width, frame.size.height, max_dim);
+        let (width, height) = constrained_size(frame.size.width, frame.size.height, max_dim);
         let config = unsafe { SCStreamConfiguration::new() };
         unsafe {
             config.setWidth(width);
@@ -252,7 +249,9 @@ fn extract_rgba(image: &CGImage) -> Result<CapturedFrame, CaptureError> {
     let is_bgra = matches!(
         (alpha, byte_order),
         (
-            CGImageAlphaInfo::PremultipliedFirst | CGImageAlphaInfo::First | CGImageAlphaInfo::NoneSkipFirst,
+            CGImageAlphaInfo::PremultipliedFirst
+                | CGImageAlphaInfo::First
+                | CGImageAlphaInfo::NoneSkipFirst,
             CGImageByteOrderInfo::Order32Little,
         )
     );

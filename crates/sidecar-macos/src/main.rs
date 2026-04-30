@@ -14,16 +14,19 @@ async fn main() {
 mod macos {
     use std::time::Duration;
 
-    use futures::{SinkExt, StreamExt};
+    use std::net::SocketAddr;
+
     use tokio::sync::mpsc;
     use tokio::time::interval;
-    use tokio_tungstenite::connect_async;
-    use tokio_tungstenite::tungstenite::Message;
     use tracing::{error, info, warn};
     use x11_web_protocol::{BackendToSidecar, SidecarToBackend};
+    use x11_web_wire::conn::{dial, DialedConnection};
+    use x11_web_wire::tls::parse_fingerprint;
+    use x11_web_wire::wire_capnp;
 
     use x11_web_sidecar_macos::input;
     use x11_web_sidecar_macos::router::WindowRouter;
+    use x11_web_sidecar_macos::wire_bridge;
 
     pub async fn run() {
         tracing_subscriber::fmt::init();
@@ -67,18 +70,65 @@ mod macos {
             );
         }
 
+        // Install rustls's default crypto provider once per process
+        // — quinn refuses to build a TLS config without it. `ring`
+        // is what our wire crate is feature-gated to.
+        let _ = rustls::crypto::ring::default_provider().install_default();
 
-        let backend_url = std::env::var("BACKEND_URL")
-            .unwrap_or_else(|_| "ws://127.0.0.1:3001/ws/sidecar".into());
+        let backend_addr: SocketAddr = std::env::var("BACKEND_QUIC_ADDR")
+            .unwrap_or_else(|_| "127.0.0.1:3002".into())
+            .parse()
+            .expect("BACKEND_QUIC_ADDR must be host:port");
+        let server_name =
+            std::env::var("BACKEND_SERVER_NAME").unwrap_or_else(|_| "localhost".into());
+        // Fingerprint comes from one of:
+        //   1. `X11WEB_SERVER_FINGERPRINT` env var (operator pasted).
+        //   2. `X11WEB_FINGERPRINT_FILE` env var pointing to a file
+        //      the backend wrote (default `target/x11web-fingerprint`).
+        // We re-read on every connect attempt so a backend restart
+        // (which generates a fresh cert) is picked up automatically
+        // without restarting the sidecar.
+        let fingerprint_source = match std::env::var("X11WEB_SERVER_FINGERPRINT") {
+            Ok(s) => FingerprintSource::Inline(s),
+            Err(_) => FingerprintSource::File(
+                std::env::var("X11WEB_FINGERPRINT_FILE").unwrap_or_else(|_| {
+                    let home = std::env::var("HOME").unwrap_or_else(|_| ".".into());
+                    format!("{home}/.x11web-fingerprint")
+                }),
+            ),
+        };
+        let bearer_token = std::env::var("X11WEB_BEARER_TOKEN")
+            .unwrap_or_else(|_| "dev-token".into())
+            .into_bytes();
+
         let sidecar_name = std::env::var("SIDECAR_NAME")
             .unwrap_or_else(|_| hostname().unwrap_or_else(|| "macos-sidecar".into()));
 
-        info!("Connecting to backend at {backend_url}");
+        info!("Connecting to backend at {backend_addr} (server-name={server_name})");
         loop {
-            match connect_async(&backend_url).await {
-                Ok((ws_stream, _)) => {
-                    info!("Connected to backend");
-                    run_session(ws_stream, &sidecar_name).await;
+            let fingerprint = match read_fingerprint(&fingerprint_source) {
+                Ok(fp) => fp,
+                Err(e) => {
+                    warn!("Fingerprint not available yet: {e}. Retrying in 2s.");
+                    tokio::time::sleep(Duration::from_secs(2)).await;
+                    continue;
+                }
+            };
+            match dial(
+                backend_addr,
+                &server_name,
+                fingerprint,
+                &bearer_token,
+                &sidecar_name,
+            )
+            .await
+            {
+                Ok(connection) => {
+                    info!(
+                        "Connected to backend; sidecar_id={} agreed_version={}",
+                        connection.sidecar_id, connection.agreed_protocol_version
+                    );
+                    run_session(connection).await;
                     warn!("Disconnected from backend, reconnecting in 5s...");
                 }
                 Err(e) => {
@@ -89,24 +139,12 @@ mod macos {
         }
     }
 
-    async fn run_session(
-        ws_stream: tokio_tungstenite::WebSocketStream<
-            tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
-        >,
-        sidecar_name: &str,
-    ) {
-        let (mut ws_tx, mut ws_rx) = ws_stream.split();
-
-        let register = SidecarToBackend::Register {
-            sidecar_name: sidecar_name.to_string(),
-        };
-        let json = serde_json::to_string(&register).unwrap();
-        if ws_tx.send(Message::Text(json.into())).await.is_err() {
-            return;
-        }
-
+    async fn run_session(mut connection: DialedConnection) {
         let (tx, mut rx) = mpsc::unbounded_channel::<SidecarToBackend>();
 
+        // Heartbeat task — pushes a `Heartbeat` into `tx` every 30 s.
+        // The send_task is what actually serialises + writes to the
+        // wire.
         let tx_heartbeat = tx.clone();
         let heartbeat_task = tokio::spawn(async move {
             let mut tick = interval(Duration::from_secs(30));
@@ -118,41 +156,59 @@ mod macos {
             }
         });
 
-        let send_task = tokio::spawn(async move {
-            while let Some(msg) = rx.recv().await {
-                let json = serde_json::to_string(&msg).unwrap();
-                if ws_tx.send(Message::Text(json.into())).await.is_err() {
-                    break;
-                }
-            }
-        });
-
-        // Window enumeration → DisplayUpdate stream. Per-session so the
-        // backend gets a fresh "everything that exists" announcement
-        // each time we reconnect.
+        // Window enumeration → DisplayUpdate stream.
         let router = WindowRouter::new();
         x11_web_sidecar_macos::enumerator::spawn(tx.clone(), router.clone());
 
-        // Recv loop: parse `BackendToSidecar` messages, dispatch the
-        // ones we know how to handle.
-        loop {
-            match ws_rx.next().await {
-                Some(Ok(Message::Text(text))) => {
-                    if let Ok(cmd) = serde_json::from_str::<BackendToSidecar>(&text) {
-                        handle_backend_msg(cmd, &router, &tx);
-                    }
-                }
-                Some(Ok(Message::Close(_))) | None => break,
-                Some(Ok(_)) => {}
-                Some(Err(e)) => {
-                    warn!("WebSocket recv error: {e}");
-                    break;
+        // Drive recv + send concurrently in the same task so capnp's
+        // !Send readers don't fight tokio::spawn.
+        let send_loop = async {
+            while let Some(msg) = rx.recv().await {
+                let Some(builder) = wire_bridge::build_from_sidecar(&msg) else {
+                    continue;
+                };
+                if let Err(e) = connection.writer.write_message(&builder).await {
+                    warn!("wire write failed: {e}");
+                    return;
                 }
             }
+        };
+        let recv_loop = async {
+            loop {
+                let msg = match connection
+                    .reader
+                    .read_message::<wire_capnp::to_sidecar::Owned>()
+                    .await
+                {
+                    Ok(Some(m)) => m,
+                    Ok(None) => return, // clean EOF
+                    Err(e) => {
+                        warn!("wire read failed: {e}");
+                        return;
+                    }
+                };
+                let to_sidecar: wire_capnp::to_sidecar::Reader = match msg.get_root() {
+                    Ok(r) => r,
+                    Err(e) => {
+                        warn!("ToSidecar root: {e}");
+                        continue;
+                    }
+                };
+                match wire_bridge::read_to_sidecar(to_sidecar) {
+                    Ok(cmd) => handle_backend_msg(cmd, &router, &tx),
+                    Err(e) => {
+                        warn!("ToSidecar translate: {e:?}");
+                    }
+                }
+            }
+        };
+
+        tokio::select! {
+            _ = send_loop => {}
+            _ = recv_loop => {}
         }
 
         heartbeat_task.abort();
-        send_task.abort();
     }
 
     fn handle_backend_msg(
@@ -193,5 +249,23 @@ mod macos {
                 .ok()
                 .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
         })
+    }
+
+    /// Where the fingerprint comes from. We re-resolve on each
+    /// dial attempt so a backend restart (which writes a new
+    /// fingerprint to its file) is picked up automatically.
+    pub enum FingerprintSource {
+        Inline(String),
+        File(String),
+    }
+
+    fn read_fingerprint(source: &FingerprintSource) -> Result<[u8; 32], String> {
+        let raw = match source {
+            FingerprintSource::Inline(s) => s.clone(),
+            FingerprintSource::File(path) => {
+                std::fs::read_to_string(path).map_err(|e| format!("read {path}: {e}"))?
+            }
+        };
+        parse_fingerprint(&raw).map_err(|e| format!("parse fingerprint: {e}"))
     }
 }

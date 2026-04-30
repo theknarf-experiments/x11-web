@@ -131,9 +131,7 @@ pub fn release(handle: FocusGuardHandle, restore_delay: Duration) {
     // call can race ahead and the target ends up frontmost.
     if let Some(app) = handle.restore_to {
         std::thread::sleep(restore_delay);
-        unsafe {
-            app.activateWithOptions(NSApplicationActivationOptions::ActivateAllWindows);
-        }
+        app.activateWithOptions(NSApplicationActivationOptions::ActivateAllWindows);
     }
 }
 
@@ -141,9 +139,9 @@ pub fn release(handle: FocusGuardHandle, restore_delay: Duration) {
 /// after the action. Returns `None` when the target is already
 /// frontmost (no point suppressing self → self).
 fn capture_restore_target(target_pid: i32) -> Option<Retained<NSRunningApplication>> {
-    let workspace = unsafe { NSWorkspace::sharedWorkspace() };
-    let front = unsafe { workspace.frontmostApplication() }?;
-    if unsafe { front.processIdentifier() } == target_pid {
+    let workspace = NSWorkspace::sharedWorkspace();
+    let front = workspace.frontmostApplication()?;
+    if front.processIdentifier() == target_pid {
         return None;
     }
     Some(front)

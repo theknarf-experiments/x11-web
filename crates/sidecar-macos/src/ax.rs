@@ -78,9 +78,7 @@ pub fn element_at_point(
     y: f32,
 ) -> Result<CFRetained<AXUIElement>, AxError> {
     let mut out: *const AXUIElement = std::ptr::null();
-    let result = unsafe {
-        root.copy_element_at_position(x, y, NonNull::new_unchecked(&mut out))
-    };
+    let result = unsafe { root.copy_element_at_position(x, y, NonNull::new_unchecked(&mut out)) };
     if result.0 != 0 || out.is_null() {
         return Err(AxError::NoElementAt);
     }
@@ -100,12 +98,13 @@ pub fn enclosing_window(element: &AXUIElement) -> Option<CFRetained<AXUIElement>
 /// returning the value as a `CFRetained<AXUIElement>` if the value
 /// is itself an AX element. `None` for missing or non-AX-element
 /// attributes.
-pub fn attribute_element(element: &AXUIElement, attribute: &str) -> Option<CFRetained<AXUIElement>> {
+pub fn attribute_element(
+    element: &AXUIElement,
+    attribute: &str,
+) -> Option<CFRetained<AXUIElement>> {
     let cfkey = CFString::from_str(attribute);
     let mut raw: *const CFType = std::ptr::null();
-    let result = unsafe {
-        element.copy_attribute_value(&cfkey, NonNull::new_unchecked(&mut raw))
-    };
+    let result = unsafe { element.copy_attribute_value(&cfkey, NonNull::new_unchecked(&mut raw)) };
     if result.0 != 0 || raw.is_null() {
         return None;
     }
@@ -120,9 +119,7 @@ pub fn attribute_element(element: &AXUIElement, attribute: &str) -> Option<CFRet
 pub fn attribute_bool(element: &AXUIElement, attribute: &str) -> Option<bool> {
     let cfkey = CFString::from_str(attribute);
     let mut raw: *const CFType = std::ptr::null();
-    let result = unsafe {
-        element.copy_attribute_value(&cfkey, NonNull::new_unchecked(&mut raw))
-    };
+    let result = unsafe { element.copy_attribute_value(&cfkey, NonNull::new_unchecked(&mut raw)) };
     if result.0 != 0 || raw.is_null() {
         return None;
     }
@@ -216,4 +213,3 @@ pub fn pid_of(element: &AXUIElement) -> Option<i32> {
 pub fn is_authorized() -> bool {
     unsafe { objc2_application_services::AXIsProcessTrusted() }
 }
-

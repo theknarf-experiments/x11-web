@@ -1,3 +1,6 @@
+mod quic;
+mod wire_bridge;
+
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -12,6 +15,7 @@ use tower_http::cors::CorsLayer;
 use tracing::{info, warn};
 use uuid::Uuid;
 use x11_web_protocol::*;
+use x11_web_wire::tls::generate_self_signed;
 
 #[derive(Clone)]
 struct AppState {
@@ -52,7 +56,50 @@ async fn main() {
         .route("/ws/frontend", get(frontend_ws_handler))
         .route("/health", get(|| async { "ok" }))
         .layer(CorsLayer::permissive())
-        .with_state(state);
+        .with_state(state.clone());
+
+    // QUIC sidecar listener (sibling of the WebSocket :3001
+    // listener). Generates a fresh self-signed cert on startup and
+    // prints its SHA-256 fingerprint so the operator can copy it
+    // into the sidecar's `X11WEB_SERVER_FINGERPRINT` env. Until the
+    // X11 sidecar migrates, both listeners coexist; sidecars that
+    // came in over WebSocket and ones that came in over QUIC share
+    // the `state.sidecars` registry transparently.
+    let _ = rustls::crypto::ring::default_provider().install_default();
+    let cert = generate_self_signed(vec!["localhost".into()]).expect("self-signed cert generation");
+    info!(
+        "QUIC sidecar TLS fingerprint (paste into sidecar's \
+         X11WEB_SERVER_FINGERPRINT):\n  sha256:{}",
+        cert.fingerprint_hex()
+    );
+    // Persist fingerprint to disk so locally-running sidecars can
+    // pick it up without the operator copy-pasting on every backend
+    // restart. mprocs polls this file before starting the sidecar.
+    //
+    // Default path is `$HOME/.x11web-fingerprint`, not workspace-
+    // relative. macOS sidecars launch via `open` and don't inherit
+    // the operator's CWD; an absolute path under the user's home
+    // is the only reliable convention without a wrapper.
+    let fp_path = std::env::var("X11WEB_FINGERPRINT_FILE").unwrap_or_else(|_| {
+        let home = std::env::var("HOME").unwrap_or_else(|_| ".".into());
+        format!("{home}/.x11web-fingerprint")
+    });
+    if let Some(parent) = std::path::Path::new(&fp_path).parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    if let Err(e) = std::fs::write(&fp_path, cert.fingerprint_hex()) {
+        warn!("could not persist fingerprint to {fp_path}: {e}");
+    } else {
+        info!("Fingerprint also written to {fp_path}");
+    }
+    let token = std::env::var("X11WEB_BEARER_TOKEN")
+        .unwrap_or_else(|_| "dev-token".into())
+        .into_bytes();
+    let quic_addr: std::net::SocketAddr = std::env::var("X11WEB_QUIC_ADDR")
+        .unwrap_or_else(|_| "0.0.0.0:3002".into())
+        .parse()
+        .expect("X11WEB_QUIC_ADDR must be host:port");
+    quic::spawn_listener(state.clone(), quic_addr, cert, token);
 
     let listener = tokio::net::TcpListener::bind("0.0.0.0:3001").await.unwrap();
     info!("Backend listening on 0.0.0.0:3001");
@@ -123,12 +170,24 @@ async fn handle_sidecar_ws(socket: WebSocket, state: AppState) {
         let Ok(msg) = serde_json::from_str::<SidecarToBackend>(&text) else {
             continue;
         };
+        dispatch_sidecar_msg(&state, &sidecar_id, msg).await;
+    }
 
+    cleanup_sidecar(&state, &sidecar_id).await;
+    send_task.abort();
+}
+
+/// Per-message dispatch shared between the WebSocket sidecar handler
+/// and the QUIC handler. Anything that fans out to frontends or
+/// updates internal registries lives here.
+async fn dispatch_sidecar_msg(state: &AppState, sidecar_id: &str, msg: SidecarToBackend) {
+    let sidecar_id = sidecar_id.to_string();
+    {
         match msg {
             SidecarToBackend::Heartbeat => {}
             SidecarToBackend::ProcessSpawned { request_id, pid } => {
                 broadcast_to_frontends(
-                    &state,
+                    state,
                     BackendToFrontend::CommandResult {
                         request_id,
                         success: true,
@@ -139,7 +198,7 @@ async fn handle_sidecar_ws(socket: WebSocket, state: AppState) {
             }
             SidecarToBackend::ProcessKilled { request_id, pid } => {
                 broadcast_to_frontends(
-                    &state,
+                    state,
                     BackendToFrontend::CommandResult {
                         request_id,
                         success: true,
@@ -318,10 +377,7 @@ async fn handle_sidecar_ws(socket: WebSocket, state: AppState) {
                 }
             }
             SidecarToBackend::Register { .. } => {} // Already handled
-            SidecarToBackend::RtcOffer {
-                frontend_id,
-                sdp,
-            } => {
+            SidecarToBackend::RtcOffer { frontend_id, sdp } => {
                 // Relay SDP offer from sidecar to the specific frontend.
                 let frontends = state.frontends.read().await;
                 if let Some(frontend) = frontends.get(&frontend_id) {
@@ -349,19 +405,23 @@ async fn handle_sidecar_ws(socket: WebSocket, state: AppState) {
             }
         }
     }
+}
 
-    // Sidecar disconnected
+/// Tear down sidecar registration when its connection drops. Used
+/// by both the WebSocket and QUIC handlers.
+async fn cleanup_sidecar(state: &AppState, sidecar_id: &str) {
     info!("Sidecar disconnected: {}", sidecar_id);
-    state.sidecars.write().await.remove(&sidecar_id);
-    // Clean up processes, window states, and display buffers for this sidecar
+    state.sidecars.write().await.remove(sidecar_id);
+    // Clean up processes, window states, and display buffers for
+    // this sidecar.
     {
         let mut procs = state.connected_processes.write().await;
         let client_ids: Vec<String> = procs
             .iter()
-            .filter(|(_, (sid, _, _))| sid == &sidecar_id)
+            .filter(|(_, (sid, _, _))| sid == sidecar_id)
             .map(|(cid, _)| cid.clone())
             .collect();
-        procs.retain(|_, (sid, _, _)| sid != &sidecar_id);
+        procs.retain(|_, (sid, _, _)| sid != sidecar_id);
         drop(procs);
         state
             .window_states
@@ -373,13 +433,11 @@ async fn handle_sidecar_ws(socket: WebSocket, state: AppState) {
             bufs.remove(cid);
         }
     }
-    send_task.abort();
 
-    // Notify frontends
     let frontends = state.frontends.read().await;
     for frontend in frontends.values() {
         let _ = frontend.tx.send(BackendToFrontend::SidecarDisconnected {
-            sidecar_id: sidecar_id.clone(),
+            sidecar_id: sidecar_id.to_string(),
         });
     }
 }

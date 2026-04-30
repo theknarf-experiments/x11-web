@@ -121,19 +121,29 @@ fn bounds_field(dict: &CFDictionary, key: &str) -> Option<f64> {
     cf.downcast::<CFNumber>().and_then(|n| n.to_f64())
 }
 
-fn number(dict: &CFDictionary<CFString, CFType>, key: core_foundation::string::CFStringRef) -> Option<CFNumber> {
+fn number(
+    dict: &CFDictionary<CFString, CFType>,
+    key: core_foundation::string::CFStringRef,
+) -> Option<CFNumber> {
     let key_owned = unsafe { CFString::wrap_under_get_rule(key) };
-    dict.find(&key_owned).and_then(|v| v.clone().downcast::<CFNumber>())
+    dict.find(&key_owned)
+        .and_then(|v| v.clone().downcast::<CFNumber>())
 }
 
-fn string(dict: &CFDictionary<CFString, CFType>, key: core_foundation::string::CFStringRef) -> Option<String> {
+fn string(
+    dict: &CFDictionary<CFString, CFType>,
+    key: core_foundation::string::CFStringRef,
+) -> Option<String> {
     let key_owned = unsafe { CFString::wrap_under_get_rule(key) };
     dict.find(&key_owned)
         .and_then(|v| v.clone().downcast::<CFString>())
         .map(|s| s.to_string())
 }
 
-fn boolean(dict: &CFDictionary<CFString, CFType>, key: core_foundation::string::CFStringRef) -> Option<bool> {
+fn boolean(
+    dict: &CFDictionary<CFString, CFType>,
+    key: core_foundation::string::CFStringRef,
+) -> Option<bool> {
     let key_owned = unsafe { CFString::wrap_under_get_rule(key) };
     dict.find(&key_owned)
         .and_then(|v| v.clone().downcast::<CFBoolean>())

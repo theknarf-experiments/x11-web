@@ -57,10 +57,7 @@ pub enum BackendToSidecar {
     /// Resize the virtual screen (RandR-driven).
     ResizeScreen { width: u16, height: u16 },
     /// WebRTC signaling: forward SDP answer from frontend to sidecar.
-    RtcAnswer {
-        frontend_id: String,
-        sdp: String,
-    },
+    RtcAnswer { frontend_id: String, sdp: String },
     /// WebRTC signaling: forward ICE candidate from frontend to sidecar.
     RtcIceCandidate {
         frontend_id: String,
@@ -123,10 +120,7 @@ pub enum SidecarToBackend {
         mime_types: Vec<String>,
     },
     /// WebRTC signaling: SDP offer from sidecar for a specific frontend.
-    RtcOffer {
-        frontend_id: String,
-        sdp: String,
-    },
+    RtcOffer { frontend_id: String, sdp: String },
     /// WebRTC signaling: ICE candidate from sidecar for a specific frontend.
     RtcIceCandidate {
         frontend_id: String,
@@ -213,10 +207,7 @@ pub enum BackendToFrontend {
         mime_types: Vec<String>,
     },
     /// WebRTC signaling: SDP offer from sidecar, relayed to this frontend.
-    RtcOffer {
-        sidecar_id: String,
-        sdp: String,
-    },
+    RtcOffer { sidecar_id: String, sdp: String },
     /// WebRTC signaling: ICE candidate from sidecar, relayed to this frontend.
     RtcIceCandidate {
         sidecar_id: String,
@@ -297,10 +288,7 @@ pub enum FrontendToBackend {
         height: u16,
     },
     /// WebRTC signaling: SDP answer from this frontend for a sidecar.
-    RtcAnswer {
-        sidecar_id: String,
-        sdp: String,
-    },
+    RtcAnswer { sidecar_id: String, sdp: String },
     /// WebRTC signaling: ICE candidate from this frontend for a sidecar.
     RtcIceCandidate {
         sidecar_id: String,
@@ -309,9 +297,7 @@ pub enum FrontendToBackend {
         sdp_mline_index: Option<u16>,
     },
     /// WebRTC signaling: request the sidecar to initiate a WebRTC offer.
-    RtcConnect {
-        sidecar_id: String,
-    },
+    RtcConnect { sidecar_id: String },
 }
 
 /// Information about a connected process (for initial sync).
@@ -820,16 +806,10 @@ pub enum DcServerMsg {
     },
     /// Process exited.
     #[serde(rename = "pe")]
-    ProcessExited {
-        pid: u32,
-        exit_code: Option<i32>,
-    },
+    ProcessExited { pid: u32, exit_code: Option<i32> },
     /// Input was dropped (no route for window).
     #[serde(rename = "id")]
-    InputDropped {
-        window_id: String,
-        reason: String,
-    },
+    InputDropped { window_id: String, reason: String },
 }
 
 /// Message sent from frontend to sidecar over WebRTC data channel.

@@ -65,6 +65,16 @@ use crate::skylight::probe;
 /// Off-screen primer target. Negative on both axes so no on-screen
 /// window — including the menubar strip — claims the coord; Chromium
 /// discards the click but the user-activation gate still ticks.
+// The constants and helpers below (`PRIMER_POINT`, `run_full_click`
+// and its callees, `down_type`, `up_type`, `uptime_nanoseconds`)
+// implement cua's SkyLight primer-click recipe. The current code
+// path is AX-only (see `inject` above), but the recipe is kept
+// behind `#[allow(dead_code)]` because canvas surfaces (Metal /
+// OpenGL viewports / WebGL) don't expose AX-addressable elements
+// and may need this fallback re-enabled per-window. Deleting and
+// rebuilding from git history would be wasteful given the volume
+// of investigation that went into making it work.
+#[allow(dead_code, unused_unsafe)]
 const PRIMER_POINT: CGPoint = CGPoint { x: -1.0, y: -1.0 };
 
 /// Inject a single browser `InputEvent` against the window described
@@ -107,7 +117,9 @@ pub fn inject(route: WindowRoute, event: InputEvent) {
             match try_ax_click(&route, target) {
                 Ok(true) => {}
                 Ok(false) => {
-                    tracing::info!("AX click did not dispatch (no element / wrong pid / unsupported)");
+                    tracing::info!(
+                        "AX click did not dispatch (no element / wrong pid / unsupported)"
+                    );
                 }
                 Err(e) => {
                     tracing::warn!("AX click error: {e}");
@@ -198,81 +210,81 @@ fn send_key(route: &WindowRoute, x11_keycode: u32, x11_state: u16, down: bool) {
 fn x11_keycode_to_mac_vk(keycode: u32) -> Option<u16> {
     Some(match keycode {
         // First row.
-        9 => 0x35,   // Escape -> kVK_Escape
-        10 => 0x12,  // 1
-        11 => 0x13,  // 2
-        12 => 0x14,  // 3
-        13 => 0x15,  // 4
-        14 => 0x17,  // 5
-        15 => 0x16,  // 6
-        16 => 0x1A,  // 7
-        17 => 0x1C,  // 8
-        18 => 0x19,  // 9
-        19 => 0x1D,  // 0
-        20 => 0x1B,  // -  (Minus)
-        21 => 0x18,  // =  (Equal)
-        22 => 0x33,  // Backspace -> kVK_Delete
+        9 => 0x35,  // Escape -> kVK_Escape
+        10 => 0x12, // 1
+        11 => 0x13, // 2
+        12 => 0x14, // 3
+        13 => 0x15, // 4
+        14 => 0x17, // 5
+        15 => 0x16, // 6
+        16 => 0x1A, // 7
+        17 => 0x1C, // 8
+        18 => 0x19, // 9
+        19 => 0x1D, // 0
+        20 => 0x1B, // -  (Minus)
+        21 => 0x18, // =  (Equal)
+        22 => 0x33, // Backspace -> kVK_Delete
         // QWERTY row.
-        23 => 0x30,  // Tab
-        24 => 0x0C,  // q
-        25 => 0x0D,  // w
-        26 => 0x0E,  // e
-        27 => 0x0F,  // r
-        28 => 0x11,  // t
-        29 => 0x10,  // y
-        30 => 0x20,  // u
-        31 => 0x22,  // i
-        32 => 0x1F,  // o
-        33 => 0x23,  // p
-        34 => 0x21,  // [
-        35 => 0x1E,  // ]
-        36 => 0x24,  // Return
+        23 => 0x30, // Tab
+        24 => 0x0C, // q
+        25 => 0x0D, // w
+        26 => 0x0E, // e
+        27 => 0x0F, // r
+        28 => 0x11, // t
+        29 => 0x10, // y
+        30 => 0x20, // u
+        31 => 0x22, // i
+        32 => 0x1F, // o
+        33 => 0x23, // p
+        34 => 0x21, // [
+        35 => 0x1E, // ]
+        36 => 0x24, // Return
         // Modifiers and ASDF row.
-        37 => 0x3B,  // Control_L
-        38 => 0x00,  // a
-        39 => 0x01,  // s
-        40 => 0x02,  // d
-        41 => 0x03,  // f
-        42 => 0x05,  // g
-        43 => 0x04,  // h
-        44 => 0x26,  // j
-        45 => 0x28,  // k
-        46 => 0x25,  // l
-        47 => 0x29,  // ;
-        48 => 0x27,  // '
-        49 => 0x32,  // `  (Backquote)
-        50 => 0x38,  // Shift_L
-        51 => 0x2A,  // \
+        37 => 0x3B, // Control_L
+        38 => 0x00, // a
+        39 => 0x01, // s
+        40 => 0x02, // d
+        41 => 0x03, // f
+        42 => 0x05, // g
+        43 => 0x04, // h
+        44 => 0x26, // j
+        45 => 0x28, // k
+        46 => 0x25, // l
+        47 => 0x29, // ;
+        48 => 0x27, // '
+        49 => 0x32, // `  (Backquote)
+        50 => 0x38, // Shift_L
+        51 => 0x2A, // \
         // ZXCV row.
-        52 => 0x06,  // z
-        53 => 0x07,  // x
-        54 => 0x08,  // c
-        55 => 0x09,  // v
-        56 => 0x0B,  // b
-        57 => 0x2D,  // n
-        58 => 0x2E,  // m
-        59 => 0x2B,  // ,
-        60 => 0x2F,  // .
-        61 => 0x2C,  // /
-        62 => 0x3C,  // Shift_R
+        52 => 0x06, // z
+        53 => 0x07, // x
+        54 => 0x08, // c
+        55 => 0x09, // v
+        56 => 0x0B, // b
+        57 => 0x2D, // n
+        58 => 0x2E, // m
+        59 => 0x2B, // ,
+        60 => 0x2F, // .
+        61 => 0x2C, // /
+        62 => 0x3C, // Shift_R
         // Bottom row.
-        63 => 0x43,  // Numpad *
-        64 => 0x3A,  // Alt_L (Option)
-        65 => 0x31,  // Space
-        66 => 0x39,  // CapsLock
+        63 => 0x43, // Numpad *
+        64 => 0x3A, // Alt_L (Option)
+        65 => 0x31, // Space
+        66 => 0x39, // CapsLock
         // F-keys.
-        67 => 0x7A,  // F1
-        68 => 0x78,  // F2
-        69 => 0x63,  // F3
-        70 => 0x76,  // F4
-        71 => 0x60,  // F5
-        72 => 0x61,  // F6
-        73 => 0x62,  // F7
-        74 => 0x64,  // F8
-        75 => 0x65,  // F9
-        76 => 0x6D,  // F10
-        95 => 0x67,  // F11
-        96 => 0x6F,  // F12
+        67 => 0x7A, // F1
+        68 => 0x78, // F2
+        69 => 0x63, // F3
+        70 => 0x76, // F4
+        71 => 0x60, // F5
+        72 => 0x61, // F6
+        73 => 0x62, // F7
+        74 => 0x64, // F8
+        75 => 0x65, // F9
+        76 => 0x6D, // F10
+        95 => 0x67, // F11
+        96 => 0x6F, // F12
         // Arrows + nav.
         105 => 0x3E, // Control_R
         108 => 0x3D, // Alt_R (Option_R)
@@ -340,7 +352,9 @@ fn try_ax_click(route: &WindowRoute, target: CGPoint) -> Result<bool, ax::AxErro
         Err(ax::AxError::NoElementAt) => {
             tracing::info!(
                 "AX click: no element at ({:.0},{:.0}) in pid {} — falling back to pixel",
-                target.x, target.y, route.pid
+                target.x,
+                target.y,
+                route.pid
             );
             return Ok(false);
         }
@@ -349,7 +363,9 @@ fn try_ax_click(route: &WindowRoute, target: CGPoint) -> Result<bool, ax::AxErro
     let elem_pid = ax::pid_of(&element);
     tracing::info!(
         "AX click: dispatching AXPress to element in pid {} at ({:.0},{:.0})",
-        elem_pid.unwrap_or(-1), target.x, target.y
+        elem_pid.unwrap_or(-1),
+        target.x,
+        target.y
     );
 
     let window = ax::enclosing_window(&element);
@@ -388,6 +404,7 @@ fn try_ax_click(route: &WindowRoute, target: CGPoint) -> Result<bool, ax::AxErro
 /// in a half-focused state. cua's tests acknowledge a brief flash
 /// during this window; what matters is that focus ends up back on
 /// the original.
+#[allow(dead_code, unused_unsafe)]
 fn run_full_click(
     route: &WindowRoute,
     cg_button: CGMouseButton,
@@ -450,9 +467,21 @@ fn run_full_click(
     // is "below system double-click threshold, clear of coalescing"
     // and short enough that AppKit's mouse-down handlers don't
     // promote the target window to key+raise during the hold.
-    post_stamped(route, down_type(cg_button), Some(cg_button), target, window_local);
+    post_stamped(
+        route,
+        down_type(cg_button),
+        Some(cg_button),
+        target,
+        window_local,
+    );
     std::thread::sleep(Duration::from_millis(1));
-    post_stamped(route, up_type(cg_button), Some(cg_button), target, window_local);
+    post_stamped(
+        route,
+        up_type(cg_button),
+        Some(cg_button),
+        target,
+        window_local,
+    );
 
     // Layer 3 — restore focus to whichever app was frontmost before
     // we started. cua's `SystemFocusStealPreventer` does this via an
@@ -473,9 +502,8 @@ fn run_full_click(
         // one. The `[]` empty options cua uses gets you the
         // default "main + key only" behaviour, which apparently
         // isn't enough on macOS 15+ for the user-visible result.
-        let ok = unsafe {
-            app.activateWithOptions(NSApplicationActivationOptions::ActivateAllWindows)
-        };
+        let ok =
+            unsafe { app.activateWithOptions(NSApplicationActivationOptions::ActivateAllWindows) };
         let now_front_pid = unsafe {
             NSWorkspace::sharedWorkspace()
                 .frontmostApplication()
@@ -495,6 +523,7 @@ fn run_full_click(
 /// restoration, but only if it isn't the click target itself
 /// (re-activating the same app we just clicked is a no-op that
 /// would also flash the target's window briefly).
+#[allow(dead_code, unused_unsafe)]
 fn capture_restore_target(target_pid: i32) -> Option<Retained<NSRunningApplication>> {
     let workspace = unsafe { NSWorkspace::sharedWorkspace() };
     let front = unsafe { workspace.frontmostApplication() }?;
@@ -515,6 +544,7 @@ fn capture_restore_target(target_pid: i32) -> Option<Retained<NSRunningApplicati
 /// NSEvent-bridged path fixed Chromium web-content hit-tests on
 /// backgrounded targets." Empirically also required for AppKit
 /// targets to honour per-pid posted events.
+#[allow(dead_code, unused_unsafe)]
 fn post_stamped(
     route: &WindowRoute,
     event_type: CGEventType,
@@ -613,11 +643,7 @@ fn post_stamped(
         // treats clickState 1 as a real single click; 0 or 2+ have
         // different semantics that don't land. Same for AppKit's
         // hit-tracker.
-        CGEvent::set_integer_value_field(
-            Some(&cg_event),
-            CGEventField::MouseEventClickState,
-            1,
-        );
+        CGEvent::set_integer_value_field(Some(&cg_event), CGEventField::MouseEventClickState, 1);
         CGEvent::set_integer_value_field(
             Some(&cg_event),
             CGEventField::MouseEventButtonNumber,
@@ -626,11 +652,7 @@ fn post_stamped(
         // NSEventSubtypeMouseEvent — what NSEvent.mouseEvent stamps
         // when called for a regular click. AppKit's renderer checks
         // this; CGEventCreateMouseEvent leaves it at 0.
-        CGEvent::set_integer_value_field(
-            Some(&cg_event),
-            CGEventField::MouseEventSubtype,
-            3,
-        );
+        CGEvent::set_integer_value_field(Some(&cg_event), CGEventField::MouseEventSubtype, 3);
     }
 
     // mouseEventWindowUnderMousePointer pair — the CGWindowID the
@@ -660,11 +682,7 @@ fn post_stamped(
     let sky = probe();
     if let Some(set_window_loc) = sky.fns.as_ref().and_then(|f| f.set_window_location) {
         unsafe {
-            set_window_loc(
-                raw_event_ptr,
-                window_local.0 as f64,
-                window_local.1 as f64,
-            );
+            set_window_loc(raw_event_ptr, window_local.0 as f64, window_local.1 as f64);
         }
     }
     if let Some(set_int) = sky.fns.as_ref().and_then(|f| f.set_int_field) {
@@ -705,6 +723,7 @@ fn post_stamped(
 /// Same routine cua's `post(...)` helper uses to stamp event
 /// timestamps. CGEvent's timestamp field is treated as ns on modern
 /// macOS.
+#[allow(dead_code, unused_unsafe)]
 fn uptime_nanoseconds() -> u64 {
     extern "C" {
         fn clock_gettime_nsec_np(clk_id: u32) -> u64;
@@ -728,10 +747,10 @@ fn window_local_to_screen(route: &WindowRoute, x: i16, y: i16) -> CGPoint {
 /// becomes one line-scroll event on our side.
 fn scroll_delta_for_button(x11_button: u8) -> Option<(i32, i32)> {
     match x11_button {
-        4 => Some((1, 0)),   // wheel up — positive y for natural scroll
-        5 => Some((-1, 0)),  // wheel down
-        6 => Some((0, -1)),  // horizontal left
-        7 => Some((0, 1)),   // horizontal right
+        4 => Some((1, 0)),  // wheel up — positive y for natural scroll
+        5 => Some((-1, 0)), // wheel down
+        6 => Some((0, -1)), // horizontal left
+        7 => Some((0, 1)),  // horizontal right
         _ => None,
     }
 }
@@ -749,14 +768,9 @@ fn scroll_delta_for_button(x11_button: u8) -> Option<(i32, i32)> {
 ///     events. cua works around this with synthesized PageDown /
 ///     ArrowDown keystrokes — we may add that later as a fallback.
 fn send_scroll(route: &WindowRoute, dy: i32, dx: i32) {
-    let Some(cg_event) = CGEvent::new_scroll_wheel_event2(
-        None,
-        CGScrollEventUnit::Line,
-        2,
-        dy,
-        dx,
-        0,
-    ) else {
+    let Some(cg_event) =
+        CGEvent::new_scroll_wheel_event2(None, CGScrollEventUnit::Line, 2, dy, dx, 0)
+    else {
         warn!("CGEventCreateScrollWheelEvent2 returned null (dy={dy} dx={dx})");
         return;
     };
@@ -794,6 +808,7 @@ fn map_button(x11_button: u8) -> Option<CGMouseButton> {
     }
 }
 
+#[allow(dead_code, unused_unsafe)]
 fn down_type(b: CGMouseButton) -> CGEventType {
     match b {
         CGMouseButton::Left => CGEventType::LeftMouseDown,
@@ -802,6 +817,7 @@ fn down_type(b: CGMouseButton) -> CGEventType {
     }
 }
 
+#[allow(dead_code, unused_unsafe)]
 fn up_type(b: CGMouseButton) -> CGEventType {
     match b {
         CGMouseButton::Left => CGEventType::LeftMouseUp,

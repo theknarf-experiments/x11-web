@@ -67,7 +67,9 @@ pub fn activate_without_raise(target_pid: i32, target_wid: CGWindowID) -> bool {
     }
     tracing::info!(
         "FocusWithoutRaise: prev_psn={:02x?} target_psn={:02x?} target_wid={}",
-        prev_psn, target_psn, target_wid
+        prev_psn,
+        target_psn,
+        target_wid
     );
 
     let mut buf = [0u8; 0xF8];
@@ -83,16 +85,12 @@ pub fn activate_without_raise(target_pid: i32, target_wid: CGWindowID) -> bool {
     buf[0x8A] = 0x02;
     // SAFETY: post_event_record_to dlsym'd, takes raw pointers we
     // own; psn is 8 bytes; bytes is 0xF8 bytes.
-    let defocus_ok = unsafe {
-        post_record(&prev_psn, &buf)
-    };
+    let defocus_ok = unsafe { post_record(&prev_psn, &buf) };
     tracing::info!("FocusWithoutRaise: defocus prev -> {defocus_ok}");
 
     // Focus target.
     buf[0x8A] = 0x01;
-    let focus_ok = unsafe {
-        post_record(&target_psn, &buf)
-    };
+    let focus_ok = unsafe { post_record(&target_psn, &buf) };
     tracing::info!("FocusWithoutRaise: focus target -> {focus_ok}");
 
     defocus_ok && focus_ok
@@ -100,7 +98,10 @@ pub fn activate_without_raise(target_pid: i32, target_wid: CGWindowID) -> bool {
 
 /// `_SLPSGetFrontProcess(&psn)` thin wrapper.
 unsafe fn resolve_front_psn(psn: &mut [u8; 8]) -> bool {
-    let sym = libc::dlsym(libc::RTLD_DEFAULT, b"_SLPSGetFrontProcess\0".as_ptr() as *const _);
+    let sym = libc::dlsym(
+        libc::RTLD_DEFAULT,
+        b"_SLPSGetFrontProcess\0".as_ptr() as *const _,
+    );
     if sym.is_null() {
         return false;
     }
@@ -110,7 +111,10 @@ unsafe fn resolve_front_psn(psn: &mut [u8; 8]) -> bool {
 
 /// `GetProcessForPID(pid, &psn)` thin wrapper.
 unsafe fn resolve_pid_psn(pid: i32, psn: &mut [u8; 8]) -> bool {
-    let sym = libc::dlsym(libc::RTLD_DEFAULT, b"GetProcessForPID\0".as_ptr() as *const _);
+    let sym = libc::dlsym(
+        libc::RTLD_DEFAULT,
+        b"GetProcessForPID\0".as_ptr() as *const _,
+    );
     if sym.is_null() {
         return false;
     }
@@ -120,7 +124,10 @@ unsafe fn resolve_pid_psn(pid: i32, psn: &mut [u8; 8]) -> bool {
 
 /// `SLPSPostEventRecordTo(psn, bytes)` thin wrapper.
 unsafe fn post_record(psn: &[u8; 8], bytes: &[u8; 0xF8]) -> bool {
-    let sym = libc::dlsym(libc::RTLD_DEFAULT, b"SLPSPostEventRecordTo\0".as_ptr() as *const _);
+    let sym = libc::dlsym(
+        libc::RTLD_DEFAULT,
+        b"SLPSPostEventRecordTo\0".as_ptr() as *const _,
+    );
     if sym.is_null() {
         return false;
     }

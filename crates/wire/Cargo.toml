@@ -1,0 +1,32 @@
+[package]
+name = "x11-web-wire"
+version = "0.1.0"
+edition = "2021"
+
+# Binary protocol between the backend and sidecars: QUIC + TLS 1.3
+# (built into QUIC) + Cap'n Proto messages over a single bidi stream.
+# Self-signed cert with fingerprint pinning for v0 — no CA required,
+# operator pastes the fingerprint into the sidecar's config.
+
+[dependencies]
+# Async runtime for stream IO.
+tokio = { version = "1", features = ["full"] }
+# QUIC implementation; uses rustls under the hood.
+quinn = { version = "0.11", default-features = false, features = ["log", "rustls", "runtime-tokio"] }
+rustls = { version = "0.23", default-features = false, features = ["ring", "std"] }
+rustls-pki-types = "1"
+# Generates self-signed certs and serializes them to DER.
+rcgen = "0.13"
+# Cap'n Proto runtime (build-time codegen happens via capnpc in build.rs).
+capnp = "0.20"
+# Hashing for cert fingerprints.
+sha2 = "0.10"
+# Hex-encode fingerprints for display + parsing.
+hex = "0.4"
+thiserror = "2"
+tracing = "0.1"
+
+[build-dependencies]
+# Code generates Rust types from schema/wire.capnp. Outputs to
+# OUT_DIR/wire_capnp.rs which lib.rs then `include!`s.
+capnpc = "0.20"

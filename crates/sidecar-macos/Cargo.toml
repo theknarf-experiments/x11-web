@@ -15,6 +15,11 @@ path = "src/main.rs"
 
 [dependencies]
 x11-web-protocol = { path = "../protocol" }
+x11-web-wire = { path = "../wire" }
+capnp = "0.20"
+# Needed at startup to install the default crypto provider that
+# `quinn` (via the wire crate) uses for TLS.
+rustls = { version = "0.23", default-features = false, features = ["ring"] }
 tokio = { version = "1", features = ["full"] }
 tokio-tungstenite = "0.26"
 futures = "0.3"

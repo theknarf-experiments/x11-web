@@ -210,11 +210,7 @@ fn announce_pid_if_new(
     announced.insert(win.pid, client_id);
 }
 
-fn emit_created(
-    tx: &mpsc::UnboundedSender<SidecarToBackend>,
-    uuid: &str,
-    win: &WindowInfo,
-) {
+fn emit_created(tx: &mpsc::UnboundedSender<SidecarToBackend>, uuid: &str, win: &WindowInfo) {
     let (x, y, w, h) = clamp_bounds(&win.bounds);
     let client_id = client_id_for_pid(win.pid);
     let _ = tx.send(SidecarToBackend::DisplayUpdate {
@@ -274,11 +270,7 @@ fn emit_configured(
     });
 }
 
-fn emit_title(
-    tx: &mpsc::UnboundedSender<SidecarToBackend>,
-    uuid: &str,
-    title: &str,
-) {
+fn emit_title(tx: &mpsc::UnboundedSender<SidecarToBackend>, uuid: &str, title: &str) {
     let _ = tx.send(SidecarToBackend::DisplayUpdate {
         client_id: format!("macos-win-{}", &uuid[..8]),
         update: DisplayUpdate::TitleChanged {

@@ -28,8 +28,7 @@
 use std::os::raw::{c_int, c_void};
 use std::sync::OnceLock;
 
-const SKYLIGHT_PATH: &[u8] =
-    b"/System/Library/PrivateFrameworks/SkyLight.framework/SkyLight\0";
+const SKYLIGHT_PATH: &[u8] = b"/System/Library/PrivateFrameworks/SkyLight.framework/SkyLight\0";
 
 /// `void SLEventPostToPid(pid_t, CGEventRef)`
 pub type PostToPidFn = unsafe extern "C" fn(pid: i32, event: *mut c_void);
@@ -40,8 +39,7 @@ pub type SetAuthMessageFn = unsafe extern "C" fn(event: *mut c_void, msg: *mut c
 /// `void SLEventSetIntegerValueField(CGEventRef, uint32_t, int64_t)` —
 /// SkyLight's raw-field SPI; reaches private fields like f51/f91/f92
 /// that the public `CGEventSetIntegerValueField` rejects.
-pub type SetIntFieldFn =
-    unsafe extern "C" fn(event: *mut c_void, field: u32, value: i64);
+pub type SetIntFieldFn = unsafe extern "C" fn(event: *mut c_void, field: u32, value: i64);
 
 /// `CGSConnectionID CGSMainConnectionID(void)` — main SkyLight
 /// connection handle for the calling process. Source for the session-id
@@ -57,8 +55,7 @@ pub type SetWindowLocationFn = unsafe extern "C" fn(event: *mut c_void, x: f64, 
 /// `OSStatus SLPSPostEventRecordTo(ProcessSerialNumber*, uint8_t*)` —
 /// posts a 248-byte synthetic event record into a process's Carbon
 /// queue. Used by the focus-without-raise recipe.
-pub type PostEventRecordToFn =
-    unsafe extern "C" fn(psn: *const c_void, bytes: *const u8) -> i32;
+pub type PostEventRecordToFn = unsafe extern "C" fn(psn: *const c_void, bytes: *const u8) -> i32;
 
 /// `objc_msgSend` typed for
 /// `+[SLSEventAuthenticationMessage messageWithEventRecord:pid:version:]`:
@@ -152,8 +149,7 @@ fn resolve() -> SkyLight {
             b"GetProcessForPID\0".as_ptr() as *const _,
         )
     };
-    let focus_without_raise =
-        post_record.is_some() && !get_front.is_null() && !get_psn.is_null();
+    let focus_without_raise = post_record.is_some() && !get_front.is_null() && !get_psn.is_null();
 
     // Auth-message factory: `objc_msgSend` cast to call
     // `+[SLSEventAuthenticationMessage messageWithEventRecord:pid:
@@ -284,7 +280,11 @@ unsafe fn extract_event_record(event: *mut c_void) -> Option<*mut c_void> {
 }
 
 fn sym<T: Copy>(name: &[u8]) -> Option<T> {
-    debug_assert_eq!(*name.last().unwrap(), 0, "symbol name must be NUL-terminated");
+    debug_assert_eq!(
+        *name.last().unwrap(),
+        0,
+        "symbol name must be NUL-terminated"
+    );
     let p = unsafe { libc::dlsym(libc::RTLD_DEFAULT, name.as_ptr() as *const _) };
     if p.is_null() {
         return None;
