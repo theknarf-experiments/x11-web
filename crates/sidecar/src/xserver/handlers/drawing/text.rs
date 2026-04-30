@@ -228,9 +228,9 @@ pub(crate) fn handle_poly_text16(state: &mut ClientState, req: &PolyText16Reques
                                         & 1;
                                     if bit != 0 {
                                         let idx = (row * gw + col) * 4;
-                                        pixels[idx] = fg_b;
+                                        pixels[idx] = fg_r;
                                         pixels[idx + 1] = fg_g;
-                                        pixels[idx + 2] = fg_r;
+                                        pixels[idx + 2] = fg_b;
                                         pixels[idx + 3] = 0xFF;
                                     }
                                 }
@@ -402,9 +402,9 @@ pub(crate) fn handle_image_text16(state: &mut ClientState, req: &ImageText16Requ
     let mut pixels = vec![0u8; total_width as usize * total_height as usize * 4];
     // Fill background
     for i in 0..(total_width as usize * total_height as usize) {
-        pixels[i * 4] = bg_b;
+        pixels[i * 4] = bg_r;
         pixels[i * 4 + 1] = bg_g;
-        pixels[i * 4 + 2] = bg_r;
+        pixels[i * 4 + 2] = bg_b;
         pixels[i * 4 + 3] = 0xFF;
     }
 
@@ -438,9 +438,9 @@ pub(crate) fn handle_image_text16(state: &mut ClientState, req: &ImageText16Requ
                         if px >= 0 && px < total_width as i32 && py >= 0 && py < total_height as i32
                         {
                             let idx = (py as usize * total_width as usize + px as usize) * 4;
-                            pixels[idx] = fg_b;
+                            pixels[idx] = fg_r;
                             pixels[idx + 1] = fg_g;
-                            pixels[idx + 2] = fg_r;
+                            pixels[idx + 2] = fg_b;
                             pixels[idx + 3] = 0xFF;
                         }
                     }
