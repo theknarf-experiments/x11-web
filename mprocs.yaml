@@ -4,11 +4,17 @@ procs:
     env:
       RUST_LOG: info
 
-  # X11 sidecar (Linux container) — still on WebSocket :3001 until
-  # we migrate it to the QUIC + Cap'n Proto wire protocol the
-  # macOS sidecar uses.
+  # X11 sidecar (Linux container) — connects to the host's backend
+  # over QUIC :3002 via `host.docker.internal`, reading the QUIC
+  # fingerprint from `$HOME/.x11web-fingerprint` (bind-mounted by
+  # compose.yml's `sidecar` service).
   sidecar-x11:
-    shell: "docker compose -f compose.dev.yml up --build; docker compose -f compose.dev.yml down"
+    shell: |
+      set -e
+      printf 'Waiting for backend fingerprint at %s/.x11web-fingerprint…\n' "$HOME"
+      while [ ! -s "$HOME/.x11web-fingerprint" ]; do sleep 0.2; done
+      docker compose up --build sidecar
+      docker compose down
 
   # macOS sidecar — connects to the backend over QUIC :3002. Builds
   # the .app bundle (stable codesign identity for TCC), waits for

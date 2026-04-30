@@ -1,31 +1,60 @@
+# Two intended consumers:
+#   1. mprocs dev loop — `docker compose up sidecar` runs ONLY the
+#      sidecar; the backend is on the host (via `cargo run`) and
+#      writes its QUIC fingerprint to `$HOME/.x11web-fingerprint`,
+#      which the sidecar bind-mounts in.
+#   2. Full container stack — `docker compose --profile full up`
+#      runs everything in containers. The sidecar still reaches
+#      the backend through `host.docker.internal:3002` (works
+#      either way) and the backend writes the fingerprint into
+#      the same host file the sidecar reads from.
+#
+# `$HOME/.x11web-fingerprint` must exist as a file before docker
+# starts containers that bind-mount it; otherwise docker creates a
+# directory at that path and the backend fails to write the cert
+# fingerprint. `touch ~/.x11web-fingerprint` once is enough.
 services:
   backend:
+    profiles: [full]
     build:
       context: .
       dockerfile: Dockerfile.backend
     ports:
       - "3001:3001"
+      - "3002:3002/udp"
     environment:
       RUST_LOG: info
+      X11WEB_FINGERPRINT_FILE: /run/state/x11web-fingerprint
+    volumes:
+      - ${HOME}/.x11web-fingerprint:/run/state/x11web-fingerprint
 
   sidecar:
     build:
       context: .
       dockerfile: Dockerfile.sidecar
     hostname: x11web
-    depends_on:
-      - backend
-    ports:
-      # WebRTC UDP port range for ICE
-      - "10000-10010:10000-10010/udp"
     environment:
-      BACKEND_URL: ws://backend:3001/ws/sidecar
-      SIDECAR_NAME: local-sidecar
+      # `host.docker.internal` works for both topologies: in mprocs
+      # mode the backend is on the host directly; in full mode the
+      # backend container exposes :3002 to the host and the sidecar
+      # routes back through it.
+      BACKEND_QUIC_ADDR: host.docker.internal:3002
+      BACKEND_SERVER_NAME: localhost
+      X11WEB_FINGERPRINT_FILE: /run/secrets/x11web-fingerprint
+      SIDECAR_NAME: dev-sidecar
       DISPLAY_NUMBER: "99"
       RUST_LOG: info
       NO_AT_BRIDGE: "1"
+    extra_hosts:
+      # Linux's docker doesn't auto-resolve host.docker.internal —
+      # add the explicit mapping so this works the same on macOS
+      # and Linux hosts.
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - ${HOME}/.x11web-fingerprint:/run/secrets/x11web-fingerprint:ro
 
   frontend:
+    profiles: [full]
     build:
       context: .
       dockerfile: Dockerfile.frontend

@@ -12,6 +12,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libopus-dev \
     # libxkbcommon for keymap compilation + compose
     libxkbcommon-dev \
+    # capnproto: needed by `x11-web-wire`'s build.rs to codegen
+    # Rust bindings from `wire.capnp`.
+    capnproto \
     && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 ARG CACHE_BUST=0

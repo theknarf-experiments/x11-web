@@ -1,4 +1,10 @@
 FROM rust:1-bookworm AS builder
+# capnproto: needed by `x11-web-wire`'s build.rs to codegen Rust
+# bindings from `wire.capnp`. Without it the build dies with a
+# "Failed to execute capnp --version" panic during cargo build.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    capnproto \
+    && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 COPY Cargo.toml Cargo.lock ./
 COPY crates/ crates/
@@ -8,4 +14,5 @@ FROM debian:bookworm-slim
 RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates && rm -rf /var/lib/apt/lists/*
 COPY --from=builder /app/target/release/x11-web-backend /usr/local/bin/
 EXPOSE 3001
+EXPOSE 3002/udp
 CMD ["x11-web-backend"]

@@ -8,24 +8,25 @@ mod menus;
 #[cfg(feature = "osmesa")]
 #[allow(dead_code)]
 mod osmesa;
-mod webrtc;
+mod wire_bridge;
 mod xinput2;
 mod xserver;
 
 use std::collections::HashMap;
 use std::process::Stdio;
 
-use futures::{SinkExt, StreamExt};
+use std::net::SocketAddr;
+
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::{Child, Command};
 use tokio::sync::mpsc;
 use tokio::time::{interval, Duration};
-use tokio_tungstenite::connect_async;
-use tokio_tungstenite::tungstenite::Message;
 use tracing::{error, info, warn};
 use x11_web_protocol::*;
+use x11_web_wire::conn::{dial, DialedConnection};
+use x11_web_wire::tls::parse_fingerprint;
+use x11_web_wire::wire_capnp;
 
-use crate::webrtc::{RtcCommand, RtcEvent, WebRtcManager};
 use crate::xserver::{TaggedDisplayUpdate, X11Server};
 
 struct ProcessManager {
@@ -225,8 +226,32 @@ async fn main() {
         }
     }
 
-    let backend_url =
-        std::env::var("BACKEND_URL").unwrap_or_else(|_| "ws://127.0.0.1:3001/ws/sidecar".into());
+    // Install rustls's default crypto provider — quinn's TLS
+    // config rejects building without one. `ring` is what the
+    // wire crate is feature-gated to.
+    let _ = rustls::crypto::ring::default_provider().install_default();
+
+    // `BACKEND_QUIC_ADDR` may be either a literal `IP:PORT` (macOS
+    // sidecar against a host backend) or `hostname:PORT` (X11
+    // sidecar in Docker reaching `backend:3002` over the network
+    // alias). Resolve via DNS at dial time rather than parse here so
+    // we re-resolve on each reconnect — handy when the backend
+    // container restarts and gets a new IP.
+    let backend_addr_str =
+        std::env::var("BACKEND_QUIC_ADDR").unwrap_or_else(|_| "127.0.0.1:3002".into());
+    let server_name = std::env::var("BACKEND_SERVER_NAME").unwrap_or_else(|_| "localhost".into());
+    let fingerprint_source = match std::env::var("X11WEB_SERVER_FINGERPRINT") {
+        Ok(s) => FingerprintSource::Inline(s),
+        Err(_) => FingerprintSource::File(std::env::var("X11WEB_FINGERPRINT_FILE").unwrap_or_else(
+            |_| {
+                let home = std::env::var("HOME").unwrap_or_else(|_| ".".into());
+                format!("{home}/.x11web-fingerprint")
+            },
+        )),
+    };
+    let bearer_token = std::env::var("X11WEB_BEARER_TOKEN")
+        .unwrap_or_else(|_| "dev-token".into())
+        .into_bytes();
     let sidecar_name =
         std::env::var("SIDECAR_NAME").unwrap_or_else(|_| hostname().unwrap_or("sidecar".into()));
     let display_number: u32 = std::env::var("DISPLAY_NUMBER")
@@ -292,15 +317,41 @@ async fn main() {
     // Start PulseAudio for audio capture/playback.
     let _pulse_daemon = audio::start_pulseaudio().await;
 
-    info!("Connecting to backend at {}", backend_url);
+    info!("Connecting to backend at {backend_addr_str} (server-name={server_name})");
 
     loop {
-        match connect_async(&backend_url).await {
-            Ok((ws_stream, _)) => {
-                info!("Connected to backend");
+        let fingerprint = match read_fingerprint(&fingerprint_source) {
+            Ok(fp) => fp,
+            Err(e) => {
+                warn!("Fingerprint not available yet: {e}. Retrying in 2s.");
+                tokio::time::sleep(Duration::from_secs(2)).await;
+                continue;
+            }
+        };
+        let backend_addr: SocketAddr = match resolve_backend_addr(&backend_addr_str).await {
+            Ok(a) => a,
+            Err(e) => {
+                warn!("Failed to resolve {backend_addr_str}: {e}. Retrying in 2s.");
+                tokio::time::sleep(Duration::from_secs(2)).await;
+                continue;
+            }
+        };
+        match dial(
+            backend_addr,
+            &server_name,
+            fingerprint,
+            &bearer_token,
+            &sidecar_name,
+        )
+        .await
+        {
+            Ok(connection) => {
+                info!(
+                    "Connected to backend; sidecar_id={} agreed_version={}",
+                    connection.sidecar_id, connection.agreed_protocol_version
+                );
                 run_session(
-                    ws_stream,
-                    &sidecar_name,
+                    connection,
                     &display_string,
                     dbus_address.clone(),
                     &mut display_rx,
@@ -322,11 +373,47 @@ async fn main() {
     }
 }
 
+/// Where the fingerprint comes from. Mirror of the macOS sidecar's
+/// equivalent — re-resolved on every dial attempt so a backend
+/// restart picks up the new fingerprint without restarting the
+/// sidecar.
+enum FingerprintSource {
+    Inline(String),
+    File(String),
+}
+
+fn read_fingerprint(source: &FingerprintSource) -> Result<[u8; 32], String> {
+    let raw = match source {
+        FingerprintSource::Inline(s) => s.clone(),
+        FingerprintSource::File(path) => {
+            std::fs::read_to_string(path).map_err(|e| format!("read {path}: {e}"))?
+        }
+    };
+    parse_fingerprint(&raw).map_err(|e| format!("parse fingerprint: {e}"))
+}
+
+/// Resolve `host:port` (or `ip:port`) to a single `SocketAddr`,
+/// preferring IPv4 because quinn's default endpoint binds 0.0.0.0
+/// and refuses to dial v6 from a v4 socket. Re-runs on every
+/// reconnect — a restarted backend container changes IPs.
+async fn resolve_backend_addr(s: &str) -> Result<SocketAddr, String> {
+    let mut addrs = tokio::net::lookup_host(s)
+        .await
+        .map_err(|e| format!("lookup_host: {e}"))?;
+    let mut first_v6 = None;
+    for a in addrs.by_ref() {
+        if a.is_ipv4() {
+            return Ok(a);
+        }
+        if first_v6.is_none() {
+            first_v6 = Some(a);
+        }
+    }
+    first_v6.ok_or_else(|| "no addresses resolved".into())
+}
+
 async fn run_session(
-    ws_stream: tokio_tungstenite::WebSocketStream<
-        tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
-    >,
-    sidecar_name: &str,
+    connection: DialedConnection,
     display_string: &str,
     dbus_address: Option<String>,
     display_rx: &mut mpsc::UnboundedReceiver<TaggedDisplayUpdate>,
@@ -337,124 +424,145 @@ async fn run_session(
     shared_clipboard: &crate::xserver::types::SharedClipboard,
     shared_selections: &crate::xserver::types::SharedSelections,
 ) {
-    let (mut ws_tx, mut ws_rx) = ws_stream.split();
+    let DialedConnection {
+        mut reader,
+        mut writer,
+        ..
+    } = connection;
     let mut process_manager = ProcessManager::new(display_string.to_string(), dbus_address);
 
-    // Send registration
-    let register = SidecarToBackend::Register {
-        sidecar_name: sidecar_name.to_string(),
-    };
-    let json = serde_json::to_string(&register).unwrap();
-    if ws_tx.send(Message::Text(json.into())).await.is_err() {
-        return;
-    }
-
-    // Channel for outgoing messages
+    // Outgoing messages: every event source pushes SidecarToBackend
+    // here, the events loop drains it through the wire writer.
     let (tx, mut rx) = mpsc::unbounded_channel::<SidecarToBackend>();
 
-    // Spawn WebRTC manager for peer-to-peer data channel + audio.
-    let (rtc_mgr, mut rtc_rx) = WebRtcManager::spawn();
+    // Incoming messages: the recv loop owns the wire reader, decodes
+    // Cap'n Proto, forwards BackendToSidecar over this channel so the
+    // events loop can keep `process_manager` borrowed exclusively.
+    let (in_tx, mut in_rx) = mpsc::unbounded_channel::<BackendToSidecar>();
 
-    // Spawn audio capture: reads from PulseAudio monitor, sends Opus to WebRTC.
-    let rtc_mgr_audio = rtc_mgr.cmd_tx_clone();
-    tokio::spawn(audio::run_audio_capture(rtc_mgr_audio));
-
-    // Channel for mic audio from WebRTC → PulseAudio virtual source.
-    let (mic_tx, mic_rx) = mpsc::unbounded_channel::<Vec<u8>>();
-    tokio::spawn(audio::run_audio_playback(mic_rx));
-
-    // Heartbeat task
+    // Heartbeat — pushes Heartbeat into tx every 30s.
     let tx_heartbeat = tx.clone();
     let heartbeat_task = tokio::spawn(async move {
-        let mut heartbeat_interval = interval(Duration::from_secs(30));
+        let mut tick = interval(Duration::from_secs(30));
         loop {
-            heartbeat_interval.tick().await;
+            tick.tick().await;
             if tx_heartbeat.send(SidecarToBackend::Heartbeat).is_err() {
                 break;
             }
         }
     });
 
-    // Forward outgoing messages to WebSocket
-    let send_task = tokio::spawn(async move {
-        while let Some(msg) = rx.recv().await {
-            let json = serde_json::to_string(&msg).unwrap();
-            if ws_tx.send(Message::Text(json.into())).await.is_err() {
-                break;
+    // Recv loop owns the wire reader. Translates messages to
+    // BackendToSidecar and forwards over `in_tx`.
+    let recv_loop = async {
+        loop {
+            let msg = match reader.read_message::<wire_capnp::to_sidecar::Owned>().await {
+                Ok(Some(m)) => m,
+                Ok(None) => return,
+                Err(e) => {
+                    warn!("wire read failed: {e}");
+                    return;
+                }
+            };
+            let to_sidecar: wire_capnp::to_sidecar::Reader = match msg.get_root() {
+                Ok(r) => r,
+                Err(e) => {
+                    warn!("ToSidecar root: {e}");
+                    continue;
+                }
+            };
+            match wire_bridge::read_to_sidecar(to_sidecar) {
+                Ok(cmd) => {
+                    if in_tx.send(cmd).is_err() {
+                        return;
+                    }
+                }
+                Err(e) => {
+                    warn!("ToSidecar translate: {e:?}");
+                }
             }
         }
-    });
+    };
 
-    // Main event loop
-    let mut check_interval = interval(Duration::from_secs(2));
-    loop {
-        tokio::select! {
-            msg = ws_rx.next() => {
-                match msg {
-                    Some(Ok(Message::Text(text))) => {
-                        if let Ok(cmd) = serde_json::from_str::<BackendToSidecar>(&text) {
-                            handle_command(cmd, &mut process_manager, &tx, window_router, screen_size_tx, shared_clipboard, shared_selections, &rtc_mgr).await;
-                        }
+    // Events + send loop owns the wire writer plus every other
+    // event source.
+    let events_loop = async {
+        let mut check_interval = interval(Duration::from_secs(2));
+        loop {
+            tokio::select! {
+                Some(cmd) = in_rx.recv() => {
+                    handle_command(
+                        cmd,
+                        &mut process_manager,
+                        &tx,
+                        window_router,
+                        screen_size_tx,
+                        shared_clipboard,
+                        shared_selections,
+                    ).await;
+                }
+                Some(msg) = rx.recv() => {
+                    let Some(builder) = wire_bridge::build_from_sidecar(&msg) else {
+                        continue;
+                    };
+                    if let Err(e) = writer.write_message(&builder).await {
+                        warn!("wire write failed: {e}");
+                        return;
                     }
-                    Some(Ok(Message::Close(_))) | None => break,
-                    _ => {}
                 }
-            }
-            Some((client_id, update)) = display_rx.recv() => {
-                // Send via WebSocket (existing path) AND WebRTC data channel.
-                let _ = tx.send(SidecarToBackend::DisplayUpdate { client_id: client_id.clone(), update: update.clone() });
-                rtc_mgr.send(RtcCommand::DisplayUpdate { client_id, update });
-            }
-            Some((client_id, peer_pid)) = client_connected_rx.recv() => {
-                let spawned_pids: Vec<u32> = process_manager.list().iter().map(|p| p.pid).collect();
-                let pid = find_ancestor_pid(peer_pid, &spawned_pids);
-
-                if let Some(pid) = pid {
-                    let command = process_manager.get_command(pid).unwrap_or("").to_string();
-                    info!("Process {pid} ({command}) (peer {peer_pid}) connected as X11 client {client_id}");
-                    let _ = tx.send(SidecarToBackend::ProcessConnected { pid, client_id: client_id.clone(), command: command.clone() });
-                    rtc_mgr.send(RtcCommand::ProcessConnected { pid, client_id, command });
-                } else {
-                    info!("X11 client {client_id} connected (peer PID {peer_pid}, no matching spawned process)");
+                Some((client_id, update)) = display_rx.recv() => {
+                    let _ = tx.send(SidecarToBackend::DisplayUpdate { client_id, update });
                 }
-            }
-            Some(clipboard_event) = clipboard_notify_rx.recv() => {
-                match clipboard_event {
-                    crate::xserver::types::ClipboardEvent::OwnerChanged { selection, owner } => {
-                        if owner != 0 {
-                            let mime_types = vec!["text/plain".into(), "UTF8_STRING".into()];
-                            let _ = tx.send(SidecarToBackend::ClipboardOffer {
-                                selection: selection.clone(),
-                                mime_types: mime_types.clone(),
+                Some((client_id, peer_pid)) = client_connected_rx.recv() => {
+                    let spawned_pids: Vec<u32> = process_manager.list().iter().map(|p| p.pid).collect();
+                    if let Some(pid) = find_ancestor_pid(peer_pid, &spawned_pids) {
+                        let command = process_manager.get_command(pid).unwrap_or("").to_string();
+                        info!(
+                            "Process {pid} ({command}) (peer {peer_pid}) connected as X11 client {client_id}"
+                        );
+                        let _ = tx.send(SidecarToBackend::ProcessConnected { pid, client_id, command });
+                    } else {
+                        info!(
+                            "X11 client {client_id} connected (peer PID {peer_pid}, no matching spawned process)"
+                        );
+                    }
+                }
+                Some(clipboard_event) = clipboard_notify_rx.recv() => {
+                    match clipboard_event {
+                        crate::xserver::types::ClipboardEvent::OwnerChanged { selection, owner } => {
+                            if owner != 0 {
+                                let mime_types = vec!["text/plain".into(), "UTF8_STRING".into()];
+                                let _ = tx.send(SidecarToBackend::ClipboardOffer {
+                                    selection,
+                                    mime_types,
+                                });
+                            }
+                        }
+                        crate::xserver::types::ClipboardEvent::Data { selection, mime_type, data } => {
+                            let _ = tx.send(SidecarToBackend::ClipboardData {
+                                selection,
+                                mime_type,
+                                data,
                             });
-                            rtc_mgr.send(RtcCommand::ClipboardOffer { selection, mime_types });
                         }
                     }
-                    crate::xserver::types::ClipboardEvent::Data { selection, mime_type, data } => {
-                        let _ = tx.send(SidecarToBackend::ClipboardData {
-                            selection: selection.clone(),
-                            mime_type: mime_type.clone(),
-                            data: data.clone(),
-                        });
-                        rtc_mgr.send(RtcCommand::ClipboardData { selection, mime_type, data });
-                    }
                 }
-            }
-            Some(rtc_event) = rtc_rx.recv() => {
-                handle_rtc_event(rtc_event, &mut process_manager, &tx, window_router, screen_size_tx, shared_clipboard, shared_selections, &rtc_mgr, &mic_tx).await;
-            }
-            _ = check_interval.tick() => {
-                let exited = process_manager.check_exited().await;
-                for (pid, exit_code) in exited {
-                    let _ = tx.send(SidecarToBackend::ProcessExited { pid, exit_code: exit_code });
-                    rtc_mgr.send(RtcCommand::ProcessExited { pid, exit_code });
+                _ = check_interval.tick() => {
+                    let exited = process_manager.check_exited().await;
+                    for (pid, exit_code) in exited {
+                        let _ = tx.send(SidecarToBackend::ProcessExited { pid, exit_code });
+                    }
                 }
             }
         }
+    };
+
+    tokio::select! {
+        _ = recv_loop => {}
+        _ = events_loop => {}
     }
 
     heartbeat_task.abort();
-    send_task.abort();
 }
 
 async fn handle_command(
@@ -465,7 +573,6 @@ async fn handle_command(
     screen_size_tx: &crate::xserver::types::ScreenSizeTx,
     shared_clipboard: &crate::xserver::types::SharedClipboard,
     shared_selections: &crate::xserver::types::SharedSelections,
-    rtc_mgr: &WebRtcManager,
 ) {
     match cmd {
         BackendToSidecar::SpawnProcess {
@@ -507,10 +614,6 @@ async fn handle_command(
         }
         BackendToSidecar::InputEvent { window_id, event } => {
             if !window_router.send_input(&window_id, event) {
-                // No route entry — most commonly because the X11
-                // client closed (or never registered) this window.
-                // Surface it so the frontend can show "input dropped"
-                // instead of silently swallowing the event.
                 let _ = tx.send(SidecarToBackend::InputDropped {
                     window_id,
                     reason: "no route entry for window UUID".into(),
@@ -532,13 +635,8 @@ async fn handle_command(
             mime_type,
         } => {
             info!("Clipboard request: selection={selection} mime={mime_type}");
-            // Look up the current selection owner and request conversion.
-            // The owner will respond via the clipboard event channel.
             if let Ok(sels) = shared_selections.lock() {
-                if let Some(_entry) = sels.values().next() {
-                    // There is a selection owner — the ConvertSelection mechanism
-                    // will handle this via the normal X11 selection protocol.
-                    // For now, signal that clipboard data is not available from server side.
+                if sels.values().next().is_some() {
                     info!(
                         "Selection owner exists — clipboard data flows via X11 selection protocol"
                     );
@@ -554,8 +652,6 @@ async fn handle_command(
                 "Clipboard set: selection={selection} mime={mime_type} len={}",
                 data.len()
             );
-            // Store the data so that when an X11 client requests this selection,
-            // the server can respond with the browser's clipboard content.
             if let Ok(mut cb) = shared_clipboard.lock() {
                 cb.insert(
                     selection,
@@ -569,108 +665,12 @@ async fn handle_command(
                 let _ = screen_size_tx.send((width, height));
             }
         }
-        BackendToSidecar::RtcAnswer { frontend_id, sdp } => {
-            rtc_mgr.send(RtcCommand::Answer { frontend_id, sdp });
-        }
-        BackendToSidecar::RtcIceCandidate {
-            frontend_id,
-            candidate,
-            ..
-        } => {
-            rtc_mgr.send(RtcCommand::IceCandidate {
-                frontend_id,
-                candidate,
-            });
-        }
-    }
-}
-
-/// Handle events from the WebRTC manager (data channel input, mic audio, signaling).
-async fn handle_rtc_event(
-    event: RtcEvent,
-    pm: &mut ProcessManager,
-    tx: &mpsc::UnboundedSender<SidecarToBackend>,
-    window_router: &crate::xserver::WindowRouter,
-    screen_size_tx: &crate::xserver::types::ScreenSizeTx,
-    shared_clipboard: &crate::xserver::types::SharedClipboard,
-    _shared_selections: &crate::xserver::types::SharedSelections,
-    rtc_mgr: &WebRtcManager,
-    mic_tx: &mpsc::UnboundedSender<Vec<u8>>,
-) {
-    match event {
-        RtcEvent::Signal(msg) => {
-            // Forward signaling messages (SDP offer, ICE candidates) to backend via WS.
-            let _ = tx.send(msg);
-        }
-        RtcEvent::Input { window_id, event } => {
-            if !window_router.send_input(&window_id, event) {
-                rtc_mgr.send(RtcCommand::InputDropped {
-                    window_id,
-                    reason: "no route entry for window UUID".into(),
-                });
-            }
-        }
-        RtcEvent::Redraw { window_id } => {
-            window_router.send_resize(&window_id, 0, 0);
-        }
-        RtcEvent::ResizeWindow {
-            window_id,
-            width,
-            height,
-        } => {
-            window_router.send_resize(&window_id, width, height);
-        }
-        RtcEvent::ResizeScreen { width, height } => {
-            if width > 0 && height > 0 {
-                let _ = screen_size_tx.send((width, height));
-            }
-        }
-        RtcEvent::SetClipboard {
-            selection,
-            mime_type,
-            data,
-        } => {
-            if let Ok(mut cb) = shared_clipboard.lock() {
-                cb.insert(
-                    selection,
-                    crate::xserver::types::ServerClipboardData { mime_type, data },
-                );
-            }
-        }
-        RtcEvent::RequestClipboard {
-            selection,
-            mime_type,
-        } => {
-            info!("WebRTC clipboard request: selection={selection} mime={mime_type}");
-        }
-        RtcEvent::SpawnProcess {
-            request_id,
-            command,
-            args,
-        } => match pm.spawn(&command, &args).await {
-            Ok(pid) => {
-                let _ = tx.send(SidecarToBackend::ProcessSpawned { request_id, pid });
-            }
-            Err(message) => {
-                let _ = tx.send(SidecarToBackend::Error {
-                    request_id: Some(request_id),
-                    message,
-                });
-            }
-        },
-        RtcEvent::KillProcess { request_id, pid } => match pm.kill(pid).await {
-            Ok(()) => {
-                let _ = tx.send(SidecarToBackend::ProcessKilled { request_id, pid });
-            }
-            Err(message) => {
-                let _ = tx.send(SidecarToBackend::Error {
-                    request_id: Some(request_id),
-                    message,
-                });
-            }
-        },
-        RtcEvent::MicAudio { data } => {
-            let _ = mic_tx.send(data);
+        // Architecturally-removed RTC variants. The wire schema
+        // doesn't carry them; the bridge maps RTC slots to nothing,
+        // so reaching this arm requires someone hand-constructing a
+        // BackendToSidecar in code. Drop with a warn.
+        BackendToSidecar::RtcAnswer { .. } | BackendToSidecar::RtcIceCandidate { .. } => {
+            warn!("Ignoring stale RTC variant of BackendToSidecar");
         }
     }
 }

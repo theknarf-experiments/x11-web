@@ -17,6 +17,9 @@ ext-compat  = []  # DPMS, MIT-SCREEN-SAVER, VidMode, RECORD, SECURITY, XINERAMA
 
 [dependencies]
 x11-web-protocol = { path = "../protocol" }
+x11-web-wire = { path = "../wire" }
+capnp = "0.20"
+rustls = { version = "0.23", default-features = false, features = ["ring"] }
 x11rb-protocol = { version = "0.13", features = [
     "request-parsing",
     "composite", "damage", "dbe", "dpms", "dri3", "glx", "present",

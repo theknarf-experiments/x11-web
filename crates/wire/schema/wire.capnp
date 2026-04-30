@@ -70,6 +70,20 @@ struct FromSidecar {
         # sidecar's router has no entry for. Lets the frontend
         # surface "input dropped" instead of silently swallowing.
         inputDropped @4 :InputDropped;
+
+        # Replies to spawn / kill / list-processes requests.
+        processSpawned @5 :ProcessSpawnedReply;
+        processKilled @6 :ProcessKilledReply;
+        processList @7 :ProcessListReply;
+
+        # Generic error response, used by the X11 sidecar to surface
+        # spawn/kill failures back to the requesting frontend.
+        errorReply @8 :ErrorReply;
+
+        # Clipboard bridging — sidecar exposes the X11 selection's
+        # current state and content to the frontend.
+        clipboardOffer @9 :ClipboardOffer;
+        clipboardData @10 :ClipboardData;
     }
 }
 
@@ -92,6 +106,46 @@ struct InputDropped {
     reason @1 :Text;
 }
 
+struct ProcessSpawnedReply {
+    requestId @0 :Text;
+    pid @1 :UInt32;
+}
+
+struct ProcessKilledReply {
+    requestId @0 :Text;
+    pid @1 :UInt32;
+}
+
+struct ProcessListReply {
+    requestId @0 :Text;
+    processes @1 :List(ProcessInfo);
+}
+
+struct ProcessInfo {
+    pid @0 :UInt32;
+    command @1 :Text;
+}
+
+struct ErrorReply {
+    # `requestId` is logically nullable — some errors aren't tied
+    # to a specific request. `hasRequestId = false` means "general
+    # error".
+    hasRequestId @0 :Bool;
+    requestId @1 :Text;
+    message @2 :Text;
+}
+
+struct ClipboardOffer {
+    selection @0 :Text;
+    mimeTypes @1 :List(Text);
+}
+
+struct ClipboardData {
+    selection @0 :Text;
+    mimeType @1 :Text;
+    data @2 :Data;
+}
+
 struct DisplayUpdate {
     clientId @0 :Text;
     payload @1 :DisplayPayload;
@@ -106,6 +160,31 @@ struct DisplayPayload {
         windowConfigured @4 :WindowConfigured;
         titleChanged @5 :TitleChanged;
         putImage @6 :PutImage;
+
+        # Cursor changes — the X11 sidecar maps cursor fonts /
+        # bitmaps / animated cursors onto the window's frame.
+        cursorChanged @7 :CursorChanged;
+        cursorBitmap @8 :CursorBitmap;
+        cursorAnimated @9 :CursorAnimated;
+
+        # Window manager state, focus, and z-order signals the
+        # frontend needs to render correctly.
+        windowFocused @10 :WindowFocused;
+        windowRaised @11 :WindowRaised;
+        windowStateChanged @12 :WindowStateChanged;
+        windowUrgent @13 :WindowUrgent;
+        transientForSet @14 :TransientForSet;
+        windowIconChanged @15 :WindowIconChanged;
+
+        # Audio cue — frontend plays a bell sound at `percent`
+        # volume.
+        bell @16 :Bell;
+
+        # AppMenu mirroring (GTK / Qt apps via DBus). The X11
+        # sidecar's MenuTracker emits the full tree on first
+        # discovery, then incremental state changes.
+        menuStructure @17 :MenuStructure;
+        menuStateChanged @18 :MenuStateChanged;
     }
 }
 
@@ -166,6 +245,140 @@ enum ImageEncoding {
     png @2;
 }
 
+# Cursor-related variants. CursorChanged carries a named cursor
+# string the frontend resolves to a CSS cursor; CursorBitmap is a
+# custom hardware cursor; CursorAnimated is a multi-frame cursor
+# (XRender CreateAnimCursor).
+struct CursorChanged {
+    windowId @0 :Text;
+    cursor @1 :Text;
+}
+
+struct CursorBitmap {
+    windowId @0 :Text;
+    width @1 :UInt16;
+    height @2 :UInt16;
+    hotspotX @3 :UInt16;
+    hotspotY @4 :UInt16;
+    data @5 :Data;
+}
+
+struct CursorAnimated {
+    windowId @0 :Text;
+    frames @1 :List(AnimCursorFrame);
+}
+
+struct AnimCursorFrame {
+    pixels @0 :Data;
+    width @1 :UInt16;
+    height @2 :UInt16;
+    hotspotX @3 :UInt16;
+    hotspotY @4 :UInt16;
+    delayMs @5 :UInt32;
+}
+
+# Window state.
+struct WindowFocused {
+    # `windowId` is logically nullable (focus cleared = "no
+    # window"). `hasWindowId = false` encodes that.
+    hasWindowId @0 :Bool;
+    windowId @1 :Text;
+}
+
+struct WindowRaised {
+    windowId @0 :Text;
+}
+
+struct WindowStateChanged {
+    windowId @0 :Text;
+    state @1 :WindowWmState;
+}
+
+struct WindowUrgent {
+    windowId @0 :Text;
+    urgent @1 :Bool;
+}
+
+struct TransientForSet {
+    windowId @0 :Text;
+    hasParent @1 :Bool;
+    parentWindowId @2 :Text;
+}
+
+struct WindowIconChanged {
+    windowId @0 :Text;
+    width @1 :UInt16;
+    height @2 :UInt16;
+    data @3 :Data;
+}
+
+enum WindowWmState {
+    normal @0;
+    minimized @1;
+    maximized @2;
+    fullscreen @3;
+    close @4;
+}
+
+struct Bell {
+    percent @0 :UInt8;
+}
+
+# AppMenu mirroring. Sidecar emits the full tree once, then sends
+# `menuStateChanged` incremental updates.
+struct MenuStructure {
+    windowId @0 :Text;
+    menu @1 :List(MenuItem);
+}
+
+struct MenuStateChanged {
+    windowId @0 :Text;
+    itemId @1 :Text;
+    hasEnabled @2 :Bool;
+    enabled @3 :Bool;
+    hasChecked @4 :Bool;
+    checked @5 :Bool;
+    hasLabel @6 :Bool;
+    label @7 :Text;
+}
+
+# Recursive — submenus contain their own MenuItem children. Cap'n
+# Proto handles this via List(MenuItem) on the children field.
+struct MenuItem {
+    id @0 :Text;
+    hasLabel @1 :Bool;
+    label @2 :Text;
+    kind @3 :MenuItemKind;
+    enabled @4 :Bool;
+    visible @5 :Bool;
+    hasChecked @6 :Bool;
+    checked @7 :Bool;
+    hasAccelerator @8 :Bool;
+    accelerator @9 :Text;
+    hasIcon @10 :Bool;
+    icon @11 :Text;
+    hasAction @12 :Bool;
+    action @13 :MenuAction;
+    children @14 :List(MenuItem);
+}
+
+enum MenuItemKind {
+    normal @0;
+    submenu @1;
+    separator @2;
+    checkbox @3;
+    radio @4;
+}
+
+# `target` is the protocol crate's `Option<serde_json::Value>` —
+# we serialize as JSON text on the wire to keep the schema
+# language-agnostic (Cap'n Proto has no native JSON type).
+struct MenuAction {
+    name @0 :Text;
+    hasTarget @1 :Bool;
+    targetJson @2 :Text;
+}
+
 # ---------- Backend → Sidecar ----------
 
 struct ToSidecar {
@@ -186,6 +399,19 @@ struct ToSidecar {
         # yet; the schema slot exists for parity with X11.
         spawnProcess @3 :SpawnProcess;
         killProcess @4 :KillProcess;
+
+        # Process listing — request, the reply comes back as
+        # `processList` on the FromSidecar union.
+        listProcesses @5 :ListProcessesReq;
+
+        # Clipboard bridging — frontend pushes bytes into the
+        # sidecar's selection, or asks for current contents.
+        requestClipboard @6 :RequestClipboard;
+        setClipboard @7 :SetClipboard;
+
+        # RandR-driven virtual screen resize on the sidecar (X11
+        # only; macOS sidecar would no-op).
+        resizeScreen @8 :ResizeScreen;
     }
 }
 
@@ -201,6 +427,25 @@ struct InputEvent {
         buttonPress @2 :ButtonPress;
         buttonRelease @3 :ButtonRelease;
         motionNotify @4 :MotionNotify;
+
+        # AppMenu / window-manage actions originated by the
+        # frontend's chrome (clicking a menu item, the close
+        # button, etc.).
+        menuActivate @5 :MenuActivateEvent;
+        windowManage @6 :WindowManageEvent;
+
+        # Browser → X11 drag-and-drop bridge.
+        dndBridge @7 :DndBridgeEvent;
+
+        # Touch + gesture from a touchscreen / trackpad pinch.
+        touchBegin @8 :TouchEvent;
+        touchUpdate @9 :TouchEvent;
+        touchEnd @10 :TouchEvent;
+        gestureSwipe @11 :GestureSwipeEvent;
+        gesturePinch @12 :GesturePinchEvent;
+
+        # IME / dead-key composition for CJK + multilingual input.
+        compositionEvent @13 :CompositionEvent;
     }
 }
 
@@ -253,4 +498,99 @@ struct SpawnProcess {
 struct KillProcess {
     requestId @0 :Text;
     pid @1 :UInt32;
+}
+
+struct ListProcessesReq {
+    requestId @0 :Text;
+}
+
+struct RequestClipboard {
+    selection @0 :Text;
+    mimeType @1 :Text;
+}
+
+struct SetClipboard {
+    selection @0 :Text;
+    mimeType @1 :Text;
+    data @2 :Data;
+}
+
+struct ResizeScreen {
+    width @0 :UInt16;
+    height @1 :UInt16;
+}
+
+# AppMenu activation. `action.name` is the namespaced action name
+# (e.g. `app.quit`); `target` is JSON-encoded GVariant.
+struct MenuActivateEvent {
+    action @0 :MenuAction;
+}
+
+struct WindowManageEvent {
+    action @0 :WindowWmState;
+}
+
+struct DndBridgeEvent {
+    event @0 :DndEventKind;
+}
+
+# Drag-and-drop event payloads from the browser into the X11
+# `XdndDrop` protocol. Mirrors the protocol crate's `DndEventKind`.
+struct DndEventKind {
+    union {
+        enter @0 :DndEnter;
+        position @1 :DndPosition;
+        drop @2 :DndDrop;
+        leave @3 :Void;
+    }
+}
+
+struct DndEnter {
+    mimeTypes @0 :List(Text);
+}
+
+struct DndPosition {
+    x @0 :Int16;
+    y @1 :Int16;
+}
+
+struct DndDrop {
+    mimeType @0 :Text;
+    data @1 :Data;
+}
+
+struct TouchEvent {
+    touchId @0 :UInt32;
+    x @1 :Int16;
+    y @2 :Int16;
+    state @3 :UInt16;
+}
+
+struct GestureSwipeEvent {
+    phase @0 :GesturePhase;
+    fingers @1 :UInt8;
+    dx @2 :Float32;
+    dy @3 :Float32;
+}
+
+struct GesturePinchEvent {
+    phase @0 :GesturePhase;
+    fingers @1 :UInt8;
+    dx @2 :Float32;
+    dy @3 :Float32;
+    scale @4 :Float32;
+    rotation @5 :Float32;
+}
+
+enum GesturePhase {
+    begin @0;
+    update @1;
+    end @2;
+}
+
+struct CompositionEvent {
+    # Phase: "start" / "update" / "end" — text is dead-key /
+    # IME accumulator state.
+    phase @0 :Text;
+    text @1 :Text;
 }

@@ -77,10 +77,18 @@ Then open http://localhost:5173. The sidecar will appear in the dashboard. Click
 ### Docker Compose
 
 ```sh
-docker compose up --build
+# One-time: backend writes the QUIC fingerprint here on startup;
+# Docker would otherwise create a directory at this path.
+touch ~/.x11web-fingerprint
+
+docker compose --profile full up --build
 ```
 
 Opens the frontend at http://localhost:8080 with backend on port 3001.
+
+`docker compose up sidecar` (without `--profile full`) starts only
+the sidecar — used by mprocs when the backend runs natively on the
+host via `cargo run`.
 
 ### Build
 

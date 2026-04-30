@@ -78,6 +78,7 @@ function ensureWorkerNetwork(): void {
 async function doSetup() {
 	ensureWorkerNetwork();
 
+	const FINGERPRINT_PATH = "/tmp/x11web-fingerprint";
 	backendContainer = await GenericContainer.fromDockerfile(
 		PROJECT_ROOT,
 		"Dockerfile.backend",
@@ -88,6 +89,12 @@ async function doSetup() {
 				.withNetworkMode(WORKER_NETWORK)
 				.withNetworkAliases("backend")
 				.withExposedPorts(3001)
+				.withEnvironment({
+					// Pin the fingerprint to a fixed path so the harness
+					// can `exec cat` it without depending on a $HOME that
+					// the backend's slim image doesn't actually set.
+					X11WEB_FINGERPRINT_FILE: FINGERPRINT_PATH,
+				})
 				.withWaitStrategy(
 					Wait.forHttp("/health", 3001).forStatusCode(200),
 				)
@@ -101,6 +108,17 @@ async function doSetup() {
 	console.log(
 		`[worker ${WORKER_INDEX}] Backend running at localhost:${backendPort}`,
 	);
+
+	// Read the QUIC TLS fingerprint the backend wrote at startup.
+	// `/health` only returns 200 after the fingerprint hits disk, so
+	// no race here.
+	const fpResult = await backendContainer.exec(["cat", FINGERPRINT_PATH]);
+	if (fpResult.exitCode !== 0) {
+		throw new Error(
+			`failed to read backend fingerprint (exit ${fpResult.exitCode}): ${fpResult.output}`,
+		);
+	}
+	const fingerprint = fpResult.output.trim();
 
 	sidecarContainer = await GenericContainer.fromDockerfile(
 		PROJECT_ROOT,
@@ -117,7 +135,12 @@ async function doSetup() {
 				// This is a container environment requirement, not app-specific.
 				.withPrivilegedMode()
 				.withEnvironment({
-					BACKEND_URL: "ws://backend:3001/ws/sidecar",
+					// QUIC + Cap'n Proto wire (replaces the old WS+JSON
+					// path). Server-name must match the cert's SAN
+					// ("localhost") even when dialing the network alias.
+					BACKEND_QUIC_ADDR: "backend:3002",
+					BACKEND_SERVER_NAME: "localhost",
+					X11WEB_SERVER_FINGERPRINT: fingerprint,
 					SIDECAR_NAME: `test-sidecar-${WORKER_INDEX}`,
 					DISPLAY_NUMBER: "99",
 					// Set DISPLAY too — many tests run subprocess.run([...])

@@ -3373,6 +3373,7 @@ name = "x11-web-sidecar"
 version = "0.1.0"
 dependencies = [
  "bdf-parser",
+ "capnp",
  "dcv-color-primitives",
  "flate2",
  "freetype-rs",
@@ -3384,6 +3385,7 @@ dependencies = [
  "libpulse-simple-binding",
  "opus",
  "rmp-serde",
+ "rustls",
  "serde",
  "serde_json",
  "str0m",
@@ -3395,6 +3397,7 @@ dependencies = [
  "url",
  "uuid",
  "x11-web-protocol",
+ "x11-web-wire",
  "x11rb-protocol",
  "xkbcommon",
  "yeslogic-fontconfig-sys",

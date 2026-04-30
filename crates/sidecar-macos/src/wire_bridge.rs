@@ -246,6 +246,13 @@ pub fn read_to_sidecar(
             // exists for parity with X11.
             Err(BridgeError::Unsupported("spawn/kill not implemented"))
         }
+        // X11-only variants — macOS sidecar has no concept of
+        // a process list to enumerate, no X11 selection bridge,
+        // and no RandR virtual screen.
+        Which::ListProcesses(_)
+        | Which::RequestClipboard(_)
+        | Which::SetClipboard(_)
+        | Which::ResizeScreen(_) => Err(BridgeError::Unsupported("X11-only ToSidecar variant")),
     }
 }
 
@@ -291,6 +298,22 @@ fn read_input_event(reader: wire_capnp::input_event::Reader) -> Result<InputEven
                 y: mn.get_y(),
                 state: mn.get_state(),
             }
+        }
+        // The remaining variants — menu activation, window
+        // manage, DnD, touch, gesture, IME composition — are X11
+        // surface area that the macOS sidecar's input dispatcher
+        // doesn't yet consume. Surface as Unsupported so the
+        // recv loop logs and drops them.
+        Which::MenuActivate(_)
+        | Which::WindowManage(_)
+        | Which::DndBridge(_)
+        | Which::TouchBegin(_)
+        | Which::TouchUpdate(_)
+        | Which::TouchEnd(_)
+        | Which::GestureSwipe(_)
+        | Which::GesturePinch(_)
+        | Which::CompositionEvent(_) => {
+            return Err(BridgeError::Unsupported("X11-only InputEvent variant"));
         }
     })
 }
