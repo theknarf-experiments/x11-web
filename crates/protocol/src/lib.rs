@@ -428,17 +428,33 @@ pub enum DisplayUpdate {
     },
     /// Incremental update for a single menu item — used for things
     /// like enabling / disabling actions or toggling check state
-    /// without re-sending the whole tree.
+    /// without re-sending the whole tree. The `enabled` and `checked`
+    /// fields use `BoolDelta` rather than `Option<bool>` so the wire
+    /// can carry a flat enum instead of a `hasFoo + foo` pair.
     MenuStateChanged {
         window_id: String,
         item_id: String,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        enabled: Option<bool>,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        checked: Option<bool>,
+        enabled: BoolDelta,
+        checked: BoolDelta,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         label: Option<String>,
     },
+}
+
+/// Three-state update for a `bool` field that may not have changed
+/// in this delta. `Unchanged` means "the receiver should keep its
+/// current value"; `Yes` and `No` mean "the new value is `true` /
+/// `false`."
+///
+/// Used in `MenuStateChanged` because Cap'n Proto can't natively
+/// express `Option<primitive>` — encoding via `hasFoo + foo` was
+/// noisier than a flat enum, and `Option<bool>` doesn't read well
+/// when `None` means "no change" rather than "no value."
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum BoolDelta {
+    Unchanged,
+    Yes,
+    No,
 }
 
 /// One node in a window's menu tree. Common shape across both

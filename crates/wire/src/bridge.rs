@@ -17,7 +17,7 @@
 use capnp::message::{Builder, HeapAllocator};
 use tracing::warn;
 use x11_web_protocol::{
-    AnimCursorFrame, DisplayUpdate, DndEventKind, GesturePhase, InputEvent, MenuAction,
+    AnimCursorFrame, BoolDelta, DisplayUpdate, DndEventKind, GesturePhase, InputEvent, MenuAction,
     MenuActionTarget, MenuItem, MenuItemKind, ProcessInfo, WindowWmState,
 };
 
@@ -338,20 +338,8 @@ fn write_display_payload(
             let mut ms = payload.init_menu_state_changed();
             ms.set_window_id(window_id);
             ms.set_item_id(item_id);
-            match enabled {
-                Some(v) => {
-                    ms.set_has_enabled(true);
-                    ms.set_enabled(*v);
-                }
-                None => ms.set_has_enabled(false),
-            }
-            match checked {
-                Some(v) => {
-                    ms.set_has_checked(true);
-                    ms.set_checked(*v);
-                }
-                None => ms.set_has_checked(false),
-            }
+            ms.set_enabled(write_bool_delta(*enabled));
+            ms.set_checked(write_bool_delta(*checked));
             if let Some(v) = label {
                 ms.set_label(v);
             }
@@ -649,16 +637,8 @@ fn read_display_payload(
             DisplayUpdate::MenuStateChanged {
                 window_id: ms.get_window_id()?.to_string()?,
                 item_id: ms.get_item_id()?.to_string()?,
-                enabled: if ms.get_has_enabled() {
-                    Some(ms.get_enabled())
-                } else {
-                    None
-                },
-                checked: if ms.get_has_checked() {
-                    Some(ms.get_checked())
-                } else {
-                    None
-                },
+                enabled: read_bool_delta(ms.get_enabled()?),
+                checked: read_bool_delta(ms.get_checked()?),
                 label: if ms.has_label() {
                     Some(ms.get_label()?.to_string()?)
                 } else {
@@ -1116,6 +1096,24 @@ fn read_gesture_phase(phase: wire_capnp::GesturePhase) -> GesturePhase {
         G::Begin => GesturePhase::Begin,
         G::Update => GesturePhase::Update,
         G::End => GesturePhase::End,
+    }
+}
+
+fn write_bool_delta(d: BoolDelta) -> wire_capnp::BoolDelta {
+    use wire_capnp::BoolDelta as B;
+    match d {
+        BoolDelta::Unchanged => B::Unchanged,
+        BoolDelta::Yes => B::Yes,
+        BoolDelta::No => B::No,
+    }
+}
+
+fn read_bool_delta(d: wire_capnp::BoolDelta) -> BoolDelta {
+    use wire_capnp::BoolDelta as B;
+    match d {
+        B::Unchanged => BoolDelta::Unchanged,
+        B::Yes => BoolDelta::Yes,
+        B::No => BoolDelta::No,
     }
 }
 

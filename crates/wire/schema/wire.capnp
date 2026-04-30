@@ -338,16 +338,20 @@ struct MenuStructure {
 struct MenuStateChanged {
     windowId @0 :Text;
     itemId @1 :Text;
-    # `enabled` and `checked` are `Option<Bool>` for delta encoding
-    # ("None = unchanged in this update"). Cap'n Proto has no native
-    # Option<primitive>, so we use explicit `has*` booleans here.
-    # `label` (a pointer field) uses the auto-generated `hasLabel()`
-    # — null pointer means "label unchanged".
-    hasEnabled @2 :Bool;
-    enabled @3 :Bool;
-    hasChecked @4 :Bool;
-    checked @5 :Bool;
-    label @6 :Text;
+    # `enabled` and `checked` are flat 3-state enums: `unchanged`
+    # means the receiver should keep its current value; `yes` / `no`
+    # mean the new value is true / false. `label` (a pointer field)
+    # uses the auto-generated `hasLabel()` — null pointer means
+    # "label unchanged".
+    enabled @2 :BoolDelta;
+    checked @3 :BoolDelta;
+    label @4 :Text;
+}
+
+enum BoolDelta {
+    unchanged @0;
+    yes @1;
+    no @2;
 }
 
 # Recursive — submenus contain their own MenuItem children. Cap'n

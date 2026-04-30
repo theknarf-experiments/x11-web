@@ -325,8 +325,10 @@ export type DisplayUpdate =
 			kind: "MenuStateChanged";
 			window_id: string;
 			item_id: string;
-			enabled?: boolean;
-			checked?: boolean;
+			// Three-state delta: "Unchanged" means receiver keeps its
+			// current value; "Yes"/"No" carry the new boolean.
+			enabled: BoolDelta;
+			checked: BoolDelta;
 			label?: string;
 	  }
 	| { kind: "WindowRaised"; window_id: string }
@@ -346,6 +348,11 @@ export type MenuItemKind =
 	| "separator"
 	| "checkbox"
 	| "radio";
+
+// Three-state delta for `MenuStateChanged.{enabled,checked}`. Mirrors
+// `protocol::BoolDelta` — "Unchanged" preserves the receiver's
+// current value; "Yes"/"No" set true/false.
+export type BoolDelta = "Unchanged" | "Yes" | "No";
 
 export interface MenuAction {
 	name: string;

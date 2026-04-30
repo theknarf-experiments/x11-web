@@ -653,13 +653,25 @@ function App() {
 				setMenus((prev) => {
 					const tree = prev.get(update.window_id);
 					if (!tree) return prev;
+					const enabledPatch =
+						update.enabled === "Yes"
+							? { enabled: true }
+							: update.enabled === "No"
+								? { enabled: false }
+								: {};
+					const checkedPatch =
+						update.checked === "Yes"
+							? { checked: true }
+							: update.checked === "No"
+								? { checked: false }
+								: {};
 					const patchItem = (items: MenuItem[]): MenuItem[] =>
 						items.map((item) => {
 							if (item.id === update.item_id) {
 								return {
 									...item,
-									...(update.enabled !== undefined && { enabled: update.enabled }),
-									...(update.checked !== undefined && { checked: update.checked }),
+									...enabledPatch,
+									...checkedPatch,
 									...(update.label !== undefined && { label: update.label }),
 								};
 							}
