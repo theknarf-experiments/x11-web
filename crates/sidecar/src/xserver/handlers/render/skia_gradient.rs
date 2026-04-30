@@ -56,8 +56,7 @@ fn x11_to_sk_transform(tx: Option<&[f64; 9]>) -> Option<Option<Transform>> {
     let Some(t) = tx else {
         return Some(Some(Transform::identity()));
     };
-    let perspective_trivial =
-        t[6].abs() < 1e-9 && t[7].abs() < 1e-9 && (t[8] - 1.0).abs() < 1e-9;
+    let perspective_trivial = t[6].abs() < 1e-9 && t[7].abs() < 1e-9 && (t[8] - 1.0).abs() < 1e-9;
     if !perspective_trivial {
         return None;
     }

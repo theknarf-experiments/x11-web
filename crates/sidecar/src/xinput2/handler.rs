@@ -209,8 +209,7 @@ pub fn handle_request(
                 let grab_mode = u8::from(req.mode);
                 let paired_device_mode = u8::from(req.paired_device_mode);
                 let owner_events = u8::from(req.owner_events) != 0;
-                let event_mask: Vec<xi::XIEventMask> =
-                    req.mask.iter().map(|&m| m.into()).collect();
+                let event_mask: Vec<xi::XIEventMask> = req.mask.iter().map(|&m| m.into()).collect();
 
                 // Check if device is already grabbed by this client.
                 if let std::collections::hash_map::Entry::Vacant(e) = active_grabs.entry(deviceid) {
@@ -329,8 +328,7 @@ pub fn handle_request(
                 let grab_mode = u8::from(req.grab_mode);
                 let paired_device_mode = u8::from(req.paired_device_mode);
                 let owner_events = u8::from(req.owner_events) != 0;
-                let event_mask: Vec<xi::XIEventMask> =
-                    req.mask.iter().map(|&m| m.into()).collect();
+                let event_mask: Vec<xi::XIEventMask> = req.mask.iter().map(|&m| m.into()).collect();
 
                 for &modifier in req.modifiers.iter() {
                     // Remove existing grab with same (window, detail, device, modifier, type).
@@ -437,7 +435,9 @@ pub fn handle_request(
                 let value = body.get(16..).map(|s| s.to_vec()).unwrap_or_default();
                 debug!(
                     "XIChangeProperty: device={} property={} len={}",
-                    req.deviceid, req.property, value.len()
+                    req.deviceid,
+                    req.property,
+                    value.len()
                 );
                 device_properties.insert((req.deviceid, req.property), value);
             }
@@ -445,7 +445,10 @@ pub fn handle_request(
         }
         xi::XI_DELETE_PROPERTY_REQUEST => {
             if let Ok(req) = xi::XIDeletePropertyRequest::try_parse_request(header, body) {
-                debug!("XIDeleteProperty: device={} property={}", req.deviceid, req.property);
+                debug!(
+                    "XIDeleteProperty: device={} property={}",
+                    req.deviceid, req.property
+                );
                 device_properties.remove(&(req.deviceid, req.property));
             }
             Vec::new()
@@ -664,7 +667,9 @@ pub fn handle_request(
 
         // ChangeDeviceDontPropagateList (8): update the stored masks.
         8 => {
-            if let Ok(req) = xi::ChangeDeviceDontPropagateListRequest::try_parse_request(header, body) {
+            if let Ok(req) =
+                xi::ChangeDeviceDontPropagateListRequest::try_parse_request(header, body)
+            {
                 let window = req.window;
                 let mode = u8::from(req.mode); // 0=Add, 1=Delete
                 debug!(

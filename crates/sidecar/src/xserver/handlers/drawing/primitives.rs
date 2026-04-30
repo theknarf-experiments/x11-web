@@ -4,11 +4,10 @@ use super::*;
 use crate::xserver::core::{GRAPHICS_EXPOSURE_EVENT, NO_EXPOSURE_EVENT};
 use crate::xserver::event::serialize_event;
 use x11rb_protocol::protocol::xproto::{
-    ClearAreaRequest, CopyAreaRequest, CopyPlaneRequest,
-    ExposeEvent, FillPolyRequest, GraphicsExposureEvent, NoExposureEvent,
-    PolyArcRequest, PolyFillArcRequest, PolyFillRectangleRequest,
-    PolyLineRequest, PolyPointRequest, PolyRectangleRequest, PolySegmentRequest,
-    WindowClass,
+    ClearAreaRequest, CopyAreaRequest, CopyPlaneRequest, ExposeEvent, FillPolyRequest,
+    GraphicsExposureEvent, NoExposureEvent, PolyArcRequest, PolyFillArcRequest,
+    PolyFillRectangleRequest, PolyLineRequest, PolyPointRequest, PolyRectangleRequest,
+    PolySegmentRequest, WindowClass,
 };
 
 // ---------------------------------------------------------------------------
@@ -23,7 +22,11 @@ pub(crate) fn handle_clear_area(state: &mut ClientState, req: &ClearAreaRequest)
         return build_error(WINDOW_ERROR, state.sequence, wid, 61, 0);
     }
     // Per X11 spec: ClearArea on an InputOnly window generates BadMatch.
-    if state.windows.get(&wid).is_some_and(|w| w.class == u16::from(WindowClass::INPUT_ONLY)) {
+    if state
+        .windows
+        .get(&wid)
+        .is_some_and(|w| w.class == u16::from(WindowClass::INPUT_ONLY))
+    {
         return build_error(MATCH_ERROR, state.sequence, wid, 61, 0);
     }
 
@@ -52,16 +55,19 @@ pub(crate) fn handle_clear_area(state: &mut ClientState, req: &ClearAreaRequest)
     if exposures {
         let bo = state.msb_first;
         let seq = state.sequence;
-        let event = serialize_event(&ExposeEvent {
-            response_type: EXPOSE_EVENT,
-            sequence: seq,
-            window: wid,
-            x: x as u16,
-            y: y as u16,
-            width,
-            height,
-            count: 0,
-        }, bo);
+        let event = serialize_event(
+            &ExposeEvent {
+                response_type: EXPOSE_EVENT,
+                sequence: seq,
+                window: wid,
+                x: x as u16,
+                y: y as u16,
+                width,
+                height,
+                count: 0,
+            },
+            bo,
+        );
         state.deliver_event(wid, EventMask::EXPOSURE, &event);
     }
 
@@ -220,31 +226,37 @@ pub(crate) fn handle_copy_area(state: &mut ClientState, req: &CopyAreaRequest) -
 
         if exposed_rects.is_empty() {
             // NoExposure event (type 14)
-            let event = serialize_event(&NoExposureEvent {
-                response_type: NO_EXPOSURE_EVENT,
-                sequence: state.sequence,
-                drawable: dst,
-                minor_opcode: 0, // core protocol
-                major_opcode: 62, // CopyArea
-            }, state.msb_first);
+            let event = serialize_event(
+                &NoExposureEvent {
+                    response_type: NO_EXPOSURE_EVENT,
+                    sequence: state.sequence,
+                    drawable: dst,
+                    minor_opcode: 0,  // core protocol
+                    major_opcode: 62, // CopyArea
+                },
+                state.msb_first,
+            );
             state.pending_events.push(event);
         } else {
             // GraphicsExposure events (type 13) for each exposed region
             let last_idx = exposed_rects.len() - 1;
             for (i, &(ex, ey, ew, eh)) in exposed_rects.iter().enumerate() {
                 let count = (last_idx - i) as u16;
-                let event = serialize_event(&GraphicsExposureEvent {
-                    response_type: GRAPHICS_EXPOSURE_EVENT,
-                    sequence: state.sequence,
-                    drawable: dst,
-                    x: ex as u16,
-                    y: ey as u16,
-                    width: ew,
-                    height: eh,
-                    minor_opcode: 0, // core protocol
-                    count,
-                    major_opcode: 62, // CopyArea
-                }, state.msb_first);
+                let event = serialize_event(
+                    &GraphicsExposureEvent {
+                        response_type: GRAPHICS_EXPOSURE_EVENT,
+                        sequence: state.sequence,
+                        drawable: dst,
+                        x: ex as u16,
+                        y: ey as u16,
+                        width: ew,
+                        height: eh,
+                        minor_opcode: 0, // core protocol
+                        count,
+                        major_opcode: 62, // CopyArea
+                    },
+                    state.msb_first,
+                );
                 state.pending_events.push(event);
             }
         }
@@ -355,30 +367,36 @@ pub(crate) fn handle_copy_plane(state: &mut ClientState, req: &CopyPlaneRequest)
         }
 
         if exposed_rects.is_empty() {
-            let event = serialize_event(&NoExposureEvent {
-                response_type: NO_EXPOSURE_EVENT,
-                sequence: state.sequence,
-                drawable: dst,
-                minor_opcode: 0, // core protocol
-                major_opcode: 63, // CopyPlane
-            }, state.msb_first);
+            let event = serialize_event(
+                &NoExposureEvent {
+                    response_type: NO_EXPOSURE_EVENT,
+                    sequence: state.sequence,
+                    drawable: dst,
+                    minor_opcode: 0,  // core protocol
+                    major_opcode: 63, // CopyPlane
+                },
+                state.msb_first,
+            );
             state.pending_events.push(event);
         } else {
             let last_idx = exposed_rects.len() - 1;
             for (i, &(ex, ey, ew, eh)) in exposed_rects.iter().enumerate() {
                 let count = (last_idx - i) as u16;
-                let event = serialize_event(&GraphicsExposureEvent {
-                    response_type: GRAPHICS_EXPOSURE_EVENT,
-                    sequence: state.sequence,
-                    drawable: dst,
-                    x: ex as u16,
-                    y: ey as u16,
-                    width: ew,
-                    height: eh,
-                    minor_opcode: 0, // core protocol
-                    count,
-                    major_opcode: 63, // CopyPlane
-                }, state.msb_first);
+                let event = serialize_event(
+                    &GraphicsExposureEvent {
+                        response_type: GRAPHICS_EXPOSURE_EVENT,
+                        sequence: state.sequence,
+                        drawable: dst,
+                        x: ex as u16,
+                        y: ey as u16,
+                        width: ew,
+                        height: eh,
+                        minor_opcode: 0, // core protocol
+                        count,
+                        major_opcode: 63, // CopyPlane
+                    },
+                    state.msb_first,
+                );
                 state.pending_events.push(event);
             }
         }
@@ -815,7 +833,10 @@ pub(crate) fn handle_poly_segment(state: &mut ClientState, req: &PolySegmentRequ
 // Opcode 67: PolyRectangle
 // ---------------------------------------------------------------------------
 
-pub(crate) fn handle_poly_rectangle(state: &mut ClientState, req: &PolyRectangleRequest) -> Vec<u8> {
+pub(crate) fn handle_poly_rectangle(
+    state: &mut ClientState,
+    req: &PolyRectangleRequest,
+) -> Vec<u8> {
     let drawable = req.drawable;
     let gc_id = req.gc;
 
@@ -1210,7 +1231,10 @@ pub(crate) fn handle_fill_poly(state: &mut ClientState, req: &FillPolyRequest) -
 // Opcode 70: PolyFillRectangle
 // ---------------------------------------------------------------------------
 
-pub(crate) fn handle_poly_fill_rectangle(state: &mut ClientState, req: &PolyFillRectangleRequest) -> Vec<u8> {
+pub(crate) fn handle_poly_fill_rectangle(
+    state: &mut ClientState,
+    req: &PolyFillRectangleRequest,
+) -> Vec<u8> {
     let drawable = req.drawable;
     let gc_id = req.gc;
 

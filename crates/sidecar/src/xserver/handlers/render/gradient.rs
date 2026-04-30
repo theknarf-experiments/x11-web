@@ -18,7 +18,14 @@ fn fixed_to_f64(f: Fixed) -> f64 {
 }
 
 pub(crate) fn handle_create_solid_fill(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
-    let req = parse_minor!(CreateSolidFillRequest, data, state, seq, 139, data[1] as u16);
+    let req = parse_minor!(
+        CreateSolidFillRequest,
+        data,
+        state,
+        seq,
+        139,
+        data[1] as u16
+    );
 
     let pid = req.picture;
     // XRenderColor is already premultiplied per the X RENDER spec --
@@ -50,7 +57,12 @@ pub(crate) fn handle_create_gradient_fill(
         36 => handle_create_conical_gradient(state, data, seq),
         _ => {
             // Unreachable from dispatch, but return proper error if called directly
-            render_err(crate::xserver::core::REQUEST_ERROR, 0, minor as u32, minor as u16)
+            render_err(
+                crate::xserver::core::REQUEST_ERROR,
+                0,
+                minor as u32,
+                minor as u16,
+            )
         }
     }
 }
@@ -530,9 +542,7 @@ fn apply_gradient_repeat(stops: &[GradientStop], t_raw: f64, repeat: u32) -> (u8
             let t = if r2 > 1.0 { 2.0 - r2 } else { r2 };
             sample_gradient_stops(stops, t)
         }
-        2 => {
-            sample_gradient_stops(stops, t_raw.clamp(0.0, 1.0))
-        }
+        2 => sample_gradient_stops(stops, t_raw.clamp(0.0, 1.0)),
         _ => {
             if !(0.0..=1.0).contains(&t_raw) {
                 (0, 0, 0, 0)

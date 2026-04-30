@@ -143,7 +143,6 @@ fn parse_rgbi(spec: &str) -> Option<(u16, u16, u16)> {
     Some((clamp(r), clamp(g), clamp(b)))
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;

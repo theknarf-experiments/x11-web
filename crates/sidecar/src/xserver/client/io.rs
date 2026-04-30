@@ -31,7 +31,13 @@ impl ClientState {
         major_opcode: u8,
         minor_opcode: u16,
     ) -> Vec<u8> {
-        super::super::core::build_error(error_code, self.sequence, bad_value, major_opcode, minor_opcode)
+        super::super::core::build_error(
+            error_code,
+            self.sequence,
+            bad_value,
+            major_opcode,
+            minor_opcode,
+        )
     }
 
     // -----------------------------------------------------------------------

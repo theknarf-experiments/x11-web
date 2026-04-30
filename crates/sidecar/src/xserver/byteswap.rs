@@ -216,8 +216,8 @@ fn byteswap_create_window(data: &mut [u8]) {
     if data.len() < 32 {
         return;
     }
-    swap_u32(data, 4);  // wid
-    swap_u32(data, 8);  // parent
+    swap_u32(data, 4); // wid
+    swap_u32(data, 8); // parent
     swap_u16(data, 12); // x
     swap_u16(data, 14); // y
     swap_u16(data, 16); // width
@@ -236,8 +236,8 @@ fn byteswap_change_window_attributes(data: &mut [u8]) {
     if data.len() < 12 {
         return;
     }
-    swap_u32(data, 4);  // wid
-    swap_u32(data, 8);  // value_mask
+    swap_u32(data, 4); // wid
+    swap_u32(data, 8); // value_mask
     let mask = read_u32_le(data, 8);
     let n = popcount32(mask);
     swap_u32_array(data, 12, n);
@@ -272,8 +272,8 @@ fn byteswap_change_property(data: &mut [u8]) {
     if data.len() < 24 {
         return;
     }
-    swap_u32(data, 4);  // wid
-    swap_u32(data, 8);  // property
+    swap_u32(data, 4); // wid
+    swap_u32(data, 8); // property
     swap_u32(data, 12); // type
     swap_u32(data, 20); // data_length (in format units)
     let format = data[16];
@@ -292,22 +292,22 @@ fn byteswap_delete_property(data: &mut [u8]) {
 }
 
 fn byteswap_get_property(data: &mut [u8]) {
-    swap_u32(data, 4);  // wid
-    swap_u32(data, 8);  // property
+    swap_u32(data, 4); // wid
+    swap_u32(data, 8); // property
     swap_u32(data, 12); // type
     swap_u32(data, 16); // long_offset
     swap_u32(data, 20); // long_length
 }
 
 fn byteswap_set_selection_owner(data: &mut [u8]) {
-    swap_u32(data, 4);  // owner
-    swap_u32(data, 8);  // selection
+    swap_u32(data, 4); // owner
+    swap_u32(data, 8); // selection
     swap_u32(data, 12); // time
 }
 
 fn byteswap_convert_selection(data: &mut [u8]) {
-    swap_u32(data, 4);  // requestor
-    swap_u32(data, 8);  // selection
+    swap_u32(data, 4); // requestor
+    swap_u32(data, 8); // selection
     swap_u32(data, 12); // target
     swap_u32(data, 16); // property
     swap_u32(data, 20); // time
@@ -322,8 +322,8 @@ fn byteswap_send_event(data: &mut [u8]) {
     // re-encodes anyway.
     swap_u32(data, 4); // destination
     swap_u32(data, 8); // event_mask
-    // Best-effort: treat the event as a ClientMessage (type 33), swap
-    // its window field at offset 12+4 and the data words.
+                       // Best-effort: treat the event as a ClientMessage (type 33), swap
+                       // its window field at offset 12+4 and the data words.
     if data.len() >= 12 + 32 {
         let evtype = data[12];
         // Common event payload header: type(1), detail(1), seq(2),
@@ -350,8 +350,8 @@ fn byteswap_send_event(data: &mut [u8]) {
 fn byteswap_grab_pointer(data: &mut [u8]) {
     // owner_events(1), unused(1), len(2), grab_window(4), event_mask(2),
     // pointer_mode(1), keyboard_mode(1), confine_to(4), cursor(4), time(4)
-    swap_u32(data, 4);  // grab_window
-    swap_u16(data, 8);  // event_mask
+    swap_u32(data, 4); // grab_window
+    swap_u16(data, 8); // event_mask
     swap_u32(data, 12); // confine_to
     swap_u32(data, 16); // cursor
     swap_u32(data, 20); // time
@@ -402,21 +402,21 @@ fn byteswap_ungrab_key(data: &mut [u8]) {
 }
 
 fn byteswap_get_motion_events(data: &mut [u8]) {
-    swap_u32(data, 4);  // wid
-    swap_u32(data, 8);  // start
+    swap_u32(data, 4); // wid
+    swap_u32(data, 8); // start
     swap_u32(data, 12); // stop
 }
 
 fn byteswap_translate_coordinates(data: &mut [u8]) {
-    swap_u32(data, 4);  // src
-    swap_u32(data, 8);  // dst
+    swap_u32(data, 4); // src
+    swap_u32(data, 8); // dst
     swap_u16(data, 12); // src_x
     swap_u16(data, 14); // src_y
 }
 
 fn byteswap_warp_pointer(data: &mut [u8]) {
-    swap_u32(data, 4);  // src
-    swap_u32(data, 8);  // dst
+    swap_u32(data, 4); // src
+    swap_u32(data, 8); // dst
     swap_u16(data, 12); // src_x
     swap_u16(data, 14); // src_y
     swap_u16(data, 16); // src_w
@@ -497,7 +497,7 @@ fn byteswap_copy_gc(data: &mut [u8]) {
 fn byteswap_set_dashes(data: &mut [u8]) {
     // unused(1), unused(1), len(2), gc(4), dash_offset(2), n(2), dashes(bytes)
     swap_u32(data, 4);
-    swap_u16(data, 8);  // dash_offset
+    swap_u16(data, 8); // dash_offset
     swap_u16(data, 10); // n
 }
 
@@ -708,7 +708,7 @@ fn byteswap_store_colors(data: &mut [u8], body_len: usize) {
     let n = (body_len - 8) / 12;
     for i in 0..n {
         let off = 8 + i * 12;
-        swap_u32(data, off);     // pixel
+        swap_u32(data, off); // pixel
         swap_u16(data, off + 4); // red
         swap_u16(data, off + 6); // green
         swap_u16(data, off + 8); // blue
@@ -835,7 +835,8 @@ mod tests {
         let mut req = [0u8; 32];
         req[0] = 1; // opcode
         req[1] = 0; // depth
-        req[2] = 0; req[3] = 8; // length 8 in MSB
+        req[2] = 0;
+        req[3] = 8; // length 8 in MSB
         req[4..8].copy_from_slice(&0x12345678u32.to_be_bytes()); // wid
         req[8..12].copy_from_slice(&0xAABBCCDDu32.to_be_bytes()); // parent
         req[12..14].copy_from_slice(&0x0001u16.to_be_bytes()); // x = 1
@@ -844,8 +845,14 @@ mod tests {
         byteswap_request_in_place(&mut req);
 
         assert_eq!(u16::from_le_bytes([req[2], req[3]]), 8);
-        assert_eq!(u32::from_le_bytes([req[4], req[5], req[6], req[7]]), 0x12345678);
-        assert_eq!(u32::from_le_bytes([req[8], req[9], req[10], req[11]]), 0xAABBCCDD);
+        assert_eq!(
+            u32::from_le_bytes([req[4], req[5], req[6], req[7]]),
+            0x12345678
+        );
+        assert_eq!(
+            u32::from_le_bytes([req[8], req[9], req[10], req[11]]),
+            0xAABBCCDD
+        );
         assert_eq!(u16::from_le_bytes([req[12], req[13]]), 1);
     }
 
@@ -855,7 +862,8 @@ mod tests {
         // wid=1, prop=2, type=3, format=32, data_len=2, data=[0xDEADBEEF, 0xFEEDFACE]
         let mut req = [0u8; 32];
         req[0] = 18;
-        req[2] = 0; req[3] = 8;
+        req[2] = 0;
+        req[3] = 8;
         req[4..8].copy_from_slice(&1u32.to_be_bytes());
         req[8..12].copy_from_slice(&2u32.to_be_bytes());
         req[12..16].copy_from_slice(&3u32.to_be_bytes());
@@ -866,8 +874,14 @@ mod tests {
 
         byteswap_request_in_place(&mut req);
 
-        assert_eq!(u32::from_le_bytes([req[24], req[25], req[26], req[27]]), 0xDEADBEEF);
-        assert_eq!(u32::from_le_bytes([req[28], req[29], req[30], req[31]]), 0xFEEDFACE);
+        assert_eq!(
+            u32::from_le_bytes([req[24], req[25], req[26], req[27]]),
+            0xDEADBEEF
+        );
+        assert_eq!(
+            u32::from_le_bytes([req[28], req[29], req[30], req[31]]),
+            0xFEEDFACE
+        );
     }
 
     #[test]

@@ -48,11 +48,7 @@ fn bbox(points: &[(f64, f64)]) -> Option<(i32, i32, i32, i32)> {
 /// Build a tiny-skia mask covering `points` (in framebuffer coordinates).
 /// The mask is offset so its top-left corner aligns with the bounding box.
 /// Returns `(mask, x_origin, y_origin)` on success.
-fn rasterize_polygon_mask(
-    points: &[(f64, f64)],
-    fb_w: i32,
-    fb_h: i32,
-) -> Option<(Mask, i32, i32)> {
+fn rasterize_polygon_mask(points: &[(f64, f64)], fb_w: i32, fb_h: i32) -> Option<(Mask, i32, i32)> {
     let (mut x0, mut y0, mut x1, mut y1) = bbox(points)?;
     // Clamp to framebuffer bounds.
     x0 = x0.max(0);
@@ -170,7 +166,17 @@ mod tests {
         // sr/sg/sb=255 (white) with op=1 (Src) and full coverage should
         // write 255 into the B channel of any covered pixel.
         composite_polygon_aa(
-            &mut fb, 32, 32, 1, 255, 255, 255, 255, true, &pts, &black_clip(),
+            &mut fb,
+            32,
+            32,
+            1,
+            255,
+            255,
+            255,
+            255,
+            true,
+            &pts,
+            &black_clip(),
         );
         let stride = fb.stride();
         let off = 16 * stride + 16 * 4; // center pixel
@@ -186,7 +192,17 @@ mod tests {
         // Polygon entirely outside the framebuffer.
         let pts = vec![(100.0, 100.0), (110.0, 100.0), (110.0, 110.0)];
         composite_polygon_aa(
-            &mut fb, 8, 8, 1, 255, 255, 255, 255, true, &pts, &black_clip(),
+            &mut fb,
+            8,
+            8,
+            1,
+            255,
+            255,
+            255,
+            255,
+            true,
+            &pts,
+            &black_clip(),
         );
         // No assert beyond "didn't panic"
     }

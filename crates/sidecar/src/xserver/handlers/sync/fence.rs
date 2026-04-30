@@ -1,8 +1,8 @@
 //! SYNC fence operations: CreateFence, TriggerFence, ResetFence,
 //! DestroyFence, QueryFence, AwaitFence.
 
-use tracing::{debug, warn};
 use super::super::parse_minor;
+use tracing::{debug, warn};
 
 use super::super::super::client::ClientState;
 use super::super::super::core::{MATCH_ERROR, VALUE_ERROR};
@@ -51,9 +51,7 @@ pub(crate) fn reset_fence(state: &mut ClientState, data: &[u8], seq: u16) -> Vec
     let req = parse_minor!(ResetFenceRequest, data, state, seq, 134, 16);
     let fence_id = req.fence;
     debug!("SYNC ResetFence: id={fence_id:#x}");
-    let err = |code: u8| {
-        super::super::super::core::build_error(code, seq, fence_id, 134, 16)
-    };
+    let err = |code: u8| super::super::super::core::build_error(code, seq, fence_id, 134, 16);
     // Per spec, fence must be triggered to reset; return BadMatch otherwise.
     if let Some(fence) = state.sync_state.fences.get_mut(&fence_id) {
         if !fence.triggered {

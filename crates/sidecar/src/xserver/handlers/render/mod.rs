@@ -596,7 +596,12 @@ pub fn handle_render_request(state: &mut ClientState, data: &[u8], seq: u16) -> 
         2 => picture::handle_query_pict_index_values(state, data, seq),
         _ => {
             debug!("Unhandled RENDER minor opcode: {minor}");
-            render_err(crate::xserver::core::REQUEST_ERROR, seq, minor as u32, minor as u16)
+            render_err(
+                crate::xserver::core::REQUEST_ERROR,
+                seq,
+                minor as u32,
+                minor as u16,
+            )
         }
     }
 }

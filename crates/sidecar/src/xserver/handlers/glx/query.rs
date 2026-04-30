@@ -2,7 +2,6 @@
 //! QueryExtensionsString, QueryServerString).
 
 use super::super::super::core::ROOT_VISUAL;
-use crate::xserver::reply::ReplyBuf;
 use super::{
     FBCONFIG_ATTRIB_COUNT, GLX_ACCUM_ALPHA_SIZE, GLX_ACCUM_BLUE_SIZE, GLX_ACCUM_GREEN_SIZE,
     GLX_ACCUM_RED_SIZE, GLX_ALPHA_SIZE, GLX_AUX_BUFFERS, GLX_BLUE_SIZE, GLX_BUFFER_SIZE,
@@ -13,6 +12,7 @@ use super::{
     GLX_TRANSPARENT_TYPE, GLX_TRUE_COLOR, GLX_VISUAL_ID, GLX_WINDOW_BIT, GLX_X_RENDERABLE,
     GLX_X_VISUAL_TYPE,
 };
+use crate::xserver::reply::ReplyBuf;
 
 // ---------------------------------------------------------------------------
 // GLX_QUERY_VERSION (minor 7)
@@ -49,21 +49,21 @@ pub(crate) fn handle_get_visual_configs(_data: &[u8], seq: u16) -> Vec<u8> {
         ROOT_VISUAL,               // [0] visual id
         X_VISUAL_CLASS_TRUE_COLOR, // [1] class (TrueColor = 4)
         1,                         // [2] rgba (True)
-        8,           // [3] red size
-        8,           // [4] green size
-        8,           // [5] blue size
-        0,           // [6] alpha size
-        0,           // [7] accum red
-        0,           // [8] accum green
-        0,           // [9] accum blue
-        0,           // [10] accum alpha
-        1,           // [11] double buffer
-        0,           // [12] stereo
-        24,          // [13] buffer size (R+G+B+A = 8+8+8+0 = 24)
-        24,          // [14] depth size
-        8,           // [15] stencil size
-        0,           // [16] aux buffers
-        0,           // [17] level
+        8,                         // [3] red size
+        8,                         // [4] green size
+        8,                         // [5] blue size
+        0,                         // [6] alpha size
+        0,                         // [7] accum red
+        0,                         // [8] accum green
+        0,                         // [9] accum blue
+        0,                         // [10] accum alpha
+        1,                         // [11] double buffer
+        0,                         // [12] stereo
+        24,                        // [13] buffer size (R+G+B+A = 8+8+8+0 = 24)
+        24,                        // [14] depth size
+        8,                         // [15] stencil size
+        0,                         // [16] aux buffers
+        0,                         // [17] level
     ];
     for (i, &v) in props.iter().enumerate() {
         let off = 32 + i * 4;
@@ -202,9 +202,9 @@ pub(crate) fn handle_query_server_string(data: &[u8], seq: u16) -> Vec<u8> {
     };
 
     let string = match name {
-        1 => b"x11-web OSMesa" as &[u8],  // GLX_VENDOR
-        2 => b"1.4" as &[u8],              // GLX_VERSION
-        3 => b"GLX_EXT_visual_info GLX_EXT_visual_rating GLX_MESA_copy_sub_buffer" as &[u8],  // GLX_EXTENSIONS
+        1 => b"x11-web OSMesa" as &[u8], // GLX_VENDOR
+        2 => b"1.4" as &[u8],            // GLX_VERSION
+        3 => b"GLX_EXT_visual_info GLX_EXT_visual_rating GLX_MESA_copy_sub_buffer" as &[u8], // GLX_EXTENSIONS
         _ => b"" as &[u8],
     };
 

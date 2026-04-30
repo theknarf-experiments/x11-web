@@ -258,7 +258,10 @@ impl ClientState {
             .windows
             .iter()
             .filter(|(_, w)| {
-                w.mapped && w.framebuffer.is_dirty() && w.parent == self.root_window && w.class == u16::from(WindowClass::INPUT_OUTPUT)
+                w.mapped
+                    && w.framebuffer.is_dirty()
+                    && w.parent == self.root_window
+                    && w.class == u16::from(WindowClass::INPUT_OUTPUT)
             })
             .map(|(id, _)| *id)
             .collect();
@@ -293,16 +296,29 @@ impl ClientState {
                     let bo = self.msb_first;
                     let seq = self.sequence;
                     for (damage_id, level) in damage_matches {
-                        let event = serialize_event(&damage::NotifyEvent {
-                            response_type: 91,
-                            level: ReportLevel::from(level),
-                            sequence: seq,
-                            drawable: wid,
-                            damage: damage_id,
-                            timestamp: 0,
-                            area: Rectangle { x: x as i16, y: y as i16, width: w, height: h },
-                            geometry: Rectangle { x: 0, y: 0, width: win_width, height: win_height },
-                        }, bo);
+                        let event = serialize_event(
+                            &damage::NotifyEvent {
+                                response_type: 91,
+                                level: ReportLevel::from(level),
+                                sequence: seq,
+                                drawable: wid,
+                                damage: damage_id,
+                                timestamp: 0,
+                                area: Rectangle {
+                                    x: x as i16,
+                                    y: y as i16,
+                                    width: w,
+                                    height: h,
+                                },
+                                geometry: Rectangle {
+                                    x: 0,
+                                    y: 0,
+                                    width: win_width,
+                                    height: win_height,
+                                },
+                            },
+                            bo,
+                        );
                         self.pending_events.push(event);
                     }
 
@@ -387,16 +403,29 @@ impl ClientState {
         };
 
         for (damage_id, level) in matches {
-            let event = serialize_event(&damage::NotifyEvent {
-                response_type: 91,
-                level: ReportLevel::from(level),
-                sequence: seq,
-                drawable: resolved,
-                damage: damage_id,
-                timestamp,
-                area: Rectangle { x, y, width, height },
-                geometry: Rectangle { x: geom_x, y: geom_y, width: geom_w, height: geom_h },
-            }, bo);
+            let event = serialize_event(
+                &damage::NotifyEvent {
+                    response_type: 91,
+                    level: ReportLevel::from(level),
+                    sequence: seq,
+                    drawable: resolved,
+                    damage: damage_id,
+                    timestamp,
+                    area: Rectangle {
+                        x,
+                        y,
+                        width,
+                        height,
+                    },
+                    geometry: Rectangle {
+                        x: geom_x,
+                        y: geom_y,
+                        width: geom_w,
+                        height: geom_h,
+                    },
+                },
+                bo,
+            );
             self.pending_events.push(event);
         }
     }

@@ -171,14 +171,17 @@ pub(crate) fn handle_send_event(state: &mut ClientState, req: &SendEventRequest)
 
                 // Generate PropertyNotify for clients watching PropertyChangeMask
                 {
-                    let pn_event = serialize_event(&PropertyNotifyEvent {
-                        response_type: PROPERTY_NOTIFY_EVENT,
-                        sequence: state.sequence,
-                        window: source_window,
-                        atom: net_wm_state_atom,
-                        time: state.timestamp(),
-                        state: 0u8.into(), // NewValue
-                    }, state.msb_first);
+                    let pn_event = serialize_event(
+                        &PropertyNotifyEvent {
+                            response_type: PROPERTY_NOTIFY_EVENT,
+                            sequence: state.sequence,
+                            window: source_window,
+                            atom: net_wm_state_atom,
+                            time: state.timestamp(),
+                            state: 0u8.into(), // NewValue
+                        },
+                        state.msb_first,
+                    );
                     state.deliver_event(source_window, EventMask::PROPERTY_CHANGE, &pn_event);
                 }
 
@@ -235,34 +238,39 @@ pub(crate) fn handle_send_event(state: &mut ClientState, req: &SendEventRequest)
                             .get(&source_window)
                             .map(|w| w.border_width)
                             .unwrap_or(0);
-                        let cn = serialize_event(&ConfigureNotifyEvent {
-                            response_type: CONFIGURE_NOTIFY_EVENT,
-                            sequence: state.sequence,
-                            event: source_window,
-                            window: source_window,
-                            above_sibling: 0,
-                            x: 0,
-                            y: 0,
-                            width: sw,
-                            height: sh,
-                            border_width,
-                            override_redirect,
-                        }, state.msb_first);
-                        state.deliver_event(source_window, EventMask::STRUCTURE_NOTIFY, &cn);
-
-                        // Send Expose so the client redraws at the new size
-                        if state.window_selects(source_window, EventMask::EXPOSURE)
-                        {
-                            let expose = serialize_event(&ExposeEvent {
-                                response_type: EXPOSE_EVENT,
+                        let cn = serialize_event(
+                            &ConfigureNotifyEvent {
+                                response_type: CONFIGURE_NOTIFY_EVENT,
                                 sequence: state.sequence,
+                                event: source_window,
                                 window: source_window,
+                                above_sibling: 0,
                                 x: 0,
                                 y: 0,
                                 width: sw,
                                 height: sh,
-                                count: 0,
-                            }, state.msb_first);
+                                border_width,
+                                override_redirect,
+                            },
+                            state.msb_first,
+                        );
+                        state.deliver_event(source_window, EventMask::STRUCTURE_NOTIFY, &cn);
+
+                        // Send Expose so the client redraws at the new size
+                        if state.window_selects(source_window, EventMask::EXPOSURE) {
+                            let expose = serialize_event(
+                                &ExposeEvent {
+                                    response_type: EXPOSE_EVENT,
+                                    sequence: state.sequence,
+                                    window: source_window,
+                                    x: 0,
+                                    y: 0,
+                                    width: sw,
+                                    height: sh,
+                                    count: 0,
+                                },
+                                state.msb_first,
+                            );
                             state.pending_events.push(expose);
                         }
                     }
@@ -317,34 +325,39 @@ pub(crate) fn handle_send_event(state: &mut ClientState, req: &SendEventRequest)
                                 .get(&source_window)
                                 .map(|w| w.border_width)
                                 .unwrap_or(0);
-                            let cn = serialize_event(&ConfigureNotifyEvent {
-                                response_type: CONFIGURE_NOTIFY_EVENT,
-                                sequence: state.sequence,
-                                event: source_window,
-                                window: source_window,
-                                above_sibling: 0,
-                                x: sx,
-                                y: sy,
-                                width: sw,
-                                height: sh,
-                                border_width,
-                                override_redirect,
-                            }, state.msb_first);
+                            let cn = serialize_event(
+                                &ConfigureNotifyEvent {
+                                    response_type: CONFIGURE_NOTIFY_EVENT,
+                                    sequence: state.sequence,
+                                    event: source_window,
+                                    window: source_window,
+                                    above_sibling: 0,
+                                    x: sx,
+                                    y: sy,
+                                    width: sw,
+                                    height: sh,
+                                    border_width,
+                                    override_redirect,
+                                },
+                                state.msb_first,
+                            );
                             state.deliver_event(source_window, EventMask::STRUCTURE_NOTIFY, &cn);
 
                             // Expose for redraw
-                            if state.window_selects(source_window, EventMask::EXPOSURE)
-                            {
-                                let expose = serialize_event(&ExposeEvent {
-                                    response_type: EXPOSE_EVENT,
-                                    sequence: state.sequence,
-                                    window: source_window,
-                                    x: 0,
-                                    y: 0,
-                                    width: sw,
-                                    height: sh,
-                                    count: 0,
-                                }, state.msb_first);
+                            if state.window_selects(source_window, EventMask::EXPOSURE) {
+                                let expose = serialize_event(
+                                    &ExposeEvent {
+                                        response_type: EXPOSE_EVENT,
+                                        sequence: state.sequence,
+                                        window: source_window,
+                                        x: 0,
+                                        y: 0,
+                                        width: sw,
+                                        height: sh,
+                                        count: 0,
+                                    },
+                                    state.msb_first,
+                                );
                                 state.pending_events.push(expose);
                             }
                         }
@@ -444,14 +457,17 @@ pub(crate) fn handle_send_event(state: &mut ClientState, req: &SendEventRequest)
                 let wm_protocols_atom = state.intern_atom("WM_PROTOCOLS", false);
                 let wm_delete_atom = state.intern_atom("WM_DELETE_WINDOW", false);
                 if state.window_supports_protocol(source_window, wm_delete_atom) {
-                    let cm = serialize_event(&ClientMessageEvent {
-                        response_type: CLIENT_MESSAGE_EVENT,
-                        format: 32,
-                        sequence: state.sequence,
-                        window: source_window,
-                        type_: wm_protocols_atom,
-                        data: [wm_delete_atom, state.timestamp(), 0, 0, 0].into(),
-                    }, state.msb_first);
+                    let cm = serialize_event(
+                        &ClientMessageEvent {
+                            response_type: CLIENT_MESSAGE_EVENT,
+                            format: 32,
+                            sequence: state.sequence,
+                            window: source_window,
+                            type_: wm_protocols_atom,
+                            data: [wm_delete_atom, state.timestamp(), 0, 0, 0].into(),
+                        },
+                        state.msb_first,
+                    );
                     state.pending_events.push(cm);
                 }
                 return Vec::new();
@@ -488,14 +504,17 @@ pub(crate) fn handle_send_event(state: &mut ClientState, req: &SendEventRequest)
                 }
                 // Generate PropertyNotify for the frame extents change
                 {
-                    let pn_event = serialize_event(&PropertyNotifyEvent {
-                        response_type: PROPERTY_NOTIFY_EVENT,
-                        sequence: state.sequence,
-                        window: source_window,
-                        atom: atom_frame,
-                        time: state.timestamp(),
-                        state: 0u8.into(), // NewValue
-                    }, state.msb_first);
+                    let pn_event = serialize_event(
+                        &PropertyNotifyEvent {
+                            response_type: PROPERTY_NOTIFY_EVENT,
+                            sequence: state.sequence,
+                            window: source_window,
+                            atom: atom_frame,
+                            time: state.timestamp(),
+                            state: 0u8.into(), // NewValue
+                        },
+                        state.msb_first,
+                    );
                     state.deliver_event(source_window, EventMask::PROPERTY_CHANGE, &pn_event);
                 }
                 return Vec::new();
@@ -632,14 +651,17 @@ pub(crate) fn handle_send_event(state: &mut ClientState, req: &SendEventRequest)
                     }
                     // Generate PropertyNotify for the state change
                     {
-                        let pn = serialize_event(&PropertyNotifyEvent {
-                            response_type: PROPERTY_NOTIFY_EVENT,
-                            sequence: state.sequence,
-                            window: source_window,
-                            atom: net_wm_state_atom,
-                            time: state.timestamp(),
-                            state: 0u8.into(), // NewValue
-                        }, state.msb_first);
+                        let pn = serialize_event(
+                            &PropertyNotifyEvent {
+                                response_type: PROPERTY_NOTIFY_EVENT,
+                                sequence: state.sequence,
+                                window: source_window,
+                                atom: net_wm_state_atom,
+                                time: state.timestamp(),
+                                state: 0u8.into(), // NewValue
+                            },
+                            state.msb_first,
+                        );
                         state.deliver_event(source_window, EventMask::PROPERTY_CHANGE, &pn);
                     }
                     if let Some(uuid) = state.window_uuid(source_window) {
@@ -669,14 +691,17 @@ pub(crate) fn handle_send_event(state: &mut ClientState, req: &SendEventRequest)
                     }
                     // Generate PropertyNotify for the state change
                     {
-                        let pn = serialize_event(&PropertyNotifyEvent {
-                            response_type: PROPERTY_NOTIFY_EVENT,
-                            sequence: state.sequence,
-                            window: source_window,
-                            atom: net_wm_state_atom,
-                            time: state.timestamp(),
-                            state: 0u8.into(), // NewValue
-                        }, state.msb_first);
+                        let pn = serialize_event(
+                            &PropertyNotifyEvent {
+                                response_type: PROPERTY_NOTIFY_EVENT,
+                                sequence: state.sequence,
+                                window: source_window,
+                                atom: net_wm_state_atom,
+                                time: state.timestamp(),
+                                state: 0u8.into(), // NewValue
+                            },
+                            state.msb_first,
+                        );
                         state.deliver_event(source_window, EventMask::PROPERTY_CHANGE, &pn);
                     }
                     if let Some(uuid) = state.window_uuid(source_window) {
@@ -714,16 +739,29 @@ pub(crate) fn handle_send_event(state: &mut ClientState, req: &SendEventRequest)
                     // Send XEMBED_EMBEDDED_NOTIFY to the icon window via _XEMBED ClientMessage.
                     let xembed_atom = state.intern_atom("_XEMBED", false);
                     let timestamp = state.timestamp();
-                    let xembed_event = serialize_event(&ClientMessageEvent {
-                        response_type: CLIENT_MESSAGE_EVENT,
-                        format: 32,
-                        sequence: 0,
-                        window: icon_window,
-                        type_: xembed_atom,
-                        data: [timestamp, 0 /* XEMBED_EMBEDDED_NOTIFY */, crate::xserver::types::SYSTEM_TRAY_WINDOW, 0, 0].into(),
-                    }, state.msb_first);
+                    let xembed_event = serialize_event(
+                        &ClientMessageEvent {
+                            response_type: CLIENT_MESSAGE_EVENT,
+                            format: 32,
+                            sequence: 0,
+                            window: icon_window,
+                            type_: xembed_atom,
+                            data: [
+                                timestamp,
+                                0, /* XEMBED_EMBEDDED_NOTIFY */
+                                crate::xserver::types::SYSTEM_TRAY_WINDOW,
+                                0,
+                                0,
+                            ]
+                            .into(),
+                        },
+                        state.msb_first,
+                    );
 
-                    if !state.event_router.send_event(icon_window, xembed_event.clone()) {
+                    if !state
+                        .event_router
+                        .send_event(icon_window, xembed_event.clone())
+                    {
                         state.pending_events.push(xembed_event);
                     }
                 }
@@ -782,14 +820,24 @@ pub(crate) fn handle_send_event(state: &mut ClientState, req: &SendEventRequest)
                         // An embedded window requests focus. Send XEMBED_FOCUS_IN back.
                         let reply_xembed_atom = state.intern_atom("_XEMBED", false);
                         let ts = state.timestamp();
-                        let focus_event = serialize_event(&ClientMessageEvent {
-                            response_type: CLIENT_MESSAGE_EVENT,
-                            format: 32,
-                            sequence: 0,
-                            window: target,
-                            type_: reply_xembed_atom,
-                            data: [ts, XEMBED_FOCUS_IN, 1 /* XEMBED_FOCUS_CURRENT */, 0, 0].into(),
-                        }, state.msb_first);
+                        let focus_event = serialize_event(
+                            &ClientMessageEvent {
+                                response_type: CLIENT_MESSAGE_EVENT,
+                                format: 32,
+                                sequence: 0,
+                                window: target,
+                                type_: reply_xembed_atom,
+                                data: [
+                                    ts,
+                                    XEMBED_FOCUS_IN,
+                                    1, /* XEMBED_FOCUS_CURRENT */
+                                    0,
+                                    0,
+                                ]
+                                .into(),
+                            },
+                            state.msb_first,
+                        );
                         if !state.event_router.send_event(target, focus_event.clone()) {
                             state.pending_events.push(focus_event);
                         }

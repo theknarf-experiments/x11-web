@@ -44,40 +44,31 @@ pub(crate) const GLX_MAJOR_OPCODE: u8 = 149;
 
 // GLX minor opcodes — re-exported from x11rb-protocol.
 use x11rb_protocol::protocol::glx::{
-    RENDER_REQUEST as GLX_RENDER,
-    RENDER_LARGE_REQUEST as GLX_RENDER_LARGE,
+    CHANGE_DRAWABLE_ATTRIBUTES_REQUEST as GLX_CHANGE_DRAWABLE_ATTRIBUTES,
+    CLIENT_INFO_REQUEST as GLX_CLIENT_INFO, COPY_CONTEXT_REQUEST as GLX_COPY_CONTEXT,
+    CREATE_CONTEXT_ATTRIBS_ARB_REQUEST as GLX_CREATE_CONTEXT_ATTRIBS_ARB,
     CREATE_CONTEXT_REQUEST as GLX_CREATE_CONTEXT,
-    DESTROY_CONTEXT_REQUEST as GLX_DESTROY_CONTEXT,
-    MAKE_CURRENT_REQUEST as GLX_MAKE_CURRENT,
-    IS_DIRECT_REQUEST as GLX_IS_DIRECT,
-    QUERY_VERSION_REQUEST as GLX_QUERY_VERSION,
-    WAIT_GL_REQUEST as GLX_WAIT_GL,
-    WAIT_X_REQUEST as GLX_WAIT_X,
-    COPY_CONTEXT_REQUEST as GLX_COPY_CONTEXT,
-    SWAP_BUFFERS_REQUEST as GLX_SWAP_BUFFERS,
-    USE_X_FONT_REQUEST as GLX_USE_X_FONT,
     CREATE_GLX_PIXMAP_REQUEST as GLX_CREATE_GLX_PIXMAP,
-    GET_VISUAL_CONFIGS_REQUEST as GLX_GET_VISUAL_CONFIGS,
-    DESTROY_GLX_PIXMAP_REQUEST as GLX_DESTROY_GLX_PIXMAP,
-    VENDOR_PRIVATE_REQUEST as GLX_VENDOR_PRIVATE,
-    VENDOR_PRIVATE_WITH_REPLY_REQUEST as GLX_VENDOR_PRIVATE_WITH_REPLY,
-    QUERY_EXTENSIONS_STRING_REQUEST as GLX_QUERY_EXTENSIONS_STRING,
-    QUERY_SERVER_STRING_REQUEST as GLX_QUERY_SERVER_STRING,
-    CLIENT_INFO_REQUEST as GLX_CLIENT_INFO,
-    GET_FB_CONFIGS_REQUEST as GLX_GET_FB_CONFIGS,
-    CREATE_PIXMAP_REQUEST as GLX_CREATE_PIXMAP,
     CREATE_NEW_CONTEXT_REQUEST as GLX_CREATE_NEW_CONTEXT,
-    QUERY_CONTEXT_REQUEST as GLX_QUERY_CONTEXT,
-    MAKE_CONTEXT_CURRENT_REQUEST as GLX_MAKE_CONTEXT_CURRENT,
-    CREATE_PBUFFER_REQUEST as GLX_CREATE_PBUFFER,
+    CREATE_PBUFFER_REQUEST as GLX_CREATE_PBUFFER, CREATE_PIXMAP_REQUEST as GLX_CREATE_PIXMAP,
+    CREATE_WINDOW_REQUEST as GLX_CREATE_WINDOW, DELETE_WINDOW_REQUEST as GLX_DELETE_WINDOW,
+    DESTROY_CONTEXT_REQUEST as GLX_DESTROY_CONTEXT,
+    DESTROY_GLX_PIXMAP_REQUEST as GLX_DESTROY_GLX_PIXMAP,
     DESTROY_PBUFFER_REQUEST as GLX_DESTROY_PBUFFER,
     GET_DRAWABLE_ATTRIBUTES_REQUEST as GLX_GET_DRAWABLE_ATTRIBUTES,
-    CHANGE_DRAWABLE_ATTRIBUTES_REQUEST as GLX_CHANGE_DRAWABLE_ATTRIBUTES,
-    CREATE_WINDOW_REQUEST as GLX_CREATE_WINDOW,
-    DELETE_WINDOW_REQUEST as GLX_DELETE_WINDOW,
+    GET_FB_CONFIGS_REQUEST as GLX_GET_FB_CONFIGS,
+    GET_VISUAL_CONFIGS_REQUEST as GLX_GET_VISUAL_CONFIGS, IS_DIRECT_REQUEST as GLX_IS_DIRECT,
+    MAKE_CONTEXT_CURRENT_REQUEST as GLX_MAKE_CONTEXT_CURRENT,
+    MAKE_CURRENT_REQUEST as GLX_MAKE_CURRENT, QUERY_CONTEXT_REQUEST as GLX_QUERY_CONTEXT,
+    QUERY_EXTENSIONS_STRING_REQUEST as GLX_QUERY_EXTENSIONS_STRING,
+    QUERY_SERVER_STRING_REQUEST as GLX_QUERY_SERVER_STRING,
+    QUERY_VERSION_REQUEST as GLX_QUERY_VERSION, RENDER_LARGE_REQUEST as GLX_RENDER_LARGE,
+    RENDER_REQUEST as GLX_RENDER, SET_CLIENT_INFO2_ARB_REQUEST as GLX_SET_CLIENT_INFO_2ARB,
     SET_CLIENT_INFO_ARB_REQUEST as GLX_SET_CLIENT_INFO_ARB,
-    CREATE_CONTEXT_ATTRIBS_ARB_REQUEST as GLX_CREATE_CONTEXT_ATTRIBS_ARB,
-    SET_CLIENT_INFO2_ARB_REQUEST as GLX_SET_CLIENT_INFO_2ARB,
+    SWAP_BUFFERS_REQUEST as GLX_SWAP_BUFFERS, USE_X_FONT_REQUEST as GLX_USE_X_FONT,
+    VENDOR_PRIVATE_REQUEST as GLX_VENDOR_PRIVATE,
+    VENDOR_PRIVATE_WITH_REPLY_REQUEST as GLX_VENDOR_PRIVATE_WITH_REPLY,
+    WAIT_GL_REQUEST as GLX_WAIT_GL, WAIT_X_REQUEST as GLX_WAIT_X,
 };
 
 // GLX FBConfig attribute tokens
@@ -220,7 +211,8 @@ pub(crate) fn handle_glx_request(state: &mut ClientState, data: &[u8], seq: u16)
         GLX_QUERY_SERVER_STRING => query::handle_query_server_string(data, seq),
         GLX_CLIENT_INFO => {
             use x11rb_protocol::protocol::glx::ClientInfoRequest;
-            if let Ok(req) = ClientInfoRequest::try_parse_request(request_header(data), &data[4..]) {
+            if let Ok(req) = ClientInfoRequest::try_parse_request(request_header(data), &data[4..])
+            {
                 let major = req.major_version;
                 let minor = req.minor_version;
                 let client_str = String::from_utf8_lossy(&req.string)
@@ -234,7 +226,9 @@ pub(crate) fn handle_glx_request(state: &mut ClientState, data: &[u8], seq: u16)
             // SetClientInfoARB and SetClientInfo2ARB have the same overall structure.
             // Use SetClientInfoArbRequest for parsing (works for both minor opcodes).
             use x11rb_protocol::protocol::glx::SetClientInfoARBRequest;
-            if let Ok(req) = SetClientInfoARBRequest::try_parse_request(request_header(data), &data[4..]) {
+            if let Ok(req) =
+                SetClientInfoARBRequest::try_parse_request(request_header(data), &data[4..])
+            {
                 let major = req.major_version;
                 let minor = req.minor_version;
                 let num_versions = req.gl_versions.len();
@@ -265,7 +259,9 @@ pub(crate) fn handle_glx_request(state: &mut ClientState, data: &[u8], seq: u16)
             // Log the vendor code for diagnostics but otherwise succeed silently
             // since returning an error would break clients using common vendor ops.
             use x11rb_protocol::protocol::glx::VendorPrivateRequest;
-            if let Ok(req) = VendorPrivateRequest::try_parse_request(request_header(data), &data[4..]) {
+            if let Ok(req) =
+                VendorPrivateRequest::try_parse_request(request_header(data), &data[4..])
+            {
                 let vendor_code = req.vendor_code;
                 debug!("GLX VendorPrivate: vendor_code={vendor_code}");
             }
@@ -276,7 +272,13 @@ pub(crate) fn handle_glx_request(state: &mut ClientState, data: &[u8], seq: u16)
         101..=255 => context::handle_glx_single(state, data, seq),
         _ => {
             warn!("Unhandled GLX minor opcode: {minor}");
-            crate::xserver::core::build_error(crate::xserver::core::REQUEST_ERROR, seq, minor as u32, 159, minor as u16)
+            crate::xserver::core::build_error(
+                crate::xserver::core::REQUEST_ERROR,
+                seq,
+                minor as u32,
+                159,
+                minor as u16,
+            )
         }
     }
 }

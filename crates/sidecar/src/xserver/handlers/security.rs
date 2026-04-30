@@ -10,7 +10,7 @@ use super::super::client::ClientState;
 pub(crate) fn handle_security_request(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
     use super::super::client::SecurityAuthorization;
     use crate::xserver::core::require_len;
-use crate::xserver::reply::ReplyBuf;
+    use crate::xserver::reply::ReplyBuf;
 
     let minor = data[1];
     match minor {
@@ -92,13 +92,20 @@ use crate::xserver::reply::ReplyBuf;
 
                 let auth_data_len = auth_data.len() as u32;
                 let extra_words = auth_data_len.div_ceil(4);
-                let mut reply = ReplyBuf::with_extra(seq, (extra_words * 4) as usize, state.msb_first)
-                    .set_u32(8, auth_id)
-                    .set_u16(12, auth_data_len as u16);
+                let mut reply =
+                    ReplyBuf::with_extra(seq, (extra_words * 4) as usize, state.msb_first)
+                        .set_u32(8, auth_id)
+                        .set_u16(12, auth_data_len as u16);
                 reply.buf_mut()[16..16 + auth_data.len()].copy_from_slice(&auth_data);
                 reply.build()
             } else {
-                crate::xserver::core::build_error(crate::xserver::core::LENGTH_ERROR, seq, 0, 155, minor as u16)
+                crate::xserver::core::build_error(
+                    crate::xserver::core::LENGTH_ERROR,
+                    seq,
+                    0,
+                    155,
+                    minor as u16,
+                )
             }
         }
         2 => {
@@ -116,7 +123,13 @@ use crate::xserver::reply::ReplyBuf;
         }
         _ => {
             debug!("SECURITY: unhandled minor opcode {minor}");
-            crate::xserver::core::build_error(crate::xserver::core::REQUEST_ERROR, seq, minor as u32, 155, minor as u16)
+            crate::xserver::core::build_error(
+                crate::xserver::core::REQUEST_ERROR,
+                seq,
+                minor as u32,
+                155,
+                minor as u16,
+            )
         }
     }
 }

@@ -32,18 +32,14 @@ pub(crate) fn depth_for_visual(visual: u32) -> u8 {
 
 // X11 event type codes — re-exported from x11rb-protocol (single source of truth).
 pub(crate) use x11rb_protocol::protocol::xproto::{
-    KEY_PRESS_EVENT, KEY_RELEASE_EVENT, BUTTON_PRESS_EVENT, BUTTON_RELEASE_EVENT,
-    MOTION_NOTIFY_EVENT, ENTER_NOTIFY_EVENT, LEAVE_NOTIFY_EVENT,
-    FOCUS_IN_EVENT, FOCUS_OUT_EVENT, KEYMAP_NOTIFY_EVENT,
-    EXPOSE_EVENT, GRAPHICS_EXPOSURE_EVENT, NO_EXPOSURE_EVENT,
-    VISIBILITY_NOTIFY_EVENT, CREATE_NOTIFY_EVENT, DESTROY_NOTIFY_EVENT,
-    UNMAP_NOTIFY_EVENT, MAP_NOTIFY_EVENT, MAP_REQUEST_EVENT,
-    REPARENT_NOTIFY_EVENT, CONFIGURE_NOTIFY_EVENT, CONFIGURE_REQUEST_EVENT,
-    GRAVITY_NOTIFY_EVENT, RESIZE_REQUEST_EVENT,
-    CIRCULATE_NOTIFY_EVENT, CIRCULATE_REQUEST_EVENT,
-    PROPERTY_NOTIFY_EVENT, SELECTION_CLEAR_EVENT, SELECTION_REQUEST_EVENT,
-    SELECTION_NOTIFY_EVENT, COLORMAP_NOTIFY_EVENT, CLIENT_MESSAGE_EVENT,
-    MAPPING_NOTIFY_EVENT,
+    BUTTON_PRESS_EVENT, BUTTON_RELEASE_EVENT, CIRCULATE_NOTIFY_EVENT, CIRCULATE_REQUEST_EVENT,
+    CLIENT_MESSAGE_EVENT, COLORMAP_NOTIFY_EVENT, CONFIGURE_NOTIFY_EVENT, CONFIGURE_REQUEST_EVENT,
+    CREATE_NOTIFY_EVENT, DESTROY_NOTIFY_EVENT, ENTER_NOTIFY_EVENT, EXPOSE_EVENT, FOCUS_IN_EVENT,
+    FOCUS_OUT_EVENT, GRAPHICS_EXPOSURE_EVENT, GRAVITY_NOTIFY_EVENT, KEYMAP_NOTIFY_EVENT,
+    KEY_PRESS_EVENT, KEY_RELEASE_EVENT, LEAVE_NOTIFY_EVENT, MAPPING_NOTIFY_EVENT, MAP_NOTIFY_EVENT,
+    MAP_REQUEST_EVENT, MOTION_NOTIFY_EVENT, NO_EXPOSURE_EVENT, PROPERTY_NOTIFY_EVENT,
+    REPARENT_NOTIFY_EVENT, RESIZE_REQUEST_EVENT, SELECTION_CLEAR_EVENT, SELECTION_NOTIFY_EVENT,
+    SELECTION_REQUEST_EVENT, UNMAP_NOTIFY_EVENT, VISIBILITY_NOTIFY_EVENT,
 };
 // Alias for British spelling used throughout codebase
 pub(crate) const COLOURMAP_NOTIFY_EVENT: u8 = COLORMAP_NOTIFY_EVENT;
@@ -52,14 +48,13 @@ pub(crate) const COLOURMAP_NOTIFY_EVENT: u8 = COLORMAP_NOTIFY_EVENT;
 pub(crate) use x11rb_protocol::protocol::xproto::EventMask;
 
 // X11 error codes — re-exported from x11rb-protocol.
-pub(crate) use x11rb_protocol::protocol::xproto::{
-    REQUEST_ERROR, VALUE_ERROR, WINDOW_ERROR, PIXMAP_ERROR, ATOM_ERROR,
-    CURSOR_ERROR, FONT_ERROR, MATCH_ERROR, DRAWABLE_ERROR, ACCESS_ERROR,
-    ALLOC_ERROR, COLORMAP_ERROR, G_CONTEXT_ERROR, ID_CHOICE_ERROR,
-    NAME_ERROR, LENGTH_ERROR,
-};
 #[cfg(test)]
 use x11rb_protocol::protocol::xproto::IMPLEMENTATION_ERROR;
+pub(crate) use x11rb_protocol::protocol::xproto::{
+    ACCESS_ERROR, ALLOC_ERROR, ATOM_ERROR, COLORMAP_ERROR, CURSOR_ERROR, DRAWABLE_ERROR,
+    FONT_ERROR, G_CONTEXT_ERROR, ID_CHOICE_ERROR, LENGTH_ERROR, MATCH_ERROR, NAME_ERROR,
+    PIXMAP_ERROR, REQUEST_ERROR, VALUE_ERROR, WINDOW_ERROR,
+};
 
 /// Validate minimum request length; returns early with a LENGTH_ERROR error if too short.
 ///
@@ -69,7 +64,11 @@ macro_rules! require_len {
     ($data:expr, $min:expr, $seq:expr, $major:expr) => {
         if $data.len() < $min {
             return $crate::xserver::core::build_error(
-                $crate::xserver::core::LENGTH_ERROR, $seq, 0, $major, 0,
+                $crate::xserver::core::LENGTH_ERROR,
+                $seq,
+                0,
+                $major,
+                0,
             );
         }
     };
@@ -77,7 +76,11 @@ macro_rules! require_len {
         if $data.len() < $min {
             let _ = $msb; // back-compat shim — byte order is patched at the write point
             return $crate::xserver::core::build_error(
-                $crate::xserver::core::LENGTH_ERROR, $seq, $data.len() as u32, $major, $minor as u16,
+                $crate::xserver::core::LENGTH_ERROR,
+                $seq,
+                $data.len() as u32,
+                $major,
+                $minor as u16,
             );
         }
     };
@@ -861,5 +864,4 @@ mod tests {
         assert_ne!(ROOT_VISUAL, 0);
         assert_ne!(ROOT_COLORMAP, 0);
     }
-
 }

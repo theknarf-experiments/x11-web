@@ -59,7 +59,14 @@ pub(crate) fn handle_set_drm_device_in_use(
     require_len!(data, 16, seq, DRI3_MAJOR_OPCODE, minor as u16, bo);
 
     use x11rb_protocol::protocol::dri3::SetDRMDeviceInUseRequest;
-    let req = parse_minor!(SetDRMDeviceInUseRequest, data, state, seq, DRI3_MAJOR_OPCODE, minor);
+    let req = parse_minor!(
+        SetDRMDeviceInUseRequest,
+        data,
+        state,
+        seq,
+        DRI3_MAJOR_OPCODE,
+        minor
+    );
     let _window = req.window;
     let drm_major = req.drm_major;
     let drm_minor = req.drm_minor;

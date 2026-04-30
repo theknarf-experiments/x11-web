@@ -55,8 +55,8 @@ pub(crate) fn handle_get_indicator_map(
     let mut reply = ReplyBuf::with_extra(seq, body_len, state.msb_first)
         .set_data_byte(device_id_byte)
         .set_u32(8, which); // which indicators
-                                           // Indicator 12-byte maps: flags(1), whichGroups(1), groups(1), whichMods(1),
-                                           //                         mods(1), realMods(1), vmods(2), ctrls(4)
+                            // Indicator 12-byte maps: flags(1), whichGroups(1), groups(1), whichMods(1),
+                            //                         mods(1), realMods(1), vmods(2), ctrls(4)
     let mut off = 32;
     for bit in 0..32u32 {
         if which & (1 << bit) == 0 {
@@ -146,7 +146,7 @@ pub(crate) fn handle_get_named_indicator(
         .set_data_byte(device_id_byte)
         .set_u32(8, indicator_atom)
         .set_u8(12, 1); // found
-    // on = check current indicator state
+                        // on = check current indicator state
     let eff_mods = state.xkb_state.effective_mods();
     let on = if indicator_atom == 0 {
         false

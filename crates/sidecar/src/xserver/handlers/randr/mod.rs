@@ -20,7 +20,7 @@ pub(crate) fn handle_randr_request(state: &mut ClientState, data: &[u8], seq: u1
         // ---------------------------------------------------------------
         0 => {
             ReplyBuf::fixed(seq, state.msb_first)
-                .set_u32(8, 1)  // major version
+                .set_u32(8, 1) // major version
                 .set_u32(12, 5) // minor version
                 .build()
         }
@@ -102,7 +102,13 @@ pub(crate) fn handle_randr_request(state: &mut ClientState, data: &[u8], seq: u1
 
         _ => {
             info!("Unhandled RANDR minor opcode: {minor}");
-            crate::xserver::core::build_error(crate::xserver::core::REQUEST_ERROR, seq, minor as u32, 140, minor as u16)
+            crate::xserver::core::build_error(
+                crate::xserver::core::REQUEST_ERROR,
+                seq,
+                minor as u32,
+                140,
+                minor as u16,
+            )
         }
     }
 }

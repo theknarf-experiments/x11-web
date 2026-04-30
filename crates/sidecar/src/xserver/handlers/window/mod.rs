@@ -158,22 +158,28 @@ pub(crate) fn update_sibling_visibility(
             if let Some(win) = state.windows.get_mut(&sib_id) {
                 win.visibility = new_vis;
                 if win.event_mask & EventMask::VISIBILITY_CHANGE != EventMask::NO_EVENT {
-                    let vis_event = serialize_event(&VisibilityNotifyEvent {
-                        response_type: VISIBILITY_NOTIFY_EVENT,
-                        sequence: seq,
-                        window: sib_id,
-                        state: new_vis.into(),
-                    }, msb_first);
+                    let vis_event = serialize_event(
+                        &VisibilityNotifyEvent {
+                            response_type: VISIBILITY_NOTIFY_EVENT,
+                            sequence: seq,
+                            window: sib_id,
+                            state: new_vis.into(),
+                        },
+                        msb_first,
+                    );
                     state.pending_events.push(vis_event);
                 }
             }
             // Broadcast to other clients watching this window
-            let vis_event = serialize_event(&VisibilityNotifyEvent {
-                response_type: VISIBILITY_NOTIFY_EVENT,
-                sequence: seq,
-                window: sib_id,
-                state: new_vis.into(),
-            }, msb_first);
+            let vis_event = serialize_event(
+                &VisibilityNotifyEvent {
+                    response_type: VISIBILITY_NOTIFY_EVENT,
+                    sequence: seq,
+                    window: sib_id,
+                    state: new_vis.into(),
+                },
+                msb_first,
+            );
             state.broadcast_event(sib_id, EventMask::VISIBILITY_CHANGE, &vis_event);
 
             // Generate Expose events for siblings that became more visible
@@ -203,32 +209,40 @@ pub(crate) fn update_sibling_visibility(
                         .map(|w| (w.width, w.height, w.event_mask))
                         .unwrap_or((0, 0, 0));
                     if sib_mask & EventMask::EXPOSURE != EventMask::NO_EVENT {
-                        let expose = serialize_event(&ExposeEvent {
+                        let expose = serialize_event(
+                            &ExposeEvent {
+                                response_type: EXPOSE_EVENT,
+                                sequence: seq,
+                                window: sib_id,
+                                x: 0,
+                                y: 0,
+                                width: sib_w,
+                                height: sib_h,
+                                count: 0,
+                            },
+                            msb_first,
+                        );
+                        state.pending_events.push(expose);
+                    }
+                    // Also broadcast to other clients that selected ExposureMask
+                    let (bc_w, bc_h) = state
+                        .windows
+                        .get(&sib_id)
+                        .map(|w| (w.width, w.height))
+                        .unwrap_or((0, 0));
+                    let expose_bc = serialize_event(
+                        &ExposeEvent {
                             response_type: EXPOSE_EVENT,
                             sequence: seq,
                             window: sib_id,
                             x: 0,
                             y: 0,
-                            width: sib_w,
-                            height: sib_h,
+                            width: bc_w,
+                            height: bc_h,
                             count: 0,
-                        }, msb_first);
-                        state.pending_events.push(expose);
-                    }
-                    // Also broadcast to other clients that selected ExposureMask
-                    let (bc_w, bc_h) = state.windows.get(&sib_id)
-                        .map(|w| (w.width, w.height))
-                        .unwrap_or((0, 0));
-                    let expose_bc = serialize_event(&ExposeEvent {
-                        response_type: EXPOSE_EVENT,
-                        sequence: seq,
-                        window: sib_id,
-                        x: 0,
-                        y: 0,
-                        width: bc_w,
-                        height: bc_h,
-                        count: 0,
-                    }, msb_first);
+                        },
+                        msb_first,
+                    );
                     state.broadcast_event(sib_id, EventMask::EXPOSURE, &expose_bc);
                 }
             }

@@ -399,11 +399,11 @@ fn pcf_4byte_padding_repack() {
     let glyph_count: u16 = 1;
     pcf.extend_from_slice(&glyph_count.to_le_bytes());
     // One compressed metric: 5 bytes each, values biased by 0x80
-    let lsb: u8 = (0i16 + 0x80) as u8;           // left_side_bearing = 0
-    let rsb: u8 = (glyph_w as i16 + 0x80) as u8;  // right_side_bearing = 6
-    let cw: u8 = (glyph_w as i16 + 0x80) as u8;   // character_width = 6
-    let asc: u8 = (glyph_h as i16 + 0x80) as u8;  // ascent = 3
-    let desc: u8 = 0x80;                            // descent = 0
+    let lsb: u8 = (0i16 + 0x80) as u8; // left_side_bearing = 0
+    let rsb: u8 = (glyph_w as i16 + 0x80) as u8; // right_side_bearing = 6
+    let cw: u8 = (glyph_w as i16 + 0x80) as u8; // character_width = 6
+    let asc: u8 = (glyph_h as i16 + 0x80) as u8; // ascent = 3
+    let desc: u8 = 0x80; // descent = 0
     pcf.extend_from_slice(&[lsb, rsb, cw, asc, desc]);
     let metrics_size = (pcf.len() as u32) - metrics_offset;
 
@@ -435,10 +435,10 @@ fn pcf_4byte_padding_repack() {
     // min_byte2=65, max_byte2=65 (char 'A'), min_byte1=0, max_byte1=0, default_char=65
     pcf.extend_from_slice(&65u16.to_le_bytes()); // min_byte2
     pcf.extend_from_slice(&65u16.to_le_bytes()); // max_byte2
-    pcf.extend_from_slice(&0u16.to_le_bytes());  // min_byte1
-    pcf.extend_from_slice(&0u16.to_le_bytes());  // max_byte1
+    pcf.extend_from_slice(&0u16.to_le_bytes()); // min_byte1
+    pcf.extend_from_slice(&0u16.to_le_bytes()); // max_byte1
     pcf.extend_from_slice(&65u16.to_le_bytes()); // default_char
-    // Encoding: glyph index 0 for char 65
+                                                 // Encoding: glyph index 0 for char 65
     pcf.extend_from_slice(&0u16.to_le_bytes());
     let encodings_size = (pcf.len() as u32) - encodings_offset;
 
@@ -456,10 +456,10 @@ fn pcf_4byte_padding_repack() {
 
     // Fill in the table directory
     let table_entries: [(u32, u32, u32, u32); 4] = [
-        (1 << 2, metrics_format, metrics_size, metrics_offset),   // PCF_METRICS
-        (1 << 3, bitmaps_format, bitmaps_size, bitmaps_offset),   // PCF_BITMAPS
+        (1 << 2, metrics_format, metrics_size, metrics_offset), // PCF_METRICS
+        (1 << 3, bitmaps_format, bitmaps_size, bitmaps_offset), // PCF_BITMAPS
         (1 << 5, encodings_format, encodings_size, encodings_offset), // PCF_BDF_ENCODINGS
-        (1 << 8, accel_format, accel_size, accel_offset),         // PCF_BDF_ACCELERATORS
+        (1 << 8, accel_format, accel_size, accel_offset),       // PCF_BDF_ACCELERATORS
     ];
     for (i, (tt, fmt, sz, off)) in table_entries.iter().enumerate() {
         let base = tables_offset + i * 16;
@@ -470,8 +470,8 @@ fn pcf_4byte_padding_repack() {
     }
 
     // Parse the synthetic PCF
-    let font = pcf::parse_pcf_data(&pcf, Path::new("test.pcf"))
-        .expect("Failed to parse synthetic PCF");
+    let font =
+        pcf::parse_pcf_data(&pcf, Path::new("test.pcf")).expect("Failed to parse synthetic PCF");
 
     // Verify the glyph for char 65 ('A') was repacked correctly
     let glyph = font.glyph(65).expect("Glyph for 'A' should exist");
@@ -479,7 +479,11 @@ fn pcf_4byte_padding_repack() {
     assert_eq!(glyph.height, 3);
 
     // Internal format should be 1-byte row stride (ceil(6/8) = 1)
-    assert_eq!(glyph.bitmap.len(), 3, "Should be 3 bytes (1 byte per row * 3 rows)");
+    assert_eq!(
+        glyph.bitmap.len(),
+        3,
+        "Should be 3 bytes (1 byte per row * 3 rows)"
+    );
     assert_eq!(glyph.bitmap[0], 0xFC, "Row 0 should be 0xFC");
     assert_eq!(glyph.bitmap[1], 0x84, "Row 1 should be 0x84");
     assert_eq!(glyph.bitmap[2], 0xFC, "Row 2 should be 0xFC");

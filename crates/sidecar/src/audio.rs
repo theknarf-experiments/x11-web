@@ -89,13 +89,14 @@ pub async fn run_audio_capture(rtc_tx: mpsc::UnboundedSender<RtcCommand>) {
     info!("Audio capture started (48kHz mono s16le)");
 
     // Initialize Opus encoder.
-    let mut encoder = match opus::Encoder::new(48000, opus::Channels::Mono, opus::Application::Audio) {
-        Ok(e) => e,
-        Err(e) => {
-            error!("Failed to create Opus encoder: {e}");
-            return;
-        }
-    };
+    let mut encoder =
+        match opus::Encoder::new(48000, opus::Channels::Mono, opus::Application::Audio) {
+            Ok(e) => e,
+            Err(e) => {
+                error!("Failed to create Opus encoder: {e}");
+                return;
+            }
+        };
 
     // Read 20ms frames (960 samples at 48kHz mono = 1920 bytes of s16le).
     const FRAME_SIZE: usize = 960; // samples per 20ms at 48kHz

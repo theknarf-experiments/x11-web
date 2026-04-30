@@ -5,12 +5,12 @@ use tracing::debug;
 
 use super::super::super::client::ClientState;
 use super::super::parse_or_void;
-use crate::xserver::reply::ReplyBuf;
-use crate::xserver::request::request_header;
 use super::{
     CapturedFrame, FOURCC_I420, FOURCC_NV12, FOURCC_NV21, FOURCC_RGB3, FOURCC_RV32, FOURCC_UYVY,
     FOURCC_Y800, FOURCC_YUY2, FOURCC_YV12, FOURCC_YV16,
 };
+use crate::xserver::reply::ReplyBuf;
+use crate::xserver::request::request_header;
 use x11rb_protocol::protocol::xv::{
     GetStillRequest, GetVideoRequest, PutImageRequest, PutStillRequest, PutVideoRequest,
     QueryImageAttributesRequest as XvQueryImageAttributesRequest, ShmPutImageRequest,
@@ -318,10 +318,18 @@ fn convert_yuv_to_argb(
     let conv = select_converter(colorspace);
     match fourcc {
         // SIMD-optimized planar paths via dcv-color-primitives.
-        FOURCC_I420 => Some(super::dcv_convert::i420_to_bgra(yuv, width, height, colorspace)),
-        FOURCC_YV12 => Some(super::dcv_convert::yv12_to_bgra(yuv, width, height, colorspace)),
-        FOURCC_NV12 => Some(super::dcv_convert::nv12_to_bgra(yuv, width, height, colorspace)),
-        FOURCC_NV21 => Some(super::dcv_convert::nv21_to_bgra(yuv, width, height, colorspace)),
+        FOURCC_I420 => Some(super::dcv_convert::i420_to_bgra(
+            yuv, width, height, colorspace,
+        )),
+        FOURCC_YV12 => Some(super::dcv_convert::yv12_to_bgra(
+            yuv, width, height, colorspace,
+        )),
+        FOURCC_NV12 => Some(super::dcv_convert::nv12_to_bgra(
+            yuv, width, height, colorspace,
+        )),
+        FOURCC_NV21 => Some(super::dcv_convert::nv21_to_bgra(
+            yuv, width, height, colorspace,
+        )),
         // Packed 4:2:2 and 4:2:2 planar formats — dcv 1.0 doesn't support these.
         FOURCC_YUY2 => Some(convert_yuy2_to_argb(yuv, width, height, conv)),
         FOURCC_UYVY => Some(convert_uyvy_to_argb(yuv, width, height, conv)),
@@ -890,7 +898,9 @@ pub(crate) fn handle_image_request(
         12 => {
             // XvStopVideo
             if data.len() >= 8 {
-                if let Ok(req) = StopVideoRequest::try_parse_request(request_header(data), &data[4..]) {
+                if let Ok(req) =
+                    StopVideoRequest::try_parse_request(request_header(data), &data[4..])
+                {
                     let port = req.port;
                     debug!("XVideo StopVideo: port={port}");
                 }
@@ -902,8 +912,8 @@ pub(crate) fn handle_image_request(
             // Report all supported formats
             let num_formats: u32 = 10;
             let extra_bytes = (num_formats * 128) as usize;
-            let mut reply = ReplyBuf::with_extra(seq, extra_bytes, state.msb_first)
-                .set_u32(8, num_formats);
+            let mut reply =
+                ReplyBuf::with_extra(seq, extra_bytes, state.msb_first).set_u32(8, num_formats);
 
             // Helper to fill an ImageFormatInfo at a given offset
             // format_type: 1 = XvYUV, 0 = XvRGB

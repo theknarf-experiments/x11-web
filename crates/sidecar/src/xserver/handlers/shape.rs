@@ -4,17 +4,17 @@
 //! are stored per-window and ShapeNotify events are delivered to subscribed
 //! clients.
 
-use tracing::debug;
 use super::parse_minor;
+use tracing::debug;
 
 use super::super::client::ClientState;
 use super::super::types::RegionRect;
 use crate::xserver::event::serialize_event;
 use crate::xserver::reply::ReplyBuf;
 use x11rb_protocol::protocol::shape::{
-    CombineRequest, GetRectanglesRequest, InputSelectedRequest, MaskRequest, NotifyEvent as ShapeNotifyEvent,
-    OffsetRequest, QueryExtentsRequest, QueryVersionRequest, RectanglesRequest, SelectInputRequest,
-    SK,
+    CombineRequest, GetRectanglesRequest, InputSelectedRequest, MaskRequest,
+    NotifyEvent as ShapeNotifyEvent, OffsetRequest, QueryExtentsRequest, QueryVersionRequest,
+    RectanglesRequest, SelectInputRequest, SK,
 };
 
 /// SHAPE kind constants.
@@ -159,9 +159,7 @@ pub(crate) fn handle_shape_request(state: &mut ClientState, data: &[u8], seq: u1
                     SHAPE_BOUNDING => &mut win.bounding_shape,
                     SHAPE_CLIP => &mut win.clip_shape,
                     SHAPE_INPUT => &mut win.input_shape,
-                    _ => {
-                        return shape_err(crate::xserver::core::VALUE_ERROR, kind as u32)
-                    }
+                    _ => return shape_err(crate::xserver::core::VALUE_ERROR, kind as u32),
                 };
                 if let Some(rects) = shape {
                     for r in rects.iter_mut() {
@@ -565,18 +563,21 @@ fn send_shape_notify(state: &mut ClientState, window_id: u32, kind: u8, seq: u16
         .unwrap_or(false);
 
     if has_subscribers {
-        let event = serialize_event(&ShapeNotifyEvent {
-            response_type: SHAPE_NOTIFY_EVENT,
-            shape_kind: SK::from(kind),
-            sequence: seq,
-            affected_window: window_id,
-            extents_x: ext.x,
-            extents_y: ext.y,
-            extents_width: ext.width,
-            extents_height: ext.height,
-            server_time: state.timestamp(),
-            shaped,
-        }, state.msb_first);
+        let event = serialize_event(
+            &ShapeNotifyEvent {
+                response_type: SHAPE_NOTIFY_EVENT,
+                shape_kind: SK::from(kind),
+                sequence: seq,
+                affected_window: window_id,
+                extents_x: ext.x,
+                extents_y: ext.y,
+                extents_width: ext.width,
+                extents_height: ext.height,
+                server_time: state.timestamp(),
+                shaped,
+            },
+            state.msb_first,
+        );
         state.pending_events.push(event);
     }
 }

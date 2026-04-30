@@ -119,7 +119,13 @@ pub(crate) fn handle_create_pixmap(state: &mut ClientState, data: &[u8], seq: u1
 
     // Validate the X pixmap exists
     if !state.pixmaps.contains_key(&x_pixmap) {
-        return crate::xserver::core::build_error(crate::xserver::core::PIXMAP_ERROR, seq, x_pixmap, 159, 22);
+        return crate::xserver::core::build_error(
+            crate::xserver::core::PIXMAP_ERROR,
+            seq,
+            x_pixmap,
+            159,
+            22,
+        );
     }
 
     // Parse attribute pairs (terminated by key=0 or end of data)
@@ -362,7 +368,7 @@ pub(crate) fn handle_query_context(state: &mut ClientState, data: &[u8], seq: u1
     let pairs = [
         (GLX_FBCONFIG_ID, if visual == 0x40 { 2u32 } else { 1u32 }),
         (GLX_RENDER_TYPE, GLX_RGBA_BIT),
-        (0x3, screen),       // GLX_SCREEN
+        (0x3, screen),        // GLX_SCREEN
         (0x800A, share_list), // GLX_SHARE_CONTEXT_EXT
     ];
     super::reply::attrib_pairs_reply(seq, &pairs)

@@ -19,9 +19,8 @@ pub(crate) fn handle_xinerama_request(state: &ClientState, data: &[u8], seq: u16
         }
         1 => {
             // GetState
-            let mut reply = ReplyBuf::fixed(seq, state.msb_first)
-                .set_data_byte(1); // state = active
-            // window ID at bytes 8-11 (from request)
+            let mut reply = ReplyBuf::fixed(seq, state.msb_first).set_data_byte(1); // state = active
+                                                                                    // window ID at bytes 8-11 (from request)
             if data.len() >= 8 {
                 reply = reply.set_bytes(8, &data[4..8]);
             }
@@ -29,8 +28,7 @@ pub(crate) fn handle_xinerama_request(state: &ClientState, data: &[u8], seq: u16
         }
         2 => {
             // GetScreenCount
-            let mut reply = ReplyBuf::fixed(seq, state.msb_first)
-                .set_data_byte(1); // screen_count = 1
+            let mut reply = ReplyBuf::fixed(seq, state.msb_first).set_data_byte(1); // screen_count = 1
             if data.len() >= 8 {
                 reply = reply.set_bytes(8, &data[4..8]);
             }
@@ -70,7 +68,13 @@ pub(crate) fn handle_xinerama_request(state: &ClientState, data: &[u8], seq: u16
         }
         _ => {
             debug!("XINERAMA: unhandled minor opcode {minor}");
-            crate::xserver::core::build_error(crate::xserver::core::REQUEST_ERROR, seq, minor as u32, 158, minor as u16)
+            crate::xserver::core::build_error(
+                crate::xserver::core::REQUEST_ERROR,
+                seq,
+                minor as u32,
+                158,
+                minor as u16,
+            )
         }
     }
 }

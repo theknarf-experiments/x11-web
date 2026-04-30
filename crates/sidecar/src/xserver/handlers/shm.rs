@@ -1,7 +1,7 @@
 //! MIT-SHM (Shared Memory) extension handler.
 
-use tracing::{info, warn};
 use super::parse_minor;
+use tracing::{info, warn};
 
 use super::super::client::ClientState;
 use super::super::core::ROOT_VISUAL;
@@ -91,7 +91,6 @@ pub(crate) fn handle_shm_request(state: &mut ClientState, data: &[u8], seq: u16)
 
         // PutImage
         3 => {
-
             let req = parse_minor!(PutImageRequest, data, state, seq, 130, minor as u16);
             let drawable = req.drawable;
             let _gc = req.gc;

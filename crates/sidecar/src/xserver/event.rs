@@ -74,7 +74,9 @@ pub(crate) fn serialize_event_with_layout<E: Serialize>(
 /// For simplicity, we swap all u16-aligned pairs and u32-aligned quads
 /// after the first 2 bytes (type + detail are single bytes).
 fn byteswap_event_inplace(bytes: &mut [u8]) {
-    if bytes.len() < 4 { return; }
+    if bytes.len() < 4 {
+        return;
+    }
     // Sequence number at [2..4] — swap as u16
     bytes.swap(2, 3);
     // Remaining fields [4..32] are all u32-aligned in standard X11 events.
@@ -127,7 +129,10 @@ mod tests {
         assert_eq!(bytes.len(), 32);
         assert_eq!(bytes[0], 22);
         assert_eq!(u16::from_le_bytes([bytes[2], bytes[3]]), 0x1234);
-        assert_eq!(u32::from_le_bytes([bytes[4], bytes[5], bytes[6], bytes[7]]), 0x65);
+        assert_eq!(
+            u32::from_le_bytes([bytes[4], bytes[5], bytes[6], bytes[7]]),
+            0x65
+        );
     }
 
     #[test]
@@ -148,6 +153,9 @@ mod tests {
         let bytes = serialize_event(&ev, true);
         assert_eq!(bytes[0], 22); // type byte unchanged
         assert_eq!(u16::from_be_bytes([bytes[2], bytes[3]]), 0x1234);
-        assert_eq!(u32::from_be_bytes([bytes[4], bytes[5], bytes[6], bytes[7]]), 0x65);
+        assert_eq!(
+            u32::from_be_bytes([bytes[4], bytes[5], bytes[6], bytes[7]]),
+            0x65
+        );
     }
 }

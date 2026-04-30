@@ -75,8 +75,7 @@ pub(crate) fn handle_query_tree(state: &mut ClientState, req: &QueryTreeRequest)
         .set_u32(8, state.root_window);
 
     let parent = state.windows.get(&wid).map(|w| w.parent).unwrap_or(0);
-    reply = reply.set_u32(12, parent)
-        .set_u16(16, n_children);
+    reply = reply.set_u32(12, parent).set_u16(16, n_children);
 
     for (i, &child) in children.iter().enumerate() {
         let off = 32 + i * 4;

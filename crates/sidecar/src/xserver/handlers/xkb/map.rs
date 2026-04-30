@@ -332,8 +332,7 @@ pub(crate) fn build_xkb_get_map_reply(state: &mut ClientState, seq: u16) -> Vec<
 
     // ----- Header -----
     let total_extra = 8 + data.len();
-    let mut reply = ReplyBuf::with_extra(seq, total_extra, state.msb_first)
-        .set_data_byte(3); // deviceID (matches Xvfb's default core kbd)
+    let mut reply = ReplyBuf::with_extra(seq, total_extra, state.msb_first).set_data_byte(3); // deviceID (matches Xvfb's default core kbd)
     reply.buf_mut()[10] = MIN_KEY_CODE;
     reply.buf_mut()[11] = MAX_KEY_CODE;
     let present: u16 = 0x00ff;
@@ -415,7 +414,10 @@ pub(crate) fn handle_xkb_set_map(state: &mut ClientState, data: &[u8], seq: u16)
                 },
             );
         }
-        debug!("SetMap: stored {count} key types starting at {}", req.first_type);
+        debug!(
+            "SetMap: stored {count} key types starting at {}",
+            req.first_type
+        );
     }
 
     if let Some(syms) = aux.syms {
@@ -428,7 +430,10 @@ pub(crate) fn handle_xkb_set_map(state: &mut ClientState, data: &[u8], seq: u16)
                 break;
             }
         }
-        debug!("SetMap: updated keysym mappings starting at keycode {}", req.first_key_sym);
+        debug!(
+            "SetMap: updated keysym mappings starting at keycode {}",
+            req.first_key_sym
+        );
     }
 
     if let Some(key_actions) = aux.key_actions {
@@ -444,7 +449,10 @@ pub(crate) fn handle_xkb_set_map(state: &mut ClientState, data: &[u8], seq: u16)
                 state.xkb_key_actions.insert(kc, actions);
             }
         }
-        debug!("SetMap: stored {total} key actions starting at {}", req.first_key_action);
+        debug!(
+            "SetMap: stored {total} key actions starting at {}",
+            req.first_key_action
+        );
     }
 
     if let Some(behaviors) = aux.behaviors {
@@ -626,8 +634,7 @@ fn cached_xkb_key_names() -> &'static [[u8; 4]; 248] {
     CACHE.get_or_init(|| {
         let mut arr = [*b"K   "; 248];
         for kc in 8u32..=255 {
-            arr[(kc - 8) as usize] =
-                crate::xserver::handlers::default_keymap::key_name(kc as u8);
+            arr[(kc - 8) as usize] = crate::xserver::handlers::default_keymap::key_name(kc as u8);
         }
         arr
     })
@@ -643,7 +650,6 @@ pub(crate) fn us_qwerty_key_names() -> [&'static [u8; 4]; 248] {
     }
     out
 }
-
 
 /// Standard US-QWERTY keysyms keyed by physical X11 keycode (8..255), pulled
 /// straight from libxkbcommon's evdev/pc105/us layout.

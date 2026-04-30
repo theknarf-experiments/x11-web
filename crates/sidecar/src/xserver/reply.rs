@@ -109,25 +109,41 @@ impl ReplyBuf {
 // Standalone byte-order-aware write functions (don't need &self).
 #[inline]
 fn write_u16(buf: &mut [u8], offset: usize, val: u16, msb_first: bool) {
-    let bytes = if msb_first { val.to_be_bytes() } else { val.to_le_bytes() };
+    let bytes = if msb_first {
+        val.to_be_bytes()
+    } else {
+        val.to_le_bytes()
+    };
     buf[offset..offset + 2].copy_from_slice(&bytes);
 }
 
 #[inline]
 fn write_i16(buf: &mut [u8], offset: usize, val: i16, msb_first: bool) {
-    let bytes = if msb_first { val.to_be_bytes() } else { val.to_le_bytes() };
+    let bytes = if msb_first {
+        val.to_be_bytes()
+    } else {
+        val.to_le_bytes()
+    };
     buf[offset..offset + 2].copy_from_slice(&bytes);
 }
 
 #[inline]
 fn write_u32(buf: &mut [u8], offset: usize, val: u32, msb_first: bool) {
-    let bytes = if msb_first { val.to_be_bytes() } else { val.to_le_bytes() };
+    let bytes = if msb_first {
+        val.to_be_bytes()
+    } else {
+        val.to_le_bytes()
+    };
     buf[offset..offset + 4].copy_from_slice(&bytes);
 }
 
 #[inline]
 fn write_i32(buf: &mut [u8], offset: usize, val: i32, msb_first: bool) {
-    let bytes = if msb_first { val.to_be_bytes() } else { val.to_le_bytes() };
+    let bytes = if msb_first {
+        val.to_be_bytes()
+    } else {
+        val.to_le_bytes()
+    };
     buf[offset..offset + 4].copy_from_slice(&bytes);
 }
 
@@ -149,14 +165,20 @@ mod tests {
         assert_eq!(reply.len(), 32);
         assert_eq!(reply[0], 1); // type = Reply
         assert_eq!(u16::from_le_bytes([reply[2], reply[3]]), 42); // seq
-        assert_eq!(u32::from_le_bytes([reply[4], reply[5], reply[6], reply[7]]), 0); // length
+        assert_eq!(
+            u32::from_le_bytes([reply[4], reply[5], reply[6], reply[7]]),
+            0
+        ); // length
     }
 
     #[test]
     fn extra_reply_sets_length() {
         let reply = ReplyBuf::with_extra(1, 16, false).build();
         assert_eq!(reply.len(), 48); // 32 + 16
-        assert_eq!(u32::from_le_bytes([reply[4], reply[5], reply[6], reply[7]]), 4); // 16/4
+        assert_eq!(
+            u32::from_le_bytes([reply[4], reply[5], reply[6], reply[7]]),
+            4
+        ); // 16/4
     }
 
     #[test]
@@ -174,7 +196,10 @@ mod tests {
             .set_u64(32, 0x00FF_FFFF_FFFF_FFFF)
             .build();
         // Low u32 (0xFFFFFFFF) in LE, then high u32 (0x00FFFFFF) in LE
-        assert_eq!(&reply[32..40], &[0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x00]);
+        assert_eq!(
+            &reply[32..40],
+            &[0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x00]
+        );
     }
 
     #[test]
@@ -183,7 +208,10 @@ mod tests {
             .set_u64(32, 0x00FF_FFFF_FFFF_FFFF)
             .build();
         // Low u32 (0xFFFFFFFF) in BE, then high u32 (0x00FFFFFF) in BE
-        assert_eq!(&reply[32..40], &[0xFF, 0xFF, 0xFF, 0xFF, 0x00, 0xFF, 0xFF, 0xFF]);
+        assert_eq!(
+            &reply[32..40],
+            &[0xFF, 0xFF, 0xFF, 0xFF, 0x00, 0xFF, 0xFF, 0xFF]
+        );
     }
 
     #[test]

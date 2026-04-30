@@ -1,7 +1,7 @@
 //! DPMS (Display Power Management Signaling) extension handler (opcode 151).
 
-use tracing::debug;
 use super::parse_minor;
+use tracing::debug;
 
 use super::super::client::ClientState;
 use crate::xserver::core::require_len;

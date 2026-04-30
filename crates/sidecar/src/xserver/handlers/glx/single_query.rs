@@ -15,9 +15,17 @@ use super::reply::GlxReply;
 pub(crate) fn handle_get_error(seq: u16) -> Vec<u8> {
     let err = {
         #[cfg(feature = "osmesa")]
-        { if osmesa::is_available() { osmesa::gl_get_error() } else { 0 } }
+        {
+            if osmesa::is_available() {
+                osmesa::gl_get_error()
+            } else {
+                0
+            }
+        }
         #[cfg(not(feature = "osmesa"))]
-        { 0u32 }
+        {
+            0u32
+        }
     };
     GlxReply::Scalar(err).encode(seq)
 }

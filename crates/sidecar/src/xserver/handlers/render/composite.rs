@@ -223,9 +223,7 @@ pub(crate) fn handle_trapezoids(state: &mut ClientState, data: &[u8], seq: u16) 
         .unwrap_or((None, true));
     let dst_draw = match dst_drawable {
         Some(d) => d,
-        None => {
-            return render_value_err(seq, dst_pic, minor)
-        }
+        None => return render_value_err(seq, dst_pic, minor),
     };
     let clip = ClipSnapshot::from_picture(state, dst_pic);
 
@@ -276,12 +274,7 @@ pub(crate) fn handle_trapezoids(state: &mut ClientState, data: &[u8], seq: u16) 
                 let l_bot = interp_x(lx1, ly1, lx2, ly2, bottom);
                 let r_top = interp_x(rx1, ry1, rx2, ry2, top);
                 let r_bot = interp_x(rx1, ry1, rx2, ry2, bottom);
-                let poly = [
-                    (l_top, top),
-                    (r_top, top),
-                    (r_bot, bottom),
-                    (l_bot, bottom),
-                ];
+                let poly = [(l_top, top), (r_top, top), (r_bot, bottom), (l_bot, bottom)];
                 composite_polygon_aa(
                     fb,
                     fb_w,
@@ -321,7 +314,6 @@ fn interp_x(x1: f64, y1: f64, x2: f64, y2: f64, y: f64) -> f64 {
     }
 }
 
-
 /// Handle XRender Triangles (minor opcode 11).
 pub(crate) fn handle_triangles(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
     let minor = data[1] as u16;
@@ -344,9 +336,7 @@ pub(crate) fn handle_triangles(state: &mut ClientState, data: &[u8], seq: u16) -
         .unwrap_or((None, true));
     let dst_draw = match dst_drawable {
         Some(d) => d,
-        None => {
-            return render_value_err(seq, dst_pic, minor)
-        }
+        None => return render_value_err(seq, dst_pic, minor),
     };
     let clip = ClipSnapshot::from_picture(state, dst_pic);
 
@@ -533,9 +523,7 @@ pub(crate) fn handle_tri_strip(state: &mut ClientState, data: &[u8], seq: u16) -
         .unwrap_or((None, true));
     let dst_draw = match dst_drawable {
         Some(d) => d,
-        None => {
-            return render_value_err(seq, dst_pic, minor)
-        }
+        None => return render_value_err(seq, dst_pic, minor),
     };
     let clip = ClipSnapshot::from_picture(state, dst_pic);
 
@@ -626,9 +614,7 @@ pub(crate) fn handle_tri_fan(state: &mut ClientState, data: &[u8], seq: u16) -> 
         .unwrap_or((None, true));
     let dst_draw = match dst_drawable {
         Some(d) => d,
-        None => {
-            return render_value_err(seq, dst_pic, minor)
-        }
+        None => return render_value_err(seq, dst_pic, minor),
     };
     let clip = ClipSnapshot::from_picture(state, dst_pic);
 
@@ -719,9 +705,7 @@ pub(crate) fn handle_fill_rectangles(state: &mut ClientState, data: &[u8], seq: 
         .unwrap_or((None, true));
     let dst_draw = match dst_drawable {
         Some(d) => d,
-        None => {
-            return render_value_err(seq, dst_pic, minor)
-        }
+        None => return render_value_err(seq, dst_pic, minor),
     };
     let clip = ClipSnapshot::from_picture(state, dst_pic);
 
@@ -801,9 +785,7 @@ pub(crate) fn handle_add_traps(state: &mut ClientState, data: &[u8], seq: u16) -
     let (target, fb_w) = {
         let pic = match state.render.pictures.get(&pic_id) {
             Some(p) => p,
-            None => {
-                return render_value_err(seq, pic_id, minor)
-            }
+            None => return render_value_err(seq, pic_id, minor),
         };
         let d = pic.drawable;
         let w = if let Some(px) = state.pixmaps.get(&d) {

@@ -2,14 +2,21 @@ use tracing::debug;
 
 use super::super::parse_minor;
 use super::{pad4, PictFilter};
-use crate::xserver::ClientState;
 use crate::xserver::reply::ReplyBuf;
+use crate::xserver::ClientState;
 use x11rb_protocol::protocol::render::SetPictureFilterRequest;
 
 /// SetPictureFilter (RENDER minor opcode 30).
 /// Sets the filter on a picture (nearest, bilinear, etc.).
 pub(crate) fn handle_set_picture_filter(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
-    let req = parse_minor!(SetPictureFilterRequest, data, state, seq, 139, data[1] as u16);
+    let req = parse_minor!(
+        SetPictureFilterRequest,
+        data,
+        state,
+        seq,
+        139,
+        data[1] as u16
+    );
 
     let pic_id = req.picture;
     let filter_name = std::str::from_utf8(&req.filter).unwrap_or("nearest");

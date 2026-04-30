@@ -55,20 +55,11 @@ pub enum RtcCommand {
         command: String,
     },
     /// Process exited event.
-    ProcessExited {
-        pid: u32,
-        exit_code: Option<i32>,
-    },
+    ProcessExited { pid: u32, exit_code: Option<i32> },
     /// Input was dropped.
-    InputDropped {
-        window_id: String,
-        reason: String,
-    },
+    InputDropped { window_id: String, reason: String },
     /// Send audio data (Opus encoded) to all peers.
-    AudioData {
-        data: Vec<u8>,
-        duration_ms: u32,
-    },
+    AudioData { data: Vec<u8>, duration_ms: u32 },
     /// UDP packet received from a peer's socket (used once UDP receive loop is wired up).
     #[allow(dead_code)]
     UdpInput {
@@ -353,10 +344,7 @@ async fn handle_command(
             }
         }
         RtcCommand::DisplayUpdate { client_id, update } => {
-            broadcast_dc(
-                peers,
-                &DcServerMsg::Display { client_id, update },
-            );
+            broadcast_dc(peers, &DcServerMsg::Display { client_id, update });
         }
         RtcCommand::ClipboardData {
             selection,
@@ -402,10 +390,7 @@ async fn handle_command(
             broadcast_dc(peers, &DcServerMsg::ProcessExited { pid, exit_code });
         }
         RtcCommand::InputDropped { window_id, reason } => {
-            broadcast_dc(
-                peers,
-                &DcServerMsg::InputDropped { window_id, reason },
-            );
+            broadcast_dc(peers, &DcServerMsg::InputDropped { window_id, reason });
         }
         RtcCommand::AudioData { data, duration_ms } => {
             let now = Instant::now();
@@ -592,9 +577,7 @@ fn handle_channel_data(
             command,
             args,
         },
-        DcClientMsg::KillProcess { request_id, pid } => {
-            RtcEvent::KillProcess { request_id, pid }
-        }
+        DcClientMsg::KillProcess { request_id, pid } => RtcEvent::KillProcess { request_id, pid },
     };
     let _ = evt_tx.send(event);
 }

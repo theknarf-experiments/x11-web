@@ -5,8 +5,8 @@ use tracing::{debug, warn};
 use super::super::super::client::ClientState;
 use super::super::super::core::*;
 use super::super::parse_minor;
-use crate::xserver::reply::ReplyBuf;
 use super::DRI3_MAJOR_OPCODE;
+use crate::xserver::reply::ReplyBuf;
 
 // -----------------------------------------------------------------
 // 4: FenceFromFD — create a SYNC fence backed by an fd

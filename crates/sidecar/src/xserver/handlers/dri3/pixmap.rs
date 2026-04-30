@@ -333,7 +333,14 @@ pub(crate) fn handle_buffer_from_pixmap(
     require_len!(data, 8, seq, DRI3_MAJOR_OPCODE, 3, bo);
 
     use x11rb_protocol::protocol::dri3::BufferFromPixmapRequest;
-    let req = parse_minor!(BufferFromPixmapRequest, data, state, seq, DRI3_MAJOR_OPCODE, 3u8);
+    let req = parse_minor!(
+        BufferFromPixmapRequest,
+        data,
+        state,
+        seq,
+        DRI3_MAJOR_OPCODE,
+        3u8
+    );
     let pixmap_id = req.pixmap;
     debug!("DRI3 BufferFromPixmap: pid={pixmap_id:#x}");
 
@@ -561,7 +568,14 @@ pub(crate) fn handle_buffers_from_pixmap(
     require_len!(data, 8, seq, DRI3_MAJOR_OPCODE, 8, bo);
 
     use x11rb_protocol::protocol::dri3::BuffersFromPixmapRequest;
-    let req = parse_minor!(BuffersFromPixmapRequest, data, state, seq, DRI3_MAJOR_OPCODE, 8u8);
+    let req = parse_minor!(
+        BuffersFromPixmapRequest,
+        data,
+        state,
+        seq,
+        DRI3_MAJOR_OPCODE,
+        8u8
+    );
     let pixmap_id = req.pixmap;
     debug!("DRI3 BuffersFromPixmap: pid={pixmap_id:#x}");
 

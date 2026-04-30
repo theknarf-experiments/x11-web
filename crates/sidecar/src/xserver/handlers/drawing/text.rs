@@ -107,7 +107,6 @@ pub(crate) fn handle_poly_text8(state: &mut ClientState, req: &PolyText8Request)
 // ---------------------------------------------------------------------------
 
 pub(crate) fn handle_poly_text16(state: &mut ClientState, req: &PolyText16Request) -> Vec<u8> {
-
     let drawable = req.drawable;
     let gc_id = req.gc;
 
@@ -276,7 +275,6 @@ pub(crate) fn handle_poly_text16(state: &mut ClientState, req: &PolyText16Reques
 // ---------------------------------------------------------------------------
 
 pub(crate) fn handle_image_text8(state: &mut ClientState, req: &ImageText8Request) -> Vec<u8> {
-
     let drawable = req.drawable;
     let gc_id = req.gc;
 
@@ -331,7 +329,6 @@ pub(crate) fn handle_image_text8(state: &mut ClientState, req: &ImageText8Reques
 // ---------------------------------------------------------------------------
 
 pub(crate) fn handle_image_text16(state: &mut ClientState, req: &ImageText16Request) -> Vec<u8> {
-
     let drawable = req.drawable;
     let gc_id = req.gc;
 

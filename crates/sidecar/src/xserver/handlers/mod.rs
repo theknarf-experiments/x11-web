@@ -46,7 +46,6 @@ use super::core::*;
 use super::types::*;
 use crate::framebuffer::Framebuffer;
 
-
 // Re-export window stacking helpers for use by property handlers
 pub(crate) use window::restack_by_window_type;
 
@@ -60,10 +59,7 @@ pub(crate) use window::restack_by_window_type;
 /// centralises the boilerplate that used to live at the top of every handler.
 macro_rules! typed {
     ($T:ty, $handler:path, $opcode:literal, $data:ident, $state:ident) => {{
-        match <$T>::try_parse_request(
-            crate::xserver::request::request_header($data),
-            &$data[4..],
-        ) {
+        match <$T>::try_parse_request(crate::xserver::request::request_header($data), &$data[4..]) {
             Ok(req) => $handler($state, &req),
             Err(_) => crate::xserver::core::build_error(
                 crate::xserver::core::LENGTH_ERROR,
@@ -98,7 +94,13 @@ macro_rules! parse_minor {
         match <$T>::try_parse_request($header, &$data[4..]) {
             Ok(r) => r,
             Err(_) => {
-                return crate::xserver::core::build_error(crate::xserver::core::LENGTH_ERROR, $seq, 0, $major, $minor as u16)
+                return crate::xserver::core::build_error(
+                    crate::xserver::core::LENGTH_ERROR,
+                    $seq,
+                    0,
+                    $major,
+                    $minor as u16,
+                )
             }
         }
     };
@@ -113,10 +115,7 @@ pub(crate) use parse_minor;
 #[allow(unused_macros)]
 macro_rules! parse_or_void {
     ($T:ty, $data:ident) => {
-        match <$T>::try_parse_request(
-            crate::xserver::request::request_header($data),
-            &$data[4..],
-        ) {
+        match <$T>::try_parse_request(crate::xserver::request::request_header($data), &$data[4..]) {
             Ok(r) => r,
             Err(_) => return Vec::new(),
         }
@@ -151,126 +150,732 @@ pub(crate) fn handle_core_request(state: &mut ClientState, data: &[u8]) -> Vec<u
     }
 
     match major_opcode {
-        1 => typed!(CreateWindowRequest, window::handle_create_window, 1, data, state),
-        2 => typed!(ChangeWindowAttributesRequest, window::handle_change_window_attributes, 2, data, state),
-        3 => typed!(GetWindowAttributesRequest, window::handle_get_window_attributes, 3, data, state),
-        4 => typed!(DestroyWindowRequest, window::handle_destroy_window, 4, data, state),
-        5 => typed!(DestroySubwindowsRequest, window::handle_destroy_subwindows, 5, data, state),
-        6 => typed!(ChangeSaveSetRequest, window::handle_change_save_set, 6, data, state),
-        7 => typed!(ReparentWindowRequest, window::handle_reparent_window, 7, data, state),
+        1 => typed!(
+            CreateWindowRequest,
+            window::handle_create_window,
+            1,
+            data,
+            state
+        ),
+        2 => typed!(
+            ChangeWindowAttributesRequest,
+            window::handle_change_window_attributes,
+            2,
+            data,
+            state
+        ),
+        3 => typed!(
+            GetWindowAttributesRequest,
+            window::handle_get_window_attributes,
+            3,
+            data,
+            state
+        ),
+        4 => typed!(
+            DestroyWindowRequest,
+            window::handle_destroy_window,
+            4,
+            data,
+            state
+        ),
+        5 => typed!(
+            DestroySubwindowsRequest,
+            window::handle_destroy_subwindows,
+            5,
+            data,
+            state
+        ),
+        6 => typed!(
+            ChangeSaveSetRequest,
+            window::handle_change_save_set,
+            6,
+            data,
+            state
+        ),
+        7 => typed!(
+            ReparentWindowRequest,
+            window::handle_reparent_window,
+            7,
+            data,
+            state
+        ),
         8 => typed!(MapWindowRequest, window::handle_map_window, 8, data, state),
-        9 => typed!(MapSubwindowsRequest, window::handle_map_subwindows, 9, data, state),
-        10 => typed!(UnmapWindowRequest, window::handle_unmap_window, 10, data, state),
-        11 => typed!(UnmapSubwindowsRequest, window::handle_unmap_subwindows, 11, data, state),
-        12 => typed!(ConfigureWindowRequest, window::handle_configure_window, 12, data, state),
-        13 => typed!(CirculateWindowRequest, window::handle_circulate_window, 13, data, state),
-        14 => typed!(GetGeometryRequest, window::handle_get_geometry, 14, data, state),
+        9 => typed!(
+            MapSubwindowsRequest,
+            window::handle_map_subwindows,
+            9,
+            data,
+            state
+        ),
+        10 => typed!(
+            UnmapWindowRequest,
+            window::handle_unmap_window,
+            10,
+            data,
+            state
+        ),
+        11 => typed!(
+            UnmapSubwindowsRequest,
+            window::handle_unmap_subwindows,
+            11,
+            data,
+            state
+        ),
+        12 => typed!(
+            ConfigureWindowRequest,
+            window::handle_configure_window,
+            12,
+            data,
+            state
+        ),
+        13 => typed!(
+            CirculateWindowRequest,
+            window::handle_circulate_window,
+            13,
+            data,
+            state
+        ),
+        14 => typed!(
+            GetGeometryRequest,
+            window::handle_get_geometry,
+            14,
+            data,
+            state
+        ),
         15 => typed!(QueryTreeRequest, window::handle_query_tree, 15, data, state),
-        16 => typed!(InternAtomRequest, property::handle_intern_atom, 16, data, state),
-        17 => typed!(GetAtomNameRequest, property::handle_get_atom_name, 17, data, state),
-        18 => typed!(ChangePropertyRequest, property::handle_change_property, 18, data, state),
-        19 => typed!(DeletePropertyRequest, property::handle_delete_property, 19, data, state),
-        20 => typed!(GetPropertyRequest, property::handle_get_property, 20, data, state),
-        21 => typed!(ListPropertiesRequest, property::handle_list_properties, 21, data, state),
-        22 => typed!(SetSelectionOwnerRequest, property::handle_set_selection_owner, 22, data, state),
-        23 => typed!(GetSelectionOwnerRequest, property::handle_get_selection_owner, 23, data, state),
-        24 => typed!(ConvertSelectionRequest, property::handle_convert_selection, 24, data, state),
-        25 => typed!(SendEventRequest, property::handle_send_event, 25, data, state),
+        16 => typed!(
+            InternAtomRequest,
+            property::handle_intern_atom,
+            16,
+            data,
+            state
+        ),
+        17 => typed!(
+            GetAtomNameRequest,
+            property::handle_get_atom_name,
+            17,
+            data,
+            state
+        ),
+        18 => typed!(
+            ChangePropertyRequest,
+            property::handle_change_property,
+            18,
+            data,
+            state
+        ),
+        19 => typed!(
+            DeletePropertyRequest,
+            property::handle_delete_property,
+            19,
+            data,
+            state
+        ),
+        20 => typed!(
+            GetPropertyRequest,
+            property::handle_get_property,
+            20,
+            data,
+            state
+        ),
+        21 => typed!(
+            ListPropertiesRequest,
+            property::handle_list_properties,
+            21,
+            data,
+            state
+        ),
+        22 => typed!(
+            SetSelectionOwnerRequest,
+            property::handle_set_selection_owner,
+            22,
+            data,
+            state
+        ),
+        23 => typed!(
+            GetSelectionOwnerRequest,
+            property::handle_get_selection_owner,
+            23,
+            data,
+            state
+        ),
+        24 => typed!(
+            ConvertSelectionRequest,
+            property::handle_convert_selection,
+            24,
+            data,
+            state
+        ),
+        25 => typed!(
+            SendEventRequest,
+            property::handle_send_event,
+            25,
+            data,
+            state
+        ),
         // Grab operations (opcodes 26-37) delegate to super::grab
-        26 => typed!(GrabPointerRequest, super::grab::handle_grab_pointer, 26, data, state),
-        27 => typed!(UngrabPointerRequest, super::grab::handle_ungrab_pointer, 27, data, state),
-        28 => typed!(GrabButtonRequest, super::grab::handle_grab_button, 28, data, state),
-        29 => typed!(UngrabButtonRequest, super::grab::handle_ungrab_button, 29, data, state),
-        30 => typed!(ChangeActivePointerGrabRequest, super::grab::handle_change_active_pointer_grab, 30, data, state),
-        31 => typed!(GrabKeyboardRequest, super::grab::handle_grab_keyboard, 31, data, state),
-        32 => typed!(UngrabKeyboardRequest, super::grab::handle_ungrab_keyboard, 32, data, state),
-        33 => typed!(GrabKeyRequest, super::grab::handle_grab_key, 33, data, state),
-        34 => typed!(UngrabKeyRequest, super::grab::handle_ungrab_key, 34, data, state),
-        35 => typed!(AllowEventsRequest, super::grab::handle_allow_events, 35, data, state),
-        36 => typed!(GrabServerRequest, super::grab::handle_grab_server, 36, data, state),
-        37 => typed!(UngrabServerRequest, super::grab::handle_ungrab_server, 37, data, state),
-        38 => typed!(QueryPointerRequest, input::handle_query_pointer, 38, data, state),
-        39 => typed!(GetMotionEventsRequest, input::handle_get_motion_events, 39, data, state),
-        40 => typed!(TranslateCoordinatesRequest, input::handle_translate_coordinates, 40, data, state),
-        41 => typed!(WarpPointerRequest, input::handle_warp_pointer, 41, data, state),
-        42 => typed!(SetInputFocusRequest, input::handle_set_input_focus, 42, data, state),
-        43 => typed!(GetInputFocusRequest, input::handle_get_input_focus, 43, data, state),
-        44 => typed!(QueryKeymapRequest, input::handle_query_keymap, 44, data, state),
+        26 => typed!(
+            GrabPointerRequest,
+            super::grab::handle_grab_pointer,
+            26,
+            data,
+            state
+        ),
+        27 => typed!(
+            UngrabPointerRequest,
+            super::grab::handle_ungrab_pointer,
+            27,
+            data,
+            state
+        ),
+        28 => typed!(
+            GrabButtonRequest,
+            super::grab::handle_grab_button,
+            28,
+            data,
+            state
+        ),
+        29 => typed!(
+            UngrabButtonRequest,
+            super::grab::handle_ungrab_button,
+            29,
+            data,
+            state
+        ),
+        30 => typed!(
+            ChangeActivePointerGrabRequest,
+            super::grab::handle_change_active_pointer_grab,
+            30,
+            data,
+            state
+        ),
+        31 => typed!(
+            GrabKeyboardRequest,
+            super::grab::handle_grab_keyboard,
+            31,
+            data,
+            state
+        ),
+        32 => typed!(
+            UngrabKeyboardRequest,
+            super::grab::handle_ungrab_keyboard,
+            32,
+            data,
+            state
+        ),
+        33 => typed!(
+            GrabKeyRequest,
+            super::grab::handle_grab_key,
+            33,
+            data,
+            state
+        ),
+        34 => typed!(
+            UngrabKeyRequest,
+            super::grab::handle_ungrab_key,
+            34,
+            data,
+            state
+        ),
+        35 => typed!(
+            AllowEventsRequest,
+            super::grab::handle_allow_events,
+            35,
+            data,
+            state
+        ),
+        36 => typed!(
+            GrabServerRequest,
+            super::grab::handle_grab_server,
+            36,
+            data,
+            state
+        ),
+        37 => typed!(
+            UngrabServerRequest,
+            super::grab::handle_ungrab_server,
+            37,
+            data,
+            state
+        ),
+        38 => typed!(
+            QueryPointerRequest,
+            input::handle_query_pointer,
+            38,
+            data,
+            state
+        ),
+        39 => typed!(
+            GetMotionEventsRequest,
+            input::handle_get_motion_events,
+            39,
+            data,
+            state
+        ),
+        40 => typed!(
+            TranslateCoordinatesRequest,
+            input::handle_translate_coordinates,
+            40,
+            data,
+            state
+        ),
+        41 => typed!(
+            WarpPointerRequest,
+            input::handle_warp_pointer,
+            41,
+            data,
+            state
+        ),
+        42 => typed!(
+            SetInputFocusRequest,
+            input::handle_set_input_focus,
+            42,
+            data,
+            state
+        ),
+        43 => typed!(
+            GetInputFocusRequest,
+            input::handle_get_input_focus,
+            43,
+            data,
+            state
+        ),
+        44 => typed!(
+            QueryKeymapRequest,
+            input::handle_query_keymap,
+            44,
+            data,
+            state
+        ),
         45 => typed!(OpenFontRequest, font::handle_open_font, 45, data, state),
         46 => typed!(CloseFontRequest, font::handle_close_font, 46, data, state),
         47 => typed!(QueryFontRequest, font::handle_query_font, 47, data, state),
-        48 => typed!(QueryTextExtentsRequest, font::handle_query_text_extents, 48, data, state),
+        48 => typed!(
+            QueryTextExtentsRequest,
+            font::handle_query_text_extents,
+            48,
+            data,
+            state
+        ),
         49 => typed!(ListFontsRequest, font::handle_list_fonts, 49, data, state),
-        50 => typed!(ListFontsWithInfoRequest, font::handle_list_fonts_with_info, 50, data, state),
-        51 => typed!(SetFontPathRequest, font::handle_set_font_path, 51, data, state),
-        52 => typed!(GetFontPathRequest, font::handle_get_font_path, 52, data, state),
-        53 => typed!(CreatePixmapRequest, drawing::handle_create_pixmap, 53, data, state),
-        54 => typed!(FreePixmapRequest, drawing::handle_free_pixmap, 54, data, state),
+        50 => typed!(
+            ListFontsWithInfoRequest,
+            font::handle_list_fonts_with_info,
+            50,
+            data,
+            state
+        ),
+        51 => typed!(
+            SetFontPathRequest,
+            font::handle_set_font_path,
+            51,
+            data,
+            state
+        ),
+        52 => typed!(
+            GetFontPathRequest,
+            font::handle_get_font_path,
+            52,
+            data,
+            state
+        ),
+        53 => typed!(
+            CreatePixmapRequest,
+            drawing::handle_create_pixmap,
+            53,
+            data,
+            state
+        ),
+        54 => typed!(
+            FreePixmapRequest,
+            drawing::handle_free_pixmap,
+            54,
+            data,
+            state
+        ),
         55 => typed!(CreateGCRequest, drawing::handle_create_gc, 55, data, state),
         56 => typed!(ChangeGCRequest, drawing::handle_change_gc, 56, data, state),
         57 => typed!(CopyGCRequest, drawing::handle_copy_gc, 57, data, state),
-        58 => typed!(SetDashesRequest, drawing::handle_set_dashes, 58, data, state),
-        59 => typed!(SetClipRectanglesRequest, drawing::handle_set_clip_rectangles, 59, data, state),
+        58 => typed!(
+            SetDashesRequest,
+            drawing::handle_set_dashes,
+            58,
+            data,
+            state
+        ),
+        59 => typed!(
+            SetClipRectanglesRequest,
+            drawing::handle_set_clip_rectangles,
+            59,
+            data,
+            state
+        ),
         60 => typed!(FreeGCRequest, drawing::handle_free_gc, 60, data, state),
-        61 => typed!(ClearAreaRequest, drawing::handle_clear_area, 61, data, state),
+        61 => typed!(
+            ClearAreaRequest,
+            drawing::handle_clear_area,
+            61,
+            data,
+            state
+        ),
         62 => typed!(CopyAreaRequest, drawing::handle_copy_area, 62, data, state),
-        63 => typed!(CopyPlaneRequest, drawing::handle_copy_plane, 63, data, state),
-        64 => typed!(PolyPointRequest, drawing::handle_poly_point, 64, data, state),
+        63 => typed!(
+            CopyPlaneRequest,
+            drawing::handle_copy_plane,
+            63,
+            data,
+            state
+        ),
+        64 => typed!(
+            PolyPointRequest,
+            drawing::handle_poly_point,
+            64,
+            data,
+            state
+        ),
         65 => typed!(PolyLineRequest, drawing::handle_poly_line, 65, data, state),
-        66 => typed!(PolySegmentRequest, drawing::handle_poly_segment, 66, data, state),
-        67 => typed!(PolyRectangleRequest, drawing::handle_poly_rectangle, 67, data, state),
+        66 => typed!(
+            PolySegmentRequest,
+            drawing::handle_poly_segment,
+            66,
+            data,
+            state
+        ),
+        67 => typed!(
+            PolyRectangleRequest,
+            drawing::handle_poly_rectangle,
+            67,
+            data,
+            state
+        ),
         68 => typed!(PolyArcRequest, drawing::handle_poly_arc, 68, data, state),
         69 => typed!(FillPolyRequest, drawing::handle_fill_poly, 69, data, state),
-        70 => typed!(PolyFillRectangleRequest, drawing::handle_poly_fill_rectangle, 70, data, state),
-        71 => typed!(PolyFillArcRequest, drawing::handle_poly_fill_arc, 71, data, state),
+        70 => typed!(
+            PolyFillRectangleRequest,
+            drawing::handle_poly_fill_rectangle,
+            70,
+            data,
+            state
+        ),
+        71 => typed!(
+            PolyFillArcRequest,
+            drawing::handle_poly_fill_arc,
+            71,
+            data,
+            state
+        ),
         72 => typed!(PutImageRequest, drawing::handle_put_image, 72, data, state),
         73 => typed!(GetImageRequest, drawing::handle_get_image, 73, data, state),
-        74 => typed!(PolyText8Request, drawing::handle_poly_text8, 74, data, state),
-        75 => typed!(PolyText16Request, drawing::handle_poly_text16, 75, data, state),
-        76 => typed!(ImageText8Request, drawing::handle_image_text8, 76, data, state),
-        77 => typed!(ImageText16Request, drawing::handle_image_text16, 77, data, state),
-        78 => typed!(CreateColormapRequest, color::handle_create_colormap, 78, data, state),
-        79 => typed!(FreeColormapRequest, color::handle_free_colormap, 79, data, state),
-        80 => typed!(CopyColormapAndFreeRequest, color::handle_copy_colormap_and_free, 80, data, state),
-        81 => typed!(InstallColormapRequest, color::handle_install_colormap, 81, data, state),
-        82 => typed!(UninstallColormapRequest, color::handle_uninstall_colormap, 82, data, state),
-        83 => typed!(ListInstalledColormapsRequest, color::handle_list_installed_colormaps, 83, data, state),
-        84 => typed!(AllocColorRequest, color::handle_alloc_color, 84, data, state),
-        85 => typed!(AllocNamedColorRequest, color::handle_alloc_named_color, 85, data, state),
-        86 => typed!(AllocColorCellsRequest, color::handle_alloc_color_cells, 86, data, state),
-        87 => typed!(AllocColorPlanesRequest, color::handle_alloc_color_planes, 87, data, state),
-        88 => typed!(FreeColorsRequest, color::handle_free_colors, 88, data, state),
-        89 => typed!(StoreColorsRequest, color::handle_store_colors, 89, data, state),
-        90 => typed!(StoreNamedColorRequest, color::handle_store_named_color, 90, data, state),
-        91 => typed!(QueryColorsRequest, color::handle_query_colors, 91, data, state),
-        92 => typed!(LookupColorRequest, color::handle_lookup_color, 92, data, state),
-        93 => typed!(CreateCursorRequest, color::handle_create_cursor, 93, data, state),
-        94 => typed!(CreateGlyphCursorRequest, color::handle_create_glyph_cursor, 94, data, state),
-        95 => typed!(FreeCursorRequest, color::handle_free_cursor, 95, data, state),
-        96 => typed!(RecolorCursorRequest, color::handle_recolor_cursor, 96, data, state),
-        97 => typed!(QueryBestSizeRequest, query::handle_query_best_size, 97, data, state),
-        98 => typed!(QueryExtensionRequest, query::handle_query_extension, 98, data, state),
-        99 => typed!(ListExtensionsRequest, query::handle_list_extensions, 99, data, state),
-        100 => typed!(ChangeKeyboardMappingRequest, input::handle_change_keyboard_mapping, 100, data, state),
-        101 => typed!(GetKeyboardMappingRequest, input::handle_get_keyboard_mapping, 101, data, state),
-        102 => typed!(ChangeKeyboardControlRequest, input::handle_change_keyboard_control, 102, data, state),
-        103 => typed!(GetKeyboardControlRequest, input::handle_get_keyboard_control, 103, data, state),
+        74 => typed!(
+            PolyText8Request,
+            drawing::handle_poly_text8,
+            74,
+            data,
+            state
+        ),
+        75 => typed!(
+            PolyText16Request,
+            drawing::handle_poly_text16,
+            75,
+            data,
+            state
+        ),
+        76 => typed!(
+            ImageText8Request,
+            drawing::handle_image_text8,
+            76,
+            data,
+            state
+        ),
+        77 => typed!(
+            ImageText16Request,
+            drawing::handle_image_text16,
+            77,
+            data,
+            state
+        ),
+        78 => typed!(
+            CreateColormapRequest,
+            color::handle_create_colormap,
+            78,
+            data,
+            state
+        ),
+        79 => typed!(
+            FreeColormapRequest,
+            color::handle_free_colormap,
+            79,
+            data,
+            state
+        ),
+        80 => typed!(
+            CopyColormapAndFreeRequest,
+            color::handle_copy_colormap_and_free,
+            80,
+            data,
+            state
+        ),
+        81 => typed!(
+            InstallColormapRequest,
+            color::handle_install_colormap,
+            81,
+            data,
+            state
+        ),
+        82 => typed!(
+            UninstallColormapRequest,
+            color::handle_uninstall_colormap,
+            82,
+            data,
+            state
+        ),
+        83 => typed!(
+            ListInstalledColormapsRequest,
+            color::handle_list_installed_colormaps,
+            83,
+            data,
+            state
+        ),
+        84 => typed!(
+            AllocColorRequest,
+            color::handle_alloc_color,
+            84,
+            data,
+            state
+        ),
+        85 => typed!(
+            AllocNamedColorRequest,
+            color::handle_alloc_named_color,
+            85,
+            data,
+            state
+        ),
+        86 => typed!(
+            AllocColorCellsRequest,
+            color::handle_alloc_color_cells,
+            86,
+            data,
+            state
+        ),
+        87 => typed!(
+            AllocColorPlanesRequest,
+            color::handle_alloc_color_planes,
+            87,
+            data,
+            state
+        ),
+        88 => typed!(
+            FreeColorsRequest,
+            color::handle_free_colors,
+            88,
+            data,
+            state
+        ),
+        89 => typed!(
+            StoreColorsRequest,
+            color::handle_store_colors,
+            89,
+            data,
+            state
+        ),
+        90 => typed!(
+            StoreNamedColorRequest,
+            color::handle_store_named_color,
+            90,
+            data,
+            state
+        ),
+        91 => typed!(
+            QueryColorsRequest,
+            color::handle_query_colors,
+            91,
+            data,
+            state
+        ),
+        92 => typed!(
+            LookupColorRequest,
+            color::handle_lookup_color,
+            92,
+            data,
+            state
+        ),
+        93 => typed!(
+            CreateCursorRequest,
+            color::handle_create_cursor,
+            93,
+            data,
+            state
+        ),
+        94 => typed!(
+            CreateGlyphCursorRequest,
+            color::handle_create_glyph_cursor,
+            94,
+            data,
+            state
+        ),
+        95 => typed!(
+            FreeCursorRequest,
+            color::handle_free_cursor,
+            95,
+            data,
+            state
+        ),
+        96 => typed!(
+            RecolorCursorRequest,
+            color::handle_recolor_cursor,
+            96,
+            data,
+            state
+        ),
+        97 => typed!(
+            QueryBestSizeRequest,
+            query::handle_query_best_size,
+            97,
+            data,
+            state
+        ),
+        98 => typed!(
+            QueryExtensionRequest,
+            query::handle_query_extension,
+            98,
+            data,
+            state
+        ),
+        99 => typed!(
+            ListExtensionsRequest,
+            query::handle_list_extensions,
+            99,
+            data,
+            state
+        ),
+        100 => typed!(
+            ChangeKeyboardMappingRequest,
+            input::handle_change_keyboard_mapping,
+            100,
+            data,
+            state
+        ),
+        101 => typed!(
+            GetKeyboardMappingRequest,
+            input::handle_get_keyboard_mapping,
+            101,
+            data,
+            state
+        ),
+        102 => typed!(
+            ChangeKeyboardControlRequest,
+            input::handle_change_keyboard_control,
+            102,
+            data,
+            state
+        ),
+        103 => typed!(
+            GetKeyboardControlRequest,
+            input::handle_get_keyboard_control,
+            103,
+            data,
+            state
+        ),
         104 => typed!(BellRequest, input::handle_bell, 104, data, state),
-        105 => typed!(ChangePointerControlRequest, input::handle_change_pointer_control, 105, data, state),
-        106 => typed!(GetPointerControlRequest, input::handle_get_pointer_control, 106, data, state),
-        107 => typed!(SetScreenSaverRequest, input::handle_set_screen_saver, 107, data, state),
-        108 => typed!(GetScreenSaverRequest, input::handle_get_screen_saver, 108, data, state),
-        109 => typed!(ChangeHostsRequest, input::handle_change_hosts, 109, data, state),
+        105 => typed!(
+            ChangePointerControlRequest,
+            input::handle_change_pointer_control,
+            105,
+            data,
+            state
+        ),
+        106 => typed!(
+            GetPointerControlRequest,
+            input::handle_get_pointer_control,
+            106,
+            data,
+            state
+        ),
+        107 => typed!(
+            SetScreenSaverRequest,
+            input::handle_set_screen_saver,
+            107,
+            data,
+            state
+        ),
+        108 => typed!(
+            GetScreenSaverRequest,
+            input::handle_get_screen_saver,
+            108,
+            data,
+            state
+        ),
+        109 => typed!(
+            ChangeHostsRequest,
+            input::handle_change_hosts,
+            109,
+            data,
+            state
+        ),
         110 => typed!(ListHostsRequest, input::handle_list_hosts, 110, data, state),
-        111 => typed!(SetAccessControlRequest, input::handle_set_access_control, 111, data, state),
-        112 => typed!(SetCloseDownModeRequest, input::handle_set_close_down_mode, 112, data, state),
-        113 => typed!(KillClientRequest, input::handle_kill_client, 113, data, state),
-        114 => typed!(RotatePropertiesRequest, input::handle_rotate_properties, 114, data, state),
-        115 => typed!(ForceScreenSaverRequest, input::handle_force_screen_saver, 115, data, state),
-        116 => typed!(SetPointerMappingRequest, input::handle_set_pointer_mapping, 116, data, state),
-        117 => typed!(GetPointerMappingRequest, input::handle_get_pointer_mapping, 117, data, state),
-        118 => typed!(SetModifierMappingRequest, input::handle_set_modifier_mapping, 118, data, state),
-        119 => typed!(GetModifierMappingRequest, input::handle_get_modifier_mapping, 119, data, state),
+        111 => typed!(
+            SetAccessControlRequest,
+            input::handle_set_access_control,
+            111,
+            data,
+            state
+        ),
+        112 => typed!(
+            SetCloseDownModeRequest,
+            input::handle_set_close_down_mode,
+            112,
+            data,
+            state
+        ),
+        113 => typed!(
+            KillClientRequest,
+            input::handle_kill_client,
+            113,
+            data,
+            state
+        ),
+        114 => typed!(
+            RotatePropertiesRequest,
+            input::handle_rotate_properties,
+            114,
+            data,
+            state
+        ),
+        115 => typed!(
+            ForceScreenSaverRequest,
+            input::handle_force_screen_saver,
+            115,
+            data,
+            state
+        ),
+        116 => typed!(
+            SetPointerMappingRequest,
+            input::handle_set_pointer_mapping,
+            116,
+            data,
+            state
+        ),
+        117 => typed!(
+            GetPointerMappingRequest,
+            input::handle_get_pointer_mapping,
+            117,
+            data,
+            state
+        ),
+        118 => typed!(
+            SetModifierMappingRequest,
+            input::handle_set_modifier_mapping,
+            118,
+            data,
+            state
+        ),
+        119 => typed!(
+            GetModifierMappingRequest,
+            input::handle_get_modifier_mapping,
+            119,
+            data,
+            state
+        ),
         127 => {
             // NoOperation
             Vec::new()
@@ -278,7 +883,13 @@ pub(crate) fn handle_core_request(state: &mut ClientState, data: &[u8]) -> Vec<u
         _ => {
             warn!("Unhandled core X11 request opcode: {major_opcode} minor: {_minor}");
             // Return BadRequest error for unrecognized opcodes per X11 spec
-            super::core::build_error(REQUEST_ERROR, seq, major_opcode as u32, major_opcode, _minor as u16)
+            super::core::build_error(
+                REQUEST_ERROR,
+                seq,
+                major_opcode as u32,
+                major_opcode,
+                _minor as u16,
+            )
         }
     }
 }
@@ -430,15 +1041,18 @@ fn emit_cursor_changed(state: &mut ClientState, wid: u32) {
             .collect();
 
         for sub_win in subscribers {
-            let event = serialize_event(&CursorNotifyEvent {
-                response_type: XFIXES_CURSOR_NOTIFY,
-                subtype: CursorNotifySubtype::from(0u8), // DisplayCursor
-                sequence: state.sequence,
-                window: sub_win,
-                cursor_serial,
-                timestamp,
-                name: 0, // unnamed
-            }, state.msb_first);
+            let event = serialize_event(
+                &CursorNotifyEvent {
+                    response_type: XFIXES_CURSOR_NOTIFY,
+                    subtype: CursorNotifySubtype::from(0u8), // DisplayCursor
+                    sequence: state.sequence,
+                    window: sub_win,
+                    cursor_serial,
+                    timestamp,
+                    name: 0, // unnamed
+                },
+                state.msb_first,
+            );
             state.pending_events.push(event);
         }
     }
@@ -1404,7 +2018,8 @@ mod tests {
         // This applies to ALL windows, not just top-level.
         let parent_mask: u32 = u32::from(super::EventMask::SUBSTRUCTURE_REDIRECT);
         let override_redirect = false;
-        let has_redirect = parent_mask & super::EventMask::SUBSTRUCTURE_REDIRECT != super::EventMask::NO_EVENT;
+        let has_redirect =
+            parent_mask & super::EventMask::SUBSTRUCTURE_REDIRECT != super::EventMask::NO_EVENT;
         assert!(
             has_redirect && !override_redirect,
             "Non-OR child of redirect parent should generate MapRequest"
@@ -1416,8 +2031,9 @@ mod tests {
         // override_redirect windows must bypass SubstructureRedirect
         let parent_mask: u32 = u32::from(super::EventMask::SUBSTRUCTURE_REDIRECT);
         let override_redirect = true;
-        let should_redirect =
-            (parent_mask & super::EventMask::SUBSTRUCTURE_REDIRECT != super::EventMask::NO_EVENT) && !override_redirect;
+        let should_redirect = (parent_mask & super::EventMask::SUBSTRUCTURE_REDIRECT
+            != super::EventMask::NO_EVENT)
+            && !override_redirect;
         assert!(
             !should_redirect,
             "Override-redirect windows must not be redirected"
@@ -1430,7 +2046,8 @@ mod tests {
         // when parent has SubstructureRedirectMask, not just top-level.
         let parent_mask: u32 = u32::from(super::EventMask::SUBSTRUCTURE_REDIRECT);
         let is_override_redirect = false;
-        let parent_has_redirect = parent_mask & super::EventMask::SUBSTRUCTURE_REDIRECT != super::EventMask::NO_EVENT;
+        let parent_has_redirect =
+            parent_mask & super::EventMask::SUBSTRUCTURE_REDIRECT != super::EventMask::NO_EVENT;
         assert!(
             parent_has_redirect && !is_override_redirect,
             "Non-OR child should generate ConfigureRequest when parent has redirect"

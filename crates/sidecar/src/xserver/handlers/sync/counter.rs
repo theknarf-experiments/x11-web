@@ -1,8 +1,8 @@
 //! SYNC counter operations: ListSystemCounters, CreateCounter, SetCounter,
 //! ChangeCounter, QueryCounter, DestroyCounter.
 
-use tracing::debug;
 use super::super::parse_minor;
+use tracing::debug;
 
 use super::super::super::client::ClientState;
 use super::super::super::core::VALUE_ERROR;
@@ -21,10 +21,10 @@ pub(crate) fn list_system_counters(state: &mut ClientState, seq: u16) -> Vec<u8>
     let name_pad = (4 - (name_len % 4)) % 4;
     let entry_size = 4 + 4 + 4 + 2 + name_len + name_pad;
     let extra = entry_size;
-    let mut reply = ReplyBuf::with_extra(seq, extra, state.msb_first)
-        .set_u32(8, 1u32); // num_counters = 1
+    let mut reply = ReplyBuf::with_extra(seq, extra, state.msb_first).set_u32(8, 1u32); // num_counters = 1
     let off = 32;
-    reply = reply.set_u32(off, 1u32) // counter ID = 1 (SERVERTIME)
+    reply = reply
+        .set_u32(off, 1u32) // counter ID = 1 (SERVERTIME)
         .set_u32(off + 4, 0u32) // resolution_hi
         .set_u32(off + 8, 1u32) // resolution_lo = 1ms
         .set_u16(off + 12, name_len as u16);
@@ -133,10 +133,12 @@ pub(crate) fn query_counter(state: &mut ClientState, data: &[u8], seq: u16) -> V
     if counter_id == 1 {
         // SERVERTIME: return current elapsed time in ms
         let ms = state.timestamp();
-        reply = reply.set_u32(8, 0u32) // value_hi
+        reply = reply
+            .set_u32(8, 0u32) // value_hi
             .set_u32(12, ms); // value_lo
     } else if let Some(counter) = state.sync_state.counters.get(&counter_id) {
-        reply = reply.set_u32(8, counter.value_hi as u32)
+        reply = reply
+            .set_u32(8, counter.value_hi as u32)
             .set_u32(12, counter.value_lo);
     } else {
         // BadCounter

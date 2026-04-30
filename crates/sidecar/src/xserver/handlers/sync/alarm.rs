@@ -1,7 +1,7 @@
 //! SYNC alarm operations: CreateAlarm, ChangeAlarm, QueryAlarm, DestroyAlarm.
 
-use tracing::debug;
 use super::super::parse_minor;
+use tracing::debug;
 
 use super::super::super::client::ClientState;
 use super::SyncAlarm;
@@ -83,10 +83,12 @@ pub(crate) fn query_alarm(state: &mut ClientState, data: &[u8], seq: u16) -> Vec
 
     if let Some(alarm) = state.sync_state.alarms.get(&alarm_id) {
         // trigger: counter(4) + value_type(4) + value(8) + test_type(4) + delta(8) + events(4) + state(4)
-        reply = reply.set_u32(8, alarm.counter)
+        reply = reply
+            .set_u32(8, alarm.counter)
             .set_u32(12, alarm.value_type as u32)
             .set_u32(16, alarm.value_hi as u32);
-        reply = reply.set_u32(20, alarm.value_lo)
+        reply = reply
+            .set_u32(20, alarm.value_lo)
             .set_u32(24, alarm.test_type as u32)
             .set_u32(28, alarm.delta_hi as u32)
             .set_u32(32, alarm.delta_lo);

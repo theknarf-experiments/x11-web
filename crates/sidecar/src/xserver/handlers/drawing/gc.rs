@@ -2,8 +2,8 @@
 
 use super::*;
 use x11rb_protocol::protocol::xproto::{
-    ChangeGCRequest, CopyGCRequest, CreateGCAux, CreateGCRequest, FreeGCRequest, GC,
-    SetClipRectanglesRequest, SetDashesRequest,
+    ChangeGCRequest, CopyGCRequest, CreateGCAux, CreateGCRequest, FreeGCRequest,
+    SetClipRectanglesRequest, SetDashesRequest, GC,
 };
 
 /// Apply parsed GC value-list fields to a `GcState`.
@@ -309,9 +309,8 @@ pub(crate) fn handle_copy_gc(state: &mut ClientState, req: &CopyGCRequest) -> Ve
             dst.arc_mode = src.arc_mode;
         }
         // clip_rects follow the clip origin fields
-        let clip_bits = u32::from(GC::CLIP_ORIGIN_X)
-            | u32::from(GC::CLIP_ORIGIN_Y)
-            | u32::from(GC::CLIP_MASK);
+        let clip_bits =
+            u32::from(GC::CLIP_ORIGIN_X) | u32::from(GC::CLIP_ORIGIN_Y) | u32::from(GC::CLIP_MASK);
         if value_mask & clip_bits != 0 {
             dst.clip_rects = src.clip_rects.clone();
         }
@@ -351,7 +350,10 @@ pub(crate) fn handle_set_dashes(state: &mut ClientState, req: &SetDashesRequest)
 // Opcode 59: SetClipRectangles
 // ---------------------------------------------------------------------------
 
-pub(crate) fn handle_set_clip_rectangles(state: &mut ClientState, req: &SetClipRectanglesRequest) -> Vec<u8> {
+pub(crate) fn handle_set_clip_rectangles(
+    state: &mut ClientState,
+    req: &SetClipRectanglesRequest,
+) -> Vec<u8> {
     let gc_id = req.gc;
 
     if !state.gcs.contains_key(&gc_id) {

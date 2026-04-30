@@ -55,7 +55,14 @@ pub(crate) fn handle_dri3_request(state: &mut ClientState, data: &[u8], seq: u16
         // -----------------------------------------------------------------
         0 => {
             use x11rb_protocol::protocol::dri3::QueryVersionRequest;
-            let req = parse_minor!(QueryVersionRequest, data, state, seq, DRI3_MAJOR_OPCODE, minor);
+            let req = parse_minor!(
+                QueryVersionRequest,
+                data,
+                state,
+                seq,
+                DRI3_MAJOR_OPCODE,
+                minor
+            );
             let client_major = req.major_version;
             let client_minor = req.minor_version;
 

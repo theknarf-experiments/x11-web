@@ -5,11 +5,11 @@ use tracing::debug;
 
 use super::super::super::client::ClientState;
 use super::super::parse_or_void;
-use crate::xserver::reply::ReplyBuf;
-use crate::xserver::request::request_header;
 use super::{
     XV_ATTR_BRIGHTNESS, XV_ATTR_COLORSPACE, XV_ATTR_CONTRAST, XV_ATTR_HUE, XV_ATTR_SATURATION,
 };
+use crate::xserver::reply::ReplyBuf;
+use crate::xserver::request::request_header;
 
 pub(crate) fn handle_port_request(
     state: &mut ClientState,
@@ -61,7 +61,9 @@ pub(crate) fn handle_port_request(
             // XvQueryBestSize
             use x11rb_protocol::protocol::xv::QueryBestSizeRequest;
             let mut reply = ReplyBuf::fixed(seq, state.msb_first);
-            if let Ok(req) = QueryBestSizeRequest::try_parse_request(request_header(data), &data[4..]) {
+            if let Ok(req) =
+                QueryBestSizeRequest::try_parse_request(request_header(data), &data[4..])
+            {
                 reply = reply.set_u16(8, req.vid_w).set_u16(10, req.vid_h);
             }
             reply.build()

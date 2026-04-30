@@ -105,8 +105,7 @@ pub(crate) fn handle_xvideo_request(state: &mut ClientState, data: &[u8], seq: u
             let format_entry_size = 8; // visual(4) + depth(1) + pad(3)
             let adaptor_size = 12 + name_padded + format_entry_size; // 1 format
 
-            let mut reply = ReplyBuf::with_extra(seq, adaptor_size, state.msb_first)
-                .set_u16(8, 1); // num_adaptors
+            let mut reply = ReplyBuf::with_extra(seq, adaptor_size, state.msb_first).set_u16(8, 1); // num_adaptors
 
             // Adaptor info
             let off = 32;
@@ -137,8 +136,7 @@ pub(crate) fn handle_xvideo_request(state: &mut ClientState, data: &[u8], seq: u
             let name_padded = (name_len + 3) & !3;
             let enc_size = 16 + name_padded; // id(4) + name_size(2) + width(2) + height(2) + rate_num(4) + rate_den(4) + name
 
-            let mut reply = ReplyBuf::with_extra(seq, enc_size, state.msb_first)
-                .set_u16(8, 1); // num_encodings
+            let mut reply = ReplyBuf::with_extra(seq, enc_size, state.msb_first).set_u16(8, 1); // num_encodings
 
             let off = 32;
             {
@@ -159,6 +157,12 @@ pub(crate) fn handle_xvideo_request(state: &mut ClientState, data: &[u8], seq: u
             image::handle_image_request(state, data, seq, minor)
         }
         13 | 14 => notify::handle_notify_request(state, data, seq, minor),
-        _ => crate::xserver::core::build_error(crate::xserver::core::REQUEST_ERROR, seq, minor as u32, 156, minor as u16),
+        _ => crate::xserver::core::build_error(
+            crate::xserver::core::REQUEST_ERROR,
+            seq,
+            minor as u32,
+            156,
+            minor as u16,
+        ),
     }
 }

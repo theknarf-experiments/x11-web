@@ -572,8 +572,15 @@ async fn handle_command(
         BackendToSidecar::RtcAnswer { frontend_id, sdp } => {
             rtc_mgr.send(RtcCommand::Answer { frontend_id, sdp });
         }
-        BackendToSidecar::RtcIceCandidate { frontend_id, candidate, .. } => {
-            rtc_mgr.send(RtcCommand::IceCandidate { frontend_id, candidate });
+        BackendToSidecar::RtcIceCandidate {
+            frontend_id,
+            candidate,
+            ..
+        } => {
+            rtc_mgr.send(RtcCommand::IceCandidate {
+                frontend_id,
+                candidate,
+            });
         }
     }
 }
@@ -630,7 +637,10 @@ async fn handle_rtc_event(
                 );
             }
         }
-        RtcEvent::RequestClipboard { selection, mime_type } => {
+        RtcEvent::RequestClipboard {
+            selection,
+            mime_type,
+        } => {
             info!("WebRTC clipboard request: selection={selection} mime={mime_type}");
         }
         RtcEvent::SpawnProcess {
@@ -639,10 +649,7 @@ async fn handle_rtc_event(
             args,
         } => match pm.spawn(&command, &args).await {
             Ok(pid) => {
-                let _ = tx.send(SidecarToBackend::ProcessSpawned {
-                    request_id,
-                    pid,
-                });
+                let _ = tx.send(SidecarToBackend::ProcessSpawned { request_id, pid });
             }
             Err(message) => {
                 let _ = tx.send(SidecarToBackend::Error {
@@ -653,10 +660,7 @@ async fn handle_rtc_event(
         },
         RtcEvent::KillProcess { request_id, pid } => match pm.kill(pid).await {
             Ok(()) => {
-                let _ = tx.send(SidecarToBackend::ProcessKilled {
-                    request_id,
-                    pid,
-                });
+                let _ = tx.send(SidecarToBackend::ProcessKilled { request_id, pid });
             }
             Err(message) => {
                 let _ = tx.send(SidecarToBackend::Error {

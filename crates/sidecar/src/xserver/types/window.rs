@@ -5,9 +5,9 @@ use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 use std::sync::{Arc, Mutex};
 use tokio::sync::mpsc;
 
+use super::pixmap::{SharedGcs, SharedPixmaps};
 use super::region::RegionRect;
 use super::routing::{EventBroadcaster, SharedWindows};
-use super::pixmap::{SharedGcs, SharedPixmaps};
 use crate::framebuffer::Framebuffer;
 
 /// EWMH window type, used for stacking layer and focus/decoration policy.

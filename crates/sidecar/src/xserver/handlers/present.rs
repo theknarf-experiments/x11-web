@@ -1,7 +1,7 @@
 //! XC-MISC and Present extension handlers.
 
-use tracing::{debug, info};
 use super::parse_minor;
+use tracing::{debug, info};
 
 use super::super::client::ClientState;
 use super::super::types::PresentSubscription;
@@ -9,9 +9,10 @@ use crate::xserver::event::serialize_event_with_layout;
 use crate::xserver::reply::ReplyBuf;
 use crate::xserver::request::request_header;
 use x11rb_protocol::protocol::present::{
-    CompleteKind, CompleteMode, CompleteNotifyEvent, ConfigureNotifyEvent as PresentConfigureNotifyEvent,
-    IdleNotifyEvent, NotifyMSCRequest, PixmapRequest as PresentPixmapRequest,
-    QueryCapabilitiesRequest, SelectInputRequest as PresentSelectInputRequest,
+    CompleteKind, CompleteMode, CompleteNotifyEvent,
+    ConfigureNotifyEvent as PresentConfigureNotifyEvent, IdleNotifyEvent, NotifyMSCRequest,
+    PixmapRequest as PresentPixmapRequest, QueryCapabilitiesRequest,
+    SelectInputRequest as PresentSelectInputRequest,
 };
 use x11rb_protocol::protocol::xc_misc::GetXIDListRequest;
 
@@ -40,8 +41,10 @@ const COMPLETE_NOTIFY_LAYOUT: &[(usize, usize)] = &[
     (12, 4), // event (u32)
     (16, 4), // window (u32)
     (20, 4), // serial (u32)
-    (24, 4), (28, 4), // ust (CARD64 = two CARD32, low first)
-    (32, 4), (36, 4), // msc (CARD64)
+    (24, 4),
+    (28, 4), // ust (CARD64 = two CARD32, low first)
+    (32, 4),
+    (36, 4), // msc (CARD64)
 ];
 
 /// Wire-field layout for `present::IdleNotifyEvent` (32 bytes).
@@ -137,8 +140,8 @@ pub(crate) fn handle_xc_misc_request(state: &mut ClientState, data: &[u8], seq: 
             let actual_count = ids.len() as u32;
             let extra_bytes = (actual_count as usize) * 4;
             let padded = (extra_bytes + 3) & !3;
-            let mut reply = ReplyBuf::with_extra(seq, padded, state.msb_first)
-                .set_u32(8, actual_count); // ids_count
+            let mut reply =
+                ReplyBuf::with_extra(seq, padded, state.msb_first).set_u32(8, actual_count); // ids_count
             for (i, &id) in ids.iter().enumerate() {
                 let offset = 32 + i * 4;
                 reply = reply.set_u32(offset, id);
@@ -147,7 +150,13 @@ pub(crate) fn handle_xc_misc_request(state: &mut ClientState, data: &[u8], seq: 
         }
         _ => {
             debug!("Unhandled XC-MISC minor opcode: {minor}");
-            crate::xserver::core::build_error(crate::xserver::core::REQUEST_ERROR, seq, minor as u32, 141, minor as u16)
+            crate::xserver::core::build_error(
+                crate::xserver::core::REQUEST_ERROR,
+                seq,
+                minor as u32,
+                141,
+                minor as u16,
+            )
         }
     }
 }
@@ -491,10 +500,14 @@ pub(crate) fn handle_present_request(state: &mut ClientState, data: &[u8], seq: 
                     response_type: GENERIC_EVENT,
                     extension: PRESENT_MAJOR_OPCODE,
                     sequence: seq,
-                    length: 2, // extra 4-byte words after the 32-byte header
+                    length: 2,     // extra 4-byte words after the 32-byte header
                     event_type: 1, // CompleteNotify
                     kind: CompleteKind::PIXMAP,
-                    mode: if is_copy { CompleteMode::COPY } else { CompleteMode::FLIP },
+                    mode: if is_copy {
+                        CompleteMode::COPY
+                    } else {
+                        CompleteMode::FLIP
+                    },
                     event: *event_id,
                     window,
                     serial,
@@ -502,7 +515,9 @@ pub(crate) fn handle_present_request(state: &mut ClientState, data: &[u8], seq: 
                     msc,
                 };
                 state.pending_events.push(serialize_event_with_layout(
-                    &ev, state.msb_first, COMPLETE_NOTIFY_LAYOUT,
+                    &ev,
+                    state.msb_first,
+                    COMPLETE_NOTIFY_LAYOUT,
                 ));
             }
 
@@ -524,7 +539,7 @@ pub(crate) fn handle_present_request(state: &mut ClientState, data: &[u8], seq: 
                         response_type: GENERIC_EVENT,
                         extension: PRESENT_MAJOR_OPCODE,
                         sequence: seq,
-                        length: 0, // no extra data beyond the 32-byte header
+                        length: 0,     // no extra data beyond the 32-byte header
                         event_type: 2, // IdleNotify
                         event: event_id,
                         window,
@@ -533,7 +548,9 @@ pub(crate) fn handle_present_request(state: &mut ClientState, data: &[u8], seq: 
                         idle_fence,
                     };
                     state.pending_events.push(serialize_event_with_layout(
-                        &ev, state.msb_first, IDLE_NOTIFY_LAYOUT,
+                        &ev,
+                        state.msb_first,
+                        IDLE_NOTIFY_LAYOUT,
                     ));
                 }
             }
@@ -585,14 +602,23 @@ pub(crate) fn handle_present_request(state: &mut ClientState, data: &[u8], seq: 
                     msc,
                 };
                 state.pending_events.push(serialize_event_with_layout(
-                    &ev, state.msb_first, COMPLETE_NOTIFY_LAYOUT,
+                    &ev,
+                    state.msb_first,
+                    COMPLETE_NOTIFY_LAYOUT,
                 ));
             }
             Vec::new()
         }
         // SelectInput
         3 => {
-            let req = parse_minor!(PresentSelectInputRequest, data, state, seq, 148, minor as u16);
+            let req = parse_minor!(
+                PresentSelectInputRequest,
+                data,
+                state,
+                seq,
+                148,
+                minor as u16
+            );
             let event_id = req.eid;
             let window = req.window;
             let event_mask = u32::from(req.event_mask);
@@ -614,16 +640,23 @@ pub(crate) fn handle_present_request(state: &mut ClientState, data: &[u8], seq: 
         }
         // QueryCapabilities
         4 => {
-            let _target = QueryCapabilitiesRequest::try_parse_request(request_header(data), &data[4..])
-                .map(|r| r.target)
-                .unwrap_or(0);
+            let _target =
+                QueryCapabilitiesRequest::try_parse_request(request_header(data), &data[4..])
+                    .map(|r| r.target)
+                    .unwrap_or(0);
             ReplyBuf::fixed(seq, state.msb_first)
                 .set_u32(8, PRESENT_CAPABILITY_ASYNC) // async: we always present asynchronously
                 .build()
         }
         _ => {
             debug!("Unhandled Present minor opcode: {minor}");
-            crate::xserver::core::build_error(crate::xserver::core::REQUEST_ERROR, seq, minor as u32, 148, minor as u16)
+            crate::xserver::core::build_error(
+                crate::xserver::core::REQUEST_ERROR,
+                seq,
+                minor as u32,
+                148,
+                minor as u16,
+            )
         }
     }
 }
@@ -663,7 +696,7 @@ pub(crate) fn send_present_config_notify(
             response_type: GENERIC_EVENT,
             extension: PRESENT_MAJOR_OPCODE,
             sequence: seq,
-            length: 4, // extra 4-byte words after the 32-byte header
+            length: 4,     // extra 4-byte words after the 32-byte header
             event_type: 3, // ConfigureNotify
             event: event_id,
             window,
@@ -678,7 +711,9 @@ pub(crate) fn send_present_config_notify(
             pixmap_flags,
         };
         state.pending_events.push(serialize_event_with_layout(
-            &ev, state.msb_first, CONFIGURE_NOTIFY_LAYOUT,
+            &ev,
+            state.msb_first,
+            CONFIGURE_NOTIFY_LAYOUT,
         ));
     }
 }

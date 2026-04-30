@@ -203,17 +203,23 @@ pub(crate) fn handle_xim_xconnect(state: &mut ClientState, event: &[u8]) -> Vec<
     // data.l[3] = divide size (max client message data = 20 bytes)
     let xim_xconnect_atom = state.intern_atom("_XIM_XCONNECT", false);
 
-    let reply = serialize_event(&ClientMessageEvent {
-        response_type: CLIENT_MESSAGE_EVENT | 0x80, // synthetic
-        format: 32,
-        sequence: state.sequence,
-        window: client_comm_window,
-        type_: xim_xconnect_atom,
-        // server comm window, major xport, minor xport, divide size, pad
-        data: [state.xim.window, 0, 0, 20, 0].into(),
-    }, state.msb_first);
+    let reply = serialize_event(
+        &ClientMessageEvent {
+            response_type: CLIENT_MESSAGE_EVENT | 0x80, // synthetic
+            format: 32,
+            sequence: state.sequence,
+            window: client_comm_window,
+            type_: xim_xconnect_atom,
+            // server comm window, major xport, minor xport, divide size, pad
+            data: [state.xim.window, 0, 0, 20, 0].into(),
+        },
+        state.msb_first,
+    );
 
-    if !state.event_router.send_event(client_comm_window, reply.clone()) {
+    if !state
+        .event_router
+        .send_event(client_comm_window, reply.clone())
+    {
         state.pending_events.push(reply);
     }
 
@@ -518,7 +524,9 @@ fn build_xim_attr(id: u16, attr_type: u16, name: &[u8]) -> Vec<u8> {
 
 /// XIM_CLOSE (32): Client closes an input method.
 fn handle_xim_close(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
-    let Some(im_id) = xim_im_id(data) else { return Vec::new(); };
+    let Some(im_id) = xim_im_id(data) else {
+        return Vec::new();
+    };
 
     debug!("XIM: CLOSE im_id={}", im_id);
     state.xim.connections.remove(&im_id);
@@ -533,7 +541,9 @@ fn handle_xim_close(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
 
 /// XIM_QUERY_EXTENSION (40): Client queries supported XIM extensions.
 fn handle_xim_query_extension(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
-    let Some(im_id) = xim_im_id(data) else { return Vec::new(); };
+    let Some(im_id) = xim_im_id(data) else {
+        return Vec::new();
+    };
 
     debug!("XIM: QUERY_EXTENSION im_id={}", im_id);
 
@@ -548,7 +558,9 @@ fn handle_xim_query_extension(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
 
 /// XIM_ENCODING_NEGOTIATION (50): Client negotiates encoding.
 fn handle_xim_encoding_negotiation(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
-    let Some(im_id) = xim_im_id(data) else { return Vec::new(); };
+    let Some(im_id) = xim_im_id(data) else {
+        return Vec::new();
+    };
 
     debug!("XIM: ENCODING_NEGOTIATION im_id={}", im_id);
 
@@ -563,7 +575,9 @@ fn handle_xim_encoding_negotiation(state: &mut ClientState, data: &[u8]) -> Vec<
 
 /// XIM_CREATE_IC (56): Client creates an input context.
 fn handle_xim_create_ic(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
-    let Some(im_id) = xim_im_id(data) else { return Vec::new(); };
+    let Some(im_id) = xim_im_id(data) else {
+        return Vec::new();
+    };
 
     let ic_id = state.xim.next_ic_id;
     state.xim.next_ic_id += 1;
@@ -710,7 +724,9 @@ fn parse_preedit_sub_attributes(data: &[u8], spot_x: &mut i16, spot_y: &mut i16)
 
 /// XIM_DESTROY_IC (58): Client destroys an input context.
 fn handle_xim_destroy_ic(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
-    let Some((im_id, ic_id)) = xim_im_ic(data) else { return Vec::new(); };
+    let Some((im_id, ic_id)) = xim_im_ic(data) else {
+        return Vec::new();
+    };
 
     debug!("XIM: DESTROY_IC im_id={} ic_id={}", im_id, ic_id);
 
@@ -726,7 +742,9 @@ fn handle_xim_destroy_ic(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
 
 /// XIM_SET_IC_VALUES (60): Client sets IC attribute values.
 fn handle_xim_set_ic_values(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
-    let Some((im_id, ic_id)) = xim_im_ic(data) else { return Vec::new(); };
+    let Some((im_id, ic_id)) = xim_im_ic(data) else {
+        return Vec::new();
+    };
 
     debug!("XIM: SET_IC_VALUES im_id={} ic_id={}", im_id, ic_id);
 
@@ -776,7 +794,9 @@ fn handle_xim_set_ic_values(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
 
 /// XIM_GET_IC_VALUES (62): Client queries IC attribute values.
 fn handle_xim_get_ic_values(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
-    let Some((im_id, ic_id)) = xim_im_ic(data) else { return Vec::new(); };
+    let Some((im_id, ic_id)) = xim_im_ic(data) else {
+        return Vec::new();
+    };
 
     debug!("XIM: GET_IC_VALUES im_id={} ic_id={}", im_id, ic_id);
 
@@ -841,7 +861,9 @@ fn handle_xim_forward_event(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
     // XIM_FORWARD_EVENT payload (after 4-byte header):
     //   im_id (2), ic_id (2), flag (2), serial (2),
     //   xEvent (32 bytes -- a KeyPress/KeyRelease event)
-    let Some((im_id, ic_id)) = xim_im_ic(data) else { return Vec::new(); };
+    let Some((im_id, ic_id)) = xim_im_ic(data) else {
+        return Vec::new();
+    };
     if data.len() < 44 {
         return Vec::new();
     }
@@ -1015,7 +1037,7 @@ fn is_modifier_keysym(keysym: u32) -> bool {
         | 0xffed  // Hyper_L
         | 0xffee  // Hyper_R
         | 0xfe03  // ISO_Level3_Shift (AltGr)
-        | 0xfe11  // ISO_Level5_Shift
+        | 0xfe11 // ISO_Level5_Shift
     )
 }
 
@@ -1048,7 +1070,9 @@ fn send_xim_commit(state: &mut ClientState, im_id: u16, ic_id: u16, text: &str) 
 /// XIM_RESET_IC (64): Client resets an input context. If there is any
 /// in-progress preedit text, it should be returned and the preedit ended.
 fn handle_xim_reset_ic(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
-    let Some((im_id, ic_id)) = xim_im_ic(data) else { return Vec::new(); };
+    let Some((im_id, ic_id)) = xim_im_ic(data) else {
+        return Vec::new();
+    };
 
     debug!("XIM: RESET_IC im_id={} ic_id={}", im_id, ic_id);
 
@@ -1084,8 +1108,12 @@ fn handle_xim_reset_ic(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
 /// XIM_TRIGGER_NOTIFY (35): Client notifies IM of trigger key activation.
 /// Reply with XIM_TRIGGER_NOTIFY_REPLY to accept the on/off switch.
 fn handle_xim_trigger_notify(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
-    let Some((im_id, ic_id)) = xim_im_ic(data) else { return Vec::new(); };
-    let Some(b) = data.get(8..12) else { return Vec::new(); };
+    let Some((im_id, ic_id)) = xim_im_ic(data) else {
+        return Vec::new();
+    };
+    let Some(b) = data.get(8..12) else {
+        return Vec::new();
+    };
     let flag = u32::from_le_bytes([b[0], b[1], b[2], b[3]]);
 
     debug!(
@@ -1102,7 +1130,9 @@ fn handle_xim_trigger_notify(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
 /// XIM_SYNC (38): Server asks client to sync. Reply immediately with
 /// XIM_SYNC_REPLY since our passthrough IM doesn't need synchronization.
 fn handle_xim_sync(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
-    let Some((im_id, ic_id)) = xim_im_ic(data) else { return Vec::new(); };
+    let Some((im_id, ic_id)) = xim_im_ic(data) else {
+        return Vec::new();
+    };
 
     debug!("XIM: SYNC im_id={} ic_id={}", im_id, ic_id);
 
@@ -1146,7 +1176,6 @@ fn keysym_to_string(keysym: u32) -> String {
     let s = xkbcommon::xkb::keysym_to_utf8(xkbcommon::xkb::Keysym::new(keysym));
     s.trim_end_matches('\0').to_string()
 }
-
 
 // ---------------------------------------------------------------------------
 // Preedit callback support

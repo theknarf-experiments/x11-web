@@ -42,7 +42,8 @@ impl ClientState {
         if self.pending_events.len() >= self.resource_limits.max_pending_events {
             // Drop oldest events to make room
             let drop_count = self.pending_events.len() / 8 + 1;
-            self.pending_events.drain(..drop_count.min(self.pending_events.len()));
+            self.pending_events
+                .drain(..drop_count.min(self.pending_events.len()));
             tracing::warn!(
                 client_id = %self.client_id,
                 "pending_events overflow: dropped {drop_count} oldest events"

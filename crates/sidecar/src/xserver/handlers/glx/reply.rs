@@ -47,17 +47,11 @@ pub(crate) enum GlxReply {
 
     /// Multiple elements (GetIntegerv with N>1, GetLightfv, etc.).
     /// Element count in size[12..16], data at [32..], length=padded/4.
-    Values {
-        count: u32,
-        data: Vec<u8>,
-    },
+    Values { count: u32, data: Vec<u8> },
 
     /// Byte string (GetString, GetPolygonStipple, GetTexImage).
     /// Byte count in size[12..16], data at [32..], length=padded/4.
-    Bytes {
-        count: u32,
-        data: Vec<u8>,
-    },
+    Bytes { count: u32, data: Vec<u8> },
 }
 
 impl GlxReply {
@@ -68,9 +62,7 @@ impl GlxReply {
         match self {
             GlxReply::Empty => ReplyBuf::fixed(seq, false).build(),
 
-            GlxReply::Scalar(value) => ReplyBuf::fixed(seq, false)
-                .set_u32(8, value)
-                .build(),
+            GlxReply::Scalar(value) => ReplyBuf::fixed(seq, false).set_u32(8, value).build(),
 
             GlxReply::SingleValue(bytes) => ReplyBuf::fixed(seq, false)
                 .set_bytes(8, &bytes)
@@ -79,8 +71,7 @@ impl GlxReply {
 
             GlxReply::Values { count, data } | GlxReply::Bytes { count, data } => {
                 let padded = (data.len() + 3) & !3;
-                let mut buf = ReplyBuf::with_extra(seq, padded, false)
-                    .set_u32(12, count);
+                let mut buf = ReplyBuf::with_extra(seq, padded, false).set_u32(12, count);
                 buf.buf_mut()[32..32 + data.len()].copy_from_slice(&data);
                 buf.build()
             }
@@ -96,7 +87,10 @@ impl GlxReply {
             Self::SingleValue(values[0].to_le_bytes())
         } else {
             let data: Vec<u8> = values.iter().flat_map(|v| v.to_le_bytes()).collect();
-            Self::Values { count: values.len() as u32, data }
+            Self::Values {
+                count: values.len() as u32,
+                data,
+            }
         }
     }
 
@@ -106,7 +100,10 @@ impl GlxReply {
             Self::SingleValue(values[0].to_le_bytes())
         } else {
             let data: Vec<u8> = values.iter().flat_map(|v| v.to_le_bytes()).collect();
-            Self::Values { count: values.len() as u32, data }
+            Self::Values {
+                count: values.len() as u32,
+                data,
+            }
         }
     }
 
@@ -116,7 +113,10 @@ impl GlxReply {
             Self::SingleValue(values[0].to_le_bytes())
         } else {
             let data: Vec<u8> = values.iter().flat_map(|v| v.to_le_bytes()).collect();
-            Self::Values { count: values.len() as u32, data }
+            Self::Values {
+                count: values.len() as u32,
+                data,
+            }
         }
     }
 
@@ -124,7 +124,10 @@ impl GlxReply {
     pub(crate) fn from_f64s(values: &[f64]) -> Self {
         // f64 is 8 bytes — never fits in SingleValue (max 4 bytes)
         let data: Vec<u8> = values.iter().flat_map(|v| v.to_le_bytes()).collect();
-        Self::Values { count: values.len() as u32, data }
+        Self::Values {
+            count: values.len() as u32,
+            data,
+        }
     }
 
     /// Build reply from a slice of bool values (as u8).
@@ -132,14 +135,20 @@ impl GlxReply {
         if values.len() == 1 {
             Self::SingleValue([values[0], 0, 0, 0])
         } else {
-            Self::Values { count: values.len() as u32, data: values.to_vec() }
+            Self::Values {
+                count: values.len() as u32,
+                data: values.to_vec(),
+            }
         }
     }
 
     /// Build reply from a byte string (GetString, GetPolygonStipple, GetTexImage).
     /// `byte_count` is the number of significant bytes (Mesa reads this many).
     pub(crate) fn from_bytes(byte_count: u32, data: Vec<u8>) -> Self {
-        Self::Bytes { count: byte_count, data }
+        Self::Bytes {
+            count: byte_count,
+            data,
+        }
     }
 }
 
@@ -183,7 +192,11 @@ pub(crate) fn attrib_pairs_reply(seq: u16, pairs: &[(u32, u32)]) -> Vec<u8> {
 
 /// AreTexturesResident reply.
 /// all_resident in retval[8..12], per-texture residences in extra data.
-pub(crate) fn are_textures_resident_reply(seq: u16, all_resident: bool, residences: &[u8]) -> Vec<u8> {
+pub(crate) fn are_textures_resident_reply(
+    seq: u16,
+    all_resident: bool,
+    residences: &[u8],
+) -> Vec<u8> {
     let extra_padded = residences.len().div_ceil(4) * 4;
     let mut buf = crate::xserver::reply::ReplyBuf::with_extra(seq, extra_padded, false)
         .set_u32(8, if all_resident { 1 } else { 0 });
@@ -200,8 +213,8 @@ pub(crate) fn build_glx_string_reply(seq: u16, string: &[u8]) -> Vec<u8> {
     // Include null terminator — Mesa allocates exactly n bytes without adding '\0'.
     let n = string.len() + 1;
     let padded = (n + 3) & !3;
-    let mut reply = crate::xserver::reply::ReplyBuf::with_extra(seq, padded, false)
-        .set_u32(12, n as u32);
+    let mut reply =
+        crate::xserver::reply::ReplyBuf::with_extra(seq, padded, false).set_u32(12, n as u32);
     reply.buf_mut()[32..32 + string.len()].copy_from_slice(string);
     // Null terminator at [32 + string.len()] is already 0 from ReplyBuf init.
     reply.build()

@@ -122,11 +122,20 @@ pub(crate) fn build_open_device_reply(
 ) -> Vec<u8> {
     let is_keyboard = device_id == MASTER_KEYBOARD_ID as u8;
     let class_info: Vec<xi::InputClassInfo> = if is_keyboard {
-        vec![xi::InputClassInfo { class_id: xi::InputClass::KEY, event_type_base: 0 }]
+        vec![xi::InputClassInfo {
+            class_id: xi::InputClass::KEY,
+            event_type_base: 0,
+        }]
     } else {
         vec![
-            xi::InputClassInfo { class_id: xi::InputClass::BUTTON, event_type_base: 0 },
-            xi::InputClassInfo { class_id: xi::InputClass::VALUATOR, event_type_base: 0 },
+            xi::InputClassInfo {
+                class_id: xi::InputClass::BUTTON,
+                event_type_base: 0,
+            },
+            xi::InputClassInfo {
+                class_id: xi::InputClass::VALUATOR,
+                event_type_base: 0,
+            },
         ]
     };
     let reply = xi::OpenDeviceReply {
@@ -183,14 +192,14 @@ pub(crate) fn build_device_modifier_mapping_reply(seq: u16, msb_first: bool) -> 
     // 8 modifiers × 2 keycodes per modifier (the xi_reply_type byte is set
     // to keycodes-per-modifier; serialize_xi_reply patches the length).
     let keymaps: Vec<u8> = vec![
-        50, 62,   // Shift: Shift_L(50), Shift_R(62)
-        66, 0,    // Lock: Caps_Lock(66)
-        37, 105,  // Control: Control_L(37), Control_R(105)
-        64, 108,  // Mod1 (Alt): Alt_L(64), Alt_R(108)
-        77, 0,    // Mod2 (Num Lock): Num_Lock(77)
-        0, 0,     // Mod3: unused
+        50, 62, // Shift: Shift_L(50), Shift_R(62)
+        66, 0, // Lock: Caps_Lock(66)
+        37, 105, // Control: Control_L(37), Control_R(105)
+        64, 108, // Mod1 (Alt): Alt_L(64), Alt_R(108)
+        77, 0, // Mod2 (Num Lock): Num_Lock(77)
+        0, 0, // Mod3: unused
         133, 134, // Mod4 (Super): Super_L(133), Super_R(134)
-        0, 0,     // Mod5: unused
+        0, 0, // Mod5: unused
     ];
     let reply = xi::GetDeviceModifierMappingReply {
         xi_reply_type: 26,

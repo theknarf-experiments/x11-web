@@ -8,8 +8,8 @@ use super::{
 };
 use crate::xserver::core::require_len;
 use crate::xserver::core::{read_i16_bo as read_i16, read_u16_bo as read_u16};
-use tracing::debug;
 use crate::xserver::reply::ReplyBuf;
+use tracing::debug;
 
 /// Build an XKB GetState reply with real modifier/group state.
 pub(crate) fn build_xkb_get_state_reply(state: &ClientState, seq: u16, device_id: u8) -> Vec<u8> {
@@ -136,13 +136,13 @@ pub(crate) fn build_xkb_get_controls_reply(
         .set_data_byte(device_id)
         .set_u8(8, ctrls.mk_dflt_btn) // mouseKeysDfltBtn
         .set_u8(9, ctrls.num_groups.max(1)); // numGroups (must be >= 1)
-    // Byte 10: groupsWrap = 0 (Wrap)
-    // Byte 11: internalMods mask
-    // Byte 12: ignoreLockMods mask
-    // Byte 13: internalMods realMods
-    // Byte 14: ignoreLockMods realMods
-    // Bytes 15-16: internalMods vmods (CARD16)
-    // Bytes 17-18: ignoreLockMods vmods (CARD16)
+                                             // Byte 10: groupsWrap = 0 (Wrap)
+                                             // Byte 11: internalMods mask
+                                             // Byte 12: ignoreLockMods mask
+                                             // Byte 13: internalMods realMods
+                                             // Byte 14: ignoreLockMods realMods
+                                             // Bytes 15-16: internalMods vmods (CARD16)
+                                             // Bytes 17-18: ignoreLockMods vmods (CARD16)
 
     reply = reply
         .set_u16(20, ctrls.repeat_delay) // repeatDelay
@@ -221,7 +221,9 @@ pub(crate) fn handle_xkb_set_controls(state: &mut ClientState, data: &[u8], seq:
     ctrls.enabled_ctrls &= XKB_ALL_BOOLEAN_CTRLS_MASK;
 
     if change_ctrls & XKB_REPEAT_KEYS_MASK != 0 {
-        ctrls.per_key_repeat.copy_from_slice(&req.per_key_repeat[..]);
+        ctrls
+            .per_key_repeat
+            .copy_from_slice(&req.per_key_repeat[..]);
     }
 
     debug!(

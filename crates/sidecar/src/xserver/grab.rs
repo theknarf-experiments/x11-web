@@ -241,7 +241,9 @@ pub(crate) fn handle_grab_pointer(state: &mut ClientState, req: &GrabPointerRequ
     // model we approximate this: if the pointer is already frozen and we don't
     // own the grab, report Frozen.
     if state.grabs.pointer_frozen && state.grabs.pointer_grab.is_none() {
-        return crate::xserver::reply::ReplyBuf::fixed(seq, state.msb_first).set_data_byte(4).build();
+        return crate::xserver::reply::ReplyBuf::fixed(seq, state.msb_first)
+            .set_data_byte(4)
+            .build();
     }
 
     // Status 3: NotViewable — grab_window must be viewable (mapped + all ancestors mapped).
@@ -249,7 +251,9 @@ pub(crate) fn handle_grab_pointer(state: &mut ClientState, req: &GrabPointerRequ
     if grab_window != state.root_window
         && !is_viewable(&state.windows, grab_window, state.root_window)
     {
-        return crate::xserver::reply::ReplyBuf::fixed(seq, state.msb_first).set_data_byte(3).build();
+        return crate::xserver::reply::ReplyBuf::fixed(seq, state.msb_first)
+            .set_data_byte(3)
+            .build();
     }
 
     // Status 2: InvalidTime — if a non-zero timestamp is earlier than the
@@ -264,7 +268,9 @@ pub(crate) fn handle_grab_pointer(state: &mut ClientState, req: &GrabPointerRequ
             // timestamp is in the past
         } else if timestamp != now {
             // timestamp is in the future — also invalid per spec
-            return crate::xserver::reply::ReplyBuf::fixed(seq, state.msb_first).set_data_byte(2).build();
+            return crate::xserver::reply::ReplyBuf::fixed(seq, state.msb_first)
+                .set_data_byte(2)
+                .build();
         }
     }
 
@@ -301,11 +307,16 @@ pub(crate) fn handle_grab_pointer(state: &mut ClientState, req: &GrabPointerRequ
     emit_grab_crossing_events(state, grab_window);
 
     // Reply: GrabSuccess
-    crate::xserver::reply::ReplyBuf::fixed(seq, state.msb_first).set_data_byte(0).build()
+    crate::xserver::reply::ReplyBuf::fixed(seq, state.msb_first)
+        .set_data_byte(0)
+        .build()
 }
 
 /// UngrabPointer (opcode 27)
-pub(crate) fn handle_ungrab_pointer(state: &mut ClientState, _req: &UngrabPointerRequest) -> Vec<u8> {
+pub(crate) fn handle_ungrab_pointer(
+    state: &mut ClientState,
+    _req: &UngrabPointerRequest,
+) -> Vec<u8> {
     if let Some(ref grab) = state.grabs.pointer_grab {
         let grab_window = grab.grab_window;
         debug!("UngrabPointer: releasing active pointer grab");
@@ -441,14 +452,18 @@ pub(crate) fn handle_grab_keyboard(state: &mut ClientState, req: &GrabKeyboardRe
 
     // Status 4: Frozen -- keyboard is frozen by another grab we don't own
     if state.grabs.keyboard_frozen && state.grabs.keyboard_grab.is_none() {
-        return crate::xserver::reply::ReplyBuf::fixed(seq, state.msb_first).set_data_byte(4).build();
+        return crate::xserver::reply::ReplyBuf::fixed(seq, state.msb_first)
+            .set_data_byte(4)
+            .build();
     }
 
     // Status 3: NotViewable -- grab_window must be viewable
     if grab_window != state.root_window
         && !is_viewable(&state.windows, grab_window, state.root_window)
     {
-        return crate::xserver::reply::ReplyBuf::fixed(seq, state.msb_first).set_data_byte(3).build();
+        return crate::xserver::reply::ReplyBuf::fixed(seq, state.msb_first)
+            .set_data_byte(3)
+            .build();
     }
 
     // Status 2: InvalidTime -- reject if timestamp is in the future
@@ -458,7 +473,9 @@ pub(crate) fn handle_grab_keyboard(state: &mut ClientState, req: &GrabKeyboardRe
         if delta > 0 && delta < 0x8000_0000 {
             // timestamp is in the past -- OK
         } else if timestamp != now {
-            return crate::xserver::reply::ReplyBuf::fixed(seq, state.msb_first).set_data_byte(2).build();
+            return crate::xserver::reply::ReplyBuf::fixed(seq, state.msb_first)
+                .set_data_byte(2)
+                .build();
         }
     }
 
@@ -478,11 +495,16 @@ pub(crate) fn handle_grab_keyboard(state: &mut ClientState, req: &GrabKeyboardRe
     // Generate crossing events: Leave(Grab) from current window, Enter(Grab) to grab window
     emit_grab_crossing_events(state, grab_window);
 
-    crate::xserver::reply::ReplyBuf::fixed(seq, state.msb_first).set_data_byte(0).build()
+    crate::xserver::reply::ReplyBuf::fixed(seq, state.msb_first)
+        .set_data_byte(0)
+        .build()
 }
 
 /// UngrabKeyboard (opcode 32)
-pub(crate) fn handle_ungrab_keyboard(state: &mut ClientState, _req: &UngrabKeyboardRequest) -> Vec<u8> {
+pub(crate) fn handle_ungrab_keyboard(
+    state: &mut ClientState,
+    _req: &UngrabKeyboardRequest,
+) -> Vec<u8> {
     if let Some(ref grab) = state.grabs.keyboard_grab {
         let grab_window = grab.grab_window;
         let pointer_mode = grab.pointer_mode;
@@ -1042,7 +1064,7 @@ mod tests {
         // Simulate a keyboard grab with pointer_mode=Synchronous (==0).
         gs.keyboard_grab = Some(ActiveKeyboardGrab {
             grab_window: 100,
-            pointer_mode: 0, // GrabModeSync — froze the pointer
+            pointer_mode: 0,  // GrabModeSync — froze the pointer
             keyboard_mode: 1, // GrabModeAsync
             owner_events: false,
         });

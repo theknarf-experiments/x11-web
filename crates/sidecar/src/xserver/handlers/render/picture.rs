@@ -42,10 +42,14 @@ pub(crate) fn handle_query_pict_formats(seq: u16, bo: bool) -> Vec<u8> {
             type_: PictType::DIRECT,
             depth: 32,
             direct: Directformat {
-                red_shift: 16, red_mask: 0xFF,
-                green_shift: 8, green_mask: 0xFF,
-                blue_shift: 0, blue_mask: 0xFF,
-                alpha_shift: 24, alpha_mask: 0xFF,
+                red_shift: 16,
+                red_mask: 0xFF,
+                green_shift: 8,
+                green_mask: 0xFF,
+                blue_shift: 0,
+                blue_mask: 0xFF,
+                alpha_shift: 24,
+                alpha_mask: 0xFF,
             },
             colormap: 0,
         },
@@ -55,10 +59,14 @@ pub(crate) fn handle_query_pict_formats(seq: u16, bo: bool) -> Vec<u8> {
             type_: PictType::DIRECT,
             depth: 24,
             direct: Directformat {
-                red_shift: 16, red_mask: 0xFF,
-                green_shift: 8, green_mask: 0xFF,
-                blue_shift: 0, blue_mask: 0xFF,
-                alpha_shift: 0, alpha_mask: 0,
+                red_shift: 16,
+                red_mask: 0xFF,
+                green_shift: 8,
+                green_mask: 0xFF,
+                blue_shift: 0,
+                blue_mask: 0xFF,
+                alpha_shift: 0,
+                alpha_mask: 0,
             },
             colormap: 0,
         },
@@ -68,10 +76,14 @@ pub(crate) fn handle_query_pict_formats(seq: u16, bo: bool) -> Vec<u8> {
             type_: PictType::DIRECT,
             depth: 8,
             direct: Directformat {
-                red_shift: 0, red_mask: 0,
-                green_shift: 0, green_mask: 0,
-                blue_shift: 0, blue_mask: 0,
-                alpha_shift: 0, alpha_mask: 0xFF,
+                red_shift: 0,
+                red_mask: 0,
+                green_shift: 0,
+                green_mask: 0,
+                blue_shift: 0,
+                blue_mask: 0,
+                alpha_shift: 0,
+                alpha_mask: 0xFF,
             },
             colormap: 0,
         },
@@ -81,10 +93,14 @@ pub(crate) fn handle_query_pict_formats(seq: u16, bo: bool) -> Vec<u8> {
             type_: PictType::DIRECT,
             depth: 1,
             direct: Directformat {
-                red_shift: 0, red_mask: 0,
-                green_shift: 0, green_mask: 0,
-                blue_shift: 0, blue_mask: 0,
-                alpha_shift: 0, alpha_mask: 0x1,
+                red_shift: 0,
+                red_mask: 0,
+                green_shift: 0,
+                green_mask: 0,
+                blue_shift: 0,
+                blue_mask: 0,
+                alpha_shift: 0,
+                alpha_mask: 0x1,
             },
             colormap: 0,
         },
@@ -94,10 +110,14 @@ pub(crate) fn handle_query_pict_formats(seq: u16, bo: bool) -> Vec<u8> {
             type_: PictType::DIRECT,
             depth: 32,
             direct: Directformat {
-                red_shift: 16, red_mask: 0xFF,
-                green_shift: 8, green_mask: 0xFF,
-                blue_shift: 0, blue_mask: 0xFF,
-                alpha_shift: 0, alpha_mask: 0,
+                red_shift: 16,
+                red_mask: 0xFF,
+                green_shift: 8,
+                green_mask: 0xFF,
+                blue_shift: 0,
+                blue_mask: 0xFF,
+                alpha_shift: 0,
+                alpha_mask: 0,
             },
             colormap: 0,
         },
@@ -107,10 +127,14 @@ pub(crate) fn handle_query_pict_formats(seq: u16, bo: bool) -> Vec<u8> {
             type_: PictType::DIRECT,
             depth: 32,
             direct: Directformat {
-                red_shift: 0, red_mask: 0xFF,
-                green_shift: 8, green_mask: 0xFF,
-                blue_shift: 16, blue_mask: 0xFF,
-                alpha_shift: 0, alpha_mask: 0,
+                red_shift: 0,
+                red_mask: 0xFF,
+                green_shift: 8,
+                green_mask: 0xFF,
+                blue_shift: 16,
+                blue_mask: 0xFF,
+                alpha_shift: 0,
+                alpha_mask: 0,
             },
             colormap: 0,
         },
@@ -166,7 +190,6 @@ pub(crate) fn handle_query_pict_formats(seq: u16, bo: bool) -> Vec<u8> {
 }
 
 pub(crate) fn handle_create_picture(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
-
     let req = parse_minor!(CreatePictureRequest, data, state, seq, 139, data[1] as u16);
 
     let pid = req.pid;
@@ -174,9 +197,7 @@ pub(crate) fn handle_create_picture(state: &mut ClientState, data: &[u8], seq: u
     let format_id = req.format;
     let value_list = req.value_list;
 
-    debug!(
-        "Render CreatePicture: pid={pid:#x} drawable={drawable:#x} format={format_id:#x}"
-    );
+    debug!("Render CreatePicture: pid={pid:#x} drawable={drawable:#x} format={format_id:#x}");
 
     // Validate drawable exists (BadDrawable if not)
     let drawable_depth: u8 = if state.windows.contains_key(&drawable) {
@@ -185,7 +206,12 @@ pub(crate) fn handle_create_picture(state: &mut ClientState, data: &[u8], seq: u
     } else if let Some(p) = state.pixmaps.get(&drawable) {
         p.depth
     } else {
-        return render_err(crate::xserver::core::DRAWABLE_ERROR, seq, drawable, data[1] as u16);
+        return render_err(
+            crate::xserver::core::DRAWABLE_ERROR,
+            seq,
+            drawable,
+            data[1] as u16,
+        );
     };
 
     // Validate format ID is known
@@ -195,7 +221,12 @@ pub(crate) fn handle_create_picture(state: &mut ClientState, data: &[u8], seq: u
         PICTFORMAT_A8 => 8,
         PICTFORMAT_A1 => 1,
         _ => {
-            return render_err(crate::xserver::core::MATCH_ERROR, seq, format_id, data[1] as u16);
+            return render_err(
+                crate::xserver::core::MATCH_ERROR,
+                seq,
+                format_id,
+                data[1] as u16,
+            );
         }
     };
 
@@ -209,26 +240,19 @@ pub(crate) fn handle_create_picture(state: &mut ClientState, data: &[u8], seq: u
         debug!(
             "CreatePicture: format depth {format_depth} incompatible with drawable depth {drawable_depth}"
         );
-        return render_err(crate::xserver::core::MATCH_ERROR, seq, format_id, data[1] as u16);
+        return render_err(
+            crate::xserver::core::MATCH_ERROR,
+            seq,
+            format_id,
+            data[1] as u16,
+        );
     }
 
     // Extract values from the parsed value_list
-    let repeat = value_list
-        .repeat
-        .map(|r| u32::from(r))
-        .unwrap_or(0);
-    let component_alpha = value_list
-        .componentalpha
-        .map(|v| v != 0)
-        .unwrap_or(false);
-    let clip_origin_x = value_list
-        .clipxorigin
-        .map(|v| v as i16)
-        .unwrap_or(0);
-    let clip_origin_y = value_list
-        .clipyorigin
-        .map(|v| v as i16)
-        .unwrap_or(0);
+    let repeat = value_list.repeat.map(|r| u32::from(r)).unwrap_or(0);
+    let component_alpha = value_list.componentalpha.map(|v| v != 0).unwrap_or(false);
+    let clip_origin_x = value_list.clipxorigin.map(|v| v as i16).unwrap_or(0);
+    let clip_origin_y = value_list.clipyorigin.map(|v| v as i16).unwrap_or(0);
     let clip_mask = value_list
         .clipmask
         .and_then(|v| if v == 0 { None } else { Some(v) });
@@ -279,11 +303,7 @@ pub(crate) fn handle_change_picture(state: &mut ClientState, data: &[u8], seq: u
             debug!("  clip_origin_y={}", pic.clip_origin_y);
         }
         if let Some(clipmask) = value_list.clipmask {
-            pic.clip_mask = if clipmask == 0 {
-                None
-            } else {
-                Some(clipmask)
-            };
+            pic.clip_mask = if clipmask == 0 { None } else { Some(clipmask) };
             // Reset clip rects when clip mask changes
             if clipmask == 0 {
                 pic.clip_rects = None;
@@ -304,7 +324,14 @@ pub(crate) fn handle_set_picture_clip_rectangles(
     data: &[u8],
     seq: u16,
 ) -> Vec<u8> {
-    let req = parse_minor!(SetPictureClipRectanglesRequest, data, state, seq, 139, data[1] as u16);
+    let req = parse_minor!(
+        SetPictureClipRectanglesRequest,
+        data,
+        state,
+        seq,
+        139,
+        data[1] as u16
+    );
 
     let pid = req.picture;
     let clip_x = req.clip_x_origin;
@@ -514,7 +541,14 @@ pub(crate) fn handle_query_pict_index_values(
     data: &[u8],
     seq: u16,
 ) -> Vec<u8> {
-    let _req = parse_minor!(QueryPictIndexValuesRequest, data, state, seq, 139, data[1] as u16);
+    let _req = parse_minor!(
+        QueryPictIndexValuesRequest,
+        data,
+        state,
+        seq,
+        139,
+        data[1] as u16
+    );
     // Reply with 0 index values (we don't have indexed formats)
     ReplyBuf::fixed(seq, state.msb_first)
         .set_u32(8, 0) // num_values = 0

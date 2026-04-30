@@ -1,7 +1,7 @@
 //! XFIXES barrier and misc operations.
 
-use tracing::debug;
 use super::super::parse_minor;
+use tracing::debug;
 
 use super::super::super::client::ClientState;
 use crate::xserver::reply::ReplyBuf;

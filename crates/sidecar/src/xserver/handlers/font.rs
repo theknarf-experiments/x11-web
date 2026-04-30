@@ -80,35 +80,35 @@ pub(crate) fn handle_query_font(state: &mut ClientState, req: &QueryFontRequest)
             let extra = 28 + char_infos_bytes; // 60 - 32 = 28 header extra + char infos
             let mut reply = ReplyBuf::with_extra(seq, extra, state.msb_first)
                 // min_bounds: lsb=0, rsb=6, width=6, ascent=10, descent=3
-                .set_i16(8, 0)   // min lsb
-                .set_i16(10, 6)  // min rsb
-                .set_i16(12, 6)  // min width
+                .set_i16(8, 0) // min lsb
+                .set_i16(10, 6) // min rsb
+                .set_i16(12, 6) // min width
                 .set_i16(14, 10) // min ascent
-                .set_i16(16, 3)  // min descent
+                .set_i16(16, 3) // min descent
                 // max_bounds (same for monospaced)
                 .set_i16(24, 0)
                 .set_i16(26, 6)
                 .set_i16(28, 6)
                 .set_i16(30, 10)
                 .set_i16(32, 3)
-                .set_u16(40, 32u16)  // min_char_or_byte2
+                .set_u16(40, 32u16) // min_char_or_byte2
                 .set_u16(42, 126u16) // max_char_or_byte2
-                .set_u16(44, 32u16)  // default_char
-                .set_u16(46, 0u16)   // n_properties
-                .set_u8(48, 0)       // draw_direction = LeftToRight
-                .set_u8(51, 1)       // all_chars_exist
-                .set_i16(52, 10i16)  // font_ascent
-                .set_i16(54, 3i16)   // font_descent
+                .set_u16(44, 32u16) // default_char
+                .set_u16(46, 0u16) // n_properties
+                .set_u8(48, 0) // draw_direction = LeftToRight
+                .set_u8(51, 1) // all_chars_exist
+                .set_i16(52, 10i16) // font_ascent
+                .set_i16(54, 3i16) // font_descent
                 .set_u32(56, n_char_infos);
             // Fill per-character info (all same for monospaced fallback)
             let mut off = 60;
             for _ in 0..n_char_infos {
                 reply = reply
-                    .set_i16(off, 0)      // lsb
-                    .set_i16(off + 2, 6)  // rsb
-                    .set_i16(off + 4, 6)  // width
+                    .set_i16(off, 0) // lsb
+                    .set_i16(off + 2, 6) // rsb
+                    .set_i16(off + 4, 6) // width
                     .set_i16(off + 6, 10) // ascent
-                    .set_i16(off + 8, 3)  // descent
+                    .set_i16(off + 8, 3) // descent
                     .set_u16(off + 10, 0); // attributes
                 off += 12;
             }
@@ -179,7 +179,11 @@ pub(crate) fn handle_query_font(state: &mut ClientState, req: &QueryFontRequest)
     let char_infos_bytes = n_char_infos as usize * 12;
 
     let extra = 28 + props_bytes + char_infos_bytes; // 60 - 32 = 28 header extra
-    let all_chars = if font.char_infos.len() == n_char_infos as usize { 1u8 } else { 0u8 };
+    let all_chars = if font.char_infos.len() == n_char_infos as usize {
+        1u8
+    } else {
+        0u8
+    };
     let mut reply = ReplyBuf::with_extra(seq, extra, state.msb_first)
         // min_bounds at offset 8 (12 bytes)
         .set_i16(8, font.min_bounds.left_side_bearing)
@@ -201,10 +205,10 @@ pub(crate) fn handle_query_font(state: &mut ClientState, req: &QueryFontRequest)
         .set_u16(42, font.max_char)
         .set_u16(44, font.default_char)
         .set_u16(46, n_properties)
-        .set_u8(48, 0)           // draw_direction = LeftToRight
-        .set_u8(49, 0)           // min_byte1
-        .set_u8(50, 0)           // max_byte1
-        .set_u8(51, all_chars)   // all_chars_exist
+        .set_u8(48, 0) // draw_direction = LeftToRight
+        .set_u8(49, 0) // min_byte1
+        .set_u8(50, 0) // max_byte1
+        .set_u8(51, all_chars) // all_chars_exist
         .set_i16(52, font.font_ascent)
         .set_i16(54, font.font_descent)
         .set_u32(56, n_char_infos);
@@ -212,9 +216,7 @@ pub(crate) fn handle_query_font(state: &mut ClientState, req: &QueryFontRequest)
     // Font properties at offset 60 (each FONTPROP = 4-byte atom + 4-byte value)
     let mut off = 60;
     for (atom, value) in &props {
-        reply = reply
-            .set_u32(off, *atom)
-            .set_u32(off + 4, *value as u32);
+        reply = reply.set_u32(off, *atom).set_u32(off + 4, *value as u32);
         off += 8;
     }
 
@@ -239,7 +241,10 @@ pub(crate) fn handle_query_font(state: &mut ClientState, req: &QueryFontRequest)
 // Opcode 48: QueryTextExtents
 // ---------------------------------------------------------------------------
 
-pub(crate) fn handle_query_text_extents(state: &mut ClientState, req: &QueryTextExtentsRequest) -> Vec<u8> {
+pub(crate) fn handle_query_text_extents(
+    state: &mut ClientState,
+    req: &QueryTextExtentsRequest,
+) -> Vec<u8> {
     let seq = state.sequence;
     let fontable = req.font;
 
@@ -290,13 +295,13 @@ pub(crate) fn handle_query_text_extents(state: &mut ClientState, req: &QueryText
     };
 
     ReplyBuf::fixed(seq, state.msb_first)
-        .set_i16(8, ascent)                            // font_ascent
-        .set_i16(10, descent)                          // font_descent
-        .set_i16(12, ascent)                           // overall_ascent
-        .set_i16(14, descent)                          // overall_descent
-        .set_u32(16, overall_width as i32 as u32)      // overall_width
-        .set_u32(20, overall_left as i32 as u32)       // overall_left
-        .set_u32(24, overall_right as i32 as u32)      // overall_right
+        .set_i16(8, ascent) // font_ascent
+        .set_i16(10, descent) // font_descent
+        .set_i16(12, ascent) // overall_ascent
+        .set_i16(14, descent) // overall_descent
+        .set_u32(16, overall_width as i32 as u32) // overall_width
+        .set_u32(20, overall_left as i32 as u32) // overall_left
+        .set_u32(24, overall_right as i32 as u32) // overall_right
         .build()
 }
 
@@ -389,8 +394,8 @@ pub(crate) fn handle_list_fonts_with_info(
         let name_pad = (4 - (name_len % 4)) % 4;
         let extra = 28 + props_bytes + name_len + name_pad; // 28 for header bytes at 32..60
 
-        let mut reply = ReplyBuf::with_extra(seq, extra, state.msb_first)
-            .set_data_byte(name_len as u8);
+        let mut reply =
+            ReplyBuf::with_extra(seq, extra, state.msb_first).set_data_byte(name_len as u8);
 
         if let Some(f) = &font {
             // min_bounds at offset 8
@@ -424,9 +429,7 @@ pub(crate) fn handle_list_fonts_with_info(
         // Font properties at offset 60 (each FONTPROP = 4-byte atom + 4-byte value)
         let mut off = 60;
         for (atom, value) in &props {
-            reply = reply
-                .set_u32(off, *atom)
-                .set_u32(off + 4, *value as u32);
+            reply = reply.set_u32(off, *atom).set_u32(off + 4, *value as u32);
             off += 8;
         }
 

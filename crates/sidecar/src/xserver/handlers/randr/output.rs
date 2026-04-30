@@ -29,9 +29,10 @@ pub(crate) fn handle_list_output_properties(
     data: &[u8],
     seq: u16,
 ) -> Vec<u8> {
-    let output_id = ListOutputPropertiesRequest::try_parse_request(request_header(data), &data[4..])
-        .map(|r| r.output)
-        .unwrap_or(0);
+    let output_id =
+        ListOutputPropertiesRequest::try_parse_request(request_header(data), &data[4..])
+            .map(|r| r.output)
+            .unwrap_or(0);
     build_list_output_properties_reply(state, seq, output_id)
 }
 
@@ -335,11 +336,15 @@ pub(crate) fn handle_set_provider_offload_sink(
     _seq: u16,
 ) -> Vec<u8> {
     if data.len() >= 16 {
-        if let Ok(req) = SetProviderOffloadSinkRequest::try_parse_request(request_header(data), &data[4..]) {
+        if let Ok(req) =
+            SetProviderOffloadSinkRequest::try_parse_request(request_header(data), &data[4..])
+        {
             let provider = req.provider;
             let sink = req.sink_provider;
             let config_ts = req.config_timestamp;
-            debug!("RRSetProviderOffloadSink: provider={provider:#x} sink={sink:#x} ts={config_ts}");
+            debug!(
+                "RRSetProviderOffloadSink: provider={provider:#x} sink={sink:#x} ts={config_ts}"
+            );
         }
     }
     Vec::new()
@@ -353,7 +358,9 @@ pub(crate) fn handle_set_provider_output_source(
     _seq: u16,
 ) -> Vec<u8> {
     if data.len() >= 16 {
-        if let Ok(req) = SetProviderOutputSourceRequest::try_parse_request(request_header(data), &data[4..]) {
+        if let Ok(req) =
+            SetProviderOutputSourceRequest::try_parse_request(request_header(data), &data[4..])
+        {
             let provider = req.provider;
             let source = req.source_provider;
             let config_ts = req.config_timestamp;
@@ -479,7 +486,13 @@ pub(crate) fn handle_delete_monitor(state: &mut ClientState, data: &[u8], _seq: 
 pub(crate) fn handle_create_lease(_state: &mut ClientState, _data: &[u8], seq: u16) -> Vec<u8> {
     let minor = 45u8;
     debug!("RRCreateLease: not supported on virtual display");
-    crate::xserver::core::build_error(crate::xserver::core::ACCESS_ERROR, seq, 0, 140, minor as u16)
+    crate::xserver::core::build_error(
+        crate::xserver::core::ACCESS_ERROR,
+        seq,
+        0,
+        140,
+        minor as u16,
+    )
 }
 
 /// RRFreeLease (46).
@@ -560,8 +573,7 @@ fn build_list_output_properties_reply(state: &ClientState, seq: u16, output_id: 
 
     let num_atoms = atoms.len() as u16;
     let var_len = atoms.len() * 4;
-    let mut reply = ReplyBuf::with_extra(seq, var_len, state.msb_first)
-        .set_u16(8, num_atoms);
+    let mut reply = ReplyBuf::with_extra(seq, var_len, state.msb_first).set_u16(8, num_atoms);
 
     let mut off = 32;
     for atom in atoms {

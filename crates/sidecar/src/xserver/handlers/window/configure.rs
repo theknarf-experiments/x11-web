@@ -14,7 +14,10 @@ use x11rb_protocol::protocol::xproto::{
 // Opcode 7: ReparentWindow
 // ---------------------------------------------------------------------------
 
-pub(crate) fn handle_reparent_window(state: &mut ClientState, req: &ReparentWindowRequest) -> Vec<u8> {
+pub(crate) fn handle_reparent_window(
+    state: &mut ClientState,
+    req: &ReparentWindowRequest,
+) -> Vec<u8> {
     let seq = state.sequence;
     let window = req.window;
     let new_parent = req.parent;
@@ -44,24 +47,30 @@ pub(crate) fn handle_reparent_window(state: &mut ClientState, req: &ReparentWind
     if was_mapped {
         // Generate UnmapNotify to the window itself (StructureNotifyMask)
         {
-            let unmap_event = serialize_event(&UnmapNotifyEvent {
-                response_type: UNMAP_NOTIFY_EVENT,
-                sequence: seq,
-                event: window,
-                window,
-                from_configure: false,
-            }, bo);
+            let unmap_event = serialize_event(
+                &UnmapNotifyEvent {
+                    response_type: UNMAP_NOTIFY_EVENT,
+                    sequence: seq,
+                    event: window,
+                    window,
+                    from_configure: false,
+                },
+                bo,
+            );
             state.deliver_event(window, EventMask::STRUCTURE_NOTIFY, &unmap_event);
         }
         // Generate UnmapNotify to the old parent (SubstructureNotifyMask)
         if old_parent != 0 {
-            let parent_unmap = serialize_event(&UnmapNotifyEvent {
-                response_type: UNMAP_NOTIFY_EVENT,
-                sequence: seq,
-                event: old_parent,
-                window,
-                from_configure: false,
-            }, bo);
+            let parent_unmap = serialize_event(
+                &UnmapNotifyEvent {
+                    response_type: UNMAP_NOTIFY_EVENT,
+                    sequence: seq,
+                    event: old_parent,
+                    window,
+                    from_configure: false,
+                },
+                bo,
+            );
             state.deliver_event(old_parent, EventMask::SUBSTRUCTURE_NOTIFY, &parent_unmap);
         }
 
@@ -94,16 +103,19 @@ pub(crate) fn handle_reparent_window(state: &mut ClientState, req: &ReparentWind
 
     // Build ReparentNotify event template
     let build_reparent_notify = |event_window: u32| -> Vec<u8> {
-        serialize_event(&ReparentNotifyEvent {
-            response_type: REPARENT_NOTIFY_EVENT,
-            sequence: seq,
-            event: event_window,
-            window,
-            parent: new_parent,
-            x,
-            y,
-            override_redirect,
-        }, bo)
+        serialize_event(
+            &ReparentNotifyEvent {
+                response_type: REPARENT_NOTIFY_EVENT,
+                sequence: seq,
+                event: event_window,
+                window,
+                parent: new_parent,
+                x,
+                y,
+                override_redirect,
+            },
+            bo,
+        )
     };
 
     let mut events = Vec::new();
@@ -111,8 +123,7 @@ pub(crate) fn handle_reparent_window(state: &mut ClientState, req: &ReparentWind
     // Send ReparentNotify to the window itself (StructureNotifyMask)
     {
         let event = build_reparent_notify(window);
-        if state.window_selects(window, EventMask::STRUCTURE_NOTIFY)
-        {
+        if state.window_selects(window, EventMask::STRUCTURE_NOTIFY) {
             events.extend_from_slice(&event);
         }
         state.broadcast_event(window, EventMask::STRUCTURE_NOTIFY, &event);
@@ -146,7 +157,10 @@ pub(crate) fn handle_reparent_window(state: &mut ClientState, req: &ReparentWind
 // Opcode 12: ConfigureWindow
 // ---------------------------------------------------------------------------
 
-pub(crate) fn handle_configure_window(state: &mut ClientState, req: &ConfigureWindowRequest) -> Vec<u8> {
+pub(crate) fn handle_configure_window(
+    state: &mut ClientState,
+    req: &ConfigureWindowRequest,
+) -> Vec<u8> {
     let seq = state.sequence;
     let wid = req.window;
     let cvl = &*req.value_list;
@@ -154,13 +168,27 @@ pub(crate) fn handle_configure_window(state: &mut ClientState, req: &ConfigureWi
     // Reconstruct the value_mask from the parsed aux fields (same bit positions as ConfigWindow)
     let value_mask: u16 = {
         let mut m: u16 = 0;
-        if cvl.x.is_some()            { m |= 1 << 0; }
-        if cvl.y.is_some()            { m |= 1 << 1; }
-        if cvl.width.is_some()        { m |= 1 << 2; }
-        if cvl.height.is_some()       { m |= 1 << 3; }
-        if cvl.border_width.is_some() { m |= 1 << 4; }
-        if cvl.sibling.is_some()      { m |= 1 << 5; }
-        if cvl.stack_mode.is_some()   { m |= 1 << 6; }
+        if cvl.x.is_some() {
+            m |= 1 << 0;
+        }
+        if cvl.y.is_some() {
+            m |= 1 << 1;
+        }
+        if cvl.width.is_some() {
+            m |= 1 << 2;
+        }
+        if cvl.height.is_some() {
+            m |= 1 << 3;
+        }
+        if cvl.border_width.is_some() {
+            m |= 1 << 4;
+        }
+        if cvl.sibling.is_some() {
+            m |= 1 << 5;
+        }
+        if cvl.stack_mode.is_some() {
+            m |= 1 << 6;
+        }
         m
     };
 
@@ -201,29 +229,46 @@ pub(crate) fn handle_configure_window(state: &mut ClientState, req: &ConfigureWi
             let mut sibling: u32 = 0;
             let mut stack_mode: u8 = 0;
 
-            if let Some(v) = cvl.x { x = v as i16; }
-            if let Some(v) = cvl.y { y = v as i16; }
-            if let Some(v) = cvl.width { width = v as u16; }
-            if let Some(v) = cvl.height { height = v as u16; }
-            if let Some(v) = cvl.border_width { border_width = v as u16; }
-            if let Some(v) = cvl.sibling { sibling = v; }
-            if let Some(v) = cvl.stack_mode { stack_mode = u32::from(v) as u8; }
+            if let Some(v) = cvl.x {
+                x = v as i16;
+            }
+            if let Some(v) = cvl.y {
+                y = v as i16;
+            }
+            if let Some(v) = cvl.width {
+                width = v as u16;
+            }
+            if let Some(v) = cvl.height {
+                height = v as u16;
+            }
+            if let Some(v) = cvl.border_width {
+                border_width = v as u16;
+            }
+            if let Some(v) = cvl.sibling {
+                sibling = v;
+            }
+            if let Some(v) = cvl.stack_mode {
+                stack_mode = u32::from(v) as u8;
+            }
 
             // Build ConfigureRequest event (code 23)
-            let event = serialize_event(&ConfigureRequestEvent {
-                response_type: CONFIGURE_REQUEST_EVENT,
-                stack_mode: stack_mode.into(),
-                sequence: 0,
-                parent: parent_id,
-                window: wid,
-                sibling,
-                x,
-                y,
-                width,
-                height,
-                border_width,
-                value_mask: value_mask.into(),
-            }, state.msb_first);
+            let event = serialize_event(
+                &ConfigureRequestEvent {
+                    response_type: CONFIGURE_REQUEST_EVENT,
+                    stack_mode: stack_mode.into(),
+                    sequence: 0,
+                    parent: parent_id,
+                    window: wid,
+                    sibling,
+                    x,
+                    y,
+                    width,
+                    height,
+                    border_width,
+                    value_mask: value_mask.into(),
+                },
+                state.msb_first,
+            );
 
             // Per X11 spec, deliver ConfigureRequest to all clients that have
             // SubstructureRedirectMask on the parent.
@@ -251,21 +296,26 @@ pub(crate) fn handle_configure_window(state: &mut ClientState, req: &ConfigureWi
     // Strip width/height bits from value_mask if resize is redirected
     let value_mask = if resize_redirected {
         // Extract the requested width/height for the ResizeRequest event
-        let req_width = cvl.width.map(|v| v as u16).unwrap_or_else(|| {
-            state.windows.get(&wid).map(|w| w.width).unwrap_or(1)
-        });
-        let req_height = cvl.height.map(|v| v as u16).unwrap_or_else(|| {
-            state.windows.get(&wid).map(|w| w.height).unwrap_or(1)
-        });
+        let req_width = cvl
+            .width
+            .map(|v| v as u16)
+            .unwrap_or_else(|| state.windows.get(&wid).map(|w| w.width).unwrap_or(1));
+        let req_height = cvl
+            .height
+            .map(|v| v as u16)
+            .unwrap_or_else(|| state.windows.get(&wid).map(|w| w.height).unwrap_or(1));
 
         let bo = state.msb_first;
-        let event = serialize_event(&ResizeRequestEvent {
-            response_type: RESIZE_REQUEST_EVENT,
-            sequence: seq,
-            window: wid,
-            width: req_width,
-            height: req_height,
-        }, bo);
+        let event = serialize_event(
+            &ResizeRequestEvent {
+                response_type: RESIZE_REQUEST_EVENT,
+                sequence: seq,
+                window: wid,
+                width: req_width,
+                height: req_height,
+            },
+            bo,
+        );
         state.broadcast_event(wid, EventMask::RESIZE_REDIRECT, &event);
 
         // Clear width (bit 2) and height (bit 3) from mask so they aren't applied
@@ -314,20 +364,23 @@ pub(crate) fn handle_configure_window(state: &mut ClientState, req: &ConfigureWi
                 let bo = state.msb_first;
                 let seq_num = state.sequence;
                 let timestamp = state.timestamp();
-                let cm = serialize_event(&ClientMessageEvent {
-                    response_type: CLIENT_MESSAGE_EVENT,
-                    format: 32,
-                    sequence: seq_num,
-                    window: wid,
-                    type_: wm_protocols_atom,
-                    data: ClientMessageData::from([
-                        net_wm_sync_request_atom,
-                        timestamp,
-                        lo,
-                        hi as u32,
-                        0,
-                    ]),
-                }, bo);
+                let cm = serialize_event(
+                    &ClientMessageEvent {
+                        response_type: CLIENT_MESSAGE_EVENT,
+                        format: 32,
+                        sequence: seq_num,
+                        window: wid,
+                        type_: wm_protocols_atom,
+                        data: ClientMessageData::from([
+                            net_wm_sync_request_atom,
+                            timestamp,
+                            lo,
+                            hi as u32,
+                            0,
+                        ]),
+                    },
+                    bo,
+                );
                 state.pending_events.push(cm);
             }
         }
@@ -487,24 +540,38 @@ pub(crate) fn handle_configure_window(state: &mut ClientState, req: &ConfigureWi
                             unmap_children.push(*child_id);
 
                             // Send UnmapNotify for the child
-                            let unmap_evt = serialize_event(&UnmapNotifyEvent {
-                                response_type: UNMAP_NOTIFY_EVENT,
-                                sequence: seq,
-                                event: *child_id,
-                                window: *child_id,
-                                from_configure: false,
-                            }, bo);
+                            let unmap_evt = serialize_event(
+                                &UnmapNotifyEvent {
+                                    response_type: UNMAP_NOTIFY_EVENT,
+                                    sequence: seq,
+                                    event: *child_id,
+                                    window: *child_id,
+                                    from_configure: false,
+                                },
+                                bo,
+                            );
                             state.pending_events.push(unmap_evt.clone());
-                            state.broadcast_event(*child_id, EventMask::STRUCTURE_NOTIFY, &unmap_evt);
+                            state.broadcast_event(
+                                *child_id,
+                                EventMask::STRUCTURE_NOTIFY,
+                                &unmap_evt,
+                            );
 
-                            let parent_unmap = serialize_event(&UnmapNotifyEvent {
-                                response_type: UNMAP_NOTIFY_EVENT,
-                                sequence: seq,
-                                event: wid,
-                                window: *child_id,
-                                from_configure: false,
-                            }, bo);
-                            state.broadcast_event(wid, EventMask::SUBSTRUCTURE_NOTIFY, &parent_unmap);
+                            let parent_unmap = serialize_event(
+                                &UnmapNotifyEvent {
+                                    response_type: UNMAP_NOTIFY_EVENT,
+                                    sequence: seq,
+                                    event: wid,
+                                    window: *child_id,
+                                    from_configure: false,
+                                },
+                                bo,
+                            );
+                            state.broadcast_event(
+                                wid,
+                                EventMask::SUBSTRUCTURE_NOTIFY,
+                                &parent_unmap,
+                            );
                         }
                     }
                     continue;
@@ -519,27 +586,33 @@ pub(crate) fn handle_configure_window(state: &mut ClientState, req: &ConfigureWi
                     } else {
                         continue;
                     };
-                    let event = serialize_event(&GravityNotifyEvent {
-                        response_type: GRAVITY_NOTIFY_EVENT,
-                        sequence: seq,
-                        event: *child_id,
-                        window: wid,
-                        x: cx,
-                        y: cy,
-                    }, bo);
+                    let event = serialize_event(
+                        &GravityNotifyEvent {
+                            response_type: GRAVITY_NOTIFY_EVENT,
+                            sequence: seq,
+                            event: *child_id,
+                            window: wid,
+                            x: cx,
+                            y: cy,
+                        },
+                        bo,
+                    );
                     state.pending_events.push(event.clone());
 
                     // Cross-connection broadcast: StructureNotify on the child
                     state.broadcast_event(*child_id, EventMask::STRUCTURE_NOTIFY, &event);
                     // Cross-connection broadcast: SubstructureNotify on the parent
-                    let parent_event = serialize_event(&GravityNotifyEvent {
-                        response_type: GRAVITY_NOTIFY_EVENT,
-                        sequence: seq,
-                        event: wid,
-                        window: wid,
-                        x: cx,
-                        y: cy,
-                    }, bo);
+                    let parent_event = serialize_event(
+                        &GravityNotifyEvent {
+                            response_type: GRAVITY_NOTIFY_EVENT,
+                            sequence: seq,
+                            event: wid,
+                            window: wid,
+                            x: cx,
+                            y: cy,
+                        },
+                        bo,
+                    );
                     state.broadcast_event(wid, EventMask::SUBSTRUCTURE_NOTIFY, &parent_event);
                 }
             }
@@ -550,23 +623,29 @@ pub(crate) fn handle_configure_window(state: &mut ClientState, req: &ConfigureWi
                     child.mapped = true;
                 }
 
-                let map_evt = serialize_event(&MapNotifyEvent {
-                    response_type: MAP_NOTIFY_EVENT,
-                    sequence: seq,
-                    event: *child_id,
-                    window: *child_id,
-                    override_redirect: false,
-                }, bo);
+                let map_evt = serialize_event(
+                    &MapNotifyEvent {
+                        response_type: MAP_NOTIFY_EVENT,
+                        sequence: seq,
+                        event: *child_id,
+                        window: *child_id,
+                        override_redirect: false,
+                    },
+                    bo,
+                );
                 state.pending_events.push(map_evt.clone());
                 state.broadcast_event(*child_id, EventMask::STRUCTURE_NOTIFY, &map_evt);
 
-                let parent_map = serialize_event(&MapNotifyEvent {
-                    response_type: MAP_NOTIFY_EVENT,
-                    sequence: seq,
-                    event: wid,
-                    window: *child_id,
-                    override_redirect: false,
-                }, bo);
+                let parent_map = serialize_event(
+                    &MapNotifyEvent {
+                        response_type: MAP_NOTIFY_EVENT,
+                        sequence: seq,
+                        event: wid,
+                        window: *child_id,
+                        override_redirect: false,
+                    },
+                    bo,
+                );
                 state.broadcast_event(wid, EventMask::SUBSTRUCTURE_NOTIFY, &parent_map);
             }
         }
@@ -914,20 +993,23 @@ pub(crate) fn handle_configure_window(state: &mut ClientState, req: &ConfigureWi
                     let hi = (new_value >> 32) as u32;
                     let timestamp = state.timestamp();
 
-                    let sync_msg = serialize_event(&ClientMessageEvent {
-                        response_type: CLIENT_MESSAGE_EVENT,
-                        format: 32,
-                        sequence: 0,
-                        window: wid,
-                        type_: wm_protocols_atom,
-                        data: ClientMessageData::from([
-                            sync_request_atom,
-                            timestamp,
-                            lo,
-                            hi,
-                            0,
-                        ]),
-                    }, msb_first);
+                    let sync_msg = serialize_event(
+                        &ClientMessageEvent {
+                            response_type: CLIENT_MESSAGE_EVENT,
+                            format: 32,
+                            sequence: 0,
+                            window: wid,
+                            type_: wm_protocols_atom,
+                            data: ClientMessageData::from([
+                                sync_request_atom,
+                                timestamp,
+                                lo,
+                                hi,
+                                0,
+                            ]),
+                        },
+                        msb_first,
+                    );
 
                     state.pending_events.push(sync_msg.clone());
                     // Also deliver to cross-connection clients
@@ -936,26 +1018,11 @@ pub(crate) fn handle_configure_window(state: &mut ClientState, req: &ConfigureWi
             }
 
             // Build the ConfigureNotify event
-            let event = serialize_event(&ConfigureNotifyEvent {
-                response_type: CONFIGURE_NOTIFY_EVENT,
-                sequence: seq,
-                event: wid,
-                window: wid,
-                above_sibling,
-                x,
-                y,
-                width,
-                height,
-                border_width,
-                override_redirect,
-            }, msb_first);
-
-            // Also send to parent with SubstructureNotifyMask
-            {
-                let parent_event = serialize_event(&ConfigureNotifyEvent {
+            let event = serialize_event(
+                &ConfigureNotifyEvent {
                     response_type: CONFIGURE_NOTIFY_EVENT,
                     sequence: seq,
-                    event: parent_id,
+                    event: wid,
                     window: wid,
                     above_sibling,
                     x,
@@ -964,7 +1031,28 @@ pub(crate) fn handle_configure_window(state: &mut ClientState, req: &ConfigureWi
                     height,
                     border_width,
                     override_redirect,
-                }, msb_first);
+                },
+                msb_first,
+            );
+
+            // Also send to parent with SubstructureNotifyMask
+            {
+                let parent_event = serialize_event(
+                    &ConfigureNotifyEvent {
+                        response_type: CONFIGURE_NOTIFY_EVENT,
+                        sequence: seq,
+                        event: parent_id,
+                        window: wid,
+                        above_sibling,
+                        x,
+                        y,
+                        width,
+                        height,
+                        border_width,
+                        override_redirect,
+                    },
+                    msb_first,
+                );
                 state.deliver_event(parent_id, EventMask::SUBSTRUCTURE_NOTIFY, &parent_event);
             }
             state.deliver_event(wid, EventMask::STRUCTURE_NOTIFY, &event);
@@ -990,16 +1078,19 @@ pub(crate) fn handle_configure_window(state: &mut ClientState, req: &ConfigureWi
                 let total = if self_selected { 1 } else { 0 } + descendants.len();
 
                 // Build the Expose event for cross-connection broadcast
-                let expose = serialize_event(&ExposeEvent {
-                    response_type: EXPOSE_EVENT,
-                    sequence: seq,
-                    window: wid,
-                    x: 0,
-                    y: 0,
-                    width,
-                    height,
-                    count: (total - 1) as u16,
-                }, msb_first);
+                let expose = serialize_event(
+                    &ExposeEvent {
+                        response_type: EXPOSE_EVENT,
+                        sequence: seq,
+                        window: wid,
+                        x: 0,
+                        y: 0,
+                        width,
+                        height,
+                        count: (total - 1) as u16,
+                    },
+                    msb_first,
+                );
                 if self_selected {
                     state.pending_events.push(expose.clone());
                 }
@@ -1009,16 +1100,19 @@ pub(crate) fn handle_configure_window(state: &mut ClientState, req: &ConfigureWi
                 for (i, (desc_id, dw, dh)) in descendants.iter().enumerate() {
                     let base = if self_selected { 1 } else { 0 };
                     let remaining = (total - base - 1 - i) as u16;
-                    let exp = serialize_event(&ExposeEvent {
-                        response_type: EXPOSE_EVENT,
-                        sequence: seq,
-                        window: *desc_id,
-                        x: 0,
-                        y: 0,
-                        width: *dw,
-                        height: *dh,
-                        count: remaining,
-                    }, msb_first);
+                    let exp = serialize_event(
+                        &ExposeEvent {
+                            response_type: EXPOSE_EVENT,
+                            sequence: seq,
+                            window: *desc_id,
+                            x: 0,
+                            y: 0,
+                            width: *dw,
+                            height: *dh,
+                            count: remaining,
+                        },
+                        msb_first,
+                    );
                     state.pending_events.push(exp);
                 }
             }
@@ -1048,7 +1142,10 @@ pub(crate) fn handle_configure_window(state: &mut ClientState, req: &ConfigureWi
 // Opcode 13: CirculateWindow
 // ---------------------------------------------------------------------------
 
-pub(crate) fn handle_circulate_window(state: &mut ClientState, req: &CirculateWindowRequest) -> Vec<u8> {
+pub(crate) fn handle_circulate_window(
+    state: &mut ClientState,
+    req: &CirculateWindowRequest,
+) -> Vec<u8> {
     let seq = state.sequence;
     let direction: u8 = req.direction.into(); // 0 = RaiseLowest, 1 = LowerHighest
     let window = req.window;
@@ -1093,13 +1190,16 @@ pub(crate) fn handle_circulate_window(state: &mut ClientState, req: &CirculateWi
     // Check if parent has SubstructureRedirectMask - if so, generate CirculateRequest instead
     if state.window_selects(window, EventMask::SUBSTRUCTURE_REDIRECT) {
         // Generate CirculateRequest event (code 27) instead of performing the operation
-        let event = serialize_event(&CirculateNotifyEvent {
-            response_type: CIRCULATE_REQUEST_EVENT,
-            sequence: seq,
-            event: window,
-            window: target_child,
-            place: direction.into(),
-        }, bo);
+        let event = serialize_event(
+            &CirculateNotifyEvent {
+                response_type: CIRCULATE_REQUEST_EVENT,
+                sequence: seq,
+                event: window,
+                window: target_child,
+                place: direction.into(),
+            },
+            bo,
+        );
         state.pending_events.push(event.clone());
         // Per X11 spec, deliver CirculateRequest to all SubstructureRedirectMask selectors
         state.broadcast_event(window, EventMask::SUBSTRUCTURE_REDIRECT, &event);
@@ -1134,24 +1234,30 @@ pub(crate) fn handle_circulate_window(state: &mut ClientState, req: &CirculateWi
     let place = if direction == 0 { 0u8 } else { 1u8 }; // 0=Top, 1=Bottom
 
     {
-        let event = serialize_event(&CirculateNotifyEvent {
-            response_type: CIRCULATE_NOTIFY_EVENT,
-            sequence: seq,
-            event: target_child,
-            window: target_child,
-            place: place.into(),
-        }, bo);
+        let event = serialize_event(
+            &CirculateNotifyEvent {
+                response_type: CIRCULATE_NOTIFY_EVENT,
+                sequence: seq,
+                event: target_child,
+                window: target_child,
+                place: place.into(),
+            },
+            bo,
+        );
         state.deliver_event(target_child, EventMask::STRUCTURE_NOTIFY, &event);
     }
 
     {
-        let event = serialize_event(&CirculateNotifyEvent {
-            response_type: CIRCULATE_NOTIFY_EVENT,
-            sequence: seq,
-            event: window,
-            window: target_child,
-            place: place.into(),
-        }, bo);
+        let event = serialize_event(
+            &CirculateNotifyEvent {
+                response_type: CIRCULATE_NOTIFY_EVENT,
+                sequence: seq,
+                event: window,
+                window: target_child,
+                place: place.into(),
+            },
+            bo,
+        );
         state.deliver_event(window, EventMask::SUBSTRUCTURE_NOTIFY, &event);
     }
 

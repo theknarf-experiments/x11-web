@@ -126,9 +126,8 @@ pub(crate) fn handle_set_crtc_transform(
         // Convert the x11rb Transform struct to our [i32; 9] matrix.
         let t = &req.transform;
         let matrix = [
-            t.matrix11, t.matrix12, t.matrix13,
-            t.matrix21, t.matrix22, t.matrix23,
-            t.matrix31, t.matrix32, t.matrix33,
+            t.matrix11, t.matrix12, t.matrix13, t.matrix21, t.matrix22, t.matrix23, t.matrix31,
+            t.matrix32, t.matrix33,
         ];
         if let Some(crtc) = state.randr_find_crtc_mut(crtc_id) {
             crtc.transform = matrix;
@@ -253,9 +252,7 @@ fn build_get_crtc_gamma_reply(state: &ClientState, seq: u16, crtc_id: u32) -> Ve
         Some(c) => c,
         None => {
             // Empty gamma reply.
-            return ReplyBuf::fixed(seq, state.msb_first)
-                .set_u16(8, 0)
-                .build();
+            return ReplyBuf::fixed(seq, state.msb_first).set_u16(8, 0).build();
         }
     };
 
@@ -266,8 +263,7 @@ fn build_get_crtc_gamma_reply(state: &ClientState, seq: u16, crtc_id: u32) -> Ve
     let pad = (4 - (gamma_data_len % 4)) % 4;
     let var_len = gamma_data_len + pad;
 
-    let mut reply = ReplyBuf::with_extra(seq, var_len, state.msb_first)
-        .set_u16(8, size);
+    let mut reply = ReplyBuf::with_extra(seq, var_len, state.msb_first).set_u16(8, size);
 
     let mut off = 32;
     // Red
@@ -288,4 +284,3 @@ fn build_get_crtc_gamma_reply(state: &ClientState, seq: u16, crtc_id: u32) -> Ve
 
     reply.build()
 }
-

@@ -1,7 +1,7 @@
 //! XTEST extension handler (opcode 150).
 
-use tracing::{debug, warn};
 use super::parse_minor;
+use tracing::{debug, warn};
 
 use super::super::client::ClientState;
 use crate::xserver::core::require_len;
@@ -109,7 +109,12 @@ pub(crate) fn handle_xtest_request(state: &mut ClientState, data: &[u8], seq: u1
                                 state.xkb_state.key_release(keycode);
                             }
                         }
-                        super::xkb::maybe_send_xkb_state_notify(state, &xkb_before, keycode, event_type);
+                        super::xkb::maybe_send_xkb_state_notify(
+                            state,
+                            &xkb_before,
+                            keycode,
+                            event_type,
+                        );
 
                         let event = build_kbp_event(state, event_type, keycode);
                         state.pending_events.push(event);

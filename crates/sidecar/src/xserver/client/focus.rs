@@ -6,10 +6,10 @@ use x11rb_protocol::protocol::xproto::{
     NotifyMode, WindowClass,
 };
 
+use super::super::core::EventMask;
 use super::super::core::{
     CLIENT_MESSAGE_EVENT, FOCUS_IN_EVENT, FOCUS_OUT_EVENT, KEYMAP_NOTIFY_EVENT,
 };
-use super::super::core::EventMask;
 use super::super::types::*;
 use super::ClientState;
 use crate::xserver::event::serialize_event;
@@ -287,7 +287,11 @@ impl ClientState {
         let mut client_windows: Vec<u32> = self
             .windows
             .values()
-            .filter(|w| w.parent == self.root_window && w.class == u16::from(WindowClass::INPUT_OUTPUT) && w.mapped)
+            .filter(|w| {
+                w.parent == self.root_window
+                    && w.class == u16::from(WindowClass::INPUT_OUTPUT)
+                    && w.mapped
+            })
             .map(|w| w.id)
             .collect();
         client_windows.sort(); // Deterministic order
@@ -306,9 +310,9 @@ impl ClientState {
                 root.children_order
                     .iter()
                     .filter(|&&cid| {
-                        self.windows
-                            .get(&cid)
-                            .is_some_and(|w| w.class == u16::from(WindowClass::INPUT_OUTPUT) && w.mapped)
+                        self.windows.get(&cid).is_some_and(|w| {
+                            w.class == u16::from(WindowClass::INPUT_OUTPUT) && w.mapped
+                        })
                     })
                     .copied()
                     .collect()
@@ -427,13 +431,7 @@ impl ClientState {
                     sequence: seq,
                     window,
                     type_: wm_protocols_atom,
-                    data: ClientMessageData::from([
-                        wm_take_focus_atom,
-                        timestamp,
-                        0,
-                        0,
-                        0,
-                    ]),
+                    data: ClientMessageData::from([wm_take_focus_atom, timestamp, 0, 0, 0]),
                 },
                 bo,
             );

@@ -114,7 +114,10 @@ pub(crate) fn handle_create_window(state: &mut ClientState, req: &CreateWindowRe
     }
     let win_gravity: u8 = win_gravity_val as u8; // default NorthWest (1)
 
-    let backing_store_val: u32 = vl.backing_store.map(u32::from).unwrap_or(u32::from(BackingStore::NOT_USEFUL));
+    let backing_store_val: u32 = vl
+        .backing_store
+        .map(u32::from)
+        .unwrap_or(u32::from(BackingStore::NOT_USEFUL));
     if vl.backing_store.is_some() && backing_store_val > u32::from(BackingStore::ALWAYS) {
         return build_error(VALUE_ERROR, _seq, backing_store_val, 1, 0);
     }
@@ -214,7 +217,11 @@ pub(crate) fn handle_create_window(state: &mut ClientState, req: &CreateWindowRe
             input_shape: None,
             shape_select_clients: Vec::new(),
             colormap: colormap_id,
-            backing_store: if is_input_only { u32::from(BackingStore::NOT_USEFUL) as u8 } else { backing_store },
+            backing_store: if is_input_only {
+                u32::from(BackingStore::NOT_USEFUL) as u8
+            } else {
+                backing_store
+            },
             backing_planes: if is_input_only {
                 0xFFFFFFFF
             } else {
@@ -294,8 +301,9 @@ pub(crate) fn handle_create_window(state: &mut ClientState, req: &CreateWindowRe
         );
     }
 
-    let is_top_level =
-        parent == state.root_window && class == u16::from(WindowClass::INPUT_OUTPUT) && !override_redirect;
+    let is_top_level = parent == state.root_window
+        && class == u16::from(WindowClass::INPUT_OUTPUT)
+        && !override_redirect;
     let wid_str = state.get_or_create_window_uuid(wid);
     let _ = state.update_tx.send((
         state.client_id.clone(),
@@ -318,18 +326,21 @@ pub(crate) fn handle_create_window(state: &mut ClientState, req: &CreateWindowRe
     // queue. Without the unconditional broadcast, a window manager / observer
     // sitting on a different connection never sees CreateNotify, only the
     // subsequent MapNotify, breaking ICCCM substructure tracking.
-    let event = serialize_event(&CreateNotifyEvent {
-        response_type: CREATE_NOTIFY_EVENT,
-        sequence: _seq,
-        parent,
-        window: wid,
-        x,
-        y,
-        width,
-        height,
-        border_width,
-        override_redirect,
-    }, state.msb_first);
+    let event = serialize_event(
+        &CreateNotifyEvent {
+            response_type: CREATE_NOTIFY_EVENT,
+            sequence: _seq,
+            parent,
+            window: wid,
+            x,
+            y,
+            width,
+            height,
+            border_width,
+            override_redirect,
+        },
+        state.msb_first,
+    );
 
     // Local delivery: only if this client itself selected SubstructureNotify
     // on the parent. Cross-connection broadcast already filters by
@@ -343,7 +354,10 @@ pub(crate) fn handle_create_window(state: &mut ClientState, req: &CreateWindowRe
 // Opcode 4: DestroyWindow
 // ---------------------------------------------------------------------------
 
-pub(crate) fn handle_destroy_window(state: &mut ClientState, req: &DestroyWindowRequest) -> Vec<u8> {
+pub(crate) fn handle_destroy_window(
+    state: &mut ClientState,
+    req: &DestroyWindowRequest,
+) -> Vec<u8> {
     let wid = req.window;
 
     if !state.windows.contains_key(&wid) {
@@ -358,24 +372,30 @@ pub(crate) fn handle_destroy_window(state: &mut ClientState, req: &DestroyWindow
     if let Some(parent_id) = parent_id {
         // Send DestroyNotify to the window itself (StructureNotifyMask)
         {
-            let event = serialize_event(&DestroyNotifyEvent {
-                response_type: DESTROY_NOTIFY_EVENT,
-                sequence: state.sequence,
-                event: wid,
-                window: wid,
-            }, state.msb_first);
+            let event = serialize_event(
+                &DestroyNotifyEvent {
+                    response_type: DESTROY_NOTIFY_EVENT,
+                    sequence: state.sequence,
+                    event: wid,
+                    window: wid,
+                },
+                state.msb_first,
+            );
 
             state.deliver_event(wid, EventMask::STRUCTURE_NOTIFY, &event);
         }
 
         // Send DestroyNotify to parent (SubstructureNotifyMask)
         {
-            let event = serialize_event(&DestroyNotifyEvent {
-                response_type: DESTROY_NOTIFY_EVENT,
-                sequence: state.sequence,
-                event: parent_id,
-                window: wid,
-            }, state.msb_first);
+            let event = serialize_event(
+                &DestroyNotifyEvent {
+                    response_type: DESTROY_NOTIFY_EVENT,
+                    sequence: state.sequence,
+                    event: parent_id,
+                    window: wid,
+                },
+                state.msb_first,
+            );
             state.deliver_event(parent_id, EventMask::SUBSTRUCTURE_NOTIFY, &event);
         }
     }
@@ -412,21 +432,27 @@ pub(crate) fn handle_destroy_window(state: &mut ClientState, req: &DestroyWindow
         let desc = *desc;
         // Send DestroyNotify for each descendant
         if let Some(desc_parent) = state.windows.get(&desc).map(|w| w.parent) {
-            let event = serialize_event(&DestroyNotifyEvent {
-                response_type: DESTROY_NOTIFY_EVENT,
-                sequence: state.sequence,
-                event: desc,
-                window: desc,
-            }, state.msb_first);
+            let event = serialize_event(
+                &DestroyNotifyEvent {
+                    response_type: DESTROY_NOTIFY_EVENT,
+                    sequence: state.sequence,
+                    event: desc,
+                    window: desc,
+                },
+                state.msb_first,
+            );
             state.deliver_event(desc, EventMask::STRUCTURE_NOTIFY, &event);
 
             // SubstructureNotify on the parent
-            let pevent = serialize_event(&DestroyNotifyEvent {
-                response_type: DESTROY_NOTIFY_EVENT,
-                sequence: state.sequence,
-                event: desc_parent,
-                window: desc,
-            }, state.msb_first);
+            let pevent = serialize_event(
+                &DestroyNotifyEvent {
+                    response_type: DESTROY_NOTIFY_EVENT,
+                    sequence: state.sequence,
+                    event: desc_parent,
+                    window: desc,
+                },
+                state.msb_first,
+            );
             state.broadcast_event(desc_parent, EventMask::SUBSTRUCTURE_NOTIFY, &pevent);
         }
 
@@ -492,7 +518,10 @@ pub(crate) fn handle_destroy_window(state: &mut ClientState, req: &DestroyWindow
 // Opcode 5: DestroySubwindows
 // ---------------------------------------------------------------------------
 
-pub(crate) fn handle_destroy_subwindows(state: &mut ClientState, req: &DestroySubwindowsRequest) -> Vec<u8> {
+pub(crate) fn handle_destroy_subwindows(
+    state: &mut ClientState,
+    req: &DestroySubwindowsRequest,
+) -> Vec<u8> {
     let parent = req.window;
 
     if !state.windows.contains_key(&parent) {

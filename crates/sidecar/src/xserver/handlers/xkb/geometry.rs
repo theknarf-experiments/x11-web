@@ -46,11 +46,7 @@ fn build_no_geometry_reply(seq: u16, device_id: u8) -> Vec<u8> {
 }
 
 /// Handle XKB SetGeometry (void request).
-pub(crate) fn handle_xkb_set_geometry(
-    _state: &mut ClientState,
-    data: &[u8],
-    _seq: u16,
-) -> Vec<u8> {
+pub(crate) fn handle_xkb_set_geometry(_state: &mut ClientState, data: &[u8], _seq: u16) -> Vec<u8> {
     debug!("XKB SetGeometry: ignored ({} bytes received)", data.len());
     Vec::new()
 }

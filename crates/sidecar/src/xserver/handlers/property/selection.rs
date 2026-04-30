@@ -13,7 +13,10 @@ use x11rb_protocol::protocol::xproto::{
 // Opcode 22: SetSelectionOwner
 // ---------------------------------------------------------------------------
 
-pub(crate) fn handle_set_selection_owner(state: &mut ClientState, req: &SetSelectionOwnerRequest) -> Vec<u8> {
+pub(crate) fn handle_set_selection_owner(
+    state: &mut ClientState,
+    req: &SetSelectionOwnerRequest,
+) -> Vec<u8> {
     {
         let owner = req.owner;
         let selection = req.selection;
@@ -41,13 +44,16 @@ pub(crate) fn handle_set_selection_owner(state: &mut ClientState, req: &SetSelec
         // Skip sending SelectionClear to the clipboard manager window since
         // it's a server-internal pseudo-window with no real client.
         if prev_owner != 0 && prev_owner != owner && prev_owner != CLIPBOARD_MANAGER_WINDOW {
-            let event = serialize_event(&SelectionClearEvent {
-                response_type: SELECTION_CLEAR_EVENT,
-                sequence: state.sequence,
-                time: state.timestamp(),
-                owner: prev_owner,
-                selection,
-            }, state.msb_first);
+            let event = serialize_event(
+                &SelectionClearEvent {
+                    response_type: SELECTION_CLEAR_EVENT,
+                    sequence: state.sequence,
+                    time: state.timestamp(),
+                    owner: prev_owner,
+                    selection,
+                },
+                state.msb_first,
+            );
             // Deliver to the previous owner — may be on another connection.
             if state.x11_to_uuid.contains_key(&prev_owner) {
                 state.pending_events.push(event);
@@ -100,19 +106,21 @@ pub(crate) fn handle_set_selection_owner(state: &mut ClientState, req: &SetSelec
                 // as a pending event (the subscribing client is this connection).
                 use x11rb_protocol::protocol::xfixes::{SelectionEvent, SelectionNotifyEvent};
                 const XFIXES_SELECTION_NOTIFY: u8 = 87; // first_event + 0
-                state.pending_events.push(crate::xserver::event::serialize_event(
-                    &SelectionNotifyEvent {
-                        response_type: XFIXES_SELECTION_NOTIFY,
-                        subtype: SelectionEvent::SET_SELECTION_OWNER,
-                        sequence: state.sequence,
-                        window: state.root_window,
-                        owner,
-                        selection,
-                        timestamp,
-                        selection_timestamp: timestamp,
-                    },
-                    state.msb_first,
-                ));
+                state
+                    .pending_events
+                    .push(crate::xserver::event::serialize_event(
+                        &SelectionNotifyEvent {
+                            response_type: XFIXES_SELECTION_NOTIFY,
+                            subtype: SelectionEvent::SET_SELECTION_OWNER,
+                            sequence: state.sequence,
+                            window: state.root_window,
+                            owner,
+                            selection,
+                            timestamp,
+                            selection_timestamp: timestamp,
+                        },
+                        state.msb_first,
+                    ));
             }
         }
 
@@ -161,7 +169,10 @@ pub(crate) fn handle_get_selection_owner(
 // Opcode 24: ConvertSelection
 // ---------------------------------------------------------------------------
 
-pub(crate) fn handle_convert_selection(state: &mut ClientState, req: &ConvertSelectionRequest) -> Vec<u8> {
+pub(crate) fn handle_convert_selection(
+    state: &mut ClientState,
+    req: &ConvertSelectionRequest,
+) -> Vec<u8> {
     let _seq = state.sequence;
     {
         let requestor = req.requestor;
@@ -194,15 +205,18 @@ pub(crate) fn handle_convert_selection(state: &mut ClientState, req: &ConvertSel
             }
 
             // Send SelectionNotify with property set (success).
-            let event = serialize_event(&SelectionNotifyEvent {
-                response_type: SELECTION_NOTIFY_EVENT,
-                sequence: state.sequence,
-                time: state.timestamp(),
-                requestor,
-                selection,
-                target,
-                property: effective_property,
-            }, state.msb_first);
+            let event = serialize_event(
+                &SelectionNotifyEvent {
+                    response_type: SELECTION_NOTIFY_EVENT,
+                    sequence: state.sequence,
+                    time: state.timestamp(),
+                    requestor,
+                    selection,
+                    target,
+                    property: effective_property,
+                },
+                state.msb_first,
+            );
             if !state.event_router.send_event(requestor, event.clone()) {
                 state.pending_events.push(event);
             }
@@ -245,15 +259,18 @@ pub(crate) fn handle_convert_selection(state: &mut ClientState, req: &ConvertSel
                 0 // None — conversion failed
             };
 
-            let event = serialize_event(&SelectionNotifyEvent {
-                response_type: SELECTION_NOTIFY_EVENT,
-                sequence: state.sequence,
-                time: state.timestamp(),
-                requestor,
-                selection,
-                target,
-                property: reply_property,
-            }, state.msb_first);
+            let event = serialize_event(
+                &SelectionNotifyEvent {
+                    response_type: SELECTION_NOTIFY_EVENT,
+                    sequence: state.sequence,
+                    time: state.timestamp(),
+                    requestor,
+                    selection,
+                    target,
+                    property: reply_property,
+                },
+                state.msb_first,
+            );
             if !state.event_router.send_event(requestor, event.clone()) {
                 state.pending_events.push(event);
             }
@@ -285,15 +302,18 @@ pub(crate) fn handle_convert_selection(state: &mut ClientState, req: &ConvertSel
 
             if pairs.is_empty() {
                 // No pairs found — send failure notification.
-                let event = serialize_event(&SelectionNotifyEvent {
-                    response_type: SELECTION_NOTIFY_EVENT,
-                    sequence: state.sequence,
-                    time: state.timestamp(),
-                    requestor,
-                    selection,
-                    target,
-                    property: 0, // None
-                }, state.msb_first);
+                let event = serialize_event(
+                    &SelectionNotifyEvent {
+                        response_type: SELECTION_NOTIFY_EVENT,
+                        sequence: state.sequence,
+                        time: state.timestamp(),
+                        requestor,
+                        selection,
+                        target,
+                        property: 0, // None
+                    },
+                    state.msb_first,
+                );
                 if !state.event_router.send_event(requestor, event.clone()) {
                     state.pending_events.push(event);
                 }
@@ -377,30 +397,36 @@ pub(crate) fn handle_convert_selection(state: &mut ClientState, req: &ConvertSel
                     }
                 } else if let Some(owner) = owner_local {
                     // Forward as individual SelectionRequest to local owner.
-                    let sel_request = serialize_event(&SelectionRequestEvent {
-                        response_type: SELECTION_REQUEST_EVENT,
-                        sequence: state.sequence,
-                        time: state.timestamp(),
-                        owner,
-                        requestor,
-                        selection,
-                        target: pt,
-                        property: pp,
-                    }, state.msb_first);
+                    let sel_request = serialize_event(
+                        &SelectionRequestEvent {
+                            response_type: SELECTION_REQUEST_EVENT,
+                            sequence: state.sequence,
+                            time: state.timestamp(),
+                            owner,
+                            requestor,
+                            selection,
+                            target: pt,
+                            property: pp,
+                        },
+                        state.msb_first,
+                    );
                     state.pending_events.push(sel_request);
                     result_pairs.push((pt, pp));
                 } else if let Some((owner, ref event_tx, _)) = remote_entry {
                     // Forward to remote owner.
-                    let sel_request = serialize_event(&SelectionRequestEvent {
-                        response_type: SELECTION_REQUEST_EVENT,
-                        sequence: state.sequence,
-                        time: state.timestamp(),
-                        owner,
-                        requestor,
-                        selection,
-                        target: pt,
-                        property: pp,
-                    }, state.msb_first);
+                    let sel_request = serialize_event(
+                        &SelectionRequestEvent {
+                            response_type: SELECTION_REQUEST_EVENT,
+                            sequence: state.sequence,
+                            time: state.timestamp(),
+                            owner,
+                            requestor,
+                            selection,
+                            target: pt,
+                            property: pp,
+                        },
+                        state.msb_first,
+                    );
                     let _ = event_tx.send(sel_request);
                     result_pairs.push((pt, pp));
                 } else {
@@ -427,15 +453,18 @@ pub(crate) fn handle_convert_selection(state: &mut ClientState, req: &ConvertSel
             }
 
             // Send SelectionNotify with target=MULTIPLE
-            let event = serialize_event(&SelectionNotifyEvent {
-                response_type: SELECTION_NOTIFY_EVENT,
-                sequence: state.sequence,
-                time: state.timestamp(),
-                requestor,
-                selection,
-                target: MULTIPLE_ATOM,
-                property: effective_property,
-            }, state.msb_first);
+            let event = serialize_event(
+                &SelectionNotifyEvent {
+                    response_type: SELECTION_NOTIFY_EVENT,
+                    sequence: state.sequence,
+                    time: state.timestamp(),
+                    requestor,
+                    selection,
+                    target: MULTIPLE_ATOM,
+                    property: effective_property,
+                },
+                state.msb_first,
+            );
             if !state.event_router.send_event(requestor, event.clone()) {
                 state.pending_events.push(event);
             }
@@ -469,16 +498,19 @@ pub(crate) fn handle_convert_selection(state: &mut ClientState, req: &ConvertSel
 
         // Check local selections first.
         if let Some(&owner) = state.selections.get(&selection) {
-            let sel_request = serialize_event(&SelectionRequestEvent {
-                response_type: SELECTION_REQUEST_EVENT,
-                sequence: state.sequence,
-                time: state.timestamp(),
-                owner,
-                requestor,
-                selection,
-                target,
-                property,
-            }, state.msb_first);
+            let sel_request = serialize_event(
+                &SelectionRequestEvent {
+                    response_type: SELECTION_REQUEST_EVENT,
+                    sequence: state.sequence,
+                    time: state.timestamp(),
+                    owner,
+                    requestor,
+                    selection,
+                    target,
+                    property,
+                },
+                state.msb_first,
+            );
             state.pending_events.push(sel_request);
         } else {
             // Check shared (cross-connection) selections.
@@ -492,29 +524,35 @@ pub(crate) fn handle_convert_selection(state: &mut ClientState, req: &ConvertSel
             if let Some((owner, event_tx)) = remote_entry {
                 // Owner is on another connection — forward SelectionRequest
                 // via the owner's event channel.
-                let sel_request = serialize_event(&SelectionRequestEvent {
-                    response_type: SELECTION_REQUEST_EVENT,
-                    sequence: state.sequence,
-                    time: state.timestamp(),
-                    owner,
-                    requestor,
-                    selection,
-                    target,
-                    property,
-                }, state.msb_first);
+                let sel_request = serialize_event(
+                    &SelectionRequestEvent {
+                        response_type: SELECTION_REQUEST_EVENT,
+                        sequence: state.sequence,
+                        time: state.timestamp(),
+                        owner,
+                        requestor,
+                        selection,
+                        target,
+                        property,
+                    },
+                    state.msb_first,
+                );
                 let _ = event_tx.send(sel_request);
             } else {
                 // No owner: send SelectionNotify with property=None to the
                 // requestor to indicate conversion failed.
-                let event = serialize_event(&SelectionNotifyEvent {
-                    response_type: SELECTION_NOTIFY_EVENT,
-                    sequence: state.sequence,
-                    time: state.timestamp(),
-                    requestor,
-                    selection,
-                    target,
-                    property: 0, // None
-                }, state.msb_first);
+                let event = serialize_event(
+                    &SelectionNotifyEvent {
+                        response_type: SELECTION_NOTIFY_EVENT,
+                        sequence: state.sequence,
+                        time: state.timestamp(),
+                        requestor,
+                        selection,
+                        target,
+                        property: 0, // None
+                    },
+                    state.msb_first,
+                );
                 // Try cross-connection delivery first, fall back to local
                 if !state.event_router.send_event(requestor, event.clone()) {
                     state.pending_events.push(event);

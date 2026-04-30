@@ -355,18 +355,25 @@ impl AppMenuRegistrar {
             }
         }
 
-        self.registrations.lock().unwrap_or_else(|e| e.into_inner()).insert(
-            window_id,
-            Registration {
-                service: sender,
-                object_path: menu_object_path,
-            },
-        );
+        self.registrations
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .insert(
+                window_id,
+                Registration {
+                    service: sender,
+                    object_path: menu_object_path,
+                },
+            );
     }
 
     async fn unregister_window(&self, window_id: u32) {
         info!("AppMenu.UnregisterWindow: xid={window_id:#x}");
-        let removed = self.registrations.lock().unwrap_or_else(|e| e.into_inner()).remove(&window_id);
+        let removed = self
+            .registrations
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .remove(&window_id);
         if removed.is_some() {
             if let Some((uuid, _)) = self.tracker.window_index().lookup(window_id) {
                 self.tracker.detach(&uuid);

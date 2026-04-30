@@ -1,7 +1,7 @@
 //! MIT-SCREEN-SAVER extension handler (opcode 152).
 
-use tracing::debug;
 use super::parse_minor;
+use tracing::debug;
 
 use super::super::client::ClientState;
 use crate::xserver::core::require_len;
@@ -111,7 +111,13 @@ pub(crate) fn handle_screen_saver_request(
         }
         _ => {
             debug!("ScreenSaver: unhandled minor opcode {minor}");
-            crate::xserver::core::build_error(crate::xserver::core::REQUEST_ERROR, seq, minor as u32, 152, minor as u16)
+            crate::xserver::core::build_error(
+                crate::xserver::core::REQUEST_ERROR,
+                seq,
+                minor as u32,
+                152,
+                minor as u16,
+            )
         }
     }
 }

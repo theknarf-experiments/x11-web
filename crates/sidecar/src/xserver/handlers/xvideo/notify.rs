@@ -60,7 +60,13 @@ pub(crate) fn handle_notify_request(
         }
         _ => {
             debug!("XVideo notify: unhandled minor opcode {minor}");
-            crate::xserver::core::build_error(crate::xserver::core::REQUEST_ERROR, seq, minor as u32, 156, minor as u16)
+            crate::xserver::core::build_error(
+                crate::xserver::core::REQUEST_ERROR,
+                seq,
+                minor as u32,
+                156,
+                minor as u16,
+            )
         }
     }
 }

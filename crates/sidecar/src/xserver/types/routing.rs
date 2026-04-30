@@ -306,7 +306,8 @@ impl EventBroadcaster {
         client_id: &str,
     ) -> Option<u32> {
         // Bit positions for the two exclusive redirect masks
-        let redirect_bits = u32::from(EventMask::SUBSTRUCTURE_REDIRECT | EventMask::RESIZE_REDIRECT);
+        let redirect_bits =
+            u32::from(EventMask::SUBSTRUCTURE_REDIRECT | EventMask::RESIZE_REDIRECT);
         let requested_redirects = new_mask & redirect_bits;
         if requested_redirects == 0 {
             return None; // No redirect masks requested, no conflict possible

@@ -65,14 +65,17 @@ pub(crate) fn start_incr_transfer(
 
     // Generate PropertyNotify(NewValue) so the requestor is notified.
     {
-        let event = serialize_event(&PropertyNotifyEvent {
-            response_type: PROPERTY_NOTIFY_EVENT,
-            sequence: state.sequence,
-            window: requestor,
-            atom: property,
-            time: state.timestamp(),
-            state: 0u8.into(), // NewValue
-        }, state.msb_first);
+        let event = serialize_event(
+            &PropertyNotifyEvent {
+                response_type: PROPERTY_NOTIFY_EVENT,
+                sequence: state.sequence,
+                window: requestor,
+                atom: property,
+                time: state.timestamp(),
+                state: 0u8.into(), // NewValue
+            },
+            state.msb_first,
+        );
 
         state.deliver_event(requestor, EventMask::PROPERTY_CHANGE, &event);
     }
@@ -149,14 +152,17 @@ pub(crate) fn advance_incr_transfer(state: &mut ClientState, window: u32, proper
     // Generate PropertyNotify(NewValue) so the requestor knows data is ready.
     // Deliver to all clients that selected PropertyChangeMask on this window.
     {
-        let event = serialize_event(&PropertyNotifyEvent {
-            response_type: PROPERTY_NOTIFY_EVENT,
-            sequence: state.sequence,
-            window,
-            atom: property,
-            time: state.timestamp(),
-            state: 0u8.into(), // NewValue
-        }, state.msb_first);
+        let event = serialize_event(
+            &PropertyNotifyEvent {
+                response_type: PROPERTY_NOTIFY_EVENT,
+                sequence: state.sequence,
+                window,
+                atom: property,
+                time: state.timestamp(),
+                state: 0u8.into(), // NewValue
+            },
+            state.msb_first,
+        );
 
         state.deliver_event(window, EventMask::PROPERTY_CHANGE, &event);
     }
@@ -235,15 +241,18 @@ pub(crate) fn serve_persistent_clipboard(
             );
         }
 
-        let event = serialize_event(&SelectionNotifyEvent {
-            response_type: SELECTION_NOTIFY_EVENT,
-            sequence: state.sequence,
-            time: state.timestamp(),
-            requestor,
-            selection,
-            target: TARGETS_ATOM,
-            property,
-        }, state.msb_first);
+        let event = serialize_event(
+            &SelectionNotifyEvent {
+                response_type: SELECTION_NOTIFY_EVENT,
+                sequence: state.sequence,
+                time: state.timestamp(),
+                requestor,
+                selection,
+                target: TARGETS_ATOM,
+                property,
+            },
+            state.msb_first,
+        );
         if !state.event_router.send_event(requestor, event.clone()) {
             state.pending_events.push(event);
         }
@@ -268,15 +277,18 @@ pub(crate) fn serve_persistent_clipboard(
             );
         }
 
-        let event = serialize_event(&SelectionNotifyEvent {
-            response_type: SELECTION_NOTIFY_EVENT,
-            sequence: state.sequence,
-            time: state.timestamp(),
-            requestor,
-            selection,
-            target: TIMESTAMP_ATOM,
-            property,
-        }, state.msb_first);
+        let event = serialize_event(
+            &SelectionNotifyEvent {
+                response_type: SELECTION_NOTIFY_EVENT,
+                sequence: state.sequence,
+                time: state.timestamp(),
+                requestor,
+                selection,
+                target: TIMESTAMP_ATOM,
+                property,
+            },
+            state.msb_first,
+        );
         if !state.event_router.send_event(requestor, event.clone()) {
             state.pending_events.push(event);
         }
@@ -297,15 +309,18 @@ pub(crate) fn serve_persistent_clipboard(
             // with the property so the requestor knows to begin consuming.
             start_incr_transfer(state, requestor, property, selection, target, data);
 
-            let event = serialize_event(&SelectionNotifyEvent {
-                response_type: SELECTION_NOTIFY_EVENT,
-                sequence: state.sequence,
-                time: state.timestamp(),
-                requestor,
-                selection,
-                target,
-                property,
-            }, state.msb_first);
+            let event = serialize_event(
+                &SelectionNotifyEvent {
+                    response_type: SELECTION_NOTIFY_EVENT,
+                    sequence: state.sequence,
+                    time: state.timestamp(),
+                    requestor,
+                    selection,
+                    target,
+                    property,
+                },
+                state.msb_first,
+            );
             if !state.event_router.send_event(requestor, event.clone()) {
                 state.pending_events.push(event);
             }
@@ -322,15 +337,18 @@ pub(crate) fn serve_persistent_clipboard(
                 );
             }
 
-            let event = serialize_event(&SelectionNotifyEvent {
-                response_type: SELECTION_NOTIFY_EVENT,
-                sequence: state.sequence,
-                time: state.timestamp(),
-                requestor,
-                selection,
-                target,
-                property,
-            }, state.msb_first);
+            let event = serialize_event(
+                &SelectionNotifyEvent {
+                    response_type: SELECTION_NOTIFY_EVENT,
+                    sequence: state.sequence,
+                    time: state.timestamp(),
+                    requestor,
+                    selection,
+                    target,
+                    property,
+                },
+                state.msb_first,
+            );
             if !state.event_router.send_event(requestor, event.clone()) {
                 state.pending_events.push(event);
             }
@@ -367,15 +385,18 @@ pub(crate) fn serve_persistent_clipboard(
                     );
                 }
 
-                let event = serialize_event(&SelectionNotifyEvent {
-                    response_type: SELECTION_NOTIFY_EVENT,
-                    sequence: state.sequence,
-                    time: state.timestamp(),
-                    requestor,
-                    selection,
-                    target,
-                    property,
-                }, state.msb_first);
+                let event = serialize_event(
+                    &SelectionNotifyEvent {
+                        response_type: SELECTION_NOTIFY_EVENT,
+                        sequence: state.sequence,
+                        time: state.timestamp(),
+                        requestor,
+                        selection,
+                        target,
+                        property,
+                    },
+                    state.msb_first,
+                );
                 if !state.event_router.send_event(requestor, event.clone()) {
                     state.pending_events.push(event);
                 }
@@ -433,36 +454,66 @@ mod tests {
 
     #[test]
     fn device_events_map_to_correct_masks() {
-        assert_eq!(event_type_to_mask(KEY_PRESS_EVENT), u32::from(EventMask::KEY_PRESS));
-        assert_eq!(event_type_to_mask(KEY_RELEASE_EVENT), u32::from(EventMask::KEY_RELEASE));
-        assert_eq!(event_type_to_mask(BUTTON_PRESS_EVENT), u32::from(EventMask::BUTTON_PRESS));
+        assert_eq!(
+            event_type_to_mask(KEY_PRESS_EVENT),
+            u32::from(EventMask::KEY_PRESS)
+        );
+        assert_eq!(
+            event_type_to_mask(KEY_RELEASE_EVENT),
+            u32::from(EventMask::KEY_RELEASE)
+        );
+        assert_eq!(
+            event_type_to_mask(BUTTON_PRESS_EVENT),
+            u32::from(EventMask::BUTTON_PRESS)
+        );
         assert_eq!(
             event_type_to_mask(BUTTON_RELEASE_EVENT),
             u32::from(EventMask::BUTTON_RELEASE)
         );
-        assert_eq!(event_type_to_mask(MOTION_NOTIFY_EVENT), u32::from(EventMask::POINTER_MOTION));
+        assert_eq!(
+            event_type_to_mask(MOTION_NOTIFY_EVENT),
+            u32::from(EventMask::POINTER_MOTION)
+        );
     }
 
     #[test]
     fn crossing_events_map_to_correct_masks() {
-        assert_eq!(event_type_to_mask(ENTER_NOTIFY_EVENT), u32::from(EventMask::ENTER_WINDOW));
-        assert_eq!(event_type_to_mask(LEAVE_NOTIFY_EVENT), u32::from(EventMask::LEAVE_WINDOW));
+        assert_eq!(
+            event_type_to_mask(ENTER_NOTIFY_EVENT),
+            u32::from(EventMask::ENTER_WINDOW)
+        );
+        assert_eq!(
+            event_type_to_mask(LEAVE_NOTIFY_EVENT),
+            u32::from(EventMask::LEAVE_WINDOW)
+        );
     }
 
     #[test]
     fn focus_events_share_mask() {
-        assert_eq!(event_type_to_mask(FOCUS_IN_EVENT), u32::from(EventMask::FOCUS_CHANGE));
-        assert_eq!(event_type_to_mask(FOCUS_OUT_EVENT), u32::from(EventMask::FOCUS_CHANGE));
+        assert_eq!(
+            event_type_to_mask(FOCUS_IN_EVENT),
+            u32::from(EventMask::FOCUS_CHANGE)
+        );
+        assert_eq!(
+            event_type_to_mask(FOCUS_OUT_EVENT),
+            u32::from(EventMask::FOCUS_CHANGE)
+        );
     }
 
     #[test]
     fn keymap_notify_maps_to_keymap_state_mask() {
-        assert_eq!(event_type_to_mask(KEYMAP_NOTIFY_EVENT), u32::from(EventMask::KEYMAP_STATE));
+        assert_eq!(
+            event_type_to_mask(KEYMAP_NOTIFY_EVENT),
+            u32::from(EventMask::KEYMAP_STATE)
+        );
     }
 
     #[test]
     fn expose_maps_to_exposure_mask() {
-        assert_eq!(event_type_to_mask(EXPOSE_EVENT), u32::from(EventMask::EXPOSURE));
+        assert_eq!(
+            event_type_to_mask(EXPOSE_EVENT),
+            u32::from(EventMask::EXPOSURE)
+        );
     }
 
     #[test]

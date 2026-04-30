@@ -18,7 +18,13 @@ pub(crate) fn handle_xresource_request(state: &mut ClientState, data: &[u8], seq
     let bo = state.msb_first;
     debug!("X-Resource minor opcode: {minor}");
     let bad_request = |bad_value: u32| {
-        build_error(REQUEST_ERROR, seq, bad_value, XRES_MAJOR_OPCODE, minor as u16)
+        build_error(
+            REQUEST_ERROR,
+            seq,
+            bad_value,
+            XRES_MAJOR_OPCODE,
+            minor as u16,
+        )
     };
 
     match minor {
@@ -38,8 +44,7 @@ pub(crate) fn handle_xresource_request(state: &mut ClientState, data: &[u8], seq
             let extra_bytes = (num_clients as usize) * 8; // each client entry = 8 bytes
 
             // Client entries: resource_base (4 bytes) + resource_mask (4 bytes) each
-            let mut reply = ReplyBuf::with_extra(seq, extra_bytes, bo)
-                .set_u32(8, num_clients); // num_clients
+            let mut reply = ReplyBuf::with_extra(seq, extra_bytes, bo).set_u32(8, num_clients); // num_clients
             for (i, &resource_base) in client_bases.iter().enumerate() {
                 let off = 32 + i * 8;
                 reply = reply
@@ -110,8 +115,7 @@ pub(crate) fn handle_xresource_request(state: &mut ClientState, data: &[u8], seq
             let active_types: Vec<&TypeCount> = types.iter().filter(|t| t.count > 0).collect();
             let num_types = active_types.len() as u32;
             let extra_bytes = (num_types as usize) * 8;
-            let mut reply = ReplyBuf::with_extra(seq, extra_bytes, bo)
-                .set_u32(8, num_types);
+            let mut reply = ReplyBuf::with_extra(seq, extra_bytes, bo).set_u32(8, num_types);
 
             let mut off = 32;
             for t in active_types {
@@ -119,9 +123,7 @@ pub(crate) fn handle_xresource_request(state: &mut ClientState, data: &[u8], seq
                     let mut atoms = state.atoms.lock().unwrap();
                     atoms.intern(t.type_name, false)
                 };
-                reply = reply
-                    .set_u32(off, atom)
-                    .set_u32(off + 4, t.count);
+                reply = reply.set_u32(off, atom).set_u32(off + 4, t.count);
                 off += 8;
             }
 
@@ -149,7 +151,8 @@ pub(crate) fn handle_xresource_request(state: &mut ClientState, data: &[u8], seq
         // 4: QueryClientIds (XRes 1.2) — return client IDs with their types
         4 => {
             use x11rb_protocol::protocol::res::QueryClientIdsRequest;
-            let Ok(req) = QueryClientIdsRequest::try_parse_request(request_header(data), &data[4..])
+            let Ok(req) =
+                QueryClientIdsRequest::try_parse_request(request_header(data), &data[4..])
             else {
                 return bad_request(0);
             };
@@ -196,8 +199,7 @@ pub(crate) fn handle_xresource_request(state: &mut ClientState, data: &[u8], seq
             // Each ClientIdValue: spec (8 bytes) + length (4) + value (4) = 16 bytes
             let num_ids = ids.len() as u32;
             let data_bytes = num_ids as usize * 16;
-            let mut reply = ReplyBuf::with_extra(seq, data_bytes, bo)
-                .set_u32(8, num_ids);
+            let mut reply = ReplyBuf::with_extra(seq, data_bytes, bo).set_u32(8, num_ids);
 
             let mut off = 32;
             for (base, value) in &ids {
@@ -217,7 +219,8 @@ pub(crate) fn handle_xresource_request(state: &mut ClientState, data: &[u8], seq
         // 5: QueryResourceBytes (XRes 1.2) — total bytes used by resource types
         5 => {
             use x11rb_protocol::protocol::res::QueryResourceBytesRequest;
-            let Ok(req) = QueryResourceBytesRequest::try_parse_request(request_header(data), &data[4..])
+            let Ok(req) =
+                QueryResourceBytesRequest::try_parse_request(request_header(data), &data[4..])
             else {
                 return bad_request(0);
             };
@@ -274,8 +277,7 @@ pub(crate) fn handle_xresource_request(state: &mut ClientState, data: &[u8], seq
             // Each ResourceSizeValue: spec (8) + bytes (4) + ref_count (4) + use_count (4) = 20 bytes
             let data_bytes = num_sizes as usize * 20;
             let padded = (data_bytes + 3) & !3;
-            let mut reply = ReplyBuf::with_extra(seq, padded, bo)
-                .set_u32(8, num_sizes);
+            let mut reply = ReplyBuf::with_extra(seq, padded, bo).set_u32(8, num_sizes);
 
             let mut off = 32;
             for e in entries {

@@ -1,12 +1,11 @@
 //! Composite and DAMAGE extension handlers.
 
-use tracing::{debug, info, warn};
 use super::parse_minor;
+use tracing::{debug, info, warn};
 
 use super::super::client::ClientState;
 use super::super::core::{OVERLAY_WINDOW, ROOT_COLORMAP};
 use super::super::types::{DamageInfo, PixmapState, WindowState, WindowType};
-use x11rb_protocol::protocol::xproto::{BackingStore, WindowClass};
 use crate::xserver::reply::ReplyBuf;
 use x11rb_protocol::protocol::composite::{
     CreateRegionFromBorderClipRequest, GetOverlayWindowRequest, NameWindowPixmapRequest,
@@ -17,6 +16,7 @@ use x11rb_protocol::protocol::damage::{
     AddRequest as DamageAddRequest, CreateRequest as DamageCreateRequest,
     DestroyRequest as DamageDestroyRequest, SubtractRequest as DamageSubtractRequest,
 };
+use x11rb_protocol::protocol::xproto::{BackingStore, WindowClass};
 
 pub(crate) fn handle_damage_request(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
     let minor = data[1];
@@ -109,7 +109,13 @@ pub(crate) fn handle_damage_request(state: &mut ClientState, data: &[u8], seq: u
         }
         _ => {
             debug!("Unhandled DAMAGE minor opcode: {minor}");
-            crate::xserver::core::build_error(crate::xserver::core::REQUEST_ERROR, seq, minor as u32, 143, minor as u16)
+            crate::xserver::core::build_error(
+                crate::xserver::core::REQUEST_ERROR,
+                seq,
+                minor as u32,
+                143,
+                minor as u16,
+            )
         }
     }
 }
@@ -122,7 +128,13 @@ pub(crate) fn handle_x_composite_request(
     let minor = data[1];
     info!("Composite minor opcode: {minor}");
     let bad_window = |window: u32| {
-        crate::xserver::core::build_error(crate::xserver::core::WINDOW_ERROR, seq, window, 142, minor as u16)
+        crate::xserver::core::build_error(
+            crate::xserver::core::WINDOW_ERROR,
+            seq,
+            window,
+            142,
+            minor as u16,
+        )
     };
 
     match minor {
@@ -148,7 +160,14 @@ pub(crate) fn handle_x_composite_request(
         }
         2 => {
             // RedirectSubwindows
-            let req = parse_minor!(RedirectSubwindowsRequest, data, state, seq, 142, minor as u16);
+            let req = parse_minor!(
+                RedirectSubwindowsRequest,
+                data,
+                state,
+                seq,
+                142,
+                minor as u16
+            );
             let window = req.window;
             let update = u8::from(req.update);
             info!("Composite RedirectSubwindows: window={window:#x} update={update}");
@@ -183,7 +202,14 @@ pub(crate) fn handle_x_composite_request(
         }
         4 => {
             // UnredirectSubwindows
-            let req = parse_minor!(UnredirectSubwindowsRequest, data, state, seq, 142, minor as u16);
+            let req = parse_minor!(
+                UnredirectSubwindowsRequest,
+                data,
+                state,
+                seq,
+                142,
+                minor as u16
+            );
             let window = req.window;
             debug!("Composite UnredirectSubwindows: window={window:#x}");
             if !state.windows.contains_key(&window) {
@@ -204,7 +230,14 @@ pub(crate) fn handle_x_composite_request(
         }
         5 => {
             // CreateRegionFromBorderClip
-            let req = parse_minor!(CreateRegionFromBorderClipRequest, data, state, seq, 142, minor as u16);
+            let req = parse_minor!(
+                CreateRegionFromBorderClipRequest,
+                data,
+                state,
+                seq,
+                142,
+                minor as u16
+            );
             let region_id = req.region;
             let window = req.window;
             debug!(
@@ -350,7 +383,14 @@ pub(crate) fn handle_x_composite_request(
             // ReleaseOverlayWindow
             // Decrements the internal reference count on the overlay window.
             // When the count reaches zero the overlay is no longer in use.
-            let req = parse_minor!(ReleaseOverlayWindowRequest, data, state, seq, 142, minor as u16);
+            let req = parse_minor!(
+                ReleaseOverlayWindowRequest,
+                data,
+                state,
+                seq,
+                142,
+                minor as u16
+            );
             let window = req.window;
             if state.overlay_ref_count > 0 {
                 state.overlay_ref_count -= 1;
@@ -365,7 +405,13 @@ pub(crate) fn handle_x_composite_request(
         }
         _ => {
             debug!("Unhandled Composite minor opcode: {minor}");
-            crate::xserver::core::build_error(crate::xserver::core::REQUEST_ERROR, seq, minor as u32, 142, minor as u16)
+            crate::xserver::core::build_error(
+                crate::xserver::core::REQUEST_ERROR,
+                seq,
+                minor as u32,
+                142,
+                minor as u16,
+            )
         }
     }
 }

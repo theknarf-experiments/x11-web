@@ -61,7 +61,10 @@ fn next_power_of_two(v: u16) -> u16 {
 // Opcode 98: QueryExtension
 // ---------------------------------------------------------------------------
 
-pub(crate) fn handle_query_extension(_state: &mut ClientState, req: &QueryExtensionRequest) -> Vec<u8> {
+pub(crate) fn handle_query_extension(
+    _state: &mut ClientState,
+    req: &QueryExtensionRequest,
+) -> Vec<u8> {
     let seq = _state.sequence;
     let name = std::str::from_utf8(&req.name).unwrap_or("");
 

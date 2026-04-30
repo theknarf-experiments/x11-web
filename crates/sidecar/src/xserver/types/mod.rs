@@ -383,14 +383,20 @@ mod tests {
     fn colormap_truecolor_is_not_writable() {
         let cm = ColormapState::new_truecolor(0x21);
         assert!(!cm.is_writable(), "TrueColor colormap must not be writable");
-        assert_eq!(cm.visual_class, x11rb_protocol::protocol::xproto::VisualClass::TRUE_COLOR);
+        assert_eq!(
+            cm.visual_class,
+            x11rb_protocol::protocol::xproto::VisualClass::TRUE_COLOR
+        );
     }
 
     #[test]
     fn colormap_pseudocolor_is_writable() {
         let cm = ColormapState::new_pseudocolor(0x21, 256);
         assert!(cm.is_writable(), "PseudoColor colormap must be writable");
-        assert_eq!(cm.visual_class, x11rb_protocol::protocol::xproto::VisualClass::PSEUDO_COLOR);
+        assert_eq!(
+            cm.visual_class,
+            x11rb_protocol::protocol::xproto::VisualClass::PSEUDO_COLOR
+        );
         assert_eq!(cm.entries.len(), 256);
     }
 
@@ -398,21 +404,30 @@ mod tests {
     fn colormap_grayscale_is_writable() {
         let cm = ColormapState::new_grayscale(0x21, 256);
         assert!(cm.is_writable());
-        assert_eq!(cm.visual_class, x11rb_protocol::protocol::xproto::VisualClass::GRAY_SCALE);
+        assert_eq!(
+            cm.visual_class,
+            x11rb_protocol::protocol::xproto::VisualClass::GRAY_SCALE
+        );
     }
 
     #[test]
     fn colormap_directcolor_is_writable() {
         let cm = ColormapState::new_directcolor(0x21, 256);
         assert!(cm.is_writable());
-        assert_eq!(cm.visual_class, x11rb_protocol::protocol::xproto::VisualClass::DIRECT_COLOR);
+        assert_eq!(
+            cm.visual_class,
+            x11rb_protocol::protocol::xproto::VisualClass::DIRECT_COLOR
+        );
     }
 
     #[test]
     fn colormap_staticgray_is_not_writable() {
         let cm = ColormapState::new_staticgray(0x21, 256);
         assert!(!cm.is_writable());
-        assert_eq!(cm.visual_class, x11rb_protocol::protocol::xproto::VisualClass::STATIC_GRAY);
+        assert_eq!(
+            cm.visual_class,
+            x11rb_protocol::protocol::xproto::VisualClass::STATIC_GRAY
+        );
         // All cells pre-allocated for read-only maps
         assert!(cm.allocated.iter().all(|&a| a));
     }
@@ -433,7 +448,10 @@ mod tests {
             !cm.is_writable(),
             "StaticColor colormap must not be writable"
         );
-        assert_eq!(cm.visual_class, x11rb_protocol::protocol::xproto::VisualClass::STATIC_COLOR);
+        assert_eq!(
+            cm.visual_class,
+            x11rb_protocol::protocol::xproto::VisualClass::STATIC_COLOR
+        );
         // All pre-allocated (read-only)
         assert!(cm.allocated.iter().all(|&a| a));
     }

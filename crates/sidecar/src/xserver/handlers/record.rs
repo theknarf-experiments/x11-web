@@ -317,7 +317,13 @@ pub(crate) fn build_record_status_reply(
 pub(crate) fn handle_record_request(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
     let minor = data[1];
     let bad_length = || {
-        crate::xserver::core::build_error(crate::xserver::core::LENGTH_ERROR, seq, 0, 154, minor as u16)
+        crate::xserver::core::build_error(
+            crate::xserver::core::LENGTH_ERROR,
+            seq,
+            0,
+            154,
+            minor as u16,
+        )
     };
     match minor {
         0 => {
@@ -331,7 +337,13 @@ pub(crate) fn handle_record_request(state: &mut ClientState, data: &[u8], seq: u
             // CreateContext
             // SECURITY: untrusted clients are denied CreateContext (BadAccess)
             if state.trust_level > 0 {
-                return crate::xserver::core::build_error(crate::xserver::core::ACCESS_ERROR, seq, 0, 154, minor as u16);
+                return crate::xserver::core::build_error(
+                    crate::xserver::core::ACCESS_ERROR,
+                    seq,
+                    0,
+                    154,
+                    minor as u16,
+                );
             }
             use x11rb_protocol::protocol::record::CreateContextRequest;
             let Ok(req) = CreateContextRequest::try_parse_request(
@@ -347,7 +359,8 @@ pub(crate) fn handle_record_request(state: &mut ClientState, data: &[u8], seq: u
 
             debug!(
                 "RECORD CreateContext: id={context_id:#x} specs={} ranges={}",
-                client_specs.len(), ranges.len()
+                client_specs.len(),
+                ranges.len()
             );
             let ctx = RecordContext {
                 id: context_id,
@@ -478,7 +491,8 @@ pub(crate) fn handle_record_request(state: &mut ClientState, data: &[u8], seq: u
                                 reply.buf_mut()[off + 15] = range.device_events.1;
                                 reply.buf_mut()[off + 16] = range.errors.0;
                                 reply.buf_mut()[off + 17] = range.errors.1;
-                                reply.buf_mut()[off + 18] = if range.client_started { 1 } else { 0 };
+                                reply.buf_mut()[off + 18] =
+                                    if range.client_started { 1 } else { 0 };
                                 reply.buf_mut()[off + 20] = if range.client_died { 1 } else { 0 };
                             }
                         }
@@ -576,7 +590,13 @@ pub(crate) fn handle_record_request(state: &mut ClientState, data: &[u8], seq: u
         }
         _ => {
             debug!("RECORD: unhandled minor opcode {minor}");
-            crate::xserver::core::build_error(crate::xserver::core::REQUEST_ERROR, seq, minor as u32, 154, minor as u16)
+            crate::xserver::core::build_error(
+                crate::xserver::core::REQUEST_ERROR,
+                seq,
+                minor as u32,
+                154,
+                minor as u16,
+            )
         }
     }
 }
@@ -1016,5 +1036,4 @@ mod tests {
         assert_eq!(results.len(), 1);
         assert_eq!(results[0][1], RECORD_FROM_CLIENT);
     }
-
 }

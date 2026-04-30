@@ -1,7 +1,7 @@
 //! SYNC Await and priority operations: Await (7), SetPriority (12), GetPriority (13).
 
-use tracing::debug;
 use super::super::parse_minor;
+use tracing::debug;
 
 use super::super::super::client::ClientState;
 use super::{is_trigger_satisfied, AwaitTrigger, PendingAwait};
@@ -23,11 +23,11 @@ pub(crate) fn await_op(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8
     for wc in req.wait_list.iter() {
         let counter_id = wc.trigger.counter;
         let value_type = u32::from(wc.trigger.wait_type);
-        let wait_value = ((wc.trigger.wait_value.hi as i64) << 32)
-            | (wc.trigger.wait_value.lo as i64);
+        let wait_value =
+            ((wc.trigger.wait_value.hi as i64) << 32) | (wc.trigger.wait_value.lo as i64);
         let test_type = u32::from(wc.trigger.test_type);
-        let event_threshold = ((wc.event_threshold.hi as i64) << 32)
-            | (wc.event_threshold.lo as i64);
+        let event_threshold =
+            ((wc.event_threshold.hi as i64) << 32) | (wc.event_threshold.lo as i64);
 
         // Get current counter value
         let current = if counter_id == 1 {

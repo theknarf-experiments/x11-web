@@ -120,8 +120,8 @@ pub(crate) fn handle_vidmode_request(state: &mut ClientState, data: &[u8], seq: 
             let mode_size = 48; // bytes per mode line info
             let extra = 4 + mode_size * mode_count; // 4 bytes for count + modes
             let padded = (extra + 3) & !3;
-            let mut reply = ReplyBuf::with_extra(seq, padded, state.msb_first)
-                .set_u32(8, mode_count as u32);
+            let mut reply =
+                ReplyBuf::with_extra(seq, padded, state.msb_first).set_u32(8, mode_count as u32);
             for (i, mode) in state.vidmode_modes.iter().enumerate() {
                 let off = 36 + i * mode_size;
                 reply = reply
@@ -143,7 +143,15 @@ pub(crate) fn handle_vidmode_request(state: &mut ClientState, data: &[u8], seq: 
         14 => {
             // GetGamma
             // x11rb uses minor opcode 16 for GetGamma; override header.
-            let _req = parse_minor!(GetGammaRequest, data, state, seq, 153, minor, vidmode_header(data, 16));
+            let _req = parse_minor!(
+                GetGammaRequest,
+                data,
+                state,
+                seq,
+                153,
+                minor,
+                vidmode_header(data, 16)
+            );
             // Approximate gamma from stored ramp midpoint:
             // gamma = log(ramp[128]/65535) / log(128/255)
             let (gamma_r, gamma_g, gamma_b) = if let Some(crtc) = state.randr_crtcs.first() {
@@ -209,18 +217,18 @@ pub(crate) fn handle_vidmode_request(state: &mut ClientState, data: &[u8], seq: 
         16 => {
             // GetGammaRamp
             // x11rb uses minor opcode 17 for GetGammaRamp; override header.
-            let req = GetGammaRampRequest::try_parse_request(
-                vidmode_header(data, 17),
-                &data[4..],
-            )
-            .unwrap_or(GetGammaRampRequest { screen: 0, size: 256 });
+            let req = GetGammaRampRequest::try_parse_request(vidmode_header(data, 17), &data[4..])
+                .unwrap_or(GetGammaRampRequest {
+                    screen: 0,
+                    size: 256,
+                });
             let size = req.size as usize;
             let ramp_bytes = size * 2; // each value is u16
             let padded = (ramp_bytes + 3) & !3;
             let total_extra = padded * 3; // R, G, B
-            let mut reply = ReplyBuf::with_extra(seq, total_extra, state.msb_first)
-                .set_u16(8, size as u16); // size
-            // Return stored ramp from CRTC, referencing directly to avoid clones
+            let mut reply =
+                ReplyBuf::with_extra(seq, total_extra, state.msb_first).set_u16(8, size as u16); // size
+                                                                                                 // Return stored ramp from CRTC, referencing directly to avoid clones
             let linear_ramp: Vec<u16>;
             let ramps: [&[u16]; 3] = if let Some(crtc) = state.randr_crtcs.first() {
                 [&crtc.gamma_red, &crtc.gamma_green, &crtc.gamma_blue]
@@ -247,7 +255,15 @@ pub(crate) fn handle_vidmode_request(state: &mut ClientState, data: &[u8], seq: 
         17 => {
             // SetGammaRamp
             // x11rb uses minor opcode 18 for SetGammaRamp; override header.
-            let req = parse_minor!(SetGammaRampRequest, data, state, seq, 153, minor, vidmode_header(data, 18));
+            let req = parse_minor!(
+                SetGammaRampRequest,
+                data,
+                state,
+                seq,
+                153,
+                minor,
+                vidmode_header(data, 18)
+            );
             let size = req.size as usize;
             if size == 0 {
                 return vidmode_err(crate::xserver::core::LENGTH_ERROR, 0);
@@ -265,7 +281,15 @@ pub(crate) fn handle_vidmode_request(state: &mut ClientState, data: &[u8], seq: 
         18 => {
             // GetGammaRampSize
             // x11rb uses minor opcode 19 for GetGammaRampSize; override header.
-            let _req = parse_minor!(GetGammaRampSizeRequest, data, state, seq, 153, minor, vidmode_header(data, 19));
+            let _req = parse_minor!(
+                GetGammaRampSizeRequest,
+                data,
+                state,
+                seq,
+                153,
+                minor,
+                vidmode_header(data, 19)
+            );
             ReplyBuf::fixed(seq, state.msb_first)
                 .set_u16(8, 256) // size = 256
                 .build()
@@ -296,7 +320,15 @@ pub(crate) fn handle_vidmode_request(state: &mut ClientState, data: &[u8], seq: 
         3 => {
             // SwitchToMode — attempt to switch to a matching mode in the mode list
             // x11rb uses minor opcode 10 for SwitchToMode; override header.
-            let req = parse_minor!(SwitchToModeRequest, data, state, seq, 153, minor, vidmode_header(data, 10));
+            let req = parse_minor!(
+                SwitchToModeRequest,
+                data,
+                state,
+                seq,
+                153,
+                minor,
+                vidmode_header(data, 10)
+            );
             let screen = req.screen;
             let requested = VidModeInfo {
                 dotclock: req.dotclock,
@@ -459,7 +491,15 @@ pub(crate) fn handle_vidmode_request(state: &mut ClientState, data: &[u8], seq: 
         10 => {
             // SwitchMode — cycle through mode list by zoom direction
             // x11rb uses minor opcode 3 for SwitchMode; override header.
-            let req = parse_minor!(SwitchModeRequest, data, state, seq, 153, minor, vidmode_header(data, 3));
+            let req = parse_minor!(
+                SwitchModeRequest,
+                data,
+                state,
+                seq,
+                153,
+                minor,
+                vidmode_header(data, 3)
+            );
             let screen = req.screen;
             let zoom = req.zoom as i16;
             if state.vidmode_locked {

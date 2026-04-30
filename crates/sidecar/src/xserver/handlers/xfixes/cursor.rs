@@ -1,6 +1,6 @@
 //! XFIXES cursor operations.
-use crate::xserver::reply::ReplyBuf;
 use super::super::parse_minor;
+use crate::xserver::reply::ReplyBuf;
 
 use tracing::debug;
 

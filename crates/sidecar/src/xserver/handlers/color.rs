@@ -16,7 +16,10 @@ use x11rb_protocol::protocol::xproto::{
 // Opcode 78: CreateColormap
 // ---------------------------------------------------------------------------
 
-pub(crate) fn handle_create_colormap(state: &mut ClientState, req: &CreateColormapRequest) -> Vec<u8> {
+pub(crate) fn handle_create_colormap(
+    state: &mut ClientState,
+    req: &CreateColormapRequest,
+) -> Vec<u8> {
     let _alloc = u8::from(req.alloc);
     let mid = req.mid;
 
@@ -121,7 +124,10 @@ pub(crate) fn handle_copy_colormap_and_free(
 // Opcode 81: InstallColormap
 // ---------------------------------------------------------------------------
 
-pub(crate) fn handle_install_colormap(state: &mut ClientState, req: &InstallColormapRequest) -> Vec<u8> {
+pub(crate) fn handle_install_colormap(
+    state: &mut ClientState,
+    req: &InstallColormapRequest,
+) -> Vec<u8> {
     let mid = req.cmap;
     // Validate colormap exists
     if mid != ROOT_COLORMAP && !state.colormaps.contains_key(&mid) {
@@ -143,14 +149,17 @@ pub(crate) fn handle_install_colormap(state: &mut ClientState, req: &InstallColo
         .collect();
 
     for wid in notify_windows {
-        let event = serialize_event(&ColormapNotifyEvent {
-            response_type: COLOURMAP_NOTIFY_EVENT,
-            sequence: 0,
-            window: wid,
-            colormap: mid,
-            new: true,
-            state: XColormapState::INSTALLED,
-        }, state.msb_first);
+        let event = serialize_event(
+            &ColormapNotifyEvent {
+                response_type: COLOURMAP_NOTIFY_EVENT,
+                sequence: 0,
+                window: wid,
+                colormap: mid,
+                new: true,
+                state: XColormapState::INSTALLED,
+            },
+            state.msb_first,
+        );
         state.pending_events.push(event.clone());
         // Also broadcast to other connections selecting on this window
         state.broadcast_event(wid, EventMask::COLOR_MAP_CHANGE, &event);
@@ -162,7 +171,10 @@ pub(crate) fn handle_install_colormap(state: &mut ClientState, req: &InstallColo
 // Opcode 82: UninstallColormap
 // ---------------------------------------------------------------------------
 
-pub(crate) fn handle_uninstall_colormap(state: &mut ClientState, req: &UninstallColormapRequest) -> Vec<u8> {
+pub(crate) fn handle_uninstall_colormap(
+    state: &mut ClientState,
+    req: &UninstallColormapRequest,
+) -> Vec<u8> {
     let mid = req.cmap;
     // Validate colormap exists
     if mid != ROOT_COLORMAP && !state.colormaps.contains_key(&mid) {
@@ -184,14 +196,17 @@ pub(crate) fn handle_uninstall_colormap(state: &mut ClientState, req: &Uninstall
         .collect();
 
     for wid in notify_windows {
-        let event = serialize_event(&ColormapNotifyEvent {
-            response_type: COLOURMAP_NOTIFY_EVENT,
-            sequence: 0,
-            window: wid,
-            colormap: mid,
-            new: true,
-            state: XColormapState::UNINSTALLED,
-        }, state.msb_first);
+        let event = serialize_event(
+            &ColormapNotifyEvent {
+                response_type: COLOURMAP_NOTIFY_EVENT,
+                sequence: 0,
+                window: wid,
+                colormap: mid,
+                new: true,
+                state: XColormapState::UNINSTALLED,
+            },
+            state.msb_first,
+        );
         state.pending_events.push(event.clone());
         state.broadcast_event(wid, EventMask::COLOR_MAP_CHANGE, &event);
     }
@@ -207,15 +222,18 @@ pub(crate) fn handle_uninstall_colormap(state: &mut ClientState, req: &Uninstall
             .map(|(&id, _)| id)
             .collect();
         for wid in notify_windows2 {
-            let event = serialize_event(&ColormapNotifyEvent {
-            response_type: COLOURMAP_NOTIFY_EVENT,
-            sequence: 0,
-            window: wid,
-            colormap: default_cmap,
-            new: true,
-            state: XColormapState::INSTALLED,
-        }, state.msb_first);
-        state.pending_events.push(event.clone());
+            let event = serialize_event(
+                &ColormapNotifyEvent {
+                    response_type: COLOURMAP_NOTIFY_EVENT,
+                    sequence: 0,
+                    window: wid,
+                    colormap: default_cmap,
+                    new: true,
+                    state: XColormapState::INSTALLED,
+                },
+                state.msb_first,
+            );
+            state.pending_events.push(event.clone());
             state.broadcast_event(wid, EventMask::COLOR_MAP_CHANGE, &event);
         }
     }
@@ -226,7 +244,10 @@ pub(crate) fn handle_uninstall_colormap(state: &mut ClientState, req: &Uninstall
 // Opcode 83: ListInstalledColormaps
 // ---------------------------------------------------------------------------
 
-pub(crate) fn handle_list_installed_colormaps(state: &ClientState, _req: &ListInstalledColormapsRequest) -> Vec<u8> {
+pub(crate) fn handle_list_installed_colormaps(
+    state: &ClientState,
+    _req: &ListInstalledColormapsRequest,
+) -> Vec<u8> {
     let seq = state.sequence;
     // _req.window is available but currently unused — we return all installed colormaps.
     // Return only colormaps that have been explicitly installed
@@ -237,8 +258,7 @@ pub(crate) fn handle_list_installed_colormaps(state: &ClientState, _req: &ListIn
     let extra_bytes = n_cmaps * 4;
     let padded = (extra_bytes + 3) & !3;
 
-    let mut reply = ReplyBuf::with_extra(seq, padded, state.msb_first)
-        .set_u16(8, n_cmaps as u16);
+    let mut reply = ReplyBuf::with_extra(seq, padded, state.msb_first).set_u16(8, n_cmaps as u16);
 
     for (i, &cid) in cmaps.iter().enumerate() {
         let off = 32 + i * 4;
@@ -292,7 +312,10 @@ pub(crate) fn handle_alloc_color(state: &mut ClientState, req: &AllocColorReques
 // Opcode 85: AllocNamedColor
 // ---------------------------------------------------------------------------
 
-pub(crate) fn handle_alloc_named_color(state: &mut ClientState, req: &AllocNamedColorRequest) -> Vec<u8> {
+pub(crate) fn handle_alloc_named_color(
+    state: &mut ClientState,
+    req: &AllocNamedColorRequest,
+) -> Vec<u8> {
     let seq = state.sequence;
     let cmap_id = req.cmap;
     // Validate colormap exists
@@ -331,7 +354,10 @@ pub(crate) fn handle_alloc_named_color(state: &mut ClientState, req: &AllocNamed
 // Opcode 86: AllocColorCells
 // ---------------------------------------------------------------------------
 
-pub(crate) fn handle_alloc_color_cells(state: &mut ClientState, req: &AllocColorCellsRequest) -> Vec<u8> {
+pub(crate) fn handle_alloc_color_cells(
+    state: &mut ClientState,
+    req: &AllocColorCellsRequest,
+) -> Vec<u8> {
     let seq = state.sequence;
     let contiguous = req.contiguous;
     let cmap_id = req.cmap;
@@ -406,7 +432,10 @@ pub(crate) fn handle_alloc_color_cells(state: &mut ClientState, req: &AllocColor
 // Opcode 87: AllocColorPlanes
 // ---------------------------------------------------------------------------
 
-pub(crate) fn handle_alloc_color_planes(state: &mut ClientState, req: &AllocColorPlanesRequest) -> Vec<u8> {
+pub(crate) fn handle_alloc_color_planes(
+    state: &mut ClientState,
+    req: &AllocColorPlanesRequest,
+) -> Vec<u8> {
     let seq = state.sequence;
     let contiguous = req.contiguous;
     let cmap_id = req.cmap;
@@ -519,12 +548,12 @@ pub(crate) fn handle_query_colors(state: &mut ClientState, req: &QueryColorsRequ
     let data_len = n_pixels * 8; // Each RGB is 8 bytes (r2, g2, b2, pad2)
     let padded = (data_len + 3) & !3;
 
-    let mut reply = ReplyBuf::with_extra(seq, padded, state.msb_first)
-        .set_u16(8, n_pixels as u16);
+    let mut reply = ReplyBuf::with_extra(seq, padded, state.msb_first).set_u16(8, n_pixels as u16);
 
     for (i, &(r, g, b)) in colors.iter().enumerate() {
         let off = 32 + i * 8;
-        reply = reply.set_u16(off, r)
+        reply = reply
+            .set_u16(off, r)
             .set_u16(off + 2, g)
             .set_u16(off + 4, b);
         // pad at off+6..off+8
@@ -631,7 +660,10 @@ pub(crate) fn handle_store_colors(state: &mut ClientState, req: &StoreColorsRequ
 // Opcode 90: StoreNamedColor
 // ---------------------------------------------------------------------------
 
-pub(crate) fn handle_store_named_color(state: &mut ClientState, req: &StoreNamedColorRequest) -> Vec<u8> {
+pub(crate) fn handle_store_named_color(
+    state: &mut ClientState,
+    req: &StoreNamedColorRequest,
+) -> Vec<u8> {
     let flags = u8::from(req.flags);
     let cmap_id = req.cmap;
     // Validate colormap exists
@@ -834,7 +866,10 @@ fn build_cursor_argb(
 // Opcode 94: CreateGlyphCursor
 // ---------------------------------------------------------------------------
 
-pub(crate) fn handle_create_glyph_cursor(state: &mut ClientState, req: &CreateGlyphCursorRequest) -> Vec<u8> {
+pub(crate) fn handle_create_glyph_cursor(
+    state: &mut ClientState,
+    req: &CreateGlyphCursorRequest,
+) -> Vec<u8> {
     let cid = req.cid;
 
     // Validate resource ID is within this client's allocated range
@@ -906,7 +941,10 @@ pub(crate) fn handle_free_cursor(state: &mut ClientState, req: &FreeCursorReques
 // Opcode 96: RecolorCursor
 // ---------------------------------------------------------------------------
 
-pub(crate) fn handle_recolor_cursor(state: &mut ClientState, req: &RecolorCursorRequest) -> Vec<u8> {
+pub(crate) fn handle_recolor_cursor(
+    state: &mut ClientState,
+    req: &RecolorCursorRequest,
+) -> Vec<u8> {
     let cid = req.cursor;
     // Validate cursor exists
     if !state.cursors.contains_key(&cid) {

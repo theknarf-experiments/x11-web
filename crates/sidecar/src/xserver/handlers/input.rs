@@ -103,7 +103,10 @@ pub(crate) fn handle_query_pointer(state: &mut ClientState, req: &QueryPointerRe
 // Opcode 39: GetMotionEvents
 // ---------------------------------------------------------------------------
 
-pub(crate) fn handle_get_motion_events(state: &mut ClientState, req: &GetMotionEventsRequest) -> Vec<u8> {
+pub(crate) fn handle_get_motion_events(
+    state: &mut ClientState,
+    req: &GetMotionEventsRequest,
+) -> Vec<u8> {
     let seq = state.sequence;
     state.motion_hint_suppressed = false;
     let start_time = req.start;
@@ -122,12 +125,14 @@ pub(crate) fn handle_get_motion_events(state: &mut ClientState, req: &GetMotionE
     // Each motion event is 8 bytes: timestamp(4) + x(2) + y(2)
     let data_bytes = n_events as usize * 8;
     let data_padded = (data_bytes + 3) & !3;
-    let mut reply = ReplyBuf::with_extra(seq, data_padded, state.msb_first)
-        .set_u32(8, n_events);
+    let mut reply = ReplyBuf::with_extra(seq, data_padded, state.msb_first).set_u32(8, n_events);
 
     for (i, (ts, x, y)) in events.iter().enumerate() {
         let off = 32 + i * 8;
-        reply = reply.set_u32(off, *ts).set_i16(off + 4, *x).set_i16(off + 6, *y);
+        reply = reply
+            .set_u32(off, *ts)
+            .set_i16(off + 4, *x)
+            .set_i16(off + 6, *y);
     }
 
     reply.build()
@@ -346,21 +351,24 @@ pub(crate) fn handle_warp_pointer(state: &mut ClientState, req: &WarpPointerRequ
     }
 
     // Send MotionNotify event to let the client know the pointer moved
-    let event = serialize_event(&MotionNotifyEvent {
-        response_type: MOTION_NOTIFY_EVENT,
-        detail: 0u8.into(), // Normal
-        sequence: seq,
-        time: state.timestamp(),
-        root: state.root_window,
-        event: new_window,
-        child: 0,
-        root_x: state.pointer_x,
-        root_y: state.pointer_y,
-        event_x: state.pointer_x,
-        event_y: state.pointer_y,
-        state: 0u16.into(),
-        same_screen: true,
-    }, state.msb_first);
+    let event = serialize_event(
+        &MotionNotifyEvent {
+            response_type: MOTION_NOTIFY_EVENT,
+            detail: 0u8.into(), // Normal
+            sequence: seq,
+            time: state.timestamp(),
+            root: state.root_window,
+            event: new_window,
+            child: 0,
+            root_x: state.pointer_x,
+            root_y: state.pointer_y,
+            event_x: state.pointer_x,
+            event_y: state.pointer_y,
+            state: 0u16.into(),
+            same_screen: true,
+        },
+        state.msb_first,
+    );
     state.pending_events.push(event);
 
     Vec::new()
@@ -370,7 +378,10 @@ pub(crate) fn handle_warp_pointer(state: &mut ClientState, req: &WarpPointerRequ
 // Opcode 42: SetInputFocus
 // ---------------------------------------------------------------------------
 
-pub(crate) fn handle_set_input_focus(state: &mut ClientState, req: &SetInputFocusRequest) -> Vec<u8> {
+pub(crate) fn handle_set_input_focus(
+    state: &mut ClientState,
+    req: &SetInputFocusRequest,
+) -> Vec<u8> {
     // revert_to (0=None, 1=PointerRoot, 2=Parent)
     let revert_to = u8::from(req.revert_to);
     if revert_to > 2 {
@@ -391,7 +402,10 @@ pub(crate) fn handle_set_input_focus(state: &mut ClientState, req: &SetInputFocu
 // Opcode 43: GetInputFocus
 // ---------------------------------------------------------------------------
 
-pub(crate) fn handle_get_input_focus(state: &mut ClientState, _req: &GetInputFocusRequest) -> Vec<u8> {
+pub(crate) fn handle_get_input_focus(
+    state: &mut ClientState,
+    _req: &GetInputFocusRequest,
+) -> Vec<u8> {
     let seq = state.sequence;
     ReplyBuf::fixed(seq, state.msb_first)
         .set_data_byte(state.focus_revert_to)
@@ -443,13 +457,16 @@ pub(crate) fn handle_change_keyboard_mapping(
 
     // MappingNotify must be sent to ALL clients per X11 spec (section 12.7).
     // The requesting client gets it via pending_events, all others via broadcast.
-    let event = serialize_event(&MappingNotifyEvent {
-        response_type: MAPPING_NOTIFY_EVENT,
-        sequence: seq,
-        request: 1u8.into(), // Keyboard
-        first_keycode: first_keycode,
-        count: keycode_count as u8,
-    }, state.msb_first);
+    let event = serialize_event(
+        &MappingNotifyEvent {
+            response_type: MAPPING_NOTIFY_EVENT,
+            sequence: seq,
+            request: 1u8.into(), // Keyboard
+            first_keycode: first_keycode,
+            count: keycode_count as u8,
+        },
+        state.msb_first,
+    );
     state.pending_events.push(event.clone());
     state
         .event_broadcaster
@@ -462,7 +479,10 @@ pub(crate) fn handle_change_keyboard_mapping(
 // Opcode 101: GetKeyboardMapping
 // ---------------------------------------------------------------------------
 
-pub(crate) fn handle_get_keyboard_mapping(state: &ClientState, req: &GetKeyboardMappingRequest) -> Vec<u8> {
+pub(crate) fn handle_get_keyboard_mapping(
+    state: &ClientState,
+    req: &GetKeyboardMappingRequest,
+) -> Vec<u8> {
     let seq = state.sequence;
     let first_keycode = req.first_keycode;
     let count = req.count;
@@ -478,8 +498,8 @@ pub(crate) fn handle_get_keyboard_mapping(state: &ClientState, req: &GetKeyboard
     let total_syms = count as u32 * keysyms_per_keycode as u32;
     let extra_bytes = total_syms as usize * 4;
 
-    let mut reply = ReplyBuf::with_extra(seq, extra_bytes, state.msb_first)
-        .set_data_byte(keysyms_per_keycode);
+    let mut reply =
+        ReplyBuf::with_extra(seq, extra_bytes, state.msb_first).set_data_byte(keysyms_per_keycode);
 
     for i in 0..count as usize {
         let keycode = first_keycode.wrapping_add(i as u8);
@@ -507,7 +527,10 @@ pub(crate) fn handle_get_keyboard_mapping(state: &ClientState, req: &GetKeyboard
 // Opcode 102: ChangeKeyboardControl
 // ---------------------------------------------------------------------------
 
-pub(crate) fn handle_change_keyboard_control(state: &mut ClientState, req: &ChangeKeyboardControlRequest) -> Vec<u8> {
+pub(crate) fn handle_change_keyboard_control(
+    state: &mut ClientState,
+    req: &ChangeKeyboardControlRequest,
+) -> Vec<u8> {
     let vl = &*req.value_list;
 
     // Per X11 spec, led (bit 4) and led_mode (bit 5) work together,
@@ -580,7 +603,10 @@ pub(crate) fn handle_change_keyboard_control(state: &mut ClientState, req: &Chan
 // Opcode 103: GetKeyboardControl
 // ---------------------------------------------------------------------------
 
-pub(crate) fn handle_get_keyboard_control(state: &ClientState, _req: &GetKeyboardControlRequest) -> Vec<u8> {
+pub(crate) fn handle_get_keyboard_control(
+    state: &ClientState,
+    _req: &GetKeyboardControlRequest,
+) -> Vec<u8> {
     let seq = state.sequence;
     let kc = &state.keyboard_control;
     ReplyBuf::with_extra(seq, 20, state.msb_first)
@@ -598,7 +624,10 @@ pub(crate) fn handle_get_keyboard_control(state: &ClientState, _req: &GetKeyboar
 // Opcode 105: ChangePointerControl
 // ---------------------------------------------------------------------------
 
-pub(crate) fn handle_change_pointer_control(state: &mut ClientState, req: &ChangePointerControlRequest) -> Vec<u8> {
+pub(crate) fn handle_change_pointer_control(
+    state: &mut ClientState,
+    req: &ChangePointerControlRequest,
+) -> Vec<u8> {
     let accel_num = req.acceleration_numerator;
     let accel_den = req.acceleration_denominator;
     let threshold = req.threshold;
@@ -624,7 +653,10 @@ pub(crate) fn handle_change_pointer_control(state: &mut ClientState, req: &Chang
 // Opcode 106: GetPointerControl
 // ---------------------------------------------------------------------------
 
-pub(crate) fn handle_get_pointer_control(state: &ClientState, _req: &GetPointerControlRequest) -> Vec<u8> {
+pub(crate) fn handle_get_pointer_control(
+    state: &ClientState,
+    _req: &GetPointerControlRequest,
+) -> Vec<u8> {
     let seq = state.sequence;
     let pc = &state.pointer_control;
     ReplyBuf::fixed(seq, state.msb_first)
@@ -638,7 +670,10 @@ pub(crate) fn handle_get_pointer_control(state: &ClientState, _req: &GetPointerC
 // Opcode 107: SetScreenSaver
 // ---------------------------------------------------------------------------
 
-pub(crate) fn handle_set_screen_saver(state: &mut ClientState, req: &SetScreenSaverRequest) -> Vec<u8> {
+pub(crate) fn handle_set_screen_saver(
+    state: &mut ClientState,
+    req: &SetScreenSaverRequest,
+) -> Vec<u8> {
     let timeout = req.timeout;
     let interval = req.interval;
     let prefer_blanking = u8::from(req.prefer_blanking);
@@ -664,7 +699,10 @@ pub(crate) fn handle_set_screen_saver(state: &mut ClientState, req: &SetScreenSa
 // Opcode 108: GetScreenSaver
 // ---------------------------------------------------------------------------
 
-pub(crate) fn handle_get_screen_saver(state: &ClientState, _req: &GetScreenSaverRequest) -> Vec<u8> {
+pub(crate) fn handle_get_screen_saver(
+    state: &ClientState,
+    _req: &GetScreenSaverRequest,
+) -> Vec<u8> {
     let seq = state.sequence;
     let ss = &state.screen_saver;
     ReplyBuf::fixed(seq, state.msb_first)
@@ -679,7 +717,10 @@ pub(crate) fn handle_get_screen_saver(state: &ClientState, _req: &GetScreenSaver
 // Opcode 115: ForceScreenSaver
 // ---------------------------------------------------------------------------
 
-pub(crate) fn handle_force_screen_saver(state: &mut ClientState, req: &ForceScreenSaverRequest) -> Vec<u8> {
+pub(crate) fn handle_force_screen_saver(
+    state: &mut ClientState,
+    req: &ForceScreenSaverRequest,
+) -> Vec<u8> {
     let seq = state.sequence;
     let mode: u8 = req.mode.into();
 
@@ -705,16 +746,19 @@ pub(crate) fn handle_force_screen_saver(state: &mut ClientState, req: &ForceScre
                     .map(|w| (w.id, w.width, w.height))
                     .collect();
                 for (wid, w, h) in &expose_targets {
-                    let expose = serialize_event(&ExposeEvent {
-                        response_type: EXPOSE_EVENT,
-                        sequence: seq,
-                        window: *wid,
-                        x: 0,
-                        y: 0,
-                        width: *w,
-                        height: *h,
-                        count: 0,
-                    }, bo);
+                    let expose = serialize_event(
+                        &ExposeEvent {
+                            response_type: EXPOSE_EVENT,
+                            sequence: seq,
+                            window: *wid,
+                            x: 0,
+                            y: 0,
+                            width: *w,
+                            height: *h,
+                            count: 0,
+                        },
+                        bo,
+                    );
                     state.deliver_event(*wid, EventMask::EXPOSURE, &expose);
                 }
 
@@ -752,16 +796,19 @@ fn build_screen_saver_notify(state: &ClientState, saver_state: u8) -> Vec<u8> {
         return Vec::new();
     }
 
-    serialize_event(&ScreenSaverNotifyEvent {
-        response_type: 92,
-        state: SsState::from(saver_state),
-        sequence: state.sequence,
-        time: state.timestamp(),
-        root: state.root_window,
-        window: state.screen_saver_window,
-        kind: SsKind::from(0u8), // Blanked
-        forced: true,
-    }, state.msb_first)
+    serialize_event(
+        &ScreenSaverNotifyEvent {
+            response_type: 92,
+            state: SsState::from(saver_state),
+            sequence: state.sequence,
+            time: state.timestamp(),
+            root: state.root_window,
+            window: state.screen_saver_window,
+            kind: SsKind::from(0u8), // Blanked
+            forced: true,
+        },
+        state.msb_first,
+    )
 }
 
 /// Build a ScreenSaverNotify (Off) event for automatic deactivation on input.
@@ -893,7 +940,10 @@ pub(crate) fn handle_change_hosts(state: &mut ClientState, req: &ChangeHostsRequ
 // Opcode 111: SetAccessControl
 // ---------------------------------------------------------------------------
 
-pub(crate) fn handle_set_access_control(state: &mut ClientState, req: &SetAccessControlRequest) -> Vec<u8> {
+pub(crate) fn handle_set_access_control(
+    state: &mut ClientState,
+    req: &SetAccessControlRequest,
+) -> Vec<u8> {
     state.access_control_enabled = u8::from(req.mode) != 0;
     debug!("SetAccessControl: enabled={}", state.access_control_enabled);
 
@@ -909,7 +959,10 @@ pub(crate) fn handle_set_access_control(state: &mut ClientState, req: &SetAccess
 // Opcode 112: SetCloseDownMode
 // ---------------------------------------------------------------------------
 
-pub(crate) fn handle_set_close_down_mode(state: &mut ClientState, req: &SetCloseDownModeRequest) -> Vec<u8> {
+pub(crate) fn handle_set_close_down_mode(
+    state: &mut ClientState,
+    req: &SetCloseDownModeRequest,
+) -> Vec<u8> {
     let mode = u8::from(req.mode);
     // Per X11 spec: mode must be 0 (Destroy), 1 (RetainPermanent), or 2 (RetainTemporary).
     if mode > 2 {
@@ -1011,7 +1064,10 @@ pub(crate) fn handle_kill_client(state: &mut ClientState, req: &KillClientReques
 // Opcode 114: RotateProperties
 // ---------------------------------------------------------------------------
 
-pub(crate) fn handle_rotate_properties(state: &mut ClientState, req: &RotatePropertiesRequest) -> Vec<u8> {
+pub(crate) fn handle_rotate_properties(
+    state: &mut ClientState,
+    req: &RotatePropertiesRequest,
+) -> Vec<u8> {
     let window = req.window;
     if !state.windows.contains_key(&window) {
         return build_error(WINDOW_ERROR, state.sequence, window, 114, 0);
@@ -1071,14 +1127,17 @@ pub(crate) fn handle_rotate_properties(state: &mut ClientState, req: &RotateProp
     let seq = state.sequence;
     let timestamp = state.timestamp();
     for &atom in &atoms {
-        let event = serialize_event(&PropertyNotifyEvent {
-            response_type: PROPERTY_NOTIFY_EVENT,
-            sequence: seq,
-            window,
-            atom,
-            time: timestamp,
-            state: 0u8.into(), // NewValue
-        }, state.msb_first);
+        let event = serialize_event(
+            &PropertyNotifyEvent {
+                response_type: PROPERTY_NOTIFY_EVENT,
+                sequence: seq,
+                window,
+                atom,
+                time: timestamp,
+                state: 0u8.into(), // NewValue
+            },
+            state.msb_first,
+        );
         state.deliver_event(window, EventMask::PROPERTY_CHANGE, &event);
     }
 
@@ -1105,13 +1164,16 @@ pub(crate) fn handle_set_pointer_mapping(
         );
 
         // MappingNotify (request=Pointer) must be sent to ALL clients per X11 spec.
-        let event = serialize_event(&MappingNotifyEvent {
-            response_type: MAPPING_NOTIFY_EVENT,
-            sequence: seq,
-            request: 2u8.into(), // Pointer
-            first_keycode: 0,
-            count: 0,
-        }, state.msb_first);
+        let event = serialize_event(
+            &MappingNotifyEvent {
+                response_type: MAPPING_NOTIFY_EVENT,
+                sequence: seq,
+                request: 2u8.into(), // Pointer
+                first_keycode: 0,
+                count: 0,
+            },
+            state.msb_first,
+        );
         state.pending_events.push(event.clone());
         state
             .event_broadcaster
@@ -1127,7 +1189,10 @@ pub(crate) fn handle_set_pointer_mapping(
 // Opcode 117: GetPointerMapping
 // ---------------------------------------------------------------------------
 
-pub(crate) fn handle_get_pointer_mapping(state: &ClientState, _req: &GetPointerMappingRequest) -> Vec<u8> {
+pub(crate) fn handle_get_pointer_mapping(
+    state: &ClientState,
+    _req: &GetPointerMappingRequest,
+) -> Vec<u8> {
     let seq = state.sequence;
     let map = &state.pointer_mapping;
     let n = map.len() as u8;
@@ -1167,13 +1232,16 @@ pub(crate) fn handle_set_modifier_mapping(
         );
 
         // MappingNotify must be sent to ALL clients per X11 spec.
-        let event = serialize_event(&MappingNotifyEvent {
-            response_type: MAPPING_NOTIFY_EVENT,
-            sequence: state.sequence,
-            request: 0u8.into(), // Modifier
-            first_keycode: 0,
-            count: 0,
-        }, state.msb_first);
+        let event = serialize_event(
+            &MappingNotifyEvent {
+                response_type: MAPPING_NOTIFY_EVENT,
+                sequence: state.sequence,
+                request: 0u8.into(), // Modifier
+                first_keycode: 0,
+                count: 0,
+            },
+            state.msb_first,
+        );
         state.pending_events.push(event.clone());
         state
             .event_broadcaster
@@ -1189,7 +1257,10 @@ pub(crate) fn handle_set_modifier_mapping(
 // Opcode 119: GetModifierMapping
 // ---------------------------------------------------------------------------
 
-pub(crate) fn handle_get_modifier_mapping(state: &ClientState, _req: &GetModifierMappingRequest) -> Vec<u8> {
+pub(crate) fn handle_get_modifier_mapping(
+    state: &ClientState,
+    _req: &GetModifierMappingRequest,
+) -> Vec<u8> {
     let seq = state.sequence;
     // Find the max keycodes per modifier to determine padding
     let max_keycodes = state
@@ -1202,8 +1273,8 @@ pub(crate) fn handle_get_modifier_mapping(state: &ClientState, _req: &GetModifie
     let keycodes_per_modifier = max_keycodes as u8;
 
     let data_len = 8 * keycodes_per_modifier as usize;
-    let mut reply = ReplyBuf::with_extra(seq, data_len, state.msb_first)
-        .set_data_byte(keycodes_per_modifier);
+    let mut reply =
+        ReplyBuf::with_extra(seq, data_len, state.msb_first).set_data_byte(keycodes_per_modifier);
 
     for (i, keycodes) in state.modifier_map.iter().enumerate() {
         let off = 32 + i * keycodes_per_modifier as usize;

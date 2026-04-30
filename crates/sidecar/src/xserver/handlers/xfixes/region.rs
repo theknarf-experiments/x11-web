@@ -1,7 +1,7 @@
 //! XFIXES region operations.
 
-use tracing::debug;
 use super::super::{parse_minor, parse_or_void};
+use tracing::debug;
 
 use super::super::super::client::ClientState;
 use super::super::super::types::{RegionRect, XFixesRegion};
@@ -10,21 +10,25 @@ use x11rb_protocol::protocol::xfixes::{
     CopyRegionRequest, CreateRegionFromBitmapRequest, CreateRegionFromGCRequest,
     CreateRegionFromPictureRequest, CreateRegionFromWindowRequest, CreateRegionRequest,
     DestroyRegionRequest, ExpandRegionRequest, FetchRegionRequest, IntersectRegionRequest,
-    InvertRegionRequest, RegionExtentsRequest, SetGCClipRegionRequest,
-    SetPictureClipRegionRequest, SetRegionRequest, SetWindowShapeRegionRequest,
-    SubtractRegionRequest, TranslateRegionRequest, UnionRegionRequest,
+    InvertRegionRequest, RegionExtentsRequest, SetGCClipRegionRequest, SetPictureClipRegionRequest,
+    SetRegionRequest, SetWindowShapeRegionRequest, SubtractRegionRequest, TranslateRegionRequest,
+    UnionRegionRequest,
 };
 
 /// 5: CreateRegion
 pub(crate) fn handle_create_region(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
     let req = parse_minor!(CreateRegionRequest, data, state, seq, 138, 5);
     let region_id = req.region;
-    let rects: Vec<RegionRect> = req.rectangles.iter().map(|r| RegionRect {
-        x: r.x,
-        y: r.y,
-        width: r.width,
-        height: r.height,
-    }).collect();
+    let rects: Vec<RegionRect> = req
+        .rectangles
+        .iter()
+        .map(|r| RegionRect {
+            x: r.x,
+            y: r.y,
+            width: r.width,
+            height: r.height,
+        })
+        .collect();
     let num_rects = rects.len();
     state
         .xfixes_regions
@@ -175,12 +179,16 @@ pub(crate) fn handle_destroy_region(state: &mut ClientState, data: &[u8], seq: u
 pub(crate) fn handle_set_region(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
     let req = parse_minor!(SetRegionRequest, data, state, seq, 138, 11);
     let region_id = req.region;
-    let rects: Vec<RegionRect> = req.rectangles.iter().map(|r| RegionRect {
-        x: r.x,
-        y: r.y,
-        width: r.width,
-        height: r.height,
-    }).collect();
+    let rects: Vec<RegionRect> = req
+        .rectangles
+        .iter()
+        .map(|r| RegionRect {
+            x: r.x,
+            y: r.y,
+            width: r.width,
+            height: r.height,
+        })
+        .collect();
     state
         .xfixes_regions
         .insert(region_id, XFixesRegion::from_rects(rects));
@@ -418,7 +426,9 @@ pub(crate) fn handle_set_window_shape_region(
             2 => win.input_shape = shape,
             _ => {}
         }
-        debug!("XFIXES SetWindowShapeRegion: window={window_id:#x} kind={kind} region={region_id:#x}");
+        debug!(
+            "XFIXES SetWindowShapeRegion: window={window_id:#x} kind={kind} region={region_id:#x}"
+        );
     }
     Vec::new()
 }

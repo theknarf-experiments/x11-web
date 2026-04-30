@@ -1,8 +1,8 @@
 //! XKB device and geometry: GetDeviceInfo, SetDeviceInfo, ListComponents.
 
 use super::super::super::client::ClientState;
-use tracing::debug;
 use crate::xserver::reply::ReplyBuf;
+use tracing::debug;
 
 /// Handle ListComponents (minor opcode 22).
 pub(crate) fn handle_list_components(
@@ -41,8 +41,8 @@ pub(crate) fn handle_list_components(
     // Pad to 4-byte boundary
     let padded = (body_size + 3) & !3;
 
-    let mut reply = ReplyBuf::with_extra(seq, padded, state.msb_first)
-        .set_data_byte(device_id_byte);
+    let mut reply =
+        ReplyBuf::with_extra(seq, padded, state.msb_first).set_data_byte(device_id_byte);
 
     // Encode header fields: nKeymaps..nGeometries at bytes 8-19
     for (i, list) in lists.iter().enumerate() {
@@ -89,8 +89,8 @@ pub(crate) fn handle_get_device_info(
     let name_len = device_name.len();
     let name_pad = (4 - (name_len % 4)) % 4;
     let body_len = 24 + name_len + name_pad; // fixed fields + name
-    let mut reply = ReplyBuf::with_extra(seq, body_len, state.msb_first)
-        .set_data_byte(device_id_byte);
+    let mut reply =
+        ReplyBuf::with_extra(seq, body_len, state.msb_first).set_data_byte(device_id_byte);
     // Byte 8-9: present (what we return): 0 = nothing extra
     reply = reply.set_u16(8, 0);
     // Byte 10: supported (bitmask of supported features)

@@ -47,13 +47,10 @@ impl ComposeState {
             .or_else(|| std::env::var_os("LC_CTYPE"))
             .or_else(|| std::env::var_os("LANG"))
             .unwrap_or_else(|| OsString::from("C.UTF-8"));
-        let inner = xkb::compose::Table::new_from_locale(
-            &context,
-            &locale,
-            xkb::compose::COMPILE_NO_FLAGS,
-        )
-        .ok()
-        .map(|table| xkb::compose::State::new(&table, xkb::compose::STATE_NO_FLAGS));
+        let inner =
+            xkb::compose::Table::new_from_locale(&context, &locale, xkb::compose::COMPILE_NO_FLAGS)
+                .ok()
+                .map(|table| xkb::compose::State::new(&table, xkb::compose::STATE_NO_FLAGS));
         Self {
             inner,
             buffered: Vec::new(),

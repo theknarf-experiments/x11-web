@@ -10,11 +10,11 @@ pub(crate) mod connection;
 #[allow(dead_code)]
 pub(crate) mod core;
 mod dispatch;
+pub(crate) mod event;
 pub(crate) mod extensions;
 #[allow(dead_code)]
 pub(crate) mod grab;
 pub(crate) mod handlers;
-pub(crate) mod event;
 pub(crate) mod input;
 pub(crate) mod reply;
 pub(crate) mod request;
@@ -881,7 +881,8 @@ de_DE,de_DE.UTF-8,fr_FR,fr_FR.UTF-8,\
 es_ES,es_ES.UTF-8,pt_BR,pt_BR.UTF-8,\
 ru_RU,ru_RU.UTF-8,ar_SA,ar_SA.UTF-8,\
 hi_IN,hi_IN.UTF-8,th_TH,th_TH.UTF-8,\
-vi_VN,vi_VN.UTF-8".to_vec(),
+vi_VN,vi_VN.UTF-8"
+                        .to_vec(),
                 },
             );
             xim_properties.insert(

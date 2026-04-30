@@ -180,22 +180,25 @@ fn check_alarms(
         let Some(alarm) = alarms.get(&alarm_id) else {
             return;
         };
-        let event = serialize_event(&AlarmNotifyEvent {
-            response_type: 83,
-            kind: 0,
-            sequence: seq,
-            alarm: alarm_id,
-            counter_value: Int64 {
-                hi: (new_value >> 32) as i32,
-                lo: new_value as u32,
+        let event = serialize_event(
+            &AlarmNotifyEvent {
+                response_type: 83,
+                kind: 0,
+                sequence: seq,
+                alarm: alarm_id,
+                counter_value: Int64 {
+                    hi: (new_value >> 32) as i32,
+                    lo: new_value as u32,
+                },
+                alarm_value: Int64 {
+                    hi: alarm.value_hi,
+                    lo: alarm.value_lo,
+                },
+                timestamp: 0,
+                state: ALARMSTATE::from(alarm.state),
             },
-            alarm_value: Int64 {
-                hi: alarm.value_hi,
-                lo: alarm.value_lo,
-            },
-            timestamp: 0,
-            state: ALARMSTATE::from(alarm.state),
-        }, msb_first);
+            msb_first,
+        );
         pending_events.push(event);
 
         // Update alarm: add delta to threshold for next trigger
@@ -341,7 +344,13 @@ pub(crate) fn handle_sync_request(state: &mut ClientState, data: &[u8], seq: u16
         19 => fence::await_fence(state, data, seq),
         _ => {
             warn!("Unhandled SYNC minor opcode: {minor}");
-            crate::xserver::core::build_error(crate::xserver::core::REQUEST_ERROR, seq, minor as u32, 134, minor as u16)
+            crate::xserver::core::build_error(
+                crate::xserver::core::REQUEST_ERROR,
+                seq,
+                minor as u32,
+                134,
+                minor as u16,
+            )
         }
     }
 }

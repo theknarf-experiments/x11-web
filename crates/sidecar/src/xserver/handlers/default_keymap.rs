@@ -105,9 +105,7 @@ pub(crate) fn key_name(keycode: u8) -> [u8; 4] {
     let entry = DEFAULT.get_or_init(build);
     if let Some(km) = entry {
         let kc_raw = keycode as u32;
-        if kc_raw >= km.keymap.min_keycode().raw()
-            && kc_raw <= km.keymap.max_keycode().raw()
-        {
+        if kc_raw >= km.keymap.min_keycode().raw() && kc_raw <= km.keymap.max_keycode().raw() {
             if let Some(name) = km.keymap.key_get_name(xkb::Keycode::new(kc_raw)) {
                 let mut out = *b"    ";
                 let bytes = name.as_bytes();
@@ -136,9 +134,7 @@ pub(crate) fn default_keysym_array() -> [u32; 248] {
         if kc < min || kc > max {
             continue;
         }
-        let syms = km
-            .keymap
-            .key_get_syms_by_level(xkb::Keycode::new(kc), 0, 0);
+        let syms = km.keymap.key_get_syms_by_level(xkb::Keycode::new(kc), 0, 0);
         out[(kc - 8) as usize] = first_sym(syms);
     }
     out

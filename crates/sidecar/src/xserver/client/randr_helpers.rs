@@ -109,21 +109,24 @@ impl ClientState {
         let bo = self.msb_first;
         let seq = self.sequence;
         let ts = self.timestamp();
-        let event = serialize_event(&ScreenChangeNotifyEvent {
-            response_type: RANDR_EVENT_BASE,
-            rotation: Rotation::ROTATE0,
-            sequence: seq,
-            timestamp: ts,
-            config_timestamp: ts,
-            root: self.root_window,
-            request_window: 0,
-            size_id: 0,
-            subpixel_order: SubPixel::from(0u8),
-            width: self.screen_width,
-            height: self.screen_height,
-            mwidth: 270,
-            mheight: 203,
-        }, bo);
+        let event = serialize_event(
+            &ScreenChangeNotifyEvent {
+                response_type: RANDR_EVENT_BASE,
+                rotation: Rotation::ROTATE0,
+                sequence: seq,
+                timestamp: ts,
+                config_timestamp: ts,
+                root: self.root_window,
+                request_window: 0,
+                size_id: 0,
+                subpixel_order: SubPixel::from(0u8),
+                width: self.screen_width,
+                height: self.screen_height,
+                mwidth: 270,
+                mheight: 203,
+            },
+            bo,
+        );
         self.pending_events.push(event);
     }
 
@@ -144,22 +147,25 @@ impl ClientState {
         let seq = self.sequence;
         let ts = self.timestamp();
 
-        let event = serialize_event(&NotifyEvent {
-            response_type: RANDR_EVENT_BASE + 1,
-            sub_code: Notify::CRTC_CHANGE,
-            sequence: seq,
-            u: NotifyData::from(CrtcChange {
-                timestamp: ts,
-                window: self.root_window,
-                crtc: crtc.id,
-                mode: crtc.mode_id,
-                rotation: Rotation::from(crtc.rotation),
-                x: crtc.x,
-                y: crtc.y,
-                width: crtc.width,
-                height: crtc.height,
-            }),
-        }, bo);
+        let event = serialize_event(
+            &NotifyEvent {
+                response_type: RANDR_EVENT_BASE + 1,
+                sub_code: Notify::CRTC_CHANGE,
+                sequence: seq,
+                u: NotifyData::from(CrtcChange {
+                    timestamp: ts,
+                    window: self.root_window,
+                    crtc: crtc.id,
+                    mode: crtc.mode_id,
+                    rotation: Rotation::from(crtc.rotation),
+                    x: crtc.x,
+                    y: crtc.y,
+                    width: crtc.width,
+                    height: crtc.height,
+                }),
+            },
+            bo,
+        );
         self.pending_events.push(event);
     }
 }

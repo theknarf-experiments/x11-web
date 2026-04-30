@@ -44,8 +44,8 @@ pub(crate) fn handle_get_screen_size_range(
     seq: u16,
 ) -> Vec<u8> {
     ReplyBuf::fixed(seq, state.msb_first)
-        .set_u16(8, 1)     // min_width
-        .set_u16(10, 1)    // min_height
+        .set_u16(8, 1) // min_width
+        .set_u16(10, 1) // min_height
         .set_u16(12, 32767) // max_width
         .set_u16(14, 32767) // max_height
         .build()

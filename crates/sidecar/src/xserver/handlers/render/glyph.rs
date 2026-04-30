@@ -45,7 +45,14 @@ pub(crate) fn handle_free_glyphset(state: &mut ClientState, data: &[u8], seq: u1
 /// ReferenceGlyphSet (RENDER minor opcode 18).
 /// Creates a new glyphset that shares glyphs with an existing one.
 pub(crate) fn handle_reference_glyphset(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
-    let req = parse_minor!(ReferenceGlyphSetRequest, data, state, seq, 139, data[1] as u16);
+    let req = parse_minor!(
+        ReferenceGlyphSetRequest,
+        data,
+        state,
+        seq,
+        139,
+        data[1] as u16
+    );
 
     let new_gsid = req.gsid;
     let existing_gsid = req.existing;

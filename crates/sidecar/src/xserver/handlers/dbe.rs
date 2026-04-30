@@ -1,7 +1,7 @@
 //! DBE (Double Buffer Extension) handler.
 
-use tracing::debug;
 use super::parse_minor;
+use tracing::debug;
 
 use super::super::client::ClientState;
 use crate::framebuffer::Framebuffer;
@@ -26,7 +26,14 @@ pub(crate) fn handle_dbe_request(state: &mut ClientState, data: &[u8], seq: u16)
             // AllocateBackBufferName
             require_len!(data, 16, seq, 157, minor as u16, state.msb_first);
             use x11rb_protocol::protocol::dbe::AllocateBackBufferRequest;
-            let req = parse_minor!(AllocateBackBufferRequest, data, state, seq, 157, minor as u16);
+            let req = parse_minor!(
+                AllocateBackBufferRequest,
+                data,
+                state,
+                seq,
+                157,
+                minor as u16
+            );
             let window_id = req.window;
             let back_buffer_id = req.buffer;
             let _swap_action = u8::from(req.swap_action); // Undefined, Background, Untouched, Copied
@@ -59,7 +66,14 @@ pub(crate) fn handle_dbe_request(state: &mut ClientState, data: &[u8], seq: u16)
             // DeallocateBackBufferName
             require_len!(data, 8, seq, 157, minor as u16, state.msb_first);
             use x11rb_protocol::protocol::dbe::DeallocateBackBufferRequest;
-            let req = parse_minor!(DeallocateBackBufferRequest, data, state, seq, 157, minor as u16);
+            let req = parse_minor!(
+                DeallocateBackBufferRequest,
+                data,
+                state,
+                seq,
+                157,
+                minor as u16
+            );
             let back_buffer_id = req.buffer;
             debug!("DBE DeallocateBackBuffer: buffer={back_buffer_id:#x}");
             state.pixmaps.remove(&back_buffer_id);
@@ -172,26 +186,29 @@ pub(crate) fn handle_dbe_request(state: &mut ClientState, data: &[u8], seq: u16)
             let screen_info_size = 4 + per_depth_size; // n_perfdepth(4) + depths
             let extra = 4 + screen_info_size; // n_screens already in header, then screen data
             let padded = (extra + 3) & !3;
-            let mut reply = ReplyBuf::with_extra(seq, padded, state.msb_first)
-                .set_u32(8, n_screens);
+            let mut reply =
+                ReplyBuf::with_extra(seq, padded, state.msb_first).set_u32(8, n_screens);
             // Screen 0
             let off = 32;
             reply = reply.set_u32(off, 1); // n_perfdepth = 1
 
             // PerflDepthInfo
             let doff = off + 4;
-            reply = reply.set_u8(doff, 24) // depth
+            reply = reply
+                .set_u8(doff, 24) // depth
                 .set_u16(doff + 2, n_visuals);
 
             // Visual 0: ROOT_VISUAL (24-bit)
             let voff = doff + 4;
-            reply = reply.set_u32(voff, 0x21) // ROOT_VISUAL
+            reply = reply
+                .set_u32(voff, 0x21) // ROOT_VISUAL
                 .set_u8(voff + 4, 24) // depth
                 .set_u8(voff + 5, 0); // performance level
 
             // Visual 1: ARGB visual (32-bit)
             let voff2 = voff + 8;
-            reply = reply.set_u32(voff2, 0x40) // ARGB visual
+            reply = reply
+                .set_u32(voff2, 0x40) // ARGB visual
                 .set_u8(voff2 + 4, 32)
                 .set_u8(voff2 + 5, 0);
 
@@ -201,7 +218,14 @@ pub(crate) fn handle_dbe_request(state: &mut ClientState, data: &[u8], seq: u16)
             // GetBackBufferAttributes
             require_len!(data, 8, seq, 157, minor as u16, state.msb_first);
             use x11rb_protocol::protocol::dbe::GetBackBufferAttributesRequest;
-            let req = parse_minor!(GetBackBufferAttributesRequest, data, state, seq, 157, minor as u16);
+            let req = parse_minor!(
+                GetBackBufferAttributesRequest,
+                data,
+                state,
+                seq,
+                157,
+                minor as u16
+            );
             let back_buffer_id = req.buffer;
             let window_id = state
                 .back_buffers

@@ -12,7 +12,10 @@ use x11rb_protocol::protocol::xproto::{
 // Opcode 2: ChangeWindowAttributes
 // ---------------------------------------------------------------------------
 
-pub(crate) fn handle_change_window_attributes(state: &mut ClientState, req: &ChangeWindowAttributesRequest) -> Vec<u8> {
+pub(crate) fn handle_change_window_attributes(
+    state: &mut ClientState,
+    req: &ChangeWindowAttributesRequest,
+) -> Vec<u8> {
     let seq = state.sequence;
     let wid = req.window;
     let vl = &*req.value_list;
@@ -56,11 +59,11 @@ pub(crate) fn handle_change_window_attributes(state: &mut ClientState, req: &Cha
     // event-mask: check SubstructureRedirect/ResizeRedirect mutual exclusion per X11 spec Section 12.3
     if let Some(em) = vl.event_mask {
         let val = u32::from(em);
-        if let Some(_conflict) = state.event_broadcaster.check_redirect_conflict(
-            wid,
-            val,
-            &state.client_id,
-        ) {
+        if let Some(_conflict) =
+            state
+                .event_broadcaster
+                .check_redirect_conflict(wid, val, &state.client_id)
+        {
             return build_error(ACCESS_ERROR, seq, 0, 2, 0);
         }
     }
@@ -114,11 +117,13 @@ pub(crate) fn handle_change_window_attributes(state: &mut ClientState, req: &Cha
             let val = u32::from(em);
             win.event_mask = val;
             // SubstructureRedirectMask = bit 20 = 0x0010_0000
-            if wid == state.root_window && (val & EventMask::SUBSTRUCTURE_REDIRECT != EventMask::NO_EVENT) {
+            if wid == state.root_window
+                && (val & EventMask::SUBSTRUCTURE_REDIRECT != EventMask::NO_EVENT)
+            {
                 info!(
-                        "Client {} registering as window manager (SubstructureRedirectMask on root)",
-                        state.client_id
-                    );
+                    "Client {} registering as window manager (SubstructureRedirectMask on root)",
+                    state.client_id
+                );
                 if let Ok(mut wm) = state.wm_state.lock() {
                     wm.client_id = Some(state.client_id.clone());
                     wm.event_tx = Some(state.wm_events_tx.clone());
@@ -134,7 +139,9 @@ pub(crate) fn handle_change_window_attributes(state: &mut ClientState, req: &Cha
             // Colormap: 0 = CopyFromParent
             let old_cmap = win.colormap;
             win.colormap = val;
-            if val != old_cmap && (win.event_mask & EventMask::COLOR_MAP_CHANGE != EventMask::NO_EVENT) {
+            if val != old_cmap
+                && (win.event_mask & EventMask::COLOR_MAP_CHANGE != EventMask::NO_EVENT)
+            {
                 deferred_colormap_notify = Some((old_cmap, val));
             }
         }
@@ -154,14 +161,17 @@ pub(crate) fn handle_change_window_attributes(state: &mut ClientState, req: &Cha
 
     // Generate ColormapNotify when the window's colormap attribute changes
     if let Some((_old_cmap, new_cmap)) = deferred_colormap_notify {
-        let event = serialize_event(&ColormapNotifyEvent {
-            response_type: COLOURMAP_NOTIFY_EVENT,
-            sequence: 0,
-            window: wid,
-            colormap: new_cmap,
-            new: true,
-            state: XColormapState::INSTALLED,
-        }, state.msb_first);
+        let event = serialize_event(
+            &ColormapNotifyEvent {
+                response_type: COLOURMAP_NOTIFY_EVENT,
+                sequence: 0,
+                window: wid,
+                colormap: new_cmap,
+                new: true,
+                state: XColormapState::INSTALLED,
+            },
+            state.msb_first,
+        );
         state.pending_events.push(event.clone());
         state.broadcast_event(wid, EventMask::COLOR_MAP_CHANGE, &event);
     }
@@ -237,7 +247,11 @@ pub(crate) fn handle_get_window_attributes(
                 None => break,
             }
         }
-        if viewable { 2 } else { 1 }
+        if viewable {
+            2
+        } else {
+            1
+        }
     };
     let mut reply = ReplyBuf::with_extra(seq, 12, state.msb_first)
         .set_data_byte(win.backing_store)
@@ -263,7 +277,7 @@ pub(crate) fn handle_get_window_attributes(
         .set_u32(32, win.event_mask | remote_masks) // all_event_masks
         .set_u32(36, win.event_mask) // your_event_mask
         .set_u16(40, win.do_not_propagate_mask as u16); // do_not_propagate_mask
-    // bytes 42-43: unused padding
+                                                        // bytes 42-43: unused padding
 
     reply.build()
 }
@@ -272,7 +286,10 @@ pub(crate) fn handle_get_window_attributes(
 // Opcode 6: ChangeSaveSet
 // ---------------------------------------------------------------------------
 
-pub(crate) fn handle_change_save_set(state: &mut ClientState, req: &ChangeSaveSetRequest) -> Vec<u8> {
+pub(crate) fn handle_change_save_set(
+    state: &mut ClientState,
+    req: &ChangeSaveSetRequest,
+) -> Vec<u8> {
     let _seq = state.sequence;
     let mode: u8 = req.mode.into();
     let window = req.window;

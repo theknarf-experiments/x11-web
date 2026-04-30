@@ -250,12 +250,27 @@ pub(crate) async fn handle_client(
     let actual_extra = reply_bytes.len() - 8;
     {
         use std::io::Write as _;
-        if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open("/tmp/glx_replies.log") {
+        if let Ok(mut f) = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open("/tmp/glx_replies.log")
+        {
             if declared_len * 4 != actual_extra {
-                let _ = writeln!(f, "SETUP_MISMATCH declared={}({}B) actual_extra={}B total={}B",
-                                 declared_len, declared_len * 4, actual_extra, reply_bytes.len());
+                let _ = writeln!(
+                    f,
+                    "SETUP_MISMATCH declared={}({}B) actual_extra={}B total={}B",
+                    declared_len,
+                    declared_len * 4,
+                    actual_extra,
+                    reply_bytes.len()
+                );
             } else {
-                let _ = writeln!(f, "SETUP_OK total={}B extra={}B", reply_bytes.len(), declared_len * 4);
+                let _ = writeln!(
+                    f,
+                    "SETUP_OK total={}B extra={}B",
+                    reply_bytes.len(),
+                    declared_len * 4
+                );
             }
         }
     }
