@@ -31,7 +31,6 @@ use super::parse_minor;
 use crate::xserver::core::require_len;
 
 /// DRI3 major opcode (assigned in QueryExtension).
-#[allow(dead_code)]
 pub(crate) const DRI3_MAJOR_OPCODE: u8 = 149;
 
 /// Build a DRI3 protocol error reply.

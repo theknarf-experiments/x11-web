@@ -93,7 +93,6 @@ impl ClientState {
     }
 
     /// Find a RandR provider by ID.
-    #[allow(dead_code)]
     pub(crate) fn randr_find_provider(&self, id: u32) -> Option<&RandrProvider> {
         self.randr_providers.iter().find(|p| p.id == id)
     }

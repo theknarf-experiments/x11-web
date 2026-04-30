@@ -14,8 +14,6 @@ use tracing::{debug, info, warn};
 pub use scalable::ScalableFont;
 pub use types::BitmapFont;
 // Re-exported for tests and downstream consumers
-#[allow(unused_imports)]
-pub use types::{CharInfo, GlyphBitmap};
 
 // ---------------------------------------------------------------------------
 // FreeType library singleton

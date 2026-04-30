@@ -8,7 +8,6 @@ use crate::xserver::core::require_len;
 use crate::xserver::reply::ReplyBuf;
 
 /// Screen saver window attributes stored by MIT-SCREEN-SAVER SetAttributes.
-#[allow(dead_code)]
 pub(crate) struct ScreenSaverAttrs {
     pub(crate) x: i16,
     pub(crate) y: i16,

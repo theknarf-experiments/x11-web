@@ -65,7 +65,6 @@ impl ClientState {
     }
 
     /// Check if a drawable exists (local windows, local pixmaps, or shared pixmaps).
-    #[allow(dead_code)]
     pub(crate) fn drawable_exists(&self, drawable: u32) -> bool {
         self.windows.contains_key(&drawable)
             || self.pixmaps.contains_key(&drawable)
@@ -77,7 +76,6 @@ impl ClientState {
     }
 
     /// Look up a GC by ID, including cross-connection shared GCs.
-    #[allow(dead_code)]
     pub(crate) fn get_gc(&self, gc_id: u32) -> Option<GcState> {
         if let Some(gc) = self.gcs.get(&gc_id) {
             return Some(gc.clone());

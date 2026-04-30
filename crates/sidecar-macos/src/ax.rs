@@ -177,7 +177,6 @@ pub fn perform_action(element: &AXUIElement, action: &'static str) -> Result<(),
 /// Names of actions the element advertises. Empty when the element
 /// has no actions or the call fails. Used to verify a target
 /// element actually supports the action we're about to dispatch.
-#[allow(dead_code)]
 pub fn advertised_action_names(element: &AXUIElement) -> Vec<String> {
     let mut raw: *const CFArray = std::ptr::null();
     let result = unsafe { element.copy_action_names(NonNull::new_unchecked(&mut raw)) };
@@ -196,7 +195,6 @@ pub fn advertised_action_names(element: &AXUIElement) -> Vec<String> {
 /// Convenience: process ID that owns the AX element. Useful for
 /// FocusGuard's "is target already frontmost?" check and for
 /// applying enablement attributes against the right pid.
-#[allow(dead_code)]
 pub fn pid_of(element: &AXUIElement) -> Option<i32> {
     let mut pid: libc::pid_t = 0;
     extern "C-unwind" {

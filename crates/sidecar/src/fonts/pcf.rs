@@ -19,7 +19,6 @@ const PCF_ACCEL_W_INKBOUNDS: u32 = 0x00000100;
 const PCF_COMPRESSED_METRICS: u32 = 0x00000100;
 const PCF_BYTE_MASK: u32 = 1 << 2; // MSB byte order
 const PCF_BIT_MASK: u32 = 1 << 3; // MSB bit order
-#[allow(dead_code)]
 const PCF_GLYPH_PAD_MASK: u32 = 3; // 2 bits for glyph padding
 
 fn pcf_read_u32(data: &[u8], offset: usize, msb: bool) -> u32 {
@@ -64,7 +63,6 @@ fn pcf_read_i32(data: &[u8], offset: usize, msb: bool) -> i32 {
 
 struct PcfTable {
     table_type: u32,
-    #[allow(dead_code)]
     format: u32,
     size: u32,
     offset: u32,

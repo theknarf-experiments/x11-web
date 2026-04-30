@@ -4,7 +4,6 @@
 //! Generated from Mesa 22.3.6 (Debian Bookworm).
 
 #![allow(non_upper_case_globals)]
-#![allow(dead_code)]
 
 // --- GLX Single Operation opcodes (X_GLsop_*) ---
 // Used for GL queries that require a reply (glGet*, glIs*, etc.)

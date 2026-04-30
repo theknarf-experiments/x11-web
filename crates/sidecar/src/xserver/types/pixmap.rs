@@ -20,7 +20,6 @@ pub(crate) struct PixmapState {
 /// validate references. The actual framebuffer data is proxied through
 /// the owning connection via SharedPixmapFbs.
 #[derive(Clone)]
-#[allow(dead_code)]
 pub(crate) struct SharedPixmapMeta {
     pub(crate) width: u16,
     pub(crate) height: u16,

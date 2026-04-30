@@ -19,7 +19,6 @@ pub(crate) struct SelectionEntry {
 
 /// Events emitted by the selection subsystem for the clipboard bridge.
 #[derive(Debug, Clone)]
-#[allow(dead_code)]
 pub enum ClipboardEvent {
     /// Selection ownership changed.
     OwnerChanged { selection: String, owner: u32 },
@@ -33,7 +32,6 @@ pub enum ClipboardEvent {
 
 /// Server-side clipboard data set by the backend (for pasting from browser into X11 apps).
 #[derive(Clone)]
-#[allow(dead_code)]
 pub(crate) struct ServerClipboardData {
     pub(crate) mime_type: String,
     pub(crate) data: Vec<u8>,
@@ -45,7 +43,6 @@ pub(crate) type SharedClipboard = Arc<Mutex<HashMap<String, ServerClipboardData>
 /// Proxy window ID used by the server for clipboard operations.
 /// This is a well-known window ID that never conflicts with client resource IDs
 /// (client IDs start at base = (conn_index+1) << 22, so 0x10 is safe).
-#[allow(dead_code)]
 pub(crate) const CLIPBOARD_PROXY_WINDOW: u32 = 0x00000010;
 
 /// Window ID used by the server's clipboard manager for persistence.
@@ -75,7 +72,6 @@ pub(crate) struct IncrTransfer {
     pub(crate) requestor: u32,
     pub(crate) property: u32,
     /// Selection atom this transfer belongs to (needed for multi-selection disambiguation).
-    #[allow(dead_code)]
     pub(crate) selection: u32,
     pub(crate) target: u32,
     pub(crate) data: Vec<u8>,

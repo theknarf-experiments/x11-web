@@ -37,17 +37,14 @@ const MAX_KEY_CODE: u8 = 255;
 const N_KEYS: usize = (MAX_KEY_CODE - MIN_KEY_CODE + 1) as usize; // 248
 
 // XKB action types
-#[allow(dead_code)]
 const SA_NO_ACTION: u8 = 0;
 const SA_SET_MODS: u8 = 1;
 const SA_LOCK_MODS: u8 = 3;
 const SA_SET_GROUP: u8 = 4;
-#[allow(dead_code)]
 const SA_LATCH_GROUP: u8 = 5;
 const SA_LOCK_GROUP: u8 = 6;
 
 // XKB behavior types
-#[allow(dead_code)]
 const KB_DEFAULT: u8 = 0;
 const KB_LOCK: u8 = 1;
 
@@ -61,15 +58,12 @@ const MAX_GROUPS: u8 = 4;
 const XKB_REPEAT_KEYS_MASK: u32 = 1 << 0;
 const XKB_SLOW_KEYS_MASK: u32 = 1 << 1;
 const XKB_BOUNCE_KEYS_MASK: u32 = 1 << 2;
-#[allow(dead_code)]
 const XKB_STICKY_KEYS_MASK: u32 = 1 << 3;
 const XKB_MOUSE_KEYS_MASK: u32 = 1 << 4;
-#[allow(dead_code)]
 const XKB_MOUSE_KEYS_ACCEL_MASK: u32 = 1 << 5;
 const XKB_ACCESS_X_KEYS_MASK: u32 = 1 << 6;
 const XKB_ACCESS_X_TIMEOUT_MASK: u32 = 1 << 7;
 const XKB_ACCESS_X_FEEDBACK_MASK: u32 = 1 << 8;
-#[allow(dead_code)]
 const XKB_AUDIBLE_BELL_MASK: u32 = 1 << 9;
 const XKB_ALL_BOOLEAN_CTRLS_MASK: u32 = (1 << 10) - 1;
 

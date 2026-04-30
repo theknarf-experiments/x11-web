@@ -437,7 +437,6 @@ ffi_fn!(FnGlBindVertexArray, (array: u32));
 ffi_fn!(FnGlFramebufferRenderbuffer, (target: u32, attachment: u32, renderbuffertarget: u32, renderbuffer: u32));
 
 /// Holds resolved function pointers to libOSMesa and GL.
-#[allow(dead_code)]
 struct OsMesaFns {
     // Library handle for additional symbol resolution
     lib_handle: *mut c_void,
@@ -1817,7 +1816,6 @@ impl MesaContext {
 
     /// Copy the OSMesa RGBA buffer into an X11 framebuffer (BGRA/XRGB format).
     /// The framebuffer uses A8R8G8B8 (BGRA in memory on LE).
-    #[allow(dead_code)]
     pub fn blit_to_framebuffer(&self, fb: &mut crate::framebuffer::Framebuffer) {
         let w = self.width.min(fb.width()) as usize;
         let h = self.height.min(fb.height()) as usize;

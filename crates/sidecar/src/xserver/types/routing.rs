@@ -258,7 +258,6 @@ impl EventBroadcaster {
     }
 
     /// Unsubscribe a client from a specific window.
-    #[allow(dead_code)]
     pub(crate) fn unsubscribe_window(&self, window_id: u32, client_id: &str) {
         if let Ok(mut subs) = self.subscriptions.lock() {
             if let Some(list) = subs.get_mut(&window_id) {
@@ -346,7 +345,6 @@ impl EventBroadcaster {
     }
 
     /// Get the event mask a specific client has subscribed to on a window.
-    #[allow(dead_code)]
     pub(crate) fn client_event_mask(&self, window_id: u32, client_id: &str) -> u32 {
         if let Ok(subs) = self.subscriptions.lock() {
             if let Some(list) = subs.get(&window_id) {
@@ -372,7 +370,6 @@ impl EventBroadcaster {
 
     /// Broadcast an event to ALL clients on the given window (e.g., MappingNotify).
     /// Does not filter by event mask or source client.
-    #[allow(dead_code)]
     pub(crate) fn broadcast_all(&self, window_id: u32, event: &[u8]) -> usize {
         let mut delivered = 0;
         if let Ok(subs) = self.subscriptions.lock() {

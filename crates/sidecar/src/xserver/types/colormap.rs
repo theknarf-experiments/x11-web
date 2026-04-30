@@ -7,7 +7,6 @@ use x11rb_protocol::protocol::xproto::VisualClass;
 #[derive(Clone)]
 pub(crate) struct ColormapState {
     /// Visual ID this colormap is associated with.
-    #[allow(dead_code)]
     pub(crate) visual: u32,
     /// Visual class of this colormap.
     pub(crate) visual_class: VisualClass,

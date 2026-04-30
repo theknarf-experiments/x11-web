@@ -152,7 +152,6 @@ fn boolean(
 
 // Suppress unused warning: CFArray import is needed for trait resolution
 // on .len() / .iter() above.
-#[allow(dead_code)]
 const _: fn() = || {
     let _ = std::mem::size_of::<CFArray<CFType>>();
 };

@@ -7,7 +7,6 @@ use super::super::super::client::{ClientState, XkbGroupCompat, XkbSymInterpretat
 use super::{SA_LOCK_MODS, SA_NO_ACTION, SA_SET_MODS};
 
 // XKB SI flags
-#[allow(dead_code)]
 const SI_AUTO_REPEAT: u8 = 1;
 const SI_LOCKING_KEY: u8 = 2;
 

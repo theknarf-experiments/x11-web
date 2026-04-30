@@ -25,7 +25,7 @@ pub use types::{BackendToSidecar, SidecarToBackend};
 /// Generated Cap'n Proto types. The build script writes this module
 /// to `$OUT_DIR/wire_capnp.rs`; we `include!` it so it appears as
 /// `wire_capnp` in our crate.
-#[allow(dead_code, clippy::all)]
+#[allow(clippy::all)]
 pub mod wire_capnp {
     include!(concat!(env!("OUT_DIR"), "/wire_capnp.rs"));
 }

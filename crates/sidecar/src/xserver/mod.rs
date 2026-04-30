@@ -7,12 +7,10 @@ pub(crate) mod atoms;
 pub(crate) mod byteswap;
 pub(crate) mod client;
 pub(crate) mod connection;
-#[allow(dead_code)]
 pub(crate) mod core;
 mod dispatch;
 pub(crate) mod event;
 pub(crate) mod extensions;
-#[allow(dead_code)]
 pub(crate) mod grab;
 pub(crate) mod handlers;
 pub(crate) mod input;

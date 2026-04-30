@@ -86,7 +86,6 @@ pub(crate) type SharedSecurityTokens = Arc<Mutex<HashMap<[u8; 16], SecurityToken
 
 /// Info for a SECURITY-generated authorization token.
 #[derive(Clone, Debug)]
-#[allow(dead_code)]
 pub(crate) struct SecurityTokenInfo {
     pub(crate) auth_id: u32,
     pub(crate) trust_level: u32, // 0 = trusted, 1 = untrusted
@@ -107,7 +106,6 @@ impl SecurityTokenInfo {
 pub(crate) type SharedRecordContexts = Arc<Mutex<HashMap<u32, SharedRecordEntry>>>;
 
 /// Entry in the shared RECORD registry.
-#[allow(dead_code)]
 pub(crate) struct SharedRecordEntry {
     pub(crate) recording_client_id: String,
     pub(crate) recording_resource_base: u32,

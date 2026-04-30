@@ -1,12 +1,10 @@
 mod audio;
 mod colors;
-#[allow(dead_code)]
 mod compose;
 mod fonts;
 mod framebuffer;
 mod menus;
 #[cfg(feature = "osmesa")]
-#[allow(dead_code)]
 mod osmesa;
 mod xinput2;
 mod xserver;
@@ -143,7 +141,6 @@ impl ProcessManager {
 /// process; dropping it would let dbus-daemon exit.
 struct DbusSession {
     address: String,
-    #[allow(dead_code)]
     daemon: Child,
 }
 

@@ -296,5 +296,4 @@ fn sym<T: Copy>(name: &[u8]) -> Option<T> {
 
 // Silence unused-warnings on c_int — kept exported because callers in
 // later commits will need the type to declare PSN buffers etc.
-#[allow(dead_code)]
 const _: c_int = 0;

@@ -222,7 +222,6 @@ pub fn gl_tex_sub_image_2d(
     }
 }
 
-#[allow(dead_code)]
 pub fn gl_read_pixels(
     x: i32,
     y: i32,
@@ -455,26 +454,22 @@ pub fn gl_hint(target: u32, mode: u32) {
     }
 }
 
-#[allow(dead_code)]
 pub fn gl_get_integerv(pname: u32, params: &mut [i32]) {
     unsafe {
         (fns().get_integerv)(pname, params.as_mut_ptr());
     }
 }
 
-#[allow(dead_code)]
 pub fn gl_get_floatv(pname: u32, params: &mut [f32]) {
     unsafe {
         (fns().get_floatv)(pname, params.as_mut_ptr());
     }
 }
 
-#[allow(dead_code)]
 pub fn gl_get_error() -> u32 {
     unsafe { (fns().get_error)() }
 }
 
-#[allow(dead_code)]
 pub fn gl_get_string(name: u32) -> String {
     let ptr = unsafe { (fns().get_string)(name) };
     if ptr.is_null() {

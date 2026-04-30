@@ -641,7 +641,6 @@ fn cached_xkb_key_names() -> &'static [[u8; 4]; 248] {
 }
 
 /// 4-character XKB key names for keycodes 8..255.
-#[allow(dead_code)]
 pub(crate) fn us_qwerty_key_names() -> [&'static [u8; 4]; 248] {
     let cache = cached_xkb_key_names();
     let mut out: [&'static [u8; 4]; 248] = [b"K   "; 248];
@@ -653,7 +652,6 @@ pub(crate) fn us_qwerty_key_names() -> [&'static [u8; 4]; 248] {
 
 /// Standard US-QWERTY keysyms keyed by physical X11 keycode (8..255), pulled
 /// straight from libxkbcommon's evdev/pc105/us layout.
-#[allow(dead_code)]
 pub(crate) fn us_qwerty_keysyms() -> [u32; 248] {
     crate::xserver::handlers::default_keymap::default_keysym_array()
 }

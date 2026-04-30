@@ -1029,7 +1029,6 @@ impl Framebuffer {
     }
 
     /// Simple fill_polygon (backward compat, EvenOdd, GXcopy).
-    #[allow(dead_code)]
     pub fn fill_polygon(&mut self, points: &[(i16, i16)], color: u32) {
         self.fill_polygon_gc(points, color, 0, 3, 0xFFFFFFFF, &[]);
     }

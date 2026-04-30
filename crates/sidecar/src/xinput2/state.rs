@@ -7,7 +7,6 @@ use super::{Xi2ActiveGrab, Xi2PassiveGrab, MASTER_KEYBOARD_ID, MASTER_POINTER_ID
 use crate::xinput2::{PendingSynthetic, ValuatorState, XiSelection};
 
 /// Maximum number of frozen XI2 events before oldest are dropped.
-#[allow(dead_code)]
 const MAX_XI2_FROZEN_EVENTS: usize = 4096;
 
 /// Per-client XI state stored on `ClientState`.
@@ -59,7 +58,6 @@ impl Default for XiState {
     }
 }
 
-#[allow(dead_code)]
 impl XiState {
     /// Check if a passive grab should activate for the given event.
     /// Returns the matching passive grab if found.

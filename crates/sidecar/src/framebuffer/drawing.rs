@@ -2,7 +2,6 @@ use super::{apply_gc_function, point_in_clip_rects, DashState, Framebuffer};
 
 impl Framebuffer {
     /// Draw a line using Bresenham's algorithm (simple version, GXcopy).
-    #[allow(dead_code)]
     pub fn draw_line(&mut self, x0: i32, y0: i32, x1: i32, y1: i32, color: u32, line_width: u16) {
         self.draw_line_gc(
             x0,
@@ -944,7 +943,6 @@ impl Framebuffer {
         }
     }
 
-    #[allow(dead_code)]
     fn bresenham_line(&mut self, x0: i32, y0: i32, x1: i32, y1: i32, color: u32) {
         let dx = (x1 - x0).abs();
         let dy = -(y1 - y0).abs();

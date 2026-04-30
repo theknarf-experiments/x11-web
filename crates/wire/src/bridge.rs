@@ -24,7 +24,6 @@ use crate::types::{BackendToSidecar, SidecarToBackend};
 use crate::wire_capnp;
 
 #[derive(Debug)]
-#[allow(dead_code)]
 pub enum BridgeError {
     /// A wire-side variant the bridge doesn't translate. Reserved
     /// for forward-compat: schema additions can return this without

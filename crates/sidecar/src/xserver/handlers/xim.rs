@@ -49,7 +49,6 @@ const XIM_SET_IC_VALUES_REPLY: u8 = 61;
 const XIM_GET_IC_VALUES: u8 = 62;
 const XIM_GET_IC_VALUES_REPLY: u8 = 63;
 const XIM_TRIGGER_NOTIFY: u8 = 35;
-#[allow(dead_code)]
 const XIM_TRIGGER_NOTIFY_REPLY: u8 = 36;
 const XIM_SET_IC_FOCUS: u8 = 68;
 const XIM_UNSET_IC_FOCUS: u8 = 69;
@@ -66,14 +65,12 @@ const XIM_STR_CONVERSION: u8 = 67;
 const XIM_PREEDIT_CALLBACKS: u32 = 0x0002;
 const XIM_PREEDIT_POSITION: u32 = 0x0004;
 const XIM_PREEDIT_NOTHING: u32 = 0x0008;
-#[allow(dead_code)]
 const XIM_STATUS_CALLBACKS: u32 = 0x0020;
 const XIM_STATUS_NOTHING: u32 = 0x0400;
 
 // XIM preedit callback opcodes
 const XIM_PREEDIT_START: u8 = 70;
 const XIM_PREEDIT_DRAW: u8 = 72;
-#[allow(dead_code)]
 const XIM_PREEDIT_CARET: u8 = 73;
 const XIM_PREEDIT_DONE: u8 = 74;
 const XIM_PREEDIT_START_REPLY: u8 = 71;
@@ -83,7 +80,6 @@ const XN_INPUT_STYLE: u16 = 0;
 const XN_CLIENT_WINDOW: u16 = 1;
 const XN_FOCUS_WINDOW: u16 = 2;
 const XN_PREEDIT_ATTRIBUTES: u16 = 3;
-#[allow(dead_code)]
 const XN_STATUS_ATTRIBUTES: u16 = 4;
 const XN_SPOT_LOCATION: u16 = 5;
 
@@ -1143,7 +1139,6 @@ fn handle_xim_sync(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
 }
 
 /// Send XIM_PREEDIT_CARET to notify the client of a caret position change.
-#[allow(dead_code)]
 pub(crate) fn send_xim_preedit_caret(
     state: &mut ClientState,
     im_id: u16,

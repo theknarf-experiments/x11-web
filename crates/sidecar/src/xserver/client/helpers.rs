@@ -37,7 +37,6 @@ impl ClientState {
 
     /// Push an event to the pending_events queue, enforcing the max limit.
     /// When the limit is exceeded, the oldest event is dropped.
-    #[allow(dead_code)]
     pub(crate) fn push_pending_event(&mut self, event: Vec<u8>) {
         if self.pending_events.len() >= self.resource_limits.max_pending_events {
             // Drop oldest events to make room

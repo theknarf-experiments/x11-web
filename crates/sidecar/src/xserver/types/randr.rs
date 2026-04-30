@@ -129,7 +129,6 @@ pub(crate) struct RandrMonitor {
 
 /// RandR output property configuration (stored by ConfigureOutputProperty).
 #[derive(Clone, Debug)]
-#[allow(dead_code)]
 pub(crate) struct OutputPropertyConfig {
     pub(crate) pending: bool,
     pub(crate) range: bool,
@@ -140,11 +139,8 @@ pub(crate) struct OutputPropertyConfig {
 pub(crate) const RANDR_EVENT_BASE: u8 = 89;
 
 /// RandR event select mask bits.
-#[allow(dead_code)]
 pub(crate) const RR_SCREEN_CHANGE_NOTIFY_MASK: u32 = 1 << 0;
-#[allow(dead_code)]
 pub(crate) const RR_CRTC_CHANGE_NOTIFY_MASK: u32 = 1 << 1;
-#[allow(dead_code)]
 pub(crate) const RR_OUTPUT_CHANGE_NOTIFY_MASK: u32 = 1 << 2;
 
 /// Generate a minimal valid EDID blob (128 bytes).

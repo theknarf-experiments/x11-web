@@ -360,7 +360,6 @@ fn rgb_to_yuv_bt601(r: u8, g: u8, b: u8) -> (u8, u8, u8) {
 
 /// Convert ARGB32 framebuffer data to the requested FOURCC format.
 /// Returns None if the format is not supported for export.
-#[allow(dead_code)]
 fn convert_argb_to_format(argb: &[u8], width: u32, height: u32, fourcc: u32) -> Option<Vec<u8>> {
     match fourcc {
         FOURCC_I420 => Some(convert_argb_to_i420(argb, width, height)),

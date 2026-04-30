@@ -39,7 +39,6 @@ use crate::xserver::request::request_header;
 // ---------------------------------------------------------------------------
 
 /// GLX major opcode (assigned in QueryExtension)
-#[allow(dead_code)]
 pub(crate) const GLX_MAJOR_OPCODE: u8 = 149;
 
 // GLX minor opcodes — re-exported from x11rb-protocol.
@@ -120,7 +119,6 @@ pub(crate) enum GlxDrawableKind {
 
 /// Metadata for a tracked GLX drawable.
 #[derive(Debug, Clone)]
-#[allow(dead_code)]
 pub(crate) struct GlxDrawable {
     pub(crate) kind: GlxDrawableKind,
     /// The X11 drawable (pixmap or window) backing this GLX drawable.

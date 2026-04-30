@@ -17,7 +17,7 @@ use x11rb_protocol::protocol::shm::{
 /// Handle MIT-SHM extension requests (major opcode 130).
 pub(crate) fn handle_shm_request(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
     let minor = data[1];
-    let bo = state.msb_first;
+    let _bo = state.msb_first;
     let shm_err = |code: u8, bad_value: u32| {
         crate::xserver::core::build_error(code, seq, bad_value, 130, minor as u16)
     };

@@ -109,7 +109,6 @@ impl XFixesRegion {
     }
 
     /// Expand the region by the given amounts on each side.
-    #[allow(dead_code)]
     pub(crate) fn expand(&self, left: i16, right: i16, top: i16, bottom: i16) -> XFixesRegion {
         let mut rects = Vec::with_capacity(self.rects.len());
         for r in &self.rects {

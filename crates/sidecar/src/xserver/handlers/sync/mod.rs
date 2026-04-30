@@ -27,7 +27,6 @@ pub(crate) struct SyncCounter {
     pub(crate) value_hi: i32,
     pub(crate) value_lo: u32,
     /// True if this is a system counter (e.g., SERVERTIME).
-    #[allow(dead_code)]
     pub(crate) is_system: bool,
 }
 
@@ -58,7 +57,6 @@ pub(crate) struct SyncAlarm {
 
 /// A SYNC fence for synchronization.
 #[derive(Clone, Debug)]
-#[allow(dead_code)]
 pub(crate) struct FenceState {
     /// The fence resource ID.
     pub(crate) id: u32,
@@ -72,7 +70,6 @@ pub(crate) struct FenceState {
 
 /// A single trigger condition for SYNC Await.
 #[derive(Clone, Debug)]
-#[allow(dead_code)]
 pub(crate) struct AwaitTrigger {
     pub(crate) counter_id: u32,
     pub(crate) value_type: u32,

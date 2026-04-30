@@ -23,7 +23,6 @@ impl ClientState {
     }
 
     /// Build an error reply in the client's byte order.
-    #[allow(dead_code)]
     pub(crate) fn error(
         &self,
         error_code: u8,
@@ -46,7 +45,6 @@ impl ClientState {
 
     /// Read a u16 from request data respecting client byte order.
     #[inline]
-    #[allow(dead_code)]
     pub(crate) fn read_u16(&self, data: &[u8], offset: usize) -> u16 {
         if self.msb_first {
             u16::from_be_bytes([data[offset], data[offset + 1]])
@@ -57,7 +55,6 @@ impl ClientState {
 
     /// Read a u32 from request data respecting client byte order.
     #[inline]
-    #[allow(dead_code)]
     pub(crate) fn read_u32(&self, data: &[u8], offset: usize) -> u32 {
         if self.msb_first {
             u32::from_be_bytes([
@@ -79,14 +76,12 @@ impl ClientState {
     /// Read a u32 from arbitrary data respecting client byte order.
     /// Same as `read_u32` but with a distinct name for clarity on non-request data.
     #[inline]
-    #[allow(dead_code)]
     pub(crate) fn read_u32_from(&self, data: &[u8], offset: usize) -> u32 {
         self.read_u32(data, offset)
     }
 
     /// Read an i16 from request data respecting client byte order.
     #[inline]
-    #[allow(dead_code)]
     pub(crate) fn read_i16(&self, data: &[u8], offset: usize) -> i16 {
         if self.msb_first {
             i16::from_be_bytes([data[offset], data[offset + 1]])
@@ -97,7 +92,6 @@ impl ClientState {
 
     /// Write a u16 into a reply buffer in the client's byte order.
     #[inline]
-    #[allow(dead_code)]
     pub(crate) fn write_u16(&self, buf: &mut [u8], offset: usize, val: u16) {
         let bytes = if self.msb_first {
             val.to_be_bytes()
@@ -109,7 +103,6 @@ impl ClientState {
 
     /// Write a u32 into a reply buffer in the client's byte order.
     #[inline]
-    #[allow(dead_code)]
     pub(crate) fn write_u32(&self, buf: &mut [u8], offset: usize, val: u32) {
         let bytes = if self.msb_first {
             val.to_be_bytes()
@@ -121,7 +114,6 @@ impl ClientState {
 
     /// Write an i16 into a reply buffer in the client's byte order.
     #[inline]
-    #[allow(dead_code)]
     pub(crate) fn write_i16(&self, buf: &mut [u8], offset: usize, val: i16) {
         let bytes = if self.msb_first {
             val.to_be_bytes()

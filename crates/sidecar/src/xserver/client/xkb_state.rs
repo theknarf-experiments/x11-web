@@ -174,7 +174,6 @@ pub(crate) struct XkbIndicatorMap {
 /// Fields are written by SetNamedIndicator and will be consumed by
 /// GetNamedIndicator when that handler is extended to echo client overrides.
 #[derive(Clone, Debug, Default)]
-#[allow(dead_code)]
 pub(crate) struct XkbNamedIndicator {
     /// Indicator index (0-31).
     pub(crate) index: u8,
@@ -193,7 +192,6 @@ pub(crate) struct XkbNamedIndicator {
 /// XKB key type definition: describes how modifiers select shift levels.
 /// Stored by SetMap for round-trip fidelity with GetMap.
 #[derive(Clone, Debug)]
-#[allow(dead_code)]
 pub(crate) struct XkbKeyType {
     pub(crate) mods_mask: u8,
     pub(crate) mods_mods: u8,
@@ -205,7 +203,6 @@ pub(crate) struct XkbKeyType {
 /// XKB key type map entry: modifier combination → level.
 /// Stored by SetMap for round-trip fidelity with GetMap.
 #[derive(Clone, Debug)]
-#[allow(dead_code)]
 pub(crate) struct XkbKTMapEntry {
     pub(crate) active: bool,
     pub(crate) mods_mask: u8,
@@ -217,7 +214,6 @@ pub(crate) struct XkbKTMapEntry {
 /// XKB modifier wire format: mask + real_mods + vmods.
 /// Stored by SetMap for round-trip fidelity with GetMap.
 #[derive(Clone, Debug)]
-#[allow(dead_code)]
 pub(crate) struct XkbModsWire {
     pub(crate) mask: u8,
     pub(crate) real_mods: u8,
@@ -228,7 +224,6 @@ pub(crate) struct XkbModsWire {
 /// Each action is 8 bytes on the wire; we store them as raw bytes
 /// for faithful round-trip with GetMap.
 #[derive(Clone, Debug)]
-#[allow(dead_code)]
 pub(crate) struct XkbAction {
     pub(crate) raw: [u8; 8],
 }
@@ -275,7 +270,6 @@ pub(crate) struct XkbGroupCompat {
 /// XKB key behavior: autorepeat, lock, radio group, etc.
 /// Stored by SetMap for round-trip fidelity with GetMap.
 #[derive(Clone, Debug)]
-#[allow(dead_code)]
 pub(crate) struct XkbKeyBehavior {
     pub(crate) behavior_type: u8,
     pub(crate) data: u8,

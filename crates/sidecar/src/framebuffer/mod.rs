@@ -230,7 +230,6 @@ impl Framebuffer {
     /// op). Used by clients that flip bits via XSetFunction +
     /// XFillRectangle to compute the complement of an image — most
     /// commonly the rendercheck `libreoffice_xrgb` "invert" subtest.
-    #[allow(dead_code)]
     pub fn invert_rect(&mut self, x: i16, y: i16, width: u16, height: u16) {
         let row_start = (x as i32).max(0) as usize;
         let row_end = ((x as i32 + width as i32).min(self.width as i32)).max(0) as usize;

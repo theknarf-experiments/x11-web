@@ -149,7 +149,6 @@ impl ScalableFont {
 
     /// Render text to an ARGB pixel buffer using FreeType's anti-aliased rasteriser.
     /// Returns (width, height, BGRX pixels with alpha).
-    #[allow(dead_code)]
     pub fn render_text_aa(&self, text: &[u8], fg: u32) -> (u16, u16, Vec<u8>) {
         let lib = super::ft_library();
         let face = match lib.new_face(&self.path, 0) {

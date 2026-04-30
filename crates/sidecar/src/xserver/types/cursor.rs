@@ -2,7 +2,6 @@
 
 /// Cursor metadata stored for RecolorCursor and bitmap cursor rendering.
 #[derive(Clone)]
-#[allow(dead_code)]
 pub(crate) struct CursorInfo {
     pub(crate) css_name: String,
     pub(crate) source_pixmap: u32,
@@ -30,7 +29,6 @@ pub(crate) struct CursorInfo {
 
 /// XFIXES pointer barrier (CreatePointerBarrier).
 #[derive(Clone, Debug)]
-#[allow(dead_code)]
 pub(crate) struct PointerBarrier {
     pub(crate) barrier_id: u32,
     pub(crate) window: u32,

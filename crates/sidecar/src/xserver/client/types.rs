@@ -2,7 +2,6 @@
 
 /// Security authorization token.
 #[derive(Clone, Debug)]
-#[allow(dead_code)]
 pub(crate) struct SecurityAuthorization {
     pub(crate) auth_id: u32,
     pub(crate) trust_level: u32, // 0 = trusted, 1 = untrusted

@@ -21,23 +21,9 @@ mod tests;
 
 // Re-export pub(crate) items for internal use across the crate.
 // These are used by submodules (handler, tests) via `use super::*`.
-#[allow(unused_imports)]
-pub(crate) use device::{
-    build_device_key_mapping_reply, build_device_modifier_mapping_reply,
-    build_list_input_devices_reply, build_master_keyboard_info, build_master_pointer_info,
-    build_open_device_reply, build_query_device_state_reply, fill_class_lengths,
-    keycode_to_keysym_xi, mods_from_state, query_device_reply_bytes, MAX_KEYCODE, MIN_KEYCODE,
-    N_POINTER_BUTTONS,
-};
-
-#[allow(unused_imports)]
-pub(crate) use events::{build_gesture_events, build_xi_pointer_event};
 
 // Re-export public items used by other modules in the crate.
-#[allow(unused_imports)]
-pub use events::{
-    build_raw_motion_event, build_raw_pointer_event, build_xi_events_for, patch_query_pointer_root,
-};
+pub use events::{build_raw_motion_event, build_xi_events_for, patch_query_pointer_root};
 
 pub use handler::handle_request;
 
@@ -49,9 +35,7 @@ pub use state::XiState;
 pub const XI_MAJOR_OPCODE: u8 = 131;
 /// Range reserved for XI legacy events. We never emit those (we use the
 /// XI2 generic-event path) but the value still has to be advertised.
-#[allow(dead_code)]
 pub const XI_FIRST_EVENT: u8 = 105;
-#[allow(dead_code)]
 pub const XI_FIRST_ERROR: u8 = 152;
 
 /// Device IDs we expose. Two master devices is the minimum modern XI
@@ -119,7 +103,6 @@ pub const AXIS_SCROLL_H: u16 = 3;
 /// `xi_reply_type` is the value placed at byte 1 of the reply (set to the
 /// XI minor opcode of the request being answered, matching the upstream
 /// xserver convention).
-#[allow(dead_code)]
 fn xi_reply_header(seq: u16, xi_reply_type: u8, length_units: u32, msb_first: bool) -> Vec<u8> {
     crate::xserver::reply::ReplyBuf::with_extra(seq, (length_units as usize) * 4, msb_first)
         .set_data_byte(xi_reply_type)
@@ -165,7 +148,6 @@ pub struct AxisValue {
 
 /// Active XI2 device grab (from XIGrabDevice).
 #[derive(Clone, Debug)]
-#[allow(dead_code)]
 pub struct Xi2ActiveGrab {
     /// The device that was grabbed.
     pub deviceid: xi::DeviceId,
@@ -183,7 +165,6 @@ pub struct Xi2ActiveGrab {
 
 /// Passive XI2 device grab (from XIPassiveGrabDevice).
 #[derive(Clone, Debug)]
-#[allow(dead_code)]
 pub struct Xi2PassiveGrab {
     /// The device the passive grab is for.
     pub deviceid: xi::DeviceId,

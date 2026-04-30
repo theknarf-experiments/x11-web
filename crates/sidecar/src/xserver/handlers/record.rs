@@ -104,7 +104,6 @@ impl RecordRange {
 
 /// RECORD context tracking state.
 #[derive(Clone, Debug)]
-#[allow(dead_code)]
 pub(crate) struct RecordContext {
     /// Context ID.
     pub(crate) id: u32,
