@@ -50,7 +50,7 @@ use objc2_app_kit::{
     NSApplicationActivationOptions, NSEvent, NSEventType, NSRunningApplication, NSWorkspace,
 };
 use objc2_core_foundation::CGPoint;
-use objc2_core_graphics::{CGEvent, CGEventField, CGEventType, CGMouseButton};
+use objc2_core_graphics::{CGEvent, CGEventField, CGEventFlags, CGEventType, CGMouseButton};
 use tracing::warn;
 use x11_web_protocol::InputEvent;
 
@@ -112,8 +112,198 @@ pub fn inject(route: WindowRoute, event: InputEvent) {
             // No-op for AX-only mode — mouseMoved doesn't help AX
             // dispatch.
         }
+        InputEvent::KeyPress { keycode, state } => {
+            send_key(&route, keycode, state, true);
+        }
+        InputEvent::KeyRelease { keycode, state } => {
+            send_key(&route, keycode, state, false);
+        }
         _ => {}
     }
+}
+
+/// Synthesize a keyboard event and post it to the target's pid.
+/// Mirrors cua-driver's `KeyboardInput.sendKey(...)`:
+///
+///   1. Build a `CGEvent` keyboard event with the macOS virtual
+///      key code and `keyDown` flag.
+///   2. Stamp `CGEventFlags` from the X11 modifier state mask so
+///      Cmd-, Shift-, Ctrl-, Alt- combos arrive as such.
+///   3. Post via `SLEventPostToPid` (no auth message in this first
+///      cut — we rely on the fallback `CGEvent.postToPid` if the
+///      SkyLight SPI wasn't resolvable). Auth-message envelope for
+///      Chromium-family acceptance can land in a follow-up.
+///
+/// Cua's note: keyboard goes through `CGEvent` rather than AX
+/// because AX has no general way to dispatch arrow keys, tab, or
+/// modifier combinations. This is the same path every Mac app uses
+/// for programmatic keyboard input — focus-steal concerns don't
+/// apply because the events route directly to the target pid.
+fn send_key(route: &WindowRoute, x11_keycode: u32, x11_state: u16, down: bool) {
+    let Some(vk) = x11_keycode_to_mac_vk(x11_keycode) else {
+        warn!("send_key: no macOS virtual key for X11 keycode {x11_keycode}");
+        return;
+    };
+    let flags = x11_state_to_cg_flags(x11_state);
+
+    let Some(cg_event) = CGEvent::new_keyboard_event(None, vk, down) else {
+        warn!("CGEventCreateKeyboardEvent returned null for vk={vk:#04x}");
+        return;
+    };
+    CGEvent::set_flags(Some(&cg_event), flags);
+
+    // Post via SkyLight first (Chromium needs CGSTickleActivityMonitor),
+    // fall back to public CGEvent.postToPid.
+    let raw_event_ptr: *mut std::os::raw::c_void =
+        (&*cg_event as *const CGEvent) as *mut std::os::raw::c_void;
+    let sky = probe();
+
+    // Attach the auth-message envelope before posting. Required by
+    // strict synthetic-event filters on macOS 14+ (Chromium, kitty,
+    // and probably others) — without it the event reaches the
+    // target's mach port but is filtered out before reaching the
+    // app's keyboard pipeline. Cua's `SkyLightEventPost.postToPid`
+    // attaches by default for keyboard (`attachAuthMessage: true`)
+    // and only skips it on the mouse path.
+    let _ = crate::skylight::attach_auth_message(raw_event_ptr, route.pid);
+
+    let posted_via_skylight = if let Some(post) = sky.fns.as_ref().map(|f| f.post_to_pid) {
+        unsafe { post(route.pid, raw_event_ptr) };
+        true
+    } else {
+        false
+    };
+    if !posted_via_skylight {
+        CGEvent::post_to_pid(route.pid, Some(&cg_event));
+    }
+}
+
+/// Map an X11 keycode (as produced by the frontend's
+/// `browserKeyToX11Keycode` — keyed on the browser's `event.code`,
+/// not `event.key`) to a macOS Carbon virtual-key value
+/// (`kVK_*`). Returns `None` for keycodes we don't translate; the
+/// caller logs and drops those rather than guessing.
+fn x11_keycode_to_mac_vk(keycode: u32) -> Option<u16> {
+    Some(match keycode {
+        // First row.
+        9 => 0x35,   // Escape -> kVK_Escape
+        10 => 0x12,  // 1
+        11 => 0x13,  // 2
+        12 => 0x14,  // 3
+        13 => 0x15,  // 4
+        14 => 0x17,  // 5
+        15 => 0x16,  // 6
+        16 => 0x1A,  // 7
+        17 => 0x1C,  // 8
+        18 => 0x19,  // 9
+        19 => 0x1D,  // 0
+        20 => 0x1B,  // -  (Minus)
+        21 => 0x18,  // =  (Equal)
+        22 => 0x33,  // Backspace -> kVK_Delete
+        // QWERTY row.
+        23 => 0x30,  // Tab
+        24 => 0x0C,  // q
+        25 => 0x0D,  // w
+        26 => 0x0E,  // e
+        27 => 0x0F,  // r
+        28 => 0x11,  // t
+        29 => 0x10,  // y
+        30 => 0x20,  // u
+        31 => 0x22,  // i
+        32 => 0x1F,  // o
+        33 => 0x23,  // p
+        34 => 0x21,  // [
+        35 => 0x1E,  // ]
+        36 => 0x24,  // Return
+        // Modifiers and ASDF row.
+        37 => 0x3B,  // Control_L
+        38 => 0x00,  // a
+        39 => 0x01,  // s
+        40 => 0x02,  // d
+        41 => 0x03,  // f
+        42 => 0x05,  // g
+        43 => 0x04,  // h
+        44 => 0x26,  // j
+        45 => 0x28,  // k
+        46 => 0x25,  // l
+        47 => 0x29,  // ;
+        48 => 0x27,  // '
+        49 => 0x32,  // `  (Backquote)
+        50 => 0x38,  // Shift_L
+        51 => 0x2A,  // \
+        // ZXCV row.
+        52 => 0x06,  // z
+        53 => 0x07,  // x
+        54 => 0x08,  // c
+        55 => 0x09,  // v
+        56 => 0x0B,  // b
+        57 => 0x2D,  // n
+        58 => 0x2E,  // m
+        59 => 0x2B,  // ,
+        60 => 0x2F,  // .
+        61 => 0x2C,  // /
+        62 => 0x3C,  // Shift_R
+        // Bottom row.
+        63 => 0x43,  // Numpad *
+        64 => 0x3A,  // Alt_L (Option)
+        65 => 0x31,  // Space
+        66 => 0x39,  // CapsLock
+        // F-keys.
+        67 => 0x7A,  // F1
+        68 => 0x78,  // F2
+        69 => 0x63,  // F3
+        70 => 0x76,  // F4
+        71 => 0x60,  // F5
+        72 => 0x61,  // F6
+        73 => 0x62,  // F7
+        74 => 0x64,  // F8
+        75 => 0x65,  // F9
+        76 => 0x6D,  // F10
+        95 => 0x67,  // F11
+        96 => 0x6F,  // F12
+        // Arrows + nav.
+        105 => 0x3E, // Control_R
+        108 => 0x3D, // Alt_R (Option_R)
+        110 => 0x73, // Home
+        111 => 0x7E, // ArrowUp
+        112 => 0x74, // PageUp
+        113 => 0x7B, // ArrowLeft
+        114 => 0x7C, // ArrowRight
+        115 => 0x77, // End
+        116 => 0x7D, // ArrowDown
+        117 => 0x79, // PageDown
+        119 => 0x75, // Delete (Forward)
+        // Meta / Cmd.
+        133 => 0x37, // Meta_L (Cmd)
+        134 => 0x36, // Meta_R (Cmd_R)
+        _ => return None,
+    })
+}
+
+/// X11 modifier-state mask (bits 0..7) → `CGEventFlags`. Mirrors
+/// the modifier vocabulary cua's `KeyboardInput.modifierMask(for:)`
+/// uses, but takes its input from our protocol's already-encoded
+/// state field rather than from named strings.
+fn x11_state_to_cg_flags(state: u16) -> CGEventFlags {
+    let mut flags = CGEventFlags::empty();
+    // Bit 0 = Shift, 1 = Lock, 2 = Control, 3 = Mod1 (Alt),
+    // 6 = Mod4 (Super/Cmd) — standard X11 modifier mapping.
+    if state & 0x01 != 0 {
+        flags |= CGEventFlags::MaskShift;
+    }
+    if state & 0x02 != 0 {
+        flags |= CGEventFlags::MaskAlphaShift;
+    }
+    if state & 0x04 != 0 {
+        flags |= CGEventFlags::MaskControl;
+    }
+    if state & 0x08 != 0 {
+        flags |= CGEventFlags::MaskAlternate;
+    }
+    if state & 0x40 != 0 {
+        flags |= CGEventFlags::MaskCommand;
+    }
+    flags
 }
 
 /// Try to resolve an AX element at the click point and dispatch

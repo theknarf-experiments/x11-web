@@ -60,6 +60,18 @@ pub type SetWindowLocationFn = unsafe extern "C" fn(event: *mut c_void, x: f64, 
 pub type PostEventRecordToFn =
     unsafe extern "C" fn(psn: *const c_void, bytes: *const u8) -> i32;
 
+/// `objc_msgSend` typed for
+/// `+[SLSEventAuthenticationMessage messageWithEventRecord:pid:version:]`:
+/// `(Class, Selector, SLSEventRecord*, int32_t, uint32_t) -> id`.
+/// Same shape cua uses (`SkyLightEventPost.swift` line 68-70).
+pub type AuthFactoryMsgSendFn = unsafe extern "C" fn(
+    cls: *mut c_void,
+    sel: *mut c_void,
+    record: *mut c_void,
+    pid: i32,
+    version: u32,
+) -> *mut c_void;
+
 /// Snapshot of which SPI subset resolved at startup. Cached for the
 /// lifetime of the process — symbol availability does not change at
 /// runtime.
@@ -81,7 +93,23 @@ pub struct SkyLightFns {
     pub set_window_location: Option<SetWindowLocationFn>,
     pub set_int_field: Option<SetIntFieldFn>,
     pub main_connection_id: Option<ConnectionIdFn>,
+    /// `objc_msgSend` cast for the auth-message factory + the ObjC
+    /// class object + selector for `+messageWithEventRecord:pid:
+    /// version:`. Available when the SkyLight private framework
+    /// loaded and the class is registered in the ObjC runtime —
+    /// which is the normal case on macOS 14+. Used by the keyboard
+    /// path to give Chromium / kitty / other strict targets an
+    /// auth-signed event they'll honour.
+    pub auth_factory_msg_send: Option<AuthFactoryMsgSendFn>,
+    pub auth_message_class: Option<*mut c_void>,
+    pub auth_factory_selector: Option<*mut c_void>,
 }
+
+// SAFETY: the cached function pointers + class object + selector are
+// all immutable for the lifetime of the process. Worst-case sharing
+// across threads is reading the same address.
+unsafe impl Send for SkyLightFns {}
+unsafe impl Sync for SkyLightFns {}
 
 static RESOLVED: OnceLock<SkyLight> = OnceLock::new();
 
@@ -127,6 +155,17 @@ fn resolve() -> SkyLight {
     let focus_without_raise =
         post_record.is_some() && !get_front.is_null() && !get_psn.is_null();
 
+    // Auth-message factory: `objc_msgSend` cast to call
+    // `+[SLSEventAuthenticationMessage messageWithEventRecord:pid:
+    // version:]`, plus the class object and selector. Present on
+    // macOS 14+ when SkyLight has registered its ObjC classes.
+    let auth_factory_msg_send = sym::<AuthFactoryMsgSendFn>(b"objc_msgSend\0");
+    let (auth_message_class, auth_factory_selector) = unsafe {
+        let cls = ns_class_from_string("SLSEventAuthenticationMessage");
+        let sel = sel_register("messageWithEventRecord:pid:version:");
+        (cls, sel)
+    };
+
     let fns = match (post_to_pid, set_auth) {
         (Some(post), Some(auth)) => Some(SkyLightFns {
             post_to_pid: post,
@@ -134,6 +173,9 @@ fn resolve() -> SkyLight {
             set_window_location: set_window,
             set_int_field,
             main_connection_id: main_connection,
+            auth_factory_msg_send,
+            auth_message_class,
+            auth_factory_selector,
         }),
         _ => None,
     };
@@ -145,6 +187,100 @@ fn resolve() -> SkyLight {
         focus_without_raise,
         fns,
     }
+}
+
+/// Look up an ObjC class by name via `NSClassFromString`. Returns
+/// `None` when the class isn't registered (e.g. the SkyLight
+/// private framework didn't load this binding's classes).
+unsafe fn ns_class_from_string(name: &str) -> Option<*mut c_void> {
+    extern "C" {
+        // Provided by Foundation / objc4. We dlopen Foundation
+        // implicitly via `objc2-foundation`; the symbol is part of
+        // the running process either way.
+        fn NSClassFromString(name: *mut c_void) -> *mut c_void;
+    }
+    use objc2_foundation::NSString;
+    let ns = NSString::from_str(name);
+    // NSClassFromString takes an NSString*. Re-cast.
+    let ptr = NSClassFromString(objc2::rc::Retained::as_ptr(&ns) as *mut c_void);
+    if ptr.is_null() {
+        None
+    } else {
+        Some(ptr)
+    }
+}
+
+/// Register a selector by name. Same as `NSSelectorFromString` /
+/// `sel_registerName`.
+unsafe fn sel_register(name: &str) -> Option<*mut c_void> {
+    extern "C" {
+        fn sel_registerName(name: *const u8) -> *mut c_void;
+    }
+    let cstr = std::ffi::CString::new(name).ok()?;
+    let sel = sel_registerName(cstr.as_ptr() as *const u8);
+    if sel.is_null() {
+        None
+    } else {
+        Some(sel)
+    }
+}
+
+/// Attach an `SLSEventAuthenticationMessage` to `event` (matching
+/// cua's `SkyLightEventPost.postToPid(... attachAuthMessage: true)`).
+/// Required for keyboard events on macOS 14+ to land on Chromium-
+/// family targets (and apparently kitty as well — strict event
+/// filters latch onto the auth envelope before honouring synthetic
+/// keystrokes).
+///
+/// Returns `true` when every leg resolved and we successfully built
+/// + attached the message. Returns `false` on any failure; the
+/// caller should still post the event without the envelope, since
+/// AppKit-only targets don't need it and we'd rather degrade than
+/// drop the event entirely.
+pub fn attach_auth_message(event_ptr: *mut c_void, pid: i32) -> bool {
+    let Some(fns) = probe().fns.as_ref() else {
+        return false;
+    };
+    let (Some(msg_send), Some(cls), Some(sel)) = (
+        fns.auth_factory_msg_send,
+        fns.auth_message_class,
+        fns.auth_factory_selector,
+    ) else {
+        return false;
+    };
+    // Extract the embedded `SLSEventRecord *` from the CGEvent.
+    // cua's `extractEventRecord(from:)` probes offsets 24, 32, 16
+    // for resilience across OS revisions; we mirror exactly.
+    let Some(record) = (unsafe { extract_event_record(event_ptr) }) else {
+        return false;
+    };
+    let msg = unsafe { msg_send(cls, sel, record, pid, 0) };
+    if msg.is_null() {
+        return false;
+    }
+    unsafe { (fns.set_auth_message)(event_ptr, msg) };
+    true
+}
+
+/// Read the `SLSEventRecord *` slot embedded in a `__CGEvent`
+/// struct. cua's note (`SkyLightEventPost.swift` line 366-374):
+/// "The layout of `__CGEvent` exposed by SkyLight's ObjC type
+/// encodings is `{CFRuntimeBase, uint32_t, SLSEventRecord *}` —
+/// on 64-bit that puts the record pointer at offset 24
+/// (CFRuntimeBase=16 + uint32=4 + 4 bytes padding). We probe a
+/// few adjacent offsets for resilience across OS revisions."
+unsafe fn extract_event_record(event: *mut c_void) -> Option<*mut c_void> {
+    if event.is_null() {
+        return None;
+    }
+    for &offset in &[24usize, 32, 16] {
+        let slot = event.add(offset) as *const *mut c_void;
+        let p = *slot;
+        if !p.is_null() {
+            return Some(p);
+        }
+    }
+    None
 }
 
 fn sym<T: Copy>(name: &[u8]) -> Option<T> {
