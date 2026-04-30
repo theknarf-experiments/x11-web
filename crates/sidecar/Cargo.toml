@@ -26,15 +26,11 @@ x11rb-protocol = { version = "0.13", features = [
     "randr", "record", "render", "res", "screensaver", "shape", "shm",
     "sync", "xf86vidmode", "xfixes", "xinerama", "xinput", "xkb", "xtest", "xv",
 ] }
-# pixman removed — using pure-Rust framebuffer to avoid heap corruption
 tokio = { version = "1", features = ["full"] }
-tokio-tungstenite = "0.26"
 futures = "0.3"
 serde = { version = "1", features = ["derive"] }
-rmp-serde = "1"
 tracing = "0.1"
 tracing-subscriber = "0.3"
-url = "2"
 uuid = { version = "1", features = ["v4"] }
 bdf-parser = "0.1"
 flate2 = "1"
@@ -42,21 +38,12 @@ glob = "0.3"
 libc = "0.2"
 freetype-rs = "0.38"
 freetype-sys = { version = "0.23", features = ["bundled"] }
-yeslogic-fontconfig-sys = { version = "6", features = ["dlopen"] }
-# DBus client — used in PR 2 to mirror GTK / Qt application menus over
-# `org.gtk.Menus` and `com.canonical.dbusmenu`. Brought in here so the
-# Phase 0 dbus-daemon plumbing can verify it links cleanly.
+# DBus client — mirrors GTK / Qt application menus via
+# `org.gtk.Menus` and `com.canonical.dbusmenu`.
 zbus = { version = "4", default-features = false, features = ["tokio"] }
-# WebRTC (Sans-IO) for peer-to-peer data channel + audio streaming
-str0m = { version = "0.18", default-features = false, features = ["openssl"] }
-# Opus codec for audio encoding/decoding
-opus = "0.3"
 # SIMD-optimized YUV<->RGB color conversion for XVideo
 dcv-color-primitives = "1"
 # 2D rasterizer used for RENDER trapezoid/triangle anti-aliased coverage
 tiny-skia = { version = "0.12", default-features = false, features = ["std", "simd"] }
 # libxkbcommon bindings — keysym resolution + compose state machine
 xkbcommon = "0.9"
-# PulseAudio client for audio capture/playback
-libpulse-binding = "2"
-libpulse-simple-binding = "2"

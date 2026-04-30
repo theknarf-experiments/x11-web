@@ -4,12 +4,7 @@ FROM rust:1-bookworm AS builder
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libosmesa6-dev \
     cmake \
-    # OpenSSL for str0m WebRTC DTLS
-    libssl-dev pkg-config \
-    # PulseAudio client dev libs for audio capture
-    libpulse-dev \
-    # Opus codec dev libs
-    libopus-dev \
+    pkg-config \
     # libxkbcommon for keymap compilation + compose
     libxkbcommon-dev \
     # capnproto: needed by `x11-web-wire`'s build.rs to codegen
@@ -129,12 +124,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libavcodec-extra \
     # CJK fonts for XIM CJK input testing
     fonts-noto-cjk \
-    # PulseAudio for audio capture/playback (WebRTC audio)
+    # PulseAudio daemon — sidecar starts it so X11 apps have a sound
+    # server to connect to (audio doesn't cross the wire yet).
     pulseaudio \
     libpulse0 \
-    # Opus codec runtime
+    # Opus codec runtime — needed by Firefox / VLC etc. for WebRTC
+    # and media playback inside the X11 session.
     libopus0 \
-    # OpenSSL runtime for str0m WebRTC
+    # OpenSSL runtime — used by X11 apps (Firefox, etc.) for TLS.
     libssl3 \
     # VLC for audio/video e2e tests
     vlc \
