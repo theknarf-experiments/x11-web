@@ -53,10 +53,10 @@ impl From<capnp::NotInSchema> for BridgeError {
 // ---------------------------------------------------------------------------
 
 /// Build a `FromSidecar` message from an internal `SidecarToBackend`.
-/// Returns `None` for variants the wire schema doesn't carry
-/// (e.g. `Register` is handled at the QUIC handshake, not as a
-/// regular message; `RtcOffer` / `RtcIceCandidate` are gone in the
-/// new architecture). Caller drops those silently.
+/// Returns `None` for variants the wire schema doesn't carry — the
+/// macOS sidecar emits a small subset of the X11 sidecar's surface
+/// (window create/destroy/map/etc., `PutImage`), so the catch-all at
+/// the bottom logs and drops anything else.
 pub fn build_from_sidecar(msg: &SidecarToBackend) -> Option<Builder<HeapAllocator>> {
     let mut builder = Builder::new_default();
     {
@@ -102,9 +102,9 @@ pub fn build_from_sidecar(msg: &SidecarToBackend) -> Option<Builder<HeapAllocato
                 idr.set_window_id(window_id);
                 idr.set_reason(reason);
             }
-            // Variants we deliberately skip — handled out-of-band
-            // (Register via Hello) or not part of the new
-            // architecture (RtcOffer / RtcIceCandidate / Error).
+            // The macOS sidecar's emitter set is intentionally small;
+            // anything else (process_list, errors, clipboard, etc.) is
+            // never produced here so we just log and drop.
             _ => {
                 warn!("wire_bridge: skipping unsupported SidecarToBackend variant");
                 return None;

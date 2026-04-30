@@ -56,23 +56,16 @@ pub enum BackendToSidecar {
     },
     /// Resize the virtual screen (RandR-driven).
     ResizeScreen { width: u16, height: u16 },
-    /// WebRTC signaling: forward SDP answer from frontend to sidecar.
-    RtcAnswer { frontend_id: String, sdp: String },
-    /// WebRTC signaling: forward ICE candidate from frontend to sidecar.
-    RtcIceCandidate {
-        frontend_id: String,
-        candidate: String,
-        sdp_mid: Option<String>,
-        sdp_mline_index: Option<u16>,
-    },
 }
 
 /// Messages sent from a sidecar to the backend.
+///
+/// Sidecar identity is established by the QUIC `Hello` handshake
+/// (see `x11_web_wire`), not via a `Register` message; nothing here
+/// carries the sidecar name.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type")]
 pub enum SidecarToBackend {
-    /// Sidecar announces itself.
-    Register { sidecar_name: String },
     /// Heartbeat to keep connection alive.
     Heartbeat,
     /// Response to a SpawnProcess command.
@@ -118,15 +111,6 @@ pub enum SidecarToBackend {
     ClipboardOffer {
         selection: String,
         mime_types: Vec<String>,
-    },
-    /// WebRTC signaling: SDP offer from sidecar for a specific frontend.
-    RtcOffer { frontend_id: String, sdp: String },
-    /// WebRTC signaling: ICE candidate from sidecar for a specific frontend.
-    RtcIceCandidate {
-        frontend_id: String,
-        candidate: String,
-        sdp_mid: Option<String>,
-        sdp_mline_index: Option<u16>,
     },
 }
 

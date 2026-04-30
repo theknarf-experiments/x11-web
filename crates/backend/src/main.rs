@@ -52,19 +52,16 @@ async fn main() {
     };
 
     let app = Router::new()
-        .route("/ws/sidecar", get(sidecar_ws_handler))
         .route("/ws/frontend", get(frontend_ws_handler))
         .route("/health", get(|| async { "ok" }))
         .layer(CorsLayer::permissive())
         .with_state(state.clone());
 
-    // QUIC sidecar listener (sibling of the WebSocket :3001
-    // listener). Generates a fresh self-signed cert on startup and
-    // prints its SHA-256 fingerprint so the operator can copy it
-    // into the sidecar's `X11WEB_SERVER_FINGERPRINT` env. Until the
-    // X11 sidecar migrates, both listeners coexist; sidecars that
-    // came in over WebSocket and ones that came in over QUIC share
-    // the `state.sidecars` registry transparently.
+    // QUIC sidecar listener — the only sidecar transport. Generates a
+    // fresh self-signed cert on startup and prints its SHA-256
+    // fingerprint so the operator can copy it into the sidecar's
+    // `X11WEB_SERVER_FINGERPRINT` env (or just bind-mount the file
+    // it gets persisted to below).
     let _ = rustls::crypto::ring::default_provider().install_default();
     let cert = generate_self_signed(vec!["localhost".into()]).expect("self-signed cert generation");
     info!(
@@ -106,80 +103,8 @@ async fn main() {
     axum::serve(listener, app).await.unwrap();
 }
 
-async fn sidecar_ws_handler(
-    ws: WebSocketUpgrade,
-    State(state): State<AppState>,
-) -> impl IntoResponse {
-    ws.on_upgrade(move |socket| handle_sidecar_ws(socket, state))
-}
-
-async fn handle_sidecar_ws(socket: WebSocket, state: AppState) {
-    let (mut ws_tx, mut ws_rx) = socket.split();
-    let (tx, mut rx) = mpsc::unbounded_channel::<BackendToSidecar>();
-    let sidecar_id = Uuid::new_v4().to_string();
-
-    // Forward messages from channel to WebSocket
-    let send_task = tokio::spawn(async move {
-        while let Some(msg) = rx.recv().await {
-            let json = serde_json::to_string(&msg).unwrap();
-            if ws_tx.send(Message::Text(json.into())).await.is_err() {
-                break;
-            }
-        }
-    });
-
-    // Wait for registration message
-    let sidecar_name = loop {
-        match ws_rx.next().await {
-            Some(Ok(Message::Text(text))) => {
-                if let Ok(msg) = serde_json::from_str::<SidecarToBackend>(&text) {
-                    if let SidecarToBackend::Register { sidecar_name } = msg {
-                        break sidecar_name;
-                    }
-                }
-            }
-            _ => return,
-        }
-    };
-
-    let info = SidecarInfo {
-        id: sidecar_id.clone(),
-        name: sidecar_name,
-    };
-
-    info!("Sidecar connected: {} ({})", info.name, info.id);
-
-    // Register sidecar
-    {
-        let mut sidecars = state.sidecars.write().await;
-        sidecars.insert(
-            sidecar_id.clone(),
-            SidecarConnection {
-                info: info.clone(),
-                tx,
-            },
-        );
-    }
-
-    // Notify all frontends
-    notify_frontends_sidecar_connected(&state, info.clone()).await;
-
-    // Process incoming messages from sidecar
-    while let Some(Ok(msg)) = ws_rx.next().await {
-        let Message::Text(text) = msg else { continue };
-        let Ok(msg) = serde_json::from_str::<SidecarToBackend>(&text) else {
-            continue;
-        };
-        dispatch_sidecar_msg(&state, &sidecar_id, msg).await;
-    }
-
-    cleanup_sidecar(&state, &sidecar_id).await;
-    send_task.abort();
-}
-
-/// Per-message dispatch shared between the WebSocket sidecar handler
-/// and the QUIC handler. Anything that fans out to frontends or
-/// updates internal registries lives here.
+/// Per-message dispatch from the QUIC sidecar handler. Anything that
+/// fans out to frontends or updates internal registries lives here.
 async fn dispatch_sidecar_msg(state: &AppState, sidecar_id: &str, msg: SidecarToBackend) {
     let sidecar_id = sidecar_id.to_string();
     {
@@ -376,39 +301,11 @@ async fn dispatch_sidecar_msg(state: &AppState, sidecar_id: &str, msg: SidecarTo
                     }
                 }
             }
-            SidecarToBackend::Register { .. } => {} // Already handled
-            SidecarToBackend::RtcOffer { frontend_id, sdp } => {
-                // Relay SDP offer from sidecar to the specific frontend.
-                let frontends = state.frontends.read().await;
-                if let Some(frontend) = frontends.get(&frontend_id) {
-                    let _ = frontend.tx.send(BackendToFrontend::RtcOffer {
-                        sidecar_id: sidecar_id.clone(),
-                        sdp,
-                    });
-                }
-            }
-            SidecarToBackend::RtcIceCandidate {
-                frontend_id,
-                candidate,
-                sdp_mid,
-                sdp_mline_index,
-            } => {
-                let frontends = state.frontends.read().await;
-                if let Some(frontend) = frontends.get(&frontend_id) {
-                    let _ = frontend.tx.send(BackendToFrontend::RtcIceCandidate {
-                        sidecar_id: sidecar_id.clone(),
-                        candidate,
-                        sdp_mid,
-                        sdp_mline_index,
-                    });
-                }
-            }
         }
     }
 }
 
-/// Tear down sidecar registration when its connection drops. Used
-/// by both the WebSocket and QUIC handlers.
+/// Tear down sidecar registration when its QUIC connection drops.
 async fn cleanup_sidecar(state: &AppState, sidecar_id: &str) {
     info!("Sidecar disconnected: {}", sidecar_id);
     state.sidecars.write().await.remove(sidecar_id);
@@ -679,48 +576,14 @@ async fn handle_frontend_ws(socket: WebSocket, state: AppState) {
                 )
                 .await;
             }
-            FrontendToBackend::RtcConnect { sidecar_id } => {
-                // Tell the sidecar to create an offer for this frontend.
-                // We pass the frontend_id so the sidecar knows who to address.
-                forward_to_sidecar(
-                    &state,
-                    &sidecar_id,
-                    BackendToSidecar::RtcAnswer {
-                        frontend_id: frontend_id.clone(),
-                        // Empty SDP = "please create an offer for me"
-                        sdp: String::new(),
-                    },
-                )
-                .await;
-            }
-            FrontendToBackend::RtcAnswer { sidecar_id, sdp } => {
-                forward_to_sidecar(
-                    &state,
-                    &sidecar_id,
-                    BackendToSidecar::RtcAnswer {
-                        frontend_id: frontend_id.clone(),
-                        sdp,
-                    },
-                )
-                .await;
-            }
-            FrontendToBackend::RtcIceCandidate {
-                sidecar_id,
-                candidate,
-                sdp_mid,
-                sdp_mline_index,
-            } => {
-                forward_to_sidecar(
-                    &state,
-                    &sidecar_id,
-                    BackendToSidecar::RtcIceCandidate {
-                        frontend_id: frontend_id.clone(),
-                        candidate,
-                        sdp_mid,
-                        sdp_mline_index,
-                    },
-                )
-                .await;
+            FrontendToBackend::RtcConnect { .. }
+            | FrontendToBackend::RtcAnswer { .. }
+            | FrontendToBackend::RtcIceCandidate { .. } => {
+                // The sidecar↔backend WebRTC relay is gone. WebRTC
+                // now terminates between frontend and backend
+                // directly; the new signaling handler that owns the
+                // backend-side str0m peer will live here.
+                warn!("RTC signaling from frontend not yet wired to backend-terminated peer");
             }
             FrontendToBackend::UpdateWindowState {
                 client_id,
@@ -783,14 +646,5 @@ async fn broadcast_to_frontends(state: &AppState, msg: BackendToFrontend) {
     let frontends = state.frontends.read().await;
     for frontend in frontends.values() {
         let _ = frontend.tx.send(msg.clone());
-    }
-}
-
-async fn notify_frontends_sidecar_connected(state: &AppState, sidecar: SidecarInfo) {
-    let frontends = state.frontends.read().await;
-    for frontend in frontends.values() {
-        let _ = frontend.tx.send(BackendToFrontend::SidecarConnected {
-            sidecar: sidecar.clone(),
-        });
     }
 }

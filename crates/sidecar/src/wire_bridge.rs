@@ -153,12 +153,6 @@ pub fn build_from_sidecar(msg: &SidecarToBackend) -> Option<Builder<HeapAllocato
                 cd.set_mime_type(mime_type);
                 cd.set_data(data);
             }
-            // Handshake-only and architecturally-removed variants.
-            SidecarToBackend::Register { .. }
-            | SidecarToBackend::RtcOffer { .. }
-            | SidecarToBackend::RtcIceCandidate { .. } => {
-                return None;
-            }
         }
     }
     Some(builder)

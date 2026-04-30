@@ -515,12 +515,6 @@ pub fn build_to_sidecar(msg: &BackendToSidecar) -> Option<Builder<HeapAllocator>
                 rs.set_width(*width);
                 rs.set_height(*height);
             }
-            // RTC variants are deliberately not part of the new
-            // sidecar↔backend protocol — the architectural plan
-            // moves WebRTC entirely to the frontend↔backend hop.
-            BackendToSidecar::RtcAnswer { .. } | BackendToSidecar::RtcIceCandidate { .. } => {
-                return None;
-            }
         }
     }
     Some(builder)

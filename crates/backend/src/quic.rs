@@ -92,10 +92,8 @@ async fn handle_quic_session(state: AppState, accepted: x11_web_wire::conn::Acce
     info!("Sidecar connected over QUIC: {} ({})", info.name, info.id);
 
     // Register sidecar with a tx that translates BackendToSidecar
-    // into wire frames before they hit the QUIC stream. This
-    // matches what the WebSocket handler does (its tx serialises
-    // to JSON in a send_task), keeping `dispatch_sidecar_msg` /
-    // existing frontend code transport-agnostic.
+    // into wire frames before they hit the QUIC stream. The send
+    // loop below picks them up off `rx` and writes them out.
     let (tx, mut rx) = mpsc::unbounded_channel::<BackendToSidecar>();
     {
         let mut sidecars = state.sidecars.write().await;

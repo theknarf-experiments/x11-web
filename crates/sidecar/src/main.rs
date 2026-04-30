@@ -665,13 +665,6 @@ async fn handle_command(
                 let _ = screen_size_tx.send((width, height));
             }
         }
-        // Architecturally-removed RTC variants. The wire schema
-        // doesn't carry them; the bridge maps RTC slots to nothing,
-        // so reaching this arm requires someone hand-constructing a
-        // BackendToSidecar in code. Drop with a warn.
-        BackendToSidecar::RtcAnswer { .. } | BackendToSidecar::RtcIceCandidate { .. } => {
-            warn!("Ignoring stale RTC variant of BackendToSidecar");
-        }
     }
 }
 
