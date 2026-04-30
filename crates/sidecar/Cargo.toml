@@ -47,3 +47,10 @@ dcv-color-primitives = "1"
 tiny-skia = { version = "0.12", default-features = false, features = ["std", "simd"] }
 # libxkbcommon bindings — keysym resolution + compose state machine
 xkbcommon = "0.9"
+
+[build-dependencies]
+# Generates GL function bindings (compatibility profile so legacy
+# fixed-function calls — Begin/End/Vertex*/Color*/MatrixMode/etc. —
+# are included; the `gl` crate ships core-only). Output is included
+# in `osmesa/mod.rs` and loaded via OSMesa's GetProcAddress.
+gl_generator = "0.14"
