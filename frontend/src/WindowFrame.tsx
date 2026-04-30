@@ -15,8 +15,6 @@ interface WindowFrameProps {
 	overrideRedirect?: boolean;
 	/** Current WM state (normal, minimized, maximized, fullscreen). */
 	wmState?: WindowWmState;
-	/** Whether the cursor is confined to this window. */
-	cursorConfined?: boolean;
 	onClose: () => void;
 	onMove: (x: number, y: number) => void;
 	onResize: (width: number, height: number) => void;
@@ -60,7 +58,6 @@ export function WindowFrame({
 	renderer,
 	overrideRedirect,
 	wmState = "normal",
-	cursorConfined,
 	onClose,
 	onMove,
 	onResize,
@@ -205,7 +202,7 @@ export function WindowFrame({
 		onInputRef.current(event);
 	}, []);
 
-	/** Clamp mouse coordinates to canvas bounds when cursor is confined. */
+	/** Translate a mouse event's client coordinates into canvas pixels. */
 	const clampToCanvas = useCallback(
 		(
 			e: React.MouseEvent<HTMLCanvasElement>,
@@ -213,15 +210,11 @@ export function WindowFrame({
 			const rect = e.currentTarget.getBoundingClientRect();
 			const scaleX = e.currentTarget.width / rect.width;
 			const scaleY = e.currentTarget.height / rect.height;
-			let mx = Math.round((e.clientX - rect.left) * scaleX);
-			let my = Math.round((e.clientY - rect.top) * scaleY);
-			if (cursorConfined) {
-				mx = Math.max(0, Math.min(mx, e.currentTarget.width - 1));
-				my = Math.max(0, Math.min(my, e.currentTarget.height - 1));
-			}
+			const mx = Math.round((e.clientX - rect.left) * scaleX);
+			const my = Math.round((e.clientY - rect.top) * scaleY);
 			return { x: mx, y: my, scaleX, scaleY };
 		},
-		[cursorConfined],
+		[],
 	);
 
 	const handleMouseMove = useCallback(

@@ -41,18 +41,8 @@ interface CanvasWindow {
 	overrideRedirect: boolean;
 	/** Current WM state. */
 	wmState: WindowWmState;
-	/** Whether cursor is confined to this window. */
-	cursorConfined: boolean;
-	/** Parent window id for transient windows. */
-	transientFor: string | null;
 	/** Saved position before maximize/fullscreen. */
 	savedPosition?: { x: number; y: number };
-	/** WM_HINTS urgency flag. */
-	urgent?: boolean;
-	/** Window icon dimensions and RGBA data (base64). */
-	iconWidth?: number;
-	iconHeight?: number;
-	iconData?: string;
 	/** X11 border width in pixels. */
 	borderWidth: number;
 	/** X11 border color (ARGB32). */
@@ -414,33 +404,6 @@ function App() {
 				}
 			}
 
-			// WindowUrgent -- set urgency hint (dock bounce / title flash)
-			if (update.kind === "WindowUrgent") {
-				setWindows((prev) =>
-					prev.map((w) =>
-						w.windowId === update.window_id
-							? { ...w, urgent: update.urgent }
-							: w,
-					),
-				);
-			}
-
-			// WindowIconChanged -- update window icon
-			if (update.kind === "WindowIconChanged") {
-				setWindows((prev) =>
-					prev.map((w) =>
-						w.windowId === update.window_id
-							? {
-									...w,
-									iconWidth: update.width,
-									iconHeight: update.height,
-									iconData: update.data,
-								}
-							: w,
-					),
-				);
-			}
-
 			// WindowConfigured -- update override-redirect window positions from server
 			if (update.kind === "WindowConfigured") {
 				const bw = update.border_width ?? 0;
@@ -547,8 +510,6 @@ function App() {
 							cursor: "default",
 							overrideRedirect: isOverrideRedirect,
 							wmState: "normal" as WindowWmState,
-							cursorConfined: false,
-							transientFor: null,
 							borderWidth: creationMeta?.borderWidth ?? 0,
 							borderPixel: creationMeta?.borderPixel ?? 0,
 						},
@@ -819,17 +780,9 @@ function App() {
 						color: win.color,
 					});
 				}
-				// Move transient children along with parent
-				const dx = win ? x - win.x : 0;
-				const dy = win ? y - win.y : 0;
-				return prev.map((w) => {
-					if (w.windowId === windowId) return { ...w, x, y };
-					// If this window is transient for the moved window, follow it
-					if (w.transientFor === windowId) {
-						return { ...w, x: w.x + dx, y: w.y + dy };
-					}
-					return w;
-				});
+				return prev.map((w) =>
+					w.windowId === windowId ? { ...w, x, y } : w,
+				);
 			});
 		},
 		[send],
@@ -858,12 +811,9 @@ function App() {
 			const win = prev.find((w) => w.windowId === windowId);
 			if (!win) return prev;
 
-			return prev.map((w) => {
-				if (w.windowId === windowId) return { ...w, zIndex: nextZIndex++ };
-				// Raise transient children above parent
-				if (w.transientFor === windowId) return { ...w, zIndex: nextZIndex++ };
-				return w;
-			});
+			return prev.map((w) =>
+				w.windowId === windowId ? { ...w, zIndex: nextZIndex++ } : w,
+			);
 		});
 	}, []);
 
@@ -1051,20 +1001,7 @@ function App() {
 				})
 			: null;
 
-	/** Sort windows: transient windows always above their parent. */
-	const sortedWindows = useMemo(() => {
-		const result = [...windows];
-		// Boost transient children z-index to be above parent
-		for (const w of result) {
-			if (w.transientFor) {
-				const parent = result.find((p) => p.windowId === w.transientFor);
-				if (parent && w.zIndex <= parent.zIndex) {
-					w.zIndex = parent.zIndex + 1;
-				}
-			}
-		}
-		return result;
-	}, [windows]);
+	const sortedWindows = useMemo(() => [...windows], [windows]);
 
 	return (
 		<>
@@ -1094,7 +1031,6 @@ function App() {
 								renderer={renderer}
 								overrideRedirect={win.overrideRedirect}
 								wmState={win.wmState}
-								cursorConfined={win.cursorConfined}
 								onClose={() => handleCloseWindow(win.windowId, win.sidecarId)}
 								onMove={(nx, ny) => handleMove(win.windowId, nx, ny)}
 								onResize={(nw, nh) =>
