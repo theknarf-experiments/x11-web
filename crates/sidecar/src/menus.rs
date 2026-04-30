@@ -23,7 +23,7 @@ use std::sync::{Arc, Mutex};
 
 use tokio::sync::mpsc;
 use tracing::{debug, info, warn};
-use x11_web_protocol::{DisplayUpdate, MenuAction, MenuItem, MenuItemKind};
+use x11_web_protocol::{DisplayUpdate, MenuAction, MenuActionTarget, MenuItem, MenuItemKind};
 use zbus::zvariant::{OwnedValue, Value};
 
 use crate::xserver::TaggedDisplayUpdate;
@@ -718,7 +718,7 @@ fn build_tree(
         let id = format!("{group_id}.{idx}");
         let label = string_prop(raw, "label").map(strip_underscores);
         let action_name = string_prop(raw, "action");
-        let target = raw.get("target").and_then(owned_value_to_json);
+        let target = raw.get("target").and_then(owned_value_to_target);
         let accelerator = string_prop(raw, "accel").map(prettify_accel);
         let icon = string_prop(raw, "icon").or_else(|| string_prop(raw, "verb-icon"));
 
@@ -837,19 +837,20 @@ fn prettify_accel(accel: String) -> String {
     out
 }
 
-/// Best-effort conversion of an OwnedValue to serde_json so we can
-/// round-trip GVariant targets through the wire protocol. Only handles
-/// the cases we actually see in GTK menu targets (mostly strings,
-/// occasionally ints).
-fn owned_value_to_json(v: &OwnedValue) -> Option<serde_json::Value> {
+/// Best-effort conversion of an OwnedValue (a GVariant carried over
+/// D-Bus) into the typed `MenuActionTarget` we ship across the wire.
+/// Only handles the variants we actually see in real GTK / Qt menu
+/// targets — mostly strings, occasionally ints / bools. Anything
+/// else returns `None` and the action ends up with `target = None`.
+fn owned_value_to_target(v: &OwnedValue) -> Option<MenuActionTarget> {
     let value: &Value = v;
     match value {
-        Value::Str(s) => Some(serde_json::Value::String(s.as_str().to_string())),
-        Value::Bool(b) => Some(serde_json::Value::Bool(*b)),
-        Value::I32(n) => Some(serde_json::Value::Number((*n).into())),
-        Value::U32(n) => Some(serde_json::Value::Number((*n).into())),
-        Value::I64(n) => Some(serde_json::Value::Number((*n).into())),
-        Value::F64(n) => serde_json::Number::from_f64(*n).map(serde_json::Value::Number),
+        Value::Str(s) => Some(MenuActionTarget::String(s.as_str().to_string())),
+        Value::Bool(b) => Some(MenuActionTarget::Bool(*b)),
+        Value::I32(n) => Some(MenuActionTarget::Int32(*n)),
+        Value::U32(n) => Some(MenuActionTarget::UInt32(*n)),
+        Value::I64(n) => Some(MenuActionTarget::Int64(*n)),
+        Value::F64(n) => Some(MenuActionTarget::Float64(*n)),
         _ => None,
     }
 }
@@ -872,7 +873,7 @@ async fn dispatch_activation(
     // Build the parameter array. v1 only handles string targets — the
     // common case for menu items that take an enum-style payload.
     let parameters: Vec<Value<'_>> = match &action.target {
-        Some(serde_json::Value::String(s)) => vec![Value::Str(s.as_str().into())],
+        Some(MenuActionTarget::String(s)) => vec![Value::Str(s.as_str().into())],
         _ => Vec::new(),
     };
     let platform_data: HashMap<&str, Value<'_>> = HashMap::new();

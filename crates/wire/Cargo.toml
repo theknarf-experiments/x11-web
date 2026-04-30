@@ -31,10 +31,6 @@ sha2 = "0.10"
 hex = "0.4"
 thiserror = "2"
 tracing = "0.1"
-# Used by the bridge to round-trip `MenuAction.target`
-# (`serde_json::Value`) through the wire as JSON text — Cap'n Proto
-# has no native dynamic-value type.
-serde_json = "1"
 
 [build-dependencies]
 # Code generates Rust types from schema/wire.capnp. Outputs to

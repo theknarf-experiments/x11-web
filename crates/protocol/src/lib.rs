@@ -504,10 +504,24 @@ pub struct MenuAction {
     /// - `"app.<name>"` and `"win.<name>"` for `org.gtk.Actions`
     /// - `"dbm:<int>"` for `com.canonical.dbusmenu`
     pub name: String,
-    /// GVariant rendered as JSON. The sidecar parses it back into a
-    /// zvariant Value before invoking org.gtk.Actions.Activate.
+    /// Action payload. Mirrors the GVariant types we actually see in
+    /// real-world GTK / Qt menu items.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub target: Option<serde_json::Value>,
+    pub target: Option<MenuActionTarget>,
+}
+
+/// Typed variant of a menu action's GVariant payload. Mirrors the
+/// six concrete shapes `crates/sidecar/src/menus.rs` produces from
+/// the D-Bus menu service — anything else is translated to `None`
+/// upstream so this enum stays small and exhaustive.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum MenuActionTarget {
+    String(String),
+    Bool(bool),
+    Int32(i32),
+    UInt32(u32),
+    Int64(i64),
+    Float64(f64),
 }
 
 /// A single frame in an animated cursor (from XRender CreateAnimCursor).

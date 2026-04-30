@@ -370,13 +370,24 @@ enum MenuItemKind {
     radio @4;
 }
 
-# `target` is the protocol crate's `Option<serde_json::Value>` —
-# we serialize as JSON text on the wire to keep the schema
-# language-agnostic (Cap'n Proto has no native JSON type).
 struct MenuAction {
     name @0 :Text;
     hasTarget @1 :Bool;
-    targetJson @2 :Text;
+    # Typed union mirroring `protocol::MenuActionTarget`. Only set
+    # when `hasTarget` is true; the union slot is meaningless
+    # otherwise (defaults to the first variant).
+    target @2 :MenuActionTarget;
+}
+
+struct MenuActionTarget {
+    union {
+        string @0 :Text;
+        boolean @1 :Bool;
+        int32 @2 :Int32;
+        uInt32 @3 :UInt32;
+        int64 @4 :Int64;
+        float64 @5 :Float64;
+    }
 }
 
 # ---------- Backend → Sidecar ----------

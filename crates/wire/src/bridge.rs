@@ -17,8 +17,8 @@
 use capnp::message::{Builder, HeapAllocator};
 use tracing::warn;
 use x11_web_protocol::{
-    AnimCursorFrame, DisplayUpdate, DndEventKind, GesturePhase, InputEvent, MenuAction, MenuItem,
-    MenuItemKind, ProcessInfo, WindowWmState,
+    AnimCursorFrame, DisplayUpdate, DndEventKind, GesturePhase, InputEvent, MenuAction,
+    MenuActionTarget, MenuItem, MenuItemKind, ProcessInfo, WindowWmState,
 };
 
 use crate::types::{BackendToSidecar, SidecarToBackend};
@@ -1260,33 +1260,54 @@ fn read_menu_item(item: wire_capnp::menu_item::Reader) -> Result<MenuItem, Bridg
 
 fn write_menu_action(mut b: wire_capnp::menu_action::Builder, action: &MenuAction) {
     b.set_name(&action.name);
-    if let Some(target) = &action.target {
-        b.set_has_target(true);
-        // `target` is `serde_json::Value`; the wire has no native
-        // dynamic-value type, so round-trip via JSON text.
-        let s = serde_json::to_string(target).unwrap_or_else(|_| "null".into());
-        b.set_target_json(&s);
-    } else {
-        b.set_has_target(false);
+    match &action.target {
+        Some(target) => {
+            b.set_has_target(true);
+            write_menu_action_target(b.reborrow().init_target(), target);
+        }
+        None => {
+            b.set_has_target(false);
+        }
+    }
+}
+
+fn write_menu_action_target(
+    mut b: wire_capnp::menu_action_target::Builder,
+    target: &MenuActionTarget,
+) {
+    match target {
+        MenuActionTarget::String(s) => b.set_string(s),
+        MenuActionTarget::Bool(v) => b.set_boolean(*v),
+        MenuActionTarget::Int32(v) => b.set_int32(*v),
+        MenuActionTarget::UInt32(v) => b.set_u_int32(*v),
+        MenuActionTarget::Int64(v) => b.set_int64(*v),
+        MenuActionTarget::Float64(v) => b.set_float64(*v),
     }
 }
 
 fn read_menu_action(a: wire_capnp::menu_action::Reader) -> Result<MenuAction, BridgeError> {
     let target = if a.get_has_target() {
-        let txt = a.get_target_json()?.to_string()?;
-        match serde_json::from_str::<serde_json::Value>(&txt) {
-            Ok(v) => Some(v),
-            Err(e) => {
-                warn!("MenuAction.target invalid JSON: {e}");
-                None
-            }
-        }
+        Some(read_menu_action_target(a.get_target()?)?)
     } else {
         None
     };
     Ok(MenuAction {
         name: a.get_name()?.to_string()?,
         target,
+    })
+}
+
+fn read_menu_action_target(
+    r: wire_capnp::menu_action_target::Reader,
+) -> Result<MenuActionTarget, BridgeError> {
+    use wire_capnp::menu_action_target::Which;
+    Ok(match r.which()? {
+        Which::String(s) => MenuActionTarget::String(s?.to_string()?),
+        Which::Boolean(v) => MenuActionTarget::Bool(v),
+        Which::Int32(v) => MenuActionTarget::Int32(v),
+        Which::UInt32(v) => MenuActionTarget::UInt32(v),
+        Which::Int64(v) => MenuActionTarget::Int64(v),
+        Which::Float64(v) => MenuActionTarget::Float64(v),
     })
 }
 
