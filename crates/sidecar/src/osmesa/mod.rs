@@ -75,7 +75,6 @@ ffi_fn!(FnGlBindTexture, (target: u32, texture: u32));
 ffi_fn!(FnGlTexImage2D, (target: u32, level: i32, internal_format: i32, width: i32, height: i32, border: i32, format: u32, type_: u32, data: *const c_void));
 ffi_fn!(FnGlTexParameteri, (target: u32, pname: u32, param: i32));
 ffi_fn!(FnGlTexSubImage2D, (target: u32, level: i32, xoffset: i32, yoffset: i32, width: i32, height: i32, format: u32, type_: u32, data: *const c_void));
-ffi_fn!(FnGlReadPixels, (x: i32, y: i32, width: i32, height: i32, format: u32, type_: u32, pixels: *mut c_void));
 ffi_fn!(FnGlScissor, (x: i32, y: i32, width: i32, height: i32));
 ffi_fn!(FnGlBlendFunc, (sfactor: u32, dfactor: u32));
 ffi_fn!(FnGlDepthFunc, (func: u32));
@@ -200,7 +199,6 @@ ffi_fn!(FnGlNormalPointer, (type_: u32, stride: i32, pointer: *const c_void));
 ffi_fn!(FnGlTexCoordPointer, (size: i32, type_: u32, stride: i32, pointer: *const c_void));
 ffi_fn!(FnGlEnableClientState, (array: u32));
 ffi_fn!(FnGlDisableClientState, (array: u32));
-ffi_fn!(FnGlInterleavedArrays, (format: u32, stride: i32, pointer: *const c_void));
 ffi_fn!(FnGlArrayElement, (i: i32));
 
 // State queries
@@ -224,11 +222,6 @@ ffi_fn!(FnGlGetTexGendv, (coord: u32, pname: u32, params: *mut f64));
 ffi_fn!(FnGlGetTexGenfv, (coord: u32, pname: u32, params: *mut f32));
 ffi_fn!(FnGlGetTexGeniv, (coord: u32, pname: u32, params: *mut i32));
 ffi_fn!(FnGlGetPixelMapfv, (map: u32, values: *mut f32));
-ffi_fn!(FnGlGetPixelMapuiv, (map: u32, values: *mut u32));
-ffi_fn!(FnGlGetPixelMapusv, (map: u32, values: *mut u16));
-ffi_fn!(FnGlGetMapdv, (target: u32, query: u32, v: *mut f64));
-ffi_fn!(FnGlGetMapfv, (target: u32, query: u32, v: *mut f32));
-ffi_fn!(FnGlGetMapiv, (target: u32, query: u32, v: *mut i32));
 ffi_fn!(FnGlGetClipPlane, (plane: u32, equation: *mut f64));
 ffi_fn!(FnGlClipPlane, (plane: u32, equation: *const f64));
 
@@ -260,8 +253,6 @@ ffi_fn!(FnGlInitNames, ());
 ffi_fn!(FnGlPushName, (name: u32));
 ffi_fn!(FnGlPopName, ());
 ffi_fn!(FnGlLoadName, (name: u32));
-ffi_fn!(FnGlSelectBuffer, (size: i32, buffer: *mut u32));
-ffi_fn!(FnGlFeedbackBuffer, (size: i32, type_: u32, buffer: *mut f32));
 ffi_fn!(FnGlPassThrough, (token: f32));
 ffi_fn!(FnGlPushAttrib, (mask: u32));
 ffi_fn!(FnGlPopAttrib, ());
@@ -381,69 +372,19 @@ ffi_fn!(FnGlBlendFuncSeparate, (src_rgb: u32, dst_rgb: u32, src_alpha: u32, dst_
 ffi_fn!(FnGlBlendColor, (r: f32, g: f32, b: f32, a: f32));
 
 // GL 2.0 Shader functions (optional)
-ffi_fn!(FnGlCreateShader, (type_: u32) -> u32);
-ffi_fn!(FnGlDeleteShader, (shader: u32));
-ffi_fn!(FnGlShaderSource, (shader: u32, count: i32, string: *const *const std::ffi::c_char, length: *const i32));
-ffi_fn!(FnGlCompileShader, (shader: u32));
-ffi_fn!(FnGlGetShaderiv, (shader: u32, pname: u32, params: *mut i32));
-ffi_fn!(FnGlGetShaderInfoLog, (shader: u32, max_length: i32, length: *mut i32, info_log: *mut i8));
-ffi_fn!(FnGlCreateProgram, () -> u32);
-ffi_fn!(FnGlDeleteProgram, (program: u32));
-ffi_fn!(FnGlAttachShader, (program: u32, shader: u32));
-ffi_fn!(FnGlDetachShader, (program: u32, shader: u32));
-ffi_fn!(FnGlLinkProgram, (program: u32));
-ffi_fn!(FnGlUseProgram, (program: u32));
-ffi_fn!(FnGlGetProgramiv, (program: u32, pname: u32, params: *mut i32));
-ffi_fn!(FnGlGetProgramInfoLog, (program: u32, max_length: i32, length: *mut i32, info_log: *mut i8));
-ffi_fn!(FnGlGetUniformLocation, (program: u32, name: *const std::ffi::c_char) -> i32);
-ffi_fn!(FnGlUniform1f, (location: i32, v0: f32));
-ffi_fn!(FnGlUniform2f, (location: i32, v0: f32, v1: f32));
-ffi_fn!(FnGlUniform3f, (location: i32, v0: f32, v1: f32, v2: f32));
-ffi_fn!(FnGlUniform4f, (location: i32, v0: f32, v1: f32, v2: f32, v3: f32));
-ffi_fn!(FnGlUniform1i, (location: i32, v0: i32));
-ffi_fn!(FnGlUniform2i, (location: i32, v0: i32, v1: i32));
-ffi_fn!(FnGlUniform3i, (location: i32, v0: i32, v1: i32, v2: i32));
-ffi_fn!(FnGlUniform4i, (location: i32, v0: i32, v1: i32, v2: i32, v3: i32));
-ffi_fn!(FnGlUniformMatrix4fv, (location: i32, count: i32, transpose: u8, value: *const f32));
-ffi_fn!(FnGlGetAttribLocation, (program: u32, name: *const std::ffi::c_char) -> i32);
-ffi_fn!(FnGlVertexAttribPointer, (index: u32, size: i32, type_: u32, normalized: u8, stride: i32, pointer: *const c_void));
-ffi_fn!(FnGlEnableVertexAttribArray, (index: u32));
-ffi_fn!(FnGlDisableVertexAttribArray, (index: u32));
 
 // GL 1.5 Buffer Objects (optional)
-ffi_fn!(FnGlGenBuffers, (n: i32, buffers: *mut u32));
-ffi_fn!(FnGlDeleteBuffers, (n: i32, buffers: *const u32));
-ffi_fn!(FnGlBindBuffer, (target: u32, buffer: u32));
-ffi_fn!(FnGlBufferData, (target: u32, size: isize, data: *const c_void, usage: u32));
-ffi_fn!(FnGlBufferSubData, (target: u32, offset: isize, size: isize, data: *const c_void));
-ffi_fn!(FnGlMapBuffer, (target: u32, access: u32) -> *mut c_void);
-ffi_fn!(FnGlUnmapBuffer, (target: u32) -> u8);
 
 // GL 3.0 FBO/VAO (optional)
-ffi_fn!(FnGlGenFramebuffers, (n: i32, ids: *mut u32));
-ffi_fn!(FnGlDeleteFramebuffers, (n: i32, ids: *const u32));
-ffi_fn!(FnGlBindFramebuffer, (target: u32, framebuffer: u32));
-ffi_fn!(FnGlFramebufferTexture2D, (target: u32, attachment: u32, textarget: u32, texture: u32, level: i32));
-ffi_fn!(FnGlGenRenderbuffers, (n: i32, ids: *mut u32));
-ffi_fn!(FnGlDeleteRenderbuffers, (n: i32, ids: *const u32));
-ffi_fn!(FnGlBindRenderbuffer, (target: u32, renderbuffer: u32));
-ffi_fn!(FnGlRenderbufferStorage, (target: u32, internal_format: u32, width: i32, height: i32));
-ffi_fn!(FnGlCheckFramebufferStatus, (target: u32) -> u32);
-ffi_fn!(FnGlGenVertexArrays, (n: i32, arrays: *mut u32));
-ffi_fn!(FnGlDeleteVertexArrays, (n: i32, arrays: *const u32));
-ffi_fn!(FnGlBindVertexArray, (array: u32));
-ffi_fn!(FnGlFramebufferRenderbuffer, (target: u32, attachment: u32, renderbuffertarget: u32, renderbuffer: u32));
 
 /// Holds resolved function pointers to libOSMesa and GL.
 struct OsMesaFns {
     // Library handle for additional symbol resolution
-    lib_handle: *mut c_void,
 
     // OSMesa functions
     create_context_ext: FnOSMesaCreateContextExt,
     destroy_context: FnOSMesaDestroyContext,
     make_current: FnOSMesaMakeCurrent,
-    get_proc_address: FnOSMesaGetProcAddress,
     pixel_store: FnOSMesaPixelStore,
 
     // GL 1.0-1.1 functions (always present)
@@ -471,7 +412,6 @@ struct OsMesaFns {
     tex_image_2d: FnGlTexImage2D,
     tex_parameteri: FnGlTexParameteri,
     tex_sub_image_2d: FnGlTexSubImage2D,
-    read_pixels: FnGlReadPixels,
     scissor: FnGlScissor,
     blend_func: FnGlBlendFunc,
     depth_func: FnGlDepthFunc,
@@ -657,7 +597,6 @@ struct OsMesaFns {
     tex_coord_pointer: FnGlTexCoordPointer,
     enable_client_state: FnGlEnableClientState,
     disable_client_state: FnGlDisableClientState,
-    interleaved_arrays: FnGlInterleavedArrays,
     array_element: FnGlArrayElement,
 
     // State queries
@@ -681,11 +620,6 @@ struct OsMesaFns {
     get_tex_genfv: FnGlGetTexGenfv,
     get_tex_geniv: FnGlGetTexGeniv,
     get_pixel_mapfv: FnGlGetPixelMapfv,
-    get_pixel_mapuiv: FnGlGetPixelMapuiv,
-    get_pixel_mapusv: FnGlGetPixelMapusv,
-    get_mapdv: FnGlGetMapdv,
-    get_mapfv: FnGlGetMapfv,
-    get_mapiv: FnGlGetMapiv,
     get_clip_plane: FnGlGetClipPlane,
     clip_plane: FnGlClipPlane,
 
@@ -717,8 +651,6 @@ struct OsMesaFns {
     push_name: FnGlPushName,
     pop_name: FnGlPopName,
     load_name: FnGlLoadName,
-    select_buffer: FnGlSelectBuffer,
-    feedback_buffer: FnGlFeedbackBuffer,
     pass_through: FnGlPassThrough,
     push_attrib: FnGlPushAttrib,
     pop_attrib: FnGlPopAttrib,
@@ -773,60 +705,11 @@ struct OsMesaFns {
     convolution_parameteriv: Option<FnGlConvolutionParameteriv>,
     histogram: Option<FnGlHistogram>,
     minmax: Option<FnGlMinmax>,
-
     // GL 2.0 Shaders
-    create_shader: Option<FnGlCreateShader>,
-    delete_shader: Option<FnGlDeleteShader>,
-    shader_source: Option<FnGlShaderSource>,
-    compile_shader: Option<FnGlCompileShader>,
-    get_shaderiv: Option<FnGlGetShaderiv>,
-    get_shader_info_log: Option<FnGlGetShaderInfoLog>,
-    create_program: Option<FnGlCreateProgram>,
-    delete_program: Option<FnGlDeleteProgram>,
-    attach_shader: Option<FnGlAttachShader>,
-    detach_shader: Option<FnGlDetachShader>,
-    link_program: Option<FnGlLinkProgram>,
-    use_program: Option<FnGlUseProgram>,
-    get_programiv: Option<FnGlGetProgramiv>,
-    get_program_info_log: Option<FnGlGetProgramInfoLog>,
-    get_uniform_location: Option<FnGlGetUniformLocation>,
-    uniform1f: Option<FnGlUniform1f>,
-    uniform2f: Option<FnGlUniform2f>,
-    uniform3f: Option<FnGlUniform3f>,
-    uniform4f: Option<FnGlUniform4f>,
-    uniform1i: Option<FnGlUniform1i>,
-    uniform2i: Option<FnGlUniform2i>,
-    uniform3i: Option<FnGlUniform3i>,
-    uniform4i: Option<FnGlUniform4i>,
-    uniform_matrix4fv: Option<FnGlUniformMatrix4fv>,
-    get_attrib_location: Option<FnGlGetAttribLocation>,
-    vertex_attrib_pointer: Option<FnGlVertexAttribPointer>,
-    enable_vertex_attrib_array: Option<FnGlEnableVertexAttribArray>,
-    disable_vertex_attrib_array: Option<FnGlDisableVertexAttribArray>,
 
     // GL 1.5 Buffer Objects
-    gen_buffers: Option<FnGlGenBuffers>,
-    delete_buffers: Option<FnGlDeleteBuffers>,
-    bind_buffer: Option<FnGlBindBuffer>,
-    buffer_data: Option<FnGlBufferData>,
-    buffer_sub_data: Option<FnGlBufferSubData>,
-    map_buffer: Option<FnGlMapBuffer>,
-    unmap_buffer: Option<FnGlUnmapBuffer>,
 
     // GL 3.0 FBO/VAO
-    gen_framebuffers: Option<FnGlGenFramebuffers>,
-    delete_framebuffers: Option<FnGlDeleteFramebuffers>,
-    bind_framebuffer: Option<FnGlBindFramebuffer>,
-    framebuffer_texture_2d: Option<FnGlFramebufferTexture2D>,
-    gen_renderbuffers: Option<FnGlGenRenderbuffers>,
-    delete_renderbuffers: Option<FnGlDeleteRenderbuffers>,
-    bind_renderbuffer: Option<FnGlBindRenderbuffer>,
-    renderbuffer_storage: Option<FnGlRenderbufferStorage>,
-    check_framebuffer_status: Option<FnGlCheckFramebufferStatus>,
-    framebuffer_renderbuffer: Option<FnGlFramebufferRenderbuffer>,
-    gen_vertex_arrays: Option<FnGlGenVertexArrays>,
-    delete_vertex_arrays: Option<FnGlDeleteVertexArrays>,
-    bind_vertex_array: Option<FnGlBindVertexArray>,
 }
 
 unsafe impl Send for OsMesaFns {}
@@ -941,12 +824,9 @@ fn try_load() -> Result<OsMesaFns, String> {
     }
 
     Ok(OsMesaFns {
-        lib_handle: lib,
-
         create_context_ext,
         destroy_context,
         make_current,
-        get_proc_address,
         pixel_store,
 
         // --- GL 1.0-1.1 (required) ---
@@ -979,7 +859,6 @@ fn try_load() -> Result<OsMesaFns, String> {
         tex_image_2d: gl!(lib, get_proc_address, "glTexImage2D", FnGlTexImage2D),
         tex_parameteri: gl!(lib, get_proc_address, "glTexParameteri", FnGlTexParameteri),
         tex_sub_image_2d: gl!(lib, get_proc_address, "glTexSubImage2D", FnGlTexSubImage2D),
-        read_pixels: gl!(lib, get_proc_address, "glReadPixels", FnGlReadPixels),
         scissor: gl!(lib, get_proc_address, "glScissor", FnGlScissor),
         blend_func: gl!(lib, get_proc_address, "glBlendFunc", FnGlBlendFunc),
         depth_func: gl!(lib, get_proc_address, "glDepthFunc", FnGlDepthFunc),
@@ -1230,12 +1109,6 @@ fn try_load() -> Result<OsMesaFns, String> {
             "glDisableClientState",
             FnGlDisableClientState
         ),
-        interleaved_arrays: gl!(
-            lib,
-            get_proc_address,
-            "glInterleavedArrays",
-            FnGlInterleavedArrays
-        ),
         array_element: gl!(lib, get_proc_address, "glArrayElement", FnGlArrayElement),
 
         // State queries
@@ -1284,21 +1157,6 @@ fn try_load() -> Result<OsMesaFns, String> {
         get_tex_genfv: gl!(lib, get_proc_address, "glGetTexGenfv", FnGlGetTexGenfv),
         get_tex_geniv: gl!(lib, get_proc_address, "glGetTexGeniv", FnGlGetTexGeniv),
         get_pixel_mapfv: gl!(lib, get_proc_address, "glGetPixelMapfv", FnGlGetPixelMapfv),
-        get_pixel_mapuiv: gl!(
-            lib,
-            get_proc_address,
-            "glGetPixelMapuiv",
-            FnGlGetPixelMapuiv
-        ),
-        get_pixel_mapusv: gl!(
-            lib,
-            get_proc_address,
-            "glGetPixelMapusv",
-            FnGlGetPixelMapusv
-        ),
-        get_mapdv: gl!(lib, get_proc_address, "glGetMapdv", FnGlGetMapdv),
-        get_mapfv: gl!(lib, get_proc_address, "glGetMapfv", FnGlGetMapfv),
-        get_mapiv: gl!(lib, get_proc_address, "glGetMapiv", FnGlGetMapiv),
         get_clip_plane: gl!(lib, get_proc_address, "glGetClipPlane", FnGlGetClipPlane),
         clip_plane: gl!(lib, get_proc_address, "glClipPlane", FnGlClipPlane),
 
@@ -1330,13 +1188,6 @@ fn try_load() -> Result<OsMesaFns, String> {
         push_name: gl!(lib, get_proc_address, "glPushName", FnGlPushName),
         pop_name: gl!(lib, get_proc_address, "glPopName", FnGlPopName),
         load_name: gl!(lib, get_proc_address, "glLoadName", FnGlLoadName),
-        select_buffer: gl!(lib, get_proc_address, "glSelectBuffer", FnGlSelectBuffer),
-        feedback_buffer: gl!(
-            lib,
-            get_proc_address,
-            "glFeedbackBuffer",
-            FnGlFeedbackBuffer
-        ),
         pass_through: gl!(lib, get_proc_address, "glPassThrough", FnGlPassThrough),
         push_attrib: gl!(lib, get_proc_address, "glPushAttrib", FnGlPushAttrib),
         pop_attrib: gl!(lib, get_proc_address, "glPopAttrib", FnGlPopAttrib),
@@ -1511,165 +1362,11 @@ fn try_load() -> Result<OsMesaFns, String> {
         ),
         histogram: gl_opt!(lib, get_proc_address, "glHistogram", FnGlHistogram),
         minmax: gl_opt!(lib, get_proc_address, "glMinmax", FnGlMinmax),
-
         // GL 2.0 Shaders
-        create_shader: gl_opt!(lib, get_proc_address, "glCreateShader", FnGlCreateShader),
-        delete_shader: gl_opt!(lib, get_proc_address, "glDeleteShader", FnGlDeleteShader),
-        shader_source: gl_opt!(lib, get_proc_address, "glShaderSource", FnGlShaderSource),
-        compile_shader: gl_opt!(lib, get_proc_address, "glCompileShader", FnGlCompileShader),
-        get_shaderiv: gl_opt!(lib, get_proc_address, "glGetShaderiv", FnGlGetShaderiv),
-        get_shader_info_log: gl_opt!(
-            lib,
-            get_proc_address,
-            "glGetShaderInfoLog",
-            FnGlGetShaderInfoLog
-        ),
-        create_program: gl_opt!(lib, get_proc_address, "glCreateProgram", FnGlCreateProgram),
-        delete_program: gl_opt!(lib, get_proc_address, "glDeleteProgram", FnGlDeleteProgram),
-        attach_shader: gl_opt!(lib, get_proc_address, "glAttachShader", FnGlAttachShader),
-        detach_shader: gl_opt!(lib, get_proc_address, "glDetachShader", FnGlDetachShader),
-        link_program: gl_opt!(lib, get_proc_address, "glLinkProgram", FnGlLinkProgram),
-        use_program: gl_opt!(lib, get_proc_address, "glUseProgram", FnGlUseProgram),
-        get_programiv: gl_opt!(lib, get_proc_address, "glGetProgramiv", FnGlGetProgramiv),
-        get_program_info_log: gl_opt!(
-            lib,
-            get_proc_address,
-            "glGetProgramInfoLog",
-            FnGlGetProgramInfoLog
-        ),
-        get_uniform_location: gl_opt!(
-            lib,
-            get_proc_address,
-            "glGetUniformLocation",
-            FnGlGetUniformLocation
-        ),
-        uniform1f: gl_opt!(lib, get_proc_address, "glUniform1f", FnGlUniform1f),
-        uniform2f: gl_opt!(lib, get_proc_address, "glUniform2f", FnGlUniform2f),
-        uniform3f: gl_opt!(lib, get_proc_address, "glUniform3f", FnGlUniform3f),
-        uniform4f: gl_opt!(lib, get_proc_address, "glUniform4f", FnGlUniform4f),
-        uniform1i: gl_opt!(lib, get_proc_address, "glUniform1i", FnGlUniform1i),
-        uniform2i: gl_opt!(lib, get_proc_address, "glUniform2i", FnGlUniform2i),
-        uniform3i: gl_opt!(lib, get_proc_address, "glUniform3i", FnGlUniform3i),
-        uniform4i: gl_opt!(lib, get_proc_address, "glUniform4i", FnGlUniform4i),
-        uniform_matrix4fv: gl_opt!(
-            lib,
-            get_proc_address,
-            "glUniformMatrix4fv",
-            FnGlUniformMatrix4fv
-        ),
-        get_attrib_location: gl_opt!(
-            lib,
-            get_proc_address,
-            "glGetAttribLocation",
-            FnGlGetAttribLocation
-        ),
-        vertex_attrib_pointer: gl_opt!(
-            lib,
-            get_proc_address,
-            "glVertexAttribPointer",
-            FnGlVertexAttribPointer
-        ),
-        enable_vertex_attrib_array: gl_opt!(
-            lib,
-            get_proc_address,
-            "glEnableVertexAttribArray",
-            FnGlEnableVertexAttribArray
-        ),
-        disable_vertex_attrib_array: gl_opt!(
-            lib,
-            get_proc_address,
-            "glDisableVertexAttribArray",
-            FnGlDisableVertexAttribArray
-        ),
 
         // GL 1.5 Buffer Objects
-        gen_buffers: gl_opt!(lib, get_proc_address, "glGenBuffers", FnGlGenBuffers),
-        delete_buffers: gl_opt!(lib, get_proc_address, "glDeleteBuffers", FnGlDeleteBuffers),
-        bind_buffer: gl_opt!(lib, get_proc_address, "glBindBuffer", FnGlBindBuffer),
-        buffer_data: gl_opt!(lib, get_proc_address, "glBufferData", FnGlBufferData),
-        buffer_sub_data: gl_opt!(lib, get_proc_address, "glBufferSubData", FnGlBufferSubData),
-        map_buffer: gl_opt!(lib, get_proc_address, "glMapBuffer", FnGlMapBuffer),
-        unmap_buffer: gl_opt!(lib, get_proc_address, "glUnmapBuffer", FnGlUnmapBuffer),
 
         // GL 3.0 FBO/VAO
-        gen_framebuffers: gl_opt!(
-            lib,
-            get_proc_address,
-            "glGenFramebuffers",
-            FnGlGenFramebuffers
-        ),
-        delete_framebuffers: gl_opt!(
-            lib,
-            get_proc_address,
-            "glDeleteFramebuffers",
-            FnGlDeleteFramebuffers
-        ),
-        bind_framebuffer: gl_opt!(
-            lib,
-            get_proc_address,
-            "glBindFramebuffer",
-            FnGlBindFramebuffer
-        ),
-        framebuffer_texture_2d: gl_opt!(
-            lib,
-            get_proc_address,
-            "glFramebufferTexture2D",
-            FnGlFramebufferTexture2D
-        ),
-        gen_renderbuffers: gl_opt!(
-            lib,
-            get_proc_address,
-            "glGenRenderbuffers",
-            FnGlGenRenderbuffers
-        ),
-        delete_renderbuffers: gl_opt!(
-            lib,
-            get_proc_address,
-            "glDeleteRenderbuffers",
-            FnGlDeleteRenderbuffers
-        ),
-        bind_renderbuffer: gl_opt!(
-            lib,
-            get_proc_address,
-            "glBindRenderbuffer",
-            FnGlBindRenderbuffer
-        ),
-        renderbuffer_storage: gl_opt!(
-            lib,
-            get_proc_address,
-            "glRenderbufferStorage",
-            FnGlRenderbufferStorage
-        ),
-        check_framebuffer_status: gl_opt!(
-            lib,
-            get_proc_address,
-            "glCheckFramebufferStatus",
-            FnGlCheckFramebufferStatus
-        ),
-        framebuffer_renderbuffer: gl_opt!(
-            lib,
-            get_proc_address,
-            "glFramebufferRenderbuffer",
-            FnGlFramebufferRenderbuffer
-        ),
-        gen_vertex_arrays: gl_opt!(
-            lib,
-            get_proc_address,
-            "glGenVertexArrays",
-            FnGlGenVertexArrays
-        ),
-        delete_vertex_arrays: gl_opt!(
-            lib,
-            get_proc_address,
-            "glDeleteVertexArrays",
-            FnGlDeleteVertexArrays
-        ),
-        bind_vertex_array: gl_opt!(
-            lib,
-            get_proc_address,
-            "glBindVertexArray",
-            FnGlBindVertexArray
-        ),
     })
 }
 
