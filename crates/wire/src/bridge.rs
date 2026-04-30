@@ -78,15 +78,10 @@ pub fn build_from_sidecar(msg: &SidecarToBackend) -> Option<Builder<HeapAllocato
             SidecarToBackend::ProcessExited { pid, exit_code } => {
                 let mut pe = root.init_process_exited();
                 pe.set_pid(*pid);
+                let mut es = pe.init_exit_status();
                 match exit_code {
-                    Some(code) => {
-                        pe.set_has_exit_code(true);
-                        pe.set_exit_code(*code);
-                    }
-                    None => {
-                        pe.set_has_exit_code(false);
-                        pe.set_exit_code(0);
-                    }
+                    Some(code) => es.set_code(*code),
+                    None => es.set_killed_by_signal(()),
                 }
             }
             SidecarToBackend::ProcessSpawned { request_id, pid } => {
@@ -117,14 +112,8 @@ pub fn build_from_sidecar(msg: &SidecarToBackend) -> Option<Builder<HeapAllocato
                 message,
             } => {
                 let mut er = root.init_error_reply();
-                match request_id {
-                    Some(id) => {
-                        er.set_has_request_id(true);
-                        er.set_request_id(id);
-                    }
-                    None => {
-                        er.set_has_request_id(false);
-                    }
+                if let Some(id) = request_id {
+                    er.set_request_id(id);
                 }
                 er.set_message(message);
             }
@@ -289,14 +278,8 @@ fn write_display_payload(
         }
         DisplayUpdate::WindowFocused { window_id } => {
             let mut wf = payload.init_window_focused();
-            match window_id {
-                Some(id) => {
-                    wf.set_has_window_id(true);
-                    wf.set_window_id(id);
-                }
-                None => {
-                    wf.set_has_window_id(false);
-                }
+            if let Some(id) = window_id {
+                wf.set_window_id(id);
             }
         }
         DisplayUpdate::WindowRaised { window_id } => {
@@ -319,14 +302,8 @@ fn write_display_payload(
         } => {
             let mut tfs = payload.init_transient_for_set();
             tfs.set_window_id(window_id);
-            match parent_window_id {
-                Some(p) => {
-                    tfs.set_has_parent(true);
-                    tfs.set_parent_window_id(p);
-                }
-                None => {
-                    tfs.set_has_parent(false);
-                }
+            if let Some(p) = parent_window_id {
+                tfs.set_parent_window_id(p);
             }
         }
         DisplayUpdate::WindowIconChanged {
@@ -375,12 +352,8 @@ fn write_display_payload(
                 }
                 None => ms.set_has_checked(false),
             }
-            match label {
-                Some(v) => {
-                    ms.set_has_label(true);
-                    ms.set_label(v);
-                }
-                None => ms.set_has_label(false),
+            if let Some(v) = label {
+                ms.set_label(v);
             }
         }
         // Drawing primitives, ClearArea, CopyArea, DrawArc,
@@ -415,13 +388,14 @@ pub fn read_from_sidecar(
         }
         Which::ProcessExited(pe) => {
             let pe = pe?;
+            use wire_capnp::process_exited::exit_status::Which as ExitWhich;
+            let exit_code = match pe.get_exit_status().which()? {
+                ExitWhich::Code(c) => Some(c),
+                ExitWhich::KilledBySignal(()) => None,
+            };
             SidecarToBackend::ProcessExited {
                 pid: pe.get_pid(),
-                exit_code: if pe.get_has_exit_code() {
-                    Some(pe.get_exit_code())
-                } else {
-                    None
-                },
+                exit_code,
             }
         }
         Which::Display(du) => {
@@ -469,7 +443,7 @@ pub fn read_from_sidecar(
         Which::ErrorReply(er) => {
             let er = er?;
             SidecarToBackend::Error {
-                request_id: if er.get_has_request_id() {
+                request_id: if er.has_request_id() {
                     Some(er.get_request_id()?.to_string()?)
                 } else {
                     None
@@ -609,7 +583,7 @@ fn read_display_payload(
         Which::WindowFocused(wf) => {
             let wf = wf?;
             DisplayUpdate::WindowFocused {
-                window_id: if wf.get_has_window_id() {
+                window_id: if wf.has_window_id() {
                     Some(wf.get_window_id()?.to_string()?)
                 } else {
                     None
@@ -640,7 +614,7 @@ fn read_display_payload(
             let tfs = tfs?;
             DisplayUpdate::TransientForSet {
                 window_id: tfs.get_window_id()?.to_string()?,
-                parent_window_id: if tfs.get_has_parent() {
+                parent_window_id: if tfs.has_parent_window_id() {
                     Some(tfs.get_parent_window_id()?.to_string()?)
                 } else {
                     None
@@ -685,7 +659,7 @@ fn read_display_payload(
                 } else {
                     None
                 },
-                label: if ms.get_has_label() {
+                label: if ms.has_label() {
                     Some(ms.get_label()?.to_string()?)
                 } else {
                     None
@@ -1157,12 +1131,8 @@ fn write_menu_items(
 
 fn write_menu_item(mut b: wire_capnp::menu_item::Builder, item: &MenuItem) {
     b.set_id(&item.id);
-    match &item.label {
-        Some(l) => {
-            b.set_has_label(true);
-            b.set_label(l);
-        }
-        None => b.set_has_label(false),
+    if let Some(l) = &item.label {
+        b.set_label(l);
     }
     b.set_kind(match item.kind {
         MenuItemKind::Normal => wire_capnp::MenuItemKind::Normal,
@@ -1173,33 +1143,19 @@ fn write_menu_item(mut b: wire_capnp::menu_item::Builder, item: &MenuItem) {
     });
     b.set_enabled(item.enabled);
     b.set_visible(item.visible);
-    match item.checked {
-        Some(v) => {
-            b.set_has_checked(true);
-            b.set_checked(v);
-        }
-        None => b.set_has_checked(false),
+    b.set_checked(match item.checked {
+        None => wire_capnp::CheckState::NotApplicable,
+        Some(false) => wire_capnp::CheckState::Unchecked,
+        Some(true) => wire_capnp::CheckState::Checked,
+    });
+    if let Some(a) = &item.accelerator {
+        b.set_accelerator(a);
     }
-    match &item.accelerator {
-        Some(a) => {
-            b.set_has_accelerator(true);
-            b.set_accelerator(a);
-        }
-        None => b.set_has_accelerator(false),
+    if let Some(i) = &item.icon {
+        b.set_icon(i);
     }
-    match &item.icon {
-        Some(i) => {
-            b.set_has_icon(true);
-            b.set_icon(i);
-        }
-        None => b.set_has_icon(false),
-    }
-    match &item.action {
-        Some(a) => {
-            b.set_has_action(true);
-            write_menu_action(b.reborrow().init_action(), a);
-        }
-        None => b.set_has_action(false),
+    if let Some(a) = &item.action {
+        write_menu_action(b.reborrow().init_action(), a);
     }
     let kids = b.init_children(item.children.len() as u32);
     write_menu_items(kids, &item.children);
@@ -1223,14 +1179,19 @@ fn read_menu_item(item: wire_capnp::menu_item::Reader) -> Result<MenuItem, Bridg
         wire_capnp::MenuItemKind::Checkbox => MenuItemKind::Checkbox,
         wire_capnp::MenuItemKind::Radio => MenuItemKind::Radio,
     };
-    let action = if item.get_has_action() {
+    let action = if item.has_action() {
         Some(read_menu_action(item.get_action()?)?)
     } else {
         None
     };
+    let checked = match item.get_checked()? {
+        wire_capnp::CheckState::NotApplicable => None,
+        wire_capnp::CheckState::Unchecked => Some(false),
+        wire_capnp::CheckState::Checked => Some(true),
+    };
     Ok(MenuItem {
         id: item.get_id()?.to_string()?,
-        label: if item.get_has_label() {
+        label: if item.has_label() {
             Some(item.get_label()?.to_string()?)
         } else {
             None
@@ -1238,17 +1199,13 @@ fn read_menu_item(item: wire_capnp::menu_item::Reader) -> Result<MenuItem, Bridg
         kind,
         enabled: item.get_enabled(),
         visible: item.get_visible(),
-        checked: if item.get_has_checked() {
-            Some(item.get_checked())
-        } else {
-            None
-        },
-        accelerator: if item.get_has_accelerator() {
+        checked,
+        accelerator: if item.has_accelerator() {
             Some(item.get_accelerator()?.to_string()?)
         } else {
             None
         },
-        icon: if item.get_has_icon() {
+        icon: if item.has_icon() {
             Some(item.get_icon()?.to_string()?)
         } else {
             None
@@ -1260,14 +1217,8 @@ fn read_menu_item(item: wire_capnp::menu_item::Reader) -> Result<MenuItem, Bridg
 
 fn write_menu_action(mut b: wire_capnp::menu_action::Builder, action: &MenuAction) {
     b.set_name(&action.name);
-    match &action.target {
-        Some(target) => {
-            b.set_has_target(true);
-            write_menu_action_target(b.reborrow().init_target(), target);
-        }
-        None => {
-            b.set_has_target(false);
-        }
+    if let Some(target) = &action.target {
+        write_menu_action_target(b.reborrow().init_target(), target);
     }
 }
 
@@ -1286,7 +1237,7 @@ fn write_menu_action_target(
 }
 
 fn read_menu_action(a: wire_capnp::menu_action::Reader) -> Result<MenuAction, BridgeError> {
-    let target = if a.get_has_target() {
+    let target = if a.has_target() {
         Some(read_menu_action_target(a.get_target()?)?)
     } else {
         None

@@ -95,10 +95,14 @@ struct ProcessConnected {
 
 struct ProcessExited {
     pid @0 :UInt32;
-    # `exitCode` is logically nullable. Cap'n Proto has no Option
-    # type — encode "no exit code" as `hasExitCode = false`.
-    hasExitCode @1 :Bool;
-    exitCode @2 :Int32;
+    exitStatus :union {
+        # Normal exit; carries the exit status code.
+        code @1 :Int32;
+        # Process was terminated by a signal — no meaningful code.
+        # `KillProcess` ack also uses this branch since we don't
+        # wait() for the real status before replying.
+        killedBySignal @2 :Void;
+    }
 }
 
 struct InputDropped {
@@ -128,11 +132,10 @@ struct ProcessInfo {
 
 struct ErrorReply {
     # `requestId` is logically nullable — some errors aren't tied
-    # to a specific request. `hasRequestId = false` means "general
-    # error".
-    hasRequestId @0 :Bool;
-    requestId @1 :Text;
-    message @2 :Text;
+    # to a specific request. Use the auto-generated `hasRequestId()`
+    # accessor; null pointer means "general error".
+    requestId @0 :Text;
+    message @1 :Text;
 }
 
 struct ClipboardOffer {
@@ -280,9 +283,9 @@ struct AnimCursorFrame {
 # Window state.
 struct WindowFocused {
     # `windowId` is logically nullable (focus cleared = "no
-    # window"). `hasWindowId = false` encodes that.
-    hasWindowId @0 :Bool;
-    windowId @1 :Text;
+    # window"). Use the auto-generated `hasWindowId()` accessor;
+    # null pointer means "no focus".
+    windowId @0 :Text;
 }
 
 struct WindowRaised {
@@ -301,8 +304,9 @@ struct WindowUrgent {
 
 struct TransientForSet {
     windowId @0 :Text;
-    hasParent @1 :Bool;
-    parentWindowId @2 :Text;
+    # Null pointer (use auto-generated `hasParentWindowId()`) means
+    # the property was unset / DeleteProperty'd.
+    parentWindowId @1 :Text;
 }
 
 struct WindowIconChanged {
@@ -334,32 +338,38 @@ struct MenuStructure {
 struct MenuStateChanged {
     windowId @0 :Text;
     itemId @1 :Text;
+    # `enabled` and `checked` are `Option<Bool>` for delta encoding
+    # ("None = unchanged in this update"). Cap'n Proto has no native
+    # Option<primitive>, so we use explicit `has*` booleans here.
+    # `label` (a pointer field) uses the auto-generated `hasLabel()`
+    # — null pointer means "label unchanged".
     hasEnabled @2 :Bool;
     enabled @3 :Bool;
     hasChecked @4 :Bool;
     checked @5 :Bool;
-    hasLabel @6 :Bool;
-    label @7 :Text;
+    label @6 :Text;
 }
 
 # Recursive — submenus contain their own MenuItem children. Cap'n
 # Proto handles this via List(MenuItem) on the children field.
+#
+# Pointer fields (`label`, `accelerator`, `icon`, `action`) are
+# logically optional; null pointer ↔ `None`, accessed via the
+# auto-generated `has*()` getters.
 struct MenuItem {
     id @0 :Text;
-    hasLabel @1 :Bool;
-    label @2 :Text;
-    kind @3 :MenuItemKind;
-    enabled @4 :Bool;
-    visible @5 :Bool;
-    hasChecked @6 :Bool;
-    checked @7 :Bool;
-    hasAccelerator @8 :Bool;
-    accelerator @9 :Text;
-    hasIcon @10 :Bool;
-    icon @11 :Text;
-    hasAction @12 :Bool;
-    action @13 :MenuAction;
-    children @14 :List(MenuItem);
+    label @1 :Text;
+    kind @2 :MenuItemKind;
+    enabled @3 :Bool;
+    visible @4 :Bool;
+    # `Option<Bool>` mapped to a tri-state enum: `notApplicable` for
+    # separators / normal items, `unchecked` / `checked` for
+    # checkboxes and radios.
+    checked @5 :CheckState;
+    accelerator @6 :Text;
+    icon @7 :Text;
+    action @8 :MenuAction;
+    children @9 :List(MenuItem);
 }
 
 enum MenuItemKind {
@@ -370,13 +380,18 @@ enum MenuItemKind {
     radio @4;
 }
 
+enum CheckState {
+    notApplicable @0;
+    unchecked @1;
+    checked @2;
+}
+
 struct MenuAction {
     name @0 :Text;
-    hasTarget @1 :Bool;
-    # Typed union mirroring `protocol::MenuActionTarget`. Only set
-    # when `hasTarget` is true; the union slot is meaningless
-    # otherwise (defaults to the first variant).
-    target @2 :MenuActionTarget;
+    # Typed union mirroring `protocol::MenuActionTarget`. Pointer
+    # field — null (auto `hasTarget()`) means the action is
+    # parameterless.
+    target @1 :MenuActionTarget;
 }
 
 struct MenuActionTarget {
