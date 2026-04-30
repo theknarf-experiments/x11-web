@@ -18,7 +18,8 @@ use tokio::sync::mpsc;
 use tokio::time::interval;
 use tracing::{info, warn};
 use uuid::Uuid;
-use x11_web_protocol::{DisplayUpdate, SidecarToBackend};
+use x11_web_protocol::DisplayUpdate;
+use x11_web_wire::SidecarToBackend;
 
 use crate::capture::capture_window;
 use crate::router::{WindowRoute, WindowRouter};

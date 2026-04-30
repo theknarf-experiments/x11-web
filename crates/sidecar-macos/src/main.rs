@@ -19,14 +19,12 @@ mod macos {
     use tokio::sync::mpsc;
     use tokio::time::interval;
     use tracing::{error, info, warn};
-    use x11_web_protocol::{BackendToSidecar, SidecarToBackend};
-    use x11_web_wire::conn::{dial, DialedConnection};
-    use x11_web_wire::tls::parse_fingerprint;
-    use x11_web_wire::wire_capnp;
-
     use x11_web_sidecar_macos::input;
     use x11_web_sidecar_macos::router::WindowRouter;
-    use x11_web_sidecar_macos::wire_bridge;
+    use x11_web_wire::bridge as wire_bridge;
+    use x11_web_wire::conn::{dial, DialedConnection};
+    use x11_web_wire::tls::parse_fingerprint;
+    use x11_web_wire::{wire_capnp, BackendToSidecar, SidecarToBackend};
 
     pub async fn run() {
         tracing_subscriber::fmt::init();

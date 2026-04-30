@@ -6,14 +6,21 @@
 //! regenerates Rust types on every build.
 //!
 //! Public modules:
-//!   - `tls`  — self-signed cert generation + fingerprint pinning.
-//!   - `conn` — `dial` / `listen` plus the `Hello` handshake.
+//!   - `tls`    — self-signed cert generation + fingerprint pinning.
+//!   - `conn`   — `dial` / `listen` plus the `Hello` handshake.
+//!   - `types`  — high-level Rust enums (`BackendToSidecar`,
+//!     `SidecarToBackend`) that wrap the Cap'n Proto wire types.
+//!   - `bridge` — translation between `types` and `wire_capnp`.
 //!
 //! The generated Cap'n Proto module lives at the crate root as
 //! `wire_capnp` so callers can write `wire::wire_capnp::Hello` etc.
 
+pub mod bridge;
 pub mod conn;
 pub mod tls;
+pub mod types;
+
+pub use types::{BackendToSidecar, SidecarToBackend};
 
 /// Generated Cap'n Proto types. The build script writes this module
 /// to `$OUT_DIR/wire_capnp.rs`; we `include!` it so it appears as

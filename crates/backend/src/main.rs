@@ -1,5 +1,4 @@
 mod quic;
-mod wire_bridge;
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -16,6 +15,7 @@ use tracing::{info, warn};
 use uuid::Uuid;
 use x11_web_protocol::*;
 use x11_web_wire::tls::generate_self_signed;
+use x11_web_wire::{BackendToSidecar, SidecarToBackend};
 
 #[derive(Clone)]
 struct AppState {

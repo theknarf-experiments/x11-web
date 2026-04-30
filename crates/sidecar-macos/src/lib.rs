@@ -28,5 +28,3 @@ pub mod router;
 pub mod skylight;
 #[cfg(target_os = "macos")]
 pub mod windows;
-#[cfg(target_os = "macos")]
-pub mod wire_bridge;

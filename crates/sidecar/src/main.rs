@@ -8,7 +8,6 @@ mod menus;
 #[cfg(feature = "osmesa")]
 #[allow(dead_code)]
 mod osmesa;
-mod wire_bridge;
 mod xinput2;
 mod xserver;
 
@@ -23,9 +22,10 @@ use tokio::sync::mpsc;
 use tokio::time::{interval, Duration};
 use tracing::{error, info, warn};
 use x11_web_protocol::*;
+use x11_web_wire::bridge as wire_bridge;
 use x11_web_wire::conn::{dial, DialedConnection};
 use x11_web_wire::tls::parse_fingerprint;
-use x11_web_wire::wire_capnp;
+use x11_web_wire::{wire_capnp, BackendToSidecar, SidecarToBackend};
 
 use crate::xserver::{TaggedDisplayUpdate, X11Server};
 

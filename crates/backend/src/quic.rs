@@ -1,27 +1,22 @@
-//! QUIC sidecar listener — accepts connections from sidecars
-//! using the wire crate's protocol (TLS 1.3 + Cap'n Proto), runs
-//! the same `dispatch_sidecar_msg` / `cleanup_sidecar` helpers the
-//! existing WebSocket handler uses.
+//! QUIC sidecar listener — the only sidecar transport. Accepts
+//! connections from sidecars using the wire crate's protocol
+//! (TLS 1.3 + Cap'n Proto) and feeds them through the shared
+//! `dispatch_sidecar_msg` / `cleanup_sidecar` helpers in
+//! `crate::main`.
 //!
 //! Each accepted connection becomes a `SidecarConnection` in
-//! `AppState.sidecars` (same registry the WebSocket path
-//! populates) — frontends don't need to know which transport a
-//! given sidecar is using.
-//!
-//! For now: WebSocket sidecars (X11) and QUIC sidecars (macOS)
-//! coexist. When the X11 sidecar migrates we drop the WebSocket
-//! sidecar listener and only this stays.
+//! `AppState.sidecars`.
 
 use std::net::SocketAddr;
 
 use tokio::sync::mpsc;
 use tracing::{info, warn};
-use x11_web_protocol::{BackendToSidecar, SidecarInfo};
+use x11_web_protocol::SidecarInfo;
+use x11_web_wire::bridge as wire_bridge;
 use x11_web_wire::conn::{accept, listen};
 use x11_web_wire::tls::ServerCert;
-use x11_web_wire::wire_capnp;
+use x11_web_wire::{wire_capnp, BackendToSidecar};
 
-use crate::wire_bridge;
 use crate::{
     broadcast_to_frontends, cleanup_sidecar, dispatch_sidecar_msg, AppState, SidecarConnection,
 };
