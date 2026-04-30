@@ -55,30 +55,26 @@ pub(crate) fn pict_format_has_alpha(format_id: u32) -> bool {
 }
 
 /// Decode a 4-byte raw pixmap word into canonical (b, g, r, a) values
-/// according to the picture's format. Our framebuffer stores raw
-/// pixmap memory; the same bytes are interpreted differently when
-/// read through different pict formats (e.g. an `xBGR32` picture and
-/// an `ARGB32` picture wrapping the same pixmap).
+/// according to the picture's format. Framebuffer storage is packed
+/// RGBA (byte 0 = R); the X11 Core PutImage path swaps from BGRA wire
+/// before writing, so an ARGB32 pixmap reads back as `[R, G, B, A]`.
 pub(crate) fn decode_pixel_bgra(format_id: u32, bytes: &[u8]) -> (u8, u8, u8, u8) {
     if bytes.len() < 4 {
         return (0, 0, 0, 0);
     }
     match format_id {
-        // ARGB32: bytes [B, G, R, A] (the layout PutImage hands us
-        // on a little-endian server, and the canonical ordering we
-        // use everywhere internally).
-        PICTFORMAT_ARGB32 => (bytes[0], bytes[1], bytes[2], bytes[3]),
-        // xRGB32 / RGB24: same layout as ARGB32 but the high byte is
-        // either padding (xRGB) or absent (RGB24); force alpha=255.
-        PICTFORMAT_XRGB32 | PICTFORMAT_RGB24 => (bytes[0], bytes[1], bytes[2], 0xff),
-        // xBGR32: R/B swapped — bytes are [R, G, B, X].
-        PICTFORMAT_XBGR32 => (bytes[2], bytes[1], bytes[0], 0xff),
+        // ARGB32: storage bytes are [R, G, B, A].
+        PICTFORMAT_ARGB32 => (bytes[2], bytes[1], bytes[0], bytes[3]),
+        // xRGB32 / RGB24: same layout as ARGB32; force alpha=255.
+        PICTFORMAT_XRGB32 | PICTFORMAT_RGB24 => (bytes[2], bytes[1], bytes[0], 0xff),
+        // xBGR32: R/B swapped vs ARGB32 — bytes [B, G, R, X].
+        PICTFORMAT_XBGR32 => (bytes[0], bytes[1], bytes[2], 0xff),
         // A8 (alpha-only) — used for masks. RENDER operations
         // (FillRectangles, Composite) store the alpha in bytes[3].
         // PutImage depth=8 also writes alpha data here when the
-        // pixmap's depth matches A8's depth. Read from bytes[3].
+        // pixmap's depth matches A8's depth.
         PICTFORMAT_A8 => (0, 0, 0, bytes[3]),
-        _ => (bytes[0], bytes[1], bytes[2], bytes[3]),
+        _ => (bytes[2], bytes[1], bytes[0], bytes[3]),
     }
 }
 
@@ -431,6 +427,7 @@ pub(crate) fn composite_pixel(
 
     // Fast paths for the operators that don't depend on per-channel
     // arithmetic — just unconditional writes.
+    // Storage layout: dst[0] = R, dst[1] = G, dst[2] = B, dst[3] = A.
     match op {
         0 => {
             // Clear
@@ -442,9 +439,9 @@ pub(crate) fn composite_pixel(
         }
         1 => {
             // Src
-            dst[0] = src_b;
+            dst[0] = src_r;
             dst[1] = src_g;
-            dst[2] = src_r;
+            dst[2] = src_b;
             dst[3] = if force_da_one { 255 } else { src_a };
             return;
         }
@@ -460,9 +457,9 @@ pub(crate) fn composite_pixel(
 
     let (fs, fd) = pict_op_factors(op, sa, da);
 
-    dst[0] = blend_chan(src_b, dst[0], fs, fd);
+    dst[0] = blend_chan(src_r, dst[0], fs, fd);
     dst[1] = blend_chan(src_g, dst[1], fs, fd);
-    dst[2] = blend_chan(src_r, dst[2], fs, fd);
+    dst[2] = blend_chan(src_b, dst[2], fs, fd);
     dst[3] = if force_da_one {
         255
     } else {
@@ -496,9 +493,10 @@ pub(crate) fn composite_pixel_ca(
     let (fs_r, fd_r) = pict_op_factors(op, sa_r as i32, da);
     let (fs_a, fd_a) = pict_op_factors(op, sa_a as i32, da);
 
-    dst[0] = blend_chan(src_b, dst[0], fs_b, fd_b);
+    // Storage layout: dst[0] = R, dst[1] = G, dst[2] = B, dst[3] = A.
+    dst[0] = blend_chan(src_r, dst[0], fs_r, fd_r);
     dst[1] = blend_chan(src_g, dst[1], fs_g, fd_g);
-    dst[2] = blend_chan(src_r, dst[2], fs_r, fd_r);
+    dst[2] = blend_chan(src_b, dst[2], fs_b, fd_b);
     dst[3] = if force_da_one {
         255
     } else {
@@ -1246,9 +1244,10 @@ mod tests {
 
     #[test]
     fn composite_src_overwrites_dst() {
+        // dst storage layout: [R, G, B, A]; src args are (src_b, src_g, src_r, src_a).
         let mut dst = [100u8, 150, 200, 128];
         composite_pixel(1, &mut dst, 10, 20, 30, 40, true);
-        assert_eq!(dst, [10, 20, 30, 40]);
+        assert_eq!(dst, [30, 20, 10, 40]);
     }
 
     #[test]
@@ -1262,8 +1261,8 @@ mod tests {
     fn composite_over_opaque_src_replaces_dst() {
         let mut dst = [100u8, 150, 200, 255];
         composite_pixel(3, &mut dst, 50, 60, 70, 255, true);
-        // Over with Sa=255: Fd = 1-Sa = 0, so dst = src
-        assert_eq!(dst, [50, 60, 70, 255]);
+        // Over with Sa=255: dst = (src_r, src_g, src_b, src_a)
+        assert_eq!(dst, [70, 60, 50, 255]);
     }
 
     #[test]
@@ -1313,26 +1312,26 @@ mod tests {
         // CA Over: each channel uses its own effective Sa.
         // src=(255,0,0,255) with per-channel alphas (255,128,0,255)
         // means R channel fully opaque, G channel half, B channel zero.
-        let mut dst = [0u8, 0, 0, 255]; // opaque black (BGRA)
+        let mut dst = [0u8, 0, 0, 255]; // opaque black (RGBA storage)
         composite_pixel_ca(
             3, // PictOpOver
             &mut dst, 0, 0, 255, 255, // src: B=0, G=0, R=255, A=255
             0, 128, 255, 255, // sa_b=0, sa_g=128, sa_r=255, sa_a=255
             true,
         );
-        // R channel: src_r=255, sa_r=255, dst_r=0 → Fd=1-sa_r=0 → result=255
-        assert_eq!(dst[2], 255);
-        // G channel: src_g=0, sa_g=128, dst_g=0 → Fd=1-sa_g=127 → result=0
+        // R channel (byte 0): src_r=255, sa_r=255 → result=255
+        assert_eq!(dst[0], 255);
+        // G channel (byte 1): src_g=0, sa_g=128 → result=0
         assert_eq!(dst[1], 0);
-        // B channel: src_b=0, sa_b=0, dst_b=0 → Fd=1-sa_b=255 → result=0
-        assert_eq!(dst[0], 0);
+        // B channel (byte 2): src_b=0, sa_b=0 → result=0
+        assert_eq!(dst[2], 0);
     }
 
     #[test]
     fn composite_pixel_ca_over_preserves_dst_where_mask_zero() {
         // When CA mask channels are 0, src is modulated to 0 and sa=0,
         // so for Over: Fd = 1-sa = 1, Fs = 1. Result = src(0) + dst * 1 = dst.
-        let mut dst = [100u8, 150, 200, 255]; // BGRA
+        let mut dst = [100u8, 150, 200, 255]; // RGBA storage
         composite_pixel_ca(
             3, // PictOpOver
             &mut dst, 0, 0, 0, 0, // src fully modulated to zero
@@ -1340,9 +1339,9 @@ mod tests {
             true,
         );
         // With src=0 and Fd=255: result = 0 + dst * 1 = dst preserved.
-        assert_eq!(dst[0], 100); // B
+        assert_eq!(dst[0], 100); // R
         assert_eq!(dst[1], 150); // G
-        assert_eq!(dst[2], 200); // R
+        assert_eq!(dst[2], 200); // B
     }
 
     #[test]
@@ -1351,14 +1350,14 @@ mod tests {
         let mut dst = [100u8, 150, 200, 255];
         composite_pixel_ca(
             1, // PictOpSrc
-            &mut dst, 10, 20, 30, 128, // src BGRA
+            &mut dst, 10, 20, 30, 128, // src args (b, g, r, a)
             64, 128, 255, 128, // per-channel sa
             true,
         );
-        // Src op: Fs=1, Fd=0, so result = src
-        assert_eq!(dst[0], 10); // B
+        // Src op: Fs=1, Fd=0, so result = src; storage layout is RGBA.
+        assert_eq!(dst[0], 30); // R
         assert_eq!(dst[1], 20); // G
-        assert_eq!(dst[2], 30); // R
+        assert_eq!(dst[2], 10); // B
         assert_eq!(dst[3], 128); // A
     }
 
@@ -1390,7 +1389,7 @@ mod tests {
     #[test]
     fn bilinear_sample_center_of_single_pixel() {
         // A single red pixel sampled at its center should return red.
-        let fb_data = vec![0u8, 0, 255, 255]; // BGRA: red
+        let fb_data = vec![255u8, 0, 0, 255]; // RGBA: red
         let (b, g, r, a) = bilinear_sample(
             &fb_data,
             4,
@@ -1406,10 +1405,10 @@ mod tests {
 
     #[test]
     fn bilinear_sample_between_two_pixels() {
-        // Two pixels: red and green, sample at boundary
+        // Two pixels: red and green; framebuffer storage is [R, G, B, A].
         let mut fb_data = vec![0u8; 8];
-        fb_data[0..4].copy_from_slice(&[0, 0, 255, 255]); // red BGRA
-        fb_data[4..8].copy_from_slice(&[0, 255, 0, 255]); // green BGRA
+        fb_data[0..4].copy_from_slice(&[255, 0, 0, 255]); // red
+        fb_data[4..8].copy_from_slice(&[0, 255, 0, 255]); // green
         let (b, g, r, a) = bilinear_sample(
             &fb_data,
             8,
@@ -1570,33 +1569,31 @@ mod tests {
     #[test]
     fn composite_pixel_over_blends_correctly() {
         // Over with 50% alpha green src onto opaque blue dst
-        let mut dst = [255u8, 0, 0, 255]; // BGRA: blue, opaque
+        // Storage layout: dst = [R, G, B, A].
+        let mut dst = [0u8, 0, 255, 255]; // blue, opaque
         composite_pixel(
             3, // PictOpOver
-            &mut dst, 0, 255, 0, 128, // src: B=0, G=255, R=0, A=128
+            &mut dst, 0, 255, 0, 128, // src args: B=0, G=255, R=0, A=128
             true,
         );
-        // sa=128, da=255, fs=255, fd=255-128=127
-        // B: blend_chan(0, 255, 255, 127) = (0 + 255*127 + 127)/255 = 127
-        // G: blend_chan(255, 0, 255, 127) = (255*255 + 0 + 127)/255 = 255
-        // R: blend_chan(0, 0, 255, 127) = (0 + 0 + 127)/255 = 0
+        // sa=128, fd=255-128=127
+        assert_eq!(dst[0], 0); // R: none
         assert_eq!(dst[1], 255); // G: fully green
-        assert_eq!(dst[0], 127); // B: attenuated blue
-        assert_eq!(dst[2], 0); // R: none
+        assert_eq!(dst[2], 127); // B: attenuated blue
     }
 
     #[test]
     fn composite_pixel_src_replaces_completely() {
-        let mut dst = [255u8, 0, 0, 255]; // blue
+        let mut dst = [0u8, 0, 255, 255]; // blue (RGBA)
         composite_pixel(1, &mut dst, 0, 255, 0, 128, true); // PictOpSrc: green
         assert_eq!(dst, [0, 255, 0, 128]);
     }
 
     #[test]
     fn composite_pixel_dst_preserves_completely() {
-        let mut dst = [255u8, 0, 0, 255]; // blue
+        let mut dst = [0u8, 0, 255, 255]; // blue
         composite_pixel(2, &mut dst, 0, 255, 0, 128, true); // PictOpDst
-        assert_eq!(dst, [255, 0, 0, 255]); // unchanged
+        assert_eq!(dst, [0, 0, 255, 255]); // unchanged
     }
 
     #[test]
@@ -1612,23 +1609,25 @@ mod tests {
 
     #[test]
     fn decode_pixel_argb32() {
-        let bytes = [10u8, 20, 30, 200]; // BGRA
+        // ARGB32 storage layout: [R, G, B, A].
+        let bytes = [10u8, 20, 30, 200];
         let (b, g, r, a) = decode_pixel_bgra(PICTFORMAT_ARGB32, &bytes);
-        assert_eq!((b, g, r, a), (10, 20, 30, 200));
+        assert_eq!((b, g, r, a), (30, 20, 10, 200));
     }
 
     #[test]
     fn decode_pixel_xrgb32_forces_opaque() {
-        let bytes = [10u8, 20, 30, 0]; // BGRX with X=0
+        let bytes = [10u8, 20, 30, 0]; // [R, G, B, X]
         let (b, g, r, a) = decode_pixel_bgra(PICTFORMAT_XRGB32, &bytes);
-        assert_eq!((b, g, r, a), (10, 20, 30, 255)); // alpha forced to 255
+        assert_eq!((b, g, r, a), (30, 20, 10, 255));
     }
 
     #[test]
     fn decode_pixel_xbgr32_swaps_rb() {
-        let bytes = [10u8, 20, 30, 0]; // stored as [R, G, B, X]
+        // xBGR32 reads bytes inverted relative to ARGB32 storage.
+        let bytes = [10u8, 20, 30, 0];
         let (b, g, r, a) = decode_pixel_bgra(PICTFORMAT_XBGR32, &bytes);
-        assert_eq!((b, g, r, a), (30, 20, 10, 255)); // R/B swapped, alpha forced
+        assert_eq!((b, g, r, a), (10, 20, 30, 255));
     }
 
     #[test]

@@ -277,13 +277,19 @@ pub(crate) fn handle_add_glyphs_from_picture(
                         }
                     }
                     Some(fmt) if fmt == PICTFORMAT_ARGB32 => {
+                        // Framebuffer storage is RGBA; glyph data is stored in
+                        // ARGB32 wire byte order ([B, G, R, A]) so consumers
+                        // (`get_glyph_argb`) read consistently with `AddGlyphs`.
                         for row in 0..height as usize {
                             let sy = row;
                             for col in 0..width as usize {
                                 let sx = src_x_cursor + col;
                                 let fb_off = sy * fb_stride * bpp + sx * bpp;
                                 if fb_off + 4 <= fb_data.len() {
-                                    pixels.extend_from_slice(&fb_data[fb_off..fb_off + 4]);
+                                    pixels.push(fb_data[fb_off + 2]); // B
+                                    pixels.push(fb_data[fb_off + 1]); // G
+                                    pixels.push(fb_data[fb_off]); // R
+                                    pixels.push(fb_data[fb_off + 3]); // A
                                 } else {
                                     pixels.extend_from_slice(&[0, 0, 0, 0]);
                                 }

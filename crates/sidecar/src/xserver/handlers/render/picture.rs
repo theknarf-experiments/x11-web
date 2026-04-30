@@ -403,24 +403,14 @@ pub(crate) fn handle_create_cursor(state: &mut ClientState, data: &[u8], seq: u1
         (32, 32) // fallback
     };
 
-    // Resolve the source picture pixels to get the cursor image
-    let argb_data = if let Some((pixels, _w, _h)) =
-        resolve_source_pixels(state, src_picture, 0, 0, width, height)
-    {
-        // Convert from BGRA (internal) to ARGB (cursor format)
-        let mut argb = vec![0u8; pixels.len()];
-        for i in (0..pixels.len()).step_by(4) {
-            if i + 3 < pixels.len() {
-                argb[i] = pixels[i + 3]; // A
-                argb[i + 1] = pixels[i + 2]; // R
-                argb[i + 2] = pixels[i + 1]; // G
-                argb[i + 3] = pixels[i]; // B
-            }
-        }
-        argb
-    } else {
-        Vec::new()
-    };
+    // `resolve_source_pixels` returns canonical BGRA byte order;
+    // cursor data on the wire is RGBA, so swap channels.
+    let argb_data = resolve_source_pixels(state, src_picture, 0, 0, width, height)
+        .map(|(mut pixels, _, _)| {
+            crate::framebuffer::swap_br_in_place(&mut pixels);
+            pixels
+        })
+        .unwrap_or_default();
 
     // Register the cursor with full bitmap data
     state.cursors.insert(cursor_id, "render-cursor".to_string());

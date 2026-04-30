@@ -46,14 +46,15 @@ pub(crate) fn handle_put_image(state: &mut ClientState, req: &PutImageRequest) -
     let gc = state.gcs.get(&gc_id).cloned().unwrap_or_default();
 
     if format == 2 && depth >= 24 {
-        // ZPixmap depth 24/32: direct BGRA/BGRX pixel data
+        // ZPixmap depth 24/32: X11 wire delivers BGRA; framebuffer stores RGBA.
+        let rgba = crate::framebuffer::swap_br(pixel_data);
         if let Some(fb) = state.get_framebuffer_mut(drawable) {
             fb.put_image_gc(
                 dst_x,
                 dst_y,
                 width,
                 height,
-                pixel_data,
+                &rgba,
                 gc.function,
                 gc.plane_mask,
                 &gc.clip_rects,
@@ -99,15 +100,10 @@ pub(crate) fn handle_put_image(state: &mut ClientState, req: &PutImageRequest) -
                         | (((b << 3) | (b >> 2)) as u32);
                     let fb_off = (dy as usize * fb_w + dx as usize) * 4;
                     if fb_off + 3 < fb_data.len() {
-                        let dst_color = (fb_data[fb_off + 2] as u32) << 16
-                            | (fb_data[fb_off + 1] as u32) << 8
-                            | fb_data[fb_off] as u32;
+                        let dst_color = crate::framebuffer::read_pixel(fb_data, fb_off);
                         let result = apply_rop(gc_func, src_color, dst_color);
                         let masked = (result & plane_mask) | (dst_color & !plane_mask);
-                        fb_data[fb_off] = (masked & 0xFF) as u8;
-                        fb_data[fb_off + 1] = ((masked >> 8) & 0xFF) as u8;
-                        fb_data[fb_off + 2] = ((masked >> 16) & 0xFF) as u8;
-                        fb_data[fb_off + 3] = 0xFF;
+                        crate::framebuffer::write_pixel(fb_data, fb_off, masked, 0xFF);
                     }
                 }
             }
@@ -128,21 +124,21 @@ pub(crate) fn handle_put_image(state: &mut ClientState, req: &PutImageRequest) -
                 }
             })
             .unwrap_or(ROOT_COLORMAP);
-        // Pre-build a 256-entry lookup table from the colormap
+        // Pre-build a 256-entry lookup table from the colormap.
+        // Storage is RGBA: [R, G, B, alpha]; alpha holds the original
+        // index so GetImage can return the correct palette index.
         let mut lut = [[0u8; 4]; 256];
         if let Some(cmap) = state.colormaps.get(&drawable_cmap) {
             for i in 0..256u32 {
                 let (r16, g16, b16) = cmap.lookup(i);
-                // [B, G, R, index] — alpha channel stores the original index
                 lut[i as usize] = [
-                    (b16 >> 8) as u8,
-                    (g16 >> 8) as u8,
                     (r16 >> 8) as u8,
+                    (g16 >> 8) as u8,
+                    (b16 >> 8) as u8,
                     i as u8,
                 ];
             }
         } else {
-            // Fallback: treat index as grayscale, store index in alpha
             for i in 0..256u32 {
                 let v = i as u8;
                 lut[i as usize] = [v, v, v, i as u8];
@@ -180,19 +176,14 @@ pub(crate) fn handle_put_image(state: &mut ClientState, req: &PutImageRequest) -
                     let idx = pixel_data[src_off] as usize;
                     let pixel = &lut[idx];
                     let src_color =
-                        (pixel[2] as u32) << 16 | (pixel[1] as u32) << 8 | pixel[0] as u32;
+                        (pixel[0] as u32) << 16 | (pixel[1] as u32) << 8 | pixel[2] as u32;
                     let fb_off = (dy as usize * fb_w + dx as usize) * 4;
                     if fb_off + 3 < fb_data.len() {
-                        let dst_color = (fb_data[fb_off + 2] as u32) << 16
-                            | (fb_data[fb_off + 1] as u32) << 8
-                            | fb_data[fb_off] as u32;
+                        let dst_color = crate::framebuffer::read_pixel(fb_data, fb_off);
                         let result = apply_rop(gc_func, src_color, dst_color);
                         let masked = (result & plane_mask) | (dst_color & !plane_mask);
-                        fb_data[fb_off] = (masked & 0xFF) as u8;
-                        fb_data[fb_off + 1] = ((masked >> 8) & 0xFF) as u8;
-                        fb_data[fb_off + 2] = ((masked >> 16) & 0xFF) as u8;
                         // Preserve colormap index in alpha channel for GetImage
-                        fb_data[fb_off + 3] = pixel[3];
+                        crate::framebuffer::write_pixel(fb_data, fb_off, masked, pixel[3]);
                     }
                 }
             }
@@ -238,15 +229,10 @@ pub(crate) fn handle_put_image(state: &mut ClientState, req: &PutImageRequest) -
                     let src_color = (v as u32) << 16 | (v as u32) << 8 | v as u32;
                     let fb_off = (dy as usize * fb_w + dx as usize) * 4;
                     if fb_off + 3 < fb_data.len() {
-                        let dst_color = (fb_data[fb_off + 2] as u32) << 16
-                            | (fb_data[fb_off + 1] as u32) << 8
-                            | fb_data[fb_off] as u32;
+                        let dst_color = crate::framebuffer::read_pixel(fb_data, fb_off);
                         let result = apply_rop(gc_func, src_color, dst_color);
                         let masked = (result & plane_mask) | (dst_color & !plane_mask);
-                        fb_data[fb_off] = (masked & 0xFF) as u8;
-                        fb_data[fb_off + 1] = ((masked >> 8) & 0xFF) as u8;
-                        fb_data[fb_off + 2] = ((masked >> 16) & 0xFF) as u8;
-                        fb_data[fb_off + 3] = 0xFF;
+                        crate::framebuffer::write_pixel(fb_data, fb_off, masked, 0xFF);
                     }
                 }
             }
@@ -286,9 +272,9 @@ pub(crate) fn handle_put_image(state: &mut ClientState, req: &PutImageRequest) -
                     let fb_off = ((dy + row) * fb_w + (dx + col)) * 4;
                     if fb_off + 3 < fb_data.len() {
                         let val = if bit != 0 { 0xFF } else { 0x00 };
-                        fb_data[fb_off] = val; // B
+                        fb_data[fb_off] = val; // R
                         fb_data[fb_off + 1] = val; // G
-                        fb_data[fb_off + 2] = val; // R
+                        fb_data[fb_off + 2] = val; // B
                         fb_data[fb_off + 3] = 0; // A (unused, cursor reads RGB only)
                     }
                 }
@@ -338,21 +324,16 @@ pub(crate) fn handle_put_image(state: &mut ClientState, req: &PutImageRequest) -
                         let fb_off = (dy as usize * fb_w + dx as usize) * 4;
                         if fb_off + 3 < fb_data.len() {
                             if gc_func == 3 && plane_mask == 0xFFFFFFFF {
-                                fb_data[fb_off] = (src_color & 0xFF) as u8;
-                                fb_data[fb_off + 1] = ((src_color >> 8) & 0xFF) as u8;
-                                fb_data[fb_off + 2] = ((src_color >> 16) & 0xFF) as u8;
-                                fb_data[fb_off + 3] = 0xFF;
+                                crate::framebuffer::write_pixel(
+                                    fb_data, fb_off, src_color, 0xFF,
+                                );
                             } else {
-                                let dst_color = (fb_data[fb_off + 2] as u32) << 16
-                                    | (fb_data[fb_off + 1] as u32) << 8
-                                    | fb_data[fb_off] as u32;
+                                let dst_color =
+                                    crate::framebuffer::read_pixel(fb_data, fb_off);
                                 let result = (apply_rop(gc_func, src_color, dst_color)
                                     & plane_mask)
                                     | (dst_color & !plane_mask);
-                                fb_data[fb_off] = (result & 0xFF) as u8;
-                                fb_data[fb_off + 1] = ((result >> 8) & 0xFF) as u8;
-                                fb_data[fb_off + 2] = ((result >> 16) & 0xFF) as u8;
-                                fb_data[fb_off + 3] = 0xFF;
+                                crate::framebuffer::write_pixel(fb_data, fb_off, result, 0xFF);
                             }
                         }
                     }
@@ -383,9 +364,7 @@ pub(crate) fn handle_put_image(state: &mut ClientState, req: &PutImageRequest) -
                         if fb_off + 3 >= fb_data.len() {
                             continue;
                         }
-                        let dst_color = (fb_data[fb_off + 2] as u32) << 16
-                            | (fb_data[fb_off + 1] as u32) << 8
-                            | fb_data[fb_off] as u32;
+                        let dst_color = crate::framebuffer::read_pixel(fb_data, fb_off);
                         let mut pixel_val = dst_color;
                         for plane in 0..num_planes {
                             let plane_bit = 1u32 << plane;
@@ -409,10 +388,7 @@ pub(crate) fn handle_put_image(state: &mut ClientState, req: &PutImageRequest) -
                             (apply_rop(gc_func, pixel_val, dst_color) & plane_mask)
                                 | (dst_color & !plane_mask)
                         };
-                        fb_data[fb_off] = (result & 0xFF) as u8;
-                        fb_data[fb_off + 1] = ((result >> 8) & 0xFF) as u8;
-                        fb_data[fb_off + 2] = ((result >> 16) & 0xFF) as u8;
-                        fb_data[fb_off + 3] = 0xFF;
+                        crate::framebuffer::write_pixel(fb_data, fb_off, result, 0xFF);
                     }
                 }
             }
@@ -490,13 +466,17 @@ pub(crate) fn handle_get_image(state: &mut ClientState, req: &GetImageRequest) -
     // Per X11 spec, GetImage on a window returns the screen contents at
     // that location, which includes composited child window content.
     let is_window = state.windows.contains_key(&drawable);
-    let pixels = if is_window {
+    let mut pixels = if is_window {
         state.extract_pixels_include_inferiors(drawable, x, y, width, height)
     } else if let Some(fb) = state.get_framebuffer_mut(drawable) {
         fb.extract_pixels(x, y, width, height)
     } else {
         vec![0u8; width as usize * height as usize * 4]
     };
+    // Framebuffer storage is RGBA; X11 GetImage wire format on a
+    // little-endian visual is BGRA. Swap once up front so all the
+    // per-format extraction loops below can read in the wire order.
+    crate::framebuffer::swap_br_in_place(&mut pixels);
 
     let w = width as usize;
     let h = height as usize;
@@ -545,7 +525,8 @@ pub(crate) fn handle_get_image(state: &mut ClientState, req: &GetImageRequest) -
                                 || pixels[src_off + 2] != 0;
                             out[dst_off] = if is_set { 1 & (plane_mask as u8) } else { 0 };
                         } else if depth <= 4 {
-                            // For depth-4, extract a 4-bit pixel from RGB channels
+                            // For depth-4, extract a 4-bit pixel from R channel
+                            // (byte 2 in BGRA wire-order swap above).
                             let r = pixels[src_off + 2] as u8;
                             out[dst_off] = (r >> 4) & (plane_mask as u8);
                         } else {

@@ -109,15 +109,15 @@ fn convert_yuy2_to_argb(yuv: &[u8], width: u32, height: u32, conv: YuvToRgb) -> 
             let (r1, g1, b1) = conv(y1, u, v);
 
             let dst0 = (row * w + pair * 2) * 4;
-            argb[dst0] = b0;
+            argb[dst0] = r0;
             argb[dst0 + 1] = g0;
-            argb[dst0 + 2] = r0;
+            argb[dst0 + 2] = b0;
             argb[dst0 + 3] = 0xFF;
 
             let dst1 = dst0 + 4;
-            argb[dst1] = b1;
+            argb[dst1] = r1;
             argb[dst1 + 1] = g1;
-            argb[dst1 + 2] = r1;
+            argb[dst1 + 2] = b1;
             argb[dst1 + 3] = 0xFF;
         }
         // Handle odd trailing pixel
@@ -128,9 +128,9 @@ fn convert_yuy2_to_argb(yuv: &[u8], width: u32, height: u32, conv: YuvToRgb) -> 
                 let u = yuv[off + 1];
                 let (r, g, b) = conv(y0, u, 128);
                 let dst = (row * w + w - 1) * 4;
-                argb[dst] = b;
+                argb[dst] = r;
                 argb[dst + 1] = g;
-                argb[dst + 2] = r;
+                argb[dst + 2] = b;
                 argb[dst + 3] = 0xFF;
             }
         }
@@ -164,15 +164,15 @@ fn convert_uyvy_to_argb(yuv: &[u8], width: u32, height: u32, conv: YuvToRgb) -> 
             let (r1, g1, b1) = conv(y1, u, v);
 
             let dst0 = (row * w + pair * 2) * 4;
-            argb[dst0] = b0;
+            argb[dst0] = r0;
             argb[dst0 + 1] = g0;
-            argb[dst0 + 2] = r0;
+            argb[dst0 + 2] = b0;
             argb[dst0 + 3] = 0xFF;
 
             let dst1 = dst0 + 4;
-            argb[dst1] = b1;
+            argb[dst1] = r1;
             argb[dst1 + 1] = g1;
-            argb[dst1 + 2] = r1;
+            argb[dst1 + 2] = b1;
             argb[dst1 + 3] = 0xFF;
         }
         // Handle odd trailing pixel
@@ -183,9 +183,9 @@ fn convert_uyvy_to_argb(yuv: &[u8], width: u32, height: u32, conv: YuvToRgb) -> 
                 let y0 = yuv[off + 1];
                 let (r, g, b) = conv(y0, u, 128);
                 let dst = (row * w + w - 1) * 4;
-                argb[dst] = b;
+                argb[dst] = r;
                 argb[dst + 1] = g;
-                argb[dst + 2] = r;
+                argb[dst + 2] = b;
                 argb[dst + 3] = 0xFF;
             }
         }
@@ -222,9 +222,9 @@ fn convert_yv16_to_argb(data: &[u8], width: u32, height: u32, conv: YuvToRgb) ->
             let v = v_plane[row * uv_stride + uv_col];
             let (r, g, b) = conv(y, u, v);
             let off = (row * w + col) * 4;
-            argb[off] = b;
+            argb[off] = r;
             argb[off + 1] = g;
-            argb[off + 2] = r;
+            argb[off + 2] = b;
             argb[off + 3] = 0xFF;
         }
     }
@@ -251,19 +251,19 @@ fn convert_rgb3_to_argb(data: &[u8], width: u32, height: u32) -> Vec<u8> {
             let g = data[src_off + 1];
             let b = data[src_off + 2];
             let dst_off = (row * w + col) * 4;
-            argb[dst_off] = b; // B
+            argb[dst_off] = r; // R
             argb[dst_off + 1] = g; // G
-            argb[dst_off + 2] = r; // R
+            argb[dst_off + 2] = b; // B
             argb[dst_off + 3] = 0xFF; // A
         }
     }
     argb
 }
 
-/// Convert packed BGRA32 (RV32) data to ARGB32.
+/// Convert packed BGRA32 (RV32) data to RGBA32.
 ///
-/// Layout: 4 bytes per pixel [B, G, R, A] in row-major order.
-/// The input is BGRA which maps directly to our ARGB32 framebuffer format (BGRA in memory).
+/// Layout: input is 4 bytes per pixel `[B, G, R, A]`; framebuffer
+/// storage expects `[R, G, B, A]`, so we swap channels 0 and 2.
 fn convert_rv32_to_argb(data: &[u8], width: u32, height: u32) -> Vec<u8> {
     let w = width as usize;
     let h = height as usize;
@@ -273,12 +273,8 @@ fn convert_rv32_to_argb(data: &[u8], width: u32, height: u32) -> Vec<u8> {
         return vec![0u8; w * h * 4];
     }
 
-    let mut argb = vec![0u8; w * h * 4];
-    for row in 0..h {
-        let src_row = row * src_stride;
-        let dst_row = row * w * 4;
-        argb[dst_row..dst_row + w * 4].copy_from_slice(&data[src_row..src_row + w * 4]);
-    }
+    let mut argb = data[..src_stride * h].to_vec();
+    crate::framebuffer::swap_br_in_place(&mut argb);
     argb
 }
 
@@ -298,9 +294,9 @@ fn convert_grey_to_argb(data: &[u8], width: u32, height: u32) -> Vec<u8> {
         for col in 0..w {
             let y = data[row * w + col];
             let off = (row * w + col) * 4;
-            argb[off] = y; // B
+            argb[off] = y; // R
             argb[off + 1] = y; // G
-            argb[off + 2] = y; // R
+            argb[off + 2] = y; // B
             argb[off + 3] = 0xFF; // A
         }
     }
@@ -318,16 +314,16 @@ fn convert_yuv_to_argb(
     let conv = select_converter(colorspace);
     match fourcc {
         // SIMD-optimized planar paths via dcv-color-primitives.
-        FOURCC_I420 => Some(super::dcv_convert::i420_to_bgra(
+        FOURCC_I420 => Some(super::dcv_convert::i420_to_rgba(
             yuv, width, height, colorspace,
         )),
-        FOURCC_YV12 => Some(super::dcv_convert::yv12_to_bgra(
+        FOURCC_YV12 => Some(super::dcv_convert::yv12_to_rgba(
             yuv, width, height, colorspace,
         )),
-        FOURCC_NV12 => Some(super::dcv_convert::nv12_to_bgra(
+        FOURCC_NV12 => Some(super::dcv_convert::nv12_to_rgba(
             yuv, width, height, colorspace,
         )),
-        FOURCC_NV21 => Some(super::dcv_convert::nv21_to_bgra(
+        FOURCC_NV21 => Some(super::dcv_convert::nv21_to_rgba(
             yuv, width, height, colorspace,
         )),
         // Packed 4:2:2 and 4:2:2 planar formats — dcv 1.0 doesn't support these.

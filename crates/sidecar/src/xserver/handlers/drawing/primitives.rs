@@ -166,9 +166,7 @@ pub(crate) fn handle_copy_area(state: &mut ClientState, req: &CopyAreaRequest) -
                             if src_off + 3 >= pixels.len() {
                                 continue;
                             }
-                            let src_pixel = pixels[src_off] as u32
-                                | (pixels[src_off + 1] as u32) << 8
-                                | (pixels[src_off + 2] as u32) << 16;
+                            let src_pixel = crate::framebuffer::read_pixel(&pixels, src_off);
                             let color = if src_pixel != 0 { ca_fg } else { ca_bg };
                             fb.draw_point_with_func(dx, dy, color, gc.function);
                         }
@@ -325,10 +323,10 @@ pub(crate) fn handle_copy_plane(state: &mut ClientState, req: &CopyPlaneRequest)
                     if src_off + 3 >= pixels.len() {
                         continue;
                     }
-                    let src_pixel = pixels[src_off] as u32
-                        | (pixels[src_off + 1] as u32) << 8
-                        | (pixels[src_off + 2] as u32) << 16
-                        | (pixels[src_off + 3] as u32) << 24;
+                    // bit_plane refers to the X11 visual's pixel plane bits
+                    // (R = 16-23, G = 8-15, B = 0-7); read_pixel returns the
+                    // pixel as 0x00RRGGBB regardless of storage byte order.
+                    let src_pixel = crate::framebuffer::read_pixel(&pixels, src_off);
                     let color = if (src_pixel & bit_plane) != 0 {
                         cp_fg
                     } else {

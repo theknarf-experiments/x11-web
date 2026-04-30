@@ -148,18 +148,8 @@ function renderUpdate(
 				rawData = compressed;
 			}
 			const imageData = ctx.createImageData(update.width, update.height);
-			// Server sends A8R8G8B8 (BGRA in memory on little-endian)
-			// Convert to canvas RGBA format
-			for (let i = 0; i < update.width * update.height; i++) {
-				const srcOff = i * 4;
-				const dstOff = i * 4;
-				if (srcOff + 3 < rawData.length) {
-					imageData.data[dstOff] = rawData[srcOff + 2]; // R
-					imageData.data[dstOff + 1] = rawData[srcOff + 1]; // G
-					imageData.data[dstOff + 2] = rawData[srcOff]; // B
-					imageData.data[dstOff + 3] = 255; // A — always opaque from server
-				}
-			}
+			// Server sends packed RGBA, the canvas ImageData layout — copy directly.
+			imageData.data.set(rawData.subarray(0, imageData.data.length));
 			ctx.putImageData(imageData, update.x, update.y);
 			break;
 		}

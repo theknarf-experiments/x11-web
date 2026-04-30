@@ -1,4 +1,6 @@
-use super::{apply_gc_function, point_in_clip_rects, DashState, Framebuffer};
+use super::{
+    apply_gc_function, point_in_clip_rects, read_pixel, write_pixel, DashState, Framebuffer,
+};
 
 impl Framebuffer {
     /// Draw a line with full GC support: raster op, cap/join styles, dashes, clip rects.
@@ -742,9 +744,7 @@ impl Framebuffer {
                 let tile_y = ((y - ts_y as i32) % tile_h as i32 + tile_h as i32) as u32 % tile_h;
                 let off = tile_y as usize * tile_stride + tile_x as usize * 4;
                 if off + 3 < tile_data.len() {
-                    let color = (tile_data[off + 2] as u32) << 16
-                        | (tile_data[off + 1] as u32) << 8
-                        | tile_data[off] as u32;
+                    let color = read_pixel(tile_data, off);
                     self.draw_point_gc(x, y, color, gc_func, plane_mask, clip_rects);
                 }
             }
@@ -799,10 +799,11 @@ impl Framebuffer {
         let mut y = y0;
         let mut is_first = true;
 
-        // Stipple is a 1-bit-per-pixel bitmap; stride is ceil(stipple_w/8) bytes per row
-        // However, pixmap data in our framebuffer is stored as 32bpp BGRA.
-        // For 1-bit depth stipples, the data is stored as 1 bit per pixel in row-major order.
-        // We detect the format based on data size.
+        // Stipple is a 1-bit-per-pixel bitmap; stride is ceil(stipple_w/8) bytes per row.
+        // For full-depth pixmap stipples, framebuffer storage is 32bpp RGBA;
+        // we treat any non-zero RGB triple as "set".
+        // For 1-bit depth stipples, data is 1 bit per pixel row-major.
+        // Format is detected by data size.
         let is_1bpp = stipple_data.len() < (stipple_w * stipple_h * 4) as usize;
         let bpp_stride = if is_1bpp {
             ((stipple_w + 7) / 8) as usize
@@ -886,18 +887,10 @@ impl Framebuffer {
         if off + 3 >= self.data.len() {
             return;
         }
-        let dst = {
-            let b = self.data[off] as u32;
-            let g = self.data[off + 1] as u32;
-            let r = self.data[off + 2] as u32;
-            (r << 16) | (g << 8) | b
-        };
+        let dst = read_pixel(&self.data, off);
         let result = apply_gc_function(gc_func, color, dst);
         let masked = (result & plane_mask) | (dst & !plane_mask);
-        self.data[off] = (masked & 0xFF) as u8;
-        self.data[off + 1] = ((masked >> 8) & 0xFF) as u8;
-        self.data[off + 2] = ((masked >> 16) & 0xFF) as u8;
-        self.data[off + 3] = 0xFF;
+        write_pixel(&mut self.data, off, masked, 0xFF);
         self.mark_dirty(x, y, 1, 1);
     }
 

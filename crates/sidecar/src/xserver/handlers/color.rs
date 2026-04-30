@@ -849,10 +849,11 @@ fn build_cursor_argb(
                 } else {
                     (bg_r, bg_g, bg_b)
                 };
-                // ARGB format: A, R, G, B
-                argb[dst_off] = b;
+                // RGBA byte order — matches the wire format the frontend
+                // (and tiny-skia) consume.
+                argb[dst_off] = r;
                 argb[dst_off + 1] = g;
-                argb[dst_off + 2] = r;
+                argb[dst_off + 2] = b;
                 argb[dst_off + 3] = 0xFF; // fully opaque
             }
             // else: all zeros = fully transparent (already initialized)

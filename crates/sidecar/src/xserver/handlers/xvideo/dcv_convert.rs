@@ -1,10 +1,10 @@
-//! Thin wrappers around `dcv-color-primitives` for YUV->BGRA conversion.
+//! Thin wrappers around `dcv-color-primitives` for YUV->RGBA conversion.
 //!
 //! dcv covers I420 and NV12 directly. YV12 (V/U plane swap) and NV21 (interleaved
 //! VU) are handled by reordering the source planes before the call.
 //!
-//! All converters output BGRA in memory layout `[B, G, R, A]`, matching the
-//! framebuffer's A8R8G8B8 format with full alpha.
+//! All converters output RGBA in memory layout `[R, G, B, A]`, matching the
+//! framebuffer's storage with full alpha.
 
 use dcv_color_primitives::{convert_image, ColorSpace, ImageFormat, PixelFormat};
 
@@ -18,18 +18,18 @@ fn pick_color_space(colorspace: i32) -> ColorSpace {
     }
 }
 
-fn empty_bgra(width: u32, height: u32) -> Vec<u8> {
+fn empty_rgba(width: u32, height: u32) -> Vec<u8> {
     vec![0u8; (width as usize) * (height as usize) * 4]
 }
 
-/// Set alpha channel to 0xFF in a BGRA buffer (dcv writes alpha=0).
-fn fill_alpha(bgra: &mut [u8]) {
-    for px in bgra.chunks_exact_mut(4) {
+/// Set alpha channel to 0xFF (dcv writes alpha=0).
+fn fill_alpha(buf: &mut [u8]) {
+    for px in buf.chunks_exact_mut(4) {
         px[3] = 0xFF;
     }
 }
 
-/// Build the dcv source/dst formats and run the conversion. Returns BGRA on
+/// Build the dcv source/dst formats and run the conversion. Returns RGBA on
 /// success, an empty buffer on any error (matching the previous fallback).
 fn convert_planar(
     src_format: PixelFormat,
@@ -38,14 +38,14 @@ fn convert_planar(
     colorspace: i32,
     src_planes: &[&[u8]],
 ) -> Vec<u8> {
-    let mut dst = empty_bgra(width, height);
+    let mut dst = empty_rgba(width, height);
     let src_fmt = ImageFormat {
         pixel_format: src_format,
         color_space: pick_color_space(colorspace),
         num_planes: src_planes.len() as u32,
     };
     let dst_fmt = ImageFormat {
-        pixel_format: PixelFormat::Bgra,
+        pixel_format: PixelFormat::Rgba,
         color_space: ColorSpace::Rgb,
         num_planes: 1,
     };
@@ -61,21 +61,21 @@ fn convert_planar(
     )
     .is_err()
     {
-        return empty_bgra(width, height);
+        return empty_rgba(width, height);
     }
     fill_alpha(&mut dst);
     dst
 }
 
 /// I420: planar Y, U, V with 4:2:0 subsampling.
-pub fn i420_to_bgra(yuv: &[u8], width: u32, height: u32, colorspace: i32) -> Vec<u8> {
+pub fn i420_to_rgba(yuv: &[u8], width: u32, height: u32, colorspace: i32) -> Vec<u8> {
     let w = width as usize;
     let h = height as usize;
     let y_size = w * h;
     let uv_stride = w.div_ceil(2);
     let uv_size = uv_stride * h.div_ceil(2);
     if yuv.len() < y_size + 2 * uv_size {
-        return empty_bgra(width, height);
+        return empty_rgba(width, height);
     }
     let y = &yuv[..y_size];
     let u = &yuv[y_size..y_size + uv_size];
@@ -85,14 +85,14 @@ pub fn i420_to_bgra(yuv: &[u8], width: u32, height: u32, colorspace: i32) -> Vec
 
 /// YV12: planar Y, V, U (V before U). Swap plane pointers and use the I420
 /// path.
-pub fn yv12_to_bgra(yuv: &[u8], width: u32, height: u32, colorspace: i32) -> Vec<u8> {
+pub fn yv12_to_rgba(yuv: &[u8], width: u32, height: u32, colorspace: i32) -> Vec<u8> {
     let w = width as usize;
     let h = height as usize;
     let y_size = w * h;
     let uv_stride = w.div_ceil(2);
     let uv_size = uv_stride * h.div_ceil(2);
     if yuv.len() < y_size + 2 * uv_size {
-        return empty_bgra(width, height);
+        return empty_rgba(width, height);
     }
     let y = &yuv[..y_size];
     let v = &yuv[y_size..y_size + uv_size];
@@ -101,14 +101,14 @@ pub fn yv12_to_bgra(yuv: &[u8], width: u32, height: u32, colorspace: i32) -> Vec
 }
 
 /// NV12: planar Y followed by interleaved UV pairs.
-pub fn nv12_to_bgra(yuv: &[u8], width: u32, height: u32, colorspace: i32) -> Vec<u8> {
+pub fn nv12_to_rgba(yuv: &[u8], width: u32, height: u32, colorspace: i32) -> Vec<u8> {
     let w = width as usize;
     let h = height as usize;
     let y_size = w * h;
     let uv_stride = w.div_ceil(2) * 2;
     let uv_size = uv_stride * h.div_ceil(2);
     if yuv.len() < y_size + uv_size {
-        return empty_bgra(width, height);
+        return empty_rgba(width, height);
     }
     let y = &yuv[..y_size];
     let uv = &yuv[y_size..y_size + uv_size];
@@ -117,14 +117,14 @@ pub fn nv12_to_bgra(yuv: &[u8], width: u32, height: u32, colorspace: i32) -> Vec
 
 /// NV21: planar Y followed by interleaved VU pairs (V before U). dcv only
 /// supports NV12, so we copy Y as-is and swap the chroma byte order.
-pub fn nv21_to_bgra(yuv: &[u8], width: u32, height: u32, colorspace: i32) -> Vec<u8> {
+pub fn nv21_to_rgba(yuv: &[u8], width: u32, height: u32, colorspace: i32) -> Vec<u8> {
     let w = width as usize;
     let h = height as usize;
     let y_size = w * h;
     let uv_stride = w.div_ceil(2) * 2;
     let uv_size = uv_stride * h.div_ceil(2);
     if yuv.len() < y_size + uv_size {
-        return empty_bgra(width, height);
+        return empty_rgba(width, height);
     }
     let y = &yuv[..y_size];
     let vu = &yuv[y_size..y_size + uv_size];
@@ -166,7 +166,7 @@ mod tests {
     #[test]
     fn i420_round_size() {
         let yuv = synth_i420(16, 16);
-        let out = i420_to_bgra(&yuv, 16, 16, 0);
+        let out = i420_to_rgba(&yuv, 16, 16, 0);
         assert_eq!(out.len(), 16 * 16 * 4);
         // alpha column is 0xFF
         for px in out.chunks_exact(4) {
@@ -185,8 +185,8 @@ mod tests {
         // Simulate YV12 by swapping U and V.
         let (u_part, v_part) = yv12[y_size..y_size + 2 * uv_size].split_at_mut(uv_size);
         u_part.swap_with_slice(v_part);
-        let i420_out = i420_to_bgra(&yuv, 16, 16, 0);
-        let yv12_out = yv12_to_bgra(&yv12, 16, 16, 0);
+        let i420_out = i420_to_rgba(&yuv, 16, 16, 0);
+        let yv12_out = yv12_to_rgba(&yv12, 16, 16, 0);
         assert_eq!(i420_out, yv12_out);
     }
 
@@ -196,7 +196,7 @@ mod tests {
         let h = 16u32;
         let mut buf = vec![128u8; (w * h) as usize];
         buf.extend(vec![128u8; (w * h / 2) as usize]);
-        let out = nv12_to_bgra(&buf, w, h, 0);
+        let out = nv12_to_rgba(&buf, w, h, 0);
         assert_eq!(out.len(), (w * h * 4) as usize);
         for px in out.chunks_exact(4) {
             assert_eq!(px[3], 0xFF);
@@ -220,8 +220,8 @@ mod tests {
             nv21.push(chunk[1]); // V first
             nv21.push(chunk[0]); // U second
         }
-        let a = nv12_to_bgra(&nv12, w, h, 0);
-        let b = nv21_to_bgra(&nv21, w, h, 0);
+        let a = nv12_to_rgba(&nv12, w, h, 0);
+        let b = nv21_to_rgba(&nv21, w, h, 0);
         assert_eq!(a, b);
     }
 }

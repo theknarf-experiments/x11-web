@@ -89,13 +89,7 @@ function argbToCursorUrl(
 		rawData = compressed;
 	}
 	const imageData = ctx.createImageData(width, height);
-	for (let i = 0; i < width * height; i++) {
-		const srcOff = i * 4;
-		imageData.data[srcOff] = rawData[srcOff + 2]; // R
-		imageData.data[srcOff + 1] = rawData[srcOff + 1]; // G
-		imageData.data[srcOff + 2] = rawData[srcOff]; // B
-		imageData.data[srcOff + 3] = rawData[srcOff + 3]; // A
-	}
+	imageData.data.set(rawData.subarray(0, imageData.data.length));
 	ctx.putImageData(imageData, 0, 0);
 	return canvas.convertToBlob({ type: "image/png" }).then((blob) => {
 		return new Promise<string>((resolve) => {

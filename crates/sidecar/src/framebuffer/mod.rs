@@ -7,8 +7,18 @@ mod shapes;
 #[cfg(test)]
 mod tests;
 
-/// A server-side pixel buffer using pure Rust (no pixman).
-/// Format: A8R8G8B8 (4 bytes per pixel, BGRA in memory on little-endian).
+/// A server-side pixel buffer.
+///
+/// Storage format: packed RGBA8888 — 4 bytes per pixel, byte order
+/// `[R, G, B, A]`. This matches what the canvas/`putImageData` API on
+/// the frontend expects, the format `tiny-skia` operates on directly,
+/// and what the macOS sidecar emits. The X11 wire format on a
+/// little-endian visual is BGRA, so PutImage/GetImage handlers swap
+/// channel 0 and 2 at the wire boundary.
+///
+/// Logical pixel colors throughout this module use the X11 convention
+/// `0x00RRGGBB` (R in bits 16-23). Use [`read_pixel`] / [`write_pixel`]
+/// to convert between storage bytes and that u32.
 #[derive(Clone)]
 pub struct Framebuffer {
     data: Vec<u8>,
@@ -231,7 +241,7 @@ impl Framebuffer {
         let r = ((color >> 16) & 0xFF) as u8;
         let g = ((color >> 8) & 0xFF) as u8;
         let b = (color & 0xFF) as u8;
-        let pixel = [b, g, r, 0xFF];
+        let pixel = [r, g, b, 0xFF];
 
         // Pre-build a row of pixels
         let row_start = (x as i32).max(0) as usize;
@@ -304,21 +314,12 @@ impl Framebuffer {
             }
             for i in 0..row_len {
                 let off = base_off + i * 4;
-                // Read existing pixel as 0x00RRGGBB
-                let dst = {
-                    let b = self.data[off] as u32;
-                    let g = self.data[off + 1] as u32;
-                    let r = self.data[off + 2] as u32;
-                    (r << 16) | (g << 8) | b
-                };
+                let dst = read_pixel(&self.data, off);
                 let result = apply_gc_function(function, color, dst);
                 // Apply plane mask: affected planes come from result,
                 // unaffected planes keep the dst value.
                 let masked = (result & plane_mask) | (dst & !plane_mask);
-                self.data[off] = (masked & 0xFF) as u8; // B
-                self.data[off + 1] = ((masked >> 8) & 0xFF) as u8; // G
-                self.data[off + 2] = ((masked >> 16) & 0xFF) as u8; // R
-                self.data[off + 3] = 0xFF; // A
+                write_pixel(&mut self.data, off, masked, 0xFF);
             }
         }
         self.mark_dirty(x as i32, y as i32, width as u32, height as u32);
@@ -463,34 +464,26 @@ impl Framebuffer {
                 }
 
                 // Alpha-blend source over destination first
-                let (sb, sg, sr) = if src_a == 0xFF {
+                let (sr, sg, sb) = if src_a == 0xFF {
                     (data[src_off], data[src_off + 1], data[src_off + 2])
                 } else {
                     let sa = src_a as u32;
                     let da = 255 - sa;
-                    let b =
+                    let r =
                         ((data[src_off] as u32 * sa + self.data[dst_off] as u32 * da) / 255) as u8;
                     let g = ((data[src_off + 1] as u32 * sa + self.data[dst_off + 1] as u32 * da)
                         / 255) as u8;
-                    let r = ((data[src_off + 2] as u32 * sa + self.data[dst_off + 2] as u32 * da)
+                    let b = ((data[src_off + 2] as u32 * sa + self.data[dst_off + 2] as u32 * da)
                         / 255) as u8;
-                    (b, g, r)
+                    (r, g, b)
                 };
 
                 // Apply GC function and plane_mask
                 let src_color = (sr as u32) << 16 | (sg as u32) << 8 | sb as u32;
-                let dst_color = u32::from_le_bytes([
-                    self.data[dst_off],
-                    self.data[dst_off + 1],
-                    self.data[dst_off + 2],
-                    self.data[dst_off + 3],
-                ]) & 0x00FFFFFF;
+                let dst_color = read_pixel(&self.data, dst_off);
                 let result = apply_gc_function(function, src_color, dst_color);
                 let masked = (result & plane_mask) | (dst_color & !plane_mask);
-                self.data[dst_off] = (masked & 0xFF) as u8;
-                self.data[dst_off + 1] = ((masked >> 8) & 0xFF) as u8;
-                self.data[dst_off + 2] = ((masked >> 16) & 0xFF) as u8;
-                self.data[dst_off + 3] = 0xFF;
+                write_pixel(&mut self.data, dst_off, masked, 0xFF);
             }
         }
         self.mark_dirty(x as i32, y as i32, width as u32, height as u32);
@@ -537,25 +530,15 @@ impl Framebuffer {
                     continue;
                 }
                 let src_off = row * src_stride + col * 4;
-                let src_color = (data[src_off + 2] as u32) << 16
-                    | (data[src_off + 1] as u32) << 8
-                    | data[src_off] as u32;
+                let src_color = read_pixel(data, src_off);
                 let dst_off = dy as usize * self.stride + dx as usize * 4;
                 if dst_off + 3 >= self.data.len() {
                     continue;
                 }
-                let dst_color = u32::from_le_bytes([
-                    self.data[dst_off],
-                    self.data[dst_off + 1],
-                    self.data[dst_off + 2],
-                    self.data[dst_off + 3],
-                ]) & 0x00FFFFFF;
+                let dst_color = read_pixel(&self.data, dst_off);
                 let result = apply_gc_function(function, src_color, dst_color);
                 let masked = (result & plane_mask) | (dst_color & !plane_mask);
-                self.data[dst_off] = (masked & 0xFF) as u8;
-                self.data[dst_off + 1] = ((masked >> 8) & 0xFF) as u8;
-                self.data[dst_off + 2] = ((masked >> 16) & 0xFF) as u8;
-                self.data[dst_off + 3] = 0xFF;
+                write_pixel(&mut self.data, dst_off, masked, 0xFF);
             }
         }
         self.mark_dirty(x as i32, y as i32, width as u32, height as u32);
@@ -623,24 +606,9 @@ impl Framebuffer {
         if off + 3 >= self.data.len() {
             return;
         }
-
-        let src = color;
-        let dst = u32::from_le_bytes([
-            self.data[off],
-            self.data[off + 1],
-            self.data[off + 2],
-            self.data[off + 3],
-        ]);
-
-        let result = apply_gc_function(gc_func, src, dst);
-
-        let r = ((result >> 16) & 0xFF) as u8;
-        let g = ((result >> 8) & 0xFF) as u8;
-        let b = (result & 0xFF) as u8;
-        self.data[off] = b;
-        self.data[off + 1] = g;
-        self.data[off + 2] = r;
-        self.data[off + 3] = 0xFF;
+        let dst = read_pixel(&self.data, off);
+        let result = apply_gc_function(gc_func, color, dst);
+        write_pixel(&mut self.data, off, result, 0xFF);
         self.mark_dirty(x, y, 1, 1);
     }
 
@@ -665,21 +633,43 @@ impl Framebuffer {
         if off + 3 >= self.data.len() {
             return;
         }
-        let src = color;
-        let dst = u32::from_le_bytes([
-            self.data[off],
-            self.data[off + 1],
-            self.data[off + 2],
-            self.data[off + 3],
-        ]);
-        let result = apply_gc_function(gc_func, src, dst);
+        let dst = read_pixel(&self.data, off);
+        let result = apply_gc_function(gc_func, color, dst);
         let masked = (result & plane_mask) | (dst & !plane_mask);
-        self.data[off] = (masked & 0xFF) as u8;
-        self.data[off + 1] = ((masked >> 8) & 0xFF) as u8;
-        self.data[off + 2] = ((masked >> 16) & 0xFF) as u8;
-        self.data[off + 3] = 0xFF;
+        write_pixel(&mut self.data, off, masked, 0xFF);
         self.mark_dirty(x, y, 1, 1);
     }
+}
+
+/// Read an RGBA-storage pixel at byte offset `off` as a `0x00RRGGBB` u32.
+#[inline]
+pub(crate) fn read_pixel(data: &[u8], off: usize) -> u32 {
+    ((data[off] as u32) << 16) | ((data[off + 1] as u32) << 8) | (data[off + 2] as u32)
+}
+
+/// Write `0x00RRGGBB` u32 + alpha to RGBA-storage at byte offset `off`.
+#[inline]
+pub(crate) fn write_pixel(data: &mut [u8], off: usize, color: u32, alpha: u8) {
+    data[off] = ((color >> 16) & 0xFF) as u8;
+    data[off + 1] = ((color >> 8) & 0xFF) as u8;
+    data[off + 2] = (color & 0xFF) as u8;
+    data[off + 3] = alpha;
+}
+
+/// In-place swap of channels 0 and 2 (B↔R) over a packed pixel buffer.
+/// Used at the X11 wire boundary, where PutImage/GetImage carry BGRA but
+/// our framebuffer stores RGBA.
+pub fn swap_br_in_place(data: &mut [u8]) {
+    for px in data.chunks_exact_mut(4) {
+        px.swap(0, 2);
+    }
+}
+
+/// Allocate a new buffer with channel 0 and 2 swapped (B↔R).
+pub fn swap_br(data: &[u8]) -> Vec<u8> {
+    let mut out = data.to_vec();
+    swap_br_in_place(&mut out);
+    out
 }
 
 /// Dash pattern state machine for dashed line drawing.

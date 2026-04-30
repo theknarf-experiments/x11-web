@@ -155,7 +155,8 @@ pub(crate) fn handle_shm_request(state: &mut ClientState, data: &[u8], seq: u16)
                 }
             }
 
-            // Blit to the drawable's framebuffer
+            // SHM clients write BGRA into the segment; framebuffer is RGBA.
+            crate::framebuffer::swap_br_in_place(&mut pixels);
             if let Some(fb) = state.get_framebuffer_mut(drawable) {
                 fb.put_image(dst_x, dst_y, src_width, src_height, &pixels);
             }
@@ -198,13 +199,15 @@ pub(crate) fn handle_shm_request(state: &mut ClientState, data: &[u8], seq: u16)
             // Sync SHM-backed pixmap data before reading
             state.sync_shm_pixmap(drawable);
 
-            // Copy pixels from drawable into SHM segment
+            // Copy pixels from drawable into SHM segment.
+            // Framebuffer is RGBA; clients expect BGRA in the segment.
             let resolved = state.resolve_drawable(drawable);
-            let pixels = if let Some(fb) = state.get_framebuffer_mut(resolved) {
+            let mut pixels = if let Some(fb) = state.get_framebuffer_mut(resolved) {
                 fb.extract_pixels(src_x, src_y, width, height)
             } else {
                 vec![0u8; width as usize * height as usize * 4]
             };
+            crate::framebuffer::swap_br_in_place(&mut pixels);
 
             if let Some(seg) = state.shm_segments.get(&shmseg) {
                 let bpp = 4usize;
@@ -316,6 +319,8 @@ pub(crate) fn handle_shm_request(state: &mut ClientState, data: &[u8], seq: u16)
 
         // CreateSegment (minor 7) — MIT-SHM 1.2+
         // Server creates an SHM segment and returns the fd to the client.
+        // Linux-only: relies on memfd_create.
+        #[cfg(target_os = "linux")]
         7 => {
             let req = parse_minor!(CreateSegmentRequest, data, state, seq, 130, minor as u16);
             let shmseg = req.shmseg;

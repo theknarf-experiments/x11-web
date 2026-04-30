@@ -15,27 +15,25 @@ fn new_framebuffer_is_zeroed() {
 #[test]
 fn resize_preserves_content() {
     let mut fb = Framebuffer::new(4, 4);
-    // Set pixel at (1,1) to red
+    // Set pixel at (1,1) to red (RGBA storage: R at byte 0)
     let off = 1 * fb.stride() + 1 * 4;
-    fb.data_mut()[off] = 0; // B
+    fb.data_mut()[off] = 255; // R
     fb.data_mut()[off + 1] = 0; // G
-    fb.data_mut()[off + 2] = 255; // R
+    fb.data_mut()[off + 2] = 0; // B
     fb.data_mut()[off + 3] = 255; // A
     fb.resize(8, 8);
     assert_eq!(fb.width(), 8);
     assert_eq!(fb.height(), 8);
-    // Original pixel should still be at (1,1)
     let off2 = 1 * fb.stride() + 1 * 4;
-    assert_eq!(fb.data()[off2 + 2], 255); // R preserved
+    assert_eq!(fb.data()[off2], 255); // R preserved
 }
 
 #[test]
 fn resize_with_forget_gravity_clears() {
     let mut fb = Framebuffer::new(4, 4);
     let off = 1 * fb.stride() + 1 * 4;
-    fb.data_mut()[off + 2] = 255;
+    fb.data_mut()[off] = 255;
     fb.resize_with_gravity(8, 8, 0); // Forget gravity
-                                     // All pixels should be zeroed
     assert!(fb.data().iter().all(|&b| b == 0));
 }
 
@@ -43,9 +41,9 @@ fn resize_with_forget_gravity_clears() {
 fn resize_with_northwest_gravity_preserves_top_left() {
     let mut fb = Framebuffer::new(4, 4);
     let off = 0; // pixel (0,0)
-    fb.data_mut()[off + 2] = 200;
+    fb.data_mut()[off] = 200; // R
     fb.resize_with_gravity(8, 8, 1); // NorthWest
-    assert_eq!(fb.data()[off + 2], 200); // Top-left preserved
+    assert_eq!(fb.data()[off], 200);
 }
 
 // -----------------------------------------------------------------------
@@ -240,16 +238,16 @@ fn copy_area_self_overlapping() {
 #[test]
 fn draw_line_tiled_horizontal() {
     let mut fb = Framebuffer::new(20, 10);
-    // Create a 2x1 tile: red, green (BGRA format)
+    // 2x1 tile in RGBA storage: red, green
     let tile_data = vec![
-        0, 0, 255, 255, // pixel (0,0) = red
+        255, 0, 0, 255, // pixel (0,0) = red
         0, 255, 0, 255, // pixel (1,0) = green
     ];
     fb.draw_line_tiled(2, 3, 7, 3, &tile_data, 2, 1, 0, 0, 3, 0xFFFFFFFF, 1, &[]);
     // Check pixel at (2,3): tile_x = 2%2 = 0 → red
     let off = 3 * fb.stride() + 2 * 4;
-    assert_eq!(fb.data()[off + 2], 255); // R = 255 (red)
-                                         // Check pixel at (3,3): tile_x = 3%2 = 1 → green
+    assert_eq!(fb.data()[off], 255); // R = 255 (red)
+                                     // Check pixel at (3,3): tile_x = 3%2 = 1 → green
     let off2 = 3 * fb.stride() + 3 * 4;
     assert_eq!(fb.data()[off2 + 1], 255); // G = 255 (green)
 }
@@ -257,18 +255,18 @@ fn draw_line_tiled_horizontal() {
 #[test]
 fn draw_line_tiled_respects_ts_origin() {
     let mut fb = Framebuffer::new(20, 10);
-    // 2x1 tile: blue, white
+    // 2x1 tile in RGBA storage: blue, white
     let tile_data = vec![
-        255, 0, 0, 255, // pixel (0,0) = blue
+        0, 0, 255, 255, // pixel (0,0) = blue
         255, 255, 255, 255, // pixel (1,0) = white
     ];
     // ts_x = 1 shifts tile origin
     fb.draw_line_tiled(0, 0, 3, 0, &tile_data, 2, 1, 1, 0, 3, 0xFFFFFFFF, 1, &[]);
     // At x=0: tile_x = (0-1)%2 = 1 → white
     let off = 0 * fb.stride() + 0 * 4;
-    assert_eq!(fb.data()[off], 255); // B
+    assert_eq!(fb.data()[off], 255); // R
     assert_eq!(fb.data()[off + 1], 255); // G
-    assert_eq!(fb.data()[off + 2], 255); // R
+    assert_eq!(fb.data()[off + 2], 255); // B
 }
 
 // -----------------------------------------------------------------------
@@ -304,12 +302,12 @@ fn draw_line_stippled_foreground_only() {
         1,
         &[],
     );
-    // At x=0: stipple set → fg (red)
+    // At x=0: stipple set → fg (red); R is byte 0 in RGBA storage
     let off = 0 * fb.stride() + 0 * 4;
-    assert_eq!(fb.data()[off + 2], 0xFF); // R
-                                          // At x=1: stipple unset, not opaque → should remain 0 (not drawn)
+    assert_eq!(fb.data()[off], 0xFF); // R
+                                      // At x=1: stipple unset, not opaque → should remain 0 (not drawn)
     let off1 = 0 * fb.stride() + 1 * 4;
-    assert_eq!(fb.data()[off1 + 2], 0); // R = 0 (not drawn)
+    assert_eq!(fb.data()[off1], 0); // R = 0 (not drawn)
 }
 
 #[test]
@@ -340,7 +338,7 @@ fn draw_line_stippled_opaque_draws_background() {
         1,
         &[],
     );
-    // At x=1: stipple unset, opaque → bg (green)
+    // At x=1: stipple unset, opaque → bg (green); G is byte 1 in RGBA storage
     let off = 0 * fb.stride() + 1 * 4;
     assert_eq!(fb.data()[off + 1], 0xFF); // G = 255 (green)
 }
@@ -352,58 +350,52 @@ fn draw_line_stippled_opaque_draws_background() {
 #[test]
 fn resize_with_southeast_gravity_preserves_bottom_right() {
     let mut fb = Framebuffer::new(4, 4);
-    // Set pixel at (3,3) - bottom-right corner
     let off = 3 * fb.stride() + 3 * 4;
-    fb.data_mut()[off + 2] = 255; // R
+    fb.data_mut()[off] = 255; // R
     fb.data_mut()[off + 3] = 255; // A
     fb.resize_with_gravity(8, 8, 9); // SouthEast
-                                     // Pixel should now be at (7,7)
     let off2 = 7 * fb.stride() + 7 * 4;
-    assert_eq!(fb.data()[off2 + 2], 255);
+    assert_eq!(fb.data()[off2], 255);
 }
 
 #[test]
 fn resize_with_center_gravity_preserves_center() {
     let mut fb = Framebuffer::new(4, 4);
-    // Set pixel at (2,2) - near center
     let off = 2 * fb.stride() + 2 * 4;
-    fb.data_mut()[off + 2] = 255; // R
+    fb.data_mut()[off] = 255; // R
     fb.data_mut()[off + 3] = 255; // A
     fb.resize_with_gravity(8, 8, 5); // Center
-                                     // Content should be offset by (2,2) to center it
     let off2 = 4 * fb.stride() + 4 * 4;
-    assert_eq!(fb.data()[off2 + 2], 255);
+    assert_eq!(fb.data()[off2], 255);
 }
 
 #[test]
 fn resize_shrink_preserves_visible_content() {
     let mut fb = Framebuffer::new(8, 8);
-    // Set pixel at (1,1) - should survive shrink
     let off = 1 * fb.stride() + 1 * 4;
-    fb.data_mut()[off + 2] = 255; // R
+    fb.data_mut()[off] = 255; // R
     fb.resize_with_gravity(4, 4, 1); // NorthWest
     let off2 = 1 * fb.stride() + 1 * 4;
-    assert_eq!(fb.data()[off2 + 2], 255);
+    assert_eq!(fb.data()[off2], 255);
 }
 
 #[test]
 fn resize_to_same_size_is_noop() {
     let mut fb = Framebuffer::new(4, 4);
     let off = 2 * fb.stride() + 2 * 4;
-    fb.data_mut()[off + 2] = 42;
+    fb.data_mut()[off] = 42;
     fb.resize_with_gravity(4, 4, 1);
-    // Should be unchanged
     let off2 = 2 * fb.stride() + 2 * 4;
-    assert_eq!(fb.data()[off2 + 2], 42);
+    assert_eq!(fb.data()[off2], 42);
 }
 
 #[test]
 fn resize_to_1x1_preserves_top_left_pixel() {
     let mut fb = Framebuffer::new(4, 4);
     let off = 0; // pixel at (0,0)
-    fb.data_mut()[off + 2] = 200; // R
+    fb.data_mut()[off] = 200; // R
     fb.resize_with_gravity(1, 1, 1); // NorthWest
-    assert_eq!(fb.data()[2], 200);
+    assert_eq!(fb.data()[0], 200);
 }
 
 // -----------------------------------------------------------------------
@@ -417,17 +409,17 @@ fn set_pixel_and_get_pixel_roundtrip() {
     let x = 5i16;
     let y = 3i16;
     let off = y as usize * fb.stride() + x as usize * 4;
-    let b = (color & 0xFF) as u8;
-    let g = ((color >> 8) & 0xFF) as u8;
     let r = ((color >> 16) & 0xFF) as u8;
+    let g = ((color >> 8) & 0xFF) as u8;
+    let b = (color & 0xFF) as u8;
     let a = ((color >> 24) & 0xFF) as u8;
-    fb.data_mut()[off] = b;
+    fb.data_mut()[off] = r;
     fb.data_mut()[off + 1] = g;
-    fb.data_mut()[off + 2] = r;
+    fb.data_mut()[off + 2] = b;
     fb.data_mut()[off + 3] = a;
-    assert_eq!(fb.data()[off], 0); // B
+    assert_eq!(fb.data()[off], 0); // R
     assert_eq!(fb.data()[off + 1], 255); // G
-    assert_eq!(fb.data()[off + 2], 0); // R
+    assert_eq!(fb.data()[off + 2], 0); // B
     assert_eq!(fb.data()[off + 3], 255); // A
 }
 
@@ -454,9 +446,8 @@ fn framebuffer_stride_is_width_times_4() {
 fn draw_horizontal_line() {
     let mut fb = Framebuffer::new(20, 10);
     fb.draw_line(0, 5, 19, 5, 0xFF0000, 1);
-    // Check a pixel in the middle of the line
     let off = 5 * fb.stride() + 10 * 4;
-    assert_eq!(fb.data()[off + 2], 0xFF); // R = 255
+    assert_eq!(fb.data()[off], 0xFF); // R = 255
 }
 
 #[test]
@@ -471,9 +462,8 @@ fn draw_vertical_line() {
 fn draw_diagonal_line() {
     let mut fb = Framebuffer::new(10, 10);
     fb.draw_line(0, 0, 9, 9, 0x0000FF, 1);
-    // Check pixel at (5,5) — should be on the diagonal
     let off = 5 * fb.stride() + 5 * 4;
-    assert_eq!(fb.data()[off], 0xFF); // B = 255
+    assert_eq!(fb.data()[off + 2], 0xFF); // B = 255
 }
 
 // -----------------------------------------------------------------------
@@ -502,29 +492,15 @@ fn wide_dashed_horiz_line_has_gaps() {
         0,
         &[], // bg, no clip
     );
-    // At x=2 (within first dash-on segment), center y=5, should be drawn
+    // R is byte 0 in RGBA storage; line color is 0xFF0000 (red).
     let off_on = 5 * fb.stride() + 2 * 4;
-    assert_ne!(
-        fb.data()[off_on + 2],
-        0,
-        "pixel at x=2 should be drawn (on-dash)"
-    );
+    assert_ne!(fb.data()[off_on], 0, "pixel at x=2 should be drawn (on-dash)");
 
-    // At x=6 (within first dash-off segment), center y=5, should NOT be drawn
     let off_off = 5 * fb.stride() + 6 * 4;
-    assert_eq!(
-        fb.data()[off_off + 2],
-        0,
-        "pixel at x=6 should be gap (off-dash)"
-    );
+    assert_eq!(fb.data()[off_off], 0, "pixel at x=6 should be gap (off-dash)");
 
-    // Width: y=4 should also be drawn at x=2 (line_width=3 means hw=1)
     let off_top = 4 * fb.stride() + 2 * 4;
-    assert_ne!(
-        fb.data()[off_top + 2],
-        0,
-        "pixel at (2,4) should be drawn (wide)"
-    );
+    assert_ne!(fb.data()[off_top], 0, "pixel at (2,4) should be drawn (wide)");
 }
 
 #[test]
@@ -578,15 +554,12 @@ fn wide_dashed_diagonal_line_has_gaps() {
         0,
         &[],
     );
-    // At (2,2) (on), should be drawn
+    // Line color is 0x0000FF (blue); B is byte 2 in RGBA storage.
     let off_on = 2 * fb.stride() + 2 * 4;
-    assert_ne!(fb.data()[off_on], 0, "pixel at (2,2) should be drawn");
+    assert_ne!(fb.data()[off_on + 2], 0, "pixel at (2,2) should be drawn");
 
-    // After ~8 pixels of Bresenham travel (off region), should not be drawn
-    // Note: diagonal pixel count depends on Bresenham steps, check around pixel 9
-    // which should be in the gap region for pattern [6,6]
     let off_off = 9 * fb.stride() + 9 * 4;
-    assert_eq!(fb.data()[off_off], 0, "pixel at (9,9) should be gap");
+    assert_eq!(fb.data()[off_off + 2], 0, "pixel at (9,9) should be gap");
 }
 
 #[test]
@@ -610,12 +583,12 @@ fn wide_double_dash_draws_background() {
         0x00FF00, // green background
         &[],
     );
-    // At x=6 (gap), should be green (background)
+    // At x=6 (gap), should be green (background); G is byte 1, R is byte 0 in RGBA.
     let off_gap = 5 * fb.stride() + 6 * 4;
     assert_ne!(
         fb.data()[off_gap + 1],
         0,
         "gap pixel should have green background"
     );
-    assert_eq!(fb.data()[off_gap + 2], 0, "gap pixel should not have red");
+    assert_eq!(fb.data()[off_gap], 0, "gap pixel should not have red");
 }

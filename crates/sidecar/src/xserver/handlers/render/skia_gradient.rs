@@ -94,7 +94,8 @@ fn render_shader_to_bgra(
         Transform::from_translate(-(src_x as f32), -(src_y as f32)),
         None,
     );
-    // tiny-skia Pixmap is RGBA premul; convert to BGRA premul.
+    // tiny-skia Pixmap is RGBA premul; the gradient pipeline (and
+    // `resolve_source_pixels` consumers) work in BGRA byte order.
     let mut bgra = Vec::with_capacity((width * height * 4) as usize);
     for px in pixmap.pixels() {
         bgra.push(px.blue());

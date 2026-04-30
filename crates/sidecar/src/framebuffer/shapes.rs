@@ -1,4 +1,4 @@
-use super::{point_in_arc, ArcChordData, DashState, Framebuffer};
+use super::{point_in_arc, read_pixel, ArcChordData, DashState, Framebuffer};
 
 impl Framebuffer {
     /// fill_rect_rop with clip rectangle support.
@@ -144,9 +144,7 @@ impl Framebuffer {
                     ((px as i32 - ts_x as i32) % tile_w as i32 + tile_w as i32) as u32 % tile_w;
                 let off = tile_y as usize * tile_stride + tile_x as usize * 4;
                 if off + 3 < tile_data.len() {
-                    let color = (tile_data[off + 2] as u32) << 16
-                        | (tile_data[off + 1] as u32) << 8
-                        | tile_data[off] as u32;
+                    let color = read_pixel(tile_data, off);
                     if function == 3 && plane_mask == 0xFFFFFFFF {
                         // Fast path: GXcopy
                         let dst_off = dy as usize * self.stride + px * 4;
@@ -454,9 +452,7 @@ impl Framebuffer {
                 let tile_y = ((py - ts_y as i32).rem_euclid(tile_h as i32)) as usize;
                 let off = tile_y * tile_stride + tile_x * 4;
                 if off + 3 < tile_data.len() {
-                    let color = (tile_data[off + 2] as u32) << 16
-                        | (tile_data[off + 1] as u32) << 8
-                        | tile_data[off] as u32;
+                    let color = read_pixel(tile_data, off);
                     self.draw_point_with_func_masked(px, py, color, gc_func, plane_mask);
                 }
             }
@@ -866,11 +862,7 @@ impl Framebuffer {
                     let tile_py = ((dy as i32 - ts_y as i32).rem_euclid(tile_h as i32)) as usize;
                     let offset = (tile_py * tile_w as usize + tile_px) * 4;
                     if offset + 3 < tile_data.len() {
-                        let b = tile_data[offset] as u32;
-                        let g = tile_data[offset + 1] as u32;
-                        let r = tile_data[offset + 2] as u32;
-                        let a = tile_data[offset + 3] as u32;
-                        let color = (a << 24) | (r << 16) | (g << 8) | b;
+                        let color = read_pixel(tile_data, offset);
                         self.draw_point_with_func_masked(
                             px as i32, dy as i32, color, gc_func, plane_mask,
                         );
