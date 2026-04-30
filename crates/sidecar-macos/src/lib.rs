@@ -11,9 +11,19 @@
 //! `CuaDriverCore` module.
 
 #[cfg(target_os = "macos")]
+pub mod ax;
+#[cfg(target_os = "macos")]
 pub mod capture;
 #[cfg(target_os = "macos")]
 pub mod enumerator;
+#[cfg(target_os = "macos")]
+pub mod focus;
+#[cfg(target_os = "macos")]
+pub mod focus_guard;
+#[cfg(target_os = "macos")]
+pub mod input;
+#[cfg(target_os = "macos")]
+pub mod router;
 #[cfg(target_os = "macos")]
 pub mod skylight;
 #[cfg(target_os = "macos")]

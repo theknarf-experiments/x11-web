@@ -20,7 +20,10 @@ mod macos {
     use tokio_tungstenite::connect_async;
     use tokio_tungstenite::tungstenite::Message;
     use tracing::{error, info, warn};
-    use x11_web_protocol::SidecarToBackend;
+    use x11_web_protocol::{BackendToSidecar, SidecarToBackend};
+
+    use x11_web_sidecar_macos::input;
+    use x11_web_sidecar_macos::router::WindowRouter;
 
     pub async fn run() {
         tracing_subscriber::fmt::init();
@@ -45,6 +48,22 @@ mod macos {
                 "Screen Recording permission: not granted. \
                  Open System Settings → Privacy & Security → Screen Recording \
                  and enable the entry for this binary, then restart the sidecar."
+            );
+        }
+
+        // Accessibility: required by `CGEvent.postToPid` to inject
+        // events into other processes. Without this, posts no-op
+        // silently — there's no error from the API. Probe via
+        // `AXIsProcessTrusted` and log the verdict so the operator
+        // can see at a glance whether input will work.
+        if unsafe { objc2_application_services::AXIsProcessTrusted() } {
+            info!("Accessibility permission: granted");
+        } else {
+            warn!(
+                "Accessibility permission: not granted. \
+                 Open System Settings → Privacy & Security → Accessibility \
+                 and enable X11WebSidecar.app. Without this, mouse and \
+                 keyboard input will silently be dropped."
             );
         }
 
@@ -111,12 +130,18 @@ mod macos {
         // Window enumeration → DisplayUpdate stream. Per-session so the
         // backend gets a fresh "everything that exists" announcement
         // each time we reconnect.
-        x11_web_sidecar_macos::enumerator::spawn(tx.clone());
+        let router = WindowRouter::new();
+        x11_web_sidecar_macos::enumerator::spawn(tx.clone(), router.clone());
 
-        // v0.1 minimum: keep the connection alive while the enumerator
-        // streams updates. Capture and input come in subsequent commits.
+        // Recv loop: parse `BackendToSidecar` messages, dispatch the
+        // ones we know how to handle.
         loop {
             match ws_rx.next().await {
+                Some(Ok(Message::Text(text))) => {
+                    if let Ok(cmd) = serde_json::from_str::<BackendToSidecar>(&text) {
+                        handle_backend_msg(cmd, &router, &tx);
+                    }
+                }
                 Some(Ok(Message::Close(_))) | None => break,
                 Some(Ok(_)) => {}
                 Some(Err(e)) => {
@@ -128,6 +153,37 @@ mod macos {
 
         heartbeat_task.abort();
         send_task.abort();
+    }
+
+    fn handle_backend_msg(
+        cmd: BackendToSidecar,
+        router: &WindowRouter,
+        tx: &mpsc::UnboundedSender<SidecarToBackend>,
+    ) {
+        match cmd {
+            BackendToSidecar::InputEvent { window_id, event } => {
+                info!("InputEvent received: window={window_id} event={event:?}");
+                match router.lookup(&window_id) {
+                    Some(route) => {
+                        info!(
+                            "Routing to pid={} origin=({:.0},{:.0})",
+                            route.pid, route.bounds.x, route.bounds.y
+                        );
+                        input::inject(route, event);
+                    }
+                    None => {
+                        warn!("No route for window UUID {window_id}");
+                        let _ = tx.send(SidecarToBackend::InputDropped {
+                            window_id,
+                            reason: "no route for window UUID on this sidecar".into(),
+                        });
+                    }
+                }
+            }
+            other => {
+                info!("Backend msg (ignored): {other:?}");
+            }
+        }
     }
 
     fn hostname() -> Option<String> {

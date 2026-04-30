@@ -21,6 +21,7 @@ use uuid::Uuid;
 use x11_web_protocol::{DisplayUpdate, SidecarToBackend};
 
 use crate::capture::capture_window;
+use crate::router::{WindowRoute, WindowRouter};
 use crate::windows::{visible_windows, WindowBounds, WindowInfo};
 
 /// Cap the longer side of each capture (in points). `0` means no
@@ -55,8 +56,9 @@ struct Tracked {
 /// Spawn the enumeration task. Sends `SidecarToBackend` messages on
 /// `tx` for every window state change, and a per-window capture task
 /// per tracked window that streams `PutImage` updates at
-/// `CAPTURE_PERIOD`.
-pub fn spawn(tx: mpsc::UnboundedSender<SidecarToBackend>) {
+/// `CAPTURE_PERIOD`. Updates `router` in lockstep so the input path
+/// can resolve window UUIDs back to pid + screen origin.
+pub fn spawn(tx: mpsc::UnboundedSender<SidecarToBackend>, router: WindowRouter) {
     tokio::spawn(async move {
         let mut tracked: HashMap<CGWindowID, Tracked> = HashMap::new();
         let mut announced_pids: HashMap<i32, String> = HashMap::new();
@@ -78,6 +80,14 @@ pub fn spawn(tx: mpsc::UnboundedSender<SidecarToBackend>) {
                 let uuid = Uuid::new_v4().to_string();
                 announce_pid_if_new(&mut announced_pids, win, &tx);
                 emit_created(&tx, &uuid, win);
+                router.insert(
+                    uuid.clone(),
+                    WindowRoute {
+                        cg_id: *id,
+                        pid: win.pid,
+                        bounds: win.bounds,
+                    },
+                );
                 let capture_handle = spawn_capture_loop(*id, uuid.clone(), win.pid, tx.clone());
                 tracked.insert(
                     *id,
@@ -96,6 +106,7 @@ pub fn spawn(tx: mpsc::UnboundedSender<SidecarToBackend>) {
                 if let Some(prev) = tracked.get_mut(id) {
                     if !bounds_eq(&prev.bounds, &win.bounds) {
                         emit_configured(&tx, &prev.uuid, &win.bounds);
+                        router.update_bounds(&prev.uuid, win.bounds);
                         prev.bounds = win.bounds;
                     }
                     if prev.title != win.name {
@@ -111,6 +122,7 @@ pub fn spawn(tx: mpsc::UnboundedSender<SidecarToBackend>) {
                     true
                 } else {
                     prev.capture_handle.abort();
+                    router.remove(&prev.uuid);
                     let _ = tx.send(SidecarToBackend::DisplayUpdate {
                         client_id: client_id_for_pid(prev.pid),
                         update: DisplayUpdate::WindowDestroyed {

@@ -43,3 +43,11 @@ objc2-screen-capture-kit = { version = "0.3.2", features = [
 objc2-core-graphics = { version = "0.3", features = ["CGImage", "CGDataProvider", "CGColorSpace", "CGWindow"] }
 objc2-core-foundation = { version = "0.3", features = ["CFCGTypes", "CFData"] }
 block2 = "0.6"
+objc2-application-services = { version = "0.3.2", features = ["Accessibility"] }
+objc2-app-kit = { version = "0.3.2", features = [
+    "NSEvent",
+    "NSGraphicsContext",
+    "NSWorkspace",
+    "NSRunningApplication",
+    "NSApplication",
+] }
