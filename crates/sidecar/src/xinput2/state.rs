@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use x11rb_protocol::protocol::xinput as xi;
 
-use super::{Xi2ActiveGrab, Xi2PassiveGrab, MASTER_POINTER_ID};
+use super::{Xi2PassiveGrab, MASTER_POINTER_ID};
 
 use crate::xinput2::{PendingSynthetic, ValuatorState, XiSelection};
 
@@ -20,7 +20,9 @@ pub struct XiState {
     /// Written by `XIChangeProperty`, removed by `XIDeleteProperty`.
     pub device_properties: HashMap<(u16, u32), Vec<u8>>,
     /// Active XI2 device grabs (one per device).
-    pub active_grabs: HashMap<xi::DeviceId, Xi2ActiveGrab>,
+    /// Devices currently grabbed (the grab parameters aren't tracked
+    /// — only presence is checked, e.g. for ALREADY_GRABBED).
+    pub active_grabs: HashMap<xi::DeviceId, ()>,
     /// Passive XI2 device grabs.
     pub passive_grabs: Vec<Xi2PassiveGrab>,
     /// Whether the pointer device events are frozen (synchronous grab mode).

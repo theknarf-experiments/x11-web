@@ -132,23 +132,6 @@ pub struct AxisValue {
     pub value: i32,
 }
 
-/// Active XI2 device grab (from XIGrabDevice).
-#[derive(Clone, Debug)]
-pub struct Xi2ActiveGrab {
-    /// The device that was grabbed.
-    pub deviceid: xi::DeviceId,
-    /// The window the grab is associated with.
-    pub grab_window: u32,
-    /// Event mask for events delivered during the grab.
-    pub event_mask: Vec<xi::XIEventMask>,
-    /// Whether owner_events is set.
-    pub owner_events: bool,
-    /// Grab mode for the paired device (0=Sync, 1=Async).
-    pub paired_device_mode: u8,
-    /// Grab mode for this device (0=Sync, 1=Async).
-    pub grab_mode: u8,
-}
-
 /// Passive XI2 device grab (from XIPassiveGrabDevice).
 #[derive(Clone, Debug)]
 pub struct Xi2PassiveGrab {

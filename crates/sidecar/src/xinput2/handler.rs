@@ -10,8 +10,8 @@ use crate::xserver::core::read_u16_bo;
 
 use super::device::*;
 use super::{
-    fp1616, serialize_xi_reply, PendingSynthetic, ValuatorState, Xi2ActiveGrab, Xi2PassiveGrab,
-    XiSelection, MASTER_KEYBOARD_ID, MASTER_POINTER_ID,
+    fp1616, serialize_xi_reply, PendingSynthetic, ValuatorState, Xi2PassiveGrab, XiSelection,
+    MASTER_KEYBOARD_ID, MASTER_POINTER_ID,
 };
 
 /// Dispatch a request whose major opcode matches our XInputExtension
@@ -26,7 +26,7 @@ pub fn handle_request(
     client_pointer: &mut u16,
     device_properties: &mut HashMap<(u16, u32), Vec<u8>>,
     focus_window: &mut u32,
-    active_grabs: &mut HashMap<xi::DeviceId, Xi2ActiveGrab>,
+    active_grabs: &mut HashMap<xi::DeviceId, ()>,
     passive_grabs: &mut Vec<Xi2PassiveGrab>,
     pointer_frozen: &mut bool,
     keyboard_frozen: &mut bool,
@@ -207,20 +207,10 @@ pub fn handle_request(
                 let deviceid = req.deviceid;
                 let grab_window = req.window;
                 let grab_mode = u8::from(req.mode);
-                let paired_device_mode = u8::from(req.paired_device_mode);
                 let owner_events = u8::from(req.owner_events) != 0;
-                let event_mask: Vec<xi::XIEventMask> = req.mask.iter().map(|&m| m.into()).collect();
 
                 // Check if device is already grabbed by this client.
                 if let std::collections::hash_map::Entry::Vacant(e) = active_grabs.entry(deviceid) {
-                    let grab = Xi2ActiveGrab {
-                        deviceid,
-                        grab_window,
-                        event_mask,
-                        owner_events,
-                        paired_device_mode,
-                        grab_mode,
-                    };
                     if grab_mode == 0 {
                         if deviceid == MASTER_POINTER_ID || deviceid == 0 || deviceid == 1 {
                             *pointer_frozen = true;
@@ -230,7 +220,7 @@ pub fn handle_request(
                         }
                     }
                     debug!("XIGrabDevice: device={deviceid} window={grab_window:#x} mode={grab_mode} owner_events={owner_events}");
-                    e.insert(grab);
+                    e.insert(());
                     xproto::GrabStatus::SUCCESS
                 } else {
                     xproto::GrabStatus::ALREADY_GRABBED
