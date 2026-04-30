@@ -128,7 +128,8 @@ impl BitmapFont {
         ))
     }
 
-    /// Render a string to a pixel buffer (BGRX format, 4 bytes per pixel).
+    /// Render a string to a pixel buffer (RGBA, 4 bytes per pixel —
+    /// matches `Framebuffer` storage).
     /// Returns (width, height, pixels).
     pub fn render_text(&self, text: &[u8], fg: u32, bg: u32) -> (u16, u16, Vec<u8>) {
         // Calculate total width
@@ -151,9 +152,9 @@ impl BitmapFont {
 
         // Fill background (opaque — ImageText fills the bounding box)
         for i in 0..(total_width as usize * total_height as usize) {
-            pixels[i * 4] = bg_b;
+            pixels[i * 4] = bg_r;
             pixels[i * 4 + 1] = bg_g;
-            pixels[i * 4 + 2] = bg_r;
+            pixels[i * 4 + 2] = bg_b;
             pixels[i * 4 + 3] = 0xFF;
         }
 
@@ -177,9 +178,9 @@ impl BitmapFont {
                             let py = gy as usize + row;
                             if px < total_width as usize && py < total_height as usize {
                                 let idx = (py * total_width as usize + px) * 4;
-                                pixels[idx] = fg_b;
+                                pixels[idx] = fg_r;
                                 pixels[idx + 1] = fg_g;
-                                pixels[idx + 2] = fg_r;
+                                pixels[idx + 2] = fg_b;
                                 pixels[idx + 3] = 0xFF;
                             }
                         }
@@ -229,9 +230,9 @@ impl BitmapFont {
                             let py = gy as usize + row;
                             if px < total_width as usize && py < total_height as usize {
                                 let idx = (py * total_width as usize + px) * 4;
-                                pixels[idx] = fg_b;
+                                pixels[idx] = fg_r;
                                 pixels[idx + 1] = fg_g;
-                                pixels[idx + 2] = fg_r;
+                                pixels[idx + 2] = fg_b;
                                 pixels[idx + 3] = 0xFF; // Opaque foreground
                             }
                         }
