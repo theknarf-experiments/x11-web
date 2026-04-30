@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use x11rb_protocol::protocol::xinput as xi;
 
-use super::{Xi2ActiveGrab, Xi2PassiveGrab, MASTER_KEYBOARD_ID, MASTER_POINTER_ID};
+use super::{Xi2ActiveGrab, Xi2PassiveGrab, MASTER_POINTER_ID};
 
 use crate::xinput2::{PendingSynthetic, ValuatorState, XiSelection};
 

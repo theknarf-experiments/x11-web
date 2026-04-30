@@ -289,23 +289,6 @@ fn write_display_payload(
             ws.set_window_id(window_id);
             ws.set_state(write_wm_state(*state));
         }
-        DisplayUpdate::WindowUrgent { window_id, urgent } => {
-            let mut wu = payload.init_window_urgent();
-            wu.set_window_id(window_id);
-            wu.set_urgent(*urgent);
-        }
-        DisplayUpdate::WindowIconChanged {
-            window_id,
-            width,
-            height,
-            data,
-        } => {
-            let mut wic = payload.init_window_icon_changed();
-            wic.set_window_id(window_id);
-            wic.set_width(*width);
-            wic.set_height(*height);
-            wic.set_data(data);
-        }
         DisplayUpdate::Bell { percent } => {
             let mut b = payload.init_bell();
             b.set_percent(*percent);
@@ -553,22 +536,6 @@ fn read_display_payload(
             DisplayUpdate::WindowStateChanged {
                 window_id: ws.get_window_id()?.to_string()?,
                 state: read_wm_state(ws.get_state()?),
-            }
-        }
-        Which::WindowUrgent(wu) => {
-            let wu = wu?;
-            DisplayUpdate::WindowUrgent {
-                window_id: wu.get_window_id()?.to_string()?,
-                urgent: wu.get_urgent(),
-            }
-        }
-        Which::WindowIconChanged(wic) => {
-            let wic = wic?;
-            DisplayUpdate::WindowIconChanged {
-                window_id: wic.get_window_id()?.to_string()?,
-                width: wic.get_width(),
-                height: wic.get_height(),
-                data: wic.get_data()?.to_vec(),
             }
         }
         Which::Bell(b) => {

@@ -2,7 +2,6 @@
 
 use crate::framebuffer::Framebuffer;
 
-use super::super::types::*;
 use super::ClientState;
 
 impl ClientState {

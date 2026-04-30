@@ -317,41 +317,6 @@ pub(crate) fn handle_change_property(
         let hint_data = &req.data[..byte_len.min(req.data.len())];
         if hint_data.len() >= 4 {
             let flags = state.read_u32_from(hint_data, 0);
-            // Bit 8 = UrgencyHint
-            let urgent = flags & (1 << 8) != 0;
-            if let Some(uuid) = state.window_uuid(window) {
-                let _ = state.update_tx.send((
-                    state.client_id.clone(),
-                    DisplayUpdate::WindowUrgent {
-                        window_id: uuid.clone(),
-                        urgent,
-                    },
-                ));
-            }
-
-            // Bit 2 = IconPixmapHint — extract icon pixmap and send to frontend
-            if flags & (1 << 2) != 0 && hint_data.len() >= 20 {
-                let icon_pixmap_id = state.read_u32_from(hint_data, 12);
-                if icon_pixmap_id != 0 {
-                    // Try to read the icon pixmap's pixel data
-                    if let Some(px) = state.pixmaps.get(&icon_pixmap_id) {
-                        let w = px.width;
-                        let h = px.height;
-                        let pixels = px.framebuffer.extract_rgba();
-                        if let Some(uuid) = state.window_uuid(window) {
-                            let _ = state.update_tx.send((
-                                state.client_id.clone(),
-                                DisplayUpdate::WindowIconChanged {
-                                    window_id: uuid,
-                                    width: w,
-                                    height: h,
-                                    data: pixels,
-                                },
-                            ));
-                        }
-                    }
-                }
-            }
 
             // Bit 0 = InputHint — whether the window accepts keyboard focus (ICCCM §4.1.2.4).
             // WM_HINTS layout: flags(4), input(4), initial_state(4), icon_pixmap(4), ...
@@ -381,49 +346,6 @@ pub(crate) fn handle_change_property(
                     } else {
                         None
                     };
-                }
-            }
-        }
-    }
-
-    // Check if this is _NET_WM_ICON — extract ARGB icon data for frontend
-    let is_net_wm_icon = state
-        .get_atom_name(property_atom)
-        .map(|n| n == "_NET_WM_ICON")
-        .unwrap_or(false);
-
-    if is_net_wm_icon && format == 32 && byte_len >= 8 {
-        let icon_data = &req.data[..byte_len.min(req.data.len())];
-        // _NET_WM_ICON format: width(CARD32) height(CARD32) ARGB_pixels...
-        if icon_data.len() >= 8 {
-            let w = state.read_u32_from(icon_data, 0);
-            let h = state.read_u32_from(icon_data, 4);
-            let pixel_count = (w as usize) * (h as usize);
-            let expected = 8 + pixel_count * 4;
-            if w > 0 && h > 0 && w <= 256 && h <= 256 && icon_data.len() >= expected {
-                // Convert ARGB to RGBA
-                let mut rgba = vec![0u8; pixel_count * 4];
-                for i in 0..pixel_count {
-                    let argb = state.read_u32_from(icon_data, 8 + i * 4);
-                    let a = (argb >> 24) as u8;
-                    let r = (argb >> 16) as u8;
-                    let g = (argb >> 8) as u8;
-                    let b = argb as u8;
-                    rgba[i * 4] = r;
-                    rgba[i * 4 + 1] = g;
-                    rgba[i * 4 + 2] = b;
-                    rgba[i * 4 + 3] = a;
-                }
-                if let Some(uuid) = state.window_uuid(window) {
-                    let _ = state.update_tx.send((
-                        state.client_id.clone(),
-                        DisplayUpdate::WindowIconChanged {
-                            window_id: uuid,
-                            width: w as u16,
-                            height: h as u16,
-                            data: rgba,
-                        },
-                    ));
                 }
             }
         }

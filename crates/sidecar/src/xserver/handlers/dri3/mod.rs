@@ -3,7 +3,6 @@
 //! DRI3 enables zero-copy buffer sharing between the X server and GPU clients
 //! via DMA-BUF file descriptors. Our implementation provides version negotiation
 //! and basic fd-backed pixmap import so Mesa's software fallback path works.
-use crate::xserver::reply::ReplyBuf;
 
 // DRI3 minor opcodes:
 // 0 = QueryVersion
@@ -22,12 +21,5 @@ use crate::xserver::reply::ReplyBuf;
 mod device;
 mod fence;
 mod pixmap;
-
-use tracing::{debug, warn};
-
-use super::super::client::ClientState;
-use super::super::core::*;
-use super::parse_minor;
-use crate::xserver::core::require_len;
 
 // Supported DRI3 version

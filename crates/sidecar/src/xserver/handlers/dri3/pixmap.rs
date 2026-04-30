@@ -1,16 +1,6 @@
 //! DRI3 pixmap operations: PixmapFromBuffer, BufferFromPixmap,
 //! PixmapFromBuffers, BuffersFromPixmap.
 
-use tracing::{debug, warn};
-
-use super::super::super::client::ClientState;
-use super::super::super::core::*;
-use super::super::super::types::PixmapState;
-use super::super::parse_minor;
-use crate::framebuffer::Framebuffer;
-use crate::xserver::core::require_len;
-use crate::xserver::reply::ReplyBuf;
-
 // DRM fourcc codes for YUV formats
 
 // -----------------------------------------------------------------

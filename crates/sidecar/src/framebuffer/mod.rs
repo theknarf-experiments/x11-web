@@ -611,25 +611,6 @@ impl Framebuffer {
         pixels
     }
 
-    /// Extract the entire framebuffer as RGBA (from BGRA internal format).
-    pub fn extract_rgba(&self) -> Vec<u8> {
-        let pixel_count = (self.width as usize) * (self.height as usize);
-        let mut rgba = vec![0u8; pixel_count * 4];
-        for y in 0..self.height as usize {
-            for x in 0..self.width as usize {
-                let src = y * self.stride + x * 4;
-                let dst = (y * self.width as usize + x) * 4;
-                if src + 3 < self.data.len() && dst + 3 < rgba.len() {
-                    rgba[dst] = self.data[src + 2]; // R (from BGRA B offset)
-                    rgba[dst + 1] = self.data[src + 1]; // G
-                    rgba[dst + 2] = self.data[src]; // B
-                    rgba[dst + 3] = self.data[src + 3]; // A
-                }
-            }
-        }
-        rgba
-    }
-
     /// Draw a single pixel at (x, y) with the given color and GC function.
     /// gc_func: 0=Clear, 1=And, 2=AndReverse, 3=Copy, 4=AndInverted,
     ///          5=Noop, 6=Xor, 7=Or, 8=Nor, 9=Equiv, 10=Invert,

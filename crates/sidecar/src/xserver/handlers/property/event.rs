@@ -111,7 +111,7 @@ pub(crate) fn handle_send_event(state: &mut ClientState, req: &SendEventRequest)
                 let hidden_atom = state.intern_atom("_NET_WM_STATE_HIDDEN", false);
                 let modal_atom = state.intern_atom("_NET_WM_STATE_MODAL", false);
                 let above_atom = state.intern_atom("_NET_WM_STATE_ABOVE", false);
-                let demands_attention_atom =
+                let _demands_attention_atom =
                     state.intern_atom("_NET_WM_STATE_DEMANDS_ATTENTION", false);
 
                 let atoms_to_change = if prop2 != 0 {
@@ -420,17 +420,6 @@ pub(crate) fn handle_send_event(state: &mut ClientState, req: &SendEventRequest)
                                 }
                             }
                         }
-                    }
-
-                    // DEMANDS_ATTENTION: notify frontend so it can show urgency hint
-                    if current_atoms.contains(&demands_attention_atom) {
-                        let _ = state.update_tx.send((
-                            state.client_id.clone(),
-                            DisplayUpdate::WindowUrgent {
-                                window_id: uuid,
-                                urgent: true,
-                            },
-                        ));
                     }
                 }
 

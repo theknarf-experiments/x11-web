@@ -175,18 +175,16 @@ struct DisplayPayload {
         windowFocused @10 :WindowFocused;
         windowRaised @11 :WindowRaised;
         windowStateChanged @12 :WindowStateChanged;
-        windowUrgent @13 :WindowUrgent;
-        windowIconChanged @14 :WindowIconChanged;
 
         # Audio cue — frontend plays a bell sound at `percent`
         # volume.
-        bell @15 :Bell;
+        bell @13 :Bell;
 
         # AppMenu mirroring (GTK / Qt apps via DBus). The X11
         # sidecar's MenuTracker emits the full tree on first
         # discovery; deltas (state changes per item) are not yet
         # implemented — sidecar re-emits the full tree on change.
-        menuStructure @16 :MenuStructure;
+        menuStructure @14 :MenuStructure;
     }
 }
 
@@ -294,18 +292,6 @@ struct WindowRaised {
 struct WindowStateChanged {
     windowId @0 :Text;
     state @1 :WindowWmState;
-}
-
-struct WindowUrgent {
-    windowId @0 :Text;
-    urgent @1 :Bool;
-}
-
-struct WindowIconChanged {
-    windowId @0 :Text;
-    width @1 :UInt16;
-    height @2 :UInt16;
-    data @3 :Data;
 }
 
 enum WindowWmState {

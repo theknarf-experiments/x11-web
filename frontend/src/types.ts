@@ -260,14 +260,6 @@ export type DisplayUpdate =
 			menu: MenuItem[];
 	  }
 	| { kind: "WindowRaised"; window_id: string }
-	| { kind: "WindowUrgent"; window_id: string; urgent: boolean }
-	| {
-			kind: "WindowIconChanged";
-			window_id: string;
-			width: number;
-			height: number;
-			data: string;
-	  }
 	| { kind: "Bell"; percent: number };
 
 export type MenuItemKind =

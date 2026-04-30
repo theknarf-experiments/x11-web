@@ -319,19 +319,6 @@ pub enum DisplayUpdate {
     WindowRaised {
         window_id: String,
     },
-    /// Window urgency hint changed (from WM_HINTS UrgencyHint flag).
-    WindowUrgent {
-        window_id: String,
-        urgent: bool,
-    },
-    /// Window icon changed (from WM_HINTS icon_pixmap or _NET_WM_ICON).
-    WindowIconChanged {
-        window_id: String,
-        width: u16,
-        height: u16,
-        #[serde(with = "base64_bytes")]
-        data: Vec<u8>,
-    },
     /// X11 Bell event — frontend should play an audible/visual bell.
     Bell {
         /// Percent volume (0-100).

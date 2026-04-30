@@ -3,10 +3,10 @@
 //! Each function delegates to the dynamically-resolved function pointer table
 //! loaded by the parent `osmesa` module.
 
-use std::ffi::{c_void, CStr, CString};
+use std::ffi::{c_void, CStr};
 use std::ptr;
 
-use super::{fns, is_available};
+use super::fns;
 
 // ===== Original GL 1.0-1.1 wrappers (unchanged API) =====
 
