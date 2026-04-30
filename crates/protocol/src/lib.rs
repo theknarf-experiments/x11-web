@@ -276,22 +276,6 @@ pub enum DisplayUpdate {
         #[serde(default)]
         border_pixel: u32,
     },
-    /// Fill a rectangle.
-    FillRect {
-        window_id: String,
-        x: i16,
-        y: i16,
-        width: u16,
-        height: u16,
-        color: u32,
-    },
-    /// Draw lines.
-    DrawLines {
-        window_id: String,
-        points: Vec<(i16, i16)>,
-        color: u32,
-        line_width: u16,
-    },
     /// Put an image (raw RGBA pixels, base64 encoded for JSON transport).
     PutImage {
         window_id: String,
@@ -302,41 +286,10 @@ pub enum DisplayUpdate {
         #[serde(with = "base64_bytes")]
         data: Vec<u8>,
     },
-    /// Copy an area within a window.
-    CopyArea {
-        src_window_id: String,
-        dst_window_id: String,
-        src_x: i16,
-        src_y: i16,
-        dst_x: i16,
-        dst_y: i16,
-        width: u16,
-        height: u16,
-    },
-    /// Clear an area.
-    ClearArea {
-        window_id: String,
-        x: i16,
-        y: i16,
-        width: u16,
-        height: u16,
-    },
     /// Window title changed (from WM_NAME property).
     TitleChanged {
         window_id: String,
         title: String,
-    },
-    /// Draw an arc.
-    DrawArc {
-        window_id: String,
-        x: i16,
-        y: i16,
-        width: u16,
-        height: u16,
-        angle1: i16,
-        angle2: i16,
-        filled: bool,
-        color: u32,
     },
     CursorChanged {
         window_id: String,
@@ -357,41 +310,14 @@ pub enum DisplayUpdate {
         #[serde(with = "base64_bytes")]
         data: Vec<u8>,
     },
-    /// Cursor confinement state changed (pointer grab with confine_to).
-    CursorConfined {
-        window_id: String,
-        confined: bool,
-    },
     /// Window WM state changed (minimize, maximize, fullscreen).
     WindowStateChanged {
         window_id: String,
         state: WindowWmState,
     },
-    /// Transient-for relationship set (WM_TRANSIENT_FOR).
-    TransientForSet {
-        window_id: String,
-        parent_window_id: Option<String>,
-    },
-    /// Drag-and-drop event from X11 (XdndDrop protocol).
-    DndEvent {
-        window_id: String,
-        event: DndEventKind,
-    },
     /// Window stacking order changed (raised to top).
     WindowRaised {
         window_id: String,
-    },
-    /// X11 clipboard content changed (selection owner set).
-    ClipboardOffer {
-        selection: String,
-        mime_types: Vec<String>,
-    },
-    /// Clipboard data from X11 selection.
-    ClipboardData {
-        selection: String,
-        mime_type: String,
-        #[serde(with = "base64_bytes")]
-        data: Vec<u8>,
     },
     /// Window urgency hint changed (from WM_HINTS UrgencyHint flag).
     WindowUrgent {
@@ -426,35 +352,6 @@ pub enum DisplayUpdate {
         window_id: String,
         menu: Vec<MenuItem>,
     },
-    /// Incremental update for a single menu item — used for things
-    /// like enabling / disabling actions or toggling check state
-    /// without re-sending the whole tree. The `enabled` and `checked`
-    /// fields use `BoolDelta` rather than `Option<bool>` so the wire
-    /// can carry a flat enum instead of a `hasFoo + foo` pair.
-    MenuStateChanged {
-        window_id: String,
-        item_id: String,
-        enabled: BoolDelta,
-        checked: BoolDelta,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        label: Option<String>,
-    },
-}
-
-/// Three-state update for a `bool` field that may not have changed
-/// in this delta. `Unchanged` means "the receiver should keep its
-/// current value"; `Yes` and `No` mean "the new value is `true` /
-/// `false`."
-///
-/// Used in `MenuStateChanged` because Cap'n Proto can't natively
-/// express `Option<primitive>` — encoding via `hasFoo + foo` was
-/// noisier than a flat enum, and `Option<bool>` doesn't read well
-/// when `None` means "no change" rather than "no value."
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub enum BoolDelta {
-    Unchanged,
-    Yes,
-    No,
 }
 
 /// One node in a window's menu tree. Common shape across both

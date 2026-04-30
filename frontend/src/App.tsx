@@ -369,17 +369,6 @@ function App() {
 				startAnimCursor(update.window_id, update.frames);
 			}
 
-			// Cursor confinement state changed
-			if (update.kind === "CursorConfined") {
-				setWindows((prev) =>
-					prev.map((w) =>
-						w.windowId === update.window_id
-							? { ...w, cursorConfined: update.confined }
-							: w,
-					),
-				);
-			}
-
 			// Window WM state changed from server
 			if (update.kind === "WindowStateChanged") {
 				setWindows((prev) =>
@@ -392,30 +381,6 @@ function App() {
 						return newW;
 					}),
 				);
-			}
-
-			// Transient-for relationship
-			if (update.kind === "TransientForSet") {
-				setWindows((prev) =>
-					prev.map((w) =>
-						w.windowId === update.window_id
-							? { ...w, transientFor: update.parent_window_id }
-							: w,
-					),
-				);
-			}
-
-			// DndEvent -- X11 app initiated drag-and-drop toward browser
-			if (update.kind === "DndEvent") {
-				const ev = update.event;
-				if (ev.kind === "Drop" && ev.data) {
-					try {
-						const decoded = atob(ev.data);
-						if (ev.mime_type === "text/plain" || ev.mime_type === "text/uri-list") {
-							navigator.clipboard.writeText(decoded).catch(() => {});
-						}
-					} catch { /* ignore decode errors */ }
-				}
 			}
 
 			// WindowRaised -- server raised a window to the top of the stack
@@ -644,44 +609,6 @@ function App() {
 					} else {
 						next.set(update.window_id, update.menu);
 					}
-					return next;
-				});
-			}
-
-			// MenuStateChanged -- incremental menu item updates (enable/disable/check/label).
-			if (update.kind === "MenuStateChanged") {
-				setMenus((prev) => {
-					const tree = prev.get(update.window_id);
-					if (!tree) return prev;
-					const enabledPatch =
-						update.enabled === "Yes"
-							? { enabled: true }
-							: update.enabled === "No"
-								? { enabled: false }
-								: {};
-					const checkedPatch =
-						update.checked === "Yes"
-							? { checked: true }
-							: update.checked === "No"
-								? { checked: false }
-								: {};
-					const patchItem = (items: MenuItem[]): MenuItem[] =>
-						items.map((item) => {
-							if (item.id === update.item_id) {
-								return {
-									...item,
-									...enabledPatch,
-									...checkedPatch,
-									...(update.label !== undefined && { label: update.label }),
-								};
-							}
-							if (item.children) {
-								return { ...item, children: patchItem(item.children) };
-							}
-							return item;
-						});
-					const next = new Map(prev);
-					next.set(update.window_id, patchItem(tree));
 					return next;
 				});
 			}

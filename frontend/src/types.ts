@@ -221,22 +221,6 @@ export type DisplayUpdate =
 			border_pixel?: number;
 	  }
 	| {
-			kind: "FillRect";
-			window_id: string;
-			x: number;
-			y: number;
-			width: number;
-			height: number;
-			color: number;
-	  }
-	| {
-			kind: "DrawLines";
-			window_id: string;
-			points: [number, number][];
-			color: number;
-			line_width: number;
-	  }
-	| {
 			kind: "PutImage";
 			window_id: string;
 			x: number;
@@ -244,37 +228,6 @@ export type DisplayUpdate =
 			width: number;
 			height: number;
 			data: string;
-	  }
-	| {
-			kind: "CopyArea";
-			src_window_id: string;
-			dst_window_id: string;
-			src_x: number;
-			src_y: number;
-			dst_x: number;
-			dst_y: number;
-			width: number;
-			height: number;
-	  }
-	| {
-			kind: "ClearArea";
-			window_id: string;
-			x: number;
-			y: number;
-			width: number;
-			height: number;
-	  }
-	| {
-			kind: "DrawArc";
-			window_id: string;
-			x: number;
-			y: number;
-			width: number;
-			height: number;
-			angle1: number;
-			angle2: number;
-			filled: boolean;
-			color: number;
 	  }
 	| {
 			kind: "CursorChanged";
@@ -296,40 +249,15 @@ export type DisplayUpdate =
 			frames: AnimCursorFrame[];
 	  }
 	| {
-			kind: "CursorConfined";
-			window_id: string;
-			confined: boolean;
-	  }
-	| {
 			kind: "WindowStateChanged";
 			window_id: string;
 			state: WindowWmState;
-	  }
-	| {
-			kind: "TransientForSet";
-			window_id: string;
-			parent_window_id: string | null;
-	  }
-	| {
-			kind: "DndEvent";
-			window_id: string;
-			event: DndEventKind;
 	  }
 	| { kind: "WindowFocused"; window_id: string | null }
 	| {
 			kind: "MenuStructure";
 			window_id: string;
 			menu: MenuItem[];
-	  }
-	| {
-			kind: "MenuStateChanged";
-			window_id: string;
-			item_id: string;
-			// Three-state delta: "Unchanged" means receiver keeps its
-			// current value; "Yes"/"No" carry the new boolean.
-			enabled: BoolDelta;
-			checked: BoolDelta;
-			label?: string;
 	  }
 	| { kind: "WindowRaised"; window_id: string }
 	| { kind: "WindowUrgent"; window_id: string; urgent: boolean }
@@ -348,11 +276,6 @@ export type MenuItemKind =
 	| "separator"
 	| "checkbox"
 	| "radio";
-
-// Three-state delta for `MenuStateChanged.{enabled,checked}`. Mirrors
-// `protocol::BoolDelta` — "Unchanged" preserves the receiver's
-// current value; "Yes"/"No" set true/false.
-export type BoolDelta = "Unchanged" | "Yes" | "No";
 
 export interface MenuAction {
 	name: string;

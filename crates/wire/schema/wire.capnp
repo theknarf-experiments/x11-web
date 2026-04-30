@@ -176,18 +176,17 @@ struct DisplayPayload {
         windowRaised @11 :WindowRaised;
         windowStateChanged @12 :WindowStateChanged;
         windowUrgent @13 :WindowUrgent;
-        transientForSet @14 :TransientForSet;
-        windowIconChanged @15 :WindowIconChanged;
+        windowIconChanged @14 :WindowIconChanged;
 
         # Audio cue — frontend plays a bell sound at `percent`
         # volume.
-        bell @16 :Bell;
+        bell @15 :Bell;
 
         # AppMenu mirroring (GTK / Qt apps via DBus). The X11
         # sidecar's MenuTracker emits the full tree on first
-        # discovery, then incremental state changes.
-        menuStructure @17 :MenuStructure;
-        menuStateChanged @18 :MenuStateChanged;
+        # discovery; deltas (state changes per item) are not yet
+        # implemented — sidecar re-emits the full tree on change.
+        menuStructure @16 :MenuStructure;
     }
 }
 
@@ -302,13 +301,6 @@ struct WindowUrgent {
     urgent @1 :Bool;
 }
 
-struct TransientForSet {
-    windowId @0 :Text;
-    # Null pointer (use auto-generated `hasParentWindowId()`) means
-    # the property was unset / DeleteProperty'd.
-    parentWindowId @1 :Text;
-}
-
 struct WindowIconChanged {
     windowId @0 :Text;
     width @1 :UInt16;
@@ -328,30 +320,11 @@ struct Bell {
     percent @0 :UInt8;
 }
 
-# AppMenu mirroring. Sidecar emits the full tree once, then sends
-# `menuStateChanged` incremental updates.
+# AppMenu mirroring. Sidecar emits the full tree on discovery and
+# again whenever menu state changes (no per-item delta yet).
 struct MenuStructure {
     windowId @0 :Text;
     menu @1 :List(MenuItem);
-}
-
-struct MenuStateChanged {
-    windowId @0 :Text;
-    itemId @1 :Text;
-    # `enabled` and `checked` are flat 3-state enums: `unchanged`
-    # means the receiver should keep its current value; `yes` / `no`
-    # mean the new value is true / false. `label` (a pointer field)
-    # uses the auto-generated `hasLabel()` — null pointer means
-    # "label unchanged".
-    enabled @2 :BoolDelta;
-    checked @3 :BoolDelta;
-    label @4 :Text;
-}
-
-enum BoolDelta {
-    unchanged @0;
-    yes @1;
-    no @2;
 }
 
 # Recursive — submenus contain their own MenuItem children. Cap'n

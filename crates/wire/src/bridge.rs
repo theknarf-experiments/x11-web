@@ -15,9 +15,8 @@
 //! that variant — there's no per-implementation pruning here.
 
 use capnp::message::{Builder, HeapAllocator};
-use tracing::warn;
 use x11_web_protocol::{
-    AnimCursorFrame, BoolDelta, DisplayUpdate, DndEventKind, GesturePhase, InputEvent, MenuAction,
+    AnimCursorFrame, DisplayUpdate, DndEventKind, GesturePhase, InputEvent, MenuAction,
     MenuActionTarget, MenuItem, MenuItemKind, ProcessInfo, WindowWmState,
 };
 
@@ -296,16 +295,6 @@ fn write_display_payload(
             wu.set_window_id(window_id);
             wu.set_urgent(*urgent);
         }
-        DisplayUpdate::TransientForSet {
-            window_id,
-            parent_window_id,
-        } => {
-            let mut tfs = payload.init_transient_for_set();
-            tfs.set_window_id(window_id);
-            if let Some(p) = parent_window_id {
-                tfs.set_parent_window_id(p);
-            }
-        }
         DisplayUpdate::WindowIconChanged {
             window_id,
             width,
@@ -327,30 +316,6 @@ fn write_display_payload(
             ms.set_window_id(window_id);
             let list = ms.init_menu(menu.len() as u32);
             write_menu_items(list, menu);
-        }
-        DisplayUpdate::MenuStateChanged {
-            window_id,
-            item_id,
-            enabled,
-            checked,
-            label,
-        } => {
-            let mut ms = payload.init_menu_state_changed();
-            ms.set_window_id(window_id);
-            ms.set_item_id(item_id);
-            ms.set_enabled(write_bool_delta(*enabled));
-            ms.set_checked(write_bool_delta(*checked));
-            if let Some(v) = label {
-                ms.set_label(v);
-            }
-        }
-        // Drawing primitives, ClearArea, CopyArea, DrawArc,
-        // DrawLines, FillRect, CursorConfined, DndEvent — variants
-        // no current sidecar emits over the wire. The warn surfaces
-        // immediately if anything starts producing one.
-        _ => {
-            warn!("wire_bridge: skipping unsupported DisplayUpdate variant for wire emission");
-            return false;
         }
     }
     true
@@ -598,17 +563,6 @@ fn read_display_payload(
                 urgent: wu.get_urgent(),
             }
         }
-        Which::TransientForSet(tfs) => {
-            let tfs = tfs?;
-            DisplayUpdate::TransientForSet {
-                window_id: tfs.get_window_id()?.to_string()?,
-                parent_window_id: if tfs.has_parent_window_id() {
-                    Some(tfs.get_parent_window_id()?.to_string()?)
-                } else {
-                    None
-                },
-            }
-        }
         Which::WindowIconChanged(wic) => {
             let wic = wic?;
             DisplayUpdate::WindowIconChanged {
@@ -630,20 +584,6 @@ fn read_display_payload(
             DisplayUpdate::MenuStructure {
                 window_id: ms.get_window_id()?.to_string()?,
                 menu,
-            }
-        }
-        Which::MenuStateChanged(ms) => {
-            let ms = ms?;
-            DisplayUpdate::MenuStateChanged {
-                window_id: ms.get_window_id()?.to_string()?,
-                item_id: ms.get_item_id()?.to_string()?,
-                enabled: read_bool_delta(ms.get_enabled()?),
-                checked: read_bool_delta(ms.get_checked()?),
-                label: if ms.has_label() {
-                    Some(ms.get_label()?.to_string()?)
-                } else {
-                    None
-                },
             }
         }
     })
@@ -1096,24 +1036,6 @@ fn read_gesture_phase(phase: wire_capnp::GesturePhase) -> GesturePhase {
         G::Begin => GesturePhase::Begin,
         G::Update => GesturePhase::Update,
         G::End => GesturePhase::End,
-    }
-}
-
-fn write_bool_delta(d: BoolDelta) -> wire_capnp::BoolDelta {
-    use wire_capnp::BoolDelta as B;
-    match d {
-        BoolDelta::Unchanged => B::Unchanged,
-        BoolDelta::Yes => B::Yes,
-        BoolDelta::No => B::No,
-    }
-}
-
-fn read_bool_delta(d: wire_capnp::BoolDelta) -> BoolDelta {
-    use wire_capnp::BoolDelta as B;
-    match d {
-        B::Unchanged => BoolDelta::Unchanged,
-        B::Yes => BoolDelta::Yes,
-        B::No => BoolDelta::No,
     }
 }
 
