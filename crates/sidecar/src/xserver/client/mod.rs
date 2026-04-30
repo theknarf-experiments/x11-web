@@ -295,8 +295,6 @@ pub(crate) struct ClientState {
     pub(crate) present_msc: u64,
     /// Channel for clipboard events (selection ownership changes, data responses).
     pub(crate) clipboard_notify_tx: Option<mpsc::UnboundedSender<super::types::ClipboardEvent>>,
-    /// Server-side clipboard data (set by backend for browser → X11 paste).
-    pub(crate) shared_clipboard: super::types::SharedClipboard,
     /// Persistent clipboard data saved when a clipboard owner disconnects.
     pub(crate) persistent_clipboard: super::types::PersistentClipboard,
     /// Shared pixmap registry for cross-connection drawable access.
@@ -349,8 +347,6 @@ pub(crate) struct ClientState {
     pub(crate) freed_xids: Vec<u32>,
     /// Built-in XIM (X Input Method) server state.
     pub(crate) xim: super::handlers::xim::XimServer,
-    /// DRI3: DRM device in use by this client (major, minor device numbers).
-    pub(crate) dri3_drm_device: Option<(u32, u32)>,
     /// Composite: overlay window reference count (GetOverlayWindow increments,
     /// ReleaseOverlayWindow decrements).
     pub(crate) overlay_ref_count: u32,

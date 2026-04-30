@@ -24,16 +24,6 @@ pub enum ClipboardEvent {
     OwnerChanged { selection: String, owner: u32 },
 }
 
-/// Server-side clipboard data set by the backend (for pasting from browser into X11 apps).
-#[derive(Clone)]
-pub(crate) struct ServerClipboardData {
-    pub(crate) mime_type: String,
-    pub(crate) data: Vec<u8>,
-}
-
-/// Shared clipboard state for server-owned selections (browser → X11).
-pub(crate) type SharedClipboard = Arc<Mutex<HashMap<String, ServerClipboardData>>>;
-
 /// Window ID used by the server's clipboard manager for persistence.
 /// When a CLIPBOARD owner disconnects, the server takes ownership using this
 /// window and serves the saved data to future requestors.

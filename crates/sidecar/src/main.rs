@@ -270,8 +270,6 @@ async fn main() {
     // Clipboard bridge channels
     let (clipboard_notify_tx, mut clipboard_notify_rx) =
         mpsc::unbounded_channel::<crate::xserver::types::ClipboardEvent>();
-    let shared_clipboard: crate::xserver::types::SharedClipboard =
-        std::sync::Arc::new(std::sync::Mutex::new(HashMap::new()));
     // MenuTracker connects to the same session bus the apps use; on
     // failure it becomes a no-op so the rest of the sidecar still
     // works without DBus.
@@ -286,7 +284,6 @@ async fn main() {
         window_router.clone(),
         menu_tracker,
         clipboard_notify_tx,
-        shared_clipboard.clone(),
         screen_size_rx,
     );
     let display_string = x11_server.display_string();
@@ -356,7 +353,6 @@ async fn main() {
                     &mut client_connected_rx,
                     &screen_size_tx,
                     &mut clipboard_notify_rx,
-                    &shared_clipboard,
                     &shared_selections,
                 )
                 .await;
@@ -418,7 +414,6 @@ async fn run_session(
     client_connected_rx: &mut mpsc::UnboundedReceiver<(String, u32)>,
     screen_size_tx: &crate::xserver::types::ScreenSizeTx,
     clipboard_notify_rx: &mut mpsc::UnboundedReceiver<crate::xserver::types::ClipboardEvent>,
-    shared_clipboard: &crate::xserver::types::SharedClipboard,
     shared_selections: &crate::xserver::types::SharedSelections,
 ) {
     let DialedConnection {
@@ -494,7 +489,6 @@ async fn run_session(
                         &tx,
                         window_router,
                         screen_size_tx,
-                        shared_clipboard,
                         shared_selections,
                     ).await;
                 }
@@ -559,7 +553,6 @@ async fn handle_command(
     tx: &mpsc::UnboundedSender<SidecarToBackend>,
     window_router: &crate::xserver::WindowRouter,
     screen_size_tx: &crate::xserver::types::ScreenSizeTx,
-    shared_clipboard: &crate::xserver::types::SharedClipboard,
     shared_selections: &crate::xserver::types::SharedSelections,
 ) {
     match cmd {
@@ -636,16 +629,13 @@ async fn handle_command(
             mime_type,
             data,
         } => {
+            // Backend → X11 clipboard import isn't wired through to
+            // the X11 selection layer yet. The bytes arrive but
+            // nothing serves them to X11 clients on ConvertSelection.
             info!(
-                "Clipboard set: selection={selection} mime={mime_type} len={}",
+                "Clipboard set: selection={selection} mime={mime_type} len={} (ignored — X11 selection bridge not implemented)",
                 data.len()
             );
-            if let Ok(mut cb) = shared_clipboard.lock() {
-                cb.insert(
-                    selection,
-                    crate::xserver::types::ServerClipboardData { mime_type, data },
-                );
-            }
         }
         BackendToSidecar::ResizeScreen { width, height } => {
             if width > 0 && height > 0 {

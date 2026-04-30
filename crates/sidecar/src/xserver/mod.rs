@@ -59,8 +59,6 @@ pub struct X11Server {
     auth_cookie: [u8; 16],
     /// Clipboard event receiver (selection ownership changes, data responses).
     clipboard_notify_tx: mpsc::UnboundedSender<ClipboardEvent>,
-    /// Server-side clipboard data (browser → X11, set via SetClipboard).
-    shared_clipboard: SharedClipboard,
     /// Shared selections (exposed for clipboard bridge in main.rs).
     shared_selections: SharedSelections,
     /// Persistent clipboard data saved when a clipboard owner disconnects.
@@ -83,7 +81,6 @@ impl X11Server {
         window_router: WindowRouter,
         menu_tracker: crate::menus::MenuTracker,
         clipboard_notify_tx: mpsc::UnboundedSender<ClipboardEvent>,
-        shared_clipboard: SharedClipboard,
         screen_size_rx: types::ScreenSizeRx,
     ) -> Self {
         let socket_path = PathBuf::from(format!("/tmp/.X11-unix/X{display_number}"));
@@ -107,7 +104,6 @@ impl X11Server {
             menu_tracker,
             auth_cookie,
             clipboard_notify_tx,
-            shared_clipboard,
             shared_selections,
             persistent_clipboard,
             screen_size_rx,
@@ -993,7 +989,6 @@ vi_VN,vi_VN.UTF-8"
                 let er = shared_event_router.clone();
                 let ss = shared_selections.clone();
                 let cn = self.clipboard_notify_tx.clone();
-                let sc = self.shared_clipboard.clone();
                 let sp = shared_pixmaps.clone();
                 let spf = shared_pixmap_fbs.clone();
                 let sg = shared_gcs.clone();
@@ -1011,8 +1006,8 @@ vi_VN,vi_VN.UTF-8"
                 tokio::spawn(async move {
                     if let Err(e) = connection::handle_client(
                         stream, client_id, update_tx, message_tx, message_rx, conn_index, peer_pid,
-                        sw, wm, sa, wr, mt, er, ss, cn, sc, sp, spf, sg, cr, eb, sgl, src, pc, ac,
-                        ssr, sacl, sst, exr,
+                        sw, wm, sa, wr, mt, er, ss, cn, sp, spf, sg, cr, eb, sgl, src, pc, ac, ssr,
+                        sacl, sst, exr,
                     )
                     .await
                     {
