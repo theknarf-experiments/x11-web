@@ -131,8 +131,6 @@ fn dispatch_extension(state: &mut ClientState, data: &[u8], seq: u16, id: Extens
         // -- ext-glx ----------------------------------------------------------
         #[cfg(feature = "ext-glx")]
         ExtensionId::Glx => handlers::extensions::handle_glx_request(state, data, seq),
-        #[cfg(feature = "ext-glx")]
-        ExtensionId::Dri3 => handlers::extensions::handle_dri3_request(state, data, seq),
 
         // -- ext-media --------------------------------------------------------
         #[cfg(feature = "ext-media")]

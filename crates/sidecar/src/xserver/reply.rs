@@ -74,21 +74,6 @@ impl ReplyBuf {
         self
     }
 
-    /// Set an i32 at the given offset (byte-order aware).
-    pub(crate) fn set_i32(mut self, offset: usize, val: i32) -> Self {
-        write_i32(&mut self.buf, offset, val, self.msb_first);
-        self
-    }
-
-    /// Set a u64 at the given offset (byte-order aware).
-    ///
-    /// X11 wire format stores 64-bit values as two u32 words (low half first,
-    /// high half second), each in the client's byte order.
-    pub(crate) fn set_u64(mut self, offset: usize, val: u64) -> Self {
-        write_u64(&mut self.buf, offset, val, self.msb_first);
-        self
-    }
-
     /// Copy raw bytes into the buffer at the given offset.
     pub(crate) fn set_bytes(mut self, offset: usize, data: &[u8]) -> Self {
         self.buf[offset..offset + data.len()].copy_from_slice(data);
@@ -135,24 +120,6 @@ fn write_u32(buf: &mut [u8], offset: usize, val: u32, msb_first: bool) {
         val.to_le_bytes()
     };
     buf[offset..offset + 4].copy_from_slice(&bytes);
-}
-
-#[inline]
-fn write_i32(buf: &mut [u8], offset: usize, val: i32, msb_first: bool) {
-    let bytes = if msb_first {
-        val.to_be_bytes()
-    } else {
-        val.to_le_bytes()
-    };
-    buf[offset..offset + 4].copy_from_slice(&bytes);
-}
-
-/// Write a u64 as two u32 words (low half first, high half second) in the
-/// client's byte order — this is the X11 wire encoding for 64-bit values.
-#[inline]
-fn write_u64(buf: &mut [u8], offset: usize, val: u64, msb_first: bool) {
-    write_u32(buf, offset, val as u32, msb_first);
-    write_u32(buf, offset + 4, (val >> 32) as u32, msb_first);
 }
 
 #[cfg(test)]

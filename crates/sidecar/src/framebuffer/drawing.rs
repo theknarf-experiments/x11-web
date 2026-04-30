@@ -1,27 +1,6 @@
 use super::{apply_gc_function, point_in_clip_rects, DashState, Framebuffer};
 
 impl Framebuffer {
-    /// Draw a line using Bresenham's algorithm (simple version, GXcopy).
-    pub fn draw_line(&mut self, x0: i32, y0: i32, x1: i32, y1: i32, color: u32, line_width: u16) {
-        self.draw_line_gc(
-            x0,
-            y0,
-            x1,
-            y1,
-            color,
-            line_width,
-            3,
-            0xFFFFFFFF,
-            0,
-            1,
-            0,
-            0,
-            &[],
-            0,
-            &[],
-        );
-    }
-
     /// Draw a line with full GC support: raster op, cap/join styles, dashes, clip rects.
     ///
     /// - `gc_func`: GC raster operation (0-15)
@@ -939,32 +918,6 @@ impl Framebuffer {
                 if dx * dx + dy * dy <= r2 {
                     self.draw_point_gc(cx + dx, cy + dy, color, gc_func, plane_mask, clip_rects);
                 }
-            }
-        }
-    }
-
-    fn bresenham_line(&mut self, x0: i32, y0: i32, x1: i32, y1: i32, color: u32) {
-        let dx = (x1 - x0).abs();
-        let dy = -(y1 - y0).abs();
-        let sx: i32 = if x0 < x1 { 1 } else { -1 };
-        let sy: i32 = if y0 < y1 { 1 } else { -1 };
-        let mut err = dx + dy;
-        let mut x = x0;
-        let mut y = y0;
-
-        loop {
-            self.draw_point(x, y, color);
-            if x == x1 && y == y1 {
-                break;
-            }
-            let e2 = 2 * err;
-            if e2 >= dy {
-                err += dy;
-                x += sx;
-            }
-            if e2 <= dx {
-                err += dx;
-                y += sy;
             }
         }
     }

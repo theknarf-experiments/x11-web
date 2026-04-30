@@ -15,23 +15,6 @@ pub(crate) struct ClipMaskBitmap {
 }
 
 impl ClipMaskBitmap {
-    /// Test whether the bit at (x, y) relative to the mask origin is set.
-    /// Returns `false` for coordinates outside the mask bounds.
-    #[inline]
-    pub(crate) fn test(&self, x: i32, y: i32) -> bool {
-        if x < 0 || y < 0 || x >= self.width as i32 || y >= self.height as i32 {
-            return false;
-        }
-        let stride = (self.width as usize).div_ceil(8);
-        let byte_idx = y as usize * stride + (x as usize) / 8;
-        let bit_idx = (x as usize) % 8;
-        if byte_idx < self.bits.len() {
-            self.bits[byte_idx] & (1 << bit_idx) != 0
-        } else {
-            false
-        }
-    }
-
     /// Convert the bitmap mask to a list of clip rectangles (run-length encoded
     /// by row).  The rectangles are offset by (origin_x, origin_y) so they can
     /// be used directly as GC clip rectangles.
@@ -139,23 +122,4 @@ impl Default for GcState {
     }
 }
 
-impl GcState {
-    /// Return the effective clip rectangles for drawing operations.
-    ///
-    /// Per X11 spec, clip_mask and clip_rects are mutually exclusive:
-    /// - If a bitmap clip mask is set, convert it to rectangles.
-    /// - Otherwise return the stored clip rectangles (possibly empty = no clip).
-    pub(crate) fn effective_clip_rects(&self) -> Vec<(i16, i16, u16, u16)> {
-        if let Some(ref bm) = self.clip_mask_bitmap {
-            bm.to_clip_rects(self.clip_x, self.clip_y)
-        } else {
-            self.clip_rects.clone()
-        }
-    }
-
-    /// Returns true if any form of clipping is active (rectangles or bitmap mask).
-    #[inline]
-    pub(crate) fn has_clip(&self) -> bool {
-        !self.clip_rects.is_empty() || self.clip_mask_bitmap.is_some()
-    }
-}
+impl GcState {}

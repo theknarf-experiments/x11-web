@@ -22,23 +22,6 @@ impl ClientState {
         self.server_start.elapsed().as_millis() as u32
     }
 
-    /// Build an error reply in the client's byte order.
-    pub(crate) fn error(
-        &self,
-        error_code: u8,
-        bad_value: u32,
-        major_opcode: u8,
-        minor_opcode: u16,
-    ) -> Vec<u8> {
-        super::super::core::build_error(
-            error_code,
-            self.sequence,
-            bad_value,
-            major_opcode,
-            minor_opcode,
-        )
-    }
-
     // -----------------------------------------------------------------------
     // Byte-order-aware read helpers for parsing client requests.
     // -----------------------------------------------------------------------
@@ -78,16 +61,6 @@ impl ClientState {
     #[inline]
     pub(crate) fn read_u32_from(&self, data: &[u8], offset: usize) -> u32 {
         self.read_u32(data, offset)
-    }
-
-    /// Read an i16 from request data respecting client byte order.
-    #[inline]
-    pub(crate) fn read_i16(&self, data: &[u8], offset: usize) -> i16 {
-        if self.msb_first {
-            i16::from_be_bytes([data[offset], data[offset + 1]])
-        } else {
-            i16::from_le_bytes([data[offset], data[offset + 1]])
-        }
     }
 
     /// Write a u16 into a reply buffer in the client's byte order.

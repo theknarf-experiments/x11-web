@@ -34,7 +34,6 @@ pub(crate) enum ExtensionId {
     Composite,
     Damage,
     Present,
-    Dri3,
     Xtest,
     Dpms,
     ScreenSaver,

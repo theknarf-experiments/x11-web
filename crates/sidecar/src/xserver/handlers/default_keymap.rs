@@ -118,28 +118,6 @@ pub(crate) fn key_name(keycode: u8) -> [u8; 4] {
     *b"K   "
 }
 
-/// Build a 248-entry array of single-keysym values for X11 keycodes 8..=255,
-/// indexed by `keycode - 8`. Returns the unmodified (level 0) keysym for
-/// each, or 0 when xkbcommon has no mapping. This is the data fed to
-/// `XkbGetMap` replies for the default ("server") keymap.
-pub(crate) fn default_keysym_array() -> [u32; 248] {
-    let mut out = [0u32; 248];
-    let entry = DEFAULT.get_or_init(build);
-    let Some(km) = entry else {
-        return out;
-    };
-    let min = km.keymap.min_keycode().raw();
-    let max = km.keymap.max_keycode().raw();
-    for kc in 8u32..=255u32 {
-        if kc < min || kc > max {
-            continue;
-        }
-        let syms = km.keymap.key_get_syms_by_level(xkb::Keycode::new(kc), 0, 0);
-        out[(kc - 8) as usize] = first_sym(syms);
-    }
-    out
-}
-
 /// Look up `(unmodified, shifted)` keysyms for an X11 keycode using the shared
 /// default US keymap. Returns `(0, 0)` for keycodes outside the keymap's
 /// declared range — matching the old hand-rolled table for unknown keys.

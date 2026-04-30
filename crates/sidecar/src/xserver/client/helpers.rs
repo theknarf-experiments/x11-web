@@ -35,22 +35,6 @@ impl ClientState {
         self.cursors.len() < self.resource_limits.max_cursors
     }
 
-    /// Push an event to the pending_events queue, enforcing the max limit.
-    /// When the limit is exceeded, the oldest event is dropped.
-    pub(crate) fn push_pending_event(&mut self, event: Vec<u8>) {
-        if self.pending_events.len() >= self.resource_limits.max_pending_events {
-            // Drop oldest events to make room
-            let drop_count = self.pending_events.len() / 8 + 1;
-            self.pending_events
-                .drain(..drop_count.min(self.pending_events.len()));
-            tracing::warn!(
-                client_id = %self.client_id,
-                "pending_events overflow: dropped {drop_count} oldest events"
-            );
-        }
-        self.pending_events.push(event);
-    }
-
     /// Record a motion history entry, enforcing the max limit.
     pub(crate) fn record_motion_history(&mut self, timestamp: u32, x: i16, y: i16) {
         if self.motion_history.len() >= self.resource_limits.max_motion_history {

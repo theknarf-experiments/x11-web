@@ -38,9 +38,6 @@ use crate::xserver::request::request_header;
 // GLX extension constants
 // ---------------------------------------------------------------------------
 
-/// GLX major opcode (assigned in QueryExtension)
-pub(crate) const GLX_MAJOR_OPCODE: u8 = 149;
-
 // GLX minor opcodes — re-exported from x11rb-protocol.
 use x11rb_protocol::protocol::glx::{
     CHANGE_DRAWABLE_ATTRIBUTES_REQUEST as GLX_CHANGE_DRAWABLE_ATTRIBUTES,

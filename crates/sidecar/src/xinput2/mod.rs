@@ -33,10 +33,6 @@ pub use state::XiState;
 /// the conventional value used by the upstream X server, but the actual
 /// number doesn't matter — clients pick it up from QueryExtension.
 pub const XI_MAJOR_OPCODE: u8 = 131;
-/// Range reserved for XI legacy events. We never emit those (we use the
-/// XI2 generic-event path) but the value still has to be advertised.
-pub const XI_FIRST_EVENT: u8 = 105;
-pub const XI_FIRST_ERROR: u8 = 152;
 
 /// Device IDs we expose. Two master devices is the minimum modern XI
 /// clients (e.g. GTK 3) expect.
@@ -98,16 +94,6 @@ pub struct ValuatorState {
 /// are the vertical / horizontal scroll axes (`XIScrollClass`).
 pub const AXIS_SCROLL_V: u16 = 2;
 pub const AXIS_SCROLL_H: u16 = 3;
-
-/// Build a `Reply` byte slice with the standard 32-byte header populated.
-/// `xi_reply_type` is the value placed at byte 1 of the reply (set to the
-/// XI minor opcode of the request being answered, matching the upstream
-/// xserver convention).
-fn xi_reply_header(seq: u16, xi_reply_type: u8, length_units: u32, msb_first: bool) -> Vec<u8> {
-    crate::xserver::reply::ReplyBuf::with_extra(seq, (length_units as usize) * 4, msb_first)
-        .set_data_byte(xi_reply_type)
-        .build()
-}
 
 /// Serialize any x11rb XInput value with a 32-byte header, then patch
 /// the `length` field (4-byte units after the header). x11rb's

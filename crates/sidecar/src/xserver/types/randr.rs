@@ -141,7 +141,6 @@ pub(crate) const RANDR_EVENT_BASE: u8 = 89;
 /// RandR event select mask bits.
 pub(crate) const RR_SCREEN_CHANGE_NOTIFY_MASK: u32 = 1 << 0;
 pub(crate) const RR_CRTC_CHANGE_NOTIFY_MASK: u32 = 1 << 1;
-pub(crate) const RR_OUTPUT_CHANGE_NOTIFY_MASK: u32 = 1 << 2;
 
 /// Generate a minimal valid EDID blob (128 bytes).
 pub(crate) fn generate_edid(

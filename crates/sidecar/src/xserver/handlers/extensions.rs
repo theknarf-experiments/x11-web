@@ -8,7 +8,6 @@
 pub(crate) use super::composite::{handle_damage_request, handle_x_composite_request};
 pub(crate) use super::dbe::handle_dbe_request;
 pub(crate) use super::dpms::handle_dpms_request;
-pub(crate) use super::dri3::handle_dri3_request;
 pub(crate) use super::glx::handle_glx_request;
 pub(crate) use super::present::{
     handle_present_request, handle_xc_misc_request, send_present_config_notify,

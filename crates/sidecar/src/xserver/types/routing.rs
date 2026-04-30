@@ -257,15 +257,6 @@ impl EventBroadcaster {
         self.unregister_client(client_id);
     }
 
-    /// Unsubscribe a client from a specific window.
-    pub(crate) fn unsubscribe_window(&self, window_id: u32, client_id: &str) {
-        if let Ok(mut subs) = self.subscriptions.lock() {
-            if let Some(list) = subs.get_mut(&window_id) {
-                list.retain(|s| s.client_id != client_id);
-            }
-        }
-    }
-
     /// Broadcast an event to all clients that have selected the matching
     /// event mask on the given window, EXCEPT the source client.
     /// Returns the number of clients the event was delivered to.
@@ -344,20 +335,6 @@ impl EventBroadcaster {
         false
     }
 
-    /// Get the event mask a specific client has subscribed to on a window.
-    pub(crate) fn client_event_mask(&self, window_id: u32, client_id: &str) -> u32 {
-        if let Ok(subs) = self.subscriptions.lock() {
-            if let Some(list) = subs.get(&window_id) {
-                for sub in list {
-                    if sub.client_id == client_id {
-                        return sub.event_mask;
-                    }
-                }
-            }
-        }
-        0
-    }
-
     /// Get the union of all clients' event masks on a window.
     pub(crate) fn all_event_masks(&self, window_id: u32) -> u32 {
         if let Ok(subs) = self.subscriptions.lock() {
@@ -366,20 +343,5 @@ impl EventBroadcaster {
             }
         }
         0
-    }
-
-    /// Broadcast an event to ALL clients on the given window (e.g., MappingNotify).
-    /// Does not filter by event mask or source client.
-    pub(crate) fn broadcast_all(&self, window_id: u32, event: &[u8]) -> usize {
-        let mut delivered = 0;
-        if let Ok(subs) = self.subscriptions.lock() {
-            if let Some(list) = subs.get(&window_id) {
-                for sub in list {
-                    let _ = sub.tx.send(event.to_vec());
-                    delivered += 1;
-                }
-            }
-        }
-        delivered
     }
 }

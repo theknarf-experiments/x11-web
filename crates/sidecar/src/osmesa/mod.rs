@@ -23,8 +23,6 @@ pub type OSMesaContext = *mut c_void;
 pub const OSMESA_RGBA: u32 = 0x1908;
 pub const OSMESA_Y_UP: u32 = 0x11;
 
-pub const GL_TRUE: u8 = 1;
-pub const GL_FALSE: u8 = 0;
 pub const GL_RGBA: u32 = 0x1908;
 pub const GL_UNSIGNED_BYTE: u32 = 0x1401;
 
@@ -862,23 +860,6 @@ pub fn is_available() -> bool {
 fn fns() -> &'static OsMesaFns {
     FNS.get()
         .expect("OSMesa not initialized — call osmesa::init() first")
-}
-
-/// Resolve an arbitrary GL function by name at runtime using the stored
-/// `OSMesaGetProcAddress` and library handle.  Returns `None` if the symbol
-/// is not found.
-pub fn resolve_proc(name: &str) -> Option<*const c_void> {
-    let f = FNS.get()?;
-    let cname = CString::new(name).ok()?;
-    let mut ptr = unsafe { (f.get_proc_address)(cname.as_ptr()) };
-    if ptr.is_null() {
-        ptr = unsafe { libc::dlsym(f.lib_handle, cname.as_ptr()) } as *const c_void;
-    }
-    if ptr.is_null() {
-        None
-    } else {
-        Some(ptr)
-    }
 }
 
 fn try_load() -> Result<OsMesaFns, String> {
@@ -1812,31 +1793,6 @@ impl MesaContext {
 
     pub fn height(&self) -> u32 {
         self.height
-    }
-
-    /// Copy the OSMesa RGBA buffer into an X11 framebuffer (BGRA/XRGB format).
-    /// The framebuffer uses A8R8G8B8 (BGRA in memory on LE).
-    pub fn blit_to_framebuffer(&self, fb: &mut crate::framebuffer::Framebuffer) {
-        let w = self.width.min(fb.width()) as usize;
-        let h = self.height.min(fb.height()) as usize;
-        let src_stride = self.width as usize * 4;
-        let dst_stride = fb.stride();
-        let fb_data = fb.data_mut();
-
-        for y in 0..h {
-            let src_row = &self.buffer[y * src_stride..y * src_stride + w * 4];
-            let dst_row = &mut fb_data[y * dst_stride..y * dst_stride + w * 4];
-            for x in 0..w {
-                let si = x * 4;
-                let di = x * 4;
-                // OSMesa RGBA -> Framebuffer BGRA (A8R8G8B8 on LE)
-                dst_row[di] = src_row[si + 2]; // B
-                dst_row[di + 1] = src_row[si + 1]; // G
-                dst_row[di + 2] = src_row[si]; // R
-                dst_row[di + 3] = src_row[si + 3]; // A
-            }
-        }
-        fb.mark_dirty(0, 0, w as u32, h as u32);
     }
 }
 

@@ -92,11 +92,6 @@ impl ClientState {
         self.randr_modes.iter().find(|m| m.id == id)
     }
 
-    /// Find a RandR provider by ID.
-    pub(crate) fn randr_find_provider(&self, id: u32) -> Option<&RandrProvider> {
-        self.randr_providers.iter().find(|p| p.id == id)
-    }
-
     /// Queue an RRScreenChangeNotify event if the client selected that mask.
     pub(crate) fn randr_queue_screen_change_notify(&mut self) {
         use super::super::types::RANDR_EVENT_BASE;

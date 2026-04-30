@@ -525,23 +525,14 @@ async fn run_session(
                     }
                 }
                 Some(clipboard_event) = clipboard_notify_rx.recv() => {
-                    match clipboard_event {
-                        crate::xserver::types::ClipboardEvent::OwnerChanged { selection, owner } => {
-                            if owner != 0 {
-                                let mime_types = vec!["text/plain".into(), "UTF8_STRING".into()];
-                                let _ = tx.send(SidecarToBackend::ClipboardOffer {
-                                    selection,
-                                    mime_types,
-                                });
-                            }
-                        }
-                        crate::xserver::types::ClipboardEvent::Data { selection, mime_type, data } => {
-                            let _ = tx.send(SidecarToBackend::ClipboardData {
-                                selection,
-                                mime_type,
-                                data,
-                            });
-                        }
+                    let crate::xserver::types::ClipboardEvent::OwnerChanged { selection, owner }
+                        = clipboard_event;
+                    if owner != 0 {
+                        let mime_types = vec!["text/plain".into(), "UTF8_STRING".into()];
+                        let _ = tx.send(SidecarToBackend::ClipboardOffer {
+                            selection,
+                            mime_types,
+                        });
                     }
                 }
                 _ = check_interval.tick() => {

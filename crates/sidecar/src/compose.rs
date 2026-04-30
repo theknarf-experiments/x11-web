@@ -108,14 +108,6 @@ impl ComposeState {
             }
         }
     }
-
-    /// Reset the compose state. Drops any in-flight sequence.
-    pub fn reset(&mut self) {
-        if let Some(state) = self.inner.as_mut() {
-            state.reset();
-        }
-        self.buffered.clear();
-    }
 }
 
 impl Default for ComposeState {

@@ -649,9 +649,3 @@ pub(crate) fn us_qwerty_key_names() -> [&'static [u8; 4]; 248] {
     }
     out
 }
-
-/// Standard US-QWERTY keysyms keyed by physical X11 keycode (8..255), pulled
-/// straight from libxkbcommon's evdev/pc105/us layout.
-pub(crate) fn us_qwerty_keysyms() -> [u32; 248] {
-    crate::xserver::handlers::default_keymap::default_keysym_array()
-}

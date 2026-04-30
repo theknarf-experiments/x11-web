@@ -107,20 +107,6 @@ impl XFixesRegion {
         let bounding = XFixesRegion::from_rects(vec![*bounds]);
         bounding.subtract(self)
     }
-
-    /// Expand the region by the given amounts on each side.
-    pub(crate) fn expand(&self, left: i16, right: i16, top: i16, bottom: i16) -> XFixesRegion {
-        let mut rects = Vec::with_capacity(self.rects.len());
-        for r in &self.rects {
-            rects.push(RegionRect {
-                x: r.x.saturating_sub(left),
-                y: r.y.saturating_sub(top),
-                width: r.width.saturating_add((left + right) as u16),
-                height: r.height.saturating_add((top + bottom) as u16),
-            });
-        }
-        XFixesRegion { rects }
-    }
 }
 
 #[cfg(test)]
