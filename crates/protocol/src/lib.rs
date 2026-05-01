@@ -27,6 +27,13 @@ pub enum BackendToFrontend {
     /// always reconciles against the full list rather than tracking
     /// incremental add/remove events.
     SidecarList { sidecars: Vec<SidecarInfo> },
+    /// The active workspace for this frontend session. Sent in
+    /// response to a `FrontendToBackend::OpenWorkspace` — exactly one
+    /// workspace per frontend. The frontend should reflect the
+    /// returned `id` in its URL hash, since the backend may have
+    /// created a fresh workspace if the requested id wasn't found
+    /// (e.g. after a backend restart).
+    Workspace { workspace: Workspace },
     /// Response to a spawn/kill command.
     CommandResult {
         request_id: String,
@@ -74,6 +81,14 @@ pub enum BackendToFrontend {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type")]
 pub enum FrontendToBackend {
+    /// Bind this frontend to a workspace. `id = Some(uuid)` opens the
+    /// existing workspace with that id; if the backend doesn't have
+    /// one (e.g. after a restart) it falls back to creating a fresh
+    /// workspace and returns the new id in `BackendToFrontend::Workspace`.
+    /// `id = None` always creates a new workspace. The frontend must
+    /// wait for the `Workspace` reply before driving the canvas, and
+    /// should reflect the returned id in its URL hash.
+    OpenWorkspace { id: Option<String> },
     /// Spawn a process on a specific sidecar.
     SpawnProcess {
         request_id: String,
@@ -117,6 +132,16 @@ pub enum FrontendToBackend {
 /// Information about a connected sidecar.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SidecarInfo {
+    pub id: String,
+    pub name: String,
+}
+
+/// A workspace — a backend-resident container that a future revision
+/// will use to hold the set of windows a user has pulled into their
+/// canvas (vs. the larger set of windows their sidecars know about
+/// but haven't been attached). For now it carries identity only.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Workspace {
     pub id: String,
     pub name: String,
 }

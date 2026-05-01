@@ -14,6 +14,7 @@ import type {
 	FrontendToBackend,
 	WindowDescriptor,
 	WindowUpdate,
+	Workspace,
 } from "./types";
 import { colorForWindowId } from "./windowColors";
 
@@ -142,6 +143,7 @@ export function useBackendSocket() {
 	const dataChannelRef = useRef<RTCDataChannel | null>(null);
 	const sendRef = useRef<(msg: FrontendToBackend) => void>(() => {});
 	const [connected, setConnected] = useState(false);
+	const [activeWorkspace, setActiveWorkspace] = useState<Workspace | null>(null);
 	const [diagnostics, setDiagnostics] = useState<Diagnostic[]>([]);
 
 	const pushDiagnostic = useCallback(
@@ -244,6 +246,14 @@ export function useBackendSocket() {
 				// WS carries SDP + ICE; once the DC opens, high-volume
 				// traffic (currently just `PutImage`) moves there.
 				startRtc();
+				// Bind this session to a workspace. URL hash drives
+				// the choice — empty hash = ask backend for a fresh
+				// one. The `Workspace` reply will set the hash if the
+				// backend assigned a different id (e.g. our hash was
+				// stale across a restart).
+				const requestedId =
+					window.location.hash.replace(/^#/, "") || null;
+				sendRef.current({ type: "OpenWorkspace", id: requestedId });
 			};
 
 			ws.onerror = () => {
@@ -256,6 +266,7 @@ export function useBackendSocket() {
 
 			ws.onclose = (event) => {
 				setConnected(false);
+				setActiveWorkspace(null);
 				if (!disposed.current) {
 					pushDiagnostic({
 						level: "warn",
@@ -273,6 +284,18 @@ export function useBackendSocket() {
 					case "SidecarList":
 						replaceSidecars(msg.sidecars);
 						break;
+					case "Workspace": {
+						setActiveWorkspace(msg.workspace);
+						const currentHash = window.location.hash.replace(/^#/, "");
+						if (currentHash !== msg.workspace.id) {
+							window.history.replaceState(
+								null,
+								"",
+								`${window.location.pathname}${window.location.search}#${msg.workspace.id}`,
+							);
+						}
+						break;
+					}
 					case "ProcessList":
 						replaceSidecarProcesses(msg.sidecar_id, msg.processes);
 						break;
@@ -379,6 +402,7 @@ export function useBackendSocket() {
 
 	return {
 		connected,
+		activeWorkspace,
 		send,
 		onWindowUpdate,
 		onBell,

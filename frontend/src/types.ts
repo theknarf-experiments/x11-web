@@ -5,6 +5,11 @@ export interface SidecarInfo {
 	name: string;
 }
 
+export interface Workspace {
+	id: string;
+	name: string;
+}
+
 export interface ProcessInfo {
 	pid: number;
 	client_id: string;
@@ -14,6 +19,7 @@ export interface ProcessInfo {
 // Backend -> Frontend messages
 export type BackendToFrontend =
 	| { type: "SidecarList"; sidecars: SidecarInfo[] }
+	| { type: "Workspace"; workspace: Workspace }
 	| {
 			type: "CommandResult";
 			request_id: string;
@@ -34,6 +40,7 @@ export type BackendToFrontend =
 
 // Frontend -> Backend messages
 export type FrontendToBackend =
+	| { type: "OpenWorkspace"; id: string | null }
 	| {
 			type: "SpawnProcess";
 			request_id: string;
@@ -81,7 +88,12 @@ export interface AnimCursorFrame {
 }
 
 /** Window WM states. */
-export type WindowWmState = "normal" | "minimized" | "maximized" | "fullscreen" | "close";
+export type WindowWmState =
+	| "normal"
+	| "minimized"
+	| "maximized"
+	| "fullscreen"
+	| "close";
 
 /** Drag-and-drop event kinds mapped from XdndDrop protocol. */
 export type DndEventKind =
@@ -184,12 +196,42 @@ export type InputEvent =
 			state: number;
 	  }
 	| { kind: "MotionNotify"; x: number; y: number; state: number }
-	| { kind: "TouchBegin"; touch_id: number; x: number; y: number; state: number }
-	| { kind: "TouchUpdate"; touch_id: number; x: number; y: number; state: number }
+	| {
+			kind: "TouchBegin";
+			touch_id: number;
+			x: number;
+			y: number;
+			state: number;
+	  }
+	| {
+			kind: "TouchUpdate";
+			touch_id: number;
+			x: number;
+			y: number;
+			state: number;
+	  }
 	| { kind: "TouchEnd"; touch_id: number; x: number; y: number; state: number }
-	| { kind: "GestureSwipe"; dx: number; dy: number; fingers: number; phase: "Begin" | "Update" | "End" }
-	| { kind: "GesturePinch"; dx: number; dy: number; scale: number; rotation: number; fingers: number; phase: "Begin" | "Update" | "End" }
+	| {
+			kind: "GestureSwipe";
+			dx: number;
+			dy: number;
+			fingers: number;
+			phase: "Begin" | "Update" | "End";
+	  }
+	| {
+			kind: "GesturePinch";
+			dx: number;
+			dy: number;
+			scale: number;
+			rotation: number;
+			fingers: number;
+			phase: "Begin" | "Update" | "End";
+	  }
 	| { kind: "MenuActivate"; action: MenuAction }
 	| { kind: "WindowManage"; action: WindowWmState }
 	| { kind: "DndBridge"; event: DndEventKind }
-	| { kind: "CompositionEvent"; phase: "start" | "update" | "end"; text: string };
+	| {
+			kind: "CompositionEvent";
+			phase: "start" | "update" | "end";
+			text: string;
+	  };

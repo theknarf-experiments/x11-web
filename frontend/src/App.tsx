@@ -71,6 +71,7 @@ function argbToCursorUrl(
 function App() {
 	const {
 		connected,
+		activeWorkspace,
 		send,
 		onWindowUpdate,
 		onBell,
@@ -479,6 +480,30 @@ function App() {
 		() => windows.filter((w) => !closedWindowIds.has(w.windowId)),
 		[windows, closedWindowIds],
 	);
+
+	// Block rendering until the backend has bound this session to a
+	// workspace. The frontend asks for one (by URL hash, or fresh) on
+	// WS open, so this gate sits up just for the request/response
+	// roundtrip — but everything below (canvas, dock, window frames)
+	// needs a workspace context.
+	if (!activeWorkspace) {
+		return (
+			<div
+				style={{
+					position: "fixed",
+					inset: 0,
+					display: "flex",
+					alignItems: "center",
+					justifyContent: "center",
+					color: "rgba(255, 255, 255, 0.6)",
+					font: "13px system-ui, sans-serif",
+					background: "#1a1a1a",
+				}}
+			>
+				{connected ? "Loading workspace…" : "Connecting to backend…"}
+			</div>
+		);
+	}
 
 	return (
 		<>

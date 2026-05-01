@@ -24,6 +24,12 @@ use x11_web_wire::{BackendToSidecar, SidecarToBackend};
 struct AppState {
     sidecars: Arc<RwLock<HashMap<String, SidecarConnection>>>,
     frontends: Arc<RwLock<HashMap<String, FrontendConnection>>>,
+    /// Authoritative workspace list. Auto-populated with one
+    /// "Workspace 1" entry the first time any frontend connects (so
+    /// the list is non-empty for the lifetime of the backend after
+    /// that). Future revisions will hold per-workspace attached-
+    /// window sets; today it's identity only.
+    workspaces: Arc<RwLock<HashMap<String, Workspace>>>,
     /// Authoritative per-sidecar list of X11-connected processes.
     /// Mutated by `ProcessConnected` / `ProcessExited` events from
     /// sidecars; broadcast to frontends as `BackendToFrontend::ProcessList`
@@ -87,6 +93,11 @@ struct TrackedWindow {
 struct FrontendConnection {
     tx: mpsc::UnboundedSender<BackendToFrontend>,
     rtc: rtc::RtcConn,
+    /// Workspace this frontend is bound to. `None` until the
+    /// frontend sends its first `OpenWorkspace`; future per-workspace
+    /// scoping (attached-window sets, etc.) reads this to decide
+    /// what to send.
+    workspace_id: Option<String>,
 }
 
 fn main() {
@@ -108,6 +119,7 @@ async fn async_main() {
     let state = AppState {
         sidecars: Arc::new(RwLock::new(HashMap::new())),
         frontends: Arc::new(RwLock::new(HashMap::new())),
+        workspaces: Arc::new(RwLock::new(HashMap::new())),
         processes: Arc::new(RwLock::new(HashMap::new())),
         window_track: Arc::new(RwLock::new(HashMap::new())),
         window_order: Arc::new(RwLock::new(Vec::new())),
@@ -432,7 +444,8 @@ async fn handle_frontend_ws(socket: WebSocket, state: AppState) {
         });
     }
 
-    // Register frontend
+    // Register frontend. The workspace is bound later, in response
+    // to the frontend's first `OpenWorkspace` request.
     {
         let mut frontends = state.frontends.write().await;
         frontends.insert(
@@ -440,6 +453,7 @@ async fn handle_frontend_ws(socket: WebSocket, state: AppState) {
             FrontendConnection {
                 tx: tx.clone(),
                 rtc,
+                workspace_id: None,
             },
         );
     }
@@ -494,6 +508,16 @@ async fn handle_frontend_ws(socket: WebSocket, state: AppState) {
         };
 
         match msg {
+            FrontendToBackend::OpenWorkspace { id } => {
+                let workspace = open_or_create_workspace(&state, id).await;
+                {
+                    let mut frontends = state.frontends.write().await;
+                    if let Some(conn) = frontends.get_mut(&frontend_id) {
+                        conn.workspace_id = Some(workspace.id.clone());
+                    }
+                }
+                let _ = tx.send(BackendToFrontend::Workspace { workspace });
+            }
             FrontendToBackend::SpawnProcess {
                 request_id,
                 sidecar_id,
@@ -626,6 +650,27 @@ async fn broadcast_sidecar_list(state: &AppState) {
         .map(|s| s.info.clone())
         .collect();
     broadcast_to_frontends(state, BackendToFrontend::SidecarList { sidecars }).await;
+}
+
+/// Resolve `requested_id` to an existing workspace, or create a
+/// fresh one if `None` was supplied or the requested id isn't known
+/// (e.g. stale URL hash after a backend restart). Either way the
+/// caller gets back a workspace to send to the frontend.
+async fn open_or_create_workspace(state: &AppState, requested_id: Option<String>) -> Workspace {
+    let mut workspaces = state.workspaces.write().await;
+    if let Some(id) = requested_id {
+        if let Some(existing) = workspaces.get(&id) {
+            return existing.clone();
+        }
+    }
+    let id = Uuid::new_v4().to_string();
+    let next_index = workspaces.len() + 1;
+    let workspace = Workspace {
+        id: id.clone(),
+        name: format!("Workspace {next_index}"),
+    };
+    workspaces.insert(id, workspace.clone());
+    workspace
 }
 
 /// Translate a sidecar-emitted [`DisplayUpdate`] into the
