@@ -37,27 +37,12 @@ pub enum BackendToSidecar {
         window_id: String,
         event: InputEvent,
     },
-    /// Request a full redraw (sends Expose events to all windows).
-    RequestRedraw { window_id: String },
     /// Resize a specific window.
     ResizeWindow {
         window_id: String,
         width: u16,
         height: u16,
     },
-    /// Request clipboard data from X11 selection.
-    RequestClipboard {
-        selection: String,
-        mime_type: String,
-    },
-    /// Set clipboard content from browser.
-    SetClipboard {
-        selection: String,
-        mime_type: String,
-        data: Vec<u8>,
-    },
-    /// Resize the virtual screen (RandR-driven).
-    ResizeScreen { width: u16, height: u16 },
 }
 
 /// Messages sent from a sidecar to the backend.
@@ -95,21 +80,5 @@ pub enum SidecarToBackend {
     Error {
         request_id: Option<String>,
         message: String,
-    },
-    /// An input event arrived for a window UUID that the sidecar's
-    /// router has no entry for. The event is dropped on the floor;
-    /// this notification lets the frontend surface that fact instead
-    /// of leaving the user wondering why their app stopped responding.
-    InputDropped { window_id: String, reason: String },
-    /// Clipboard data in response to RequestClipboard.
-    ClipboardData {
-        selection: String,
-        mime_type: String,
-        data: Vec<u8>,
-    },
-    /// X11 clipboard content changed (new selection owner).
-    ClipboardOffer {
-        selection: String,
-        mime_types: Vec<String>,
     },
 }

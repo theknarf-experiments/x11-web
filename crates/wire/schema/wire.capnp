@@ -66,24 +66,14 @@ struct FromSidecar {
         # which carries an encoded frame.
         display @3 :DisplayUpdate;
 
-        # Diagnostics: an InputEvent arrived for a window UUID the
-        # sidecar's router has no entry for. Lets the frontend
-        # surface "input dropped" instead of silently swallowing.
-        inputDropped @4 :InputDropped;
-
         # Replies to spawn / kill / list-processes requests.
-        processSpawned @5 :ProcessSpawnedReply;
-        processKilled @6 :ProcessKilledReply;
-        processList @7 :ProcessListReply;
+        processSpawned @4 :ProcessSpawnedReply;
+        processKilled @5 :ProcessKilledReply;
+        processList @6 :ProcessListReply;
 
         # Generic error response, used by the X11 sidecar to surface
         # spawn/kill failures back to the requesting frontend.
-        errorReply @8 :ErrorReply;
-
-        # Clipboard bridging — sidecar exposes the X11 selection's
-        # current state and content to the frontend.
-        clipboardOffer @9 :ClipboardOffer;
-        clipboardData @10 :ClipboardData;
+        errorReply @7 :ErrorReply;
     }
 }
 
@@ -103,11 +93,6 @@ struct ProcessExited {
         # wait() for the real status before replying.
         killedBySignal @2 :Void;
     }
-}
-
-struct InputDropped {
-    windowId @0 :Text;
-    reason @1 :Text;
 }
 
 struct ProcessSpawnedReply {
@@ -136,17 +121,6 @@ struct ErrorReply {
     # accessor; null pointer means "general error".
     requestId @0 :Text;
     message @1 :Text;
-}
-
-struct ClipboardOffer {
-    selection @0 :Text;
-    mimeTypes @1 :List(Text);
-}
-
-struct ClipboardData {
-    selection @0 :Text;
-    mimeType @1 :Text;
-    data @2 :Data;
 }
 
 struct DisplayUpdate {
@@ -375,32 +349,19 @@ struct ToSidecar {
         # Forward an input event coming from the frontend.
         inputEvent @0 :InputEventEnvelope;
 
-        # Force a redraw — sidecar should re-emit the latest frame
-        # for that window. Used when a frontend reconnects.
-        requestRedraw @1 :RequestRedraw;
-
         # The frontend's WindowFrame got resized; ask the sidecar
         # to resize the corresponding window if its windowing
         # model permits.
-        resizeWindow @2 :ResizeWindow;
+        resizeWindow @1 :ResizeWindow;
 
         # Process control. macOS sidecar doesn't implement these
         # yet; the schema slot exists for parity with X11.
-        spawnProcess @3 :SpawnProcess;
-        killProcess @4 :KillProcess;
+        spawnProcess @2 :SpawnProcess;
+        killProcess @3 :KillProcess;
 
         # Process listing — request, the reply comes back as
         # `processList` on the FromSidecar union.
-        listProcesses @5 :ListProcessesReq;
-
-        # Clipboard bridging — frontend pushes bytes into the
-        # sidecar's selection, or asks for current contents.
-        requestClipboard @6 :RequestClipboard;
-        setClipboard @7 :SetClipboard;
-
-        # RandR-driven virtual screen resize on the sidecar (X11
-        # only; macOS sidecar would no-op).
-        resizeScreen @8 :ResizeScreen;
+        listProcesses @4 :ListProcessesReq;
     }
 }
 
@@ -468,10 +429,6 @@ struct MotionNotify {
     state @2 :UInt16;
 }
 
-struct RequestRedraw {
-    windowId @0 :Text;
-}
-
 struct ResizeWindow {
     windowId @0 :Text;
     width @1 :UInt16;
@@ -491,22 +448,6 @@ struct KillProcess {
 
 struct ListProcessesReq {
     requestId @0 :Text;
-}
-
-struct RequestClipboard {
-    selection @0 :Text;
-    mimeType @1 :Text;
-}
-
-struct SetClipboard {
-    selection @0 :Text;
-    mimeType @1 :Text;
-    data @2 :Data;
-}
-
-struct ResizeScreen {
-    width @0 :UInt16;
-    height @1 :UInt16;
 }
 
 # AppMenu activation. `action.name` is the namespaced action name

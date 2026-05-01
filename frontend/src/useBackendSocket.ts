@@ -30,33 +30,18 @@ export interface ConnectedProcess {
 	command: string;
 }
 
-export type ClipboardDataCallback = (
-	sidecarId: string,
-	selection: string,
-	mimeType: string,
-	data: string,
-) => void;
-
-export type ClipboardOfferCallback = (
-	sidecarId: string,
-	selection: string,
-	mimeTypes: string[],
-) => void;
-
 /**
  * Per-event diagnostic surfaced from the backend / WebSocket layer.
  * Rendered by `<DiagnosticsPanel>` so the user has *some* visibility
  * into errors that previously vanished into the void (sidecar errors,
- * dropped input events, socket errors).
+ * socket errors).
  */
 export interface Diagnostic {
 	id: string;
 	level: "info" | "warn" | "error";
-	source: "ws" | "command" | "input" | "sidecar";
+	source: "ws" | "command" | "sidecar";
 	message: string;
 	timestamp: number;
-	sidecarId?: string;
-	windowId?: string;
 }
 
 const MAX_DIAGNOSTICS = 100;
@@ -71,8 +56,6 @@ export function useBackendSocket() {
 	const disposed = useRef(false);
 	const windowUpdateCallbackRef = useRef<WindowUpdateCallback | null>(null);
 	const bellCallbackRef = useRef<BellCallback | null>(null);
-	const clipboardDataCallbackRef = useRef<ClipboardDataCallback | null>(null);
-	const clipboardOfferCallbackRef = useRef<ClipboardOfferCallback | null>(null);
 	const [connected, setConnected] = useState(false);
 	const [sidecars, setSidecars] = useState<SidecarInfo[]>([]);
 	const [processes, setProcesses] = useState<Record<string, ProcessInfo[]>>({});
@@ -194,30 +177,6 @@ export function useBackendSocket() {
 							message: msg.message || (msg.success ? "OK" : "command failed"),
 						});
 						break;
-					case "InputDropped":
-						pushDiagnostic({
-							level: "warn",
-							source: "input",
-							message: `input dropped: ${msg.reason}`,
-							sidecarId: msg.sidecar_id,
-							windowId: msg.window_id,
-						});
-						break;
-					case "ClipboardData":
-						clipboardDataCallbackRef.current?.(
-							msg.sidecar_id,
-							msg.selection,
-							msg.mime_type,
-							msg.data,
-						);
-						break;
-					case "ClipboardOffer":
-						clipboardOfferCallbackRef.current?.(
-							msg.sidecar_id,
-							msg.selection,
-							msg.mime_types,
-						);
-						break;
 				}
 			};
 		}
@@ -255,20 +214,6 @@ export function useBackendSocket() {
 		bellCallbackRef.current = cb;
 	}, []);
 
-	const onClipboardData = useCallback(
-		(cb: ClipboardDataCallback | null) => {
-			clipboardDataCallbackRef.current = cb;
-		},
-		[],
-	);
-
-	const onClipboardOffer = useCallback(
-		(cb: ClipboardOfferCallback | null) => {
-			clipboardOfferCallbackRef.current = cb;
-		},
-		[],
-	);
-
 	return {
 		connected,
 		sidecars,
@@ -278,8 +223,6 @@ export function useBackendSocket() {
 		send,
 		onWindowUpdate,
 		onBell,
-		onClipboardData,
-		onClipboardOffer,
 		diagnostics,
 		dismissDiagnostic,
 		clearDiagnostics,

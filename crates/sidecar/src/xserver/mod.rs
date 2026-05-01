@@ -113,11 +113,6 @@ impl X11Server {
         }
     }
 
-    /// Get a clone of the shared selections (for clipboard bridge in main.rs).
-    pub fn shared_selections(&self) -> SharedSelections {
-        self.shared_selections.clone()
-    }
-
     /// Write an `.Xauthority` file containing the MIT-MAGIC-COOKIE-1 entry
     /// so that X11 clients that require auth (e.g. xterm, many toolkit apps)
     /// can authenticate against this server.

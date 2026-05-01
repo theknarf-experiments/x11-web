@@ -274,8 +274,11 @@ async fn main() {
     // works without DBus.
     let menu_tracker =
         crate::menus::MenuTracker::new(display_tx.clone(), dbus_address.clone()).await;
-    // Watch channel for dynamic screen resize (RandR).
-    let (screen_size_tx, screen_size_rx) = tokio::sync::watch::channel((1024u16, 768u16));
+    // Watch channel for dynamic screen resize (RandR). The sender
+    // is kept alive here so the X server's receiver stays open;
+    // there's no external driver wired up — the virtual screen is
+    // a fixed size from the X clients' perspective.
+    let (_screen_size_tx, screen_size_rx) = tokio::sync::watch::channel((1024u16, 768u16));
     let x11_server = X11Server::new(
         display_number,
         display_tx,
@@ -286,7 +289,6 @@ async fn main() {
         screen_size_rx,
     );
     let display_string = x11_server.display_string();
-    let shared_selections = x11_server.shared_selections();
 
     // Write .Xauthority file and set env var so spawned processes inherit it.
     match x11_server.write_xauthority() {
@@ -350,9 +352,7 @@ async fn main() {
                     &mut display_rx,
                     &window_router,
                     &mut client_connected_rx,
-                    &screen_size_tx,
                     &mut clipboard_notify_rx,
-                    &shared_selections,
                 )
                 .await;
                 warn!("Disconnected from backend, reconnecting in 5s...");
@@ -411,9 +411,7 @@ async fn run_session(
     display_rx: &mut mpsc::UnboundedReceiver<TaggedDisplayUpdate>,
     window_router: &crate::xserver::WindowRouter,
     client_connected_rx: &mut mpsc::UnboundedReceiver<(String, u32)>,
-    screen_size_tx: &crate::xserver::types::ScreenSizeTx,
     clipboard_notify_rx: &mut mpsc::UnboundedReceiver<crate::xserver::types::ClipboardEvent>,
-    shared_selections: &crate::xserver::types::SharedSelections,
 ) {
     let DialedConnection {
         mut reader,
@@ -487,8 +485,6 @@ async fn run_session(
                         &mut process_manager,
                         &tx,
                         window_router,
-                        screen_size_tx,
-                        shared_selections,
                     ).await;
                 }
                 Some(msg) = rx.recv() => {
@@ -517,16 +513,10 @@ async fn run_session(
                         );
                     }
                 }
-                Some(clipboard_event) = clipboard_notify_rx.recv() => {
-                    let crate::xserver::types::ClipboardEvent::OwnerChanged { selection, owner }
-                        = clipboard_event;
-                    if owner != 0 {
-                        let mime_types = vec!["text/plain".into(), "UTF8_STRING".into()];
-                        let _ = tx.send(SidecarToBackend::ClipboardOffer {
-                            selection,
-                            mime_types,
-                        });
-                    }
+                Some(_clipboard_event) = clipboard_notify_rx.recv() => {
+                    // X11-internal clipboard ownership changes are not
+                    // bridged to the frontend right now; just drain the
+                    // channel so the X server's sender doesn't back up.
                 }
                 _ = check_interval.tick() => {
                     let exited = process_manager.check_exited().await;
@@ -551,8 +541,6 @@ async fn handle_command(
     pm: &mut ProcessManager,
     tx: &mpsc::UnboundedSender<SidecarToBackend>,
     window_router: &crate::xserver::WindowRouter,
-    screen_size_tx: &crate::xserver::types::ScreenSizeTx,
-    shared_selections: &crate::xserver::types::SharedSelections,
 ) {
     match cmd {
         BackendToSidecar::SpawnProcess {
@@ -593,15 +581,7 @@ async fn handle_command(
             });
         }
         BackendToSidecar::InputEvent { window_id, event } => {
-            if !window_router.send_input(&window_id, event) {
-                let _ = tx.send(SidecarToBackend::InputDropped {
-                    window_id,
-                    reason: "no route entry for window UUID".into(),
-                });
-            }
-        }
-        BackendToSidecar::RequestRedraw { window_id } => {
-            window_router.send_resize(&window_id, 0, 0);
+            window_router.send_input(&window_id, event);
         }
         BackendToSidecar::ResizeWindow {
             window_id,
@@ -609,38 +589,6 @@ async fn handle_command(
             height,
         } => {
             window_router.send_resize(&window_id, width, height);
-        }
-        BackendToSidecar::RequestClipboard {
-            selection,
-            mime_type,
-        } => {
-            info!("Clipboard request: selection={selection} mime={mime_type}");
-            if let Ok(sels) = shared_selections.lock() {
-                if sels.values().next().is_some() {
-                    info!(
-                        "Selection owner exists — clipboard data flows via X11 selection protocol"
-                    );
-                }
-            }
-        }
-        BackendToSidecar::SetClipboard {
-            selection,
-            mime_type,
-            data,
-        } => {
-            // Backend → X11 clipboard import isn't wired through to
-            // the X11 selection layer yet. The bytes arrive but
-            // nothing serves them to X11 clients on ConvertSelection.
-            info!(
-                "Clipboard set: selection={selection} mime={mime_type} len={} (ignored — X11 selection bridge not implemented)",
-                data.len()
-            );
-        }
-        BackendToSidecar::ResizeScreen { width, height } => {
-            if width > 0 && height > 0 {
-                info!("Screen resize request: {width}x{height}");
-                let _ = screen_size_tx.send((width, height));
-            }
         }
     }
 }

@@ -79,11 +79,6 @@ export function DiagnosticsPanel({
 									<span className={s.entryTime}>{formatTime(d.timestamp)}</span>
 									<span className={s.entrySource}>{d.source}</span>
 									<span className={s.entryMessage}>{d.message}</span>
-									{d.windowId && (
-										<span className={s.entryContext}>
-											win {d.windowId.slice(0, 8)}
-										</span>
-									)}
 								</button>
 							))}
 					</div>

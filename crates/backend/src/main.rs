@@ -174,10 +174,7 @@ async fn dispatch_sidecar_msg(state: &AppState, sidecar_id: &str, msg: SidecarTo
                 )
                 .await;
             }
-            SidecarToBackend::ProcessExited {
-                pid,
-                exit_code: _,
-            } => {
+            SidecarToBackend::ProcessExited { pid, exit_code: _ } => {
                 // Drop matching entries from per-sidecar list and the
                 // window-state index; clear any buffered display
                 // updates keyed by the freed client_ids.
@@ -301,47 +298,6 @@ async fn dispatch_sidecar_msg(state: &AppState, sidecar_id: &str, msg: SidecarTo
                 )
                 .await;
             }
-            SidecarToBackend::InputDropped { window_id, reason } => {
-                broadcast_to_frontends(
-                    &state,
-                    BackendToFrontend::InputDropped {
-                        sidecar_id: sidecar_id.clone(),
-                        window_id,
-                        reason,
-                    },
-                )
-                .await;
-            }
-            SidecarToBackend::ClipboardData {
-                selection,
-                mime_type,
-                data,
-            } => {
-                broadcast_to_frontends(
-                    state,
-                    BackendToFrontend::ClipboardData {
-                        sidecar_id: sidecar_id.clone(),
-                        selection,
-                        mime_type,
-                        data,
-                    },
-                )
-                .await;
-            }
-            SidecarToBackend::ClipboardOffer {
-                selection,
-                mime_types,
-            } => {
-                broadcast_to_frontends(
-                    state,
-                    BackendToFrontend::ClipboardOffer {
-                        sidecar_id: sidecar_id.clone(),
-                        selection,
-                        mime_types,
-                    },
-                )
-                .await;
-            }
         }
     }
 }
@@ -407,10 +363,7 @@ async fn handle_frontend_ws(socket: WebSocket, state: AppState) {
     // Register frontend
     {
         let mut frontends = state.frontends.write().await;
-        frontends.insert(
-            frontend_id.clone(),
-            FrontendConnection { tx: tx.clone() },
-        );
+        frontends.insert(frontend_id.clone(), FrontendConnection { tx: tx.clone() });
     }
 
     // Send current sidecar list to just this frontend.
@@ -492,17 +445,6 @@ async fn handle_frontend_ws(socket: WebSocket, state: AppState) {
                 )
                 .await;
             }
-            FrontendToBackend::RequestRedraw {
-                sidecar_id,
-                window_id,
-            } => {
-                forward_to_sidecar(
-                    &state,
-                    &sidecar_id,
-                    BackendToSidecar::RequestRedraw { window_id },
-                )
-                .await;
-            }
             FrontendToBackend::InputEvent {
                 sidecar_id,
                 window_id,
@@ -529,50 +471,6 @@ async fn handle_frontend_ws(socket: WebSocket, state: AppState) {
                         width,
                         height,
                     },
-                )
-                .await;
-            }
-            FrontendToBackend::RequestClipboard {
-                sidecar_id,
-                selection,
-                mime_type,
-            } => {
-                forward_to_sidecar(
-                    &state,
-                    &sidecar_id,
-                    BackendToSidecar::RequestClipboard {
-                        selection,
-                        mime_type,
-                    },
-                )
-                .await;
-            }
-            FrontendToBackend::SetClipboard {
-                sidecar_id,
-                selection,
-                mime_type,
-                data,
-            } => {
-                forward_to_sidecar(
-                    &state,
-                    &sidecar_id,
-                    BackendToSidecar::SetClipboard {
-                        selection,
-                        mime_type,
-                        data,
-                    },
-                )
-                .await;
-            }
-            FrontendToBackend::ResizeScreen {
-                sidecar_id,
-                width,
-                height,
-            } => {
-                forward_to_sidecar(
-                    &state,
-                    &sidecar_id,
-                    BackendToSidecar::ResizeScreen { width, height },
                 )
                 .await;
             }
@@ -628,7 +526,7 @@ async fn broadcast_to_frontends(state: &AppState, msg: BackendToFrontend) {
 /// Snapshot the current sidecar list and broadcast it to every
 /// connected frontend. Called on initial frontend connect, on a new
 /// sidecar joining, and on a sidecar leaving.
-pub async fn broadcast_sidecar_list(state: &AppState) {
+async fn broadcast_sidecar_list(state: &AppState) {
     let sidecars: Vec<SidecarInfo> = state
         .sidecars
         .read()
@@ -662,19 +560,13 @@ fn update_to_window_update(update: DisplayUpdate) -> Option<WindowUpdate> {
             height,
             data,
         },
-        D::TitleChanged { window_id, title } => {
-            WindowUpdate::TitleChanged { window_id, title }
-        }
+        D::TitleChanged { window_id, title } => WindowUpdate::TitleChanged { window_id, title },
         D::WindowStateChanged { window_id, state } => {
             WindowUpdate::StateChanged { window_id, state }
         }
         D::WindowFocused { window_id } => WindowUpdate::Focused { window_id },
-        D::MenuStructure { window_id, menu } => {
-            WindowUpdate::MenuStructure { window_id, menu }
-        }
-        D::CursorChanged { window_id, cursor } => {
-            WindowUpdate::CursorChanged { window_id, cursor }
-        }
+        D::MenuStructure { window_id, menu } => WindowUpdate::MenuStructure { window_id, menu },
+        D::CursorChanged { window_id, cursor } => WindowUpdate::CursorChanged { window_id, cursor },
         D::CursorBitmap {
             window_id,
             width,
@@ -711,7 +603,13 @@ async fn apply_window_lifecycle(
     use DisplayUpdate::*;
     let mut track = state.window_track.write().await;
     let mut order = state.window_order.write().await;
-    let key = |wid: &str| (sidecar_id.to_string(), client_id.to_string(), wid.to_string());
+    let key = |wid: &str| {
+        (
+            sidecar_id.to_string(),
+            client_id.to_string(),
+            wid.to_string(),
+        )
+    };
     match update {
         WindowCreated {
             window_id,
@@ -820,7 +718,7 @@ async fn apply_window_lifecycle(
 ///   - top-level without one: X11 default position, `placed = false`
 ///     (frontend may apply its own layout heuristic and broadcast
 ///     the result via `UpdateWindowPosition`).
-pub async fn build_window_list(state: &AppState) -> Vec<WindowDescriptor> {
+async fn build_window_list(state: &AppState) -> Vec<WindowDescriptor> {
     let track = state.window_track.read().await;
     let order = state.window_order.read().await;
     let positions = state.window_positions.read().await;
@@ -867,7 +765,7 @@ pub async fn build_window_list(state: &AppState) -> Vec<WindowDescriptor> {
     windows
 }
 
-pub async fn broadcast_window_list(state: &AppState) {
+async fn broadcast_window_list(state: &AppState) {
     let windows = build_window_list(state).await;
     broadcast_to_frontends(state, BackendToFrontend::WindowList { windows }).await;
 }
@@ -898,7 +796,7 @@ async fn drop_sidecar_windows(state: &AppState, sidecar_id: &str) -> bool {
 /// Snapshot one sidecar's X11-connected process list and broadcast it
 /// to every frontend. Called on `ProcessConnected` / `ProcessExited`
 /// events from the sidecar and on sidecar disconnect.
-pub async fn broadcast_process_list(state: &AppState, sidecar_id: &str) {
+async fn broadcast_process_list(state: &AppState, sidecar_id: &str) {
     let processes = state
         .processes
         .read()

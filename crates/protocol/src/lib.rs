@@ -57,29 +57,6 @@ pub enum BackendToFrontend {
     /// X11 bell event — frontend should play an audible/visual bell.
     /// Not per-window; lifted out of the per-window update stream.
     Bell { percent: u8 },
-    /// Forwarded from `SidecarToBackend::InputDropped`. Tells the
-    /// frontend that an input event it sent was discarded by the
-    /// sidecar's router (e.g. the window UUID is stale because the
-    /// X11 client closed the window between send and route lookup).
-    InputDropped {
-        sidecar_id: String,
-        window_id: String,
-        reason: String,
-    },
-    /// Clipboard content from sidecar.
-    ClipboardData {
-        sidecar_id: String,
-        selection: String,
-        mime_type: String,
-        #[serde(with = "base64_bytes")]
-        data: Vec<u8>,
-    },
-    /// X11 clipboard content changed.
-    ClipboardOffer {
-        sidecar_id: String,
-        selection: String,
-        mime_types: Vec<String>,
-    },
 }
 
 /// Messages sent from a frontend client to the backend.
@@ -99,11 +76,6 @@ pub enum FrontendToBackend {
         sidecar_id: String,
         pid: u32,
     },
-    /// Request a full redraw of a window.
-    RequestRedraw {
-        sidecar_id: String,
-        window_id: String,
-    },
     /// Send input to a window on a sidecar.
     InputEvent {
         sidecar_id: String,
@@ -118,33 +90,8 @@ pub enum FrontendToBackend {
         height: u16,
     },
     /// Update a window's tracked position (synced across frontends).
-    UpdateWindowPosition {
-        window_id: String,
-        x: f64,
-        y: f64,
-    },
-    /// Request clipboard content from X11.
-    RequestClipboard {
-        sidecar_id: String,
-        selection: String,
-        mime_type: String,
-    },
-    /// Set clipboard content in X11 from browser.
-    SetClipboard {
-        sidecar_id: String,
-        selection: String,
-        mime_type: String,
-        #[serde(with = "base64_bytes")]
-        data: Vec<u8>,
-    },
-    /// Resize the virtual screen on a sidecar (RandR-driven).
-    ResizeScreen {
-        sidecar_id: String,
-        width: u16,
-        height: u16,
-    },
+    UpdateWindowPosition { window_id: String, x: f64, y: f64 },
 }
-
 
 /// Information about a connected sidecar.
 #[derive(Debug, Clone, Serialize, Deserialize)]

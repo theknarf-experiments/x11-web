@@ -123,32 +123,6 @@ pub fn build_from_sidecar(msg: &SidecarToBackend) -> Option<Builder<HeapAllocato
                     return None;
                 }
             }
-            SidecarToBackend::InputDropped { window_id, reason } => {
-                let mut idr = root.init_input_dropped();
-                idr.set_window_id(window_id);
-                idr.set_reason(reason);
-            }
-            SidecarToBackend::ClipboardOffer {
-                selection,
-                mime_types,
-            } => {
-                let mut co = root.init_clipboard_offer();
-                co.set_selection(selection);
-                let mut list = co.init_mime_types(mime_types.len() as u32);
-                for (i, mt) in mime_types.iter().enumerate() {
-                    list.set(i as u32, mt);
-                }
-            }
-            SidecarToBackend::ClipboardData {
-                selection,
-                mime_type,
-                data,
-            } => {
-                let mut cd = root.init_clipboard_data();
-                cd.set_selection(selection);
-                cd.set_mime_type(mime_type);
-                cd.set_data(data);
-            }
         }
     }
     Some(builder)
@@ -339,13 +313,6 @@ pub fn read_from_sidecar(
             let update = read_display_payload(du.get_payload()?)?;
             SidecarToBackend::DisplayUpdate { client_id, update }
         }
-        Which::InputDropped(idr) => {
-            let idr = idr?;
-            SidecarToBackend::InputDropped {
-                window_id: idr.get_window_id()?.to_string()?,
-                reason: idr.get_reason()?.to_string()?,
-            }
-        }
         Which::ProcessSpawned(ps) => {
             let ps = ps?;
             SidecarToBackend::ProcessSpawned {
@@ -384,26 +351,6 @@ pub fn read_from_sidecar(
                     None
                 },
                 message: er.get_message()?.to_string()?,
-            }
-        }
-        Which::ClipboardOffer(co) => {
-            let co = co?;
-            let mime_types = co.get_mime_types()?;
-            let mut mts = Vec::with_capacity(mime_types.len() as usize);
-            for entry in mime_types.iter() {
-                mts.push(entry?.to_string()?);
-            }
-            SidecarToBackend::ClipboardOffer {
-                selection: co.get_selection()?.to_string()?,
-                mime_types: mts,
-            }
-        }
-        Which::ClipboardData(cd) => {
-            let cd = cd?;
-            SidecarToBackend::ClipboardData {
-                selection: cd.get_selection()?.to_string()?,
-                mime_type: cd.get_mime_type()?.to_string()?,
-                data: cd.get_data()?.to_vec(),
             }
         }
     })
@@ -572,10 +519,6 @@ pub fn build_to_sidecar(msg: &BackendToSidecar) -> Option<Builder<HeapAllocator>
                     return None;
                 }
             }
-            BackendToSidecar::RequestRedraw { window_id } => {
-                let mut rr = root.init_request_redraw();
-                rr.set_window_id(window_id);
-            }
             BackendToSidecar::ResizeWindow {
                 window_id,
                 width,
@@ -607,29 +550,6 @@ pub fn build_to_sidecar(msg: &BackendToSidecar) -> Option<Builder<HeapAllocator>
             BackendToSidecar::ListProcesses { request_id } => {
                 let mut lp = root.init_list_processes();
                 lp.set_request_id(request_id);
-            }
-            BackendToSidecar::RequestClipboard {
-                selection,
-                mime_type,
-            } => {
-                let mut rc = root.init_request_clipboard();
-                rc.set_selection(selection);
-                rc.set_mime_type(mime_type);
-            }
-            BackendToSidecar::SetClipboard {
-                selection,
-                mime_type,
-                data,
-            } => {
-                let mut sc = root.init_set_clipboard();
-                sc.set_selection(selection);
-                sc.set_mime_type(mime_type);
-                sc.set_data(data);
-            }
-            BackendToSidecar::ResizeScreen { width, height } => {
-                let mut rs = root.init_resize_screen();
-                rs.set_width(*width);
-                rs.set_height(*height);
             }
         }
     }
@@ -778,12 +698,6 @@ pub fn read_to_sidecar(
             let event = read_input_event(env.get_event()?)?;
             BackendToSidecar::InputEvent { window_id, event }
         }
-        Which::RequestRedraw(rr) => {
-            let rr = rr?;
-            BackendToSidecar::RequestRedraw {
-                window_id: rr.get_window_id()?.to_string()?,
-            }
-        }
         Which::ResizeWindow(rw) => {
             let rw = rw?;
             BackendToSidecar::ResizeWindow {
@@ -816,28 +730,6 @@ pub fn read_to_sidecar(
             let lp = lp?;
             BackendToSidecar::ListProcesses {
                 request_id: lp.get_request_id()?.to_string()?,
-            }
-        }
-        Which::RequestClipboard(rc) => {
-            let rc = rc?;
-            BackendToSidecar::RequestClipboard {
-                selection: rc.get_selection()?.to_string()?,
-                mime_type: rc.get_mime_type()?.to_string()?,
-            }
-        }
-        Which::SetClipboard(sc) => {
-            let sc = sc?;
-            BackendToSidecar::SetClipboard {
-                selection: sc.get_selection()?.to_string()?,
-                mime_type: sc.get_mime_type()?.to_string()?,
-                data: sc.get_data()?.to_vec(),
-            }
-        }
-        Which::ResizeScreen(rs) => {
-            let rs = rs?;
-            BackendToSidecar::ResizeScreen {
-                width: rs.get_width(),
-                height: rs.get_height(),
             }
         }
     })

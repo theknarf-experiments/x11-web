@@ -193,7 +193,7 @@ mod macos {
                     }
                 };
                 match wire_bridge::read_to_sidecar(to_sidecar) {
-                    Ok(cmd) => handle_backend_msg(cmd, &router, &tx),
+                    Ok(cmd) => handle_backend_msg(cmd, &router),
                     Err(e) => {
                         warn!("ToSidecar translate: {e:?}");
                     }
@@ -209,11 +209,7 @@ mod macos {
         heartbeat_task.abort();
     }
 
-    fn handle_backend_msg(
-        cmd: BackendToSidecar,
-        router: &WindowRouter,
-        tx: &mpsc::UnboundedSender<SidecarToBackend>,
-    ) {
+    fn handle_backend_msg(cmd: BackendToSidecar, router: &WindowRouter) {
         match cmd {
             BackendToSidecar::InputEvent { window_id, event } => {
                 info!("InputEvent received: window={window_id} event={event:?}");
@@ -227,10 +223,6 @@ mod macos {
                     }
                     None => {
                         warn!("No route for window UUID {window_id}");
-                        let _ = tx.send(SidecarToBackend::InputDropped {
-                            window_id,
-                            reason: "no route for window UUID on this sidecar".into(),
-                        });
                     }
                 }
             }

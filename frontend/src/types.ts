@@ -23,26 +23,7 @@ export type BackendToFrontend =
 	| { type: "ProcessList"; sidecar_id: string; processes: ProcessInfo[] }
 	| { type: "WindowUpdate"; update: WindowUpdate }
 	| { type: "WindowList"; windows: WindowDescriptor[] }
-	| { type: "Bell"; percent: number }
-	| {
-			type: "InputDropped";
-			sidecar_id: string;
-			window_id: string;
-			reason: string;
-	  }
-	| {
-			type: "ClipboardData";
-			sidecar_id: string;
-			selection: string;
-			mime_type: string;
-			data: string;
-	  }
-	| {
-			type: "ClipboardOffer";
-			sidecar_id: string;
-			selection: string;
-			mime_types: string[];
-	  };
+	| { type: "Bell"; percent: number };
 
 // Frontend -> Backend messages
 export type FrontendToBackend =
@@ -72,25 +53,6 @@ export type FrontendToBackend =
 			window_id: string;
 			x: number;
 			y: number;
-	  }
-	| {
-			type: "RequestClipboard";
-			sidecar_id: string;
-			selection: string;
-			mime_type: string;
-	  }
-	| {
-			type: "SetClipboard";
-			sidecar_id: string;
-			selection: string;
-			mime_type: string;
-			data: string;
-	  }
-	| {
-			type: "ResizeScreen";
-			sidecar_id: string;
-			width: number;
-			height: number;
 	  };
 
 /** Animated cursor frame. */

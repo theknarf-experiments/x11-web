@@ -125,8 +125,6 @@ function App() {
 		send,
 		onWindowUpdate,
 		onBell,
-		onClipboardData,
-		onClipboardOffer,
 		diagnostics,
 		dismissDiagnostic,
 		clearDiagnostics,
@@ -155,38 +153,6 @@ function App() {
 			}
 		};
 	}, []);
-
-	// Send ResizeScreen to all connected sidecars when the viewport resizes.
-	const sidecarsRef = useRef(sidecars);
-	sidecarsRef.current = sidecars;
-	useEffect(() => {
-		let timer: ReturnType<typeof setTimeout> | undefined;
-		const sendScreenSize = () => {
-			const w = Math.round(window.innerWidth);
-			const h = Math.round(window.innerHeight);
-			for (const sc of sidecarsRef.current) {
-				send({
-					type: "ResizeScreen",
-					sidecar_id: sc.id,
-					width: w,
-					height: h,
-				});
-			}
-		};
-		const onResize = () => {
-			clearTimeout(timer);
-			timer = setTimeout(sendScreenSize, 150);
-		};
-		window.addEventListener("resize", onResize);
-		// Send initial size once connected
-		if (connected && sidecarsRef.current.length > 0) {
-			sendScreenSize();
-		}
-		return () => {
-			window.removeEventListener("resize", onResize);
-			clearTimeout(timer);
-		};
-	}, [connected, sidecars, send]);
 
 	/** Start an animated cursor cycle for a window. */
 	const startAnimCursor = useCallback((windowId: string, frames: AnimCursorFrame[]) => {
@@ -504,152 +470,6 @@ function App() {
 		});
 		return () => onBell(null);
 	}, [onBell]);
-
-	// Clipboard bridge: browser <-> X11
-	const clipboardOfferRef = useRef<
-		Map<string, { selection: string; mimeTypes: string[] }>
-	>(new Map());
-
-	useEffect(() => {
-		onClipboardOffer((sidecarId, selection, mimeTypes) => {
-			clipboardOfferRef.current.set(sidecarId, { selection, mimeTypes });
-		});
-		return () => onClipboardOffer(null);
-	}, [onClipboardOffer]);
-
-	useEffect(() => {
-		onClipboardData((_sidecarId, _selection, mimeType, data) => {
-			try {
-				if (mimeType === "text/plain" || mimeType.startsWith("text/")) {
-					const text = atob(data);
-					navigator.clipboard.writeText(text).catch(() => {});
-				} else if (mimeType === "text/html") {
-					const html = atob(data);
-					const blob = new Blob([html], { type: "text/html" });
-					const textBlob = new Blob([html], { type: "text/plain" });
-					const item = new ClipboardItem({
-						"text/html": blob,
-						"text/plain": textBlob,
-					});
-					navigator.clipboard.write([item]).catch(() => {});
-				} else if (mimeType.startsWith("image/")) {
-					// Decode base64 to binary
-					const binaryStr = atob(data);
-					const bytes = new Uint8Array(binaryStr.length);
-					for (let i = 0; i < binaryStr.length; i++) {
-						bytes[i] = binaryStr.charCodeAt(i);
-					}
-					const blob = new Blob([bytes], { type: mimeType });
-					const item = new ClipboardItem({ [mimeType]: blob });
-					navigator.clipboard.write([item]).catch(() => {});
-				}
-			} catch {
-				// ignore decode errors
-			}
-		});
-		return () => onClipboardData(null);
-	}, [onClipboardData]);
-
-	// Listen for paste events: send browser clipboard content to X11
-	useEffect(() => {
-		function handlePaste(e: ClipboardEvent) {
-			const dt = e.clipboardData;
-			if (!dt) return;
-
-			for (const sidecar of sidecars) {
-				// Try HTML first
-				const html = dt.getData("text/html");
-				if (html) {
-					send({
-						type: "SetClipboard",
-						sidecar_id: sidecar.id,
-						selection: "CLIPBOARD",
-						mime_type: "text/html",
-						data: btoa(html),
-					});
-				}
-
-				// Always send plain text
-				const text = dt.getData("text/plain");
-				if (text) {
-					send({
-						type: "SetClipboard",
-						sidecar_id: sidecar.id,
-						selection: "CLIPBOARD",
-						mime_type: "text/plain",
-						data: btoa(text),
-					});
-				}
-
-				// Try images from files
-				for (const file of Array.from(dt.files)) {
-					if (file.type.startsWith("image/")) {
-						const reader = new FileReader();
-						reader.onloadend = () => {
-							const result = reader.result as ArrayBuffer;
-							const bytes = new Uint8Array(result);
-							let binary = "";
-							for (let j = 0; j < bytes.length; j++) {
-								binary += String.fromCharCode(bytes[j]);
-							}
-							send({
-								type: "SetClipboard",
-								sidecar_id: sidecar.id,
-								selection: "CLIPBOARD",
-								mime_type: file.type,
-								data: btoa(binary),
-							});
-						};
-						reader.readAsArrayBuffer(file);
-					}
-				}
-			}
-		}
-
-		function handleCopy() {
-			for (const [sidecarId, offer] of clipboardOfferRef.current) {
-				// Request multiple types if available
-				const requestedTypes = new Set<string>();
-				for (const mime of offer.mimeTypes) {
-					if (
-						mime === "text/plain" ||
-						mime === "text/html" ||
-						mime.startsWith("image/png")
-					) {
-						requestedTypes.add(mime);
-					}
-				}
-				// Fallback to first available type
-				if (requestedTypes.size === 0 && offer.mimeTypes.length > 0) {
-					requestedTypes.add(offer.mimeTypes[0]);
-				}
-				// Also request TARGETS for negotiation
-				if (offer.mimeTypes.includes("TARGETS")) {
-					send({
-						type: "RequestClipboard",
-						sidecar_id: sidecarId,
-						selection: offer.selection,
-						mime_type: "TARGETS",
-					});
-				}
-				for (const mimeType of requestedTypes) {
-					send({
-						type: "RequestClipboard",
-						sidecar_id: sidecarId,
-						selection: offer.selection,
-						mime_type: mimeType,
-					});
-				}
-			}
-		}
-
-		document.addEventListener("paste", handlePaste);
-		document.addEventListener("copy", handleCopy);
-		return () => {
-			document.removeEventListener("paste", handlePaste);
-			document.removeEventListener("copy", handleCopy);
-		};
-	}, [sidecars, send]);
 
 	function handleSpawn(sidecarId: string, command: string, args: string[]) {
 		send({
