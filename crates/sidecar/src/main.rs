@@ -1,14 +1,3 @@
-mod audio;
-mod colors;
-mod compose;
-mod fonts;
-mod framebuffer;
-mod menus;
-#[cfg(feature = "osmesa")]
-mod osmesa;
-mod xinput2;
-mod xserver;
-
 use std::collections::HashMap;
 use std::process::Stdio;
 
@@ -19,12 +8,12 @@ use tokio::process::{Child, Command};
 use tokio::sync::mpsc;
 use tokio::time::{interval, Duration};
 use tracing::{error, info, warn};
+use x11_web_protocol::DisplayUpdate;
 use x11_web_wire::bridge as wire_bridge;
 use x11_web_wire::conn::{dial, DialedConnection};
 use x11_web_wire::tls::parse_fingerprint;
 use x11_web_wire::{wire_capnp, BackendToSidecar, SidecarKind, SidecarToBackend};
-
-use crate::xserver::{TaggedDisplayUpdate, X11Server};
+use x11_web_x11_server::{MenuTracker, TaggedDisplayUpdate, WindowRouter, X11Server};
 
 struct ProcessManager {
     processes: HashMap<u32, ManagedProcess>,
@@ -265,14 +254,13 @@ async fn main() {
     // Start X11 server
     let (display_tx, mut display_rx) = mpsc::unbounded_channel::<TaggedDisplayUpdate>();
     let (client_connected_tx, mut client_connected_rx) = mpsc::unbounded_channel::<(String, u32)>();
-    let window_router = crate::xserver::WindowRouter::new();
+    let window_router = WindowRouter::new();
     // Clipboard bridge channels
     let (clipboard_notify_tx, mut clipboard_notify_rx) = mpsc::unbounded_channel::<()>();
     // MenuTracker connects to the same session bus the apps use; on
     // failure it becomes a no-op so the rest of the sidecar still
     // works without DBus.
-    let menu_tracker =
-        crate::menus::MenuTracker::new(display_tx.clone(), dbus_address.clone()).await;
+    let menu_tracker = MenuTracker::new(display_tx.clone(), dbus_address.clone()).await;
     // Watch channel for dynamic screen resize (RandR). The sender
     // is kept alive here so the X server's receiver stays open;
     // there's no external driver wired up — the virtual screen is
@@ -307,9 +295,6 @@ async fn main() {
             error!("X11 server error: {e}");
         }
     });
-
-    // Start PulseAudio for audio capture/playback.
-    let _pulse_daemon = audio::start_pulseaudio().await;
 
     info!("Connecting to backend at {backend_addr_str} (server-name={server_name})");
 
@@ -409,7 +394,7 @@ async fn run_session(
     display_string: &str,
     dbus_address: Option<String>,
     display_rx: &mut mpsc::UnboundedReceiver<TaggedDisplayUpdate>,
-    window_router: &crate::xserver::WindowRouter,
+    window_router: &WindowRouter,
     client_connected_rx: &mut mpsc::UnboundedReceiver<(String, u32)>,
     clipboard_notify_rx: &mut mpsc::UnboundedReceiver<()>,
 ) {
@@ -497,6 +482,12 @@ async fn run_session(
                     }
                 }
                 Some((client_id, update)) = display_rx.recv() => {
+                    // x11-server emits raw RGBA in PutImage. The
+                    // wire format is WebP-lossless; encode here so
+                    // the X server library doesn't have to know
+                    // about pixel codecs. Other DisplayUpdate
+                    // variants pass through unchanged.
+                    let update = encode_for_wire(update);
                     let _ = tx.send(SidecarToBackend::DisplayUpdate { client_id, update });
                 }
                 Some((client_id, peer_pid)) = client_connected_rx.recv() => {
@@ -540,7 +531,7 @@ async fn handle_command(
     cmd: BackendToSidecar,
     pm: &mut ProcessManager,
     tx: &mpsc::UnboundedSender<SidecarToBackend>,
-    window_router: &crate::xserver::WindowRouter,
+    window_router: &WindowRouter,
 ) {
     match cmd {
         BackendToSidecar::SpawnProcess {
@@ -595,6 +586,34 @@ async fn handle_command(
         // that don't auto-stream every enumerated window.
         BackendToSidecar::StartWindowCapture { .. }
         | BackendToSidecar::StopWindowCapture { .. } => {}
+    }
+}
+
+/// Compress `DisplayUpdate::PutImage`'s raw-RGBA payload into the
+/// WebP-lossless format the wire (and the frontend's `createImageBitmap`
+/// decoder) expects. All other variants are returned unchanged.
+fn encode_for_wire(update: DisplayUpdate) -> DisplayUpdate {
+    match update {
+        DisplayUpdate::PutImage {
+            window_id,
+            x,
+            y,
+            width,
+            height,
+            data,
+        } => {
+            let encoded =
+                x11_web_pixel_codec::encode_rgba_lossless(&data, width as u32, height as u32);
+            DisplayUpdate::PutImage {
+                window_id,
+                x,
+                y,
+                width,
+                height,
+                data: encoded,
+            }
+        }
+        other => other,
     }
 }
 

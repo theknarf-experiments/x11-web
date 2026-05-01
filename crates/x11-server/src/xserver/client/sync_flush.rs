@@ -339,6 +339,10 @@ impl ClientState {
                         }
                     }
 
+                    // Pixels are raw RGBA — the embedder
+                    // (`x11-web-sidecar`) compresses to WebP-lossless
+                    // before forwarding to the wire so encoding
+                    // concerns stay out of the X server library.
                     let owner = if win.owner_client_id.is_empty() {
                         self.client_id.clone()
                     } else {

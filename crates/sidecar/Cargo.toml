@@ -3,57 +3,19 @@ name = "x11-web-sidecar"
 version = "0.1.0"
 edition = "2021"
 
-[features]
-default = ["osmesa", "all-extensions"]
-osmesa = []
-# Extension groups — each gates a set of X11 extensions at compile time.
-all-extensions = ["ext-core", "ext-input", "ext-render", "ext-glx", "ext-media", "ext-compat"]
-ext-core    = []  # SHAPE, MIT-SHM, BIG-REQUESTS, SYNC, GE, XFIXES, RANDR, XC-MISC, X-Resource
-ext-input   = []  # XInputExtension, XTEST, XKEYBOARD
-ext-render  = []  # RENDER, Composite, DAMAGE, Present
-ext-glx     = []  # GLX, DRI3
-ext-media   = []  # XVideo, DOUBLE-BUFFER
-ext-compat  = []  # DPMS, MIT-SCREEN-SAVER, VidMode, RECORD, SECURITY, XINERAMA
-
 [dependencies]
+# Embeddable X11 server (framebuffer, protocol, extensions). Sidecar
+# owns the wire side; the server emits typed events into a channel.
+x11-web-x11-server = { path = "../x11-server" }
 x11-web-protocol = { path = "../protocol" }
 x11-web-wire = { path = "../wire" }
+# Pixel encoder shared with sidecar-macos. Sidecar compresses raw
+# RGBA pixels into WebP-lossless before they hit the wire.
+x11-web-pixel-codec = { path = "../pixel-codec" }
 capnp = "0.20"
 rustls = { version = "0.23", default-features = false, features = ["ring"] }
-x11rb-protocol = { version = "0.13", features = [
-    "request-parsing",
-    "composite", "damage", "dbe", "dpms", "dri3", "glx", "present",
-    "randr", "record", "render", "res", "screensaver", "shape", "shm",
-    "sync", "xf86vidmode", "xfixes", "xinerama", "xinput", "xkb", "xtest", "xv",
-] }
 tokio = { version = "1", features = ["full"] }
 futures = "0.3"
-serde = { version = "1", features = ["derive"] }
 tracing = "0.1"
 tracing-subscriber = "0.3"
 uuid = { version = "1", features = ["v4"] }
-bdf-parser = "0.1"
-# Used for gz-decoding fonts (BDF / PCF). Pixel compression lives in
-# `x11-web-pixel-codec` (WebP-lossless), shared with sidecar-macos.
-flate2 = "1"
-x11-web-pixel-codec = { path = "../pixel-codec" }
-glob = "0.3"
-libc = "0.2"
-freetype-rs = "0.38"
-freetype-sys = { version = "0.23", features = ["bundled"] }
-# DBus client — mirrors GTK / Qt application menus via
-# `org.gtk.Menus` and `com.canonical.dbusmenu`.
-zbus = { version = "4", default-features = false, features = ["tokio"] }
-# SIMD-optimized YUV<->RGB color conversion for XVideo
-dcv-color-primitives = "1"
-# 2D rasterizer used for RENDER trapezoid/triangle anti-aliased coverage
-tiny-skia = { version = "0.12", default-features = false, features = ["std", "simd"] }
-# libxkbcommon bindings — keysym resolution + compose state machine
-xkbcommon = "0.9"
-
-[build-dependencies]
-# Generates GL function bindings (compatibility profile so legacy
-# fixed-function calls — Begin/End/Vertex*/Color*/MatrixMode/etc. —
-# are included; the `gl` crate ships core-only). Output is included
-# in `osmesa/mod.rs` and loaded via OSMesa's GetProcAddress.
-gl_generator = "0.14"

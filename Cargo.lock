@@ -3351,19 +3351,9 @@ dependencies = [
 name = "x11-web-sidecar"
 version = "0.1.0"
 dependencies = [
- "bdf-parser",
  "capnp",
- "dcv-color-primitives",
- "flate2",
- "freetype-rs",
- "freetype-sys",
  "futures",
- "gl_generator",
- "glob",
- "libc",
  "rustls",
- "serde",
- "tiny-skia",
  "tokio",
  "tracing",
  "tracing-subscriber",
@@ -3371,9 +3361,7 @@ dependencies = [
  "x11-web-pixel-codec",
  "x11-web-protocol",
  "x11-web-wire",
- "x11rb-protocol",
- "xkbcommon",
- "zbus",
+ "x11-web-x11-server",
 ]
 
 [[package]]
@@ -3423,6 +3411,30 @@ dependencies = [
  "tokio",
  "tracing",
  "x11-web-protocol",
+]
+
+[[package]]
+name = "x11-web-x11-server"
+version = "0.1.0"
+dependencies = [
+ "bdf-parser",
+ "dcv-color-primitives",
+ "flate2",
+ "freetype-rs",
+ "freetype-sys",
+ "futures",
+ "gl_generator",
+ "glob",
+ "libc",
+ "serde",
+ "tiny-skia",
+ "tokio",
+ "tracing",
+ "uuid",
+ "x11-web-protocol",
+ "x11rb-protocol",
+ "xkbcommon",
+ "zbus",
 ]
 
 [[package]]

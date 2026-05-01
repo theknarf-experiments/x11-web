@@ -335,7 +335,12 @@ impl Framebuffer {
         self.dirty = None;
     }
 
-    /// Extract the dirty region and clear the dirty flag.
+    /// Extract the dirty region as raw RGBA bytes and clear the
+    /// dirty flag. The caller is responsible for any post-processing
+    /// (shape clipping, etc.) and for encoding to WebP before
+    /// sending — encoding here would force every caller to operate
+    /// on opaque compressed bytes, which silently corrupts when
+    /// downstream code treats them as a pixel array.
     pub fn take_dirty_pixels(&mut self) -> Option<(i16, i16, u16, u16, Vec<u8>)> {
         let (dx, dy, dw, dh) = self.dirty.take()?;
         if dw == 0 || dh == 0 {
@@ -356,9 +361,7 @@ impl Framebuffer {
                 pixels.extend_from_slice(&self.data[y_off + x_off..end]);
             }
         }
-
-        let compressed = x11_web_pixel_codec::encode_rgba_lossless(&pixels, dw, dh);
-        Some((dx as i16, dy as i16, dw as u16, dh as u16, compressed))
+        Some((dx as i16, dy as i16, dw as u16, dh as u16, pixels))
     }
 
     /// Fill a rectangle with a solid color (0x00RRGGBB format).

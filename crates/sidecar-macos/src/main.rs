@@ -189,9 +189,8 @@ mod macos {
         // `StartWindowCapture` / `StopWindowCapture`, which the
         // recv_loop forwards onto `capture_ctl_tx`.
         let router = WindowRouter::new();
-        let (capture_ctl_tx, capture_ctl_rx) = mpsc::unbounded_channel::<
-            x11_web_sidecar_macos::enumerator::CaptureControl,
-        >();
+        let (capture_ctl_tx, capture_ctl_rx) =
+            mpsc::unbounded_channel::<x11_web_sidecar_macos::enumerator::CaptureControl>();
         x11_web_sidecar_macos::enumerator::spawn(tx.clone(), router.clone(), capture_ctl_rx);
 
         // Drive recv + send concurrently in the same task so capnp's
@@ -248,9 +247,7 @@ mod macos {
     fn handle_backend_msg(
         cmd: BackendToSidecar,
         router: &WindowRouter,
-        capture_ctl_tx: &mpsc::UnboundedSender<
-            x11_web_sidecar_macos::enumerator::CaptureControl,
-        >,
+        capture_ctl_tx: &mpsc::UnboundedSender<x11_web_sidecar_macos::enumerator::CaptureControl>,
     ) {
         use x11_web_sidecar_macos::enumerator::CaptureControl;
         match cmd {

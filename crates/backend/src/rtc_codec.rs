@@ -47,12 +47,7 @@ pub fn encode_put_image(
 /// single Vec ready for `RTCDataChannel.send`. Mirrors
 /// [`encode_put_image`] minus the (x, y) offset — thumbnails always
 /// represent the full window.
-pub fn encode_window_thumbnail(
-    window_id: &str,
-    width: u16,
-    height: u16,
-    data: &[u8],
-) -> Vec<u8> {
+pub fn encode_window_thumbnail(window_id: &str, width: u16, height: u16, data: &[u8]) -> Vec<u8> {
     let words_needed = (data.len() + window_id.len() + 128).div_ceil(8);
     let allocator = HeapAllocator::new().first_segment_words(words_needed as u32);
     let mut message = capnp::message::Builder::new(allocator);

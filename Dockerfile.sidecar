@@ -48,7 +48,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential pkg-config \
     libdbusmenu-glib-dev libx11-dev libglib2.0-dev \
     && rm -rf /var/lib/apt/lists/*
-COPY crates/sidecar/test-tools/dbusmenu-test.c /tmp/
+COPY crates/x11-server/test-tools/dbusmenu-test.c /tmp/
 RUN gcc -o /usr/local/bin/dbusmenu-test /tmp/dbusmenu-test.c \
     $(pkg-config --cflags --libs dbusmenu-glib-0.4 x11) \
     || touch /usr/local/bin/dbusmenu-test
@@ -124,19 +124,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libavcodec-extra \
     # CJK fonts for XIM CJK input testing
     fonts-noto-cjk \
-    # PulseAudio daemon — sidecar starts it so X11 apps have a sound
-    # server to connect to (audio doesn't cross the wire yet).
-    pulseaudio \
-    libpulse0 \
-    # Opus codec runtime — needed by Firefox / VLC etc. for WebRTC
-    # and media playback inside the X11 session.
-    libopus0 \
     # OpenSSL runtime — used by X11 apps (Firefox, etc.) for TLS.
     libssl3 \
-    # VLC for audio/video e2e tests
-    vlc \
-    # Audacity for recording e2e tests (CLI mode)
-    audacity \
     # GLX testing (not available on all architectures; install if present)
     && rm -rf /var/lib/apt/lists/* \
     && apt-get update && apt-get install -y --no-install-recommends glmark2 2>/dev/null; \
@@ -190,7 +179,7 @@ RUN mkdir -p /tmp/.X11-unix
 # Fixed hostname so xterm/vim prompts are deterministic in e2e snapshot tests
 RUN echo "x11web" > /etc/hostname
 COPY --from=builder /app/target/release/x11-web-sidecar /usr/local/bin/
-COPY crates/sidecar/fonts/ /usr/local/share/fonts/bdf/
+COPY crates/x11-server/fonts/ /usr/local/share/fonts/bdf/
 COPY crates/sidecar/entrypoint.sh /usr/local/bin/entrypoint.sh
 RUN chmod +x /usr/local/bin/entrypoint.sh
 ENV DISPLAY_NUMBER=99

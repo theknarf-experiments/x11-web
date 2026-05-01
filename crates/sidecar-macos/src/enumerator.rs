@@ -225,9 +225,7 @@ fn handle_capture_control(
             // Find the Tracked entry by UUID. The map is keyed by
             // CGWindowID for cheap lookup during enumeration; here
             // we iterate since per-second start/stop is rare.
-            let entry = tracked
-                .iter_mut()
-                .find(|(_, t)| t.uuid == window_id);
+            let entry = tracked.iter_mut().find(|(_, t)| t.uuid == window_id);
             let Some((cg_id, t)) = entry else {
                 warn!("StartWindowCapture for unknown window_id={window_id}");
                 return;
@@ -240,9 +238,7 @@ fn handle_capture_control(
             info!("Started live capture for window {} (cg_id={cg_id})", t.uuid);
         }
         CaptureControl::Stop { window_id } => {
-            let entry = tracked
-                .iter_mut()
-                .find(|(_, t)| t.uuid == window_id);
+            let entry = tracked.iter_mut().find(|(_, t)| t.uuid == window_id);
             let Some((cg_id, t)) = entry else {
                 warn!("StopWindowCapture for unknown window_id={window_id}");
                 return;

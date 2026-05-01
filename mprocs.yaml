@@ -32,7 +32,7 @@ procs:
       # "network <id> not found". `rm -fs` drops the stale container so
       # `up` creates a fresh one on the current default network.
       docker compose rm -fs sidecar >/dev/null 2>&1 || true
-      docker compose up sidecar
+      docker compose up --build sidecar
 
   # macOS sidecar — connects to the backend over QUIC :3002. Builds
   # the .app bundle (stable codesign identity for TCC), waits for
