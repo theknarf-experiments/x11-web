@@ -7,6 +7,7 @@ export interface SidecarInfo {
 
 export interface ProcessInfo {
 	pid: number;
+	client_id: string;
 	command: string;
 }
 
@@ -21,32 +22,10 @@ export type BackendToFrontend =
 	  }
 	| { type: "ProcessList"; sidecar_id: string; processes: ProcessInfo[] }
 	| {
-			type: "ProcessExited";
-			sidecar_id: string;
-			pid: number;
-			exit_code: number | null;
-	  }
-	| {
-			type: "ProcessConnected";
-			sidecar_id: string;
-			pid: number;
-			client_id: string;
-			command: string;
-	  }
-	| {
 			type: "DisplayUpdate";
 			sidecar_id: string;
 			client_id: string;
 			update: DisplayUpdate;
-	  }
-	| {
-			type: "ConnectedProcessesList";
-			processes: {
-				sidecar_id: string;
-				pid: number;
-				client_id: string;
-				command: string;
-			}[];
 	  }
 	| {
 			type: "WindowStateList";
@@ -96,7 +75,6 @@ export type FrontendToBackend =
 			args: string[];
 	  }
 	| { type: "KillProcess"; request_id: string; sidecar_id: string; pid: number }
-	| { type: "ListProcesses"; request_id: string; sidecar_id: string }
 	| { type: "SubscribeDisplay"; sidecar_id: string }
 	| {
 			type: "InputEvent";

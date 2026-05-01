@@ -33,33 +33,20 @@ pub enum BackendToFrontend {
         success: bool,
         message: String,
     },
-    /// Process list for a sidecar.
+    /// Authoritative list of X11-connected processes for one sidecar.
+    /// Sent on initial frontend connect (one per sidecar), whenever a
+    /// process connects or exits, and on sidecar disconnect (with an
+    /// empty list). The frontend reconciles against the full list per
+    /// sidecar rather than tracking incremental connect/exit events.
     ProcessList {
         sidecar_id: String,
         processes: Vec<ProcessInfo>,
-    },
-    /// A process exited.
-    ProcessExited {
-        sidecar_id: String,
-        pid: u32,
-        exit_code: Option<i32>,
-    },
-    /// An X11 client connected and was associated with a spawned process.
-    ProcessConnected {
-        sidecar_id: String,
-        pid: u32,
-        client_id: String,
-        command: String,
     },
     /// Display update forwarded from a sidecar.
     DisplayUpdate {
         sidecar_id: String,
         client_id: String,
         update: DisplayUpdate,
-    },
-    /// Initial list of all currently connected processes (sent on frontend connect).
-    ConnectedProcessesList {
-        processes: Vec<ConnectedProcessInfo>,
     },
     /// Initial window state for all windows (sent on frontend connect).
     WindowStateList { windows: Vec<WindowState> },
@@ -112,11 +99,6 @@ pub enum FrontendToBackend {
         sidecar_id: String,
         pid: u32,
     },
-    /// List processes on a sidecar.
-    ListProcesses {
-        request_id: String,
-        sidecar_id: String,
-    },
     /// Subscribe to display updates from a sidecar.
     SubscribeDisplay { sidecar_id: String },
     /// Request a full redraw of a window.
@@ -167,14 +149,6 @@ pub enum FrontendToBackend {
     },
 }
 
-/// Information about a connected process (for initial sync).
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ConnectedProcessInfo {
-    pub sidecar_id: String,
-    pub pid: u32,
-    pub client_id: String,
-    pub command: String,
-}
 
 /// Window state for position/color sync.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -194,10 +168,12 @@ pub struct SidecarInfo {
     pub name: String,
 }
 
-/// Information about a running process.
+/// One X11-connected process under a sidecar. Wrapped in a
+/// [`BackendToFrontend::ProcessList`] keyed by `sidecar_id`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProcessInfo {
     pub pid: u32,
+    pub client_id: String,
     pub command: String,
 }
 

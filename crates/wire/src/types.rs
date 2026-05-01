@@ -1,14 +1,23 @@
 //! High-level Rust enums for sidecar↔backend messages.
 //!
 //! Wraps the data types from `x11_web_protocol` (`DisplayUpdate`,
-//! `InputEvent`, `ProcessInfo`) with envelope variants. Each
+//! `InputEvent`, `SpawnedProcessInfo`) with envelope variants. Each
 //! consumer's `wire_bridge` translates between these and the Cap'n
 //! Proto types in `wire_capnp`.
 //!
 //! No serde derives — the on-wire format is Cap'n Proto, so these
 //! enums never see JSON. `Debug` is kept for tracing.
 
-use x11_web_protocol::{DisplayUpdate, InputEvent, ProcessInfo};
+use x11_web_protocol::{DisplayUpdate, InputEvent};
+
+/// On-host process listing returned by a sidecar in response to
+/// `ListProcesses`. Wire-only; the frontend-facing protocol uses
+/// `protocol::ProcessInfo` (which carries an X11 `client_id`).
+#[derive(Debug, Clone)]
+pub struct SpawnedProcessInfo {
+    pub pid: u32,
+    pub command: String,
+}
 
 /// Messages sent from the backend to a sidecar.
 #[derive(Debug)]
@@ -69,7 +78,7 @@ pub enum SidecarToBackend {
     /// List of running processes.
     ProcessList {
         request_id: String,
-        processes: Vec<ProcessInfo>,
+        processes: Vec<SpawnedProcessInfo>,
     },
     /// An X11 client connected and was associated with a spawned process.
     ProcessConnected {

@@ -177,49 +177,31 @@ export function useBackendSocket() {
 						);
 						break;
 					}
-					case "ProcessList":
+					case "ProcessList": {
+						// Authoritative for one sidecar — replace its
+						// per-sidecar list and rebuild the flat
+						// cross-sidecar `connectedProcesses` array.
+						const sidecarId = msg.sidecar_id;
 						setProcesses((prev) => ({
 							...prev,
-							[msg.sidecar_id]: msg.processes,
+							[sidecarId]: msg.processes,
 						}));
-						break;
-					case "ProcessExited":
-						setProcesses((prev) => ({
-							...prev,
-							[msg.sidecar_id]: (prev[msg.sidecar_id] || []).filter(
-								(p) => p.pid !== msg.pid,
-							),
-						}));
-						setConnectedProcesses((prev) =>
-							prev.filter((p) => p.pid !== msg.pid),
-						);
-						break;
-					case "ProcessConnected":
 						setConnectedProcesses((prev) => [
-							...prev,
-							{
-								sidecarId: msg.sidecar_id,
-								pid: msg.pid,
-								clientId: msg.client_id,
-								command: msg.command,
-							},
+							...prev.filter((p) => p.sidecarId !== sidecarId),
+							...msg.processes.map((p) => ({
+								sidecarId,
+								pid: p.pid,
+								clientId: p.client_id,
+								command: p.command,
+							})),
 						]);
 						break;
+					}
 					case "DisplayUpdate":
 						displayCallbackRef.current?.(
 							msg.sidecar_id,
 							msg.client_id,
 							msg.update,
-						);
-						break;
-					case "ConnectedProcessesList":
-						setConnectedProcesses(
-							msg.processes.map((p) => ({
-								sidecarId: p.sidecar_id,
-								pid: p.pid,
-								clientId: p.client_id,
-								command: p.command,
-							})),
 						);
 						break;
 					case "WindowStateList":

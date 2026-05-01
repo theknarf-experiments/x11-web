@@ -20,7 +20,7 @@ pub mod conn;
 pub mod tls;
 pub mod types;
 
-pub use types::{BackendToSidecar, SidecarToBackend};
+pub use types::{BackendToSidecar, SidecarToBackend, SpawnedProcessInfo};
 
 /// Generated Cap'n Proto types. The build script writes this module
 /// to `$OUT_DIR/wire_capnp.rs`; we `include!` it so it appears as

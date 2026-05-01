@@ -199,15 +199,11 @@ function App() {
 				pid: cp.pid,
 				command: cp.command,
 			});
-			// Auto-subscribe to display updates and request process list
+			// Auto-subscribe to display updates. The backend pushes
+			// ProcessList for every sidecar without us having to ask.
 			if (!subscribedRef.current.has(cp.sidecarId)) {
 				subscribedRef.current.add(cp.sidecarId);
 				send({ type: "SubscribeDisplay", sidecar_id: cp.sidecarId });
-				send({
-					type: "ListProcesses",
-					request_id: nextRequestId(),
-					sidecar_id: cp.sidecarId,
-				});
 			}
 		}
 

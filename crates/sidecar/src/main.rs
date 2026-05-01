@@ -19,7 +19,6 @@ use tokio::process::{Child, Command};
 use tokio::sync::mpsc;
 use tokio::time::{interval, Duration};
 use tracing::{error, info, warn};
-use x11_web_protocol::*;
 use x11_web_wire::bridge as wire_bridge;
 use x11_web_wire::conn::{dial, DialedConnection};
 use x11_web_wire::tls::parse_fingerprint;
@@ -99,10 +98,10 @@ impl ProcessManager {
         self.processes.get(&pid).map(|p| p.command.as_str())
     }
 
-    fn list(&self) -> Vec<ProcessInfo> {
+    fn list(&self) -> Vec<x11_web_wire::SpawnedProcessInfo> {
         self.processes
             .iter()
-            .map(|(&pid, proc)| ProcessInfo {
+            .map(|(&pid, proc)| x11_web_wire::SpawnedProcessInfo {
                 pid,
                 command: proc.command.clone(),
             })

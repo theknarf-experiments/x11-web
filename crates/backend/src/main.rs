@@ -21,8 +21,11 @@ use x11_web_wire::{BackendToSidecar, SidecarToBackend};
 struct AppState {
     sidecars: Arc<RwLock<HashMap<String, SidecarConnection>>>,
     frontends: Arc<RwLock<HashMap<String, FrontendConnection>>>,
-    /// Registry of connected X11 processes: client_id → (sidecar_id, pid)
-    connected_processes: Arc<RwLock<HashMap<String, (String, u32, String)>>>,
+    /// Authoritative per-sidecar list of X11-connected processes.
+    /// Mutated by `ProcessConnected` / `ProcessExited` events from
+    /// sidecars; broadcast to frontends as `BackendToFrontend::ProcessList`
+    /// after every change.
+    processes: Arc<RwLock<HashMap<String, Vec<ProcessInfo>>>>,
     /// Window state for position/color sync: client_id → WindowState
     window_states: Arc<RwLock<HashMap<String, WindowState>>>,
     /// Display update buffer per client_id for replay on frontend connect
@@ -46,7 +49,7 @@ async fn main() {
     let state = AppState {
         sidecars: Arc::new(RwLock::new(HashMap::new())),
         frontends: Arc::new(RwLock::new(HashMap::new())),
-        connected_processes: Arc::new(RwLock::new(HashMap::new())),
+        processes: Arc::new(RwLock::new(HashMap::new())),
         window_states: Arc::new(RwLock::new(HashMap::new())),
         display_buffers: Arc::new(RwLock::new(HashMap::new())),
     };
@@ -132,69 +135,58 @@ async fn dispatch_sidecar_msg(state: &AppState, sidecar_id: &str, msg: SidecarTo
                 )
                 .await;
             }
-            SidecarToBackend::ProcessExited { pid, exit_code } => {
-                // Clean up from registries
-                let mut procs = state.connected_processes.write().await;
-                let mut states = state.window_states.write().await;
-                // Find client_ids for this pid to clean up display buffers
-                let client_ids: Vec<String> = procs
-                    .iter()
-                    .filter(|(_, (_, p, _))| *p == pid)
-                    .map(|(cid, _)| cid.clone())
-                    .collect();
-                procs.retain(|_, (_, p, _)| *p != pid);
-                states.retain(|_, ws| ws.pid != pid);
-                drop(procs);
-                drop(states);
-                {
+            SidecarToBackend::ProcessExited {
+                pid,
+                exit_code: _,
+            } => {
+                // Drop matching entries from per-sidecar list and the
+                // window-state index; clear any buffered display
+                // updates keyed by the freed client_ids.
+                let freed_client_ids: Vec<String> = {
+                    let mut procs = state.processes.write().await;
+                    let list = procs.entry(sidecar_id.clone()).or_default();
+                    let freed: Vec<String> = list
+                        .iter()
+                        .filter(|p| p.pid == pid)
+                        .map(|p| p.client_id.clone())
+                        .collect();
+                    list.retain(|p| p.pid != pid);
+                    freed
+                };
+                state.window_states.write().await.retain(|_, ws| ws.pid != pid);
+                if !freed_client_ids.is_empty() {
                     let mut bufs = state.display_buffers.write().await;
-                    for cid in &client_ids {
+                    for cid in &freed_client_ids {
                         bufs.remove(cid);
                     }
                 }
-                broadcast_to_frontends(
-                    &state,
-                    BackendToFrontend::ProcessExited {
-                        sidecar_id: sidecar_id.clone(),
-                        pid,
-                        exit_code,
-                    },
-                )
-                .await;
+                broadcast_process_list(state, &sidecar_id).await;
             }
             SidecarToBackend::ProcessList {
                 request_id: _,
-                processes,
+                processes: _,
             } => {
-                broadcast_to_frontends(
-                    &state,
-                    BackendToFrontend::ProcessList {
-                        sidecar_id: sidecar_id.clone(),
-                        processes,
-                    },
-                )
-                .await;
+                // Sidecar's spawned-process listing is no longer
+                // forwarded — the frontend works exclusively from the
+                // X11-connected list maintained via ProcessConnected /
+                // ProcessExited events.
             }
             SidecarToBackend::ProcessConnected {
                 pid,
                 client_id,
                 command,
             } => {
-                // Register in process registry
-                state.connected_processes.write().await.insert(
-                    client_id.clone(),
-                    (sidecar_id.clone(), pid, command.clone()),
-                );
-                broadcast_to_frontends(
-                    &state,
-                    BackendToFrontend::ProcessConnected {
-                        sidecar_id: sidecar_id.clone(),
+                {
+                    let mut procs = state.processes.write().await;
+                    let list = procs.entry(sidecar_id.clone()).or_default();
+                    list.retain(|p| p.client_id != client_id);
+                    list.push(ProcessInfo {
                         pid,
                         client_id,
                         command,
-                    },
-                )
-                .await;
+                    });
+                }
+                broadcast_process_list(state, &sidecar_id).await;
             }
             SidecarToBackend::DisplayUpdate { client_id, update } => {
                 let is_put_image =
@@ -311,20 +303,21 @@ async fn cleanup_sidecar(state: &AppState, sidecar_id: &str) {
     state.sidecars.write().await.remove(sidecar_id);
     // Clean up processes, window states, and display buffers for
     // this sidecar.
+    let client_ids: Vec<String> = state
+        .processes
+        .write()
+        .await
+        .remove(sidecar_id)
+        .unwrap_or_default()
+        .into_iter()
+        .map(|p| p.client_id)
+        .collect();
+    state
+        .window_states
+        .write()
+        .await
+        .retain(|_, ws| ws.sidecar_id != sidecar_id);
     {
-        let mut procs = state.connected_processes.write().await;
-        let client_ids: Vec<String> = procs
-            .iter()
-            .filter(|(_, (sid, _, _))| sid == sidecar_id)
-            .map(|(cid, _)| cid.clone())
-            .collect();
-        procs.retain(|_, (sid, _, _)| sid != sidecar_id);
-        drop(procs);
-        state
-            .window_states
-            .write()
-            .await
-            .retain(|_, ws| ws.sidecar_id != sidecar_id);
         let mut bufs = state.display_buffers.write().await;
         for cid in &client_ids {
             bufs.remove(cid);
@@ -332,6 +325,9 @@ async fn cleanup_sidecar(state: &AppState, sidecar_id: &str) {
     }
 
     broadcast_sidecar_list(state).await;
+    // The sidecar's per-sidecar process list went to zero; let
+    // frontends know with one final empty broadcast.
+    broadcast_process_list(state, sidecar_id).await;
 }
 
 async fn frontend_ws_handler(
@@ -382,22 +378,14 @@ async fn handle_frontend_ws(socket: WebSocket, state: AppState) {
         let _ = tx.send(BackendToFrontend::SidecarList { sidecars });
     }
 
-    // Send currently connected processes
+    // Send the per-sidecar X11-connected process list to this frontend.
     {
-        let procs = state.connected_processes.read().await;
-        let processes: Vec<ConnectedProcessInfo> = procs
-            .iter()
-            .map(
-                |(client_id, (sidecar_id, pid, command))| ConnectedProcessInfo {
-                    sidecar_id: sidecar_id.clone(),
-                    pid: *pid,
-                    client_id: client_id.clone(),
-                    command: command.clone(),
-                },
-            )
-            .collect();
-        if !processes.is_empty() {
-            let _ = tx.send(BackendToFrontend::ConnectedProcessesList { processes });
+        let procs = state.processes.read().await;
+        for (sidecar_id, processes) in procs.iter() {
+            let _ = tx.send(BackendToFrontend::ProcessList {
+                sidecar_id: sidecar_id.clone(),
+                processes: processes.clone(),
+            });
         }
     }
 
@@ -407,17 +395,6 @@ async fn handle_frontend_ws(socket: WebSocket, state: AppState) {
         let windows: Vec<WindowState> = states.values().cloned().collect();
         if !windows.is_empty() {
             let _ = tx.send(BackendToFrontend::WindowStateList { windows });
-        }
-    }
-
-    // Request process lists from all connected sidecars so the frontend
-    // gets command names (e.g. "xterm", "firefox-esr") immediately.
-    {
-        let sidecars = state.sidecars.read().await;
-        for (sidecar_id, sidecar) in sidecars.iter() {
-            let _ = sidecar.tx.send(BackendToSidecar::ListProcesses {
-                request_id: format!("init-{}", sidecar_id),
-            });
         }
     }
 
@@ -458,17 +435,6 @@ async fn handle_frontend_ws(socket: WebSocket, state: AppState) {
                 )
                 .await;
             }
-            FrontendToBackend::ListProcesses {
-                request_id,
-                sidecar_id,
-            } => {
-                forward_to_sidecar(
-                    &state,
-                    &sidecar_id,
-                    BackendToSidecar::ListProcesses { request_id },
-                )
-                .await;
-            }
             FrontendToBackend::SubscribeDisplay { sidecar_id } => {
                 let mut frontends = state.frontends.write().await;
                 if let Some(frontend) = frontends.get_mut(&frontend_id) {
@@ -477,10 +443,10 @@ async fn handle_frontend_ws(socket: WebSocket, state: AppState) {
 
                         // Replay buffered display updates for all clients of this sidecar
                         let bufs = state.display_buffers.read().await;
-                        let procs = state.connected_processes.read().await;
-                        for (client_id, (sid, _, _)) in procs.iter() {
-                            if sid == &sidecar_id {
-                                if let Some(buf) = bufs.get(client_id) {
+                        let procs = state.processes.read().await;
+                        if let Some(list) = procs.get(&sidecar_id) {
+                            for p in list {
+                                if let Some(buf) = bufs.get(&p.client_id) {
                                     for msg in buf {
                                         let _ = frontend.tx.send(msg.clone());
                                     }
@@ -581,11 +547,15 @@ async fn handle_frontend_ws(socket: WebSocket, state: AppState) {
                 y,
                 color,
             } => {
-                // Look up pid from connected_processes
-                let pid = {
-                    let procs = state.connected_processes.read().await;
-                    procs.get(&client_id).map(|(_, p, _)| *p).unwrap_or(0)
-                };
+                // Look up pid by client_id by scanning the per-sidecar list.
+                let pid = state
+                    .processes
+                    .read()
+                    .await
+                    .get(&sidecar_id)
+                    .and_then(|list| list.iter().find(|p| p.client_id == client_id))
+                    .map(|p| p.pid)
+                    .unwrap_or(0);
 
                 // Store window state
                 state.window_states.write().await.insert(
@@ -650,4 +620,25 @@ pub async fn broadcast_sidecar_list(state: &AppState) {
         .map(|s| s.info.clone())
         .collect();
     broadcast_to_frontends(state, BackendToFrontend::SidecarList { sidecars }).await;
+}
+
+/// Snapshot one sidecar's X11-connected process list and broadcast it
+/// to every frontend. Called on `ProcessConnected` / `ProcessExited`
+/// events from the sidecar and on sidecar disconnect.
+pub async fn broadcast_process_list(state: &AppState, sidecar_id: &str) {
+    let processes = state
+        .processes
+        .read()
+        .await
+        .get(sidecar_id)
+        .cloned()
+        .unwrap_or_default();
+    broadcast_to_frontends(
+        state,
+        BackendToFrontend::ProcessList {
+            sidecar_id: sidecar_id.to_string(),
+            processes,
+        },
+    )
+    .await;
 }

@@ -17,10 +17,10 @@
 use capnp::message::{Builder, HeapAllocator};
 use x11_web_protocol::{
     AnimCursorFrame, DisplayUpdate, DndEventKind, GesturePhase, InputEvent, MenuAction,
-    MenuActionTarget, MenuItem, MenuItemKind, ProcessInfo, WindowWmState,
+    MenuActionTarget, MenuItem, MenuItemKind, WindowWmState,
 };
 
-use crate::types::{BackendToSidecar, SidecarToBackend};
+use crate::types::{BackendToSidecar, SidecarToBackend, SpawnedProcessInfo};
 use crate::wire_capnp;
 
 #[derive(Debug)]
@@ -365,7 +365,7 @@ pub fn read_from_sidecar(
             let processes = pl.get_processes()?;
             let mut out = Vec::with_capacity(processes.len() as usize);
             for entry in processes.iter() {
-                out.push(ProcessInfo {
+                out.push(SpawnedProcessInfo {
                     pid: entry.get_pid(),
                     command: entry.get_command()?.to_string()?,
                 });
