@@ -1,32 +1,26 @@
 //! Single-window capture via ScreenCaptureKit.
 //!
-//! Mirrors cua-driver's `WindowCapture.captureWindow`:
+//! Two-phase API:
 //!
-//!   1. `SCShareableContent.getShareableContentWithCompletionHandler:`
-//!      to enumerate every window WindowServer knows about.
-//!   2. Locate the `SCWindow` whose `windowID` matches the
-//!      `CGWindowID` we tracked via `CGWindowListCopyWindowInfo`.
-//!   3. `SCContentFilter(desktopIndependentWindow:)` — the filter
-//!      kind that captures hidden / occluded / off-Space windows by
-//!      reading the desktop-independent compositor surface, instead
-//!      of grabbing rectangles off a display.
-//!   4. `SCScreenshotManager.captureImageWithFilter:configuration:` —
-//!      one-shot capture, returns a CGImage in BGRA.
-//!   5. Drain CGImage's data provider, swap channels into RGBA, drop
-//!      any per-row padding.
+//!   1. [`build_session`] enumerates the desktop's shareable windows
+//!      once, finds the target by `CGWindowID`, and constructs a
+//!      reusable [`CaptureSession`] (an `SCContentFilter` plus a
+//!      pre-built `SCStreamConfiguration`).
+//!   2. [`capture_with_session`] reuses the cached session to take a
+//!      single screenshot via `SCScreenshotManager.captureImage`.
+//!      No per-frame enumeration; just the readback.
 //!
-//! The chain is structured as **nested ObjC completion handlers** —
-//! `getShareableContent`'s callback synchronously kicks off
-//! `captureImage`'s callback, which extracts pixels and sends the
-//! resulting `CapturedFrame` through a single `oneshot`. This shape
-//! keeps every ObjC type (SCShareableContent, SCWindow,
-//! SCContentFilter, CGImage) inside the ObjC-owned thread context,
-//! so the only thing crossing Rust's `.await` boundary is
-//! `oneshot::Receiver<Result<CapturedFrame, String>>` — which IS
-//! `Send`, allowing `capture_window` to be called from
-//! `tokio::spawn`'d tasks.
+//! Skipping the enumeration removes the 50–300 ms / call overhead
+//! we'd otherwise pay every frame on a busy desktop.
+//!
+//! Both entry points are *synchronous* — they block on a
+//! `std::sync::mpsc` channel until the ObjC completion block fires,
+//! and are intended to run on a dedicated `std::thread` rather than a
+//! tokio task. That's because the cached `Retained<SCContentFilter>`
+//! is `!Send` — see the unsafe impl on [`CaptureSession`] below.
 
 use std::ptr::NonNull;
+use std::sync::mpsc::{sync_channel, SyncSender};
 use std::sync::{Arc, Mutex};
 
 use block2::RcBlock;
@@ -38,7 +32,6 @@ use objc2_foundation::NSError;
 use objc2_screen_capture_kit::{
     SCContentFilter, SCScreenshotManager, SCShareableContent, SCStreamConfiguration,
 };
-use tokio::sync::oneshot;
 
 #[derive(Debug)]
 pub enum CaptureError {
@@ -75,83 +68,109 @@ pub struct CapturedFrame {
     pub rgba: Vec<u8>,
 }
 
-/// One-shot completion delivered by the nested ObjC blocks.
-type FrameSender = oneshot::Sender<Result<CapturedFrame, String>>;
-type SharedSender = Arc<Mutex<Option<FrameSender>>>;
-
-/// Capture `window_id` and return its pixels as packed RGBA.
+/// A cached capture target — the SC objects needed to take a
+/// screenshot of a specific window without re-enumerating the whole
+/// desktop. Build once via [`build_session`], reuse across many
+/// [`capture_with_session`] calls.
 ///
-/// `max_dim`, if non-zero, caps the longer side of the captured
-/// image (in points) — SCK does the downscale internally during
-/// capture, so neither the wire payload nor our extract loop pay
-/// for the extra pixels. A typical desktop window at 1600×1000
-/// emits ~6.4 MB of RGBA at full size; capping to `max_dim = 800`
-/// brings that to ~1.6 MB which JSON-over-WebSocket can carry at
-/// a couple Hz without choking.
-///
-/// Send-friendly: holds only `oneshot::Receiver` across `.await`,
-/// never ObjC types.
-pub async fn capture_window(window_id: u32, max_dim: u32) -> Result<CapturedFrame, CaptureError> {
-    let (tx, rx) = oneshot::channel::<Result<CapturedFrame, String>>();
-    let sender: SharedSender = Arc::new(Mutex::new(Some(tx)));
+/// The session pins to the window's bounds at build time. If the
+/// macOS window resizes, captures keep coming back at the original
+/// size (downscaled / upscaled to fit). Rebuild the session if the
+/// caller knows the bounds changed.
+pub struct CaptureSession {
+    filter: Retained<SCContentFilter>,
+    config: Retained<SCStreamConfiguration>,
+}
 
-    // Tight scope around the !Send `RcBlock` so Rust's drop-tracker
-    // can prove it doesn't outlive the SCK call; without this the
-    // compiler keeps it alive across the `.await` and the future
-    // becomes non-`Send`, blocking `tokio::spawn`. SCK calls
-    // `Block_copy` internally, so it owns its own retain — dropping
-    // our `RcBlock` here is safe.
+// SAFETY: ScreenCaptureKit's SCContentFilter and SCStreamConfiguration
+// are reference-counted descriptor objects without thread-affine
+// state. We construct the session inside a GCD completion-block
+// thread, then move it across exactly one boundary (mpsc channel)
+// onto the dedicated capture thread, where it stays. We never share
+// an instance across threads after that point. Method dispatch on
+// these classes is documented to be safe from any thread.
+unsafe impl Send for CaptureSession {}
+
+type SessionSender = Arc<Mutex<Option<SyncSender<Result<CaptureSession, String>>>>>;
+type FrameSender = Arc<Mutex<Option<SyncSender<Result<CapturedFrame, String>>>>>;
+
+/// Synchronously enumerate shareable windows, find the one with
+/// `window_id`, and return a [`CaptureSession`] usable for many
+/// subsequent [`capture_with_session`] calls. `max_dim` caps the
+/// longer side at capture time (0 = no cap, full window dimensions).
+///
+/// Blocks the calling thread until the SCK completion block fires —
+/// don't call from a tokio task; spawn a dedicated `std::thread`.
+pub fn build_session(window_id: u32, max_dim: u32) -> Result<CaptureSession, CaptureError> {
+    let (tx, rx) = sync_channel::<Result<CaptureSession, String>>(1);
+    let sender: SessionSender = Arc::new(Mutex::new(Some(tx)));
     {
-        let outer = build_outer_block(window_id, max_dim, sender);
+        let outer = build_session_block(window_id, max_dim, sender);
         unsafe {
             SCShareableContent::getShareableContentWithCompletionHandler(&outer);
         }
     }
-
-    rx.await
-        .map_err(|_| CaptureError::CaptureFailed("completion handler dropped".into()))?
-        .map_err(|e| {
-            // Heuristic: TCC failures are routed through `NoContent`
-            // so callers can offer the right log message.
-            if e.contains("declined") || e.contains("authorized") || e.contains("permission") {
-                CaptureError::NoContent(e)
-            } else if let Some(rest) = e.strip_prefix("window-not-found:") {
-                CaptureError::WindowNotFound(rest.parse().unwrap_or(0))
-            } else {
-                CaptureError::CaptureFailed(e)
-            }
-        })
+    rx.recv()
+        .map_err(|_| CaptureError::CaptureFailed("session callback dropped".into()))?
+        .map_err(classify_error)
 }
 
-fn build_outer_block(
+/// Synchronously capture a frame using a session built earlier.
+/// Blocks until SCK's `captureImage` completion fires.
+pub fn capture_with_session(session: &CaptureSession) -> Result<CapturedFrame, CaptureError> {
+    let (tx, rx) = sync_channel::<Result<CapturedFrame, String>>(1);
+    let sender: FrameSender = Arc::new(Mutex::new(Some(tx)));
+    {
+        let inner = build_frame_block(sender);
+        unsafe {
+            SCScreenshotManager::captureImageWithFilter_configuration_completionHandler(
+                &session.filter,
+                &session.config,
+                Some(&inner),
+            );
+        }
+    }
+    rx.recv()
+        .map_err(|_| CaptureError::CaptureFailed("capture callback dropped".into()))?
+        .map_err(CaptureError::CaptureFailed)
+}
+
+fn classify_error(e: String) -> CaptureError {
+    if e.contains("declined") || e.contains("authorized") || e.contains("permission") {
+        CaptureError::NoContent(e)
+    } else if let Some(rest) = e.strip_prefix("window-not-found:") {
+        CaptureError::WindowNotFound(rest.parse().unwrap_or(0))
+    } else {
+        CaptureError::CaptureFailed(e)
+    }
+}
+
+fn build_session_block(
     window_id: u32,
     max_dim: u32,
-    sender: SharedSender,
+    sender: SessionSender,
 ) -> RcBlock<dyn Fn(*mut SCShareableContent, *mut NSError)> {
     RcBlock::new(move |content: *mut SCShareableContent, err: *mut NSError| {
+        let send = |r: Result<CaptureSession, String>| {
+            if let Ok(mut g) = sender.lock() {
+                if let Some(s) = g.take() {
+                    let _ = s.send(r);
+                }
+            }
+        };
         let Some(content_nn) = NonNull::new(content) else {
-            send_err(&sender, error_message(err));
+            send(Err(error_message(err)));
             return;
         };
-        // SAFETY: `getShareableContent`'s contract: when err is null,
-        // content is a valid SCShareableContent. We're inside that
-        // callback path.
         let content_ref: &SCShareableContent = unsafe { content_nn.as_ref() };
-
-        let target = match find_window(content_ref, window_id) {
-            Some(w) => w,
-            None => {
-                send_err(&sender, format!("window-not-found:{window_id}"));
-                return;
-            }
+        let Some(target) = find_window(content_ref, window_id) else {
+            send(Err(format!("window-not-found:{window_id}")));
+            return;
         };
 
         let filter = unsafe {
             SCContentFilter::initWithDesktopIndependentWindow(SCContentFilter::alloc(), &target)
         };
-        // SCK takes points (logical pixels). The window's `frame` is
-        // already in points — SCK does the scale-up to physical
-        // pixels internally via the display's backing scale.
         let frame = unsafe { target.frame() };
         let (width, height) = constrained_size(frame.size.width, frame.size.height, max_dim);
         let config = unsafe { SCStreamConfiguration::new() };
@@ -160,22 +179,11 @@ fn build_outer_block(
             config.setHeight(height);
             config.setShowsCursor(false);
         }
-
-        // Nested completion: extract bytes inside ObjC, ship Vec<u8>
-        // out — never a !Send ObjC type — through the same sender.
-        let inner = build_inner_block(sender.clone());
-        unsafe {
-            SCScreenshotManager::captureImageWithFilter_configuration_completionHandler(
-                &filter,
-                &config,
-                Some(&inner),
-            );
-        }
-        // inner drops here; SCK's Block_copy keeps it alive.
+        send(Ok(CaptureSession { filter, config }));
     })
 }
 
-fn build_inner_block(sender: SharedSender) -> RcBlock<dyn Fn(*mut CGImage, *mut NSError)> {
+fn build_frame_block(sender: FrameSender) -> RcBlock<dyn Fn(*mut CGImage, *mut NSError)> {
     RcBlock::new(move |image: *mut CGImage, err: *mut NSError| {
         let result = match NonNull::new(image) {
             Some(p) => {
@@ -187,7 +195,11 @@ fn build_inner_block(sender: SharedSender) -> RcBlock<dyn Fn(*mut CGImage, *mut 
             }
             None => Err(error_message(err)),
         };
-        send_result(&sender, result);
+        if let Ok(mut g) = sender.lock() {
+            if let Some(s) = g.take() {
+                let _ = s.send(result);
+            }
+        }
     })
 }
 
@@ -275,18 +287,6 @@ fn extract_rgba(image: &CGImage) -> Result<CapturedFrame, CaptureError> {
         height: height as u32,
         rgba,
     })
-}
-
-fn send_err(sender: &SharedSender, msg: String) {
-    send_result(sender, Err(msg));
-}
-
-fn send_result(sender: &SharedSender, result: Result<CapturedFrame, String>) {
-    if let Ok(mut guard) = sender.lock() {
-        if let Some(s) = guard.take() {
-            let _ = s.send(result);
-        }
-    }
 }
 
 fn error_message(err: *mut NSError) -> String {

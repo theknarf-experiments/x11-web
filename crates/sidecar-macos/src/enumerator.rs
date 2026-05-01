@@ -11,7 +11,8 @@
 //! `WindowFrame` from the frontend's perspective.
 
 use std::collections::HashMap;
-use std::time::Duration;
+use std::sync::mpsc::RecvTimeoutError;
+use std::time::{Duration, Instant};
 
 use core_graphics::window::CGWindowID;
 use tokio::sync::mpsc;
@@ -21,7 +22,7 @@ use uuid::Uuid;
 use x11_web_protocol::DisplayUpdate;
 use x11_web_wire::SidecarToBackend;
 
-use crate::capture::capture_window;
+use crate::capture::{build_session, capture_with_session};
 use crate::router::{WindowRoute, WindowRouter};
 use crate::windows::{visible_windows, WindowBounds, WindowInfo};
 
@@ -32,12 +33,13 @@ use crate::windows::{visible_windows, WindowBounds, WindowInfo};
 /// (~150-300 ms for 2k-wide captures) without needing a downscale.
 const CAPTURE_MAX_DIM: u32 = 0;
 
-/// Period between successive captures of the same window. ~14 Hz —
-/// fast enough that simple animations look smooth, slow enough that
-/// bandwidth stays manageable. The latest-frame-wins backpressure in
-/// the backend's RTC driver drops captures that overrun the network,
-/// so over-capturing is safe.
-const CAPTURE_PERIOD: Duration = Duration::from_millis(70);
+/// Period between successive captures of the same window. ~30 Hz —
+/// achievable now that we cache an `SCContentFilter` per window and
+/// skip the per-frame `SCShareableContent` enumeration (was 50–300 ms
+/// per call). The latest-frame-wins backpressure in the backend's RTC
+/// driver drops captures that overrun the network, so over-capturing
+/// is safe.
+const CAPTURE_PERIOD: Duration = Duration::from_millis(33);
 
 /// Layer 0 = "normal" application windows. Higher layers are menubar
 /// items (25), the dock (20), tooltips/popovers, etc. cua-driver uses
@@ -53,7 +55,27 @@ struct Tracked {
     pid: i32,
     bounds: WindowBounds,
     title: String,
-    capture_handle: tokio::task::JoinHandle<()>,
+    capture_stop: Option<CaptureStop>,
+}
+
+/// Handle for stopping a per-window capture thread. The thread owns
+/// non-Send ObjC state (a `Retained<SCContentFilter>` inside its
+/// cached session), so it has to be a real OS thread, not a tokio
+/// task. We signal it to exit by sending on `shutdown`; the thread
+/// breaks out of its loop on the next tick.
+struct CaptureStop {
+    shutdown: std::sync::mpsc::Sender<()>,
+    handle: std::thread::JoinHandle<()>,
+}
+
+impl CaptureStop {
+    fn abort(self) {
+        let _ = self.shutdown.send(());
+        // Don't join — the thread can take up to one CAPTURE_PERIOD to
+        // notice the shutdown, and we don't want to block the
+        // enumerator tick. The thread shuts itself down cleanly.
+        drop(self.handle);
+    }
 }
 
 /// Spawn the enumeration task. Sends `SidecarToBackend` messages on
@@ -91,7 +113,7 @@ pub fn spawn(tx: mpsc::UnboundedSender<SidecarToBackend>, router: WindowRouter) 
                         bounds: win.bounds,
                     },
                 );
-                let capture_handle = spawn_capture_loop(*id, uuid.clone(), win.pid, tx.clone());
+                let capture_stop = spawn_capture_loop(*id, uuid.clone(), win.pid, tx.clone());
                 tracked.insert(
                     *id,
                     Tracked {
@@ -99,7 +121,7 @@ pub fn spawn(tx: mpsc::UnboundedSender<SidecarToBackend>, router: WindowRouter) 
                         pid: win.pid,
                         bounds: win.bounds,
                         title: win.name.clone(),
-                        capture_handle,
+                        capture_stop: Some(capture_stop),
                     },
                 );
             }
@@ -124,7 +146,9 @@ pub fn spawn(tx: mpsc::UnboundedSender<SidecarToBackend>, router: WindowRouter) 
                 if current.contains_key(id) {
                     true
                 } else {
-                    prev.capture_handle.abort();
+                    if let Some(stop) = prev.capture_stop.take() {
+                        stop.abort();
+                    }
                     router.remove(&prev.uuid);
                     let _ = tx.send(SidecarToBackend::DisplayUpdate {
                         client_id: client_id_for_pid(prev.pid),
@@ -139,55 +163,82 @@ pub fn spawn(tx: mpsc::UnboundedSender<SidecarToBackend>, router: WindowRouter) 
     });
 }
 
-/// Per-window capture task: every `CAPTURE_PERIOD`, capture and emit
-/// a `PutImage` covering the whole window. Aborted by the enumerator
-/// when the window vanishes.
+/// Per-window capture loop. Runs on a dedicated OS thread (not a
+/// tokio task) because the cached `SCContentFilter` is `!Send` and we
+/// don't want it migrating across the tokio worker pool. Builds the
+/// `CaptureSession` once up-front so subsequent captures skip the
+/// 50–300 ms `SCShareableContent` enumeration.
 fn spawn_capture_loop(
     cg_id: CGWindowID,
     uuid: String,
     pid: i32,
     tx: mpsc::UnboundedSender<SidecarToBackend>,
-) -> tokio::task::JoinHandle<()> {
+) -> CaptureStop {
+    let (shutdown_tx, shutdown_rx) = std::sync::mpsc::channel::<()>();
+    let handle = std::thread::Builder::new()
+        .name(format!("macos-capture-{cg_id}"))
+        .spawn(move || run_capture_loop(cg_id, uuid, pid, tx, shutdown_rx))
+        .expect("spawn macos capture thread");
+    CaptureStop {
+        shutdown: shutdown_tx,
+        handle,
+    }
+}
+
+fn run_capture_loop(
+    cg_id: CGWindowID,
+    uuid: String,
+    pid: i32,
+    tx: mpsc::UnboundedSender<SidecarToBackend>,
+    shutdown_rx: std::sync::mpsc::Receiver<()>,
+) {
     let client_id = client_id_for_pid(pid);
-    tokio::spawn(async move {
-        let mut tick = interval(CAPTURE_PERIOD);
-        // Skip the first tick — `interval` fires immediately, and we
-        // already raced the WindowCreated/Mapped emit; let the
-        // frontend draw the empty frame first to avoid the canvas
-        // flickering between sizes.
-        tick.tick().await;
-        loop {
-            tick.tick().await;
-            let t0 = std::time::Instant::now();
-            match capture_window(cg_id, CAPTURE_MAX_DIM).await {
-                Ok(frame) => {
-                    let t_capture = t0.elapsed();
-                    let t1 = std::time::Instant::now();
-                    // Lossy q90: visually identical to lossless for
-                    // typical UI / screen content but ~5-10× faster
-                    // encode and smaller wire payload. Switch to
-                    // `encode_rgba_lossless` if fidelity for tiny
-                    // text or high-contrast edges matters.
-                    let compressed = x11_web_pixel_codec::encode_rgba_lossy(
-                        &frame.rgba,
-                        frame.width,
-                        frame.height,
-                        90.0,
-                    );
-                    let t_encode = t1.elapsed();
-                    let raw_kb = frame.rgba.len() / 1024;
-                    let comp_kb = compressed.len() / 1024;
-                    info!(
-                        "capture[{}] {}x{} raw={}KB comp={}KB capture={:?} encode={:?}",
-                        &uuid[..8],
-                        frame.width,
-                        frame.height,
-                        raw_kb,
-                        comp_kb,
-                        t_capture,
-                        t_encode,
-                    );
-                    let _ = tx.send(SidecarToBackend::DisplayUpdate {
+    let session = match build_session(cg_id, CAPTURE_MAX_DIM) {
+        Ok(s) => s,
+        Err(e) => {
+            warn!("session build failed for window {cg_id} ({client_id}): {e}");
+            return;
+        }
+    };
+    loop {
+        // Block for up to CAPTURE_PERIOD — if the enumerator signals
+        // shutdown, exit immediately; otherwise the timeout doubles as
+        // our frame ticker.
+        match shutdown_rx.recv_timeout(CAPTURE_PERIOD) {
+            Ok(()) | Err(RecvTimeoutError::Disconnected) => return,
+            Err(RecvTimeoutError::Timeout) => {}
+        }
+        let t0 = Instant::now();
+        match capture_with_session(&session) {
+            Ok(frame) => {
+                let t_capture = t0.elapsed();
+                let t1 = Instant::now();
+                // Lossy q90: visually identical to lossless for
+                // typical UI / screen content but ~5-10× faster
+                // encode and smaller wire payload. Switch to
+                // `encode_rgba_lossless` if fidelity for tiny
+                // text or high-contrast edges matters.
+                let compressed = x11_web_pixel_codec::encode_rgba_lossy(
+                    &frame.rgba,
+                    frame.width,
+                    frame.height,
+                    90.0,
+                );
+                let t_encode = t1.elapsed();
+                let raw_kb = frame.rgba.len() / 1024;
+                let comp_kb = compressed.len() / 1024;
+                info!(
+                    "capture[{}] {}x{} raw={}KB comp={}KB capture={:?} encode={:?}",
+                    &uuid[..8],
+                    frame.width,
+                    frame.height,
+                    raw_kb,
+                    comp_kb,
+                    t_capture,
+                    t_encode,
+                );
+                if tx
+                    .send(SidecarToBackend::DisplayUpdate {
                         client_id: client_id.clone(),
                         update: DisplayUpdate::PutImage {
                             window_id: uuid.clone(),
@@ -197,14 +248,19 @@ fn spawn_capture_loop(
                             height: frame.height.min(u16::MAX as u32) as u16,
                             data: compressed,
                         },
-                    });
-                }
-                Err(e) => {
-                    warn!("capture failed for window {cg_id} ({client_id}): {e}");
+                    })
+                    .is_err()
+                {
+                    // Backend channel closed — sidecar is shutting
+                    // down. Exit quietly.
+                    return;
                 }
             }
+            Err(e) => {
+                warn!("capture failed for window {cg_id} ({client_id}): {e}");
+            }
         }
-    })
+    }
 }
 
 fn is_renderable(w: &WindowInfo) -> bool {
