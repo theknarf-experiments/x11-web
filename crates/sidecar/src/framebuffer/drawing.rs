@@ -1,8 +1,11 @@
 use super::{
     apply_gc_function, build_clip_mask, build_dash, point_in_clip_rects, read_pixel,
-    skia_color, skia_eligible, write_pixel, DashState, Framebuffer,
+    skia_color, skia_eligible, stipple_to_tile, write_pixel, DashState, Framebuffer,
 };
-use tiny_skia::{FillRule, Paint, PathBuilder, Transform};
+use tiny_skia::{
+    FillRule, FilterQuality, Paint, PathBuilder, Pattern, PixmapRef, SpreadMode, Stroke,
+    Transform,
+};
 
 impl Framebuffer {
     /// Draw a line with full GC support: raster op, cap/join styles, dashes, clip rects.
@@ -253,6 +256,7 @@ impl Framebuffer {
 
     /// Draw a line using a tile pattern for per-pixel color lookup.
     /// Per X11 spec, when fill_style is Tiled, line pixels use the tile color at each (x,y).
+    #[allow(clippy::too_many_arguments)]
     pub fn draw_line_tiled(
         &mut self,
         x0: i32,
@@ -272,6 +276,51 @@ impl Framebuffer {
         if tile_w == 0 || tile_h == 0 || tile_data.is_empty() {
             return;
         }
+        // GXcopy: tiny-skia stroke with a Pattern paint sampled at each
+        // destination pixel covered by the line.
+        if skia_eligible(gc_func, plane_mask) {
+            if let Some(tile_pm) = PixmapRef::from_bytes(tile_data, tile_w, tile_h) {
+                let mut pb = PathBuilder::new();
+                pb.move_to(x0 as f32, y0 as f32);
+                pb.line_to(x1 as f32, y1 as f32);
+                if let Some(path) = pb.finish() {
+                    let mut paint = Paint::default();
+                    paint.shader = Pattern::new(
+                        tile_pm,
+                        SpreadMode::Repeat,
+                        FilterQuality::Nearest,
+                        1.0,
+                        Transform::from_translate(ts_x as f32, ts_y as f32),
+                    );
+                    paint.anti_alias = true;
+                    let mut stroke = Stroke::default();
+                    stroke.width = 1.0;
+                    stroke.line_cap = match cap_style {
+                        2 => tiny_skia::LineCap::Round,
+                        3 => tiny_skia::LineCap::Square,
+                        _ => tiny_skia::LineCap::Butt,
+                    };
+                    let clip_mask = build_clip_mask(self.width, self.height, clip_rects);
+                    let _ = self.with_pixmap_mut(|pm| {
+                        pm.stroke_path(
+                            &path,
+                            &paint,
+                            &stroke,
+                            Transform::identity(),
+                            clip_mask.as_ref(),
+                        );
+                    });
+                    let pad = 1;
+                    let min_x = x0.min(x1) - pad;
+                    let min_y = y0.min(y1) - pad;
+                    let w = (x0.max(x1) - x0.min(x1) + pad * 2 + 1) as u32;
+                    let h = (y0.max(y1) - y0.min(y1) + pad * 2 + 1) as u32;
+                    self.mark_dirty(min_x, min_y, w, h);
+                    return;
+                }
+            }
+        }
+        // Fallback (non-GXcopy): per-pixel Bresenham with raster-op blit.
         let tile_stride = tile_w as usize * 4;
         let dx = (x1 - x0).abs();
         let dy = -(y1 - y0).abs();
@@ -281,11 +330,9 @@ impl Framebuffer {
         let mut x = x0;
         let mut y = y0;
         let mut is_first = true;
-
         loop {
             let is_last = x == x1 && y == y1;
             let skip = cap_style == 0 && is_last && !is_first;
-
             if !skip {
                 let tile_x = ((x - ts_x as i32) % tile_w as i32 + tile_w as i32) as u32 % tile_w;
                 let tile_y = ((y - ts_y as i32) % tile_h as i32 + tile_h as i32) as u32 % tile_h;
@@ -295,7 +342,6 @@ impl Framebuffer {
                     self.draw_point_gc(x, y, color, gc_func, plane_mask, clip_rects);
                 }
             }
-
             is_first = false;
             if is_last {
                 break;
@@ -312,9 +358,12 @@ impl Framebuffer {
         }
     }
 
-    /// Draw a line using a stipple pattern for per-pixel fill.
-    /// Per X11 spec, when fill_style is Stippled, only foreground pixels where
-    /// stipple bit is set are drawn. OpaqueStippled draws bg where bit is unset.
+    /// Draw a line using a stipple pattern.
+    ///
+    /// `Stippled` mode: only pixels where the stipple bit is 1 get the
+    /// foreground colour. `OpaqueStippled` (`opaque=true`) also paints
+    /// the background colour into the cleared bits.
+    #[allow(clippy::too_many_arguments)]
     pub fn draw_line_stippled(
         &mut self,
         x0: i32,
@@ -337,77 +386,46 @@ impl Framebuffer {
         if stipple_w == 0 || stipple_h == 0 || stipple_data.is_empty() {
             return;
         }
-        let dx = (x1 - x0).abs();
-        let dy = -(y1 - y0).abs();
-        let sx: i32 = if x0 < x1 { 1 } else { -1 };
-        let sy: i32 = if y0 < y1 { 1 } else { -1 };
-        let mut err = dx + dy;
-        let mut x = x0;
-        let mut y = y0;
-        let mut is_first = true;
-
-        // Stipple is a 1-bit-per-pixel bitmap; stride is ceil(stipple_w/8) bytes per row.
-        // For full-depth pixmap stipples, framebuffer storage is 32bpp RGBA;
-        // we treat any non-zero RGB triple as "set".
-        // For 1-bit depth stipples, data is 1 bit per pixel row-major.
-        // Format is detected by data size.
+        // Stipple is either a 1bpp bitmap or a 32bpp RGBA pixmap;
+        // detect by size and bake into an RGBA tile.
         let is_1bpp = stipple_data.len() < (stipple_w * stipple_h * 4) as usize;
-        let bpp_stride = if is_1bpp {
-            ((stipple_w + 7) / 8) as usize
+        let tile = if is_1bpp {
+            stipple_to_tile(stipple_data, stipple_w, stipple_h, fg, bg, opaque)
         } else {
-            stipple_w as usize * 4
-        };
-
-        loop {
-            let is_last = x == x1 && y == y1;
-            let skip = cap_style == 0 && is_last && !is_first;
-
-            if !skip {
-                let sx_pos =
-                    ((x - ts_x as i32) % stipple_w as i32 + stipple_w as i32) as u32 % stipple_w;
-                let sy_pos =
-                    ((y - ts_y as i32) % stipple_h as i32 + stipple_h as i32) as u32 % stipple_h;
-
-                let bit_set = if is_1bpp {
-                    let byte_idx = sy_pos as usize * bpp_stride + (sx_pos / 8) as usize;
-                    if byte_idx < stipple_data.len() {
-                        stipple_data[byte_idx] & (1 << (sx_pos % 8)) != 0
-                    } else {
-                        false
+            // 32bpp pixmap stipple — treat any non-zero RGB as "set".
+            let mut tile = vec![0u8; (stipple_w * stipple_h * 4) as usize];
+            let stride = stipple_w as usize * 4;
+            for sy in 0..stipple_h as usize {
+                for sx in 0..stipple_w as usize {
+                    let src = sy * stride + sx * 4;
+                    if src + 3 >= stipple_data.len() {
+                        continue;
                     }
-                } else {
-                    // 32bpp: check if pixel is non-zero (any channel)
-                    let off = sy_pos as usize * bpp_stride + sx_pos as usize * 4;
-                    if off + 3 < stipple_data.len() {
-                        stipple_data[off] != 0
-                            || stipple_data[off + 1] != 0
-                            || stipple_data[off + 2] != 0
+                    let set = stipple_data[src] != 0
+                        || stipple_data[src + 1] != 0
+                        || stipple_data[src + 2] != 0;
+                    let dst = (sy * stipple_w as usize + sx) * 4;
+                    let color = if set {
+                        Some(fg)
+                    } else if opaque {
+                        Some(bg)
                     } else {
-                        false
+                        None
+                    };
+                    if let Some(c) = color {
+                        tile[dst] = ((c >> 16) & 0xFF) as u8;
+                        tile[dst + 1] = ((c >> 8) & 0xFF) as u8;
+                        tile[dst + 2] = (c & 0xFF) as u8;
+                        tile[dst + 3] = 0xFF;
                     }
-                };
-
-                if bit_set {
-                    self.draw_point_gc(x, y, fg, gc_func, plane_mask, clip_rects);
-                } else if opaque {
-                    self.draw_point_gc(x, y, bg, gc_func, plane_mask, clip_rects);
                 }
             }
-
-            is_first = false;
-            if is_last {
-                break;
-            }
-            let e2 = 2 * err;
-            if e2 >= dy {
-                err += dy;
-                x += sx;
-            }
-            if e2 <= dx {
-                err += dx;
-                y += sy;
-            }
-        }
+            tile
+        };
+        self.draw_line_tiled(
+            x0, y0, x1, y1, &tile, stipple_w, stipple_h, ts_x, ts_y, gc_func, plane_mask,
+            cap_style, clip_rects,
+        );
     }
 
     /// Draw a single pixel with GC function, plane mask, and clip rects.
