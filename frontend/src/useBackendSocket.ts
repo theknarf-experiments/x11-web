@@ -5,6 +5,7 @@ import type {
 	FrontendToBackend,
 	ProcessInfo,
 	SidecarInfo,
+	WindowDescriptor,
 } from "./types";
 
 // Resolve order: ?ws=... query param > VITE_WS_URL build-time env > default.
@@ -99,6 +100,7 @@ export function useBackendSocket() {
 	const [connectedProcesses, setConnectedProcesses] = useState<
 		ConnectedProcess[]
 	>([]);
+	const [windowList, setWindowList] = useState<WindowDescriptor[]>([]);
 	const [diagnostics, setDiagnostics] = useState<Diagnostic[]>([]);
 
 	const pushDiagnostic = useCallback(
@@ -203,6 +205,9 @@ export function useBackendSocket() {
 							msg.client_id,
 							msg.update,
 						);
+						break;
+					case "WindowList":
+						setWindowList(msg.windows);
 						break;
 					case "WindowStateList":
 						setInitialWindowStates(
@@ -315,6 +320,7 @@ export function useBackendSocket() {
 		processes,
 		connectedProcesses,
 		initialWindowStates,
+		windowList,
 		send,
 		onDisplayUpdate,
 		onWindowStateChange,

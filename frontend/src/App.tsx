@@ -110,6 +110,7 @@ function App() {
 		processes,
 		connectedProcesses,
 		initialWindowStates,
+		windowList,
 		send,
 		onDisplayUpdate,
 		onWindowStateChange,
@@ -131,10 +132,6 @@ function App() {
 	/** Map clientId -> { sidecarId, pid, command } for process association. */
 	const clientInfoRef = useRef<
 		Map<string, { sidecarId: string; pid: number; command: string }>
-	>(new Map());
-	/** Track creation metadata (position, override_redirect) for windows not yet mapped. */
-	const windowCreationRef = useRef<
-		Map<string, { x: number; y: number; overrideRedirect: boolean; borderWidth: number; borderPixel: number }>
 	>(new Map());
 	/** Track which sidecars we've already subscribed to. */
 	const subscribedRef = useRef<Set<string>>(new Set());
@@ -289,9 +286,155 @@ function App() {
 		animCursorTimersRef.current.set(windowId, timer);
 	}, []);
 
-	// Register display callback -- creates WindowFrames on WindowMapped
+	// Reconcile our `windows` state against the backend's authoritative
+	// `WindowList`. The backend filters out non-visible / non-top-level
+	// windows; we just merge the descriptor's geometry into our existing
+	// per-window UI state (or seed defaults for newly-arrived windows).
 	useEffect(() => {
-		onDisplayUpdate((sidecarId, clientId, update) => {
+		// User-initiated close: reap any closed-window IDs the backend
+		// has already dropped from its list (race window over).
+		for (const wid of [...closedWindowsRef.current]) {
+			if (!windowList.some((w) => w.window_id === wid)) {
+				closedWindowsRef.current.delete(wid);
+			}
+		}
+		const filtered = windowList.filter(
+			(w) => !closedWindowsRef.current.has(w.window_id),
+		);
+		setWindows((prev) => {
+			const desired = new Set(filtered.map((w) => w.window_id));
+			const byId = new Map(prev.map((w) => [w.windowId, w]));
+			const next: CanvasWindow[] = filtered.map((d, i) => {
+				// Stacking order from the backend's WindowList — last
+				// item is on top.
+				const zIndex = i + 1;
+				const existing = byId.get(d.window_id);
+				if (existing) {
+					// Geometry from the X11 server is authoritative for
+					// override-redirect popups; for regular top-level
+					// windows the user-driven frontend position wins.
+					return {
+						...existing,
+						sidecarId: d.sidecar_id,
+						clientId: d.client_id,
+						overrideRedirect: d.override_redirect,
+						borderWidth: d.border_width,
+						borderPixel: d.border_pixel,
+						zIndex,
+						...(d.override_redirect ? { x: d.x, y: d.y } : {}),
+					};
+				}
+				// First time seeing this window — seed defaults.
+				const info = clientInfoRef.current.get(d.client_id);
+				const pid = info?.pid ?? 0;
+				const command = info?.command;
+				const title = command
+					|| processesRef.current[d.sidecar_id]?.find((p) => p.pid === pid)?.command
+					|| `PID ${pid}`;
+				let cx: number;
+				let cy: number;
+				let color: string;
+				if (d.override_redirect) {
+					cx = d.x;
+					cy = d.y;
+					color = "transparent";
+				} else {
+					const saved = initialWindowStatesRef.current.find(
+						(ws) => ws.clientId === d.client_id,
+					);
+					if (saved) {
+						cx = saved.x;
+						cy = saved.y;
+						color = saved.color;
+					} else {
+						const idx = spawnCounter++;
+						const offset = idx * 30;
+						cx = window.innerWidth / 4 + offset;
+						cy = window.innerHeight / 4 + offset;
+						color = PASTEL_COLORS[idx % PASTEL_COLORS.length];
+						send({
+							type: "UpdateWindowState",
+							client_id: d.client_id,
+							sidecar_id: d.sidecar_id,
+							x: cx,
+							y: cy,
+							color,
+						});
+					}
+				}
+				return {
+					windowId: d.window_id,
+					clientId: d.client_id,
+					sidecarId: d.sidecar_id,
+					pid,
+					title,
+					x: cx,
+					y: cy,
+					color,
+					zIndex,
+					cursor: "default",
+					overrideRedirect: d.override_redirect,
+					wmState: "normal" as WindowWmState,
+					borderWidth: d.border_width,
+					borderPixel: d.border_pixel,
+				};
+			});
+
+			// Anything not in the new list is gone — clean up renderers
+			// and per-window timers/menus for those windows.
+			for (const w of prev) {
+				if (!desired.has(w.windowId)) {
+					renderersRef.current.delete(w.windowId);
+					const timer = animCursorTimersRef.current.get(w.windowId);
+					if (timer) {
+						clearInterval(timer);
+						animCursorTimersRef.current.delete(w.windowId);
+					}
+				}
+			}
+
+			// Equality check — return prev if nothing changed (avoids
+			// re-render on every WindowList that's identical).
+			if (
+				next.length === prev.length &&
+				next.every((w, i) => {
+					const old = prev[i];
+					return (
+						old.windowId === w.windowId
+						&& old.x === w.x
+						&& old.y === w.y
+						&& old.zIndex === w.zIndex
+						&& old.borderWidth === w.borderWidth
+						&& old.borderPixel === w.borderPixel
+						&& old.overrideRedirect === w.overrideRedirect
+					);
+				})
+			) {
+				return prev;
+			}
+			return next;
+		});
+
+		// If the focused window left the list, clear focus.
+		const liveIds = new Set(filtered.map((w) => w.window_id));
+		setFocusedWindowId((prev) => (prev && !liveIds.has(prev) ? null : prev));
+		setMenus((prev) => {
+			let changed = false;
+			const next = new Map(prev);
+			for (const wid of prev.keys()) {
+				if (!liveIds.has(wid)) {
+					next.delete(wid);
+					changed = true;
+				}
+			}
+			return changed ? next : prev;
+		});
+	}, [windowList, send]);
+
+	// Register display callback for per-window content events
+	// (titles, cursors, focus, WM state, menus, bell).
+	useEffect(() => {
+		onDisplayUpdate((_sidecarId, _clientId, update) => {
 			// Title changes update the matching window
 			if (update.kind === "TitleChanged") {
 				setWindows((prev) =>
@@ -363,17 +506,6 @@ function App() {
 				);
 			}
 
-			// WindowRaised -- server raised a window to the top of the stack
-			if (update.kind === "WindowRaised") {
-				setWindows((prev) =>
-					prev.map((w) =>
-						w.windowId === update.window_id
-							? { ...w, zIndex: nextZIndex++ }
-							: w,
-					),
-				);
-			}
-
 			// Bell -- play an audible/visual bell
 			if (update.kind === "Bell") {
 				try {
@@ -392,157 +524,6 @@ function App() {
 						document.body.style.backgroundColor = "";
 					}, 100);
 				}
-			}
-
-			// WindowConfigured -- update override-redirect window positions from server
-			if (update.kind === "WindowConfigured") {
-				const bw = update.border_width ?? 0;
-				const bp = update.border_pixel ?? 0;
-				setWindows((prev) =>
-					prev.map((w) =>
-						w.windowId === update.window_id
-							? {
-								...w,
-								...(w.overrideRedirect ? { x: update.x, y: update.y } : {}),
-								borderWidth: bw,
-								borderPixel: bp,
-							}
-							: w,
-					),
-				);
-				const existing = windowCreationRef.current.get(update.window_id);
-				if (existing) {
-					existing.x = update.x;
-					existing.y = update.y;
-					existing.borderWidth = bw;
-					existing.borderPixel = bp;
-				}
-			}
-
-			// WindowCreated -- track creation metadata for later use at map time
-			if (update.kind === "WindowCreated") {
-				windowCreationRef.current.set(update.window_id, {
-					x: update.x,
-					y: update.y,
-					overrideRedirect: !!update.override_redirect,
-					borderWidth: update.border_width ?? 0,
-					borderPixel: update.border_pixel ?? 0,
-				});
-			}
-
-			// WindowMapped with is_top_level or override_redirect -- create a WindowFrame
-			if (update.kind === "WindowMapped" && (update.is_top_level || update.override_redirect)) {
-				const windowId = update.window_id;
-				if (closedWindowsRef.current.has(windowId)) return;
-
-				const isOverrideRedirect = !!update.override_redirect;
-				const creationMeta = windowCreationRef.current.get(windowId);
-
-				setWindows((prev) => {
-					if (prev.some((w) => w.windowId === windowId)) return prev;
-
-					const info = clientInfoRef.current.get(clientId);
-					const pid = info?.pid ?? 0;
-					const sid = info?.sidecarId ?? sidecarId;
-					const command = info?.command;
-					const title = command
-						|| processesRef.current[sid]?.find((p) => p.pid === pid)?.command
-						|| `PID ${pid}`;
-
-					let cx: number;
-					let cy: number;
-					let color: string;
-
-					if (isOverrideRedirect) {
-						cx = creationMeta?.x ?? 0;
-						cy = creationMeta?.y ?? 0;
-						color = "transparent";
-					} else {
-						const saved = initialWindowStatesRef.current.find(
-							(ws) => ws.clientId === clientId,
-						);
-						if (saved) {
-							cx = saved.x;
-							cy = saved.y;
-							color = saved.color;
-						} else {
-							const idx = spawnCounter++;
-							const offset = idx * 30;
-							cx = window.innerWidth / 4 + offset;
-							cy = window.innerHeight / 4 + offset;
-							color = PASTEL_COLORS[idx % PASTEL_COLORS.length];
-						}
-
-						if (!saved) {
-							send({
-								type: "UpdateWindowState",
-								client_id: clientId,
-								sidecar_id: sid,
-								x: cx,
-								y: cy,
-								color,
-							});
-						}
-					}
-
-					return [
-						...prev,
-						{
-							windowId,
-							clientId,
-							sidecarId: sid,
-							pid,
-							title,
-							x: cx,
-							y: cy,
-							color,
-							zIndex: nextZIndex++,
-							cursor: "default",
-							overrideRedirect: isOverrideRedirect,
-							wmState: "normal" as WindowWmState,
-							borderWidth: creationMeta?.borderWidth ?? 0,
-							borderPixel: creationMeta?.borderPixel ?? 0,
-						},
-					];
-				});
-			}
-
-			// WindowUnmapped -- hide the WindowFrame
-			if (update.kind === "WindowUnmapped") {
-				setWindows((prev) => {
-					if (!prev.some((w) => w.windowId === update.window_id))
-						return prev;
-					return prev.filter((w) => w.windowId !== update.window_id);
-				});
-				setFocusedWindowId((prev) =>
-					prev === update.window_id ? null : prev,
-				);
-			}
-
-			// WindowDestroyed -- remove frame and renderer
-			if (update.kind === "WindowDestroyed") {
-				renderersRef.current.delete(update.window_id);
-				windowCreationRef.current.delete(update.window_id);
-				// Clean up animated cursor timer
-				const timer = animCursorTimersRef.current.get(update.window_id);
-				if (timer) {
-					clearInterval(timer);
-					animCursorTimersRef.current.delete(update.window_id);
-				}
-				setWindows((prev) => {
-					if (!prev.some((w) => w.windowId === update.window_id))
-						return prev;
-					return prev.filter((w) => w.windowId !== update.window_id);
-				});
-				setFocusedWindowId((prev) =>
-					prev === update.window_id ? null : prev,
-				);
-				setMenus((prev) => {
-					if (!prev.has(update.window_id)) return prev;
-					const next = new Map(prev);
-					next.delete(update.window_id);
-					return next;
-				});
 			}
 
 			// WindowFocused -- the X11 server tells us which top-level

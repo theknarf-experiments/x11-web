@@ -48,6 +48,13 @@ pub enum BackendToFrontend {
         client_id: String,
         update: DisplayUpdate,
     },
+    /// Authoritative list of all top-level / override-redirect windows
+    /// that are currently mapped, across every sidecar + client.
+    /// Vec order = stacking order, last item on top. Sent on every
+    /// change to the visible-window set; the frontend replaces its
+    /// window state outright rather than tracking per-window
+    /// create/map/unmap/destroy/configure/raise events.
+    WindowList { windows: Vec<WindowDescriptor> },
     /// Initial window state for all windows (sent on frontend connect).
     WindowStateList { windows: Vec<WindowState> },
     /// A window's state changed (position/color, from another frontend).
@@ -175,6 +182,29 @@ pub struct ProcessInfo {
     pub pid: u32,
     pub client_id: String,
     pub command: String,
+}
+
+/// One visible window in [`BackendToFrontend::WindowList`]. The
+/// backend filters X11 windows down to "top-level *or*
+/// override-redirect *and* mapped" before publishing — internal
+/// child windows, unmapped windows, etc. never appear here.
+///
+/// `override_redirect` distinguishes pop-ups (menus, tooltips) from
+/// regular top-level windows. For override-redirect popups, the
+/// `(x, y)` from the X server is authoritative; for regular windows
+/// the frontend owns the position so the user can drag them.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WindowDescriptor {
+    pub sidecar_id: String,
+    pub client_id: String,
+    pub window_id: String,
+    pub x: i16,
+    pub y: i16,
+    pub width: u16,
+    pub height: u16,
+    pub border_width: u16,
+    pub border_pixel: u32,
+    pub override_redirect: bool,
 }
 
 /// A display update from the X server to be rendered in the browser.

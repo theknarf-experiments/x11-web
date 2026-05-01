@@ -1,27 +1,23 @@
 import { inflateRaw } from "pako";
 import type { DisplayUpdate } from "./types";
 
-interface WindowInfo {
-	x: number;
-	y: number;
-	width: number;
-	height: number;
-	mapped: boolean;
-}
-
 type RenderContext =
 	| CanvasRenderingContext2D
 	| OffscreenCanvasRenderingContext2D;
 
 /**
- * Owns the back buffer, window map, and pending queue for a single X11 client.
- * Rendering happens immediately when pushUpdate is called (outside React).
- * The visible canvas blits from the back buffer on each rAF.
+ * Owns the back buffer for a single X11 client. The visible canvas
+ * blits from this buffer on each rAF; pushUpdate paints synchronously
+ * outside React.
+ *
+ * Per-window geometry / lifecycle is tracked centrally in `App.tsx`
+ * from the backend's authoritative `WindowList`; the renderer only
+ * needs to handle pixel updates (`PutImage`) — everything else is a
+ * no-op here.
  */
 export class ClientRenderer {
 	backBuffer: OffscreenCanvas;
 	private ctx: OffscreenCanvasRenderingContext2D;
-	private windows = new Map<string, WindowInfo>();
 	dirty = false;
 
 	constructor(width: number, height: number) {
@@ -48,25 +44,17 @@ export class ClientRenderer {
 	}
 
 	pushUpdate(update: DisplayUpdate) {
-		if (update.kind === "WindowCreated") {
-			if (
-				update.width > this.backBuffer.width ||
-				update.height > this.backBuffer.height
-			) {
-				this.resizeBuffer(
-					Math.max(update.width, this.backBuffer.width),
-					Math.max(update.height, this.backBuffer.height),
-				);
-			}
-		} else if (update.kind === "WindowConfigured") {
-			if (
-				update.width !== this.backBuffer.width ||
-				update.height !== this.backBuffer.height
-			) {
-				this.resizeBuffer(update.width, update.height);
-			}
+		if (update.kind !== "PutImage") return;
+		// Grow the back buffer if a region update extends past current bounds.
+		const right = update.x + update.width;
+		const bottom = update.y + update.height;
+		if (right > this.backBuffer.width || bottom > this.backBuffer.height) {
+			this.resizeBuffer(
+				Math.max(right, this.backBuffer.width),
+				Math.max(bottom, this.backBuffer.height),
+			);
 		}
-		renderUpdate(this.ctx, update, this.windows);
+		renderPutImage(this.ctx, update);
 		this.dirty = true;
 	}
 
@@ -83,75 +71,25 @@ export class ClientRenderer {
 	}
 }
 
-function renderUpdate(
+function renderPutImage(
 	ctx: RenderContext,
-	update: DisplayUpdate,
-	windows: Map<string, WindowInfo>,
+	update: Extract<DisplayUpdate, { kind: "PutImage" }>,
 ) {
-	switch (update.kind) {
-		case "WindowCreated": {
-			windows.set(update.window_id, {
-				x: update.x,
-				y: update.y,
-				width: update.width,
-				height: update.height,
-				mapped: false,
-			});
-			break;
-		}
-		case "WindowDestroyed": {
-			const win = windows.get(update.window_id);
-			if (win) {
-				ctx.clearRect(win.x, win.y, win.width, win.height);
-				windows.delete(update.window_id);
-			}
-			break;
-		}
-		case "WindowMapped": {
-			const win = windows.get(update.window_id);
-			if (win) {
-				win.mapped = true;
-			}
-			break;
-		}
-		case "WindowUnmapped": {
-			const win = windows.get(update.window_id);
-			if (win) {
-				win.mapped = false;
-				ctx.clearRect(win.x, win.y, win.width, win.height);
-			}
-			break;
-		}
-		case "WindowConfigured": {
-			const win = windows.get(update.window_id);
-			if (win) {
-				ctx.clearRect(win.x, win.y, win.width, win.height);
-				win.x = update.x;
-				win.y = update.y;
-				win.width = update.width;
-				win.height = update.height;
-			}
-			break;
-		}
-		case "PutImage": {
-			if (update.data.length === 0) break;
-			// Decode base64 string to binary, then decompress deflate
-			const binaryStr = atob(update.data as unknown as string);
-			const compressed = new Uint8Array(binaryStr.length);
-			for (let i = 0; i < binaryStr.length; i++) {
-				compressed[i] = binaryStr.charCodeAt(i);
-			}
-			let rawData: Uint8Array;
-			try {
-				rawData = inflateRaw(compressed);
-			} catch {
-				rawData = compressed;
-			}
-			const imageData = ctx.createImageData(update.width, update.height);
-			// Server sends packed RGBA, the canvas ImageData layout — copy directly.
-			imageData.data.set(rawData.subarray(0, imageData.data.length));
-			ctx.putImageData(imageData, update.x, update.y);
-			break;
-		}
+	if (update.data.length === 0) return;
+	// Decode base64 string to binary, then decompress deflate.
+	const binaryStr = atob(update.data as unknown as string);
+	const compressed = new Uint8Array(binaryStr.length);
+	for (let i = 0; i < binaryStr.length; i++) {
+		compressed[i] = binaryStr.charCodeAt(i);
 	}
+	let rawData: Uint8Array;
+	try {
+		rawData = inflateRaw(compressed);
+	} catch {
+		rawData = compressed;
+	}
+	const imageData = ctx.createImageData(update.width, update.height);
+	// Server sends packed RGBA, the canvas ImageData layout — copy directly.
+	imageData.data.set(rawData.subarray(0, imageData.data.length));
+	ctx.putImageData(imageData, update.x, update.y);
 }

@@ -26,6 +26,15 @@ struct AppState {
     /// sidecars; broadcast to frontends as `BackendToFrontend::ProcessList`
     /// after every change.
     processes: Arc<RwLock<HashMap<String, Vec<ProcessInfo>>>>,
+    /// Window state mirror per `(sidecar_id, client_id, window_id)`,
+    /// updated from the X11 lifecycle events the sidecar pushes
+    /// (Created / Mapped / Unmapped / Destroyed / Configured / Raised).
+    /// `window_order` is the stacking order keyed by the same triple,
+    /// last entry on top. The filtered list (mapped + top-level or
+    /// override-redirect) is published as `BackendToFrontend::WindowList`
+    /// on every change.
+    window_track: Arc<RwLock<HashMap<(String, String, String), TrackedWindow>>>,
+    window_order: Arc<RwLock<Vec<(String, String, String)>>>,
     /// Window state for position/color sync: client_id → WindowState
     window_states: Arc<RwLock<HashMap<String, WindowState>>>,
     /// Display update buffer per client_id for replay on frontend connect
@@ -35,6 +44,21 @@ struct AppState {
 struct SidecarConnection {
     info: SidecarInfo,
     tx: mpsc::UnboundedSender<BackendToSidecar>,
+}
+
+/// Per-window state mirrored in the backend, keyed by
+/// `(sidecar_id, client_id, window_id)`.
+#[derive(Clone)]
+struct TrackedWindow {
+    x: i16,
+    y: i16,
+    width: u16,
+    height: u16,
+    border_width: u16,
+    border_pixel: u32,
+    is_top_level: bool,
+    override_redirect: bool,
+    mapped: bool,
 }
 
 struct FrontendConnection {
@@ -50,6 +74,8 @@ async fn main() {
         sidecars: Arc::new(RwLock::new(HashMap::new())),
         frontends: Arc::new(RwLock::new(HashMap::new())),
         processes: Arc::new(RwLock::new(HashMap::new())),
+        window_track: Arc::new(RwLock::new(HashMap::new())),
+        window_order: Arc::new(RwLock::new(Vec::new())),
         window_states: Arc::new(RwLock::new(HashMap::new())),
         display_buffers: Arc::new(RwLock::new(HashMap::new())),
     };
@@ -154,13 +180,20 @@ async fn dispatch_sidecar_msg(state: &AppState, sidecar_id: &str, msg: SidecarTo
                     freed
                 };
                 state.window_states.write().await.retain(|_, ws| ws.pid != pid);
+                let mut window_list_changed = false;
                 if !freed_client_ids.is_empty() {
                     let mut bufs = state.display_buffers.write().await;
                     for cid in &freed_client_ids {
                         bufs.remove(cid);
+                        if drop_client_windows(state, cid).await {
+                            window_list_changed = true;
+                        }
                     }
                 }
                 broadcast_process_list(state, &sidecar_id).await;
+                if window_list_changed {
+                    broadcast_window_list(state).await;
+                }
             }
             SidecarToBackend::ProcessList {
                 request_id: _,
@@ -189,8 +222,15 @@ async fn dispatch_sidecar_msg(state: &AppState, sidecar_id: &str, msg: SidecarTo
                 broadcast_process_list(state, &sidecar_id).await;
             }
             SidecarToBackend::DisplayUpdate { client_id, update } => {
-                let is_put_image =
-                    matches!(update, x11_web_protocol::DisplayUpdate::PutImage { .. });
+                // Window-lifecycle variants are absorbed by the
+                // backend's tracker; the frontend only sees the
+                // resulting `WindowList`. Everything else is forwarded
+                // through the existing per-sidecar subscription path.
+                if apply_window_lifecycle(state, &sidecar_id, &client_id, &update).await {
+                    broadcast_window_list(state).await;
+                    return;
+                }
+
                 let put_image_wid = match &update {
                     x11_web_protocol::DisplayUpdate::PutImage { window_id, .. } => {
                         Some(window_id.clone())
@@ -203,27 +243,25 @@ async fn dispatch_sidecar_msg(state: &AppState, sidecar_id: &str, msg: SidecarTo
                     update,
                 };
 
-                // Buffer for replay to new frontends.
-                // Keep only the latest PutImage per window_id.
-                // Lifecycle events (WindowCreated, etc.) are always kept.
+                // Buffer for replay to new frontends. Keep only the
+                // latest `PutImage` per window_id; everything else
+                // accumulates.
                 {
                     let mut bufs = state.display_buffers.write().await;
                     let buf = bufs.entry(client_id.clone()).or_default();
-                    if is_put_image {
-                        if let Some(wid) = put_image_wid {
-                            buf.retain(|m| {
-                                if let BackendToFrontend::DisplayUpdate { update: u, .. } = m {
-                                    if let x11_web_protocol::DisplayUpdate::PutImage {
-                                        window_id,
-                                        ..
-                                    } = u
-                                    {
-                                        return window_id != &wid;
-                                    }
+                    if let Some(wid) = put_image_wid {
+                        buf.retain(|m| {
+                            if let BackendToFrontend::DisplayUpdate { update: u, .. } = m {
+                                if let x11_web_protocol::DisplayUpdate::PutImage {
+                                    window_id,
+                                    ..
+                                } = u
+                                {
+                                    return window_id != &wid;
                                 }
-                                true
-                            });
-                        }
+                            }
+                            true
+                        });
                     }
                     buf.push(msg.clone());
                 }
@@ -324,10 +362,14 @@ async fn cleanup_sidecar(state: &AppState, sidecar_id: &str) {
         }
     }
 
+    let windows_changed = drop_sidecar_windows(state, sidecar_id).await;
     broadcast_sidecar_list(state).await;
     // The sidecar's per-sidecar process list went to zero; let
     // frontends know with one final empty broadcast.
     broadcast_process_list(state, sidecar_id).await;
+    if windows_changed {
+        broadcast_window_list(state).await;
+    }
 }
 
 async fn frontend_ws_handler(
@@ -387,6 +429,36 @@ async fn handle_frontend_ws(socket: WebSocket, state: AppState) {
                 processes: processes.clone(),
             });
         }
+    }
+
+    // Send the current authoritative window list (visible windows
+    // across all sidecars/clients, in stacking order).
+    {
+        let track = state.window_track.read().await;
+        let order = state.window_order.read().await;
+        let mut windows = Vec::new();
+        for key @ (sid, cid, wid) in order.iter() {
+            let Some(w) = track.get(key) else { continue };
+            if !w.mapped {
+                continue;
+            }
+            if !(w.is_top_level || w.override_redirect) {
+                continue;
+            }
+            windows.push(WindowDescriptor {
+                sidecar_id: sid.clone(),
+                client_id: cid.clone(),
+                window_id: wid.clone(),
+                x: w.x,
+                y: w.y,
+                width: w.width,
+                height: w.height,
+                border_width: w.border_width,
+                border_pixel: w.border_pixel,
+                override_redirect: w.override_redirect,
+            });
+        }
+        let _ = tx.send(BackendToFrontend::WindowList { windows });
     }
 
     // Send current window states
@@ -620,6 +692,173 @@ pub async fn broadcast_sidecar_list(state: &AppState) {
         .map(|s| s.info.clone())
         .collect();
     broadcast_to_frontends(state, BackendToFrontend::SidecarList { sidecars }).await;
+}
+
+/// Apply a `DisplayUpdate` to the backend's window-state mirror.
+/// Returns `true` if the variant is a window-lifecycle event that the
+/// backend has absorbed (and therefore should *not* forward to the
+/// frontend); `false` otherwise (caller forwards as usual).
+async fn apply_window_lifecycle(
+    state: &AppState,
+    sidecar_id: &str,
+    client_id: &str,
+    update: &DisplayUpdate,
+) -> bool {
+    use DisplayUpdate::*;
+    let mut track = state.window_track.write().await;
+    let mut order = state.window_order.write().await;
+    let key = |wid: &str| (sidecar_id.to_string(), client_id.to_string(), wid.to_string());
+    match update {
+        WindowCreated {
+            window_id,
+            x,
+            y,
+            width,
+            height,
+            is_top_level,
+            override_redirect,
+            border_width,
+            border_pixel,
+        } => {
+            let k = key(window_id);
+            track.insert(
+                k.clone(),
+                TrackedWindow {
+                    x: *x,
+                    y: *y,
+                    width: *width,
+                    height: *height,
+                    border_width: *border_width,
+                    border_pixel: *border_pixel,
+                    is_top_level: *is_top_level,
+                    override_redirect: *override_redirect,
+                    mapped: false,
+                },
+            );
+            if !order.contains(&k) {
+                order.push(k);
+            }
+            true
+        }
+        WindowMapped {
+            window_id,
+            is_top_level,
+            override_redirect,
+        } => {
+            let k = key(window_id);
+            let entry = track.entry(k.clone()).or_insert(TrackedWindow {
+                x: 0,
+                y: 0,
+                width: 0,
+                height: 0,
+                border_width: 0,
+                border_pixel: 0,
+                is_top_level: *is_top_level,
+                override_redirect: *override_redirect,
+                mapped: false,
+            });
+            entry.is_top_level = *is_top_level;
+            entry.override_redirect = *override_redirect;
+            entry.mapped = true;
+            if !order.contains(&k) {
+                order.push(k);
+            }
+            true
+        }
+        WindowUnmapped { window_id } => {
+            if let Some(w) = track.get_mut(&key(window_id)) {
+                w.mapped = false;
+            }
+            true
+        }
+        WindowDestroyed { window_id } => {
+            let k = key(window_id);
+            track.remove(&k);
+            order.retain(|x| x != &k);
+            true
+        }
+        WindowConfigured {
+            window_id,
+            x,
+            y,
+            width,
+            height,
+            border_width,
+            border_pixel,
+        } => {
+            if let Some(w) = track.get_mut(&key(window_id)) {
+                w.x = *x;
+                w.y = *y;
+                w.width = *width;
+                w.height = *height;
+                w.border_width = *border_width;
+                w.border_pixel = *border_pixel;
+            }
+            true
+        }
+        WindowRaised { window_id } => {
+            let k = key(window_id);
+            order.retain(|x| x != &k);
+            order.push(k);
+            true
+        }
+        _ => false,
+    }
+}
+
+/// Build the current authoritative window list (visible windows only,
+/// in stacking order — last on top) and broadcast it to all frontends.
+pub async fn broadcast_window_list(state: &AppState) {
+    let track = state.window_track.read().await;
+    let order = state.window_order.read().await;
+    let mut windows = Vec::with_capacity(order.len());
+    for key @ (sidecar_id, client_id, window_id) in order.iter() {
+        let Some(w) = track.get(key) else { continue };
+        if !w.mapped {
+            continue;
+        }
+        if !(w.is_top_level || w.override_redirect) {
+            continue;
+        }
+        windows.push(WindowDescriptor {
+            sidecar_id: sidecar_id.clone(),
+            client_id: client_id.clone(),
+            window_id: window_id.clone(),
+            x: w.x,
+            y: w.y,
+            width: w.width,
+            height: w.height,
+            border_width: w.border_width,
+            border_pixel: w.border_pixel,
+            override_redirect: w.override_redirect,
+        });
+    }
+    drop(track);
+    drop(order);
+    broadcast_to_frontends(state, BackendToFrontend::WindowList { windows }).await;
+}
+
+/// Drop every window owned by a given client, used when a process
+/// exits. Returns `true` if anything changed (so the caller can
+/// trigger a `WindowList` broadcast).
+async fn drop_client_windows(state: &AppState, client_id: &str) -> bool {
+    let mut track = state.window_track.write().await;
+    let mut order = state.window_order.write().await;
+    let before = track.len();
+    track.retain(|(_, c, _), _| c != client_id);
+    order.retain(|(_, c, _)| c != client_id);
+    track.len() != before
+}
+
+/// Drop every window owned by a given sidecar, used when a sidecar
+/// disconnects.
+async fn drop_sidecar_windows(state: &AppState, sidecar_id: &str) -> bool {
+    let mut track = state.window_track.write().await;
+    let mut order = state.window_order.write().await;
+    let before = track.len();
+    track.retain(|(s, _, _), _| s != sidecar_id);
+    order.retain(|(s, _, _)| s != sidecar_id);
+    track.len() != before
 }
 
 /// Snapshot one sidecar's X11-connected process list and broadcast it

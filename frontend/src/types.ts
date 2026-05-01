@@ -27,6 +27,7 @@ export type BackendToFrontend =
 			client_id: string;
 			update: DisplayUpdate;
 	  }
+	| { type: "WindowList"; windows: WindowDescriptor[] }
 	| {
 			type: "WindowStateList";
 			windows: {
@@ -141,33 +142,22 @@ export type DndEventKind =
 /** Focus policy for the window manager. */
 export type FocusPolicy = "click-to-focus" | "focus-follows-mouse";
 
+/** A visible window from the backend's authoritative `WindowList`. */
+export interface WindowDescriptor {
+	sidecar_id: string;
+	client_id: string;
+	window_id: string;
+	x: number;
+	y: number;
+	width: number;
+	height: number;
+	border_width: number;
+	border_pixel: number;
+	override_redirect: boolean;
+}
+
 export type DisplayUpdate =
 	| { kind: "TitleChanged"; window_id: string; title: string }
-	| {
-			kind: "WindowCreated";
-			window_id: string;
-			x: number;
-			y: number;
-			width: number;
-			height: number;
-			is_top_level?: boolean;
-			override_redirect?: boolean;
-			border_width?: number;
-			border_pixel?: number;
-	  }
-	| { kind: "WindowDestroyed"; window_id: string }
-	| { kind: "WindowMapped"; window_id: string; is_top_level?: boolean; override_redirect?: boolean }
-	| { kind: "WindowUnmapped"; window_id: string }
-	| {
-			kind: "WindowConfigured";
-			window_id: string;
-			x: number;
-			y: number;
-			width: number;
-			height: number;
-			border_width?: number;
-			border_pixel?: number;
-	  }
 	| {
 			kind: "PutImage";
 			window_id: string;
@@ -207,7 +197,6 @@ export type DisplayUpdate =
 			window_id: string;
 			menu: MenuItem[];
 	  }
-	| { kind: "WindowRaised"; window_id: string }
 	| { kind: "Bell"; percent: number };
 
 export type MenuItemKind =
