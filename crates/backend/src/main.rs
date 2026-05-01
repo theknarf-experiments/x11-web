@@ -35,12 +35,12 @@ struct AppState {
     /// on every change.
     window_track: Arc<RwLock<HashMap<(String, String, String), TrackedWindow>>>,
     window_order: Arc<RwLock<Vec<(String, String, String)>>>,
-    /// Per-client tracked positions, populated by `UpdateWindowPosition`
-    /// from frontends. Keyed by `client_id`. Folded into
-    /// `WindowDescriptor.{x, y, placed}` on every `WindowList` broadcast
-    /// so newly-connected frontends pick up positions other tabs already
-    /// chose for the same client.
-    window_positions: Arc<RwLock<HashMap<String, ClientPosition>>>,
+    /// Per-window tracked positions, populated by
+    /// `UpdateWindowPosition` from frontends. Keyed by `window_id`.
+    /// Folded into `WindowDescriptor.{x, y, placed}` on every
+    /// `WindowList` broadcast so newly-connected frontends pick up
+    /// positions other tabs already chose.
+    window_positions: Arc<RwLock<HashMap<String, TrackedPosition>>>,
     /// Display update buffer per client_id for replay on frontend connect
     display_buffers: Arc<RwLock<HashMap<String, Vec<BackendToFrontend>>>>,
 }
@@ -50,15 +50,14 @@ struct SidecarConnection {
     tx: mpsc::UnboundedSender<BackendToSidecar>,
 }
 
-/// Per-client tracked position. Kept alongside `pid` and `sidecar_id`
-/// so the backend can prune entries when a process exits or a sidecar
-/// disconnects.
-#[derive(Clone)]
-struct ClientPosition {
+/// Per-window tracked position. Just `(x, y)` — owner identity (pid /
+/// sidecar / client) lives in `window_track` keyed by the same
+/// `window_id`, so cleanup paths use that for filtering rather than
+/// duplicating the metadata here.
+#[derive(Clone, Copy)]
+struct TrackedPosition {
     x: f64,
     y: f64,
-    pid: u32,
-    sidecar_id: String,
 }
 
 /// Per-window state mirrored in the backend, keyed by
@@ -194,7 +193,9 @@ async fn dispatch_sidecar_msg(state: &AppState, sidecar_id: &str, msg: SidecarTo
                     list.retain(|p| p.pid != pid);
                     freed
                 };
-                state.window_positions.write().await.retain(|_, p| p.pid != pid);
+                // Position state is keyed by window_id; orphan
+                // entries from destroyed windows are harmless and
+                // get cleaned up via `drop_client_windows` below.
                 let mut window_list_changed = false;
                 if !freed_client_ids.is_empty() {
                     let mut bufs = state.display_buffers.write().await;
@@ -239,23 +240,36 @@ async fn dispatch_sidecar_msg(state: &AppState, sidecar_id: &str, msg: SidecarTo
             SidecarToBackend::DisplayUpdate { client_id, update } => {
                 // Window-lifecycle variants are absorbed by the
                 // backend's tracker; the frontend only sees the
-                // resulting `WindowList`. Everything else is forwarded
-                // through the existing per-sidecar subscription path.
+                // resulting `WindowList`.
                 if apply_window_lifecycle(state, &sidecar_id, &client_id, &update).await {
                     broadcast_window_list(state).await;
                     return;
                 }
 
-                let put_image_wid = match &update {
-                    x11_web_protocol::DisplayUpdate::PutImage { window_id, .. } => {
-                        Some(window_id.clone())
+                // Bell isn't per-window — fan out as a top-level
+                // message rather than wrapping in a WindowUpdate.
+                if let x11_web_protocol::DisplayUpdate::Bell { percent } = update {
+                    let frontends = state.frontends.read().await;
+                    for frontend in frontends.values() {
+                        if frontend.subscribed_sidecars.contains(&sidecar_id) {
+                            let _ = frontend.tx.send(BackendToFrontend::Bell { percent });
+                        }
                     }
+                    return;
+                }
+
+                // Translate the remaining content/property variants
+                // into the frontend-facing `WindowUpdate` shape.
+                let window_update = match update_to_window_update(update) {
+                    Some(u) => u,
+                    None => return,
+                };
+                let put_image_wid = match &window_update {
+                    WindowUpdate::PutImage { window_id, .. } => Some(window_id.clone()),
                     _ => None,
                 };
-                let msg = BackendToFrontend::DisplayUpdate {
-                    sidecar_id: sidecar_id.clone(),
-                    client_id: client_id.clone(),
-                    update,
+                let msg = BackendToFrontend::WindowUpdate {
+                    update: window_update,
                 };
 
                 // Buffer for replay to new frontends. Keep only the
@@ -266,12 +280,8 @@ async fn dispatch_sidecar_msg(state: &AppState, sidecar_id: &str, msg: SidecarTo
                     let buf = bufs.entry(client_id.clone()).or_default();
                     if let Some(wid) = put_image_wid {
                         buf.retain(|m| {
-                            if let BackendToFrontend::DisplayUpdate { update: u, .. } = m {
-                                if let x11_web_protocol::DisplayUpdate::PutImage {
-                                    window_id,
-                                    ..
-                                } = u
-                                {
+                            if let BackendToFrontend::WindowUpdate { update: u } = m {
+                                if let WindowUpdate::PutImage { window_id, .. } = u {
                                     return window_id != &wid;
                                 }
                             }
@@ -365,11 +375,8 @@ async fn cleanup_sidecar(state: &AppState, sidecar_id: &str) {
         .into_iter()
         .map(|p| p.client_id)
         .collect();
-    state
-        .window_positions
-        .write()
-        .await
-        .retain(|_, p| p.sidecar_id != sidecar_id);
+    // Orphan tracked positions for the disconnected sidecar's windows
+    // get cleaned up by `drop_sidecar_windows` below.
     {
         let mut bufs = state.display_buffers.write().await;
         for cid in &client_ids {
@@ -595,31 +602,12 @@ async fn handle_frontend_ws(socket: WebSocket, state: AppState) {
                 )
                 .await;
             }
-            FrontendToBackend::UpdateWindowPosition {
-                client_id,
-                sidecar_id,
-                x,
-                y,
-            } => {
-                // Look up pid by client_id by scanning the per-sidecar list.
-                let pid = state
-                    .processes
-                    .read()
+            FrontendToBackend::UpdateWindowPosition { window_id, x, y } => {
+                state
+                    .window_positions
+                    .write()
                     .await
-                    .get(&sidecar_id)
-                    .and_then(|list| list.iter().find(|p| p.client_id == client_id))
-                    .map(|p| p.pid)
-                    .unwrap_or(0);
-
-                state.window_positions.write().await.insert(
-                    client_id.clone(),
-                    ClientPosition {
-                        x,
-                        y,
-                        pid,
-                        sidecar_id: sidecar_id.clone(),
-                    },
-                );
+                    .insert(window_id.clone(), TrackedPosition { x, y });
 
                 // Broadcast a tight delta to every *other* frontend
                 // (the originator already has the latest position
@@ -628,10 +616,12 @@ async fn handle_frontend_ws(socket: WebSocket, state: AppState) {
                 let frontends = state.frontends.read().await;
                 for (fid, frontend) in frontends.iter() {
                     if fid != &frontend_id {
-                        let _ = frontend.tx.send(BackendToFrontend::WindowPositionChanged {
-                            client_id: client_id.clone(),
-                            x,
-                            y,
+                        let _ = frontend.tx.send(BackendToFrontend::WindowUpdate {
+                            update: WindowUpdate::PositionChanged {
+                                window_id: window_id.clone(),
+                                x,
+                                y,
+                            },
                         });
                     }
                 }
@@ -673,6 +663,65 @@ pub async fn broadcast_sidecar_list(state: &AppState) {
         .map(|s| s.info.clone())
         .collect();
     broadcast_to_frontends(state, BackendToFrontend::SidecarList { sidecars }).await;
+}
+
+/// Translate a sidecar-emitted [`DisplayUpdate`] into the
+/// frontend-facing [`WindowUpdate`]. Returns `None` for variants the
+/// frontend doesn't see (lifecycle events absorbed by the tracker,
+/// `Bell` lifted to the top level, `WindowRaised` since stacking is
+/// expressed by `WindowList` order).
+fn update_to_window_update(update: DisplayUpdate) -> Option<WindowUpdate> {
+    use DisplayUpdate as D;
+    Some(match update {
+        D::PutImage {
+            window_id,
+            x,
+            y,
+            width,
+            height,
+            data,
+        } => WindowUpdate::PutImage {
+            window_id,
+            x,
+            y,
+            width,
+            height,
+            data,
+        },
+        D::TitleChanged { window_id, title } => {
+            WindowUpdate::TitleChanged { window_id, title }
+        }
+        D::WindowStateChanged { window_id, state } => {
+            WindowUpdate::StateChanged { window_id, state }
+        }
+        D::WindowFocused { window_id } => WindowUpdate::Focused { window_id },
+        D::MenuStructure { window_id, menu } => {
+            WindowUpdate::MenuStructure { window_id, menu }
+        }
+        D::CursorChanged { window_id, cursor } => {
+            WindowUpdate::CursorChanged { window_id, cursor }
+        }
+        D::CursorBitmap {
+            window_id,
+            width,
+            height,
+            hotspot_x,
+            hotspot_y,
+            data,
+        } => WindowUpdate::CursorBitmap {
+            window_id,
+            width,
+            height,
+            hotspot_x,
+            hotspot_y,
+            data,
+        },
+        D::CursorAnimated { window_id, frames } => {
+            WindowUpdate::CursorAnimated { window_id, frames }
+        }
+        // Lifecycle / Bell / Raised are handled elsewhere.
+        _ => return None,
+    })
 }
 
 /// Apply a `DisplayUpdate` to the backend's window-state mirror.
@@ -801,6 +850,7 @@ pub async fn build_window_list(state: &AppState) -> Vec<WindowDescriptor> {
     let track = state.window_track.read().await;
     let order = state.window_order.read().await;
     let positions = state.window_positions.read().await;
+    let procs = state.processes.read().await;
     let mut windows = Vec::with_capacity(order.len());
     for key @ (sidecar_id, client_id, window_id) in order.iter() {
         let Some(w) = track.get(key) else { continue };
@@ -812,15 +862,24 @@ pub async fn build_window_list(state: &AppState) -> Vec<WindowDescriptor> {
         }
         let (x, y, placed) = if w.override_redirect {
             (w.x as f64, w.y as f64, true)
-        } else if let Some(p) = positions.get(client_id) {
+        } else if let Some(p) = positions.get(window_id) {
             (p.x, p.y, true)
         } else {
             (w.x as f64, w.y as f64, false)
         };
+        // Pull pid + command from the cached process list so the
+        // frontend has everything needed for dock labels and the
+        // kill button without a separate ProcessList lookup.
+        let (pid, command) = procs
+            .get(sidecar_id)
+            .and_then(|list| list.iter().find(|p| &p.client_id == client_id))
+            .map(|p| (p.pid, p.command.clone()))
+            .unwrap_or((0, String::new()));
         windows.push(WindowDescriptor {
-            sidecar_id: sidecar_id.clone(),
-            client_id: client_id.clone(),
             window_id: window_id.clone(),
+            sidecar_id: sidecar_id.clone(),
+            pid,
+            command,
             x,
             y,
             width: w.width,

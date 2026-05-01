@@ -1,11 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type {
 	BackendToFrontend,
-	DisplayUpdate,
 	FrontendToBackend,
 	ProcessInfo,
 	SidecarInfo,
 	WindowDescriptor,
+	WindowUpdate,
 } from "./types";
 
 // Resolve order: ?ws=... query param > VITE_WS_URL build-time env > default.
@@ -19,11 +19,9 @@ const WS_URL = (() => {
 	return import.meta.env.VITE_WS_URL || "ws://localhost:3001/ws/frontend";
 })();
 
-export type DisplayUpdateCallback = (
-	sidecarId: string,
-	clientId: string,
-	update: DisplayUpdate,
-) => void;
+export type WindowUpdateCallback = (update: WindowUpdate) => void;
+
+export type BellCallback = (percent: number) => void;
 
 export interface ConnectedProcess {
 	sidecarId: string;
@@ -31,12 +29,6 @@ export interface ConnectedProcess {
 	clientId: string;
 	command: string;
 }
-
-export type WindowPositionChangedCallback = (
-	clientId: string,
-	x: number,
-	y: number,
-) => void;
 
 export type ClipboardDataCallback = (
 	sidecarId: string,
@@ -77,8 +69,8 @@ export function useBackendSocket() {
 	const wsRef = useRef<WebSocket | null>(null);
 	const reconnectTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
 	const disposed = useRef(false);
-	const displayCallbackRef = useRef<DisplayUpdateCallback | null>(null);
-	const windowPositionCallbackRef = useRef<WindowPositionChangedCallback | null>(null);
+	const windowUpdateCallbackRef = useRef<WindowUpdateCallback | null>(null);
+	const bellCallbackRef = useRef<BellCallback | null>(null);
 	const clipboardDataCallbackRef = useRef<ClipboardDataCallback | null>(null);
 	const clipboardOfferCallbackRef = useRef<ClipboardOfferCallback | null>(null);
 	const [connected, setConnected] = useState(false);
@@ -186,22 +178,14 @@ export function useBackendSocket() {
 						]);
 						break;
 					}
-					case "DisplayUpdate":
-						displayCallbackRef.current?.(
-							msg.sidecar_id,
-							msg.client_id,
-							msg.update,
-						);
+					case "WindowUpdate":
+						windowUpdateCallbackRef.current?.(msg.update);
 						break;
 					case "WindowList":
 						setWindowList(msg.windows);
 						break;
-					case "WindowPositionChanged":
-						windowPositionCallbackRef.current?.(
-							msg.client_id,
-							msg.x,
-							msg.y,
-						);
+					case "Bell":
+						bellCallbackRef.current?.(msg.percent);
 						break;
 					case "CommandResult":
 						pushDiagnostic({
@@ -263,16 +247,13 @@ export function useBackendSocket() {
 		}
 	}, []);
 
-	const onDisplayUpdate = useCallback((cb: DisplayUpdateCallback | null) => {
-		displayCallbackRef.current = cb;
+	const onWindowUpdate = useCallback((cb: WindowUpdateCallback | null) => {
+		windowUpdateCallbackRef.current = cb;
 	}, []);
 
-	const onWindowPositionChanged = useCallback(
-		(cb: WindowPositionChangedCallback | null) => {
-			windowPositionCallbackRef.current = cb;
-		},
-		[],
-	);
+	const onBell = useCallback((cb: BellCallback | null) => {
+		bellCallbackRef.current = cb;
+	}, []);
 
 	const onClipboardData = useCallback(
 		(cb: ClipboardDataCallback | null) => {
@@ -295,8 +276,8 @@ export function useBackendSocket() {
 		connectedProcesses,
 		windowList,
 		send,
-		onDisplayUpdate,
-		onWindowPositionChanged,
+		onWindowUpdate,
+		onBell,
 		onClipboardData,
 		onClipboardOffer,
 		diagnostics,

@@ -42,28 +42,21 @@ pub enum BackendToFrontend {
         sidecar_id: String,
         processes: Vec<ProcessInfo>,
     },
-    /// Display update forwarded from a sidecar.
-    DisplayUpdate {
-        sidecar_id: String,
-        client_id: String,
-        update: DisplayUpdate,
-    },
+    /// Per-window update. Each variant identifies the affected window
+    /// by its globally-unique `window_id`; no envelope-level routing
+    /// metadata is needed.
+    WindowUpdate { update: WindowUpdate },
     /// Authoritative list of all top-level / override-redirect windows
-    /// that are currently mapped, across every sidecar + client.
-    /// Vec order = stacking order, last item on top. Each descriptor
-    /// carries the position the frontend should render at (X11
-    /// authoritative for popups; cross-frontend tracked position for
-    /// top-level windows when one exists). Sent on every change to the
-    /// visible-window set including initial frontend connect.
+    /// that are currently mapped. Vec order = stacking order, last
+    /// item on top. Each descriptor carries the position the frontend
+    /// should render at (X11 authoritative for popups; cross-frontend
+    /// tracked position for top-level windows when one exists). Sent
+    /// on every change to the visible-window set including initial
+    /// frontend connect.
     WindowList { windows: Vec<WindowDescriptor> },
-    /// A window's tracked position changed (from another frontend
-    /// dragging it). High-frequency incremental update; the
-    /// `WindowList` snapshot is the slower-fan-out source of truth.
-    WindowPositionChanged {
-        client_id: String,
-        x: f64,
-        y: f64,
-    },
+    /// X11 bell event — frontend should play an audible/visual bell.
+    /// Not per-window; lifted out of the per-window update stream.
+    Bell { percent: u8 },
     /// Forwarded from `SidecarToBackend::InputDropped`. Tells the
     /// frontend that an input event it sent was discarded by the
     /// sidecar's router (e.g. the window UUID is stale because the
@@ -128,8 +121,7 @@ pub enum FrontendToBackend {
     },
     /// Update a window's tracked position (synced across frontends).
     UpdateWindowPosition {
-        client_id: String,
-        sidecar_id: String,
+        window_id: String,
         x: f64,
         y: f64,
     },
@@ -177,6 +169,11 @@ pub struct ProcessInfo {
 /// override-redirect *and* mapped" before publishing — internal
 /// child windows, unmapped windows, etc. never appear here.
 ///
+/// `window_id` is a globally unique UUID — the only identifier the
+/// frontend needs for any per-window operation. `sidecar_id`, `pid`,
+/// and `command` are auxiliary metadata for UI labels and process
+/// control (kill button targets `(sidecar_id, pid)`).
+///
 /// `override_redirect` distinguishes pop-ups (menus, tooltips) from
 /// regular top-level windows. `placed` indicates whether `(x, y)` is
 /// a meaningful position (X11 server position for popups, or a
@@ -186,9 +183,10 @@ pub struct ProcessInfo {
 /// `UpdateWindowPosition`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WindowDescriptor {
-    pub sidecar_id: String,
-    pub client_id: String,
     pub window_id: String,
+    pub sidecar_id: String,
+    pub pid: u32,
+    pub command: String,
     pub x: f64,
     pub y: f64,
     pub width: u16,
@@ -197,6 +195,62 @@ pub struct WindowDescriptor {
     pub border_pixel: u32,
     pub override_redirect: bool,
     pub placed: bool,
+}
+
+/// Per-window incremental update sent to the frontend. The wire-level
+/// X11 lifecycle events (Created/Mapped/Unmapped/...) are absorbed by
+/// the backend and re-emitted as `BackendToFrontend::WindowList`;
+/// what's left is the smaller set of per-window content/property
+/// changes plus the cross-frontend drag delta.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "kind")]
+pub enum WindowUpdate {
+    /// Pixel rectangle (raw RGBA, deflate-compressed, base64-encoded
+    /// for JSON transport).
+    PutImage {
+        window_id: String,
+        x: i16,
+        y: i16,
+        width: u16,
+        height: u16,
+        #[serde(with = "base64_bytes")]
+        data: Vec<u8>,
+    },
+    /// Window title (from WM_NAME).
+    TitleChanged { window_id: String, title: String },
+    /// X11 WM state — Normal / Minimized / Maximized / Fullscreen / Close.
+    StateChanged {
+        window_id: String,
+        state: WindowWmState,
+    },
+    /// Input focus changed; `None` clears focus.
+    Focused { window_id: Option<String> },
+    /// Full GTK / dbusmenu menu tree mirror. Empty `menu` clears.
+    MenuStructure {
+        window_id: String,
+        menu: Vec<MenuItem>,
+    },
+    /// CSS-style cursor name (e.g. "default", "pointer").
+    CursorChanged { window_id: String, cursor: String },
+    /// Custom RGBA cursor bitmap.
+    CursorBitmap {
+        window_id: String,
+        width: u16,
+        height: u16,
+        hotspot_x: u16,
+        hotspot_y: u16,
+        #[serde(with = "base64_bytes")]
+        data: Vec<u8>,
+    },
+    /// Animated cursor (multi-frame).
+    CursorAnimated {
+        window_id: String,
+        frames: Vec<AnimCursorFrame>,
+    },
+    /// Cross-frontend drag delta — another tab moved this window.
+    /// High-frequency incremental update; the `WindowList` snapshot
+    /// is the slower-fan-out source of truth.
+    PositionChanged { window_id: String, x: f64, y: f64 },
 }
 
 /// A display update from the X server to be rendered in the browser.

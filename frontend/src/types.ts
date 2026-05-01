@@ -21,19 +21,9 @@ export type BackendToFrontend =
 			message: string;
 	  }
 	| { type: "ProcessList"; sidecar_id: string; processes: ProcessInfo[] }
-	| {
-			type: "DisplayUpdate";
-			sidecar_id: string;
-			client_id: string;
-			update: DisplayUpdate;
-	  }
+	| { type: "WindowUpdate"; update: WindowUpdate }
 	| { type: "WindowList"; windows: WindowDescriptor[] }
-	| {
-			type: "WindowPositionChanged";
-			client_id: string;
-			x: number;
-			y: number;
-	  }
+	| { type: "Bell"; percent: number }
 	| {
 			type: "InputDropped";
 			sidecar_id: string;
@@ -80,8 +70,7 @@ export type FrontendToBackend =
 	  }
 	| {
 			type: "UpdateWindowPosition";
-			client_id: string;
-			sidecar_id: string;
+			window_id: string;
 			x: number;
 			y: number;
 	  }
@@ -131,9 +120,10 @@ export type FocusPolicy = "click-to-focus" | "focus-follows-mouse";
 
 /** A visible window from the backend's authoritative `WindowList`. */
 export interface WindowDescriptor {
-	sidecar_id: string;
-	client_id: string;
 	window_id: string;
+	sidecar_id: string;
+	pid: number;
+	command: string;
 	x: number;
 	y: number;
 	width: number;
@@ -148,7 +138,7 @@ export interface WindowDescriptor {
 	placed: boolean;
 }
 
-export type DisplayUpdate =
+export type WindowUpdate =
 	| { kind: "TitleChanged"; window_id: string; title: string }
 	| {
 			kind: "PutImage";
@@ -179,17 +169,17 @@ export type DisplayUpdate =
 			frames: AnimCursorFrame[];
 	  }
 	| {
-			kind: "WindowStateChanged";
+			kind: "StateChanged";
 			window_id: string;
 			state: WindowWmState;
 	  }
-	| { kind: "WindowFocused"; window_id: string | null }
+	| { kind: "Focused"; window_id: string | null }
 	| {
 			kind: "MenuStructure";
 			window_id: string;
 			menu: MenuItem[];
 	  }
-	| { kind: "Bell"; percent: number };
+	| { kind: "PositionChanged"; window_id: string; x: number; y: number };
 
 export type MenuItemKind =
 	| "normal"

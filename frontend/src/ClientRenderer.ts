@@ -1,5 +1,5 @@
 import { inflateRaw } from "pako";
-import type { DisplayUpdate } from "./types";
+import type { WindowUpdate } from "./types";
 
 type RenderContext =
 	| CanvasRenderingContext2D
@@ -43,7 +43,7 @@ export class ClientRenderer {
 		this.dirty = true;
 	}
 
-	pushUpdate(update: DisplayUpdate) {
+	pushUpdate(update: WindowUpdate) {
 		if (update.kind !== "PutImage") return;
 		// Grow the back buffer if a region update extends past current bounds.
 		const right = update.x + update.width;
@@ -73,7 +73,7 @@ export class ClientRenderer {
 
 function renderPutImage(
 	ctx: RenderContext,
-	update: Extract<DisplayUpdate, { kind: "PutImage" }>,
+	update: Extract<WindowUpdate, { kind: "PutImage" }>,
 ) {
 	if (update.data.length === 0) return;
 	// Decode base64 string to binary, then decompress deflate.

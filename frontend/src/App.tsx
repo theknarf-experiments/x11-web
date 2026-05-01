@@ -25,11 +25,10 @@ function nextRequestId() {
 
 /**
  * One WindowFrame per top-level mapped X11 window.
- * Multiple windows may share the same clientId (and thus the same renderer).
+ * Each window has its own renderer, keyed by window_id.
  */
 interface CanvasWindow {
 	windowId: string;
-	clientId: string;
 	sidecarId: string;
 	pid: number;
 	title: string;
@@ -125,8 +124,8 @@ function App() {
 		connectedProcesses,
 		windowList,
 		send,
-		onDisplayUpdate,
-		onWindowPositionChanged,
+		onWindowUpdate,
+		onBell,
 		onClipboardData,
 		onClipboardOffer,
 		diagnostics,
@@ -142,15 +141,8 @@ function App() {
 	/** One renderer per top-level X11 window (keyed by window_id as string). */
 	const renderersRef = useRef<Map<string, ClientRenderer>>(new Map());
 	const closedWindowsRef = useRef<Set<string>>(new Set());
-	/** Map clientId -> { sidecarId, pid, command } for process association. */
-	const clientInfoRef = useRef<
-		Map<string, { sidecarId: string; pid: number; command: string }>
-	>(new Map());
 	/** Track which sidecars we've already subscribed to. */
 	const subscribedRef = useRef<Set<string>>(new Set());
-	/** Ref to always-current processes map (avoids stale closures in callbacks). */
-	const processesRef = useRef(processes);
-	processesRef.current = processes;
 
 	/** Animated cursor timers: windowId -> interval handle. */
 	const animCursorTimersRef = useRef<Map<string, ReturnType<typeof setInterval>>>(new Map());
@@ -199,65 +191,18 @@ function App() {
 		};
 	}, [connected, sidecars, send]);
 
-	// Keep clientInfoRef in sync with connectedProcesses
+	// Subscribe to display updates from every sidecar that has at least
+	// one X11 client connected. Window pid+command come from the
+	// `WindowDescriptor` directly now, so no clientInfoRef sync is
+	// needed.
 	useEffect(() => {
 		for (const cp of connectedProcesses) {
-			clientInfoRef.current.set(cp.clientId, {
-				sidecarId: cp.sidecarId,
-				pid: cp.pid,
-				command: cp.command,
-			});
-			// Auto-subscribe to display updates. The backend pushes
-			// ProcessList for every sidecar without us having to ask.
 			if (!subscribedRef.current.has(cp.sidecarId)) {
 				subscribedRef.current.add(cp.sidecarId);
 				send({ type: "SubscribeDisplay", sidecar_id: cp.sidecarId });
 			}
 		}
-
-		// Update any windows that were created before ProcessConnected arrived
-		setWindows((prev) => {
-			let changed = false;
-			const next = prev.map((w) => {
-				if (w.pid === 0 || w.title.startsWith("PID ")) {
-					const info = clientInfoRef.current.get(w.clientId);
-					if (info && info.pid !== 0) {
-						const title = info.command
-							|| processes[info.sidecarId]?.find((p) => p.pid === info.pid)?.command
-							|| w.title;
-						if (w.pid !== info.pid || w.title !== title) {
-							changed = true;
-							return {
-								...w,
-								pid: info.pid,
-								sidecarId: info.sidecarId,
-								title,
-							};
-						}
-					}
-				}
-				return w;
-			});
-			return changed ? next : prev;
-		});
-	}, [connectedProcesses, send, processes]);
-
-	// Update window titles when process list changes
-	useEffect(() => {
-		setWindows((prev) => {
-			let changed = false;
-			const next = prev.map((w) => {
-				const procList = processes[w.sidecarId] || [];
-				const proc = procList.find((p) => p.pid === w.pid);
-				if (proc && w.title !== proc.command) {
-					changed = true;
-					return { ...w, title: proc.command };
-				}
-				return w;
-			});
-			return changed ? next : prev;
-		});
-	}, [processes]);
+	}, [connectedProcesses, send]);
 
 	/** Start an animated cursor cycle for a window. */
 	const startAnimCursor = useCallback((windowId: string, frames: AnimCursorFrame[]) => {
@@ -321,13 +266,14 @@ function App() {
 				const zIndex = i + 1;
 				const existing = byId.get(d.window_id);
 				if (existing) {
-					// Geometry from the X11 server is authoritative for
-					// override-redirect popups; for regular top-level
-					// windows the user-driven frontend position wins.
+					// X11 server position wins for popups; for regular
+					// top-level windows the user-driven frontend
+					// position takes precedence (`PositionChanged`
+					// updates apply incrementally).
 					return {
 						...existing,
 						sidecarId: d.sidecar_id,
-						clientId: d.client_id,
+						pid: d.pid,
 						overrideRedirect: d.override_redirect,
 						borderWidth: d.border_width,
 						borderPixel: d.border_pixel,
@@ -336,12 +282,7 @@ function App() {
 					};
 				}
 				// First time seeing this window — seed defaults.
-				const info = clientInfoRef.current.get(d.client_id);
-				const pid = info?.pid ?? 0;
-				const command = info?.command;
-				const title = command
-					|| processesRef.current[d.sidecar_id]?.find((p) => p.pid === pid)?.command
-					|| `PID ${pid}`;
+				const title = d.command || `PID ${d.pid}`;
 				let cx: number;
 				let cy: number;
 				const color = d.override_redirect
@@ -362,17 +303,15 @@ function App() {
 					cy = window.innerHeight / 4 + offset;
 					send({
 						type: "UpdateWindowPosition",
-						client_id: d.client_id,
-						sidecar_id: d.sidecar_id,
+						window_id: d.window_id,
 						x: cx,
 						y: cy,
 					});
 				}
 				return {
 					windowId: d.window_id,
-					clientId: d.client_id,
 					sidecarId: d.sidecar_id,
-					pid,
+					pid: d.pid,
 					title,
 					x: cx,
 					y: cy,
@@ -437,10 +376,10 @@ function App() {
 		});
 	}, [windowList, send]);
 
-	// Register display callback for per-window content events
-	// (titles, cursors, focus, WM state, menus, bell).
+	// Register window-update callback for per-window content events
+	// (titles, cursors, focus, WM state, menus, position deltas).
 	useEffect(() => {
-		onDisplayUpdate((_sidecarId, _clientId, update) => {
+		onWindowUpdate((update) => {
 			// Title changes update the matching window
 			if (update.kind === "TitleChanged") {
 				setWindows((prev) =>
@@ -498,8 +437,8 @@ function App() {
 				startAnimCursor(update.window_id, update.frames);
 			}
 
-			// Window WM state changed from server
-			if (update.kind === "WindowStateChanged") {
+			// X11 WM state changed
+			if (update.kind === "StateChanged") {
 				setWindows((prev) =>
 					prev.map((w) => {
 						if (w.windowId !== update.window_id) return w;
@@ -512,30 +451,20 @@ function App() {
 				);
 			}
 
-			// Bell -- play an audible/visual bell
-			if (update.kind === "Bell") {
-				try {
-					const ctx = new AudioContext();
-					const osc = ctx.createOscillator();
-					const gain = ctx.createGain();
-					osc.connect(gain);
-					gain.connect(ctx.destination);
-					osc.frequency.value = 800;
-					gain.gain.value = Math.max(0.01, update.percent / 100);
-					osc.start();
-					osc.stop(ctx.currentTime + 0.1);
-				} catch {
-					document.body.style.backgroundColor = "#fff";
-					setTimeout(() => {
-						document.body.style.backgroundColor = "";
-					}, 100);
-				}
+			// Focus — drives the global menu bar.
+			if (update.kind === "Focused") {
+				setFocusedWindowId(update.window_id);
 			}
 
-			// WindowFocused -- the X11 server tells us which top-level
-			// window has input focus. Drives the global menu bar.
-			if (update.kind === "WindowFocused") {
-				setFocusedWindowId(update.window_id);
+			// Cross-frontend drag delta from another tab.
+			if (update.kind === "PositionChanged") {
+				setWindows((prev) =>
+					prev.map((w) =>
+						w.windowId === update.window_id
+							? { ...w, x: update.x, y: update.y }
+							: w,
+					),
+				);
 			}
 
 			// MenuStructure -- full menu tree from a GTK / Qt app.
@@ -566,19 +495,31 @@ function App() {
 			}
 			r.pushUpdate(update);
 		});
-		return () => onDisplayUpdate(null);
-	// biome-ignore lint/correctness/useExhaustiveDependencies: initialWindowStates used via ref to avoid re-registering callback
-	}, [onDisplayUpdate, send, startAnimCursor]);
+		return () => onWindowUpdate(null);
+	}, [onWindowUpdate, startAnimCursor]);
 
-	// Handle position changes from other tabs (high-frequency drag sync).
+	// Top-level Bell event — play an audible/visual notification.
 	useEffect(() => {
-		onWindowPositionChanged((clientId, x, y) => {
-			setWindows((prev) =>
-				prev.map((w) => (w.clientId === clientId ? { ...w, x, y } : w)),
-			);
+		onBell((percent) => {
+			try {
+				const ctx = new AudioContext();
+				const osc = ctx.createOscillator();
+				const gain = ctx.createGain();
+				osc.connect(gain);
+				gain.connect(ctx.destination);
+				osc.frequency.value = 800;
+				gain.gain.value = Math.max(0.01, percent / 100);
+				osc.start();
+				osc.stop(ctx.currentTime + 0.1);
+			} catch {
+				document.body.style.backgroundColor = "#fff";
+				setTimeout(() => {
+					document.body.style.backgroundColor = "";
+				}, 100);
+			}
 		});
-		return () => onWindowPositionChanged(null);
-	}, [onWindowPositionChanged]);
+		return () => onBell(null);
+	}, [onBell]);
 
 	// Clipboard bridge: browser <-> X11
 	const clipboardOfferRef = useRef<
@@ -750,8 +691,7 @@ function App() {
 				if (win && !win.overrideRedirect) {
 					send({
 						type: "UpdateWindowPosition",
-						client_id: win.clientId,
-						sidecar_id: win.sidecarId,
+						window_id: windowId,
 						x,
 						y,
 					});
