@@ -10,9 +10,10 @@ use crate::framebuffer::Framebuffer;
 use crate::xserver::core::require_len;
 use crate::xserver::reply::ReplyBuf;
 use x11rb_protocol::protocol::shm::{
-    AttachRequest, CreatePixmapRequest, CreateSegmentRequest, DetachRequest, GetImageRequest,
-    PutImageRequest,
+    AttachRequest, CreatePixmapRequest, DetachRequest, GetImageRequest, PutImageRequest,
 };
+#[cfg(target_os = "linux")]
+use x11rb_protocol::protocol::shm::CreateSegmentRequest;
 
 /// Handle MIT-SHM extension requests (major opcode 130).
 pub(crate) fn handle_shm_request(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {

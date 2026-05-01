@@ -1,10 +1,9 @@
 use super::{
     apply_gc_function, build_clip_mask, build_dash, point_in_clip_rects, read_pixel,
-    skia_color, skia_eligible, stipple_to_tile, write_pixel, DashState, Framebuffer,
+    skia_eligible, stipple_to_tile, write_pixel, DashState, Framebuffer,
 };
 use tiny_skia::{
-    FillRule, FilterQuality, Paint, PathBuilder, Pattern, PixmapRef, SpreadMode, Stroke,
-    Transform,
+    FilterQuality, Paint, PathBuilder, Pattern, PixmapRef, SpreadMode, Stroke, Transform,
 };
 
 impl Framebuffer {
@@ -457,61 +456,6 @@ impl Framebuffer {
         let masked = (result & plane_mask) | (dst & !plane_mask);
         write_pixel(&mut self.data, off, masked, 0xFF);
         self.mark_dirty(x, y, 1, 1);
-    }
-
-    /// Fill a small circle (for round line caps/joins).
-    pub(crate) fn fill_circle(
-        &mut self,
-        cx: i32,
-        cy: i32,
-        radius: i32,
-        color: u32,
-        gc_func: u8,
-        plane_mask: u32,
-        clip_rects: &[(i16, i16, u16, u16)],
-    ) {
-        if radius <= 0 {
-            return;
-        }
-        if skia_eligible(gc_func, plane_mask) {
-            if let Some(rect) = tiny_skia::Rect::from_xywh(
-                (cx - radius) as f32,
-                (cy - radius) as f32,
-                (radius * 2) as f32,
-                (radius * 2) as f32,
-            ) {
-                if let Some(path) = PathBuilder::from_oval(rect) {
-                    let mut paint = Paint::default();
-                    paint.set_color(skia_color(color));
-                    paint.anti_alias = true;
-                    let clip_mask = build_clip_mask(self.width, self.height, clip_rects);
-                    let _ = self.with_pixmap_mut(|pm| {
-                        pm.fill_path(
-                            &path,
-                            &paint,
-                            FillRule::Winding,
-                            Transform::identity(),
-                            clip_mask.as_ref(),
-                        );
-                    });
-                    self.mark_dirty(
-                        cx - radius,
-                        cy - radius,
-                        (radius * 2 + 1) as u32,
-                        (radius * 2 + 1) as u32,
-                    );
-                    return;
-                }
-            }
-        }
-        let r2 = radius * radius;
-        for dy in -radius..=radius {
-            for dx in -radius..=radius {
-                if dx * dx + dy * dy <= r2 {
-                    self.draw_point_gc(cx + dx, cy + dy, color, gc_func, plane_mask, clip_rects);
-                }
-            }
-        }
     }
 }
 
