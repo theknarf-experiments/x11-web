@@ -572,6 +572,14 @@ pub fn build_to_sidecar(msg: &BackendToSidecar) -> Option<Builder<HeapAllocator>
                 let mut lp = root.init_list_processes();
                 lp.set_request_id(request_id);
             }
+            BackendToSidecar::StartWindowCapture { window_id } => {
+                let mut req = root.init_start_window_capture();
+                req.set_window_id(window_id);
+            }
+            BackendToSidecar::StopWindowCapture { window_id } => {
+                let mut req = root.init_stop_window_capture();
+                req.set_window_id(window_id);
+            }
         }
     }
     Some(builder)
@@ -751,6 +759,18 @@ pub fn read_to_sidecar(
             let lp = lp?;
             BackendToSidecar::ListProcesses {
                 request_id: lp.get_request_id()?.to_string()?,
+            }
+        }
+        Which::StartWindowCapture(req) => {
+            let req = req?;
+            BackendToSidecar::StartWindowCapture {
+                window_id: req.get_window_id()?.to_string()?,
+            }
+        }
+        Which::StopWindowCapture(req) => {
+            let req = req?;
+            BackendToSidecar::StopWindowCapture {
+                window_id: req.get_window_id()?.to_string()?,
             }
         }
     })

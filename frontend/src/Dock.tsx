@@ -18,6 +18,11 @@ interface DockProps {
 	/// dock looks each window up here when rendering the picker so
 	/// it can show a live preview alongside the spawn controls.
 	thumbnails: Map<string, string>;
+	/// Window IDs already attached to the active workspace's canvas.
+	/// The picker hides these — once a polaroid is dragged out it
+	/// turns into a live WindowFrame, no need to keep showing it as
+	/// a thumbnail.
+	attachedWindowIds: Set<string>;
 	onSpawn: (sidecarId: string, command: string, args: string[]) => void;
 	onClose: (sidecarId: string, pid: number) => void;
 	onFocusWindow: (sidecarId: string, pid: number) => void;
@@ -27,6 +32,7 @@ export function Dock({
 	connected,
 	processes,
 	thumbnails,
+	attachedWindowIds,
 	onSpawn,
 	onClose,
 	onFocusWindow,
@@ -140,7 +146,9 @@ export function Dock({
 									<div className={s.popoverStack}>
 										{(() => {
 											const sidecarWindows = allWindows.filter(
-												(w) => w.sidecarId === sc.id,
+												(w) =>
+													w.sidecarId === sc.id &&
+													!attachedWindowIds.has(w.windowId),
 											);
 											if (sidecarWindows.length === 0) return null;
 											return (
@@ -152,12 +160,21 @@ export function Dock({
 																key={w.windowId}
 																className={s.thumbnailCell}
 																title={w.title || w.windowId}
+																draggable={true}
+																onDragStart={(e) => {
+																	e.dataTransfer.setData(
+																		"application/x-x11web-window-id",
+																		w.windowId,
+																	);
+																	e.dataTransfer.effectAllowed = "copy";
+																}}
 															>
 																{url ? (
 																	<img
 																		src={url}
 																		alt={w.title || ""}
 																		className={s.thumbnailImg}
+																		draggable={false}
 																	/>
 																) : (
 																	<div className={s.thumbnailPlaceholder} />

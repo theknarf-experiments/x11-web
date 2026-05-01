@@ -103,12 +103,26 @@ impl WireWriter {
     }
 }
 
+/// Sidecar implementation kind, set at handshake. Drives backend
+/// policy: X11 windows auto-stream and auto-attach to all open
+/// workspaces; macOS windows are visible only as thumbnails until
+/// the user drags one onto the canvas.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SidecarKind {
+    /// Default for old sidecars that don't set the field; treated
+    /// the same as `X11` for backwards compatibility.
+    Unknown,
+    X11,
+    Macos,
+}
+
 /// What the backend hands to its session handler after a successful
 /// handshake. The reader/writer halves of the bidi stream are split
 /// so the handler can drive recv + send concurrently.
 pub struct AcceptedConnection {
     pub sidecar_id: String,
     pub sidecar_name: String,
+    pub sidecar_kind: SidecarKind,
     pub reader: WireReader,
     pub writer: WireWriter,
     /// quinn connection handle — kept so the caller can close it
@@ -207,6 +221,11 @@ pub async fn accept(
         .map_err(|e| WireError::Connection(format!("sidecar name read: {e}")))?
         .to_string()
         .map_err(|e| WireError::Connection(format!("sidecar name utf8: {e}")))?;
+    let sidecar_kind = match hello.get_sidecar_kind() {
+        Ok(wire_capnp::SidecarKind::X11) => SidecarKind::X11,
+        Ok(wire_capnp::SidecarKind::Macos) => SidecarKind::Macos,
+        Ok(wire_capnp::SidecarKind::Unknown) | Err(_) => SidecarKind::Unknown,
+    };
 
     let sidecar_id = match validate_token(token, &sidecar_name) {
         Ok(id) => id,
@@ -233,6 +252,7 @@ pub async fn accept(
     Ok(AcceptedConnection {
         sidecar_id,
         sidecar_name,
+        sidecar_kind,
         reader,
         writer,
         connection,
@@ -252,6 +272,7 @@ pub async fn dial(
     fingerprint: [u8; 32],
     bearer_token: &[u8],
     sidecar_name: &str,
+    sidecar_kind: SidecarKind,
 ) -> Result<DialedConnection, WireError> {
     let client_cfg = make_client_config(fingerprint)?;
     let mut endpoint = Endpoint::client("0.0.0.0:0".parse().unwrap())
@@ -283,6 +304,11 @@ pub async fn dial(
         hello.set_protocol_version(PROTOCOL_VERSION);
         hello.set_bearer_token(bearer_token);
         hello.set_sidecar_name(sidecar_name);
+        hello.set_sidecar_kind(match sidecar_kind {
+            SidecarKind::X11 => wire_capnp::SidecarKind::X11,
+            SidecarKind::Macos => wire_capnp::SidecarKind::Macos,
+            SidecarKind::Unknown => wire_capnp::SidecarKind::Unknown,
+        });
     }
     writer.write_message(&hello_builder).await?;
 

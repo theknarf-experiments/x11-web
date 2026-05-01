@@ -263,6 +263,18 @@
 		transform 0.2s ease,
 		box-shadow 0.2s ease,
 		z-index 0s linear 0.2s;
+	/* Open hand on hover, closed hand on mousedown. The browser's
+	   drag cursor takes over once HTML5 drag actually starts (we
+	   can't override that with CSS), but the active state covers
+	   the grab moment. */
+	cursor: grab;
+	/* Drag-to-select would compete with HTML5 drag-and-drop. */
+	user-select: none;
+	-webkit-user-select: none;
+}
+
+.thumbnailCell:active {
+	cursor: grabbing;
 }
 
 .thumbnailCell:first-child {

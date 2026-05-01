@@ -9,12 +9,16 @@ interface Camera {
 
 interface InfiniteCanvasProps {
 	children: ReactNode;
+	/// Called on drop with the drop point already translated into
+	/// canvas coordinates (camera-aware). Used to land dragged
+	/// polaroids onto the canvas at the cursor.
+	onCanvasDrop?: (point: { x: number; y: number }, event: React.DragEvent) => void;
 }
 
 const MIN_SCALE = 0.1;
 const MAX_SCALE = 3;
 
-export function InfiniteCanvas({ children }: InfiniteCanvasProps) {
+export function InfiniteCanvas({ children, onCanvasDrop }: InfiniteCanvasProps) {
 	const [camera, setCamera] = useState<Camera>({ x: 0, y: 0, scale: 1 });
 	const cameraRef = useRef(camera);
 	cameraRef.current = camera;
@@ -65,8 +69,37 @@ export function InfiniteCanvas({ children }: InfiniteCanvasProps) {
 	const transform = `scale(${camera.scale}) translate(${-camera.x}px, ${-camera.y}px)`;
 	const zoomPercent = Math.round(camera.scale * 100);
 
+	const handleDragOver = onCanvasDrop
+		? (e: React.DragEvent) => {
+				// Allowing drop requires preventDefault on dragover.
+				e.preventDefault();
+				e.dataTransfer.dropEffect = "copy";
+			}
+		: undefined;
+
+	const handleDrop = onCanvasDrop
+		? (e: React.DragEvent) => {
+				e.preventDefault();
+				const el = viewportRef.current;
+				if (!el) return;
+				const rect = el.getBoundingClientRect();
+				const cam = cameraRef.current;
+				const cursorX = e.clientX - rect.left;
+				const cursorY = e.clientY - rect.top;
+				const canvasX = cam.x + cursorX / cam.scale;
+				const canvasY = cam.y + cursorY / cam.scale;
+				onCanvasDrop({ x: canvasX, y: canvasY }, e);
+			}
+		: undefined;
+
 	return (
-		<div ref={viewportRef} className={s.viewport} data-testid="infinite-canvas">
+		<div
+			ref={viewportRef}
+			className={s.viewport}
+			data-testid="infinite-canvas"
+			onDragOver={handleDragOver}
+			onDrop={handleDrop}
+		>
 			<div
 				className={s.transform}
 				style={{ transform }}

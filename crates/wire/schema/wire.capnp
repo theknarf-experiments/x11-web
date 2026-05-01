@@ -25,6 +25,18 @@ struct Hello {
     # nonce signatures or pre-shared keys (v1) without a schema bump.
     bearerToken @1 :Data;
     sidecarName @2 :Text;
+    # Distinguishes X11 (auto-stream every window) from macOS
+    # (stream on demand when the user drags a polaroid out of the
+    # picker into the canvas). Old sidecars that don't set this
+    # default to `unknown` — backend treats them as X11 for
+    # backwards compatibility.
+    sidecarKind @3 :SidecarKind;
+}
+
+enum SidecarKind {
+    unknown @0;
+    x11 @1;
+    macos @2;
 }
 
 struct HelloAck {
@@ -380,7 +392,20 @@ struct ToSidecar {
         # Process listing — request, the reply comes back as
         # `processList` on the FromSidecar union.
         listProcesses @4 :ListProcessesReq;
+
+        # Begin / end live capture of a specific window. macOS
+        # sidecar enumerates every window into the picker via
+        # thumbnails by default; the live SCStream only spins up
+        # when the backend asks via `startWindowCapture` (and stops
+        # when no workspace has it attached anymore).
+        # X11 sidecar streams unconditionally; ignores these.
+        startWindowCapture @5 :WindowCaptureReq;
+        stopWindowCapture @6 :WindowCaptureReq;
     }
+}
+
+struct WindowCaptureReq {
+    windowId @0 :Text;
 }
 
 struct InputEventEnvelope {

@@ -20,6 +20,7 @@ pub mod conn;
 pub mod tls;
 pub mod types;
 
+pub use conn::SidecarKind;
 pub use types::{BackendToSidecar, SidecarToBackend, SpawnedProcessInfo};
 
 /// Generated Cap'n Proto types. The build script writes this module

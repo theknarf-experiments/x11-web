@@ -66,8 +66,22 @@ struct Tracked {
     pid: i32,
     bounds: WindowBounds,
     title: String,
+    /// Live SCStream capture handle. `None` by default — only
+    /// populated when the backend asks for it via
+    /// `CaptureControl::Start`. Drops back to `None` when the
+    /// backend asks to stop or the window vanishes.
     capture_stop: Option<CaptureStop>,
     thumbnail_stop: Option<CaptureStop>,
+}
+
+/// Commands the enumerator listens for so on-demand SCStream
+/// captures can be started / stopped without rebuilding the whole
+/// `Tracked` map. `window_id` is the UUID the enumerator handed out
+/// for the window.
+#[derive(Debug)]
+pub enum CaptureControl {
+    Start { window_id: String },
+    Stop { window_id: String },
 }
 
 /// Handle for stopping a per-window capture thread. The thread owns
@@ -91,94 +105,154 @@ impl CaptureStop {
 }
 
 /// Spawn the enumeration task. Sends `SidecarToBackend` messages on
-/// `tx` for every window state change, and a per-window capture task
-/// per tracked window that streams `PutImage` updates at
-/// `CAPTURE_PERIOD`. Updates `router` in lockstep so the input path
-/// can resolve window UUIDs back to pid + screen origin.
-pub fn spawn(tx: mpsc::UnboundedSender<SidecarToBackend>, router: WindowRouter) {
+/// `tx` for every window state change, plus a per-window thumbnail
+/// task. Live SCStream capture is started / stopped on demand via
+/// `capture_ctl_rx` (the backend asks when a workspace attaches a
+/// window). `router` is updated in lockstep so the input path can
+/// resolve window UUIDs back to pid + screen origin.
+pub fn spawn(
+    tx: mpsc::UnboundedSender<SidecarToBackend>,
+    router: WindowRouter,
+    mut capture_ctl_rx: mpsc::UnboundedReceiver<CaptureControl>,
+) {
     tokio::spawn(async move {
         let mut tracked: HashMap<CGWindowID, Tracked> = HashMap::new();
         let mut announced_pids: HashMap<i32, String> = HashMap::new();
         let mut tick = interval(Duration::from_secs(1));
 
         loop {
-            tick.tick().await;
-            let current = visible_windows()
-                .into_iter()
-                .filter(is_renderable)
-                .map(|w| (w.id, w))
-                .collect::<HashMap<_, _>>();
-
-            // Newly-seen windows.
-            for (id, win) in &current {
-                if tracked.contains_key(id) {
-                    continue;
+            tokio::select! {
+                _ = tick.tick() => {
+                    enumerate_step(&mut tracked, &mut announced_pids, &tx, &router);
                 }
-                let uuid = Uuid::new_v4().to_string();
-                announce_pid_if_new(&mut announced_pids, win, &tx);
-                emit_created(&tx, &uuid, win);
-                router.insert(
-                    uuid.clone(),
-                    WindowRoute {
-                        cg_id: *id,
-                        pid: win.pid,
-                        bounds: win.bounds,
-                    },
-                );
-                let capture_stop = spawn_capture_loop(*id, uuid.clone(), win.pid, tx.clone());
-                let thumbnail_stop =
-                    spawn_thumbnail_loop(*id, uuid.clone(), win.pid, tx.clone());
-                tracked.insert(
-                    *id,
-                    Tracked {
-                        uuid,
-                        pid: win.pid,
-                        bounds: win.bounds,
-                        title: win.name.clone(),
-                        capture_stop: Some(capture_stop),
-                        thumbnail_stop: Some(thumbnail_stop),
-                    },
-                );
-            }
-
-            // Existing windows: check for bounds / title changes.
-            for (id, win) in &current {
-                if let Some(prev) = tracked.get_mut(id) {
-                    if !bounds_eq(&prev.bounds, &win.bounds) {
-                        emit_configured(&tx, &prev.uuid, &win.bounds);
-                        router.update_bounds(&prev.uuid, win.bounds);
-                        prev.bounds = win.bounds;
-                    }
-                    if prev.title != win.name {
-                        emit_title(&tx, &prev.uuid, &win.name);
-                        prev.title = win.name.clone();
-                    }
+                Some(cmd) = capture_ctl_rx.recv() => {
+                    handle_capture_control(cmd, &mut tracked, &tx);
                 }
             }
-
-            // Vanished windows.
-            tracked.retain(|id, prev| {
-                if current.contains_key(id) {
-                    true
-                } else {
-                    if let Some(stop) = prev.capture_stop.take() {
-                        stop.abort();
-                    }
-                    if let Some(stop) = prev.thumbnail_stop.take() {
-                        stop.abort();
-                    }
-                    router.remove(&prev.uuid);
-                    let _ = tx.send(SidecarToBackend::DisplayUpdate {
-                        client_id: client_id_for_pid(prev.pid),
-                        update: DisplayUpdate::WindowDestroyed {
-                            window_id: prev.uuid.clone(),
-                        },
-                    });
-                    false
-                }
-            });
         }
     });
+}
+
+fn enumerate_step(
+    tracked: &mut HashMap<CGWindowID, Tracked>,
+    announced_pids: &mut HashMap<i32, String>,
+    tx: &mpsc::UnboundedSender<SidecarToBackend>,
+    router: &WindowRouter,
+) {
+    let current = visible_windows()
+        .into_iter()
+        .filter(is_renderable)
+        .map(|w| (w.id, w))
+        .collect::<HashMap<_, _>>();
+
+    // Newly-seen windows.
+    for (id, win) in &current {
+        if tracked.contains_key(id) {
+            continue;
+        }
+        let uuid = Uuid::new_v4().to_string();
+        announce_pid_if_new(announced_pids, win, tx);
+        emit_created(tx, &uuid, win);
+        router.insert(
+            uuid.clone(),
+            WindowRoute {
+                cg_id: *id,
+                pid: win.pid,
+                bounds: win.bounds,
+            },
+        );
+        // Thumbnails always run so the picker has live previews.
+        // Live capture is started later via CaptureControl::Start.
+        let thumbnail_stop = spawn_thumbnail_loop(*id, uuid.clone(), win.pid, tx.clone());
+        tracked.insert(
+            *id,
+            Tracked {
+                uuid,
+                pid: win.pid,
+                bounds: win.bounds,
+                title: win.name.clone(),
+                capture_stop: None,
+                thumbnail_stop: Some(thumbnail_stop),
+            },
+        );
+    }
+
+    // Existing windows: check for bounds / title changes.
+    for (id, win) in &current {
+        if let Some(prev) = tracked.get_mut(id) {
+            if !bounds_eq(&prev.bounds, &win.bounds) {
+                emit_configured(tx, &prev.uuid, &win.bounds);
+                router.update_bounds(&prev.uuid, win.bounds);
+                prev.bounds = win.bounds;
+            }
+            if prev.title != win.name {
+                emit_title(tx, &prev.uuid, &win.name);
+                prev.title = win.name.clone();
+            }
+        }
+    }
+
+    // Vanished windows.
+    tracked.retain(|id, prev| {
+        if current.contains_key(id) {
+            true
+        } else {
+            if let Some(stop) = prev.capture_stop.take() {
+                stop.abort();
+            }
+            if let Some(stop) = prev.thumbnail_stop.take() {
+                stop.abort();
+            }
+            router.remove(&prev.uuid);
+            let _ = tx.send(SidecarToBackend::DisplayUpdate {
+                client_id: client_id_for_pid(prev.pid),
+                update: DisplayUpdate::WindowDestroyed {
+                    window_id: prev.uuid.clone(),
+                },
+            });
+            false
+        }
+    });
+}
+
+fn handle_capture_control(
+    cmd: CaptureControl,
+    tracked: &mut HashMap<CGWindowID, Tracked>,
+    tx: &mpsc::UnboundedSender<SidecarToBackend>,
+) {
+    match cmd {
+        CaptureControl::Start { window_id } => {
+            // Find the Tracked entry by UUID. The map is keyed by
+            // CGWindowID for cheap lookup during enumeration; here
+            // we iterate since per-second start/stop is rare.
+            let entry = tracked
+                .iter_mut()
+                .find(|(_, t)| t.uuid == window_id);
+            let Some((cg_id, t)) = entry else {
+                warn!("StartWindowCapture for unknown window_id={window_id}");
+                return;
+            };
+            if t.capture_stop.is_some() {
+                return; // already streaming
+            }
+            let stop = spawn_capture_loop(*cg_id, t.uuid.clone(), t.pid, tx.clone());
+            t.capture_stop = Some(stop);
+            info!("Started live capture for window {} (cg_id={cg_id})", t.uuid);
+        }
+        CaptureControl::Stop { window_id } => {
+            let entry = tracked
+                .iter_mut()
+                .find(|(_, t)| t.uuid == window_id);
+            let Some((cg_id, t)) = entry else {
+                warn!("StopWindowCapture for unknown window_id={window_id}");
+                return;
+            };
+            if let Some(stop) = t.capture_stop.take() {
+                stop.abort();
+                info!("Stopped live capture for window {} (cg_id={cg_id})", t.uuid);
+            }
+        }
+    }
 }
 
 /// Per-window capture loop. Runs on a dedicated OS thread because

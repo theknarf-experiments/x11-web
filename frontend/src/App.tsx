@@ -72,6 +72,7 @@ function App() {
 	const {
 		connected,
 		activeWorkspace,
+		attachedWindowIds,
 		send,
 		onWindowUpdate,
 		onBell,
@@ -505,8 +506,13 @@ function App() {
 			: null;
 
 	const visibleWindows = useMemo(
-		() => windows.filter((w) => !closedWindowIds.has(w.windowId)),
-		[windows, closedWindowIds],
+		() =>
+			windows.filter(
+				(w) =>
+					!closedWindowIds.has(w.windowId) &&
+					attachedWindowIds.has(w.windowId),
+			),
+		[windows, closedWindowIds, attachedWindowIds],
 	);
 
 	// Block rendering until the backend has bound this session to a
@@ -541,7 +547,37 @@ function App() {
 				onActivate={handleMenuActivate}
 				appContextMenuItems={focusedAppContextMenuItems}
 			/>
-			<InfiniteCanvas>
+			<InfiniteCanvas
+				onCanvasDrop={(point, event) => {
+					const windowId = event.dataTransfer.getData(
+						"application/x-x11web-window-id",
+					);
+					if (!windowId || !activeWorkspace) return;
+					send({
+						type: "AttachWindow",
+						workspace_id: activeWorkspace.id,
+						window_id: windowId,
+					});
+					// Drop the new WindowFrame at the cursor's canvas
+					// coordinate. Two-phase update: patch the local
+					// row immediately so the WindowFrame mounts at
+					// the drop point on the next render, *and* tell
+					// the backend so other frontends pick it up via
+					// `WindowList`. Without the local patch,
+					// `applyWindowList` preserves the existing
+					// (cascade-seeded) position when the next
+					// snapshot arrives — by design, so cross-frontend
+					// `WindowList` broadcasts don't fight a local
+					// drag.
+					patchWindow(windowId, { x: point.x, y: point.y });
+					send({
+						type: "UpdateWindowPosition",
+						window_id: windowId,
+						x: point.x,
+						y: point.y,
+					});
+				}}
+			>
 				{visibleWindows.map((win) => {
 					// Lazy-create the renderer so a window appearing in
 					// the authoritative list shows up immediately, before
@@ -590,6 +626,7 @@ function App() {
 				connected={connected}
 				processes={dockProcesses}
 				thumbnails={thumbnails}
+				attachedWindowIds={attachedWindowIds}
 				onSpawn={handleSpawn}
 				onClose={handleCloseProcess}
 				onFocusWindow={raiseProcess}

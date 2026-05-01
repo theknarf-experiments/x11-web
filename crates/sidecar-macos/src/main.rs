@@ -48,7 +48,7 @@ mod macos {
     use x11_web_wire::bridge as wire_bridge;
     use x11_web_wire::conn::{dial, DialedConnection};
     use x11_web_wire::tls::parse_fingerprint;
-    use x11_web_wire::{wire_capnp, BackendToSidecar, SidecarToBackend};
+    use x11_web_wire::{wire_capnp, BackendToSidecar, SidecarKind, SidecarToBackend};
 
     pub async fn run(conn_state: Arc<AtomicU8>) {
         tracing_subscriber::fmt::init();
@@ -144,6 +144,7 @@ mod macos {
                 fingerprint,
                 &bearer_token,
                 &sidecar_name,
+                SidecarKind::Macos,
             )
             .await
             {
@@ -183,9 +184,15 @@ mod macos {
             }
         });
 
-        // Window enumeration → DisplayUpdate stream.
+        // Window enumeration → DisplayUpdate stream. Live SCStream
+        // captures are off by default; backend asks for them via
+        // `StartWindowCapture` / `StopWindowCapture`, which the
+        // recv_loop forwards onto `capture_ctl_tx`.
         let router = WindowRouter::new();
-        x11_web_sidecar_macos::enumerator::spawn(tx.clone(), router.clone());
+        let (capture_ctl_tx, capture_ctl_rx) = mpsc::unbounded_channel::<
+            x11_web_sidecar_macos::enumerator::CaptureControl,
+        >();
+        x11_web_sidecar_macos::enumerator::spawn(tx.clone(), router.clone(), capture_ctl_rx);
 
         // Drive recv + send concurrently in the same task so capnp's
         // !Send readers don't fight tokio::spawn.
@@ -222,7 +229,7 @@ mod macos {
                     }
                 };
                 match wire_bridge::read_to_sidecar(to_sidecar) {
-                    Ok(cmd) => handle_backend_msg(cmd, &router),
+                    Ok(cmd) => handle_backend_msg(cmd, &router, &capture_ctl_tx),
                     Err(e) => {
                         warn!("ToSidecar translate: {e:?}");
                     }
@@ -238,7 +245,14 @@ mod macos {
         heartbeat_task.abort();
     }
 
-    fn handle_backend_msg(cmd: BackendToSidecar, router: &WindowRouter) {
+    fn handle_backend_msg(
+        cmd: BackendToSidecar,
+        router: &WindowRouter,
+        capture_ctl_tx: &mpsc::UnboundedSender<
+            x11_web_sidecar_macos::enumerator::CaptureControl,
+        >,
+    ) {
+        use x11_web_sidecar_macos::enumerator::CaptureControl;
         match cmd {
             BackendToSidecar::InputEvent { window_id, event } => {
                 info!("InputEvent received: window={window_id} event={event:?}");
@@ -254,6 +268,12 @@ mod macos {
                         warn!("No route for window UUID {window_id}");
                     }
                 }
+            }
+            BackendToSidecar::StartWindowCapture { window_id } => {
+                let _ = capture_ctl_tx.send(CaptureControl::Start { window_id });
+            }
+            BackendToSidecar::StopWindowCapture { window_id } => {
+                let _ = capture_ctl_tx.send(CaptureControl::Stop { window_id });
             }
             other => {
                 info!("Backend msg (ignored): {other:?}");

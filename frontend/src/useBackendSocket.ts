@@ -144,6 +144,13 @@ export function useBackendSocket() {
 	const sendRef = useRef<(msg: FrontendToBackend) => void>(() => {});
 	const [connected, setConnected] = useState(false);
 	const [activeWorkspace, setActiveWorkspace] = useState<Workspace | null>(null);
+	/// Window IDs attached to `activeWorkspace`'s canvas. The backend
+	/// pushes a fresh snapshot via `AttachedWindows` whenever the set
+	/// changes; we ignore snapshots for other workspaces.
+	const [attachedWindowIds, setAttachedWindowIds] = useState<Set<string>>(
+		() => new Set(),
+	);
+	const activeWorkspaceIdRef = useRef<string | null>(null);
 	const [diagnostics, setDiagnostics] = useState<Diagnostic[]>([]);
 
 	const pushDiagnostic = useCallback(
@@ -267,6 +274,8 @@ export function useBackendSocket() {
 			ws.onclose = (event) => {
 				setConnected(false);
 				setActiveWorkspace(null);
+				activeWorkspaceIdRef.current = null;
+				setAttachedWindowIds(new Set());
 				if (!disposed.current) {
 					pushDiagnostic({
 						level: "warn",
@@ -286,6 +295,7 @@ export function useBackendSocket() {
 						break;
 					case "Workspace": {
 						setActiveWorkspace(msg.workspace);
+						activeWorkspaceIdRef.current = msg.workspace.id;
 						const currentHash = window.location.hash.replace(/^#/, "");
 						if (currentHash !== msg.workspace.id) {
 							window.history.replaceState(
@@ -294,6 +304,16 @@ export function useBackendSocket() {
 								`${window.location.pathname}${window.location.search}#${msg.workspace.id}`,
 							);
 						}
+						break;
+					}
+					case "AttachedWindows": {
+						// Only act on snapshots for our bound workspace —
+						// the backend broadcasts to all frontends rather
+						// than per-recipient filtering.
+						if (msg.workspace_id !== activeWorkspaceIdRef.current) {
+							break;
+						}
+						setAttachedWindowIds(new Set(msg.window_ids));
 						break;
 					}
 					case "ProcessList":
@@ -403,6 +423,7 @@ export function useBackendSocket() {
 	return {
 		connected,
 		activeWorkspace,
+		attachedWindowIds,
 		send,
 		onWindowUpdate,
 		onBell,

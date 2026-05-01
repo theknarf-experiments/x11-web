@@ -84,7 +84,11 @@ async fn handle_quic_session(state: AppState, accepted: x11_web_wire::conn::Acce
         id: sidecar_id.clone(),
         name: accepted.sidecar_name.clone(),
     };
-    info!("Sidecar connected over QUIC: {} ({})", info.name, info.id);
+    let kind = accepted.sidecar_kind;
+    info!(
+        "Sidecar connected over QUIC: {} ({}) kind={:?}",
+        info.name, info.id, kind
+    );
 
     // Register sidecar with a tx that translates BackendToSidecar
     // into wire frames before they hit the QUIC stream. The send
@@ -96,6 +100,7 @@ async fn handle_quic_session(state: AppState, accepted: x11_web_wire::conn::Acce
             sidecar_id.clone(),
             SidecarConnection {
                 info: info.clone(),
+                kind,
                 tx,
             },
         );

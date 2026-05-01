@@ -22,7 +22,7 @@ use tracing::{error, info, warn};
 use x11_web_wire::bridge as wire_bridge;
 use x11_web_wire::conn::{dial, DialedConnection};
 use x11_web_wire::tls::parse_fingerprint;
-use x11_web_wire::{wire_capnp, BackendToSidecar, SidecarToBackend};
+use x11_web_wire::{wire_capnp, BackendToSidecar, SidecarKind, SidecarToBackend};
 
 use crate::xserver::{TaggedDisplayUpdate, X11Server};
 
@@ -336,6 +336,7 @@ async fn main() {
             fingerprint,
             &bearer_token,
             &sidecar_name,
+            SidecarKind::X11,
         )
         .await
         {
@@ -589,6 +590,11 @@ async fn handle_command(
         } => {
             window_router.send_resize(&window_id, width, height);
         }
+        // X11 sidecar streams unconditionally — these on-demand
+        // capture controls only matter for sidecars (currently macOS)
+        // that don't auto-stream every enumerated window.
+        BackendToSidecar::StartWindowCapture { .. }
+        | BackendToSidecar::StopWindowCapture { .. } => {}
     }
 }
 

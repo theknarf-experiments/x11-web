@@ -43,6 +43,13 @@ pub enum BackendToSidecar {
         width: u16,
         height: u16,
     },
+    /// Start live capture of a specific window. The macOS sidecar
+    /// only runs SCStream for windows the backend has explicitly
+    /// asked for; X11 streams unconditionally and ignores this.
+    StartWindowCapture { window_id: String },
+    /// Stop live capture — sent when no workspace has the window
+    /// attached anymore.
+    StopWindowCapture { window_id: String },
 }
 
 /// Messages sent from a sidecar to the backend.

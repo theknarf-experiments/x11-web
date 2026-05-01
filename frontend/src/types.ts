@@ -21,6 +21,11 @@ export type BackendToFrontend =
 	| { type: "SidecarList"; sidecars: SidecarInfo[] }
 	| { type: "Workspace"; workspace: Workspace }
 	| {
+			type: "AttachedWindows";
+			workspace_id: string;
+			window_ids: string[];
+	  }
+	| {
 			type: "CommandResult";
 			request_id: string;
 			success: boolean;
@@ -41,6 +46,8 @@ export type BackendToFrontend =
 // Frontend -> Backend messages
 export type FrontendToBackend =
 	| { type: "OpenWorkspace"; id: string | null }
+	| { type: "AttachWindow"; workspace_id: string; window_id: string }
+	| { type: "DetachWindow"; workspace_id: string; window_id: string }
 	| {
 			type: "SpawnProcess";
 			request_id: string;
