@@ -11,7 +11,6 @@ import {
 	raiseProcess,
 	raiseWindow,
 	setFocusedWindow,
-	sidecarsCollection,
 	windowsCollection,
 } from "./db";
 import { GlobalMenuBar } from "./GlobalMenuBar";
@@ -81,9 +80,6 @@ function App() {
 		clearDiagnostics,
 	} = useBackendSocket();
 
-	const { data: sidecars = [] } = useLiveQuery((q) =>
-		q.from({ s: sidecarsCollection }).select(({ s }) => s),
-	);
 	const { data: processes = [] } = useLiveQuery((q) =>
 		q.from({ p: processesCollection }).select(({ p }) => p),
 	);
@@ -539,7 +535,6 @@ function App() {
 			</InfiniteCanvas>
 			<Dock
 				connected={connected}
-				sidecars={sidecars}
 				processes={dockProcesses}
 				onSpawn={handleSpawn}
 				onClose={handleCloseProcess}

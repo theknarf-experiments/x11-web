@@ -1,7 +1,8 @@
+import { useLiveQuery } from "@tanstack/react-db";
 import { useEffect, useRef, useState, ViewTransition } from "react";
 import { AppContextMenu, getAppContextMenuItems } from "./AppContextMenu";
 import s from "./Dock.module.css";
-import type { SidecarInfo } from "./types";
+import { sidecarsCollection } from "./db";
 
 export interface DockProcess {
 	sidecarId: string;
@@ -12,7 +13,6 @@ export interface DockProcess {
 
 interface DockProps {
 	connected: boolean;
-	sidecars: SidecarInfo[];
 	processes: DockProcess[];
 	onSpawn: (sidecarId: string, command: string, args: string[]) => void;
 	onClose: (sidecarId: string, pid: number) => void;
@@ -21,13 +21,15 @@ interface DockProps {
 
 export function Dock({
 	connected,
-	sidecars,
 	processes,
 	onSpawn,
 	onClose,
 	onFocusWindow,
 }: DockProps) {
-	const [showSpawn, setShowSpawn] = useState(false);
+	const { data: sidecars = [] } = useLiveQuery((q) =>
+		q.from({ s: sidecarsCollection }).select(({ s }) => s),
+	);
+	const [openSpawnId, setOpenSpawnId] = useState<string | null>(null);
 	const [contextMenu, setContextMenu] = useState<{
 		sidecarId: string;
 		pid: number;
@@ -36,36 +38,27 @@ export function Dock({
 	} | null>(null);
 	const [command, setCommand] = useState("xeyes");
 	const [args, setArgs] = useState("");
-	const [selectedSidecar, setSelectedSidecar] = useState<string>("");
-	const spawnRef = useRef<HTMLDivElement>(null);
+	const spawnRowRef = useRef<HTMLDivElement>(null);
 
-	// Auto-select first sidecar
+	// Outside-click closes whichever popover is open. The context menu
+	// has its own outside-click handler inside `AppContextMenu`.
 	useEffect(() => {
-		if (!selectedSidecar && sidecars.length > 0) {
-			setSelectedSidecar(sidecars[0].id);
-		}
-	}, [sidecars, selectedSidecar]);
-
-	// Close the spawn popover on outside click. The context menu has
-	// its own outside-click handler inside `AppContextMenu`.
-	useEffect(() => {
-		if (!showSpawn) return;
+		if (!openSpawnId) return;
 		function handleClick(e: MouseEvent) {
 			if (
-				spawnRef.current &&
-				!spawnRef.current.contains(e.target as Node)
+				spawnRowRef.current &&
+				!spawnRowRef.current.contains(e.target as Node)
 			) {
-				setShowSpawn(false);
+				setOpenSpawnId(null);
 			}
 		}
 		document.addEventListener("pointerdown", handleClick);
 		return () => document.removeEventListener("pointerdown", handleClick);
-	}, [showSpawn]);
+	}, [openSpawnId]);
 
-	function handleSpawn() {
-		if (!selectedSidecar) return;
-		onSpawn(selectedSidecar, command, args ? args.split(" ") : []);
-		setShowSpawn(false);
+	function handleSpawn(sidecarId: string) {
+		onSpawn(sidecarId, command, args ? args.split(" ") : []);
+		setOpenSpawnId(null);
 	}
 
 	function handleContextMenu(
@@ -104,85 +97,78 @@ export function Dock({
 					</ViewTransition>
 				))}
 
-				{/* Separator between apps and add button */}
-				{processes.length > 0 && <div className={s.separator} />}
+				{/* Separator between apps and the per-sidecar add buttons */}
+				{processes.length > 0 && sidecars.length > 0 && (
+					<div className={s.separator} />
+				)}
 
-				{/* Add button */}
-				<div ref={spawnRef} style={{ position: "relative" }}>
-					<button
-						type="button"
-						className={`${s.iconButton} ${s.addButton}`}
-						onClick={() => {
-							setShowSpawn(!showSpawn);
-							setContextMenu(null);
-						}}
-						data-testid="spawn-button"
-					>
-						<span className={s.statusDot}>
-							<span
-								className={`${s.statusDotInner} ${connected && sidecars.length > 0 ? s.online : s.offline}`}
-								data-testid="connection-status"
-							/>
-						</span>
-						+
-					</button>
-
-					{showSpawn && (
-						<div className={s.popover}>
-							{sidecars.length > 1 && (
-								<div className={s.popoverRow}>
-									<select
-										className={s.popoverSelect}
-										value={selectedSidecar}
-										onChange={(e) => setSelectedSidecar(e.target.value)}
-									>
-										{sidecars.map((sc) => (
-											<option key={sc.id} value={sc.id}>
-												{sc.name}
-											</option>
-										))}
-									</select>
-								</div>
-							)}
-							{sidecars.length === 1 && (
-								<div className={s.popoverLabel}>{sidecars[0].name}</div>
-							)}
-							<div className={s.popoverRow}>
-								<input
-									type="text"
-									value={command}
-									onChange={(e) => setCommand(e.target.value)}
-									placeholder="command"
-									className={s.popoverInput}
-									onKeyDown={(e) => {
-										if (e.key === "Enter") handleSpawn();
-									}}
-								/>
-							</div>
-							<div className={s.popoverRow}>
-								<input
-									type="text"
-									value={args}
-									onChange={(e) => setArgs(e.target.value)}
-									placeholder="args"
-									className={s.popoverInput}
-									onKeyDown={(e) => {
-										if (e.key === "Enter") handleSpawn();
-									}}
-								/>
-							</div>
-							<div className={s.popoverRow}>
+				{/* One + button per connected sidecar. */}
+				<div ref={spawnRowRef} className={s.spawnRow}>
+					{sidecars.map((sc) => {
+						const isOpen = openSpawnId === sc.id;
+						return (
+							<div key={sc.id} className={s.spawnSlot}>
 								<button
 									type="button"
-									className={s.popoverButton}
-									disabled={!selectedSidecar}
-									onClick={handleSpawn}
+									className={`${s.iconButton} ${s.addButton}`}
+									onClick={() => {
+										setOpenSpawnId(isOpen ? null : sc.id);
+										setContextMenu(null);
+									}}
+									data-testid="spawn-button"
+									data-sidecar-id={sc.id}
 								>
-									Spawn
+									<span className={s.tooltip}>{sc.name}</span>
+									<span className={s.statusDot}>
+										<span
+											className={`${s.statusDotInner} ${connected ? s.online : s.offline}`}
+											data-testid="connection-status"
+										/>
+									</span>
+									+
 								</button>
+
+								{isOpen && (
+									<div className={s.popover}>
+										<div className={s.popoverLabel}>{sc.name}</div>
+										<div className={s.popoverRow}>
+											<input
+												type="text"
+												value={command}
+												onChange={(e) => setCommand(e.target.value)}
+												placeholder="command"
+												className={s.popoverInput}
+												onKeyDown={(e) => {
+													if (e.key === "Enter") handleSpawn(sc.id);
+												}}
+											/>
+										</div>
+										<div className={s.popoverRow}>
+											<input
+												type="text"
+												value={args}
+												onChange={(e) => setArgs(e.target.value)}
+												placeholder="args"
+												className={s.popoverInput}
+												onKeyDown={(e) => {
+													if (e.key === "Enter") handleSpawn(sc.id);
+												}}
+											/>
+										</div>
+										<div className={s.popoverRow}>
+											<button
+												type="button"
+												className={s.popoverButton}
+												onClick={() => handleSpawn(sc.id)}
+											>
+												Spawn
+											</button>
+										</div>
+									</div>
+								)}
 							</div>
-						</div>
-					)}
+						);
+					})}
 				</div>
 			</div>
 			{contextMenu && (

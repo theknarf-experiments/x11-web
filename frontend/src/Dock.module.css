@@ -22,6 +22,16 @@
 	align-self: center;
 }
 
+.spawnRow {
+	display: flex;
+	gap: 6px;
+	align-items: end;
+}
+
+.spawnSlot {
+	position: relative;
+}
+
 .iconButton {
 	width: 48px;
 	height: 48px;
