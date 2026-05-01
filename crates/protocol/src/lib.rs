@@ -22,12 +22,11 @@ mod base64_bytes {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type")]
 pub enum BackendToFrontend {
-    /// Current list of connected sidecars.
+    /// Current list of connected sidecars. Sent on initial frontend
+    /// connect *and* whenever a sidecar joins or leaves — the frontend
+    /// always reconciles against the full list rather than tracking
+    /// incremental add/remove events.
     SidecarList { sidecars: Vec<SidecarInfo> },
-    /// A sidecar connected.
-    SidecarConnected { sidecar: SidecarInfo },
-    /// A sidecar disconnected.
-    SidecarDisconnected { sidecar_id: String },
     /// Response to a spawn/kill command.
     CommandResult {
         request_id: String,

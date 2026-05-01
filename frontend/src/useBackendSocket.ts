@@ -160,26 +160,23 @@ export function useBackendSocket() {
 				const msg: BackendToFrontend = JSON.parse(event.data);
 
 				switch (msg.type) {
-					case "SidecarList":
+					case "SidecarList": {
+						// The list is authoritative — replace state, then
+						// prune any per-sidecar caches whose owner left.
+						const liveIds = new Set(msg.sidecars.map((s) => s.id));
 						setSidecars(msg.sidecars);
-						break;
-					case "SidecarConnected":
-						setSidecars((prev) => [
-							...prev.filter((s) => s.id !== msg.sidecar.id),
-							msg.sidecar,
-						]);
-						break;
-					case "SidecarDisconnected":
-						setSidecars((prev) => prev.filter((s) => s.id !== msg.sidecar_id));
 						setProcesses((prev) => {
-							const next = { ...prev };
-							delete next[msg.sidecar_id];
+							const next: typeof prev = {};
+							for (const [id, ps] of Object.entries(prev)) {
+								if (liveIds.has(id)) next[id] = ps;
+							}
 							return next;
 						});
 						setConnectedProcesses((prev) =>
-							prev.filter((p) => p.sidecarId !== msg.sidecar_id),
+							prev.filter((p) => liveIds.has(p.sidecarId)),
 						);
 						break;
+					}
 					case "ProcessList":
 						setProcesses((prev) => ({
 							...prev,

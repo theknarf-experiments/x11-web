@@ -331,12 +331,7 @@ async fn cleanup_sidecar(state: &AppState, sidecar_id: &str) {
         }
     }
 
-    let frontends = state.frontends.read().await;
-    for frontend in frontends.values() {
-        let _ = frontend.tx.send(BackendToFrontend::SidecarDisconnected {
-            sidecar_id: sidecar_id.to_string(),
-        });
-    }
+    broadcast_sidecar_list(state).await;
 }
 
 async fn frontend_ws_handler(
@@ -375,13 +370,16 @@ async fn handle_frontend_ws(socket: WebSocket, state: AppState) {
         );
     }
 
-    // Send current sidecar list
+    // Send current sidecar list to just this frontend.
     {
-        let sidecars = state.sidecars.read().await;
-        let sidecar_list: Vec<SidecarInfo> = sidecars.values().map(|s| s.info.clone()).collect();
-        let _ = tx.send(BackendToFrontend::SidecarList {
-            sidecars: sidecar_list,
-        });
+        let sidecars: Vec<SidecarInfo> = state
+            .sidecars
+            .read()
+            .await
+            .values()
+            .map(|s| s.info.clone())
+            .collect();
+        let _ = tx.send(BackendToFrontend::SidecarList { sidecars });
     }
 
     // Send currently connected processes
@@ -638,4 +636,18 @@ async fn broadcast_to_frontends(state: &AppState, msg: BackendToFrontend) {
     for frontend in frontends.values() {
         let _ = frontend.tx.send(msg.clone());
     }
+}
+
+/// Snapshot the current sidecar list and broadcast it to every
+/// connected frontend. Called on initial frontend connect, on a new
+/// sidecar joining, and on a sidecar leaving.
+pub async fn broadcast_sidecar_list(state: &AppState) {
+    let sidecars: Vec<SidecarInfo> = state
+        .sidecars
+        .read()
+        .await
+        .values()
+        .map(|s| s.info.clone())
+        .collect();
+    broadcast_to_frontends(state, BackendToFrontend::SidecarList { sidecars }).await;
 }

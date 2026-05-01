@@ -13,8 +13,6 @@ export interface ProcessInfo {
 // Backend -> Frontend messages
 export type BackendToFrontend =
 	| { type: "SidecarList"; sidecars: SidecarInfo[] }
-	| { type: "SidecarConnected"; sidecar: SidecarInfo }
-	| { type: "SidecarDisconnected"; sidecar_id: string }
 	| {
 			type: "CommandResult";
 			request_id: string;

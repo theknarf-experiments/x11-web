@@ -18,7 +18,7 @@ use x11_web_wire::tls::ServerCert;
 use x11_web_wire::{wire_capnp, BackendToSidecar};
 
 use crate::{
-    broadcast_to_frontends, cleanup_sidecar, dispatch_sidecar_msg, AppState, SidecarConnection,
+    broadcast_sidecar_list, cleanup_sidecar, dispatch_sidecar_msg, AppState, SidecarConnection,
 };
 
 /// Spawn the QUIC accept loop on its own OS thread. Each accepted
@@ -101,14 +101,8 @@ async fn handle_quic_session(state: AppState, accepted: x11_web_wire::conn::Acce
         );
     }
 
-    // Notify frontends that a new sidecar joined.
-    broadcast_to_frontends(
-        &state,
-        x11_web_protocol::BackendToFrontend::SidecarConnected {
-            sidecar: info.clone(),
-        },
-    )
-    .await;
+    // Notify frontends that the sidecar inventory changed.
+    broadcast_sidecar_list(&state).await;
 
     let mut writer = accepted.writer;
     let mut reader = accepted.reader;
