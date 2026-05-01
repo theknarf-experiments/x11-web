@@ -32,15 +32,7 @@ export interface ConnectedProcess {
 	command: string;
 }
 
-export interface InitialWindowState {
-	clientId: string;
-	sidecarId: string;
-	pid: number;
-	x: number;
-	y: number;
-}
-
-export type WindowStateChangeCallback = (
+export type WindowPositionChangedCallback = (
 	clientId: string,
 	x: number,
 	y: number,
@@ -86,15 +78,12 @@ export function useBackendSocket() {
 	const reconnectTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
 	const disposed = useRef(false);
 	const displayCallbackRef = useRef<DisplayUpdateCallback | null>(null);
-	const windowStateCallbackRef = useRef<WindowStateChangeCallback | null>(null);
+	const windowPositionCallbackRef = useRef<WindowPositionChangedCallback | null>(null);
 	const clipboardDataCallbackRef = useRef<ClipboardDataCallback | null>(null);
 	const clipboardOfferCallbackRef = useRef<ClipboardOfferCallback | null>(null);
 	const [connected, setConnected] = useState(false);
 	const [sidecars, setSidecars] = useState<SidecarInfo[]>([]);
 	const [processes, setProcesses] = useState<Record<string, ProcessInfo[]>>({});
-	const [initialWindowStates, setInitialWindowStates] = useState<
-		InitialWindowState[]
-	>([]);
 	const [connectedProcesses, setConnectedProcesses] = useState<
 		ConnectedProcess[]
 	>([]);
@@ -207,19 +196,12 @@ export function useBackendSocket() {
 					case "WindowList":
 						setWindowList(msg.windows);
 						break;
-					case "WindowStateList":
-						setInitialWindowStates(
-							msg.windows.map((w) => ({
-								clientId: w.client_id,
-								sidecarId: w.sidecar_id,
-								pid: w.pid,
-								x: w.x,
-								y: w.y,
-							})),
+					case "WindowPositionChanged":
+						windowPositionCallbackRef.current?.(
+							msg.client_id,
+							msg.x,
+							msg.y,
 						);
-						break;
-					case "WindowStateChanged":
-						windowStateCallbackRef.current?.(msg.client_id, msg.x, msg.y);
 						break;
 					case "CommandResult":
 						pushDiagnostic({
@@ -285,9 +267,9 @@ export function useBackendSocket() {
 		displayCallbackRef.current = cb;
 	}, []);
 
-	const onWindowStateChange = useCallback(
-		(cb: WindowStateChangeCallback | null) => {
-			windowStateCallbackRef.current = cb;
+	const onWindowPositionChanged = useCallback(
+		(cb: WindowPositionChangedCallback | null) => {
+			windowPositionCallbackRef.current = cb;
 		},
 		[],
 	);
@@ -311,11 +293,10 @@ export function useBackendSocket() {
 		sidecars,
 		processes,
 		connectedProcesses,
-		initialWindowStates,
 		windowList,
 		send,
 		onDisplayUpdate,
-		onWindowStateChange,
+		onWindowPositionChanged,
 		onClipboardData,
 		onClipboardOffer,
 		diagnostics,

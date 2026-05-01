@@ -50,15 +50,16 @@ pub enum BackendToFrontend {
     },
     /// Authoritative list of all top-level / override-redirect windows
     /// that are currently mapped, across every sidecar + client.
-    /// Vec order = stacking order, last item on top. Sent on every
-    /// change to the visible-window set; the frontend replaces its
-    /// window state outright rather than tracking per-window
-    /// create/map/unmap/destroy/configure/raise events.
+    /// Vec order = stacking order, last item on top. Each descriptor
+    /// carries the position the frontend should render at (X11
+    /// authoritative for popups; cross-frontend tracked position for
+    /// top-level windows when one exists). Sent on every change to the
+    /// visible-window set including initial frontend connect.
     WindowList { windows: Vec<WindowDescriptor> },
-    /// Initial window state for all windows (sent on frontend connect).
-    WindowStateList { windows: Vec<WindowState> },
-    /// A window's tracked position changed (from another frontend).
-    WindowStateChanged {
+    /// A window's tracked position changed (from another frontend
+    /// dragging it). High-frequency incremental update; the
+    /// `WindowList` snapshot is the slower-fan-out source of truth.
+    WindowPositionChanged {
         client_id: String,
         x: f64,
         y: f64,
@@ -126,7 +127,7 @@ pub enum FrontendToBackend {
         height: u16,
     },
     /// Update a window's tracked position (synced across frontends).
-    UpdateWindowState {
+    UpdateWindowPosition {
         client_id: String,
         sidecar_id: String,
         x: f64,
@@ -155,16 +156,6 @@ pub enum FrontendToBackend {
 }
 
 
-/// Per-client window position state synced across frontends.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct WindowState {
-    pub client_id: String,
-    pub sidecar_id: String,
-    pub pid: u32,
-    pub x: f64,
-    pub y: f64,
-}
-
 /// Information about a connected sidecar.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SidecarInfo {
@@ -187,21 +178,25 @@ pub struct ProcessInfo {
 /// child windows, unmapped windows, etc. never appear here.
 ///
 /// `override_redirect` distinguishes pop-ups (menus, tooltips) from
-/// regular top-level windows. For override-redirect popups, the
-/// `(x, y)` from the X server is authoritative; for regular windows
-/// the frontend owns the position so the user can drag them.
+/// regular top-level windows. `placed` indicates whether `(x, y)` is
+/// a meaningful position (X11 server position for popups, or a
+/// cross-frontend-tracked position for top-level windows that any
+/// frontend has dragged) versus an X11 default that the frontend can
+/// override with its own layout heuristic before the first
+/// `UpdateWindowPosition`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WindowDescriptor {
     pub sidecar_id: String,
     pub client_id: String,
     pub window_id: String,
-    pub x: i16,
-    pub y: i16,
+    pub x: f64,
+    pub y: f64,
     pub width: u16,
     pub height: u16,
     pub border_width: u16,
     pub border_pixel: u32,
     pub override_redirect: bool,
+    pub placed: bool,
 }
 
 /// A display update from the X server to be rendered in the browser.

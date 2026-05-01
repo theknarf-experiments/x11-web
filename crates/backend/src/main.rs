@@ -35,8 +35,12 @@ struct AppState {
     /// on every change.
     window_track: Arc<RwLock<HashMap<(String, String, String), TrackedWindow>>>,
     window_order: Arc<RwLock<Vec<(String, String, String)>>>,
-    /// Per-client window position state synced across frontends.
-    window_states: Arc<RwLock<HashMap<String, WindowState>>>,
+    /// Per-client tracked positions, populated by `UpdateWindowPosition`
+    /// from frontends. Keyed by `client_id`. Folded into
+    /// `WindowDescriptor.{x, y, placed}` on every `WindowList` broadcast
+    /// so newly-connected frontends pick up positions other tabs already
+    /// chose for the same client.
+    window_positions: Arc<RwLock<HashMap<String, ClientPosition>>>,
     /// Display update buffer per client_id for replay on frontend connect
     display_buffers: Arc<RwLock<HashMap<String, Vec<BackendToFrontend>>>>,
 }
@@ -44,6 +48,17 @@ struct AppState {
 struct SidecarConnection {
     info: SidecarInfo,
     tx: mpsc::UnboundedSender<BackendToSidecar>,
+}
+
+/// Per-client tracked position. Kept alongside `pid` and `sidecar_id`
+/// so the backend can prune entries when a process exits or a sidecar
+/// disconnects.
+#[derive(Clone)]
+struct ClientPosition {
+    x: f64,
+    y: f64,
+    pid: u32,
+    sidecar_id: String,
 }
 
 /// Per-window state mirrored in the backend, keyed by
@@ -76,7 +91,7 @@ async fn main() {
         processes: Arc::new(RwLock::new(HashMap::new())),
         window_track: Arc::new(RwLock::new(HashMap::new())),
         window_order: Arc::new(RwLock::new(Vec::new())),
-        window_states: Arc::new(RwLock::new(HashMap::new())),
+        window_positions: Arc::new(RwLock::new(HashMap::new())),
         display_buffers: Arc::new(RwLock::new(HashMap::new())),
     };
 
@@ -179,7 +194,7 @@ async fn dispatch_sidecar_msg(state: &AppState, sidecar_id: &str, msg: SidecarTo
                     list.retain(|p| p.pid != pid);
                     freed
                 };
-                state.window_states.write().await.retain(|_, ws| ws.pid != pid);
+                state.window_positions.write().await.retain(|_, p| p.pid != pid);
                 let mut window_list_changed = false;
                 if !freed_client_ids.is_empty() {
                     let mut bufs = state.display_buffers.write().await;
@@ -351,10 +366,10 @@ async fn cleanup_sidecar(state: &AppState, sidecar_id: &str) {
         .map(|p| p.client_id)
         .collect();
     state
-        .window_states
+        .window_positions
         .write()
         .await
-        .retain(|_, ws| ws.sidecar_id != sidecar_id);
+        .retain(|_, p| p.sidecar_id != sidecar_id);
     {
         let mut bufs = state.display_buffers.write().await;
         for cid in &client_ids {
@@ -434,40 +449,8 @@ async fn handle_frontend_ws(socket: WebSocket, state: AppState) {
     // Send the current authoritative window list (visible windows
     // across all sidecars/clients, in stacking order).
     {
-        let track = state.window_track.read().await;
-        let order = state.window_order.read().await;
-        let mut windows = Vec::new();
-        for key @ (sid, cid, wid) in order.iter() {
-            let Some(w) = track.get(key) else { continue };
-            if !w.mapped {
-                continue;
-            }
-            if !(w.is_top_level || w.override_redirect) {
-                continue;
-            }
-            windows.push(WindowDescriptor {
-                sidecar_id: sid.clone(),
-                client_id: cid.clone(),
-                window_id: wid.clone(),
-                x: w.x,
-                y: w.y,
-                width: w.width,
-                height: w.height,
-                border_width: w.border_width,
-                border_pixel: w.border_pixel,
-                override_redirect: w.override_redirect,
-            });
-        }
+        let windows = build_window_list(&state).await;
         let _ = tx.send(BackendToFrontend::WindowList { windows });
-    }
-
-    // Send current window states
-    {
-        let states = state.window_states.read().await;
-        let windows: Vec<WindowState> = states.values().cloned().collect();
-        if !windows.is_empty() {
-            let _ = tx.send(BackendToFrontend::WindowStateList { windows });
-        }
     }
 
     // Process incoming messages from frontend
@@ -612,7 +595,7 @@ async fn handle_frontend_ws(socket: WebSocket, state: AppState) {
                 )
                 .await;
             }
-            FrontendToBackend::UpdateWindowState {
+            FrontendToBackend::UpdateWindowPosition {
                 client_id,
                 sidecar_id,
                 x,
@@ -628,22 +611,24 @@ async fn handle_frontend_ws(socket: WebSocket, state: AppState) {
                     .map(|p| p.pid)
                     .unwrap_or(0);
 
-                state.window_states.write().await.insert(
+                state.window_positions.write().await.insert(
                     client_id.clone(),
-                    WindowState {
-                        client_id: client_id.clone(),
-                        sidecar_id,
-                        pid,
+                    ClientPosition {
                         x,
                         y,
+                        pid,
+                        sidecar_id: sidecar_id.clone(),
                     },
                 );
 
-                // Broadcast to OTHER frontends
+                // Broadcast a tight delta to every *other* frontend
+                // (the originator already has the latest position
+                // locally). The next `WindowList` snapshot will also
+                // reflect this tracked position.
                 let frontends = state.frontends.read().await;
                 for (fid, frontend) in frontends.iter() {
                     if fid != &frontend_id {
-                        let _ = frontend.tx.send(BackendToFrontend::WindowStateChanged {
+                        let _ = frontend.tx.send(BackendToFrontend::WindowPositionChanged {
                             client_id: client_id.clone(),
                             x,
                             y,
@@ -804,9 +789,18 @@ async fn apply_window_lifecycle(
 
 /// Build the current authoritative window list (visible windows only,
 /// in stacking order — last on top) and broadcast it to all frontends.
-pub async fn broadcast_window_list(state: &AppState) {
+/// Build the current authoritative window list, with each
+/// descriptor's `(x, y, placed)` chosen as follows:
+///   - override-redirect popups: X11 position, `placed = true`
+///   - top-level with a tracked cross-frontend position: tracked
+///     position, `placed = true`
+///   - top-level without one: X11 default position, `placed = false`
+///     (frontend may apply its own layout heuristic and broadcast
+///     the result via `UpdateWindowPosition`).
+pub async fn build_window_list(state: &AppState) -> Vec<WindowDescriptor> {
     let track = state.window_track.read().await;
     let order = state.window_order.read().await;
+    let positions = state.window_positions.read().await;
     let mut windows = Vec::with_capacity(order.len());
     for key @ (sidecar_id, client_id, window_id) in order.iter() {
         let Some(w) = track.get(key) else { continue };
@@ -816,21 +810,32 @@ pub async fn broadcast_window_list(state: &AppState) {
         if !(w.is_top_level || w.override_redirect) {
             continue;
         }
+        let (x, y, placed) = if w.override_redirect {
+            (w.x as f64, w.y as f64, true)
+        } else if let Some(p) = positions.get(client_id) {
+            (p.x, p.y, true)
+        } else {
+            (w.x as f64, w.y as f64, false)
+        };
         windows.push(WindowDescriptor {
             sidecar_id: sidecar_id.clone(),
             client_id: client_id.clone(),
             window_id: window_id.clone(),
-            x: w.x,
-            y: w.y,
+            x,
+            y,
             width: w.width,
             height: w.height,
             border_width: w.border_width,
             border_pixel: w.border_pixel,
             override_redirect: w.override_redirect,
+            placed,
         });
     }
-    drop(track);
-    drop(order);
+    windows
+}
+
+pub async fn broadcast_window_list(state: &AppState) {
+    let windows = build_window_list(state).await;
     broadcast_to_frontends(state, BackendToFrontend::WindowList { windows }).await;
 }
 

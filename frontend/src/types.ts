@@ -29,17 +29,7 @@ export type BackendToFrontend =
 	  }
 	| { type: "WindowList"; windows: WindowDescriptor[] }
 	| {
-			type: "WindowStateList";
-			windows: {
-				client_id: string;
-				sidecar_id: string;
-				pid: number;
-				x: number;
-				y: number;
-			}[];
-	  }
-	| {
-			type: "WindowStateChanged";
+			type: "WindowPositionChanged";
 			client_id: string;
 			x: number;
 			y: number;
@@ -89,7 +79,7 @@ export type FrontendToBackend =
 			height: number;
 	  }
 	| {
-			type: "UpdateWindowState";
+			type: "UpdateWindowPosition";
 			client_id: string;
 			sidecar_id: string;
 			x: number;
@@ -151,6 +141,11 @@ export interface WindowDescriptor {
 	border_width: number;
 	border_pixel: number;
 	override_redirect: boolean;
+	/** True when (x, y) is a meaningful position (X11 server position
+	 * for popups, or a cross-frontend tracked position for top-level
+	 * windows). False when it's the X11 default and the frontend may
+	 * apply its own layout heuristic. */
+	placed: boolean;
 }
 
 export type DisplayUpdate =

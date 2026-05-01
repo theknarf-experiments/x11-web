@@ -123,11 +123,10 @@ function App() {
 		sidecars,
 		processes,
 		connectedProcesses,
-		initialWindowStates,
 		windowList,
 		send,
 		onDisplayUpdate,
-		onWindowStateChange,
+		onWindowPositionChanged,
 		onClipboardData,
 		onClipboardOffer,
 		diagnostics,
@@ -152,8 +151,6 @@ function App() {
 	/** Ref to always-current processes map (avoids stale closures in callbacks). */
 	const processesRef = useRef(processes);
 	processesRef.current = processes;
-	const initialWindowStatesRef = useRef(initialWindowStates);
-	initialWindowStatesRef.current = initialWindowStates;
 
 	/** Animated cursor timers: windowId -> interval handle. */
 	const animCursorTimersRef = useRef<Map<string, ReturnType<typeof setInterval>>>(new Map());
@@ -350,29 +347,26 @@ function App() {
 				const color = d.override_redirect
 					? "transparent"
 					: colorForWindowId(d.window_id);
-				if (d.override_redirect) {
+				if (d.placed) {
+					// Backend gave us an authoritative position (X11 for
+					// popups, cross-frontend tracked for top-level).
 					cx = d.x;
 					cy = d.y;
 				} else {
-					const saved = initialWindowStatesRef.current.find(
-						(ws) => ws.clientId === d.client_id,
-					);
-					if (saved) {
-						cx = saved.x;
-						cy = saved.y;
-					} else {
-						const idx = spawnCounter++;
-						const offset = idx * 30;
-						cx = window.innerWidth / 4 + offset;
-						cy = window.innerHeight / 4 + offset;
-						send({
-							type: "UpdateWindowState",
-							client_id: d.client_id,
-							sidecar_id: d.sidecar_id,
-							x: cx,
-							y: cy,
-						});
-					}
+					// First time *any* frontend has seen this top-level
+					// window — pick a cascading position and broadcast it
+					// so other tabs converge on the same spot.
+					const idx = spawnCounter++;
+					const offset = idx * 30;
+					cx = window.innerWidth / 4 + offset;
+					cy = window.innerHeight / 4 + offset;
+					send({
+						type: "UpdateWindowPosition",
+						client_id: d.client_id,
+						sidecar_id: d.sidecar_id,
+						x: cx,
+						y: cy,
+					});
 				}
 				return {
 					windowId: d.window_id,
@@ -576,15 +570,15 @@ function App() {
 	// biome-ignore lint/correctness/useExhaustiveDependencies: initialWindowStates used via ref to avoid re-registering callback
 	}, [onDisplayUpdate, send, startAnimCursor]);
 
-	// Handle window state changes from other tabs
+	// Handle position changes from other tabs (high-frequency drag sync).
 	useEffect(() => {
-		onWindowStateChange((clientId, x, y) => {
+		onWindowPositionChanged((clientId, x, y) => {
 			setWindows((prev) =>
 				prev.map((w) => (w.clientId === clientId ? { ...w, x, y } : w)),
 			);
 		});
-		return () => onWindowStateChange(null);
-	}, [onWindowStateChange]);
+		return () => onWindowPositionChanged(null);
+	}, [onWindowPositionChanged]);
 
 	// Clipboard bridge: browser <-> X11
 	const clipboardOfferRef = useRef<
@@ -755,7 +749,7 @@ function App() {
 				const win = prev.find((w) => w.windowId === windowId);
 				if (win && !win.overrideRedirect) {
 					send({
-						type: "UpdateWindowState",
+						type: "UpdateWindowPosition",
 						client_id: win.clientId,
 						sidecar_id: win.sidecarId,
 						x,
