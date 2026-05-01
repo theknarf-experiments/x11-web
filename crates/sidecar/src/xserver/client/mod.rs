@@ -294,7 +294,7 @@ pub(crate) struct ClientState {
     /// Present extension: monotonically increasing media stream counter per-CRTC.
     pub(crate) present_msc: u64,
     /// Channel for clipboard events (selection ownership changes, data responses).
-    pub(crate) clipboard_notify_tx: Option<mpsc::UnboundedSender<super::types::ClipboardEvent>>,
+    pub(crate) clipboard_notify_tx: Option<mpsc::UnboundedSender<()>>,
     /// Persistent clipboard data saved when a clipboard owner disconnects.
     pub(crate) persistent_clipboard: super::types::PersistentClipboard,
     /// Shared pixmap registry for cross-connection drawable access.

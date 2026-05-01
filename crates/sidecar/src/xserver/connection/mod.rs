@@ -111,7 +111,7 @@ pub(crate) async fn handle_client(
     menu_tracker: crate::menus::MenuTracker,
     event_router: EventRouter,
     shared_selections: SharedSelections,
-    clipboard_notify_tx: mpsc::UnboundedSender<ClipboardEvent>,
+    clipboard_notify_tx: mpsc::UnboundedSender<()>,
     shared_pixmaps: SharedPixmaps,
     shared_pixmap_fbs: SharedPixmapFbs,
     shared_gcs: SharedGcs,

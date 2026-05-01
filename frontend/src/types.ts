@@ -23,7 +23,14 @@ export type BackendToFrontend =
 	| { type: "ProcessList"; sidecar_id: string; processes: ProcessInfo[] }
 	| { type: "WindowUpdate"; update: WindowUpdate }
 	| { type: "WindowList"; windows: WindowDescriptor[] }
-	| { type: "Bell"; percent: number };
+	| { type: "Bell"; percent: number }
+	| { type: "RtcAnswer"; sdp: string }
+	| {
+			type: "RtcIceCandidate";
+			candidate: string;
+			sdp_mid: string | null;
+			sdp_mline_index: number | null;
+	  };
 
 // Frontend -> Backend messages
 export type FrontendToBackend =
@@ -53,6 +60,13 @@ export type FrontendToBackend =
 			window_id: string;
 			x: number;
 			y: number;
+	  }
+	| { type: "RtcOffer"; sdp: string }
+	| {
+			type: "RtcIceCandidate";
+			candidate: string;
+			sdp_mid: string | null;
+			sdp_mline_index: number | null;
 	  };
 
 /** Animated cursor frame. */
@@ -101,15 +115,6 @@ export interface WindowDescriptor {
 
 export type WindowUpdate =
 	| { kind: "TitleChanged"; window_id: string; title: string }
-	| {
-			kind: "PutImage";
-			window_id: string;
-			x: number;
-			y: number;
-			width: number;
-			height: number;
-			data: string;
-	  }
 	| {
 			kind: "CursorChanged";
 			window_id: string;

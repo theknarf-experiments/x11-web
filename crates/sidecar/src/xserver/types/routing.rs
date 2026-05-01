@@ -11,8 +11,10 @@ use x11rb_protocol::protocol::xproto::EventMask;
 /// A display update tagged with the client_id that produced it.
 pub type TaggedDisplayUpdate = (String, DisplayUpdate);
 
-/// Shared screen size sender/receiver pair for dynamic RandR resize.
-pub type ScreenSizeTx = watch::Sender<(u16, u16)>;
+/// Shared screen size receiver for dynamic RandR resize. The sender
+/// half lives in `main.rs`; right now nothing external drives it, but
+/// the X server's RandR implementation watches the rx so any future
+/// sender can trigger a screen-size change.
 pub type ScreenSizeRx = watch::Receiver<(u16, u16)>;
 
 /// Shared server grab lock. When Some(client_id), that client holds the server

@@ -16,6 +16,7 @@ import {
 } from "./db";
 import { GlobalMenuBar } from "./GlobalMenuBar";
 import { InfiniteCanvas } from "./InfiniteCanvas";
+import { decodePutImage } from "./rtcWire";
 import { SettingsPanel } from "./SettingsPanel";
 import type {
 	AnimCursorFrame,
@@ -74,6 +75,7 @@ function App() {
 		send,
 		onWindowUpdate,
 		onBell,
+		onDataChannelMessage,
 		diagnostics,
 		dismissDiagnostic,
 		clearDiagnostics,
@@ -118,7 +120,8 @@ function App() {
 	}, []);
 
 	// Reap renderers, animation timers, and locally-closed entries for
-	// windows the backend has dropped from its authoritative list.
+	// windows the backend has dropped. Renderer creation happens lazily
+	// during render so a window appears as soon as it lands in the list.
 	useEffect(() => {
 		const live = new Set(windows.map((w) => w.windowId));
 		for (const wid of [...renderersRef.current.keys()]) {
@@ -218,25 +221,26 @@ function App() {
 			if (update.kind === "CursorAnimated") {
 				startAnimCursor(update.window_id, update.frames);
 			}
-
-			// Route display updates to the per-window renderer.
-			const windowId = "window_id" in update ? update.window_id : undefined;
-			if (windowId == null) return;
-
-			const key = windowId;
-			const renderers = renderersRef.current;
-			let r = renderers.get(key);
-			if (!r) {
-				const w = "width" in update ? (update as { width: number }).width : 1;
-				const h =
-					"height" in update ? (update as { height: number }).height : 1;
-				r = new ClientRenderer(w || 1, h || 1);
-				renderers.set(key, r);
-			}
-			r.pushUpdate(update);
 		});
 		return () => onWindowUpdate(null);
 	}, [onWindowUpdate, startAnimCursor]);
+
+	// PutImage frames over the WebRTC DataChannel: decode the
+	// Cap'n Proto envelope and route to the per-window renderer.
+	useEffect(() => {
+		onDataChannelMessage((bytes) => {
+			const msg = decodePutImage(bytes);
+			if (!msg) return;
+			const renderers = renderersRef.current;
+			let r = renderers.get(msg.windowId);
+			if (!r) {
+				r = new ClientRenderer(msg.width || 1, msg.height || 1);
+				renderers.set(msg.windowId, r);
+			}
+			r.pushPutImage(msg.x, msg.y, msg.width, msg.height, msg.data);
+		});
+		return () => onDataChannelMessage(null);
+	}, [onDataChannelMessage]);
 
 	// Top-level Bell event — play an audible/visual notification.
 	useEffect(() => {
@@ -490,8 +494,14 @@ function App() {
 			/>
 			<InfiniteCanvas>
 				{visibleWindows.map((win) => {
-					const renderer = renderersRef.current.get(win.windowId);
-					if (!renderer) return null;
+					// Lazy-create the renderer so a window appearing in
+					// the authoritative list shows up immediately, before
+					// the first PutImage arrives over the DC.
+					let renderer = renderersRef.current.get(win.windowId);
+					if (!renderer) {
+						renderer = new ClientRenderer(win.width || 1, win.height || 1);
+						renderersRef.current.set(win.windowId, renderer);
+					}
 					return (
 						<div
 							key={win.windowId}

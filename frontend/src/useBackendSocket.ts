@@ -8,6 +8,7 @@ import {
 	setFocusedWindow,
 	windowsCollection,
 } from "./db";
+import { Reassembler } from "./rtcReassembler";
 import type {
 	BackendToFrontend,
 	FrontendToBackend,
@@ -29,6 +30,8 @@ const WS_URL = (() => {
 
 export type WindowUpdateCallback = (update: WindowUpdate) => void;
 export type BellCallback = (percent: number) => void;
+/** Raw bytes from the WebRTC DataChannel — caller decodes (Cap'n Proto). */
+export type DataChannelMessageCallback = (data: Uint8Array) => void;
 
 /**
  * Per-event diagnostic surfaced from the backend / WebSocket layer.
@@ -134,6 +137,9 @@ export function useBackendSocket() {
 	const disposed = useRef(false);
 	const windowUpdateCallbackRef = useRef<WindowUpdateCallback | null>(null);
 	const bellCallbackRef = useRef<BellCallback | null>(null);
+	const dcMessageCallbackRef = useRef<DataChannelMessageCallback | null>(null);
+	const peerConnectionRef = useRef<RTCPeerConnection | null>(null);
+	const dataChannelRef = useRef<RTCDataChannel | null>(null);
 	const sendRef = useRef<(msg: FrontendToBackend) => void>(() => {});
 	const [connected, setConnected] = useState(false);
 	const [diagnostics, setDiagnostics] = useState<Diagnostic[]>([]);
@@ -165,13 +171,80 @@ export function useBackendSocket() {
 	useEffect(() => {
 		disposed.current = false;
 
+		function startRtc() {
+			if (peerConnectionRef.current) return;
+			// Host-only ICE config. STUN/TURN can be added once we
+			// deploy beyond LAN.
+			const pc = new RTCPeerConnection({ iceServers: [] });
+			peerConnectionRef.current = pc;
+
+			pc.onicecandidate = (e) => {
+				if (e.candidate) {
+					sendRef.current({
+						type: "RtcIceCandidate",
+						candidate: e.candidate.candidate,
+						sdp_mid: e.candidate.sdpMid,
+						sdp_mline_index: e.candidate.sdpMLineIndex,
+					});
+				}
+			};
+
+			// Unordered + unreliable: pixel frames are independent
+			// snapshots. Drop in transit is fine — the next frame
+			// supersedes — and out-of-order arrival is handled by the
+			// reassembler keying off the chunk header's `msg_id`.
+			const dc = pc.createDataChannel("putimage", {
+				ordered: false,
+				maxRetransmits: 0,
+			});
+			dataChannelRef.current = dc;
+			dc.binaryType = "arraybuffer";
+			const reassembler = new Reassembler();
+			dc.onopen = () =>
+				pushDiagnostic({
+					level: "info",
+					source: "ws",
+					message: "DataChannel open",
+				});
+			dc.onclose = () =>
+				pushDiagnostic({
+					level: "warn",
+					source: "ws",
+					message: "DataChannel closed",
+				});
+			dc.onmessage = (e) => {
+				const chunk = new Uint8Array(e.data as ArrayBuffer);
+				const payload = reassembler.onChunk(chunk);
+				if (payload) dcMessageCallbackRef.current?.(payload);
+			};
+
+			pc.createOffer()
+				.then((offer) => pc.setLocalDescription(offer).then(() => offer))
+				.then((offer) => {
+					sendRef.current({ type: "RtcOffer", sdp: offer.sdp ?? "" });
+				})
+				.catch((err) => {
+					pushDiagnostic({
+						level: "error",
+						source: "ws",
+						message: `RTC offer failed: ${err}`,
+					});
+				});
+		}
+
 		function connect() {
 			if (disposed.current) return;
 
 			const ws = new WebSocket(WS_URL);
 			wsRef.current = ws;
 
-			ws.onopen = () => setConnected(true);
+			ws.onopen = () => {
+				setConnected(true);
+				// Kick off the WebRTC handshake once the WS is up. The
+				// WS carries SDP + ICE; once the DC opens, high-volume
+				// traffic (currently just `PutImage`) moves there.
+				startRtc();
+			};
 
 			ws.onerror = () => {
 				pushDiagnostic({
@@ -222,6 +295,39 @@ export function useBackendSocket() {
 							message: msg.message || (msg.success ? "OK" : "command failed"),
 						});
 						break;
+					case "RtcAnswer": {
+						const pc = peerConnectionRef.current;
+						if (pc) {
+							pc.setRemoteDescription({
+								type: "answer",
+								sdp: msg.sdp,
+							}).catch((err) => {
+								pushDiagnostic({
+									level: "error",
+									source: "ws",
+									message: `setRemoteDescription failed: ${err}`,
+								});
+							});
+						}
+						break;
+					}
+					case "RtcIceCandidate": {
+						const pc = peerConnectionRef.current;
+						if (pc && msg.candidate) {
+							pc.addIceCandidate({
+								candidate: msg.candidate,
+								sdpMid: msg.sdp_mid ?? undefined,
+								sdpMLineIndex: msg.sdp_mline_index ?? undefined,
+							}).catch((err) => {
+								pushDiagnostic({
+									level: "warn",
+									source: "ws",
+									message: `addIceCandidate failed: ${err}`,
+								});
+							});
+						}
+						break;
+					}
 				}
 			};
 		}
@@ -239,6 +345,10 @@ export function useBackendSocket() {
 					ws.onopen = ws.onclose = ws.onerror = ws.onmessage = null;
 				}
 			}
+			dataChannelRef.current?.close();
+			dataChannelRef.current = null;
+			peerConnectionRef.current?.close();
+			peerConnectionRef.current = null;
 		};
 		// `pushDiagnostic` is a useCallback with [] deps and is therefore
 		// stable for the lifetime of the component, so this effect still
@@ -260,11 +370,19 @@ export function useBackendSocket() {
 		bellCallbackRef.current = cb;
 	}, []);
 
+	const onDataChannelMessage = useCallback(
+		(cb: DataChannelMessageCallback | null) => {
+			dcMessageCallbackRef.current = cb;
+		},
+		[],
+	);
+
 	return {
 		connected,
 		send,
 		onWindowUpdate,
 		onBell,
+		onDataChannelMessage,
 		diagnostics,
 		dismissDiagnostic,
 		clearDiagnostics,

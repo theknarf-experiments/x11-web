@@ -44,7 +44,6 @@ pub(crate) fn start_incr_transfer(
     state: &mut ClientState,
     requestor: u32,
     property: u32,
-    selection: u32,
     target: u32,
     data: Vec<u8>,
 ) -> bool {
@@ -86,7 +85,6 @@ pub(crate) fn start_incr_transfer(
     state.push_incr_transfer(IncrTransfer {
         requestor,
         property,
-        selection,
         target,
         data,
         offset: 0,
@@ -307,7 +305,7 @@ pub(crate) fn serve_persistent_clipboard(
             // Large data: use INCR (incremental) transfer per ICCCM §2.7.2.
             // Set INCR property, register transfer, then send SelectionNotify
             // with the property so the requestor knows to begin consuming.
-            start_incr_transfer(state, requestor, property, selection, target, data);
+            start_incr_transfer(state, requestor, property, target, data);
 
             let event = serialize_event(
                 &SelectionNotifyEvent {

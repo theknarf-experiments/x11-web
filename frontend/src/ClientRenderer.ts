@@ -1,19 +1,16 @@
 import { inflateRaw } from "pako";
-import type { WindowUpdate } from "./types";
-
-type RenderContext =
-	| CanvasRenderingContext2D
-	| OffscreenCanvasRenderingContext2D;
 
 /**
  * Owns the back buffer for a single X11 client. The visible canvas
- * blits from this buffer on each rAF; pushUpdate paints synchronously
- * outside React.
+ * blits from this buffer on each rAF; `pushPutImage` paints
+ * synchronously outside React.
+ *
+ * Pixel updates ride the WebRTC DataChannel as Cap'n Proto frames
+ * (decoded by `rtcWire.ts`); this renderer just receives the raw
+ * deflate-compressed RGBA payload, inflates with pako, and blits.
  *
  * Per-window geometry / lifecycle is tracked centrally in `App.tsx`
- * from the backend's authoritative `WindowList`; the renderer only
- * needs to handle pixel updates (`PutImage`) — everything else is a
- * no-op here.
+ * from the backend's authoritative `WindowList`.
  */
 export class ClientRenderer {
 	backBuffer: OffscreenCanvas;
@@ -43,18 +40,31 @@ export class ClientRenderer {
 		this.dirty = true;
 	}
 
-	pushUpdate(update: WindowUpdate) {
-		if (update.kind !== "PutImage") return;
-		// Grow the back buffer if a region update extends past current bounds.
-		const right = update.x + update.width;
-		const bottom = update.y + update.height;
+	/** Paint a PutImage rectangle from deflate-compressed RGBA bytes. */
+	pushPutImage(
+		x: number,
+		y: number,
+		width: number,
+		height: number,
+		compressed: Uint8Array,
+	) {
+		const right = x + width;
+		const bottom = y + height;
 		if (right > this.backBuffer.width || bottom > this.backBuffer.height) {
 			this.resizeBuffer(
 				Math.max(right, this.backBuffer.width),
 				Math.max(bottom, this.backBuffer.height),
 			);
 		}
-		renderPutImage(this.ctx, update);
+		let raw: Uint8Array;
+		try {
+			raw = inflateRaw(compressed);
+		} catch {
+			raw = compressed;
+		}
+		const imageData = this.ctx.createImageData(width, height);
+		imageData.data.set(raw.subarray(0, imageData.data.length));
+		this.ctx.putImageData(imageData, x, y);
 		this.dirty = true;
 	}
 
@@ -69,27 +79,4 @@ export class ClientRenderer {
 		this.backBuffer.height = height;
 		this.ctx.putImageData(oldData, 0, 0);
 	}
-}
-
-function renderPutImage(
-	ctx: RenderContext,
-	update: Extract<WindowUpdate, { kind: "PutImage" }>,
-) {
-	if (update.data.length === 0) return;
-	// Decode base64 string to binary, then decompress deflate.
-	const binaryStr = atob(update.data as unknown as string);
-	const compressed = new Uint8Array(binaryStr.length);
-	for (let i = 0; i < binaryStr.length; i++) {
-		compressed[i] = binaryStr.charCodeAt(i);
-	}
-	let rawData: Uint8Array;
-	try {
-		rawData = inflateRaw(compressed);
-	} catch {
-		rawData = compressed;
-	}
-	const imageData = ctx.createImageData(update.width, update.height);
-	// Server sends packed RGBA, the canvas ImageData layout — copy directly.
-	imageData.data.set(rawData.subarray(0, imageData.data.length));
-	ctx.putImageData(imageData, update.x, update.y);
 }

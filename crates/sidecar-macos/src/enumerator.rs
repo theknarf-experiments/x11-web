@@ -11,9 +11,12 @@
 //! `WindowFrame` from the frontend's perspective.
 
 use std::collections::HashMap;
+use std::io::Write;
 use std::time::Duration;
 
 use core_graphics::window::CGWindowID;
+use flate2::write::DeflateEncoder;
+use flate2::Compression;
 use tokio::sync::mpsc;
 use tokio::time::interval;
 use tracing::{info, warn};
@@ -158,6 +161,12 @@ fn spawn_capture_loop(
             tick.tick().await;
             match capture_window(cg_id, CAPTURE_MAX_DIM).await {
                 Ok(frame) => {
+                    // Deflate-compress the RGBA payload — full-resolution
+                    // captures can be several MB of raw bytes, which
+                    // overflows SCTP's reliable-channel write window
+                    // and gets rejected silently. Mirrors what the X11
+                    // sidecar's framebuffer encoder does.
+                    let compressed = deflate_raw(&frame.rgba);
                     let _ = tx.send(SidecarToBackend::DisplayUpdate {
                         client_id: client_id.clone(),
                         update: DisplayUpdate::PutImage {
@@ -166,7 +175,7 @@ fn spawn_capture_loop(
                             y: 0,
                             width: frame.width.min(u16::MAX as u32) as u16,
                             height: frame.height.min(u16::MAX as u32) as u16,
-                            data: frame.rgba,
+                            data: compressed,
                         },
                     });
                 }
@@ -298,4 +307,18 @@ fn clamp_bounds(b: &WindowBounds) -> (i16, i16, u16, u16) {
     let w = b.width.clamp(0.0, u16::MAX as f64) as u16;
     let h = b.height.clamp(0.0, u16::MAX as f64) as u16;
     (x, y, w, h)
+}
+
+/// Deflate-compress (raw, no zlib header). The frontend's
+/// `pushPutImage` calls pako's `inflateRaw` on receipt.
+fn deflate_raw(data: &[u8]) -> Vec<u8> {
+    let mut encoder = DeflateEncoder::new(Vec::new(), Compression::fast());
+    if let Err(e) = encoder.write_all(data) {
+        warn!("deflate write failed: {e} — sending uncompressed");
+        return data.to_vec();
+    }
+    encoder.finish().unwrap_or_else(|e| {
+        warn!("deflate finish failed: {e} — sending uncompressed");
+        data.to_vec()
+    })
 }

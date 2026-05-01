@@ -124,14 +124,12 @@ pub(crate) fn handle_set_selection_owner(
             }
         }
 
-        // Notify the clipboard bridge about ownership changes so the backend
-        // can offer clipboard data to the frontend.
+        // Pulse the clipboard-notify channel for any future bridge.
+        // Today the receiver in main.rs just drains, but the
+        // X-server-internal selection machinery still emits events so
+        // the wiring stays in place.
         if let Some(ref clipboard_tx) = state.clipboard_notify_tx {
-            let selection_name = state.get_atom_name(selection).unwrap_or_default();
-            let _ = clipboard_tx.send(super::super::super::types::ClipboardEvent::OwnerChanged {
-                selection: selection_name,
-                owner,
-            });
+            let _ = clipboard_tx.send(());
         }
     }
     Vec::new()

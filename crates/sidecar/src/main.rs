@@ -267,8 +267,7 @@ async fn main() {
     let (client_connected_tx, mut client_connected_rx) = mpsc::unbounded_channel::<(String, u32)>();
     let window_router = crate::xserver::WindowRouter::new();
     // Clipboard bridge channels
-    let (clipboard_notify_tx, mut clipboard_notify_rx) =
-        mpsc::unbounded_channel::<crate::xserver::types::ClipboardEvent>();
+    let (clipboard_notify_tx, mut clipboard_notify_rx) = mpsc::unbounded_channel::<()>();
     // MenuTracker connects to the same session bus the apps use; on
     // failure it becomes a no-op so the rest of the sidecar still
     // works without DBus.
@@ -411,7 +410,7 @@ async fn run_session(
     display_rx: &mut mpsc::UnboundedReceiver<TaggedDisplayUpdate>,
     window_router: &crate::xserver::WindowRouter,
     client_connected_rx: &mut mpsc::UnboundedReceiver<(String, u32)>,
-    clipboard_notify_rx: &mut mpsc::UnboundedReceiver<crate::xserver::types::ClipboardEvent>,
+    clipboard_notify_rx: &mut mpsc::UnboundedReceiver<()>,
 ) {
     let DialedConnection {
         mut reader,

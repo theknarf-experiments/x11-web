@@ -58,7 +58,7 @@ pub struct X11Server {
     menu_tracker: crate::menus::MenuTracker,
     auth_cookie: [u8; 16],
     /// Clipboard event receiver (selection ownership changes, data responses).
-    clipboard_notify_tx: mpsc::UnboundedSender<ClipboardEvent>,
+    clipboard_notify_tx: mpsc::UnboundedSender<()>,
     /// Shared selections (exposed for clipboard bridge in main.rs).
     shared_selections: SharedSelections,
     /// Persistent clipboard data saved when a clipboard owner disconnects.
@@ -80,7 +80,7 @@ impl X11Server {
         client_connected_tx: mpsc::UnboundedSender<(String, u32)>,
         window_router: WindowRouter,
         menu_tracker: crate::menus::MenuTracker,
-        clipboard_notify_tx: mpsc::UnboundedSender<ClipboardEvent>,
+        clipboard_notify_tx: mpsc::UnboundedSender<()>,
         screen_size_rx: types::ScreenSizeRx,
     ) -> Self {
         let socket_path = PathBuf::from(format!("/tmp/.X11-unix/X{display_number}"));

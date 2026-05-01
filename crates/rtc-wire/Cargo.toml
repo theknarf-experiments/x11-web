@@ -1,0 +1,17 @@
+[package]
+name = "x11-web-rtc-wire"
+version = "0.1.0"
+edition = "2021"
+
+# Binary protocol between the backend and the browser frontend over a
+# WebRTC DataChannel. Cap'n Proto framing; raw bytes for pixel data
+# (no deflate, no base64 — the WS path's encoding hacks were there to
+# survive JSON, which doesn't apply here).
+
+[dependencies]
+capnp = "0.20"
+
+[build-dependencies]
+# Generates Rust types from schema/wire.capnp into
+# OUT_DIR/wire_capnp.rs which lib.rs then `include!`s.
+capnpc = "0.20"

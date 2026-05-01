@@ -79,13 +79,19 @@ async function doSetup() {
 	ensureWorkerNetwork();
 
 	const FINGERPRINT_PATH = "/tmp/x11web-fingerprint";
+	// Per-worker UDP port for the WebRTC DataChannel. Container port
+	// and host port match so the backend (which lives in the
+	// container) can advertise `127.0.0.1:<port>` knowing that's what
+	// the browser on the host will reach.
+	const rtcUdpPort = 3003 + Number(WORKER_INDEX);
+
 	backendContainer = await GenericContainer.fromDockerfile(
 		PROJECT_ROOT,
 		"Dockerfile.backend",
 	)
 		.build("x11-web-backend-test", { deleteOnExit: false })
-		.then((image) =>
-			image
+		.then((image) => {
+			const built = image
 				.withNetworkMode(WORKER_NETWORK)
 				.withNetworkAliases("backend")
 				.withExposedPorts(3001)
@@ -94,19 +100,43 @@ async function doSetup() {
 					// can `exec cat` it without depending on a $HOME that
 					// the backend's slim image doesn't actually set.
 					X11WEB_FINGERPRINT_FILE: FINGERPRINT_PATH,
+					// Bind the WebRTC UDP socket to a known port inside
+					// the container. The same port is published 1:1 to
+					// the host below so `127.0.0.1:<port>` reaches it.
+					X11WEB_RTC_BIND_ADDR: `0.0.0.0:${rtcUdpPort}`,
+					// What the backend tells the browser to dial. The
+					// browser runs on the host, so it sees container
+					// services through the host loopback.
+					X11WEB_RTC_PUBLIC_HOST: "127.0.0.1",
 				})
 				.withWaitStrategy(
 					Wait.forHttp("/health", 3001).forStatusCode(200),
 				)
 				// Reuse on worker respawn — keyed by image+env+network, all
 				// stable per worker — so we re-attach instead of leaking.
-				.withReuse()
-				.start(),
-		);
+				.withReuse();
+
+			// testcontainers-node's `withExposedPorts` only handles TCP.
+			// Reach through the protected `hostConfig` to add the UDP
+			// port binding ourselves: the WebRTC DataChannel rides UDP,
+			// and without an explicit publish the browser on the host
+			// can't reach the container's UDP socket.
+			const hostConfig = (built as unknown as { hostConfig: Record<string, unknown> }).hostConfig;
+			const createOpts = (built as unknown as { createOpts: { ExposedPorts?: Record<string, object> } }).createOpts;
+			const portBindings = (hostConfig.PortBindings ?? {}) as Record<string, Array<{ HostPort: string }>>;
+			portBindings[`${rtcUdpPort}/udp`] = [{ HostPort: String(rtcUdpPort) }];
+			hostConfig.PortBindings = portBindings;
+			createOpts.ExposedPorts = {
+				...(createOpts.ExposedPorts ?? {}),
+				[`${rtcUdpPort}/udp`]: {},
+			};
+
+			return built.start();
+		});
 
 	backendPort = backendContainer.getMappedPort(3001);
 	console.log(
-		`[worker ${WORKER_INDEX}] Backend running at localhost:${backendPort}`,
+		`[worker ${WORKER_INDEX}] Backend running at localhost:${backendPort} (RTC UDP :${rtcUdpPort})`,
 	);
 
 	// Read the QUIC TLS fingerprint the backend wrote at startup.

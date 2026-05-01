@@ -5,5 +5,6 @@ members = [
     "crates/sidecar",
     "crates/sidecar-macos",
     "crates/wire",
+    "crates/rtc-wire",
 ]
 resolver = "2"

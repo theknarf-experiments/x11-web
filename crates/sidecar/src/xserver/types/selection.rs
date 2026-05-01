@@ -17,13 +17,6 @@ pub(crate) struct SelectionEntry {
     pub(crate) timestamp: u32,
 }
 
-/// Events emitted by the selection subsystem for the clipboard bridge.
-#[derive(Debug, Clone)]
-pub enum ClipboardEvent {
-    /// Selection ownership changed.
-    OwnerChanged { selection: String, owner: u32 },
-}
-
 /// Window ID used by the server's clipboard manager for persistence.
 /// When a CLIPBOARD owner disconnects, the server takes ownership using this
 /// window and serves the saved data to future requestors.
@@ -50,8 +43,6 @@ pub(crate) type PersistentClipboard = Arc<Mutex<HashMap<u32, PersistentClipboard
 pub(crate) struct IncrTransfer {
     pub(crate) requestor: u32,
     pub(crate) property: u32,
-    /// Selection atom this transfer belongs to (needed for multi-selection disambiguation).
-    pub(crate) selection: u32,
     pub(crate) target: u32,
     pub(crate) data: Vec<u8>,
     pub(crate) offset: usize,
@@ -70,7 +61,6 @@ mod tests {
         let transfer = IncrTransfer {
             requestor: 100,
             property: 200,
-            selection: 300,
             target: 400,
             data: vec![0u8; 200_000], // 200KB
             offset: 0,
@@ -96,7 +86,6 @@ mod tests {
         let transfer = IncrTransfer {
             requestor: 1,
             property: 2,
-            selection: 3,
             target: 4,
             data: vec![42u8; 100],
             offset: 100, // All data sent

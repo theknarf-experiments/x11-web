@@ -1,4 +1,7 @@
+mod chunking;
 mod quic;
+mod rtc;
+mod rtc_codec;
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -41,8 +44,14 @@ struct AppState {
     /// `WindowList` broadcast so newly-connected frontends pick up
     /// positions other tabs already chose.
     window_positions: Arc<RwLock<HashMap<String, TrackedPosition>>>,
-    /// Display update buffer per client_id for replay on frontend connect
+    /// Display update buffer per client_id for replay on frontend connect.
+    /// PutImage is no longer in here — see `pixel_buffers`.
     display_buffers: Arc<RwLock<HashMap<String, Vec<BackendToFrontend>>>>,
+    /// Latest Cap'n Proto-encoded PutImage frame per (client_id,
+    /// window_id), replayed over the DataChannel once a frontend's
+    /// DC opens. Replaces the old WS-shaped PutImage replay; pixels
+    /// don't ride the WS anymore.
+    pixel_buffers: Arc<RwLock<HashMap<String, HashMap<String, Vec<u8>>>>>,
 }
 
 struct SidecarConnection {
@@ -77,10 +86,23 @@ struct TrackedWindow {
 
 struct FrontendConnection {
     tx: mpsc::UnboundedSender<BackendToFrontend>,
+    rtc: rtc::RtcConn,
 }
 
-#[tokio::main]
-async fn main() {
+fn main() {
+    // Default tokio worker stack (2 MiB) overflows under sustained
+    // str0m SCTP writes — the SCTP/DTLS path is deep enough that a
+    // burst of large-payload writes tips it over. 8 MiB gives ample
+    // headroom and matches what the chat example in str0m runs with.
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .thread_stack_size(8 * 1024 * 1024)
+        .build()
+        .expect("build tokio runtime");
+    runtime.block_on(async_main());
+}
+
+async fn async_main() {
     tracing_subscriber::fmt::init();
 
     let state = AppState {
@@ -91,6 +113,7 @@ async fn main() {
         window_order: Arc::new(RwLock::new(Vec::new())),
         window_positions: Arc::new(RwLock::new(HashMap::new())),
         display_buffers: Arc::new(RwLock::new(HashMap::new())),
+        pixel_buffers: Arc::new(RwLock::new(HashMap::new())),
     };
 
     let app = Router::new()
@@ -194,9 +217,15 @@ async fn dispatch_sidecar_msg(state: &AppState, sidecar_id: &str, msg: SidecarTo
                 // get cleaned up via `drop_client_windows` below.
                 let mut window_list_changed = false;
                 if !freed_client_ids.is_empty() {
-                    let mut bufs = state.display_buffers.write().await;
+                    {
+                        let mut bufs = state.display_buffers.write().await;
+                        let mut pixels = state.pixel_buffers.write().await;
+                        for cid in &freed_client_ids {
+                            bufs.remove(cid);
+                            pixels.remove(cid);
+                        }
+                    }
                     for cid in &freed_client_ids {
-                        bufs.remove(cid);
                         if drop_client_windows(state, cid).await {
                             window_list_changed = true;
                         }
@@ -249,37 +278,55 @@ async fn dispatch_sidecar_msg(state: &AppState, sidecar_id: &str, msg: SidecarTo
                     return;
                 }
 
+                // PutImage rides the WebRTC DataChannel as Cap'n
+                // Proto; encode once and fan out to every frontend
+                // whose DC is open. Buffer the latest per
+                // (client_id, window_id) so freshly-connected
+                // frontends get the current pixels once their DC
+                // opens (see the replay task in `handle_socket`).
+                if let DisplayUpdate::PutImage {
+                    window_id,
+                    x,
+                    y,
+                    width,
+                    height,
+                    data,
+                } = update
+                {
+                    let bytes = rtc_codec::encode_put_image(&window_id, x, y, width, height, &data);
+                    {
+                        let mut bufs = state.pixel_buffers.write().await;
+                        bufs.entry(client_id.clone())
+                            .or_default()
+                            .insert(window_id.clone(), bytes.clone());
+                    }
+                    let frontends = state.frontends.read().await;
+                    for frontend in frontends.values() {
+                        if frontend
+                            .rtc
+                            .dc_open
+                            .load(std::sync::atomic::Ordering::Acquire)
+                        {
+                            let _ = frontend.rtc.dc_tx.send(bytes.clone());
+                        }
+                    }
+                    return;
+                }
+
                 // Translate the remaining content/property variants
                 // into the frontend-facing `WindowUpdate` shape.
                 let window_update = match update_to_window_update(update) {
                     Some(u) => u,
                     None => return,
                 };
-                let put_image_wid = match &window_update {
-                    WindowUpdate::PutImage { window_id, .. } => Some(window_id.clone()),
-                    _ => None,
-                };
                 let msg = BackendToFrontend::WindowUpdate {
                     update: window_update,
                 };
 
-                // Buffer for replay to new frontends. Keep only the
-                // latest `PutImage` per window_id; everything else
-                // accumulates.
+                // Buffer everything else for replay on WS connect.
                 {
                     let mut bufs = state.display_buffers.write().await;
-                    let buf = bufs.entry(client_id.clone()).or_default();
-                    if let Some(wid) = put_image_wid {
-                        buf.retain(|m| {
-                            if let BackendToFrontend::WindowUpdate { update: u } = m {
-                                if let WindowUpdate::PutImage { window_id, .. } = u {
-                                    return window_id != &wid;
-                                }
-                            }
-                            true
-                        });
-                    }
-                    buf.push(msg.clone());
+                    bufs.entry(client_id.clone()).or_default().push(msg.clone());
                 }
 
                 broadcast_to_frontends(state, msg).await;
@@ -321,8 +368,10 @@ async fn cleanup_sidecar(state: &AppState, sidecar_id: &str) {
     // get cleaned up by `drop_sidecar_windows` below.
     {
         let mut bufs = state.display_buffers.write().await;
+        let mut pixels = state.pixel_buffers.write().await;
         for cid in &client_ids {
             bufs.remove(cid);
+            pixels.remove(cid);
         }
     }
 
@@ -360,10 +409,39 @@ async fn handle_frontend_ws(socket: WebSocket, state: AppState) {
         }
     });
 
+    // Spawn the per-frontend WebRTC driver. The DC isn't usable
+    // until the browser sends an offer over the WS, but the task is
+    // ready to receive signalling immediately.
+    let rtc = rtc::spawn(frontend_id.clone(), tx.clone());
+
+    // Once the DC opens for the first time, replay every buffered
+    // PutImage so the frontend's canvases populate immediately
+    // instead of waiting for the next X11 expose / paint cycle.
+    {
+        let dc_opened = rtc.dc_opened.clone();
+        let dc_tx = rtc.dc_tx.clone();
+        let pixel_buffers = state.pixel_buffers.clone();
+        tokio::spawn(async move {
+            dc_opened.notified().await;
+            let bufs = pixel_buffers.read().await;
+            for windows in bufs.values() {
+                for bytes in windows.values() {
+                    let _ = dc_tx.send(bytes.clone());
+                }
+            }
+        });
+    }
+
     // Register frontend
     {
         let mut frontends = state.frontends.write().await;
-        frontends.insert(frontend_id.clone(), FrontendConnection { tx: tx.clone() });
+        frontends.insert(
+            frontend_id.clone(),
+            FrontendConnection {
+                tx: tx.clone(),
+                rtc,
+            },
+        );
     }
 
     // Send current sidecar list to just this frontend.
@@ -498,6 +576,19 @@ async fn handle_frontend_ws(socket: WebSocket, state: AppState) {
                     }
                 }
             }
+            FrontendToBackend::RtcOffer { sdp } => {
+                if let Some(frontend) = state.frontends.read().await.get(&frontend_id) {
+                    let _ = frontend.rtc.signal_tx.send(rtc::RtcSignal::Offer(sdp));
+                }
+            }
+            FrontendToBackend::RtcIceCandidate { candidate, .. } => {
+                if let Some(frontend) = state.frontends.read().await.get(&frontend_id) {
+                    let _ = frontend
+                        .rtc
+                        .signal_tx
+                        .send(rtc::RtcSignal::IceCandidate(candidate));
+                }
+            }
         }
     }
 
@@ -545,21 +636,9 @@ async fn broadcast_sidecar_list(state: &AppState) {
 fn update_to_window_update(update: DisplayUpdate) -> Option<WindowUpdate> {
     use DisplayUpdate as D;
     Some(match update {
-        D::PutImage {
-            window_id,
-            x,
-            y,
-            width,
-            height,
-            data,
-        } => WindowUpdate::PutImage {
-            window_id,
-            x,
-            y,
-            width,
-            height,
-            data,
-        },
+        // PutImage flows over the WebRTC DataChannel, not the WS,
+        // and is handled directly in `dispatch_sidecar_msg`.
+        D::PutImage { .. } => return None,
         D::TitleChanged { window_id, title } => WindowUpdate::TitleChanged { window_id, title },
         D::WindowStateChanged { window_id, state } => {
             WindowUpdate::StateChanged { window_id, state }

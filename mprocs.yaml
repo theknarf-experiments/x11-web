@@ -24,6 +24,14 @@ procs:
       set -e
       printf 'Waiting for backend fingerprint at %s/.x11web-fingerprint…\n' "$HOME"
       while [ ! -s "$HOME/.x11web-fingerprint" ]; do sleep 0.2; done
+      # Force-remove any container left over from a previous run before
+      # `up`. Compose pins the container to the network it was created
+      # on by ID; if that network was later deleted (e.g. by a stray
+      # `docker network prune` or a worker-network sweep), the next
+      # `up` attempts to attach to a dead network ID and fails with
+      # "network <id> not found". `rm -fs` drops the stale container so
+      # `up` creates a fresh one on the current default network.
+      docker compose rm -fs sidecar >/dev/null 2>&1 || true
       docker compose up sidecar
 
   # macOS sidecar — connects to the backend over QUIC :3002. Builds

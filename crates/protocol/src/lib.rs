@@ -57,6 +57,17 @@ pub enum BackendToFrontend {
     /// X11 bell event — frontend should play an audible/visual bell.
     /// Not per-window; lifted out of the per-window update stream.
     Bell { percent: u8 },
+
+    /// SDP answer in response to a `FrontendToBackend::RtcOffer`.
+    /// The WS carries WebRTC signaling; once the peer connection is
+    /// up the DataChannel takes over high-frequency traffic.
+    RtcAnswer { sdp: String },
+    /// Trickled ICE candidate from the backend's `Rtc` driver.
+    RtcIceCandidate {
+        candidate: String,
+        sdp_mid: Option<String>,
+        sdp_mline_index: Option<u16>,
+    },
 }
 
 /// Messages sent from a frontend client to the backend.
@@ -91,6 +102,16 @@ pub enum FrontendToBackend {
     },
     /// Update a window's tracked position (synced across frontends).
     UpdateWindowPosition { window_id: String, x: f64, y: f64 },
+
+    /// SDP offer initiating the WebRTC session — the frontend creates
+    /// the peer connection and offer once the WS is up.
+    RtcOffer { sdp: String },
+    /// Trickled ICE candidate from the browser.
+    RtcIceCandidate {
+        candidate: String,
+        sdp_mid: Option<String>,
+        sdp_mline_index: Option<u16>,
+    },
 }
 
 /// Information about a connected sidecar.
@@ -142,25 +163,16 @@ pub struct WindowDescriptor {
     pub placed: bool,
 }
 
-/// Per-window incremental update sent to the frontend. The wire-level
-/// X11 lifecycle events (Created/Mapped/Unmapped/...) are absorbed by
-/// the backend and re-emitted as `BackendToFrontend::WindowList`;
-/// what's left is the smaller set of per-window content/property
+/// Per-window incremental update sent to the frontend over the
+/// WebSocket. Pixel rectangles travel over the WebRTC DataChannel as
+/// Cap'n Proto frames (see `crates/rtc-wire`); the wire-level X11
+/// lifecycle events (Created/Mapped/Unmapped/...) are absorbed by the
+/// backend and re-emitted as `BackendToFrontend::WindowList`; what's
+/// left here is the smaller set of per-window content/property
 /// changes plus the cross-frontend drag delta.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "kind")]
 pub enum WindowUpdate {
-    /// Pixel rectangle (raw RGBA, deflate-compressed, base64-encoded
-    /// for JSON transport).
-    PutImage {
-        window_id: String,
-        x: i16,
-        y: i16,
-        width: u16,
-        height: u16,
-        #[serde(with = "base64_bytes")]
-        data: Vec<u8>,
-    },
     /// Window title (from WM_NAME).
     TitleChanged { window_id: String, title: String },
     /// X11 WM state — Normal / Minimized / Maximized / Fullscreen / Close.
