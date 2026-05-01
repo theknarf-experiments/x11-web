@@ -23,6 +23,8 @@ pub mod focus_guard;
 #[cfg(target_os = "macos")]
 pub mod input;
 #[cfg(target_os = "macos")]
+pub mod menu;
+#[cfg(target_os = "macos")]
 pub mod router;
 #[cfg(target_os = "macos")]
 pub mod screenshot;

@@ -339,6 +339,12 @@ function App() {
 
 	const handleFocus = useCallback((windowId: string) => {
 		raiseWindow(windowId);
+		// Set focus locally too. For X11 this is redundant — the X
+		// server forwards a `WindowUpdate::Focused` after it
+		// processes the click — but the macOS sidecar doesn't emit
+		// focus events, so without setting it client-side the
+		// global menu bar would never light up for macOS windows.
+		setFocusedWindow(windowId);
 	}, []);
 
 	const handleInput = useCallback(

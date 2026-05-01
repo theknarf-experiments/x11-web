@@ -116,6 +116,21 @@ export function GlobalMenuBar({
 									fire(item.action);
 								}
 							}}
+							onPointerEnter={() => {
+								// macOS-style menu cruise: once any top-level
+								// menu is open, hovering a sibling switches
+								// to it without an extra click. We don't open
+								// anything on hover when the bar is closed.
+								if (
+									openIndex !== null &&
+									openIndex !== idx &&
+									item.enabled !== false &&
+									item.children &&
+									item.children.length > 0
+								) {
+									setOpenIndex(idx);
+								}
+							}}
 						>
 							{item.label ?? "(unnamed)"}
 						</button>
@@ -143,6 +158,12 @@ interface MenuDropdownProps {
 }
 
 function MenuDropdown({ items, onActivate }: MenuDropdownProps) {
+	// Lifted submenu state — only one of this dropdown's rows can
+	// have its submenu open at a time. macOS-style hover cruise:
+	// hovering a submenu-carrier opens it (closing any other);
+	// hovering a leaf closes any open sibling submenu.
+	const [openId, setOpenId] = useState<string | null>(null);
+
 	return (
 		<div
 			className={s.dropdown}
@@ -159,6 +180,9 @@ function MenuDropdown({ items, onActivate }: MenuDropdownProps) {
 						<MenuRow
 							item={item}
 							hasChildren={hasChildren}
+							isOpen={openId === item.id}
+							onOpenSubmenu={() => setOpenId(item.id)}
+							onCloseSiblings={() => setOpenId(null)}
 							onActivate={onActivate}
 						/>
 					</div>
@@ -171,11 +195,20 @@ function MenuDropdown({ items, onActivate }: MenuDropdownProps) {
 interface MenuRowProps {
 	item: MenuItem;
 	hasChildren: boolean;
+	isOpen: boolean;
+	onOpenSubmenu: () => void;
+	onCloseSiblings: () => void;
 	onActivate: (action: MenuAction | undefined) => void;
 }
 
-function MenuRow({ item, hasChildren, onActivate }: MenuRowProps) {
-	const [submenuOpen, setSubmenuOpen] = useState(false);
+function MenuRow({
+	item,
+	hasChildren,
+	isOpen,
+	onOpenSubmenu,
+	onCloseSiblings,
+	onActivate,
+}: MenuRowProps) {
 	const enabled = item.enabled !== false;
 	const checked = item.checked === true;
 
@@ -187,7 +220,16 @@ function MenuRow({ item, hasChildren, onActivate }: MenuRowProps) {
 					className={s.dropdownItem}
 					data-testid="global-menu-item"
 					disabled={!enabled}
-					onClick={() => setSubmenuOpen((v) => !v)}
+					onPointerEnter={() => {
+						if (enabled) onOpenSubmenu();
+					}}
+					onClick={() => {
+						// Toggle on click for keyboard / explicit
+						// open-close. Hover already opens; clicking
+						// an already-open carrier collapses it.
+						if (isOpen) onCloseSiblings();
+						else onOpenSubmenu();
+					}}
 				>
 					<span className={s.itemLabel}>
 						{checked ? "✓ " : ""}
@@ -195,7 +237,7 @@ function MenuRow({ item, hasChildren, onActivate }: MenuRowProps) {
 					</span>
 					<span className={s.submenuChevron}>▸</span>
 				</button>
-				{submenuOpen && item.children && (
+				{isOpen && item.children && (
 					<div className={s.nestedDropdown}>
 						<MenuDropdown items={item.children} onActivate={onActivate} />
 					</div>
@@ -210,6 +252,7 @@ function MenuRow({ item, hasChildren, onActivate }: MenuRowProps) {
 			className={s.dropdownItem}
 			data-testid="global-menu-item"
 			disabled={!enabled}
+			onPointerEnter={onCloseSiblings}
 			onClick={() => onActivate(item.action)}
 		>
 			<span className={s.itemLabel}>

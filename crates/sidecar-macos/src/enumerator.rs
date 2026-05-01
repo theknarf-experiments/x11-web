@@ -236,6 +236,12 @@ fn handle_capture_control(
             let stop = spawn_capture_loop(*cg_id, t.uuid.clone(), t.pid, tx.clone());
             t.capture_stop = Some(stop);
             info!("Started live capture for window {} (cg_id={cg_id})", t.uuid);
+            // Mirror the app's macOS menu bar into a MenuStructure
+            // event so the frontend's GlobalMenuBar can render it.
+            // Reads block on AX RPC into the target process, so we
+            // hand it off to the blocking thread pool — the
+            // enumerator loop must stay responsive.
+            spawn_menu_read(t.pid, t.uuid.clone(), tx.clone());
         }
         CaptureControl::Stop { window_id } => {
             let entry = tracked.iter_mut().find(|(_, t)| t.uuid == window_id);
@@ -249,6 +255,42 @@ fn handle_capture_control(
             }
         }
     }
+}
+
+/// Read the macOS menu bar of the app at `pid` and emit a
+/// `MenuStructure` for `window_id`. AX is RPC into the target
+/// process and can take 5–50 ms (longer if the app is slow), so we
+/// run on the blocking pool with a wall-clock budget. Empty menu on
+/// failure / timeout is a benign no-op for the frontend's
+/// GlobalMenuBar.
+fn spawn_menu_read(pid: i32, window_id: String, tx: mpsc::UnboundedSender<SidecarToBackend>) {
+    let client_id = client_id_for_pid(pid);
+    let log_window_id = window_id.clone();
+    tokio::task::spawn_blocking(move || {
+        let menu = crate::menu::read_menu_bar_with_timeout(pid, Duration::from_millis(500));
+        // Surface the AX outcome so an empty menu (the most common
+        // failure mode — missing TCC grant, or the app isn't
+        // frontmost) is visible in the sidecar log instead of
+        // failing silently into the frontend.
+        if menu.is_empty() {
+            warn!(
+                "menu: AX read returned 0 items for pid={pid} window={} \
+                 (check Accessibility permission; some apps only expose \
+                 their menu bar when frontmost)",
+                &log_window_id[..log_window_id.len().min(8)]
+            );
+        } else {
+            info!(
+                "menu: pid={pid} window={} → {} top-level items",
+                &log_window_id[..log_window_id.len().min(8)],
+                menu.len()
+            );
+        }
+        let _ = tx.send(SidecarToBackend::DisplayUpdate {
+            client_id,
+            update: DisplayUpdate::MenuStructure { window_id, menu },
+        });
+    });
 }
 
 /// Per-window capture loop. Runs on a dedicated OS thread because

@@ -73,6 +73,16 @@ pub fn inject(route: WindowRoute, event: InputEvent) {
         InputEvent::KeyRelease { keycode, state } => {
             send_key(&route, keycode, state, false);
         }
+        InputEvent::MenuActivate { action } => {
+            // The action's `name` is the AX path we baked in when
+            // the menu was first read (`p<pid>/i/j/k`). Re-walk
+            // and AXPress the leaf — runs on the calling thread,
+            // a single AX RPC takes a couple ms.
+            match crate::menu::dispatch_action(&action.name) {
+                Ok(()) => tracing::info!("menu activate: {}", action.name),
+                Err(e) => tracing::warn!("menu activate {}: {e}", action.name),
+            }
+        }
         _ => {}
     }
 }
