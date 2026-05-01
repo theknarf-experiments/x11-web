@@ -1,7 +1,7 @@
 // Decoder for the Cap'n Proto `Frame` message type defined in
-// `crates/rtc-wire/schema/wire.capnp`. The backend encodes
-// `Frame::PutImage` and writes it to the WebRTC DataChannel; this
-// module decodes the bytes back into a typed object.
+// `crates/rtc-wire/schema/wire.capnp`. The backend encodes the
+// `Frame` union into a single DataChannel message; this module
+// decodes the bytes back into a discriminated TS union.
 //
 // The schema is small enough that hand-rolling the decoder is
 // cheaper than pulling in `capnp-ts` (~100KB gz). The backend forces
@@ -11,6 +11,7 @@
 // https://capnproto.org/encoding.html
 
 export interface PutImageMessage {
+	kind: "putImage";
 	windowId: string;
 	x: number;
 	y: number;
@@ -19,15 +20,25 @@ export interface PutImageMessage {
 	data: Uint8Array;
 }
 
+export interface ThumbnailMessage {
+	kind: "thumbnail";
+	windowId: string;
+	width: number;
+	height: number;
+	data: Uint8Array;
+}
+
+export type FrameMessage = PutImageMessage | ThumbnailMessage;
+
 const FRAME_DISCRIMINANT_PUT_IMAGE = 1;
+const FRAME_DISCRIMINANT_THUMBNAIL = 2;
 const ELEMENT_SIZE_BYTE = 2;
 const POINTER_TAG_STRUCT = 0;
 const POINTER_TAG_LIST = 1;
 
-/** Decode a Cap'n Proto-serialised `Frame { putImage: PutImage }`.
- *  Returns null if the message isn't a PutImage variant or if the
- *  layout doesn't match expectations. */
-export function decodePutImage(buf: Uint8Array): PutImageMessage | null {
+/** Decode a Cap'n Proto-serialised `Frame`. Returns null if the
+ *  message isn't a known variant or the layout doesn't match. */
+export function decodeFrame(buf: Uint8Array): FrameMessage | null {
 	const dv = new DataView(buf.buffer, buf.byteOffset, buf.byteLength);
 
 	// Stream framing: u32 LE (segCount-1), u32 LE (seg-0 size in
@@ -45,35 +56,76 @@ export function decodePutImage(buf: Uint8Array): PutImageMessage | null {
 	// Frame: data section is the union discriminant (16-bit at offset 0).
 	const frameStart = segOffset + 8 + root.offsetWords * 8;
 	const discriminant = dv.getUint16(frameStart, true);
-	if (discriminant !== FRAME_DISCRIMINANT_PUT_IMAGE) return null;
-
-	// Frame's pointer 0 → PutImage.
 	const framePtrSection = frameStart + root.dataWords * 8;
-	const piRef = readStructPointer(dv, framePtrSection);
-	if (!piRef) return null;
-	if (piRef.dataWords < 1 || piRef.ptrWords < 2) return null;
 
-	const piStart = framePtrSection + 8 + piRef.offsetWords * 8;
+	if (discriminant === FRAME_DISCRIMINANT_PUT_IMAGE) {
+		return decodePutImagePayload(buf, dv, framePtrSection);
+	}
+	if (discriminant === FRAME_DISCRIMINANT_THUMBNAIL) {
+		return decodeThumbnailPayload(buf, dv, framePtrSection);
+	}
+	return null;
+}
 
-	// PutImage data section: x (Int16), y (Int16), width (UInt16), height (UInt16)
+function decodePutImagePayload(
+	buf: Uint8Array,
+	dv: DataView,
+	framePtrSection: number,
+): PutImageMessage | null {
+	// Frame's pointer 0 → PutImage.
+	const ref = readStructPointer(dv, framePtrSection);
+	if (!ref) return null;
+	if (ref.dataWords < 1 || ref.ptrWords < 2) return null;
+	const piStart = framePtrSection + 8 + ref.offsetWords * 8;
+
+	// PutImage data: x (Int16), y (Int16), width (UInt16), height (UInt16)
 	const x = dv.getInt16(piStart, true);
 	const y = dv.getInt16(piStart + 2, true);
 	const width = dv.getUint16(piStart + 4, true);
 	const height = dv.getUint16(piStart + 6, true);
 
 	// PutImage pointer 0 → windowId Text, pointer 1 → data.
-	const piPtrSection = piStart + piRef.dataWords * 8;
-	const wid = readBytePointer(buf, dv, piPtrSection, /* dropTrailingNul */ true);
+	const ptrSection = piStart + ref.dataWords * 8;
+	const wid = readBytePointer(buf, dv, ptrSection, /* dropTrailingNul */ true);
 	const data = readBytePointer(
 		buf,
 		dv,
-		piPtrSection + 8,
+		ptrSection + 8,
 		/* dropTrailingNul */ false,
 	);
 	if (!wid || !data) return null;
-
 	const windowId = new TextDecoder().decode(wid);
-	return { windowId, x, y, width, height, data };
+	return { kind: "putImage", windowId, x, y, width, height, data };
+}
+
+function decodeThumbnailPayload(
+	buf: Uint8Array,
+	dv: DataView,
+	framePtrSection: number,
+): ThumbnailMessage | null {
+	const ref = readStructPointer(dv, framePtrSection);
+	if (!ref) return null;
+	if (ref.dataWords < 1 || ref.ptrWords < 2) return null;
+	const tStart = framePtrSection + 8 + ref.offsetWords * 8;
+
+	// WindowThumbnail data: width (UInt16), height (UInt16) at the
+	// start of the data section. (The first 4 bytes of the data
+	// section are unused — Cap'n Proto pads structs to 8-byte words.)
+	const width = dv.getUint16(tStart, true);
+	const height = dv.getUint16(tStart + 2, true);
+
+	// Pointer 0 → windowId Text, pointer 1 → data bytes.
+	const ptrSection = tStart + ref.dataWords * 8;
+	const wid = readBytePointer(buf, dv, ptrSection, /* dropTrailingNul */ true);
+	const data = readBytePointer(
+		buf,
+		dv,
+		ptrSection + 8,
+		/* dropTrailingNul */ false,
+	);
+	if (!wid || !data) return null;
+	const windowId = new TextDecoder().decode(wid);
+	return { kind: "thumbnail", windowId, width, height, data };
 }
 
 interface StructRef {

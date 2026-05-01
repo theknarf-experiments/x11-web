@@ -1,13 +1,10 @@
 //! Encoders for the WebRTC DataChannel binary protocol.
 //!
-//! One message type for now: `PutImage`. The pixel `data` field is
-//! whatever the sidecar produced — currently deflate-compressed RGBA;
-//! the frontend inflates with pako after capnp decode.
-//!
-//! The encoder pre-sizes the message builder to fit the largest
-//! plausible single PutImage in one segment so the resulting stream
-//! is always single-segment. The frontend's hand-rolled decoder
-//! relies on that — it doesn't follow far pointers.
+//! Two message types: `PutImage` (live pixel rectangles, see the
+//! sidecar) and `WindowThumbnail` (low-rate downscaled previews used
+//! by the spawn-popover picker). Both pre-size the message builder
+//! so the resulting stream is always single-segment — the frontend's
+//! hand-rolled decoder doesn't follow far pointers.
 
 use capnp::message::HeapAllocator;
 use x11_web_rtc_wire::wire_capnp;
@@ -39,6 +36,33 @@ pub fn encode_put_image(
         put_image.set_width(width);
         put_image.set_height(height);
         put_image.set_data(data);
+    }
+    let mut buf = Vec::new();
+    capnp::serialize::write_message(&mut buf, &message)
+        .expect("capnp serialise to Vec is infallible");
+    buf
+}
+
+/// Build a `Frame::WindowThumbnail` capnp message and serialise to a
+/// single Vec ready for `RTCDataChannel.send`. Mirrors
+/// [`encode_put_image`] minus the (x, y) offset — thumbnails always
+/// represent the full window.
+pub fn encode_window_thumbnail(
+    window_id: &str,
+    width: u16,
+    height: u16,
+    data: &[u8],
+) -> Vec<u8> {
+    let words_needed = (data.len() + window_id.len() + 128).div_ceil(8);
+    let allocator = HeapAllocator::new().first_segment_words(words_needed as u32);
+    let mut message = capnp::message::Builder::new(allocator);
+    {
+        let frame = message.init_root::<wire_capnp::frame::Builder>();
+        let mut t = frame.init_window_thumbnail();
+        t.set_window_id(window_id);
+        t.set_width(width);
+        t.set_height(height);
+        t.set_data(data);
     }
     let mut buf = Vec::new();
     capnp::serialize::write_message(&mut buf, &message)

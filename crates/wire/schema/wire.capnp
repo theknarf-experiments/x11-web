@@ -159,6 +159,13 @@ struct DisplayPayload {
         # discovery; deltas (state changes per item) are not yet
         # implemented — sidecar re-emits the full tree on change.
         menuStructure @14 :MenuStructure;
+
+        # Low-resolution preview of a window, refreshed at low rate
+        # (~1 Hz) so the frontend can render thumbnails in the
+        # spawn-popover before deciding to attach the window to the
+        # canvas. Pre-encoded as WebP — frontend decodes via
+        # `createImageBitmap`.
+        windowThumbnail @15 :WindowThumbnail;
     }
 }
 
@@ -217,6 +224,17 @@ enum ImageEncoding {
     rawRgba @0;
     jpeg @1;
     png @2;
+}
+
+# Low-rate window preview. Distinct from `PutImage` so the backend
+# doesn't have to disambiguate "tile of a live frame" from "thumbnail
+# for the picker". Always WebP-encoded; frontend renders directly via
+# `createImageBitmap`.
+struct WindowThumbnail {
+    windowId @0 :Text;
+    width @1 :UInt16;
+    height @2 :UInt16;
+    data @3 :Data;
 }
 
 # Cursor-related variants. CursorChanged carries a named cursor

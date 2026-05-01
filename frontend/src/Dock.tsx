@@ -2,7 +2,7 @@ import { useLiveQuery } from "@tanstack/react-db";
 import { useEffect, useRef, useState, ViewTransition } from "react";
 import { AppContextMenu, getAppContextMenuItems } from "./AppContextMenu";
 import s from "./Dock.module.css";
-import { sidecarsCollection } from "./db";
+import { sidecarsCollection, windowsCollection } from "./db";
 
 export interface DockProcess {
 	sidecarId: string;
@@ -14,6 +14,10 @@ export interface DockProcess {
 interface DockProps {
 	connected: boolean;
 	processes: DockProcess[];
+	/// Per-window thumbnail object URLs (windowId → blob URL). The
+	/// dock looks each window up here when rendering the picker so
+	/// it can show a live preview alongside the spawn controls.
+	thumbnails: Map<string, string>;
 	onSpawn: (sidecarId: string, command: string, args: string[]) => void;
 	onClose: (sidecarId: string, pid: number) => void;
 	onFocusWindow: (sidecarId: string, pid: number) => void;
@@ -22,12 +26,16 @@ interface DockProps {
 export function Dock({
 	connected,
 	processes,
+	thumbnails,
 	onSpawn,
 	onClose,
 	onFocusWindow,
 }: DockProps) {
 	const { data: sidecars = [] } = useLiveQuery((q) =>
 		q.from({ s: sidecarsCollection }).select(({ s }) => s),
+	);
+	const { data: allWindows = [] } = useLiveQuery((q) =>
+		q.from({ w: windowsCollection }).select(({ w }) => w),
 	);
 	const [openSpawnId, setOpenSpawnId] = useState<string | null>(null);
 	const [contextMenu, setContextMenu] = useState<{
@@ -164,6 +172,40 @@ export function Dock({
 												Spawn
 											</button>
 										</div>
+
+										{(() => {
+											const sidecarWindows = allWindows.filter(
+												(w) => w.sidecarId === sc.id,
+											);
+											if (sidecarWindows.length === 0) return null;
+											return (
+												<div className={s.thumbnailGrid}>
+													{sidecarWindows.map((w) => {
+														const url = thumbnails.get(w.windowId);
+														return (
+															<div
+																key={w.windowId}
+																className={s.thumbnailCell}
+																title={w.title || w.windowId}
+															>
+																{url ? (
+																	<img
+																		src={url}
+																		alt={w.title || ""}
+																		className={s.thumbnailImg}
+																	/>
+																) : (
+																	<div className={s.thumbnailPlaceholder} />
+																)}
+																<div className={s.thumbnailTitle}>
+																	{w.title || "Untitled"}
+																</div>
+															</div>
+														);
+													})}
+												</div>
+											);
+										})()}
 									</div>
 								)}
 							</div>

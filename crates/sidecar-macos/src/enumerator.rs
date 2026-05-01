@@ -23,6 +23,7 @@ use x11_web_wire::SidecarToBackend;
 
 use crate::capture::{build_session, recv_frame_timeout};
 use crate::router::{WindowRoute, WindowRouter};
+use crate::screenshot;
 use crate::windows::{visible_windows, WindowBounds, WindowInfo};
 
 /// Target FPS for SCStream delivery. SCK dedups idle frames
@@ -34,6 +35,22 @@ const CAPTURE_FPS: u32 = 30;
 /// Polling interval for the shutdown signal while waiting on the
 /// SCStream frame channel. Worst-case shutdown latency = this value.
 const SHUTDOWN_POLL: Duration = Duration::from_millis(100);
+
+/// Cap the longer side of a thumbnail at this many pixels. Sized for
+/// the spawn-popover picker — small enough to encode quickly and
+/// keep the WebRTC payload under 30 KB at the WebP quality below.
+const THUMBNAIL_MAX_DIM: u32 = 320;
+
+/// Period between successive thumbnail captures of the same window.
+/// 1 Hz is enough to feel live while the user hovers the picker
+/// without hammering the screenshot API (which still pays a small
+/// per-call cost even with the filter cached).
+const THUMBNAIL_PERIOD: Duration = Duration::from_secs(1);
+
+/// WebP quality for thumbnails. Lower than the 90 we use for live
+/// frames — we're targeting <30 KB per thumbnail and a few pixels of
+/// blocky-ness in the picker is invisible at 320 px.
+const THUMBNAIL_QUALITY: f32 = 70.0;
 
 /// Layer 0 = "normal" application windows. Higher layers are menubar
 /// items (25), the dock (20), tooltips/popovers, etc. cua-driver uses
@@ -50,6 +67,7 @@ struct Tracked {
     bounds: WindowBounds,
     title: String,
     capture_stop: Option<CaptureStop>,
+    thumbnail_stop: Option<CaptureStop>,
 }
 
 /// Handle for stopping a per-window capture thread. The thread owns
@@ -108,6 +126,8 @@ pub fn spawn(tx: mpsc::UnboundedSender<SidecarToBackend>, router: WindowRouter) 
                     },
                 );
                 let capture_stop = spawn_capture_loop(*id, uuid.clone(), win.pid, tx.clone());
+                let thumbnail_stop =
+                    spawn_thumbnail_loop(*id, uuid.clone(), win.pid, tx.clone());
                 tracked.insert(
                     *id,
                     Tracked {
@@ -116,6 +136,7 @@ pub fn spawn(tx: mpsc::UnboundedSender<SidecarToBackend>, router: WindowRouter) 
                         bounds: win.bounds,
                         title: win.name.clone(),
                         capture_stop: Some(capture_stop),
+                        thumbnail_stop: Some(thumbnail_stop),
                     },
                 );
             }
@@ -141,6 +162,9 @@ pub fn spawn(tx: mpsc::UnboundedSender<SidecarToBackend>, router: WindowRouter) 
                     true
                 } else {
                     if let Some(stop) = prev.capture_stop.take() {
+                        stop.abort();
+                    }
+                    if let Some(stop) = prev.thumbnail_stop.take() {
                         stop.abort();
                     }
                     router.remove(&prev.uuid);
@@ -246,6 +270,83 @@ fn run_capture_loop(
             .is_err()
         {
             // Backend channel closed — sidecar is shutting down.
+            return;
+        }
+    }
+}
+
+/// Per-window thumbnail loop. Runs at `THUMBNAIL_PERIOD` cadence on
+/// its own OS thread, capturing a `THUMBNAIL_MAX_DIM`-capped
+/// downscaled screenshot via the one-shot `SCScreenshotManager` path
+/// (separate from the live SCStream — they have different cadences
+/// and consumers).
+fn spawn_thumbnail_loop(
+    cg_id: CGWindowID,
+    uuid: String,
+    pid: i32,
+    tx: mpsc::UnboundedSender<SidecarToBackend>,
+) -> CaptureStop {
+    let (shutdown_tx, shutdown_rx) = std::sync::mpsc::channel::<()>();
+    let handle = std::thread::Builder::new()
+        .name(format!("macos-thumb-{cg_id}"))
+        .spawn(move || run_thumbnail_loop(cg_id, uuid, pid, tx, shutdown_rx))
+        .expect("spawn macos thumbnail thread");
+    CaptureStop {
+        shutdown: shutdown_tx,
+        handle,
+    }
+}
+
+fn run_thumbnail_loop(
+    cg_id: CGWindowID,
+    uuid: String,
+    pid: i32,
+    tx: mpsc::UnboundedSender<SidecarToBackend>,
+    shutdown_rx: std::sync::mpsc::Receiver<()>,
+) {
+    use std::sync::mpsc::RecvTimeoutError;
+
+    let client_id = client_id_for_pid(pid);
+    let session = match screenshot::build_session(cg_id, THUMBNAIL_MAX_DIM) {
+        Ok(s) => s,
+        Err(e) => {
+            warn!("thumbnail session failed for window {cg_id} ({client_id}): {e}");
+            return;
+        }
+    };
+    loop {
+        // recv_timeout doubles as the period ticker. On shutdown
+        // (Ok(_)) or producer drop (Disconnected) we exit; on
+        // timeout we capture the next frame.
+        match shutdown_rx.recv_timeout(THUMBNAIL_PERIOD) {
+            Ok(()) | Err(RecvTimeoutError::Disconnected) => return,
+            Err(RecvTimeoutError::Timeout) => {}
+        }
+        let frame = match screenshot::capture_with_session(&session) {
+            Ok(f) => f,
+            Err(e) => {
+                warn!("thumbnail capture failed for window {cg_id} ({client_id}): {e}");
+                continue;
+            }
+        };
+        let compressed = x11_web_pixel_codec::encode_rgba_lossy(
+            &frame.rgba,
+            frame.width,
+            frame.height,
+            THUMBNAIL_QUALITY,
+        );
+        if tx
+            .send(SidecarToBackend::DisplayUpdate {
+                client_id: client_id.clone(),
+                update: DisplayUpdate::WindowThumbnail {
+                    window_id: uuid.clone(),
+                    width: frame.width.min(u16::MAX as u32) as u16,
+                    height: frame.height.min(u16::MAX as u32) as u16,
+                    data: compressed,
+                },
+            })
+            .is_err()
+        {
             return;
         }
     }

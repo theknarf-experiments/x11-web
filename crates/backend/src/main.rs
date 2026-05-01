@@ -58,6 +58,13 @@ struct AppState {
     /// DC opens. Replaces the old WS-shaped PutImage replay; pixels
     /// don't ride the WS anymore.
     pixel_buffers: Arc<RwLock<HashMap<String, HashMap<String, Vec<u8>>>>>,
+    /// Latest Cap'n Proto-encoded WindowThumbnail frame per
+    /// (client_id, window_id). Sidecars (currently macOS only) emit
+    /// these at low rate so the frontend can render previews in the
+    /// spawn-popover picker. Same DC fan-out + replay-on-open story
+    /// as `pixel_buffers`; kept parallel rather than merged so
+    /// thumbnails and live frames don't overwrite each other.
+    thumbnail_buffers: Arc<RwLock<HashMap<String, HashMap<String, Vec<u8>>>>>,
 }
 
 struct SidecarConnection {
@@ -126,6 +133,7 @@ async fn async_main() {
         window_positions: Arc::new(RwLock::new(HashMap::new())),
         display_buffers: Arc::new(RwLock::new(HashMap::new())),
         pixel_buffers: Arc::new(RwLock::new(HashMap::new())),
+        thumbnail_buffers: Arc::new(RwLock::new(HashMap::new())),
     };
 
     let app = Router::new()
@@ -232,9 +240,11 @@ async fn dispatch_sidecar_msg(state: &AppState, sidecar_id: &str, msg: SidecarTo
                     {
                         let mut bufs = state.display_buffers.write().await;
                         let mut pixels = state.pixel_buffers.write().await;
+                        let mut thumbs = state.thumbnail_buffers.write().await;
                         for cid in &freed_client_ids {
                             bufs.remove(cid);
                             pixels.remove(cid);
+                            thumbs.remove(cid);
                         }
                     }
                     for cid in &freed_client_ids {
@@ -325,6 +335,38 @@ async fn dispatch_sidecar_msg(state: &AppState, sidecar_id: &str, msg: SidecarTo
                     return;
                 }
 
+                // WindowThumbnail rides the same DataChannel path as
+                // PutImage but lands in a parallel cache (see
+                // `thumbnail_buffers`) so live frames and thumbnails
+                // don't overwrite each other.
+                if let DisplayUpdate::WindowThumbnail {
+                    window_id,
+                    width,
+                    height,
+                    data,
+                } = update
+                {
+                    let bytes =
+                        rtc_codec::encode_window_thumbnail(&window_id, width, height, &data);
+                    {
+                        let mut bufs = state.thumbnail_buffers.write().await;
+                        bufs.entry(client_id.clone())
+                            .or_default()
+                            .insert(window_id.clone(), bytes.clone());
+                    }
+                    let frontends = state.frontends.read().await;
+                    for frontend in frontends.values() {
+                        if frontend
+                            .rtc
+                            .dc_open
+                            .load(std::sync::atomic::Ordering::Acquire)
+                        {
+                            let _ = frontend.rtc.dc_tx.send(bytes.clone());
+                        }
+                    }
+                    return;
+                }
+
                 // Translate the remaining content/property variants
                 // into the frontend-facing `WindowUpdate` shape.
                 let window_update = match update_to_window_update(update) {
@@ -381,9 +423,11 @@ async fn cleanup_sidecar(state: &AppState, sidecar_id: &str) {
     {
         let mut bufs = state.display_buffers.write().await;
         let mut pixels = state.pixel_buffers.write().await;
+        let mut thumbs = state.thumbnail_buffers.write().await;
         for cid in &client_ids {
             bufs.remove(cid);
             pixels.remove(cid);
+            thumbs.remove(cid);
         }
     }
 
@@ -427,18 +471,30 @@ async fn handle_frontend_ws(socket: WebSocket, state: AppState) {
     let rtc = rtc::spawn(frontend_id.clone(), tx.clone());
 
     // Once the DC opens for the first time, replay every buffered
-    // PutImage so the frontend's canvases populate immediately
-    // instead of waiting for the next X11 expose / paint cycle.
+    // PutImage *and* every buffered thumbnail so the frontend's
+    // canvases + popover thumbnails populate immediately instead of
+    // waiting for the next paint / refresh cycle.
     {
         let dc_opened = rtc.dc_opened.clone();
         let dc_tx = rtc.dc_tx.clone();
         let pixel_buffers = state.pixel_buffers.clone();
+        let thumbnail_buffers = state.thumbnail_buffers.clone();
         tokio::spawn(async move {
             dc_opened.notified().await;
-            let bufs = pixel_buffers.read().await;
-            for windows in bufs.values() {
-                for bytes in windows.values() {
-                    let _ = dc_tx.send(bytes.clone());
+            {
+                let bufs = pixel_buffers.read().await;
+                for windows in bufs.values() {
+                    for bytes in windows.values() {
+                        let _ = dc_tx.send(bytes.clone());
+                    }
+                }
+            }
+            {
+                let bufs = thumbnail_buffers.read().await;
+                for windows in bufs.values() {
+                    for bytes in windows.values() {
+                        let _ = dc_tx.send(bytes.clone());
+                    }
                 }
             }
         });
@@ -681,9 +737,10 @@ async fn open_or_create_workspace(state: &AppState, requested_id: Option<String>
 fn update_to_window_update(update: DisplayUpdate) -> Option<WindowUpdate> {
     use DisplayUpdate as D;
     Some(match update {
-        // PutImage flows over the WebRTC DataChannel, not the WS,
-        // and is handled directly in `dispatch_sidecar_msg`.
-        D::PutImage { .. } => return None,
+        // PutImage and WindowThumbnail both flow over the WebRTC
+        // DataChannel, not the WS — handled directly in
+        // `dispatch_sidecar_msg`.
+        D::PutImage { .. } | D::WindowThumbnail { .. } => return None,
         D::TitleChanged { window_id, title } => WindowUpdate::TitleChanged { window_id, title },
         D::WindowStateChanged { window_id, state } => {
             WindowUpdate::StateChanged { window_id, state }

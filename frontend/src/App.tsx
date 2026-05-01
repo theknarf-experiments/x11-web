@@ -15,7 +15,7 @@ import {
 } from "./db";
 import { GlobalMenuBar } from "./GlobalMenuBar";
 import { InfiniteCanvas } from "./InfiniteCanvas";
-import { decodePutImage } from "./rtcWire";
+import { decodeFrame } from "./rtcWire";
 import { SettingsPanel } from "./SettingsPanel";
 import type {
 	AnimCursorFrame,
@@ -222,19 +222,47 @@ function App() {
 		return () => onWindowUpdate(null);
 	}, [onWindowUpdate, startAnimCursor]);
 
-	// PutImage frames over the WebRTC DataChannel: decode the
-	// Cap'n Proto envelope and route to the per-window renderer.
+	// Per-window thumbnail object URLs, keyed by window_id.
+	// Driven by `Frame::WindowThumbnail` arrivals over the DC; the
+	// previous URL is revoked when superseded so we don't leak.
+	const [thumbnails, setThumbnails] = useState<Map<string, string>>(
+		() => new Map(),
+	);
+
+	// Frame messages over the WebRTC DataChannel: decode the
+	// Cap'n Proto envelope and dispatch on variant. PutImage routes
+	// to the per-window renderer; WindowThumbnail updates the
+	// thumbnail map (consumed by the dock's spawn popover).
 	useEffect(() => {
 		onDataChannelMessage((bytes) => {
-			const msg = decodePutImage(bytes);
+			const msg = decodeFrame(bytes);
 			if (!msg) return;
-			const renderers = renderersRef.current;
-			let r = renderers.get(msg.windowId);
-			if (!r) {
-				r = new ClientRenderer(msg.width || 1, msg.height || 1);
-				renderers.set(msg.windowId, r);
+			if (msg.kind === "putImage") {
+				const renderers = renderersRef.current;
+				let r = renderers.get(msg.windowId);
+				if (!r) {
+					r = new ClientRenderer(msg.width || 1, msg.height || 1);
+					renderers.set(msg.windowId, r);
+				}
+				r.pushPutImage(msg.x, msg.y, msg.width, msg.height, msg.data);
+				return;
 			}
-			r.pushPutImage(msg.x, msg.y, msg.width, msg.height, msg.data);
+			if (msg.kind === "thumbnail") {
+				// Copy the bytes into a fresh ArrayBuffer because the
+				// Uint8Array we got from the decoder is a view into
+				// the reassembler's buffer, which gets reused.
+				const copy = new Uint8Array(msg.data);
+				const url = URL.createObjectURL(
+					new Blob([copy], { type: "image/webp" }),
+				);
+				setThumbnails((prev) => {
+					const next = new Map(prev);
+					const old = next.get(msg.windowId);
+					if (old) URL.revokeObjectURL(old);
+					next.set(msg.windowId, url);
+					return next;
+				});
+			}
 		});
 		return () => onDataChannelMessage(null);
 	}, [onDataChannelMessage]);
@@ -561,6 +589,7 @@ function App() {
 			<Dock
 				connected={connected}
 				processes={dockProcesses}
+				thumbnails={thumbnails}
 				onSpawn={handleSpawn}
 				onClose={handleCloseProcess}
 				onFocusWindow={raiseProcess}

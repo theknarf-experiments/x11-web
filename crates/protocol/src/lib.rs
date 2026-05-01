@@ -352,6 +352,20 @@ pub enum DisplayUpdate {
         window_id: String,
         menu: Vec<MenuItem>,
     },
+    /// Low-resolution window preview, WebP-encoded. Sidecar emits
+    /// these at low rate (~1 Hz) for windows that aren't yet
+    /// attached to the canvas. The backend filters them out of the
+    /// WS JSON path and routes the bytes via the WebRTC DataChannel
+    /// (see `rtc_codec::encode_window_thumbnail`), so the data
+    /// field never gets JSON-encoded — the serde representation
+    /// here is just for completeness if anyone ever debug-prints
+    /// one.
+    WindowThumbnail {
+        window_id: String,
+        width: u16,
+        height: u16,
+        data: Vec<u8>,
+    },
 }
 
 /// One node in a window's menu tree. Common shape across both

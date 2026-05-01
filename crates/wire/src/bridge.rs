@@ -273,6 +273,18 @@ fn write_display_payload(
             let list = ms.init_menu(menu.len() as u32);
             write_menu_items(list, menu);
         }
+        DisplayUpdate::WindowThumbnail {
+            window_id,
+            width,
+            height,
+            data,
+        } => {
+            let mut t = payload.init_window_thumbnail();
+            t.set_window_id(window_id);
+            t.set_width(*width);
+            t.set_height(*height);
+            t.set_data(data);
+        }
     }
     true
 }
@@ -497,6 +509,15 @@ fn read_display_payload(
             DisplayUpdate::MenuStructure {
                 window_id: ms.get_window_id()?.to_string()?,
                 menu,
+            }
+        }
+        Which::WindowThumbnail(t) => {
+            let t = t?;
+            DisplayUpdate::WindowThumbnail {
+                window_id: t.get_window_id()?.to_string()?,
+                width: t.get_width(),
+                height: t.get_height(),
+                data: t.get_data()?.to_vec(),
             }
         }
     })

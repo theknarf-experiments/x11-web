@@ -20,6 +20,12 @@ struct Frame {
         # Pixel rectangle for a window. Raw RGBA, no compression, no
         # base64 — DataChannel carries arbitrary bytes.
         putImage @1 :PutImage;
+
+        # Low-rate, downscaled preview of a window's pixels. Same
+        # shape as PutImage minus the (x, y) offset since thumbnails
+        # always represent the full window. WebP-encoded; frontend
+        # decodes via createImageBitmap.
+        windowThumbnail @2 :WindowThumbnail;
     }
 }
 
@@ -30,4 +36,11 @@ struct PutImage {
     width @3 :UInt16;
     height @4 :UInt16;
     data @5 :Data;
+}
+
+struct WindowThumbnail {
+    windowId @0 :Text;
+    width @1 :UInt16;
+    height @2 :UInt16;
+    data @3 :Data;
 }

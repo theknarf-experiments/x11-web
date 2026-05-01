@@ -25,6 +25,8 @@ pub mod input;
 #[cfg(target_os = "macos")]
 pub mod router;
 #[cfg(target_os = "macos")]
+pub mod screenshot;
+#[cfg(target_os = "macos")]
 pub mod skylight;
 #[cfg(target_os = "macos")]
 pub mod tray;
