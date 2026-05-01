@@ -47,7 +47,7 @@ objc2-screen-capture-kit = { version = "0.3.2", features = [
     "libc",
 ] }
 objc2-core-graphics = { version = "0.3", features = ["CGImage", "CGDataProvider", "CGColorSpace", "CGWindow"] }
-objc2-core-foundation = { version = "0.3", features = ["CFCGTypes", "CFData"] }
+objc2-core-foundation = { version = "0.3", features = ["CFCGTypes", "CFData", "CFArray", "CFDictionary", "CFNumber"] }
 objc2-core-media = { version = "0.3", features = ["CMSampleBuffer", "CMTime", "objc2-core-video"] }
 objc2-core-video = { version = "0.3", features = ["CVPixelBuffer", "CVImageBuffer", "CVBuffer", "CVReturn"] }
 dispatch2 = { version = "0.3", features = ["alloc", "objc2"] }

@@ -29,7 +29,9 @@
 //! auto-`Send`, but the underlying ScreenCaptureKit / dispatch types
 //! are documented as thread-safe — see the `unsafe impl Send` below.
 
+use std::ffi::c_void;
 use std::ptr::NonNull;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{sync_channel, Receiver, RecvTimeoutError, SyncSender, TrySendError};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -39,16 +41,17 @@ use dispatch2::{DispatchQueue, DispatchQueueAttr, DispatchRetained};
 use objc2::rc::Retained;
 use objc2::runtime::ProtocolObject;
 use objc2::{define_class, AllocAnyThread, DefinedClass};
+use objc2_core_foundation::{CFDictionary, CFNumber, CFNumberType};
 use objc2_core_media::{CMSampleBuffer, CMTime};
 use objc2_core_video::{
     CVImageBuffer, CVPixelBufferGetBaseAddress, CVPixelBufferGetBytesPerRow,
     CVPixelBufferGetHeight, CVPixelBufferGetPixelFormatType, CVPixelBufferGetWidth,
     CVPixelBufferLockBaseAddress, CVPixelBufferLockFlags, CVPixelBufferUnlockBaseAddress,
 };
-use objc2_foundation::{NSError, NSObject, NSObjectProtocol};
+use objc2_foundation::{NSError, NSObject, NSObjectProtocol, NSString};
 use objc2_screen_capture_kit::{
-    SCContentFilter, SCShareableContent, SCStream, SCStreamConfiguration, SCStreamDelegate,
-    SCStreamOutput, SCStreamOutputType,
+    SCContentFilter, SCFrameStatus, SCShareableContent, SCStream, SCStreamConfiguration,
+    SCStreamDelegate, SCStreamFrameInfoStatus, SCStreamOutput, SCStreamOutputType,
 };
 
 #[derive(Debug)]
@@ -101,6 +104,14 @@ pub(crate) struct StreamHandlerIvars {
     /// `try_send` here from the SCK callback; latest-frame-wins by
     /// keeping the channel bounded at 1 and dropping on full.
     sender: Mutex<Option<FrameSender>>,
+    /// `false` until we've successfully queued the first frame to the
+    /// consumer. Pre-baseline we accept any frame that yields pixels
+    /// — for static windows, SCK's first callback can be `Idle`
+    /// (nothing changed since the IOSurface was allocated, but the
+    /// pixels are still there). Post-baseline we filter to `Complete`
+    /// only since `Idle` redeliveries would just re-encode the
+    /// previous frame.
+    delivered_baseline: AtomicBool,
 }
 
 define_class!(
@@ -121,6 +132,19 @@ define_class!(
             if kind != SCStreamOutputType::Screen {
                 return;
             }
+            // Status-based dedup: post-baseline, only accept fresh
+            // `Complete` frames. Pre-baseline we accept anything that
+            // carries pixels so a static window still gets its
+            // initial render — SCK can label that very first frame
+            // `Idle` because the IOSurface hasn't changed since
+            // allocation.
+            let baseline_done = self.ivars().delivered_baseline.load(Ordering::Relaxed);
+            if baseline_done {
+                match frame_status(sample_buffer) {
+                    Some(SCFrameStatus::Complete) => {}
+                    _ => return,
+                }
+            }
             let frame = match extract_rgba(sample_buffer) {
                 Some(f) => f,
                 None => return,
@@ -132,7 +156,16 @@ define_class!(
             if let Ok(g) = self.ivars().sender.lock() {
                 if let Some(s) = g.as_ref() {
                     match s.try_send(frame) {
-                        Ok(()) | Err(TrySendError::Full(_)) => {}
+                        Ok(()) => {
+                            // Consumer accepted the frame — baseline
+                            // is delivered. Future Idle frames can
+                            // be filtered.
+                            self.ivars().delivered_baseline.store(true, Ordering::Relaxed);
+                        }
+                        Err(TrySendError::Full(_)) => {
+                            // Channel still has the previous frame;
+                            // baseline must already be in flight.
+                        }
                         Err(TrySendError::Disconnected(_)) => {}
                     }
                 }
@@ -162,6 +195,7 @@ impl StreamHandler {
     fn new(sender: FrameSender) -> Retained<Self> {
         let this = Self::alloc().set_ivars(StreamHandlerIvars {
             sender: Mutex::new(Some(sender)),
+            delivered_baseline: AtomicBool::new(false),
         });
         unsafe { objc2::msg_send![super(this), init] }
     }
@@ -379,9 +413,51 @@ fn find_window(
     None
 }
 
+/// Read the `SCFrameStatus` from the sample buffer's attachments.
+/// Every screen frame SCK delivers carries a single attachment dict
+/// at index 0 with `SCStreamFrameInfoStatus` set to a CFNumber
+/// holding the `SCFrameStatus`. Missing or malformed attachments
+/// return `None`, which we treat the same as a non-Complete status —
+/// the frame is dropped.
+fn frame_status(sample_buffer: &CMSampleBuffer) -> Option<SCFrameStatus> {
+    let attachments = unsafe { sample_buffer.sample_attachments_array(false) }?;
+    if attachments.count() == 0 {
+        return None;
+    }
+    // SAFETY: SCK puts a CFMutableDictionary at index 0; the pointer
+    // is non-null when count > 0, and we treat it as borrowed for
+    // this function's scope only.
+    let dict_ptr = unsafe { attachments.value_at_index(0) };
+    if dict_ptr.is_null() {
+        return None;
+    }
+    let dict: &CFDictionary = unsafe { &*(dict_ptr as *const CFDictionary) };
+
+    // SAFETY: Reading an immutable extern static — SCK's framework
+    // initializes it before any client code can call into it.
+    let key_ref: &NSString = unsafe { SCStreamFrameInfoStatus };
+    let value_ptr = unsafe { dict.value(key_ref as *const NSString as *const c_void) };
+    if value_ptr.is_null() {
+        return None;
+    }
+    let number: &CFNumber = unsafe { &*(value_ptr as *const CFNumber) };
+
+    let mut raw: isize = 0;
+    let ok = unsafe {
+        number.value(
+            CFNumberType::NSIntegerType,
+            &mut raw as *mut isize as *mut c_void,
+        )
+    };
+    if !ok {
+        return None;
+    }
+    Some(SCFrameStatus(raw))
+}
+
 /// Pull RGBA bytes out of the CMSampleBuffer. Returns `None` for
-/// frames we can't or shouldn't process (idle redeliveries with no
-/// new pixels, unexpected pixel formats, locking failures).
+/// frames we can't or shouldn't process (unexpected pixel formats,
+/// locking failures).
 fn extract_rgba(sample_buffer: &CMSampleBuffer) -> Option<CapturedFrame> {
     let image_buffer = unsafe { sample_buffer.image_buffer() }?;
     let pixel_buffer: &CVImageBuffer = &image_buffer;
