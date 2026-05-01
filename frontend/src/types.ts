@@ -36,7 +36,6 @@ export type BackendToFrontend =
 				pid: number;
 				x: number;
 				y: number;
-				color: string;
 			}[];
 	  }
 	| {
@@ -44,7 +43,6 @@ export type BackendToFrontend =
 			client_id: string;
 			x: number;
 			y: number;
-			color: string;
 	  }
 	| {
 			type: "InputDropped";
@@ -96,7 +94,6 @@ export type FrontendToBackend =
 			sidecar_id: string;
 			x: number;
 			y: number;
-			color: string;
 	  }
 	| {
 			type: "RequestClipboard";

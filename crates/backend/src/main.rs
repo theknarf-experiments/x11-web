@@ -35,7 +35,7 @@ struct AppState {
     /// on every change.
     window_track: Arc<RwLock<HashMap<(String, String, String), TrackedWindow>>>,
     window_order: Arc<RwLock<Vec<(String, String, String)>>>,
-    /// Window state for position/color sync: client_id → WindowState
+    /// Per-client window position state synced across frontends.
     window_states: Arc<RwLock<HashMap<String, WindowState>>>,
     /// Display update buffer per client_id for replay on frontend connect
     display_buffers: Arc<RwLock<HashMap<String, Vec<BackendToFrontend>>>>,
@@ -617,7 +617,6 @@ async fn handle_frontend_ws(socket: WebSocket, state: AppState) {
                 sidecar_id,
                 x,
                 y,
-                color,
             } => {
                 // Look up pid by client_id by scanning the per-sidecar list.
                 let pid = state
@@ -629,7 +628,6 @@ async fn handle_frontend_ws(socket: WebSocket, state: AppState) {
                     .map(|p| p.pid)
                     .unwrap_or(0);
 
-                // Store window state
                 state.window_states.write().await.insert(
                     client_id.clone(),
                     WindowState {
@@ -638,7 +636,6 @@ async fn handle_frontend_ws(socket: WebSocket, state: AppState) {
                         pid,
                         x,
                         y,
-                        color: color.clone(),
                     },
                 );
 
@@ -650,7 +647,6 @@ async fn handle_frontend_ws(socket: WebSocket, state: AppState) {
                             client_id: client_id.clone(),
                             x,
                             y,
-                            color: color.clone(),
                         });
                     }
                 }

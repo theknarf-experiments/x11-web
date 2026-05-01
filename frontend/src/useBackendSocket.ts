@@ -38,14 +38,12 @@ export interface InitialWindowState {
 	pid: number;
 	x: number;
 	y: number;
-	color: string;
 }
 
 export type WindowStateChangeCallback = (
 	clientId: string,
 	x: number,
 	y: number,
-	color: string,
 ) => void;
 
 export type ClipboardDataCallback = (
@@ -217,17 +215,11 @@ export function useBackendSocket() {
 								pid: w.pid,
 								x: w.x,
 								y: w.y,
-								color: w.color,
 							})),
 						);
 						break;
 					case "WindowStateChanged":
-						windowStateCallbackRef.current?.(
-							msg.client_id,
-							msg.x,
-							msg.y,
-							msg.color,
-						);
+						windowStateCallbackRef.current?.(msg.client_id, msg.x, msg.y);
 						break;
 					case "CommandResult":
 						pushDiagnostic({

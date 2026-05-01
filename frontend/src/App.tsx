@@ -67,6 +67,20 @@ const PASTEL_COLORS = [
 let spawnCounter = 0;
 let nextZIndex = 1;
 
+/**
+ * Pick a tint from `PASTEL_COLORS` deterministically from a window UUID.
+ * Same window_id → same colour across browser tabs / reloads, so no
+ * cross-frontend syncing is required.
+ */
+function colorForWindowId(windowId: string): string {
+	let hash = 0;
+	for (let i = 0; i < windowId.length; i++) {
+		hash = ((hash << 5) - hash + windowId.charCodeAt(i)) | 0;
+	}
+	const idx = Math.abs(hash) % PASTEL_COLORS.length;
+	return PASTEL_COLORS[idx];
+}
+
 /** Convert ARGB pixel data to a CSS cursor URL data-uri. Returns a promise. */
 function argbToCursorUrl(
 	data: string,
@@ -333,11 +347,12 @@ function App() {
 					|| `PID ${pid}`;
 				let cx: number;
 				let cy: number;
-				let color: string;
+				const color = d.override_redirect
+					? "transparent"
+					: colorForWindowId(d.window_id);
 				if (d.override_redirect) {
 					cx = d.x;
 					cy = d.y;
-					color = "transparent";
 				} else {
 					const saved = initialWindowStatesRef.current.find(
 						(ws) => ws.clientId === d.client_id,
@@ -345,20 +360,17 @@ function App() {
 					if (saved) {
 						cx = saved.x;
 						cy = saved.y;
-						color = saved.color;
 					} else {
 						const idx = spawnCounter++;
 						const offset = idx * 30;
 						cx = window.innerWidth / 4 + offset;
 						cy = window.innerHeight / 4 + offset;
-						color = PASTEL_COLORS[idx % PASTEL_COLORS.length];
 						send({
 							type: "UpdateWindowState",
 							client_id: d.client_id,
 							sidecar_id: d.sidecar_id,
 							x: cx,
 							y: cy,
-							color,
 						});
 					}
 				}
@@ -566,9 +578,9 @@ function App() {
 
 	// Handle window state changes from other tabs
 	useEffect(() => {
-		onWindowStateChange((clientId, x, y, color) => {
+		onWindowStateChange((clientId, x, y) => {
 			setWindows((prev) =>
-				prev.map((w) => (w.clientId === clientId ? { ...w, x, y, color } : w)),
+				prev.map((w) => (w.clientId === clientId ? { ...w, x, y } : w)),
 			);
 		});
 		return () => onWindowStateChange(null);
@@ -748,7 +760,6 @@ function App() {
 						sidecar_id: win.sidecarId,
 						x,
 						y,
-						color: win.color,
 					});
 				}
 				return prev.map((w) =>

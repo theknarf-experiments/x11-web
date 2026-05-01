@@ -57,12 +57,11 @@ pub enum BackendToFrontend {
     WindowList { windows: Vec<WindowDescriptor> },
     /// Initial window state for all windows (sent on frontend connect).
     WindowStateList { windows: Vec<WindowState> },
-    /// A window's state changed (position/color, from another frontend).
+    /// A window's tracked position changed (from another frontend).
     WindowStateChanged {
         client_id: String,
         x: f64,
         y: f64,
-        color: String,
     },
     /// Forwarded from `SidecarToBackend::InputDropped`. Tells the
     /// frontend that an input event it sent was discarded by the
@@ -126,13 +125,12 @@ pub enum FrontendToBackend {
         width: u16,
         height: u16,
     },
-    /// Update a window's position/color (synced across frontends).
+    /// Update a window's tracked position (synced across frontends).
     UpdateWindowState {
         client_id: String,
         sidecar_id: String,
         x: f64,
         y: f64,
-        color: String,
     },
     /// Request clipboard content from X11.
     RequestClipboard {
@@ -157,7 +155,7 @@ pub enum FrontendToBackend {
 }
 
 
-/// Window state for position/color sync.
+/// Per-client window position state synced across frontends.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WindowState {
     pub client_id: String,
@@ -165,7 +163,6 @@ pub struct WindowState {
     pub pid: u32,
     pub x: f64,
     pub y: f64,
-    pub color: String,
 }
 
 /// Information about a connected sidecar.
