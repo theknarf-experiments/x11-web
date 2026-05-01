@@ -94,15 +94,6 @@ pub enum BackendToFrontend {
         selection: String,
         mime_types: Vec<String>,
     },
-    /// WebRTC signaling: SDP offer from sidecar, relayed to this frontend.
-    RtcOffer { sidecar_id: String, sdp: String },
-    /// WebRTC signaling: ICE candidate from sidecar, relayed to this frontend.
-    RtcIceCandidate {
-        sidecar_id: String,
-        candidate: String,
-        sdp_mid: Option<String>,
-        sdp_mline_index: Option<u16>,
-    },
 }
 
 /// Messages sent from a frontend client to the backend.
@@ -175,17 +166,6 @@ pub enum FrontendToBackend {
         width: u16,
         height: u16,
     },
-    /// WebRTC signaling: SDP answer from this frontend for a sidecar.
-    RtcAnswer { sidecar_id: String, sdp: String },
-    /// WebRTC signaling: ICE candidate from this frontend for a sidecar.
-    RtcIceCandidate {
-        sidecar_id: String,
-        candidate: String,
-        sdp_mid: Option<String>,
-        sdp_mline_index: Option<u16>,
-    },
-    /// WebRTC signaling: request the sidecar to initiate a WebRTC offer.
-    RtcConnect { sidecar_id: String },
 }
 
 /// Information about a connected process (for initial sync).

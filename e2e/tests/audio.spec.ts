@@ -1,12 +1,12 @@
 /**
- * WebRTC transport and audio streaming e2e tests.
+ * PulseAudio + WebSocket display e2e tests.
  *
  * Tests:
- * - WebRTC signaling types are present in the protocol
- * - PulseAudio is running in the sidecar
- * - VLC can play a test video with audio output
- * - Audacity can record from the virtual mic source
- * - Existing WebSocket display path still works (backward compat)
+ * - PulseAudio is running in the sidecar with the virtual_in / virtual_out sinks
+ * - VLC can play a test video through PulseAudio
+ * - Audio capture from the monitor source works
+ * - Audacity is installed and sees the virtual devices
+ * - The WebSocket display path renders xeyes / xterm
  */
 
 import type { Locator, Page } from "@playwright/test";
@@ -21,7 +21,7 @@ import {
 	cleanupApps,
 } from "./fixtures";
 
-test.describe("WebRTC & Audio", () => {
+test.describe("Audio", () => {
 	test.afterEach(async ({ sidecarContainer }) => {
 		await cleanupApps(sidecarContainer);
 	});
@@ -123,12 +123,10 @@ test.describe("WebRTC & Audio", () => {
 		expect(paResult.output).toContain("virtual_in");
 	});
 
-	test("WebSocket display path still works (backward compat)", async ({
+	test("WebSocket display path renders xeyes", async ({
 		page,
 		frontendUrl,
 	}) => {
-		// Verify the existing WebSocket-based display update path is functional.
-		// This ensures WebRTC additions don't break the existing transport.
 		await page.goto(frontendUrl);
 		await waitForDock(page);
 

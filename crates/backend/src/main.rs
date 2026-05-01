@@ -576,15 +576,6 @@ async fn handle_frontend_ws(socket: WebSocket, state: AppState) {
                 )
                 .await;
             }
-            FrontendToBackend::RtcConnect { .. }
-            | FrontendToBackend::RtcAnswer { .. }
-            | FrontendToBackend::RtcIceCandidate { .. } => {
-                // The sidecar↔backend WebRTC relay is gone. WebRTC
-                // now terminates between frontend and backend
-                // directly; the new signaling handler that owns the
-                // backend-side str0m peer will live here.
-                warn!("RTC signaling from frontend not yet wired to backend-terminated peer");
-            }
             FrontendToBackend::UpdateWindowState {
                 client_id,
                 sidecar_id,
