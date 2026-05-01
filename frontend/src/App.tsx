@@ -1,9 +1,19 @@
+import { useLiveQuery } from "@tanstack/react-db";
 import { inflateRaw } from "pako";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { getAppContextMenuItems } from "./AppContextMenu";
 import { ClientRenderer } from "./ClientRenderer";
 import { DiagnosticsPanel } from "./DiagnosticsPanel";
 import { Dock, type DockProcess } from "./Dock";
+import {
+	patchWindow,
+	processesCollection,
+	raiseProcess,
+	raiseWindow,
+	setFocusedWindow,
+	sidecarsCollection,
+	windowsCollection,
+} from "./db";
 import { GlobalMenuBar } from "./GlobalMenuBar";
 import { InfiniteCanvas } from "./InfiniteCanvas";
 import { SettingsPanel } from "./SettingsPanel";
@@ -12,7 +22,6 @@ import type {
 	FocusPolicy,
 	InputEvent,
 	MenuAction,
-	MenuItem,
 	WindowWmState,
 } from "./types";
 import { useBackendSocket } from "./useBackendSocket";
@@ -21,63 +30,6 @@ import { WindowFrame } from "./WindowFrame";
 let requestCounter = 0;
 function nextRequestId() {
 	return `req-${++requestCounter}-${Date.now()}`;
-}
-
-/**
- * One WindowFrame per top-level mapped X11 window.
- * Each window has its own renderer, keyed by window_id.
- */
-interface CanvasWindow {
-	windowId: string;
-	sidecarId: string;
-	pid: number;
-	title: string;
-	x: number;
-	y: number;
-	color: string;
-	zIndex: number;
-	cursor: string;
-	overrideRedirect: boolean;
-	/** Current WM state. */
-	wmState: WindowWmState;
-	/** Saved position before maximize/fullscreen. */
-	savedPosition?: { x: number; y: number };
-	/** X11 border width in pixels. */
-	borderWidth: number;
-	/** X11 border color (ARGB32). */
-	borderPixel: number;
-}
-
-const PASTEL_COLORS = [
-	"#fce4ec", // pink
-	"#e8eaf6", // indigo
-	"#e0f2f1", // teal
-	"#fff9c4", // yellow
-	"#f3e5f5", // purple
-	"#e8f5e9", // green
-	"#fff3e0", // orange
-	"#e1f5fe", // light blue
-	"#fbe9e7", // deep orange
-	"#f1f8e9", // light green
-	"#ede7f6", // deep purple
-	"#e0f7fa", // cyan
-];
-
-let spawnCounter = 0;
-let nextZIndex = 1;
-
-/**
- * Pick a tint from `PASTEL_COLORS` deterministically from a window UUID.
- * Same window_id → same colour across browser tabs / reloads, so no
- * cross-frontend syncing is required.
- */
-function colorForWindowId(windowId: string): string {
-	let hash = 0;
-	for (let i = 0; i < windowId.length; i++) {
-		hash = ((hash << 5) - hash + windowId.charCodeAt(i)) | 0;
-	}
-	const idx = Math.abs(hash) % PASTEL_COLORS.length;
-	return PASTEL_COLORS[idx];
 }
 
 /** Convert ARGB pixel data to a CSS cursor URL data-uri. Returns a promise. */
@@ -119,9 +71,6 @@ function argbToCursorUrl(
 function App() {
 	const {
 		connected,
-		sidecars,
-		processes,
-		windowList,
 		send,
 		onWindowUpdate,
 		onBell,
@@ -130,17 +79,31 @@ function App() {
 		clearDiagnostics,
 	} = useBackendSocket();
 
-	const [windows, setWindows] = useState<CanvasWindow[]>([]);
-	/** UUID of the currently X11-focused top-level window, or null. */
-	const [focusedWindowId, setFocusedWindowId] = useState<string | null>(null);
-	/** Per-window menu trees mirrored from GTK / Qt apps via the sidecar. */
-	const [menus, setMenus] = useState<Map<string, MenuItem[]>>(new Map());
-	/** One renderer per top-level X11 window (keyed by window_id as string). */
-	const renderersRef = useRef<Map<string, ClientRenderer>>(new Map());
-	const closedWindowsRef = useRef<Set<string>>(new Set());
+	const { data: sidecars = [] } = useLiveQuery((q) =>
+		q.from({ s: sidecarsCollection }).select(({ s }) => s),
+	);
+	const { data: processes = [] } = useLiveQuery((q) =>
+		q.from({ p: processesCollection }).select(({ p }) => p),
+	);
+	// DOM order matches collection insertion order; visual stacking comes
+	// from `stackingOrder` via CSS z-index. Reordering the array would flip
+	// the DOM whenever a window is raised, which breaks any hit-testing that
+	// uses DOM-position locators (e.g. Playwright's `nth(...)`).
+	const { data: windows = [] } = useLiveQuery((q) =>
+		q.from({ w: windowsCollection }).select(({ w }) => w),
+	);
 
+	/** One renderer per top-level X11 window (keyed by window_id). */
+	const renderersRef = useRef<Map<string, ClientRenderer>>(new Map());
+	/** Windows the user has locally closed (KillProcess in flight); filtered
+	 *  out of the visible set until the backend's next WindowList drops them. */
+	const [closedWindowIds, setClosedWindowIds] = useState<Set<string>>(
+		() => new Set(),
+	);
 	/** Animated cursor timers: windowId -> interval handle. */
-	const animCursorTimersRef = useRef<Map<string, ReturnType<typeof setInterval>>>(new Map());
+	const animCursorTimersRef = useRef<
+		Map<string, ReturnType<typeof setInterval>>
+	>(new Map());
 
 	/** Focus policy setting. */
 	const [focusPolicy, setFocusPolicy] = useState<FocusPolicy>("click-to-focus");
@@ -154,213 +117,86 @@ function App() {
 		};
 	}, []);
 
-	/** Start an animated cursor cycle for a window. */
-	const startAnimCursor = useCallback((windowId: string, frames: AnimCursorFrame[]) => {
-		// Clear any existing animation for this window
-		const existing = animCursorTimersRef.current.get(windowId);
-		if (existing) clearInterval(existing);
-
-		if (frames.length === 0) return;
-
-		let frameIndex = 0;
-
-		const advanceFrame = () => {
-			const frame = frames[frameIndex];
-			argbToCursorUrl(
-				frame.pixels,
-				frame.width,
-				frame.height,
-				frame.hotspot_x,
-				frame.hotspot_y,
-			).then((cursorCss) => {
-				setWindows((prev) =>
-					prev.map((w) =>
-						w.windowId === windowId ? { ...w, cursor: cursorCss } : w,
-					),
-				);
-			});
-			frameIndex = (frameIndex + 1) % frames.length;
-		};
-
-		// Show first frame immediately
-		advanceFrame();
-
-		// Use the first frame's delay for the interval (simplification --
-		// ideally each frame has its own delay, but setInterval is fixed)
-		const delay = frames[0].delay_ms || 100;
-		const timer = setInterval(advanceFrame, delay);
-		animCursorTimersRef.current.set(windowId, timer);
-	}, []);
-
-	// Reconcile our `windows` state against the backend's authoritative
-	// `WindowList`. The backend filters out non-visible / non-top-level
-	// windows; we just merge the descriptor's geometry into our existing
-	// per-window UI state (or seed defaults for newly-arrived windows).
+	// Reap renderers, animation timers, and locally-closed entries for
+	// windows the backend has dropped from its authoritative list.
 	useEffect(() => {
-		// User-initiated close: reap any closed-window IDs the backend
-		// has already dropped from its list (race window over).
-		for (const wid of [...closedWindowsRef.current]) {
-			if (!windowList.some((w) => w.window_id === wid)) {
-				closedWindowsRef.current.delete(wid);
+		const live = new Set(windows.map((w) => w.windowId));
+		for (const wid of [...renderersRef.current.keys()]) {
+			if (!live.has(wid)) renderersRef.current.delete(wid);
+		}
+		for (const [wid, timer] of [...animCursorTimersRef.current]) {
+			if (!live.has(wid)) {
+				clearInterval(timer);
+				animCursorTimersRef.current.delete(wid);
 			}
 		}
-		const filtered = windowList.filter(
-			(w) => !closedWindowsRef.current.has(w.window_id),
-		);
-		setWindows((prev) => {
-			const desired = new Set(filtered.map((w) => w.window_id));
-			const byId = new Map(prev.map((w) => [w.windowId, w]));
-			const next: CanvasWindow[] = filtered.map((d, i) => {
-				// Stacking order from the backend's WindowList — last
-				// item is on top.
-				const zIndex = i + 1;
-				const existing = byId.get(d.window_id);
-				if (existing) {
-					// X11 server position wins for popups; for regular
-					// top-level windows the user-driven frontend
-					// position takes precedence (`PositionChanged`
-					// updates apply incrementally).
-					return {
-						...existing,
-						sidecarId: d.sidecar_id,
-						pid: d.pid,
-						overrideRedirect: d.override_redirect,
-						borderWidth: d.border_width,
-						borderPixel: d.border_pixel,
-						zIndex,
-						...(d.override_redirect ? { x: d.x, y: d.y } : {}),
-					};
-				}
-				// First time seeing this window — seed defaults.
-				const title = d.command || `PID ${d.pid}`;
-				let cx: number;
-				let cy: number;
-				const color = d.override_redirect
-					? "transparent"
-					: colorForWindowId(d.window_id);
-				if (d.placed) {
-					// Backend gave us an authoritative position (X11 for
-					// popups, cross-frontend tracked for top-level).
-					cx = d.x;
-					cy = d.y;
-				} else {
-					// First time *any* frontend has seen this top-level
-					// window — pick a cascading position and broadcast it
-					// so other tabs converge on the same spot.
-					const idx = spawnCounter++;
-					const offset = idx * 30;
-					cx = window.innerWidth / 4 + offset;
-					cy = window.innerHeight / 4 + offset;
-					send({
-						type: "UpdateWindowPosition",
-						window_id: d.window_id,
-						x: cx,
-						y: cy,
-					});
-				}
-				return {
-					windowId: d.window_id,
-					sidecarId: d.sidecar_id,
-					pid: d.pid,
-					title,
-					x: cx,
-					y: cy,
-					color,
-					zIndex,
-					cursor: "default",
-					overrideRedirect: d.override_redirect,
-					wmState: "normal" as WindowWmState,
-					borderWidth: d.border_width,
-					borderPixel: d.border_pixel,
-				};
-			});
-
-			// Anything not in the new list is gone — clean up renderers
-			// and per-window timers/menus for those windows.
-			for (const w of prev) {
-				if (!desired.has(w.windowId)) {
-					renderersRef.current.delete(w.windowId);
-					const timer = animCursorTimersRef.current.get(w.windowId);
-					if (timer) {
-						clearInterval(timer);
-						animCursorTimersRef.current.delete(w.windowId);
-					}
-				}
-			}
-
-			// Equality check — return prev if nothing changed (avoids
-			// re-render on every WindowList that's identical).
-			if (
-				next.length === prev.length &&
-				next.every((w, i) => {
-					const old = prev[i];
-					return (
-						old.windowId === w.windowId
-						&& old.x === w.x
-						&& old.y === w.y
-						&& old.zIndex === w.zIndex
-						&& old.borderWidth === w.borderWidth
-						&& old.borderPixel === w.borderPixel
-						&& old.overrideRedirect === w.overrideRedirect
-					);
-				})
-			) {
-				return prev;
-			}
-			return next;
-		});
-
-		// If the focused window left the list, clear focus.
-		const liveIds = new Set(filtered.map((w) => w.window_id));
-		setFocusedWindowId((prev) => (prev && !liveIds.has(prev) ? null : prev));
-		setMenus((prev) => {
+		setClosedWindowIds((prev) => {
 			let changed = false;
-			const next = new Map(prev);
-			for (const wid of prev.keys()) {
-				if (!liveIds.has(wid)) {
+			const next = new Set(prev);
+			for (const wid of prev) {
+				if (!live.has(wid)) {
 					next.delete(wid);
 					changed = true;
 				}
 			}
 			return changed ? next : prev;
 		});
-	}, [windowList, send]);
+	}, [windows]);
 
-	// Register window-update callback for per-window content events
-	// (titles, cursors, focus, WM state, menus, position deltas).
+	/** Start an animated cursor cycle for a window. */
+	const startAnimCursor = useCallback(
+		(windowId: string, frames: AnimCursorFrame[]) => {
+			// Clear any existing animation for this window
+			const existing = animCursorTimersRef.current.get(windowId);
+			if (existing) clearInterval(existing);
+
+			if (frames.length === 0) return;
+
+			let frameIndex = 0;
+
+			const advanceFrame = () => {
+				const frame = frames[frameIndex];
+				argbToCursorUrl(
+					frame.pixels,
+					frame.width,
+					frame.height,
+					frame.hotspot_x,
+					frame.hotspot_y,
+				).then((cursor) => {
+					patchWindow(windowId, { cursor });
+				});
+				frameIndex = (frameIndex + 1) % frames.length;
+			};
+
+			// Show first frame immediately
+			advanceFrame();
+
+			// Use the first frame's delay for the interval (simplification --
+			// ideally each frame has its own delay, but setInterval is fixed)
+			const delay = frames[0].delay_ms || 100;
+			const timer = setInterval(advanceFrame, delay);
+			animCursorTimersRef.current.set(windowId, timer);
+		},
+		[],
+	);
+
+	// Per-window updates the hook doesn't already apply to the collection:
+	// PutImage routes to the per-window renderer; CursorBitmap/CursorAnimated
+	// need async decode or timer-driven cycling, so they live here and patch
+	// the row directly.
 	useEffect(() => {
 		onWindowUpdate((update) => {
-			// Title changes update the matching window
-			if (update.kind === "TitleChanged") {
-				setWindows((prev) =>
-					prev.map((w) =>
-						w.windowId === update.window_id
-							? { ...w, title: update.title }
-							: w,
-					),
-				);
-			}
-
-			// Cursor changes update the matching window
+			// Static cursor change — stop any running animation.
 			if (update.kind === "CursorChanged") {
-				// Stop any animated cursor
 				const existing = animCursorTimersRef.current.get(update.window_id);
 				if (existing) {
 					clearInterval(existing);
 					animCursorTimersRef.current.delete(update.window_id);
 				}
-				setWindows((prev) =>
-					prev.map((w) =>
-						w.windowId === update.window_id
-							? { ...w, cursor: update.cursor }
-							: w,
-					),
-				);
 			}
 
-			// Custom cursor bitmap -- convert ARGB data to a CSS cursor URL
+			// Custom cursor bitmap -- convert ARGB data to a CSS cursor URL.
 			if (update.kind === "CursorBitmap") {
-				// Stop any animated cursor
 				const existing = animCursorTimersRef.current.get(update.window_id);
 				if (existing) {
 					clearInterval(existing);
@@ -374,60 +210,13 @@ function App() {
 					update.hotspot_x,
 					update.hotspot_y,
 				).then((cursor) => {
-					setWindows((prev) =>
-						prev.map((w) =>
-							w.windowId === windowId ? { ...w, cursor } : w,
-						),
-					);
+					patchWindow(windowId, { cursor });
 				});
 			}
 
-			// Animated cursor -- cycle through frames
+			// Animated cursor -- cycle through frames.
 			if (update.kind === "CursorAnimated") {
 				startAnimCursor(update.window_id, update.frames);
-			}
-
-			// X11 WM state changed
-			if (update.kind === "StateChanged") {
-				setWindows((prev) =>
-					prev.map((w) => {
-						if (w.windowId !== update.window_id) return w;
-						const newW = { ...w, wmState: update.state };
-						if (update.state === "maximized" || update.state === "fullscreen") {
-							newW.savedPosition = { x: w.x, y: w.y };
-						}
-						return newW;
-					}),
-				);
-			}
-
-			// Focus — drives the global menu bar.
-			if (update.kind === "Focused") {
-				setFocusedWindowId(update.window_id);
-			}
-
-			// Cross-frontend drag delta from another tab.
-			if (update.kind === "PositionChanged") {
-				setWindows((prev) =>
-					prev.map((w) =>
-						w.windowId === update.window_id
-							? { ...w, x: update.x, y: update.y }
-							: w,
-					),
-				);
-			}
-
-			// MenuStructure -- full menu tree from a GTK / Qt app.
-			if (update.kind === "MenuStructure") {
-				setMenus((prev) => {
-					const next = new Map(prev);
-					if (update.menu.length === 0) {
-						next.delete(update.window_id);
-					} else {
-						next.set(update.window_id, update.menu);
-					}
-					return next;
-				});
 			}
 
 			// Route display updates to the per-window renderer.
@@ -439,7 +228,8 @@ function App() {
 			let r = renderers.get(key);
 			if (!r) {
 				const w = "width" in update ? (update as { width: number }).width : 1;
-				const h = "height" in update ? (update as { height: number }).height : 1;
+				const h =
+					"height" in update ? (update as { height: number }).height : 1;
 				r = new ClientRenderer(w || 1, h || 1);
 				renderers.set(key, r);
 			}
@@ -483,20 +273,16 @@ function App() {
 
 	const handleMove = useCallback(
 		(windowId: string, x: number, y: number) => {
-			setWindows((prev) => {
-				const win = prev.find((w) => w.windowId === windowId);
-				if (win && !win.overrideRedirect) {
-					send({
-						type: "UpdateWindowPosition",
-						window_id: windowId,
-						x,
-						y,
-					});
-				}
-				return prev.map((w) =>
-					w.windowId === windowId ? { ...w, x, y } : w,
-				);
-			});
+			const win = windowsCollection.state.get(windowId);
+			if (win && !win.overrideRedirect) {
+				send({
+					type: "UpdateWindowPosition",
+					window_id: windowId,
+					x,
+					y,
+				});
+			}
+			patchWindow(windowId, { x, y });
 		},
 		[send],
 	);
@@ -520,14 +306,7 @@ function App() {
 	);
 
 	const handleFocus = useCallback((windowId: string) => {
-		setWindows((prev) => {
-			const win = prev.find((w) => w.windowId === windowId);
-			if (!win) return prev;
-
-			return prev.map((w) =>
-				w.windowId === windowId ? { ...w, zIndex: nextZIndex++ } : w,
-			);
-		});
+		raiseWindow(windowId);
 	}, []);
 
 	const handleInput = useCallback(
@@ -542,25 +321,24 @@ function App() {
 		[send],
 	);
 
-	/** Kill a process and remove all of its windows. */
+	/** Kill a process and locally hide all of its windows until the
+	 *  backend's next `WindowList` drops them. */
 	const handleCloseProcess = useCallback(
 		(sidecarId: string, pid: number) => {
-			setWindows((prev) => {
-				for (const w of prev) {
-					if (w.sidecarId === sidecarId && w.pid === pid) {
-						closedWindowsRef.current.add(w.windowId);
-						// Clean up animated cursor timer
-						const timer = animCursorTimersRef.current.get(w.windowId);
-						if (timer) {
-							clearInterval(timer);
-							animCursorTimersRef.current.delete(w.windowId);
-						}
+			const wids: string[] = [];
+			for (const w of windowsCollection.state.values()) {
+				if (w.sidecarId === sidecarId && w.pid === pid) {
+					wids.push(w.windowId);
+					const timer = animCursorTimersRef.current.get(w.windowId);
+					if (timer) {
+						clearInterval(timer);
+						animCursorTimersRef.current.delete(w.windowId);
 					}
 				}
-				return prev.filter(
-					(w) => !(w.sidecarId === sidecarId && w.pid === pid),
-				);
-			});
+			}
+			if (wids.length > 0) {
+				setClosedWindowIds((prev) => new Set([...prev, ...wids]));
+			}
 			send({
 				type: "KillProcess",
 				request_id: nextRequestId(),
@@ -574,13 +352,7 @@ function App() {
 	/** Minimize a window (hide it, show in dock). */
 	const handleMinimize = useCallback(
 		(windowId: string, sidecarId: string) => {
-			setWindows((prev) =>
-				prev.map((w) =>
-					w.windowId === windowId
-						? { ...w, wmState: "minimized" as WindowWmState }
-						: w,
-				),
-			);
+			patchWindow(windowId, { wmState: "minimized" });
 			send({
 				type: "InputEvent",
 				sidecar_id: sidecarId,
@@ -594,17 +366,11 @@ function App() {
 	/** Maximize a window (expand to fill viewport). */
 	const handleMaximize = useCallback(
 		(windowId: string, sidecarId: string) => {
-			setWindows((prev) =>
-				prev.map((w) =>
-					w.windowId === windowId
-						? {
-								...w,
-								wmState: "maximized" as WindowWmState,
-								savedPosition: { x: w.x, y: w.y },
-							}
-						: w,
-				),
-			);
+			const win = windowsCollection.state.get(windowId);
+			patchWindow(windowId, {
+				wmState: "maximized",
+				...(win ? { savedPosition: { x: win.x, y: win.y } } : {}),
+			});
 			send({
 				type: "InputEvent",
 				sidecar_id: sidecarId,
@@ -631,20 +397,15 @@ function App() {
 	/** Restore a window from maximized/fullscreen/minimized to normal. */
 	const handleRestore = useCallback(
 		(windowId: string, sidecarId: string) => {
-			setWindows((prev) =>
-				prev.map((w) => {
-					if (w.windowId !== windowId) return w;
-					const restored = {
-						...w,
-						wmState: "normal" as WindowWmState,
-					};
-					if (w.savedPosition) {
-						restored.x = w.savedPosition.x;
-						restored.y = w.savedPosition.y;
-					}
-					return restored;
-				}),
-			);
+			const win = windowsCollection.state.get(windowId);
+			const patch: { wmState: WindowWmState; x?: number; y?: number } = {
+				wmState: "normal",
+			};
+			if (win?.savedPosition) {
+				patch.x = win.savedPosition.x;
+				patch.y = win.savedPosition.y;
+			}
+			patchWindow(windowId, patch);
 			send({
 				type: "InputEvent",
 				sidecar_id: sidecarId,
@@ -659,10 +420,10 @@ function App() {
 	const handleMouseEnterWindow = useCallback(
 		(windowId: string) => {
 			if (focusPolicy !== "focus-follows-mouse") return;
-			handleFocus(windowId);
-			setFocusedWindowId(windowId);
+			raiseWindow(windowId);
+			setFocusedWindow(windowId);
 		},
-		[focusPolicy, handleFocus],
+		[focusPolicy],
 	);
 
 	// Deduplicate windows by process for the dock -- one entry per (sidecarId, pid)
@@ -675,8 +436,9 @@ function App() {
 			const key = `${w.sidecarId}:${w.pid}`;
 			if (!seen.has(key)) {
 				seen.add(key);
-				const procList = processes[w.sidecarId] || [];
-				const proc = procList.find((p) => p.pid === w.pid);
+				const proc = processes.find(
+					(p) => p.sidecar_id === w.sidecarId && p.pid === w.pid,
+				);
 				result.push({
 					sidecarId: w.sidecarId,
 					pid: w.pid,
@@ -688,11 +450,10 @@ function App() {
 		return result;
 	}, [windows, processes]);
 
-	const focusedWindow = windows.find((w) => w.windowId === focusedWindowId);
+	const focusedWindow = windows.find((w) => w.focused) ?? null;
 	const focusedTitle = focusedWindow?.title ?? null;
-	const focusedMenu = focusedWindowId
-		? (menus.get(focusedWindowId) ?? null)
-		: null;
+	const focusedMenu =
+		focusedWindow && focusedWindow.menu.length > 0 ? focusedWindow.menu : null;
 
 	const handleMenuActivate = useCallback(
 		(action: MenuAction) => {
@@ -714,7 +475,10 @@ function App() {
 				})
 			: null;
 
-	const sortedWindows = useMemo(() => [...windows], [windows]);
+	const visibleWindows = useMemo(
+		() => windows.filter((w) => !closedWindowIds.has(w.windowId)),
+		[windows, closedWindowIds],
+	);
 
 	return (
 		<>
@@ -725,7 +489,7 @@ function App() {
 				appContextMenuItems={focusedAppContextMenuItems}
 			/>
 			<InfiniteCanvas>
-				{sortedWindows.map((win) => {
+				{visibleWindows.map((win) => {
 					const renderer = renderersRef.current.get(win.windowId);
 					if (!renderer) return null;
 					return (
@@ -738,7 +502,7 @@ function App() {
 								title={win.title}
 								x={win.x}
 								y={win.y}
-								zIndex={win.zIndex}
+								zIndex={win.stackingOrder}
 								color={win.color}
 								cursor={win.cursor}
 								renderer={renderer}
@@ -769,23 +533,7 @@ function App() {
 				processes={dockProcesses}
 				onSpawn={handleSpawn}
 				onClose={handleCloseProcess}
-				onFocusWindow={(sidecarId, pid) => {
-					// Restore minimized windows and bring all windows for this process to front
-					setWindows((prev) =>
-						prev.map((w) =>
-							w.sidecarId === sidecarId && w.pid === pid
-								? {
-										...w,
-										zIndex: nextZIndex++,
-										wmState:
-											w.wmState === "minimized"
-												? ("normal" as WindowWmState)
-												: w.wmState,
-									}
-								: w,
-						),
-					);
-				}}
+				onFocusWindow={raiseProcess}
 			/>
 			<DiagnosticsPanel
 				diagnostics={diagnostics}

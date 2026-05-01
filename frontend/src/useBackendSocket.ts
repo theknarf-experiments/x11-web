@@ -1,12 +1,20 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import {
+	applyWindowList,
+	type NewWindowSeed,
+	patchWindow,
+	replaceSidecarProcesses,
+	replaceSidecars,
+	setFocusedWindow,
+	windowsCollection,
+} from "./db";
 import type {
 	BackendToFrontend,
 	FrontendToBackend,
-	ProcessInfo,
-	SidecarInfo,
 	WindowDescriptor,
 	WindowUpdate,
 } from "./types";
+import { colorForWindowId } from "./windowColors";
 
 // Resolve order: ?ws=... query param > VITE_WS_URL build-time env > default.
 // The query-param branch lets parallel e2e workers share a single built
@@ -20,15 +28,7 @@ const WS_URL = (() => {
 })();
 
 export type WindowUpdateCallback = (update: WindowUpdate) => void;
-
 export type BellCallback = (percent: number) => void;
-
-export interface ConnectedProcess {
-	sidecarId: string;
-	pid: number;
-	clientId: string;
-	command: string;
-}
 
 /**
  * Per-event diagnostic surfaced from the backend / WebSocket layer.
@@ -50,19 +50,92 @@ function nextDiagnosticId() {
 	return `diag-${++diagnosticCounter}-${Date.now()}`;
 }
 
+let spawnCounter = 0;
+
+function seedForDescriptor(
+	d: WindowDescriptor,
+	send: (msg: FrontendToBackend) => void,
+): NewWindowSeed {
+	let x: number;
+	let y: number;
+	if (d.placed || d.override_redirect) {
+		// Backend gave us an authoritative position (X11 server for popups,
+		// cross-frontend tracked for top-level windows).
+		x = d.x;
+		y = d.y;
+	} else {
+		// First time *any* frontend has seen this top-level window — pick a
+		// cascading position and broadcast it so other tabs converge.
+		const idx = spawnCounter++;
+		const offset = idx * 30;
+		x = window.innerWidth / 4 + offset;
+		y = window.innerHeight / 4 + offset;
+		send({
+			type: "UpdateWindowPosition",
+			window_id: d.window_id,
+			x,
+			y,
+		});
+	}
+	return {
+		x,
+		y,
+		color: d.override_redirect ? "transparent" : colorForWindowId(d.window_id),
+		title: d.command || `PID ${d.pid}`,
+		cursor: "default",
+		wmState: "normal",
+	};
+}
+
+/** Apply a `WindowUpdate` to the windows collection where it represents a
+ *  persistent UI-state change. Returns true if the hook handled the update
+ *  (the App can still observe it via the `onWindowUpdate` callback for
+ *  side-effect kinds like `PutImage` and animated/bitmap cursors). */
+function applyWindowUpdate(update: WindowUpdate) {
+	switch (update.kind) {
+		case "TitleChanged":
+			patchWindow(update.window_id, { title: update.title });
+			break;
+		case "CursorChanged":
+			patchWindow(update.window_id, { cursor: update.cursor });
+			break;
+		case "Focused":
+			setFocusedWindow(update.window_id);
+			break;
+		case "PositionChanged":
+			patchWindow(update.window_id, { x: update.x, y: update.y });
+			break;
+		case "MenuStructure":
+			patchWindow(update.window_id, { menu: update.menu });
+			break;
+		case "StateChanged":
+			if (update.state === "maximized" || update.state === "fullscreen") {
+				// Save the current position so Restore can put the window
+				// back where it was before the WM transition.
+				const existing = windowsCollection.state.get(update.window_id);
+				if (existing) {
+					patchWindow(update.window_id, {
+						wmState: update.state,
+						savedPosition: { x: existing.x, y: existing.y },
+					});
+				}
+			} else {
+				patchWindow(update.window_id, { wmState: update.state });
+			}
+			break;
+		// PutImage / CursorBitmap / CursorAnimated are handled by App.tsx
+		// (renderers and async cursor decoding live there).
+	}
+}
+
 export function useBackendSocket() {
 	const wsRef = useRef<WebSocket | null>(null);
 	const reconnectTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
 	const disposed = useRef(false);
 	const windowUpdateCallbackRef = useRef<WindowUpdateCallback | null>(null);
 	const bellCallbackRef = useRef<BellCallback | null>(null);
+	const sendRef = useRef<(msg: FrontendToBackend) => void>(() => {});
 	const [connected, setConnected] = useState(false);
-	const [sidecars, setSidecars] = useState<SidecarInfo[]>([]);
-	const [processes, setProcesses] = useState<Record<string, ProcessInfo[]>>({});
-	const [connectedProcesses, setConnectedProcesses] = useState<
-		ConnectedProcess[]
-	>([]);
-	const [windowList, setWindowList] = useState<WindowDescriptor[]>([]);
 	const [diagnostics, setDiagnostics] = useState<Diagnostic[]>([]);
 
 	const pushDiagnostic = useCallback(
@@ -124,48 +197,20 @@ export function useBackendSocket() {
 				const msg: BackendToFrontend = JSON.parse(event.data);
 
 				switch (msg.type) {
-					case "SidecarList": {
-						// The list is authoritative — replace state, then
-						// prune any per-sidecar caches whose owner left.
-						const liveIds = new Set(msg.sidecars.map((s) => s.id));
-						setSidecars(msg.sidecars);
-						setProcesses((prev) => {
-							const next: typeof prev = {};
-							for (const [id, ps] of Object.entries(prev)) {
-								if (liveIds.has(id)) next[id] = ps;
-							}
-							return next;
-						});
-						setConnectedProcesses((prev) =>
-							prev.filter((p) => liveIds.has(p.sidecarId)),
-						);
+					case "SidecarList":
+						replaceSidecars(msg.sidecars);
 						break;
-					}
-					case "ProcessList": {
-						// Authoritative for one sidecar — replace its
-						// per-sidecar list and rebuild the flat
-						// cross-sidecar `connectedProcesses` array.
-						const sidecarId = msg.sidecar_id;
-						setProcesses((prev) => ({
-							...prev,
-							[sidecarId]: msg.processes,
-						}));
-						setConnectedProcesses((prev) => [
-							...prev.filter((p) => p.sidecarId !== sidecarId),
-							...msg.processes.map((p) => ({
-								sidecarId,
-								pid: p.pid,
-								clientId: p.client_id,
-								command: p.command,
-							})),
-						]);
-						break;
-					}
-					case "WindowUpdate":
-						windowUpdateCallbackRef.current?.(msg.update);
+					case "ProcessList":
+						replaceSidecarProcesses(msg.sidecar_id, msg.processes);
 						break;
 					case "WindowList":
-						setWindowList(msg.windows);
+						applyWindowList(msg.windows, (d) =>
+							seedForDescriptor(d, sendRef.current),
+						);
+						break;
+					case "WindowUpdate":
+						applyWindowUpdate(msg.update);
+						windowUpdateCallbackRef.current?.(msg.update);
 						break;
 					case "Bell":
 						bellCallbackRef.current?.(msg.percent);
@@ -205,6 +250,7 @@ export function useBackendSocket() {
 			wsRef.current.send(JSON.stringify(msg));
 		}
 	}, []);
+	sendRef.current = send;
 
 	const onWindowUpdate = useCallback((cb: WindowUpdateCallback | null) => {
 		windowUpdateCallbackRef.current = cb;
@@ -216,10 +262,6 @@ export function useBackendSocket() {
 
 	return {
 		connected,
-		sidecars,
-		processes,
-		connectedProcesses,
-		windowList,
 		send,
 		onWindowUpdate,
 		onBell,
