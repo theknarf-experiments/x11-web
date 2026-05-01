@@ -12,14 +12,38 @@
 
 use std::net::SocketAddr;
 use std::sync::Arc;
+use std::time::Duration;
 
 use capnp::message::ReaderOptions;
-use quinn::{Endpoint, RecvStream, SendStream};
+use quinn::{Endpoint, RecvStream, SendStream, TransportConfig};
 use tracing::warn;
 
 use crate::tls::{make_client_config, make_server_config, ServerCert};
 use crate::wire_capnp;
 use crate::{WireError, PROTOCOL_VERSION};
+
+/// QUIC connection idle timeout — both sides drop the connection
+/// when no packet has arrived in this long. Default Quinn is 30s,
+/// which makes a killed sidecar take half a minute to disappear from
+/// the dock; this gets it to a few seconds.
+const QUIC_IDLE_TIMEOUT: Duration = Duration::from_secs(5);
+
+/// QUIC keep-alive cadence — each side sends a PING frame this often
+/// when otherwise idle, so an alive-but-quiet connection isn't
+/// reaped by `QUIC_IDLE_TIMEOUT`. Must be < idle timeout / 2 so a
+/// single dropped PING doesn't tear down a working connection.
+const QUIC_KEEP_ALIVE: Duration = Duration::from_secs(2);
+
+fn quic_transport_config() -> Arc<TransportConfig> {
+    let mut t = TransportConfig::default();
+    t.max_idle_timeout(Some(
+        QUIC_IDLE_TIMEOUT
+            .try_into()
+            .expect("idle timeout fits in VarInt"),
+    ));
+    t.keep_alive_interval(Some(QUIC_KEEP_ALIVE));
+    Arc::new(t)
+}
 
 /// Half of the bidi stream a peer reads from. Wraps `RecvStream` and
 /// drains it with capnp's segment-aware reader.
@@ -111,10 +135,11 @@ pub struct DialedConnection {
 /// connections.
 pub fn listen(bind: SocketAddr, cert: &ServerCert) -> Result<Endpoint, WireError> {
     let rustls_cfg = make_server_config(cert)?;
-    let server_cfg = quinn::ServerConfig::with_crypto(Arc::new(
+    let mut server_cfg = quinn::ServerConfig::with_crypto(Arc::new(
         quinn::crypto::rustls::QuicServerConfig::try_from(rustls_cfg)
             .map_err(|e| WireError::Tls(format!("quic server config: {e}")))?,
     ));
+    server_cfg.transport_config(quic_transport_config());
     let endpoint = Endpoint::server(server_cfg, bind)
         .map_err(|e| WireError::Connection(format!("endpoint bind {bind}: {e}")))?;
     Ok(endpoint)
@@ -231,10 +256,12 @@ pub async fn dial(
     let client_cfg = make_client_config(fingerprint)?;
     let mut endpoint = Endpoint::client("0.0.0.0:0".parse().unwrap())
         .map_err(|e| WireError::Connection(format!("client endpoint: {e}")))?;
-    endpoint.set_default_client_config(quinn::ClientConfig::new(Arc::new(
+    let mut quic_client_cfg = quinn::ClientConfig::new(Arc::new(
         quinn::crypto::rustls::QuicClientConfig::try_from(client_cfg)
             .map_err(|e| WireError::Tls(format!("quic client config: {e}")))?,
-    )));
+    ));
+    quic_client_cfg.transport_config(quic_transport_config());
+    endpoint.set_default_client_config(quic_client_cfg);
 
     let connection = endpoint
         .connect(server_addr, server_name)
