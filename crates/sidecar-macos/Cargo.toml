@@ -26,9 +26,8 @@ serde = { version = "1", features = ["derive"] }
 tracing = "0.1"
 tracing-subscriber = "0.3"
 uuid = { version = "1", features = ["v4"] }
-# Deflate-compress raw RGBA before sending PutImage to the backend.
-# Required to keep frames under the SCTP DataChannel write window.
-flate2 = "1"
+# Pixel encoder shared with the X11 sidecar.
+x11-web-pixel-codec = { path = "../pixel-codec" }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 core-foundation = "0.10"

@@ -1,13 +1,13 @@
-import { inflateRaw } from "pako";
-
 /**
  * Owns the back buffer for a single X11 client. The visible canvas
  * blits from this buffer on each rAF; `pushPutImage` paints
- * synchronously outside React.
+ * asynchronously outside React (decode happens via
+ * `createImageBitmap`, which the browser can offload from the main
+ * thread / accelerate).
  *
  * Pixel updates ride the WebRTC DataChannel as Cap'n Proto frames
- * (decoded by `rtcWire.ts`); this renderer just receives the raw
- * deflate-compressed RGBA payload, inflates with pako, and blits.
+ * (decoded by `rtcWire.ts`); the payload is a complete WebP-lossless
+ * image, decoded natively by the browser.
  *
  * Per-window geometry / lifecycle is tracked centrally in `App.tsx`
  * from the backend's authoritative `WindowList`.
@@ -16,6 +16,12 @@ export class ClientRenderer {
 	backBuffer: OffscreenCanvas;
 	private ctx: OffscreenCanvasRenderingContext2D;
 	dirty = false;
+
+	/** Serialise paints so out-of-order `createImageBitmap` resolutions
+	 *  don't blit stale frames over fresher ones. The backend's
+	 *  monotonic-msg_id reassembly already drops stale chunks — this is
+	 *  belt-and-suspenders for the async decode boundary. */
+	private paintChain: Promise<unknown> = Promise.resolve();
 
 	constructor(width: number, height: number) {
 		this.backBuffer = new OffscreenCanvas(width, height);
@@ -40,32 +46,39 @@ export class ClientRenderer {
 		this.dirty = true;
 	}
 
-	/** Paint a PutImage rectangle from deflate-compressed RGBA bytes. */
+	/** Paint a PutImage rectangle from a WebP-encoded payload. */
 	pushPutImage(
 		x: number,
 		y: number,
 		width: number,
 		height: number,
-		compressed: Uint8Array,
+		encoded: Uint8Array,
 	) {
-		const right = x + width;
-		const bottom = y + height;
-		if (right > this.backBuffer.width || bottom > this.backBuffer.height) {
-			this.resizeBuffer(
-				Math.max(right, this.backBuffer.width),
-				Math.max(bottom, this.backBuffer.height),
-			);
-		}
-		let raw: Uint8Array;
-		try {
-			raw = inflateRaw(compressed);
-		} catch {
-			raw = compressed;
-		}
-		const imageData = this.ctx.createImageData(width, height);
-		imageData.data.set(raw.subarray(0, imageData.data.length));
-		this.ctx.putImageData(imageData, x, y);
-		this.dirty = true;
+		// Copy out of the chunked-reassembly buffer immediately so the
+		// caller can free its source — `createImageBitmap` may take a
+		// few ms and we want the buffer back ASAP.
+		const blob = new Blob([encoded.slice()], { type: "image/webp" });
+		this.paintChain = this.paintChain
+			.then(() => createImageBitmap(blob))
+			.then((bitmap) => {
+				const right = x + width;
+				const bottom = y + height;
+				if (
+					right > this.backBuffer.width ||
+					bottom > this.backBuffer.height
+				) {
+					this.resizeBuffer(
+						Math.max(right, this.backBuffer.width),
+						Math.max(bottom, this.backBuffer.height),
+					);
+				}
+				this.ctx.drawImage(bitmap, x, y);
+				bitmap.close();
+				this.dirty = true;
+			})
+			.catch((err) => {
+				console.warn("[ClientRenderer] WebP decode failed:", err);
+			});
 	}
 
 	private resizeBuffer(width: number, height: number) {

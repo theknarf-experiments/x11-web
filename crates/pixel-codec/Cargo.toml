@@ -1,0 +1,13 @@
+[package]
+name = "x11-web-pixel-codec"
+version = "0.1.0"
+edition = "2021"
+
+# Encodes captured RGBA pixel buffers for the wire format both
+# sidecars send to the backend. Currently WebP-lossless. Centralised
+# here so we can tweak codec / quality / future dirty-region splitting
+# in one place rather than duplicating it in each sidecar.
+
+[dependencies]
+# libwebp via libwebp-sys (statically vendored — no apt dep needed).
+webp = "0.3"

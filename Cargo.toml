@@ -6,5 +6,19 @@ members = [
     "crates/sidecar-macos",
     "crates/wire",
     "crates/rtc-wire",
+    "crates/pixel-codec",
 ]
 resolver = "2"
+
+# WebP-lossless encoding via libwebp is CPU-bound. cc-rs picks
+# -O0 for libwebp's C source in dev builds by default, which makes
+# encode times around 2.5s per ~10 MB frame on retina captures.
+# Optimising libwebp-sys (and a few other compute-heavy native
+# deps) at -O3 brings that down to ~150 ms while keeping our own
+# Rust at -O0 for fast iteration.
+[profile.dev.package.libwebp-sys]
+opt-level = 3
+[profile.dev.package.flate2]
+opt-level = 3
+[profile.dev.package.miniz_oxide]
+opt-level = 3

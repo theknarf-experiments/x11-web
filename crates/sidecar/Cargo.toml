@@ -33,7 +33,10 @@ tracing = "0.1"
 tracing-subscriber = "0.3"
 uuid = { version = "1", features = ["v4"] }
 bdf-parser = "0.1"
+# Used for gz-decoding fonts (BDF / PCF). Pixel compression lives in
+# `x11-web-pixel-codec` (WebP-lossless), shared with sidecar-macos.
 flate2 = "1"
+x11-web-pixel-codec = { path = "../pixel-codec" }
 glob = "0.3"
 libc = "0.2"
 freetype-rs = "0.38"

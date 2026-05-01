@@ -1,6 +1,3 @@
-use flate2::write::DeflateEncoder;
-use flate2::Compression;
-use std::io::Write;
 use tiny_skia::{
     Color, FillRule, FilterQuality, Paint, Path, PathBuilder, Pattern, PixmapMut, PixmapRef,
     SpreadMode, Stroke, StrokeDash, Transform,
@@ -360,13 +357,7 @@ impl Framebuffer {
             }
         }
 
-        let mut encoder = DeflateEncoder::new(Vec::new(), Compression::fast());
-        let _ = encoder.write_all(&pixels);
-        let compressed = encoder.finish().unwrap_or_else(|e| {
-            tracing::warn!("framebuffer compression failed, sending uncompressed: {e}");
-            pixels
-        });
-
+        let compressed = x11_web_pixel_codec::encode_rgba_lossless(&pixels, dw, dh);
         Some((dx as i16, dy as i16, dw as u16, dh as u16, compressed))
     }
 

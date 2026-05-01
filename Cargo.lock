@@ -387,6 +387,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c8efb64bd706a16a1bdde310ae86b351e4d21550d98d056f22f8a7f7a2183fec"
 
 [[package]]
+name = "byteorder-lite"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8f1fe948ff07f4bd06c30984e69f5b4899c516a3ef74f34df92a2df2ab535495"
+
+[[package]]
 name = "bytes"
 version = "1.11.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1160,6 +1166,18 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3d3067d79b975e8844ca9eb072e16b31c3c1c36928edf9c6789548c524d0d954"
 
 [[package]]
+name = "image"
+version = "0.25.10"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "85ab80394333c02fe689eaf900ab500fbd0c2213da414687ebf995a65d5a6104"
+dependencies = [
+ "bytemuck",
+ "byteorder-lite",
+ "moxcms",
+ "num-traits",
+]
+
+[[package]]
 name = "indexmap"
 version = "2.13.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1255,6 +1273,16 @@ name = "libc"
 version = "0.2.183"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b5b646652bf6661599e1da8901b3b9522896f01e736bad5f723fe7a3a27f899d"
+
+[[package]]
+name = "libwebp-sys"
+version = "0.9.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "54cd30df7c7165ce74a456e4ca9732c603e8dc5e60784558c1c6dc047f876733"
+dependencies = [
+ "cc",
+ "glob",
+]
 
 [[package]]
 name = "libz-sys"
@@ -1356,6 +1384,16 @@ dependencies = [
  "libc",
  "wasi",
  "windows-sys 0.61.2",
+]
+
+[[package]]
+name = "moxcms"
+version = "0.8.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bb85c154ba489f01b25c0d36ae69a87e4a1c73a72631fc6c0eb6dde34a73e44b"
+dependencies = [
+ "num-traits",
+ "pxfm",
 ]
 
 [[package]]
@@ -1910,6 +1948,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "pxfm"
+version = "0.1.29"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e0c5ccf5294c6ccd63a74f1565028353830a9c2f5eb0c682c355c471726a6e3f"
+
+[[package]]
 name = "quinn"
 version = "0.11.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2351,9 +2395,9 @@ checksum = "77549399552de45a898a580c1b41d445bf730df867cc44e6c0233bbc4b8329de"
 
 [[package]]
 name = "simd-adler32"
-version = "0.3.8"
+version = "0.3.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e320a6c5ad31d271ad523dcf3ad13e2767ad8b1cb8f047f75a8aeaf8da139da2"
+checksum = "703d5c7ef118737c72f1af64ad2f6f8c5e1921f818cdcb97b8fe6fc69bf66214"
 
 [[package]]
 name = "slab"
@@ -3044,6 +3088,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "webp"
+version = "0.3.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c071456adef4aca59bf6a583c46b90ff5eb0b4f758fc347cea81290288f37ce1"
+dependencies = [
+ "image",
+ "libwebp-sys",
+]
+
+[[package]]
 name = "windows-link"
 version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3265,6 +3319,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "x11-web-pixel-codec"
+version = "0.1.0"
+dependencies = [
+ "webp",
+]
+
+[[package]]
 name = "x11-web-protocol"
 version = "0.1.0"
 dependencies = [
@@ -3302,6 +3363,7 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "uuid",
+ "x11-web-pixel-codec",
  "x11-web-protocol",
  "x11-web-wire",
  "x11rb-protocol",
@@ -3317,7 +3379,6 @@ dependencies = [
  "capnp",
  "core-foundation",
  "core-graphics",
- "flate2",
  "futures",
  "libc",
  "objc2",
@@ -3333,6 +3394,7 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "uuid",
+ "x11-web-pixel-codec",
  "x11-web-protocol",
  "x11-web-wire",
 ]

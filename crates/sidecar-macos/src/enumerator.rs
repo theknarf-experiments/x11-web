@@ -11,12 +11,9 @@
 //! `WindowFrame` from the frontend's perspective.
 
 use std::collections::HashMap;
-use std::io::Write;
 use std::time::Duration;
 
 use core_graphics::window::CGWindowID;
-use flate2::write::DeflateEncoder;
-use flate2::Compression;
 use tokio::sync::mpsc;
 use tokio::time::interval;
 use tracing::{info, warn};
@@ -28,17 +25,19 @@ use crate::capture::capture_window;
 use crate::router::{WindowRoute, WindowRouter};
 use crate::windows::{visible_windows, WindowBounds, WindowInfo};
 
-/// Cap the longer side of each capture (in points). `0` means no
-/// cap — captures come out at the window's full logical-point
-/// dimensions, which is what the frontend canvas is sized to. Set a
-/// non-zero value if WebSocket bandwidth becomes a problem; once we
-/// move pixels onto the WebRTC data channel the cap can stay off.
+/// Cap the longer side of each capture (in pixels). `0` = no cap;
+/// SCK captures at the window's logical-point size so the bitmap
+/// matches what the descriptor reports and the canvas renders 1:1.
+/// Lossy q90 + libwebp-sys at -O3 keeps encode times reasonable
+/// (~150-300 ms for 2k-wide captures) without needing a downscale.
 const CAPTURE_MAX_DIM: u32 = 0;
 
-/// Period between successive captures of the same window. Low-rate
-/// for v0.2 — once we move pixels onto the WebRTC data channel we'll
-/// crank this up.
-const CAPTURE_PERIOD: Duration = Duration::from_secs(1);
+/// Period between successive captures of the same window. ~14 Hz —
+/// fast enough that simple animations look smooth, slow enough that
+/// bandwidth stays manageable. The latest-frame-wins backpressure in
+/// the backend's RTC driver drops captures that overrun the network,
+/// so over-capturing is safe.
+const CAPTURE_PERIOD: Duration = Duration::from_millis(70);
 
 /// Layer 0 = "normal" application windows. Higher layers are menubar
 /// items (25), the dock (20), tooltips/popovers, etc. cua-driver uses
@@ -159,14 +158,35 @@ fn spawn_capture_loop(
         tick.tick().await;
         loop {
             tick.tick().await;
+            let t0 = std::time::Instant::now();
             match capture_window(cg_id, CAPTURE_MAX_DIM).await {
                 Ok(frame) => {
-                    // Deflate-compress the RGBA payload — full-resolution
-                    // captures can be several MB of raw bytes, which
-                    // overflows SCTP's reliable-channel write window
-                    // and gets rejected silently. Mirrors what the X11
-                    // sidecar's framebuffer encoder does.
-                    let compressed = deflate_raw(&frame.rgba);
+                    let t_capture = t0.elapsed();
+                    let t1 = std::time::Instant::now();
+                    // Lossy q90: visually identical to lossless for
+                    // typical UI / screen content but ~5-10× faster
+                    // encode and smaller wire payload. Switch to
+                    // `encode_rgba_lossless` if fidelity for tiny
+                    // text or high-contrast edges matters.
+                    let compressed = x11_web_pixel_codec::encode_rgba_lossy(
+                        &frame.rgba,
+                        frame.width,
+                        frame.height,
+                        90.0,
+                    );
+                    let t_encode = t1.elapsed();
+                    let raw_kb = frame.rgba.len() / 1024;
+                    let comp_kb = compressed.len() / 1024;
+                    info!(
+                        "capture[{}] {}x{} raw={}KB comp={}KB capture={:?} encode={:?}",
+                        &uuid[..8],
+                        frame.width,
+                        frame.height,
+                        raw_kb,
+                        comp_kb,
+                        t_capture,
+                        t_encode,
+                    );
                     let _ = tx.send(SidecarToBackend::DisplayUpdate {
                         client_id: client_id.clone(),
                         update: DisplayUpdate::PutImage {
@@ -307,18 +327,4 @@ fn clamp_bounds(b: &WindowBounds) -> (i16, i16, u16, u16) {
     let w = b.width.clamp(0.0, u16::MAX as f64) as u16;
     let h = b.height.clamp(0.0, u16::MAX as f64) as u16;
     (x, y, w, h)
-}
-
-/// Deflate-compress (raw, no zlib header). The frontend's
-/// `pushPutImage` calls pako's `inflateRaw` on receipt.
-fn deflate_raw(data: &[u8]) -> Vec<u8> {
-    let mut encoder = DeflateEncoder::new(Vec::new(), Compression::fast());
-    if let Err(e) = encoder.write_all(data) {
-        warn!("deflate write failed: {e} — sending uncompressed");
-        return data.to_vec();
-    }
-    encoder.finish().unwrap_or_else(|e| {
-        warn!("deflate finish failed: {e} — sending uncompressed");
-        data.to_vec()
-    })
 }
