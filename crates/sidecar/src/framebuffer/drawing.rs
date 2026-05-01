@@ -1,8 +1,8 @@
 use super::{
-    apply_gc_function, build_clip_mask, point_in_clip_rects, read_pixel, skia_color,
-    skia_eligible, write_pixel, DashState, Framebuffer,
+    apply_gc_function, build_clip_mask, build_dash, point_in_clip_rects, read_pixel,
+    skia_color, skia_eligible, write_pixel, DashState, Framebuffer,
 };
-use tiny_skia::{FillRule, Paint, PathBuilder, Stroke, Transform};
+use tiny_skia::{FillRule, Paint, PathBuilder, Transform};
 
 impl Framebuffer {
     /// Draw a line with full GC support: raster op, cap/join styles, dashes, clip rects.
@@ -38,71 +38,60 @@ impl Framebuffer {
         // join_style is used by draw_polyline_gc; not needed for single segments.
         let _ = join_style;
 
-        // Fast path: solid (non-dashed) lines under GXcopy go to
-        // tiny-skia for AA stroking with proper caps.
-        if line_style == 0
-            && skia_eligible(gc_func, plane_mask)
-            && stroke_line_skia(self, x0, y0, x1, y1, color, line_width, cap_style, clip_rects)
-        {
-            return;
+        // Fast path: GXcopy lines (solid or dashed) go to tiny-skia
+        // for AA stroking with proper caps and Stroke::dash.
+        if skia_eligible(gc_func, plane_mask) {
+            let mut pb = PathBuilder::new();
+            pb.move_to(x0 as f32, y0 as f32);
+            pb.line_to(x1 as f32, y1 as f32);
+            if let Some(path) = pb.finish() {
+                let dash = build_dash(line_style, dash_list, dash_offset);
+                // DoubleDash: stroke background colour with the inverse
+                // dash pattern in the gaps before drawing the foreground.
+                if line_style == 2 {
+                    if let Some(ref d) = dash {
+                        self.stroke_path_skia(
+                            &path,
+                            background,
+                            line_width,
+                            cap_style,
+                            Some(d.inverted()),
+                            clip_rects,
+                        );
+                    }
+                }
+                self.stroke_path_skia(&path, color, line_width, cap_style, dash, clip_rects);
+                let pad = (line_width as i32 / 2 + 1).max(1);
+                let min_x = x0.min(x1) - pad;
+                let min_y = y0.min(y1) - pad;
+                let w = (x0.max(x1) - x0.min(x1) + pad * 2 + 1) as u32;
+                let h = (y0.max(y1) - y0.min(y1) + pad * 2 + 1) as u32;
+                self.mark_dirty(min_x, min_y, w, h);
+                return;
+            }
         }
 
-        // Dashed line state
+        // Fallback (non-GXcopy raster ops): single-pixel Bresenham
+        // with optional dash support. Wide lines under raster-op
+        // blends are rare in real apps; we accept the visual
+        // simplification.
         let dashes = if (line_style == 1 || line_style == 2) && !dash_list.is_empty() {
             Some(DashState::new(dash_list, dash_offset))
         } else {
             None
         };
-
-        if line_width <= 1 {
-            self.bresenham_line_gc(
-                x0, y0, x1, y1, color, gc_func, plane_mask, cap_style, dashes, line_style,
-                background, clip_rects,
-            );
-        } else {
-            // Wide line with dash support
-            let hw = (line_width / 2) as i32;
-            let is_dashed = dashes.is_some();
-
-            if y0 == y1 {
-                // Horizontal wide line
-                self.draw_wide_line_horiz(
-                    x0, y0, x1, hw, line_width, color, gc_func, plane_mask, cap_style, line_style,
-                    background, clip_rects, dashes,
-                );
-            } else if x0 == x1 {
-                // Vertical wide line
-                self.draw_wide_line_vert(
-                    x0, y0, y1, hw, line_width, color, gc_func, plane_mask, cap_style, line_style,
-                    background, clip_rects, dashes,
-                );
-            } else {
-                // Diagonal wide line
-                self.draw_wide_line_diagonal(
-                    x0, y0, x1, y1, hw, color, gc_func, plane_mask, cap_style, line_style,
-                    background, clip_rects, dashes,
-                );
-            }
-
-            // Round cap: draw filled circles at endpoints (only for solid lines;
-            // dashed lines handle caps per-segment)
-            if cap_style == 2 && line_width > 2 && !is_dashed {
-                self.fill_circle(x0, y0, hw, color, gc_func, plane_mask, clip_rects);
-                self.fill_circle(x1, y1, hw, color, gc_func, plane_mask, clip_rects);
-            }
-        }
+        self.bresenham_line_gc(
+            x0, y0, x1, y1, color, gc_func, plane_mask, cap_style, dashes, line_style,
+            background, clip_rects,
+        );
     }
 
     /// Draw a polyline (sequence of connected line segments) with join style support.
     ///
-    /// This draws each segment via `draw_line_gc` and then renders the appropriate
-    /// join decoration at each interior vertex where two segments meet.
-    ///
-    /// Join styles (X11 spec):
-    /// - 0 (Miter): extend outer edges until they meet, with a miter limit
-    ///   (angle < 10.43 degrees falls back to bevel)
-    /// - 1 (Round): filled circle at join point with radius = line_width / 2
-    /// - 2 (Bevel): fill the triangular notch between the outer edges
+    /// X11 join styles map directly onto tiny-skia's `LineJoin` for the
+    /// GXcopy fast path; the fallback draws each segment independently
+    /// via `draw_line_gc` and accepts that interior vertices look like
+    /// adjacent butt-capped strokes.
     #[allow(clippy::too_many_arguments)]
     pub fn draw_polyline_gc(
         &mut self,
@@ -123,7 +112,58 @@ impl Framebuffer {
             return;
         }
 
-        // Draw each line segment
+        // Fast path: build a single multi-segment path and let tiny-skia
+        // handle joins, caps, and dashes natively.
+        if skia_eligible(gc_func, plane_mask) {
+            let mut pb = PathBuilder::new();
+            pb.move_to(points[0].0 as f32, points[0].1 as f32);
+            for &(x, y) in &points[1..] {
+                pb.line_to(x as f32, y as f32);
+            }
+            if let Some(path) = pb.finish() {
+                let dash = build_dash(line_style, dash_list, dash_offset);
+                let join = match join_style {
+                    1 => tiny_skia::LineJoin::Round,
+                    2 => tiny_skia::LineJoin::Bevel,
+                    _ => tiny_skia::LineJoin::Miter,
+                };
+                if line_style == 2 {
+                    if let Some(ref d) = dash {
+                        self.stroke_path_skia_full(
+                            &path,
+                            background,
+                            line_width,
+                            cap_style,
+                            join,
+                            Some(d.inverted()),
+                            clip_rects,
+                        );
+                    }
+                }
+                self.stroke_path_skia_full(
+                    &path,
+                    color,
+                    line_width,
+                    cap_style,
+                    join,
+                    dash,
+                    clip_rects,
+                );
+                let xs = points.iter().map(|p| p.0);
+                let ys = points.iter().map(|p| p.1);
+                let pad = (line_width as i32 / 2 + 1).max(1);
+                let min_x = xs.clone().min().unwrap_or(0) - pad;
+                let min_y = ys.clone().min().unwrap_or(0) - pad;
+                let max_x = xs.max().unwrap_or(0) + pad;
+                let max_y = ys.max().unwrap_or(0) + pad;
+                self.mark_dirty(min_x, min_y, (max_x - min_x) as u32, (max_y - min_y) as u32);
+                return;
+            }
+        }
+
+        // Fallback: draw each segment independently. Joins under
+        // non-GXcopy raster ops aren't supported; segments butt up
+        // against each other.
         for w in points.windows(2) {
             self.draw_line_gc(
                 w[0].0,
@@ -142,510 +182,6 @@ impl Framebuffer {
                 background,
                 clip_rects,
             );
-        }
-
-        // Apply join decorations at interior vertices (only for wide lines)
-        if line_width <= 1 || points.len() < 3 {
-            return;
-        }
-
-        let hw = (line_width as f64) / 2.0;
-
-        for i in 1..points.len() - 1 {
-            let (px, py) = (points[i - 1].0 as f64, points[i - 1].1 as f64);
-            let (jx, jy) = (points[i].0 as f64, points[i].1 as f64);
-            let (nx, ny) = (points[i + 1].0 as f64, points[i + 1].1 as f64);
-
-            // Direction vectors for incoming and outgoing segments
-            let d1x = jx - px;
-            let d1y = jy - py;
-            let d2x = nx - jx;
-            let d2y = ny - jy;
-
-            let len1 = (d1x * d1x + d1y * d1y).sqrt();
-            let len2 = (d2x * d2x + d2y * d2y).sqrt();
-            if len1 < 1e-9 || len2 < 1e-9 {
-                continue;
-            }
-
-            // Unit direction vectors
-            let u1x = d1x / len1;
-            let u1y = d1y / len1;
-            let u2x = d2x / len2;
-            let u2y = d2y / len2;
-
-            // Perpendicular normals (pointing left of direction)
-            let n1x = -u1y;
-            let n1y = u1x;
-            let n2x = -u2y;
-            let n2y = u2x;
-
-            match join_style {
-                1 => {
-                    // JoinRound: filled circle at join point
-                    self.fill_circle(
-                        jx as i32, jy as i32, hw as i32, color, gc_func, plane_mask, clip_rects,
-                    );
-                }
-                2 => {
-                    // JoinBevel: fill the triangular notch between the outer edges
-                    // The three points of the bevel triangle:
-                    // - join point offset along normal of segment 1
-                    // - the join vertex itself (inner corner fills naturally)
-                    // - join point offset along normal of segment 2
-                    // We need to pick the outer side (where the gap is).
-                    let cross = u1x * u2y - u1y * u2x;
-                    let sign = if cross > 0.0 { 1.0 } else { -1.0 };
-
-                    let p1x = jx + sign * n1x * hw;
-                    let p1y = jy + sign * n1y * hw;
-                    let p2x = jx + sign * n2x * hw;
-                    let p2y = jy + sign * n2y * hw;
-
-                    let tri = [
-                        (jx as i16, jy as i16),
-                        (p1x as i16, p1y as i16),
-                        (p2x as i16, p2y as i16),
-                    ];
-                    self.fill_polygon_gc(&tri, color, 0, gc_func, plane_mask, clip_rects);
-                }
-                _ => {
-                    // JoinMiter (0, default): extend outer edges until they meet.
-                    // Miter limit: if the angle between segments is too acute,
-                    // fall back to bevel. X11 spec miter limit is at 10.43 degrees,
-                    // which corresponds to a miter length / line_width ratio of ~10.43
-                    // (i.e. 1/sin(theta/2) where theta is the angle).
-                    let cos_theta = u1x * u2x + u1y * u2y;
-                    // theta is the angle between the two directions
-                    // half_sin = sin(theta/2) where theta = pi - angle_between
-                    // For miter: miter_length = hw / sin(alpha/2)
-                    // where alpha = pi - theta (the join angle)
-                    let alpha = (1.0 - cos_theta).clamp(0.0, 2.0);
-                    // alpha = 2 * sin^2(angle/2), where angle is between the directions
-                    // sin(join_half_angle) = sin((pi - angle)/2) = cos(angle/2)
-                    // cos^2(angle/2) = (1 + cos_theta) / 2
-                    let half_join_sin_sq = alpha / 2.0; // sin^2(half of the supplementary angle)
-                                                        // Miter limit: miter_length <= miter_limit * line_width
-                                                        // miter_length = hw / sin(half_join_angle)
-                                                        // X11 miter limit ratio: 1/sin(10.43/2 degrees) ~ 11.0
-                                                        // Simplified: if sin^2(half_join) < threshold, use bevel
-                                                        // threshold = (1 / 11.0)^2 ≈ 0.00826
-                    let miter_limit_sin_sq = 0.00826;
-
-                    if half_join_sin_sq < miter_limit_sin_sq {
-                        // Angle too acute - fall back to bevel
-                        let cross = u1x * u2y - u1y * u2x;
-                        let sign = if cross > 0.0 { 1.0 } else { -1.0 };
-                        let p1x = jx + sign * n1x * hw;
-                        let p1y = jy + sign * n1y * hw;
-                        let p2x = jx + sign * n2x * hw;
-                        let p2y = jy + sign * n2y * hw;
-                        let tri = [
-                            (jx as i16, jy as i16),
-                            (p1x as i16, p1y as i16),
-                            (p2x as i16, p2y as i16),
-                        ];
-                        self.fill_polygon_gc(&tri, color, 0, gc_func, plane_mask, clip_rects);
-                    } else {
-                        // Compute the miter point: intersection of the two offset edges
-                        let cross = u1x * u2y - u1y * u2x;
-                        let sign = if cross > 0.0 { 1.0 } else { -1.0 };
-
-                        // Offset edge 1: point = join + sign*n1*hw, direction = u1
-                        // Offset edge 2: point = join + sign*n2*hw, direction = u2
-                        // Solve for intersection using parametric form
-                        let p1x = jx + sign * n1x * hw;
-                        let p1y = jy + sign * n1y * hw;
-                        let p2x = jx + sign * n2x * hw;
-                        let p2y = jy + sign * n2y * hw;
-
-                        let denom = u1x * (-u2y) - u1y * (-u2x);
-                        if denom.abs() > 1e-9 {
-                            let t = ((p2x - p1x) * (-u2y) - (p2y - p1y) * (-u2x)) / denom;
-                            let mx = p1x + t * u1x;
-                            let my = p1y + t * u1y;
-
-                            // Fill the miter triangle (join point + two outer edge points + miter point)
-                            let quad = [
-                                (jx as i16, jy as i16),
-                                (p1x as i16, p1y as i16),
-                                (mx as i16, my as i16),
-                                (p2x as i16, p2y as i16),
-                            ];
-                            self.fill_polygon_gc(&quad, color, 0, gc_func, plane_mask, clip_rects);
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    /// Draw a wide horizontal line with dash support.
-    #[allow(clippy::too_many_arguments)]
-    fn draw_wide_line_horiz(
-        &mut self,
-        x0: i32,
-        y: i32,
-        x1: i32,
-        hw: i32,
-        line_width: u16,
-        color: u32,
-        gc_func: u8,
-        plane_mask: u32,
-        cap_style: u8,
-        line_style: u8,
-        background: u32,
-        clip_rects: &[(i16, i16, u16, u16)],
-        dashes: Option<DashState>,
-    ) {
-        let min_x = x0.min(x1);
-        let max_x = x0.max(x1);
-        let cap_extra = match cap_style {
-            2 | 3 => hw,
-            _ => 0,
-        };
-
-        match dashes {
-            None => {
-                // Solid wide horizontal line
-                self.fill_rect_rop_clipped(
-                    (min_x - cap_extra) as i16,
-                    (y - hw) as i16,
-                    (max_x - min_x + 1 + cap_extra * 2) as u16,
-                    line_width,
-                    color,
-                    gc_func,
-                    plane_mask,
-                    clip_rects,
-                );
-            }
-            Some(mut ds) => {
-                // Dashed wide horizontal line: walk pixels left-to-right,
-                // collect contiguous on/off runs, draw each as a rectangle.
-                let dir = if x0 <= x1 { 1i32 } else { -1i32 };
-                let count = (max_x - min_x + 1) as usize;
-                let start_x = x0;
-                let mut seg_start = start_x;
-                let mut seg_on = ds.is_on();
-                let mut cx = start_x;
-
-                for i in 0..count {
-                    let cur_on = ds.is_on();
-                    if cur_on != seg_on || i == 0 {
-                        if i > 0 {
-                            // Flush previous segment
-                            self.flush_wide_h_segment(
-                                seg_start,
-                                cx - dir,
-                                y,
-                                hw,
-                                line_width,
-                                seg_on,
-                                color,
-                                background,
-                                gc_func,
-                                plane_mask,
-                                line_style,
-                                cap_style,
-                                i == 0,
-                                false,
-                                clip_rects,
-                            );
-                        }
-                        seg_start = cx;
-                        seg_on = cur_on;
-                    }
-                    ds.advance();
-                    if i + 1 < count {
-                        cx += dir;
-                    }
-                }
-                // Flush last segment
-                self.flush_wide_h_segment(
-                    seg_start, cx, y, hw, line_width, seg_on, color, background, gc_func,
-                    plane_mask, line_style, cap_style, false, true, clip_rects,
-                );
-            }
-        }
-    }
-
-    /// Flush a single horizontal dash segment as a filled rectangle.
-    #[allow(clippy::too_many_arguments)]
-    fn flush_wide_h_segment(
-        &mut self,
-        x_start: i32,
-        x_end: i32,
-        y: i32,
-        hw: i32,
-        line_width: u16,
-        is_on: bool,
-        color: u32,
-        background: u32,
-        gc_func: u8,
-        plane_mask: u32,
-        line_style: u8,
-        _cap_style: u8,
-        _is_first: bool,
-        _is_last: bool,
-        clip_rects: &[(i16, i16, u16, u16)],
-    ) {
-        let min_x = x_start.min(x_end);
-        let max_x = x_start.max(x_end);
-        let w = (max_x - min_x + 1) as u16;
-
-        if is_on {
-            self.fill_rect_rop_clipped(
-                min_x as i16,
-                (y - hw) as i16,
-                w,
-                line_width,
-                color,
-                gc_func,
-                plane_mask,
-                clip_rects,
-            );
-        } else if line_style == 2 {
-            // DoubleDash: draw background in gaps
-            self.fill_rect_rop_clipped(
-                min_x as i16,
-                (y - hw) as i16,
-                w,
-                line_width,
-                background,
-                gc_func,
-                plane_mask,
-                clip_rects,
-            );
-        }
-    }
-
-    /// Draw a wide vertical line with dash support.
-    #[allow(clippy::too_many_arguments)]
-    fn draw_wide_line_vert(
-        &mut self,
-        x: i32,
-        y0: i32,
-        y1: i32,
-        hw: i32,
-        line_width: u16,
-        color: u32,
-        gc_func: u8,
-        plane_mask: u32,
-        cap_style: u8,
-        line_style: u8,
-        background: u32,
-        clip_rects: &[(i16, i16, u16, u16)],
-        dashes: Option<DashState>,
-    ) {
-        let min_y = y0.min(y1);
-        let max_y = y0.max(y1);
-        let cap_extra = match cap_style {
-            2 | 3 => hw,
-            _ => 0,
-        };
-
-        match dashes {
-            None => {
-                // Solid wide vertical line
-                self.fill_rect_rop_clipped(
-                    (x - hw) as i16,
-                    (min_y - cap_extra) as i16,
-                    line_width,
-                    (max_y - min_y + 1 + cap_extra * 2) as u16,
-                    color,
-                    gc_func,
-                    plane_mask,
-                    clip_rects,
-                );
-            }
-            Some(mut ds) => {
-                // Dashed wide vertical line
-                let dir = if y0 <= y1 { 1i32 } else { -1i32 };
-                let count = (max_y - min_y + 1) as usize;
-                let mut cy = y0;
-                let mut seg_start = cy;
-                let mut seg_on = ds.is_on();
-
-                for i in 0..count {
-                    let cur_on = ds.is_on();
-                    if cur_on != seg_on || i == 0 {
-                        if i > 0 {
-                            let seg_min = seg_start.min(cy - dir);
-                            let seg_max = seg_start.max(cy - dir);
-                            let h = (seg_max - seg_min + 1) as u16;
-                            if seg_on {
-                                self.fill_rect_rop_clipped(
-                                    (x - hw) as i16,
-                                    seg_min as i16,
-                                    line_width,
-                                    h,
-                                    color,
-                                    gc_func,
-                                    plane_mask,
-                                    clip_rects,
-                                );
-                            } else if line_style == 2 {
-                                self.fill_rect_rop_clipped(
-                                    (x - hw) as i16,
-                                    seg_min as i16,
-                                    line_width,
-                                    h,
-                                    background,
-                                    gc_func,
-                                    plane_mask,
-                                    clip_rects,
-                                );
-                            }
-                        }
-                        seg_start = cy;
-                        seg_on = cur_on;
-                    }
-                    ds.advance();
-                    if i + 1 < count {
-                        cy += dir;
-                    }
-                }
-                // Flush last segment
-                let seg_min = seg_start.min(cy);
-                let seg_max = seg_start.max(cy);
-                let h = (seg_max - seg_min + 1) as u16;
-                if seg_on {
-                    self.fill_rect_rop_clipped(
-                        (x - hw) as i16,
-                        seg_min as i16,
-                        line_width,
-                        h,
-                        color,
-                        gc_func,
-                        plane_mask,
-                        clip_rects,
-                    );
-                } else if line_style == 2 {
-                    self.fill_rect_rop_clipped(
-                        (x - hw) as i16,
-                        seg_min as i16,
-                        line_width,
-                        h,
-                        background,
-                        gc_func,
-                        plane_mask,
-                        clip_rects,
-                    );
-                }
-            }
-        }
-    }
-
-    /// Draw a wide diagonal line with dash support.
-    /// Uses perpendicular strips from the center line, with dash state
-    /// controlling which strips are drawn.
-    #[allow(clippy::too_many_arguments)]
-    fn draw_wide_line_diagonal(
-        &mut self,
-        x0: i32,
-        y0: i32,
-        x1: i32,
-        y1: i32,
-        hw: i32,
-        color: u32,
-        gc_func: u8,
-        plane_mask: u32,
-        cap_style: u8,
-        line_style: u8,
-        background: u32,
-        clip_rects: &[(i16, i16, u16, u16)],
-        dashes: Option<DashState>,
-    ) {
-        let fdx = (x1 - x0) as f64;
-        let fdy = (y1 - y0) as f64;
-        let len = fdx.hypot(fdy);
-        let ux = fdx / len;
-        let uy = fdy / len;
-        // Perpendicular direction (rotated 90 degrees)
-        let px = -uy;
-        let py = ux;
-
-        // Extend endpoints for Projecting cap (cap_style 3)
-        let (ex0, ey0, ex1, ey1) = if cap_style == 3 {
-            let ext = hw as f64;
-            (
-                (x0 as f64 - ux * ext).round() as i32,
-                (y0 as f64 - uy * ext).round() as i32,
-                (x1 as f64 + ux * ext).round() as i32,
-                (y1 as f64 + uy * ext).round() as i32,
-            )
-        } else {
-            (x0, y0, x1, y1)
-        };
-
-        match dashes {
-            None => {
-                // Solid wide diagonal line: draw parallel offset lines
-                for d in -hw..=hw {
-                    let ox = (px * d as f64).round() as i32;
-                    let oy = (py * d as f64).round() as i32;
-                    self.bresenham_line_gc(
-                        ex0 + ox,
-                        ey0 + oy,
-                        ex1 + ox,
-                        ey1 + oy,
-                        color,
-                        gc_func,
-                        plane_mask,
-                        1,
-                        None,
-                        0,
-                        background,
-                        clip_rects,
-                    );
-                }
-            }
-            Some(mut ds) => {
-                // Dashed wide diagonal line: walk along center line with Bresenham,
-                // drawing perpendicular strips at each pixel based on dash state.
-                let dx = (ex1 - ex0).abs();
-                let dy = -(ey1 - ey0).abs();
-                let sx: i32 = if ex0 < ex1 { 1 } else { -1 };
-                let sy: i32 = if ey0 < ey1 { 1 } else { -1 };
-                let mut err = dx + dy;
-                let mut cx = ex0;
-                let mut cy = ey0;
-
-                loop {
-                    let is_on = ds.is_on();
-                    let draw_color = if is_on {
-                        Some(color)
-                    } else if line_style == 2 {
-                        Some(background)
-                    } else {
-                        None
-                    };
-
-                    if let Some(c) = draw_color {
-                        // Draw perpendicular strip at (cx, cy)
-                        for d in -hw..=hw {
-                            let px_i = cx + (px * d as f64).round() as i32;
-                            let py_i = cy + (py * d as f64).round() as i32;
-                            self.draw_point_gc(px_i, py_i, c, gc_func, plane_mask, clip_rects);
-                        }
-                    }
-
-                    ds.advance();
-
-                    if cx == ex1 && cy == ey1 {
-                        break;
-                    }
-                    let e2 = 2 * err;
-                    if e2 >= dy {
-                        err += dy;
-                        cx += sx;
-                    }
-                    if e2 <= dx {
-                        err += dx;
-                        cy += sy;
-                    }
-                }
-            }
         }
     }
 
@@ -961,57 +497,3 @@ impl Framebuffer {
     }
 }
 
-/// Stroke a single line segment via tiny-skia under GXcopy. Returns
-/// `false` if tiny-skia rejects the input (e.g. degenerate framebuffer
-/// dimensions); the caller falls back to the hand-rolled blitter.
-#[allow(clippy::too_many_arguments)]
-fn stroke_line_skia(
-    fb: &mut Framebuffer,
-    x0: i32,
-    y0: i32,
-    x1: i32,
-    y1: i32,
-    color: u32,
-    line_width: u16,
-    cap_style: u8,
-    clip_rects: &[(i16, i16, u16, u16)],
-) -> bool {
-    let mut pb = PathBuilder::new();
-    pb.move_to(x0 as f32, y0 as f32);
-    pb.line_to(x1 as f32, y1 as f32);
-    let Some(path) = pb.finish() else {
-        return false;
-    };
-    let mut paint = Paint::default();
-    paint.set_color(skia_color(color));
-    paint.anti_alias = true;
-    let mut stroke = Stroke::default();
-    stroke.width = line_width.max(1) as f32;
-    // X11 cap_style: 0=NotLast, 1=Butt, 2=Round, 3=Projecting.
-    stroke.line_cap = match cap_style {
-        2 => tiny_skia::LineCap::Round,
-        3 => tiny_skia::LineCap::Square,
-        _ => tiny_skia::LineCap::Butt,
-    };
-    let clip_mask = build_clip_mask(fb.width, fb.height, clip_rects);
-    let drew = fb
-        .with_pixmap_mut(|pm| {
-            pm.stroke_path(
-                &path,
-                &paint,
-                &stroke,
-                Transform::identity(),
-                clip_mask.as_ref(),
-            );
-        })
-        .is_some();
-    if drew {
-        let pad = (line_width as i32 / 2 + 1).max(1);
-        let min_x = x0.min(x1) - pad;
-        let min_y = y0.min(y1) - pad;
-        let w = (x0.max(x1) - x0.min(x1) + pad * 2 + 1) as u32;
-        let h = (y0.max(y1) - y0.min(y1) + pad * 2 + 1) as u32;
-        fb.mark_dirty(min_x, min_y, w, h);
-    }
-    drew
-}

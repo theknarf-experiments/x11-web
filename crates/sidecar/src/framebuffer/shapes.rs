@@ -1,8 +1,8 @@
 use super::{
-    build_clip_mask, point_in_arc, read_pixel, skia_color, skia_eligible, ArcChordData,
-    DashState, Framebuffer,
+    build_clip_mask, build_dash, point_in_arc, read_pixel, skia_color, skia_eligible,
+    ArcChordData, DashState, Framebuffer,
 };
-use tiny_skia::{FillRule, Paint, PathBuilder, Stroke, Transform};
+use tiny_skia::{FillRule, Paint, PathBuilder, Transform};
 
 impl Framebuffer {
     /// fill_rect_rop with clip rectangle support.
@@ -249,84 +249,30 @@ impl Framebuffer {
             }
         } else {
             // Stroked arc outline.
-            let lw = line_width.max(1) as f64;
-
             // Fast path: solid GXcopy goes to tiny-skia for AA stroke.
             if skia_eligible(gc_func, plane_mask) {
                 if let Some(path) = build_arc_polyline(cx, cy, rx, ry, start_rad, extent_rad) {
-                    let mut paint = Paint::default();
-                    paint.set_color(skia_color(color));
-                    paint.anti_alias = true;
-                    let mut stroke = Stroke::default();
-                    stroke.width = lw as f32;
-                    stroke.line_cap = tiny_skia::LineCap::Butt;
-                    let clip_mask = build_clip_mask(self.width, self.height, clip_rects);
-                    let _ = self.with_pixmap_mut(|pm| {
-                        pm.stroke_path(
-                            &path,
-                            &paint,
-                            &stroke,
-                            Transform::identity(),
-                            clip_mask.as_ref(),
-                        );
-                    });
+                    self.stroke_path_skia(&path, color, line_width.max(1), 1, None, clip_rects);
                     self.mark_dirty(x as i32, y as i32, width as u32, height as u32);
                     return;
                 }
             }
 
-            // Fallback: thick stroke via concentric ellipse scan; thin
-            // stroke via Bresenham between sampled arc points.
-            if lw <= 1.0 {
-                let steps = ((rx + ry) * 2.0).max(64.0) as usize;
-                let mut prev: Option<(i32, i32)> = None;
-                for i in 0..=steps {
-                    let t = start_rad + extent_rad * (i as f64 / steps as f64);
-                    let px = (cx + rx * t.cos()) as i32;
-                    let py = (cy - ry * t.sin()) as i32;
-                    if let Some((lx, ly)) = prev {
-                        self.bresenham_line_rop_clipped(
-                            lx, ly, px, py, color, gc_func, plane_mask, clip_rects,
-                        );
-                    }
-                    prev = Some((px, py));
+            // Fallback (non-GXcopy): single-pixel Bresenham along
+            // sampled arc points. Wide strokes under raster-op blends
+            // are not supported.
+            let steps = ((rx + ry) * 2.0).max(64.0) as usize;
+            let mut prev: Option<(i32, i32)> = None;
+            for i in 0..=steps {
+                let t = start_rad + extent_rad * (i as f64 / steps as f64);
+                let px = (cx + rx * t.cos()) as i32;
+                let py = (cy - ry * t.sin()) as i32;
+                if let Some((lx, ly)) = prev {
+                    self.bresenham_line_rop_clipped(
+                        lx, ly, px, py, color, gc_func, plane_mask, clip_rects,
+                    );
                 }
-            } else {
-                let half_lw = lw / 2.0;
-                let outer_rx = rx + half_lw;
-                let outer_ry = ry + half_lw;
-                let inner_rx = (rx - half_lw).max(0.0);
-                let inner_ry = (ry - half_lw).max(0.0);
-                let full_circle = angle2.abs() >= 360 * 64;
-                let min_x = (cx - outer_rx).floor() as i32;
-                let max_x = (cx + outer_rx).ceil() as i32;
-                let min_y = (cy - outer_ry).floor() as i32;
-                let max_y = (cy + outer_ry).ceil() as i32;
-
-                for py in min_y..=max_y {
-                    for px in min_x..=max_x {
-                        let ddx = px as f64 - cx;
-                        let ddy = py as f64 - cy;
-                        let outer_val = (ddx / outer_rx).powi(2) + (ddy / outer_ry).powi(2);
-                        if outer_val > 1.0 {
-                            continue;
-                        }
-                        if inner_rx > 0.0 && inner_ry > 0.0 {
-                            let inner_val = (ddx / inner_rx).powi(2) + (ddy / inner_ry).powi(2);
-                            if inner_val < 1.0 {
-                                continue;
-                            }
-                        }
-                        if !full_circle {
-                            let norm_x = if rx > 0.0 { ddx / rx } else { ddx };
-                            let norm_y = if ry > 0.0 { ddy / ry } else { ddy };
-                            if !point_in_arc(norm_x, norm_y, start_rad, extent_rad) {
-                                continue;
-                            }
-                        }
-                        self.draw_point_gc(px, py, color, gc_func, plane_mask, clip_rects);
-                    }
-                }
+                prev = Some((px, py));
             }
         }
     }
@@ -549,7 +495,8 @@ impl Framebuffer {
             return;
         }
 
-        // For filled arcs, use arc_mode-aware fill with full GC support.
+        // Filled arcs delegate to the arc-mode-aware fill (already
+        // tiny-skia-fast-pathed for GXcopy).
         if filled {
             self.draw_arc_with_mode_gc(
                 x, y, width, height, angle1, angle2, true, foreground, arc_mode, function,
@@ -562,31 +509,50 @@ impl Framebuffer {
         let cy = y as f64 + height as f64 / 2.0;
         let rx = width as f64 / 2.0;
         let ry = height as f64 / 2.0;
-
         let start_rad = (angle1 as f64) / 64.0 * std::f64::consts::PI / 180.0;
         let extent_rad = (angle2 as f64) / 64.0 * std::f64::consts::PI / 180.0;
 
+        // Fast path: solid GXcopy strokes (with optional dashes) go to
+        // tiny-skia. DoubleDash is handled by stroking the background
+        // colour with the inverse dash pattern first.
+        if skia_eligible(function, plane_mask) {
+            if let Some(path) = build_arc_polyline(cx, cy, rx, ry, start_rad, extent_rad) {
+                let dash = build_dash(line_style, dash_list, dash_offset);
+                if line_style == 2 {
+                    if let Some(ref d) = dash {
+                        self.stroke_path_skia(
+                            &path,
+                            background,
+                            line_width,
+                            1, // butt
+                            Some(d.inverted()),
+                            clip_rects,
+                        );
+                    }
+                }
+                self.stroke_path_skia(
+                    &path,
+                    foreground,
+                    line_width,
+                    1, // butt
+                    dash,
+                    clip_rects,
+                );
+                self.mark_dirty(x as i32, y as i32, width as u32, height as u32);
+                return;
+            }
+        }
+
+        // Fallback: per-pixel Bresenham along the arc with dash logic.
         let steps = ((rx + ry) * 2.0).max(64.0) as usize;
-        let lw = line_width.max(1) as f64;
-        let half_lw = lw / 2.0;
-
-        // Set up dash state if dashed line style
         let use_dashes = (line_style == 1 || line_style == 2) && !dash_list.is_empty();
-        let mut dash_state = if use_dashes {
-            Some(DashState::new(dash_list, dash_offset))
-        } else {
-            None
-        };
-
+        let mut dash_state = use_dashes.then(|| DashState::new(dash_list, dash_offset));
         let mut prev: Option<(i32, i32)> = None;
-
         for i in 0..=steps {
             let t = start_rad + extent_rad * (i as f64 / steps as f64);
             let px = (cx + rx * t.cos()) as i32;
             let py = (cy - ry * t.sin()) as i32;
-
             if let Some((lx, ly)) = prev {
-                // Determine dash on/off state
                 let draw_fg = if let Some(ref mut ds) = dash_state {
                     let on = ds.is_on();
                     ds.advance();
@@ -594,67 +560,17 @@ impl Framebuffer {
                 } else {
                     true
                 };
-
                 let color = if draw_fg {
                     foreground
                 } else if line_style == 2 {
-                    // DoubleDash: draw background in gaps
                     background
                 } else {
                     prev = Some((px, py));
-                    continue; // OnOffDash: skip gaps
+                    continue;
                 };
-
-                if lw <= 1.5 {
-                    // Thin line: use single-pixel Bresenham
-                    self.bresenham_line_rop_clipped(
-                        lx, ly, px, py, color, function, plane_mask, clip_rects,
-                    );
-                } else {
-                    // Thick line: draw perpendicular rectangles along the arc
-                    let dx = (px - lx) as f64;
-                    let dy = (py - ly) as f64;
-                    let len = dx.hypot(dy);
-                    if len > 0.0 {
-                        let nx = -dy / len * half_lw;
-                        let ny = dx / len * half_lw;
-                        // Fill the thick segment as a small rectangle
-                        let min_x = (lx as f64 - nx.abs()).floor() as i32;
-                        let max_x = (px as f64 + nx.abs()).ceil() as i32;
-                        let min_y = (ly as f64 - ny.abs()).floor() as i32;
-                        let max_y = (py as f64 + ny.abs()).ceil() as i32;
-                        for fy in min_y..=max_y {
-                            for fx in min_x..=max_x {
-                                // Check distance from line segment
-                                let t_proj = ((fx as f64 - lx as f64) * dx
-                                    + (fy as f64 - ly as f64) * dy)
-                                    / (len * len);
-                                if (0.0..=1.0).contains(&t_proj) {
-                                    let closest_x = lx as f64 + t_proj * dx;
-                                    let closest_y = ly as f64 + t_proj * dy;
-                                    let dist = ((fx as f64 - closest_x).powi(2)
-                                        + (fy as f64 - closest_y).powi(2))
-                                    .sqrt();
-                                    if dist <= half_lw {
-                                        if !clip_rects.is_empty()
-                                            && !clip_rects.iter().any(|&(cx, cy, cw, ch)| {
-                                                fx >= cx as i32
-                                                    && fx < (cx as i32 + cw as i32)
-                                                    && fy >= cy as i32
-                                                    && fy < (cy as i32 + ch as i32)
-                                            })
-                                        {
-                                            continue;
-                                        }
-                                        self.draw_point_with_func_masked(
-                                            fx, fy, color, function, plane_mask,
-                                        );
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
+                self.bresenham_line_rop_clipped(
+                    lx, ly, px, py, color, function, plane_mask, clip_rects,
+                );
             }
             prev = Some((px, py));
         }
@@ -734,7 +650,10 @@ impl Framebuffer {
             return;
         }
 
-        // Fast path: solid GXcopy goes to tiny-skia for AA fill.
+        // tiny-skia handles the GXcopy fast path; for non-Porter-Duff
+        // raster ops we fall back to a per-span scanline fill that
+        // routes through `fill_rect_rop_clipped` so plane_mask + GC
+        // function are honoured.
         if skia_eligible(gc_func, plane_mask) {
             let mut pb = PathBuilder::new();
             pb.move_to(points[0].0 as f32, points[0].1 as f32);
@@ -755,38 +674,20 @@ impl Framebuffer {
                 let _ = self.with_pixmap_mut(|pm| {
                     pm.fill_path(&path, &paint, rule, Transform::identity(), clip_mask.as_ref());
                 });
-                self.mark_dirty(
-                    bx0,
-                    by0,
-                    (bx1 - bx0) as u32,
-                    (by1 - by0) as u32,
-                );
+                self.mark_dirty(bx0, by0, (bx1 - bx0) as u32, (by1 - by0) as u32);
                 return;
             }
         }
 
-        // Fallback: scanline fill applying raster op + plane_mask.
-        for y in by0..by1 {
-            let n = points.len();
-            let mut crossings: Vec<(i32, i32)> = Vec::new();
-            for i in 0..n {
-                let (x0, y0) = (points[i].0 as i32, points[i].1 as i32);
-                let (x1, y1) = (points[(i + 1) % n].0 as i32, points[(i + 1) % n].1 as i32);
-                if (y0 <= y && y1 > y) || (y1 <= y && y0 > y) {
-                    let x = x0 + (y - y0) * (x1 - x0) / (y1 - y0);
-                    let dir = if y0 < y1 { 1 } else { -1 };
-                    crossings.push((x, dir));
-                }
-            }
-            crossings.sort_unstable_by_key(|c| c.0);
-
-            let emit_span = |this: &mut Self, sx: i32, ex: i32| {
-                let sx = sx.max(0).min(i16::MAX as i32) as i16;
-                let ex = ex.min(this.width as i32 - 1).min(i16::MAX as i32) as i16;
+        // Fallback (non-GXcopy raster op): scanline fill via existing
+        // helper to ensure GC function + plane_mask are applied.
+        let scanlines = self.compute_polygon_scanlines(points, fill_rule);
+        for (y, spans) in scanlines {
+            for (sx, ex) in spans {
                 if ex >= sx {
-                    this.fill_rect_rop_clipped(
+                    self.fill_rect_rop_clipped(
                         sx,
-                        y as i16,
+                        y,
                         (ex - sx + 1) as u16,
                         1,
                         color,
@@ -794,30 +695,6 @@ impl Framebuffer {
                         plane_mask,
                         clip_rects,
                     );
-                }
-            };
-
-            if fill_rule == 1 {
-                let mut winding = 0i32;
-                let mut span_start: Option<i32> = None;
-                for (cx, dir) in &crossings {
-                    let was_inside = winding != 0;
-                    winding += dir;
-                    let now_inside = winding != 0;
-                    if !was_inside && now_inside {
-                        span_start = Some(*cx);
-                    } else if was_inside && !now_inside {
-                        if let Some(sx_val) = span_start.take() {
-                            emit_span(self, sx_val, *cx);
-                        }
-                    }
-                }
-            } else {
-                let xs: Vec<i32> = crossings.iter().map(|c| c.0).collect();
-                for pair in xs.chunks(2) {
-                    if pair.len() == 2 {
-                        emit_span(self, pair[0], pair[1]);
-                    }
                 }
             }
         }

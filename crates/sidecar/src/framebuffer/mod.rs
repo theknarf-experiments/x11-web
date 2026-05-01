@@ -1,7 +1,7 @@
 use flate2::write::DeflateEncoder;
 use flate2::Compression;
 use std::io::Write;
-use tiny_skia::{Color, FillRule, Paint, PathBuilder, PixmapMut, Stroke, Transform};
+use tiny_skia::{Color, FillRule, Paint, Path, PathBuilder, PixmapMut, Stroke, StrokeDash, Transform};
 
 mod drawing;
 mod shapes;
@@ -26,6 +26,45 @@ fn skia_color(rgb: u32) -> Color {
     let g = ((rgb >> 8) & 0xFF) as u8;
     let b = (rgb & 0xFF) as u8;
     Color::from_rgba8(r, g, b, 0xFF)
+}
+
+/// X11 dash pattern translated into a tiny-skia stroke dash.
+#[derive(Clone)]
+pub(crate) struct DashSpec {
+    pub(crate) array: Vec<f32>,
+    pub(crate) offset: f32,
+}
+
+impl DashSpec {
+    /// Return the inverted dash (swaps on/off runs by shifting the
+    /// offset by the first run length). Used to draw the *background*
+    /// colour in DoubleDash gaps via a second stroke pass.
+    pub(crate) fn inverted(&self) -> Self {
+        let first = self.array.first().copied().unwrap_or(0.0);
+        Self {
+            array: self.array.clone(),
+            offset: self.offset + first,
+        }
+    }
+}
+
+/// Translate X11 line_style + dash_list + dash_offset into a tiny-skia
+/// dash spec. Returns `None` for solid lines or empty patterns.
+pub(crate) fn build_dash(line_style: u8, dash_list: &[u8], dash_offset: u16) -> Option<DashSpec> {
+    if (line_style != 1 && line_style != 2) || dash_list.is_empty() {
+        return None;
+    }
+    // X11 dash arrays may be odd-length; tiny-skia requires even-length
+    // pairs (on, off, ...). Duplicate the pattern to make it even.
+    let mut array: Vec<f32> = dash_list.iter().map(|&n| n as f32).collect();
+    if array.len() % 2 != 0 {
+        let dup = array.clone();
+        array.extend(dup);
+    }
+    Some(DashSpec {
+        array,
+        offset: dash_offset as f32,
+    })
 }
 
 /// Build an `Option<tiny_skia::Mask>` from X11 GC clip rectangles.
@@ -665,6 +704,59 @@ impl Framebuffer {
     fn with_pixmap_mut<R>(&mut self, f: impl FnOnce(&mut PixmapMut<'_>) -> R) -> Option<R> {
         let mut pm = PixmapMut::from_bytes(&mut self.data, self.width, self.height)?;
         Some(f(&mut pm))
+    }
+
+    /// Stroke a tiny-skia [`Path`] with optional X11 dashing.
+    pub(crate) fn stroke_path_skia(
+        &mut self,
+        path: &Path,
+        color: u32,
+        line_width: u16,
+        cap_style: u8,
+        dash: Option<DashSpec>,
+        clip_rects: &[(i16, i16, u16, u16)],
+    ) {
+        self.stroke_path_skia_full(
+            path,
+            color,
+            line_width,
+            cap_style,
+            tiny_skia::LineJoin::Miter,
+            dash,
+            clip_rects,
+        );
+    }
+
+    /// As [`stroke_path_skia`], but also lets callers pick the line-join
+    /// style. Used by polyline rendering.
+    pub(crate) fn stroke_path_skia_full(
+        &mut self,
+        path: &Path,
+        color: u32,
+        line_width: u16,
+        cap_style: u8,
+        line_join: tiny_skia::LineJoin,
+        dash: Option<DashSpec>,
+        clip_rects: &[(i16, i16, u16, u16)],
+    ) {
+        let mut paint = Paint::default();
+        paint.set_color(skia_color(color));
+        paint.anti_alias = true;
+        let mut stroke = Stroke::default();
+        stroke.width = line_width.max(1) as f32;
+        stroke.line_cap = match cap_style {
+            2 => tiny_skia::LineCap::Round,
+            3 => tiny_skia::LineCap::Square,
+            _ => tiny_skia::LineCap::Butt,
+        };
+        stroke.line_join = line_join;
+        if let Some(d) = dash {
+            stroke.dash = StrokeDash::new(d.array, d.offset);
+        }
+        let clip_mask = build_clip_mask(self.width, self.height, clip_rects);
+        let _ = self.with_pixmap_mut(|pm| {
+            pm.stroke_path(path, &paint, &stroke, Transform::identity(), clip_mask.as_ref());
+        });
     }
 
     /// Draw a point applying both GC function and plane_mask.
