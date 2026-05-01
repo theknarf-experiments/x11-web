@@ -5,13 +5,36 @@ fn main() {
 }
 
 #[cfg(target_os = "macos")]
-#[tokio::main]
-async fn main() {
-    macos::run().await;
+fn main() {
+    use std::sync::atomic::AtomicU8;
+    use std::sync::Arc;
+    use x11_web_sidecar_macos::tray;
+
+    // The macOS tray UI (NSApplication, NSStatusItem) demands the
+    // main thread, but the sidecar's tokio runtime owned it before.
+    // Spin tokio off onto a dedicated worker thread and let the main
+    // thread block on AppKit's run loop — when the user chooses Quit
+    // the process exits and the tokio runtime is torn down with it.
+    let conn_state = Arc::new(AtomicU8::new(tray::ConnState::Connecting as u8));
+    let cs_for_runtime = conn_state.clone();
+    std::thread::Builder::new()
+        .name("sidecar-tokio".into())
+        .spawn(move || {
+            let rt = tokio::runtime::Builder::new_multi_thread()
+                .enable_all()
+                .build()
+                .expect("build tokio runtime");
+            rt.block_on(macos::run(cs_for_runtime));
+        })
+        .expect("spawn sidecar tokio thread");
+
+    tray::run_event_loop(conn_state);
 }
 
 #[cfg(target_os = "macos")]
 mod macos {
+    use std::sync::atomic::AtomicU8;
+    use std::sync::Arc;
     use std::time::Duration;
 
     use std::net::SocketAddr;
@@ -21,12 +44,13 @@ mod macos {
     use tracing::{error, info, warn};
     use x11_web_sidecar_macos::input;
     use x11_web_sidecar_macos::router::WindowRouter;
+    use x11_web_sidecar_macos::tray::{self, ConnState};
     use x11_web_wire::bridge as wire_bridge;
     use x11_web_wire::conn::{dial, DialedConnection};
     use x11_web_wire::tls::parse_fingerprint;
     use x11_web_wire::{wire_capnp, BackendToSidecar, SidecarToBackend};
 
-    pub async fn run() {
+    pub async fn run(conn_state: Arc<AtomicU8>) {
         tracing_subscriber::fmt::init();
 
         // Probe SkyLight up front so the operator sees in the log
@@ -104,10 +128,12 @@ mod macos {
 
         info!("Connecting to backend at {backend_addr} (server-name={server_name})");
         loop {
+            tray::store(&conn_state, ConnState::Connecting);
             let fingerprint = match read_fingerprint(&fingerprint_source) {
                 Ok(fp) => fp,
                 Err(e) => {
                     warn!("Fingerprint not available yet: {e}. Retrying in 2s.");
+                    tray::store(&conn_state, ConnState::Disconnected);
                     tokio::time::sleep(Duration::from_secs(2)).await;
                     continue;
                 }
@@ -126,11 +152,14 @@ mod macos {
                         "Connected to backend; sidecar_id={} agreed_version={}",
                         connection.sidecar_id, connection.agreed_protocol_version
                     );
+                    tray::store(&conn_state, ConnState::Connected);
                     run_session(connection).await;
+                    tray::store(&conn_state, ConnState::Disconnected);
                     warn!("Disconnected from backend, reconnecting in 5s...");
                 }
                 Err(e) => {
                     error!("Failed to connect to backend: {e}");
+                    tray::store(&conn_state, ConnState::Disconnected);
                 }
             }
             tokio::time::sleep(Duration::from_secs(5)).await;

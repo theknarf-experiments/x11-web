@@ -45,6 +45,14 @@ procs:
   # `open --wait-apps` keeps mprocs blocking so its panel reflects
   # the sidecar lifecycle.
   sidecar-macos:
+    # Same pty-keystroke trick as sidecar-x11. mprocs's default stop
+    # SIGTERMs only the shell PID, which can't interrupt the
+    # `open --wait-apps` foreground child — bash can't run its
+    # INT/TERM trap until the current foreground command returns.
+    # Ctrl+C through the pty delivers SIGINT to the whole foreground
+    # process group, so `open` exits and the trap fires.
+    stop:
+      send-keys: ["<C-c>"]
     shell: |
       set -e
       crates/sidecar-macos/scripts/build-app.sh
@@ -64,12 +72,17 @@ procs:
       # `exec tail` — that would replace the shell process and
       # discard the trap.
       trap 'pkill -f X11WebSidecar.app/Contents/MacOS/x11-web-sidecar-macos 2>/dev/null; rm -f "$LOG"' EXIT INT TERM
-      open --stdout "$LOG" --stderr "$LOG" ./target/debug/X11WebSidecar.app
+      # Start tail in the background so the panel sees output while
+      # the app is running. `open --wait-apps` then blocks the
+      # foreground until the .app process terminates — either via
+      # the tray's Quit menu or via the EXIT trap. When it returns
+      # we kill the tail so this shell exits and mprocs reflects
+      # the lifecycle.
       tail -f "$LOG" &
       TAIL_PID=$!
-      # Block on the tail; when mprocs signals us, the trap above
-      # tears down the launched app.
-      wait "$TAIL_PID"
+      open --wait-apps --stdout "$LOG" --stderr "$LOG" ./target/debug/X11WebSidecar.app
+      kill "$TAIL_PID" 2>/dev/null || true
+      wait "$TAIL_PID" 2>/dev/null || true
 
   frontend:
     cmd: ["pnpm", "--filter", "frontend", "dev"]

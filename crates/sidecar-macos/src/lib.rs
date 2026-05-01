@@ -27,4 +27,6 @@ pub mod router;
 #[cfg(target_os = "macos")]
 pub mod skylight;
 #[cfg(target_os = "macos")]
+pub mod tray;
+#[cfg(target_os = "macos")]
 pub mod windows;
