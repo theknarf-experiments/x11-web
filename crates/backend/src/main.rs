@@ -77,7 +77,6 @@ struct TrackedWindow {
 
 struct FrontendConnection {
     tx: mpsc::UnboundedSender<BackendToFrontend>,
-    subscribed_sidecars: Vec<String>,
 }
 
 #[tokio::main]
@@ -249,12 +248,7 @@ async fn dispatch_sidecar_msg(state: &AppState, sidecar_id: &str, msg: SidecarTo
                 // Bell isn't per-window — fan out as a top-level
                 // message rather than wrapping in a WindowUpdate.
                 if let x11_web_protocol::DisplayUpdate::Bell { percent } = update {
-                    let frontends = state.frontends.read().await;
-                    for frontend in frontends.values() {
-                        if frontend.subscribed_sidecars.contains(&sidecar_id) {
-                            let _ = frontend.tx.send(BackendToFrontend::Bell { percent });
-                        }
-                    }
+                    broadcast_to_frontends(state, BackendToFrontend::Bell { percent }).await;
                     return;
                 }
 
@@ -291,13 +285,7 @@ async fn dispatch_sidecar_msg(state: &AppState, sidecar_id: &str, msg: SidecarTo
                     buf.push(msg.clone());
                 }
 
-                // Forward to subscribed frontends
-                let frontends = state.frontends.read().await;
-                for frontend in frontends.values() {
-                    if frontend.subscribed_sidecars.contains(&sidecar_id) {
-                        let _ = frontend.tx.send(msg.clone());
-                    }
-                }
+                broadcast_to_frontends(state, msg).await;
             }
             SidecarToBackend::Error {
                 request_id,
@@ -329,32 +317,30 @@ async fn dispatch_sidecar_msg(state: &AppState, sidecar_id: &str, msg: SidecarTo
                 mime_type,
                 data,
             } => {
-                let frontends = state.frontends.read().await;
-                for frontend in frontends.values() {
-                    if frontend.subscribed_sidecars.contains(&sidecar_id) {
-                        let _ = frontend.tx.send(BackendToFrontend::ClipboardData {
-                            sidecar_id: sidecar_id.clone(),
-                            selection: selection.clone(),
-                            mime_type: mime_type.clone(),
-                            data: data.clone(),
-                        });
-                    }
-                }
+                broadcast_to_frontends(
+                    state,
+                    BackendToFrontend::ClipboardData {
+                        sidecar_id: sidecar_id.clone(),
+                        selection,
+                        mime_type,
+                        data,
+                    },
+                )
+                .await;
             }
             SidecarToBackend::ClipboardOffer {
                 selection,
                 mime_types,
             } => {
-                let frontends = state.frontends.read().await;
-                for frontend in frontends.values() {
-                    if frontend.subscribed_sidecars.contains(&sidecar_id) {
-                        let _ = frontend.tx.send(BackendToFrontend::ClipboardOffer {
-                            sidecar_id: sidecar_id.clone(),
-                            selection: selection.clone(),
-                            mime_types: mime_types.clone(),
-                        });
-                    }
-                }
+                broadcast_to_frontends(
+                    state,
+                    BackendToFrontend::ClipboardOffer {
+                        sidecar_id: sidecar_id.clone(),
+                        selection,
+                        mime_types,
+                    },
+                )
+                .await;
             }
         }
     }
@@ -423,10 +409,7 @@ async fn handle_frontend_ws(socket: WebSocket, state: AppState) {
         let mut frontends = state.frontends.write().await;
         frontends.insert(
             frontend_id.clone(),
-            FrontendConnection {
-                tx: tx.clone(),
-                subscribed_sidecars: Vec::new(),
-            },
+            FrontendConnection { tx: tx.clone() },
         );
     }
 
@@ -458,6 +441,18 @@ async fn handle_frontend_ws(socket: WebSocket, state: AppState) {
     {
         let windows = build_window_list(&state).await;
         let _ = tx.send(BackendToFrontend::WindowList { windows });
+    }
+
+    // Replay buffered display updates for every X11 client so the
+    // frontend's canvases aren't blank — the buffer keeps the latest
+    // PutImage per window.
+    {
+        let bufs = state.display_buffers.read().await;
+        for buf in bufs.values() {
+            for msg in buf {
+                let _ = tx.send(msg.clone());
+            }
+        }
     }
 
     // Process incoming messages from frontend
@@ -496,27 +491,6 @@ async fn handle_frontend_ws(socket: WebSocket, state: AppState) {
                     BackendToSidecar::KillProcess { request_id, pid },
                 )
                 .await;
-            }
-            FrontendToBackend::SubscribeDisplay { sidecar_id } => {
-                let mut frontends = state.frontends.write().await;
-                if let Some(frontend) = frontends.get_mut(&frontend_id) {
-                    if !frontend.subscribed_sidecars.contains(&sidecar_id) {
-                        frontend.subscribed_sidecars.push(sidecar_id.clone());
-
-                        // Replay buffered display updates for all clients of this sidecar
-                        let bufs = state.display_buffers.read().await;
-                        let procs = state.processes.read().await;
-                        if let Some(list) = procs.get(&sidecar_id) {
-                            for p in list {
-                                if let Some(buf) = bufs.get(&p.client_id) {
-                                    for msg in buf {
-                                        let _ = frontend.tx.send(msg.clone());
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
             }
             FrontendToBackend::RequestRedraw {
                 sidecar_id,

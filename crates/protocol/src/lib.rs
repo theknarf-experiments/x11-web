@@ -99,8 +99,6 @@ pub enum FrontendToBackend {
         sidecar_id: String,
         pid: u32,
     },
-    /// Subscribe to display updates from a sidecar.
-    SubscribeDisplay { sidecar_id: String },
     /// Request a full redraw of a window.
     RequestRedraw {
         sidecar_id: String,

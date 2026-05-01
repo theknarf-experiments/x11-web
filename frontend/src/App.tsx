@@ -121,7 +121,6 @@ function App() {
 		connected,
 		sidecars,
 		processes,
-		connectedProcesses,
 		windowList,
 		send,
 		onWindowUpdate,
@@ -141,8 +140,6 @@ function App() {
 	/** One renderer per top-level X11 window (keyed by window_id as string). */
 	const renderersRef = useRef<Map<string, ClientRenderer>>(new Map());
 	const closedWindowsRef = useRef<Set<string>>(new Set());
-	/** Track which sidecars we've already subscribed to. */
-	const subscribedRef = useRef<Set<string>>(new Set());
 
 	/** Animated cursor timers: windowId -> interval handle. */
 	const animCursorTimersRef = useRef<Map<string, ReturnType<typeof setInterval>>>(new Map());
@@ -190,19 +187,6 @@ function App() {
 			clearTimeout(timer);
 		};
 	}, [connected, sidecars, send]);
-
-	// Subscribe to display updates from every sidecar that has at least
-	// one X11 client connected. Window pid+command come from the
-	// `WindowDescriptor` directly now, so no clientInfoRef sync is
-	// needed.
-	useEffect(() => {
-		for (const cp of connectedProcesses) {
-			if (!subscribedRef.current.has(cp.sidecarId)) {
-				subscribedRef.current.add(cp.sidecarId);
-				send({ type: "SubscribeDisplay", sidecar_id: cp.sidecarId });
-			}
-		}
-	}, [connectedProcesses, send]);
 
 	/** Start an animated cursor cycle for a window. */
 	const startAnimCursor = useCallback((windowId: string, frames: AnimCursorFrame[]) => {
@@ -573,8 +557,6 @@ function App() {
 			if (!dt) return;
 
 			for (const sidecar of sidecars) {
-				if (!subscribedRef.current.has(sidecar.id)) continue;
-
 				// Try HTML first
 				const html = dt.getData("text/html");
 				if (html) {
@@ -626,7 +608,6 @@ function App() {
 
 		function handleCopy() {
 			for (const [sidecarId, offer] of clipboardOfferRef.current) {
-				if (!subscribedRef.current.has(sidecarId)) continue;
 				// Request multiple types if available
 				const requestedTypes = new Set<string>();
 				for (const mime of offer.mimeTypes) {
@@ -671,10 +652,6 @@ function App() {
 	}, [sidecars, send]);
 
 	function handleSpawn(sidecarId: string, command: string, args: string[]) {
-		if (!subscribedRef.current.has(sidecarId)) {
-			subscribedRef.current.add(sidecarId);
-			send({ type: "SubscribeDisplay", sidecar_id: sidecarId });
-		}
 		send({
 			type: "SpawnProcess",
 			request_id: nextRequestId(),

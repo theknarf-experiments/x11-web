@@ -54,7 +54,6 @@ export type FrontendToBackend =
 			args: string[];
 	  }
 	| { type: "KillProcess"; request_id: string; sidecar_id: string; pid: number }
-	| { type: "SubscribeDisplay"; sidecar_id: string }
 	| {
 			type: "InputEvent";
 			sidecar_id: string;
