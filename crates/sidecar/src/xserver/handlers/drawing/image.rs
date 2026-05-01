@@ -324,12 +324,9 @@ pub(crate) fn handle_put_image(state: &mut ClientState, req: &PutImageRequest) -
                         let fb_off = (dy as usize * fb_w + dx as usize) * 4;
                         if fb_off + 3 < fb_data.len() {
                             if gc_func == 3 && plane_mask == 0xFFFFFFFF {
-                                crate::framebuffer::write_pixel(
-                                    fb_data, fb_off, src_color, 0xFF,
-                                );
+                                crate::framebuffer::write_pixel(fb_data, fb_off, src_color, 0xFF);
                             } else {
-                                let dst_color =
-                                    crate::framebuffer::read_pixel(fb_data, fb_off);
+                                let dst_color = crate::framebuffer::read_pixel(fb_data, fb_off);
                                 let result = (apply_rop(gc_func, src_color, dst_color)
                                     & plane_mask)
                                     | (dst_color & !plane_mask);

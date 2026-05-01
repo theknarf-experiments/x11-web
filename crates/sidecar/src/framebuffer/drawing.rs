@@ -1,6 +1,6 @@
 use super::{
-    apply_gc_function, build_clip_mask, build_dash, point_in_clip_rects, read_pixel,
-    skia_eligible, stipple_to_tile, write_pixel, DashState, Framebuffer,
+    apply_gc_function, build_clip_mask, build_dash, point_in_clip_rects, read_pixel, skia_eligible,
+    stipple_to_tile, write_pixel, DashState, Framebuffer,
 };
 use tiny_skia::{
     FilterQuality, Paint, PathBuilder, Pattern, PixmapRef, SpreadMode, Stroke, Transform,
@@ -83,8 +83,8 @@ impl Framebuffer {
             None
         };
         self.bresenham_line_gc(
-            x0, y0, x1, y1, color, gc_func, plane_mask, cap_style, dashes, line_style,
-            background, clip_rects,
+            x0, y0, x1, y1, color, gc_func, plane_mask, cap_style, dashes, line_style, background,
+            clip_rects,
         );
     }
 
@@ -143,13 +143,7 @@ impl Framebuffer {
                     }
                 }
                 self.stroke_path_skia_full(
-                    &path,
-                    color,
-                    line_width,
-                    cap_style,
-                    join,
-                    dash,
-                    clip_rects,
+                    &path, color, line_width, cap_style, join, dash, clip_rects,
                 );
                 let xs = points.iter().map(|p| p.0);
                 let ys = points.iter().map(|p| p.1);
@@ -458,4 +452,3 @@ impl Framebuffer {
         self.mark_dirty(x, y, 1, 1);
     }
 }
-

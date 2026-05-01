@@ -72,11 +72,16 @@ impl Framebuffer {
         // the tiled-fill fast path. Cleared bits become transparent
         // (Stippled) or `bg` (OpaqueStippled).
         if skia_eligible(function, plane_mask) {
-            let tile = stipple_to_tile(stipple_data, stipple_w, stipple_h, foreground,
-                background, opaque);
+            let tile = stipple_to_tile(
+                stipple_data,
+                stipple_w,
+                stipple_h,
+                foreground,
+                background,
+                opaque,
+            );
             self.fill_rect_tiled(
-                x, y, width, height, &tile, stipple_w, stipple_h, ts_x, ts_y, function,
-                plane_mask,
+                x, y, width, height, &tile, stipple_w, stipple_h, ts_x, ts_y, function, plane_mask,
             );
             return;
         }
@@ -401,7 +406,17 @@ impl Framebuffer {
         for py in min_y..=max_y {
             for px in min_x..=max_x {
                 if !Self::pixel_in_filled_arc(
-                    px, py, cx, cy, rx, ry, angle1, angle2, start_rad, extent_rad, arc_mode,
+                    px,
+                    py,
+                    cx,
+                    cy,
+                    rx,
+                    ry,
+                    angle1,
+                    angle2,
+                    start_rad,
+                    extent_rad,
+                    arc_mode,
                     chord.as_ref(),
                 ) {
                     continue;
@@ -475,7 +490,17 @@ impl Framebuffer {
         for py in min_y..=max_y {
             for px in min_x..=max_x {
                 if !Self::pixel_in_filled_arc(
-                    px, py, cx, cy, rx, ry, angle1, angle2, start_rad, extent_rad, arc_mode,
+                    px,
+                    py,
+                    cx,
+                    cy,
+                    rx,
+                    ry,
+                    angle1,
+                    angle2,
+                    start_rad,
+                    extent_rad,
+                    arc_mode,
                     chord.as_ref(),
                 ) {
                     continue;
@@ -563,12 +588,8 @@ impl Framebuffer {
                     }
                 }
                 self.stroke_path_skia(
-                    &path,
-                    foreground,
-                    line_width,
-                    1, // butt
-                    dash,
-                    clip_rects,
+                    &path, foreground, line_width, 1, // butt
+                    dash, clip_rects,
                 );
                 self.mark_dirty(x as i32, y as i32, width as u32, height as u32);
                 return;
@@ -674,10 +695,9 @@ impl Framebuffer {
 
         let bx0 = points.iter().map(|p| p.0).min().unwrap_or(0).max(0) as i32;
         let by0 = points.iter().map(|p| p.1).min().unwrap_or(0).max(0) as i32;
-        let bx1 = (points.iter().map(|p| p.0).max().unwrap_or(0) as i32 + 1)
-            .min(self.width as i32);
-        let by1 = (points.iter().map(|p| p.1).max().unwrap_or(0) as i32 + 1)
-            .min(self.height as i32);
+        let bx1 = (points.iter().map(|p| p.0).max().unwrap_or(0) as i32 + 1).min(self.width as i32);
+        let by1 =
+            (points.iter().map(|p| p.1).max().unwrap_or(0) as i32 + 1).min(self.height as i32);
         if bx0 >= bx1 || by0 >= by1 {
             return;
         }
@@ -704,7 +724,13 @@ impl Framebuffer {
                 };
                 let clip_mask = build_clip_mask(self.width, self.height, clip_rects);
                 let _ = self.with_pixmap_mut(|pm| {
-                    pm.fill_path(&path, &paint, rule, Transform::identity(), clip_mask.as_ref());
+                    pm.fill_path(
+                        &path,
+                        &paint,
+                        rule,
+                        Transform::identity(),
+                        clip_mask.as_ref(),
+                    );
                 });
                 self.mark_dirty(bx0, by0, (bx1 - bx0) as u32, (by1 - by0) as u32);
                 return;
@@ -765,14 +791,7 @@ impl Framebuffer {
             };
             if let Some(path) = pb.finish() {
                 if self.fill_path_tiled(
-                    &path,
-                    tile_data,
-                    tile_w,
-                    tile_h,
-                    ts_x,
-                    ts_y,
-                    rule,
-                    clip_rects,
+                    &path, tile_data, tile_w, tile_h, ts_x, ts_y, rule, clip_rects,
                 ) {
                     let bx0 = points.iter().map(|p| p.0).min().unwrap_or(0).max(0) as i32;
                     let by0 = points.iter().map(|p| p.1).min().unwrap_or(0).max(0) as i32;
@@ -836,8 +855,8 @@ impl Framebuffer {
         if skia_eligible(gc_func, plane_mask) {
             let tile = stipple_to_tile(stipple_data, stipple_w, stipple_h, fg, bg, opaque);
             self.fill_polygon_tiled(
-                points, &tile, stipple_w, stipple_h, ts_x, ts_y, fill_rule, gc_func,
-                plane_mask, clip_rects,
+                points, &tile, stipple_w, stipple_h, ts_x, ts_y, fill_rule, gc_func, plane_mask,
+                clip_rects,
             );
             return;
         }

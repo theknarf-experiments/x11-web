@@ -494,13 +494,25 @@ fn wide_dashed_horiz_line_has_gaps() {
     );
     // R is byte 0 in RGBA storage; line color is 0xFF0000 (red).
     let off_on = 5 * fb.stride() + 2 * 4;
-    assert_ne!(fb.data()[off_on], 0, "pixel at x=2 should be drawn (on-dash)");
+    assert_ne!(
+        fb.data()[off_on],
+        0,
+        "pixel at x=2 should be drawn (on-dash)"
+    );
 
     let off_off = 5 * fb.stride() + 6 * 4;
-    assert_eq!(fb.data()[off_off], 0, "pixel at x=6 should be gap (off-dash)");
+    assert_eq!(
+        fb.data()[off_off],
+        0,
+        "pixel at x=6 should be gap (off-dash)"
+    );
 
     let off_top = 4 * fb.stride() + 2 * 4;
-    assert_ne!(fb.data()[off_top], 0, "pixel at (2,4) should be drawn (wide)");
+    assert_ne!(
+        fb.data()[off_top],
+        0,
+        "pixel at (2,4) should be drawn (wide)"
+    );
 }
 
 #[test]

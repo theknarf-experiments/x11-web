@@ -118,7 +118,11 @@ pub(crate) fn stipple_to_tile(
 
 /// Build an `Option<tiny_skia::Mask>` from X11 GC clip rectangles.
 /// Returns `None` if `rects` is empty (no clipping needed).
-fn build_clip_mask(width: u32, height: u32, rects: &[(i16, i16, u16, u16)]) -> Option<tiny_skia::Mask> {
+fn build_clip_mask(
+    width: u32,
+    height: u32,
+    rects: &[(i16, i16, u16, u16)],
+) -> Option<tiny_skia::Mask> {
     if rects.is_empty() {
         return None;
     }
@@ -782,7 +786,13 @@ impl Framebuffer {
         paint.anti_alias = false;
         let clip_mask = build_clip_mask(self.width, self.height, clip_rects);
         self.with_pixmap_mut(|pm| {
-            pm.fill_path(path, &paint, fill_rule, Transform::identity(), clip_mask.as_ref());
+            pm.fill_path(
+                path,
+                &paint,
+                fill_rule,
+                Transform::identity(),
+                clip_mask.as_ref(),
+            );
         })
         .is_some()
     }
@@ -836,7 +846,13 @@ impl Framebuffer {
         }
         let clip_mask = build_clip_mask(self.width, self.height, clip_rects);
         let _ = self.with_pixmap_mut(|pm| {
-            pm.stroke_path(path, &paint, &stroke, Transform::identity(), clip_mask.as_ref());
+            pm.stroke_path(
+                path,
+                &paint,
+                &stroke,
+                Transform::identity(),
+                clip_mask.as_ref(),
+            );
         });
     }
 
