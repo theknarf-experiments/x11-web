@@ -1,7 +1,10 @@
 use flate2::write::DeflateEncoder;
 use flate2::Compression;
 use std::io::Write;
-use tiny_skia::{Color, FillRule, Paint, Path, PathBuilder, PixmapMut, Stroke, StrokeDash, Transform};
+use tiny_skia::{
+    Color, FillRule, FilterQuality, Paint, Path, PathBuilder, Pattern, PixmapMut, PixmapRef,
+    SpreadMode, Stroke, StrokeDash, Transform,
+};
 
 mod drawing;
 mod shapes;
@@ -704,6 +707,38 @@ impl Framebuffer {
     fn with_pixmap_mut<R>(&mut self, f: impl FnOnce(&mut PixmapMut<'_>) -> R) -> Option<R> {
         let mut pm = PixmapMut::from_bytes(&mut self.data, self.width, self.height)?;
         Some(f(&mut pm))
+    }
+
+    /// Fill a tiny-skia [`Path`] with an X11 tile pattern.
+    /// `tile_data` must be a valid RGBA pixel buffer of `tile_w × tile_h`.
+    pub(crate) fn fill_path_tiled(
+        &mut self,
+        path: &Path,
+        tile_data: &[u8],
+        tile_w: u32,
+        tile_h: u32,
+        ts_x: i16,
+        ts_y: i16,
+        fill_rule: FillRule,
+        clip_rects: &[(i16, i16, u16, u16)],
+    ) -> bool {
+        let Some(tile_pm) = PixmapRef::from_bytes(tile_data, tile_w, tile_h) else {
+            return false;
+        };
+        let mut paint = Paint::default();
+        paint.shader = Pattern::new(
+            tile_pm,
+            SpreadMode::Repeat,
+            FilterQuality::Nearest,
+            1.0,
+            Transform::from_translate(ts_x as f32, ts_y as f32),
+        );
+        paint.anti_alias = false;
+        let clip_mask = build_clip_mask(self.width, self.height, clip_rects);
+        self.with_pixmap_mut(|pm| {
+            pm.fill_path(path, &paint, fill_rule, Transform::identity(), clip_mask.as_ref());
+        })
+        .is_some()
     }
 
     /// Stroke a tiny-skia [`Path`] with optional X11 dashing.

@@ -110,8 +110,6 @@ impl Framebuffer {
     }
 
     /// Fill a rectangle using a tile pattern (pixmap).
-    ///
-    /// The tile is a full-color pixmap that is repeated across the drawable.
     pub fn fill_rect_tiled(
         &mut self,
         x: i16,
@@ -126,41 +124,53 @@ impl Framebuffer {
         function: u8,
         plane_mask: u32,
     ) {
-        if tile_w == 0 || tile_h == 0 || tile_data.is_empty() {
+        if tile_w == 0 || tile_h == 0 || tile_data.is_empty() || width == 0 || height == 0 {
             return;
         }
         let tile_stride = tile_w as usize * 4;
+        // Fast path: GXcopy + full plane mask -> tiny-skia pattern paint.
+        if skia_eligible(function, plane_mask) {
+            if let Some(rect) =
+                tiny_skia::Rect::from_xywh(x as f32, y as f32, width as f32, height as f32)
+            {
+                let mut pb = PathBuilder::new();
+                pb.push_rect(rect);
+                if let Some(path) = pb.finish() {
+                    if self.fill_path_tiled(
+                        &path,
+                        tile_data,
+                        tile_w,
+                        tile_h,
+                        ts_x,
+                        ts_y,
+                        FillRule::Winding,
+                        &[],
+                    ) {
+                        self.mark_dirty(x as i32, y as i32, width as u32, height as u32);
+                        return;
+                    }
+                }
+            }
+        }
+        // Fallback (non-GXcopy): per-pixel raster-op blit.
         let row_start = (x as i32).max(0) as usize;
         let row_end = ((x as i32 + width as i32).min(self.width as i32)).max(0) as usize;
         if row_start >= row_end {
             return;
         }
-
         for row in 0..height as i32 {
             let dy = y as i32 + row;
             if dy < 0 || dy >= self.height as i32 {
                 continue;
             }
             let tile_y = ((dy - ts_y as i32) % tile_h as i32 + tile_h as i32) as u32 % tile_h;
-
             for px in row_start..row_end {
                 let tile_x =
                     ((px as i32 - ts_x as i32) % tile_w as i32 + tile_w as i32) as u32 % tile_w;
                 let off = tile_y as usize * tile_stride + tile_x as usize * 4;
                 if off + 3 < tile_data.len() {
                     let color = read_pixel(tile_data, off);
-                    if function == 3 && plane_mask == 0xFFFFFFFF {
-                        // Fast path: GXcopy
-                        let dst_off = dy as usize * self.stride + px * 4;
-                        if dst_off + 3 < self.data.len() {
-                            self.data[dst_off..dst_off + 4]
-                                .copy_from_slice(&tile_data[off..off + 4]);
-                        }
-                    } else {
-                        self.draw_point_with_func_masked(
-                            px as i32, dy, color, function, plane_mask,
-                        );
-                    }
+                    self.draw_point_with_func_masked(px as i32, dy, color, function, plane_mask);
                 }
             }
         }
@@ -348,9 +358,32 @@ impl Framebuffer {
         let ry = height as f64 / 2.0;
         let start_rad = (angle1 as f64) / 64.0 * std::f64::consts::PI / 180.0;
         let extent_rad = (angle2 as f64) / 64.0 * std::f64::consts::PI / 180.0;
+
+        // Fast path: GXcopy + full plane mask -> tiny-skia path fill
+        // with a tile pattern paint.
+        if skia_eligible(gc_func, plane_mask) {
+            if let Some(path) =
+                build_arc_path(cx, cy, rx, ry, start_rad, extent_rad, arc_mode, angle2)
+            {
+                if self.fill_path_tiled(
+                    &path,
+                    tile_data,
+                    tile_w,
+                    tile_h,
+                    ts_x,
+                    ts_y,
+                    FillRule::Winding,
+                    clip_rects,
+                ) {
+                    self.mark_dirty(x as i32, y as i32, width as u32, height as u32);
+                    return;
+                }
+            }
+        }
+
+        // Fallback: per-pixel point-in-arc test with raster-op blit.
         let chord = ArcChordData::new_if_chord(arc_mode, angle2, start_rad, extent_rad);
         let tile_stride = tile_w as usize * 4;
-
         let min_y = y.max(0) as i32;
         let max_y = ((y as i32 + height as i32).min(self.height as i32 - 1)).max(0);
         let min_x = x.max(0) as i32;
@@ -359,17 +392,7 @@ impl Framebuffer {
         for py in min_y..=max_y {
             for px in min_x..=max_x {
                 if !Self::pixel_in_filled_arc(
-                    px,
-                    py,
-                    cx,
-                    cy,
-                    rx,
-                    ry,
-                    angle1,
-                    angle2,
-                    start_rad,
-                    extent_rad,
-                    arc_mode,
+                    px, py, cx, cy, rx, ry, angle1, angle2, start_rad, extent_rad, arc_mode,
                     chord.as_ref(),
                 ) {
                     continue;
@@ -717,7 +740,45 @@ impl Framebuffer {
         if points.len() < 3 || tile_w == 0 || tile_h == 0 || tile_data.is_empty() {
             return;
         }
-        // Rasterize polygon scanlines and apply tile pattern per-pixel
+        // Fast path: GXcopy + full plane mask -> tiny-skia path fill with
+        // a tile pattern paint.
+        if skia_eligible(gc_func, plane_mask) {
+            let mut pb = PathBuilder::new();
+            pb.move_to(points[0].0 as f32, points[0].1 as f32);
+            for &(px, py) in &points[1..] {
+                pb.line_to(px as f32, py as f32);
+            }
+            pb.close();
+            let rule = if fill_rule == 1 {
+                FillRule::Winding
+            } else {
+                FillRule::EvenOdd
+            };
+            if let Some(path) = pb.finish() {
+                if self.fill_path_tiled(
+                    &path,
+                    tile_data,
+                    tile_w,
+                    tile_h,
+                    ts_x,
+                    ts_y,
+                    rule,
+                    clip_rects,
+                ) {
+                    let bx0 = points.iter().map(|p| p.0).min().unwrap_or(0).max(0) as i32;
+                    let by0 = points.iter().map(|p| p.1).min().unwrap_or(0).max(0) as i32;
+                    let bx1 = (points.iter().map(|p| p.0).max().unwrap_or(0) as i32 + 1)
+                        .min(self.width as i32);
+                    let by1 = (points.iter().map(|p| p.1).max().unwrap_or(0) as i32 + 1)
+                        .min(self.height as i32);
+                    if bx0 < bx1 && by0 < by1 {
+                        self.mark_dirty(bx0, by0, (bx1 - bx0) as u32, (by1 - by0) as u32);
+                    }
+                    return;
+                }
+            }
+        }
+        // Fallback: per-pixel raster-op blit.
         let scanlines = self.compute_polygon_scanlines(points, fill_rule);
         for (y, spans) in &scanlines {
             let dy = *y;
