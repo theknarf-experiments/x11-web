@@ -11,7 +11,6 @@
 //! `WindowFrame` from the frontend's perspective.
 
 use std::collections::HashMap;
-use std::sync::mpsc::RecvTimeoutError;
 use std::time::{Duration, Instant};
 
 use core_graphics::window::CGWindowID;
@@ -22,24 +21,19 @@ use uuid::Uuid;
 use x11_web_protocol::DisplayUpdate;
 use x11_web_wire::SidecarToBackend;
 
-use crate::capture::{build_session, capture_with_session};
+use crate::capture::{build_session, recv_frame_timeout};
 use crate::router::{WindowRoute, WindowRouter};
 use crate::windows::{visible_windows, WindowBounds, WindowInfo};
 
-/// Cap the longer side of each capture (in pixels). `0` = no cap;
-/// SCK captures at the window's logical-point size so the bitmap
-/// matches what the descriptor reports and the canvas renders 1:1.
-/// Lossy q90 + libwebp-sys at -O3 keeps encode times reasonable
-/// (~150-300 ms for 2k-wide captures) without needing a downscale.
-const CAPTURE_MAX_DIM: u32 = 0;
+/// Target FPS for SCStream delivery. SCK dedups idle frames
+/// internally, so this is a *cap*, not a fixed cadence — windows that
+/// aren't repainting won't generate callbacks. The latest-frame-wins
+/// channel + RTC backpressure mean over-requesting is safe.
+const CAPTURE_FPS: u32 = 30;
 
-/// Period between successive captures of the same window. ~30 Hz —
-/// achievable now that we cache an `SCContentFilter` per window and
-/// skip the per-frame `SCShareableContent` enumeration (was 50–300 ms
-/// per call). The latest-frame-wins backpressure in the backend's RTC
-/// driver drops captures that overrun the network, so over-capturing
-/// is safe.
-const CAPTURE_PERIOD: Duration = Duration::from_millis(33);
+/// Polling interval for the shutdown signal while waiting on the
+/// SCStream frame channel. Worst-case shutdown latency = this value.
+const SHUTDOWN_POLL: Duration = Duration::from_millis(100);
 
 /// Layer 0 = "normal" application windows. Higher layers are menubar
 /// items (25), the dock (20), tooltips/popovers, etc. cua-driver uses
@@ -163,11 +157,11 @@ pub fn spawn(tx: mpsc::UnboundedSender<SidecarToBackend>, router: WindowRouter) 
     });
 }
 
-/// Per-window capture loop. Runs on a dedicated OS thread (not a
-/// tokio task) because the cached `SCContentFilter` is `!Send` and we
-/// don't want it migrating across the tokio worker pool. Builds the
-/// `CaptureSession` once up-front so subsequent captures skip the
-/// 50–300 ms `SCShareableContent` enumeration.
+/// Per-window capture loop. Runs on a dedicated OS thread because
+/// the SCStream owns ObjC state we don't want migrating across the
+/// tokio worker pool, and `recv_frame_timeout` blocks. SCK pushes
+/// frames through the session's bounded(1) channel; we encode each
+/// one and forward it as a `PutImage`.
 fn spawn_capture_loop(
     cg_id: CGWindowID,
     uuid: String,
@@ -193,7 +187,7 @@ fn run_capture_loop(
     shutdown_rx: std::sync::mpsc::Receiver<()>,
 ) {
     let client_id = client_id_for_pid(pid);
-    let session = match build_session(cg_id, CAPTURE_MAX_DIM) {
+    let session = match build_session(cg_id, CAPTURE_FPS) {
         Ok(s) => s,
         Err(e) => {
             warn!("session build failed for window {cg_id} ({client_id}): {e}");
@@ -201,64 +195,58 @@ fn run_capture_loop(
         }
     };
     loop {
-        // Block for up to CAPTURE_PERIOD — if the enumerator signals
-        // shutdown, exit immediately; otherwise the timeout doubles as
-        // our frame ticker.
-        match shutdown_rx.recv_timeout(CAPTURE_PERIOD) {
-            Ok(()) | Err(RecvTimeoutError::Disconnected) => return,
-            Err(RecvTimeoutError::Timeout) => {}
+        // Non-blocking shutdown check before each frame. Combined with
+        // recv_frame_timeout(SHUTDOWN_POLL) below, worst-case
+        // shutdown latency is ~100ms.
+        if shutdown_rx.try_recv().is_ok() {
+            return;
         }
         let t0 = Instant::now();
-        match capture_with_session(&session) {
-            Ok(frame) => {
-                let t_capture = t0.elapsed();
-                let t1 = Instant::now();
-                // Lossy q90: visually identical to lossless for
-                // typical UI / screen content but ~5-10× faster
-                // encode and smaller wire payload. Switch to
-                // `encode_rgba_lossless` if fidelity for tiny
-                // text or high-contrast edges matters.
-                let compressed = x11_web_pixel_codec::encode_rgba_lossy(
-                    &frame.rgba,
-                    frame.width,
-                    frame.height,
-                    90.0,
-                );
-                let t_encode = t1.elapsed();
-                let raw_kb = frame.rgba.len() / 1024;
-                let comp_kb = compressed.len() / 1024;
-                info!(
-                    "capture[{}] {}x{} raw={}KB comp={}KB capture={:?} encode={:?}",
-                    &uuid[..8],
-                    frame.width,
-                    frame.height,
-                    raw_kb,
-                    comp_kb,
-                    t_capture,
-                    t_encode,
-                );
-                if tx
-                    .send(SidecarToBackend::DisplayUpdate {
-                        client_id: client_id.clone(),
-                        update: DisplayUpdate::PutImage {
-                            window_id: uuid.clone(),
-                            x: 0,
-                            y: 0,
-                            width: frame.width.min(u16::MAX as u32) as u16,
-                            height: frame.height.min(u16::MAX as u32) as u16,
-                            data: compressed,
-                        },
-                    })
-                    .is_err()
-                {
-                    // Backend channel closed — sidecar is shutting
-                    // down. Exit quietly.
-                    return;
-                }
-            }
+        let frame = match recv_frame_timeout(&session, SHUTDOWN_POLL) {
+            Ok(Some(f)) => f,
+            Ok(None) => continue,
             Err(e) => {
-                warn!("capture failed for window {cg_id} ({client_id}): {e}");
+                warn!("capture stream ended for window {cg_id} ({client_id}): {e}");
+                return;
             }
+        };
+        let t_capture = t0.elapsed();
+        let t1 = Instant::now();
+        // Lossy q90: visually identical to lossless for typical UI /
+        // screen content but ~5-10× faster encode and smaller wire
+        // payload. Switch to `encode_rgba_lossless` if fidelity for
+        // tiny text or high-contrast edges matters.
+        let compressed =
+            x11_web_pixel_codec::encode_rgba_lossy(&frame.rgba, frame.width, frame.height, 90.0);
+        let t_encode = t1.elapsed();
+        let raw_kb = frame.rgba.len() / 1024;
+        let comp_kb = compressed.len() / 1024;
+        info!(
+            "capture[{}] {}x{} raw={}KB comp={}KB capture={:?} encode={:?}",
+            &uuid[..8],
+            frame.width,
+            frame.height,
+            raw_kb,
+            comp_kb,
+            t_capture,
+            t_encode,
+        );
+        if tx
+            .send(SidecarToBackend::DisplayUpdate {
+                client_id: client_id.clone(),
+                update: DisplayUpdate::PutImage {
+                    window_id: uuid.clone(),
+                    x: 0,
+                    y: 0,
+                    width: frame.width.min(u16::MAX as u32) as u16,
+                    height: frame.height.min(u16::MAX as u32) as u16,
+                    data: compressed,
+                },
+            })
+            .is_err()
+        {
+            // Backend channel closed — sidecar is shutting down.
+            return;
         }
     }
 }
