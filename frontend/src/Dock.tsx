@@ -137,42 +137,7 @@ export function Dock({
 								</button>
 
 								{isOpen && (
-									<div className={s.popover}>
-										<div className={s.popoverLabel}>{sc.name}</div>
-										<div className={s.popoverRow}>
-											<input
-												type="text"
-												value={command}
-												onChange={(e) => setCommand(e.target.value)}
-												placeholder="command"
-												className={s.popoverInput}
-												onKeyDown={(e) => {
-													if (e.key === "Enter") handleSpawn(sc.id);
-												}}
-											/>
-										</div>
-										<div className={s.popoverRow}>
-											<input
-												type="text"
-												value={args}
-												onChange={(e) => setArgs(e.target.value)}
-												placeholder="args"
-												className={s.popoverInput}
-												onKeyDown={(e) => {
-													if (e.key === "Enter") handleSpawn(sc.id);
-												}}
-											/>
-										</div>
-										<div className={s.popoverRow}>
-											<button
-												type="button"
-												className={s.popoverButton}
-												onClick={() => handleSpawn(sc.id)}
-											>
-												Spawn
-											</button>
-										</div>
-
+									<div className={s.popoverStack}>
 										{(() => {
 											const sidecarWindows = allWindows.filter(
 												(w) => w.sidecarId === sc.id,
@@ -206,7 +171,40 @@ export function Dock({
 												</div>
 											);
 										})()}
+
+										<div className={s.popover}>
+										<div className={s.popoverLabel}>{sc.name}</div>
+										<div className={s.popoverRow}>
+											<input
+												type="text"
+												value={command}
+												onChange={(e) => setCommand(e.target.value)}
+												placeholder="command"
+												className={s.popoverInput}
+												onKeyDown={(e) => {
+													if (e.key === "Enter") handleSpawn(sc.id);
+												}}
+											/>
+											<input
+												type="text"
+												value={args}
+												onChange={(e) => setArgs(e.target.value)}
+												placeholder="args"
+												className={s.popoverInput}
+												onKeyDown={(e) => {
+													if (e.key === "Enter") handleSpawn(sc.id);
+												}}
+											/>
+											<button
+												type="button"
+												className={s.popoverButton}
+												onClick={() => handleSpawn(sc.id)}
+											>
+												Spawn
+											</button>
+										</div>
 									</div>
+								</div>
 								)}
 							</div>
 						);

@@ -121,12 +121,23 @@
 	background: #f87171;
 }
 
-/* Spawn popover */
-.popover {
+/* Wrapper for the floating thumbnail row + the spawn popover panel.
+   It owns the absolute positioning so the two stack vertically with
+   the polaroids floating freely above the panel — no shared
+   background. */
+.popoverStack {
 	position: absolute;
 	bottom: 100%;
 	right: 0;
 	margin-bottom: 12px;
+	display: flex;
+	flex-direction: column;
+	align-items: flex-end;
+	gap: 8px;
+}
+
+/* Spawn popover panel — sidecar name + spawn controls. */
+.popover {
 	padding: 12px;
 	background: rgba(30, 30, 30, 0.95);
 	backdrop-filter: blur(20px);
@@ -135,7 +146,7 @@
 	display: flex;
 	flex-direction: column;
 	gap: 8px;
-	min-width: 240px;
+	min-width: 420px;
 }
 
 .popoverRow {
@@ -177,7 +188,7 @@
 }
 
 .popoverButton {
-	flex: 1;
+	flex: 0 0 auto;
 	padding: 6px 14px;
 	border-radius: 8px;
 	border: none;
@@ -197,46 +208,151 @@
 	cursor: default;
 }
 
-/* Thumbnail picker — one cell per window the sidecar knows about. */
+/* Polaroid-style thumbnail picker, fanned horizontally so the
+   cards read as "tossed on a desk" rather than a tidy grid:
+     * cards overlap by ~30 px (negative margin),
+     * each card has a tilt and a small vertical offset that
+       cycle independently (3 tilts × 4 baselines), so consecutive
+       windows never look identical,
+     * the row scrolls horizontally if it overflows the popover.
+   Real Polaroids have a thin top + side border, a much wider
+   bottom for the caption, a near-white paper with a faint grain,
+   and a layered asymmetric shadow that sells the depth. */
 .thumbnailGrid {
-	display: grid;
-	grid-template-columns: repeat(2, 1fr);
-	gap: 8px;
-	margin-top: 6px;
-	padding-top: 10px;
-	border-top: 1px solid rgba(255, 255, 255, 0.1);
+	display: flex;
+	flex-direction: row;
+	align-items: flex-start;
+	/* The polaroids float on the dark dock background — no panel
+	   chrome around them. Padding gives the tilted/lifted cards
+	   room to extend without clipping. */
+	padding: 26px 12px;
+	max-width: 80vw;
+	overflow-x: auto;
+	overflow-y: visible;
+	scrollbar-width: thin;
 }
 
 .thumbnailCell {
 	display: flex;
 	flex-direction: column;
-	gap: 4px;
-	min-width: 0;
+	flex: 0 0 auto;
+	width: 140px;
+	/* Polaroid proportions: thin top/sides, ~3× thicker bottom. */
+	padding: 8px 8px 22px;
+	/* Pull each card back over the previous one for the fan effect.
+	   First-child override below resets the leading card. */
+	margin-left: -28px;
+	background-color: #fafafa;
+	background-image:
+		repeating-linear-gradient(
+			0deg,
+			rgba(0, 0, 0, 0.015) 0,
+			rgba(0, 0, 0, 0.015) 1px,
+			transparent 1px,
+			transparent 2px
+		),
+		linear-gradient(180deg, #ffffff 0%, #f0f0ec 100%);
+	border-radius: 2px;
+	box-shadow:
+		0 1px 1px rgba(0, 0, 0, 0.2),
+		0 6px 12px -2px rgba(0, 0, 0, 0.4),
+		0 14px 28px -6px rgba(0, 0, 0, 0.25);
+	transform: rotate(-2deg);
+	transform-origin: center bottom;
+	transition:
+		transform 0.2s ease,
+		box-shadow 0.2s ease,
+		z-index 0s linear 0.2s;
+}
+
+.thumbnailCell:first-child {
+	margin-left: 0;
+}
+
+/* Tilt cycle — 3 distinct rotations so a fan of N never repeats
+   immediately. */
+.thumbnailCell:nth-child(3n + 2) {
+	transform: rotate(2.5deg);
+}
+
+.thumbnailCell:nth-child(3n) {
+	transform: rotate(-0.5deg);
+}
+
+/* Vertical-offset cycle, prime to the tilt cycle so the two don't
+   sync. Gives the "thrown haphazardly" baseline. */
+.thumbnailCell:nth-child(4n + 1) {
+	margin-top: 0;
+}
+
+.thumbnailCell:nth-child(4n + 2) {
+	margin-top: 6px;
+}
+
+.thumbnailCell:nth-child(4n + 3) {
+	margin-top: -4px;
+}
+
+.thumbnailCell:nth-child(4n) {
+	margin-top: 10px;
+}
+
+.thumbnailCell:hover {
+	transform: rotate(0) translateY(-6px) scale(1.05);
+	box-shadow:
+		0 2px 2px rgba(0, 0, 0, 0.25),
+		0 12px 22px -3px rgba(0, 0, 0, 0.5),
+		0 26px 44px -8px rgba(0, 0, 0, 0.35);
+	z-index: 10;
+	transition:
+		transform 0.18s ease,
+		box-shadow 0.18s ease;
 }
 
 .thumbnailImg {
 	width: 100%;
-	height: 80px;
+	aspect-ratio: 5 / 4;
 	object-fit: cover;
-	border-radius: 6px;
-	border: 1px solid rgba(255, 255, 255, 0.12);
-	background: rgba(0, 0, 0, 0.3);
+	background: #1a1a1a;
+	display: block;
+	/* Photo recedes slightly into the frame — the inset darkens the
+	   inside edges so it doesn't look like a flat sticker. */
+	box-shadow:
+		inset 0 0 0 1px rgba(0, 0, 0, 0.18),
+		inset 0 1px 3px rgba(0, 0, 0, 0.45);
 }
 
 .thumbnailPlaceholder {
 	width: 100%;
-	height: 80px;
-	border-radius: 6px;
-	border: 1px dashed rgba(255, 255, 255, 0.15);
-	background: rgba(0, 0, 0, 0.2);
+	aspect-ratio: 5 / 4;
+	background:
+		repeating-linear-gradient(
+			135deg,
+			#dcdcdc 0,
+			#dcdcdc 6px,
+			#cfcfcf 6px,
+			#cfcfcf 12px
+		);
+	box-shadow:
+		inset 0 0 0 1px rgba(0, 0, 0, 0.18),
+		inset 0 1px 3px rgba(0, 0, 0, 0.35);
 }
 
 .thumbnailTitle {
-	font-size: 10px;
-	color: rgba(255, 255, 255, 0.7);
+	/* Handwriting-style fallback chain — Caveat is a Google Font,
+	   the rest are common system handwriting faces. */
+	font-family: "Caveat", "Bradley Hand", "Marker Felt", "Segoe Script",
+		cursive;
+	font-size: 16px;
+	font-weight: 600;
+	color: #1a1a1a;
+	text-align: center;
+	margin-top: 8px;
 	white-space: nowrap;
 	overflow: hidden;
 	text-overflow: ellipsis;
+	/* Faint ink-on-paper feel — never quite jet-black. */
+	opacity: 0.82;
 }
 
 /* Per-app context menu styles now live in AppContextMenu.module.css —
