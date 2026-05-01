@@ -52,6 +52,7 @@ export type FrontendToBackend =
 			type: "SpawnProcess";
 			request_id: string;
 			sidecar_id: string;
+			workspace_id: string;
 			command: string;
 			args: string[];
 	  }

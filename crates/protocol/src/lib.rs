@@ -117,10 +117,14 @@ pub enum FrontendToBackend {
         workspace_id: String,
         window_id: String,
     },
-    /// Spawn a process on a specific sidecar.
+    /// Spawn a process on a specific sidecar. `workspace_id` is the
+    /// frontend's active workspace; the backend remembers it so any
+    /// X11 windows the spawned process opens auto-attach only to
+    /// that workspace (rather than every open one).
     SpawnProcess {
         request_id: String,
         sidecar_id: String,
+        workspace_id: String,
         command: String,
         args: Vec<String>,
     },

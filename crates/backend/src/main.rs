@@ -80,6 +80,17 @@ struct AppState {
     /// `WindowCreated`. Used to route `Start/StopWindowCapture` to
     /// the right sidecar without scanning `window_track` twice.
     window_owner: Arc<RwLock<HashMap<String, String>>>,
+    /// `request_id → workspace_id` for in-flight `SpawnProcess`
+    /// commands. Stored when the frontend's spawn request arrives
+    /// and consumed when the sidecar replies with `ProcessSpawned`,
+    /// at which point we promote the entry into `spawn_origin`.
+    pending_spawns: Arc<RwLock<HashMap<String, String>>>,
+    /// `(sidecar_id, pid) → workspace_id`. The workspace that
+    /// asked the sidecar to spawn this pid. When an X11 client of
+    /// that pid emits `WindowCreated`, the backend uses this to
+    /// auto-attach the window only to that workspace — different
+    /// workspaces can run different apps without cross-pollination.
+    spawn_origin: Arc<RwLock<HashMap<(String, u32), String>>>,
 }
 
 struct SidecarConnection {
@@ -153,6 +164,8 @@ async fn async_main() {
         attached_windows: Arc::new(RwLock::new(HashMap::new())),
         streaming_refcount: Arc::new(RwLock::new(HashMap::new())),
         window_owner: Arc::new(RwLock::new(HashMap::new())),
+        pending_spawns: Arc::new(RwLock::new(HashMap::new())),
+        spawn_origin: Arc::new(RwLock::new(HashMap::new())),
     };
 
     let app = Router::new()
@@ -215,6 +228,18 @@ async fn dispatch_sidecar_msg(state: &AppState, sidecar_id: &str, msg: SidecarTo
         match msg {
             SidecarToBackend::Heartbeat => {}
             SidecarToBackend::ProcessSpawned { request_id, pid } => {
+                // Pop the pending spawn entry the frontend created
+                // when it asked for this command, and promote it
+                // into the (sidecar_id, pid) → workspace_id index
+                // so `WindowCreated` later knows where to attach.
+                let workspace_id = state.pending_spawns.write().await.remove(&request_id);
+                if let Some(workspace_id) = workspace_id {
+                    state
+                        .spawn_origin
+                        .write()
+                        .await
+                        .insert((sidecar_id.clone(), pid), workspace_id);
+                }
                 broadcast_to_frontends(
                     state,
                     BackendToFrontend::CommandResult {
@@ -240,6 +265,11 @@ async fn dispatch_sidecar_msg(state: &AppState, sidecar_id: &str, msg: SidecarTo
                 // Drop matching entries from per-sidecar list and the
                 // window-state index; clear any buffered display
                 // updates keyed by the freed client_ids.
+                state
+                    .spawn_origin
+                    .write()
+                    .await
+                    .remove(&(sidecar_id.clone(), pid));
                 let freed_client_ids: Vec<String> = {
                     let mut procs = state.processes.write().await;
                     let list = procs.entry(sidecar_id.clone()).or_default();
@@ -312,7 +342,7 @@ async fn dispatch_sidecar_msg(state: &AppState, sidecar_id: &str, msg: SidecarTo
                     // newly-created / destroyed window. Only fires
                     // for the relevant lifecycle variants; cheap
                     // no-op for others.
-                    on_window_lifecycle_after(state, &sidecar_id, &update).await;
+                    on_window_lifecycle_after(state, &sidecar_id, &client_id, &update).await;
                     broadcast_window_list(state).await;
                     return;
                 }
@@ -629,9 +659,17 @@ async fn handle_frontend_ws(socket: WebSocket, state: AppState) {
             FrontendToBackend::SpawnProcess {
                 request_id,
                 sidecar_id,
+                workspace_id,
                 command,
                 args,
             } => {
+                // Remember which workspace asked for this spawn so
+                // the resulting X11 window only auto-attaches there.
+                state
+                    .pending_spawns
+                    .write()
+                    .await
+                    .insert(request_id.clone(), workspace_id);
                 forward_to_sidecar(
                     &state,
                     &sidecar_id,
@@ -766,11 +804,15 @@ async fn broadcast_sidecar_list(state: &AppState) {
 /// caller gets back a workspace to send to the frontend.
 /// Side effects that run after `apply_window_lifecycle` has updated
 /// the tracker: populate `window_owner`, auto-attach X11 windows to
-/// every open workspace (X11 streams unconditionally), drop
-/// ownership / attached / refcount entries on destroy.
+/// the workspace that asked for the spawn (looked up via
+/// `spawn_origin`), drop ownership / attached / refcount entries on
+/// destroy. macOS windows always wait for a frontend `AttachWindow`;
+/// X11 windows whose origin can't be traced (no spawn through the
+/// dock — e.g. orphan clients) likewise stay detached.
 async fn on_window_lifecycle_after(
     state: &AppState,
     sidecar_id: &str,
+    client_id: &str,
     update: &DisplayUpdate,
 ) {
     match update {
@@ -786,19 +828,33 @@ async fn on_window_lifecycle_after(
                 let mut owners = state.window_owner.write().await;
                 owners.insert(window_id.clone(), sidecar_id.to_string());
             }
-            // X11 (and unknown, treated as X11 for back-compat)
-            // auto-attach to every open workspace. macOS windows
-            // wait for a frontend `AttachWindow`.
             if matches!(kind, SidecarKind::X11 | SidecarKind::Unknown) {
-                let workspace_ids: Vec<String> = state
-                    .workspaces
+                // Resolve client_id → pid via the per-sidecar
+                // processes table that ProcessConnected builds, then
+                // pid → workspace via spawn_origin. The pair lets us
+                // attach this window only to the workspace that
+                // asked for it.
+                let pid = state
+                    .processes
                     .read()
                     .await
-                    .keys()
-                    .cloned()
-                    .collect();
-                for ws_id in workspace_ids {
-                    attach_window(state, &ws_id, window_id).await;
+                    .get(sidecar_id)
+                    .and_then(|list| {
+                        list.iter()
+                            .find(|p| p.client_id == client_id)
+                            .map(|p| p.pid)
+                    });
+                let workspace_id = match pid {
+                    Some(pid) => state
+                        .spawn_origin
+                        .read()
+                        .await
+                        .get(&(sidecar_id.to_string(), pid))
+                        .cloned(),
+                    None => None,
+                };
+                if let Some(workspace_id) = workspace_id {
+                    attach_window(state, &workspace_id, window_id).await;
                 }
             }
         }

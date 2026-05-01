@@ -292,10 +292,12 @@ function App() {
 	}, [onBell]);
 
 	function handleSpawn(sidecarId: string, command: string, args: string[]) {
+		if (!activeWorkspace) return;
 		send({
 			type: "SpawnProcess",
 			request_id: nextRequestId(),
 			sidecar_id: sidecarId,
+			workspace_id: activeWorkspace.id,
 			command,
 			args,
 		});
