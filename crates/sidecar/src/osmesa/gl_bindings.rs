@@ -487,8 +487,9 @@ pub fn gl_rects(x1: i16, y1: i16, x2: i16, y2: i16) {
 // ===== Additional color variants =====
 
 pub fn gl_color3b(r: i8, g: i8, b: i8) {
+    use gl_generated::types::GLbyte;
     unsafe {
-        gl_generated::Color3b(r, g, b);
+        gl_generated::Color3b(r as GLbyte, g as GLbyte, b as GLbyte);
     }
 }
 pub fn gl_color3d(r: f64, g: f64, b: f64) {
@@ -517,8 +518,9 @@ pub fn gl_color3us(r: u16, g: u16, b: u16) {
     }
 }
 pub fn gl_color4b(r: i8, g: i8, b: i8, a: i8) {
+    use gl_generated::types::GLbyte;
     unsafe {
-        gl_generated::Color4b(r, g, b, a);
+        gl_generated::Color4b(r as GLbyte, g as GLbyte, b as GLbyte, a as GLbyte);
     }
 }
 pub fn gl_color4d(r: f64, g: f64, b: f64, a: f64) {
@@ -593,8 +595,9 @@ pub fn gl_clear_index(c: f32) {
 // ===== Additional normal variants =====
 
 pub fn gl_normal3b(nx: i8, ny: i8, nz: i8) {
+    use gl_generated::types::GLbyte;
     unsafe {
-        gl_generated::Normal3b(nx, ny, nz);
+        gl_generated::Normal3b(nx as GLbyte, ny as GLbyte, nz as GLbyte);
     }
 }
 pub fn gl_normal3d(nx: f64, ny: f64, nz: f64) {
