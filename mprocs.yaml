@@ -9,12 +9,22 @@ procs:
   # fingerprint from `$HOME/.x11web-fingerprint` (bind-mounted by
   # compose.yml's `sidecar` service).
   sidecar-x11:
+    # mprocs writes the keys into the process's pty; Ctrl+C lands as
+    # SIGINT on the foreground process group, which is exactly what
+    # `docker compose up` interprets as "graceful teardown" — it
+    # propagates SIGTERM to the container, waits the grace period,
+    # then exits. mprocs's default kill (SIGTERM to bash) doesn't
+    # forward to compose, leaving the container orphaned.
+    #
+    # The `stop: { cmd: ... }` form is master-only; on the released
+    # 0.9.2 npm package only signal strings and `send-keys` work.
+    stop:
+      send-keys: ["<C-c>"]
     shell: |
       set -e
       printf 'Waiting for backend fingerprint at %s/.x11web-fingerprint…\n' "$HOME"
       while [ ! -s "$HOME/.x11web-fingerprint" ]; do sleep 0.2; done
-      docker compose up --build sidecar
-      docker compose down
+      docker compose up sidecar
 
   # macOS sidecar — connects to the backend over QUIC :3002. Builds
   # the .app bundle (stable codesign identity for TCC), waits for
