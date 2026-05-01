@@ -70,6 +70,52 @@ pub(crate) fn build_dash(line_style: u8, dash_list: &[u8], dash_offset: u16) -> 
     })
 }
 
+/// Materialise a 1bpp X11 stipple as an RGBA tile suitable for use
+/// with [`Framebuffer::fill_path_tiled`].
+///
+/// `opaque=false` (Stippled) leaves cleared bits transparent so the
+/// destination shows through; `opaque=true` (OpaqueStippled) paints
+/// them with `bg`.
+pub(crate) fn stipple_to_tile(
+    stipple_data: &[u8],
+    stipple_w: u32,
+    stipple_h: u32,
+    fg: u32,
+    bg: u32,
+    opaque: bool,
+) -> Vec<u8> {
+    let stride = stipple_w.div_ceil(8) as usize;
+    let mut out = vec![0u8; (stipple_w * stipple_h * 4) as usize];
+    let fg_r = ((fg >> 16) & 0xFF) as u8;
+    let fg_g = ((fg >> 8) & 0xFF) as u8;
+    let fg_b = (fg & 0xFF) as u8;
+    let bg_r = ((bg >> 16) & 0xFF) as u8;
+    let bg_g = ((bg >> 8) & 0xFF) as u8;
+    let bg_b = (bg & 0xFF) as u8;
+    for sy in 0..stipple_h {
+        for sx in 0..stipple_w {
+            let byte_idx = (sy as usize) * stride + (sx as usize / 8);
+            let bit_set = stipple_data
+                .get(byte_idx)
+                .is_some_and(|b| (b >> (sx % 8)) & 1 != 0);
+            let off = ((sy * stipple_w + sx) * 4) as usize;
+            if bit_set {
+                out[off] = fg_r;
+                out[off + 1] = fg_g;
+                out[off + 2] = fg_b;
+                out[off + 3] = 0xFF;
+            } else if opaque {
+                out[off] = bg_r;
+                out[off + 1] = bg_g;
+                out[off + 2] = bg_b;
+                out[off + 3] = 0xFF;
+            }
+            // else: leave [0, 0, 0, 0] — transparent.
+        }
+    }
+    out
+}
+
 /// Build an `Option<tiny_skia::Mask>` from X11 GC clip rectangles.
 /// Returns `None` if `rects` is empty (no clipping needed).
 fn build_clip_mask(width: u32, height: u32, rects: &[(i16, i16, u16, u16)]) -> Option<tiny_skia::Mask> {

@@ -1,6 +1,6 @@
 use super::{
     build_clip_mask, build_dash, point_in_arc, read_pixel, skia_color, skia_eligible,
-    ArcChordData, DashState, Framebuffer,
+    stipple_to_tile, ArcChordData, DashState, Framebuffer,
 };
 use tiny_skia::{FillRule, Paint, PathBuilder, Transform};
 
@@ -68,22 +68,32 @@ impl Framebuffer {
             self.fill_rect_rop(x, y, width, height, foreground, function, plane_mask);
             return;
         }
+        // GXcopy: materialise the stipple as an RGBA tile and reuse
+        // the tiled-fill fast path. Cleared bits become transparent
+        // (Stippled) or `bg` (OpaqueStippled).
+        if skia_eligible(function, plane_mask) {
+            let tile = stipple_to_tile(stipple_data, stipple_w, stipple_h, foreground,
+                background, opaque);
+            self.fill_rect_tiled(
+                x, y, width, height, &tile, stipple_w, stipple_h, ts_x, ts_y, function,
+                plane_mask,
+            );
+            return;
+        }
+        // Fallback (non-GXcopy): per-pixel raster-op blit.
         let stipple_stride = stipple_w.div_ceil(8) as usize;
         let row_start = (x as i32).max(0) as usize;
         let row_end = ((x as i32 + width as i32).min(self.width as i32)).max(0) as usize;
         if row_start >= row_end {
             return;
         }
-
         for row in 0..height as i32 {
             let dy = y as i32 + row;
             if dy < 0 || dy >= self.height as i32 {
                 continue;
             }
-            // Which row in the stipple pattern (tiled)
             let stip_y =
                 ((dy - ts_y as i32) % stipple_h as i32 + stipple_h as i32) as u32 % stipple_h;
-
             for px in row_start..row_end {
                 let stip_x = ((px as i32 - ts_x as i32) % stipple_w as i32 + stipple_w as i32)
                     as u32
@@ -94,7 +104,6 @@ impl Framebuffer {
                 } else {
                     0
                 };
-
                 if bit != 0 {
                     self.draw_point_with_func_masked(
                         px as i32, dy, foreground, function, plane_mask,
@@ -439,6 +448,18 @@ impl Framebuffer {
             return;
         }
 
+        // GXcopy: bake the stipple to an RGBA tile and reuse the
+        // tiled-arc fast path.
+        if skia_eligible(gc_func, plane_mask) {
+            let tile = stipple_to_tile(stipple_data, stipple_w, stipple_h, fg, bg, opaque);
+            self.fill_arc_tiled(
+                x, y, width, height, angle1, angle2, &tile, stipple_w, stipple_h, ts_x, ts_y,
+                arc_mode, gc_func, plane_mask, clip_rects,
+            );
+            return;
+        }
+
+        // Fallback (non-GXcopy): per-pixel point-in-arc + stipple test.
         let cx = x as f64 + width as f64 / 2.0;
         let cy = y as f64 + height as f64 / 2.0;
         let rx = width as f64 / 2.0;
@@ -447,26 +468,14 @@ impl Framebuffer {
         let extent_rad = (angle2 as f64) / 64.0 * std::f64::consts::PI / 180.0;
         let chord = ArcChordData::new_if_chord(arc_mode, angle2, start_rad, extent_rad);
         let stipple_stride = stipple_w.div_ceil(8) as usize;
-
         let min_y = y.max(0) as i32;
         let max_y = ((y as i32 + height as i32).min(self.height as i32 - 1)).max(0);
         let min_x = x.max(0) as i32;
         let max_x = ((x as i32 + width as i32).min(self.width as i32 - 1)).max(0);
-
         for py in min_y..=max_y {
             for px in min_x..=max_x {
                 if !Self::pixel_in_filled_arc(
-                    px,
-                    py,
-                    cx,
-                    cy,
-                    rx,
-                    ry,
-                    angle1,
-                    angle2,
-                    start_rad,
-                    extent_rad,
-                    arc_mode,
+                    px, py, cx, cy, rx, ry, angle1, angle2, start_rad, extent_rad, arc_mode,
                     chord.as_ref(),
                 ) {
                     continue;
@@ -802,6 +811,7 @@ impl Framebuffer {
     }
 
     /// Fill polygon with a stipple pattern.
+    #[allow(clippy::too_many_arguments)]
     pub fn fill_polygon_stippled(
         &mut self,
         points: &[(i16, i16)],
@@ -821,6 +831,17 @@ impl Framebuffer {
         if points.len() < 3 || stipple_w == 0 || stipple_h == 0 || stipple_data.is_empty() {
             return;
         }
+        // GXcopy: bake the stipple to an RGBA tile and reuse the
+        // tiled-polygon fast path.
+        if skia_eligible(gc_func, plane_mask) {
+            let tile = stipple_to_tile(stipple_data, stipple_w, stipple_h, fg, bg, opaque);
+            self.fill_polygon_tiled(
+                points, &tile, stipple_w, stipple_h, ts_x, ts_y, fill_rule, gc_func,
+                plane_mask, clip_rects,
+            );
+            return;
+        }
+        // Fallback (non-GXcopy): per-pixel raster-op blit.
         let stipple_stride = stipple_w.div_ceil(8) as usize;
         let scanlines = self.compute_polygon_scanlines(points, fill_rule);
         for (y, spans) in &scanlines {
