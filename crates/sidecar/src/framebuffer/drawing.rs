@@ -1,6 +1,8 @@
 use super::{
-    apply_gc_function, point_in_clip_rects, read_pixel, write_pixel, DashState, Framebuffer,
+    apply_gc_function, build_clip_mask, point_in_clip_rects, read_pixel, skia_color,
+    skia_eligible, write_pixel, DashState, Framebuffer,
 };
+use tiny_skia::{FillRule, Paint, PathBuilder, Stroke, Transform};
 
 impl Framebuffer {
     /// Draw a line with full GC support: raster op, cap/join styles, dashes, clip rects.
@@ -35,6 +37,15 @@ impl Framebuffer {
     ) {
         // join_style is used by draw_polyline_gc; not needed for single segments.
         let _ = join_style;
+
+        // Fast path: solid (non-dashed) lines under GXcopy go to
+        // tiny-skia for AA stroking with proper caps.
+        if line_style == 0
+            && skia_eligible(gc_func, plane_mask)
+            && stroke_line_skia(self, x0, y0, x1, y1, color, line_width, cap_style, clip_rects)
+        {
+            return;
+        }
 
         // Dashed line state
         let dashes = if (line_style == 1 || line_style == 2) && !dash_list.is_empty() {
@@ -905,6 +916,40 @@ impl Framebuffer {
         plane_mask: u32,
         clip_rects: &[(i16, i16, u16, u16)],
     ) {
+        if radius <= 0 {
+            return;
+        }
+        if skia_eligible(gc_func, plane_mask) {
+            if let Some(rect) = tiny_skia::Rect::from_xywh(
+                (cx - radius) as f32,
+                (cy - radius) as f32,
+                (radius * 2) as f32,
+                (radius * 2) as f32,
+            ) {
+                if let Some(path) = PathBuilder::from_oval(rect) {
+                    let mut paint = Paint::default();
+                    paint.set_color(skia_color(color));
+                    paint.anti_alias = true;
+                    let clip_mask = build_clip_mask(self.width, self.height, clip_rects);
+                    let _ = self.with_pixmap_mut(|pm| {
+                        pm.fill_path(
+                            &path,
+                            &paint,
+                            FillRule::Winding,
+                            Transform::identity(),
+                            clip_mask.as_ref(),
+                        );
+                    });
+                    self.mark_dirty(
+                        cx - radius,
+                        cy - radius,
+                        (radius * 2 + 1) as u32,
+                        (radius * 2 + 1) as u32,
+                    );
+                    return;
+                }
+            }
+        }
         let r2 = radius * radius;
         for dy in -radius..=radius {
             for dx in -radius..=radius {
@@ -914,4 +959,59 @@ impl Framebuffer {
             }
         }
     }
+}
+
+/// Stroke a single line segment via tiny-skia under GXcopy. Returns
+/// `false` if tiny-skia rejects the input (e.g. degenerate framebuffer
+/// dimensions); the caller falls back to the hand-rolled blitter.
+#[allow(clippy::too_many_arguments)]
+fn stroke_line_skia(
+    fb: &mut Framebuffer,
+    x0: i32,
+    y0: i32,
+    x1: i32,
+    y1: i32,
+    color: u32,
+    line_width: u16,
+    cap_style: u8,
+    clip_rects: &[(i16, i16, u16, u16)],
+) -> bool {
+    let mut pb = PathBuilder::new();
+    pb.move_to(x0 as f32, y0 as f32);
+    pb.line_to(x1 as f32, y1 as f32);
+    let Some(path) = pb.finish() else {
+        return false;
+    };
+    let mut paint = Paint::default();
+    paint.set_color(skia_color(color));
+    paint.anti_alias = true;
+    let mut stroke = Stroke::default();
+    stroke.width = line_width.max(1) as f32;
+    // X11 cap_style: 0=NotLast, 1=Butt, 2=Round, 3=Projecting.
+    stroke.line_cap = match cap_style {
+        2 => tiny_skia::LineCap::Round,
+        3 => tiny_skia::LineCap::Square,
+        _ => tiny_skia::LineCap::Butt,
+    };
+    let clip_mask = build_clip_mask(fb.width, fb.height, clip_rects);
+    let drew = fb
+        .with_pixmap_mut(|pm| {
+            pm.stroke_path(
+                &path,
+                &paint,
+                &stroke,
+                Transform::identity(),
+                clip_mask.as_ref(),
+            );
+        })
+        .is_some();
+    if drew {
+        let pad = (line_width as i32 / 2 + 1).max(1);
+        let min_x = x0.min(x1) - pad;
+        let min_y = y0.min(y1) - pad;
+        let w = (x0.max(x1) - x0.min(x1) + pad * 2 + 1) as u32;
+        let h = (y0.max(y1) - y0.min(y1) + pad * 2 + 1) as u32;
+        fb.mark_dirty(min_x, min_y, w, h);
+    }
+    drew
 }

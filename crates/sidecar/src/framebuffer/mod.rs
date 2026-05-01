@@ -1,11 +1,53 @@
 use flate2::write::DeflateEncoder;
 use flate2::Compression;
 use std::io::Write;
+use tiny_skia::{Color, FillRule, Paint, PathBuilder, PixmapMut, Stroke, Transform};
 
 mod drawing;
 mod shapes;
 #[cfg(test)]
 mod tests;
+
+/// Whether a drawing call can be served by a tiny-skia fast path.
+///
+/// tiny-skia handles Porter-Duff Source-Over compositing only, so the
+/// X11 GC raster ops (XOR, AND, ...) and partial plane masks fall
+/// through to the hand-rolled blitters. The common `(GXcopy, full
+/// plane mask)` case is the only one we route to tiny-skia.
+#[inline]
+fn skia_eligible(gc_func: u8, plane_mask: u32) -> bool {
+    gc_func == 3 && plane_mask == 0xFFFFFFFF
+}
+
+/// Convert an `0x00RRGGBB` X11 color into a tiny-skia opaque [`Color`].
+#[inline]
+fn skia_color(rgb: u32) -> Color {
+    let r = ((rgb >> 16) & 0xFF) as u8;
+    let g = ((rgb >> 8) & 0xFF) as u8;
+    let b = (rgb & 0xFF) as u8;
+    Color::from_rgba8(r, g, b, 0xFF)
+}
+
+/// Build an `Option<tiny_skia::Mask>` from X11 GC clip rectangles.
+/// Returns `None` if `rects` is empty (no clipping needed).
+fn build_clip_mask(width: u32, height: u32, rects: &[(i16, i16, u16, u16)]) -> Option<tiny_skia::Mask> {
+    if rects.is_empty() {
+        return None;
+    }
+    let mut mask = tiny_skia::Mask::new(width, height)?;
+    let mut pb = PathBuilder::new();
+    for &(rx, ry, rw, rh) in rects {
+        if rw == 0 || rh == 0 {
+            continue;
+        }
+        if let Some(rect) = tiny_skia::Rect::from_xywh(rx as f32, ry as f32, rw as f32, rh as f32) {
+            pb.push_rect(rect);
+        }
+    }
+    let path = pb.finish()?;
+    mask.fill_path(&path, FillRule::Winding, false, Transform::identity());
+    Some(mask)
+}
 
 /// A server-side pixel buffer.
 ///
@@ -615,6 +657,14 @@ impl Framebuffer {
     /// Draw a single pixel with GXcopy (the common case).
     pub fn draw_point(&mut self, x: i32, y: i32, color: u32) {
         self.draw_point_with_func(x, y, color, 3);
+    }
+
+    /// Wrap the framebuffer's storage as a tiny-skia [`PixmapMut`] for
+    /// the duration of `f`. Returns `None` if tiny-skia rejects the
+    /// (width, height) (e.g. zero size).
+    fn with_pixmap_mut<R>(&mut self, f: impl FnOnce(&mut PixmapMut<'_>) -> R) -> Option<R> {
+        let mut pm = PixmapMut::from_bytes(&mut self.data, self.width, self.height)?;
+        Some(f(&mut pm))
     }
 
     /// Draw a point applying both GC function and plane_mask.

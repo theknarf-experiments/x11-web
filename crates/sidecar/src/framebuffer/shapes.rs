@@ -1,4 +1,8 @@
-use super::{point_in_arc, read_pixel, ArcChordData, DashState, Framebuffer};
+use super::{
+    build_clip_mask, point_in_arc, read_pixel, skia_color, skia_eligible, ArcChordData,
+    DashState, Framebuffer,
+};
+use tiny_skia::{FillRule, Paint, PathBuilder, Stroke, Transform};
 
 impl Framebuffer {
     /// fill_rect_rop with clip rectangle support.
@@ -194,110 +198,106 @@ impl Framebuffer {
         let extent_rad = (angle2 as f64) / 64.0 * std::f64::consts::PI / 180.0;
 
         if filled {
+            // Fast path: solid GXcopy goes to tiny-skia for AA fill.
+            if skia_eligible(gc_func, plane_mask) {
+                if let Some(path) =
+                    build_arc_path(cx, cy, rx, ry, start_rad, extent_rad, arc_mode, angle2)
+                {
+                    let mut paint = Paint::default();
+                    paint.set_color(skia_color(color));
+                    paint.anti_alias = true;
+                    let clip_mask = build_clip_mask(self.width, self.height, clip_rects);
+                    let _ = self.with_pixmap_mut(|pm| {
+                        pm.fill_path(
+                            &path,
+                            &paint,
+                            FillRule::Winding,
+                            Transform::identity(),
+                            clip_mask.as_ref(),
+                        );
+                    });
+                    self.mark_dirty(x as i32, y as i32, width as u32, height as u32);
+                    return;
+                }
+            }
+
+            // Fallback: per-pixel scan with raster op + plane_mask.
             let min_y = y.max(0) as i32;
             let max_y = ((y as i32 + height as i32).min(self.height as i32 - 1)).max(0);
             let min_x = x.max(0) as i32;
             let max_x = ((x as i32 + width as i32).min(self.width as i32 - 1)).max(0);
-
-            if arc_mode == 0 && angle2.abs() < 360 * 64 {
-                // ArcChord: fill area between the arc and a straight chord
-                // connecting start and end points of the arc.
-                let end_rad = start_rad + extent_rad;
-                // Chord endpoints in normalized coords
-                let chord_x1 = start_rad.cos();
-                let chord_y1 = -start_rad.sin();
-                let chord_x2 = end_rad.cos();
-                let chord_y2 = -end_rad.sin();
-                // Direction vector of chord: (dx, dy)
-                let cdx = chord_x2 - chord_x1;
-                let cdy = chord_y2 - chord_y1;
-                // Mid-arc point to determine which side of chord to fill
-                let mid_rad = start_rad + extent_rad / 2.0;
-                let mid_x = mid_rad.cos();
-                let mid_y = -mid_rad.sin();
-                let mid_cross = cdx * (mid_y - chord_y1) - cdy * (mid_x - chord_x1);
-
-                for py in min_y..=max_y {
-                    for px in min_x..=max_x {
-                        let ddx = (px as f64 - cx) / rx;
-                        let ddy = (py as f64 - cy) / ry;
-                        if ddx * ddx + ddy * ddy <= 1.0 {
-                            // Check if point is on same side of chord as mid-arc
-                            let cross = cdx * (ddy - chord_y1) - cdy * (ddx - chord_x1);
-                            if (cross >= 0.0) == (mid_cross >= 0.0) {
-                                self.draw_point_gc(px, py, color, gc_func, plane_mask, clip_rects);
-                            }
-                        }
-                    }
-                }
-            } else {
-                // ArcPieSlice (default): fill from center like a pie wedge
-                for py in min_y..=max_y {
-                    for px in min_x..=max_x {
-                        let ddx = (px as f64 - cx) / rx;
-                        let ddy = (py as f64 - cy) / ry;
-                        if ddx * ddx + ddy * ddy <= 1.0
-                            && (angle2.abs() >= 360 * 64
-                                || point_in_arc(ddx, ddy, start_rad, extent_rad))
-                        {
-                            self.draw_point_gc(px, py, color, gc_func, plane_mask, clip_rects);
-                        }
+            let chord = ArcChordData::new_if_chord(arc_mode, angle2, start_rad, extent_rad);
+            for py in min_y..=max_y {
+                for px in min_x..=max_x {
+                    if Self::pixel_in_filled_arc(
+                        px,
+                        py,
+                        cx,
+                        cy,
+                        rx,
+                        ry,
+                        angle1,
+                        angle2,
+                        start_rad,
+                        extent_rad,
+                        arc_mode,
+                        chord.as_ref(),
+                    ) {
+                        self.draw_point_gc(px, py, color, gc_func, plane_mask, clip_rects);
                     }
                 }
             }
         } else {
+            // Stroked arc outline.
             let lw = line_width.max(1) as f64;
-            if lw <= 1.0 {
-                // Thin line: use parametric Bresenham approach
-                let steps = ((rx + ry) * 2.0).max(64.0) as usize;
-                let mut prev_x: Option<i32> = None;
-                let mut prev_y: Option<i32> = None;
 
+            // Fast path: solid GXcopy goes to tiny-skia for AA stroke.
+            if skia_eligible(gc_func, plane_mask) {
+                if let Some(path) = build_arc_polyline(cx, cy, rx, ry, start_rad, extent_rad) {
+                    let mut paint = Paint::default();
+                    paint.set_color(skia_color(color));
+                    paint.anti_alias = true;
+                    let mut stroke = Stroke::default();
+                    stroke.width = lw as f32;
+                    stroke.line_cap = tiny_skia::LineCap::Butt;
+                    let clip_mask = build_clip_mask(self.width, self.height, clip_rects);
+                    let _ = self.with_pixmap_mut(|pm| {
+                        pm.stroke_path(
+                            &path,
+                            &paint,
+                            &stroke,
+                            Transform::identity(),
+                            clip_mask.as_ref(),
+                        );
+                    });
+                    self.mark_dirty(x as i32, y as i32, width as u32, height as u32);
+                    return;
+                }
+            }
+
+            // Fallback: thick stroke via concentric ellipse scan; thin
+            // stroke via Bresenham between sampled arc points.
+            if lw <= 1.0 {
+                let steps = ((rx + ry) * 2.0).max(64.0) as usize;
+                let mut prev: Option<(i32, i32)> = None;
                 for i in 0..=steps {
                     let t = start_rad + extent_rad * (i as f64 / steps as f64);
                     let px = (cx + rx * t.cos()) as i32;
                     let py = (cy - ry * t.sin()) as i32;
-
-                    if let (Some(lx), Some(ly)) = (prev_x, prev_y) {
-                        // Use GC-aware point drawing via bresenham steps
-                        let dx: i32 = (px - lx).abs();
-                        let dy: i32 = -(py - ly).abs();
-                        let sx: i32 = if lx < px { 1 } else { -1 };
-                        let sy: i32 = if ly < py { 1 } else { -1 };
-                        let mut err = dx + dy;
-                        let mut bx = lx;
-                        let mut by = ly;
-                        loop {
-                            self.draw_point_gc(bx, by, color, gc_func, plane_mask, clip_rects);
-                            if bx == px && by == py {
-                                break;
-                            }
-                            let e2 = 2 * err;
-                            if e2 >= dy {
-                                err += dy;
-                                bx += sx;
-                            }
-                            if e2 <= dx {
-                                err += dx;
-                                by += sy;
-                            }
-                        }
+                    if let Some((lx, ly)) = prev {
+                        self.bresenham_line_rop_clipped(
+                            lx, ly, px, py, color, gc_func, plane_mask, clip_rects,
+                        );
                     }
-                    prev_x = Some(px);
-                    prev_y = Some(py);
+                    prev = Some((px, py));
                 }
             } else {
-                // Thick line: scan-convert the region between inner and outer
-                // concentric ellipses and filter by angular range.
                 let half_lw = lw / 2.0;
                 let outer_rx = rx + half_lw;
                 let outer_ry = ry + half_lw;
                 let inner_rx = (rx - half_lw).max(0.0);
                 let inner_ry = (ry - half_lw).max(0.0);
-
                 let full_circle = angle2.abs() >= 360 * 64;
-
-                // Bounding box of the outer ellipse
                 let min_x = (cx - outer_rx).floor() as i32;
                 let max_x = (cx + outer_rx).ceil() as i32;
                 let min_y = (cy - outer_ry).floor() as i32;
@@ -307,40 +307,23 @@ impl Framebuffer {
                     for px in min_x..=max_x {
                         let ddx = px as f64 - cx;
                         let ddy = py as f64 - cy;
-
-                        // Check if pixel is within the outer ellipse
-                        let outer_val = if outer_rx > 0.0 && outer_ry > 0.0 {
-                            (ddx / outer_rx).powi(2) + (ddy / outer_ry).powi(2)
-                        } else {
-                            f64::MAX
-                        };
+                        let outer_val = (ddx / outer_rx).powi(2) + (ddy / outer_ry).powi(2);
                         if outer_val > 1.0 {
                             continue;
                         }
-
-                        // Check if pixel is outside the inner ellipse
                         if inner_rx > 0.0 && inner_ry > 0.0 {
                             let inner_val = (ddx / inner_rx).powi(2) + (ddy / inner_ry).powi(2);
                             if inner_val < 1.0 {
                                 continue;
                             }
                         }
-                        // else inner ellipse has zero radius, so every point
-                        // inside outer is part of the stroke
-
-                        // Check angular range (use normalized coords against
-                        // the original ellipse center)
                         if !full_circle {
-                            // Normalize against the nominal ellipse radii for
-                            // angle test so the angular boundaries match the
-                            // X11 spec definition.
                             let norm_x = if rx > 0.0 { ddx / rx } else { ddx };
                             let norm_y = if ry > 0.0 { ddy / ry } else { ddy };
                             if !point_in_arc(norm_x, norm_y, start_rad, extent_rad) {
                                 continue;
                             }
                         }
-
                         self.draw_point_gc(px, py, color, gc_func, plane_mask, clip_rects);
                     }
                 }
@@ -741,34 +724,80 @@ impl Framebuffer {
             return;
         }
 
-        let Some(min_y) = points.iter().map(|p| p.1).min() else {
+        let bx0 = points.iter().map(|p| p.0).min().unwrap_or(0).max(0) as i32;
+        let by0 = points.iter().map(|p| p.1).min().unwrap_or(0).max(0) as i32;
+        let bx1 = (points.iter().map(|p| p.0).max().unwrap_or(0) as i32 + 1)
+            .min(self.width as i32);
+        let by1 = (points.iter().map(|p| p.1).max().unwrap_or(0) as i32 + 1)
+            .min(self.height as i32);
+        if bx0 >= bx1 || by0 >= by1 {
             return;
-        };
-        let min_y = min_y.max(0) as i32;
-        let max_y = points
-            .iter()
-            .map(|p| p.1)
-            .max()
-            .unwrap_or(0)
-            .min(self.height as i16 - 1) as i32;
+        }
 
-        for y in min_y..=max_y {
+        // Fast path: solid GXcopy goes to tiny-skia for AA fill.
+        if skia_eligible(gc_func, plane_mask) {
+            let mut pb = PathBuilder::new();
+            pb.move_to(points[0].0 as f32, points[0].1 as f32);
+            for &(px, py) in &points[1..] {
+                pb.line_to(px as f32, py as f32);
+            }
+            pb.close();
+            if let Some(path) = pb.finish() {
+                let mut paint = Paint::default();
+                paint.set_color(skia_color(color));
+                paint.anti_alias = false;
+                let rule = if fill_rule == 1 {
+                    FillRule::Winding
+                } else {
+                    FillRule::EvenOdd
+                };
+                let clip_mask = build_clip_mask(self.width, self.height, clip_rects);
+                let _ = self.with_pixmap_mut(|pm| {
+                    pm.fill_path(&path, &paint, rule, Transform::identity(), clip_mask.as_ref());
+                });
+                self.mark_dirty(
+                    bx0,
+                    by0,
+                    (bx1 - bx0) as u32,
+                    (by1 - by0) as u32,
+                );
+                return;
+            }
+        }
+
+        // Fallback: scanline fill applying raster op + plane_mask.
+        for y in by0..by1 {
             let n = points.len();
+            let mut crossings: Vec<(i32, i32)> = Vec::new();
+            for i in 0..n {
+                let (x0, y0) = (points[i].0 as i32, points[i].1 as i32);
+                let (x1, y1) = (points[(i + 1) % n].0 as i32, points[(i + 1) % n].1 as i32);
+                if (y0 <= y && y1 > y) || (y1 <= y && y0 > y) {
+                    let x = x0 + (y - y0) * (x1 - x0) / (y1 - y0);
+                    let dir = if y0 < y1 { 1 } else { -1 };
+                    crossings.push((x, dir));
+                }
+            }
+            crossings.sort_unstable_by_key(|c| c.0);
+
+            let emit_span = |this: &mut Self, sx: i32, ex: i32| {
+                let sx = sx.max(0).min(i16::MAX as i32) as i16;
+                let ex = ex.min(this.width as i32 - 1).min(i16::MAX as i32) as i16;
+                if ex >= sx {
+                    this.fill_rect_rop_clipped(
+                        sx,
+                        y as i16,
+                        (ex - sx + 1) as u16,
+                        1,
+                        color,
+                        gc_func,
+                        plane_mask,
+                        clip_rects,
+                    );
+                }
+            };
 
             if fill_rule == 1 {
-                // Winding rule: collect (x, direction) crossings, fill wherever winding != 0
-                let mut crossings: Vec<(i32, i32)> = Vec::new();
-                for i in 0..n {
-                    let (x0, y0) = (points[i].0 as i32, points[i].1 as i32);
-                    let (x1, y1) = (points[(i + 1) % n].0 as i32, points[(i + 1) % n].1 as i32);
-                    if (y0 <= y && y1 > y) || (y1 <= y && y0 > y) {
-                        let x = x0 + (y - y0) * (x1 - x0) / (y1 - y0);
-                        let dir = if y0 < y1 { 1 } else { -1 };
-                        crossings.push((x, dir));
-                    }
-                }
-                crossings.sort_unstable_by_key(|c| c.0);
-
                 let mut winding = 0i32;
                 let mut span_start: Option<i32> = None;
                 for (cx, dir) in &crossings {
@@ -779,53 +808,15 @@ impl Framebuffer {
                         span_start = Some(*cx);
                     } else if was_inside && !now_inside {
                         if let Some(sx_val) = span_start.take() {
-                            let sx = sx_val.max(0).min(i16::MAX as i32) as i16;
-                            let ex = (*cx).min(self.width as i32 - 1).min(i16::MAX as i32) as i16;
-                            if ex >= sx {
-                                self.fill_rect_rop_clipped(
-                                    sx,
-                                    y as i16,
-                                    (ex - sx + 1) as u16,
-                                    1,
-                                    color,
-                                    gc_func,
-                                    plane_mask,
-                                    clip_rects,
-                                );
-                            }
+                            emit_span(self, sx_val, *cx);
                         }
                     }
                 }
             } else {
-                // EvenOdd rule (default)
-                let mut intersections = Vec::new();
-                for i in 0..n {
-                    let (x0, y0) = (points[i].0 as i32, points[i].1 as i32);
-                    let (x1, y1) = (points[(i + 1) % n].0 as i32, points[(i + 1) % n].1 as i32);
-
-                    if (y0 <= y && y1 > y) || (y1 <= y && y0 > y) {
-                        let x = x0 + (y - y0) * (x1 - x0) / (y1 - y0);
-                        intersections.push(x);
-                    }
-                }
-                intersections.sort_unstable();
-
-                for pair in intersections.chunks(2) {
+                let xs: Vec<i32> = crossings.iter().map(|c| c.0).collect();
+                for pair in xs.chunks(2) {
                     if pair.len() == 2 {
-                        let start_x = pair[0].max(0).min(i16::MAX as i32) as i16;
-                        let end_x = pair[1].min(self.width as i32 - 1).min(i16::MAX as i32) as i16;
-                        if end_x >= start_x {
-                            self.fill_rect_rop_clipped(
-                                start_x,
-                                y as i16,
-                                (end_x - start_x + 1) as u16,
-                                1,
-                                color,
-                                gc_func,
-                                plane_mask,
-                                clip_rects,
-                            );
-                        }
+                        emit_span(self, pair[0], pair[1]);
                     }
                 }
             }
@@ -1019,4 +1010,75 @@ impl Framebuffer {
         }
         result
     }
+}
+
+/// Build an *open* polyline path along the arc — no closing edge. For
+/// stroke rendering of the outline.
+fn build_arc_polyline(
+    cx: f64,
+    cy: f64,
+    rx: f64,
+    ry: f64,
+    start_rad: f64,
+    extent_rad: f64,
+) -> Option<tiny_skia::Path> {
+    if rx <= 0.0 || ry <= 0.0 {
+        return None;
+    }
+    let segments = ((rx + ry) * 2.0).clamp(32.0, 256.0) as usize;
+    let mut pb = PathBuilder::new();
+    let pt = |t: f64| ((cx + rx * t.cos()) as f32, (cy - ry * t.sin()) as f32);
+    let (sx, sy) = pt(start_rad);
+    pb.move_to(sx, sy);
+    for i in 1..=segments {
+        let t = start_rad + extent_rad * (i as f64 / segments as f64);
+        let (px, py) = pt(t);
+        pb.line_to(px, py);
+    }
+    pb.finish()
+}
+
+/// Build a tiny-skia path approximating an X11 elliptical arc as a
+/// polyline. Returns `None` for degenerate inputs.
+///
+/// `arc_mode`: 0 = ArcChord (close start→end with a chord),
+///             1 = ArcPieSlice (close through the ellipse centre).
+fn build_arc_path(
+    cx: f64,
+    cy: f64,
+    rx: f64,
+    ry: f64,
+    start_rad: f64,
+    extent_rad: f64,
+    arc_mode: u8,
+    angle2: i16,
+) -> Option<tiny_skia::Path> {
+    if rx <= 0.0 || ry <= 0.0 {
+        return None;
+    }
+    let full_circle = angle2.abs() >= 360 * 64;
+    let segments = ((rx + ry) * 2.0).clamp(32.0, 256.0) as usize;
+    let mut pb = PathBuilder::new();
+    let pt = |t: f64| ((cx + rx * t.cos()) as f32, (cy - ry * t.sin()) as f32);
+    let (sx, sy) = pt(start_rad);
+    if full_circle || arc_mode != 0 {
+        // PieSlice (or full ellipse): start at centre, line out to arc start.
+        if !full_circle {
+            pb.move_to(cx as f32, cy as f32);
+            pb.line_to(sx, sy);
+        } else {
+            pb.move_to(sx, sy);
+        }
+    } else {
+        // Chord: arc start is the path start; the closing edge will be
+        // the implicit line from the arc end back to (sx, sy).
+        pb.move_to(sx, sy);
+    }
+    for i in 1..=segments {
+        let t = start_rad + extent_rad * (i as f64 / segments as f64);
+        let (px, py) = pt(t);
+        pb.line_to(px, py);
+    }
+    pb.close();
+    pb.finish()
 }
