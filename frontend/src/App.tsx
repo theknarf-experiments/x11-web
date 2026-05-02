@@ -589,11 +589,22 @@ function App() {
 				{visibleWindows.map((win) => {
 					// Lazy-create the renderer so a window appearing in
 					// the authoritative list shows up immediately, before
-					// the first PutImage arrives over the DC.
+					// the first PutImage arrives over the DC. Sync
+					// the back buffer to the descriptor's authoritative
+					// size on every render — `pushPutImage`'s built-in
+					// resize is grow-only, so a shrinking window (e.g.
+					// Calculator going from Scientific back to Basic)
+					// otherwise leaves the canvas at the previous larger
+					// size with stale pixels in the unused region.
 					let renderer = renderersRef.current.get(win.windowId);
 					if (!renderer) {
 						renderer = new ClientRenderer(win.width || 1, win.height || 1);
 						renderersRef.current.set(win.windowId, renderer);
+					} else if (
+						renderer.width !== win.width ||
+						renderer.height !== win.height
+					) {
+						renderer.resize(win.width || 1, win.height || 1);
 					}
 					return (
 						<div
@@ -610,6 +621,7 @@ function App() {
 								cursor={win.cursor}
 								renderer={renderer}
 								overrideRedirect={win.overrideRedirect}
+								resizable={win.resizable}
 								wmState={win.wmState}
 								onClose={() => handleCloseWindow(win.windowId, win.sidecarId)}
 								onMove={(nx, ny) => handleMove(win.windowId, nx, ny)}

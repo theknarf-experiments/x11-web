@@ -61,17 +61,12 @@ export class ClientRenderer {
 		this.paintChain = this.paintChain
 			.then(() => createImageBitmap(blob))
 			.then((bitmap) => {
-				const right = x + width;
-				const bottom = y + height;
-				if (
-					right > this.backBuffer.width ||
-					bottom > this.backBuffer.height
-				) {
-					this.resizeBuffer(
-						Math.max(right, this.backBuffer.width),
-						Math.max(bottom, this.backBuffer.height),
-					);
-				}
+				// No resize logic here — the back buffer's size is
+				// driven exclusively by `resize()` calls from the
+				// caller, which mirror the server's authoritative
+				// `WindowDescriptor.{width, height}`. PutImage rectangles
+				// outside the current canvas just clip; the next
+				// frame at the right size paints them.
 				this.ctx.drawImage(bitmap, x, y);
 				bitmap.close();
 				this.dirty = true;

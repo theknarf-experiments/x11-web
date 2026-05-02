@@ -13,6 +13,10 @@ interface WindowFrameProps {
 	cursor: string;
 	renderer: ClientRenderer;
 	overrideRedirect?: boolean;
+	/** Whether the underlying app supports drag-resize. False for
+	 * fixed-size apps (e.g., macOS Calculator) — we hide the resize
+	 * handles entirely so the user doesn't get a no-op gesture. */
+	resizable?: boolean;
 	/** Current WM state (normal, minimized, maximized, fullscreen). */
 	wmState?: WindowWmState;
 	onClose: () => void;
@@ -57,6 +61,7 @@ export function WindowFrame({
 	cursor,
 	renderer,
 	overrideRedirect,
+	resizable = true,
 	wmState = "normal",
 	onClose,
 	onMove,
@@ -866,7 +871,7 @@ export function WindowFrame({
 				onCompositionEnd={handleCompositionEnd}
 				onContextMenu={handleContextMenu}
 			/>
-			{!isMaximized && !isFullscreen && (
+			{resizable && !isMaximized && !isFullscreen && (
 				<>
 					<div
 						className={`${s.resizeHandle} ${s.resizeSE}`}

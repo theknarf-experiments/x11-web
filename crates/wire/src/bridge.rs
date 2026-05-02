@@ -143,6 +143,7 @@ fn write_display_payload(
             override_redirect,
             border_width,
             border_pixel,
+            resizable,
         } => {
             let mut wc = payload.init_window_created();
             wc.set_window_id(window_id);
@@ -154,6 +155,7 @@ fn write_display_payload(
             wc.set_override_redirect(*override_redirect);
             wc.set_border_width(*border_width);
             wc.set_border_pixel(*border_pixel);
+            wc.set_resizable(*resizable);
         }
         DisplayUpdate::WindowDestroyed { window_id } => {
             let mut wd = payload.init_window_destroyed();
@@ -181,6 +183,7 @@ fn write_display_payload(
             height,
             border_width,
             border_pixel,
+            resizable,
         } => {
             let mut wc = payload.init_window_configured();
             wc.set_window_id(window_id);
@@ -190,6 +193,7 @@ fn write_display_payload(
             wc.set_height(*height);
             wc.set_border_width(*border_width);
             wc.set_border_pixel(*border_pixel);
+            wc.set_resizable(*resizable);
         }
         DisplayUpdate::TitleChanged { window_id, title } => {
             let mut tc = payload.init_title_changed();
@@ -385,6 +389,7 @@ fn read_display_payload(
                 override_redirect: wc.get_override_redirect(),
                 border_width: wc.get_border_width(),
                 border_pixel: wc.get_border_pixel(),
+                resizable: wc.get_resizable(),
             }
         }
         Which::WindowDestroyed(wd) => {
@@ -417,6 +422,7 @@ fn read_display_payload(
                 height: wc.get_height(),
                 border_width: wc.get_border_width(),
                 border_pixel: wc.get_border_pixel(),
+                resizable: wc.get_resizable(),
             }
         }
         Which::TitleChanged(tc) => {

@@ -178,6 +178,7 @@ pub(crate) fn resize_window(
                 height: win.height,
                 border_width: win.border_width,
                 border_pixel: win.border_pixel,
+                resizable: true,
             },
         ));
     }

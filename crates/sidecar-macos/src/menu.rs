@@ -89,6 +89,17 @@ fn read_menu_item(element: &AXUIElement, id: String, depth: u32) -> Option<MenuI
     let title = attribute_string(element, "AXTitle").unwrap_or_default();
     let enabled = attribute_bool(element, "AXEnabled").unwrap_or(true);
 
+    // `AXMenuItemMarkChar` carries the rendered mark — `"✓"` for a
+    // checked checkbox, `"•"` for a selected radio, empty otherwise.
+    // Treat its presence as "this item is currently checked," and
+    // its character as a hint for which kind of toggle it is.
+    // (Items that *could* be checkable but aren't currently checked
+    // have no mark char and look identical to plain `Normal` items
+    // in AX — there's no way to distinguish at rest. The class
+    // gets corrected the next time the user checks one.)
+    let mark = attribute_string(element, "AXMenuItemMarkChar").unwrap_or_default();
+    let checked = if mark.is_empty() { None } else { Some(true) };
+
     // A menu item with a submenu has an `AXMenu` child holding the
     // submenu's items; one without is a leaf. Some apps mark
     // separators with empty title and no children.
@@ -102,6 +113,10 @@ fn read_menu_item(element: &AXUIElement, id: String, depth: u32) -> Option<MenuI
         MenuItemKind::Separator
     } else if has_submenu {
         MenuItemKind::Submenu
+    } else if mark.contains('•') || mark.contains('◦') {
+        MenuItemKind::Radio
+    } else if !mark.is_empty() {
+        MenuItemKind::Checkbox
     } else {
         MenuItemKind::Normal
     };
@@ -150,11 +165,10 @@ fn read_menu_item(element: &AXUIElement, id: String, depth: u32) -> Option<MenuI
         kind,
         enabled,
         visible: true,
-        // `AXMenuItemMarkChar` would tell us about checkboxes /
-        // radios, and `AXMenuItemCmdChar` + `AXMenuItemCmdModifiers`
-        // would let us reconstruct the keyboard accelerator. v1
-        // skips both — the global menu bar still works fine.
-        checked: None,
+        checked,
+        // `AXMenuItemCmdChar` + `AXMenuItemCmdModifiers` would let
+        // us reconstruct the keyboard accelerator (e.g. "⌘Q"). Not
+        // wired yet.
         accelerator: None,
         icon: None,
         action,

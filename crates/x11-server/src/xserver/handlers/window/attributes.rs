@@ -195,6 +195,7 @@ pub(crate) fn handle_change_window_attributes(
                         height: win.height,
                         border_width: win.border_width,
                         border_pixel: win.border_pixel,
+                        resizable: true,
                     },
                 ));
             }

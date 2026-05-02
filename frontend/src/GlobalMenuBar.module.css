@@ -102,11 +102,16 @@
 	color: rgba(255, 255, 255, 0.9);
 	font: inherit;
 	font-size: 13px;
-	padding: 5px 14px;
-	display: flex;
+	padding: 5px 14px 5px 4px;
+	/* Three-column layout: dedicated slot for the check mark so
+	   labels of checked and unchecked items stay aligned, then the
+	   label, then the right-edge column for accelerator or
+	   submenu chevron. The mark slot has fixed width so no item
+	   ever shifts horizontally based on its own state. */
+	display: grid;
+	grid-template-columns: 18px 1fr auto;
+	column-gap: 8px;
 	align-items: center;
-	justify-content: space-between;
-	gap: 24px;
 	cursor: pointer;
 	text-align: left;
 }
@@ -120,8 +125,14 @@
 	cursor: default;
 }
 
+.itemMark {
+	font-size: 12px;
+	color: rgba(255, 255, 255, 0.85);
+	text-align: center;
+	line-height: 1;
+}
+
 .itemLabel {
-	flex: 1;
 	white-space: nowrap;
 	overflow: hidden;
 	text-overflow: ellipsis;
@@ -130,6 +141,8 @@
 .accel {
 	color: rgba(255, 255, 255, 0.5);
 	font-size: 12px;
+	min-width: 36px;
+	text-align: right;
 }
 
 .submenuChevron {

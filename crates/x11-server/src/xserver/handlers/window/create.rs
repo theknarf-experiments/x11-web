@@ -317,6 +317,7 @@ pub(crate) fn handle_create_window(state: &mut ClientState, req: &CreateWindowRe
             override_redirect,
             border_width: if is_input_only { 0 } else { border_width },
             border_pixel: if is_input_only { 0 } else { border_pixel },
+            resizable: true,
         },
     ));
 

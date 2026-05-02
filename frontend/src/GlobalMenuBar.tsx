@@ -231,10 +231,8 @@ function MenuRow({
 						else onOpenSubmenu();
 					}}
 				>
-					<span className={s.itemLabel}>
-						{checked ? "✓ " : ""}
-						{item.label ?? ""}
-					</span>
+					<span className={s.itemMark}>{checked ? "✓" : ""}</span>
+					<span className={s.itemLabel}>{item.label ?? ""}</span>
 					<span className={s.submenuChevron}>▸</span>
 				</button>
 				{isOpen && item.children && (
@@ -255,13 +253,9 @@ function MenuRow({
 			onPointerEnter={onCloseSiblings}
 			onClick={() => onActivate(item.action)}
 		>
-			<span className={s.itemLabel}>
-				{checked ? "✓ " : ""}
-				{item.label ?? ""}
-			</span>
-			{item.accelerator && (
-				<span className={s.accel}>{item.accelerator}</span>
-			)}
+			<span className={s.itemMark}>{checked ? "✓" : ""}</span>
+			<span className={s.itemLabel}>{item.label ?? ""}</span>
+			<span className={s.accel}>{item.accelerator ?? ""}</span>
 		</button>
 	);
 }

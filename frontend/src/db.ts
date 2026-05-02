@@ -108,6 +108,7 @@ export interface WindowRow {
 	borderWidth: number;
 	borderPixel: number;
 	overrideRedirect: boolean;
+	resizable: boolean;
 	x: number;
 	y: number;
 	title: string;
@@ -176,6 +177,7 @@ export function applyWindowList(
 					borderWidth: d.border_width,
 					borderPixel: d.border_pixel,
 					overrideRedirect: d.override_redirect,
+					resizable: d.resizable,
 					x,
 					y,
 					stackingOrder,
@@ -195,6 +197,7 @@ export function applyWindowList(
 					borderWidth: d.border_width,
 					borderPixel: d.border_pixel,
 					overrideRedirect: d.override_redirect,
+					resizable: d.resizable,
 					x: seed.x,
 					y: seed.y,
 					title: seed.title,

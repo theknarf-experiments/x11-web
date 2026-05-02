@@ -272,6 +272,20 @@ mod macos {
             BackendToSidecar::StopWindowCapture { window_id } => {
                 let _ = capture_ctl_tx.send(CaptureControl::Stop { window_id });
             }
+            BackendToSidecar::ResizeWindow {
+                window_id,
+                width,
+                height,
+            } => match router.lookup(&window_id) {
+                Some(route) => {
+                    info!(
+                        "ResizeWindow: pid={} {width}x{height}",
+                        route.pid
+                    );
+                    x11_web_sidecar_macos::resize::inject_resize(route, width, height);
+                }
+                None => warn!("ResizeWindow: no route for window_id={window_id}"),
+            },
             other => {
                 info!("Backend msg (ignored): {other:?}");
             }

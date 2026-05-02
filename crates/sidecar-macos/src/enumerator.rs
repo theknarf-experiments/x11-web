@@ -72,6 +72,10 @@ struct Tracked {
     /// backend asks to stop or the window vanishes.
     capture_stop: Option<CaptureStop>,
     thumbnail_stop: Option<CaptureStop>,
+    /// Menu-poll thread handle. Lifecycle matches `capture_stop` —
+    /// the menu only needs mirroring while the window is on the
+    /// canvas, since the picker doesn't show menus.
+    menu_stop: Option<CaptureStop>,
 }
 
 /// Commands the enumerator listens for so on-demand SCStream
@@ -162,7 +166,8 @@ fn enumerate_step(
             },
         );
         // Thumbnails always run so the picker has live previews.
-        // Live capture is started later via CaptureControl::Start.
+        // Live capture + menu mirroring are started later via
+        // CaptureControl::Start.
         let thumbnail_stop = spawn_thumbnail_loop(*id, uuid.clone(), win.pid, tx.clone());
         tracked.insert(
             *id,
@@ -173,6 +178,7 @@ fn enumerate_step(
                 title: win.name.clone(),
                 capture_stop: None,
                 thumbnail_stop: Some(thumbnail_stop),
+                menu_stop: None,
             },
         );
     }
@@ -181,12 +187,37 @@ fn enumerate_step(
     for (id, win) in &current {
         if let Some(prev) = tracked.get_mut(id) {
             if !bounds_eq(&prev.bounds, &win.bounds) {
-                emit_configured(tx, &prev.uuid, &win.bounds);
+                emit_configured(tx, &prev.uuid, prev.pid, &win.bounds);
                 router.update_bounds(&prev.uuid, win.bounds);
                 prev.bounds = win.bounds;
+                // SCStream and the screenshot session both pin
+                // their dimensions at session-build time. After a
+                // size change (e.g. Calculator switching from
+                // Basic to Scientific) frames continue arriving at
+                // the original size. Tear down and respawn so the
+                // new bounds take effect. We only rebuild capture
+                // if it was running — thumbnails always restart.
+                if let Some(stop) = prev.capture_stop.take() {
+                    stop.abort();
+                    prev.capture_stop = Some(spawn_capture_loop(
+                        *id,
+                        prev.uuid.clone(),
+                        prev.pid,
+                        tx.clone(),
+                    ));
+                }
+                if let Some(stop) = prev.thumbnail_stop.take() {
+                    stop.abort();
+                    prev.thumbnail_stop = Some(spawn_thumbnail_loop(
+                        *id,
+                        prev.uuid.clone(),
+                        prev.pid,
+                        tx.clone(),
+                    ));
+                }
             }
             if prev.title != win.name {
-                emit_title(tx, &prev.uuid, &win.name);
+                emit_title(tx, &prev.uuid, prev.pid, &win.name);
                 prev.title = win.name.clone();
             }
         }
@@ -201,6 +232,9 @@ fn enumerate_step(
                 stop.abort();
             }
             if let Some(stop) = prev.thumbnail_stop.take() {
+                stop.abort();
+            }
+            if let Some(stop) = prev.menu_stop.take() {
                 stop.abort();
             }
             router.remove(&prev.uuid);
@@ -236,12 +270,12 @@ fn handle_capture_control(
             let stop = spawn_capture_loop(*cg_id, t.uuid.clone(), t.pid, tx.clone());
             t.capture_stop = Some(stop);
             info!("Started live capture for window {} (cg_id={cg_id})", t.uuid);
-            // Mirror the app's macOS menu bar into a MenuStructure
-            // event so the frontend's GlobalMenuBar can render it.
-            // Reads block on AX RPC into the target process, so we
-            // hand it off to the blocking thread pool — the
-            // enumerator loop must stay responsive.
-            spawn_menu_read(t.pid, t.uuid.clone(), tx.clone());
+            // Start mirroring the app's macOS menu bar. Polls AX
+            // periodically so checkbox toggles / item add-remove /
+            // accelerator changes flow through to the global menu
+            // bar without an attach-detach cycle.
+            let menu_stop = spawn_menu_poll_loop(t.pid, t.uuid.clone(), tx.clone());
+            t.menu_stop = Some(menu_stop);
         }
         CaptureControl::Stop { window_id } => {
             let entry = tracked.iter_mut().find(|(_, t)| t.uuid == window_id);
@@ -253,44 +287,89 @@ fn handle_capture_control(
                 stop.abort();
                 info!("Stopped live capture for window {} (cg_id={cg_id})", t.uuid);
             }
+            if let Some(stop) = t.menu_stop.take() {
+                stop.abort();
+            }
         }
     }
 }
 
-/// Read the macOS menu bar of the app at `pid` and emit a
-/// `MenuStructure` for `window_id`. AX is RPC into the target
-/// process and can take 5–50 ms (longer if the app is slow), so we
-/// run on the blocking pool with a wall-clock budget. Empty menu on
-/// failure / timeout is a benign no-op for the frontend's
-/// GlobalMenuBar.
-fn spawn_menu_read(pid: i32, window_id: String, tx: mpsc::UnboundedSender<SidecarToBackend>) {
+/// Period between successive menu reads while a window is attached.
+/// Slow enough that the AX RPC cost (~10–50 ms / read) is negligible
+/// in the bandwidth budget, fast enough that toggling a checkbox in
+/// the menu reflects in the global menu bar before the user notices.
+const MENU_POLL_PERIOD: Duration = Duration::from_secs(2);
+
+/// Polls the macOS menu bar of the app at `pid` and emits a
+/// `MenuStructure` for `window_id` on each tick while attached.
+/// Owns its OS thread so AX RPC blocking doesn't tie up tokio
+/// workers, and shuts down on `CaptureControl::Stop` (or window
+/// vanishing) via the same `CaptureStop` mpsc shutdown channel the
+/// capture / thumbnail loops use.
+fn spawn_menu_poll_loop(
+    pid: i32,
+    window_id: String,
+    tx: mpsc::UnboundedSender<SidecarToBackend>,
+) -> CaptureStop {
+    let (shutdown_tx, shutdown_rx) = std::sync::mpsc::channel::<()>();
+    let handle = std::thread::Builder::new()
+        .name(format!("macos-menu-{pid}"))
+        .spawn(move || run_menu_poll_loop(pid, window_id, tx, shutdown_rx))
+        .expect("spawn macos menu poll thread");
+    CaptureStop {
+        shutdown: shutdown_tx,
+        handle,
+    }
+}
+
+fn run_menu_poll_loop(
+    pid: i32,
+    window_id: String,
+    tx: mpsc::UnboundedSender<SidecarToBackend>,
+    shutdown_rx: std::sync::mpsc::Receiver<()>,
+) {
+    use std::sync::mpsc::RecvTimeoutError;
+
     let client_id = client_id_for_pid(pid);
-    let log_window_id = window_id.clone();
-    tokio::task::spawn_blocking(move || {
+    let log_window = window_id[..window_id.len().min(8)].to_string();
+    let mut first = true;
+    loop {
+        // First read fires immediately; subsequent reads wait up
+        // to MENU_POLL_PERIOD or until shutdown.
+        if !first {
+            match shutdown_rx.recv_timeout(MENU_POLL_PERIOD) {
+                Ok(()) | Err(RecvTimeoutError::Disconnected) => return,
+                Err(RecvTimeoutError::Timeout) => {}
+            }
+        }
+        first = false;
+
         let menu = crate::menu::read_menu_bar_with_timeout(pid, Duration::from_millis(500));
-        // Surface the AX outcome so an empty menu (the most common
-        // failure mode — missing TCC grant, or the app isn't
-        // frontmost) is visible in the sidecar log instead of
-        // failing silently into the frontend.
         if menu.is_empty() {
             warn!(
-                "menu: AX read returned 0 items for pid={pid} window={} \
+                "menu: AX read returned 0 items for pid={pid} window={log_window} \
                  (check Accessibility permission; some apps only expose \
-                 their menu bar when frontmost)",
-                &log_window_id[..log_window_id.len().min(8)]
+                 their menu bar when frontmost)"
             );
         } else {
             info!(
-                "menu: pid={pid} window={} → {} top-level items",
-                &log_window_id[..log_window_id.len().min(8)],
+                "menu: pid={pid} window={log_window} → {} top-level items",
                 menu.len()
             );
         }
-        let _ = tx.send(SidecarToBackend::DisplayUpdate {
-            client_id,
-            update: DisplayUpdate::MenuStructure { window_id, menu },
-        });
-    });
+        if tx
+            .send(SidecarToBackend::DisplayUpdate {
+                client_id: client_id.clone(),
+                update: DisplayUpdate::MenuStructure {
+                    window_id: window_id.clone(),
+                    menu,
+                },
+            })
+            .is_err()
+        {
+            return;
+        }
+    }
 }
 
 /// Per-window capture loop. Runs on a dedicated OS thread because
@@ -500,6 +579,7 @@ fn announce_pid_if_new(
 fn emit_created(tx: &mpsc::UnboundedSender<SidecarToBackend>, uuid: &str, win: &WindowInfo) {
     let (x, y, w, h) = clamp_bounds(&win.bounds);
     let client_id = client_id_for_pid(win.pid);
+    let resizable = crate::resize::is_resizable(win.pid, win.bounds);
     let _ = tx.send(SidecarToBackend::DisplayUpdate {
         client_id: client_id.clone(),
         update: DisplayUpdate::WindowCreated {
@@ -512,6 +592,7 @@ fn emit_created(tx: &mpsc::UnboundedSender<SidecarToBackend>, uuid: &str, win: &
             override_redirect: false,
             border_width: 0,
             border_pixel: 0,
+            resizable,
         },
     });
     let _ = tx.send(SidecarToBackend::DisplayUpdate {
@@ -536,15 +617,18 @@ fn emit_created(tx: &mpsc::UnboundedSender<SidecarToBackend>, uuid: &str, win: &
 fn emit_configured(
     tx: &mpsc::UnboundedSender<SidecarToBackend>,
     uuid: &str,
+    pid: i32,
     bounds: &WindowBounds,
 ) {
     let (x, y, w, h) = clamp_bounds(bounds);
-    // We don't know the pid from a UUID alone — this would matter for
-    // the WS protocol's `client_id` routing, but the backend just uses
-    // it as an opaque key, so any consistent value works. Using the
-    // window's UUID prefix keeps it stable per-window.
+    // Must match the `client_id` used by `emit_created` — the
+    // backend keys `window_track` on `(sidecar_id, client_id,
+    // window_id)`, and a different client_id here means the
+    // Configured update lands on a key the tracker doesn't have
+    // and the window's stored size never changes.
+    let resizable = crate::resize::is_resizable(pid, *bounds);
     let _ = tx.send(SidecarToBackend::DisplayUpdate {
-        client_id: format!("macos-win-{}", &uuid[..8]),
+        client_id: client_id_for_pid(pid),
         update: DisplayUpdate::WindowConfigured {
             window_id: uuid.to_string(),
             x,
@@ -553,13 +637,14 @@ fn emit_configured(
             height: h,
             border_width: 0,
             border_pixel: 0,
+            resizable,
         },
     });
 }
 
-fn emit_title(tx: &mpsc::UnboundedSender<SidecarToBackend>, uuid: &str, title: &str) {
+fn emit_title(tx: &mpsc::UnboundedSender<SidecarToBackend>, uuid: &str, pid: i32, title: &str) {
     let _ = tx.send(SidecarToBackend::DisplayUpdate {
-        client_id: format!("macos-win-{}", &uuid[..8]),
+        client_id: client_id_for_pid(pid),
         update: DisplayUpdate::TitleChanged {
             window_id: uuid.to_string(),
             title: title.to_string(),

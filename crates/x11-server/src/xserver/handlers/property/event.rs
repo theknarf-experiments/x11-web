@@ -296,6 +296,7 @@ pub(crate) fn handle_send_event(state: &mut ClientState, req: &SendEventRequest)
                                 height: sh,
                                 border_width: bw,
                                 border_pixel: bp,
+                                resizable: true,
                             },
                         ));
                     }
@@ -383,6 +384,7 @@ pub(crate) fn handle_send_event(state: &mut ClientState, req: &SendEventRequest)
                                     height: sh,
                                     border_width: bw,
                                     border_pixel: bp,
+                                    resizable: true,
                                 },
                             ));
                         }
@@ -597,6 +599,7 @@ pub(crate) fn handle_send_event(state: &mut ClientState, req: &SendEventRequest)
                             height,
                             border_width: bw,
                             border_pixel: bp,
+                            resizable: true,
                         },
                     ));
                 }

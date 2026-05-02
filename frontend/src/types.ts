@@ -131,6 +131,12 @@ export interface WindowDescriptor {
 	 * windows). False when it's the X11 default and the frontend may
 	 * apply its own layout heuristic. */
 	placed: boolean;
+	/** Whether the user can drag-resize this window. Set by the
+	 * sidecar — X11 sidecars always report true; the macOS sidecar
+	 * probes AX (`AXSize` settable) so fixed-size apps like
+	 * Calculator's Basic mode report false and the frontend hides
+	 * its resize handles. */
+	resizable: boolean;
 }
 
 export type WindowUpdate =

@@ -218,6 +218,12 @@ pub struct WindowDescriptor {
     pub border_pixel: u32,
     pub override_redirect: bool,
     pub placed: bool,
+    /// Whether the user can drag-resize the window. The frontend
+    /// hides resize handles when this is false. Sidecar-determined:
+    /// X11 windows are always reported as resizable; macOS sidecars
+    /// probe AX (`AXSize` settable on the underlying NSWindow).
+    #[serde(default = "default_true")]
+    pub resizable: bool,
 }
 
 /// Per-window incremental update sent to the frontend over the
@@ -290,6 +296,13 @@ pub enum DisplayUpdate {
         /// X11 border color (ARGB32).
         #[serde(default)]
         border_pixel: u32,
+        /// Whether the user can drag-resize the window. The frontend
+        /// hides resize handles when this is false. Sidecar-determined:
+        /// X11 windows are always treated as resizable (window managers
+        /// usually honour size hints anyway), macOS sidecars probe AX
+        /// to see if `AXSize` is settable on the underlying NSWindow.
+        #[serde(default = "default_true")]
+        resizable: bool,
     },
     /// A window was destroyed.
     WindowDestroyed {
@@ -320,6 +333,11 @@ pub enum DisplayUpdate {
         /// X11 border color (ARGB32).
         #[serde(default)]
         border_pixel: u32,
+        /// See [`WindowCreated::resizable`]; re-emitted on every
+        /// configure so apps that flip the constraint at runtime
+        /// (rare) reach the frontend.
+        #[serde(default = "default_true")]
+        resizable: bool,
     },
     /// Put an image (raw RGBA pixels, base64 encoded for JSON transport).
     PutImage {

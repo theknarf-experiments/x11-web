@@ -191,6 +191,11 @@ struct WindowCreated {
     overrideRedirect @6 :Bool;
     borderWidth @7 :UInt16;
     borderPixel @8 :UInt32;
+    # Whether the user can resize the window. macOS apps like
+    # Calculator have fixed-size windows; setting AXSize on them
+    # silently no-ops. The frontend hides the resize handles when
+    # this is false.
+    resizable @9 :Bool;
 }
 
 struct WindowDestroyed {
@@ -215,6 +220,10 @@ struct WindowConfigured {
     height @4 :UInt16;
     borderWidth @5 :UInt16;
     borderPixel @6 :UInt32;
+    # See `WindowCreated.resizable`. Re-emitted on every
+    # configure so apps that flip the constraint at runtime
+    # (rare) reach the frontend.
+    resizable @7 :Bool;
 }
 
 struct TitleChanged {

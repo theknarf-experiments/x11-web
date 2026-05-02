@@ -122,6 +122,10 @@ struct TrackedWindow {
     is_top_level: bool,
     override_redirect: bool,
     mapped: bool,
+    /// Whether the user can drag-resize this window. Sidecar reports
+    /// `true` for X11 windows unconditionally; macOS sidecars probe AX
+    /// and report whatever `AXSize`-settable says.
+    resizable: bool,
 }
 
 struct FrontendConnection {
@@ -1073,6 +1077,7 @@ async fn apply_window_lifecycle(
             override_redirect,
             border_width,
             border_pixel,
+            resizable,
         } => {
             let k = key(window_id);
             track.insert(
@@ -1087,6 +1092,7 @@ async fn apply_window_lifecycle(
                     is_top_level: *is_top_level,
                     override_redirect: *override_redirect,
                     mapped: false,
+                    resizable: *resizable,
                 },
             );
             if !order.contains(&k) {
@@ -1110,6 +1116,7 @@ async fn apply_window_lifecycle(
                 is_top_level: *is_top_level,
                 override_redirect: *override_redirect,
                 mapped: false,
+                resizable: true,
             });
             entry.is_top_level = *is_top_level;
             entry.override_redirect = *override_redirect;
@@ -1139,6 +1146,7 @@ async fn apply_window_lifecycle(
             height,
             border_width,
             border_pixel,
+            resizable,
         } => {
             if let Some(w) = track.get_mut(&key(window_id)) {
                 w.x = *x;
@@ -1147,6 +1155,7 @@ async fn apply_window_lifecycle(
                 w.height = *height;
                 w.border_width = *border_width;
                 w.border_pixel = *border_pixel;
+                w.resizable = *resizable;
             }
             true
         }
@@ -1212,6 +1221,7 @@ async fn build_window_list(state: &AppState) -> Vec<WindowDescriptor> {
             border_pixel: w.border_pixel,
             override_redirect: w.override_redirect,
             placed,
+            resizable: w.resizable,
         });
     }
     windows

@@ -25,6 +25,8 @@ pub mod input;
 #[cfg(target_os = "macos")]
 pub mod menu;
 #[cfg(target_os = "macos")]
+pub mod resize;
+#[cfg(target_os = "macos")]
 pub mod router;
 #[cfg(target_os = "macos")]
 pub mod screenshot;
