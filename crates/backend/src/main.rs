@@ -1307,14 +1307,12 @@ async fn apply_window_lifecycle(
     }
 }
 
-/// Build the current authoritative window list (visible windows only,
-/// in stacking order — last on top) and broadcast it to all frontends.
-/// Build the current authoritative window list. `(x, y)` carries
-/// only sidecar geometry — the X11 server position for popups, or
-/// the X server's default for top-level windows. The frontend joins
-/// this against the per-workspace doc's `window_positions` to get
-/// the user-tracked position for top-level windows; popups use
-/// `(x, y)` directly.
+/// Build the current authoritative window list (visible windows
+/// only) and broadcast it to all frontends. `(x, y)` is sidecar
+/// geometry — meaningful only for `override_redirect` popups,
+/// which keep X-server placement. Top-level windows take their
+/// canvas position from the matching `OcifNode` in the workspace
+/// doc; the descriptor's `(x, y)` is ignored on the frontend.
 async fn build_window_list(state: &AppState) -> Vec<WindowDescriptor> {
     let track = state.window_track.read().await;
     let order = state.window_order.read().await;

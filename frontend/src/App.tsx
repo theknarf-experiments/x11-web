@@ -126,7 +126,7 @@ function App() {
 		q.from({ p: processesCollection }).select(({ p }) => p),
 	);
 	// DOM order matches collection insertion order; visual stacking comes
-	// from `stackingOrder` via CSS z-index. Reordering the array would flip
+	// from `OcifNode.z` via CSS z-index. Reordering the array would flip
 	// the DOM whenever a window is raised, which breaks any hit-testing that
 	// uses DOM-position locators (e.g. Playwright's `nth(...)`).
 	const { data: windows = [] } = useLiveQuery((q) =>

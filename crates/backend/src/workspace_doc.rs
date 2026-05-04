@@ -27,7 +27,9 @@ use std::collections::HashMap;
 use automerge::sync::{State as SyncState, SyncDoc};
 use automerge::transaction::Transactable;
 use automerge::{AutoCommit, ObjType, ReadDoc, ScalarValue, Value, ROOT};
-use autosurgeon::{hydrate, reconcile, Hydrate, Reconcile};
+use autosurgeon::{reconcile, Hydrate, Reconcile};
+#[cfg(test)]
+use autosurgeon::hydrate;
 
 #[derive(Debug, Clone, Default, Reconcile, Hydrate)]
 pub struct WorkspaceDoc {
