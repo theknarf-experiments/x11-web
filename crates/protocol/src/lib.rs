@@ -119,9 +119,6 @@ pub enum FrontendToBackend {
         width: u16,
         height: u16,
     },
-    /// Update a window's tracked position (synced across frontends).
-    UpdateWindowPosition { window_id: String, x: f64, y: f64 },
-
     /// SDP offer initiating the WebRTC session — the frontend creates
     /// the peer connection and offer once the WS is up.
     RtcOffer { sdp: String },
@@ -170,12 +167,11 @@ pub struct ProcessInfo {
 /// control (kill button targets `(sidecar_id, pid)`).
 ///
 /// `override_redirect` distinguishes pop-ups (menus, tooltips) from
-/// regular top-level windows. `placed` indicates whether `(x, y)` is
-/// a meaningful position (X11 server position for popups, or a
-/// cross-frontend-tracked position for top-level windows that any
-/// frontend has dragged) versus an X11 default that the frontend can
-/// override with its own layout heuristic before the first
-/// `UpdateWindowPosition`.
+/// regular top-level windows. `(x, y)` is sidecar geometry — the X
+/// server position for popups, or the X server's default for
+/// top-level windows. User-collaborative position lives in the
+/// per-workspace Automerge doc's `window_positions`; the frontend
+/// joins these at render time.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WindowDescriptor {
     pub window_id: String,
@@ -189,7 +185,6 @@ pub struct WindowDescriptor {
     pub border_width: u16,
     pub border_pixel: u32,
     pub override_redirect: bool,
-    pub placed: bool,
     /// Whether the user can drag-resize the window. The frontend
     /// hides resize handles when this is false. Sidecar-determined:
     /// X11 windows are always reported as resizable; macOS sidecars
@@ -239,10 +234,6 @@ pub enum WindowUpdate {
         window_id: String,
         frames: Vec<AnimCursorFrame>,
     },
-    /// Cross-frontend drag delta — another tab moved this window.
-    /// High-frequency incremental update; the `WindowList` snapshot
-    /// is the slower-fan-out source of truth.
-    PositionChanged { window_id: String, x: f64, y: f64 },
 }
 
 /// A display update from the X server to be rendered in the browser.

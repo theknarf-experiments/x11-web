@@ -180,6 +180,60 @@ export function detachWindow(workspaceId: string, windowId: string) {
 	ship(workspaceId, drainOutbound(entry));
 }
 
+/** Read the tracked position for `windowId`, or `null` if no
+ *  frontend has placed this window yet (the renderer falls back to
+ *  the descriptor's geometry or a cascade seed). */
+export function getPosition(
+	workspaceId: string,
+	windowId: string,
+): { x: number; y: number } | null {
+	const entry = docs.get(workspaceId);
+	if (!entry) return null;
+	const map = entry.doc.window_positions as
+		| { [k: string]: { x: number; y: number } }
+		| undefined;
+	const pos = map?.[windowId];
+	return pos ? { x: pos.x, y: pos.y } : null;
+}
+
+/** Snapshot every tracked position for a workspace. Used by the
+ *  frontend's mirror loop to re-sync `WindowRow.x/y` against the
+ *  doc on every notify. */
+export function getAllPositions(
+	workspaceId: string,
+): Map<string, { x: number; y: number }> {
+	const out = new Map<string, { x: number; y: number }>();
+	const entry = docs.get(workspaceId);
+	if (!entry) return out;
+	const map = entry.doc.window_positions as
+		| { [k: string]: { x: number; y: number } }
+		| undefined;
+	if (!map) return out;
+	for (const [k, v] of Object.entries(map)) {
+		out.set(k, { x: v.x, y: v.y });
+	}
+	return out;
+}
+
+/** Set or update the tracked position for `windowId`. Called
+ *  from drag handlers; the doc syncs to backend + sibling tabs. */
+export function setPosition(
+	workspaceId: string,
+	windowId: string,
+	x: number,
+	y: number,
+) {
+	const entry = ensure(workspaceId);
+	const existing = (entry.doc.window_positions ?? {})[windowId];
+	if (existing && existing.x === x && existing.y === y) return;
+	entry.doc = Automerge.change(entry.doc, (d) => {
+		if (!d.window_positions) d.window_positions = {};
+		d.window_positions[windowId] = { x, y };
+	});
+	notify(workspaceId);
+	ship(workspaceId, drainOutbound(entry));
+}
+
 /** Drop our local doc + sync state for a workspace. Currently
  *  unused; we'll call this if a frontend ever switches workspaces
  *  mid-session. */

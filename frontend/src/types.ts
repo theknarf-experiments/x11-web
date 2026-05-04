@@ -63,12 +63,6 @@ export type FrontendToBackend =
 			width: number;
 			height: number;
 	  }
-	| {
-			type: "UpdateWindowPosition";
-			window_id: string;
-			x: number;
-			y: number;
-	  }
 	| { type: "RtcOffer"; sdp: string }
 	| {
 			type: "RtcIceCandidate";
@@ -119,11 +113,6 @@ export interface WindowDescriptor {
 	border_width: number;
 	border_pixel: number;
 	override_redirect: boolean;
-	/** True when (x, y) is a meaningful position (X11 server position
-	 * for popups, or a cross-frontend tracked position for top-level
-	 * windows). False when it's the X11 default and the frontend may
-	 * apply its own layout heuristic. */
-	placed: boolean;
 	/** Whether the user can drag-resize this window. Set by the
 	 * sidecar — X11 sidecars always report true; the macOS sidecar
 	 * probes AX (`AXSize` settable) so fixed-size apps like
@@ -163,8 +152,7 @@ export type WindowUpdate =
 			kind: "MenuStructure";
 			window_id: string;
 			menu: MenuItem[];
-	  }
-	| { kind: "PositionChanged"; window_id: string; x: number; y: number };
+	  };
 
 export type MenuItemKind =
 	| "normal"

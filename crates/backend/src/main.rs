@@ -45,12 +45,6 @@ struct AppState {
     /// on every change.
     window_track: Arc<RwLock<HashMap<(String, String, String), TrackedWindow>>>,
     window_order: Arc<RwLock<Vec<(String, String, String)>>>,
-    /// Per-window tracked positions, populated by
-    /// `UpdateWindowPosition` from frontends. Keyed by `window_id`.
-    /// Folded into `WindowDescriptor.{x, y, placed}` on every
-    /// `WindowList` broadcast so newly-connected frontends pick up
-    /// positions other tabs already chose.
-    window_positions: Arc<RwLock<HashMap<String, TrackedPosition>>>,
     /// Display update buffer per client_id for replay on frontend connect.
     /// PutImage is no longer in here — see `pixel_buffers`.
     display_buffers: Arc<RwLock<HashMap<String, Vec<BackendToFrontend>>>>,
@@ -100,16 +94,6 @@ struct SidecarConnection {
     info: SidecarInfo,
     kind: SidecarKind,
     tx: mpsc::UnboundedSender<BackendToSidecar>,
-}
-
-/// Per-window tracked position. Just `(x, y)` — owner identity (pid /
-/// sidecar / client) lives in `window_track` keyed by the same
-/// `window_id`, so cleanup paths use that for filtering rather than
-/// duplicating the metadata here.
-#[derive(Clone, Copy)]
-struct TrackedPosition {
-    x: f64,
-    y: f64,
 }
 
 /// Per-window state mirrored in the backend, keyed by
@@ -164,7 +148,6 @@ async fn async_main() {
         processes: Arc::new(RwLock::new(HashMap::new())),
         window_track: Arc::new(RwLock::new(HashMap::new())),
         window_order: Arc::new(RwLock::new(Vec::new())),
-        window_positions: Arc::new(RwLock::new(HashMap::new())),
         display_buffers: Arc::new(RwLock::new(HashMap::new())),
         pixel_buffers: Arc::new(RwLock::new(HashMap::new())),
         thumbnail_buffers: Arc::new(RwLock::new(HashMap::new())),
@@ -796,30 +779,6 @@ async fn handle_frontend_ws(socket: WebSocket, state: AppState) {
                 )
                 .await;
             }
-            FrontendToBackend::UpdateWindowPosition { window_id, x, y } => {
-                state
-                    .window_positions
-                    .write()
-                    .await
-                    .insert(window_id.clone(), TrackedPosition { x, y });
-
-                // Broadcast a tight delta to every *other* frontend
-                // (the originator already has the latest position
-                // locally). The next `WindowList` snapshot will also
-                // reflect this tracked position.
-                let frontends = state.frontends.read().await;
-                for (fid, frontend) in frontends.iter() {
-                    if fid != &frontend_id {
-                        let _ = frontend.tx.send(BackendToFrontend::WindowUpdate {
-                            update: WindowUpdate::PositionChanged {
-                                window_id: window_id.clone(),
-                                x,
-                                y,
-                            },
-                        });
-                    }
-                }
-            }
             FrontendToBackend::RtcOffer { sdp } => {
                 if let Some(frontend) = state.frontends.read().await.get(&frontend_id) {
                     let _ = frontend.rtc.signal_tx.send(rtc::RtcSignal::Offer(sdp));
@@ -1304,18 +1263,15 @@ async fn apply_window_lifecycle(
 
 /// Build the current authoritative window list (visible windows only,
 /// in stacking order — last on top) and broadcast it to all frontends.
-/// Build the current authoritative window list, with each
-/// descriptor's `(x, y, placed)` chosen as follows:
-///   - override-redirect popups: X11 position, `placed = true`
-///   - top-level with a tracked cross-frontend position: tracked
-///     position, `placed = true`
-///   - top-level without one: X11 default position, `placed = false`
-///     (frontend may apply its own layout heuristic and broadcast
-///     the result via `UpdateWindowPosition`).
+/// Build the current authoritative window list. `(x, y)` carries
+/// only sidecar geometry — the X11 server position for popups, or
+/// the X server's default for top-level windows. The frontend joins
+/// this against the per-workspace doc's `window_positions` to get
+/// the user-tracked position for top-level windows; popups use
+/// `(x, y)` directly.
 async fn build_window_list(state: &AppState) -> Vec<WindowDescriptor> {
     let track = state.window_track.read().await;
     let order = state.window_order.read().await;
-    let positions = state.window_positions.read().await;
     let procs = state.processes.read().await;
     let mut windows = Vec::with_capacity(order.len());
     for key @ (sidecar_id, client_id, window_id) in order.iter() {
@@ -1326,13 +1282,6 @@ async fn build_window_list(state: &AppState) -> Vec<WindowDescriptor> {
         if !(w.is_top_level || w.override_redirect) {
             continue;
         }
-        let (x, y, placed) = if w.override_redirect {
-            (w.x as f64, w.y as f64, true)
-        } else if let Some(p) = positions.get(window_id) {
-            (p.x, p.y, true)
-        } else {
-            (w.x as f64, w.y as f64, false)
-        };
         // Pull pid + command from the cached process list so the
         // frontend has everything needed for dock labels and the
         // kill button without a separate ProcessList lookup.
@@ -1346,14 +1295,13 @@ async fn build_window_list(state: &AppState) -> Vec<WindowDescriptor> {
             sidecar_id: sidecar_id.clone(),
             pid,
             command,
-            x,
-            y,
+            x: w.x as f64,
+            y: w.y as f64,
             width: w.width,
             height: w.height,
             border_width: w.border_width,
             border_pixel: w.border_pixel,
             override_redirect: w.override_redirect,
-            placed,
             resizable: w.resizable,
         });
     }

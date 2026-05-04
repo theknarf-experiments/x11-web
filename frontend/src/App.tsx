@@ -30,6 +30,11 @@ import {
 	useWorkspaceName,
 } from "./useBackendSocket";
 import { WindowFrame } from "./WindowFrame";
+import {
+	getAllPositions,
+	setPosition as setWorkspacePosition,
+	subscribe as subscribeWorkspace,
+} from "./workspaceSync";
 
 let requestCounter = 0;
 function nextRequestId() {
@@ -299,6 +304,27 @@ function App() {
 		return () => onBell(null);
 	}, [onBell]);
 
+	// Mirror doc positions onto `WindowRow.{x,y}`. Drag handlers
+	// optimistically patch the row for a smooth interactive feel,
+	// but the doc is the cross-tab source of truth — when a sibling
+	// tab moves a window, this listener picks up the sync and brings
+	// our row in line.
+	useEffect(() => {
+		if (!activeWorkspace) return;
+		const apply = () => {
+			const positions = getAllPositions(activeWorkspace.id);
+			for (const [windowId, pos] of positions) {
+				const row = windowsCollection.state.get(windowId);
+				if (!row || row.overrideRedirect) continue;
+				if (row.x !== pos.x || row.y !== pos.y) {
+					patchWindow(windowId, { x: pos.x, y: pos.y });
+				}
+			}
+		};
+		apply();
+		return subscribeWorkspace(activeWorkspace.id, apply);
+	}, [activeWorkspace]);
+
 	function handleSpawn(sidecarId: string, command: string, args: string[]) {
 		if (!activeWorkspace) return;
 		send({
@@ -314,17 +340,18 @@ function App() {
 	const handleMove = useCallback(
 		(windowId: string, x: number, y: number) => {
 			const win = windowsCollection.state.get(windowId);
-			if (win && !win.overrideRedirect) {
-				send({
-					type: "UpdateWindowPosition",
-					window_id: windowId,
-					x,
-					y,
-				});
+			// Top-level windows: position is user-collaborative
+			// state in the workspace doc. Mutating the doc syncs to
+			// every other peer; the local mirror loop also picks it
+			// up and patches the row. Patch optimistically here too
+			// so drag stays smooth without waiting for the round
+			// trip through `notify`.
+			if (win && !win.overrideRedirect && activeWorkspace) {
+				setWorkspacePosition(activeWorkspace.id, windowId, x, y);
 			}
 			patchWindow(windowId, { x, y });
 		},
-		[send],
+		[activeWorkspace],
 	);
 
 	const resizeTimerRef = useRef<ReturnType<typeof setTimeout>>(undefined);
@@ -575,23 +602,18 @@ function App() {
 					if (!windowId || !activeWorkspace) return;
 					attachWindowToWorkspace(activeWorkspace.id, windowId);
 					// Drop the new WindowFrame at the cursor's canvas
-					// coordinate. Two-phase update: patch the local
-					// row immediately so the WindowFrame mounts at
-					// the drop point on the next render, *and* tell
-					// the backend so other frontends pick it up via
-					// `WindowList`. Without the local patch,
-					// `applyWindowList` preserves the existing
-					// (cascade-seeded) position when the next
-					// snapshot arrives — by design, so cross-frontend
-					// `WindowList` broadcasts don't fight a local
-					// drag.
+					// coordinate. The doc carries the position so
+					// sibling tabs converge on the same drop point;
+					// the local patch is the optimistic preview so
+					// the frame appears at the drop point on the next
+					// render without waiting for the doc-mirror.
+					setWorkspacePosition(
+						activeWorkspace.id,
+						windowId,
+						point.x,
+						point.y,
+					);
 					patchWindow(windowId, { x: point.x, y: point.y });
-					send({
-						type: "UpdateWindowPosition",
-						window_id: windowId,
-						x: point.x,
-						y: point.y,
-					});
 				}}
 			>
 				{visibleWindows.map((win) => {

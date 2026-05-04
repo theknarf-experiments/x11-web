@@ -20,10 +20,13 @@ import {
 	applyInbound,
 	attachWindow as attachWindowDoc,
 	detachWindow as detachWindowDoc,
+	getAllPositions,
 	getAttachedWindowIds,
 	getName as getWorkspaceName,
+	getPosition,
 	setControlChannel,
 	setName as setWorkspaceName,
+	setPosition,
 	subscribe as subscribeWorkspace,
 } from "./workspaceSync";
 import type {
@@ -75,28 +78,34 @@ let spawnCounter = 0;
 
 function seedForDescriptor(
 	d: WindowDescriptor,
-	send: (msg: FrontendToBackend) => void,
+	workspaceId: string | null,
 ): NewWindowSeed {
 	let x: number;
 	let y: number;
-	if (d.placed || d.override_redirect) {
-		// Backend gave us an authoritative position (X11 server for popups,
-		// cross-frontend tracked for top-level windows).
+	const docPos =
+		workspaceId && !d.override_redirect
+			? getPosition(workspaceId, d.window_id)
+			: null;
+	if (d.override_redirect) {
+		// Popups: X server placement is authoritative.
 		x = d.x;
 		y = d.y;
+	} else if (docPos) {
+		// Some frontend (maybe this one earlier, maybe a sibling tab)
+		// already placed this window — adopt the doc position.
+		x = docPos.x;
+		y = docPos.y;
 	} else {
-		// First time *any* frontend has seen this top-level window — pick a
-		// cascading position and broadcast it so other tabs converge.
+		// First time any frontend has seen this top-level window —
+		// pick a cascading position and write it to the doc so other
+		// tabs converge.
 		const idx = spawnCounter++;
 		const offset = idx * 30;
 		x = window.innerWidth / 4 + offset;
 		y = window.innerHeight / 4 + offset;
-		send({
-			type: "UpdateWindowPosition",
-			window_id: d.window_id,
-			x,
-			y,
-		});
+		if (workspaceId) {
+			setPosition(workspaceId, d.window_id, x, y);
+		}
 	}
 	return {
 		x,
@@ -122,9 +131,6 @@ function applyWindowUpdate(update: WindowUpdate) {
 			break;
 		case "Focused":
 			setFocusedWindow(update.window_id);
-			break;
-		case "PositionChanged":
-			patchWindow(update.window_id, { x: update.x, y: update.y });
 			break;
 		case "MenuStructure":
 			patchWindow(update.window_id, { menu: update.menu });
@@ -357,7 +363,7 @@ export function useBackendSocket() {
 						break;
 					case "WindowList":
 						applyWindowList(msg.windows, (d) =>
-							seedForDescriptor(d, sendRef.current),
+							seedForDescriptor(d, activeWorkspaceIdRef.current),
 						);
 						break;
 					case "WindowUpdate":
