@@ -399,39 +399,41 @@ function notify(workspaceId: string) {
 	listeners.get(workspaceId)?.forEach((fn) => fn());
 }
 
-/** RAF-batched flush scheduler. The doc is mutated synchronously
- *  inside helpers (so subsequent reads see the latest state), but
- *  the side effects — notifying React subscribers (which kicks the
- *  TanstackDB projection) and shipping outbound sync messages —
- *  are coalesced into one batch per animation frame.
+/** Notify React subscribers synchronously; batch outbound sync
+ *  messages onto the next animation frame.
  *
- *  Concretely, a high-frequency drag (pen draw, text edit) goes
- *  from one O(N) projection + one sync send per keystroke (60Hz)
- *  to one of each per RAF tick. Each RAF flush still ships every
- *  delta accumulated since the last flush, so peers stay
- *  consistent — Automerge's sync protocol bundles the missing
- *  changes into one message. Pattern modeled on Automerge Repo's
- *  `DocSynchronizer`, which throttles its `#syncWithPeers` to
- *  100ms; we use RAF (≈16ms) since both peers are typically on
- *  the same machine and bandwidth isn't the constraint. */
-const dirtyWorkspaces = new Set<string>();
+ *  Synchronous notify is essential for controlled `<textarea>`s:
+ *  the doc updates inside `onChange`, and we need React to see the
+ *  new value in the same tick so the controlled `value` prop
+ *  matches the DOM. Otherwise an unrelated re-render between the
+ *  keystroke and the next RAF would reconcile the textarea back
+ *  to its stale prop value and reset the cursor to the end.
+ *
+ *  Outbound `ship` (Automerge sync messages over the control DC)
+ *  stays RAF-batched. That's where the bandwidth win lives — a
+ *  high-frequency drag (pen draw, text edit) sends one bundled
+ *  sync message per RAF tick instead of one per keystroke.
+ *  Pattern modeled on Automerge Repo's `DocSynchronizer`, which
+ *  throttles its `#syncWithPeers` to 100 ms; RAF (~16 ms) is fine
+ *  for our local-network case. */
+const dirtyShipWorkspaces = new Set<string>();
 let rafScheduled = false;
 
 function scheduleFlush(workspaceId: string) {
-	dirtyWorkspaces.add(workspaceId);
+	notify(workspaceId);
+	dirtyShipWorkspaces.add(workspaceId);
 	if (rafScheduled) return;
 	rafScheduled = true;
-	requestAnimationFrame(flushDirty);
+	requestAnimationFrame(flushShip);
 }
 
-function flushDirty() {
+function flushShip() {
 	rafScheduled = false;
-	const ids = [...dirtyWorkspaces];
-	dirtyWorkspaces.clear();
+	const ids = [...dirtyShipWorkspaces];
+	dirtyShipWorkspaces.clear();
 	for (const id of ids) {
 		const entry = docs.get(id);
 		if (!entry) continue;
-		notify(id);
 		ship(id, drainOutbound(entry));
 	}
 }
@@ -449,9 +451,10 @@ function ensure(workspaceId: string): PerWorkspace {
 }
 
 /** Apply an inbound sync message. Updates the doc + per-peer
- *  sync state synchronously, then schedules a RAF flush which
- *  notifies subscribers and ships any reply messages. The caller
- *  doesn't need to forward replies — the scheduler does it. */
+ *  sync state synchronously, notifies React subscribers in the
+ *  same tick, and queues any reply messages for shipping on the
+ *  next animation frame. The caller doesn't need to forward
+ *  replies — the scheduler does it. */
 export function applyInbound(workspaceId: string, message: Uint8Array): void {
 	const entry = ensure(workspaceId);
 	const [newDoc, newState] = Automerge.receiveSyncMessage(
@@ -655,11 +658,24 @@ export function insertOcifNode(
 			? (node.resource ?? crypto.randomUUID())
 			: undefined;
 		if (resourceId && !d.resources[resourceId]) {
+			// Seed the representation with empty content, then splice
+			// the seed text in. This makes `content` a text CRDT from
+			// the first character — concurrent edits in two tabs merge
+			// at character level instead of last-writer-winning the
+			// whole string.
 			d.resources[resourceId] = {
-				representations: [
-					{ mime_type: "text/plain", content: node.text ?? "" },
-				],
+				representations: [{ mime_type: "text/plain", content: "" }],
 			};
+			const seed = node.text ?? "";
+			if (seed.length > 0) {
+				Automerge.splice(
+					d as Automerge.Doc<WorkspaceDoc>,
+					["resources", resourceId, "representations", 0, "content"],
+					0,
+					0,
+					seed,
+				);
+			}
 		}
 		d.nodes[id] = {
 			x: node.x,
@@ -852,7 +868,20 @@ export function setOcifNodeFontSize(
 
 /** Helper — write a `text/plain` representation through the
  *  resource layer. Mutates `d` directly inside an
- *  `Automerge.change` callback. */
+ *  `Automerge.change` callback.
+ *
+ *  Updates to an existing representation route through
+ *  `Automerge.updateText`: it diffs the current value against
+ *  `text` and emits character-level splice ops, so concurrent
+ *  edits in two tabs merge instead of last-writer-winning the
+ *  whole string. New representations seed `content: ""` and
+ *  splice `text` in afterwards so the field starts as a text
+ *  CRDT from the first character.
+ *
+ *  `d` is the mutable `Doc` proxy supplied by `Automerge.change`,
+ *  not a hydrated `WorkspaceDoc` value — the type annotation is
+ *  loose here because `Automerge.updateText` / `Automerge.splice`
+ *  expect the proxy and not a typed view. */
 function writeText(
 	d: WorkspaceDoc,
 	n: OcifNode,
@@ -864,24 +893,50 @@ function writeText(
 		resourceId = crypto.randomUUID();
 		n.resource = resourceId;
 		d.resources[resourceId] = {
-			representations: [{ mime_type: "text/plain", content: text }],
+			representations: [{ mime_type: "text/plain", content: "" }],
 		};
+		Automerge.splice(
+			d as Automerge.Doc<WorkspaceDoc>,
+			["resources", resourceId, "representations", 0, "content"],
+			0,
+			0,
+			text,
+		);
 		return;
 	}
 	const r = d.resources[resourceId];
 	if (!r) {
 		d.resources[resourceId] = {
-			representations: [{ mime_type: "text/plain", content: text }],
+			representations: [{ mime_type: "text/plain", content: "" }],
 		};
+		Automerge.splice(
+			d as Automerge.Doc<WorkspaceDoc>,
+			["resources", resourceId, "representations", 0, "content"],
+			0,
+			0,
+			text,
+		);
 		return;
 	}
 	const idx = r.representations.findIndex(
 		(rep) => rep.mime_type === "text/plain",
 	);
 	if (idx >= 0) {
-		r.representations[idx].content = text;
+		Automerge.updateText(
+			d as Automerge.Doc<WorkspaceDoc>,
+			["resources", resourceId, "representations", idx, "content"],
+			text,
+		);
 	} else {
-		r.representations.push({ mime_type: "text/plain", content: text });
+		const newIdx = r.representations.length;
+		r.representations.push({ mime_type: "text/plain", content: "" });
+		Automerge.splice(
+			d as Automerge.Doc<WorkspaceDoc>,
+			["resources", resourceId, "representations", newIdx, "content"],
+			0,
+			0,
+			text,
+		);
 	}
 }
 
