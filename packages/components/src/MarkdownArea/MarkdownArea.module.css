@@ -1,0 +1,91 @@
+.area {
+	position: relative;
+	box-sizing: border-box;
+	width: 100%;
+	min-height: 120px;
+	padding: 12px 14px;
+	background: #ffffff;
+	border: 1px solid rgba(0, 0, 0, 0.15);
+	border-radius: 6px;
+	color: #1a1a1a;
+	font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui,
+		sans-serif;
+	font-size: 14px;
+	line-height: 1.5;
+	white-space: pre-wrap;
+	overflow-wrap: break-word;
+	cursor: text;
+	outline: none;
+	user-select: text;
+}
+
+.area:focus {
+	border-color: rgba(0, 122, 255, 0.5);
+	box-shadow: 0 0 0 1px rgba(0, 122, 255, 0.25);
+}
+
+/* Token decorations — keep markers visible, just style them so the
+ * line communicates "this is a heading / bold / etc." */
+.heading-1,
+.heading-2,
+.heading-3,
+.heading-4,
+.heading-5,
+.heading-6 {
+	font-weight: 700;
+	color: #000;
+}
+.heading-1 {
+	font-size: 1.6em;
+	line-height: 1.25;
+}
+.heading-2 {
+	font-size: 1.35em;
+	line-height: 1.25;
+}
+.heading-3 {
+	font-size: 1.18em;
+}
+.heading-4 {
+	font-size: 1.06em;
+}
+.heading-5,
+.heading-6 {
+	font-size: 1em;
+}
+
+.bold {
+	font-weight: 700;
+}
+
+.italic {
+	font-style: italic;
+}
+
+.inline-code {
+	font-family: ui-monospace, "SF Mono", Menlo, monospace;
+	font-size: 0.92em;
+	padding: 1px 4px;
+	border-radius: 3px;
+	background: rgba(0, 0, 0, 0.06);
+}
+
+.code-block {
+	display: inline-block;
+	font-family: ui-monospace, "SF Mono", Menlo, monospace;
+	font-size: 0.92em;
+	background: rgba(0, 0, 0, 0.05);
+	border-radius: 4px;
+	padding: 2px 6px;
+}
+
+.blockquote {
+	color: rgba(0, 0, 0, 0.65);
+	border-left: 3px solid rgba(0, 0, 0, 0.2);
+	padding-left: 8px;
+}
+
+.link {
+	color: #0366d6;
+	text-decoration: underline;
+}
