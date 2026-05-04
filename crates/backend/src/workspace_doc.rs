@@ -45,6 +45,13 @@ pub struct WorkspaceDoc {
     /// Windows aren't migrated into this map yet; once they are,
     /// `attached_windows` and `window_positions` collapse into it.
     pub nodes: HashMap<String, OcifNode>,
+    /// OCIF resources — text, images, or any other displayable
+    /// content referenced by nodes via the `resource` field.
+    /// Keyed by resource id (UUID). The spec stores resources as
+    /// a top-level array of `{id, representations, ...}`; we use a
+    /// Map keyed on `id` for the same reason `nodes` is mapped:
+    /// CRDT-friendly insert/delete semantics.
+    pub resources: HashMap<String, OcifResource>,
 }
 
 #[derive(Debug, Clone, Copy, Reconcile, Hydrate)]
@@ -81,11 +88,13 @@ pub struct OcifNode {
     /// connection that follows the connected boxes when they move
     /// or resize.
     pub edge: Option<EdgeExt>,
-    /// Inline text content rendered inside the node. OCIF would
-    /// normally model this as a referenced resource with a
-    /// `text/plain` representation; we inline it on the node for
-    /// simplicity and convert to a resource on OCIF export.
-    pub text: Option<String>,
+    /// `@ocif/textstyle` extension. All fields optional per spec;
+    /// renderer falls back to defaults when missing.
+    pub text_style: Option<TextStyleExt>,
+    /// Reference to a resource in the workspace's `resources` map.
+    /// When the resource has a `text/plain` representation, the
+    /// renderer displays that text inside the node.
+    pub resource: Option<String>,
 }
 
 /// `@ocif/rect` — fillColor / strokeColor / strokeWidth. All
@@ -99,11 +108,12 @@ pub struct RectExt {
 }
 
 /// `@ocif/arrow` — start / end points (canvas-space coords),
-/// strokeColor, strokeWidth. The cached start/end coords are
-/// always present even for connected arrows so we have a fallback
-/// position when an attachment is later detached. OCIF also
-/// defines startMarker / endMarker for arrowhead shapes; v1
-/// hardcodes a triangle on the end and nothing on the start.
+/// strokeColor, strokeWidth, and per-end markers. The cached
+/// start/end coords are always present even for connected arrows
+/// so we have a fallback position when an attachment is later
+/// detached. `start_marker` / `end_marker` are spec values
+/// `"none"` or `"arrowhead"`; renderer falls back to "none" on
+/// start and "arrowhead" on end when unset.
 #[derive(Debug, Clone, Default, Reconcile, Hydrate)]
 pub struct ArrowExt {
     pub start_x: f64,
@@ -112,6 +122,41 @@ pub struct ArrowExt {
     pub end_y: f64,
     pub stroke_width: Option<f64>,
     pub stroke_color: Option<String>,
+    pub start_marker: Option<String>,
+    pub end_marker: Option<String>,
+}
+
+/// `@ocif/textstyle` — font / color / alignment / weight. All
+/// fields optional per spec; renderer applies sensible defaults
+/// (14px sans-serif white centered, no bold/italic) when missing.
+/// `align` is one of `"left" | "right" | "center" | "justify"`.
+#[derive(Debug, Clone, Default, Reconcile, Hydrate)]
+pub struct TextStyleExt {
+    pub font_size_px: Option<f64>,
+    pub font_family: Option<String>,
+    pub color: Option<String>,
+    pub align: Option<String>,
+    pub bold: Option<bool>,
+    pub italic: Option<bool>,
+}
+
+/// One OCIF resource — content that nodes can reference. A node
+/// pointing at this resource displays the first representation it
+/// can render (today: any `text/plain` representation). Future
+/// representations might cover `text/markdown`, images, etc.
+#[derive(Debug, Clone, Default, Reconcile, Hydrate)]
+pub struct OcifResource {
+    pub representations: Vec<OcifRepresentation>,
+}
+
+/// One representation of a resource — exactly one of `content`
+/// (inline) or `location` (URI to remote bytes) per spec, though
+/// we don't enforce. `mime_type` is the IANA MIME type.
+#[derive(Debug, Clone, Default, Reconcile, Hydrate)]
+pub struct OcifRepresentation {
+    pub mime_type: String,
+    pub content: Option<String>,
+    pub location: Option<String>,
 }
 
 /// `@ocif/edge` — relation between two nodes referenced by id.
@@ -150,6 +195,7 @@ impl WorkspaceEntry {
             attached_windows: HashMap::<String, bool>::new(),
             window_positions: HashMap::new(),
             nodes: HashMap::new(),
+            resources: HashMap::new(),
         };
         reconcile(&mut doc, &seed).expect("reconcile fresh workspace doc");
         Self {

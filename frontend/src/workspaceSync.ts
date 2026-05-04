@@ -18,11 +18,29 @@ export interface WorkspaceDoc {
 	attached_windows: { [windowId: string]: boolean };
 	window_positions: { [windowId: string]: { x: number; y: number } };
 	nodes: { [nodeId: string]: OcifNode };
+	resources: { [resourceId: string]: OcifResource };
+}
+
+/** OCIF resource — content referenced by nodes via the
+ *  `OcifNode.resource` field. Renderable representations live in
+ *  `representations`; today we only emit `text/plain`. */
+export interface OcifResource {
+	representations: OcifRepresentation[];
+}
+
+/** One representation of a resource. Spec requires one of
+ *  `content` or `location`; we don't enforce. */
+export interface OcifRepresentation {
+	mime_type: string;
+	content?: string;
+	location?: string;
 }
 
 /** OCIF-shaped user-drawn node. Internal flat shape; serializes to
  *  `{ id, position: [x,y,z], size: [w,h], data: [{type, ...}] }` on
- *  OCIF export. Keep in sync with `OcifNode` in Rust. */
+ *  OCIF export. Mirrors `OcifNode` in Rust, plus a derived `text`
+ *  field resolved from the referenced resource at projection time
+ *  (a render-side convenience — the doc only stores `resource`). */
 export interface OcifNode {
 	x: number;
 	y: number;
@@ -32,8 +50,13 @@ export interface OcifNode {
 	rect?: RectExt;
 	arrow?: ArrowExt;
 	edge?: EdgeExt;
-	/** Inline text content rendered inside the node. Serializes to
-	 *  a referenced `text/plain` resource on OCIF export. */
+	text_style?: TextStyleExt;
+	/** Reference to a resource id in `WorkspaceDoc.resources`. The
+	 *  renderer pulls the first `text/plain` representation off
+	 *  the resource and displays it. */
+	resource?: string;
+	/** Derived: resolved `text/plain` content from `resource`.
+	 *  Computed by `getOcifNodes` — not stored in the doc. */
 	text?: string;
 }
 
@@ -45,9 +68,10 @@ export interface RectExt {
 }
 
 /** `@ocif/arrow` — endpoints in canvas-space coords, plus stroke
- *  styling. The cached start/end coords are always present even
- *  for connected arrows — they're the fallback when an attachment
- *  is later detached. */
+ *  styling and per-end markers. The cached start/end coords are
+ *  always present even for connected arrows — they're the
+ *  fallback when an attachment is later detached. Markers default
+ *  to `"none"` on start and `"arrowhead"` on end when unset. */
 export interface ArrowExt {
 	start_x: number;
 	start_y: number;
@@ -55,6 +79,19 @@ export interface ArrowExt {
 	end_y: number;
 	stroke_width?: number;
 	stroke_color?: string;
+	start_marker?: "none" | "arrowhead";
+	end_marker?: "none" | "arrowhead";
+}
+
+/** `@ocif/textstyle` — font and alignment per spec. All fields
+ *  optional; renderer applies defaults when missing. */
+export interface TextStyleExt {
+	font_size_px?: number;
+	font_family?: string;
+	color?: string;
+	align?: "left" | "right" | "center" | "justify";
+	bold?: boolean;
+	italic?: boolean;
 }
 
 /** `@ocif/edge` — relation between two nodes referenced by id.
@@ -312,13 +349,19 @@ export function getOcifNodes(workspaceId: string): Map<string, OcifNode> {
 			rect: v.rect ? { ...v.rect } : undefined,
 			arrow: v.arrow ? { ...v.arrow } : undefined,
 			edge: v.edge ? { ...v.edge } : undefined,
-			text: v.text,
+			text_style: v.text_style ? { ...v.text_style } : undefined,
+			resource: v.resource,
+			text: resolveNodeText(entry.doc, v),
 		});
 	}
 	return out;
 }
 
-/** Insert a new node. Caller picks the id (typically `crypto.randomUUID()`). */
+/** Insert a new node. Caller picks the id (typically
+ *  `crypto.randomUUID()`). Pass `node.text` to seed text content
+ *  — we'll create a backing resource and hook up
+ *  `node.resource`. The view-only `text` field on `OcifNode` is
+ *  consumed here and translated into the spec-shaped resource. */
 export function insertOcifNode(
 	workspaceId: string,
 	id: string,
@@ -327,21 +370,30 @@ export function insertOcifNode(
 	const entry = ensure(workspaceId);
 	entry.doc = Automerge.change(entry.doc, (d) => {
 		if (!d.nodes) d.nodes = {};
-		// Always seed `text` (default "") so the Automerge field
-		// exists from creation. Adding a brand-new property to a
-		// nested object via a later `change` can be flaky depending
-		// on how the doc was reconciled — initialising it up front
-		// sidesteps that.
+		if (!d.resources) d.resources = {};
+		// If text content is supplied, allocate a resource for it
+		// up front and reference it from the new node. Empty text
+		// still seeds a resource so subsequent edits update the
+		// existing representation rather than create one lazily.
+		const resourceId = node.resource ?? crypto.randomUUID();
+		if (!d.resources[resourceId]) {
+			d.resources[resourceId] = {
+				representations: [
+					{ mime_type: "text/plain", content: node.text ?? "" },
+				],
+			};
+		}
 		d.nodes[id] = {
 			x: node.x,
 			y: node.y,
 			z: node.z,
 			width: node.width,
 			height: node.height,
-			text: node.text ?? "",
+			resource: resourceId,
 			...(node.rect ? { rect: { ...node.rect } } : {}),
 			...(node.arrow ? { arrow: { ...node.arrow } } : {}),
 			...(node.edge ? { edge: { ...node.edge } } : {}),
+			...(node.text_style ? { text_style: { ...node.text_style } } : {}),
 		};
 	});
 	notify(workspaceId);
@@ -412,8 +464,11 @@ export function setOcifNodeBounds(
 	ship(workspaceId, drainOutbound(entry));
 }
 
-/** Set a node's inline text content. Pass an empty string to
- *  clear; the field stays present in the doc. */
+/** Set a node's text content. Routes through the OCIF resource
+ *  model: a `text/plain` representation lives on a resource that
+ *  the node references via `resource`. Creates the resource the
+ *  first time the node has text; updates the existing
+ *  representation thereafter. */
 export function setOcifNodeText(
 	workspaceId: string,
 	id: string,
@@ -424,10 +479,48 @@ export function setOcifNodeText(
 	entry.doc = Automerge.change(entry.doc, (d) => {
 		const n = d.nodes?.[id];
 		if (!n) return;
-		n.text = text;
+		if (!d.resources) d.resources = {};
+		let resourceId = n.resource;
+		if (!resourceId) {
+			resourceId = crypto.randomUUID();
+			n.resource = resourceId;
+			d.resources[resourceId] = {
+				representations: [{ mime_type: "text/plain", content: text }],
+			};
+			return;
+		}
+		const r = d.resources[resourceId];
+		if (!r) {
+			d.resources[resourceId] = {
+				representations: [{ mime_type: "text/plain", content: text }],
+			};
+			return;
+		}
+		const idx = r.representations.findIndex(
+			(rep) => rep.mime_type === "text/plain",
+		);
+		if (idx >= 0) {
+			r.representations[idx].content = text;
+		} else {
+			r.representations.push({ mime_type: "text/plain", content: text });
+		}
 	});
 	notify(workspaceId);
 	ship(workspaceId, drainOutbound(entry));
+}
+
+/** Resolve a node's text content from its referenced resource.
+ *  Returns an empty string if the node has no resource or the
+ *  resource has no `text/plain` representation. */
+export function resolveNodeText(
+	doc: Automerge.Doc<WorkspaceDoc>,
+	node: OcifNode,
+): string {
+	if (!node.resource) return "";
+	const r = doc.resources?.[node.resource];
+	if (!r) return "";
+	const rep = r.representations.find((rep) => rep.mime_type === "text/plain");
+	return rep?.content ?? "";
 }
 
 /** Update an arrow node's endpoints in a single mutation. Callers

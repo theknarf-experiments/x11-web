@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useRef } from "react";
+import { useCallback } from "react";
 import s from "./OcifBox.module.css";
+import { OcifTextLayer } from "./OcifTextLayer";
 import type { OcifNode } from "./workspaceSync";
 
 export type ResizeHandle =
@@ -85,9 +86,6 @@ export function OcifBox({
 		},
 		[id, onPointerDown, editing, interactive],
 	);
-	// `rect` ext present → boxed shape with border / fill / resize
-	// handles. Absent → free-floating text node (no chrome).
-	const hasRect = !!node.rect;
 	const fill = node.rect?.fill_color ?? DEFAULT_FILL;
 	const stroke = node.rect?.stroke_color ?? DEFAULT_STROKE;
 	const strokeWidth = node.rect?.stroke_width ?? DEFAULT_STROKE_WIDTH;
@@ -96,36 +94,33 @@ export function OcifBox({
 		: selected
 			? s.selected
 			: s.box;
-	const style: React.CSSProperties = {
-		position: "absolute",
-		left: node.x,
-		top: node.y,
-		width: node.width,
-		height: node.height,
-		zIndex: Math.round(node.z),
-	};
-	if (hasRect) {
-		style.background = fill;
-		style.border = `${strokeWidth}px solid ${stroke}`;
-		style.borderRadius = DEFAULT_RADIUS;
-	}
 	return (
 		<div
 			data-testid="ocif-box"
 			data-node-id={id}
 			className={className}
-			style={style}
+			style={{
+				position: "absolute",
+				left: node.x,
+				top: node.y,
+				width: node.width,
+				height: node.height,
+				zIndex: Math.round(node.z),
+				background: fill,
+				border: `${strokeWidth}px solid ${stroke}`,
+				borderRadius: DEFAULT_RADIUS,
+			}}
 			onPointerDown={handlePointerDown}
 		>
-			<TextLayer
+			<OcifTextLayer
 				id={id}
 				text={node.text ?? ""}
 				editing={editing}
+				textStyle={node.text_style}
 				onChangeText={onChangeText}
 				onExit={onExitEdit}
 			/>
-			{hasRect &&
-				selected &&
+			{selected &&
 				!editing &&
 				interactive &&
 				HANDLES.map((h) => (
@@ -143,67 +138,3 @@ export function OcifBox({
 	);
 }
 
-interface TextLayerProps {
-	id: string;
-	text: string;
-	editing: boolean;
-	/** Called on every keystroke — the textarea is fully
-	 *  controlled by the doc. */
-	onChangeText: (id: string, text: string) => void;
-	/** Exit edit mode (called on blur or Esc). */
-	onExit: () => void;
-}
-
-/** Inline text rendered inside the box. Static span when not in
- *  edit mode; auto-focused textarea when editing. Edits go to the
- *  doc on every keystroke so sibling tabs see live updates. The
- *  textarea has no local draft state — `value` IS `node.text`. */
-function TextLayer({
-	id,
-	text,
-	editing,
-	onChangeText,
-	onExit,
-}: TextLayerProps) {
-	const taRef = useRef<HTMLTextAreaElement>(null);
-
-	useEffect(() => {
-		if (editing) {
-			const ta = taRef.current;
-			if (ta) {
-				ta.focus();
-				ta.select();
-			}
-		}
-	}, [editing]);
-
-	if (!editing) {
-		if (!text) return null;
-		return <div className={s.text}>{text}</div>;
-	}
-
-	return (
-		<textarea
-			ref={taRef}
-			className={s.editor}
-			value={text}
-			onChange={(e) => onChangeText(id, e.target.value)}
-			onPointerDown={(e) => e.stopPropagation()}
-			onClick={(e) => e.stopPropagation()}
-			onKeyDown={(e) => {
-				if (e.key === "Escape") {
-					e.preventDefault();
-					e.stopPropagation();
-					onExit();
-					return;
-				}
-				// Stop propagation so canvas-level shortcuts
-				// (Delete to remove the selected box, etc.) don't
-				// fire while typing.
-				e.stopPropagation();
-			}}
-			onBlur={onExit}
-			spellCheck={false}
-		/>
-	);
-}

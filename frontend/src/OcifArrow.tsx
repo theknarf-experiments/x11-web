@@ -120,13 +120,16 @@ export function OcifArrow({
 			width,
 			height,
 			path: `M${sx},${sy} Q${cx},${cy} ${ex},${ey}`,
-			headX: ex,
-			headY: ey,
-			headDeg: ae * (180 / Math.PI),
-			startX: sx,
-			startY: sy,
 			endX: ex,
 			endY: ey,
+			endDeg: ae * (180 / Math.PI),
+			// Tangent direction at the start, derived from the
+			// quadratic Bézier control point. The arrowhead points
+			// outward (away from the shape), so 180° flip from the
+			// tangent.
+			startX: sx,
+			startY: sy,
+			startDeg: Math.atan2(sy - cy, sx - cx) * (180 / Math.PI),
 			startAttached: !!startNode,
 			endAttached: !!endNode,
 		};
@@ -136,6 +139,11 @@ export function OcifArrow({
 
 	const stroke = node.arrow.stroke_color ?? DEFAULT_STROKE;
 	const strokeWidth = node.arrow.stroke_width ?? DEFAULT_STROKE_WIDTH;
+	// Spec defaults are "none" both ends; we flip the end default
+	// to "arrowhead" to keep the visual continuity with how arrows
+	// were originally drawn here.
+	const startMarker = node.arrow.start_marker ?? "none";
+	const endMarker = node.arrow.end_marker ?? "arrowhead";
 
 	return (
 		<div
@@ -179,12 +187,22 @@ export function OcifArrow({
 					strokeLinecap="round"
 					pointerEvents="none"
 				/>
-				<polygon
-					points={`0,-${HEAD_SIZE / 2} ${HEAD_SIZE},0 0,${HEAD_SIZE / 2}`}
-					fill={stroke}
-					transform={`translate(${layout.headX},${layout.headY}) rotate(${layout.headDeg})`}
-					pointerEvents="none"
-				/>
+				{endMarker === "arrowhead" && (
+					<polygon
+						points={`0,-${HEAD_SIZE / 2} ${HEAD_SIZE},0 0,${HEAD_SIZE / 2}`}
+						fill={stroke}
+						transform={`translate(${layout.endX},${layout.endY}) rotate(${layout.endDeg})`}
+						pointerEvents="none"
+					/>
+				)}
+				{startMarker === "arrowhead" && (
+					<polygon
+						points={`0,-${HEAD_SIZE / 2} ${HEAD_SIZE},0 0,${HEAD_SIZE / 2}`}
+						fill={stroke}
+						transform={`translate(${layout.startX},${layout.startY}) rotate(${layout.startDeg})`}
+						pointerEvents="none"
+					/>
+				)}
 				{selected && interactive && (
 					<>
 						<circle

@@ -1,0 +1,20 @@
+.text,
+.selected,
+.dropTarget {
+	cursor: move;
+	box-sizing: border-box;
+}
+
+/* Selected free-text node: subtle dashed outline so the user can
+ * see the bounds. No background; no border in the static state. */
+.selected {
+	outline: 1px dashed rgba(0, 122, 255, 0.7);
+	outline-offset: 2px;
+}
+
+/* Drop target — the same green-halo treatment OcifBox uses, so the
+ * "release to attach" affordance reads consistently. */
+.dropTarget {
+	outline: 2px solid #34c759;
+	outline-offset: 2px;
+}

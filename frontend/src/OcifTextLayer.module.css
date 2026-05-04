@@ -1,0 +1,33 @@
+/* Static text label inside the node's bounds. Layout (centering,
+ * padding, wrapping) lives here; typography (size / family /
+ * color / weight / italic / alignment) comes from inline styles
+ * computed by `OcifTextLayer` from the optional `@ocif/textstyle`
+ * extension. */
+.text {
+	position: absolute;
+	inset: 0;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	padding: 8px 12px;
+	line-height: 1.3;
+	overflow-wrap: anywhere;
+	white-space: pre-wrap;
+	pointer-events: none;
+	user-select: none;
+}
+
+/* Editable textarea. Same layout as the static label so toggling
+ * between view + edit doesn't shift the text. `pointer-events:
+ * auto` because the host's pointerdown handler stops propagation. */
+.editor {
+	position: absolute;
+	inset: 0;
+	background: transparent;
+	border: none;
+	padding: 8px 12px;
+	line-height: 1.3;
+	resize: none;
+	outline: none;
+	pointer-events: auto;
+}

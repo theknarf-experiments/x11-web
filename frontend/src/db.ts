@@ -11,6 +11,7 @@ import type {
 	EdgeExt,
 	OcifNode,
 	RectExt,
+	TextStyleExt,
 } from "./workspaceSync";
 
 interface SyncApi<T extends object> {
@@ -321,10 +322,15 @@ export interface OcifNodeRow {
 	z: number;
 	width: number;
 	height: number;
+	/** Resolved text content from the referenced resource — view
+	 *  copy. Source of truth is `WorkspaceDoc.resources[node.resource]
+	 *  .representations[mime=text/plain].content`. */
 	text: string;
 	rect?: RectExt;
 	arrow?: ArrowExt;
 	edge?: EdgeExt;
+	textStyle?: TextStyleExt;
+	resourceId?: string;
 }
 
 const ocifNodes = makeCollection<OcifNodeRow>({
@@ -370,6 +376,8 @@ export function applyOcifNodesSnapshot(
 			rect: node.rect ? { ...node.rect } : undefined,
 			arrow: node.arrow ? { ...node.arrow } : undefined,
 			edge: node.edge ? { ...node.edge } : undefined,
+			textStyle: node.text_style ? { ...node.text_style } : undefined,
+			resourceId: node.resource,
 		};
 		api.write({
 			type: current.has(id) ? "update" : "insert",

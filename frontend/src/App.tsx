@@ -24,6 +24,7 @@ import { GlobalMenuBar } from "./GlobalMenuBar";
 import { InfiniteCanvas } from "./InfiniteCanvas";
 import { OcifArrow } from "./OcifArrow";
 import { OcifBox, type ResizeHandle } from "./OcifBox";
+import { OcifText } from "./OcifText";
 import { decodeFrame } from "./rtcWire";
 import { SettingsPanel } from "./SettingsPanel";
 import type {
@@ -114,6 +115,8 @@ function App() {
 				rect: row.rect,
 				arrow: row.arrow,
 				edge: row.edge,
+				text_style: row.textStyle,
+				resource: row.resourceId,
 			});
 		}
 		return out;
@@ -1062,40 +1065,59 @@ function App() {
 					patchWindow(windowId, { x: point.x, y: point.y });
 				}}
 			>
-				{[...ocifNodes.entries()].map(([id, node]) =>
-					node.arrow ? (
-						<OcifArrow
-							key={id}
-							id={id}
-							node={node}
-							selected={selectedNodeId === id}
-							interactive={tool === "pointer"}
-							nodes={ocifNodes}
-							draggingEnd={
-								arrowDrag?.arrowId === id ? arrowDrag.end : null
-							}
-							onPointerDown={handleNodePointerDown}
-							onEndpointPointerDown={handleArrowEndpointDown}
-						/>
-					) : (
-						<OcifBox
+				{[...ocifNodes.entries()].map(([id, node]) => {
+					if (node.arrow) {
+						return (
+							<OcifArrow
+								key={id}
+								id={id}
+								node={node}
+								selected={selectedNodeId === id}
+								interactive={tool === "pointer"}
+								nodes={ocifNodes}
+								draggingEnd={
+									arrowDrag?.arrowId === id ? arrowDrag.end : null
+								}
+								onPointerDown={handleNodePointerDown}
+								onEndpointPointerDown={handleArrowEndpointDown}
+							/>
+						);
+					}
+					const dropTarget =
+						arrowDrag?.dropTargetNodeId === id ||
+						(drawing?.kind === "arrow" && drawing.endNodeId === id);
+					if (node.rect) {
+						return (
+							<OcifBox
+								key={id}
+								id={id}
+								node={node}
+								selected={selectedNodeId === id}
+								editing={editingNodeId === id}
+								interactive={tool === "pointer"}
+								dropTarget={dropTarget}
+								onPointerDown={handleNodePointerDown}
+								onResizeHandleDown={handleResizeHandleDown}
+								onChangeText={handleChangeText}
+								onExitEdit={handleExitEdit}
+							/>
+						);
+					}
+					return (
+						<OcifText
 							key={id}
 							id={id}
 							node={node}
 							selected={selectedNodeId === id}
 							editing={editingNodeId === id}
 							interactive={tool === "pointer"}
-							dropTarget={
-								arrowDrag?.dropTargetNodeId === id ||
-								(drawing?.kind === "arrow" && drawing.endNodeId === id)
-							}
+							dropTarget={dropTarget}
 							onPointerDown={handleNodePointerDown}
-							onResizeHandleDown={handleResizeHandleDown}
 							onChangeText={handleChangeText}
 							onExitEdit={handleExitEdit}
 						/>
-					),
-				)}
+					);
+				})}
 				{drawing?.kind === "box" && (
 					<div
 						style={{
