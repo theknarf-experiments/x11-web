@@ -18,6 +18,7 @@
 		"@tanstack/react-hotkeys": "^0.10.0",
 		"pako": "^2.1.0",
 		"perfect-arrows": "^0.3.7",
+		"perfect-freehand": "^1.2.3",
 		"react": "19.3.0-canary-3cb2c420-20260324",
 		"react-dom": "19.3.0-canary-3cb2c420-20260324"
 	},

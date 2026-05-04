@@ -77,6 +77,10 @@ pub struct OcifNode {
     pub height: f64,
     /// `@ocif/rect` extension.
     pub rect: Option<RectExt>,
+    /// `@ocif/path` extension. The path string is in node-local
+    /// coords starting at (0, 0), so the rendered SVG sits at the
+    /// node's `(x, y)` and fills its `(width, height)`.
+    pub path: Option<PathExt>,
     /// `@ocif/arrow` extension. For free-floating arrows the
     /// `start_x/y/end_x/y` are the visual endpoints. For connected
     /// arrows (also carrying `edge`), they're cached but the
@@ -102,6 +106,20 @@ pub struct OcifNode {
 /// missing.
 #[derive(Debug, Clone, Default, Reconcile, Hydrate)]
 pub struct RectExt {
+    pub stroke_width: Option<f64>,
+    pub stroke_color: Option<String>,
+    pub fill_color: Option<String>,
+}
+
+/// `@ocif/path` — SVG-like path commands plus styling. The
+/// freehand-pen pipeline stores the smoothed stroke as a closed
+/// filled polygon (SVG path with `Z`), so `fill_color` carries the
+/// drawn color and `stroke_width` / `stroke_color` are typically
+/// unused. Path coordinates are local to the node — `(0, 0)` is
+/// the top-left of the node's bounds.
+#[derive(Debug, Clone, Default, Reconcile, Hydrate)]
+pub struct PathExt {
+    pub path: String,
     pub stroke_width: Option<f64>,
     pub stroke_color: Option<String>,
     pub fill_color: Option<String>,

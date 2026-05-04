@@ -10,6 +10,7 @@ import type {
 	ArrowExt,
 	EdgeExt,
 	OcifNode,
+	PathExt,
 	RectExt,
 	TextStyleExt,
 } from "./workspaceSync";
@@ -327,6 +328,7 @@ export interface OcifNodeRow {
 	 *  .representations[mime=text/plain].content`. */
 	text: string;
 	rect?: RectExt;
+	path?: PathExt;
 	arrow?: ArrowExt;
 	edge?: EdgeExt;
 	textStyle?: TextStyleExt;
@@ -374,6 +376,7 @@ export function applyOcifNodesSnapshot(
 			height: node.height,
 			text: node.text ?? "",
 			rect: node.rect ? { ...node.rect } : undefined,
+			path: node.path ? { ...node.path } : undefined,
 			arrow: node.arrow ? { ...node.arrow } : undefined,
 			edge: node.edge ? { ...node.edge } : undefined,
 			textStyle: node.text_style ? { ...node.text_style } : undefined,

@@ -24,6 +24,7 @@ import { GlobalMenuBar } from "./GlobalMenuBar";
 import { InfiniteCanvas } from "./InfiniteCanvas";
 import { OcifArrow } from "./OcifArrow";
 import { OcifBox, type ResizeHandle } from "./OcifBox";
+import { OcifPath } from "./OcifPath";
 import { OcifText, type TextCorner } from "./OcifText";
 import { decodeFrame } from "./rtcWire";
 import { SettingsPanel } from "./SettingsPanel";
@@ -40,6 +41,7 @@ import {
 } from "./useBackendSocket";
 import { WindowFrame } from "./WindowFrame";
 import {
+	buildPathFromInkPoints,
 	deleteOcifNode,
 	FONT_MAX,
 	FONT_MIN,
@@ -51,6 +53,7 @@ import {
 	setOcifArrowEndpoints,
 	setOcifNodeBounds,
 	setOcifNodeFontSize,
+	setOcifNodePathLive,
 	setOcifNodePosition,
 	setOcifNodeText,
 	setPosition as setWorkspacePosition,
@@ -117,6 +120,7 @@ function App() {
 				height: row.height,
 				text: row.text,
 				rect: row.rect,
+				path: row.path,
 				arrow: row.arrow,
 				edge: row.edge,
 				text_style: row.textStyle,
@@ -154,6 +158,7 @@ function App() {
 	useHotkey(TOOL_HOTKEYS.box, () => setTool("box"));
 	useHotkey(TOOL_HOTKEYS.arrow, () => setTool("arrow"));
 	useHotkey(TOOL_HOTKEYS.text, () => setTool("text"));
+	useHotkey(TOOL_HOTKEYS.pen, () => setTool("pen"));
 	/** Local preview while the user is drag-creating a shape.
 	 *  Not synced — peers see the shape only on commit (pointerup).
 	 *  For arrows, `startNodeId` / `endNodeId` are the boxes the
@@ -179,8 +184,26 @@ function App() {
 				startNodeId: string | null;
 				endNodeId: string | null;
 		  }
+		| {
+				kind: "pen";
+				/** Raw input points in canvas coords. Pressure (third
+				 *  component) is captured from the pointer event when
+				 *  available; perfect-freehand uses it to vary stroke
+				 *  width along the path. */
+				points: Array<[number, number, number]>;
+				/** OCIF node id once it's been inserted — set on the
+				 *  first pointermove with ≥ 2 points so peers see the
+				 *  stroke grow live. `null` until then. */
+				nodeId: string | null;
+		  }
 		| null
 	>(null);
+	/** Mirror of `drawing` for ref-style reads inside event
+	 *  handlers — lets `onMove` access the latest state without
+	 *  triggering an effect re-run / listener re-bind on every
+	 *  pointermove. */
+	const drawingRef = useRef(drawing);
+	drawingRef.current = drawing;
 	/** Currently-selected OCIF node id (or null). Selection is
 	 *  per-tab — different users have different selections. */
 	const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
@@ -387,6 +410,16 @@ function App() {
 				});
 				return;
 			}
+			if (tool === "pen") {
+				e.preventDefault();
+				setSelectedNodeId(null);
+				setDrawing({
+					kind: "pen",
+					points: [[point.x, point.y, e.pressure || 0.5]],
+					nodeId: null,
+				});
+				return;
+			}
 			if (tool === "text") {
 				e.preventDefault();
 				// Click-to-place: drop a text-only node at the
@@ -434,6 +467,39 @@ function App() {
 			const toCanvas = pageToCanvasRef.current;
 			if (!toCanvas) return;
 			const p = toCanvas(ev.clientX, ev.clientY);
+			// Pen: side effects (insert / live-update the node)
+			// happen outside the state updater so React Strict
+			// Mode's dev-double-invoke can't fire them twice.
+			const cur = drawingRef.current;
+			if (cur?.kind === "pen") {
+				const newPoints: Array<[number, number, number]> = [
+					...cur.points,
+					[p.x, p.y, ev.pressure || 0.5],
+				];
+				const built = buildPathFromInkPoints(newPoints);
+				let nodeId = cur.nodeId;
+				if (built && !nodeId) {
+					nodeId = crypto.randomUUID();
+					const z = maxNodeZRef.current + 1;
+					maxNodeZRef.current = z;
+					insertOcifNode(activeWorkspace.id, nodeId, {
+						x: built.x,
+						y: built.y,
+						z,
+						width: built.width,
+						height: built.height,
+						path: { path: built.path, fill_color: "#ffffff" },
+					});
+				} else if (built && nodeId) {
+					setOcifNodePathLive(activeWorkspace.id, nodeId, built);
+				}
+				setDrawing({
+					kind: "pen",
+					points: newPoints,
+					nodeId,
+				});
+				return;
+			}
 			// Hit-test for arrow snapping: walk up from the element
 			// under the cursor to the nearest OcifBox marker.
 			const overEl = document.elementFromPoint(ev.clientX, ev.clientY);
@@ -470,6 +536,15 @@ function App() {
 				});
 				setSelectedNodeId(id);
 				setTool("pointer");
+			} else if (drawing.kind === "pen") {
+				// Doc was already mutated live during the gesture
+				// (see `onMove`). Just finalize selection + drop
+				// back to pointer mode. A click without any drag
+				// (no nodeId set) leaves nothing in the doc.
+				if (drawing.nodeId) {
+					setSelectedNodeId(drawing.nodeId);
+					setTool("pointer");
+				}
 			} else if (drawing.kind === "arrow") {
 				const dx = drawing.endX - drawing.startX;
 				const dy = drawing.endY - drawing.startY;
@@ -1133,6 +1208,18 @@ function App() {
 				}}
 			>
 				{[...ocifNodes.entries()].map(([id, node]) => {
+					if (node.path) {
+						return (
+							<OcifPath
+								key={id}
+								id={id}
+								node={node}
+								selected={selectedNodeId === id}
+								interactive={tool === "pointer"}
+								onPointerDown={handleNodePointerDown}
+							/>
+						);
+					}
 					if (node.arrow) {
 						return (
 							<OcifArrow
@@ -1226,6 +1313,11 @@ function App() {
 						/>
 					</svg>
 				)}
+				{/* No local pen preview — the in-progress stroke is
+				 * mutated into the doc on every pointermove and
+				 * rendered through the same OcifPath component as
+				 * a finalised stroke. Sibling tabs see it grow
+				 * live with no extra plumbing. */}
 				{visibleWindows.map((win) => {
 					// Lazy-create the renderer so a window appearing in
 					// the authoritative list shows up immediately, before

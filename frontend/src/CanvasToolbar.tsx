@@ -1,7 +1,7 @@
 import s from "./CanvasToolbar.module.css";
 import { Tooltip } from "./Tooltip";
 
-export type CanvasTool = "pointer" | "box" | "arrow" | "text";
+export type CanvasTool = "pointer" | "box" | "arrow" | "text" | "pen";
 
 /** The hotkey for each tool, kept here so the toolbar tooltip and
  *  the global hotkey registration in App.tsx stay in lockstep. */
@@ -10,6 +10,7 @@ export const TOOL_HOTKEYS: Record<CanvasTool, string> = {
 	box: "B",
 	arrow: "A",
 	text: "T",
+	pen: "P",
 };
 
 interface CanvasToolbarProps {
@@ -91,6 +92,23 @@ export function CanvasToolbar({ tool, onSelect }: CanvasToolbarProps) {
 						strokeWidth={1.75}
 						strokeLinecap="round"
 					/>
+				</svg>
+			</ToolButton>
+			<ToolButton
+				active={tool === "pen"}
+				label="Pen"
+				hotkey={TOOL_HOTKEYS.pen}
+				onClick={() => onSelect("pen")}
+			>
+				<svg viewBox="0 0 16 16" width={16} height={16}>
+					<path
+						d="M2 14 C 4 11, 6 9, 9 7 C 11 5, 13 4, 14 3"
+						fill="none"
+						stroke="currentColor"
+						strokeWidth={1.5}
+						strokeLinecap="round"
+					/>
+					<circle cx={2} cy={14} r={1} fill="currentColor" />
 				</svg>
 			</ToolButton>
 		</div>

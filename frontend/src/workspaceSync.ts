@@ -11,6 +11,7 @@
 
 import * as Automerge from "@automerge/automerge";
 import { layoutWithLines, prepareWithSegments } from "@chenglou/pretext";
+import { getStroke } from "perfect-freehand";
 import { encodeWorkspaceSync } from "./rtcWire";
 
 /** Default font family for measuring + rendering text nodes. Must
@@ -35,6 +36,99 @@ const LINE_HEIGHT_MULTIPLIER = 1.3;
  *  `solveFontSizeForCornerTarget`. Same range we expose to the UI. */
 export const FONT_MIN = 8;
 export const FONT_MAX = 200;
+
+/** Update an `@ocif/path` node's geometry — path string + bounds
+ *  in one mutation. Used by the live drawing flow: every
+ *  pointermove during a stroke recomputes the path through
+ *  perfect-freehand and writes here. Sibling tabs see the stroke
+ *  grow without waiting for pointerup. */
+export function setOcifNodePathLive(
+	workspaceId: string,
+	id: string,
+	data: {
+		x: number;
+		y: number;
+		width: number;
+		height: number;
+		path: string;
+	},
+) {
+	const entry = ensure(workspaceId);
+	if (!(entry.doc.nodes ?? {})[id]) return;
+	entry.doc = Automerge.change(entry.doc, (d) => {
+		const n = d.nodes?.[id];
+		if (!n || !n.path) return;
+		n.x = data.x;
+		n.y = data.y;
+		n.width = data.width;
+		n.height = data.height;
+		n.path.path = data.path;
+	});
+	notify(workspaceId);
+	ship(workspaceId, drainOutbound(entry));
+}
+
+/** Convert raw input points (canvas coords, optional pressure)
+ *  into an `@ocif/path`-compatible payload via perfect-freehand.
+ *  Returns the SVG path string in node-local coords plus the
+ *  bounding box in canvas coords — caller stores the bounds on
+ *  the node and the path on the `@ocif/path` extension. */
+export function buildPathFromInkPoints(
+	inputPoints: Array<[number, number, number?]>,
+): { x: number; y: number; width: number; height: number; path: string } | null {
+	if (inputPoints.length < 2) return null;
+	const stroke = getStroke(inputPoints, {
+		size: 6,
+		thinning: 0.6,
+		smoothing: 0.5,
+		streamline: 0.5,
+		simulatePressure: true,
+	});
+	if (stroke.length < 2) return null;
+	let minX = Infinity;
+	let minY = Infinity;
+	let maxX = -Infinity;
+	let maxY = -Infinity;
+	for (const [x, y] of stroke) {
+		if (x < minX) minX = x;
+		if (y < minY) minY = y;
+		if (x > maxX) maxX = x;
+		if (y > maxY) maxY = y;
+	}
+	// Translate stroke into node-local coords so the SVG renders
+	// from (0, 0) inside the node container.
+	const localPath = svgPathFromPolygon(
+		stroke.map(([x, y]) => [x - minX, y - minY]),
+	);
+	return {
+		x: minX,
+		y: minY,
+		width: Math.max(1, maxX - minX),
+		height: Math.max(1, maxY - minY),
+		path: localPath,
+	};
+}
+
+/** Build the SVG `M ... Q ... Z` path that perfect-freehand's
+ *  example uses — quadratic-Bézier through midpoints for smooth
+ *  rendering of the polygon outline. */
+function svgPathFromPolygon(points: Array<[number, number]>): string {
+	if (points.length === 0) return "";
+	const len = points.length;
+	const parts: string[] = [`M${points[0][0].toFixed(2)},${points[0][1].toFixed(2)}`];
+	parts.push("Q");
+	for (let i = 0; i < len; i++) {
+		const [x0, y0] = points[i];
+		const [x1, y1] = points[(i + 1) % len];
+		const mx = (x0 + x1) / 2;
+		const my = (y0 + y1) / 2;
+		parts.push(
+			`${x0.toFixed(2)},${y0.toFixed(2)} ${mx.toFixed(2)},${my.toFixed(2)}`,
+		);
+	}
+	parts.push("Z");
+	return parts.join(" ");
+}
 
 /** Find the font size that lands the dragged corner closest to
  *  the cursor. Ternary search over `[FONT_MIN, FONT_MAX]`, asking
@@ -170,6 +264,7 @@ export interface OcifNode {
 	width: number;
 	height: number;
 	rect?: RectExt;
+	path?: PathExt;
 	arrow?: ArrowExt;
 	edge?: EdgeExt;
 	text_style?: TextStyleExt;
@@ -184,6 +279,16 @@ export interface OcifNode {
 
 /** `@ocif/rect` — all properties optional per spec. */
 export interface RectExt {
+	stroke_width?: number;
+	stroke_color?: string;
+	fill_color?: string;
+}
+
+/** `@ocif/path` — SVG-like path commands and stroke styling.
+ *  Coordinates are local to the node (origin at the top-left of
+ *  the node's bounds). */
+export interface PathExt {
+	path: string;
 	stroke_width?: number;
 	stroke_color?: string;
 	fill_color?: string;
@@ -469,6 +574,7 @@ export function getOcifNodes(workspaceId: string): Map<string, OcifNode> {
 			width: v.width,
 			height: v.height,
 			rect: v.rect ? { ...v.rect } : undefined,
+			path: v.path ? { ...v.path } : undefined,
 			arrow: v.arrow ? { ...v.arrow } : undefined,
 			edge: v.edge ? { ...v.edge } : undefined,
 			text_style: v.text_style ? { ...v.text_style } : undefined,
@@ -495,7 +601,7 @@ export function insertOcifNode(
 	node: OcifNode,
 ) {
 	const entry = ensure(workspaceId);
-	const isTextOnly = !node.rect && !node.arrow;
+	const isTextOnly = !node.rect && !node.arrow && !node.path;
 	const measured = isTextOnly
 		? measureTextNodeBounds(
 				node.text ?? "",
@@ -527,6 +633,7 @@ export function insertOcifNode(
 			height: measured?.height ?? node.height,
 			resource: resourceId,
 			...(node.rect ? { rect: { ...node.rect } } : {}),
+			...(node.path ? { path: { ...node.path } } : {}),
 			...(node.arrow ? { arrow: { ...node.arrow } } : {}),
 			...(node.edge ? { edge: { ...node.edge } } : {}),
 			...(node.text_style ? { text_style: { ...node.text_style } } : {}),
