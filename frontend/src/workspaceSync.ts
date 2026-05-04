@@ -10,6 +10,7 @@
 // directly on the browser.
 
 import * as Automerge from "@automerge/automerge";
+import { encodeWorkspaceSync } from "./rtcWire";
 
 /** Doc shape — keep in sync with `WorkspaceDoc` in Rust. */
 export interface WorkspaceDoc {
@@ -25,6 +26,39 @@ interface PerWorkspace {
 
 /** Lazy per-workspace store. Created on first sync message. */
 const docs = new Map<string, PerWorkspace>();
+
+/** Per-workspace listener set. Fired after every applyInbound or
+ *  local mutation so React subscribers can re-read the doc. */
+const listeners = new Map<string, Set<() => void>>();
+
+/** The active control DataChannel for shipping sync messages. Set
+ *  by `useBackendSocket` once the channel opens and cleared on
+ *  close. Local mutations (e.g., `setName`) push their generated
+ *  sync messages straight onto this channel. */
+let controlDc: RTCDataChannel | null = null;
+
+export function setControlChannel(dc: RTCDataChannel | null) {
+	controlDc = dc;
+}
+
+export function subscribe(
+	workspaceId: string,
+	listener: () => void,
+): () => void {
+	let set = listeners.get(workspaceId);
+	if (!set) {
+		set = new Set();
+		listeners.set(workspaceId, set);
+	}
+	set.add(listener);
+	return () => {
+		set?.delete(listener);
+	};
+}
+
+function notify(workspaceId: string) {
+	listeners.get(workspaceId)?.forEach((fn) => fn());
+}
 
 function ensure(workspaceId: string): PerWorkspace {
 	let entry = docs.get(workspaceId);
@@ -53,6 +87,7 @@ export function applyInbound(
 	);
 	entry.doc = newDoc;
 	entry.syncState = newState;
+	notify(workspaceId);
 	return drainOutbound(entry);
 }
 
@@ -77,11 +112,35 @@ function drainOutbound(entry: PerWorkspace): Uint8Array[] {
 	return out;
 }
 
-/** Read-only view of the current hydrated doc. Useful for slice
- *  1b verification (read `name`) and React-side derivations. */
+function ship(workspaceId: string, messages: Uint8Array[]) {
+	if (!controlDc || controlDc.readyState !== "open") return;
+	for (const m of messages) {
+		controlDc.send(encodeWorkspaceSync(workspaceId, m));
+	}
+}
+
+/** Read-only view of the current hydrated doc. */
 export function snapshot(workspaceId: string): WorkspaceDoc | null {
 	const entry = docs.get(workspaceId);
 	return entry ? (entry.doc as WorkspaceDoc) : null;
+}
+
+/** Read just the `name` field. Cheap; safe to call inside
+ *  `useSyncExternalStore` getSnapshot. */
+export function getName(workspaceId: string): string | null {
+	return docs.get(workspaceId)?.doc.name ?? null;
+}
+
+/** Mutate the workspace's `name`. Generates and ships sync messages
+ *  immediately if the control DC is open; otherwise the change sits
+ *  in the local doc and is shipped on the next sync round. */
+export function setName(workspaceId: string, name: string) {
+	const entry = ensure(workspaceId);
+	entry.doc = Automerge.change(entry.doc, (d) => {
+		d.name = name;
+	});
+	notify(workspaceId);
+	ship(workspaceId, drainOutbound(entry));
 }
 
 /** Drop our local doc + sync state for a workspace. Currently
@@ -89,4 +148,5 @@ export function snapshot(workspaceId: string): WorkspaceDoc | null {
  *  mid-session. */
 export function forget(workspaceId: string) {
 	docs.delete(workspaceId);
+	listeners.delete(workspaceId);
 }

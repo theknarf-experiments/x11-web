@@ -563,20 +563,35 @@ async fn handle_frontend_ws(socket: WebSocket, state: AppState) {
                     };
                     conn.rtc.control_tx.clone()
                 };
-                let mut docs = state.workspace_docs.write().await;
-                let Some(entry) = docs.get_mut(&workspace_id) else {
-                    warn!(
-                        "workspace sync from {frontend_id}: unknown workspace {workspace_id}"
-                    );
-                    continue;
+                let other_peers: Vec<String> = {
+                    let mut docs = state.workspace_docs.write().await;
+                    let Some(entry) = docs.get_mut(&workspace_id) else {
+                        warn!(
+                            "workspace sync from {frontend_id}: unknown workspace \
+                             {workspace_id}"
+                        );
+                        continue;
+                    };
+                    if let Err(e) = entry.receive_sync(&frontend_id, &message) {
+                        warn!("workspace sync receive: {e}");
+                        continue;
+                    }
+                    while let Some(reply) = entry.generate_sync(&frontend_id) {
+                        let frame =
+                            rtc_codec::encode_workspace_sync(&workspace_id, &reply);
+                        let _ = control_tx.send(frame);
+                    }
+                    // Fan out to every other peer bound to this
+                    // workspace so a rename in tab A reaches tab B.
+                    entry
+                        .peer_states
+                        .keys()
+                        .filter(|p| p.as_str() != frontend_id)
+                        .cloned()
+                        .collect()
                 };
-                if let Err(e) = entry.receive_sync(&frontend_id, &message) {
-                    warn!("workspace sync receive: {e}");
-                    continue;
-                }
-                while let Some(reply) = entry.generate_sync(&frontend_id) {
-                    let frame = rtc_codec::encode_workspace_sync(&workspace_id, &reply);
-                    let _ = control_tx.send(frame);
+                for peer in other_peers {
+                    kick_workspace_sync(&state, &peer, &workspace_id).await;
                 }
             }
         });

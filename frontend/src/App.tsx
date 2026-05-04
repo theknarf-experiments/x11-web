@@ -24,7 +24,7 @@ import type {
 	MenuAction,
 	WindowWmState,
 } from "./types";
-import { useBackendSocket } from "./useBackendSocket";
+import { useBackendSocket, useWorkspaceName } from "./useBackendSocket";
 import { WindowFrame } from "./WindowFrame";
 
 let requestCounter = 0;
@@ -77,10 +77,12 @@ function App() {
 		onWindowUpdate,
 		onBell,
 		onDataChannelMessage,
+		setWorkspaceName,
 		diagnostics,
 		dismissDiagnostic,
 		clearDiagnostics,
 	} = useBackendSocket();
+	const workspaceName = useWorkspaceName(activeWorkspace?.id ?? null);
 
 	const { data: processes = [] } = useLiveQuery((q) =>
 		q.from({ p: processesCollection }).select(({ p }) => p),
@@ -551,6 +553,10 @@ function App() {
 		<>
 			<GlobalMenuBar
 				focusedTitle={focusedTitle}
+				workspaceName={workspaceName}
+				onRenameWorkspace={(name) => {
+					if (activeWorkspace) setWorkspaceName(activeWorkspace.id, name);
+				}}
 				menu={focusedMenu}
 				onActivate={handleMenuActivate}
 				appContextMenuItems={focusedAppContextMenuItems}

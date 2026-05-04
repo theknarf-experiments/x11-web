@@ -1,4 +1,10 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import {
+	useCallback,
+	useEffect,
+	useRef,
+	useState,
+	useSyncExternalStore,
+} from "react";
 import {
 	applyWindowList,
 	type NewWindowSeed,
@@ -10,7 +16,13 @@ import {
 } from "./db";
 import { Reassembler } from "./rtcReassembler";
 import { decodeFrame, encodeWorkspaceSync } from "./rtcWire";
-import { applyInbound, snapshot } from "./workspaceSync";
+import {
+	applyInbound,
+	getName as getWorkspaceName,
+	setControlChannel,
+	setName as setWorkspaceName,
+	subscribe as subscribeWorkspace,
+} from "./workspaceSync";
 import type {
 	BackendToFrontend,
 	FrontendToBackend,
@@ -238,18 +250,22 @@ export function useBackendSocket() {
 			const controlDc = pc.createDataChannel("control");
 			controlChannelRef.current = controlDc;
 			controlDc.binaryType = "arraybuffer";
-			controlDc.onopen = () =>
+			controlDc.onopen = () => {
+				setControlChannel(controlDc);
 				pushDiagnostic({
 					level: "info",
 					source: "ws",
 					message: "control DC open",
 				});
-			controlDc.onclose = () =>
+			};
+			controlDc.onclose = () => {
+				setControlChannel(null);
 				pushDiagnostic({
 					level: "warn",
 					source: "ws",
 					message: "control DC closed",
 				});
+			};
 			controlDc.onmessage = (e) => {
 				const bytes = new Uint8Array(e.data as ArrayBuffer);
 				const frame = decodeFrame(bytes);
@@ -257,18 +273,6 @@ export function useBackendSocket() {
 				const replies = applyInbound(frame.workspaceId, frame.message);
 				for (const reply of replies) {
 					controlDc.send(encodeWorkspaceSync(frame.workspaceId, reply));
-				}
-				// 1b verification: log the hydrated doc state so we
-				// can confirm the workspace's name made it across.
-				// Will get noisier in slice 2+ when the doc actually
-				// changes on every attach/detach — drop then.
-				const view = snapshot(frame.workspaceId);
-				if (view) {
-					console.log(
-						"workspace doc:",
-						frame.workspaceId,
-						JSON.parse(JSON.stringify(view)),
-					);
 				}
 			};
 
@@ -475,8 +479,28 @@ export function useBackendSocket() {
 		onWindowUpdate,
 		onBell,
 		onDataChannelMessage,
+		setWorkspaceName,
 		diagnostics,
 		dismissDiagnostic,
 		clearDiagnostics,
 	};
+}
+
+/** Reactive read of the workspace's `name` field from the local
+ *  Automerge doc. Returns `null` until the initial sync arrives.
+ *  Re-renders automatically on remote changes (other tabs renaming
+ *  the same workspace) and on local `setName` calls. */
+export function useWorkspaceName(workspaceId: string | null): string | null {
+	const subscribe = useCallback(
+		(listener: () => void) => {
+			if (!workspaceId) return () => {};
+			return subscribeWorkspace(workspaceId, listener);
+		},
+		[workspaceId],
+	);
+	const getSnapshot = useCallback(
+		() => (workspaceId ? getWorkspaceName(workspaceId) : null),
+		[workspaceId],
+	);
+	return useSyncExternalStore(subscribe, getSnapshot);
 }

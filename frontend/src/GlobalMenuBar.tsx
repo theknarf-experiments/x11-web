@@ -9,6 +9,12 @@ import type { MenuAction, MenuItem } from "./types";
 interface GlobalMenuBarProps {
 	/** Title of the currently focused window, or null when nothing is focused. */
 	focusedTitle: string | null;
+	/** Active workspace's name from the synced Automerge doc. Used as
+	 * the bar title when no window is focused, and is editable inline. */
+	workspaceName: string | null;
+	/** Commit a new workspace name. Empty strings are ignored — the
+	 * input falls back to the previous value. */
+	onRenameWorkspace: (name: string) => void;
 	/** Menu tree mirrored from the focused window's GTK / Qt app. */
 	menu: MenuItem[] | null;
 	/** Send an activation back to the focused window. */
@@ -33,6 +39,8 @@ interface GlobalMenuBarProps {
  */
 export function GlobalMenuBar({
 	focusedTitle,
+	workspaceName,
+	onRenameWorkspace,
 	menu,
 	onActivate,
 	appContextMenuItems,
@@ -79,22 +87,29 @@ export function GlobalMenuBar({
 
 	return (
 		<div className={s.menuBar} data-testid="global-menu-bar" ref={barRef}>
-			<button
-				type="button"
-				className={s.appTitle}
-				data-testid="global-menu-bar-title"
-				disabled={!titleClickable}
-				onClick={(e) => {
-					if (!titleClickable) return;
-					const rect = e.currentTarget.getBoundingClientRect();
-					setAppMenuAnchor({
-						x: rect.left,
-						y: rect.bottom + 4,
-					});
-				}}
-			>
-				{focusedTitle ?? "x11-web"}
-			</button>
+			{focusedTitle == null ? (
+				<WorkspaceNameField
+					name={workspaceName ?? "Workspace"}
+					onCommit={onRenameWorkspace}
+				/>
+			) : (
+				<button
+					type="button"
+					className={s.appTitle}
+					data-testid="global-menu-bar-title"
+					disabled={!titleClickable}
+					onClick={(e) => {
+						if (!titleClickable) return;
+						const rect = e.currentTarget.getBoundingClientRect();
+						setAppMenuAnchor({
+							x: rect.left,
+							y: rect.bottom + 4,
+						});
+					}}
+				>
+					{focusedTitle}
+				</button>
+			)}
 			{topItems.map((item, idx) => {
 				const isOpen = openIndex === idx;
 				const isSeparator = item.kind === "separator";
@@ -149,6 +164,60 @@ export function GlobalMenuBar({
 				/>
 			)}
 		</div>
+	);
+}
+
+interface WorkspaceNameFieldProps {
+	name: string;
+	onCommit: (next: string) => void;
+}
+
+/**
+ * Inline-editable text field for the workspace name. Looks like
+ * static text until clicked, then becomes a real text input. Commits
+ * on blur or Enter; reverts on Escape. Discards empty submissions so
+ * the user can't end up with a nameless workspace.
+ */
+function WorkspaceNameField({ name, onCommit }: WorkspaceNameFieldProps) {
+	const [draft, setDraft] = useState(name);
+	const [editing, setEditing] = useState(false);
+
+	// Pull in remote changes (other tabs renaming the same workspace)
+	// when we're not actively editing — overwriting an in-progress
+	// edit would be bad UX.
+	// biome-ignore lint/correctness/useExhaustiveDependencies: only reflect remote changes when idle
+	useEffect(() => {
+		if (!editing) setDraft(name);
+	}, [name]);
+
+	return (
+		<input
+			type="text"
+			className={s.workspaceNameInput}
+			data-testid="global-menu-bar-title"
+			value={draft}
+			onChange={(e) => setDraft(e.target.value)}
+			onFocus={(e) => {
+				setEditing(true);
+				setDraft(name);
+				e.currentTarget.select();
+			}}
+			onBlur={() => {
+				const trimmed = draft.trim();
+				if (trimmed && trimmed !== name) onCommit(trimmed);
+				else setDraft(name);
+				setEditing(false);
+			}}
+			onKeyDown={(e) => {
+				if (e.key === "Enter") {
+					e.currentTarget.blur();
+				} else if (e.key === "Escape") {
+					setDraft(name);
+					e.currentTarget.blur();
+				}
+			}}
+			spellCheck={false}
+		/>
 	);
 }
 

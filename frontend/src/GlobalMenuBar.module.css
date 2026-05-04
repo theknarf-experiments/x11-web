@@ -47,6 +47,35 @@
 	opacity: 0.7;
 }
 
+/* Editable workspace-name slot. Looks like the .appTitle button
+ * (same font/weight/padding) but is a real <input> so the user can
+ * click and type. Hover hint mirrors the button's hover so it's
+ * obviously interactive. */
+.workspaceNameInput {
+	background: transparent;
+	border: 1px solid transparent;
+	color: inherit;
+	font: inherit;
+	font-weight: 600;
+	white-space: nowrap;
+	padding: 4px 9px;
+	margin-right: 8px;
+	border-radius: 4px;
+	cursor: text;
+	min-width: 6ch;
+	width: auto;
+	outline: none;
+}
+
+.workspaceNameInput:hover {
+	background: rgba(255, 255, 255, 0.1);
+}
+
+.workspaceNameInput:focus {
+	background: rgba(255, 255, 255, 0.15);
+	border-color: rgba(255, 255, 255, 0.25);
+}
+
 .menuItemWrapper {
 	position: relative;
 }
