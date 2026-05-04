@@ -41,6 +41,8 @@ import {
 import { WindowFrame } from "./WindowFrame";
 import {
 	deleteOcifNode,
+	FONT_MAX,
+	FONT_MIN,
 	getAllPositions,
 	getOcifNodes,
 	insertOcifNode,
@@ -745,15 +747,18 @@ function App() {
 			// the drag doesn't drift the node.
 			const anchorX = signX > 0 ? node.x : node.x + node.width;
 			const anchorY = signY > 0 ? node.y : node.y + node.height;
-			const startWidth = node.width;
-			const startFont = node.text_style?.font_size_px ?? 14;
+			// Capture text + style at gesture start. The text doesn't
+			// change during a resize (handles aren't shown in edit
+			// mode); pretext measures against this snapshot.
+			const startText = node.text ?? "";
+			const startStyle = node.text_style;
 			const onMove = (ev: PointerEvent) => {
 				const t = pageToCanvasRef.current;
 				if (!t) return;
 				const p = t(ev.clientX, ev.clientY);
 				const targetFont = solveFontSizeForCornerTarget({
-					startWidth,
-					startFont,
+					text: startText,
+					textStyle: startStyle,
 					signX,
 					signY,
 					anchorX,
@@ -762,8 +767,8 @@ function App() {
 					cursorY: p.y,
 				});
 				const newFont = Math.max(
-					8,
-					Math.min(200, Math.round(targetFont)),
+					FONT_MIN,
+					Math.min(FONT_MAX, Math.round(targetFont)),
 				);
 				setOcifNodeFontSize(wid, id, newFont, {
 					x: anchorX,

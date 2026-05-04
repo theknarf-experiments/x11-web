@@ -31,27 +31,30 @@ const EMPTY_TEXT_MIN_WIDTH = 24;
 /** Line-height multiplier matching the renderer (`OcifTextLayer`'s
  *  CSS `line-height: 1.3`). */
 const LINE_HEIGHT_MULTIPLIER = 1.3;
+/** Clamp range for the ternary search in
+ *  `solveFontSizeForCornerTarget`. Same range we expose to the UI. */
+export const FONT_MIN = 8;
+export const FONT_MAX = 200;
 
-/** Solve for the font size that lands the dragged corner closest
- *  to the cursor under the linear approximation
- *      width(F)  ≈ a·F + p_w
- *      height(F) ≈ b·F + p_h
- *  where `a` is the char-width-per-px ratio inferred from the
- *  node's current bounds, and `b` = 1.3 (line height multiplier).
+/** Find the font size that lands the dragged corner closest to
+ *  the cursor. Ternary search over `[FONT_MIN, FONT_MAX]`, asking
+ *  pretext for the actual measured bounds at each candidate — no
+ *  linear-model assumption, just delegate measurement to pretext.
  *
- *  With two equations and one unknown the system is over-
- *  determined; the least-squares minimizer of
- *  ||(corner(F) − cursor)||² is the closed form
- *      F* = (a·u + b·v) / (a² + b²)
- *  where `u, v` are the cursor's signed offsets from the
- *  drag-anchor (the corner OPPOSITE the one being dragged), with
- *  the corner's cardinal padding subtracted off.
+ *  Distance(F) is unimodal in F: both width and height grow
+ *  monotonically with font size, so the dragged corner sweeps
+ *  along a (mostly straight) path radiating from the anchor, and
+ *  its distance to a fixed cursor point has exactly one minimum.
  *
- *  Caller is responsible for clamping the result to a sane font
- *  range and feeding it into `setOcifNodeFontSize`. */
+ *  Cost: ~25 pretext measurements per call to converge to <0.5px
+ *  precision; pretext is canvas-backed and microsecond-cheap, so
+ *  this is comfortably fast for a 60Hz drag.
+ *
+ *  Caller is responsible for clamping the result and feeding it
+ *  into `setOcifNodeFontSize`. */
 export function solveFontSizeForCornerTarget(input: {
-	startWidth: number;
-	startFont: number;
+	text: string;
+	textStyle?: TextStyleExt;
 	signX: 1 | -1;
 	signY: 1 | -1;
 	anchorX: number;
@@ -59,16 +62,34 @@ export function solveFontSizeForCornerTarget(input: {
 	cursorX: number;
 	cursorY: number;
 }): number {
-	const p_w = TEXT_PAD_X * 2;
-	const p_h = TEXT_PAD_Y * 2;
-	const b = LINE_HEIGHT_MULTIPLIER;
-	const a = Math.max(
-		0.01,
-		(input.startWidth - p_w) / Math.max(1, input.startFont),
-	);
-	const u = input.signX * (input.cursorX - input.anchorX) - p_w;
-	const v = input.signY * (input.cursorY - input.anchorY) - p_h;
-	return (a * u + b * v) / (a * a + b * b);
+	const distanceAtFont = (F: number): number => {
+		const b = measureTextNodeBounds(
+			input.text,
+			F,
+			input.textStyle?.font_family,
+			input.textStyle?.bold,
+			input.textStyle?.italic,
+		);
+		const cornerX = input.anchorX + input.signX * b.width;
+		const cornerY = input.anchorY + input.signY * b.height;
+		return Math.hypot(
+			cornerX - input.cursorX,
+			cornerY - input.cursorY,
+		);
+	};
+	let lo = FONT_MIN;
+	let hi = FONT_MAX;
+	// 32 ternary-search rounds is plenty for [8..200] → <0.01px.
+	for (let i = 0; i < 32 && hi - lo > 0.5; i++) {
+		const m1 = lo + (hi - lo) / 3;
+		const m2 = hi - (hi - lo) / 3;
+		if (distanceAtFont(m1) < distanceAtFont(m2)) {
+			hi = m2;
+		} else {
+			lo = m1;
+		}
+	}
+	return (lo + hi) / 2;
 }
 
 /** Measure rendered text dimensions via pretext (canvas-based,
@@ -94,7 +115,13 @@ export function measureTextNodeBounds(
 	fontParts.push(`${fontSizePx}px`);
 	fontParts.push(fontFamily);
 	const font = fontParts.join(" ");
-	const prepared = prepareWithSegments(text, font);
+	// `whiteSpace: pre-wrap` is the textarea-like mode — pretext
+	// preserves `\n` as hard line breaks and keeps spaces visible.
+	// The default `normal` mode collapses whitespace, which would
+	// merge multi-line text back into a single line.
+	const prepared = prepareWithSegments(text, font, {
+		whiteSpace: "pre-wrap",
+	});
 	// Huge maxWidth so we only wrap on explicit newlines.
 	const result = layoutWithLines(prepared, 1e9, lineHeight);
 	const widest =
