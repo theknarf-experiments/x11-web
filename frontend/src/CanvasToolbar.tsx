@@ -2,7 +2,13 @@ import type { Hotkey } from "@tanstack/react-hotkeys";
 import s from "./CanvasToolbar.module.css";
 import { Tooltip } from "./Tooltip";
 
-export type CanvasTool = "pointer" | "box" | "arrow" | "text" | "pen";
+export type CanvasTool =
+	| "pointer"
+	| "box"
+	| "arrow"
+	| "text"
+	| "pen"
+	| "markdown";
 
 /** The hotkey for each tool, kept here so the toolbar tooltip and
  *  the global hotkey registration in App.tsx stay in lockstep.
@@ -15,6 +21,7 @@ export const TOOL_HOTKEYS: Record<CanvasTool, Hotkey> = {
 	arrow: "A",
 	text: "T",
 	pen: "P",
+	markdown: "M",
 };
 
 interface CanvasToolbarProps {
@@ -113,6 +120,33 @@ export function CanvasToolbar({ tool, onSelect }: CanvasToolbarProps) {
 						strokeLinecap="round"
 					/>
 					<circle cx={2} cy={14} r={1} fill="currentColor" />
+				</svg>
+			</ToolButton>
+			<ToolButton
+				active={tool === "markdown"}
+				label="Markdown"
+				hotkey={TOOL_HOTKEYS.markdown}
+				onClick={() => onSelect("markdown")}
+			>
+				<svg viewBox="0 0 16 16" width={16} height={16}>
+					<rect
+						x={2}
+						y={3}
+						width={12}
+						height={10}
+						rx={1.5}
+						fill="none"
+						stroke="currentColor"
+						strokeWidth={1.25}
+					/>
+					<path
+						d="M4 11 V6 L6 9 L8 6 V11 M11 6 V11 M9.5 9 L11 11 L12.5 9"
+						fill="none"
+						stroke="currentColor"
+						strokeWidth={1.25}
+						strokeLinecap="round"
+						strokeLinejoin="round"
+					/>
 				</svg>
 			</ToolButton>
 		</div>

@@ -1,0 +1,127 @@
+.note,
+.selected,
+.dropTarget {
+	position: absolute;
+	box-sizing: border-box;
+	display: flex;
+	flex-direction: column;
+	background: rgba(255, 245, 200, 0.06);
+	border: 1px solid rgba(255, 220, 120, 0.35);
+	border-radius: 6px;
+	overflow: hidden;
+	cursor: move;
+}
+
+.selected {
+	box-shadow:
+		0 0 0 2px #007aff,
+		0 0 0 4px rgba(0, 122, 255, 0.3);
+}
+
+.dropTarget {
+	box-shadow:
+		0 0 0 2px #34c759,
+		0 0 0 6px rgba(52, 199, 89, 0.35);
+}
+
+/* Small label bar at the top of the note — distinguishes a
+ * markdown note visually from boxes and plain text. */
+.header {
+	flex: 0 0 auto;
+	padding: 4px 10px;
+	font-size: 10px;
+	font-weight: 600;
+	text-transform: uppercase;
+	letter-spacing: 0.6px;
+	color: rgba(255, 220, 120, 0.85);
+	background: rgba(255, 220, 120, 0.08);
+	border-bottom: 1px solid rgba(255, 220, 120, 0.2);
+	user-select: none;
+}
+
+.editor {
+	flex: 1 1 auto;
+	min-height: 0;
+	width: 100%;
+	resize: none;
+	border: 0;
+	padding: 8px 10px;
+	background: transparent;
+	color: #f5f5f5;
+	font-family: ui-monospace, "SF Mono", Menlo, monospace;
+	font-size: 12px;
+	line-height: 1.45;
+	white-space: pre;
+	overflow: auto;
+	outline: none;
+	cursor: text;
+}
+
+.editor::-webkit-scrollbar {
+	width: 8px;
+	height: 8px;
+}
+.editor::-webkit-scrollbar-thumb {
+	background: rgba(255, 255, 255, 0.18);
+	border-radius: 4px;
+}
+.editor::-webkit-scrollbar-track {
+	background: transparent;
+}
+
+/* Resize handles — same look as OcifBox so the gesture feels
+ * consistent across shapes. */
+.handle {
+	position: absolute;
+	width: 10px;
+	height: 10px;
+	background: #ffffff;
+	border: 1px solid #007aff;
+	border-radius: 2px;
+	box-sizing: border-box;
+}
+
+.handle_n,
+.handle_s {
+	left: 50%;
+	transform: translateX(-50%);
+	cursor: ns-resize;
+}
+.handle_e,
+.handle_w {
+	top: 50%;
+	transform: translateY(-50%);
+	cursor: ew-resize;
+}
+.handle_nw {
+	cursor: nwse-resize;
+	left: -5px;
+	top: -5px;
+}
+.handle_n {
+	top: -5px;
+}
+.handle_ne {
+	cursor: nesw-resize;
+	right: -5px;
+	top: -5px;
+}
+.handle_e {
+	right: -5px;
+}
+.handle_se {
+	cursor: nwse-resize;
+	right: -5px;
+	bottom: -5px;
+}
+.handle_s {
+	bottom: -5px;
+}
+.handle_sw {
+	cursor: nesw-resize;
+	left: -5px;
+	bottom: -5px;
+}
+.handle_w {
+	left: -5px;
+}

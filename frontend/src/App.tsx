@@ -24,6 +24,7 @@ import { GlobalMenuBar } from "./GlobalMenuBar";
 import { InfiniteCanvas } from "./InfiniteCanvas";
 import { OcifArrow } from "./OcifArrow";
 import { OcifBox, type ResizeHandle } from "./OcifBox";
+import { OcifMarkdown } from "./OcifMarkdown";
 import { OcifPath } from "./OcifPath";
 import { OcifText, type TextCorner } from "./OcifText";
 import { decodeFrame } from "./rtcWire";
@@ -117,6 +118,7 @@ function App() {
 				text_style: row.textStyle,
 				window: row.window,
 				resource: row.resourceId,
+				text_mime_type: row.textMimeType,
 			});
 		}
 		return out;
@@ -151,6 +153,7 @@ function App() {
 	useHotkey(TOOL_HOTKEYS.arrow, () => setTool("arrow"));
 	useHotkey(TOOL_HOTKEYS.text, () => setTool("text"));
 	useHotkey(TOOL_HOTKEYS.pen, () => setTool("pen"));
+	useHotkey(TOOL_HOTKEYS.markdown, () => setTool("markdown"));
 	/** Local preview while the user is drag-creating a shape.
 	 *  Not synced — peers see the shape only on commit (pointerup).
 	 *  For arrows, `startNodeId` / `endNodeId` are the boxes the
@@ -418,6 +421,31 @@ function App() {
 				// create. Matches the convention in design tools
 				// (Figma / tldraw): pick a tool, place one shape,
 				// resume editing.
+				setTool("pointer");
+				return;
+			}
+			if (tool === "markdown") {
+				e.preventDefault();
+				// Click-to-place a markdown note at a fixed default
+				// size — the user resizes via corner handles, the
+				// content scrolls when it overflows. Drop straight
+				// into edit mode.
+				const id = crypto.randomUUID();
+				const z = maxNodeZRef.current + 1;
+				maxNodeZRef.current = z;
+				const MD_W = 280;
+				const MD_H = 200;
+				insertOcifNode(activeWorkspace.id, id, {
+					x: point.x - MD_W / 2,
+					y: point.y - MD_H / 2,
+					z,
+					width: MD_W,
+					height: MD_H,
+					text: "",
+					text_mime_type: "text/markdown",
+				});
+				setSelectedNodeId(id);
+				setEditingNodeId(id);
 				setTool("pointer");
 				return;
 			}
@@ -773,16 +801,19 @@ function App() {
 	);
 
 	const handleExitEdit = useCallback(() => {
-		// Empty text-only nodes have no chrome to indicate they
+		// Empty plain-text nodes have no chrome to indicate they
 		// exist — leaving them in the doc just adds invisible
-		// clutter. Drop on blur if the node has no shape ext and
-		// no content.
+		// clutter. Drop on blur if the node has no shape ext, no
+		// markdown chrome, and no content. Markdown notes always
+		// have a header + tinted background, so an empty one is a
+		// legitimate scratch note the user can return to.
 		if (activeWorkspace && editingNodeId) {
 			const node = ocifNodes.get(editingNodeId);
 			if (
 				node &&
 				!node.rect &&
 				!node.arrow &&
+				node.text_mime_type !== "text/markdown" &&
 				!(node.text && node.text.length > 0)
 			) {
 				deleteOcifNode(activeWorkspace.id, editingNodeId);
@@ -1246,6 +1277,23 @@ function App() {
 					if (node.rect) {
 						return (
 							<OcifBox
+								key={id}
+								id={id}
+								node={node}
+								selected={selectedNodeId === id}
+								editing={editingNodeId === id}
+								interactive={tool === "pointer"}
+								dropTarget={dropTarget}
+								onPointerDown={handleNodePointerDown}
+								onResizeHandleDown={handleResizeHandleDown}
+								onChangeText={handleChangeText}
+								onExitEdit={handleExitEdit}
+							/>
+						);
+					}
+					if (node.text_mime_type === "text/markdown") {
+						return (
+							<OcifMarkdown
 								key={id}
 								id={id}
 								node={node}

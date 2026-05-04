@@ -303,6 +303,10 @@ export interface OcifNodeRow {
 	textStyle?: TextStyleExt;
 	window?: WindowExt;
 	resourceId?: string;
+	/** Mime type of the resource's first representation — drives
+	 *  text-only-node dispatch in the renderer (`text/plain` →
+	 *  `OcifText`, `text/markdown` → `OcifMarkdown`). */
+	textMimeType?: string;
 }
 
 const ocifNodes = makeCollection<OcifNodeRow>({
@@ -352,6 +356,7 @@ export function applyOcifNodesSnapshot(
 			textStyle: node.text_style ? { ...node.text_style } : undefined,
 			window: node.window ? { ...node.window } : undefined,
 			resourceId: node.resource,
+			textMimeType: node.text_mime_type,
 		};
 		api.write({
 			type: current.has(id) ? "update" : "insert",

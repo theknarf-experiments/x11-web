@@ -285,12 +285,19 @@ export interface OcifNode {
 	 *  by `window_id`; the OcifNode owns position / z / size. */
 	window?: WindowExt;
 	/** Reference to a resource id in `WorkspaceDoc.resources`. The
-	 *  renderer pulls the first `text/plain` representation off
-	 *  the resource and displays it. */
+	 *  renderer pulls the first representation off the resource
+	 *  and displays it. */
 	resource?: string;
-	/** Derived: resolved `text/plain` content from `resource`.
-	 *  Computed by `getOcifNodes` — not stored in the doc. */
+	/** Derived: resolved text content from the first
+	 *  representation on `resource`. Computed by `getOcifNodes` —
+	 *  not stored in the doc. */
 	text?: string;
+	/** Derived: mime type of `resource`'s first representation
+	 *  (`text/plain` by default; `text/markdown` for markdown
+	 *  notes). Lets the renderer dispatch text-only nodes between
+	 *  `OcifText` and `OcifMarkdown` without an extra schema flag.
+	 *  Computed by `getOcifNodes` — not stored in the doc. */
+	text_mime_type?: string;
 }
 
 /** `@x11web/window` — links an OcifNode to a live window streamed
@@ -613,6 +620,7 @@ export function getOcifNodes(workspaceId: string): Map<string, OcifNode> {
 			window: v.window ? { ...v.window } : undefined,
 			resource: v.resource,
 			text: resolveNodeText(entry.doc, v),
+			text_mime_type: resolveNodeMimeType(entry.doc, v),
 		});
 	}
 	return out;
@@ -634,11 +642,15 @@ export function insertOcifNode(
 	node: OcifNode,
 ) {
 	const entry = ensure(workspaceId);
-	// Text-only nodes auto-fit their bounds to the measured text;
-	// boxes / arrows / paths / windows keep the caller's geometry.
-	const isTextOnly =
-		!node.rect && !node.arrow && !node.path && !node.window;
-	const measured = isTextOnly
+	const mimeType = node.text_mime_type ?? "text/plain";
+	// Plain-text-only nodes auto-fit their bounds to the measured
+	// text; boxes / arrows / paths / windows / markdown notes keep
+	// the caller's geometry (markdown notes are user-resizable and
+	// scroll their content).
+	const isAutoFitText =
+		!node.rect && !node.arrow && !node.path && !node.window
+			&& mimeType === "text/plain";
+	const measured = isAutoFitText
 		? measureTextNodeBounds(
 				node.text ?? "",
 				node.text_style?.font_size_px ?? 14,
@@ -664,7 +676,7 @@ export function insertOcifNode(
 			// at character level instead of last-writer-winning the
 			// whole string.
 			d.resources[resourceId] = {
-				representations: [{ mime_type: "text/plain", content: "" }],
+				representations: [{ mime_type: mimeType, content: "" }],
 			};
 			const seed = node.text ?? "";
 			if (seed.length > 0) {
@@ -813,7 +825,7 @@ export function setOcifNodeText(
 		const n = d.nodes?.[id];
 		if (!n) return;
 		writeText(d, n, text);
-		if (!n.rect && !n.arrow) {
+		if (!n.rect && !n.arrow && isPlainTextNode(d, n)) {
 			const bounds = boundsForNode(n, text);
 			n.width = bounds.width;
 			n.height = bounds.height;
@@ -849,7 +861,7 @@ export function setOcifNodeFontSize(
 		if (!n) return;
 		if (!n.text_style) n.text_style = {};
 		n.text_style.font_size_px = fontSizePx;
-		if (!n.rect && !n.arrow) {
+		if (!n.rect && !n.arrow && isPlainTextNode(d, n)) {
 			const text = readText(d, n);
 			const bounds = boundsForNode(n, text);
 			n.width = bounds.width;
@@ -918,21 +930,20 @@ function writeText(
 		);
 		return;
 	}
-	const idx = r.representations.findIndex(
-		(rep) => rep.mime_type === "text/plain",
-	);
-	if (idx >= 0) {
+	// Each resource carries one representation; update its content
+	// regardless of mime type so the same code path handles
+	// `text/plain` and `text/markdown` (and any future mime types).
+	if (r.representations.length > 0) {
 		Automerge.updateText(
 			d as Automerge.Doc<WorkspaceDoc>,
-			["resources", resourceId, "representations", idx, "content"],
+			["resources", resourceId, "representations", 0, "content"],
 			text,
 		);
 	} else {
-		const newIdx = r.representations.length;
 		r.representations.push({ mime_type: "text/plain", content: "" });
 		Automerge.splice(
 			d as Automerge.Doc<WorkspaceDoc>,
-			["resources", resourceId, "representations", newIdx, "content"],
+			["resources", resourceId, "representations", 0, "content"],
 			0,
 			0,
 			text,
@@ -940,16 +951,25 @@ function writeText(
 	}
 }
 
-/** Helper — read the `text/plain` content for a node from the
- *  shared resources map. Empty string when missing. */
+/** Helper — read the active representation's content for a node
+ *  from the shared resources map. Empty string when missing. */
 function readText(d: WorkspaceDoc, n: OcifNode): string {
 	if (!n.resource) return "";
 	const r = d.resources?.[n.resource];
-	if (!r) return "";
-	const rep = r.representations.find(
-		(rep) => rep.mime_type === "text/plain",
-	);
+	const rep = r?.representations?.[0];
 	return rep?.content ?? "";
+}
+
+/** Helper — true when `n` carries plain text content (vs. markdown
+ *  or another mime type). Used to gate auto-fit-to-text behavior:
+ *  plain text nodes auto-resize so the bounds always hug the text;
+ *  markdown notes have caller-set bounds and an internal scrollbar
+ *  when content overflows. */
+function isPlainTextNode(d: WorkspaceDoc, n: OcifNode): boolean {
+	if (!n.resource) return true;
+	const r = d.resources?.[n.resource];
+	const rep = r?.representations?.[0];
+	return (rep?.mime_type ?? "text/plain") === "text/plain";
 }
 
 /** Helper — measure node bounds from current text + textstyle. */
@@ -965,17 +985,33 @@ function boundsForNode(n: OcifNode, text: string): { width: number; height: numb
 }
 
 /** Resolve a node's text content from its referenced resource.
- *  Returns an empty string if the node has no resource or the
- *  resource has no `text/plain` representation. */
+ *  Returns the first representation's content (each resource carries
+ *  one representation today — `text/plain` for plain text nodes,
+ *  `text/markdown` for markdown notes). Empty string when there's
+ *  no resource or the resource is empty. */
 export function resolveNodeText(
 	doc: Automerge.Doc<WorkspaceDoc>,
 	node: OcifNode,
 ): string {
 	if (!node.resource) return "";
 	const r = doc.resources?.[node.resource];
-	if (!r) return "";
-	const rep = r.representations.find((rep) => rep.mime_type === "text/plain");
+	const rep = r?.representations?.[0];
 	return rep?.content ?? "";
+}
+
+/** Mime type of a node's referenced resource (the first
+ *  representation). `"text/plain"` when the resource is missing
+ *  or doesn't declare a mime type — same default the spec
+ *  applies. Lets the renderer pick `OcifText` vs `OcifMarkdown`
+ *  for text-only nodes. */
+export function resolveNodeMimeType(
+	doc: Automerge.Doc<WorkspaceDoc>,
+	node: OcifNode,
+): string {
+	if (!node.resource) return "text/plain";
+	const r = doc.resources?.[node.resource];
+	const rep = r?.representations?.[0];
+	return rep?.mime_type ?? "text/plain";
 }
 
 /** Update an arrow node's endpoints in a single mutation. Callers
