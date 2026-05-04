@@ -146,6 +146,7 @@ function App() {
 	useHotkey(TOOL_HOTKEYS.pointer, () => setTool("pointer"));
 	useHotkey(TOOL_HOTKEYS.box, () => setTool("box"));
 	useHotkey(TOOL_HOTKEYS.arrow, () => setTool("arrow"));
+	useHotkey(TOOL_HOTKEYS.text, () => setTool("text"));
 	/** Local preview while the user is drag-creating a shape.
 	 *  Not synced — peers see the shape only on commit (pointerup).
 	 *  For arrows, `startNodeId` / `endNodeId` are the boxes the
@@ -379,6 +380,35 @@ function App() {
 				});
 				return;
 			}
+			if (tool === "text") {
+				e.preventDefault();
+				// Click-to-place: drop a text-only node at the
+				// cursor and immediately enter edit mode. Empty
+				// text nodes are auto-deleted on blur (see
+				// `handleExitEdit`) so a stray click leaves no
+				// orphan in the doc.
+				const id = crypto.randomUUID();
+				const z = maxNodeZRef.current + 1;
+				maxNodeZRef.current = z;
+				const TEXT_W = 200;
+				const TEXT_H = 32;
+				insertOcifNode(activeWorkspace.id, id, {
+					x: point.x - TEXT_W / 2,
+					y: point.y - TEXT_H / 2,
+					z,
+					width: TEXT_W,
+					height: TEXT_H,
+					text: "",
+				});
+				setSelectedNodeId(id);
+				setEditingNodeId(id);
+				// One-shot: drop back to pointer mode after a
+				// create. Matches the convention in design tools
+				// (Figma / tldraw): pick a tool, place one shape,
+				// resume editing.
+				setTool("pointer");
+				return;
+			}
 			setSelectedNodeId(null);
 		},
 		[tool, activeWorkspace],
@@ -432,6 +462,7 @@ function App() {
 					rect: {},
 				});
 				setSelectedNodeId(id);
+				setTool("pointer");
 			} else if (drawing.kind === "arrow") {
 				const dx = drawing.endX - drawing.startX;
 				const dy = drawing.endY - drawing.startY;
@@ -474,6 +505,7 @@ function App() {
 						...(edge ? { edge } : {}),
 					});
 					setSelectedNodeId(id);
+					setTool("pointer");
 				}
 			}
 			setDrawing(null);
@@ -666,8 +698,24 @@ function App() {
 	);
 
 	const handleExitEdit = useCallback(() => {
+		// Empty text-only nodes have no chrome to indicate they
+		// exist — leaving them in the doc just adds invisible
+		// clutter. Drop on blur if the node has no shape ext and
+		// no content.
+		if (activeWorkspace && editingNodeId) {
+			const node = ocifNodes.get(editingNodeId);
+			if (
+				node &&
+				!node.rect &&
+				!node.arrow &&
+				!(node.text && node.text.length > 0)
+			) {
+				deleteOcifNode(activeWorkspace.id, editingNodeId);
+				setSelectedNodeId(null);
+			}
+		}
 		setEditingNodeId(null);
-	}, []);
+	}, [activeWorkspace, editingNodeId, ocifNodes]);
 
 	/** Pointer-down on one of a box's resize handles. Computes new
 	 *  bounds from the drag delta and ships a single `setBounds`

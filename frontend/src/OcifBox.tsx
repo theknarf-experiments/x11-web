@@ -85,6 +85,9 @@ export function OcifBox({
 		},
 		[id, onPointerDown, editing, interactive],
 	);
+	// `rect` ext present → boxed shape with border / fill / resize
+	// handles. Absent → free-floating text node (no chrome).
+	const hasRect = !!node.rect;
 	const fill = node.rect?.fill_color ?? DEFAULT_FILL;
 	const stroke = node.rect?.stroke_color ?? DEFAULT_STROKE;
 	const strokeWidth = node.rect?.stroke_width ?? DEFAULT_STROKE_WIDTH;
@@ -93,22 +96,25 @@ export function OcifBox({
 		: selected
 			? s.selected
 			: s.box;
+	const style: React.CSSProperties = {
+		position: "absolute",
+		left: node.x,
+		top: node.y,
+		width: node.width,
+		height: node.height,
+		zIndex: Math.round(node.z),
+	};
+	if (hasRect) {
+		style.background = fill;
+		style.border = `${strokeWidth}px solid ${stroke}`;
+		style.borderRadius = DEFAULT_RADIUS;
+	}
 	return (
 		<div
 			data-testid="ocif-box"
 			data-node-id={id}
 			className={className}
-			style={{
-				position: "absolute",
-				left: node.x,
-				top: node.y,
-				width: node.width,
-				height: node.height,
-				zIndex: Math.round(node.z),
-				background: fill,
-				border: `${strokeWidth}px solid ${stroke}`,
-				borderRadius: DEFAULT_RADIUS,
-			}}
+			style={style}
 			onPointerDown={handlePointerDown}
 		>
 			<TextLayer
@@ -118,7 +124,8 @@ export function OcifBox({
 				onChangeText={onChangeText}
 				onExit={onExitEdit}
 			/>
-			{selected &&
+			{hasRect &&
+				selected &&
 				!editing &&
 				interactive &&
 				HANDLES.map((h) => (
