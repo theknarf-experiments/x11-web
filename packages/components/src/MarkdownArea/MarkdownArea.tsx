@@ -1,4 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { flushSync } from "react-dom";
 import s from "./MarkdownArea.module.css";
 import { buildSegments, parseDecorations } from "./parse";
 
@@ -58,12 +59,16 @@ export function MarkdownArea({ initial = "", onChange }: Props) {
 		el.editContext = ec;
 		ecRef.current = ec;
 
-		const onText = (e: TextUpdateEvent) => {
-			// `textupdate.selectionStart/End` is the new selection
-			// the user expects after the edit; mirror it into the
-			// EC so the next keystroke targets the right offset.
-			ec.updateSelection(e.selectionStart, e.selectionEnd);
-			force({});
+		const onText = () => {
+			// `flushSync` so the new text + DOM-selection sync land
+			// synchronously before this event handler returns. Each
+			// keystroke is its own DOM event, but Playwright (and
+			// fast typists) can fire them tightly enough that React
+			// would otherwise batch multiple textupdates into one
+			// render — our useLayoutEffect would only re-position
+			// the caret once at the end, leaving Chromium with a
+			// stale DOM selection for the intermediate keystrokes.
+			flushSync(() => force({}));
 			onChange?.(ec.text);
 		};
 
@@ -91,11 +96,27 @@ export function MarkdownArea({ initial = "", onChange }: Props) {
 			}
 		};
 
+		// Chromium fires a regular `paste` DOM event for EC-attached
+		// elements (clipboard data isn't routed through textupdate),
+		// so we intercept it ourselves.
+		const onPaste = (e: ClipboardEvent) => {
+			const pasted = e.clipboardData?.getData("text/plain");
+			if (!pasted) return;
+			e.preventDefault();
+			const start = ec.selectionStart;
+			ec.updateText(start, ec.selectionEnd, pasted);
+			ec.updateSelection(start + pasted.length, start + pasted.length);
+			force({});
+			onChange?.(ec.text);
+		};
+
 		ec.addEventListener("textupdate", onText);
 		el.ownerDocument.addEventListener("selectionchange", onSel);
+		el.addEventListener("paste", onPaste);
 		return () => {
 			ec.removeEventListener("textupdate", onText);
 			el.ownerDocument.removeEventListener("selectionchange", onSel);
+			el.removeEventListener("paste", onPaste);
 			el.editContext = null;
 			ecRef.current = null;
 		};
@@ -142,6 +163,11 @@ export function MarkdownArea({ initial = "", onChange }: Props) {
 					{text.slice(seg.start, seg.end)}
 				</span>
 			))}
+			{/* Trailing `<br>` so a `\n` at the end of the text
+			 * renders an empty visible line. Without this, the
+			 * caret on that empty line collapses to a zero-size
+			 * rect at the end of the previous line. */}
+			{text.endsWith("\n") && <br />}
 		</div>
 	);
 }

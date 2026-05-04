@@ -212,6 +212,93 @@ export const CaretAndInsertionAgree: Story = {
 	},
 };
 
+/** Diagnostic — trace what `ec.text` and `ec.selectionStart`
+ *  look like after each keystroke. Helps catch races where our
+ *  useLayoutEffect-driven DOM-selection sync interferes with
+ *  Chromium's text input. */
+export const DiagnoseTypingTrace: Story = {
+	args: { initial: "" },
+	play: async ({ canvasElement }) => {
+		const editor = findEditor(canvasElement);
+		await userEvent.click(editor);
+		const ec = (editor as HTMLDivElement & { editContext: EditContext })
+			.editContext;
+		const trace: { text: string; sel: number }[] = [];
+		for (const c of "Hello") {
+			await userEvent.keyboard(c);
+			trace.push({ text: ec.text, sel: ec.selectionStart });
+		}
+		expect(trace).toEqual([
+			{ text: "H", sel: 1 },
+			{ text: "He", sel: 2 },
+			{ text: "Hel", sel: 3 },
+			{ text: "Hell", sel: 4 },
+			{ text: "Hello", sel: 5 },
+		]);
+	},
+};
+
+/** Pasting plain text via the system clipboard should land in
+ *  the editor at the current selection. Chromium fires a regular
+ *  `paste` DOM event for EditContext-attached elements rather than
+ *  routing through `textupdate`, so we have to handle it ourselves. */
+export const PasteInsertsText: Story = {
+	args: { initial: "" },
+	play: async ({ canvasElement }) => {
+		const editor = findEditor(canvasElement);
+		await userEvent.click(editor);
+		// Synthesize a paste with text/plain payload.
+		const dt = new DataTransfer();
+		dt.setData("text/plain", "pasted");
+		const evt = new ClipboardEvent("paste", {
+			clipboardData: dt,
+			bubbles: true,
+			cancelable: true,
+		});
+		editor.dispatchEvent(evt);
+		await waitFor(() => expect(getValue(canvasElement)).toBe("pasted"));
+	},
+};
+
+/** After pressing Enter on a non-empty line, the caret should be
+ *  visually on the new line — even before the user types anything
+ *  else. Bug we're chasing: caret stays on the original line until
+ *  the next keystroke. We assert via the DOM selection's offset
+ *  in the rendered text — past the `\n` is past the first line. */
+export const EnterMovesCaretBelowPreviousLine: Story = {
+	args: { initial: "hello" },
+	play: async ({ canvasElement }) => {
+		const editor = findEditor(canvasElement);
+		await userEvent.click(editor);
+		await userEvent.keyboard("{End}");
+		await userEvent.keyboard("{Enter}");
+		// The DOM selection should be positioned past the inserted
+		// `\n` — i.e. at offset 6 in "hello\n". A subsequent keystroke
+		// must therefore visually land on the new line.
+		const sel = editor.ownerDocument.getSelection();
+		expect(sel?.rangeCount).toBeGreaterThan(0);
+		const r = sel!.getRangeAt(0);
+		// Walk the content to compute the global text offset of the
+		// caret.
+		const probe = editor.ownerDocument.createRange();
+		probe.selectNodeContents(editor);
+		probe.setEnd(r.startContainer, r.startOffset);
+		const caretOffset = probe.toString().length;
+		expect(caretOffset).toBe("hello\n".length);
+		// And the rendered text should now be visibly two lines —
+		// the trailing `<br>` (or equivalent) that gives the empty
+		// new line a visual height. We assert by checking that the
+		// editor's bounding rect is taller than a single text line
+		// would be.
+		const editorRect = editor.getBoundingClientRect();
+		const firstLineNode = findFirstTextNode(editor);
+		const firstRange = editor.ownerDocument.createRange();
+		firstRange.selectNode(firstLineNode);
+		const firstRect = firstRange.getBoundingClientRect();
+		expect(editorRect.height).toBeGreaterThan(firstRect.height * 1.5);
+	},
+};
+
 function findFirstTextNode(root: Node): Text {
 	const walker = root.ownerDocument!.createTreeWalker(
 		root,
