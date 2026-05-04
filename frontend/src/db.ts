@@ -13,6 +13,7 @@ import type {
 	PathExt,
 	RectExt,
 	TextStyleExt,
+	WindowExt,
 } from "./workspaceSync";
 
 interface SyncApi<T extends object> {
@@ -106,25 +107,38 @@ export function replaceSidecarProcesses(
 
 // ---------- windows ----------
 
+/** Per-window sidecar-driven state. Canvas position / z / size for
+ *  top-level windows lives on the matching `OcifNode` in the
+ *  workspace doc — this row holds everything the X server / sidecar
+ *  is authoritative for: title, focus, wm_state, menu, etc. Popups
+ *  (`overrideRedirect: true`) keep their `x` / `y` here since the X
+ *  server places them and they don't get an OcifNode. */
 export interface WindowRow {
 	windowId: string;
 	sidecarId: string;
 	pid: number;
 	command: string;
+	/** Sidecar-reported geometry. For top-level windows this is the
+	 *  X server's idea; the canvas reads w/h from the OcifNode (kept
+	 *  in lockstep by the backend on `WindowConfigured`). */
 	width: number;
 	height: number;
 	borderWidth: number;
 	borderPixel: number;
 	overrideRedirect: boolean;
 	resizable: boolean;
+	/** Popups only — X server placement. Top-level windows ignore
+	 *  these and read position from the matching OcifNode. */
 	x: number;
 	y: number;
 	title: string;
 	wmState: WindowWmState;
 	color: string;
 	focused: boolean;
-	stackingOrder: number;
 	menu: MenuItem[];
+	/** Local-only memory of the node's pre-maximize geometry, so
+	 *  Restore can put the window back where it was. Per-tab; not
+	 *  synced via the doc. */
 	savedPosition?: { x: number; y: number };
 }
 
@@ -135,11 +149,9 @@ const windows = makeCollection<WindowRow>({
 export const windowsCollection = windows.collection;
 
 /** Seed values for a window the first time we see it (computed by the caller
- *  so app-level concerns like cascading position and palette can stay out of
- *  the data layer). */
+ *  so app-level concerns like palette and title fallback can stay out of the
+ *  data layer). */
 export interface NewWindowSeed {
-	x: number;
-	y: number;
 	color: string;
 	wmState: WindowWmState;
 	title: string;
@@ -147,7 +159,10 @@ export interface NewWindowSeed {
 
 /** Apply an authoritative `WindowList` snapshot. Inserts new rows with seed
  *  values; updates retained rows preserving dynamic UI state (title, focus,
- *  cursor, etc.); deletes rows that disappeared. */
+ *  menu, etc.); deletes rows that disappeared. Position / z / size for
+ *  top-level windows lives on the matching `OcifNode` in the workspace doc;
+ *  this row only carries sidecar-driven state. Popups (override_redirect)
+ *  keep `(x, y)` here since the X server places them. */
 export function applyWindowList(
 	descriptors: WindowDescriptor[],
 	seedNew: (descriptor: WindowDescriptor) => NewWindowSeed,
@@ -162,13 +177,9 @@ export function applyWindowList(
 			api.write({ type: "delete", key: wid });
 		}
 	}
-	descriptors.forEach((d, i) => {
-		const stackingOrder = i + 1;
+	descriptors.forEach((d) => {
 		const existing = current.get(d.window_id);
 		if (existing) {
-			// Popup positions come from the X server (override_redirect=true);
-			// regular top-level windows track position locally and via the
-			// cross-frontend `UpdateWindowPosition` mirror.
 			const x = d.override_redirect ? d.x : existing.x;
 			const y = d.override_redirect ? d.y : existing.y;
 			api.write({
@@ -186,7 +197,6 @@ export function applyWindowList(
 					resizable: d.resizable,
 					x,
 					y,
-					stackingOrder,
 				},
 			});
 		} else {
@@ -204,13 +214,12 @@ export function applyWindowList(
 					borderPixel: d.border_pixel,
 					overrideRedirect: d.override_redirect,
 					resizable: d.resizable,
-					x: seed.x,
-					y: seed.y,
+					x: d.x,
+					y: d.y,
 					title: seed.title,
 					wmState: seed.wmState,
 					color: seed.color,
 					focused: false,
-					stackingOrder,
 					menu: [],
 				},
 			});
@@ -246,62 +255,22 @@ export function setFocusedWindow(windowId: string | null) {
 	api.commit();
 }
 
-/** Bump `stackingOrder` so this window renders on top of everything currently
- *  in the collection. Used by click-to-focus and dock reactivation. Optionally
- *  also unminimizes the window. */
-export function raiseWindow(
-	windowId: string,
-	opts: { unminimize?: boolean } = {},
-) {
-	const api = windows.sync.current;
-	if (!api) return;
-	let max = 0;
-	for (const row of windowsCollection.state.values()) {
-		if (row.stackingOrder > max) max = row.stackingOrder;
-	}
+/** Unminimize a window (transition `wmState: "minimized" → "normal"`)
+ *  if it's currently minimized. Stacking order — the "raise to top"
+ *  effect — lives on the matching `OcifNode.z` and is bumped via
+ *  `raiseOcifNode` in `workspaceSync`. */
+export function unminimizeWindow(windowId: string) {
 	const existing = windowsCollection.state.get(windowId);
-	if (!existing) return;
-	api.begin();
-	api.write({
-		type: "update",
-		value: {
-			...existing,
-			stackingOrder: max + 1,
-			wmState:
-				opts.unminimize && existing.wmState === "minimized"
-					? "normal"
-					: existing.wmState,
-		},
-	});
-	api.commit();
+	if (!existing || existing.wmState !== "minimized") return;
+	patchWindow(windowId, { wmState: "normal" });
 }
 
-/** Bring all windows belonging to `(sidecarId, pid)` to front and unminimize. */
-export function raiseProcess(sidecarId: string, pid: number) {
-	const api = windows.sync.current;
-	if (!api) return;
-	let max = 0;
-	for (const row of windowsCollection.state.values()) {
-		if (row.stackingOrder > max) max = row.stackingOrder;
-	}
-	const matches = [...windowsCollection.state.values()].filter(
-		(w) => w.sidecarId === sidecarId && w.pid === pid,
-	);
-	if (matches.length === 0) return;
-	api.begin();
-	let cursor = max;
-	for (const row of matches) {
-		cursor += 1;
-		api.write({
-			type: "update",
-			value: {
-				...row,
-				stackingOrder: cursor,
-				wmState: row.wmState === "minimized" ? "normal" : row.wmState,
-			},
-		});
-	}
-	api.commit();
+/** Find every `(sidecarId, pid)` window's id — used by the dock to
+ *  bring all of an app's windows to front in one gesture. */
+export function windowsForProcess(sidecarId: string, pid: number): string[] {
+	return [...windowsCollection.state.values()]
+		.filter((w) => w.sidecarId === sidecarId && w.pid === pid)
+		.map((w) => w.windowId);
 }
 
 // ---------- OCIF nodes (user-drawn shapes, mirror of doc state) ----------
@@ -332,6 +301,7 @@ export interface OcifNodeRow {
 	arrow?: ArrowExt;
 	edge?: EdgeExt;
 	textStyle?: TextStyleExt;
+	window?: WindowExt;
 	resourceId?: string;
 }
 
@@ -380,6 +350,7 @@ export function applyOcifNodesSnapshot(
 			arrow: node.arrow ? { ...node.arrow } : undefined,
 			edge: node.edge ? { ...node.edge } : undefined,
 			textStyle: node.text_style ? { ...node.text_style } : undefined,
+			window: node.window ? { ...node.window } : undefined,
 			resourceId: node.resource,
 		};
 		api.write({

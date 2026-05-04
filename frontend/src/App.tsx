@@ -9,10 +9,10 @@ import {
 	ocifNodesCollection,
 	patchWindow,
 	processesCollection,
-	raiseProcess,
-	raiseWindow,
 	setFocusedWindow,
+	unminimizeWindow,
 	windowsCollection,
+	windowsForProcess,
 } from "./db";
 import { useHotkey } from "@tanstack/react-hotkeys";
 import {
@@ -28,12 +28,7 @@ import { OcifPath } from "./OcifPath";
 import { OcifText, type TextCorner } from "./OcifText";
 import { decodeFrame } from "./rtcWire";
 import { SettingsPanel } from "./SettingsPanel";
-import type {
-	FocusPolicy,
-	InputEvent,
-	MenuAction,
-	WindowWmState,
-} from "./types";
+import type { FocusPolicy, InputEvent, MenuAction } from "./types";
 import {
 	useAttachedWindowIds,
 	useBackendSocket,
@@ -45,17 +40,16 @@ import {
 	deleteOcifNode,
 	FONT_MAX,
 	FONT_MIN,
-	getAllPositions,
 	getOcifNodes,
 	insertOcifNode,
 	type OcifNode,
+	raiseOcifNode,
 	setOcifArrowAnchor,
 	setOcifArrowEndpoints,
 	setOcifNodeBounds,
 	setOcifNodeFontSize,
 	setOcifNodePosition,
 	setOcifNodeText,
-	setPosition as setWorkspacePosition,
 	solveFontSizeForCornerTarget,
 	subscribe as subscribeWorkspace,
 } from "./workspaceSync";
@@ -70,12 +64,10 @@ function App() {
 		connected,
 		activeWorkspace,
 		send,
-		onWindowUpdate,
 		onBell,
 		onDataChannelMessage,
 		setWorkspaceName,
 		attachWindowToWorkspace,
-		detachWindowFromWorkspace,
 		diagnostics,
 		dismissDiagnostic,
 		clearDiagnostics,
@@ -123,6 +115,7 @@ function App() {
 				arrow: row.arrow,
 				edge: row.edge,
 				text_style: row.textStyle,
+				window: row.window,
 				resource: row.resourceId,
 			});
 		}
@@ -318,27 +311,6 @@ function App() {
 		return () => onBell(null);
 	}, [onBell]);
 
-	// Mirror doc positions onto `WindowRow.{x,y}`. Drag handlers
-	// optimistically patch the row for a smooth interactive feel,
-	// but the doc is the cross-tab source of truth — when a sibling
-	// tab moves a window, this listener picks up the sync and brings
-	// our row in line.
-	useEffect(() => {
-		if (!activeWorkspace) return;
-		const apply = () => {
-			const positions = getAllPositions(activeWorkspace.id);
-			for (const [windowId, pos] of positions) {
-				const row = windowsCollection.state.get(windowId);
-				if (!row || row.overrideRedirect) continue;
-				if (row.x !== pos.x || row.y !== pos.y) {
-					patchWindow(windowId, { x: pos.x, y: pos.y });
-				}
-			}
-		};
-		apply();
-		return subscribeWorkspace(activeWorkspace.id, apply);
-	}, [activeWorkspace]);
-
 	function handleSpawn(sidecarId: string, command: string, args: string[]) {
 		if (!activeWorkspace) return;
 		send({
@@ -388,16 +360,17 @@ function App() {
 			if (tool === "arrow") {
 				e.preventDefault();
 				setSelectedNodeId(null);
-				// If the gesture starts on top of a box, capture
-				// its id so we can build a connected `@ocif/edge`
-				// on release. Walk the DOM target up looking for
-				// an OcifBox marker; OcifArrow nodes are excluded
-				// (you can't anchor an edge to another edge).
+				// If the gesture starts on top of an attachable
+				// node (box / text / window), capture its id so we
+				// can build a connected `@ocif/edge` on release.
+				// `data-ocif-attachable` is the unified marker;
+				// arrows / paths / popups deliberately don't carry
+				// it (you can't anchor an edge to another edge).
 				const targetEl = e.target as Element | null;
-				const startBox = targetEl?.closest<HTMLElement>(
-					'[data-testid="ocif-box"]',
+				const startEl = targetEl?.closest<HTMLElement>(
+					"[data-ocif-attachable]",
 				);
-				const startNodeId = startBox?.dataset.nodeId ?? null;
+				const startNodeId = startEl?.dataset.ocifAttachable ?? null;
 				setDrawing({
 					kind: "arrow",
 					startX: point.x,
@@ -521,12 +494,12 @@ function App() {
 				return;
 			}
 			// Hit-test for arrow snapping: walk up from the element
-			// under the cursor to the nearest OcifBox marker.
+			// under the cursor to the nearest attachable marker.
 			const overEl = document.elementFromPoint(ev.clientX, ev.clientY);
-			const overBox = overEl?.closest<HTMLElement>(
-				'[data-testid="ocif-box"]',
+			const overAttachable = overEl?.closest<HTMLElement>(
+				"[data-ocif-attachable]",
 			);
-			const overNodeId = overBox?.dataset.nodeId ?? null;
+			const overNodeId = overAttachable?.dataset.ocifAttachable ?? null;
 			setDrawing((d) => {
 				if (!d) return d;
 				if (d.kind === "box") {
@@ -717,15 +690,15 @@ function App() {
 				// endpoint (perfect-arrows applies `padEnd` only,
 				// not `padStart`), so `elementFromPoint` would see
 				// the circle instead of the box behind it.
-				const overBox = document
+				const overAttachable = document
 					.elementsFromPoint(ev.clientX, ev.clientY)
 					.map((el) =>
 						(el as Element).closest<HTMLElement>(
-							'[data-testid="ocif-box"]',
+							"[data-ocif-attachable]",
 						),
 					)
-					.find((box): box is HTMLElement => !!box);
-				const overNodeId = overBox?.dataset.nodeId ?? null;
+					.find((el): el is HTMLElement => !!el);
+				const overNodeId = overAttachable?.dataset.ocifAttachable ?? null;
 				// Self-loops aren't useful — if hovering the box the
 				// other end is anchored to, treat as no drop target.
 				const dropTargetNodeId =
@@ -948,17 +921,14 @@ function App() {
 
 	const handleMove = useCallback(
 		(windowId: string, x: number, y: number) => {
+			// Top-level windows live as `OcifNode`s in the workspace
+			// doc — moving one is just an `setOcifNodePosition`. Pop-
+			// ups (overrideRedirect) don't get a node; their X-server
+			// placement is authoritative and they ignore drags.
+			if (!activeWorkspace) return;
 			const win = windowsCollection.state.get(windowId);
-			// Top-level windows: position is user-collaborative
-			// state in the workspace doc. Mutating the doc syncs to
-			// every other peer; the local mirror loop also picks it
-			// up and patches the row. Patch optimistically here too
-			// so drag stays smooth without waiting for the round
-			// trip through `notify`.
-			if (win && !win.overrideRedirect && activeWorkspace) {
-				setWorkspacePosition(activeWorkspace.id, windowId, x, y);
-			}
-			patchWindow(windowId, { x, y });
+			if (win?.overrideRedirect) return;
+			setOcifNodePosition(activeWorkspace.id, windowId, x, y);
 		},
 		[activeWorkspace],
 	);
@@ -981,15 +951,21 @@ function App() {
 		[send],
 	);
 
-	const handleFocus = useCallback((windowId: string) => {
-		raiseWindow(windowId);
-		// Set focus locally too. For X11 this is redundant — the X
-		// server forwards a `WindowUpdate::Focused` after it
-		// processes the click — but the macOS sidecar doesn't emit
-		// focus events, so without setting it client-side the
-		// global menu bar would never light up for macOS windows.
-		setFocusedWindow(windowId);
-	}, []);
+	const handleFocus = useCallback(
+		(windowId: string) => {
+			if (activeWorkspace) {
+				raiseOcifNode(activeWorkspace.id, windowId);
+				unminimizeWindow(windowId);
+			}
+			// Set focus locally too. For X11 this is redundant — the X
+			// server forwards a `WindowUpdate::Focused` after it
+			// processes the click — but the macOS sidecar doesn't emit
+			// focus events, so without setting it client-side the
+			// global menu bar would never light up for macOS windows.
+			setFocusedWindow(windowId);
+		},
+		[activeWorkspace],
+	);
 
 	const handleInput = useCallback(
 		(windowId: string, sidecarId: string, event: InputEvent) => {
@@ -1007,17 +983,7 @@ function App() {
 	 *  backend's next `WindowList` drops them. */
 	const handleCloseProcess = useCallback(
 		(sidecarId: string, pid: number) => {
-			const wids: string[] = [];
-			for (const w of windowsCollection.state.values()) {
-				if (w.sidecarId === sidecarId && w.pid === pid) {
-					wids.push(w.windowId);
-					const timer = animCursorTimersRef.current.get(w.windowId);
-					if (timer) {
-						clearInterval(timer);
-						animCursorTimersRef.current.delete(w.windowId);
-					}
-				}
-			}
+			const wids = windowsForProcess(sidecarId, pid);
 			if (wids.length > 0) {
 				setClosedWindowIds((prev) => new Set([...prev, ...wids]));
 			}
@@ -1045,13 +1011,14 @@ function App() {
 		[send],
 	);
 
-	/** Maximize a window (expand to fill viewport). */
+	/** Maximize a window (expand to fill viewport). Stash the
+	 *  pre-maximize node position so Restore can put it back. */
 	const handleMaximize = useCallback(
 		(windowId: string, sidecarId: string) => {
-			const win = windowsCollection.state.get(windowId);
+			const node = ocifNodes.get(windowId);
 			patchWindow(windowId, {
 				wmState: "maximized",
-				...(win ? { savedPosition: { x: win.x, y: win.y } } : {}),
+				...(node ? { savedPosition: { x: node.x, y: node.y } } : {}),
 			});
 			send({
 				type: "InputEvent",
@@ -1060,7 +1027,7 @@ function App() {
 				event: { kind: "WindowManage", action: "maximized" },
 			});
 		},
-		[send],
+		[send, ocifNodes],
 	);
 
 	/** Close a window gracefully via ICCCM WM_DELETE_WINDOW. */
@@ -1076,18 +1043,22 @@ function App() {
 		[send],
 	);
 
-	/** Restore a window from maximized/fullscreen/minimized to normal. */
+	/** Restore a window from maximized/fullscreen/minimized to normal.
+	 *  Pre-maximize node position is in `WindowRow.savedPosition` (the
+	 *  per-tab local memory stashed at maximize time). */
 	const handleRestore = useCallback(
 		(windowId: string, sidecarId: string) => {
+			if (!activeWorkspace) return;
 			const win = windowsCollection.state.get(windowId);
-			const patch: { wmState: WindowWmState; x?: number; y?: number } = {
-				wmState: "normal",
-			};
+			patchWindow(windowId, { wmState: "normal" });
 			if (win?.savedPosition) {
-				patch.x = win.savedPosition.x;
-				patch.y = win.savedPosition.y;
+				setOcifNodePosition(
+					activeWorkspace.id,
+					windowId,
+					win.savedPosition.x,
+					win.savedPosition.y,
+				);
 			}
-			patchWindow(windowId, patch);
 			send({
 				type: "InputEvent",
 				sidecar_id: sidecarId,
@@ -1095,17 +1066,17 @@ function App() {
 				event: { kind: "WindowManage", action: "normal" },
 			});
 		},
-		[send],
+		[activeWorkspace, send],
 	);
 
 	/** Focus follows mouse: focus window on mouse enter. */
 	const handleMouseEnterWindow = useCallback(
 		(windowId: string) => {
 			if (focusPolicy !== "focus-follows-mouse") return;
-			raiseWindow(windowId);
+			if (activeWorkspace) raiseOcifNode(activeWorkspace.id, windowId);
 			setFocusedWindow(windowId);
 		},
-		[focusPolicy],
+		[focusPolicy, activeWorkspace],
 	);
 
 	// Deduplicate windows by process for the dock -- one entry per (sidecarId, pid)
@@ -1157,12 +1128,18 @@ function App() {
 				})
 			: null;
 
+	// Top-level windows render off the OcifNode map — `node.x/y/z`
+	// are the canvas-collaborative geometry; the WindowRow lookup
+	// supplies sidecar-driven props (title, focus, wmState, menu).
+	// Pop-ups (override_redirect) never get a node and are picked
+	// up directly from `windows` using the descriptor's X-server
+	// placement.
 	const visibleWindows = useMemo(
 		() =>
 			windows.filter(
 				(w) =>
 					!closedWindowIds.has(w.windowId) &&
-					attachedWindowIds.has(w.windowId),
+					(w.overrideRedirect || attachedWindowIds.has(w.windowId)),
 			),
 		[windows, closedWindowIds, attachedWindowIds],
 	);
@@ -1211,23 +1188,29 @@ function App() {
 						"application/x-x11web-window-id",
 					);
 					if (!windowId || !activeWorkspace) return;
-					attachWindowToWorkspace(activeWorkspace.id, windowId);
-					// Drop the new WindowFrame at the cursor's canvas
-					// coordinate. The doc carries the position so
-					// sibling tabs converge on the same drop point;
-					// the local patch is the optimistic preview so
-					// the frame appears at the drop point on the next
-					// render without waiting for the doc-mirror.
-					setWorkspacePosition(
+					const win = windowsCollection.state.get(windowId);
+					if (!win) return;
+					// Create the workspace's OcifNode for this window
+					// at the drop point. Width/height seeded from the
+					// sidecar-reported dimensions; the backend will
+					// keep the node's size in lockstep on subsequent
+					// `WindowConfigured` events.
+					attachWindowToWorkspace(
 						activeWorkspace.id,
 						windowId,
+						win.sidecarId,
 						point.x,
 						point.y,
+						win.width,
+						win.height,
 					);
-					patchWindow(windowId, { x: point.x, y: point.y });
 				}}
 			>
 				{[...ocifNodes.entries()].map(([id, node]) => {
+					// Window nodes are rendered by the `visibleWindows`
+					// loop below — they need the WindowRow lookup for
+					// title / focus / pixels, so we skip them here.
+					if (node.window) return null;
 					if (node.path) {
 						return (
 							<OcifPath
@@ -1339,6 +1322,20 @@ function App() {
 				 * a finalised stroke. Sibling tabs see it grow
 				 * live with no extra plumbing. */}
 				{visibleWindows.map((win) => {
+					// For top-level windows pull canvas geometry from
+					// the matching OcifNode (collaborative); for pop-
+					// ups the descriptor's `(x, y)` is the X server's
+					// authoritative placement. zIndex defaults to 0
+					// for popups so they layer above the topmost node
+					// — popup parents trigger them and the user
+					// expects them on top.
+					const node = win.overrideRedirect
+						? null
+						: ocifNodes.get(win.windowId);
+					if (!win.overrideRedirect && !node) return null;
+					const x = node ? node.x : win.x;
+					const y = node ? node.y : win.y;
+					const zIndex = node ? Math.round(node.z) : 1_000_000;
 					// Lazy-create the renderer so a window appearing in
 					// the authoritative list shows up immediately, before
 					// the first PutImage arrives over the DC. Sync
@@ -1366,9 +1363,9 @@ function App() {
 							<WindowFrame
 								clientId={win.windowId}
 								title={win.title}
-								x={win.x}
-								y={win.y}
-								zIndex={win.stackingOrder}
+								x={x}
+								y={y}
+								zIndex={zIndex}
 								color={win.color}
 								renderer={renderer}
 								overrideRedirect={win.overrideRedirect}
@@ -1401,7 +1398,13 @@ function App() {
 				attachedWindowIds={attachedWindowIds}
 				onSpawn={handleSpawn}
 				onClose={handleCloseProcess}
-				onFocusWindow={raiseProcess}
+				onFocusWindow={(sidecarId, pid) => {
+					if (!activeWorkspace) return;
+					for (const wid of windowsForProcess(sidecarId, pid)) {
+						raiseOcifNode(activeWorkspace.id, wid);
+						unminimizeWindow(wid);
+					}
+				}}
 			/>
 			<DiagnosticsPanel
 				diagnostics={diagnostics}

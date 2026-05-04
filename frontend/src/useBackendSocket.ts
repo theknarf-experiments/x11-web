@@ -12,21 +12,17 @@ import {
 	replaceSidecarProcesses,
 	replaceSidecars,
 	setFocusedWindow,
-	windowsCollection,
 } from "./db";
 import { Reassembler } from "./rtcReassembler";
 import { decodeFrame } from "./rtcWire";
 import {
 	applyInbound,
-	attachWindow as attachWindowDoc,
-	detachWindow as detachWindowDoc,
-	getAllPositions,
-	getAttachedWindowIds,
+	attachWindowNode,
+	detachWindowNode,
 	getName as getWorkspaceName,
-	getPosition,
+	getWindowNodeIds,
 	setControlChannel,
 	setName as setWorkspaceName,
-	setPosition,
 	subscribe as subscribeWorkspace,
 } from "./workspaceSync";
 import type {
@@ -74,42 +70,8 @@ function nextDiagnosticId() {
 	return `diag-${++diagnosticCounter}-${Date.now()}`;
 }
 
-let spawnCounter = 0;
-
-function seedForDescriptor(
-	d: WindowDescriptor,
-	workspaceId: string | null,
-): NewWindowSeed {
-	let x: number;
-	let y: number;
-	const docPos =
-		workspaceId && !d.override_redirect
-			? getPosition(workspaceId, d.window_id)
-			: null;
-	if (d.override_redirect) {
-		// Popups: X server placement is authoritative.
-		x = d.x;
-		y = d.y;
-	} else if (docPos) {
-		// Some frontend (maybe this one earlier, maybe a sibling tab)
-		// already placed this window — adopt the doc position.
-		x = docPos.x;
-		y = docPos.y;
-	} else {
-		// First time any frontend has seen this top-level window —
-		// pick a cascading position and write it to the doc so other
-		// tabs converge.
-		const idx = spawnCounter++;
-		const offset = idx * 30;
-		x = window.innerWidth / 4 + offset;
-		y = window.innerHeight / 4 + offset;
-		if (workspaceId) {
-			setPosition(workspaceId, d.window_id, x, y);
-		}
-	}
+function seedForDescriptor(d: WindowDescriptor): NewWindowSeed {
 	return {
-		x,
-		y,
 		color: d.override_redirect ? "transparent" : colorForWindowId(d.window_id),
 		title: d.command || `PID ${d.pid}`,
 		wmState: "normal",
@@ -132,19 +94,11 @@ function applyWindowUpdate(update: WindowUpdate) {
 			patchWindow(update.window_id, { menu: update.menu });
 			break;
 		case "StateChanged":
-			if (update.state === "maximized" || update.state === "fullscreen") {
-				// Save the current position so Restore can put the window
-				// back where it was before the WM transition.
-				const existing = windowsCollection.state.get(update.window_id);
-				if (existing) {
-					patchWindow(update.window_id, {
-						wmState: update.state,
-						savedPosition: { x: existing.x, y: existing.y },
-					});
-				}
-			} else {
-				patchWindow(update.window_id, { wmState: update.state });
-			}
+			// `savedPosition` for Restore is captured by the user-
+			// initiated maximize handler in App.tsx (where the
+			// OcifNode position is available); we just patch the
+			// wmState here.
+			patchWindow(update.window_id, { wmState: update.state });
 			break;
 		// PutImage is handled by App.tsx (renderer routing lives there).
 	}
@@ -322,7 +276,6 @@ export function useBackendSocket() {
 				setConnected(false);
 				setActiveWorkspace(null);
 				activeWorkspaceIdRef.current = null;
-				setAttachedWindowIds(new Set());
 				if (!disposed.current) {
 					pushDiagnostic({
 						level: "warn",
@@ -357,9 +310,7 @@ export function useBackendSocket() {
 						replaceSidecarProcesses(msg.sidecar_id, msg.processes);
 						break;
 					case "WindowList":
-						applyWindowList(msg.windows, (d) =>
-							seedForDescriptor(d, activeWorkspaceIdRef.current),
-						);
+						applyWindowList(msg.windows, seedForDescriptor);
 						break;
 					case "WindowUpdate":
 						applyWindowUpdate(msg.update);
@@ -467,8 +418,8 @@ export function useBackendSocket() {
 		onBell,
 		onDataChannelMessage,
 		setWorkspaceName,
-		attachWindowToWorkspace: attachWindowDoc,
-		detachWindowFromWorkspace: detachWindowDoc,
+		attachWindowToWorkspace: attachWindowNode,
+		detachWindowFromWorkspace: detachWindowNode,
 		diagnostics,
 		dismissDiagnostic,
 		clearDiagnostics,
@@ -494,25 +445,26 @@ export function useWorkspaceName(workspaceId: string | null): string | null {
 	return useSyncExternalStore(subscribe, getSnapshot);
 }
 
-/** Reactive read of the workspace's attached-window set. Returns a
- *  fresh `Set<string>` each render; useEffect-listener pattern
- *  rather than `useSyncExternalStore` because Set lacks the
- *  referential stability that store would require. The set is small
- *  (a handful of windows) so allocating per-update is fine. */
+/** Reactive read of the workspace's window-node ids — the set of
+ *  windows currently rendered on this workspace's canvas. Returns
+ *  a fresh `Set<string>` per change. Source of truth is the
+ *  Automerge doc; `useEffect`-listener pattern rather than
+ *  `useSyncExternalStore` because Sets lack the referential
+ *  stability the latter requires. */
 export function useAttachedWindowIds(
 	workspaceId: string | null,
 ): Set<string> {
 	const [snap, setSnap] = useState<Set<string>>(() =>
-		workspaceId ? getAttachedWindowIds(workspaceId) : new Set(),
+		workspaceId ? getWindowNodeIds(workspaceId) : new Set(),
 	);
 	useEffect(() => {
 		if (!workspaceId) {
 			setSnap(new Set());
 			return;
 		}
-		setSnap(getAttachedWindowIds(workspaceId));
+		setSnap(getWindowNodeIds(workspaceId));
 		return subscribeWorkspace(workspaceId, () => {
-			setSnap(getAttachedWindowIds(workspaceId));
+			setSnap(getWindowNodeIds(workspaceId));
 		});
 	}, [workspaceId]);
 	return snap;

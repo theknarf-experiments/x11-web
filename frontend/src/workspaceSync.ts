@@ -244,8 +244,6 @@ export function measureTextNodeBounds(
 /** Doc shape — keep in sync with `WorkspaceDoc` in Rust. */
 export interface WorkspaceDoc {
 	name: string;
-	attached_windows: { [windowId: string]: boolean };
-	window_positions: { [windowId: string]: { x: number; y: number } };
 	nodes: { [nodeId: string]: OcifNode };
 	resources: { [resourceId: string]: OcifResource };
 }
@@ -281,6 +279,11 @@ export interface OcifNode {
 	arrow?: ArrowExt;
 	edge?: EdgeExt;
 	text_style?: TextStyleExt;
+	/** `@x11web/window` ext — present iff this node is a live
+	 *  window streamed from a sidecar. Title / focus / wm_state /
+	 *  pixels come from the sidecar-driven `WindowList` joined
+	 *  by `window_id`; the OcifNode owns position / z / size. */
+	window?: WindowExt;
 	/** Reference to a resource id in `WorkspaceDoc.resources`. The
 	 *  renderer pulls the first `text/plain` representation off
 	 *  the resource and displays it. */
@@ -288,6 +291,14 @@ export interface OcifNode {
 	/** Derived: resolved `text/plain` content from `resource`.
 	 *  Computed by `getOcifNodes` — not stored in the doc. */
 	text?: string;
+}
+
+/** `@x11web/window` — links an OcifNode to a live window streamed
+ *  from a sidecar. The node carries canvas-side state (position /
+ *  z / size); this ext only carries identity. */
+export interface WindowExt {
+	window_id: string;
+	sidecar_id: string;
 }
 
 /** `@ocif/rect` — all properties optional per spec. */
@@ -504,92 +515,55 @@ export function setName(workspaceId: string, name: string) {
 	scheduleFlush(workspaceId);
 }
 
-/** Read the set of window ids currently attached to the workspace.
- *  Returns a fresh `Set` each call — pair with `subscribe` (or the
- *  `useAttachedWindowIds` hook) to know when to re-read. */
-export function getAttachedWindowIds(workspaceId: string): Set<string> {
-	const entry = docs.get(workspaceId);
-	if (!entry) return new Set();
-	const map = entry.doc.attached_windows as
-		| { [k: string]: boolean }
-		| undefined;
-	return new Set(Object.keys(map ?? {}));
-}
-
-/** Add `windowId` to the workspace's attached set (drag-attach from
- *  the picker). Local doc mutation; backend learns about it via the
- *  next sync round and runs `Start/StopWindowCapture` if needed. */
-export function attachWindow(workspaceId: string, windowId: string) {
-	const entry = ensure(workspaceId);
-	if ((entry.doc.attached_windows ?? {})[windowId]) return;
-	entry.doc = Automerge.change(entry.doc, (d) => {
-		if (!d.attached_windows) d.attached_windows = {};
-		d.attached_windows[windowId] = true;
-	});
-	scheduleFlush(workspaceId);
-}
-
-/** Remove `windowId` from the workspace's attached set. */
-export function detachWindow(workspaceId: string, windowId: string) {
-	const entry = ensure(workspaceId);
-	if (!(entry.doc.attached_windows ?? {})[windowId]) return;
-	entry.doc = Automerge.change(entry.doc, (d) => {
-		if (d.attached_windows) delete d.attached_windows[windowId];
-	});
-	scheduleFlush(workspaceId);
-}
-
-/** Read the tracked position for `windowId`, or `null` if no
- *  frontend has placed this window yet (the renderer falls back to
- *  the descriptor's geometry or a cascade seed). */
-export function getPosition(
+/** Insert a window-node — the canvas-side handle for a live window
+ *  streamed from a sidecar. Node id IS the underlying `windowId` so
+ *  edges can target it directly. Used by drag-attach from the dock
+ *  picker; backend-driven attaches arrive via inbound sync. */
+export function attachWindowNode(
 	workspaceId: string,
 	windowId: string,
-): { x: number; y: number } | null {
-	const entry = docs.get(workspaceId);
-	if (!entry) return null;
-	const map = entry.doc.window_positions as
-		| { [k: string]: { x: number; y: number } }
-		| undefined;
-	const pos = map?.[windowId];
-	return pos ? { x: pos.x, y: pos.y } : null;
-}
-
-/** Snapshot every tracked position for a workspace. Used by the
- *  frontend's mirror loop to re-sync `WindowRow.x/y` against the
- *  doc on every notify. */
-export function getAllPositions(
-	workspaceId: string,
-): Map<string, { x: number; y: number }> {
-	const out = new Map<string, { x: number; y: number }>();
-	const entry = docs.get(workspaceId);
-	if (!entry) return out;
-	const map = entry.doc.window_positions as
-		| { [k: string]: { x: number; y: number } }
-		| undefined;
-	if (!map) return out;
-	for (const [k, v] of Object.entries(map)) {
-		out.set(k, { x: v.x, y: v.y });
-	}
-	return out;
-}
-
-/** Set or update the tracked position for `windowId`. Called
- *  from drag handlers; the doc syncs to backend + sibling tabs. */
-export function setPosition(
-	workspaceId: string,
-	windowId: string,
+	sidecarId: string,
 	x: number,
 	y: number,
+	width: number,
+	height: number,
 ) {
 	const entry = ensure(workspaceId);
-	const existing = (entry.doc.window_positions ?? {})[windowId];
-	if (existing && existing.x === x && existing.y === y) return;
-	entry.doc = Automerge.change(entry.doc, (d) => {
-		if (!d.window_positions) d.window_positions = {};
-		d.window_positions[windowId] = { x, y };
+	if ((entry.doc.nodes ?? {})[windowId]) return;
+	let maxZ = 0;
+	for (const n of Object.values(entry.doc.nodes ?? {})) {
+		if (n.z > maxZ) maxZ = n.z;
+	}
+	insertOcifNode(workspaceId, windowId, {
+		x,
+		y,
+		z: maxZ + 1,
+		width,
+		height,
+		window: { window_id: windowId, sidecar_id: sidecarId },
 	});
-	scheduleFlush(workspaceId);
+}
+
+/** Remove the window-node for `windowId` (drag-off-canvas, or any
+ *  other user-driven detach). Cascades through `deleteOcifNode`'s
+ *  edge-cleanup logic so edges that referenced the window are
+ *  dropped rather than left dangling. */
+export function detachWindowNode(workspaceId: string, windowId: string) {
+	deleteOcifNode(workspaceId, windowId);
+}
+
+/** Window ids currently rendered on this workspace's canvas — every
+ *  node id whose `OcifNode` carries the `@x11web/window` extension.
+ *  Returns a fresh `Set` per call; pair with `subscribe` to know
+ *  when to re-read. */
+export function getWindowNodeIds(workspaceId: string): Set<string> {
+	const out = new Set<string>();
+	const entry = docs.get(workspaceId);
+	if (!entry) return out;
+	for (const [id, node] of Object.entries(entry.doc.nodes ?? {})) {
+		if (node.window) out.add(id);
+	}
+	return out;
 }
 
 /** Drop our local doc + sync state for a workspace. Currently
@@ -633,6 +607,7 @@ export function getOcifNodes(workspaceId: string): Map<string, OcifNode> {
 			arrow: v.arrow ? { ...v.arrow } : undefined,
 			edge: v.edge ? { ...v.edge } : undefined,
 			text_style: v.text_style ? { ...v.text_style } : undefined,
+			window: v.window ? { ...v.window } : undefined,
 			resource: v.resource,
 			text: resolveNodeText(entry.doc, v),
 		});
@@ -656,7 +631,10 @@ export function insertOcifNode(
 	node: OcifNode,
 ) {
 	const entry = ensure(workspaceId);
-	const isTextOnly = !node.rect && !node.arrow && !node.path;
+	// Text-only nodes auto-fit their bounds to the measured text;
+	// boxes / arrows / paths / windows keep the caller's geometry.
+	const isTextOnly =
+		!node.rect && !node.arrow && !node.path && !node.window;
 	const measured = isTextOnly
 		? measureTextNodeBounds(
 				node.text ?? "",
@@ -666,14 +644,17 @@ export function insertOcifNode(
 				node.text_style?.italic,
 			)
 		: null;
+	// Window nodes don't carry text content; skip the resource
+	// allocation so we don't leak phantom text/plain resources for
+	// every attached window.
+	const allocateResource = !node.window;
 	entry.doc = Automerge.change(entry.doc, (d) => {
 		if (!d.nodes) d.nodes = {};
 		if (!d.resources) d.resources = {};
-		// Allocate a resource up front so subsequent text edits
-		// update the existing representation rather than creating
-		// one lazily.
-		const resourceId = node.resource ?? crypto.randomUUID();
-		if (!d.resources[resourceId]) {
+		const resourceId = allocateResource
+			? (node.resource ?? crypto.randomUUID())
+			: undefined;
+		if (resourceId && !d.resources[resourceId]) {
 			d.resources[resourceId] = {
 				representations: [
 					{ mime_type: "text/plain", content: node.text ?? "" },
@@ -686,7 +667,7 @@ export function insertOcifNode(
 			z: node.z,
 			width: measured?.width ?? node.width,
 			height: measured?.height ?? node.height,
-			resource: resourceId,
+			...(resourceId ? { resource: resourceId } : {}),
 			...(node.rect ? { rect: { ...node.rect } } : {}),
 			...(node.path
 				? {
@@ -710,7 +691,28 @@ export function insertOcifNode(
 			...(node.arrow ? { arrow: { ...node.arrow } } : {}),
 			...(node.edge ? { edge: { ...node.edge } } : {}),
 			...(node.text_style ? { text_style: { ...node.text_style } } : {}),
+			...(node.window ? { window: { ...node.window } } : {}),
 		};
+	});
+	scheduleFlush(workspaceId);
+}
+
+/** Bump a node's `z` so it renders on top of every other node in
+ *  the workspace. Used by click-to-focus / dock reactivation for
+ *  window-nodes; also handy for "raise this shape" gestures on
+ *  boxes / text in the future. Collaborative — every peer sees
+ *  the new stacking order. */
+export function raiseOcifNode(workspaceId: string, id: string) {
+	const entry = ensure(workspaceId);
+	if (!(entry.doc.nodes ?? {})[id]) return;
+	let maxZ = 0;
+	for (const n of Object.values(entry.doc.nodes ?? {})) {
+		if (n.z > maxZ) maxZ = n.z;
+	}
+	entry.doc = Automerge.change(entry.doc, (d) => {
+		const n = d.nodes?.[id];
+		if (!n) return;
+		n.z = maxZ + 1;
 	});
 	scheduleFlush(workspaceId);
 }

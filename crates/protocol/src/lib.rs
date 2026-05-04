@@ -167,11 +167,10 @@ pub struct ProcessInfo {
 /// control (kill button targets `(sidecar_id, pid)`).
 ///
 /// `override_redirect` distinguishes pop-ups (menus, tooltips) from
-/// regular top-level windows. `(x, y)` is sidecar geometry — the X
-/// server position for popups, or the X server's default for
-/// top-level windows. User-collaborative position lives in the
-/// per-workspace Automerge doc's `window_positions`; the frontend
-/// joins these at render time.
+/// regular top-level windows. For popups, `(x, y)` is the X server
+/// placement and is authoritative. For top-level windows, `(x, y)`
+/// is meaningless to the frontend — canvas position lives on the
+/// matching `OcifNode` in the workspace doc.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WindowDescriptor {
     pub window_id: String,

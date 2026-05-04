@@ -61,8 +61,8 @@ struct AppState {
     /// thumbnails and live frames don't overwrite each other.
     thumbnail_buffers: Arc<RwLock<HashMap<String, HashMap<String, Vec<u8>>>>>,
     /// Reference count of how many workspaces have a given window
-    /// attached. Derived from the global union of every workspace
-    /// doc's `attached_windows`; rebuilt by
+    /// attached (i.e. carry an `OcifNode` with the `@x11web/window`
+    /// extension for it). Rebuilt by
     /// `reconcile_streaming_after_change` after every doc mutation.
     /// When a window's count goes 0→N the backend tells the owning
     /// sidecar to start live capture, N→0 stops it.
@@ -82,10 +82,10 @@ struct AppState {
     /// auto-attach the window only to that workspace — different
     /// workspaces can run different apps without cross-pollination.
     spawn_origin: Arc<RwLock<HashMap<(String, u32), String>>>,
-    /// Per-workspace Automerge document. Authoritative for
-    /// user-collaborative state (currently just `name`; `attached_
-    /// windows` and `window_positions` migrate in slices 2 and 3).
-    /// Synced over each frontend's control DataChannel via
+    /// Per-workspace Automerge document. Authoritative for the
+    /// canvas — name, OCIF nodes (boxes / text / arrows / pen
+    /// strokes / windows-as-nodes), and OCIF resources. Synced
+    /// over each frontend's control DataChannel via
     /// `automerge::sync` — see `workspace_doc` module.
     workspace_docs: Arc<RwLock<HashMap<String, workspace_doc::WorkspaceEntry>>>,
 }
@@ -707,8 +707,8 @@ async fn handle_frontend_ws(socket: WebSocket, state: AppState) {
                 let workspace_id = workspace.id.clone();
                 let _ = tx.send(BackendToFrontend::Workspace { workspace });
                 // Kick the Automerge sync handshake. The doc's
-                // `attached_windows` and `name` are delivered by
-                // that initial sync — no separate wire messages.
+                // window-nodes and `name` are delivered by that
+                // initial sync — no separate wire messages.
                 // No-op if the control DC hasn't opened yet — the
                 // rtc-task's control_opened watcher fires it then.
                 kick_workspace_sync(&state, &frontend_id, &workspace_id).await;
@@ -857,7 +857,11 @@ async fn on_window_lifecycle_after(
     update: &DisplayUpdate,
 ) {
     match update {
-        DisplayUpdate::WindowCreated { window_id, .. } => {
+        DisplayUpdate::WindowCreated {
+            window_id,
+            override_redirect,
+            ..
+        } => {
             let kind = state
                 .sidecars
                 .read()
@@ -869,7 +873,10 @@ async fn on_window_lifecycle_after(
                 let mut owners = state.window_owner.write().await;
                 owners.insert(window_id.clone(), sidecar_id.to_string());
             }
-            if matches!(kind, SidecarKind::X11 | SidecarKind::Unknown) {
+            // Pop-ups (override_redirect) keep X-server-authoritative
+            // placement and don't get a doc node — they live entirely
+            // in `WindowList` and disappear with their parent.
+            if !*override_redirect && matches!(kind, SidecarKind::X11 | SidecarKind::Unknown) {
                 // Resolve client_id → pid via the per-sidecar
                 // processes table that ProcessConnected builds, then
                 // pid → workspace via spawn_origin. The pair lets us
@@ -895,21 +902,21 @@ async fn on_window_lifecycle_after(
                     None => None,
                 };
                 if let Some(workspace_id) = workspace_id {
-                    backend_attach_window(state, &workspace_id, window_id).await;
+                    backend_attach_window(state, &workspace_id, sidecar_id, window_id).await;
                 }
             }
         }
         DisplayUpdate::WindowDestroyed { window_id } => {
-            // Remove from every workspace's `attached_windows`; for
-            // each that changed, fan the doc mutation out so peers
-            // see the disappearance. Then reconcile streaming so the
+            // Remove the window-node from every workspace; for each
+            // that changed, fan the doc mutation out so peers see
+            // the disappearance. Then reconcile streaming so the
             // sidecar gets a `StopWindowCapture` if this was the
             // last attach.
             let affected: Vec<String> = {
                 let mut docs = state.workspace_docs.write().await;
                 docs.iter_mut()
                     .filter_map(|(ws_id, entry)| {
-                        entry.detach(window_id).then(|| ws_id.clone())
+                        entry.detach_window_node(window_id).then(|| ws_id.clone())
                     })
                     .collect()
             };
@@ -919,23 +926,81 @@ async fn on_window_lifecycle_after(
             reconcile_streaming_after_change(state).await;
             state.window_owner.write().await.remove(window_id);
         }
+        DisplayUpdate::WindowConfigured {
+            window_id,
+            width,
+            height,
+            ..
+        } => {
+            // Sidecar resized the window — mirror new dimensions
+            // onto every workspace's matching window-node so peers
+            // see the new size.
+            let affected: Vec<String> = {
+                let mut docs = state.workspace_docs.write().await;
+                docs.iter_mut()
+                    .filter_map(|(ws_id, entry)| {
+                        entry
+                            .set_window_node_size(window_id, *width as f64, *height as f64)
+                            .then(|| ws_id.clone())
+                    })
+                    .collect()
+            };
+            for ws_id in &affected {
+                fan_out_workspace_sync(state, ws_id).await;
+            }
+        }
         _ => {}
     }
 }
 
-/// Backend-side attach: mutate `workspace_id`'s doc to add
-/// `window_id` to its `attached_windows`, fan the change out to all
-/// connected peers, and reconcile streaming refcount. Used by X11
-/// auto-attach on `WindowCreated`. Frontend-side attaches arrive as
-/// inbound sync messages and never call this directly.
-async fn backend_attach_window(state: &AppState, workspace_id: &str, window_id: &str) {
+/// Backend-side attach: insert a window-node into `workspace_id`'s
+/// doc carrying the `@x11web/window` extension, fan the change out
+/// to every connected peer, and reconcile streaming refcount.
+/// Width/height come from `window_track` (the X server's reported
+/// dimensions); position is cascaded from the workspace's existing
+/// node count so successive spawns don't pile on top of each other.
+/// Used by X11 auto-attach on `WindowCreated`. Frontend-side
+/// attaches arrive as inbound sync messages and never call this
+/// directly.
+async fn backend_attach_window(
+    state: &AppState,
+    workspace_id: &str,
+    sidecar_id: &str,
+    window_id: &str,
+) {
+    // Pull the sidecar-reported dimensions for this window.
+    let (width, height) = {
+        let track = state.window_track.read().await;
+        match track
+            .iter()
+            .find(|((_, _, w), _)| w == window_id)
+            .map(|(_, w)| (w.width as f64, w.height as f64))
+        {
+            Some(dims) => dims,
+            None => {
+                warn!("backend_attach_window: window {window_id} not in tracker");
+                return;
+            }
+        }
+    };
     let changed = {
         let mut docs = state.workspace_docs.write().await;
         let Some(entry) = docs.get_mut(workspace_id) else {
             warn!("backend_attach_window: no doc for workspace {workspace_id}");
             return;
         };
-        entry.attach(window_id)
+        // Cascade position + z so the new window lands on top and
+        // visibly offset from existing nodes. (200, 100) is the
+        // canvas-space anchor; 30px stairsteps look natural.
+        // `node_stats` reads via targeted ops — `entry.snapshot()`
+        // would `hydrate` the whole doc, which panics if any
+        // existing node was created on a peer that didn't write
+        // explicit `Null`s for absent `Option` fields (the JS
+        // Automerge API doesn't).
+        let (node_count, max_z) = entry.node_stats();
+        let x = 200.0 + node_count as f64 * 30.0;
+        let y = 100.0 + node_count as f64 * 30.0;
+        entry.attach_window_node(window_id, sidecar_id, x, y, max_z + 1.0, width, height)
     };
     if !changed {
         return;
@@ -995,7 +1060,7 @@ async fn fan_out_workspace_sync(state: &AppState, workspace_id: &str) {
 }
 
 /// Recompute the global per-window attach refcount from the union of
-/// every workspace doc's `attached_windows`, diff against the cached
+/// every workspace doc's window-node ids, diff against the cached
 /// `streaming_refcount`, and drive `Start/StopWindowCapture` on the
 /// owning sidecar for each transition. Idempotent — call after every
 /// mutation that could change attached state (incoming sync,
@@ -1006,7 +1071,7 @@ async fn reconcile_streaming_after_change(state: &AppState) {
         let docs = state.workspace_docs.read().await;
         let mut counts: HashMap<String, usize> = HashMap::new();
         for entry in docs.values() {
-            for window_id in entry.attached_window_ids() {
+            for window_id in entry.window_node_ids() {
                 *counts.entry(window_id).or_insert(0) += 1;
             }
         }

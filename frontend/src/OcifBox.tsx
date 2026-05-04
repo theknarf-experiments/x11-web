@@ -98,6 +98,7 @@ export function OcifBox({
 		<div
 			data-testid="ocif-box"
 			data-node-id={id}
+			data-ocif-attachable={id}
 			className={className}
 			style={{
 				position: "absolute",

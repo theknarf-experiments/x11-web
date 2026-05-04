@@ -794,6 +794,7 @@ export function WindowFrame({
 			data-testid="window-frame"
 			data-client-id={clientId}
 			data-wm-state={wmState}
+			data-ocif-attachable={overrideRedirect ? undefined : clientId}
 		>
 			<div className={s.header}>
 				<div className={s.trafficLights}>
