@@ -23,7 +23,9 @@ import {
 	getAllPositions,
 	getAttachedWindowIds,
 	getName as getWorkspaceName,
+	getOcifNodes,
 	getPosition,
+	type OcifNode,
 	setControlChannel,
 	setName as setWorkspaceName,
 	setPosition,
@@ -513,6 +515,26 @@ export function useAttachedWindowIds(
 		setSnap(getAttachedWindowIds(workspaceId));
 		return subscribeWorkspace(workspaceId, () => {
 			setSnap(getAttachedWindowIds(workspaceId));
+		});
+	}, [workspaceId]);
+	return snap;
+}
+
+/** Reactive read of the workspace's user-drawn OCIF nodes. */
+export function useOcifNodes(
+	workspaceId: string | null,
+): Map<string, OcifNode> {
+	const [snap, setSnap] = useState<Map<string, OcifNode>>(() =>
+		workspaceId ? getOcifNodes(workspaceId) : new Map(),
+	);
+	useEffect(() => {
+		if (!workspaceId) {
+			setSnap(new Map());
+			return;
+		}
+		setSnap(getOcifNodes(workspaceId));
+		return subscribeWorkspace(workspaceId, () => {
+			setSnap(getOcifNodes(workspaceId));
 		});
 	}, [workspaceId]);
 	return snap;

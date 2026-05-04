@@ -1,0 +1,41 @@
+.toolbar {
+	position: fixed;
+	left: 16px;
+	bottom: 80px;
+	display: flex;
+	flex-direction: column;
+	gap: 4px;
+	padding: 4px;
+	background: rgba(28, 28, 30, 0.85);
+	backdrop-filter: blur(20px);
+	-webkit-backdrop-filter: blur(20px);
+	border: 1px solid rgba(255, 255, 255, 0.12);
+	border-radius: 10px;
+	box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35);
+	z-index: 150;
+	color: rgba(255, 255, 255, 0.9);
+}
+
+.button,
+.buttonActive {
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	width: 32px;
+	height: 32px;
+	background: transparent;
+	border: 1px solid transparent;
+	border-radius: 6px;
+	color: inherit;
+	cursor: pointer;
+	padding: 0;
+}
+
+.button:hover {
+	background: rgba(255, 255, 255, 0.08);
+}
+
+.buttonActive {
+	background: rgba(255, 255, 255, 0.16);
+	border-color: rgba(255, 255, 255, 0.25);
+}

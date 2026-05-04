@@ -12,8 +12,10 @@ import {
 	setFocusedWindow,
 	windowsCollection,
 } from "./db";
+import { CanvasToolbar, type CanvasTool } from "./CanvasToolbar";
 import { GlobalMenuBar } from "./GlobalMenuBar";
 import { InfiniteCanvas } from "./InfiniteCanvas";
+import { OcifBox } from "./OcifBox";
 import { decodeFrame } from "./rtcWire";
 import { SettingsPanel } from "./SettingsPanel";
 import type {
@@ -25,11 +27,15 @@ import type {
 import {
 	useAttachedWindowIds,
 	useBackendSocket,
+	useOcifNodes,
 	useWorkspaceName,
 } from "./useBackendSocket";
 import { WindowFrame } from "./WindowFrame";
 import {
+	deleteOcifNode,
 	getAllPositions,
+	insertOcifNode,
+	setOcifNodePosition,
 	setPosition as setWorkspacePosition,
 	subscribe as subscribeWorkspace,
 } from "./workspaceSync";
@@ -56,6 +62,7 @@ function App() {
 	} = useBackendSocket();
 	const workspaceName = useWorkspaceName(activeWorkspace?.id ?? null);
 	const attachedWindowIds = useAttachedWindowIds(activeWorkspace?.id ?? null);
+	const ocifNodes = useOcifNodes(activeWorkspace?.id ?? null);
 
 	const { data: processes = [] } = useLiveQuery((q) =>
 		q.from({ p: processesCollection }).select(({ p }) => p),
@@ -77,6 +84,31 @@ function App() {
 	);
 	/** Focus policy setting. */
 	const [focusPolicy, setFocusPolicy] = useState<FocusPolicy>("click-to-focus");
+
+	/** Active canvas tool — "pointer" (default) or "box" (drag to
+	 *  draw an `@ocif/rect` node). */
+	const [tool, setTool] = useState<CanvasTool>("pointer");
+	/** Local preview rect while the user is drag-creating a box.
+	 *  Not synced — peers see the box only on commit (pointerup). */
+	const [drawing, setDrawing] = useState<{
+		startX: number;
+		startY: number;
+		x: number;
+		y: number;
+		w: number;
+		h: number;
+	} | null>(null);
+	/** Currently-selected OCIF node id (or null). Selection is
+	 *  per-tab — different users have different selections. */
+	const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
+	/** Helper to translate page-coords (from window-level pointermove
+	 *  events) into canvas-space, exposed by `InfiniteCanvas`. */
+	const pageToCanvasRef = useRef<
+		((cx: number, cy: number) => { x: number; y: number }) | null
+	>(null);
+	/** Highest `z` we've assigned to any node in this session. New
+	 *  boxes get `maxZ + 1` so they land on top. */
+	const maxNodeZRef = useRef(0);
 
 	// Reap renderers and locally-closed entries for windows the
 	// backend has dropped. Renderer creation happens lazily during
@@ -199,6 +231,156 @@ function App() {
 			args,
 		});
 	}
+
+	// Track the highest `z` we've seen so newly-drawn boxes land
+	// on top of existing ones. Reads on every doc change.
+	useEffect(() => {
+		let max = maxNodeZRef.current;
+		for (const node of ocifNodes.values()) {
+			if (node.z > max) max = node.z;
+		}
+		maxNodeZRef.current = max;
+	}, [ocifNodes]);
+
+	/** Pointer-down on empty canvas while in "box" mode: start a
+	 *  local preview rect and arm window-level move/up listeners
+	 *  to drive it. Commits to the doc on release. */
+	const handleCanvasPointerDown = useCallback(
+		(point: { x: number; y: number }, e: React.PointerEvent) => {
+			if (tool !== "box" || !activeWorkspace) return;
+			e.preventDefault();
+			setSelectedNodeId(null);
+			setDrawing({
+				startX: point.x,
+				startY: point.y,
+				x: point.x,
+				y: point.y,
+				w: 0,
+				h: 0,
+			});
+		},
+		[tool, activeWorkspace],
+	);
+
+	// Drive the draw preview from window-level pointer events so
+	// the gesture survives if the cursor leaves the canvas mid-
+	// drag. Commits on release.
+	useEffect(() => {
+		if (!drawing || !activeWorkspace) return;
+		const onMove = (e: PointerEvent) => {
+			const toCanvas = pageToCanvasRef.current;
+			if (!toCanvas) return;
+			const p = toCanvas(e.clientX, e.clientY);
+			setDrawing((d) =>
+				d
+					? {
+							...d,
+							x: Math.min(d.startX, p.x),
+							y: Math.min(d.startY, p.y),
+							w: Math.abs(p.x - d.startX),
+							h: Math.abs(p.y - d.startY),
+						}
+					: d,
+			);
+		};
+		const onUp = () => {
+			// Side effects (the doc insert) live OUTSIDE the state
+			// updater. React Strict Mode dev-double-invokes setter
+			// callbacks to catch impurity, which would otherwise
+			// commit the box twice. The captured `drawing` is up to
+			// date because this effect re-runs on every pointermove.
+			if (drawing && drawing.w >= 4 && drawing.h >= 4) {
+				const id = crypto.randomUUID();
+				const z = maxNodeZRef.current + 1;
+				maxNodeZRef.current = z;
+				insertOcifNode(activeWorkspace.id, id, {
+					x: drawing.x,
+					y: drawing.y,
+					z,
+					width: drawing.w,
+					height: drawing.h,
+					rect: {},
+				});
+				setSelectedNodeId(id);
+			}
+			setDrawing(null);
+		};
+		window.addEventListener("pointermove", onMove);
+		window.addEventListener("pointerup", onUp);
+		return () => {
+			window.removeEventListener("pointermove", onMove);
+			window.removeEventListener("pointerup", onUp);
+		};
+	}, [drawing, activeWorkspace]);
+
+	/** Pointer-down on an existing OCIF box: select it, then drag
+	 *  to move. Optimistic — we patch the local rendered Map snapshot
+	 *  after the doc mutation and rely on the next `useOcifNodes`
+	 *  re-read to converge. */
+	const handleNodePointerDown = useCallback(
+		(id: string, e: React.PointerEvent) => {
+			if (!activeWorkspace) return;
+			e.preventDefault();
+			setSelectedNodeId(id);
+			const toCanvas = pageToCanvasRef.current;
+			if (!toCanvas) return;
+			const node = ocifNodes.get(id);
+			if (!node) return;
+			const start = toCanvas(e.clientX, e.clientY);
+			const offsetX = start.x - node.x;
+			const offsetY = start.y - node.y;
+			const onMove = (ev: PointerEvent) => {
+				const t = pageToCanvasRef.current;
+				if (!t) return;
+				const p = t(ev.clientX, ev.clientY);
+				setOcifNodePosition(
+					activeWorkspace.id,
+					id,
+					p.x - offsetX,
+					p.y - offsetY,
+				);
+			};
+			const onUp = () => {
+				window.removeEventListener("pointermove", onMove);
+				window.removeEventListener("pointerup", onUp);
+			};
+			window.addEventListener("pointermove", onMove);
+			window.addEventListener("pointerup", onUp);
+		},
+		[activeWorkspace, ocifNodes],
+	);
+
+	// Delete / Backspace deletes the selected box. Esc clears
+	// selection and exits draw mode.
+	useEffect(() => {
+		const onKey = (e: KeyboardEvent) => {
+			const target = e.target as HTMLElement | null;
+			// Don't intercept while the user is typing into an input.
+			if (
+				target &&
+				(target.tagName === "INPUT" ||
+					target.tagName === "TEXTAREA" ||
+					target.isContentEditable)
+			) {
+				return;
+			}
+			if (e.key === "Escape") {
+				setSelectedNodeId(null);
+				setTool("pointer");
+				return;
+			}
+			if (
+				(e.key === "Delete" || e.key === "Backspace") &&
+				selectedNodeId &&
+				activeWorkspace
+			) {
+				deleteOcifNode(activeWorkspace.id, selectedNodeId);
+				setSelectedNodeId(null);
+			}
+		};
+		window.addEventListener("keydown", onKey);
+		return () => window.removeEventListener("keydown", onKey);
+	}, [selectedNodeId, activeWorkspace]);
 
 	const handleMove = useCallback(
 		(windowId: string, x: number, y: number) => {
@@ -458,6 +640,8 @@ function App() {
 				appContextMenuItems={focusedAppContextMenuItems}
 			/>
 			<InfiniteCanvas
+				pageToCanvasRef={pageToCanvasRef}
+				onCanvasPointerDown={handleCanvasPointerDown}
 				onCanvasDrop={(point, event) => {
 					const windowId = event.dataTransfer.getData(
 						"application/x-x11web-window-id",
@@ -479,6 +663,31 @@ function App() {
 					patchWindow(windowId, { x: point.x, y: point.y });
 				}}
 			>
+				{[...ocifNodes.entries()].map(([id, node]) => (
+					<OcifBox
+						key={id}
+						id={id}
+						node={node}
+						selected={selectedNodeId === id}
+						onPointerDown={handleNodePointerDown}
+					/>
+				))}
+				{drawing && (
+					<div
+						style={{
+							position: "absolute",
+							left: drawing.x,
+							top: drawing.y,
+							width: drawing.w,
+							height: drawing.h,
+							background: "rgba(0, 122, 255, 0.08)",
+							outline: "2px dashed #007aff",
+							outlineOffset: "-2px",
+							pointerEvents: "none",
+							zIndex: 9999,
+						}}
+					/>
+				)}
 				{visibleWindows.map((win) => {
 					// Lazy-create the renderer so a window appearing in
 					// the authoritative list shows up immediately, before
@@ -534,6 +743,7 @@ function App() {
 					);
 				})}
 			</InfiniteCanvas>
+			<CanvasToolbar tool={tool} onSelect={setTool} />
 			<Dock
 				connected={connected}
 				processes={dockProcesses}

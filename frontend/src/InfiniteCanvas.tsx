@@ -13,12 +13,33 @@ interface InfiniteCanvasProps {
 	/// canvas coordinates (camera-aware). Used to land dragged
 	/// polaroids onto the canvas at the cursor.
 	onCanvasDrop?: (point: { x: number; y: number }, event: React.DragEvent) => void;
+	/// Called when the user pointer-downs on empty canvas (not on a
+	/// window or any other child). Caller gets canvas-space coords
+	/// and the original event so it can attach window-level
+	/// pointermove / pointerup listeners for the drag-to-draw
+	/// gesture.
+	onCanvasPointerDown?: (
+		point: { x: number; y: number },
+		event: React.PointerEvent,
+	) => void;
+	/// Helper: convert page-space pointer coords (e.g. from a
+	/// window-level pointermove) into the canvas's local coords.
+	/// Provided as a ref so the parent can grab the latest function
+	/// without re-rendering on every camera update.
+	pageToCanvasRef?: React.MutableRefObject<
+		((clientX: number, clientY: number) => { x: number; y: number }) | null
+	>;
 }
 
 const MIN_SCALE = 0.1;
 const MAX_SCALE = 3;
 
-export function InfiniteCanvas({ children, onCanvasDrop }: InfiniteCanvasProps) {
+export function InfiniteCanvas({
+	children,
+	onCanvasDrop,
+	onCanvasPointerDown,
+	pageToCanvasRef,
+}: InfiniteCanvasProps) {
 	const [camera, setCamera] = useState<Camera>({ x: 0, y: 0, scale: 1 });
 	const cameraRef = useRef(camera);
 	cameraRef.current = camera;
@@ -92,6 +113,41 @@ export function InfiniteCanvas({ children, onCanvasDrop }: InfiniteCanvasProps) 
 			}
 		: undefined;
 
+	// Compute and expose a page→canvas helper. Updated on every
+	// render so callers see the current camera. The ref pattern
+	// avoids re-binding pointermove/pointerup listeners as the
+	// camera changes mid-drag.
+	if (pageToCanvasRef) {
+		pageToCanvasRef.current = (clientX, clientY) => {
+			const el = viewportRef.current;
+			if (!el) return { x: clientX, y: clientY };
+			const rect = el.getBoundingClientRect();
+			const cam = cameraRef.current;
+			return {
+				x: cam.x + (clientX - rect.left) / cam.scale,
+				y: cam.y + (clientY - rect.top) / cam.scale,
+			};
+		};
+	}
+
+	const handlePointerDown = onCanvasPointerDown
+		? (e: React.PointerEvent) => {
+				// Only fire when the gesture starts on the empty canvas
+				// (not on a window, toolbar, or any other child).
+				if (e.target !== viewportRef.current) return;
+				const el = viewportRef.current;
+				if (!el) return;
+				const rect = el.getBoundingClientRect();
+				const cam = cameraRef.current;
+				const cursorX = e.clientX - rect.left;
+				const cursorY = e.clientY - rect.top;
+				onCanvasPointerDown(
+					{ x: cam.x + cursorX / cam.scale, y: cam.y + cursorY / cam.scale },
+					e,
+				);
+			}
+		: undefined;
+
 	return (
 		<div
 			ref={viewportRef}
@@ -99,6 +155,7 @@ export function InfiniteCanvas({ children, onCanvasDrop }: InfiniteCanvasProps) 
 			data-testid="infinite-canvas"
 			onDragOver={handleDragOver}
 			onDrop={handleDrop}
+			onPointerDown={handlePointerDown}
 		>
 			<div
 				className={s.transform}

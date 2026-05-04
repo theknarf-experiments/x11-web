@@ -1,0 +1,15 @@
+.box,
+.selected {
+	cursor: move;
+	box-sizing: border-box;
+}
+
+/* Selection halo. Sits OUTSIDE the box (so it doesn't overlap the
+ * white border) and inherits the box's border-radius via the
+ * inline style — box-shadow's spread radius respects the host
+ * element's corners. */
+.selected {
+	box-shadow:
+		0 0 0 2px #007aff,
+		0 0 0 4px rgba(0, 122, 255, 0.3);
+}

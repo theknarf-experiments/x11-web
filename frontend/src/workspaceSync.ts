@@ -17,6 +17,26 @@ export interface WorkspaceDoc {
 	name: string;
 	attached_windows: { [windowId: string]: boolean };
 	window_positions: { [windowId: string]: { x: number; y: number } };
+	nodes: { [nodeId: string]: OcifNode };
+}
+
+/** OCIF-shaped user-drawn node. Internal flat shape; serializes to
+ *  `{ id, position: [x,y,z], size: [w,h], data: [{type, ...}] }` on
+ *  OCIF export. Keep in sync with `OcifNode` in Rust. */
+export interface OcifNode {
+	x: number;
+	y: number;
+	z: number;
+	width: number;
+	height: number;
+	rect?: RectExt;
+}
+
+/** `@ocif/rect` — all properties optional per spec. */
+export interface RectExt {
+	stroke_width?: number;
+	stroke_color?: string;
+	fill_color?: string;
 }
 
 interface PerWorkspace {
@@ -240,4 +260,100 @@ export function setPosition(
 export function forget(workspaceId: string) {
 	docs.delete(workspaceId);
 	listeners.delete(workspaceId);
+}
+
+// ---------- OCIF nodes (user-drawn shapes) ----------
+
+/** Snapshot of every user-drawn node in the workspace. Returns a
+ *  fresh map per call; pair with `subscribe` (or `useOcifNodes`) to
+ *  know when to re-read. */
+export function getOcifNodes(workspaceId: string): Map<string, OcifNode> {
+	const out = new Map<string, OcifNode>();
+	const entry = docs.get(workspaceId);
+	if (!entry) return out;
+	const nodes = entry.doc.nodes as { [k: string]: OcifNode } | undefined;
+	if (!nodes) return out;
+	for (const [k, v] of Object.entries(nodes)) {
+		out.set(k, {
+			x: v.x,
+			y: v.y,
+			z: v.z,
+			width: v.width,
+			height: v.height,
+			rect: v.rect ? { ...v.rect } : undefined,
+		});
+	}
+	return out;
+}
+
+/** Insert a new node. Caller picks the id (typically `crypto.randomUUID()`). */
+export function insertOcifNode(
+	workspaceId: string,
+	id: string,
+	node: OcifNode,
+) {
+	const entry = ensure(workspaceId);
+	entry.doc = Automerge.change(entry.doc, (d) => {
+		if (!d.nodes) d.nodes = {};
+		d.nodes[id] = {
+			x: node.x,
+			y: node.y,
+			z: node.z,
+			width: node.width,
+			height: node.height,
+			...(node.rect ? { rect: { ...node.rect } } : {}),
+		};
+	});
+	notify(workspaceId);
+	ship(workspaceId, drainOutbound(entry));
+}
+
+/** Update a node's position. Optimistic — caller can patch local
+ *  render state separately for snappier feel. */
+export function setOcifNodePosition(
+	workspaceId: string,
+	id: string,
+	x: number,
+	y: number,
+) {
+	const entry = ensure(workspaceId);
+	if (!(entry.doc.nodes ?? {})[id]) return;
+	entry.doc = Automerge.change(entry.doc, (d) => {
+		const n = d.nodes?.[id];
+		if (!n) return;
+		n.x = x;
+		n.y = y;
+	});
+	notify(workspaceId);
+	ship(workspaceId, drainOutbound(entry));
+}
+
+/** Update a node's size. */
+export function setOcifNodeSize(
+	workspaceId: string,
+	id: string,
+	width: number,
+	height: number,
+) {
+	const entry = ensure(workspaceId);
+	if (!(entry.doc.nodes ?? {})[id]) return;
+	entry.doc = Automerge.change(entry.doc, (d) => {
+		const n = d.nodes?.[id];
+		if (!n) return;
+		n.width = width;
+		n.height = height;
+	});
+	notify(workspaceId);
+	ship(workspaceId, drainOutbound(entry));
+}
+
+/** Delete a node from the workspace. */
+export function deleteOcifNode(workspaceId: string, id: string) {
+	const entry = ensure(workspaceId);
+	if (!(entry.doc.nodes ?? {})[id]) return;
+	entry.doc = Automerge.change(entry.doc, (d) => {
+		if (d.nodes) delete d.nodes[id];
+	});
+	notify(workspaceId);
+	ship(workspaceId, drainOutbound(entry));
 }

@@ -31,23 +31,53 @@ use autosurgeon::{hydrate, reconcile, Hydrate, Reconcile};
 #[derive(Debug, Clone, Default, Reconcile, Hydrate)]
 pub struct WorkspaceDoc {
     /// Display name. Auto-assigned `"Workspace N"` on creation;
-    /// will become user-editable in slice 5.
+    /// editable inline via the menu bar.
     pub name: String,
     /// Window IDs attached to this workspace's canvas. Map (set
     /// semantics) so concurrent attaches converge cleanly. The value
     /// is always `true` and is meaningless — presence is the signal.
-    /// (Autosurgeon's derives don't accept `()` as a value, hence
-    /// `bool`.) Empty in slice 1b — gets populated in slice 2.
     pub attached_windows: HashMap<String, bool>,
-    /// Per-window tracked position. Empty in slice 1b — populated in
-    /// slice 3, replaces backend's global `window_positions` map.
+    /// Per-window tracked position.
     pub window_positions: HashMap<String, Position>,
+    /// User-drawn OCIF-shaped nodes (rectangles, future arrows /
+    /// text / paths). Keyed by UUID generated on create. Follows
+    /// OCIF v0.7.0 node shape — see <https://canvasprotocol.org>.
+    /// Windows aren't migrated into this map yet; once they are,
+    /// `attached_windows` and `window_positions` collapse into it.
+    pub nodes: HashMap<String, OcifNode>,
 }
 
 #[derive(Debug, Clone, Copy, Reconcile, Hydrate)]
 pub struct Position {
     pub x: f64,
     pub y: f64,
+}
+
+/// One OCIF node. Position is `[x, y, z]` per OCIF; we keep it as
+/// scalar fields for autosurgeon ergonomics and emit the array at
+/// serialization time. `z` drives stacking order (higher renders
+/// on top). `width` / `height` are OCIF `size`.
+#[derive(Debug, Clone, Default, Reconcile, Hydrate)]
+pub struct OcifNode {
+    pub x: f64,
+    pub y: f64,
+    pub z: f64,
+    pub width: f64,
+    pub height: f64,
+    /// `@ocif/rect` extension. Future variants live as siblings:
+    /// `oval: Option<OvalExt>`, `arrow: Option<ArrowExt>`, etc.
+    /// At most one extension shape per node is set today.
+    pub rect: Option<RectExt>,
+}
+
+/// `@ocif/rect` — fillColor / strokeColor / strokeWidth. All
+/// optional per OCIF; the renderer falls back to defaults when
+/// missing.
+#[derive(Debug, Clone, Default, Reconcile, Hydrate)]
+pub struct RectExt {
+    pub stroke_width: Option<f64>,
+    pub stroke_color: Option<String>,
+    pub fill_color: Option<String>,
 }
 
 /// Backend-side state for one workspace doc. Holds the doc itself
@@ -69,6 +99,7 @@ impl WorkspaceEntry {
             name: name.to_string(),
             attached_windows: HashMap::<String, bool>::new(),
             window_positions: HashMap::new(),
+            nodes: HashMap::new(),
         };
         reconcile(&mut doc, &seed).expect("reconcile fresh workspace doc");
         Self {
