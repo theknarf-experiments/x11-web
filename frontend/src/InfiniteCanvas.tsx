@@ -132,9 +132,11 @@ export function InfiniteCanvas({
 
 	const handlePointerDown = onCanvasPointerDown
 		? (e: React.PointerEvent) => {
-				// Only fire when the gesture starts on the empty canvas
-				// (not on a window, toolbar, or any other child).
-				if (e.target !== viewportRef.current) return;
+				// Fires for any pointerdown that bubbles up to the
+				// viewport. Children that want to consume the event
+				// (windows, toolbar buttons, OcifBox in pointer mode)
+				// stop propagation; everything else falls through to
+				// the canvas tool dispatcher (drag-create / deselect).
 				const el = viewportRef.current;
 				if (!el) return;
 				const rect = el.getBoundingClientRect();

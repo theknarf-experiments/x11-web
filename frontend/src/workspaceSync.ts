@@ -30,6 +30,8 @@ export interface OcifNode {
 	width: number;
 	height: number;
 	rect?: RectExt;
+	arrow?: ArrowExt;
+	edge?: EdgeExt;
 	/** Inline text content rendered inside the node. Serializes to
 	 *  a referenced `text/plain` resource on OCIF export. */
 	text?: string;
@@ -40,6 +42,30 @@ export interface RectExt {
 	stroke_width?: number;
 	stroke_color?: string;
 	fill_color?: string;
+}
+
+/** `@ocif/arrow` — endpoints in canvas-space coords, plus stroke
+ *  styling. For free-floating arrows these are the actual visual
+ *  endpoints; for connected arrows (those also carrying `edge`)
+ *  they're cached and the renderer recomputes from the connected
+ *  nodes' bounds. */
+export interface ArrowExt {
+	start_x: number;
+	start_y: number;
+	end_x: number;
+	end_y: number;
+	stroke_width?: number;
+	stroke_color?: string;
+}
+
+/** `@ocif/edge` — relation between two nodes referenced by id.
+ *  Combined with `arrow` for the visual treatment; the geometry
+ *  is computed at render time so the connection follows the boxes
+ *  when they move or resize. */
+export interface EdgeExt {
+	start: string;
+	end: string;
+	directed: boolean;
 }
 
 interface PerWorkspace {
@@ -284,6 +310,8 @@ export function getOcifNodes(workspaceId: string): Map<string, OcifNode> {
 			width: v.width,
 			height: v.height,
 			rect: v.rect ? { ...v.rect } : undefined,
+			arrow: v.arrow ? { ...v.arrow } : undefined,
+			edge: v.edge ? { ...v.edge } : undefined,
 			text: v.text,
 		});
 	}
@@ -312,6 +340,8 @@ export function insertOcifNode(
 			height: node.height,
 			text: node.text ?? "",
 			...(node.rect ? { rect: { ...node.rect } } : {}),
+			...(node.arrow ? { arrow: { ...node.arrow } } : {}),
+			...(node.edge ? { edge: { ...node.edge } } : {}),
 		};
 	});
 	notify(workspaceId);
@@ -400,12 +430,54 @@ export function setOcifNodeText(
 	ship(workspaceId, drainOutbound(entry));
 }
 
-/** Delete a node from the workspace. */
+/** Update an arrow node's endpoints in a single mutation. Callers
+ *  pass canvas-space coords; the renderer derives the SVG path via
+ *  perfect-arrows. We also keep the node's `(x, y, width, height)`
+ *  in sync with the arrow's bounding box so future hit-testing /
+ *  layout that consults the OCIF size still works. */
+export function setOcifArrowEndpoints(
+	workspaceId: string,
+	id: string,
+	startX: number,
+	startY: number,
+	endX: number,
+	endY: number,
+) {
+	const entry = ensure(workspaceId);
+	if (!(entry.doc.nodes ?? {})[id]) return;
+	entry.doc = Automerge.change(entry.doc, (d) => {
+		const n = d.nodes?.[id];
+		if (!n || !n.arrow) return;
+		n.arrow.start_x = startX;
+		n.arrow.start_y = startY;
+		n.arrow.end_x = endX;
+		n.arrow.end_y = endY;
+		const minX = Math.min(startX, endX);
+		const minY = Math.min(startY, endY);
+		n.x = minX;
+		n.y = minY;
+		n.width = Math.abs(endX - startX);
+		n.height = Math.abs(endY - startY);
+	});
+	notify(workspaceId);
+	ship(workspaceId, drainOutbound(entry));
+}
+
+/** Delete a node from the workspace. Also drops any edges that
+ *  referenced this node — a dangling edge with a missing endpoint
+ *  has nothing to render against. */
 export function deleteOcifNode(workspaceId: string, id: string) {
 	const entry = ensure(workspaceId);
 	if (!(entry.doc.nodes ?? {})[id]) return;
 	entry.doc = Automerge.change(entry.doc, (d) => {
-		if (d.nodes) delete d.nodes[id];
+		if (!d.nodes) return;
+		delete d.nodes[id];
+		for (const [otherId, other] of Object.entries(d.nodes)) {
+			const e = (other as OcifNode).edge;
+			if (e && (e.start === id || e.end === id)) {
+				delete d.nodes[otherId];
+			}
+		}
 	});
 	notify(workspaceId);
 	ship(workspaceId, drainOutbound(entry));

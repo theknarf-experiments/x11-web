@@ -1,6 +1,6 @@
 import s from "./CanvasToolbar.module.css";
 
-export type CanvasTool = "pointer" | "box";
+export type CanvasTool = "pointer" | "box" | "arrow";
 
 interface CanvasToolbarProps {
 	tool: CanvasTool;
@@ -8,8 +8,8 @@ interface CanvasToolbarProps {
 }
 
 /** Floating tool palette in the bottom-left of the viewport.
- *  v1: just pointer + box. Future tools (arrow, text, freehand)
- *  slot in here as additional buttons. */
+ *  v1: pointer / box / arrow. Future tools (text, freehand) slot
+ *  in here as additional buttons. */
 export function CanvasToolbar({ tool, onSelect }: CanvasToolbarProps) {
 	return (
 		<div className={s.toolbar} data-testid="canvas-toolbar">
@@ -42,6 +42,25 @@ export function CanvasToolbar({ tool, onSelect }: CanvasToolbarProps) {
 						fill="none"
 						stroke="currentColor"
 						strokeWidth={1.5}
+					/>
+				</svg>
+			</ToolButton>
+			<ToolButton
+				active={tool === "arrow"}
+				label="Arrow"
+				onClick={() => onSelect("arrow")}
+			>
+				<svg viewBox="0 0 16 16" width={16} height={16}>
+					<path
+						d="M2 13 L13 4"
+						fill="none"
+						stroke="currentColor"
+						strokeWidth={1.5}
+						strokeLinecap="round"
+					/>
+					<polygon
+						points="13,4 9,4 13,8"
+						fill="currentColor"
 					/>
 				</svg>
 			</ToolButton>

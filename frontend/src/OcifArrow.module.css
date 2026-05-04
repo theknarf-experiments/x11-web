@@ -1,0 +1,27 @@
+.container {
+	position: absolute;
+	pointer-events: none;
+}
+
+.svg {
+	overflow: visible;
+}
+
+/* Wide invisible click target. Cursor hint is `move` because
+ * dragging the line moves the whole arrow. */
+.hit {
+	pointer-events: stroke;
+	cursor: move;
+}
+
+.endpoint {
+	fill: #ffffff;
+	stroke: #007aff;
+	stroke-width: 1.5;
+	cursor: grab;
+	pointer-events: auto;
+}
+
+.endpoint:active {
+	cursor: grabbing;
+}

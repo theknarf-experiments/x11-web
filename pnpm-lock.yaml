@@ -65,6 +65,9 @@ importers:
       pako:
         specifier: ^2.1.0
         version: 2.1.0
+      perfect-arrows:
+        specifier: ^0.3.7
+        version: 0.3.7
       react:
         specifier: 19.3.0-canary-3cb2c420-20260324
         version: 19.3.0-canary-3cb2c420-20260324
@@ -1945,6 +1948,10 @@ packages:
   pathval@2.0.1:
     resolution: {integrity: sha512-//nshmD55c46FuFw26xV/xFAaB5HF9Xdap7HJBBnrKdAd6/GxDBaNA1870O79+9ueg61cZLSVc+OaFlfmObYVQ==}
     engines: {node: '>= 14.16'}
+
+  perfect-arrows@0.3.7:
+    resolution: {integrity: sha512-wEN2gerTPVWl3yqoFEF8OeGbg3aRe2sxNUi9rnyYrCsL4JcI6K2tBDezRtqVrYG0BNtsWLdYiiTrYm+X//8yLQ==}
+    engines: {node: '>=10'}
 
   picocolors@1.1.1:
     resolution: {integrity: sha512-xceH2snhtb5M9liqDsmEw56le376mTZkEX/jEb/RxNFyegNul7eNslCXP9FDj/Lcu0X8KEyMceP2ntpaHrDEVA==}
@@ -4002,6 +4009,8 @@ snapshots:
   path-to-regexp@3.3.0: {}
 
   pathval@2.0.1: {}
+
+  perfect-arrows@0.3.7: {}
 
   picocolors@1.1.1: {}
 

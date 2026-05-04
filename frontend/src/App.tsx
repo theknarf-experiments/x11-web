@@ -17,6 +17,7 @@ import {
 import { CanvasToolbar, type CanvasTool } from "./CanvasToolbar";
 import { GlobalMenuBar } from "./GlobalMenuBar";
 import { InfiniteCanvas } from "./InfiniteCanvas";
+import { OcifArrow } from "./OcifArrow";
 import { OcifBox, type ResizeHandle } from "./OcifBox";
 import { decodeFrame } from "./rtcWire";
 import { SettingsPanel } from "./SettingsPanel";
@@ -38,6 +39,7 @@ import {
 	getOcifNodes,
 	insertOcifNode,
 	type OcifNode,
+	setOcifArrowEndpoints,
 	setOcifNodeBounds,
 	setOcifNodePosition,
 	setOcifNodeText,
@@ -103,11 +105,9 @@ function App() {
 				width: row.width,
 				height: row.height,
 				text: row.text,
-				rect: {
-					fill_color: row.fillColor,
-					stroke_color: row.strokeColor,
-					stroke_width: row.strokeWidth,
-				},
+				rect: row.rect,
+				arrow: row.arrow,
+				edge: row.edge,
 			});
 		}
 		return out;
@@ -137,16 +137,33 @@ function App() {
 	/** Active canvas tool — "pointer" (default) or "box" (drag to
 	 *  draw an `@ocif/rect` node). */
 	const [tool, setTool] = useState<CanvasTool>("pointer");
-	/** Local preview rect while the user is drag-creating a box.
-	 *  Not synced — peers see the box only on commit (pointerup). */
-	const [drawing, setDrawing] = useState<{
-		startX: number;
-		startY: number;
-		x: number;
-		y: number;
-		w: number;
-		h: number;
-	} | null>(null);
+	/** Local preview while the user is drag-creating a shape.
+	 *  Not synced — peers see the shape only on commit (pointerup).
+	 *  For arrows, `startNodeId` / `endNodeId` are the boxes the
+	 *  gesture began / currently hovers over (or null for empty
+	 *  canvas); on release a connected `@ocif/edge` is created
+	 *  when both ends are over boxes. */
+	const [drawing, setDrawing] = useState<
+		| {
+				kind: "box";
+				startX: number;
+				startY: number;
+				x: number;
+				y: number;
+				w: number;
+				h: number;
+		  }
+		| {
+				kind: "arrow";
+				startX: number;
+				startY: number;
+				endX: number;
+				endY: number;
+				startNodeId: string | null;
+				endNodeId: string | null;
+		  }
+		| null
+	>(null);
 	/** Currently-selected OCIF node id (or null). Selection is
 	 *  per-tab — different users have different selections. */
 	const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
@@ -293,13 +310,13 @@ function App() {
 		maxNodeZRef.current = max;
 	}, [ocifNodes]);
 
-	/** Pointer-down on empty canvas. In "box" mode this starts a
-	 *  drag-create gesture; in "pointer" mode it deselects any
-	 *  selected node. We deliberately don't touch `editingNodeId`
-	 *  here — the textarea's `onBlur` is the canonical exit signal
-	 *  for edit mode, and clearing the state synchronously here
-	 *  would unmount the textarea before its blur event can fire,
-	 *  losing the in-progress text. */
+	/** Pointer-down on empty canvas. In "box" or "arrow" mode this
+	 *  starts a drag-create gesture; in "pointer" mode it deselects
+	 *  any selected node. We deliberately don't touch
+	 *  `editingNodeId` here — the textarea's `onBlur` is the
+	 *  canonical exit signal for edit mode, and clearing the state
+	 *  synchronously here would unmount the textarea before its
+	 *  blur event can fire, losing the in-progress text. */
 	const handleCanvasPointerDown = useCallback(
 		(point: { x: number; y: number }, e: React.PointerEvent) => {
 			if (!activeWorkspace) return;
@@ -307,12 +324,37 @@ function App() {
 				e.preventDefault();
 				setSelectedNodeId(null);
 				setDrawing({
+					kind: "box",
 					startX: point.x,
 					startY: point.y,
 					x: point.x,
 					y: point.y,
 					w: 0,
 					h: 0,
+				});
+				return;
+			}
+			if (tool === "arrow") {
+				e.preventDefault();
+				setSelectedNodeId(null);
+				// If the gesture starts on top of a box, capture
+				// its id so we can build a connected `@ocif/edge`
+				// on release. Walk the DOM target up looking for
+				// an OcifBox marker; OcifArrow nodes are excluded
+				// (you can't anchor an edge to another edge).
+				const targetEl = e.target as Element | null;
+				const startBox = targetEl?.closest<HTMLElement>(
+					'[data-testid="ocif-box"]',
+				);
+				const startNodeId = startBox?.dataset.nodeId ?? null;
+				setDrawing({
+					kind: "arrow",
+					startX: point.x,
+					startY: point.y,
+					endX: point.x,
+					endY: point.y,
+					startNodeId,
+					endNodeId: startNodeId,
 				});
 				return;
 			}
@@ -323,32 +365,40 @@ function App() {
 
 	// Drive the draw preview from window-level pointer events so
 	// the gesture survives if the cursor leaves the canvas mid-
-	// drag. Commits on release.
+	// drag. Commits on release. Side effects (the doc insert) live
+	// OUTSIDE the state updater — React Strict Mode dev-double-
+	// invokes setter callbacks, which would otherwise create two
+	// nodes. The captured `drawing` is up to date because this
+	// effect re-runs on every pointermove.
 	useEffect(() => {
 		if (!drawing || !activeWorkspace) return;
-		const onMove = (e: PointerEvent) => {
+		const onMove = (ev: PointerEvent) => {
 			const toCanvas = pageToCanvasRef.current;
 			if (!toCanvas) return;
-			const p = toCanvas(e.clientX, e.clientY);
-			setDrawing((d) =>
-				d
-					? {
-							...d,
-							x: Math.min(d.startX, p.x),
-							y: Math.min(d.startY, p.y),
-							w: Math.abs(p.x - d.startX),
-							h: Math.abs(p.y - d.startY),
-						}
-					: d,
+			const p = toCanvas(ev.clientX, ev.clientY);
+			// Hit-test for arrow snapping: walk up from the element
+			// under the cursor to the nearest OcifBox marker.
+			const overEl = document.elementFromPoint(ev.clientX, ev.clientY);
+			const overBox = overEl?.closest<HTMLElement>(
+				'[data-testid="ocif-box"]',
 			);
+			const overNodeId = overBox?.dataset.nodeId ?? null;
+			setDrawing((d) => {
+				if (!d) return d;
+				if (d.kind === "box") {
+					return {
+						...d,
+						x: Math.min(d.startX, p.x),
+						y: Math.min(d.startY, p.y),
+						w: Math.abs(p.x - d.startX),
+						h: Math.abs(p.y - d.startY),
+					};
+				}
+				return { ...d, endX: p.x, endY: p.y, endNodeId: overNodeId };
+			});
 		};
 		const onUp = () => {
-			// Side effects (the doc insert) live OUTSIDE the state
-			// updater. React Strict Mode dev-double-invokes setter
-			// callbacks to catch impurity, which would otherwise
-			// commit the box twice. The captured `drawing` is up to
-			// date because this effect re-runs on every pointermove.
-			if (drawing && drawing.w >= 4 && drawing.h >= 4) {
+			if (drawing.kind === "box" && drawing.w >= 4 && drawing.h >= 4) {
 				const id = crypto.randomUUID();
 				const z = maxNodeZRef.current + 1;
 				maxNodeZRef.current = z;
@@ -361,6 +411,45 @@ function App() {
 					rect: {},
 				});
 				setSelectedNodeId(id);
+			} else if (drawing.kind === "arrow") {
+				const dx = drawing.endX - drawing.startX;
+				const dy = drawing.endY - drawing.startY;
+				const connected =
+					drawing.startNodeId &&
+					drawing.endNodeId &&
+					drawing.startNodeId !== drawing.endNodeId;
+				// Connected edges always commit (no min-distance);
+				// free-floating arrows need a minimum drag to avoid
+				// stray clicks producing tiny invisible arrows.
+				if (connected || Math.hypot(dx, dy) >= 8) {
+					const id = crypto.randomUUID();
+					const z = maxNodeZRef.current + 1;
+					maxNodeZRef.current = z;
+					const arrow = {
+						start_x: drawing.startX,
+						start_y: drawing.startY,
+						end_x: drawing.endX,
+						end_y: drawing.endY,
+					};
+					insertOcifNode(activeWorkspace.id, id, {
+						x: Math.min(drawing.startX, drawing.endX),
+						y: Math.min(drawing.startY, drawing.endY),
+						z,
+						width: Math.abs(dx),
+						height: Math.abs(dy),
+						arrow,
+						...(connected
+							? {
+									edge: {
+										start: drawing.startNodeId as string,
+										end: drawing.endNodeId as string,
+										directed: true,
+									},
+								}
+							: {}),
+					});
+					setSelectedNodeId(id);
+				}
 			}
 			setDrawing(null);
 		};
@@ -372,10 +461,9 @@ function App() {
 		};
 	}, [drawing, activeWorkspace]);
 
-	/** Pointer-down on an existing OCIF box: select it, then drag
-	 *  to move. Optimistic — we patch the local rendered Map snapshot
-	 *  after the doc mutation and rely on the next `useOcifNodes`
-	 *  re-read to converge. */
+	/** Pointer-down on an existing OCIF node: select it, then drag
+	 *  to move. For arrows, dragging the body translates both
+	 *  endpoints; for boxes, it shifts position. */
 	const handleNodePointerDown = useCallback(
 		(id: string, e: React.PointerEvent) => {
 			if (!activeWorkspace) return;
@@ -385,19 +473,78 @@ function App() {
 			if (!toCanvas) return;
 			const node = ocifNodes.get(id);
 			if (!node) return;
-			const start = toCanvas(e.clientX, e.clientY);
-			const offsetX = start.x - node.x;
-			const offsetY = start.y - node.y;
+			const startPoint = toCanvas(e.clientX, e.clientY);
+			const wid = activeWorkspace.id;
+
+			// Connected arrow: select-only, no body drag — geometry
+			// follows the connected boxes' bounds, dragging the line
+			// itself would just produce a stale free-floating arrow.
+			if (node.edge) return;
+			let onMove: (ev: PointerEvent) => void;
+			if (node.arrow) {
+				const baseSX = node.arrow.start_x;
+				const baseSY = node.arrow.start_y;
+				const baseEX = node.arrow.end_x;
+				const baseEY = node.arrow.end_y;
+				onMove = (ev) => {
+					const t = pageToCanvasRef.current;
+					if (!t) return;
+					const p = t(ev.clientX, ev.clientY);
+					const dx = p.x - startPoint.x;
+					const dy = p.y - startPoint.y;
+					setOcifArrowEndpoints(
+						wid,
+						id,
+						baseSX + dx,
+						baseSY + dy,
+						baseEX + dx,
+						baseEY + dy,
+					);
+				};
+			} else {
+				const offsetX = startPoint.x - node.x;
+				const offsetY = startPoint.y - node.y;
+				onMove = (ev) => {
+					const t = pageToCanvasRef.current;
+					if (!t) return;
+					const p = t(ev.clientX, ev.clientY);
+					setOcifNodePosition(wid, id, p.x - offsetX, p.y - offsetY);
+				};
+			}
+			const onUp = () => {
+				window.removeEventListener("pointermove", onMove);
+				window.removeEventListener("pointerup", onUp);
+			};
+			window.addEventListener("pointermove", onMove);
+			window.addEventListener("pointerup", onUp);
+		},
+		[activeWorkspace, ocifNodes],
+	);
+
+	/** Pointer-down on an arrow's start or end handle. Drags that
+	 *  endpoint to a new canvas-space position; the other endpoint
+	 *  stays put. */
+	const handleArrowEndpointDown = useCallback(
+		(id: string, end: "start" | "end", e: React.PointerEvent) => {
+			if (!activeWorkspace) return;
+			e.preventDefault();
+			const node = ocifNodes.get(id);
+			const arrow = node?.arrow;
+			if (!arrow) return;
+			const wid = activeWorkspace.id;
+			const baseSX = arrow.start_x;
+			const baseSY = arrow.start_y;
+			const baseEX = arrow.end_x;
+			const baseEY = arrow.end_y;
 			const onMove = (ev: PointerEvent) => {
 				const t = pageToCanvasRef.current;
 				if (!t) return;
 				const p = t(ev.clientX, ev.clientY);
-				setOcifNodePosition(
-					activeWorkspace.id,
-					id,
-					p.x - offsetX,
-					p.y - offsetY,
-				);
+				if (end === "start") {
+					setOcifArrowEndpoints(wid, id, p.x, p.y, baseEX, baseEY);
+				} else {
+					setOcifArrowEndpoints(wid, id, baseSX, baseSY, p.x, p.y);
+				}
 			};
 			const onUp = () => {
 				window.removeEventListener("pointermove", onMove);
@@ -807,20 +954,34 @@ function App() {
 					patchWindow(windowId, { x: point.x, y: point.y });
 				}}
 			>
-				{[...ocifNodes.entries()].map(([id, node]) => (
-					<OcifBox
-						key={id}
-						id={id}
-						node={node}
-						selected={selectedNodeId === id}
-						editing={editingNodeId === id}
-						onPointerDown={handleNodePointerDown}
-						onResizeHandleDown={handleResizeHandleDown}
-						onChangeText={handleChangeText}
-						onExitEdit={handleExitEdit}
-					/>
-				))}
-				{drawing && (
+				{[...ocifNodes.entries()].map(([id, node]) =>
+					node.arrow ? (
+						<OcifArrow
+							key={id}
+							id={id}
+							node={node}
+							selected={selectedNodeId === id}
+							interactive={tool === "pointer"}
+							nodes={ocifNodes}
+							onPointerDown={handleNodePointerDown}
+							onEndpointPointerDown={handleArrowEndpointDown}
+						/>
+					) : (
+						<OcifBox
+							key={id}
+							id={id}
+							node={node}
+							selected={selectedNodeId === id}
+							editing={editingNodeId === id}
+							interactive={tool === "pointer"}
+							onPointerDown={handleNodePointerDown}
+							onResizeHandleDown={handleResizeHandleDown}
+							onChangeText={handleChangeText}
+							onExitEdit={handleExitEdit}
+						/>
+					),
+				)}
+				{drawing?.kind === "box" && (
 					<div
 						style={{
 							position: "absolute",
@@ -835,6 +996,30 @@ function App() {
 							zIndex: 9999,
 						}}
 					/>
+				)}
+				{drawing?.kind === "arrow" && (
+					<svg
+						style={{
+							position: "absolute",
+							left: Math.min(drawing.startX, drawing.endX) - 24,
+							top: Math.min(drawing.startY, drawing.endY) - 24,
+							width: Math.abs(drawing.endX - drawing.startX) + 48,
+							height: Math.abs(drawing.endY - drawing.startY) + 48,
+							pointerEvents: "none",
+							zIndex: 9999,
+							overflow: "visible",
+						}}
+					>
+						<line
+							x1={drawing.startX - (Math.min(drawing.startX, drawing.endX) - 24)}
+							y1={drawing.startY - (Math.min(drawing.startY, drawing.endY) - 24)}
+							x2={drawing.endX - (Math.min(drawing.startX, drawing.endX) - 24)}
+							y2={drawing.endY - (Math.min(drawing.startY, drawing.endY) - 24)}
+							stroke="#007aff"
+							strokeWidth={2}
+							strokeDasharray="4 4"
+						/>
+					</svg>
 				)}
 				{visibleWindows.map((win) => {
 					// Lazy-create the renderer so a window appearing in

@@ -57,6 +57,10 @@ pub struct Position {
 /// scalar fields for autosurgeon ergonomics and emit the array at
 /// serialization time. `z` drives stacking order (higher renders
 /// on top). `width` / `height` are OCIF `size`.
+///
+/// At most one shape extension (`rect` / `arrow` / future ovals
+/// etc.) is set per node. `text` is independent — a rect or arrow
+/// can carry an inline text label.
 #[derive(Debug, Clone, Default, Reconcile, Hydrate)]
 pub struct OcifNode {
     pub x: f64,
@@ -64,10 +68,19 @@ pub struct OcifNode {
     pub z: f64,
     pub width: f64,
     pub height: f64,
-    /// `@ocif/rect` extension. Future variants live as siblings:
-    /// `oval: Option<OvalExt>`, `arrow: Option<ArrowExt>`, etc.
-    /// At most one extension shape per node is set today.
+    /// `@ocif/rect` extension.
     pub rect: Option<RectExt>,
+    /// `@ocif/arrow` extension. For free-floating arrows the
+    /// `start_x/y/end_x/y` are the visual endpoints. For connected
+    /// arrows (also carrying `edge`), they're cached but the
+    /// renderer recomputes from the connected nodes' bounds.
+    pub arrow: Option<ArrowExt>,
+    /// `@ocif/edge` extension. Connects two nodes by id —
+    /// canonical OCIF "this is a relation" marker. Combined with
+    /// `arrow` for visual treatment, this gives a directional
+    /// connection that follows the connected boxes when they move
+    /// or resize.
+    pub edge: Option<EdgeExt>,
     /// Inline text content rendered inside the node. OCIF would
     /// normally model this as a referenced resource with a
     /// `text/plain` representation; we inline it on the node for
@@ -83,6 +96,31 @@ pub struct RectExt {
     pub stroke_width: Option<f64>,
     pub stroke_color: Option<String>,
     pub fill_color: Option<String>,
+}
+
+/// `@ocif/arrow` — start / end points (canvas-space coords),
+/// strokeColor, strokeWidth. OCIF also defines startMarker /
+/// endMarker for arrowhead shapes; v1 hardcodes a triangle on the
+/// end and nothing on the start.
+#[derive(Debug, Clone, Default, Reconcile, Hydrate)]
+pub struct ArrowExt {
+    pub start_x: f64,
+    pub start_y: f64,
+    pub end_x: f64,
+    pub end_y: f64,
+    pub stroke_width: Option<f64>,
+    pub stroke_color: Option<String>,
+}
+
+/// `@ocif/edge` — relation between two nodes referenced by id.
+/// `directed = true` means the edge is start → end (rendered as
+/// an arrow from start to end); `false` is undirected. We don't
+/// model OCIF's optional `relation` type yet.
+#[derive(Debug, Clone, Default, Reconcile, Hydrate)]
+pub struct EdgeExt {
+    pub start: String,
+    pub end: String,
+    pub directed: bool,
 }
 
 /// Backend-side state for one workspace doc. Holds the doc itself

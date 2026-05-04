@@ -17,6 +17,12 @@ interface OcifBoxProps {
 	node: OcifNode;
 	selected: boolean;
 	editing: boolean;
+	/** When true (pointer mode) the box intercepts pointerdown to
+	 *  drive select / drag-to-move. When false (box / arrow draw
+	 *  mode) the event bubbles up to the canvas-level handler so a
+	 *  drag gesture can start ON TOP OF the box (e.g., drawing an
+	 *  arrow from one box to another). */
+	interactive: boolean;
 	/** Pointer-down on the box body. App.tsx uses this to drive
 	 *  click-to-select and drag-to-move. */
 	onPointerDown: (id: string, e: React.PointerEvent) => void;
@@ -50,6 +56,7 @@ export function OcifBox({
 	node,
 	selected,
 	editing,
+	interactive,
 	onPointerDown,
 	onResizeHandleDown,
 	onChangeText,
@@ -63,10 +70,15 @@ export function OcifBox({
 				e.stopPropagation();
 				return;
 			}
+			// In box / arrow draw mode, let the event bubble to the
+			// canvas-level handler so a drag-to-create gesture can
+			// start on top of an existing box (drawing an arrow from
+			// box A to box B is the canonical use case).
+			if (!interactive) return;
 			e.stopPropagation();
 			onPointerDown(id, e);
 		},
-		[id, onPointerDown, editing],
+		[id, onPointerDown, editing, interactive],
 	);
 	const fill = node.rect?.fill_color ?? DEFAULT_FILL;
 	const stroke = node.rect?.stroke_color ?? DEFAULT_STROKE;
@@ -98,6 +110,7 @@ export function OcifBox({
 			/>
 			{selected &&
 				!editing &&
+				interactive &&
 				HANDLES.map((h) => (
 					<div
 						key={h}

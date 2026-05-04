@@ -6,7 +6,12 @@ import type {
 	WindowDescriptor,
 	WindowWmState,
 } from "./types";
-import type { OcifNode } from "./workspaceSync";
+import type {
+	ArrowExt,
+	EdgeExt,
+	OcifNode,
+	RectExt,
+} from "./workspaceSync";
 
 interface SyncApi<T extends object> {
 	begin(options?: { immediate?: boolean }): void;
@@ -302,7 +307,11 @@ export function raiseProcess(sidecarId: string, pid: number) {
 /** A single OCIF node row, projected from the per-workspace
  *  Automerge doc. Source of truth is the doc; this collection is a
  *  one-way reactive mirror. Mutations go through `workspaceSync.*`
- *  helpers — never mutate this collection directly. */
+ *  helpers — never mutate this collection directly.
+ *
+ *  Shape extensions (`rect` / `arrow` / future ovals) are kept as
+ *  nested objects rather than flattened — fewer fields to maintain
+ *  per shape and the row becomes near-isomorphic to `OcifNode`. */
 export interface OcifNodeRow {
 	id: string;
 	workspaceId: string;
@@ -313,9 +322,9 @@ export interface OcifNodeRow {
 	width: number;
 	height: number;
 	text: string;
-	fillColor?: string;
-	strokeColor?: string;
-	strokeWidth?: number;
+	rect?: RectExt;
+	arrow?: ArrowExt;
+	edge?: EdgeExt;
 }
 
 const ocifNodes = makeCollection<OcifNodeRow>({
@@ -358,9 +367,9 @@ export function applyOcifNodesSnapshot(
 			width: node.width,
 			height: node.height,
 			text: node.text ?? "",
-			fillColor: node.rect?.fill_color,
-			strokeColor: node.rect?.stroke_color,
-			strokeWidth: node.rect?.stroke_width,
+			rect: node.rect ? { ...node.rect } : undefined,
+			arrow: node.arrow ? { ...node.arrow } : undefined,
+			edge: node.edge ? { ...node.edge } : undefined,
 		};
 		api.write({
 			type: current.has(id) ? "update" : "insert",
