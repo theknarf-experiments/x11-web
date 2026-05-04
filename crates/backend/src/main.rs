@@ -4,7 +4,7 @@ mod rtc;
 mod rtc_codec;
 mod workspace_doc;
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use axum::extract::ws::{Message, WebSocket};
@@ -66,16 +66,12 @@ struct AppState {
     /// as `pixel_buffers`; kept parallel rather than merged so
     /// thumbnails and live frames don't overwrite each other.
     thumbnail_buffers: Arc<RwLock<HashMap<String, HashMap<String, Vec<u8>>>>>,
-    /// Per-workspace set of windows that are attached to its canvas.
-    /// X11-sidecar windows auto-attach on creation; macOS-sidecar
-    /// windows attach only when the user drags a polaroid out of the
-    /// picker. Drives the frontend's canvas render filter.
-    attached_windows: Arc<RwLock<HashMap<String, HashSet<String>>>>,
     /// Reference count of how many workspaces have a given window
-    /// attached. When the count goes 0→1 the backend asks the
-    /// owning sidecar to start live capture; on 1→0 it asks to stop.
-    /// Decoupled from `attached_windows` so multi-workspace attaches
-    /// of the same window don't double-start the SCStream.
+    /// attached. Derived from the global union of every workspace
+    /// doc's `attached_windows`; rebuilt by
+    /// `reconcile_streaming_after_change` after every doc mutation.
+    /// When a window's count goes 0→N the backend tells the owning
+    /// sidecar to start live capture, N→0 stops it.
     streaming_refcount: Arc<RwLock<HashMap<String, usize>>>,
     /// Reverse index window_id → sidecar_id, populated on
     /// `WindowCreated`. Used to route `Start/StopWindowCapture` to
@@ -172,7 +168,6 @@ async fn async_main() {
         display_buffers: Arc::new(RwLock::new(HashMap::new())),
         pixel_buffers: Arc::new(RwLock::new(HashMap::new())),
         thumbnail_buffers: Arc::new(RwLock::new(HashMap::new())),
-        attached_windows: Arc::new(RwLock::new(HashMap::new())),
         streaming_refcount: Arc::new(RwLock::new(HashMap::new())),
         window_owner: Arc::new(RwLock::new(HashMap::new())),
         pending_spawns: Arc::new(RwLock::new(HashMap::new())),
@@ -593,6 +588,10 @@ async fn handle_frontend_ws(socket: WebSocket, state: AppState) {
                 for peer in other_peers {
                     kick_workspace_sync(&state, &peer, &workspace_id).await;
                 }
+                // Frontend-driven attach/detach can change which
+                // windows need live capture — reconcile now that
+                // the doc has caught up with the inbound change.
+                reconcile_streaming_after_change(&state).await;
             }
         });
     }
@@ -724,37 +723,12 @@ async fn handle_frontend_ws(socket: WebSocket, state: AppState) {
                 }
                 let workspace_id = workspace.id.clone();
                 let _ = tx.send(BackendToFrontend::Workspace { workspace });
-                // Kick the Automerge sync handshake. No-op if the
-                // control DC hasn't opened yet — the rtc-task's
-                // control_opened watcher will fire it then instead.
+                // Kick the Automerge sync handshake. The doc's
+                // `attached_windows` and `name` are delivered by
+                // that initial sync — no separate wire messages.
+                // No-op if the control DC hasn't opened yet — the
+                // rtc-task's control_opened watcher fires it then.
                 kick_workspace_sync(&state, &frontend_id, &workspace_id).await;
-                // Send the current attached-window set for the
-                // workspace this frontend just bound to. Any X11
-                // windows that auto-attached before connect appear
-                // here.
-                let window_ids: Vec<String> = state
-                    .attached_windows
-                    .read()
-                    .await
-                    .get(&workspace_id)
-                    .map(|set| set.iter().cloned().collect())
-                    .unwrap_or_default();
-                let _ = tx.send(BackendToFrontend::AttachedWindows {
-                    workspace_id,
-                    window_ids,
-                });
-            }
-            FrontendToBackend::AttachWindow {
-                workspace_id,
-                window_id,
-            } => {
-                attach_window(&state, &workspace_id, &window_id).await;
-            }
-            FrontendToBackend::DetachWindow {
-                workspace_id,
-                window_id,
-            } => {
-                detach_window(&state, &workspace_id, &window_id).await;
             }
             FrontendToBackend::SpawnProcess {
                 request_id,
@@ -962,133 +936,59 @@ async fn on_window_lifecycle_after(
                     None => None,
                 };
                 if let Some(workspace_id) = workspace_id {
-                    attach_window(state, &workspace_id, window_id).await;
+                    backend_attach_window(state, &workspace_id, window_id).await;
                 }
             }
         }
         DisplayUpdate::WindowDestroyed { window_id } => {
-            // Remove from every workspace's attached set; if any
-            // were holding it, broadcast their updated set.
-            let affected_workspaces: Vec<String> = {
-                let mut attached = state.attached_windows.write().await;
-                attached
-                    .iter_mut()
-                    .filter_map(|(ws_id, set)| set.remove(window_id).then(|| ws_id.clone()))
+            // Remove from every workspace's `attached_windows`; for
+            // each that changed, fan the doc mutation out so peers
+            // see the disappearance. Then reconcile streaming so the
+            // sidecar gets a `StopWindowCapture` if this was the
+            // last attach.
+            let affected: Vec<String> = {
+                let mut docs = state.workspace_docs.write().await;
+                docs.iter_mut()
+                    .filter_map(|(ws_id, entry)| {
+                        entry.detach(window_id).then(|| ws_id.clone())
+                    })
                     .collect()
             };
-            for ws_id in affected_workspaces {
-                broadcast_attached_windows(state, &ws_id).await;
+            for ws_id in &affected {
+                fan_out_workspace_sync(state, ws_id).await;
             }
-            state.streaming_refcount.write().await.remove(window_id);
+            reconcile_streaming_after_change(state).await;
             state.window_owner.write().await.remove(window_id);
         }
         _ => {}
     }
 }
 
-/// Add `window_id` to `workspace_id`'s attached set. Refcount-inc
-/// the streaming map; on 0→1, send `StartWindowCapture` to the
-/// owning sidecar (no-op for X11 sidecars, which stream
-/// unconditionally and ignore the message). Broadcasts the updated
-/// attached set to all frontends.
-async fn attach_window(state: &AppState, workspace_id: &str, window_id: &str) {
-    let already = {
-        let mut attached = state.attached_windows.write().await;
-        !attached
-            .entry(workspace_id.to_string())
-            .or_default()
-            .insert(window_id.to_string())
+/// Backend-side attach: mutate `workspace_id`'s doc to add
+/// `window_id` to its `attached_windows`, fan the change out to all
+/// connected peers, and reconcile streaming refcount. Used by X11
+/// auto-attach on `WindowCreated`. Frontend-side attaches arrive as
+/// inbound sync messages and never call this directly.
+async fn backend_attach_window(state: &AppState, workspace_id: &str, window_id: &str) {
+    let changed = {
+        let mut docs = state.workspace_docs.write().await;
+        let Some(entry) = docs.get_mut(workspace_id) else {
+            warn!("backend_attach_window: no doc for workspace {workspace_id}");
+            return;
+        };
+        entry.attach(window_id)
     };
-    if already {
+    if !changed {
         return;
     }
-    let started = {
-        let mut rc = state.streaming_refcount.write().await;
-        let entry = rc.entry(window_id.to_string()).or_insert(0);
-        *entry += 1;
-        *entry == 1
-    };
-    if started {
-        if let Some(owner_sidecar) = state.window_owner.read().await.get(window_id).cloned() {
-            send_to_sidecar(
-                state,
-                &owner_sidecar,
-                BackendToSidecar::StartWindowCapture {
-                    window_id: window_id.to_string(),
-                },
-            )
-            .await;
-        }
-    }
-    broadcast_attached_windows(state, workspace_id).await;
-}
-
-/// Remove `window_id` from `workspace_id`'s attached set. Refcount-
-/// dec the streaming map; on 1→0, send `StopWindowCapture` to the
-/// owning sidecar.
-async fn detach_window(state: &AppState, workspace_id: &str, window_id: &str) {
-    let was_present = {
-        let mut attached = state.attached_windows.write().await;
-        attached
-            .get_mut(workspace_id)
-            .map(|set| set.remove(window_id))
-            .unwrap_or(false)
-    };
-    if !was_present {
-        return;
-    }
-    let stopped = {
-        let mut rc = state.streaming_refcount.write().await;
-        match rc.get_mut(window_id) {
-            Some(n) if *n > 0 => {
-                *n -= 1;
-                if *n == 0 {
-                    rc.remove(window_id);
-                    true
-                } else {
-                    false
-                }
-            }
-            _ => false,
-        }
-    };
-    if stopped {
-        if let Some(owner_sidecar) = state.window_owner.read().await.get(window_id).cloned() {
-            send_to_sidecar(
-                state,
-                &owner_sidecar,
-                BackendToSidecar::StopWindowCapture {
-                    window_id: window_id.to_string(),
-                },
-            )
-            .await;
-        }
-    }
-    broadcast_attached_windows(state, workspace_id).await;
+    fan_out_workspace_sync(state, workspace_id).await;
+    reconcile_streaming_after_change(state).await;
 }
 
 async fn send_to_sidecar(state: &AppState, sidecar_id: &str, msg: BackendToSidecar) {
     if let Some(sc) = state.sidecars.read().await.get(sidecar_id) {
         let _ = sc.tx.send(msg);
     }
-}
-
-async fn broadcast_attached_windows(state: &AppState, workspace_id: &str) {
-    let window_ids: Vec<String> = state
-        .attached_windows
-        .read()
-        .await
-        .get(workspace_id)
-        .map(|set| set.iter().cloned().collect())
-        .unwrap_or_default();
-    broadcast_to_frontends(
-        state,
-        BackendToFrontend::AttachedWindows {
-            workspace_id: workspace_id.to_string(),
-            window_ids,
-        },
-    )
-    .await;
 }
 
 async fn open_or_create_workspace(state: &AppState, requested_id: Option<String>) -> Workspace {
@@ -1117,6 +1017,92 @@ async fn open_or_create_workspace(state: &AppState, requested_id: Option<String>
         .entry(id)
         .or_insert_with(|| workspace_doc::WorkspaceEntry::new(&name));
     workspace
+}
+
+/// Fan a backend-side mutation out to every peer that's already
+/// done at least one sync round for this workspace. Newly-connected
+/// peers don't need this — their first sync via the OpenWorkspace
+/// handler picks up whatever's in the doc at that point.
+async fn fan_out_workspace_sync(state: &AppState, workspace_id: &str) {
+    let peers = {
+        let docs = state.workspace_docs.read().await;
+        docs.get(workspace_id)
+            .map(|e| e.peers())
+            .unwrap_or_default()
+    };
+    for peer in peers {
+        kick_workspace_sync(state, &peer, workspace_id).await;
+    }
+}
+
+/// Recompute the global per-window attach refcount from the union of
+/// every workspace doc's `attached_windows`, diff against the cached
+/// `streaming_refcount`, and drive `Start/StopWindowCapture` on the
+/// owning sidecar for each transition. Idempotent — call after every
+/// mutation that could change attached state (incoming sync,
+/// backend-side attach/detach, window destroy).
+async fn reconcile_streaming_after_change(state: &AppState) {
+    use std::collections::HashMap;
+    let new_counts: HashMap<String, usize> = {
+        let docs = state.workspace_docs.read().await;
+        let mut counts: HashMap<String, usize> = HashMap::new();
+        for entry in docs.values() {
+            for window_id in entry.attached_window_ids() {
+                *counts.entry(window_id).or_insert(0) += 1;
+            }
+        }
+        counts
+    };
+    let (starts, stops) = {
+        let mut rc = state.streaming_refcount.write().await;
+        let mut starts: Vec<String> = Vec::new();
+        let mut stops: Vec<String> = Vec::new();
+        for (window_id, old) in rc.iter() {
+            let new = new_counts.get(window_id).copied().unwrap_or(0);
+            if *old > 0 && new == 0 {
+                stops.push(window_id.clone());
+            }
+        }
+        for (window_id, new) in &new_counts {
+            let old = rc.get(window_id).copied().unwrap_or(0);
+            if old == 0 && *new > 0 {
+                starts.push(window_id.clone());
+            }
+        }
+        // Drop zero-count entries so the map only holds active windows.
+        rc.clear();
+        for (k, v) in new_counts {
+            if v > 0 {
+                rc.insert(k, v);
+            }
+        }
+        (starts, stops)
+    };
+    let owners = state.window_owner.read().await.clone();
+    for window_id in starts {
+        if let Some(sidecar_id) = owners.get(&window_id) {
+            send_to_sidecar(
+                state,
+                sidecar_id,
+                BackendToSidecar::StartWindowCapture {
+                    window_id: window_id.clone(),
+                },
+            )
+            .await;
+        }
+    }
+    for window_id in stops {
+        if let Some(sidecar_id) = owners.get(&window_id) {
+            send_to_sidecar(
+                state,
+                sidecar_id,
+                BackendToSidecar::StopWindowCapture {
+                    window_id: window_id.clone(),
+                },
+            )
+            .await;
+        }
+    }
 }
 
 /// Drive a sync round for one (frontend, workspace) pair. Generates

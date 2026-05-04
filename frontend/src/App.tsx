@@ -24,7 +24,11 @@ import type {
 	MenuAction,
 	WindowWmState,
 } from "./types";
-import { useBackendSocket, useWorkspaceName } from "./useBackendSocket";
+import {
+	useAttachedWindowIds,
+	useBackendSocket,
+	useWorkspaceName,
+} from "./useBackendSocket";
 import { WindowFrame } from "./WindowFrame";
 
 let requestCounter = 0;
@@ -72,17 +76,19 @@ function App() {
 	const {
 		connected,
 		activeWorkspace,
-		attachedWindowIds,
 		send,
 		onWindowUpdate,
 		onBell,
 		onDataChannelMessage,
 		setWorkspaceName,
+		attachWindowToWorkspace,
+		detachWindowFromWorkspace,
 		diagnostics,
 		dismissDiagnostic,
 		clearDiagnostics,
 	} = useBackendSocket();
 	const workspaceName = useWorkspaceName(activeWorkspace?.id ?? null);
+	const attachedWindowIds = useAttachedWindowIds(activeWorkspace?.id ?? null);
 
 	const { data: processes = [] } = useLiveQuery((q) =>
 		q.from({ p: processesCollection }).select(({ p }) => p),
@@ -567,11 +573,7 @@ function App() {
 						"application/x-x11web-window-id",
 					);
 					if (!windowId || !activeWorkspace) return;
-					send({
-						type: "AttachWindow",
-						workspace_id: activeWorkspace.id,
-						window_id: windowId,
-					});
+					attachWindowToWorkspace(activeWorkspace.id, windowId);
 					// Drop the new WindowFrame at the cursor's canvas
 					// coordinate. Two-phase update: patch the local
 					// row immediately so the WindowFrame mounts at

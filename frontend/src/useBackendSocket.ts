@@ -18,6 +18,9 @@ import { Reassembler } from "./rtcReassembler";
 import { decodeFrame, encodeWorkspaceSync } from "./rtcWire";
 import {
 	applyInbound,
+	attachWindow as attachWindowDoc,
+	detachWindow as detachWindowDoc,
+	getAttachedWindowIds,
 	getName as getWorkspaceName,
 	setControlChannel,
 	setName as setWorkspaceName,
@@ -159,12 +162,6 @@ export function useBackendSocket() {
 	const sendRef = useRef<(msg: FrontendToBackend) => void>(() => {});
 	const [connected, setConnected] = useState(false);
 	const [activeWorkspace, setActiveWorkspace] = useState<Workspace | null>(null);
-	/// Window IDs attached to `activeWorkspace`'s canvas. The backend
-	/// pushes a fresh snapshot via `AttachedWindows` whenever the set
-	/// changes; we ignore snapshots for other workspaces.
-	const [attachedWindowIds, setAttachedWindowIds] = useState<Set<string>>(
-		() => new Set(),
-	);
 	const activeWorkspaceIdRef = useRef<string | null>(null);
 	const [diagnostics, setDiagnostics] = useState<Diagnostic[]>([]);
 
@@ -355,16 +352,6 @@ export function useBackendSocket() {
 						}
 						break;
 					}
-					case "AttachedWindows": {
-						// Only act on snapshots for our bound workspace —
-						// the backend broadcasts to all frontends rather
-						// than per-recipient filtering.
-						if (msg.workspace_id !== activeWorkspaceIdRef.current) {
-							break;
-						}
-						setAttachedWindowIds(new Set(msg.window_ids));
-						break;
-					}
 					case "ProcessList":
 						replaceSidecarProcesses(msg.sidecar_id, msg.processes);
 						break;
@@ -474,12 +461,13 @@ export function useBackendSocket() {
 	return {
 		connected,
 		activeWorkspace,
-		attachedWindowIds,
 		send,
 		onWindowUpdate,
 		onBell,
 		onDataChannelMessage,
 		setWorkspaceName,
+		attachWindowToWorkspace: attachWindowDoc,
+		detachWindowFromWorkspace: detachWindowDoc,
 		diagnostics,
 		dismissDiagnostic,
 		clearDiagnostics,
@@ -503,4 +491,28 @@ export function useWorkspaceName(workspaceId: string | null): string | null {
 		[workspaceId],
 	);
 	return useSyncExternalStore(subscribe, getSnapshot);
+}
+
+/** Reactive read of the workspace's attached-window set. Returns a
+ *  fresh `Set<string>` each render; useEffect-listener pattern
+ *  rather than `useSyncExternalStore` because Set lacks the
+ *  referential stability that store would require. The set is small
+ *  (a handful of windows) so allocating per-update is fine. */
+export function useAttachedWindowIds(
+	workspaceId: string | null,
+): Set<string> {
+	const [snap, setSnap] = useState<Set<string>>(() =>
+		workspaceId ? getAttachedWindowIds(workspaceId) : new Set(),
+	);
+	useEffect(() => {
+		if (!workspaceId) {
+			setSnap(new Set());
+			return;
+		}
+		setSnap(getAttachedWindowIds(workspaceId));
+		return subscribeWorkspace(workspaceId, () => {
+			setSnap(getAttachedWindowIds(workspaceId));
+		});
+	}, [workspaceId]);
+	return snap;
 }

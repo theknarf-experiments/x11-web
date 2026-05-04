@@ -143,6 +143,43 @@ export function setName(workspaceId: string, name: string) {
 	ship(workspaceId, drainOutbound(entry));
 }
 
+/** Read the set of window ids currently attached to the workspace.
+ *  Returns a fresh `Set` each call — pair with `subscribe` (or the
+ *  `useAttachedWindowIds` hook) to know when to re-read. */
+export function getAttachedWindowIds(workspaceId: string): Set<string> {
+	const entry = docs.get(workspaceId);
+	if (!entry) return new Set();
+	const map = entry.doc.attached_windows as
+		| { [k: string]: boolean }
+		| undefined;
+	return new Set(Object.keys(map ?? {}));
+}
+
+/** Add `windowId` to the workspace's attached set (drag-attach from
+ *  the picker). Local doc mutation; backend learns about it via the
+ *  next sync round and runs `Start/StopWindowCapture` if needed. */
+export function attachWindow(workspaceId: string, windowId: string) {
+	const entry = ensure(workspaceId);
+	if ((entry.doc.attached_windows ?? {})[windowId]) return;
+	entry.doc = Automerge.change(entry.doc, (d) => {
+		if (!d.attached_windows) d.attached_windows = {};
+		d.attached_windows[windowId] = true;
+	});
+	notify(workspaceId);
+	ship(workspaceId, drainOutbound(entry));
+}
+
+/** Remove `windowId` from the workspace's attached set. */
+export function detachWindow(workspaceId: string, windowId: string) {
+	const entry = ensure(workspaceId);
+	if (!(entry.doc.attached_windows ?? {})[windowId]) return;
+	entry.doc = Automerge.change(entry.doc, (d) => {
+		if (d.attached_windows) delete d.attached_windows[windowId];
+	});
+	notify(workspaceId);
+	ship(workspaceId, drainOutbound(entry));
+}
+
 /** Drop our local doc + sync state for a workspace. Currently
  *  unused; we'll call this if a frontend ever switches workspaces
  *  mid-session. */

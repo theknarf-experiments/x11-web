@@ -24,7 +24,8 @@
 use std::collections::HashMap;
 
 use automerge::sync::{State as SyncState, SyncDoc};
-use automerge::AutoCommit;
+use automerge::transaction::Transactable;
+use automerge::{AutoCommit, ObjType, ReadDoc, ROOT};
 use autosurgeon::{hydrate, reconcile, Hydrate, Reconcile};
 
 #[derive(Debug, Clone, Default, Reconcile, Hydrate)]
@@ -111,11 +112,126 @@ impl WorkspaceEntry {
     pub fn forget_peer(&mut self, peer_id: &str) {
         self.peer_states.remove(peer_id);
     }
+
+    /// Peers we've ever exchanged a sync message with for this
+    /// workspace. Caller fans out backend-side mutations to all of
+    /// them — newly-connected peers start their first sync via the
+    /// OpenWorkspace handler instead.
+    pub fn peers(&self) -> Vec<String> {
+        self.peer_states.keys().cloned().collect()
+    }
+
+    /// Add `window_id` to `attached_windows` (the doc's set). Returns
+    /// `true` if the set actually changed. Used by backend-side
+    /// mutations (X11 auto-attach on `WindowCreated`); frontend-side
+    /// attaches arrive as inbound sync messages and never call this.
+    pub fn attach(&mut self, window_id: &str) -> bool {
+        let attached = match self.doc.get(ROOT, "attached_windows").ok().flatten() {
+            Some((automerge::Value::Object(ObjType::Map), id)) => id,
+            _ => match self.doc.put_object(ROOT, "attached_windows", ObjType::Map) {
+                Ok(id) => id,
+                Err(_) => return false,
+            },
+        };
+        if self.doc.get(&attached, window_id).ok().flatten().is_some() {
+            return false;
+        }
+        self.doc.put(&attached, window_id, true).is_ok()
+    }
+
+    /// Remove `window_id` from `attached_windows`. Returns `true` if
+    /// the entry was present (and is now gone). Used on
+    /// `WindowDestroyed` cleanup.
+    pub fn detach(&mut self, window_id: &str) -> bool {
+        let attached = match self.doc.get(ROOT, "attached_windows").ok().flatten() {
+            Some((automerge::Value::Object(ObjType::Map), id)) => id,
+            _ => return false,
+        };
+        if self.doc.get(&attached, window_id).ok().flatten().is_none() {
+            return false;
+        }
+        self.doc.delete(&attached, window_id).is_ok()
+    }
+
+    /// Iterate the currently-attached window ids. Used by
+    /// `reconcile_streaming_after_change` to compute the global
+    /// refcount across every workspace.
+    pub fn attached_window_ids(&self) -> Vec<String> {
+        match self.doc.get(ROOT, "attached_windows").ok().flatten() {
+            Some((automerge::Value::Object(ObjType::Map), id)) => {
+                self.doc.keys(&id).collect()
+            }
+            _ => Vec::new(),
+        }
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn attach_detach_idempotent_and_visible_to_peers() {
+        let mut backend = WorkspaceEntry::new("Workspace 1");
+        assert!(backend.attach("win-a"));
+        // Second attach is a no-op.
+        assert!(!backend.attach("win-a"));
+        assert!(backend.attach("win-b"));
+
+        // Sync to a peer and verify both windows arrive.
+        let mut peer_doc = AutoCommit::new();
+        let mut peer_state = SyncState::new();
+        for _ in 0..32 {
+            let to_peer = backend.generate_sync("p");
+            let from_peer = peer_doc
+                .sync()
+                .generate_sync_message(&mut peer_state)
+                .map(|m| m.encode());
+            if to_peer.is_none() && from_peer.is_none() {
+                break;
+            }
+            if let Some(b) = to_peer {
+                let m = automerge::sync::Message::decode(&b).unwrap();
+                peer_doc
+                    .sync()
+                    .receive_sync_message(&mut peer_state, m)
+                    .unwrap();
+            }
+            if let Some(b) = from_peer {
+                backend.receive_sync("p", &b).unwrap();
+            }
+        }
+        let view: WorkspaceDoc = hydrate(&peer_doc).unwrap();
+        assert!(view.attached_windows.contains_key("win-a"));
+        assert!(view.attached_windows.contains_key("win-b"));
+
+        // Detach + sync — windows disappear.
+        assert!(backend.detach("win-a"));
+        assert!(!backend.detach("win-a")); // idempotent
+        for _ in 0..32 {
+            let to_peer = backend.generate_sync("p");
+            let from_peer = peer_doc
+                .sync()
+                .generate_sync_message(&mut peer_state)
+                .map(|m| m.encode());
+            if to_peer.is_none() && from_peer.is_none() {
+                break;
+            }
+            if let Some(b) = to_peer {
+                let m = automerge::sync::Message::decode(&b).unwrap();
+                peer_doc
+                    .sync()
+                    .receive_sync_message(&mut peer_state, m)
+                    .unwrap();
+            }
+            if let Some(b) = from_peer {
+                backend.receive_sync("p", &b).unwrap();
+            }
+        }
+        let view2: WorkspaceDoc = hydrate(&peer_doc).unwrap();
+        assert!(!view2.attached_windows.contains_key("win-a"));
+        assert!(view2.attached_windows.contains_key("win-b"));
+    }
 
     #[test]
     fn two_peers_converge_on_initial_state() {

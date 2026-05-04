@@ -34,16 +34,6 @@ pub enum BackendToFrontend {
     /// created a fresh workspace if the requested id wasn't found
     /// (e.g. after a backend restart).
     Workspace { workspace: Workspace },
-    /// Authoritative set of windows currently attached to a
-    /// workspace's canvas. Replace-snapshot semantics — the frontend
-    /// reconciles against the full list rather than tracking deltas.
-    /// Frontends only act on entries whose `workspace_id` matches
-    /// their bound workspace; the backend broadcasts to all
-    /// frontends rather than per-recipient filtering.
-    AttachedWindows {
-        workspace_id: String,
-        window_ids: Vec<String>,
-    },
     /// Response to a spawn/kill command.
     CommandResult {
         request_id: String,
@@ -99,24 +89,6 @@ pub enum FrontendToBackend {
     /// wait for the `Workspace` reply before driving the canvas, and
     /// should reflect the returned id in its URL hash.
     OpenWorkspace { id: Option<String> },
-    /// Add a window to a workspace's canvas. macOS-sidecar windows
-    /// are detached by default and only become canvas-visible when
-    /// the user drags a polaroid out of the picker; this fires the
-    /// drop. The backend updates its per-workspace `attached_windows`
-    /// table, refcounts a `streaming_windows` table, asks the owning
-    /// sidecar to start live capture if this is the first attach for
-    /// that window, and broadcasts the updated `AttachedWindows`.
-    AttachWindow {
-        workspace_id: String,
-        window_id: String,
-    },
-    /// Remove a window from a workspace's canvas. Mirror of
-    /// `AttachWindow`. When the streaming refcount hits zero the
-    /// backend asks the sidecar to stop live capture.
-    DetachWindow {
-        workspace_id: String,
-        window_id: String,
-    },
     /// Spawn a process on a specific sidecar. `workspace_id` is the
     /// frontend's active workspace; the backend remembers it so any
     /// X11 windows the spawned process opens auto-attach only to
