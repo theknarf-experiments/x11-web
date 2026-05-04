@@ -9,6 +9,7 @@ import {
 	windowsCollection,
 } from "./db";
 import { Reassembler } from "./rtcReassembler";
+import { decodeFrame, encodeWorkspaceSync } from "./rtcWire";
 import type {
 	BackendToFrontend,
 	FrontendToBackend,
@@ -141,6 +142,7 @@ export function useBackendSocket() {
 	const dcMessageCallbackRef = useRef<DataChannelMessageCallback | null>(null);
 	const peerConnectionRef = useRef<RTCPeerConnection | null>(null);
 	const dataChannelRef = useRef<RTCDataChannel | null>(null);
+	const controlChannelRef = useRef<RTCDataChannel | null>(null);
 	const sendRef = useRef<(msg: FrontendToBackend) => void>(() => {});
 	const [connected, setConnected] = useState(false);
 	const [activeWorkspace, setActiveWorkspace] = useState<Workspace | null>(null);
@@ -225,6 +227,48 @@ export function useBackendSocket() {
 				const chunk = new Uint8Array(e.data as ArrayBuffer);
 				const payload = reassembler.onChunk(chunk);
 				if (payload) dcMessageCallbackRef.current?.(payload);
+			};
+
+			// Ordered + reliable: workspace Automerge sync messages
+			// and any other loss-intolerant control traffic. No
+			// chunking — messages stay under the SCTP single-message
+			// limit (sync messages are a few hundred bytes to a few
+			// KB at our scale).
+			const controlDc = pc.createDataChannel("control");
+			controlChannelRef.current = controlDc;
+			controlDc.binaryType = "arraybuffer";
+			controlDc.onopen = () => {
+				pushDiagnostic({
+					level: "info",
+					source: "ws",
+					message: "control DC open",
+				});
+				// Slice 1a hello — once the channel is up, send a
+				// frame back so the backend log shows both
+				// directions of the round-trip. Replaced in 1b by
+				// the real Automerge sync handshake.
+				const hello = encodeWorkspaceSync(
+					"hello-test",
+					new TextEncoder().encode("hello-from-frontend"),
+				);
+				controlDc.send(hello);
+			};
+			controlDc.onclose = () =>
+				pushDiagnostic({
+					level: "warn",
+					source: "ws",
+					message: "control DC closed",
+				});
+			controlDc.onmessage = (e) => {
+				const bytes = new Uint8Array(e.data as ArrayBuffer);
+				const frame = decodeFrame(bytes);
+				if (frame?.kind === "workspaceSync") {
+					console.log(
+						"control inbound:",
+						frame.workspaceId,
+						new TextDecoder().decode(frame.message),
+					);
+				}
 			};
 
 			pc.createOffer()
@@ -390,6 +434,8 @@ export function useBackendSocket() {
 			}
 			dataChannelRef.current?.close();
 			dataChannelRef.current = null;
+			controlChannelRef.current?.close();
+			controlChannelRef.current = null;
 			peerConnectionRef.current?.close();
 			peerConnectionRef.current = null;
 		};

@@ -31,15 +31,24 @@ pub struct RtcConn {
     /// SDP offers + remote ICE candidates received from the browser
     /// over the WebSocket; forwarded into `Rtc`.
     pub signal_tx: mpsc::UnboundedSender<RtcSignal>,
-    /// Bytes to write into the DataChannel. Dropped silently if the
-    /// channel isn't open yet — callers should gate on `dc_open`.
+    /// Bytes to write into the media DataChannel ("putimage", unordered+
+    /// unreliable). Dropped silently if the channel isn't open yet —
+    /// callers should gate on `dc_open`.
     pub dc_tx: mpsc::UnboundedSender<Vec<u8>>,
-    /// True iff the DC has been opened by the peer at least once and
-    /// hasn't closed since.
+    /// True iff the media DC has been opened by the peer at least once
+    /// and hasn't closed since.
     pub dc_open: Arc<AtomicBool>,
-    /// Pulsed once on the DC's first open. Replay tasks await this
-    /// to know when it's safe to start sending bytes via `dc_tx`.
+    /// Pulsed once on the media DC's first open. Replay tasks await
+    /// this to know when it's safe to start sending bytes via `dc_tx`.
     pub dc_opened: Arc<Notify>,
+    /// Bytes to write into the control DataChannel ("control",
+    /// ordered+reliable). Used for Automerge sync and any other
+    /// loss-intolerant traffic. Same caveat as `dc_tx` — gate on
+    /// `control_open`.
+    pub control_tx: mpsc::UnboundedSender<Vec<u8>>,
+    #[allow(dead_code)] // read in slice 1b (workspace-sync gating)
+    pub control_open: Arc<AtomicBool>,
+    pub control_opened: Arc<Notify>,
 }
 
 #[derive(Debug)]
@@ -53,14 +62,25 @@ pub enum RtcSignal {
 }
 
 /// Spawns the driver task and returns a handle. The task lives until
-/// any of its channels close.
-pub fn spawn(frontend_id: String, ws_tx: mpsc::UnboundedSender<BackendToFrontend>) -> RtcConn {
+/// any of its channels close. `control_inbound_tx` receives raw bytes
+/// from the control DC — caller is responsible for decoding and
+/// dispatching (e.g., to a workspace-sync handler).
+pub fn spawn(
+    frontend_id: String,
+    ws_tx: mpsc::UnboundedSender<BackendToFrontend>,
+    control_inbound_tx: mpsc::UnboundedSender<Vec<u8>>,
+) -> RtcConn {
     let (signal_tx, signal_rx) = mpsc::unbounded_channel::<RtcSignal>();
     let (dc_tx, dc_rx) = mpsc::unbounded_channel::<Vec<u8>>();
+    let (control_tx, control_rx) = mpsc::unbounded_channel::<Vec<u8>>();
     let dc_open = Arc::new(AtomicBool::new(false));
     let dc_opened = Arc::new(Notify::new());
+    let control_open = Arc::new(AtomicBool::new(false));
+    let control_opened = Arc::new(Notify::new());
     let dc_open_for_task = dc_open.clone();
     let dc_opened_for_task = dc_opened.clone();
+    let control_open_for_task = control_open.clone();
+    let control_opened_for_task = control_opened.clone();
 
     tokio::spawn(async move {
         if let Err(e) = drive(
@@ -68,8 +88,12 @@ pub fn spawn(frontend_id: String, ws_tx: mpsc::UnboundedSender<BackendToFrontend
             ws_tx,
             signal_rx,
             dc_rx,
+            control_rx,
+            control_inbound_tx,
             dc_open_for_task,
             dc_opened_for_task,
+            control_open_for_task,
+            control_opened_for_task,
         )
         .await
         {
@@ -82,16 +106,24 @@ pub fn spawn(frontend_id: String, ws_tx: mpsc::UnboundedSender<BackendToFrontend
         dc_tx,
         dc_open,
         dc_opened,
+        control_tx,
+        control_open,
+        control_opened,
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn drive(
     frontend_id: String,
     ws_tx: mpsc::UnboundedSender<BackendToFrontend>,
     mut signal_rx: mpsc::UnboundedReceiver<RtcSignal>,
     mut dc_rx: mpsc::UnboundedReceiver<Vec<u8>>,
+    mut control_rx: mpsc::UnboundedReceiver<Vec<u8>>,
+    control_inbound_tx: mpsc::UnboundedSender<Vec<u8>>,
     dc_open: Arc<AtomicBool>,
     dc_opened: Arc<Notify>,
+    control_open: Arc<AtomicBool>,
+    control_opened: Arc<Notify>,
 ) -> Result<(), String> {
     // Bind / public address are env-configurable so the same binary
     // works on the host (mprocs / dev) and inside Docker (e2e):
@@ -148,7 +180,11 @@ async fn drive(
         }
     };
 
-    let mut channel_id: Option<ChannelId> = None;
+    // Two channels, dispatched by label. The browser-side
+    // `pc.createDataChannel` calls determine the labels; we just
+    // route inbound/outbound by what we see on `ChannelOpen`.
+    let mut media_channel_id: Option<ChannelId> = None;
+    let mut control_channel_id: Option<ChannelId> = None;
     let mut buf = vec![0u8; 2000];
     let mut chunker = Chunker::new();
     // Backpressure queue. New PutImage frames REPLACE the queue
@@ -163,7 +199,7 @@ async fn drive(
         // Drain pending chunks while str0m has buffer room. We do this
         // at the top of every loop iteration AND on
         // `ChannelBufferedAmountLow` so writes flow continuously.
-        drain_pending(&mut rtc, channel_id, &mut pending, &frontend_id);
+        drain_pending(&mut rtc, media_channel_id, &mut pending, &frontend_id);
 
         // Drain non-blocking output before parking on input. Each
         // iteration of this inner loop processes one Output; when we
@@ -179,26 +215,53 @@ async fn drive(
                 Output::Event(event) => match event {
                     Event::ChannelOpen(id, label) => {
                         info!(%frontend_id, %label, "DC open");
-                        channel_id = Some(id);
-                        if let Some(mut ch) = rtc.channel(id) {
-                            ch.set_buffered_amount_low_threshold(LOW_THRESHOLD);
+                        match label.as_str() {
+                            "control" => {
+                                control_channel_id = Some(id);
+                                control_open.store(true, Ordering::Release);
+                                control_opened.notify_waiters();
+                            }
+                            // Default to media for any other label
+                            // (currently "putimage"). Keeps backward
+                            // compatibility if the browser-side label
+                            // ever changes.
+                            _ => {
+                                media_channel_id = Some(id);
+                                if let Some(mut ch) = rtc.channel(id) {
+                                    ch.set_buffered_amount_low_threshold(LOW_THRESHOLD);
+                                }
+                                dc_open.store(true, Ordering::Release);
+                                dc_opened.notify_waiters();
+                            }
                         }
-                        dc_open.store(true, Ordering::Release);
-                        dc_opened.notify_waiters();
                     }
                     Event::ChannelClose(id) => {
-                        if Some(id) == channel_id {
-                            info!(%frontend_id, "DC close");
-                            channel_id = None;
+                        if Some(id) == media_channel_id {
+                            info!(%frontend_id, "media DC close");
+                            media_channel_id = None;
                             pending.clear();
                             dc_open.store(false, Ordering::Release);
+                        } else if Some(id) == control_channel_id {
+                            info!(%frontend_id, "control DC close");
+                            control_channel_id = None;
+                            control_open.store(false, Ordering::Release);
                         }
                     }
                     Event::ChannelData(d) => {
-                        debug!(%frontend_id, "DC inbound ({} bytes) — ignoring", d.data.len());
+                        if Some(d.id) == control_channel_id {
+                            // Control channel is loss-intolerant —
+                            // forward verbatim to whoever owns the
+                            // inbound rx. Data is the raw capnp Frame
+                            // bytes; decoding lives upstream.
+                            if control_inbound_tx.send(d.data).is_err() {
+                                debug!(%frontend_id, "control inbound rx dropped");
+                            }
+                        } else {
+                            debug!(%frontend_id, "media DC inbound ({} bytes) — ignoring", d.data.len());
+                        }
                     }
                     Event::ChannelBufferedAmountLow(_) => {
-                        drain_pending(&mut rtc, channel_id, &mut pending, &frontend_id);
+                        drain_pending(&mut rtc, media_channel_id, &mut pending, &frontend_id);
                     }
                     Event::IceConnectionStateChange(state) => {
                         debug!(%frontend_id, ?state, "ICE state");
@@ -260,7 +323,7 @@ async fn drive(
                 while let Ok(next) = dc_rx.try_recv() {
                     latest = next;
                 }
-                if channel_id.is_some() {
+                if media_channel_id.is_some() {
                     // Latest-frame-wins. If the previous frame's
                     // chunks haven't all drained yet, drop them — they
                     // would only produce a stale image. The chunker's
@@ -271,6 +334,23 @@ async fn drive(
                     for chunk in chunker.chunk(&latest) {
                         pending.push_back(chunk);
                     }
+                }
+            }
+            Some(data) = control_rx.recv() => {
+                // Control channel is reliable+ordered. No chunking,
+                // no latest-wins — every message must arrive intact.
+                // We trust the upstream layer not to ship messages
+                // bigger than the SCTP single-message limit (~64KB
+                // on most browsers). Automerge sync messages are
+                // typically a few hundred bytes to a few KB.
+                if let Some(id) = control_channel_id {
+                    if let Some(mut ch) = rtc.channel(id) {
+                        if let Err(e) = ch.write(true, &data) {
+                            warn!(%frontend_id, "control DC write: {e}");
+                        }
+                    }
+                } else {
+                    debug!(%frontend_id, "control bytes dropped — DC not open");
                 }
             }
             else => break,
@@ -288,14 +368,16 @@ async fn drive(
 /// Push as many queued chunks as str0m's SCTP buffer accepts. Stops
 /// on the first `Ok(false)` (buffer full) and waits for
 /// `ChannelBufferedAmountLow` to retry. Called at the top of every
-/// loop iteration plus on the buffered-low event.
+/// loop iteration plus on the buffered-low event. Operates on the
+/// media channel only — the control channel writes are individually
+/// addressed and never queued.
 fn drain_pending(
     rtc: &mut Rtc,
-    channel_id: Option<ChannelId>,
+    media_channel_id: Option<ChannelId>,
     pending: &mut VecDeque<Vec<u8>>,
     frontend_id: &str,
 ) {
-    let Some(id) = channel_id else { return };
+    let Some(id) = media_channel_id else { return };
     while let Some(chunk) = pending.front() {
         let Some(mut ch) = rtc.channel(id) else {
             return;

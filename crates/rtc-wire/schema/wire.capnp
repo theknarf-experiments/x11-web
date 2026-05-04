@@ -26,6 +26,14 @@ struct Frame {
         # always represent the full window. WebP-encoded; frontend
         # decodes via createImageBitmap.
         windowThumbnail @2 :WindowThumbnail;
+
+        # Symmetric Automerge sync message for a workspace doc.
+        # Carried over the dedicated control DataChannel
+        # (ordered+reliable). Same shape both directions — peers
+        # exchange these in rounds until they have nothing more to
+        # send. The `message` is the raw output of
+        # `automerge::sync::Message::encode`; opaque to this layer.
+        workspaceSync @3 :WorkspaceSync;
     }
 }
 
@@ -43,4 +51,9 @@ struct WindowThumbnail {
     width @1 :UInt16;
     height @2 :UInt16;
     data @3 :Data;
+}
+
+struct WorkspaceSync {
+    workspaceId @0 :Text;
+    message @1 :Data;
 }

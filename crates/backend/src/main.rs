@@ -526,7 +526,55 @@ async fn handle_frontend_ws(socket: WebSocket, state: AppState) {
     // Spawn the per-frontend WebRTC driver. The DC isn't usable
     // until the browser sends an offer over the WS, but the task is
     // ready to receive signalling immediately.
-    let rtc = rtc::spawn(frontend_id.clone(), tx.clone());
+    //
+    // `control_inbound_tx` carries raw bytes received on the control
+    // DC. The handler task below decodes the capnp Frame and
+    // dispatches by variant — currently just logging for the slice
+    // 1a hello round-trip, future Automerge sync replaces this.
+    let (control_inbound_tx, mut control_inbound_rx) = mpsc::unbounded_channel::<Vec<u8>>();
+    let rtc = rtc::spawn(frontend_id.clone(), tx.clone(), control_inbound_tx);
+    {
+        let frontend_id = frontend_id.clone();
+        tokio::spawn(async move {
+            while let Some(bytes) = control_inbound_rx.recv().await {
+                match rtc_codec::decode_workspace_sync(&bytes) {
+                    Some((workspace_id, message)) => {
+                        info!(
+                            "control inbound from {frontend_id}: workspace_id={workspace_id} \
+                             {} bytes (preview: {:?})",
+                            message.len(),
+                            String::from_utf8_lossy(
+                                &message[..message.len().min(64)],
+                            ),
+                        );
+                    }
+                    None => {
+                        warn!(
+                            "control inbound from {frontend_id}: failed to decode \
+                             workspaceSync ({} bytes)",
+                            bytes.len()
+                        );
+                    }
+                }
+            }
+        });
+    }
+
+    // Slice 1a hello: when the control DC opens, send a single
+    // workspaceSync frame so we can verify the round-trip end to
+    // end. Replaced in 1b by the real Automerge sync handshake.
+    {
+        let control_opened = rtc.control_opened.clone();
+        let control_tx = rtc.control_tx.clone();
+        tokio::spawn(async move {
+            control_opened.notified().await;
+            let bytes = rtc_codec::encode_workspace_sync(
+                "hello-test",
+                b"hello-from-backend",
+            );
+            let _ = control_tx.send(bytes);
+        });
+    }
 
     // Once the DC opens for the first time, replay every buffered
     // PutImage *and* every buffered thumbnail so the frontend's
