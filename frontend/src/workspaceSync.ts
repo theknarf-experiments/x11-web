@@ -45,10 +45,9 @@ export interface RectExt {
 }
 
 /** `@ocif/arrow` — endpoints in canvas-space coords, plus stroke
- *  styling. For free-floating arrows these are the actual visual
- *  endpoints; for connected arrows (those also carrying `edge`)
- *  they're cached and the renderer recomputes from the connected
- *  nodes' bounds. */
+ *  styling. The cached start/end coords are always present even
+ *  for connected arrows — they're the fallback when an attachment
+ *  is later detached. */
 export interface ArrowExt {
 	start_x: number;
 	start_y: number;
@@ -59,12 +58,13 @@ export interface ArrowExt {
 }
 
 /** `@ocif/edge` — relation between two nodes referenced by id.
- *  Combined with `arrow` for the visual treatment; the geometry
- *  is computed at render time so the connection follows the boxes
- *  when they move or resize. */
+ *  Each endpoint is independently optional: just `start` set is a
+ *  half-attached arrow (start anchored, end free), and so on.
+ *  When both are unset there's no point keeping the field; the
+ *  caller drops it. */
 export interface EdgeExt {
-	start: string;
-	end: string;
+	start?: string;
+	end?: string;
 	directed: boolean;
 }
 
@@ -462,6 +462,67 @@ export function setOcifArrowEndpoints(
 	notify(workspaceId);
 	ship(workspaceId, drainOutbound(entry));
 }
+
+export type ArrowAnchor =
+	| { kind: "node"; nodeId: string }
+	| { kind: "free"; x: number; y: number };
+
+/** Atomic per-endpoint anchor update for an arrow.
+ *  - `node` anchor: ensure `n.edge` exists, set
+ *    `n.edge.{start|end}` to the node id. The cached
+ *    `arrow.{start|end}_x/y` is left alone (it's the fallback
+ *    used when this side is later detached).
+ *  - `free` anchor: clear `n.edge.{start|end}` (and the whole
+ *    `n.edge` if both ends are now unset) and write the canvas
+ *    coord onto `arrow.{start|end}_x/y`.
+ *
+ *  Mutates `n.edge` directly inside the `Automerge.change`
+ *  callback rather than capturing into a local — Automerge's
+ *  change tracker doesn't always handle proxy-self-assignment
+ *  cleanly, so the direct path keeps the mutation crisp. */
+export function setOcifArrowAnchor(
+	workspaceId: string,
+	id: string,
+	end: "start" | "end",
+	anchor: ArrowAnchor,
+) {
+	const entry = ensure(workspaceId);
+	if (!(entry.doc.nodes ?? {})[id]) return;
+	entry.doc = Automerge.change(entry.doc, (d) => {
+		const n = d.nodes?.[id];
+		if (!n || !n.arrow) return;
+		if (anchor.kind === "node") {
+			if (!n.edge) n.edge = { directed: true };
+			n.edge[end] = anchor.nodeId;
+		} else {
+			if (n.edge) {
+				delete n.edge[end];
+				if (
+					n.edge.start === undefined &&
+					n.edge.end === undefined
+				) {
+					delete n.edge;
+				}
+			}
+			const xKey = end === "start" ? "start_x" : "end_x";
+			const yKey = end === "start" ? "start_y" : "end_y";
+			n.arrow[xKey] = anchor.x;
+			n.arrow[yKey] = anchor.y;
+		}
+		// Refresh the node's bounding box from the cached coords.
+		const sx = n.arrow.start_x;
+		const sy = n.arrow.start_y;
+		const ex = n.arrow.end_x;
+		const ey = n.arrow.end_y;
+		n.x = Math.min(sx, ex);
+		n.y = Math.min(sy, ey);
+		n.width = Math.abs(ex - sx);
+		n.height = Math.abs(ey - sy);
+	});
+	notify(workspaceId);
+	ship(workspaceId, drainOutbound(entry));
+}
+
 
 /** Delete a node from the workspace. Also drops any edges that
  *  referenced this node — a dangling edge with a missing endpoint

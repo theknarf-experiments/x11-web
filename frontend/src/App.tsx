@@ -39,6 +39,7 @@ import {
 	getOcifNodes,
 	insertOcifNode,
 	type OcifNode,
+	setOcifArrowAnchor,
 	setOcifArrowEndpoints,
 	setOcifNodeBounds,
 	setOcifNodePosition,
@@ -169,6 +170,18 @@ function App() {
 	const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
 	/** Currently-text-editing OCIF node id (or null). Per-tab. */
 	const [editingNodeId, setEditingNodeId] = useState<string | null>(null);
+	/** Live drag state for an arrow endpoint or arrow-create
+	 *  gesture. Drives two visual hints:
+	 *    - the endpoint being dragged renders in a "dragging" color
+	 *    - the box currently under the cursor (if a valid drop
+	 *      target) shows an attach-preview outline
+	 *  Per-tab; the doc carries the actual anchored state, this is
+	 *  purely UI feedback during the gesture. */
+	const [arrowDrag, setArrowDrag] = useState<{
+		arrowId: string;
+		end: "start" | "end";
+		dropTargetNodeId: string | null;
+	} | null>(null);
 	/** Helper to translate page-coords (from window-level pointermove
 	 *  events) into canvas-space, exposed by `InfiniteCanvas`. */
 	const pageToCanvasRef = useRef<
@@ -414,14 +427,18 @@ function App() {
 			} else if (drawing.kind === "arrow") {
 				const dx = drawing.endX - drawing.startX;
 				const dy = drawing.endY - drawing.startY;
-				const connected =
-					drawing.startNodeId &&
-					drawing.endNodeId &&
-					drawing.startNodeId !== drawing.endNodeId;
-				// Connected edges always commit (no min-distance);
-				// free-floating arrows need a minimum drag to avoid
-				// stray clicks producing tiny invisible arrows.
-				if (connected || Math.hypot(dx, dy) >= 8) {
+				// Self-loops (start and end on the same box) are
+				// degenerate — treat as no attachment for the dup
+				// end. Either-end-anchored counts as connected so a
+				// quick click on a box with tiny drag still creates
+				// a meaningful arrow.
+				const startNodeId = drawing.startNodeId;
+				const endNodeId =
+					drawing.endNodeId && drawing.endNodeId !== startNodeId
+						? drawing.endNodeId
+						: null;
+				const anyAnchor = !!(startNodeId || endNodeId);
+				if (anyAnchor || Math.hypot(dx, dy) >= 8) {
 					const id = crypto.randomUUID();
 					const z = maxNodeZRef.current + 1;
 					maxNodeZRef.current = z;
@@ -431,6 +448,14 @@ function App() {
 						end_x: drawing.endX,
 						end_y: drawing.endY,
 					};
+					const edge =
+						startNodeId || endNodeId
+							? {
+									...(startNodeId ? { start: startNodeId } : {}),
+									...(endNodeId ? { end: endNodeId } : {}),
+									directed: true,
+								}
+							: undefined;
 					insertOcifNode(activeWorkspace.id, id, {
 						x: Math.min(drawing.startX, drawing.endX),
 						y: Math.min(drawing.startY, drawing.endY),
@@ -438,15 +463,7 @@ function App() {
 						width: Math.abs(dx),
 						height: Math.abs(dy),
 						arrow,
-						...(connected
-							? {
-									edge: {
-										start: drawing.startNodeId as string,
-										end: drawing.endNodeId as string,
-										directed: true,
-									},
-								}
-							: {}),
+						...(edge ? { edge } : {}),
 					});
 					setSelectedNodeId(id);
 				}
@@ -521,34 +538,69 @@ function App() {
 		[activeWorkspace, ocifNodes],
 	);
 
-	/** Pointer-down on an arrow's start or end handle. Drags that
-	 *  endpoint to a new canvas-space position; the other endpoint
-	 *  stays put. */
+	/** Pointer-down on an arrow's start or end handle. The endpoint
+	 *  always follows the cursor during the drag — even if it was
+	 *  previously connected, the very first pointermove writes a
+	 *  free anchor to the doc so the visual handle leaves the box.
+	 *  Local `arrowDrag` state tracks the box currently under the
+	 *  cursor so we can render a "drop here to connect" outline.
+	 *  On release, if there's a drop target, the doc commits the
+	 *  attachment to that node. */
 	const handleArrowEndpointDown = useCallback(
 		(id: string, end: "start" | "end", e: React.PointerEvent) => {
 			if (!activeWorkspace) return;
 			e.preventDefault();
 			const node = ocifNodes.get(id);
-			const arrow = node?.arrow;
-			if (!arrow) return;
+			if (!node?.arrow) return;
 			const wid = activeWorkspace.id;
-			const baseSX = arrow.start_x;
-			const baseSY = arrow.start_y;
-			const baseEX = arrow.end_x;
-			const baseEY = arrow.end_y;
+			const otherEndNodeId =
+				end === "start" ? node.edge?.end : node.edge?.start;
+			let pendingDropNodeId: string | null = null;
+			setArrowDrag({ arrowId: id, end, dropTargetNodeId: null });
 			const onMove = (ev: PointerEvent) => {
 				const t = pageToCanvasRef.current;
 				if (!t) return;
 				const p = t(ev.clientX, ev.clientY);
-				if (end === "start") {
-					setOcifArrowEndpoints(wid, id, p.x, p.y, baseEX, baseEY);
-				} else {
-					setOcifArrowEndpoints(wid, id, baseSX, baseSY, p.x, p.y);
-				}
+				// Free-anchor unconditionally so the handle visually
+				// follows the cursor regardless of whether the user
+				// is hovering a box.
+				setOcifArrowAnchor(wid, id, end, {
+					kind: "free",
+					x: p.x,
+					y: p.y,
+				});
+				// Walk the elements at the cursor (top-to-bottom)
+				// rather than just the topmost — the dragging handle
+				// itself is right under the cursor for the start
+				// endpoint (perfect-arrows applies `padEnd` only,
+				// not `padStart`), so `elementFromPoint` would see
+				// the circle instead of the box behind it.
+				const overBox = document
+					.elementsFromPoint(ev.clientX, ev.clientY)
+					.map((el) =>
+						(el as Element).closest<HTMLElement>(
+							'[data-testid="ocif-box"]',
+						),
+					)
+					.find((box): box is HTMLElement => !!box);
+				const overNodeId = overBox?.dataset.nodeId ?? null;
+				// Self-loops aren't useful — if hovering the box the
+				// other end is anchored to, treat as no drop target.
+				const dropTargetNodeId =
+					overNodeId && overNodeId !== otherEndNodeId ? overNodeId : null;
+				pendingDropNodeId = dropTargetNodeId;
+				setArrowDrag({ arrowId: id, end, dropTargetNodeId });
 			};
 			const onUp = () => {
 				window.removeEventListener("pointermove", onMove);
 				window.removeEventListener("pointerup", onUp);
+				if (pendingDropNodeId) {
+					setOcifArrowAnchor(wid, id, end, {
+						kind: "node",
+						nodeId: pendingDropNodeId,
+					});
+				}
+				setArrowDrag(null);
 			};
 			window.addEventListener("pointermove", onMove);
 			window.addEventListener("pointerup", onUp);
@@ -963,6 +1015,9 @@ function App() {
 							selected={selectedNodeId === id}
 							interactive={tool === "pointer"}
 							nodes={ocifNodes}
+							draggingEnd={
+								arrowDrag?.arrowId === id ? arrowDrag.end : null
+							}
 							onPointerDown={handleNodePointerDown}
 							onEndpointPointerDown={handleArrowEndpointDown}
 						/>
@@ -974,6 +1029,10 @@ function App() {
 							selected={selectedNodeId === id}
 							editing={editingNodeId === id}
 							interactive={tool === "pointer"}
+							dropTarget={
+								arrowDrag?.dropTargetNodeId === id ||
+								(drawing?.kind === "arrow" && drawing.endNodeId === id)
+							}
 							onPointerDown={handleNodePointerDown}
 							onResizeHandleDown={handleResizeHandleDown}
 							onChangeText={handleChangeText}

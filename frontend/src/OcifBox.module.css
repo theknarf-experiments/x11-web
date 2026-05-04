@@ -1,5 +1,6 @@
 .box,
-.selected {
+.selected,
+.dropTarget {
 	cursor: move;
 	box-sizing: border-box;
 }
@@ -12,6 +13,15 @@
 	box-shadow:
 		0 0 0 2px #007aff,
 		0 0 0 4px rgba(0, 122, 255, 0.3);
+}
+
+/* Drop-target halo — a brighter, dashed-feeling glow that says
+ * "release here to attach". A green tint distinguishes it from
+ * the selection halo (which is blue). */
+.dropTarget {
+	box-shadow:
+		0 0 0 2px #34c759,
+		0 0 0 6px rgba(52, 199, 89, 0.35);
 }
 
 /* Static text label inside the box. Centered, padded so it doesn't

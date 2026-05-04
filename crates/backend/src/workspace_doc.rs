@@ -99,9 +99,11 @@ pub struct RectExt {
 }
 
 /// `@ocif/arrow` — start / end points (canvas-space coords),
-/// strokeColor, strokeWidth. OCIF also defines startMarker /
-/// endMarker for arrowhead shapes; v1 hardcodes a triangle on the
-/// end and nothing on the start.
+/// strokeColor, strokeWidth. The cached start/end coords are
+/// always present even for connected arrows so we have a fallback
+/// position when an attachment is later detached. OCIF also
+/// defines startMarker / endMarker for arrowhead shapes; v1
+/// hardcodes a triangle on the end and nothing on the start.
 #[derive(Debug, Clone, Default, Reconcile, Hydrate)]
 pub struct ArrowExt {
     pub start_x: f64,
@@ -113,13 +115,18 @@ pub struct ArrowExt {
 }
 
 /// `@ocif/edge` — relation between two nodes referenced by id.
-/// `directed = true` means the edge is start → end (rendered as
-/// an arrow from start to end); `false` is undirected. We don't
-/// model OCIF's optional `relation` type yet.
+/// Each endpoint is independently optional: `start = Some(id)`
+/// + `end = None` is a half-attached arrow (start anchored to a
+/// node, end at the cached `arrow.end_x/y`), and vice versa.
+/// `directed = true` renders as start → end; `false` undirected.
+/// (OCIF v0.7's `@ocif/edge` requires both endpoints; we relax
+/// that for partial-connection UX. On OCIF export, partials would
+/// emit a `@ocif/hyperedge` or a custom `@x11web/anchor`
+/// extension instead.)
 #[derive(Debug, Clone, Default, Reconcile, Hydrate)]
 pub struct EdgeExt {
-    pub start: String,
-    pub end: String,
+    pub start: Option<String>,
+    pub end: Option<String>,
     pub directed: bool,
 }
 

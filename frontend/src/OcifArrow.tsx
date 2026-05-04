@@ -1,5 +1,5 @@
 import { useMemo } from "react";
-import { getArrow, getBoxToBoxArrow } from "perfect-arrows";
+import { getBoxToBoxArrow } from "perfect-arrows";
 import s from "./OcifArrow.module.css";
 import type { OcifNode } from "./workspaceSync";
 
@@ -12,11 +12,15 @@ interface OcifArrowProps {
 	 *  arrow draw mode) the event bubbles so a drag gesture can
 	 *  start through it. */
 	interactive: boolean;
-	/** Connected-arrow lookup: if `node.edge` is set, the renderer
-	 *  pulls the start/end node bounds from this map and computes
-	 *  geometry via `getBoxToBoxArrow` so the arrow follows its
-	 *  endpoints when they move or resize. */
+	/** Connected-arrow lookup: when `node.edge.start` or
+	 *  `node.edge.end` is set, the renderer pulls the connected
+	 *  node's bounds from this map and computes geometry against
+	 *  them (so the connection follows the boxes). */
 	nodes: Map<string, OcifNode>;
+	/** Which endpoint, if any, is currently being drag-relocated.
+	 *  Renders that handle in a distinctive "dragging" color so the
+	 *  user has visual feedback that they're moving it. */
+	draggingEnd: "start" | "end" | null;
 	onPointerDown: (id: string, e: React.PointerEvent) => void;
 	onEndpointPointerDown: (
 		id: string,
@@ -36,141 +40,95 @@ const HIT_STROKE_WIDTH = 14;
  *  clipped by the SVG viewport. */
 const SVG_MARGIN = HEAD_SIZE + 24;
 
-/** One arrow node. Geometry varies by which extensions are set:
- *  - `edge` ext: connection between two nodes; uses
- *    `getBoxToBoxArrow` against their bounds and re-renders when
- *    those bounds change (the connection follows the boxes).
- *  - `arrow` ext only: free-floating; uses `getArrow` against the
- *    stored start/end coords.
- *
- *  In both cases the SVG covers a bounding rect around the
- *  endpoints plus margin for the arrowhead and curve. */
+function endpointClass(dragging: boolean, attached: boolean): string {
+	if (dragging) return s.endpointDragging;
+	return attached ? s.endpointAttached : s.endpoint;
+}
+
+/** One arrow node. Each endpoint independently follows either a
+ *  connected box (via `node.edge.start` / `node.edge.end`) or a
+ *  cached canvas coord (`node.arrow.start_x/y` / `end_x/y`). The
+ *  geometry funnels through a single `getBoxToBoxArrow` call by
+ *  treating free endpoints as 1×1 point boxes — keeps the path
+ *  uniform regardless of whether 0, 1, or 2 ends are anchored. */
 export function OcifArrow({
 	id,
 	node,
 	selected,
 	interactive,
 	nodes,
+	draggingEnd,
 	onPointerDown,
 	onEndpointPointerDown,
 }: OcifArrowProps) {
 	const layout = useMemo(() => {
 		const arrow = node.arrow;
-		const edge = node.edge;
 		if (!arrow) return null;
-
-		// Resolve connected-edge endpoints from the boxes' bounds.
-		// If a referenced box has gone missing (was deleted before
-		// us — `deleteOcifNode` cascade should have caught it but
-		// inbound sync timing may briefly leave us dangling), fall
-		// back to the cached arrow coords.
-		let path: string;
-		let headX: number;
-		let headY: number;
-		let headDeg: number;
-		let visibleStartX: number;
-		let visibleStartY: number;
-		let visibleEndX: number;
-		let visibleEndY: number;
-
-		if (edge) {
-			const startNode = nodes.get(edge.start);
-			const endNode = nodes.get(edge.end);
-			if (!startNode || !endNode) return null;
-			const margin =
-				SVG_MARGIN +
-				Math.max(startNode.width, startNode.height, endNode.width, endNode.height) /
-					2;
-			const minX =
-				Math.min(startNode.x, endNode.x) - margin;
-			const minY =
-				Math.min(startNode.y, endNode.y) - margin;
-			const maxX =
-				Math.max(
-					startNode.x + startNode.width,
-					endNode.x + endNode.width,
-				) + margin;
-			const maxY =
-				Math.max(
-					startNode.y + startNode.height,
-					endNode.y + endNode.height,
-				) + margin;
-			const width = maxX - minX;
-			const height = maxY - minY;
-			const [sx, sy, cx, cy, ex, ey, ae] = getBoxToBoxArrow(
-				startNode.x - minX,
-				startNode.y - minY,
-				startNode.width,
-				startNode.height,
-				endNode.x - minX,
-				endNode.y - minY,
-				endNode.width,
-				endNode.height,
-				{ bow: 0.2, stretch: 0.5, padEnd: HEAD_SIZE },
-			);
-			path = `M${sx},${sy} Q${cx},${cy} ${ex},${ey}`;
-			headX = ex;
-			headY = ey;
-			headDeg = ae * (180 / Math.PI);
-			visibleStartX = sx;
-			visibleStartY = sy;
-			visibleEndX = ex;
-			visibleEndY = ey;
-			return {
-				minX,
-				minY,
-				width,
-				height,
-				path,
-				headX,
-				headY,
-				headDeg,
-				startX: visibleStartX,
-				startY: visibleStartY,
-				endX: visibleEndX,
-				endY: visibleEndY,
-				connected: true,
-			};
-		}
-
-		// Free-floating arrow.
-		const minX = Math.min(arrow.start_x, arrow.end_x) - SVG_MARGIN;
-		const minY = Math.min(arrow.start_y, arrow.end_y) - SVG_MARGIN;
-		const maxX = Math.max(arrow.start_x, arrow.end_x) + SVG_MARGIN;
-		const maxY = Math.max(arrow.start_y, arrow.end_y) + SVG_MARGIN;
+		const startNode = node.edge?.start
+			? nodes.get(node.edge.start)
+			: undefined;
+		const endNode = node.edge?.end ? nodes.get(node.edge.end) : undefined;
+		// Determine effective bounding box per endpoint. Free
+		// endpoints become 1×1 point boxes at the cached coord.
+		const sBox = startNode
+			? {
+					x: startNode.x,
+					y: startNode.y,
+					w: startNode.width,
+					h: startNode.height,
+				}
+			: {
+					x: arrow.start_x - 0.5,
+					y: arrow.start_y - 0.5,
+					w: 1,
+					h: 1,
+				};
+		const eBox = endNode
+			? {
+					x: endNode.x,
+					y: endNode.y,
+					w: endNode.width,
+					h: endNode.height,
+				}
+			: {
+					x: arrow.end_x - 0.5,
+					y: arrow.end_y - 0.5,
+					w: 1,
+					h: 1,
+				};
+		// SVG container covers the union of both boxes plus margin.
+		const minX = Math.min(sBox.x, eBox.x) - SVG_MARGIN;
+		const minY = Math.min(sBox.y, eBox.y) - SVG_MARGIN;
+		const maxX = Math.max(sBox.x + sBox.w, eBox.x + eBox.w) + SVG_MARGIN;
+		const maxY = Math.max(sBox.y + sBox.h, eBox.y + eBox.h) + SVG_MARGIN;
 		const width = maxX - minX;
 		const height = maxY - minY;
-		const sx0 = arrow.start_x - minX;
-		const sy0 = arrow.start_y - minY;
-		const ex0 = arrow.end_x - minX;
-		const ey0 = arrow.end_y - minY;
-		const [sx, sy, cx, cy, ex, ey, ae] = getArrow(sx0, sy0, ex0, ey0, {
-			bow: 0.2,
-			stretch: 0.5,
-			padEnd: HEAD_SIZE,
-		});
-		path = `M${sx},${sy} Q${cx},${cy} ${ex},${ey}`;
-		headX = ex;
-		headY = ey;
-		headDeg = ae * (180 / Math.PI);
-		visibleStartX = sx0;
-		visibleStartY = sy0;
-		visibleEndX = ex0;
-		visibleEndY = ey0;
+		const [sx, sy, cx, cy, ex, ey, ae] = getBoxToBoxArrow(
+			sBox.x - minX,
+			sBox.y - minY,
+			sBox.w,
+			sBox.h,
+			eBox.x - minX,
+			eBox.y - minY,
+			eBox.w,
+			eBox.h,
+			{ bow: 0.2, stretch: 0.5, padEnd: HEAD_SIZE },
+		);
 		return {
 			minX,
 			minY,
 			width,
 			height,
-			path,
-			headX,
-			headY,
-			headDeg,
-			startX: visibleStartX,
-			startY: visibleStartY,
-			endX: visibleEndX,
-			endY: visibleEndY,
-			connected: false,
+			path: `M${sx},${sy} Q${cx},${cy} ${ex},${ey}`,
+			headX: ex,
+			headY: ey,
+			headDeg: ae * (180 / Math.PI),
+			startX: sx,
+			startY: sy,
+			endX: ex,
+			endY: ey,
+			startAttached: !!startNode,
+			endAttached: !!endNode,
 		};
 	}, [node.arrow, node.edge, nodes]);
 
@@ -227,13 +185,16 @@ export function OcifArrow({
 					transform={`translate(${layout.headX},${layout.headY}) rotate(${layout.headDeg})`}
 					pointerEvents="none"
 				/>
-				{selected && interactive && !layout.connected && (
+				{selected && interactive && (
 					<>
 						<circle
 							cx={layout.startX}
 							cy={layout.startY}
 							r={6}
-							className={s.endpoint}
+							className={endpointClass(
+								draggingEnd === "start",
+								layout.startAttached,
+							)}
 							onPointerDown={(e) => {
 								e.stopPropagation();
 								onEndpointPointerDown(id, "start", e);
@@ -243,7 +204,10 @@ export function OcifArrow({
 							cx={layout.endX}
 							cy={layout.endY}
 							r={6}
-							className={s.endpoint}
+							className={endpointClass(
+								draggingEnd === "end",
+								layout.endAttached,
+							)}
 							onPointerDown={(e) => {
 								e.stopPropagation();
 								onEndpointPointerDown(id, "end", e);

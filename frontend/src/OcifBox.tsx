@@ -23,6 +23,10 @@ interface OcifBoxProps {
 	 *  drag gesture can start ON TOP OF the box (e.g., drawing an
 	 *  arrow from one box to another). */
 	interactive: boolean;
+	/** True when an arrow endpoint or arrow-create gesture is
+	 *  currently hovering this box and would attach on release.
+	 *  Renders a "drop here" outline as visual feedback. */
+	dropTarget: boolean;
 	/** Pointer-down on the box body. App.tsx uses this to drive
 	 *  click-to-select and drag-to-move. */
 	onPointerDown: (id: string, e: React.PointerEvent) => void;
@@ -57,6 +61,7 @@ export function OcifBox({
 	selected,
 	editing,
 	interactive,
+	dropTarget,
 	onPointerDown,
 	onResizeHandleDown,
 	onChangeText,
@@ -83,11 +88,16 @@ export function OcifBox({
 	const fill = node.rect?.fill_color ?? DEFAULT_FILL;
 	const stroke = node.rect?.stroke_color ?? DEFAULT_STROKE;
 	const strokeWidth = node.rect?.stroke_width ?? DEFAULT_STROKE_WIDTH;
+	const className = dropTarget
+		? s.dropTarget
+		: selected
+			? s.selected
+			: s.box;
 	return (
 		<div
 			data-testid="ocif-box"
 			data-node-id={id}
-			className={selected ? s.selected : s.box}
+			className={className}
 			style={{
 				position: "absolute",
 				left: node.x,

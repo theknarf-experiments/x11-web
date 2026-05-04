@@ -14,14 +14,35 @@
 	cursor: move;
 }
 
-.endpoint {
-	fill: #ffffff;
-	stroke: #007aff;
+.endpoint,
+.endpointAttached,
+.endpointDragging {
 	stroke-width: 1.5;
 	cursor: grab;
 	pointer-events: auto;
 }
 
-.endpoint:active {
+.endpoint {
+	fill: #ffffff;
+	stroke: #007aff;
+}
+
+/* Attached endpoint — distinguish visually so the user knows it's
+ * anchored to a box (drag to detach). */
+.endpointAttached {
+	fill: #007aff;
+	stroke: #ffffff;
+}
+
+/* Currently being dragged. Bright orange to read distinctly
+ * against both attached + free states. */
+.endpointDragging {
+	fill: #ff9500;
+	stroke: #ffffff;
+	cursor: grabbing;
+}
+
+.endpoint:active,
+.endpointAttached:active {
 	cursor: grabbing;
 }
