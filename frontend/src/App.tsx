@@ -5,6 +5,8 @@ import { ClientRenderer } from "./ClientRenderer";
 import { DiagnosticsPanel } from "./DiagnosticsPanel";
 import { Dock, type DockProcess } from "./Dock";
 import {
+	applyOcifNodesSnapshot,
+	ocifNodesCollection,
 	patchWindow,
 	processesCollection,
 	raiseProcess,
@@ -15,7 +17,7 @@ import {
 import { CanvasToolbar, type CanvasTool } from "./CanvasToolbar";
 import { GlobalMenuBar } from "./GlobalMenuBar";
 import { InfiniteCanvas } from "./InfiniteCanvas";
-import { OcifBox } from "./OcifBox";
+import { OcifBox, type ResizeHandle } from "./OcifBox";
 import { decodeFrame } from "./rtcWire";
 import { SettingsPanel } from "./SettingsPanel";
 import type {
@@ -27,15 +29,18 @@ import type {
 import {
 	useAttachedWindowIds,
 	useBackendSocket,
-	useOcifNodes,
 	useWorkspaceName,
 } from "./useBackendSocket";
 import { WindowFrame } from "./WindowFrame";
 import {
 	deleteOcifNode,
 	getAllPositions,
+	getOcifNodes,
 	insertOcifNode,
+	type OcifNode,
+	setOcifNodeBounds,
 	setOcifNodePosition,
+	setOcifNodeText,
 	setPosition as setWorkspacePosition,
 	subscribe as subscribeWorkspace,
 } from "./workspaceSync";
@@ -62,7 +67,51 @@ function App() {
 	} = useBackendSocket();
 	const workspaceName = useWorkspaceName(activeWorkspace?.id ?? null);
 	const attachedWindowIds = useAttachedWindowIds(activeWorkspace?.id ?? null);
-	const ocifNodes = useOcifNodes(activeWorkspace?.id ?? null);
+
+	// Mirror the per-workspace Automerge doc's OCIF nodes into the
+	// `ocifNodesCollection`. The doc is the source of truth — this
+	// effect just projects it for `useLiveQuery` to read. Mutations
+	// route through `workspaceSync.*` helpers, which trigger the
+	// subscription that re-runs `apply`.
+	useEffect(() => {
+		if (!activeWorkspace) return;
+		const apply = () => {
+			applyOcifNodesSnapshot(
+				activeWorkspace.id,
+				getOcifNodes(activeWorkspace.id),
+			);
+		};
+		apply();
+		return subscribeWorkspace(activeWorkspace.id, apply);
+	}, [activeWorkspace]);
+
+	// Read OCIF nodes for the active workspace. Source of truth is
+	// the Automerge doc, projected into `ocifNodesCollection` by the
+	// effect above.
+	const { data: ocifNodeRows = [] } = useLiveQuery((q) =>
+		q.from({ n: ocifNodesCollection }).select(({ n }) => n),
+	);
+	const activeWorkspaceId = activeWorkspace?.id ?? null;
+	const ocifNodes = useMemo(() => {
+		const out = new Map<string, OcifNode>();
+		for (const row of ocifNodeRows) {
+			if (row.workspaceId !== activeWorkspaceId) continue;
+			out.set(row.nodeId, {
+				x: row.x,
+				y: row.y,
+				z: row.z,
+				width: row.width,
+				height: row.height,
+				text: row.text,
+				rect: {
+					fill_color: row.fillColor,
+					stroke_color: row.strokeColor,
+					stroke_width: row.strokeWidth,
+				},
+			});
+		}
+		return out;
+	}, [ocifNodeRows, activeWorkspaceId]);
 
 	const { data: processes = [] } = useLiveQuery((q) =>
 		q.from({ p: processesCollection }).select(({ p }) => p),
@@ -101,6 +150,8 @@ function App() {
 	/** Currently-selected OCIF node id (or null). Selection is
 	 *  per-tab — different users have different selections. */
 	const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
+	/** Currently-text-editing OCIF node id (or null). Per-tab. */
+	const [editingNodeId, setEditingNodeId] = useState<string | null>(null);
 	/** Helper to translate page-coords (from window-level pointermove
 	 *  events) into canvas-space, exposed by `InfiniteCanvas`. */
 	const pageToCanvasRef = useRef<
@@ -242,22 +293,30 @@ function App() {
 		maxNodeZRef.current = max;
 	}, [ocifNodes]);
 
-	/** Pointer-down on empty canvas while in "box" mode: start a
-	 *  local preview rect and arm window-level move/up listeners
-	 *  to drive it. Commits to the doc on release. */
+	/** Pointer-down on empty canvas. In "box" mode this starts a
+	 *  drag-create gesture; in "pointer" mode it deselects any
+	 *  selected node. We deliberately don't touch `editingNodeId`
+	 *  here — the textarea's `onBlur` is the canonical exit signal
+	 *  for edit mode, and clearing the state synchronously here
+	 *  would unmount the textarea before its blur event can fire,
+	 *  losing the in-progress text. */
 	const handleCanvasPointerDown = useCallback(
 		(point: { x: number; y: number }, e: React.PointerEvent) => {
-			if (tool !== "box" || !activeWorkspace) return;
-			e.preventDefault();
+			if (!activeWorkspace) return;
+			if (tool === "box") {
+				e.preventDefault();
+				setSelectedNodeId(null);
+				setDrawing({
+					startX: point.x,
+					startY: point.y,
+					x: point.x,
+					y: point.y,
+					w: 0,
+					h: 0,
+				});
+				return;
+			}
 			setSelectedNodeId(null);
-			setDrawing({
-				startX: point.x,
-				startY: point.y,
-				x: point.x,
-				y: point.y,
-				w: 0,
-				h: 0,
-			});
 		},
 		[tool, activeWorkspace],
 	);
@@ -350,8 +409,10 @@ function App() {
 		[activeWorkspace, ocifNodes],
 	);
 
-	// Delete / Backspace deletes the selected box. Esc clears
-	// selection and exits draw mode.
+	// Delete / Backspace deletes the selected box. Enter on a
+	// selected box enters text-edit mode. Esc clears selection +
+	// exits draw mode (text-edit Esc is handled inside the editor
+	// via stopPropagation).
 	useEffect(() => {
 		const onKey = (e: KeyboardEvent) => {
 			const target = e.target as HTMLElement | null;
@@ -366,7 +427,13 @@ function App() {
 			}
 			if (e.key === "Escape") {
 				setSelectedNodeId(null);
+				setEditingNodeId(null);
 				setTool("pointer");
+				return;
+			}
+			if (e.key === "Enter" && selectedNodeId && !editingNodeId) {
+				e.preventDefault();
+				setEditingNodeId(selectedNodeId);
 				return;
 			}
 			if (
@@ -376,11 +443,88 @@ function App() {
 			) {
 				deleteOcifNode(activeWorkspace.id, selectedNodeId);
 				setSelectedNodeId(null);
+				setEditingNodeId(null);
 			}
 		};
 		window.addEventListener("keydown", onKey);
 		return () => window.removeEventListener("keydown", onKey);
-	}, [selectedNodeId, activeWorkspace]);
+	}, [selectedNodeId, editingNodeId, activeWorkspace]);
+
+	const handleChangeText = useCallback(
+		(id: string, text: string) => {
+			if (!activeWorkspace) return;
+			setOcifNodeText(activeWorkspace.id, id, text);
+		},
+		[activeWorkspace],
+	);
+
+	const handleExitEdit = useCallback(() => {
+		setEditingNodeId(null);
+	}, []);
+
+	/** Pointer-down on one of a box's resize handles. Computes new
+	 *  bounds from the drag delta and ships a single `setBounds`
+	 *  doc mutation per pointermove (one sync message rather than
+	 *  separate position + size). */
+	const handleResizeHandleDown = useCallback(
+		(id: string, handle: ResizeHandle, e: React.PointerEvent) => {
+			if (!activeWorkspace) return;
+			e.preventDefault();
+			const node = ocifNodes.get(id);
+			const toCanvas = pageToCanvasRef.current;
+			if (!node || !toCanvas) return;
+			const start = toCanvas(e.clientX, e.clientY);
+			const baseX = node.x;
+			const baseY = node.y;
+			const baseW = node.width;
+			const baseH = node.height;
+			const MIN = 16;
+			const onMove = (ev: PointerEvent) => {
+				const t = pageToCanvasRef.current;
+				if (!t) return;
+				const p = t(ev.clientX, ev.clientY);
+				const dx = p.x - start.x;
+				const dy = p.y - start.y;
+				let nx = baseX;
+				let ny = baseY;
+				let nw = baseW;
+				let nh = baseH;
+				if (handle.includes("w")) {
+					nx = baseX + dx;
+					nw = baseW - dx;
+				}
+				if (handle.includes("e")) {
+					nw = baseW + dx;
+				}
+				if (handle.includes("n")) {
+					ny = baseY + dy;
+					nh = baseH - dy;
+				}
+				if (handle.includes("s")) {
+					nh = baseH + dy;
+				}
+				// Clamp to MIN, anchoring the opposite side so the
+				// box doesn't drift when the cursor crosses the
+				// minimum threshold.
+				if (nw < MIN) {
+					if (handle.includes("w")) nx = baseX + baseW - MIN;
+					nw = MIN;
+				}
+				if (nh < MIN) {
+					if (handle.includes("n")) ny = baseY + baseH - MIN;
+					nh = MIN;
+				}
+				setOcifNodeBounds(activeWorkspace.id, id, nx, ny, nw, nh);
+			};
+			const onUp = () => {
+				window.removeEventListener("pointermove", onMove);
+				window.removeEventListener("pointerup", onUp);
+			};
+			window.addEventListener("pointermove", onMove);
+			window.addEventListener("pointerup", onUp);
+		},
+		[activeWorkspace, ocifNodes],
+	);
 
 	const handleMove = useCallback(
 		(windowId: string, x: number, y: number) => {
@@ -669,7 +813,11 @@ function App() {
 						id={id}
 						node={node}
 						selected={selectedNodeId === id}
+						editing={editingNodeId === id}
 						onPointerDown={handleNodePointerDown}
+						onResizeHandleDown={handleResizeHandleDown}
+						onChangeText={handleChangeText}
+						onExitEdit={handleExitEdit}
 					/>
 				))}
 				{drawing && (

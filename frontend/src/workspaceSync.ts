@@ -30,6 +30,9 @@ export interface OcifNode {
 	width: number;
 	height: number;
 	rect?: RectExt;
+	/** Inline text content rendered inside the node. Serializes to
+	 *  a referenced `text/plain` resource on OCIF export. */
+	text?: string;
 }
 
 /** `@ocif/rect` — all properties optional per spec. */
@@ -281,6 +284,7 @@ export function getOcifNodes(workspaceId: string): Map<string, OcifNode> {
 			width: v.width,
 			height: v.height,
 			rect: v.rect ? { ...v.rect } : undefined,
+			text: v.text,
 		});
 	}
 	return out;
@@ -295,12 +299,18 @@ export function insertOcifNode(
 	const entry = ensure(workspaceId);
 	entry.doc = Automerge.change(entry.doc, (d) => {
 		if (!d.nodes) d.nodes = {};
+		// Always seed `text` (default "") so the Automerge field
+		// exists from creation. Adding a brand-new property to a
+		// nested object via a later `change` can be flaky depending
+		// on how the doc was reconciled — initialising it up front
+		// sidesteps that.
 		d.nodes[id] = {
 			x: node.x,
 			y: node.y,
 			z: node.z,
 			width: node.width,
 			height: node.height,
+			text: node.text ?? "",
 			...(node.rect ? { rect: { ...node.rect } } : {}),
 		};
 	});
@@ -342,6 +352,49 @@ export function setOcifNodeSize(
 		if (!n) return;
 		n.width = width;
 		n.height = height;
+	});
+	notify(workspaceId);
+	ship(workspaceId, drainOutbound(entry));
+}
+
+/** Update a node's bounds (position + size) in a single mutation —
+ *  used by the resize gesture so it only ships one sync message
+ *  per pointermove instead of two. */
+export function setOcifNodeBounds(
+	workspaceId: string,
+	id: string,
+	x: number,
+	y: number,
+	width: number,
+	height: number,
+) {
+	const entry = ensure(workspaceId);
+	if (!(entry.doc.nodes ?? {})[id]) return;
+	entry.doc = Automerge.change(entry.doc, (d) => {
+		const n = d.nodes?.[id];
+		if (!n) return;
+		n.x = x;
+		n.y = y;
+		n.width = width;
+		n.height = height;
+	});
+	notify(workspaceId);
+	ship(workspaceId, drainOutbound(entry));
+}
+
+/** Set a node's inline text content. Pass an empty string to
+ *  clear; the field stays present in the doc. */
+export function setOcifNodeText(
+	workspaceId: string,
+	id: string,
+	text: string,
+) {
+	const entry = ensure(workspaceId);
+	if (!(entry.doc.nodes ?? {})[id]) return;
+	entry.doc = Automerge.change(entry.doc, (d) => {
+		const n = d.nodes?.[id];
+		if (!n) return;
+		n.text = text;
 	});
 	notify(workspaceId);
 	ship(workspaceId, drainOutbound(entry));

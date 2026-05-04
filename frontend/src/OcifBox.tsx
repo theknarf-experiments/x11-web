@@ -1,14 +1,35 @@
-import { useCallback } from "react";
+import { useCallback, useEffect, useRef } from "react";
 import s from "./OcifBox.module.css";
 import type { OcifNode } from "./workspaceSync";
+
+export type ResizeHandle =
+	| "n"
+	| "s"
+	| "e"
+	| "w"
+	| "ne"
+	| "nw"
+	| "se"
+	| "sw";
 
 interface OcifBoxProps {
 	id: string;
 	node: OcifNode;
 	selected: boolean;
+	editing: boolean;
 	/** Pointer-down on the box body. App.tsx uses this to drive
 	 *  click-to-select and drag-to-move. */
 	onPointerDown: (id: string, e: React.PointerEvent) => void;
+	/** Pointer-down on a resize handle. App.tsx drives the gesture. */
+	onResizeHandleDown: (
+		id: string,
+		handle: ResizeHandle,
+		e: React.PointerEvent,
+	) => void;
+	/** Live text update — called on every keystroke. */
+	onChangeText: (id: string, text: string) => void;
+	/** Exit edit mode (blur or Esc). */
+	onExitEdit: () => void;
 }
 
 const DEFAULT_FILL = "transparent";
@@ -16,19 +37,36 @@ const DEFAULT_STROKE = "#ffffff";
 const DEFAULT_STROKE_WIDTH = 2;
 const DEFAULT_RADIUS = 6;
 
+const HANDLES: ResizeHandle[] = ["nw", "n", "ne", "e", "se", "s", "sw", "w"];
+
 /** One `@ocif/rect` node rendered as an absolute-positioned div in
  *  canvas space. Uses `border` + `box-sizing: border-box` so the
  *  rendered outer width / height match the doc-stored OCIF size
  *  exactly (the border draws *inside* the box, not outside). The
  *  border-radius is a render-time treatment — not part of the
  *  `@ocif/rect` spec — so it stays in CSS rather than the doc. */
-export function OcifBox({ id, node, selected, onPointerDown }: OcifBoxProps) {
+export function OcifBox({
+	id,
+	node,
+	selected,
+	editing,
+	onPointerDown,
+	onResizeHandleDown,
+	onChangeText,
+	onExitEdit,
+}: OcifBoxProps) {
 	const handlePointerDown = useCallback(
 		(e: React.PointerEvent) => {
+			// While editing, swallow pointerdown on the body so the
+			// drag-to-move handler doesn't kick in mid-edit.
+			if (editing) {
+				e.stopPropagation();
+				return;
+			}
 			e.stopPropagation();
 			onPointerDown(id, e);
 		},
-		[id, onPointerDown],
+		[id, onPointerDown, editing],
 	);
 	const fill = node.rect?.fill_color ?? DEFAULT_FILL;
 	const stroke = node.rect?.stroke_color ?? DEFAULT_STROKE;
@@ -50,6 +88,92 @@ export function OcifBox({ id, node, selected, onPointerDown }: OcifBoxProps) {
 				borderRadius: DEFAULT_RADIUS,
 			}}
 			onPointerDown={handlePointerDown}
+		>
+			<TextLayer
+				id={id}
+				text={node.text ?? ""}
+				editing={editing}
+				onChangeText={onChangeText}
+				onExit={onExitEdit}
+			/>
+			{selected &&
+				!editing &&
+				HANDLES.map((h) => (
+					<div
+						key={h}
+						className={`${s.handle} ${s[`handle_${h}`]}`}
+						data-resize-handle={h}
+						onPointerDown={(e) => {
+							e.stopPropagation();
+							onResizeHandleDown(id, h, e);
+						}}
+					/>
+				))}
+		</div>
+	);
+}
+
+interface TextLayerProps {
+	id: string;
+	text: string;
+	editing: boolean;
+	/** Called on every keystroke — the textarea is fully
+	 *  controlled by the doc. */
+	onChangeText: (id: string, text: string) => void;
+	/** Exit edit mode (called on blur or Esc). */
+	onExit: () => void;
+}
+
+/** Inline text rendered inside the box. Static span when not in
+ *  edit mode; auto-focused textarea when editing. Edits go to the
+ *  doc on every keystroke so sibling tabs see live updates. The
+ *  textarea has no local draft state — `value` IS `node.text`. */
+function TextLayer({
+	id,
+	text,
+	editing,
+	onChangeText,
+	onExit,
+}: TextLayerProps) {
+	const taRef = useRef<HTMLTextAreaElement>(null);
+
+	useEffect(() => {
+		if (editing) {
+			const ta = taRef.current;
+			if (ta) {
+				ta.focus();
+				ta.select();
+			}
+		}
+	}, [editing]);
+
+	if (!editing) {
+		if (!text) return null;
+		return <div className={s.text}>{text}</div>;
+	}
+
+	return (
+		<textarea
+			ref={taRef}
+			className={s.editor}
+			value={text}
+			onChange={(e) => onChangeText(id, e.target.value)}
+			onPointerDown={(e) => e.stopPropagation()}
+			onClick={(e) => e.stopPropagation()}
+			onKeyDown={(e) => {
+				if (e.key === "Escape") {
+					e.preventDefault();
+					e.stopPropagation();
+					onExit();
+					return;
+				}
+				// Stop propagation so canvas-level shortcuts
+				// (Delete to remove the selected box, etc.) don't
+				// fire while typing.
+				e.stopPropagation();
+			}}
+			onBlur={onExit}
+			spellCheck={false}
 		/>
 	);
 }

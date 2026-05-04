@@ -68,6 +68,11 @@ pub struct OcifNode {
     /// `oval: Option<OvalExt>`, `arrow: Option<ArrowExt>`, etc.
     /// At most one extension shape per node is set today.
     pub rect: Option<RectExt>,
+    /// Inline text content rendered inside the node. OCIF would
+    /// normally model this as a referenced resource with a
+    /// `text/plain` representation; we inline it on the node for
+    /// simplicity and convert to a resource on OCIF export.
+    pub text: Option<String>,
 }
 
 /// `@ocif/rect` — fillColor / strokeColor / strokeWidth. All

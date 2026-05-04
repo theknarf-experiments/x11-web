@@ -6,6 +6,7 @@ import type {
 	WindowDescriptor,
 	WindowWmState,
 } from "./types";
+import type { OcifNode } from "./workspaceSync";
 
 interface SyncApi<T extends object> {
 	begin(options?: { immediate?: boolean }): void;
@@ -291,6 +292,79 @@ export function raiseProcess(sidecarId: string, pid: number) {
 				stackingOrder: cursor,
 				wmState: row.wmState === "minimized" ? "normal" : row.wmState,
 			},
+		});
+	}
+	api.commit();
+}
+
+// ---------- OCIF nodes (user-drawn shapes, mirror of doc state) ----------
+
+/** A single OCIF node row, projected from the per-workspace
+ *  Automerge doc. Source of truth is the doc; this collection is a
+ *  one-way reactive mirror. Mutations go through `workspaceSync.*`
+ *  helpers — never mutate this collection directly. */
+export interface OcifNodeRow {
+	id: string;
+	workspaceId: string;
+	nodeId: string;
+	x: number;
+	y: number;
+	z: number;
+	width: number;
+	height: number;
+	text: string;
+	fillColor?: string;
+	strokeColor?: string;
+	strokeWidth?: number;
+}
+
+const ocifNodes = makeCollection<OcifNodeRow>({
+	id: "ocif-nodes",
+	getKey: (r) => r.id,
+});
+export const ocifNodesCollection = ocifNodes.collection;
+
+/** Replace the OCIF nodes for one workspace with a fresh snapshot.
+ *  Other workspaces' rows are untouched. Called after every
+ *  Automerge mutation / inbound sync that affects this workspace's
+ *  doc. Uses `insert` vs `update` correctly — `insert` on an
+ *  existing key is a no-op for our collection sync, so movement /
+ *  resize updates need `update`. */
+export function applyOcifNodesSnapshot(
+	workspaceId: string,
+	snap: Map<string, OcifNode>,
+) {
+	const api = ocifNodes.sync.current;
+	if (!api) return;
+	const current = ocifNodesCollection.state;
+	const incomingKeys = new Set(
+		[...snap.keys()].map((k) => `${workspaceId}:${k}`),
+	);
+	api.begin();
+	for (const [key, row] of current) {
+		if (row.workspaceId === workspaceId && !incomingKeys.has(key)) {
+			api.write({ type: "delete", key });
+		}
+	}
+	for (const [nodeId, node] of snap) {
+		const id = `${workspaceId}:${nodeId}`;
+		const value: OcifNodeRow = {
+			id,
+			workspaceId,
+			nodeId,
+			x: node.x,
+			y: node.y,
+			z: node.z,
+			width: node.width,
+			height: node.height,
+			text: node.text ?? "",
+			fillColor: node.rect?.fill_color,
+			strokeColor: node.rect?.stroke_color,
+			strokeWidth: node.rect?.stroke_width,
+		};
+		api.write({
+			type: current.has(id) ? "update" : "insert",
+			value,
 		});
 	}
 	api.commit();
