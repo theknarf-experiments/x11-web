@@ -1,5 +1,4 @@
 import { useLiveQuery } from "@tanstack/react-db";
-import { inflateRaw } from "pako";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { getAppContextMenuItems } from "./AppContextMenu";
 import { ClientRenderer } from "./ClientRenderer";
@@ -18,7 +17,6 @@ import { InfiniteCanvas } from "./InfiniteCanvas";
 import { decodeFrame } from "./rtcWire";
 import { SettingsPanel } from "./SettingsPanel";
 import type {
-	AnimCursorFrame,
 	FocusPolicy,
 	InputEvent,
 	MenuAction,
@@ -39,42 +37,6 @@ import {
 let requestCounter = 0;
 function nextRequestId() {
 	return `req-${++requestCounter}-${Date.now()}`;
-}
-
-/** Convert ARGB pixel data to a CSS cursor URL data-uri. Returns a promise. */
-function argbToCursorUrl(
-	data: string,
-	width: number,
-	height: number,
-	hotX: number,
-	hotY: number,
-): Promise<string> {
-	const canvas = new OffscreenCanvas(width, height);
-	const ctx = canvas.getContext("2d")!;
-	const binaryStr = atob(data);
-	const compressed = new Uint8Array(binaryStr.length);
-	for (let i = 0; i < binaryStr.length; i++) {
-		compressed[i] = binaryStr.charCodeAt(i);
-	}
-	let rawData: Uint8Array;
-	try {
-		rawData = inflateRaw(compressed);
-	} catch {
-		rawData = compressed;
-	}
-	const imageData = ctx.createImageData(width, height);
-	imageData.data.set(rawData.subarray(0, imageData.data.length));
-	ctx.putImageData(imageData, 0, 0);
-	return canvas.convertToBlob({ type: "image/png" }).then((blob) => {
-		return new Promise<string>((resolve) => {
-			const reader = new FileReader();
-			reader.onloadend = () => {
-				const dataUrl = reader.result as string;
-				resolve(`url(${dataUrl}) ${hotX} ${hotY}, auto`);
-			};
-			reader.readAsDataURL(blob);
-		});
-	});
 }
 
 function App() {
@@ -113,36 +75,16 @@ function App() {
 	const [closedWindowIds, setClosedWindowIds] = useState<Set<string>>(
 		() => new Set(),
 	);
-	/** Animated cursor timers: windowId -> interval handle. */
-	const animCursorTimersRef = useRef<
-		Map<string, ReturnType<typeof setInterval>>
-	>(new Map());
-
 	/** Focus policy setting. */
 	const [focusPolicy, setFocusPolicy] = useState<FocusPolicy>("click-to-focus");
 
-	// Clean up animated cursor timers on unmount
-	useEffect(() => {
-		return () => {
-			for (const timer of animCursorTimersRef.current.values()) {
-				clearInterval(timer);
-			}
-		};
-	}, []);
-
-	// Reap renderers, animation timers, and locally-closed entries for
-	// windows the backend has dropped. Renderer creation happens lazily
-	// during render so a window appears as soon as it lands in the list.
+	// Reap renderers and locally-closed entries for windows the
+	// backend has dropped. Renderer creation happens lazily during
+	// render so a window appears as soon as it lands in the list.
 	useEffect(() => {
 		const live = new Set(windows.map((w) => w.windowId));
 		for (const wid of [...renderersRef.current.keys()]) {
 			if (!live.has(wid)) renderersRef.current.delete(wid);
-		}
-		for (const [wid, timer] of [...animCursorTimersRef.current]) {
-			if (!live.has(wid)) {
-				clearInterval(timer);
-				animCursorTimersRef.current.delete(wid);
-			}
 		}
 		setClosedWindowIds((prev) => {
 			let changed = false;
@@ -156,85 +98,6 @@ function App() {
 			return changed ? next : prev;
 		});
 	}, [windows]);
-
-	/** Start an animated cursor cycle for a window. */
-	const startAnimCursor = useCallback(
-		(windowId: string, frames: AnimCursorFrame[]) => {
-			// Clear any existing animation for this window
-			const existing = animCursorTimersRef.current.get(windowId);
-			if (existing) clearInterval(existing);
-
-			if (frames.length === 0) return;
-
-			let frameIndex = 0;
-
-			const advanceFrame = () => {
-				const frame = frames[frameIndex];
-				argbToCursorUrl(
-					frame.pixels,
-					frame.width,
-					frame.height,
-					frame.hotspot_x,
-					frame.hotspot_y,
-				).then((cursor) => {
-					patchWindow(windowId, { cursor });
-				});
-				frameIndex = (frameIndex + 1) % frames.length;
-			};
-
-			// Show first frame immediately
-			advanceFrame();
-
-			// Use the first frame's delay for the interval (simplification --
-			// ideally each frame has its own delay, but setInterval is fixed)
-			const delay = frames[0].delay_ms || 100;
-			const timer = setInterval(advanceFrame, delay);
-			animCursorTimersRef.current.set(windowId, timer);
-		},
-		[],
-	);
-
-	// Per-window updates the hook doesn't already apply to the collection:
-	// PutImage routes to the per-window renderer; CursorBitmap/CursorAnimated
-	// need async decode or timer-driven cycling, so they live here and patch
-	// the row directly.
-	useEffect(() => {
-		onWindowUpdate((update) => {
-			// Static cursor change — stop any running animation.
-			if (update.kind === "CursorChanged") {
-				const existing = animCursorTimersRef.current.get(update.window_id);
-				if (existing) {
-					clearInterval(existing);
-					animCursorTimersRef.current.delete(update.window_id);
-				}
-			}
-
-			// Custom cursor bitmap -- convert ARGB data to a CSS cursor URL.
-			if (update.kind === "CursorBitmap") {
-				const existing = animCursorTimersRef.current.get(update.window_id);
-				if (existing) {
-					clearInterval(existing);
-					animCursorTimersRef.current.delete(update.window_id);
-				}
-				const windowId = update.window_id;
-				argbToCursorUrl(
-					update.data,
-					update.width,
-					update.height,
-					update.hotspot_x,
-					update.hotspot_y,
-				).then((cursor) => {
-					patchWindow(windowId, { cursor });
-				});
-			}
-
-			// Animated cursor -- cycle through frames.
-			if (update.kind === "CursorAnimated") {
-				startAnimCursor(update.window_id, update.frames);
-			}
-		});
-		return () => onWindowUpdate(null);
-	}, [onWindowUpdate, startAnimCursor]);
 
 	// Per-window thumbnail object URLs, keyed by window_id.
 	// Driven by `Frame::WindowThumbnail` arrivals over the DC; the
@@ -648,7 +511,6 @@ function App() {
 								y={win.y}
 								zIndex={win.stackingOrder}
 								color={win.color}
-								cursor={win.cursor}
 								renderer={renderer}
 								overrideRedirect={win.overrideRedirect}
 								resizable={win.resizable}

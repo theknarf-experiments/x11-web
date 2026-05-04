@@ -217,23 +217,6 @@ pub enum WindowUpdate {
         window_id: String,
         menu: Vec<MenuItem>,
     },
-    /// CSS-style cursor name (e.g. "default", "pointer").
-    CursorChanged { window_id: String, cursor: String },
-    /// Custom RGBA cursor bitmap.
-    CursorBitmap {
-        window_id: String,
-        width: u16,
-        height: u16,
-        hotspot_x: u16,
-        hotspot_y: u16,
-        #[serde(with = "base64_bytes")]
-        data: Vec<u8>,
-    },
-    /// Animated cursor (multi-frame).
-    CursorAnimated {
-        window_id: String,
-        frames: Vec<AnimCursorFrame>,
-    },
 }
 
 /// A display update from the X server to be rendered in the browser.
@@ -316,25 +299,6 @@ pub enum DisplayUpdate {
     TitleChanged {
         window_id: String,
         title: String,
-    },
-    CursorChanged {
-        window_id: String,
-        cursor: String,
-    },
-    /// Animated cursor with multiple frames (from CreateAnimCursor).
-    CursorAnimated {
-        window_id: String,
-        frames: Vec<AnimCursorFrame>,
-    },
-    /// Custom cursor bitmap for a window.
-    CursorBitmap {
-        window_id: String,
-        width: u16,
-        height: u16,
-        hotspot_x: u16,
-        hotspot_y: u16,
-        #[serde(with = "base64_bytes")]
-        data: Vec<u8>,
     },
     /// Window WM state changed (minimize, maximize, fullscreen).
     WindowStateChanged {
@@ -462,20 +426,6 @@ pub enum MenuActionTarget {
     UInt32(u32),
     Int64(i64),
     Float64(f64),
-}
-
-/// A single frame in an animated cursor (from XRender CreateAnimCursor).
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct AnimCursorFrame {
-    /// ARGB pixel data, base64-encoded.
-    #[serde(with = "base64_bytes")]
-    pub pixels: Vec<u8>,
-    pub width: u16,
-    pub height: u16,
-    pub hotspot_x: u16,
-    pub hotspot_y: u16,
-    /// Delay in milliseconds before advancing to the next frame.
-    pub delay_ms: u32,
 }
 
 /// Window management state flags.

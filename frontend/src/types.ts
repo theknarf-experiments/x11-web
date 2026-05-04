@@ -71,17 +71,6 @@ export type FrontendToBackend =
 			sdp_mline_index: number | null;
 	  };
 
-/** Animated cursor frame. */
-export interface AnimCursorFrame {
-	/** Base64-encoded ARGB pixel data. */
-	pixels: string;
-	width: number;
-	height: number;
-	hotspot_x: number;
-	hotspot_y: number;
-	delay_ms: number;
-}
-
 /** Window WM states. */
 export type WindowWmState =
 	| "normal"
@@ -123,25 +112,6 @@ export interface WindowDescriptor {
 
 export type WindowUpdate =
 	| { kind: "TitleChanged"; window_id: string; title: string }
-	| {
-			kind: "CursorChanged";
-			window_id: string;
-			cursor: string;
-	  }
-	| {
-			kind: "CursorBitmap";
-			window_id: string;
-			width: number;
-			height: number;
-			hotspot_x: number;
-			hotspot_y: number;
-			data: string;
-	  }
-	| {
-			kind: "CursorAnimated";
-			window_id: string;
-			frames: AnimCursorFrame[];
-	  }
 	| {
 			kind: "StateChanged";
 			window_id: string;

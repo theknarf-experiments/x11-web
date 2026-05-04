@@ -112,7 +112,6 @@ export interface WindowRow {
 	x: number;
 	y: number;
 	title: string;
-	cursor: string;
 	wmState: WindowWmState;
 	color: string;
 	focused: boolean;
@@ -134,7 +133,6 @@ export interface NewWindowSeed {
 	x: number;
 	y: number;
 	color: string;
-	cursor: string;
 	wmState: WindowWmState;
 	title: string;
 }
@@ -201,7 +199,6 @@ export function applyWindowList(
 					x: seed.x,
 					y: seed.y,
 					title: seed.title,
-					cursor: seed.cursor,
 					wmState: seed.wmState,
 					color: seed.color,
 					focused: false,

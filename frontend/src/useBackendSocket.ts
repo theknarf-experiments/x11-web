@@ -112,7 +112,6 @@ function seedForDescriptor(
 		y,
 		color: d.override_redirect ? "transparent" : colorForWindowId(d.window_id),
 		title: d.command || `PID ${d.pid}`,
-		cursor: "default",
 		wmState: "normal",
 	};
 }
@@ -120,14 +119,11 @@ function seedForDescriptor(
 /** Apply a `WindowUpdate` to the windows collection where it represents a
  *  persistent UI-state change. Returns true if the hook handled the update
  *  (the App can still observe it via the `onWindowUpdate` callback for
- *  side-effect kinds like `PutImage` and animated/bitmap cursors). */
+ *  side-effect kinds like `PutImage`). */
 function applyWindowUpdate(update: WindowUpdate) {
 	switch (update.kind) {
 		case "TitleChanged":
 			patchWindow(update.window_id, { title: update.title });
-			break;
-		case "CursorChanged":
-			patchWindow(update.window_id, { cursor: update.cursor });
 			break;
 		case "Focused":
 			setFocusedWindow(update.window_id);
@@ -150,8 +146,7 @@ function applyWindowUpdate(update: WindowUpdate) {
 				patchWindow(update.window_id, { wmState: update.state });
 			}
 			break;
-		// PutImage / CursorBitmap / CursorAnimated are handled by App.tsx
-		// (renderers and async cursor decoding live there).
+		// PutImage is handled by App.tsx (renderer routing lives there).
 	}
 }
 

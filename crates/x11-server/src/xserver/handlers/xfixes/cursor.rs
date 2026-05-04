@@ -275,6 +275,11 @@ pub(crate) fn handle_change_cursor_by_name(
 }
 
 /// 29: HideCursor
+///
+/// XFIXES nesting counter is still maintained — XFIXES clients
+/// observe a coherent state — but the browser-side cursor
+/// notification was removed when frontend cursor delivery was
+/// dropped. See `emit_cursor_changed` for the same context.
 pub(crate) fn handle_hide_cursor(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
     let req = parse_minor!(HideCursorRequest, data, state, seq, 138, 29);
     let window_id = req.window;
@@ -283,25 +288,10 @@ pub(crate) fn handle_hide_cursor(state: &mut ClientState, data: &[u8], seq: u16)
         "XFIXES HideCursor: window={window_id:#x} nesting={}",
         state.cursor_hidden
     );
-    // On first hide, send cursor changed to "none"
-    if state.cursor_hidden == 1 {
-        if let Some(uuid) = state
-            .top_level_uuid_for(window_id)
-            .or_else(|| state.window_uuid(window_id))
-        {
-            let _ = state.update_tx.send((
-                state.client_id.clone(),
-                x11_web_protocol::DisplayUpdate::CursorChanged {
-                    window_id: uuid,
-                    cursor: "none".to_string(),
-                },
-            ));
-        }
-    }
     Vec::new()
 }
 
-/// 30: ShowCursor
+/// 30: ShowCursor — see `handle_hide_cursor` for the dropped-frontend note.
 pub(crate) fn handle_show_cursor(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
     let req = parse_minor!(ShowCursorRequest, data, state, seq, 138, 30);
     let window_id = req.window;
@@ -310,36 +300,5 @@ pub(crate) fn handle_show_cursor(state: &mut ClientState, data: &[u8], seq: u16)
         "XFIXES ShowCursor: window={window_id:#x} nesting={}",
         state.cursor_hidden
     );
-    // When nesting reaches 0, restore the real cursor
-    if state.cursor_hidden == 0 {
-        // Resolve the real cursor name from current_cursor or fall back to "default"
-        let real_cursor = if state.current_cursor != 0 {
-            state
-                .cursors
-                .get(&state.current_cursor)
-                .cloned()
-                .or_else(|| {
-                    state
-                        .cursor_info
-                        .get(&state.current_cursor)
-                        .map(|i| i.css_name.clone())
-                })
-                .unwrap_or_else(|| "default".to_string())
-        } else {
-            "default".to_string()
-        };
-        if let Some(uuid) = state
-            .top_level_uuid_for(window_id)
-            .or_else(|| state.window_uuid(window_id))
-        {
-            let _ = state.update_tx.send((
-                state.client_id.clone(),
-                x11_web_protocol::DisplayUpdate::CursorChanged {
-                    window_id: uuid,
-                    cursor: real_cursor,
-                },
-            ));
-        }
-    }
     Vec::new()
 }

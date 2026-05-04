@@ -150,11 +150,16 @@ struct DisplayPayload {
         titleChanged @5 :TitleChanged;
         putImage @6 :PutImage;
 
-        # Cursor changes — the X11 sidecar maps cursor fonts /
-        # bitmaps / animated cursors onto the window's frame.
-        cursorChanged @7 :CursorChanged;
-        cursorBitmap @8 :CursorBitmap;
-        cursorAnimated @9 :CursorAnimated;
+        # Ordinals @7 / @8 / @9 are reserved — they previously held
+        # cursorChanged / cursorBitmap / cursorAnimated. Cursor
+        # plumbing was never wired all the way through to a usable
+        # browser cursor, so the wire variants were removed; the
+        # X11 sidecar still parses cursor resources internally.
+        # Don't reuse these ordinals — pick @16 onwards if cursor
+        # delivery is ever wired back.
+        reservedCursor7 @7 :Void;
+        reservedCursor8 @8 :Void;
+        reservedCursor9 @9 :Void;
 
         # Window manager state, focus, and z-order signals the
         # frontend needs to render correctly.
@@ -256,38 +261,6 @@ struct WindowThumbnail {
     width @1 :UInt16;
     height @2 :UInt16;
     data @3 :Data;
-}
-
-# Cursor-related variants. CursorChanged carries a named cursor
-# string the frontend resolves to a CSS cursor; CursorBitmap is a
-# custom hardware cursor; CursorAnimated is a multi-frame cursor
-# (XRender CreateAnimCursor).
-struct CursorChanged {
-    windowId @0 :Text;
-    cursor @1 :Text;
-}
-
-struct CursorBitmap {
-    windowId @0 :Text;
-    width @1 :UInt16;
-    height @2 :UInt16;
-    hotspotX @3 :UInt16;
-    hotspotY @4 :UInt16;
-    data @5 :Data;
-}
-
-struct CursorAnimated {
-    windowId @0 :Text;
-    frames @1 :List(AnimCursorFrame);
-}
-
-struct AnimCursorFrame {
-    pixels @0 :Data;
-    width @1 :UInt16;
-    height @2 :UInt16;
-    hotspotX @3 :UInt16;
-    hotspotY @4 :UInt16;
-    delayMs @5 :UInt32;
 }
 
 # Window state.

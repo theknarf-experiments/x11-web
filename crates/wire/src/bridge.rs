@@ -16,8 +16,8 @@
 
 use capnp::message::{Builder, HeapAllocator};
 use x11_web_protocol::{
-    AnimCursorFrame, DisplayUpdate, DndEventKind, GesturePhase, InputEvent, MenuAction,
-    MenuActionTarget, MenuItem, MenuItemKind, WindowWmState,
+    DisplayUpdate, DndEventKind, GesturePhase, InputEvent, MenuAction, MenuActionTarget, MenuItem,
+    MenuItemKind, WindowWmState,
 };
 
 use crate::types::{BackendToSidecar, SidecarToBackend, SpawnedProcessInfo};
@@ -217,41 +217,6 @@ fn write_display_payload(
             pi.set_encoding(wire_capnp::ImageEncoding::RawRgba);
             pi.set_data(data);
         }
-        DisplayUpdate::CursorChanged { window_id, cursor } => {
-            let mut cc = payload.init_cursor_changed();
-            cc.set_window_id(window_id);
-            cc.set_cursor(cursor);
-        }
-        DisplayUpdate::CursorBitmap {
-            window_id,
-            width,
-            height,
-            hotspot_x,
-            hotspot_y,
-            data,
-        } => {
-            let mut cb = payload.init_cursor_bitmap();
-            cb.set_window_id(window_id);
-            cb.set_width(*width);
-            cb.set_height(*height);
-            cb.set_hotspot_x(*hotspot_x);
-            cb.set_hotspot_y(*hotspot_y);
-            cb.set_data(data);
-        }
-        DisplayUpdate::CursorAnimated { window_id, frames } => {
-            let mut ca = payload.init_cursor_animated();
-            ca.set_window_id(window_id);
-            let mut fl = ca.init_frames(frames.len() as u32);
-            for (i, f) in frames.iter().enumerate() {
-                let mut entry = fl.reborrow().get(i as u32);
-                entry.set_pixels(&f.pixels);
-                entry.set_width(f.width);
-                entry.set_height(f.height);
-                entry.set_hotspot_x(f.hotspot_x);
-                entry.set_hotspot_y(f.hotspot_y);
-                entry.set_delay_ms(f.delay_ms);
-            }
-        }
         DisplayUpdate::WindowFocused { window_id } => {
             let mut wf = payload.init_window_focused();
             if let Some(id) = window_id {
@@ -443,42 +408,17 @@ fn read_display_payload(
                 data: pi.get_data()?.to_vec(),
             }
         }
-        Which::CursorChanged(cc) => {
-            let cc = cc?;
-            DisplayUpdate::CursorChanged {
-                window_id: cc.get_window_id()?.to_string()?,
-                cursor: cc.get_cursor()?.to_string()?,
-            }
-        }
-        Which::CursorBitmap(cb) => {
-            let cb = cb?;
-            DisplayUpdate::CursorBitmap {
-                window_id: cb.get_window_id()?.to_string()?,
-                width: cb.get_width(),
-                height: cb.get_height(),
-                hotspot_x: cb.get_hotspot_x(),
-                hotspot_y: cb.get_hotspot_y(),
-                data: cb.get_data()?.to_vec(),
-            }
-        }
-        Which::CursorAnimated(ca) => {
-            let ca = ca?;
-            let frames = ca.get_frames()?;
-            let mut out = Vec::with_capacity(frames.len() as usize);
-            for frame in frames.iter() {
-                out.push(AnimCursorFrame {
-                    pixels: frame.get_pixels()?.to_vec(),
-                    width: frame.get_width(),
-                    height: frame.get_height(),
-                    hotspot_x: frame.get_hotspot_x(),
-                    hotspot_y: frame.get_hotspot_y(),
-                    delay_ms: frame.get_delay_ms(),
-                });
-            }
-            DisplayUpdate::CursorAnimated {
-                window_id: ca.get_window_id()?.to_string()?,
-                frames: out,
-            }
+        // Reserved cursor ordinals (@7/@8/@9) — see wire.capnp.
+        // No live emitter ships these, but old sidecars on the
+        // wire might. Translate to a hard error so the QUIC
+        // recv loop logs + skips them; the connection stays
+        // alive (next message gets read normally).
+        Which::ReservedCursor7(_)
+        | Which::ReservedCursor8(_)
+        | Which::ReservedCursor9(_) => {
+            return Err(BridgeError::Capnp(capnp::Error::failed(
+                "received reserved cursor variant; ignored".into(),
+            )));
         }
         Which::WindowFocused(wf) => {
             let wf = wf?;

@@ -1,7 +1,13 @@
 //! Cursor metadata and pointer barrier types.
 
 /// Cursor metadata stored for RecolorCursor and bitmap cursor rendering.
+///
+/// `css_name` and `anim_frames` are unused for now — they fed the
+/// browser-side cursor renderer that was removed. Kept populated so
+/// re-introducing the renderer can read them without resurrecting
+/// the parsing code in CreateCursor / RenderCreateAnimCursor.
 #[derive(Clone)]
+#[allow(dead_code)]
 pub(crate) struct CursorInfo {
     pub(crate) css_name: String,
     pub(crate) source_pixmap: u32,

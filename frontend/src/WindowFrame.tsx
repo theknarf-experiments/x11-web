@@ -10,7 +10,6 @@ interface WindowFrameProps {
 	y: number;
 	zIndex: number;
 	color: string;
-	cursor: string;
 	renderer: ClientRenderer;
 	overrideRedirect?: boolean;
 	/** Whether the underlying app supports drag-resize. False for
@@ -58,7 +57,6 @@ export function WindowFrame({
 	y,
 	zIndex,
 	color,
-	cursor,
 	renderer,
 	overrideRedirect,
 	resizable = true,
@@ -741,13 +739,14 @@ export function WindowFrame({
 				<canvas
 					ref={canvasRef}
 					className={s.canvas}
-					style={{
-						cursor,
-						...(borderWidth > 0 ? {
-							border: `${borderWidth}px solid ${argb32ToCss(borderPixel)}`,
-							boxSizing: "content-box",
-						} : {}),
-					}}
+					style={
+						borderWidth > 0
+							? {
+									border: `${borderWidth}px solid ${argb32ToCss(borderPixel)}`,
+									boxSizing: "content-box",
+								}
+							: undefined
+					}
 					data-testid="x11-canvas"
 					tabIndex={0}
 					onPointerDown={(e) => {
@@ -847,13 +846,14 @@ export function WindowFrame({
 			<canvas
 				ref={canvasRef}
 				className={s.canvas}
-				style={{
-					cursor,
-					...(borderWidth > 0 ? {
-						border: `${borderWidth}px solid ${argb32ToCss(borderPixel)}`,
-						boxSizing: "content-box",
-					} : {}),
-				}}
+				style={
+					borderWidth > 0
+						? {
+								border: `${borderWidth}px solid ${argb32ToCss(borderPixel)}`,
+								boxSizing: "content-box",
+							}
+						: undefined
+				}
 				data-testid="x11-canvas"
 				tabIndex={0}
 				onPointerDown={(e) => {

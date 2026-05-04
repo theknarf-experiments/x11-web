@@ -1114,25 +1114,6 @@ fn update_to_window_update(update: DisplayUpdate) -> Option<WindowUpdate> {
         }
         D::WindowFocused { window_id } => WindowUpdate::Focused { window_id },
         D::MenuStructure { window_id, menu } => WindowUpdate::MenuStructure { window_id, menu },
-        D::CursorChanged { window_id, cursor } => WindowUpdate::CursorChanged { window_id, cursor },
-        D::CursorBitmap {
-            window_id,
-            width,
-            height,
-            hotspot_x,
-            hotspot_y,
-            data,
-        } => WindowUpdate::CursorBitmap {
-            window_id,
-            width,
-            height,
-            hotspot_x,
-            hotspot_y,
-            data,
-        },
-        D::CursorAnimated { window_id, frames } => {
-            WindowUpdate::CursorAnimated { window_id, frames }
-        }
         // Lifecycle / Bell / Raised are handled elsewhere.
         _ => return None,
     })

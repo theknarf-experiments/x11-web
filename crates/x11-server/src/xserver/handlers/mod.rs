@@ -919,97 +919,24 @@ fn glyph_to_css_cursor(glyph: u16) -> &'static str {
     }
 }
 
-/// Resolve the effective cursor for a window and emit CursorChanged to the frontend.
-/// When the cursor has pre-rendered bitmap data, also emit CursorBitmap.
-/// Also sends XFixesCursorNotify to any subscribed clients per XFIXES spec.
+/// Resolve the effective cursor for a window and update XFIXES
+/// state.
+///
+/// **Frontend cursor delivery is currently disabled** — the
+/// `DisplayUpdate::Cursor*` variants were removed because the
+/// browser-side rendering never worked end to end. The X11 cursor
+/// resource tables (`state.cursors`, `state.cursor_info`,
+/// `state.current_cursor`) are still populated by Create/Render
+/// cursor handlers and read by `GetCursorImage` etc., so X11 clients
+/// see a coherent cursor story even though the browser doesn't.
+/// Re-introducing browser cursors should resurrect the wire-side
+/// emit logic at <https://git/issue/TODO> (pre-existing diff in the
+/// commit that removed it).
 fn emit_cursor_changed(state: &mut ClientState, wid: u32) {
-    // Resolve the cursor ID and CSS name from the window's cursor resource
+    // Resolve the cursor ID for XFIXES tracking. The CSS name path
+    // and the top-level ancestor walk that previously fed the
+    // frontend emit are gone.
     let cursor_id = state.windows.get(&wid).and_then(|w| w.cursor);
-    let css_cursor = cursor_id
-        .and_then(|cid| state.cursors.get(&cid))
-        .cloned()
-        .unwrap_or_else(|| "default".to_string());
-
-    // Walk up to the top-level ancestor
-    let mut target = wid;
-    for _ in 0..10 {
-        match state.windows.get(&target) {
-            Some(w) if w.parent != state.root_window && w.parent != 0 => {
-                target = w.parent;
-            }
-            _ => break,
-        }
-    }
-
-    if let Some(wid_str) = state.window_uuid(target) {
-        if let Some(cid) = cursor_id {
-            if let Some(info) = state.cursor_info.get(&cid) {
-                // Animated cursor: send all frames to the frontend for timer-based cycling
-                if info.anim_frames.len() >= 2 {
-                    use flate2::write::DeflateEncoder;
-                    use flate2::Compression;
-                    use std::io::Write;
-                    use x11_web_protocol::AnimCursorFrame;
-
-                    let frames: Vec<AnimCursorFrame> = info
-                        .anim_frames
-                        .iter()
-                        .map(|(argb, w, h, hx, hy, delay)| {
-                            let mut encoder = DeflateEncoder::new(Vec::new(), Compression::fast());
-                            let _ = encoder.write_all(argb);
-                            let compressed = encoder.finish().unwrap_or_else(|_| argb.clone());
-                            AnimCursorFrame {
-                                pixels: compressed,
-                                width: *w,
-                                height: *h,
-                                hotspot_x: *hx,
-                                hotspot_y: *hy,
-                                delay_ms: *delay,
-                            }
-                        })
-                        .collect();
-
-                    let _ = state.update_tx.send((
-                        state.client_id.clone(),
-                        DisplayUpdate::CursorAnimated {
-                            window_id: wid_str.clone(),
-                            frames,
-                        },
-                    ));
-                } else if !info.argb_data.is_empty() && info.width > 0 && info.height > 0 {
-                    // Static bitmap cursor
-                    use flate2::write::DeflateEncoder;
-                    use flate2::Compression;
-                    use std::io::Write;
-
-                    let mut encoder = DeflateEncoder::new(Vec::new(), Compression::fast());
-                    let _ = encoder.write_all(&info.argb_data);
-                    let compressed = encoder.finish().unwrap_or_else(|_| info.argb_data.clone());
-
-                    let _ = state.update_tx.send((
-                        state.client_id.clone(),
-                        DisplayUpdate::CursorBitmap {
-                            window_id: wid_str.clone(),
-                            width: info.width,
-                            height: info.height,
-                            hotspot_x: info.hotspot_x,
-                            hotspot_y: info.hotspot_y,
-                            data: compressed,
-                        },
-                    ));
-                }
-            }
-        }
-
-        // Always send CursorChanged as fallback (CSS cursor name)
-        let _ = state.update_tx.send((
-            state.client_id.clone(),
-            DisplayUpdate::CursorChanged {
-                window_id: wid_str,
-                cursor: css_cursor,
-            },
-        ));
-    }
 
     // Update current_cursor tracking for XFIXES GetCursorImage.
     let new_cursor_id = cursor_id.unwrap_or(0);
