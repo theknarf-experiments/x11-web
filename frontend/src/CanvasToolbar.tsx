@@ -1,11 +1,15 @@
+import type { Hotkey } from "@tanstack/react-hotkeys";
 import s from "./CanvasToolbar.module.css";
 import { Tooltip } from "./Tooltip";
 
 export type CanvasTool = "pointer" | "box" | "arrow" | "text" | "pen";
 
 /** The hotkey for each tool, kept here so the toolbar tooltip and
- *  the global hotkey registration in App.tsx stay in lockstep. */
-export const TOOL_HOTKEYS: Record<CanvasTool, string> = {
+ *  the global hotkey registration in App.tsx stay in lockstep.
+ *  Values typed as `Hotkey` (the string-form, not `RawHotkey`
+ *  objects) so `useHotkey` accepts them and the Tooltip's `string`
+ *  prop is happy too. */
+export const TOOL_HOTKEYS: Record<CanvasTool, Hotkey> = {
 	pointer: "V",
 	box: "B",
 	arrow: "A",

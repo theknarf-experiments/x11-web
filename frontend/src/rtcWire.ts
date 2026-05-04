@@ -180,7 +180,7 @@ function decodeThumbnailPayload(
 export function encodeWorkspaceSync(
 	workspaceId: string,
 	message: Uint8Array,
-): Uint8Array {
+): Uint8Array<ArrayBuffer> {
 	const widBytes = new TextEncoder().encode(workspaceId);
 	const textBytes = widBytes.length + 1; // include NUL
 	const textPadded = Math.ceil(textBytes / 8) * 8;

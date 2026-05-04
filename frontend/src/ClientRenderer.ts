@@ -46,14 +46,15 @@ export class ClientRenderer {
 		this.dirty = true;
 	}
 
-	/** Paint a PutImage rectangle from a WebP-encoded payload. */
-	pushPutImage(
-		x: number,
-		y: number,
-		width: number,
-		height: number,
-		encoded: Uint8Array,
-	) {
+	/** Paint a PutImage rectangle from a WebP-encoded payload at
+	 *  `(x, y)`. The rectangle's width/height are taken from the
+	 *  decoded bitmap; the wire-protocol's explicit width/height
+	 *  fields are redundant with that and aren't needed here. The
+	 *  back buffer's size is driven exclusively by `resize()` from
+	 *  the caller (mirroring `WindowDescriptor.{width, height}`);
+	 *  rectangles outside the current canvas just clip and the next
+	 *  frame at the right size paints them. */
+	pushPutImage(x: number, y: number, encoded: Uint8Array) {
 		// Copy out of the chunked-reassembly buffer immediately so the
 		// caller can free its source — `createImageBitmap` may take a
 		// few ms and we want the buffer back ASAP.
@@ -61,12 +62,6 @@ export class ClientRenderer {
 		this.paintChain = this.paintChain
 			.then(() => createImageBitmap(blob))
 			.then((bitmap) => {
-				// No resize logic here — the back buffer's size is
-				// driven exclusively by `resize()` calls from the
-				// caller, which mirror the server's authoritative
-				// `WindowDescriptor.{width, height}`. PutImage rectangles
-				// outside the current canvas just clip; the next
-				// frame at the right size paints them.
 				this.ctx.drawImage(bitmap, x, y);
 				bitmap.close();
 				this.dirty = true;

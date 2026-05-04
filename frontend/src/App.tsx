@@ -265,7 +265,7 @@ function App() {
 					r = new ClientRenderer(msg.width || 1, msg.height || 1);
 					renderers.set(msg.windowId, r);
 				}
-				r.pushPutImage(msg.x, msg.y, msg.width, msg.height, msg.data);
+				r.pushPutImage(msg.x, msg.y, msg.data);
 				return;
 			}
 			if (msg.kind === "thumbnail") {
