@@ -10,6 +10,7 @@ import {
 } from "./db";
 import { Reassembler } from "./rtcReassembler";
 import { decodeFrame, encodeWorkspaceSync } from "./rtcWire";
+import { applyInbound, snapshot } from "./workspaceSync";
 import type {
 	BackendToFrontend,
 	FrontendToBackend,
@@ -237,22 +238,12 @@ export function useBackendSocket() {
 			const controlDc = pc.createDataChannel("control");
 			controlChannelRef.current = controlDc;
 			controlDc.binaryType = "arraybuffer";
-			controlDc.onopen = () => {
+			controlDc.onopen = () =>
 				pushDiagnostic({
 					level: "info",
 					source: "ws",
 					message: "control DC open",
 				});
-				// Slice 1a hello — once the channel is up, send a
-				// frame back so the backend log shows both
-				// directions of the round-trip. Replaced in 1b by
-				// the real Automerge sync handshake.
-				const hello = encodeWorkspaceSync(
-					"hello-test",
-					new TextEncoder().encode("hello-from-frontend"),
-				);
-				controlDc.send(hello);
-			};
 			controlDc.onclose = () =>
 				pushDiagnostic({
 					level: "warn",
@@ -262,11 +253,21 @@ export function useBackendSocket() {
 			controlDc.onmessage = (e) => {
 				const bytes = new Uint8Array(e.data as ArrayBuffer);
 				const frame = decodeFrame(bytes);
-				if (frame?.kind === "workspaceSync") {
+				if (frame?.kind !== "workspaceSync") return;
+				const replies = applyInbound(frame.workspaceId, frame.message);
+				for (const reply of replies) {
+					controlDc.send(encodeWorkspaceSync(frame.workspaceId, reply));
+				}
+				// 1b verification: log the hydrated doc state so we
+				// can confirm the workspace's name made it across.
+				// Will get noisier in slice 2+ when the doc actually
+				// changes on every attach/detach — drop then.
+				const view = snapshot(frame.workspaceId);
+				if (view) {
 					console.log(
-						"control inbound:",
+						"workspace doc:",
 						frame.workspaceId,
-						new TextDecoder().decode(frame.message),
+						JSON.parse(JSON.stringify(view)),
 					);
 				}
 			};

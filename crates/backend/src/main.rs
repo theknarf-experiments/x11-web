@@ -2,6 +2,7 @@ mod chunking;
 mod quic;
 mod rtc;
 mod rtc_codec;
+mod workspace_doc;
 
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
@@ -91,6 +92,12 @@ struct AppState {
     /// auto-attach the window only to that workspace — different
     /// workspaces can run different apps without cross-pollination.
     spawn_origin: Arc<RwLock<HashMap<(String, u32), String>>>,
+    /// Per-workspace Automerge document. Authoritative for
+    /// user-collaborative state (currently just `name`; `attached_
+    /// windows` and `window_positions` migrate in slices 2 and 3).
+    /// Synced over each frontend's control DataChannel via
+    /// `automerge::sync` — see `workspace_doc` module.
+    workspace_docs: Arc<RwLock<HashMap<String, workspace_doc::WorkspaceEntry>>>,
 }
 
 struct SidecarConnection {
@@ -170,6 +177,7 @@ async fn async_main() {
         window_owner: Arc::new(RwLock::new(HashMap::new())),
         pending_spawns: Arc::new(RwLock::new(HashMap::new())),
         spawn_origin: Arc::new(RwLock::new(HashMap::new())),
+        workspace_docs: Arc::new(RwLock::new(HashMap::new())),
     };
 
     let app = Router::new()
@@ -528,51 +536,72 @@ async fn handle_frontend_ws(socket: WebSocket, state: AppState) {
     // ready to receive signalling immediately.
     //
     // `control_inbound_tx` carries raw bytes received on the control
-    // DC. The handler task below decodes the capnp Frame and
-    // dispatches by variant — currently just logging for the slice
-    // 1a hello round-trip, future Automerge sync replaces this.
+    // DC. The handler task below decodes each capnp Frame and dispatches
+    // workspaceSync variants into the Automerge sync protocol — apply
+    // the inbound message, then send any generated reply back over the
+    // control DC.
     let (control_inbound_tx, mut control_inbound_rx) = mpsc::unbounded_channel::<Vec<u8>>();
     let rtc = rtc::spawn(frontend_id.clone(), tx.clone(), control_inbound_tx);
     {
         let frontend_id = frontend_id.clone();
+        let state = state.clone();
         tokio::spawn(async move {
             while let Some(bytes) = control_inbound_rx.recv().await {
-                match rtc_codec::decode_workspace_sync(&bytes) {
-                    Some((workspace_id, message)) => {
-                        info!(
-                            "control inbound from {frontend_id}: workspace_id={workspace_id} \
-                             {} bytes (preview: {:?})",
-                            message.len(),
-                            String::from_utf8_lossy(
-                                &message[..message.len().min(64)],
-                            ),
-                        );
-                    }
-                    None => {
-                        warn!(
-                            "control inbound from {frontend_id}: failed to decode \
-                             workspaceSync ({} bytes)",
-                            bytes.len()
-                        );
-                    }
+                let Some((workspace_id, message)) = rtc_codec::decode_workspace_sync(&bytes)
+                else {
+                    warn!(
+                        "control inbound from {frontend_id}: failed to decode workspaceSync \
+                         ({} bytes)",
+                        bytes.len()
+                    );
+                    continue;
+                };
+                let control_tx = {
+                    let frontends = state.frontends.read().await;
+                    let Some(conn) = frontends.get(&frontend_id) else {
+                        continue;
+                    };
+                    conn.rtc.control_tx.clone()
+                };
+                let mut docs = state.workspace_docs.write().await;
+                let Some(entry) = docs.get_mut(&workspace_id) else {
+                    warn!(
+                        "workspace sync from {frontend_id}: unknown workspace {workspace_id}"
+                    );
+                    continue;
+                };
+                if let Err(e) = entry.receive_sync(&frontend_id, &message) {
+                    warn!("workspace sync receive: {e}");
+                    continue;
+                }
+                while let Some(reply) = entry.generate_sync(&frontend_id) {
+                    let frame = rtc_codec::encode_workspace_sync(&workspace_id, &reply);
+                    let _ = control_tx.send(frame);
                 }
             }
         });
     }
 
-    // Slice 1a hello: when the control DC opens, send a single
-    // workspaceSync frame so we can verify the round-trip end to
-    // end. Replaced in 1b by the real Automerge sync handshake.
+    // Kick the initial sync round when the control DC opens. The
+    // workspace_id may not be set yet (the frontend's OpenWorkspace
+    // can arrive before or after the DC opens); if it's missing we
+    // skip — the OpenWorkspace handler kicks too, so whichever event
+    // arrives last triggers the round.
     {
+        let frontend_id = frontend_id.clone();
+        let state = state.clone();
         let control_opened = rtc.control_opened.clone();
-        let control_tx = rtc.control_tx.clone();
         tokio::spawn(async move {
             control_opened.notified().await;
-            let bytes = rtc_codec::encode_workspace_sync(
-                "hello-test",
-                b"hello-from-backend",
-            );
-            let _ = control_tx.send(bytes);
+            let ws_id = {
+                let frontends = state.frontends.read().await;
+                frontends
+                    .get(&frontend_id)
+                    .and_then(|c| c.workspace_id.clone())
+            };
+            if let Some(ws) = ws_id {
+                kick_workspace_sync(&state, &frontend_id, &ws).await;
+            }
         });
     }
 
@@ -680,6 +709,10 @@ async fn handle_frontend_ws(socket: WebSocket, state: AppState) {
                 }
                 let workspace_id = workspace.id.clone();
                 let _ = tx.send(BackendToFrontend::Workspace { workspace });
+                // Kick the Automerge sync handshake. No-op if the
+                // control DC hasn't opened yet — the rtc-task's
+                // control_opened watcher will fire it then instead.
+                kick_workspace_sync(&state, &frontend_id, &workspace_id).await;
                 // Send the current attached-window set for the
                 // workspace this frontend just bound to. Any X11
                 // windows that auto-attached before connect appear
@@ -817,6 +850,14 @@ async fn handle_frontend_ws(socket: WebSocket, state: AppState) {
     // Frontend disconnected
     info!("Frontend disconnected: {}", frontend_id);
     state.frontends.write().await.remove(&frontend_id);
+    // Drop per-peer sync state in every workspace doc — peer_states
+    // would otherwise grow unboundedly across reconnects.
+    {
+        let mut docs = state.workspace_docs.write().await;
+        for entry in docs.values_mut() {
+            entry.forget_peer(&frontend_id);
+        }
+    }
     send_task.abort();
 }
 
@@ -1044,12 +1085,55 @@ async fn open_or_create_workspace(state: &AppState, requested_id: Option<String>
     }
     let id = Uuid::new_v4().to_string();
     let next_index = workspaces.len() + 1;
+    let name = format!("Workspace {next_index}");
     let workspace = Workspace {
         id: id.clone(),
-        name: format!("Workspace {next_index}"),
+        name: name.clone(),
     };
-    workspaces.insert(id, workspace.clone());
+    workspaces.insert(id.clone(), workspace.clone());
+    drop(workspaces);
+    // Seed the Automerge doc with the same name. Frontends will
+    // pick this up via the sync protocol once they bind to the
+    // workspace and the control DC is open.
+    state
+        .workspace_docs
+        .write()
+        .await
+        .entry(id)
+        .or_insert_with(|| workspace_doc::WorkspaceEntry::new(&name));
     workspace
+}
+
+/// Drive a sync round for one (frontend, workspace) pair. Generates
+/// outbound sync messages until the peer is caught up, encodes each
+/// as a capnp `WorkspaceSync` frame, and pushes onto the control DC.
+/// Safe to call repeatedly — `generate_sync_message` returns `None`
+/// when there's nothing to send.
+async fn kick_workspace_sync(state: &AppState, frontend_id: &str, workspace_id: &str) {
+    use std::sync::atomic::Ordering;
+    let (control_tx, control_open) = {
+        let frontends = state.frontends.read().await;
+        let Some(conn) = frontends.get(frontend_id) else {
+            return;
+        };
+        (
+            conn.rtc.control_tx.clone(),
+            conn.rtc.control_open.load(Ordering::Acquire),
+        )
+    };
+    if !control_open {
+        // Caller will retry once the DC opens.
+        return;
+    }
+    let mut docs = state.workspace_docs.write().await;
+    let Some(entry) = docs.get_mut(workspace_id) else {
+        warn!("kick_workspace_sync: no doc for workspace {workspace_id}");
+        return;
+    };
+    while let Some(msg) = entry.generate_sync(frontend_id) {
+        let bytes = rtc_codec::encode_workspace_sync(workspace_id, &msg);
+        let _ = control_tx.send(bytes);
+    }
 }
 
 /// Translate a sidecar-emitted [`DisplayUpdate`] into the

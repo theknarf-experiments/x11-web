@@ -1,0 +1,160 @@
+//! Per-workspace Automerge document.
+//!
+//! Each workspace is a CRDT doc shared between the backend and every
+//! frontend bound to that workspace. The schema below is the single
+//! source of truth for the doc shape; autosurgeon's `Reconcile` /
+//! `Hydrate` derives handle the struct ↔ doc projection so we stay in
+//! ordinary Rust types instead of touching Automerge ops directly.
+//!
+//! Authority boundary: only state that is genuinely *user-collaborative
+//! across frontends* lives in here. Sidecar-driven state (window
+//! dimensions, focus, X server position for popups) stays in the
+//! backend's `window_track` HashMap and continues to flow downstream
+//! via `WindowList`. The doc holds the user's choices: which windows
+//! they've attached, where they've placed them.
+//!
+//! The sync protocol is `automerge::sync` — symmetric peer-to-peer
+//! sync messages. The backend acts as a peer + persistence keeper;
+//! frontends are the other peers. The control DC carries the raw
+//! `automerge::sync::Message::encode` bytes.
+//!
+//! Slice 1b only ships `name`. `attached_windows` and
+//! `window_positions` come in slices 2 and 3.
+
+use std::collections::HashMap;
+
+use automerge::sync::{State as SyncState, SyncDoc};
+use automerge::AutoCommit;
+use autosurgeon::{hydrate, reconcile, Hydrate, Reconcile};
+
+#[derive(Debug, Clone, Default, Reconcile, Hydrate)]
+pub struct WorkspaceDoc {
+    /// Display name. Auto-assigned `"Workspace N"` on creation;
+    /// will become user-editable in slice 5.
+    pub name: String,
+    /// Window IDs attached to this workspace's canvas. Map (set
+    /// semantics) so concurrent attaches converge cleanly. The value
+    /// is always `true` and is meaningless — presence is the signal.
+    /// (Autosurgeon's derives don't accept `()` as a value, hence
+    /// `bool`.) Empty in slice 1b — gets populated in slice 2.
+    pub attached_windows: HashMap<String, bool>,
+    /// Per-window tracked position. Empty in slice 1b — populated in
+    /// slice 3, replaces backend's global `window_positions` map.
+    pub window_positions: HashMap<String, Position>,
+}
+
+#[derive(Debug, Clone, Copy, Reconcile, Hydrate)]
+pub struct Position {
+    pub x: f64,
+    pub y: f64,
+}
+
+/// Backend-side state for one workspace doc. Holds the doc itself
+/// plus the per-peer sync state — Automerge's sync protocol needs to
+/// remember what each peer has acknowledged so it can ship deltas
+/// rather than re-sending the whole history every round.
+pub struct WorkspaceEntry {
+    pub doc: AutoCommit,
+    /// `frontend_id → SyncState`. Created lazily on first sync from
+    /// that peer.
+    pub peer_states: HashMap<String, SyncState>,
+}
+
+impl WorkspaceEntry {
+    /// Create a fresh empty doc seeded with the given name.
+    pub fn new(name: &str) -> Self {
+        let mut doc = AutoCommit::new();
+        let seed = WorkspaceDoc {
+            name: name.to_string(),
+            attached_windows: HashMap::<String, bool>::new(),
+            window_positions: HashMap::new(),
+        };
+        reconcile(&mut doc, &seed).expect("reconcile fresh workspace doc");
+        Self {
+            doc,
+            peer_states: HashMap::new(),
+        }
+    }
+
+    /// Hydrate the doc into a Rust struct. Cheap, but not free —
+    /// callers should batch reads rather than hydrating per-field.
+    /// Used in slices 2+; kept here so the doc's `attached_windows` /
+    /// `window_positions` are reachable from sync apply paths once we
+    /// migrate them off `AppState`.
+    #[allow(dead_code)]
+    pub fn snapshot(&self) -> WorkspaceDoc {
+        hydrate(&self.doc).expect("workspace doc hydrate")
+    }
+
+    /// Generate the next outbound sync message for `peer_id`, if
+    /// any. Returns `None` when the peer is fully caught up.
+    pub fn generate_sync(&mut self, peer_id: &str) -> Option<Vec<u8>> {
+        let state = self.peer_states.entry(peer_id.to_string()).or_default();
+        self.doc.sync().generate_sync_message(state).map(|m| m.encode())
+    }
+
+    /// Apply an inbound sync message from `peer_id`. The doc may
+    /// change as a result; the caller should follow up with a
+    /// `generate_sync` round to send any reply.
+    pub fn receive_sync(&mut self, peer_id: &str, bytes: &[u8]) -> Result<(), String> {
+        let message = automerge::sync::Message::decode(bytes)
+            .map_err(|e| format!("decode sync message: {e}"))?;
+        let state = self.peer_states.entry(peer_id.to_string()).or_default();
+        self.doc
+            .sync()
+            .receive_sync_message(state, message)
+            .map_err(|e| format!("receive sync message: {e}"))
+    }
+
+    /// Drop a peer's sync state (used on frontend disconnect to
+    /// avoid unbounded growth).
+    pub fn forget_peer(&mut self, peer_id: &str) {
+        self.peer_states.remove(peer_id);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn two_peers_converge_on_initial_state() {
+        // Backend creates a doc with a name; "frontend" is just
+        // another AutoCommit on the other side. Run the sync
+        // protocol to completion (both sides return None) and
+        // verify both have the same hydrated state.
+        let mut backend = WorkspaceEntry::new("Workspace 1");
+        let mut frontend_doc = AutoCommit::new();
+        let mut frontend_state = SyncState::new();
+        let peer = "test-peer";
+
+        // Bounded loop — should converge in <10 rounds.
+        for _ in 0..32 {
+            let to_frontend = backend.generate_sync(peer);
+            let from_frontend = frontend_doc
+                .sync()
+                .generate_sync_message(&mut frontend_state)
+                .map(|m| m.encode());
+
+            if to_frontend.is_none() && from_frontend.is_none() {
+                break;
+            }
+
+            if let Some(bytes) = to_frontend {
+                let msg = automerge::sync::Message::decode(&bytes).unwrap();
+                frontend_doc
+                    .sync()
+                    .receive_sync_message(&mut frontend_state, msg)
+                    .unwrap();
+            }
+            if let Some(bytes) = from_frontend {
+                backend.receive_sync(peer, &bytes).unwrap();
+            }
+        }
+
+        let backend_view = backend.snapshot();
+        let frontend_view: WorkspaceDoc = hydrate(&frontend_doc).unwrap();
+        assert_eq!(backend_view.name, "Workspace 1");
+        assert_eq!(frontend_view.name, "Workspace 1");
+    }
+}
