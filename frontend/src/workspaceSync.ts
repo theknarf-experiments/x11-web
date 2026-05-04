@@ -37,45 +37,64 @@ const LINE_HEIGHT_MULTIPLIER = 1.3;
 export const FONT_MIN = 8;
 export const FONT_MAX = 200;
 
-/** Update an `@ocif/path` node's geometry — path string + bounds
- *  in one mutation. Used by the live drawing flow: every
- *  pointermove during a stroke recomputes the path through
- *  perfect-freehand and writes here. Sibling tabs see the stroke
- *  grow without waiting for pointerup. */
-export function setOcifNodePathLive(
+/** Append one input sample to a path node's `points` list.
+ *
+ *  This is the hot path during a freehand stroke: one pointermove
+ *  ⇒ one helper call ⇒ one Automerge list-push of three floats.
+ *  Per-sample wire delta is constant regardless of how long the
+ *  stroke is, and concurrent appends merge correctly via list
+ *  semantics. The smoothed SVG path is computed at render time —
+ *  the doc only ever stores raw input. */
+export function appendOcifNodePathPoint(
 	workspaceId: string,
 	id: string,
-	data: {
-		x: number;
-		y: number;
-		width: number;
-		height: number;
-		path: string;
-	},
+	point: [number, number, number],
 ) {
 	const entry = ensure(workspaceId);
 	if (!(entry.doc.nodes ?? {})[id]) return;
 	entry.doc = Automerge.change(entry.doc, (d) => {
 		const n = d.nodes?.[id];
 		if (!n || !n.path) return;
-		n.x = data.x;
-		n.y = data.y;
-		n.width = data.width;
-		n.height = data.height;
-		n.path.path = data.path;
+		n.path.points.push(point[0], point[1], point[2]);
 	});
-	notify(workspaceId);
-	ship(workspaceId, drainOutbound(entry));
+	scheduleFlush(workspaceId);
 }
 
-/** Convert raw input points (canvas coords, optional pressure)
- *  into an `@ocif/path`-compatible payload via perfect-freehand.
- *  Returns the SVG path string in node-local coords plus the
- *  bounding box in canvas coords — caller stores the bounds on
- *  the node and the path on the `@ocif/path` extension. */
-export function buildPathFromInkPoints(
-	inputPoints: Array<[number, number, number?]>,
-): { x: number; y: number; width: number; height: number; path: string } | null {
+/** Run perfect-freehand on a flat `[x, y, p, x, y, p, ...]` list
+ *  and produce a smoothed SVG path string in the same coord space
+ *  as the inputs. Returns `null` for inputs that can't form a
+ *  stroke (< 2 samples, or perfect-freehand collapsed them).
+ *
+ *  Called by `OcifPath` on every render — pure function of
+ *  `points`, so memoize on the array reference. */
+export function svgPathFromPoints(points: number[]): string | null {
+	if (points.length < 6) return null;
+	const inputPoints: Array<[number, number, number]> = [];
+	for (let i = 0; i + 2 < points.length; i += 3) {
+		inputPoints.push([points[i], points[i + 1], points[i + 2]]);
+	}
+	if (inputPoints.length < 2) return null;
+	const stroke = getStroke(inputPoints, {
+		size: 6,
+		thinning: 0.6,
+		smoothing: 0.5,
+		streamline: 0.5,
+		simulatePressure: true,
+	});
+	if (stroke.length < 2) return null;
+	return svgPathFromPolygon(stroke);
+}
+
+/** Bounds of the smoothed stroke in input-coord space. Returns
+ *  `null` for inputs that can't form a stroke. */
+export function pathBoundsFromPoints(
+	points: number[],
+): { minX: number; minY: number; width: number; height: number } | null {
+	if (points.length < 6) return null;
+	const inputPoints: Array<[number, number, number]> = [];
+	for (let i = 0; i + 2 < points.length; i += 3) {
+		inputPoints.push([points[i], points[i + 1], points[i + 2]]);
+	}
 	if (inputPoints.length < 2) return null;
 	const stroke = getStroke(inputPoints, {
 		size: 6,
@@ -95,17 +114,11 @@ export function buildPathFromInkPoints(
 		if (x > maxX) maxX = x;
 		if (y > maxY) maxY = y;
 	}
-	// Translate stroke into node-local coords so the SVG renders
-	// from (0, 0) inside the node container.
-	const localPath = svgPathFromPolygon(
-		stroke.map(([x, y]) => [x - minX, y - minY]),
-	);
 	return {
-		x: minX,
-		y: minY,
+		minX,
+		minY,
 		width: Math.max(1, maxX - minX),
 		height: Math.max(1, maxY - minY),
-		path: localPath,
 	};
 }
 
@@ -284,11 +297,13 @@ export interface RectExt {
 	fill_color?: string;
 }
 
-/** `@ocif/path` — SVG-like path commands and stroke styling.
- *  Coordinates are local to the node (origin at the top-left of
- *  the node's bounds). */
+/** `@ocif/path` — raw freehand input samples. `points` is a flat
+ *  list of `[x, y, pressure, x, y, pressure, ...]` triples in
+ *  node-local coords (origin = the first sampled canvas point).
+ *  The renderer runs perfect-freehand on these at draw time;
+ *  we never serialize the smoothed SVG path into the doc. */
 export interface PathExt {
-	path: string;
+	points: number[];
 	stroke_width?: number;
 	stroke_color?: string;
 	fill_color?: string;
@@ -373,6 +388,43 @@ function notify(workspaceId: string) {
 	listeners.get(workspaceId)?.forEach((fn) => fn());
 }
 
+/** RAF-batched flush scheduler. The doc is mutated synchronously
+ *  inside helpers (so subsequent reads see the latest state), but
+ *  the side effects — notifying React subscribers (which kicks the
+ *  TanstackDB projection) and shipping outbound sync messages —
+ *  are coalesced into one batch per animation frame.
+ *
+ *  Concretely, a high-frequency drag (pen draw, text edit) goes
+ *  from one O(N) projection + one sync send per keystroke (60Hz)
+ *  to one of each per RAF tick. Each RAF flush still ships every
+ *  delta accumulated since the last flush, so peers stay
+ *  consistent — Automerge's sync protocol bundles the missing
+ *  changes into one message. Pattern modeled on Automerge Repo's
+ *  `DocSynchronizer`, which throttles its `#syncWithPeers` to
+ *  100ms; we use RAF (≈16ms) since both peers are typically on
+ *  the same machine and bandwidth isn't the constraint. */
+const dirtyWorkspaces = new Set<string>();
+let rafScheduled = false;
+
+function scheduleFlush(workspaceId: string) {
+	dirtyWorkspaces.add(workspaceId);
+	if (rafScheduled) return;
+	rafScheduled = true;
+	requestAnimationFrame(flushDirty);
+}
+
+function flushDirty() {
+	rafScheduled = false;
+	const ids = [...dirtyWorkspaces];
+	dirtyWorkspaces.clear();
+	for (const id of ids) {
+		const entry = docs.get(id);
+		if (!entry) continue;
+		notify(id);
+		ship(id, drainOutbound(entry));
+	}
+}
+
 function ensure(workspaceId: string): PerWorkspace {
 	let entry = docs.get(workspaceId);
 	if (!entry) {
@@ -385,13 +437,11 @@ function ensure(workspaceId: string): PerWorkspace {
 	return entry;
 }
 
-/** Apply an inbound sync message and return any reply messages the
- *  protocol wants to ship back. Drain to empty so the handshake
- *  converges in as few round-trips as possible. */
-export function applyInbound(
-	workspaceId: string,
-	message: Uint8Array,
-): Uint8Array[] {
+/** Apply an inbound sync message. Updates the doc + per-peer
+ *  sync state synchronously, then schedules a RAF flush which
+ *  notifies subscribers and ships any reply messages. The caller
+ *  doesn't need to forward replies — the scheduler does it. */
+export function applyInbound(workspaceId: string, message: Uint8Array): void {
 	const entry = ensure(workspaceId);
 	const [newDoc, newState] = Automerge.receiveSyncMessage(
 		entry.doc,
@@ -400,8 +450,7 @@ export function applyInbound(
 	);
 	entry.doc = newDoc;
 	entry.syncState = newState;
-	notify(workspaceId);
-	return drainOutbound(entry);
+	scheduleFlush(workspaceId);
 }
 
 /** Generate any outbound sync messages we have queued for the peer.
@@ -452,8 +501,7 @@ export function setName(workspaceId: string, name: string) {
 	entry.doc = Automerge.change(entry.doc, (d) => {
 		d.name = name;
 	});
-	notify(workspaceId);
-	ship(workspaceId, drainOutbound(entry));
+	scheduleFlush(workspaceId);
 }
 
 /** Read the set of window ids currently attached to the workspace.
@@ -478,8 +526,7 @@ export function attachWindow(workspaceId: string, windowId: string) {
 		if (!d.attached_windows) d.attached_windows = {};
 		d.attached_windows[windowId] = true;
 	});
-	notify(workspaceId);
-	ship(workspaceId, drainOutbound(entry));
+	scheduleFlush(workspaceId);
 }
 
 /** Remove `windowId` from the workspace's attached set. */
@@ -489,8 +536,7 @@ export function detachWindow(workspaceId: string, windowId: string) {
 	entry.doc = Automerge.change(entry.doc, (d) => {
 		if (d.attached_windows) delete d.attached_windows[windowId];
 	});
-	notify(workspaceId);
-	ship(workspaceId, drainOutbound(entry));
+	scheduleFlush(workspaceId);
 }
 
 /** Read the tracked position for `windowId`, or `null` if no
@@ -543,8 +589,7 @@ export function setPosition(
 		if (!d.window_positions) d.window_positions = {};
 		d.window_positions[windowId] = { x, y };
 	});
-	notify(workspaceId);
-	ship(workspaceId, drainOutbound(entry));
+	scheduleFlush(workspaceId);
 }
 
 /** Drop our local doc + sync state for a workspace. Currently
@@ -574,7 +619,17 @@ export function getOcifNodes(workspaceId: string): Map<string, OcifNode> {
 			width: v.width,
 			height: v.height,
 			rect: v.rect ? { ...v.rect } : undefined,
-			path: v.path ? { ...v.path } : undefined,
+			// `points` is an Automerge list proxy; copy to a plain
+			// array so consumers can `useMemo` on it and React
+			// equality checks behave predictably.
+			path: v.path
+				? {
+						points: v.path.points ? Array.from(v.path.points) : [],
+						stroke_width: v.path.stroke_width,
+						stroke_color: v.path.stroke_color,
+						fill_color: v.path.fill_color,
+					}
+				: undefined,
 			arrow: v.arrow ? { ...v.arrow } : undefined,
 			edge: v.edge ? { ...v.edge } : undefined,
 			text_style: v.text_style ? { ...v.text_style } : undefined,
@@ -633,14 +688,31 @@ export function insertOcifNode(
 			height: measured?.height ?? node.height,
 			resource: resourceId,
 			...(node.rect ? { rect: { ...node.rect } } : {}),
-			...(node.path ? { path: { ...node.path } } : {}),
+			...(node.path
+				? {
+						// Build the PathExt with only defined fields —
+						// Automerge throws on `undefined` assignments to
+						// optional scalars.
+						path: {
+							points: node.path.points ? [...node.path.points] : [],
+							...(node.path.stroke_width !== undefined
+								? { stroke_width: node.path.stroke_width }
+								: {}),
+							...(node.path.stroke_color !== undefined
+								? { stroke_color: node.path.stroke_color }
+								: {}),
+							...(node.path.fill_color !== undefined
+								? { fill_color: node.path.fill_color }
+								: {}),
+						},
+					}
+				: {}),
 			...(node.arrow ? { arrow: { ...node.arrow } } : {}),
 			...(node.edge ? { edge: { ...node.edge } } : {}),
 			...(node.text_style ? { text_style: { ...node.text_style } } : {}),
 		};
 	});
-	notify(workspaceId);
-	ship(workspaceId, drainOutbound(entry));
+	scheduleFlush(workspaceId);
 }
 
 /** Update a node's position. Optimistic — caller can patch local
@@ -659,8 +731,7 @@ export function setOcifNodePosition(
 		n.x = x;
 		n.y = y;
 	});
-	notify(workspaceId);
-	ship(workspaceId, drainOutbound(entry));
+	scheduleFlush(workspaceId);
 }
 
 /** Update a node's size. */
@@ -678,8 +749,7 @@ export function setOcifNodeSize(
 		n.width = width;
 		n.height = height;
 	});
-	notify(workspaceId);
-	ship(workspaceId, drainOutbound(entry));
+	scheduleFlush(workspaceId);
 }
 
 /** Update a node's bounds (position + size) in a single mutation —
@@ -703,8 +773,7 @@ export function setOcifNodeBounds(
 		n.width = width;
 		n.height = height;
 	});
-	notify(workspaceId);
-	ship(workspaceId, drainOutbound(entry));
+	scheduleFlush(workspaceId);
 }
 
 /** Set a node's text content. Routes through the OCIF resource
@@ -732,8 +801,7 @@ export function setOcifNodeText(
 			n.height = bounds.height;
 		}
 	});
-	notify(workspaceId);
-	ship(workspaceId, drainOutbound(entry));
+	scheduleFlush(workspaceId);
 }
 
 /** Set a text-only node's font size (in `@ocif/textstyle.font_size_px`).
@@ -777,8 +845,7 @@ export function setOcifNodeFontSize(
 			}
 		}
 	});
-	notify(workspaceId);
-	ship(workspaceId, drainOutbound(entry));
+	scheduleFlush(workspaceId);
 }
 
 /** Helper — write a `text/plain` representation through the
@@ -883,8 +950,7 @@ export function setOcifArrowEndpoints(
 		n.width = Math.abs(endX - startX);
 		n.height = Math.abs(endY - startY);
 	});
-	notify(workspaceId);
-	ship(workspaceId, drainOutbound(entry));
+	scheduleFlush(workspaceId);
 }
 
 export type ArrowAnchor =
@@ -943,8 +1009,7 @@ export function setOcifArrowAnchor(
 		n.width = Math.abs(ex - sx);
 		n.height = Math.abs(ey - sy);
 	});
-	notify(workspaceId);
-	ship(workspaceId, drainOutbound(entry));
+	scheduleFlush(workspaceId);
 }
 
 
@@ -964,6 +1029,5 @@ export function deleteOcifNode(workspaceId: string, id: string) {
 			}
 		}
 	});
-	notify(workspaceId);
-	ship(workspaceId, drainOutbound(entry));
+	scheduleFlush(workspaceId);
 }

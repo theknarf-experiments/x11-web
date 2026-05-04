@@ -1,5 +1,6 @@
-import { useCallback } from "react";
+import { useCallback, useMemo } from "react";
 import s from "./OcifPath.module.css";
+import { pathBoundsFromPoints, svgPathFromPoints } from "./workspaceSync";
 import type { OcifNode } from "./workspaceSync";
 
 interface OcifPathProps {
@@ -15,13 +16,15 @@ interface OcifPathProps {
 
 const DEFAULT_FILL = "#ffffff";
 
-/** One `@ocif/path` node — a freehand stroke or any other vector
- *  path. The path commands are stored in node-local coords; the
- *  SVG container sits at the node's bounds so the path renders
- *  in place. The freehand pipeline produces a closed filled
- *  polygon (perfect-freehand outputs the stroke OUTLINE), so
- *  `fill_color` carries the drawn color while `stroke_*` are
- *  typically unused. */
+/** One `@ocif/path` node — a freehand stroke. The doc carries the
+ *  raw input samples (flat `[x, y, p, ...]` triples in node-local
+ *  coords); we run perfect-freehand here at render time to get the
+ *  smoothed polygon outline and the matching SVG path string.
+ *
+ *  Bounds also come from the smoothed polygon — `node.x/y` is the
+ *  anchor (the first sampled canvas point), but the polygon may
+ *  extend in any direction from there, so the SVG container is
+ *  positioned at `(node.x + bounds.minX, node.y + bounds.minY)`. */
 export function OcifPath({
 	id,
 	node,
@@ -37,9 +40,17 @@ export function OcifPath({
 		},
 		[id, onPointerDown, interactive],
 	);
-	const path = node.path;
-	if (!path) return null;
-	const fill = path.fill_color ?? DEFAULT_FILL;
+	const points = node.path?.points;
+	const pathStr = useMemo(
+		() => (points ? svgPathFromPoints(points) : null),
+		[points],
+	);
+	const bounds = useMemo(
+		() => (points ? pathBoundsFromPoints(points) : null),
+		[points],
+	);
+	if (!node.path || !pathStr || !bounds) return null;
+	const fill = node.path.fill_color ?? DEFAULT_FILL;
 	const className = selected ? s.selected : s.path;
 	return (
 		<div
@@ -48,26 +59,26 @@ export function OcifPath({
 			className={className}
 			style={{
 				position: "absolute",
-				left: node.x,
-				top: node.y,
-				width: node.width,
-				height: node.height,
+				left: node.x + bounds.minX,
+				top: node.y + bounds.minY,
+				width: bounds.width,
+				height: bounds.height,
 				zIndex: Math.round(node.z),
 			}}
 		>
 			<svg
-				width={node.width}
-				height={node.height}
-				viewBox={`0 0 ${node.width} ${node.height}`}
+				width={bounds.width}
+				height={bounds.height}
+				viewBox={`${bounds.minX} ${bounds.minY} ${bounds.width} ${bounds.height}`}
 				preserveAspectRatio="none"
 				// SVG itself ignores hits — only the path catches
 				// events. Otherwise the SVG's bounding rect (often
 				// much larger than the visible ink) would intercept
 				// clicks on transparent pixels.
-				style={{ pointerEvents: "none" }}
+				style={{ pointerEvents: "none", overflow: "visible" }}
 			>
 				<path
-					d={path.path}
+					d={pathStr}
 					fill={fill}
 					// Transparent wider stroke = invisible hit area
 					// around the visible ink so thin strokes stay

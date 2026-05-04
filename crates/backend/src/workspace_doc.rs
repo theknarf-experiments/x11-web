@@ -77,9 +77,12 @@ pub struct OcifNode {
     pub height: f64,
     /// `@ocif/rect` extension.
     pub rect: Option<RectExt>,
-    /// `@ocif/path` extension. The path string is in node-local
-    /// coords starting at (0, 0), so the rendered SVG sits at the
-    /// node's `(x, y)` and fills its `(width, height)`.
+    /// `@ocif/path` extension. Stored as a flat list of input
+    /// samples in node-local coords; the renderer runs
+    /// perfect-freehand on them at draw time. Append-only during a
+    /// stroke so concurrent edits merge cleanly via Automerge list
+    /// semantics — the wire delta per sample is just three pushed
+    /// floats.
     pub path: Option<PathExt>,
     /// `@ocif/arrow` extension. For free-floating arrows the
     /// `start_x/y/end_x/y` are the visual endpoints. For connected
@@ -111,15 +114,20 @@ pub struct RectExt {
     pub fill_color: Option<String>,
 }
 
-/// `@ocif/path` — SVG-like path commands plus styling. The
-/// freehand-pen pipeline stores the smoothed stroke as a closed
-/// filled polygon (SVG path with `Z`), so `fill_color` carries the
-/// drawn color and `stroke_width` / `stroke_color` are typically
-/// unused. Path coordinates are local to the node — `(0, 0)` is
-/// the top-left of the node's bounds.
+/// `@ocif/path` — raw input samples for a freehand stroke. Stored
+/// as a flat list of `(x, y, pressure)` triples in node-local
+/// coords (origin = the first sampled canvas point). The renderer
+/// runs perfect-freehand on these at draw time and emits a closed
+/// filled polygon — `fill_color` carries the drawn color, and
+/// `stroke_width` / `stroke_color` are typically unused.
+///
+/// Append-only during a stroke: each pointermove pushes three
+/// floats onto `points`. That's the wire delta — concurrent peers
+/// merge cleanly via Automerge's list semantics, and the round-
+/// trip is bounded regardless of how long the stroke gets.
 #[derive(Debug, Clone, Default, Reconcile, Hydrate)]
 pub struct PathExt {
-    pub path: String,
+    pub points: Vec<f64>,
     pub stroke_width: Option<f64>,
     pub stroke_color: Option<String>,
     pub fill_color: Option<String>,

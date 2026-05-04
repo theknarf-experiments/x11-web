@@ -41,7 +41,7 @@ import {
 } from "./useBackendSocket";
 import { WindowFrame } from "./WindowFrame";
 import {
-	buildPathFromInkPoints,
+	appendOcifNodePathPoint,
 	deleteOcifNode,
 	FONT_MAX,
 	FONT_MIN,
@@ -53,7 +53,6 @@ import {
 	setOcifArrowEndpoints,
 	setOcifNodeBounds,
 	setOcifNodeFontSize,
-	setOcifNodePathLive,
 	setOcifNodePosition,
 	setOcifNodeText,
 	setPosition as setWorkspacePosition,
@@ -467,31 +466,52 @@ function App() {
 			const toCanvas = pageToCanvasRef.current;
 			if (!toCanvas) return;
 			const p = toCanvas(ev.clientX, ev.clientY);
-			// Pen: side effects (insert / live-update the node)
-			// happen outside the state updater so React Strict
-			// Mode's dev-double-invoke can't fire them twice.
+			// Pen: side effects (insert / append) happen outside
+			// the state updater so React Strict Mode's dev-double-
+			// invoke can't fire them twice.
+			//
+			// Wire shape: the node is anchored at the FIRST sampled
+			// canvas point (`node.x/y`); each subsequent sample is
+			// stored as an `(lx, ly, p)` triple offset from that
+			// anchor. Inserting the node seeds `points` with all
+			// samples collected so far (≥ 2, including the
+			// pointerdown sample); every later pointermove pushes
+			// just one triple via `appendOcifNodePathPoint`. That's
+			// the wire delta — three Automerge list-pushes per
+			// frame, regardless of stroke length.
 			const cur = drawingRef.current;
 			if (cur?.kind === "pen") {
-				const newPoints: Array<[number, number, number]> = [
-					...cur.points,
-					[p.x, p.y, ev.pressure || 0.5],
+				const sample: [number, number, number] = [
+					p.x,
+					p.y,
+					ev.pressure || 0.5,
 				];
-				const built = buildPathFromInkPoints(newPoints);
+				const newPoints = [...cur.points, sample];
 				let nodeId = cur.nodeId;
-				if (built && !nodeId) {
+				if (!nodeId && newPoints.length >= 2) {
+					const [fx, fy] = cur.points[0];
 					nodeId = crypto.randomUUID();
 					const z = maxNodeZRef.current + 1;
 					maxNodeZRef.current = z;
+					const flat: number[] = [];
+					for (const [px, py, pp] of newPoints) {
+						flat.push(px - fx, py - fy, pp);
+					}
 					insertOcifNode(activeWorkspace.id, nodeId, {
-						x: built.x,
-						y: built.y,
+						x: fx,
+						y: fy,
 						z,
-						width: built.width,
-						height: built.height,
-						path: { path: built.path, fill_color: "#ffffff" },
+						width: 0,
+						height: 0,
+						path: { points: flat, fill_color: "#ffffff" },
 					});
-				} else if (built && nodeId) {
-					setOcifNodePathLive(activeWorkspace.id, nodeId, built);
+				} else if (nodeId) {
+					const [fx, fy] = cur.points[0];
+					appendOcifNodePathPoint(activeWorkspace.id, nodeId, [
+						p.x - fx,
+						p.y - fy,
+						ev.pressure || 0.5,
+					]);
 				}
 				setDrawing({
 					kind: "pen",

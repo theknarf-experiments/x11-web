@@ -15,7 +15,7 @@ import {
 	windowsCollection,
 } from "./db";
 import { Reassembler } from "./rtcReassembler";
-import { decodeFrame, encodeWorkspaceSync } from "./rtcWire";
+import { decodeFrame } from "./rtcWire";
 import {
 	applyInbound,
 	attachWindow as attachWindowDoc,
@@ -268,10 +268,10 @@ export function useBackendSocket() {
 				const bytes = new Uint8Array(e.data as ArrayBuffer);
 				const frame = decodeFrame(bytes);
 				if (frame?.kind !== "workspaceSync") return;
-				const replies = applyInbound(frame.workspaceId, frame.message);
-				for (const reply of replies) {
-					controlDc.send(encodeWorkspaceSync(frame.workspaceId, reply));
-				}
+				// `applyInbound` schedules a RAF flush; sync replies
+				// (and any locally-mutated outbound) ship via the
+				// scheduler against the registered control DC.
+				applyInbound(frame.workspaceId, frame.message);
 			};
 
 			pc.createOffer()
