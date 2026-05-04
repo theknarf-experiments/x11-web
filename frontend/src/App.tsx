@@ -14,7 +14,12 @@ import {
 	setFocusedWindow,
 	windowsCollection,
 } from "./db";
-import { CanvasToolbar, type CanvasTool } from "./CanvasToolbar";
+import { useHotkey } from "@tanstack/react-hotkeys";
+import {
+	CanvasToolbar,
+	type CanvasTool,
+	TOOL_HOTKEYS,
+} from "./CanvasToolbar";
 import { GlobalMenuBar } from "./GlobalMenuBar";
 import { InfiniteCanvas } from "./InfiniteCanvas";
 import { OcifArrow } from "./OcifArrow";
@@ -135,9 +140,12 @@ function App() {
 	/** Focus policy setting. */
 	const [focusPolicy, setFocusPolicy] = useState<FocusPolicy>("click-to-focus");
 
-	/** Active canvas tool — "pointer" (default) or "box" (drag to
-	 *  draw an `@ocif/rect` node). */
+	/** Active canvas tool — "pointer" (default), "box", or "arrow".
+	 *  Hotkeys (V / B / A) registered below. */
 	const [tool, setTool] = useState<CanvasTool>("pointer");
+	useHotkey(TOOL_HOTKEYS.pointer, () => setTool("pointer"));
+	useHotkey(TOOL_HOTKEYS.box, () => setTool("box"));
+	useHotkey(TOOL_HOTKEYS.arrow, () => setTool("arrow"));
 	/** Local preview while the user is drag-creating a shape.
 	 *  Not synced — peers see the shape only on commit (pointerup).
 	 *  For arrows, `startNodeId` / `endNodeId` are the boxes the

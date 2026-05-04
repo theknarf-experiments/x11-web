@@ -41,17 +41,18 @@
 	border-color: rgba(255, 255, 255, 0.25);
 }
 
-/* Pure-CSS tooltip: appears to the right of the button after a
- * short hover/focus delay. Read on hover or keyboard focus; the
- * `aria-label` covers screen readers separately. */
-.button[data-tooltip]::after,
-.buttonActive[data-tooltip]::after {
-	content: attr(data-tooltip);
+/* Tooltip rendered as an inner span so we can lay out the label
+ * and the hotkey badge separately. Anchored to the right of the
+ * button; appears on hover or keyboard focus after a short delay. */
+.tooltip {
 	position: absolute;
 	left: calc(100% + 10px);
 	top: 50%;
 	transform: translateY(-50%);
-	padding: 4px 8px;
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	padding: 4px 6px 4px 8px;
 	background: rgba(28, 28, 30, 0.95);
 	color: rgba(255, 255, 255, 0.95);
 	font-size: 12px;
@@ -71,9 +72,29 @@
 	z-index: 1000;
 }
 
-.button[data-tooltip]:hover::after,
-.button[data-tooltip]:focus-visible::after,
-.buttonActive[data-tooltip]:hover::after,
-.buttonActive[data-tooltip]:focus-visible::after {
+.button:hover .tooltip,
+.button:focus-visible .tooltip,
+.buttonActive:hover .tooltip,
+.buttonActive:focus-visible .tooltip {
 	opacity: 1;
+}
+
+.tooltipLabel {
+	font-weight: 500;
+}
+
+.tooltipKey {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	min-width: 16px;
+	height: 16px;
+	padding: 0 4px;
+	border-radius: 3px;
+	background: rgba(255, 255, 255, 0.14);
+	border: 1px solid rgba(255, 255, 255, 0.18);
+	font-size: 10px;
+	font-weight: 600;
+	letter-spacing: 0.02em;
+	color: rgba(255, 255, 255, 0.9);
 }

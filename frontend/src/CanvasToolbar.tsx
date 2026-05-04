@@ -2,6 +2,14 @@ import s from "./CanvasToolbar.module.css";
 
 export type CanvasTool = "pointer" | "box" | "arrow";
 
+/** The hotkey for each tool, kept here so the toolbar tooltip and
+ *  the global hotkey registration in App.tsx stay in lockstep. */
+export const TOOL_HOTKEYS: Record<CanvasTool, string> = {
+	pointer: "V",
+	box: "B",
+	arrow: "A",
+};
+
 interface CanvasToolbarProps {
 	tool: CanvasTool;
 	onSelect: (tool: CanvasTool) => void;
@@ -16,6 +24,7 @@ export function CanvasToolbar({ tool, onSelect }: CanvasToolbarProps) {
 			<ToolButton
 				active={tool === "pointer"}
 				label="Pointer"
+				hotkey={TOOL_HOTKEYS.pointer}
 				onClick={() => onSelect("pointer")}
 			>
 				<svg viewBox="0 0 16 16" width={16} height={16}>
@@ -31,6 +40,7 @@ export function CanvasToolbar({ tool, onSelect }: CanvasToolbarProps) {
 			<ToolButton
 				active={tool === "box"}
 				label="Box"
+				hotkey={TOOL_HOTKEYS.box}
 				onClick={() => onSelect("box")}
 			>
 				<svg viewBox="0 0 16 16" width={16} height={16}>
@@ -48,6 +58,7 @@ export function CanvasToolbar({ tool, onSelect }: CanvasToolbarProps) {
 			<ToolButton
 				active={tool === "arrow"}
 				label="Arrow"
+				hotkey={TOOL_HOTKEYS.arrow}
 				onClick={() => onSelect("arrow")}
 			>
 				<svg viewBox="0 0 16 16" width={16} height={16}>
@@ -71,6 +82,7 @@ export function CanvasToolbar({ tool, onSelect }: CanvasToolbarProps) {
 function ToolButton(props: {
 	active: boolean;
 	label: string;
+	hotkey: string;
 	onClick: () => void;
 	children: React.ReactNode;
 }) {
@@ -78,12 +90,16 @@ function ToolButton(props: {
 		<button
 			type="button"
 			className={props.active ? s.buttonActive : s.button}
-			data-tooltip={props.label}
-			aria-label={props.label}
+			aria-label={`${props.label} (${props.hotkey})`}
 			aria-pressed={props.active}
+			aria-keyshortcuts={props.hotkey}
 			onClick={props.onClick}
 		>
 			{props.children}
+			<span className={s.tooltip} role="presentation">
+				<span className={s.tooltipLabel}>{props.label}</span>
+				<span className={s.tooltipKey}>{props.hotkey}</span>
+			</span>
 		</button>
 	);
 }
