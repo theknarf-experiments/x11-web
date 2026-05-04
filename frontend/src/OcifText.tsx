@@ -16,9 +16,14 @@ interface OcifTextProps {
 	 *  currently hovering this node. Renders a "drop here" outline. */
 	dropTarget: boolean;
 	onPointerDown: (id: string, e: React.PointerEvent) => void;
+	/** Pointer-down on one of the four corner scale handles. App.tsx
+	 *  drives the gesture; dragging scales `font_size_px`. */
+	onScaleHandleDown: (id: string, e: React.PointerEvent) => void;
 	onChangeText: (id: string, text: string) => void;
 	onExitEdit: () => void;
 }
+
+const CORNERS = ["nw", "ne", "se", "sw"] as const;
 
 /** A free-floating text node — an OCIF node whose only "shape" is
  *  its text content (no `@ocif/rect`, no `@ocif/arrow`). Renders
@@ -33,6 +38,7 @@ export function OcifText({
 	interactive,
 	dropTarget,
 	onPointerDown,
+	onScaleHandleDown,
 	onChangeText,
 	onExitEdit,
 }: OcifTextProps) {
@@ -76,6 +82,20 @@ export function OcifText({
 				onChangeText={onChangeText}
 				onExit={onExitEdit}
 			/>
+			{selected &&
+				interactive &&
+				!editing &&
+				CORNERS.map((c) => (
+					<div
+						key={c}
+						className={`${s.handle} ${s[`handle_${c}`]}`}
+						data-scale-handle={c}
+						onPointerDown={(e) => {
+							e.stopPropagation();
+							onScaleHandleDown(id, e);
+						}}
+					/>
+				))}
 		</div>
 	);
 }

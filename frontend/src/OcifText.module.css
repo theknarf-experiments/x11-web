@@ -18,3 +18,36 @@
 	outline: 2px solid #34c759;
 	outline-offset: 2px;
 }
+
+/* Four corner scale handles. Drag any one to scale the font size
+ * proportional to the cursor's distance from the node center. */
+.handle {
+	position: absolute;
+	width: 10px;
+	height: 10px;
+	background: #ffffff;
+	border: 1px solid #007aff;
+	border-radius: 2px;
+	box-sizing: border-box;
+}
+
+.handle_nw {
+	left: -5px;
+	top: -5px;
+	cursor: nwse-resize;
+}
+.handle_ne {
+	right: -5px;
+	top: -5px;
+	cursor: nesw-resize;
+}
+.handle_se {
+	right: -5px;
+	bottom: -5px;
+	cursor: nwse-resize;
+}
+.handle_sw {
+	left: -5px;
+	bottom: -5px;
+	cursor: nesw-resize;
+}

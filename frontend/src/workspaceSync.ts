@@ -10,7 +10,59 @@
 // directly on the browser.
 
 import * as Automerge from "@automerge/automerge";
+import { layoutWithLines, prepareWithSegments } from "@chenglou/pretext";
 import { encodeWorkspaceSync } from "./rtcWire";
+
+/** Default font family for measuring + rendering text nodes. Must
+ *  match the renderer's CSS so measured bounds line up with the
+ *  on-screen text. Kept in this module so the helpers and the
+ *  view layer agree. */
+const DEFAULT_FONT_FAMILY =
+	'-apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif';
+/** Padding around the measured text, in canvas pixels. Matches
+ *  the `padding: 8px 12px` rule on `.text` / `.editor` in
+ *  `OcifTextLayer.module.css`. */
+const TEXT_PAD_X = 12;
+const TEXT_PAD_Y = 8;
+/** Minimum width when the text is empty so the textarea has
+ *  somewhere to render the caret. */
+const EMPTY_TEXT_MIN_WIDTH = 24;
+
+/** Measure rendered text dimensions via pretext (canvas-based,
+ *  no DOM reflow). Returns the OUTER node bounds — measured width
+ *  + padding. */
+export function measureTextNodeBounds(
+	text: string,
+	fontSizePx: number,
+	fontFamily: string = DEFAULT_FONT_FAMILY,
+	bold = false,
+	italic = false,
+): { width: number; height: number } {
+	const lineHeight = fontSizePx * 1.3;
+	if (text === "") {
+		return {
+			width: EMPTY_TEXT_MIN_WIDTH + TEXT_PAD_X * 2,
+			height: lineHeight + TEXT_PAD_Y * 2,
+		};
+	}
+	const fontParts: string[] = [];
+	if (italic) fontParts.push("italic");
+	if (bold) fontParts.push("600");
+	fontParts.push(`${fontSizePx}px`);
+	fontParts.push(fontFamily);
+	const font = fontParts.join(" ");
+	const prepared = prepareWithSegments(text, font);
+	// Huge maxWidth so we only wrap on explicit newlines.
+	const result = layoutWithLines(prepared, 1e9, lineHeight);
+	const widest =
+		result.lines.length === 0
+			? 0
+			: Math.max(...result.lines.map((l) => l.width));
+	return {
+		width: Math.ceil(widest) + TEXT_PAD_X * 2,
+		height: Math.ceil(result.height) + TEXT_PAD_Y * 2,
+	};
+}
 
 /** Doc shape — keep in sync with `WorkspaceDoc` in Rust. */
 export interface WorkspaceDoc {
@@ -361,20 +413,34 @@ export function getOcifNodes(workspaceId: string): Map<string, OcifNode> {
  *  `crypto.randomUUID()`). Pass `node.text` to seed text content
  *  — we'll create a backing resource and hook up
  *  `node.resource`. The view-only `text` field on `OcifNode` is
- *  consumed here and translated into the spec-shaped resource. */
+ *  consumed here and translated into the spec-shaped resource.
+ *
+ *  For text-only nodes (no `rect` / `arrow`), the caller's
+ *  `width` / `height` are ignored and replaced with measured
+ *  bounds from the actual text + textstyle — keeps the node
+ *  bounds tight from creation. */
 export function insertOcifNode(
 	workspaceId: string,
 	id: string,
 	node: OcifNode,
 ) {
 	const entry = ensure(workspaceId);
+	const isTextOnly = !node.rect && !node.arrow;
+	const measured = isTextOnly
+		? measureTextNodeBounds(
+				node.text ?? "",
+				node.text_style?.font_size_px ?? 14,
+				node.text_style?.font_family,
+				node.text_style?.bold,
+				node.text_style?.italic,
+			)
+		: null;
 	entry.doc = Automerge.change(entry.doc, (d) => {
 		if (!d.nodes) d.nodes = {};
 		if (!d.resources) d.resources = {};
-		// If text content is supplied, allocate a resource for it
-		// up front and reference it from the new node. Empty text
-		// still seeds a resource so subsequent edits update the
-		// existing representation rather than create one lazily.
+		// Allocate a resource up front so subsequent text edits
+		// update the existing representation rather than creating
+		// one lazily.
 		const resourceId = node.resource ?? crypto.randomUUID();
 		if (!d.resources[resourceId]) {
 			d.resources[resourceId] = {
@@ -387,8 +453,8 @@ export function insertOcifNode(
 			x: node.x,
 			y: node.y,
 			z: node.z,
-			width: node.width,
-			height: node.height,
+			width: measured?.width ?? node.width,
+			height: measured?.height ?? node.height,
 			resource: resourceId,
 			...(node.rect ? { rect: { ...node.rect } } : {}),
 			...(node.arrow ? { arrow: { ...node.arrow } } : {}),
@@ -468,7 +534,10 @@ export function setOcifNodeBounds(
  *  model: a `text/plain` representation lives on a resource that
  *  the node references via `resource`. Creates the resource the
  *  first time the node has text; updates the existing
- *  representation thereafter. */
+ *  representation thereafter.
+ *
+ *  Text-only nodes (no `rect` / `arrow`) auto-resize to fit the
+ *  measured text; boxes keep their user-set bounds. */
 export function setOcifNodeText(
 	workspaceId: string,
 	id: string,
@@ -479,34 +548,99 @@ export function setOcifNodeText(
 	entry.doc = Automerge.change(entry.doc, (d) => {
 		const n = d.nodes?.[id];
 		if (!n) return;
-		if (!d.resources) d.resources = {};
-		let resourceId = n.resource;
-		if (!resourceId) {
-			resourceId = crypto.randomUUID();
-			n.resource = resourceId;
-			d.resources[resourceId] = {
-				representations: [{ mime_type: "text/plain", content: text }],
-			};
-			return;
-		}
-		const r = d.resources[resourceId];
-		if (!r) {
-			d.resources[resourceId] = {
-				representations: [{ mime_type: "text/plain", content: text }],
-			};
-			return;
-		}
-		const idx = r.representations.findIndex(
-			(rep) => rep.mime_type === "text/plain",
-		);
-		if (idx >= 0) {
-			r.representations[idx].content = text;
-		} else {
-			r.representations.push({ mime_type: "text/plain", content: text });
+		writeText(d, n, text);
+		if (!n.rect && !n.arrow) {
+			const bounds = boundsForNode(n, text);
+			n.width = bounds.width;
+			n.height = bounds.height;
 		}
 	});
 	notify(workspaceId);
 	ship(workspaceId, drainOutbound(entry));
+}
+
+/** Set a text-only node's font size (in `@ocif/textstyle.font_size_px`).
+ *  Re-measures and updates bounds so the rendered text fits. */
+export function setOcifNodeFontSize(
+	workspaceId: string,
+	id: string,
+	fontSizePx: number,
+) {
+	const entry = ensure(workspaceId);
+	if (!(entry.doc.nodes ?? {})[id]) return;
+	entry.doc = Automerge.change(entry.doc, (d) => {
+		const n = d.nodes?.[id];
+		if (!n) return;
+		if (!n.text_style) n.text_style = {};
+		n.text_style.font_size_px = fontSizePx;
+		if (!n.rect && !n.arrow) {
+			const text = readText(d, n);
+			const bounds = boundsForNode(n, text);
+			n.width = bounds.width;
+			n.height = bounds.height;
+		}
+	});
+	notify(workspaceId);
+	ship(workspaceId, drainOutbound(entry));
+}
+
+/** Helper — write a `text/plain` representation through the
+ *  resource layer. Mutates `d` directly inside an
+ *  `Automerge.change` callback. */
+function writeText(
+	d: WorkspaceDoc,
+	n: OcifNode,
+	text: string,
+): void {
+	if (!d.resources) d.resources = {};
+	let resourceId = n.resource;
+	if (!resourceId) {
+		resourceId = crypto.randomUUID();
+		n.resource = resourceId;
+		d.resources[resourceId] = {
+			representations: [{ mime_type: "text/plain", content: text }],
+		};
+		return;
+	}
+	const r = d.resources[resourceId];
+	if (!r) {
+		d.resources[resourceId] = {
+			representations: [{ mime_type: "text/plain", content: text }],
+		};
+		return;
+	}
+	const idx = r.representations.findIndex(
+		(rep) => rep.mime_type === "text/plain",
+	);
+	if (idx >= 0) {
+		r.representations[idx].content = text;
+	} else {
+		r.representations.push({ mime_type: "text/plain", content: text });
+	}
+}
+
+/** Helper — read the `text/plain` content for a node from the
+ *  shared resources map. Empty string when missing. */
+function readText(d: WorkspaceDoc, n: OcifNode): string {
+	if (!n.resource) return "";
+	const r = d.resources?.[n.resource];
+	if (!r) return "";
+	const rep = r.representations.find(
+		(rep) => rep.mime_type === "text/plain",
+	);
+	return rep?.content ?? "";
+}
+
+/** Helper — measure node bounds from current text + textstyle. */
+function boundsForNode(n: OcifNode, text: string): { width: number; height: number } {
+	const ts = n.text_style;
+	return measureTextNodeBounds(
+		text,
+		ts?.font_size_px ?? 14,
+		ts?.font_family ?? DEFAULT_FONT_FAMILY,
+		ts?.bold ?? false,
+		ts?.italic ?? false,
+	);
 }
 
 /** Resolve a node's text content from its referenced resource.

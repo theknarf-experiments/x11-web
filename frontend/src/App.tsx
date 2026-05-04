@@ -48,6 +48,7 @@ import {
 	setOcifArrowAnchor,
 	setOcifArrowEndpoints,
 	setOcifNodeBounds,
+	setOcifNodeFontSize,
 	setOcifNodePosition,
 	setOcifNodeText,
 	setPosition as setWorkspacePosition,
@@ -720,6 +721,50 @@ function App() {
 		setEditingNodeId(null);
 	}, [activeWorkspace, editingNodeId, ocifNodes]);
 
+	/** Pointer-down on a text node's corner scale handle. Drag
+	 *  scales `font_size_px` proportional to the cursor's distance
+	 *  from the node's center — outward grows, inward shrinks. The
+	 *  bounds re-measure automatically inside `setOcifNodeFontSize`
+	 *  so the text stays tight to the new size. */
+	const handleTextScaleHandleDown = useCallback(
+		(id: string, e: React.PointerEvent) => {
+			if (!activeWorkspace) return;
+			e.preventDefault();
+			const node = ocifNodes.get(id);
+			if (!node || node.rect || node.arrow) return;
+			const wid = activeWorkspace.id;
+			const cx = node.x + node.width / 2;
+			const cy = node.y + node.height / 2;
+			const toCanvas = pageToCanvasRef.current;
+			if (!toCanvas) return;
+			const startCursor = toCanvas(e.clientX, e.clientY);
+			const startDist = Math.max(
+				1,
+				Math.hypot(startCursor.x - cx, startCursor.y - cy),
+			);
+			const startFont = node.text_style?.font_size_px ?? 14;
+			const onMove = (ev: PointerEvent) => {
+				const t = pageToCanvasRef.current;
+				if (!t) return;
+				const p = t(ev.clientX, ev.clientY);
+				const dist = Math.max(1, Math.hypot(p.x - cx, p.y - cy));
+				const ratio = dist / startDist;
+				const newFont = Math.max(
+					8,
+					Math.min(200, Math.round(startFont * ratio)),
+				);
+				setOcifNodeFontSize(wid, id, newFont);
+			};
+			const onUp = () => {
+				window.removeEventListener("pointermove", onMove);
+				window.removeEventListener("pointerup", onUp);
+			};
+			window.addEventListener("pointermove", onMove);
+			window.addEventListener("pointerup", onUp);
+		},
+		[activeWorkspace, ocifNodes],
+	);
+
 	/** Pointer-down on one of a box's resize handles. Computes new
 	 *  bounds from the drag delta and ships a single `setBounds`
 	 *  doc mutation per pointermove (one sync message rather than
@@ -1113,6 +1158,7 @@ function App() {
 							interactive={tool === "pointer"}
 							dropTarget={dropTarget}
 							onPointerDown={handleNodePointerDown}
+							onScaleHandleDown={handleTextScaleHandleDown}
 							onChangeText={handleChangeText}
 							onExitEdit={handleExitEdit}
 						/>
