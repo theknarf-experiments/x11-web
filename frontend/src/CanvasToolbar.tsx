@@ -1,4 +1,5 @@
 import s from "./CanvasToolbar.module.css";
+import { Tooltip } from "./Tooltip";
 
 export type CanvasTool = "pointer" | "box" | "arrow";
 
@@ -87,19 +88,17 @@ function ToolButton(props: {
 	children: React.ReactNode;
 }) {
 	return (
-		<button
-			type="button"
-			className={props.active ? s.buttonActive : s.button}
-			aria-label={`${props.label} (${props.hotkey})`}
-			aria-pressed={props.active}
-			aria-keyshortcuts={props.hotkey}
-			onClick={props.onClick}
-		>
-			{props.children}
-			<span className={s.tooltip} role="presentation">
-				<span className={s.tooltipLabel}>{props.label}</span>
-				<span className={s.tooltipKey}>{props.hotkey}</span>
-			</span>
-		</button>
+		<Tooltip label={props.label} hotkey={props.hotkey} side="right">
+			<button
+				type="button"
+				className={props.active ? s.buttonActive : s.button}
+				aria-label={`${props.label} (${props.hotkey})`}
+				aria-pressed={props.active}
+				aria-keyshortcuts={props.hotkey}
+				onClick={props.onClick}
+			>
+				{props.children}
+			</button>
+		</Tooltip>
 	);
 }

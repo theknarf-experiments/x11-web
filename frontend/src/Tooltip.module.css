@@ -1,0 +1,88 @@
+/* Wrapper provides the positioning context. `display: inline-flex`
+ * keeps the trigger laid out as if the wrapper weren't there for
+ * most flex / inline parents. */
+.wrapper {
+	position: relative;
+	display: inline-flex;
+}
+
+/* The bubble itself. Hidden by default; fades in instantly on
+ * hover (the old Dock tooltip's UX, which feels more responsive
+ * than a delayed appearance). */
+.bubble {
+	position: absolute;
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	padding: 4px 10px;
+	background: rgba(30, 30, 30, 0.95);
+	color: #ccc;
+	font-size: 11px;
+	font-family:
+		-apple-system,
+		BlinkMacSystemFont,
+		"SF Pro Text",
+		system-ui,
+		sans-serif;
+	white-space: nowrap;
+	border-radius: 6px;
+	border: 1px solid rgba(255, 255, 255, 0.1);
+	pointer-events: none;
+	opacity: 0;
+	transition: opacity 0.1s ease;
+	z-index: 1000;
+}
+
+.wrapper:hover .bubble,
+.wrapper:focus-within .bubble {
+	opacity: 1;
+}
+
+.label {
+	font-weight: 500;
+}
+
+/* Hotkey chip — small, slightly raised pill on the right of the
+ * label. Mimics native menu accelerator hints. Sized to read
+ * cleanly against the 11px label. */
+.key {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	min-width: 14px;
+	height: 14px;
+	padding: 0 3px;
+	border-radius: 3px;
+	background: rgba(255, 255, 255, 0.12);
+	border: 1px solid rgba(255, 255, 255, 0.16);
+	font-size: 9px;
+	font-weight: 600;
+	letter-spacing: 0.02em;
+	color: #ccc;
+}
+
+/* Side placements. The arrow / pointer indicator could be added
+ * later; v1 keeps it as a plain bubble. */
+.top {
+	bottom: calc(100% + 16px);
+	left: 50%;
+	transform: translateX(-50%);
+}
+
+.bottom {
+	top: calc(100% + 16px);
+	left: 50%;
+	transform: translateX(-50%);
+}
+
+.right {
+	left: calc(100% + 16px);
+	top: 50%;
+	transform: translateY(-50%);
+}
+
+.left {
+	right: calc(100% + 16px);
+	top: 50%;
+	transform: translateY(-50%);
+}

@@ -67,28 +67,6 @@
 	color: rgba(255, 255, 255, 0.7);
 }
 
-.tooltip {
-	position: absolute;
-	bottom: 100%;
-	left: 50%;
-	transform: translateX(-50%);
-	margin-bottom: 8px;
-	padding: 4px 10px;
-	background: rgba(30, 30, 30, 0.95);
-	border: 1px solid rgba(255, 255, 255, 0.1);
-	border-radius: 6px;
-	font-size: 11px;
-	color: #ccc;
-	white-space: nowrap;
-	pointer-events: none;
-	opacity: 0;
-	transition: opacity 0.1s;
-}
-
-.iconButton:hover .tooltip {
-	opacity: 1;
-}
-
 .runningDot {
 	position: absolute;
 	bottom: -4px;

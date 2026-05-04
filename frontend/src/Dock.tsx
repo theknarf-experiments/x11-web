@@ -3,6 +3,7 @@ import { useEffect, useRef, useState, ViewTransition } from "react";
 import { AppContextMenu, getAppContextMenuItems } from "./AppContextMenu";
 import s from "./Dock.module.css";
 import { sidecarsCollection, windowsCollection } from "./db";
+import { Tooltip } from "./Tooltip";
 
 export interface DockProcess {
 	sidecarId: string;
@@ -95,19 +96,20 @@ export function Dock({
 						enter="dock-icon-in"
 						exit="dock-icon-out"
 					>
-						<button
-							type="button"
-							className={s.iconButton}
-							style={{ background: proc.color }}
-							onClick={() => onFocusWindow(proc.sidecarId, proc.pid)}
-							onContextMenu={(e) =>
-								handleContextMenu(e, proc.sidecarId, proc.pid)
-							}
-						>
-							<span className={s.tooltip}>{proc.title}</span>
-							<span className={s.runningDot} />
-							{proc.title.charAt(0).toUpperCase()}
-						</button>
+						<Tooltip label={proc.title} side="top">
+							<button
+								type="button"
+								className={s.iconButton}
+								style={{ background: proc.color }}
+								onClick={() => onFocusWindow(proc.sidecarId, proc.pid)}
+								onContextMenu={(e) =>
+									handleContextMenu(e, proc.sidecarId, proc.pid)
+								}
+							>
+								<span className={s.runningDot} />
+								{proc.title.charAt(0).toUpperCase()}
+							</button>
+						</Tooltip>
 					</ViewTransition>
 				))}
 
@@ -122,25 +124,26 @@ export function Dock({
 						const isOpen = openSpawnId === sc.id;
 						return (
 							<div key={sc.id} className={s.spawnSlot}>
-								<button
-									type="button"
-									className={`${s.iconButton} ${s.addButton}`}
-									onClick={() => {
-										setOpenSpawnId(isOpen ? null : sc.id);
-										setContextMenu(null);
-									}}
-									data-testid="spawn-button"
-									data-sidecar-id={sc.id}
-								>
-									<span className={s.tooltip}>{sc.name}</span>
-									<span className={s.statusDot}>
-										<span
-											className={`${s.statusDotInner} ${connected ? s.online : s.offline}`}
-											data-testid="connection-status"
-										/>
-									</span>
-									+
-								</button>
+								<Tooltip label={sc.name} side="top">
+									<button
+										type="button"
+										className={`${s.iconButton} ${s.addButton}`}
+										onClick={() => {
+											setOpenSpawnId(isOpen ? null : sc.id);
+											setContextMenu(null);
+										}}
+										data-testid="spawn-button"
+										data-sidecar-id={sc.id}
+									>
+										<span className={s.statusDot}>
+											<span
+												className={`${s.statusDotInner} ${connected ? s.online : s.offline}`}
+												data-testid="connection-status"
+											/>
+										</span>
+										+
+									</button>
+								</Tooltip>
 
 								{isOpen && (
 									<div className={s.popoverStack}>

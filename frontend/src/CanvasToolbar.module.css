@@ -29,7 +29,6 @@
 	color: inherit;
 	cursor: pointer;
 	padding: 0;
-	position: relative;
 }
 
 .button:hover {
@@ -39,62 +38,4 @@
 .buttonActive {
 	background: rgba(255, 255, 255, 0.16);
 	border-color: rgba(255, 255, 255, 0.25);
-}
-
-/* Tooltip rendered as an inner span so we can lay out the label
- * and the hotkey badge separately. Anchored to the right of the
- * button; appears on hover or keyboard focus after a short delay. */
-.tooltip {
-	position: absolute;
-	left: calc(100% + 10px);
-	top: 50%;
-	transform: translateY(-50%);
-	display: flex;
-	align-items: center;
-	gap: 8px;
-	padding: 4px 6px 4px 8px;
-	background: rgba(28, 28, 30, 0.95);
-	color: rgba(255, 255, 255, 0.95);
-	font-size: 12px;
-	font-family:
-		-apple-system,
-		BlinkMacSystemFont,
-		"SF Pro Text",
-		system-ui,
-		sans-serif;
-	white-space: nowrap;
-	border-radius: 4px;
-	border: 1px solid rgba(255, 255, 255, 0.12);
-	box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
-	pointer-events: none;
-	opacity: 0;
-	transition: opacity 0.15s ease 0.4s;
-	z-index: 1000;
-}
-
-.button:hover .tooltip,
-.button:focus-visible .tooltip,
-.buttonActive:hover .tooltip,
-.buttonActive:focus-visible .tooltip {
-	opacity: 1;
-}
-
-.tooltipLabel {
-	font-weight: 500;
-}
-
-.tooltipKey {
-	display: inline-flex;
-	align-items: center;
-	justify-content: center;
-	min-width: 16px;
-	height: 16px;
-	padding: 0 4px;
-	border-radius: 3px;
-	background: rgba(255, 255, 255, 0.14);
-	border: 1px solid rgba(255, 255, 255, 0.18);
-	font-size: 10px;
-	font-weight: 600;
-	letter-spacing: 0.02em;
-	color: rgba(255, 255, 255, 0.9);
 }
