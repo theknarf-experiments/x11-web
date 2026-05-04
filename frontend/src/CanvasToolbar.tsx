@@ -78,7 +78,7 @@ function ToolButton(props: {
 		<button
 			type="button"
 			className={props.active ? s.buttonActive : s.button}
-			title={props.label}
+			data-tooltip={props.label}
 			aria-label={props.label}
 			aria-pressed={props.active}
 			onClick={props.onClick}
