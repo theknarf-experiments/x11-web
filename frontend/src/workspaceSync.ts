@@ -28,6 +28,49 @@ const TEXT_PAD_Y = 8;
  *  somewhere to render the caret. */
 const EMPTY_TEXT_MIN_WIDTH = 24;
 
+/** Line-height multiplier matching the renderer (`OcifTextLayer`'s
+ *  CSS `line-height: 1.3`). */
+const LINE_HEIGHT_MULTIPLIER = 1.3;
+
+/** Solve for the font size that lands the dragged corner closest
+ *  to the cursor under the linear approximation
+ *      width(F)  ≈ a·F + p_w
+ *      height(F) ≈ b·F + p_h
+ *  where `a` is the char-width-per-px ratio inferred from the
+ *  node's current bounds, and `b` = 1.3 (line height multiplier).
+ *
+ *  With two equations and one unknown the system is over-
+ *  determined; the least-squares minimizer of
+ *  ||(corner(F) − cursor)||² is the closed form
+ *      F* = (a·u + b·v) / (a² + b²)
+ *  where `u, v` are the cursor's signed offsets from the
+ *  drag-anchor (the corner OPPOSITE the one being dragged), with
+ *  the corner's cardinal padding subtracted off.
+ *
+ *  Caller is responsible for clamping the result to a sane font
+ *  range and feeding it into `setOcifNodeFontSize`. */
+export function solveFontSizeForCornerTarget(input: {
+	startWidth: number;
+	startFont: number;
+	signX: 1 | -1;
+	signY: 1 | -1;
+	anchorX: number;
+	anchorY: number;
+	cursorX: number;
+	cursorY: number;
+}): number {
+	const p_w = TEXT_PAD_X * 2;
+	const p_h = TEXT_PAD_Y * 2;
+	const b = LINE_HEIGHT_MULTIPLIER;
+	const a = Math.max(
+		0.01,
+		(input.startWidth - p_w) / Math.max(1, input.startFont),
+	);
+	const u = input.signX * (input.cursorX - input.anchorX) - p_w;
+	const v = input.signY * (input.cursorY - input.anchorY) - p_h;
+	return (a * u + b * v) / (a * a + b * b);
+}
+
 /** Measure rendered text dimensions via pretext (canvas-based,
  *  no DOM reflow). Returns the OUTER node bounds — measured width
  *  + padding. */
@@ -38,7 +81,7 @@ export function measureTextNodeBounds(
 	bold = false,
 	italic = false,
 ): { width: number; height: number } {
-	const lineHeight = fontSizePx * 1.3;
+	const lineHeight = fontSizePx * LINE_HEIGHT_MULTIPLIER;
 	if (text === "") {
 		return {
 			width: EMPTY_TEXT_MIN_WIDTH + TEXT_PAD_X * 2,
@@ -560,11 +603,24 @@ export function setOcifNodeText(
 }
 
 /** Set a text-only node's font size (in `@ocif/textstyle.font_size_px`).
- *  Re-measures and updates bounds so the rendered text fits. */
+ *  Re-measures and updates bounds so the rendered text fits.
+ *
+ *  `anchor` (optional) keeps a specific corner of the node fixed
+ *  in canvas space across the resize. `gripX` / `gripY` are the
+ *  signs of the GRABBED corner (the one moving with the cursor):
+ *  the anchor is the corner with opposite signs, which we want to
+ *  pin at `(anchor.x, anchor.y)`. When omitted, the node's
+ *  top-left (`x, y`) is left untouched. */
 export function setOcifNodeFontSize(
 	workspaceId: string,
 	id: string,
 	fontSizePx: number,
+	anchor?: {
+		x: number;
+		y: number;
+		gripX: 1 | -1;
+		gripY: 1 | -1;
+	},
 ) {
 	const entry = ensure(workspaceId);
 	if (!(entry.doc.nodes ?? {})[id]) return;
@@ -578,6 +634,13 @@ export function setOcifNodeFontSize(
 			const bounds = boundsForNode(n, text);
 			n.width = bounds.width;
 			n.height = bounds.height;
+			if (anchor) {
+				// Pin the corner OPPOSITE the grabbed one. If the
+				// user grabbed the east edge (gripX > 0) the west
+				// edge stays at anchor.x; vice versa for west grip.
+				n.x = anchor.gripX > 0 ? anchor.x : anchor.x - bounds.width;
+				n.y = anchor.gripY > 0 ? anchor.y : anchor.y - bounds.height;
+			}
 		}
 	});
 	notify(workspaceId);

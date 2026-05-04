@@ -3,6 +3,8 @@ import s from "./OcifText.module.css";
 import { OcifTextLayer } from "./OcifTextLayer";
 import type { OcifNode } from "./workspaceSync";
 
+export type TextCorner = "nw" | "ne" | "se" | "sw";
+
 interface OcifTextProps {
 	id: string;
 	node: OcifNode;
@@ -17,13 +19,19 @@ interface OcifTextProps {
 	dropTarget: boolean;
 	onPointerDown: (id: string, e: React.PointerEvent) => void;
 	/** Pointer-down on one of the four corner scale handles. App.tsx
-	 *  drives the gesture; dragging scales `font_size_px`. */
-	onScaleHandleDown: (id: string, e: React.PointerEvent) => void;
+	 *  drives the gesture; dragging scales `font_size_px`. The
+	 *  corner identity tells the handler which axis-signs to use
+	 *  when solving for the target font. */
+	onScaleHandleDown: (
+		id: string,
+		corner: TextCorner,
+		e: React.PointerEvent,
+	) => void;
 	onChangeText: (id: string, text: string) => void;
 	onExitEdit: () => void;
 }
 
-const CORNERS = ["nw", "ne", "se", "sw"] as const;
+const CORNERS: TextCorner[] = ["nw", "ne", "se", "sw"];
 
 /** A free-floating text node — an OCIF node whose only "shape" is
  *  its text content (no `@ocif/rect`, no `@ocif/arrow`). Renders
@@ -92,7 +100,7 @@ export function OcifText({
 						data-scale-handle={c}
 						onPointerDown={(e) => {
 							e.stopPropagation();
-							onScaleHandleDown(id, e);
+							onScaleHandleDown(id, c, e);
 						}}
 					/>
 				))}

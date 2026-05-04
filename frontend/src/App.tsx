@@ -24,7 +24,7 @@ import { GlobalMenuBar } from "./GlobalMenuBar";
 import { InfiniteCanvas } from "./InfiniteCanvas";
 import { OcifArrow } from "./OcifArrow";
 import { OcifBox, type ResizeHandle } from "./OcifBox";
-import { OcifText } from "./OcifText";
+import { OcifText, type TextCorner } from "./OcifText";
 import { decodeFrame } from "./rtcWire";
 import { SettingsPanel } from "./SettingsPanel";
 import type {
@@ -52,6 +52,7 @@ import {
 	setOcifNodePosition,
 	setOcifNodeText,
 	setPosition as setWorkspacePosition,
+	solveFontSizeForCornerTarget,
 	subscribe as subscribeWorkspace,
 } from "./workspaceSync";
 
@@ -721,39 +722,55 @@ function App() {
 		setEditingNodeId(null);
 	}, [activeWorkspace, editingNodeId, ocifNodes]);
 
-	/** Pointer-down on a text node's corner scale handle. Drag
-	 *  scales `font_size_px` proportional to the cursor's distance
-	 *  from the node's center — outward grows, inward shrinks. The
-	 *  bounds re-measure automatically inside `setOcifNodeFontSize`
-	 *  so the text stays tight to the new size. */
+	/** Pointer-down on a text node's corner scale handle. Solves
+	 *  for the font size that lands the dragged corner closest to
+	 *  the cursor (closed form, see `solveFontSizeForCornerTarget`).
+	 *  The OPPOSITE corner stays anchored throughout the drag, so
+	 *  the cursor's projection along the handle's diagonal axis
+	 *  tracks 1:1 — perpendicular movement is absorbed by the
+	 *  least-squares fit since text aspect ratio is text-bound. */
 	const handleTextScaleHandleDown = useCallback(
-		(id: string, e: React.PointerEvent) => {
+		(id: string, corner: TextCorner, e: React.PointerEvent) => {
 			if (!activeWorkspace) return;
 			e.preventDefault();
 			const node = ocifNodes.get(id);
 			if (!node || node.rect || node.arrow) return;
 			const wid = activeWorkspace.id;
-			const cx = node.x + node.width / 2;
-			const cy = node.y + node.height / 2;
-			const toCanvas = pageToCanvasRef.current;
-			if (!toCanvas) return;
-			const startCursor = toCanvas(e.clientX, e.clientY);
-			const startDist = Math.max(
-				1,
-				Math.hypot(startCursor.x - cx, startCursor.y - cy),
-			);
+			const signX: 1 | -1 =
+				corner === "ne" || corner === "se" ? 1 : -1;
+			const signY: 1 | -1 =
+				corner === "se" || corner === "sw" ? 1 : -1;
+			// Anchor = the corner OPPOSITE the one being dragged.
+			// Stays fixed in canvas coords across the gesture so
+			// the drag doesn't drift the node.
+			const anchorX = signX > 0 ? node.x : node.x + node.width;
+			const anchorY = signY > 0 ? node.y : node.y + node.height;
+			const startWidth = node.width;
 			const startFont = node.text_style?.font_size_px ?? 14;
 			const onMove = (ev: PointerEvent) => {
 				const t = pageToCanvasRef.current;
 				if (!t) return;
 				const p = t(ev.clientX, ev.clientY);
-				const dist = Math.max(1, Math.hypot(p.x - cx, p.y - cy));
-				const ratio = dist / startDist;
+				const targetFont = solveFontSizeForCornerTarget({
+					startWidth,
+					startFont,
+					signX,
+					signY,
+					anchorX,
+					anchorY,
+					cursorX: p.x,
+					cursorY: p.y,
+				});
 				const newFont = Math.max(
 					8,
-					Math.min(200, Math.round(startFont * ratio)),
+					Math.min(200, Math.round(targetFont)),
 				);
-				setOcifNodeFontSize(wid, id, newFont);
+				setOcifNodeFontSize(wid, id, newFont, {
+					x: anchorX,
+					y: anchorY,
+					gripX: signX,
+					gripY: signY,
+				});
 			};
 			const onUp = () => {
 				window.removeEventListener("pointermove", onMove);
