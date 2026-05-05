@@ -1,4 +1,9 @@
 export {
+	CanvasToolbar,
+	type CanvasTool,
+	TOOL_HOTKEYS,
+} from "./CanvasToolbar/CanvasToolbar.tsx";
+export {
 	Dock,
 	DOCK_WINDOW_DRAG_MIME,
 	type DockProcess,

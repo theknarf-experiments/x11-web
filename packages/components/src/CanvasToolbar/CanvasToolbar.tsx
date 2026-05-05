@@ -1,5 +1,4 @@
-import type { Hotkey } from "@tanstack/react-hotkeys";
-import { Tooltip } from "@x11-web/components";
+import { Tooltip } from "../Tooltip/Tooltip.tsx";
 import s from "./CanvasToolbar.module.css";
 
 export type CanvasTool =
@@ -11,11 +10,10 @@ export type CanvasTool =
 	| "markdown";
 
 /** The hotkey for each tool, kept here so the toolbar tooltip and
- *  the global hotkey registration in App.tsx stay in lockstep.
- *  Values typed as `Hotkey` (the string-form, not `RawHotkey`
- *  objects) so `useHotkey` accepts them and the Tooltip's `string`
- *  prop is happy too. */
-export const TOOL_HOTKEYS: Record<CanvasTool, Hotkey> = {
+ *  the global hotkey registration in `App` stay in lockstep.
+ *  Typed as plain strings — `@tanstack/react-hotkeys`'
+ *  `RegisterableHotkey` accepts string-form chords directly. */
+export const TOOL_HOTKEYS: Record<CanvasTool, string> = {
 	pointer: "V",
 	box: "B",
 	arrow: "A",
@@ -30,8 +28,8 @@ interface CanvasToolbarProps {
 }
 
 /** Floating tool palette in the bottom-left of the viewport.
- *  v1: pointer / box / arrow. Future tools (text, freehand) slot
- *  in here as additional buttons. */
+ *  Pointer / box / arrow / text / pen / markdown — extend by
+ *  adding to `CanvasTool` + `TOOL_HOTKEYS` and a button below. */
 export function CanvasToolbar({ tool, onSelect }: CanvasToolbarProps) {
 	return (
 		<div className={s.toolbar} data-testid="canvas-toolbar">
@@ -169,6 +167,7 @@ function ToolButton(props: {
 				aria-pressed={props.active}
 				aria-keyshortcuts={props.hotkey}
 				onClick={props.onClick}
+				data-tool={props.label.toLowerCase()}
 			>
 				{props.children}
 			</button>
