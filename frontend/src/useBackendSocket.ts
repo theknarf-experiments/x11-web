@@ -50,19 +50,11 @@ export type BellCallback = (percent: number) => void;
 /** Raw bytes from the WebRTC DataChannel — caller decodes (Cap'n Proto). */
 export type DataChannelMessageCallback = (data: Uint8Array) => void;
 
-/**
- * Per-event diagnostic surfaced from the backend / WebSocket layer.
- * Rendered by `<DiagnosticsPanel>` so the user has *some* visibility
- * into errors that previously vanished into the void (sidecar errors,
- * socket errors).
- */
-export interface Diagnostic {
-	id: string;
-	level: "info" | "warn" | "error";
-	source: "ws" | "command" | "sidecar";
-	message: string;
-	timestamp: number;
-}
+// `Diagnostic` lives in `@x11-web/components` (alongside the panel
+// that renders it). Re-exported here so existing importers in this
+// file's neighbourhood don't need to change.
+import type { Diagnostic } from "@x11-web/components";
+export type { Diagnostic };
 
 const MAX_DIAGNOSTICS = 100;
 let diagnosticCounter = 0;

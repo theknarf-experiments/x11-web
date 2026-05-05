@@ -3,6 +3,7 @@ import {
 	AppContextMenu,
 	CanvasToolbar,
 	type CanvasTool,
+	DiagnosticsPanel,
 	Dock,
 	DOCK_WINDOW_DRAG_MIME,
 	type DockProcess,
@@ -13,7 +14,6 @@ import {
 } from "@x11-web/components";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ClientRenderer } from "./ClientRenderer";
-import { DiagnosticsPanel } from "./DiagnosticsPanel";
 import {
 	applyOcifNodesSnapshot,
 	ocifNodesCollection,

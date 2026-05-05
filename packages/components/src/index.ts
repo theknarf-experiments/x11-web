@@ -9,6 +9,10 @@ export {
 	TOOL_HOTKEYS,
 } from "./CanvasToolbar/CanvasToolbar.tsx";
 export {
+	type Diagnostic,
+	DiagnosticsPanel,
+} from "./DiagnosticsPanel/DiagnosticsPanel.tsx";
+export {
 	Dock,
 	DOCK_WINDOW_DRAG_MIME,
 	type DockProcess,
@@ -24,4 +28,9 @@ export {
 export { InfiniteCanvas } from "./InfiniteCanvas/InfiniteCanvas.tsx";
 export { MarkdownArea } from "./MarkdownArea/MarkdownArea.tsx";
 export { Polaroid, PolaroidStack } from "./Polaroid/Polaroid.tsx";
+export {
+	Popover,
+	type PopoverAlign,
+	type PopoverSide,
+} from "./Popover/Popover.tsx";
 export { Tooltip, type TooltipSide } from "./Tooltip/Tooltip.tsx";
