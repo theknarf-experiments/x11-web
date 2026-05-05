@@ -170,17 +170,3 @@ export function InfiniteCanvas({
 		</div>
 	);
 }
-
-/** Get the current viewport center in canvas coordinates */
-export function getViewportCenter(camera: {
-	x: number;
-	y: number;
-	scale: number;
-}): { x: number; y: number } {
-	const vw = window.innerWidth;
-	const vh = window.innerHeight;
-	return {
-		x: camera.x + vw / (2 * camera.scale),
-		y: camera.y + vh / (2 * camera.scale),
-	};
-}

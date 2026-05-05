@@ -8,6 +8,7 @@ import {
 	type DockProcess,
 	getAppContextMenuItems,
 	GlobalMenuBar,
+	InfiniteCanvas,
 	TOOL_HOTKEYS,
 } from "@x11-web/components";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -25,7 +26,6 @@ import {
 	windowsForProcess,
 } from "./db";
 import { useHotkey } from "@tanstack/react-hotkeys";
-import { InfiniteCanvas } from "./InfiniteCanvas";
 import { OcifArrow } from "./OcifArrow";
 import { OcifBox, type ResizeHandle } from "./OcifBox";
 import { OcifMarkdown } from "./OcifMarkdown";
