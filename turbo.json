@@ -1,8 +1,12 @@
 {
 	"$schema": "https://turbo.build/schema.json",
 	"tasks": {
+		"codegen": {
+			"inputs": ["../crates/rtc-wire/schema/**/*.capnp"],
+			"outputs": ["src/generated/**"]
+		},
 		"build": {
-			"dependsOn": ["^build"],
+			"dependsOn": ["^build", "codegen"],
 			"outputs": ["dist/**"]
 		},
 		"check": {
@@ -12,9 +16,15 @@
 			"cache": false,
 			"persistent": true
 		},
-		"typecheck": {},
+		"typecheck": {
+			"dependsOn": ["codegen"]
+		},
 		"test": {
 			"dependsOn": ["build"],
+			"cache": false
+		},
+		"frontend#test": {
+			"dependsOn": ["frontend#codegen"],
 			"cache": false
 		}
 	}

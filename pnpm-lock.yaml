@@ -71,6 +71,9 @@ importers:
       '@x11-web/components':
         specifier: workspace:*
         version: link:../packages/components
+      capnp-es:
+        specifier: ^0.0.14
+        version: 0.0.14(typescript@5.9.3)
       pako:
         specifier: ^2.1.0
         version: 2.1.0
@@ -1731,6 +1734,15 @@ packages:
 
   caniuse-lite@1.0.30001781:
     resolution: {integrity: sha512-RdwNCyMsNBftLjW6w01z8bKEvT6e/5tpPVEgtn22TiLGlstHOVecsX2KHFkD5e/vRnIE4EGzpuIODb3mtswtkw==}
+
+  capnp-es@0.0.14:
+    resolution: {integrity: sha512-8lWj4GJISiqRSlAJGkWpI4Azib7QY5UDIkqxeHcI7aAnXVk9SFuWxl1Fme+2HhzNANV0WTJqwUZvvXvloc3sBA==}
+    hasBin: true
+    peerDependencies:
+      typescript: ^5.7.3
+    peerDependenciesMeta:
+      typescript:
+        optional: true
 
   chai@5.3.3:
     resolution: {integrity: sha512-4zNhdJD/iOjSH0A05ea+Ke6MU5mmpQcbQsSOkgdaUMJ9zTlDTD/GYlwohmIE2u0gaxHYiVHEn1Fw9mZ/ktJWgw==}
@@ -4522,6 +4534,10 @@ snapshots:
   camelcase@7.0.1: {}
 
   caniuse-lite@1.0.30001781: {}
+
+  capnp-es@0.0.14(typescript@5.9.3):
+    optionalDependencies:
+      typescript: 5.9.3
 
   chai@5.3.3:
     dependencies:
