@@ -1,37 +1,47 @@
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef } from "react";
 import { flushSync } from "react-dom";
 import s from "./MarkdownArea.module.css";
 import { buildSegments, parseDecorations } from "./parse";
 
 interface Props {
-	initial?: string;
-	onChange?: (text: string) => void;
+	value: string;
+	onChange: (text: string) => void;
 }
 
 /** Inline-syntax-highlighted markdown editor on top of the W3C
  *  EditContext API. Chromium owns the editing surface — caret,
- *  click, drag-select, IME, clipboard, undo. The EC is the source
- *  of truth for the text; we read `ec.text` on every render and
- *  only own two glue points where Chromium leaves us hanging:
- *  pushing DOM-selection changes back into EC, and inserting `\n`
- *  on Enter (which doesn't fire `textupdate`). */
-export function MarkdownArea({ initial = "", onChange }: Props) {
+ *  click, drag-select, IME, clipboard, undo. The component is
+ *  controlled: `value` is the source of truth, `onChange` reports
+ *  every keystroke / paste back to the host so it can persist
+ *  the text (e.g. into Automerge) and re-render us with a new
+ *  `value` when remote edits land.
+ *
+ *  We're on the hook for: parsing + rendering styled spans,
+ *  forwarding `textupdate` into `onChange`, mirroring DOM selection
+ *  back into EC for clicks, pushing EC.selection back into DOM so
+ *  the native caret paints in the right spot, and inserting `\n`
+ *  on Enter (which Chromium swallows from the textupdate path). */
+export function MarkdownArea({ value, onChange }: Props) {
 	const ref = useRef<HTMLDivElement>(null);
 	const ecRef = useRef<EditContext | null>(null);
-	const [, force] = useState({});
+	const onChangeRef = useRef(onChange);
+	onChangeRef.current = onChange;
 
-	const text = ecRef.current?.text ?? initial;
-	const segments = buildSegments(text, parseDecorations(text));
+	const segments = buildSegments(value, parseDecorations(value));
 
-	// After React commits the new text into the DOM, push the EC's
-	// selection back into the DOM so the native caret paints at
-	// the correct offset. Chromium updates the EC's text +
-	// selection on `textupdate` but doesn't move the DOM
-	// selection, so without this the caret stays at offset 0.
+	// Push EC selection back into the DOM after every render so
+	// the native caret paints at the correct offset. Chromium
+	// updates `ec.selectionStart` on `textupdate` but doesn't move
+	// the DOM selection — without this the caret stays at offset 0.
+	// Skip when this editor isn't focused: in a multi-editor page
+	// (e.g., two collaborating tabs side-by-side) the unfocused
+	// editor's effect would otherwise stomp the global DOM
+	// selection out of the editor the user is actually typing in.
 	useLayoutEffect(() => {
 		const el = ref.current;
 		const ec = ecRef.current;
 		if (!el || !ec) return;
+		if (el.ownerDocument.activeElement !== el) return;
 		let remaining = ec.selectionStart;
 		const walker = el.ownerDocument.createTreeWalker(
 			el,
@@ -50,26 +60,22 @@ export function MarkdownArea({ initial = "", onChange }: Props) {
 		r.collapse(true);
 		sel.removeAllRanges();
 		sel.addRange(r);
-	}, [text]);
+	}, [value]);
 
 	useEffect(() => {
 		const el = ref.current;
 		if (!el || typeof EditContext === "undefined") return;
-		const ec = new EditContext({ text: initial });
+		const ec = new EditContext({ text: value });
 		el.editContext = ec;
 		ecRef.current = ec;
 
 		const onText = () => {
-			// `flushSync` so the new text + DOM-selection sync land
-			// synchronously before this event handler returns. Each
-			// keystroke is its own DOM event, but Playwright (and
-			// fast typists) can fire them tightly enough that React
-			// would otherwise batch multiple textupdates into one
-			// render — our useLayoutEffect would only re-position
-			// the caret once at the end, leaving Chromium with a
-			// stale DOM selection for the intermediate keystrokes.
-			flushSync(() => force({}));
-			onChange?.(ec.text);
+			// `flushSync` so the parent state update + caret sync
+			// land synchronously before the next textupdate fires.
+			// Tightly-packed keystrokes (Playwright, fast typists)
+			// would otherwise batch into one render and the DOM
+			// selection ends up one step behind.
+			flushSync(() => onChangeRef.current(ec.text));
 		};
 
 		// Mirror DOM selection (clicks, drags, arrows) into the EC.
@@ -106,8 +112,7 @@ export function MarkdownArea({ initial = "", onChange }: Props) {
 			const start = ec.selectionStart;
 			ec.updateText(start, ec.selectionEnd, pasted);
 			ec.updateSelection(start + pasted.length, start + pasted.length);
-			force({});
-			onChange?.(ec.text);
+			onChangeRef.current(ec.text);
 		};
 
 		ec.addEventListener("textupdate", onText);
@@ -144,14 +149,13 @@ export function MarkdownArea({ initial = "", onChange }: Props) {
 				const start = ec.selectionStart;
 				ec.updateText(start, ec.selectionEnd, "\n");
 				ec.updateSelection(start + 1, start + 1);
-				force({});
-				onChange?.(ec.text);
+				onChangeRef.current(ec.text);
 			}}
 		>
 			{segments.map((seg, i) => (
 				<span
 					// Stable key — same `<span>` across renders so
-					// DOM selection survives keystrokes.
+					// the DOM selection survives keystrokes.
 					key={i}
 					className={
 						seg.classes
@@ -160,14 +164,14 @@ export function MarkdownArea({ initial = "", onChange }: Props) {
 							.join(" ") || undefined
 					}
 				>
-					{text.slice(seg.start, seg.end)}
+					{value.slice(seg.start, seg.end)}
 				</span>
 			))}
 			{/* Trailing `<br>` so a `\n` at the end of the text
 			 * renders an empty visible line. Without this, the
 			 * caret on that empty line collapses to a zero-size
 			 * rect at the end of the previous line. */}
-			{text.endsWith("\n") && <br />}
+			{value.endsWith("\n") && <br />}
 		</div>
 	);
 }

@@ -8,7 +8,7 @@ function ControlledHost({ initial }: { initial: string }) {
 	const [text, setText] = useState(initial);
 	return (
 		<div style={{ width: 480, fontFamily: "system-ui, sans-serif" }}>
-			<MarkdownArea initial={initial} onChange={setText} />
+			<MarkdownArea value={text} onChange={setText} />
 			<details style={{ marginTop: 12, color: "#888", fontSize: 12 }}>
 				<summary>raw text ({text.length} chars)</summary>
 				<pre

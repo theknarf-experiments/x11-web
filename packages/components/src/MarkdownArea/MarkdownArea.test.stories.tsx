@@ -11,7 +11,7 @@ function TestHost({ initial }: { initial: string }) {
 	const [text, setText] = useState(initial);
 	return (
 		<div data-testid="host" style={{ width: 480 }}>
-			<MarkdownArea initial={initial} onChange={setText} />
+			<MarkdownArea value={text} onChange={setText} />
 			<pre data-testid="value" style={{ whiteSpace: "pre-wrap" }}>
 				{text}
 			</pre>
