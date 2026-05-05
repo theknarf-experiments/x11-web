@@ -1,14 +1,16 @@
 import { useLiveQuery } from "@tanstack/react-db";
 import {
+	AppContextMenu,
 	CanvasToolbar,
 	type CanvasTool,
 	Dock,
 	DOCK_WINDOW_DRAG_MIME,
 	type DockProcess,
+	getAppContextMenuItems,
+	GlobalMenuBar,
 	TOOL_HOTKEYS,
 } from "@x11-web/components";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { AppContextMenu, getAppContextMenuItems } from "./AppContextMenu";
 import { ClientRenderer } from "./ClientRenderer";
 import { DiagnosticsPanel } from "./DiagnosticsPanel";
 import {
@@ -23,7 +25,6 @@ import {
 	windowsForProcess,
 } from "./db";
 import { useHotkey } from "@tanstack/react-hotkeys";
-import { GlobalMenuBar } from "./GlobalMenuBar";
 import { InfiniteCanvas } from "./InfiniteCanvas";
 import { OcifArrow } from "./OcifArrow";
 import { OcifBox, type ResizeHandle } from "./OcifBox";

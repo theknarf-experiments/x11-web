@@ -2,9 +2,41 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import {
 	AppContextMenu,
 	type AppContextMenuItem,
-} from "./AppContextMenu";
+} from "../AppContextMenu/AppContextMenu.tsx";
 import s from "./GlobalMenuBar.module.css";
-import type { MenuAction, MenuItem } from "./types";
+
+/**
+ * Menu protocol shapes mirrored from the backend's GTK / Qt /
+ * AppKit menu introspection. Defined here so the component
+ * library has no upstream import; the frontend re-exports these
+ * from its own `types.ts` so protocol-side code (db rows,
+ * `WindowUpdate.MenuChanged`, etc.) keeps importing them from a
+ * single place.
+ */
+export type MenuItemKind =
+	| "normal"
+	| "submenu"
+	| "separator"
+	| "checkbox"
+	| "radio";
+
+export interface MenuAction {
+	name: string;
+	target?: unknown;
+}
+
+export interface MenuItem {
+	id: string;
+	label?: string;
+	kind: MenuItemKind;
+	enabled?: boolean;
+	visible?: boolean;
+	checked?: boolean;
+	accelerator?: string;
+	icon?: string;
+	action?: MenuAction;
+	children?: MenuItem[];
+}
 
 interface GlobalMenuBarProps {
 	/** Title of the currently focused window, or null when nothing is focused. */
@@ -21,9 +53,9 @@ interface GlobalMenuBarProps {
 	onActivate: (action: MenuAction) => void;
 	/**
 	 * Items shown when the user clicks the focused app's title in the
-	 * bar. App.tsx builds these via `getAppContextMenuItems` so this
-	 * stays in lock-step with the dock right-click menu — change one
-	 * place, change both.
+	 * bar. The host builds these (e.g. via `getAppContextMenuItems`)
+	 * so the same list drives the dock right-click and the menu bar
+	 * title click.
 	 */
 	appContextMenuItems: AppContextMenuItem[] | null;
 }

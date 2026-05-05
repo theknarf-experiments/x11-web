@@ -124,30 +124,17 @@ export type WindowUpdate =
 			menu: MenuItem[];
 	  };
 
-export type MenuItemKind =
-	| "normal"
-	| "submenu"
-	| "separator"
-	| "checkbox"
-	| "radio";
+// Menu protocol types live in `@x11-web/components` (the
+// `GlobalMenuBar` consumes them). Re-export here so protocol-side
+// importers (db rows, `WindowUpdate.MenuStructure`, etc.) keep
+// pulling them from a single place.
+import type {
+	MenuAction,
+	MenuItem,
+	MenuItemKind,
+} from "@x11-web/components";
 
-export interface MenuAction {
-	name: string;
-	target?: unknown;
-}
-
-export interface MenuItem {
-	id: string;
-	label?: string;
-	kind: MenuItemKind;
-	enabled?: boolean;
-	visible?: boolean;
-	checked?: boolean;
-	accelerator?: string;
-	icon?: string;
-	action?: MenuAction;
-	children?: MenuItem[];
-}
+export type { MenuAction, MenuItem, MenuItemKind };
 
 export type InputEvent =
 	| { kind: "KeyPress"; keycode: number; state: number }
