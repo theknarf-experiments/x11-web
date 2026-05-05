@@ -23,4 +23,5 @@ export {
 } from "./GlobalMenuBar/GlobalMenuBar.tsx";
 export { InfiniteCanvas } from "./InfiniteCanvas/InfiniteCanvas.tsx";
 export { MarkdownArea } from "./MarkdownArea/MarkdownArea.tsx";
+export { Polaroid, PolaroidStack } from "./Polaroid/Polaroid.tsx";
 export { Tooltip, type TooltipSide } from "./Tooltip/Tooltip.tsx";

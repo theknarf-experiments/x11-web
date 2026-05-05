@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, ViewTransition } from "react";
+import { Polaroid, PolaroidStack } from "../Polaroid/Polaroid.tsx";
 import { Tooltip } from "../Tooltip/Tooltip.tsx";
 import s from "./Dock.module.css";
 
@@ -162,40 +163,24 @@ export function Dock({
 										);
 										if (sidecarWindows.length === 0) return null;
 										return (
-											<div className={s.thumbnailGrid}>
-												{sidecarWindows.map((w) => {
-													const url = thumbnails.get(w.windowId);
-													return (
-														<div
-															key={w.windowId}
-															className={s.thumbnailCell}
-															title={w.title || w.windowId}
-															draggable={true}
-															onDragStart={(e) => {
-																e.dataTransfer.setData(
-																	DOCK_WINDOW_DRAG_MIME,
-																	w.windowId,
-																);
-																e.dataTransfer.effectAllowed = "copy";
-															}}
-														>
-															{url ? (
-																<img
-																	src={url}
-																	alt={w.title || ""}
-																	className={s.thumbnailImg}
-																	draggable={false}
-																/>
-															) : (
-																<div className={s.thumbnailPlaceholder} />
-															)}
-															<div className={s.thumbnailTitle}>
-																{w.title || "Untitled"}
-															</div>
-														</div>
-													);
-												})}
-											</div>
+											<PolaroidStack>
+												{sidecarWindows.map((w) => (
+													<Polaroid
+														key={w.windowId}
+														src={thumbnails.get(w.windowId)}
+														caption={w.title || "Untitled"}
+														title={w.title || w.windowId}
+														draggable
+														onDragStart={(e) => {
+															e.dataTransfer.setData(
+																DOCK_WINDOW_DRAG_MIME,
+																w.windowId,
+															);
+															e.dataTransfer.effectAllowed = "copy";
+														}}
+													/>
+												))}
+											</PolaroidStack>
 										);
 									})()}
 
