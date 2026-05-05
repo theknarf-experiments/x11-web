@@ -9,7 +9,7 @@ function ControlledHost({ initial }: { initial: string }) {
 	return (
 		<div style={{ width: 480, fontFamily: "system-ui, sans-serif" }}>
 			<MarkdownArea value={text} onChange={setText} />
-			<details style={{ marginTop: 12, color: "#888", fontSize: 12 }}>
+			<details style={{ marginTop: 12, color: "#555", fontSize: 12 }}>
 				<summary>raw text ({text.length} chars)</summary>
 				<pre
 					style={{

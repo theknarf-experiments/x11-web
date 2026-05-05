@@ -25,10 +25,10 @@ export const WithShapes: Story = {
 	render: (args) => (
 		<InfiniteCanvas {...args}>
 			{[
-				{ x: 100, y: 100, color: "#cc6677" },
-				{ x: 320, y: 220, color: "#6699cc" },
-				{ x: 600, y: 80, color: "#88aa66" },
-				{ x: 800, y: 400, color: "#cc99cc" },
+				{ x: 100, y: 100, color: "#7d2632" },
+				{ x: 320, y: 220, color: "#1f4e7a" },
+				{ x: 600, y: 80, color: "#3a5a23" },
+				{ x: 800, y: 400, color: "#5b3a5b" },
 			].map((box, i) => (
 				<div
 					// biome-ignore lint/suspicious/noArrayIndexKey: static demo content

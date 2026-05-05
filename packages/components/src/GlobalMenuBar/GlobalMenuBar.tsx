@@ -227,6 +227,7 @@ function WorkspaceNameField({ name, onCommit }: WorkspaceNameFieldProps) {
 			type="text"
 			className={s.workspaceNameInput}
 			data-testid="global-menu-bar-title"
+			aria-label="Workspace name"
 			value={draft}
 			onChange={(e) => setDraft(e.target.value)}
 			onFocus={(e) => {
@@ -318,6 +319,9 @@ function MenuRow({
 			<>
 				<button
 					type="button"
+					role="menuitem"
+					aria-haspopup="menu"
+					aria-expanded={isOpen}
 					className={s.dropdownItem}
 					data-testid="global-menu-item"
 					disabled={!enabled}
@@ -348,6 +352,7 @@ function MenuRow({
 	return (
 		<button
 			type="button"
+			role="menuitem"
 			className={s.dropdownItem}
 			data-testid="global-menu-item"
 			disabled={!enabled}
