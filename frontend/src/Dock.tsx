@@ -1,9 +1,9 @@
 import { useLiveQuery } from "@tanstack/react-db";
+import { Tooltip } from "@x11-web/components";
 import { useEffect, useRef, useState, ViewTransition } from "react";
 import { AppContextMenu, getAppContextMenuItems } from "./AppContextMenu";
 import s from "./Dock.module.css";
 import { sidecarsCollection, windowsCollection } from "./db";
-import { Tooltip } from "./Tooltip";
 
 export interface DockProcess {
 	sidecarId: string;

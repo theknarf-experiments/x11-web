@@ -1,6 +1,6 @@
 import type { Hotkey } from "@tanstack/react-hotkeys";
+import { Tooltip } from "@x11-web/components";
 import s from "./CanvasToolbar.module.css";
-import { Tooltip } from "./Tooltip";
 
 export type CanvasTool =
 	| "pointer"
