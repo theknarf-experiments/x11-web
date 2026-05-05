@@ -1,15 +1,16 @@
 import { useLiveQuery } from "@tanstack/react-db";
+import { Dock, DOCK_WINDOW_DRAG_MIME, type DockProcess } from "@x11-web/components";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { getAppContextMenuItems } from "./AppContextMenu";
+import { AppContextMenu, getAppContextMenuItems } from "./AppContextMenu";
 import { ClientRenderer } from "./ClientRenderer";
 import { DiagnosticsPanel } from "./DiagnosticsPanel";
-import { Dock, type DockProcess } from "./Dock";
 import {
 	applyOcifNodesSnapshot,
 	ocifNodesCollection,
 	patchWindow,
 	processesCollection,
 	setFocusedWindow,
+	sidecarsCollection,
 	unminimizeWindow,
 	windowsCollection,
 	windowsForProcess,
@@ -126,6 +127,9 @@ function App() {
 
 	const { data: processes = [] } = useLiveQuery((q) =>
 		q.from({ p: processesCollection }).select(({ p }) => p),
+	);
+	const { data: sidecars = [] } = useLiveQuery((q) =>
+		q.from({ s: sidecarsCollection }).select(({ s }) => s),
 	);
 	// DOM order matches collection insertion order; visual stacking comes
 	// from `OcifNode.z` via CSS z-index. Reordering the array would flip
@@ -1133,6 +1137,22 @@ function App() {
 		return result;
 	}, [windows, processes]);
 
+	// Windows that haven't been placed on the canvas yet. Surface
+	// them as draggable thumbnails inside the dock's spawn popover.
+	const unattachedDockWindows = useMemo(
+		() => windows.filter((w) => !attachedWindowIds.has(w.windowId)),
+		[windows, attachedWindowIds],
+	);
+
+	// Right-click on a dock app icon. Position is in viewport
+	// coords; the menu portal renders absolutely.
+	const [dockContextMenu, setDockContextMenu] = useState<{
+		sidecarId: string;
+		pid: number;
+		x: number;
+		y: number;
+	} | null>(null);
+
 	const focusedWindow = windows.find((w) => w.focused) ?? null;
 	const focusedTitle = focusedWindow?.title ?? null;
 	const focusedMenu =
@@ -1214,9 +1234,7 @@ function App() {
 				pageToCanvasRef={pageToCanvasRef}
 				onCanvasPointerDown={handleCanvasPointerDown}
 				onCanvasDrop={(point, event) => {
-					const windowId = event.dataTransfer.getData(
-						"application/x-x11web-window-id",
-					);
+					const windowId = event.dataTransfer.getData(DOCK_WINDOW_DRAG_MIME);
 					if (!windowId || !activeWorkspace) return;
 					const win = windowsCollection.state.get(windowId);
 					if (!win) return;
@@ -1438,11 +1456,11 @@ function App() {
 			<CanvasToolbar tool={tool} onSelect={setTool} />
 			<Dock
 				connected={connected}
+				sidecars={sidecars}
 				processes={dockProcesses}
+				windows={unattachedDockWindows}
 				thumbnails={thumbnails}
-				attachedWindowIds={attachedWindowIds}
 				onSpawn={handleSpawn}
-				onClose={handleCloseProcess}
 				onFocusWindow={(sidecarId, pid) => {
 					if (!activeWorkspace) return;
 					for (const wid of windowsForProcess(sidecarId, pid)) {
@@ -1450,7 +1468,23 @@ function App() {
 						unminimizeWindow(wid);
 					}
 				}}
+				onProcessContextMenu={(sidecarId, pid, x, y) =>
+					setDockContextMenu({ sidecarId, pid, x, y })
+				}
 			/>
+			{dockContextMenu && (
+				<AppContextMenu
+					items={getAppContextMenuItems(
+						dockContextMenu.sidecarId,
+						dockContextMenu.pid,
+						{ onClose: handleCloseProcess },
+					)}
+					x={dockContextMenu.x}
+					y={dockContextMenu.y}
+					openUpwards
+					onClose={() => setDockContextMenu(null)}
+				/>
+			)}
 			<DiagnosticsPanel
 				diagnostics={diagnostics}
 				onDismiss={dismissDiagnostic}
