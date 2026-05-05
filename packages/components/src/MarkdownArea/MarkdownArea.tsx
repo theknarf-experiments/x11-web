@@ -34,6 +34,29 @@ export function MarkdownArea({ value, onChange, className }: Props) {
 
 	const segments = buildSegments(value, parseDecorations(value));
 
+	// Sync `value` → `ec.text` whenever the controlled prop changes.
+	// Local typing already keeps `ec.text` and `value` in lockstep
+	// (Chromium updates `ec.text` synchronously on `textupdate`,
+	// `flushSync` ensures the parent state catches up before the
+	// next event), so this is a no-op for local edits. For *remote*
+	// updates — the `value` prop arriving from a peer / Automerge
+	// doc subscription — `ec.text` would otherwise stay stale, and
+	// the next local keystroke would emit a `textupdate` whose
+	// resulting text was diffed against the OLD value. The host
+	// then writes that stale-derived text back into the CRDT and
+	// the remote edit reverts.
+	useLayoutEffect(() => {
+		const ec = ecRef.current;
+		if (!ec) return;
+		if (ec.text === value) return;
+		ec.updateText(0, ec.text.length, value);
+		// Clamp selection — `updateText` may have shortened the
+		// text out from under it.
+		const start = Math.min(ec.selectionStart, value.length);
+		const end = Math.min(ec.selectionEnd, value.length);
+		ec.updateSelection(start, end);
+	}, [value]);
+
 	// Push EC selection back into the DOM after every render so
 	// the native caret paints at the correct offset. Chromium
 	// updates `ec.selectionStart` on `textupdate` but doesn't move

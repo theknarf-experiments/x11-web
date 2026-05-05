@@ -250,3 +250,70 @@ export const RemoteEditAppearsInLocalEditor: Story = {
 		);
 	},
 };
+
+/** Stale-`EditContext` regression — when a remote edit lands in
+ *  the controlled `value` prop, the component's internal
+ *  `EditContext.text` must update too. Otherwise the next local
+ *  keystroke reports an `ec.text` derived from the *old* value,
+ *  and `Automerge.updateText`'s diff against the up-to-date doc
+ *  emits a destructive splice that deletes the remote text. */
+export const TypingAfterRemoteEditPreservesBothPeers: Story = {
+	args: { initial: "" },
+	play: async ({ canvasElement }) => {
+		const editorA = findEditor(canvasElement, "a");
+		await userEvent.click(editorA);
+		await userEvent.keyboard("hello");
+		await waitFor(() =>
+			expect(getValue(canvasElement, "b")).toBe("hello"),
+		);
+
+		// B types one char. With the bug, B's stale `ec.text=""`
+		// makes Chromium emit a textupdate whose resulting text is
+		// just that one char — `Automerge.updateText` then diffs
+		// the doc's "hello" against "X" and erases "hello".
+		const editorB = findEditor(canvasElement, "b");
+		await userEvent.click(editorB);
+		await userEvent.keyboard("X");
+
+		await waitFor(() => {
+			const a = getValue(canvasElement, "a");
+			const b = getValue(canvasElement, "b");
+			expect(a).toMatch(/hello/);
+			expect(b).toMatch(/hello/);
+		});
+	},
+};
+
+/** Same root cause from the other direction — A types, B's edit
+ *  arrives as a remote update, A then types again. A must still
+ *  see B's text after typing. */
+export const InterleavedEditsRetainBothPeersText: Story = {
+	args: { initial: "" },
+	play: async ({ canvasElement }) => {
+		const editorA = findEditor(canvasElement, "a");
+		await userEvent.click(editorA);
+		await userEvent.keyboard("A1");
+		await waitFor(() =>
+			expect(getValue(canvasElement, "b")).toBe("A1"),
+		);
+
+		const editorB = findEditor(canvasElement, "b");
+		await userEvent.click(editorB);
+		await userEvent.keyboard("B2");
+		await waitFor(() => {
+			expect(getValue(canvasElement, "a")).toMatch(/A1/);
+			expect(getValue(canvasElement, "a")).toMatch(/B2/);
+		});
+
+		await userEvent.click(editorA);
+		await userEvent.keyboard("A3");
+		await waitFor(() => {
+			const a = getValue(canvasElement, "a");
+			const b = getValue(canvasElement, "b");
+			for (const fragment of ["A1", "B2", "A3"]) {
+				expect(a).toMatch(new RegExp(fragment));
+				expect(b).toMatch(new RegExp(fragment));
+			}
+		});
+	},
+};
