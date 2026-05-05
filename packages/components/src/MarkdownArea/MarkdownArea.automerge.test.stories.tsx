@@ -5,7 +5,9 @@ import { userEvent } from "vitest/browser";
 import { expect, waitFor, within } from "storybook/test";
 import { MarkdownArea } from "./MarkdownArea.tsx";
 
-interface DocShape {
+// Index signature satisfies Automerge's `Record<string, unknown>`
+// constraint on its generic doc type.
+interface DocShape extends Record<string, unknown> {
 	body: string;
 }
 

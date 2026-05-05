@@ -39,35 +39,46 @@
 	user-select: none;
 }
 
-.editor {
+/* Wrapper that hosts either the read-only static text or the
+ * `MarkdownArea` editor. Flex-grows to fill the note body and
+ * scrolls when content overflows. */
+.editorWrap {
 	flex: 1 1 auto;
 	min-height: 0;
-	width: 100%;
-	resize: none;
-	border: 0;
-	padding: 8px 10px;
-	background: transparent;
-	color: #f5f5f5;
-	font-family: ui-monospace, "SF Mono", Menlo, monospace;
-	font-size: 12px;
-	line-height: 1.45;
-	white-space: pre;
 	overflow: auto;
-	outline: none;
-	cursor: text;
+	color: #f5f5f5;
 }
 
-.editor::-webkit-scrollbar {
+.editorWrap::-webkit-scrollbar {
 	width: 8px;
 	height: 8px;
 }
-.editor::-webkit-scrollbar-thumb {
+.editorWrap::-webkit-scrollbar-thumb {
 	background: rgba(255, 255, 255, 0.18);
 	border-radius: 4px;
 }
-.editor::-webkit-scrollbar-track {
+.editorWrap::-webkit-scrollbar-track {
 	background: transparent;
 }
+
+/* Override `MarkdownArea`'s default white card chrome — inside an
+ * Ocif note we want it to fill the wrapper and inherit the
+ * parchment-tinted look from the surrounding `.note`. */
+.editor {
+	width: 100%;
+	min-height: 100%;
+	background: transparent;
+	border: 0;
+	border-radius: 0;
+	color: inherit;
+	padding: 8px 10px;
+}
+
+.editor:focus {
+	border: 0;
+	box-shadow: none;
+}
+
 
 /* Resize handles — same look as OcifBox so the gesture feels
  * consistent across shapes. */

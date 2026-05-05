@@ -1,3 +1,4 @@
+/// <reference path="./edit-context.d.ts" />
 import { useEffect, useLayoutEffect, useRef } from "react";
 import { flushSync } from "react-dom";
 import s from "./MarkdownArea.module.css";
@@ -6,6 +7,10 @@ import { buildSegments, parseDecorations } from "./parse";
 interface Props {
 	value: string;
 	onChange: (text: string) => void;
+	/** Optional class merged onto the outer editable `<div>` so
+	 *  consumers can override the default background / border /
+	 *  size from outside. */
+	className?: string;
 }
 
 /** Inline-syntax-highlighted markdown editor on top of the W3C
@@ -21,7 +26,7 @@ interface Props {
  *  back into EC for clicks, pushing EC.selection back into DOM so
  *  the native caret paints in the right spot, and inserting `\n`
  *  on Enter (which Chromium swallows from the textupdate path). */
-export function MarkdownArea({ value, onChange }: Props) {
+export function MarkdownArea({ value, onChange, className }: Props) {
 	const ref = useRef<HTMLDivElement>(null);
 	const ecRef = useRef<EditContext | null>(null);
 	const onChangeRef = useRef(onChange);
@@ -131,7 +136,7 @@ export function MarkdownArea({ value, onChange }: Props) {
 	return (
 		<div
 			ref={ref}
-			className={s.area}
+			className={className ? `${s.area} ${className}` : s.area}
 			tabIndex={0}
 			onKeyDown={(e) => {
 				// Chromium swallows Enter from `textupdate`; insert

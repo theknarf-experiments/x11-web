@@ -68,6 +68,9 @@ importers:
       '@tanstack/react-hotkeys':
         specifier: ^0.10.0
         version: 0.10.0(react-dom@19.3.0-canary-3cb2c420-20260324(react@19.3.0-canary-3cb2c420-20260324))(react@19.3.0-canary-3cb2c420-20260324)
+      '@x11-web/components':
+        specifier: workspace:*
+        version: link:../packages/components
       pako:
         specifier: ^2.1.0
         version: 2.1.0

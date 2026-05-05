@@ -16,6 +16,7 @@
 		"@tanstack/db": "^0.6.5",
 		"@tanstack/react-db": "^0.1.83",
 		"@tanstack/react-hotkeys": "^0.10.0",
+		"@x11-web/components": "workspace:*",
 		"pako": "^2.1.0",
 		"perfect-arrows": "^0.3.7",
 		"perfect-freehand": "^1.2.3",

@@ -428,8 +428,8 @@ function App() {
 				e.preventDefault();
 				// Click-to-place a markdown note at a fixed default
 				// size — the user resizes via corner handles, the
-				// content scrolls when it overflows. Drop straight
-				// into edit mode.
+				// content scrolls when it overflows. The editor is
+				// always live; no separate edit mode.
 				const id = crypto.randomUUID();
 				const z = maxNodeZRef.current + 1;
 				maxNodeZRef.current = z;
@@ -445,7 +445,6 @@ function App() {
 					text_mime_type: "text/markdown",
 				});
 				setSelectedNodeId(id);
-				setEditingNodeId(id);
 				setTool("pointer");
 				return;
 			}
@@ -1298,13 +1297,11 @@ function App() {
 								id={id}
 								node={node}
 								selected={selectedNodeId === id}
-								editing={editingNodeId === id}
 								interactive={tool === "pointer"}
 								dropTarget={dropTarget}
 								onPointerDown={handleNodePointerDown}
 								onResizeHandleDown={handleResizeHandleDown}
 								onChangeText={handleChangeText}
-								onExitEdit={handleExitEdit}
 							/>
 						);
 					}
