@@ -1,4 +1,12 @@
 import { useCallback, useEffect, useRef } from "react";
+import {
+	keyDownToInput,
+	keyUpToInput,
+	mouseButtonMask,
+	mouseDownToInput,
+	mouseMoveToInput,
+	mouseUpToInput,
+} from "./inputProtocol";
 import type { ClientRenderer } from "./ClientRenderer";
 import type { InputEvent, WindowWmState } from "./types";
 import s from "./WindowFrame.module.css";
@@ -205,65 +213,36 @@ export function WindowFrame({
 		onInputRef.current(event);
 	}, []);
 
-	/** Translate a mouse event's client coordinates into canvas pixels. */
-	const clampToCanvas = useCallback(
-		(
-			e: React.MouseEvent<HTMLCanvasElement>,
-		): { x: number; y: number; scaleX: number; scaleY: number } => {
-			const rect = e.currentTarget.getBoundingClientRect();
-			const scaleX = e.currentTarget.width / rect.width;
-			const scaleY = e.currentTarget.height / rect.height;
-			const mx = Math.round((e.clientX - rect.left) * scaleX);
-			const my = Math.round((e.clientY - rect.top) * scaleY);
-			return { x: mx, y: my, scaleX, scaleY };
-		},
-		[],
-	);
+	/** Build the canvas geometry the protocol module needs to map
+	 *  client coords into canvas pixels. */
+	const canvasGeom = useCallback((target: HTMLCanvasElement) => {
+		return {
+			rect: target.getBoundingClientRect(),
+			width: target.width,
+			height: target.height,
+		};
+	}, []);
 
 	const handleMouseMove = useCallback(
 		(e: React.MouseEvent<HTMLCanvasElement>) => {
-			const { x: mx, y: my } = clampToCanvas(e);
-			sendInput({
-				kind: "MotionNotify",
-				x: mx,
-				y: my,
-				state: mouseButtonMask(e.buttons),
-			});
+			sendInput(mouseMoveToInput(e, canvasGeom(e.currentTarget)));
 		},
-		[sendInput, clampToCanvas],
+		[sendInput, canvasGeom],
 	);
 
 	const handleMouseDown = useCallback(
 		(e: React.MouseEvent<HTMLCanvasElement>) => {
 			e.stopPropagation();
-			const { x: mx, y: my } = clampToCanvas(e);
-			const browserBit = [1, 4, 2][e.button] ?? 0;
-			const prePressButtons = e.buttons & ~browserBit;
-			sendInput({
-				kind: "ButtonPress",
-				button: x11Button(e.button),
-				x: mx,
-				y: my,
-				state: mouseButtonMask(prePressButtons) | mouseMods(e),
-			});
+			sendInput(mouseDownToInput(e, canvasGeom(e.currentTarget)));
 		},
-		[sendInput, clampToCanvas],
+		[sendInput, canvasGeom],
 	);
 
 	const handleMouseUp = useCallback(
 		(e: React.MouseEvent<HTMLCanvasElement>) => {
-			const { x: mx, y: my } = clampToCanvas(e);
-			const browserBit = [1, 4, 2][e.button] ?? 0;
-			const preReleaseButtons = e.buttons | browserBit;
-			sendInput({
-				kind: "ButtonRelease",
-				button: x11Button(e.button),
-				x: mx,
-				y: my,
-				state: mouseButtonMask(preReleaseButtons) | mouseMods(e),
-			});
+			sendInput(mouseUpToInput(e, canvasGeom(e.currentTarget)));
 		},
-		[sendInput, clampToCanvas],
+		[sendInput, canvasGeom],
 	);
 
 	const handleKeyDown = useCallback(
@@ -277,14 +256,8 @@ export function WindowFrame({
 			// Suppress regular key events during IME composition to avoid double input
 			if (composingRef.current) return;
 			e.preventDefault();
-			const keycode = browserKeyToX11Keycode(e);
-			if (keycode > 0) {
-				sendInput({
-					kind: "KeyPress",
-					keycode,
-					state: keyboardMask(e),
-				});
-			}
+			const ev = keyDownToInput(e);
+			if (ev) sendInput(ev);
 		},
 		[sendInput, wmState, onRestore],
 	);
@@ -294,14 +267,8 @@ export function WindowFrame({
 			// Suppress regular key events during IME composition to avoid double input
 			if (composingRef.current) return;
 			e.preventDefault();
-			const keycode = browserKeyToX11Keycode(e);
-			if (keycode > 0) {
-				sendInput({
-					kind: "KeyRelease",
-					keycode,
-					state: keyboardMask(e),
-				});
-			}
+			const ev = keyUpToInput(e);
+			if (ev) sendInput(ev);
 		},
 		[sendInput],
 	);
@@ -898,142 +865,5 @@ export function WindowFrame({
 
 /** Map browser KeyboardEvent to X11 keycode using e.code (physical key).
  *  Falls back to e.keyCode + 8 for Playwright compatibility. */
-function browserKeyToX11Keycode(e: React.KeyboardEvent): number {
-	const codeMap: Record<string, number> = {
-		Escape: 9,
-		Digit1: 10,
-		Digit2: 11,
-		Digit3: 12,
-		Digit4: 13,
-		Digit5: 14,
-		Digit6: 15,
-		Digit7: 16,
-		Digit8: 17,
-		Digit9: 18,
-		Digit0: 19,
-		Minus: 20,
-		Equal: 21,
-		Backspace: 22,
-		Tab: 23,
-		KeyQ: 24,
-		KeyW: 25,
-		KeyE: 26,
-		KeyR: 27,
-		KeyT: 28,
-		KeyY: 29,
-		KeyU: 30,
-		KeyI: 31,
-		KeyO: 32,
-		KeyP: 33,
-		BracketLeft: 34,
-		BracketRight: 35,
-		Enter: 36,
-		ControlLeft: 37,
-		KeyA: 38,
-		KeyS: 39,
-		KeyD: 40,
-		KeyF: 41,
-		KeyG: 42,
-		KeyH: 43,
-		KeyJ: 44,
-		KeyK: 45,
-		KeyL: 46,
-		Semicolon: 47,
-		Quote: 48,
-		Backquote: 49,
-		ShiftLeft: 50,
-		Backslash: 51,
-		KeyZ: 52,
-		KeyX: 53,
-		KeyC: 54,
-		KeyV: 55,
-		KeyB: 56,
-		KeyN: 57,
-		KeyM: 58,
-		Comma: 59,
-		Period: 60,
-		Slash: 61,
-		ShiftRight: 62,
-		NumpadMultiply: 63,
-		AltLeft: 64,
-		Space: 65,
-		CapsLock: 66,
-		F1: 67,
-		F2: 68,
-		F3: 69,
-		F4: 70,
-		F5: 71,
-		F6: 72,
-		F7: 73,
-		F8: 74,
-		F9: 75,
-		F10: 76,
-		NumLock: 77,
-		ScrollLock: 78,
-		F11: 95,
-		F12: 96,
-		ControlRight: 105,
-		AltRight: 108,
-		Home: 110,
-		ArrowUp: 111,
-		PageUp: 112,
-		ArrowLeft: 113,
-		ArrowRight: 114,
-		End: 115,
-		ArrowDown: 116,
-		PageDown: 117,
-		Insert: 118,
-		Delete: 119,
-		MetaLeft: 133,
-		MetaRight: 134,
-	};
-
-	if (e.code && codeMap[e.code] !== undefined) {
-		return codeMap[e.code];
-	}
-
-	if (e.keyCode > 0) {
-		return e.keyCode + 8;
-	}
-
-	return 0;
-}
-
-function x11Button(browserButton: number): number {
-	switch (browserButton) {
-		case 0:
-			return 1;
-		case 1:
-			return 2;
-		case 2:
-			return 3;
-		default:
-			return browserButton + 1;
-	}
-}
-
-function mouseButtonMask(buttons: number): number {
-	let mask = 0;
-	if (buttons & 1) mask |= 0x100;
-	if (buttons & 4) mask |= 0x200;
-	if (buttons & 2) mask |= 0x400;
-	return mask;
-}
-
-function mouseMods(e: React.MouseEvent): number {
-	let mask = 0;
-	if (e.shiftKey) mask |= 0x01;
-	if (e.ctrlKey) mask |= 0x04;
-	if (e.altKey) mask |= 0x08;
-	if (e.metaKey) mask |= 0x40;
-	return mask;
-}
-
-function keyboardMask(e: React.KeyboardEvent): number {
-	let mask = 0;
-	if (e.shiftKey) mask |= 0x01;
-	if (e.ctrlKey) mask |= 0x04;
-	if (e.altKey) mask |= 0x08;
-	if (e.metaKey) mask |= 0x40;
-	return mask;
-}
+// Pure browser-event → X11 protocol translation lives in
+// `inputProtocol.ts` (table-tested in `inputProtocol.test.ts`).
