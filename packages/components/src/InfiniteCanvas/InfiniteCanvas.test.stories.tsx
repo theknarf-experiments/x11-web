@@ -122,6 +122,49 @@ export const PointerDownFiresWithCanvasCoords: Story = {
 	},
 };
 
+/** Clicking the zoom indicator opens a preset menu; picking a
+ *  level snaps the camera to that exact scale. Useful when scroll
+ *  zoom has drifted off a round number like 100%. */
+export const ZoomIndicatorPresetSnaps: Story = {
+	args: {},
+	play: async ({ canvasElement }) => {
+		const viewport = within(canvasElement).getByTestId("infinite-canvas");
+		const transformLayer = viewport.querySelector(
+			"[data-canvas-scale]",
+		) as HTMLElement;
+
+		// Drift away from 100% with a couple of ctrl+wheel events.
+		viewport.dispatchEvent(
+			new WheelEvent("wheel", {
+				bubbles: true,
+				cancelable: true,
+				ctrlKey: true,
+				deltaY: -100,
+				clientX: 100,
+				clientY: 100,
+			}),
+		);
+		await waitFor(() =>
+			expect(
+				parseFloat(
+					transformLayer.getAttribute("data-canvas-scale") ?? "1",
+				),
+			).not.toBe(1),
+		);
+
+		// Open menu via the indicator, pick 200%.
+		within(canvasElement).getByTestId("zoom-indicator").click();
+		const menu = await waitFor(() =>
+			within(canvasElement).getByTestId("zoom-menu"),
+		);
+		within(menu).getByText("200%").click();
+
+		await waitFor(() =>
+			expect(transformLayer.getAttribute("data-canvas-scale")).toBe("2"),
+		);
+	},
+};
+
 /** `ctrl + wheel` zooms the canvas around the cursor. The inner
  *  transform layer exposes the new scale via `data-canvas-scale`
  *  for inspection. */

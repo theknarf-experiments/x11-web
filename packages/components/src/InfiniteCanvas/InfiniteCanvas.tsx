@@ -33,6 +33,7 @@ interface InfiniteCanvasProps {
 
 const MIN_SCALE = 0.1;
 const MAX_SCALE = 3;
+const ZOOM_PRESETS = [0.25, 0.5, 0.75, 1, 1.5, 2];
 
 export function InfiniteCanvas({
 	children,
@@ -44,6 +45,41 @@ export function InfiniteCanvas({
 	const cameraRef = useRef(camera);
 	cameraRef.current = camera;
 	const viewportRef = useRef<HTMLDivElement>(null);
+	const [zoomMenuOpen, setZoomMenuOpen] = useState(false);
+	const zoomMenuRef = useRef<HTMLDivElement>(null);
+
+	// Outside-click closes the zoom preset menu.
+	useEffect(() => {
+		if (!zoomMenuOpen) return;
+		function onPointerDown(e: PointerEvent) {
+			if (!zoomMenuRef.current?.contains(e.target as Node)) {
+				setZoomMenuOpen(false);
+			}
+		}
+		document.addEventListener("pointerdown", onPointerDown);
+		return () => document.removeEventListener("pointerdown", onPointerDown);
+	}, [zoomMenuOpen]);
+
+	// Jump the camera to a specific scale, keeping the canvas point
+	// currently under the viewport's centre anchored. Used by the
+	// preset menu — pure scroll-zoom can't snap precisely to round
+	// numbers like 100%.
+	const setZoom = (newScale: number) => {
+		const el = viewportRef.current;
+		if (!el) return;
+		const rect = el.getBoundingClientRect();
+		const cam = cameraRef.current;
+		const cx = rect.width / 2;
+		const cy = rect.height / 2;
+		const canvasX = cam.x + cx / cam.scale;
+		const canvasY = cam.y + cy / cam.scale;
+		setCamera({
+			x: canvasX - cx / newScale,
+			y: canvasY - cy / newScale,
+			scale: newScale,
+		});
+		setZoomMenuOpen(false);
+	};
 
 	// Wheel: scroll = pan, cmd+scroll or pinch = zoom
 	// Use a native event listener to get { passive: false } for preventDefault
@@ -166,7 +202,38 @@ export function InfiniteCanvas({
 			>
 				{children}
 			</div>
-			<div className={s.zoomIndicator}>{zoomPercent}%</div>
+			<div className={s.zoomIndicatorWrap} ref={zoomMenuRef}>
+				<button
+					type="button"
+					className={s.zoomIndicator}
+					data-testid="zoom-indicator"
+					onClick={() => setZoomMenuOpen((o) => !o)}
+				>
+					{zoomPercent}%
+				</button>
+				{zoomMenuOpen && (
+					<div
+						className={s.zoomMenu}
+						role="menu"
+						data-testid="zoom-menu"
+					>
+						{ZOOM_PRESETS.map((preset) => (
+							<button
+								key={preset}
+								type="button"
+								className={
+									camera.scale === preset
+										? s.zoomMenuItemActive
+										: s.zoomMenuItem
+								}
+								onClick={() => setZoom(preset)}
+							>
+								{Math.round(preset * 100)}%
+							</button>
+						))}
+					</div>
+				)}
+			</div>
 		</div>
 	);
 }
