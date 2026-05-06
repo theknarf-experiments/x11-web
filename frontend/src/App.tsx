@@ -40,6 +40,7 @@ import {
 	useBackendSocket,
 	useWorkspaceName,
 } from "./useBackendSocket";
+import { useWindowActions } from "./windowActions";
 import { WindowFrame } from "./WindowFrame";
 import {
 	appendOcifNodePathPoint,
@@ -897,165 +898,27 @@ function App() {
 		[activeWorkspace, ocifNodes],
 	);
 
-	const handleMove = useCallback(
-		(windowId: string, x: number, y: number) => {
-			// Top-level windows live as `OcifNode`s in the workspace
-			// doc — moving one is just an `setOcifNodePosition`. Pop-
-			// ups (overrideRedirect) don't get a node; their X-server
-			// placement is authoritative and they ignore drags.
-			if (!activeWorkspace) return;
-			const win = windowsCollection.state.get(windowId);
-			if (win?.overrideRedirect) return;
-			setOcifNodePosition(activeWorkspace.id, windowId, x, y);
-		},
-		[activeWorkspace],
-	);
-
-	const resizeTimerRef = useRef<ReturnType<typeof setTimeout>>(undefined);
-
-	const handleResize = useCallback(
-		(windowId: string, sidecarId: string, width: number, height: number) => {
-			clearTimeout(resizeTimerRef.current);
-			resizeTimerRef.current = setTimeout(() => {
-				send({
-					type: "ResizeWindow",
-					sidecar_id: sidecarId,
-					window_id: windowId,
-					width,
-					height,
-				});
-			}, 100);
-		},
-		[send],
-	);
-
-	const handleFocus = useCallback(
-		(windowId: string) => {
-			if (activeWorkspace) {
-				raiseOcifNode(activeWorkspace.id, windowId);
-				unminimizeWindow(windowId);
-			}
-			// Set focus locally too. For X11 this is redundant — the X
-			// server forwards a `WindowUpdate::Focused` after it
-			// processes the click — but the macOS sidecar doesn't emit
-			// focus events, so without setting it client-side the
-			// global menu bar would never light up for macOS windows.
-			setFocusedWindow(windowId);
-		},
-		[activeWorkspace],
-	);
-
-	const handleInput = useCallback(
-		(windowId: string, sidecarId: string, event: InputEvent) => {
-			send({
-				type: "InputEvent",
-				sidecar_id: sidecarId,
-				window_id: windowId,
-				event,
-			});
-		},
-		[send],
-	);
-
-	/** Kill a process and locally hide all of its windows until the
-	 *  backend's next `WindowList` drops them. */
-	const handleCloseProcess = useCallback(
-		(sidecarId: string, pid: number) => {
-			const wids = windowsForProcess(sidecarId, pid);
-			if (wids.length > 0) {
-				setClosedWindowIds((prev) => new Set([...prev, ...wids]));
-			}
-			send({
-				type: "KillProcess",
-				request_id: nextRequestId(),
-				sidecar_id: sidecarId,
-				pid,
-			});
-		},
-		[send],
-	);
-
-	/** Minimize a window (hide it, show in dock). */
-	const handleMinimize = useCallback(
-		(windowId: string, sidecarId: string) => {
-			patchWindow(windowId, { wmState: "minimized" });
-			send({
-				type: "InputEvent",
-				sidecar_id: sidecarId,
-				window_id: windowId,
-				event: { kind: "WindowManage", action: "minimized" },
-			});
-		},
-		[send],
-	);
-
-	/** Maximize a window (expand to fill viewport). Stash the
-	 *  pre-maximize node position so Restore can put it back. */
-	const handleMaximize = useCallback(
-		(windowId: string, sidecarId: string) => {
-			const node = ocifNodes.get(windowId);
-			patchWindow(windowId, {
-				wmState: "maximized",
-				...(node ? { savedPosition: { x: node.x, y: node.y } } : {}),
-			});
-			send({
-				type: "InputEvent",
-				sidecar_id: sidecarId,
-				window_id: windowId,
-				event: { kind: "WindowManage", action: "maximized" },
-			});
-		},
-		[send, ocifNodes],
-	);
-
-	/** Close a window gracefully via ICCCM WM_DELETE_WINDOW. */
-	const handleCloseWindow = useCallback(
-		(windowId: string, sidecarId: string) => {
-			send({
-				type: "InputEvent",
-				sidecar_id: sidecarId,
-				window_id: windowId,
-				event: { kind: "WindowManage", action: "close" },
-			});
-		},
-		[send],
-	);
-
-	/** Restore a window from maximized/fullscreen/minimized to normal.
-	 *  Pre-maximize node position is in `WindowRow.savedPosition` (the
-	 *  per-tab local memory stashed at maximize time). */
-	const handleRestore = useCallback(
-		(windowId: string, sidecarId: string) => {
-			if (!activeWorkspace) return;
-			const win = windowsCollection.state.get(windowId);
-			patchWindow(windowId, { wmState: "normal" });
-			if (win?.savedPosition) {
-				setOcifNodePosition(
-					activeWorkspace.id,
-					windowId,
-					win.savedPosition.x,
-					win.savedPosition.y,
-				);
-			}
-			send({
-				type: "InputEvent",
-				sidecar_id: sidecarId,
-				window_id: windowId,
-				event: { kind: "WindowManage", action: "normal" },
-			});
-		},
-		[activeWorkspace, send],
-	);
-
-	/** Focus follows mouse: focus window on mouse enter. */
-	const handleMouseEnterWindow = useCallback(
-		(windowId: string) => {
-			if (focusPolicy !== "focus-follows-mouse") return;
-			if (activeWorkspace) raiseOcifNode(activeWorkspace.id, windowId);
-			setFocusedWindow(windowId);
-		},
-		[focusPolicy, activeWorkspace],
-	);
+	// All `WindowFrame` lifecycle callbacks live in
+	// `useWindowActions` — one bag, every member a thin
+	// `send` + collection-mutation wrapper.
+	const {
+		handleMove,
+		handleResize,
+		handleFocus,
+		handleInput,
+		handleCloseProcess,
+		handleMinimize,
+		handleMaximize,
+		handleCloseWindow,
+		handleRestore,
+		handleMouseEnterWindow,
+	} = useWindowActions({
+		activeWorkspaceId: activeWorkspace?.id ?? null,
+		ocifNodes,
+		focusPolicy,
+		send,
+		setClosedWindowIds,
+	});
 
 	// Deduplicate windows by process for the dock -- one entry per (sidecarId, pid)
 	// Include minimized windows so they appear in the dock
