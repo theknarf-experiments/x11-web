@@ -31,7 +31,8 @@ import { OcifBox, type ResizeHandle } from "./OcifBox";
 import { OcifMarkdown } from "./OcifMarkdown";
 import { OcifPath } from "./OcifPath";
 import { OcifText, type TextCorner } from "./OcifText";
-import { decodeFrame } from "./rtcWire";
+import { useBellSound } from "./bellSound";
+import { useFrameRouter } from "./frameRouter";
 import { SettingsPanel } from "./SettingsPanel";
 import type { FocusPolicy, InputEvent, MenuAction } from "./types";
 import {
@@ -142,8 +143,14 @@ function App() {
 		q.from({ w: windowsCollection }).select(({ w }) => w),
 	);
 
-	/** One renderer per top-level X11 window (keyed by window_id). */
-	const renderersRef = useRef<Map<string, ClientRenderer>>(new Map());
+	// `useFrameRouter` owns the per-window `ClientRenderer` map and
+	// the thumbnail object-URL map; it consumes inbound DataChannel
+	// frames and dispatches `PutImage` / `WindowThumbnail` into
+	// them. The eviction loop below + the lazy-init in the render
+	// path also touch `renderersRef.current` directly.
+	const { renderersRef, thumbnails } = useFrameRouter({
+		onDataChannelMessage,
+	});
 	/** Windows the user has locally closed (KillProcess in flight); filtered
 	 *  out of the visible set until the backend's next WindowList drops them. */
 	const [closedWindowIds, setClosedWindowIds] = useState<Set<string>>(
@@ -253,73 +260,7 @@ function App() {
 		});
 	}, [windows]);
 
-	// Per-window thumbnail object URLs, keyed by window_id.
-	// Driven by `Frame::WindowThumbnail` arrivals over the DC; the
-	// previous URL is revoked when superseded so we don't leak.
-	const [thumbnails, setThumbnails] = useState<Map<string, string>>(
-		() => new Map(),
-	);
-
-	// Frame messages over the WebRTC DataChannel: decode the
-	// Cap'n Proto envelope and dispatch on variant. PutImage routes
-	// to the per-window renderer; WindowThumbnail updates the
-	// thumbnail map (consumed by the dock's spawn popover).
-	useEffect(() => {
-		onDataChannelMessage((bytes) => {
-			const msg = decodeFrame(bytes);
-			if (!msg) return;
-			if (msg.kind === "putImage") {
-				const renderers = renderersRef.current;
-				let r = renderers.get(msg.windowId);
-				if (!r) {
-					r = new ClientRenderer(msg.width || 1, msg.height || 1);
-					renderers.set(msg.windowId, r);
-				}
-				r.pushPutImage(msg.x, msg.y, msg.data);
-				return;
-			}
-			if (msg.kind === "thumbnail") {
-				// Copy the bytes into a fresh ArrayBuffer because the
-				// Uint8Array we got from the decoder is a view into
-				// the reassembler's buffer, which gets reused.
-				const copy = new Uint8Array(msg.data);
-				const url = URL.createObjectURL(
-					new Blob([copy], { type: "image/webp" }),
-				);
-				setThumbnails((prev) => {
-					const next = new Map(prev);
-					const old = next.get(msg.windowId);
-					if (old) URL.revokeObjectURL(old);
-					next.set(msg.windowId, url);
-					return next;
-				});
-			}
-		});
-		return () => onDataChannelMessage(null);
-	}, [onDataChannelMessage]);
-
-	// Top-level Bell event — play an audible/visual notification.
-	useEffect(() => {
-		onBell((percent) => {
-			try {
-				const ctx = new AudioContext();
-				const osc = ctx.createOscillator();
-				const gain = ctx.createGain();
-				osc.connect(gain);
-				gain.connect(ctx.destination);
-				osc.frequency.value = 800;
-				gain.gain.value = Math.max(0.01, percent / 100);
-				osc.start();
-				osc.stop(ctx.currentTime + 0.1);
-			} catch {
-				document.body.style.backgroundColor = "#fff";
-				setTimeout(() => {
-					document.body.style.backgroundColor = "";
-				}, 100);
-			}
-		});
-		return () => onBell(null);
-	}, [onBell]);
+	useBellSound({ onBell });
 
 	function handleSpawn(sidecarId: string, command: string, args: string[]) {
 		if (!activeWorkspace) return;
