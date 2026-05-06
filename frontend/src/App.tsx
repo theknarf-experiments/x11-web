@@ -40,6 +40,7 @@ import {
 	useBackendSocket,
 	useWorkspaceName,
 } from "./useBackendSocket";
+import { useAuth } from "./useAuth";
 import { useWindowActions } from "./windowActions";
 import { WindowFrame } from "./WindowFrame";
 import {
@@ -159,6 +160,15 @@ function App() {
 	);
 	/** Focus policy setting. */
 	const [focusPolicy, setFocusPolicy] = useState<FocusPolicy>("click-to-focus");
+
+	// OIDC auth state — `null` user means anonymous (everything
+	// still works; identity-gated features just stay locked).
+	const {
+		user: authUser,
+		loading: authLoading,
+		signIn,
+		signOut,
+	} = useAuth();
 
 	/** Active canvas tool — "pointer" (default), "box", or "arrow".
 	 *  Hotkeys (V / B / A) registered below. */
@@ -1036,6 +1046,11 @@ function App() {
 				menu={focusedMenu}
 				onActivate={handleMenuActivate}
 				appContextMenuItems={focusedAppContextMenuItems}
+				auth={
+					authLoading
+						? null
+						: { user: authUser, onSignIn: signIn, onSignOut: signOut }
+				}
 			/>
 			<InfiniteCanvas
 				pageToCanvasRef={pageToCanvasRef}

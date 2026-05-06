@@ -1,0 +1,27 @@
+# Local-only dev/test infra that the main `compose.yml` doesn't
+# need. Currently: a mock OIDC provider for the auth flow.
+#
+# Run alongside the existing dev loop:
+#   docker compose -f compose.dev.yml up -d mock-oidc
+#
+# The backend then needs:
+#   OIDC_ISSUER=http://localhost:8080/x11-web
+#   OIDC_CLIENT_ID=x11-web
+#   OIDC_REDIRECT_URI=http://localhost:3001/auth/callback
+# (see `.env.example`)
+#
+# In production, swap this service out for a real IdP — Keycloak,
+# Authentik, Auth0, Google, etc. — and update `OIDC_ISSUER` to
+# point at it. Nothing else changes.
+
+services:
+  mock-oidc:
+    image: ghcr.io/navikt/mock-oauth2-server:2.1.10
+    ports:
+      - "8080:8080"
+    environment:
+      # Default behaviour is "any path is a valid issuer ID"; the
+      # `x11-web` segment in `OIDC_ISSUER` becomes the issuer name.
+      # The login form auto-mints tokens for whatever user id /
+      # email the operator types into it.
+      LOG_LEVEL: INFO

@@ -38,6 +38,17 @@ export interface MenuItem {
 	children?: MenuItem[];
 }
 
+/** Optional auth UI rendered at the right end of the bar. When
+ *  `user` is `null`, a "Sign in" button is shown; when present,
+ *  the email is shown next to a "Sign out" affordance. The host
+ *  drives both via `onSignIn` / `onSignOut`; pass the whole object
+ *  as `null` to hide auth UI entirely. */
+export interface GlobalMenuBarAuth {
+	user: { email: string | null } | null;
+	onSignIn: () => void;
+	onSignOut: () => void;
+}
+
 interface GlobalMenuBarProps {
 	/** Title of the currently focused window, or null when nothing is focused. */
 	focusedTitle: string | null;
@@ -58,6 +69,8 @@ interface GlobalMenuBarProps {
 	 * title click.
 	 */
 	appContextMenuItems: AppContextMenuItem[] | null;
+	/** Optional auth state + handlers. Omit / pass `null` to hide. */
+	auth?: GlobalMenuBarAuth | null;
 }
 
 /**
@@ -76,6 +89,7 @@ export function GlobalMenuBar({
 	menu,
 	onActivate,
 	appContextMenuItems,
+	auth,
 }: GlobalMenuBarProps) {
 	const [openIndex, setOpenIndex] = useState<number | null>(null);
 	const [appMenuAnchor, setAppMenuAnchor] = useState<{
@@ -194,6 +208,38 @@ export function GlobalMenuBar({
 					y={appMenuAnchor.y}
 					onClose={() => setAppMenuAnchor(null)}
 				/>
+			)}
+			{auth && (
+				<>
+					<div className={s.authSpacer} />
+					{auth.user ? (
+						<>
+							<span
+								className={s.authEmail}
+								data-testid="auth-email"
+							>
+								{auth.user.email ?? "signed in"}
+							</span>
+							<button
+								type="button"
+								className={s.authButton}
+								data-testid="auth-sign-out"
+								onClick={auth.onSignOut}
+							>
+								Sign out
+							</button>
+						</>
+					) : (
+						<button
+							type="button"
+							className={s.authButton}
+							data-testid="auth-sign-in"
+							onClick={auth.onSignIn}
+						>
+							Sign in
+						</button>
+					)}
+				</>
 			)}
 		</div>
 	);

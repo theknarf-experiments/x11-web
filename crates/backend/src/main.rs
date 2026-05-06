@@ -1,3 +1,4 @@
+mod auth_routes;
 mod chunking;
 mod quic;
 mod rtc;
@@ -158,11 +159,76 @@ async fn async_main() {
         workspace_docs: Arc::new(RwLock::new(HashMap::new())),
     };
 
-    let app = Router::new()
+    // OIDC + session middleware. `OidcConfig::from_env()` returns
+    // `None` when `OIDC_ISSUER` is unset → anonymous-only mode;
+    // `/auth/login` then 503s but `/auth/me` still works (returns
+    // `null`). The mode is logged on startup so prod can't silently
+    // regress to anonymous.
+    let authenticator = match x11_web_auth::OidcConfig::from_env() {
+        Some(cfg) => {
+            info!("OIDC enabled (issuer={})", cfg.issuer);
+            Some(
+                x11_web_auth::Authenticator::new(cfg)
+                    .expect("OIDC authenticator init"),
+            )
+        }
+        None => {
+            info!("OIDC disabled — anonymous-only mode (set OIDC_ISSUER to enable)");
+            None
+        }
+    };
+    let auth_state = auth_routes::AuthState::new(authenticator);
+
+    // Cookie-based sessions, in-memory store. `SameSite=Lax`
+    // means the cookie rides along on cross-port localhost
+    // requests in dev (same eTLD+1) without the `Secure` flag
+    // that would require HTTPS. Production deployments behind
+    // TLS should flip `with_secure(true)`.
+    let session_store = tower_sessions_memory_store::MemoryStore::default();
+    let session_layer = tower_sessions::SessionManagerLayer::new(session_store)
+        .with_name("x11web.sid")
+        .with_same_site(tower_sessions::cookie::SameSite::Lax)
+        .with_http_only(true)
+        .with_secure(false);
+
+    let mut app = Router::new()
         .route("/ws/frontend", get(frontend_ws_handler))
         .route("/health", get(|| async { "ok" }))
-        .layer(CorsLayer::permissive())
-        .with_state(state.clone());
+        .with_state(state.clone())
+        .merge(auth_routes::router().with_state(auth_state));
+
+    // Optional static-file fallback. When `X11WEB_FRONTEND_DIR`
+    // points at a built `frontend/dist`, the backend serves the
+    // SPA at `/` (with index.html as the SPA fallback). Used in
+    // e2e and production deploys where there's no separate
+    // frontend host. In dev with Vite, leave it unset.
+    if let Ok(dir) = std::env::var("X11WEB_FRONTEND_DIR") {
+        info!("Serving SPA from {dir}");
+        app = app.fallback_service(
+            tower_http::services::ServeDir::new(&dir)
+                .not_found_service(tower_http::services::ServeFile::new(
+                    format!("{dir}/index.html"),
+                )),
+        );
+    }
+
+    let app = app
+        // CORS with credentials so the SPA dev server (Vite on
+        // a different port) can call `/auth/me` etc. with the
+        // session cookie attached.
+        .layer(
+            CorsLayer::new()
+                .allow_credentials(true)
+                .allow_methods([
+                    axum::http::Method::GET,
+                    axum::http::Method::POST,
+                ])
+                .allow_headers([axum::http::header::CONTENT_TYPE])
+                .allow_origin(tower_http::cors::AllowOrigin::predicate(
+                    |_origin, _| true,
+                )),
+        )
+        .layer(session_layer);
 
     // QUIC sidecar listener — the only sidecar transport. Generates a
     // fresh self-signed cert on startup and prints its SHA-256

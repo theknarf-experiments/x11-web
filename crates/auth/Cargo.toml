@@ -1,0 +1,16 @@
+[package]
+name = "x11-web-auth"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+# OIDC discovery + Authorization Code (PKCE) flow + ID-token JWT
+# verification against the issuer's JWKS. The crate's `reqwest`
+# integration ships in default-features.
+openidconnect = "4"
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"] }
+serde = { version = "1", features = ["derive"] }
+thiserror = "2"
+tokio = { version = "1", features = ["sync", "macros"] }
+tracing = "0.1"
+url = "2"

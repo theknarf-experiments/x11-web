@@ -23,6 +23,34 @@
 	user-select: none;
 }
 
+/* Pushes auth UI to the right end of the bar without forcing a
+ * specific layout for the menu items on the left. */
+.authSpacer {
+	flex: 1 1 auto;
+}
+
+.authEmail {
+	padding: 4px 8px;
+	color: rgba(255, 255, 255, 0.6);
+	font-size: 12px;
+}
+
+.authButton {
+	padding: 4px 10px;
+	border-radius: 6px;
+	background: transparent;
+	border: 1px solid rgba(255, 255, 255, 0.18);
+	color: rgba(255, 255, 255, 0.85);
+	font-size: 12px;
+	font-family: inherit;
+	cursor: pointer;
+}
+
+.authButton:hover {
+	background: rgba(255, 255, 255, 0.06);
+	color: rgba(255, 255, 255, 0.95);
+}
+
 .appTitle {
 	background: transparent;
 	border: none;

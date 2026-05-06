@@ -1,5 +1,6 @@
 [workspace]
 members = [
+    "crates/auth",
     "crates/protocol",
     "crates/backend",
     "crates/sidecar",

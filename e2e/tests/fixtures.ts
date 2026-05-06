@@ -8,10 +8,8 @@
  *   import { test, expect } from "./fixtures";
  */
 
-import { execSync, spawn } from "node:child_process";
+import { execSync } from "node:child_process";
 import * as fs from "node:fs";
-import * as http from "node:http";
-import * as os from "node:os";
 import * as path from "node:path";
 import {
 	type Locator,
@@ -26,7 +24,6 @@ const PROJECT_ROOT = path.resolve(import.meta.dirname, "../..");
 const E2E_DIR = path.resolve(import.meta.dirname, "..");
 const FRONTEND_DIR = path.join(PROJECT_ROOT, "frontend");
 const SCRIPTS_DIR = path.join(E2E_DIR, "scripts");
-const SERVE_BIN = path.join(E2E_DIR, "node_modules", ".bin", "serve");
 
 // ---------------------------------------------------------------------------
 // Per-worker container state
@@ -47,15 +44,11 @@ const SERVE_BIN = path.join(E2E_DIR, "node_modules", ".bin", "serve");
 // not, so we use index only.
 const WORKER_INDEX = process.env.TEST_WORKER_INDEX ?? "0";
 const WORKER_NETWORK = `x11web-worker-${WORKER_INDEX}`;
-// Sticky frontend port per worker, persisted to a tmp lockfile so that
-// worker respawns reattach to the existing `serve` process instead of
-// spawning a leaked one.
-const FRONTEND_LOCK = path.join(os.tmpdir(), `x11web-worker-${WORKER_INDEX}.json`);
-type FrontendLock = { port: number };
 
 let backendContainer: StartedTestContainer;
 let sidecarContainer: StartedTestContainer;
-let frontendPort: number;
+let mockOidcContainer: StartedTestContainer;
+let mockOidcPort: number;
 let backendPort: number;
 let setupDone = false;
 let setupPromise: Promise<void> | null = null;
@@ -79,11 +72,52 @@ async function doSetup() {
 	ensureWorkerNetwork();
 
 	const FINGERPRINT_PATH = "/tmp/x11web-fingerprint";
-	// Per-worker UDP port for the WebRTC DataChannel. Container port
-	// and host port match so the backend (which lives in the
-	// container) can advertise `127.0.0.1:<port>` knowing that's what
-	// the browser on the host will reach.
+	const FRONTEND_DIST_IN_CONTAINER = "/srv/frontend-dist";
+	// All host-side ports are pinned per worker so the OIDC URIs
+	// can be set on the backend container's env *before* it starts
+	// (testcontainers can't update env after start). Fixed offsets
+	// per worker keep workers from colliding.
+	//
+	// Note that there is no separate frontend server in e2e —
+	// the backend serves `frontend/dist` at `/` (bind-mounted in
+	// below), so `frontendUrl` is the backend's URL.
 	const rtcUdpPort = 3003 + Number(WORKER_INDEX);
+	backendPort = 3010 + Number(WORKER_INDEX);
+	mockOidcPort = 8090 + Number(WORKER_INDEX);
+	const mockOidcContainerPort = 8080;
+
+	mockOidcContainer = await new GenericContainer(
+		"ghcr.io/navikt/mock-oauth2-server:2.1.10",
+	)
+		.withNetworkMode(WORKER_NETWORK)
+		.withNetworkAliases("mock-oidc")
+		.withEnvironment({
+			// Tell the mock server to advertise the host-published
+			// URL in its discovery doc + ID-token `iss` claim. Both
+			// the backend and the browser hit it via this URL, so
+			// the issuer string stays consistent across container
+			// and host views.
+			SERVER_URL: `http://localhost:${mockOidcPort}`,
+			LOG_LEVEL: "INFO",
+		})
+		// `Wait.forHttp` expects 2xx; mock-oauth2-server's root path
+		// returns 404 by design. The discovery doc *is* served, so
+		// poll that — it also confirms the server is fully up.
+		.withWaitStrategy(
+			Wait.forHttp(
+				"/x11-web/.well-known/openid-configuration",
+				mockOidcContainerPort,
+			).forStatusCode(200),
+		)
+		.withExposedPorts({
+			container: mockOidcContainerPort,
+			host: mockOidcPort,
+		})
+		.withReuse()
+		.start();
+	console.log(
+		`[worker ${WORKER_INDEX}] Mock OIDC running at http://localhost:${mockOidcPort}`,
+	);
 
 	backendContainer = await GenericContainer.fromDockerfile(
 		PROJECT_ROOT,
@@ -94,7 +128,29 @@ async function doSetup() {
 			const built = image
 				.withNetworkMode(WORKER_NETWORK)
 				.withNetworkAliases("backend")
-				.withExposedPorts(3001)
+				.withExposedPorts({ container: 3001, host: backendPort })
+				// `localhost` inside the backend container resolves
+				// to the host gateway, so the backend hits the
+				// host-published mock-oidc port at the *same* URL
+				// the browser uses. That keeps the OIDC issuer
+				// string identical on both sides — required for the
+				// `iss` claim check on the ID token.
+				.withExtraHosts([
+					{ host: "localhost", ipAddress: "host-gateway" },
+				])
+				// Mount the prebuilt frontend (produced by
+				// `global-setup.ts`) into the backend container so
+				// the backend's `ServeDir` fallback serves the SPA.
+				// Means the browser hits one origin
+				// (`localhost:<backendPort>`) for the SPA, the auth
+				// routes, and the WS — cookies trivially same-origin.
+				.withBindMounts([
+					{
+						source: path.join(FRONTEND_DIR, "dist"),
+						target: FRONTEND_DIST_IN_CONTAINER,
+						mode: "ro",
+					},
+				])
 				.withEnvironment({
 					// Pin the fingerprint to a fixed path so the harness
 					// can `exec cat` it without depending on a $HOME that
@@ -108,6 +164,15 @@ async function doSetup() {
 					// browser runs on the host, so it sees container
 					// services through the host loopback.
 					X11WEB_RTC_PUBLIC_HOST: "127.0.0.1",
+					// Tells the backend to serve the SPA at `/`. The
+					// path is the bind-mount target above.
+					X11WEB_FRONTEND_DIR: FRONTEND_DIST_IN_CONTAINER,
+					// OIDC against the mock provider. `localhost` here
+					// resolves through the host-gateway entry above.
+					OIDC_ISSUER: `http://localhost:${mockOidcPort}/x11-web`,
+					OIDC_CLIENT_ID: "x11-web",
+					OIDC_REDIRECT_URI: `http://localhost:${backendPort}/auth/callback`,
+					OIDC_POST_LOGIN_REDIRECT: `http://localhost:${backendPort}/`,
 				})
 				.withWaitStrategy(
 					Wait.forHttp("/health", 3001).forStatusCode(200),
@@ -194,64 +259,10 @@ async function doSetup() {
 				.start(),
 		);
 
-	console.log(`[worker ${WORKER_INDEX}] Sidecar connected to backend`);
-
-	frontendPort = await ensureFrontendServer();
 	console.log(
-		`[worker ${WORKER_INDEX}] Frontend running at http://localhost:${frontendPort}`,
+		`[worker ${WORKER_INDEX}] SPA served by backend at http://localhost:${backendPort}`,
 	);
 	setupDone = true;
-}
-
-/**
- * Ensure a `serve` process for this worker is running against the prebuilt
- * `frontend/dist` (built once by `global-setup.ts`). The port is persisted
- * in `FRONTEND_LOCK` so that worker respawns reattach to the existing
- * `serve` process instead of leaking one per respawn. The runtime WS URL
- * is supplied to each browser page via the `?ws=...` query param baked
- * into `frontendUrl`.
- */
-async function ensureFrontendServer(): Promise<number> {
-	if (fs.existsSync(FRONTEND_LOCK)) {
-		try {
-			const lock = JSON.parse(
-				fs.readFileSync(FRONTEND_LOCK, "utf8"),
-			) as FrontendLock;
-			const res = await fetch(`http://localhost:${lock.port}`).catch(
-				() => null,
-			);
-			if (res?.ok) return lock.port;
-		} catch {
-			// stale; fall through to spawn fresh
-		}
-	}
-	const port = await findFreePort();
-	const child = spawn(SERVE_BIN, ["dist", "-l", `${port}`, "--no-clipboard"], {
-		cwd: FRONTEND_DIR,
-		detached: true,
-		stdio: "ignore",
-	});
-	child.unref();
-	await new Promise<void>((resolve, reject) => {
-		const timeout = setTimeout(() => {
-			clearInterval(check);
-			reject(new Error("Frontend server failed to start within 30s"));
-		}, 30_000);
-		const check = setInterval(async () => {
-			try {
-				const res = await fetch(`http://localhost:${port}`);
-				if (res.ok) {
-					clearInterval(check);
-					clearTimeout(timeout);
-					resolve();
-				}
-			} catch {
-				// Not ready yet
-			}
-		}, 200);
-	});
-	fs.writeFileSync(FRONTEND_LOCK, JSON.stringify({ port }));
-	return port;
 }
 
 async function teardownAll() {
@@ -260,16 +271,6 @@ async function teardownAll() {
 	// `x11web-worker-*` prefix match.
 	setupDone = false;
 	setupPromise = null;
-}
-
-function findFreePort(): Promise<number> {
-	return new Promise((resolve) => {
-		const server = http.createServer();
-		server.listen(0, () => {
-			const port = (server.address() as { port: number }).port;
-			server.close(() => resolve(port));
-		});
-	});
 }
 
 // ---------------------------------------------------------------------------
@@ -294,12 +295,13 @@ export const test = base.extend<{}, X11Fixtures>({
 	frontendUrl: [
 		async ({}, use) => {
 			await ensureSetup();
-			// Bake the per-worker backend WS URL into the URL as a query
-			// param; the frontend bundle picks it up at runtime so workers
-			// can share one prebuilt `dist`.
+			// SPA + WS + auth all live on the backend's host port —
+			// same origin, so cookies trivially apply. The WS URL is
+			// still baked in as a `?ws=` query param so the bundle
+			// can be shared across workers.
 			const wsUrl = `ws://localhost:${backendPort}/ws/frontend`;
 			await use(
-				`http://localhost:${frontendPort}/?ws=${encodeURIComponent(wsUrl)}`,
+				`http://localhost:${backendPort}/?ws=${encodeURIComponent(wsUrl)}`,
 			);
 		},
 		{ scope: "worker", timeout: 600_000 },

@@ -16,4 +16,20 @@ export default defineConfig({
 		format: "es",
 		plugins: () => [wasm(), topLevelAwait()],
 	},
+	server: {
+		// Forward auth + WS requests to the backend so the browser
+		// sees them as same-origin. Cookies (session) and the WS
+		// upgrade handshake then ride along without CORS dance.
+		proxy: {
+			"/auth": {
+				target: "http://localhost:3001",
+				changeOrigin: true,
+			},
+			"/ws/frontend": {
+				target: "ws://localhost:3001",
+				ws: true,
+				changeOrigin: true,
+			},
+		},
+	},
 });

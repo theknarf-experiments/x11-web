@@ -21,6 +21,7 @@ export {
 } from "./Dock/Dock.tsx";
 export {
 	GlobalMenuBar,
+	type GlobalMenuBarAuth,
 	type MenuAction,
 	type MenuItem,
 	type MenuItemKind,
