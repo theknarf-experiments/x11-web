@@ -13,6 +13,7 @@ import {
 	mouseMoveToInput,
 	mouseUpToInput,
 } from "./inputProtocol";
+import { computeResize, startPointerDrag } from "./pointerDrag";
 import type { ClientRenderer } from "./ClientRenderer";
 import type { InputEvent, WindowWmState } from "./types";
 import s from "./WindowFrame.module.css";
@@ -48,13 +49,6 @@ interface WindowFrameProps {
 
 const MIN_WIDTH = 50;
 const MIN_HEIGHT = 50;
-
-function getScale(el: Element): number {
-	const wrapper = el.closest("[data-canvas-scale]");
-	return wrapper
-		? Number.parseFloat(wrapper.getAttribute("data-canvas-scale") || "1")
-		: 1;
-}
 
 /** Convert X11 ARGB32 pixel to CSS color string. */
 function argb32ToCss(pixel: number): string {
@@ -131,85 +125,51 @@ export function WindowFrame({
 		};
 	}, [renderer]);
 
-	// Title bar drag
+	// Title bar drag — `startPointerDrag` owns the pointer-capture +
+	// listener bookkeeping; we just translate the cursor delta into
+	// a new top-left position.
 	const handleTitlePointerDown = useCallback(
 		(e: React.PointerEvent) => {
 			if (wmState === "maximized" || wmState === "fullscreen") return;
 			e.stopPropagation();
-			const startX = e.clientX;
-			const startY = e.clientY;
 			const origX = x;
 			const origY = y;
-			const target = e.currentTarget;
-			target.setPointerCapture(e.pointerId);
-			const scale = getScale(target);
-
-			const onPointerMove = (ev: Event) => {
-				const { clientX, clientY } = ev as PointerEvent;
-				const dx = clientX - startX;
-				const dy = clientY - startY;
+			startPointerDrag(e, ({ dx, dy, scale }) => {
 				onMove(origX + dx / scale, origY + dy / scale);
-			};
-
-			const onPointerUp = () => {
-				target.removeEventListener("pointermove", onPointerMove);
-				target.removeEventListener("pointerup", onPointerUp);
-			};
-
-			target.addEventListener("pointermove", onPointerMove);
-			target.addEventListener("pointerup", onPointerUp);
+			});
 		},
 		[x, y, onMove, wmState],
 	);
 
-	// Corner resize -- dx/dy signs determine which edges move
+	// Corner resize — `flipX` / `flipY` identify the grabbed corner.
+	// `computeResize` does the geometry; the helper handles the
+	// pointer-capture wiring.
 	const makeResizeHandler = useCallback(
 		(flipX: boolean, flipY: boolean) => (e: React.PointerEvent) => {
 			if (wmState === "maximized" || wmState === "fullscreen") return;
 			e.stopPropagation();
-			const startMX = e.clientX;
-			const startMY = e.clientY;
 			const canvas = canvasRef.current;
 			const origW = canvas ? canvas.width : renderer.width;
 			const origH = canvas ? canvas.height : renderer.height;
 			const origX = x;
 			const origY = y;
-			const target = e.currentTarget;
-			target.setPointerCapture(e.pointerId);
-			const scale = getScale(target);
-
-			const onPointerMove = (ev: Event) => {
-				const { clientX, clientY } = ev as PointerEvent;
-				const dx = (clientX - startMX) / scale;
-				const dy = (clientY - startMY) / scale;
-
-				const newW = Math.max(
-					MIN_WIDTH,
-					Math.round(origW + (flipX ? -dx : dx)),
-				);
-				const newH = Math.max(
-					MIN_HEIGHT,
-					Math.round(origH + (flipY ? -dy : dy)),
-				);
-
-				renderer.resize(newW, newH);
-				onResize(newW, newH);
-
-				if (flipX)
-					onMove(
-						origX + (origW - newW),
-						flipY ? origY + (origH - newH) : origY,
-					);
-				else if (flipY) onMove(origX, origY + (origH - newH));
-			};
-
-			const onPointerUp = () => {
-				target.removeEventListener("pointermove", onPointerMove);
-				target.removeEventListener("pointerup", onPointerUp);
-			};
-
-			target.addEventListener("pointermove", onPointerMove);
-			target.addEventListener("pointerup", onPointerUp);
+			startPointerDrag(e, ({ dx, dy, scale }) => {
+				const r = computeResize({
+					origX,
+					origY,
+					origW,
+					origH,
+					dx: dx / scale,
+					dy: dy / scale,
+					flipX,
+					flipY,
+					minW: MIN_WIDTH,
+					minH: MIN_HEIGHT,
+				});
+				renderer.resize(r.width, r.height);
+				onResize(r.width, r.height);
+				if (flipX || flipY) onMove(r.x, r.y);
+			});
 		},
 		[renderer, onResize, onMove, x, y, wmState],
 	);
