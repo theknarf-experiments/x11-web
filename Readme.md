@@ -93,10 +93,9 @@ docker compose -f compose.dev.yml up -d
 ```
 
 OpenObserve UI lives at http://localhost:5080 — log in with
-`admin@example.com` / `Complexpass#123` (dev creds in
-`compose.dev.yml`). `mprocs` already wires the right
-`OTEL_EXPORTER_OTLP_*` env into the backend; leave those unset
-to opt out entirely.
+`admin@admin.com` / `admin` (dev creds in `compose.dev.yml`).
+`mprocs` already wires the right `OTEL_EXPORTER_OTLP_*` env
+into the backend; leave those unset to opt out entirely.
 
 ### Docker Compose
 

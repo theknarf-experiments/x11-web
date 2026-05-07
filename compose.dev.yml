@@ -40,8 +40,8 @@ services:
       - "5080:5080" # Web UI + HTTP OTLP
       - "5081:5081" # gRPC OTLP
     environment:
-      ZO_ROOT_USER_EMAIL: admin@example.com
-      ZO_ROOT_USER_PASSWORD: Complexpass#123
+      ZO_ROOT_USER_EMAIL: admin@admin.com
+      ZO_ROOT_USER_PASSWORD: admin
       ZO_DATA_DIR: /data
     volumes:
       - openobserve-data:/data

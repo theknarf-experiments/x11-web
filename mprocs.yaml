@@ -1,10 +1,10 @@
 procs:
   # OpenObserve — local OTel-native UI for traces + metrics + logs
   # in a single container. UI at http://localhost:5080
-  # (admin@example.com / Complexpass#123); OTLP gRPC ingest on
-  # :5081, path-routed by org. Naming the service explicitly on
-  # the `up` line keeps `mock-oidc` (also in compose.dev.yml)
-  # out of the default dev loop.
+  # (admin@admin.com / admin); OTLP gRPC ingest on :5081,
+  # path-routed by org. Naming the service explicitly on the
+  # `up` line keeps `mock-oidc` (also in compose.dev.yml) out of
+  # the default dev loop.
   openobserve:
     stop:
       send-keys: ["<C-c>"]
@@ -25,10 +25,10 @@ procs:
       # `authorization` / `organization` / `stream-name` headers
       # ride as gRPC metadata via OTel's standard
       # `OTEL_EXPORTER_OTLP_HEADERS` env. Basic-auth token below
-      # is `base64(admin@example.com:Complexpass#123)` and
-      # matches the dev creds in compose.dev.yml.
+      # is `base64(admin@admin.com:admin)` and matches the dev
+      # creds in compose.dev.yml.
       OTEL_EXPORTER_OTLP_ENDPOINT: http://localhost:5081/api/default
-      OTEL_EXPORTER_OTLP_HEADERS: "authorization=Basic YWRtaW5AZXhhbXBsZS5jb206Q29tcGxleHBhc3MjMTIz,organization=default,stream-name=default"
+      OTEL_EXPORTER_OTLP_HEADERS: "authorization=Basic YWRtaW5AYWRtaW4uY29tOmFkbWlu,organization=default,stream-name=default"
       OTEL_SERVICE_NAME: x11-web-backend
 
   # X11 sidecar (Linux container) — connects to the host's backend
