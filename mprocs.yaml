@@ -10,6 +10,13 @@ procs:
       send-keys: ["<C-c>"]
     shell: |
       set -e
+      # Same trick as sidecar-x11: compose pins a container to
+      # the network it was created on by ID, so if that network
+      # got deleted (`docker network prune`, worker-network
+      # sweep, …) the next `up` fails with "network <id> not
+      # found". `rm -fs` drops the stale container so `up`
+      # creates a fresh one on the current default network.
+      docker compose -f compose.dev.yml rm -fs openobserve >/dev/null 2>&1 || true
       docker compose -f compose.dev.yml up openobserve
 
   backend:
