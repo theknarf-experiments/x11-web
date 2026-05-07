@@ -54,7 +54,7 @@ mod macos {
         // OTel pipeline + stdout fmt layer. Env-gated: when
         // `OTEL_EXPORTER_OTLP_ENDPOINT` is unset, only the
         // stdout subscriber runs (same profile as before).
-        let _telemetry = x11_web_telemetry::init("x11-web-sidecar-macos");
+        let _telemetry = x11_web_sidecar_macos::telemetry::init();
 
         // Probe SkyLight up front so the operator sees in the log
         // whether the private path is reachable on this system.
@@ -200,6 +200,14 @@ mod macos {
         // !Send readers don't fight tokio::spawn.
         let send_loop = async {
             while let Some(msg) = rx.recv().await {
+                if let SidecarToBackend::DisplayUpdate { update, .. } = &msg {
+                    if let Some(m) = x11_web_sidecar_macos::telemetry::metrics() {
+                        let kind =
+                            x11_web_sidecar_macos::telemetry::display_update_kind(update);
+                        m.display_updates
+                            .add(1, &[opentelemetry::KeyValue::new("kind", kind)]);
+                    }
+                }
                 let traceparent = x11_web_telemetry::current_traceparent();
                 let Some(builder) = wire_bridge::build_from_sidecar(&msg, &traceparent) else {
                     continue;
@@ -273,8 +281,18 @@ mod macos {
         capture_ctl_tx: &mpsc::UnboundedSender<x11_web_sidecar_macos::enumerator::CaptureControl>,
     ) {
         use x11_web_sidecar_macos::enumerator::CaptureControl;
+        // Per-command child spans: one envelope span
+        // (`sidecar.handle_backend_msg`) is too coarse to time
+        // individual operations. These nested spans show up as
+        // children in the same trace and make it obvious whether
+        // e.g. an AX click is the slow step.
         match cmd {
             BackendToSidecar::InputEvent { window_id, event } => {
+                let span = tracing::info_span!(
+                    "sidecar.input_event",
+                    window_id = %window_id,
+                );
+                let _enter = span.enter();
                 info!("InputEvent received: window={window_id} event={event:?}");
                 match router.lookup(&window_id) {
                     Some(route) => {
@@ -290,25 +308,35 @@ mod macos {
                 }
             }
             BackendToSidecar::StartWindowCapture { window_id } => {
+                let span = tracing::info_span!("sidecar.start_capture", window_id = %window_id);
+                let _enter = span.enter();
                 let _ = capture_ctl_tx.send(CaptureControl::Start { window_id });
             }
             BackendToSidecar::StopWindowCapture { window_id } => {
+                let span = tracing::info_span!("sidecar.stop_capture", window_id = %window_id);
+                let _enter = span.enter();
                 let _ = capture_ctl_tx.send(CaptureControl::Stop { window_id });
             }
             BackendToSidecar::ResizeWindow {
                 window_id,
                 width,
                 height,
-            } => match router.lookup(&window_id) {
-                Some(route) => {
-                    info!(
-                        "ResizeWindow: pid={} {width}x{height}",
-                        route.pid
-                    );
-                    x11_web_sidecar_macos::resize::inject_resize(route, width, height);
+            } => {
+                let span = tracing::info_span!(
+                    "sidecar.resize_window",
+                    window_id = %window_id,
+                    width,
+                    height,
+                );
+                let _enter = span.enter();
+                match router.lookup(&window_id) {
+                    Some(route) => {
+                        info!("ResizeWindow: pid={} {width}x{height}", route.pid);
+                        x11_web_sidecar_macos::resize::inject_resize(route, width, height);
+                    }
+                    None => warn!("ResizeWindow: no route for window_id={window_id}"),
                 }
-                None => warn!("ResizeWindow: no route for window_id={window_id}"),
-            },
+            }
             other => {
                 info!("Backend msg (ignored): {other:?}");
             }

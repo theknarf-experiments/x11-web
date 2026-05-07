@@ -230,6 +230,9 @@ fn enumerate_step(
         } else {
             if let Some(stop) = prev.capture_stop.take() {
                 stop.abort();
+                if let Some(m) = crate::telemetry::metrics() {
+                    m.capture_sessions_active.add(-1, &[]);
+                }
             }
             if let Some(stop) = prev.thumbnail_stop.take() {
                 stop.abort();
@@ -269,6 +272,9 @@ fn handle_capture_control(
             }
             let stop = spawn_capture_loop(*cg_id, t.uuid.clone(), t.pid, tx.clone());
             t.capture_stop = Some(stop);
+            if let Some(m) = crate::telemetry::metrics() {
+                m.capture_sessions_active.add(1, &[]);
+            }
             info!("Started live capture for window {} (cg_id={cg_id})", t.uuid);
             // Start mirroring the app's macOS menu bar. Polls AX
             // periodically so checkbox toggles / item add-remove /
@@ -285,6 +291,9 @@ fn handle_capture_control(
             };
             if let Some(stop) = t.capture_stop.take() {
                 stop.abort();
+                if let Some(m) = crate::telemetry::metrics() {
+                    m.capture_sessions_active.add(-1, &[]);
+                }
                 info!("Stopped live capture for window {} (cg_id={cg_id})", t.uuid);
             }
             if let Some(stop) = t.menu_stop.take() {
@@ -580,6 +589,9 @@ fn emit_created(tx: &mpsc::UnboundedSender<SidecarToBackend>, uuid: &str, win: &
     let (x, y, w, h) = clamp_bounds(&win.bounds);
     let client_id = client_id_for_pid(win.pid);
     let resizable = crate::resize::is_resizable(win.pid, win.bounds);
+    if let Some(m) = crate::telemetry::metrics() {
+        m.windows_enumerated.add(1, &[]);
+    }
     let _ = tx.send(SidecarToBackend::DisplayUpdate {
         client_id: client_id.clone(),
         update: DisplayUpdate::WindowCreated {

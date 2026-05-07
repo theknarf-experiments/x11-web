@@ -31,6 +31,27 @@ use crate::skylight::probe;
 /// dispatch `AXPress` wrapped in `FocusGuard` (Layer 2 + Layer 3).
 /// Pure RPC, no synthetic mouse events, no focus disturbance.
 pub fn inject(route: WindowRoute, event: InputEvent) {
+    // Tag the metric by event family so we can split key/click/scroll
+    // workloads in OpenObserve. Recorded at attempt time — drops
+    // inside `send_key` / `try_ax_click` (e.g. missing AX permission)
+    // still count, which pairs naturally with the AX warnings in logs.
+    if let Some(m) = crate::telemetry::metrics() {
+        let kind = match &event {
+            InputEvent::KeyPress { .. } | InputEvent::KeyRelease { .. } => "key",
+            InputEvent::ButtonPress { button, .. } | InputEvent::ButtonRelease { button, .. } => {
+                if scroll_delta_for_button(*button).is_some() {
+                    "scroll"
+                } else {
+                    "button"
+                }
+            }
+            InputEvent::MotionNotify { .. } => "motion",
+            InputEvent::MenuActivate { .. } => "menu",
+            _ => "other",
+        };
+        m.input_events
+            .add(1, &[opentelemetry::KeyValue::new("kind", kind)]);
+    }
     match event {
         InputEvent::ButtonPress { button, x, y, .. } => {
             // Scroll-wheel buttons (X11 convention: 4/5 vertical,

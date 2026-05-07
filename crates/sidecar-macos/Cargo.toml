@@ -25,10 +25,10 @@ futures = "0.3"
 serde = { version = "1", features = ["derive"] }
 tracing = "0.1"
 # OTel: SDK init lives in `crates/telemetry`; this binary keeps
-# its own metric instruments (currently none — placeholder for
-# parity with the X11 sidecar). Env-gated; when
-# `OTEL_EXPORTER_OTLP_ENDPOINT` is unset the SDK is never
-# initialised.
+# its own metric instruments in `src/telemetry.rs` (display_updates,
+# input_events, windows_enumerated, capture_sessions_active).
+# Env-gated — when `OTEL_EXPORTER_OTLP_ENDPOINT` is unset the SDK
+# is never initialised and the metric ops are no-ops.
 x11-web-telemetry = { path = "../telemetry" }
 opentelemetry = { version = "0.31", features = ["metrics"] }
 uuid = { version = "1", features = ["v4"] }
