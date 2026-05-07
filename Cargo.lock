@@ -4906,14 +4906,15 @@ dependencies = [
  "objc2-core-video",
  "objc2-foundation",
  "objc2-screen-capture-kit",
+ "opentelemetry",
  "rustls",
  "serde",
  "tokio",
  "tracing",
- "tracing-subscriber",
  "uuid",
  "x11-web-pixel-codec",
  "x11-web-protocol",
+ "x11-web-telemetry",
  "x11-web-wire",
 ]
 

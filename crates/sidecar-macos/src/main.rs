@@ -51,7 +51,10 @@ mod macos {
     use x11_web_wire::{wire_capnp, BackendToSidecar, SidecarKind, SidecarToBackend};
 
     pub async fn run(conn_state: Arc<AtomicU8>) {
-        tracing_subscriber::fmt::init();
+        // OTel pipeline + stdout fmt layer. Env-gated: when
+        // `OTEL_EXPORTER_OTLP_ENDPOINT` is unset, only the
+        // stdout subscriber runs (same profile as before).
+        let _telemetry = x11_web_telemetry::init("x11-web-sidecar-macos");
 
         // Probe SkyLight up front so the operator sees in the log
         // whether the private path is reachable on this system.
@@ -197,12 +200,8 @@ mod macos {
         // !Send readers don't fight tokio::spawn.
         let send_loop = async {
             while let Some(msg) = rx.recv().await {
-                // sidecar-macos doesn't have OTel wired up yet —
-                // empty traceparent keeps the wire happy and is
-                // safely ignored by the backend's extractor. Add
-                // the telemetry crate when the macOS sidecar
-                // wants its own service in OpenObserve.
-                let Some(builder) = wire_bridge::build_from_sidecar(&msg, "") else {
+                let traceparent = x11_web_telemetry::current_traceparent();
+                let Some(builder) = wire_bridge::build_from_sidecar(&msg, &traceparent) else {
                     continue;
                 };
                 if let Err(e) = connection.writer.write_message(&builder).await {
@@ -233,9 +232,26 @@ mod macos {
                     }
                 };
                 match wire_bridge::read_to_sidecar(to_sidecar) {
-                    // Discard `traceparent` here; sidecar-macos
-                    // isn't yet emitting OTel spans of its own.
-                    Ok((cmd, _traceparent)) => handle_backend_msg(cmd, &router, &capture_ctl_tx),
+                    Ok((cmd, traceparent)) => {
+                        // Continue the backend's span for the
+                        // duration of this command — same shape
+                        // as the X11 sidecar's `handle_command`
+                        // wrapper. Spans emitted from
+                        // `handle_backend_msg` (and its child
+                        // tasks) thread up into one trace.
+                        use x11_web_telemetry::{OpenTelemetrySpanExt, TraceContextExt};
+                        let parent_ctx =
+                            x11_web_telemetry::extract_traceparent(&traceparent);
+                        let span = tracing::info_span!(
+                            "sidecar.handle_backend_msg",
+                            traceparent = %traceparent,
+                        );
+                        if parent_ctx.span().span_context().is_valid() {
+                            let _ = span.set_parent(parent_ctx);
+                        }
+                        let _enter = span.enter();
+                        handle_backend_msg(cmd, &router, &capture_ctl_tx);
+                    }
                     Err(e) => {
                         warn!("ToSidecar translate: {e:?}");
                     }

@@ -130,7 +130,7 @@ procs:
       open --wait-apps --stdout "$LOG" --stderr "$LOG" \
         --env "OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:5081/api/default" \
         --env "OTEL_EXPORTER_OTLP_HEADERS=authorization=Basic YWRtaW5AYWRtaW4uY29tOmFkbWlu,organization=default,stream-name=default" \
-        --env "OTEL_SERVICE_NAME=x11-web-sidecar" \
+        --env "OTEL_SERVICE_NAME=x11-web-sidecar-macos" \
         ./target/debug/X11WebSidecar.app
       kill "$TAIL_PID" 2>/dev/null || true
       wait "$TAIL_PID" 2>/dev/null || true
