@@ -1,3 +1,5 @@
+mod telemetry;
+
 use std::collections::HashMap;
 use std::process::Stdio;
 
@@ -67,6 +69,9 @@ impl ProcessManager {
             "Spawned process: {} (pid {}) with DISPLAY={}",
             command, pid, self.display_string
         );
+        if let Some(m) = telemetry::metrics() {
+            m.processes_spawned.add(1, &[]);
+        }
         Ok(pid)
     }
 
@@ -199,7 +204,7 @@ async fn start_dbus_session() -> Option<DbusSession> {
 
 #[tokio::main]
 async fn main() {
-    tracing_subscriber::fmt::init();
+    let _telemetry = telemetry::init();
 
     // Attempt to load OSMesa for GLX software rendering
     #[cfg(feature = "osmesa")]
@@ -488,6 +493,15 @@ async fn run_session(
                     // about pixel codecs. Other DisplayUpdate
                     // variants pass through unchanged.
                     let update = encode_for_wire(update);
+                    if let Some(m) = telemetry::metrics() {
+                        let kind = match &update {
+                            x11_web_protocol::DisplayUpdate::PutImage { .. } => "put_image",
+                            x11_web_protocol::DisplayUpdate::WindowThumbnail { .. } => "thumbnail",
+                            _ => "other",
+                        };
+                        m.display_updates
+                            .add(1, &[opentelemetry::KeyValue::new("kind", kind)]);
+                    }
                     let _ = tx.send(SidecarToBackend::DisplayUpdate { client_id, update });
                 }
                 Some((client_id, peer_pid)) = client_connected_rx.recv() => {

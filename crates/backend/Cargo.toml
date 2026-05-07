@@ -22,17 +22,12 @@ serde_json = "1"
 # DTLS, SCTP, and the DataChannel SCTP layer. No audio/video.
 str0m = "0.18"
 tracing = "0.1"
-tracing-subscriber = { version = "0.3", features = ["env-filter"] }
-# OTel: env-gated. When `OTEL_EXPORTER_OTLP_ENDPOINT` is unset
-# the SDK is never initialised — neither traces nor metrics ride
-# anywhere. With it set, we wire the existing `tracing` calls
-# into OTel via `tracing-opentelemetry`, and the metrics provider
-# exports counters/gauges/histograms over the same OTLP gRPC
-# pipe.
-opentelemetry = { version = "0.31", features = ["metrics", "trace"] }
-opentelemetry_sdk = { version = "0.31", features = ["rt-tokio"] }
-opentelemetry-otlp = { version = "0.31", features = ["grpc-tonic", "metrics", "trace"] }
-tracing-opentelemetry = "0.32"
+# OTel: SDK init lives in `crates/telemetry`; the backend defines
+# its own metric instruments and registers them off the shared
+# meter. Env-gated — when `OTEL_EXPORTER_OTLP_ENDPOINT` is unset
+# the SDK is never initialised.
+x11-web-telemetry = { path = "../telemetry" }
+opentelemetry = { version = "0.31", features = ["metrics"] }
 uuid = { version = "1", features = ["v4"] }
 tower-http = { version = "0.6", features = ["cors", "fs"] }
 # Per-workspace CRDT documents. We use autosurgeon for the

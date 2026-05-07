@@ -17,5 +17,10 @@ rustls = { version = "0.23", default-features = false, features = ["ring"] }
 tokio = { version = "1", features = ["full"] }
 futures = "0.3"
 tracing = "0.1"
-tracing-subscriber = "0.3"
+# OTel: SDK init lives in `crates/telemetry`; the sidecar defines
+# its own metric instruments and registers them off the shared
+# meter. Env-gated — when `OTEL_EXPORTER_OTLP_ENDPOINT` is unset
+# the SDK is never initialised.
+x11-web-telemetry = { path = "../telemetry" }
+opentelemetry = { version = "0.31", features = ["metrics"] }
 uuid = { version = "1", features = ["v4"] }
