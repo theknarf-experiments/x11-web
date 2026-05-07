@@ -105,6 +105,9 @@ async fn handle_quic_session(state: AppState, accepted: x11_web_wire::conn::Acce
             },
         );
     }
+    if let Some(m) = crate::telemetry::metrics() {
+        m.sidecars_connected.add(1, &[]);
+    }
 
     // Notify frontends that the sidecar inventory changed.
     broadcast_sidecar_list(&state).await;

@@ -3,6 +3,7 @@ mod chunking;
 mod quic;
 mod rtc;
 mod rtc_codec;
+mod telemetry;
 mod workspace_doc;
 
 use std::collections::HashMap;
@@ -140,7 +141,7 @@ fn main() {
 }
 
 async fn async_main() {
-    tracing_subscriber::fmt::init();
+    let _telemetry = telemetry::init();
 
     let state = AppState {
         sidecars: Arc::new(RwLock::new(HashMap::new())),
@@ -433,6 +434,7 @@ async fn dispatch_sidecar_msg(state: &AppState, sidecar_id: &str, msg: SidecarTo
                             .insert(window_id.clone(), bytes.clone());
                     }
                     let frontends = state.frontends.read().await;
+                    let mut sent = 0u64;
                     for frontend in frontends.values() {
                         if frontend
                             .rtc
@@ -440,7 +442,13 @@ async fn dispatch_sidecar_msg(state: &AppState, sidecar_id: &str, msg: SidecarTo
                             .load(std::sync::atomic::Ordering::Acquire)
                         {
                             let _ = frontend.rtc.dc_tx.send(bytes.clone());
+                            sent += 1;
                         }
+                    }
+                    if let Some(m) = telemetry::metrics() {
+                        let kind = [opentelemetry::KeyValue::new("kind", "put_image")];
+                        m.frame_count.add(sent, &kind);
+                        m.frame_bytes.add(sent * bytes.len() as u64, &kind);
                     }
                     return;
                 }
@@ -465,6 +473,7 @@ async fn dispatch_sidecar_msg(state: &AppState, sidecar_id: &str, msg: SidecarTo
                             .insert(window_id.clone(), bytes.clone());
                     }
                     let frontends = state.frontends.read().await;
+                    let mut sent = 0u64;
                     for frontend in frontends.values() {
                         if frontend
                             .rtc
@@ -472,7 +481,13 @@ async fn dispatch_sidecar_msg(state: &AppState, sidecar_id: &str, msg: SidecarTo
                             .load(std::sync::atomic::Ordering::Acquire)
                         {
                             let _ = frontend.rtc.dc_tx.send(bytes.clone());
+                            sent += 1;
                         }
+                    }
+                    if let Some(m) = telemetry::metrics() {
+                        let kind = [opentelemetry::KeyValue::new("kind", "thumbnail")];
+                        m.frame_count.add(sent, &kind);
+                        m.frame_bytes.add(sent * bytes.len() as u64, &kind);
                     }
                     return;
                 }
@@ -517,6 +532,9 @@ async fn dispatch_sidecar_msg(state: &AppState, sidecar_id: &str, msg: SidecarTo
 async fn cleanup_sidecar(state: &AppState, sidecar_id: &str) {
     info!("Sidecar disconnected: {}", sidecar_id);
     state.sidecars.write().await.remove(sidecar_id);
+    if let Some(m) = telemetry::metrics() {
+        m.sidecars_connected.add(-1, &[]);
+    }
     // Clean up processes, window states, and display buffers for
     // this sidecar.
     let client_ids: Vec<String> = state
@@ -711,6 +729,9 @@ async fn handle_frontend_ws(socket: WebSocket, state: AppState) {
             },
         );
     }
+    if let Some(m) = telemetry::metrics() {
+        m.frontends_connected.add(1, &[]);
+    }
 
     // Send current sidecar list to just this frontend.
     {
@@ -864,6 +885,9 @@ async fn handle_frontend_ws(socket: WebSocket, state: AppState) {
     // Frontend disconnected
     info!("Frontend disconnected: {}", frontend_id);
     state.frontends.write().await.remove(&frontend_id);
+    if let Some(m) = telemetry::metrics() {
+        m.frontends_connected.add(-1, &[]);
+    }
     // Drop per-peer sync state in every workspace doc — peer_states
     // would otherwise grow unboundedly across reconnects.
     {

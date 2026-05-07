@@ -25,3 +25,18 @@ services:
       # The login form auto-mints tokens for whatever user id /
       # email the operator types into it.
       LOG_LEVEL: INFO
+
+  # Local OTel collector + UI in one image. The backend (and the
+  # sidecar, once instrumented) export traces + metrics over OTLP
+  # gRPC to :4317; open the UI at http://localhost:16686 to see
+  # them. Production deploys swap this out for whatever target
+  # the org runs (Tempo, Honeycomb, Datadog, …) by re-pointing
+  # `OTEL_EXPORTER_OTLP_ENDPOINT`.
+  jaeger:
+    image: jaegertracing/all-in-one:1.76.0
+    ports:
+      - "16686:16686" # Jaeger UI
+      - "4317:4317"   # OTLP gRPC (traces, metrics)
+      - "4318:4318"   # OTLP HTTP (browser SDK exports here later)
+    environment:
+      COLLECTOR_OTLP_ENABLED: "true"

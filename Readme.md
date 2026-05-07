@@ -85,6 +85,16 @@ pnpm dev
 
 Then open http://localhost:5173. The sidecar will appear in the dashboard. Click "Spawn xeyes" to launch an X11 app.
 
+Optional dev infra (mock OIDC, local Jaeger for traces + metrics):
+
+```sh
+docker compose -f compose.dev.yml up -d
+```
+
+Jaeger UI lives at http://localhost:16686. Telemetry only flows
+when `OTEL_EXPORTER_OTLP_ENDPOINT` is set in the backend's env
+(see `.env.example`); leave it unset to opt out entirely.
+
 ### Docker Compose
 
 ```sh
