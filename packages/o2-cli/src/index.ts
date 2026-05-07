@@ -4,8 +4,12 @@
  * subcommands. Connection config is env-driven (`O2_ENDPOINT`,
  * `O2_ORG`, `O2_EMAIL`, `O2_PASSWORD`) with sensible defaults
  * matching `compose.dev.yml`.
+ *
+ * `dotenv/config` autoloads `./.env` from the cwd so the CLI
+ * picks up creds from a repo-root `.env` without extra wiring.
  */
 
+import "dotenv/config";
 import { Command } from "commander";
 import { z } from "zod";
 import {
