@@ -30,6 +30,14 @@ const StreamListSchema = z.object({
 });
 export type Stream = z.infer<typeof StreamSchema>;
 
+const FieldSchema = z.object({ name: z.string(), type: z.string() });
+const StreamSchemaResponseSchema = z.object({
+	schema: z.array(FieldSchema),
+});
+export type Field = z.infer<typeof FieldSchema>;
+
+export type StreamType = "logs" | "traces" | "metrics";
+
 /** Search hit shape. OpenObserve returns whatever columns the
  *  query selected; everything's optional from our POV. */
 const SearchHitSchema = z.record(z.string(), z.unknown());
@@ -72,6 +80,18 @@ export class O2Client {
 		return parsed.list;
 	}
 
+	/** Schema introspection. Useful because OpenObserve grows the
+	 *  schema lazily as data arrives — fields only exist after
+	 *  something has populated them, which is easy to forget when
+	 *  writing SQL. */
+	async getStreamSchema(name: string, streamType: StreamType): Promise<Field[]> {
+		const raw = await this.request(
+			"GET",
+			`/api/${this.cfg.org}/streams/${encodeURIComponent(name)}/schema?type=${streamType}`,
+		);
+		return StreamSchemaResponseSchema.parse(raw).schema;
+	}
+
 	/** Run a SQL search against a stream. `sql` should already
 	 *  reference the target stream by name (the SDK doesn't
 	 *  prefix-rewrite, so `FROM "default"` etc. is on the caller). */
@@ -79,7 +99,7 @@ export class O2Client {
 		sql: string;
 		startTime: number; // µs since epoch
 		endTime: number; // µs since epoch
-		streamType?: "logs" | "traces" | "metrics";
+		streamType?: StreamType;
 	}): Promise<SearchHit[]> {
 		const params = new URLSearchParams();
 		if (opts.streamType) params.set("type", opts.streamType);
