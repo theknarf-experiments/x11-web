@@ -30,6 +30,13 @@ export default defineConfig({
 				ws: true,
 				changeOrigin: true,
 			},
+			// OTLP/HTTP proxy: browser can't speak gRPC, so the
+			// frontend's OTel SDK posts protobuf-encoded spans to
+			// the backend, which forwards them to OpenObserve.
+			"/api/telemetry": {
+				target: "http://localhost:3001",
+				changeOrigin: true,
+			},
 		},
 	},
 });

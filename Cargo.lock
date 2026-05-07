@@ -4839,6 +4839,7 @@ dependencies = [
  "capnp",
  "futures",
  "opentelemetry",
+ "reqwest",
  "rustls",
  "serde",
  "serde_json",

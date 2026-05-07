@@ -4,6 +4,7 @@ mod quic;
 mod rtc;
 mod rtc_codec;
 mod telemetry;
+mod telemetry_proxy;
 mod workspace_doc;
 
 use std::collections::HashMap;
@@ -12,7 +13,7 @@ use std::sync::Arc;
 use axum::extract::ws::{Message, WebSocket};
 use axum::extract::{State, WebSocketUpgrade};
 use axum::response::IntoResponse;
-use axum::routing::get;
+use axum::routing::{get, post};
 use axum::Router;
 use futures::{SinkExt, StreamExt};
 use tokio::sync::{mpsc, RwLock};
@@ -195,6 +196,13 @@ async fn async_main() {
     let mut app = Router::new()
         .route("/ws/frontend", get(frontend_ws_handler))
         .route("/health", get(|| async { "ok" }))
+        // Same-origin OTLP/HTTP proxy for the browser. The SDK
+        // doesn't speak gRPC and we don't want OpenObserve creds
+        // in the browser, so the frontend posts here and we forward.
+        .route(
+            "/api/telemetry/v1/traces",
+            post(telemetry_proxy::traces_handler),
+        )
         .with_state(state.clone())
         .merge(auth_routes::router().with_state(auth_state));
 

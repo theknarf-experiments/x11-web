@@ -28,6 +28,11 @@ tracing = "0.1"
 # the SDK is never initialised.
 x11-web-telemetry = { path = "../telemetry" }
 opentelemetry = { version = "0.31", features = ["metrics"] }
+# Used by the `/api/telemetry/v1/traces` proxy route — the browser
+# can't speak gRPC so the frontend OTLP exporter posts protobuf to
+# the backend over HTTPS, and we forward it on to OpenObserve with
+# the correct auth headers.
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"] }
 uuid = { version = "1", features = ["v4"] }
 tower-http = { version = "0.6", features = ["cors", "fs"] }
 # Per-workspace CRDT documents. We use autosurgeon for the
