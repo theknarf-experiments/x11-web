@@ -381,6 +381,7 @@ mod macos {
                     }
                     None => {
                         warn!("No route for window UUID {window_id}");
+                        x11_web_telemetry::mark_span_error("no route for window_id");
                     }
                 }
             }
@@ -411,7 +412,10 @@ mod macos {
                         info!("ResizeWindow: pid={} {width}x{height}", route.pid);
                         x11_web_sidecar_macos::resize::inject_resize(route, width, height);
                     }
-                    None => warn!("ResizeWindow: no route for window_id={window_id}"),
+                    None => {
+                        warn!("ResizeWindow: no route for window_id={window_id}");
+                        x11_web_telemetry::mark_span_error("no route for window_id");
+                    }
                 }
             }
             other => {

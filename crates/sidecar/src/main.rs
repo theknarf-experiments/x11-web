@@ -640,6 +640,8 @@ async fn handle_command(
                 let _ = tx.send(SidecarToBackend::ProcessSpawned { request_id, pid });
             }
             Err(message) => {
+                tracing::warn!(error = %message, "SpawnProcess failed");
+                x11_web_telemetry::mark_span_error(format!("spawn failed: {message}"));
                 let _ = tx.send(SidecarToBackend::Error {
                     request_id: Some(request_id),
                     message,
@@ -655,6 +657,8 @@ async fn handle_command(
                 });
             }
             Err(message) => {
+                tracing::warn!(error = %message, "KillProcess failed");
+                x11_web_telemetry::mark_span_error(format!("kill failed: {message}"));
                 let _ = tx.send(SidecarToBackend::Error {
                     request_id: Some(request_id),
                     message,

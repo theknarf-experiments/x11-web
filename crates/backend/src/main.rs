@@ -1060,6 +1060,9 @@ async fn forward_to_sidecar(state: &AppState, sidecar_id: &str, msg: BackendToSi
         let _ = sidecar.tx.send((msg, traceparent));
     } else {
         warn!("Sidecar not found: {}", sidecar_id);
+        // Caller's `backend.frontend_msg` is still active — mark
+        // it failed so the trace shows red in OpenObserve.
+        x11_web_telemetry::mark_span_error("sidecar not found");
     }
 }
 

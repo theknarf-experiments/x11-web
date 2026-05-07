@@ -217,6 +217,16 @@ pub use tracing_opentelemetry::OpenTelemetrySpanExt;
 /// calling `set_parent`.
 pub use opentelemetry::trace::TraceContextExt;
 
+/// Mark the active span as failed with a human-readable cause.
+/// Equivalent to `Span::current().set_status(Status::error(msg))`
+/// but keeps the OTel/tracing-opentelemetry imports out of the
+/// caller's binary. OpenObserve highlights ERROR-status spans red
+/// in the trace view, which is what makes "find me the failed
+/// spawns" possible.
+pub fn mark_span_error(msg: impl Into<std::borrow::Cow<'static, str>>) {
+    tracing::Span::current().set_status(opentelemetry::trace::Status::error(msg));
+}
+
 /* ----------------------------------------------------------------
  * Cross-process trace context propagation.
  *

@@ -32,6 +32,7 @@ import type {
 	WindowUpdate,
 	Workspace,
 } from "./types";
+import { SpanStatusCode } from "@opentelemetry/api";
 import { spanAttrsFor, tracer } from "./telemetry";
 import { colorForWindowId } from "./windowColors";
 
@@ -390,16 +391,23 @@ export function useBackendSocket() {
 	}, [pushDiagnostic]);
 
 	const send = useCallback((msg: FrontendToBackend) => {
-		if (wsRef.current?.readyState !== WebSocket.OPEN) return;
-		// Wrap each send in a span and stamp the W3C traceparent
-		// onto the JSON envelope so the backend can adopt it as the
-		// parent context for the dispatch span — and propagate it
-		// further to the sidecar over QUIC. Kept manual rather than
-		// pulling `@opentelemetry/core`'s W3C propagator just to
-		// avoid the extra package.
 		const kind = (msg as { type?: string }).type ?? "unknown";
+		// Always open the span — even on the WS-closed path we want a
+		// failed span in OpenObserve so a "no traces fired" question
+		// can distinguish "never tried" from "tried but socket gone".
 		tracer().startActiveSpan(`frontend.ws_send.${kind}`, (span) => {
 			span.setAttributes(spanAttrsFor(msg));
+			if (wsRef.current?.readyState !== WebSocket.OPEN) {
+				span.setStatus({ code: SpanStatusCode.ERROR, message: "ws not open" });
+				span.end();
+				return;
+			}
+			// Wrap each send in a span and stamp the W3C traceparent
+			// onto the JSON envelope so the backend can adopt it as
+			// the parent context for the dispatch span — and propagate
+			// it further to the sidecar over QUIC. Kept manual rather
+			// than pulling `@opentelemetry/core`'s W3C propagator just
+			// to avoid the extra package.
 			const sc = span.spanContext();
 			const flags = sc.traceFlags.toString(16).padStart(2, "0");
 			const traceparent = `00-${sc.traceId}-${sc.spanId}-${flags}`;
