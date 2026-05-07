@@ -15,11 +15,12 @@
  * UI never have to branch.
  */
 
-import { trace } from "@opentelemetry/api";
+import { type Attributes, trace } from "@opentelemetry/api";
 import { OTLPTraceExporter } from "@opentelemetry/exporter-trace-otlp-http";
 import { resourceFromAttributes } from "@opentelemetry/resources";
 import { BatchSpanProcessor, WebTracerProvider } from "@opentelemetry/sdk-trace-web";
 import { ATTR_SERVICE_NAME, ATTR_SERVICE_VERSION } from "@opentelemetry/semantic-conventions";
+import type { FrontendToBackend } from "./types";
 
 const SERVICE_NAME = "x11-web-frontend";
 const TRACER_NAME = SERVICE_NAME;
@@ -50,4 +51,48 @@ export function initTelemetry(): void {
 
 export function tracer() {
 	return trace.getTracer(TRACER_NAME);
+}
+
+/**
+ * Per-variant attributes for `frontend.ws_send.<variant>` spans.
+ * Picks the IDs you'd actually filter by in OpenObserve when
+ * looking at "what did the user just do" — sidecar/window/workspace
+ * IDs, command name, request_id for matching the eventual
+ * `ProcessSpawned` reply, etc. Long opaque blobs (SDP, ICE
+ * candidate strings) are intentionally omitted.
+ */
+export function spanAttrsFor(msg: FrontendToBackend): Attributes {
+	switch (msg.type) {
+		case "OpenWorkspace":
+			return msg.id ? { "workspace.id": msg.id } : {};
+		case "SpawnProcess":
+			return {
+				"request.id": msg.request_id,
+				"sidecar.id": msg.sidecar_id,
+				"workspace.id": msg.workspace_id,
+				command: msg.command,
+				"args.count": msg.args.length,
+			};
+		case "KillProcess":
+			return {
+				"request.id": msg.request_id,
+				"sidecar.id": msg.sidecar_id,
+				pid: msg.pid,
+			};
+		case "InputEvent":
+			return {
+				"sidecar.id": msg.sidecar_id,
+				"window.id": msg.window_id,
+				"event.kind": (msg.event as { type?: string }).type ?? "unknown",
+			};
+		case "ResizeWindow":
+			return {
+				"sidecar.id": msg.sidecar_id,
+				"window.id": msg.window_id,
+				width: msg.width,
+				height: msg.height,
+			};
+		default:
+			return {};
+	}
 }

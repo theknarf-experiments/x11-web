@@ -821,15 +821,29 @@ async fn handle_frontend_ws(socket: WebSocket, state: AppState) {
         // dispatch span. Anything further down (forward_to_sidecar
         // → QUIC → sidecar) reads `current_traceparent()` from the
         // active context, so the same trace continues end-to-end.
+        // Fields are declared empty up front (tracing requires a
+        // static field set per call site) and filled in below from
+        // the matched variant.
         use x11_web_telemetry::{OpenTelemetrySpanExt, TraceContextExt};
         let parent_ctx = x11_web_telemetry::extract_traceparent(&traceparent);
         let span = tracing::info_span!(
             "backend.frontend_msg",
             traceparent = %traceparent,
+            msg.kind = tracing::field::Empty,
+            request.id = tracing::field::Empty,
+            sidecar.id = tracing::field::Empty,
+            workspace.id = tracing::field::Empty,
+            window.id = tracing::field::Empty,
+            command = tracing::field::Empty,
+            pid = tracing::field::Empty,
+            width = tracing::field::Empty,
+            height = tracing::field::Empty,
+            event.kind = tracing::field::Empty,
         );
         if parent_ctx.span().span_context().is_valid() {
             let _ = span.set_parent(parent_ctx);
         }
+        record_msg_attrs(&span, &msg);
         let _enter = span.enter();
 
         match msg {
@@ -947,6 +961,93 @@ async fn handle_frontend_ws(socket: WebSocket, state: AppState) {
         }
     }
     send_task.abort();
+}
+
+/// Stamp the variant-specific IDs onto the active
+/// `backend.frontend_msg` span so a single trace shows what the
+/// user actually clicked — workspace/sidecar/window IDs, the
+/// command name on a spawn, etc. Fields must already be declared
+/// (as `field::Empty`) at the span-creation site or `record` is a
+/// silent no-op.
+fn record_msg_attrs(span: &tracing::Span, msg: &FrontendToBackend) {
+    use FrontendToBackend::*;
+    match msg {
+        OpenWorkspace { id } => {
+            span.record("msg.kind", "OpenWorkspace");
+            if let Some(id) = id {
+                span.record("workspace.id", id.as_str());
+            }
+        }
+        SpawnProcess {
+            request_id,
+            sidecar_id,
+            workspace_id,
+            command,
+            ..
+        } => {
+            span.record("msg.kind", "SpawnProcess");
+            span.record("request.id", request_id.as_str());
+            span.record("sidecar.id", sidecar_id.as_str());
+            span.record("workspace.id", workspace_id.as_str());
+            span.record("command", command.as_str());
+        }
+        KillProcess {
+            request_id,
+            sidecar_id,
+            pid,
+        } => {
+            span.record("msg.kind", "KillProcess");
+            span.record("request.id", request_id.as_str());
+            span.record("sidecar.id", sidecar_id.as_str());
+            span.record("pid", *pid);
+        }
+        InputEvent {
+            sidecar_id,
+            window_id,
+            event,
+        } => {
+            span.record("msg.kind", "InputEvent");
+            span.record("sidecar.id", sidecar_id.as_str());
+            span.record("window.id", window_id.as_str());
+            span.record("event.kind", input_event_kind(event));
+        }
+        ResizeWindow {
+            sidecar_id,
+            window_id,
+            width,
+            height,
+        } => {
+            span.record("msg.kind", "ResizeWindow");
+            span.record("sidecar.id", sidecar_id.as_str());
+            span.record("window.id", window_id.as_str());
+            span.record("width", *width);
+            span.record("height", *height);
+        }
+        RtcOffer { .. } => {
+            span.record("msg.kind", "RtcOffer");
+        }
+        RtcIceCandidate { .. } => {
+            span.record("msg.kind", "RtcIceCandidate");
+        }
+    }
+}
+
+fn input_event_kind(e: &x11_web_protocol::InputEvent) -> &'static str {
+    use x11_web_protocol::InputEvent::*;
+    match e {
+        KeyPress { .. } => "KeyPress",
+        KeyRelease { .. } => "KeyRelease",
+        ButtonPress { .. } => "ButtonPress",
+        ButtonRelease { .. } => "ButtonRelease",
+        MotionNotify { .. } => "MotionNotify",
+        TouchBegin { .. } => "TouchBegin",
+        TouchUpdate { .. } => "TouchUpdate",
+        TouchEnd { .. } => "TouchEnd",
+        GestureSwipe { .. } => "GestureSwipe",
+        GesturePinch { .. } => "GesturePinch",
+        MenuActivate { .. } => "MenuActivate",
+        _ => "other",
+    }
 }
 
 async fn forward_to_sidecar(state: &AppState, sidecar_id: &str, msg: BackendToSidecar) {

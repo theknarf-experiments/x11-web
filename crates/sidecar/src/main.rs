@@ -490,10 +490,18 @@ async fn run_session(
                     let span = tracing::info_span!(
                         "sidecar.handle_command",
                         traceparent = %traceparent,
+                        cmd.kind = tracing::field::Empty,
+                        request.id = tracing::field::Empty,
+                        window.id = tracing::field::Empty,
+                        command = tracing::field::Empty,
+                        pid = tracing::field::Empty,
+                        width = tracing::field::Empty,
+                        height = tracing::field::Empty,
                     );
                     if parent_ctx.span().span_context().is_valid() {
                         let _ = span.set_parent(parent_ctx);
                     }
+                    record_cmd_attrs(&span, &cmd);
                     let _enter = span.enter();
                     handle_command(
                         cmd,
@@ -565,6 +573,55 @@ async fn run_session(
     }
 
     heartbeat_task.abort();
+}
+
+/// Stamp variant-specific IDs onto the active `sidecar.handle_command`
+/// span so a single trace shows exactly which window / process the
+/// sidecar is acting on. Mirror of the backend's `record_msg_attrs`;
+/// the field set here is a subset (no workspace/sidecar IDs — those
+/// are upstream concerns).
+fn record_cmd_attrs(span: &tracing::Span, cmd: &BackendToSidecar) {
+    use BackendToSidecar::*;
+    match cmd {
+        SpawnProcess {
+            request_id, command, ..
+        } => {
+            span.record("cmd.kind", "SpawnProcess");
+            span.record("request.id", request_id.as_str());
+            span.record("command", command.as_str());
+        }
+        KillProcess { request_id, pid } => {
+            span.record("cmd.kind", "KillProcess");
+            span.record("request.id", request_id.as_str());
+            span.record("pid", *pid);
+        }
+        ListProcesses { request_id } => {
+            span.record("cmd.kind", "ListProcesses");
+            span.record("request.id", request_id.as_str());
+        }
+        InputEvent { window_id, .. } => {
+            span.record("cmd.kind", "InputEvent");
+            span.record("window.id", window_id.as_str());
+        }
+        ResizeWindow {
+            window_id,
+            width,
+            height,
+        } => {
+            span.record("cmd.kind", "ResizeWindow");
+            span.record("window.id", window_id.as_str());
+            span.record("width", *width);
+            span.record("height", *height);
+        }
+        StartWindowCapture { window_id } => {
+            span.record("cmd.kind", "StartWindowCapture");
+            span.record("window.id", window_id.as_str());
+        }
+        StopWindowCapture { window_id } => {
+            span.record("cmd.kind", "StopWindowCapture");
+            span.record("window.id", window_id.as_str());
+        }
+    }
 }
 
 async fn handle_command(

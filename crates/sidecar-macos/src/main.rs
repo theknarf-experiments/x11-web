@@ -274,10 +274,18 @@ mod macos {
                         let span = tracing::info_span!(
                             "sidecar.handle_backend_msg",
                             traceparent = %traceparent,
+                            cmd.kind = tracing::field::Empty,
+                            window.id = tracing::field::Empty,
+                            request.id = tracing::field::Empty,
+                            command = tracing::field::Empty,
+                            pid = tracing::field::Empty,
+                            width = tracing::field::Empty,
+                            height = tracing::field::Empty,
                         );
                         if parent_ctx.span().span_context().is_valid() {
                             let _ = span.set_parent(parent_ctx);
                         }
+                        record_cmd_attrs(&span, &cmd);
                         let _enter = span.enter();
                         handle_backend_msg(cmd, &router, &capture_ctl_tx);
                     }
@@ -294,6 +302,54 @@ mod macos {
         }
 
         heartbeat_task.abort();
+    }
+
+    /// Same shape as the X11 sidecar's `record_cmd_attrs`. Stamps
+    /// the active `sidecar.handle_backend_msg` span with the
+    /// variant + key IDs so an OpenObserve drill-down shows what
+    /// window / process the macOS sidecar was acting on.
+    fn record_cmd_attrs(span: &tracing::Span, cmd: &BackendToSidecar) {
+        use BackendToSidecar::*;
+        match cmd {
+            SpawnProcess {
+                request_id, command, ..
+            } => {
+                span.record("cmd.kind", "SpawnProcess");
+                span.record("request.id", request_id.as_str());
+                span.record("command", command.as_str());
+            }
+            KillProcess { request_id, pid } => {
+                span.record("cmd.kind", "KillProcess");
+                span.record("request.id", request_id.as_str());
+                span.record("pid", *pid);
+            }
+            ListProcesses { request_id } => {
+                span.record("cmd.kind", "ListProcesses");
+                span.record("request.id", request_id.as_str());
+            }
+            InputEvent { window_id, .. } => {
+                span.record("cmd.kind", "InputEvent");
+                span.record("window.id", window_id.as_str());
+            }
+            ResizeWindow {
+                window_id,
+                width,
+                height,
+            } => {
+                span.record("cmd.kind", "ResizeWindow");
+                span.record("window.id", window_id.as_str());
+                span.record("width", *width);
+                span.record("height", *height);
+            }
+            StartWindowCapture { window_id } => {
+                span.record("cmd.kind", "StartWindowCapture");
+                span.record("window.id", window_id.as_str());
+            }
+            StopWindowCapture { window_id } => {
+                span.record("cmd.kind", "StopWindowCapture");
+                span.record("window.id", window_id.as_str());
+            }
+        }
     }
 
     fn handle_backend_msg(

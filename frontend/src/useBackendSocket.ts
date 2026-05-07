@@ -32,7 +32,7 @@ import type {
 	WindowUpdate,
 	Workspace,
 } from "./types";
-import { tracer } from "./telemetry";
+import { spanAttrsFor, tracer } from "./telemetry";
 import { colorForWindowId } from "./windowColors";
 
 // Resolve order: ?ws=... query param > VITE_WS_URL build-time env >
@@ -399,6 +399,7 @@ export function useBackendSocket() {
 		// avoid the extra package.
 		const kind = (msg as { type?: string }).type ?? "unknown";
 		tracer().startActiveSpan(`frontend.ws_send.${kind}`, (span) => {
+			span.setAttributes(spanAttrsFor(msg));
 			const sc = span.spanContext();
 			const flags = sc.traceFlags.toString(16).padStart(2, "0");
 			const traceparent = `00-${sc.traceId}-${sc.spanId}-${flags}`;
