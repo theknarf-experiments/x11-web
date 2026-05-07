@@ -794,9 +794,37 @@ async fn handle_frontend_ws(socket: WebSocket, state: AppState) {
     // Process incoming messages from frontend
     while let Some(Ok(msg)) = ws_rx.next().await {
         let Message::Text(text) = msg else { continue };
-        let Ok(msg) = serde_json::from_str::<FrontendToBackend>(&text) else {
+        // Two-step parse: pull the optional `_traceparent` envelope
+        // field off first (set by the frontend so a click joins up
+        // with backend + sidecar spans), then re-parse the same
+        // value as the typed enum. `from_value` walks the existing
+        // tree, so this is cheap.
+        let Ok(value) = serde_json::from_str::<serde_json::Value>(&text) else {
             continue;
         };
+        let traceparent = value
+            .get("_traceparent")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or_default()
+            .to_string();
+        let Ok(msg) = serde_json::from_value::<FrontendToBackend>(value) else {
+            continue;
+        };
+
+        // Adopt the frontend's trace context as the parent for the
+        // dispatch span. Anything further down (forward_to_sidecar
+        // → QUIC → sidecar) reads `current_traceparent()` from the
+        // active context, so the same trace continues end-to-end.
+        use x11_web_telemetry::{OpenTelemetrySpanExt, TraceContextExt};
+        let parent_ctx = x11_web_telemetry::extract_traceparent(&traceparent);
+        let span = tracing::info_span!(
+            "backend.frontend_msg",
+            traceparent = %traceparent,
+        );
+        if parent_ctx.span().span_context().is_valid() {
+            let _ = span.set_parent(parent_ctx);
+        }
+        let _enter = span.enter();
 
         match msg {
             FrontendToBackend::OpenWorkspace { id } => {

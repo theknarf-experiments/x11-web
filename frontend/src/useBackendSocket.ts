@@ -32,6 +32,7 @@ import type {
 	WindowUpdate,
 	Workspace,
 } from "./types";
+import { tracer } from "./telemetry";
 import { colorForWindowId } from "./windowColors";
 
 // Resolve order: ?ws=... query param > VITE_WS_URL build-time env >
@@ -389,9 +390,22 @@ export function useBackendSocket() {
 	}, [pushDiagnostic]);
 
 	const send = useCallback((msg: FrontendToBackend) => {
-		if (wsRef.current?.readyState === WebSocket.OPEN) {
-			wsRef.current.send(JSON.stringify(msg));
-		}
+		if (wsRef.current?.readyState !== WebSocket.OPEN) return;
+		// Wrap each send in a span and stamp the W3C traceparent
+		// onto the JSON envelope so the backend can adopt it as the
+		// parent context for the dispatch span — and propagate it
+		// further to the sidecar over QUIC. Kept manual rather than
+		// pulling `@opentelemetry/core`'s W3C propagator just to
+		// avoid the extra package.
+		const kind = (msg as { type?: string }).type ?? "unknown";
+		tracer().startActiveSpan(`frontend.ws_send.${kind}`, (span) => {
+			const sc = span.spanContext();
+			const flags = sc.traceFlags.toString(16).padStart(2, "0");
+			const traceparent = `00-${sc.traceId}-${sc.spanId}-${flags}`;
+			const wire = { ...msg, _traceparent: traceparent };
+			wsRef.current?.send(JSON.stringify(wire));
+			span.end();
+		});
 	}, []);
 	sendRef.current = send;
 
