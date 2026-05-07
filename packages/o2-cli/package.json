@@ -1,0 +1,22 @@
+{
+	"name": "@x11-web/o2-cli",
+	"private": true,
+	"version": "0.0.0",
+	"type": "module",
+	"bin": {
+		"o2": "./bin/o2.mjs"
+	},
+	"scripts": {
+		"start": "tsx src/index.ts",
+		"typecheck": "tsc --noEmit"
+	},
+	"dependencies": {
+		"commander": "^14.0.1",
+		"zod": "^4.1.12"
+	},
+	"devDependencies": {
+		"@types/node": "24.12.0",
+		"tsx": "^4.20.6",
+		"typescript": "catalog:"
+	}
+}
