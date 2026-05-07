@@ -4938,6 +4938,7 @@ dependencies = [
  "opentelemetry-appender-tracing",
  "opentelemetry-otlp",
  "opentelemetry_sdk",
+ "tokio",
  "tracing",
  "tracing-opentelemetry",
  "tracing-subscriber",

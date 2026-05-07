@@ -54,7 +54,7 @@ mod macos {
         // OTel pipeline + stdout fmt layer. Env-gated: when
         // `OTEL_EXPORTER_OTLP_ENDPOINT` is unset, only the
         // stdout subscriber runs (same profile as before).
-        let _telemetry = x11_web_sidecar_macos::telemetry::init();
+        let telemetry = x11_web_sidecar_macos::telemetry::init();
 
         // Probe SkyLight up front so the operator sees in the log
         // whether the private path is reachable on this system.
@@ -130,7 +130,15 @@ mod macos {
             .unwrap_or_else(|_| hostname().unwrap_or_else(|| "macos-sidecar".into()));
 
         info!("Connecting to backend at {backend_addr} (server-name={server_name})");
-        loop {
+        // Race the connect-loop against SIGINT/SIGTERM. Whichever
+        // wins ends the select and we flush telemetry before the
+        // tokio worker thread returns. NOTE: the tray's "Quit" item
+        // calls `NSApp.terminate:` directly, which `exit()`s
+        // synchronously without giving this task a chance to run —
+        // that path still drops the last batch. Plumbing the tray
+        // through here would need a custom Quit selector that
+        // signals tokio first; deferred for now.
+        let connect_loop = async { loop {
             tray::store(&conn_state, ConnState::Connecting);
             let fingerprint = match read_fingerprint(&fingerprint_source) {
                 Ok(fp) => fp,
@@ -167,7 +175,20 @@ mod macos {
                 }
             }
             tokio::time::sleep(Duration::from_secs(5)).await;
+        }};
+        tokio::select! {
+            _ = connect_loop => {}
+            _ = x11_web_telemetry::shutdown_signal() => {
+                info!("Shutdown signal received; flushing telemetry...");
+            }
         }
+        telemetry.shutdown();
+        // The tokio runtime lives on a worker thread; AppKit owns
+        // the main thread and won't exit `app.run()` just because
+        // we returned here. Force the process to exit now that
+        // telemetry is drained — leaving it alive keeps the tray
+        // icon present with no working backing.
+        std::process::exit(0);
     }
 
     async fn run_session(mut connection: DialedConnection) {

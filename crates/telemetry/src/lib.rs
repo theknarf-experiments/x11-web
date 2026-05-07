@@ -181,6 +181,32 @@ pub fn meter() -> Option<&'static Meter> {
     METER.get()
 }
 
+/// Resolves on the first SIGINT or SIGTERM the process receives.
+/// Each binary `select!`s it next to its main loop and then calls
+/// [`Telemetry::shutdown`] so the tail of the metric / span / log
+/// batch flushes before the process exits — without this, the
+/// last few seconds of telemetry are dropped on every Ctrl-C.
+///
+/// Windows has no SIGTERM; the `cfg(not(unix))` arm only listens
+/// for Ctrl-C there.
+pub async fn shutdown_signal() {
+    let ctrl_c = async {
+        let _ = tokio::signal::ctrl_c().await;
+    };
+    #[cfg(unix)]
+    let term = async {
+        use tokio::signal::unix::{signal, SignalKind};
+        let mut sig = signal(SignalKind::terminate()).expect("install SIGTERM handler");
+        sig.recv().await;
+    };
+    #[cfg(not(unix))]
+    let term = std::future::pending::<()>();
+    tokio::select! {
+        _ = ctrl_c => {}
+        _ = term => {}
+    }
+}
+
 /// Re-export — lets a `tracing::Span` adopt an OTel `Context` as
 /// its parent (`span.set_parent(ctx)`). Re-exported so binary
 /// callers don't have to take a direct dependency on

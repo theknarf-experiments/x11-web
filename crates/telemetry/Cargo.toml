@@ -14,3 +14,7 @@ opentelemetry-appender-tracing = "0.31"
 tracing = "0.1"
 tracing-opentelemetry = "0.32"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+# Signal handling for the shared `shutdown_signal()` helper. Each
+# binary awaits it next to its main loop so OTel's last batch
+# flushes on Ctrl-C / SIGTERM instead of dying with the process.
+tokio = { version = "1", features = ["signal", "macros"] }

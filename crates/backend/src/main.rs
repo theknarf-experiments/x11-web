@@ -141,7 +141,7 @@ fn main() {
 }
 
 async fn async_main() {
-    let _telemetry = telemetry::init();
+    let telemetry = telemetry::init();
 
     let state = AppState {
         sidecars: Arc::new(RwLock::new(HashMap::new())),
@@ -274,7 +274,15 @@ async fn async_main() {
 
     let listener = tokio::net::TcpListener::bind("0.0.0.0:3001").await.unwrap();
     info!("Backend listening on 0.0.0.0:3001");
-    axum::serve(listener, app).await.unwrap();
+    // Graceful shutdown so OTel's last batch flushes on Ctrl-C —
+    // axum returns from `serve` once the signal future resolves,
+    // we then explicitly call `telemetry.shutdown()` to drain.
+    axum::serve(listener, app)
+        .with_graceful_shutdown(x11_web_telemetry::shutdown_signal())
+        .await
+        .unwrap();
+    info!("Shutdown signal received; flushing telemetry...");
+    telemetry.shutdown();
 }
 
 /// Per-message dispatch from the QUIC sidecar handler. Anything that

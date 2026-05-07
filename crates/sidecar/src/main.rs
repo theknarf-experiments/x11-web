@@ -204,7 +204,7 @@ async fn start_dbus_session() -> Option<DbusSession> {
 
 #[tokio::main]
 async fn main() {
-    let _telemetry = telemetry::init();
+    let telemetry = telemetry::init();
 
     // Attempt to load OSMesa for GLX software rendering
     #[cfg(feature = "osmesa")]
@@ -303,7 +303,11 @@ async fn main() {
 
     info!("Connecting to backend at {backend_addr_str} (server-name={server_name})");
 
-    loop {
+    // Race the connect-loop against SIGINT/SIGTERM. Whichever
+    // resolves first ends the select; we then drain the telemetry
+    // pipelines so the last batch makes it to OpenObserve before
+    // the process exits.
+    let connect_loop = async { loop {
         let fingerprint = match read_fingerprint(&fingerprint_source) {
             Ok(fp) => fp,
             Err(e) => {
@@ -352,7 +356,14 @@ async fn main() {
             }
         }
         tokio::time::sleep(Duration::from_secs(5)).await;
+    }};
+    tokio::select! {
+        _ = connect_loop => {}
+        _ = x11_web_telemetry::shutdown_signal() => {
+            info!("Shutdown signal received; flushing telemetry...");
+        }
     }
+    telemetry.shutdown();
 }
 
 /// Where the fingerprint comes from. Mirror of the macOS sidecar's
