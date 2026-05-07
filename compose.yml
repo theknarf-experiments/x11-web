@@ -45,6 +45,12 @@ services:
       DISPLAY_NUMBER: "99"
       RUST_LOG: info
       NO_AT_BRIDGE: "1"
+      # OTel forwarded from the launching shell (mprocs sets these
+      # with `host.docker.internal` so the sidecar reaches the
+      # host's OpenObserve). Empty when unset → SDK doesn't init.
+      OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-}
+      OTEL_EXPORTER_OTLP_HEADERS: ${OTEL_EXPORTER_OTLP_HEADERS:-}
+      OTEL_SERVICE_NAME: ${OTEL_SERVICE_NAME:-}
     extra_hosts:
       # Linux's docker doesn't auto-resolve host.docker.internal —
       # add the explicit mapping so this works the same on macOS

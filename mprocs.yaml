@@ -47,6 +47,15 @@ procs:
     # 0.9.2 npm package only signal strings and `send-keys` work.
     stop:
       send-keys: ["<C-c>"]
+    env:
+      # Forwarded into the sidecar container via compose.yml's
+      # `${OTEL_*:-}` substitutions. The endpoint uses
+      # `host.docker.internal` (vs the backend's `localhost`)
+      # because the sidecar runs inside Docker and reaches the
+      # host's OpenObserve through the Docker bridge.
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://host.docker.internal:5081/api/default
+      OTEL_EXPORTER_OTLP_HEADERS: "authorization=Basic YWRtaW5AYWRtaW4uY29tOmFkbWlu,organization=default,stream-name=default"
+      OTEL_SERVICE_NAME: x11-web-sidecar
     shell: |
       set -e
       printf 'Waiting for backend fingerprint at %s/.x11web-fingerprint…\n' "$HOME"
@@ -107,7 +116,15 @@ procs:
       # the lifecycle.
       tail -f "$LOG" &
       TAIL_PID=$!
-      open --wait-apps --stdout "$LOG" --stderr "$LOG" ./target/debug/X11WebSidecar.app
+      # `open` doesn't propagate the launching shell's env to the
+      # bundled .app — `--env` is the supported way (macOS 11+).
+      # Plain `localhost` works because the sidecar-macos runs
+      # natively on the host, not in a container.
+      open --wait-apps --stdout "$LOG" --stderr "$LOG" \
+        --env "OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:5081/api/default" \
+        --env "OTEL_EXPORTER_OTLP_HEADERS=authorization=Basic YWRtaW5AYWRtaW4uY29tOmFkbWlu,organization=default,stream-name=default" \
+        --env "OTEL_SERVICE_NAME=x11-web-sidecar" \
+        ./target/debug/X11WebSidecar.app
       kill "$TAIL_PID" 2>/dev/null || true
       wait "$TAIL_PID" 2>/dev/null || true
 
