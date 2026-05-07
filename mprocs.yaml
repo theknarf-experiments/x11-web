@@ -1,8 +1,26 @@
 procs:
+  # Local Jaeger all-in-one. Backend + sidecars export traces +
+  # metrics to it over OTLP gRPC (`:4317`); UI is at
+  # http://localhost:16686. Naming `jaeger` explicitly on the
+  # `up` line keeps `mock-oidc` (also in compose.dev.yml) from
+  # coming along for the ride — it only joins when the OIDC
+  # work needs it.
+  jaeger:
+    stop:
+      send-keys: ["<C-c>"]
+    shell: |
+      set -e
+      docker compose -f compose.dev.yml up jaeger
+
   backend:
     cmd: ["cargo", "run", "--bin", "x11-web-backend"]
     env:
       RUST_LOG: info
+      # Enable OpenTelemetry export to the local Jaeger above.
+      # Unset to opt out — the backend logs "OTel disabled" and
+      # runs the same as before.
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://localhost:4317
+      OTEL_SERVICE_NAME: x11-web-backend
 
   # X11 sidecar (Linux container) — connects to the host's backend
   # over QUIC :3002 via `host.docker.internal`, reading the QUIC
