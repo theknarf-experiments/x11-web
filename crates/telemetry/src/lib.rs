@@ -18,7 +18,9 @@ use opentelemetry::metrics::Meter;
 use opentelemetry::propagation::{Extractor, Injector, TextMapPropagator};
 use opentelemetry::trace::TracerProvider as _;
 use opentelemetry::{Context, KeyValue};
-use opentelemetry_otlp::{MetricExporter, SpanExporter};
+use opentelemetry_appender_tracing::layer::OpenTelemetryTracingBridge;
+use opentelemetry_otlp::{LogExporter, MetricExporter, SpanExporter};
+use opentelemetry_sdk::logs::SdkLoggerProvider;
 use opentelemetry_sdk::metrics::SdkMeterProvider;
 use opentelemetry_sdk::propagation::TraceContextPropagator;
 use opentelemetry_sdk::trace::SdkTracerProvider;
@@ -26,7 +28,7 @@ use opentelemetry_sdk::Resource;
 use tracing::info;
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
-use tracing_subscriber::EnvFilter;
+use tracing_subscriber::{EnvFilter, Layer};
 
 static METER: OnceLock<Meter> = OnceLock::new();
 
@@ -41,6 +43,7 @@ static METER: OnceLock<Meter> = OnceLock::new();
 pub struct Telemetry {
     tracer_provider: Option<SdkTracerProvider>,
     meter_provider: Option<SdkMeterProvider>,
+    logger_provider: Option<SdkLoggerProvider>,
 }
 
 #[allow(dead_code)]
@@ -54,6 +57,11 @@ impl Telemetry {
         if let Some(mp) = self.meter_provider {
             if let Err(e) = mp.shutdown() {
                 eprintln!("OTel meter shutdown failed: {e}");
+            }
+        }
+        if let Some(lp) = self.logger_provider {
+            if let Err(e) = lp.shutdown() {
+                eprintln!("OTel logger shutdown failed: {e}");
             }
         }
     }
@@ -86,6 +94,7 @@ pub fn init(service_name: &'static str) -> Telemetry {
         return Telemetry {
             tracer_provider: None,
             meter_provider: None,
+            logger_provider: None,
         };
     }
 
@@ -112,7 +121,7 @@ pub fn init(service_name: &'static str) -> Telemetry {
         .build()
         .expect("OTLP metric exporter init");
     let meter_provider = SdkMeterProvider::builder()
-        .with_resource(resource)
+        .with_resource(resource.clone())
         .with_periodic_exporter(metric_exporter)
         .build();
     global::set_meter_provider(meter_provider.clone());
@@ -124,19 +133,44 @@ pub fn init(service_name: &'static str) -> Telemetry {
     global::set_text_map_propagator(TraceContextPropagator::new());
     let _ = METER.set(global::meter(service_name));
 
+    // Logs — `tracing` events bridge into OTel `LogRecord`s via
+    // `OpenTelemetryTracingBridge`, then the SDK ships them out
+    // as the third pillar over OTLP gRPC. Bridge filters out its
+    // own crate names so the exporter's tracing emissions don't
+    // feed back into themselves and explode (a classic OTel
+    // footgun).
+    let log_exporter = LogExporter::builder()
+        .with_tonic()
+        .build()
+        .expect("OTLP log exporter init");
+    let logger_provider = SdkLoggerProvider::builder()
+        .with_resource(resource.clone())
+        .with_batch_exporter(log_exporter)
+        .build();
+    let log_layer = OpenTelemetryTracingBridge::new(&logger_provider).with_filter(
+        EnvFilter::new("info")
+            .add_directive("opentelemetry=off".parse().unwrap())
+            .add_directive("hyper=off".parse().unwrap())
+            .add_directive("tonic=off".parse().unwrap())
+            .add_directive("h2=off".parse().unwrap())
+            .add_directive("reqwest=off".parse().unwrap()),
+    );
+
     let tracer = tracer_provider.tracer(service_name);
     let otel_layer = tracing_opentelemetry::layer().with_tracer(tracer);
     tracing_subscriber::registry()
         .with(env_filter)
         .with(tracing_subscriber::fmt::layer())
         .with(otel_layer)
+        .with(log_layer)
         .init();
 
-    info!(service = service_name, "OTel enabled — exporting traces + metrics to OTLP gRPC");
+    info!(service = service_name, "OTel enabled — exporting traces + metrics + logs to OTLP gRPC");
 
     Telemetry {
         tracer_provider: Some(tracer_provider),
         meter_provider: Some(meter_provider),
+        logger_provider: Some(logger_provider),
     }
 }
 

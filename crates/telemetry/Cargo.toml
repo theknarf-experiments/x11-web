@@ -4,9 +4,13 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-opentelemetry = { version = "0.31", features = ["metrics", "trace"] }
-opentelemetry_sdk = { version = "0.31", features = ["rt-tokio"] }
-opentelemetry-otlp = { version = "0.31", features = ["grpc-tonic", "metrics", "trace"] }
+opentelemetry = { version = "0.31", features = ["metrics", "trace", "logs"] }
+opentelemetry_sdk = { version = "0.31", features = ["rt-tokio", "logs"] }
+opentelemetry-otlp = { version = "0.31", features = ["grpc-tonic", "metrics", "trace", "logs"] }
+# Bridges `tracing::Event` records into OTel LogRecords so the
+# same `info!` / `warn!` / etc. that go to stdout also stream to
+# the OTLP logs receiver.
+opentelemetry-appender-tracing = "0.31"
 tracing = "0.1"
 tracing-opentelemetry = "0.32"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
