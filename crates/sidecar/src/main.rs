@@ -417,7 +417,8 @@ async fn run_session(
     // Incoming messages: the recv loop owns the wire reader, decodes
     // Cap'n Proto, forwards BackendToSidecar over this channel so the
     // events loop can keep `process_manager` borrowed exclusively.
-    let (in_tx, mut in_rx) = mpsc::unbounded_channel::<BackendToSidecar>();
+    let (in_tx, mut in_rx) =
+        mpsc::unbounded_channel::<(BackendToSidecar, String)>();
 
     // Heartbeat — pushes Heartbeat into tx every 30s.
     let tx_heartbeat = tx.clone();
@@ -451,8 +452,8 @@ async fn run_session(
                 }
             };
             match wire_bridge::read_to_sidecar(to_sidecar) {
-                Ok(cmd) => {
-                    if in_tx.send(cmd).is_err() {
+                Ok((cmd, traceparent)) => {
+                    if in_tx.send((cmd, traceparent)).is_err() {
                         return;
                     }
                 }
@@ -469,7 +470,20 @@ async fn run_session(
         let mut check_interval = interval(Duration::from_secs(2));
         loop {
             tokio::select! {
-                Some(cmd) = in_rx.recv() => {
+                Some((cmd, traceparent)) = in_rx.recv() => {
+                    // Continue the backend's span for the duration
+                    // of this command — any tracing macros inside
+                    // `handle_command` thread up into one trace.
+                    use x11_web_telemetry::{OpenTelemetrySpanExt, TraceContextExt};
+                    let parent_ctx = x11_web_telemetry::extract_traceparent(&traceparent);
+                    let span = tracing::info_span!(
+                        "sidecar.handle_command",
+                        traceparent = %traceparent,
+                    );
+                    if parent_ctx.span().span_context().is_valid() {
+                        let _ = span.set_parent(parent_ctx);
+                    }
+                    let _enter = span.enter();
                     handle_command(
                         cmd,
                         &mut process_manager,
@@ -478,7 +492,8 @@ async fn run_session(
                     ).await;
                 }
                 Some(msg) = rx.recv() => {
-                    let Some(builder) = wire_bridge::build_from_sidecar(&msg) else {
+                    let traceparent = x11_web_telemetry::current_traceparent();
+                    let Some(builder) = wire_bridge::build_from_sidecar(&msg, &traceparent) else {
                         continue;
                     };
                     if let Err(e) = writer.write_message(&builder).await {

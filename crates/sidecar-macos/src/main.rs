@@ -197,7 +197,12 @@ mod macos {
         // !Send readers don't fight tokio::spawn.
         let send_loop = async {
             while let Some(msg) = rx.recv().await {
-                let Some(builder) = wire_bridge::build_from_sidecar(&msg) else {
+                // sidecar-macos doesn't have OTel wired up yet —
+                // empty traceparent keeps the wire happy and is
+                // safely ignored by the backend's extractor. Add
+                // the telemetry crate when the macOS sidecar
+                // wants its own service in OpenObserve.
+                let Some(builder) = wire_bridge::build_from_sidecar(&msg, "") else {
                     continue;
                 };
                 if let Err(e) = connection.writer.write_message(&builder).await {
@@ -228,7 +233,9 @@ mod macos {
                     }
                 };
                 match wire_bridge::read_to_sidecar(to_sidecar) {
-                    Ok(cmd) => handle_backend_msg(cmd, &router, &capture_ctl_tx),
+                    // Discard `traceparent` here; sidecar-macos
+                    // isn't yet emitting OTel spans of its own.
+                    Ok((cmd, _traceparent)) => handle_backend_msg(cmd, &router, &capture_ctl_tx),
                     Err(e) => {
                         warn!("ToSidecar translate: {e:?}");
                     }

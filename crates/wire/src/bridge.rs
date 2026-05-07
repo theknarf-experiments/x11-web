@@ -55,10 +55,17 @@ impl From<capnp::NotInSchema> for BridgeError {
 // Outbound: SidecarToBackend → wire_capnp::FromSidecar
 // ---------------------------------------------------------------------------
 
-pub fn build_from_sidecar(msg: &SidecarToBackend) -> Option<Builder<HeapAllocator>> {
+/// `traceparent` — see [`build_to_sidecar`].
+pub fn build_from_sidecar(
+    msg: &SidecarToBackend,
+    traceparent: &str,
+) -> Option<Builder<HeapAllocator>> {
     let mut builder = Builder::new_default();
     {
         let mut root = builder.init_root::<wire_capnp::from_sidecar::Builder>();
+        if !traceparent.is_empty() {
+            root.set_traceparent(traceparent);
+        }
         match msg {
             SidecarToBackend::Heartbeat => {
                 root.set_heartbeat(());
@@ -262,11 +269,18 @@ fn write_display_payload(
 // Inbound: wire_capnp::FromSidecar → SidecarToBackend
 // ---------------------------------------------------------------------------
 
+/// See [`read_to_sidecar`] — returns the deserialised message
+/// plus the W3C `traceparent` the sender stamped on it.
 pub fn read_from_sidecar(
     reader: wire_capnp::from_sidecar::Reader,
-) -> Result<SidecarToBackend, BridgeError> {
+) -> Result<(SidecarToBackend, String), BridgeError> {
     use wire_capnp::from_sidecar::Which;
-    Ok(match reader.which()? {
+    let traceparent = reader
+        .get_traceparent()
+        .ok()
+        .and_then(|t| t.to_string().ok())
+        .unwrap_or_default();
+    let msg = match reader.which()? {
         Which::Heartbeat(()) => SidecarToBackend::Heartbeat,
         Which::ProcessConnected(pc) => {
             let pc = pc?;
@@ -334,7 +348,8 @@ pub fn read_from_sidecar(
                 message: er.get_message()?.to_string()?,
             }
         }
-    })
+    };
+    Ok((msg, traceparent))
 }
 
 fn read_display_payload(
@@ -473,10 +488,24 @@ fn read_display_payload(
 // Outbound: BackendToSidecar → wire_capnp::ToSidecar
 // ---------------------------------------------------------------------------
 
-pub fn build_to_sidecar(msg: &BackendToSidecar) -> Option<Builder<HeapAllocator>> {
+/// `traceparent` is the W3C Trace Context string of the
+/// caller's current span (empty when telemetry is disabled). The
+/// receiver uses it as the parent context for any spans it opens
+/// while processing this message — see
+/// `x11_web_telemetry::current_traceparent` /
+/// `extract_traceparent`.
+pub fn build_to_sidecar(
+    msg: &BackendToSidecar,
+    traceparent: &str,
+) -> Option<Builder<HeapAllocator>> {
     let mut builder = Builder::new_default();
     {
-        let root = builder.init_root::<wire_capnp::to_sidecar::Builder>();
+        let mut root = builder.init_root::<wire_capnp::to_sidecar::Builder>();
+        // Primitive field set before `init_*` for any union
+        // variant — `init_*` consumes the builder.
+        if !traceparent.is_empty() {
+            root.set_traceparent(traceparent);
+        }
         match msg {
             BackendToSidecar::InputEvent { window_id, event } => {
                 let mut env = root.init_input_event();
@@ -662,11 +691,21 @@ fn write_input_event(builder: wire_capnp::input_event::Builder, event: &InputEve
 // Inbound: wire_capnp::ToSidecar → BackendToSidecar
 // ---------------------------------------------------------------------------
 
+/// Returns the deserialised message plus the W3C `traceparent`
+/// the sender stamped on it (empty when the sender had no active
+/// span / telemetry was off). The caller passes the traceparent
+/// to [`x11_web_telemetry::extract_traceparent`] to derive the
+/// parent OTel context for any span it opens.
 pub fn read_to_sidecar(
     reader: wire_capnp::to_sidecar::Reader,
-) -> Result<BackendToSidecar, BridgeError> {
+) -> Result<(BackendToSidecar, String), BridgeError> {
     use wire_capnp::to_sidecar::Which;
-    Ok(match reader.which()? {
+    let traceparent = reader
+        .get_traceparent()
+        .ok()
+        .and_then(|t| t.to_string().ok())
+        .unwrap_or_default();
+    let msg = match reader.which()? {
         Which::InputEvent(env) => {
             let env = env?;
             let window_id = env.get_window_id()?.to_string()?;
@@ -719,7 +758,8 @@ pub fn read_to_sidecar(
                 window_id: req.get_window_id()?.to_string()?,
             }
         }
-    })
+    };
+    Ok((msg, traceparent))
 }
 
 fn read_input_event(reader: wire_capnp::input_event::Reader) -> Result<InputEvent, BridgeError> {

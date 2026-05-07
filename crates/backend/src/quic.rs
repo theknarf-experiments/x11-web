@@ -139,19 +139,25 @@ async fn handle_quic_session(state: AppState, accepted: x11_web_wire::conn::Acce
                     continue;
                 }
             };
-            let internal = match wire_bridge::read_from_sidecar(from) {
+            let (internal, traceparent) = match wire_bridge::read_from_sidecar(from) {
                 Ok(m) => m,
                 Err(e) => {
                     warn!("FromSidecar translate: {e:?}");
                     continue;
                 }
             };
+            // Continue any span the sidecar was acting under so
+            // its work threads up into the backend's trace.
+            // Empty traceparent → empty Context, no-op effect on
+            // any spans `dispatch_sidecar_msg` opens.
+            let _otel_ctx = x11_web_telemetry::extract_traceparent(&traceparent);
             dispatch_sidecar_msg(&state, &sidecar_id, internal).await;
         }
     };
     let send_loop = async {
         while let Some(msg) = rx.recv().await {
-            let Some(builder) = wire_bridge::build_to_sidecar(&msg) else {
+            let traceparent = x11_web_telemetry::current_traceparent();
+            let Some(builder) = wire_bridge::build_to_sidecar(&msg, &traceparent) else {
                 continue;
             };
             if let Err(e) = writer.write_message(&builder).await {

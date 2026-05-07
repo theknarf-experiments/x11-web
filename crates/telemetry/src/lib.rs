@@ -10,14 +10,17 @@
 //! looks them up off the cached [`meter`]; this crate just owns
 //! the SDK lifecycle.
 
+use std::collections::HashMap;
 use std::sync::OnceLock;
 
 use opentelemetry::global;
 use opentelemetry::metrics::Meter;
+use opentelemetry::propagation::{Extractor, Injector, TextMapPropagator};
 use opentelemetry::trace::TracerProvider as _;
-use opentelemetry::KeyValue;
+use opentelemetry::{Context, KeyValue};
 use opentelemetry_otlp::{MetricExporter, SpanExporter};
 use opentelemetry_sdk::metrics::SdkMeterProvider;
+use opentelemetry_sdk::propagation::TraceContextPropagator;
 use opentelemetry_sdk::trace::SdkTracerProvider;
 use opentelemetry_sdk::Resource;
 use tracing::info;
@@ -113,6 +116,12 @@ pub fn init(service_name: &'static str) -> Telemetry {
         .with_periodic_exporter(metric_exporter)
         .build();
     global::set_meter_provider(meter_provider.clone());
+    // W3C Trace Context for cross-process propagation. Lets the
+    // backend ↔ sidecar wire format inject/extract `traceparent`
+    // through the helpers below and have the standard format
+    // applied (older peers that just see the raw string still
+    // round-trip it).
+    global::set_text_map_propagator(TraceContextPropagator::new());
     let _ = METER.set(global::meter(service_name));
 
     let tracer = tracer_provider.tracer(service_name);
@@ -136,4 +145,70 @@ pub fn init(service_name: &'static str) -> Telemetry {
 /// recording on a missing instrument is a no-op.
 pub fn meter() -> Option<&'static Meter> {
     METER.get()
+}
+
+/// Re-export — lets a `tracing::Span` adopt an OTel `Context` as
+/// its parent (`span.set_parent(ctx)`). Re-exported so binary
+/// callers don't have to take a direct dependency on
+/// `tracing-opentelemetry`.
+pub use tracing_opentelemetry::OpenTelemetrySpanExt;
+/// Re-export — gives `Context::span_context()` on the receiver
+/// side so callers can ask "is the parent context valid?" before
+/// calling `set_parent`.
+pub use opentelemetry::trace::TraceContextExt;
+
+/* ----------------------------------------------------------------
+ * Cross-process trace context propagation.
+ *
+ * The backend ↔ sidecar wire format carries a `traceparent` field
+ * on every message. These helpers handle the W3C-format
+ * inject/extract against an `opentelemetry::Context`, used by the
+ * sender (`current_traceparent()`) and the receiver
+ * (`extract_traceparent(s)`).
+ *
+ * Both are no-ops when telemetry is disabled — `inject_context`
+ * sees no SpanContext and writes nothing; `extract` returns an
+ * empty Context that doesn't influence any subsequent spans.
+ * ---------------------------------------------------------------- */
+
+struct MapInjector<'a>(&'a mut HashMap<String, String>);
+impl Injector for MapInjector<'_> {
+    fn set(&mut self, key: &str, value: String) {
+        self.0.insert(key.to_string(), value);
+    }
+}
+
+struct MapExtractor<'a>(&'a HashMap<String, String>);
+impl Extractor for MapExtractor<'_> {
+    fn get(&self, key: &str) -> Option<&str> {
+        self.0.get(key).map(String::as_str)
+    }
+    fn keys(&self) -> Vec<&str> {
+        self.0.keys().map(String::as_str).collect()
+    }
+}
+
+/// Serialise the current task's trace context to a W3C
+/// `traceparent` string, suitable for putting on the wire. Empty
+/// string when there's no active span / OTel isn't running — the
+/// receiving side treats empty as "no context, start fresh".
+pub fn current_traceparent() -> String {
+    let mut carrier = HashMap::new();
+    let propagator = TraceContextPropagator::new();
+    propagator.inject_context(&Context::current(), &mut MapInjector(&mut carrier));
+    carrier.remove("traceparent").unwrap_or_default()
+}
+
+/// Parse a `traceparent` string back into an OTel [`Context`].
+/// Empty / malformed input yields an empty Context (no parent —
+/// any span opened against it becomes a fresh root, which is the
+/// safe degradation for un-instrumented peers).
+pub fn extract_traceparent(traceparent: &str) -> Context {
+    if traceparent.is_empty() {
+        return Context::new();
+    }
+    let mut carrier = HashMap::new();
+    carrier.insert("traceparent".to_string(), traceparent.to_string());
+    let propagator = TraceContextPropagator::new();
+    propagator.extract(&MapExtractor(&carrier))
 }

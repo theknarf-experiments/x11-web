@@ -63,6 +63,11 @@ struct HelloAck {
 # ---------- Sidecar → Backend ----------
 
 struct FromSidecar {
+    # W3C Trace Context (`00-<trace_id>-<span_id>-<flags>`) of the
+    # span the sidecar is acting under when emitting this message.
+    # Empty when telemetry isn't enabled. Backend uses this as the
+    # parent context for any span it opens while processing.
+    traceparent @8 :Text;
     union {
         heartbeat @0 :Void;
 
@@ -357,6 +362,11 @@ struct MenuActionTarget {
 # ---------- Backend → Sidecar ----------
 
 struct ToSidecar {
+    # W3C Trace Context (`00-<trace_id>-<span_id>-<flags>`) of the
+    # span the backend is acting under when emitting this message.
+    # Empty when telemetry isn't enabled. Sidecar uses this as the
+    # parent context for any span it opens while processing.
+    traceparent @7 :Text;
     union {
         # Forward an input event coming from the frontend.
         inputEvent @0 :InputEventEnvelope;
