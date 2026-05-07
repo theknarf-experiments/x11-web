@@ -60,7 +60,7 @@ pnpm install
 Activate the repo's git hooks (one-shot, per clone):
 
 ```sh
-.hooks/install.sh
+mise run install-hooks
 ```
 
 Points `core.hooksPath` at `.hooks/`. The pre-commit hook runs

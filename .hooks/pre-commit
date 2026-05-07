@@ -2,8 +2,8 @@
 # Pre-commit hook: typecheck every TS workspace before letting the
 # commit through.
 #
-# Activated repo-wide via `git config core.hooksPath .hooks` (run
-# from the repo root) — see `.hooks/install.sh` for a one-liner.
+# Activated repo-wide via `mise run install-hooks` (one-shot,
+# per clone — sets `core.hooksPath` to `.hooks/`).
 #
 # `turbo run typecheck` fans out to every package's `typecheck`
 # script and short-circuits on the first failure. Turbo caches

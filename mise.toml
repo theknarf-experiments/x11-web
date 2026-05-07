@@ -2,3 +2,7 @@
 node = "22"
 pnpm = "10"
 rust = "stable"
+
+[tasks.install-hooks]
+description = "Point git at the repo's `.hooks/` directory (one-shot, per clone)."
+run = "git config core.hooksPath .hooks"
