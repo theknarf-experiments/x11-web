@@ -26,17 +26,25 @@ services:
       # email the operator types into it.
       LOG_LEVEL: INFO
 
-  # Local OTel collector + UI in one image. The backend (and the
-  # sidecar, once instrumented) export traces + metrics over OTLP
-  # gRPC to :4317; open the UI at http://localhost:16686 to see
-  # them. Production deploys swap this out for whatever target
-  # the org runs (Tempo, Honeycomb, Datadog, …) by re-pointing
-  # `OTEL_EXPORTER_OTLP_ENDPOINT`.
-  jaeger:
-    image: jaegertracing/all-in-one:1.76.0
+  # OpenObserve — single-binary, OTel-native, all three pillars
+  # in one container (traces + metrics + logs). UI lives on
+  # :5080; OTLP gRPC ingest on :5081 with a path-routed endpoint
+  # (`http://host:5081/api/{org}`) plus `authorization` /
+  # `organization` / `stream-name` metadata headers — see
+  # `mprocs.yaml` for the full env-var bundle. Production deploys
+  # swap this out by re-pointing `OTEL_EXPORTER_OTLP_ENDPOINT` (+
+  # the matching headers) at the real target.
+  openobserve:
+    image: openobserve/openobserve:latest
     ports:
-      - "16686:16686" # Jaeger UI
-      - "4317:4317"   # OTLP gRPC (traces, metrics)
-      - "4318:4318"   # OTLP HTTP (browser SDK exports here later)
+      - "5080:5080" # Web UI + HTTP OTLP
+      - "5081:5081" # gRPC OTLP
     environment:
-      COLLECTOR_OTLP_ENABLED: "true"
+      ZO_ROOT_USER_EMAIL: admin@example.com
+      ZO_ROOT_USER_PASSWORD: Complexpass#123
+      ZO_DATA_DIR: /data
+    volumes:
+      - openobserve-data:/data
+
+volumes:
+  openobserve-data:

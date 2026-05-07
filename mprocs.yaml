@@ -1,25 +1,34 @@
 procs:
-  # Local Jaeger all-in-one. Backend + sidecars export traces +
-  # metrics to it over OTLP gRPC (`:4317`); UI is at
-  # http://localhost:16686. Naming `jaeger` explicitly on the
-  # `up` line keeps `mock-oidc` (also in compose.dev.yml) from
-  # coming along for the ride — it only joins when the OIDC
-  # work needs it.
-  jaeger:
+  # OpenObserve — local OTel-native UI for traces + metrics + logs
+  # in a single container. UI at http://localhost:5080
+  # (admin@example.com / Complexpass#123); OTLP gRPC ingest on
+  # :5081, path-routed by org. Naming the service explicitly on
+  # the `up` line keeps `mock-oidc` (also in compose.dev.yml)
+  # out of the default dev loop.
+  openobserve:
     stop:
       send-keys: ["<C-c>"]
     shell: |
       set -e
-      docker compose -f compose.dev.yml up jaeger
+      docker compose -f compose.dev.yml up openobserve
 
   backend:
     cmd: ["cargo", "run", "--bin", "x11-web-backend"]
     env:
       RUST_LOG: info
-      # Enable OpenTelemetry export to the local Jaeger above.
-      # Unset to opt out — the backend logs "OTel disabled" and
-      # runs the same as before.
-      OTEL_EXPORTER_OTLP_ENDPOINT: http://localhost:4317
+      # Enable OpenTelemetry export to OpenObserve above. Unset
+      # to opt out — the backend logs "OTel disabled" and runs
+      # the same as before.
+      #
+      # Endpoint ends in `/api/<org>` because OpenObserve's gRPC
+      # OTLP receiver is path-routed by org. The three
+      # `authorization` / `organization` / `stream-name` headers
+      # ride as gRPC metadata via OTel's standard
+      # `OTEL_EXPORTER_OTLP_HEADERS` env. Basic-auth token below
+      # is `base64(admin@example.com:Complexpass#123)` and
+      # matches the dev creds in compose.dev.yml.
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://localhost:5081/api/default
+      OTEL_EXPORTER_OTLP_HEADERS: "authorization=Basic YWRtaW5AZXhhbXBsZS5jb206Q29tcGxleHBhc3MjMTIz,organization=default,stream-name=default"
       OTEL_SERVICE_NAME: x11-web-backend
 
   # X11 sidecar (Linux container) — connects to the host's backend
