@@ -92,8 +92,11 @@ async fn handle_quic_session(state: AppState, accepted: x11_web_wire::conn::Acce
 
     // Register sidecar with a tx that translates BackendToSidecar
     // into wire frames before they hit the QUIC stream. The send
-    // loop below picks them up off `rx` and writes them out.
-    let (tx, mut rx) = mpsc::unbounded_channel::<BackendToSidecar>();
+    // loop below picks them up off `rx` and writes them out. The
+    // String alongside each message is the W3C traceparent captured
+    // at the call site (this task has no active span of its own,
+    // so we can't sample one here).
+    let (tx, mut rx) = mpsc::unbounded_channel::<(BackendToSidecar, String)>();
     {
         let mut sidecars = state.sidecars.write().await;
         sidecars.insert(
@@ -155,8 +158,7 @@ async fn handle_quic_session(state: AppState, accepted: x11_web_wire::conn::Acce
         }
     };
     let send_loop = async {
-        while let Some(msg) = rx.recv().await {
-            let traceparent = x11_web_telemetry::current_traceparent();
+        while let Some((msg, traceparent)) = rx.recv().await {
             let Some(builder) = wire_bridge::build_to_sidecar(&msg, &traceparent) else {
                 continue;
             };

@@ -96,7 +96,13 @@ struct AppState {
 struct SidecarConnection {
     info: SidecarInfo,
     kind: SidecarKind,
-    tx: mpsc::UnboundedSender<BackendToSidecar>,
+    /// Outbound QUIC channel. The String is the W3C `traceparent`
+    /// captured at the call site (where the WS handler's span is
+    /// still active) — the QUIC writer task that drains this
+    /// channel has no active span of its own, so we'd otherwise
+    /// inject an empty traceparent and break cross-process
+    /// propagation.
+    tx: mpsc::UnboundedSender<(BackendToSidecar, String)>,
 }
 
 /// Per-window state mirrored in the backend, keyed by
@@ -944,9 +950,13 @@ async fn handle_frontend_ws(socket: WebSocket, state: AppState) {
 }
 
 async fn forward_to_sidecar(state: &AppState, sidecar_id: &str, msg: BackendToSidecar) {
+    // Snapshot the traceparent here, while the WS handler's
+    // `backend.frontend_msg` span is still on top of the active
+    // context. The QUIC writer reads this off the channel later.
+    let traceparent = x11_web_telemetry::current_traceparent();
     let sidecars = state.sidecars.read().await;
     if let Some(sidecar) = sidecars.get(sidecar_id) {
-        let _ = sidecar.tx.send(msg);
+        let _ = sidecar.tx.send((msg, traceparent));
     } else {
         warn!("Sidecar not found: {}", sidecar_id);
     }
@@ -1144,8 +1154,9 @@ async fn backend_attach_window(
 }
 
 async fn send_to_sidecar(state: &AppState, sidecar_id: &str, msg: BackendToSidecar) {
+    let traceparent = x11_web_telemetry::current_traceparent();
     if let Some(sc) = state.sidecars.read().await.get(sidecar_id) {
-        let _ = sc.tx.send(msg);
+        let _ = sc.tx.send((msg, traceparent));
     }
 }
 
