@@ -497,6 +497,8 @@ async fn run_session(
                         pid = tracing::field::Empty,
                         width = tracing::field::Empty,
                         height = tracing::field::Empty,
+                        error.kind = tracing::field::Empty,
+                        error.message = tracing::field::Empty,
                     );
                     if parent_ctx.span().span_context().is_valid() {
                         let _ = span.set_parent(parent_ctx);
@@ -641,7 +643,7 @@ async fn handle_command(
             }
             Err(message) => {
                 tracing::warn!(error = %message, "SpawnProcess failed");
-                x11_web_telemetry::mark_span_error(format!("spawn failed: {message}"));
+                x11_web_telemetry::mark_span_error("spawn_failed", message.clone());
                 let _ = tx.send(SidecarToBackend::Error {
                     request_id: Some(request_id),
                     message,
@@ -658,7 +660,7 @@ async fn handle_command(
             }
             Err(message) => {
                 tracing::warn!(error = %message, "KillProcess failed");
-                x11_web_telemetry::mark_span_error(format!("kill failed: {message}"));
+                x11_web_telemetry::mark_span_error("kill_failed", message.clone());
                 let _ = tx.send(SidecarToBackend::Error {
                     request_id: Some(request_id),
                     message,

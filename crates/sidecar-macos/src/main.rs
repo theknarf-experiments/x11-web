@@ -281,6 +281,8 @@ mod macos {
                             pid = tracing::field::Empty,
                             width = tracing::field::Empty,
                             height = tracing::field::Empty,
+                            error.kind = tracing::field::Empty,
+                            error.message = tracing::field::Empty,
                         );
                         if parent_ctx.span().span_context().is_valid() {
                             let _ = span.set_parent(parent_ctx);
@@ -368,6 +370,8 @@ mod macos {
                 let span = tracing::info_span!(
                     "sidecar.input_event",
                     window_id = %window_id,
+                    error.kind = tracing::field::Empty,
+                    error.message = tracing::field::Empty,
                 );
                 let _enter = span.enter();
                 info!("InputEvent received: window={window_id} event={event:?}");
@@ -381,7 +385,10 @@ mod macos {
                     }
                     None => {
                         warn!("No route for window UUID {window_id}");
-                        x11_web_telemetry::mark_span_error("no route for window_id");
+                        x11_web_telemetry::mark_span_error(
+                            "no_route_for_window",
+                            format!("window_id={window_id}"),
+                        );
                     }
                 }
             }
@@ -405,6 +412,8 @@ mod macos {
                     window_id = %window_id,
                     width,
                     height,
+                    error.kind = tracing::field::Empty,
+                    error.message = tracing::field::Empty,
                 );
                 let _enter = span.enter();
                 match router.lookup(&window_id) {
@@ -414,7 +423,10 @@ mod macos {
                     }
                     None => {
                         warn!("ResizeWindow: no route for window_id={window_id}");
-                        x11_web_telemetry::mark_span_error("no route for window_id");
+                        x11_web_telemetry::mark_span_error(
+                            "no_route_for_window",
+                            format!("window_id={window_id}"),
+                        );
                     }
                 }
             }

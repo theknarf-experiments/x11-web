@@ -398,7 +398,13 @@ export function useBackendSocket() {
 		tracer().startActiveSpan(`frontend.ws_send.${kind}`, (span) => {
 			span.setAttributes(spanAttrsFor(msg));
 			if (wsRef.current?.readyState !== WebSocket.OPEN) {
-				span.setStatus({ code: SpanStatusCode.ERROR, message: "ws not open" });
+				// Mirror the Rust binaries' `mark_span_error` shape:
+				// status + structured `error.kind` / `error.message`
+				// attributes so failures are filterable by category
+				// in OpenObserve, not just by red-status traces.
+				const message = `ws readyState=${wsRef.current?.readyState ?? "null"}`;
+				span.setAttributes({ "error.kind": "ws_not_open", "error.message": message });
+				span.setStatus({ code: SpanStatusCode.ERROR, message });
 				span.end();
 				return;
 			}

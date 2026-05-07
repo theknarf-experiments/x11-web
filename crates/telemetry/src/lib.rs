@@ -217,14 +217,27 @@ pub use tracing_opentelemetry::OpenTelemetrySpanExt;
 /// calling `set_parent`.
 pub use opentelemetry::trace::TraceContextExt;
 
-/// Mark the active span as failed with a human-readable cause.
-/// Equivalent to `Span::current().set_status(Status::error(msg))`
-/// but keeps the OTel/tracing-opentelemetry imports out of the
-/// caller's binary. OpenObserve highlights ERROR-status spans red
-/// in the trace view, which is what makes "find me the failed
-/// spawns" possible.
-pub fn mark_span_error(msg: impl Into<std::borrow::Cow<'static, str>>) {
-    tracing::Span::current().set_status(opentelemetry::trace::Status::error(msg));
+/// Mark the active span as failed and record structured error
+/// metadata so the failure is both visible (red in OpenObserve's
+/// trace view) and queryable.
+///
+/// `kind` is a stable, low-cardinality discriminator —
+/// "sidecar_not_found", "spawn_failed", "no_route_for_window",
+/// etc. — suitable for `WHERE error.kind = '…'` queries.
+/// `message` is the human-readable detail, often the underlying
+/// `e.to_string()`.
+///
+/// The fields `error.kind` and `error.message` must be declared
+/// on the active span (with `tracing::field::Empty`) for the
+/// `record` calls to take effect — `tracing` requires a static
+/// field set per call site. The helper always sets the status,
+/// which works regardless.
+pub fn mark_span_error(kind: &'static str, message: impl Into<String>) {
+    let message: String = message.into();
+    let span = tracing::Span::current();
+    span.record("error.kind", kind);
+    span.record("error.message", message.as_str());
+    span.set_status(opentelemetry::trace::Status::error(message));
 }
 
 /* ----------------------------------------------------------------

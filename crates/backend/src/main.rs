@@ -839,6 +839,8 @@ async fn handle_frontend_ws(socket: WebSocket, state: AppState) {
             width = tracing::field::Empty,
             height = tracing::field::Empty,
             event.kind = tracing::field::Empty,
+            error.kind = tracing::field::Empty,
+            error.message = tracing::field::Empty,
         );
         if parent_ctx.span().span_context().is_valid() {
             let _ = span.set_parent(parent_ctx);
@@ -1062,7 +1064,10 @@ async fn forward_to_sidecar(state: &AppState, sidecar_id: &str, msg: BackendToSi
         warn!("Sidecar not found: {}", sidecar_id);
         // Caller's `backend.frontend_msg` is still active — mark
         // it failed so the trace shows red in OpenObserve.
-        x11_web_telemetry::mark_span_error("sidecar not found");
+        x11_web_telemetry::mark_span_error(
+            "sidecar_not_found",
+            format!("sidecar id={sidecar_id}"),
+        );
     }
 }
 
