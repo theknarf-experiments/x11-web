@@ -44,14 +44,15 @@ interface ActionsHandle {
 	actions: ReturnType<typeof useWindowActions>;
 }
 
+// biome-ignore lint/suspicious/noExplicitAny: matches the hook's
+// `send: (message: any) => void` signature and the `Dispatch`
+// shape exactly so the test passes the same types the host does.
 interface HostArgs {
 	activeWorkspaceId: string | null;
 	ocifNodes: Map<string, OcifNode>;
 	focusPolicy: "click-to-focus" | "focus-follows-mouse";
-	send: (m: unknown) => void;
-	setClosedWindowIds: (
-		updater: (prev: Set<string>) => Set<string>,
-	) => void;
+	send: (message: any) => void;
+	setClosedWindowIds: React.Dispatch<React.SetStateAction<Set<string>>>;
 	ref: React.Ref<ActionsHandle>;
 }
 
@@ -63,13 +64,18 @@ function Host({ ref, ...args }: HostArgs) {
 
 let root: Root;
 let container: HTMLDivElement;
-let send: ReturnType<typeof vi.fn>;
-let setClosedWindowIds: ReturnType<typeof vi.fn>;
+// `vi.fn()` is callable + constructable, which TS sees as a
+// union; spread a narrower function type so the prop bag in
+// `mount()` matches `Host`'s expected signatures.
+// biome-ignore lint/suspicious/noExplicitAny: matches the hook's API
+let send: ((m: any) => void) & ReturnType<typeof vi.fn>;
+let setClosedWindowIds: React.Dispatch<React.SetStateAction<Set<string>>> &
+	ReturnType<typeof vi.fn>;
 const handleRef: { current: ActionsHandle | null } = { current: null };
 
 function mount(over: Partial<HostArgs> = {}) {
-	send = vi.fn();
-	setClosedWindowIds = vi.fn();
+	send = vi.fn() as typeof send;
+	setClosedWindowIds = vi.fn() as typeof setClosedWindowIds;
 	container = document.createElement("div");
 	document.body.appendChild(container);
 	act(() => {

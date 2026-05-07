@@ -34,15 +34,23 @@ import type {
 } from "./types";
 import { colorForWindowId } from "./windowColors";
 
-// Resolve order: ?ws=... query param > VITE_WS_URL build-time env > default.
-// The query-param branch lets parallel e2e workers share a single built
-// bundle but route each browser page to its own backend.
+// Resolve order: ?ws=... query param > VITE_WS_URL build-time env >
+// same-origin default. Same-origin works in production (backend
+// serves the SPA + WS together) and after OIDC redirects (which
+// drop the query param). The query-param branch lets parallel e2e
+// workers share a single built bundle but route each browser page
+// to its own backend.
 const WS_URL = (() => {
 	if (typeof window !== "undefined") {
 		const fromQuery = new URLSearchParams(window.location.search).get("ws");
 		if (fromQuery) return fromQuery;
 	}
-	return import.meta.env.VITE_WS_URL || "ws://localhost:3001/ws/frontend";
+	if (import.meta.env.VITE_WS_URL) return import.meta.env.VITE_WS_URL;
+	if (typeof window !== "undefined") {
+		const proto = window.location.protocol === "https:" ? "wss:" : "ws:";
+		return `${proto}//${window.location.host}/ws/frontend`;
+	}
+	return "ws://localhost:3001/ws/frontend";
 })();
 
 export type WindowUpdateCallback = (update: WindowUpdate) => void;

@@ -34,35 +34,40 @@ test("OIDC sign in surfaces the user's email in the menu bar", async ({
 		signInBtn.click(),
 	]);
 
-	// mock-oauth2-server's default login form: a single text input
-	// for the user identifier (becomes the `sub` claim) and a
-	// "Sign-in" submit button. We tag the user with an email-shaped
-	// id so the same string round-trips through the `email` claim
-	// (the mock derives email from `sub` if it looks like one).
-	const userInput = page.locator("input[name='username']");
+	// mock-oauth2-server's default login form: a "Enter any
+	// user/subject" textbox (becomes the `sub` claim) plus an
+	// optional JSON-claims textarea. We fill both so the resulting
+	// ID token carries an `email` claim that the SPA can render.
+	const userInput = page.getByPlaceholder(/Enter any user\/subject/i);
 	await expect(userInput).toBeVisible({ timeout: 10_000 });
 	await userInput.fill("alice@example.com");
+	const claimsInput = page.getByPlaceholder(/Optional claims JSON/i);
+	await claimsInput.fill('{"email": "alice@example.com"}');
+	const submit = page.getByRole("button", { name: "Sign-in" });
 	await Promise.all([
-		page.waitForURL(/\/$/, { timeout: 15_000 }),
-		page.locator("button[type='submit']").click(),
+		page.waitForURL(/^http:\/\/localhost:\d+\/(\?|$)/, {
+			timeout: 15_000,
+		}),
+		submit.click(),
 	]);
 
 	// Back on the SPA, `useAuth` re-fetches `/auth/me` and the bar
 	// flips to the signed-in state.
-	await expect(page.locator('[data-testid="auth-email"]')).toHaveText(
-		"alice@example.com",
-		{ timeout: 15_000 },
-	);
 	await expect(
 		page.locator('[data-testid="auth-sign-out"]'),
-	).toBeVisible();
+	).toBeVisible({ timeout: 15_000 });
+	await expect(page.locator('[data-testid="auth-email"]')).toHaveText(
+		"alice@example.com",
+	);
 
 	// `/auth/me` directly returns the same user — guarantees the
-	// session cookie is wired through the WS-side cookies test as
-	// well (same backend, same cookie).
+	// session cookie is wired up end-to-end.
 	const me = await page.evaluate(async () => {
 		const r = await fetch("/auth/me", { credentials: "include" });
 		return r.ok ? r.json() : null;
 	});
-	expect(me).toMatchObject({ sub: "alice@example.com" });
+	expect(me).toMatchObject({
+		sub: "alice@example.com",
+		email: "alice@example.com",
+	});
 });

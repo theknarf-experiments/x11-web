@@ -498,7 +498,11 @@ function drainOutbound(entry: PerWorkspace): Uint8Array[] {
 function ship(workspaceId: string, messages: Uint8Array[]) {
 	if (!controlDc || controlDc.readyState !== "open") return;
 	for (const m of messages) {
-		controlDc.send(encodeWorkspaceSync(workspaceId, m));
+		// `RTCDataChannel.send` is overloaded across the Uint8Array
+		// generic variants; the encoder hands back a fresh
+		// `ArrayBuffer`-backed Uint8Array so this is safe.
+		const buf = encodeWorkspaceSync(workspaceId, m) as Uint8Array<ArrayBuffer>;
+		controlDc.send(buf);
 	}
 }
 

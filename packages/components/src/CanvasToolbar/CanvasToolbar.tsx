@@ -11,16 +11,18 @@ export type CanvasTool =
 
 /** The hotkey for each tool, kept here so the toolbar tooltip and
  *  the global hotkey registration in `App` stay in lockstep.
- *  Typed as plain strings — `@tanstack/react-hotkeys`'
- *  `RegisterableHotkey` accepts string-form chords directly. */
-export const TOOL_HOTKEYS: Record<CanvasTool, string> = {
+ *  `as const` preserves each value's string literal type at the
+ *  boundary so `useHotkey(TOOL_HOTKEYS.pointer, …)` typechecks
+ *  against `@tanstack/react-hotkeys`'s strict `Hotkey` template-
+ *  literal type (single keys like `"V"` match `Key`). */
+export const TOOL_HOTKEYS = {
 	pointer: "V",
 	box: "B",
 	arrow: "A",
 	text: "T",
 	pen: "P",
 	markdown: "M",
-};
+} as const satisfies Record<CanvasTool, string>;
 
 interface CanvasToolbarProps {
 	tool: CanvasTool;

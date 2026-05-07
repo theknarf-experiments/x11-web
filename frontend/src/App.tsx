@@ -17,9 +17,7 @@ import { ClientRenderer } from "./ClientRenderer";
 import {
 	applyOcifNodesSnapshot,
 	ocifNodesCollection,
-	patchWindow,
 	processesCollection,
-	setFocusedWindow,
 	sidecarsCollection,
 	unminimizeWindow,
 	windowsCollection,
@@ -34,7 +32,7 @@ import { OcifText, type TextCorner } from "./OcifText";
 import { useBellSound } from "./bellSound";
 import { useFrameRouter } from "./frameRouter";
 import { SettingsPanel } from "./SettingsPanel";
-import type { FocusPolicy, InputEvent, MenuAction } from "./types";
+import type { FocusPolicy, MenuAction } from "./types";
 import {
 	useAttachedWindowIds,
 	useBackendSocket,
