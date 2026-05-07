@@ -1,0 +1,20 @@
+#!/usr/bin/env bash
+# Pre-commit hook: typecheck every TS workspace before letting the
+# commit through.
+#
+# Activated repo-wide via `git config core.hooksPath .hooks` (run
+# from the repo root) — see `.hooks/install.sh` for a one-liner.
+#
+# `turbo run typecheck` fans out to every package's `typecheck`
+# script and short-circuits on the first failure. Turbo caches
+# results keyed on input file hashes so the hook is effectively
+# free on commits that don't touch typed code.
+
+set -euo pipefail
+
+ROOT=$(git rev-parse --show-toplevel)
+cd "$ROOT"
+
+# Use `pnpm exec` so the locally-installed `turbo` is on PATH
+# regardless of the dev's global setup.
+pnpm exec turbo run typecheck

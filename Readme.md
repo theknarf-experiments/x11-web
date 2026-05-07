@@ -57,6 +57,17 @@ Install dependencies:
 pnpm install
 ```
 
+Activate the repo's git hooks (one-shot, per clone):
+
+```sh
+.hooks/install.sh
+```
+
+Points `core.hooksPath` at `.hooks/`. The pre-commit hook runs
+`turbo run typecheck` across every TS workspace; turbo caches the
+result, so commits that don't touch typed code are effectively
+free.
+
 ### Local development
 
 Run all three components in separate terminals:

@@ -963,7 +963,6 @@ test.describe("Key auto-repeat conformance", () => {
 					"fi",
 				].join("\n"),
 			],
-			{ timeout: 120_000 },
 		);
 		console.log(`XTS native: exit=${result.exitCode}`);
 		const match = result.output.match(
