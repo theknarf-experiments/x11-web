@@ -38,7 +38,7 @@ test.describe.serial("x11perf extended operations", () => {
 		expect(output).toMatch(/reps|trep/i);
 	});
 
-	test.skip("x11perf fill operations", async ({ sidecarContainer }) => {
+	test("x11perf fill operations", async ({ sidecarContainer }) => {
 		const output = await execInSidecar(
 			sidecarContainer,
 			"x11perf -repeat 1 -time 1 -noop -gc -create 2>&1 | tail -30",
@@ -70,9 +70,7 @@ test.describe.serial("x11perf extended operations", () => {
 		expect(output).toMatch(/reps|trep/i);
 	});
 
-	// x11perf window operations: hangs past Playwright's 5-minute test
-	// timeout. Documented in todo.md.
-	test.skip("x11perf window operations", async ({ sidecarContainer }) => {
+	test("x11perf window operations", async ({ sidecarContainer }) => {
 		const output = await execInSidecar(
 			sidecarContainer,
 			"x11perf -repeat 1 -time 1 -create -map -unmap -destroy -resize -move 2>&1 | tail -30",
@@ -94,9 +92,8 @@ test.describe.serial("x11perf extended operations", () => {
 });
 
 test.describe("Conformance: x11perf extended validation", () => {
-	// Pre-existing flake: x11perf invocation runs >15 sub-benchmarks and
-	// regularly hits the default 60s timeout. Documented in todo.md.
-	test.skip("x11perf drawing operations complete without crashes", async ({ sidecarContainer }) => {
+	test("x11perf drawing operations complete without crashes", async ({ sidecarContainer }) => {
+		test.setTimeout(300_000);
 		const result = await sidecarContainer.exec([
 			"bash", "-c", [
 				"export DISPLAY=:99",

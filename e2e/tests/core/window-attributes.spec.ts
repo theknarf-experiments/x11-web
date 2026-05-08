@@ -70,7 +70,7 @@ test.describe("Backing store", () => {
 		expect(result.output).toContain("backing_store=2");
 	});
 
-	test.skip("backing-planes and backing-pixel are stored", async ({ sidecarContainer }) => {
+	test("backing-planes and backing-pixel are stored", async ({ sidecarContainer }) => {
 		const result = await runPythonScript(sidecarContainer, "backing_planes_pixel_stored.py", { env: { DISPLAY: ":99" } });
 		expect(result.output).toContain("planes=0xff0000");
 		expect(result.output).toContain("pixel=0xff00");

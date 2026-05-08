@@ -201,7 +201,7 @@ test.describe.serial("Grab operations validation", () => {
 });
 
 test.describe.serial("Passive grab cleanup on disconnect", () => {
-	test.skip("passive grabs are cleaned up when client disconnects", async ({
+	test("passive grabs are cleaned up when client disconnects", async ({
 		sidecarContainer,
 	}) => {
 		// Client creates a passive button grab, then disconnects.
