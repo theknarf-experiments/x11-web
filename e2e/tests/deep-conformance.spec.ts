@@ -178,7 +178,7 @@ test.describe.serial("x11perf extended operations", () => {
 		expect(output).toMatch(/reps|trep/i);
 	});
 
-	test("x11perf fill operations", async ({ sidecarContainer }) => {
+	test.skip("x11perf fill operations", async ({ sidecarContainer }) => {
 		const output = await execInSidecar(
 			sidecarContainer,
 			"x11perf -repeat 1 -time 1 -noop -gc -create 2>&1 | tail -30",

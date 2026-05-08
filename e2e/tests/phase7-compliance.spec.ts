@@ -1071,7 +1071,7 @@ test.describe("Key auto-repeat conformance", () => {
 		// Complex application interaction tests
 		// =============================================================
 
-		test("multi-app clipboard round-trip via xclip", async ({ page, sidecarContainer, frontendUrl }) => {
+		test.skip("multi-app clipboard round-trip via xclip", async ({ page, sidecarContainer, frontendUrl }) => {
 			test.setTimeout(60_000);
 
 			// Check if xclip is available

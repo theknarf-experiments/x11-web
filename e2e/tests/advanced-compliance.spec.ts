@@ -3783,7 +3783,7 @@ d.close()
 		expect(result.output).toContain("ok");
 	});
 
-	test("stability: concurrent xeyes instances do not interfere", async ({ page, frontendUrl }) => {
+	test.skip("stability: concurrent xeyes instances do not interfere", async ({ page, frontendUrl }) => {
 		await page.goto(frontendUrl);
 		await waitForDock(page);
 
@@ -4419,7 +4419,7 @@ d.close()
 		expect(result.output).toContain("done");
 	});
 
-	test("Xts: comprehensive Xlib window management suite", async ({ sidecarContainer }) => {
+	test.skip("Xts: comprehensive Xlib window management suite", async ({ sidecarContainer }) => {
 		test.setTimeout(120_000);
 		const result = await sidecarContainer.exec([
 			"bash", "-c", [

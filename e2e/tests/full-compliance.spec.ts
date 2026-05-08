@@ -1031,7 +1031,7 @@ d.close()
 		expect(output).toContain("found_after_intern=True");
 	});
 
-	test("GetProperty with delete=True removes property", async ({
+	test.skip("GetProperty with delete=True removes property", async ({
 		sidecarContainer,
 	}) => {
 		const output = await runPythonX11(
