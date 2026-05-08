@@ -528,14 +528,8 @@ function writeDndEvent(b: DndEventCapnp, ev: DndEventKind): void {
 		case "Drop": {
 			const d = p._initDrop();
 			d.mimeType = ev.mime_type;
-			// ev.data is a string ("base64-encoded") in TS — we ship
-			// raw bytes on the wire, so decode here. This mirrors the
-			// pre-existing behaviour: types.ts declared the field as
-			// a base64 string for JSON survival, capnp has native
-			// `Data` so the conversion happens in the bridge.
-			const bytes = base64ToBytes(ev.data);
-			const out = d._initData(bytes.length);
-			out.copyBuffer(bytes);
+			const out = d._initData(ev.data.byteLength);
+			out.copyBuffer(ev.data);
 			return;
 		}
 		case "Leave": {
@@ -543,11 +537,4 @@ function writeDndEvent(b: DndEventCapnp, ev: DndEventKind): void {
 			return;
 		}
 	}
-}
-
-function base64ToBytes(s: string): Uint8Array {
-	const bin = atob(s);
-	const out = new Uint8Array(bin.length);
-	for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
-	return out;
 }

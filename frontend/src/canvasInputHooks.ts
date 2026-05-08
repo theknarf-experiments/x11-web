@@ -428,11 +428,12 @@ export function attachDndBridge(
 		const dt = e.dataTransfer;
 		if (!dt) return;
 
+		const enc = new TextEncoder();
 		const text = dt.getData("text/plain");
 		if (text) {
 			onInput({
 				kind: "DndBridge",
-				event: { kind: "Drop", mime_type: "text/plain", data: btoa(text) },
+				event: { kind: "Drop", mime_type: "text/plain", data: enc.encode(text) },
 			});
 			return;
 		}
@@ -441,7 +442,7 @@ export function attachDndBridge(
 		if (html) {
 			onInput({
 				kind: "DndBridge",
-				event: { kind: "Drop", mime_type: "text/html", data: btoa(html) },
+				event: { kind: "Drop", mime_type: "text/html", data: enc.encode(html) },
 			});
 			return;
 		}
@@ -451,17 +452,12 @@ export function attachDndBridge(
 			const reader = new FileReader();
 			reader.onloadend = () => {
 				const result = reader.result as ArrayBuffer;
-				const bytes = new Uint8Array(result);
-				let binary = "";
-				for (let i = 0; i < bytes.length; i++) {
-					binary += String.fromCharCode(bytes[i]);
-				}
 				onInput({
 					kind: "DndBridge",
 					event: {
 						kind: "Drop",
 						mime_type: file.type || "application/octet-stream",
-						data: btoa(binary),
+						data: new Uint8Array(result),
 					},
 				});
 			};

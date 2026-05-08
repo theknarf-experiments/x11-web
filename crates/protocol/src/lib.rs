@@ -1,26 +1,11 @@
-use serde::{Deserialize, Serialize};
-
-/// Serde helper to encode `Vec<u8>` as a base64 string in JSON.
-/// Used by every variant that carries raw bytes (clipboard data,
-/// drag-and-drop payloads, etc.) so JSON over WebSocket between the
-/// backend and frontend stays text-safe.
-mod base64_bytes {
-    use base64::{engine::general_purpose::STANDARD, Engine};
-    use serde::{Deserialize, Deserializer, Serializer};
-
-    pub fn serialize<S: Serializer>(data: &Vec<u8>, serializer: S) -> Result<S::Ok, S::Error> {
-        serializer.serialize_str(&STANDARD.encode(data))
-    }
-
-    pub fn deserialize<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Vec<u8>, D::Error> {
-        let s = String::deserialize(deserializer)?;
-        STANDARD.decode(&s).map_err(serde::de::Error::custom)
-    }
-}
+// Plain Rust types for the protocol surface. The on-wire format
+// is Cap'n Proto on every boundary (see `crates/ws-wire`,
+// `crates/wire`, `crates/rtc-wire`); these enums are just the
+// typed shape that bridges convert to/from. No serde derives, no
+// JSON-survival helpers.
 
 /// Messages sent from the backend to a frontend client.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(tag = "type")]
+#[derive(Debug, Clone)]
 pub enum BackendToFrontend {
     /// Current list of connected sidecars. Sent on initial frontend
     /// connect *and* whenever a sidecar joins or leaves — the frontend
@@ -78,8 +63,7 @@ pub enum BackendToFrontend {
 }
 
 /// Messages sent from a frontend client to the backend.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(tag = "type")]
+#[derive(Debug, Clone)]
 pub enum FrontendToBackend {
     /// Bind this frontend to a workspace. `id = Some(uuid)` opens the
     /// existing workspace with that id; if the backend doesn't have
@@ -131,7 +115,7 @@ pub enum FrontendToBackend {
 }
 
 /// Information about a connected sidecar.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone)]
 pub struct SidecarInfo {
     pub id: String,
     pub name: String,
@@ -141,7 +125,7 @@ pub struct SidecarInfo {
 /// will use to hold the set of windows a user has pulled into their
 /// canvas (vs. the larger set of windows their sidecars know about
 /// but haven't been attached). For now it carries identity only.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone)]
 pub struct Workspace {
     pub id: String,
     pub name: String,
@@ -149,7 +133,7 @@ pub struct Workspace {
 
 /// One X11-connected process under a sidecar. Wrapped in a
 /// [`BackendToFrontend::ProcessList`] keyed by `sidecar_id`.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone)]
 pub struct ProcessInfo {
     pub pid: u32,
     pub client_id: String,
@@ -171,7 +155,7 @@ pub struct ProcessInfo {
 /// placement and is authoritative. For top-level windows, `(x, y)`
 /// is meaningless to the frontend — canvas position lives on the
 /// matching `OcifNode` in the workspace doc.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone)]
 pub struct WindowDescriptor {
     pub window_id: String,
     pub sidecar_id: String,
@@ -188,7 +172,6 @@ pub struct WindowDescriptor {
     /// hides resize handles when this is false. Sidecar-determined:
     /// X11 windows are always reported as resizable; macOS sidecars
     /// probe AX (`AXSize` settable on the underlying NSWindow).
-    #[serde(default = "default_true")]
     pub resizable: bool,
 }
 
@@ -199,8 +182,7 @@ pub struct WindowDescriptor {
 /// backend and re-emitted as `BackendToFrontend::WindowList`; what's
 /// left here is the smaller set of per-window content/property
 /// changes plus the cross-frontend drag delta.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(tag = "kind")]
+#[derive(Debug, Clone)]
 pub enum WindowUpdate {
     /// Window title (from WM_NAME).
     TitleChanged { window_id: String, title: String },
@@ -219,8 +201,7 @@ pub enum WindowUpdate {
 }
 
 /// A display update from the X server to be rendered in the browser.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(tag = "kind")]
+#[derive(Debug, Clone)]
 pub enum DisplayUpdate {
     /// A window was created.
     WindowCreated {
@@ -231,22 +212,17 @@ pub enum DisplayUpdate {
         height: u16,
         /// True if this is a top-level, non-override-redirect, InputOutput window.
         /// Only these should be shown as WindowFrames in the frontend.
-        #[serde(default)]
         is_top_level: bool,
-        #[serde(default)]
         override_redirect: bool,
         /// X11 border width in pixels (drawn around the content area).
-        #[serde(default)]
         border_width: u16,
         /// X11 border color (ARGB32).
-        #[serde(default)]
         border_pixel: u32,
         /// Whether the user can drag-resize the window. The frontend
         /// hides resize handles when this is false. Sidecar-determined:
         /// X11 windows are always treated as resizable (window managers
         /// usually honour size hints anyway), macOS sidecars probe AX
         /// to see if `AXSize` is settable on the underlying NSWindow.
-        #[serde(default = "default_true")]
         resizable: bool,
     },
     /// A window was destroyed.
@@ -256,9 +232,7 @@ pub enum DisplayUpdate {
     /// A window was mapped (made visible).
     WindowMapped {
         window_id: String,
-        #[serde(default)]
         is_top_level: bool,
-        #[serde(default)]
         override_redirect: bool,
     },
     /// A window was unmapped (hidden).
@@ -273,25 +247,21 @@ pub enum DisplayUpdate {
         width: u16,
         height: u16,
         /// X11 border width in pixels (drawn around the content area).
-        #[serde(default)]
         border_width: u16,
         /// X11 border color (ARGB32).
-        #[serde(default)]
         border_pixel: u32,
         /// See [`WindowCreated::resizable`]; re-emitted on every
         /// configure so apps that flip the constraint at runtime
         /// (rare) reach the frontend.
-        #[serde(default = "default_true")]
         resizable: bool,
     },
-    /// Put an image (raw RGBA pixels, base64 encoded for JSON transport).
+    /// Put an image — raw RGBA pixels straight on the wire.
     PutImage {
         window_id: String,
         x: i16,
         y: i16,
         width: u16,
         height: u16,
-        #[serde(with = "base64_bytes")]
         data: Vec<u8>,
     },
     /// Window title changed (from WM_NAME property).
@@ -331,11 +301,8 @@ pub enum DisplayUpdate {
     /// Low-resolution window preview, WebP-encoded. Sidecar emits
     /// these at low rate (~1 Hz) for windows that aren't yet
     /// attached to the canvas. The backend filters them out of the
-    /// WS JSON path and routes the bytes via the WebRTC DataChannel
-    /// (see `rtc_codec::encode_window_thumbnail`), so the data
-    /// field never gets JSON-encoded — the serde representation
-    /// here is just for completeness if anyone ever debug-prints
-    /// one.
+    /// WS path and routes the bytes via the WebRTC DataChannel
+    /// (see `rtc_codec::encode_window_thumbnail`).
     WindowThumbnail {
         window_id: String,
         width: u16,
@@ -348,7 +315,7 @@ pub enum DisplayUpdate {
 /// `org.gtk.Menus` and `com.canonical.dbusmenu`; the sidecar's
 /// MenuTracker translates each protocol into this representation
 /// before forwarding to the frontend.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone)]
 pub struct MenuItem {
     /// Stable identifier inside this window's menu tree. The frontend
     /// uses this for React keys and `MenuStateChanged` lookups. Format
@@ -356,40 +323,27 @@ pub struct MenuItem {
     /// `"dbm:<id>"` for dbusmenu.
     pub id: String,
     /// Human-readable label. `None` indicates a separator.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub label: Option<String>,
     pub kind: MenuItemKind,
-    #[serde(default = "default_true")]
     pub enabled: bool,
-    #[serde(default = "default_true")]
     pub visible: bool,
     /// Current check / radio state, when applicable.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub checked: Option<bool>,
     /// Display form of the keyboard shortcut, e.g. `"Ctrl+Q"`. The
     /// underlying GTK / dbusmenu accelerator string is parsed by the
     /// sidecar before sending.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub accelerator: Option<String>,
     /// Named icon (typically a freedesktop icon name). Frontend
     /// resolves to its own asset, or skips if unknown.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub icon: Option<String>,
     /// Action to invoke when this item is activated. `None` for
     /// separators, submenu parents, and items waiting for lazy load.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub action: Option<MenuAction>,
     /// Children for submenus. Empty for leaves.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub children: Vec<MenuItem>,
 }
 
-fn default_true() -> bool {
-    true
-}
-
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "lowercase")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MenuItemKind {
     Normal,
     Submenu,
@@ -401,7 +355,7 @@ pub enum MenuItemKind {
 /// Identifier for the action a menu item triggers, plus any optional
 /// target value (used by GTK actions that take a parameter — e.g.
 /// `app.set-mode("scientific")`).
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone)]
 pub struct MenuAction {
     /// Namespaced action name. Currently:
     /// - `"app.<name>"` and `"win.<name>"` for `org.gtk.Actions`
@@ -409,7 +363,6 @@ pub struct MenuAction {
     pub name: String,
     /// Action payload. Mirrors the GVariant types we actually see in
     /// real-world GTK / Qt menu items.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub target: Option<MenuActionTarget>,
 }
 
@@ -417,7 +370,7 @@ pub struct MenuAction {
 /// six concrete shapes `crates/sidecar/src/menus.rs` produces from
 /// the D-Bus menu service — anything else is translated to `None`
 /// upstream so this enum stays small and exhaustive.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone)]
 pub enum MenuActionTarget {
     String(String),
     Bool(bool),
@@ -428,8 +381,7 @@ pub enum MenuActionTarget {
 }
 
 /// Window management state flags.
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "lowercase")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum WindowWmState {
     Normal,
     Minimized,
@@ -440,7 +392,7 @@ pub enum WindowWmState {
 }
 
 /// Phase of a gesture event (swipe or pinch).
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone)]
 pub enum GesturePhase {
     Begin,
     Update,
@@ -448,8 +400,7 @@ pub enum GesturePhase {
 }
 
 /// Drag-and-drop event kinds mapped from XdndDrop protocol.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(tag = "kind")]
+#[derive(Debug, Clone)]
 pub enum DndEventKind {
     /// XdndEnter — a drag entered the window.
     Enter {
@@ -462,8 +413,7 @@ pub enum DndEventKind {
     Drop {
         /// MIME type of the dropped content.
         mime_type: String,
-        /// Data payload (base64 encoded).
-        #[serde(with = "base64_bytes")]
+        /// Raw payload bytes — capnp `Data` on the wire.
         data: Vec<u8>,
     },
     /// XdndLeave — the drag left the window.
@@ -471,8 +421,7 @@ pub enum DndEventKind {
 }
 
 /// Input events sent from the frontend to X11 clients.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(tag = "kind")]
+#[derive(Debug, Clone)]
 pub enum InputEvent {
     KeyPress {
         keycode: u32,

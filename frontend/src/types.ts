@@ -83,7 +83,7 @@ export type WindowWmState =
 export type DndEventKind =
 	| { kind: "Enter"; mime_types: string[] }
 	| { kind: "Position"; x: number; y: number }
-	| { kind: "Drop"; mime_type: string; data: string }
+	| { kind: "Drop"; mime_type: string; data: Uint8Array }
 	| { kind: "Leave" };
 
 /** Focus policy for the window manager. */
