@@ -25,22 +25,22 @@ test.describe.serial("SHAPE extension", () => {
 });
 
 test.describe("SHAPE extension conformance", () => {
-	test.skip("SHAPE: set bounding region and query extents", async ({ sidecarContainer }) => {
+	test("SHAPE: set bounding region and query extents", async ({ sidecarContainer }) => {
 		test.setTimeout(30_000);
 		const result = await sidecarContainer.exec([
 			"python3", "-c", [
 				"import Xlib, Xlib.display, Xlib.ext.shape",
 				"d = Xlib.display.Display()",
+				"d.shape_query_version()",
 				"root = d.screen().root",
 				"w = root.create_window(0, 0, 200, 200, 0, d.screen().root_depth)",
 				"w.map()",
 				"d.sync()",
-				// Set a bounding rectangle via ShapeRectangles
-				"Xlib.ext.shape.shape_rectangles(w, Xlib.ext.shape.SO.Set, Xlib.ext.shape.SK.Bounding, 0, 0, [(10, 10, 50, 50)])",
+				// (operation, destination_kind, ordering, x_offset, y_offset, rectangles)
+				"w.shape_rectangles(Xlib.ext.shape.SO.Set, Xlib.ext.shape.SK.Bounding, 0, 0, 0, [(10, 10, 50, 50)])",
 				"d.sync()",
-				// Query shape extents
-				"ext = Xlib.ext.shape.shape_query_extents(w)",
-				"print(f'bounding_shaped={ext.bounding_shaped}')",
+				"ext = w.shape_query_extents()",
+				"print(f'bounding_shaped={int(ext.bounding_shaped)}')",
 				"print(f'bounding_x={ext.bounding_shape_extents_x}')",
 				"print(f'bounding_y={ext.bounding_shape_extents_y}')",
 				"print(f'bounding_w={ext.bounding_shape_extents_width}')",
@@ -58,24 +58,23 @@ test.describe("SHAPE extension conformance", () => {
 		expect(result.output).toContain("bounding_h=50");
 	});
 
-	test.skip("SHAPE: combine bounding regions (Union)", async ({ sidecarContainer }) => {
+	test("SHAPE: combine bounding regions (Union)", async ({ sidecarContainer }) => {
 		test.setTimeout(30_000);
 		const result = await sidecarContainer.exec([
 			"python3", "-c", [
 				"import Xlib, Xlib.display, Xlib.ext.shape",
 				"d = Xlib.display.Display()",
+				"d.shape_query_version()",
 				"root = d.screen().root",
 				"w = root.create_window(0, 0, 200, 200, 0, d.screen().root_depth)",
 				"w.map()",
 				"d.sync()",
-				// Set initial bounding region
-				"Xlib.ext.shape.shape_rectangles(w, Xlib.ext.shape.SO.Set, Xlib.ext.shape.SK.Bounding, 0, 0, [(0, 0, 50, 50)])",
+				"w.shape_rectangles(Xlib.ext.shape.SO.Set, Xlib.ext.shape.SK.Bounding, 0, 0, 0, [(0, 0, 50, 50)])",
 				"d.sync()",
-				// Union with another rectangle
-				"Xlib.ext.shape.shape_rectangles(w, Xlib.ext.shape.SO.Union, Xlib.ext.shape.SK.Bounding, 0, 0, [(30, 30, 50, 50)])",
+				"w.shape_rectangles(Xlib.ext.shape.SO.Union, Xlib.ext.shape.SK.Bounding, 0, 0, 0, [(30, 30, 50, 50)])",
 				"d.sync()",
-				// Query: union of (0,0,50,50) and (30,30,50,50) = (0,0,80,80)
-				"ext = Xlib.ext.shape.shape_query_extents(w)",
+				// Union of (0,0,50,50) and (30,30,50,50) = bounds (0,0,80,80).
+				"ext = w.shape_query_extents()",
 				"print(f'bounding_w={ext.bounding_shape_extents_width}')",
 				"print(f'bounding_h={ext.bounding_shape_extents_height}')",
 				"print('SHAPE_UNION_PASS')",
@@ -88,21 +87,21 @@ test.describe("SHAPE extension conformance", () => {
 		expect(result.output).toContain("bounding_h=80");
 	});
 
-	test.skip("SHAPE: clip region affects drawing", async ({ sidecarContainer }) => {
+	test("SHAPE: clip region affects drawing", async ({ sidecarContainer }) => {
 		test.setTimeout(30_000);
 		const result = await sidecarContainer.exec([
 			"python3", "-c", [
 				"import Xlib, Xlib.display, Xlib.ext.shape",
 				"d = Xlib.display.Display()",
+				"d.shape_query_version()",
 				"root = d.screen().root",
 				"w = root.create_window(0, 0, 100, 100, 0, d.screen().root_depth)",
 				"w.map()",
 				"d.sync()",
-				// Set a clip region
-				"Xlib.ext.shape.shape_rectangles(w, Xlib.ext.shape.SO.Set, Xlib.ext.shape.SK.Clip, 0, 0, [(10, 10, 30, 30)])",
+				"w.shape_rectangles(Xlib.ext.shape.SO.Set, Xlib.ext.shape.SK.Clip, 0, 0, 0, [(10, 10, 30, 30)])",
 				"d.sync()",
-				"ext = Xlib.ext.shape.shape_query_extents(w)",
-				"print(f'clip_shaped={ext.clip_shaped}')",
+				"ext = w.shape_query_extents()",
+				"print(f'clip_shaped={int(ext.clip_shaped)}')",
 				"print('SHAPE_CLIP_PASS')",
 				"w.destroy()",
 				"d.close()",

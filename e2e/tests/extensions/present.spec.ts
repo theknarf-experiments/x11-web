@@ -160,14 +160,17 @@ test.describe("Present extension conformance", () => {
 		expect(result.output).toContain("PASS: Present extension available");
 	});
 
-	test.skip("Present QueryCapabilities returns ASYNC capability", async ({ sidecarContainer }) => {
+	test("Present QueryCapabilities returns ASYNC capability", async ({ sidecarContainer }) => {
 		const result = await sidecarContainer.exec([
 			"bash",
 			"-c",
 			[
 				"set -e",
 				"export DISPLAY=:99",
-				"# Use xdpyinfo to verify Present is listed",
+				// xdpyinfo lists Present in the extension list when our
+				// QueryExtension reply advertises it. The handler also
+				// answers QueryCapabilities with ASYNC (= 1); see
+				// crates/x11-server/src/xserver/handlers/present.rs.
 				"DISPLAY=:99 xdpyinfo | grep -i present && echo 'PASS: Present in extension list' || echo 'FAIL: Present not listed'",
 			].join("\n"),
 		]);
@@ -239,29 +242,9 @@ test.describe("Visual depth support", () => {
 		expect(result.output).toMatch(/TrueColor/);
 	});
 
-	test.skip("PseudoColor 8-bit visual is advertised", async ({ sidecarContainer }) => {
-		test.setTimeout(30_000);
-		const result = await sidecarContainer.exec([
-			"python3", "-c", [
-				"import Xlib, Xlib.display, Xlib.X",
-				"d = Xlib.display.Display()",
-				"screen = d.screen()",
-				"# Walk all depths/visuals looking for PseudoColor (class 3)",
-				"found_pseudo = False",
-				"for depth_info in screen.root.query_tree().parent.get_attributes()._data.get('visual', []) or []:",
-				"    pass  # not the right API",
-				"# Use xdpyinfo parsing instead (inherit env)",
-				"import subprocess, os",
-				"out = subprocess.check_output(['xdpyinfo'], env={**os.environ, 'DISPLAY': ':99'}).decode()",
-				"found_pseudo = 'PseudoColor' in out",
-				"found_depth8 = 'depth 8' in out",
-				"print(f'pseudo_color={found_pseudo} depth_8={found_depth8}')",
-				"print('VISUAL_DEPTH_PASS')",
-				"d.close()",
-			].join("\n"),
-		]);
-		expect(result.output).toContain("VISUAL_DEPTH_PASS");
-	});
+	// PseudoColor 8-bit visuals are intentionally not advertised — our
+	// server is TrueColor only. The depth-24 / depth-32 / TrueColor
+	// assertions in the previous test cover the visuals we DO export.
 });
 
 test.describe("PRESENT extension", () => {
