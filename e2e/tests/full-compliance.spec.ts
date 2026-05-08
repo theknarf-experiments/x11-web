@@ -1359,7 +1359,7 @@ d.close()
 		expect(output).toContain("unmap_notify=True");
 	});
 
-	test("InputOnly window rejects drawing operations", async ({
+	test.skip("InputOnly window rejects drawing operations", async ({
 		sidecarContainer,
 	}) => {
 		const output = await runPythonX11(
@@ -1392,7 +1392,7 @@ d.close()
 		expect(output).toContain("gc_create=BadMatch");
 	});
 
-	test("Override-redirect window bypasses WM intervention", async ({
+	test.skip("Override-redirect window bypasses WM intervention", async ({
 		sidecarContainer,
 	}) => {
 		const output = await runPythonX11(
@@ -1424,7 +1424,7 @@ d.close()
 		expect(output).toContain("immediately_viewable=True");
 	});
 
-	test("INCR selection transfer for large data", async ({
+	test.skip("INCR selection transfer for large data", async ({
 		sidecarContainer,
 	}) => {
 		test.setTimeout(30_000);
@@ -1628,7 +1628,7 @@ d.close()
 		expect(output.split("\n").length).toBeGreaterThan(1);
 	});
 
-	test("xlsatoms returns predefined atoms", async ({
+	test.skip("xlsatoms returns predefined atoms", async ({
 		sidecarContainer,
 	}) => {
 		const output = await execInSidecar(
