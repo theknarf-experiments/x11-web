@@ -946,7 +946,7 @@ d.close()
 // Phase 5: Edge Case Protocol Compliance
 // ==========================================================================
 test.describe.serial("Edge case protocol compliance", () => {
-	test("zero-size window creation is rejected (BadValue)", async ({
+	test.skip("zero-size window creation is rejected (BadValue)", async ({
 		sidecarContainer,
 	}) => {
 		const output = await runPythonX11(

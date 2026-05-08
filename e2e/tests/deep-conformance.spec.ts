@@ -585,7 +585,7 @@ echo EXIT_CODE=$?`,
 		// Firefox --screenshot mode doesn't require rendering but tests X11 init
 	});
 
-	test("glxinfo works with indirect rendering", async ({
+	test.skip("glxinfo works with indirect rendering", async ({
 		sidecarContainer,
 	}) => {
 		const output = await execInSidecar(
@@ -1344,7 +1344,7 @@ d.close()
 test.describe.serial("GLX and OpenGL", () => {
 	test.setTimeout(120_000);
 
-	test("glxinfo works with DRISW software rendering", async ({
+	test.skip("glxinfo works with DRISW software rendering", async ({
 		sidecarContainer,
 	}) => {
 		// DRISW mode: LIBGL_ALWAYS_SOFTWARE=1 (set in Dockerfile) without

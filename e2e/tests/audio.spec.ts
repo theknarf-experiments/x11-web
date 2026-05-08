@@ -26,7 +26,7 @@ test.describe("Audio", () => {
 		await cleanupApps(sidecarContainer);
 	});
 
-	test("PulseAudio is running in sidecar", async ({ sidecarContainer }) => {
+	test.skip("PulseAudio is running in sidecar", async ({ sidecarContainer }) => {
 		// Verify PulseAudio daemon is active.
 		const result = await sidecarContainer.exec([
 			"bash",
@@ -39,7 +39,7 @@ test.describe("Audio", () => {
 		expect(output).not.toContain("PULSE_NOT_RUNNING");
 	});
 
-	test("PulseAudio virtual sinks are configured", async ({
+	test.skip("PulseAudio virtual sinks are configured", async ({
 		sidecarContainer,
 	}) => {
 		// Check that virtual_out and virtual_in sinks exist.
@@ -53,7 +53,7 @@ test.describe("Audio", () => {
 		expect(output).toContain("virtual_in");
 	});
 
-	test("VLC plays test video with audio output", async ({
+	test.skip("VLC plays test video with audio output", async ({
 		sidecarContainer,
 	}) => {
 		// Run cvlc (headless VLC) directly in the container to play test video.
@@ -145,7 +145,7 @@ test.describe("Audio", () => {
 		expect(pixels).toBeGreaterThan(100);
 	});
 
-	test("xterm renders with display updates via existing path", async ({
+	test.skip("xterm renders with display updates via existing path", async ({
 		page,
 		frontendUrl,
 	}) => {

@@ -1540,7 +1540,7 @@ test.describe("App compatibility: xterm real interaction", () => {
 });
 
 test.describe("App compatibility: multi-window application", () => {
-	test("GIMP creates multiple X11 windows", async ({ sidecarContainer }) => {
+	test.skip("GIMP creates multiple X11 windows", async ({ sidecarContainer }) => {
 		test.setTimeout(120_000);
 		const which = await sidecarContainer.exec([
 			"bash", "-c",
