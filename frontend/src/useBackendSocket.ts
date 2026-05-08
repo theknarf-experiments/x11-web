@@ -26,7 +26,6 @@ import {
 	subscribe as subscribeWorkspace,
 } from "./workspaceSync";
 import type {
-	BackendToFrontend,
 	FrontendToBackend,
 	WindowDescriptor,
 	WindowUpdate,
@@ -34,6 +33,7 @@ import type {
 } from "./types";
 import { SpanStatusCode } from "@opentelemetry/api";
 import { spanAttrsFor, tracer } from "./telemetry";
+import { decodeBackendMsg, encodeFrontendMsg } from "./wsWire";
 import { colorForWindowId } from "./windowColors";
 
 // Resolve order: ?ws=... query param > VITE_WS_URL build-time env >
@@ -248,6 +248,10 @@ export function useBackendSocket() {
 			if (disposed.current) return;
 
 			const ws = new WebSocket(WS_URL);
+			// Cap'n Proto frames are binary; default `"blob"` would
+			// give us a Blob and force an async `arrayBuffer()` read
+			// per message. `"arraybuffer"` keeps the data path sync.
+			ws.binaryType = "arraybuffer";
 			wsRef.current = ws;
 
 			ws.onopen = () => {
@@ -289,7 +293,19 @@ export function useBackendSocket() {
 			};
 
 			ws.onmessage = (event) => {
-				const msg: BackendToFrontend = JSON.parse(event.data);
+				// `event.data` is an ArrayBuffer (we set `binaryType`
+				// above). Decode through the capnp bridge — see
+				// `frontend/src/wsWire.ts`.
+				const decoded = decodeBackendMsg(new Uint8Array(event.data));
+				if (!decoded) {
+					pushDiagnostic({
+						level: "warn",
+						source: "ws",
+						message: "ws frame failed to decode",
+					});
+					return;
+				}
+				const msg = decoded.msg;
 
 				switch (msg.type) {
 					case "SidecarList":
@@ -408,17 +424,16 @@ export function useBackendSocket() {
 				span.end();
 				return;
 			}
-			// Wrap each send in a span and stamp the W3C traceparent
-			// onto the JSON envelope so the backend can adopt it as
-			// the parent context for the dispatch span — and propagate
-			// it further to the sidecar over QUIC. Kept manual rather
-			// than pulling `@opentelemetry/core`'s W3C propagator just
-			// to avoid the extra package.
+			// Build the W3C traceparent from the active span and hand
+			// it to the capnp encoder, which puts it on the schema's
+			// top-level `traceparent` field. Backend extracts it as
+			// the parent context for the dispatch span — and forwards
+			// it on to the sidecar over QUIC.
 			const sc = span.spanContext();
 			const flags = sc.traceFlags.toString(16).padStart(2, "0");
 			const traceparent = `00-${sc.traceId}-${sc.spanId}-${flags}`;
-			const wire = { ...msg, _traceparent: traceparent };
-			wsRef.current?.send(JSON.stringify(wire));
+			const bytes = encodeFrontendMsg(msg, traceparent);
+			wsRef.current?.send(bytes);
 			span.end();
 		});
 	}, []);

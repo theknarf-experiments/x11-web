@@ -8,6 +8,7 @@ x11-web-auth = { path = "../auth" }
 x11-web-protocol = { path = "../protocol" }
 x11-web-wire = { path = "../wire" }
 x11-web-rtc-wire = { path = "../rtc-wire" }
+x11-web-ws-wire = { path = "../ws-wire" }
 axum = { version = "0.8", features = ["ws"] }
 axum-extra = { version = "0.10", features = ["cookie"] }
 tower-sessions = "0.15"

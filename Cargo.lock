@@ -4855,6 +4855,7 @@ dependencies = [
  "x11-web-rtc-wire",
  "x11-web-telemetry",
  "x11-web-wire",
+ "x11-web-ws-wire",
 ]
 
 [[package]]

@@ -605,11 +605,17 @@ async fn handle_frontend_ws(socket: WebSocket, state: AppState) {
 
     info!("Frontend connected: {}", frontend_id);
 
-    // Forward messages from channel to WebSocket
+    // Forward messages from channel to WebSocket. Binary frames
+    // carrying Cap'n Proto serialised `BackendMsg`s — the schema
+    // lives in `crates/ws-wire/schema/ws.capnp` and the bridge in
+    // the same crate handles the protocol-enum ↔ capnp dance.
+    // Traceparent is sampled here so a future "trace
+    // backend-pushed updates" feature can chain on the receiver.
     let send_task = tokio::spawn(async move {
         while let Some(msg) = rx.recv().await {
-            let json = serde_json::to_string(&msg).unwrap();
-            if ws_tx.send(Message::Text(json.into())).await.is_err() {
+            let traceparent = x11_web_telemetry::current_traceparent();
+            let bytes = x11_web_ws_wire::encode_backend_msg(&msg, &traceparent);
+            if ws_tx.send(Message::Binary(bytes.into())).await.is_err() {
                 break;
             }
         }
@@ -797,24 +803,17 @@ async fn handle_frontend_ws(socket: WebSocket, state: AppState) {
         }
     }
 
-    // Process incoming messages from frontend
+    // Process incoming messages from frontend. Binary frames with
+    // a Cap'n Proto `FrontendMsg`; the bridge gives us back the
+    // typed enum + the traceparent header in one call.
     while let Some(Ok(msg)) = ws_rx.next().await {
-        let Message::Text(text) = msg else { continue };
-        // Two-step parse: pull the optional `_traceparent` envelope
-        // field off first (set by the frontend so a click joins up
-        // with backend + sidecar spans), then re-parse the same
-        // value as the typed enum. `from_value` walks the existing
-        // tree, so this is cheap.
-        let Ok(value) = serde_json::from_str::<serde_json::Value>(&text) else {
-            continue;
-        };
-        let traceparent = value
-            .get("_traceparent")
-            .and_then(serde_json::Value::as_str)
-            .unwrap_or_default()
-            .to_string();
-        let Ok(msg) = serde_json::from_value::<FrontendToBackend>(value) else {
-            continue;
+        let Message::Binary(bytes) = msg else { continue };
+        let (msg, traceparent) = match x11_web_ws_wire::decode_frontend_msg(&bytes) {
+            Ok(pair) => pair,
+            Err(e) => {
+                warn!("frontend msg decode failed: {e:?}");
+                continue;
+            }
         };
 
         // Adopt the frontend's trace context as the parent for the
