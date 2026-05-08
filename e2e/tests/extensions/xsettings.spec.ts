@@ -42,25 +42,8 @@ test.describe("XSETTINGS manager", () => {
 	});
 });
 
-test.describe("XSETTINGS GTK integration", () => {
-	// Pre-existing: gtk3-demo crashes (or never starts cleanly) before our
-	// timeout. Probably needs an XSETTINGS daemon publishing _XSETTINGS_S0
-	// or for us to advertise sane defaults.
-	test.skip("GTK3 app can query XSETTINGS for theme", async ({ sidecarContainer }) => {
-		test.setTimeout(30_000);
-		const result = await sidecarContainer.exec([
-			"bash", "-c", [
-				"export DISPLAY=:99",
-				"# Run a GTK3 demo briefly to verify it doesn't crash due to missing XSETTINGS",
-				"timeout 5 gtk3-demo 2>&1 &",
-				"sleep 3",
-				"pkill -f gtk3-demo 2>/dev/null || true",
-				"echo 'gtk3-xsettings-ok'",
-			].join("\n"),
-		]);
-		expect(result.output).toContain("gtk3-xsettings-ok");
-	});
-});
+// GTK3 app smoke test moved to apps/toolkits.spec.ts since it
+// exercises a real toolkit rather than the XSETTINGS protocol.
 
 test.describe.serial("EWMH compliance for real applications", () => {
 	test("_NET_SUPPORTED lists all required atoms", async ({

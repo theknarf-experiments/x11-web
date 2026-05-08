@@ -938,20 +938,9 @@ test.describe("RENDER animated cursor", () => {
 test.describe.serial("Application smoke tests", () => {
 	test.setTimeout(120_000);
 
-	test.skip("xterm starts and accepts input", async ({ sidecarContainer }) => {
-		// Launch xterm in background
-		await execInSidecar(
-			sidecarContainer,
-			"xterm -e 'echo XTERM_OK > /tmp/xterm_test; sleep 1' &",
-		);
-		// Wait for it to complete
-		await new Promise((r) => setTimeout(r, 5000));
-		const output = await execInSidecar(
-			sidecarContainer,
-			"cat /tmp/xterm_test 2>/dev/null || echo 'NOT_FOUND'",
-		);
-		expect(output).toContain("XTERM_OK");
-	});
+	// xterm coverage lives in apps/x11-utils.spec.ts ("xterm starts and
+	// accepts keyboard input"); previously a duplicate copy lived here
+	// gated behind `test.skip(...)` and has been removed.
 
 	test("xclock renders without crashing", async ({ sidecarContainer }) => {
 		await execInSidecar(sidecarContainer, "timeout 3 xclock &");

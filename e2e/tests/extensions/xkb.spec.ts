@@ -1247,7 +1247,7 @@ test.describe("Conformance: Extension conformance", () => {
 		expect(result.output).toContain("XKB_OK");
 	});
 
-	test.skip("rendercheck full suite passes", async ({ sidecarContainer }) => {
+	test("rendercheck full suite passes", async ({ sidecarContainer }) => {
 		// rendercheck can take a while; the inner timeout is 120s, but we
 		// also need playwright to wait that long.
 		test.setTimeout(180_000);

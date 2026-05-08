@@ -167,3 +167,25 @@ test.describe("App compatibility: clipboard between apps", () => {
 		expect(result.output).toContain("PASS: clipboard");
 	});
 });
+
+test.describe("App compatibility: GTK3", () => {
+	// gtk3-demo currently segfaults on startup against our server.
+	// Suspected cause: missing or partial XSETTINGS / Xft state, or a
+	// protocol error in one of the calls libgtk-3 issues during init.
+	// XSETTINGS_S0 ownership and format are already covered by
+	// extensions/xsettings.spec.ts; this test stays skipped until
+	// gtk3-demo can complete startup without crashing.
+	test.skip("gtk3-demo starts and shuts down cleanly", async ({ sidecarContainer }) => {
+		test.setTimeout(30_000);
+		const result = await sidecarContainer.exec([
+			"bash", "-c", [
+				"export DISPLAY=:99",
+				"timeout 5 gtk3-demo 2>&1 &",
+				"sleep 3",
+				"pkill -f gtk3-demo 2>/dev/null || true",
+				"xdpyinfo > /dev/null 2>&1 && echo 'gtk3-ok' || echo 'server-died'",
+			].join("\n"),
+		]);
+		expect(result.output).toContain("gtk3-ok");
+	});
+});

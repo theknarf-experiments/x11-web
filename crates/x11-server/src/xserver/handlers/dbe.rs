@@ -5,8 +5,10 @@ use tracing::debug;
 use x11rb_protocol::protocol::dbe::{
     ALLOCATE_BACK_BUFFER_REQUEST, BEGIN_IDIOM_REQUEST, DEALLOCATE_BACK_BUFFER_REQUEST,
     END_IDIOM_REQUEST, GET_BACK_BUFFER_ATTRIBUTES_REQUEST, GET_VISUAL_INFO_REQUEST,
-    QUERY_VERSION_REQUEST, SWAP_BUFFERS_REQUEST, SwapAction,
+    GetVisualInfoReply, QUERY_VERSION_REQUEST, SWAP_BUFFERS_REQUEST, SwapAction, VisualInfo,
+    VisualInfos,
 };
+use x11rb_protocol::x11_utils::Serialize;
 
 use super::super::client::ClientState;
 use crate::framebuffer::Framebuffer;
@@ -179,43 +181,38 @@ pub(crate) fn handle_dbe_request(state: &mut ClientState, data: &[u8], seq: u16)
             Vec::new()
         }
         GET_VISUAL_INFO_REQUEST => {
-            // GetVisualInfo
-            // Return visual info for 1 screen with our 2 visuals supporting DBE
-            let n_screens: u32 = 1;
-            // PerflDepthInfo: depth(1) + pad(1) + n_visuals(2) + visual entries
-            // Each visual entry: visual_id(4) + depth(1) + perflevel(1) + pad(2) = 8
-            let n_visuals: u16 = 2; // 24-bit and 32-bit
-            let per_depth_size = 4 + n_visuals as usize * 8; // header + visuals
-            let screen_info_size = 4 + per_depth_size; // n_perfdepth(4) + depths
-            let extra = 4 + screen_info_size; // n_screens already in header, then screen data
-            let padded = (extra + 3) & !3;
-            let mut reply =
-                ReplyBuf::with_extra(seq, padded, state.msb_first).set_u32(8, n_screens);
-            // Screen 0
-            let off = 32;
-            reply = reply.set_u32(off, 1); // n_perfdepth = 1
-
-            // PerflDepthInfo
-            let doff = off + 4;
-            reply = reply
-                .set_u8(doff, 24) // depth
-                .set_u16(doff + 2, n_visuals);
-
-            // Visual 0: ROOT_VISUAL (24-bit)
-            let voff = doff + 4;
-            reply = reply
-                .set_u32(voff, 0x21) // ROOT_VISUAL
-                .set_u8(voff + 4, 24) // depth
-                .set_u8(voff + 5, 0); // performance level
-
-            // Visual 1: ARGB visual (32-bit)
-            let voff2 = voff + 8;
-            reply = reply
-                .set_u32(voff2, 0x40) // ARGB visual
-                .set_u8(voff2 + 4, 32)
-                .set_u8(voff2 + 5, 0);
-
-            reply.build()
+            // GetVisualInfo: per the DBE spec the reply is one
+            // `VisualInfos` entry per screen we advertise. We only
+            // support one screen, with two DBE-capable visuals: the
+            // root 24-bit visual and an ARGB 32-bit visual.
+            let supported_visuals = vec![VisualInfos {
+                infos: vec![
+                    VisualInfo {
+                        visual_id: 0x21, // ROOT_VISUAL
+                        depth: 24,
+                        perf_level: 0,
+                    },
+                    VisualInfo {
+                        visual_id: 0x40, // ARGB visual
+                        depth: 32,
+                        perf_level: 0,
+                    },
+                ],
+            }];
+            let mut bytes = GetVisualInfoReply {
+                sequence: seq,
+                length: 0,
+                supported_visuals,
+            }
+            .serialize();
+            // Stamp length from the actual buffer size (overrides the
+            // 0 we passed in).
+            let length = ((bytes.len() - 32) / 4) as u32;
+            bytes[4..8].copy_from_slice(&length.to_ne_bytes());
+            if state.msb_first {
+                byteswap_get_visual_info_reply(&mut bytes);
+            }
+            bytes
         }
         GET_BACK_BUFFER_ATTRIBUTES_REQUEST => {
             // GetBackBufferAttributes
@@ -242,6 +239,36 @@ pub(crate) fn handle_dbe_request(state: &mut ClientState, data: &[u8], seq: u16)
         _ => {
             debug!("DBE: unhandled minor opcode {minor}");
             dbe_err(crate::xserver::core::REQUEST_ERROR, minor as u32)
+        }
+    }
+}
+
+/// `GetVisualInfoReply`:
+/// `[type:1, pad:1, sequence:u16, length:u32, n_supported_visuals:u32,
+///   pad:20, supported_visuals:[VisualInfos]]`. Each `VisualInfos` is
+/// `n_infos:u32` followed by `n_infos` × `VisualInfo (8 bytes:
+/// visual_id:u32, depth:u8, perf_level:u8, pad:2)`.
+///
+/// Called before any byte-swaps; reads multi-byte fields in native
+/// order to walk the layout, then swaps each field in place.
+fn byteswap_get_visual_info_reply(buf: &mut [u8]) {
+    use crate::xserver::byteswap::{swap_u16, swap_u32};
+    let n_screens = u32::from_ne_bytes([buf[8], buf[9], buf[10], buf[11]]) as usize;
+    swap_u16(buf, 2); // sequence
+    swap_u32(buf, 4); // length
+    swap_u32(buf, 8); // n_supported_visuals
+    let mut off = 32;
+    for _ in 0..n_screens {
+        if off + 4 > buf.len() {
+            return;
+        }
+        let n_infos =
+            u32::from_ne_bytes([buf[off], buf[off + 1], buf[off + 2], buf[off + 3]]) as usize;
+        swap_u32(buf, off); // n_infos
+        off += 4;
+        for _ in 0..n_infos {
+            swap_u32(buf, off); // visual_id; depth/perf_level/pad are bytes
+            off += 8;
         }
     }
 }

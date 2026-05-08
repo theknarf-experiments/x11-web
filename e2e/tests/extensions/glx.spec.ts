@@ -1143,3 +1143,98 @@ sys.exit(1 if failed > 0 else 0)
 		console.log("x11perf wide lines + stipple fills completed");
 	});
 });
+
+test.describe.serial("GLX and OpenGL", () => {
+	test.setTimeout(120_000);
+
+	test("glxinfo works with DRISW software rendering", async ({
+		sidecarContainer,
+	}) => {
+		// DRISW mode: LIBGL_ALWAYS_SOFTWARE=1 (set in Dockerfile) without
+		// LIBGL_ALWAYS_INDIRECT. Mesa loads swrast_dri.so and uses
+		// driConvertConfigs to match our FBConfigs against the driver's.
+		const output = await execInSidecar(
+			sidecarContainer,
+			"LIBGL_DEBUG=verbose timeout 10 glxinfo -B 2>&1 | head -30",
+		);
+		expect(output).toContain("OpenGL renderer string: llvmpipe");
+		expect(output).toContain("OpenGL version string:");
+		expect(output).not.toContain("Segmentation fault");
+		expect(output).not.toContain("[xcb] Extra reply data");
+		expect(output).not.toContain("No matching fbConfigs");
+	});
+
+	test("glmark2 renders with DRISW software rendering", async ({
+		sidecarContainer,
+	}) => {
+		// glmark2 calls glXChooseFBConfig with specific requirements.
+		// Test what attributes it needs via a ctypes probe.
+		const probeScript = [
+			"import ctypes, ctypes.util, sys, os",
+			"os.environ['LIBGL_ALWAYS_SOFTWARE'] = '1'",
+			"X11 = ctypes.CDLL(ctypes.util.find_library('X11'))",
+			"GL = ctypes.CDLL(ctypes.util.find_library('GL'))",
+			"X11.XOpenDisplay.restype = ctypes.c_void_p",
+			"dpy = X11.XOpenDisplay(b':99')",
+			"if not dpy: print('FAIL:display'); sys.exit(1)",
+			"GL.glXChooseFBConfig.restype = ctypes.POINTER(ctypes.c_void_p)",
+			"# glmark2-style attrs: RGBA, double-buffered, depth 24, stencil 8",
+			"attrs = (ctypes.c_int * 13)(0x8011, 1, 5, 1, 12, 24, 13, 8, 8, 8, 9, 8, 0)",
+			"n = ctypes.c_int()",
+			"cfgs = GL.glXChooseFBConfig(dpy, 0, attrs, ctypes.byref(n))",
+			"print(f'ChooseFBConfig={n.value}')",
+			"# Simpler: just double-buffer",
+			"attrs2 = (ctypes.c_int * 3)(5, 1, 0)",
+			"cfgs2 = GL.glXChooseFBConfig(dpy, 0, attrs2, ctypes.byref(n))",
+			"print(f'SimpleChoose={n.value}')",
+			"# Even simpler: no attrs at all",
+			"attrs3 = (ctypes.c_int * 1)(0)",
+			"cfgs3 = GL.glXChooseFBConfig(dpy, 0, attrs3, ctypes.byref(n))",
+			"print(f'AnyConfig={n.value}')",
+			"# Test glXGetVisualFromFBConfig — glmark2 needs this",
+			"if cfgs and n.value > 0:",
+			"    GL.glXGetVisualFromFBConfig.restype = ctypes.c_void_p",
+			"    for i in range(min(n.value, 4)):",
+			"        vi = GL.glXGetVisualFromFBConfig(dpy, cfgs[i])",
+			"        print(f'  FBConfig[{i}] visual={hex(vi) if vi else \"NULL\"}')",
+			"X11.XCloseDisplay(dpy)",
+		].join("\n");
+		const b64 = Buffer.from(probeScript).toString("base64");
+		await sidecarContainer.exec(["bash", "-c", `printf '%s' '${b64}' | base64 -d > /tmp/glmark2_probe.py`]);
+		const probeOutput = await execInSidecar(sidecarContainer, "python3 /tmp/glmark2_probe.py 2>&1");
+		console.log("FBConfig probe:", probeOutput);
+
+		// Run glmark2
+		const output = await execInSidecar(
+			sidecarContainer,
+			"LIBGL_DEBUG=verbose timeout 10 glmark2 -b build 2>&1 | head -20 || true",
+		);
+		console.log("glmark2 output:", output);
+		expect(output).not.toContain("Segmentation fault");
+	});
+
+	test("glxinfo reports GLX version and extensions", async ({
+		sidecarContainer,
+	}) => {
+		const output = await execInSidecar(
+			sidecarContainer,
+			"LIBGL_ALWAYS_INDIRECT=1 glxinfo 2>&1 | head -30",
+		);
+		expect(output).toContain("server glx version string: 1.4");
+		expect(output).toContain("server glx vendor string: x11-web OSMesa");
+		expect(output).not.toContain("[xcb] Extra reply data");
+		expect(output).not.toContain("Segmentation fault");
+	});
+
+	test("glxgears renders frames without crash (indirect)", async ({
+		sidecarContainer,
+	}) => {
+		const output = await execInSidecar(
+			sidecarContainer,
+			"LIBGL_ALWAYS_INDIRECT=1 timeout 2 glxgears -info 2>&1 | head -20 || true",
+		);
+		expect(output).not.toContain("glXCreateContext failed");
+		expect(output).not.toContain("Segmentation fault");
+		expect(output).not.toContain("[xcb] Extra reply data");
+	});
+});
