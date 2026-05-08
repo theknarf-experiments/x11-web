@@ -4,17 +4,20 @@
 use tracing::debug;
 
 use super::super::super::client::ClientState;
-use super::super::parse_or_void;
+use super::super::parse_minor;
 use super::{
     CapturedFrame, FOURCC_I420, FOURCC_NV12, FOURCC_NV21, FOURCC_RGB3, FOURCC_RV32, FOURCC_UYVY,
-    FOURCC_Y800, FOURCC_YUY2, FOURCC_YV12, FOURCC_YV16,
+    FOURCC_Y800, FOURCC_YUY2, FOURCC_YV12, FOURCC_YV16, XV_MAJOR_OPCODE, build_var_reply,
+    byteswap_image_format_info, fourcc_yuv_format, rgb_format,
 };
-use crate::xserver::reply::ReplyBuf;
-use crate::xserver::request::request_header;
+use crate::xserver::byteswap::{swap_u16, swap_u32, swap_u32_array};
 use x11rb_protocol::protocol::xv::{
-    GetStillRequest, GetVideoRequest, PutImageRequest, PutStillRequest, PutVideoRequest,
-    QueryImageAttributesRequest as XvQueryImageAttributesRequest, ShmPutImageRequest,
-    StopVideoRequest,
+    GET_STILL_REQUEST, GET_VIDEO_REQUEST, GetStillRequest, GetVideoRequest,
+    ImageFormatInfoFormat, LIST_IMAGE_FORMATS_REQUEST, ListImageFormatsReply,
+    ListImageFormatsRequest, PUT_IMAGE_REQUEST, PUT_STILL_REQUEST, PUT_VIDEO_REQUEST,
+    PutImageRequest, PutStillRequest, PutVideoRequest, QUERY_IMAGE_ATTRIBUTES_REQUEST,
+    QueryImageAttributesReply, QueryImageAttributesRequest as XvQueryImageAttributesRequest,
+    SHM_PUT_IMAGE_REQUEST, STOP_VIDEO_REQUEST, ShmPutImageRequest, StopVideoRequest,
 };
 
 // ---------------------------------------------------------------------------
@@ -507,315 +510,265 @@ pub(crate) fn handle_image_request(
     minor: u8,
 ) -> Vec<u8> {
     let xv_err = |code: u8, bad_value: u32| {
-        crate::xserver::core::build_error(code, seq, bad_value, 156, minor as u16)
+        crate::xserver::core::build_error(
+            code,
+            seq,
+            bad_value,
+            XV_MAJOR_OPCODE,
+            u16::from(minor),
+        )
     };
     match minor {
-        5 => {
-            // PutVideo — not supported (software adaptor has no video capture)
-            // Per XVideo spec §4.3: return BadMatch for unsupported port operations.
-            let port = PutVideoRequest::try_parse_request(request_header(data), &data[4..])
-                .map(|r| r.port)
-                .unwrap_or(0);
+        // Capture/playback we don't implement; per XVideo §4.3-4.5 these
+        // return BadMatch for unsupported port operations.
+        PUT_VIDEO_REQUEST => {
+            let port = PutVideoRequest::try_parse_request(
+                crate::xserver::request::request_header(data),
+                &data[4..],
+            )
+            .map(|r| r.port)
+            .unwrap_or(0);
             debug!("XVideo PutVideo: port={port} — returning BadMatch (capture not supported)");
             xv_err(crate::xserver::core::MATCH_ERROR, port)
         }
-        6 => {
-            // PutStill — not supported (software adaptor has no video capture)
-            // Per XVideo spec §4.4: return BadMatch for unsupported port operations.
-            let port = PutStillRequest::try_parse_request(request_header(data), &data[4..])
-                .map(|r| r.port)
-                .unwrap_or(0);
+        PUT_STILL_REQUEST => {
+            let port = PutStillRequest::try_parse_request(
+                crate::xserver::request::request_header(data),
+                &data[4..],
+            )
+            .map(|r| r.port)
+            .unwrap_or(0);
             debug!("XVideo PutStill: port={port} — returning BadMatch (capture not supported)");
             xv_err(crate::xserver::core::MATCH_ERROR, port)
         }
-        7 => {
-            // GetVideo — not supported (software adaptor has no video capture output)
-            // Per XVideo spec §4.5: return BadMatch for unsupported port operations.
-            let port = GetVideoRequest::try_parse_request(request_header(data), &data[4..])
-                .map(|r| r.port)
-                .unwrap_or(0);
+        GET_VIDEO_REQUEST => {
+            let port = GetVideoRequest::try_parse_request(
+                crate::xserver::request::request_header(data),
+                &data[4..],
+            )
+            .map(|r| r.port)
+            .unwrap_or(0);
             debug!("XVideo GetVideo: port={port} — returning BadMatch (capture not supported)");
             xv_err(crate::xserver::core::MATCH_ERROR, port)
         }
-        8 => {
-            // GetStill — capture current pixels from a drawable region
-            if data.len() < 32 {
-                return Vec::new();
-            }
-            let req = parse_or_void!(GetStillRequest, data);
+        GET_STILL_REQUEST => {
+            let req = parse_minor!(GetStillRequest, data, state, seq, XV_MAJOR_OPCODE, minor);
             let port = req.port;
             let drawable = req.drawable;
-            let gc_id = req.gc;
-            let vid_x = req.vid_x;
-            let vid_y = req.vid_y;
-            let vid_w = req.vid_w;
-            let vid_h = req.vid_h;
+            debug!(
+                "XVideo GetStill: port={port} drawable={drawable:#x} gc={:#x} \
+                 vid=({},{} {}x{}) drw=({},{} {}x{})",
+                req.gc,
+                req.vid_x,
+                req.vid_y,
+                req.vid_w,
+                req.vid_h,
+                req.drw_x,
+                req.drw_y,
+                req.drw_w,
+                req.drw_h,
+            );
+            if !state.windows.contains_key(&drawable) && !state.pixmaps.contains_key(&drawable) {
+                return xv_err(crate::xserver::core::DRAWABLE_ERROR, drawable);
+            }
+            if !state.gcs.contains_key(&req.gc) {
+                return xv_err(crate::xserver::core::G_CONTEXT_ERROR, req.gc);
+            }
             let drw_x = req.drw_x;
             let drw_y = req.drw_y;
             let drw_w = req.drw_w;
             let drw_h = req.drw_h;
-
-            debug!(
-                "XVideo GetStill: port={port} drawable={drawable:#x} gc={gc_id:#x} \
-                    vid=({vid_x},{vid_y} {vid_w}x{vid_h}) drw=({drw_x},{drw_y} {drw_w}x{drw_h})"
-            );
-
-            // Validate the drawable exists (window or pixmap).
-            if !state.windows.contains_key(&drawable) && !state.pixmaps.contains_key(&drawable) {
-                return xv_err(crate::xserver::core::DRAWABLE_ERROR, drawable);
-            }
-
-            // Validate the GC exists.
-            if !state.gcs.contains_key(&gc_id) {
-                return xv_err(crate::xserver::core::G_CONTEXT_ERROR, gc_id);
-            }
-
-            // Extract ARGB32 pixels from the drawable's framebuffer at the
-            // draw region (drw_x, drw_y, drw_w, drw_h). The draw region
-            // specifies which part of the drawable to capture from.
             let resolved = state.resolve_drawable(drawable);
             let pixels = if let Some(fb) = state.get_framebuffer_mut(resolved) {
                 fb.extract_pixels(drw_x, drw_y, drw_w, drw_h)
             } else {
-                // Drawable is valid but has no backing framebuffer yet;
-                // return zeroed (transparent black) pixels.
                 vec![0u8; drw_w as usize * drw_h as usize * 4]
             };
-
-            // Store the captured frame in the port's state for subsequent
-            // PutStill / PutVideo retrieval.
             let port_state = state.xv_ports.entry(port).or_default();
             port_state.captured_frame = Some(CapturedFrame {
                 width: drw_w,
                 height: drw_h,
                 data: pixels,
             });
-
-            // GetStill is a void request — no reply is sent.
             Vec::new()
         }
-        12 => {
-            // XvStopVideo
-            if data.len() >= 8 {
-                if let Ok(req) =
-                    StopVideoRequest::try_parse_request(request_header(data), &data[4..])
-                {
-                    let port = req.port;
-                    debug!("XVideo StopVideo: port={port}");
-                }
+        STOP_VIDEO_REQUEST => {
+            if let Ok(req) = StopVideoRequest::try_parse_request(
+                crate::xserver::request::request_header(data),
+                &data[4..],
+            ) {
+                debug!("XVideo StopVideo: port={}", req.port);
             }
             Vec::new()
         }
-        16 => {
-            // XvListImageFormats
-            // Report all supported formats
-            let num_formats: u32 = 10;
-            let extra_bytes = (num_formats * 128) as usize;
-            let mut reply =
-                ReplyBuf::with_extra(seq, extra_bytes, state.msb_first).set_u32(8, num_formats);
-
-            // Helper to fill an ImageFormatInfo at a given offset
-            // format_type: 1 = XvYUV, 0 = XvRGB
-            let fill_format = |reply: &mut ReplyBuf,
-                               idx: usize,
-                               fourcc: u32,
-                               name: &[u8; 4],
-                               bpp: u8,
-                               format_type: u32,
-                               num_planes: u32,
-                               horz_u: u32,
-                               vert_u: u32,
-                               horz_v: u32,
-                               vert_v: u32| {
-                let off = 32 + idx * 128;
-                let buf = reply.buf_mut();
-                state.write_u32(&mut buf[off..], 0, fourcc);
-                state.write_u32(&mut buf[off..], 4, format_type);
-                buf[off + 8] = 0; // byte_order = LSBFirst
-                buf[off + 16] = bpp; // bits_per_pixel
-                buf[off + 9..off + 9 + 4].copy_from_slice(name);
-                state.write_u32(&mut buf[off..], 20, num_planes);
-                buf[off + 24] = 0; // depth = 0
-                state.write_u32(&mut buf[off..], 40, 1); // horz_y_period
-                state.write_u32(&mut buf[off..], 44, 1); // vert_y_period
-                state.write_u32(&mut buf[off..], 48, horz_u);
-                state.write_u32(&mut buf[off..], 52, vert_u);
-                state.write_u32(&mut buf[off..], 56, horz_v);
-                state.write_u32(&mut buf[off..], 60, vert_v);
+        LIST_IMAGE_FORMATS_REQUEST => {
+            let _req = parse_minor!(
+                ListImageFormatsRequest,
+                data,
+                state,
+                seq,
+                XV_MAJOR_OPCODE,
+                minor
+            );
+            let format = supported_image_formats();
+            let reply = ListImageFormatsReply {
+                sequence: seq,
+                length: 0,
+                format,
             };
-
-            // Format 0: YUY2 (packed 4:2:2)
-            fill_format(&mut reply, 0, FOURCC_YUY2, b"YUY2", 16, 1, 1, 2, 1, 2, 1);
-            // Format 1: UYVY (packed 4:2:2 alternate)
-            fill_format(&mut reply, 1, FOURCC_UYVY, b"UYVY", 16, 1, 1, 2, 1, 2, 1);
-            // Format 2: I420 (planar 4:2:0)
-            fill_format(&mut reply, 2, FOURCC_I420, b"I420", 12, 1, 3, 2, 2, 2, 2);
-            // Format 3: YV12 (planar 4:2:0 V-first)
-            fill_format(&mut reply, 3, FOURCC_YV12, b"YV12", 12, 1, 3, 2, 2, 2, 2);
-            // Format 4: NV12 (semi-planar 4:2:0, interleaved UV)
-            fill_format(&mut reply, 4, FOURCC_NV12, b"NV12", 12, 1, 2, 2, 2, 2, 2);
-            // Format 5: NV21 (semi-planar 4:2:0, interleaved VU)
-            fill_format(&mut reply, 5, FOURCC_NV21, b"NV21", 12, 1, 2, 2, 2, 2, 2);
-            // Format 6: YV16 (planar 4:2:2, V-first)
-            fill_format(&mut reply, 6, FOURCC_YV16, b"YV16", 16, 1, 3, 2, 1, 2, 1);
-            // Format 7: RGB3 (packed RGB24)
-            fill_format(&mut reply, 7, FOURCC_RGB3, b"RGB3", 24, 0, 1, 0, 0, 0, 0);
-            // Format 8: RV32 (packed BGRA32)
-            fill_format(&mut reply, 8, FOURCC_RV32, b"RV32", 32, 0, 1, 0, 0, 0, 0);
-            // Format 9: Y800 (8-bit grayscale)
-            fill_format(&mut reply, 9, FOURCC_Y800, b"Y800", 8, 1, 1, 0, 0, 0, 0);
-
-            reply.build()
+            build_var_reply(&reply, state.msb_first, |buf| {
+                byteswap_list_image_formats_reply(buf, reply.format.len());
+            })
         }
-        17 => {
-            // XvQueryImageAttributes
-            if data.len() >= 16 {
-                let req = parse_or_void!(XvQueryImageAttributesRequest, data);
-                let fourcc = req.id;
-                let width = req.width as u32;
-                let height = req.height as u32;
-
-                let (data_size, pitches, offsets) = query_image_attributes(fourcc, width, height);
-
-                // Determine number of planes for this format
-                let num_planes = match fourcc {
-                    FOURCC_I420 | FOURCC_YV12 | FOURCC_YV16 => 3u32,
-                    FOURCC_NV12 | FOURCC_NV21 => 2u32,
-                    FOURCC_YUY2 | FOURCC_UYVY | FOURCC_RGB3 | FOURCC_RV32 | FOURCC_Y800 => 1u32,
-                    _ => 1u32,
-                };
-
-                // Reply: 32 header + num_planes * 4 (pitches) + num_planes * 4 (offsets)
-                let extra = (num_planes * 4 * 2) as usize;
-                let mut reply = ReplyBuf::with_extra(seq, extra, state.msb_first)
-                    .set_u32(8, num_planes)
-                    .set_u32(12, data_size)
-                    .set_u16(16, width as u16)
-                    .set_u16(18, height as u16);
-
-                // Write pitches
-                for (i, &pitch) in pitches.iter().take(num_planes as usize).enumerate() {
-                    reply = reply.set_u32(32 + i * 4, pitch);
-                }
-                // Write offsets
-                let off_base = 32 + num_planes as usize * 4;
-                for (i, &offset) in offsets.iter().take(num_planes as usize).enumerate() {
-                    reply = reply.set_u32(off_base + i * 4, offset);
-                }
-
-                reply.build()
-            } else {
-                Vec::new()
-            }
+        QUERY_IMAGE_ATTRIBUTES_REQUEST => {
+            let req = parse_minor!(
+                XvQueryImageAttributesRequest,
+                data,
+                state,
+                seq,
+                XV_MAJOR_OPCODE,
+                minor
+            );
+            let fourcc = req.id;
+            let width = u32::from(req.width);
+            let height = u32::from(req.height);
+            let (data_size, pitches, offsets) = query_image_attributes(fourcc, width, height);
+            let num_planes = num_planes_for(fourcc) as usize;
+            let reply = QueryImageAttributesReply {
+                sequence: seq,
+                length: 0,
+                data_size,
+                width: req.width,
+                height: req.height,
+                pitches: pitches[..num_planes].to_vec(),
+                offsets: offsets[..num_planes].to_vec(),
+            };
+            build_var_reply(&reply, state.msb_first, |buf| {
+                byteswap_query_image_attributes_reply(buf, num_planes);
+            })
         }
-        18 => {
-            // XvPutImage
-            if data.len() >= 40 {
-                let req = parse_or_void!(PutImageRequest, data);
-                let port = req.port;
-                let drawable = req.drawable;
-                let fourcc = req.id;
-                let src_w = req.src_w;
-                let src_h = req.src_h;
-                let drw_x = req.drw_x;
-                let drw_y = req.drw_y;
-                let drw_w = req.drw_w;
-                let drw_h = req.drw_h;
-                let img_w = req.width;
-                let img_h = req.height;
-
-                let yuv_data = &*req.data;
-
-                // Use image dimensions for conversion, then scale to drw dimensions
-                xv_put_image_impl(
-                    state,
-                    drawable,
-                    port,
-                    fourcc,
-                    yuv_data,
-                    if src_w > 0 { src_w } else { img_w },
-                    if src_h > 0 { src_h } else { img_h },
-                    drw_x,
-                    drw_y,
-                    drw_w,
-                    drw_h,
-                );
-            }
+        PUT_IMAGE_REQUEST => {
+            let req = parse_minor!(PutImageRequest, data, state, seq, XV_MAJOR_OPCODE, minor);
+            let src_w = if req.src_w > 0 { req.src_w } else { req.width };
+            let src_h = if req.src_h > 0 { req.src_h } else { req.height };
+            xv_put_image_impl(
+                state, req.drawable, req.port, req.id, &req.data, src_w, src_h, req.drw_x,
+                req.drw_y, req.drw_w, req.drw_h,
+            );
             Vec::new()
         }
-        19 => {
-            // XvShmPutImage
-            if data.len() >= 49 {
-                let req = parse_or_void!(ShmPutImageRequest, data);
-                let port = req.port;
-                let drawable = req.drawable;
-                let shmseg = req.shmseg;
-                let fourcc = req.id;
-                let offset = req.offset as usize;
-                let src_w = req.src_w;
-                let src_h = req.src_h;
-                let drw_x = req.drw_x;
-                let drw_y = req.drw_y;
-                let drw_w = req.drw_w;
-                let drw_h = req.drw_h;
-                let img_w = req.width;
-                let img_h = req.height;
-                let send_event = req.send_event != 0;
-
-                debug!(
-                    "XVideo ShmPutImage: port={port} drawable={drawable:#x} shmseg={shmseg} \
-                     fourcc={fourcc:#010x} offset={offset} src={src_w}x{src_h} \
-                     drw=({drw_x},{drw_y} {drw_w}x{drw_h}) img={img_w}x{img_h}"
-                );
-
-                // Read YUV data from shared memory segment
-                let w = if src_w > 0 { src_w } else { img_w };
-                let h = if src_h > 0 { src_h } else { img_h };
-                let (data_size, _, _) = query_image_attributes(fourcc, w as u32, h as u32);
-
-                if let Some(seg) = state.shm_segments.get(&shmseg) {
-                    if offset + data_size as usize <= seg.size {
-                        let yuv_data = unsafe {
-                            std::slice::from_raw_parts(seg.addr.add(offset), data_size as usize)
-                        };
-
-                        xv_put_image_impl(
-                            state, drawable, port, fourcc, yuv_data, w, h, drw_x, drw_y, drw_w,
-                            drw_h,
-                        );
-                    } else {
-                        debug!("XVideo ShmPutImage: out of bounds (offset={offset} + size={data_size} > seg.size={})", seg.size);
-                    }
+        SHM_PUT_IMAGE_REQUEST => {
+            let req = parse_minor!(ShmPutImageRequest, data, state, seq, XV_MAJOR_OPCODE, minor);
+            let send_event = req.send_event != 0;
+            let w = if req.src_w > 0 { req.src_w } else { req.width };
+            let h = if req.src_h > 0 { req.src_h } else { req.height };
+            let (data_size, _, _) = query_image_attributes(req.id, u32::from(w), u32::from(h));
+            let offset = req.offset as usize;
+            debug!(
+                "XVideo ShmPutImage: port={} drawable={:#x} shmseg={} fourcc={:#010x} \
+                 offset={} src={}x{} drw=({},{} {}x{}) img={}x{}",
+                req.port, req.drawable, req.shmseg, req.id, offset, req.src_w, req.src_h,
+                req.drw_x, req.drw_y, req.drw_w, req.drw_h, req.width, req.height,
+            );
+            if let Some(seg) = state.shm_segments.get(&req.shmseg) {
+                if offset + data_size as usize <= seg.size {
+                    let yuv_data = unsafe {
+                        std::slice::from_raw_parts(seg.addr.add(offset), data_size as usize)
+                    };
+                    xv_put_image_impl(
+                        state, req.drawable, req.port, req.id, yuv_data, w, h, req.drw_x,
+                        req.drw_y, req.drw_w, req.drw_h,
+                    );
                 } else {
-                    debug!("XVideo ShmPutImage: unknown shmseg={shmseg}");
-                }
-
-                // If send_event, return a ShmCompletion event
-                if send_event {
-                    use x11rb_protocol::protocol::shm::CompletionEvent;
-                    return crate::xserver::event::serialize_event(
-                        &CompletionEvent {
-                            response_type: 65,
-                            sequence: seq,
-                            drawable,
-                            minor_event: 0,
-                            major_event: 0,
-                            shmseg,
-                            offset: offset as u32,
-                        },
-                        state.msb_first,
+                    debug!(
+                        "XVideo ShmPutImage: out of bounds (offset={offset} + size={data_size} > seg.size={})",
+                        seg.size
                     );
                 }
+            } else {
+                debug!("XVideo ShmPutImage: unknown shmseg={}", req.shmseg);
             }
-            Vec::new()
-        }
-        20 => {
-            // XvGetStill — not meaningful for software rendering, return void
+            if send_event {
+                use x11rb_protocol::protocol::shm::CompletionEvent;
+                return crate::xserver::event::serialize_event(
+                    &CompletionEvent {
+                        response_type: 65,
+                        sequence: seq,
+                        drawable: req.drawable,
+                        minor_event: 0,
+                        major_event: 0,
+                        shmseg: req.shmseg,
+                        offset: offset as u32,
+                    },
+                    state.msb_first,
+                );
+            }
             Vec::new()
         }
         _ => {
             debug!("XVideo image: unhandled minor opcode {minor}");
-            xv_err(crate::xserver::core::REQUEST_ERROR, minor as u32)
+            xv_err(crate::xserver::core::REQUEST_ERROR, u32::from(minor))
         }
     }
+}
+
+fn num_planes_for(fourcc: u32) -> u8 {
+    match fourcc {
+        FOURCC_I420 | FOURCC_YV12 | FOURCC_YV16 => 3,
+        FOURCC_NV12 | FOURCC_NV21 => 2,
+        FOURCC_YUY2 | FOURCC_UYVY | FOURCC_RGB3 | FOURCC_RV32 | FOURCC_Y800 | _ => 1,
+    }
+}
+
+fn supported_image_formats() -> Vec<x11rb_protocol::protocol::xv::ImageFormatInfo> {
+    let packed = ImageFormatInfoFormat::PACKED;
+    let planar = ImageFormatInfoFormat::PLANAR;
+    vec![
+        // 4:2:2 packed
+        fourcc_yuv_format(FOURCC_YUY2, 16, 1, 2, 1, 2, 1, packed),
+        fourcc_yuv_format(FOURCC_UYVY, 16, 1, 2, 1, 2, 1, packed),
+        // 4:2:0 planar
+        fourcc_yuv_format(FOURCC_I420, 12, 3, 2, 2, 2, 2, planar),
+        fourcc_yuv_format(FOURCC_YV12, 12, 3, 2, 2, 2, 2, planar),
+        // 4:2:0 semi-planar
+        fourcc_yuv_format(FOURCC_NV12, 12, 2, 2, 2, 2, 2, planar),
+        fourcc_yuv_format(FOURCC_NV21, 12, 2, 2, 2, 2, 2, planar),
+        // 4:2:2 planar
+        fourcc_yuv_format(FOURCC_YV16, 16, 3, 2, 1, 2, 1, planar),
+        // RGB
+        rgb_format(FOURCC_RGB3, 24, 24),
+        rgb_format(FOURCC_RV32, 32, 24),
+        // Greyscale
+        fourcc_yuv_format(FOURCC_Y800, 8, 1, 0, 0, 0, 0, packed),
+    ]
+}
+
+/// `ListImageFormatsReply`:
+/// `[type:1, pad:1, sequence:u16, length:u32, num_formats:u32,
+///   pad:20, format:[ImageFormatInfo (128 each)]]`
+fn byteswap_list_image_formats_reply(buf: &mut [u8], num_formats: usize) {
+    swap_u16(buf, 2);
+    swap_u32(buf, 4);
+    swap_u32(buf, 8); // num_formats
+    let header_bytes = 32;
+    for i in 0..num_formats {
+        byteswap_image_format_info(buf, header_bytes + i * 128);
+    }
+}
+
+/// `QueryImageAttributesReply`:
+/// `[type:1, pad:1, sequence:u16, length:u32, num_planes:u32, data_size:u32,
+///   width:u16, height:u16, pad:12, pitches:[u32; num_planes],
+///   offsets:[u32; num_planes]]`
+fn byteswap_query_image_attributes_reply(buf: &mut [u8], num_planes: usize) {
+    swap_u16(buf, 2);
+    swap_u32(buf, 4);
+    swap_u32(buf, 8); // num_planes
+    swap_u32(buf, 12); // data_size
+    swap_u16(buf, 16); // width
+    swap_u16(buf, 18); // height
+    let pitches_off = 32;
+    let offsets_off = pitches_off + num_planes * 4;
+    swap_u32_array(buf, pitches_off, num_planes);
+    swap_u32_array(buf, offsets_off, num_planes);
 }

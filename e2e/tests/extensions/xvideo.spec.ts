@@ -11,7 +11,7 @@ test.describe("XVideo extension FOURCC formats", () => {
 		await waitForDock(page);
 	});
 
-	test.skip("XVideo QueryAdaptors and ListImageFormats return formats", async ({ sidecarContainer }) => {
+	test("XVideo QueryAdaptors and ListImageFormats return formats", async ({ sidecarContainer }) => {
 		const result = await runPythonScript(sidecarContainer, "xvideo_queryadaptors_listformats.py", { env: { DISPLAY: ":99" } });
 		expect(result.output).toContain("PASS: XVideo formats advertised");
 	});

@@ -3,7 +3,12 @@
 use tracing::debug;
 
 use super::super::super::client::ClientState;
-use super::super::parse_or_void;
+use super::super::parse_minor;
+use super::XV_MAJOR_OPCODE;
+use x11rb_protocol::protocol::xv::{
+    SELECT_PORT_NOTIFY_REQUEST, SELECT_VIDEO_NOTIFY_REQUEST, SelectPortNotifyRequest,
+    SelectVideoNotifyRequest,
+};
 
 pub(crate) fn handle_notify_request(
     state: &mut ClientState,
@@ -12,50 +17,48 @@ pub(crate) fn handle_notify_request(
     minor: u8,
 ) -> Vec<u8> {
     match minor {
-        13 => {
-            // SelectVideoNotify — register interest in XvVideoNotify events on a drawable
-            // This is a void request. Track the subscription in client state so we can
-            // deliver VideoNotify events if/when video operations complete on that drawable.
-            if data.len() >= 9 {
-                use x11rb_protocol::protocol::xv::SelectVideoNotifyRequest;
-                let req = parse_or_void!(SelectVideoNotifyRequest, data);
-                let drawable = req.drawable;
-                let on_off = req.onoff;
-                if on_off {
-                    state.xv_video_notify_drawables.insert(drawable);
-                } else {
-                    state.xv_video_notify_drawables.remove(&drawable);
-                }
-                debug!("XVideo SelectVideoNotify: drawable={drawable:#x} on={on_off}");
+        SELECT_VIDEO_NOTIFY_REQUEST => {
+            // Track interest in XvVideoNotify events on a drawable so we can
+            // deliver them when video operations complete.
+            let req = parse_minor!(
+                SelectVideoNotifyRequest,
+                data,
+                state,
+                seq,
+                XV_MAJOR_OPCODE,
+                minor
+            );
+            if req.onoff {
+                state.xv_video_notify_drawables.insert(req.drawable);
             } else {
-                debug!(
-                    "XVideo SelectVideoNotify: short request (len={}), ignoring",
-                    data.len()
-                );
+                state.xv_video_notify_drawables.remove(&req.drawable);
             }
+            debug!(
+                "XVideo SelectVideoNotify: drawable={:#x} on={}",
+                req.drawable, req.onoff,
+            );
             Vec::new()
         }
-        14 => {
-            // SelectPortNotify — register interest in XvPortNotify events on a port
-            // This is a void request. Track the subscription so we can deliver
-            // PortNotify events when port attributes change.
-            if data.len() >= 9 {
-                use x11rb_protocol::protocol::xv::SelectPortNotifyRequest;
-                let req = parse_or_void!(SelectPortNotifyRequest, data);
-                let port = req.port;
-                let on_off = req.onoff;
-                if on_off {
-                    state.xv_port_notify_ports.insert(port);
-                } else {
-                    state.xv_port_notify_ports.remove(&port);
-                }
-                debug!("XVideo SelectPortNotify: port={port} on={on_off}");
+        SELECT_PORT_NOTIFY_REQUEST => {
+            // Track interest in XvPortNotify events on a port so we can
+            // deliver them when port attributes change.
+            let req = parse_minor!(
+                SelectPortNotifyRequest,
+                data,
+                state,
+                seq,
+                XV_MAJOR_OPCODE,
+                minor
+            );
+            if req.onoff {
+                state.xv_port_notify_ports.insert(req.port);
             } else {
-                debug!(
-                    "XVideo SelectPortNotify: short request (len={}), ignoring",
-                    data.len()
-                );
+                state.xv_port_notify_ports.remove(&req.port);
             }
+            debug!(
+                "XVideo SelectPortNotify: port={} on={}",
+                req.port, req.onoff,
+            );
             Vec::new()
         }
         _ => {
@@ -63,9 +66,9 @@ pub(crate) fn handle_notify_request(
             crate::xserver::core::build_error(
                 crate::xserver::core::REQUEST_ERROR,
                 seq,
-                minor as u32,
-                156,
-                minor as u16,
+                u32::from(minor),
+                XV_MAJOR_OPCODE,
+                u16::from(minor),
             )
         }
     }
