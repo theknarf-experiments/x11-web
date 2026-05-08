@@ -16,6 +16,48 @@
 //! Strings (byte sequences with declared byte length) and image data
 //! are left untouched — byte-order does not apply.
 
+use x11rb_protocol::protocol::xproto::{
+    ALLOC_COLOR_CELLS_REQUEST, ALLOC_COLOR_PLANES_REQUEST, ALLOC_COLOR_REQUEST,
+    ALLOC_NAMED_COLOR_REQUEST, ALLOW_EVENTS_REQUEST, BELL_REQUEST,
+    CHANGE_ACTIVE_POINTER_GRAB_REQUEST, CHANGE_GC_REQUEST, CHANGE_HOSTS_REQUEST,
+    CHANGE_KEYBOARD_CONTROL_REQUEST, CHANGE_KEYBOARD_MAPPING_REQUEST,
+    CHANGE_POINTER_CONTROL_REQUEST, CHANGE_PROPERTY_REQUEST, CHANGE_SAVE_SET_REQUEST,
+    CHANGE_WINDOW_ATTRIBUTES_REQUEST, CIRCULATE_WINDOW_REQUEST, CLEAR_AREA_REQUEST,
+    CLIENT_MESSAGE_EVENT, CLOSE_FONT_REQUEST, CONFIGURE_WINDOW_REQUEST,
+    CONVERT_SELECTION_REQUEST, COPY_AREA_REQUEST, COPY_COLORMAP_AND_FREE_REQUEST,
+    COPY_GC_REQUEST, COPY_PLANE_REQUEST, CREATE_COLORMAP_REQUEST, CREATE_CURSOR_REQUEST,
+    CREATE_GC_REQUEST, CREATE_GLYPH_CURSOR_REQUEST, CREATE_PIXMAP_REQUEST,
+    CREATE_WINDOW_REQUEST, DELETE_PROPERTY_REQUEST, DESTROY_SUBWINDOWS_REQUEST,
+    DESTROY_WINDOW_REQUEST, FILL_POLY_REQUEST, FORCE_SCREEN_SAVER_REQUEST,
+    FREE_COLORMAP_REQUEST, FREE_COLORS_REQUEST, FREE_CURSOR_REQUEST, FREE_GC_REQUEST,
+    FREE_PIXMAP_REQUEST, GET_ATOM_NAME_REQUEST, GET_FONT_PATH_REQUEST, GET_GEOMETRY_REQUEST,
+    GET_IMAGE_REQUEST,
+    GET_INPUT_FOCUS_REQUEST, GET_KEYBOARD_CONTROL_REQUEST, GET_KEYBOARD_MAPPING_REQUEST,
+    GET_MODIFIER_MAPPING_REQUEST, GET_MOTION_EVENTS_REQUEST, GET_POINTER_CONTROL_REQUEST,
+    GET_POINTER_MAPPING_REQUEST, GET_PROPERTY_REQUEST, GET_SCREEN_SAVER_REQUEST,
+    GET_SELECTION_OWNER_REQUEST, GET_WINDOW_ATTRIBUTES_REQUEST, GRAB_BUTTON_REQUEST,
+    GRAB_KEYBOARD_REQUEST, GRAB_KEY_REQUEST, GRAB_POINTER_REQUEST, GRAB_SERVER_REQUEST,
+    IMAGE_TEXT16_REQUEST, IMAGE_TEXT8_REQUEST, INSTALL_COLORMAP_REQUEST,
+    INTERN_ATOM_REQUEST, KILL_CLIENT_REQUEST, LIST_EXTENSIONS_REQUEST,
+    LIST_FONTS_REQUEST, LIST_FONTS_WITH_INFO_REQUEST, LIST_HOSTS_REQUEST,
+    LIST_INSTALLED_COLORMAPS_REQUEST, LIST_PROPERTIES_REQUEST, LOOKUP_COLOR_REQUEST,
+    MAP_SUBWINDOWS_REQUEST, MAP_WINDOW_REQUEST, NO_OPERATION_REQUEST, OPEN_FONT_REQUEST,
+    POLY_ARC_REQUEST, POLY_FILL_ARC_REQUEST, POLY_FILL_RECTANGLE_REQUEST,
+    POLY_LINE_REQUEST, POLY_POINT_REQUEST, POLY_RECTANGLE_REQUEST, POLY_SEGMENT_REQUEST,
+    POLY_TEXT16_REQUEST, POLY_TEXT8_REQUEST, PUT_IMAGE_REQUEST, QUERY_BEST_SIZE_REQUEST,
+    QUERY_EXTENSION_REQUEST, QUERY_FONT_REQUEST, QUERY_KEYMAP_REQUEST,
+    QUERY_POINTER_REQUEST, QUERY_TEXT_EXTENTS_REQUEST, QUERY_TREE_REQUEST,
+    QUERY_COLORS_REQUEST, RECOLOR_CURSOR_REQUEST, REPARENT_WINDOW_REQUEST,
+    ROTATE_PROPERTIES_REQUEST, SEND_EVENT_REQUEST, SET_ACCESS_CONTROL_REQUEST,
+    SET_CLIP_RECTANGLES_REQUEST, SET_CLOSE_DOWN_MODE_REQUEST, SET_DASHES_REQUEST,
+    SET_FONT_PATH_REQUEST, SET_INPUT_FOCUS_REQUEST, SET_MODIFIER_MAPPING_REQUEST,
+    SET_POINTER_MAPPING_REQUEST, SET_SCREEN_SAVER_REQUEST, SET_SELECTION_OWNER_REQUEST,
+    STORE_COLORS_REQUEST, STORE_NAMED_COLOR_REQUEST, TRANSLATE_COORDINATES_REQUEST,
+    UNGRAB_BUTTON_REQUEST, UNGRAB_KEYBOARD_REQUEST, UNGRAB_KEY_REQUEST,
+    UNGRAB_POINTER_REQUEST, UNGRAB_SERVER_REQUEST, UNINSTALL_COLORMAP_REQUEST,
+    UNMAP_SUBWINDOWS_REQUEST, UNMAP_WINDOW_REQUEST, WARP_POINTER_REQUEST,
+};
+
 /// Swap a u16 at the given offset in place.
 #[inline]
 pub(crate) fn swap_u16(buf: &mut [u8], off: usize) {
@@ -94,107 +136,134 @@ pub(crate) fn byteswap_request_in_place(data: &mut [u8]) {
 
     match opcode {
         // --- Window management ---
-        1 => byteswap_create_window(data),
-        2 => byteswap_change_window_attributes(data),
-        3 | 4 | 5 | 8 | 9 | 10 | 11 | 13 | 14 | 15 | 21 | 23 | 38 => {
+        CREATE_WINDOW_REQUEST => byteswap_create_window(data),
+        CHANGE_WINDOW_ATTRIBUTES_REQUEST => byteswap_change_window_attributes(data),
+        GET_WINDOW_ATTRIBUTES_REQUEST
+        | DESTROY_WINDOW_REQUEST
+        | DESTROY_SUBWINDOWS_REQUEST
+        | MAP_WINDOW_REQUEST
+        | MAP_SUBWINDOWS_REQUEST
+        | UNMAP_WINDOW_REQUEST
+        | UNMAP_SUBWINDOWS_REQUEST
+        | CIRCULATE_WINDOW_REQUEST
+        | GET_GEOMETRY_REQUEST
+        | QUERY_TREE_REQUEST
+        | LIST_PROPERTIES_REQUEST
+        | GET_SELECTION_OWNER_REQUEST
+        | QUERY_POINTER_REQUEST => {
             // Single u32 wid/drawable/atom argument at bytes 4..8.
             // Includes opcodes that share the same one-resource layout.
             swap_u32(data, 4);
         }
-        6 => swap_u32(data, 4), // ChangeSaveSet: mode in byte 1, wid at 4
-        7 => byteswap_reparent_window(data),
-        12 => byteswap_configure_window(data),
-        16 => byteswap_intern_atom(data),
-        17 => swap_u32(data, 4), // GetAtomName: atom
-        18 => byteswap_change_property(data),
-        19 => byteswap_delete_property(data),
-        20 => byteswap_get_property(data),
-        22 => byteswap_set_selection_owner(data),
-        24 => byteswap_convert_selection(data),
-        25 => byteswap_send_event(data),
-        26 => byteswap_grab_pointer(data),
-        27 => swap_u32(data, 4), // UngrabPointer: time
-        28 => byteswap_grab_button(data),
-        29 => byteswap_ungrab_button(data),
-        30 => byteswap_change_active_pointer_grab(data),
-        31 => byteswap_grab_keyboard(data),
-        32 => swap_u32(data, 4), // UngrabKeyboard: time
-        33 => byteswap_grab_key(data),
-        34 => byteswap_ungrab_key(data),
-        35 => swap_u32(data, 4), // AllowEvents: time
-        36 | 37 | 43 | 44 | 52 | 99 | 103 | 106 | 108 | 110 | 117 | 119 | 127 => {
+        CHANGE_SAVE_SET_REQUEST => swap_u32(data, 4), // mode in byte 1, wid at 4
+        REPARENT_WINDOW_REQUEST => byteswap_reparent_window(data),
+        CONFIGURE_WINDOW_REQUEST => byteswap_configure_window(data),
+        INTERN_ATOM_REQUEST => byteswap_intern_atom(data),
+        GET_ATOM_NAME_REQUEST => swap_u32(data, 4), // atom
+        CHANGE_PROPERTY_REQUEST => byteswap_change_property(data),
+        DELETE_PROPERTY_REQUEST => byteswap_delete_property(data),
+        GET_PROPERTY_REQUEST => byteswap_get_property(data),
+        SET_SELECTION_OWNER_REQUEST => byteswap_set_selection_owner(data),
+        CONVERT_SELECTION_REQUEST => byteswap_convert_selection(data),
+        SEND_EVENT_REQUEST => byteswap_send_event(data),
+        GRAB_POINTER_REQUEST => byteswap_grab_pointer(data),
+        UNGRAB_POINTER_REQUEST => swap_u32(data, 4), // time
+        GRAB_BUTTON_REQUEST => byteswap_grab_button(data),
+        UNGRAB_BUTTON_REQUEST => byteswap_ungrab_button(data),
+        CHANGE_ACTIVE_POINTER_GRAB_REQUEST => byteswap_change_active_pointer_grab(data),
+        GRAB_KEYBOARD_REQUEST => byteswap_grab_keyboard(data),
+        UNGRAB_KEYBOARD_REQUEST => swap_u32(data, 4), // time
+        GRAB_KEY_REQUEST => byteswap_grab_key(data),
+        UNGRAB_KEY_REQUEST => byteswap_ungrab_key(data),
+        ALLOW_EVENTS_REQUEST => swap_u32(data, 4), // time
+        GRAB_SERVER_REQUEST
+        | UNGRAB_SERVER_REQUEST
+        | GET_INPUT_FOCUS_REQUEST
+        | QUERY_KEYMAP_REQUEST
+        | GET_FONT_PATH_REQUEST
+        | LIST_EXTENSIONS_REQUEST
+        | GET_KEYBOARD_CONTROL_REQUEST
+        | GET_POINTER_CONTROL_REQUEST
+        | GET_SCREEN_SAVER_REQUEST
+        | LIST_HOSTS_REQUEST
+        | GET_POINTER_MAPPING_REQUEST
+        | GET_MODIFIER_MAPPING_REQUEST
+        | NO_OPERATION_REQUEST => {
             // No body fields beyond the header; nothing else to swap.
         }
-        39 => byteswap_get_motion_events(data),
-        40 => byteswap_translate_coordinates(data),
-        41 => byteswap_warp_pointer(data),
-        42 => byteswap_set_input_focus(data),
-        45 => byteswap_open_font(data),
-        46 | 47 => swap_u32(data, 4), // CloseFont, QueryFont
-        48 => byteswap_query_text_extents(data),
-        49 | 50 => byteswap_list_fonts(data),
-        51 => byteswap_set_font_path(data),
-        53 => byteswap_create_pixmap(data),
-        54 => swap_u32(data, 4), // FreePixmap
-        55 => byteswap_create_gc(data),
-        56 => byteswap_change_gc(data),
-        57 => byteswap_copy_gc(data),
-        58 => byteswap_set_dashes(data),
-        59 => byteswap_set_clip_rectangles(data),
-        60 => swap_u32(data, 4), // FreeGC
-        61 => byteswap_clear_area(data),
-        62 => byteswap_copy_area(data),
-        63 => byteswap_copy_plane(data),
-        64 | 65 => byteswap_poly_point_or_line(data, body_len),
-        66 => byteswap_poly_segment(data, body_len),
-        67 | 70 => byteswap_poly_rectangle(data, body_len),
-        68 | 71 => byteswap_poly_arc(data, body_len),
-        69 => byteswap_fill_poly(data, body_len),
-        72 => byteswap_put_image(data),
-        73 => byteswap_get_image(data),
-        74 | 75 => byteswap_poly_text(data),
-        76 | 77 => byteswap_image_text(data),
-        78 => byteswap_create_colormap(data),
-        79 | 81 | 82 => swap_u32(data, 4), // FreeColormap, InstallColormap, UninstallColormap
-        80 => byteswap_copy_colormap_and_free(data),
-        83 => swap_u32(data, 4), // ListInstalledColormaps: wid
-        84 => byteswap_alloc_color(data),
-        85 => byteswap_alloc_named_color(data),
-        86 => byteswap_alloc_color_cells(data),
-        87 => byteswap_alloc_color_planes(data),
-        88 => byteswap_free_colors(data, body_len),
-        89 => byteswap_store_colors(data, body_len),
-        90 => byteswap_store_named_color(data),
-        91 => byteswap_query_colors(data, body_len),
-        92 => byteswap_lookup_color(data),
-        93 => byteswap_create_cursor(data),
-        94 => byteswap_create_glyph_cursor(data),
-        95 => swap_u32(data, 4), // FreeCursor
-        96 => byteswap_recolor_cursor(data),
-        97 => byteswap_query_best_size(data),
-        98 => byteswap_query_extension(data),
-        100 => byteswap_change_keyboard_mapping(data),
-        101 => {
+        GET_MOTION_EVENTS_REQUEST => byteswap_get_motion_events(data),
+        TRANSLATE_COORDINATES_REQUEST => byteswap_translate_coordinates(data),
+        WARP_POINTER_REQUEST => byteswap_warp_pointer(data),
+        SET_INPUT_FOCUS_REQUEST => byteswap_set_input_focus(data),
+        OPEN_FONT_REQUEST => byteswap_open_font(data),
+        CLOSE_FONT_REQUEST | QUERY_FONT_REQUEST => swap_u32(data, 4),
+        QUERY_TEXT_EXTENTS_REQUEST => byteswap_query_text_extents(data),
+        LIST_FONTS_REQUEST | LIST_FONTS_WITH_INFO_REQUEST => byteswap_list_fonts(data),
+        SET_FONT_PATH_REQUEST => byteswap_set_font_path(data),
+        CREATE_PIXMAP_REQUEST => byteswap_create_pixmap(data),
+        FREE_PIXMAP_REQUEST => swap_u32(data, 4),
+        CREATE_GC_REQUEST => byteswap_create_gc(data),
+        CHANGE_GC_REQUEST => byteswap_change_gc(data),
+        COPY_GC_REQUEST => byteswap_copy_gc(data),
+        SET_DASHES_REQUEST => byteswap_set_dashes(data),
+        SET_CLIP_RECTANGLES_REQUEST => byteswap_set_clip_rectangles(data),
+        FREE_GC_REQUEST => swap_u32(data, 4),
+        CLEAR_AREA_REQUEST => byteswap_clear_area(data),
+        COPY_AREA_REQUEST => byteswap_copy_area(data),
+        COPY_PLANE_REQUEST => byteswap_copy_plane(data),
+        POLY_POINT_REQUEST | POLY_LINE_REQUEST => byteswap_poly_point_or_line(data, body_len),
+        POLY_SEGMENT_REQUEST => byteswap_poly_segment(data, body_len),
+        POLY_RECTANGLE_REQUEST | POLY_FILL_RECTANGLE_REQUEST => {
+            byteswap_poly_rectangle(data, body_len)
+        }
+        POLY_ARC_REQUEST | POLY_FILL_ARC_REQUEST => byteswap_poly_arc(data, body_len),
+        FILL_POLY_REQUEST => byteswap_fill_poly(data, body_len),
+        PUT_IMAGE_REQUEST => byteswap_put_image(data),
+        GET_IMAGE_REQUEST => byteswap_get_image(data),
+        POLY_TEXT8_REQUEST | POLY_TEXT16_REQUEST => byteswap_poly_text(data),
+        IMAGE_TEXT8_REQUEST | IMAGE_TEXT16_REQUEST => byteswap_image_text(data),
+        CREATE_COLORMAP_REQUEST => byteswap_create_colormap(data),
+        FREE_COLORMAP_REQUEST | INSTALL_COLORMAP_REQUEST | UNINSTALL_COLORMAP_REQUEST => {
+            swap_u32(data, 4)
+        }
+        COPY_COLORMAP_AND_FREE_REQUEST => byteswap_copy_colormap_and_free(data),
+        LIST_INSTALLED_COLORMAPS_REQUEST => swap_u32(data, 4), // wid
+        ALLOC_COLOR_REQUEST => byteswap_alloc_color(data),
+        ALLOC_NAMED_COLOR_REQUEST => byteswap_alloc_named_color(data),
+        ALLOC_COLOR_CELLS_REQUEST => byteswap_alloc_color_cells(data),
+        ALLOC_COLOR_PLANES_REQUEST => byteswap_alloc_color_planes(data),
+        FREE_COLORS_REQUEST => byteswap_free_colors(data, body_len),
+        STORE_COLORS_REQUEST => byteswap_store_colors(data, body_len),
+        STORE_NAMED_COLOR_REQUEST => byteswap_store_named_color(data),
+        QUERY_COLORS_REQUEST => byteswap_query_colors(data, body_len),
+        LOOKUP_COLOR_REQUEST => byteswap_lookup_color(data),
+        CREATE_CURSOR_REQUEST => byteswap_create_cursor(data),
+        CREATE_GLYPH_CURSOR_REQUEST => byteswap_create_glyph_cursor(data),
+        FREE_CURSOR_REQUEST => swap_u32(data, 4),
+        RECOLOR_CURSOR_REQUEST => byteswap_recolor_cursor(data),
+        QUERY_BEST_SIZE_REQUEST => byteswap_query_best_size(data),
+        QUERY_EXTENSION_REQUEST => byteswap_query_extension(data),
+        CHANGE_KEYBOARD_MAPPING_REQUEST => byteswap_change_keyboard_mapping(data),
+        GET_KEYBOARD_MAPPING_REQUEST => {
             // GetKeyboardMapping: first_keycode(1), count(1), unused(2)
             // No multi-byte fields to swap.
         }
-        102 => byteswap_change_keyboard_control(data),
-        104 => {
+        CHANGE_KEYBOARD_CONTROL_REQUEST => byteswap_change_keyboard_control(data),
+        BELL_REQUEST => {
             // Bell: percent(1) — nothing to swap.
         }
-        105 => byteswap_change_pointer_control(data),
-        107 => byteswap_set_screen_saver(data),
-        109 => byteswap_change_hosts(data),
-        111 | 112 | 115 => {
-            // SetAccessControl, SetCloseDownMode, ForceScreenSaver:
+        CHANGE_POINTER_CONTROL_REQUEST => byteswap_change_pointer_control(data),
+        SET_SCREEN_SAVER_REQUEST => byteswap_set_screen_saver(data),
+        CHANGE_HOSTS_REQUEST => byteswap_change_hosts(data),
+        SET_ACCESS_CONTROL_REQUEST | SET_CLOSE_DOWN_MODE_REQUEST | FORCE_SCREEN_SAVER_REQUEST => {
             // mode(1), unused(1), len(2). Nothing to swap.
         }
-        113 => swap_u32(data, 4), // KillClient: resource
-        114 => byteswap_rotate_properties(data, body_len),
-        116 => {
+        KILL_CLIENT_REQUEST => swap_u32(data, 4), // resource
+        ROTATE_PROPERTIES_REQUEST => byteswap_rotate_properties(data, body_len),
+        SET_POINTER_MAPPING_REQUEST => {
             // SetPointerMapping: map_len(1), then bytes — no swap.
         }
-        118 => {
+        SET_MODIFIER_MAPPING_REQUEST => {
             // SetModifierMapping: keycodes_per_modifier(1), then 8*N bytes.
         }
         // Extension opcodes (128..) — minor opcode at byte 1, body
@@ -330,7 +399,7 @@ fn byteswap_send_event(data: &mut [u8]) {
         // window(4), then event-specific.
         swap_u16(data, 12 + 2); // event sequence
         swap_u32(data, 12 + 4); // window
-        if evtype == 33 {
+        if evtype == CLIENT_MESSAGE_EVENT {
             // ClientMessage: format byte at offset 1; format=32 → 5x u32
             // starting at offset 12+12. format=16 → 10x u16. format=8 → bytes.
             let format = data[12 + 1];
@@ -643,7 +712,7 @@ fn byteswap_image_text(data: &mut [u8]) {
     swap_u32(data, 8);
     swap_u16(data, 12);
     swap_u16(data, 14);
-    if data[0] == 77 {
+    if data[0] == IMAGE_TEXT16_REQUEST {
         // ImageText16: swap each u16 char.
         let nchars = data[1] as usize;
         for i in 0..nchars {
