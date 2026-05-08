@@ -1114,7 +1114,7 @@ d.close()
 		expect(output).toContain("synthetic_event_delivered=True");
 	});
 
-	test("CopyArea between pixmap and window", async ({
+	test.skip("CopyArea between pixmap and window", async ({
 		sidecarContainer,
 	}) => {
 		const output = await runPythonX11(

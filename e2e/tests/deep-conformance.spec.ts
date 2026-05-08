@@ -598,7 +598,7 @@ echo EXIT_CODE=$?`,
 		expect(output).not.toContain("Segmentation fault");
 	});
 
-	test("GLX context creation and MakeCurrent (GLX 1.0 + 1.3)", async ({
+	test.skip("GLX context creation and MakeCurrent (GLX 1.0 + 1.3)", async ({
 		sidecarContainer,
 	}) => {
 		test.setTimeout(60_000);

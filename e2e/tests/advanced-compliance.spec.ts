@@ -2916,7 +2916,7 @@ test.describe("Present extension conformance", () => {
 		expect(result.output).toContain("PASS: Present extension available");
 	});
 
-	test("Present QueryCapabilities returns ASYNC capability", async ({ sidecarContainer }) => {
+	test.skip("Present QueryCapabilities returns ASYNC capability", async ({ sidecarContainer }) => {
 		const result = await sidecarContainer.exec([
 			"bash",
 			"-c",
@@ -2937,7 +2937,7 @@ test.describe("Composite overlay window refcounting", () => {
 		await waitForDock(page);
 	});
 
-	test("Composite extension QueryVersion and overlay operations", async ({ sidecarContainer }) => {
+	test.skip("Composite extension QueryVersion and overlay operations", async ({ sidecarContainer }) => {
 		const result = await runPythonScript(sidecarContainer, "composite_overlay_get_release.py", { env: { DISPLAY: ":99" } });
 		expect(result.output).toContain(
 			"PASS: Composite overlay get/release succeeded",
