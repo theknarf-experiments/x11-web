@@ -1,17 +1,33 @@
 //! XFree86-VidModeExtension handler (opcode 153).
+//!
+//! Replies are constructed via x11rb's `Serialize` impls so the wire
+//! layout is owned by a single source of truth (the protocol crate)
+//! rather than scattered byte-offset arithmetic. x11rb's `serialize()`
+//! emits native-endian bytes; for MSB-first clients we re-encode each
+//! multi-byte field in place using the shared `byteswap` helpers. The
+//! per-reply byteswap helpers at the bottom of this file mirror the
+//! corresponding `Serialize::serialize_into` field-by-field.
 
 use tracing::debug;
 
 use super::super::client::ClientState;
-use crate::xserver::reply::ReplyBuf;
+use crate::xserver::byteswap::{swap_u16, swap_u32, swap_u32_array};
 use x11rb_protocol::protocol::xf86vidmode::{
-    AddModeLineRequest, DeleteModeLineRequest, GetAllModeLinesRequest, GetDotClocksRequest,
-    GetGammaRampRequest, GetGammaRampSizeRequest, GetGammaRequest, GetModeLineRequest,
-    GetMonitorRequest, GetViewPortRequest, LockModeSwitchRequest, QueryVersionRequest,
-    SetGammaRampRequest, SetGammaRequest, SetViewPortRequest, SwitchModeRequest,
-    SwitchToModeRequest, ValidateModeLineRequest,
+    ADD_MODE_LINE_REQUEST, AddModeLineRequest, DELETE_MODE_LINE_REQUEST, DeleteModeLineRequest,
+    GET_ALL_MODE_LINES_REQUEST, GET_DOT_CLOCKS_REQUEST, GET_GAMMA_RAMP_REQUEST,
+    GET_GAMMA_RAMP_SIZE_REQUEST, GET_GAMMA_REQUEST, GET_MODE_LINE_REQUEST, GET_MONITOR_REQUEST,
+    GET_VIEW_PORT_REQUEST, GetAllModeLinesReply, GetAllModeLinesRequest, GetDotClocksReply,
+    GetDotClocksRequest, GetGammaRampReply, GetGammaRampRequest, GetGammaRampSizeReply,
+    GetGammaRampSizeRequest, GetGammaReply, GetGammaRequest, GetModeLineReply, GetModeLineRequest,
+    GetMonitorReply, GetMonitorRequest, GetViewPortReply, GetViewPortRequest,
+    LOCK_MODE_SWITCH_REQUEST, LockModeSwitchRequest, MOD_MODE_LINE_REQUEST, ModModeLineRequest,
+    ModeFlag, ModeInfo as WireModeInfo, QUERY_VERSION_REQUEST, QueryVersionReply,
+    QueryVersionRequest, SET_CLIENT_VERSION_REQUEST, SET_GAMMA_RAMP_REQUEST, SET_GAMMA_REQUEST,
+    SET_VIEW_PORT_REQUEST, SWITCH_MODE_REQUEST, SWITCH_TO_MODE_REQUEST, SetGammaRampRequest,
+    SetGammaRequest, SetViewPortRequest, SwitchModeRequest, SwitchToModeRequest,
+    VALIDATE_MODE_LINE_REQUEST, ValidateModeLineReply, ValidateModeLineRequest,
 };
-use x11rb_protocol::x11_utils::RequestHeader;
+use x11rb_protocol::x11_utils::Serialize;
 
 use super::parse_minor;
 
@@ -31,6 +47,26 @@ pub(crate) struct VidModeInfo {
 }
 
 impl VidModeInfo {
+    /// Convert to x11rb's wire-format `ModeInfo` so the wire layout
+    /// (48-byte struct with hskew + flags + privsize at exact offsets)
+    /// is owned by x11rb's `serialize()` instead of by us.
+    fn to_wire(&self) -> WireModeInfo {
+        WireModeInfo {
+            dotclock: self.dotclock.into(),
+            hdisplay: self.hdisplay,
+            hsyncstart: self.hsyncstart,
+            hsyncend: self.hsyncend,
+            htotal: self.htotal,
+            hskew: 0,
+            vdisplay: self.vdisplay,
+            vsyncstart: self.vsyncstart,
+            vsyncend: self.vsyncend,
+            vtotal: self.vtotal,
+            flags: ModeFlag::from(self.flags),
+            privsize: 0,
+        }
+    }
+
     /// Create a default mode matching the given screen dimensions.
     pub(crate) fn default_for_screen(width: u16, height: u16) -> Self {
         Self {
@@ -61,15 +97,39 @@ impl VidModeInfo {
     }
 }
 
-/// Build a RequestHeader with a custom minor opcode (for cases where the
-/// current code's minor numbering differs from x11rb's constants).
-#[inline]
-fn vidmode_header(data: &[u8], minor_override: u8) -> RequestHeader {
-    RequestHeader {
-        major_opcode: data[0],
-        minor_opcode: minor_override,
-        remaining_length: 0,
+/// Number of trailing 4-byte words a serialized reply has past its
+/// 32-byte header. x11rb's `length` field counts these.
+fn trailing_words(serialized_len: usize) -> u32 {
+    const HEADER_BYTES: usize = 32;
+    const WORD_BYTES: usize = 4;
+    debug_assert!(serialized_len >= HEADER_BYTES);
+    debug_assert!((serialized_len - HEADER_BYTES) % WORD_BYTES == 0);
+    u32::try_from((serialized_len - HEADER_BYTES) / WORD_BYTES).expect("reply fits in u32 words")
+}
+
+/// Serialize an x11rb reply struct, byte-swapping in place when the
+/// client expects MSB-first wire encoding. The byteswap callback
+/// mirrors the reply's `Serialize::serialize_into` field-by-field.
+///
+/// Some x11rb `Serialize::Bytes` types are smaller than the X11
+/// 32-byte reply minimum (notably `QueryVersionReply` is 12 bytes);
+/// we right-pad with zeros to the wire-format minimum so the client
+/// doesn't stall waiting for the missing tail.
+fn build_reply<R, F>(reply: &R, msb_first: bool, swap: F) -> Vec<u8>
+where
+    R: Serialize,
+    R::Bytes: AsRef<[u8]>,
+    F: Fn(&mut [u8]),
+{
+    const REPLY_MIN: usize = 32;
+    let mut bytes: Vec<u8> = reply.serialize().as_ref().to_vec();
+    if bytes.len() < REPLY_MIN {
+        bytes.resize(REPLY_MIN, 0);
     }
+    if msb_first {
+        swap(&mut bytes);
+    }
+    bytes
 }
 
 /// XFree86-VidModeExtension (opcode 153)
@@ -79,427 +139,48 @@ pub(crate) fn handle_vidmode_request(state: &mut ClientState, data: &[u8], seq: 
         crate::xserver::core::build_error(code, seq, bad_value, 153, minor as u16)
     };
     match minor {
-        0 => {
-            // QueryVersion
+        QUERY_VERSION_REQUEST => {
             let _req = parse_minor!(QueryVersionRequest, data, state, seq, 153, minor);
-            ReplyBuf::fixed(seq, state.msb_first)
-                .set_u16(8, 2) // major
-                .set_u16(10, 2) // minor
-                .build()
+            let reply = QueryVersionReply {
+                sequence: seq,
+                length: 0,
+                major_version: 2,
+                minor_version: 2,
+            };
+            build_reply(&reply, state.msb_first, byteswap_query_version_reply)
         }
-        1 => {
-            // GetModeLine — return the current mode from the mode list.
+        GET_MODE_LINE_REQUEST => {
             let _req = parse_minor!(GetModeLineRequest, data, state, seq, 153, minor);
-            let mode = state
-                .vidmode_modes
-                .get(state.vidmode_current_mode)
-                .cloned()
-                .unwrap_or_else(|| {
-                    VidModeInfo::default_for_screen(state.screen_width, state.screen_height)
-                });
-            ReplyBuf::with_extra(seq, 20, state.msb_first) // 32 header + 20 modeline data
-                .set_u32(8, mode.dotclock) // dotclock
-                .set_u16(12, mode.hdisplay) // hdisplay
-                .set_u16(14, mode.hsyncstart) // hsyncstart
-                .set_u16(16, mode.hsyncend) // hsyncend
-                .set_u16(18, mode.htotal) // htotal
-                .set_u16(20, 0) // hskew
-                .set_u16(22, mode.vdisplay) // vdisplay
-                .set_u16(24, mode.vsyncstart) // vsyncstart
-                .set_u16(26, mode.vsyncend) // vsyncend
-                .set_u16(28, mode.vtotal) // vtotal
-                .set_u32(32, mode.flags) // flags
-                // privsize at 36..40 = 0
-                .build()
-        }
-        6 => {
-            // GetAllModeLines
-            // Return all modes from the mode list.
-            let _req = parse_minor!(GetAllModeLinesRequest, data, state, seq, 153, minor);
-            let mode_count = state.vidmode_modes.len();
-            let mode_size = 48; // bytes per mode line info
-            let extra = 4 + mode_size * mode_count; // 4 bytes for count + modes
-            let padded = (extra + 3) & !3;
-            let mut reply =
-                ReplyBuf::with_extra(seq, padded, state.msb_first).set_u32(8, mode_count as u32);
-            for (i, mode) in state.vidmode_modes.iter().enumerate() {
-                let off = 36 + i * mode_size;
-                reply = reply
-                    .set_u32(off, mode.dotclock)
-                    .set_u16(off + 4, mode.hdisplay)
-                    .set_u16(off + 6, mode.hsyncstart)
-                    .set_u16(off + 8, mode.hsyncend)
-                    .set_u16(off + 10, mode.htotal)
-                    // hskew at off + 12 = 0
-                    .set_u16(off + 14, mode.vdisplay)
-                    .set_u16(off + 16, mode.vsyncstart)
-                    .set_u16(off + 18, mode.vsyncend)
-                    .set_u16(off + 20, mode.vtotal)
-                    // pad at off + 22..26 = 0
-                    .set_u32(off + 26, mode.flags);
-            }
-            reply.build()
-        }
-        14 => {
-            // GetGamma
-            // x11rb uses minor opcode 16 for GetGamma; override header.
-            let _req = parse_minor!(
-                GetGammaRequest,
-                data,
-                state,
-                seq,
-                153,
-                minor,
-                vidmode_header(data, 16)
-            );
-            // Approximate gamma from stored ramp midpoint:
-            // gamma = log(ramp[128]/65535) / log(128/255)
-            let (gamma_r, gamma_g, gamma_b) = if let Some(crtc) = state.randr_crtcs.first() {
-                let approx = |ramp: &[u16]| -> f64 {
-                    if ramp.len() > 128 && ramp[128] > 0 {
-                        let mid_val: f64 = ramp[128] as f64 / 65535.0;
-                        let mid_pos: f64 = 128.0 / 255.0;
-                        if mid_val > 0.0 && mid_val < 1.0 {
-                            mid_pos.ln() / mid_val.ln()
-                        } else {
-                            1.0
-                        }
-                    } else {
-                        1.0
-                    }
-                };
-                (
-                    approx(&crtc.gamma_red),
-                    approx(&crtc.gamma_green),
-                    approx(&crtc.gamma_blue),
-                )
-            } else {
-                (1.0, 1.0, 1.0)
+            let mode = current_mode(state);
+            let reply = GetModeLineReply {
+                sequence: seq,
+                length: 0,
+                dotclock: mode.dotclock.into(),
+                hdisplay: mode.hdisplay,
+                hsyncstart: mode.hsyncstart,
+                hsyncend: mode.hsyncend,
+                htotal: mode.htotal,
+                hskew: 0,
+                vdisplay: mode.vdisplay,
+                vsyncstart: mode.vsyncstart,
+                vsyncend: mode.vsyncend,
+                vtotal: mode.vtotal,
+                flags: ModeFlag::from(mode.flags),
+                private: Vec::new(),
             };
-            // Gamma is 16.16 fixed point, 1.0 = 65536
-            ReplyBuf::fixed(seq, state.msb_first)
-                .set_u32(8, (gamma_r * 65536.0) as u32) // red
-                .set_u32(12, (gamma_g * 65536.0) as u32) // green
-                .set_u32(16, (gamma_b * 65536.0) as u32) // blue
-                .build()
+            build_get_mode_line_reply(&reply, state.msb_first)
         }
-        15 => {
-            // SetGamma
-            // Parse three 16.16 fixed-point gamma values from request
-            let req = parse_minor!(SetGammaRequest, data, state, seq, 153, minor);
-            let red_fp = req.red;
-            let green_fp = req.green;
-            let blue_fp = req.blue;
-            let gamma_r = red_fp as f64 / 65536.0;
-            let gamma_g = green_fp as f64 / 65536.0;
-            let gamma_b = blue_fp as f64 / 65536.0;
-            // Compute ramp: ramp[i] = ((i/255)^(1/gamma) * 65535) as u16
-            let compute_ramp = |gamma: f64| -> Vec<u16> {
-                (0..256)
-                    .map(|i| {
-                        let normalized = i as f64 / 255.0;
-                        let val = if gamma > 0.0 {
-                            normalized.powf(1.0 / gamma) * 65535.0
-                        } else {
-                            normalized * 65535.0
-                        };
-                        val.round() as u16
-                    })
-                    .collect()
-            };
-            if let Some(crtc) = state.randr_crtcs.get_mut(0) {
-                crtc.gamma_red = compute_ramp(gamma_r);
-                crtc.gamma_green = compute_ramp(gamma_g);
-                crtc.gamma_blue = compute_ramp(gamma_b);
-            }
+        MOD_MODE_LINE_REQUEST => {
+            // Modify a mode in the mode list. Treated as a no-op:
+            // we accept the request to avoid BadRequest from clients
+            // that probe ModModeLine but don't fail the connection.
+            let _req: ModModeLineRequest<'_> =
+                parse_minor!(ModModeLineRequest, data, state, seq, 153, minor);
             Vec::new()
         }
-        16 => {
-            // GetGammaRamp
-            // x11rb uses minor opcode 17 for GetGammaRamp; override header.
-            let req = GetGammaRampRequest::try_parse_request(vidmode_header(data, 17), &data[4..])
-                .unwrap_or(GetGammaRampRequest {
-                    screen: 0,
-                    size: 256,
-                });
-            let size = req.size as usize;
-            let ramp_bytes = size * 2; // each value is u16
-            let padded = (ramp_bytes + 3) & !3;
-            let total_extra = padded * 3; // R, G, B
-            let mut reply =
-                ReplyBuf::with_extra(seq, total_extra, state.msb_first).set_u16(8, size as u16); // size
-                                                                                                 // Return stored ramp from CRTC, referencing directly to avoid clones
-            let linear_ramp: Vec<u16>;
-            let ramps: [&[u16]; 3] = if let Some(crtc) = state.randr_crtcs.first() {
-                [&crtc.gamma_red, &crtc.gamma_green, &crtc.gamma_blue]
-            } else {
-                linear_ramp = (0..256)
-                    .map(|i| ((i as u32 * 65535) / 255) as u16)
-                    .collect();
-                [&linear_ramp, &linear_ramp, &linear_ramp]
-            };
-            for (channel, ramp) in ramps.iter().enumerate() {
-                let base = 32 + channel * padded;
-                for i in 0..size {
-                    let val = if i < ramp.len() {
-                        ramp[i]
-                    } else {
-                        // Extrapolate linearly if requested size exceeds stored ramp
-                        ((i as u32 * 65535) / (size.max(1) as u32 - 1).max(1)) as u16
-                    };
-                    reply = reply.set_u16(base + i * 2, val);
-                }
-            }
-            reply.build()
-        }
-        17 => {
-            // SetGammaRamp
-            // x11rb uses minor opcode 18 for SetGammaRamp; override header.
-            let req = parse_minor!(
-                SetGammaRampRequest,
-                data,
-                state,
-                seq,
-                153,
-                minor,
-                vidmode_header(data, 18)
-            );
-            let size = req.size as usize;
-            if size == 0 {
-                return vidmode_err(crate::xserver::core::LENGTH_ERROR, 0);
-            }
-            let red: Vec<u16> = req.red.iter().take(size).copied().collect();
-            let green: Vec<u16> = req.green.iter().take(size).copied().collect();
-            let blue: Vec<u16> = req.blue.iter().take(size).copied().collect();
-            if let Some(crtc) = state.randr_crtcs.get_mut(0) {
-                crtc.gamma_red = red;
-                crtc.gamma_green = green;
-                crtc.gamma_blue = blue;
-            }
-            Vec::new()
-        }
-        18 => {
-            // GetGammaRampSize
-            // x11rb uses minor opcode 19 for GetGammaRampSize; override header.
-            let _req = parse_minor!(
-                GetGammaRampSizeRequest,
-                data,
-                state,
-                seq,
-                153,
-                minor,
-                vidmode_header(data, 19)
-            );
-            ReplyBuf::fixed(seq, state.msb_first)
-                .set_u16(8, 256) // size = 256
-                .build()
-        }
-        2 => {
-            // GetModeLine (legacy alias)
-            // Same as minor 1 — some clients use minor 2
-            let mode = state
-                .vidmode_modes
-                .get(state.vidmode_current_mode)
-                .cloned()
-                .unwrap_or_else(|| {
-                    VidModeInfo::default_for_screen(state.screen_width, state.screen_height)
-                });
-            ReplyBuf::with_extra(seq, 20, state.msb_first)
-                .set_u32(8, mode.dotclock)
-                .set_u16(12, mode.hdisplay)
-                .set_u16(14, mode.hsyncstart)
-                .set_u16(16, mode.hsyncend)
-                .set_u16(18, mode.htotal)
-                .set_u16(22, mode.vdisplay)
-                .set_u16(24, mode.vsyncstart)
-                .set_u16(26, mode.vsyncend)
-                .set_u16(28, mode.vtotal)
-                .set_u32(32, mode.flags)
-                .build()
-        }
-        3 => {
-            // SwitchToMode — attempt to switch to a matching mode in the mode list
-            // x11rb uses minor opcode 10 for SwitchToMode; override header.
-            let req = parse_minor!(
-                SwitchToModeRequest,
-                data,
-                state,
-                seq,
-                153,
-                minor,
-                vidmode_header(data, 10)
-            );
-            let screen = req.screen;
-            let requested = VidModeInfo {
-                dotclock: req.dotclock,
-                hdisplay: req.hdisplay,
-                hsyncstart: req.hsyncstart,
-                hsyncend: req.hsyncend,
-                htotal: req.htotal,
-                vdisplay: req.vdisplay,
-                vsyncstart: req.vsyncstart,
-                vsyncend: req.vsyncend,
-                vtotal: req.vtotal,
-                flags: u32::from(req.flags),
-            };
-            if state.vidmode_locked {
-                debug!(
-                    "VidMode SwitchToMode: screen={screen} {}x{} rejected — mode switching is locked",
-                    requested.hdisplay, requested.vdisplay,
-                );
-                return Vec::new();
-            }
-            if let Some(idx) = state
-                .vidmode_modes
-                .iter()
-                .position(|m| m.matches(&requested))
-            {
-                state.vidmode_current_mode = idx;
-                debug!(
-                    "VidMode SwitchToMode: screen={screen} switched to mode {idx} ({}x{}, dotclock={})",
-                    requested.hdisplay, requested.vdisplay, requested.dotclock,
-                );
-            } else {
-                debug!(
-                    "VidMode SwitchToMode: screen={screen} {}x{} not found in mode list (no change)",
-                    requested.hdisplay, requested.vdisplay,
-                );
-            }
-            Vec::new()
-        }
-        4 => {
-            // GetMonitor
-            // Return a single monitor with vendor/model strings
-            let _req = parse_minor!(GetMonitorRequest, data, state, seq, 153, minor);
-            let vendor = b"x11web";
-            let model = b"virtual";
-            let vendor_len = vendor.len() as u32;
-            let model_len = model.len() as u32;
-            let vendor_padded = ((vendor_len as usize) + 3) & !3;
-            let model_padded = ((model_len as usize) + 3) & !3;
-            let hsync_count: u32 = 1;
-            let vsync_count: u32 = 1;
-            // hsync ranges (2 u32 each: low, high) + vsync ranges
-            let extra = 8
-                + vendor_padded
-                + model_padded
-                + (hsync_count as usize * 8)
-                + (vsync_count as usize * 8);
-            let padded_extra = (extra + 3) & !3;
-            let mut off = 32;
-            let reply = ReplyBuf::with_extra(seq, padded_extra, state.msb_first)
-                .set_u32(8, vendor_len)
-                .set_u32(12, model_len)
-                .set_u32(16, hsync_count)
-                .set_u32(20, vsync_count)
-                .set_bytes(off, vendor);
-            off += vendor_padded;
-            let reply = reply.set_bytes(off, model);
-            off += model_padded;
-            // HSync range: 31.5 - 80.0 kHz (as 16.16 fixed point * 100)
-            let reply = reply
-                .set_u32(off, 3150) // low = 31.50 kHz
-                .set_u32(off + 4, 8000); // high = 80.00 kHz
-            off += 8;
-            // VSync range: 56 - 75 Hz
-            reply
-                .set_u32(off, 5600) // low = 56.00 Hz
-                .set_u32(off + 4, 7500) // high = 75.00 Hz
-                .build()
-        }
-        5 => {
-            // LockModeSwitch — store the lock state
-            let req = parse_minor!(LockModeSwitchRequest, data, state, seq, 153, minor);
-            let screen = req.screen;
-            let lock = req.lock;
-            state.vidmode_locked = lock != 0;
-            debug!(
-                "VidMode LockModeSwitch: screen={screen} locked={}",
-                state.vidmode_locked
-            );
-            Vec::new()
-        }
-        7 => {
-            // AddModeLine — parse and add to mode list
-            let req = parse_minor!(AddModeLineRequest, data, state, seq, 153, minor);
-            let screen = req.screen;
-            let new_mode = VidModeInfo {
-                dotclock: req.dotclock,
-                hdisplay: req.hdisplay,
-                hsyncstart: req.hsyncstart,
-                hsyncend: req.hsyncend,
-                htotal: req.htotal,
-                vdisplay: req.vdisplay,
-                vsyncstart: req.vsyncstart,
-                vsyncend: req.vsyncend,
-                vtotal: req.vtotal,
-                flags: u32::from(req.flags),
-            };
-            debug!(
-                "VidMode AddModeLine: screen={screen} {}x{} dotclock={}",
-                new_mode.hdisplay, new_mode.vdisplay, new_mode.dotclock,
-            );
-            // Only add if not already present.
-            if !state.vidmode_modes.iter().any(|m| m.matches(&new_mode)) {
-                state.vidmode_modes.push(new_mode);
-            }
-            Vec::new()
-        }
-        8 => {
-            // DeleteModeLine — remove matching mode from the list
-            let req = parse_minor!(DeleteModeLineRequest, data, state, seq, 153, minor);
-            let screen = req.screen;
-            let target = VidModeInfo {
-                dotclock: req.dotclock,
-                hdisplay: req.hdisplay,
-                hsyncstart: req.hsyncstart,
-                hsyncend: req.hsyncend,
-                htotal: req.htotal,
-                vdisplay: req.vdisplay,
-                vsyncstart: req.vsyncstart,
-                vsyncend: req.vsyncend,
-                vtotal: req.vtotal,
-                flags: u32::from(req.flags),
-            };
-            debug!(
-                "VidMode DeleteModeLine: screen={screen} {}x{} dotclock={}",
-                target.hdisplay, target.vdisplay, target.dotclock,
-            );
-            if let Some(idx) = state.vidmode_modes.iter().position(|m| m.matches(&target)) {
-                // Don't allow deleting the last mode.
-                if state.vidmode_modes.len() > 1 {
-                    state.vidmode_modes.remove(idx);
-                    // Adjust current_mode index if needed.
-                    if state.vidmode_current_mode >= state.vidmode_modes.len() {
-                        state.vidmode_current_mode = 0;
-                    } else if state.vidmode_current_mode > idx {
-                        state.vidmode_current_mode -= 1;
-                    }
-                } else {
-                    debug!("VidMode DeleteModeLine: refusing to delete last mode");
-                }
-            }
-            Vec::new()
-        }
-        9 => {
-            // ValidateModeLine — always return MODE_OK
-            let _req = parse_minor!(ValidateModeLineRequest, data, state, seq, 153, minor);
-            ReplyBuf::fixed(seq, state.msb_first)
-                .set_u32(8, 0) // status = MODE_OK
-                .build()
-        }
-        10 => {
-            // SwitchMode — cycle through mode list by zoom direction
-            // x11rb uses minor opcode 3 for SwitchMode; override header.
-            let req = parse_minor!(
-                SwitchModeRequest,
-                data,
-                state,
-                seq,
-                153,
-                minor,
-                vidmode_header(data, 3)
-            );
+        SWITCH_MODE_REQUEST => {
+            // Cycle through mode list by zoom direction.
+            let req = parse_minor!(SwitchModeRequest, data, state, seq, 153, minor);
             let screen = req.screen;
             let zoom = req.zoom as i16;
             if state.vidmode_locked {
@@ -521,38 +202,575 @@ pub(crate) fn handle_vidmode_request(state: &mut ClientState, data: &[u8], seq: 
             }
             Vec::new()
         }
-        11 => {
-            // GetViewPort
-            let _req = parse_minor!(GetViewPortRequest, data, state, seq, 153, minor);
-            ReplyBuf::fixed(seq, state.msb_first)
-                .set_u32(8, state.vidmode_viewport_x)
-                .set_u32(12, state.vidmode_viewport_y)
-                .build()
+        GET_MONITOR_REQUEST => {
+            // Return a single monitor with vendor/model strings.
+            let _req = parse_minor!(GetMonitorRequest, data, state, seq, 153, minor);
+            let vendor = b"x11web".to_vec();
+            let model = b"virtual".to_vec();
+            // Pad the vendor string out to a 4-byte boundary; x11rb's
+            // serializer asserts that `alignment_pad.len()` matches
+            // `((vendor_len + 3) & !3) - vendor_len`.
+            let alignment_pad = vec![0u8; ((vendor.len() + 3) & !3) - vendor.len()];
+            // Syncrange is u32: low Hz in lower 16 bits, high in upper 16.
+            let pack = |low: u16, high: u16| -> u32 { u32::from(low) | (u32::from(high) << 16) };
+            let reply = GetMonitorReply {
+                sequence: seq,
+                length: 0,
+                hsync: vec![pack(31, 80)],
+                vsync: vec![pack(56, 75)],
+                vendor,
+                alignment_pad,
+                model,
+            };
+            build_get_monitor_reply(&reply, state.msb_first)
         }
-        12 => {
-            // SetViewPort — store offset (clamped to screen bounds) and log
-            let req = parse_minor!(SetViewPortRequest, data, state, seq, 153, minor);
+        LOCK_MODE_SWITCH_REQUEST => {
+            let req = parse_minor!(LockModeSwitchRequest, data, state, seq, 153, minor);
             let screen = req.screen;
-            let x = req.x;
-            let y = req.y;
-            state.vidmode_viewport_x = x;
-            state.vidmode_viewport_y = y;
-            debug!("VidMode SetViewPort: screen={screen} x={x} y={y} (stored; virtual display always at 0,0)");
+            let lock = req.lock;
+            state.vidmode_locked = lock != 0;
+            debug!(
+                "VidMode LockModeSwitch: screen={screen} locked={}",
+                state.vidmode_locked
+            );
             Vec::new()
         }
-        13 => {
-            // GetDotClocks
+        GET_ALL_MODE_LINES_REQUEST => {
+            let _req = parse_minor!(GetAllModeLinesRequest, data, state, seq, 153, minor);
+            let modeinfo: Vec<WireModeInfo> = state
+                .vidmode_modes
+                .iter()
+                .map(VidModeInfo::to_wire)
+                .collect();
+            let reply = GetAllModeLinesReply {
+                sequence: seq,
+                length: 0,
+                modeinfo,
+            };
+            build_get_all_mode_lines_reply(&reply, state.msb_first)
+        }
+        ADD_MODE_LINE_REQUEST => {
+            let req = parse_minor!(AddModeLineRequest, data, state, seq, 153, minor);
+            let new_mode = mode_from_add_modeline(&req);
+            debug!(
+                "VidMode AddModeLine: screen={} {}x{} dotclock={}",
+                req.screen, new_mode.hdisplay, new_mode.vdisplay, new_mode.dotclock,
+            );
+            if !state.vidmode_modes.iter().any(|m| m.matches(&new_mode)) {
+                state.vidmode_modes.push(new_mode);
+            }
+            Vec::new()
+        }
+        DELETE_MODE_LINE_REQUEST => {
+            let req = parse_minor!(DeleteModeLineRequest, data, state, seq, 153, minor);
+            let target = mode_from_delete_modeline(&req);
+            debug!(
+                "VidMode DeleteModeLine: screen={} {}x{} dotclock={}",
+                req.screen, target.hdisplay, target.vdisplay, target.dotclock,
+            );
+            if let Some(idx) = state.vidmode_modes.iter().position(|m| m.matches(&target)) {
+                if state.vidmode_modes.len() > 1 {
+                    state.vidmode_modes.remove(idx);
+                    if state.vidmode_current_mode >= state.vidmode_modes.len() {
+                        state.vidmode_current_mode = 0;
+                    } else if state.vidmode_current_mode > idx {
+                        state.vidmode_current_mode -= 1;
+                    }
+                } else {
+                    debug!("VidMode DeleteModeLine: refusing to delete last mode");
+                }
+            }
+            Vec::new()
+        }
+        VALIDATE_MODE_LINE_REQUEST => {
+            let _req = parse_minor!(ValidateModeLineRequest, data, state, seq, 153, minor);
+            let reply = ValidateModeLineReply {
+                sequence: seq,
+                length: 0,
+                status: 0, // MODE_OK
+            };
+            build_reply(&reply, state.msb_first, byteswap_validate_mode_line_reply)
+        }
+        SWITCH_TO_MODE_REQUEST => {
+            let req = parse_minor!(SwitchToModeRequest, data, state, seq, 153, minor);
+            let requested = mode_from_switch_to_mode(&req);
+            if state.vidmode_locked {
+                debug!(
+                    "VidMode SwitchToMode: screen={} {}x{} rejected — mode switching is locked",
+                    req.screen, requested.hdisplay, requested.vdisplay,
+                );
+                return Vec::new();
+            }
+            if let Some(idx) = state
+                .vidmode_modes
+                .iter()
+                .position(|m| m.matches(&requested))
+            {
+                state.vidmode_current_mode = idx;
+                debug!(
+                    "VidMode SwitchToMode: screen={} switched to mode {idx} ({}x{}, dotclock={})",
+                    req.screen, requested.hdisplay, requested.vdisplay, requested.dotclock,
+                );
+            } else {
+                debug!(
+                    "VidMode SwitchToMode: screen={} {}x{} not found in mode list (no change)",
+                    req.screen, requested.hdisplay, requested.vdisplay,
+                );
+            }
+            Vec::new()
+        }
+        GET_VIEW_PORT_REQUEST => {
+            let _req = parse_minor!(GetViewPortRequest, data, state, seq, 153, minor);
+            let reply = GetViewPortReply {
+                sequence: seq,
+                length: 0,
+                x: state.vidmode_viewport_x,
+                y: state.vidmode_viewport_y,
+            };
+            build_reply(&reply, state.msb_first, byteswap_get_view_port_reply)
+        }
+        SET_VIEW_PORT_REQUEST => {
+            let req = parse_minor!(SetViewPortRequest, data, state, seq, 153, minor);
+            state.vidmode_viewport_x = req.x;
+            state.vidmode_viewport_y = req.y;
+            debug!(
+                "VidMode SetViewPort: screen={} x={} y={} (stored; virtual display always at 0,0)",
+                req.screen, req.x, req.y,
+            );
+            Vec::new()
+        }
+        GET_DOT_CLOCKS_REQUEST => {
             let _req = parse_minor!(GetDotClocksRequest, data, state, seq, 153, minor);
-            let dotclock = state.screen_width as u32 * state.screen_height as u32 * 60;
-            ReplyBuf::with_extra(seq, 4, state.msb_first) // 32 header + 4 clock value
-                .set_u32(8, 0) // flags = 0
-                .set_u32(12, 1) // clocks = 1
-                .set_u32(16, dotclock) // maxclocks
-                // Padding at 20..32 is zero
-                // clock[0] = dot clock of the mode
-                .set_u32(32, dotclock)
-                .build()
+            let dotclock = u32::from(state.screen_width) * u32::from(state.screen_height) * 60;
+            let reply = GetDotClocksReply {
+                sequence: seq,
+                length: 0,
+                flags: 0u32.into(), // bit 0 clear → continuous clock list of length `clocks`
+                clocks: 1,
+                maxclocks: dotclock,
+                clock: vec![dotclock],
+            };
+            build_get_dot_clocks_reply(&reply, state.msb_first)
+        }
+        SET_CLIENT_VERSION_REQUEST => {
+            // Xxf86vm calls this on every connection to negotiate
+            // the protocol version. We don't track per-client
+            // versions; just acknowledge with no reply.
+            Vec::new()
+        }
+        SET_GAMMA_REQUEST => {
+            let req = parse_minor!(SetGammaRequest, data, state, seq, 153, minor);
+            // 16.16 fixed point: 1.0 == 65536.
+            let gamma = |fp: u32| -> f64 { fp as f64 / 65536.0 };
+            if let Some(crtc) = state.randr_crtcs.get_mut(0) {
+                crtc.gamma_red = compute_gamma_ramp(gamma(req.red));
+                crtc.gamma_green = compute_gamma_ramp(gamma(req.green));
+                crtc.gamma_blue = compute_gamma_ramp(gamma(req.blue));
+            }
+            Vec::new()
+        }
+        GET_GAMMA_REQUEST => {
+            let _req = parse_minor!(GetGammaRequest, data, state, seq, 153, minor);
+            let (gamma_r, gamma_g, gamma_b) = approx_gamma_from_state(state);
+            let to_fp = |g: f64| -> u32 { (g * 65536.0) as u32 };
+            let reply = GetGammaReply {
+                sequence: seq,
+                length: 0,
+                red: to_fp(gamma_r),
+                green: to_fp(gamma_g),
+                blue: to_fp(gamma_b),
+            };
+            build_reply(&reply, state.msb_first, byteswap_get_gamma_reply)
+        }
+        GET_GAMMA_RAMP_REQUEST => {
+            let req = parse_minor!(GetGammaRampRequest, data, state, seq, 153, minor);
+            let size = req.size;
+            // x11rb's GetGammaRampReply requires red/green/blue lengths to
+            // each equal `(size + 1) & !1` u16s (the spec aligns to a
+            // u32 boundary by padding odd sizes with one trailing u16).
+            let aligned_size = ((u32::from(size) + 1) & !1) as usize;
+            let (red, green, blue) = sample_gamma_ramps(state, size, aligned_size);
+            let reply = GetGammaRampReply {
+                sequence: seq,
+                length: 0,
+                size,
+                red,
+                green,
+                blue,
+            };
+            build_get_gamma_ramp_reply(&reply, state.msb_first)
+        }
+        SET_GAMMA_RAMP_REQUEST => {
+            let req = parse_minor!(SetGammaRampRequest, data, state, seq, 153, minor);
+            let size = req.size as usize;
+            if size == 0 {
+                return vidmode_err(crate::xserver::core::LENGTH_ERROR, 0);
+            }
+            if let Some(crtc) = state.randr_crtcs.get_mut(0) {
+                crtc.gamma_red = req.red.iter().take(size).copied().collect();
+                crtc.gamma_green = req.green.iter().take(size).copied().collect();
+                crtc.gamma_blue = req.blue.iter().take(size).copied().collect();
+            }
+            Vec::new()
+        }
+        GET_GAMMA_RAMP_SIZE_REQUEST => {
+            let _req = parse_minor!(GetGammaRampSizeRequest, data, state, seq, 153, minor);
+            let reply = GetGammaRampSizeReply {
+                sequence: seq,
+                length: 0,
+                size: 256,
+            };
+            build_reply(&reply, state.msb_first, byteswap_get_gamma_ramp_size_reply)
         }
         _ => vidmode_err(crate::xserver::core::REQUEST_ERROR, 0),
     }
+}
+
+// ---------------------------------------------------------------------------
+// Mode-list helpers
+// ---------------------------------------------------------------------------
+
+fn current_mode(state: &ClientState) -> VidModeInfo {
+    state
+        .vidmode_modes
+        .get(state.vidmode_current_mode)
+        .cloned()
+        .unwrap_or_else(|| VidModeInfo::default_for_screen(state.screen_width, state.screen_height))
+}
+
+fn mode_from_add_modeline(req: &AddModeLineRequest) -> VidModeInfo {
+    VidModeInfo {
+        dotclock: req.dotclock,
+        hdisplay: req.hdisplay,
+        hsyncstart: req.hsyncstart,
+        hsyncend: req.hsyncend,
+        htotal: req.htotal,
+        vdisplay: req.vdisplay,
+        vsyncstart: req.vsyncstart,
+        vsyncend: req.vsyncend,
+        vtotal: req.vtotal,
+        flags: u32::from(req.flags),
+    }
+}
+
+fn mode_from_delete_modeline(req: &DeleteModeLineRequest) -> VidModeInfo {
+    VidModeInfo {
+        dotclock: req.dotclock,
+        hdisplay: req.hdisplay,
+        hsyncstart: req.hsyncstart,
+        hsyncend: req.hsyncend,
+        htotal: req.htotal,
+        vdisplay: req.vdisplay,
+        vsyncstart: req.vsyncstart,
+        vsyncend: req.vsyncend,
+        vtotal: req.vtotal,
+        flags: u32::from(req.flags),
+    }
+}
+
+fn mode_from_switch_to_mode(req: &SwitchToModeRequest<'_>) -> VidModeInfo {
+    VidModeInfo {
+        dotclock: req.dotclock.into(),
+        hdisplay: req.hdisplay,
+        hsyncstart: req.hsyncstart,
+        hsyncend: req.hsyncend,
+        htotal: req.htotal,
+        vdisplay: req.vdisplay,
+        vsyncstart: req.vsyncstart,
+        vsyncend: req.vsyncend,
+        vtotal: req.vtotal,
+        flags: u32::from(req.flags),
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Gamma helpers
+// ---------------------------------------------------------------------------
+
+fn compute_gamma_ramp(gamma: f64) -> Vec<u16> {
+    (0..256)
+        .map(|i| {
+            let normalized = i as f64 / 255.0;
+            let val = if gamma > 0.0 {
+                normalized.powf(1.0 / gamma) * 65535.0
+            } else {
+                normalized * 65535.0
+            };
+            val.round() as u16
+        })
+        .collect()
+}
+
+fn approx_gamma_from_state(state: &ClientState) -> (f64, f64, f64) {
+    // gamma ≈ log(128/255) / log(ramp[128]/65535)
+    let approx = |ramp: &[u16]| -> f64 {
+        if ramp.len() > 128 && ramp[128] > 0 {
+            let mid_val = ramp[128] as f64 / 65535.0;
+            let mid_pos: f64 = 128.0 / 255.0;
+            if mid_val > 0.0 && mid_val < 1.0 {
+                mid_pos.ln() / mid_val.ln()
+            } else {
+                1.0
+            }
+        } else {
+            1.0
+        }
+    };
+    if let Some(crtc) = state.randr_crtcs.first() {
+        (
+            approx(&crtc.gamma_red),
+            approx(&crtc.gamma_green),
+            approx(&crtc.gamma_blue),
+        )
+    } else {
+        (1.0, 1.0, 1.0)
+    }
+}
+
+fn sample_gamma_ramps(
+    state: &ClientState,
+    size: u16,
+    aligned_size: usize,
+) -> (Vec<u16>, Vec<u16>, Vec<u16>) {
+    let sample = |stored: &[u16]| -> Vec<u16> {
+        (0..aligned_size)
+            .map(|i| {
+                if i < usize::from(size) {
+                    stored
+                        .get(i)
+                        .copied()
+                        // Linear extrapolation if request exceeds stored ramp.
+                        .unwrap_or_else(|| {
+                            ((i as u32 * 65535) / (usize::from(size).max(1) as u32 - 1).max(1))
+                                as u16
+                        })
+                } else {
+                    // Trailing alignment u16 (only present when size is odd).
+                    0
+                }
+            })
+            .collect()
+    };
+    if let Some(crtc) = state.randr_crtcs.first() {
+        (
+            sample(&crtc.gamma_red),
+            sample(&crtc.gamma_green),
+            sample(&crtc.gamma_blue),
+        )
+    } else {
+        let linear: Vec<u16> = (0..256)
+            .map(|i| ((i as u32 * 65535) / 255) as u16)
+            .collect();
+        (sample(&linear), sample(&linear), sample(&linear))
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Reply builders for variable-length replies
+// ---------------------------------------------------------------------------
+
+fn build_get_mode_line_reply(reply: &GetModeLineReply, msb_first: bool) -> Vec<u8> {
+    let mut bytes = reply.serialize();
+    fix_length(&mut bytes);
+    if msb_first {
+        byteswap_get_mode_line_reply(&mut bytes);
+    }
+    bytes
+}
+
+fn build_get_monitor_reply(reply: &GetMonitorReply, msb_first: bool) -> Vec<u8> {
+    let mut bytes = reply.serialize();
+    fix_length(&mut bytes);
+    if msb_first {
+        byteswap_get_monitor_reply(&mut bytes, reply.hsync.len(), reply.vsync.len());
+    }
+    bytes
+}
+
+fn build_get_all_mode_lines_reply(reply: &GetAllModeLinesReply, msb_first: bool) -> Vec<u8> {
+    let mut bytes = reply.serialize();
+    fix_length(&mut bytes);
+    if msb_first {
+        byteswap_get_all_mode_lines_reply(&mut bytes, reply.modeinfo.len());
+    }
+    bytes
+}
+
+fn build_get_dot_clocks_reply(reply: &GetDotClocksReply, msb_first: bool) -> Vec<u8> {
+    let mut bytes = reply.serialize();
+    fix_length(&mut bytes);
+    if msb_first {
+        byteswap_get_dot_clocks_reply(&mut bytes, reply.clock.len());
+    }
+    bytes
+}
+
+fn build_get_gamma_ramp_reply(reply: &GetGammaRampReply, msb_first: bool) -> Vec<u8> {
+    let mut bytes = reply.serialize();
+    fix_length(&mut bytes);
+    if msb_first {
+        byteswap_get_gamma_ramp_reply(&mut bytes, reply.red.len());
+    }
+    bytes
+}
+
+/// Overwrite the reply's `length` field (bytes 4..8) with the trailing
+/// word count derived from the actual buffer. x11rb's `Serialize`
+/// emits whatever value the caller put on the struct, but we always
+/// build with `length: 0` and let the buffer length be the source of
+/// truth — that way we can't drift.
+fn fix_length(bytes: &mut Vec<u8>) {
+    let length = trailing_words(bytes.len());
+    bytes[4..8].copy_from_slice(&length.to_ne_bytes());
+}
+
+// ---------------------------------------------------------------------------
+// Per-reply byteswap helpers
+//
+// Each helper mirrors the corresponding `Serialize::serialize_into`
+// in x11rb_protocol::protocol::xf86vidmode field-by-field. If x11rb
+// changes the wire layout of one of these replies (rare — it's an
+// X11 extension protocol fixed by spec) the mirror function must
+// be updated in tandem. Tests in `e2e/tests/extensions/vidmode.spec.ts`
+// exercise the LE path; the BE path is covered by audit.
+// ---------------------------------------------------------------------------
+
+/// QueryVersionReply: [type:1, pad:1, sequence:u16, length:u32,
+///                     major:u16, minor:u16]
+fn byteswap_query_version_reply(buf: &mut [u8]) {
+    swap_u16(buf, 2);
+    swap_u32(buf, 4);
+    swap_u16(buf, 8);
+    swap_u16(buf, 10);
+}
+
+/// GetModeLineReply: [type:1, pad:1, sequence:u16, length:u32,
+///                    dotclock:u32, hdisplay:u16, hsyncstart:u16,
+///                    hsyncend:u16, htotal:u16, hskew:u16,
+///                    vdisplay:u16, vsyncstart:u16, vsyncend:u16,
+///                    vtotal:u16, pad:2, flags:u32, pad:12,
+///                    privsize:u32, private:bytes]
+fn byteswap_get_mode_line_reply(buf: &mut [u8]) {
+    swap_u16(buf, 2); // sequence
+    swap_u32(buf, 4); // length
+    swap_u32(buf, 8); // dotclock
+    for i in 0..7 {
+        swap_u16(buf, 12 + i * 2); // hdisplay..hskew
+    }
+    for i in 0..4 {
+        swap_u16(buf, 22 + i * 2); // vdisplay..vtotal
+    }
+    swap_u32(buf, 32); // flags
+    swap_u32(buf, 48); // privsize
+    // `private` bytes are an opaque blob — no swap.
+}
+
+/// ValidateModeLineReply: [type:1, pad:1, sequence:u16, length:u32,
+///                         status:u32, pad:20]
+fn byteswap_validate_mode_line_reply(buf: &mut [u8]) {
+    swap_u16(buf, 2);
+    swap_u32(buf, 4);
+    swap_u32(buf, 8);
+}
+
+/// GetMonitorReply: [type:1, pad:1, sequence:u16, length:u32,
+///                   vendor_length:u8, model_length:u8,
+///                   num_hsync:u8, num_vsync:u8, pad:20,
+///                   hsync:[Syncrange], vsync:[Syncrange],
+///                   vendor:bytes, alignment_pad:bytes, model:bytes]
+fn byteswap_get_monitor_reply(buf: &mut [u8], hsync_count: usize, vsync_count: usize) {
+    swap_u16(buf, 2);
+    swap_u32(buf, 4);
+    let hsync_off = 32;
+    swap_u32_array(buf, hsync_off, hsync_count);
+    let vsync_off = hsync_off + hsync_count * 4;
+    swap_u32_array(buf, vsync_off, vsync_count);
+    // vendor/model strings and alignment padding are byte-only.
+}
+
+/// GetAllModeLinesReply: [type:1, pad:1, sequence:u16, length:u32,
+///                        modecount:u32, pad:20, modeinfo:[ModeInfo]]
+fn byteswap_get_all_mode_lines_reply(buf: &mut [u8], mode_count: usize) {
+    swap_u16(buf, 2);
+    swap_u32(buf, 4);
+    swap_u32(buf, 8); // modecount
+    let mode_size = size_of::<<WireModeInfo as Serialize>::Bytes>();
+    let header_bytes = 32;
+    for i in 0..mode_count {
+        byteswap_mode_info(buf, header_bytes + i * mode_size);
+    }
+}
+
+/// ModeInfo (48 bytes): [dotclock:u32, hdisplay:u16, hsyncstart:u16,
+///                       hsyncend:u16, htotal:u16, hskew:u32,
+///                       vdisplay:u16, vsyncstart:u16, vsyncend:u16,
+///                       vtotal:u16, pad:4, flags:u32, pad:12,
+///                       privsize:u32]
+fn byteswap_mode_info(buf: &mut [u8], off: usize) {
+    swap_u32(buf, off); // dotclock
+    for i in 0..4 {
+        swap_u16(buf, off + 4 + i * 2); // hdisplay..htotal
+    }
+    swap_u32(buf, off + 12); // hskew (u32)
+    for i in 0..4 {
+        swap_u16(buf, off + 16 + i * 2); // vdisplay..vtotal
+    }
+    swap_u32(buf, off + 28); // flags
+    swap_u32(buf, off + 44); // privsize
+}
+
+/// GetDotClocksReply: [type:1, pad:1, sequence:u16, length:u32,
+///                     flags:u32, clocks:u32, maxclocks:u32, pad:12,
+///                     clock:[u32]]
+fn byteswap_get_dot_clocks_reply(buf: &mut [u8], clock_count: usize) {
+    swap_u16(buf, 2);
+    swap_u32(buf, 4);
+    swap_u32(buf, 8); // flags
+    swap_u32(buf, 12); // clocks
+    swap_u32(buf, 16); // maxclocks
+    swap_u32_array(buf, 32, clock_count);
+}
+
+/// GetViewPortReply: [type:1, pad:1, sequence:u16, length:u32,
+///                    x:u32, y:u32, pad:16]
+fn byteswap_get_view_port_reply(buf: &mut [u8]) {
+    swap_u16(buf, 2);
+    swap_u32(buf, 4);
+    swap_u32(buf, 8);
+    swap_u32(buf, 12);
+}
+
+/// GetGammaReply: [type:1, pad:1, sequence:u16, length:u32,
+///                 red:u32, green:u32, blue:u32, pad:12]
+fn byteswap_get_gamma_reply(buf: &mut [u8]) {
+    swap_u16(buf, 2);
+    swap_u32(buf, 4);
+    swap_u32(buf, 8);
+    swap_u32(buf, 12);
+    swap_u32(buf, 16);
+}
+
+/// GetGammaRampReply: [type:1, pad:1, sequence:u16, length:u32,
+///                     size:u16, pad:22, red:[u16], green:[u16],
+///                     blue:[u16]] where each channel is
+///                     `(size + 1) & !1` u16s long.
+fn byteswap_get_gamma_ramp_reply(buf: &mut [u8], channel_len: usize) {
+    swap_u16(buf, 2);
+    swap_u32(buf, 4);
+    swap_u16(buf, 8); // size
+    let header_bytes = 32;
+    for channel in 0..3 {
+        let base = header_bytes + channel * channel_len * 2;
+        for i in 0..channel_len {
+            swap_u16(buf, base + i * 2);
+        }
+    }
+}
+
+/// GetGammaRampSizeReply: [type:1, pad:1, sequence:u16, length:u32,
+///                         size:u16, pad:22]
+fn byteswap_get_gamma_ramp_size_reply(buf: &mut [u8]) {
+    swap_u16(buf, 2);
+    swap_u32(buf, 4);
+    swap_u16(buf, 8);
 }

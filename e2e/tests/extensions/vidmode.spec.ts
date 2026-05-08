@@ -30,7 +30,7 @@ test.describe("VidMode extension mode management", () => {
 		await waitForDock(page);
 	});
 
-	test.skip("VidMode GetAllModeLines returns at least one mode", async ({ sidecarContainer }) => {
+	test("VidMode GetAllModeLines returns at least one mode", async ({ sidecarContainer }) => {
 		const result = await runPythonScript(sidecarContainer, "vidmode_getallmodelines.py", { env: { DISPLAY: ":99" } });
 		expect(result.output).toContain("PASS: VidMode returned modes");
 	});

@@ -11,25 +11,24 @@ test.describe("MIT-MAGIC-COOKIE-1 authentication", () => {
 		await waitForDock(page);
 	});
 
-	test.skip("xauth list shows a cookie for display :99", async ({ sidecarContainer }) => {
+	test("xauth list shows a cookie for display :99", async ({ sidecarContainer }) => {
+		// The X server writes its auth file to a fixed path
+		// (/tmp/.x11-web-Xauthority — see X11Server::write_xauthority).
+		// `xauth` without an explicit -f / $XAUTHORITY would look at
+		// ~/.Xauthority which we don't create.
 		const result = await sidecarContainer.exec([
 			"bash",
 			"-c",
 			[
 				"set -e",
 				"export DISPLAY=:99",
-				"# Check that xauth has an entry for our display",
+				"export XAUTHORITY=/tmp/.x11-web-Xauthority",
 				"ENTRIES=$(xauth list 2>&1 || echo 'xauth failed')",
 				"echo \"$ENTRIES\"",
 				"if echo \"$ENTRIES\" | grep -q 'MIT-MAGIC-COOKIE-1'; then",
 				"  echo 'PASS: MIT-MAGIC-COOKIE-1 entry found'",
 				"else",
-				"  # Check if XAUTHORITY file exists",
-				"  if [ -f \"$XAUTHORITY\" ]; then",
-				"    echo 'PASS: XAUTHORITY file exists'",
-				"  else",
-				"    echo 'FAIL: no auth entries found'",
-				"  fi",
+				"  echo 'FAIL: no auth entries found'",
 				"fi",
 			].join("\n"),
 		]);

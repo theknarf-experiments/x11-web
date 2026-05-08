@@ -172,26 +172,6 @@ test.describe("Phase 8: Background pixmap, VisibilityNotify, grab sync, DRI3 fen
 		expect(result.output).toContain("SYNC_GRAB_OK");
 	});
 
-	// DRI3 was removed from the server (commit 60b4bd3).
-	test.skip("DRI3 QueryVersion returns 1.2", async ({ sidecarContainer }) => {
-		const result = await sidecarContainer.exec([
-			"python3",
-			"-c",
-			[
-				"import subprocess as sp",
-				"r = sp.run(['xdpyinfo', '-ext', 'DRI3'], capture_output=True, text=True)",
-				"print(r.stdout)",
-				"if 'DRI3' in r.stdout:",
-				"    print('DRI3_FOUND')",
-				"else:",
-				"    print('DRI3_MISSING')",
-			].join("\n"),
-		]);
-		console.log(`DRI3: ${result.output}`);
-		// DRI3 extension should be reported
-		expect(result.output).toContain("DRI3_FOUND");
-	});
-
 	test("SYNC extension fences can be created and queried", async ({ sidecarContainer }) => {
 		const result = await sidecarContainer.exec([
 			"python3",

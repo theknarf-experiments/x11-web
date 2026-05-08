@@ -18,7 +18,7 @@
 
 /// Swap a u16 at the given offset in place.
 #[inline]
-fn swap_u16(buf: &mut [u8], off: usize) {
+pub(crate) fn swap_u16(buf: &mut [u8], off: usize) {
     if off + 2 <= buf.len() {
         buf[off..off + 2].reverse();
     }
@@ -26,7 +26,7 @@ fn swap_u16(buf: &mut [u8], off: usize) {
 
 /// Swap a u32 at the given offset in place.
 #[inline]
-fn swap_u32(buf: &mut [u8], off: usize) {
+pub(crate) fn swap_u32(buf: &mut [u8], off: usize) {
     if off + 4 <= buf.len() {
         buf[off..off + 4].reverse();
     }
@@ -34,7 +34,7 @@ fn swap_u32(buf: &mut [u8], off: usize) {
 
 /// Swap N consecutive u32s starting at `off`.
 #[inline]
-fn swap_u32_array(buf: &mut [u8], off: usize, count: usize) {
+pub(crate) fn swap_u32_array(buf: &mut [u8], off: usize, count: usize) {
     for i in 0..count {
         swap_u32(buf, off + i * 4);
     }
@@ -42,7 +42,7 @@ fn swap_u32_array(buf: &mut [u8], off: usize, count: usize) {
 
 /// Swap N consecutive u16s starting at `off`.
 #[inline]
-fn swap_u16_array(buf: &mut [u8], off: usize, count: usize) {
+pub(crate) fn swap_u16_array(buf: &mut [u8], off: usize, count: usize) {
     for i in 0..count {
         swap_u16(buf, off + i * 2);
     }

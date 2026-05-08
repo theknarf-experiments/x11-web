@@ -48,7 +48,7 @@ test.describe("Composite overlay window refcounting", () => {
 		await waitForDock(page);
 	});
 
-	test.skip("Composite extension QueryVersion and overlay operations", async ({ sidecarContainer }) => {
+	test("Composite extension QueryVersion and overlay operations", async ({ sidecarContainer }) => {
 		const result = await runPythonScript(sidecarContainer, "composite_overlay_get_release.py", { env: { DISPLAY: ":99" } });
 		expect(result.output).toContain(
 			"PASS: Composite overlay get/release succeeded",
