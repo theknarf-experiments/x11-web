@@ -1,4 +1,9 @@
-// Protocol types matching crates/protocol/src/lib.rs
+// SPA-facing shape of the protocol. The wire is Cap'n Proto
+// (`crates/ws-wire/schema/ws.capnp`); `frontend/src/wsWire.ts`
+// translates between the generated capnp classes and these
+// idiomatic-TS unions so call sites stay clean. The
+// `crates/protocol/src/lib.rs` Rust enums are the equivalent on
+// the backend / sidecar side.
 
 export interface SidecarInfo {
 	id: string;
