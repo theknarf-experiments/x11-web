@@ -9,7 +9,7 @@
 		"typecheck": "tsc -b --noEmit",
 		"preview": "vite preview",
 		"test": "vitest --run",
-		"codegen": "capnp-es ../crates/rtc-wire/schema/wire.capnp -ots,dts:src/generated --src-prefix=../crates/rtc-wire/schema"
+		"codegen": "capnp-es ../crates/rtc-wire/schema/wire.capnp -ots,dts:src/generated --src-prefix=../crates/rtc-wire/schema && capnp-es ../crates/ws-wire/schema/ws.capnp -ots,dts:src/generated --src-prefix=../crates/ws-wire/schema"
 	},
 	"dependencies": {
 		"@automerge/automerge": "^3.2.6",
