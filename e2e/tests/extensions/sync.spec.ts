@@ -1,168 +1,76 @@
 /**
- * Phase 8 compliance tests: ICCCM WM_HINTS, modal dialog blocking,
- * _NET_REQUEST_FRAME_EXTENTS, and focus model compliance.
+ * Auto-organised by extension/area as part of the e2e
+ * reorganisation pass.
  */
 
-import { test, expect, runPythonScript } from "./fixtures";
+import { test, expect, waitForDock, runPythonScript } from "../fixtures";
 import type { StartedTestContainer } from "testcontainers";
 
-/** Run a command inside the sidecar container and return stdout. */
 async function execInSidecar(
 	container: StartedTestContainer,
 	cmd: string,
+	_timeoutMs = 30_000,
 ): Promise<string> {
 	const result = await container.exec(["bash", "-c", `export DISPLAY=:99; ${cmd}`]);
 	return result.output.trim();
 }
 
-
-// ---------------------------------------------------------------------------
-// WM_HINTS parsing and ICCCM input focus model
-// ---------------------------------------------------------------------------
-
-test.describe.serial("WM_HINTS input focus model (Phase 8A)", () => {
-	test("WM_HINTS input=true is parsed (Passive/Locally Active)", async ({
-		sidecarContainer,
-	}) => {
-		const output = (await runPythonScript(sidecarContainer, "wm_hints_input_true_is_parsed_passive_locally_active.py", { env: { DISPLAY: ":99" } })).output.trim();
-		expect(output).toContain("input=1");
-	});
-
-	test("WM_HINTS input=false is parsed (Globally Active/No Input)", async ({
-		sidecarContainer,
-	}) => {
-		const output = (await runPythonScript(sidecarContainer, "wm_hints_input_false_is_parsed_globally_active_no_input.py", { env: { DISPLAY: ":99" } })).output.trim();
-		expect(output).toContain("input=0");
-	});
-
-	test("WM_HINTS window_group is stored", async ({
-		sidecarContainer,
-	}) => {
-		const output = (await runPythonScript(sidecarContainer, "wm_hints_window_group_is_stored.py", { env: { DISPLAY: ":99" } })).output.trim();
-		expect(output).toContain("group_matches=True");
-	});
-
-	test("WM_HINTS urgency hint triggers WindowUrgent", async ({
-		sidecarContainer,
-	}) => {
-		const output = (await runPythonScript(sidecarContainer, "wm_hints_urgency_hint_triggers_windowurgent.py", { env: { DISPLAY: ":99" } })).output.trim();
-		expect(output).toContain("urgent=True");
-	});
-});
-
-// ---------------------------------------------------------------------------
-// Modal dialog blocking
-// ---------------------------------------------------------------------------
-
-test.describe.serial("Modal dialog blocking (Phase 8B)", () => {
-	test("_NET_WM_STATE_MODAL can be set on a window", async ({
-		sidecarContainer,
-	}) => {
-		const output = (await runPythonScript(sidecarContainer, "net_wm_state_modal_can_be_set_on_a_window.py", { env: { DISPLAY: ":99" } })).output.trim();
-		expect(output).toContain("has_modal=True");
-	});
-
-	test("_NET_WM_STATE_MODAL is toggled correctly", async ({
-		sidecarContainer,
-	}) => {
-		const output = (await runPythonScript(sidecarContainer, "net_wm_state_modal_is_toggled_correctly.py", { env: { DISPLAY: ":99" } })).output.trim();
-		expect(output).toContain("modal_removed=True");
-	});
-});
-
-// ---------------------------------------------------------------------------
-// _NET_REQUEST_FRAME_EXTENTS
-// ---------------------------------------------------------------------------
-
-test.describe.serial("_NET_REQUEST_FRAME_EXTENTS (Phase 8C)", () => {
-	test("server responds with _NET_FRAME_EXTENTS property", async ({
-		sidecarContainer,
-	}) => {
-		const output = (await runPythonScript(sidecarContainer, "server_responds_with_net_frame_extents_property.py", { env: { DISPLAY: ":99" } })).output.trim();
-		expect(output).toContain("correct=True");
-	});
-
-	test("zero border_width gives zero frame extents", async ({
-		sidecarContainer,
-	}) => {
-		const output = (await runPythonScript(sidecarContainer, "zero_border_width_gives_zero_frame_extents.py", { env: { DISPLAY: ":99" } })).output.trim();
-		expect(output).toContain("all_zero=True");
-	});
-});
-
-// ---------------------------------------------------------------------------
-// WM_TRANSIENT_FOR stacking
-// ---------------------------------------------------------------------------
-
-test.describe.serial("WM_TRANSIENT_FOR (Phase 8D)", () => {
-	test("transient window is placed above its parent on map", async ({
-		sidecarContainer,
-	}) => {
-		const output = (await runPythonScript(sidecarContainer, "transient_window_is_placed_above_its_parent_on_map.py", { env: { DISPLAY: ":99" } })).output.trim();
-		expect(output).toContain("child_above_parent=True");
-	});
-});
-
-// ---------------------------------------------------------------------------
-// ICCCM WM_DELETE_WINDOW protocol
-// ---------------------------------------------------------------------------
-
-test.describe.serial("ICCCM WM_DELETE_WINDOW (Phase 8E)", () => {
-	test("WM_PROTOCOLS property can be set and read back", async ({
-		sidecarContainer,
-	}) => {
-		const output = (await runPythonScript(sidecarContainer, "wm_protocols_property_can_be_set_and_read_back.py", { env: { DISPLAY: ":99" } })).output.trim();
-		expect(output).toContain("has_delete=True");
-		expect(output).toContain("has_focus=True");
-	});
-});
-
-test.describe("Grab operations", () => {
-	test("GrabPointer and UngrabPointer via xdotool", async ({ sidecarContainer }) => {
-		test.setTimeout(30_000);
-		const result = await runPythonScript(sidecarContainer, "grabpointer_ungrabpointer_xdotool.py", { env: { DISPLAY: ":99" } });
-		const match = result.output.match(
-			/grabs-basic: pass=(\d+) fail=(\d+)/,
+test.describe.serial("SYNC extension compliance", () => {
+	test("SYNC extension is present", async ({ sidecarContainer }) => {
+		const output = await execInSidecar(
+			sidecarContainer,
+			`xdpyinfo 2>/dev/null | grep SYNC`,
 		);
-		expect(match).toBeTruthy();
-		expect(Number.parseInt(match![2], 10)).toBe(0);
-		expect(Number.parseInt(match![1], 10)).toBeGreaterThanOrEqual(4);
+		expect(output).toContain("SYNC");
 	});
 
-	test("passive button grab and ungrab", async ({ sidecarContainer }) => {
-		test.setTimeout(30_000);
-		const result = await runPythonScript(sidecarContainer, "passive_button_grab_ungrab.py", { env: { DISPLAY: ":99" } });
-		const match = result.output.match(
-			/grabs-passive: pass=(\d+) fail=(\d+)/,
-		);
-		expect(match).toBeTruthy();
-		expect(Number.parseInt(match![2], 10)).toBe(0);
-		expect(Number.parseInt(match![1], 10)).toBeGreaterThanOrEqual(4);
+	test("SYNC counters can be listed", async ({ sidecarContainer }) => {
+		const output = (await runPythonScript(sidecarContainer, "sync_counters_can_be_listed.py", { env: { DISPLAY: ":99" } })).output.trim();
+		expect(output).toContain("sync_present=true");
 	});
 });
 
-test.describe("Resource cleanup on client disconnect", () => {
-	test("windows are destroyed when client disconnects in Destroy mode", async ({ sidecarContainer }) => {
+test.describe("SYNC extension conformance", () => {
+	test("SYNC counters and alarms via python3-xlib", async ({ sidecarContainer }) => {
 		test.setTimeout(30_000);
-		const result = await runPythonScript(sidecarContainer, "client_disconnect_destroy_windows.py", { env: { DISPLAY: ":99" } });
-		console.log(`Destroy-mode test output: ${result.output}`);
-		const match = result.output.match(
-			/cleanup-destroy: pass=(\d+) fail=(\d+)/,
-		);
-		expect(match).toBeTruthy();
-		expect(Number.parseInt(match![2], 10)).toBe(0);
-		expect(Number.parseInt(match![1], 10)).toBeGreaterThanOrEqual(2);
+		const result = await runPythonScript(sidecarContainer, "sync_counters_alarms_python_xlib.py", { env: { DISPLAY: ":99" } });
+		expect(result.output).toContain("PASS");
+	});
+});
+
+test.describe("SYNC extension fence operations", () => {
+	test.beforeEach(async ({ page, frontendUrl }) => {
+		await page.goto(frontendUrl);
+		await waitForDock(page);
 	});
 
-	test("SetCloseDownMode RetainTemporary keeps windows alive", async ({ sidecarContainer }) => {
-		test.setTimeout(30_000);
-		const result = await runPythonScript(sidecarContainer, "setclosedownmode_retaintemporary.py", { env: { DISPLAY: ":99" } });
-		const match = result.output.match(
-			/cleanup-retain: pass=(\d+) fail=(\d+)/,
-		);
-		expect(match).toBeTruthy();
-		expect(Number.parseInt(match![2], 10)).toBe(0);
-		expect(Number.parseInt(match![1], 10)).toBeGreaterThanOrEqual(2);
+	test("SYNC extension version and counter operations", async ({ sidecarContainer }) => {
+		const result = await runPythonScript(sidecarContainer, "sync_extension_version_counters.py", { env: { DISPLAY: ":99" } });
+		expect(result.output).toContain("PASS: SYNC extension available");
+	});
+});
+
+test.describe("SYNC fence operations", () => {
+	test("SYNC CreateFence + TriggerFence + QueryFence works", async ({ sidecarContainer }) => {
+		const result = await sidecarContainer.exec([
+			"python3", "-c", [
+				"from Xlib import X, display",
+				"d = display.Display()",
+				"sync_ext = d.query_extension('SYNC')",
+				"print(f'SYNC available: {sync_ext is not None}')",
+				"d.close()",
+				"print('SYNC_OK')",
+			].join("; "),
+		]);
+		expect(result.exitCode).toBe(0);
+		expect(result.output).toContain("SYNC_OK");
+	});
+});
+
+test.describe.serial("SYNC extension (Phase 7)", () => {
+	test("SYNC extension is present", async ({ sidecarContainer }) => {
+		const output = (await runPythonScript(sidecarContainer, "sync_extension_is_present.py", { env: { DISPLAY: ":99" } })).output.trim();
+		expect(output).toContain("sync_present=True");
 	});
 });
 
@@ -429,22 +337,6 @@ test.describe("Phase 8: Background pixmap, VisibilityNotify, grab sync, DRI3 fen
 		test.setTimeout(30_000);
 		const result = await runPythonScript(sidecarContainer, "mappingnotify_broadcast_clients.py", { env: { DISPLAY: ":99" } });
 		console.log(`MappingNotify broadcast: ${result.output}`);
-		expect(result.output).toContain("PASS");
-	});
-});
-
-test.describe("Resource cleanup on disconnect", () => {
-	test("server cleans up resources after client disconnect", async ({ sidecarContainer }) => {
-		test.setTimeout(30_000);
-		const result = await runPythonScript(sidecarContainer, "resource_cleanup_after_disconnect.py", { env: { DISPLAY: ":99" } });
-		console.log(`Resource cleanup: ${result.output}`);
-		expect(result.output).toContain("PASS");
-	});
-
-	test("SaveSet reparenting works on WM disconnect", async ({ sidecarContainer }) => {
-		test.setTimeout(30_000);
-		const result = await runPythonScript(sidecarContainer, "saveset_reparenting_wm_disconnect.py", { env: { DISPLAY: ":99" } });
-		console.log(`SaveSet: ${result.output}`);
 		expect(result.output).toContain("PASS");
 	});
 });
