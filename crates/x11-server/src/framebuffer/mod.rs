@@ -2,6 +2,7 @@ use tiny_skia::{
     Color, FillRule, FilterQuality, Paint, Path, PathBuilder, Pattern, PixmapMut, PixmapRef,
     SpreadMode, Stroke, StrokeDash, Transform,
 };
+use x11rb_protocol::protocol::xproto::{CapStyle, GX, Gravity};
 
 mod drawing;
 mod shapes;
@@ -249,17 +250,18 @@ impl Framebuffer {
 
         // Destination offset: where in the new buffer to place old content.
         // A positive dx means old content shifts right; positive dy means down.
-        let (dx, dy): (i32, i32) = match gravity {
-            1 => (0, 0),           // NorthWest
-            2 => (dw / 2, 0),      // North
-            3 => (dw, 0),          // NorthEast
-            4 => (0, dh / 2),      // West
-            5 => (dw / 2, dh / 2), // Center
-            6 => (dw, dh / 2),     // East
-            7 => (0, dh),          // SouthWest
-            8 => (dw / 2, dh),     // South
-            9 => (dw, dh),         // SouthEast
-            10 => (0, 0),          // Static
+        let (dx, dy): (i32, i32) = match Gravity::from(gravity) {
+            Gravity::NORTH_WEST => (0, 0),
+            Gravity::NORTH => (dw / 2, 0),
+            Gravity::NORTH_EAST => (dw, 0),
+            Gravity::WEST => (0, dh / 2),
+            Gravity::CENTER => (dw / 2, dh / 2),
+            Gravity::EAST => (dw, dh / 2),
+            Gravity::SOUTH_WEST => (0, dh),
+            Gravity::SOUTH => (dw / 2, dh),
+            Gravity::SOUTH_EAST => (dw, dh),
+            Gravity::STATIC => (0, 0),
+            // Includes BIT_FORGET / WIN_UNMAP (both = 0) and unknown values.
             _ => (0, 0),
         };
 
@@ -829,9 +831,9 @@ impl Framebuffer {
         paint.anti_alias = true;
         let mut stroke = Stroke::default();
         stroke.width = line_width.max(1) as f32;
-        stroke.line_cap = match cap_style {
-            2 => tiny_skia::LineCap::Round,
-            3 => tiny_skia::LineCap::Square,
+        stroke.line_cap = match CapStyle::from(cap_style) {
+            CapStyle::ROUND => tiny_skia::LineCap::Round,
+            CapStyle::PROJECTING => tiny_skia::LineCap::Square,
             _ => tiny_skia::LineCap::Butt,
         };
         stroke.line_join = line_join;
@@ -980,24 +982,25 @@ pub(crate) fn point_in_clip_rects(x: i32, y: i32, rects: &[(i16, i16, u16, u16)]
 
 /// Apply X11 GC raster operation function to source and destination pixels.
 pub fn apply_gc_function(func: u8, src: u32, dst: u32) -> u32 {
-    match func {
-        0 => 0,             // GXclear
-        1 => src & dst,     // GXand
-        2 => src & !dst,    // GXandReverse
-        3 => src,           // GXcopy
-        4 => !src & dst,    // GXandInverted
-        5 => dst,           // GXnoop
-        6 => src ^ dst,     // GXxor
-        7 => src | dst,     // GXor
-        8 => !(src | dst),  // GXnor
-        9 => !(src ^ dst),  // GXequiv
-        10 => !dst,         // GXinvert
-        11 => src | !dst,   // GXorReverse
-        12 => !src,         // GXcopyInverted
-        13 => !src | dst,   // GXorInverted
-        14 => !(src & dst), // GXnand
-        15 => 0xFFFFFFFF,   // GXset
-        _ => src,           // default to copy
+    match GX::from(func) {
+        GX::CLEAR => 0,
+        GX::AND => src & dst,
+        GX::AND_REVERSE => src & !dst,
+        GX::COPY => src,
+        GX::AND_INVERTED => !src & dst,
+        GX::NOOP => dst,
+        GX::XOR => src ^ dst,
+        GX::OR => src | dst,
+        GX::NOR => !(src | dst),
+        GX::EQUIV => !(src ^ dst),
+        GX::INVERT => !dst,
+        GX::OR_REVERSE => src | !dst,
+        GX::COPY_INVERTED => !src,
+        GX::OR_INVERTED => !src | dst,
+        GX::NAND => !(src & dst),
+        GX::SET => 0xFFFFFFFF,
+        // Unknown function: behave as GXcopy.
+        _ => src,
     }
 }
 

@@ -5,6 +5,7 @@ use super::{
 use tiny_skia::{
     FilterQuality, Paint, PathBuilder, Pattern, PixmapRef, SpreadMode, Stroke, Transform,
 };
+use x11rb_protocol::protocol::xproto::{CapStyle, JoinStyle, LineStyle};
 
 impl Framebuffer {
     /// Draw a line with full GC support: raster op, cap/join styles, dashes, clip rects.
@@ -50,7 +51,7 @@ impl Framebuffer {
                 let dash = build_dash(line_style, dash_list, dash_offset);
                 // DoubleDash: stroke background colour with the inverse
                 // dash pattern in the gaps before drawing the foreground.
-                if line_style == 2 {
+                if LineStyle::from(line_style) == LineStyle::DOUBLE_DASH {
                     if let Some(ref d) = dash {
                         self.stroke_path_skia(
                             &path,
@@ -77,7 +78,11 @@ impl Framebuffer {
         // with optional dash support. Wide lines under raster-op
         // blends are rare in real apps; we accept the visual
         // simplification.
-        let dashes = if (line_style == 1 || line_style == 2) && !dash_list.is_empty() {
+        let dashes = if matches!(
+            LineStyle::from(line_style),
+            LineStyle::ON_OFF_DASH | LineStyle::DOUBLE_DASH
+        ) && !dash_list.is_empty()
+        {
             Some(DashState::new(dash_list, dash_offset))
         } else {
             None
@@ -124,12 +129,12 @@ impl Framebuffer {
             }
             if let Some(path) = pb.finish() {
                 let dash = build_dash(line_style, dash_list, dash_offset);
-                let join = match join_style {
-                    1 => tiny_skia::LineJoin::Round,
-                    2 => tiny_skia::LineJoin::Bevel,
+                let join = match JoinStyle::from(join_style) {
+                    JoinStyle::ROUND => tiny_skia::LineJoin::Round,
+                    JoinStyle::BEVEL => tiny_skia::LineJoin::Bevel,
                     _ => tiny_skia::LineJoin::Miter,
                 };
-                if line_style == 2 {
+                if LineStyle::from(line_style) == LineStyle::DOUBLE_DASH {
                     if let Some(ref d) = dash {
                         self.stroke_path_skia_full(
                             &path,
@@ -224,7 +229,7 @@ impl Framebuffer {
             if !skip {
                 if draw_fg {
                     self.draw_point_gc(x, y, color, gc_func, plane_mask, clip_rects);
-                } else if line_style == 2 {
+                } else if LineStyle::from(line_style) == LineStyle::DOUBLE_DASH {
                     // DoubleDash: draw background in dash gaps
                     self.draw_point_gc(x, y, background, gc_func, plane_mask, clip_rects);
                 }
@@ -288,9 +293,9 @@ impl Framebuffer {
                     paint.anti_alias = true;
                     let mut stroke = Stroke::default();
                     stroke.width = 1.0;
-                    stroke.line_cap = match cap_style {
-                        2 => tiny_skia::LineCap::Round,
-                        3 => tiny_skia::LineCap::Square,
+                    stroke.line_cap = match CapStyle::from(cap_style) {
+                        CapStyle::ROUND => tiny_skia::LineCap::Round,
+                        CapStyle::PROJECTING => tiny_skia::LineCap::Square,
                         _ => tiny_skia::LineCap::Butt,
                     };
                     let clip_mask = build_clip_mask(self.width, self.height, clip_rects);
