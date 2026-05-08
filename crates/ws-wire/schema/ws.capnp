@@ -148,32 +148,34 @@ struct WindowUpdateMsg {
 }
 
 struct WindowUpdate {
-    windowId @0 :Text;
-    payload :union {
-        noVariant      @1 :Void;
-        titleChanged   @2 :TitleChanged;
-        stateChanged   @3 :StateChanged;
-        focused        @4 :Focused;
-        menuStructure  @5 :MenuStructure;
+    union {
+        noVariant      @0 :Void;
+        titleChanged   @1 :TitleChanged;
+        stateChanged   @2 :StateChanged;
+        focused        @3 :Focused;
+        menuStructure  @4 :MenuStructure;
     }
 }
 
 struct TitleChanged {
-    title @0 :Text;
+    windowId @0 :Text;
+    title    @1 :Text;
 }
 
 struct StateChanged {
-    state @0 :WindowWmState;
+    windowId @0 :Text;
+    state    @1 :WindowWmState;
 }
 
-# `windowId` empty = focus cleared (revert to root).
+# `windowId` unset = focus cleared (revert to root). Text fields
+# expose `has_window_id()` automatically, so no separate flag.
 struct Focused {
     windowId @0 :Text;
-    hasWindow @1 :Bool;
 }
 
 struct MenuStructure {
-    items @0 :List(MenuItem);
+    windowId @0 :Text;
+    items    @1 :List(MenuItem);
 }
 
 enum WindowWmState {
@@ -211,22 +213,22 @@ struct Bell {
 # Menus (recursive — `MenuItem.children` is List(MenuItem))
 # ============================================================
 
+# Text + struct fields auto-expose `has_*()` for absence checks,
+# so `Option<String>` and `Option<MenuAction>` need no extra flag.
+# `checked` is the only `Option<primitive>` here — encoded via a
+# 3-state enum (NotApplicable / Unchecked / Checked) so the reader
+# can distinguish "explicitly false" from "absent".
 struct MenuItem {
-    id           @0 :Text;
-    label        @1 :Text;     # empty → separator
-    hasLabel     @2 :Bool;
-    kind         @3 :MenuItemKind;
-    enabled      @4 :Bool;
-    visible      @5 :Bool;
-    checkedHas   @6 :Bool;
-    checked      @7 :Bool;
-    accelerator  @8 :Text;     # empty → none
-    hasAccel     @9 :Bool;
-    icon         @10 :Text;    # empty → none
-    hasIcon      @11 :Bool;
-    actionHas    @12 :Bool;
-    action       @13 :MenuAction;
-    children     @14 :List(MenuItem);
+    id          @0  :Text;
+    label       @1  :Text;
+    kind        @2  :MenuItemKind;
+    enabled     @3  :Bool;
+    visible     @4  :Bool;
+    checked     @5  :CheckState;
+    accelerator @6  :Text;
+    icon        @7  :Text;
+    action      @8  :MenuAction;
+    children    @9  :List(MenuItem);
 }
 
 enum MenuItemKind {
@@ -237,21 +239,25 @@ enum MenuItemKind {
     radio     @4;
 }
 
+enum CheckState {
+    notApplicable @0;
+    unchecked     @1;
+    checked       @2;
+}
+
 struct MenuAction {
-    name      @0 :Text;
-    targetHas @1 :Bool;
-    target    @2 :MenuActionTarget;
+    name   @0 :Text;
+    target @1 :MenuActionTarget;  # absent via `has_target()`
 }
 
 struct MenuActionTarget {
-    payload :union {
-        none    @0 :Void;
-        string  @1 :Text;
-        bool    @2 :Bool;
-        int32   @3 :Int32;
-        uInt32  @4 :UInt32;
-        int64   @5 :Int64;
-        float64 @6 :Float64;
+    union {
+        string  @0 :Text;
+        boolean @1 :Bool;
+        int32   @2 :Int32;
+        uInt32  @3 :UInt32;
+        int64   @4 :Int64;
+        float64 @5 :Float64;
     }
 }
 
