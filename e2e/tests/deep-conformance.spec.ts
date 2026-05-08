@@ -6,7 +6,7 @@
  * X11 server works with any and all applications.
  */
 
-import { test, expect } from "./fixtures";
+import { test, expect, runPythonScript } from "./fixtures";
 import type { StartedTestContainer } from "testcontainers";
 
 /** Run a command inside the sidecar container and return stdout. */
@@ -19,19 +19,6 @@ async function execInSidecar(
 	return result.output.trim();
 }
 
-/** Run a python3-xlib script inside the sidecar container. */
-async function runPythonX11(
-	container: StartedTestContainer,
-	script: string,
-): Promise<string> {
-	const escaped = script.replace(/'/g, "'\\''");
-	const result = await container.exec([
-		"bash",
-		"-c",
-		`DISPLAY=:99 python3 -c '${escaped}'`,
-	]);
-	return result.output.trim();
-}
 
 // ===========================================================================
 // RENDERCHECK — RENDER extension conformance suite
@@ -338,24 +325,7 @@ test.describe.serial("Font system deep tests", () => {
 	test("OpenFont and QueryFont round-trip for XLFD pattern", async ({
 		sidecarContainer,
 	}) => {
-		const output = await runPythonX11(
-			sidecarContainer,
-			`
-import Xlib.display
-d = Xlib.display.Display()
-# Open a font using XLFD pattern with wildcards
-try:
-    font = d.open_font('-*-fixed-*-*-*-*-*-*-*-*-*-*-*-*')
-    qi = font.query()
-    print(f"font_ascent={qi.font_ascent} font_descent={qi.font_descent}")
-    print(f"min_char={qi.min_char_or_byte2} max_char={qi.max_char_or_byte2}")
-    print("FONT_OK")
-    font.close()
-except Exception as e:
-    print(f"ERROR: {e}")
-d.close()
-`,
-		);
+		const output = (await runPythonScript(sidecarContainer, "openfont_and_queryfont_round_trip_for_xlfd_pattern.py", { env: { DISPLAY: ":99" } })).output.trim();
 		expect(output).toContain("FONT_OK");
 		expect(output).toMatch(/font_ascent=\d+/);
 	});
@@ -363,25 +333,7 @@ d.close()
 	test("QueryTextExtents returns correct metrics", async ({
 		sidecarContainer,
 	}) => {
-		const output = await runPythonX11(
-			sidecarContainer,
-			`
-import Xlib.display
-d = Xlib.display.Display()
-font = d.open_font('fixed')
-qi = font.query()
-# query_text_extents requires a list of char codes (16-bit ints), not a string
-ext = font.query_text_extents([ord(c) for c in 'Hello World'])
-print(f"overall_width={ext.overall_width}")
-print(f"font_ascent={ext.font_ascent}")
-print(f"font_descent={ext.font_descent}")
-# Width must be positive and reasonable
-if ext.overall_width > 0:
-    print("EXTENTS_OK")
-font.close()
-d.close()
-`,
-		);
+		const output = (await runPythonScript(sidecarContainer, "querytextextents_returns_correct_metrics.py", { env: { DISPLAY: ":99" } })).output.trim();
 		expect(output).toContain("EXTENTS_OK");
 	});
 });
@@ -416,25 +368,7 @@ test.describe.serial("Atom system tests", () => {
 	test("InternAtom and GetAtomName round-trip", async ({
 		sidecarContainer,
 	}) => {
-		const output = await runPythonX11(
-			sidecarContainer,
-			`
-import Xlib.display
-d = Xlib.display.Display()
-# Create a custom atom
-atom = d.intern_atom('_TEST_CUSTOM_ATOM_12345')
-name = d.get_atom_name(atom)
-print(f"atom_id={atom} name={name}")
-if name == '_TEST_CUSTOM_ATOM_12345':
-    print("ATOM_OK")
-# Verify only_if_exists works
-atom2 = d.intern_atom('_NONEXISTENT_ATOM_ZZZZZ', only_if_exists=True)
-print(f"nonexistent={atom2}")
-if atom2 == 0:
-    print("ONLY_IF_EXISTS_OK")
-d.close()
-`,
-		);
+		const output = (await runPythonScript(sidecarContainer, "internatom_and_getatomname_round_trip_2.py", { env: { DISPLAY: ":99" } })).output.trim();
 		expect(output).toContain("ATOM_OK");
 		expect(output).toContain("ONLY_IF_EXISTS_OK");
 	});
@@ -809,117 +743,21 @@ test.describe.serial("Multi-client interaction", () => {
 	test("Two clients can set and read properties", async ({
 		sidecarContainer,
 	}) => {
-		const output = await runPythonX11(
-			sidecarContainer,
-			`
-import Xlib.display, Xlib.X, struct
-
-# Client 1: create window and set property
-d1 = Xlib.display.Display()
-screen = d1.screen()
-w = screen.root.create_window(0, 0, 100, 100, 0, screen.root_depth,
-    Xlib.X.InputOutput, Xlib.X.CopyFromParent)
-w.map()
-d1.sync()
-
-# Set a custom property
-atom = d1.intern_atom('_TEST_MULTI_CLIENT')
-w.change_property(atom, Xlib.Xatom.STRING, 8, b'hello_from_client1')
-d1.sync()
-wid = w.id
-
-# Client 2: read the property
-d2 = Xlib.display.Display()
-w2 = d2.create_resource_object('window', wid)
-prop = w2.get_full_property(d2.intern_atom('_TEST_MULTI_CLIENT'), Xlib.Xatom.STRING)
-if prop and prop.value == b'hello_from_client1':
-    print("MULTI_CLIENT_OK")
-else:
-    print(f"FAIL: prop={prop}")
-
-d1.close()
-d2.close()
-`,
-		);
+		const output = (await runPythonScript(sidecarContainer, "two_clients_can_set_and_read_properties.py", { env: { DISPLAY: ":99" } })).output.trim();
 		expect(output).toContain("MULTI_CLIENT_OK");
 	});
 
 	test("Selection transfer between two clients", async ({
 		sidecarContainer,
 	}) => {
-		const output = await runPythonX11(
-			sidecarContainer,
-			`
-import Xlib.display, Xlib.X, Xlib.Xatom
-import time
-
-d = Xlib.display.Display()
-screen = d.screen()
-
-# Create owner window
-owner = screen.root.create_window(0, 0, 1, 1, 0, screen.root_depth,
-    Xlib.X.InputOutput, Xlib.X.CopyFromParent,
-    event_mask=Xlib.X.PropertyChangeMask)
-owner.map()
-d.sync()
-
-# Set selection owner
-sel_atom = d.intern_atom('PRIMARY')
-owner.set_selection_owner(sel_atom, Xlib.X.CurrentTime)
-d.sync()
-
-# Verify ownership
-sel_owner = d.get_selection_owner(sel_atom)
-if sel_owner == owner:
-    print("SELECTION_OWNER_OK")
-else:
-    print(f"FAIL: expected owner {owner.id}, got {sel_owner}")
-
-d.close()
-`,
-		);
+		const output = (await runPythonScript(sidecarContainer, "selection_transfer_between_two_clients.py", { env: { DISPLAY: ":99" } })).output.trim();
 		expect(output).toContain("SELECTION_OWNER_OK");
 	});
 
 	test("Event delivery to multiple clients watching same window", async ({
 		sidecarContainer,
 	}) => {
-		const output = await runPythonX11(
-			sidecarContainer,
-			`
-import Xlib.display, Xlib.X
-
-# Create a window
-d1 = Xlib.display.Display()
-screen = d1.screen()
-w = screen.root.create_window(0, 0, 100, 100, 0, screen.root_depth,
-    Xlib.X.InputOutput, Xlib.X.CopyFromParent,
-    event_mask=Xlib.X.StructureNotifyMask | Xlib.X.PropertyChangeMask)
-w.map()
-d1.sync()
-
-# Client 2 selects events on the same window
-d2 = Xlib.display.Display()
-w2 = d2.create_resource_object('window', w.id)
-w2.change_attributes(event_mask=Xlib.X.PropertyChangeMask)
-d2.sync()
-
-# Change a property - both clients should be notifiable
-atom = d1.intern_atom('_MULTI_TEST')
-w.change_property(atom, Xlib.Xatom.STRING, 8, b'test_value')
-d1.sync()
-
-# Check client 1 gets PropertyNotify
-d1.sync()
-ev = d1.pending_events()
-print(f"client1_pending={ev}")
-
-# Both connected successfully
-print("MULTI_EVENT_OK")
-d1.close()
-d2.close()
-`,
-		);
+		const output = (await runPythonScript(sidecarContainer, "event_delivery_to_multiple_clients_watching_same_window.py", { env: { DISPLAY: ":99" } })).output.trim();
 		expect(output).toContain("MULTI_EVENT_OK");
 	});
 });
@@ -934,149 +772,26 @@ test.describe.serial("Protocol edge cases", () => {
 	test("Large property data (INCR threshold)", async ({
 		sidecarContainer,
 	}) => {
-		const output = await runPythonX11(
-			sidecarContainer,
-			`
-import Xlib.display, Xlib.X, Xlib.Xatom
-
-d = Xlib.display.Display()
-screen = d.screen()
-w = screen.root.create_window(0, 0, 1, 1, 0, screen.root_depth,
-    Xlib.X.InputOutput, Xlib.X.CopyFromParent)
-w.map()
-d.sync()
-
-# Set a large property (100KB - should work with or without INCR)
-large_data = b'A' * 100000
-atom = d.intern_atom('_LARGE_PROP_TEST')
-w.change_property(atom, Xlib.Xatom.STRING, 8, large_data)
-d.sync()
-
-# Read it back
-prop = w.get_full_property(atom, Xlib.Xatom.STRING)
-if prop and len(prop.value) == 100000 and prop.value == large_data:
-    print("LARGE_PROP_OK")
-else:
-    print(f"FAIL: got {len(prop.value) if prop else 0} bytes")
-
-d.close()
-`,
-		);
+		const output = (await runPythonScript(sidecarContainer, "large_property_data_incr_threshold.py", { env: { DISPLAY: ":99" } })).output.trim();
 		expect(output).toContain("LARGE_PROP_OK");
 	});
 
 	test("Window hierarchy: reparent, query tree", async ({
 		sidecarContainer,
 	}) => {
-		const output = await runPythonX11(
-			sidecarContainer,
-			`
-import Xlib.display, Xlib.X
-
-d = Xlib.display.Display()
-screen = d.screen()
-
-# Create parent and child windows
-parent = screen.root.create_window(0, 0, 200, 200, 0, screen.root_depth,
-    Xlib.X.InputOutput, Xlib.X.CopyFromParent)
-child = screen.root.create_window(0, 0, 50, 50, 0, screen.root_depth,
-    Xlib.X.InputOutput, Xlib.X.CopyFromParent)
-parent.map()
-child.map()
-d.sync()
-
-# Reparent child into parent
-child.reparent(parent, 10, 10)
-d.sync()
-
-# Query tree to verify
-tree = parent.query_tree()
-child_ids = [c.id for c in tree.children]
-if child.id in child_ids:
-    print("REPARENT_OK")
-else:
-    print(f"FAIL: child {child.id} not in {child_ids}")
-
-# Verify geometry relative to new parent
-geom = child.get_geometry()
-print(f"child_x={geom.x} child_y={geom.y}")
-if geom.x == 10 and geom.y == 10:
-    print("GEOMETRY_OK")
-
-d.close()
-`,
-		);
+		const output = (await runPythonScript(sidecarContainer, "window_hierarchy_reparent_query_tree.py", { env: { DISPLAY: ":99" } })).output.trim();
 		expect(output).toContain("REPARENT_OK");
 		expect(output).toContain("GEOMETRY_OK");
 	});
 
 	test("Colormap operations", async ({ sidecarContainer }) => {
-		const output = await runPythonX11(
-			sidecarContainer,
-			`
-import Xlib.display, Xlib.X
-
-d = Xlib.display.Display()
-screen = d.screen()
-
-# Create a colormap
-cmap = screen.default_colormap
-# AllocColor
-result = cmap.alloc_color(65535, 0, 0)  # Red
-print(f"alloc_red: pixel={result.pixel}")
-if result.pixel > 0 or result.exact_red == 65535:
-    print("ALLOC_COLOR_OK")
-
-# AllocNamedColor
-try:
-    result2 = cmap.alloc_named_color('blue')
-    print(f"alloc_blue: pixel={result2.pixel}")
-    print("ALLOC_NAMED_OK")
-except Exception as e:
-    print(f"AllocNamedColor: {e}")
-
-# QueryColors
-colors = cmap.query_colors([result.pixel])
-if len(colors) > 0:
-    print("QUERY_COLORS_OK")
-
-d.close()
-`,
-		);
+		const output = (await runPythonScript(sidecarContainer, "colormap_operations.py", { env: { DISPLAY: ":99" } })).output.trim();
 		expect(output).toContain("ALLOC_COLOR_OK");
 		expect(output).toContain("QUERY_COLORS_OK");
 	});
 
 	test("GrabPointer and UngrabPointer", async ({ sidecarContainer }) => {
-		const output = await runPythonX11(
-			sidecarContainer,
-			`
-import Xlib.display, Xlib.X
-
-d = Xlib.display.Display()
-screen = d.screen()
-w = screen.root.create_window(0, 0, 100, 100, 0, screen.root_depth,
-    Xlib.X.InputOutput, Xlib.X.CopyFromParent,
-    event_mask=Xlib.X.ButtonPressMask | Xlib.X.ButtonReleaseMask)
-w.map()
-d.sync()
-
-# Grab pointer
-status = w.grab_pointer(False, Xlib.X.ButtonPressMask | Xlib.X.ButtonReleaseMask,
-    Xlib.X.GrabModeAsync, Xlib.X.GrabModeAsync, Xlib.X.NONE, Xlib.X.NONE,
-    Xlib.X.CurrentTime)
-print(f"grab_status={status}")
-if status == Xlib.X.GrabSuccess:
-    print("GRAB_OK")
-
-# Ungrab
-d.ungrab_pointer(Xlib.X.CurrentTime)
-d.sync()
-print("UNGRAB_OK")
-
-d.close()
-`,
-		);
+		const output = (await runPythonScript(sidecarContainer, "grabpointer_and_ungrabpointer.py", { env: { DISPLAY: ":99" } })).output.trim();
 		expect(output).toContain("GRAB_OK");
 		expect(output).toContain("UNGRAB_OK");
 	});
@@ -1084,194 +799,39 @@ d.close()
 	test("SetInputFocus and FocusIn/FocusOut events", async ({
 		sidecarContainer,
 	}) => {
-		const output = await runPythonX11(
-			sidecarContainer,
-			`
-import Xlib.display, Xlib.X
-
-d = Xlib.display.Display()
-screen = d.screen()
-
-w1 = screen.root.create_window(0, 0, 100, 100, 0, screen.root_depth,
-    Xlib.X.InputOutput, Xlib.X.CopyFromParent,
-    event_mask=Xlib.X.FocusChangeMask)
-w2 = screen.root.create_window(200, 0, 100, 100, 0, screen.root_depth,
-    Xlib.X.InputOutput, Xlib.X.CopyFromParent,
-    event_mask=Xlib.X.FocusChangeMask)
-w1.map()
-w2.map()
-d.sync()
-
-# Set focus to w1
-d.set_input_focus(w1, Xlib.X.RevertToParent, Xlib.X.CurrentTime)
-d.sync()
-
-focus = d.get_input_focus()
-if focus.focus.id == w1.id:
-    print("FOCUS_W1_OK")
-
-# Switch focus to w2
-d.set_input_focus(w2, Xlib.X.RevertToParent, Xlib.X.CurrentTime)
-d.sync()
-
-focus = d.get_input_focus()
-if focus.focus.id == w2.id:
-    print("FOCUS_W2_OK")
-
-d.close()
-`,
-		);
+		const output = (await runPythonScript(sidecarContainer, "setinputfocus_and_focusin_focusout_events.py", { env: { DISPLAY: ":99" } })).output.trim();
 		expect(output).toContain("FOCUS_W1_OK");
 		expect(output).toContain("FOCUS_W2_OK");
 	});
 
 	test("CreatePixmap at multiple depths", async ({ sidecarContainer }) => {
-		const output = await runPythonX11(
-			sidecarContainer,
-			`
-import Xlib.display, Xlib.X
-
-d = Xlib.display.Display()
-screen = d.screen()
-
-depths_ok = []
-for depth in [1, 8, 24, 32]:
-    try:
-        pm = screen.root.create_pixmap(100, 100, depth)
-        pm.free()
-        depths_ok.append(depth)
-    except Exception as e:
-        print(f"depth {depth}: {e}")
-
-print(f"depths_ok={depths_ok}")
-if 1 in depths_ok and 24 in depths_ok:
-    print("PIXMAP_DEPTHS_OK")
-
-d.close()
-`,
-		);
+		const output = (await runPythonScript(sidecarContainer, "createpixmap_at_multiple_depths.py", { env: { DISPLAY: ":99" } })).output.trim();
 		expect(output).toContain("PIXMAP_DEPTHS_OK");
 	});
 
 	test("Window stacking order operations", async ({ sidecarContainer }) => {
-		const output = await runPythonX11(
-			sidecarContainer,
-			`
-import Xlib.display, Xlib.X
-
-d = Xlib.display.Display()
-screen = d.screen()
-
-# Create three windows
-w1 = screen.root.create_window(0, 0, 100, 100, 0, screen.root_depth,
-    Xlib.X.InputOutput, Xlib.X.CopyFromParent)
-w2 = screen.root.create_window(50, 0, 100, 100, 0, screen.root_depth,
-    Xlib.X.InputOutput, Xlib.X.CopyFromParent)
-w3 = screen.root.create_window(100, 0, 100, 100, 0, screen.root_depth,
-    Xlib.X.InputOutput, Xlib.X.CopyFromParent)
-w1.map()
-w2.map()
-w3.map()
-d.sync()
-
-# Raise w1 to top
-w1.configure(stack_mode=Xlib.X.Above)
-d.sync()
-
-# Query stacking order
-tree = screen.root.query_tree()
-children = [c.id for c in tree.children]
-# w1 should be at or near the top
-if w1.id in children:
-    pos = children.index(w1.id)
-    print(f"w1_position={pos} total={len(children)}")
-    print("STACKING_OK")
-
-d.close()
-`,
-		);
+		const output = (await runPythonScript(sidecarContainer, "window_stacking_order_operations.py", { env: { DISPLAY: ":99" } })).output.trim();
 		expect(output).toContain("STACKING_OK");
 	});
 
 	test("RENDER CreatePicture and Composite", async ({
 		sidecarContainer,
 	}) => {
-		const output = await runPythonX11(
-			sidecarContainer,
-			`
-import Xlib.display, Xlib.X
-
-d = Xlib.display.Display()
-screen = d.screen()
-w = screen.root.create_window(0, 0, 100, 100, 0, screen.root_depth,
-    Xlib.X.InputOutput, Xlib.X.CopyFromParent)
-w.map()
-d.sync()
-
-# Check RENDER extension is available
-try:
-    render_info = d.query_extension('RENDER')
-    if render_info and render_info.present:
-        print("RENDER_PRESENT")
-    else:
-        print("RENDER_MISSING")
-except Exception as e:
-    print(f"RENDER check: {e}")
-
-d.close()
-`,
-		);
+		const output = (await runPythonScript(sidecarContainer, "render_createpicture_and_composite.py", { env: { DISPLAY: ":99" } })).output.trim();
 		expect(output).toContain("RENDER_PRESENT");
 	});
 
 	test("SYNC extension counter operations", async ({
 		sidecarContainer,
 	}) => {
-		const output = await runPythonX11(
-			sidecarContainer,
-			`
-import Xlib.display, Xlib.X
-
-d = Xlib.display.Display()
-
-# Check SYNC extension
-sync_info = d.query_extension('SYNC')
-if sync_info and sync_info.present:
-    print("SYNC_PRESENT")
-else:
-    print("SYNC_MISSING")
-
-d.close()
-`,
-		);
+		const output = (await runPythonScript(sidecarContainer, "sync_extension_counter_operations.py", { env: { DISPLAY: ":99" } })).output.trim();
 		expect(output).toContain("SYNC_PRESENT");
 	});
 
 	test("Rapid connect/disconnect stress test", async ({
 		sidecarContainer,
 	}) => {
-		const output = await runPythonX11(
-			sidecarContainer,
-			`
-import Xlib.display
-
-success = 0
-for i in range(20):
-    try:
-        d = Xlib.display.Display()
-        screen = d.screen()
-        # Do a basic operation
-        _ = screen.root.get_geometry()
-        d.close()
-        success += 1
-    except Exception as e:
-        print(f"Connection {i} failed: {e}")
-
-print(f"success={success}/20")
-if success == 20:
-    print("STRESS_OK")
-`,
-		);
+		const output = (await runPythonScript(sidecarContainer, "rapid_connect_disconnect_stress_test.py", { env: { DISPLAY: ":99" } })).output.trim();
 		expect(output).toContain("STRESS_OK");
 	});
 });
@@ -1284,42 +844,14 @@ test.describe.serial("Keyboard and input", () => {
 	test("GetKeyboardMapping returns valid mappings", async ({
 		sidecarContainer,
 	}) => {
-		const output = await runPythonX11(
-			sidecarContainer,
-			`
-import Xlib.display
-
-d = Xlib.display.Display()
-# Get keyboard mapping for a range of keycodes
-mapping = d.get_keyboard_mapping(8, 248)
-print(f"mapping_entries={len(mapping)}")
-if len(mapping) > 0:
-    print("KEYMAP_OK")
-
-d.close()
-`,
-		);
+		const output = (await runPythonScript(sidecarContainer, "getkeyboardmapping_returns_valid_mappings.py", { env: { DISPLAY: ":99" } })).output.trim();
 		expect(output).toContain("KEYMAP_OK");
 	});
 
 	test("GetModifierMapping returns valid modifiers", async ({
 		sidecarContainer,
 	}) => {
-		const output = await runPythonX11(
-			sidecarContainer,
-			`
-import Xlib.display
-
-d = Xlib.display.Display()
-mod = d.get_modifier_mapping()
-print(f"modifier_groups={len(mod)}")
-# Should have 8 modifier groups (Shift, Lock, Control, Mod1-5)
-if len(mod) == 8:
-    print("MODMAP_OK")
-
-d.close()
-`,
-		);
+		const output = (await runPythonScript(sidecarContainer, "getmodifiermapping_returns_valid_modifiers.py", { env: { DISPLAY: ":99" } })).output.trim();
 		expect(output).toContain("MODMAP_OK");
 	});
 
@@ -1446,59 +978,19 @@ test.describe.serial("Extension deep tests", () => {
 	test("SHAPE extension: set window shape", async ({
 		sidecarContainer,
 	}) => {
-		const output = await runPythonX11(
-			sidecarContainer,
-			`
-import Xlib.display, Xlib.X
-
-d = Xlib.display.Display()
-# Check SHAPE extension
-shape_info = d.query_extension('SHAPE')
-if shape_info and shape_info.present:
-    print("SHAPE_PRESENT")
-else:
-    print("SHAPE_MISSING")
-d.close()
-`,
-		);
+		const output = (await runPythonScript(sidecarContainer, "shape_extension_set_window_shape.py", { env: { DISPLAY: ":99" } })).output.trim();
 		expect(output).toContain("SHAPE_PRESENT");
 	});
 
 	test("COMPOSITE extension: redirect window", async ({
 		sidecarContainer,
 	}) => {
-		const output = await runPythonX11(
-			sidecarContainer,
-			`
-import Xlib.display, Xlib.X
-
-d = Xlib.display.Display()
-composite_info = d.query_extension('Composite')
-if composite_info and composite_info.present:
-    print("COMPOSITE_PRESENT")
-else:
-    print("COMPOSITE_MISSING")
-d.close()
-`,
-		);
+		const output = (await runPythonScript(sidecarContainer, "composite_extension_redirect_window.py", { env: { DISPLAY: ":99" } })).output.trim();
 		expect(output).toContain("COMPOSITE_PRESENT");
 	});
 
 	test("XFIXES extension: create region", async ({ sidecarContainer }) => {
-		const output = await runPythonX11(
-			sidecarContainer,
-			`
-import Xlib.display
-
-d = Xlib.display.Display()
-xfixes_info = d.query_extension('XFIXES')
-if xfixes_info and xfixes_info.present:
-    print("XFIXES_PRESENT")
-else:
-    print("XFIXES_MISSING")
-d.close()
-`,
-		);
+		const output = (await runPythonScript(sidecarContainer, "xfixes_extension_create_region.py", { env: { DISPLAY: ":99" } })).output.trim();
 		expect(output).toContain("XFIXES_PRESENT");
 	});
 
@@ -1525,20 +1017,7 @@ d.close()
 	});
 
 	test("XTEST extension: simulate input", async ({ sidecarContainer }) => {
-		const output = await runPythonX11(
-			sidecarContainer,
-			`
-import Xlib.display
-
-d = Xlib.display.Display()
-xtest_info = d.query_extension('XTEST')
-if xtest_info and xtest_info.present:
-    print("XTEST_PRESENT")
-else:
-    print("XTEST_MISSING")
-d.close()
-`,
-		);
+		const output = (await runPythonScript(sidecarContainer, "xtest_extension_simulate_input.py", { env: { DISPLAY: ":99" } })).output.trim();
 		expect(output).toContain("XTEST_PRESENT");
 	});
 
@@ -1561,121 +1040,19 @@ test.describe.serial("ICCCM and EWMH compliance", () => {
 	test("WM_PROTOCOLS and WM_DELETE_WINDOW", async ({
 		sidecarContainer,
 	}) => {
-		const output = await runPythonX11(
-			sidecarContainer,
-			`
-import Xlib.display, Xlib.X, Xlib.Xatom
-
-d = Xlib.display.Display()
-screen = d.screen()
-
-# Create a window with WM_DELETE_WINDOW protocol
-w = screen.root.create_window(0, 0, 100, 100, 0, screen.root_depth,
-    Xlib.X.InputOutput, Xlib.X.CopyFromParent)
-w.map()
-d.sync()
-
-# Set WM_PROTOCOLS
-wm_protocols = d.intern_atom('WM_PROTOCOLS')
-wm_delete = d.intern_atom('WM_DELETE_WINDOW')
-
-import struct
-w.change_property(wm_protocols, Xlib.Xatom.ATOM, 32,
-    [wm_delete])
-d.sync()
-
-# Read it back
-prop = w.get_full_property(wm_protocols, Xlib.Xatom.ATOM)
-if prop and len(prop.value) > 0:
-    # prop.value is an array of ints in python-xlib (one per atom),
-    # or raw bytes in some older versions — handle both
-    raw = bytes(prop.value) if isinstance(prop.value, (bytes, bytearray)) else b''
-    if raw:
-        atoms = struct.unpack('<' + 'I' * (len(raw) // 4), raw[:len(raw) - len(raw) % 4])
-    else:
-        atoms = list(prop.value)
-    if wm_delete in atoms:
-        print("WM_DELETE_WINDOW_OK")
-
-d.close()
-`,
-		);
+		const output = (await runPythonScript(sidecarContainer, "wm_protocols_and_wm_delete_window.py", { env: { DISPLAY: ":99" } })).output.trim();
 		expect(output).toContain("WM_DELETE_WINDOW_OK");
 	});
 
 	test("_NET_WM_NAME (UTF-8 window title)", async ({
 		sidecarContainer,
 	}) => {
-		const output = await runPythonX11(
-			sidecarContainer,
-			`
-import Xlib.display, Xlib.X
-
-d = Xlib.display.Display()
-screen = d.screen()
-
-w = screen.root.create_window(0, 0, 100, 100, 0, screen.root_depth,
-    Xlib.X.InputOutput, Xlib.X.CopyFromParent)
-w.map()
-d.sync()
-
-# Set _NET_WM_NAME (UTF-8)
-net_wm_name = d.intern_atom('_NET_WM_NAME')
-utf8_string = d.intern_atom('UTF8_STRING')
-title = 'Test Window — Ünïcödé ✓'
-w.change_property(net_wm_name, utf8_string, 8, title.encode('utf-8'))
-d.sync()
-
-# Read it back
-prop = w.get_full_property(net_wm_name, utf8_string)
-if prop and prop.value.decode('utf-8') == title:
-    print("UTF8_TITLE_OK")
-else:
-    print(f"FAIL: got {prop.value if prop else None}")
-
-d.close()
-`,
-		);
+		const output = (await runPythonScript(sidecarContainer, "net_wm_name_utf_8_window_title.py", { env: { DISPLAY: ":99" } })).output.trim();
 		expect(output).toContain("UTF8_TITLE_OK");
 	});
 
 	test("_NET_WM_STATE management", async ({ sidecarContainer }) => {
-		const output = await runPythonX11(
-			sidecarContainer,
-			`
-import Xlib.display, Xlib.X, Xlib.Xatom
-import struct
-
-d = Xlib.display.Display()
-screen = d.screen()
-
-w = screen.root.create_window(0, 0, 100, 100, 0, screen.root_depth,
-    Xlib.X.InputOutput, Xlib.X.CopyFromParent)
-w.map()
-d.sync()
-
-# Set _NET_WM_STATE with multiple state atoms
-net_wm_state = d.intern_atom('_NET_WM_STATE')
-above = d.intern_atom('_NET_WM_STATE_ABOVE')
-focused = d.intern_atom('_NET_WM_STATE_FOCUSED')
-
-w.change_property(net_wm_state, Xlib.Xatom.ATOM, 32, [above, focused])
-d.sync()
-
-# Read it back
-prop = w.get_full_property(net_wm_state, Xlib.Xatom.ATOM)
-if prop and len(prop.value) > 0:
-    raw = bytes(prop.value) if isinstance(prop.value, (bytes, bytearray)) else b''
-    if raw:
-        atoms = struct.unpack('<' + 'I' * (len(raw) // 4), raw[:len(raw) - len(raw) % 4])
-    else:
-        atoms = list(prop.value)
-    if above in atoms and focused in atoms:
-        print("NET_WM_STATE_OK")
-
-d.close()
-`,
-		);
+		const output = (await runPythonScript(sidecarContainer, "net_wm_state_management.py", { env: { DISPLAY: ":99" } })).output.trim();
 		expect(output).toContain("NET_WM_STATE_OK");
 	});
 });
