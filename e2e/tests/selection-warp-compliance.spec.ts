@@ -5,7 +5,7 @@
  * These tests validate the protocol fixes made for full X11 spec compliance.
  */
 
-import { test, expect } from "./fixtures";
+import { test, expect, runPythonScript } from "./fixtures";
 import type { StartedTestContainer } from "testcontainers";
 
 /** Run a command inside the sidecar container and return stdout. */
@@ -18,19 +18,6 @@ async function execInSidecar(
 	return result.output.trim();
 }
 
-/** Run a python3-xlib script inside the sidecar container. */
-async function runPythonX11(
-	container: StartedTestContainer,
-	script: string,
-): Promise<string> {
-	const escaped = script.replace(/'/g, "'\\''");
-	const result = await container.exec([
-		"bash",
-		"-c",
-		`DISPLAY=:99 python3 -c '${escaped}'`,
-	]);
-	return result.output.trim();
-}
 
 // ==========================================================================
 // INCR (Incremental) Selection Transfer
@@ -41,76 +28,14 @@ test.describe.serial("INCR selection transfer", () => {
 	test("small selection data is transferred inline (non-INCR)", async ({
 		sidecarContainer,
 	}) => {
-		const output = await runPythonX11(
-			sidecarContainer,
-			`
-import Xlib.display, Xlib.X, Xlib.Xatom
-d = Xlib.display.Display()
-root = d.screen().root
-
-# Create a window that owns PRIMARY
-w = root.create_window(0, 0, 10, 10, 0, d.screen().root_depth,
-    Xlib.X.InputOutput, Xlib.X.CopyFromParent)
-w.map()
-d.sync()
-
-# Set small clipboard data via property
-small_data = b"Hello, clipboard!"
-w.change_property(Xlib.Xatom.STRING, Xlib.Xatom.STRING, 8, small_data)
-d.sync()
-
-# Read it back
-prop = w.get_full_property(Xlib.Xatom.STRING, Xlib.X.AnyPropertyType)
-if prop and prop.value == small_data:
-    print("SMALL_TRANSFER_OK")
-else:
-    print(f"SMALL_TRANSFER_FAIL: got {prop}")
-`,
-		);
+		const output = (await runPythonScript(sidecarContainer, "small_selection_data_is_transferred_inline_non_incr.py", { env: { DISPLAY: ":99" } })).output.trim();
 		expect(output).toContain("SMALL_TRANSFER_OK");
 	});
 
 	test("property change and delete round-trip works (INCR infrastructure)", async ({
 		sidecarContainer,
 	}) => {
-		const output = await runPythonX11(
-			sidecarContainer,
-			`
-import Xlib.display, Xlib.X, Xlib.Xatom
-d = Xlib.display.Display()
-root = d.screen().root
-
-w = root.create_window(0, 0, 10, 10, 0, d.screen().root_depth,
-    Xlib.X.InputOutput, Xlib.X.CopyFromParent)
-w.map()
-d.sync()
-
-# Set a large property (128KB)
-large_data = bytes(range(256)) * 512  # 128KB
-test_atom = d.intern_atom("_TEST_INCR_PROP")
-w.change_property(test_atom, Xlib.Xatom.STRING, 8, large_data)
-d.sync()
-
-# Read it back with GetProperty (partial read, then delete)
-prop = w.get_full_property(test_atom, Xlib.X.AnyPropertyType)
-if prop and len(prop.value) == len(large_data):
-    print("LARGE_PROP_OK")
-else:
-    got_len = len(prop.value) if prop else 0
-    print(f"LARGE_PROP_FAIL: expected {len(large_data)}, got {got_len}")
-
-# Delete the property
-w.delete_property(test_atom)
-d.sync()
-
-# Verify deletion
-prop2 = w.get_full_property(test_atom, Xlib.X.AnyPropertyType)
-if prop2 is None:
-    print("DELETE_PROP_OK")
-else:
-    print("DELETE_PROP_FAIL: property still exists")
-`,
-		);
+		const output = (await runPythonScript(sidecarContainer, "property_change_and_delete_round_trip_works_incr_infrastructure.py", { env: { DISPLAY: ":99" } })).output.trim();
 		expect(output).toContain("LARGE_PROP_OK");
 		expect(output).toContain("DELETE_PROP_OK");
 	});
@@ -118,37 +43,7 @@ else:
 	test("MULTIPLE selection target works", async ({
 		sidecarContainer,
 	}) => {
-		const output = await runPythonX11(
-			sidecarContainer,
-			`
-import Xlib.display, Xlib.X, Xlib.Xatom
-d = Xlib.display.Display()
-root = d.screen().root
-
-# Create a window and set CLIPBOARD ownership
-w = root.create_window(0, 0, 10, 10, 0, d.screen().root_depth,
-    Xlib.X.InputOutput, Xlib.X.CopyFromParent,
-    event_mask=Xlib.X.PropertyChangeMask)
-w.map()
-d.sync()
-
-# Intern atoms
-clipboard = d.intern_atom("CLIPBOARD")
-targets_atom = d.intern_atom("TARGETS")
-timestamp_atom = d.intern_atom("TIMESTAMP")
-utf8 = d.intern_atom("UTF8_STRING")
-
-# Set selection owner (set_selection_owner is on the Window, not Display)
-w.set_selection_owner(clipboard, Xlib.X.CurrentTime)
-d.sync()
-
-owner = d.get_selection_owner(clipboard)
-if owner == w:
-    print("SELECTION_OWNER_OK")
-else:
-    print(f"SELECTION_OWNER_FAIL: expected {w}, got {owner}")
-`,
-		);
+		const output = (await runPythonScript(sidecarContainer, "multiple_selection_target_works.py", { env: { DISPLAY: ":99" } })).output.trim();
 		expect(output).toContain("SELECTION_OWNER_OK");
 	});
 });
@@ -162,119 +57,21 @@ test.describe.serial("WarpPointer conditional warp", () => {
 	test("unconditional warp moves pointer to absolute position", async ({
 		sidecarContainer,
 	}) => {
-		const output = await runPythonX11(
-			sidecarContainer,
-			`
-import Xlib.display, Xlib.X
-d = Xlib.display.Display()
-root = d.screen().root
-
-# Warp to absolute position (100, 200) relative to root
-root.warp_pointer(100, 200)
-d.sync()
-
-# Query pointer position
-qp = root.query_pointer()
-dx = abs(qp.root_x - 100)
-dy = abs(qp.root_y - 200)
-if dx <= 1 and dy <= 1:
-    print("ABSOLUTE_WARP_OK")
-else:
-    print(f"ABSOLUTE_WARP_FAIL: expected (100,200), got ({qp.root_x},{qp.root_y})")
-`,
-		);
+		const output = (await runPythonScript(sidecarContainer, "unconditional_warp_moves_pointer_to_absolute_position.py", { env: { DISPLAY: ":99" } })).output.trim();
 		expect(output).toContain("ABSOLUTE_WARP_OK");
 	});
 
 	test("relative warp offsets from current position", async ({
 		sidecarContainer,
 	}) => {
-		const output = await runPythonX11(
-			sidecarContainer,
-			`
-import Xlib.display, Xlib.X
-d = Xlib.display.Display()
-root = d.screen().root
-
-# First warp to a known position
-root.warp_pointer(200, 200)
-d.sync()
-
-# Now relative warp: move by (+50, +30)
-d.warp_pointer(50, 30)
-d.sync()
-
-qp = root.query_pointer()
-dx = abs(qp.root_x - 250)
-dy = abs(qp.root_y - 230)
-if dx <= 1 and dy <= 1:
-    print("RELATIVE_WARP_OK")
-else:
-    print(f"RELATIVE_WARP_FAIL: expected (250,230), got ({qp.root_x},{qp.root_y})")
-`,
-		);
+		const output = (await runPythonScript(sidecarContainer, "relative_warp_offsets_from_current_position.py", { env: { DISPLAY: ":99" } })).output.trim();
 		expect(output).toContain("RELATIVE_WARP_OK");
 	});
 
 	test("conditional warp with src_window only warps if pointer is in src rectangle", async ({
 		sidecarContainer,
 	}) => {
-		const output = await runPythonX11(
-			sidecarContainer,
-			`
-import Xlib.display, Xlib.X
-import Xlib.protocol.request as req
-d = Xlib.display.Display()
-root = d.screen().root
-screen = d.screen()
-
-# Create a window at (100, 100) size 200x200
-w = root.create_window(100, 100, 200, 200, 0, screen.root_depth,
-    Xlib.X.InputOutput, Xlib.X.CopyFromParent,
-    event_mask=Xlib.X.ExposureMask)
-w.map()
-d.sync()
-
-# Conditional WarpPointer with src_window+src rect: only warps if pointer
-# is currently inside that rect. python-xlib's Window.warp_pointer wrapper
-# always uses src_window=None; the underlying request supports it though.
-def conditional_warp(src_id, dx, dy):
-    req.WarpPointer(display=d.display,
-        src_window=src_id, dst_window=0,
-        src_x=0, src_y=0, src_width=200, src_height=200,
-        dst_x=dx, dst_y=dy)
-
-# First test: pointer inside src window -> warp should happen
-root.warp_pointer(200, 200)  # inside the window
-d.sync()
-conditional_warp(w.id, 10, 10)
-d.sync()
-
-qp = root.query_pointer()
-# Pointer was at (200,200), should now be at (210,210) since it was inside the window
-dx = abs(qp.root_x - 210)
-dy = abs(qp.root_y - 210)
-if dx <= 2 and dy <= 2:
-    print("CONDITIONAL_WARP_INSIDE_OK")
-else:
-    print(f"CONDITIONAL_WARP_INSIDE_FAIL: expected ~(210,210), got ({qp.root_x},{qp.root_y})")
-
-# Second test: pointer outside src window -> warp should NOT happen
-root.warp_pointer(50, 50)  # outside the window (100,100,200,200)
-d.sync()
-conditional_warp(w.id, 99, 99)
-d.sync()
-
-qp2 = root.query_pointer()
-# Pointer should still be at (50,50) since it was outside the window
-dx2 = abs(qp2.root_x - 50)
-dy2 = abs(qp2.root_y - 50)
-if dx2 <= 2 and dy2 <= 2:
-    print("CONDITIONAL_WARP_OUTSIDE_OK")
-else:
-    print(f"CONDITIONAL_WARP_OUTSIDE_FAIL: expected ~(50,50), got ({qp2.root_x},{qp2.root_y})")
-`,
-		);
+		const output = (await runPythonScript(sidecarContainer, "conditional_warp_with_src_window_only_warps_if_pointer_is_in_src_rectangle.py", { env: { DISPLAY: ":99" } })).output.trim();
 		expect(output).toContain("CONDITIONAL_WARP_INSIDE_OK");
 		expect(output).toContain("CONDITIONAL_WARP_OUTSIDE_OK");
 	});
@@ -289,31 +86,7 @@ test.describe.serial("DELETE selection target", () => {
 	test("DELETE target clears selection ownership", async ({
 		sidecarContainer,
 	}) => {
-		const output = await runPythonX11(
-			sidecarContainer,
-			`
-import Xlib.display, Xlib.X, Xlib.Xatom
-d = Xlib.display.Display()
-root = d.screen().root
-
-# Create owner window
-w = root.create_window(0, 0, 10, 10, 0, d.screen().root_depth,
-    Xlib.X.InputOutput, Xlib.X.CopyFromParent)
-w.map()
-d.sync()
-
-# Take PRIMARY ownership (set_selection_owner is on the Window).
-# Predefined atoms live in Xlib.Xatom, not Xlib.X.
-w.set_selection_owner(Xlib.Xatom.PRIMARY, Xlib.X.CurrentTime)
-d.sync()
-
-owner = d.get_selection_owner(Xlib.Xatom.PRIMARY)
-if owner == w:
-    print("OWNER_SET_OK")
-else:
-    print(f"OWNER_SET_FAIL: {owner}")
-`,
-		);
+		const output = (await runPythonScript(sidecarContainer, "delete_target_clears_selection_ownership.py", { env: { DISPLAY: ":99" } })).output.trim();
 		expect(output).toContain("OWNER_SET_OK");
 	});
 });
@@ -473,31 +246,7 @@ test.describe.serial("RENDER extension compliance", () => {
 	test("RENDER PictFormats include required formats", async ({
 		sidecarContainer,
 	}) => {
-		const output = await runPythonX11(
-			sidecarContainer,
-			`
-import Xlib.display
-d = Xlib.display.Display()
-
-# Check that QueryPictFormats returns the expected formats
-# We test this by verifying the display opened successfully
-# and that basic RENDER operations work
-root = d.screen().root
-w = root.create_window(0, 0, 10, 10, 0, d.screen().root_depth,
-    Xlib.X.InputOutput, Xlib.X.CopyFromParent)
-w.map()
-d.sync()
-
-# Query extension
-render_ext = d.query_extension("RENDER")
-if render_ext:
-    print("RENDER_EXT_OK")
-else:
-    print("RENDER_EXT_MISSING")
-
-d.close()
-`,
-		);
+		const output = (await runPythonScript(sidecarContainer, "render_pictformats_include_required_formats.py", { env: { DISPLAY: ":99" } })).output.trim();
 		expect(output).toContain("RENDER_EXT_OK");
 	});
 });
@@ -511,115 +260,21 @@ test.describe.serial("Window manager compliance", () => {
 	test("override-redirect windows bypass SubstructureRedirect", async ({
 		sidecarContainer,
 	}) => {
-		const output = await runPythonX11(
-			sidecarContainer,
-			`
-import Xlib.display, Xlib.X
-d = Xlib.display.Display()
-root = d.screen().root
-
-# Create an override-redirect window
-w = root.create_window(50, 50, 100, 100, 0, d.screen().root_depth,
-    Xlib.X.InputOutput, Xlib.X.CopyFromParent,
-    override_redirect=True,
-    event_mask=Xlib.X.ExposureMask)
-w.map()
-d.sync()
-
-# Verify window is mapped and has override-redirect set
-attrs = w.get_attributes()
-if attrs.override_redirect:
-    print("OVERRIDE_REDIRECT_OK")
-else:
-    print("OVERRIDE_REDIRECT_FAIL")
-`,
-		);
+		const output = (await runPythonScript(sidecarContainer, "override_redirect_windows_bypass_substructureredirect.py", { env: { DISPLAY: ":99" } })).output.trim();
 		expect(output).toContain("OVERRIDE_REDIRECT_OK");
 	});
 
 	test("window stacking operations (raise/lower)", async ({
 		sidecarContainer,
 	}) => {
-		const output = await runPythonX11(
-			sidecarContainer,
-			`
-import Xlib.display, Xlib.X
-d = Xlib.display.Display()
-root = d.screen().root
-
-# Create two overlapping windows
-w1 = root.create_window(0, 0, 100, 100, 0, d.screen().root_depth,
-    Xlib.X.InputOutput, Xlib.X.CopyFromParent)
-w2 = root.create_window(50, 50, 100, 100, 0, d.screen().root_depth,
-    Xlib.X.InputOutput, Xlib.X.CopyFromParent)
-w1.map()
-w2.map()
-d.sync()
-
-# Raise w1 above w2
-w1.raise_window()
-d.sync()
-
-# Lower w1 below w2
-w1.configure(stack_mode=Xlib.X.Below)
-d.sync()
-
-# Query the tree to check stacking order
-tree = root.query_tree()
-children = tree.children
-if w1 in children and w2 in children:
-    i1 = children.index(w1)
-    i2 = children.index(w2)
-    if i1 < i2:
-        print("STACKING_OK")
-    else:
-        print(f"STACKING_FAIL: w1 at {i1}, w2 at {i2}")
-else:
-    print("STACKING_FAIL: windows not found in tree")
-`,
-		);
+		const output = (await runPythonScript(sidecarContainer, "window_stacking_operations_raise_lower.py", { env: { DISPLAY: ":99" } })).output.trim();
 		expect(output).toContain("STACKING_OK");
 	});
 
 	test("focus model (Passive, Locally Active) works", async ({
 		sidecarContainer,
 	}) => {
-		const output = await runPythonX11(
-			sidecarContainer,
-			`
-import Xlib.display, Xlib.X
-d = Xlib.display.Display()
-root = d.screen().root
-
-# Create a window and set input focus
-w = root.create_window(0, 0, 100, 100, 0, d.screen().root_depth,
-    Xlib.X.InputOutput, Xlib.X.CopyFromParent,
-    event_mask=Xlib.X.FocusChangeMask | Xlib.X.KeyPressMask)
-w.map()
-d.sync()
-
-# Set focus to window
-d.set_input_focus(w, Xlib.X.RevertToParent, Xlib.X.CurrentTime)
-d.sync()
-
-# Verify focus
-focus = d.get_input_focus()
-if focus.focus == w:
-    print("FOCUS_SET_OK")
-else:
-    print(f"FOCUS_SET_FAIL: expected {w}, got {focus.focus}")
-
-# Set focus to PointerRoot
-d.set_input_focus(Xlib.X.PointerRoot, Xlib.X.RevertToPointerRoot, Xlib.X.CurrentTime)
-d.sync()
-
-focus2 = d.get_input_focus()
-if focus2.focus == Xlib.X.PointerRoot:
-    print("FOCUS_POINTERROOT_OK")
-else:
-    print(f"FOCUS_POINTERROOT_FAIL: got {focus2.focus}")
-`,
-		);
+		const output = (await runPythonScript(sidecarContainer, "focus_model_passive_locally_active_works.py", { env: { DISPLAY: ":99" } })).output.trim();
 		expect(output).toContain("FOCUS_SET_OK");
 		expect(output).toContain("FOCUS_POINTERROOT_OK");
 	});
