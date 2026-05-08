@@ -10,7 +10,16 @@
 use super::parse_minor;
 use crate::xserver::event::serialize_event_with_layout;
 use crate::xserver::reply::ReplyBuf;
-use x11rb_protocol::protocol::xkb::{ControlsNotifyEvent, MapNotifyEvent, StateNotifyEvent};
+use x11rb_protocol::protocol::ge::QUERY_VERSION_REQUEST as GE_QUERY_VERSION_REQUEST;
+use x11rb_protocol::protocol::xkb::{
+    BELL_REQUEST, ControlsNotifyEvent, GET_COMPAT_MAP_REQUEST, GET_CONTROLS_REQUEST,
+    GET_DEVICE_INFO_REQUEST, GET_INDICATOR_MAP_REQUEST, GET_INDICATOR_STATE_REQUEST,
+    GET_KBD_BY_NAME_REQUEST, GET_MAP_REQUEST, GET_NAMED_INDICATOR_REQUEST, GET_NAMES_REQUEST,
+    GET_STATE_REQUEST, LATCH_LOCK_STATE_REQUEST, LIST_COMPONENTS_REQUEST, MapNotifyEvent,
+    PER_CLIENT_FLAGS_REQUEST, SELECT_EVENTS_REQUEST, SET_COMPAT_MAP_REQUEST, SET_CONTROLS_REQUEST,
+    SET_DEBUGGING_FLAGS_REQUEST, SET_DEVICE_INFO_REQUEST, SET_INDICATOR_MAP_REQUEST, SET_MAP_REQUEST,
+    SET_NAMED_INDICATOR_REQUEST, SET_NAMES_REQUEST, StateNotifyEvent, USE_EXTENSION_REQUEST,
+};
 
 mod compat;
 mod controls;
@@ -234,7 +243,7 @@ pub(crate) fn handle_ge_request(state: &mut ClientState, data: &[u8], seq: u16) 
     debug!("Generic Event Extension minor opcode: {minor}");
 
     match minor {
-        0 => {
+        GE_QUERY_VERSION_REQUEST => {
             // QueryVersion: reply with version 1.0
             ReplyBuf::fixed(seq, state.msb_first)
                 .set_u16(8, 1) // major version
@@ -265,7 +274,7 @@ pub(crate) fn handle_xkb_request(state: &mut ClientState, data: &[u8], seq: u16)
     let device_id_byte = if data.len() >= 6 { data[4] } else { 0 };
 
     match minor {
-        0 => {
+        USE_EXTENSION_REQUEST => {
             // UseExtension: reply with supported=true, version 1.0
             ReplyBuf::fixed(seq, state.msb_first)
                 .set_data_byte(1) // supported = true
@@ -273,8 +282,8 @@ pub(crate) fn handle_xkb_request(state: &mut ClientState, data: &[u8], seq: u16)
                 .set_u16(10, 0) // server minor version
                 .build()
         }
-        1 => handle_xkb_select_events(state, data), // SelectEvents
-        3 => {
+        SELECT_EVENTS_REQUEST => handle_xkb_select_events(state, data),
+        BELL_REQUEST => {
             // Bell: ring the bell with percent from request.
             // XKB Bell request layout: 4-5=deviceSpec, 6-7=bellClass,
             //   8-9=bellID, 10=percent, 11=forceSound, 12=soundOnly,
@@ -294,20 +303,20 @@ pub(crate) fn handle_xkb_request(state: &mut ClientState, data: &[u8], seq: u16)
             // frontend or test harness can observe bell events.
             Vec::new()
         }
-        4 => controls::build_xkb_get_state_reply(state, seq, device_id_byte),
-        5 => controls::handle_xkb_latch_lock_state(state, data, seq),
-        6 => controls::build_xkb_get_controls_reply(state, seq, device_id_byte),
-        7 => controls::handle_xkb_set_controls(state, data, seq),
-        8 => map::build_xkb_get_map_reply(state, seq),
-        9 => map::handle_xkb_set_map(state, data, seq),
-        10 => compat::build_xkb_get_compat_map_reply(state, seq, device_id_byte),
-        11 => compat::handle_xkb_set_compat_map(state, data), // SetCompatMap
-        12 => indicators::handle_get_indicator_state(state, seq, device_id_byte),
-        13 => indicators::handle_get_indicator_map(state, data, seq, device_id_byte),
-        14 => indicators::handle_set_indicator_map(state, data),
-        15 => indicators::handle_get_named_indicator(state, data, seq, device_id_byte),
-        16 => handle_xkb_set_named_indicator(state, data), // SetNamedIndicator
-        17 => {
+        GET_STATE_REQUEST => controls::build_xkb_get_state_reply(state, seq, device_id_byte),
+        LATCH_LOCK_STATE_REQUEST => controls::handle_xkb_latch_lock_state(state, data, seq),
+        GET_CONTROLS_REQUEST => controls::build_xkb_get_controls_reply(state, seq, device_id_byte),
+        SET_CONTROLS_REQUEST => controls::handle_xkb_set_controls(state, data, seq),
+        GET_MAP_REQUEST => map::build_xkb_get_map_reply(state, seq),
+        SET_MAP_REQUEST => map::handle_xkb_set_map(state, data, seq),
+        GET_COMPAT_MAP_REQUEST => compat::build_xkb_get_compat_map_reply(state, seq, device_id_byte),
+        SET_COMPAT_MAP_REQUEST => compat::handle_xkb_set_compat_map(state, data),
+        GET_INDICATOR_STATE_REQUEST => indicators::handle_get_indicator_state(state, seq, device_id_byte),
+        GET_INDICATOR_MAP_REQUEST => indicators::handle_get_indicator_map(state, data, seq, device_id_byte),
+        SET_INDICATOR_MAP_REQUEST => indicators::handle_set_indicator_map(state, data),
+        GET_NAMED_INDICATOR_REQUEST => indicators::handle_get_named_indicator(state, data, seq, device_id_byte),
+        SET_NAMED_INDICATOR_REQUEST => handle_xkb_set_named_indicator(state, data),
+        GET_NAMES_REQUEST => {
             // GetNames: which-name bitmask selects which strings to return.
             use x11rb_protocol::protocol::xkb::GetNamesRequest;
             let req_which = GetNamesRequest::try_parse_request(
@@ -318,10 +327,11 @@ pub(crate) fn handle_xkb_request(state: &mut ClientState, data: &[u8], seq: u16)
             .unwrap_or(0x0FFF);
             names::build_xkb_get_names_reply(state, seq, device_id_byte, req_which)
         }
-        18 => names::handle_xkb_set_names(state, data, seq), // SetNames
+        SET_NAMES_REQUEST => names::handle_xkb_set_names(state, data, seq),
+        // GetGeometry/SetGeometry (minor 19/20): no constants in x11rb-protocol 0.13.2.
         19 => geometry::build_xkb_get_geometry_reply(state, seq, device_id_byte),
         20 => geometry::handle_xkb_set_geometry(state, data, seq),
-        21 => {
+        PER_CLIENT_FLAGS_REQUEST => {
             // PerClientFlags: reply with `value & change` and the supported mask.
             use x11rb_protocol::protocol::xkb::PerClientFlagsRequest;
             let req = parse_minor!(PerClientFlagsRequest, data, state, seq, 135, 21);
@@ -337,11 +347,11 @@ pub(crate) fn handle_xkb_request(state: &mut ClientState, data: &[u8], seq: u16)
                 .set_u32(20, u32::from(req.auto_ctrls_values))
                 .build()
         }
-        22 => device::handle_list_components(state, seq, device_id_byte),
-        23 => map::handle_xkb_get_kbd_by_name(state, data, seq, device_id_byte),
-        24 => device::handle_get_device_info(state, seq, device_id_byte),
-        25 => device::handle_set_device_info(state, data),
-        101 => {
+        LIST_COMPONENTS_REQUEST => device::handle_list_components(state, seq, device_id_byte),
+        GET_KBD_BY_NAME_REQUEST => map::handle_xkb_get_kbd_by_name(state, data, seq, device_id_byte),
+        GET_DEVICE_INFO_REQUEST => device::handle_get_device_info(state, seq, device_id_byte),
+        SET_DEVICE_INFO_REQUEST => device::handle_set_device_info(state, data),
+        SET_DEBUGGING_FLAGS_REQUEST => {
             // SetDebuggingFlags: reply with all-zero flags/ctrls.
             // Wire: 4-7=msg_length, 8-11=affect_flags, 12-15=flags,
             //       16-19=affect_ctrls, 20-23=ctrls, then message.

@@ -9,29 +9,21 @@ use crate::xserver::event::serialize_event_with_layout;
 use crate::xserver::reply::ReplyBuf;
 use crate::xserver::request::request_header;
 use x11rb_protocol::protocol::present::{
-    CompleteKind, CompleteMode, CompleteNotifyEvent,
-    ConfigureNotifyEvent as PresentConfigureNotifyEvent, IdleNotifyEvent, NotifyMSCRequest,
-    PixmapRequest as PresentPixmapRequest, QueryCapabilitiesRequest,
-    SelectInputRequest as PresentSelectInputRequest,
+    Capability, CompleteKind, CompleteMode, CompleteNotifyEvent,
+    ConfigureNotifyEvent as PresentConfigureNotifyEvent, EventMask, IdleNotifyEvent,
+    NOTIFY_MSC_REQUEST, NotifyMSCRequest, Option as PresentOption, PIXMAP_REQUEST,
+    PixmapRequest as PresentPixmapRequest, QUERY_CAPABILITIES_REQUEST,
+    QUERY_VERSION_REQUEST as PRESENT_QUERY_VERSION_REQUEST, QueryCapabilitiesRequest,
+    SELECT_INPUT_REQUEST, SelectInputRequest as PresentSelectInputRequest,
 };
-use x11rb_protocol::protocol::xc_misc::GetXIDListRequest;
+use x11rb_protocol::protocol::xc_misc::{
+    GET_VERSION_REQUEST, GET_XID_LIST_REQUEST, GET_XID_RANGE_REQUEST, GetXIDListRequest,
+};
 
 /// Present major opcode (assigned at QueryExtension time).
 const PRESENT_MAJOR_OPCODE: u8 = 148;
 /// XGE response_type for all Present events.
 const GENERIC_EVENT: u8 = 35;
-
-// Present event mask bits (from the Present extension spec).
-const PRESENT_COMPLETE_NOTIFY_MASK: u32 = 1;
-const PRESENT_IDLE_NOTIFY_MASK: u32 = 2;
-const PRESENT_CONFIG_NOTIFY_MASK: u32 = 4;
-
-// Present option flags for PresentPixmap.
-const PRESENT_OPTION_ASYNC: u32 = 1;
-const PRESENT_OPTION_COPY: u32 = 2;
-
-// Present capability flags.
-const PRESENT_CAPABILITY_ASYNC: u32 = 1;
 
 /// Wire-field layout for `present::CompleteNotifyEvent` (40 bytes).
 const COMPLETE_NOTIFY_LAYOUT: &[(usize, usize)] = &[
@@ -82,15 +74,15 @@ pub(crate) fn handle_xc_misc_request(state: &mut ClientState, data: &[u8], seq: 
     debug!("XC-MISC minor opcode: {minor}");
 
     match minor {
-        0 => {
-            // GetVersion: reply with version 1.1
+        GET_VERSION_REQUEST => {
+            // Reply with version 1.1.
             ReplyBuf::fixed(seq, state.msb_first)
                 .set_u16(8, 1) // major version
                 .set_u16(10, 1) // minor version
                 .build()
         }
-        1 => {
-            // GetXIDRange: reply with a contiguous range of resource IDs.
+        GET_XID_RANGE_REQUEST => {
+            // Reply with a contiguous range of resource IDs.
             // Per the XC-MISC spec, first try to return recycled (freed) IDs
             // as individual IDs wouldn't form a contiguous range; fall back
             // to allocating new IDs from the client's ID space.
@@ -107,8 +99,8 @@ pub(crate) fn handle_xc_misc_request(state: &mut ClientState, data: &[u8], seq: 
                 .set_u32(12, range_size) // count
                 .build()
         }
-        2 => {
-            // GetXIDList: return requested number of individual resource IDs.
+        GET_XID_LIST_REQUEST => {
+            // Return the requested number of individual resource IDs.
             // Prefer recycled (freed) IDs over allocating new sequential ones.
             let count = GetXIDListRequest::try_parse_request(request_header(data), &data[4..])
                 .map(|r| r.count)
@@ -167,15 +159,12 @@ pub(crate) fn handle_present_request(state: &mut ClientState, data: &[u8], seq: 
     debug!("Present minor opcode: {minor}");
 
     match minor {
-        // QueryVersion
-        0 => {
-            ReplyBuf::fixed(seq, state.msb_first)
-                .set_u32(8, 1) // major version
-                .set_u32(12, 2) // minor version
-                .build()
-        }
-        // Pixmap (PresentPixmap) -- the critical operation
-        1 => {
+        PRESENT_QUERY_VERSION_REQUEST => ReplyBuf::fixed(seq, state.msb_first)
+            .set_u32(8, 1) // major version
+            .set_u32(12, 2) // minor version
+            .build(),
+        PIXMAP_REQUEST => {
+            // PresentPixmap — the critical operation.
             let req = parse_minor!(PresentPixmapRequest, data, state, seq, 148, minor as u16);
             let window = req.window;
             let pixmap = req.pixmap;
@@ -208,8 +197,8 @@ pub(crate) fn handle_present_request(state: &mut ClientState, data: &[u8], seq: 
                 }
             }
 
-            let is_async = (options & PRESENT_OPTION_ASYNC) != 0;
-            let is_copy = (options & PRESENT_OPTION_COPY) != 0;
+            let is_async = (options & u32::from(PresentOption::ASYNC)) != 0;
+            let is_copy = (options & u32::from(PresentOption::COPY)) != 0;
 
             info!(
                 "PresentPixmap: window={:#x} pixmap={:#x} serial={} x_off={} y_off={} options={:#x}",
@@ -488,7 +477,8 @@ pub(crate) fn handle_present_request(state: &mut ClientState, data: &[u8], seq: 
                 .present_subscriptions
                 .iter()
                 .filter(|(_, sub)| {
-                    sub.window == window && (sub.event_mask & PRESENT_COMPLETE_NOTIFY_MASK) != 0
+                    sub.window == window
+                        && (sub.event_mask & u32::from(EventMask::COMPLETE_NOTIFY)) != 0
                 })
                 .map(|(&eid, sub)| (eid, sub.window))
                 .collect();
@@ -529,7 +519,8 @@ pub(crate) fn handle_present_request(state: &mut ClientState, data: &[u8], seq: 
                     .present_subscriptions
                     .iter()
                     .filter(|(_, sub)| {
-                        sub.window == window && (sub.event_mask & PRESENT_IDLE_NOTIFY_MASK) != 0
+                        sub.window == window
+                            && (sub.event_mask & u32::from(EventMask::IDLE_NOTIFY)) != 0
                     })
                     .map(|(&eid, _)| eid)
                     .collect();
@@ -557,8 +548,7 @@ pub(crate) fn handle_present_request(state: &mut ClientState, data: &[u8], seq: 
 
             Vec::new() // PresentPixmap has no reply
         }
-        // NotifyMSC
-        2 => {
+        NOTIFY_MSC_REQUEST => {
             let req = parse_minor!(NotifyMSCRequest, data, state, seq, 148, minor as u16);
             let window = req.window;
             let serial = req.serial;
@@ -579,7 +569,8 @@ pub(crate) fn handle_present_request(state: &mut ClientState, data: &[u8], seq: 
                 .present_subscriptions
                 .iter()
                 .filter(|(_, sub)| {
-                    sub.window == window && (sub.event_mask & PRESENT_COMPLETE_NOTIFY_MASK) != 0
+                    sub.window == window
+                        && (sub.event_mask & u32::from(EventMask::COMPLETE_NOTIFY)) != 0
                 })
                 .map(|(&eid, sub)| (eid, sub.window))
                 .collect();
@@ -609,8 +600,7 @@ pub(crate) fn handle_present_request(state: &mut ClientState, data: &[u8], seq: 
             }
             Vec::new()
         }
-        // SelectInput
-        3 => {
+        SELECT_INPUT_REQUEST => {
             let req = parse_minor!(
                 PresentSelectInputRequest,
                 data,
@@ -638,14 +628,14 @@ pub(crate) fn handle_present_request(state: &mut ClientState, data: &[u8], seq: 
             }
             Vec::new() // SelectInput has no reply
         }
-        // QueryCapabilities
-        4 => {
+        QUERY_CAPABILITIES_REQUEST => {
             let _target =
                 QueryCapabilitiesRequest::try_parse_request(request_header(data), &data[4..])
                     .map(|r| r.target)
                     .unwrap_or(0);
             ReplyBuf::fixed(seq, state.msb_first)
-                .set_u32(8, PRESENT_CAPABILITY_ASYNC) // async: we always present asynchronously
+                // We always present asynchronously.
+                .set_u32(8, u32::from(u8::from(Capability::ASYNC)))
                 .build()
         }
         _ => {
@@ -680,7 +670,8 @@ pub(crate) fn send_present_config_notify(
         .present_subscriptions
         .iter()
         .filter(|(_, sub)| {
-            sub.window == window && (sub.event_mask & PRESENT_CONFIG_NOTIFY_MASK) != 0
+            sub.window == window
+                && (sub.event_mask & u32::from(EventMask::CONFIGURE_NOTIFY)) != 0
         })
         .map(|(&eid, _)| eid)
         .collect();

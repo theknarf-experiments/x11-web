@@ -10,9 +10,11 @@ use crate::framebuffer::Framebuffer;
 use crate::xserver::core::require_len;
 use crate::xserver::reply::ReplyBuf;
 #[cfg(target_os = "linux")]
-use x11rb_protocol::protocol::shm::CreateSegmentRequest;
+use x11rb_protocol::protocol::shm::{CREATE_SEGMENT_REQUEST, CreateSegmentRequest};
 use x11rb_protocol::protocol::shm::{
-    AttachRequest, CreatePixmapRequest, DetachRequest, GetImageRequest, PutImageRequest,
+    ATTACH_FD_REQUEST, ATTACH_REQUEST, AttachRequest, CREATE_PIXMAP_REQUEST, CreatePixmapRequest,
+    DETACH_REQUEST, DetachRequest, GET_IMAGE_REQUEST, GetImageRequest, PUT_IMAGE_REQUEST,
+    PutImageRequest, QUERY_VERSION_REQUEST,
 };
 
 /// Handle MIT-SHM extension requests (major opcode 130).
@@ -24,8 +26,7 @@ pub(crate) fn handle_shm_request(state: &mut ClientState, data: &[u8], seq: u16)
     };
 
     match minor {
-        // QueryVersion
-        0 => {
+        QUERY_VERSION_REQUEST => {
             info!("SHM QueryVersion");
             ReplyBuf::fixed(seq, state.msb_first)
                 .set_data_byte(1) // shared_pixmaps = true
@@ -37,8 +38,7 @@ pub(crate) fn handle_shm_request(state: &mut ClientState, data: &[u8], seq: u16)
                 .build()
         }
 
-        // Attach
-        1 => {
+        ATTACH_REQUEST => {
             let req = parse_minor!(AttachRequest, data, state, seq, 130, minor as u16);
             let shmseg = req.shmseg;
             let shmid = req.shmid as i32;
@@ -75,8 +75,7 @@ pub(crate) fn handle_shm_request(state: &mut ClientState, data: &[u8], seq: u16)
             Vec::new() // No reply for Attach
         }
 
-        // Detach
-        2 => {
+        DETACH_REQUEST => {
             let req = parse_minor!(DetachRequest, data, state, seq, 130, minor as u16);
             let shmseg = req.shmseg;
             info!("SHM Detach: shmseg={shmseg}");
@@ -90,8 +89,7 @@ pub(crate) fn handle_shm_request(state: &mut ClientState, data: &[u8], seq: u16)
             Vec::new() // No reply for Detach
         }
 
-        // PutImage
-        3 => {
+        PUT_IMAGE_REQUEST => {
             let req = parse_minor!(PutImageRequest, data, state, seq, 130, minor as u16);
             let drawable = req.drawable;
             let _gc = req.gc;
@@ -182,8 +180,7 @@ pub(crate) fn handle_shm_request(state: &mut ClientState, data: &[u8], seq: u16)
             }
         }
 
-        // GetImage
-        4 => {
+        GET_IMAGE_REQUEST => {
             let req = parse_minor!(GetImageRequest, data, state, seq, 130, minor as u16);
             let drawable = req.drawable;
             let src_x = req.x;
@@ -233,8 +230,7 @@ pub(crate) fn handle_shm_request(state: &mut ClientState, data: &[u8], seq: u16)
                 .build()
         }
 
-        // CreatePixmap
-        5 => {
+        CREATE_PIXMAP_REQUEST => {
             let req = parse_minor!(CreatePixmapRequest, data, state, seq, 130, minor as u16);
             let pid = req.pid;
             let width = req.width;
@@ -264,8 +260,8 @@ pub(crate) fn handle_shm_request(state: &mut ClientState, data: &[u8], seq: u16)
             Vec::new()
         }
 
-        // AttachFd (minor 6) — MIT-SHM 1.2+ with fd passing
-        6 => {
+        ATTACH_FD_REQUEST => {
+            // MIT-SHM 1.2+ with fd passing.
             require_len!(data, 12, seq, 130, minor as u16, state.msb_first);
             let shmseg = state.read_u32(data, 4);
             let read_only = data[8] != 0;
@@ -318,11 +314,10 @@ pub(crate) fn handle_shm_request(state: &mut ClientState, data: &[u8], seq: u16)
             Vec::new()
         }
 
-        // CreateSegment (minor 7) — MIT-SHM 1.2+
-        // Server creates an SHM segment and returns the fd to the client.
-        // Linux-only: relies on memfd_create.
+        // MIT-SHM 1.2+: server creates an SHM segment and returns the fd to
+        // the client. Linux-only since it relies on memfd_create.
         #[cfg(target_os = "linux")]
-        7 => {
+        CREATE_SEGMENT_REQUEST => {
             let req = parse_minor!(CreateSegmentRequest, data, state, seq, 130, minor as u16);
             let shmseg = req.shmseg;
             let size = req.size as usize;
@@ -336,7 +331,7 @@ pub(crate) fn handle_shm_request(state: &mut ClientState, data: &[u8], seq: u16)
                     seq,
                     0,
                     130,
-                    7,
+                    u16::from(CREATE_SEGMENT_REQUEST),
                 );
             }
 

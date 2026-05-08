@@ -2,6 +2,13 @@
 
 use super::parse_minor;
 use tracing::{debug, warn};
+use x11rb_protocol::protocol::xproto::{
+    BUTTON_PRESS_EVENT, BUTTON_RELEASE_EVENT, KEY_PRESS_EVENT, KEY_RELEASE_EVENT,
+    MOTION_NOTIFY_EVENT,
+};
+use x11rb_protocol::protocol::xtest::{
+    COMPARE_CURSOR_REQUEST, FAKE_INPUT_REQUEST, GET_VERSION_REQUEST, GRAB_CONTROL_REQUEST,
+};
 
 use super::super::client::ClientState;
 use crate::xserver::core::require_len;
@@ -14,15 +21,13 @@ pub(crate) fn handle_xtest_request(state: &mut ClientState, data: &[u8], seq: u1
         crate::xserver::core::build_error(code, seq, bad_value, 150, minor as u16)
     };
     match minor {
-        0 => {
-            // GetVersion
+        GET_VERSION_REQUEST => {
             ReplyBuf::fixed(seq, state.msb_first)
                 .set_data_byte(2) // major_version in data byte
                 .set_u16(8, 2) // minor_version
                 .build()
         }
-        1 => {
-            // CompareCursor
+        COMPARE_CURSOR_REQUEST => {
             require_len!(data, 12, seq, 150, minor as u16, state.msb_first);
             use x11rb_protocol::protocol::xtest::CompareCursorRequest;
             let req = parse_minor!(CompareCursorRequest, data, state, seq, 150, minor as u16);
@@ -47,8 +52,7 @@ pub(crate) fn handle_xtest_request(state: &mut ClientState, data: &[u8], seq: u1
                 .set_data_byte(if same { 1 } else { 0 })
                 .build()
         }
-        2 => {
-            // FakeInput
+        FAKE_INPUT_REQUEST => {
             // SECURITY: untrusted clients are denied FakeInput (BadAccess)
             if state.trust_level > 0 {
                 return xtest_err(crate::xserver::core::ACCESS_ERROR, 0);
@@ -93,15 +97,14 @@ pub(crate) fn handle_xtest_request(state: &mut ClientState, data: &[u8], seq: u1
                 };
 
                 match event_type {
-                    2 | 3 => {
-                        // KeyPress (2) / KeyRelease (3)
+                    KEY_PRESS_EVENT | KEY_RELEASE_EVENT => {
                         let keycode = detail;
 
                         let xkb_before = super::xkb::XkbStateSnapshot::capture(state);
                         let byte_idx = (keycode / 8) as usize;
                         let bit_mask = 1u8 << (keycode % 8);
                         if byte_idx < state.pressed_keys.len() {
-                            if event_type == 2 {
+                            if event_type == KEY_PRESS_EVENT {
                                 state.pressed_keys[byte_idx] |= bit_mask;
                                 state.xkb_state.key_press(keycode);
                             } else {
@@ -119,13 +122,11 @@ pub(crate) fn handle_xtest_request(state: &mut ClientState, data: &[u8], seq: u1
                         let event = build_kbp_event(state, event_type, keycode);
                         state.pending_events.push(event);
                     }
-                    4 | 5 => {
-                        // ButtonPress (4) / ButtonRelease (5)
+                    BUTTON_PRESS_EVENT | BUTTON_RELEASE_EVENT => {
                         let event = build_kbp_event(state, event_type, detail);
                         state.pending_events.push(event);
                     }
-                    6 => {
-                        // MotionNotify
+                    MOTION_NOTIFY_EVENT => {
                         let old_px = state.pointer_x;
                         let old_py = state.pointer_y;
                         if detail == 0 {
@@ -146,7 +147,7 @@ pub(crate) fn handle_xtest_request(state: &mut ClientState, data: &[u8], seq: u1
                             state.pointer_x = bx;
                             state.pointer_y = by;
                         }
-                        let event = build_kbp_event(state, 6, 0);
+                        let event = build_kbp_event(state, MOTION_NOTIFY_EVENT, 0);
                         state.pending_events.push(event);
                     }
                     _ => {
@@ -157,8 +158,7 @@ pub(crate) fn handle_xtest_request(state: &mut ClientState, data: &[u8], seq: u1
             }
             Vec::new()
         }
-        3 => {
-            // GrabControl
+        GRAB_CONTROL_REQUEST => {
             // Impervious mode: when enabled, XTEST events bypass active grabs.
             // This allows accessibility tools and test harnesses to inject
             // events even when another client holds a grab.

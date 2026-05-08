@@ -8,8 +8,9 @@ use super::{
 use crate::xserver::core::require_len;
 use crate::xserver::ClientState;
 use x11rb_protocol::protocol::render::{
+    CREATE_CONICAL_GRADIENT_REQUEST, CREATE_LINEAR_GRADIENT_REQUEST, CREATE_RADIAL_GRADIENT_REQUEST,
     CreateConicalGradientRequest, CreateLinearGradientRequest, CreateRadialGradientRequest,
-    CreateSolidFillRequest, Fixed,
+    CreateSolidFillRequest, Fixed, Repeat,
 };
 
 /// Convert a 16.16 fixed-point i32 (x11rb `Fixed`) to f64.
@@ -52,9 +53,9 @@ pub(crate) fn handle_create_gradient_fill(
     require_len!(data, 8, seq, 139, data[1] as u16, state.msb_first);
     let minor = data[1];
     match minor {
-        34 => handle_create_linear_gradient(state, data, seq),
-        35 => handle_create_radial_gradient(state, data, seq),
-        36 => handle_create_conical_gradient(state, data, seq),
+        CREATE_LINEAR_GRADIENT_REQUEST => handle_create_linear_gradient(state, data, seq),
+        CREATE_RADIAL_GRADIENT_REQUEST => handle_create_radial_gradient(state, data, seq),
+        CREATE_CONICAL_GRADIENT_REQUEST => handle_create_conical_gradient(state, data, seq),
         _ => {
             // Unreachable from dispatch, but return proper error if called directly
             render_err(
@@ -218,17 +219,17 @@ pub(crate) fn rasterize_linear_gradient(
                 py = tx_py;
             }
             let t_raw = ((px - p1x) * dx + (py - p1y) * dy) / len_sq;
-            let (r, g, b, a) = match repeat {
-                1 => {
+            let (r, g, b, a) = match Repeat::from(repeat) {
+                Repeat::NORMAL => {
                     let t = t_raw.rem_euclid(1.0);
                     sample_gradient_stops(&grad.stops, t)
                 }
-                3 => {
+                Repeat::REFLECT => {
                     let r2 = t_raw.rem_euclid(2.0);
                     let t = if r2 > 1.0 { 2.0 - r2 } else { r2 };
                     sample_gradient_stops(&grad.stops, t)
                 }
-                2 => sample_gradient_stops(&grad.stops, t_raw.clamp(0.0, 1.0)),
+                Repeat::PAD => sample_gradient_stops(&grad.stops, t_raw.clamp(0.0, 1.0)),
                 _ => {
                     if !(0.0..=1.0).contains(&t_raw) {
                         (0, 0, 0, 0)
@@ -502,13 +503,13 @@ pub(crate) fn apply_pixmap_repeat(
     h: i32,
     repeat: u32,
 ) -> (u32, u32) {
-    match repeat {
-        2 => {
+    match Repeat::from(repeat) {
+        Repeat::PAD => {
             let sx = raw_x.clamp(0, w - 1);
             let sy = raw_y.clamp(0, h - 1);
             (sx as u32, sy as u32)
         }
-        3 => {
+        Repeat::REFLECT => {
             let reflect = |v: i32, size: i32| -> u32 {
                 if size <= 0 {
                     return 0;
@@ -532,17 +533,17 @@ pub(crate) fn apply_pixmap_repeat(
 
 /// Apply repeat mode to a gradient parameter `t` and sample the stops.
 fn apply_gradient_repeat(stops: &[GradientStop], t_raw: f64, repeat: u32) -> (u8, u8, u8, u8) {
-    match repeat {
-        1 => {
+    match Repeat::from(repeat) {
+        Repeat::NORMAL => {
             let t = t_raw.rem_euclid(1.0);
             sample_gradient_stops(stops, t)
         }
-        3 => {
+        Repeat::REFLECT => {
             let r2 = t_raw.rem_euclid(2.0);
             let t = if r2 > 1.0 { 2.0 - r2 } else { r2 };
             sample_gradient_stops(stops, t)
         }
-        2 => sample_gradient_stops(stops, t_raw.clamp(0.0, 1.0)),
+        Repeat::PAD => sample_gradient_stops(stops, t_raw.clamp(0.0, 1.0)),
         _ => {
             if !(0.0..=1.0).contains(&t_raw) {
                 (0, 0, 0, 0)

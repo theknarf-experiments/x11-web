@@ -19,6 +19,7 @@ use tiny_skia::{
     Color, GradientStop as SkStop, LinearGradient, Paint, Pixmap, Point, RadialGradient, Rect,
     Shader, SpreadMode, SweepGradient, Transform,
 };
+use x11rb_protocol::protocol::render::Repeat;
 
 use super::{ConicalGradientState, GradientStop, LinearGradientState, RadialGradientState};
 
@@ -41,11 +42,11 @@ fn to_sk_stops(stops: &[GradientStop]) -> Vec<SkStop> {
 /// `(mode, clip_to_unit)` where `clip_to_unit = true` means caller must
 /// post-process pixels outside `t in [0,1]` to be transparent (None mode).
 fn map_repeat(repeat: u32) -> (SpreadMode, bool) {
-    match repeat {
-        0 => (SpreadMode::Pad, true),
-        1 => (SpreadMode::Repeat, false),
-        2 => (SpreadMode::Pad, false),
-        3 => (SpreadMode::Reflect, false),
+    match Repeat::from(repeat) {
+        Repeat::NONE => (SpreadMode::Pad, true),
+        Repeat::NORMAL => (SpreadMode::Repeat, false),
+        Repeat::PAD => (SpreadMode::Pad, false),
+        Repeat::REFLECT => (SpreadMode::Reflect, false),
         _ => (SpreadMode::Pad, false),
     }
 }

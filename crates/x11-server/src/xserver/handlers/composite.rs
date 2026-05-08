@@ -8,13 +8,20 @@ use super::super::core::{OVERLAY_WINDOW, ROOT_COLORMAP};
 use super::super::types::{DamageInfo, PixmapState, WindowState, WindowType};
 use crate::xserver::reply::ReplyBuf;
 use x11rb_protocol::protocol::composite::{
-    CreateRegionFromBorderClipRequest, GetOverlayWindowRequest, NameWindowPixmapRequest,
+    CREATE_REGION_FROM_BORDER_CLIP_REQUEST, CreateRegionFromBorderClipRequest,
+    GET_OVERLAY_WINDOW_REQUEST, GetOverlayWindowRequest, NAME_WINDOW_PIXMAP_REQUEST,
+    NameWindowPixmapRequest, QUERY_VERSION_REQUEST as COMPOSITE_QUERY_VERSION_REQUEST,
+    REDIRECT_SUBWINDOWS_REQUEST, REDIRECT_WINDOW_REQUEST, RELEASE_OVERLAY_WINDOW_REQUEST,
     RedirectSubwindowsRequest, RedirectWindowRequest, ReleaseOverlayWindowRequest,
-    UnredirectSubwindowsRequest, UnredirectWindowRequest,
+    UNREDIRECT_SUBWINDOWS_REQUEST, UNREDIRECT_WINDOW_REQUEST, UnredirectSubwindowsRequest,
+    UnredirectWindowRequest,
 };
 use x11rb_protocol::protocol::damage::{
-    AddRequest as DamageAddRequest, CreateRequest as DamageCreateRequest,
-    DestroyRequest as DamageDestroyRequest, SubtractRequest as DamageSubtractRequest,
+    ADD_REQUEST as DAMAGE_ADD_REQUEST, AddRequest as DamageAddRequest,
+    CREATE_REQUEST as DAMAGE_CREATE_REQUEST, CreateRequest as DamageCreateRequest,
+    DESTROY_REQUEST as DAMAGE_DESTROY_REQUEST, DestroyRequest as DamageDestroyRequest,
+    QUERY_VERSION_REQUEST as DAMAGE_QUERY_VERSION_REQUEST, SUBTRACT_REQUEST as DAMAGE_SUBTRACT_REQUEST,
+    SubtractRequest as DamageSubtractRequest,
 };
 use x11rb_protocol::protocol::xproto::{BackingStore, WindowClass};
 
@@ -23,15 +30,14 @@ pub(crate) fn handle_damage_request(state: &mut ClientState, data: &[u8], seq: u
     debug!("DAMAGE minor opcode: {minor}");
 
     match minor {
-        0 => {
-            // QueryVersion: reply with version 1.1
+        DAMAGE_QUERY_VERSION_REQUEST => {
+            // Reply with version 1.1.
             ReplyBuf::fixed(seq, state.msb_first)
                 .set_u32(8, 1) // major version
                 .set_u32(12, 1) // minor version
                 .build()
         }
-        1 => {
-            // DamageCreate
+        DAMAGE_CREATE_REQUEST => {
             let req = parse_minor!(DamageCreateRequest, data, state, seq, 143, minor as u16);
             let damage_id = req.damage;
             let drawable = req.drawable;
@@ -47,8 +53,7 @@ pub(crate) fn handle_damage_request(state: &mut ClientState, data: &[u8], seq: u
             );
             Vec::new()
         }
-        2 => {
-            // DamageDestroy
+        DAMAGE_DESTROY_REQUEST => {
             let req = parse_minor!(DamageDestroyRequest, data, state, seq, 143, minor as u16);
             let damage_id = req.damage;
             debug!("DAMAGE Destroy: id={damage_id:#x}");
@@ -56,8 +61,7 @@ pub(crate) fn handle_damage_request(state: &mut ClientState, data: &[u8], seq: u
             state.recycle_xid(damage_id);
             Vec::new()
         }
-        3 => {
-            // DamageSubtract
+        DAMAGE_SUBTRACT_REQUEST => {
             let req = parse_minor!(DamageSubtractRequest, data, state, seq, 143, minor as u16);
             let damage_id = req.damage;
             let repair = req.repair;
@@ -94,8 +98,8 @@ pub(crate) fn handle_damage_request(state: &mut ClientState, data: &[u8], seq: u
 
             Vec::new()
         }
-        4 => {
-            // DamageAdd: manually add damage to a drawable
+        DAMAGE_ADD_REQUEST => {
+            // Manually add damage to a drawable.
             let req = parse_minor!(DamageAddRequest, data, state, seq, 143, minor as u16);
             let drawable = req.drawable;
             let region = req.region;
@@ -138,15 +142,14 @@ pub(crate) fn handle_x_composite_request(
     };
 
     match minor {
-        0 => {
-            // QueryVersion: reply with version 0.4
+        COMPOSITE_QUERY_VERSION_REQUEST => {
+            // Reply with version 0.4.
             ReplyBuf::fixed(seq, state.msb_first)
                 .set_u32(8, 0) // major version
                 .set_u32(12, 4) // minor version
                 .build()
         }
-        1 => {
-            // RedirectWindow
+        REDIRECT_WINDOW_REQUEST => {
             let req = parse_minor!(RedirectWindowRequest, data, state, seq, 142, minor as u16);
             let window = req.window;
             let update = u8::from(req.update);
@@ -158,8 +161,7 @@ pub(crate) fn handle_x_composite_request(
             }
             Vec::new()
         }
-        2 => {
-            // RedirectSubwindows
+        REDIRECT_SUBWINDOWS_REQUEST => {
             let req = parse_minor!(
                 RedirectSubwindowsRequest,
                 data,
@@ -188,8 +190,7 @@ pub(crate) fn handle_x_composite_request(
             }
             Vec::new()
         }
-        3 => {
-            // UnredirectWindow
+        UNREDIRECT_WINDOW_REQUEST => {
             let req = parse_minor!(UnredirectWindowRequest, data, state, seq, 142, minor as u16);
             let window = req.window;
             debug!("Composite UnredirectWindow: window={window:#x}");
@@ -200,8 +201,7 @@ pub(crate) fn handle_x_composite_request(
             }
             Vec::new()
         }
-        4 => {
-            // UnredirectSubwindows
+        UNREDIRECT_SUBWINDOWS_REQUEST => {
             let req = parse_minor!(
                 UnredirectSubwindowsRequest,
                 data,
@@ -228,8 +228,7 @@ pub(crate) fn handle_x_composite_request(
             }
             Vec::new()
         }
-        5 => {
-            // CreateRegionFromBorderClip
+        CREATE_REGION_FROM_BORDER_CLIP_REQUEST => {
             let req = parse_minor!(
                 CreateRegionFromBorderClipRequest,
                 data,
@@ -259,9 +258,9 @@ pub(crate) fn handle_x_composite_request(
             );
             Vec::new()
         }
-        6 => {
-            // NameWindowPixmap: create a pixmap that is a live alias of the
-            // window's off-screen framebuffer.
+        NAME_WINDOW_PIXMAP_REQUEST => {
+            // Create a pixmap that is a live alias of the window's off-screen
+            // framebuffer.
             //
             // Per the Composite spec the returned pixmap IS the window's
             // off-screen storage -- reads (GetImage, CopyArea) always see the
@@ -307,10 +306,10 @@ pub(crate) fn handle_x_composite_request(
             }
             Vec::new()
         }
-        7 => {
-            // GetOverlayWindow: create (if needed) and return an InputOutput overlay
-            // window positioned above all other windows at the root level.
-            // The overlay window is transparent and covers the entire screen.
+        GET_OVERLAY_WINDOW_REQUEST => {
+            // Create (if needed) and return an InputOutput overlay window
+            // positioned above all other windows at the root level. The
+            // overlay is transparent and covers the entire screen.
             let _req = parse_minor!(GetOverlayWindowRequest, data, state, seq, 142, minor as u16);
             if !state.windows.contains_key(&OVERLAY_WINDOW) {
                 let w = state.screen_width;
@@ -379,9 +378,8 @@ pub(crate) fn handle_x_composite_request(
                 .set_u32(8, OVERLAY_WINDOW)
                 .build()
         }
-        8 => {
-            // ReleaseOverlayWindow
-            // Decrements the internal reference count on the overlay window.
+        RELEASE_OVERLAY_WINDOW_REQUEST => {
+            // Decrement the internal reference count on the overlay window.
             // When the count reaches zero the overlay is no longer in use.
             let req = parse_minor!(
                 ReleaseOverlayWindowRequest,

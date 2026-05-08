@@ -1,5 +1,17 @@
 use std::collections::HashMap;
 use tracing::{debug, info};
+use x11rb_protocol::protocol::render::{
+    ADD_GLYPHS_REQUEST, ADD_TRAPS_REQUEST, CHANGE_PICTURE_REQUEST, COMPOSITE_GLYPHS16_REQUEST,
+    COMPOSITE_GLYPHS32_REQUEST, COMPOSITE_GLYPHS8_REQUEST, COMPOSITE_REQUEST,
+    CREATE_ANIM_CURSOR_REQUEST, CREATE_CONICAL_GRADIENT_REQUEST, CREATE_CURSOR_REQUEST,
+    CREATE_GLYPH_SET_REQUEST, CREATE_LINEAR_GRADIENT_REQUEST, CREATE_PICTURE_REQUEST,
+    CREATE_RADIAL_GRADIENT_REQUEST, CREATE_SOLID_FILL_REQUEST, FILL_RECTANGLES_REQUEST,
+    FREE_GLYPHS_REQUEST, FREE_GLYPH_SET_REQUEST, FREE_PICTURE_REQUEST, PictOp,
+    QUERY_FILTERS_REQUEST, QUERY_PICT_FORMATS_REQUEST, QUERY_PICT_INDEX_VALUES_REQUEST,
+    QUERY_VERSION_REQUEST, REFERENCE_GLYPH_SET_REQUEST, SET_PICTURE_CLIP_RECTANGLES_REQUEST,
+    SET_PICTURE_FILTER_REQUEST, SET_PICTURE_TRANSFORM_REQUEST, TRAPEZOIDS_REQUEST,
+    TRIANGLES_REQUEST, TRI_FAN_REQUEST, TRI_STRIP_REQUEST,
+};
 
 use crate::xserver::core::read_u32_bo;
 use crate::xserver::core::require_len;
@@ -94,8 +106,15 @@ pub(crate) fn decode_pixel_bgra(format_id: u32, bytes: &[u8]) -> (u8, u8, u8, u8
 /// behaviour rather than the spec — only the canonical destructive
 /// ops trigger the full-dst path.
 pub(crate) fn zero_src_has_no_effect(op: u8) -> bool {
-    // Clear=0, Src=1, In=5, InReverse=6, Out=7, AtopReverse=10.
-    !matches!(op, 0 | 1 | 5 | 6 | 7 | 10)
+    !matches!(
+        PictOp::from(op),
+        PictOp::CLEAR
+            | PictOp::SRC
+            | PictOp::IN
+            | PictOp::IN_REVERSE
+            | PictOp::OUT
+            | PictOp::ATOP_REVERSE
+    )
 }
 
 /// Inside-triangle test using the standard sign-of-cross-product
@@ -362,45 +381,45 @@ fn out_con(a: i32, b: i32) -> i32 {
 /// `composite_pixel` and the component-alpha variant which calls
 /// this once per channel with per-channel `sa`.
 fn pict_op_factors(op: u8, sa: i32, da: i32) -> (i32, i32) {
-    match op {
-        0 => (0, 0),                              // Clear
-        1 => (255, 0),                            // Src
-        2 => (0, 255),                            // Dst
-        3 => (255, 255 - sa),                     // Over
-        4 => (255 - da, 255),                     // OverReverse
-        5 => (da, 0),                             // In
-        6 => (0, sa),                             // InReverse
-        7 => (255 - da, 0),                       // Out
-        8 => (0, 255 - sa),                       // OutReverse
-        9 => (da, 255 - sa),                      // Atop
-        10 => (255 - da, sa),                     // AtopReverse
-        11 => (255 - da, 255 - sa),               // Xor
-        12 => (255, 255),                         // Add (clamped on apply)
-        13 | 20 => (out_dis(sa, da), 255),        // Saturate / DisjointOverReverse
-        16 => (0, 0),                             // DisjointClear
-        17 => (255, 0),                           // DisjointSrc (= Src)
-        18 => (0, 255),                           // DisjointDst (= Dst)
-        19 => (255, out_dis(da, sa)),             // DisjointOver
-        21 => (in_dis(sa, da), 0),                // DisjointIn
-        22 => (0, in_dis(da, sa)),                // DisjointInReverse
-        23 => (out_dis(sa, da), 0),               // DisjointOut
-        24 => (0, out_dis(da, sa)),               // DisjointOutReverse
-        25 => (in_dis(sa, da), out_dis(da, sa)),  // DisjointAtop
-        26 => (out_dis(sa, da), in_dis(da, sa)),  // DisjointAtopReverse
-        27 => (out_dis(sa, da), out_dis(da, sa)), // DisjointXor
-        32 => (0, 0),                             // ConjointClear
-        33 => (255, 0),                           // ConjointSrc (= Src)
-        34 => (0, 255),                           // ConjointDst (= Dst)
-        35 => (255, out_con(da, sa)),             // ConjointOver
-        36 => (out_con(sa, da), 255),             // ConjointOverReverse
-        37 => (in_con(sa, da), 0),                // ConjointIn
-        38 => (0, in_con(da, sa)),                // ConjointInReverse
-        39 => (out_con(sa, da), 0),               // ConjointOut
-        40 => (0, out_con(da, sa)),               // ConjointOutReverse
-        41 => (in_con(sa, da), out_con(da, sa)),  // ConjointAtop
-        42 => (out_con(sa, da), in_con(da, sa)),  // ConjointAtopReverse
-        43 => (out_con(sa, da), out_con(da, sa)), // ConjointXor
-        _ => (255, 255 - sa),                     // fallback to Over
+    match PictOp::from(op) {
+        PictOp::CLEAR => (0, 0),
+        PictOp::SRC => (255, 0),
+        PictOp::DST => (0, 255),
+        PictOp::OVER => (255, 255 - sa),
+        PictOp::OVER_REVERSE => (255 - da, 255),
+        PictOp::IN => (da, 0),
+        PictOp::IN_REVERSE => (0, sa),
+        PictOp::OUT => (255 - da, 0),
+        PictOp::OUT_REVERSE => (0, 255 - sa),
+        PictOp::ATOP => (da, 255 - sa),
+        PictOp::ATOP_REVERSE => (255 - da, sa),
+        PictOp::XOR => (255 - da, 255 - sa),
+        PictOp::ADD => (255, 255), // Add (clamped on apply)
+        PictOp::SATURATE | PictOp::DISJOINT_OVER_REVERSE => (out_dis(sa, da), 255),
+        PictOp::DISJOINT_CLEAR => (0, 0),
+        PictOp::DISJOINT_SRC => (255, 0),
+        PictOp::DISJOINT_DST => (0, 255),
+        PictOp::DISJOINT_OVER => (255, out_dis(da, sa)),
+        PictOp::DISJOINT_IN => (in_dis(sa, da), 0),
+        PictOp::DISJOINT_IN_REVERSE => (0, in_dis(da, sa)),
+        PictOp::DISJOINT_OUT => (out_dis(sa, da), 0),
+        PictOp::DISJOINT_OUT_REVERSE => (0, out_dis(da, sa)),
+        PictOp::DISJOINT_ATOP => (in_dis(sa, da), out_dis(da, sa)),
+        PictOp::DISJOINT_ATOP_REVERSE => (out_dis(sa, da), in_dis(da, sa)),
+        PictOp::DISJOINT_XOR => (out_dis(sa, da), out_dis(da, sa)),
+        PictOp::CONJOINT_CLEAR => (0, 0),
+        PictOp::CONJOINT_SRC => (255, 0),
+        PictOp::CONJOINT_DST => (0, 255),
+        PictOp::CONJOINT_OVER => (255, out_con(da, sa)),
+        PictOp::CONJOINT_OVER_REVERSE => (out_con(sa, da), 255),
+        PictOp::CONJOINT_IN => (in_con(sa, da), 0),
+        PictOp::CONJOINT_IN_REVERSE => (0, in_con(da, sa)),
+        PictOp::CONJOINT_OUT => (out_con(sa, da), 0),
+        PictOp::CONJOINT_OUT_REVERSE => (0, out_con(da, sa)),
+        PictOp::CONJOINT_ATOP => (in_con(sa, da), out_con(da, sa)),
+        PictOp::CONJOINT_ATOP_REVERSE => (out_con(sa, da), in_con(da, sa)),
+        PictOp::CONJOINT_XOR => (out_con(sa, da), out_con(da, sa)),
+        _ => (255, 255 - sa), // fallback to Over
     }
 }
 
@@ -428,25 +447,23 @@ pub(crate) fn composite_pixel(
     // Fast paths for the operators that don't depend on per-channel
     // arithmetic — just unconditional writes.
     // Storage layout: dst[0] = R, dst[1] = G, dst[2] = B, dst[3] = A.
-    match op {
-        0 => {
-            // Clear
+    match PictOp::from(op) {
+        PictOp::CLEAR => {
             dst[0] = 0;
             dst[1] = 0;
             dst[2] = 0;
             dst[3] = if force_da_one { 255 } else { 0 };
             return;
         }
-        1 => {
-            // Src
+        PictOp::SRC => {
             dst[0] = src_r;
             dst[1] = src_g;
             dst[2] = src_b;
             dst[3] = if force_da_one { 255 } else { src_a };
             return;
         }
-        2 => {
-            // Dst — leave the destination untouched.
+        PictOp::DST => {
+            // Leave the destination untouched.
             return;
         }
         _ => {}
@@ -524,10 +541,10 @@ fn reject_gradient_destination(
     // destination picture id at a known offset within the request
     // body. We only need to flag those.
     let dst_offset = match minor {
-        8 => 16,       // Composite: dst at offset 16
-        10..=13 => 12, // Trapezoids/Triangles/TriStrip/TriFan
-        23..=25 => 12, // CompositeGlyphs8/16/32
-        26 => 8,       // FillRectangles
+        COMPOSITE_REQUEST => 16, // Composite: dst at offset 16
+        TRAPEZOIDS_REQUEST | TRIANGLES_REQUEST | TRI_STRIP_REQUEST | TRI_FAN_REQUEST => 12,
+        COMPOSITE_GLYPHS8_REQUEST | COMPOSITE_GLYPHS16_REQUEST | COMPOSITE_GLYPHS32_REQUEST => 12,
+        FILL_RECTANGLES_REQUEST => 8, // FillRectangles
         _ => return None,
     };
     if data.len() < dst_offset + 4 {
@@ -562,36 +579,42 @@ pub fn handle_render_request(state: &mut ClientState, data: &[u8], seq: u16) -> 
     }
 
     match minor {
-        0 => picture::handle_query_version(seq, bo),
-        1 => picture::handle_query_pict_formats(seq, bo),
-        4 => picture::handle_create_picture(state, data, seq),
-        5 => picture::handle_change_picture(state, data, seq),
-        6 => picture::handle_set_picture_clip_rectangles(state, data, seq),
-        7 => picture::handle_free_picture(state, data),
-        8 => composite::handle_composite(state, data, seq),
-        10 => composite::handle_trapezoids(state, data, seq),
-        11 => composite::handle_triangles(state, data, seq),
-        12 => composite::handle_tri_strip(state, data, seq),
-        13 => composite::handle_tri_fan(state, data, seq),
-        17 => glyph::handle_create_glyphset(state, data, seq),
-        18 => glyph::handle_reference_glyphset(state, data, seq),
-        19 => glyph::handle_free_glyphset(state, data, seq),
-        20 => glyph::handle_add_glyphs(state, data, seq),
+        QUERY_VERSION_REQUEST => picture::handle_query_version(seq, bo),
+        QUERY_PICT_FORMATS_REQUEST => picture::handle_query_pict_formats(seq, bo),
+        CREATE_PICTURE_REQUEST => picture::handle_create_picture(state, data, seq),
+        CHANGE_PICTURE_REQUEST => picture::handle_change_picture(state, data, seq),
+        SET_PICTURE_CLIP_RECTANGLES_REQUEST => {
+            picture::handle_set_picture_clip_rectangles(state, data, seq)
+        }
+        FREE_PICTURE_REQUEST => picture::handle_free_picture(state, data),
+        COMPOSITE_REQUEST => composite::handle_composite(state, data, seq),
+        TRAPEZOIDS_REQUEST => composite::handle_trapezoids(state, data, seq),
+        TRIANGLES_REQUEST => composite::handle_triangles(state, data, seq),
+        TRI_STRIP_REQUEST => composite::handle_tri_strip(state, data, seq),
+        TRI_FAN_REQUEST => composite::handle_tri_fan(state, data, seq),
+        CREATE_GLYPH_SET_REQUEST => glyph::handle_create_glyphset(state, data, seq),
+        REFERENCE_GLYPH_SET_REQUEST => glyph::handle_reference_glyphset(state, data, seq),
+        FREE_GLYPH_SET_REQUEST => glyph::handle_free_glyphset(state, data, seq),
+        ADD_GLYPHS_REQUEST => glyph::handle_add_glyphs(state, data, seq),
         21 => glyph::handle_add_glyphs_from_picture(state, data, seq),
-        22 => glyph::handle_free_glyphs(state, data, seq),
-        23 => glyph::handle_composite_glyphs(state, data, 1, seq), // Glyphs8
-        24 => glyph::handle_composite_glyphs(state, data, 2, seq), // Glyphs16
-        25 => glyph::handle_composite_glyphs(state, data, 4, seq), // Glyphs32
-        26 => composite::handle_fill_rectangles(state, data, seq),
-        27 => picture::handle_create_cursor(state, data, seq),
-        28 => transform::handle_set_picture_transform(state, data, seq),
-        29 => filter::handle_query_filters(seq, bo),
-        30 => filter::handle_set_picture_filter(state, data, seq),
-        31 => picture::handle_create_anim_cursor(state, data, seq),
-        32 => composite::handle_add_traps(state, data, seq),
-        33 => gradient::handle_create_solid_fill(state, data, seq),
-        34..=36 => gradient::handle_create_gradient_fill(state, data, seq),
-        2 => picture::handle_query_pict_index_values(state, data, seq),
+        FREE_GLYPHS_REQUEST => glyph::handle_free_glyphs(state, data, seq),
+        COMPOSITE_GLYPHS8_REQUEST => glyph::handle_composite_glyphs(state, data, 1, seq),
+        COMPOSITE_GLYPHS16_REQUEST => glyph::handle_composite_glyphs(state, data, 2, seq),
+        COMPOSITE_GLYPHS32_REQUEST => glyph::handle_composite_glyphs(state, data, 4, seq),
+        FILL_RECTANGLES_REQUEST => composite::handle_fill_rectangles(state, data, seq),
+        CREATE_CURSOR_REQUEST => picture::handle_create_cursor(state, data, seq),
+        SET_PICTURE_TRANSFORM_REQUEST => transform::handle_set_picture_transform(state, data, seq),
+        QUERY_FILTERS_REQUEST => filter::handle_query_filters(seq, bo),
+        SET_PICTURE_FILTER_REQUEST => filter::handle_set_picture_filter(state, data, seq),
+        CREATE_ANIM_CURSOR_REQUEST => picture::handle_create_anim_cursor(state, data, seq),
+        ADD_TRAPS_REQUEST => composite::handle_add_traps(state, data, seq),
+        CREATE_SOLID_FILL_REQUEST => gradient::handle_create_solid_fill(state, data, seq),
+        CREATE_LINEAR_GRADIENT_REQUEST
+        | CREATE_RADIAL_GRADIENT_REQUEST
+        | CREATE_CONICAL_GRADIENT_REQUEST => gradient::handle_create_gradient_fill(state, data, seq),
+        QUERY_PICT_INDEX_VALUES_REQUEST => {
+            picture::handle_query_pict_index_values(state, data, seq)
+        }
         _ => {
             debug!("Unhandled RENDER minor opcode: {minor}");
             render_err(

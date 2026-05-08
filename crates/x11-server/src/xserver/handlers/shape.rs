@@ -12,25 +12,17 @@ use super::super::types::RegionRect;
 use crate::xserver::event::serialize_event;
 use crate::xserver::reply::ReplyBuf;
 use x11rb_protocol::protocol::shape::{
-    CombineRequest, GetRectanglesRequest, InputSelectedRequest, MaskRequest,
-    NotifyEvent as ShapeNotifyEvent, OffsetRequest, QueryExtentsRequest, QueryVersionRequest,
-    RectanglesRequest, SelectInputRequest, SK,
+    COMBINE_REQUEST, CombineRequest, GET_RECTANGLES_REQUEST, GetRectanglesRequest,
+    INPUT_SELECTED_REQUEST, InputSelectedRequest, MASK_REQUEST, MaskRequest,
+    NotifyEvent as ShapeNotifyEvent, OFFSET_REQUEST, OffsetRequest, QUERY_EXTENTS_REQUEST,
+    QUERY_VERSION_REQUEST, QueryExtentsRequest, QueryVersionRequest, RECTANGLES_REQUEST,
+    RectanglesRequest, SELECT_INPUT_REQUEST, SK, SO, SelectInputRequest,
 };
 
-/// SHAPE kind constants.
-const SHAPE_BOUNDING: u8 = 0;
-const SHAPE_CLIP: u8 = 1;
-const SHAPE_INPUT: u8 = 2;
-
-/// SHAPE operation constants.
-const SHAPE_SET: u8 = 0;
-const SHAPE_UNION: u8 = 1;
-const SHAPE_INTERSECT: u8 = 2;
-const SHAPE_SUBTRACT: u8 = 3;
-const SHAPE_INVERT: u8 = 4;
-
-/// SHAPE event code (first event for the extension).
-const SHAPE_NOTIFY_EVENT: u8 = 64;
+/// Absolute event code for SHAPE NotifyEvent. The extension's
+/// first_event base is fixed at 64 in our server; x11rb's
+/// `shape::NOTIFY_EVENT` is the relative offset (0).
+const SHAPE_NOTIFY_EVENT: u8 = 64 + x11rb_protocol::protocol::shape::NOTIFY_EVENT;
 
 pub(crate) fn handle_shape_request(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
     let minor = data[1];
@@ -40,8 +32,7 @@ pub(crate) fn handle_shape_request(state: &mut ClientState, data: &[u8], seq: u1
     };
 
     match minor {
-        // 0: QueryVersion
-        0 => {
+        QUERY_VERSION_REQUEST => {
             let _req = parse_minor!(QueryVersionRequest, data, state, seq, 128, 0);
             ReplyBuf::fixed(seq, state.msb_first)
                 .set_u16(8, 1) // major version
@@ -49,11 +40,11 @@ pub(crate) fn handle_shape_request(state: &mut ClientState, data: &[u8], seq: u1
                 .build()
         }
 
-        // 1: Rectangles — set shape from a list of rectangles
-        1 => {
+        RECTANGLES_REQUEST => {
+            // Set shape from a list of rectangles.
             let req = parse_minor!(RectanglesRequest, data, state, seq, 128, 1);
-            let operation = u8::from(req.operation);
-            let kind = u8::from(req.destination_kind);
+            let operation = req.operation;
+            let kind = req.destination_kind;
             let ordering = u8::from(req.ordering);
             // ordering is an optimization hint (0=UnSorted, 1=YSorted, 2=YXSorted,
             // 3=YXBanded).  We don't reorder internally, but we must reject
@@ -77,7 +68,7 @@ pub(crate) fn handle_shape_request(state: &mut ClientState, data: &[u8], seq: u1
             }
 
             // If no rectangles are given, reset to default (unshaped)
-            let new_shape = if rects.is_empty() && operation == SHAPE_SET {
+            let new_shape = if rects.is_empty() && operation == SO::SET {
                 None
             } else {
                 Some(rects)
@@ -89,11 +80,11 @@ pub(crate) fn handle_shape_request(state: &mut ClientState, data: &[u8], seq: u1
             Vec::new()
         }
 
-        // 2: Mask — set shape from a pixmap bitmap
-        2 => {
+        MASK_REQUEST => {
+            // Set shape from a pixmap bitmap.
             let req = parse_minor!(MaskRequest, data, state, seq, 128, 2);
-            let operation = u8::from(req.operation);
-            let kind = u8::from(req.destination_kind);
+            let operation = req.operation;
+            let kind = req.destination_kind;
             let window_id = req.destination_window;
             let x_offset = req.x_offset;
             let y_offset = req.y_offset;
@@ -116,12 +107,12 @@ pub(crate) fn handle_shape_request(state: &mut ClientState, data: &[u8], seq: u1
             Vec::new()
         }
 
-        // 3: Combine — combine shapes from another window
-        3 => {
+        COMBINE_REQUEST => {
+            // Combine shapes from another window.
             let req = parse_minor!(CombineRequest, data, state, seq, 128, 3);
-            let operation = u8::from(req.operation);
-            let dest_kind = u8::from(req.destination_kind);
-            let src_kind = u8::from(req.source_kind);
+            let operation = req.operation;
+            let dest_kind = req.destination_kind;
+            let src_kind = req.source_kind;
             let dest_window = req.destination_window;
             let x_offset = req.x_offset;
             let y_offset = req.y_offset;
@@ -146,20 +137,20 @@ pub(crate) fn handle_shape_request(state: &mut ClientState, data: &[u8], seq: u1
             Vec::new()
         }
 
-        // 4: Offset — translate a shape
-        4 => {
+        OFFSET_REQUEST => {
+            // Translate a shape.
             let req = parse_minor!(OffsetRequest, data, state, seq, 128, 4);
-            let kind = u8::from(req.destination_kind);
+            let kind = req.destination_kind;
             let window_id = req.destination_window;
             let x_offset = req.x_offset;
             let y_offset = req.y_offset;
 
             if let Some(win) = state.windows.get_mut(&window_id) {
                 let shape = match kind {
-                    SHAPE_BOUNDING => &mut win.bounding_shape,
-                    SHAPE_CLIP => &mut win.clip_shape,
-                    SHAPE_INPUT => &mut win.input_shape,
-                    _ => return shape_err(crate::xserver::core::VALUE_ERROR, kind as u32),
+                    SK::BOUNDING => &mut win.bounding_shape,
+                    SK::CLIP => &mut win.clip_shape,
+                    SK::INPUT => &mut win.input_shape,
+                    _ => return shape_err(crate::xserver::core::VALUE_ERROR, u32::from(kind)),
                 };
                 if let Some(rects) = shape {
                     for r in rects.iter_mut() {
@@ -174,8 +165,8 @@ pub(crate) fn handle_shape_request(state: &mut ClientState, data: &[u8], seq: u1
             Vec::new()
         }
 
-        // 5: QueryExtents — get bounding and clip shape extents
-        5 => {
+        QUERY_EXTENTS_REQUEST => {
+            // Get bounding and clip shape extents.
             let req = parse_minor!(QueryExtentsRequest, data, state, seq, 128, 5);
             let window_id = req.destination_window;
 
@@ -216,8 +207,8 @@ pub(crate) fn handle_shape_request(state: &mut ClientState, data: &[u8], seq: u1
                 .build()
         }
 
-        // 6: SelectInput — subscribe to ShapeNotify events
-        6 => {
+        SELECT_INPUT_REQUEST => {
+            // Subscribe to ShapeNotify events.
             let req = parse_minor!(SelectInputRequest, data, state, seq, 128, 6);
             let window_id = req.destination_window;
             let enable = req.enable;
@@ -237,8 +228,8 @@ pub(crate) fn handle_shape_request(state: &mut ClientState, data: &[u8], seq: u1
             Vec::new()
         }
 
-        // 7: InputSelected — query if shape events are selected
-        7 => {
+        INPUT_SELECTED_REQUEST => {
+            // Query if shape events are selected.
             let req = parse_minor!(InputSelectedRequest, data, state, seq, 128, 7);
             let window_id = req.destination_window;
 
@@ -253,17 +244,17 @@ pub(crate) fn handle_shape_request(state: &mut ClientState, data: &[u8], seq: u1
                 .build()
         }
 
-        // 8: GetRectangles — get the shape rectangles for a window
-        8 => {
+        GET_RECTANGLES_REQUEST => {
+            // Get the shape rectangles for a window.
             let req = parse_minor!(GetRectanglesRequest, data, state, seq, 128, 8);
             let window_id = req.window;
-            let kind = u8::from(req.source_kind);
+            let kind = req.source_kind;
 
             let rects = if let Some(win) = state.windows.get(&window_id) {
                 match kind {
-                    SHAPE_BOUNDING => win.bounding_shape.as_deref(),
-                    SHAPE_CLIP => win.clip_shape.as_deref(),
-                    SHAPE_INPUT => win.input_shape.as_deref(),
+                    SK::BOUNDING => win.bounding_shape.as_deref(),
+                    SK::CLIP => win.clip_shape.as_deref(),
+                    SK::INPUT => win.input_shape.as_deref(),
                     _ => None,
                 }
                 .map(|r| r.to_vec())
@@ -311,37 +302,26 @@ pub(crate) fn handle_shape_request(state: &mut ClientState, data: &[u8], seq: u1
 }
 
 /// Get the shape rectangles for a window, or None if unshaped.
-fn get_window_shape(state: &ClientState, window_id: u32, kind: u8) -> Option<Vec<RegionRect>> {
+fn get_window_shape(state: &ClientState, window_id: u32, kind: SK) -> Option<Vec<RegionRect>> {
     let win = state.windows.get(&window_id)?;
+    let full_rect = || {
+        Some(vec![RegionRect {
+            x: 0,
+            y: 0,
+            width: win.width,
+            height: win.height,
+        }])
+    };
     match kind {
-        SHAPE_BOUNDING => win.bounding_shape.clone().or_else(|| {
-            Some(vec![RegionRect {
-                x: 0,
-                y: 0,
-                width: win.width,
-                height: win.height,
-            }])
-        }),
-        SHAPE_CLIP => win.clip_shape.clone().or_else(|| {
-            win.bounding_shape.clone().or_else(|| {
-                Some(vec![RegionRect {
-                    x: 0,
-                    y: 0,
-                    width: win.width,
-                    height: win.height,
-                }])
-            })
-        }),
-        SHAPE_INPUT => win.input_shape.clone().or_else(|| {
-            win.bounding_shape.clone().or_else(|| {
-                Some(vec![RegionRect {
-                    x: 0,
-                    y: 0,
-                    width: win.width,
-                    height: win.height,
-                }])
-            })
-        }),
+        SK::BOUNDING => win.bounding_shape.clone().or_else(full_rect),
+        SK::CLIP => win
+            .clip_shape
+            .clone()
+            .or_else(|| win.bounding_shape.clone().or_else(full_rect)),
+        SK::INPUT => win
+            .input_shape
+            .clone()
+            .or_else(|| win.bounding_shape.clone().or_else(full_rect)),
         _ => None,
     }
 }
@@ -350,8 +330,8 @@ fn get_window_shape(state: &ClientState, window_id: u32, kind: u8) -> Option<Vec
 fn apply_shape(
     state: &mut ClientState,
     window_id: u32,
-    kind: u8,
-    operation: u8,
+    kind: SK,
+    operation: SO,
     new_rects: Option<Vec<RegionRect>>,
 ) {
     let win = match state.windows.get_mut(&window_id) {
@@ -360,17 +340,17 @@ fn apply_shape(
     };
 
     let target = match kind {
-        SHAPE_BOUNDING => &mut win.bounding_shape,
-        SHAPE_CLIP => &mut win.clip_shape,
-        SHAPE_INPUT => &mut win.input_shape,
+        SK::BOUNDING => &mut win.bounding_shape,
+        SK::CLIP => &mut win.clip_shape,
+        SK::INPUT => &mut win.input_shape,
         _ => return,
     };
 
     match operation {
-        SHAPE_SET => {
+        SO::SET => {
             *target = new_rects;
         }
-        SHAPE_UNION => {
+        SO::UNION => {
             let existing = target.take().unwrap_or_default();
             let mut combined = existing;
             if let Some(new) = new_rects {
@@ -382,7 +362,7 @@ fn apply_shape(
                 Some(combined)
             };
         }
-        SHAPE_INTERSECT => {
+        SO::INTERSECT => {
             if let Some(ref existing) = target {
                 if let Some(ref new) = new_rects {
                     let result = intersect_rects(existing, new);
@@ -400,7 +380,7 @@ fn apply_shape(
                 *target = new_rects;
             }
         }
-        SHAPE_SUBTRACT => {
+        SO::SUBTRACT => {
             if let Some(ref existing) = target {
                 if let Some(ref new) = new_rects {
                     let result = subtract_rects(existing, new);
@@ -426,7 +406,7 @@ fn apply_shape(
                 };
             }
         }
-        SHAPE_INVERT => {
+        SO::INVERT => {
             // Invert: result = new - existing
             if let Some(ref existing) = target {
                 if let Some(ref new) = new_rects {
@@ -532,12 +512,12 @@ fn coalesce_rects(rects: &mut Vec<RegionRect>) {
 }
 
 /// Send ShapeNotify event to subscribed clients.
-fn send_shape_notify(state: &mut ClientState, window_id: u32, kind: u8, seq: u16) {
+fn send_shape_notify(state: &mut ClientState, window_id: u32, kind: SK, seq: u16) {
     let (shaped, ext) = if let Some(win) = state.windows.get(&window_id) {
         let shape = match kind {
-            SHAPE_BOUNDING => &win.bounding_shape,
-            SHAPE_CLIP => &win.clip_shape,
-            SHAPE_INPUT => &win.input_shape,
+            SK::BOUNDING => &win.bounding_shape,
+            SK::CLIP => &win.clip_shape,
+            SK::INPUT => &win.input_shape,
             _ => return,
         };
         match shape {
@@ -566,7 +546,7 @@ fn send_shape_notify(state: &mut ClientState, window_id: u32, kind: u8, seq: u16
         let event = serialize_event(
             &ShapeNotifyEvent {
                 response_type: SHAPE_NOTIFY_EVENT,
-                shape_kind: SK::from(kind),
+                shape_kind: kind,
                 sequence: seq,
                 affected_window: window_id,
                 extents_x: ext.x,

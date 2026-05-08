@@ -2,6 +2,11 @@
 
 use super::parse_minor;
 use tracing::debug;
+use x11rb_protocol::protocol::dbe::{
+    ALLOCATE_BACK_BUFFER_REQUEST, BEGIN_IDIOM_REQUEST, DEALLOCATE_BACK_BUFFER_REQUEST,
+    END_IDIOM_REQUEST, GET_BACK_BUFFER_ATTRIBUTES_REQUEST, GET_VISUAL_INFO_REQUEST,
+    QUERY_VERSION_REQUEST, SWAP_BUFFERS_REQUEST, SwapAction,
+};
 
 use super::super::client::ClientState;
 use crate::framebuffer::Framebuffer;
@@ -15,14 +20,14 @@ pub(crate) fn handle_dbe_request(state: &mut ClientState, data: &[u8], seq: u16)
         crate::xserver::core::build_error(code, seq, bad_value, 157, minor as u16)
     };
     match minor {
-        0 => {
+        QUERY_VERSION_REQUEST => {
             // GetVersion
             ReplyBuf::fixed(seq, state.msb_first)
                 .set_u8(8, 1) // major_version
                 .set_u8(9, 0) // minor_version
                 .build()
         }
-        1 => {
+        ALLOCATE_BACK_BUFFER_REQUEST => {
             // AllocateBackBufferName
             require_len!(data, 16, seq, 157, minor as u16, state.msb_first);
             use x11rb_protocol::protocol::dbe::AllocateBackBufferRequest;
@@ -62,7 +67,7 @@ pub(crate) fn handle_dbe_request(state: &mut ClientState, data: &[u8], seq: u16)
             }
             Vec::new()
         }
-        2 => {
+        DEALLOCATE_BACK_BUFFER_REQUEST => {
             // DeallocateBackBufferName
             require_len!(data, 8, seq, 157, minor as u16, state.msb_first);
             use x11rb_protocol::protocol::dbe::DeallocateBackBufferRequest;
@@ -81,17 +86,15 @@ pub(crate) fn handle_dbe_request(state: &mut ClientState, data: &[u8], seq: u16)
             state.recycle_xid(back_buffer_id);
             Vec::new()
         }
-        3 => {
+        SWAP_BUFFERS_REQUEST => {
             // SwapBuffers
             require_len!(data, 8, seq, 157, minor as u16, state.msb_first);
             use x11rb_protocol::protocol::dbe::SwapBuffersRequest;
             let req = parse_minor!(SwapBuffersRequest, data, state, seq, 157, minor as u16);
             for action in req.actions.iter() {
                 let window_id = action.window;
-                let swap_action = u8::from(action.swap_action);
-                // swap_action: 0=Undefined, 1=Background, 2=Untouched, 3=Copied
-
-                debug!("DBE SwapBuffers: window={window_id:#x} action={swap_action}");
+                let swap_action = action.swap_action;
+                debug!("DBE SwapBuffers: window={window_id:#x} action={swap_action:?}");
 
                 // Find the back buffer for this window
                 let back_buffer_id = state
@@ -112,7 +115,7 @@ pub(crate) fn handle_dbe_request(state: &mut ClientState, data: &[u8], seq: u16)
 
                     if let Some((bw, bh, pixels)) = back_pixels {
                         // For Copied swap action, save old front before overwriting
-                        let old_front = if swap_action == 3 {
+                        let old_front = if swap_action == SwapAction::COPIED {
                             state
                                 .windows
                                 .get(&window_id)
@@ -135,22 +138,22 @@ pub(crate) fn handle_dbe_request(state: &mut ClientState, data: &[u8], seq: u16)
                         // Apply swap action to the back buffer
                         if let Some(bb) = state.pixmaps.get_mut(&bbid) {
                             match swap_action {
-                                1 => {
-                                    // Background: fill back buffer with window's background
+                                SwapAction::BACKGROUND => {
+                                    // Fill back buffer with window's background.
                                     bb.framebuffer.fill_rect(0, 0, bb.width, bb.height, bg);
                                 }
-                                2 => {
-                                    // Untouched: leave back buffer as-is
+                                SwapAction::UNTOUCHED => {
+                                    // Leave back buffer as-is.
                                 }
-                                3 => {
-                                    // Copied: swap — put old front into back buffer
+                                SwapAction::COPIED => {
+                                    // Swap — put old front into back buffer.
                                     if let Some(old) = old_front {
                                         bb.framebuffer.put_image(0, 0, bb.width, bb.height, &old);
                                     }
                                 }
-                                _ => {
-                                    // Undefined: content is undefined, no action needed
-                                }
+                                // SwapAction::UNDEFINED and any unknown value:
+                                // content is undefined, no action needed.
+                                _ => {}
                             }
                         }
 
@@ -161,21 +164,21 @@ pub(crate) fn handle_dbe_request(state: &mut ClientState, data: &[u8], seq: u16)
             }
             Vec::new()
         }
-        4 => {
+        BEGIN_IDIOM_REQUEST => {
             // BeginIdiom: mark start of atomic swap group.
             // All SwapBuffers calls between Begin and EndIdiom should be treated as atomic.
             // We accept this silently since our SwapBuffers is already synchronous.
             state.dbe_idiom_depth += 1;
             Vec::new()
         }
-        5 => {
+        END_IDIOM_REQUEST => {
             // EndIdiom: end of atomic swap group.
             if state.dbe_idiom_depth > 0 {
                 state.dbe_idiom_depth -= 1;
             }
             Vec::new()
         }
-        6 => {
+        GET_VISUAL_INFO_REQUEST => {
             // GetVisualInfo
             // Return visual info for 1 screen with our 2 visuals supporting DBE
             let n_screens: u32 = 1;
@@ -214,7 +217,7 @@ pub(crate) fn handle_dbe_request(state: &mut ClientState, data: &[u8], seq: u16)
 
             reply.build()
         }
-        7 => {
+        GET_BACK_BUFFER_ATTRIBUTES_REQUEST => {
             // GetBackBufferAttributes
             require_len!(data, 8, seq, 157, minor as u16, state.msb_first);
             use x11rb_protocol::protocol::dbe::GetBackBufferAttributesRequest;
