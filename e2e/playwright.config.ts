@@ -16,6 +16,15 @@ export default defineConfig({
 	timeout: 60_000,
 	retries: 0,
 	workers: WORKERS,
+	// Parallelise tests *within* a file across worker slots, not just
+	// across files. Each `fixtures.ts` worker has its own container
+	// trio, so parallelism gives every test a clean sidecar. Without
+	// this, single-file runs serialise through one sidecar and
+	// processes / X state leak between tests (xeyes left running,
+	// stale focus, atoms accumulated). The previous `workers > 1`
+	// behaviour relied on Playwright respawning workers on failures,
+	// which accidentally provided that clean-slate effect.
+	fullyParallel: true,
 	globalSetup: "./global-setup.ts",
 	globalTeardown: "./global-teardown.ts",
 	use: {
