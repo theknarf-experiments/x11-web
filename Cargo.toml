@@ -8,6 +8,7 @@ members = [
     "crates/sidecar-macos",
     "crates/wire",
     "crates/rtc-wire",
+    "crates/ws-wire",
     "crates/pixel-codec",
     "crates/x11-server",
 ]

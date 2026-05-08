@@ -4964,6 +4964,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "x11-web-ws-wire"
+version = "0.1.0"
+dependencies = [
+ "capnp",
+ "capnpc",
+ "x11-web-protocol",
+]
+
+[[package]]
 name = "x11-web-x11-server"
 version = "0.1.0"
 dependencies = [

@@ -1,0 +1,22 @@
+[package]
+name = "x11-web-ws-wire"
+version = "0.1.0"
+edition = "2021"
+
+# Browser ↔ Backend WebSocket binary wire format. Replaces the
+# JSON-over-text encoding with Cap'n Proto framing so both the
+# Rust backend and the TypeScript frontend share one schema (in
+# `schema/ws.capnp`) instead of duplicating types in
+# `crates/protocol/src/lib.rs` and `frontend/src/types.ts`.
+
+[dependencies]
+capnp = "0.20"
+# Bridge converts between this crate's wire types and the typed
+# enums in `crates/protocol`. Keeping the bridge here (rather than
+# in `protocol`) means `protocol` doesn't need a capnp dep.
+x11-web-protocol = { path = "../protocol" }
+
+[build-dependencies]
+# Generates Rust types from `schema/ws.capnp` into
+# `OUT_DIR/ws_capnp.rs` which `lib.rs` then `include!`s.
+capnpc = "0.20"
