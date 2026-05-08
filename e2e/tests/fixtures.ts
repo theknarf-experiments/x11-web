@@ -37,12 +37,18 @@ const SCRIPTS_DIR = path.join(E2E_DIR, "scripts");
 // `frontendUrl` below — see `useBackendSocket.ts`.
 //
 // Every worker uses its own private Docker network (so the alias `backend`
-// resolves to *its* backend) named after the Playwright worker index. The
-// network name and `.withReuse()` keys MUST be stable across worker respawns
-// (Playwright respawns workers on test failure) — otherwise each respawn
-// would leak the previous network/containers. Worker index is stable; pid is
-// not, so we use index only.
-const WORKER_INDEX = process.env.TEST_WORKER_INDEX ?? "0";
+// resolves to *its* backend) named after the Playwright parallel-slot
+// index. The network name and `.withReuse()` keys MUST be stable across
+// worker respawns (Playwright respawns workers on test failure) —
+// otherwise each respawn would leak the previous network/containers.
+//
+// `TEST_WORKER_INDEX` is *not* stable: it's a monotonically increasing
+// counter that goes up every time a worker process spawns, including
+// respawns. `TEST_PARALLEL_INDEX` is the parallel-slot index in
+// `[0, workers)`, which IS stable across respawns of the same slot.
+// Using the wrong one was the leak: with `workers: 2` and many failures
+// we'd see 20+ distinct indexes, each allocating its own 3-container set.
+const WORKER_INDEX = process.env.TEST_PARALLEL_INDEX ?? "0";
 const WORKER_NETWORK = `x11web-worker-${WORKER_INDEX}`;
 
 let backendContainer: StartedTestContainer;
