@@ -248,8 +248,8 @@ pub(crate) fn build_get_monitors_reply(state: &ClientState, seq: u16) -> Vec<u8>
         reply = reply.set_u16(off, m.height);
         off += 2;
         // mm dimensions: approximate from pixel size (96 DPI).
-        let mm_w = (m.width as u32 * 254 + 480) / 960;
-        let mm_h = (m.height as u32 * 254 + 480) / 960;
+        let mm_w = crate::xserver::types::pixels_to_mm_at_96dpi(m.width as u32);
+        let mm_h = crate::xserver::types::pixels_to_mm_at_96dpi(m.height as u32);
         reply = reply.set_u32(off, mm_w);
         off += 4;
         reply = reply.set_u32(off, mm_h);

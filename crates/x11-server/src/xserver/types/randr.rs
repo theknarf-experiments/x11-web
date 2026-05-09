@@ -156,6 +156,13 @@ pub(crate) const DEFAULT_RANDR_OUTPUT_ID: u32 = 200;
 pub(crate) const DEFAULT_RANDR_MODE_ID: u32 = 300;
 pub(crate) const DEFAULT_RANDR_PROVIDER_ID: u32 = 400;
 
+/// Convert a pixel measurement to millimetres assuming the standard 96 DPI
+/// (≈ 25.4 mm/inch * 10 → 254/960 with `+ 480` rounding for half-up).
+#[inline]
+pub(crate) fn pixels_to_mm_at_96dpi(pixels: u32) -> u32 {
+    (pixels * 254 + 480) / 960
+}
+
 /// RandR event select mask bits.
 pub(crate) const RR_SCREEN_CHANGE_NOTIFY_MASK: u32 = 1 << 0;
 pub(crate) const RR_CRTC_CHANGE_NOTIFY_MASK: u32 = 1 << 1;

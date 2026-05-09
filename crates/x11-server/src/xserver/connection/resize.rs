@@ -275,9 +275,8 @@ pub(super) fn apply_screen_resize(state: &mut ClientState, new_w: u16, new_h: u1
     }
 
     // Update output EDID and dimensions
-    // Compute mm dimensions proportionally (96 DPI default)
-    let mm_w = ((new_w as u32) * 254 + 480) / 960;
-    let mm_h = ((new_h as u32) * 254 + 480) / 960;
+    let mm_w = crate::xserver::types::pixels_to_mm_at_96dpi(new_w as u32);
+    let mm_h = crate::xserver::types::pixels_to_mm_at_96dpi(new_h as u32);
     let edid_atom = state.intern_atom("EDID", false);
     let edid_data = generate_edid(mm_w as u16, mm_h as u16, new_w, new_h);
     if let Some(output) = state.randr_outputs.iter_mut().find(|o| o.id == output_id) {
