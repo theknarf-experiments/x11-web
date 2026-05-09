@@ -1,12 +1,13 @@
 //! Byte-order I/O helpers and error building for ClientState.
 
 use super::ClientState;
+use crate::xserver::core::RESOURCE_ID_MASK;
 
 impl ClientState {
     /// Validate that a resource ID belongs to this client's allocated range.
     /// Returns true if valid, false if the ID is outside this client's range.
     pub(crate) fn validate_resource_id(&self, id: u32) -> bool {
-        (id & !0x003FFFFF) == self.resource_id_base
+        (id & !RESOURCE_ID_MASK) == self.resource_id_base
     }
 
     /// Recycle a freed resource ID so it can be reused via XC-MISC GetXIDList.
@@ -29,30 +30,22 @@ impl ClientState {
     /// Read a u16 from request data respecting client byte order.
     #[inline]
     pub(crate) fn read_u16(&self, data: &[u8], offset: usize) -> u16 {
+        let bytes: [u8; 2] = data[offset..offset + 2].try_into().unwrap();
         if self.msb_first {
-            u16::from_be_bytes([data[offset], data[offset + 1]])
+            u16::from_be_bytes(bytes)
         } else {
-            u16::from_le_bytes([data[offset], data[offset + 1]])
+            u16::from_le_bytes(bytes)
         }
     }
 
     /// Read a u32 from request data respecting client byte order.
     #[inline]
     pub(crate) fn read_u32(&self, data: &[u8], offset: usize) -> u32 {
+        let bytes: [u8; 4] = data[offset..offset + 4].try_into().unwrap();
         if self.msb_first {
-            u32::from_be_bytes([
-                data[offset],
-                data[offset + 1],
-                data[offset + 2],
-                data[offset + 3],
-            ])
+            u32::from_be_bytes(bytes)
         } else {
-            u32::from_le_bytes([
-                data[offset],
-                data[offset + 1],
-                data[offset + 2],
-                data[offset + 3],
-            ])
+            u32::from_le_bytes(bytes)
         }
     }
 
