@@ -50,10 +50,12 @@ test.describe.serial("Resource limits and robustness", () => {
 });
 
 test.describe("Multi-app interaction", () => {
-	// Pre-existing: `xdotool windowfocus + xdotool type` doesn't deliver
-	// the typed text to the focused xterm. Likely a bug in our XTEST /
-	// SetInputFocus interplay — keystrokes synthesised via XTEST should
-	// be routed through the focus window but currently end up nowhere.
+	// XTEST FakeInput KeyPress events are now broadcast to the focus
+	// window's selecting clients (see crates/x11-server xtest.rs), but
+	// `xdotool type` still doesn't reach xterm — the events arrive at our
+	// server, the focus is set correctly, but xterm doesn't process them.
+	// Likely needs FocusIn synthesis for cross-client SetInputFocus and/or
+	// XKB state synchronisation; tracked as a separate workstream.
 	test.skip("xdotool sends keystrokes to a specific window", async ({ sidecarContainer }) => {
 		test.setTimeout(30_000);
 		const check = await sidecarContainer.exec([
@@ -235,19 +237,22 @@ test.describe("Concurrent client stress tests", () => {
 	// Pre-existing: spawning 50 xeyes concurrently saturates the test
 	// container; xeyes processes either fail to launch or fail to register
 	// with the sidecar in time. Documented in todo.md.
-	test.skip("50 concurrent xeyes clients connect and render", async ({ sidecarContainer }) => {
+	test("50 concurrent xeyes clients connect and render", async ({ sidecarContainer }) => {
 		test.setTimeout(60_000);
-		// Spawn 50 xeyes processes concurrently
+		// Spawn 50 xeyes processes concurrently. Note: `cmd &; done` is a
+		// bash syntax error (the `&` already terminates the command), which
+		// is why the original version never actually spawned anything and
+		// reported 0/50 running.
 		const result = await sidecarContainer.exec([
 			"bash", "-c", [
 				"export DISPLAY=:99",
-				"for i in $(seq 1 50); do xeyes &; done",
+				"for i in $(seq 1 50); do xeyes & done",
 				"sleep 3",
 				// Count how many xeyes are running
 				"RUNNING=$(pgrep -c xeyes || echo 0)",
 				"echo \"stress-clients: running=$RUNNING\"",
-				// Clean up
-				"pkill -9 xeyes 2>/dev/null; true",
+				// Clean up — match by exact name so we don't kill our own shell.
+				"pkill -9 -x xeyes 2>/dev/null; true",
 				"sleep 1",
 			].join("\n"),
 		], { timeout: 30_000 } as any);
@@ -273,7 +278,7 @@ test.describe("Concurrent client connections", () => {
 	// concurrent client spawns either fail to register all windows in
 	// the sidecar's window list, or trip our property store path.
 	// Documented in todo.md.
-	test.skip("10 concurrent xlogo instances", async ({ sidecarContainer }) => {
+	test("10 concurrent xlogo instances", async ({ sidecarContainer }) => {
 		test.setTimeout(60_000);
 		const result = await sidecarContainer.exec([
 			"bash", "-c", [
@@ -286,14 +291,18 @@ test.describe("Concurrent client connections", () => {
 				"# Count the windows via xdotool",
 				"COUNT=$(xdotool search --name xlogo 2>/dev/null | wc -l)",
 				"echo \"WINDOW_COUNT=$COUNT\"",
-				"# Clean up",
-				"pkill -f xlogo 2>/dev/null || true",
-				"sleep 1",
+				// Decide pass/fail BEFORE pkill so the next step doesn't
+				// terminate us — `pkill -f xlogo` matches anything in the
+				// command line containing "xlogo", which includes the bash
+				// script we're running, so the original version killed
+				// itself and never reached the if/else.
 				"if [ \"$COUNT\" -ge 10 ]; then",
 				"  echo 'CONCURRENT_PASS'",
 				"else",
 				"  echo 'CONCURRENT_FAIL'",
 				"fi",
+				"pkill -x xlogo 2>/dev/null || true",
+				"sleep 1",
 			].join("\n"),
 		]);
 		expect(result.output).toContain("CONCURRENT_PASS");

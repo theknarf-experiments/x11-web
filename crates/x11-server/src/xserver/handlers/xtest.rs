@@ -120,11 +120,27 @@ pub(crate) fn handle_xtest_request(state: &mut ClientState, data: &[u8], seq: u1
                         );
 
                         let event = build_kbp_event(state, event_type, keycode);
-                        state.pending_events.push(event);
+                        // Synthetic key events must be routed to whichever
+                        // client has key-press selection on the focus window
+                        // (typically the focused app, not the xtest client).
+                        // Keep the local pending push so XTest clients that
+                        // grab their own key events still see them, but also
+                        // broadcast across connections.
+                        let mask = if event_type == KEY_PRESS_EVENT {
+                            crate::xserver::core::EventMask::KEY_PRESS
+                        } else {
+                            crate::xserver::core::EventMask::KEY_RELEASE
+                        };
+                        state.deliver_event(state.focus_window, mask, &event);
                     }
                     BUTTON_PRESS_EVENT | BUTTON_RELEASE_EVENT => {
                         let event = build_kbp_event(state, event_type, detail);
-                        state.pending_events.push(event);
+                        let mask = if event_type == BUTTON_PRESS_EVENT {
+                            crate::xserver::core::EventMask::BUTTON_PRESS
+                        } else {
+                            crate::xserver::core::EventMask::BUTTON_RELEASE
+                        };
+                        state.deliver_event(state.focus_window, mask, &event);
                     }
                     MOTION_NOTIFY_EVENT => {
                         let old_px = state.pointer_x;

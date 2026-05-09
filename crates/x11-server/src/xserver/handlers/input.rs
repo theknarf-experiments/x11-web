@@ -389,8 +389,18 @@ pub(crate) fn handle_set_input_focus(
     }
     let focus = req.focus;
     // Per X11 spec: focus can be 0 (None), 1 (PointerRoot), or a valid window ID.
-    // If it's a specific window, validate it exists.
-    if focus > 1 && !state.windows.contains_key(&focus) {
+    // If it's a specific window, validate it exists. Window may be owned by
+    // another client (xdotool focusing an xterm), so check the shared store
+    // too — without this, every cross-client SetInputFocus is rejected as
+    // BadWindow.
+    if focus > 1
+        && !state.windows.contains_key(&focus)
+        && !state
+            .shared_windows
+            .lock()
+            .ok()
+            .is_some_and(|s| s.contains_key(&focus))
+    {
         return build_error(WINDOW_ERROR, state.sequence, focus, 42, 0);
     }
     state.focus_revert_to = revert_to;
