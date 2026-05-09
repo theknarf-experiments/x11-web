@@ -12,8 +12,8 @@ use super::reply::GlxReply;
 
 pub(crate) fn handle_delete_lists(payload: &[u8], seq: u16) -> Vec<u8> {
     if payload.len() >= 8 {
-        let list = u32::from_le_bytes([payload[0], payload[1], payload[2], payload[3]]);
-        let range = i32::from_le_bytes([payload[4], payload[5], payload[6], payload[7]]);
+        let list = super::render::read_u32_le(payload, 0);
+        let range = super::render::read_i32_le(payload, 4);
         #[cfg(feature = "osmesa")]
         {
             if osmesa::is_available() {
@@ -32,7 +32,7 @@ pub(crate) fn handle_render_mode(payload: &[u8], seq: u16) -> Vec<u8> {
     if payload.len() < 4 {
         return GlxReply::Empty.encode(seq);
     }
-    let mode = u32::from_le_bytes([payload[0], payload[1], payload[2], payload[3]]);
+    let mode = super::render::read_u32_le(payload, 0);
     let result: i32 = {
         #[cfg(feature = "osmesa")]
         {
@@ -72,8 +72,8 @@ pub(crate) fn handle_pixel_storef(payload: &[u8], seq: u16) -> Vec<u8> {
     if payload.len() < 8 {
         return GlxReply::Empty.encode(seq);
     }
-    let pname = u32::from_le_bytes([payload[0], payload[1], payload[2], payload[3]]);
-    let param = f32::from_le_bytes([payload[4], payload[5], payload[6], payload[7]]);
+    let pname = super::render::read_u32_le(payload, 0);
+    let param = super::render::read_f32_le(payload, 4);
     #[cfg(feature = "osmesa")]
     {
         if osmesa::is_available() {
@@ -91,8 +91,8 @@ pub(crate) fn handle_pixel_storei(payload: &[u8], seq: u16) -> Vec<u8> {
     if payload.len() < 8 {
         return GlxReply::Empty.encode(seq);
     }
-    let pname = u32::from_le_bytes([payload[0], payload[1], payload[2], payload[3]]);
-    let param = i32::from_le_bytes([payload[4], payload[5], payload[6], payload[7]]);
+    let pname = super::render::read_u32_le(payload, 0);
+    let param = super::render::read_i32_le(payload, 4);
     #[cfg(feature = "osmesa")]
     {
         if osmesa::is_available() {
@@ -110,7 +110,7 @@ pub(crate) fn handle_are_textures_resident(payload: &[u8], seq: u16) -> Vec<u8> 
     if payload.len() < 4 {
         return GlxReply::Empty.encode(seq);
     }
-    let n = i32::from_le_bytes([payload[0], payload[1], payload[2], payload[3]]);
+    let n = super::render::read_i32_le(payload, 0);
     let n = n.max(0) as usize;
     if payload.len() < 4 + n * 4 {
         return GlxReply::Empty.encode(seq);
@@ -156,7 +156,7 @@ pub(crate) fn handle_delete_textures(payload: &[u8], seq: u16) -> Vec<u8> {
     if payload.len() < 4 {
         return GlxReply::Empty.encode(seq);
     }
-    let n = i32::from_le_bytes([payload[0], payload[1], payload[2], payload[3]]);
+    let n = super::render::read_i32_le(payload, 0);
     let n = n.max(0) as usize;
     if payload.len() >= 4 + n * 4 {
         let textures: Vec<u32> = (0..n)

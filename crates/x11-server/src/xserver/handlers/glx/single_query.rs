@@ -38,7 +38,7 @@ pub(crate) fn handle_get_integerv(payload: &[u8], seq: u16) -> Vec<u8> {
     if payload.len() < 4 {
         return GlxReply::Empty.encode(seq);
     }
-    let pname = u32::from_le_bytes([payload[0], payload[1], payload[2], payload[3]]);
+    let pname = super::render::read_u32_le(payload, 0);
     let n: usize = gl_integer_count(pname);
     let mut params = vec![0i32; n];
     #[cfg(feature = "osmesa")]
@@ -58,7 +58,7 @@ pub(crate) fn handle_get_floatv(payload: &[u8], seq: u16) -> Vec<u8> {
     if payload.len() < 4 {
         return GlxReply::Empty.encode(seq);
     }
-    let pname = u32::from_le_bytes([payload[0], payload[1], payload[2], payload[3]]);
+    let pname = super::render::read_u32_le(payload, 0);
     let n: usize = gl_float_count(pname);
     let mut params = vec![0f32; n];
     #[cfg(feature = "osmesa")]
@@ -78,7 +78,7 @@ pub(crate) fn handle_get_doublev(payload: &[u8], seq: u16) -> Vec<u8> {
     if payload.len() < 4 {
         return GlxReply::Empty.encode(seq);
     }
-    let pname = u32::from_le_bytes([payload[0], payload[1], payload[2], payload[3]]);
+    let pname = super::render::read_u32_le(payload, 0);
     let n: usize = gl_float_count(pname);
     let mut params = vec![0f64; n];
     #[cfg(feature = "osmesa")]
@@ -98,7 +98,7 @@ pub(crate) fn handle_get_booleanv(payload: &[u8], seq: u16) -> Vec<u8> {
     if payload.len() < 4 {
         return GlxReply::Empty.encode(seq);
     }
-    let pname = u32::from_le_bytes([payload[0], payload[1], payload[2], payload[3]]);
+    let pname = super::render::read_u32_le(payload, 0);
     let n: usize = gl_float_count(pname);
     let mut params = vec![0u8; n];
     #[cfg(feature = "osmesa")]
@@ -118,7 +118,7 @@ pub(crate) fn handle_get_string(payload: &[u8], seq: u16) -> Vec<u8> {
     if payload.len() < 4 {
         return GlxReply::Empty.encode(seq);
     }
-    let name = u32::from_le_bytes([payload[0], payload[1], payload[2], payload[3]]);
+    let name = super::render::read_u32_le(payload, 0);
     let s = {
         #[cfg(feature = "osmesa")]
         {
@@ -151,7 +151,7 @@ pub(crate) fn handle_is_enabled(payload: &[u8], seq: u16) -> Vec<u8> {
     if payload.len() < 4 {
         return GlxReply::Empty.encode(seq);
     }
-    let cap = u32::from_le_bytes([payload[0], payload[1], payload[2], payload[3]]);
+    let cap = super::render::read_u32_le(payload, 0);
     let enabled: u32 = {
         #[cfg(feature = "osmesa")]
         {
@@ -181,7 +181,7 @@ pub(crate) fn handle_is_texture(payload: &[u8], seq: u16) -> Vec<u8> {
     if payload.len() < 4 {
         return GlxReply::Empty.encode(seq);
     }
-    let texture = u32::from_le_bytes([payload[0], payload[1], payload[2], payload[3]]);
+    let texture = super::render::read_u32_le(payload, 0);
     let result: u32 = {
         #[cfg(feature = "osmesa")]
         {
@@ -211,7 +211,7 @@ pub(crate) fn handle_gen_textures(payload: &[u8], seq: u16) -> Vec<u8> {
     if payload.len() < 4 {
         return GlxReply::Empty.encode(seq);
     }
-    let n = i32::from_le_bytes([payload[0], payload[1], payload[2], payload[3]]);
+    let n = super::render::read_i32_le(payload, 0);
     let n = n.max(0) as usize;
     let mut textures = vec![0u32; n];
     #[cfg(feature = "osmesa")]
@@ -231,8 +231,8 @@ pub(crate) fn handle_get_tex_parameteriv(payload: &[u8], seq: u16) -> Vec<u8> {
     if payload.len() < 8 {
         return GlxReply::Empty.encode(seq);
     }
-    let target = u32::from_le_bytes([payload[0], payload[1], payload[2], payload[3]]);
-    let pname = u32::from_le_bytes([payload[4], payload[5], payload[6], payload[7]]);
+    let target = super::render::read_u32_le(payload, 0);
+    let pname = super::render::read_u32_le(payload, 4);
     let n = 1usize;
     let mut params = vec![0i32; n];
     #[cfg(feature = "osmesa")]
@@ -252,8 +252,8 @@ pub(crate) fn handle_get_tex_parameterfv(payload: &[u8], seq: u16) -> Vec<u8> {
     if payload.len() < 8 {
         return GlxReply::Empty.encode(seq);
     }
-    let target = u32::from_le_bytes([payload[0], payload[1], payload[2], payload[3]]);
-    let pname = u32::from_le_bytes([payload[4], payload[5], payload[6], payload[7]]);
+    let target = super::render::read_u32_le(payload, 0);
+    let pname = super::render::read_u32_le(payload, 4);
     let n = 1usize;
     let mut params = vec![0f32; n];
     #[cfg(feature = "osmesa")]
@@ -273,9 +273,9 @@ pub(crate) fn handle_get_tex_level_parameteriv(payload: &[u8], seq: u16) -> Vec<
     if payload.len() < 12 {
         return GlxReply::Empty.encode(seq);
     }
-    let target = u32::from_le_bytes([payload[0], payload[1], payload[2], payload[3]]);
-    let level = i32::from_le_bytes([payload[4], payload[5], payload[6], payload[7]]);
-    let pname = u32::from_le_bytes([payload[8], payload[9], payload[10], payload[11]]);
+    let target = super::render::read_u32_le(payload, 0);
+    let level = super::render::read_i32_le(payload, 4);
+    let pname = super::render::read_u32_le(payload, 8);
     let n = 1usize;
     let mut params = vec![0i32; n];
     #[cfg(feature = "osmesa")]
@@ -295,9 +295,9 @@ pub(crate) fn handle_get_tex_level_parameterfv(payload: &[u8], seq: u16) -> Vec<
     if payload.len() < 12 {
         return GlxReply::Empty.encode(seq);
     }
-    let target = u32::from_le_bytes([payload[0], payload[1], payload[2], payload[3]]);
-    let level = i32::from_le_bytes([payload[4], payload[5], payload[6], payload[7]]);
-    let pname = u32::from_le_bytes([payload[8], payload[9], payload[10], payload[11]]);
+    let target = super::render::read_u32_le(payload, 0);
+    let level = super::render::read_i32_le(payload, 4);
+    let pname = super::render::read_u32_le(payload, 8);
     let n = 1usize;
     let mut params = vec![0f32; n];
     #[cfg(feature = "osmesa")]
@@ -317,10 +317,10 @@ pub(crate) fn handle_get_tex_image(payload: &[u8], seq: u16) -> Vec<u8> {
     if payload.len() < 16 {
         return GlxReply::Empty.encode(seq);
     }
-    let target = u32::from_le_bytes([payload[0], payload[1], payload[2], payload[3]]);
-    let level = i32::from_le_bytes([payload[4], payload[5], payload[6], payload[7]]);
-    let format = u32::from_le_bytes([payload[8], payload[9], payload[10], payload[11]]);
-    let type_ = u32::from_le_bytes([payload[12], payload[13], payload[14], payload[15]]);
+    let target = super::render::read_u32_le(payload, 0);
+    let level = super::render::read_i32_le(payload, 4);
+    let format = super::render::read_u32_le(payload, 8);
+    let type_ = super::render::read_u32_le(payload, 12);
     // Query texture dimensions via glGetTexLevelParameteriv
     let (width, height): (i32, i32) = {
         #[cfg(feature = "osmesa")]
@@ -364,8 +364,8 @@ pub(crate) fn handle_get_lightfv(payload: &[u8], seq: u16) -> Vec<u8> {
     if payload.len() < 8 {
         return GlxReply::Empty.encode(seq);
     }
-    let light = u32::from_le_bytes([payload[0], payload[1], payload[2], payload[3]]);
-    let pname = u32::from_le_bytes([payload[4], payload[5], payload[6], payload[7]]);
+    let light = super::render::read_u32_le(payload, 0);
+    let pname = super::render::read_u32_le(payload, 4);
     let n = gl_light_param_count(pname);
     let mut params = vec![0f32; n];
     #[cfg(feature = "osmesa")]
@@ -385,8 +385,8 @@ pub(crate) fn handle_get_lightiv(payload: &[u8], seq: u16) -> Vec<u8> {
     if payload.len() < 8 {
         return GlxReply::Empty.encode(seq);
     }
-    let light = u32::from_le_bytes([payload[0], payload[1], payload[2], payload[3]]);
-    let pname = u32::from_le_bytes([payload[4], payload[5], payload[6], payload[7]]);
+    let light = super::render::read_u32_le(payload, 0);
+    let pname = super::render::read_u32_le(payload, 4);
     let n = gl_light_param_count(pname);
     let mut params = vec![0i32; n];
     #[cfg(feature = "osmesa")]
@@ -406,8 +406,8 @@ pub(crate) fn handle_get_materialfv(payload: &[u8], seq: u16) -> Vec<u8> {
     if payload.len() < 8 {
         return GlxReply::Empty.encode(seq);
     }
-    let face = u32::from_le_bytes([payload[0], payload[1], payload[2], payload[3]]);
-    let pname = u32::from_le_bytes([payload[4], payload[5], payload[6], payload[7]]);
+    let face = super::render::read_u32_le(payload, 0);
+    let pname = super::render::read_u32_le(payload, 4);
     let n = gl_material_param_count(pname);
     let mut params = vec![0f32; n];
     #[cfg(feature = "osmesa")]
@@ -427,8 +427,8 @@ pub(crate) fn handle_get_materialiv(payload: &[u8], seq: u16) -> Vec<u8> {
     if payload.len() < 8 {
         return GlxReply::Empty.encode(seq);
     }
-    let face = u32::from_le_bytes([payload[0], payload[1], payload[2], payload[3]]);
-    let pname = u32::from_le_bytes([payload[4], payload[5], payload[6], payload[7]]);
+    let face = super::render::read_u32_le(payload, 0);
+    let pname = super::render::read_u32_le(payload, 4);
     let n = gl_material_param_count(pname);
     let mut params = vec![0i32; n];
     #[cfg(feature = "osmesa")]
@@ -448,8 +448,8 @@ pub(crate) fn handle_get_tex_envfv(payload: &[u8], seq: u16) -> Vec<u8> {
     if payload.len() < 8 {
         return GlxReply::Empty.encode(seq);
     }
-    let target = u32::from_le_bytes([payload[0], payload[1], payload[2], payload[3]]);
-    let pname = u32::from_le_bytes([payload[4], payload[5], payload[6], payload[7]]);
+    let target = super::render::read_u32_le(payload, 0);
+    let pname = super::render::read_u32_le(payload, 4);
     let n = gl_texenv_param_count(pname);
     let mut params = vec![0f32; n];
     #[cfg(feature = "osmesa")]
@@ -469,8 +469,8 @@ pub(crate) fn handle_get_tex_enviv(payload: &[u8], seq: u16) -> Vec<u8> {
     if payload.len() < 8 {
         return GlxReply::Empty.encode(seq);
     }
-    let target = u32::from_le_bytes([payload[0], payload[1], payload[2], payload[3]]);
-    let pname = u32::from_le_bytes([payload[4], payload[5], payload[6], payload[7]]);
+    let target = super::render::read_u32_le(payload, 0);
+    let pname = super::render::read_u32_le(payload, 4);
     let n = gl_texenv_param_count(pname);
     let mut params = vec![0i32; n];
     #[cfg(feature = "osmesa")]
@@ -490,8 +490,8 @@ pub(crate) fn handle_get_tex_gendv(payload: &[u8], seq: u16) -> Vec<u8> {
     if payload.len() < 8 {
         return GlxReply::Empty.encode(seq);
     }
-    let coord = u32::from_le_bytes([payload[0], payload[1], payload[2], payload[3]]);
-    let pname = u32::from_le_bytes([payload[4], payload[5], payload[6], payload[7]]);
+    let coord = super::render::read_u32_le(payload, 0);
+    let pname = super::render::read_u32_le(payload, 4);
     let n = gl_texgen_param_count(pname);
     let mut params = vec![0f64; n];
     #[cfg(feature = "osmesa")]
@@ -511,8 +511,8 @@ pub(crate) fn handle_get_tex_genfv(payload: &[u8], seq: u16) -> Vec<u8> {
     if payload.len() < 8 {
         return GlxReply::Empty.encode(seq);
     }
-    let coord = u32::from_le_bytes([payload[0], payload[1], payload[2], payload[3]]);
-    let pname = u32::from_le_bytes([payload[4], payload[5], payload[6], payload[7]]);
+    let coord = super::render::read_u32_le(payload, 0);
+    let pname = super::render::read_u32_le(payload, 4);
     let n = gl_texgen_param_count(pname);
     let mut params = vec![0f32; n];
     #[cfg(feature = "osmesa")]
@@ -532,8 +532,8 @@ pub(crate) fn handle_get_tex_geniv(payload: &[u8], seq: u16) -> Vec<u8> {
     if payload.len() < 8 {
         return GlxReply::Empty.encode(seq);
     }
-    let coord = u32::from_le_bytes([payload[0], payload[1], payload[2], payload[3]]);
-    let pname = u32::from_le_bytes([payload[4], payload[5], payload[6], payload[7]]);
+    let coord = super::render::read_u32_le(payload, 0);
+    let pname = super::render::read_u32_le(payload, 4);
     let n = gl_texgen_param_count(pname);
     let mut params = vec![0i32; n];
     #[cfg(feature = "osmesa")]
@@ -553,7 +553,7 @@ pub(crate) fn handle_get_pixel_mapfv(payload: &[u8], seq: u16) -> Vec<u8> {
     if payload.len() < 4 {
         return GlxReply::Empty.encode(seq);
     }
-    let map = u32::from_le_bytes([payload[0], payload[1], payload[2], payload[3]]);
+    let map = super::render::read_u32_le(payload, 0);
     // Query the map size first via glGetIntegerv on the corresponding GL_PIXEL_MAP_*_SIZE
     let size_pname = gl_pixel_map_size_pname(map);
     let n: usize = {
@@ -590,7 +590,7 @@ pub(crate) fn handle_get_clip_plane(payload: &[u8], seq: u16) -> Vec<u8> {
     if payload.len() < 4 {
         return GlxReply::Empty.encode(seq);
     }
-    let plane = u32::from_le_bytes([payload[0], payload[1], payload[2], payload[3]]);
+    let plane = super::render::read_u32_le(payload, 0);
     let mut equation = [0f64; 4];
     #[cfg(feature = "osmesa")]
     {
@@ -624,7 +624,7 @@ pub(crate) fn handle_gen_lists(payload: &[u8], seq: u16) -> Vec<u8> {
     if payload.len() < 4 {
         return GlxReply::Empty.encode(seq);
     }
-    let range = i32::from_le_bytes([payload[0], payload[1], payload[2], payload[3]]);
+    let range = super::render::read_i32_le(payload, 0);
     let result: u32 = {
         #[cfg(feature = "osmesa")]
         {
@@ -650,7 +650,7 @@ pub(crate) fn handle_is_list(payload: &[u8], seq: u16) -> Vec<u8> {
     if payload.len() < 4 {
         return GlxReply::Empty.encode(seq);
     }
-    let list = u32::from_le_bytes([payload[0], payload[1], payload[2], payload[3]]);
+    let list = super::render::read_u32_le(payload, 0);
     let result: u32 = {
         #[cfg(feature = "osmesa")]
         {

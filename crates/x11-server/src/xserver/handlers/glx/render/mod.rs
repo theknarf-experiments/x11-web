@@ -84,8 +84,8 @@ pub(crate) fn handle_render_large(state: &mut ClientState, data: &[u8], seq: u16
 
         let mut off = payload_start;
         while off + 4 <= payload_end {
-            let render_opcode = u16::from_le_bytes([data[off], data[off + 1]]);
-            let cmd_len = u16::from_le_bytes([data[off + 2], data[off + 3]]) as usize;
+            let render_opcode = read_u16_le(data, off);
+            let cmd_len = read_u16_le(data, off + 2) as usize;
             if cmd_len < 4 || off + cmd_len > payload_end {
                 break;
             }
