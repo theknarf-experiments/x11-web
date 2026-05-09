@@ -11,10 +11,7 @@ test.describe("Clipboard manager", () => {
 		expect(result.output).toContain("clipboard-mgr-ok");
 	});
 
-	// Pre-existing: when xclip exits, the clipboard owner is gone and the
-	// CLIPBOARD selection content is lost. We don't yet have an in-server
-	// clipboard manager that takes over ownership on owner exit.
-	test.skip("clipboard data persists after source app exits", async ({ sidecarContainer }) => {
+	test("clipboard data persists after source app exits", async ({ sidecarContainer }) => {
 		test.setTimeout(30_000);
 		const result = await sidecarContainer.exec([
 			"bash", "-c", [
@@ -26,8 +23,10 @@ test.describe("Clipboard manager", () => {
 				"# Read it back to verify it was set",
 				"DATA1=$(xclip -selection clipboard -o 2>/dev/null || echo 'read-failed')",
 				"echo \"before-exit: $DATA1\"",
-				"# Kill xclip (the clipboard owner)",
-				"pkill -f xclip 2>/dev/null || true",
+				"# Kill xclip (the clipboard owner). Use -x so we match the",
+				"# exact process name and don't terminate this shell — the",
+				"# inline script has 'xclip' in argv and -f would kill it.",
+				"pkill -x xclip 2>/dev/null || true",
 				"sleep 2",
 				"# Read clipboard again - should still have the data",
 				"DATA2=$(xclip -selection clipboard -o 2>/dev/null || echo 'read-failed')",
