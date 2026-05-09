@@ -188,10 +188,80 @@ test.skip("DIAG: synthetic firefox-like client receives events", async ({
 // the F/+ overlay, the issue is Firefox's first-run gating.
 // Try gtk3-demo — also GTK3, but smaller. If clicks reach widgets there,
 // the bug is Firefox-specific; if not, it's a GTK3 issue we should fix.
-// Click on a known interactive Firefox UI element — the tab close X — at
-// canvas (478, 22). Compare with how gtk3-demo handled the equivalent
-// click at canvas (200, 100). This proves whether clicks reach Firefox.
-test("DIAG: Firefox close button click", async ({
+test.skip("DIAG: Firefox slow click sequence", async ({
+	page,
+	sidecarContainer,
+	frontendUrl,
+}) => {
+	test.setTimeout(180_000);
+	await cleanupApps(sidecarContainer);
+	await page.goto(frontendUrl);
+	await waitForDock(page);
+
+	await sidecarContainer.exec([
+		"bash",
+		"-c",
+		`mkdir -p /tmp/ffprof && cat > /tmp/ffprof/user.js <<'EOF'
+user_pref("browser.startup.firstrunSkipsHomepage", true);
+user_pref("browser.aboutwelcome.enabled", false);
+user_pref("trailhead.firstrun.didSeeAboutWelcome", true);
+user_pref("browser.shell.checkDefaultBrowser", false);
+user_pref("browser.aboutConfig.showWarning", false);
+EOF`,
+	]);
+
+	const win = await spawnApp(
+		page,
+		"--no-remote --new-instance --profile /tmp/ffprof about:blank",
+		"firefox-esr",
+		FIREFOX_STARTUP_TIMEOUT,
+	);
+	const canvas = win.locator('[data-testid="x11-canvas"]');
+	await expect(canvas).toBeVisible({ timeout: FIREFOX_STARTUP_TIMEOUT });
+	await expect.poll(async () => hasRenderedContent(canvas), {
+		timeout: FIREFOX_STARTUP_TIMEOUT,
+		intervals: [3000, 5000, 5000],
+	}).toBe(true);
+	await page.waitForTimeout(8000); // let Firefox fully settle
+
+	const box = await canvas.boundingBox();
+	if (!box) return;
+	const ux = box.x + box.width * 0.5;
+	const uy = box.y + 63;
+	console.log(`URL bar at viewport (${ux}, ${uy})`);
+
+	// Move slowly to URL bar with multi-step motion
+	await page.mouse.move(box.x + 100, box.y + 200);
+	await page.waitForTimeout(200);
+	await page.mouse.move(box.x + 300, box.y + 100);
+	await page.waitForTimeout(200);
+	await page.mouse.move(ux, uy, { steps: 10 });
+	await page.waitForTimeout(500);
+	await canvas.screenshot({ path: "test-results/slow-1-hover.png" });
+
+	// Click with separate down/up
+	await page.mouse.down();
+	await page.waitForTimeout(100);
+	await page.mouse.up();
+	await page.waitForTimeout(1500);
+	await canvas.screenshot({ path: "test-results/slow-2-clicked.png" });
+
+	// Capture state RIGHT after click before any DOM-focus changes
+	await canvas.screenshot({ path: "test-results/slow-2b-after-click.png" });
+
+	// Send keystrokes via xdotool inside the container (XTEST FakeInput)
+	// while URL bar is presumably focused. If THIS works but page.keyboard
+	// doesn't, the bug is in our canvas → server keyboard delivery.
+	await sidecarContainer.exec([
+		"bash",
+		"-c",
+		"export DISPLAY=:99; xdotool type --delay 50 'xyz' 2>&1",
+	]);
+	await page.waitForTimeout(800);
+	await canvas.screenshot({ path: "test-results/slow-3-xdotool-typed.png" });
+});
+
+test.skip("DIAG: Firefox close button click", async ({
 	page,
 	sidecarContainer,
 	frontendUrl,
