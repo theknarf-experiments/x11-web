@@ -55,15 +55,16 @@ async function navigateFirefox(
 	canvas: Locator,
 	url: string,
 ): Promise<void> {
+	// Click somewhere in the content area first to make sure the canvas
+	// has keyboard focus, then use Ctrl+L (Firefox's "focus URL bar"
+	// shortcut) — the URL bar's exact pixel position depends on chrome
+	// height and isn't a stable click target.
 	const box = await canvas.boundingBox();
 	expect(box).not.toBeNull();
-	await page.mouse.click(
-		box!.x + box!.width * 0.5,
-		box!.y + box!.height * 0.08,
-	);
-	await page.waitForTimeout(1000);
-	await page.keyboard.press("Control+a");
-	await page.waitForTimeout(200);
+	await page.mouse.click(box!.x + box!.width * 0.5, box!.y + box!.height * 0.5);
+	await page.waitForTimeout(500);
+	await page.keyboard.press("Control+l");
+	await page.waitForTimeout(500);
 	await page.keyboard.type(url, { delay: 30 });
 	await page.waitForTimeout(300);
 	await page.keyboard.press("Enter");
@@ -91,11 +92,10 @@ test("firefox: startup and initial rendering", async ({
 	});
 });
 
-// All five navigation tests below depend on Playwright keyboard/mouse events
-// reaching Firefox through the canvas → backend → sidecar input pipeline.
-// Firefox now starts and renders (the startup test above passes), but synthesised
-// clicks and typed URLs don't currently reach Firefox's URL bar. Same input-
-// dispatch class as the xdotool-keystroke skip in stress.spec.ts.
+// Keyboard input through canvas → sidecar → app is verified by the xterm
+// and vim tests in x11-web.spec.ts. Firefox-specific navigation flakes on
+// first-run UI (privacy notice tab, telemetry overlay) and tab-strip
+// position — these are Firefox-side issues, not input-pipeline bugs.
 
 // ---------------------------------------------------------------------------
 // Firefox navigates to about:config
