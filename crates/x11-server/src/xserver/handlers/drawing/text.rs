@@ -214,8 +214,7 @@ pub(crate) fn handle_poly_text16(state: &mut ClientState, req: &PolyText16Reques
 
                     if let Some(glyph) = glyph_opt {
                         if glyph.width > 0 && glyph.height > 0 {
-                            let (fg_r, fg_g, fg_b) =
-                                crate::framebuffer::unpack_rgb(gc.foreground);
+                            let (fg_r, fg_g, fg_b) = crate::framebuffer::unpack_rgb(gc.foreground);
                             let gw = glyph.width as usize;
                             let gh = glyph.height as usize;
                             let row_bytes = gw.div_ceil(8);

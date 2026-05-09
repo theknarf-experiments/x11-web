@@ -11,13 +11,13 @@ use crate::xserver::request::request_header;
 use x11rb_protocol::protocol::present::{
     Capability, CompleteKind, CompleteMode, CompleteNotifyEvent,
     ConfigureNotifyEvent as PresentConfigureNotifyEvent, EventMask, IdleNotifyEvent,
-    NOTIFY_MSC_REQUEST, NotifyMSCRequest, Option as PresentOption, PIXMAP_REQUEST,
-    PixmapRequest as PresentPixmapRequest, QUERY_CAPABILITIES_REQUEST,
-    QUERY_VERSION_REQUEST as PRESENT_QUERY_VERSION_REQUEST, QueryCapabilitiesRequest,
-    SELECT_INPUT_REQUEST, SelectInputRequest as PresentSelectInputRequest,
+    NotifyMSCRequest, Option as PresentOption, PixmapRequest as PresentPixmapRequest,
+    QueryCapabilitiesRequest, SelectInputRequest as PresentSelectInputRequest, NOTIFY_MSC_REQUEST,
+    PIXMAP_REQUEST, QUERY_CAPABILITIES_REQUEST,
+    QUERY_VERSION_REQUEST as PRESENT_QUERY_VERSION_REQUEST, SELECT_INPUT_REQUEST,
 };
 use x11rb_protocol::protocol::xc_misc::{
-    GET_VERSION_REQUEST, GET_XID_LIST_REQUEST, GET_XID_RANGE_REQUEST, GetXIDListRequest,
+    GetXIDListRequest, GET_VERSION_REQUEST, GET_XID_LIST_REQUEST, GET_XID_RANGE_REQUEST,
 };
 
 /// Present major opcode (assigned at QueryExtension time).
@@ -131,7 +131,7 @@ pub(crate) fn handle_xc_misc_request(state: &mut ClientState, data: &[u8], seq: 
 
             let actual_count = ids.len() as u32;
             let extra_bytes = (actual_count as usize) * 4;
-            let padded = crate::xserver::core::align_to_4(extra_bytes );
+            let padded = crate::xserver::core::align_to_4(extra_bytes);
             let mut reply =
                 ReplyBuf::with_extra(seq, padded, state.msb_first).set_u32(8, actual_count); // ids_count
             for (i, &id) in ids.iter().enumerate() {
@@ -670,8 +670,7 @@ pub(crate) fn send_present_config_notify(
         .present_subscriptions
         .iter()
         .filter(|(_, sub)| {
-            sub.window == window
-                && (sub.event_mask & u32::from(EventMask::CONFIGURE_NOTIFY)) != 0
+            sub.window == window && (sub.event_mask & u32::from(EventMask::CONFIGURE_NOTIFY)) != 0
         })
         .map(|(&eid, _)| eid)
         .collect();

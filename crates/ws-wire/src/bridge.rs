@@ -17,8 +17,8 @@ use capnp::message::{Builder, HeapAllocator};
 use capnp::serialize;
 use x11_web_protocol::{
     BackendToFrontend, DndEventKind, FrontendToBackend, GesturePhase, InputEvent, MenuAction,
-    MenuActionTarget, MenuItem, MenuItemKind, ProcessInfo, SidecarInfo, Workspace, WindowDescriptor,
-    WindowUpdate, WindowWmState,
+    MenuActionTarget, MenuItem, MenuItemKind, ProcessInfo, SidecarInfo, WindowDescriptor,
+    WindowUpdate, WindowWmState, Workspace,
 };
 
 use crate::ws_capnp;
@@ -1091,7 +1091,10 @@ mod tests {
         match decoded {
             FrontendToBackend::InputEvent { event, .. } => match event {
                 InputEvent::ButtonPress {
-                    button, x, y, state,
+                    button,
+                    x,
+                    y,
+                    state,
                 } => {
                     assert_eq!((button, x, y, state), (1, 10, 20, 0));
                 }

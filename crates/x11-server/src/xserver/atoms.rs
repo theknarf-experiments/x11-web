@@ -296,8 +296,7 @@ mod tests {
 
     #[test]
     fn predefined_consts_match_table() {
-        let lookup: HashMap<&str, u32> =
-            PREDEFINED_ATOMS.iter().map(|&(n, i)| (n, i)).collect();
+        let lookup: HashMap<&str, u32> = PREDEFINED_ATOMS.iter().map(|&(n, i)| (n, i)).collect();
         let pairs: &[(&str, u32)] = &[
             ("ATOM", predef::ATOM),
             ("CARDINAL", predef::CARDINAL),
@@ -308,20 +307,44 @@ mod tests {
             ("TIMESTAMP", predef::TIMESTAMP),
             ("CLIPBOARD", predef::CLIPBOARD),
             ("_NET_WM_WINDOW_TYPE", predef::NET_WM_WINDOW_TYPE),
-            ("_NET_WM_WINDOW_TYPE_NORMAL", predef::NET_WM_WINDOW_TYPE_NORMAL),
-            ("_NET_WM_WINDOW_TYPE_DIALOG", predef::NET_WM_WINDOW_TYPE_DIALOG),
-            ("_NET_WM_WINDOW_TYPE_TOOLBAR", predef::NET_WM_WINDOW_TYPE_TOOLBAR),
+            (
+                "_NET_WM_WINDOW_TYPE_NORMAL",
+                predef::NET_WM_WINDOW_TYPE_NORMAL,
+            ),
+            (
+                "_NET_WM_WINDOW_TYPE_DIALOG",
+                predef::NET_WM_WINDOW_TYPE_DIALOG,
+            ),
+            (
+                "_NET_WM_WINDOW_TYPE_TOOLBAR",
+                predef::NET_WM_WINDOW_TYPE_TOOLBAR,
+            ),
             ("_NET_WM_WINDOW_TYPE_MENU", predef::NET_WM_WINDOW_TYPE_MENU),
-            ("_NET_WM_WINDOW_TYPE_UTILITY", predef::NET_WM_WINDOW_TYPE_UTILITY),
-            ("_NET_WM_WINDOW_TYPE_SPLASH", predef::NET_WM_WINDOW_TYPE_SPLASH),
+            (
+                "_NET_WM_WINDOW_TYPE_UTILITY",
+                predef::NET_WM_WINDOW_TYPE_UTILITY,
+            ),
+            (
+                "_NET_WM_WINDOW_TYPE_SPLASH",
+                predef::NET_WM_WINDOW_TYPE_SPLASH,
+            ),
             ("_NET_WM_WINDOW_TYPE_DOCK", predef::NET_WM_WINDOW_TYPE_DOCK),
-            ("_NET_WM_WINDOW_TYPE_DESKTOP", predef::NET_WM_WINDOW_TYPE_DESKTOP),
+            (
+                "_NET_WM_WINDOW_TYPE_DESKTOP",
+                predef::NET_WM_WINDOW_TYPE_DESKTOP,
+            ),
             (
                 "_NET_WM_WINDOW_TYPE_DROPDOWN_MENU",
                 predef::NET_WM_WINDOW_TYPE_DROPDOWN_MENU,
             ),
-            ("_NET_WM_WINDOW_TYPE_POPUP_MENU", predef::NET_WM_WINDOW_TYPE_POPUP_MENU),
-            ("_NET_WM_WINDOW_TYPE_TOOLTIP", predef::NET_WM_WINDOW_TYPE_TOOLTIP),
+            (
+                "_NET_WM_WINDOW_TYPE_POPUP_MENU",
+                predef::NET_WM_WINDOW_TYPE_POPUP_MENU,
+            ),
+            (
+                "_NET_WM_WINDOW_TYPE_TOOLTIP",
+                predef::NET_WM_WINDOW_TYPE_TOOLTIP,
+            ),
             (
                 "_NET_WM_WINDOW_TYPE_NOTIFICATION",
                 predef::NET_WM_WINDOW_TYPE_NOTIFICATION,

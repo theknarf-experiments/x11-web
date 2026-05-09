@@ -3,9 +3,9 @@
 use super::parse_minor;
 use tracing::debug;
 use x11rb_protocol::protocol::dpms::{
-    CAPABLE_REQUEST, DISABLE_REQUEST, DPMSMode, ENABLE_REQUEST, FORCE_LEVEL_REQUEST,
-    ForceLevelRequest, GET_TIMEOUTS_REQUEST, GET_VERSION_REQUEST, INFO_REQUEST,
-    SET_TIMEOUTS_REQUEST, SetTimeoutsRequest,
+    DPMSMode, ForceLevelRequest, SetTimeoutsRequest, CAPABLE_REQUEST, DISABLE_REQUEST,
+    ENABLE_REQUEST, FORCE_LEVEL_REQUEST, GET_TIMEOUTS_REQUEST, GET_VERSION_REQUEST, INFO_REQUEST,
+    SET_TIMEOUTS_REQUEST,
 };
 
 use super::super::client::ClientState;

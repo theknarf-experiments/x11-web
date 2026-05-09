@@ -9,13 +9,13 @@ use super::super::types::{PixmapState, ShmPixmapBacking, ShmSegment};
 use crate::framebuffer::Framebuffer;
 use crate::xserver::core::require_len;
 use crate::xserver::reply::ReplyBuf;
-#[cfg(target_os = "linux")]
-use x11rb_protocol::protocol::shm::{CREATE_SEGMENT_REQUEST, CreateSegmentRequest};
 use x11rb_protocol::protocol::shm::{
-    ATTACH_FD_REQUEST, ATTACH_REQUEST, AttachRequest, CREATE_PIXMAP_REQUEST, CreatePixmapRequest,
-    DETACH_REQUEST, DetachRequest, GET_IMAGE_REQUEST, GetImageRequest, PUT_IMAGE_REQUEST,
-    PutImageRequest, QUERY_VERSION_REQUEST,
+    AttachRequest, CreatePixmapRequest, DetachRequest, GetImageRequest, PutImageRequest,
+    ATTACH_FD_REQUEST, ATTACH_REQUEST, CREATE_PIXMAP_REQUEST, DETACH_REQUEST, GET_IMAGE_REQUEST,
+    PUT_IMAGE_REQUEST, QUERY_VERSION_REQUEST,
 };
+#[cfg(target_os = "linux")]
+use x11rb_protocol::protocol::shm::{CreateSegmentRequest, CREATE_SEGMENT_REQUEST};
 
 /// Handle MIT-SHM extension requests (major opcode 130).
 pub(crate) fn handle_shm_request(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {

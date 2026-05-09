@@ -12,13 +12,14 @@ use crate::xserver::event::serialize_event_with_layout;
 use crate::xserver::reply::ReplyBuf;
 use x11rb_protocol::protocol::ge::QUERY_VERSION_REQUEST as GE_QUERY_VERSION_REQUEST;
 use x11rb_protocol::protocol::xkb::{
-    BELL_REQUEST, ControlsNotifyEvent, GET_COMPAT_MAP_REQUEST, GET_CONTROLS_REQUEST,
-    GET_DEVICE_INFO_REQUEST, GET_INDICATOR_MAP_REQUEST, GET_INDICATOR_STATE_REQUEST,
-    GET_KBD_BY_NAME_REQUEST, GET_MAP_REQUEST, GET_NAMED_INDICATOR_REQUEST, GET_NAMES_REQUEST,
-    GET_STATE_REQUEST, LATCH_LOCK_STATE_REQUEST, LIST_COMPONENTS_REQUEST, MapNotifyEvent,
-    PER_CLIENT_FLAGS_REQUEST, SELECT_EVENTS_REQUEST, SET_COMPAT_MAP_REQUEST, SET_CONTROLS_REQUEST,
-    SET_DEBUGGING_FLAGS_REQUEST, SET_DEVICE_INFO_REQUEST, SET_INDICATOR_MAP_REQUEST, SET_MAP_REQUEST,
-    SET_NAMED_INDICATOR_REQUEST, SET_NAMES_REQUEST, StateNotifyEvent, USE_EXTENSION_REQUEST,
+    ControlsNotifyEvent, MapNotifyEvent, StateNotifyEvent, BELL_REQUEST, GET_COMPAT_MAP_REQUEST,
+    GET_CONTROLS_REQUEST, GET_DEVICE_INFO_REQUEST, GET_INDICATOR_MAP_REQUEST,
+    GET_INDICATOR_STATE_REQUEST, GET_KBD_BY_NAME_REQUEST, GET_MAP_REQUEST,
+    GET_NAMED_INDICATOR_REQUEST, GET_NAMES_REQUEST, GET_STATE_REQUEST, LATCH_LOCK_STATE_REQUEST,
+    LIST_COMPONENTS_REQUEST, PER_CLIENT_FLAGS_REQUEST, SELECT_EVENTS_REQUEST,
+    SET_COMPAT_MAP_REQUEST, SET_CONTROLS_REQUEST, SET_DEBUGGING_FLAGS_REQUEST,
+    SET_DEVICE_INFO_REQUEST, SET_INDICATOR_MAP_REQUEST, SET_MAP_REQUEST,
+    SET_NAMED_INDICATOR_REQUEST, SET_NAMES_REQUEST, USE_EXTENSION_REQUEST,
 };
 
 mod compat;
@@ -350,12 +351,20 @@ pub(crate) fn handle_xkb_request(state: &mut ClientState, data: &[u8], seq: u16)
         SET_CONTROLS_REQUEST => controls::handle_xkb_set_controls(state, data, seq),
         GET_MAP_REQUEST => map::build_xkb_get_map_reply(state, seq),
         SET_MAP_REQUEST => map::handle_xkb_set_map(state, data, seq),
-        GET_COMPAT_MAP_REQUEST => compat::build_xkb_get_compat_map_reply(state, seq, device_id_byte),
+        GET_COMPAT_MAP_REQUEST => {
+            compat::build_xkb_get_compat_map_reply(state, seq, device_id_byte)
+        }
         SET_COMPAT_MAP_REQUEST => compat::handle_xkb_set_compat_map(state, data),
-        GET_INDICATOR_STATE_REQUEST => indicators::handle_get_indicator_state(state, seq, device_id_byte),
-        GET_INDICATOR_MAP_REQUEST => indicators::handle_get_indicator_map(state, data, seq, device_id_byte),
+        GET_INDICATOR_STATE_REQUEST => {
+            indicators::handle_get_indicator_state(state, seq, device_id_byte)
+        }
+        GET_INDICATOR_MAP_REQUEST => {
+            indicators::handle_get_indicator_map(state, data, seq, device_id_byte)
+        }
         SET_INDICATOR_MAP_REQUEST => indicators::handle_set_indicator_map(state, data),
-        GET_NAMED_INDICATOR_REQUEST => indicators::handle_get_named_indicator(state, data, seq, device_id_byte),
+        GET_NAMED_INDICATOR_REQUEST => {
+            indicators::handle_get_named_indicator(state, data, seq, device_id_byte)
+        }
         SET_NAMED_INDICATOR_REQUEST => handle_xkb_set_named_indicator(state, data),
         GET_NAMES_REQUEST => {
             // GetNames: which-name bitmask selects which strings to return.
@@ -389,7 +398,9 @@ pub(crate) fn handle_xkb_request(state: &mut ClientState, data: &[u8], seq: u16)
                 .build()
         }
         LIST_COMPONENTS_REQUEST => device::handle_list_components(state, seq, device_id_byte),
-        GET_KBD_BY_NAME_REQUEST => map::handle_xkb_get_kbd_by_name(state, data, seq, device_id_byte),
+        GET_KBD_BY_NAME_REQUEST => {
+            map::handle_xkb_get_kbd_by_name(state, data, seq, device_id_byte)
+        }
         GET_DEVICE_INFO_REQUEST => device::handle_get_device_info(state, seq, device_id_byte),
         SET_DEVICE_INFO_REQUEST => device::handle_set_device_info(state, data),
         SET_DEBUGGING_FLAGS_REQUEST => {

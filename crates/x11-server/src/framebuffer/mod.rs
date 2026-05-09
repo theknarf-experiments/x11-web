@@ -2,7 +2,7 @@ use tiny_skia::{
     Color, FillRule, FilterQuality, Paint, Path, PathBuilder, Pattern, PixmapMut, PixmapRef,
     SpreadMode, Stroke, StrokeDash, Transform,
 };
-use x11rb_protocol::protocol::xproto::{CapStyle, GX, Gravity, LineStyle};
+use x11rb_protocol::protocol::xproto::{CapStyle, Gravity, LineStyle, GX};
 
 /// Full plane mask: all 32 bit-planes are affected by GC operations.
 pub(crate) const PLANE_MASK_ALL: u32 = u32::MAX;

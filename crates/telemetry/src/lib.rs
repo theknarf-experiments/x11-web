@@ -79,8 +79,7 @@ impl Telemetry {
 ///     reader on the SDK's default 60 s cadence; registers an
 ///     `SdkMeterProvider` globally.
 pub fn init(service_name: &'static str) -> Telemetry {
-    let env_filter = EnvFilter::try_from_default_env()
-        .unwrap_or_else(|_| EnvFilter::new("info"));
+    let env_filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
 
     let otlp_endpoint = std::env::var("OTEL_EXPORTER_OTLP_ENDPOINT")
         .ok()
@@ -100,10 +99,7 @@ pub fn init(service_name: &'static str) -> Telemetry {
 
     let resource = Resource::builder()
         .with_service_name(service_name)
-        .with_attribute(KeyValue::new(
-            "service.version",
-            env!("CARGO_PKG_VERSION"),
-        ))
+        .with_attribute(KeyValue::new("service.version", env!("CARGO_PKG_VERSION")))
         .build();
 
     let span_exporter = SpanExporter::builder()
@@ -165,7 +161,10 @@ pub fn init(service_name: &'static str) -> Telemetry {
         .with(log_layer)
         .init();
 
-    info!(service = service_name, "OTel enabled — exporting traces + metrics + logs to OTLP gRPC");
+    info!(
+        service = service_name,
+        "OTel enabled — exporting traces + metrics + logs to OTLP gRPC"
+    );
 
     Telemetry {
         tracer_provider: Some(tracer_provider),
@@ -207,15 +206,15 @@ pub async fn shutdown_signal() {
     }
 }
 
+/// Re-export — gives `Context::span_context()` on the receiver
+/// side so callers can ask "is the parent context valid?" before
+/// calling `set_parent`.
+pub use opentelemetry::trace::TraceContextExt;
 /// Re-export — lets a `tracing::Span` adopt an OTel `Context` as
 /// its parent (`span.set_parent(ctx)`). Re-exported so binary
 /// callers don't have to take a direct dependency on
 /// `tracing-opentelemetry`.
 pub use tracing_opentelemetry::OpenTelemetrySpanExt;
-/// Re-export — gives `Context::span_context()` on the receiver
-/// side so callers can ask "is the parent context valid?" before
-/// calling `set_parent`.
-pub use opentelemetry::trace::TraceContextExt;
 
 /// Mark the active span as failed and record structured error
 /// metadata so the failure is both visible (red in OpenObserve's

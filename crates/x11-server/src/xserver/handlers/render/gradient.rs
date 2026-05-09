@@ -8,9 +8,9 @@ use super::{
 use crate::xserver::core::require_len;
 use crate::xserver::ClientState;
 use x11rb_protocol::protocol::render::{
-    CREATE_CONICAL_GRADIENT_REQUEST, CREATE_LINEAR_GRADIENT_REQUEST, CREATE_RADIAL_GRADIENT_REQUEST,
     CreateConicalGradientRequest, CreateLinearGradientRequest, CreateRadialGradientRequest,
-    CreateSolidFillRequest, Fixed, Repeat,
+    CreateSolidFillRequest, Fixed, Repeat, CREATE_CONICAL_GRADIENT_REQUEST,
+    CREATE_LINEAR_GRADIENT_REQUEST, CREATE_RADIAL_GRADIENT_REQUEST,
 };
 
 /// Convert a 16.16 fixed-point i32 (x11rb `Fixed`) to f64.

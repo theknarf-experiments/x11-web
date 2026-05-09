@@ -13,9 +13,8 @@ use std::sync::Arc;
 use openidconnect::core::{CoreAuthenticationFlow, CoreClient, CoreProviderMetadata};
 use openidconnect::reqwest::Client as OidcHttpClient;
 use openidconnect::{
-    AuthorizationCode, ClientId, ClientSecret, CsrfToken, EmptyAdditionalClaims, IssuerUrl,
-    Nonce, OAuth2TokenResponse, PkceCodeChallenge, PkceCodeVerifier, RedirectUrl, Scope,
-    TokenResponse,
+    AuthorizationCode, ClientId, ClientSecret, CsrfToken, EmptyAdditionalClaims, IssuerUrl, Nonce,
+    OAuth2TokenResponse, PkceCodeChallenge, PkceCodeVerifier, RedirectUrl, Scope, TokenResponse,
 };
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -72,15 +71,14 @@ impl OidcConfig {
         if issuer.trim().is_empty() {
             return None;
         }
-        let client_id = std::env::var("OIDC_CLIENT_ID")
-            .unwrap_or_else(|_| "x11-web".into());
+        let client_id = std::env::var("OIDC_CLIENT_ID").unwrap_or_else(|_| "x11-web".into());
         let client_secret = std::env::var("OIDC_CLIENT_SECRET")
             .ok()
             .filter(|s| !s.is_empty());
         let redirect_uri = std::env::var("OIDC_REDIRECT_URI")
             .unwrap_or_else(|_| "http://localhost:3001/auth/callback".into());
-        let post_login_redirect = std::env::var("OIDC_POST_LOGIN_REDIRECT")
-            .unwrap_or_else(|_| "/".into());
+        let post_login_redirect =
+            std::env::var("OIDC_POST_LOGIN_REDIRECT").unwrap_or_else(|_| "/".into());
         Some(Self {
             issuer,
             client_id,
@@ -109,7 +107,16 @@ pub struct PendingLogin {
 pub struct Authenticator {
     config: OidcConfig,
     http: OidcHttpClient,
-    client: OnceCell<CoreClient<openidconnect::EndpointSet, openidconnect::EndpointNotSet, openidconnect::EndpointNotSet, openidconnect::EndpointNotSet, openidconnect::EndpointMaybeSet, openidconnect::EndpointMaybeSet>>,
+    client: OnceCell<
+        CoreClient<
+            openidconnect::EndpointSet,
+            openidconnect::EndpointNotSet,
+            openidconnect::EndpointNotSet,
+            openidconnect::EndpointNotSet,
+            openidconnect::EndpointMaybeSet,
+            openidconnect::EndpointMaybeSet,
+        >,
+    >,
 }
 
 impl Authenticator {
@@ -157,11 +164,7 @@ impl Authenticator {
                     self.config.issuer,
                     metadata.authorization_endpoint().as_str()
                 );
-                let secret = self
-                    .config
-                    .client_secret
-                    .clone()
-                    .map(ClientSecret::new);
+                let secret = self.config.client_secret.clone().map(ClientSecret::new);
                 let redirect_url = RedirectUrl::new(self.config.redirect_uri.clone())
                     .map_err(|e| AuthError::Config(format!("OIDC_REDIRECT_URI: {e}")))?;
                 let client = CoreClient::from_provider_metadata(

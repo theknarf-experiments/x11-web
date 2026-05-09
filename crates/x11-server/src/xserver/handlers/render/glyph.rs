@@ -391,7 +391,15 @@ pub(crate) fn handle_composite_glyphs(
         minor_opcode: COMPOSITE_GLYPHS8_REQUEST,
         remaining_length: real_header.remaining_length,
     };
-    let req = parse_minor!(CompositeGlyphs8Request, data, state, seq, 139, minor, header);
+    let req = parse_minor!(
+        CompositeGlyphs8Request,
+        data,
+        state,
+        seq,
+        139,
+        minor,
+        header
+    );
 
     let pict_op = u8::from(req.op);
     let src_pic = req.src;

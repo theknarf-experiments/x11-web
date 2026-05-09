@@ -48,11 +48,7 @@ impl RandrCrtc {
             gamma_green: gamma.clone(),
             gamma_blue: gamma,
             // Identity transform in 16.16 fixed-point.
-            transform: [
-                FP_16_16_ONE, 0, 0,
-                0, FP_16_16_ONE, 0,
-                0, 0, FP_16_16_ONE,
-            ],
+            transform: [FP_16_16_ONE, 0, 0, 0, FP_16_16_ONE, 0, 0, 0, FP_16_16_ONE],
         }
     }
 }
@@ -182,9 +178,7 @@ const EDID_VIDEO_INPUT_DIGITAL: u8 = 0x80;
 const EDID_FEATURE_SUPPORT: u8 = 0x0A;
 
 /// 10-byte chromaticity block — standard sRGB-ish primaries.
-const EDID_CHROMATICITY: [u8; 10] = [
-    0xEE, 0x91, 0xA3, 0x54, 0x4C, 0x99, 0x26, 0x0F, 0x50, 0x54,
-];
+const EDID_CHROMATICITY: [u8; 10] = [0xEE, 0x91, 0xA3, 0x54, 0x4C, 0x99, 0x26, 0x0F, 0x50, 0x54];
 
 /// Detailed Timing Descriptor flag byte: non-interlaced, normal display.
 const EDID_DTD_FLAGS: u8 = 0x18;

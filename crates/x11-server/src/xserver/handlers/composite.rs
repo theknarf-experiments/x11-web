@@ -8,20 +8,21 @@ use super::super::core::{OVERLAY_WINDOW, ROOT_COLORMAP};
 use super::super::types::{DamageInfo, PixmapState, WindowState, WindowType};
 use crate::xserver::reply::ReplyBuf;
 use x11rb_protocol::protocol::composite::{
-    CREATE_REGION_FROM_BORDER_CLIP_REQUEST, CreateRegionFromBorderClipRequest,
-    GET_OVERLAY_WINDOW_REQUEST, GetOverlayWindowRequest, NAME_WINDOW_PIXMAP_REQUEST,
-    NameWindowPixmapRequest, QUERY_VERSION_REQUEST as COMPOSITE_QUERY_VERSION_REQUEST,
-    REDIRECT_SUBWINDOWS_REQUEST, REDIRECT_WINDOW_REQUEST, RELEASE_OVERLAY_WINDOW_REQUEST,
+    CreateRegionFromBorderClipRequest, GetOverlayWindowRequest, NameWindowPixmapRequest,
     RedirectSubwindowsRequest, RedirectWindowRequest, ReleaseOverlayWindowRequest,
-    UNREDIRECT_SUBWINDOWS_REQUEST, UNREDIRECT_WINDOW_REQUEST, UnredirectSubwindowsRequest,
-    UnredirectWindowRequest,
+    UnredirectSubwindowsRequest, UnredirectWindowRequest, CREATE_REGION_FROM_BORDER_CLIP_REQUEST,
+    GET_OVERLAY_WINDOW_REQUEST, NAME_WINDOW_PIXMAP_REQUEST,
+    QUERY_VERSION_REQUEST as COMPOSITE_QUERY_VERSION_REQUEST, REDIRECT_SUBWINDOWS_REQUEST,
+    REDIRECT_WINDOW_REQUEST, RELEASE_OVERLAY_WINDOW_REQUEST, UNREDIRECT_SUBWINDOWS_REQUEST,
+    UNREDIRECT_WINDOW_REQUEST,
 };
 use x11rb_protocol::protocol::damage::{
-    ADD_REQUEST as DAMAGE_ADD_REQUEST, AddRequest as DamageAddRequest,
-    CREATE_REQUEST as DAMAGE_CREATE_REQUEST, CreateRequest as DamageCreateRequest,
-    DESTROY_REQUEST as DAMAGE_DESTROY_REQUEST, DestroyRequest as DamageDestroyRequest,
-    QUERY_VERSION_REQUEST as DAMAGE_QUERY_VERSION_REQUEST, SUBTRACT_REQUEST as DAMAGE_SUBTRACT_REQUEST,
-    SubtractRequest as DamageSubtractRequest,
+    AddRequest as DamageAddRequest, CreateRequest as DamageCreateRequest,
+    DestroyRequest as DamageDestroyRequest, SubtractRequest as DamageSubtractRequest,
+    ADD_REQUEST as DAMAGE_ADD_REQUEST, CREATE_REQUEST as DAMAGE_CREATE_REQUEST,
+    DESTROY_REQUEST as DAMAGE_DESTROY_REQUEST,
+    QUERY_VERSION_REQUEST as DAMAGE_QUERY_VERSION_REQUEST,
+    SUBTRACT_REQUEST as DAMAGE_SUBTRACT_REQUEST,
 };
 use x11rb_protocol::protocol::xproto::{BackingStore, WindowClass};
 

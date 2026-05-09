@@ -212,9 +212,9 @@ impl ClientState {
             if !shared.is_empty() {
                 for event in events {
                     if event.len() == X11_EVENT_SIZE
-                    && event[0] >= X11_EVENT_TYPE_MIN
-                    && event[0] <= X11_EVENT_TYPE_MAX
-                {
+                        && event[0] >= X11_EVENT_TYPE_MIN
+                        && event[0] <= X11_EVENT_TYPE_MAX
+                    {
                         let event_code = event[0] & !SEND_EVENT_FLAG;
                         let server_time = self.timestamp();
                         let seq = self.sequence;

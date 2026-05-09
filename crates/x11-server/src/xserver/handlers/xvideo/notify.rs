@@ -6,8 +6,8 @@ use super::super::super::client::ClientState;
 use super::super::parse_minor;
 use super::XV_MAJOR_OPCODE;
 use x11rb_protocol::protocol::xv::{
-    SELECT_PORT_NOTIFY_REQUEST, SELECT_VIDEO_NOTIFY_REQUEST, SelectPortNotifyRequest,
-    SelectVideoNotifyRequest,
+    SelectPortNotifyRequest, SelectVideoNotifyRequest, SELECT_PORT_NOTIFY_REQUEST,
+    SELECT_VIDEO_NOTIFY_REQUEST,
 };
 
 pub(crate) fn handle_notify_request(

@@ -138,44 +138,46 @@ mod macos {
         // that path still drops the last batch. Plumbing the tray
         // through here would need a custom Quit selector that
         // signals tokio first; deferred for now.
-        let connect_loop = async { loop {
-            tray::store(&conn_state, ConnState::Connecting);
-            let fingerprint = match read_fingerprint(&fingerprint_source) {
-                Ok(fp) => fp,
-                Err(e) => {
-                    warn!("Fingerprint not available yet: {e}. Retrying in 2s.");
-                    tray::store(&conn_state, ConnState::Disconnected);
-                    tokio::time::sleep(Duration::from_secs(2)).await;
-                    continue;
+        let connect_loop = async {
+            loop {
+                tray::store(&conn_state, ConnState::Connecting);
+                let fingerprint = match read_fingerprint(&fingerprint_source) {
+                    Ok(fp) => fp,
+                    Err(e) => {
+                        warn!("Fingerprint not available yet: {e}. Retrying in 2s.");
+                        tray::store(&conn_state, ConnState::Disconnected);
+                        tokio::time::sleep(Duration::from_secs(2)).await;
+                        continue;
+                    }
+                };
+                match dial(
+                    backend_addr,
+                    &server_name,
+                    fingerprint,
+                    &bearer_token,
+                    &sidecar_name,
+                    SidecarKind::Macos,
+                )
+                .await
+                {
+                    Ok(connection) => {
+                        info!(
+                            "Connected to backend; sidecar_id={} agreed_version={}",
+                            connection.sidecar_id, connection.agreed_protocol_version
+                        );
+                        tray::store(&conn_state, ConnState::Connected);
+                        run_session(connection).await;
+                        tray::store(&conn_state, ConnState::Disconnected);
+                        warn!("Disconnected from backend, reconnecting in 5s...");
+                    }
+                    Err(e) => {
+                        error!("Failed to connect to backend: {e}");
+                        tray::store(&conn_state, ConnState::Disconnected);
+                    }
                 }
-            };
-            match dial(
-                backend_addr,
-                &server_name,
-                fingerprint,
-                &bearer_token,
-                &sidecar_name,
-                SidecarKind::Macos,
-            )
-            .await
-            {
-                Ok(connection) => {
-                    info!(
-                        "Connected to backend; sidecar_id={} agreed_version={}",
-                        connection.sidecar_id, connection.agreed_protocol_version
-                    );
-                    tray::store(&conn_state, ConnState::Connected);
-                    run_session(connection).await;
-                    tray::store(&conn_state, ConnState::Disconnected);
-                    warn!("Disconnected from backend, reconnecting in 5s...");
-                }
-                Err(e) => {
-                    error!("Failed to connect to backend: {e}");
-                    tray::store(&conn_state, ConnState::Disconnected);
-                }
+                tokio::time::sleep(Duration::from_secs(5)).await;
             }
-            tokio::time::sleep(Duration::from_secs(5)).await;
-        }};
+        };
         tokio::select! {
             _ = connect_loop => {}
             _ = x11_web_telemetry::shutdown_signal() => {
@@ -223,8 +225,7 @@ mod macos {
             while let Some(msg) = rx.recv().await {
                 if let SidecarToBackend::DisplayUpdate { update, .. } = &msg {
                     if let Some(m) = x11_web_sidecar_macos::telemetry::metrics() {
-                        let kind =
-                            x11_web_sidecar_macos::telemetry::display_update_kind(update);
+                        let kind = x11_web_sidecar_macos::telemetry::display_update_kind(update);
                         m.display_updates
                             .add(1, &[opentelemetry::KeyValue::new("kind", kind)]);
                     }
@@ -269,8 +270,7 @@ mod macos {
                         // `handle_backend_msg` (and its child
                         // tasks) thread up into one trace.
                         use x11_web_telemetry::{OpenTelemetrySpanExt, TraceContextExt};
-                        let parent_ctx =
-                            x11_web_telemetry::extract_traceparent(&traceparent);
+                        let parent_ctx = x11_web_telemetry::extract_traceparent(&traceparent);
                         let span = tracing::info_span!(
                             "sidecar.handle_backend_msg",
                             traceparent = %traceparent,
@@ -314,7 +314,9 @@ mod macos {
         use BackendToSidecar::*;
         match cmd {
             SpawnProcess {
-                request_id, command, ..
+                request_id,
+                command,
+                ..
             } => {
                 span.record("cmd.kind", "SpawnProcess");
                 span.record("request.id", request_id.as_str());

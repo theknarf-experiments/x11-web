@@ -290,7 +290,7 @@ pub(crate) fn build_record_data_reply(
 ) -> Vec<u8> {
     use crate::xserver::reply::ReplyBuf;
     let data_len = intercepted_data.len();
-    let padded = crate::xserver::core::align_to_4(data_len );
+    let padded = crate::xserver::core::align_to_4(data_len);
     // RECORD intentionally writes everything LE regardless of the client's
     // byte order — the client_swapped field at offset 12 signals which it is.
     let mut reply = ReplyBuf::with_extra(enable_seq, padded, false)
@@ -461,7 +461,7 @@ pub(crate) fn handle_record_request(state: &mut ClientState, data: &[u8], seq: u
                     } else {
                         0
                     };
-                    let padded = crate::xserver::core::align_to_4(client_info_bytes );
+                    let padded = crate::xserver::core::align_to_4(client_info_bytes);
 
                     let mut reply = ReplyBuf::with_extra(seq, padded, false)
                         .set_data_byte(if ctx.enabled { 1 } else { 0 })
@@ -835,9 +835,18 @@ mod tests {
     #[test]
     fn client_spec_consts_match_x11rb() {
         use x11rb_protocol::protocol::record::CS;
-        assert_eq!(CLIENT_SPEC_CURRENT_CLIENTS, u32::from(u8::from(CS::CURRENT_CLIENTS)));
-        assert_eq!(CLIENT_SPEC_FUTURE_CLIENTS, u32::from(u8::from(CS::FUTURE_CLIENTS)));
-        assert_eq!(CLIENT_SPEC_ALL_CLIENTS, u32::from(u8::from(CS::ALL_CLIENTS)));
+        assert_eq!(
+            CLIENT_SPEC_CURRENT_CLIENTS,
+            u32::from(u8::from(CS::CURRENT_CLIENTS))
+        );
+        assert_eq!(
+            CLIENT_SPEC_FUTURE_CLIENTS,
+            u32::from(u8::from(CS::FUTURE_CLIENTS))
+        );
+        assert_eq!(
+            CLIENT_SPEC_ALL_CLIENTS,
+            u32::from(u8::from(CS::ALL_CLIENTS))
+        );
     }
 
     fn make_range(core_req: (u8, u8), events: (u8, u8)) -> RecordRange {

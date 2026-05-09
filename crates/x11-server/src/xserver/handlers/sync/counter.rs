@@ -157,8 +157,7 @@ pub(crate) fn destroy_counter(state: &mut ClientState, data: &[u8], seq: u16) ->
     // Deactivate any alarms referencing this counter
     for alarm in state.sync_state.alarms.values_mut() {
         if alarm.counter == counter_id {
-            alarm.state =
-                x11rb_protocol::protocol::sync::ALARMSTATE::INACTIVE.into();
+            alarm.state = x11rb_protocol::protocol::sync::ALARMSTATE::INACTIVE.into();
         }
     }
     // Cancel any pending Await requests that reference this counter.

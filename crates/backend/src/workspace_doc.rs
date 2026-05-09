@@ -27,9 +27,9 @@ use std::collections::HashMap;
 use automerge::sync::{State as SyncState, SyncDoc};
 use automerge::transaction::Transactable;
 use automerge::{AutoCommit, ObjType, ReadDoc, ScalarValue, Value, ROOT};
-use autosurgeon::{reconcile, Hydrate, Reconcile};
 #[cfg(test)]
 use autosurgeon::hydrate;
+use autosurgeon::{reconcile, Hydrate, Reconcile};
 
 #[derive(Debug, Clone, Default, Reconcile, Hydrate)]
 pub struct WorkspaceDoc {
@@ -251,7 +251,10 @@ impl WorkspaceEntry {
     /// any. Returns `None` when the peer is fully caught up.
     pub fn generate_sync(&mut self, peer_id: &str) -> Option<Vec<u8>> {
         let state = self.peer_states.entry(peer_id.to_string()).or_default();
-        self.doc.sync().generate_sync_message(state).map(|m| m.encode())
+        self.doc
+            .sync()
+            .generate_sync_message(state)
+            .map(|m| m.encode())
     }
 
     /// Apply an inbound sync message from `peer_id`. The doc may
@@ -359,8 +362,8 @@ impl WorkspaceEntry {
             .doc
             .keys(&nodes)
             .filter(|other| {
-                let Some(edge) = get_map(&self.doc, &nodes, other)
-                    .and_then(|n| get_map(&self.doc, &n, "edge"))
+                let Some(edge) =
+                    get_map(&self.doc, &nodes, other).and_then(|n| get_map(&self.doc, &n, "edge"))
                 else {
                     return false;
                 };
@@ -380,12 +383,7 @@ impl WorkspaceEntry {
     /// sidecar. Targeted writes only (no full-doc reconcile).
     /// Returns `true` if a node existed and the size actually
     /// changed.
-    pub fn set_window_node_size(
-        &mut self,
-        window_id: &str,
-        width: f64,
-        height: f64,
-    ) -> bool {
+    pub fn set_window_node_size(&mut self, window_id: &str, width: f64, height: f64) -> bool {
         let Some(nodes) = get_map(&self.doc, &ROOT, "nodes") else {
             return false;
         };
@@ -461,22 +459,14 @@ fn ensure_nodes_map(doc: &mut AutoCommit) -> Option<automerge::ObjId> {
 /// absent or holds a non-map value. Used by the targeted-mutation
 /// helpers above to avoid touching `hydrate` / `reconcile` on the
 /// hot path.
-fn get_map(
-    doc: &AutoCommit,
-    parent: &automerge::ObjId,
-    key: &str,
-) -> Option<automerge::ObjId> {
+fn get_map(doc: &AutoCommit, parent: &automerge::ObjId, key: &str) -> Option<automerge::ObjId> {
     match doc.get(parent, key).ok().flatten() {
         Some((Value::Object(ObjType::Map), id)) => Some(id),
         _ => None,
     }
 }
 
-fn read_f64(
-    doc: &AutoCommit,
-    parent: &automerge::ObjId,
-    key: &str,
-) -> Option<f64> {
+fn read_f64(doc: &AutoCommit, parent: &automerge::ObjId, key: &str) -> Option<f64> {
     match doc.get(parent, key).ok().flatten()? {
         (Value::Scalar(scalar), _) => match scalar.into_owned() {
             ScalarValue::F64(v) => Some(v),
@@ -488,11 +478,7 @@ fn read_f64(
     }
 }
 
-fn read_string(
-    doc: &AutoCommit,
-    parent: &automerge::ObjId,
-    key: &str,
-) -> Option<String> {
+fn read_string(doc: &AutoCommit, parent: &automerge::ObjId, key: &str) -> Option<String> {
     match doc.get(parent, key).ok().flatten()? {
         (Value::Scalar(scalar), _) => match scalar.into_owned() {
             ScalarValue::Str(s) => Some(s.into()),
@@ -506,7 +492,11 @@ fn read_string(
 mod tests {
     use super::*;
 
-    fn drain_sync(backend: &mut WorkspaceEntry, peer_doc: &mut AutoCommit, peer_state: &mut SyncState) {
+    fn drain_sync(
+        backend: &mut WorkspaceEntry,
+        peer_doc: &mut AutoCommit,
+        peer_state: &mut SyncState,
+    ) {
         for _ in 0..32 {
             let to_peer = backend.generate_sync("p");
             let from_peer = peer_doc

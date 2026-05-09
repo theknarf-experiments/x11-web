@@ -1,7 +1,7 @@
 //! Graphics Context state and bitmap clip mask types.
 
 use x11rb_protocol::protocol::xproto::{
-    ArcMode, CapStyle, FillRule, FillStyle, GX, JoinStyle, LineStyle, SubwindowMode,
+    ArcMode, CapStyle, FillRule, FillStyle, JoinStyle, LineStyle, SubwindowMode, GX,
 };
 
 /// Resolved bitmap clip mask data extracted from a pixmap.

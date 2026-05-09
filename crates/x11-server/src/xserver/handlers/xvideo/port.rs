@@ -6,17 +6,17 @@ use tracing::debug;
 use super::super::super::client::ClientState;
 use super::super::parse_minor;
 use super::{
-    XV_ATTR_BRIGHTNESS, XV_ATTR_COLORSPACE, XV_ATTR_CONTRAST, XV_ATTR_HUE, XV_ATTR_SATURATION,
-    XV_MAJOR_OPCODE, build_reply,
+    build_reply, XV_ATTR_BRIGHTNESS, XV_ATTR_COLORSPACE, XV_ATTR_CONTRAST, XV_ATTR_HUE,
+    XV_ATTR_SATURATION, XV_MAJOR_OPCODE,
 };
 use crate::xserver::byteswap::{swap_u16, swap_u32};
 use crate::xserver::reply::ReplyBuf;
 use x11rb_protocol::protocol::xv::{
-    AttributeFlag, GET_PORT_ATTRIBUTE_REQUEST, GRAB_PORT_REQUEST, GetPortAttributeReply,
-    GetPortAttributeRequest, GrabPortReply, GrabPortRequest, GrabPortStatus,
-    QUERY_BEST_SIZE_REQUEST, QUERY_PORT_ATTRIBUTES_REQUEST, QueryBestSizeReply,
-    QueryBestSizeRequest, QueryPortAttributesRequest, SET_PORT_ATTRIBUTE_REQUEST,
-    SetPortAttributeRequest, UNGRAB_PORT_REQUEST, UngrabPortRequest,
+    AttributeFlag, GetPortAttributeReply, GetPortAttributeRequest, GrabPortReply, GrabPortRequest,
+    GrabPortStatus, QueryBestSizeReply, QueryBestSizeRequest, QueryPortAttributesRequest,
+    SetPortAttributeRequest, UngrabPortRequest, GET_PORT_ATTRIBUTE_REQUEST, GRAB_PORT_REQUEST,
+    QUERY_BEST_SIZE_REQUEST, QUERY_PORT_ATTRIBUTES_REQUEST, SET_PORT_ATTRIBUTE_REQUEST,
+    UNGRAB_PORT_REQUEST,
 };
 
 pub(crate) fn handle_port_request(
@@ -57,8 +57,14 @@ pub(crate) fn handle_port_request(
             Vec::new()
         }
         QUERY_BEST_SIZE_REQUEST => {
-            let req =
-                parse_minor!(QueryBestSizeRequest, data, state, seq, XV_MAJOR_OPCODE, minor);
+            let req = parse_minor!(
+                QueryBestSizeRequest,
+                data,
+                state,
+                seq,
+                XV_MAJOR_OPCODE,
+                minor
+            );
             let reply = QueryBestSizeReply {
                 sequence: seq,
                 length: 0,
@@ -68,8 +74,14 @@ pub(crate) fn handle_port_request(
             build_reply(&reply, state.msb_first, byteswap_query_best_size_reply)
         }
         SET_PORT_ATTRIBUTE_REQUEST => {
-            let req =
-                parse_minor!(SetPortAttributeRequest, data, state, seq, XV_MAJOR_OPCODE, minor);
+            let req = parse_minor!(
+                SetPortAttributeRequest,
+                data,
+                state,
+                seq,
+                XV_MAJOR_OPCODE,
+                minor
+            );
             let port = req.port;
             let atom = req.attribute;
             let value = req.value;
@@ -90,8 +102,14 @@ pub(crate) fn handle_port_request(
             Vec::new()
         }
         GET_PORT_ATTRIBUTE_REQUEST => {
-            let req =
-                parse_minor!(GetPortAttributeRequest, data, state, seq, XV_MAJOR_OPCODE, minor);
+            let req = parse_minor!(
+                GetPortAttributeRequest,
+                data,
+                state,
+                seq,
+                XV_MAJOR_OPCODE,
+                minor
+            );
             let port = req.port;
             let atom = req.attribute;
             let name = state.get_atom_name(atom).unwrap_or_default();
@@ -149,11 +167,36 @@ struct PortAttribute {
 fn port_attributes() -> [PortAttribute; 5] {
     let flags = AttributeFlag::GETTABLE | AttributeFlag::SETTABLE;
     [
-        PortAttribute { flags, min: -1000, max: 1000, name: b"XV_BRIGHTNESS" },
-        PortAttribute { flags, min: 0, max: 2000, name: b"XV_CONTRAST" },
-        PortAttribute { flags, min: 0, max: 2000, name: b"XV_SATURATION" },
-        PortAttribute { flags, min: -180, max: 180, name: b"XV_HUE" },
-        PortAttribute { flags, min: 0, max: 1, name: b"XV_COLORSPACE" },
+        PortAttribute {
+            flags,
+            min: -1000,
+            max: 1000,
+            name: b"XV_BRIGHTNESS",
+        },
+        PortAttribute {
+            flags,
+            min: 0,
+            max: 2000,
+            name: b"XV_CONTRAST",
+        },
+        PortAttribute {
+            flags,
+            min: 0,
+            max: 2000,
+            name: b"XV_SATURATION",
+        },
+        PortAttribute {
+            flags,
+            min: -180,
+            max: 180,
+            name: b"XV_HUE",
+        },
+        PortAttribute {
+            flags,
+            min: 0,
+            max: 1,
+            name: b"XV_COLORSPACE",
+        },
     ]
 }
 
@@ -166,10 +209,7 @@ fn build_query_port_attributes_reply(
     attrs: &[PortAttribute],
 ) -> Vec<u8> {
     const ATTR_INFO_BYTES: usize = 16;
-    let trailing_bytes: usize = attrs
-        .iter()
-        .map(|a| ATTR_INFO_BYTES + a.name.len())
-        .sum();
+    let trailing_bytes: usize = attrs.iter().map(|a| ATTR_INFO_BYTES + a.name.len()).sum();
     debug_assert!(trailing_bytes % 4 == 0, "trailing must be 4-aligned");
     let text_size: u32 = attrs.iter().map(|a| a.name.len() as u32 + 1).sum();
     let mut reply = ReplyBuf::with_extra(seq, trailing_bytes, msb_first)
@@ -216,4 +256,3 @@ fn byteswap_get_port_attribute_reply(buf: &mut [u8]) {
     swap_u32(buf, 4);
     swap_u32(buf, 8);
 }
-

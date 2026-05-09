@@ -162,9 +162,7 @@ fn check_alarms(
     let triggered: Vec<u32> = alarms
         .iter()
         .filter(|(_, a)| {
-            a.counter == counter_id
-                && ALARMSTATE::from(a.state) == ALARMSTATE::ACTIVE
-                && a.events
+            a.counter == counter_id && ALARMSTATE::from(a.state) == ALARMSTATE::ACTIVE && a.events
         })
         .filter(|(_, a)| {
             let threshold = ((a.value_hi as i64) << 32) | (a.value_lo as i64);

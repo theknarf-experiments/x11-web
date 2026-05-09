@@ -428,9 +428,7 @@ fn read_display_payload(
         // wire might. Translate to a hard error so the QUIC
         // recv loop logs + skips them; the connection stays
         // alive (next message gets read normally).
-        Which::ReservedCursor7(_)
-        | Which::ReservedCursor8(_)
-        | Which::ReservedCursor9(_) => {
+        Which::ReservedCursor7(_) | Which::ReservedCursor8(_) | Which::ReservedCursor9(_) => {
             return Err(BridgeError::Capnp(capnp::Error::failed(
                 "received reserved cursor variant; ignored".into(),
             )));

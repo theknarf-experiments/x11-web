@@ -484,7 +484,7 @@ fn parse_pcf_properties_font_name(data: &[u8], table: &PcfTable) -> Option<Strin
     // Each property: name_offset(4), is_string(1), value(4) = 9 bytes
     let strings_start = props_start + num_props * 9;
     // Align to 4 bytes
-    let strings_start = crate::xserver::core::align_to_4(strings_start );
+    let strings_start = crate::xserver::core::align_to_4(strings_start);
 
     if strings_start + 4 > data.len() {
         return None;

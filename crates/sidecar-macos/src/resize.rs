@@ -79,10 +79,7 @@ pub fn is_resizable(pid: i32, bounds: WindowBounds) -> bool {
     let cfkey = CFString::from_str("AXSize");
     let mut settable: u8 = 0;
     let result = unsafe {
-        window.is_attribute_settable(
-            &cfkey,
-            NonNull::new_unchecked(&mut settable as *mut u8),
-        )
+        window.is_attribute_settable(&cfkey, NonNull::new_unchecked(&mut settable as *mut u8))
     };
     if result.0 != 0 {
         return true;

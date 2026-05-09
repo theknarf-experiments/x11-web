@@ -6,18 +6,18 @@ use tracing::debug;
 use super::super::super::client::ClientState;
 use super::super::parse_minor;
 use super::{
-    CapturedFrame, FOURCC_I420, FOURCC_NV12, FOURCC_NV21, FOURCC_RGB3, FOURCC_RV32, FOURCC_UYVY,
-    FOURCC_Y800, FOURCC_YUY2, FOURCC_YV12, FOURCC_YV16, XV_MAJOR_OPCODE, build_var_reply,
-    byteswap_image_format_info, fourcc_yuv_format, rgb_format,
+    build_var_reply, byteswap_image_format_info, fourcc_yuv_format, rgb_format, CapturedFrame,
+    FOURCC_I420, FOURCC_NV12, FOURCC_NV21, FOURCC_RGB3, FOURCC_RV32, FOURCC_UYVY, FOURCC_Y800,
+    FOURCC_YUY2, FOURCC_YV12, FOURCC_YV16, XV_MAJOR_OPCODE,
 };
 use crate::xserver::byteswap::{swap_u16, swap_u32, swap_u32_array};
 use x11rb_protocol::protocol::xv::{
-    GET_STILL_REQUEST, GET_VIDEO_REQUEST, GetStillRequest, GetVideoRequest,
-    ImageFormatInfoFormat, LIST_IMAGE_FORMATS_REQUEST, ListImageFormatsReply,
-    ListImageFormatsRequest, PUT_IMAGE_REQUEST, PUT_STILL_REQUEST, PUT_VIDEO_REQUEST,
-    PutImageRequest, PutStillRequest, PutVideoRequest, QUERY_IMAGE_ATTRIBUTES_REQUEST,
+    GetStillRequest, GetVideoRequest, ImageFormatInfoFormat, ListImageFormatsReply,
+    ListImageFormatsRequest, PutImageRequest, PutStillRequest, PutVideoRequest,
     QueryImageAttributesReply, QueryImageAttributesRequest as XvQueryImageAttributesRequest,
-    SHM_PUT_IMAGE_REQUEST, STOP_VIDEO_REQUEST, ShmPutImageRequest, StopVideoRequest,
+    ShmPutImageRequest, StopVideoRequest, GET_STILL_REQUEST, GET_VIDEO_REQUEST,
+    LIST_IMAGE_FORMATS_REQUEST, PUT_IMAGE_REQUEST, PUT_STILL_REQUEST, PUT_VIDEO_REQUEST,
+    QUERY_IMAGE_ATTRIBUTES_REQUEST, SHM_PUT_IMAGE_REQUEST, STOP_VIDEO_REQUEST,
 };
 
 // ---------------------------------------------------------------------------
@@ -540,13 +540,7 @@ pub(crate) fn handle_image_request(
     minor: u8,
 ) -> Vec<u8> {
     let xv_err = |code: u8, bad_value: u32| {
-        crate::xserver::core::build_error(
-            code,
-            seq,
-            bad_value,
-            XV_MAJOR_OPCODE,
-            u16::from(minor),
-        )
+        crate::xserver::core::build_error(code, seq, bad_value, XV_MAJOR_OPCODE, u16::from(minor))
     };
     match minor {
         // Capture/playback we don't implement; per XVideo §4.3-4.5 these
@@ -682,8 +676,17 @@ pub(crate) fn handle_image_request(
             let src_w = if req.src_w > 0 { req.src_w } else { req.width };
             let src_h = if req.src_h > 0 { req.src_h } else { req.height };
             xv_put_image_impl(
-                state, req.drawable, req.port, req.id, &req.data, src_w, src_h, req.drw_x,
-                req.drw_y, req.drw_w, req.drw_h,
+                state,
+                req.drawable,
+                req.port,
+                req.id,
+                &req.data,
+                src_w,
+                src_h,
+                req.drw_x,
+                req.drw_y,
+                req.drw_w,
+                req.drw_h,
             );
             Vec::new()
         }
@@ -697,8 +700,19 @@ pub(crate) fn handle_image_request(
             debug!(
                 "XVideo ShmPutImage: port={} drawable={:#x} shmseg={} fourcc={:#010x} \
                  offset={} src={}x{} drw=({},{} {}x{}) img={}x{}",
-                req.port, req.drawable, req.shmseg, req.id, offset, req.src_w, req.src_h,
-                req.drw_x, req.drw_y, req.drw_w, req.drw_h, req.width, req.height,
+                req.port,
+                req.drawable,
+                req.shmseg,
+                req.id,
+                offset,
+                req.src_w,
+                req.src_h,
+                req.drw_x,
+                req.drw_y,
+                req.drw_w,
+                req.drw_h,
+                req.width,
+                req.height,
             );
             if let Some(seg) = state.shm_segments.get(&req.shmseg) {
                 if offset + data_size as usize <= seg.size {
@@ -706,8 +720,17 @@ pub(crate) fn handle_image_request(
                         std::slice::from_raw_parts(seg.addr.add(offset), data_size as usize)
                     };
                     xv_put_image_impl(
-                        state, req.drawable, req.port, req.id, yuv_data, w, h, req.drw_x,
-                        req.drw_y, req.drw_w, req.drw_h,
+                        state,
+                        req.drawable,
+                        req.port,
+                        req.id,
+                        yuv_data,
+                        w,
+                        h,
+                        req.drw_x,
+                        req.drw_y,
+                        req.drw_w,
+                        req.drw_h,
                     );
                 } else {
                     debug!(

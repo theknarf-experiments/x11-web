@@ -176,20 +176,14 @@ impl ColormapState {
         match vc {
             4 => {
                 // TrueColor: compute pixel directly
-                let pixel = crate::framebuffer::pack_rgb(
-                    (r >> 8) as u8,
-                    (g >> 8) as u8,
-                    (b >> 8) as u8,
-                );
+                let pixel =
+                    crate::framebuffer::pack_rgb((r >> 8) as u8, (g >> 8) as u8, (b >> 8) as u8);
                 Some(pixel)
             }
             5 => {
                 // DirectColor: compute pixel from per-channel lookup.
-                let pixel = crate::framebuffer::pack_rgb(
-                    (r >> 8) as u8,
-                    (g >> 8) as u8,
-                    (b >> 8) as u8,
-                );
+                let pixel =
+                    crate::framebuffer::pack_rgb((r >> 8) as u8, (g >> 8) as u8, (b >> 8) as u8);
                 Some(pixel)
             }
             0 | 2 => {
@@ -333,8 +327,8 @@ impl ColormapState {
 mod tests {
     use super::*;
     use crate::xserver::core::{
-        VISUAL_DIRECT_COLOR_24, VISUAL_GRAY_SCALE_8, VISUAL_PSEUDO_COLOR_8,
-        VISUAL_STATIC_COLOR_8, VISUAL_STATIC_GRAY_4, VISUAL_TRUE_COLOR_24,
+        VISUAL_DIRECT_COLOR_24, VISUAL_GRAY_SCALE_8, VISUAL_PSEUDO_COLOR_8, VISUAL_STATIC_COLOR_8,
+        VISUAL_STATIC_GRAY_4, VISUAL_TRUE_COLOR_24,
     };
 
     #[test]

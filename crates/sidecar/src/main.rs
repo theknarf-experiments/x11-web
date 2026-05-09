@@ -322,56 +322,58 @@ async fn main() {
     // resolves first ends the select; we then drain the telemetry
     // pipelines so the last batch makes it to OpenObserve before
     // the process exits.
-    let connect_loop = async { loop {
-        let fingerprint = match read_fingerprint(&fingerprint_source) {
-            Ok(fp) => fp,
-            Err(e) => {
-                warn!("Fingerprint not available yet: {e}. Retrying in 2s.");
-                tokio::time::sleep(DIAL_RETRY_DELAY).await;
-                continue;
+    let connect_loop = async {
+        loop {
+            let fingerprint = match read_fingerprint(&fingerprint_source) {
+                Ok(fp) => fp,
+                Err(e) => {
+                    warn!("Fingerprint not available yet: {e}. Retrying in 2s.");
+                    tokio::time::sleep(DIAL_RETRY_DELAY).await;
+                    continue;
+                }
+            };
+            let backend_addr: SocketAddr = match resolve_backend_addr(&backend_addr_str).await {
+                Ok(a) => a,
+                Err(e) => {
+                    warn!("Failed to resolve {backend_addr_str}: {e}. Retrying in 2s.");
+                    tokio::time::sleep(DIAL_RETRY_DELAY).await;
+                    continue;
+                }
+            };
+            match dial(
+                backend_addr,
+                &server_name,
+                fingerprint,
+                &bearer_token,
+                &sidecar_name,
+                SidecarKind::X11,
+            )
+            .await
+            {
+                Ok(connection) => {
+                    info!(
+                        "Connected to backend; sidecar_id={} agreed_version={}",
+                        connection.sidecar_id, connection.agreed_protocol_version
+                    );
+                    run_session(
+                        connection,
+                        &display_string,
+                        dbus_address.clone(),
+                        &mut display_rx,
+                        &window_router,
+                        &mut client_connected_rx,
+                        &mut clipboard_notify_rx,
+                    )
+                    .await;
+                    warn!("Disconnected from backend, reconnecting in 5s...");
+                }
+                Err(e) => {
+                    error!("Failed to connect to backend: {e}");
+                }
             }
-        };
-        let backend_addr: SocketAddr = match resolve_backend_addr(&backend_addr_str).await {
-            Ok(a) => a,
-            Err(e) => {
-                warn!("Failed to resolve {backend_addr_str}: {e}. Retrying in 2s.");
-                tokio::time::sleep(DIAL_RETRY_DELAY).await;
-                continue;
-            }
-        };
-        match dial(
-            backend_addr,
-            &server_name,
-            fingerprint,
-            &bearer_token,
-            &sidecar_name,
-            SidecarKind::X11,
-        )
-        .await
-        {
-            Ok(connection) => {
-                info!(
-                    "Connected to backend; sidecar_id={} agreed_version={}",
-                    connection.sidecar_id, connection.agreed_protocol_version
-                );
-                run_session(
-                    connection,
-                    &display_string,
-                    dbus_address.clone(),
-                    &mut display_rx,
-                    &window_router,
-                    &mut client_connected_rx,
-                    &mut clipboard_notify_rx,
-                )
-                .await;
-                warn!("Disconnected from backend, reconnecting in 5s...");
-            }
-            Err(e) => {
-                error!("Failed to connect to backend: {e}");
-            }
+            tokio::time::sleep(BACKEND_RECONNECT_DELAY).await;
         }
-        tokio::time::sleep(BACKEND_RECONNECT_DELAY).await;
-    }};
+    };
     tokio::select! {
         _ = connect_loop => {}
         _ = x11_web_telemetry::shutdown_signal() => {
@@ -443,8 +445,7 @@ async fn run_session(
     // Incoming messages: the recv loop owns the wire reader, decodes
     // Cap'n Proto, forwards BackendToSidecar over this channel so the
     // events loop can keep `process_manager` borrowed exclusively.
-    let (in_tx, mut in_rx) =
-        mpsc::unbounded_channel::<(BackendToSidecar, String)>();
+    let (in_tx, mut in_rx) = mpsc::unbounded_channel::<(BackendToSidecar, String)>();
 
     // Heartbeat — pushes Heartbeat into tx every 30s.
     let tx_heartbeat = tx.clone();
@@ -601,7 +602,9 @@ fn record_cmd_attrs(span: &tracing::Span, cmd: &BackendToSidecar) {
     use BackendToSidecar::*;
     match cmd {
         SpawnProcess {
-            request_id, command, ..
+            request_id,
+            command,
+            ..
         } => {
             span.record("cmd.kind", "SpawnProcess");
             span.record("request.id", request_id.as_str());

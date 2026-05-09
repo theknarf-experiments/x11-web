@@ -175,10 +175,7 @@ async fn async_main() {
     let authenticator = match x11_web_auth::OidcConfig::from_env() {
         Some(cfg) => {
             info!("OIDC enabled (issuer={})", cfg.issuer);
-            Some(
-                x11_web_auth::Authenticator::new(cfg)
-                    .expect("OIDC authenticator init"),
-            )
+            Some(x11_web_auth::Authenticator::new(cfg).expect("OIDC authenticator init"))
         }
         None => {
             info!("OIDC disabled — anonymous-only mode (set OIDC_ISSUER to enable)");
@@ -219,12 +216,9 @@ async fn async_main() {
     // frontend host. In dev with Vite, leave it unset.
     if let Ok(dir) = std::env::var("X11WEB_FRONTEND_DIR") {
         info!("Serving SPA from {dir}");
-        app = app.fallback_service(
-            tower_http::services::ServeDir::new(&dir)
-                .not_found_service(tower_http::services::ServeFile::new(
-                    format!("{dir}/index.html"),
-                )),
-        );
+        app = app.fallback_service(tower_http::services::ServeDir::new(&dir).not_found_service(
+            tower_http::services::ServeFile::new(format!("{dir}/index.html")),
+        ));
     }
 
     let app = app
@@ -234,14 +228,9 @@ async fn async_main() {
         .layer(
             CorsLayer::new()
                 .allow_credentials(true)
-                .allow_methods([
-                    axum::http::Method::GET,
-                    axum::http::Method::POST,
-                ])
+                .allow_methods([axum::http::Method::GET, axum::http::Method::POST])
                 .allow_headers([axum::http::header::CONTENT_TYPE])
-                .allow_origin(tower_http::cors::AllowOrigin::predicate(
-                    |_origin, _| true,
-                )),
+                .allow_origin(tower_http::cors::AllowOrigin::predicate(|_origin, _| true)),
         )
         .layer(session_layer);
 
@@ -637,8 +626,7 @@ async fn handle_frontend_ws(socket: WebSocket, state: AppState) {
         let state = state.clone();
         tokio::spawn(async move {
             while let Some(bytes) = control_inbound_rx.recv().await {
-                let Some((workspace_id, message)) = rtc_codec::decode_workspace_sync(&bytes)
-                else {
+                let Some((workspace_id, message)) = rtc_codec::decode_workspace_sync(&bytes) else {
                     warn!(
                         "control inbound from {frontend_id}: failed to decode workspaceSync \
                          ({} bytes)",
@@ -667,8 +655,7 @@ async fn handle_frontend_ws(socket: WebSocket, state: AppState) {
                         continue;
                     }
                     while let Some(reply) = entry.generate_sync(&frontend_id) {
-                        let frame =
-                            rtc_codec::encode_workspace_sync(&workspace_id, &reply);
+                        let frame = rtc_codec::encode_workspace_sync(&workspace_id, &reply);
                         let _ = control_tx.send(frame);
                     }
                     // Fan out to every other peer bound to this
@@ -807,7 +794,9 @@ async fn handle_frontend_ws(socket: WebSocket, state: AppState) {
     // a Cap'n Proto `FrontendMsg`; the bridge gives us back the
     // typed enum + the traceparent header in one call.
     while let Some(Ok(msg)) = ws_rx.next().await {
-        let Message::Binary(bytes) = msg else { continue };
+        let Message::Binary(bytes) = msg else {
+            continue;
+        };
         let (msg, traceparent) = match x11_web_ws_wire::decode_frontend_msg(&bytes) {
             Ok(pair) => pair,
             Err(e) => {
@@ -1063,10 +1052,7 @@ async fn forward_to_sidecar(state: &AppState, sidecar_id: &str, msg: BackendToSi
         warn!("Sidecar not found: {}", sidecar_id);
         // Caller's `backend.frontend_msg` is still active — mark
         // it failed so the trace shows red in OpenObserve.
-        x11_web_telemetry::mark_span_error(
-            "sidecar_not_found",
-            format!("sidecar id={sidecar_id}"),
-        );
+        x11_web_telemetry::mark_span_error("sidecar_not_found", format!("sidecar id={sidecar_id}"));
     }
 }
 

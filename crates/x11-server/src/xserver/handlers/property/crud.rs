@@ -483,7 +483,7 @@ pub(crate) fn handle_get_property(state: &mut ClientState, req: &GetPropertyRequ
             _ => return_data.len() as u32,
         };
 
-        let padded_len = align_to_4(return_data.len() );
+        let padded_len = align_to_4(return_data.len());
 
         let mut reply = ReplyBuf::with_extra(seq, padded_len, state.msb_first)
             .set_data_byte(prop_val.format)

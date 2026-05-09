@@ -29,8 +29,8 @@ pub(crate) fn handle_security_request(state: &mut ClientState, data: &[u8], seq:
                 let value_mask = state.read_u32(data, 8);
 
                 // Parse optional values after the auth proto name + data
-                let name_padded = crate::xserver::core::align_to_4(auth_proto_name_len );
-                let data_padded = crate::xserver::core::align_to_4(auth_proto_data_len );
+                let name_padded = crate::xserver::core::align_to_4(auth_proto_name_len);
+                let data_padded = crate::xserver::core::align_to_4(auth_proto_data_len);
                 let values_off = 12 + name_padded + data_padded;
 
                 let mut trust_level: u32 = 0; // trusted by default

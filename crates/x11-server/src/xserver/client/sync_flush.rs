@@ -329,8 +329,8 @@ impl ClientState {
                         for py in 0..h as i16 {
                             for px in 0..w as i16 {
                                 if !point_in_shape(shape, x + px, y + py) {
-                                    let offset = (py as usize * w as usize + px as usize)
-                                        * BYTES_PER_PIXEL;
+                                    let offset =
+                                        (py as usize * w as usize + px as usize) * BYTES_PER_PIXEL;
                                     if offset + BYTES_PER_PIXEL <= pixels.len() {
                                         pixels[offset..offset + BYTES_PER_PIXEL].fill(0);
                                     }

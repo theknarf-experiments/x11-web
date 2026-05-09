@@ -83,8 +83,8 @@ pub async fn traces_handler(headers: HeaderMap, body: Bytes) -> impl IntoRespons
 
     match req.send().await {
         Ok(res) => {
-            let status = StatusCode::from_u16(res.status().as_u16())
-                .unwrap_or(StatusCode::BAD_GATEWAY);
+            let status =
+                StatusCode::from_u16(res.status().as_u16()).unwrap_or(StatusCode::BAD_GATEWAY);
             let bytes = res.bytes().await.unwrap_or_default();
             (status, bytes).into_response()
         }

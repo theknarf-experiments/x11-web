@@ -13,19 +13,19 @@ use tracing::debug;
 use super::super::client::ClientState;
 use crate::xserver::byteswap::{swap_u16, swap_u32, swap_u32_array};
 use x11rb_protocol::protocol::xf86vidmode::{
-    ADD_MODE_LINE_REQUEST, AddModeLineRequest, DELETE_MODE_LINE_REQUEST, DeleteModeLineRequest,
-    GET_ALL_MODE_LINES_REQUEST, GET_DOT_CLOCKS_REQUEST, GET_GAMMA_RAMP_REQUEST,
-    GET_GAMMA_RAMP_SIZE_REQUEST, GET_GAMMA_REQUEST, GET_MODE_LINE_REQUEST, GET_MONITOR_REQUEST,
-    GET_VIEW_PORT_REQUEST, GetAllModeLinesReply, GetAllModeLinesRequest, GetDotClocksReply,
-    GetDotClocksRequest, GetGammaRampReply, GetGammaRampRequest, GetGammaRampSizeReply,
-    GetGammaRampSizeRequest, GetGammaReply, GetGammaRequest, GetModeLineReply, GetModeLineRequest,
-    GetMonitorReply, GetMonitorRequest, GetViewPortReply, GetViewPortRequest,
-    LOCK_MODE_SWITCH_REQUEST, LockModeSwitchRequest, MOD_MODE_LINE_REQUEST, ModModeLineRequest,
-    ModeFlag, ModeInfo as WireModeInfo, QUERY_VERSION_REQUEST, QueryVersionReply,
-    QueryVersionRequest, SET_CLIENT_VERSION_REQUEST, SET_GAMMA_RAMP_REQUEST, SET_GAMMA_REQUEST,
-    SET_VIEW_PORT_REQUEST, SWITCH_MODE_REQUEST, SWITCH_TO_MODE_REQUEST, SetGammaRampRequest,
+    AddModeLineRequest, DeleteModeLineRequest, GetAllModeLinesReply, GetAllModeLinesRequest,
+    GetDotClocksReply, GetDotClocksRequest, GetGammaRampReply, GetGammaRampRequest,
+    GetGammaRampSizeReply, GetGammaRampSizeRequest, GetGammaReply, GetGammaRequest,
+    GetModeLineReply, GetModeLineRequest, GetMonitorReply, GetMonitorRequest, GetViewPortReply,
+    GetViewPortRequest, LockModeSwitchRequest, ModModeLineRequest, ModeFlag,
+    ModeInfo as WireModeInfo, QueryVersionReply, QueryVersionRequest, SetGammaRampRequest,
     SetGammaRequest, SetViewPortRequest, SwitchModeRequest, SwitchToModeRequest,
-    VALIDATE_MODE_LINE_REQUEST, ValidateModeLineReply, ValidateModeLineRequest,
+    ValidateModeLineReply, ValidateModeLineRequest, ADD_MODE_LINE_REQUEST,
+    DELETE_MODE_LINE_REQUEST, GET_ALL_MODE_LINES_REQUEST, GET_DOT_CLOCKS_REQUEST,
+    GET_GAMMA_RAMP_REQUEST, GET_GAMMA_RAMP_SIZE_REQUEST, GET_GAMMA_REQUEST, GET_MODE_LINE_REQUEST,
+    GET_MONITOR_REQUEST, GET_VIEW_PORT_REQUEST, LOCK_MODE_SWITCH_REQUEST, MOD_MODE_LINE_REQUEST,
+    QUERY_VERSION_REQUEST, SET_CLIENT_VERSION_REQUEST, SET_GAMMA_RAMP_REQUEST, SET_GAMMA_REQUEST,
+    SET_VIEW_PORT_REQUEST, SWITCH_MODE_REQUEST, SWITCH_TO_MODE_REQUEST, VALIDATE_MODE_LINE_REQUEST,
 };
 use x11rb_protocol::x11_utils::Serialize;
 
@@ -663,7 +663,7 @@ fn byteswap_get_mode_line_reply(buf: &mut [u8]) {
     }
     swap_u32(buf, 32); // flags
     swap_u32(buf, 48); // privsize
-    // `private` bytes are an opaque blob — no swap.
+                       // `private` bytes are an opaque blob — no swap.
 }
 
 /// ValidateModeLineReply: [type:1, pad:1, sequence:u16, length:u32,

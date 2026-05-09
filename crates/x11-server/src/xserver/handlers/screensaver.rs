@@ -3,8 +3,9 @@
 use super::parse_minor;
 use tracing::debug;
 use x11rb_protocol::protocol::screensaver::{
-    Kind, QUERY_INFO_REQUEST, QUERY_VERSION_REQUEST, SELECT_INPUT_REQUEST, SET_ATTRIBUTES_REQUEST,
-    SUSPEND_REQUEST, SelectInputRequest, SetAttributesRequest, State, UNSET_ATTRIBUTES_REQUEST,
+    Kind, SelectInputRequest, SetAttributesRequest, State, QUERY_INFO_REQUEST,
+    QUERY_VERSION_REQUEST, SELECT_INPUT_REQUEST, SET_ATTRIBUTES_REQUEST, SUSPEND_REQUEST,
+    UNSET_ATTRIBUTES_REQUEST,
 };
 
 use super::super::client::ClientState;

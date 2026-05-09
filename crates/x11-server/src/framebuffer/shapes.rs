@@ -604,14 +604,7 @@ impl Framebuffer {
                         );
                     }
                 }
-                self.stroke_path_skia(
-                    &path,
-                    foreground,
-                    line_width,
-                    butt_cap,
-                    dash,
-                    clip_rects,
-                );
+                self.stroke_path_skia(&path, foreground, line_width, butt_cap, dash, clip_rects);
                 self.mark_dirty(x as i32, y as i32, width as u32, height as u32);
                 return;
             }

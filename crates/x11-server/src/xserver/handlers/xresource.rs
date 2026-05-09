@@ -276,7 +276,7 @@ pub(crate) fn handle_xresource_request(state: &mut ClientState, data: &[u8], seq
             let num_sizes = entries.len() as u32;
             // Each ResourceSizeValue: spec (8) + bytes (4) + ref_count (4) + use_count (4) = 20 bytes
             let data_bytes = num_sizes as usize * 20;
-            let padded = align_to_4(data_bytes );
+            let padded = align_to_4(data_bytes);
             let mut reply = ReplyBuf::with_extra(seq, padded, bo).set_u32(8, num_sizes);
 
             let mut off = 32;

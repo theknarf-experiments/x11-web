@@ -17,15 +17,14 @@ use super::super::client::ClientState;
 use super::parse_minor;
 use crate::xserver::byteswap::{swap_u16, swap_u32, swap_u32_array};
 use x11rb_protocol::protocol::xv::{
-    AdaptorInfo, EncodingInfo, Format, GET_PORT_ATTRIBUTE_REQUEST, GET_STILL_REQUEST,
-    GET_VIDEO_REQUEST, GRAB_PORT_REQUEST, ImageFormatInfo, LIST_IMAGE_FORMATS_REQUEST,
-    PUT_IMAGE_REQUEST, PUT_STILL_REQUEST, PUT_VIDEO_REQUEST, QUERY_ADAPTORS_REQUEST,
-    QUERY_BEST_SIZE_REQUEST, QUERY_ENCODINGS_REQUEST, QUERY_EXTENSION_REQUEST,
-    QUERY_IMAGE_ATTRIBUTES_REQUEST, QUERY_PORT_ATTRIBUTES_REQUEST, QueryAdaptorsReply,
-    QueryAdaptorsRequest, QueryEncodingsReply, QueryEncodingsRequest, QueryExtensionReply,
-    QueryExtensionRequest, Rational, SELECT_PORT_NOTIFY_REQUEST, SELECT_VIDEO_NOTIFY_REQUEST,
-    SET_PORT_ATTRIBUTE_REQUEST, STOP_VIDEO_REQUEST, ScanlineOrder, SHM_PUT_IMAGE_REQUEST,
-    Type, UNGRAB_PORT_REQUEST,
+    AdaptorInfo, EncodingInfo, Format, ImageFormatInfo, QueryAdaptorsReply, QueryAdaptorsRequest,
+    QueryEncodingsReply, QueryEncodingsRequest, QueryExtensionReply, QueryExtensionRequest,
+    Rational, ScanlineOrder, Type, GET_PORT_ATTRIBUTE_REQUEST, GET_STILL_REQUEST,
+    GET_VIDEO_REQUEST, GRAB_PORT_REQUEST, LIST_IMAGE_FORMATS_REQUEST, PUT_IMAGE_REQUEST,
+    PUT_STILL_REQUEST, PUT_VIDEO_REQUEST, QUERY_ADAPTORS_REQUEST, QUERY_BEST_SIZE_REQUEST,
+    QUERY_ENCODINGS_REQUEST, QUERY_EXTENSION_REQUEST, QUERY_IMAGE_ATTRIBUTES_REQUEST,
+    QUERY_PORT_ATTRIBUTES_REQUEST, SELECT_PORT_NOTIFY_REQUEST, SELECT_VIDEO_NOTIFY_REQUEST,
+    SET_PORT_ATTRIBUTE_REQUEST, SHM_PUT_IMAGE_REQUEST, STOP_VIDEO_REQUEST, UNGRAB_PORT_REQUEST,
 };
 use x11rb_protocol::x11_utils::Serialize;
 
@@ -109,8 +108,14 @@ pub(crate) fn handle_xvideo_request(state: &mut ClientState, data: &[u8], seq: u
     let minor = data[1];
     match minor {
         QUERY_EXTENSION_REQUEST => {
-            let _req =
-                parse_minor!(QueryExtensionRequest, data, state, seq, XV_MAJOR_OPCODE, minor);
+            let _req = parse_minor!(
+                QueryExtensionRequest,
+                data,
+                state,
+                seq,
+                XV_MAJOR_OPCODE,
+                minor
+            );
             let reply = QueryExtensionReply {
                 sequence: seq,
                 length: 0,
@@ -120,8 +125,14 @@ pub(crate) fn handle_xvideo_request(state: &mut ClientState, data: &[u8], seq: u
             build_reply(&reply, state.msb_first, byteswap_query_extension_reply)
         }
         QUERY_ADAPTORS_REQUEST => {
-            let _req =
-                parse_minor!(QueryAdaptorsRequest, data, state, seq, XV_MAJOR_OPCODE, minor);
+            let _req = parse_minor!(
+                QueryAdaptorsRequest,
+                data,
+                state,
+                seq,
+                XV_MAJOR_OPCODE,
+                minor
+            );
             let reply = QueryAdaptorsReply {
                 sequence: seq,
                 length: 0,
@@ -139,8 +150,14 @@ pub(crate) fn handle_xvideo_request(state: &mut ClientState, data: &[u8], seq: u
             build_query_adaptors_reply(&reply, state.msb_first)
         }
         QUERY_ENCODINGS_REQUEST => {
-            let _req =
-                parse_minor!(QueryEncodingsRequest, data, state, seq, XV_MAJOR_OPCODE, minor);
+            let _req = parse_minor!(
+                QueryEncodingsRequest,
+                data,
+                state,
+                seq,
+                XV_MAJOR_OPCODE,
+                minor
+            );
             let reply = QueryEncodingsReply {
                 sequence: seq,
                 length: 0,
@@ -157,11 +174,12 @@ pub(crate) fn handle_xvideo_request(state: &mut ClientState, data: &[u8], seq: u
             };
             build_query_encodings_reply(&reply, state.msb_first)
         }
-        GRAB_PORT_REQUEST | UNGRAB_PORT_REQUEST | QUERY_BEST_SIZE_REQUEST
-        | SET_PORT_ATTRIBUTE_REQUEST | GET_PORT_ATTRIBUTE_REQUEST
-        | QUERY_PORT_ATTRIBUTES_REQUEST => {
-            port::handle_port_request(state, data, seq, minor)
-        }
+        GRAB_PORT_REQUEST
+        | UNGRAB_PORT_REQUEST
+        | QUERY_BEST_SIZE_REQUEST
+        | SET_PORT_ATTRIBUTE_REQUEST
+        | GET_PORT_ATTRIBUTE_REQUEST
+        | QUERY_PORT_ATTRIBUTES_REQUEST => port::handle_port_request(state, data, seq, minor),
         PUT_VIDEO_REQUEST
         | PUT_STILL_REQUEST
         | GET_VIDEO_REQUEST
@@ -277,7 +295,7 @@ fn byteswap_adaptor_info(buf: &mut [u8], off: &mut usize, adaptor: &AdaptorInfo)
     swap_u16(buf, *off + 6); // num_ports
     swap_u16(buf, *off + 8); // num_formats
     *off += 12;
-    let name_padded = crate::xserver::core::align_to_4(adaptor.name.len() );
+    let name_padded = crate::xserver::core::align_to_4(adaptor.name.len());
     *off += name_padded; // name bytes (no swap)
     for _ in &adaptor.formats {
         // Format: visual:u32, depth:u8, pad:3
@@ -314,7 +332,7 @@ fn byteswap_encoding_info(buf: &mut [u8], off: &mut usize, encoding: &EncodingIn
     swap_u16(buf, *off + 8); // height
     swap_u32(buf, *off + 12); // rate.numerator
     swap_u32(buf, *off + 16); // rate.denominator
-    *off += 20 + (crate::xserver::core::align_to_4(encoding.name.len() ));
+    *off += 20 + (crate::xserver::core::align_to_4(encoding.name.len()));
 }
 
 /// `ImageFormatInfo` (128 bytes, no inner variable-length parts).
@@ -327,14 +345,13 @@ fn byteswap_encoding_info(buf: &mut [u8], off: &mut usize, encoding: &EncodingIn
 ///   vcomp_order:[u8;32], vscanline_order:u8, pad:11]`
 pub(super) fn byteswap_image_format_info(buf: &mut [u8], off: usize) {
     swap_u32(buf, off); // id
-    // type_ at off+4 is u8, byte_order at off+5 is u8 — no swap.
-    // guid is bytes — no swap.
+                        // type_ at off+4 is u8, byte_order at off+5 is u8 — no swap.
+                        // guid is bytes — no swap.
     swap_u32(buf, off + 32); // red_mask
     swap_u32(buf, off + 36); // green_mask
     swap_u32(buf, off + 40); // blue_mask
     swap_u32_array(buf, off + 48, 9); // y/u/v sample_bits + 6 vhorz/vvert periods
 }
-
 
 /// Build a YUV-format `ImageFormatInfo` for our software adaptor. The
 /// canonical FOURCC GUID is the 4-char fourcc followed by a fixed

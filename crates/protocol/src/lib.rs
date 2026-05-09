@@ -226,9 +226,7 @@ pub enum DisplayUpdate {
         resizable: bool,
     },
     /// A window was destroyed.
-    WindowDestroyed {
-        window_id: String,
-    },
+    WindowDestroyed { window_id: String },
     /// A window was mapped (made visible).
     WindowMapped {
         window_id: String,
@@ -236,9 +234,7 @@ pub enum DisplayUpdate {
         override_redirect: bool,
     },
     /// A window was unmapped (hidden).
-    WindowUnmapped {
-        window_id: String,
-    },
+    WindowUnmapped { window_id: String },
     /// A window was moved/resized.
     WindowConfigured {
         window_id: String,
@@ -265,19 +261,14 @@ pub enum DisplayUpdate {
         data: Vec<u8>,
     },
     /// Window title changed (from WM_NAME property).
-    TitleChanged {
-        window_id: String,
-        title: String,
-    },
+    TitleChanged { window_id: String, title: String },
     /// Window WM state changed (minimize, maximize, fullscreen).
     WindowStateChanged {
         window_id: String,
         state: WindowWmState,
     },
     /// Window stacking order changed (raised to top).
-    WindowRaised {
-        window_id: String,
-    },
+    WindowRaised { window_id: String },
     /// X11 Bell event — frontend should play an audible/visual bell.
     Bell {
         /// Percent volume (0-100).
@@ -287,9 +278,7 @@ pub enum DisplayUpdate {
     /// focused top-level window, or `None` if focus was cleared (revert
     /// to root, no window focused). Used by the global menu bar to
     /// know which window's menu to display.
-    WindowFocused {
-        window_id: Option<String>,
-    },
+    WindowFocused { window_id: Option<String> },
     /// Full menu tree for a top-level window. Sent when the sidecar
     /// first mirrors a GTK / Qt application menu, and again whenever
     /// the structure changes substantially. Empty `menu` clears the

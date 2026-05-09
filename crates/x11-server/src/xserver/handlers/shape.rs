@@ -12,11 +12,11 @@ use super::super::types::RegionRect;
 use crate::xserver::event::serialize_event;
 use crate::xserver::reply::ReplyBuf;
 use x11rb_protocol::protocol::shape::{
-    COMBINE_REQUEST, CombineRequest, GET_RECTANGLES_REQUEST, GetRectanglesRequest,
-    INPUT_SELECTED_REQUEST, InputSelectedRequest, MASK_REQUEST, MaskRequest,
-    NotifyEvent as ShapeNotifyEvent, OFFSET_REQUEST, OffsetRequest, QUERY_EXTENTS_REQUEST,
-    QUERY_VERSION_REQUEST, QueryExtentsRequest, QueryVersionRequest, RECTANGLES_REQUEST,
-    RectanglesRequest, SELECT_INPUT_REQUEST, SK, SO, SelectInputRequest,
+    CombineRequest, GetRectanglesRequest, InputSelectedRequest, MaskRequest,
+    NotifyEvent as ShapeNotifyEvent, OffsetRequest, QueryExtentsRequest, QueryVersionRequest,
+    RectanglesRequest, SelectInputRequest, COMBINE_REQUEST, GET_RECTANGLES_REQUEST,
+    INPUT_SELECTED_REQUEST, MASK_REQUEST, OFFSET_REQUEST, QUERY_EXTENTS_REQUEST,
+    QUERY_VERSION_REQUEST, RECTANGLES_REQUEST, SELECT_INPUT_REQUEST, SK, SO,
 };
 
 /// Absolute event code for SHAPE NotifyEvent. The extension's
@@ -278,7 +278,7 @@ pub(crate) fn handle_shape_request(state: &mut ClientState, data: &[u8], seq: u1
 
             let n_rects = rects.len() as u32;
             let rects_bytes = rects.len() * 8;
-            let padded = crate::xserver::core::align_to_4(rects_bytes );
+            let padded = crate::xserver::core::align_to_4(rects_bytes);
             let mut reply = ReplyBuf::with_extra(seq, padded, state.msb_first)
                 .set_data_byte(0) // ordering = UnSorted
                 .set_u32(8, n_rects);
