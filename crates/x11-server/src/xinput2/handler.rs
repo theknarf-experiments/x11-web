@@ -409,7 +409,8 @@ pub fn handle_request(
                 let reply = xi::XIGetPropertyReply {
                     sequence: seq,
                     length: 0,
-                    type_: 31, // XA_STRING as a reasonable default
+                    // XA_STRING is the reasonable default for unknown property types.
+                    type_: crate::xserver::atoms::predef::STRING,
                     bytes_after: 0,
                     num_items: value.len() as u32,
                     items: xi::XIGetPropertyItems::Data8(value.clone()),

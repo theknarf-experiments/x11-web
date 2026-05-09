@@ -44,6 +44,11 @@ pub(crate) use x11rb_protocol::protocol::xproto::{
 // Alias for British spelling used throughout codebase
 pub(crate) const COLOURMAP_NOTIFY_EVENT: u8 = COLORMAP_NOTIFY_EVENT;
 
+/// Top bit of a wire event-type byte: set on synthetic events delivered via
+/// SendEvent. Used both to mark outgoing synthetic events and to strip the
+/// flag when matching against the bare event type.
+pub(crate) const SEND_EVENT_FLAG: u8 = 0x80;
+
 // X11 event masks — re-exported directly from x11rb.
 pub(crate) use x11rb_protocol::protocol::xproto::EventMask;
 

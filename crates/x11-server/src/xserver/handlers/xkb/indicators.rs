@@ -4,6 +4,16 @@ use super::super::super::client::ClientState;
 use crate::xserver::core::read_u32_bo as read_u32;
 use crate::xserver::reply::ReplyBuf;
 
+/// Real-modifier mask bits as `u8` aliases of `x11rb::xproto::ModMask`.
+/// Used by the XKB indicator state / map handlers, which need raw bytes
+/// rather than the `ModMask` wrapper type. Verified by a test below.
+const MOD_LOCK: u8 = 1 << 1; // Caps Lock
+const MOD_M2: u8 = 1 << 4; // Num Lock
+const MOD_M3: u8 = 1 << 5; // Scroll Lock
+
+/// XkbIM_UseLocked flag for the IndicatorMap whichMods field.
+const WHICH_MODS_USE_LOCKED: u8 = 0x04;
+
 /// Handle GetIndicatorState (minor opcode 12).
 pub(crate) fn handle_get_indicator_state(
     state: &mut ClientState,
@@ -12,16 +22,16 @@ pub(crate) fn handle_get_indicator_state(
 ) -> Vec<u8> {
     let mut ind_state: u32 = 0;
     let eff_mods = state.xkb_state.effective_mods();
-    // Indicator 0: Caps Lock (Lock modifier = bit 1)
-    if eff_mods & 0x02 != 0 {
+    // Indicator 0: Caps Lock
+    if eff_mods & MOD_LOCK != 0 {
         ind_state |= 1 << 0;
     }
-    // Indicator 1: Num Lock (Mod2 = bit 4)
-    if eff_mods & 0x10 != 0 {
+    // Indicator 1: Num Lock
+    if eff_mods & MOD_M2 != 0 {
         ind_state |= 1 << 1;
     }
-    // Indicator 2: Scroll Lock (Mod3 = bit 5) - not common but supported
-    if eff_mods & 0x20 != 0 {
+    // Indicator 2: Scroll Lock — not common but supported
+    if eff_mods & MOD_M3 != 0 {
         ind_state |= 1 << 2;
     }
     // Indicator 3: Group (lit when group > 0)
@@ -67,25 +77,25 @@ pub(crate) fn handle_get_indicator_map(
         }
         match bit {
             0 => {
-                // Caps Lock: driven by Lock modifier (0x02)
+                // Caps Lock: driven by Lock modifier
                 reply.buf_mut()[off] = 0; // flags
                 reply.buf_mut()[off + 1] = 0; // whichGroups
                 reply.buf_mut()[off + 2] = 0; // groups
-                reply.buf_mut()[off + 3] = 0x04; // whichMods: UseLocked
-                reply.buf_mut()[off + 4] = 0x02; // mods: Lock
-                reply.buf_mut()[off + 5] = 0x02; // realMods: Lock
+                reply.buf_mut()[off + 3] = WHICH_MODS_USE_LOCKED;
+                reply.buf_mut()[off + 4] = MOD_LOCK; // mods
+                reply.buf_mut()[off + 5] = MOD_LOCK; // realMods
             }
             1 => {
-                // Num Lock: driven by Mod2 (0x10)
-                reply.buf_mut()[off + 3] = 0x04; // whichMods: UseLocked
-                reply.buf_mut()[off + 4] = 0x10; // mods: Mod2
-                reply.buf_mut()[off + 5] = 0x10; // realMods: Mod2
+                // Num Lock: driven by Mod2
+                reply.buf_mut()[off + 3] = WHICH_MODS_USE_LOCKED;
+                reply.buf_mut()[off + 4] = MOD_M2;
+                reply.buf_mut()[off + 5] = MOD_M2;
             }
             2 => {
-                // Scroll Lock: driven by Mod3 (0x20)
-                reply.buf_mut()[off + 3] = 0x04;
-                reply.buf_mut()[off + 4] = 0x20;
-                reply.buf_mut()[off + 5] = 0x20;
+                // Scroll Lock: driven by Mod3
+                reply.buf_mut()[off + 3] = WHICH_MODS_USE_LOCKED;
+                reply.buf_mut()[off + 4] = MOD_M3;
+                reply.buf_mut()[off + 5] = MOD_M3;
             }
             3 => {
                 // Group indicator: driven by effective group != 0
@@ -159,13 +169,26 @@ pub(crate) fn handle_get_named_indicator(
             .get_name(indicator_atom)
             .map(|s| s.to_string());
         match name.as_deref() {
-            Some("Caps Lock") => eff_mods & 0x02 != 0,
-            Some("Num Lock") => eff_mods & 0x10 != 0,
-            Some("Scroll Lock") => eff_mods & 0x20 != 0,
+            Some("Caps Lock") => eff_mods & MOD_LOCK != 0,
+            Some("Num Lock") => eff_mods & MOD_M2 != 0,
+            Some("Scroll Lock") => eff_mods & MOD_M3 != 0,
             Some("Group 2") => state.xkb_state.effective_group() >= 1,
             _ => false,
         }
     };
     reply = reply.set_u8(13, on as u8);
     reply.build()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use x11rb_protocol::protocol::xproto::ModMask;
+
+    #[test]
+    fn mod_constants_match_x11rb() {
+        assert_eq!(MOD_LOCK, u16::from(ModMask::LOCK) as u8);
+        assert_eq!(MOD_M2, u16::from(ModMask::M2) as u8);
+        assert_eq!(MOD_M3, u16::from(ModMask::M3) as u8);
+    }
 }

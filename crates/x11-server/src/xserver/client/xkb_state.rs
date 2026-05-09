@@ -56,7 +56,7 @@ impl XkbState {
     /// Check if BounceKeys should reject this key press (debounce).
     /// Returns true if the key should be rejected.
     pub(crate) fn bounce_keys_reject(&self, keycode: u8) -> bool {
-        const XKB_BOUNCE_KEYS_MASK: u32 = 1 << 2;
+        use crate::xserver::handlers::xkb::XKB_BOUNCE_KEYS_MASK;
         if (self.controls.enabled_ctrls & XKB_BOUNCE_KEYS_MASK) == 0 {
             return false;
         }
@@ -71,7 +71,7 @@ impl XkbState {
     /// Update modifier state when a key is pressed.
     /// Returns the modifier mask for the keycode, if any.
     pub(crate) fn key_press(&mut self, keycode: u8) -> u8 {
-        const XKB_STICKY_KEYS_MASK: u32 = 1 << 3;
+        use crate::xserver::handlers::xkb::XKB_STICKY_KEYS_MASK;
         let sticky_enabled = (self.controls.enabled_ctrls & XKB_STICKY_KEYS_MASK) != 0;
 
         let mod_bit = keycode_to_modifier(keycode);
@@ -97,7 +97,7 @@ impl XkbState {
 
     /// Update modifier state when a key is released.
     pub(crate) fn key_release(&mut self, keycode: u8) {
-        const XKB_STICKY_KEYS_MASK: u32 = 1 << 3;
+        use crate::xserver::handlers::xkb::{XKB_BOUNCE_KEYS_MASK, XKB_STICKY_KEYS_MASK};
         let sticky_enabled = (self.controls.enabled_ctrls & XKB_STICKY_KEYS_MASK) != 0;
 
         let mod_bit = keycode_to_modifier(keycode);
@@ -111,7 +111,6 @@ impl XkbState {
         }
 
         // BounceKeys: record release time for debounce
-        const XKB_BOUNCE_KEYS_MASK: u32 = 1 << 2;
         if (self.controls.enabled_ctrls & XKB_BOUNCE_KEYS_MASK) != 0 {
             self.bounce_key_release_time.insert(keycode, Instant::now());
         }

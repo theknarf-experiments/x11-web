@@ -1,6 +1,20 @@
 //! RECORD extension intercept and notification methods on ClientState.
 
 use super::ClientState;
+use crate::xserver::core::SEND_EVENT_FLAG;
+
+/// Largest valid major opcode for a core (i.e. non-extension) X11 request.
+/// Per the X11 protocol, opcodes 1..=127 are core requests; 128..=255 are
+/// dynamically assigned to extensions via QueryExtension.
+const CORE_REQUEST_OPCODE_MAX: u8 = 127;
+
+/// Lowest valid X11 wire event code (KeyPress = 2). Codes 0 and 1 are
+/// reserved for the Error and Reply response types respectively.
+const X11_EVENT_TYPE_MIN: u8 = 2;
+
+/// Highest valid X11 wire event code (GenericEvent = 35 in newer protocol;
+/// 34 = MappingNotify is the last "core" type used by RECORD intercept).
+const X11_EVENT_TYPE_MAX: u8 = 34;
 
 impl ClientState {
     /// Intercept a request that was just received from this client and generate
@@ -49,7 +63,7 @@ impl ClientState {
                 } else {
                     0
                 };
-                let matched = if major_opcode <= 127 {
+                let matched = if major_opcode <= CORE_REQUEST_OPCODE_MAX {
                     entry.context.matches_core_request(major_opcode)
                 } else {
                     entry
@@ -132,7 +146,7 @@ impl ClientState {
                 }
                 if response[0] == 1 {
                     // Reply
-                    let matched = if major_opcode <= 127 {
+                    let matched = if major_opcode <= CORE_REQUEST_OPCODE_MAX {
                         entry.context.matches_core_reply(major_opcode)
                     } else {
                         entry.context.matches_ext_reply(major_opcode, minor_opcode)
@@ -175,7 +189,10 @@ impl ClientState {
         // Local contexts (self-interception)
         if !self.record_contexts.is_empty() {
             for event in events {
-                if event.len() == 32 && event[0] >= 2 && event[0] <= 34 {
+                if event.len() == 32
+                    && event[0] >= X11_EVENT_TYPE_MIN
+                    && event[0] <= X11_EVENT_TYPE_MAX
+                {
                     let server_time = self.timestamp();
                     let seq = self.sequence;
                     results.extend(super::super::handlers::record::intercept_event(
@@ -194,8 +211,11 @@ impl ClientState {
         if let Ok(shared) = self.shared_record_contexts.lock() {
             if !shared.is_empty() {
                 for event in events {
-                    if event.len() == 32 && event[0] >= 2 && event[0] <= 34 {
-                        let event_code = event[0] & 0x7f;
+                    if event.len() == 32
+                    && event[0] >= X11_EVENT_TYPE_MIN
+                    && event[0] <= X11_EVENT_TYPE_MAX
+                {
+                        let event_code = event[0] & !SEND_EVENT_FLAG;
                         let server_time = self.timestamp();
                         let seq = self.sequence;
                         for entry in shared.values() {

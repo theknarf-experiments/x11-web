@@ -7,6 +7,9 @@ use std::collections::HashMap;
 /// ICCCM extensions follow our own assignment from 69 upward. The
 /// `predefined_consts_match_table` test guards every entry against drift.
 pub(crate) mod predef {
+    /// Per the X11 spec, atom 31 is the predefined `STRING` type used for
+    /// Latin-1 textual property values.
+    pub(crate) const STRING: u32 = 31;
     pub(crate) const NET_WM_WINDOW_TYPE: u32 = 79;
     pub(crate) const NET_WM_WINDOW_TYPE_NORMAL: u32 = 80;
     pub(crate) const NET_WM_WINDOW_TYPE_DIALOG: u32 = 81;
@@ -288,6 +291,7 @@ mod tests {
         let lookup: HashMap<&str, u32> =
             PREDEFINED_ATOMS.iter().map(|&(n, i)| (n, i)).collect();
         let pairs: &[(&str, u32)] = &[
+            ("STRING", predef::STRING),
             ("_NET_WM_WINDOW_TYPE", predef::NET_WM_WINDOW_TYPE),
             ("_NET_WM_WINDOW_TYPE_NORMAL", predef::NET_WM_WINDOW_TYPE_NORMAL),
             ("_NET_WM_WINDOW_TYPE_DIALOG", predef::NET_WM_WINDOW_TYPE_DIALOG),

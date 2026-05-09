@@ -15,6 +15,13 @@ use super::super::client::ClientState;
 // RECORD data category constants
 // ---------------------------------------------------------------------------
 
+/// RECORD ClientSpec wire values used in `Vec<u32>` `client_specs` fields.
+/// Mirrors `x11rb::record::CS::*` but kept as `u32` because the spec stores
+/// `client_specs` as `CARD32` (a 32-bit XID-or-magic field).
+pub(crate) const CLIENT_SPEC_CURRENT_CLIENTS: u32 = 1;
+pub(crate) const CLIENT_SPEC_FUTURE_CLIENTS: u32 = 2;
+pub(crate) const CLIENT_SPEC_ALL_CLIENTS: u32 = 3;
+
 /// FromServer: events and errors from the server.
 pub(crate) const RECORD_FROM_SERVER: u8 = 0;
 /// FromClient: client requests.
@@ -137,16 +144,13 @@ impl RecordContext {
         }
         for &spec in &self.client_specs {
             match spec {
-                // CurrentClients (1) or AllClients (3): intercept all current clients
-                // except the recording client itself.
-                1 | 3 => {
-                    if source_client_id != recording_client_id {
-                        return true;
-                    }
-                }
-                // FutureClients (2): intercept future clients only.
-                // In practice this also means "not the recording client".
-                2 => {
+                // CurrentClients, FutureClients, or AllClients: intercept any
+                // matching client except the recording client itself. We treat
+                // the three magic values identically because the test harness
+                // can't distinguish "current" from "future" at intercept time.
+                CLIENT_SPEC_CURRENT_CLIENTS
+                | CLIENT_SPEC_FUTURE_CLIENTS
+                | CLIENT_SPEC_ALL_CLIENTS => {
                     if source_client_id != recording_client_id {
                         return true;
                     }
@@ -466,7 +470,11 @@ pub(crate) fn handle_record_request(state: &mut ClientState, data: &[u8], seq: u
 
                     if num_clients > 0 {
                         // Write client info
-                        let spec = ctx.client_specs.first().copied().unwrap_or(3);
+                        let spec = ctx
+                            .client_specs
+                            .first()
+                            .copied()
+                            .unwrap_or(CLIENT_SPEC_ALL_CLIENTS);
                         reply.buf_mut()[32..36].copy_from_slice(&spec.to_le_bytes());
                         reply.buf_mut()[36..40].copy_from_slice(&ranges_per_client.to_le_bytes());
 
@@ -823,6 +831,14 @@ use std::collections::HashMap;
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn client_spec_consts_match_x11rb() {
+        use x11rb_protocol::protocol::record::CS;
+        assert_eq!(CLIENT_SPEC_CURRENT_CLIENTS, u32::from(u8::from(CS::CURRENT_CLIENTS)));
+        assert_eq!(CLIENT_SPEC_FUTURE_CLIENTS, u32::from(u8::from(CS::FUTURE_CLIENTS)));
+        assert_eq!(CLIENT_SPEC_ALL_CLIENTS, u32::from(u8::from(CS::ALL_CLIENTS)));
+    }
 
     fn make_range(core_req: (u8, u8), events: (u8, u8)) -> RecordRange {
         RecordRange {

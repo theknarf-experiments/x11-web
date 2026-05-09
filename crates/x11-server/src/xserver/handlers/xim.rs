@@ -171,7 +171,7 @@ impl XimServer {
 /// Returns a client message event to send back to the requesting client.
 pub(crate) fn handle_xim_xconnect(state: &mut ClientState, event: &[u8]) -> Vec<u8> {
     // ClientMessage event layout:
-    //   [0]    = event type (33 | 0x80)
+    //   [0]    = event type (CLIENT_MESSAGE_EVENT | SEND_EVENT_FLAG)
     //   [1]    = format (32)
     //   [4-7]  = window (our XIM window)
     //   [8-11] = type atom (_XIM_XCONNECT)
@@ -198,7 +198,7 @@ pub(crate) fn handle_xim_xconnect(state: &mut ClientState, event: &[u8]) -> Vec<
 
     let reply = serialize_event(
         &ClientMessageEvent {
-            response_type: CLIENT_MESSAGE_EVENT | 0x80, // synthetic
+            response_type: CLIENT_MESSAGE_EVENT | SEND_EVENT_FLAG, // synthetic
             format: 32,
             sequence: state.sequence,
             window: client_comm_window,
@@ -311,7 +311,7 @@ fn send_xim_reply_to(state: &mut ClientState, client_window: u32, reply_data: &[
         data[..reply_data.len()].copy_from_slice(reply_data);
         let cm = serialize_event_with_layout(
             &ClientMessageEvent {
-                response_type: CLIENT_MESSAGE_EVENT | 0x80,
+                response_type: CLIENT_MESSAGE_EVENT | SEND_EVENT_FLAG,
                 format: 8,
                 sequence: state.sequence,
                 window: client_window,
@@ -352,7 +352,7 @@ fn send_xim_reply_to(state: &mut ClientState, client_window: u32, reply_data: &[
         // Send a format=32 ClientMessage pointing to the property.
         let cm = serialize_event(
             &ClientMessageEvent {
-                response_type: CLIENT_MESSAGE_EVENT | 0x80,
+                response_type: CLIENT_MESSAGE_EVENT | SEND_EVENT_FLAG,
                 format: 32,
                 sequence: state.sequence,
                 window: client_window,
@@ -402,7 +402,7 @@ fn handle_xim_connect(state: &mut ClientState, _data: &[u8]) -> Vec<u8> {
     data[..reply.len()].copy_from_slice(&reply);
     let cm = serialize_event_with_layout(
         &ClientMessageEvent {
-            response_type: CLIENT_MESSAGE_EVENT | 0x80,
+            response_type: CLIENT_MESSAGE_EVENT | SEND_EVENT_FLAG,
             format: 8,
             sequence: state.sequence,
             window: 0, // overwritten by event router

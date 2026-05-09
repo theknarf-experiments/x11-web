@@ -66,7 +66,8 @@ const MAX_GROUPS: u8 = 4;
 /// Verified by `xkb_control_masks_match_x11rb` in tests below.
 pub(crate) const XKB_REPEAT_KEYS_MASK: u32 = 1 << 0;
 pub(crate) const XKB_SLOW_KEYS_MASK: u32 = 1 << 1;
-const XKB_BOUNCE_KEYS_MASK: u32 = 1 << 2;
+pub(crate) const XKB_BOUNCE_KEYS_MASK: u32 = 1 << 2;
+pub(crate) const XKB_STICKY_KEYS_MASK: u32 = 1 << 3;
 pub(crate) const XKB_MOUSE_KEYS_MASK: u32 = 1 << 4;
 const XKB_ACCESS_X_KEYS_MASK: u32 = 1 << 6;
 const XKB_ACCESS_X_TIMEOUT_MASK: u32 = 1 << 7;
@@ -97,6 +98,7 @@ mod xkb_const_checks {
         assert_eq!(XKB_REPEAT_KEYS_MASK, u32::from(BoolCtrl::REPEAT_KEYS));
         assert_eq!(XKB_SLOW_KEYS_MASK, u32::from(BoolCtrl::SLOW_KEYS));
         assert_eq!(XKB_BOUNCE_KEYS_MASK, u32::from(BoolCtrl::BOUNCE_KEYS));
+        assert_eq!(XKB_STICKY_KEYS_MASK, u32::from(BoolCtrl::STICKY_KEYS));
         assert_eq!(XKB_MOUSE_KEYS_MASK, u32::from(BoolCtrl::MOUSE_KEYS));
         assert_eq!(XKB_ACCESS_X_KEYS_MASK, u32::from(BoolCtrl::ACCESS_X_KEYS));
         assert_eq!(
