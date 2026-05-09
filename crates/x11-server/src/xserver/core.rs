@@ -132,6 +132,23 @@ macro_rules! require_len {
 }
 pub(crate) use require_len;
 
+/// Wire-format byte offsets within a 32-byte X11 error reply.
+mod error_layout {
+    /// Response-type byte (always 0 for errors).
+    pub(super) const RESPONSE_TYPE: usize = 0;
+    /// Error code byte (BadValue, BadWindow, etc.).
+    pub(super) const ERROR_CODE: usize = 1;
+    /// Sequence number of the request that caused the error (u16).
+    pub(super) const SEQUENCE: std::ops::Range<usize> = 2..4;
+    /// Resource ID, atom, value, or whatever the spec says is "bad" for the
+    /// error code (u32).
+    pub(super) const BAD_VALUE: std::ops::Range<usize> = 4..8;
+    /// Minor opcode of the request (u16; non-zero only for extension errors).
+    pub(super) const MINOR_OPCODE: std::ops::Range<usize> = 8..10;
+    /// Major opcode of the request (u8).
+    pub(super) const MAJOR_OPCODE: usize = 10;
+}
+
 /// Build an X11 error reply (32 bytes) in canonical little-endian byte
 /// order. The connection write loop calls [`byteswap_error_in_place`] on
 /// the response before sending if the client negotiated MSB-first byte
@@ -144,26 +161,25 @@ pub(crate) fn build_error(
     minor_opcode: u16,
 ) -> Vec<u8> {
     let mut err = [0u8; 32];
-    err[0] = 0; // Error indicator
-    err[1] = error_code;
-    err[2..4].copy_from_slice(&seq.to_le_bytes());
-    err[4..8].copy_from_slice(&bad_value.to_le_bytes());
-    err[8..10].copy_from_slice(&minor_opcode.to_le_bytes());
-    err[10] = major_opcode;
+    err[error_layout::RESPONSE_TYPE] = 0; // Error indicator
+    err[error_layout::ERROR_CODE] = error_code;
+    err[error_layout::SEQUENCE].copy_from_slice(&seq.to_le_bytes());
+    err[error_layout::BAD_VALUE].copy_from_slice(&bad_value.to_le_bytes());
+    err[error_layout::MINOR_OPCODE].copy_from_slice(&minor_opcode.to_le_bytes());
+    err[error_layout::MAJOR_OPCODE] = major_opcode;
     err.to_vec()
 }
 
 /// Convert an LE-formatted X11 error reply (built by [`build_error`])
-/// into MSB-first byte order in place. Safe to call on a 32-byte error
-/// buffer; field offsets follow the X11 wire format (seq @ 2..4,
-/// bad_value @ 4..8, minor_opcode @ 8..10).
+/// into MSB-first byte order in place. Field offsets follow the wire
+/// layout described in [`error_layout`].
 pub(crate) fn byteswap_error_in_place(err: &mut [u8]) {
-    if err.len() < 32 || err[0] != 0 {
+    if err.len() < 32 || err[error_layout::RESPONSE_TYPE] != 0 {
         return;
     }
-    err[2..4].reverse();
-    err[4..8].reverse();
-    err[8..10].reverse();
+    err[error_layout::SEQUENCE].reverse();
+    err[error_layout::BAD_VALUE].reverse();
+    err[error_layout::MINOR_OPCODE].reverse();
 }
 
 /// Helper to read a u16 from a buffer in the specified byte order.

@@ -67,6 +67,21 @@ pub(crate) fn serialize_event_with_layout<E: Serialize>(
 
 /// Byte-swap a 32-byte X11 event for MSB-first clients.
 ///
+/// Wire-format byte offsets within a 32-byte X11 event.
+mod event_layout {
+    /// Event-type byte (KeyPress, ConfigureNotify, …).
+    pub(super) const RESPONSE_TYPE: usize = 0;
+    /// Event-specific detail byte (e.g. keycode for KeyPress).
+    #[allow(dead_code)]
+    pub(super) const DETAIL: usize = 1;
+    /// Sequence number of the originating request (u16).
+    pub(super) const SEQUENCE: std::ops::Range<usize> = 2..4;
+    /// First byte of the u32-aligned payload area. All standard X11 events
+    /// pack their remaining fields as 4-byte words from here through
+    /// `X11_EVENT_SIZE`.
+    pub(super) const PAYLOAD_START: usize = 4;
+}
+
 /// X11 events have a known field layout: the first byte is the event type,
 /// byte 1 is event-specific, bytes 2-3 are sequence (u16), and bytes 4-31
 /// contain u32/u16/i16 fields depending on the event type.
@@ -78,12 +93,12 @@ fn byteswap_event_inplace(bytes: &mut [u8]) {
     if bytes.len() < 4 {
         return;
     }
-    // Sequence number at [2..4] — swap as u16
-    bytes.swap(2, 3);
-    // Remaining fields [4..X11_EVENT_SIZE] are all u32-aligned in standard
-    // X11 events. Swap each word.
+    // Sequence number — swap as u16.
+    bytes[event_layout::SEQUENCE].reverse();
+    // Remaining fields are all u32-aligned in standard X11 events. Swap
+    // each word.
     let end = bytes.len().min(X11_EVENT_SIZE);
-    for i in (4..end).step_by(X11_WORD_SIZE) {
+    for i in (event_layout::PAYLOAD_START..end).step_by(X11_WORD_SIZE) {
         if i + 3 < bytes.len() {
             bytes.swap(i, i + 3);
             bytes.swap(i + 1, i + 2);
