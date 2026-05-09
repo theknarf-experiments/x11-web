@@ -56,7 +56,7 @@ impl Default for KeyboardControl {
             208, // Hyper_R
         ];
         for &kc in MODIFIER_KEYCODES {
-            auto_repeats[(kc / 8) as usize] &= !(1u8 << (kc % 8));
+            crate::xserver::types::keycode_bitset::clear(&mut auto_repeats, kc);
         }
         Self {
             key_click_percent: 0,

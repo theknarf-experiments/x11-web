@@ -521,9 +521,7 @@ pub(crate) fn composite_pixel_ca(
     };
 }
 
-pub(crate) fn pad4(n: usize) -> usize {
-    (n + 3) & !3
-}
+pub(crate) use crate::xserver::core::align_to_4 as pad4;
 
 /// Returns `Some(error_reply)` if the given Render request would
 /// target a *gradient* picture as its destination — those are

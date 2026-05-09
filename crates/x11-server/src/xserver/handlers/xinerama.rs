@@ -56,7 +56,7 @@ pub(crate) fn handle_xinerama_request(state: &ClientState, data: &[u8], seq: u16
             let num_screens: u32 = 1;
             let screen_info_size = 8usize; // x_org(2) + y_org(2) + width(2) + height(2)
             let extra = screen_info_size;
-            let padded = (extra + 3) & !3;
+            let padded = crate::xserver::core::align_to_4(extra );
             // Screen 0: x=0, y=0, width=state.screen_width, height=state.screen_height
             let off = 32;
             // x_org = 0, y_org = 0 (already zero)

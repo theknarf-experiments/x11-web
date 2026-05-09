@@ -278,7 +278,7 @@ pub(crate) fn handle_shape_request(state: &mut ClientState, data: &[u8], seq: u1
 
             let n_rects = rects.len() as u32;
             let rects_bytes = rects.len() * 8;
-            let padded = (rects_bytes + 3) & !3;
+            let padded = crate::xserver::core::align_to_4(rects_bytes );
             let mut reply = ReplyBuf::with_extra(seq, padded, state.msb_first)
                 .set_data_byte(0) // ordering = UnSorted
                 .set_u32(8, n_rects);

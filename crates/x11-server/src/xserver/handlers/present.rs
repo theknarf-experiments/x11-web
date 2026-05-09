@@ -131,7 +131,7 @@ pub(crate) fn handle_xc_misc_request(state: &mut ClientState, data: &[u8], seq: 
 
             let actual_count = ids.len() as u32;
             let extra_bytes = (actual_count as usize) * 4;
-            let padded = (extra_bytes + 3) & !3;
+            let padded = crate::xserver::core::align_to_4(extra_bytes );
             let mut reply =
                 ReplyBuf::with_extra(seq, padded, state.msb_first).set_u32(8, actual_count); // ids_count
             for (i, &id) in ids.iter().enumerate() {

@@ -124,7 +124,7 @@ pub(crate) fn handle_get_motion_events(
     let n_events = events.len() as u32;
     // Each motion event is 8 bytes: timestamp(4) + x(2) + y(2)
     let data_bytes = n_events as usize * 8;
-    let data_padded = (data_bytes + 3) & !3;
+    let data_padded = align_to_4(data_bytes );
     let mut reply = ReplyBuf::with_extra(seq, data_padded, state.msb_first).set_u32(8, n_events);
 
     for (i, (ts, x, y)) in events.iter().enumerate() {
@@ -848,7 +848,7 @@ pub(crate) fn handle_list_hosts(state: &ClientState, _req: &ListHostsRequest) ->
         .serialize_into(&mut host_entries);
     }
 
-    let extra_padded = (host_entries.len() + 3) & !3;
+    let extra_padded = align_to_4(host_entries.len() );
     ReplyBuf::with_extra(seq, extra_padded, state.msb_first)
         .set_data_byte(if state.access_control_enabled { 1 } else { 0 })
         .set_u16(8, state.access_hosts.len() as u16)
@@ -1205,7 +1205,7 @@ pub(crate) fn handle_get_pointer_mapping(
     let seq = state.sequence;
     let map = &state.pointer_mapping;
     let n = map.len() as u8;
-    let padded_len = (n as usize + 3) & !3;
+    let padded_len = align_to_4(n as usize );
     ReplyBuf::with_extra(seq, padded_len, state.msb_first)
         .set_data_byte(n)
         .set_bytes(32, map)

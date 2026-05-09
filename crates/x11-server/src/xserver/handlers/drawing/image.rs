@@ -92,7 +92,7 @@ pub(crate) fn handle_put_image(state: &mut ClientState, req: &PutImageRequest) -
             let fb_w = fb.width() as usize;
             let fb_h = fb.height() as usize;
             let row_bytes = w * 2;
-            let padded_row = (row_bytes + 3) & !3;
+            let padded_row = align_to_4(row_bytes );
             let fb_data = fb.data_mut();
             for row in 0..h {
                 let dy = dst_y as i32 + row as i32;
@@ -169,7 +169,7 @@ pub(crate) fn handle_put_image(state: &mut ClientState, req: &PutImageRequest) -
             let h = height as usize;
             let fb_w = fb.width() as usize;
             let fb_h = fb.height() as usize;
-            let padded_row = (w + 3) & !3;
+            let padded_row = align_to_4(w );
             let fb_data = fb.data_mut();
             for row in 0..h {
                 let dy = dst_y as i32 + row as i32;
@@ -215,7 +215,7 @@ pub(crate) fn handle_put_image(state: &mut ClientState, req: &PutImageRequest) -
             let fb_w = fb.width() as usize;
             let fb_h = fb.height() as usize;
             let row_bytes = w.div_ceil(2);
-            let padded_row = (row_bytes + 3) & !3;
+            let padded_row = align_to_4(row_bytes );
             let fb_data = fb.data_mut();
             for row in 0..h {
                 let dy = dst_y as i32 + row as i32;
@@ -266,7 +266,7 @@ pub(crate) fn handle_put_image(state: &mut ClientState, req: &PutImageRequest) -
             let dx = dst_x as usize;
             let dy = dst_y as usize;
             let row_bytes = w.div_ceil(8);
-            let padded_row = (row_bytes + 3) & !3;
+            let padded_row = align_to_4(row_bytes );
             let fb_data = fb.data_mut();
             for row in 0..h {
                 if dy + row >= fb_h {
@@ -306,7 +306,7 @@ pub(crate) fn handle_put_image(state: &mut ClientState, req: &PutImageRequest) -
             // Each scanline is (left_pad + w) bits, rounded up to 32-bit boundary
             let scanline_bits = left_pad + w;
             let scanline_bytes = scanline_bits.div_ceil(8);
-            let padded_scanline = (scanline_bytes + 3) & !3;
+            let padded_scanline = align_to_4(scanline_bytes );
 
             if format == 0 {
                 let fg = mapped_fg & gc.plane_mask;
@@ -504,7 +504,7 @@ pub(crate) fn handle_get_image(state: &mut ClientState, req: &GetImageRequest) -
                 4
             };
             let row_bytes = w * bpp;
-            let padded_row = (row_bytes + 3) & !3;
+            let padded_row = align_to_4(row_bytes );
             let mut out = vec![0u8; padded_row * h];
             for row in 0..h {
                 let src_row_start = row * w * 4;
@@ -555,7 +555,7 @@ pub(crate) fn handle_get_image(state: &mut ClientState, req: &GetImageRequest) -
             // XYPixmap: planar format, one bitmap per plane in plane_mask, MSB plane first.
             // Only planes with bits set in plane_mask are included in the output.
             let scanline_bytes = w.div_ceil(8);
-            let padded_scanline = (scanline_bytes + 3) & !3;
+            let padded_scanline = align_to_4(scanline_bytes );
             let plane_size = padded_scanline * h;
             // Collect which planes are active (in descending order for MSB-first output)
             let mut active_planes: Vec<usize> = Vec::new();
@@ -593,7 +593,7 @@ pub(crate) fn handle_get_image(state: &mut ClientState, req: &GetImageRequest) -
         }
         _ => {
             let scanline_bytes = w.div_ceil(8);
-            let padded_scanline = (scanline_bytes + 3) & !3;
+            let padded_scanline = align_to_4(scanline_bytes );
             let mut out = vec![0u8; padded_scanline * h];
             for row in 0..h {
                 let row_offset = row * padded_scanline;
@@ -621,7 +621,7 @@ pub(crate) fn handle_get_image(state: &mut ClientState, req: &GetImageRequest) -
 
     let data_len = image_data.len();
     // Pad data to 4-byte boundary per X11 protocol
-    let padded_len = (data_len + 3) & !3;
+    let padded_len = align_to_4(data_len );
 
     let mut reply = ReplyBuf::with_extra(seq, padded_len, state.msb_first)
         .set_data_byte(depth)

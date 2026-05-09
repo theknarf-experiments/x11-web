@@ -54,7 +54,7 @@ pub(crate) fn byteswap_setup_reply(buf: &mut [u8]) {
 
     // --- Vendor string (padded to 4 bytes) ---
     let mut off = 40;
-    let vendor_padded = (vendor_len + 3) & !3;
+    let vendor_padded = align_to_4(vendor_len );
     off += vendor_padded; // skip vendor bytes (raw, no swap needed)
 
     // --- Pixmap formats (8 bytes each) ---

@@ -48,6 +48,14 @@ pub(crate) const X11_EVENT_SIZE: usize = 32;
 /// of this many bytes.
 pub(crate) const X11_WORD_SIZE: usize = 4;
 
+/// Round `n` up to the next 4-byte (X11 wire-word) boundary. X11 pads every
+/// field group to a multiple of 4 bytes, so this is the canonical alignment
+/// helper for request/reply length calculations.
+#[inline]
+pub(crate) const fn align_to_4(n: usize) -> usize {
+    (n + 3) & !3
+}
+
 /// Map a visual ID to its pixel depth, matching the visual table in setup.rs.
 /// Returns the root depth (24) for unknown visuals as a safe fallback.
 pub(crate) fn depth_for_visual(visual: u32) -> u8 {

@@ -21,6 +21,27 @@ pub(crate) use routing::{
     EventBroadcaster, EventRouter, ServerGrabLock, SharedKeymap, SharedWindows, WindowMessage,
 };
 
+/// 256-keycode bitset packed into 32 bytes (one bit per X11 keycode 0..255).
+/// Used by `pressed_keys`, `auto_repeats`, and `XkbControls::per_key_repeat`.
+pub(crate) mod keycode_bitset {
+    pub(crate) const SIZE: usize = 32;
+
+    #[inline]
+    pub(crate) fn get(bs: &[u8; SIZE], kc: u8) -> bool {
+        (bs[(kc / 8) as usize] & (1 << (kc % 8))) != 0
+    }
+
+    #[inline]
+    pub(crate) fn set(bs: &mut [u8; SIZE], kc: u8) {
+        bs[(kc / 8) as usize] |= 1 << (kc % 8);
+    }
+
+    #[inline]
+    pub(crate) fn clear(bs: &mut [u8; SIZE], kc: u8) {
+        bs[(kc / 8) as usize] &= !(1 << (kc % 8));
+    }
+}
+
 pub(crate) use colormap::*;
 pub(crate) use control::*;
 pub(crate) use cursor::*;

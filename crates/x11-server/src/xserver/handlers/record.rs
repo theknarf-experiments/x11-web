@@ -290,7 +290,7 @@ pub(crate) fn build_record_data_reply(
 ) -> Vec<u8> {
     use crate::xserver::reply::ReplyBuf;
     let data_len = intercepted_data.len();
-    let padded = (data_len + 3) & !3;
+    let padded = crate::xserver::core::align_to_4(data_len );
     // RECORD intentionally writes everything LE regardless of the client's
     // byte order — the client_swapped field at offset 12 signals which it is.
     let mut reply = ReplyBuf::with_extra(enable_seq, padded, false)
@@ -461,7 +461,7 @@ pub(crate) fn handle_record_request(state: &mut ClientState, data: &[u8], seq: u
                     } else {
                         0
                     };
-                    let padded = (client_info_bytes + 3) & !3;
+                    let padded = crate::xserver::core::align_to_4(client_info_bytes );
 
                     let mut reply = ReplyBuf::with_extra(seq, padded, false)
                         .set_data_byte(if ctx.enabled { 1 } else { 0 })

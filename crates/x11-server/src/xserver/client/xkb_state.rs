@@ -311,19 +311,23 @@ pub(crate) struct XkbControls {
 
 impl Default for XkbControls {
     fn default() -> Self {
-        let mut per_key_repeat = [0xFFu8; 32];
-        // Disable auto-repeat for modifier keys by default
-        // Keycode 37 (Ctrl_L) = byte 4 bit 5
-        per_key_repeat[37 / 8] &= !(1 << (37 % 8));
-        per_key_repeat[50 / 8] &= !(1 << (50 % 8)); // Shift_L
-        per_key_repeat[62 / 8] &= !(1 << (62 % 8)); // Shift_R
-        per_key_repeat[64 / 8] &= !(1 << (64 % 8)); // Alt_L
-        per_key_repeat[66 / 8] &= !(1 << (66 % 8)); // Caps_Lock
-        per_key_repeat[77 / 8] &= !(1 << (77 % 8)); // Num_Lock
-        per_key_repeat[105 / 8] &= !(1 << (105 % 8)); // Ctrl_R
-        per_key_repeat[108 / 8] &= !(1 << (108 % 8)); // Alt_R
-        per_key_repeat[133 / 8] &= !(1 << (133 % 8)); // Super_L
-        per_key_repeat[134 / 8] &= !(1 << (134 % 8)); // Super_R
+        use crate::xserver::types::keycode_bitset;
+        let mut per_key_repeat = [0xFFu8; keycode_bitset::SIZE];
+        // Disable auto-repeat for modifier keys by default.
+        for kc in [
+            37u8, // Ctrl_L
+            50,   // Shift_L
+            62,   // Shift_R
+            64,   // Alt_L
+            66,   // Caps_Lock
+            77,   // Num_Lock
+            105,  // Ctrl_R
+            108,  // Alt_R
+            133,  // Super_L
+            134,  // Super_R
+        ] {
+            keycode_bitset::clear(&mut per_key_repeat, kc);
+        }
 
         Self {
             // RepeatKeys enabled by default (bit 0 = XkbRepeatKeysMask)

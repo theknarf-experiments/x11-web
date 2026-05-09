@@ -39,7 +39,7 @@ pub(crate) fn handle_list_components(
         }
     }
     // Pad to 4-byte boundary
-    let padded = (body_size + 3) & !3;
+    let padded = crate::xserver::core::align_to_4(body_size );
 
     let mut reply =
         ReplyBuf::with_extra(seq, padded, state.msb_first).set_data_byte(device_id_byte);

@@ -504,7 +504,7 @@ fn send_xim_set_event_mask(state: &mut ClientState, im_id: u16, ic_id: u16) {
 /// Build an XIM attribute descriptor.
 /// Format: attribute_id(2) + type(2) + name_length(2) + name + padding.
 fn build_xim_attr(id: u16, attr_type: u16, name: &[u8]) -> Vec<u8> {
-    let padded_name_len = (name.len() + 3) & !3;
+    let padded_name_len = align_to_4(name.len() );
     let mut buf = Vec::with_capacity(6 + padded_name_len);
     buf.extend_from_slice(&id.to_le_bytes());
     buf.extend_from_slice(&attr_type.to_le_bytes());
@@ -687,7 +687,7 @@ fn parse_ic_attributes(
         }
 
         // Advance past the value, padded to 4 bytes
-        offset += (attr_len + 3) & !3;
+        offset += align_to_4(attr_len );
     }
 }
 
@@ -711,7 +711,7 @@ fn parse_preedit_sub_attributes(data: &[u8], spot_x: &mut i16, spot_y: &mut i16)
             _ => {}
         }
 
-        offset += (attr_len + 3) & !3;
+        offset += align_to_4(attr_len );
     }
 }
 
@@ -1046,7 +1046,7 @@ fn send_xim_commit(state: &mut ClientState, im_id: u16, ic_id: u16, text: &str) 
     //   byte_length_of_committed_string (2),
     //   committed_string (variable), pad
     let flag: u16 = 0x0002; // XLookupChars
-    let padded_len = (text_bytes.len() + 3) & !3;
+    let padded_len = align_to_4(text_bytes.len() );
 
     let mut body = Vec::new();
     body.extend_from_slice(&im_id.to_le_bytes());
@@ -1178,7 +1178,7 @@ fn send_xim_preedit_start(state: &mut ClientState, im_id: u16, ic_id: u16) {
 /// Update preedit string for an IC.
 fn send_xim_preedit_draw(state: &mut ClientState, im_id: u16, ic_id: u16, text: &str, caret: i32) {
     let text_bytes = text.as_bytes();
-    let padded_text_len = (text_bytes.len() + 3) & !3;
+    let padded_text_len = align_to_4(text_bytes.len() );
 
     // XIM_PREEDIT_DRAW: major=72, minor=0, length=variable
     //   im_id(2), ic_id(2),

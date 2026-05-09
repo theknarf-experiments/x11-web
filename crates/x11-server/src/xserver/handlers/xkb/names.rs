@@ -407,7 +407,7 @@ pub(crate) fn handle_xkb_set_names(state: &mut ClientState, data: &[u8], seq: u1
             }
         }
         offset += n_kt_levels as usize;
-        offset = (offset + 3) & !3;
+        offset = crate::xserver::core::align_to_4(offset );
         for &n_levels in &levels_per_type {
             let mut level_atoms = Vec::new();
             for _ in 0..n_levels {

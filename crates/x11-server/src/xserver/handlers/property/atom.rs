@@ -31,7 +31,7 @@ pub(crate) fn handle_get_atom_name(state: &mut ClientState, req: &GetAtomNameReq
         return build_error(ATOM_ERROR, seq, atom, 17, 0);
     };
     let name_bytes = name.as_bytes();
-    let padded_len = (name_bytes.len() + 3) & !3;
+    let padded_len = align_to_4(name_bytes.len() );
 
     let mut reply =
         ReplyBuf::with_extra(seq, padded_len, state.msb_first).set_u16(8, name_bytes.len() as u16);

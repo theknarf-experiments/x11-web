@@ -277,7 +277,7 @@ fn byteswap_adaptor_info(buf: &mut [u8], off: &mut usize, adaptor: &AdaptorInfo)
     swap_u16(buf, *off + 6); // num_ports
     swap_u16(buf, *off + 8); // num_formats
     *off += 12;
-    let name_padded = (adaptor.name.len() + 3) & !3;
+    let name_padded = crate::xserver::core::align_to_4(adaptor.name.len() );
     *off += name_padded; // name bytes (no swap)
     for _ in &adaptor.formats {
         // Format: visual:u32, depth:u8, pad:3
@@ -314,7 +314,7 @@ fn byteswap_encoding_info(buf: &mut [u8], off: &mut usize, encoding: &EncodingIn
     swap_u16(buf, *off + 8); // height
     swap_u32(buf, *off + 12); // rate.numerator
     swap_u32(buf, *off + 16); // rate.denominator
-    *off += 20 + ((encoding.name.len() + 3) & !3);
+    *off += 20 + (crate::xserver::core::align_to_4(encoding.name.len() ));
 }
 
 /// `ImageFormatInfo` (128 bytes, no inner variable-length parts).

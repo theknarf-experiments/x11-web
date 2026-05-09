@@ -249,7 +249,7 @@ pub(crate) fn handle_list_installed_colormaps(
 
     let n_cmaps = cmaps.len();
     let extra_bytes = n_cmaps * 4;
-    let padded = (extra_bytes + 3) & !3;
+    let padded = align_to_4(extra_bytes );
 
     let mut reply = ReplyBuf::with_extra(seq, padded, state.msb_first).set_u16(8, n_cmaps as u16);
 
@@ -403,7 +403,7 @@ pub(crate) fn handle_alloc_color_cells(
             let n_pix = n_colors as usize;
             let n_mask = if n_planes > 0 { n_planes as usize } else { 0 };
             let data_len = (n_pix + n_mask) * 4;
-            let padded = (data_len + 3) & !3;
+            let padded = align_to_4(data_len );
             let mut reply = ReplyBuf::with_extra(seq, padded, state.msb_first)
                 .set_u16(8, n_pix as u16)
                 .set_u16(10, n_mask as u16);
@@ -475,7 +475,7 @@ pub(crate) fn handle_alloc_color_planes(
     match pixels {
         Some(pix) => {
             let data_len = n_colors as usize * 4;
-            let padded = (data_len + 3) & !3;
+            let padded = align_to_4(data_len );
             // Red/green/blue masks at offsets 12, 16, 20
             let mut bit = 0u32;
             let mut red_mask = 0u32;
@@ -539,7 +539,7 @@ pub(crate) fn handle_query_colors(state: &mut ClientState, req: &QueryColorsRequ
     }
 
     let data_len = n_pixels * 8; // Each RGB is 8 bytes (r2, g2, b2, pad2)
-    let padded = (data_len + 3) & !3;
+    let padded = align_to_4(data_len );
 
     let mut reply = ReplyBuf::with_extra(seq, padded, state.msb_first).set_u16(8, n_pixels as u16);
 

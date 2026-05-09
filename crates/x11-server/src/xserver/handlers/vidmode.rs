@@ -209,8 +209,9 @@ pub(crate) fn handle_vidmode_request(state: &mut ClientState, data: &[u8], seq: 
             let model = b"virtual".to_vec();
             // Pad the vendor string out to a 4-byte boundary; x11rb's
             // serializer asserts that `alignment_pad.len()` matches
-            // `((vendor_len + 3) & !3) - vendor_len`.
-            let alignment_pad = vec![0u8; ((vendor.len() + 3) & !3) - vendor.len()];
+            // `align_to_4(vendor_len) - vendor_len`.
+            let alignment_pad =
+                vec![0u8; crate::xserver::core::align_to_4(vendor.len()) - vendor.len()];
             // Syncrange is u32: low Hz in lower 16 bits, high in upper 16.
             let pack = |low: u16, high: u16| -> u32 { u32::from(low) | (u32::from(high) << 16) };
             let reply = GetMonitorReply {

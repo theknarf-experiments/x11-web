@@ -101,16 +101,13 @@ pub(crate) fn handle_xtest_request(state: &mut ClientState, data: &[u8], seq: u1
                         let keycode = detail;
 
                         let xkb_before = super::xkb::XkbStateSnapshot::capture(state);
-                        let byte_idx = (keycode / 8) as usize;
-                        let bit_mask = 1u8 << (keycode % 8);
-                        if byte_idx < state.pressed_keys.len() {
-                            if event_type == KEY_PRESS_EVENT {
-                                state.pressed_keys[byte_idx] |= bit_mask;
-                                state.xkb_state.key_press(keycode);
-                            } else {
-                                state.pressed_keys[byte_idx] &= !bit_mask;
-                                state.xkb_state.key_release(keycode);
-                            }
+                        use crate::xserver::types::keycode_bitset;
+                        if event_type == KEY_PRESS_EVENT {
+                            keycode_bitset::set(&mut state.pressed_keys, keycode);
+                            state.xkb_state.key_press(keycode);
+                        } else {
+                            keycode_bitset::clear(&mut state.pressed_keys, keycode);
+                            state.xkb_state.key_release(keycode);
                         }
                         super::xkb::maybe_send_xkb_state_notify(
                             state,

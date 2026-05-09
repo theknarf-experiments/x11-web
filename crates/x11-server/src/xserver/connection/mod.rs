@@ -31,12 +31,6 @@ const BYTE_ORDER_MSB: u8 = 0x42;
 /// some slop for partial reads.
 const READ_BUF_BYTES: usize = 256 * 1024;
 
-/// Round `n` up to the next 4-byte boundary. X11 wire structures pad
-/// every field group to a multiple of 4 bytes.
-#[inline]
-const fn align_to_4(n: usize) -> usize {
-    (n + 3) & !3
-}
 use x11rb_protocol::x11_utils::{Serialize, TryParse};
 
 use super::atoms::AtomManager;
@@ -1451,11 +1445,19 @@ pub(crate) async fn handle_client(
                                         // Use the auto-repeat mechanism: a slow key press is only
                                         // accepted if the key is already being held (repeat event).
                                         // First press is "pending" until auto-repeat fires after delay.
-                                        if kc < 256 && (state.pressed_keys[kc / 8] & (1 << (kc % 8))) == 0 {
+                                        if kc < 256
+                                            && !crate::xserver::types::keycode_bitset::get(
+                                                &state.pressed_keys,
+                                                kc as u8,
+                                            )
+                                        {
                                             // First press: set the key as pressed but DON'T deliver
                                             // the event yet. Instead, set up a repeat timer with
                                             // slow_keys_delay and the first repeat will be the accepted press.
-                                            state.pressed_keys[kc / 8] |= 1 << (kc % 8);
+                                            crate::xserver::types::keycode_bitset::set(
+                                                &mut state.pressed_keys,
+                                                kc as u8,
+                                            );
                                             let xkb_before = handlers::xkb::XkbStateSnapshot::capture(&state);
                                             state.xkb_state.key_press(kc as u8);
                                             handlers::xkb::maybe_send_xkb_state_notify(&mut state, &xkb_before, kc as u8, 2);
@@ -1472,7 +1474,10 @@ pub(crate) async fn handle_client(
 
                                     let xkb_before = handlers::xkb::XkbStateSnapshot::capture(&state);
                                     if kc < 256 {
-                                        state.pressed_keys[kc / 8] |= 1 << (kc % 8);
+                                        crate::xserver::types::keycode_bitset::set(
+                                            &mut state.pressed_keys,
+                                            kc as u8,
+                                        );
                                         state.xkb_state.key_press(kc as u8);
                                     }
                                     handlers::xkb::maybe_send_xkb_state_notify(&mut state, &xkb_before, kc as u8, 2);
@@ -1480,7 +1485,11 @@ pub(crate) async fn handle_client(
                                     let repeat_enabled = (state.xkb_state.controls.enabled_ctrls
                                         & crate::xserver::handlers::xkb::XKB_REPEAT_KEYS_MASK)
                                         != 0;
-                                    let key_repeats = kc < 256 && (state.xkb_state.controls.per_key_repeat[kc / 8] & (1 << (kc % 8))) != 0;
+                                    let key_repeats = kc < 256
+                                        && crate::xserver::types::keycode_bitset::get(
+                                            &state.xkb_state.controls.per_key_repeat,
+                                            kc as u8,
+                                        );
                                     if repeat_enabled && key_repeats {
                                         let delay = state.xkb_state.controls.repeat_delay as u64;
                                         key_repeat = Some(RepeatState {
@@ -1540,7 +1549,10 @@ pub(crate) async fn handle_client(
 
                                     let xkb_before = handlers::xkb::XkbStateSnapshot::capture(&state);
                                     if kc < 256 {
-                                        state.pressed_keys[kc / 8] &= !(1 << (kc % 8));
+                                        crate::xserver::types::keycode_bitset::clear(
+                                            &mut state.pressed_keys,
+                                            kc as u8,
+                                        );
                                         state.xkb_state.key_release(kc as u8);
                                     }
                                     handlers::xkb::maybe_send_xkb_state_notify(&mut state, &xkb_before, kc as u8, 3);

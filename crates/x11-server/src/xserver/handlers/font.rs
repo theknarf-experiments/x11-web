@@ -328,7 +328,7 @@ pub(crate) fn handle_list_fonts(state: &mut ClientState, req: &ListFontsRequest)
         str_data.extend_from_slice(nb);
     }
     // Pad to 4-byte boundary.
-    let padded = (str_data.len() + 3) & !3;
+    let padded = align_to_4(str_data.len() );
     str_data.resize(padded, 0);
 
     ReplyBuf::with_extra(seq, padded, state.msb_first)
@@ -466,7 +466,7 @@ pub(crate) fn handle_get_font_path(state: &ClientState, _req: &GetFontPathReques
             path_data.extend_from_slice(bytes);
         }
     }
-    let padded_len = (path_data.len() + 3) & !3;
+    let padded_len = align_to_4(path_data.len() );
     path_data.resize(padded_len, 0);
 
     ReplyBuf::with_extra(seq, padded_len, state.msb_first)
