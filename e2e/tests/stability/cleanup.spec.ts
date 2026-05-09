@@ -116,7 +116,7 @@ test.describe.serial("python3-xlib edge cases", () => {
 });
 
 test.describe.serial("Advanced protocol compliance", () => {
-	test.skip("PutImage and GetImage round-trip at depth 24 (ZPixmap)", async ({
+	test("PutImage and GetImage round-trip at depth 24 (ZPixmap)", async ({
 		sidecarContainer,
 	}) => {
 		const output = (await runPythonScript(sidecarContainer, "putimage_and_getimage_round_trip_at_depth_24_zpixmap.py", { env: { DISPLAY: ":99" } })).output.trim();
@@ -178,7 +178,7 @@ test.describe.serial("Advanced protocol compliance", () => {
 	// reply, so the test never reads back an updated max_request_length.
 	// Either we're not handling EnableExtension correctly or the
 	// follow-up Setup info refresh isn't propagating.
-	test.skip("Big-Requests extension enables large requests", async ({
+	test("Big-Requests extension enables large requests", async ({
 		sidecarContainer,
 	}) => {
 		const output = (await runPythonScript(sidecarContainer, "big_requests_extension_enables_large_requests.py", { env: { DISPLAY: ":99" } })).output.trim();
@@ -244,7 +244,7 @@ test.describe.serial("Advanced protocol compliance", () => {
 		expect(output).toContain("composite_present=True");
 	});
 
-	test.skip("COMPOSITE RedirectWindow and NameWindowPixmap work", async ({
+	test("COMPOSITE RedirectWindow and NameWindowPixmap work", async ({
 		sidecarContainer,
 	}) => {
 		const output = (await runPythonScript(sidecarContainer, "composite_redirectwindow_and_namewindowpixmap_work.py", { env: { DISPLAY: ":99" } })).output.trim();
@@ -261,21 +261,21 @@ test.describe.serial("Advanced protocol compliance", () => {
 		expect(output).toContain("xfixes_present=True");
 	});
 
-	test.skip("Error handling: BadWindow for invalid window ID", async ({
+	test("Error handling: BadWindow for invalid window ID", async ({
 		sidecarContainer,
 	}) => {
 		const output = (await runPythonScript(sidecarContainer, "error_handling_badwindow_for_invalid_window_id.py", { env: { DISPLAY: ":99" } })).output.trim();
 		expect(output).toContain("error=BadWindow");
 	});
 
-	test.skip("Error handling: BadValue for invalid arguments", async ({
+	test("Error handling: BadValue for invalid arguments", async ({
 		sidecarContainer,
 	}) => {
 		const output = (await runPythonScript(sidecarContainer, "error_handling_badvalue_for_invalid_arguments.py", { env: { DISPLAY: ":99" } })).output.trim();
 		expect(output).toContain("error=BadValue");
 	});
 
-	test.skip("Multi-client event delivery via EventBroadcaster", async ({
+	test("Multi-client event delivery via EventBroadcaster", async ({
 		sidecarContainer,
 	}) => {
 		const output = (await runPythonScript(sidecarContainer, "multi_client_event_delivery_via_eventbroadcaster.py", { env: { DISPLAY: ":99" } })).output.trim();
@@ -319,7 +319,7 @@ test.describe.serial("Advanced protocol compliance", () => {
 		expect(output).toContain("has_a2=True");
 	});
 
-	test.skip("QueryBestSize returns valid tile/stipple sizes", async ({
+	test("QueryBestSize returns valid tile/stipple sizes", async ({
 		sidecarContainer,
 	}) => {
 		const output = (await runPythonScript(sidecarContainer, "querybestsize_returns_valid_tile_stipple_sizes.py", { env: { DISPLAY: ":99" } })).output.trim();

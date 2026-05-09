@@ -8,15 +8,18 @@ w = screen.root.create_window(0, 0, 100, 100, 0, screen.root_depth,
 w.map()
 d1.sync()
 
-# Second client selects PropertyChangeMask on the same window
-from Xlib.xobject.drawable import Window
-w2 = Window(d2, w.id)
+# Second client selects PropertyChangeMask on the same window. Use
+# create_resource_object so the wrapper has the underlying _BaseDisplay
+# plumbing; constructing Window(d, id) directly stores the high-level
+# Display, which lacks `send_request`.
+w2 = d2.create_resource_object("window", w.id)
 w2.change_attributes(event_mask=Xlib.X.PropertyChangeMask)
 d2.sync()
 
 # Change a property from client 1
+import Xlib.Xatom
 test_atom = d1.intern_atom('_TEST_BROADCAST')
-w.change_property(test_atom, Xlib.X.Xatom.STRING, 8, b'test')
+w.change_property(test_atom, Xlib.Xatom.STRING, 8, b'test')
 d1.sync()
 
 # Client 2 should get PropertyNotify

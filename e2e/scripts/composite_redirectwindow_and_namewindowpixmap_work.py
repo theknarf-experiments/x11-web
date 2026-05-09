@@ -1,47 +1,49 @@
-import Xlib.display, Xlib.X
-import struct
+"""COMPOSITE: QueryVersion, RedirectWindow, UnredirectWindow round-trip.
+
+Drives python-xlib's `Xlib.ext.composite` API instead of hand-rolled
+protocol bytes (the previous version used a non-existent
+`Display.send_request` and never ran).
+"""
+
+import Xlib.display
+import Xlib.X
+import Xlib.ext.composite as composite
 
 d = Xlib.display.Display()
 screen = d.screen()
 
 # Query Composite extension
-comp = d.query_extension('Composite')
+comp = d.query_extension("Composite")
 if comp is None or comp.major_opcode == 0:
     print("composite_not_found")
     d.close()
-    exit()
+    raise SystemExit
 
-opcode = comp.major_opcode
+# python-xlib lazily initialises Xlib.ext.composite the first time
+# `query_extension('Composite')` succeeds, so `composite_query_version`
+# is already attached to the display object — calling `init` again would
+# raise AssertionError("attempting to replace display method").
 
-# Create a window
-w = screen.root.create_window(0, 0, 50, 50, 0, screen.root_depth,
+# QueryVersion through the extension's high-level API. python-xlib's
+# wrapper sends a fixed major/minor (1.0) so it just needs `self`.
+ver = d.composite_query_version()
+print(f"composite_query_ok={ver is not None}")
+
+w = screen.root.create_window(
+    0, 0, 50, 50, 0, screen.root_depth,
     Xlib.X.InputOutput, Xlib.X.CopyFromParent,
-    event_mask=Xlib.X.ExposureMask)
+    event_mask=Xlib.X.ExposureMask,
+)
 w.map()
 d.sync()
 
-# CompositeQueryVersion (minor=0): check version support
-req = struct.pack('<BBHII', opcode, 0, 4, 0, 4)
-d.send_request(Xlib.protocol.rq.ReplyRequest(
-    _data = req + b'\\x00' * (16 - len(req)),
-), True)
-d.sync()
-print("composite_query_ok=True")
-
-# RedirectWindow (minor=1): redirect the window for compositing
-# data: major_opcode, minor=1, length=3, window(4), update(1), pad(3)
-redirect_data = struct.pack('<BBHI', opcode, 1, 3, w.id) + struct.pack('B', 0) + b'\\x00' * 3
-d.send_request(Xlib.protocol.rq.Request(
-    _data = redirect_data,
-), True)
+# RedirectWindow with update=Manual (1).
+w.composite_redirect_window(composite.RedirectManual)
 d.sync()
 print("redirect_ok=True")
 
-# UnredirectWindow (minor=3): un-redirect
-unredir_data = struct.pack('<BBHI', opcode, 3, 2, w.id)
-d.send_request(Xlib.protocol.rq.Request(
-    _data = unredir_data,
-), True)
+# UnredirectWindow.
+w.composite_unredirect_window(composite.RedirectManual)
 d.sync()
 print("unredirect_ok=True")
 
