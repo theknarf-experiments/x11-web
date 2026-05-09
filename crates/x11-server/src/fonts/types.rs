@@ -86,14 +86,14 @@ impl BitmapFont {
 
         let w = bitmap.width() as u16;
         let h = bitmap.rows() as u16;
-        let lsb = (metrics.horiBearingX >> 6) as i16;
-        let ascent = (metrics.horiBearingY >> 6) as i16;
+        let lsb = super::ft_pixels(metrics.horiBearingX);
+        let ascent = super::ft_pixels(metrics.horiBearingY);
         let descent = h as i16 - ascent;
-        let char_width = (metrics.horiAdvance >> 6) as i16;
+        let char_width = super::ft_pixels(metrics.horiAdvance);
         let rsb = lsb + w as i16;
 
         // Convert FreeType bitmap (8-bit grayscale) to 1-bit MSB-first
-        let row_bytes = (w as usize).div_ceil(8);
+        let row_bytes = super::glyph_bitmap::row_bytes(w as usize);
         let mut bmp = vec![0u8; row_bytes * h as usize];
         let buffer = bitmap.buffer();
         let pitch = bitmap.pitch().unsigned_abs() as usize;
@@ -105,7 +105,7 @@ impl BitmapFont {
                     0
                 };
                 if gray >= 128 {
-                    bmp[row * row_bytes + col / 8] |= 0x80 >> (col % 8);
+                    super::glyph_bitmap::set(&mut bmp, row, col, row_bytes);
                 }
             }
         }
@@ -162,14 +162,10 @@ impl BitmapFont {
                 let gx = cursor_x + ci.left_side_bearing as i32;
                 let gy = self.font_ascent as i32 - ci.ascent as i32;
 
-                let row_bytes = (glyph.width as usize).div_ceil(8);
+                let row_bytes = super::glyph_bitmap::row_bytes(glyph.width as usize);
                 for row in 0..glyph.height as usize {
                     for col in 0..glyph.width as usize {
-                        let byte_idx = row * row_bytes + col / 8;
-                        let bit_idx = 7 - (col % 8); // MSB first
-                        if byte_idx < glyph.bitmap.len()
-                            && (glyph.bitmap[byte_idx] >> bit_idx) & 1 != 0
-                        {
+                        if super::glyph_bitmap::get(&glyph.bitmap, row, col, row_bytes) {
                             let px = gx as usize + col;
                             let py = gy as usize + row;
                             if px < total_width as usize && py < total_height as usize {
@@ -212,14 +208,10 @@ impl BitmapFont {
                 let gx = cursor_x + ci.left_side_bearing as i32;
                 let gy = self.font_ascent as i32 - ci.ascent as i32;
 
-                let row_bytes = (glyph.width as usize).div_ceil(8);
+                let row_bytes = super::glyph_bitmap::row_bytes(glyph.width as usize);
                 for row in 0..glyph.height as usize {
                     for col in 0..glyph.width as usize {
-                        let byte_idx = row * row_bytes + col / 8;
-                        let bit_idx = 7 - (col % 8);
-                        if byte_idx < glyph.bitmap.len()
-                            && (glyph.bitmap[byte_idx] >> bit_idx) & 1 != 0
-                        {
+                        if super::glyph_bitmap::get(&glyph.bitmap, row, col, row_bytes) {
                             let px = gx as usize + col;
                             let py = gy as usize + row;
                             if px < total_width as usize && py < total_height as usize {

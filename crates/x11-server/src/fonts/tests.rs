@@ -28,14 +28,12 @@ fn test_glyph_rendering() {
         h_glyph.bitmap.len()
     );
 
-    let row_bytes = ((h_glyph.width as usize) + 7) / 8;
+    let row_bytes = super::glyph_bitmap::row_bytes(h_glyph.width as usize);
     let mut has_pixel = false;
     for row in 0..h_glyph.height as usize {
         let mut line = String::new();
         for col in 0..h_glyph.width as usize {
-            let byte_idx = row * row_bytes + col / 8;
-            let bit_idx = 7 - (col % 8);
-            if byte_idx < h_glyph.bitmap.len() && (h_glyph.bitmap[byte_idx] >> bit_idx) & 1 != 0 {
+            if super::glyph_bitmap::get(&h_glyph.bitmap, row, col, row_bytes) {
                 line.push('#');
                 has_pixel = true;
             } else {

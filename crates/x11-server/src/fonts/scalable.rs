@@ -40,27 +40,25 @@ impl ScalableFont {
         let pitch = bitmap.pitch().unsigned_abs() as usize;
 
         // Convert FreeType bitmap (8-bit gray) to 1-bit MSB bitmap
-        let row_bytes = (w as usize).div_ceil(8);
+        let row_bytes = super::glyph_bitmap::row_bytes(w as usize);
         let mut bmp = vec![0u8; row_bytes * h as usize];
         let buf = bitmap.buffer();
         for row in 0..h as usize {
             for col in 0..w as usize {
                 let src_idx = row * pitch + col;
                 if src_idx < buf.len() && buf[src_idx] >= 128 {
-                    let byte_idx = row * row_bytes + col / 8;
-                    let bit_idx = 7 - (col % 8);
-                    bmp[byte_idx] |= 1 << bit_idx;
+                    super::glyph_bitmap::set(&mut bmp, row, col, row_bytes);
                 }
             }
         }
 
-        // FreeType metrics are in 26.6 fixed-point (1/64th of a pixel)
+        // FreeType metrics are in 26.6 fixed-point (1/64th of a pixel).
         let ci = CharInfo {
-            left_side_bearing: (metrics.horiBearingX >> 6) as i16,
-            right_side_bearing: ((metrics.horiBearingX + metrics.width) >> 6) as i16,
-            character_width: (metrics.horiAdvance >> 6) as i16,
-            ascent: (metrics.horiBearingY >> 6) as i16,
-            descent: ((metrics.height - metrics.horiBearingY) >> 6) as i16,
+            left_side_bearing: super::ft_pixels(metrics.horiBearingX),
+            right_side_bearing: super::ft_pixels(metrics.horiBearingX + metrics.width),
+            character_width: super::ft_pixels(metrics.horiAdvance),
+            ascent: super::ft_pixels(metrics.horiBearingY),
+            descent: super::ft_pixels(metrics.height - metrics.horiBearingY),
             attributes: 0,
         };
 
@@ -128,8 +126,8 @@ impl ScalableFont {
 
         // Get global metrics
         let size_metrics = face.size_metrics()?;
-        let font_ascent = (size_metrics.ascender >> 6) as i16;
-        let font_descent = ((-size_metrics.descender) >> 6) as i16;
+        let font_ascent = super::ft_pixels(size_metrics.ascender);
+        let font_descent = super::ft_pixels(-size_metrics.descender);
 
         Some(BitmapFont {
             name: self.xlfd_name.clone(),

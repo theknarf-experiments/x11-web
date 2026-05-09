@@ -15,6 +15,42 @@ pub use scalable::ScalableFont;
 pub use types::BitmapFont;
 // Re-exported for tests and downstream consumers
 
+/// Convert a FreeType 26.6 fixed-point value (1/64 of a pixel) to integer
+/// pixels, truncating fractional parts. FT metric fields like `horiAdvance`,
+/// `horiBearingY`, and `size_metrics.ascender` are all in 26.6 format.
+#[inline]
+pub(crate) fn ft_pixels(fixed: i64) -> i16 {
+    (fixed >> 6) as i16
+}
+
+/// Helpers for X11 1-bit-per-pixel MSB-first glyph bitmaps. Pixels are
+/// packed left-to-right within each byte (bit 7 = leftmost), and rows are
+/// padded to `row_bytes(width)` bytes.
+pub(crate) mod glyph_bitmap {
+    /// Stride (bytes per row) for a 1-bpp bitmap of `width` pixels.
+    #[inline]
+    pub(crate) fn row_bytes(width: usize) -> usize {
+        width.div_ceil(8)
+    }
+
+    /// Test whether the bit at `(row, col)` is set. Out-of-range indices
+    /// return `false` so callers don't need their own bounds checks.
+    #[inline]
+    pub(crate) fn get(bmp: &[u8], row: usize, col: usize, row_bytes: usize) -> bool {
+        let idx = row * row_bytes + col / 8;
+        idx < bmp.len() && (bmp[idx] >> (7 - (col % 8))) & 1 != 0
+    }
+
+    /// Set the bit at `(row, col)`. Silently skips out-of-range indices.
+    #[inline]
+    pub(crate) fn set(bmp: &mut [u8], row: usize, col: usize, row_bytes: usize) {
+        let idx = row * row_bytes + col / 8;
+        if idx < bmp.len() {
+            bmp[idx] |= 1 << (7 - (col % 8));
+        }
+    }
+}
+
 // ---------------------------------------------------------------------------
 // FreeType library singleton
 // ---------------------------------------------------------------------------

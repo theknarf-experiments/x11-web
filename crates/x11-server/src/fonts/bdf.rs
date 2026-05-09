@@ -116,15 +116,13 @@ pub(super) fn parse_bdf_data(data: &[u8], path: &Path) -> Option<BitmapFont> {
         // Extract bitmap data
         let w = bb.size.x as u16;
         let h = bb.size.y as u16;
-        let row_bytes = (w as usize).div_ceil(8);
+        let row_bytes = super::glyph_bitmap::row_bytes(w as usize);
         let mut bitmap = vec![0u8; row_bytes * h as usize];
 
         for row in 0..h as usize {
             for col in 0..w as usize {
                 if glyph.pixel(col, row) {
-                    let byte_idx = row * row_bytes + col / 8;
-                    let bit_idx = 7 - (col % 8);
-                    bitmap[byte_idx] |= 1 << bit_idx;
+                    super::glyph_bitmap::set(&mut bitmap, row, col, row_bytes);
                 }
             }
         }

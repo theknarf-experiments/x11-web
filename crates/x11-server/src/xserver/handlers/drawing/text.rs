@@ -217,14 +217,16 @@ pub(crate) fn handle_poly_text16(state: &mut ClientState, req: &PolyText16Reques
                             let (fg_r, fg_g, fg_b) = crate::framebuffer::unpack_rgb(gc.foreground);
                             let gw = glyph.width as usize;
                             let gh = glyph.height as usize;
-                            let row_bytes = gw.div_ceil(8);
+                            let row_bytes = crate::fonts::glyph_bitmap::row_bytes(gw);
                             let mut pixels = vec![0u8; gw * gh * 4];
                             for row in 0..gh {
                                 for col in 0..gw {
-                                    let bit = (glyph.bitmap[row * row_bytes + col / 8]
-                                        >> (7 - (col % 8)))
-                                        & 1;
-                                    if bit != 0 {
+                                    if crate::fonts::glyph_bitmap::get(
+                                        &glyph.bitmap,
+                                        row,
+                                        col,
+                                        row_bytes,
+                                    ) {
                                         let idx = (row * gw + col) * 4;
                                         pixels[idx] = fg_r;
                                         pixels[idx + 1] = fg_g;
@@ -420,13 +422,12 @@ pub(crate) fn handle_image_text16(state: &mut ClientState, req: &ImageText16Requ
         if let Some(glyph) = glyph_opt {
             let gw = glyph.width as usize;
             let gh = glyph.height as usize;
-            let row_bytes = gw.div_ceil(8);
+            let row_bytes = crate::fonts::glyph_bitmap::row_bytes(gw);
             let gx = pen_x + ci.left_side_bearing as i32;
             let gy = font.font_ascent as i32 - ci.ascent as i32;
             for row in 0..gh {
                 for col in 0..gw {
-                    let bit = (glyph.bitmap[row * row_bytes + col / 8] >> (7 - (col % 8))) & 1;
-                    if bit != 0 {
+                    if crate::fonts::glyph_bitmap::get(&glyph.bitmap, row, col, row_bytes) {
                         let px = gx + col as i32;
                         let py = gy + row as i32;
                         if px >= 0 && px < total_width as i32 && py >= 0 && py < total_height as i32
