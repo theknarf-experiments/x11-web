@@ -417,10 +417,16 @@ pub(crate) fn build_master_pointer_info(
 }
 
 pub(crate) fn build_master_keyboard_info() -> xi::XIDeviceInfo {
+    // Advertise the full X11 keycode range. GDK reads this list to know
+    // which keycodes the keyboard can produce; with an empty list, GDK 3
+    // treats the device as having no keys and silently discards every
+    // KeyPress / XI2 KeyPress targeted at it (the Firefox/GTK3 symptom
+    // where URL-bar focus works but typing does nothing).
+    let keys: Vec<u32> = (8u32..=255).collect();
     let mut classes = vec![xi::DeviceClass {
         len: 0,
         sourceid: MASTER_KEYBOARD_ID,
-        data: xi::DeviceClassData::Key(xi::DeviceClassDataKey { keys: vec![] }),
+        data: xi::DeviceClassData::Key(xi::DeviceClassDataKey { keys }),
     }];
     fill_class_lengths(&mut classes);
 

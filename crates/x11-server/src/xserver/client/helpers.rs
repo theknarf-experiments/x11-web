@@ -143,6 +143,24 @@ impl ClientState {
         );
     }
 
+    /// Walk the parent chain from `x11_wid` up to the immediate child of
+    /// the root window — that's the top-level for click-to-focus. Returns
+    /// None if `x11_wid` doesn't belong to any window we know about.
+    pub(crate) fn top_level_for(&self, x11_wid: u32) -> Option<u32> {
+        if x11_wid == 0 || x11_wid == self.root_window {
+            return None;
+        }
+        let mut current = x11_wid;
+        for _ in 0..crate::xserver::window_tree::MAX_TREE_DEPTH {
+            let parent = self.windows.get(&current).map(|w| w.parent)?;
+            if parent == self.root_window || parent == 0 {
+                return Some(current);
+            }
+            current = parent;
+        }
+        None
+    }
+
     /// Walk the parent chain from `x11_wid` to find the nearest top-level
     /// window that has a registered UUID.
     pub(crate) fn top_level_uuid_for(&self, x11_wid: u32) -> Option<String> {

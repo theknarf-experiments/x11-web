@@ -186,8 +186,45 @@ test.skip("DIAG: synthetic firefox-like client receives events", async ({
 // Try Firefox with a custom profile that disables first-run UI and
 // telemetry overlays. If input works without the privacy notice tab and
 // the F/+ overlay, the issue is Firefox's first-run gating.
-// Try gtk3-demo — also GTK3, but smaller. If clicks reach widgets there,
-// the bug is Firefox-specific; if not, it's a GTK3 issue we should fix.
+// Down-arrow on gtk3-demo's list view should move the selection. This
+// exercises core+XI key delivery, focus subtree descent (GTK3 selects
+// XI keys on a sub-window of the toplevel), and XI2 FocusIn synthesis —
+// without any of those, GTK3 swallows the key silently and the
+// selection never repaints.
+test("gtk3-demo keyboard navigation moves list selection", async ({
+	page,
+	sidecarContainer,
+	frontendUrl,
+}) => {
+	test.setTimeout(120_000);
+	await cleanupApps(sidecarContainer);
+	await page.goto(frontendUrl);
+	await waitForDock(page);
+
+	const win = await spawnApp(page, "", "gtk3-demo", 30_000);
+	const canvas = win.locator('[data-testid="x11-canvas"]');
+	await expect(canvas).toBeVisible({ timeout: 30_000 });
+	await page.waitForTimeout(5000);
+
+	const box = await canvas.boundingBox();
+	if (!box) throw new Error("canvas has no bounding box");
+
+	await page.mouse.click(box.x + 100, box.y + 100);
+	await page.waitForTimeout(800);
+	const afterClick = await canvasPixelHash(canvas);
+
+	await page.keyboard.press("ArrowDown");
+	await page.waitForTimeout(500);
+	const afterDown1 = await canvasPixelHash(canvas);
+
+	await page.keyboard.press("ArrowDown");
+	await page.waitForTimeout(500);
+	const afterDown2 = await canvasPixelHash(canvas);
+
+	expect(afterDown1).not.toBe(afterClick);
+	expect(afterDown2).not.toBe(afterDown1);
+});
+
 test.skip("DIAG: Firefox slow click sequence", async ({
 	page,
 	sidecarContainer,

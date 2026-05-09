@@ -23,7 +23,10 @@ mod tests;
 // These are used by submodules (handler, tests) via `use super::*`.
 
 // Re-export public items used by other modules in the crate.
-pub use events::{build_raw_motion_event, build_xi_events_for, patch_query_pointer_root};
+pub use events::{
+    build_raw_motion_event, build_xi_events_for, build_xi_focus_events_for,
+    patch_query_pointer_root,
+};
 
 pub use handler::handle_request;
 

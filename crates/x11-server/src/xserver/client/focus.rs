@@ -175,7 +175,67 @@ impl ClientState {
                 // Focus set to PointerRoot: send FocusIn(PointerRoot) to root
                 self.send_focus_event(FOCUS_IN_EVENT, 6, self.root_window, bo, seq);
             }
+
+            // XInput2 focus events. GTK3 / Firefox track focus through
+            // their XI2 device state and drop key events for windows
+            // that haven't received an XI FocusIn — without this the
+            // toolkit's per-device focus_window stays NULL and arrow
+            // keys, typing into the URL bar etc. all silently fail
+            // even though our XI key events reach the client.
+            let prev_subtree = self.window_subtree_chain(prev_focus);
+            let next_subtree = self.window_subtree_chain(new_focus);
+            let xi_focus_events = crate::xinput2::build_xi_focus_events_for(
+                &self.xi.selections,
+                &prev_subtree,
+                &next_subtree,
+                seq,
+                self.root_window,
+                bo,
+            );
+            for ev in xi_focus_events {
+                self.pending_events.push(ev);
+            }
         }
+    }
+
+    /// Walk a window's subtree (the window itself + every descendant) and
+    /// return the chain of window IDs. Used by XI2 focus event delivery
+    /// so toolkits that select on a content sub-window get a FocusIn even
+    /// when our `focus_window` is set on the toplevel.
+    fn window_subtree_chain(&self, root: u32) -> Vec<u32> {
+        if root == 0 || root == 1 {
+            return Vec::new();
+        }
+        let mut out = vec![root];
+        // Walk parent chain up to root
+        let mut cur = root;
+        for _ in 0..crate::xserver::window_tree::MAX_TREE_DEPTH {
+            match self.windows.get(&cur) {
+                Some(w) if w.parent != 0 && w.parent != cur && w.parent != self.root_window => {
+                    out.push(w.parent);
+                    cur = w.parent;
+                }
+                _ => break,
+            }
+        }
+        // Walk descendants (BFS)
+        let mut queue: Vec<u32> = self
+            .windows
+            .get(&root)
+            .map(|w| w.children_order.clone())
+            .unwrap_or_default();
+        let mut depth = 0;
+        while let Some(w) = queue.pop() {
+            if depth > crate::xserver::window_tree::MAX_TREE_DEPTH * 4 {
+                break;
+            }
+            depth += 1;
+            out.push(w);
+            if let Some(child_state) = self.windows.get(&w) {
+                queue.extend(child_state.children_order.iter().copied());
+            }
+        }
+        out
     }
 
     /// Helper to send a single focus event if the window has FocusChangeMask

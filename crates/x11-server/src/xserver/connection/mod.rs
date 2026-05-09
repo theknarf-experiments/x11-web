@@ -1330,11 +1330,26 @@ pub(crate) async fn handle_client(
                                 }
                                 continue;
                             }
-                            state.set_focus_window(x11_wid);
+                            // Click-to-focus, but ONLY on actual button press
+                            // events — clobbering focus_window on every motion
+                            // and key event also clobbers any SetInputFocus
+                            // call the toolkit just made (GTK3 routes XI key
+                            // selections to a focus subwindow that wouldn't
+                            // be in the ancestor chain of the top_level we'd
+                            // otherwise set focus to). And only if focus
+                            // isn't already inside this top-level — otherwise
+                            // the toolkit's intra-window focus tracking
+                            // (URL bar vs content area) gets reset on every
+                            // unrelated click.
                             if matches!(
                                 input,
                                 x11_web_protocol::InputEvent::ButtonPress { .. }
                             ) {
+                                let cur = state.focus_window;
+                                let cur_top = state.top_level_for(cur);
+                                if cur_top != Some(x11_wid) {
+                                    state.set_focus_window(x11_wid);
+                                }
                                 let uuid = state.top_level_uuid_for(x11_wid);
                                 state.broadcast_focus(uuid);
                             }
@@ -1392,6 +1407,7 @@ pub(crate) async fn handle_client(
                                             let xi_evts = crate::xinput2::build_xi_events_for(
                                                 &mut state.xi.valuators,
                                                 &state.xi.selections,
+                                                &state.xi.passive_grabs,
                                                 &chain,
                                                 state.sequence,
                                                 state.root_window,
@@ -1420,6 +1436,7 @@ pub(crate) async fn handle_client(
                                             let xi_evts = crate::xinput2::build_xi_events_for(
                                                 &mut state.xi.valuators,
                                                 &state.xi.selections,
+                                                &state.xi.passive_grabs,
                                                 &chain,
                                                 state.sequence,
                                                 state.root_window,
@@ -1534,6 +1551,7 @@ pub(crate) async fn handle_client(
                                             let xi_evts = crate::xinput2::build_xi_events_for(
                                                 &mut state.xi.valuators,
                                                 &state.xi.selections,
+                                                &state.xi.passive_grabs,
                                                 &chain,
                                                 state.sequence,
                                                 state.root_window,
@@ -1618,6 +1636,7 @@ pub(crate) async fn handle_client(
                                             let xi_press = crate::xinput2::build_xi_events_for(
                                                 &mut state.xi.valuators,
                                                 &state.xi.selections,
+                                                &state.xi.passive_grabs,
                                                 &chain,
                                                 state.sequence,
                                                 state.root_window,
@@ -1630,6 +1649,7 @@ pub(crate) async fn handle_client(
                                             let xi_release = crate::xinput2::build_xi_events_for(
                                                 &mut state.xi.valuators,
                                                 &state.xi.selections,
+                                                &state.xi.passive_grabs,
                                                 &chain,
                                                 state.sequence,
                                                 state.root_window,
@@ -1662,6 +1682,7 @@ pub(crate) async fn handle_client(
                                             let xi_evts = crate::xinput2::build_xi_events_for(
                                                 &mut state.xi.valuators,
                                                 &state.xi.selections,
+                                                &state.xi.passive_grabs,
                                                 &chain,
                                                 state.sequence,
                                                 state.root_window,
@@ -1819,11 +1840,35 @@ pub(crate) async fn handle_client(
                                 }
                                 x11_web_protocol::InputEvent::KeyPress { .. }
                                 | x11_web_protocol::InputEvent::KeyRelease { .. } => {
-                                    // Keyboard events propagate from the
-                                    // focus window. focus_window may be a
-                                    // child, so use it directly.
+                                    // Per X11 spec §7: if the pointer is
+                                    // inside the focus window's subtree,
+                                    // key events descend to the deepest
+                                    // window under the pointer. Toolkits
+                                    // (GTK3, Firefox) select XI keys on
+                                    // a content sub-window of their
+                                    // toplevel — without this descent
+                                    // the chain stops at focus_window
+                                    // (the toplevel) and the selection
+                                    // is unreachable.
                                     let f = state.focus_window;
-                                    if f != 0 && f != 1 { f } else { x11_wid }
+                                    let focus_target = if f != 0 && f != 1 { f } else { x11_wid };
+                                    let (deepest, _, _) = find_deepest_window(
+                                        &state.windows,
+                                        state.root_window,
+                                        state.pointer_x,
+                                        state.pointer_y,
+                                    );
+                                    if deepest == focus_target
+                                        || crate::xserver::window_tree::is_descendant_of(
+                                            &state.windows,
+                                            deepest,
+                                            focus_target,
+                                        )
+                                    {
+                                        deepest
+                                    } else {
+                                        focus_target
+                                    }
                                 }
                                 _ => x11_wid,
                             };
@@ -1831,6 +1876,7 @@ pub(crate) async fn handle_client(
                             let xi_events = crate::xinput2::build_xi_events_for(
                                 &mut state.xi.valuators,
                                 &state.xi.selections,
+                                &state.xi.passive_grabs,
                                 &chain,
                                 state.sequence,
                                 state.root_window,
@@ -1912,6 +1958,7 @@ pub(crate) async fn handle_client(
                     let xi_events = crate::xinput2::build_xi_events_for(
                         &mut state.xi.valuators,
                         &state.xi.selections,
+                        &state.xi.passive_grabs,
                         &chain,
                         state.sequence,
                         state.root_window,

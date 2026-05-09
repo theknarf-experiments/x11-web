@@ -6,9 +6,61 @@ use crate::xserver::core::write_u32_bo;
 
 use super::device::mods_from_state;
 use super::{
-    fp1616, fp3232, AxisValue, ValuatorState, XiSelection, AXIS_SCROLL_H, AXIS_SCROLL_V,
-    MASTER_POINTER_ID, XI_MAJOR_OPCODE,
+    fp1616, fp3232, AxisValue, ValuatorState, Xi2PassiveGrab, XiSelection, AXIS_SCROLL_H,
+    AXIS_SCROLL_V, MASTER_KEYBOARD_ID, MASTER_POINTER_ID, XI_MAJOR_OPCODE,
 };
+
+/// XI2 grab_type values for `Xi2PassiveGrab.grab_type`.
+const XI_GRAB_TYPE_BUTTON: u8 = 1;
+const XI_GRAB_TYPE_KEYCODE: u8 = 2;
+
+/// XI2 wildcard for "any modifier" in `Xi2PassiveGrab.modifiers`.
+const XI_ANY_MODIFIER: u32 = 1 << 31;
+/// Core X11 wildcard for "any modifier" — toolkits sometimes pass this
+/// (1 << 15) into XIPassiveGrabDevice instead of the proper 1 << 31.
+const CORE_ANY_MODIFIER: u32 = 1 << 15;
+
+/// Test whether an XI2 event mask vector covers a given event type.
+/// Mirror of `XiSelection::wants` but for raw XIEventMask slices.
+fn mask_wants(mask: &[xi::XIEventMask], evtype: u16) -> bool {
+    let bit = evtype as u32;
+    let word = (bit / 32) as usize;
+    let in_word = bit % 32;
+    mask.get(word)
+        .map(|w| (u32::from(*w) >> in_word) & 1 != 0)
+        .unwrap_or(false)
+}
+
+/// Find a passive XI2 grab that matches the current event. Returns a
+/// reference to the grab so the caller can pull the `grab_window` and
+/// `event_mask` out for delivery.
+///
+/// A passive grab matches when:
+/// - The grab type matches (Button=1, Keycode=2).
+/// - The device matches (or grab is for `XIAllDevices` / `XIAllMasterDevices`).
+/// - The detail (keycode/button) matches (or grab uses `0` = AnyKey/AnyButton).
+/// - The modifier state matches (or grab uses `XIAnyModifier`).
+/// - The grab window is in the propagation chain — either the event
+///   window itself or one of its ancestors. Without this, a grab on one
+///   toplevel would fire on every other toplevel's events.
+fn find_passive_grab<'a>(
+    passive_grabs: &'a [Xi2PassiveGrab],
+    grab_type: u8,
+    deviceid: xi::DeviceId,
+    detail: u32,
+    modifiers: u16,
+    chain: &[u32],
+) -> Option<&'a Xi2PassiveGrab> {
+    passive_grabs.iter().find(|g| {
+        g.grab_type == grab_type
+            && (g.deviceid == 0 || g.deviceid == 1 || g.deviceid == deviceid)
+            && (g.detail == 0 || g.detail == detail)
+            && (g.modifiers == XI_ANY_MODIFIER
+                || g.modifiers == CORE_ANY_MODIFIER
+                || (g.modifiers as u16) == modifiers)
+            && chain.iter().any(|w| *w == g.grab_window)
+    })
+}
 
 /// Build an XI2 `RawMotion` event. Raw events have no event window —
 /// they're delivered to every client that selected on the root window.
@@ -148,6 +200,7 @@ pub(crate) fn build_xi_pointer_event(
 pub fn build_xi_events_for(
     valuators: &mut ValuatorState,
     selections: &[XiSelection],
+    passive_grabs: &[Xi2PassiveGrab],
     chain: &[u32],
     seq: u16,
     root_window: u32,
@@ -294,21 +347,81 @@ pub fn build_xi_events_for(
             InputEvent::GestureSwipe { .. } | InputEvent::GesturePinch { .. } => {
                 return build_gesture_events(input, selections, chain, seq, root_window, msb_first);
             }
+            // Keyboard events use a different code path with the master
+            // keyboard device IDs and the XI2 KeyPressEvent struct.
+            InputEvent::KeyPress { keycode, state } => {
+                return build_xi_key_events(
+                    xi::KEY_PRESS_EVENT,
+                    xi::RAW_KEY_PRESS_EVENT,
+                    keycode as u32,
+                    state,
+                    selections,
+                    passive_grabs,
+                    chain,
+                    seq,
+                    root_window,
+                    msb_first,
+                );
+            }
+            InputEvent::KeyRelease { keycode, state } => {
+                return build_xi_key_events(
+                    xi::KEY_RELEASE_EVENT,
+                    xi::RAW_KEY_RELEASE_EVENT,
+                    keycode as u32,
+                    state,
+                    selections,
+                    passive_grabs,
+                    chain,
+                    seq,
+                    root_window,
+                    msb_first,
+                );
+            }
             _ => return Vec::new(),
         }
     };
 
     let mut out = Vec::new();
 
-    // Regular device event: targets the deepest window in the chain
-    // whose selection covers this event type.
-    let device_target = chain.iter().copied().find(|w| {
-        selections.iter().any(|s| {
-            s.window == *w
-                && (s.deviceid == 0 || s.deviceid == 1 || s.deviceid == MASTER_POINTER_ID)
-                && s.wants(device_type)
+    // Passive button grabs: when set on `grab_window` for a specific
+    // button/modifier combo, button events redirect to the grab window
+    // with the grab's event mask. Toolkits use this for click-to-focus
+    // and drag-and-drop activation, so consult before the per-window
+    // selection chain.
+    let grab_target = if matches!(
+        *input,
+        InputEvent::ButtonPress { .. } | InputEvent::ButtonRelease { .. }
+    ) {
+        find_passive_grab(
+            passive_grabs,
+            XI_GRAB_TYPE_BUTTON,
+            MASTER_POINTER_ID,
+            detail,
+            mods,
+            chain,
+        )
+    } else {
+        None
+    };
+
+    // Regular device event: passive grab takes priority. Otherwise
+    // target the deepest window in the chain whose selection covers
+    // this event type.
+    let device_target = if let Some(grab) = grab_target {
+        if mask_wants(&grab.event_mask, device_type) {
+            Some(grab.grab_window)
+        } else {
+            None
+        }
+    } else {
+        chain.iter().copied().find(|w| {
+            selections.iter().any(|s| {
+                s.window == *w
+                    && (s.deviceid == 0 || s.deviceid == 1 || s.deviceid == MASTER_POINTER_ID)
+                    && s.wants(device_type)
+            })
         })
-    });
+    };
 
     if let Some(event_window) = device_target {
         out.push(build_xi_pointer_event(
@@ -441,6 +554,114 @@ pub fn build_raw_pointer_event(
     super::serialize_xi_reply(&event, msb_first)
 }
 
+/// Build an XI2 FocusIn / FocusOut event for delivery to a single window.
+/// The wire format is shared with EnterEvent (x11rb aliases `FocusInEvent`
+/// to `EnterEvent`).
+///
+/// `event_type` is `xi::FOCUS_IN_EVENT` (9) or `xi::FOCUS_OUT_EVENT` (10).
+/// `detail` follows the X11 focus-event detail codes (0=Ancestor,
+/// 1=Virtual, 2=Inferior, 3=Nonlinear, 4=NonlinearVirtual). `mode` is
+/// the NotifyMode (0=Normal, 1=Grab, 2=Ungrab, 3=WhileGrabbed).
+pub(crate) fn build_xi_focus_event(
+    event_type: u16,
+    detail: u8,
+    mode: u8,
+    seq: u16,
+    root_window: u32,
+    event_window: u32,
+    msb_first: bool,
+) -> Vec<u8> {
+    let event = xi::EnterEvent {
+        response_type: 35, // GenericEvent
+        extension: XI_MAJOR_OPCODE,
+        sequence: seq,
+        length: 0,
+        event_type,
+        deviceid: MASTER_KEYBOARD_ID,
+        time: 0,
+        sourceid: MASTER_KEYBOARD_ID,
+        mode: xi::NotifyMode::from(mode),
+        detail: xi::NotifyDetail::from(detail),
+        root: root_window,
+        event: event_window,
+        child: 0,
+        root_x: fp1616(0),
+        root_y: fp1616(0),
+        event_x: fp1616(0),
+        event_y: fp1616(0),
+        same_screen: true,
+        focus: true,
+        mods: mods_from_state(0),
+        group: xi::GroupInfo {
+            base: 0,
+            latched: 0,
+            locked: 0,
+            effective: 0,
+        },
+        buttons: vec![0],
+    };
+    super::serialize_xi_reply(&event, msb_first)
+}
+
+/// Compute every (window, event_type) pair in this client's XI selections
+/// that wants an XI focus event when focus changes from `prev` to `next`.
+///
+/// We deliberately stay simple: any window in `next`'s subtree (or its
+/// ancestor chain up to root) that selected `XI_FocusIn` gets a FocusIn,
+/// and the symmetric set on `prev` gets a FocusOut. Detail codes are set
+/// to `Nonlinear` (3) — toolkits don't usually act on the precise detail,
+/// they just need *some* FocusIn to mark the device focused so XI2 keys
+/// flow into widgets.
+pub fn build_xi_focus_events_for(
+    selections: &[XiSelection],
+    windows_under_prev: &[u32],
+    windows_under_next: &[u32],
+    seq: u16,
+    root_window: u32,
+    msb_first: bool,
+) -> Vec<Vec<u8>> {
+    let mut out = Vec::new();
+
+    for &window in windows_under_prev {
+        let wants = selections.iter().any(|s| {
+            s.window == window
+                && (s.deviceid == 0 || s.deviceid == 1 || s.deviceid == MASTER_KEYBOARD_ID)
+                && s.wants(xi::FOCUS_OUT_EVENT)
+        });
+        if wants {
+            out.push(build_xi_focus_event(
+                xi::FOCUS_OUT_EVENT,
+                3, // Nonlinear
+                0, // Normal
+                seq,
+                root_window,
+                window,
+                msb_first,
+            ));
+        }
+    }
+    for &window in windows_under_next {
+        let wants = selections.iter().any(|s| {
+            s.window == window
+                && (s.deviceid == 0 || s.deviceid == 1 || s.deviceid == MASTER_KEYBOARD_ID)
+                && s.wants(xi::FOCUS_IN_EVENT)
+        });
+        if wants {
+            out.push(build_xi_focus_event(
+                xi::FOCUS_IN_EVENT,
+                3, // Nonlinear
+                0, // Normal
+                seq,
+                root_window,
+                window,
+                msb_first,
+            ));
+        }
+    }
+
+    out
+}
+
 /// Patch `root_window` into the `root` field of an XIQueryPointer reply
 /// produced by `handle_request`. The reply is built before we know which
 /// root window the X server is using; this lets the dispatch site fix it
@@ -449,4 +670,118 @@ pub fn patch_query_pointer_root(buf: &mut [u8], root_window: u32, msb_first: boo
     if buf.len() >= 12 {
         write_u32_bo(buf, 8, root_window, msb_first);
     }
+}
+
+/// Build XI2 KeyPress / KeyRelease events. Selections must match the
+/// master *keyboard* device for these. Without this, GTK3 / Firefox /
+/// any GDK-3 client that subscribed via `XISelectEvents(KEY_PRESS)`
+/// silently drops every keystroke.
+///
+/// Passive grabs registered via `XIPassiveGrabDevice` take priority
+/// over per-window selections — that's how GTK3 receives accelerator
+/// keystrokes (it grabs Down / Up / Tab / Return on its toplevel and
+/// expects every matching keystroke to land on that window with the
+/// grab's event mask, regardless of where the focus subtree's selections
+/// were set).
+#[allow(clippy::too_many_arguments)]
+pub fn build_xi_key_events(
+    event_type: u16,
+    raw_type: u16,
+    keycode: u32,
+    mods_state: u16,
+    selections: &[XiSelection],
+    passive_grabs: &[Xi2PassiveGrab],
+    chain: &[u32],
+    seq: u16,
+    root_window: u32,
+    msb_first: bool,
+) -> Vec<Vec<u8>> {
+    let mut out = Vec::new();
+
+    let grab = find_passive_grab(
+        passive_grabs,
+        XI_GRAB_TYPE_KEYCODE,
+        MASTER_KEYBOARD_ID,
+        keycode,
+        mods_state,
+        chain,
+    );
+
+    let device_target = if let Some(g) = grab {
+        if mask_wants(&g.event_mask, event_type) {
+            Some(g.grab_window)
+        } else {
+            None
+        }
+    } else {
+        chain.iter().copied().find(|w| {
+            selections.iter().any(|s| {
+                s.window == *w
+                    && (s.deviceid == 0 || s.deviceid == 1 || s.deviceid == MASTER_KEYBOARD_ID)
+                    && s.wants(event_type)
+            })
+        })
+    };
+
+    if let Some(event_window) = device_target {
+        let event = xi::KeyPressEvent {
+            response_type: 35, // GenericEvent
+            extension: XI_MAJOR_OPCODE,
+            sequence: seq,
+            length: 0,
+            event_type,
+            deviceid: MASTER_KEYBOARD_ID,
+            time: 0,
+            detail: keycode,
+            root: root_window,
+            event: event_window,
+            child: 0,
+            root_x: fp1616(0),
+            root_y: fp1616(0),
+            event_x: fp1616(0),
+            event_y: fp1616(0),
+            sourceid: MASTER_KEYBOARD_ID,
+            flags: 0u32.into(),
+            mods: mods_from_state(mods_state),
+            group: xi::GroupInfo {
+                base: 0,
+                latched: 0,
+                locked: 0,
+                effective: 0,
+            },
+            button_mask: vec![],
+            valuator_mask: vec![],
+            axisvalues: vec![],
+        };
+        out.push(super::serialize_xi_reply(&event, msb_first));
+    }
+
+    let any_raw = chain.iter().any(|w| {
+        selections.iter().any(|s| {
+            s.window == *w
+                && (s.deviceid == 0 || s.deviceid == 1 || s.deviceid == MASTER_KEYBOARD_ID)
+                && s.wants(raw_type)
+        })
+    });
+
+    if any_raw {
+        let raw = xi::RawKeyPressEvent {
+            response_type: 35,
+            extension: XI_MAJOR_OPCODE,
+            sequence: seq,
+            length: 0,
+            event_type: raw_type,
+            deviceid: MASTER_KEYBOARD_ID,
+            time: 0,
+            detail: keycode,
+            sourceid: MASTER_KEYBOARD_ID,
+            flags: 0u32.into(),
+            valuator_mask: vec![],
+            axisvalues: vec![],
+            axisvalues_raw: vec![],
+        };
+        out.push(super::serialize_xi_reply(&raw, msb_first));
+    }
+
+    out
 }
