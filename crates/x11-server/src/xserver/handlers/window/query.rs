@@ -34,6 +34,24 @@ pub(crate) fn handle_get_geometry(state: &mut ClientState, req: &GetGeometryRequ
             .build();
     }
 
+    // Cross-client fallback: foreign windows live in the shared store.
+    if let Some(sw) = state
+        .shared_windows
+        .lock()
+        .ok()
+        .and_then(|sw| sw.get(&drawable).cloned())
+    {
+        return ReplyBuf::fixed(seq, state.msb_first)
+            .set_data_byte(sw.depth)
+            .set_u32(8, state.root_window)
+            .set_i16(12, sw.x)
+            .set_i16(14, sw.y)
+            .set_u16(16, sw.width)
+            .set_u16(18, sw.height)
+            .set_u16(20, sw.border_width)
+            .build();
+    }
+
     // Drawable not found - return BadDrawable error
     build_error(DRAWABLE_ERROR, seq, drawable, 14, 0)
 }
@@ -46,8 +64,18 @@ pub(crate) fn handle_query_tree(state: &mut ClientState, req: &QueryTreeRequest)
     let seq = state.sequence;
     let wid = req.window;
 
+    // Cross-client fallback: foreign windows live in shared_windows.
     if !state.windows.contains_key(&wid) {
-        return build_error(WINDOW_ERROR, seq, wid, 15, 0);
+        let shared_win = state
+            .shared_windows
+            .lock()
+            .ok()
+            .and_then(|sw| sw.get(&wid).cloned());
+        if let Some(sw) = shared_win {
+            state.windows.insert(wid, sw);
+        } else {
+            return build_error(WINDOW_ERROR, seq, wid, 15, 0);
+        }
     }
 
     // Return children in bottom-to-top stacking order per X11 spec.

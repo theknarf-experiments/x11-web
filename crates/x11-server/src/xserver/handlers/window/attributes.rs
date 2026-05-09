@@ -216,6 +216,22 @@ pub(crate) fn handle_get_window_attributes(
     let seq = state.sequence;
     let wid = req.window;
 
+    // Cross-client GetWindowAttributes: when the window was created by a
+    // different client, fall back to the shared store. Without this we
+    // return BadWindow → Xlib zeros attrs.visual → GDK calls
+    // XVisualIDFromVisual(NULL) → SIGSEGV (the Firefox/GTK3 crash).
+    if !state.windows.contains_key(&wid) {
+        let shared_win = state
+            .shared_windows
+            .lock()
+            .ok()
+            .and_then(|sw| sw.get(&wid).cloned());
+        if let Some(sw) = shared_win {
+            state.windows.insert(wid, sw);
+        } else {
+            return build_error(WINDOW_ERROR, seq, wid, 3, 0);
+        }
+    }
     let win = match state.windows.get(&wid) {
         Some(w) => w,
         None => return build_error(WINDOW_ERROR, seq, wid, 3, 0),

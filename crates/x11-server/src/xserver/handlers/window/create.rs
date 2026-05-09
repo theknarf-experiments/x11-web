@@ -162,7 +162,20 @@ pub(crate) fn handle_create_window(state: &mut ClientState, req: &CreateWindowRe
         // against the window's own event_mask for completeness).
     }
 
-    let use_visual = if visual == 0 { ROOT_VISUAL } else { visual };
+    // visual=CopyFromParent (0) means inherit from parent; resolve it at
+    // create time so we always store a real visual ID. InputOnly windows
+    // legally pass CopyFromParent and must get the parent's visual too —
+    // GTK/GDK clients call XGetWindowAttributes on these windows and pass
+    // the visual through XVisualIDFromVisual; if we stored 0, Xlib's
+    // _XVIDtoVisual returns NULL and the client crashes (see Firefox/GTK3
+    // SIGSEGV).
+    let parent_visual = state
+        .windows
+        .get(&parent)
+        .map(|p| p.visual)
+        .filter(|v| *v != 0)
+        .unwrap_or(ROOT_VISUAL);
+    let use_visual = if visual == 0 { parent_visual } else { visual };
 
     info!("CreateWindow: id={wid:#x} parent={parent:#x} {x},{y} {width}x{height} depth={req_depth} class={class} visual={visual:#x} bg={background_pixel:#x}");
 
@@ -190,7 +203,9 @@ pub(crate) fn handle_create_window(state: &mut ClientState, req: &CreateWindowRe
             width,
             height,
             border_width: if is_input_only { 0 } else { border_width },
-            visual: if is_input_only { 0 } else { use_visual },
+            // Even InputOnly windows must report a real visual ID; clients
+            // (GDK/Xlib) feed it back through XVisualIDFromVisual.
+            visual: use_visual,
             depth: use_depth,
             class,
             mapped: false,

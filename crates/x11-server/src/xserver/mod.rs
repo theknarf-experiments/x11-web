@@ -590,7 +590,10 @@ impl X11Server {
                     width: 1,
                     height: 1,
                     border_width: 0,
-                    visual: 0,
+                    // InputOnly windows still need a real visual ID so
+                    // client-side XVisualIDFromVisual lookups don't return
+                    // NULL and crash GDK.
+                    visual: ROOT_VISUAL,
                     depth: 0,
                     class: u16::from(WindowClass::INPUT_ONLY),
                     mapped: false,
@@ -659,7 +662,9 @@ impl X11Server {
                     width: 1,
                     height: 1,
                     border_width: 0,
-                    visual: 0,
+                    // See WM_CHECK_WINDOW comment — InputOnly still gets a
+                    // real visual ID.
+                    visual: ROOT_VISUAL,
                     depth: 0,
                     class: u16::from(WindowClass::INPUT_ONLY),
                     mapped: false,
@@ -784,7 +789,9 @@ impl X11Server {
                     width: 1,
                     height: 1,
                     border_width: 0,
-                    visual: 0,
+                    // See WM_CHECK_WINDOW comment — InputOnly still gets a
+                    // real visual ID.
+                    visual: ROOT_VISUAL,
                     depth: 0,
                     class: u16::from(WindowClass::INPUT_ONLY),
                     mapped: false,
@@ -896,7 +903,9 @@ vi_VN,vi_VN.UTF-8"
                     width: 1,
                     height: 1,
                     border_width: 0,
-                    visual: 0,
+                    // See WM_CHECK_WINDOW comment — InputOnly still gets a
+                    // real visual ID.
+                    visual: ROOT_VISUAL,
                     depth: 0,
                     class: u16::from(WindowClass::INPUT_ONLY),
                     mapped: false,

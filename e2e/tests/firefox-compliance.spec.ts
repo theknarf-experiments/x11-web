@@ -69,6 +69,12 @@ async function navigateFirefox(
 	await page.keyboard.press("Enter");
 }
 
+// All six tests below are gated on Firefox starting non-headless. Firefox
+// crashes inside `XVisualIDFromVisual()` with a NULL Visual* — see the
+// "Firefox ESR starts without crash (non-headless)" test in
+// stability/protocol-errors.spec.ts for the underlying GDK→Xlib path.
+// Once that crash is fixed these tests can all be unskipped together.
+
 // ---------------------------------------------------------------------------
 // Firefox startup and initial rendering
 // ---------------------------------------------------------------------------
