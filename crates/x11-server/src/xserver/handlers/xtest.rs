@@ -73,9 +73,15 @@ pub(crate) fn handle_xtest_request(state: &mut ClientState, data: &[u8], seq: u1
 
                 // Builder for the KeyButtonPointer-class wire layout shared by
                 // KeyPress, KeyRelease, ButtonPress, ButtonRelease, MotionNotify.
+                // `event_window` is the target window (focus for keys, the
+                // pointer-hit subwindow for buttons/motion); `event_x`,
+                // `event_y` are window-local coordinates.
                 let build_kbp_event = |state: &super::super::client::ClientState,
                                        response_type: u8,
-                                       detail: u8|
+                                       detail: u8,
+                                       event_window: u32,
+                                       event_x: i16,
+                                       event_y: i16|
                  -> Vec<u8> {
                     use x11rb_protocol::protocol::xproto::KeyPressEvent;
                     let ev = KeyPressEvent {
@@ -84,12 +90,12 @@ pub(crate) fn handle_xtest_request(state: &mut ClientState, data: &[u8], seq: u1
                         sequence: seq,
                         time: state.timestamp(),
                         root: state.root_window,
-                        event: state.focus_window,
-                        child: state.focus_window,
+                        event: event_window,
+                        child: 0,
                         root_x: state.pointer_x,
                         root_y: state.pointer_y,
-                        event_x: state.pointer_x,
-                        event_y: state.pointer_y,
+                        event_x,
+                        event_y,
                         state: 0u16.into(),
                         same_screen: true,
                     };
@@ -116,13 +122,17 @@ pub(crate) fn handle_xtest_request(state: &mut ClientState, data: &[u8], seq: u1
                             event_type,
                         );
 
-                        let event = build_kbp_event(state, event_type, keycode);
-                        // Synthetic key events must be routed to whichever
-                        // client has key-press selection on the focus window
-                        // (typically the focused app, not the xtest client).
-                        // Keep the local pending push so XTest clients that
-                        // grab their own key events still see them, but also
-                        // broadcast across connections.
+                        // Keys go to the focus window (or its first ancestor
+                        // that selected the mask, but we deliver to the focus
+                        // window itself and let the receiver propagate).
+                        let event = build_kbp_event(
+                            state,
+                            event_type,
+                            keycode,
+                            state.focus_window,
+                            state.pointer_x,
+                            state.pointer_y,
+                        );
                         let mask = if event_type == KEY_PRESS_EVENT {
                             crate::xserver::core::EventMask::KEY_PRESS
                         } else {
@@ -131,13 +141,61 @@ pub(crate) fn handle_xtest_request(state: &mut ClientState, data: &[u8], seq: u1
                         state.deliver_event(state.focus_window, mask, &event);
                     }
                     BUTTON_PRESS_EVENT | BUTTON_RELEASE_EVENT => {
-                        let event = build_kbp_event(state, event_type, detail);
+                        // Buttons go to the deepest mapped window under the
+                        // current pointer position, not the focus window.
+                        // Walk the SHARED window registry — the local
+                        // per-connection `state.windows` only contains
+                        // windows this XTEST client created, so target
+                        // windows owned by other clients (GTK app, Firefox
+                        // chrome, etc.) wouldn't be reachable through it.
+                        let mask_bit = u32::from(if event_type == BUTTON_PRESS_EVENT {
+                            crate::xserver::core::EventMask::BUTTON_PRESS
+                        } else {
+                            crate::xserver::core::EventMask::BUTTON_RELEASE
+                        });
+                        let (event_window, ex, ey) = find_subwindow_in_shared(
+                            state,
+                            state.pointer_x,
+                            state.pointer_y,
+                            mask_bit,
+                        );
+                        let event =
+                            build_kbp_event(state, event_type, detail, event_window, ex, ey);
+                        // Prefer routing the event directly to the owning
+                        // connection via EventRouter — broadcast filters by
+                        // subscription mask which can lag behind the
+                        // window's actual selection. EventRouter only knows
+                        // top-level UUIDs; fall back to the broadcaster for
+                        // sub-window targets and for any other client that
+                        // also selected on the window.
+                        let routed = state.event_router.send_event(event_window, event.clone());
+                        if !routed {
+                            // Walk up to find the nearest top-level that's
+                            // registered with the router.
+                            if let Ok(shared) = state.shared_windows.lock() {
+                                let mut walker = event_window;
+                                for _ in 0..super::super::window_tree::MAX_TREE_DEPTH {
+                                    if state
+                                        .event_router
+                                        .send_event(walker, event.clone())
+                                    {
+                                        break;
+                                    }
+                                    match shared.get(&walker) {
+                                        Some(w) if w.parent != 0 && w.parent != walker => {
+                                            walker = w.parent;
+                                        }
+                                        _ => break,
+                                    }
+                                }
+                            }
+                        }
                         let mask = if event_type == BUTTON_PRESS_EVENT {
                             crate::xserver::core::EventMask::BUTTON_PRESS
                         } else {
                             crate::xserver::core::EventMask::BUTTON_RELEASE
                         };
-                        state.deliver_event(state.focus_window, mask, &event);
+                        state.broadcast_event(event_window, mask, &event);
                     }
                     MOTION_NOTIFY_EVENT => {
                         let old_px = state.pointer_x;
@@ -160,8 +218,48 @@ pub(crate) fn handle_xtest_request(state: &mut ClientState, data: &[u8], seq: u1
                             state.pointer_x = bx;
                             state.pointer_y = by;
                         }
-                        let event = build_kbp_event(state, MOTION_NOTIFY_EVENT, 0);
-                        state.pending_events.push(event);
+                        // Motion goes to the window under the new pointer
+                        // position; consult the shared registry so we
+                        // reach windows owned by other clients.
+                        let (event_window, ex, ey) = find_subwindow_in_shared(
+                            state,
+                            state.pointer_x,
+                            state.pointer_y,
+                            u32::from(crate::xserver::core::EventMask::POINTER_MOTION),
+                        );
+                        let event = build_kbp_event(
+                            state,
+                            MOTION_NOTIFY_EVENT,
+                            0,
+                            event_window,
+                            ex,
+                            ey,
+                        );
+                        // Route to the owning connection so toolkits update
+                        // their pointer-tracking state before the click
+                        // arrives.
+                        let routed = state.event_router.send_event(event_window, event.clone());
+                        if !routed {
+                            if let Ok(shared) = state.shared_windows.lock() {
+                                let mut walker = event_window;
+                                for _ in 0..super::super::window_tree::MAX_TREE_DEPTH {
+                                    if state.event_router.send_event(walker, event.clone()) {
+                                        break;
+                                    }
+                                    match shared.get(&walker) {
+                                        Some(w) if w.parent != 0 && w.parent != walker => {
+                                            walker = w.parent;
+                                        }
+                                        _ => break,
+                                    }
+                                }
+                            }
+                        }
+                        state.broadcast_event(
+                            event_window,
+                            crate::xserver::core::EventMask::POINTER_MOTION,
+                            &event,
+                        );
                     }
                     _ => {
                         warn!("XTEST FakeInput: unknown event type {event_type}");
@@ -186,4 +284,94 @@ pub(crate) fn handle_xtest_request(state: &mut ClientState, data: &[u8], seq: u1
             xtest_err(crate::xserver::core::REQUEST_ERROR, minor as u32)
         }
     }
+}
+
+/// Walk the SHARED window registry to find the deepest mapped window
+/// containing the given root-relative point that selects for the event
+/// (or its first ancestor that does). XTest clients usually don't own
+/// the windows their fake events should target — their per-connection
+/// `state.windows` only sees this client's own windows, which won't
+/// include the GTK app or Firefox chrome that the cursor is actually
+/// over.
+///
+/// The shared registry has all windows but its per-window
+/// `children_order` is not synced from per-client state, so we can't
+/// use the standard `find_event_subwindow` on it. Instead we descend
+/// by scanning every window with a matching `parent` — slower but
+/// correct.
+fn find_subwindow_in_shared(
+    state: &super::super::client::ClientState,
+    root_x: i16,
+    root_y: i16,
+    required_mask: u32,
+) -> (u32, i16, i16) {
+    use std::collections::HashMap;
+
+    let Ok(shared) = state.shared_windows.lock() else {
+        return (state.root_window, root_x, root_y);
+    };
+
+    // Step 1: descend from root. At each level scan all children of
+    // the current window, pick the one (with highest XID, a stable but
+    // arbitrary tie-break) that covers the local point.
+    let mut current = state.root_window;
+    let mut local_x = root_x;
+    let mut local_y = root_y;
+    for _ in 0..super::super::window_tree::MAX_TREE_DEPTH {
+        let mut hit: Option<(u32, i16, i16)> = None;
+        for (&wid, w) in shared.iter() {
+            if w.parent != current || !w.mapped {
+                continue;
+            }
+            let cx = w.x;
+            let cy = w.y;
+            let cw = w.width as i16;
+            let ch = w.height as i16;
+            if local_x >= cx && local_x < cx + cw && local_y >= cy && local_y < cy + ch {
+                let candidate = (wid, local_x - cx, local_y - cy);
+                hit = Some(match hit {
+                    Some(prev) if prev.0 > wid => prev,
+                    _ => candidate,
+                });
+            }
+        }
+        match hit {
+            Some((wid, lx, ly)) => {
+                current = wid;
+                local_x = lx;
+                local_y = ly;
+            }
+            None => break,
+        }
+    }
+
+    // Step 2: walk up from the deepest hit window looking for one that
+    // selects for the required mask. Translate local coords back as
+    // we go.
+    let _ = HashMap::<u32, ()>::new(); // silence unused import if any
+    let mut accum_x = local_x;
+    let mut accum_y = local_y;
+    let mut walker = current;
+    let mut found: Option<(u32, i16, i16)> = None;
+    for _ in 0..super::super::window_tree::MAX_TREE_DEPTH {
+        if let Some(w) = shared.get(&walker) {
+            if u32::from(w.event_mask) & required_mask != 0 {
+                found = Some((walker, accum_x, accum_y));
+                break;
+            }
+            if u32::from(w.do_not_propagate_mask) & required_mask != 0 {
+                break;
+            }
+            let parent = w.parent;
+            if parent == 0 || parent == walker {
+                break;
+            }
+            accum_x += w.x;
+            accum_y += w.y;
+            walker = parent;
+        } else {
+            break;
+        }
+    }
+    found.unwrap_or((current, local_x, local_y))
 }

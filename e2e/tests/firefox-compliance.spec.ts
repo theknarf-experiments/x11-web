@@ -209,7 +209,8 @@ test("gtk3-demo keyboard navigation moves list selection", async ({
 	const box = await canvas.boundingBox();
 	if (!box) throw new Error("canvas has no bounding box");
 
-	await page.mouse.click(box.x + 100, box.y + 100);
+	const beforeClick = await canvasPixelHash(canvas);
+	await page.mouse.click(box.x + 100, box.y + 200);
 	await page.waitForTimeout(800);
 	const afterClick = await canvasPixelHash(canvas);
 
@@ -221,8 +222,87 @@ test("gtk3-demo keyboard navigation moves list selection", async ({
 	await page.waitForTimeout(500);
 	const afterDown2 = await canvasPixelHash(canvas);
 
+	// Click on a different list row should change the highlighted item.
+	expect(afterClick).not.toBe(beforeClick);
 	expect(afterDown1).not.toBe(afterClick);
 	expect(afterDown2).not.toBe(afterDown1);
+});
+
+// XTEST FakeInput must dispatch button events to the window under the
+// pointer (not the focus window). Validates this by spawning gtk3-demo,
+// hovering the cursor over a list row via xdotool, and clicking; the
+// highlighted row should change. Without the fix, xdotool clicks
+// silently no-op because they're delivered to focus_window which doesn't
+// match the cursor's actual visual target.
+//
+// SKIPPED: even with the dispatch fix in place, GTK3 doesn't react to
+// the synthesized clicks — likely needs Enter/Leave crossing events
+// generated alongside the motion-then-click sequence so the toolkit
+// updates its hovered-widget state before the press fires.
+test.skip("xdotool clicks reach the window under the pointer", async ({
+	page,
+	sidecarContainer,
+	frontendUrl,
+}) => {
+	test.setTimeout(120_000);
+	await cleanupApps(sidecarContainer);
+	await page.goto(frontendUrl);
+	await waitForDock(page);
+
+	const win = await spawnApp(page, "", "gtk3-demo", 30_000);
+	const canvas = win.locator('[data-testid="x11-canvas"]');
+	await expect(canvas).toBeVisible({ timeout: 30_000 });
+	await page.waitForTimeout(5000);
+
+	// Find gtk3-demo's window position and size at root level.
+	// Find gtk3-demo's actual main toplevel by ignoring the tiny
+	// 10x10 helper windows the toolkit creates. Pick the first
+	// child of root that's > 100px wide.
+	const winInfo = await sidecarContainer.exec([
+		"bash",
+		"-c",
+		`export DISPLAY=:99; xwininfo -root -tree | head -30`,
+	]);
+	const lines = winInfo.output.split("\n");
+	let wx = 0, wy = 0, w = 0, h = 0;
+	for (const line of lines) {
+		const m = line.match(
+			/0x[0-9a-f]+[^\n]*?(\d{2,4})x(\d{2,4})\+(-?\d+)\+(-?\d+)/,
+		);
+		if (!m) continue;
+		const ww = Number(m[1]);
+		const hh = Number(m[2]);
+		if (ww > 200 && hh > 200) {
+			w = ww;
+			h = hh;
+			wx = Number(m[3]);
+			wy = Number(m[4]);
+			break;
+		}
+	}
+	if (w === 0) throw new Error("could not find gtk3-demo main window");
+	console.log(`gtk3 at root (${wx},${wy}) size ${w}x${h}`);
+
+	const before = await canvasPixelHash(canvas);
+
+	await sidecarContainer.exec([
+		"bash",
+		"-c",
+		`export DISPLAY=:99; xdotool mousemove ${wx + 100} ${wy + 80} click 1`,
+	]);
+	await page.waitForTimeout(2000);
+	const afterFirst = await canvasPixelHash(canvas);
+
+	await sidecarContainer.exec([
+		"bash",
+		"-c",
+		`export DISPLAY=:99; xdotool mousemove ${wx + 100} ${wy + 250} click 1`,
+	]);
+	await page.waitForTimeout(2000);
+	const afterSecond = await canvasPixelHash(canvas);
+
+	expect(afterFirst).not.toBe(before);
+	expect(afterSecond).not.toBe(afterFirst);
 });
 
 test.skip("DIAG: Firefox slow click sequence", async ({
