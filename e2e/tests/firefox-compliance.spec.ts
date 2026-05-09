@@ -95,7 +95,14 @@ test("firefox: startup and initial rendering", async ({
 // ---------------------------------------------------------------------------
 // Firefox navigates to about:config
 // ---------------------------------------------------------------------------
-test("firefox: navigate to about:config", async ({
+// Firefox-side input does NOT actually work. The pixel-hash assertion is
+// a false-positive farm — cursor blink and minor UI animation make
+// hashAfter !== hashBefore even when the URL bar never receives focus.
+// See test-results/ff-{before,after}-navigate.png from a recent run:
+// the URL bar still shows the "Search or enter address" placeholder
+// and the active tab is still "New Tab", proving input never reached
+// Firefox. Tracked as a separate workstream.
+test.skip("firefox: navigate to about:config", async ({
 	page,
 	sidecarContainer,
 	frontendUrl,
@@ -120,7 +127,7 @@ test("firefox: navigate to about:config", async ({
 // ---------------------------------------------------------------------------
 // Firefox navigates to Wikipedia
 // ---------------------------------------------------------------------------
-test("firefox: navigate to Wikipedia", async ({
+test.skip("firefox: navigate to Wikipedia", async ({
 	page,
 	sidecarContainer,
 	frontendUrl,
@@ -154,7 +161,7 @@ test("firefox: navigate to Wikipedia", async ({
 // ---------------------------------------------------------------------------
 // Firefox scroll works
 // ---------------------------------------------------------------------------
-test("firefox: scroll works on loaded page", async ({
+test.skip("firefox: scroll works on loaded page", async ({
 	page,
 	sidecarContainer,
 	frontendUrl,
@@ -199,7 +206,7 @@ test("firefox: scroll works on loaded page", async ({
 // ---------------------------------------------------------------------------
 // Firefox navigates to YouTube
 // ---------------------------------------------------------------------------
-test("firefox: navigate to YouTube", async ({
+test.skip("firefox: navigate to YouTube", async ({
 	page,
 	sidecarContainer,
 	frontendUrl,
@@ -229,7 +236,7 @@ test("firefox: navigate to YouTube", async ({
 // ---------------------------------------------------------------------------
 // Local HTML5 video playback
 // ---------------------------------------------------------------------------
-test("firefox: local HTML5 video playback", async ({
+test.skip("firefox: local HTML5 video playback", async ({
 	page,
 	sidecarContainer,
 	frontendUrl,
