@@ -197,7 +197,7 @@ pub(crate) fn handle_query_extensions_string(_data: &[u8], seq: u16) -> Vec<u8> 
 
 pub(crate) fn handle_query_server_string(data: &[u8], seq: u16) -> Vec<u8> {
     let name = if data.len() >= 12 {
-        u32::from_le_bytes([data[8], data[9], data[10], data[11]])
+        super::render::read_u32_le(data, 8)
     } else {
         0
     };

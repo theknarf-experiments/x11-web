@@ -14,12 +14,56 @@ use crate::xserver::core::require_len;
 use tracing::warn;
 
 // ---------------------------------------------------------------------------
+// Wire-payload readers (LE-encoded; the GLX protocol always sends LE
+// regardless of the connection's byte order).
+// ---------------------------------------------------------------------------
+
+#[inline]
+pub(crate) fn read_u32_le(data: &[u8], off: usize) -> u32 {
+    u32::from_le_bytes([data[off], data[off + 1], data[off + 2], data[off + 3]])
+}
+
+#[inline]
+pub(crate) fn read_i32_le(data: &[u8], off: usize) -> i32 {
+    i32::from_le_bytes([data[off], data[off + 1], data[off + 2], data[off + 3]])
+}
+
+#[inline]
+pub(crate) fn read_f32_le(data: &[u8], off: usize) -> f32 {
+    f32::from_le_bytes([data[off], data[off + 1], data[off + 2], data[off + 3]])
+}
+
+#[inline]
+pub(crate) fn read_f64_le(data: &[u8], off: usize) -> f64 {
+    f64::from_le_bytes([
+        data[off],
+        data[off + 1],
+        data[off + 2],
+        data[off + 3],
+        data[off + 4],
+        data[off + 5],
+        data[off + 6],
+        data[off + 7],
+    ])
+}
+
+#[inline]
+pub(crate) fn read_u16_le(data: &[u8], off: usize) -> u16 {
+    u16::from_le_bytes([data[off], data[off + 1]])
+}
+
+#[inline]
+pub(crate) fn read_i16_le(data: &[u8], off: usize) -> i16 {
+    i16::from_le_bytes([data[off], data[off + 1]])
+}
+
+// ---------------------------------------------------------------------------
 // GLX_RENDER (minor 1) -- batched GL commands
 // ---------------------------------------------------------------------------
 
 pub(crate) fn handle_render(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
     require_len!(data, 8, seq, 159, 1, state.msb_first);
-    let _tag = u32::from_le_bytes([data[4], data[5], data[6], data[7]]);
+    let _tag = read_u32_le(data, 4);
 
     #[cfg(feature = "osmesa")]
     {
@@ -34,8 +78,8 @@ pub(crate) fn handle_render(state: &mut ClientState, data: &[u8], seq: u16) -> V
     // Parse batched render commands starting at offset 8
     let mut off = 8;
     while off + 4 <= data.len() {
-        let render_opcode = u16::from_le_bytes([data[off], data[off + 1]]);
-        let cmd_len = u16::from_le_bytes([data[off + 2], data[off + 3]]) as usize;
+        let render_opcode = read_u16_le(data, off);
+        let cmd_len = read_u16_le(data, off + 2) as usize;
 
         if cmd_len < 4 || off + cmd_len > data.len() {
             break;
@@ -71,7 +115,7 @@ pub(crate) fn handle_render_large(state: &mut ClientState, data: &[u8], seq: u16
             }
         }
 
-        let payload_len = u32::from_le_bytes([data[12], data[13], data[14], data[15]]) as usize;
+        let payload_len = read_u32_le(data, 12) as usize;
         let payload_start = 16;
         let payload_end = (payload_start + payload_len).min(data.len());
 

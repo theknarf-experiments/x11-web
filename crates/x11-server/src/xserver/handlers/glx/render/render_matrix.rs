@@ -8,12 +8,12 @@ pub(crate) fn dispatch(opcode: u16, data: &[u8]) -> Option<bool> {
         // glFrustum (opcode 175)
         175 => {
             if data.len() >= 48 {
-                let left = f64::from_le_bytes(data[0..8].try_into().unwrap());
-                let right = f64::from_le_bytes(data[8..16].try_into().unwrap());
-                let bottom = f64::from_le_bytes(data[16..24].try_into().unwrap());
-                let top = f64::from_le_bytes(data[24..32].try_into().unwrap());
-                let near = f64::from_le_bytes(data[32..40].try_into().unwrap());
-                let far = f64::from_le_bytes(data[40..48].try_into().unwrap());
+                let left = super::read_f64_le(data, 0);
+                let right = super::read_f64_le(data, 8);
+                let bottom = super::read_f64_le(data, 16);
+                let top = super::read_f64_le(data, 24);
+                let near = super::read_f64_le(data, 32);
+                let far = super::read_f64_le(data, 40);
                 osmesa::gl_frustum(left, right, bottom, top, near, far);
             }
         }
@@ -92,19 +92,19 @@ pub(crate) fn dispatch(opcode: u16, data: &[u8]) -> Option<bool> {
         // glMatrixMode (opcode 181)
         181 => {
             if data.len() >= 4 {
-                let mode = u32::from_le_bytes([data[0], data[1], data[2], data[3]]);
+                let mode = super::read_u32_le(data, 0);
                 osmesa::gl_matrix_mode(mode);
             }
         }
         // glOrtho (opcode 182)
         182 => {
             if data.len() >= 48 {
-                let left = f64::from_le_bytes(data[0..8].try_into().unwrap());
-                let right = f64::from_le_bytes(data[8..16].try_into().unwrap());
-                let bottom = f64::from_le_bytes(data[16..24].try_into().unwrap());
-                let top = f64::from_le_bytes(data[24..32].try_into().unwrap());
-                let near = f64::from_le_bytes(data[32..40].try_into().unwrap());
-                let far = f64::from_le_bytes(data[40..48].try_into().unwrap());
+                let left = super::read_f64_le(data, 0);
+                let right = super::read_f64_le(data, 8);
+                let bottom = super::read_f64_le(data, 16);
+                let top = super::read_f64_le(data, 24);
+                let near = super::read_f64_le(data, 32);
+                let far = super::read_f64_le(data, 40);
                 osmesa::gl_ortho(left, right, bottom, top, near, far);
             }
         }
@@ -119,66 +119,66 @@ pub(crate) fn dispatch(opcode: u16, data: &[u8]) -> Option<bool> {
         // glRotated (opcode 185)
         185 => {
             if data.len() >= 32 {
-                let angle = f64::from_le_bytes(data[0..8].try_into().unwrap());
-                let x = f64::from_le_bytes(data[8..16].try_into().unwrap());
-                let y = f64::from_le_bytes(data[16..24].try_into().unwrap());
-                let z = f64::from_le_bytes(data[24..32].try_into().unwrap());
+                let angle = super::read_f64_le(data, 0);
+                let x = super::read_f64_le(data, 8);
+                let y = super::read_f64_le(data, 16);
+                let z = super::read_f64_le(data, 24);
                 osmesa::gl_rotated(angle, x, y, z);
             }
         }
         // glRotatef (opcode 186)
         186 => {
             if data.len() >= 16 {
-                let angle = f32::from_le_bytes([data[0], data[1], data[2], data[3]]);
-                let x = f32::from_le_bytes([data[4], data[5], data[6], data[7]]);
-                let y = f32::from_le_bytes([data[8], data[9], data[10], data[11]]);
-                let z = f32::from_le_bytes([data[12], data[13], data[14], data[15]]);
+                let angle = super::read_f32_le(data, 0);
+                let x = super::read_f32_le(data, 4);
+                let y = super::read_f32_le(data, 8);
+                let z = super::read_f32_le(data, 12);
                 osmesa::gl_rotatef(angle, x, y, z);
             }
         }
         // glScaled (opcode 187)
         187 => {
             if data.len() >= 24 {
-                let x = f64::from_le_bytes(data[0..8].try_into().unwrap());
-                let y = f64::from_le_bytes(data[8..16].try_into().unwrap());
-                let z = f64::from_le_bytes(data[16..24].try_into().unwrap());
+                let x = super::read_f64_le(data, 0);
+                let y = super::read_f64_le(data, 8);
+                let z = super::read_f64_le(data, 16);
                 osmesa::gl_scaled(x, y, z);
             }
         }
         // glScalef (opcode 188)
         188 => {
             if data.len() >= 12 {
-                let x = f32::from_le_bytes([data[0], data[1], data[2], data[3]]);
-                let y = f32::from_le_bytes([data[4], data[5], data[6], data[7]]);
-                let z = f32::from_le_bytes([data[8], data[9], data[10], data[11]]);
+                let x = super::read_f32_le(data, 0);
+                let y = super::read_f32_le(data, 4);
+                let z = super::read_f32_le(data, 8);
                 osmesa::gl_scalef(x, y, z);
             }
         }
         // glTranslated (opcode 189)
         189 => {
             if data.len() >= 24 {
-                let x = f64::from_le_bytes(data[0..8].try_into().unwrap());
-                let y = f64::from_le_bytes(data[8..16].try_into().unwrap());
-                let z = f64::from_le_bytes(data[16..24].try_into().unwrap());
+                let x = super::read_f64_le(data, 0);
+                let y = super::read_f64_le(data, 8);
+                let z = super::read_f64_le(data, 16);
                 osmesa::gl_translated(x, y, z);
             }
         }
         // glTranslatef (opcode 190)
         190 => {
             if data.len() >= 12 {
-                let x = f32::from_le_bytes([data[0], data[1], data[2], data[3]]);
-                let y = f32::from_le_bytes([data[4], data[5], data[6], data[7]]);
-                let z = f32::from_le_bytes([data[8], data[9], data[10], data[11]]);
+                let x = super::read_f32_le(data, 0);
+                let y = super::read_f32_le(data, 4);
+                let z = super::read_f32_le(data, 8);
                 osmesa::gl_translatef(x, y, z);
             }
         }
         // glViewport (opcode 191)
         191 => {
             if data.len() >= 16 {
-                let x = i32::from_le_bytes([data[0], data[1], data[2], data[3]]);
-                let y = i32::from_le_bytes([data[4], data[5], data[6], data[7]]);
-                let w = i32::from_le_bytes([data[8], data[9], data[10], data[11]]);
-                let h = i32::from_le_bytes([data[12], data[13], data[14], data[15]]);
+                let x = super::read_i32_le(data, 0);
+                let y = super::read_i32_le(data, 4);
+                let w = super::read_i32_le(data, 8);
+                let h = super::read_i32_le(data, 12);
                 osmesa::gl_viewport(x, y, w, h);
             }
         }

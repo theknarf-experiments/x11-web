@@ -23,11 +23,11 @@ pub(crate) fn handle_use_x_font(state: &mut ClientState, data: &[u8], _seq: u16)
     if data.len() < 24 {
         return Vec::new();
     }
-    let _context_tag = u32::from_le_bytes([data[4], data[5], data[6], data[7]]);
-    let font_id = u32::from_le_bytes([data[8], data[9], data[10], data[11]]);
-    let first = u32::from_le_bytes([data[12], data[13], data[14], data[15]]);
-    let count = u32::from_le_bytes([data[16], data[17], data[18], data[19]]);
-    let list_base = u32::from_le_bytes([data[20], data[21], data[22], data[23]]);
+    let _context_tag = super::render::read_u32_le(data, 4);
+    let font_id = super::render::read_u32_le(data, 8);
+    let first = super::render::read_u32_le(data, 12);
+    let count = super::render::read_u32_le(data, 16);
+    let list_base = super::render::read_u32_le(data, 20);
 
     debug!("GLX UseXFont: font={font_id:#x} first={first} count={count} list_base={list_base}");
 
@@ -90,9 +90,9 @@ pub(crate) fn handle_use_x_font(state: &mut ClientState, data: &[u8], _seq: u16)
 pub(crate) fn handle_create_glx_pixmap(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
     // Wire: 4 screen | 4 visual | 4 pixmap (X) | 4 glx_pixmap (new id)
     require_len!(data, 20, seq, 159, 13, state.msb_first);
-    let visual = u32::from_le_bytes([data[8], data[9], data[10], data[11]]);
-    let x_pixmap = u32::from_le_bytes([data[12], data[13], data[14], data[15]]);
-    let glx_pixmap = u32::from_le_bytes([data[16], data[17], data[18], data[19]]);
+    let visual = super::render::read_u32_le(data, 8);
+    let x_pixmap = super::render::read_u32_le(data, 12);
+    let glx_pixmap = super::render::read_u32_le(data, 16);
 
     let fbconfig = if visual == VISUAL_TRUE_COLOR_ARGB_32 {
         FBCONFIG_ARGB
@@ -120,11 +120,11 @@ pub(crate) fn handle_create_glx_pixmap(state: &mut ClientState, data: &[u8], seq
 pub(crate) fn handle_create_pixmap(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
     // Wire: screen(4) fbconfig(4) pixmap(4) glx_pixmap(4) num_attribs(4) attribs...
     require_len!(data, 24, seq, 159, 22, state.msb_first);
-    let _screen = u32::from_le_bytes([data[4], data[5], data[6], data[7]]);
-    let fbconfig = u32::from_le_bytes([data[8], data[9], data[10], data[11]]);
-    let x_pixmap = u32::from_le_bytes([data[12], data[13], data[14], data[15]]);
-    let glx_pixmap = u32::from_le_bytes([data[16], data[17], data[18], data[19]]);
-    let num_attribs = u32::from_le_bytes([data[20], data[21], data[22], data[23]]) as usize;
+    let _screen = super::render::read_u32_le(data, 4);
+    let fbconfig = super::render::read_u32_le(data, 8);
+    let x_pixmap = super::render::read_u32_le(data, 12);
+    let glx_pixmap = super::render::read_u32_le(data, 16);
+    let num_attribs = super::render::read_u32_le(data, 20) as usize;
 
     // Validate the X pixmap exists
     if !state.pixmaps.contains_key(&x_pixmap) {
@@ -144,7 +144,7 @@ pub(crate) fn handle_create_pixmap(state: &mut ClientState, data: &[u8], seq: u1
         if base + 8 > data.len() {
             break;
         }
-        let key = u32::from_le_bytes([data[base], data[base + 1], data[base + 2], data[base + 3]]);
+        let key = super::render::read_u32_le(data, base);
         if key == 0 {
             break;
         }
@@ -176,7 +176,7 @@ pub(crate) fn handle_create_pixmap(state: &mut ClientState, data: &[u8], seq: u1
 
 pub(crate) fn handle_destroy_glx_pixmap(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
     require_len!(data, 8, seq, 159, 15, state.msb_first);
-    let glx_pixmap = u32::from_le_bytes([data[4], data[5], data[6], data[7]]);
+    let glx_pixmap = super::render::read_u32_le(data, 4);
     if state.glx.drawables.remove(&glx_pixmap).is_some() {
         debug!("Destroyed GLX pixmap {glx_pixmap:#x}");
     } else {
@@ -192,9 +192,9 @@ pub(crate) fn handle_destroy_glx_pixmap(state: &mut ClientState, data: &[u8], se
 pub(crate) fn handle_create_pbuffer(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
     // Wire: 4 screen | 4 fbconfig | 4 pbuffer_id | 4 num_attribs | attribs...
     require_len!(data, 20, seq, 159, 27, state.msb_first);
-    let fbconfig = u32::from_le_bytes([data[8], data[9], data[10], data[11]]);
-    let pbuffer_id = u32::from_le_bytes([data[12], data[13], data[14], data[15]]);
-    let num_attribs = u32::from_le_bytes([data[16], data[17], data[18], data[19]]) as usize;
+    let fbconfig = super::render::read_u32_le(data, 8);
+    let pbuffer_id = super::render::read_u32_le(data, 12);
+    let num_attribs = super::render::read_u32_le(data, 16) as usize;
 
     let mut attributes = HashMap::new();
     for i in 0..num_attribs {
@@ -202,7 +202,7 @@ pub(crate) fn handle_create_pbuffer(state: &mut ClientState, data: &[u8], seq: u
         if base + 8 > data.len() {
             break;
         }
-        let key = u32::from_le_bytes([data[base], data[base + 1], data[base + 2], data[base + 3]]);
+        let key = super::render::read_u32_le(data, base);
         let val = u32::from_le_bytes([
             data[base + 4],
             data[base + 5],
@@ -231,7 +231,7 @@ pub(crate) fn handle_create_pbuffer(state: &mut ClientState, data: &[u8], seq: u
 
 pub(crate) fn handle_destroy_pbuffer(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
     require_len!(data, 8, seq, 159, 28, state.msb_first);
-    let pbuffer_id = u32::from_le_bytes([data[4], data[5], data[6], data[7]]);
+    let pbuffer_id = super::render::read_u32_le(data, 4);
     if state.glx.drawables.remove(&pbuffer_id).is_some() {
         state.recycle_xid(pbuffer_id);
         debug!("Destroyed GLX pbuffer {pbuffer_id:#x}");
@@ -248,10 +248,10 @@ pub(crate) fn handle_destroy_pbuffer(state: &mut ClientState, data: &[u8], seq: 
 pub(crate) fn handle_create_window(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
     // Wire: 4 screen | 4 fbconfig | 4 window (X) | 4 glx_window | 4 num_attribs | attribs...
     require_len!(data, 24, seq, 159, 31, state.msb_first);
-    let fbconfig = u32::from_le_bytes([data[8], data[9], data[10], data[11]]);
-    let x_window = u32::from_le_bytes([data[12], data[13], data[14], data[15]]);
-    let glx_window = u32::from_le_bytes([data[16], data[17], data[18], data[19]]);
-    let num_attribs = u32::from_le_bytes([data[20], data[21], data[22], data[23]]) as usize;
+    let fbconfig = super::render::read_u32_le(data, 8);
+    let x_window = super::render::read_u32_le(data, 12);
+    let glx_window = super::render::read_u32_le(data, 16);
+    let num_attribs = super::render::read_u32_le(data, 20) as usize;
 
     let mut attributes = HashMap::new();
     for i in 0..num_attribs {
@@ -259,7 +259,7 @@ pub(crate) fn handle_create_window(state: &mut ClientState, data: &[u8], seq: u1
         if base + 8 > data.len() {
             break;
         }
-        let key = u32::from_le_bytes([data[base], data[base + 1], data[base + 2], data[base + 3]]);
+        let key = super::render::read_u32_le(data, base);
         let val = u32::from_le_bytes([
             data[base + 4],
             data[base + 5],
@@ -288,7 +288,7 @@ pub(crate) fn handle_create_window(state: &mut ClientState, data: &[u8], seq: u1
 
 pub(crate) fn handle_delete_window(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
     require_len!(data, 8, seq, 159, 32, state.msb_first);
-    let glx_window = u32::from_le_bytes([data[4], data[5], data[6], data[7]]);
+    let glx_window = super::render::read_u32_le(data, 4);
     if state.glx.drawables.remove(&glx_window).is_some() {
         debug!("Deleted GLX window {glx_window:#x}");
     } else {
@@ -309,7 +309,7 @@ pub(crate) fn handle_get_drawable_attributes(
     if data.len() < 8 {
         return super::reply::attrib_pairs_reply(seq, &[]);
     }
-    let drawable_id = u32::from_le_bytes([data[4], data[5], data[6], data[7]]);
+    let drawable_id = super::render::read_u32_le(data, 4);
 
     if let Some(drawable) = state.glx.drawables.get(&drawable_id) {
         let mut pairs: Vec<(u32, u32)> = Vec::new();
@@ -335,8 +335,8 @@ pub(crate) fn handle_change_drawable_attributes(
     seq: u16,
 ) -> Vec<u8> {
     require_len!(data, 12, seq, 159, 30, state.msb_first);
-    let drawable_id = u32::from_le_bytes([data[4], data[5], data[6], data[7]]);
-    let num_attribs = u32::from_le_bytes([data[8], data[9], data[10], data[11]]) as usize;
+    let drawable_id = super::render::read_u32_le(data, 4);
+    let num_attribs = super::render::read_u32_le(data, 8) as usize;
 
     if let Some(drawable) = state.glx.drawables.get_mut(&drawable_id) {
         for i in 0..num_attribs {
@@ -344,8 +344,7 @@ pub(crate) fn handle_change_drawable_attributes(
             if base + 8 > data.len() {
                 break;
             }
-            let key =
-                u32::from_le_bytes([data[base], data[base + 1], data[base + 2], data[base + 3]]);
+            let key = super::render::read_u32_le(data, base);
             let val = u32::from_le_bytes([
                 data[base + 4],
                 data[base + 5],
@@ -367,7 +366,7 @@ pub(crate) fn handle_change_drawable_attributes(
 
 pub(crate) fn handle_query_context(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
     require_len!(data, 8, seq, 159, 25, state.msb_first);
-    let ctx_id = u32::from_le_bytes([data[4], data[5], data[6], data[7]]);
+    let ctx_id = super::render::read_u32_le(data, 4);
 
     let ctx = state.glx.contexts.get(&ctx_id);
     let screen = ctx.map(|c| c.screen).unwrap_or(0);

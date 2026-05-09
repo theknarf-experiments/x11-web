@@ -8,26 +8,26 @@ pub(crate) fn dispatch(opcode: u16, data: &[u8]) -> Option<bool> {
         // glTexParameteri
         105 => {
             if data.len() >= 12 {
-                let target = u32::from_le_bytes([data[0], data[1], data[2], data[3]]);
-                let pname = u32::from_le_bytes([data[4], data[5], data[6], data[7]]);
-                let param = i32::from_le_bytes([data[8], data[9], data[10], data[11]]);
+                let target = super::read_u32_le(data, 0);
+                let pname = super::read_u32_le(data, 4);
+                let param = super::read_i32_le(data, 8);
                 osmesa::gl_tex_parameteri(target, pname, param);
             }
         }
         // glTexParameterf (opcode 106)
         106 => {
             if data.len() >= 12 {
-                let target = u32::from_le_bytes([data[0], data[1], data[2], data[3]]);
-                let pname = u32::from_le_bytes([data[4], data[5], data[6], data[7]]);
-                let param = f32::from_le_bytes([data[8], data[9], data[10], data[11]]);
+                let target = super::read_u32_le(data, 0);
+                let pname = super::read_u32_le(data, 4);
+                let param = super::read_f32_le(data, 8);
                 osmesa::gl_tex_parameterf(target, pname, param);
             }
         }
         // glTexParameterfv (opcode 107)
         107 => {
             if data.len() >= 12 {
-                let target = u32::from_le_bytes([data[0], data[1], data[2], data[3]]);
-                let pname = u32::from_le_bytes([data[4], data[5], data[6], data[7]]);
+                let target = super::read_u32_le(data, 0);
+                let pname = super::read_u32_le(data, 4);
                 let count = (data.len() - 8) / 4;
                 let mut params = vec![0f32; count];
                 for i in 0..count {
@@ -44,8 +44,8 @@ pub(crate) fn dispatch(opcode: u16, data: &[u8]) -> Option<bool> {
         // glTexParameteriv (opcode 109)
         109 => {
             if data.len() >= 12 {
-                let target = u32::from_le_bytes([data[0], data[1], data[2], data[3]]);
-                let pname = u32::from_le_bytes([data[4], data[5], data[6], data[7]]);
+                let target = super::read_u32_le(data, 0);
+                let pname = super::read_u32_le(data, 4);
                 let count = (data.len() - 8) / 4;
                 let mut params = vec![0i32; count];
                 for i in 0..count {
@@ -62,17 +62,17 @@ pub(crate) fn dispatch(opcode: u16, data: &[u8]) -> Option<bool> {
         // glTexEnvf (opcode 115)
         115 => {
             if data.len() >= 12 {
-                let target = u32::from_le_bytes([data[0], data[1], data[2], data[3]]);
-                let pname = u32::from_le_bytes([data[4], data[5], data[6], data[7]]);
-                let param = f32::from_le_bytes([data[8], data[9], data[10], data[11]]);
+                let target = super::read_u32_le(data, 0);
+                let pname = super::read_u32_le(data, 4);
+                let param = super::read_f32_le(data, 8);
                 osmesa::gl_tex_envf(target, pname, param);
             }
         }
         // glTexEnvfv (opcode 116)
         116 => {
             if data.len() >= 12 {
-                let target = u32::from_le_bytes([data[0], data[1], data[2], data[3]]);
-                let pname = u32::from_le_bytes([data[4], data[5], data[6], data[7]]);
+                let target = super::read_u32_le(data, 0);
+                let pname = super::read_u32_le(data, 4);
                 let count = (data.len() - 8) / 4;
                 let mut params = vec![0f32; count];
                 for i in 0..count {
@@ -89,17 +89,17 @@ pub(crate) fn dispatch(opcode: u16, data: &[u8]) -> Option<bool> {
         // glTexEnvi (opcode 117)
         117 => {
             if data.len() >= 12 {
-                let target = u32::from_le_bytes([data[0], data[1], data[2], data[3]]);
-                let pname = u32::from_le_bytes([data[4], data[5], data[6], data[7]]);
-                let param = i32::from_le_bytes([data[8], data[9], data[10], data[11]]);
+                let target = super::read_u32_le(data, 0);
+                let pname = super::read_u32_le(data, 4);
+                let param = super::read_i32_le(data, 8);
                 osmesa::gl_tex_envi(target, pname, param);
             }
         }
         // glTexEnviv (opcode 118)
         118 => {
             if data.len() >= 12 {
-                let target = u32::from_le_bytes([data[0], data[1], data[2], data[3]]);
-                let pname = u32::from_le_bytes([data[4], data[5], data[6], data[7]]);
+                let target = super::read_u32_le(data, 0);
+                let pname = super::read_u32_le(data, 4);
                 let count = (data.len() - 8) / 4;
                 let mut params = vec![0i32; count];
                 for i in 0..count {
@@ -116,17 +116,17 @@ pub(crate) fn dispatch(opcode: u16, data: &[u8]) -> Option<bool> {
         // glTexGend (opcode 119)
         119 => {
             if data.len() >= 16 {
-                let coord = u32::from_le_bytes([data[0], data[1], data[2], data[3]]);
-                let pname = u32::from_le_bytes([data[4], data[5], data[6], data[7]]);
-                let param = f64::from_le_bytes(data[8..16].try_into().unwrap());
+                let coord = super::read_u32_le(data, 0);
+                let pname = super::read_u32_le(data, 4);
+                let param = super::read_f64_le(data, 8);
                 osmesa::gl_tex_gend(coord, pname, param);
             }
         }
         // glTexGendv (opcode 120)
         120 => {
             if data.len() >= 12 {
-                let coord = u32::from_le_bytes([data[0], data[1], data[2], data[3]]);
-                let pname = u32::from_le_bytes([data[4], data[5], data[6], data[7]]);
+                let coord = super::read_u32_le(data, 0);
+                let pname = super::read_u32_le(data, 4);
                 let count = (data.len() - 8) / 8;
                 let mut params = vec![0f64; count];
                 for i in 0..count {
@@ -138,17 +138,17 @@ pub(crate) fn dispatch(opcode: u16, data: &[u8]) -> Option<bool> {
         // glTexGenf (opcode 121)
         121 => {
             if data.len() >= 12 {
-                let coord = u32::from_le_bytes([data[0], data[1], data[2], data[3]]);
-                let pname = u32::from_le_bytes([data[4], data[5], data[6], data[7]]);
-                let param = f32::from_le_bytes([data[8], data[9], data[10], data[11]]);
+                let coord = super::read_u32_le(data, 0);
+                let pname = super::read_u32_le(data, 4);
+                let param = super::read_f32_le(data, 8);
                 osmesa::gl_tex_genf(coord, pname, param);
             }
         }
         // glTexGenfv (opcode 122)
         122 => {
             if data.len() >= 12 {
-                let coord = u32::from_le_bytes([data[0], data[1], data[2], data[3]]);
-                let pname = u32::from_le_bytes([data[4], data[5], data[6], data[7]]);
+                let coord = super::read_u32_le(data, 0);
+                let pname = super::read_u32_le(data, 4);
                 let count = (data.len() - 8) / 4;
                 let mut params = vec![0f32; count];
                 for i in 0..count {
@@ -165,17 +165,17 @@ pub(crate) fn dispatch(opcode: u16, data: &[u8]) -> Option<bool> {
         // glTexGeni (opcode 123)
         123 => {
             if data.len() >= 12 {
-                let coord = u32::from_le_bytes([data[0], data[1], data[2], data[3]]);
-                let pname = u32::from_le_bytes([data[4], data[5], data[6], data[7]]);
-                let param = i32::from_le_bytes([data[8], data[9], data[10], data[11]]);
+                let coord = super::read_u32_le(data, 0);
+                let pname = super::read_u32_le(data, 4);
+                let param = super::read_i32_le(data, 8);
                 osmesa::gl_tex_geni(coord, pname, param);
             }
         }
         // glTexGeniv (opcode 124)
         124 => {
             if data.len() >= 12 {
-                let coord = u32::from_le_bytes([data[0], data[1], data[2], data[3]]);
-                let pname = u32::from_le_bytes([data[4], data[5], data[6], data[7]]);
+                let coord = super::read_u32_le(data, 0);
+                let pname = super::read_u32_le(data, 4);
                 let count = (data.len() - 8) / 4;
                 let mut params = vec![0i32; count];
                 for i in 0..count {
@@ -192,61 +192,61 @@ pub(crate) fn dispatch(opcode: u16, data: &[u8]) -> Option<bool> {
         // glActiveTexture (opcode 197)
         197 => {
             if data.len() >= 4 {
-                let texture = u32::from_le_bytes([data[0], data[1], data[2], data[3]]);
+                let texture = super::read_u32_le(data, 0);
                 osmesa::gl_active_texture(texture);
             }
         }
         // glMultiTexCoord1fv (opcode 198)
         198 => {
             if data.len() >= 8 {
-                let target = u32::from_le_bytes([data[0], data[1], data[2], data[3]]);
-                let s = f32::from_le_bytes([data[4], data[5], data[6], data[7]]);
+                let target = super::read_u32_le(data, 0);
+                let s = super::read_f32_le(data, 4);
                 osmesa::gl_multi_tex_coord1f(target, s);
             }
         }
         // glMultiTexCoord2fv (opcode 199)
         199 => {
             if data.len() >= 12 {
-                let target = u32::from_le_bytes([data[0], data[1], data[2], data[3]]);
-                let s = f32::from_le_bytes([data[4], data[5], data[6], data[7]]);
-                let t = f32::from_le_bytes([data[8], data[9], data[10], data[11]]);
+                let target = super::read_u32_le(data, 0);
+                let s = super::read_f32_le(data, 4);
+                let t = super::read_f32_le(data, 8);
                 osmesa::gl_multi_tex_coord2f(target, s, t);
             }
         }
         // glMultiTexCoord3fv (opcode 200)
         200 => {
             if data.len() >= 16 {
-                let target = u32::from_le_bytes([data[0], data[1], data[2], data[3]]);
-                let s = f32::from_le_bytes([data[4], data[5], data[6], data[7]]);
-                let t = f32::from_le_bytes([data[8], data[9], data[10], data[11]]);
-                let r = f32::from_le_bytes([data[12], data[13], data[14], data[15]]);
+                let target = super::read_u32_le(data, 0);
+                let s = super::read_f32_le(data, 4);
+                let t = super::read_f32_le(data, 8);
+                let r = super::read_f32_le(data, 12);
                 osmesa::gl_multi_tex_coord3f(target, s, t, r);
             }
         }
         // glMultiTexCoord4fv (opcode 201)
         201 => {
             if data.len() >= 20 {
-                let target = u32::from_le_bytes([data[0], data[1], data[2], data[3]]);
-                let s = f32::from_le_bytes([data[4], data[5], data[6], data[7]]);
-                let t = f32::from_le_bytes([data[8], data[9], data[10], data[11]]);
-                let r = f32::from_le_bytes([data[12], data[13], data[14], data[15]]);
-                let q = f32::from_le_bytes([data[16], data[17], data[18], data[19]]);
+                let target = super::read_u32_le(data, 0);
+                let s = super::read_f32_le(data, 4);
+                let t = super::read_f32_le(data, 8);
+                let r = super::read_f32_le(data, 12);
+                let q = super::read_f32_le(data, 16);
                 osmesa::gl_multi_tex_coord4f(target, s, t, r, q);
             }
         }
         // glColorTable (opcode 4098 -- large render)
         4098 => {
             if data.len() >= 32 {
-                let target = u32::from_le_bytes([data[20], data[21], data[22], data[23]]);
-                let internalformat = u32::from_le_bytes([data[24], data[25], data[26], data[27]]);
-                let width = i32::from_le_bytes([data[28], data[29], data[30], data[31]]);
+                let target = super::read_u32_le(data, 20);
+                let internalformat = super::read_u32_le(data, 24);
+                let width = super::read_i32_le(data, 28);
                 let format = if data.len() >= 36 {
-                    u32::from_le_bytes([data[32], data[33], data[34], data[35]])
+                    super::read_u32_le(data, 32)
                 } else {
                     osmesa::GL_RGBA
                 };
                 let type_ = if data.len() >= 40 {
-                    u32::from_le_bytes([data[36], data[37], data[38], data[39]])
+                    super::read_u32_le(data, 36)
                 } else {
                     osmesa::GL_UNSIGNED_BYTE
                 };
@@ -266,21 +266,21 @@ pub(crate) fn dispatch(opcode: u16, data: &[u8]) -> Option<bool> {
         // glTexSubImage1D (opcode 4099)
         4099 => {
             if data.len() >= 32 {
-                let target = u32::from_le_bytes([data[20], data[21], data[22], data[23]]);
-                let level = i32::from_le_bytes([data[24], data[25], data[26], data[27]]);
-                let xoffset = i32::from_le_bytes([data[28], data[29], data[30], data[31]]);
+                let target = super::read_u32_le(data, 20);
+                let level = super::read_i32_le(data, 24);
+                let xoffset = super::read_i32_le(data, 28);
                 let width = if data.len() >= 36 {
-                    i32::from_le_bytes([data[32], data[33], data[34], data[35]])
+                    super::read_i32_le(data, 32)
                 } else {
                     0
                 };
                 let format = if data.len() >= 40 {
-                    u32::from_le_bytes([data[36], data[37], data[38], data[39]])
+                    super::read_u32_le(data, 36)
                 } else {
                     osmesa::GL_RGBA
                 };
                 let type_ = if data.len() >= 44 {
-                    u32::from_le_bytes([data[40], data[41], data[42], data[43]])
+                    super::read_u32_le(data, 40)
                 } else {
                     osmesa::GL_UNSIGNED_BYTE
                 };
@@ -295,22 +295,22 @@ pub(crate) fn dispatch(opcode: u16, data: &[u8]) -> Option<bool> {
         // glTexImage1D (opcode 4100)
         4100 => {
             if data.len() >= 36 {
-                let target = u32::from_le_bytes([data[20], data[21], data[22], data[23]]);
-                let level = i32::from_le_bytes([data[24], data[25], data[26], data[27]]);
-                let internal_format = i32::from_le_bytes([data[28], data[29], data[30], data[31]]);
-                let width = i32::from_le_bytes([data[32], data[33], data[34], data[35]]);
+                let target = super::read_u32_le(data, 20);
+                let level = super::read_i32_le(data, 24);
+                let internal_format = super::read_i32_le(data, 28);
+                let width = super::read_i32_le(data, 32);
                 let border = if data.len() >= 40 {
-                    i32::from_le_bytes([data[36], data[37], data[38], data[39]])
+                    super::read_i32_le(data, 36)
                 } else {
                     0
                 };
                 let format = if data.len() >= 44 {
-                    u32::from_le_bytes([data[40], data[41], data[42], data[43]])
+                    super::read_u32_le(data, 40)
                 } else {
                     osmesa::GL_RGBA
                 };
                 let type_ = if data.len() >= 48 {
-                    u32::from_le_bytes([data[44], data[45], data[46], data[47]])
+                    super::read_u32_le(data, 44)
                 } else {
                     osmesa::GL_UNSIGNED_BYTE
                 };
@@ -344,27 +344,27 @@ pub(crate) fn dispatch(opcode: u16, data: &[u8]) -> Option<bool> {
             if data.len() >= 40 {
                 let _swap_bytes = data[0];
                 let _lsb_first = data[1];
-                let _row_length = i32::from_le_bytes([data[4], data[5], data[6], data[7]]);
-                let _skip_rows = i32::from_le_bytes([data[8], data[9], data[10], data[11]]);
-                let _skip_pixels = i32::from_le_bytes([data[12], data[13], data[14], data[15]]);
-                let _alignment = i32::from_le_bytes([data[16], data[17], data[18], data[19]]);
-                let target = u32::from_le_bytes([data[20], data[21], data[22], data[23]]);
-                let level = i32::from_le_bytes([data[24], data[25], data[26], data[27]]);
-                let internal_format = i32::from_le_bytes([data[28], data[29], data[30], data[31]]);
-                let width = i32::from_le_bytes([data[32], data[33], data[34], data[35]]);
-                let height = i32::from_le_bytes([data[36], data[37], data[38], data[39]]);
+                let _row_length = super::read_i32_le(data, 4);
+                let _skip_rows = super::read_i32_le(data, 8);
+                let _skip_pixels = super::read_i32_le(data, 12);
+                let _alignment = super::read_i32_le(data, 16);
+                let target = super::read_u32_le(data, 20);
+                let level = super::read_i32_le(data, 24);
+                let internal_format = super::read_i32_le(data, 28);
+                let width = super::read_i32_le(data, 32);
+                let height = super::read_i32_le(data, 36);
                 let border = if data.len() >= 44 {
-                    i32::from_le_bytes([data[40], data[41], data[42], data[43]])
+                    super::read_i32_le(data, 40)
                 } else {
                     0
                 };
                 let format = if data.len() >= 48 {
-                    u32::from_le_bytes([data[44], data[45], data[46], data[47]])
+                    super::read_u32_le(data, 44)
                 } else {
                     osmesa::GL_RGBA
                 };
                 let type_ = if data.len() >= 52 {
-                    u32::from_le_bytes([data[48], data[49], data[50], data[51]])
+                    super::read_u32_le(data, 48)
                 } else {
                     osmesa::GL_UNSIGNED_BYTE
                 };
@@ -400,19 +400,19 @@ pub(crate) fn dispatch(opcode: u16, data: &[u8]) -> Option<bool> {
         // glTexSubImage2D (opcode 4102)
         4102 => {
             if data.len() >= 44 {
-                let target = u32::from_le_bytes([data[20], data[21], data[22], data[23]]);
-                let level = i32::from_le_bytes([data[24], data[25], data[26], data[27]]);
-                let xoffset = i32::from_le_bytes([data[28], data[29], data[30], data[31]]);
-                let yoffset = i32::from_le_bytes([data[32], data[33], data[34], data[35]]);
-                let width = i32::from_le_bytes([data[36], data[37], data[38], data[39]]);
-                let height = i32::from_le_bytes([data[40], data[41], data[42], data[43]]);
+                let target = super::read_u32_le(data, 20);
+                let level = super::read_i32_le(data, 24);
+                let xoffset = super::read_i32_le(data, 28);
+                let yoffset = super::read_i32_le(data, 32);
+                let width = super::read_i32_le(data, 36);
+                let height = super::read_i32_le(data, 40);
                 let format = if data.len() >= 48 {
-                    u32::from_le_bytes([data[44], data[45], data[46], data[47]])
+                    super::read_u32_le(data, 44)
                 } else {
                     osmesa::GL_RGBA
                 };
                 let type_ = if data.len() >= 52 {
-                    u32::from_le_bytes([data[48], data[49], data[50], data[51]])
+                    super::read_u32_le(data, 48)
                 } else {
                     osmesa::GL_UNSIGNED_BYTE
                 };
@@ -428,27 +428,27 @@ pub(crate) fn dispatch(opcode: u16, data: &[u8]) -> Option<bool> {
         // glCopyTexImage1D (opcode 4103)
         4103 => {
             if data.len() >= 28 {
-                let target = u32::from_le_bytes([data[0], data[1], data[2], data[3]]);
-                let level = i32::from_le_bytes([data[4], data[5], data[6], data[7]]);
-                let internalformat = u32::from_le_bytes([data[8], data[9], data[10], data[11]]);
-                let x = i32::from_le_bytes([data[12], data[13], data[14], data[15]]);
-                let y = i32::from_le_bytes([data[16], data[17], data[18], data[19]]);
-                let width = i32::from_le_bytes([data[20], data[21], data[22], data[23]]);
-                let border = i32::from_le_bytes([data[24], data[25], data[26], data[27]]);
+                let target = super::read_u32_le(data, 0);
+                let level = super::read_i32_le(data, 4);
+                let internalformat = super::read_u32_le(data, 8);
+                let x = super::read_i32_le(data, 12);
+                let y = super::read_i32_le(data, 16);
+                let width = super::read_i32_le(data, 20);
+                let border = super::read_i32_le(data, 24);
                 osmesa::gl_copy_tex_image_1d(target, level, internalformat, x, y, width, border);
             }
         }
         // glCopyTexImage2D (opcode 4104)
         4104 => {
             if data.len() >= 32 {
-                let target = u32::from_le_bytes([data[0], data[1], data[2], data[3]]);
-                let level = i32::from_le_bytes([data[4], data[5], data[6], data[7]]);
-                let internalformat = u32::from_le_bytes([data[8], data[9], data[10], data[11]]);
-                let x = i32::from_le_bytes([data[12], data[13], data[14], data[15]]);
-                let y = i32::from_le_bytes([data[16], data[17], data[18], data[19]]);
-                let width = i32::from_le_bytes([data[20], data[21], data[22], data[23]]);
-                let height = i32::from_le_bytes([data[24], data[25], data[26], data[27]]);
-                let border = i32::from_le_bytes([data[28], data[29], data[30], data[31]]);
+                let target = super::read_u32_le(data, 0);
+                let level = super::read_i32_le(data, 4);
+                let internalformat = super::read_u32_le(data, 8);
+                let x = super::read_i32_le(data, 12);
+                let y = super::read_i32_le(data, 16);
+                let width = super::read_i32_le(data, 20);
+                let height = super::read_i32_le(data, 24);
+                let border = super::read_i32_le(data, 28);
                 osmesa::gl_copy_tex_image_2d(
                     target,
                     level,
@@ -464,26 +464,26 @@ pub(crate) fn dispatch(opcode: u16, data: &[u8]) -> Option<bool> {
         // glCopyTexSubImage1D (opcode 4105)
         4105 => {
             if data.len() >= 24 {
-                let target = u32::from_le_bytes([data[0], data[1], data[2], data[3]]);
-                let level = i32::from_le_bytes([data[4], data[5], data[6], data[7]]);
-                let xoffset = i32::from_le_bytes([data[8], data[9], data[10], data[11]]);
-                let x = i32::from_le_bytes([data[12], data[13], data[14], data[15]]);
-                let y = i32::from_le_bytes([data[16], data[17], data[18], data[19]]);
-                let width = i32::from_le_bytes([data[20], data[21], data[22], data[23]]);
+                let target = super::read_u32_le(data, 0);
+                let level = super::read_i32_le(data, 4);
+                let xoffset = super::read_i32_le(data, 8);
+                let x = super::read_i32_le(data, 12);
+                let y = super::read_i32_le(data, 16);
+                let width = super::read_i32_le(data, 20);
                 osmesa::gl_copy_tex_sub_image_1d(target, level, xoffset, x, y, width);
             }
         }
         // glCopyTexSubImage2D (opcode 4106)
         4106 => {
             if data.len() >= 32 {
-                let target = u32::from_le_bytes([data[0], data[1], data[2], data[3]]);
-                let level = i32::from_le_bytes([data[4], data[5], data[6], data[7]]);
-                let xoffset = i32::from_le_bytes([data[8], data[9], data[10], data[11]]);
-                let yoffset = i32::from_le_bytes([data[12], data[13], data[14], data[15]]);
-                let x = i32::from_le_bytes([data[16], data[17], data[18], data[19]]);
-                let y = i32::from_le_bytes([data[20], data[21], data[22], data[23]]);
-                let width = i32::from_le_bytes([data[24], data[25], data[26], data[27]]);
-                let height = i32::from_le_bytes([data[28], data[29], data[30], data[31]]);
+                let target = super::read_u32_le(data, 0);
+                let level = super::read_i32_le(data, 4);
+                let xoffset = super::read_i32_le(data, 8);
+                let yoffset = super::read_i32_le(data, 12);
+                let x = super::read_i32_le(data, 16);
+                let y = super::read_i32_le(data, 20);
+                let width = super::read_i32_le(data, 24);
+                let height = super::read_i32_le(data, 28);
                 osmesa::gl_copy_tex_sub_image_2d(
                     target, level, xoffset, yoffset, x, y, width, height,
                 );
@@ -492,17 +492,17 @@ pub(crate) fn dispatch(opcode: u16, data: &[u8]) -> Option<bool> {
         // glConvolutionParameterf (opcode 4108)
         4108 => {
             if data.len() >= 12 {
-                let target = u32::from_le_bytes([data[0], data[1], data[2], data[3]]);
-                let pname = u32::from_le_bytes([data[4], data[5], data[6], data[7]]);
-                let param = f32::from_le_bytes([data[8], data[9], data[10], data[11]]);
+                let target = super::read_u32_le(data, 0);
+                let pname = super::read_u32_le(data, 4);
+                let param = super::read_f32_le(data, 8);
                 osmesa::gl_convolution_parameterf(target, pname, param);
             }
         }
         // glConvolutionParameterfv (opcode 4109)
         4109 => {
             if data.len() >= 12 {
-                let target = u32::from_le_bytes([data[0], data[1], data[2], data[3]]);
-                let pname = u32::from_le_bytes([data[4], data[5], data[6], data[7]]);
+                let target = super::read_u32_le(data, 0);
+                let pname = super::read_u32_le(data, 4);
                 let count = (data.len() - 8) / 4;
                 let mut params = vec![0f32; count];
                 for i in 0..count {
@@ -519,17 +519,17 @@ pub(crate) fn dispatch(opcode: u16, data: &[u8]) -> Option<bool> {
         // glConvolutionParameteri (opcode 4110)
         4110 => {
             if data.len() >= 12 {
-                let target = u32::from_le_bytes([data[0], data[1], data[2], data[3]]);
-                let pname = u32::from_le_bytes([data[4], data[5], data[6], data[7]]);
-                let param = i32::from_le_bytes([data[8], data[9], data[10], data[11]]);
+                let target = super::read_u32_le(data, 0);
+                let pname = super::read_u32_le(data, 4);
+                let param = super::read_i32_le(data, 8);
                 osmesa::gl_convolution_parameteri(target, pname, param);
             }
         }
         // glConvolutionParameteriv (opcode 4111)
         4111 => {
             if data.len() >= 12 {
-                let target = u32::from_le_bytes([data[0], data[1], data[2], data[3]]);
-                let pname = u32::from_le_bytes([data[4], data[5], data[6], data[7]]);
+                let target = super::read_u32_le(data, 0);
+                let pname = super::read_u32_le(data, 4);
                 let count = (data.len() - 8) / 4;
                 let mut params = vec![0i32; count];
                 for i in 0..count {
@@ -546,9 +546,9 @@ pub(crate) fn dispatch(opcode: u16, data: &[u8]) -> Option<bool> {
         // glHistogram (opcode 4112)
         4112 => {
             if data.len() >= 16 {
-                let target = u32::from_le_bytes([data[0], data[1], data[2], data[3]]);
-                let width = i32::from_le_bytes([data[4], data[5], data[6], data[7]]);
-                let internalformat = u32::from_le_bytes([data[8], data[9], data[10], data[11]]);
+                let target = super::read_u32_le(data, 0);
+                let width = super::read_i32_le(data, 4);
+                let internalformat = super::read_u32_le(data, 8);
                 let sink = data[12];
                 osmesa::gl_histogram(target, width, internalformat, sink);
             }
@@ -556,8 +556,8 @@ pub(crate) fn dispatch(opcode: u16, data: &[u8]) -> Option<bool> {
         // glMinmax (opcode 4113)
         4113 => {
             if data.len() >= 12 {
-                let target = u32::from_le_bytes([data[0], data[1], data[2], data[3]]);
-                let internalformat = u32::from_le_bytes([data[4], data[5], data[6], data[7]]);
+                let target = super::read_u32_le(data, 0);
+                let internalformat = super::read_u32_le(data, 4);
                 let sink = data[8];
                 osmesa::gl_minmax(target, internalformat, sink);
             }
@@ -565,15 +565,15 @@ pub(crate) fn dispatch(opcode: u16, data: &[u8]) -> Option<bool> {
         // glTexImage3D (opcode 4114)
         4114 => {
             if data.len() >= 56 {
-                let target = u32::from_le_bytes([data[20], data[21], data[22], data[23]]);
-                let level = i32::from_le_bytes([data[24], data[25], data[26], data[27]]);
-                let internal_format = i32::from_le_bytes([data[28], data[29], data[30], data[31]]);
-                let width = i32::from_le_bytes([data[32], data[33], data[34], data[35]]);
-                let height = i32::from_le_bytes([data[36], data[37], data[38], data[39]]);
-                let depth = i32::from_le_bytes([data[40], data[41], data[42], data[43]]);
-                let border = i32::from_le_bytes([data[44], data[45], data[46], data[47]]);
-                let format = u32::from_le_bytes([data[48], data[49], data[50], data[51]]);
-                let type_ = u32::from_le_bytes([data[52], data[53], data[54], data[55]]);
+                let target = super::read_u32_le(data, 20);
+                let level = super::read_i32_le(data, 24);
+                let internal_format = super::read_i32_le(data, 28);
+                let width = super::read_i32_le(data, 32);
+                let height = super::read_i32_le(data, 36);
+                let depth = super::read_i32_le(data, 40);
+                let border = super::read_i32_le(data, 44);
+                let format = super::read_u32_le(data, 48);
+                let type_ = super::read_u32_le(data, 52);
                 let pixel_data = if data.len() > 56 { &data[56..] } else { &[] };
                 if !pixel_data.is_empty() {
                     osmesa::gl_tex_image_3d(
@@ -594,16 +594,16 @@ pub(crate) fn dispatch(opcode: u16, data: &[u8]) -> Option<bool> {
         // glTexSubImage3D (opcode 4115)
         4115 => {
             if data.len() >= 60 {
-                let target = u32::from_le_bytes([data[20], data[21], data[22], data[23]]);
-                let level = i32::from_le_bytes([data[24], data[25], data[26], data[27]]);
-                let xoffset = i32::from_le_bytes([data[28], data[29], data[30], data[31]]);
-                let yoffset = i32::from_le_bytes([data[32], data[33], data[34], data[35]]);
-                let zoffset = i32::from_le_bytes([data[36], data[37], data[38], data[39]]);
-                let width = i32::from_le_bytes([data[40], data[41], data[42], data[43]]);
-                let height = i32::from_le_bytes([data[44], data[45], data[46], data[47]]);
-                let depth = i32::from_le_bytes([data[48], data[49], data[50], data[51]]);
-                let format = u32::from_le_bytes([data[52], data[53], data[54], data[55]]);
-                let type_ = u32::from_le_bytes([data[56], data[57], data[58], data[59]]);
+                let target = super::read_u32_le(data, 20);
+                let level = super::read_i32_le(data, 24);
+                let xoffset = super::read_i32_le(data, 28);
+                let yoffset = super::read_i32_le(data, 32);
+                let zoffset = super::read_i32_le(data, 36);
+                let width = super::read_i32_le(data, 40);
+                let height = super::read_i32_le(data, 44);
+                let depth = super::read_i32_le(data, 48);
+                let format = super::read_u32_le(data, 52);
+                let type_ = super::read_u32_le(data, 56);
                 let pixel_data = if data.len() > 60 { &data[60..] } else { &[] };
                 if !pixel_data.is_empty() {
                     osmesa::gl_tex_sub_image_3d(
@@ -616,13 +616,13 @@ pub(crate) fn dispatch(opcode: u16, data: &[u8]) -> Option<bool> {
         // glCompressedTexImage2D (opcode 4116 -- ARB version)
         4116 => {
             if data.len() >= 48 {
-                let target = u32::from_le_bytes([data[20], data[21], data[22], data[23]]);
-                let level = i32::from_le_bytes([data[24], data[25], data[26], data[27]]);
-                let internalformat = u32::from_le_bytes([data[28], data[29], data[30], data[31]]);
-                let width = i32::from_le_bytes([data[32], data[33], data[34], data[35]]);
-                let height = i32::from_le_bytes([data[36], data[37], data[38], data[39]]);
-                let border = i32::from_le_bytes([data[40], data[41], data[42], data[43]]);
-                let image_size = i32::from_le_bytes([data[44], data[45], data[46], data[47]]);
+                let target = super::read_u32_le(data, 20);
+                let level = super::read_i32_le(data, 24);
+                let internalformat = super::read_u32_le(data, 28);
+                let width = super::read_i32_le(data, 32);
+                let height = super::read_i32_le(data, 36);
+                let border = super::read_i32_le(data, 40);
+                let image_size = super::read_i32_le(data, 44);
 
                 let pixel_data = if data.len() > 48 { &data[48..] } else { &[] };
                 osmesa::gl_compressed_tex_image_2d(
@@ -640,15 +640,15 @@ pub(crate) fn dispatch(opcode: u16, data: &[u8]) -> Option<bool> {
         // glBindTexture (opcode 4117)
         4117 => {
             if data.len() >= 8 {
-                let target = u32::from_le_bytes([data[0], data[1], data[2], data[3]]);
-                let texture = u32::from_le_bytes([data[4], data[5], data[6], data[7]]);
+                let target = super::read_u32_le(data, 0);
+                let texture = super::read_u32_le(data, 4);
                 osmesa::gl_bind_texture(target, texture);
             }
         }
         // glGenTextures (opcode 4118)
         4118 => {
             if data.len() >= 4 {
-                let n = i32::from_le_bytes([data[0], data[1], data[2], data[3]]);
+                let n = super::read_i32_le(data, 0);
                 if n > 0 && n <= 256 {
                     let mut textures = vec![0u32; n as usize];
                     osmesa::gl_gen_textures(n, &mut textures);
@@ -658,7 +658,7 @@ pub(crate) fn dispatch(opcode: u16, data: &[u8]) -> Option<bool> {
         // glDeleteTextures (opcode 4119)
         4119 => {
             if data.len() >= 4 {
-                let n = i32::from_le_bytes([data[0], data[1], data[2], data[3]]);
+                let n = super::read_i32_le(data, 0);
                 if n > 0 && data.len() >= 4 + n as usize * 4 {
                     let textures: Vec<u32> = (0..n as usize)
                         .map(|i| {
@@ -678,12 +678,12 @@ pub(crate) fn dispatch(opcode: u16, data: &[u8]) -> Option<bool> {
         // glCompressedTexImage1D (opcode 216)
         216 => {
             if data.len() >= 44 {
-                let target = u32::from_le_bytes([data[20], data[21], data[22], data[23]]);
-                let level = i32::from_le_bytes([data[24], data[25], data[26], data[27]]);
-                let internalformat = u32::from_le_bytes([data[28], data[29], data[30], data[31]]);
-                let width = i32::from_le_bytes([data[32], data[33], data[34], data[35]]);
-                let border = i32::from_le_bytes([data[36], data[37], data[38], data[39]]);
-                let image_size = i32::from_le_bytes([data[40], data[41], data[42], data[43]]);
+                let target = super::read_u32_le(data, 20);
+                let level = super::read_i32_le(data, 24);
+                let internalformat = super::read_u32_le(data, 28);
+                let width = super::read_i32_le(data, 32);
+                let border = super::read_i32_le(data, 36);
+                let image_size = super::read_i32_le(data, 40);
                 let pixel_data = if data.len() > 44 { &data[44..] } else { &[] };
                 osmesa::gl_compressed_tex_image_1d(
                     target,
@@ -699,13 +699,13 @@ pub(crate) fn dispatch(opcode: u16, data: &[u8]) -> Option<bool> {
         // glCompressedTexImage2D (opcode 217 -- GL 1.3 non-ARB version)
         217 => {
             if data.len() >= 48 {
-                let target = u32::from_le_bytes([data[20], data[21], data[22], data[23]]);
-                let level = i32::from_le_bytes([data[24], data[25], data[26], data[27]]);
-                let internalformat = u32::from_le_bytes([data[28], data[29], data[30], data[31]]);
-                let width = i32::from_le_bytes([data[32], data[33], data[34], data[35]]);
-                let height = i32::from_le_bytes([data[36], data[37], data[38], data[39]]);
-                let border = i32::from_le_bytes([data[40], data[41], data[42], data[43]]);
-                let image_size = i32::from_le_bytes([data[44], data[45], data[46], data[47]]);
+                let target = super::read_u32_le(data, 20);
+                let level = super::read_i32_le(data, 24);
+                let internalformat = super::read_u32_le(data, 28);
+                let width = super::read_i32_le(data, 32);
+                let height = super::read_i32_le(data, 36);
+                let border = super::read_i32_le(data, 40);
+                let image_size = super::read_i32_le(data, 44);
                 let pixel_data = if data.len() > 48 { &data[48..] } else { &[] };
                 osmesa::gl_compressed_tex_image_2d(
                     target,
@@ -722,14 +722,14 @@ pub(crate) fn dispatch(opcode: u16, data: &[u8]) -> Option<bool> {
         // glCompressedTexImage3D (opcode 218)
         218 => {
             if data.len() >= 52 {
-                let target = u32::from_le_bytes([data[20], data[21], data[22], data[23]]);
-                let level = i32::from_le_bytes([data[24], data[25], data[26], data[27]]);
-                let internalformat = u32::from_le_bytes([data[28], data[29], data[30], data[31]]);
-                let width = i32::from_le_bytes([data[32], data[33], data[34], data[35]]);
-                let height = i32::from_le_bytes([data[36], data[37], data[38], data[39]]);
-                let depth = i32::from_le_bytes([data[40], data[41], data[42], data[43]]);
-                let border = i32::from_le_bytes([data[44], data[45], data[46], data[47]]);
-                let image_size = i32::from_le_bytes([data[48], data[49], data[50], data[51]]);
+                let target = super::read_u32_le(data, 20);
+                let level = super::read_i32_le(data, 24);
+                let internalformat = super::read_u32_le(data, 28);
+                let width = super::read_i32_le(data, 32);
+                let height = super::read_i32_le(data, 36);
+                let depth = super::read_i32_le(data, 40);
+                let border = super::read_i32_le(data, 44);
+                let image_size = super::read_i32_le(data, 48);
                 let pixel_data = if data.len() > 52 { &data[52..] } else { &[] };
                 osmesa::gl_compressed_tex_image_3d(
                     target,
@@ -747,12 +747,12 @@ pub(crate) fn dispatch(opcode: u16, data: &[u8]) -> Option<bool> {
         // glCompressedTexSubImage1D (opcode 219)
         219 => {
             if data.len() >= 44 {
-                let target = u32::from_le_bytes([data[20], data[21], data[22], data[23]]);
-                let level = i32::from_le_bytes([data[24], data[25], data[26], data[27]]);
-                let xoffset = i32::from_le_bytes([data[28], data[29], data[30], data[31]]);
-                let width = i32::from_le_bytes([data[32], data[33], data[34], data[35]]);
-                let format = u32::from_le_bytes([data[36], data[37], data[38], data[39]]);
-                let image_size = i32::from_le_bytes([data[40], data[41], data[42], data[43]]);
+                let target = super::read_u32_le(data, 20);
+                let level = super::read_i32_le(data, 24);
+                let xoffset = super::read_i32_le(data, 28);
+                let width = super::read_i32_le(data, 32);
+                let format = super::read_u32_le(data, 36);
+                let image_size = super::read_i32_le(data, 40);
                 let pixel_data = if data.len() > 44 { &data[44..] } else { &[] };
                 osmesa::gl_compressed_tex_sub_image_1d(
                     target, level, xoffset, width, format, image_size, pixel_data,
@@ -762,14 +762,14 @@ pub(crate) fn dispatch(opcode: u16, data: &[u8]) -> Option<bool> {
         // glCompressedTexSubImage2D (opcode 220)
         220 => {
             if data.len() >= 52 {
-                let target = u32::from_le_bytes([data[20], data[21], data[22], data[23]]);
-                let level = i32::from_le_bytes([data[24], data[25], data[26], data[27]]);
-                let xoffset = i32::from_le_bytes([data[28], data[29], data[30], data[31]]);
-                let yoffset = i32::from_le_bytes([data[32], data[33], data[34], data[35]]);
-                let width = i32::from_le_bytes([data[36], data[37], data[38], data[39]]);
-                let height = i32::from_le_bytes([data[40], data[41], data[42], data[43]]);
-                let format = u32::from_le_bytes([data[44], data[45], data[46], data[47]]);
-                let image_size = i32::from_le_bytes([data[48], data[49], data[50], data[51]]);
+                let target = super::read_u32_le(data, 20);
+                let level = super::read_i32_le(data, 24);
+                let xoffset = super::read_i32_le(data, 28);
+                let yoffset = super::read_i32_le(data, 32);
+                let width = super::read_i32_le(data, 36);
+                let height = super::read_i32_le(data, 40);
+                let format = super::read_u32_le(data, 44);
+                let image_size = super::read_i32_le(data, 48);
                 let pixel_data = if data.len() > 52 { &data[52..] } else { &[] };
                 osmesa::gl_compressed_tex_sub_image_2d(
                     target, level, xoffset, yoffset, width, height, format, image_size, pixel_data,
@@ -779,16 +779,16 @@ pub(crate) fn dispatch(opcode: u16, data: &[u8]) -> Option<bool> {
         // glCompressedTexSubImage3D (opcode 221)
         221 => {
             if data.len() >= 60 {
-                let target = u32::from_le_bytes([data[20], data[21], data[22], data[23]]);
-                let level = i32::from_le_bytes([data[24], data[25], data[26], data[27]]);
-                let xoffset = i32::from_le_bytes([data[28], data[29], data[30], data[31]]);
-                let yoffset = i32::from_le_bytes([data[32], data[33], data[34], data[35]]);
-                let zoffset = i32::from_le_bytes([data[36], data[37], data[38], data[39]]);
-                let width = i32::from_le_bytes([data[40], data[41], data[42], data[43]]);
-                let height = i32::from_le_bytes([data[44], data[45], data[46], data[47]]);
-                let depth = i32::from_le_bytes([data[48], data[49], data[50], data[51]]);
-                let format = u32::from_le_bytes([data[52], data[53], data[54], data[55]]);
-                let image_size = i32::from_le_bytes([data[56], data[57], data[58], data[59]]);
+                let target = super::read_u32_le(data, 20);
+                let level = super::read_i32_le(data, 24);
+                let xoffset = super::read_i32_le(data, 28);
+                let yoffset = super::read_i32_le(data, 32);
+                let zoffset = super::read_i32_le(data, 36);
+                let width = super::read_i32_le(data, 40);
+                let height = super::read_i32_le(data, 44);
+                let depth = super::read_i32_le(data, 48);
+                let format = super::read_u32_le(data, 52);
+                let image_size = super::read_i32_le(data, 56);
                 let pixel_data = if data.len() > 60 { &data[60..] } else { &[] };
                 osmesa::gl_compressed_tex_sub_image_3d(
                     target, level, xoffset, yoffset, zoffset, width, height, depth, format,

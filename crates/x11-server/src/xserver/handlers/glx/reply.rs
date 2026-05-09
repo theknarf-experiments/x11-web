@@ -70,7 +70,7 @@ impl GlxReply {
                 .build(),
 
             GlxReply::Values { count, data } | GlxReply::Bytes { count, data } => {
-                let padded = crate::xserver::core::align_to_4(data.len() );
+                let padded = crate::xserver::core::align_to_4(data.len());
                 let mut buf = ReplyBuf::with_extra(seq, padded, false).set_u32(12, count);
                 buf.buf_mut()[32..32 + data.len()].copy_from_slice(&data);
                 buf.build()
@@ -212,7 +212,7 @@ pub(crate) fn are_textures_resident_reply(
 pub(crate) fn build_glx_string_reply(seq: u16, string: &[u8]) -> Vec<u8> {
     // Include null terminator — Mesa allocates exactly n bytes without adding '\0'.
     let n = string.len() + 1;
-    let padded = crate::xserver::core::align_to_4(n );
+    let padded = crate::xserver::core::align_to_4(n);
     let mut reply =
         crate::xserver::reply::ReplyBuf::with_extra(seq, padded, false).set_u32(12, n as u32);
     reply.buf_mut()[32..32 + string.len()].copy_from_slice(string);

@@ -8,14 +8,14 @@ pub(crate) fn dispatch(opcode: u16, data: &[u8]) -> Option<bool> {
         // glEnable
         69 => {
             if data.len() >= 4 {
-                let cap = u32::from_le_bytes([data[0], data[1], data[2], data[3]]);
+                let cap = super::read_u32_le(data, 0);
                 osmesa::gl_enable(cap);
             }
         }
         // glDisable
         68 => {
             if data.len() >= 4 {
-                let cap = u32::from_le_bytes([data[0], data[1], data[2], data[3]]);
+                let cap = super::read_u32_le(data, 0);
                 osmesa::gl_disable(cap);
             }
         }
@@ -30,45 +30,45 @@ pub(crate) fn dispatch(opcode: u16, data: &[u8]) -> Option<bool> {
         // glDepthFunc
         164 => {
             if data.len() >= 4 {
-                let func = u32::from_le_bytes([data[0], data[1], data[2], data[3]]);
+                let func = super::read_u32_le(data, 0);
                 osmesa::gl_depth_func(func);
             }
         }
         // glDepthMask
         135 => {
             if data.len() >= 4 {
-                let flag = u32::from_le_bytes([data[0], data[1], data[2], data[3]]);
+                let flag = super::read_u32_le(data, 0);
                 osmesa::gl_depth_mask(if flag != 0 { 1 } else { 0 });
             }
         }
         // glClearColor
         130 => {
             if data.len() >= 16 {
-                let r = f32::from_le_bytes([data[0], data[1], data[2], data[3]]);
-                let g = f32::from_le_bytes([data[4], data[5], data[6], data[7]]);
-                let b = f32::from_le_bytes([data[8], data[9], data[10], data[11]]);
-                let a = f32::from_le_bytes([data[12], data[13], data[14], data[15]]);
+                let r = super::read_f32_le(data, 0);
+                let g = super::read_f32_le(data, 4);
+                let b = super::read_f32_le(data, 8);
+                let a = super::read_f32_le(data, 12);
                 osmesa::gl_clear_color(r, g, b, a);
             }
         }
         // glClear
         127 => {
             if data.len() >= 4 {
-                let mask = u32::from_le_bytes([data[0], data[1], data[2], data[3]]);
+                let mask = super::read_u32_le(data, 0);
                 osmesa::gl_clear(mask);
             }
         }
         // glClearDepth
         132 => {
             if data.len() >= 8 {
-                let depth = f64::from_le_bytes(data[0..8].try_into().unwrap());
+                let depth = super::read_f64_le(data, 0);
                 osmesa::gl_clear_depth(depth);
             }
         }
         // glClearStencil
         133 => {
             if data.len() >= 4 {
-                let s = i32::from_le_bytes([data[0], data[1], data[2], data[3]]);
+                let s = super::read_i32_le(data, 0);
                 osmesa::gl_clear_stencil(s);
             }
         }
@@ -77,10 +77,10 @@ pub(crate) fn dispatch(opcode: u16, data: &[u8]) -> Option<bool> {
             if data.len() >= 4 {
                 // Each is a GLboolean (4 bytes each in the wire protocol)
                 if data.len() >= 16 {
-                    let r = u32::from_le_bytes([data[0], data[1], data[2], data[3]]);
-                    let g = u32::from_le_bytes([data[4], data[5], data[6], data[7]]);
-                    let b = u32::from_le_bytes([data[8], data[9], data[10], data[11]]);
-                    let a = u32::from_le_bytes([data[12], data[13], data[14], data[15]]);
+                    let r = super::read_u32_le(data, 0);
+                    let g = super::read_u32_le(data, 4);
+                    let b = super::read_u32_le(data, 8);
+                    let a = super::read_u32_le(data, 12);
                     osmesa::gl_color_mask(
                         if r != 0 { 1 } else { 0 },
                         if g != 0 { 1 } else { 0 },
@@ -93,149 +93,149 @@ pub(crate) fn dispatch(opcode: u16, data: &[u8]) -> Option<bool> {
         // glBlendFunc
         160 => {
             if data.len() >= 8 {
-                let sfactor = u32::from_le_bytes([data[0], data[1], data[2], data[3]]);
-                let dfactor = u32::from_le_bytes([data[4], data[5], data[6], data[7]]);
+                let sfactor = super::read_u32_le(data, 0);
+                let dfactor = super::read_u32_le(data, 4);
                 osmesa::gl_blend_func(sfactor, dfactor);
             }
         }
         // glStencilFunc
         162 => {
             if data.len() >= 12 {
-                let func = u32::from_le_bytes([data[0], data[1], data[2], data[3]]);
-                let ref_ = i32::from_le_bytes([data[4], data[5], data[6], data[7]]);
-                let mask = u32::from_le_bytes([data[8], data[9], data[10], data[11]]);
+                let func = super::read_u32_le(data, 0);
+                let ref_ = super::read_i32_le(data, 4);
+                let mask = super::read_u32_le(data, 8);
                 osmesa::gl_stencil_func(func, ref_, mask);
             }
         }
         // glStencilMask (opcode 209)
         209 => {
             if data.len() >= 4 {
-                let mask = u32::from_le_bytes([data[0], data[1], data[2], data[3]]);
+                let mask = super::read_u32_le(data, 0);
                 osmesa::gl_stencil_mask(mask);
             }
         }
         // glStencilOp
         163 => {
             if data.len() >= 12 {
-                let fail = u32::from_le_bytes([data[0], data[1], data[2], data[3]]);
-                let zfail = u32::from_le_bytes([data[4], data[5], data[6], data[7]]);
-                let zpass = u32::from_le_bytes([data[8], data[9], data[10], data[11]]);
+                let fail = super::read_u32_le(data, 0);
+                let zfail = super::read_u32_le(data, 4);
+                let zpass = super::read_u32_le(data, 8);
                 osmesa::gl_stencil_op(fail, zfail, zpass);
             }
         }
         // glScissor
         103 => {
             if data.len() >= 16 {
-                let x = i32::from_le_bytes([data[0], data[1], data[2], data[3]]);
-                let y = i32::from_le_bytes([data[4], data[5], data[6], data[7]]);
-                let w = i32::from_le_bytes([data[8], data[9], data[10], data[11]]);
-                let h = i32::from_le_bytes([data[12], data[13], data[14], data[15]]);
+                let x = super::read_i32_le(data, 0);
+                let y = super::read_i32_le(data, 4);
+                let w = super::read_i32_le(data, 8);
+                let h = super::read_i32_le(data, 12);
                 osmesa::gl_scissor(x, y, w, h);
             }
         }
         // glAlphaFunc
         240 => {
             if data.len() >= 8 {
-                let func = u32::from_le_bytes([data[0], data[1], data[2], data[3]]);
-                let ref_ = f32::from_le_bytes([data[4], data[5], data[6], data[7]]);
+                let func = super::read_u32_le(data, 0);
+                let ref_ = super::read_f32_le(data, 4);
                 osmesa::gl_alpha_func(func, ref_);
             }
         }
         // glHint
         85 => {
             if data.len() >= 8 {
-                let target = u32::from_le_bytes([data[0], data[1], data[2], data[3]]);
-                let mode = u32::from_le_bytes([data[4], data[5], data[6], data[7]]);
+                let target = super::read_u32_le(data, 0);
+                let mode = super::read_u32_le(data, 4);
                 osmesa::gl_hint(target, mode);
             }
         }
         // glLineWidth
         95 => {
             if data.len() >= 4 {
-                let width = f32::from_le_bytes([data[0], data[1], data[2], data[3]]);
+                let width = super::read_f32_le(data, 0);
                 osmesa::gl_line_width(width);
             }
         }
         // glPointSize
         100 => {
             if data.len() >= 4 {
-                let size = f32::from_le_bytes([data[0], data[1], data[2], data[3]]);
+                let size = super::read_f32_le(data, 0);
                 osmesa::gl_point_size(size);
             }
         }
         // glPolygonMode
         101 => {
             if data.len() >= 8 {
-                let face = u32::from_le_bytes([data[0], data[1], data[2], data[3]]);
-                let mode = u32::from_le_bytes([data[4], data[5], data[6], data[7]]);
+                let face = super::read_u32_le(data, 0);
+                let mode = super::read_u32_le(data, 4);
                 osmesa::gl_polygon_mode(face, mode);
             }
         }
         // glCullFace
         79 => {
             if data.len() >= 4 {
-                let mode = u32::from_le_bytes([data[0], data[1], data[2], data[3]]);
+                let mode = super::read_u32_le(data, 0);
                 osmesa::gl_cull_face(mode);
             }
         }
         // glFrontFace
         84 => {
             if data.len() >= 4 {
-                let mode = u32::from_le_bytes([data[0], data[1], data[2], data[3]]);
+                let mode = super::read_u32_le(data, 0);
                 osmesa::gl_front_face(mode);
             }
         }
         // glShadeModel
         104 => {
             if data.len() >= 4 {
-                let mode = u32::from_le_bytes([data[0], data[1], data[2], data[3]]);
+                let mode = super::read_u32_le(data, 0);
                 osmesa::gl_shade_model(mode);
             }
         }
         // glPixelStorei
         110 => {
             if data.len() >= 8 {
-                let pname = u32::from_le_bytes([data[0], data[1], data[2], data[3]]);
-                let param = i32::from_le_bytes([data[4], data[5], data[6], data[7]]);
+                let pname = super::read_u32_le(data, 0);
+                let param = super::read_i32_le(data, 4);
                 osmesa::gl_pixel_storei(pname, param);
             }
         }
         // glPixelStoref (opcode 111)
         111 => {
             if data.len() >= 8 {
-                let pname = u32::from_le_bytes([data[0], data[1], data[2], data[3]]);
-                let param = f32::from_le_bytes([data[4], data[5], data[6], data[7]]);
+                let pname = super::read_u32_le(data, 0);
+                let param = super::read_f32_le(data, 4);
                 osmesa::gl_pixel_storef(pname, param);
             }
         }
         // glPixelTransferf (opcode 112)
         112 => {
             if data.len() >= 8 {
-                let pname = u32::from_le_bytes([data[0], data[1], data[2], data[3]]);
-                let param = f32::from_le_bytes([data[4], data[5], data[6], data[7]]);
+                let pname = super::read_u32_le(data, 0);
+                let param = super::read_f32_le(data, 4);
                 osmesa::gl_pixel_transferf(pname, param);
             }
         }
         // glPixelTransferi (opcode 113)
         113 => {
             if data.len() >= 8 {
-                let pname = u32::from_le_bytes([data[0], data[1], data[2], data[3]]);
-                let param = i32::from_le_bytes([data[4], data[5], data[6], data[7]]);
+                let pname = super::read_u32_le(data, 0);
+                let param = super::read_i32_le(data, 4);
                 osmesa::gl_pixel_transferi(pname, param);
             }
         }
         // glPixelZoom (opcode 114)
         114 => {
             if data.len() >= 8 {
-                let xfactor = f32::from_le_bytes([data[0], data[1], data[2], data[3]]);
-                let yfactor = f32::from_le_bytes([data[4], data[5], data[6], data[7]]);
+                let xfactor = super::read_f32_le(data, 0);
+                let yfactor = super::read_f32_le(data, 4);
                 osmesa::gl_pixel_zoom(xfactor, yfactor);
             }
         }
         // glClipPlane (opcode 77)
         77 => {
             if data.len() >= 36 {
-                let plane = u32::from_le_bytes([data[0], data[1], data[2], data[3]]);
+                let plane = super::read_u32_le(data, 0);
                 let mut eq = [0f64; 4];
                 for i in 0..4 {
                     eq[i] = f64::from_le_bytes(data[4 + i * 8..12 + i * 8].try_into().unwrap());
@@ -246,23 +246,23 @@ pub(crate) fn dispatch(opcode: u16, data: &[u8]) -> Option<bool> {
         // glColorMaterial (opcode 78)
         78 => {
             if data.len() >= 8 {
-                let face = u32::from_le_bytes([data[0], data[1], data[2], data[3]]);
-                let mode = u32::from_le_bytes([data[4], data[5], data[6], data[7]]);
+                let face = super::read_u32_le(data, 0);
+                let mode = super::read_u32_le(data, 4);
                 osmesa::gl_color_material(face, mode);
             }
         }
         // glFogf (opcode 80)
         80 => {
             if data.len() >= 8 {
-                let pname = u32::from_le_bytes([data[0], data[1], data[2], data[3]]);
-                let param = f32::from_le_bytes([data[4], data[5], data[6], data[7]]);
+                let pname = super::read_u32_le(data, 0);
+                let param = super::read_f32_le(data, 4);
                 osmesa::gl_fogf(pname, param);
             }
         }
         // glFogfv (opcode 81)
         81 => {
             if data.len() >= 8 {
-                let pname = u32::from_le_bytes([data[0], data[1], data[2], data[3]]);
+                let pname = super::read_u32_le(data, 0);
                 let count = (data.len() - 4) / 4;
                 let mut params = vec![0f32; count];
                 for i in 0..count {
@@ -279,15 +279,15 @@ pub(crate) fn dispatch(opcode: u16, data: &[u8]) -> Option<bool> {
         // glFogi (opcode 82)
         82 => {
             if data.len() >= 8 {
-                let pname = u32::from_le_bytes([data[0], data[1], data[2], data[3]]);
-                let param = i32::from_le_bytes([data[4], data[5], data[6], data[7]]);
+                let pname = super::read_u32_le(data, 0);
+                let param = super::read_i32_le(data, 4);
                 osmesa::gl_fogi(pname, param);
             }
         }
         // glFogiv (opcode 83)
         83 => {
             if data.len() >= 8 {
-                let pname = u32::from_le_bytes([data[0], data[1], data[2], data[3]]);
+                let pname = super::read_u32_le(data, 0);
                 let count = (data.len() - 4) / 4;
                 let mut params = vec![0i32; count];
                 for i in 0..count {
@@ -304,17 +304,17 @@ pub(crate) fn dispatch(opcode: u16, data: &[u8]) -> Option<bool> {
         // glLightf (opcode 86)
         86 => {
             if data.len() >= 12 {
-                let light = u32::from_le_bytes([data[0], data[1], data[2], data[3]]);
-                let pname = u32::from_le_bytes([data[4], data[5], data[6], data[7]]);
-                let param = f32::from_le_bytes([data[8], data[9], data[10], data[11]]);
+                let light = super::read_u32_le(data, 0);
+                let pname = super::read_u32_le(data, 4);
+                let param = super::read_f32_le(data, 8);
                 osmesa::gl_lightf(light, pname, param);
             }
         }
         // glLightfv (opcode 87)
         87 => {
             if data.len() >= 12 {
-                let light = u32::from_le_bytes([data[0], data[1], data[2], data[3]]);
-                let pname = u32::from_le_bytes([data[4], data[5], data[6], data[7]]);
+                let light = super::read_u32_le(data, 0);
+                let pname = super::read_u32_le(data, 4);
                 let count = (data.len() - 8) / 4;
                 let mut params = vec![0f32; count];
                 for i in 0..count {
@@ -331,17 +331,17 @@ pub(crate) fn dispatch(opcode: u16, data: &[u8]) -> Option<bool> {
         // glLighti (opcode 88)
         88 => {
             if data.len() >= 12 {
-                let light = u32::from_le_bytes([data[0], data[1], data[2], data[3]]);
-                let pname = u32::from_le_bytes([data[4], data[5], data[6], data[7]]);
-                let param = i32::from_le_bytes([data[8], data[9], data[10], data[11]]);
+                let light = super::read_u32_le(data, 0);
+                let pname = super::read_u32_le(data, 4);
+                let param = super::read_i32_le(data, 8);
                 osmesa::gl_lighti(light, pname, param);
             }
         }
         // glLightiv (opcode 89)
         89 => {
             if data.len() >= 12 {
-                let light = u32::from_le_bytes([data[0], data[1], data[2], data[3]]);
-                let pname = u32::from_le_bytes([data[4], data[5], data[6], data[7]]);
+                let light = super::read_u32_le(data, 0);
+                let pname = super::read_u32_le(data, 4);
                 let count = (data.len() - 8) / 4;
                 let mut params = vec![0i32; count];
                 for i in 0..count {
@@ -358,15 +358,15 @@ pub(crate) fn dispatch(opcode: u16, data: &[u8]) -> Option<bool> {
         // glLightModelf (opcode 90)
         90 => {
             if data.len() >= 8 {
-                let pname = u32::from_le_bytes([data[0], data[1], data[2], data[3]]);
-                let param = f32::from_le_bytes([data[4], data[5], data[6], data[7]]);
+                let pname = super::read_u32_le(data, 0);
+                let param = super::read_f32_le(data, 4);
                 osmesa::gl_light_modelf(pname, param);
             }
         }
         // glLightModelfv (opcode 91)
         91 => {
             if data.len() >= 8 {
-                let pname = u32::from_le_bytes([data[0], data[1], data[2], data[3]]);
+                let pname = super::read_u32_le(data, 0);
                 let count = (data.len() - 4) / 4;
                 let mut params = vec![0f32; count];
                 for i in 0..count {
@@ -383,15 +383,15 @@ pub(crate) fn dispatch(opcode: u16, data: &[u8]) -> Option<bool> {
         // glLightModeli (opcode 92)
         92 => {
             if data.len() >= 8 {
-                let pname = u32::from_le_bytes([data[0], data[1], data[2], data[3]]);
-                let param = i32::from_le_bytes([data[4], data[5], data[6], data[7]]);
+                let pname = super::read_u32_le(data, 0);
+                let param = super::read_i32_le(data, 4);
                 osmesa::gl_light_modeli(pname, param);
             }
         }
         // glLightModeliv (opcode 93)
         93 => {
             if data.len() >= 8 {
-                let pname = u32::from_le_bytes([data[0], data[1], data[2], data[3]]);
+                let pname = super::read_u32_le(data, 0);
                 let count = (data.len() - 4) / 4;
                 let mut params = vec![0i32; count];
                 for i in 0..count {
@@ -408,25 +408,25 @@ pub(crate) fn dispatch(opcode: u16, data: &[u8]) -> Option<bool> {
         // glLineStipple (opcode 94)
         94 => {
             if data.len() >= 8 {
-                let factor = i32::from_le_bytes([data[0], data[1], data[2], data[3]]);
-                let pattern = u16::from_le_bytes([data[4], data[5]]);
+                let factor = super::read_i32_le(data, 0);
+                let pattern = super::read_u16_le(data, 4);
                 osmesa::gl_line_stipple(factor, pattern);
             }
         }
         // glMaterialf (opcode 96)
         96 => {
             if data.len() >= 12 {
-                let face = u32::from_le_bytes([data[0], data[1], data[2], data[3]]);
-                let pname = u32::from_le_bytes([data[4], data[5], data[6], data[7]]);
-                let param = f32::from_le_bytes([data[8], data[9], data[10], data[11]]);
+                let face = super::read_u32_le(data, 0);
+                let pname = super::read_u32_le(data, 4);
+                let param = super::read_f32_le(data, 8);
                 osmesa::gl_materialf(face, pname, param);
             }
         }
         // glMaterialfv (opcode 97)
         97 => {
             if data.len() >= 12 {
-                let face = u32::from_le_bytes([data[0], data[1], data[2], data[3]]);
-                let pname = u32::from_le_bytes([data[4], data[5], data[6], data[7]]);
+                let face = super::read_u32_le(data, 0);
+                let pname = super::read_u32_le(data, 4);
                 let count = (data.len() - 8) / 4;
                 let mut params = vec![0f32; count];
                 for i in 0..count {
@@ -443,17 +443,17 @@ pub(crate) fn dispatch(opcode: u16, data: &[u8]) -> Option<bool> {
         // glMateriali (opcode 98)
         98 => {
             if data.len() >= 12 {
-                let face = u32::from_le_bytes([data[0], data[1], data[2], data[3]]);
-                let pname = u32::from_le_bytes([data[4], data[5], data[6], data[7]]);
-                let param = i32::from_le_bytes([data[8], data[9], data[10], data[11]]);
+                let face = super::read_u32_le(data, 0);
+                let pname = super::read_u32_le(data, 4);
+                let param = super::read_i32_le(data, 8);
                 osmesa::gl_materiali(face, pname, param);
             }
         }
         // glMaterialiv (opcode 99)
         99 => {
             if data.len() >= 12 {
-                let face = u32::from_le_bytes([data[0], data[1], data[2], data[3]]);
-                let pname = u32::from_le_bytes([data[4], data[5], data[6], data[7]]);
+                let face = super::read_u32_le(data, 0);
+                let pname = super::read_u32_le(data, 4);
                 let count = (data.len() - 8) / 4;
                 let mut params = vec![0i32; count];
                 for i in 0..count {
@@ -480,31 +480,31 @@ pub(crate) fn dispatch(opcode: u16, data: &[u8]) -> Option<bool> {
         // glLoadName (opcode 126)
         126 => {
             if data.len() >= 4 {
-                let name = u32::from_le_bytes([data[0], data[1], data[2], data[3]]);
+                let name = super::read_u32_le(data, 0);
                 osmesa::gl_load_name(name);
             }
         }
         // glClearAccum (opcode 128)
         128 => {
             if data.len() >= 16 {
-                let r = f32::from_le_bytes([data[0], data[1], data[2], data[3]]);
-                let g = f32::from_le_bytes([data[4], data[5], data[6], data[7]]);
-                let b = f32::from_le_bytes([data[8], data[9], data[10], data[11]]);
-                let a = f32::from_le_bytes([data[12], data[13], data[14], data[15]]);
+                let r = super::read_f32_le(data, 0);
+                let g = super::read_f32_le(data, 4);
+                let b = super::read_f32_le(data, 8);
+                let a = super::read_f32_le(data, 12);
                 osmesa::gl_clear_accum(r, g, b, a);
             }
         }
         // glClearIndex (opcode 129)
         129 => {
             if data.len() >= 4 {
-                let c = f32::from_le_bytes([data[0], data[1], data[2], data[3]]);
+                let c = super::read_f32_le(data, 0);
                 osmesa::gl_clear_index(c);
             }
         }
         // glIndexMask (opcode 131)
         131 => {
             if data.len() >= 4 {
-                let mask = u32::from_le_bytes([data[0], data[1], data[2], data[3]]);
+                let mask = super::read_u32_le(data, 0);
                 osmesa::gl_index_mask(mask);
             }
         }
@@ -515,36 +515,36 @@ pub(crate) fn dispatch(opcode: u16, data: &[u8]) -> Option<bool> {
         // glAccum (opcode 137)
         137 => {
             if data.len() >= 8 {
-                let op = u32::from_le_bytes([data[0], data[1], data[2], data[3]]);
-                let value = f32::from_le_bytes([data[4], data[5], data[6], data[7]]);
+                let op = super::read_u32_le(data, 0);
+                let value = super::read_f32_le(data, 4);
                 osmesa::gl_accum(op, value);
             }
         }
         // glLogicOp (opcode 159)
         159 => {
             if data.len() >= 4 {
-                let opcode_val = u32::from_le_bytes([data[0], data[1], data[2], data[3]]);
+                let opcode_val = super::read_u32_le(data, 0);
                 osmesa::gl_logic_op(opcode_val);
             }
         }
         // glDrawBuffer (opcode 136)
         136 => {
             if data.len() >= 4 {
-                let mode = u32::from_le_bytes([data[0], data[1], data[2], data[3]]);
+                let mode = super::read_u32_le(data, 0);
                 osmesa::gl_draw_buffer(mode);
             }
         }
         // glReadBuffer (opcode 138)
         138 => {
             if data.len() >= 4 {
-                let mode = u32::from_le_bytes([data[0], data[1], data[2], data[3]]);
+                let mode = super::read_u32_le(data, 0);
                 osmesa::gl_read_buffer(mode);
             }
         }
         // glPassThrough (opcode 139)
         139 => {
             if data.len() >= 4 {
-                let token = f32::from_le_bytes([data[0], data[1], data[2], data[3]]);
+                let token = super::read_f32_le(data, 0);
                 osmesa::gl_pass_through(token);
             }
         }
@@ -555,8 +555,8 @@ pub(crate) fn dispatch(opcode: u16, data: &[u8]) -> Option<bool> {
         // glPixelMapfv (opcode 143)
         143 => {
             if data.len() >= 8 {
-                let map = u32::from_le_bytes([data[0], data[1], data[2], data[3]]);
-                let map_size = i32::from_le_bytes([data[4], data[5], data[6], data[7]]);
+                let map = super::read_u32_le(data, 0);
+                let map_size = super::read_i32_le(data, 4);
                 let count = map_size as usize;
                 if data.len() >= 8 + count * 4 {
                     let mut values = vec![0f32; count];
@@ -575,8 +575,8 @@ pub(crate) fn dispatch(opcode: u16, data: &[u8]) -> Option<bool> {
         // glPixelMapuiv (opcode 144)
         144 => {
             if data.len() >= 8 {
-                let map = u32::from_le_bytes([data[0], data[1], data[2], data[3]]);
-                let map_size = i32::from_le_bytes([data[4], data[5], data[6], data[7]]);
+                let map = super::read_u32_le(data, 0);
+                let map_size = super::read_i32_le(data, 4);
                 let count = map_size as usize;
                 if data.len() >= 8 + count * 4 {
                     let mut values = vec![0u32; count];
@@ -595,13 +595,13 @@ pub(crate) fn dispatch(opcode: u16, data: &[u8]) -> Option<bool> {
         // glPixelMapusv (opcode 145)
         145 => {
             if data.len() >= 8 {
-                let map = u32::from_le_bytes([data[0], data[1], data[2], data[3]]);
-                let map_size = i32::from_le_bytes([data[4], data[5], data[6], data[7]]);
+                let map = super::read_u32_le(data, 0);
+                let map_size = super::read_i32_le(data, 4);
                 let count = map_size as usize;
                 if data.len() >= 8 + count * 2 {
                     let mut values = vec![0u16; count];
                     for i in 0..count {
-                        values[i] = u16::from_le_bytes([data[8 + i * 2], data[9 + i * 2]]);
+                        values[i] = super::read_u16_le(data, 8 + i * 2);
                     }
                     osmesa::gl_pixel_mapusv(map, map_size, &values);
                 }
@@ -610,101 +610,101 @@ pub(crate) fn dispatch(opcode: u16, data: &[u8]) -> Option<bool> {
         // glPushName (opcode 146)
         146 => {
             if data.len() >= 4 {
-                let name = u32::from_le_bytes([data[0], data[1], data[2], data[3]]);
+                let name = super::read_u32_le(data, 0);
                 osmesa::gl_push_name(name);
             }
         }
         // glMapGrid1d (opcode 147)
         147 => {
             if data.len() >= 20 {
-                let un = i32::from_le_bytes([data[0], data[1], data[2], data[3]]);
-                let u1 = f64::from_le_bytes(data[4..12].try_into().unwrap());
-                let u2 = f64::from_le_bytes(data[12..20].try_into().unwrap());
+                let un = super::read_i32_le(data, 0);
+                let u1 = super::read_f64_le(data, 4);
+                let u2 = super::read_f64_le(data, 12);
                 osmesa::gl_map_grid1d(un, u1, u2);
             }
         }
         // glMapGrid1f (opcode 148)
         148 => {
             if data.len() >= 12 {
-                let un = i32::from_le_bytes([data[0], data[1], data[2], data[3]]);
-                let u1 = f32::from_le_bytes([data[4], data[5], data[6], data[7]]);
-                let u2 = f32::from_le_bytes([data[8], data[9], data[10], data[11]]);
+                let un = super::read_i32_le(data, 0);
+                let u1 = super::read_f32_le(data, 4);
+                let u2 = super::read_f32_le(data, 8);
                 osmesa::gl_map_grid1f(un, u1, u2);
             }
         }
         // glMapGrid2d (opcode 149)
         149 => {
             if data.len() >= 40 {
-                let un = i32::from_le_bytes([data[0], data[1], data[2], data[3]]);
-                let u1 = f64::from_le_bytes(data[4..12].try_into().unwrap());
-                let u2 = f64::from_le_bytes(data[12..20].try_into().unwrap());
-                let vn = i32::from_le_bytes([data[20], data[21], data[22], data[23]]);
-                let v1 = f64::from_le_bytes(data[24..32].try_into().unwrap());
-                let v2 = f64::from_le_bytes(data[32..40].try_into().unwrap());
+                let un = super::read_i32_le(data, 0);
+                let u1 = super::read_f64_le(data, 4);
+                let u2 = super::read_f64_le(data, 12);
+                let vn = super::read_i32_le(data, 20);
+                let v1 = super::read_f64_le(data, 24);
+                let v2 = super::read_f64_le(data, 32);
                 osmesa::gl_map_grid2d(un, u1, u2, vn, v1, v2);
             }
         }
         // glPushAttrib (opcode 150)
         150 => {
             if data.len() >= 4 {
-                let mask = u32::from_le_bytes([data[0], data[1], data[2], data[3]]);
+                let mask = super::read_u32_le(data, 0);
                 osmesa::gl_push_attrib(mask);
             }
         }
         // glPolygonOffset (opcode 161)
         161 => {
             if data.len() >= 8 {
-                let factor = f32::from_le_bytes([data[0], data[1], data[2], data[3]]);
-                let units = f32::from_le_bytes([data[4], data[5], data[6], data[7]]);
+                let factor = super::read_f32_le(data, 0);
+                let units = super::read_f32_le(data, 4);
                 osmesa::gl_polygon_offset(factor, units);
             }
         }
         // glDepthRange (opcode 174)
         174 => {
             if data.len() >= 16 {
-                let near = f64::from_le_bytes(data[0..8].try_into().unwrap());
-                let far = f64::from_le_bytes(data[8..16].try_into().unwrap());
+                let near = super::read_f64_le(data, 0);
+                let far = super::read_f64_le(data, 8);
                 osmesa::gl_depth_range(near, far);
             }
         }
         // glPolygonOffset (alternate opcode 192)
         192 => {
             if data.len() >= 8 {
-                let factor = f32::from_le_bytes([data[0], data[1], data[2], data[3]]);
-                let units = f32::from_le_bytes([data[4], data[5], data[6], data[7]]);
+                let factor = super::read_f32_le(data, 0);
+                let units = super::read_f32_le(data, 4);
                 osmesa::gl_polygon_offset(factor, units);
             }
         }
         // glMultiTexCoord4dv (opcode 210): target(4) + s(8) + t(8) + r(8) + q(8) = 36 bytes
         210 => {
             if data.len() >= 36 {
-                let target = u32::from_le_bytes([data[0], data[1], data[2], data[3]]);
-                let s = f64::from_le_bytes(data[4..12].try_into().unwrap()) as f32;
-                let t = f64::from_le_bytes(data[12..20].try_into().unwrap()) as f32;
-                let r = f64::from_le_bytes(data[20..28].try_into().unwrap()) as f32;
-                let q = f64::from_le_bytes(data[28..36].try_into().unwrap()) as f32;
+                let target = super::read_u32_le(data, 0);
+                let s = super::read_f64_le(data, 4) as f32;
+                let t = super::read_f64_le(data, 12) as f32;
+                let r = super::read_f64_le(data, 20) as f32;
+                let q = super::read_f64_le(data, 28) as f32;
                 osmesa::gl_multi_tex_coord4f(target, s, t, r, q);
             }
         }
         // glMultiTexCoord4iv (opcode 211): target(4) + s(4) + t(4) + r(4) + q(4) = 20 bytes
         211 => {
             if data.len() >= 20 {
-                let target = u32::from_le_bytes([data[0], data[1], data[2], data[3]]);
-                let s = i32::from_le_bytes([data[4], data[5], data[6], data[7]]) as f32;
-                let t = i32::from_le_bytes([data[8], data[9], data[10], data[11]]) as f32;
-                let r = i32::from_le_bytes([data[12], data[13], data[14], data[15]]) as f32;
-                let q = i32::from_le_bytes([data[16], data[17], data[18], data[19]]) as f32;
+                let target = super::read_u32_le(data, 0);
+                let s = super::read_i32_le(data, 4) as f32;
+                let t = super::read_i32_le(data, 8) as f32;
+                let r = super::read_i32_le(data, 12) as f32;
+                let q = super::read_i32_le(data, 16) as f32;
                 osmesa::gl_multi_tex_coord4f(target, s, t, r, q);
             }
         }
         // glMultiTexCoord4sv (opcode 212): target(4) + s(2) + t(2) + r(2) + q(2) = 12 bytes
         212 => {
             if data.len() >= 12 {
-                let target = u32::from_le_bytes([data[0], data[1], data[2], data[3]]);
-                let s = i16::from_le_bytes([data[4], data[5]]) as f32;
-                let t = i16::from_le_bytes([data[6], data[7]]) as f32;
-                let r = i16::from_le_bytes([data[8], data[9]]) as f32;
-                let q = i16::from_le_bytes([data[10], data[11]]) as f32;
+                let target = super::read_u32_le(data, 0);
+                let s = super::read_i16_le(data, 4) as f32;
+                let t = super::read_i16_le(data, 6) as f32;
+                let r = super::read_i16_le(data, 8) as f32;
+                let q = super::read_i16_le(data, 10) as f32;
                 osmesa::gl_multi_tex_coord4f(target, s, t, r, q);
             }
         }
@@ -712,12 +712,12 @@ pub(crate) fn dispatch(opcode: u16, data: &[u8]) -> Option<bool> {
         //   + internalformat(4) + width(4) + border(4) + imageSize(4) + data...
         213 => {
             if data.len() >= 44 {
-                let target = u32::from_le_bytes([data[20], data[21], data[22], data[23]]);
-                let level = i32::from_le_bytes([data[24], data[25], data[26], data[27]]);
-                let internalformat = u32::from_le_bytes([data[28], data[29], data[30], data[31]]);
-                let width = i32::from_le_bytes([data[32], data[33], data[34], data[35]]);
-                let border = i32::from_le_bytes([data[36], data[37], data[38], data[39]]);
-                let image_size = i32::from_le_bytes([data[40], data[41], data[42], data[43]]);
+                let target = super::read_u32_le(data, 20);
+                let level = super::read_i32_le(data, 24);
+                let internalformat = super::read_u32_le(data, 28);
+                let width = super::read_i32_le(data, 32);
+                let border = super::read_i32_le(data, 36);
+                let image_size = super::read_i32_le(data, 40);
                 let pixel_data = if data.len() > 44 { &data[44..] } else { &[] };
                 osmesa::gl_compressed_tex_image_1d(
                     target,
@@ -734,13 +734,13 @@ pub(crate) fn dispatch(opcode: u16, data: &[u8]) -> Option<bool> {
         //   + internalformat(4) + width(4) + height(4) + border(4) + imageSize(4) + data...
         214 => {
             if data.len() >= 48 {
-                let target = u32::from_le_bytes([data[20], data[21], data[22], data[23]]);
-                let level = i32::from_le_bytes([data[24], data[25], data[26], data[27]]);
-                let internalformat = u32::from_le_bytes([data[28], data[29], data[30], data[31]]);
-                let width = i32::from_le_bytes([data[32], data[33], data[34], data[35]]);
-                let height = i32::from_le_bytes([data[36], data[37], data[38], data[39]]);
-                let border = i32::from_le_bytes([data[40], data[41], data[42], data[43]]);
-                let image_size = i32::from_le_bytes([data[44], data[45], data[46], data[47]]);
+                let target = super::read_u32_le(data, 20);
+                let level = super::read_i32_le(data, 24);
+                let internalformat = super::read_u32_le(data, 28);
+                let width = super::read_i32_le(data, 32);
+                let height = super::read_i32_le(data, 36);
+                let border = super::read_i32_le(data, 40);
+                let image_size = super::read_i32_le(data, 44);
                 let pixel_data = if data.len() > 48 { &data[48..] } else { &[] };
                 osmesa::gl_compressed_tex_image_2d(
                     target,
@@ -758,14 +758,14 @@ pub(crate) fn dispatch(opcode: u16, data: &[u8]) -> Option<bool> {
         //   + internalformat(4) + width(4) + height(4) + depth(4) + border(4) + imageSize(4) + data...
         215 => {
             if data.len() >= 52 {
-                let target = u32::from_le_bytes([data[20], data[21], data[22], data[23]]);
-                let level = i32::from_le_bytes([data[24], data[25], data[26], data[27]]);
-                let internalformat = u32::from_le_bytes([data[28], data[29], data[30], data[31]]);
-                let width = i32::from_le_bytes([data[32], data[33], data[34], data[35]]);
-                let height = i32::from_le_bytes([data[36], data[37], data[38], data[39]]);
-                let depth = i32::from_le_bytes([data[40], data[41], data[42], data[43]]);
-                let border = i32::from_le_bytes([data[44], data[45], data[46], data[47]]);
-                let image_size = i32::from_le_bytes([data[48], data[49], data[50], data[51]]);
+                let target = super::read_u32_le(data, 20);
+                let level = super::read_i32_le(data, 24);
+                let internalformat = super::read_u32_le(data, 28);
+                let width = super::read_i32_le(data, 32);
+                let height = super::read_i32_le(data, 36);
+                let depth = super::read_i32_le(data, 40);
+                let border = super::read_i32_le(data, 44);
+                let image_size = super::read_i32_le(data, 48);
                 let pixel_data = if data.len() > 52 { &data[52..] } else { &[] };
                 osmesa::gl_compressed_tex_image_3d(
                     target,
@@ -790,7 +790,7 @@ pub(crate) fn dispatch(opcode: u16, data: &[u8]) -> Option<bool> {
         // glSampleCoverage (opcode 229)
         229 => {
             if data.len() >= 8 {
-                let value = f32::from_le_bytes([data[0], data[1], data[2], data[3]]);
+                let value = super::read_f32_le(data, 0);
                 let invert = data[4];
                 osmesa::gl_sample_coverage(value, invert);
             }
@@ -802,32 +802,32 @@ pub(crate) fn dispatch(opcode: u16, data: &[u8]) -> Option<bool> {
         // glBlendColor (opcode 4096)
         4096 => {
             if data.len() >= 16 {
-                let r = f32::from_le_bytes([data[0], data[1], data[2], data[3]]);
-                let g = f32::from_le_bytes([data[4], data[5], data[6], data[7]]);
-                let b = f32::from_le_bytes([data[8], data[9], data[10], data[11]]);
-                let a = f32::from_le_bytes([data[12], data[13], data[14], data[15]]);
+                let r = super::read_f32_le(data, 0);
+                let g = super::read_f32_le(data, 4);
+                let b = super::read_f32_le(data, 8);
+                let a = super::read_f32_le(data, 12);
                 osmesa::gl_blend_color(r, g, b, a);
             }
         }
         // glBlendEquation (opcode 4097)
         4097 => {
             if data.len() >= 4 {
-                let mode = u32::from_le_bytes([data[0], data[1], data[2], data[3]]);
+                let mode = super::read_u32_le(data, 0);
                 osmesa::gl_blend_equation(mode);
             }
         }
         // glPointParameterf (opcode 4120)
         4120 => {
             if data.len() >= 8 {
-                let pname = u32::from_le_bytes([data[0], data[1], data[2], data[3]]);
-                let param = f32::from_le_bytes([data[4], data[5], data[6], data[7]]);
+                let pname = super::read_u32_le(data, 0);
+                let param = super::read_f32_le(data, 4);
                 osmesa::gl_point_parameterf(pname, param);
             }
         }
         // glPointParameterfv (opcode 4121)
         4121 => {
             if data.len() >= 8 {
-                let pname = u32::from_le_bytes([data[0], data[1], data[2], data[3]]);
+                let pname = super::read_u32_le(data, 0);
                 let count = (data.len() - 4) / 4;
                 let mut params = vec![0f32; count];
                 for i in 0..count {
@@ -844,46 +844,46 @@ pub(crate) fn dispatch(opcode: u16, data: &[u8]) -> Option<bool> {
         // glStencilFuncSeparate (opcode 4129)
         4129 => {
             if data.len() >= 16 {
-                let face = u32::from_le_bytes([data[0], data[1], data[2], data[3]]);
-                let func = u32::from_le_bytes([data[4], data[5], data[6], data[7]]);
-                let ref_ = i32::from_le_bytes([data[8], data[9], data[10], data[11]]);
-                let mask = u32::from_le_bytes([data[12], data[13], data[14], data[15]]);
+                let face = super::read_u32_le(data, 0);
+                let func = super::read_u32_le(data, 4);
+                let ref_ = super::read_i32_le(data, 8);
+                let mask = super::read_u32_le(data, 12);
                 osmesa::gl_stencil_func_separate(face, func, ref_, mask);
             }
         }
         // glStencilOpSeparate (opcode 4130)
         4130 => {
             if data.len() >= 16 {
-                let face = u32::from_le_bytes([data[0], data[1], data[2], data[3]]);
-                let sfail = u32::from_le_bytes([data[4], data[5], data[6], data[7]]);
-                let dpfail = u32::from_le_bytes([data[8], data[9], data[10], data[11]]);
-                let dppass = u32::from_le_bytes([data[12], data[13], data[14], data[15]]);
+                let face = super::read_u32_le(data, 0);
+                let sfail = super::read_u32_le(data, 4);
+                let dpfail = super::read_u32_le(data, 8);
+                let dppass = super::read_u32_le(data, 12);
                 osmesa::gl_stencil_op_separate(face, sfail, dpfail, dppass);
             }
         }
         // glStencilMaskSeparate (opcode 4131)
         4131 => {
             if data.len() >= 8 {
-                let face = u32::from_le_bytes([data[0], data[1], data[2], data[3]]);
-                let mask = u32::from_le_bytes([data[4], data[5], data[6], data[7]]);
+                let face = super::read_u32_le(data, 0);
+                let mask = super::read_u32_le(data, 4);
                 osmesa::gl_stencil_mask_separate(face, mask);
             }
         }
         // glBlendFuncSeparate (opcode 4134)
         4134 => {
             if data.len() >= 16 {
-                let srgb = u32::from_le_bytes([data[0], data[1], data[2], data[3]]);
-                let drgb = u32::from_le_bytes([data[4], data[5], data[6], data[7]]);
-                let salpha = u32::from_le_bytes([data[8], data[9], data[10], data[11]]);
-                let dalpha = u32::from_le_bytes([data[12], data[13], data[14], data[15]]);
+                let srgb = super::read_u32_le(data, 0);
+                let drgb = super::read_u32_le(data, 4);
+                let salpha = super::read_u32_le(data, 8);
+                let dalpha = super::read_u32_le(data, 12);
                 osmesa::gl_blend_func_separate(srgb, drgb, salpha, dalpha);
             }
         }
         // glPointParameteri (opcode 4222)
         4222 => {
             if data.len() >= 8 {
-                let pname = u32::from_le_bytes([data[0], data[1], data[2], data[3]]);
-                let param = i32::from_le_bytes([data[4], data[5], data[6], data[7]]);
+                let pname = super::read_u32_le(data, 0);
+                let param = super::read_i32_le(data, 4);
                 osmesa::gl_point_parameteri(pname, param);
             }
         }

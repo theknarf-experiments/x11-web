@@ -26,10 +26,10 @@ use crate::xserver::core::require_len;
 
 pub(crate) fn handle_create_context(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
     require_len!(data, 24, seq, 159, 3, state.msb_first);
-    let ctx_id = u32::from_le_bytes([data[4], data[5], data[6], data[7]]);
-    let visual = u32::from_le_bytes([data[8], data[9], data[10], data[11]]);
-    let screen = u32::from_le_bytes([data[12], data[13], data[14], data[15]]);
-    let share_list = u32::from_le_bytes([data[16], data[17], data[18], data[19]]);
+    let ctx_id = super::render::read_u32_le(data, 4);
+    let visual = super::render::read_u32_le(data, 8);
+    let screen = super::render::read_u32_le(data, 12);
+    let share_list = super::render::read_u32_le(data, 16);
 
     let tag = state.glx.next_tag;
     state.glx.next_tag += 1;
@@ -57,11 +57,11 @@ pub(crate) fn handle_create_context(state: &mut ClientState, data: &[u8], seq: u
 pub(crate) fn handle_create_new_context(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
     // Same layout but uses FBConfig ID instead of visual
     require_len!(data, 28, seq, 159, 24, state.msb_first);
-    let ctx_id = u32::from_le_bytes([data[4], data[5], data[6], data[7]]);
-    let fbconfig = u32::from_le_bytes([data[8], data[9], data[10], data[11]]);
-    let screen = u32::from_le_bytes([data[12], data[13], data[14], data[15]]);
+    let ctx_id = super::render::read_u32_le(data, 4);
+    let fbconfig = super::render::read_u32_le(data, 8);
+    let screen = super::render::read_u32_le(data, 12);
     let share_list = if data.len() >= 24 {
-        u32::from_le_bytes([data[20], data[21], data[22], data[23]])
+        super::render::read_u32_le(data, 20)
     } else {
         0
     };
@@ -102,10 +102,10 @@ pub(crate) fn handle_create_context_attribs(
     seq: u16,
 ) -> Vec<u8> {
     require_len!(data, 28, seq, 159, 34, state.msb_first);
-    let ctx_id = u32::from_le_bytes([data[4], data[5], data[6], data[7]]);
-    let fbconfig = u32::from_le_bytes([data[8], data[9], data[10], data[11]]);
-    let screen = u32::from_le_bytes([data[12], data[13], data[14], data[15]]);
-    let share_list = u32::from_le_bytes([data[16], data[17], data[18], data[19]]);
+    let ctx_id = super::render::read_u32_le(data, 4);
+    let fbconfig = super::render::read_u32_le(data, 8);
+    let screen = super::render::read_u32_le(data, 12);
+    let share_list = super::render::read_u32_le(data, 16);
 
     let visual = if fbconfig == super::FBCONFIG_ARGB {
         VISUAL_TRUE_COLOR_ARGB_32
@@ -138,7 +138,7 @@ pub(crate) fn handle_create_context_attribs(
 
 pub(crate) fn handle_destroy_context(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
     require_len!(data, 8, seq, 159, 4, state.msb_first);
-    let ctx_id = u32::from_le_bytes([data[4], data[5], data[6], data[7]]);
+    let ctx_id = super::render::read_u32_le(data, 4);
     state.glx.contexts.remove(&ctx_id);
     state.recycle_xid(ctx_id);
     if state.glx.current_context == ctx_id {
@@ -155,8 +155,8 @@ pub(crate) fn handle_destroy_context(state: &mut ClientState, data: &[u8], seq: 
 
 pub(crate) fn handle_make_current(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
     require_len!(data, 16, seq, 159, 5, state.msb_first);
-    let drawable = u32::from_le_bytes([data[4], data[5], data[6], data[7]]);
-    let ctx_id = u32::from_le_bytes([data[8], data[9], data[10], data[11]]);
+    let drawable = super::render::read_u32_le(data, 4);
+    let ctx_id = super::render::read_u32_le(data, 8);
 
     let tag = do_make_current(state, ctx_id, drawable);
 
@@ -173,9 +173,9 @@ pub(crate) fn handle_make_context_current(
     seq: u16,
 ) -> Vec<u8> {
     require_len!(data, 20, seq, 159, 26, state.msb_first);
-    let drawable = u32::from_le_bytes([data[4], data[5], data[6], data[7]]);
-    let _read_drawable = u32::from_le_bytes([data[8], data[9], data[10], data[11]]);
-    let ctx_id = u32::from_le_bytes([data[12], data[13], data[14], data[15]]);
+    let drawable = super::render::read_u32_le(data, 4);
+    let _read_drawable = super::render::read_u32_le(data, 8);
+    let ctx_id = super::render::read_u32_le(data, 12);
 
     let tag = do_make_current(state, ctx_id, drawable);
 
@@ -247,9 +247,9 @@ pub(crate) fn handle_is_direct(seq: u16) -> Vec<u8> {
 pub(crate) fn handle_copy_context(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
     // Wire: src_context(4) dst_context(4) mask(4) src_context_tag(4)
     require_len!(data, 20, seq, 159, 10, state.msb_first);
-    let src_ctx = u32::from_le_bytes([data[4], data[5], data[6], data[7]]);
-    let dst_ctx = u32::from_le_bytes([data[8], data[9], data[10], data[11]]);
-    let _mask = u32::from_le_bytes([data[12], data[13], data[14], data[15]]);
+    let src_ctx = super::render::read_u32_le(data, 4);
+    let dst_ctx = super::render::read_u32_le(data, 8);
+    let _mask = super::render::read_u32_le(data, 12);
 
     // Validate both contexts exist
     if !state.glx.contexts.contains_key(&src_ctx) {
@@ -272,7 +272,7 @@ pub(crate) fn handle_glx_single(state: &mut ClientState, data: &[u8], seq: u16) 
     // GLX single GL commands arrive as individual minor opcodes (101+).
     // Wire layout: major_opcode(1) minor=gl_opcode(1) req_len(2) context_tag(4) payload(...)
     require_len!(data, 8, seq, 159, data[1] as u16, state.msb_first);
-    let _context_tag = u32::from_le_bytes([data[4], data[5], data[6], data[7]]);
+    let _context_tag = super::render::read_u32_le(data, 4);
     let gl_opcode = data[1] as u32;
     let payload = if data.len() > 8 { &data[8..] } else { &[] };
 
@@ -346,7 +346,7 @@ pub(crate) fn handle_vendor_private_with_reply(data: &[u8], seq: u16) -> Vec<u8>
     if data.len() < 12 {
         return super::reply::GlxReply::Empty.encode(seq);
     }
-    let vendor_code = u32::from_le_bytes([data[4], data[5], data[6], data[7]]);
+    let vendor_code = super::render::read_u32_le(data, 4);
 
     match vendor_code {
         // glXGetProcAddressARB (vendor code 1296)
@@ -367,8 +367,8 @@ pub(crate) fn handle_vendor_private_with_reply(data: &[u8], seq: u16) -> Vec<u8>
 
 pub(crate) fn handle_swap_buffers(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
     require_len!(data, 12, seq, 159, 11, state.msb_first);
-    let _tag = u32::from_le_bytes([data[4], data[5], data[6], data[7]]);
-    let drawable = u32::from_le_bytes([data[8], data[9], data[10], data[11]]);
+    let _tag = super::render::read_u32_le(data, 4);
+    let drawable = super::render::read_u32_le(data, 8);
 
     #[cfg(feature = "osmesa")]
     {
