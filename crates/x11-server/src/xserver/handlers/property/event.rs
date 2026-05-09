@@ -162,7 +162,7 @@ pub(crate) fn handle_send_event(state: &mut ClientState, req: &SendEventRequest)
                     win.properties.insert(
                         net_wm_state_atom,
                         PropertyValue {
-                            prop_type: 4,
+                            prop_type: crate::xserver::atoms::predef::ATOM,
                             format: 32,
                             data: data_bytes,
                         },
@@ -487,7 +487,7 @@ pub(crate) fn handle_send_event(state: &mut ClientState, req: &SendEventRequest)
                     win.properties.insert(
                         atom_frame,
                         PropertyValue {
-                            prop_type: 6, // CARDINAL
+                            prop_type: crate::xserver::atoms::predef::CARDINAL,
                             format: 32,
                             data,
                         },
@@ -635,7 +635,7 @@ pub(crate) fn handle_send_event(state: &mut ClientState, req: &SendEventRequest)
                         win.properties.insert(
                             net_wm_state_atom,
                             PropertyValue {
-                                prop_type: 4,
+                                prop_type: crate::xserver::atoms::predef::ATOM,
                                 format: 32,
                                 data,
                             },

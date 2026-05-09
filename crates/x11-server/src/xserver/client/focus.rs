@@ -102,7 +102,7 @@ impl ClientState {
                 root.properties.insert(
                     net_active_atom,
                     PropertyValue {
-                        prop_type: 33, // WINDOW
+                        prop_type: crate::xserver::atoms::predef::WINDOW,
                         format: 32,
                         data,
                     },
@@ -358,7 +358,7 @@ impl ClientState {
             root.properties.insert(
                 net_client_list_atom,
                 PropertyValue {
-                    prop_type: 33, // WINDOW
+                    prop_type: crate::xserver::atoms::predef::WINDOW,
                     format: 32,
                     data,
                 },
@@ -366,7 +366,7 @@ impl ClientState {
             root.properties.insert(
                 net_client_list_stacking_atom,
                 PropertyValue {
-                    prop_type: 33,
+                    prop_type: crate::xserver::atoms::predef::WINDOW,
                     format: 32,
                     data: stacking_data,
                 },
@@ -416,7 +416,7 @@ impl ClientState {
             win.properties.insert(
                 allowed_atom,
                 PropertyValue {
-                    prop_type: 4, // ATOM
+                    prop_type: crate::xserver::atoms::predef::ATOM,
                     format: 32,
                     data,
                 },
@@ -599,7 +599,7 @@ impl ClientState {
             root.properties.insert(
                 net_workarea_atom,
                 PropertyValue {
-                    prop_type: 6, // CARDINAL
+                    prop_type: crate::xserver::atoms::predef::CARDINAL,
                     format: 32,
                     data,
                 },

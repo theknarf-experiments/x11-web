@@ -49,7 +49,7 @@ pub(crate) fn handle_xresource_request(state: &mut ClientState, data: &[u8], seq
                 let off = 32 + i * 8;
                 reply = reply
                     .set_u32(off, resource_base)
-                    .set_u32(off + 4, 0x003FFFFF);
+                    .set_u32(off + 4, RESOURCE_ID_MASK);
             }
 
             reply.build()
@@ -176,7 +176,7 @@ pub(crate) fn handle_xresource_request(state: &mut ClientState, data: &[u8], seq
                     client_bases.clone()
                 } else {
                     // Find matching client by resource base
-                    let base = client_xid & !0x003FFFFF;
+                    let base = client_xid & !RESOURCE_ID_MASK;
                     if client_bases.contains(&base) {
                         vec![base]
                     } else {

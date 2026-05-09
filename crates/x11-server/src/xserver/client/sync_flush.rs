@@ -298,7 +298,8 @@ impl ClientState {
                     for (damage_id, level) in damage_matches {
                         let event = serialize_event(
                             &damage::NotifyEvent {
-                                response_type: 91,
+                                response_type: crate::xserver::extensions::DAMAGE_FIRST_EVENT
+                                    + damage::NOTIFY_EVENT,
                                 level: ReportLevel::from(level),
                                 sequence: seq,
                                 drawable: wid,
@@ -409,7 +410,8 @@ impl ClientState {
         for (damage_id, level) in matches {
             let event = serialize_event(
                 &damage::NotifyEvent {
-                    response_type: 91,
+                    response_type: crate::xserver::extensions::DAMAGE_FIRST_EVENT
+                        + damage::NOTIFY_EVENT,
                     level: ReportLevel::from(level),
                     sequence: seq,
                     drawable: resolved,

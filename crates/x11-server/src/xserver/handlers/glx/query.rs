@@ -1,7 +1,8 @@
 //! GLX query operations (QueryVersion, GetVisualConfigs, GetFBConfigs,
 //! QueryExtensionsString, QueryServerString).
 
-use super::super::super::core::ROOT_VISUAL;
+use super::super::super::core::{ROOT_VISUAL, VISUAL_TRUE_COLOR_ARGB_32};
+use super::{FBCONFIG_ARGB, FBCONFIG_RGB};
 use super::{
     FBCONFIG_ATTRIB_COUNT, GLX_ACCUM_ALPHA_SIZE, GLX_ACCUM_BLUE_SIZE, GLX_ACCUM_GREEN_SIZE,
     GLX_ACCUM_RED_SIZE, GLX_ALPHA_SIZE, GLX_AUX_BUFFERS, GLX_BLUE_SIZE, GLX_BUFFER_SIZE,
@@ -99,7 +100,7 @@ pub(crate) fn handle_get_fb_configs(_data: &[u8], seq: u16) -> Vec<u8> {
     // comparing rgbBits; setting 32 here causes "No matching fbConfigs" because
     // swrast's 24-bit RGB DRI config has rgbBits=24, not 32.
     let config1: [(u32, u32); FBCONFIG_ATTRIB_COUNT] = [
-        (GLX_FBCONFIG_ID, 1),
+        (GLX_FBCONFIG_ID, FBCONFIG_RGB),
         (GLX_VISUAL_ID, ROOT_VISUAL),
         (GLX_X_RENDERABLE, 1),
         (GLX_RENDER_TYPE, GLX_RGBA_BIT),
@@ -134,8 +135,8 @@ pub(crate) fn handle_get_fb_configs(_data: &[u8], seq: u16) -> Vec<u8> {
 
     // FBConfig 2: 32-bit ARGB
     let config2: [(u32, u32); FBCONFIG_ATTRIB_COUNT] = [
-        (GLX_FBCONFIG_ID, 2),
-        (GLX_VISUAL_ID, 0x40), // ARGB visual
+        (GLX_FBCONFIG_ID, FBCONFIG_ARGB),
+        (GLX_VISUAL_ID, VISUAL_TRUE_COLOR_ARGB_32),
         (GLX_X_RENDERABLE, 1),
         (GLX_RENDER_TYPE, GLX_RGBA_BIT),
         (

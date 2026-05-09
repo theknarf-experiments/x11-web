@@ -185,7 +185,7 @@ fn check_alarms(
         };
         let event = serialize_event(
             &AlarmNotifyEvent {
-                response_type: 83,
+                response_type: crate::xserver::extensions::SYNC_FIRST_EVENT,
                 kind: 0,
                 sequence: seq,
                 alarm: alarm_id,

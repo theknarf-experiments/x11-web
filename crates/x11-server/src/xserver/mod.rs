@@ -204,7 +204,7 @@ impl X11Server {
                 root_properties.insert(
                     atom,
                     PropertyValue {
-                        prop_type: 6,
+                        prop_type: crate::xserver::atoms::predef::CARDINAL,
                         format: 32,
                         data: cardinal_one.clone(),
                     },
@@ -325,7 +325,7 @@ impl X11Server {
             root_properties.insert(
                 net_supported_atom,
                 PropertyValue {
-                    prop_type: 4, // ATOM
+                    prop_type: crate::xserver::atoms::predef::ATOM,
                     format: 32,
                     data: supported_data,
                 },
@@ -338,7 +338,7 @@ impl X11Server {
             root_properties.insert(
                 net_supporting,
                 PropertyValue {
-                    prop_type: 33, // WINDOW
+                    prop_type: crate::xserver::atoms::predef::WINDOW,
                     format: 32,
                     data: WM_CHECK_WINDOW.to_le_bytes().to_vec(),
                 },
@@ -361,7 +361,7 @@ impl X11Server {
             root_properties.insert(
                 net_num_desktops,
                 PropertyValue {
-                    prop_type: 6, // CARDINAL
+                    prop_type: crate::xserver::atoms::predef::CARDINAL,
                     format: 32,
                     data: 1u32.to_le_bytes().to_vec(),
                 },
@@ -372,7 +372,7 @@ impl X11Server {
             root_properties.insert(
                 net_cur_desktop,
                 PropertyValue {
-                    prop_type: 6,
+                    prop_type: crate::xserver::atoms::predef::CARDINAL,
                     format: 32,
                     data: 0u32.to_le_bytes().to_vec(),
                 },
@@ -386,7 +386,7 @@ impl X11Server {
             root_properties.insert(
                 net_desktop_geom,
                 PropertyValue {
-                    prop_type: 6,
+                    prop_type: crate::xserver::atoms::predef::CARDINAL,
                     format: 32,
                     data: geom_data,
                 },
@@ -397,7 +397,7 @@ impl X11Server {
             root_properties.insert(
                 net_desktop_vp,
                 PropertyValue {
-                    prop_type: 6,
+                    prop_type: crate::xserver::atoms::predef::CARDINAL,
                     format: 32,
                     data: vec![0; 8],
                 },
@@ -413,7 +413,7 @@ impl X11Server {
             root_properties.insert(
                 net_workarea,
                 PropertyValue {
-                    prop_type: 6,
+                    prop_type: crate::xserver::atoms::predef::CARDINAL,
                     format: 32,
                     data: workarea,
                 },
@@ -424,7 +424,7 @@ impl X11Server {
             root_properties.insert(
                 net_client_list,
                 PropertyValue {
-                    prop_type: 33, // WINDOW
+                    prop_type: crate::xserver::atoms::predef::WINDOW,
                     format: 32,
                     data: Vec::new(),
                 },
@@ -435,7 +435,7 @@ impl X11Server {
             root_properties.insert(
                 net_client_list_stacking,
                 PropertyValue {
-                    prop_type: 33,
+                    prop_type: crate::xserver::atoms::predef::WINDOW,
                     format: 32,
                     data: Vec::new(),
                 },
@@ -446,7 +446,7 @@ impl X11Server {
             root_properties.insert(
                 net_active,
                 PropertyValue {
-                    prop_type: 33,
+                    prop_type: crate::xserver::atoms::predef::WINDOW,
                     format: 32,
                     data: 0u32.to_le_bytes().to_vec(),
                 },
@@ -470,7 +470,7 @@ impl X11Server {
             root_properties.insert(
                 xkb_rules_atom,
                 PropertyValue {
-                    prop_type: 31, // STRING
+                    prop_type: crate::xserver::atoms::predef::STRING,
                     format: 8,
                     data: xkb_rules_data,
                 },
@@ -481,7 +481,7 @@ impl X11Server {
             root_properties.insert(
                 net_wm_cm_atom,
                 PropertyValue {
-                    prop_type: 33, // WINDOW
+                    prop_type: crate::xserver::atoms::predef::WINDOW,
                     format: 32,
                     data: ROOT_WINDOW.to_le_bytes().to_vec(),
                 },
@@ -494,7 +494,7 @@ impl X11Server {
             root_properties.insert(
                 resource_mgr_atom,
                 PropertyValue {
-                    prop_type: 31, // STRING
+                    prop_type: crate::xserver::atoms::predef::STRING,
                     format: 8,
                     data: resource_mgr_data,
                 },
@@ -507,7 +507,7 @@ impl X11Server {
             wm_check_properties.insert(
                 net_supporting_wm_check,
                 PropertyValue {
-                    prop_type: 33, // WINDOW
+                    prop_type: crate::xserver::atoms::predef::WINDOW,
                     format: 32,
                     data: WM_CHECK_WINDOW.to_le_bytes().to_vec(),
                 },
@@ -763,7 +763,7 @@ impl X11Server {
             tray_properties.insert(
                 tray_orientation_atom,
                 PropertyValue {
-                    prop_type: 6, // CARDINAL
+                    prop_type: crate::xserver::atoms::predef::CARDINAL,
                     format: 32,
                     data: 0u32.to_le_bytes().to_vec(),
                 },
@@ -772,7 +772,7 @@ impl X11Server {
             tray_properties.insert(
                 tray_visual_atom,
                 PropertyValue {
-                    prop_type: 32, // VISUALID
+                    prop_type: crate::xserver::atoms::predef::VISUALID,
                     format: 32,
                     data: 0x40u32.to_le_bytes().to_vec(),
                 },
@@ -868,7 +868,7 @@ impl X11Server {
             xim_properties.insert(
                 locales_atom,
                 PropertyValue {
-                    prop_type: 31, // STRING
+                    prop_type: crate::xserver::atoms::predef::STRING,
                     format: 8,
                     data: b"@locale=C,en,en_US,en_US.UTF-8,POSIX,\
 zh_CN,zh_CN.UTF-8,zh_TW,zh_TW.UTF-8,\
@@ -885,7 +885,7 @@ vi_VN,vi_VN.UTF-8"
             xim_properties.insert(
                 transport_atom,
                 PropertyValue {
-                    prop_type: 31, // STRING
+                    prop_type: crate::xserver::atoms::predef::STRING,
                     format: 8,
                     data: b"@transport=X/".to_vec(),
                 },
@@ -953,7 +953,7 @@ vi_VN,vi_VN.UTF-8"
                 root.properties.insert(
                     xim_servers_atom,
                     PropertyValue {
-                        prop_type: 4, // ATOM
+                        prop_type: crate::xserver::atoms::predef::ATOM,
                         format: 32,
                         data: xim_server_name_atom.to_le_bytes().to_vec(),
                     },

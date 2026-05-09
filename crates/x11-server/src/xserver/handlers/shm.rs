@@ -165,7 +165,7 @@ pub(crate) fn handle_shm_request(state: &mut ClientState, data: &[u8], seq: u16)
                 use x11rb_protocol::protocol::shm::CompletionEvent;
                 crate::xserver::event::serialize_event(
                     &CompletionEvent {
-                        response_type: 65, // ShmCompletion (first_event + 0)
+                        response_type: crate::xserver::extensions::SHM_FIRST_EVENT,
                         sequence: seq,
                         drawable,
                         minor_event: 0,

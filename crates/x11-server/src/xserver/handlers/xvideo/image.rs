@@ -710,7 +710,7 @@ pub(crate) fn handle_image_request(
                 use x11rb_protocol::protocol::shm::CompletionEvent;
                 return crate::xserver::event::serialize_event(
                     &CompletionEvent {
-                        response_type: 65,
+                        response_type: crate::xserver::extensions::SHM_FIRST_EVENT,
                         sequence: seq,
                         drawable: req.drawable,
                         minor_event: 0,

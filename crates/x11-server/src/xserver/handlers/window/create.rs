@@ -286,7 +286,7 @@ pub(crate) fn handle_create_window(state: &mut ClientState, req: &CreateWindowRe
         win.properties.insert(
             atom_frame,
             PropertyValue {
-                prop_type: 6, // CARDINAL
+                prop_type: crate::xserver::atoms::predef::CARDINAL,
                 format: 32,
                 data: vec![0; 16], // left, right, top, bottom = 0
             },
@@ -296,7 +296,7 @@ pub(crate) fn handle_create_window(state: &mut ClientState, req: &CreateWindowRe
             win.properties.insert(
                 atom_pid,
                 PropertyValue {
-                    prop_type: 6, // CARDINAL
+                    prop_type: crate::xserver::atoms::predef::CARDINAL,
                     format: 32,
                     data: client_pid.to_le_bytes().to_vec(),
                 },
@@ -309,7 +309,7 @@ pub(crate) fn handle_create_window(state: &mut ClientState, req: &CreateWindowRe
         win.properties.insert(
             atom_machine,
             PropertyValue {
-                prop_type: 31, // STRING
+                prop_type: crate::xserver::atoms::predef::STRING,
                 format: 8,
                 data: hostname.as_bytes().to_vec(),
             },

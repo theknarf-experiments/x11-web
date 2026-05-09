@@ -222,9 +222,8 @@ pub(crate) fn handle_convert_selection(
         }
 
         // --- TIMESTAMP target: respond with the selection acquisition timestamp ---
-        const TIMESTAMP_ATOM: u32 = 137;
-        const CARDINAL_ATOM: u32 = 6;
-        if target == TIMESTAMP_ATOM {
+        use crate::xserver::atoms::predef;
+        if target == predef::TIMESTAMP {
             // Look up the timestamp when this selection was acquired.
             let sel_ts = state
                 .selection_timestamps
@@ -246,7 +245,7 @@ pub(crate) fn handle_convert_selection(
                     win.properties.insert(
                         effective_property,
                         PropertyValue {
-                            prop_type: CARDINAL_ATOM,
+                            prop_type: predef::CARDINAL,
                             format: 32,
                             data: ts_data.to_vec(),
                         },
@@ -276,9 +275,7 @@ pub(crate) fn handle_convert_selection(
         }
 
         // --- MULTIPLE target: convert multiple targets at once per ICCCM ---
-        const MULTIPLE_ATOM: u32 = 136;
-        const ATOM_ATOM: u32 = 4;
-        if target == MULTIPLE_ATOM && effective_property != 0 {
+        if target == predef::MULTIPLE && effective_property != 0 {
             // Read the ATOM_PAIR list from the requestor's property.
             // Format is pairs of (target, property) atoms, each u32.
             let pairs: Vec<(u32, u32)> = state
@@ -350,7 +347,7 @@ pub(crate) fn handle_convert_selection(
                 let pt = *pair_target;
                 let pp = *pair_property;
 
-                if pt == TIMESTAMP_ATOM {
+                if pt == predef::TIMESTAMP {
                     // Handle TIMESTAMP inline.
                     let sel_ts = state
                         .selection_timestamps
@@ -375,7 +372,7 @@ pub(crate) fn handle_convert_selection(
                             win.properties.insert(
                                 pp,
                                 PropertyValue {
-                                    prop_type: CARDINAL_ATOM,
+                                    prop_type: predef::CARDINAL,
                                     format: 32,
                                     data: ts_data.to_vec(),
                                 },
@@ -443,7 +440,7 @@ pub(crate) fn handle_convert_selection(
                 win.properties.insert(
                     effective_property,
                     PropertyValue {
-                        prop_type: ATOM_ATOM,
+                        prop_type: predef::ATOM,
                         format: 32,
                         data: result_data,
                     },
@@ -458,7 +455,7 @@ pub(crate) fn handle_convert_selection(
                     time: state.timestamp(),
                     requestor,
                     selection,
-                    target: MULTIPLE_ATOM,
+                    target: predef::MULTIPLE,
                     property: effective_property,
                 },
                 state.msb_first,

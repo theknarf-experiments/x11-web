@@ -313,7 +313,7 @@ pub(crate) async fn handle_client(
     let local_windows = shared_windows.lock().unwrap().clone();
     let (wm_events_tx, mut wm_events_rx) = mpsc::unbounded_channel::<Vec<u8>>();
 
-    let resource_id_base = (conn_index + 1) << 22;
+    let resource_id_base = (conn_index + 1) << super::core::RESOURCE_ID_BASE_SHIFT;
     let mut state = ClientState {
         client_id: client_id.clone(),
         peer_pid,
@@ -1738,7 +1738,7 @@ pub(crate) async fn handle_client(
                                 let focused = state.focus_window;
                                 if let Some(win) = state.windows.get_mut(&focused) {
                                     win.properties.insert(user_time_atom, PropertyValue {
-                                        prop_type: 6, // CARDINAL
+                                        prop_type: crate::xserver::atoms::predef::CARDINAL,
                                         format: 32,
                                         data: timestamp.to_le_bytes().to_vec(),
                                     });

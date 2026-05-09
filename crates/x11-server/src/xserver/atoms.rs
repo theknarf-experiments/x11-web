@@ -7,9 +7,16 @@ use std::collections::HashMap;
 /// ICCCM extensions follow our own assignment from 69 upward. The
 /// `predefined_consts_match_table` test guards every entry against drift.
 pub(crate) mod predef {
-    /// Per the X11 spec, atom 31 is the predefined `STRING` type used for
-    /// Latin-1 textual property values.
+    /// X11 predefined atoms 4 / 6 / 31 / 33 are the standard property
+    /// type atoms used by ICCCM and EWMH (`ATOM`, `CARDINAL`, `STRING`,
+    /// `WINDOW`).
+    pub(crate) const ATOM: u32 = 4;
+    pub(crate) const CARDINAL: u32 = 6;
     pub(crate) const STRING: u32 = 31;
+    pub(crate) const VISUALID: u32 = 32;
+    pub(crate) const WINDOW: u32 = 33;
+    pub(crate) const MULTIPLE: u32 = 136;
+    pub(crate) const TIMESTAMP: u32 = 137;
     pub(crate) const NET_WM_WINDOW_TYPE: u32 = 79;
     pub(crate) const NET_WM_WINDOW_TYPE_NORMAL: u32 = 80;
     pub(crate) const NET_WM_WINDOW_TYPE_DIALOG: u32 = 81;
@@ -291,7 +298,13 @@ mod tests {
         let lookup: HashMap<&str, u32> =
             PREDEFINED_ATOMS.iter().map(|&(n, i)| (n, i)).collect();
         let pairs: &[(&str, u32)] = &[
+            ("ATOM", predef::ATOM),
+            ("CARDINAL", predef::CARDINAL),
             ("STRING", predef::STRING),
+            ("VISUALID", predef::VISUALID),
+            ("WINDOW", predef::WINDOW),
+            ("MULTIPLE", predef::MULTIPLE),
+            ("TIMESTAMP", predef::TIMESTAMP),
             ("_NET_WM_WINDOW_TYPE", predef::NET_WM_WINDOW_TYPE),
             ("_NET_WM_WINDOW_TYPE_NORMAL", predef::NET_WM_WINDOW_TYPE_NORMAL),
             ("_NET_WM_WINDOW_TYPE_DIALOG", predef::NET_WM_WINDOW_TYPE_DIALOG),

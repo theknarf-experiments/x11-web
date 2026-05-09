@@ -238,7 +238,7 @@ pub(super) fn apply_screen_resize(state: &mut ClientState, new_w: u16, new_h: u1
             root.properties.insert(
                 geom_atom,
                 PropertyValue {
-                    prop_type: 6, // CARDINAL
+                    prop_type: crate::xserver::atoms::predef::CARDINAL,
                     format: 32,
                     data: geom_data,
                 },
@@ -246,7 +246,7 @@ pub(super) fn apply_screen_resize(state: &mut ClientState, new_w: u16, new_h: u1
             root.properties.insert(
                 workarea_atom,
                 PropertyValue {
-                    prop_type: 6,
+                    prop_type: crate::xserver::atoms::predef::CARDINAL,
                     format: 32,
                     data: workarea_data,
                 },

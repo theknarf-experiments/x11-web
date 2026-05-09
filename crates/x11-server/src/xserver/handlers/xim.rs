@@ -342,7 +342,7 @@ fn send_xim_reply_to(state: &mut ClientState, client_window: u32, reply_data: &[
             win.properties.insert(
                 prop_atom,
                 PropertyValue {
-                    prop_type: 31, // STRING
+                    prop_type: crate::xserver::atoms::predef::STRING,
                     format: 8,
                     data: reply_data.to_vec(),
                 },
@@ -864,7 +864,7 @@ fn handle_xim_forward_event(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
     // The xEvent starts at offset 12 and is 32 bytes (X11 wire format).
 
     let x_event = &data[12..44];
-    let event_type = x_event[0] & 0x7F;
+    let event_type = x_event[0] & !SEND_EVENT_FLAG;
 
     // Only process KeyPress events (type 2)
     if event_type != 2 {
@@ -1293,7 +1293,7 @@ pub(crate) fn maybe_handle_xim_message(state: &mut ClientState, event: &[u8]) ->
         return false;
     }
 
-    let event_type = event[0] & 0x7F;
+    let event_type = event[0] & !SEND_EVENT_FLAG;
     if event_type != CLIENT_MESSAGE_EVENT {
         return false;
     }

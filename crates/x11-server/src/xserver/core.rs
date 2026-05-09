@@ -11,22 +11,43 @@ pub(crate) const WM_CHECK_WINDOW: u32 = 0x00000064;
 pub(crate) const XSETTINGS_WINDOW: u32 = 0x00000012;
 /// Dedicated window for the built-in XIM (X Input Method) server.
 pub(crate) const XIM_WINDOW: u32 = 0x00000013;
-pub(crate) const ROOT_VISUAL: u32 = 0x00000021;
+pub(crate) const ROOT_VISUAL: u32 = VISUAL_TRUE_COLOR_24;
 pub(crate) const ROOT_COLORMAP: u32 = 0x00000020;
 pub(crate) const SCREEN_WIDTH: u16 = 1024;
 pub(crate) const SCREEN_HEIGHT: u16 = 768;
+
+// Visual IDs. These are server-internal assignments — they don't have to
+// match any external table — but each one is referenced by colormap /
+// depth-routing logic so they need stable names.
+pub(crate) const VISUAL_TRUE_COLOR_24: u32 = 0x21;
+pub(crate) const VISUAL_DIRECT_COLOR_24: u32 = 0x22;
+pub(crate) const VISUAL_PSEUDO_COLOR_8: u32 = 0x23;
+pub(crate) const VISUAL_TRUE_COLOR_16: u32 = 0x24;
+pub(crate) const VISUAL_STATIC_GRAY_4: u32 = 0x25;
+pub(crate) const VISUAL_GRAY_SCALE_8: u32 = 0x26;
+pub(crate) const VISUAL_STATIC_COLOR_8: u32 = 0x27;
+pub(crate) const VISUAL_TRUE_COLOR_ARGB_32: u32 = 0x40;
+
+/// Per-client resource-ID base shift. Each connection gets a 22-bit ID
+/// space (`(conn_index + 1) << RESOURCE_ID_BASE_SHIFT`); the low 22 bits
+/// are owned by the client. Mirrors what is reported in the connection
+/// setup `resource_id_mask`.
+pub(crate) const RESOURCE_ID_BASE_SHIFT: u32 = 22;
+/// Mask of the bits a client may set within its assigned resource-ID
+/// space. Equal to `(1 << RESOURCE_ID_BASE_SHIFT) - 1`.
+pub(crate) const RESOURCE_ID_MASK: u32 = (1 << RESOURCE_ID_BASE_SHIFT) - 1;
 
 /// Map a visual ID to its pixel depth, matching the visual table in setup.rs.
 /// Returns the root depth (24) for unknown visuals as a safe fallback.
 pub(crate) fn depth_for_visual(visual: u32) -> u8 {
     match visual {
-        0x40 => 32,              // TrueColor ARGB
-        0x21 | 0x22 => 24,       // TrueColor / DirectColor 24-bit
-        0x24 => 16,              // TrueColor 16-bit
-        0x23 | 0x26 | 0x27 => 8, // PseudoColor / GrayScale / StaticColor
-        0x25 => 4,               // StaticGray 4-bit
-        0 => 0,                  // InputOnly windows
-        _ => 24,                 // default to root depth
+        VISUAL_TRUE_COLOR_ARGB_32 => 32,
+        VISUAL_TRUE_COLOR_24 | VISUAL_DIRECT_COLOR_24 => 24,
+        VISUAL_TRUE_COLOR_16 => 16,
+        VISUAL_PSEUDO_COLOR_8 | VISUAL_GRAY_SCALE_8 | VISUAL_STATIC_COLOR_8 => 8,
+        VISUAL_STATIC_GRAY_4 => 4,
+        0 => 0,  // InputOnly windows
+        _ => 24, // default to root depth
     }
 }
 

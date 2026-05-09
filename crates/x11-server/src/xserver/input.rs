@@ -1168,7 +1168,7 @@ pub(crate) fn build_x11_input_event(
                         win.properties.insert(
                             net_wm_state_atom,
                             PropertyValue {
-                                prop_type: 4, // ATOM
+                                prop_type: crate::xserver::atoms::predef::ATOM,
                                 format: 32,
                                 data: Vec::new(),
                             },
@@ -1193,7 +1193,7 @@ pub(crate) fn build_x11_input_event(
                         win.properties.insert(
                             net_wm_state_atom,
                             PropertyValue {
-                                prop_type: 4,
+                                prop_type: crate::xserver::atoms::predef::ATOM,
                                 format: 32,
                                 data: atom_data,
                             },
@@ -1218,7 +1218,7 @@ pub(crate) fn build_x11_input_event(
                         win.properties.insert(
                             net_wm_state_atom,
                             PropertyValue {
-                                prop_type: 4,
+                                prop_type: crate::xserver::atoms::predef::ATOM,
                                 format: 32,
                                 data: atom_data,
                             },
@@ -1240,7 +1240,7 @@ pub(crate) fn build_x11_input_event(
                         win.properties.insert(
                             net_wm_state_atom,
                             PropertyValue {
-                                prop_type: 4,
+                                prop_type: crate::xserver::atoms::predef::ATOM,
                                 format: 32,
                                 data: atom_data,
                             },

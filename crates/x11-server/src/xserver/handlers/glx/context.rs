@@ -11,7 +11,7 @@ use crate::osmesa;
 use crate::osmesa::MesaContext;
 
 use super::super::super::client::ClientState;
-use super::super::super::core::ROOT_VISUAL;
+use super::super::super::core::{ROOT_VISUAL, VISUAL_TRUE_COLOR_ARGB_32};
 #[cfg(feature = "osmesa")]
 use super::blit_osmesa_to_drawable;
 use super::{get_drawable_size, GlxContext};
@@ -67,7 +67,11 @@ pub(crate) fn handle_create_new_context(state: &mut ClientState, data: &[u8], se
     };
 
     // Map fbconfig to visual
-    let visual = if fbconfig == 2 { 0x40 } else { ROOT_VISUAL };
+    let visual = if fbconfig == super::FBCONFIG_ARGB {
+        VISUAL_TRUE_COLOR_ARGB_32
+    } else {
+        ROOT_VISUAL
+    };
 
     let tag = state.glx.next_tag;
     state.glx.next_tag += 1;
@@ -103,7 +107,11 @@ pub(crate) fn handle_create_context_attribs(
     let screen = u32::from_le_bytes([data[12], data[13], data[14], data[15]]);
     let share_list = u32::from_le_bytes([data[16], data[17], data[18], data[19]]);
 
-    let visual = if fbconfig == 2 { 0x40 } else { ROOT_VISUAL };
+    let visual = if fbconfig == super::FBCONFIG_ARGB {
+        VISUAL_TRUE_COLOR_ARGB_32
+    } else {
+        ROOT_VISUAL
+    };
 
     let tag = state.glx.next_tag;
     state.glx.next_tag += 1;

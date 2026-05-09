@@ -235,7 +235,7 @@ pub(crate) fn build_setup(conn_index: u32) -> Setup {
 
     // Additional 24-bit DirectColor visual for apps that prefer it
     let visual_dc24 = Visualtype {
-        visual_id: 0x22,
+        visual_id: VISUAL_DIRECT_COLOR_24,
         class: VisualClass::DIRECT_COLOR,
         bits_per_rgb_value: 8,
         colormap_entries: 256,
@@ -251,7 +251,7 @@ pub(crate) fn build_setup(conn_index: u32) -> Setup {
 
     // 32-bit TrueColor with alpha (for compositing, ARGB windows)
     let visual_argb = Visualtype {
-        visual_id: 0x40,
+        visual_id: VISUAL_TRUE_COLOR_ARGB_32,
         class: VisualClass::TRUE_COLOR,
         bits_per_rgb_value: 8,
         colormap_entries: 256,
@@ -268,7 +268,7 @@ pub(crate) fn build_setup(conn_index: u32) -> Setup {
     // 8-bit PseudoColor visual (for legacy apps like xv, some games)
     // We emulate PseudoColor by mapping 256-entry colormap to TrueColor internally.
     let visual_8bit = Visualtype {
-        visual_id: 0x23,
+        visual_id: VISUAL_PSEUDO_COLOR_8,
         class: VisualClass::PSEUDO_COLOR,
         bits_per_rgb_value: 8,
         colormap_entries: 256,
@@ -279,7 +279,7 @@ pub(crate) fn build_setup(conn_index: u32) -> Setup {
 
     // 8-bit GrayScale visual (writable grayscale, for apps that want to modify gray levels)
     let visual_gray8 = Visualtype {
-        visual_id: 0x26,
+        visual_id: VISUAL_GRAY_SCALE_8,
         class: VisualClass::GRAY_SCALE,
         bits_per_rgb_value: 8,
         colormap_entries: 256,
@@ -290,7 +290,7 @@ pub(crate) fn build_setup(conn_index: u32) -> Setup {
 
     // 8-bit StaticColor visual (read-only indexed color, 3-3-2 RGB)
     let visual_static_color = Visualtype {
-        visual_id: 0x27,
+        visual_id: VISUAL_STATIC_COLOR_8,
         class: VisualClass::STATIC_COLOR,
         bits_per_rgb_value: 8,
         colormap_entries: 256,
@@ -306,7 +306,7 @@ pub(crate) fn build_setup(conn_index: u32) -> Setup {
 
     // 16-bit TrueColor visual (for some embedded/legacy apps)
     let visual_16bit = Visualtype {
-        visual_id: 0x24,
+        visual_id: VISUAL_TRUE_COLOR_16,
         class: VisualClass::TRUE_COLOR,
         bits_per_rgb_value: 5,
         colormap_entries: 32,
@@ -328,7 +328,7 @@ pub(crate) fn build_setup(conn_index: u32) -> Setup {
 
     // 4-bit StaticGray visual (for xbiff, some ancient apps)
     let visual_4bit = Visualtype {
-        visual_id: 0x25,
+        visual_id: VISUAL_STATIC_GRAY_4,
         class: VisualClass::STATIC_GRAY,
         bits_per_rgb_value: 4,
         colormap_entries: 16,

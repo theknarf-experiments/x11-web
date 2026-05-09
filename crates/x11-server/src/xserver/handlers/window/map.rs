@@ -391,7 +391,7 @@ pub(crate) fn handle_map_window(state: &mut ClientState, req: &MapWindowRequest)
         win.properties
             .entry(net_wm_state_atom)
             .or_insert_with(|| PropertyValue {
-                prop_type: 4, // ATOM
+                prop_type: crate::xserver::atoms::predef::ATOM,
                 format: 32,
                 data: Vec::new(),
             });

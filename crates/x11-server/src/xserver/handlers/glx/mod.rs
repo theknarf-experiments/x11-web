@@ -67,6 +67,11 @@ use x11rb_protocol::protocol::glx::{
     WAIT_GL_REQUEST as GLX_WAIT_GL, WAIT_X_REQUEST as GLX_WAIT_X,
 };
 
+/// FBConfig ID we advertise for the standard 24-bit TrueColor RGB visual.
+pub(crate) const FBCONFIG_RGB: u32 = 1;
+/// FBConfig ID we advertise for the 32-bit ARGB visual (compositing-capable).
+pub(crate) const FBCONFIG_ARGB: u32 = 2;
+
 // GLX FBConfig attribute tokens
 const GLX_VISUAL_ID: u32 = 0x800B;
 const GLX_FBCONFIG_ID: u32 = 0x8013;

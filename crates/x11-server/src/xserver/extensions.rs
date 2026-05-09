@@ -12,6 +12,19 @@
 
 use std::collections::HashMap;
 
+// Extension `first_event` bases — the wire event-type byte assigned to each
+// extension's first event. Must stay in sync with the table in `add(...)`
+// calls in `ExtensionRegistry::new` (covered by `extension_event_bases_no_overlap`).
+pub(crate) const SHAPE_FIRST_EVENT: u8 = 64;
+pub(crate) const SHM_FIRST_EVENT: u8 = 65;
+pub(crate) const SYNC_FIRST_EVENT: u8 = 83;
+pub(crate) const XKB_FIRST_EVENT: u8 = 85;
+pub(crate) const XFIXES_FIRST_EVENT: u8 = 87;
+pub(crate) const RANDR_FIRST_EVENT: u8 = 89;
+pub(crate) const DAMAGE_FIRST_EVENT: u8 = 91;
+pub(crate) const SECURITY_FIRST_EVENT: u8 = 93;
+pub(crate) const XVIDEO_FIRST_EVENT: u8 = 95;
+
 // ---------------------------------------------------------------------------
 // ExtensionId — one variant per extension we support
 // ---------------------------------------------------------------------------

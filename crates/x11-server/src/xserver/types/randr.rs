@@ -23,11 +23,17 @@ pub(crate) struct RandrCrtc {
     pub(crate) transform: [i32; 9],
 }
 
+/// Gamma ramp full-scale value: gamma stops are u16, so the maximum entry
+/// is `u16::MAX = 65535`.
+pub(crate) const GAMMA_RAMP_MAX: u32 = u16::MAX as u32;
+/// Identity scale for RandR's 16.16 fixed-point transform matrix.
+pub(crate) const FP_16_16_ONE: i32 = 1 << 16;
+
 impl RandrCrtc {
     /// Create a default CRTC with a linear gamma ramp.
     pub(crate) fn new(id: u32, width: u16, height: u16, mode_id: u32, output_id: u32) -> Self {
         let gamma: Vec<u16> = (0..256)
-            .map(|i| ((i as u32 * 65535) / 255) as u16)
+            .map(|i| ((i as u32 * GAMMA_RAMP_MAX) / 255) as u16)
             .collect();
         Self {
             id,
@@ -41,8 +47,12 @@ impl RandrCrtc {
             gamma_red: gamma.clone(),
             gamma_green: gamma.clone(),
             gamma_blue: gamma,
-            // Identity transform: diagonal 1.0 in 16.16 fixed-point
-            transform: [65536, 0, 0, 0, 65536, 0, 0, 0, 65536],
+            // Identity transform in 16.16 fixed-point.
+            transform: [
+                FP_16_16_ONE, 0, 0,
+                0, FP_16_16_ONE, 0,
+                0, 0, FP_16_16_ONE,
+            ],
         }
     }
 }
@@ -142,6 +152,31 @@ pub(crate) const RANDR_EVENT_BASE: u8 = 89;
 pub(crate) const RR_SCREEN_CHANGE_NOTIFY_MASK: u32 = 1 << 0;
 pub(crate) const RR_CRTC_CHANGE_NOTIFY_MASK: u32 = 1 << 1;
 
+// EDID 1.3 wire-format constants. Byte values defined by the VESA EDID
+// specification — names follow the spec's terminology so a reader can
+// cross-reference. We only define the bytes that carry semantic meaning;
+// dimensional fields (sync widths, blanking intervals) stay inline.
+
+/// Mandatory EDID header (8 bytes) that identifies the blob.
+const EDID_HEADER: [u8; 8] = [0x00, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x00];
+
+/// Video-input descriptor: bit 7 set = digital input, lower bits = depth code.
+const EDID_VIDEO_INPUT_DIGITAL: u8 = 0x80;
+
+/// Feature-support byte: standard sRGB color space, preferred timing in DTD1.
+const EDID_FEATURE_SUPPORT: u8 = 0x0A;
+
+/// 10-byte chromaticity block — standard sRGB-ish primaries.
+const EDID_CHROMATICITY: [u8; 10] = [
+    0xEE, 0x91, 0xA3, 0x54, 0x4C, 0x99, 0x26, 0x0F, 0x50, 0x54,
+];
+
+/// Detailed Timing Descriptor flag byte: non-interlaced, normal display.
+const EDID_DTD_FLAGS: u8 = 0x18;
+
+/// Monitor-name descriptor tag (used in DTD#2 to declare a monitor name string).
+const EDID_DESC_TAG_MONITOR_NAME: u8 = 0xFC;
+
 /// Generate a minimal valid EDID blob (128 bytes).
 pub(crate) fn generate_edid(
     width_mm: u16,
@@ -151,7 +186,7 @@ pub(crate) fn generate_edid(
 ) -> Vec<u8> {
     let mut edid = vec![0u8; 128];
     // Header
-    edid[0..8].copy_from_slice(&[0x00, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x00]);
+    edid[0..8].copy_from_slice(&EDID_HEADER);
     // Manufacturer ID: "XWB" (X11-Web) encoded as 3 5-bit chars
     // X=24, W=23, B=2 -> 0b11000_10111_00010 = 0xC5C2
     edid[8] = 0xC5;
@@ -168,16 +203,16 @@ pub(crate) fn generate_edid(
     edid[18] = 1;
     edid[19] = 3;
     // Digital input, 8-bit color
-    edid[20] = 0x80;
+    edid[20] = EDID_VIDEO_INPUT_DIGITAL;
     // Max image size (cm)
     edid[21] = (width_mm / 10) as u8;
     edid[22] = (height_mm / 10) as u8;
     // Gamma 2.2 (value = (gamma * 100) - 100 = 120)
     edid[23] = 120;
     // Supported features: RGB color, preferred timing in DTD1
-    edid[24] = 0x0A;
+    edid[24] = EDID_FEATURE_SUPPORT;
     // Chromaticity (standard sRGB-ish values)
-    edid[25..35].copy_from_slice(&[0xEE, 0x91, 0xA3, 0x54, 0x4C, 0x99, 0x26, 0x0F, 0x50, 0x54]);
+    edid[25..35].copy_from_slice(&EDID_CHROMATICITY);
     // Established timings
     edid[35] = 0x00;
     edid[36] = 0x00;
@@ -219,13 +254,13 @@ pub(crate) fn generate_edid(
     edid[69] = 0;
     edid[70] = 0;
     // Flags: non-interlaced, normal display
-    edid[71] = 0x18;
+    edid[71] = EDID_DTD_FLAGS;
 
     // DTD#2 (bytes 72-89): Monitor name descriptor
     edid[72] = 0x00;
     edid[73] = 0x00;
     edid[74] = 0x00;
-    edid[75] = 0xFC; // Monitor name tag
+    edid[75] = EDID_DESC_TAG_MONITOR_NAME;
     edid[76] = 0x00;
     let name = b"X11-Web\n";
     let end = 77 + name.len().min(13);

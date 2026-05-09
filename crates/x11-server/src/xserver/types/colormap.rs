@@ -328,53 +328,57 @@ impl ColormapState {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::xserver::core::{
+        VISUAL_DIRECT_COLOR_24, VISUAL_GRAY_SCALE_8, VISUAL_PSEUDO_COLOR_8,
+        VISUAL_STATIC_COLOR_8, VISUAL_STATIC_GRAY_4, VISUAL_TRUE_COLOR_24,
+    };
 
     #[test]
     fn truecolor_is_read_only() {
-        let cmap = ColormapState::new_truecolor(0x21);
+        let cmap = ColormapState::new_truecolor(VISUAL_TRUE_COLOR_24);
         assert!(!cmap.is_writable());
     }
 
     #[test]
     fn staticgray_is_read_only() {
-        let cmap = ColormapState::new_staticgray(0x25, 16);
+        let cmap = ColormapState::new_staticgray(VISUAL_STATIC_GRAY_4, 16);
         assert!(!cmap.is_writable());
     }
 
     #[test]
     fn staticcolor_is_read_only() {
-        let cmap = ColormapState::new_staticcolor(0x27, 256);
+        let cmap = ColormapState::new_staticcolor(VISUAL_STATIC_COLOR_8, 256);
         assert!(!cmap.is_writable());
     }
 
     #[test]
     fn pseudocolor_is_writable() {
-        let cmap = ColormapState::new_pseudocolor(0x23, 256);
+        let cmap = ColormapState::new_pseudocolor(VISUAL_PSEUDO_COLOR_8, 256);
         assert!(cmap.is_writable());
     }
 
     #[test]
     fn grayscale_is_writable() {
-        let cmap = ColormapState::new_grayscale(0x26, 256);
+        let cmap = ColormapState::new_grayscale(VISUAL_GRAY_SCALE_8, 256);
         assert!(cmap.is_writable());
     }
 
     #[test]
     fn directcolor_is_writable() {
-        let cmap = ColormapState::new_directcolor(0x22, 256);
+        let cmap = ColormapState::new_directcolor(VISUAL_DIRECT_COLOR_24, 256);
         assert!(cmap.is_writable());
     }
 
     #[test]
     fn truecolor_alloc_color_computes_pixel() {
-        let mut cmap = ColormapState::new_truecolor(0x21);
+        let mut cmap = ColormapState::new_truecolor(VISUAL_TRUE_COLOR_24);
         let pixel = cmap.alloc_color(0xFF00, 0x8000, 0x0000);
         assert_eq!(pixel, Some(0x00FF8000));
     }
 
     #[test]
     fn pseudocolor_alloc_and_lookup_round_trip() {
-        let mut cmap = ColormapState::new_pseudocolor(0x23, 256);
+        let mut cmap = ColormapState::new_pseudocolor(VISUAL_PSEUDO_COLOR_8, 256);
         let pixel = cmap.alloc_color(0xFFFF, 0x0000, 0xFFFF).unwrap();
         let (r, g, b) = cmap.lookup(pixel);
         assert_eq!(r, 0xFFFF);
@@ -384,7 +388,7 @@ mod tests {
 
     #[test]
     fn staticgray_alloc_finds_closest_match() {
-        let cmap = ColormapState::new_staticgray(0x25, 16);
+        let cmap = ColormapState::new_staticgray(VISUAL_STATIC_GRAY_4, 16);
         // Closest entry to full white should be the last index
         let mut cmap = cmap;
         let pixel = cmap.alloc_color(0xFFFF, 0xFFFF, 0xFFFF).unwrap();
@@ -393,7 +397,7 @@ mod tests {
 
     #[test]
     fn pseudocolor_alloc_cells_and_free() {
-        let mut cmap = ColormapState::new_pseudocolor(0x23, 256);
+        let mut cmap = ColormapState::new_pseudocolor(VISUAL_PSEUDO_COLOR_8, 256);
         let cells = cmap.alloc_cells(3).unwrap();
         assert_eq!(cells.len(), 3);
         cmap.free_cells(&cells);
@@ -404,13 +408,13 @@ mod tests {
 
     #[test]
     fn readonly_alloc_cells_fails() {
-        let mut cmap = ColormapState::new_truecolor(0x21);
+        let mut cmap = ColormapState::new_truecolor(VISUAL_TRUE_COLOR_24);
         assert!(cmap.alloc_cells(1).is_none());
     }
 
     #[test]
     fn staticcolor_332_decomposition() {
-        let cmap = ColormapState::new_staticcolor(0x27, 256);
+        let cmap = ColormapState::new_staticcolor(VISUAL_STATIC_COLOR_8, 256);
         // Index 0: R=0, G=0, B=0
         let (r, g, b) = cmap.lookup(0);
         assert_eq!(r, 0);
@@ -425,7 +429,7 @@ mod tests {
 
     #[test]
     fn store_colors_updates_entries() {
-        let mut cmap = ColormapState::new_pseudocolor(0x23, 256);
+        let mut cmap = ColormapState::new_pseudocolor(VISUAL_PSEUDO_COLOR_8, 256);
         cmap.store_colors(&[(0, 0x1234, 0x5678, 0x9ABC, 0x07)]);
         let (r, g, b) = cmap.lookup(0);
         assert_eq!(r, 0x1234);
@@ -435,7 +439,7 @@ mod tests {
 
     #[test]
     fn store_colors_partial_flags() {
-        let mut cmap = ColormapState::new_pseudocolor(0x23, 256);
+        let mut cmap = ColormapState::new_pseudocolor(VISUAL_PSEUDO_COLOR_8, 256);
         cmap.store_colors(&[(0, 0xAAAA, 0xBBBB, 0xCCCC, 0)]);
         // Only update red (flag 0x01)
         cmap.store_colors(&[(0, 0x1111, 0, 0, 0x01)]);
@@ -447,7 +451,7 @@ mod tests {
 
     #[test]
     fn alloc_cells_contiguous_basic() {
-        let mut cmap = ColormapState::new_pseudocolor(0x23, 256);
+        let mut cmap = ColormapState::new_pseudocolor(VISUAL_PSEUDO_COLOR_8, 256);
         let cells = cmap.alloc_cells_contiguous(4).unwrap();
         assert_eq!(cells.len(), 4);
         // Cells must be consecutive
@@ -458,7 +462,7 @@ mod tests {
 
     #[test]
     fn alloc_cells_contiguous_with_gaps() {
-        let mut cmap = ColormapState::new_pseudocolor(0x23, 16);
+        let mut cmap = ColormapState::new_pseudocolor(VISUAL_PSEUDO_COLOR_8, 16);
         // Allocate and free some cells to create gaps
         let first = cmap.alloc_cells(3).unwrap(); // 0, 1, 2
         let _second = cmap.alloc_cells(2).unwrap(); // 3, 4
@@ -473,7 +477,7 @@ mod tests {
 
     #[test]
     fn alloc_cells_contiguous_fails_when_not_enough() {
-        let mut cmap = ColormapState::new_pseudocolor(0x23, 8);
+        let mut cmap = ColormapState::new_pseudocolor(VISUAL_PSEUDO_COLOR_8, 8);
         // Allocate every other cell to fragment the space
         cmap.allocated[0] = true;
         cmap.allocated[2] = true;
@@ -485,14 +489,14 @@ mod tests {
 
     #[test]
     fn alloc_cells_contiguous_empty() {
-        let mut cmap = ColormapState::new_pseudocolor(0x23, 256);
+        let mut cmap = ColormapState::new_pseudocolor(VISUAL_PSEUDO_COLOR_8, 256);
         let cells = cmap.alloc_cells_contiguous(0).unwrap();
         assert_eq!(cells.len(), 0);
     }
 
     #[test]
     fn alloc_cells_contiguous_readonly_fails() {
-        let mut cmap = ColormapState::new_truecolor(0x21);
+        let mut cmap = ColormapState::new_truecolor(VISUAL_TRUE_COLOR_24);
         assert!(cmap.alloc_cells_contiguous(1).is_none());
     }
 
@@ -502,7 +506,7 @@ mod tests {
 
     #[test]
     fn copy_colormap_preserves_allocated_state() {
-        let mut src = ColormapState::new_pseudocolor(0x23, 256);
+        let mut src = ColormapState::new_pseudocolor(VISUAL_PSEUDO_COLOR_8, 256);
         // Allocate some cells in source
         src.allocated[0] = true;
         src.allocated[5] = true;
@@ -518,7 +522,7 @@ mod tests {
 
     #[test]
     fn copy_colormap_frees_source_cells() {
-        let mut src = ColormapState::new_pseudocolor(0x23, 256);
+        let mut src = ColormapState::new_pseudocolor(VISUAL_PSEUDO_COLOR_8, 256);
         src.allocated[0] = true;
         src.allocated[5] = true;
         // Step 1: clone for copy

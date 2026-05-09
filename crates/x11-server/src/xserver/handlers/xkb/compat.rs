@@ -9,12 +9,31 @@ use super::{SA_LOCK_MODS, SA_NO_ACTION, SA_SET_MODS};
 // XKB SI flags
 const SI_LOCKING_KEY: u8 = 2;
 
-// XKB compat match operations
+// XKB compat match operations — wire-stable u8 IDs from
+// `x11rb::xkb::SymInterpretMatch`. Verified by a test below.
 const MATCH_NONE_OF: u8 = 0;
 const MATCH_ANY_OF_OR_NONE: u8 = 1;
 const MATCH_ANY_OF: u8 = 2;
 const MATCH_ALL_OF: u8 = 3;
 const MATCH_EXACTLY: u8 = 4;
+
+#[cfg(test)]
+mod match_op_tests {
+    use super::*;
+    use x11rb_protocol::protocol::xkb::SymInterpretMatch;
+
+    #[test]
+    fn match_consts_match_x11rb() {
+        assert_eq!(MATCH_NONE_OF, u8::from(SymInterpretMatch::NONE_OF));
+        assert_eq!(
+            MATCH_ANY_OF_OR_NONE,
+            u8::from(SymInterpretMatch::ANY_OF_OR_NONE)
+        );
+        assert_eq!(MATCH_ANY_OF, u8::from(SymInterpretMatch::ANY_OF));
+        assert_eq!(MATCH_ALL_OF, u8::from(SymInterpretMatch::ALL_OF));
+        assert_eq!(MATCH_EXACTLY, u8::from(SymInterpretMatch::EXACTLY));
+    }
+}
 
 /// Build the default set of symbol interpretations based on xkeyboard-config's
 /// compat/complete. These map standard modifier keysyms to their actions.

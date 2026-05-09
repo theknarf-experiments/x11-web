@@ -37,22 +37,15 @@ pub(crate) fn handle_create_colormap(
     let visual = req.visual;
 
     // Map visual ID to visual class and create appropriate colormap.
-    // Visual IDs defined in our server setup:
-    //   0x20 = TrueColor 24-bit (root)
-    //   0x22 = DirectColor 24-bit
-    //   0x23 = PseudoColor 8-bit (256 entries)
-    //   0x24 = TrueColor 16-bit
-    //   0x25 = StaticGray 4-bit (16 entries)
-    //   0x26 = GrayScale 8-bit (256 entries, writable)
-    //   0x27 = StaticColor 8-bit (256 entries, read-only)
-    //   0x40 = TrueColor 32-bit (ARGB)
     let cmap = match visual {
-        0x21 | 0x24 | 0x40 => ColormapState::new_truecolor(visual),
-        0x22 => ColormapState::new_directcolor(visual, 256),
-        0x23 => ColormapState::new_pseudocolor(visual, 256),
-        0x25 => ColormapState::new_staticgray(visual, 16),
-        0x26 => ColormapState::new_grayscale(visual, 256),
-        0x27 => ColormapState::new_staticcolor(visual, 256),
+        VISUAL_TRUE_COLOR_24 | VISUAL_TRUE_COLOR_16 | VISUAL_TRUE_COLOR_ARGB_32 => {
+            ColormapState::new_truecolor(visual)
+        }
+        VISUAL_DIRECT_COLOR_24 => ColormapState::new_directcolor(visual, 256),
+        VISUAL_PSEUDO_COLOR_8 => ColormapState::new_pseudocolor(visual, 256),
+        VISUAL_STATIC_GRAY_4 => ColormapState::new_staticgray(visual, 16),
+        VISUAL_GRAY_SCALE_8 => ColormapState::new_grayscale(visual, 256),
+        VISUAL_STATIC_COLOR_8 => ColormapState::new_staticcolor(visual, 256),
         _ => {
             return build_error(MATCH_ERROR, state.sequence, visual, 78, 0);
         }
@@ -106,7 +99,7 @@ pub(crate) fn handle_copy_colormap_and_free(
     let new_cmap = if let Some(src_cmap) = state.colormaps.get(&src) {
         src_cmap.clone()
     } else {
-        ColormapState::new_truecolor(0x21)
+        ColormapState::new_truecolor(VISUAL_TRUE_COLOR_24)
     };
     state.colormaps.insert(mid, new_cmap);
     // Per X11 spec: free all allocated cells in the SOURCE colormap

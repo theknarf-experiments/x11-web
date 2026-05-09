@@ -6,8 +6,11 @@ use std::collections::HashMap;
 use tracing::{debug, warn};
 
 use super::super::super::client::ClientState;
-use super::super::super::core::ROOT_VISUAL;
-use super::{GlxDrawable, GlxDrawableKind, GLX_FBCONFIG_ID, GLX_RENDER_TYPE, GLX_RGBA_BIT};
+use super::super::super::core::{ROOT_VISUAL, VISUAL_TRUE_COLOR_ARGB_32};
+use super::{
+    GlxDrawable, GlxDrawableKind, FBCONFIG_ARGB, FBCONFIG_RGB, GLX_FBCONFIG_ID, GLX_RENDER_TYPE,
+    GLX_RGBA_BIT,
+};
 use crate::xserver::core::require_len;
 
 // ---------------------------------------------------------------------------
@@ -89,7 +92,11 @@ pub(crate) fn handle_create_glx_pixmap(state: &mut ClientState, data: &[u8], seq
     let x_pixmap = u32::from_le_bytes([data[12], data[13], data[14], data[15]]);
     let glx_pixmap = u32::from_le_bytes([data[16], data[17], data[18], data[19]]);
 
-    let fbconfig = if visual == 0x40 { 2 } else { 1 };
+    let fbconfig = if visual == VISUAL_TRUE_COLOR_ARGB_32 {
+        FBCONFIG_ARGB
+    } else {
+        FBCONFIG_RGB
+    };
     state.glx.drawables.insert(
         glx_pixmap,
         GlxDrawable {
@@ -366,7 +373,14 @@ pub(crate) fn handle_query_context(state: &mut ClientState, data: &[u8], seq: u1
     let share_list = ctx.map(|c| c.share_list).unwrap_or(0);
 
     let pairs = [
-        (GLX_FBCONFIG_ID, if visual == 0x40 { 2u32 } else { 1u32 }),
+        (
+            GLX_FBCONFIG_ID,
+            if visual == VISUAL_TRUE_COLOR_ARGB_32 {
+                FBCONFIG_ARGB
+            } else {
+                FBCONFIG_RGB
+            },
+        ),
         (GLX_RENDER_TYPE, GLX_RGBA_BIT),
         (0x3, screen),        // GLX_SCREEN
         (0x800A, share_list), // GLX_SHARE_CONTEXT_EXT

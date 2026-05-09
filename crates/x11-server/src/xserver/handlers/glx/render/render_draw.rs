@@ -1039,11 +1039,22 @@ pub(crate) fn dispatch(opcode: u16, data: &[u8]) -> Option<bool> {
                             data[hdr_off + 11],
                         ]) as usize;
 
-                        // The low 4 bits encode the number of values per element;
-                        // bits 4..13 encode the GL type; bits 14+ select the array.
-                        let num_values = (data_type & 0x0F) as i32;
-                        let gl_type = (data_type >> 4) & 0x3FF;
-                        let array_bits = data_type >> 14;
+                        // GLX DrawArrays array-data-type packing (single u32):
+                        //   bits  0..3  : number of values per element
+                        //   bits  4..13 : GL data type
+                        //   bits 14..30 : array-selector flags (one bit per array)
+                        const NUM_VALUES_MASK: u32 = 0x0F;
+                        const GL_TYPE_SHIFT: u32 = 4;
+                        const GL_TYPE_MASK: u32 = 0x3FF;
+                        const ARRAY_BITS_SHIFT: u32 = 14;
+                        const ARRAY_BIT_VERTEX: u32 = 1 << 0;
+                        const ARRAY_BIT_NORMAL: u32 = 1 << 1;
+                        const ARRAY_BIT_COLOR: u32 = 1 << 2;
+                        const ARRAY_BIT_TEXCOORD: u32 = 1 << 3;
+
+                        let num_values = (data_type & NUM_VALUES_MASK) as i32;
+                        let gl_type = (data_type >> GL_TYPE_SHIFT) & GL_TYPE_MASK;
+                        let array_bits = data_type >> ARRAY_BITS_SHIFT;
 
                         if offset + num_bytes <= vertex_data.len() {
                             let ptr = vertex_data[offset..].as_ptr() as *const std::ffi::c_void;
@@ -1054,26 +1065,22 @@ pub(crate) fn dispatch(opcode: u16, data: &[u8]) -> Option<bool> {
                             };
 
                             unsafe {
-                                if array_bits & 0x01 != 0 {
-                                    // vertex
+                                if array_bits & ARRAY_BIT_VERTEX != 0 {
                                     osmesa::gl_enable_client_state(osmesa::GL_VERTEX_ARRAY);
                                     osmesa::gl_vertex_pointer(num_values, gl_type, stride, ptr);
                                     enabled.push(osmesa::GL_VERTEX_ARRAY);
                                 }
-                                if array_bits & 0x02 != 0 {
-                                    // normal
+                                if array_bits & ARRAY_BIT_NORMAL != 0 {
                                     osmesa::gl_enable_client_state(osmesa::GL_NORMAL_ARRAY);
                                     osmesa::gl_normal_pointer(gl_type, stride, ptr);
                                     enabled.push(osmesa::GL_NORMAL_ARRAY);
                                 }
-                                if array_bits & 0x04 != 0 {
-                                    // color
+                                if array_bits & ARRAY_BIT_COLOR != 0 {
                                     osmesa::gl_enable_client_state(osmesa::GL_COLOR_ARRAY);
                                     osmesa::gl_color_pointer(num_values, gl_type, stride, ptr);
                                     enabled.push(osmesa::GL_COLOR_ARRAY);
                                 }
-                                if array_bits & 0x08 != 0 {
-                                    // texcoord
+                                if array_bits & ARRAY_BIT_TEXCOORD != 0 {
                                     osmesa::gl_enable_client_state(osmesa::GL_TEXTURE_COORD_ARRAY);
                                     osmesa::gl_tex_coord_pointer(num_values, gl_type, stride, ptr);
                                     enabled.push(osmesa::GL_TEXTURE_COORD_ARRAY);
