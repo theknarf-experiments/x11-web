@@ -9,12 +9,24 @@ use tracing::debug;
 
 /// Build an XKB GetNames reply.
 ///
-/// The request `which` bitmask (from the wire) controls which name sections
-/// are returned.  The bits are:
-///   0  KeycodesName        4  CompatName        8  (reserved)
-///   1  GeometryName        5  IndicatorNames    9  KeyNames
-///   2  SymbolsName         6  KeyTypeNames     10  KeyAliases
-///   3  GroupNames          7  KTLevelNames     11  VirtualModNames
+/// The request `which` bitmask (from the wire) controls which name
+/// sections are returned. Bit assignments are fixed by the XKB
+/// protocol (see `xkbproto.h` `XkbXxxNameMask`):
+///
+///   bit  mask    section
+///    0   0x0001  KeycodesName       8   0x0100  IndicatorNames
+///    1   0x0002  GeometryName       9   0x0200  GroupNames
+///    2   0x0004  SymbolsName       10   0x0400  VirtualModNames
+///    3   0x0008  PhysSymbolsName   11   0x0800  KeyNames
+///    4   0x0010  TypesName         12   0x1000  KeyAliases
+///    5   0x0020  CompatName        13   0x2000  RGNames
+///    6   0x0040  KeyTypeNames
+///    7   0x0080  KTLevelNames
+///
+/// The data section appears in this exact bit order; reordering or
+/// renumbering breaks Xlib (`xkbcomp` reports "Could not load names"
+/// followed by `BadName` on `XkbGetGeometry` because the geometry
+/// atom slot is parsed from the wrong wire offset).
 pub(crate) fn build_xkb_get_names_reply(
     state: &mut ClientState,
     seq: u16,
@@ -30,7 +42,7 @@ pub(crate) fn build_xkb_get_names_reply(
     let _n_vmods = virtual_mods.count_ones() as u8; // 3
 
     // Intern all name atoms we may need up front.
-    let (keycodes_atom, geometry_atom, symbols_atom, compat_atom) = {
+    let (keycodes_atom, geometry_atom, symbols_atom, types_atom, compat_atom) = {
         let mut atoms = state.atoms.lock().unwrap();
         let kc = state
             .xkb_names_atoms
@@ -47,13 +59,21 @@ pub(crate) fn build_xkb_get_names_reply(
             .get(&2)
             .copied()
             .unwrap_or_else(|| atoms.intern("pc+us", false));
+        let types = state
+            .xkb_names_atoms
+            .get(&3)
+            .copied()
+            .unwrap_or_else(|| atoms.intern("complete", false));
         let compat = state
             .xkb_names_atoms
             .get(&4)
             .copied()
             .unwrap_or_else(|| atoms.intern("complete", false));
-        (kc, geo, sym, compat)
+        (kc, geo, sym, types, compat)
     };
+    // PhysSymbolsName mirrors SymbolsName; the protocol slot must be
+    // a non-zero atom for Xlib's XkbGetNames parser to succeed.
+    let phys_symbols_atom = symbols_atom;
 
     let type_name_strs = ["ONE_LEVEL", "TWO_LEVEL", "ALPHABETIC", "KEYPAD"];
     let level_name_strs = [
@@ -170,26 +190,22 @@ pub(crate) fn build_xkb_get_names_reply(
         emit_atom!(symbols_atom);
     }
 
-    // Bit 3: GroupNames (one ATOM per set bit in groupNames)
+    // Bit 3: PhysSymbolsName (1 ATOM)
     if req_which & (1 << 3) != 0 {
         which |= 1 << 3;
-        for &atom in &group_atoms {
-            emit_atom!(atom);
-        }
+        emit_atom!(phys_symbols_atom);
     }
 
-    // Bit 4: CompatName (1 ATOM)
+    // Bit 4: TypesName (1 ATOM)
     if req_which & (1 << 4) != 0 {
         which |= 1 << 4;
-        emit_atom!(compat_atom);
+        emit_atom!(types_atom);
     }
 
-    // Bit 5: IndicatorNames (one ATOM per set bit in indicators)
+    // Bit 5: CompatName (1 ATOM)
     if req_which & (1 << 5) != 0 {
         which |= 1 << 5;
-        for &atom in &indicator_atoms {
-            emit_atom!(atom);
-        }
+        emit_atom!(compat_atom);
     }
 
     // Bit 6: KeyTypeNames (nTypes ATOMs)
@@ -217,9 +233,33 @@ pub(crate) fn build_xkb_get_names_reply(
         }
     }
 
-    // Bit 9: KeyNames (N_KEYS * 4 bytes)
+    // Bit 8: IndicatorNames (one ATOM per set bit in indicators)
+    if req_which & (1 << 8) != 0 {
+        which |= 1 << 8;
+        for &atom in &indicator_atoms {
+            emit_atom!(atom);
+        }
+    }
+
+    // Bit 9: GroupNames (one ATOM per set bit in groupNames)
     if req_which & (1 << 9) != 0 {
         which |= 1 << 9;
+        for &atom in &group_atoms {
+            emit_atom!(atom);
+        }
+    }
+
+    // Bit 10: VirtualModNames (one ATOM per set bit in virtualMods)
+    if req_which & (1 << 10) != 0 {
+        which |= 1 << 10;
+        for &atom in &vmod_atoms {
+            emit_atom!(atom);
+        }
+    }
+
+    // Bit 11: KeyNames (N_KEYS * 4 bytes)
+    if req_which & (1 << 11) != 0 {
+        which |= 1 << 11;
         let key_names = super::map::us_qwerty_key_names();
         for kc in MIN_KEY_CODE..=MAX_KEY_CODE {
             let idx = (kc - MIN_KEY_CODE) as usize;
@@ -235,9 +275,9 @@ pub(crate) fn build_xkb_get_names_reply(
         }
     }
 
-    // Bit 10: KeyAliases (pairs of 4-byte names)
-    let n_key_aliases: u16 = if req_which & (1 << 10) != 0 {
-        which |= 1 << 10;
+    // Bit 12: KeyAliases (pairs of 4-byte names)
+    let n_key_aliases: u16 = if req_which & (1 << 12) != 0 {
+        which |= 1 << 12;
         let aliases = &state.xkb_key_aliases;
         for (alias, real) in aliases {
             data.extend_from_slice(alias);
@@ -247,14 +287,6 @@ pub(crate) fn build_xkb_get_names_reply(
     } else {
         0
     };
-
-    // Bit 11: VirtualModNames (one ATOM per set bit in virtualMods)
-    if req_which & (1 << 11) != 0 {
-        which |= 1 << 11;
-        for &atom in &vmod_atoms {
-            emit_atom!(atom);
-        }
-    }
 
     let mut reply = ReplyBuf::with_extra(seq, data.len(), state.msb_first)
         .set_data_byte(device_id)
@@ -336,30 +368,23 @@ pub(crate) fn handle_xkb_set_names(state: &mut ClientState, data: &[u8], seq: u1
         state.xkb_names_atoms.insert(2, atom);
         offset += 4;
     }
-    // Bit 3: PhysSymbols name atom
-    if which & (1 << 3) != 0 {
-        // GroupNames: one atom per set bit in groupNames mask
-        let n_groups = group_names_mask.count_ones() as usize;
-        state.xkb_group_names.clear();
-        for _ in 0..n_groups {
-            if offset + 4 <= data.len() {
-                let atom = read_u32(data, offset, msb);
-                state.xkb_group_names.push(atom);
-                offset += 4;
-            }
-        }
+    // Bit 3: PhysSymbolsName (1 atom)
+    if which & (1 << 3) != 0 && offset + 4 <= data.len() {
+        let atom = read_u32(data, offset, msb);
+        state.xkb_names_atoms.insert(3, atom);
+        offset += 4;
     }
-    // Bit 5: IndicatorNames
-    if which & (1 << 5) != 0 {
-        let n_indicators = indicators.count_ones() as usize;
-        state.xkb_indicator_name_atoms.clear();
-        for _ in 0..n_indicators {
-            if offset + 4 <= data.len() {
-                let atom = read_u32(data, offset, msb);
-                state.xkb_indicator_name_atoms.push(atom);
-                offset += 4;
-            }
-        }
+    // Bit 4: TypesName (1 atom)
+    if which & (1 << 4) != 0 && offset + 4 <= data.len() {
+        let atom = read_u32(data, offset, msb);
+        state.xkb_names_atoms.insert(4, atom);
+        offset += 4;
+    }
+    // Bit 5: CompatName (1 atom)
+    if which & (1 << 5) != 0 && offset + 4 <= data.len() {
+        let atom = read_u32(data, offset, msb);
+        state.xkb_names_atoms.insert(5, atom);
+        offset += 4;
     }
     // Bit 6: KeyTypeNames
     if which & (1 << 6) != 0 {
@@ -374,7 +399,6 @@ pub(crate) fn handle_xkb_set_names(state: &mut ClientState, data: &[u8], seq: u1
     }
     // Bit 7: KTLevelNames
     if which & (1 << 7) != 0 {
-        // nLevelsPerType: one byte per type
         state.xkb_kt_level_names.clear();
         let mut levels_per_type = Vec::new();
         for i in 0..n_kt_levels as usize {
@@ -383,9 +407,7 @@ pub(crate) fn handle_xkb_set_names(state: &mut ClientState, data: &[u8], seq: u1
             }
         }
         offset += n_kt_levels as usize;
-        // Pad to 4-byte boundary
         offset = (offset + 3) & !3;
-        // Atom values
         for &n_levels in &levels_per_type {
             let mut level_atoms = Vec::new();
             for _ in 0..n_levels {
@@ -398,34 +420,32 @@ pub(crate) fn handle_xkb_set_names(state: &mut ClientState, data: &[u8], seq: u1
             state.xkb_kt_level_names.push(level_atoms);
         }
     }
-    // Bit 9: KeyNames (4-byte names per key)
-    if which & (1 << 9) != 0 {
-        for i in 0..n_keys as usize {
+    // Bit 8: IndicatorNames (one atom per set bit in `indicators`)
+    if which & (1 << 8) != 0 {
+        let n_indicators = indicators.count_ones() as usize;
+        state.xkb_indicator_name_atoms.clear();
+        for _ in 0..n_indicators {
             if offset + 4 <= data.len() {
-                let kc = first_key.wrapping_add(i as u8);
-                let mut name = [0u8; 4];
-                name.copy_from_slice(&data[offset..offset + 4]);
-                state.xkb_key_names.insert(kc, name);
+                let atom = read_u32(data, offset, msb);
+                state.xkb_indicator_name_atoms.push(atom);
                 offset += 4;
             }
         }
     }
-    // Bit 10: KeyAliases (pairs of 4-byte names)
-    if which & (1 << 10) != 0 {
-        state.xkb_key_aliases.clear();
-        for _ in 0..n_key_aliases {
-            if offset + 8 <= data.len() {
-                let mut alias = [0u8; 4];
-                let mut real = [0u8; 4];
-                alias.copy_from_slice(&data[offset..offset + 4]);
-                real.copy_from_slice(&data[offset + 4..offset + 8]);
-                state.xkb_key_aliases.push((alias, real));
-                offset += 8;
+    // Bit 9: GroupNames (one atom per set bit in groupNames mask)
+    if which & (1 << 9) != 0 {
+        let n_groups = group_names_mask.count_ones() as usize;
+        state.xkb_group_names.clear();
+        for _ in 0..n_groups {
+            if offset + 4 <= data.len() {
+                let atom = read_u32(data, offset, msb);
+                state.xkb_group_names.push(atom);
+                offset += 4;
             }
         }
     }
-    // Bit 11: VirtualModNames
-    if which & (1 << 11) != 0 {
+    // Bit 10: VirtualModNames (one atom per set bit in virtualMods)
+    if which & (1 << 10) != 0 {
         // virtualMods bitmask is at bytes 30-31 of the request
         let vmods: u16 = if data.len() >= 32 {
             read_u16(data, 30, msb)
@@ -439,6 +459,32 @@ pub(crate) fn handle_xkb_set_names(state: &mut ClientState, data: &[u8], seq: u1
                 let atom = read_u32(data, offset, msb);
                 state.xkb_vmod_names.push(atom);
                 offset += 4;
+            }
+        }
+    }
+    // Bit 11: KeyNames (4-byte names per key)
+    if which & (1 << 11) != 0 {
+        for i in 0..n_keys as usize {
+            if offset + 4 <= data.len() {
+                let kc = first_key.wrapping_add(i as u8);
+                let mut name = [0u8; 4];
+                name.copy_from_slice(&data[offset..offset + 4]);
+                state.xkb_key_names.insert(kc, name);
+                offset += 4;
+            }
+        }
+    }
+    // Bit 12: KeyAliases (pairs of 4-byte names)
+    if which & (1 << 12) != 0 {
+        state.xkb_key_aliases.clear();
+        for _ in 0..n_key_aliases {
+            if offset + 8 <= data.len() {
+                let mut alias = [0u8; 4];
+                let mut real = [0u8; 4];
+                alias.copy_from_slice(&data[offset..offset + 4]);
+                real.copy_from_slice(&data[offset + 4..offset + 8]);
+                state.xkb_key_aliases.push((alias, real));
+                offset += 8;
             }
         }
     }

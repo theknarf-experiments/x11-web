@@ -12,12 +12,18 @@ try:
     else:
         failed += 1; print("FAIL: xset does not report auto repeat")
     # Check xkbcomp can read the keyboard map
-    xkb_out = subprocess.check_output(
-        ["xkbcomp", ":99", "-"],
+    proc = subprocess.run(
+        ["xkbcomp", "-xkb", "-w", "10", ":99", "-"],
         env=env,
-        stderr=subprocess.DEVNULL
-    ).decode()
-    if "repeat" in xkb_out.lower():
+        capture_output=True,
+        text=True,
+    )
+    if proc.returncode != 0:
+        failed += 1
+        print(f"FAIL: xkbcomp exit={proc.returncode}")
+        print(f"--- xkbcomp stderr ---\n{proc.stderr.strip()}\n--- end ---")
+        print(f"--- xkbcomp stdout (last 500 chars) ---\n{proc.stdout[-500:]}\n--- end ---")
+    elif "repeat" in proc.stdout.lower():
         passed += 1; print("PASS: xkbcomp includes repeat key definitions")
     else:
         failed += 1; print("FAIL: xkbcomp missing repeat definitions")

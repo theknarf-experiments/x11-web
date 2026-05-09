@@ -1569,11 +1569,7 @@ test.describe.serial("XTS binary execution", () => {
 });
 
 test.describe("Key auto-repeat conformance", () => {
-	// Depends on `xkbcomp :99 -` returning a parseable keymap. xkbcomp
-	// currently exits with status 1 — same root cause as the
-	// `xkbcomp dumps a parseable XKB keymap` test in x11-web.spec.ts.
-	// Documented in todo.md.
-	test.skip("GetControls reports correct repeat delay and interval", async ({ sidecarContainer }) => {
+	test("GetControls reports correct repeat delay and interval", async ({ sidecarContainer }) => {
 		test.setTimeout(30_000);
 		const result = await runPythonScript(sidecarContainer, "getcontrols_repeat_delay_interval.py", { env: { DISPLAY: ":99" } });
 		const match = result.output.match(/key-repeat: pass=(\d+) fail=(\d+)/);
