@@ -39,12 +39,14 @@ pub(crate) fn handle_use_x_font(state: &mut ClientState, data: &[u8], _seq: u16)
         }
     };
 
-    // GL_COMPILE = 0x1300
+    // GL enum tokens used by UseXFont. Values match the OpenGL spec.
     const GL_COMPILE: u32 = 0x1300;
+    const GL_UNPACK_LSB_FIRST: u32 = 0x0CF1;
+    const GL_UNPACK_ALIGNMENT: u32 = 0x0D05;
 
     // Set pixel storage for 1-bit bitmaps: byte-aligned, MSB first
-    crate::osmesa::gl_pixel_storei(0x0D05, 1); // GL_UNPACK_ALIGNMENT = 1
-    crate::osmesa::gl_pixel_storei(0x0CF1, 0); // GL_UNPACK_LSB_FIRST = 0
+    crate::osmesa::gl_pixel_storei(GL_UNPACK_ALIGNMENT, 1);
+    crate::osmesa::gl_pixel_storei(GL_UNPACK_LSB_FIRST, 0);
 
     for i in 0..count {
         let char_code = (first + i) as u16;

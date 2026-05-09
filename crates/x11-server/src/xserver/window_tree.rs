@@ -4,11 +4,16 @@ use std::collections::HashMap;
 
 use super::types::WindowState;
 
+/// Maximum depth we walk when traversing the window tree before bailing
+/// out. Prevents infinite loops if `parent` chains contain cycles, which
+/// shouldn't happen but isn't enforced by the protocol.
+pub(crate) const MAX_TREE_DEPTH: usize = 128;
+
 /// Walk from `start` up through `parent` links collecting the chain of window IDs.
 pub(crate) fn ancestor_chain(windows: &HashMap<u32, WindowState>, start: u32) -> Vec<u32> {
     let mut chain = Vec::new();
     let mut cur = start;
-    for _ in 0..128 {
+    for _ in 0..MAX_TREE_DEPTH {
         chain.push(cur);
         match windows.get(&cur).map(|w| w.parent) {
             Some(p) if p != 0 && p != cur => cur = p,
@@ -25,7 +30,7 @@ pub(crate) fn is_descendant_of(
     ancestor: u32,
 ) -> bool {
     let mut current = child;
-    for _ in 0..128 {
+    for _ in 0..MAX_TREE_DEPTH {
         let parent = match windows.get(&current) {
             Some(w) => w.parent,
             None => return false,

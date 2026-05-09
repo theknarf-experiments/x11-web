@@ -325,15 +325,14 @@ impl ClientState {
 
                     // Apply shape clipping: mask pixels outside the bounding/clip shape
                     if let Some(shape) = win.effective_render_shape() {
+                        const BYTES_PER_PIXEL: usize = 4; // RGBA8888
                         for py in 0..h as i16 {
                             for px in 0..w as i16 {
                                 if !point_in_shape(shape, x + px, y + py) {
-                                    let offset = (py as usize * w as usize + px as usize) * 4;
-                                    if offset + 3 < pixels.len() {
-                                        pixels[offset] = 0; // B
-                                        pixels[offset + 1] = 0; // G
-                                        pixels[offset + 2] = 0; // R
-                                        pixels[offset + 3] = 0; // A
+                                    let offset = (py as usize * w as usize + px as usize)
+                                        * BYTES_PER_PIXEL;
+                                    if offset + BYTES_PER_PIXEL <= pixels.len() {
+                                        pixels[offset..offset + BYTES_PER_PIXEL].fill(0);
                                     }
                                 }
                             }

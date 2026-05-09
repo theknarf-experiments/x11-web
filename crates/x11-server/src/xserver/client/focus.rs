@@ -2,8 +2,8 @@
 
 use x11_web_protocol::DisplayUpdate;
 use x11rb_protocol::protocol::xproto::{
-    ClientMessageData, ClientMessageEvent, FocusInEvent, KeymapNotifyEvent, NotifyDetail,
-    NotifyMode, WindowClass,
+    ClientMessageData, ClientMessageEvent, FocusInEvent, InputFocus, KeymapNotifyEvent,
+    NotifyDetail, NotifyMode, WindowClass,
 };
 
 use super::super::core::EventMask;
@@ -52,10 +52,10 @@ impl ClientState {
         if self.focus_window != window {
             return;
         }
-        let new_focus = match self.focus_revert_to {
-            0 => 0, // RevertToNone
-            1 => 1, // RevertToPointerRoot
-            2 => {
+        let new_focus = match InputFocus::from(self.focus_revert_to) {
+            InputFocus::NONE => u8::from(InputFocus::NONE) as u32,
+            InputFocus::POINTER_ROOT => u8::from(InputFocus::POINTER_ROOT) as u32,
+            InputFocus::PARENT => {
                 // RevertToParent: walk up the window tree to find the nearest
                 // ancestor that still exists (it may have been destroyed too).
                 let mut candidate = self

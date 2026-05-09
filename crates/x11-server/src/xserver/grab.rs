@@ -16,9 +16,23 @@ use std::collections::{HashMap, VecDeque};
 use tracing::{debug, info};
 use x11rb_protocol::protocol::xproto::{
     AllowEventsRequest, ChangeActivePointerGrabRequest, GrabButtonRequest, GrabKeyRequest,
-    GrabKeyboardRequest, GrabPointerRequest, GrabServerRequest, UngrabButtonRequest,
+    GrabKeyboardRequest, GrabPointerRequest, GrabServerRequest, ModMask, UngrabButtonRequest,
     UngrabKeyRequest, UngrabKeyboardRequest, UngrabPointerRequest, UngrabServerRequest,
 };
+
+/// X11 wire constant for `AnyModifier` — the magic modifier mask that
+/// matches any combination of modifier keys. Mirrors `ModMask::ANY`
+/// (verified by a unit test below).
+pub(crate) const ANY_MODIFIER: u16 = 1 << 15;
+
+/// Half the X11 timestamp space (`0x8000_0000`). Used to detect 32-bit
+/// timestamp wraparound when comparing two `TIMESTAMP` values: a delta
+/// strictly less than this means `b` is later than `a`.
+const TIMESTAMP_WRAP_THRESHOLD: u32 = 0x8000_0000;
+
+/// Bit mask covering pointer-button state bits 1..=5 in the X11 keybutton
+/// state mask (`Button1Mask = 1<<8 .. Button5Mask = 1<<12`).
+const BUTTON_STATE_MASK_ALL: u16 = 0x1F00;
 
 /// Generate crossing events for a grab activation.
 /// Per X11 spec §11.3, uses mode=Grab and computes proper detail
@@ -178,7 +192,7 @@ pub(crate) struct ActiveKeyboardGrab {
 pub(crate) struct PassiveButtonGrab {
     pub(crate) grab_window: u32,
     pub(crate) button: u8,     // 0 = AnyButton
-    pub(crate) modifiers: u16, // 0x8000 = AnyModifier
+    pub(crate) modifiers: u16, // ANY_MODIFIER matches any combination
     pub(crate) event_mask: u32,
     pub(crate) pointer_mode: u8,
     pub(crate) keyboard_mode: u8,
@@ -191,7 +205,7 @@ pub(crate) struct PassiveButtonGrab {
 pub(crate) struct PassiveKeyGrab {
     pub(crate) grab_window: u32,
     pub(crate) key: u8,        // 0 = AnyKey
-    pub(crate) modifiers: u16, // 0x8000 = AnyModifier
+    pub(crate) modifiers: u16, // ANY_MODIFIER matches any combination
     pub(crate) pointer_mode: u8,
     pub(crate) keyboard_mode: u8,
     pub(crate) owner_events: bool,
@@ -264,7 +278,7 @@ pub(crate) fn handle_grab_pointer(state: &mut ClientState, req: &GrabPointerRequ
         // in the past (simple unsigned comparison; wraparound after ~49 days is
         // unlikely in practice).
         let delta = now.wrapping_sub(timestamp);
-        if delta > 0 && delta < 0x8000_0000 {
+        if delta > 0 && delta < TIMESTAMP_WRAP_THRESHOLD {
             // timestamp is in the past
         } else if timestamp != now {
             // timestamp is in the future — also invalid per spec
@@ -394,7 +408,7 @@ pub(crate) fn handle_ungrab_button(state: &mut ClientState, req: &UngrabButtonRe
 
     debug!("UngrabButton: window={grab_window:#x} button={button} modifiers={modifiers:#x}");
 
-    if button == 0 && modifiers == 0x8000 {
+    if button == 0 && modifiers == ANY_MODIFIER {
         // AnyButton + AnyModifier: remove all button grabs on this window
         state
             .grabs
@@ -470,7 +484,7 @@ pub(crate) fn handle_grab_keyboard(state: &mut ClientState, req: &GrabKeyboardRe
     if timestamp != 0 {
         let now = state.timestamp();
         let delta = now.wrapping_sub(timestamp);
-        if delta > 0 && delta < 0x8000_0000 {
+        if delta > 0 && delta < TIMESTAMP_WRAP_THRESHOLD {
             // timestamp is in the past -- OK
         } else if timestamp != now {
             return crate::xserver::reply::ReplyBuf::fixed(seq, state.msb_first)
@@ -583,7 +597,7 @@ pub(crate) fn handle_ungrab_key(state: &mut ClientState, req: &UngrabKeyRequest)
 
     debug!("UngrabKey: window={grab_window:#x} key={key} modifiers={modifiers:#x}");
 
-    if key == 0 && modifiers == 0x8000 {
+    if key == 0 && modifiers == ANY_MODIFIER {
         state
             .grabs
             .key_grabs
@@ -725,7 +739,7 @@ pub(crate) fn check_passive_button_grab(
             .find(|g| {
                 g.grab_window == current
             && (g.button == 0 || g.button == button)         // AnyButton or exact match
-            && (g.modifiers == 0x8000 || g.modifiers == modifiers) // AnyModifier or exact match
+            && (g.modifiers == ANY_MODIFIER || g.modifiers == modifiers) // AnyModifier or exact match
             })
             .cloned();
 
@@ -792,7 +806,7 @@ pub(crate) fn check_passive_key_grab(
             .find(|g| {
                 g.grab_window == current
             && (g.key == 0 || g.key == keycode)              // AnyKey or exact match
-            && (g.modifiers == 0x8000 || g.modifiers == modifiers) // AnyModifier or exact match
+            && (g.modifiers == ANY_MODIFIER || g.modifiers == modifiers) // AnyModifier or exact match
             })
             .cloned();
 
@@ -833,7 +847,7 @@ pub(crate) fn check_button_release_ungrab(state: &mut ClientState, _button: u8, 
     // release it when all buttons are released (button_mask has no button bits set)
     if let Some(ref grab) = state.grabs.pointer_grab {
         // Button bits in state mask: Button1=0x100, Button2=0x200, Button3=0x400, Button4=0x800, Button5=0x1000
-        let any_buttons_held = (button_mask & 0x1F00) != 0;
+        let any_buttons_held = (button_mask & BUTTON_STATE_MASK_ALL) != 0;
         if !any_buttons_held {
             let grab_window = grab.grab_window;
             debug!("Auto-ungrab: all buttons released");
@@ -951,6 +965,11 @@ pub(crate) fn clamp_to_confine(state: &ClientState, x: i16, y: i16) -> (i16, i16
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn any_modifier_matches_x11rb() {
+        assert_eq!(ANY_MODIFIER, u16::from(ModMask::ANY));
+    }
 
     fn make_grab_state() -> GrabState {
         GrabState::default()
@@ -1139,7 +1158,7 @@ mod tests {
         gs.frozen_pointer_events.push_back(vec![0u8; 32]);
 
         // Simulate all buttons released (button_mask = 0)
-        let any_buttons_held = (0u16 & 0x1F00) != 0;
+        let any_buttons_held = (0u16 & BUTTON_STATE_MASK_ALL) != 0;
         assert!(!any_buttons_held);
 
         // Simulate auto-ungrab
@@ -1227,15 +1246,15 @@ mod tests {
         gs.key_grabs.push(PassiveKeyGrab {
             grab_window: 100,
             key: 38,
-            modifiers: 0x8000, // AnyModifier
+            modifiers: ANY_MODIFIER, // AnyModifier
             pointer_mode: 0,
             keyboard_mode: 0,
             owner_events: false,
         });
         let grab = &gs.key_grabs[0];
-        assert_eq!(grab.modifiers, 0x8000);
+        assert_eq!(grab.modifiers, ANY_MODIFIER);
         // AnyModifier matches any modifier state
-        assert!(grab.modifiers == 0x8000 || grab.modifiers == 0x04);
+        assert!(grab.modifiers == ANY_MODIFIER || grab.modifiers == 0x04);
     }
 
     #[test]
@@ -1359,7 +1378,7 @@ mod tests {
         let grab = PassiveButtonGrab {
             grab_window: 0x100,
             button: 1,
-            modifiers: 0x8000, // AnyModifier
+            modifiers: ANY_MODIFIER, // AnyModifier
             event_mask: 0x04,
             pointer_mode: 1,  // Async
             keyboard_mode: 1, // Async
@@ -1369,7 +1388,7 @@ mod tests {
         };
         assert_eq!(grab.grab_window, 0x100);
         assert_eq!(grab.button, 1);
-        assert_eq!(grab.modifiers, 0x8000);
+        assert_eq!(grab.modifiers, ANY_MODIFIER);
         assert!(grab.owner_events);
     }
 

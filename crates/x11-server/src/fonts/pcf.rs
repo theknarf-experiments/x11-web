@@ -21,6 +21,11 @@ const PCF_BYTE_MASK: u32 = 1 << 2; // MSB byte order
 const PCF_BIT_MASK: u32 = 1 << 3; // MSB bit order
 const PCF_GLYPH_PAD_MASK: u32 = 3; // 2 bits for glyph padding
 
+/// Per the PCF spec, compressed metric fields are stored as `value + 0x80`
+/// in a single byte so that `(byte as i16) - BIAS` recovers the signed
+/// metric. The bias makes the unsigned byte cover -128..=127.
+const COMPRESSED_METRIC_BIAS: i16 = 0x80;
+
 fn pcf_read_u32(data: &[u8], offset: usize, msb: bool) -> u32 {
     if offset + 4 > data.len() {
         return 0;
@@ -292,11 +297,11 @@ fn parse_pcf_metrics(data: &[u8], table: &PcfTable) -> Option<Vec<PcfMetric>> {
                 break;
             }
             metrics.push(PcfMetric {
-                left_side_bearing: data[pos] as i16 - 0x80,
-                right_side_bearing: data[pos + 1] as i16 - 0x80,
-                character_width: data[pos + 2] as i16 - 0x80,
-                ascent: data[pos + 3] as i16 - 0x80,
-                descent: data[pos + 4] as i16 - 0x80,
+                left_side_bearing: data[pos] as i16 - COMPRESSED_METRIC_BIAS,
+                right_side_bearing: data[pos + 1] as i16 - COMPRESSED_METRIC_BIAS,
+                character_width: data[pos + 2] as i16 - COMPRESSED_METRIC_BIAS,
+                ascent: data[pos + 3] as i16 - COMPRESSED_METRIC_BIAS,
+                descent: data[pos + 4] as i16 - COMPRESSED_METRIC_BIAS,
                 attributes: 0,
             });
             pos += 5;
