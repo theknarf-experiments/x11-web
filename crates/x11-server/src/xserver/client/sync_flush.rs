@@ -216,7 +216,7 @@ impl ClientState {
             let mut target = *child_id;
             let mut off_x: i32 = 0;
             let mut off_y: i32 = 0;
-            for _ in 0..10 {
+            for _ in 0..crate::xserver::window_tree::MAX_TREE_DEPTH {
                 let (parent, wx, wy) = match self.windows.get(&target) {
                     Some(w) if w.parent != self.root_window && w.parent != 0 => {
                         (w.parent, w.x as i32, w.y as i32)

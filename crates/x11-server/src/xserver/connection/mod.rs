@@ -692,7 +692,7 @@ pub(crate) async fn handle_client(
                     // For CLIPBOARD, persist the data and take server-side ownership
                     // so future paste requests still work (clipboard manager persistence).
                     {
-                        const CLIPBOARD_ATOM: u32 = 134;
+                        use crate::xserver::atoms::predef::CLIPBOARD as CLIPBOARD_ATOM;
                         let my_wids: Vec<u32> = state.x11_to_uuid.keys().copied().collect();
                         let timestamp = state.timestamp();
 

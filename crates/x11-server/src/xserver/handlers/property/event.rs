@@ -6,6 +6,22 @@ use x11rb_protocol::protocol::xproto::{
     ClientMessageEvent, ConfigureNotifyEvent, ExposeEvent, PropertyNotifyEvent, SendEventRequest,
 };
 
+// XEmbed protocol message types (per the freedesktop.org XEmbed 0.5 spec).
+// Sent in `data.l[1]` of a ClientMessage with type `_XEMBED`.
+const XEMBED_EMBEDDED_NOTIFY: u32 = 0;
+const XEMBED_WINDOW_ACTIVATE: u32 = 1;
+const XEMBED_WINDOW_DEACTIVATE: u32 = 2;
+const XEMBED_REQUEST_FOCUS: u32 = 3;
+const XEMBED_FOCUS_IN: u32 = 4;
+const XEMBED_FOCUS_OUT: u32 = 5;
+const XEMBED_FOCUS_NEXT: u32 = 6;
+const XEMBED_FOCUS_PREV: u32 = 7;
+const XEMBED_MODALITY_ON: u32 = 10;
+const XEMBED_MODALITY_OFF: u32 = 11;
+const XEMBED_REGISTER_ACCELERATOR: u32 = 12;
+const XEMBED_UNREGISTER_ACCELERATOR: u32 = 13;
+const XEMBED_ACTIVATE_ACCELERATOR: u32 = 14;
+
 // ---------------------------------------------------------------------------
 // Opcode 25: SendEvent
 // ---------------------------------------------------------------------------
@@ -17,8 +33,8 @@ pub(crate) fn handle_send_event(state: &mut ClientState, req: &SendEventRequest)
 
     // The event data is 32 bytes parsed by x11rb
     let mut event: Vec<u8> = req.event.to_vec();
-    // Mark as synthetic (bit 7 of the event code)
-    event[0] |= 0x80;
+    // Mark as synthetic
+    event[0] |= crate::xserver::core::SEND_EVENT_FLAG;
 
     // Resolve destination:
     // 0 = PointerWindow: deliver to the window containing the pointer
@@ -778,21 +794,6 @@ pub(crate) fn handle_send_event(state: &mut ClientState, req: &SendEventRequest)
                 } else {
                     0
                 };
-
-                // XEmbed message types:
-                const XEMBED_EMBEDDED_NOTIFY: u32 = 0;
-                const XEMBED_WINDOW_ACTIVATE: u32 = 1;
-                const XEMBED_WINDOW_DEACTIVATE: u32 = 2;
-                const XEMBED_REQUEST_FOCUS: u32 = 3;
-                const XEMBED_FOCUS_IN: u32 = 4;
-                const XEMBED_FOCUS_OUT: u32 = 5;
-                const XEMBED_FOCUS_NEXT: u32 = 6;
-                const XEMBED_FOCUS_PREV: u32 = 7;
-                const XEMBED_MODALITY_ON: u32 = 10;
-                const XEMBED_MODALITY_OFF: u32 = 11;
-                const XEMBED_REGISTER_ACCELERATOR: u32 = 12;
-                const XEMBED_UNREGISTER_ACCELERATOR: u32 = 13;
-                const XEMBED_ACTIVATE_ACCELERATOR: u32 = 14;
 
                 match xembed_message {
                     XEMBED_EMBEDDED_NOTIFY => {

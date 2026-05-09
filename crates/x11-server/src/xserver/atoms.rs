@@ -17,6 +17,7 @@ pub(crate) mod predef {
     pub(crate) const WINDOW: u32 = 33;
     pub(crate) const MULTIPLE: u32 = 136;
     pub(crate) const TIMESTAMP: u32 = 137;
+    pub(crate) const CLIPBOARD: u32 = 134;
     pub(crate) const NET_WM_WINDOW_TYPE: u32 = 79;
     pub(crate) const NET_WM_WINDOW_TYPE_NORMAL: u32 = 80;
     pub(crate) const NET_WM_WINDOW_TYPE_DIALOG: u32 = 81;
@@ -305,6 +306,7 @@ mod tests {
             ("WINDOW", predef::WINDOW),
             ("MULTIPLE", predef::MULTIPLE),
             ("TIMESTAMP", predef::TIMESTAMP),
+            ("CLIPBOARD", predef::CLIPBOARD),
             ("_NET_WM_WINDOW_TYPE", predef::NET_WM_WINDOW_TYPE),
             ("_NET_WM_WINDOW_TYPE_NORMAL", predef::NET_WM_WINDOW_TYPE_NORMAL),
             ("_NET_WM_WINDOW_TYPE_DIALOG", predef::NET_WM_WINDOW_TYPE_DIALOG),
