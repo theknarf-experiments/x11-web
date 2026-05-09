@@ -411,9 +411,10 @@ impl Framebuffer {
                         None
                     };
                     if let Some(c) = color {
-                        tile[dst] = ((c >> 16) & 0xFF) as u8;
-                        tile[dst + 1] = ((c >> 8) & 0xFF) as u8;
-                        tile[dst + 2] = (c & 0xFF) as u8;
+                        let (r, g, b) = super::unpack_rgb(c);
+                        tile[dst] = r;
+                        tile[dst + 1] = g;
+                        tile[dst + 2] = b;
                         tile[dst + 3] = 0xFF;
                     }
                 }

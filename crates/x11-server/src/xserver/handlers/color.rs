@@ -529,9 +529,8 @@ pub(crate) fn handle_query_colors(state: &mut ClientState, req: &QueryColorsRequ
             cmap.lookup(pixel)
         } else {
             // Default TrueColor decomposition (ROOT_COLORMAP)
-            let r = ((pixel >> 16) & 0xFF) as u16;
-            let g = ((pixel >> 8) & 0xFF) as u16;
-            let b = (pixel & 0xFF) as u16;
+            let (r8, g8, b8) = crate::framebuffer::unpack_rgb(pixel);
+            let (r, g, b) = (r8 as u16, g8 as u16, b8 as u16);
             (r << 8 | r, g << 8 | g, b << 8 | b)
         };
 

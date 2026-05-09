@@ -141,12 +141,8 @@ impl BitmapFont {
         let total_width = total_width.max(1) as u16;
         let total_height = (self.font_ascent + self.font_descent) as u16;
 
-        let fg_r = ((fg >> 16) & 0xFF) as u8;
-        let fg_g = ((fg >> 8) & 0xFF) as u8;
-        let fg_b = (fg & 0xFF) as u8;
-        let bg_r = ((bg >> 16) & 0xFF) as u8;
-        let bg_g = ((bg >> 8) & 0xFF) as u8;
-        let bg_b = (bg & 0xFF) as u8;
+        let (fg_r, fg_g, fg_b) = crate::framebuffer::unpack_rgb(fg);
+        let (bg_r, bg_g, bg_b) = crate::framebuffer::unpack_rgb(bg);
 
         let mut pixels = vec![0u8; total_width as usize * total_height as usize * 4];
 
@@ -204,9 +200,7 @@ impl BitmapFont {
         let total_width = total_width.max(1) as u16;
         let total_height = (self.font_ascent + self.font_descent) as u16;
 
-        let fg_r = ((fg >> 16) & 0xFF) as u8;
-        let fg_g = ((fg >> 8) & 0xFF) as u8;
-        let fg_b = (fg & 0xFF) as u8;
+        let (fg_r, fg_g, fg_b) = crate::framebuffer::unpack_rgb(fg);
 
         // Background pixels are fully transparent (alpha=0x00)
         let mut pixels = vec![0u8; total_width as usize * total_height as usize * 4];

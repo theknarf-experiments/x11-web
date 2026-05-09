@@ -214,9 +214,8 @@ pub(crate) fn handle_poly_text16(state: &mut ClientState, req: &PolyText16Reques
 
                     if let Some(glyph) = glyph_opt {
                         if glyph.width > 0 && glyph.height > 0 {
-                            let fg_r = ((gc.foreground >> 16) & 0xFF) as u8;
-                            let fg_g = ((gc.foreground >> 8) & 0xFF) as u8;
-                            let fg_b = (gc.foreground & 0xFF) as u8;
+                            let (fg_r, fg_g, fg_b) =
+                                crate::framebuffer::unpack_rgb(gc.foreground);
                             let gw = glyph.width as usize;
                             let gh = glyph.height as usize;
                             let row_bytes = gw.div_ceil(8);
@@ -392,12 +391,8 @@ pub(crate) fn handle_image_text16(state: &mut ClientState, req: &ImageText16Requ
     let total_height = (font.font_ascent + font.font_descent) as u16;
 
     // Render with opaque background
-    let fg_r = ((gc.foreground >> 16) & 0xFF) as u8;
-    let fg_g = ((gc.foreground >> 8) & 0xFF) as u8;
-    let fg_b = (gc.foreground & 0xFF) as u8;
-    let bg_r = ((gc.background >> 16) & 0xFF) as u8;
-    let bg_g = ((gc.background >> 8) & 0xFF) as u8;
-    let bg_b = (gc.background & 0xFF) as u8;
+    let (fg_r, fg_g, fg_b) = crate::framebuffer::unpack_rgb(gc.foreground);
+    let (bg_r, bg_g, bg_b) = crate::framebuffer::unpack_rgb(gc.background);
 
     let mut pixels = vec![0u8; total_width as usize * total_height as usize * 4];
     // Fill background

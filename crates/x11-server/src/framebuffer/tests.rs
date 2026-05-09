@@ -409,9 +409,7 @@ fn set_pixel_and_get_pixel_roundtrip() {
     let x = 5i16;
     let y = 3i16;
     let off = y as usize * fb.stride() + x as usize * 4;
-    let r = ((color >> 16) & 0xFF) as u8;
-    let g = ((color >> 8) & 0xFF) as u8;
-    let b = (color & 0xFF) as u8;
+    let (r, g, b) = super::unpack_rgb(color);
     let a = ((color >> 24) & 0xFF) as u8;
     fb.data_mut()[off] = r;
     fb.data_mut()[off + 1] = g;

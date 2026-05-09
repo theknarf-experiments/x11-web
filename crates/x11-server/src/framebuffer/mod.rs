@@ -23,12 +23,28 @@ fn skia_eligible(gc_func: u8, plane_mask: u32) -> bool {
     GX::from(gc_func) == GX::COPY && plane_mask == PLANE_MASK_ALL
 }
 
+/// Unpack an `0x00RRGGBB` X11 colour into its 8-bit (R, G, B) channels.
+/// The X11 wire format always passes pixel values packed in this order
+/// regardless of visual class.
+#[inline]
+pub(crate) fn unpack_rgb(rgb: u32) -> (u8, u8, u8) {
+    (
+        ((rgb >> 16) & 0xFF) as u8,
+        ((rgb >> 8) & 0xFF) as u8,
+        (rgb & 0xFF) as u8,
+    )
+}
+
+/// Inverse of [`unpack_rgb`]: pack 8-bit channels into a `0x00RRGGBB` u32.
+#[inline]
+pub(crate) fn pack_rgb(r: u8, g: u8, b: u8) -> u32 {
+    ((r as u32) << 16) | ((g as u32) << 8) | (b as u32)
+}
+
 /// Convert an `0x00RRGGBB` X11 color into a tiny-skia opaque [`Color`].
 #[inline]
 fn skia_color(rgb: u32) -> Color {
-    let r = ((rgb >> 16) & 0xFF) as u8;
-    let g = ((rgb >> 8) & 0xFF) as u8;
-    let b = (rgb & 0xFF) as u8;
+    let (r, g, b) = unpack_rgb(rgb);
     Color::from_rgba8(r, g, b, 0xFF)
 }
 
@@ -89,12 +105,8 @@ pub(crate) fn stipple_to_tile(
 ) -> Vec<u8> {
     let stride = stipple_w.div_ceil(8) as usize;
     let mut out = vec![0u8; (stipple_w * stipple_h * 4) as usize];
-    let fg_r = ((fg >> 16) & 0xFF) as u8;
-    let fg_g = ((fg >> 8) & 0xFF) as u8;
-    let fg_b = (fg & 0xFF) as u8;
-    let bg_r = ((bg >> 16) & 0xFF) as u8;
-    let bg_g = ((bg >> 8) & 0xFF) as u8;
-    let bg_b = (bg & 0xFF) as u8;
+    let (fg_r, fg_g, fg_b) = unpack_rgb(fg);
+    let (bg_r, bg_g, bg_b) = unpack_rgb(bg);
     for sy in 0..stipple_h {
         for sx in 0..stipple_w {
             let byte_idx = (sy as usize) * stride + (sx as usize / 8);
@@ -368,9 +380,7 @@ impl Framebuffer {
 
     /// Fill a rectangle with a solid color (0x00RRGGBB format).
     pub fn fill_rect(&mut self, x: i16, y: i16, width: u16, height: u16, color: u32) {
-        let r = ((color >> 16) & 0xFF) as u8;
-        let g = ((color >> 8) & 0xFF) as u8;
-        let b = (color & 0xFF) as u8;
+        let (r, g, b) = unpack_rgb(color);
         let pixel = [r, g, b, 0xFF];
 
         // Pre-build a row of pixels
@@ -880,15 +890,16 @@ impl Framebuffer {
 /// Read an RGBA-storage pixel at byte offset `off` as a `0x00RRGGBB` u32.
 #[inline]
 pub(crate) fn read_pixel(data: &[u8], off: usize) -> u32 {
-    ((data[off] as u32) << 16) | ((data[off + 1] as u32) << 8) | (data[off + 2] as u32)
+    pack_rgb(data[off], data[off + 1], data[off + 2])
 }
 
 /// Write `0x00RRGGBB` u32 + alpha to RGBA-storage at byte offset `off`.
 #[inline]
 pub(crate) fn write_pixel(data: &mut [u8], off: usize, color: u32, alpha: u8) {
-    data[off] = ((color >> 16) & 0xFF) as u8;
-    data[off + 1] = ((color >> 8) & 0xFF) as u8;
-    data[off + 2] = (color & 0xFF) as u8;
+    let (r, g, b) = unpack_rgb(color);
+    data[off] = r;
+    data[off + 1] = g;
+    data[off + 2] = b;
     data[off + 3] = alpha;
 }
 

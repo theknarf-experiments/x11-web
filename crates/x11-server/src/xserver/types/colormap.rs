@@ -133,9 +133,8 @@ impl ColormapState {
         match vc {
             5 => {
                 // DirectColor: decompose pixel into per-channel indices and look up each
-                let ri = ((pixel >> 16) & 0xFF) as usize;
-                let gi = ((pixel >> 8) & 0xFF) as usize;
-                let bi = (pixel & 0xFF) as usize;
+                let (r8, g8, b8) = crate::framebuffer::unpack_rgb(pixel);
+                let (ri, gi, bi) = (r8 as usize, g8 as usize, b8 as usize);
                 let n = self.entries.len();
                 let r = if ri < n {
                     self.entries[ri].0
@@ -164,9 +163,8 @@ impl ColormapState {
             }
             _ => {
                 // TrueColor: decompose pixel
-                let r = ((pixel >> 16) & 0xFF) as u16;
-                let g = ((pixel >> 8) & 0xFF) as u16;
-                let b = (pixel & 0xFF) as u16;
+                let (r8, g8, b8) = crate::framebuffer::unpack_rgb(pixel);
+                let (r, g, b) = (r8 as u16, g8 as u16, b8 as u16);
                 (r << 8 | r, g << 8 | g, b << 8 | b)
             }
         }
@@ -178,14 +176,20 @@ impl ColormapState {
         match vc {
             4 => {
                 // TrueColor: compute pixel directly
-                let pixel =
-                    (((r >> 8) as u32) << 16) | (((g >> 8) as u32) << 8) | ((b >> 8) as u32);
+                let pixel = crate::framebuffer::pack_rgb(
+                    (r >> 8) as u8,
+                    (g >> 8) as u8,
+                    (b >> 8) as u8,
+                );
                 Some(pixel)
             }
             5 => {
                 // DirectColor: compute pixel from per-channel lookup.
-                let pixel =
-                    (((r >> 8) as u32) << 16) | (((g >> 8) as u32) << 8) | ((b >> 8) as u32);
+                let pixel = crate::framebuffer::pack_rgb(
+                    (r >> 8) as u8,
+                    (g >> 8) as u8,
+                    (b >> 8) as u8,
+                );
                 Some(pixel)
             }
             0 | 2 => {
