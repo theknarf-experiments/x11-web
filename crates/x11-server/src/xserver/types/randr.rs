@@ -186,6 +186,92 @@ const EDID_DTD_FLAGS: u8 = 0x18;
 /// Monitor-name descriptor tag (used in DTD#2 to declare a monitor name string).
 const EDID_DESC_TAG_MONITOR_NAME: u8 = 0xFC;
 
+/// Field byte offsets within a 128-byte EDID 1.3 blob. Names follow the
+/// VESA EDID 1.3 spec so a reader can cross-reference.
+mod edid_offset {
+    pub(super) const HEADER: std::ops::Range<usize> = 0..8;
+    pub(super) const MANUFACTURER_ID: std::ops::Range<usize> = 8..10;
+    pub(super) const PRODUCT_CODE: std::ops::Range<usize> = 10..12;
+    pub(super) const SERIAL: std::ops::Range<usize> = 12..16;
+    pub(super) const WEEK_OF_MANUFACTURE: usize = 16;
+    pub(super) const YEAR_OF_MANUFACTURE: usize = 17; // year - 1990
+    pub(super) const VERSION: usize = 18;
+    pub(super) const REVISION: usize = 19;
+    pub(super) const VIDEO_INPUT: usize = 20;
+    pub(super) const MAX_H_IMAGE_SIZE_CM: usize = 21;
+    pub(super) const MAX_V_IMAGE_SIZE_CM: usize = 22;
+    pub(super) const DISPLAY_GAMMA: usize = 23;
+    pub(super) const FEATURE_SUPPORT: usize = 24;
+    pub(super) const CHROMATICITY: std::ops::Range<usize> = 25..35;
+    pub(super) const ESTABLISHED_TIMINGS: std::ops::Range<usize> = 35..38;
+    pub(super) const STANDARD_TIMINGS: std::ops::Range<usize> = 38..54;
+    pub(super) const DTD1: std::ops::Range<usize> = 54..72;
+    pub(super) const DTD2: std::ops::Range<usize> = 72..90;
+    // DTD3 + DTD4 (90..126) left zero — unused.
+    pub(super) const EXTENSION_FLAG: usize = 126;
+    pub(super) const CHECKSUM: usize = 127;
+}
+
+/// Field offsets within an EDID Detailed Timing Descriptor (18 bytes).
+mod dtd_offset {
+    pub(super) const PIXEL_CLOCK_LO: usize = 0;
+    pub(super) const PIXEL_CLOCK_HI: usize = 1;
+    pub(super) const H_ACTIVE_LO: usize = 2;
+    pub(super) const H_BLANKING_LO: usize = 3;
+    pub(super) const H_ACTIVE_BLANKING_HI: usize = 4;
+    pub(super) const V_ACTIVE_LO: usize = 5;
+    pub(super) const V_BLANKING_LO: usize = 6;
+    pub(super) const V_ACTIVE_BLANKING_HI: usize = 7;
+    pub(super) const H_SYNC_OFFSET: usize = 8;
+    pub(super) const H_SYNC_WIDTH: usize = 9;
+    pub(super) const V_SYNC_OFFSET_WIDTH: usize = 10;
+    pub(super) const SYNC_HI: usize = 11;
+    pub(super) const H_IMAGE_SIZE_MM: usize = 12;
+    pub(super) const V_IMAGE_SIZE_MM: usize = 13;
+    pub(super) const IMAGE_SIZE_MM_HI: usize = 14;
+    pub(super) const H_BORDER: usize = 15;
+    pub(super) const V_BORDER: usize = 16;
+    pub(super) const FLAGS: usize = 17;
+}
+
+/// Field offsets within an EDID Monitor-Name descriptor (DTD#2, 18 bytes).
+mod monitor_name_offset {
+    pub(super) const ZERO_PIXEL_CLOCK: std::ops::Range<usize> = 0..3;
+    pub(super) const TAG: usize = 3;
+    pub(super) const FLAG: usize = 4;
+    pub(super) const NAME: std::ops::Range<usize> = 5..18;
+}
+
+/// Manufacturer-ID bytes for "XWB" (X11-Web), encoded as 3 × 5-bit chars
+/// per the EDID spec: X=24, W=23, B=2 → 0b11000_10111_00010 = 0xC5C2.
+const MANUFACTURER_ID_XWB: [u8; 2] = [0xC5, 0xC2];
+/// Product / serial dummy values.
+const PRODUCT_CODE: [u8; 2] = [0x01, 0x00];
+const SERIAL_NUMBER: [u8; 4] = [0x01, 0x00, 0x00, 0x00];
+/// Manufacturing date stamp embedded in the EDID.
+const MFG_WEEK: u8 = 1;
+const MFG_YEAR_MINUS_1990: u8 = 34; // 2024
+/// EDID version we advertise: 1.3.
+const EDID_VERSION_MAJOR: u8 = 1;
+const EDID_VERSION_MINOR: u8 = 3;
+/// Display gamma encoded as `(gamma * 100) - 100` → 2.2 maps to 120.
+const DISPLAY_GAMMA_22: u8 = 120;
+/// Standard-timing entry meaning "unused" — both bytes 0x01.
+const STANDARD_TIMING_UNUSED: u8 = 0x01;
+/// Horizontal blanking pixels reserved in our generated mode.
+const H_BLANKING_PIXELS: u16 = 160;
+/// Vertical blanking lines reserved in our generated mode.
+const V_BLANKING_LINES: u16 = 30;
+/// Horizontal sync offset / pulse width (in pixels).
+const H_SYNC_OFFSET: u8 = 40;
+const H_SYNC_WIDTH: u8 = 40;
+/// Packed v-sync field: offset=3 (high nibble), width=6 (low nibble).
+const V_SYNC_OFFSET_WIDTH: u8 = 0x36;
+/// Refresh rate (Hz) used to derive pixel clock.
+const REFRESH_HZ: u32 = 60;
+/// Pixel-clock divisor: EDID stores pixel clock in 10 kHz units.
+const PIXEL_CLOCK_DIVISOR: u32 = 10_000;
+
 /// Generate a minimal valid EDID blob (128 bytes).
 pub(crate) fn generate_edid(
     width_mm: u16,
@@ -193,101 +279,84 @@ pub(crate) fn generate_edid(
     width_px: u16,
     height_px: u16,
 ) -> Vec<u8> {
+    use edid_offset as eo;
+
     let mut edid = vec![0u8; 128];
-    // Header
-    edid[0..8].copy_from_slice(&EDID_HEADER);
-    // Manufacturer ID: "XWB" (X11-Web) encoded as 3 5-bit chars
-    // X=24, W=23, B=2 -> 0b11000_10111_00010 = 0xC5C2
-    edid[8] = 0xC5;
-    edid[9] = 0xC2;
-    // Product code
-    edid[10] = 0x01;
-    edid[11] = 0x00;
-    // Serial
-    edid[12..16].copy_from_slice(&[0x01, 0x00, 0x00, 0x00]);
-    // Week 1, Year 2024 (year - 1990 = 34)
-    edid[16] = 1;
-    edid[17] = 34;
-    // EDID version 1.3
-    edid[18] = 1;
-    edid[19] = 3;
-    // Digital input, 8-bit color
-    edid[20] = EDID_VIDEO_INPUT_DIGITAL;
-    // Max image size (cm)
-    edid[21] = (width_mm / 10) as u8;
-    edid[22] = (height_mm / 10) as u8;
-    // Gamma 2.2 (value = (gamma * 100) - 100 = 120)
-    edid[23] = 120;
-    // Supported features: RGB color, preferred timing in DTD1
-    edid[24] = EDID_FEATURE_SUPPORT;
-    // Chromaticity (standard sRGB-ish values)
-    edid[25..35].copy_from_slice(&EDID_CHROMATICITY);
-    // Established timings
-    edid[35] = 0x00;
-    edid[36] = 0x00;
-    edid[37] = 0x00;
-    // Standard timings (8 entries of 0x0101 = unused)
-    for i in 0..8 {
-        edid[38 + i * 2] = 0x01;
-        edid[38 + i * 2 + 1] = 0x01;
+    edid[eo::HEADER].copy_from_slice(&EDID_HEADER);
+    edid[eo::MANUFACTURER_ID].copy_from_slice(&MANUFACTURER_ID_XWB);
+    edid[eo::PRODUCT_CODE].copy_from_slice(&PRODUCT_CODE);
+    edid[eo::SERIAL].copy_from_slice(&SERIAL_NUMBER);
+    edid[eo::WEEK_OF_MANUFACTURE] = MFG_WEEK;
+    edid[eo::YEAR_OF_MANUFACTURE] = MFG_YEAR_MINUS_1990;
+    edid[eo::VERSION] = EDID_VERSION_MAJOR;
+    edid[eo::REVISION] = EDID_VERSION_MINOR;
+    edid[eo::VIDEO_INPUT] = EDID_VIDEO_INPUT_DIGITAL;
+    edid[eo::MAX_H_IMAGE_SIZE_CM] = (width_mm / 10) as u8;
+    edid[eo::MAX_V_IMAGE_SIZE_CM] = (height_mm / 10) as u8;
+    edid[eo::DISPLAY_GAMMA] = DISPLAY_GAMMA_22;
+    edid[eo::FEATURE_SUPPORT] = EDID_FEATURE_SUPPORT;
+    edid[eo::CHROMATICITY].copy_from_slice(&EDID_CHROMATICITY);
+    // Established timings: leave zero (no preset modes asserted).
+    for byte in &mut edid[eo::ESTABLISHED_TIMINGS] {
+        *byte = 0;
     }
-    // Detailed Timing Descriptor #1 (bytes 54-71)
-    // Pixel clock in 10kHz units
-    let pixel_clock: u16 = ((width_px as u32 + 160) * (height_px as u32 + 30) * 60 / 10000) as u16;
-    edid[54] = (pixel_clock & 0xFF) as u8;
-    edid[55] = ((pixel_clock >> 8) & 0xFF) as u8;
-    // H active lower 8 bits
-    edid[56] = (width_px & 0xFF) as u8;
-    // H blanking lower 8 bits
-    edid[57] = 160u8;
-    // H active upper 4 : H blanking upper 4
-    edid[58] = (((width_px >> 8) & 0x0F) << 4) as u8;
-    // V active lower 8 bits
-    edid[59] = (height_px & 0xFF) as u8;
-    // V blanking lower 8 bits
-    edid[60] = 30;
-    // V active upper 4 : V blanking upper 4
-    edid[61] = (((height_px >> 8) & 0x0F) << 4) as u8;
-    // H sync offset, width
-    edid[62] = 40;
-    edid[63] = 40;
-    // V sync offset (4 bits) : V sync width (4 bits)
-    edid[64] = 0x36; // offset=3, width=6
-                     // Upper bits of sync
-    edid[65] = 0x00;
-    // Image size mm
-    edid[66] = (width_mm & 0xFF) as u8;
-    edid[67] = (height_mm & 0xFF) as u8;
-    edid[68] = (((width_mm >> 8) & 0x0F) << 4 | ((height_mm >> 8) & 0x0F)) as u8;
-    // Border
-    edid[69] = 0;
-    edid[70] = 0;
-    // Flags: non-interlaced, normal display
-    edid[71] = EDID_DTD_FLAGS;
-
-    // DTD#2 (bytes 72-89): Monitor name descriptor
-    edid[72] = 0x00;
-    edid[73] = 0x00;
-    edid[74] = 0x00;
-    edid[75] = EDID_DESC_TAG_MONITOR_NAME;
-    edid[76] = 0x00;
-    let name = b"X11-Web\n";
-    let end = 77 + name.len().min(13);
-    edid[77..end].copy_from_slice(&name[..name.len().min(13)]);
-    // Pad with spaces
-    for b in &mut edid[end..90] {
-        *b = 0x20;
+    // Standard timings: 8 entries of 0x0101 (unused).
+    for byte in &mut edid[eo::STANDARD_TIMINGS] {
+        *byte = STANDARD_TIMING_UNUSED;
     }
 
-    // DTD#3, DTD#4: unused (zeroed)
-    // edid[90..126] already zero
+    // DTD#1: preferred timing for our actual screen mode.
+    {
+        use dtd_offset as d;
+        let dtd = &mut edid[eo::DTD1];
+        let pixel_clock: u16 = ((width_px as u32 + H_BLANKING_PIXELS as u32)
+            * (height_px as u32 + V_BLANKING_LINES as u32)
+            * REFRESH_HZ
+            / PIXEL_CLOCK_DIVISOR) as u16;
+        dtd[d::PIXEL_CLOCK_LO] = (pixel_clock & 0xFF) as u8;
+        dtd[d::PIXEL_CLOCK_HI] = ((pixel_clock >> 8) & 0xFF) as u8;
+        dtd[d::H_ACTIVE_LO] = (width_px & 0xFF) as u8;
+        dtd[d::H_BLANKING_LO] = H_BLANKING_PIXELS as u8;
+        dtd[d::H_ACTIVE_BLANKING_HI] = (((width_px >> 8) & 0x0F) << 4) as u8;
+        dtd[d::V_ACTIVE_LO] = (height_px & 0xFF) as u8;
+        dtd[d::V_BLANKING_LO] = V_BLANKING_LINES as u8;
+        dtd[d::V_ACTIVE_BLANKING_HI] = (((height_px >> 8) & 0x0F) << 4) as u8;
+        dtd[d::H_SYNC_OFFSET] = H_SYNC_OFFSET;
+        dtd[d::H_SYNC_WIDTH] = H_SYNC_WIDTH;
+        dtd[d::V_SYNC_OFFSET_WIDTH] = V_SYNC_OFFSET_WIDTH;
+        dtd[d::SYNC_HI] = 0;
+        dtd[d::H_IMAGE_SIZE_MM] = (width_mm & 0xFF) as u8;
+        dtd[d::V_IMAGE_SIZE_MM] = (height_mm & 0xFF) as u8;
+        dtd[d::IMAGE_SIZE_MM_HI] =
+            (((width_mm >> 8) & 0x0F) << 4 | ((height_mm >> 8) & 0x0F)) as u8;
+        dtd[d::H_BORDER] = 0;
+        dtd[d::V_BORDER] = 0;
+        dtd[d::FLAGS] = EDID_DTD_FLAGS;
+    }
 
-    // Extension count
-    edid[126] = 0;
+    // DTD#2: monitor-name descriptor.
+    {
+        use monitor_name_offset as m;
+        let dtd = &mut edid[eo::DTD2];
+        for byte in &mut dtd[m::ZERO_PIXEL_CLOCK] {
+            *byte = 0;
+        }
+        dtd[m::TAG] = EDID_DESC_TAG_MONITOR_NAME;
+        dtd[m::FLAG] = 0;
+        let name = b"X11-Web\n";
+        let copy_len = name.len().min(m::NAME.len());
+        dtd[m::NAME.start..m::NAME.start + copy_len].copy_from_slice(&name[..copy_len]);
+        for byte in &mut dtd[m::NAME.start + copy_len..m::NAME.end] {
+            *byte = 0x20; // pad with spaces per EDID spec
+        }
+    }
 
-    // Checksum: make all 128 bytes sum to 0 mod 256
-    let sum: u32 = edid[..127].iter().map(|&b| b as u32).sum();
-    edid[127] = (256 - (sum % 256)) as u8;
+    // DTD#3, DTD#4: unused (zeroed).
+    edid[eo::EXTENSION_FLAG] = 0;
+
+    // Checksum: make all 128 bytes sum to 0 mod 256.
+    let sum: u32 = edid[..eo::CHECKSUM].iter().map(|&b| b as u32).sum();
+    edid[eo::CHECKSUM] = (256 - (sum % 256)) as u8;
 
     edid
 }
