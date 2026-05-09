@@ -80,7 +80,7 @@ pub(crate) fn start_incr_transfer(
     }
 
     // Default chunk size: ~64KB (standard INCR chunk).
-    let chunk_size = 65536;
+    let chunk_size = INCR_THRESHOLD;
 
     state.push_incr_transfer(IncrTransfer {
         requestor,

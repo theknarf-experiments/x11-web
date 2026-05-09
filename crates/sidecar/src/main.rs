@@ -9,6 +9,22 @@ use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::{Child, Command};
 use tokio::sync::mpsc;
 use tokio::time::{interval, Duration};
+
+/// How often the sidecar pings the backend to keep the connection alive.
+const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(30);
+/// Polling cadence for reaping exited child processes.
+const PROCESS_CHECK_INTERVAL: Duration = Duration::from_secs(2);
+/// Timeout for `dbus-daemon`'s `--print-address` line on startup; also the
+/// reconnect delay when the backend QUIC link drops.
+const DBUS_STARTUP_TIMEOUT: Duration = Duration::from_secs(5);
+const BACKEND_RECONNECT_DELAY: Duration = Duration::from_secs(5);
+/// Sleep between dial retries when the backend isn't reachable yet.
+const DIAL_RETRY_DELAY: Duration = Duration::from_secs(2);
+
+/// Maximum depth we walk when traversing a /proc-style parent chain to
+/// locate the original X client owning a given process. Prevents an
+/// unbounded loop if the chain contains a cycle.
+const MAX_PROCESS_PARENT_DEPTH: usize = 50;
 use tracing::{error, info, warn};
 use x11_web_protocol::DisplayUpdate;
 use x11_web_wire::bridge as wire_bridge;
@@ -170,7 +186,7 @@ async fn start_dbus_session() -> Option<DbusSession> {
     };
 
     let mut lines = BufReader::new(stdout).lines();
-    let address = match tokio::time::timeout(Duration::from_secs(5), lines.next_line()).await {
+    let address = match tokio::time::timeout(DBUS_STARTUP_TIMEOUT, lines.next_line()).await {
         Ok(Ok(Some(line))) => line.trim().to_string(),
         Ok(Ok(None)) => {
             warn!("dbus-daemon closed stdout before printing address");
@@ -311,7 +327,7 @@ async fn main() {
             Ok(fp) => fp,
             Err(e) => {
                 warn!("Fingerprint not available yet: {e}. Retrying in 2s.");
-                tokio::time::sleep(Duration::from_secs(2)).await;
+                tokio::time::sleep(DIAL_RETRY_DELAY).await;
                 continue;
             }
         };
@@ -319,7 +335,7 @@ async fn main() {
             Ok(a) => a,
             Err(e) => {
                 warn!("Failed to resolve {backend_addr_str}: {e}. Retrying in 2s.");
-                tokio::time::sleep(Duration::from_secs(2)).await;
+                tokio::time::sleep(DIAL_RETRY_DELAY).await;
                 continue;
             }
         };
@@ -354,7 +370,7 @@ async fn main() {
                 error!("Failed to connect to backend: {e}");
             }
         }
-        tokio::time::sleep(Duration::from_secs(5)).await;
+        tokio::time::sleep(BACKEND_RECONNECT_DELAY).await;
     }};
     tokio::select! {
         _ = connect_loop => {}
@@ -433,7 +449,7 @@ async fn run_session(
     // Heartbeat — pushes Heartbeat into tx every 30s.
     let tx_heartbeat = tx.clone();
     let heartbeat_task = tokio::spawn(async move {
-        let mut tick = interval(Duration::from_secs(30));
+        let mut tick = interval(HEARTBEAT_INTERVAL);
         loop {
             tick.tick().await;
             if tx_heartbeat.send(SidecarToBackend::Heartbeat).is_err() {
@@ -477,7 +493,7 @@ async fn run_session(
     // Events + send loop owns the wire writer plus every other
     // event source.
     let events_loop = async {
-        let mut check_interval = interval(Duration::from_secs(2));
+        let mut check_interval = interval(PROCESS_CHECK_INTERVAL);
         loop {
             tokio::select! {
                 Some((cmd, traceparent)) = in_rx.recv() => {
@@ -732,7 +748,7 @@ fn find_ancestor_pid(peer_pid: u32, spawned_pids: &[u32]) -> Option<u32> {
     }
     // Walk up the tree
     let mut current = peer_pid;
-    for _ in 0..50 {
+    for _ in 0..MAX_PROCESS_PARENT_DEPTH {
         let ppid = get_ppid(current);
         match ppid {
             Some(0) | Some(1) | None => return None, // reached init or failed
