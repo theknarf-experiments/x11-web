@@ -317,12 +317,7 @@ echo EXIT_CODE=$?`,
 		expect(output).not.toContain("[xcb] Extra reply data");
 	});
 
-	// Firefox crashes at XVisualIDFromVisual (NULL visual pointer) inside
-	// gdk_x11_window_foreign_new_for_display — GDK passes NULL to Xlib because
-	// our visual lookup for foreign windows returns nothing GTK can use. The
-	// simpler "Xlib finds root visual in setup" test above already passes, so
-	// this is a more nuanced GDK-specific path; tracked separately.
-	test.skip("Firefox ESR starts without crash (non-headless)", async ({
+	test("Firefox ESR starts without crash (non-headless)", async ({
 		sidecarContainer,
 	}) => {
 		test.setTimeout(60_000);
@@ -347,9 +342,7 @@ echo EXIT_CODE=$?`,
 		expect(output).not.toContain("Segmentation fault");
 	});
 
-	// gtk3-demo --run=css_basics segfaults in Mesa's DRISW path (no /dev/dri).
-	// Same root cause as Firefox non-headless crash — skip until DRISW issue resolved.
-	test.skip("GTK3 example app starts", async ({ sidecarContainer }) => {
+	test("GTK3 example app starts", async ({ sidecarContainer }) => {
 		const output = await execInSidecar(
 			sidecarContainer,
 			`timeout 5 gtk3-demo --run=css_basics 2>&1 &

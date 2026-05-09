@@ -69,16 +69,10 @@ async function navigateFirefox(
 	await page.keyboard.press("Enter");
 }
 
-// All six tests below are gated on Firefox starting non-headless. Firefox
-// crashes inside `XVisualIDFromVisual()` with a NULL Visual* — see the
-// "Firefox ESR starts without crash (non-headless)" test in
-// stability/protocol-errors.spec.ts for the underlying GDK→Xlib path.
-// Once that crash is fixed these tests can all be unskipped together.
-
 // ---------------------------------------------------------------------------
 // Firefox startup and initial rendering
 // ---------------------------------------------------------------------------
-test.skip("firefox: startup and initial rendering", async ({
+test("firefox: startup and initial rendering", async ({
 	page,
 	sidecarContainer,
 	frontendUrl,
@@ -96,6 +90,12 @@ test.skip("firefox: startup and initial rendering", async ({
 		totalTimeoutMs: 30_000,
 	});
 });
+
+// All five navigation tests below depend on Playwright keyboard/mouse events
+// reaching Firefox through the canvas → backend → sidecar input pipeline.
+// Firefox now starts and renders (the startup test above passes), but synthesised
+// clicks and typed URLs don't currently reach Firefox's URL bar. Same input-
+// dispatch class as the xdotool-keystroke skip in stress.spec.ts.
 
 // ---------------------------------------------------------------------------
 // Firefox navigates to about:config
