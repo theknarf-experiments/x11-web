@@ -13,49 +13,12 @@ use super::super::super::client::ClientState;
 use crate::xserver::core::require_len;
 use tracing::warn;
 
-// ---------------------------------------------------------------------------
 // Wire-payload readers (LE-encoded; the GLX protocol always sends LE
-// regardless of the connection's byte order).
-// ---------------------------------------------------------------------------
-
-#[inline]
-pub(crate) fn read_u32_le(data: &[u8], off: usize) -> u32 {
-    u32::from_le_bytes([data[off], data[off + 1], data[off + 2], data[off + 3]])
-}
-
-#[inline]
-pub(crate) fn read_i32_le(data: &[u8], off: usize) -> i32 {
-    i32::from_le_bytes([data[off], data[off + 1], data[off + 2], data[off + 3]])
-}
-
-#[inline]
-pub(crate) fn read_f32_le(data: &[u8], off: usize) -> f32 {
-    f32::from_le_bytes([data[off], data[off + 1], data[off + 2], data[off + 3]])
-}
-
-#[inline]
-pub(crate) fn read_f64_le(data: &[u8], off: usize) -> f64 {
-    f64::from_le_bytes([
-        data[off],
-        data[off + 1],
-        data[off + 2],
-        data[off + 3],
-        data[off + 4],
-        data[off + 5],
-        data[off + 6],
-        data[off + 7],
-    ])
-}
-
-#[inline]
-pub(crate) fn read_u16_le(data: &[u8], off: usize) -> u16 {
-    u16::from_le_bytes([data[off], data[off + 1]])
-}
-
-#[inline]
-pub(crate) fn read_i16_le(data: &[u8], off: usize) -> i16 {
-    i16::from_le_bytes([data[off], data[off + 1]])
-}
+// regardless of the connection's byte order). Re-exported from core so
+// non-GLX handlers can share the same helpers.
+pub(crate) use crate::xserver::core::{
+    read_f32_le, read_f64_le, read_i16_le, read_i32_le, read_u16_le, read_u32_le,
+};
 
 // ---------------------------------------------------------------------------
 // GLX_RENDER (minor 1) -- batched GL commands

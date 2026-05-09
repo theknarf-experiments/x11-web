@@ -584,7 +584,7 @@ fn handle_xim_create_ic(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
 
     // IC attributes start after im_id(2) + byte-length-of-attr-list(2)
     if data.len() >= 8 {
-        let attr_len = u16::from_le_bytes([data[6], data[7]]) as usize;
+        let attr_len = crate::xserver::core::read_u16_le(data, 6) as usize;
         let attr_data = &data[8..data.len().min(8 + attr_len)];
         parse_ic_attributes(
             attr_data,
@@ -642,8 +642,8 @@ fn parse_ic_attributes(
 ) {
     let mut offset = 0;
     while offset + 4 <= data.len() {
-        let attr_id = u16::from_le_bytes([data[offset], data[offset + 1]]);
-        let attr_len = u16::from_le_bytes([data[offset + 2], data[offset + 3]]) as usize;
+        let attr_id = crate::xserver::core::read_u16_le(data, offset);
+        let attr_len = crate::xserver::core::read_u16_le(data, offset + 2) as usize;
         offset += 4;
 
         if offset + attr_len > data.len() {
@@ -680,8 +680,8 @@ fn parse_ic_attributes(
                 parse_preedit_sub_attributes(&data[offset..offset + attr_len], spot_x, spot_y);
             }
             XN_SPOT_LOCATION if attr_len >= 4 => {
-                *spot_x = i16::from_le_bytes([data[offset], data[offset + 1]]);
-                *spot_y = i16::from_le_bytes([data[offset + 2], data[offset + 3]]);
+                *spot_x = crate::xserver::core::read_i16_le(data, offset);
+                *spot_y = crate::xserver::core::read_i16_le(data, offset + 2);
             }
             _ => {}
         }
@@ -695,8 +695,8 @@ fn parse_ic_attributes(
 fn parse_preedit_sub_attributes(data: &[u8], spot_x: &mut i16, spot_y: &mut i16) {
     let mut offset = 0;
     while offset + 4 <= data.len() {
-        let attr_id = u16::from_le_bytes([data[offset], data[offset + 1]]);
-        let attr_len = u16::from_le_bytes([data[offset + 2], data[offset + 3]]) as usize;
+        let attr_id = crate::xserver::core::read_u16_le(data, offset);
+        let attr_len = crate::xserver::core::read_u16_le(data, offset + 2) as usize;
         offset += 4;
 
         if offset + attr_len > data.len() {
@@ -705,8 +705,8 @@ fn parse_preedit_sub_attributes(data: &[u8], spot_x: &mut i16, spot_y: &mut i16)
 
         match attr_id {
             XN_SPOT_LOCATION if attr_len >= 4 => {
-                *spot_x = i16::from_le_bytes([data[offset], data[offset + 1]]);
-                *spot_y = i16::from_le_bytes([data[offset + 2], data[offset + 3]]);
+                *spot_x = crate::xserver::core::read_i16_le(data, offset);
+                *spot_y = crate::xserver::core::read_i16_le(data, offset + 2);
             }
             _ => {}
         }
@@ -743,7 +743,7 @@ fn handle_xim_set_ic_values(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
 
     // Parse and apply attribute values
     if data.len() >= 12 {
-        let _byte_len = u16::from_le_bytes([data[8], data[9]]);
+        let _byte_len = crate::xserver::core::read_u16_le(data, 8);
         let attr_data = &data[10..];
 
         let mut input_style = 0u32;

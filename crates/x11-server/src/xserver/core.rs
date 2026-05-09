@@ -185,41 +185,66 @@ pub(crate) fn byteswap_error_in_place(err: &mut [u8]) {
 /// Helper to read a u16 from a buffer in the specified byte order.
 #[inline]
 pub(crate) fn read_u16_bo(data: &[u8], offset: usize, msb_first: bool) -> u16 {
+    let bytes: [u8; 2] = data[offset..offset + 2].try_into().unwrap();
     if msb_first {
-        u16::from_be_bytes([data[offset], data[offset + 1]])
+        u16::from_be_bytes(bytes)
     } else {
-        u16::from_le_bytes([data[offset], data[offset + 1]])
+        u16::from_le_bytes(bytes)
     }
 }
 
 /// Helper to read a u32 from a buffer in the specified byte order.
 #[inline]
 pub(crate) fn read_u32_bo(data: &[u8], offset: usize, msb_first: bool) -> u32 {
+    let bytes: [u8; 4] = data[offset..offset + 4].try_into().unwrap();
     if msb_first {
-        u32::from_be_bytes([
-            data[offset],
-            data[offset + 1],
-            data[offset + 2],
-            data[offset + 3],
-        ])
+        u32::from_be_bytes(bytes)
     } else {
-        u32::from_le_bytes([
-            data[offset],
-            data[offset + 1],
-            data[offset + 2],
-            data[offset + 3],
-        ])
+        u32::from_le_bytes(bytes)
     }
 }
 
 /// Helper to read an i16 from a buffer in the specified byte order.
 #[inline]
 pub(crate) fn read_i16_bo(data: &[u8], offset: usize, msb_first: bool) -> i16 {
+    let bytes: [u8; 2] = data[offset..offset + 2].try_into().unwrap();
     if msb_first {
-        i16::from_be_bytes([data[offset], data[offset + 1]])
+        i16::from_be_bytes(bytes)
     } else {
-        i16::from_le_bytes([data[offset], data[offset + 1]])
+        i16::from_le_bytes(bytes)
     }
+}
+
+/// LE-only helpers for wire formats that always use little-endian regardless
+/// of the connection's byte order (XIM, GLX render protocol, etc.).
+#[inline]
+pub(crate) fn read_u16_le(data: &[u8], offset: usize) -> u16 {
+    u16::from_le_bytes(data[offset..offset + 2].try_into().unwrap())
+}
+
+#[inline]
+pub(crate) fn read_u32_le(data: &[u8], offset: usize) -> u32 {
+    u32::from_le_bytes(data[offset..offset + 4].try_into().unwrap())
+}
+
+#[inline]
+pub(crate) fn read_i16_le(data: &[u8], offset: usize) -> i16 {
+    i16::from_le_bytes(data[offset..offset + 2].try_into().unwrap())
+}
+
+#[inline]
+pub(crate) fn read_i32_le(data: &[u8], offset: usize) -> i32 {
+    i32::from_le_bytes(data[offset..offset + 4].try_into().unwrap())
+}
+
+#[inline]
+pub(crate) fn read_f32_le(data: &[u8], offset: usize) -> f32 {
+    f32::from_le_bytes(data[offset..offset + 4].try_into().unwrap())
+}
+
+#[inline]
+pub(crate) fn read_f64_le(data: &[u8], offset: usize) -> f64 {
+    f64::from_le_bytes(data[offset..offset + 8].try_into().unwrap())
 }
 
 /// Helper to write u32 into a buffer in the specified byte order.
