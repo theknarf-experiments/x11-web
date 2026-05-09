@@ -454,6 +454,10 @@ test.skip("dock icon click brings window to front", async ({
 	expect(frame1Z).toBeGreaterThan(z2Before);
 });
 
+// Multi-window xterm focus-tracking test still flakes on canvas2.click() —
+// the second window is dragged off-screen by the test and the locator
+// can't reliably click into it. Single-window keyboard input works (see
+// "xterm accepts keyboard input" above).
 test.skip("keyboard input follows canvas focus between windows", async ({
 	page,
 	frontendUrl,
@@ -746,7 +750,7 @@ test.skip("gimp renders main window", async ({ page, frontendUrl }) => {
 	});
 });
 
-test.skip("vim workflow: insert, save, quit, cat", async ({ page, frontendUrl }) => {
+test("vim workflow: insert, save, quit, cat", async ({ page, frontendUrl }) => {
 	await page.goto(frontendUrl);
 	await waitForDock(page);
 
