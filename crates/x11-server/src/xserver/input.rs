@@ -40,17 +40,17 @@ pub(crate) fn enforce_barriers(
     new_x: i16,
     new_y: i16,
 ) -> (i16, i16) {
+    /// XFIXES `BarrierDirections` bits — set in `directions` to allow motion
+    /// through the barrier in that direction. `0` blocks every direction.
+    const BARRIER_DIR_POSITIVE_X: u32 = 1 << 0; // motion from left to right
+    const BARRIER_DIR_POSITIVE_Y: u32 = 1 << 1; // motion from top to bottom
+    const BARRIER_DIR_NEGATIVE_X: u32 = 1 << 2; // motion from right to left
+    const BARRIER_DIR_NEGATIVE_Y: u32 = 1 << 3; // motion from bottom to top
+
     let mut final_x = new_x;
     let mut final_y = new_y;
 
     for barrier in barriers.values() {
-        // Barrier direction bits:
-        // bit 0 = PositiveX (blocks motion from left to right)
-        // bit 1 = PositiveY (blocks motion from top to bottom)
-        // bit 2 = NegativeX (blocks motion from right to left)
-        // bit 3 = NegativeY (blocks motion from bottom to top)
-        // If directions == 0, blocks all directions.
-
         if barrier.x1 == barrier.x2 {
             // Vertical barrier (blocks horizontal motion)
             let bx = barrier.x1;
@@ -65,8 +65,8 @@ pub(crate) fn enforce_barriers(
                 let blocked = if barrier.directions == 0 {
                     crosses_right || crosses_left
                 } else {
-                    (crosses_right && (barrier.directions & 1) != 0)
-                        || (crosses_left && (barrier.directions & 4) != 0)
+                    (crosses_right && (barrier.directions & BARRIER_DIR_POSITIVE_X) != 0)
+                        || (crosses_left && (barrier.directions & BARRIER_DIR_NEGATIVE_X) != 0)
                 };
 
                 if blocked {
@@ -86,8 +86,8 @@ pub(crate) fn enforce_barriers(
                 let blocked = if barrier.directions == 0 {
                     crosses_down || crosses_up
                 } else {
-                    (crosses_down && (barrier.directions & 2) != 0)
-                        || (crosses_up && (barrier.directions & 8) != 0)
+                    (crosses_down && (barrier.directions & BARRIER_DIR_POSITIVE_Y) != 0)
+                        || (crosses_up && (barrier.directions & BARRIER_DIR_NEGATIVE_Y) != 0)
                 };
 
                 if blocked {

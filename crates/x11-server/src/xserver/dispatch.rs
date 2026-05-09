@@ -12,16 +12,20 @@ use super::extensions::ExtensionId;
 use super::handlers;
 use super::reply::ReplyBuf;
 
+/// Minimum length of an X11 request header: major opcode (1) + minor opcode
+/// or data byte (1) + length-in-words (2).
+const MIN_REQUEST_HEADER_LEN: usize = 4;
+
 /// Dispatch an X11 request to the appropriate handler based on the major opcode.
 pub(super) fn handle_request(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
-    if data.len() < 4 {
+    if data.len() < MIN_REQUEST_HEADER_LEN {
         return Vec::new();
     }
     let major_opcode = data[0];
     let _minor = data[1];
     let seq = state.sequence;
 
-    // Core protocol requests (opcodes 1-127)
+    // Core protocol requests (opcodes 1..=CORE_REQUEST_OPCODE_MAX).
     if major_opcode <= 127 {
         return handlers::handle_core_request(state, data);
     }
