@@ -11,50 +11,83 @@ use crate::xserver::core::{read_i16_bo as read_i16, read_u16_bo as read_u16};
 use crate::xserver::reply::ReplyBuf;
 use tracing::debug;
 
+/// Reply-byte offsets for the XKB GetState reply (32 bytes total).
+mod get_state_reply {
+    pub(super) const MODS: usize = 8;
+    pub(super) const BASE_MODS: usize = 9;
+    pub(super) const LATCHED_MODS: usize = 10;
+    pub(super) const LOCKED_MODS: usize = 11;
+    pub(super) const GROUP: usize = 12;
+    pub(super) const LOCKED_GROUP: usize = 13;
+    pub(super) const BASE_GROUP: usize = 14; // i16
+    pub(super) const LATCHED_GROUP: usize = 16; // i16
+    pub(super) const COMPAT_STATE: usize = 18;
+    pub(super) const GRAB_MODS: usize = 19;
+    pub(super) const COMPAT_GRAB_MODS: usize = 20;
+    pub(super) const LOOKUP_MODS: usize = 21;
+    pub(super) const COMPAT_LOOKUP_MODS: usize = 22;
+    // 23 = pad; 24-25 ptrBtnState; 26-31 pad
+}
+
+/// Request-byte offsets for the XKB LatchLockState wire request (16 bytes).
+mod latch_lock_state_req {
+    pub(super) const DEVICE_SPEC: usize = 4; // u16
+    pub(super) const AFFECT_MOD_LOCKS: usize = 6;
+    pub(super) const MOD_LOCKS: usize = 7;
+    pub(super) const LOCK_GROUP: usize = 8;
+    pub(super) const GROUP_LOCK: usize = 9;
+    pub(super) const AFFECT_MOD_LATCHES: usize = 10;
+    pub(super) const MOD_LATCHES: usize = 11;
+    // 12-13 = pad
+    pub(super) const LATCH_GROUP: usize = 14;
+    pub(super) const GROUP_LATCH: usize = 14; // i16, overlapping name
+}
+
+/// Reply-byte offsets for the XKB GetControls reply (32 + 60 = 92 bytes).
+mod get_controls_reply {
+    pub(super) const MK_DFLT_BTN: usize = 8;
+    pub(super) const NUM_GROUPS: usize = 9;
+    // 10: groupsWrap, 11-14: internal/ignore mod masks, 15-18: vmods
+    pub(super) const REPEAT_DELAY: usize = 20; // u16
+    pub(super) const REPEAT_INTERVAL: usize = 22; // u16
+    pub(super) const SLOW_KEYS_DELAY: usize = 24; // u16
+    pub(super) const DEBOUNCE_DELAY: usize = 26; // u16
+    pub(super) const MK_DELAY: usize = 28; // u16
+    pub(super) const MK_INTERVAL: usize = 30; // u16
+    pub(super) const MK_TIME_TO_MAX: usize = 32; // u16
+    pub(super) const MK_MAX_SPEED: usize = 34; // u16
+    pub(super) const MK_CURVE: usize = 36; // i16
+    pub(super) const AX_OPTIONS: usize = 38; // u16
+    pub(super) const AX_TIMEOUT: usize = 40; // u16
+    // 42-55: various timeout masks/values (left zero)
+    pub(super) const ENABLED_CTRLS: usize = 56; // u32
+    pub(super) const PER_KEY_REPEAT: std::ops::Range<usize> = 60..92;
+}
+
 /// Build an XKB GetState reply with real modifier/group state.
 pub(crate) fn build_xkb_get_state_reply(state: &ClientState, seq: u16, device_id: u8) -> Vec<u8> {
     let xkb = &state.xkb_state;
     let effective_mods = xkb.effective_mods();
     let effective_group = xkb.effective_group() as u8;
 
-    // GetState reply layout (32 bytes):
-    //   0: type = Reply (1)
-    //   1: deviceID
-    //   2-3: sequence
-    //   4-7: length (0 for 32-byte reply)
-    //   8: mods (effective modifiers)
-    //   9: baseMods
-    //  10: latchedMods
-    //  11: lockedMods
-    //  12: group (effective group)
-    //  13: lockedGroup
-    //  14-15: baseGroup (INT16)
-    //  16-17: latchedGroup (INT16)
-    //  18: compatState (same as mods for compat)
-    //  19: grabMods (same as effective for now)
-    //  20: compatGrabMods
-    //  21: lookupMods (same as effective minus internal)
-    //  22: compatLookupMods
-    //  23: pad
-    //  24-25: ptrBtnState (pointer button state)
-    //  26-31: pad
+    // GetState reply layout per `get_state_reply` module above. Bytes 23,
+    // 24-25 (ptrBtnState), and 26-31 are left zero.
+    use get_state_reply as r;
     ReplyBuf::fixed(seq, state.msb_first)
         .set_data_byte(device_id)
-        .set_u8(8, effective_mods)
-        .set_u8(9, xkb.base_mods)
-        .set_u8(10, xkb.latched_mods)
-        .set_u8(11, xkb.locked_mods)
-        .set_u8(12, effective_group)
-        .set_u8(13, xkb.locked_group as u8)
-        .set_i16(14, xkb.base_group)
-        .set_i16(16, xkb.latched_group)
-        .set_u8(18, effective_mods) // compatState
-        .set_u8(19, effective_mods) // grabMods
-        .set_u8(20, effective_mods) // compatGrabMods
-        .set_u8(21, effective_mods) // lookupMods
-        .set_u8(22, effective_mods) // compatLookupMods
-        // 23 = pad
-        // 24-25: ptrBtnState = 0 (no pointer button state tracked here)
+        .set_u8(r::MODS, effective_mods)
+        .set_u8(r::BASE_MODS, xkb.base_mods)
+        .set_u8(r::LATCHED_MODS, xkb.latched_mods)
+        .set_u8(r::LOCKED_MODS, xkb.locked_mods)
+        .set_u8(r::GROUP, effective_group)
+        .set_u8(r::LOCKED_GROUP, xkb.locked_group as u8)
+        .set_i16(r::BASE_GROUP, xkb.base_group)
+        .set_i16(r::LATCHED_GROUP, xkb.latched_group)
+        .set_u8(r::COMPAT_STATE, effective_mods)
+        .set_u8(r::GRAB_MODS, effective_mods)
+        .set_u8(r::COMPAT_GRAB_MODS, effective_mods)
+        .set_u8(r::LOOKUP_MODS, effective_mods)
+        .set_u8(r::COMPAT_LOOKUP_MODS, effective_mods)
         .build()
 }
 
@@ -68,22 +101,22 @@ pub(crate) fn handle_xkb_latch_lock_state(
 
     let before = super::XkbStateSnapshot::capture(state);
 
+    use latch_lock_state_req as r;
     let msb = state.msb_first;
-    let _device_spec = read_u16(data, 4, msb);
-    let affect_mod_locks = data[6];
-    let mod_locks = data[7];
-    let lock_group = data[8] != 0;
-    let group_lock = data[9] as i16;
-    let affect_mod_latches = data[10];
-    let mod_latches = data[11];
-    // Bytes 12-13: pad
+    let _device_spec = read_u16(data, r::DEVICE_SPEC, msb);
+    let affect_mod_locks = data[r::AFFECT_MOD_LOCKS];
+    let mod_locks = data[r::MOD_LOCKS];
+    let lock_group = data[r::LOCK_GROUP] != 0;
+    let group_lock = data[r::GROUP_LOCK] as i16;
+    let affect_mod_latches = data[r::AFFECT_MOD_LATCHES];
+    let mod_latches = data[r::MOD_LATCHES];
     let latch_group = if data.len() >= 15 {
-        data[14] != 0
+        data[r::LATCH_GROUP] != 0
     } else {
         false
     };
     let group_latch = if data.len() >= 16 {
-        read_i16(data, 14, msb)
+        read_i16(data, r::GROUP_LATCH, msb)
     } else {
         0
     };
@@ -131,36 +164,30 @@ pub(crate) fn build_xkb_get_controls_reply(
 ) -> Vec<u8> {
     let ctrls = &state.xkb_state.controls;
 
-    // GetControls reply: 92 bytes total (32 header + 60 body)
+    // GetControls reply: 92 bytes total (32 header + 60 body). Bytes 10-19,
+    // 42-55 are left zero (groupsWrap, internal/ignore mod masks + vmods,
+    // various timeout masks).
+    use get_controls_reply as r;
     let mut reply = ReplyBuf::with_extra(seq, 60, state.msb_first)
         .set_data_byte(device_id)
-        .set_u8(8, ctrls.mk_dflt_btn) // mouseKeysDfltBtn
-        .set_u8(9, ctrls.num_groups.max(1)); // numGroups (must be >= 1)
-                                             // Byte 10: groupsWrap = 0 (Wrap)
-                                             // Byte 11: internalMods mask
-                                             // Byte 12: ignoreLockMods mask
-                                             // Byte 13: internalMods realMods
-                                             // Byte 14: ignoreLockMods realMods
-                                             // Bytes 15-16: internalMods vmods (CARD16)
-                                             // Bytes 17-18: ignoreLockMods vmods (CARD16)
+        .set_u8(r::MK_DFLT_BTN, ctrls.mk_dflt_btn)
+        .set_u8(r::NUM_GROUPS, ctrls.num_groups.max(1));
 
     reply = reply
-        .set_u16(20, ctrls.repeat_delay) // repeatDelay
-        .set_u16(22, ctrls.repeat_interval) // repeatInterval
-        .set_u16(24, ctrls.slow_keys_delay) // slowKeysDelay
-        .set_u16(26, ctrls.debounce_delay) // debounceDelay
-        .set_u16(28, ctrls.mk_delay) // mouseKeysDelay
-        .set_u16(30, ctrls.mk_interval) // mouseKeysInterval
-        .set_u16(32, ctrls.mk_time_to_max) // mouseKeysTimeToMax
-        .set_u16(34, ctrls.mk_max_speed) // mouseKeysMaxSpeed
-        .set_i16(36, ctrls.mk_curve) // mouseKeysCurve (INT16)
-        .set_u16(38, ctrls.ax_options as u16) // accessXOption (CARD16)
-        .set_u16(40, ctrls.ax_timeout) // accessXTimeout
-        // Bytes 42-55: various timeout masks/values (zero)
-        .set_u32(56, ctrls.enabled_ctrls); // enabledControls (CARD32)
+        .set_u16(r::REPEAT_DELAY, ctrls.repeat_delay)
+        .set_u16(r::REPEAT_INTERVAL, ctrls.repeat_interval)
+        .set_u16(r::SLOW_KEYS_DELAY, ctrls.slow_keys_delay)
+        .set_u16(r::DEBOUNCE_DELAY, ctrls.debounce_delay)
+        .set_u16(r::MK_DELAY, ctrls.mk_delay)
+        .set_u16(r::MK_INTERVAL, ctrls.mk_interval)
+        .set_u16(r::MK_TIME_TO_MAX, ctrls.mk_time_to_max)
+        .set_u16(r::MK_MAX_SPEED, ctrls.mk_max_speed)
+        .set_i16(r::MK_CURVE, ctrls.mk_curve)
+        .set_u16(r::AX_OPTIONS, ctrls.ax_options as u16)
+        .set_u16(r::AX_TIMEOUT, ctrls.ax_timeout)
+        .set_u32(r::ENABLED_CTRLS, ctrls.enabled_ctrls);
 
-    // Bytes 60-91: perKeyRepeat (32 bytes)
-    reply.buf_mut()[60..92].copy_from_slice(&ctrls.per_key_repeat);
+    reply.buf_mut()[r::PER_KEY_REPEAT].copy_from_slice(&ctrls.per_key_repeat);
 
     reply.build()
 }
