@@ -92,15 +92,10 @@ test("firefox: startup and initial rendering", async ({
 	});
 });
 
-// Keyboard input through canvas → sidecar → app is verified by the xterm
-// and vim tests in x11-web.spec.ts. Firefox-specific navigation flakes on
-// first-run UI (privacy notice tab, telemetry overlay) and tab-strip
-// position — these are Firefox-side issues, not input-pipeline bugs.
-
 // ---------------------------------------------------------------------------
 // Firefox navigates to about:config
 // ---------------------------------------------------------------------------
-test.skip("firefox: navigate to about:config", async ({
+test("firefox: navigate to about:config", async ({
 	page,
 	sidecarContainer,
 	frontendUrl,
@@ -125,7 +120,7 @@ test.skip("firefox: navigate to about:config", async ({
 // ---------------------------------------------------------------------------
 // Firefox navigates to Wikipedia
 // ---------------------------------------------------------------------------
-test.skip("firefox: navigate to Wikipedia", async ({
+test("firefox: navigate to Wikipedia", async ({
 	page,
 	sidecarContainer,
 	frontendUrl,
@@ -159,7 +154,7 @@ test.skip("firefox: navigate to Wikipedia", async ({
 // ---------------------------------------------------------------------------
 // Firefox scroll works
 // ---------------------------------------------------------------------------
-test.skip("firefox: scroll works on loaded page", async ({
+test("firefox: scroll works on loaded page", async ({
 	page,
 	sidecarContainer,
 	frontendUrl,
@@ -204,7 +199,7 @@ test.skip("firefox: scroll works on loaded page", async ({
 // ---------------------------------------------------------------------------
 // Firefox navigates to YouTube
 // ---------------------------------------------------------------------------
-test.skip("firefox: navigate to YouTube", async ({
+test("firefox: navigate to YouTube", async ({
 	page,
 	sidecarContainer,
 	frontendUrl,
@@ -234,7 +229,7 @@ test.skip("firefox: navigate to YouTube", async ({
 // ---------------------------------------------------------------------------
 // Local HTML5 video playback
 // ---------------------------------------------------------------------------
-test.skip("firefox: local HTML5 video playback", async ({
+test("firefox: local HTML5 video playback", async ({
 	page,
 	sidecarContainer,
 	frontendUrl,

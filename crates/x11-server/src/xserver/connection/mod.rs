@@ -40,7 +40,7 @@ use super::core::*;
 use super::grab;
 use super::grab::GrabState;
 use super::handlers;
-use super::input::{build_x11_input_event, enforce_barriers};
+use super::input::{build_x11_input_event, enforce_barriers, find_deepest_window};
 use super::setup::{build_setup, byteswap_setup_reply};
 use super::types::*;
 use super::{ancestor_chain, handle_request};
@@ -1785,7 +1785,32 @@ pub(crate) async fn handle_client(
                                     stream.write_all(&event_bytes).await?;
                                 }
                             }
-                            let chain = ancestor_chain(&state.windows, x11_wid);
+                            // For XInput2 dispatch we need the deepest hit
+                            // child, not just the top-level — apps like
+                            // Firefox/GTK3 select XI events on internal
+                            // content children (e.g., the 921x691 GDK
+                            // content overlay), so a chain that stops at
+                            // top_level misses every selection.
+                            let xi_start = match &input {
+                                x11_web_protocol::InputEvent::ButtonPress { x, y, .. }
+                                | x11_web_protocol::InputEvent::ButtonRelease { x, y, .. }
+                                | x11_web_protocol::InputEvent::MotionNotify { x, y, .. }
+                                | x11_web_protocol::InputEvent::TouchBegin { x, y, .. }
+                                | x11_web_protocol::InputEvent::TouchUpdate { x, y, .. }
+                                | x11_web_protocol::InputEvent::TouchEnd { x, y, .. } => {
+                                    find_deepest_window(&state.windows, x11_wid, *x, *y).0
+                                }
+                                x11_web_protocol::InputEvent::KeyPress { .. }
+                                | x11_web_protocol::InputEvent::KeyRelease { .. } => {
+                                    // Keyboard events propagate from the
+                                    // focus window. focus_window may be a
+                                    // child, so use it directly.
+                                    let f = state.focus_window;
+                                    if f != 0 && f != 1 { f } else { x11_wid }
+                                }
+                                _ => x11_wid,
+                            };
+                            let chain = ancestor_chain(&state.windows, xi_start);
                             let xi_events = crate::xinput2::build_xi_events_for(
                                 &mut state.xi.valuators,
                                 &state.xi.selections,
