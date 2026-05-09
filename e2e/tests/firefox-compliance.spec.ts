@@ -181,6 +181,204 @@ test.skip("DIAG: synthetic firefox-like client receives events", async ({
 // Diagnostic — capture the actual bytes our X server writes to Firefox's
 // X11 socket on canvas click + key press, so we can compare with what an
 // X11 client expects.
+// Run Firefox under GDK_DEBUG=events so GDK prints every event it receives
+// from us to stderr. We capture that and compare with what we sent.
+// Try Firefox with a custom profile that disables first-run UI and
+// telemetry overlays. If input works without the privacy notice tab and
+// the F/+ overlay, the issue is Firefox's first-run gating.
+// Try gtk3-demo — also GTK3, but smaller. If clicks reach widgets there,
+// the bug is Firefox-specific; if not, it's a GTK3 issue we should fix.
+// Click on a known interactive Firefox UI element — the tab close X — at
+// canvas (478, 22). Compare with how gtk3-demo handled the equivalent
+// click at canvas (200, 100). This proves whether clicks reach Firefox.
+test("DIAG: Firefox close button click", async ({
+	page,
+	sidecarContainer,
+	frontendUrl,
+}) => {
+	test.setTimeout(180_000);
+	await cleanupApps(sidecarContainer);
+	await page.goto(frontendUrl);
+	await waitForDock(page);
+
+	// Build profile
+	await sidecarContainer.exec([
+		"bash",
+		"-c",
+		`mkdir -p /tmp/ffprof && cat > /tmp/ffprof/user.js <<'EOF'
+user_pref("browser.startup.firstrunSkipsHomepage", true);
+user_pref("browser.startup.homepage_override.mstone", "ignore");
+user_pref("browser.aboutwelcome.enabled", false);
+user_pref("trailhead.firstrun.didSeeAboutWelcome", true);
+user_pref("browser.shell.checkDefaultBrowser", false);
+user_pref("browser.startup.homepage", "about:blank");
+user_pref("browser.newtabpage.enabled", false);
+user_pref("browser.aboutConfig.showWarning", false);
+EOF`,
+	]);
+
+	// Force GDK to use core X events (no XInput2) by wrapping firefox-esr
+	// in a small shell script. If Firefox responds to clicks under this
+	// flag, the XInput2 path is the bug.
+	await sidecarContainer.exec([
+		"bash",
+		"-c",
+		`cat > /usr/local/bin/firefox-no-xi2 <<'EOF'
+#!/bin/sh
+export GDK_CORE_DEVICE_EVENTS=1
+exec firefox-esr "$@"
+EOF
+chmod +x /usr/local/bin/firefox-no-xi2`,
+	]);
+
+	const win = await spawnApp(
+		page,
+		"--no-remote --new-instance --profile /tmp/ffprof about:blank",
+		"firefox-no-xi2",
+		FIREFOX_STARTUP_TIMEOUT,
+	);
+	const canvas = win.locator('[data-testid="x11-canvas"]');
+	await expect(canvas).toBeVisible({ timeout: FIREFOX_STARTUP_TIMEOUT });
+	await expect.poll(async () => hasRenderedContent(canvas), {
+		timeout: FIREFOX_STARTUP_TIMEOUT,
+		intervals: [3000, 5000, 5000, 10000, 10000],
+	}).toBe(true);
+	await page.waitForTimeout(3000);
+	await canvas.screenshot({ path: "test-results/ff-close-before.png" });
+
+	const box = await canvas.boundingBox();
+	if (!box) { console.log("no box"); return; }
+
+	// Click the "X" close button of the Privacy Notice tab at canvas
+	// (~478, 22). If it works, the tab will close and the bar will
+	// shrink — visible pixel change.
+	console.log("Click privacy notice close X at canvas (478, 22)");
+	await sidecarContainer.exec(["bash", "-c", "true > /tmp/sidecar.log"]);
+	await page.mouse.click(box.x + 478, box.y + 22);
+	await page.waitForTimeout(1500);
+	await canvas.screenshot({ path: "test-results/ff-after-close-tab.png" });
+	const log1 = await sidecarContainer.exec(["bash", "-c", "grep -aE 'DISPATCH' /tmp/sidecar.log | tail -5"]);
+	console.log("---DISPATCH---\n" + log1.output);
+
+	// Click the refresh icon at canvas (~95, 63)
+	await sidecarContainer.exec(["bash", "-c", "true > /tmp/sidecar.log"]);
+	console.log("Click refresh at canvas (95, 63)");
+	await page.mouse.click(box.x + 95, box.y + 63);
+	await page.waitForTimeout(1500);
+	await canvas.screenshot({ path: "test-results/ff-after-refresh.png" });
+	const log2 = await sidecarContainer.exec(["bash", "-c", "grep -aE 'DISPATCH' /tmp/sidecar.log | tail -5"]);
+	console.log("---DISPATCH---\n" + log2.output);
+});
+
+test.skip("DIAG: Firefox with clean profile", async ({
+	page,
+	sidecarContainer,
+	frontendUrl,
+}) => {
+	test.setTimeout(180_000);
+	await cleanupApps(sidecarContainer);
+	await page.goto(frontendUrl);
+	await waitForDock(page);
+
+	// Build a fresh profile with prefs that skip first-run / telemetry overlays.
+	await sidecarContainer.exec([
+		"bash",
+		"-c",
+		`mkdir -p /tmp/ffprof && cat > /tmp/ffprof/user.js <<'EOF'
+user_pref("browser.startup.firstrunSkipsHomepage", true);
+user_pref("browser.startup.homepage_override.mstone", "ignore");
+user_pref("startup.homepage_welcome_url", "");
+user_pref("startup.homepage_welcome_url.additional", "");
+user_pref("datareporting.policy.dataSubmissionPolicyBypassNotification", true);
+user_pref("browser.aboutwelcome.enabled", false);
+user_pref("toolkit.telemetry.reportingpolicy.firstRun", false);
+user_pref("trailhead.firstrun.didSeeAboutWelcome", true);
+user_pref("browser.shell.checkDefaultBrowser", false);
+user_pref("doh-rollout.doneFirstRun", true);
+user_pref("browser.tabs.warnOnClose", false);
+user_pref("browser.tabs.warnOnCloseOtherTabs", false);
+user_pref("browser.startup.homepage", "about:blank");
+user_pref("browser.newtabpage.enabled", false);
+user_pref("browser.aboutConfig.showWarning", false);
+EOF`,
+	]);
+
+	const win = await spawnApp(
+		page,
+		"--no-remote --new-instance --profile /tmp/ffprof about:blank",
+		"firefox-esr",
+		FIREFOX_STARTUP_TIMEOUT,
+	);
+	const canvas = win.locator('[data-testid="x11-canvas"]');
+	await expect(canvas).toBeVisible({ timeout: FIREFOX_STARTUP_TIMEOUT });
+
+	// Wait for Firefox to render content
+	await expect.poll(async () => hasRenderedContent(canvas), {
+		timeout: FIREFOX_STARTUP_TIMEOUT,
+		intervals: [3000, 5000, 5000, 10000, 10000],
+	}).toBe(true);
+	await page.waitForTimeout(3000);
+	await canvas.screenshot({ path: "test-results/clean-profile-before.png" });
+
+	const box = await canvas.boundingBox();
+	if (!box) { console.log("no box"); return; }
+	console.log(`canvas box: ${JSON.stringify(box)}`);
+
+	// Inspect the actual canvas DOM attributes vs CSS rect — if the
+	// internal width/height differs from the CSS rect, the click
+	// coordinate translation in inputProtocol's clientToCanvas() will
+	// produce wrong Y values.
+	const dims = await canvas.evaluate((c: HTMLCanvasElement) => ({
+		canvasWidth: c.width,
+		canvasHeight: c.height,
+		clientWidth: c.clientWidth,
+		clientHeight: c.clientHeight,
+		rect: c.getBoundingClientRect(),
+	}));
+	console.log("canvas DOM dims:", JSON.stringify(dims));
+
+	// The URL bar in our screenshot lives at roughly y=63px from the canvas
+	// top. Click directly on it so we don't depend on Ctrl+L behaviour.
+	await sidecarContainer.exec(["bash", "-c", "true > /tmp/sidecar.log"]);
+	// Hamburger menu is at top-right (~896, 64) in canvas coords.
+	// Clicking it should open a menu dropdown — visible pixel change.
+	const hamburgerX = box.x + 896;
+	const hamburgerY = box.y + 63;
+	console.log(`Click hamburger at viewport (${hamburgerX}, ${hamburgerY})`);
+	await page.mouse.click(hamburgerX, hamburgerY);
+	await page.waitForTimeout(1000);
+	await canvas.screenshot({ path: "test-results/clean-profile-hamburger.png" });
+	const dispLog = await sidecarContainer.exec(["bash", "-c", "grep -aE 'DISPATCH' /tmp/sidecar.log | tail -5"]);
+	console.log("---DISPATCH for hamburger click---\n" + dispLog.output);
+
+	// Inspect Firefox's content child window — actual position/size
+	const ffWindows = await sidecarContainer.exec([
+		"bash",
+		"-c",
+		[
+			"export DISPLAY=:99",
+			"TOP=$(xwininfo -root -tree | grep 'Mozilla Firefox.*Navigator' | grep -oE '0x[0-9a-f]+' | head -1)",
+			'echo "TOP=$TOP"',
+			'xwininfo -id "$TOP" -all 2>&1 | head -30',
+			'echo "--- children ---"',
+			'xwininfo -id "$TOP" -tree 2>&1 | head -30',
+			'echo "--- detailed child geometry ---"',
+			'for c in $(xwininfo -id "$TOP" -tree | grep -oE "0x[0-9a-f]+" | grep -v "$TOP" | head -2); do',
+			'  echo "child $c:"',
+			'  xwininfo -id "$c" -all 2>&1 | head -20',
+			'done',
+		].join("\n"),
+	]);
+	console.log("---FIREFOX WINDOWS---\n" + ffWindows.output);
+	await canvas.screenshot({ path: "test-results/clean-profile-after-urlbar-click.png" });
+	await page.keyboard.type("about:config", { delay: 30 });
+	await page.waitForTimeout(500);
+	await canvas.screenshot({ path: "test-results/clean-profile-typed.png" });
+	await page.keyboard.press("Enter");
+	await page.waitForTimeout(3000);
+	await canvas.screenshot({ path: "test-results/clean-profile-after.png" });
+});
+
 test.skip("DIAG: Firefox click delivery target", async ({
 	page,
 	sidecarContainer,
