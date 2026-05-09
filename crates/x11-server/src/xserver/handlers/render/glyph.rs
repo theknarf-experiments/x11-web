@@ -377,13 +377,21 @@ pub(crate) fn handle_composite_glyphs(
     let minor = data[1] as u16;
     require_len!(data, 28, seq, 139, minor, bo);
 
-    // All three CompositeGlyphs variants have the same field layout.
-    // We parse the header fields manually from the typed struct's perspective
-    // but use a single code path. The CompositeGlyphs8Request struct works
-    // for all three since the header is identical.
-    use x11rb_protocol::protocol::render::CompositeGlyphs8Request;
+    // All three CompositeGlyphs variants have the same field layout, but
+    // x11rb's try_parse_request() rejects mismatched minor opcodes. We
+    // parse using CompositeGlyphs8Request with a synthetic header that
+    // claims minor=23 — the wire body is identical, only the glyph IDs
+    // are 1/2/4 bytes (handled separately by `glyph_id_size`).
+    use x11rb_protocol::protocol::render::{CompositeGlyphs8Request, COMPOSITE_GLYPHS8_REQUEST};
+    use x11rb_protocol::x11_utils::RequestHeader;
 
-    let req = parse_minor!(CompositeGlyphs8Request, data, state, seq, 139, minor);
+    let real_header = crate::xserver::request::request_header(data);
+    let header = RequestHeader {
+        major_opcode: real_header.major_opcode,
+        minor_opcode: COMPOSITE_GLYPHS8_REQUEST,
+        remaining_length: real_header.remaining_length,
+    };
+    let req = parse_minor!(CompositeGlyphs8Request, data, state, seq, 139, minor, header);
 
     let pict_op = u8::from(req.op);
     let src_pic = req.src;
