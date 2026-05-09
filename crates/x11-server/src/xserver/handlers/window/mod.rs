@@ -97,20 +97,20 @@ pub(crate) fn restack_by_window_type(state: &mut ClientState, wid: u32, parent_i
 /// Compute the effective stacking layer for a window, considering both
 /// window type and _NET_WM_STATE_ABOVE/_NET_WM_STATE_BELOW state atoms.
 pub(crate) fn effective_stacking_layer(win: &WindowState) -> u8 {
+    use crate::xserver::atoms::predef;
     let base_layer = win.window_type.stacking_layer();
 
     // Check for _NET_WM_STATE_ABOVE / _NET_WM_STATE_BELOW in the window's _NET_WM_STATE property
-    // _NET_WM_STATE atom is 92, ABOVE is 102, BELOW is 103
-    if let Some(prop) = win.properties.get(&92) {
+    if let Some(prop) = win.properties.get(&predef::NET_WM_STATE) {
         if prop.format == 32 {
             for chunk in prop.data.chunks_exact(4) {
                 let atom = u32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]);
-                if atom == 102 {
-                    // _NET_WM_STATE_ABOVE: promote to at least layer 3
+                if atom == predef::NET_WM_STATE_ABOVE {
+                    // promote to at least layer 3
                     return base_layer.max(3);
                 }
-                if atom == 103 {
-                    // _NET_WM_STATE_BELOW: demote to layer 1
+                if atom == predef::NET_WM_STATE_BELOW {
+                    // demote to layer 1
                     return 1;
                 }
             }

@@ -2,7 +2,10 @@ use tiny_skia::{
     Color, FillRule, FilterQuality, Paint, Path, PathBuilder, Pattern, PixmapMut, PixmapRef,
     SpreadMode, Stroke, StrokeDash, Transform,
 };
-use x11rb_protocol::protocol::xproto::{CapStyle, GX, Gravity};
+use x11rb_protocol::protocol::xproto::{CapStyle, GX, Gravity, LineStyle};
+
+/// Full plane mask: all 32 bit-planes are affected by GC operations.
+pub(crate) const PLANE_MASK_ALL: u32 = u32::MAX;
 
 mod drawing;
 mod shapes;
@@ -17,7 +20,7 @@ mod tests;
 /// plane mask)` case is the only one we route to tiny-skia.
 #[inline]
 fn skia_eligible(gc_func: u8, plane_mask: u32) -> bool {
-    gc_func == 3 && plane_mask == 0xFFFFFFFF
+    GX::from(gc_func) == GX::COPY && plane_mask == PLANE_MASK_ALL
 }
 
 /// Convert an `0x00RRGGBB` X11 color into a tiny-skia opaque [`Color`].
@@ -52,7 +55,9 @@ impl DashSpec {
 /// Translate X11 line_style + dash_list + dash_offset into a tiny-skia
 /// dash spec. Returns `None` for solid lines or empty patterns.
 pub(crate) fn build_dash(line_style: u8, dash_list: &[u8], dash_offset: u16) -> Option<DashSpec> {
-    if (line_style != 1 && line_style != 2) || dash_list.is_empty() {
+    let style = LineStyle::from(line_style);
+    if (style != LineStyle::ON_OFF_DASH && style != LineStyle::DOUBLE_DASH) || dash_list.is_empty()
+    {
         return None;
     }
     // X11 dash arrays may be odd-length; tiny-skia requires even-length
@@ -207,16 +212,10 @@ impl Framebuffer {
 
     /// Resize the framebuffer with X11 bit-gravity pixel preservation.
     ///
-    /// `gravity` values:
-    ///   0 = Forget (discard content), 1 = NorthWest, 2 = North, 3 = NorthEast,
-    ///   4 = West, 5 = Center, 6 = East, 7 = SouthWest, 8 = South,
-    ///   9 = SouthEast, 10 = Static
-    ///
-    /// For Forget (0), existing pixels are discarded and the caller should
-    /// generate Expose events. For all other values, old pixels are copied to
-    /// the position dictated by the gravity so that the corresponding corner,
-    /// edge-center, or center of the old content aligns with the same reference
-    /// point in the new geometry.
+    /// See `x11rb_protocol::protocol::xproto::Gravity` for the variant set.
+    /// `BIT_FORGET` discards content; all other values translate old pixels
+    /// so the corresponding edge / corner / centre stays aligned in the new
+    /// geometry. The caller should generate Expose events for `BIT_FORGET`.
     pub fn resize_with_gravity(&mut self, new_width: u32, new_height: u32, gravity: u8) {
         if new_width == 0 || new_height == 0 {
             return;
@@ -229,9 +228,10 @@ impl Framebuffer {
         let old_h = self.height;
         let dw = new_width as i32 - old_w as i32;
         let dh = new_height as i32 - old_h as i32;
+        let gravity = Gravity::from(gravity);
 
         // For Forget gravity, just allocate a blank buffer — no pixel copy.
-        if gravity == 0 {
+        if gravity == Gravity::BIT_FORGET {
             self.width = new_width;
             self.height = new_height;
             self.stride = new_width as usize * 4;
@@ -250,7 +250,7 @@ impl Framebuffer {
 
         // Destination offset: where in the new buffer to place old content.
         // A positive dx means old content shifts right; positive dy means down.
-        let (dx, dy): (i32, i32) = match Gravity::from(gravity) {
+        let (dx, dy): (i32, i32) = match gravity {
             Gravity::NORTH_WEST => (0, 0),
             Gravity::NORTH => (dw / 2, 0),
             Gravity::NORTH_EAST => (dw, 0),
@@ -401,10 +401,10 @@ impl Framebuffer {
 
     /// Fill a rectangle applying an X11 GC raster operation.
     ///
-    /// For GXcopy (3) this behaves identically to [`fill_rect`]. For other
+    /// For `GX::COPY` this behaves identically to [`fill_rect`]. For other
     /// operations the existing pixel value is read, combined with `color`
     /// through `apply_gc_function`, and written back. `plane_mask` selects
-    /// which bit-planes are affected (0xFFFFFFFF means all).
+    /// which bit-planes are affected (`PLANE_MASK_ALL` means all).
     pub fn fill_rect_rop(
         &mut self,
         x: i16,
@@ -415,14 +415,15 @@ impl Framebuffer {
         function: u8,
         plane_mask: u32,
     ) {
+        let func = GX::from(function);
         // Fast-path: GXcopy with full plane mask is the common case.
-        if function == 3 && plane_mask == 0xFFFFFFFF {
+        if func == GX::COPY && plane_mask == PLANE_MASK_ALL {
             self.fill_rect(x, y, width, height, color);
             return;
         }
 
         // GXnoop - nothing to do.
-        if function == 5 {
+        if func == GX::NOOP {
             return;
         }
 
@@ -557,7 +558,7 @@ impl Framebuffer {
             return;
         }
         // Fast path: GXcopy with no clipping and full plane_mask
-        if function == 3 && plane_mask == 0xFFFFFFFF && clip_rects.is_empty() {
+        if GX::from(function) == GX::COPY && plane_mask == PLANE_MASK_ALL && clip_rects.is_empty() {
             self.put_image_over(x, y, width, height, data);
             return;
         }
@@ -636,7 +637,7 @@ impl Framebuffer {
             return;
         }
         // Fast path
-        if function == 3 && plane_mask == 0xFFFFFFFF && clip_rects.is_empty() {
+        if GX::from(function) == GX::COPY && plane_mask == PLANE_MASK_ALL && clip_rects.is_empty() {
             self.put_image(x, y, width, height, data);
             return;
         }

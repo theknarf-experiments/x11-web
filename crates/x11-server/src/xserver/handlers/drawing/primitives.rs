@@ -5,9 +5,9 @@ use crate::xserver::core::{GRAPHICS_EXPOSURE_EVENT, NO_EXPOSURE_EVENT};
 use crate::xserver::event::serialize_event;
 use x11rb_protocol::protocol::xproto::{
     ClearAreaRequest, CopyAreaRequest, CopyPlaneRequest, ExposeEvent, FillPolyRequest,
-    GraphicsExposureEvent, NoExposureEvent, PolyArcRequest, PolyFillArcRequest,
+    FillStyle, GraphicsExposureEvent, NoExposureEvent, PolyArcRequest, PolyFillArcRequest,
     PolyFillRectangleRequest, PolyLineRequest, PolyPointRequest, PolyRectangleRequest,
-    PolySegmentRequest, WindowClass,
+    PolySegmentRequest, SubwindowMode, WindowClass,
 };
 
 // ---------------------------------------------------------------------------
@@ -111,8 +111,8 @@ pub(crate) fn handle_copy_area(state: &mut ClientState, req: &CopyAreaRequest) -
     let src_depth = state.pixmaps.get(&src).map(|p| p.depth).unwrap_or(24);
 
     let has_clip = !gc.clip_rects.is_empty();
-    // subwindow_mode: 0=ClipByChildren, 1=IncludeInferiors
-    let include_inferiors = gc.subwindow_mode == 1 && state.windows.contains_key(&src);
+    let include_inferiors = SubwindowMode::from(gc.subwindow_mode) == SubwindowMode::INCLUDE_INFERIORS
+        && state.windows.contains_key(&src);
 
     if src == dst && !include_inferiors {
         if let Some(fb) = state.get_framebuffer_mut(src) {
@@ -505,7 +505,7 @@ pub(crate) fn handle_poly_line(state: &mut ClientState, req: &PolyLineRequest) -
     let bg = state.map_color_for_drawable(drawable, gc.background);
 
     // Extract tile/stipple data before borrowing framebuffer
-    let tile_data: Option<(Vec<u8>, u32, u32)> = if gc.fill_style == 1 {
+    let tile_data: Option<(Vec<u8>, u32, u32)> = if FillStyle::from(gc.fill_style) == FillStyle::TILED {
         state.pixmaps.get(&gc.tile).map(|p| {
             (
                 p.framebuffer.data().to_vec(),
@@ -516,7 +516,10 @@ pub(crate) fn handle_poly_line(state: &mut ClientState, req: &PolyLineRequest) -
     } else {
         None
     };
-    let stipple_data: Option<(Vec<u8>, u32, u32)> = if gc.fill_style == 2 || gc.fill_style == 3 {
+    let stipple_data: Option<(Vec<u8>, u32, u32)> = if matches!(
+        FillStyle::from(gc.fill_style),
+        FillStyle::STIPPLED | FillStyle::OPAQUE_STIPPLED
+    ) {
         state.pixmaps.get(&gc.stipple).map(|p| {
             (
                 p.framebuffer.data().to_vec(),
@@ -585,7 +588,7 @@ pub(crate) fn handle_poly_line(state: &mut ClientState, req: &PolyLineRequest) -
                             sh,
                             gc.ts_x,
                             gc.ts_y,
-                            gc.fill_style == 3,
+                            FillStyle::from(gc.fill_style) == FillStyle::OPAQUE_STIPPLED,
                             gc.function,
                             gc.plane_mask,
                             gc.cap_style,
@@ -677,7 +680,7 @@ pub(crate) fn handle_poly_segment(state: &mut ClientState, req: &PolySegmentRequ
     let bg = state.map_color_for_drawable(drawable, gc.background);
 
     // Extract tile/stipple data before borrowing framebuffer
-    let tile_data: Option<(Vec<u8>, u32, u32)> = if gc.fill_style == 1 {
+    let tile_data: Option<(Vec<u8>, u32, u32)> = if FillStyle::from(gc.fill_style) == FillStyle::TILED {
         state.pixmaps.get(&gc.tile).map(|p| {
             (
                 p.framebuffer.data().to_vec(),
@@ -688,7 +691,10 @@ pub(crate) fn handle_poly_segment(state: &mut ClientState, req: &PolySegmentRequ
     } else {
         None
     };
-    let stipple_data: Option<(Vec<u8>, u32, u32)> = if gc.fill_style == 2 || gc.fill_style == 3 {
+    let stipple_data: Option<(Vec<u8>, u32, u32)> = if matches!(
+        FillStyle::from(gc.fill_style),
+        FillStyle::STIPPLED | FillStyle::OPAQUE_STIPPLED
+    ) {
         state.pixmaps.get(&gc.stipple).map(|p| {
             (
                 p.framebuffer.data().to_vec(),
@@ -755,7 +761,7 @@ pub(crate) fn handle_poly_segment(state: &mut ClientState, req: &PolySegmentRequ
                             sh,
                             gc.ts_x,
                             gc.ts_y,
-                            gc.fill_style == 3,
+                            FillStyle::from(gc.fill_style) == FillStyle::OPAQUE_STIPPLED,
                             gc.function,
                             gc.plane_mask,
                             gc.cap_style,
@@ -857,7 +863,7 @@ pub(crate) fn handle_poly_rectangle(
     let bg = state.map_color_for_drawable(drawable, gc.background);
 
     // Extract tile/stipple data before borrowing framebuffer
-    let tile_data: Option<(Vec<u8>, u32, u32)> = if gc.fill_style == 1 {
+    let tile_data: Option<(Vec<u8>, u32, u32)> = if FillStyle::from(gc.fill_style) == FillStyle::TILED {
         state.pixmaps.get(&gc.tile).map(|p| {
             (
                 p.framebuffer.data().to_vec(),
@@ -868,7 +874,10 @@ pub(crate) fn handle_poly_rectangle(
     } else {
         None
     };
-    let stipple_data: Option<(Vec<u8>, u32, u32)> = if gc.fill_style == 2 || gc.fill_style == 3 {
+    let stipple_data: Option<(Vec<u8>, u32, u32)> = if matches!(
+        FillStyle::from(gc.fill_style),
+        FillStyle::STIPPLED | FillStyle::OPAQUE_STIPPLED
+    ) {
         state.pixmaps.get(&gc.stipple).map(|p| {
             (
                 p.framebuffer.data().to_vec(),
@@ -948,7 +957,7 @@ pub(crate) fn handle_poly_rectangle(
                                 sh,
                                 gc.ts_x,
                                 gc.ts_y,
-                                gc.fill_style == 3,
+                                FillStyle::from(gc.fill_style) == FillStyle::OPAQUE_STIPPLED,
                                 gc.function,
                                 gc.plane_mask,
                                 gc.cap_style,
@@ -1111,7 +1120,7 @@ pub(crate) fn handle_fill_poly(state: &mut ClientState, req: &FillPolyRequest) -
     let bg = state.map_color_for_drawable(drawable, gc.background);
 
     // Extract tile/stipple data before borrowing framebuffer
-    let tile_data: Option<(Vec<u8>, u32, u32)> = if gc.fill_style == 1 {
+    let tile_data: Option<(Vec<u8>, u32, u32)> = if FillStyle::from(gc.fill_style) == FillStyle::TILED {
         state.pixmaps.get(&gc.tile).map(|p| {
             (
                 p.framebuffer.data().to_vec(),
@@ -1122,7 +1131,10 @@ pub(crate) fn handle_fill_poly(state: &mut ClientState, req: &FillPolyRequest) -
     } else {
         None
     };
-    let stipple_data: Option<(Vec<u8>, u32, u32)> = if gc.fill_style == 2 || gc.fill_style == 3 {
+    let stipple_data: Option<(Vec<u8>, u32, u32)> = if matches!(
+        FillStyle::from(gc.fill_style),
+        FillStyle::STIPPLED | FillStyle::OPAQUE_STIPPLED
+    ) {
         state.pixmaps.get(&gc.stipple).map(|p| {
             (
                 p.framebuffer.data().to_vec(),
@@ -1175,7 +1187,7 @@ pub(crate) fn handle_fill_poly(state: &mut ClientState, req: &FillPolyRequest) -
                             sh,
                             gc.ts_x,
                             gc.ts_y,
-                            gc.fill_style == 3,
+                            FillStyle::from(gc.fill_style) == FillStyle::OPAQUE_STIPPLED,
                             gc.fill_rule,
                             gc.function,
                             gc.plane_mask,
@@ -1261,7 +1273,7 @@ pub(crate) fn handle_poly_fill_rectangle(
     );
 
     // Extract tile/stipple data before borrowing framebuffer
-    let tile_data: Option<(Vec<u8>, u32, u32)> = if gc.fill_style == 1 {
+    let tile_data: Option<(Vec<u8>, u32, u32)> = if FillStyle::from(gc.fill_style) == FillStyle::TILED {
         // Tiled: use tile pixmap
         state.pixmaps.get(&gc.tile).map(|p| {
             let d = p.framebuffer.data().to_vec();
@@ -1270,7 +1282,10 @@ pub(crate) fn handle_poly_fill_rectangle(
     } else {
         None
     };
-    let stipple_data: Option<(Vec<u8>, u32, u32)> = if gc.fill_style == 2 || gc.fill_style == 3 {
+    let stipple_data: Option<(Vec<u8>, u32, u32)> = if matches!(
+        FillStyle::from(gc.fill_style),
+        FillStyle::STIPPLED | FillStyle::OPAQUE_STIPPLED
+    ) {
         // Stippled or OpaqueStippled: use stipple pixmap
         state.pixmaps.get(&gc.stipple).map(|p| {
             let d = p.framebuffer.data().to_vec();
@@ -1351,7 +1366,7 @@ pub(crate) fn handle_poly_fill_rectangle(
                                 sh,
                                 gc.ts_x,
                                 gc.ts_y,
-                                gc.fill_style == 3,
+                                FillStyle::from(gc.fill_style) == FillStyle::OPAQUE_STIPPLED,
                                 gc.function,
                                 gc.plane_mask,
                             );
@@ -1372,7 +1387,7 @@ pub(crate) fn handle_poly_fill_rectangle(
                                         sh,
                                         gc.ts_x,
                                         gc.ts_y,
-                                        gc.fill_style == 3,
+                                        FillStyle::from(gc.fill_style) == FillStyle::OPAQUE_STIPPLED,
                                         gc.function,
                                         gc.plane_mask,
                                     );
@@ -1445,7 +1460,7 @@ pub(crate) fn handle_poly_fill_arc(state: &mut ClientState, req: &PolyFillArcReq
     info!("PolyFillArc: gc={gc_id:#x} func={} fg_raw={:#x} fg_mapped={fg:#x} draw={drawable:#x} fill_style={}", gc.function, gc.foreground, gc.fill_style);
 
     // Extract tile/stipple data before borrowing framebuffer
-    let tile_data: Option<(Vec<u8>, u32, u32)> = if gc.fill_style == 1 {
+    let tile_data: Option<(Vec<u8>, u32, u32)> = if FillStyle::from(gc.fill_style) == FillStyle::TILED {
         state.pixmaps.get(&gc.tile).map(|p| {
             (
                 p.framebuffer.data().to_vec(),
@@ -1456,7 +1471,10 @@ pub(crate) fn handle_poly_fill_arc(state: &mut ClientState, req: &PolyFillArcReq
     } else {
         None
     };
-    let stipple_data: Option<(Vec<u8>, u32, u32)> = if gc.fill_style == 2 || gc.fill_style == 3 {
+    let stipple_data: Option<(Vec<u8>, u32, u32)> = if matches!(
+        FillStyle::from(gc.fill_style),
+        FillStyle::STIPPLED | FillStyle::OPAQUE_STIPPLED
+    ) {
         state.pixmaps.get(&gc.stipple).map(|p| {
             (
                 p.framebuffer.data().to_vec(),
@@ -1531,7 +1549,7 @@ pub(crate) fn handle_poly_fill_arc(state: &mut ClientState, req: &PolyFillArcReq
                             sh,
                             gc.ts_x,
                             gc.ts_y,
-                            gc.fill_style == 3,
+                            FillStyle::from(gc.fill_style) == FillStyle::OPAQUE_STIPPLED,
                             gc.arc_mode,
                             gc.function,
                             gc.plane_mask,

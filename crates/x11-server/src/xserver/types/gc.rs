@@ -1,5 +1,9 @@
 //! Graphics Context state and bitmap clip mask types.
 
+use x11rb_protocol::protocol::xproto::{
+    ArcMode, CapStyle, FillRule, FillStyle, GX, JoinStyle, LineStyle, SubwindowMode,
+};
+
 /// Resolved bitmap clip mask data extracted from a pixmap.
 /// When `clip_mask` is set to a 1-bit-depth pixmap, we cache the bitmap
 /// here so drawing operations can test individual pixels.
@@ -92,29 +96,29 @@ pub(crate) struct GcState {
 impl Default for GcState {
     fn default() -> Self {
         Self {
-            function: 3, // GXcopy
-            plane_mask: 0xFFFFFFFF,
+            function: u32::from(GX::COPY) as u8,
+            plane_mask: u32::MAX,
             foreground: 0x00_00_00,
             background: 0xFF_FF_FF,
             line_width: 0,
-            line_style: 0, // Solid
-            cap_style: 1,  // Butt
-            join_style: 0, // Miter
-            fill_style: 0, // Solid
-            fill_rule: 0,  // EvenOdd
+            line_style: u32::from(LineStyle::SOLID) as u8,
+            cap_style: u32::from(CapStyle::BUTT) as u8,
+            join_style: u32::from(JoinStyle::MITER) as u8,
+            fill_style: u32::from(FillStyle::SOLID) as u8,
+            fill_rule: u32::from(FillRule::EVEN_ODD) as u8,
             tile: 0,
             stipple: 0,
             ts_x: 0,
             ts_y: 0,
             font_id: 0,
-            subwindow_mode: 0, // ClipByChildren
+            subwindow_mode: u32::from(SubwindowMode::CLIP_BY_CHILDREN) as u8,
             graphics_exposures: true,
             clip_x: 0,
             clip_y: 0,
             clip_mask: 0, // None
             dash_offset: 0,
             dashes: 4,
-            arc_mode: 1, // PieSlice
+            arc_mode: u32::from(ArcMode::PIE_SLICE) as u8,
             clip_rects: Vec::new(),
             clip_mask_bitmap: None,
             dash_list: Vec::new(),

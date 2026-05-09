@@ -72,20 +72,21 @@ impl WindowType {
 
     /// Resolve from _NET_WM_WINDOW_TYPE atom IDs (tries first match in list per EWMH spec).
     pub(crate) fn from_atom_ids(atoms: &[u32]) -> Self {
+        use crate::xserver::atoms::predef;
         for &atom in atoms {
             match atom {
-                87 => return WindowType::Desktop,
-                86 => return WindowType::Dock,
-                82 => return WindowType::Toolbar,
-                83 => return WindowType::Menu,
-                84 => return WindowType::Utility,
-                85 => return WindowType::Splash,
-                81 => return WindowType::Dialog,
-                88 => return WindowType::DropdownMenu,
-                89 => return WindowType::PopupMenu,
-                90 => return WindowType::Tooltip,
-                91 => return WindowType::Notification,
-                80 => return WindowType::Normal,
+                predef::NET_WM_WINDOW_TYPE_DESKTOP => return WindowType::Desktop,
+                predef::NET_WM_WINDOW_TYPE_DOCK => return WindowType::Dock,
+                predef::NET_WM_WINDOW_TYPE_TOOLBAR => return WindowType::Toolbar,
+                predef::NET_WM_WINDOW_TYPE_MENU => return WindowType::Menu,
+                predef::NET_WM_WINDOW_TYPE_UTILITY => return WindowType::Utility,
+                predef::NET_WM_WINDOW_TYPE_SPLASH => return WindowType::Splash,
+                predef::NET_WM_WINDOW_TYPE_DIALOG => return WindowType::Dialog,
+                predef::NET_WM_WINDOW_TYPE_DROPDOWN_MENU => return WindowType::DropdownMenu,
+                predef::NET_WM_WINDOW_TYPE_POPUP_MENU => return WindowType::PopupMenu,
+                predef::NET_WM_WINDOW_TYPE_TOOLTIP => return WindowType::Tooltip,
+                predef::NET_WM_WINDOW_TYPE_NOTIFICATION => return WindowType::Notification,
+                predef::NET_WM_WINDOW_TYPE_NORMAL => return WindowType::Normal,
                 _ => {} // unknown type, try next
             }
         }

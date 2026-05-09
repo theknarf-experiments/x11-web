@@ -20,6 +20,18 @@ use tokio::time::Duration;
 use tracing::{debug, info, warn};
 use x11rb_protocol::protocol::xfixes::{SelectionEvent, SelectionNotifyEvent};
 use x11rb_protocol::protocol::xproto::{ImageOrder, SetupRequest};
+
+/// X11 setup-request `byte_order` byte values: 0x6c ('l') means LSB-first /
+/// little-endian; 0x42 ('B') means MSB-first / big-endian.
+const BYTE_ORDER_LSB: u8 = 0x6c;
+const BYTE_ORDER_MSB: u8 = 0x42;
+
+/// Round `n` up to the next 4-byte boundary. X11 wire structures pad
+/// every field group to a multiple of 4 bytes.
+#[inline]
+const fn align_to_4(n: usize) -> usize {
+    (n + 3) & !3
+}
 use x11rb_protocol::x11_utils::{Serialize, TryParse};
 
 use super::atoms::AtomManager;
@@ -77,12 +89,12 @@ fn safe_close(fd: i32) {
 /// Build an X11 connection failure response.
 fn build_auth_failure(byte_order: u8, reason: &[u8]) -> Vec<u8> {
     let reason_len = reason.len();
-    let padded_reason_len = (reason_len + 3) & !3;
+    let padded_reason_len = align_to_4(reason_len);
     let additional_data_words = (padded_reason_len / 4) as u16;
     let mut resp = Vec::with_capacity(8 + padded_reason_len);
     resp.push(0); // Failed
     resp.push(reason_len as u8);
-    if byte_order == 0x6c {
+    if byte_order == BYTE_ORDER_LSB {
         resp.extend_from_slice(&11u16.to_le_bytes());
         resp.extend_from_slice(&0u16.to_le_bytes());
         resp.extend_from_slice(&additional_data_words.to_le_bytes());
@@ -132,14 +144,14 @@ pub(crate) async fn handle_client(
     stream.read_exact(&mut header_buf).await?;
 
     let byte_order = header_buf[0];
-    if byte_order != 0x6c && byte_order != 0x42 {
+    if byte_order != BYTE_ORDER_LSB && byte_order != BYTE_ORDER_MSB {
         return Err(io::Error::new(
             io::ErrorKind::InvalidData,
             format!("Invalid byte order: 0x{:02x}", byte_order),
         ));
     }
 
-    let (auth_name_len, auth_data_len) = if byte_order == 0x6c {
+    let (auth_name_len, auth_data_len) = if byte_order == BYTE_ORDER_LSB {
         (
             u16::from_le_bytes([header_buf[6], header_buf[7]]),
             u16::from_le_bytes([header_buf[8], header_buf[9]]),
@@ -151,10 +163,7 @@ pub(crate) async fn handle_client(
         )
     };
 
-    fn pad4(n: u16) -> usize {
-        let n = n as usize;
-        (n + 3) & !3
-    }
+    let pad4 = |n: u16| align_to_4(n as usize);
     let total_len = 12 + pad4(auth_name_len) + pad4(auth_data_len);
     let mut setup_buf = vec![0u8; total_len];
     setup_buf[..12].copy_from_slice(&header_buf);
@@ -236,7 +245,7 @@ pub(crate) async fn handle_client(
     }
 
     // Phase 2: Send setup reply
-    let msb_first = byte_order == 0x42;
+    let msb_first = byte_order == BYTE_ORDER_MSB;
     let mut setup = build_setup(conn_index);
     if msb_first {
         // MSB-first clients expect big-endian image byte order in the setup
@@ -1355,8 +1364,10 @@ pub(crate) async fn handle_client(
                                     }
 
                                     // MouseKeys: convert numpad keys to pointer events
-                                    const XKB_MOUSE_KEYS_MASK: u32 = 1 << 4;
-                                    if (state.xkb_state.controls.enabled_ctrls & XKB_MOUSE_KEYS_MASK) != 0 {
+                                    if (state.xkb_state.controls.enabled_ctrls
+                                        & crate::xserver::handlers::xkb::XKB_MOUSE_KEYS_MASK)
+                                        != 0
+                                    {
                                         use crate::xserver::client::xkb_state::{mousekeys_movement, mousekeys_is_click};
                                         if let Some((dx, dy)) = mousekeys_movement(kc as u8) {
                                             // Convert to pointer motion
@@ -1427,8 +1438,10 @@ pub(crate) async fn handle_client(
                                     // (Simplified synchronous check — a full implementation would use
                                     // an async timer to accept the key after slow_keys_delay.)
                                     // For now we track first-press time and accept on subsequent events.
-                                    const XKB_SLOW_KEYS_MASK: u32 = 1 << 1;
-                                    if (state.xkb_state.controls.enabled_ctrls & XKB_SLOW_KEYS_MASK) != 0 {
+                                    if (state.xkb_state.controls.enabled_ctrls
+                                        & crate::xserver::handlers::xkb::XKB_SLOW_KEYS_MASK)
+                                        != 0
+                                    {
                                         let delay = state.xkb_state.controls.slow_keys_delay;
                                         // Use the auto-repeat mechanism: a slow key press is only
                                         // accepted if the key is already being held (repeat event).
@@ -1459,7 +1472,9 @@ pub(crate) async fn handle_client(
                                     }
                                     handlers::xkb::maybe_send_xkb_state_notify(&mut state, &xkb_before, kc as u8, 2);
                                     // Start auto-repeat if enabled for this key.
-                                    let repeat_enabled = (state.xkb_state.controls.enabled_ctrls & (1 << 0)) != 0; // XkbRepeatKeysMask
+                                    let repeat_enabled = (state.xkb_state.controls.enabled_ctrls
+                                        & crate::xserver::handlers::xkb::XKB_REPEAT_KEYS_MASK)
+                                        != 0;
                                     let key_repeats = kc < 256 && (state.xkb_state.controls.per_key_repeat[kc / 8] & (1 << (kc % 8))) != 0;
                                     if repeat_enabled && key_repeats {
                                         let delay = state.xkb_state.controls.repeat_delay as u64;
@@ -1480,8 +1495,10 @@ pub(crate) async fn handle_client(
                                     let kc = *keycode as usize;
 
                                     // MouseKeys: convert KP_5 release to ButtonRelease
-                                    const XKB_MOUSE_KEYS_MASK_REL: u32 = 1 << 4;
-                                    if (state.xkb_state.controls.enabled_ctrls & XKB_MOUSE_KEYS_MASK_REL) != 0 {
+                                    if (state.xkb_state.controls.enabled_ctrls
+                                        & crate::xserver::handlers::xkb::XKB_MOUSE_KEYS_MASK)
+                                        != 0
+                                    {
                                         use crate::xserver::client::xkb_state::{mousekeys_movement, mousekeys_is_click};
                                         if mousekeys_movement(kc as u8).is_some() {
                                             // Movement key release: nothing to do (motion has no release)

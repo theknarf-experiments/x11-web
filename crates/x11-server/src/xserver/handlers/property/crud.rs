@@ -198,7 +198,7 @@ pub(crate) fn handle_change_property(
     }
 
     // Check if this is _NET_WM_WINDOW_TYPE — update window type for stacking layer enforcement
-    let is_window_type = property_atom == 79 // _NET_WM_WINDOW_TYPE predefined atom
+    let is_window_type = property_atom == crate::xserver::atoms::predef::NET_WM_WINDOW_TYPE
         || state
             .get_atom_name(property_atom)
             .map(|n| n == "_NET_WM_WINDOW_TYPE")
@@ -223,8 +223,8 @@ pub(crate) fn handle_change_property(
     }
 
     // Check if this is _NET_WM_STRUT or _NET_WM_STRUT_PARTIAL — update strut and recalculate workarea
-    let is_strut = property_atom == 129
-        || property_atom == 130
+    let is_strut = property_atom == crate::xserver::atoms::predef::NET_WM_STRUT
+        || property_atom == crate::xserver::atoms::predef::NET_WM_STRUT_PARTIAL
         || state
             .get_atom_name(property_atom)
             .map(|n| n == "_NET_WM_STRUT" || n == "_NET_WM_STRUT_PARTIAL")

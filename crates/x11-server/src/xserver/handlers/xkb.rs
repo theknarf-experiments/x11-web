@@ -45,15 +45,16 @@ const MIN_KEY_CODE: u8 = 8;
 const MAX_KEY_CODE: u8 = 255;
 const N_KEYS: usize = (MAX_KEY_CODE - MIN_KEY_CODE + 1) as usize; // 248
 
-// XKB action types
-const SA_NO_ACTION: u8 = 0;
-const SA_SET_MODS: u8 = 1;
-const SA_LOCK_MODS: u8 = 3;
-const SA_SET_GROUP: u8 = 4;
-const SA_LOCK_GROUP: u8 = 6;
+// XKB action types — wire-stable u8 IDs from `x11rb::xkb::SAType`. Re-cast
+// here so they can be used in `match` arms and as struct fields.
+const SA_NO_ACTION: u8 = 0; // SAType::NO_ACTION
+const SA_SET_MODS: u8 = 1; // SAType::SET_MODS
+const SA_LOCK_MODS: u8 = 3; // SAType::LOCK_MODS
+const SA_SET_GROUP: u8 = 4; // SAType::SET_GROUP
+const SA_LOCK_GROUP: u8 = 6; // SAType::LOCK_GROUP
 
-// XKB behavior types
-const KB_LOCK: u8 = 1;
+// XKB behavior types — wire-stable u8 IDs from `x11rb::xkb::BehaviorType`.
+const KB_LOCK: u8 = 1; // BehaviorType::LOCK
 
 /// Number of keyboard groups (layouts) we support.
 /// XKB allows up to 4 groups. We always advertise all 4 slots but
@@ -61,15 +62,53 @@ const KB_LOCK: u8 = 1;
 /// SetMap or the server has loaded additional layouts.
 const MAX_GROUPS: u8 = 4;
 
-// XKB control bits
-const XKB_REPEAT_KEYS_MASK: u32 = 1 << 0;
-const XKB_SLOW_KEYS_MASK: u32 = 1 << 1;
+/// XKB Boolean control bits — values mirror `x11rb::xkb::BoolCtrl::*`.
+/// Verified by `xkb_control_masks_match_x11rb` in tests below.
+pub(crate) const XKB_REPEAT_KEYS_MASK: u32 = 1 << 0;
+pub(crate) const XKB_SLOW_KEYS_MASK: u32 = 1 << 1;
 const XKB_BOUNCE_KEYS_MASK: u32 = 1 << 2;
-const XKB_MOUSE_KEYS_MASK: u32 = 1 << 4;
+pub(crate) const XKB_MOUSE_KEYS_MASK: u32 = 1 << 4;
 const XKB_ACCESS_X_KEYS_MASK: u32 = 1 << 6;
 const XKB_ACCESS_X_TIMEOUT_MASK: u32 = 1 << 7;
 const XKB_ACCESS_X_FEEDBACK_MASK: u32 = 1 << 8;
 const XKB_ALL_BOOLEAN_CTRLS_MASK: u32 = (1 << 10) - 1;
+
+#[cfg(test)]
+mod xkb_const_checks {
+    use super::*;
+    use x11rb_protocol::protocol::xkb::{BehaviorType, BoolCtrl, SAType};
+
+    #[test]
+    fn action_types_match_x11rb() {
+        assert_eq!(SA_NO_ACTION, u8::from(SAType::NO_ACTION));
+        assert_eq!(SA_SET_MODS, u8::from(SAType::SET_MODS));
+        assert_eq!(SA_LOCK_MODS, u8::from(SAType::LOCK_MODS));
+        assert_eq!(SA_SET_GROUP, u8::from(SAType::SET_GROUP));
+        assert_eq!(SA_LOCK_GROUP, u8::from(SAType::LOCK_GROUP));
+    }
+
+    #[test]
+    fn behavior_types_match_x11rb() {
+        assert_eq!(KB_LOCK, u8::from(BehaviorType::LOCK));
+    }
+
+    #[test]
+    fn xkb_control_masks_match_x11rb() {
+        assert_eq!(XKB_REPEAT_KEYS_MASK, u32::from(BoolCtrl::REPEAT_KEYS));
+        assert_eq!(XKB_SLOW_KEYS_MASK, u32::from(BoolCtrl::SLOW_KEYS));
+        assert_eq!(XKB_BOUNCE_KEYS_MASK, u32::from(BoolCtrl::BOUNCE_KEYS));
+        assert_eq!(XKB_MOUSE_KEYS_MASK, u32::from(BoolCtrl::MOUSE_KEYS));
+        assert_eq!(XKB_ACCESS_X_KEYS_MASK, u32::from(BoolCtrl::ACCESS_X_KEYS));
+        assert_eq!(
+            XKB_ACCESS_X_TIMEOUT_MASK,
+            u32::from(BoolCtrl::ACCESS_X_TIMEOUT_MASK),
+        );
+        assert_eq!(
+            XKB_ACCESS_X_FEEDBACK_MASK,
+            u32::from(BoolCtrl::ACCESS_X_FEEDBACK_MASK),
+        );
+    }
+}
 
 // Modifier key keycodes (evdev)
 const MODIFIER_KEYS: &[(u8, u8, u8)] = &[

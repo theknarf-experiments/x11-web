@@ -3,6 +3,22 @@ use super::{
     stipple_to_tile, ArcChordData, DashState, Framebuffer,
 };
 use tiny_skia::{FillRule, Paint, PathBuilder, Transform};
+use x11rb_protocol::protocol::xproto::{ArcMode, FillRule as XFillRule, LineStyle};
+
+#[inline]
+fn winding_fill_rule(fill_rule: u8) -> FillRule {
+    if XFillRule::from(fill_rule) == XFillRule::WINDING {
+        FillRule::Winding
+    } else {
+        FillRule::EvenOdd
+    }
+}
+
+#[inline]
+fn line_style_uses_dashes(line_style: u8) -> bool {
+    let style = LineStyle::from(line_style);
+    style == LineStyle::ON_OFF_DASH || style == LineStyle::DOUBLE_DASH
+}
 
 impl Framebuffer {
     /// fill_rect_rop with clip rectangle support.
@@ -317,7 +333,7 @@ impl Framebuffer {
         start_rad: f64,
         extent_rad: f64,
         arc_mode: u8,
-        // Pre-computed chord data for ArcChord mode (only used when arc_mode == 0)
+        // Pre-computed chord data for ArcChord mode (only used for ArcMode::CHORD).
         chord: Option<&ArcChordData>,
     ) -> bool {
         let ddx = (px as f64 - cx) / rx;
@@ -328,7 +344,7 @@ impl Framebuffer {
         if angle2.abs() >= 360 * 64 {
             return true;
         }
-        if arc_mode == 0 {
+        if ArcMode::from(arc_mode) == ArcMode::CHORD {
             // ArcChord
             if let Some(ch) = chord {
                 let cross = ch.cdx * (ddy - ch.chord_y1) - ch.cdy * (ddx - ch.chord_x1);
@@ -572,24 +588,29 @@ impl Framebuffer {
         // Fast path: solid GXcopy strokes (with optional dashes) go to
         // tiny-skia. DoubleDash is handled by stroking the background
         // colour with the inverse dash pattern first.
+        let butt_cap = u32::from(x11rb_protocol::protocol::xproto::CapStyle::BUTT) as u8;
         if skia_eligible(function, plane_mask) {
             if let Some(path) = build_arc_polyline(cx, cy, rx, ry, start_rad, extent_rad) {
                 let dash = build_dash(line_style, dash_list, dash_offset);
-                if line_style == 2 {
+                if LineStyle::from(line_style) == LineStyle::DOUBLE_DASH {
                     if let Some(ref d) = dash {
                         self.stroke_path_skia(
                             &path,
                             background,
                             line_width,
-                            1, // butt
+                            butt_cap,
                             Some(d.inverted()),
                             clip_rects,
                         );
                     }
                 }
                 self.stroke_path_skia(
-                    &path, foreground, line_width, 1, // butt
-                    dash, clip_rects,
+                    &path,
+                    foreground,
+                    line_width,
+                    butt_cap,
+                    dash,
+                    clip_rects,
                 );
                 self.mark_dirty(x as i32, y as i32, width as u32, height as u32);
                 return;
@@ -598,7 +619,7 @@ impl Framebuffer {
 
         // Fallback: per-pixel Bresenham along the arc with dash logic.
         let steps = ((rx + ry) * 2.0).max(64.0) as usize;
-        let use_dashes = (line_style == 1 || line_style == 2) && !dash_list.is_empty();
+        let use_dashes = line_style_uses_dashes(line_style) && !dash_list.is_empty();
         let mut dash_state = use_dashes.then(|| DashState::new(dash_list, dash_offset));
         let mut prev: Option<(i32, i32)> = None;
         for i in 0..=steps {
@@ -615,7 +636,7 @@ impl Framebuffer {
                 };
                 let color = if draw_fg {
                     foreground
-                } else if line_style == 2 {
+                } else if LineStyle::from(line_style) == LineStyle::DOUBLE_DASH {
                     background
                 } else {
                     prev = Some((px, py));
@@ -717,11 +738,7 @@ impl Framebuffer {
                 let mut paint = Paint::default();
                 paint.set_color(skia_color(color));
                 paint.anti_alias = false;
-                let rule = if fill_rule == 1 {
-                    FillRule::Winding
-                } else {
-                    FillRule::EvenOdd
-                };
+                let rule = winding_fill_rule(fill_rule);
                 let clip_mask = build_clip_mask(self.width, self.height, clip_rects);
                 let _ = self.with_pixmap_mut(|pm| {
                     pm.fill_path(
@@ -784,11 +801,7 @@ impl Framebuffer {
                 pb.line_to(px as f32, py as f32);
             }
             pb.close();
-            let rule = if fill_rule == 1 {
-                FillRule::Winding
-            } else {
-                FillRule::EvenOdd
-            };
+            let rule = winding_fill_rule(fill_rule);
             if let Some(path) = pb.finish() {
                 if self.fill_path_tiled(
                     &path, tile_data, tile_w, tile_h, ts_x, ts_y, rule, clip_rects,
@@ -928,7 +941,7 @@ impl Framebuffer {
             let y32 = y as i32;
             let mut spans = Vec::new();
 
-            if fill_rule == 1 {
+            if XFillRule::from(fill_rule) == XFillRule::WINDING {
                 // Winding rule
                 let mut crossings: Vec<(i32, i32)> = Vec::new();
                 for i in 0..n {

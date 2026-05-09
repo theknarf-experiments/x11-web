@@ -14,6 +14,37 @@ use super::super::types::*;
 use super::ClientState;
 use crate::xserver::event::serialize_event;
 
+/// ICCCM WM_NORMAL_HINTS flag bits (selecting which fields of the
+/// `WM_SIZE_HINTS` structure are valid).
+mod wm_size_hints {
+    pub(super) const P_MIN_SIZE: u32 = 1 << 4;
+    pub(super) const P_MAX_SIZE: u32 = 1 << 5;
+    pub(super) const P_RESIZE_INC: u32 = 1 << 6;
+    pub(super) const P_BASE_SIZE: u32 = 1 << 8;
+}
+
+/// Wire layout of the ICCCM `WM_SIZE_HINTS` property (format=32, 18×u32 = 72
+/// bytes). Each field offset is given in u32 indices for readability.
+#[allow(dead_code)]
+mod wm_size_hints_offset {
+    pub(super) const FLAGS: usize = 0;
+    pub(super) const MIN_WIDTH: usize = 5;
+    pub(super) const MIN_HEIGHT: usize = 6;
+    pub(super) const MAX_WIDTH: usize = 7;
+    pub(super) const MAX_HEIGHT: usize = 8;
+    pub(super) const WIDTH_INC: usize = 9;
+    pub(super) const HEIGHT_INC: usize = 10;
+    pub(super) const BASE_WIDTH: usize = 13;
+    pub(super) const BASE_HEIGHT: usize = 14;
+}
+
+#[inline]
+fn read_u32_word(data: &[u8], word_index: usize) -> Option<u32> {
+    let byte = word_index * 4;
+    let bytes: &[u8; 4] = data.get(byte..byte + 4)?.try_into().ok()?;
+    Some(u32::from_le_bytes(*bytes))
+}
+
 impl ClientState {
     /// Revert focus away from the given window (called when it's destroyed or unmapped).
     /// Follows X11 revert-to semantics: None→0, PointerRoot→1, Parent→nearest existing ancestor.
@@ -486,36 +517,47 @@ impl ClientState {
             return None;
         }
 
-        let flags = u32::from_le_bytes([pv.data[0], pv.data[1], pv.data[2], pv.data[3]]);
+        use wm_size_hints::{P_BASE_SIZE, P_MAX_SIZE, P_MIN_SIZE, P_RESIZE_INC};
+        use wm_size_hints_offset as off;
+
+        let flags = read_u32_word(&pv.data, off::FLAGS)?;
         let mut hints = SizeHints::default();
 
-        // PMinSize flag (bit 4)
-        if flags & (1 << 4) != 0 && pv.data.len() >= 32 {
-            hints.min_width =
-                u32::from_le_bytes([pv.data[20], pv.data[21], pv.data[22], pv.data[23]]) as u16;
-            hints.min_height =
-                u32::from_le_bytes([pv.data[24], pv.data[25], pv.data[26], pv.data[27]]) as u16;
+        if flags & P_MIN_SIZE != 0 {
+            if let (Some(w), Some(h)) = (
+                read_u32_word(&pv.data, off::MIN_WIDTH),
+                read_u32_word(&pv.data, off::MIN_HEIGHT),
+            ) {
+                hints.min_width = w as u16;
+                hints.min_height = h as u16;
+            }
         }
-        // PMaxSize flag (bit 5)
-        if flags & (1 << 5) != 0 && pv.data.len() >= 40 {
-            hints.max_width =
-                u32::from_le_bytes([pv.data[28], pv.data[29], pv.data[30], pv.data[31]]) as u16;
-            hints.max_height =
-                u32::from_le_bytes([pv.data[32], pv.data[33], pv.data[34], pv.data[35]]) as u16;
+        if flags & P_MAX_SIZE != 0 {
+            if let (Some(w), Some(h)) = (
+                read_u32_word(&pv.data, off::MAX_WIDTH),
+                read_u32_word(&pv.data, off::MAX_HEIGHT),
+            ) {
+                hints.max_width = w as u16;
+                hints.max_height = h as u16;
+            }
         }
-        // PResizeInc flag (bit 6)
-        if flags & (1 << 6) != 0 && pv.data.len() >= 48 {
-            hints.width_inc =
-                u32::from_le_bytes([pv.data[36], pv.data[37], pv.data[38], pv.data[39]]) as u16;
-            hints.height_inc =
-                u32::from_le_bytes([pv.data[40], pv.data[41], pv.data[42], pv.data[43]]) as u16;
+        if flags & P_RESIZE_INC != 0 {
+            if let (Some(w), Some(h)) = (
+                read_u32_word(&pv.data, off::WIDTH_INC),
+                read_u32_word(&pv.data, off::HEIGHT_INC),
+            ) {
+                hints.width_inc = w as u16;
+                hints.height_inc = h as u16;
+            }
         }
-        // PBaseSize flag (bit 8)
-        if flags & (1 << 8) != 0 && pv.data.len() >= 64 {
-            hints.base_width =
-                u32::from_le_bytes([pv.data[52], pv.data[53], pv.data[54], pv.data[55]]) as u16;
-            hints.base_height =
-                u32::from_le_bytes([pv.data[56], pv.data[57], pv.data[58], pv.data[59]]) as u16;
+        if flags & P_BASE_SIZE != 0 {
+            if let (Some(w), Some(h)) = (
+                read_u32_word(&pv.data, off::BASE_WIDTH),
+                read_u32_word(&pv.data, off::BASE_HEIGHT),
+            ) {
+                hints.base_width = w as u16;
+                hints.base_height = h as u16;
+            }
         }
 
         Some(hints)

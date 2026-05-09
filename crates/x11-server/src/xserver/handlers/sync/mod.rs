@@ -18,7 +18,9 @@ use tracing::{debug, warn};
 
 use super::super::client::ClientState;
 use crate::xserver::event::serialize_event;
-use x11rb_protocol::protocol::sync::{AlarmNotifyEvent, InitializeRequest, Int64, ALARMSTATE};
+use x11rb_protocol::protocol::sync::{
+    AlarmNotifyEvent, InitializeRequest, Int64, ALARMSTATE, TESTTYPE, VALUETYPE,
+};
 
 /// A SYNC counter (system or client-created).
 #[derive(Clone, Debug)]
@@ -159,14 +161,18 @@ fn check_alarms(
 ) {
     let triggered: Vec<u32> = alarms
         .iter()
-        .filter(|(_, a)| a.counter == counter_id && a.state == 0 && a.events)
+        .filter(|(_, a)| {
+            a.counter == counter_id
+                && ALARMSTATE::from(a.state) == ALARMSTATE::ACTIVE
+                && a.events
+        })
         .filter(|(_, a)| {
             let threshold = ((a.value_hi as i64) << 32) | (a.value_lo as i64);
-            match a.test_type {
-                0 => old_value < threshold && new_value >= threshold, // PositiveTransition
-                1 => old_value > threshold && new_value <= threshold, // NegativeTransition
-                2 => new_value >= threshold,                          // PositiveComparison
-                3 => new_value <= threshold,                          // NegativeComparison
+            match TESTTYPE::from(a.test_type) {
+                TESTTYPE::POSITIVE_TRANSITION => old_value < threshold && new_value >= threshold,
+                TESTTYPE::NEGATIVE_TRANSITION => old_value > threshold && new_value <= threshold,
+                TESTTYPE::POSITIVE_COMPARISON => new_value >= threshold,
+                TESTTYPE::NEGATIVE_COMPARISON => new_value <= threshold,
                 _ => false,
             }
         })
@@ -208,7 +214,7 @@ fn check_alarms(
                 alarm.value_lo = new_threshold as u32;
             } else {
                 // No delta = one-shot alarm, deactivate
-                alarm.state = 1; // Inactive
+                alarm.state = ALARMSTATE::INACTIVE.into();
             }
         }
     }
@@ -216,11 +222,13 @@ fn check_alarms(
 
 /// Check if a single await trigger condition is satisfied given the current counter value.
 fn is_trigger_satisfied(trigger: &AwaitTrigger, current_value: i64) -> bool {
-    match trigger.test_type {
-        0 => current_value >= trigger.wait_value, // PositiveTransition
-        1 => current_value <= trigger.wait_value, // NegativeTransition
-        2 => current_value >= trigger.wait_value, // PositiveComparison
-        3 => current_value <= trigger.wait_value, // NegativeComparison
+    match TESTTYPE::from(trigger.test_type) {
+        TESTTYPE::POSITIVE_TRANSITION | TESTTYPE::POSITIVE_COMPARISON => {
+            current_value >= trigger.wait_value
+        }
+        TESTTYPE::NEGATIVE_TRANSITION | TESTTYPE::NEGATIVE_COMPARISON => {
+            current_value <= trigger.wait_value
+        }
         _ => true,
     }
 }

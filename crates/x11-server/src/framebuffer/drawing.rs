@@ -215,7 +215,7 @@ impl Framebuffer {
             let is_last = x == x1 && y == y1;
 
             // NotLast cap: skip the last pixel
-            let skip = cap_style == 0 && is_last && !is_first;
+            let skip = CapStyle::from(cap_style) == CapStyle::NOT_LAST && is_last && !is_first;
 
             // Dash logic
             let draw_fg = if let Some(ref mut ds) = dashes {
@@ -330,7 +330,7 @@ impl Framebuffer {
         let mut is_first = true;
         loop {
             let is_last = x == x1 && y == y1;
-            let skip = cap_style == 0 && is_last && !is_first;
+            let skip = CapStyle::from(cap_style) == CapStyle::NOT_LAST && is_last && !is_first;
             if !skip {
                 let tile_x = ((x - ts_x as i32) % tile_w as i32 + tile_w as i32) as u32 % tile_w;
                 let tile_y = ((y - ts_y as i32) % tile_h as i32 + tile_h as i32) as u32 % tile_h;
@@ -442,7 +442,7 @@ impl Framebuffer {
         if !clip_rects.is_empty() && !point_in_clip_rects(x, y, clip_rects) {
             return;
         }
-        if gc_func == 3 && plane_mask == 0xFFFFFFFF {
+        if skia_eligible(gc_func, plane_mask) {
             self.draw_point(x, y, color);
             return;
         }

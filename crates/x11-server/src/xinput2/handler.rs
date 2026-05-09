@@ -14,6 +14,16 @@ use super::{
     MASTER_KEYBOARD_ID, MASTER_POINTER_ID,
 };
 
+/// XInput's "All Devices" virtual device IDs: 0 (XIAllDevices) and 1
+/// (XIAllMasterDevices) both target the entire master pair.
+const XI_ALL_DEVICES: xi::DeviceId = 0;
+const XI_ALL_MASTER_DEVICES: xi::DeviceId = 1;
+
+#[inline]
+fn is_any_master_id(id: xi::DeviceId) -> bool {
+    id == XI_ALL_DEVICES || id == XI_ALL_MASTER_DEVICES
+}
+
 /// Dispatch a request whose major opcode matches our XInputExtension
 /// registration. Returns the wire-format reply (or `Vec::new()` for
 /// no-reply requests).
@@ -254,54 +264,54 @@ pub fn handle_request(
         xi::XI_ALLOW_EVENTS_REQUEST => {
             if let Ok(req) = xi::XIAllowEventsRequest::try_parse_request(header, body) {
                 let deviceid = req.deviceid;
-                let mode = u8::from(req.event_mode);
-                debug!("XIAllowEvents: device={deviceid} mode={mode}");
+                let mode = req.event_mode;
+                let is_pointer = deviceid == MASTER_POINTER_ID || is_any_master_id(deviceid);
+                let is_keyboard = deviceid == MASTER_KEYBOARD_ID || is_any_master_id(deviceid);
+                debug!("XIAllowEvents: device={deviceid} mode={:?}", mode);
                 match mode {
-                    // AsyncDevice (0): thaw device, deliver frozen, no re-freeze.
-                    0 => {
-                        if deviceid == MASTER_POINTER_ID || deviceid == 0 || deviceid == 1 {
+                    // Thaw device, deliver frozen, no re-freeze.
+                    xi::EventMode::ASYNC_DEVICE => {
+                        if is_pointer {
                             *pointer_frozen = false;
-                            // Frozen events will be delivered at next flush.
                         }
-                        if deviceid == MASTER_KEYBOARD_ID || deviceid == 0 || deviceid == 1 {
+                        if is_keyboard {
                             *keyboard_frozen = false;
                         }
                     }
-                    // SyncDevice (1): thaw device, deliver frozen, re-freeze on next event.
-                    1 => {
-                        if deviceid == MASTER_POINTER_ID || deviceid == 0 || deviceid == 1 {
+                    // Thaw device, deliver frozen, re-freeze on next event.
+                    xi::EventMode::SYNC_DEVICE => {
+                        if is_pointer {
                             *pointer_frozen = false;
-                            // After delivering, the event loop will re-freeze on next event.
                         }
-                        if deviceid == MASTER_KEYBOARD_ID || deviceid == 0 || deviceid == 1 {
+                        if is_keyboard {
                             *keyboard_frozen = false;
                         }
                     }
-                    // ReplayDevice (2): release grab and replay.
-                    2 => {
+                    // Release grab and replay.
+                    xi::EventMode::REPLAY_DEVICE => {
                         active_grabs.remove(&deviceid);
-                        if deviceid == MASTER_POINTER_ID || deviceid == 0 || deviceid == 1 {
+                        if is_pointer {
                             *pointer_frozen = false;
                         }
-                        if deviceid == MASTER_KEYBOARD_ID || deviceid == 0 || deviceid == 1 {
+                        if is_keyboard {
                             *keyboard_frozen = false;
                         }
                     }
-                    // AsyncPairedDevice (3): thaw the paired device.
-                    3 => {
+                    // Thaw the paired device.
+                    xi::EventMode::ASYNC_PAIRED_DEVICE => {
                         if deviceid == MASTER_POINTER_ID {
                             *keyboard_frozen = false;
                         } else if deviceid == MASTER_KEYBOARD_ID {
                             *pointer_frozen = false;
                         }
                     }
-                    // AsyncAll (4): thaw all devices.
-                    4 => {
+                    // Thaw both devices in the master pair.
+                    xi::EventMode::ASYNC_PAIR => {
                         *pointer_frozen = false;
                         *keyboard_frozen = false;
                     }
-                    _ => {
-                        debug!("XIAllowEvents: unknown mode {mode}");
+                    other => {
+                        debug!("XIAllowEvents: unhandled mode {:?}", other);
                     }
                 }
             }
@@ -515,9 +525,9 @@ pub fn handle_request(
         // toolkits (Xt, Motif, GTK2, Tk) that rely on XI 1.x device
         // enumeration and configuration.
 
-        // OpenDevice (3): return actual device classes for the requested
+        // OpenDevice: return actual device classes for the requested
         // device. Pointer gets button+valuator, keyboard gets key class.
-        3 => {
+        xi::OPEN_DEVICE_REQUEST => {
             let device_id = xi::OpenDeviceRequest::try_parse_request(header, body)
                 .map(|r| r.device_id)
                 .unwrap_or(0);
@@ -525,10 +535,10 @@ pub fn handle_request(
             build_open_device_reply(device_id, seq, screen_width, screen_height, msb_first)
         }
 
-        // GetDeviceDontPropagateList (9): return the stored propagation
+        // GetDeviceDontPropagateList: return the stored propagation
         // exclusion mask for the given window. We store these in the
         // xi1_dont_propagate map.
-        9 => {
+        xi::GET_DEVICE_DONT_PROPAGATE_LIST_REQUEST => {
             let window = xi::GetDeviceDontPropagateListRequest::try_parse_request(header, body)
                 .map(|r| r.window)
                 .unwrap_or(0);
@@ -539,7 +549,7 @@ pub fn handle_request(
                 .cloned()
                 .unwrap_or_default();
             let reply = xi::GetDeviceDontPropagateListReply {
-                xi_reply_type: 9,
+                xi_reply_type: xi::GET_DEVICE_DONT_PROPAGATE_LIST_REQUEST,
                 sequence: seq,
                 length: 0,
                 classes,
@@ -547,13 +557,13 @@ pub fn handle_request(
             serialize_xi_reply(&reply, msb_first)
         }
 
-        // GetDeviceMotionEvents (10): return empty event list since we
+        // GetDeviceMotionEvents: return empty event list since we
         // don't maintain motion history for the virtual display. This is
         // spec-compliant — the motion_size in our ValuatorInfo is 0.
-        10 => {
+        xi::GET_DEVICE_MOTION_EVENTS_REQUEST => {
             debug!("XI 1.x GetDeviceMotionEvents: no motion history (virtual display)");
             let reply = xi::GetDeviceMotionEventsReply {
-                xi_reply_type: 10,
+                xi_reply_type: xi::GET_DEVICE_MOTION_EVENTS_REQUEST,
                 sequence: seq,
                 length: 0,
                 num_axes: 0,
@@ -563,11 +573,11 @@ pub fn handle_request(
             serialize_xi_reply(&reply, msb_first)
         }
 
-        // GetDeviceFocus (20): return current focus window and RevertTo.
-        20 => {
+        // GetDeviceFocus: return current focus window and RevertTo.
+        xi::GET_DEVICE_FOCUS_REQUEST => {
             debug!("XI 1.x GetDeviceFocus: focus={:#x}", *focus_window);
             let reply = xi::GetDeviceFocusReply {
-                xi_reply_type: 20,
+                xi_reply_type: xi::GET_DEVICE_FOCUS_REQUEST,
                 sequence: seq,
                 length: 0,
                 focus: *focus_window,
@@ -577,10 +587,9 @@ pub fn handle_request(
             serialize_xi_reply(&reply, msb_first)
         }
 
-        // GetDeviceKeyMapping (24): return the actual keymap for the
-        // keyboard device, matching the core GetKeyboardMapping response.
-        // Format: first_keycode(1) + count(1) + pad(2)
-        24 => {
+        // GetDeviceKeyMapping: return the actual keymap for the keyboard
+        // device, matching the core GetKeyboardMapping response.
+        xi::GET_DEVICE_KEY_MAPPING_REQUEST => {
             let req = xi::GetDeviceKeyMappingRequest::try_parse_request(header, body).ok();
             let first_keycode = req.as_ref().map(|r| r.first_keycode).unwrap_or(8);
             let count = req.as_ref().map(|r| r.count).unwrap_or(0);
@@ -588,19 +597,19 @@ pub fn handle_request(
             build_device_key_mapping_reply(first_keycode, count, seq, msb_first, custom_keymap)
         }
 
-        // GetDeviceModifierMapping (26): return the actual modifier map
+        // GetDeviceModifierMapping: return the actual modifier map
         // matching the core modifier mapping (Shift, Lock, Control, Mod1-5).
-        26 => {
+        xi::GET_DEVICE_MODIFIER_MAPPING_REQUEST => {
             debug!("XI 1.x GetDeviceModifierMapping");
             build_device_modifier_mapping_reply(seq, msb_first)
         }
 
-        // GetDeviceButtonMapping (28): return identity mapping for 7
-        // buttons (3 physical + 4 scroll).
-        28 => {
+        // GetDeviceButtonMapping: return identity mapping for 7 buttons
+        // (3 physical + 4 scroll).
+        xi::GET_DEVICE_BUTTON_MAPPING_REQUEST => {
             debug!("XI 1.x GetDeviceButtonMapping: returning identity");
             let reply = xi::GetDeviceButtonMappingReply {
-                xi_reply_type: 28,
+                xi_reply_type: xi::GET_DEVICE_BUTTON_MAPPING_REQUEST,
                 sequence: seq,
                 length: 0,
                 map: (1..=7).collect(),
@@ -608,8 +617,8 @@ pub fn handle_request(
             serialize_xi_reply(&reply, msb_first)
         }
 
-        // QueryDeviceState (30): return current button/key/valuator state.
-        30 => {
+        // QueryDeviceState: return current button/key/valuator state.
+        xi::QUERY_DEVICE_STATE_REQUEST => {
             let device_id = xi::QueryDeviceStateRequest::try_parse_request(header, body)
                 .map(|r| r.device_id)
                 .unwrap_or(0);
@@ -620,8 +629,8 @@ pub fn handle_request(
         // ---- XI 1.x void requests -----------------------------------------
         // These modify state or are informational — we handle them properly.
 
-        // CloseDevice (4): accept and release any device-specific resources.
-        4 => {
+        // CloseDevice: accept and release any device-specific resources.
+        xi::CLOSE_DEVICE_REQUEST => {
             let device_id = xi::CloseDeviceRequest::try_parse_request(header, body)
                 .map(|r| r.device_id)
                 .unwrap_or(0);
@@ -629,16 +638,16 @@ pub fn handle_request(
             Vec::new()
         }
 
-        // SetDeviceMode (5): accept mode changes. Our virtual devices
-        // support both ABSOLUTE and RELATIVE, but we always report the
-        // valuator state regardless of mode.
-        5 => {
+        // SetDeviceMode: accept mode changes. Our virtual devices support
+        // both ABSOLUTE and RELATIVE, but we always report the valuator
+        // state regardless of mode.
+        xi::SET_DEVICE_MODE_REQUEST => {
             let req = xi::SetDeviceModeRequest::try_parse_request(header, body).ok();
             let device_id = req.as_ref().map(|r| r.device_id).unwrap_or(0);
             let mode = req.map(|r| u8::from(r.mode)).unwrap_or(0);
             debug!("XI 1.x SetDeviceMode: device_id={device_id} mode={mode}");
             let reply = xi::SetDeviceModeReply {
-                xi_reply_type: 5,
+                xi_reply_type: xi::SET_DEVICE_MODE_REQUEST,
                 sequence: seq,
                 length: 0,
                 status: xproto::GrabStatus::SUCCESS,
@@ -646,8 +655,8 @@ pub fn handle_request(
             serialize_xi_reply(&reply, msb_first)
         }
 
-        // SelectExtensionEvent (6): track per-window XI 1.x event masks.
-        6 => {
+        // SelectExtensionEvent: track per-window XI 1.x event masks.
+        xi::SELECT_EXTENSION_EVENT_REQUEST => {
             let window = xi::SelectExtensionEventRequest::try_parse_request(header, body)
                 .map(|r| r.window)
                 .unwrap_or(0);
@@ -655,21 +664,22 @@ pub fn handle_request(
             Vec::new()
         }
 
-        // ChangeDeviceDontPropagateList (8): update the stored masks.
-        8 => {
+        // ChangeDeviceDontPropagateList: update the stored masks.
+        xi::CHANGE_DEVICE_DONT_PROPAGATE_LIST_REQUEST => {
             if let Ok(req) =
                 xi::ChangeDeviceDontPropagateListRequest::try_parse_request(header, body)
             {
                 let window = req.window;
-                let mode = u8::from(req.mode); // 0=Add, 1=Delete
+                let mode = req.mode;
                 debug!(
-                    "XI 1.x ChangeDeviceDontPropagateList: window={window:#x} count={} mode={mode}",
-                    req.classes.len()
+                    "XI 1.x ChangeDeviceDontPropagateList: window={window:#x} count={} mode={:?}",
+                    req.classes.len(),
+                    mode,
                 );
                 let map = xi1_dont_propagate.get_or_insert_with(HashMap::new);
                 let entry = map.entry(window).or_insert_with(Vec::new);
                 for &class in req.classes.iter() {
-                    if mode == 0 {
+                    if mode == xi::PropagateMode::ADD_TO_LIST {
                         if !entry.contains(&class) {
                             entry.push(class);
                         }
@@ -681,8 +691,8 @@ pub fn handle_request(
             Vec::new()
         }
 
-        // SetDeviceFocus (21): update device focus.
-        21 => {
+        // SetDeviceFocus: update device focus.
+        xi::SET_DEVICE_FOCUS_REQUEST => {
             let w = xi::SetDeviceFocusRequest::try_parse_request(header, body)
                 .map(|r| r.focus)
                 .unwrap_or(0);
@@ -691,18 +701,18 @@ pub fn handle_request(
             Vec::new()
         }
 
-        // ChangeDeviceKeyMapping (25): accept key mapping changes.
-        25 => {
+        // ChangeDeviceKeyMapping: accept key mapping changes.
+        xi::CHANGE_DEVICE_KEY_MAPPING_REQUEST => {
             debug!("XI 1.x ChangeDeviceKeyMapping");
             Vec::new()
         }
 
-        // SetDeviceModifierMapping (27): accept modifier changes, reply
+        // SetDeviceModifierMapping: accept modifier changes, reply
         // with status=Success.
-        27 => {
+        xi::SET_DEVICE_MODIFIER_MAPPING_REQUEST => {
             debug!("XI 1.x SetDeviceModifierMapping");
             let reply = xi::SetDeviceModifierMappingReply {
-                xi_reply_type: 27,
+                xi_reply_type: xi::SET_DEVICE_MODIFIER_MAPPING_REQUEST,
                 sequence: seq,
                 length: 0,
                 status: xproto::MappingStatus::SUCCESS,
@@ -710,12 +720,12 @@ pub fn handle_request(
             serialize_xi_reply(&reply, msb_first)
         }
 
-        // SetDeviceButtonMapping (29): accept button mapping, reply with
+        // SetDeviceButtonMapping: accept button mapping, reply with
         // status=Success.
-        29 => {
+        xi::SET_DEVICE_BUTTON_MAPPING_REQUEST => {
             debug!("XI 1.x SetDeviceButtonMapping");
             let reply = xi::SetDeviceButtonMappingReply {
-                xi_reply_type: 29,
+                xi_reply_type: xi::SET_DEVICE_BUTTON_MAPPING_REQUEST,
                 sequence: seq,
                 length: 0,
                 status: xproto::MappingStatus::SUCCESS,

@@ -1,5 +1,32 @@
 use std::collections::HashMap;
 
+/// Named atom IDs from the predefined-atom table below. Add an entry here
+/// before referencing the atom by number anywhere outside `atoms.rs`.
+///
+/// The values are wire-stable: the X11 spec defines IDs 1..68 and EWMH /
+/// ICCCM extensions follow our own assignment from 69 upward. The
+/// `predefined_consts_match_table` test guards every entry against drift.
+pub(crate) mod predef {
+    pub(crate) const NET_WM_WINDOW_TYPE: u32 = 79;
+    pub(crate) const NET_WM_WINDOW_TYPE_NORMAL: u32 = 80;
+    pub(crate) const NET_WM_WINDOW_TYPE_DIALOG: u32 = 81;
+    pub(crate) const NET_WM_WINDOW_TYPE_TOOLBAR: u32 = 82;
+    pub(crate) const NET_WM_WINDOW_TYPE_MENU: u32 = 83;
+    pub(crate) const NET_WM_WINDOW_TYPE_UTILITY: u32 = 84;
+    pub(crate) const NET_WM_WINDOW_TYPE_SPLASH: u32 = 85;
+    pub(crate) const NET_WM_WINDOW_TYPE_DOCK: u32 = 86;
+    pub(crate) const NET_WM_WINDOW_TYPE_DESKTOP: u32 = 87;
+    pub(crate) const NET_WM_WINDOW_TYPE_DROPDOWN_MENU: u32 = 88;
+    pub(crate) const NET_WM_WINDOW_TYPE_POPUP_MENU: u32 = 89;
+    pub(crate) const NET_WM_WINDOW_TYPE_TOOLTIP: u32 = 90;
+    pub(crate) const NET_WM_WINDOW_TYPE_NOTIFICATION: u32 = 91;
+    pub(crate) const NET_WM_STATE: u32 = 92;
+    pub(crate) const NET_WM_STATE_ABOVE: u32 = 102;
+    pub(crate) const NET_WM_STATE_BELOW: u32 = 103;
+    pub(crate) const NET_WM_STRUT: u32 = 129;
+    pub(crate) const NET_WM_STRUT_PARTIAL: u32 = 130;
+}
+
 pub(crate) struct AtomManager {
     atoms: HashMap<String, u32>,
     reverse: HashMap<u32, String>,
@@ -251,6 +278,49 @@ pub(crate) const PREDEFINED_ATOMS: &[(&str, u32)] = &[
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // -----------------------------------------------------------------------
+    // Predef constants must match the wire IDs in PREDEFINED_ATOMS
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn predefined_consts_match_table() {
+        let lookup: HashMap<&str, u32> =
+            PREDEFINED_ATOMS.iter().map(|&(n, i)| (n, i)).collect();
+        let pairs: &[(&str, u32)] = &[
+            ("_NET_WM_WINDOW_TYPE", predef::NET_WM_WINDOW_TYPE),
+            ("_NET_WM_WINDOW_TYPE_NORMAL", predef::NET_WM_WINDOW_TYPE_NORMAL),
+            ("_NET_WM_WINDOW_TYPE_DIALOG", predef::NET_WM_WINDOW_TYPE_DIALOG),
+            ("_NET_WM_WINDOW_TYPE_TOOLBAR", predef::NET_WM_WINDOW_TYPE_TOOLBAR),
+            ("_NET_WM_WINDOW_TYPE_MENU", predef::NET_WM_WINDOW_TYPE_MENU),
+            ("_NET_WM_WINDOW_TYPE_UTILITY", predef::NET_WM_WINDOW_TYPE_UTILITY),
+            ("_NET_WM_WINDOW_TYPE_SPLASH", predef::NET_WM_WINDOW_TYPE_SPLASH),
+            ("_NET_WM_WINDOW_TYPE_DOCK", predef::NET_WM_WINDOW_TYPE_DOCK),
+            ("_NET_WM_WINDOW_TYPE_DESKTOP", predef::NET_WM_WINDOW_TYPE_DESKTOP),
+            (
+                "_NET_WM_WINDOW_TYPE_DROPDOWN_MENU",
+                predef::NET_WM_WINDOW_TYPE_DROPDOWN_MENU,
+            ),
+            ("_NET_WM_WINDOW_TYPE_POPUP_MENU", predef::NET_WM_WINDOW_TYPE_POPUP_MENU),
+            ("_NET_WM_WINDOW_TYPE_TOOLTIP", predef::NET_WM_WINDOW_TYPE_TOOLTIP),
+            (
+                "_NET_WM_WINDOW_TYPE_NOTIFICATION",
+                predef::NET_WM_WINDOW_TYPE_NOTIFICATION,
+            ),
+            ("_NET_WM_STATE", predef::NET_WM_STATE),
+            ("_NET_WM_STATE_ABOVE", predef::NET_WM_STATE_ABOVE),
+            ("_NET_WM_STATE_BELOW", predef::NET_WM_STATE_BELOW),
+            ("_NET_WM_STRUT", predef::NET_WM_STRUT),
+            ("_NET_WM_STRUT_PARTIAL", predef::NET_WM_STRUT_PARTIAL),
+        ];
+        for &(name, value) in pairs {
+            assert_eq!(
+                lookup.get(name).copied(),
+                Some(value),
+                "predef::{name} must equal PREDEFINED_ATOMS entry",
+            );
+        }
+    }
 
     // -----------------------------------------------------------------------
     // Basic intern / lookup

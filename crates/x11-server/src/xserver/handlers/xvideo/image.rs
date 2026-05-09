@@ -77,12 +77,30 @@ fn yuv_to_rgb_bt709(y: u8, u: u8, v: u8) -> (u8, u8, u8) {
 /// Type alias for YUV→RGB conversion function pointer.
 type YuvToRgb = fn(u8, u8, u8) -> (u8, u8, u8);
 
+/// XVideo `XV_COLORSPACE` port-attribute values.
+#[repr(i32)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum XvColorspace {
+    /// ITU-R BT.601 (SDTV — default).
+    Bt601 = 0,
+    /// ITU-R BT.709 (HDTV).
+    Bt709 = 1,
+}
+
+impl From<i32> for XvColorspace {
+    fn from(value: i32) -> Self {
+        match value {
+            1 => XvColorspace::Bt709,
+            _ => XvColorspace::Bt601,
+        }
+    }
+}
+
 /// Select the conversion function based on colorspace.
 fn select_converter(colorspace: i32) -> YuvToRgb {
-    if colorspace == 1 {
-        yuv_to_rgb_bt709
-    } else {
-        yuv_to_rgb_bt601
+    match XvColorspace::from(colorspace) {
+        XvColorspace::Bt709 => yuv_to_rgb_bt709,
+        XvColorspace::Bt601 => yuv_to_rgb_bt601,
     }
 }
 

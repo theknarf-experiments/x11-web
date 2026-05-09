@@ -7,7 +7,8 @@ use super::super::super::client::ClientState;
 use super::SyncAlarm;
 use crate::xserver::reply::ReplyBuf;
 use x11rb_protocol::protocol::sync::{
-    ChangeAlarmRequest, CreateAlarmRequest, DestroyAlarmRequest, QueryAlarmRequest,
+    ChangeAlarmRequest, CreateAlarmRequest, DestroyAlarmRequest, QueryAlarmRequest, ALARMSTATE,
+    TESTTYPE, VALUETYPE,
 };
 
 /// Minor opcode 8: CreateAlarm
@@ -18,14 +19,20 @@ pub(crate) fn create_alarm(state: &mut ClientState, data: &[u8], seq: u16) -> Ve
 
     let alarm = SyncAlarm {
         counter: vl.counter.unwrap_or(0),
-        value_type: vl.value_type.map(|v| u32::from(v) as u8).unwrap_or(0), // Absolute
+        value_type: vl
+            .value_type
+            .map(|v| u32::from(v) as u8)
+            .unwrap_or_else(|| u32::from(VALUETYPE::ABSOLUTE) as u8),
         value_hi: vl.value.map(|v| v.hi).unwrap_or(0),
         value_lo: vl.value.map(|v| v.lo).unwrap_or(0),
-        test_type: vl.test_type.map(|v| u32::from(v) as u8).unwrap_or(0), // PositiveTransition
+        test_type: vl
+            .test_type
+            .map(|v| u32::from(v) as u8)
+            .unwrap_or_else(|| u32::from(TESTTYPE::POSITIVE_TRANSITION) as u8),
         delta_hi: vl.delta.map(|v| v.hi).unwrap_or(0),
         delta_lo: vl.delta.map(|v| v.lo).unwrap_or(1), // Default delta = 1
         events: vl.events.map(|v| v != 0).unwrap_or(true),
-        state: 0, // Active
+        state: ALARMSTATE::ACTIVE.into(),
     };
 
     debug!(
@@ -65,8 +72,8 @@ pub(crate) fn change_alarm(state: &mut ClientState, data: &[u8], seq: u16) -> Ve
             alarm.events = ev != 0;
         }
         // Re-activate if it was inactive
-        if alarm.state == 1 {
-            alarm.state = 0;
+        if ALARMSTATE::from(alarm.state) == ALARMSTATE::INACTIVE {
+            alarm.state = ALARMSTATE::ACTIVE.into();
         }
         debug!("SYNC ChangeAlarm: id={alarm_id:#x}");
     }
