@@ -529,7 +529,7 @@ test.skip("keyboard input follows canvas focus between windows", async ({
 	});
 });
 
-test.skip("xeyes pupils follow the cursor", async ({ page, frontendUrl }) => {
+test("xeyes pupils follow the cursor", async ({ page, frontendUrl }) => {
 	await page.goto(frontendUrl);
 	await waitForDock(page);
 
