@@ -156,7 +156,7 @@ echo EXIT_CODE=$?`,
 		// Firefox --screenshot mode doesn't require rendering but tests X11 init
 	});
 
-	test.skip("glxinfo works with indirect rendering", async ({
+	test("glxinfo works with indirect rendering", async ({
 		sidecarContainer,
 	}) => {
 		const output = await execInSidecar(
@@ -169,7 +169,7 @@ echo EXIT_CODE=$?`,
 		expect(output).not.toContain("Segmentation fault");
 	});
 
-	test.skip("GLX context creation and MakeCurrent (GLX 1.0 + 1.3)", async ({
+	test("GLX context creation and MakeCurrent (GLX 1.0 + 1.3)", async ({
 		sidecarContainer,
 	}) => {
 		test.setTimeout(60_000);
@@ -317,8 +317,11 @@ echo EXIT_CODE=$?`,
 		expect(output).not.toContain("[xcb] Extra reply data");
 	});
 
-	// Firefox crashes at XVisualIDFromVisual (NULL visual pointer).
-	// Root cause under investigation — see test above.
+	// Firefox crashes at XVisualIDFromVisual (NULL visual pointer) inside
+	// gdk_x11_window_foreign_new_for_display — GDK passes NULL to Xlib because
+	// our visual lookup for foreign windows returns nothing GTK can use. The
+	// simpler "Xlib finds root visual in setup" test above already passes, so
+	// this is a more nuanced GDK-specific path; tracked separately.
 	test.skip("Firefox ESR starts without crash (non-headless)", async ({
 		sidecarContainer,
 	}) => {
@@ -371,7 +374,7 @@ echo WISH_DONE`,
 });
 
 test.describe.serial("Edge case protocol compliance", () => {
-	test.skip("zero-size window creation is rejected (BadValue)", async ({
+	test("zero-size window creation is rejected (BadValue)", async ({
 		sidecarContainer,
 	}) => {
 		const output = (await runPythonScript(sidecarContainer, "zero_size_window_creation_is_rejected_badvalue.py", { env: { DISPLAY: ":99" } })).output.trim();
@@ -394,7 +397,7 @@ test.describe.serial("Edge case protocol compliance", () => {
 		expect(output).toContain("found_after_intern=True");
 	});
 
-	test.skip("GetProperty with delete=True removes property", async ({
+	test("GetProperty with delete=True removes property", async ({
 		sidecarContainer,
 	}) => {
 		const output = (await runPythonScript(sidecarContainer, "getproperty_with_delete_true_removes_property.py", { env: { DISPLAY: ":99" } })).output.trim();
@@ -409,7 +412,7 @@ test.describe.serial("Edge case protocol compliance", () => {
 		expect(output).toContain("synthetic_event_delivered=True");
 	});
 
-	test.skip("CopyArea between pixmap and window", async ({
+	test("CopyArea between pixmap and window", async ({
 		sidecarContainer,
 	}) => {
 		const output = (await runPythonScript(sidecarContainer, "copyarea_between_pixmap_and_window.py", { env: { DISPLAY: ":99" } })).output.trim();
@@ -445,14 +448,14 @@ test.describe.serial("Edge case protocol compliance", () => {
 		expect(output).toContain("unmap_notify=True");
 	});
 
-	test.skip("InputOnly window rejects drawing operations", async ({
+	test("InputOnly window rejects drawing operations", async ({
 		sidecarContainer,
 	}) => {
 		const output = (await runPythonScript(sidecarContainer, "inputonly_window_rejects_drawing_operations.py", { env: { DISPLAY: ":99" } })).output.trim();
 		expect(output).toContain("gc_create=BadMatch");
 	});
 
-	test.skip("Override-redirect window bypasses WM intervention", async ({
+	test("Override-redirect window bypasses WM intervention", async ({
 		sidecarContainer,
 	}) => {
 		const output = (await runPythonScript(sidecarContainer, "override_redirect_window_bypasses_wm_intervention.py", { env: { DISPLAY: ":99" } })).output.trim();
@@ -460,7 +463,7 @@ test.describe.serial("Edge case protocol compliance", () => {
 		expect(output).toContain("immediately_viewable=True");
 	});
 
-	test.skip("INCR selection transfer for large data", async ({
+	test("INCR selection transfer for large data", async ({
 		sidecarContainer,
 	}) => {
 		test.setTimeout(30_000);
@@ -509,12 +512,14 @@ test.describe.serial("Edge case protocol compliance", () => {
 		expect(output.split("\n").length).toBeGreaterThan(1);
 	});
 
-	test.skip("xlsatoms returns predefined atoms", async ({
+	test("xlsatoms returns predefined atoms", async ({
 		sidecarContainer,
 	}) => {
 		const output = await execInSidecar(
 			sidecarContainer,
-			"xlsatoms 2>&1 | head -30",
+			// STRING is predefined atom #31 — keep the head margin generous so
+			// the assertion below sees it.
+			"xlsatoms 2>&1 | head -40",
 		);
 		// Should include standard predefined atoms
 		expect(output).toContain("PRIMARY");
@@ -798,7 +803,7 @@ test.describe.serial("ConfigureWindow stack_mode validation", () => {
 });
 
 test.describe.serial("RotateProperties edge cases", () => {
-	test.skip("RotateProperties with duplicate atoms returns BadMatch", async ({
+	test("RotateProperties with duplicate atoms returns BadMatch", async ({
 		sidecarContainer,
 	}) => {
 		const output = (await runPythonScript(sidecarContainer, "rotateproperties_with_duplicate_atoms_returns_badmatch.py", { env: { DISPLAY: ":99" } })).output.trim();

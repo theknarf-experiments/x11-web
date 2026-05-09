@@ -3,7 +3,7 @@
 use super::*;
 use x11rb_protocol::protocol::xproto::{
     ChangeGCRequest, CopyGCRequest, CreateGCAux, CreateGCRequest, FreeGCRequest,
-    SetClipRectanglesRequest, SetDashesRequest, GC,
+    SetClipRectanglesRequest, SetDashesRequest, WindowClass, GC,
 };
 
 /// Apply parsed GC value-list fields to a `GcState`.
@@ -102,6 +102,16 @@ pub(crate) fn handle_create_gc(state: &mut ClientState, req: &CreateGCRequest) -
     // It must be a valid window or pixmap.
     if !state.windows.contains_key(&drawable) && !state.pixmaps.contains_key(&drawable) {
         return build_error(DRAWABLE_ERROR, state.sequence, drawable, 55, 0);
+    }
+
+    // Per X11 spec: CreateGC on an InputOnly window generates BadMatch
+    // because InputOnly windows have no drawable surface.
+    if state
+        .windows
+        .get(&drawable)
+        .is_some_and(|w| w.class == u16::from(WindowClass::INPUT_ONLY))
+    {
+        return build_error(MATCH_ERROR, state.sequence, drawable, 55, 0);
     }
 
     // Validate: ID must not already be in use

@@ -497,6 +497,11 @@ pub(crate) fn handle_get_property(state: &mut ClientState, req: &GetPropertyRequ
             if let Some(win) = state.windows.get_mut(&window) {
                 win.properties.remove(&property_atom);
             }
+            if let Ok(mut shared) = state.shared_windows.lock() {
+                if let Some(sw) = shared.get_mut(&window) {
+                    sw.properties.remove(&property_atom);
+                }
+            }
 
             // Generate PropertyNotify(Deleted) per spec
             if state.window_selects(window, EventMask::PROPERTY_CHANGE) {

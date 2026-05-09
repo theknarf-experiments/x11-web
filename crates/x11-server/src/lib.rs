@@ -44,3 +44,17 @@ mod xserver;
 
 pub use menus::MenuTracker;
 pub use xserver::{TaggedDisplayUpdate, WindowRouter, X11Server};
+
+/// Attempt to load OSMesa for software OpenGL rendering. Returns `true` if
+/// libOSMesa was found and the GL function pointers were resolved. Embedders
+/// should call this once at startup before any client connects; absent this
+/// call, GLX queries fall back to empty/stub replies.
+#[cfg(feature = "osmesa")]
+pub fn init_osmesa() -> bool {
+    osmesa::init()
+}
+
+#[cfg(not(feature = "osmesa"))]
+pub fn init_osmesa() -> bool {
+    false
+}

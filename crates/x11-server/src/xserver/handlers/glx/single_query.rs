@@ -133,9 +133,14 @@ pub(crate) fn handle_get_string(payload: &[u8], seq: u16) -> Vec<u8> {
             String::new()
         }
     };
-    let bytes = s.as_bytes();
+    // Mesa's indirect glGetString allocates exactly `reply.size` bytes and
+    // does not append a null terminator — the Xorg convention is that the
+    // server includes the trailing '\0' in both the data and the count, so
+    // the client receives a properly terminated C string.
+    let mut bytes = s.into_bytes();
+    bytes.push(0);
     let n = bytes.len() as u32;
-    GlxReply::from_bytes(n, bytes.to_vec()).encode(seq)
+    GlxReply::from_bytes(n, bytes).encode(seq)
 }
 
 // ---------------------------------------------------------------------------

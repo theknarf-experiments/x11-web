@@ -206,14 +206,13 @@ async fn start_dbus_session() -> Option<DbusSession> {
 async fn main() {
     let telemetry = telemetry::init();
 
-    // Attempt to load OSMesa for GLX software rendering
-    #[cfg(feature = "osmesa")]
-    {
-        if osmesa::init() {
-            info!("OSMesa software OpenGL rendering available");
-        } else {
-            warn!("OSMesa not available — GLX will return stub responses");
-        }
+    // Attempt to load OSMesa for GLX software rendering. The x11-server
+    // crate owns the actual FFI; we just kick off the load here so the
+    // function pointers are ready before any client connects.
+    if x11_web_x11_server::init_osmesa() {
+        info!("OSMesa software OpenGL rendering available");
+    } else {
+        warn!("OSMesa not available — GLX will return stub responses");
     }
 
     // Install rustls's default crypto provider — quinn's TLS

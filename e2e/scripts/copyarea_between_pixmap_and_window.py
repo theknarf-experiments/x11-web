@@ -17,8 +17,10 @@ d.sync()
 w.copy_area(gc, pm, 0, 0, 100, 100, 0, 0)
 d.sync()
 
-# GetImage from window to verify
-img = w.get_image(10, 10, 1, 1, 0xFFFFFFFF, Xlib.X.ZPixmap)
+# GetImage from window to verify. python-xlib's signature is
+# (x, y, width, height, format, plane_mask) — note format and plane_mask
+# come in that order, opposite of the X11 wire-level GetImage request.
+img = w.get_image(10, 10, 1, 1, Xlib.X.ZPixmap, 0xFFFFFFFF)
 data = bytes(img.data)
 if len(data) >= 4:
     import struct
