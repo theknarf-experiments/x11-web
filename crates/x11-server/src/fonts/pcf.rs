@@ -27,34 +27,26 @@ const PCF_GLYPH_PAD_MASK: u32 = 3; // 2 bits for glyph padding
 const COMPRESSED_METRIC_BIAS: i16 = 0x80;
 
 fn pcf_read_u32(data: &[u8], offset: usize, msb: bool) -> u32 {
-    if offset + 4 > data.len() {
+    let Some(slice) = data.get(offset..offset + 4) else {
         return 0;
-    }
+    };
+    let bytes: [u8; 4] = slice.try_into().unwrap();
     if msb {
-        u32::from_be_bytes([
-            data[offset],
-            data[offset + 1],
-            data[offset + 2],
-            data[offset + 3],
-        ])
+        u32::from_be_bytes(bytes)
     } else {
-        u32::from_le_bytes([
-            data[offset],
-            data[offset + 1],
-            data[offset + 2],
-            data[offset + 3],
-        ])
+        u32::from_le_bytes(bytes)
     }
 }
 
 fn pcf_read_u16(data: &[u8], offset: usize, msb: bool) -> u16 {
-    if offset + 2 > data.len() {
+    let Some(slice) = data.get(offset..offset + 2) else {
         return 0;
-    }
+    };
+    let bytes: [u8; 2] = slice.try_into().unwrap();
     if msb {
-        u16::from_be_bytes([data[offset], data[offset + 1]])
+        u16::from_be_bytes(bytes)
     } else {
-        u16::from_le_bytes([data[offset], data[offset + 1]])
+        u16::from_le_bytes(bytes)
     }
 }
 
@@ -64,6 +56,64 @@ fn pcf_read_i16(data: &[u8], offset: usize, msb: bool) -> i16 {
 
 fn pcf_read_i32(data: &[u8], offset: usize, msb: bool) -> i32 {
     pcf_read_u32(data, offset, msb) as i32
+}
+
+/// Stateful cursor over a PCF table body. Tracks `pos` so callers don't
+/// have to bookkeep `pos += 4` after every field read; they just call
+/// `read_u32()` / `read_u16()` / `skip(n)` and the cursor advances.
+///
+/// All reads return `0` (or the zero-byte) on out-of-bounds access — the
+/// older free-function helpers had the same behaviour and several PCF
+/// parsers rely on it for graceful handling of truncated tables.
+struct PcfReader<'a> {
+    data: &'a [u8],
+    pos: usize,
+    msb: bool,
+}
+
+impl<'a> PcfReader<'a> {
+    fn new(data: &'a [u8], pos: usize, msb: bool) -> Self {
+        Self { data, pos, msb }
+    }
+
+    fn read_u32(&mut self) -> u32 {
+        let v = pcf_read_u32(self.data, self.pos, self.msb);
+        self.pos += 4;
+        v
+    }
+
+    fn read_u16(&mut self) -> u16 {
+        let v = pcf_read_u16(self.data, self.pos, self.msb);
+        self.pos += 2;
+        v
+    }
+
+    fn read_i16(&mut self) -> i16 {
+        self.read_u16() as i16
+    }
+
+    fn read_u8(&mut self) -> u8 {
+        let v = self.data.get(self.pos).copied().unwrap_or(0);
+        self.pos += 1;
+        v
+    }
+
+    /// Read a single byte interpreted as `i16 - COMPRESSED_METRIC_BIAS`.
+    fn read_compressed_metric(&mut self) -> i16 {
+        self.read_u8() as i16 - COMPRESSED_METRIC_BIAS
+    }
+
+    fn skip(&mut self, n: usize) {
+        self.pos += n;
+    }
+
+    fn pos(&self) -> usize {
+        self.pos
+    }
+
+    fn remaining(&self) -> usize {
+        self.data.len().saturating_sub(self.pos)
+    }
 }
 
 struct PcfTable {
@@ -102,34 +152,16 @@ pub(super) fn parse_pcf_data(data: &[u8], path: &Path) -> Option<BitmapFont> {
         return None;
     }
 
+    // The table-of-contents header is always little-endian regardless of
+    // any per-table format flag.
+    let mut r = PcfReader::new(data, 8, false);
     let mut tables = Vec::with_capacity(table_count);
-    for i in 0..table_count {
-        let off = 8 + i * 16;
+    for _ in 0..table_count {
         tables.push(PcfTable {
-            table_type: u32::from_le_bytes([
-                data[off],
-                data[off + 1],
-                data[off + 2],
-                data[off + 3],
-            ]),
-            format: u32::from_le_bytes([
-                data[off + 4],
-                data[off + 5],
-                data[off + 6],
-                data[off + 7],
-            ]),
-            size: u32::from_le_bytes([
-                data[off + 8],
-                data[off + 9],
-                data[off + 10],
-                data[off + 11],
-            ]),
-            offset: u32::from_le_bytes([
-                data[off + 12],
-                data[off + 13],
-                data[off + 14],
-                data[off + 15],
-            ]),
+            table_type: r.read_u32(),
+            format: r.read_u32(),
+            size: r.read_u32(),
+            offset: r.read_u32(),
         });
     }
 
@@ -285,44 +317,40 @@ fn parse_pcf_metrics(data: &[u8], table: &PcfTable) -> Option<Vec<PcfMetric>> {
     let msb = format & PCF_BYTE_MASK != 0;
     let compressed = format & PCF_COMPRESSED_METRICS != 0;
 
-    let mut pos = off + 4;
+    let mut r = PcfReader::new(data, off + 4, msb);
     let mut metrics = Vec::new();
 
     if compressed {
-        // Compressed: 2-byte count, then 5 bytes per metric
-        let count = pcf_read_u16(data, pos, msb) as usize;
-        pos += 2;
+        // Compressed: 2-byte count, then 5 bytes per metric.
+        let count = r.read_u16() as usize;
         for _ in 0..count {
-            if pos + 5 > data.len() {
+            if r.remaining() < 5 {
                 break;
             }
             metrics.push(PcfMetric {
-                left_side_bearing: data[pos] as i16 - COMPRESSED_METRIC_BIAS,
-                right_side_bearing: data[pos + 1] as i16 - COMPRESSED_METRIC_BIAS,
-                character_width: data[pos + 2] as i16 - COMPRESSED_METRIC_BIAS,
-                ascent: data[pos + 3] as i16 - COMPRESSED_METRIC_BIAS,
-                descent: data[pos + 4] as i16 - COMPRESSED_METRIC_BIAS,
+                left_side_bearing: r.read_compressed_metric(),
+                right_side_bearing: r.read_compressed_metric(),
+                character_width: r.read_compressed_metric(),
+                ascent: r.read_compressed_metric(),
+                descent: r.read_compressed_metric(),
                 attributes: 0,
             });
-            pos += 5;
         }
     } else {
-        // Uncompressed: 4-byte count, then 12 bytes per metric
-        let count = pcf_read_u32(data, pos, msb) as usize;
-        pos += 4;
+        // Uncompressed: 4-byte count, then 12 bytes per metric.
+        let count = r.read_u32() as usize;
         for _ in 0..count {
-            if pos + 12 > data.len() {
+            if r.remaining() < 12 {
                 break;
             }
             metrics.push(PcfMetric {
-                left_side_bearing: pcf_read_i16(data, pos, msb),
-                right_side_bearing: pcf_read_i16(data, pos + 2, msb),
-                character_width: pcf_read_i16(data, pos + 4, msb),
-                ascent: pcf_read_i16(data, pos + 6, msb),
-                descent: pcf_read_i16(data, pos + 8, msb),
-                attributes: pcf_read_u16(data, pos + 10, msb),
+                left_side_bearing: r.read_i16(),
+                right_side_bearing: r.read_i16(),
+                character_width: r.read_i16(),
+                ascent: r.read_i16(),
+                descent: r.read_i16(),
+                attributes: r.read_u16(),
             });
-            pos += 12;
         }
     }
 
@@ -344,33 +372,26 @@ fn parse_pcf_bitmaps(
     let msb_bits = format & PCF_BIT_MASK != 0;
     let glyph_pad = 1usize << (format & PCF_GLYPH_PAD_MASK);
 
-    let mut pos = off + 4;
+    let mut r = PcfReader::new(data, off + 4, msb);
 
-    // Glyph count
-    let count = pcf_read_u32(data, pos, msb) as usize;
-    pos += 4;
-
+    let count = r.read_u32() as usize;
     if count != glyph_count || count > 100_000 {
-        // Mismatch - try to proceed anyway
+        // Mismatch — try to proceed anyway.
     }
 
-    // Offsets into bitmap data (one per glyph)
+    // Offsets into bitmap data (one per glyph).
     let mut offsets = Vec::with_capacity(count);
     for _ in 0..count {
-        offsets.push(pcf_read_u32(data, pos, msb) as usize);
-        pos += 4;
+        offsets.push(r.read_u32() as usize);
     }
 
-    // 4 bitmap sizes (for different padding)
-    let _sizes: [u32; 4] = [
-        pcf_read_u32(data, pos, msb),
-        pcf_read_u32(data, pos + 4, msb),
-        pcf_read_u32(data, pos + 8, msb),
-        pcf_read_u32(data, pos + 12, msb),
-    ];
-    pos += 16;
+    // 4 bitmap sizes (for different padding) — values are unused; we read
+    // them only to advance past the table.
+    for _ in 0..4 {
+        let _ = r.read_u32();
+    }
 
-    let bitmap_data_start = pos;
+    let bitmap_data_start = r.pos();
 
     // Extract bitmaps, repacking from PCF's native row padding to 1-byte padding.
     // PCF stores each row padded to `glyph_pad` bytes (1, 2, or 4).
@@ -429,23 +450,22 @@ fn parse_pcf_encodings(data: &[u8], table: &PcfTable) -> Option<(u16, u16, HashM
     let format = pcf_read_u32(data, off, false);
     let msb = format & PCF_BYTE_MASK != 0;
 
-    let min_byte2 = pcf_read_u16(data, off + 4, msb);
-    let max_byte2 = pcf_read_u16(data, off + 6, msb);
-    let min_byte1 = pcf_read_u16(data, off + 8, msb);
-    let max_byte1 = pcf_read_u16(data, off + 10, msb);
-    let _default_char = pcf_read_u16(data, off + 12, msb);
+    let mut r = PcfReader::new(data, off + 4, msb);
+    let min_byte2 = r.read_u16();
+    let max_byte2 = r.read_u16();
+    let min_byte1 = r.read_u16();
+    let max_byte1 = r.read_u16();
+    let _default_char = r.read_u16();
 
-    let mut pos = off + 14;
     let mut encoding_map = HashMap::new();
 
-    // For single-byte fonts, min_byte1 == max_byte1 == 0
+    // For single-byte fonts, min_byte1 == max_byte1 == 0.
     for b1 in min_byte1..=max_byte1 {
         for b2 in min_byte2..=max_byte2 {
-            if pos + 2 > data.len() {
+            if r.remaining() < 2 {
                 break;
             }
-            let glyph_idx = pcf_read_u16(data, pos, msb);
-            pos += 2;
+            let glyph_idx = r.read_u16();
             if glyph_idx != 0xFFFF {
                 let encoding = if min_byte1 == 0 && max_byte1 == 0 {
                     b2
@@ -480,10 +500,17 @@ fn parse_pcf_properties_font_name(data: &[u8], table: &PcfTable) -> Option<Strin
         return None;
     }
 
+    /// Wire size of a single PCF property record:
+    /// `name_offset(4) + is_string(1) + value(4)`.
+    const PROPERTY_ENTRY_BYTES: usize = 9;
+    /// Byte offset within a property entry of the `is_string` flag.
+    const PROP_IS_STRING_OFFSET: usize = 4;
+    /// Byte offset within a property entry of the `value` field.
+    const PROP_VALUE_OFFSET: usize = 5;
+
     let props_start = off + 8;
-    // Each property: name_offset(4), is_string(1), value(4) = 9 bytes
-    let strings_start = props_start + num_props * 9;
-    // Align to 4 bytes
+    let strings_start = props_start + num_props * PROPERTY_ENTRY_BYTES;
+    // Align to 4 bytes.
     let strings_start = crate::xserver::core::align_to_4(strings_start);
 
     if strings_start + 4 > data.len() {
@@ -498,15 +525,15 @@ fn parse_pcf_properties_font_name(data: &[u8], table: &PcfTable) -> Option<Strin
 
     let strings = &data[string_data_start..string_data_start + string_size];
 
-    // Look for FONT property
+    // Look for FONT property.
     for i in 0..num_props {
-        let poff = props_start + i * 9;
-        if poff + 9 > data.len() {
+        let poff = props_start + i * PROPERTY_ENTRY_BYTES;
+        if poff + PROPERTY_ENTRY_BYTES > data.len() {
             break;
         }
         let name_offset = pcf_read_u32(data, poff, msb) as usize;
-        let is_string = data[poff + 4];
-        let value = pcf_read_u32(data, poff + 5, msb);
+        let is_string = data[poff + PROP_IS_STRING_OFFSET];
+        let value = pcf_read_u32(data, poff + PROP_VALUE_OFFSET, msb);
 
         if name_offset < strings.len() {
             let name_end = strings[name_offset..]
@@ -533,27 +560,34 @@ fn parse_pcf_properties_font_name(data: &[u8], table: &PcfTable) -> Option<Strin
     None
 }
 
+/// Field offsets within a PCF accelerator-table body (after the 4-byte
+/// format header). See PCF spec for the full record layout: format(4),
+/// noOverlap(1), constantMetrics(1), terminalFont(1), constantWidth(1),
+/// inkInside(1), inkMetrics(1), drawDirection(1), padding(1),
+/// fontAscent(4), fontDescent(4), maxOverlap(4), minbounds(12),
+/// maxbounds(12), then optionally ink_minbounds(12) + ink_maxbounds(12).
+mod accel_offsets {
+    pub(super) const FONT_ASCENT: usize = 12;
+    pub(super) const FONT_DESCENT: usize = 16;
+}
+
 fn parse_pcf_accelerators(data: &[u8], table: &PcfTable) -> (i16, i16) {
+    /// Sensible fallback ascent / descent when the table is unreadable.
+    const FALLBACK_ASCENT_DESCENT: (i16, i16) = (10, 3);
+
     let off = table.offset as usize;
     if off + 4 > data.len() {
-        return (10, 3);
+        return FALLBACK_ASCENT_DESCENT;
     }
     let format = pcf_read_u32(data, off, false);
     let msb = format & PCF_BYTE_MASK != 0;
     let _has_ink = format & PCF_ACCEL_W_INKBOUNDS != 0;
 
-    // Layout: format(4), noOverlap(1), constantMetrics(1),
-    //         terminalFont(1), constantWidth(1), inkInside(1),
-    //         inkMetrics(1), drawDirection(1), padding(1),
-    //         fontAscent(4), fontDescent(4), maxOverlap(4),
-    //         then minbounds(12) and maxbounds(12)
-    //         then optionally ink_minbounds(12) and ink_maxbounds(12)
-
-    let ascent_off = off + 12;
-    let descent_off = off + 16;
+    let ascent_off = off + accel_offsets::FONT_ASCENT;
+    let descent_off = off + accel_offsets::FONT_DESCENT;
 
     if descent_off + 4 > data.len() {
-        return (10, 3);
+        return FALLBACK_ASCENT_DESCENT;
     }
 
     let font_ascent = pcf_read_i32(data, ascent_off, msb) as i16;
