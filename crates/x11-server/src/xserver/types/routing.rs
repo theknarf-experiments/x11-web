@@ -28,6 +28,11 @@ pub(crate) type ServerGrabLock = Arc<(Mutex<Option<String>>, tokio::sync::Notify
 /// All connections share a single window namespace, as required by X11.
 pub(crate) type SharedWindows = Arc<Mutex<HashMap<u32, super::WindowState>>>;
 
+/// Shared keyboard map: keycode → list of keysyms set by
+/// `ChangeKeyboardMapping`. The keymap is server-wide per the X11
+/// spec, so all connections see the same value.
+pub(crate) type SharedKeymap = Arc<Mutex<HashMap<u8, Vec<u32>>>>;
+
 /// Message sent to a specific X11 connection via the window router.
 pub(crate) enum WindowMessage {
     Input(InputEvent),

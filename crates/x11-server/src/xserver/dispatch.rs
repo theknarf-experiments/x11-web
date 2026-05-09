@@ -77,6 +77,7 @@ fn dispatch_extension(state: &mut ClientState, data: &[u8], seq: u16, id: Extens
         // -- ext-input --------------------------------------------------------
         #[cfg(feature = "ext-input")]
         ExtensionId::XInput => {
+            let custom_keymap = state.custom_keymap.lock().unwrap().clone();
             let mut reply = crate::xinput2::handle_request(
                 data,
                 seq,
@@ -97,7 +98,7 @@ fn dispatch_extension(state: &mut ClientState, data: &[u8], seq: u16, id: Extens
                 SCREEN_HEIGHT,
                 state.root_window,
                 state.msb_first,
-                &state.custom_keymap,
+                &custom_keymap,
             );
             if data.len() >= 2
                 && data[1] == x11rb_protocol::protocol::xinput::XI_QUERY_POINTER_REQUEST

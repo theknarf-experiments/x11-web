@@ -442,12 +442,15 @@ pub(crate) fn handle_change_keyboard_mapping(
     }
 
     // Store the new keycode->keysym mappings from the parsed keysyms list
-    for i in 0..keycode_count {
-        let keycode = first_keycode.wrapping_add(i as u8);
-        let start = i * keysyms_per_keycode;
-        let end = start + keysyms_per_keycode;
-        let syms: Vec<u32> = req.keysyms[start..end].to_vec();
-        state.custom_keymap.insert(keycode, syms);
+    {
+        let mut keymap = state.custom_keymap.lock().unwrap();
+        for i in 0..keycode_count {
+            let keycode = first_keycode.wrapping_add(i as u8);
+            let start = i * keysyms_per_keycode;
+            let end = start + keysyms_per_keycode;
+            let syms: Vec<u32> = req.keysyms[start..end].to_vec();
+            keymap.insert(keycode, syms);
+        }
     }
 
     debug!(
@@ -487,13 +490,9 @@ pub(crate) fn handle_get_keyboard_mapping(
     let first_keycode = req.first_keycode;
     let count = req.count;
 
+    let custom_keymap = state.custom_keymap.lock().unwrap();
     // Determine keysyms_per_keycode: use max from custom mappings or default 4
-    let max_custom = state
-        .custom_keymap
-        .values()
-        .map(|v| v.len())
-        .max()
-        .unwrap_or(0);
+    let max_custom = custom_keymap.values().map(|v| v.len()).max().unwrap_or(0);
     let keysyms_per_keycode = max_custom.max(4) as u8;
     let total_syms = count as u32 * keysyms_per_keycode as u32;
     let extra_bytes = total_syms as usize * 4;
@@ -505,7 +504,7 @@ pub(crate) fn handle_get_keyboard_mapping(
         let keycode = first_keycode.wrapping_add(i as u8);
         let offset = 32 + i * keysyms_per_keycode as usize * 4;
 
-        if let Some(custom_syms) = state.custom_keymap.get(&keycode) {
+        if let Some(custom_syms) = custom_keymap.get(&keycode) {
             // Use the custom mapping set by ChangeKeyboardMapping
             for (j, &sym) in custom_syms.iter().enumerate() {
                 if j < keysyms_per_keycode as usize {

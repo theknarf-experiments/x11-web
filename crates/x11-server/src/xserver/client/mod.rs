@@ -163,7 +163,9 @@ pub(crate) struct ClientState {
     pub(crate) bit_gravity: HashMap<u32, u8>,
     /// Custom keycode→keysym mapping (ChangeKeyboardMapping).
     /// Key = keycode, value = list of keysyms for that keycode.
-    pub(crate) custom_keymap: HashMap<u8, Vec<u32>>,
+    /// Server-wide (shared across connections) per the X11 spec —
+    /// `xmodmap` from one client must be observable from another.
+    pub(crate) custom_keymap: super::types::SharedKeymap,
     /// XFIXES: clients subscribed to cursor change events (window_id → bool).
     pub(crate) cursor_event_subscribers: HashMap<u32, bool>,
     /// XFIXES: clients subscribed to selection events (selection_atom → event_mask).

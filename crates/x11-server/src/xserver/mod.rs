@@ -173,6 +173,7 @@ impl X11Server {
 
         let shared_atoms: Arc<Mutex<AtomManager>> = Arc::new(Mutex::new(AtomManager::new()));
         let shared_windows: SharedWindows = Arc::new(Mutex::new(HashMap::new()));
+        let shared_keymap: SharedKeymap = Arc::new(Mutex::new(HashMap::new()));
         let shared_wm_state: SharedWmState = Arc::new(Mutex::new(WmState {
             client_id: None,
             event_tx: None,
@@ -977,6 +978,7 @@ vi_VN,vi_VN.UTF-8"
                 let _ = self.client_connected_tx.send((client_id.clone(), peer_pid));
                 let cid = client_id.clone();
                 let sw = shared_windows.clone();
+                let skm = shared_keymap.clone();
                 let wm = shared_wm_state.clone();
                 let sa = shared_atoms.clone();
                 let wr = self.window_router.clone();
@@ -1001,8 +1003,8 @@ vi_VN,vi_VN.UTF-8"
                 tokio::spawn(async move {
                     if let Err(e) = connection::handle_client(
                         stream, client_id, update_tx, message_tx, message_rx, conn_index, peer_pid,
-                        sw, wm, sa, wr, mt, er, ss, cn, sp, spf, sg, cr, eb, sgl, src, pc, ac, ssr,
-                        sacl, sst, exr,
+                        sw, skm, wm, sa, wr, mt, er, ss, cn, sp, spf, sg, cr, eb, sgl, src, pc, ac,
+                        ssr, sacl, sst, exr,
                     )
                     .await
                     {

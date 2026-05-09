@@ -13,14 +13,22 @@ time.sleep(0.1)
 # SelectionRequest, but that's redundant — convert_selection is what
 # the server actually responds to — and python-xlib's SelectionRequest
 # constructor requires an `owner` field which the test wasn't passing.)
-clipboard = d.intern_atom("CLIPBOARD")
+# Use a private selection atom so other tests in the same container
+# can't contaminate this no-owner case (e.g. the xclip test earlier in
+# the file leaves CLIPBOARD owned by the persistent clipboard manager,
+# which would route ConvertSelection through the success path instead).
+sel = d.intern_atom("_X11WEB_SELNOTIFY_TEST")
 prop = d.intern_atom("_TEST_SEL")
-w.convert_selection(clipboard, Xlib.Xatom.STRING, prop, 0)
+w.convert_selection(sel, Xlib.Xatom.STRING, prop, 0)
 d.sync()
 time.sleep(0.2)
-# Check for SelectionNotify event
+# Block for a SelectionNotify event with a 10s ceiling. Under parallel
+# test load the event-router → connection → socket round-trip can take
+# longer than the immediate `pending_events()` check sees.
 got_sel_notify = False
-for _ in range(50):
+import select
+deadline = time.monotonic() + 10.0
+while time.monotonic() < deadline:
     if d.pending_events():
         ev = d.next_event()
         if ev.type == Xlib.X.SelectionNotify:
@@ -32,7 +40,8 @@ for _ in range(50):
                 passed += 1; print(f"PASS: SelectionNotify received (prop={ev.property})")
             break
     else:
-        break
+        # Wait on the socket directly so we don't burn CPU.
+        select.select([d.fileno()], [], [], 0.1)
 if not got_sel_notify:
     failed += 1; print("FAIL: No SelectionNotify event")
 w.destroy()

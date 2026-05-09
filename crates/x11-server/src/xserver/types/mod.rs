@@ -18,7 +18,7 @@ mod window;
 // Re-export everything so callers can still do `use super::types::*`.
 pub use routing::*;
 pub(crate) use routing::{
-    EventBroadcaster, EventRouter, ServerGrabLock, SharedWindows, WindowMessage,
+    EventBroadcaster, EventRouter, ServerGrabLock, SharedKeymap, SharedWindows, WindowMessage,
 };
 
 pub(crate) use colormap::*;

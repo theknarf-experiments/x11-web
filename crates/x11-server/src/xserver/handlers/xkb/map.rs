@@ -67,8 +67,9 @@ pub(crate) fn build_xkb_get_map_reply(state: &mut ClientState, seq: u16) -> Vec<
     // 2. KeySyms: one XkbSymMapWireDesc per key, with multi-group support
     // =====================================================================
     let mut total_syms_count: u16 = 0;
+    let custom_keymap_snapshot = state.custom_keymap.lock().unwrap().clone();
     for kc in MIN_KEY_CODE..=MAX_KEY_CODE {
-        let (normal, shifted) = super::super::resolve_keysym(kc, &state.custom_keymap);
+        let (normal, shifted) = super::super::resolve_keysym(kc, &custom_keymap_snapshot);
         let two_level = normal != 0 && shifted != 0 && normal != shifted;
         let width: u8 = if two_level { 2 } else { 1 };
 
@@ -423,13 +424,15 @@ pub(crate) fn handle_xkb_set_map(state: &mut ClientState, data: &[u8], seq: u16)
     if let Some(syms) = aux.syms {
         present |= u16::from(MapPart::KEY_SYMS);
         let mut kc = req.first_key_sym;
+        let mut keymap = state.custom_keymap.lock().unwrap();
         for sm in syms {
-            state.custom_keymap.insert(kc, sm.syms);
+            keymap.insert(kc, sm.syms);
             kc = kc.wrapping_add(1);
             if kc == 0 {
                 break;
             }
         }
+        drop(keymap);
         debug!(
             "SetMap: updated keysym mappings starting at keycode {}",
             req.first_key_sym

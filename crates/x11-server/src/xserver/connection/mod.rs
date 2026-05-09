@@ -105,6 +105,7 @@ pub(crate) async fn handle_client(
     conn_index: u32,
     peer_pid: u32,
     shared_windows: SharedWindows,
+    shared_keymap: super::types::SharedKeymap,
     shared_wm_state: SharedWmState,
     shared_atoms: Arc<Mutex<AtomManager>>,
     window_router: WindowRouter,
@@ -386,7 +387,7 @@ pub(crate) async fn handle_client(
         ],
         win_gravity: HashMap::new(),
         bit_gravity: HashMap::new(),
-        custom_keymap: HashMap::new(),
+        custom_keymap: shared_keymap.clone(),
         cursor_event_subscribers: HashMap::new(),
         selection_event_subscribers: HashMap::new(),
         cursor_serial: 0,
@@ -1536,7 +1537,10 @@ pub(crate) async fn handle_client(
                             // the input event.
                             if let x11_web_protocol::InputEvent::KeyPress { keycode, state: mask } = &input {
                                 let shifted = (*mask & 1) != 0; // ShiftMask
-                                let (normal_ks, shifted_ks) = handlers::resolve_keysym(*keycode as u8, &state.custom_keymap);
+                                let (normal_ks, shifted_ks) = {
+                                    let keymap = state.custom_keymap.lock().unwrap();
+                                    handlers::resolve_keysym(*keycode as u8, &keymap)
+                                };
                                 let keysym = if shifted { shifted_ks } else { normal_ks };
 
                                 match compose.process(keysym) {
