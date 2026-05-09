@@ -70,6 +70,193 @@ async function navigateFirefox(
 	await page.keyboard.press("Enter");
 }
 
+test.skip("DIAG: GIMP click receives input", async ({
+	page,
+	sidecarContainer,
+	frontendUrl,
+}) => {
+	test.setTimeout(180_000);
+	await cleanupApps(sidecarContainer);
+	await page.goto(frontendUrl);
+	await waitForDock(page);
+	await sidecarContainer.exec(["bash", "-c", "true > /tmp/sidecar.log"]);
+	// Spawn GIMP interactively (no batch) so the UI window appears.
+	await sidecarContainer.exec(["bash", "-c", "export DISPLAY=:99; gimp --no-data --no-fonts > /tmp/gimp.log 2>&1 &"]);
+	await page.waitForTimeout(20000);
+
+	const canvases = page.locator('[data-testid="x11-canvas"]');
+	const count = await canvases.count();
+	console.log(`Canvases visible: ${count}`);
+	if (count === 0) { console.log("no canvas, abort"); return; }
+	const canvas = canvases.nth(count - 1);
+	await canvas.screenshot({ path: "test-results/diag-gimp-before.png" });
+
+	const box = await canvas.boundingBox();
+	if (!box) { console.log("no box"); return; }
+	const cx = Math.round(box.x + box.width * 0.5);
+	const cy = Math.round(box.y + box.height * 0.5);
+	console.log(`Click GIMP at (${cx}, ${cy})`);
+	await page.mouse.click(cx, cy);
+	await page.waitForTimeout(500);
+	await page.keyboard.type("hello", { delay: 50 });
+	await page.waitForTimeout(800);
+	await canvas.screenshot({ path: "test-results/diag-gimp-after.png" });
+
+	const log = await sidecarContainer.exec(["bash", "-c", "grep -aE 'DISPATCH' /tmp/sidecar.log | tail -8"]);
+	console.log("---DISPATCH---\n" + log.output);
+});
+
+test.skip("DIAG: synthetic firefox-like client receives events", async ({
+	page,
+	sidecarContainer,
+	frontendUrl,
+}) => {
+	test.setTimeout(180_000);
+	await cleanupApps(sidecarContainer);
+	await page.goto(frontendUrl);
+	await waitForDock(page);
+
+	// Drop a python script that creates a parent window 921x691 with
+	// Firefox-like event_mask, plus a child window of the same size.
+	// Both select for events and the child logs received events.
+	const pyScript = [
+		"import os, time, sys",
+		"import Xlib.display, Xlib.X",
+		"d = Xlib.display.Display()",
+		"screen = d.screen()",
+		"# Parent: KeyPress|KeyRelease|ButtonPress|ButtonRelease|EnterWindow|LeaveWindow|PointerMotion|KeymapState|Exposure|StructureNotify|FocusChange|PropertyChange",
+		"PARENT_MASK = 0x63a07f",
+		"# Child: ButtonPress|ButtonRelease|Enter|Leave|Motion|Exposure|VisibilityChange|StructureNotify|PropertyChange",
+		"CHILD_MASK = 0x43807c",
+		"parent = screen.root.create_window(0, 0, 921, 691, 0, screen.root_depth, event_mask=PARENT_MASK)",
+		"child = parent.create_window(0, 0, 921, 691, 0, screen.root_depth, event_mask=CHILD_MASK)",
+		"parent.set_wm_class('FFTest', 'FFTest')",
+		"parent.set_wm_name('Synthetic FFTest')",
+		"parent.map()",
+		"child.map()",
+		"d.sync()",
+		"sys.stderr.write(f'PARENT={hex(parent.id)} CHILD={hex(child.id)}\\n')",
+		"sys.stderr.flush()",
+		"start = time.time()",
+		"while time.time() - start < 30:",
+		"    while d.pending_events() > 0:",
+		"        ev = d.next_event()",
+		"        sys.stderr.write(f'EV {ev.type} {ev}\\n')",
+		"        sys.stderr.flush()",
+		"    time.sleep(0.05)",
+	].join("\n");
+	const b64 = Buffer.from(pyScript).toString("base64");
+	await sidecarContainer.exec(["bash", "-c", `printf '%s' '${b64}' | base64 -d > /tmp/fftest.py`]);
+	await sidecarContainer.exec(["bash", "-c", "true > /tmp/fftest.log; export DISPLAY=:99; (python3 /tmp/fftest.py > /tmp/fftest.out 2> /tmp/fftest.log &) ; sleep 2"]);
+	await page.waitForTimeout(3000);
+
+	// Now the synthetic window should be on the canvas — find its locator.
+	const canvases = page.locator('[data-testid="x11-canvas"]');
+	const count = await canvases.count();
+	console.log(`Canvases visible: ${count}`);
+	const lastCanvas = canvases.nth(count - 1);
+	const box = await lastCanvas.boundingBox();
+	console.log(`Last canvas box: ${JSON.stringify(box)}`);
+	if (!box) {
+		console.log("No box - aborting");
+		return;
+	}
+	const cx = Math.round(box.x + box.width * 0.5);
+	const cy = Math.round(box.y + box.height * 0.5);
+	console.log(`Clicking at viewport (${cx}, ${cy})`);
+	await page.mouse.click(cx, cy);
+	await page.waitForTimeout(300);
+	await page.keyboard.press("a");
+	await page.waitForTimeout(300);
+
+	const log = await sidecarContainer.exec(["bash", "-c", "grep -aE 'DISPATCH' /tmp/sidecar.log 2>/dev/null | tail -10"]);
+	console.log("---DISPATCH---\n" + log.output);
+	const fft = await sidecarContainer.exec(["bash", "-c", "head -30 /tmp/fftest.log"]);
+	console.log("---FFTEST events received---\n" + fft.output);
+});
+
+// Diagnostic — attach xev to Firefox's content child by XID, then click
+// the canvas. xev runs on a separate connection so it receives the same
+// X11 stream a Firefox-internal listener would.
+// Diagnostic — capture the actual bytes our X server writes to Firefox's
+// X11 socket on canvas click + key press, so we can compare with what an
+// X11 client expects.
+test.skip("DIAG: Firefox click delivery target", async ({
+	page,
+	sidecarContainer,
+	frontendUrl,
+}) => {
+	test.setTimeout(180_000);
+	await cleanupApps(sidecarContainer);
+	await page.goto(frontendUrl);
+	await waitForDock(page);
+
+	const canvas = await spawnFirefoxAndWait(page);
+	await sidecarContainer.exec(["bash", "-c", "true > /tmp/sidecar.log"]);
+
+	// Find Firefox's "Mozilla Firefox" (Navigator) window id and its child.
+	const findIds = await sidecarContainer.exec([
+		"bash",
+		"-c",
+		[
+			"export DISPLAY=:99",
+			"TOP=$(xwininfo -root -tree | grep 'Mozilla Firefox.*Navigator' | grep -oE '0x[0-9a-f]+' | head -1)",
+			'if [ -z "$TOP" ]; then echo NOT_FOUND; exit 1; fi',
+			'echo "TOP=$TOP"',
+			'CHILD=$(xwininfo -id "$TOP" -tree | grep -oE "0x[0-9a-f]+" | grep -v "^$TOP\\$" | head -1)',
+			'echo "CHILD=$CHILD"',
+		].join("\n"),
+	]);
+	console.log("---FIREFOX IDS---\n" + findIds.output);
+	const m = findIds.output.match(/TOP=(0x[0-9a-f]+)\s+CHILD=(0x[0-9a-f]+)/);
+	if (!m) { console.log("could not parse"); return; }
+	const topId = m[1];
+	const childId = m[2];
+	console.log(`Top=${topId} Child=${childId}`);
+
+	// Attach xev to the child so xev sees the same events Firefox sees.
+	await sidecarContainer.exec([
+		"bash",
+		"-c",
+		`true > /tmp/xev_top.log; true > /tmp/xev_child.log
+		export DISPLAY=:99
+		xev -id ${topId} > /tmp/xev_top.log 2>&1 &
+		xev -id ${childId} > /tmp/xev_child.log 2>&1 &
+		`,
+	]);
+	await page.waitForTimeout(1500);
+
+	const box = await canvas.boundingBox();
+	const cx = Math.round(box!.x + box!.width * 0.5);
+	const cy = Math.round(box!.y + box!.height * 0.5);
+	console.log(`Clicking at viewport (${cx}, ${cy})`);
+	await page.mouse.click(cx, cy);
+	await page.waitForTimeout(500);
+	// Send Ctrl+L which Firefox interprets as "focus URL bar".
+	await page.keyboard.down("Control");
+	await page.waitForTimeout(100);
+	await page.keyboard.press("l");
+	await page.waitForTimeout(100);
+	await page.keyboard.up("Control");
+	await page.waitForTimeout(500);
+	// Type a few chars to verify URL bar is focused (would appear in URL).
+	await page.keyboard.type("xyz", { delay: 50 });
+	await page.waitForTimeout(500);
+	await canvas.screenshot({ path: "test-results/diag-after-ctrl-l-type.png" });
+
+	// Sidecar dispatch log + byte writes (full)
+	const log = await sidecarContainer.exec(["bash", "-c", "grep -aE 'DISPATCH|WRITE_INPUT' /tmp/sidecar.log"]);
+	console.log("---DISPATCH/WRITE---\n" + log.output);
+
+	// Map peer pid → process name to see which app got the bytes
+	const procs = await sidecarContainer.exec(["bash", "-c", "ps axo pid,comm | grep -iE 'firefox|xterm|xev' | head"]);
+	console.log("---PROCS---\n" + procs.output);
+
+	// Full window tree to see what overlays / popups are active
+	const tree = await sidecarContainer.exec(["bash", "-c", "export DISPLAY=:99; xwininfo -root -tree 2>&1 | head -80"]);
+	console.log("---WINDOW TREE---\n" + tree.output);
+});
+
 // ---------------------------------------------------------------------------
 // Firefox startup and initial rendering
 // ---------------------------------------------------------------------------

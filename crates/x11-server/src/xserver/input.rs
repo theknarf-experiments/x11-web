@@ -961,7 +961,6 @@ pub(crate) fn build_x11_input_event(
         }
         _ => (top_level, 0, 0),
     };
-
     // If target is 0, event was blocked by do_not_propagate — discard it.
     if event_window == 0 {
         return Vec::new();

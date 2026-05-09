@@ -1823,6 +1823,22 @@ pub(crate) async fn handle_client(
                             for ev in xi_events {
                                 stream.write_all(&ev).await?;
                             }
+
+                            // Flush any pending events queued during input
+                            // dispatch (FocusIn/FocusOut from
+                            // set_focus_window, PropertyNotify from
+                            // _NET_WM_USER_TIME, ColormapNotify, etc.).
+                            // Without this, FocusIn is held in pending_events
+                            // until the client's next request — and a
+                            // GTK app that sees KeyPress without a prior
+                            // FocusIn ignores the keystroke.
+                            if !state.pending_events.is_empty() {
+                                let mut events: Vec<Vec<u8>> = state.pending_events.drain(..).collect();
+                                patch_event_sequences(&mut events, state.sequence, state.msb_first);
+                                let record_intercepts = state.record_intercept_events(&events);
+                                for event in events { stream.write_all(&event).await?; }
+                                for intercept in record_intercepts { stream.write_all(&intercept).await?; }
+                            }
                         }
                         WindowMessage::Resize(width, height) => {
                             if let Some(uuid) = state.x11_to_uuid.get(&x11_wid).cloned() {
