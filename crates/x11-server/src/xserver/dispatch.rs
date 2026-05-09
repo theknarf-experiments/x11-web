@@ -62,7 +62,7 @@ fn dispatch_extension(state: &mut ClientState, data: &[u8], seq: u16, id: Extens
             // BigReqEnable: mark BIG-REQUESTS as enabled and return max request length.
             state.big_requests_enabled = true;
             ReplyBuf::fixed(seq, state.msb_first)
-                .set_u32(8, 4_194_304u32) // 16 MB / 4
+                .set_u32(8, crate::xserver::core::BIG_REQUESTS_MAX_LEN_WORDS)
                 .build()
         }
         ExtensionId::Shape => handlers::extensions::handle_shape_request(state, data, seq),

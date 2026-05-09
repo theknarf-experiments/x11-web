@@ -150,7 +150,7 @@ impl ClientState {
             return None;
         }
         let mut current = x11_wid;
-        for _ in 0..128 {
+        for _ in 0..crate::xserver::window_tree::MAX_TREE_DEPTH {
             if let Some(uuid) = self.x11_to_uuid.get(&current) {
                 return Some(uuid.clone());
             }

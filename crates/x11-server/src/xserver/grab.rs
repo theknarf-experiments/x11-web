@@ -136,7 +136,7 @@ pub(crate) struct ActivePointerGrab {
 /// ancestors are mapped).
 fn is_viewable(windows: &HashMap<u32, WindowState>, wid: u32, root: u32) -> bool {
     let mut cur = wid;
-    for _ in 0..128 {
+    for _ in 0..crate::xserver::window_tree::MAX_TREE_DEPTH {
         if cur == root {
             return true;
         }
@@ -160,7 +160,7 @@ fn window_abs_bounds(
     let mut abs_x = w.x;
     let mut abs_y = w.y;
     let mut cur = w.parent;
-    for _ in 0..128 {
+    for _ in 0..crate::xserver::window_tree::MAX_TREE_DEPTH {
         if cur == root || cur == 0 {
             break;
         }
@@ -731,7 +731,7 @@ pub(crate) fn check_passive_button_grab(
 ) -> bool {
     // Walk up the window hierarchy to find a matching passive button grab
     let mut current = window;
-    for _ in 0..128 {
+    for _ in 0..crate::xserver::window_tree::MAX_TREE_DEPTH {
         let matching = state
             .grabs
             .button_grabs
@@ -798,7 +798,7 @@ pub(crate) fn check_passive_key_grab(
     window: u32,
 ) -> bool {
     let mut current = window;
-    for _ in 0..128 {
+    for _ in 0..crate::xserver::window_tree::MAX_TREE_DEPTH {
         let matching = state
             .grabs
             .key_grabs

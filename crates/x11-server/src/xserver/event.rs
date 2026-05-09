@@ -74,15 +74,16 @@ pub(crate) fn serialize_event_with_layout<E: Serialize>(
 /// For simplicity, we swap all u16-aligned pairs and u32-aligned quads
 /// after the first 2 bytes (type + detail are single bytes).
 fn byteswap_event_inplace(bytes: &mut [u8]) {
+    use super::core::{X11_EVENT_SIZE, X11_WORD_SIZE};
     if bytes.len() < 4 {
         return;
     }
     // Sequence number at [2..4] — swap as u16
     bytes.swap(2, 3);
-    // Remaining fields [4..32] are all u32-aligned in standard X11 events.
-    // Swap each 4-byte word.
-    let end = bytes.len().min(32);
-    for i in (4..end).step_by(4) {
+    // Remaining fields [4..X11_EVENT_SIZE] are all u32-aligned in standard
+    // X11 events. Swap each word.
+    let end = bytes.len().min(X11_EVENT_SIZE);
+    for i in (4..end).step_by(X11_WORD_SIZE) {
         if i + 3 < bytes.len() {
             bytes.swap(i, i + 3);
             bytes.swap(i + 1, i + 2);

@@ -63,7 +63,7 @@ impl ClientState {
                     .get(&window)
                     .map(|w| w.parent)
                     .unwrap_or(self.root_window);
-                for _ in 0..128 {
+                for _ in 0..crate::xserver::window_tree::MAX_TREE_DEPTH {
                     if candidate == 0 || candidate == self.root_window {
                         break;
                     }
@@ -288,7 +288,7 @@ impl ClientState {
     fn ancestor_chain(&self, window: u32) -> Vec<u32> {
         let mut chain = Vec::new();
         let mut current = window;
-        for _ in 0..128 {
+        for _ in 0..crate::xserver::window_tree::MAX_TREE_DEPTH {
             match self.windows.get(&current) {
                 Some(w) if w.parent != 0 && w.parent != current => {
                     chain.push(w.parent);

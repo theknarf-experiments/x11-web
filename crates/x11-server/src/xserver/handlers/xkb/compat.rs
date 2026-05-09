@@ -9,6 +9,20 @@ use super::{SA_LOCK_MODS, SA_NO_ACTION, SA_SET_MODS};
 // XKB SI flags
 const SI_LOCKING_KEY: u8 = 2;
 
+// X11 keysym values used by the default symbol-interpretation table.
+// Mirror the entries from /usr/include/X11/keysymdef.h.
+const KEY_SHIFT_L: u32 = 0xFFE1;
+const KEY_SHIFT_R: u32 = 0xFFE2;
+const KEY_CONTROL_L: u32 = 0xFFE3;
+const KEY_CONTROL_R: u32 = 0xFFE4;
+const KEY_CAPS_LOCK: u32 = 0xFFE5;
+const KEY_ALT_L: u32 = 0xFFE9;
+const KEY_ALT_R: u32 = 0xFFEA;
+const KEY_SUPER_L: u32 = 0xFFEB;
+const KEY_SUPER_R: u32 = 0xFFEC;
+const KEY_NUM_LOCK: u32 = 0xFF7F;
+const KEY_ISO_LEVEL3_SHIFT: u32 = 0xFE03;
+
 // XKB compat match operations — wire-stable u8 IDs from
 // `x11rb::xkb::SymInterpretMatch`. Verified by a test below.
 const MATCH_NONE_OF: u8 = 0;
@@ -71,7 +85,7 @@ pub(crate) fn default_si_table() -> Vec<XkbSymInterpretation> {
 
     // Shift_L / Shift_R → SA_SetMods(Shift)
     table.push(si(
-        0xFFE1,
+        KEY_SHIFT_L,
         0x01,
         MATCH_ANY_OF_OR_NONE,
         0xFF,
@@ -81,7 +95,7 @@ pub(crate) fn default_si_table() -> Vec<XkbSymInterpretation> {
         0,
     ));
     table.push(si(
-        0xFFE2,
+        KEY_SHIFT_R,
         0x01,
         MATCH_ANY_OF_OR_NONE,
         0xFF,
@@ -92,7 +106,7 @@ pub(crate) fn default_si_table() -> Vec<XkbSymInterpretation> {
     ));
     // Caps_Lock → SA_LockMods(Lock)
     table.push(si(
-        0xFFE5,
+        KEY_CAPS_LOCK,
         0x02,
         MATCH_ANY_OF_OR_NONE,
         0xFF,
@@ -103,7 +117,7 @@ pub(crate) fn default_si_table() -> Vec<XkbSymInterpretation> {
     ));
     // Control_L, Control_R → SA_SetMods(Control)
     table.push(si(
-        0xFFE3,
+        KEY_CONTROL_L,
         0x04,
         MATCH_ANY_OF_OR_NONE,
         0xFF,
@@ -113,7 +127,7 @@ pub(crate) fn default_si_table() -> Vec<XkbSymInterpretation> {
         0,
     ));
     table.push(si(
-        0xFFE4,
+        KEY_CONTROL_R,
         0x04,
         MATCH_ANY_OF_OR_NONE,
         0xFF,
@@ -124,7 +138,7 @@ pub(crate) fn default_si_table() -> Vec<XkbSymInterpretation> {
     ));
     // Alt_L, Alt_R → SA_SetMods(Mod1), vmod Alt(0)
     table.push(si(
-        0xFFE9,
+        KEY_ALT_L,
         0x08,
         MATCH_ANY_OF_OR_NONE,
         0,
@@ -134,7 +148,7 @@ pub(crate) fn default_si_table() -> Vec<XkbSymInterpretation> {
         1 << 0,
     ));
     table.push(si(
-        0xFFEA,
+        KEY_ALT_R,
         0x08,
         MATCH_ANY_OF_OR_NONE,
         0,
@@ -145,7 +159,7 @@ pub(crate) fn default_si_table() -> Vec<XkbSymInterpretation> {
     ));
     // Num_Lock → SA_LockMods(Mod2), vmod NumLock(1)
     table.push(si(
-        0xFF7F,
+        KEY_NUM_LOCK,
         0x10,
         MATCH_ANY_OF_OR_NONE,
         1,
@@ -156,7 +170,7 @@ pub(crate) fn default_si_table() -> Vec<XkbSymInterpretation> {
     ));
     // Super_L, Super_R → SA_SetMods(Mod4), vmod Super(3)
     table.push(si(
-        0xFFEB,
+        KEY_SUPER_L,
         0x40,
         MATCH_ANY_OF_OR_NONE,
         3,
@@ -166,7 +180,7 @@ pub(crate) fn default_si_table() -> Vec<XkbSymInterpretation> {
         1 << 3,
     ));
     table.push(si(
-        0xFFEC,
+        KEY_SUPER_R,
         0x40,
         MATCH_ANY_OF_OR_NONE,
         3,
@@ -177,7 +191,7 @@ pub(crate) fn default_si_table() -> Vec<XkbSymInterpretation> {
     ));
     // ISO_Level3_Shift → SA_SetMods(Mod5)
     table.push(si(
-        0xFE03,
+        KEY_ISO_LEVEL3_SHIFT,
         0x80,
         MATCH_ANY_OF_OR_NONE,
         0xFF,

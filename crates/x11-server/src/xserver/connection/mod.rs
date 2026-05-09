@@ -26,6 +26,11 @@ use x11rb_protocol::protocol::xproto::{ImageOrder, SetupRequest};
 const BYTE_ORDER_LSB: u8 = 0x6c;
 const BYTE_ORDER_MSB: u8 = 0x42;
 
+/// Per-connection read buffer size (256 KiB). Sized to comfortably hold the
+/// largest single non-BIG-REQUESTS request the spec allows (256 KiB - 4) plus
+/// some slop for partial reads.
+const READ_BUF_BYTES: usize = 256 * 1024;
+
 /// Round `n` up to the next 4-byte boundary. X11 wire structures pad
 /// every field group to a multiple of 4 bytes.
 #[inline]
@@ -513,7 +518,7 @@ pub(crate) async fn handle_client(
 
     let mut compose = crate::compose::ComposeState::new();
 
-    let mut buf = vec![0u8; 256 * 1024];
+    let mut buf = vec![0u8; READ_BUF_BYTES];
     let mut pending = Vec::new();
     let mut frame_interval = tokio::time::interval(Duration::from_millis(16));
     frame_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
@@ -618,7 +623,7 @@ pub(crate) async fn handle_client(
                         let is_inferior = {
                             let mut cur = state.windows.get(&wid).map(|w| w.parent).unwrap_or(0);
                             let mut found = false;
-                            for _ in 0..128 {
+                            for _ in 0..crate::xserver::window_tree::MAX_TREE_DEPTH {
                                 if cur == 0 || cur == wid { break; }
                                 if let Some(w) = state.windows.get(&cur) {
                                     if w.owner_client_id == my_client_id {
@@ -639,7 +644,7 @@ pub(crate) async fn handle_client(
                         let new_parent = {
                             let mut cur = state.windows.get(&wid).map(|w| w.parent).unwrap_or(root);
                             let mut target = root;
-                            for _ in 0..128 {
+                            for _ in 0..crate::xserver::window_tree::MAX_TREE_DEPTH {
                                 if cur == 0 { break; }
                                 if let Some(w) = state.windows.get(&cur) {
                                     if w.owner_client_id != my_client_id {

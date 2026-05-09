@@ -1,7 +1,7 @@
 //! RECORD extension intercept and notification methods on ClientState.
 
 use super::ClientState;
-use crate::xserver::core::SEND_EVENT_FLAG;
+use crate::xserver::core::{SEND_EVENT_FLAG, X11_EVENT_SIZE};
 
 /// Largest valid major opcode for a core (i.e. non-extension) X11 request.
 /// Per the X11 protocol, opcodes 1..=127 are core requests; 128..=255 are
@@ -189,7 +189,7 @@ impl ClientState {
         // Local contexts (self-interception)
         if !self.record_contexts.is_empty() {
             for event in events {
-                if event.len() == 32
+                if event.len() == X11_EVENT_SIZE
                     && event[0] >= X11_EVENT_TYPE_MIN
                     && event[0] <= X11_EVENT_TYPE_MAX
                 {
@@ -211,7 +211,7 @@ impl ClientState {
         if let Ok(shared) = self.shared_record_contexts.lock() {
             if !shared.is_empty() {
                 for event in events {
-                    if event.len() == 32
+                    if event.len() == X11_EVENT_SIZE
                     && event[0] >= X11_EVENT_TYPE_MIN
                     && event[0] <= X11_EVENT_TYPE_MAX
                 {

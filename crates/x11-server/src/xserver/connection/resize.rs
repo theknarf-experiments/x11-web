@@ -11,7 +11,10 @@ use crate::xserver::client::ClientState;
 use crate::xserver::core::*;
 use crate::xserver::event::serialize_event;
 use crate::xserver::is_descendant_of;
-use crate::xserver::types::{generate_edid, PropertyValue, RandrMode};
+use crate::xserver::types::{
+    generate_edid, PropertyValue, RandrMode, DEFAULT_RANDR_CRTC_ID, DEFAULT_RANDR_MODE_ID,
+    DEFAULT_RANDR_OUTPUT_ID,
+};
 
 /// Resize a top-level window in response to a frontend canvas size change.
 pub(crate) fn resize_window(
@@ -255,9 +258,9 @@ pub(super) fn apply_screen_resize(state: &mut ClientState, new_w: u16, new_h: u1
     }
 
     // 4. Update RandR CRTC, mode, and output to reflect new size
-    let crtc_id: u32 = 100;
-    let mode_id: u32 = 300;
-    let output_id: u32 = 200;
+    let crtc_id = DEFAULT_RANDR_CRTC_ID;
+    let mode_id = DEFAULT_RANDR_MODE_ID;
+    let output_id = DEFAULT_RANDR_OUTPUT_ID;
 
     // Update mode
     let new_mode = RandrMode::new(mode_id, new_w, new_h);

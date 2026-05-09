@@ -873,7 +873,7 @@ pub(crate) fn handle_send_event(state: &mut ClientState, req: &SendEventRequest)
         let event_mask_bit = event_type_to_mask(event_type);
         let mut current = target;
         let mut found = None;
-        for _ in 0..128 {
+        for _ in 0..crate::xserver::window_tree::MAX_TREE_DEPTH {
             let win = match state.windows.get(&current) {
                 Some(w) => w,
                 None => break,

@@ -4,6 +4,26 @@ use super::*;
 use crate::xserver::reply::ReplyBuf;
 use x11rb_protocol::protocol::xproto::{GetImageRequest, PutImageRequest, WindowClass};
 
+/// Decode a 16-bit RGB565 pixel into a 24-bit `0x00RRGGBB` value, scaling
+/// each channel up to 8 bits via bit-replication so the lowest bits don't
+/// stay dark (this matches what the X server's image-format conversions
+/// produce on real hardware).
+#[inline]
+fn rgb565_to_rgb888(val: u16) -> u32 {
+    const R_SHIFT: u32 = 11;
+    const G_SHIFT: u32 = 5;
+    const FIVE_BIT_MASK: u16 = 0x1F;
+    const SIX_BIT_MASK: u16 = 0x3F;
+
+    let r5 = ((val >> R_SHIFT) & FIVE_BIT_MASK) as u8;
+    let g6 = ((val >> G_SHIFT) & SIX_BIT_MASK) as u8;
+    let b5 = (val & FIVE_BIT_MASK) as u8;
+    let r8 = (r5 << 3) | (r5 >> 2);
+    let g8 = (g6 << 2) | (g6 >> 4);
+    let b8 = (b5 << 3) | (b5 >> 2);
+    ((r8 as u32) << 16) | ((g8 as u32) << 8) | (b8 as u32)
+}
+
 // ---------------------------------------------------------------------------
 // Opcode 72: PutImage
 // ---------------------------------------------------------------------------
@@ -92,12 +112,7 @@ pub(crate) fn handle_put_image(state: &mut ClientState, req: &PutImageRequest) -
                         continue;
                     }
                     let val = u16::from_le_bytes([pixel_data[src_off], pixel_data[src_off + 1]]);
-                    let r = ((val >> 11) & 0x1F) as u8;
-                    let g = ((val >> 5) & 0x3F) as u8;
-                    let b = (val & 0x1F) as u8;
-                    let src_color = ((((r << 3) | (r >> 2)) as u32) << 16)
-                        | ((((g << 2) | (g >> 4)) as u32) << 8)
-                        | (((b << 3) | (b >> 2)) as u32);
+                    let src_color = rgb565_to_rgb888(val);
                     let fb_off = (dy as usize * fb_w + dx as usize) * 4;
                     if fb_off + 3 < fb_data.len() {
                         let dst_color = crate::framebuffer::read_pixel(fb_data, fb_off);
@@ -426,7 +441,7 @@ pub(crate) fn handle_get_image(state: &mut ClientState, req: &GetImageRequest) -
         }
         // Also check ancestors are mapped
         let mut parent = win.parent;
-        for _ in 0..128 {
+        for _ in 0..crate::xserver::window_tree::MAX_TREE_DEPTH {
             if parent == state.root_window || parent == 0 {
                 break;
             }

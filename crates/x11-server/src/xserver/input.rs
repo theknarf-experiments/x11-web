@@ -353,7 +353,7 @@ fn window_local_coords(
     let mut ox = 0i32;
     let mut oy = 0i32;
     let mut cur = window;
-    for _ in 0..128 {
+    for _ in 0..crate::xserver::window_tree::MAX_TREE_DEPTH {
         if cur == root || cur == 0 {
             break;
         }
@@ -880,7 +880,7 @@ fn keyboard_event_child(
     // Walk from focus_window up to event_window, tracking the previous step
     let mut cur = focus_window;
     let mut prev = focus_window;
-    for _ in 0..128 {
+    for _ in 0..crate::xserver::window_tree::MAX_TREE_DEPTH {
         if cur == event_window {
             return prev;
         }

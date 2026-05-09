@@ -36,40 +36,52 @@ fn clamp_u8(v: i32) -> u8 {
     }
 }
 
-/// Convert a single YUV pixel to (R, G, B) using BT.601 coefficients.
+/// Chroma offset: U/V are stored as `value + 128` so the unsigned byte
+/// covers -128..=127.
+const CHROMA_OFFSET: i32 = 128;
+/// Right-shift count corresponding to the 1/256 scaling factor baked into
+/// the integer coefficients below.
+const COEFF_SHIFT: u32 = 8;
+
+/// BT.601 (SDTV) integer coefficients for YUV→RGB.
 ///
-/// Integer approximations:
-/// - R = Y + ((351 * (V - 128)) >> 8)
-/// - G = Y - ((179 * (V - 128) + 86 * (U - 128)) >> 8)
-/// - B = Y + ((443 * (U - 128)) >> 8)
+/// `(R, G_cr, G_cb, B)` — multiplied by `(V-128)` or `(U-128)` and then
+/// shifted right by `COEFF_SHIFT` to recover ~1.0 scaling.
+const BT601_R_CR: i32 = 351;
+const BT601_G_CR: i32 = 179;
+const BT601_G_CB: i32 = 86;
+const BT601_B_CB: i32 = 443;
+
+/// BT.709 (HDTV) integer coefficients for YUV→RGB.
+const BT709_R_CR: i32 = 403;
+const BT709_G_CR: i32 = 120;
+const BT709_G_CB: i32 = 48;
+const BT709_B_CB: i32 = 475;
+
+/// Convert a single YUV pixel to (R, G, B) using BT.601 coefficients.
 #[inline(always)]
 fn yuv_to_rgb_bt601(y: u8, u: u8, v: u8) -> (u8, u8, u8) {
     let y = y as i32;
-    let cb = u as i32 - 128;
-    let cr = v as i32 - 128;
+    let cb = u as i32 - CHROMA_OFFSET;
+    let cr = v as i32 - CHROMA_OFFSET;
 
-    let r = y + ((351 * cr) >> 8);
-    let g = y - ((179 * cr + 86 * cb) >> 8);
-    let b = y + ((443 * cb) >> 8);
+    let r = y + ((BT601_R_CR * cr) >> COEFF_SHIFT);
+    let g = y - ((BT601_G_CR * cr + BT601_G_CB * cb) >> COEFF_SHIFT);
+    let b = y + ((BT601_B_CB * cb) >> COEFF_SHIFT);
 
     (clamp_u8(r), clamp_u8(g), clamp_u8(b))
 }
 
 /// Convert a single YUV pixel to (R, G, B) using BT.709 coefficients.
-///
-/// BT.709 integer approximations:
-/// - R = Y + ((403 * (V - 128)) >> 8)
-/// - G = Y - ((48 * (U - 128) + 120 * (V - 128)) >> 8)
-/// - B = Y + ((475 * (U - 128)) >> 8)
 #[inline(always)]
 fn yuv_to_rgb_bt709(y: u8, u: u8, v: u8) -> (u8, u8, u8) {
     let y = y as i32;
-    let cb = u as i32 - 128;
-    let cr = v as i32 - 128;
+    let cb = u as i32 - CHROMA_OFFSET;
+    let cr = v as i32 - CHROMA_OFFSET;
 
-    let r = y + ((403 * cr) >> 8);
-    let g = y - ((120 * cr + 48 * cb) >> 8);
-    let b = y + ((475 * cb) >> 8);
+    let r = y + ((BT709_R_CR * cr) >> COEFF_SHIFT);
+    let g = y - ((BT709_G_CR * cr + BT709_G_CB * cb) >> COEFF_SHIFT);
+    let b = y + ((BT709_B_CB * cb) >> COEFF_SHIFT);
 
     (clamp_u8(r), clamp_u8(g), clamp_u8(b))
 }

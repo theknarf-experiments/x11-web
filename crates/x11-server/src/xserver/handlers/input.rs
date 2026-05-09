@@ -54,7 +54,7 @@ pub(crate) fn handle_query_pointer(state: &mut ClientState, req: &QueryPointerRe
     let mut win_origin_y = 0i32;
     {
         let mut cur = window;
-        for _ in 0..128 {
+        for _ in 0..crate::xserver::window_tree::MAX_TREE_DEPTH {
             if cur == state.root_window || cur == 0 {
                 break;
             }
@@ -157,7 +157,7 @@ pub(crate) fn handle_translate_coordinates(
     let mut sy = src_y as i32;
     {
         let mut cur = src_window;
-        for _ in 0..128 {
+        for _ in 0..crate::xserver::window_tree::MAX_TREE_DEPTH {
             if cur == state.root_window || cur == 0 {
                 break;
             }
@@ -175,7 +175,7 @@ pub(crate) fn handle_translate_coordinates(
     let mut dy = 0i32;
     {
         let mut cur = dst_window;
-        for _ in 0..128 {
+        for _ in 0..crate::xserver::window_tree::MAX_TREE_DEPTH {
             if cur == state.root_window || cur == 0 {
                 break;
             }
@@ -247,7 +247,7 @@ pub(crate) fn handle_warp_pointer(state: &mut ClientState, req: &WarpPointerRequ
                 sw_abs_y = w.y as i32;
                 cur = w.parent;
             }
-            for _ in 0..128 {
+            for _ in 0..crate::xserver::window_tree::MAX_TREE_DEPTH {
                 if cur == state.root_window || cur == 0 {
                     break;
                 }
@@ -294,7 +294,7 @@ pub(crate) fn handle_warp_pointer(state: &mut ClientState, req: &WarpPointerRequ
         let mut abs_x = dst_x as i32;
         let mut abs_y = dst_y as i32;
         let mut cur = dst_window;
-        for _ in 0..128 {
+        for _ in 0..crate::xserver::window_tree::MAX_TREE_DEPTH {
             if cur == state.root_window || cur == 0 {
                 break;
             }

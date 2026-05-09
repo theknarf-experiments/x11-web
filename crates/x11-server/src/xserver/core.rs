@@ -37,6 +37,17 @@ pub(crate) const RESOURCE_ID_BASE_SHIFT: u32 = 22;
 /// space. Equal to `(1 << RESOURCE_ID_BASE_SHIFT) - 1`.
 pub(crate) const RESOURCE_ID_MASK: u32 = (1 << RESOURCE_ID_BASE_SHIFT) - 1;
 
+/// Maximum length (in 4-byte words) we advertise for BIG-REQUESTS — equals
+/// 16 MiB, the largest power-of-two that fits comfortably under our buffer
+/// limits while well above the spec's 256 KiB minimum.
+pub(crate) const BIG_REQUESTS_MAX_LEN_WORDS: u32 = (16 * 1024 * 1024) / 4;
+
+/// Wire size in bytes of a single core X11 event (always 32).
+pub(crate) const X11_EVENT_SIZE: usize = 32;
+/// Wire word size: every X11 wire field group is rounded up to a multiple
+/// of this many bytes.
+pub(crate) const X11_WORD_SIZE: usize = 4;
+
 /// Map a visual ID to its pixel depth, matching the visual table in setup.rs.
 /// Returns the root depth (24) for unknown visuals as a safe fallback.
 pub(crate) fn depth_for_visual(visual: u32) -> u8 {

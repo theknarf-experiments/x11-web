@@ -13,10 +13,10 @@ impl ClientState {
     pub(crate) fn randr_init_default(&mut self) {
         use super::super::types::*;
 
-        let crtc_id: u32 = 100;
-        let output_id: u32 = 200;
-        let mode_id: u32 = 300;
-        let provider_id: u32 = 400;
+        let crtc_id = DEFAULT_RANDR_CRTC_ID;
+        let output_id = DEFAULT_RANDR_OUTPUT_ID;
+        let mode_id = DEFAULT_RANDR_MODE_ID;
+        let provider_id = DEFAULT_RANDR_PROVIDER_ID;
 
         let mode = RandrMode::new(mode_id, self.screen_width, self.screen_height);
         let crtc = RandrCrtc::new(
