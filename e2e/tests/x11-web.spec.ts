@@ -594,7 +594,7 @@ test.skip("xterm renders text on the canvas", async ({ page, frontendUrl }) => {
 	});
 });
 
-test.skip("xterm accepts keyboard input", async ({ page, frontendUrl }) => {
+test("xterm accepts keyboard input", async ({ page, frontendUrl }) => {
 	await page.goto(frontendUrl);
 	await waitForDock(page);
 
