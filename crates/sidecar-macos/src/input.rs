@@ -22,6 +22,11 @@ use crate::focus_guard;
 use crate::router::WindowRoute;
 use crate::skylight::probe;
 
+/// Delay between an AXPress activation and the focus-guard release. Matches
+/// the timing cua's focus preventer uses; long enough for the activation
+/// hop to fire before we restore the original front window.
+const AX_PRESS_FOCUS_GUARD_DELAY: std::time::Duration = std::time::Duration::from_millis(50);
+
 /// Inject a single browser `InputEvent` against the window described
 /// by `route`. Logs and skips silently for event kinds we don't
 /// support yet (touch, gestures).
@@ -338,7 +343,7 @@ fn try_ax_click(route: &WindowRoute, target: CGPoint) -> Result<bool, ax::AxErro
 
     // Always release; cua's preventer matches a 50 ms delay to give
     // the activation a chance to fire before our restore.
-    focus_guard::release(handle, std::time::Duration::from_millis(50));
+    focus_guard::release(handle, AX_PRESS_FOCUS_GUARD_DELAY);
 
     match result {
         Ok(()) => Ok(true),

@@ -275,8 +275,13 @@ async fn async_main() {
         .expect("X11WEB_QUIC_ADDR must be host:port");
     quic::spawn_listener(state.clone(), quic_addr, cert, token);
 
-    let listener = tokio::net::TcpListener::bind("0.0.0.0:3001").await.unwrap();
-    info!("Backend listening on 0.0.0.0:3001");
+    /// Default HTTP listen address for the dev backend. Production deployments
+    /// typically front this with a reverse proxy and override via env var.
+    const DEFAULT_HTTP_LISTEN_ADDR: &str = "0.0.0.0:3001";
+    let listener = tokio::net::TcpListener::bind(DEFAULT_HTTP_LISTEN_ADDR)
+        .await
+        .unwrap();
+    info!("Backend listening on {DEFAULT_HTTP_LISTEN_ADDR}");
     // Graceful shutdown so OTel's last batch flushes on Ctrl-C —
     // axum returns from `serve` once the signal future resolves,
     // we then explicitly call `telemetry.shutdown()` to drain.

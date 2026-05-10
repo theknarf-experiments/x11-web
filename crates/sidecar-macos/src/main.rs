@@ -50,6 +50,14 @@ mod macos {
     use x11_web_wire::tls::parse_fingerprint;
     use x11_web_wire::{wire_capnp, BackendToSidecar, SidecarKind, SidecarToBackend};
 
+    /// Sleep between dial retries when waiting for the backend fingerprint
+    /// file to appear on first launch.
+    const FINGERPRINT_RETRY_DELAY: Duration = Duration::from_secs(2);
+    /// Sleep before reconnecting after the QUIC link drops.
+    const BACKEND_RECONNECT_DELAY: Duration = Duration::from_secs(5);
+    /// How often the macOS sidecar pings the backend to keep the link alive.
+    const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(30);
+
     pub async fn run(conn_state: Arc<AtomicU8>) {
         // OTel pipeline + stdout fmt layer. Env-gated: when
         // `OTEL_EXPORTER_OTLP_ENDPOINT` is unset, only the
@@ -146,7 +154,7 @@ mod macos {
                     Err(e) => {
                         warn!("Fingerprint not available yet: {e}. Retrying in 2s.");
                         tray::store(&conn_state, ConnState::Disconnected);
-                        tokio::time::sleep(Duration::from_secs(2)).await;
+                        tokio::time::sleep(FINGERPRINT_RETRY_DELAY).await;
                         continue;
                     }
                 };
@@ -175,7 +183,7 @@ mod macos {
                         tray::store(&conn_state, ConnState::Disconnected);
                     }
                 }
-                tokio::time::sleep(Duration::from_secs(5)).await;
+                tokio::time::sleep(BACKEND_RECONNECT_DELAY).await;
             }
         };
         tokio::select! {
@@ -201,7 +209,7 @@ mod macos {
         // wire.
         let tx_heartbeat = tx.clone();
         let heartbeat_task = tokio::spawn(async move {
-            let mut tick = interval(Duration::from_secs(30));
+            let mut tick = interval(HEARTBEAT_INTERVAL);
             loop {
                 tick.tick().await;
                 if tx_heartbeat.send(SidecarToBackend::Heartbeat).is_err() {

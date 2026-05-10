@@ -67,18 +67,30 @@ impl OidcConfig {
     /// is unset or empty — i.e. the operator hasn't configured an
     /// identity provider, so the backend stays in anonymous mode.
     pub fn from_env() -> Option<Self> {
+        /// Default `client_id` advertised to the OIDC issuer when
+        /// `OIDC_CLIENT_ID` is unset. Matches the application's product name.
+        const DEFAULT_CLIENT_ID: &str = "x11-web";
+        /// Default redirect URI used when `OIDC_REDIRECT_URI` is unset.
+        /// Matches the dev backend's listen address (`0.0.0.0:3001` /
+        /// `localhost:3001`).
+        const DEFAULT_REDIRECT_URI: &str = "http://localhost:3001/auth/callback";
+        /// Where to send the browser after a successful login when
+        /// `OIDC_POST_LOGIN_REDIRECT` is unset.
+        const DEFAULT_POST_LOGIN_REDIRECT: &str = "/";
+
         let issuer = std::env::var("OIDC_ISSUER").ok()?;
         if issuer.trim().is_empty() {
             return None;
         }
-        let client_id = std::env::var("OIDC_CLIENT_ID").unwrap_or_else(|_| "x11-web".into());
+        let client_id =
+            std::env::var("OIDC_CLIENT_ID").unwrap_or_else(|_| DEFAULT_CLIENT_ID.into());
         let client_secret = std::env::var("OIDC_CLIENT_SECRET")
             .ok()
             .filter(|s| !s.is_empty());
-        let redirect_uri = std::env::var("OIDC_REDIRECT_URI")
-            .unwrap_or_else(|_| "http://localhost:3001/auth/callback".into());
-        let post_login_redirect =
-            std::env::var("OIDC_POST_LOGIN_REDIRECT").unwrap_or_else(|_| "/".into());
+        let redirect_uri =
+            std::env::var("OIDC_REDIRECT_URI").unwrap_or_else(|_| DEFAULT_REDIRECT_URI.into());
+        let post_login_redirect = std::env::var("OIDC_POST_LOGIN_REDIRECT")
+            .unwrap_or_else(|_| DEFAULT_POST_LOGIN_REDIRECT.into());
         Some(Self {
             issuer,
             client_id,

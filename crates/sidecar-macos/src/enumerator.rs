@@ -36,6 +36,15 @@ const CAPTURE_FPS: u32 = 30;
 /// SCStream frame channel. Worst-case shutdown latency = this value.
 const SHUTDOWN_POLL: Duration = Duration::from_millis(100);
 
+/// Cadence for the window-list refresh tick that keeps the picker /
+/// router state in sync with the live macOS window stack.
+const WINDOW_LIST_TICK: Duration = Duration::from_secs(1);
+
+/// Timeout for synchronously walking an application's NSMenu via the
+/// Accessibility API. Most well-behaved apps respond in a few ms; this
+/// caps the wait so a stuck app can't block the menu scanner.
+const MENU_BAR_READ_TIMEOUT: Duration = Duration::from_millis(500);
+
 /// Cap the longer side of a thumbnail at this many pixels. Sized for
 /// the spawn-popover picker — small enough to encode quickly and
 /// keep the WebRTC payload under 30 KB at the WebP quality below.
@@ -122,7 +131,7 @@ pub fn spawn(
     tokio::spawn(async move {
         let mut tracked: HashMap<CGWindowID, Tracked> = HashMap::new();
         let mut announced_pids: HashMap<i32, String> = HashMap::new();
-        let mut tick = interval(Duration::from_secs(1));
+        let mut tick = interval(WINDOW_LIST_TICK);
 
         loop {
             tokio::select! {
@@ -353,7 +362,7 @@ fn run_menu_poll_loop(
         }
         first = false;
 
-        let menu = crate::menu::read_menu_bar_with_timeout(pid, Duration::from_millis(500));
+        let menu = crate::menu::read_menu_bar_with_timeout(pid, MENU_BAR_READ_TIMEOUT);
         if menu.is_empty() {
             warn!(
                 "menu: AX read returned 0 items for pid={pid} window={log_window} \
