@@ -1158,14 +1158,7 @@ sys.exit(1 if failed > 0 else 0)
 test.describe.serial("GLX and OpenGL", () => {
 	test.setTimeout(120_000);
 
-	// DRISW path falls through to indirect GLX, where our glGetString
-	// reply for GL_VENDOR / GL_RENDERER returns garbled bytes (visible
-	// as `OpenGL vendor string: ��u��` in glxinfo output). Mesa
-	// otherwise identifies the device correctly via the
-	// GLX_MESA_query_renderer extension. Tracking this as a follow-up
-	// in todo.md; the indirect-mode glxinfo test below still exercises
-	// the rest of the GLX surface.
-	test.skip("glxinfo works with DRISW software rendering", async ({
+	test("glxinfo works with DRISW software rendering", async ({
 		sidecarContainer,
 	}) => {
 		const output = await execInSidecar(
