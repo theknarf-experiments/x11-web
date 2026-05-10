@@ -14,6 +14,18 @@
 //!   [32..]   extra data (only if length > 0)
 //! ```
 
+use super::core::{X11_EVENT_SIZE as REPLY_HEADER_SIZE, X11_WORD_SIZE as BYTES_PER_WORD};
+
+/// Reply type byte: X11 reply messages always have byte 0 == 1.
+const REPLY_TYPE_BYTE: u8 = 1;
+
+mod offset {
+    /// Sequence number (u16) — bytes 2..4.
+    pub(super) const SEQUENCE: usize = 2;
+    /// Length in 4-byte words of extra data beyond the 32-byte header (u32).
+    pub(super) const LENGTH: usize = 4;
+}
+
 /// Builder for core X11 replies.
 ///
 /// Handles the 32-byte header automatically. Callers set fields by name.
@@ -26,21 +38,24 @@ pub(crate) struct ReplyBuf {
 impl ReplyBuf {
     /// Create a fixed 32-byte reply (no extra data, length=0).
     pub(crate) fn fixed(seq: u16, msb_first: bool) -> Self {
-        let mut buf = vec![0u8; 32];
-        buf[0] = 1;
-        write_u16(&mut buf, 2, seq, msb_first);
+        let mut buf = vec![0u8; REPLY_HEADER_SIZE];
+        buf[0] = REPLY_TYPE_BYTE;
+        write_u16(&mut buf, offset::SEQUENCE, seq, msb_first);
         Self { buf, msb_first }
     }
 
     /// Create a reply with extra data. `length` is set to `extra_bytes / 4`.
     /// `extra_bytes` must be a multiple of 4.
     pub(crate) fn with_extra(seq: u16, extra_bytes: usize, msb_first: bool) -> Self {
-        debug_assert!(extra_bytes % 4 == 0, "extra_bytes must be a multiple of 4");
-        let extra_words = (extra_bytes / 4) as u32;
-        let mut buf = vec![0u8; 32 + extra_bytes];
-        buf[0] = 1;
-        write_u16(&mut buf, 2, seq, msb_first);
-        write_u32(&mut buf, 4, extra_words, msb_first);
+        debug_assert!(
+            extra_bytes % BYTES_PER_WORD == 0,
+            "extra_bytes must be a multiple of 4"
+        );
+        let extra_words = (extra_bytes / BYTES_PER_WORD) as u32;
+        let mut buf = vec![0u8; REPLY_HEADER_SIZE + extra_bytes];
+        buf[0] = REPLY_TYPE_BYTE;
+        write_u16(&mut buf, offset::SEQUENCE, seq, msb_first);
+        write_u32(&mut buf, offset::LENGTH, extra_words, msb_first);
         Self { buf, msb_first }
     }
 

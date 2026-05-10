@@ -4,7 +4,7 @@ use crate::xserver::reply::ReplyBuf;
 use tracing::debug;
 
 use super::super::super::client::{ClientState, XkbGroupCompat, XkbSymInterpretation};
-use super::{SA_LOCK_MODS, SA_NO_ACTION, SA_SET_MODS};
+use super::{MAX_KEY_CODE, MIN_KEY_CODE, SA_LOCK_MODS, SA_NO_ACTION, SA_SET_MODS};
 
 // XKB SI flags
 const SI_LOCKING_KEY: u8 = 2;
@@ -351,7 +351,7 @@ pub(crate) fn handle_xkb_set_compat_map(state: &mut ClientState, data: &[u8]) ->
 /// This is the core of XKB compat compilation per the XKB spec §15.3.
 fn recompute_compat_actions(state: &mut ClientState) {
     // Walk all keycodes in the keymap range
-    for keycode in 8u8..=255u8 {
+    for keycode in MIN_KEY_CODE..=MAX_KEY_CODE {
         // Skip keys that have explicit actions (set by SetMap with XkbExplicit)
         if state.xkb_explicit.get(&keycode).copied().unwrap_or(0) & 0x01 != 0 {
             // XkbExplicitKeyAction (bit 0) — client set this action explicitly

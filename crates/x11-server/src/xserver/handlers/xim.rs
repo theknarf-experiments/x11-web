@@ -15,7 +15,7 @@ use tracing::debug;
 use super::*;
 use crate::compose::{ComposeResult, ComposeState};
 use crate::xserver::event::{serialize_event, serialize_event_with_layout};
-use x11rb_protocol::protocol::xproto::ClientMessageEvent;
+use x11rb_protocol::protocol::xproto::{ClientMessageEvent, ModMask};
 
 /// Wire-field layout for `ClientMessageEvent` with format=8 — only header is
 /// byteswapped; the 20-byte data payload is opaque bytes.
@@ -79,6 +79,10 @@ const XN_CLIENT_WINDOW: u16 = 1;
 const XN_FOCUS_WINDOW: u16 = 2;
 const XN_PREEDIT_ATTRIBUTES: u16 = 3;
 const XN_SPOT_LOCATION: u16 = 5;
+
+// Latin-1 keysyms 'a' and 'z' — keysym values match ASCII for the Latin-1 block.
+const KEYSYM_LATIN_LOWER_A: u32 = 0x61;
+const KEYSYM_LATIN_LOWER_Z: u32 = 0x7a;
 
 // XIM message header layout (after the 4-byte ClientMessage type/format/seq
 // trailer): major (1), minor (1), length-in-words (u16 LE), then the payload.
@@ -866,8 +870,8 @@ fn handle_xim_forward_event(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
     let x_event = &data[12..44];
     let event_type = x_event[0] & !SEND_EVENT_FLAG;
 
-    // Only process KeyPress events (type 2)
-    if event_type != 2 {
+    // Only process KeyPress events.
+    if event_type != KEY_PRESS_EVENT {
         return Vec::new();
     }
 
@@ -881,10 +885,10 @@ fn handle_xim_forward_event(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
     let custom_keymap = state.custom_keymap.lock().unwrap();
     let (normal_keysym, shifted_keysym) = super::resolve_keysym(keycode, &custom_keymap);
     drop(custom_keymap);
-    let shift_pressed = modifier_state & 0x0001 != 0;
-    let caps_lock = modifier_state & 0x0002 != 0;
+    let shift_pressed = modifier_state & u16::from(ModMask::SHIFT) != 0;
+    let caps_lock = modifier_state & u16::from(ModMask::LOCK) != 0;
 
-    let keysym = if (0x61..=0x7a).contains(&normal_keysym) {
+    let keysym = if (KEYSYM_LATIN_LOWER_A..=KEYSYM_LATIN_LOWER_Z).contains(&normal_keysym) {
         // Letter key: apply shift and caps lock
         if shift_pressed ^ caps_lock {
             shifted_keysym

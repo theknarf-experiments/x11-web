@@ -1,4 +1,5 @@
 use x11rb_protocol::protocol::xinput as xi;
+use x11rb_protocol::protocol::xproto::GE_GENERIC_EVENT;
 
 use x11_web_protocol::InputEvent;
 
@@ -74,7 +75,7 @@ fn find_passive_grab<'a>(
 /// queue` and a hard abort.
 pub fn build_raw_motion_event(sequence: u16, msb_first: bool) -> Vec<u8> {
     let event = xi::RawMotionEvent {
-        response_type: 35, // GenericEvent
+        response_type: GE_GENERIC_EVENT,
         extension: XI_MAJOR_OPCODE,
         sequence,
         length: 0,
@@ -150,7 +151,7 @@ pub(crate) fn build_xi_pointer_event(
     let axisvalues: Vec<xi::Fp3232> = sorted.iter().map(|a| fp3232(a.value)).collect();
 
     let event = xi::ButtonPressEvent {
-        response_type: 35, // GenericEvent
+        response_type: GE_GENERIC_EVENT,
         extension: XI_MAJOR_OPCODE,
         sequence: seq,
         length: 0, // patched after first serialize
@@ -537,7 +538,7 @@ pub fn build_raw_pointer_event(
     msb_first: bool,
 ) -> Vec<u8> {
     let event = xi::RawButtonPressEvent {
-        response_type: 35,
+        response_type: GE_GENERIC_EVENT,
         extension: XI_MAJOR_OPCODE,
         sequence,
         length: 0,
@@ -572,7 +573,7 @@ pub(crate) fn build_xi_focus_event(
     msb_first: bool,
 ) -> Vec<u8> {
     let event = xi::EnterEvent {
-        response_type: 35, // GenericEvent
+        response_type: GE_GENERIC_EVENT,
         extension: XI_MAJOR_OPCODE,
         sequence: seq,
         length: 0,
@@ -725,7 +726,7 @@ pub fn build_xi_key_events(
 
     if let Some(event_window) = device_target {
         let event = xi::KeyPressEvent {
-            response_type: 35, // GenericEvent
+            response_type: GE_GENERIC_EVENT,
             extension: XI_MAJOR_OPCODE,
             sequence: seq,
             length: 0,
@@ -766,7 +767,7 @@ pub fn build_xi_key_events(
 
     if any_raw {
         let raw = xi::RawKeyPressEvent {
-            response_type: 35,
+            response_type: GE_GENERIC_EVENT,
             extension: XI_MAJOR_OPCODE,
             sequence: seq,
             length: 0,

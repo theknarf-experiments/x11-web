@@ -5,6 +5,14 @@ use x11rb_protocol::protocol::xproto::{
     ImageText16Request, ImageText8Request, PolyText16Request, PolyText8Request,
 };
 
+/// PolyText item-length sentinel: 255 marks a font-switch item; the next
+/// 4 bytes are the new font ID (5-byte item total).
+const POLYTEXT_FONT_SHIFT: usize = 255;
+/// PolyText item-length sentinel: 0 marks the end of the item list (terminator).
+const POLYTEXT_TERMINATOR: usize = 0;
+/// Wire size of a font-switch item: 1-byte tag (255) + 4-byte font ID.
+const POLYTEXT_FONT_SHIFT_SIZE: usize = 5;
+
 // ---------------------------------------------------------------------------
 // Opcode 74: PolyText8
 // ---------------------------------------------------------------------------
@@ -42,19 +50,19 @@ pub(crate) fn handle_poly_text8(state: &mut ClientState, req: &PolyText8Request)
     while offset < end {
         let item_len = items_data[offset] as usize;
 
-        if item_len == 255 {
+        if item_len == POLYTEXT_FONT_SHIFT {
             // Font-switch item: length=255, then 4-byte font ID.
             // Per X11 spec, change the active font for subsequent text items.
-            if offset + 5 <= end {
+            if offset + POLYTEXT_FONT_SHIFT_SIZE <= end {
                 let new_font_id = state.read_u32(items_data, offset + 1);
                 if let Some(f) = state.font_manager.get_font(new_font_id) {
                     font = Some(f);
                 }
             }
-            offset += 5;
+            offset += POLYTEXT_FONT_SHIFT_SIZE;
             continue;
         }
-        if item_len == 0 {
+        if item_len == POLYTEXT_TERMINATOR {
             break;
         }
         if offset + 2 + item_len > end {
@@ -138,18 +146,18 @@ pub(crate) fn handle_poly_text16(state: &mut ClientState, req: &PolyText16Reques
     while offset < end {
         let item_len = items_data[offset] as usize;
 
-        if item_len == 255 {
+        if item_len == POLYTEXT_FONT_SHIFT {
             // Font-switch item: change active font for subsequent text items.
-            if offset + 5 <= end {
+            if offset + POLYTEXT_FONT_SHIFT_SIZE <= end {
                 let new_font_id = state.read_u32(items_data, offset + 1);
                 if let Some(f) = state.font_manager.get_font(new_font_id) {
                     font = Some(f);
                 }
             }
-            offset += 5;
+            offset += POLYTEXT_FONT_SHIFT_SIZE;
             continue;
         }
-        if item_len == 0 {
+        if item_len == POLYTEXT_TERMINATOR {
             break;
         }
         if offset + 2 + item_len * 2 > end {
