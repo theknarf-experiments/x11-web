@@ -176,25 +176,22 @@ test.describe("Orphan: GLX integration", () => {
 		}
 	});
 
-	test("glxgears renders frames via OSMesa", async ({ page, sidecarContainer, frontendUrl }) => {
+	test("glxgears renders frames via OSMesa", async ({ sidecarContainer }) => {
 		test.setTimeout(30_000);
-		// Start glxgears in the background, capped to 10s so it can't outlive
-		// the test (afterEach killApps handles cleanup as a backstop).
-		await sidecarContainer.exec([
-			"bash",
-			"-c",
-			"export DISPLAY=:99; timeout 10 glxgears -geometry 300x300+50+50 &",
+		// Run glxgears for ~3 seconds and verify the X server is still alive
+		// after.  We don't assert on the FPS-output line because OSMesa
+		// can take a moment to emit it — the regression we care about is
+		// "glxgears crashes the server", which `xdpyinfo` after the run
+		// detects reliably.
+		const result = await sidecarContainer.exec([
+			"bash", "-c",
+			[
+				"export DISPLAY=:99",
+				"timeout 3 glxgears -geometry 300x300+50+50 >/dev/null 2>&1 || true",
+				"xdpyinfo >/dev/null 2>&1 && echo SERVER_ALIVE || echo SERVER_DEAD",
+			].join("\n"),
 		]);
-		// Wait for window to appear
-		await page.goto(frontendUrl);
-		await waitForDock(page);
-		await page.waitForTimeout(3000);
-
-		// Check if any window appeared (glxgears may fail without real GL)
-		const windowFrames = page.locator('[data-testid="window-frame"]');
-		const count = await windowFrames.count();
-		console.log(`glxgears: ${count} window(s) appeared`);
-		// This test validates the GLX pipeline doesn't crash
+		expect(result.output).toContain("SERVER_ALIVE");
 	});
 });
 

@@ -310,13 +310,22 @@ test.describe.serial("Application compatibility", () => {
 	// --- Multi-client interaction ---
 
 	test("Multiple X clients can coexist", async ({ sidecarContainer }) => {
-		// Kill any leftover instances from prior tests so pgrep counts reflect
-		// only what this test starts. Use pkill+wait to ensure processes are
-		// fully reaped before we (re)spawn them — `killApps` only sleeps
-		// 1 s, which is borderline on a loaded CI worker.
+		// Kill any leftover xeyes/xclock/xlogo instances from previous tests
+		// (or a previous Playwright retry of this test), then poll until
+		// pgrep agrees they're gone. Without this, retried runs see the
+		// previous attempt's processes and the assertion below explodes.
 		await execInSidecar(
 			sidecarContainer,
-			"pkill -9 -f 'xeyes|xclock|xlogo' 2>/dev/null; sleep 2; true",
+			[
+				"pkill -KILL -x xeyes  2>/dev/null; true",
+				"pkill -KILL -x xclock 2>/dev/null; true",
+				"pkill -KILL -x xlogo  2>/dev/null; true",
+				"for _ in $(seq 1 20); do",
+				"  n=$(pgrep -x 'xeyes|xclock|xlogo' 2>/dev/null | wc -l)",
+				"  [ \"$n\" = \"0\" ] && break",
+				"  sleep 0.2",
+				"done",
+			].join("\n"),
 		);
 		await execInSidecar(sidecarContainer, "xeyes &");
 		await execInSidecar(sidecarContainer, "xclock -digital &");
@@ -325,9 +334,9 @@ test.describe.serial("Application compatibility", () => {
 
 		const ps = await execInSidecar(
 			sidecarContainer,
-			`echo "xeyes=$(pgrep xeyes | wc -l)"
-echo "xclock=$(pgrep xclock | wc -l)"
-echo "xlogo=$(pgrep xlogo | wc -l)"`,
+			`echo "xeyes=$(pgrep -x xeyes | wc -l)"
+echo "xclock=$(pgrep -x xclock | wc -l)"
+echo "xlogo=$(pgrep -x xlogo | wc -l)"`,
 		);
 		expect(ps).toContain("xeyes=1");
 		expect(ps).toContain("xclock=1");
