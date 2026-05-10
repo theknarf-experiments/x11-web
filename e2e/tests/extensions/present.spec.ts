@@ -3,7 +3,7 @@
  * reorganisation pass.
  */
 
-import { test, expect, waitForDock, runPythonScript } from "../fixtures";
+import { test, expect, runPythonScript } from "../fixtures";
 import type { StartedTestContainer } from "testcontainers";
 
 async function execInSidecar(
@@ -150,11 +150,6 @@ test.describe("Present extension conformance", () => {
 });
 
 test.describe("Present extension conformance", () => {
-	test.beforeEach(async ({ page, frontendUrl }) => {
-		await page.goto(frontendUrl);
-		await waitForDock(page);
-	});
-
 	test("Present QueryVersion returns version >= 1.0", async ({ sidecarContainer }) => {
 		const result = await runPythonScript(sidecarContainer, "present_queryversion.py", { env: { DISPLAY: ":99" } });
 		expect(result.output).toContain("PASS: Present extension available");

@@ -3,7 +3,7 @@
  * reorganisation pass.
  */
 
-import { test, expect, waitForDock, runPythonScript } from "../fixtures";
+import { test, expect, runPythonScript } from "../fixtures";
 import type { StartedTestContainer } from "testcontainers";
 
 async function execInSidecar(
@@ -70,11 +70,6 @@ test.describe("XFIXES extension conformance", () => {
 });
 
 test.describe("XFIXES pointer barriers", () => {
-	test.beforeEach(async ({ page, frontendUrl }) => {
-		await page.goto(frontendUrl);
-		await waitForDock(page);
-	});
-
 	test("CreatePointerBarrier and DeletePointerBarrier round-trip", async ({ sidecarContainer }) => {
 		const result = await runPythonScript(sidecarContainer, "xfixes_pointer_barrier_create_delete.py", { env: { DISPLAY: ":99" } });
 		expect(result.output).toContain(

@@ -3,14 +3,9 @@
  * reorganisation pass.
  */
 
-import { test, expect, waitForDock, runPythonScript } from "../fixtures";
+import { test, expect, runPythonScript } from "../fixtures";
 
 test.describe("XVideo extension FOURCC formats", () => {
-	test.beforeEach(async ({ page, frontendUrl }) => {
-		await page.goto(frontendUrl);
-		await waitForDock(page);
-	});
-
 	test("XVideo QueryAdaptors and ListImageFormats return formats", async ({ sidecarContainer }) => {
 		const result = await runPythonScript(sidecarContainer, "xvideo_queryadaptors_listformats.py", { env: { DISPLAY: ":99" } });
 		expect(result.output).toContain("PASS: XVideo formats advertised");

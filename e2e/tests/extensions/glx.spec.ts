@@ -66,11 +66,6 @@ test.describe("GLX display lists", () => {
 });
 
 test.describe("GLX extension client info", () => {
-	test.beforeEach(async ({ page, frontendUrl }) => {
-		await page.goto(frontendUrl);
-		await waitForDock(page);
-	});
-
 	test("glxinfo connects and retrieves vendor string", async ({ sidecarContainer }) => {
 		const result = await sidecarContainer.exec([
 			"bash",

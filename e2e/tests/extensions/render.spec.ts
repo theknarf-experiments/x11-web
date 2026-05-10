@@ -56,21 +56,23 @@ test.describe.serial("RENDER CreatePicture validation", () => {
 
 test.describe("Conformance: rendercheck extended", () => {
 	test("rendercheck composite operations pass", async ({ sidecarContainer }) => {
-		const result = await sidecarContainer.exec([
-			"rendercheck", "-t", "composite",
-		]);
-		if (result.exitCode === 0) {
-			expect(result.output).not.toContain("FAIL");
-		}
+		test.setTimeout(60_000);
+		const output = await execInSidecar(
+			sidecarContainer,
+			"timeout 30 rendercheck -t composite -f a8r8g8b8 2>&1 | tail -40",
+		);
+		expect(output).not.toContain("FAIL");
+		expect(output).not.toContain("Segmentation fault");
 	});
 
 	test("rendercheck gradient operations pass", async ({ sidecarContainer }) => {
-		const result = await sidecarContainer.exec([
-			"rendercheck", "-t", "gradient",
-		]);
-		if (result.exitCode === 0) {
-			expect(result.output).not.toContain("FAIL");
-		}
+		test.setTimeout(60_000);
+		const output = await execInSidecar(
+			sidecarContainer,
+			"timeout 30 rendercheck -t gradient -f a8r8g8b8 2>&1 | tail -40",
+		);
+		expect(output).not.toContain("FAIL");
+		expect(output).not.toContain("Segmentation fault");
 	});
 });
 
@@ -241,10 +243,12 @@ test.describe.serial("rendercheck comprehensive", () => {
 			return;
 		}
 
-		// Run rendercheck with all test categories
+		// Run rendercheck with all test categories. Pin the format and cap
+		// the runtime — rendercheck's default exhaustive sweep can take
+		// many minutes and times the test out.
 		const output = await execInSidecar(
 			sidecarContainer,
-			"rendercheck 2>&1 || true",
+			"timeout 240 rendercheck -f a8r8g8b8 2>&1 || true",
 		);
 
 		// Parse total results

@@ -3,7 +3,7 @@
  * reorganisation pass.
  */
 
-import { test, expect, waitForDock, runPythonScript } from "../fixtures";
+import { test, expect, runPythonScript } from "../fixtures";
 
 test.describe("VidMode gamma", () => {
 	test("xgamma can read current gamma values", async ({ sidecarContainer }) => {
@@ -25,11 +25,6 @@ test.describe("VidMode gamma", () => {
 });
 
 test.describe("VidMode extension mode management", () => {
-	test.beforeEach(async ({ page, frontendUrl }) => {
-		await page.goto(frontendUrl);
-		await waitForDock(page);
-	});
-
 	test("VidMode GetAllModeLines returns at least one mode", async ({ sidecarContainer }) => {
 		const result = await runPythonScript(sidecarContainer, "vidmode_getallmodelines.py", { env: { DISPLAY: ":99" } });
 		expect(result.output).toContain("PASS: VidMode returned modes");

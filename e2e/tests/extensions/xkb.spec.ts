@@ -3,7 +3,7 @@
  * reorganisation pass.
  */
 
-import { test, expect, waitForDock, runPythonScript } from "../fixtures";
+import { test, expect, runPythonScript } from "../fixtures";
 import type { StartedTestContainer } from "testcontainers";
 
 async function execInSidecar(
@@ -478,11 +478,6 @@ test.describe("Extension enumeration", () => {
 });
 
 test.describe("Extension enumeration completeness", () => {
-	test.beforeEach(async ({ page, frontendUrl }) => {
-		await page.goto(frontendUrl);
-		await waitForDock(page);
-	});
-
 	test("all required extensions are listed by xdpyinfo", async ({ sidecarContainer }) => {
 		const result = await sidecarContainer.exec([
 			"bash",

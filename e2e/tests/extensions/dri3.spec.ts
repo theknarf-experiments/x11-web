@@ -5,14 +5,9 @@
  * registering the extension without a real handler) trips the suite.
  */
 
-import { test, expect, waitForDock } from "../fixtures";
+import { test, expect } from "../fixtures";
 
 test.describe("DRI3 is not advertised", () => {
-	test.beforeEach(async ({ page, frontendUrl }) => {
-		await page.goto(frontendUrl);
-		await waitForDock(page);
-	});
-
 	test("xdpyinfo does not list DRI3", async ({ sidecarContainer }) => {
 		const result = await sidecarContainer.exec(["xdpyinfo", "-queryExtensions"]);
 		expect(result.exitCode).toBe(0);

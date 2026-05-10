@@ -3,7 +3,7 @@
  * reorganisation pass.
  */
 
-import { test, expect, waitForDock, runPythonScript } from "../fixtures";
+import { test, expect, runPythonScript } from "../fixtures";
 import type { StartedTestContainer } from "testcontainers";
 
 async function execInSidecar(
@@ -43,11 +43,6 @@ test.describe.serial("COMPOSITE extension compliance", () => {
 });
 
 test.describe("Composite overlay window refcounting", () => {
-	test.beforeEach(async ({ page, frontendUrl }) => {
-		await page.goto(frontendUrl);
-		await waitForDock(page);
-	});
-
 	test("Composite extension QueryVersion and overlay operations", async ({ sidecarContainer }) => {
 		const result = await runPythonScript(sidecarContainer, "composite_overlay_get_release.py", { env: { DISPLAY: ":99" } });
 		expect(result.output).toContain(

@@ -3,14 +3,9 @@
  * reorganisation pass.
  */
 
-import { test, expect, waitForDock } from "../fixtures";
+import { test, expect } from "../fixtures";
 
 test.describe("MIT-MAGIC-COOKIE-1 authentication", () => {
-	test.beforeEach(async ({ page, frontendUrl }) => {
-		await page.goto(frontendUrl);
-		await waitForDock(page);
-	});
-
 	test("xauth list shows a cookie for display :99", async ({ sidecarContainer }) => {
 		// The X server writes its auth file to a fixed path
 		// (/tmp/.x11-web-Xauthority — see X11Server::write_xauthority).

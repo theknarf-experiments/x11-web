@@ -3,7 +3,7 @@
  * reorganisation pass.
  */
 
-import { test, expect, waitForDock, runPythonScript } from "../fixtures";
+import { test, expect, runPythonScript } from "../fixtures";
 import type { StartedTestContainer } from "testcontainers";
 
 async function execInSidecar(
@@ -55,11 +55,6 @@ test.describe("XIM protocol", () => {
 });
 
 test.describe("XIM input method protocol", () => {
-	test.beforeEach(async ({ page, frontendUrl }) => {
-		await page.goto(frontendUrl);
-		await waitForDock(page);
-	});
-
 	test("XIM server is reachable and accepts connections", async ({ sidecarContainer }) => {
 		const result = await runPythonScript(sidecarContainer, "xim_server_reachable.py", { env: { DISPLAY: ":99" } });
 		expect(result.output).toContain("PASS:");

@@ -3,14 +3,9 @@
  * reorganisation pass.
  */
 
-import { test, expect, waitForDock } from "../fixtures";
+import { test, expect } from "../fixtures";
 
 test.describe("Big requests extension", () => {
-	test.beforeEach(async ({ page, frontendUrl }) => {
-		await page.goto(frontendUrl);
-		await waitForDock(page);
-	});
-
 	test("BIG-REQUESTS extension is available", async ({ sidecarContainer }) => {
 		const result = await sidecarContainer.exec([
 			"bash",

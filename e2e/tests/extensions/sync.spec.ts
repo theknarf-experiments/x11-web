@@ -3,7 +3,7 @@
  * reorganisation pass.
  */
 
-import { test, expect, waitForDock, runPythonScript } from "../fixtures";
+import { test, expect, runPythonScript } from "../fixtures";
 import type { StartedTestContainer } from "testcontainers";
 
 async function execInSidecar(
@@ -39,11 +39,6 @@ test.describe("SYNC extension conformance", () => {
 });
 
 test.describe("SYNC extension fence operations", () => {
-	test.beforeEach(async ({ page, frontendUrl }) => {
-		await page.goto(frontendUrl);
-		await waitForDock(page);
-	});
-
 	test("SYNC extension version and counter operations", async ({ sidecarContainer }) => {
 		const result = await runPythonScript(sidecarContainer, "sync_extension_version_counters.py", { env: { DISPLAY: ":99" } });
 		expect(result.output).toContain("PASS: SYNC extension available");
