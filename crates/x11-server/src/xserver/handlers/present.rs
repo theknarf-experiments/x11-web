@@ -23,7 +23,7 @@ use x11rb_protocol::protocol::xc_misc::{
 /// Present major opcode (assigned at QueryExtension time).
 const PRESENT_MAJOR_OPCODE: u8 = 148;
 /// XGE response_type for all Present events.
-const GENERIC_EVENT: u8 = 35;
+const GENERIC_EVENT: u8 = x11rb_protocol::protocol::xproto::GE_GENERIC_EVENT;
 
 /// Wire-field layout for `present::CompleteNotifyEvent` (40 bytes).
 const COMPLETE_NOTIFY_LAYOUT: &[(usize, usize)] = &[
@@ -86,7 +86,7 @@ pub(crate) fn handle_xc_misc_request(state: &mut ClientState, data: &[u8], seq: 
             // Per the XC-MISC spec, first try to return recycled (freed) IDs
             // as individual IDs wouldn't form a contiguous range; fall back
             // to allocating new IDs from the client's ID space.
-            let mask: u32 = 0x003FFFFF;
+            let mask: u32 = crate::xserver::core::RESOURCE_ID_MASK;
             let current_offset = state.next_xid.wrapping_sub(state.resource_id_base) & mask;
             let remaining = mask.saturating_sub(current_offset) + 1;
             let range_size = remaining.min(65536);
@@ -117,7 +117,7 @@ pub(crate) fn handle_xc_misc_request(state: &mut ClientState, data: &[u8], seq: 
 
             // Fill remaining from sequential allocation
             if ids.len() < ids_to_return {
-                let mask: u32 = 0x003FFFFF;
+                let mask: u32 = crate::xserver::core::RESOURCE_ID_MASK;
                 let current_offset = state.next_xid.wrapping_sub(state.resource_id_base) & mask;
                 let remaining = mask.saturating_sub(current_offset) + 1;
                 let sequential_count = ((ids_to_return - ids.len()) as u32).min(remaining);

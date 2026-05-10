@@ -12,7 +12,9 @@ use x11rb_protocol::x11_utils::Serialize;
 
 use super::super::client::ClientState;
 use crate::framebuffer::Framebuffer;
-use crate::xserver::core::require_len;
+use crate::xserver::core::{
+    depth_for_visual, require_len, VISUAL_TRUE_COLOR_24, VISUAL_TRUE_COLOR_ARGB_32,
+};
 use crate::xserver::reply::ReplyBuf;
 
 /// DBE - Double Buffer Extension (opcode 157)
@@ -188,13 +190,13 @@ pub(crate) fn handle_dbe_request(state: &mut ClientState, data: &[u8], seq: u16)
             let supported_visuals = vec![VisualInfos {
                 infos: vec![
                     VisualInfo {
-                        visual_id: 0x21, // ROOT_VISUAL
-                        depth: 24,
+                        visual_id: VISUAL_TRUE_COLOR_24,
+                        depth: depth_for_visual(VISUAL_TRUE_COLOR_24),
                         perf_level: 0,
                     },
                     VisualInfo {
-                        visual_id: 0x40, // ARGB visual
-                        depth: 32,
+                        visual_id: VISUAL_TRUE_COLOR_ARGB_32,
+                        depth: depth_for_visual(VISUAL_TRUE_COLOR_ARGB_32),
                         perf_level: 0,
                     },
                 ],

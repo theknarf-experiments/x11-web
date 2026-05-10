@@ -4,6 +4,16 @@ use tracing::debug;
 
 use super::super::client::ClientState;
 
+/// SECURITY `CA` value-mask bits for `GenerateAuthorization` — controls which
+/// optional fields follow the request body in 4-byte words. Order on the wire
+/// is the bit order below: timeout, trust_level, group, event_mask.
+mod ca_value_mask {
+    pub(super) const TIMEOUT: u32 = 1 << 0;
+    pub(super) const TRUST_LEVEL: u32 = 1 << 1;
+    pub(super) const GROUP: u32 = 1 << 2;
+    pub(super) const EVENT_MASK: u32 = 1 << 3;
+}
+
 /// SECURITY (opcode 155)
 /// Note: x11rb-protocol does not include the SECURITY extension, so these
 /// requests use manual parsing.
@@ -39,19 +49,19 @@ pub(crate) fn handle_security_request(state: &mut ClientState, data: &[u8], seq:
                 let mut event_mask: u32 = 0;
 
                 let mut voff = values_off;
-                if value_mask & 1 != 0 && voff + 4 <= data.len() {
+                if value_mask & ca_value_mask::TIMEOUT != 0 && voff + 4 <= data.len() {
                     timeout = state.read_u32(data, voff);
                     voff += 4;
                 }
-                if value_mask & 2 != 0 && voff + 4 <= data.len() {
+                if value_mask & ca_value_mask::TRUST_LEVEL != 0 && voff + 4 <= data.len() {
                     trust_level = state.read_u32(data, voff);
                     voff += 4;
                 }
-                if value_mask & 4 != 0 && voff + 4 <= data.len() {
+                if value_mask & ca_value_mask::GROUP != 0 && voff + 4 <= data.len() {
                     group = state.read_u32(data, voff);
                     voff += 4;
                 }
-                if value_mask & 8 != 0 && voff + 4 <= data.len() {
+                if value_mask & ca_value_mask::EVENT_MASK != 0 && voff + 4 <= data.len() {
                     event_mask = state.read_u32(data, voff);
                 }
 

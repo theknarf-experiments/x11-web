@@ -1,7 +1,19 @@
 //! Colormap state for TrueColor, PseudoColor, DirectColor, GrayScale,
 //! StaticGray, and StaticColor visuals.
 
-use x11rb_protocol::protocol::xproto::VisualClass;
+use x11rb_protocol::protocol::xproto::{ColorFlag, VisualClass};
+
+/// 3-3-2 RGB packing used by `StaticColor` visuals: pixel index `RRRGGGBB`.
+mod rgb_332 {
+    pub(super) const R_SHIFT: u32 = 5;
+    pub(super) const G_SHIFT: u32 = 2;
+    pub(super) const RG_MASK: u32 = 0x7;
+    pub(super) const B_MASK: u32 = 0x3;
+    /// Maximum 3-bit value (used as scaling denominator for R/G).
+    pub(super) const RG_MAX: u32 = 7;
+    /// Maximum 2-bit value (used as scaling denominator for B).
+    pub(super) const B_MAX: u32 = 3;
+}
 
 /// Colormap state for both TrueColor (read-only) and PseudoColor (writable) visuals.
 #[derive(Clone)]
@@ -101,13 +113,13 @@ impl ColormapState {
         let mut entries = Vec::with_capacity(n_entries);
         for i in 0..n_entries {
             // 3-3-2 decomposition: RRRGGGBB
-            let r = ((i >> 5) & 0x7) as u32;
-            let g = ((i >> 2) & 0x7) as u32;
-            let b = (i & 0x3) as u32;
+            let r = ((i as u32 >> rgb_332::R_SHIFT) & rgb_332::RG_MASK) as u32;
+            let g = ((i as u32 >> rgb_332::G_SHIFT) & rgb_332::RG_MASK) as u32;
+            let b = (i as u32 & rgb_332::B_MASK) as u32;
             entries.push((
-                ((r * 65535) / 7) as u16,
-                ((g * 65535) / 7) as u16,
-                ((b * 65535) / 3) as u16,
+                ((r * 65535) / rgb_332::RG_MAX) as u16,
+                ((g * 65535) / rgb_332::RG_MAX) as u16,
+                ((b * 65535) / rgb_332::B_MAX) as u16,
             ));
         }
         Self {
@@ -129,9 +141,8 @@ impl ColormapState {
 
     /// Look up the RGB value for a pixel index.
     pub(crate) fn lookup(&self, pixel: u32) -> (u16, u16, u16) {
-        let vc = u8::from(self.visual_class);
-        match vc {
-            5 => {
+        match self.visual_class {
+            VisualClass::DIRECT_COLOR => {
                 // DirectColor: decompose pixel into per-channel indices and look up each
                 let (r8, g8, b8) = crate::framebuffer::unpack_rgb(pixel);
                 let (ri, gi, bi) = (r8 as usize, g8 as usize, b8 as usize);
@@ -153,8 +164,11 @@ impl ColormapState {
                 };
                 (r, g, b)
             }
-            0..=3 => {
-                // StaticGray, GrayScale, StaticColor, PseudoColor: index into table
+            VisualClass::STATIC_GRAY
+            | VisualClass::GRAY_SCALE
+            | VisualClass::STATIC_COLOR
+            | VisualClass::PSEUDO_COLOR => {
+                // Indexed: pixel directly indexes the entry table.
                 if (pixel as usize) < self.entries.len() {
                     self.entries[pixel as usize]
                 } else {
@@ -162,7 +176,7 @@ impl ColormapState {
                 }
             }
             _ => {
-                // TrueColor: decompose pixel
+                // TrueColor (and any unrecognized class): decompose pixel.
                 let (r8, g8, b8) = crate::framebuffer::unpack_rgb(pixel);
                 let (r, g, b) = (r8 as u16, g8 as u16, b8 as u16);
                 (r << 8 | r, g << 8 | g, b << 8 | b)
@@ -172,22 +186,15 @@ impl ColormapState {
 
     /// Allocate a color cell and return the pixel index.
     pub(crate) fn alloc_color(&mut self, r: u16, g: u16, b: u16) -> Option<u32> {
-        let vc = u8::from(self.visual_class);
-        match vc {
-            4 => {
-                // TrueColor: compute pixel directly
+        match self.visual_class {
+            VisualClass::TRUE_COLOR | VisualClass::DIRECT_COLOR => {
+                // Compute pixel directly from RGB.
                 let pixel =
                     crate::framebuffer::pack_rgb((r >> 8) as u8, (g >> 8) as u8, (b >> 8) as u8);
                 Some(pixel)
             }
-            5 => {
-                // DirectColor: compute pixel from per-channel lookup.
-                let pixel =
-                    crate::framebuffer::pack_rgb((r >> 8) as u8, (g >> 8) as u8, (b >> 8) as u8);
-                Some(pixel)
-            }
-            0 | 2 => {
-                // StaticGray / StaticColor: read-only, find closest match
+            VisualClass::STATIC_GRAY | VisualClass::STATIC_COLOR => {
+                // Read-only: find closest match by Euclidean distance in RGB space.
                 let mut best_idx = 0u32;
                 let mut best_dist = u64::MAX;
                 for (i, &(er, eg, eb)) in self.entries.iter().enumerate() {
@@ -306,18 +313,20 @@ impl ColormapState {
         for &(pixel, r, g, b, flags) in items {
             if (pixel as usize) < self.entries.len() {
                 let entry = &mut self.entries[pixel as usize];
-                if flags & 0x01 != 0 {
+                if flags & u8::from(ColorFlag::RED) != 0 {
                     entry.0 = r;
-                } // DoRed
-                if flags & 0x02 != 0 {
+                }
+                if flags & u8::from(ColorFlag::GREEN) != 0 {
                     entry.1 = g;
-                } // DoGreen
-                if flags & 0x04 != 0 {
+                }
+                if flags & u8::from(ColorFlag::BLUE) != 0 {
                     entry.2 = b;
-                } // DoBlue
+                }
                 if flags == 0 {
+                    // No DoRed/DoGreen/DoBlue bits: spec says nothing, so be
+                    // lenient and write all channels.
                     *entry = (r, g, b);
-                } // All channels
+                }
             }
         }
     }

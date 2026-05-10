@@ -4,6 +4,7 @@ use super::types::*;
 use crate::xserver::event::serialize_event;
 use std::collections::HashMap;
 use x11_web_protocol::{DisplayUpdate, InputEvent};
+use x11rb_protocol::protocol::xfixes::BarrierDirections;
 use x11rb_protocol::protocol::xproto::{
     ButtonPressEvent, ClientMessageData, ClientMessageEvent, EnterNotifyEvent, KeyPressEvent,
     MotionNotifyEvent, PropertyNotifyEvent,
@@ -40,13 +41,6 @@ pub(crate) fn enforce_barriers(
     new_x: i16,
     new_y: i16,
 ) -> (i16, i16) {
-    /// XFIXES `BarrierDirections` bits — set in `directions` to allow motion
-    /// through the barrier in that direction. `0` blocks every direction.
-    const BARRIER_DIR_POSITIVE_X: u32 = 1 << 0; // motion from left to right
-    const BARRIER_DIR_POSITIVE_Y: u32 = 1 << 1; // motion from top to bottom
-    const BARRIER_DIR_NEGATIVE_X: u32 = 1 << 2; // motion from right to left
-    const BARRIER_DIR_NEGATIVE_Y: u32 = 1 << 3; // motion from bottom to top
-
     let mut final_x = new_x;
     let mut final_y = new_y;
 
@@ -65,8 +59,11 @@ pub(crate) fn enforce_barriers(
                 let blocked = if barrier.directions == 0 {
                     crosses_right || crosses_left
                 } else {
-                    (crosses_right && (barrier.directions & BARRIER_DIR_POSITIVE_X) != 0)
-                        || (crosses_left && (barrier.directions & BARRIER_DIR_NEGATIVE_X) != 0)
+                    (crosses_right
+                        && (barrier.directions & u32::from(BarrierDirections::POSITIVE_X)) != 0)
+                        || (crosses_left
+                            && (barrier.directions & u32::from(BarrierDirections::NEGATIVE_X))
+                                != 0)
                 };
 
                 if blocked {
@@ -86,8 +83,11 @@ pub(crate) fn enforce_barriers(
                 let blocked = if barrier.directions == 0 {
                     crosses_down || crosses_up
                 } else {
-                    (crosses_down && (barrier.directions & BARRIER_DIR_POSITIVE_Y) != 0)
-                        || (crosses_up && (barrier.directions & BARRIER_DIR_NEGATIVE_Y) != 0)
+                    (crosses_down
+                        && (barrier.directions & u32::from(BarrierDirections::POSITIVE_Y)) != 0)
+                        || (crosses_up
+                            && (barrier.directions & u32::from(BarrierDirections::NEGATIVE_Y))
+                                != 0)
                 };
 
                 if blocked {
@@ -127,7 +127,7 @@ pub(crate) fn find_event_subwindow(
     // Track accumulated offsets for coordinate translation as we walk up.
     let mut accum_x = source_rx;
     let mut accum_y = source_ry;
-    for _ in 0..64 {
+    for _ in 0..super::window_tree::MAX_TREE_DEPTH {
         if let Some(w) = windows.get(&current) {
             // Does this window select for the event?
             if w.event_mask & required_mask != 0 {
@@ -239,7 +239,7 @@ pub(crate) fn propagate_keyboard_event(
     required_mask: u32,
 ) -> u32 {
     let mut current = focus_window;
-    for _ in 0..64 {
+    for _ in 0..super::window_tree::MAX_TREE_DEPTH {
         if let Some(w) = windows.get(&current) {
             if w.event_mask & required_mask != 0 {
                 return current;
@@ -268,7 +268,7 @@ fn is_blocked_by_modal(windows: &HashMap<u32, WindowState>, target: u32) -> bool
     // Walk target and its ancestors to collect the set of windows that could be blocked.
     let mut blocked_set = Vec::new();
     let mut cur = target;
-    for _ in 0..64 {
+    for _ in 0..super::window_tree::MAX_TREE_DEPTH {
         blocked_set.push(cur);
         if let Some(w) = windows.get(&cur) {
             if w.parent == 0 || w.parent == cur {
@@ -324,7 +324,7 @@ const DETAIL_NONLINEAR_VIRTUAL: u8 = 4;
 fn ancestor_path(windows: &HashMap<u32, WindowState>, window: u32, root: u32) -> Vec<u32> {
     let mut path = vec![window];
     let mut cur = window;
-    for _ in 0..64 {
+    for _ in 0..super::window_tree::MAX_TREE_DEPTH {
         if cur == root || cur == 0 {
             break;
         }
@@ -416,7 +416,7 @@ fn make_crossing_event(
     let has_focus = {
         let mut cur = focus_window;
         let mut found = false;
-        for _ in 0..64 {
+        for _ in 0..super::window_tree::MAX_TREE_DEPTH {
             if cur == event_window {
                 found = true;
                 break;

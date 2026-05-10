@@ -4,7 +4,7 @@ use super::parse_minor;
 use tracing::{debug, info, warn};
 
 use super::super::client::ClientState;
-use super::super::core::{OVERLAY_WINDOW, ROOT_COLORMAP};
+use super::super::core::{OVERLAY_WINDOW, ROOT_COLORMAP, VISUAL_TRUE_COLOR_ARGB_32};
 use super::super::types::{DamageInfo, PixmapState, WindowState, WindowType};
 use crate::xserver::reply::ReplyBuf;
 use x11rb_protocol::protocol::composite::{
@@ -323,7 +323,7 @@ pub(crate) fn handle_x_composite_request(
                     width: w,
                     height: h,
                     border_width: 0,
-                    visual: 0x40, // 32-bit ARGB visual for compositing
+                    visual: VISUAL_TRUE_COLOR_ARGB_32,
                     depth: 32,
                     class: u16::from(WindowClass::INPUT_OUTPUT),
                     mapped: true,
