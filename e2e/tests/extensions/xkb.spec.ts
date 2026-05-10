@@ -311,19 +311,19 @@ test.describe.serial("Application compatibility", () => {
 
 	test("Multiple X clients can coexist", async ({ sidecarContainer }) => {
 		// Kill any leftover xeyes/xclock/xlogo instances from previous tests
-		// (or a previous Playwright retry of this test), then poll until
-		// pgrep agrees they're gone. Without this, retried runs see the
-		// previous attempt's processes and the assertion below explodes.
+		// or test files on the same Playwright worker (sidecarContainer is
+		// scoped to the worker, so processes outlive a single test file).
+		// Poll-with-timeout each binary individually — `pgrep -x` doesn't
+		// support regex alternation.
 		await execInSidecar(
 			sidecarContainer,
 			[
-				"pkill -KILL -x xeyes  2>/dev/null; true",
-				"pkill -KILL -x xclock 2>/dev/null; true",
-				"pkill -KILL -x xlogo  2>/dev/null; true",
-				"for _ in $(seq 1 20); do",
-				"  n=$(pgrep -x 'xeyes|xclock|xlogo' 2>/dev/null | wc -l)",
-				"  [ \"$n\" = \"0\" ] && break",
-				"  sleep 0.2",
+				"for app in xeyes xclock xlogo; do",
+				"  pkill -KILL -x $app 2>/dev/null; true",
+				"  for _ in $(seq 1 20); do",
+				"    pgrep -x $app >/dev/null 2>&1 || break",
+				"    sleep 0.2",
+				"  done",
 				"done",
 			].join("\n"),
 		);
