@@ -313,18 +313,13 @@ test.describe.serial("Application compatibility", () => {
 		// Kill any leftover xeyes/xclock/xlogo instances from previous tests
 		// or test files on the same Playwright worker (sidecarContainer is
 		// scoped to the worker, so processes outlive a single test file).
-		// Poll-with-timeout each binary individually — `pgrep -x` doesn't
-		// support regex alternation.
 		await execInSidecar(
 			sidecarContainer,
 			[
 				"for app in xeyes xclock xlogo; do",
 				"  pkill -KILL -x $app 2>/dev/null; true",
-				"  for _ in $(seq 1 20); do",
-				"    pgrep -x $app >/dev/null 2>&1 || break",
-				"    sleep 0.2",
-				"  done",
 				"done",
+				"sleep 1",
 			].join("\n"),
 		);
 		await execInSidecar(sidecarContainer, "xeyes &");
@@ -332,11 +327,18 @@ test.describe.serial("Application compatibility", () => {
 		await execInSidecar(sidecarContainer, "xlogo &");
 		await new Promise((r) => setTimeout(r, 3000));
 
+		// Count only LIVE processes — `pgrep -x` happily counts zombies
+		// (state Z) that PID 1 in the sidecar container never reaps after
+		// previous tests' background processes are killed.  `ps -eo state`
+		// filters those out.
 		const ps = await execInSidecar(
 			sidecarContainer,
-			`echo "xeyes=$(pgrep -x xeyes | wc -l)"
-echo "xclock=$(pgrep -x xclock | wc -l)"
-echo "xlogo=$(pgrep -x xlogo | wc -l)"`,
+			[
+				'count() { ps --no-headers -eo state,comm 2>/dev/null | awk -v c="$1" \'$2 == c && $1 != "Z" { n++ } END { print n + 0 }\'; }',
+				'echo "xeyes=$(count xeyes)"',
+				'echo "xclock=$(count xclock)"',
+				'echo "xlogo=$(count xlogo)"',
+			].join("\n"),
 		);
 		expect(ps).toContain("xeyes=1");
 		expect(ps).toContain("xclock=1");
