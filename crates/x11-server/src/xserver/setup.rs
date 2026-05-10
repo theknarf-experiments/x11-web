@@ -32,87 +32,127 @@ pub(crate) fn byteswap_setup_reply(buf: &mut [u8]) {
     swap16(buf, 2); // protocol-major-version
     swap16(buf, 4); // protocol-minor-version
     swap16(buf, 6); // additional-data length (in 4-byte units)
-    swap32(buf, 8); // release-number
-    swap32(buf, 12); // resource-id-base
-    swap32(buf, 16); // resource-id-mask
-    swap32(buf, 20); // motion-buffer-size
-                     // Read vendor length and format count BEFORE swapping them (they're still LE)
-    let vendor_len = u16::from_le_bytes([buf[24], buf[25]]) as usize;
-    let num_formats = buf[29] as usize;
-    let num_screens = buf[28] as usize;
-    swap16(buf, 24); // length-of-vendor
-    swap16(buf, 26); // maximum-request-length
-                     // [28] number-of-screens (u8) — no swap
-                     // [29] number-of-formats (u8) — no swap
-                     // [30] image-byte-order (u8) — no swap
-                     // [31] bitmap-format-bit-order (u8) — no swap
-                     // [32] bitmap-format-scanline-unit (u8) — no swap
-                     // [33] bitmap-format-scanline-pad (u8) — no swap
-                     // [34] min-keycode (u8) — no swap
-                     // [35] max-keycode (u8) — no swap
-                     // [36..39] unused (4 bytes)
+    use setup_layout as s;
+    swap32(buf, s::RELEASE_NUMBER);
+    swap32(buf, s::RESOURCE_ID_BASE);
+    swap32(buf, s::RESOURCE_ID_MASK);
+    swap32(buf, s::MOTION_BUFFER_SIZE);
+    // Read vendor length and format count BEFORE swapping them (they're still LE).
+    let vendor_len = u16::from_le_bytes([buf[s::VENDOR_LEN], buf[s::VENDOR_LEN + 1]]) as usize;
+    let num_formats = buf[s::NUM_FORMATS] as usize;
+    let num_screens = buf[s::NUM_SCREENS] as usize;
+    swap16(buf, s::VENDOR_LEN);
+    swap16(buf, s::MAX_REQUEST_LEN);
+    // Bytes [28..36] are all u8 (no swap); [36..40] is unused.
 
-    // --- Vendor string (padded to 4 bytes) ---
-    let mut off = 40;
-    let vendor_padded = align_to_4(vendor_len);
-    off += vendor_padded; // skip vendor bytes (raw, no swap needed)
+    // Vendor string (padded to 4 bytes).
+    let mut off = s::HEADER_SIZE;
+    off += align_to_4(vendor_len);
+    // Pixmap formats (depth/bpp/scanline_pad/pad — all u8, no swap).
+    off += num_formats * PIXMAP_FORMAT_SIZE;
 
-    // --- Pixmap formats (8 bytes each) ---
-    // Format: depth(1) bpp(1) scanline_pad(1) pad(5) — all single-byte, no swap
-    off += num_formats * 8;
-
-    // --- Screens ---
     for _ in 0..num_screens {
-        if off + 40 > buf.len() {
+        if off + screen_layout::SIZE > buf.len() {
             return;
         }
-        swap32(buf, off); // root window
-        swap32(buf, off + 4); // default-colormap
-        swap32(buf, off + 8); // white-pixel
-        swap32(buf, off + 12); // black-pixel
-        swap32(buf, off + 16); // current-input-masks
-        swap16(buf, off + 20); // width-in-pixels
-        swap16(buf, off + 22); // height-in-pixels
-        swap16(buf, off + 24); // width-in-millimeters
-        swap16(buf, off + 26); // height-in-millimeters
-        swap16(buf, off + 28); // min-installed-maps
-        swap16(buf, off + 30); // max-installed-maps
-        swap32(buf, off + 32); // root-visual
-                               // [off+36] backing-stores (u8)
-                               // [off+37] save-unders (u8)
-                               // [off+38] root-depth (u8)
-        let num_depths = buf[off + 39] as usize;
-        off += 40;
+        use screen_layout as sc;
+        swap32(buf, off + sc::ROOT);
+        swap32(buf, off + sc::DEFAULT_COLORMAP);
+        swap32(buf, off + sc::WHITE_PIXEL);
+        swap32(buf, off + sc::BLACK_PIXEL);
+        swap32(buf, off + sc::CURRENT_INPUT_MASKS);
+        swap16(buf, off + sc::WIDTH_PX);
+        swap16(buf, off + sc::HEIGHT_PX);
+        swap16(buf, off + sc::WIDTH_MM);
+        swap16(buf, off + sc::HEIGHT_MM);
+        swap16(buf, off + sc::MIN_INSTALLED_MAPS);
+        swap16(buf, off + sc::MAX_INSTALLED_MAPS);
+        swap32(buf, off + sc::ROOT_VISUAL);
+        // [off+36] backing-stores, [off+37] save-unders, [off+38] root-depth — u8.
+        let num_depths = buf[off + sc::NUM_DEPTHS] as usize;
+        off += sc::SIZE;
 
-        // --- Depths ---
         for _ in 0..num_depths {
-            if off + 8 > buf.len() {
+            if off + depth_layout::SIZE > buf.len() {
                 return;
             }
-            // [off] depth (u8)
-            // [off+1] unused
-            let num_visuals = u16::from_le_bytes([buf[off + 2], buf[off + 3]]) as usize;
-            swap16(buf, off + 2); // number-of-visuals
-                                  // [off+4..7] unused (4 bytes)
-            off += 8;
+            use depth_layout as d;
+            // [off] depth, [off+1] unused.
+            let num_visuals =
+                u16::from_le_bytes([buf[off + d::NUM_VISUALS], buf[off + d::NUM_VISUALS + 1]])
+                    as usize;
+            swap16(buf, off + d::NUM_VISUALS);
+            // [off+4..7] unused.
+            off += d::SIZE;
 
-            // --- Visuals (24 bytes each) ---
             for _ in 0..num_visuals {
-                if off + 24 > buf.len() {
+                if off + visual_layout::SIZE > buf.len() {
                     return;
                 }
-                swap32(buf, off); // visual-id
-                                  // [off+4] class (u8)
-                                  // [off+5] bits-per-rgb-value (u8)
-                swap16(buf, off + 6); // colormap-entries
-                swap32(buf, off + 8); // red-mask
-                swap32(buf, off + 12); // green-mask
-                swap32(buf, off + 16); // blue-mask
-                                       // [off+20..23] unused (4 bytes)
-                off += 24;
+                use visual_layout as v;
+                swap32(buf, off + v::VISUAL_ID);
+                // [off+4] class, [off+5] bits-per-rgb — u8.
+                swap16(buf, off + v::COLORMAP_ENTRIES);
+                swap32(buf, off + v::RED_MASK);
+                swap32(buf, off + v::GREEN_MASK);
+                swap32(buf, off + v::BLUE_MASK);
+                // [off+20..23] unused.
+                off += v::SIZE;
             }
         }
     }
+}
+
+/// Wire-format byte size of one PIXMAPFORMAT entry: depth(1) + bpp(1) +
+/// scanline_pad(1) + pad(5).
+const PIXMAP_FORMAT_SIZE: usize = 8;
+
+/// Field offsets within the X11 connection setup reply header.
+mod setup_layout {
+    pub(super) const RELEASE_NUMBER: usize = 8;
+    pub(super) const RESOURCE_ID_BASE: usize = 12;
+    pub(super) const RESOURCE_ID_MASK: usize = 16;
+    pub(super) const MOTION_BUFFER_SIZE: usize = 20;
+    pub(super) const VENDOR_LEN: usize = 24; // u16
+    pub(super) const MAX_REQUEST_LEN: usize = 26; // u16
+    pub(super) const NUM_SCREENS: usize = 28; // u8
+    pub(super) const NUM_FORMATS: usize = 29; // u8
+    /// Total fixed-header size before the vendor string.
+    pub(super) const HEADER_SIZE: usize = 40;
+}
+
+/// Field offsets within a single SCREEN structure (40 bytes).
+mod screen_layout {
+    pub(super) const ROOT: usize = 0;
+    pub(super) const DEFAULT_COLORMAP: usize = 4;
+    pub(super) const WHITE_PIXEL: usize = 8;
+    pub(super) const BLACK_PIXEL: usize = 12;
+    pub(super) const CURRENT_INPUT_MASKS: usize = 16;
+    pub(super) const WIDTH_PX: usize = 20;
+    pub(super) const HEIGHT_PX: usize = 22;
+    pub(super) const WIDTH_MM: usize = 24;
+    pub(super) const HEIGHT_MM: usize = 26;
+    pub(super) const MIN_INSTALLED_MAPS: usize = 28;
+    pub(super) const MAX_INSTALLED_MAPS: usize = 30;
+    pub(super) const ROOT_VISUAL: usize = 32;
+    pub(super) const NUM_DEPTHS: usize = 39;
+    pub(super) const SIZE: usize = 40;
+}
+
+/// Field offsets within a single DEPTH structure (8 bytes).
+mod depth_layout {
+    pub(super) const NUM_VISUALS: usize = 2;
+    pub(super) const SIZE: usize = 8;
+}
+
+/// Field offsets within a single VISUALTYPE structure (24 bytes).
+mod visual_layout {
+    pub(super) const VISUAL_ID: usize = 0;
+    pub(super) const COLORMAP_ENTRIES: usize = 6;
+    pub(super) const RED_MASK: usize = 8;
+    pub(super) const GREEN_MASK: usize = 12;
+    pub(super) const BLUE_MASK: usize = 16;
+    pub(super) const SIZE: usize = 24;
 }
 
 /// Build the XSETTINGS binary property data (LSB-first byte order).

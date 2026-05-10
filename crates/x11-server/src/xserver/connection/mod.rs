@@ -31,6 +31,27 @@ const BYTE_ORDER_MSB: u8 = 0x42;
 /// some slop for partial reads.
 const READ_BUF_BYTES: usize = 256 * 1024;
 
+/// Wire size of the X11 connection-setup request header (byte_order +
+/// pad + protocol_major + protocol_minor + auth_name_len + auth_data_len
+/// + pad). Auth strings start immediately after.
+const SETUP_REQUEST_HEADER_SIZE: usize = 12;
+
+/// Frame tick interval driving the per-connection display-update flush
+/// loop. 16 ms ≈ 60 Hz.
+const FRAME_INTERVAL: std::time::Duration = std::time::Duration::from_millis(16);
+
+/// Sentinel duration used to disarm the per-key auto-repeat timer. Long
+/// enough that the timer effectively never fires while no key is held.
+const REPEAT_TIMER_DORMANT: std::time::Duration = std::time::Duration::from_secs(86_400);
+
+/// Bounds on the byte length of a single BIG-REQUESTS-extended request.
+/// Lower bound (2 X11 words) rejects truncated headers; the 16 MiB cap
+/// matches the maximum we advertise to clients (see
+/// `BIG_REQUESTS_MAX_LEN_WORDS` in core.rs) and protects the server
+/// from absurdly large allocations.
+const BIG_REQUEST_MIN_BYTES: usize = 8;
+const BIG_REQUEST_MAX_BYTES: usize = 16 * 1024 * 1024;
+
 use x11rb_protocol::x11_utils::{Serialize, TryParse};
 
 use super::atoms::AtomManager;
@@ -179,7 +200,7 @@ pub(crate) async fn handle_client(
     // - Unknown auth protocols are accepted with a warning for compatibility.
     let mut security_trust_level: u32 = 0; // 0 = trusted (default)
     if auth_name_len > 0 {
-        let auth_name_start = 12usize;
+        let auth_name_start = SETUP_REQUEST_HEADER_SIZE;
         let auth_name_end = auth_name_start + auth_name_len as usize;
         let auth_data_start = auth_name_start + pad4(auth_name_len);
         let auth_data_end = auth_data_start + auth_data_len as usize;
@@ -514,7 +535,7 @@ pub(crate) async fn handle_client(
 
     let mut buf = vec![0u8; READ_BUF_BYTES];
     let mut pending = Vec::new();
-    let mut frame_interval = tokio::time::interval(Duration::from_millis(16));
+    let mut frame_interval = tokio::time::interval(FRAME_INTERVAL);
     frame_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
 
     // Key auto-repeat state.
@@ -527,7 +548,7 @@ pub(crate) async fn handle_client(
         in_delay_phase: bool,
     }
     let mut key_repeat: Option<RepeatState> = None;
-    let repeat_timer = tokio::time::sleep(Duration::from_secs(86400)); // dormant
+    let repeat_timer = tokio::time::sleep(REPEAT_TIMER_DORMANT); // dormant
                                                                        // Pin the sleep so we can reset it.
     tokio::pin!(repeat_timer);
 
@@ -1023,7 +1044,7 @@ pub(crate) async fn handle_client(
                             u32::from_le_bytes([pending[4], pending[5], pending[6], pending[7]]) as usize
                         };
                         let big_bytes = big_len * 4;
-                        if !(8..=16 * 1024 * 1024).contains(&big_bytes) {
+                        if !(BIG_REQUEST_MIN_BYTES..=BIG_REQUEST_MAX_BYTES).contains(&big_bytes) {
                             // Reject absurdly large or too-small requests
                             warn!("BIG-REQUEST with invalid length: {big_bytes}");
                             pending.clear();
@@ -1224,7 +1245,7 @@ pub(crate) async fn handle_client(
                                     u32::from_le_bytes([pending[4], pending[5], pending[6], pending[7]]) as usize
                                 };
                                 let big_bytes = big_len * 4;
-                                if !(8..=16 * 1024 * 1024).contains(&big_bytes) {
+                                if !(BIG_REQUEST_MIN_BYTES..=BIG_REQUEST_MAX_BYTES).contains(&big_bytes) {
                                     pending.clear();
                                     break;
                                 }
@@ -1519,7 +1540,7 @@ pub(crate) async fn handle_client(
                                     } else {
                                         // Non-repeating key: cancel any pending repeat
                                         key_repeat = None;
-                                        repeat_timer.as_mut().reset(tokio::time::Instant::now() + Duration::from_secs(86400));
+                                        repeat_timer.as_mut().reset(tokio::time::Instant::now() + REPEAT_TIMER_DORMANT);
                                     }
                                 }
                                 x11_web_protocol::InputEvent::KeyRelease { keycode, state: mask } => {
@@ -1577,7 +1598,7 @@ pub(crate) async fn handle_client(
                                     // Cancel auto-repeat for this key.
                                     if key_repeat.as_ref().is_some_and(|r| r.keycode == *keycode as u8) {
                                         key_repeat = None;
-                                        repeat_timer.as_mut().reset(tokio::time::Instant::now() + Duration::from_secs(86400));
+                                        repeat_timer.as_mut().reset(tokio::time::Instant::now() + REPEAT_TIMER_DORMANT);
                                     }
                                 }
                                 _ => {}
@@ -1977,7 +1998,7 @@ pub(crate) async fn handle_client(
                     repeat_timer.as_mut().reset(tokio::time::Instant::now() + Duration::from_millis(interval));
                 } else {
                     // No key held, park the timer far in the future.
-                    repeat_timer.as_mut().reset(tokio::time::Instant::now() + Duration::from_secs(86400));
+                    repeat_timer.as_mut().reset(tokio::time::Instant::now() + REPEAT_TIMER_DORMANT);
                 }
             }
         }

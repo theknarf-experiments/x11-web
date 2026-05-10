@@ -222,10 +222,10 @@ pub fn handle_request(
                 // Check if device is already grabbed by this client.
                 if let std::collections::hash_map::Entry::Vacant(e) = active_grabs.entry(deviceid) {
                     if grab_mode == 0 {
-                        if deviceid == MASTER_POINTER_ID || deviceid == 0 || deviceid == 1 {
+                        if deviceid == MASTER_POINTER_ID || is_any_master_id(deviceid) {
                             *pointer_frozen = true;
                         }
-                        if deviceid == MASTER_KEYBOARD_ID || deviceid == 0 || deviceid == 1 {
+                        if deviceid == MASTER_KEYBOARD_ID || is_any_master_id(deviceid) {
                             *keyboard_frozen = true;
                         }
                     }
@@ -252,10 +252,10 @@ pub fn handle_request(
                 debug!("XIUngrabDevice: releasing device={deviceid}");
                 active_grabs.remove(&deviceid);
                 // Thaw any frozen events for this device.
-                if deviceid == MASTER_POINTER_ID || deviceid == 0 || deviceid == 1 {
+                if deviceid == MASTER_POINTER_ID || is_any_master_id(deviceid) {
                     *pointer_frozen = false;
                 }
-                if deviceid == MASTER_KEYBOARD_ID || deviceid == 0 || deviceid == 1 {
+                if deviceid == MASTER_KEYBOARD_ID || is_any_master_id(deviceid) {
                     *keyboard_frozen = false;
                 }
             }
@@ -337,7 +337,7 @@ pub fn handle_request(
                             && g.detail == detail
                             && g.grab_type == grab_type
                             && g.modifiers == modifier
-                            && (g.deviceid == deviceid || deviceid == 0 || deviceid == 1))
+                            && (g.deviceid == deviceid || is_any_master_id(deviceid)))
                     });
 
                     // Insert new passive grab (LIFO — at front).
@@ -377,7 +377,7 @@ pub fn handle_request(
                             && g.detail == detail
                             && g.grab_type == grab_type
                             && g.modifiers == modifier
-                            && (g.deviceid == deviceid || deviceid == 0 || deviceid == 1))
+                            && (g.deviceid == deviceid || is_any_master_id(deviceid)))
                     });
                     debug!("XIPassiveUngrabDevice: device={deviceid} window={grab_window:#x} detail={detail} type={grab_type} mod={modifier:#x}");
                 }
@@ -430,10 +430,18 @@ pub fn handle_request(
         }
         xi::XI_CHANGE_PROPERTY_REQUEST => {
             if let Ok(req) = xi::XIChangePropertyRequest::try_parse_request(header, body) {
+                /// Wire-format size of the XIChangeProperty fixed header
+                /// preceding the variable-length items array (deviceid (2) +
+                /// mode (1) + format (1) + property (4) + type (4) +
+                /// num_items (4) = 16 bytes).
+                const XI_CHANGE_PROPERTY_HEADER_SIZE: usize = 16;
                 // The typed parser already validated deviceid/property/format/num_items.
-                // We keep the raw items bytes (post-16-byte header) so XIGetProperty
+                // We keep the raw items bytes (post-header) so XIGetProperty
                 // can echo them back unchanged.
-                let value = body.get(16..).map(|s| s.to_vec()).unwrap_or_default();
+                let value = body
+                    .get(XI_CHANGE_PROPERTY_HEADER_SIZE..)
+                    .map(|s| s.to_vec())
+                    .unwrap_or_default();
                 debug!(
                     "XIChangeProperty: device={} property={} len={}",
                     req.deviceid,
