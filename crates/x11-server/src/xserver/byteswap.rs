@@ -378,6 +378,24 @@ fn byteswap_convert_selection(data: &mut [u8]) {
     swap_u32(data, 20); // time
 }
 
+/// Offset of the embedded 32-byte event payload within a `SendEvent` request.
+/// Layout: opcode(1), propagate(1), len(2), destination(4), event_mask(4) → 12.
+const SEND_EVENT_PAYLOAD_OFFSET: usize = 12;
+
+/// Wire-field layout of a `ClientMessage` event payload.
+mod client_message_offsets {
+    /// Format byte (8, 16, or 32 — number of bits per data unit).
+    pub(super) const FORMAT: usize = 1;
+    /// Sequence number (u16).
+    pub(super) const SEQUENCE: usize = 2;
+    /// Window (u32).
+    pub(super) const WINDOW: usize = 4;
+    /// Message-type atom (u32).
+    pub(super) const TYPE_ATOM: usize = 8;
+    /// 20-byte data payload begins here.
+    pub(super) const DATA: usize = 12;
+}
+
 fn byteswap_send_event(data: &mut [u8]) {
     // propagate(1), unused(1), len(2), destination(4), event_mask(4),
     // event(32 bytes — leave to event-specific code; most events use
@@ -387,26 +405,25 @@ fn byteswap_send_event(data: &mut [u8]) {
     // re-encodes anyway.
     swap_u32(data, 4); // destination
     swap_u32(data, 8); // event_mask
-                       // Best-effort: treat the event as a ClientMessage (type 33), swap
-                       // its window field at offset 12+4 and the data words.
-    if data.len() >= 12 + 32 {
-        let evtype = data[12];
-        // Common event payload header: type(1), detail(1), seq(2),
-        // window(4), then event-specific.
-        swap_u16(data, 12 + 2); // event sequence
-        swap_u32(data, 12 + 4); // window
+    // Best-effort: treat the event as a ClientMessage, swap its window
+    // field and the data words.
+    let payload = SEND_EVENT_PAYLOAD_OFFSET;
+    if data.len() >= payload + crate::xserver::core::X11_EVENT_SIZE {
+        let evtype = data[payload];
+        swap_u16(data, payload + client_message_offsets::SEQUENCE);
+        swap_u32(data, payload + client_message_offsets::WINDOW);
         if evtype == CLIENT_MESSAGE_EVENT {
             // ClientMessage: format byte at offset 1; format=32 → 5x u32
-            // starting at offset 12+12. format=16 → 10x u16. format=8 → bytes.
-            let format = data[12 + 1];
+            // starting at the data payload. format=16 → 10x u16. format=8 → bytes.
+            let format = data[payload + client_message_offsets::FORMAT];
             if format == 32 {
-                swap_u32(data, 12 + 8); // message_type atom
-                swap_u32_array(data, 12 + 12, 5);
+                swap_u32(data, payload + client_message_offsets::TYPE_ATOM);
+                swap_u32_array(data, payload + client_message_offsets::DATA, 5);
             } else if format == 16 {
-                swap_u32(data, 12 + 8); // message_type atom
-                swap_u16_array(data, 12 + 12, 10);
+                swap_u32(data, payload + client_message_offsets::TYPE_ATOM);
+                swap_u16_array(data, payload + client_message_offsets::DATA, 10);
             } else if format == 8 {
-                swap_u32(data, 12 + 8); // message_type atom
+                swap_u32(data, payload + client_message_offsets::TYPE_ATOM);
             }
         }
     }
@@ -767,16 +784,27 @@ fn byteswap_free_colors(data: &mut [u8], body_len: usize) {
     swap_u32_array(data, 12, n);
 }
 
+/// `StoreColors` ColorItem layout: 12 bytes per item.
+/// Wire: pixel(u32), red(u16), green(u16), blue(u16), do_mask(u8), unused(u8).
+mod color_item_layout {
+    pub(super) const SIZE: usize = 12;
+    pub(super) const PIXEL: usize = 0;
+    pub(super) const RED: usize = 4;
+    pub(super) const GREEN: usize = 6;
+    pub(super) const BLUE: usize = 8;
+}
+
 fn byteswap_store_colors(data: &mut [u8], body_len: usize) {
-    // unused(1), unused(1), len(2), mid(4), items[](pixel:4, red:2, green:2, blue:2, do_mask:1, unused:1)
+    // unused(1), unused(1), len(2), mid(4), items[]
+    const ITEMS_OFFSET: usize = 8;
     swap_u32(data, 4);
-    let n = (body_len - 8) / 12;
+    let n = (body_len - ITEMS_OFFSET) / color_item_layout::SIZE;
     for i in 0..n {
-        let off = 8 + i * 12;
-        swap_u32(data, off); // pixel
-        swap_u16(data, off + 4); // red
-        swap_u16(data, off + 6); // green
-        swap_u16(data, off + 8); // blue
+        let off = ITEMS_OFFSET + i * color_item_layout::SIZE;
+        swap_u32(data, off + color_item_layout::PIXEL);
+        swap_u16(data, off + color_item_layout::RED);
+        swap_u16(data, off + color_item_layout::GREEN);
+        swap_u16(data, off + color_item_layout::BLUE);
     }
 }
 

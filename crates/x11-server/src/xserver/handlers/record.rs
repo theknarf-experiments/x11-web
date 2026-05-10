@@ -35,6 +35,41 @@ pub(crate) const RECORD_START_OF_DATA: u8 = 4;
 /// EndOfData: context disabled.
 pub(crate) const RECORD_END_OF_DATA: u8 = 5;
 
+/// `GetContext` reply layout: client-info header + 24-byte RecordRange entries.
+mod get_context_layout {
+    /// First byte of client-info section (after the 32-byte reply header).
+    pub(super) const CLIENT_SPEC: usize = 32;
+    /// nRanges (u32) for the client-info entry.
+    pub(super) const N_RANGES: usize = 36;
+    /// First byte of the RecordRange array (after one ClientInfo header).
+    pub(super) const RANGES_START: usize = 40;
+}
+
+/// Wire layout of one xRecordRange struct (24 bytes).
+/// Each (first, last) range is two bytes; ext requests/replies are
+/// (major, first_minor, last_minor) — 4 bytes each (3 used + 1 pad).
+mod record_range_layout {
+    pub(super) const SIZE: usize = 24;
+    /// Core request range first/last (2 bytes).
+    pub(super) const CORE_REQUESTS: usize = 0;
+    /// Core reply range first/last (2 bytes).
+    pub(super) const CORE_REPLIES: usize = 2;
+    /// Extension requests (major, first_minor, last_minor + 1 pad).
+    pub(super) const EXT_REQUESTS: usize = 4;
+    /// Extension replies (major, first_minor, last_minor + 1 pad).
+    pub(super) const EXT_REPLIES: usize = 8;
+    /// Delivered events range (2 bytes).
+    pub(super) const DELIVERED_EVENTS: usize = 12;
+    /// Device events range (2 bytes).
+    pub(super) const DEVICE_EVENTS: usize = 14;
+    /// Errors range (2 bytes).
+    pub(super) const ERRORS: usize = 16;
+    /// client_started flag (u8).
+    pub(super) const CLIENT_STARTED: usize = 18;
+    /// client_died flag (u8).
+    pub(super) const CLIENT_DIED: usize = 20;
+}
+
 // ---------------------------------------------------------------------------
 // RecordRange: describes what protocol elements to intercept
 // ---------------------------------------------------------------------------
@@ -475,32 +510,52 @@ pub(crate) fn handle_record_request(state: &mut ClientState, data: &[u8], seq: u
                             .first()
                             .copied()
                             .unwrap_or(CLIENT_SPEC_ALL_CLIENTS);
-                        reply.buf_mut()[32..36].copy_from_slice(&spec.to_le_bytes());
-                        reply.buf_mut()[36..40].copy_from_slice(&ranges_per_client.to_le_bytes());
+                        reply.buf_mut()[get_context_layout::CLIENT_SPEC
+                            ..get_context_layout::CLIENT_SPEC + 4]
+                            .copy_from_slice(&spec.to_le_bytes());
+                        reply.buf_mut()
+                            [get_context_layout::N_RANGES..get_context_layout::N_RANGES + 4]
+                            .copy_from_slice(&ranges_per_client.to_le_bytes());
 
                         // Write ranges
                         for (i, range) in ctx.ranges.iter().enumerate() {
-                            let off = 40 + i * 24;
-                            if off + 24 <= reply.buf_mut().len() {
-                                reply.buf_mut()[off] = range.core_requests.0;
-                                reply.buf_mut()[off + 1] = range.core_requests.1;
-                                reply.buf_mut()[off + 2] = range.core_replies.0;
-                                reply.buf_mut()[off + 3] = range.core_replies.1;
-                                reply.buf_mut()[off + 4] = range.ext_requests.0;
-                                reply.buf_mut()[off + 5] = range.ext_requests.1;
-                                reply.buf_mut()[off + 6] = range.ext_requests.2;
-                                reply.buf_mut()[off + 8] = range.ext_replies.0;
-                                reply.buf_mut()[off + 9] = range.ext_replies.1;
-                                reply.buf_mut()[off + 10] = range.ext_replies.2;
-                                reply.buf_mut()[off + 12] = range.delivered_events.0;
-                                reply.buf_mut()[off + 13] = range.delivered_events.1;
-                                reply.buf_mut()[off + 14] = range.device_events.0;
-                                reply.buf_mut()[off + 15] = range.device_events.1;
-                                reply.buf_mut()[off + 16] = range.errors.0;
-                                reply.buf_mut()[off + 17] = range.errors.1;
-                                reply.buf_mut()[off + 18] =
-                                    if range.client_started { 1 } else { 0 };
-                                reply.buf_mut()[off + 20] = if range.client_died { 1 } else { 0 };
+                            let off = get_context_layout::RANGES_START
+                                + i * record_range_layout::SIZE;
+                            if off + record_range_layout::SIZE <= reply.buf_mut().len() {
+                                let buf = reply.buf_mut();
+                                buf[off + record_range_layout::CORE_REQUESTS] =
+                                    range.core_requests.0;
+                                buf[off + record_range_layout::CORE_REQUESTS + 1] =
+                                    range.core_requests.1;
+                                buf[off + record_range_layout::CORE_REPLIES] =
+                                    range.core_replies.0;
+                                buf[off + record_range_layout::CORE_REPLIES + 1] =
+                                    range.core_replies.1;
+                                buf[off + record_range_layout::EXT_REQUESTS] =
+                                    range.ext_requests.0;
+                                buf[off + record_range_layout::EXT_REQUESTS + 1] =
+                                    range.ext_requests.1;
+                                buf[off + record_range_layout::EXT_REQUESTS + 2] =
+                                    range.ext_requests.2;
+                                buf[off + record_range_layout::EXT_REPLIES] = range.ext_replies.0;
+                                buf[off + record_range_layout::EXT_REPLIES + 1] =
+                                    range.ext_replies.1;
+                                buf[off + record_range_layout::EXT_REPLIES + 2] =
+                                    range.ext_replies.2;
+                                buf[off + record_range_layout::DELIVERED_EVENTS] =
+                                    range.delivered_events.0;
+                                buf[off + record_range_layout::DELIVERED_EVENTS + 1] =
+                                    range.delivered_events.1;
+                                buf[off + record_range_layout::DEVICE_EVENTS] =
+                                    range.device_events.0;
+                                buf[off + record_range_layout::DEVICE_EVENTS + 1] =
+                                    range.device_events.1;
+                                buf[off + record_range_layout::ERRORS] = range.errors.0;
+                                buf[off + record_range_layout::ERRORS + 1] = range.errors.1;
+                                buf[off + record_range_layout::CLIENT_STARTED] =
+                                    range.client_started as u8;
+                                buf[off + record_range_layout::CLIENT_DIED] =
+                                    range.client_died as u8;
                             }
                         }
                     }

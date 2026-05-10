@@ -6,6 +6,38 @@ use super::super::super::client::ClientState;
 use crate::xserver::reply::ReplyBuf;
 use crate::xserver::request::request_header;
 
+/// RandR `MODEINFO` wire structure: 32 bytes per mode in
+/// GetScreenResources/GetScreenResourcesCurrent replies.
+mod modeinfo_layout {
+    /// Wire size of a single MODEINFO entry.
+    pub(super) const SIZE: usize = 32;
+    /// u32 mode ID.
+    pub(super) const ID: usize = 0;
+    /// u16 width.
+    pub(super) const WIDTH: usize = 4;
+    /// u16 height.
+    pub(super) const HEIGHT: usize = 6;
+    /// u32 dot clock.
+    pub(super) const DOT_CLOCK: usize = 8;
+    /// u16 horizontal sync start.
+    pub(super) const H_SYNC_START: usize = 12;
+    /// u16 horizontal sync end.
+    pub(super) const H_SYNC_END: usize = 14;
+    /// u16 horizontal total.
+    pub(super) const H_TOTAL: usize = 16;
+    // hSkew at offset 18 is always 0 for our backend.
+    /// u16 vertical sync start.
+    pub(super) const V_SYNC_START: usize = 20;
+    /// u16 vertical sync end.
+    pub(super) const V_SYNC_END: usize = 22;
+    /// u16 vertical total.
+    pub(super) const V_TOTAL: usize = 24;
+    /// u16 mode-name length in bytes.
+    pub(super) const NAME_LEN: usize = 26;
+    /// u32 mode flags.
+    pub(super) const FLAGS: usize = 28;
+}
+
 /// RRSelectInput (4) — select RandR events.
 pub(crate) fn handle_select_input(state: &mut ClientState, data: &[u8], _seq: u16) -> Vec<u8> {
     use x11rb_protocol::protocol::randr::SelectInputRequest;
@@ -95,7 +127,11 @@ pub(crate) fn build_screen_resources_reply(state: &ClientState, seq: u16) -> Vec
     //   output_ids: num_outputs * 4
     //   mode_infos: num_modes * 32
     //   mode_names: names_len + pad
-    let var_len = num_crtcs * 4 + num_outputs * 4 + num_modes * 32 + names_len + names_pad;
+    let var_len = num_crtcs * 4
+        + num_outputs * 4
+        + num_modes * modeinfo_layout::SIZE
+        + names_len
+        + names_pad;
 
     let mut reply = ReplyBuf::with_extra(seq, var_len, state.msb_first)
         .set_u32(8, state.timestamp())
@@ -122,20 +158,20 @@ pub(crate) fn build_screen_resources_reply(state: &ClientState, seq: u16) -> Vec
     // ModeInfo structs (32 bytes each)
     for mode in &state.randr_modes {
         reply = reply
-            .set_u32(off, mode.id)
-            .set_u16(off + 4, mode.width)
-            .set_u16(off + 6, mode.height)
-            .set_u32(off + 8, mode.dot_clock)
-            .set_u16(off + 12, mode.h_sync_start)
-            .set_u16(off + 14, mode.h_sync_end)
-            .set_u16(off + 16, mode.h_total)
+            .set_u32(off + modeinfo_layout::ID, mode.id)
+            .set_u16(off + modeinfo_layout::WIDTH, mode.width)
+            .set_u16(off + modeinfo_layout::HEIGHT, mode.height)
+            .set_u32(off + modeinfo_layout::DOT_CLOCK, mode.dot_clock)
+            .set_u16(off + modeinfo_layout::H_SYNC_START, mode.h_sync_start)
+            .set_u16(off + modeinfo_layout::H_SYNC_END, mode.h_sync_end)
+            .set_u16(off + modeinfo_layout::H_TOTAL, mode.h_total)
             // hSkew at off+18 = 0
-            .set_u16(off + 20, mode.v_sync_start)
-            .set_u16(off + 22, mode.v_sync_end)
-            .set_u16(off + 24, mode.v_total)
-            .set_u16(off + 26, mode.name.len() as u16)
-            .set_u32(off + 28, mode.flags);
-        off += 32;
+            .set_u16(off + modeinfo_layout::V_SYNC_START, mode.v_sync_start)
+            .set_u16(off + modeinfo_layout::V_SYNC_END, mode.v_sync_end)
+            .set_u16(off + modeinfo_layout::V_TOTAL, mode.v_total)
+            .set_u16(off + modeinfo_layout::NAME_LEN, mode.name.len() as u16)
+            .set_u32(off + modeinfo_layout::FLAGS, mode.flags);
+        off += modeinfo_layout::SIZE;
     }
 
     // Mode names (concatenated)

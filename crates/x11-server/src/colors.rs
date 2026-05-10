@@ -16,10 +16,15 @@ use std::sync::OnceLock;
 /// Global color database, lazily initialized on first access.
 static COLOR_DB: OnceLock<HashMap<String, (u16, u16, u16)>> = OnceLock::new();
 
+/// Scale factor for 8→16 bit color expansion: `0xFF * 0x101 = 0xFFFF`,
+/// so multiplying a u8 by 0x101 produces the canonical 16-bit form
+/// (e.g., 0xFF → 0xFFFF, 0x80 → 0x8080).
+const COLOR_8_TO_16_SCALE: u16 = 0x101;
+
 /// Scale an 8-bit color component to 16-bit (0-255 -> 0-65535).
 #[inline]
 fn scale8(v: u8) -> u16 {
-    v as u16 * 257
+    v as u16 * COLOR_8_TO_16_SCALE
 }
 
 /// Normalize a color name for case-insensitive and space-insensitive lookup.

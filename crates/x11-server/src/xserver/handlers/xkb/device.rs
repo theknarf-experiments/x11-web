@@ -4,6 +4,19 @@ use super::super::super::client::ClientState;
 use crate::xserver::reply::ReplyBuf;
 use tracing::debug;
 
+/// GetDeviceInfo reply layout (after the 32-byte reply header).
+mod get_device_info_layout {
+    /// hasOwnState (u8) — 1 if the device has its own state.
+    pub(super) const HAS_OWN_STATE: usize = 21;
+    /// nameLen (u16) — length of the device-name string.
+    pub(super) const NAME_LEN: usize = 30;
+    /// First byte of the name string (32-byte reply header + 24-byte fixed body).
+    pub(super) const NAME_DATA: usize = 56;
+}
+
+/// Wire size of one XkbAction record in `SetDeviceInfo` button-action arrays.
+const XKB_ACTION_SIZE: usize = 8;
+
 /// Handle ListComponents (minor opcode 22).
 pub(crate) fn handle_list_components(
     state: &mut ClientState,
@@ -102,17 +115,17 @@ pub(crate) fn handle_get_device_info(
     // Byte 18: firstBtnRtrn (0)
     // Byte 19: nBtnsRtrn (0)
     // Byte 20: totalBtns (0)
-    // Byte 21: hasOwnState (1)
-    reply.buf_mut()[21] = 1;
+    // hasOwnState = 1
+    reply.buf_mut()[get_device_info_layout::HAS_OWN_STATE] = 1;
     // Byte 22-23: dfltKbdFB (0)
     // Byte 24-25: dfltLedFB (0)
-    // Byte 28-29: devType (0)
     // Byte 26-27: nDeviceLedFBs (already 0)
-    // Byte 30-31: nameLen
-    reply = reply.set_u16(30, name_len as u16);
-    // Name starts at byte 32 + 24 = 56 in our layout
-    // Actually, the body starts at 32, and after the 24 fixed body bytes:
-    reply.buf_mut()[56..56 + name_len].copy_from_slice(device_name);
+    // Byte 28-29: devType (0)
+    reply = reply.set_u16(get_device_info_layout::NAME_LEN, name_len as u16);
+    // Name follows the 24-byte fixed body at offset 56.
+    reply.buf_mut()
+        [get_device_info_layout::NAME_DATA..get_device_info_layout::NAME_DATA + name_len]
+        .copy_from_slice(device_name);
     debug!(
         "GetDeviceInfo: returning '{}'",
         std::str::from_utf8(device_name).unwrap_or("?")
@@ -143,30 +156,20 @@ pub(crate) fn handle_set_device_info(state: &mut ClientState, data: &[u8]) -> Ve
         // Parse button actions (each action is 8 bytes)
         if change & 1 != 0 {
             for i in 0..n_btns {
-                if offset + 8 > data.len() {
+                if offset + XKB_ACTION_SIZE > data.len() {
                     break;
                 }
                 let btn_idx = first_btn + i;
-                let action_type = data[offset];
-                // Store the button action mapping
-                state.xkb_button_actions.insert(
-                    btn_idx,
-                    [
-                        data[offset],
-                        data[offset + 1],
-                        data[offset + 2],
-                        data[offset + 3],
-                        data[offset + 4],
-                        data[offset + 5],
-                        data[offset + 6],
-                        data[offset + 7],
-                    ],
-                );
+                let action: [u8; XKB_ACTION_SIZE] = data[offset..offset + XKB_ACTION_SIZE]
+                    .try_into()
+                    .expect("checked length above");
+                let action_type = action[0];
+                state.xkb_button_actions.insert(btn_idx, action);
                 debug!(
                     "SetDeviceInfo: button {} action type {}",
                     btn_idx, action_type
                 );
-                offset += 8;
+                offset += XKB_ACTION_SIZE;
             }
         }
 

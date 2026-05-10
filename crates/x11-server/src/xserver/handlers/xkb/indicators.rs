@@ -14,6 +14,35 @@ const MOD_M3: u8 = 1 << 5; // Scroll Lock
 /// XkbIM_UseLocked flag for the IndicatorMap whichMods field.
 const WHICH_MODS_USE_LOCKED: u8 = 0x04;
 
+/// XkbIM_UseEffective flag for the IndicatorMap whichGroups field — indicator
+/// tracks the effective keyboard group rather than a fixed group set.
+const WHICH_GROUPS_USE_EFFECTIVE: u8 = 0x80;
+
+/// Group bitmask for "lit when not in group 0" — covers groups 2, 3, and 4.
+const GROUPS_NON_BASE: u8 = 0x0E;
+
+/// XkbIndicatorMapWireDesc layout: 12-byte record per indicator in
+/// `GetIndicatorMap` replies and `SetIndicatorMap` requests.
+mod indicator_map_layout {
+    /// Wire size of one IndicatorMap entry.
+    pub(super) const SIZE: usize = 12;
+    /// u8 flags (XkbIM_NoExplicit etc.).
+    pub(super) const FLAGS: usize = 0;
+    /// u8 whichGroups (XkbIM_UseBase|UseLatched|UseLocked|UseEffective|UseCompat).
+    pub(super) const WHICH_GROUPS: usize = 1;
+    /// u8 groups (group bitmask).
+    pub(super) const GROUPS: usize = 2;
+    /// u8 whichMods (XkbIM_UseBase|UseLatched|UseLocked|UseEffective|UseCompat).
+    pub(super) const WHICH_MODS: usize = 3;
+    /// u8 mods (modifier bitmask).
+    pub(super) const MODS: usize = 4;
+    /// u8 realMods (real modifier bitmask).
+    pub(super) const REAL_MODS: usize = 5;
+    // u16 vmods (virtual modifiers) at offset 6.
+    /// u32 ctrls (controls bitmask) — wire offset 8.
+    pub(super) const CTRLS: usize = 8;
+}
+
 /// Handle GetIndicatorState (minor opcode 12).
 pub(crate) fn handle_get_indicator_state(
     state: &mut ClientState,
@@ -60,51 +89,49 @@ pub(crate) fn handle_get_indicator_map(
         0x0F
     };
     let n_indicators = which.count_ones() as usize;
-    let map_size = 12; // XkbIndicatorMapWireDesc = 12 bytes
-    let body_len = n_indicators * map_size;
+    let body_len = n_indicators * indicator_map_layout::SIZE;
     let mut reply = ReplyBuf::with_extra(seq, body_len, state.msb_first)
         .set_data_byte(device_id_byte)
         .set_u32(8, which); // which indicators
-                            // Indicator 12-byte maps: flags(1), whichGroups(1), groups(1), whichMods(1),
-                            //                         mods(1), realMods(1), vmods(2), ctrls(4)
     let mut off = 32;
     for bit in 0..32u32 {
         if which & (1 << bit) == 0 {
             continue;
         }
-        if off + map_size > reply.buf_mut().len() {
+        if off + indicator_map_layout::SIZE > reply.buf_mut().len() {
             break;
         }
         match bit {
             0 => {
                 // Caps Lock: driven by Lock modifier
-                reply.buf_mut()[off] = 0; // flags
-                reply.buf_mut()[off + 1] = 0; // whichGroups
-                reply.buf_mut()[off + 2] = 0; // groups
-                reply.buf_mut()[off + 3] = WHICH_MODS_USE_LOCKED;
-                reply.buf_mut()[off + 4] = MOD_LOCK; // mods
-                reply.buf_mut()[off + 5] = MOD_LOCK; // realMods
+                reply.buf_mut()[off + indicator_map_layout::FLAGS] = 0;
+                reply.buf_mut()[off + indicator_map_layout::WHICH_GROUPS] = 0;
+                reply.buf_mut()[off + indicator_map_layout::GROUPS] = 0;
+                reply.buf_mut()[off + indicator_map_layout::WHICH_MODS] = WHICH_MODS_USE_LOCKED;
+                reply.buf_mut()[off + indicator_map_layout::MODS] = MOD_LOCK;
+                reply.buf_mut()[off + indicator_map_layout::REAL_MODS] = MOD_LOCK;
             }
             1 => {
                 // Num Lock: driven by Mod2
-                reply.buf_mut()[off + 3] = WHICH_MODS_USE_LOCKED;
-                reply.buf_mut()[off + 4] = MOD_M2;
-                reply.buf_mut()[off + 5] = MOD_M2;
+                reply.buf_mut()[off + indicator_map_layout::WHICH_MODS] = WHICH_MODS_USE_LOCKED;
+                reply.buf_mut()[off + indicator_map_layout::MODS] = MOD_M2;
+                reply.buf_mut()[off + indicator_map_layout::REAL_MODS] = MOD_M2;
             }
             2 => {
                 // Scroll Lock: driven by Mod3
-                reply.buf_mut()[off + 3] = WHICH_MODS_USE_LOCKED;
-                reply.buf_mut()[off + 4] = MOD_M3;
-                reply.buf_mut()[off + 5] = MOD_M3;
+                reply.buf_mut()[off + indicator_map_layout::WHICH_MODS] = WHICH_MODS_USE_LOCKED;
+                reply.buf_mut()[off + indicator_map_layout::MODS] = MOD_M3;
+                reply.buf_mut()[off + indicator_map_layout::REAL_MODS] = MOD_M3;
             }
             3 => {
                 // Group indicator: driven by effective group != 0
-                reply.buf_mut()[off + 1] = 0x80; // whichGroups: UseEffective
-                reply.buf_mut()[off + 2] = 0x0E; // groups: 1|2|3 (lit when not group 0)
+                reply.buf_mut()[off + indicator_map_layout::WHICH_GROUPS] =
+                    WHICH_GROUPS_USE_EFFECTIVE;
+                reply.buf_mut()[off + indicator_map_layout::GROUPS] = GROUPS_NON_BASE;
             }
             _ => {}
         }
-        off += map_size;
+        off += indicator_map_layout::SIZE;
     }
     reply.build()
 }
@@ -119,7 +146,7 @@ pub(crate) fn handle_set_indicator_map(state: &mut ClientState, data: &[u8]) -> 
             if which & (1 << bit) == 0 {
                 continue;
             }
-            if off + 12 > data.len() {
+            if off + indicator_map_layout::SIZE > data.len() {
                 break;
             }
             while state.xkb_indicator_maps.len() <= bit as usize {
@@ -127,14 +154,14 @@ pub(crate) fn handle_set_indicator_map(state: &mut ClientState, data: &[u8]) -> 
                     .xkb_indicator_maps
                     .push(super::super::super::client::XkbIndicatorMap::default());
             }
-            let ctrls_val = read_u32(data, off + 8, msb);
+            let ctrls_val = read_u32(data, off + indicator_map_layout::CTRLS, msb);
             let map = &mut state.xkb_indicator_maps[bit as usize];
-            map.which_groups = data[off + 1];
-            map.groups = data[off + 2];
-            map.which_mods = data[off + 3];
-            map.mods = data[off + 4];
+            map.which_groups = data[off + indicator_map_layout::WHICH_GROUPS];
+            map.groups = data[off + indicator_map_layout::GROUPS];
+            map.which_mods = data[off + indicator_map_layout::WHICH_MODS];
+            map.mods = data[off + indicator_map_layout::MODS];
             map.ctrls = ctrls_val;
-            off += 12;
+            off += indicator_map_layout::SIZE;
         }
     }
     Vec::new()

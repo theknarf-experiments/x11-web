@@ -11,6 +11,20 @@ use x11rb_protocol::protocol::randr::{
     SetPanningRequest,
 };
 
+/// RRGetCrtcTransform reply: pending and current transforms are 3x3 fixed-
+/// point matrices; each entry is one u32 word.
+mod crtc_transform_layout {
+    /// Pending transform matrix begins at this offset within the reply.
+    pub(super) const PENDING_MATRIX: usize = 8;
+    /// Current transform matrix begins at this offset within the reply.
+    pub(super) const CURRENT_MATRIX: usize = 48;
+    /// Wire size of one fixed-point matrix entry.
+    pub(super) const ENTRY_SIZE: usize = 4;
+}
+
+/// 16.16 fixed-point representation of `1.0` — used for identity-matrix entries.
+const FIXED_16_16_ONE: i32 = 65536;
+
 /// RRGetCrtcInfo (20).
 pub(crate) fn handle_get_crtc_info(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
     let crtc_id = GetCrtcInfoRequest::try_parse_request(request_header(data), &data[4..])
@@ -170,7 +184,17 @@ pub(crate) fn handle_get_crtc_transform(state: &mut ClientState, data: &[u8], se
         .map(|r| r.crtc)
         .unwrap_or(0);
     // Retrieve transform or fall back to identity.
-    let identity = [65536i32, 0, 0, 0, 65536, 0, 0, 0, 65536];
+    let identity = [
+        FIXED_16_16_ONE,
+        0,
+        0,
+        0,
+        FIXED_16_16_ONE,
+        0,
+        0,
+        0,
+        FIXED_16_16_ONE,
+    ];
     let transform = state
         .randr_find_crtc(crtc_id)
         .map(|c| c.transform)
@@ -181,15 +205,21 @@ pub(crate) fn handle_get_crtc_transform(state: &mut ClientState, data: &[u8], se
     // But the length field counts words after the first 32 bytes: 80/4 = 20.
     let mut reply = ReplyBuf::with_extra(seq, 80, state.msb_first);
 
-    // Write pending transform at offset 8
+    // Write pending transform.
     for (i, &val) in transform.iter().enumerate() {
-        reply = reply.set_u32(8 + i * 4, val as u32);
+        reply = reply.set_u32(
+            crtc_transform_layout::PENDING_MATRIX + i * crtc_transform_layout::ENTRY_SIZE,
+            val as u32,
+        );
     }
     // pending filter name length = 0 at offset 44, padding at 46-47: already 0
 
-    // Write current transform at offset 48
+    // Write current transform.
     for (i, &val) in transform.iter().enumerate() {
-        reply = reply.set_u32(48 + i * 4, val as u32);
+        reply = reply.set_u32(
+            crtc_transform_layout::CURRENT_MATRIX + i * crtc_transform_layout::ENTRY_SIZE,
+            val as u32,
+        );
     }
     // current filter name length = 0 at offset 84, padding at 86-87: already 0
 
