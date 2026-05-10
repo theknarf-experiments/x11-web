@@ -311,8 +311,13 @@ test.describe.serial("Application compatibility", () => {
 
 	test("Multiple X clients can coexist", async ({ sidecarContainer }) => {
 		// Kill any leftover instances from prior tests so pgrep counts reflect
-		// only what this test starts.
-		await killApps(sidecarContainer);
+		// only what this test starts. Use pkill+wait to ensure processes are
+		// fully reaped before we (re)spawn them — `killApps` only sleeps
+		// 1 s, which is borderline on a loaded CI worker.
+		await execInSidecar(
+			sidecarContainer,
+			"pkill -9 -f 'xeyes|xclock|xlogo' 2>/dev/null; sleep 2; true",
+		);
 		await execInSidecar(sidecarContainer, "xeyes &");
 		await execInSidecar(sidecarContainer, "xclock -digital &");
 		await execInSidecar(sidecarContainer, "xlogo &");
