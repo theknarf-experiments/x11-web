@@ -18,14 +18,6 @@ async function execInSidecar(
 test.describe.serial("RENDER extension operations", () => {
 	test("rendercheck passes core tests", async ({ sidecarContainer }) => {
 		test.setTimeout(120_000);
-		const hasRendercheck = await execInSidecar(
-			sidecarContainer,
-			"which rendercheck 2>/dev/null && echo AVAILABLE || echo MISSING",
-		);
-		if (hasRendercheck.includes("MISSING")) {
-			test.skip();
-			return;
-		}
 		const output = await execInSidecar(
 			sidecarContainer,
 			"timeout 60 rendercheck -t fill,blend,dcoords,scoords,mcoords 2>&1 | tail -10",
@@ -308,14 +300,6 @@ test.describe.serial("rendercheck comprehensive", () => {
 test.describe("rendercheck comprehensive", () => {
 	test("rendercheck all test categories pass", async ({ sidecarContainer }) => {
 		test.setTimeout(120_000);
-		const check = await sidecarContainer.exec([
-			"bash", "-c",
-			"which rendercheck 2>/dev/null || echo NONE",
-		]);
-		if (check.output.trim() === "NONE") {
-			test.skip();
-			return;
-		}
 		const result = await sidecarContainer.exec([
 			"bash", "-c", [
 				"export DISPLAY=:99",
@@ -325,25 +309,16 @@ test.describe("rendercheck comprehensive", () => {
 		// Parse pass/fail counts
 		const passMatch = result.output.match(/(\d+) passed/);
 		const failMatch = result.output.match(/(\d+) failed/);
-		if (passMatch) {
-			const passed = parseInt(passMatch[1], 10);
-			const failed = failMatch ? parseInt(failMatch[1], 10) : 0;
-			console.log(`rendercheck: ${passed} passed, ${failed} failed`);
-			expect(passed).toBeGreaterThanOrEqual(789);
-			expect(failed).toBe(0);
-		}
+		expect(passMatch, "rendercheck did not report pass count").toBeTruthy();
+		const passed = parseInt(passMatch![1], 10);
+		const failed = failMatch ? parseInt(failMatch[1], 10) : 0;
+		console.log(`rendercheck: ${passed} passed, ${failed} failed`);
+		expect(passed).toBeGreaterThanOrEqual(789);
+		expect(failed).toBe(0);
 	});
 
 	test("rendercheck per-category breakdown all pass", async ({ sidecarContainer }) => {
 		test.setTimeout(180_000);
-		const check = await sidecarContainer.exec([
-			"bash", "-c",
-			"which rendercheck 2>/dev/null || echo NONE",
-		]);
-		if (check.output.trim() === "NONE") {
-			test.skip();
-			return;
-		}
 		// Run each test category independently to isolate failures
 		const categories = [
 			"fill", "dcoords", "scoords", "mcoords", "tscoords",
@@ -405,16 +380,6 @@ test.describe.serial("RENDER extension (Phase 7)", () => {
 	test("rendercheck runs without critical failures", async ({
 		sidecarContainer,
 	}) => {
-		// Check if rendercheck is available
-		const checkResult = await sidecarContainer.exec([
-			"bash",
-			"-c",
-			"which rendercheck 2>/dev/null && echo AVAILABLE || echo MISSING",
-		]);
-		if (checkResult.output.trim().includes("MISSING")) {
-			test.skip();
-			return;
-		}
 		const output = await execInSidecar(
 			sidecarContainer,
 			"timeout 30 rendercheck -t fill 2>&1 | tail -5",
@@ -426,20 +391,6 @@ test.describe.serial("RENDER extension (Phase 7)", () => {
 });
 
 test.describe.serial("rendercheck full coverage", () => {
-	let rendercheckAvailable = false;
-
-	test("detect rendercheck availability", async ({ sidecarContainer }) => {
-		const check = await execInSidecar(
-			sidecarContainer,
-			"command -v rendercheck 2>/dev/null && echo AVAILABLE || echo MISSING",
-		);
-		rendercheckAvailable = check.includes("AVAILABLE");
-		if (!rendercheckAvailable) {
-			console.log("timeout 30 rendercheck not installed – tests will be skipped");
-		}
-		expect(true).toBe(true);
-	});
-
 	for (const category of [
 		"fill",
 		"dcomp",
@@ -452,12 +403,11 @@ test.describe.serial("rendercheck full coverage", () => {
 		"tri",
 	]) {
 		test(`rendercheck -t ${category}`, async ({ sidecarContainer }) => {
-			test.skip(!rendercheckAvailable, "timeout 30 rendercheck not available");
 			test.setTimeout(120_000);
 
 			const output = await execInSidecar(
 				sidecarContainer,
-				`rendercheck -t ${category} 2>&1 || true`,
+				`timeout 30 rendercheck -t ${category} 2>&1 || true`,
 			);
 
 			// Should not crash
@@ -472,11 +422,6 @@ test.describe.serial("rendercheck full coverage", () => {
 					failures,
 					`rendercheck -t ${category} reported ${failures} failures`,
 				).toBe(0);
-			}
-
-			// Also accept "tests passed" with no failure line
-			if (output.includes("tests passed") && !failMatch) {
-				// All good
 			}
 		});
 	}
@@ -497,13 +442,6 @@ test.describe.serial("Host access control compliance", () => {
 	test("ListHosts returns valid response via python3", async ({
 		sidecarContainer,
 	}) => {
-		const check = await execInSidecar(
-			sidecarContainer,
-			"python3 -c 'import Xlib.display' 2>/dev/null && echo AVAILABLE || echo MISSING",
-		);
-		const python3Available = check.includes("AVAILABLE");
-		test.skip(!python3Available, "python3-xlib not available");
-
 		const output = (await runPythonScript(sidecarContainer, "listhosts_returns_valid_response_via_python3.py", { env: { DISPLAY: ":99" } })).output.trim();
 		// mode is 0 (disabled) or 1 (enabled)
 		expect(output).toMatch(/acl_enabled=[01]/);
@@ -513,12 +451,6 @@ test.describe.serial("Host access control compliance", () => {
 	test("Composite extension: QueryVersion and RedirectWindow", async ({
 		sidecarContainer,
 	}) => {
-		const check = await execInSidecar(
-			sidecarContainer,
-			"python3 -c 'import Xlib.display' 2>/dev/null && echo AVAILABLE || echo MISSING",
-		);
-		test.skip(!check.includes("AVAILABLE"), "python3-xlib not available");
-
 		const output = (await runPythonScript(sidecarContainer, "composite_extension_queryversion_and_redirectwindow.py", { env: { DISPLAY: ":99" } })).output.trim();
 		// Should not crash and should report Composite is available
 		expect(output).not.toContain("X Error");
@@ -527,12 +459,6 @@ test.describe.serial("Host access control compliance", () => {
 	test("DAMAGE extension: DamageCreate and DamageDestroy", async ({
 		sidecarContainer,
 	}) => {
-		const check = await execInSidecar(
-			sidecarContainer,
-			"python3 -c 'import Xlib.display' 2>/dev/null && echo AVAILABLE || echo MISSING",
-		);
-		test.skip(!check.includes("AVAILABLE"), "python3-xlib not available");
-
 		const output = (await runPythonScript(sidecarContainer, "damage_extension_damagecreate_and_damagedestroy.py", { env: { DISPLAY: ":99" } })).output.trim();
 		expect(output).toContain("damage_ext_opcode=");
 		expect(output).toContain("damage_test=ok");
@@ -551,12 +477,6 @@ test.describe.serial("Host access control compliance", () => {
 	test("Present extension: QueryVersion and QueryCapabilities", async ({
 		sidecarContainer,
 	}) => {
-		const check = await execInSidecar(
-			sidecarContainer,
-			"python3 -c 'import Xlib.display' 2>/dev/null && echo AVAILABLE || echo MISSING",
-		);
-		test.skip(!check.includes("AVAILABLE"), "python3-xlib not available");
-
 		const output = (await runPythonScript(sidecarContainer, "present_extension_queryversion_and_querycapabilities.py", { env: { DISPLAY: ":99" } })).output.trim();
 		expect(output).toContain("present_opcode=");
 		expect(output).toContain("xcmisc_opcode=");
@@ -565,12 +485,6 @@ test.describe.serial("Host access control compliance", () => {
 	test("XTEST extension: GetVersion and CompareCursor", async ({
 		sidecarContainer,
 	}) => {
-		const check = await execInSidecar(
-			sidecarContainer,
-			"python3 -c 'import Xlib.display' 2>/dev/null && echo AVAILABLE || echo MISSING",
-		);
-		test.skip(!check.includes("AVAILABLE"), "python3-xlib not available");
-
 		const output = (await runPythonScript(sidecarContainer, "xtest_extension_getversion_and_comparecursor.py", { env: { DISPLAY: ":99" } })).output.trim();
 		expect(output).toContain("xtest_opcode=");
 	});
@@ -847,14 +761,8 @@ test.describe.serial("RENDER extension compliance", () => {
 			sidecarContainer,
 			"timeout 30 rendercheck -t fill 2>&1 | tail -5",
 		);
-		// rendercheck reports pass/fail
-		if (output.includes("tests passed")) {
-			expect(output).not.toMatch(/\d+ tests failed/);
-		}
-		// If rendercheck is not installed, skip gracefully
-		if (output.includes("not found") || output.includes("No such file")) {
-			test.skip();
-		}
+		expect(output).not.toContain("Segmentation fault");
+		expect(output).not.toMatch(/\d+ tests failed/);
 	});
 
 	test("rendercheck gradient operations", async ({
@@ -864,12 +772,8 @@ test.describe.serial("RENDER extension compliance", () => {
 			sidecarContainer,
 			"timeout 30 rendercheck -t gradient 2>&1 | tail -5",
 		);
-		if (output.includes("not found")) {
-			test.skip();
-		}
-		if (output.includes("tests passed")) {
-			expect(output).not.toMatch(/\d+ tests failed/);
-		}
+		expect(output).not.toContain("Segmentation fault");
+		expect(output).not.toMatch(/\d+ tests failed/);
 	});
 
 	test("rendercheck blend operations", async ({
@@ -879,12 +783,8 @@ test.describe.serial("RENDER extension compliance", () => {
 			sidecarContainer,
 			"timeout 30 rendercheck -t blend 2>&1 | tail -5",
 		);
-		if (output.includes("not found")) {
-			test.skip();
-		}
-		if (output.includes("tests passed")) {
-			expect(output).not.toMatch(/\d+ tests failed/);
-		}
+		expect(output).not.toContain("Segmentation fault");
+		expect(output).not.toMatch(/\d+ tests failed/);
 	});
 
 	test("rendercheck composite operations", async ({
@@ -894,12 +794,8 @@ test.describe.serial("RENDER extension compliance", () => {
 			sidecarContainer,
 			"timeout 30 rendercheck -t composite 2>&1 | tail -5",
 		);
-		if (output.includes("not found")) {
-			test.skip();
-		}
-		if (output.includes("tests passed")) {
-			expect(output).not.toMatch(/\d+ tests failed/);
-		}
+		expect(output).not.toContain("Segmentation fault");
+		expect(output).not.toMatch(/\d+ tests failed/);
 	});
 
 	test("RENDER PictFormats include required formats", async ({

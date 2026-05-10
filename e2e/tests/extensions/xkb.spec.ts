@@ -1105,13 +1105,6 @@ test.describe.serial("Protocol validation tools", () => {
 test.describe("XKB compat map", () => {
 	test("xkbcomp can dump the compat map", async ({ sidecarContainer }) => {
 		test.setTimeout(30_000);
-		const available = await sidecarContainer.exec([
-			"bash", "-c", "which xkbcomp 2>/dev/null && echo XKBCOMP_FOUND || echo XKBCOMP_MISSING",
-		]);
-		if (available.output.includes("XKBCOMP_MISSING")) {
-			test.skip();
-			return;
-		}
 		const result = await sidecarContainer.exec([
 			"bash", "-c", [
 				"export DISPLAY=:99",
@@ -1151,15 +1144,8 @@ test.describe.serial("Server capabilities via xdpyinfo", () => {
 	test("xdpyinfo reports all required extensions", async ({
 		sidecarContainer,
 	}) => {
-		const output = await execInSidecar(
-			sidecarContainer,
-			"xdpyinfo 2>/dev/null || echo XDPYINFO_FAILED",
-		);
-
-		if (output.includes("XDPYINFO_FAILED")) {
-			test.skip();
-			return;
-		}
+		const output = await execInSidecar(sidecarContainer, "xdpyinfo");
+		expect(output).not.toContain("XDPYINFO_FAILED");
 
 		// Verify key extensions are listed
 		const requiredExtensions = [
@@ -1183,15 +1169,7 @@ test.describe.serial("Server capabilities via xdpyinfo", () => {
 	test("xdpyinfo reports correct visual depths", async ({
 		sidecarContainer,
 	}) => {
-		const output = await execInSidecar(
-			sidecarContainer,
-			"xdpyinfo 2>/dev/null || echo XDPYINFO_FAILED",
-		);
-
-		if (output.includes("XDPYINFO_FAILED")) {
-			test.skip();
-			return;
-		}
+		const output = await execInSidecar(sidecarContainer, "xdpyinfo");
 
 		// Must report 24-bit TrueColor (the default visual)
 		expect(output).toContain("depth 24");

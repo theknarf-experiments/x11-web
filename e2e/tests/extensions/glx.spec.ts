@@ -25,14 +25,6 @@ async function killApps(container: StartedTestContainer): Promise<void> {
 test.describe("GLX display lists", () => {
 	test("glxgears runs without errors", async ({ sidecarContainer }) => {
 		test.setTimeout(30_000);
-		const which = await sidecarContainer.exec([
-			"bash", "-c",
-			"which glxgears 2>/dev/null || echo NONE",
-		]);
-		if (which.output.trim() === "NONE") {
-			test.skip();
-			return;
-		}
 		const result = await sidecarContainer.exec([
 			"bash", "-c", [
 				"export DISPLAY=:99",
@@ -46,14 +38,6 @@ test.describe("GLX display lists", () => {
 
 	test("glmark2 benchmark runs without crash", async ({ sidecarContainer }) => {
 		test.setTimeout(60_000);
-		const which = await sidecarContainer.exec([
-			"bash", "-c",
-			"which glmark2 2>/dev/null || echo NONE",
-		]);
-		if (which.output.trim() === "NONE") {
-			test.skip();
-			return;
-		}
 		const result = await sidecarContainer.exec([
 			"bash", "-c", [
 				"export DISPLAY=:99",

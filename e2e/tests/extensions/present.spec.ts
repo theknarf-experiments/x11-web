@@ -273,14 +273,6 @@ test.describe("Present extension capabilities", () => {
 test.describe("App compatibility: xclock rendering", () => {
 	test("xclock starts, renders non-trivial pixels (analog clock)", async ({ sidecarContainer }) => {
 		test.setTimeout(30_000);
-		const which = await sidecarContainer.exec([
-			"bash", "-c",
-			"which xclock 2>/dev/null || echo NONE",
-		]);
-		if (which.output.trim() === "NONE") {
-			test.skip();
-			return;
-		}
 		const result = await sidecarContainer.exec([
 			"bash", "-c", [
 				"export DISPLAY=:99",
@@ -334,24 +326,9 @@ test.describe.serial("MIT-SHM extension (Phase 7)", () => {
 });
 
 test.describe.serial("XI2 protocol compliance", () => {
-	let python3Available = false;
-
-	test("detect python3 availability", async ({ sidecarContainer }) => {
-		const check = await execInSidecar(
-			sidecarContainer,
-			"python3 -c 'import Xlib.display' 2>/dev/null && echo AVAILABLE || echo MISSING",
-		);
-		python3Available = check.includes("AVAILABLE");
-		if (!python3Available) {
-			console.log("python3-xlib not installed – XI2 tests will be skipped");
-		}
-		expect(true).toBe(true);
-	});
-
 	test("XIQueryVersion negotiates version 2.x", async ({
 		sidecarContainer,
 	}) => {
-		test.skip(!python3Available, "python3-xlib not available");
 		const output = (await runPythonScript(sidecarContainer, "xiqueryversion_negotiates_version_2_x.py", { env: { DISPLAY: ":99" } })).output.trim();
 		expect(output).toContain("present=True");
 	});
