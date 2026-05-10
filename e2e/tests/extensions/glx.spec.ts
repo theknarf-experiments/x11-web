@@ -441,12 +441,6 @@ test.describe.serial("Real-world application smoke tests", () => {
 	}) => {
 		test.setTimeout(600_000);
 
-		const which = await execInSidecar(
-			sidecarContainer,
-			"which x11perf 2>/dev/null || echo MISSING",
-		);
-		test.skip(which.includes("MISSING"), "x11perf not installed");
-
 		// Run a comprehensive x11perf test covering all major operations
 		const output = await execInSidecar(
 			sidecarContainer,
@@ -1137,11 +1131,6 @@ sys.exit(1 if failed > 0 else 0)
 
 	test("comprehensive x11perf wide lines and stipple fills", async ({ sidecarContainer }) => {
 		test.setTimeout(600_000);
-		const which = await execInSidecar(
-			sidecarContainer,
-			"which x11perf 2>/dev/null || echo MISSING",
-		);
-		test.skip(which.includes("MISSING"), "x11perf not installed");
 		const result = await sidecarContainer.exec([
 			"bash", "-c", [
 				"export DISPLAY=:99",

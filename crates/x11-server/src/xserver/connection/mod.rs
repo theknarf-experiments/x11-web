@@ -342,6 +342,8 @@ pub(crate) async fn handle_client(
         sequence: 0,
         windows: local_windows,
         shared_windows,
+        shared_dirty_windows: std::collections::HashSet::new(),
+        shared_removed_windows: std::collections::HashSet::new(),
         pixmaps: HashMap::new(),
         gcs: HashMap::new(),
         atoms: shared_atoms,

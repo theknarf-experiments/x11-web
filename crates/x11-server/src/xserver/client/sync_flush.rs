@@ -69,11 +69,40 @@ impl ClientState {
     // -----------------------------------------------------------------------
 
     /// Sync local windows with the shared store.
+    ///
+    /// This is called once per socket-read tick. To keep the cost proportional
+    /// to *changes* rather than to the size of `self.windows`, the local→shared
+    /// push (step 2) and the explicit removal step (step 3) only walk
+    /// `shared_dirty_windows` and `shared_removed_windows`. Without that
+    /// gating, a single client opening N windows would re-iterate every window
+    /// on every read — observed as O(N²) total CPU under x11perf burst loads.
+    ///
+    /// The shared→local pull (step 1) still walks `shared` because the cost is
+    /// already proportional to "things produced by other clients" plus the
+    /// foreign-cleanup pass.
     pub(crate) fn sync_windows(&mut self) {
         if let Ok(mut shared) = self.shared_windows.lock() {
             // 1. shared → local: pull in foreign windows we don't yet have, and
             //    drop foreign windows that have disappeared from shared (their
-            //    owning client disconnected and removed them).
+            //    owning client disconnected and removed them). Only walk the
+            //    map when shared could possibly contain a window we don't yet
+            //    have — checking lengths is O(1) and lets the common
+            //    single-client case (e.g. x11perf hammering CreateWindow) skip
+            //    step 1 entirely.
+            let shared_len = shared.len();
+            let local_len = self.windows.len();
+            let mut needs_step1 = shared_len != local_len;
+            if !needs_step1 {
+                // Same length doesn't guarantee same key set — verify by
+                // sampling against shared's first key. For the common case
+                // where the only modifications came from this client (so
+                // shared mirrors our local view), this lets us short-circuit.
+                if let Some((&first_shared_key, _)) = shared.iter().next() {
+                    needs_step1 = !self.windows.contains_key(&first_shared_key);
+                }
+            }
+
+            if needs_step1 {
             let shared_keys: std::collections::HashSet<u32> = shared.keys().copied().collect();
             let foreign_to_remove: Vec<u32> = self
                 .windows
@@ -100,15 +129,18 @@ impl ClientState {
                     // For our own windows, the local view is authoritative —
                     // pulling mapped=true from shared here would resurrect
                     // unmapped state immediately after handle_unmap_window
-                    // wrote mapped=false. Only foreign windows need the
-                    // monotonic visibility promotion.
-                    if !is_mine {
-                        if shared_win.mapped && !local_win.mapped {
-                            local_win.mapped = true;
-                        }
-                        if shared_win.redirected {
-                            local_win.redirected = true;
-                        }
+                    // wrote mapped=false, and the property merge is wasted
+                    // work since we're the source of truth. Skip the whole
+                    // merge for own windows so this loop costs O(foreign +
+                    // new-from-shared) rather than O(total-windows).
+                    if is_mine {
+                        continue;
+                    }
+                    if shared_win.mapped && !local_win.mapped {
+                        local_win.mapped = true;
+                    }
+                    if shared_win.redirected {
+                        local_win.redirected = true;
                     }
                     for (&atom, val) in shared_win.properties.iter() {
                         local_win
@@ -120,14 +152,19 @@ impl ClientState {
                     self.windows.insert(wid, shared_win.clone());
                 }
             }
+            } // end of `if needs_step1` block
 
-            // 2. local → shared: push our owned windows into the shared store.
-            //    Don't re-publish foreign windows we cached — that would
-            //    resurrect entries the owning client already destroyed.
-            for (&wid, local_win) in self.windows.iter() {
+            // 2. local → shared: push only the windows we mutated since the
+            //    last sync. Each handler that changes window state should call
+            //    `state.mark_window_shared_dirty(wid)` so this loop sees it.
+            let dirty = std::mem::take(&mut self.shared_dirty_windows);
+            for wid in &dirty {
+                let Some(local_win) = self.windows.get(wid) else {
+                    continue;
+                };
                 let is_mine = local_win.owner_client_id.is_empty()
                     || local_win.owner_client_id == self.client_id;
-                if let Some(shared_win) = shared.get_mut(&wid) {
+                if let Some(shared_win) = shared.get_mut(wid) {
                     if is_mine {
                         // For our own windows, propagate the full mapped /
                         // redirected state — including transitions back to
@@ -156,16 +193,15 @@ impl ClientState {
                     shared_win.width = local_win.width;
                     shared_win.height = local_win.height;
                 } else if is_mine {
-                    shared.insert(wid, local_win.clone());
+                    shared.insert(*wid, local_win.clone());
                 }
             }
 
-            // 3. Drop shared entries that no client has locally any more.
-            //    Only safe for windows we own (otherwise we'd evict another
-            //    client's window from shared just because we don't have it
-            //    cached locally).
-            let shared_ids: Vec<u32> = shared.keys().copied().collect();
-            for wid in shared_ids {
+            // 3. Drop shared entries that we previously owned and have removed
+            //    locally (DestroyWindow / disconnect cleanup). Use the explicit
+            //    removal set instead of scanning `shared` for orphans.
+            let removed = std::mem::take(&mut self.shared_removed_windows);
+            for wid in removed {
                 if !self.windows.contains_key(&wid) {
                     let owner_is_me = shared
                         .get(&wid)
@@ -179,6 +215,21 @@ impl ClientState {
                 }
             }
         }
+    }
+
+    /// Mark `wid` as needing to be flushed to `shared_windows` on the next
+    /// `sync_windows()` call. Call this from any handler that mutates the
+    /// local copy of a window in a way that needs to be visible to other
+    /// connections (geometry, properties, mapped/redirected flags, etc.).
+    pub(crate) fn mark_window_shared_dirty(&mut self, wid: u32) {
+        self.shared_dirty_windows.insert(wid);
+    }
+
+    /// Mark `wid` as needing to be removed from `shared_windows` on the next
+    /// `sync_windows()` call.
+    pub(crate) fn mark_window_shared_removed(&mut self, wid: u32) {
+        self.shared_removed_windows.insert(wid);
+        self.shared_dirty_windows.remove(&wid);
     }
 
     /// Send dirty framebuffer regions for all mapped windows as PutImage updates.

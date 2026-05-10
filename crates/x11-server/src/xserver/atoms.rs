@@ -40,8 +40,12 @@ pub(crate) mod predef {
     pub(crate) const NET_WM_STATE: u32 = 92;
     pub(crate) const NET_WM_STATE_ABOVE: u32 = 102;
     pub(crate) const NET_WM_STATE_BELOW: u32 = 103;
+    pub(crate) const NET_FRAME_EXTENTS: u32 = 126;
+    pub(crate) const NET_WM_PID: u32 = 127;
     pub(crate) const NET_WM_STRUT: u32 = 129;
     pub(crate) const NET_WM_STRUT_PARTIAL: u32 = 130;
+    /// `WM_CLIENT_MACHINE` is in the X11 predefined-atom table at id 36.
+    pub(crate) const WM_CLIENT_MACHINE: u32 = 36;
 }
 
 pub(crate) struct AtomManager {

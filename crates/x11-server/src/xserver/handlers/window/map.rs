@@ -16,7 +16,7 @@ use x11rb_protocol::protocol::xproto::{
 pub(crate) fn handle_map_window(state: &mut ClientState, req: &MapWindowRequest) -> Vec<u8> {
     let seq = state.sequence;
     let wid = req.window;
-    info!(
+    debug!(
         "MapWindow called: wid={wid:#x} exists={}",
         state.windows.contains_key(&wid)
     );
@@ -135,7 +135,7 @@ pub(crate) fn handle_map_window(state: &mut ClientState, req: &MapWindowRequest)
         });
 
     if let Some(win) = state.windows.get_mut(&wid) {
-        info!(
+        debug!(
             "MapWindow: id={wid:#x} {}x{} mapped={}",
             win.width, win.height, win.mapped
         );

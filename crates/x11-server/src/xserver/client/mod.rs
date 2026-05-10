@@ -10,7 +10,7 @@ mod sync_flush;
 pub(crate) mod types;
 pub(crate) mod xkb_state;
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
 use tokio::sync::mpsc;
 
@@ -63,6 +63,13 @@ pub(crate) struct ClientState {
     pub(crate) sequence: u16,
     pub(crate) windows: HashMap<u32, WindowState>,
     pub(crate) shared_windows: SharedWindows,
+    /// Window IDs whose local state has changed since the last `sync_windows`
+    /// call and therefore need to be pushed back to `shared_windows`. Without
+    /// this we'd re-iterate every window on every read tick, which becomes
+    /// O(N²) under x11perf-style burst create/destroy workloads.
+    pub(crate) shared_dirty_windows: HashSet<u32>,
+    /// Window IDs that should be removed from `shared_windows` on next sync.
+    pub(crate) shared_removed_windows: HashSet<u32>,
     pub(crate) pixmaps: HashMap<u32, PixmapState>,
     pub(crate) gcs: HashMap<u32, GcState>,
     pub(crate) atoms: Arc<Mutex<AtomManager>>,

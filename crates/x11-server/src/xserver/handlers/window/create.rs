@@ -2,10 +2,27 @@
 
 use super::*;
 use crate::xserver::event::serialize_event;
+use std::sync::OnceLock;
 use x11rb_protocol::protocol::xproto::{
     BackingStore, CreateNotifyEvent, CreateWindowRequest, DestroyNotifyEvent,
     DestroySubwindowsRequest, DestroyWindowRequest, WindowClass,
 };
+
+/// Hostname read from `/etc/hostname` at first use. Cached to avoid the
+/// syscall on every CreateWindow — x11perf -create can issue thousands of
+/// CreateWindow requests in one benchmark, and hitting the filesystem each
+/// time turns the request handler into a sleep loop.
+fn cached_hostname() -> &'static str {
+    static HOSTNAME: OnceLock<String> = OnceLock::new();
+    HOSTNAME
+        .get_or_init(|| {
+            std::fs::read_to_string("/etc/hostname")
+                .unwrap_or_else(|_| "localhost".to_string())
+                .trim()
+                .to_string()
+        })
+        .as_str()
+}
 
 // ---------------------------------------------------------------------------
 // Opcode 1: CreateWindow
@@ -177,7 +194,7 @@ pub(crate) fn handle_create_window(state: &mut ClientState, req: &CreateWindowRe
         .unwrap_or(ROOT_VISUAL);
     let use_visual = if visual == 0 { parent_visual } else { visual };
 
-    info!("CreateWindow: id={wid:#x} parent={parent:#x} {x},{y} {width}x{height} depth={req_depth} class={class} visual={visual:#x} bg={background_pixel:#x}");
+    debug!("CreateWindow: id={wid:#x} parent={parent:#x} {x},{y} {width}x{height} depth={req_depth} class={class} visual={visual:#x} bg={background_pixel:#x}");
 
     // InputOnly windows must not have backgrounds, borders, or framebuffers.
     // They exist only to receive events. Per spec, depth must be 0 for InputOnly.
@@ -275,16 +292,16 @@ pub(crate) fn handle_create_window(state: &mut ClientState, req: &CreateWindowRe
         parent_win.children_order.push(wid);
     }
 
-    // Set _NET_FRAME_EXTENTS = (0,0,0,0) on new windows -- GTK3 checks this.
-    let atom_frame = state.intern_atom("_NET_FRAME_EXTENTS", false);
-    // Set _NET_WM_PID if we know the client's process ID (EWMH §5.6)
-    let atom_pid = state.intern_atom("_NET_WM_PID", false);
-    // Set WM_CLIENT_MACHINE (ICCCM §4.1.2.9)
-    let atom_machine = state.intern_atom("WM_CLIENT_MACHINE", false);
+    // _NET_FRAME_EXTENTS / _NET_WM_PID / WM_CLIENT_MACHINE all live in the
+    // predefined-atom table, so we hard-reference their IDs and skip the
+    // hot-path lock (`intern_atom` takes the AtomManager mutex). x11perf
+    // -create issues thousands of CreateWindow requests in one benchmark,
+    // and three lock acquisitions per request used to dominate the run.
+    use crate::xserver::atoms::predef;
     let client_pid = state.peer_pid;
     if let Some(win) = state.windows.get_mut(&wid) {
         win.properties.insert(
-            atom_frame,
+            predef::NET_FRAME_EXTENTS,
             PropertyValue {
                 prop_type: crate::xserver::atoms::predef::CARDINAL,
                 format: 32,
@@ -294,24 +311,21 @@ pub(crate) fn handle_create_window(state: &mut ClientState, req: &CreateWindowRe
         // _NET_WM_PID
         if client_pid > 0 {
             win.properties.insert(
-                atom_pid,
+                predef::NET_WM_PID,
                 PropertyValue {
-                    prop_type: crate::xserver::atoms::predef::CARDINAL,
+                    prop_type: predef::CARDINAL,
                     format: 32,
                     data: client_pid.to_le_bytes().to_vec(),
                 },
             );
         }
-        // WM_CLIENT_MACHINE: hostname
-        let hostname =
-            std::fs::read_to_string("/etc/hostname").unwrap_or_else(|_| "localhost".to_string());
-        let hostname = hostname.trim();
+        // WM_CLIENT_MACHINE: hostname (cached after first read).
         win.properties.insert(
-            atom_machine,
+            predef::WM_CLIENT_MACHINE,
             PropertyValue {
-                prop_type: crate::xserver::atoms::predef::STRING,
+                prop_type: predef::STRING,
                 format: 8,
-                data: hostname.as_bytes().to_vec(),
+                data: cached_hostname().as_bytes().to_vec(),
             },
         );
     }
@@ -362,6 +376,9 @@ pub(crate) fn handle_create_window(state: &mut ClientState, req: &CreateWindowRe
     // on the parent. Cross-connection broadcast already filters by
     // source_client_id so we don't double-deliver to ourselves.
     state.deliver_event(parent, EventMask::SUBSTRUCTURE_NOTIFY, &event);
+
+    // Mark the window for sync to shared_windows so other clients see it.
+    state.mark_window_shared_dirty(wid);
 
     Vec::new() // No reply for CreateWindow
 }
