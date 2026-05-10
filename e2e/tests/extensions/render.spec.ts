@@ -16,7 +16,7 @@ async function execInSidecar(
 }
 
 test.describe.serial("RENDER extension operations", () => {
-	test("timeout 30 rendercheck passes core tests", async ({ sidecarContainer }) => {
+	test("rendercheck passes core tests", async ({ sidecarContainer }) => {
 		test.setTimeout(120_000);
 		const hasRendercheck = await execInSidecar(
 			sidecarContainer,
@@ -55,7 +55,7 @@ test.describe.serial("RENDER CreatePicture validation", () => {
 });
 
 test.describe("Conformance: rendercheck extended", () => {
-	test("timeout 30 rendercheck composite operations pass", async ({ sidecarContainer }) => {
+	test("rendercheck composite operations pass", async ({ sidecarContainer }) => {
 		test.setTimeout(60_000);
 		const output = await execInSidecar(
 			sidecarContainer,
@@ -65,7 +65,7 @@ test.describe("Conformance: rendercheck extended", () => {
 		expect(output).not.toContain("Segmentation fault");
 	});
 
-	test("timeout 30 rendercheck gradient operations pass", async ({ sidecarContainer }) => {
+	test("rendercheck gradient operations pass", async ({ sidecarContainer }) => {
 		test.setTimeout(60_000);
 		const output = await execInSidecar(
 			sidecarContainer,
@@ -104,10 +104,10 @@ test.describe("Extended app compatibility", () => {
 	});
 });
 
-test.describe.serial("timeout 30 rendercheck conformance", () => {
+test.describe.serial("rendercheck conformance", () => {
 	test.setTimeout(300_000);
 
-	test("timeout 30 rendercheck blend operations pass", async ({ sidecarContainer }) => {
+	test("rendercheck blend operations pass", async ({ sidecarContainer }) => {
 		const output = await execInSidecar(
 			sidecarContainer,
 			"timeout 30 rendercheck -t blend -f a8r8g8b8 2>&1 | tail -40",
@@ -117,7 +117,7 @@ test.describe.serial("timeout 30 rendercheck conformance", () => {
 		expect(output.toLowerCase()).not.toContain("server error");
 	});
 
-	test("timeout 30 rendercheck composite operations pass", async ({
+	test("rendercheck composite operations pass", async ({
 		sidecarContainer,
 	}) => {
 		const output = await execInSidecar(
@@ -127,7 +127,7 @@ test.describe.serial("timeout 30 rendercheck conformance", () => {
 		expect(output).not.toContain("Segmentation fault");
 	});
 
-	test("timeout 30 rendercheck fill operations pass", async ({ sidecarContainer }) => {
+	test("rendercheck fill operations pass", async ({ sidecarContainer }) => {
 		const output = await execInSidecar(
 			sidecarContainer,
 			"timeout 30 rendercheck -t fill -f a8r8g8b8 2>&1 | tail -40",
@@ -135,7 +135,7 @@ test.describe.serial("timeout 30 rendercheck conformance", () => {
 		expect(output).not.toContain("Segmentation fault");
 	});
 
-	test("timeout 30 rendercheck dcoords (destination coordinates) pass", async ({
+	test("rendercheck dcoords (destination coordinates) pass", async ({
 		sidecarContainer,
 	}) => {
 		const output = await execInSidecar(
@@ -145,7 +145,7 @@ test.describe.serial("timeout 30 rendercheck conformance", () => {
 		expect(output).not.toContain("Segmentation fault");
 	});
 
-	test("timeout 30 rendercheck scoords (source coordinates) pass", async ({
+	test("rendercheck scoords (source coordinates) pass", async ({
 		sidecarContainer,
 	}) => {
 		const output = await execInSidecar(
@@ -155,7 +155,7 @@ test.describe.serial("timeout 30 rendercheck conformance", () => {
 		expect(output).not.toContain("Segmentation fault");
 	});
 
-	test("timeout 30 rendercheck mcoords (mask coordinates) pass", async ({
+	test("rendercheck mcoords (mask coordinates) pass", async ({
 		sidecarContainer,
 	}) => {
 		const output = await execInSidecar(
@@ -165,7 +165,7 @@ test.describe.serial("timeout 30 rendercheck conformance", () => {
 		expect(output).not.toContain("Segmentation fault");
 	});
 
-	test("timeout 30 rendercheck tscoords (transformed source coordinates) pass", async ({
+	test("rendercheck tscoords (transformed source coordinates) pass", async ({
 		sidecarContainer,
 	}) => {
 		const output = await execInSidecar(
@@ -175,7 +175,7 @@ test.describe.serial("timeout 30 rendercheck conformance", () => {
 		expect(output).not.toContain("Segmentation fault");
 	});
 
-	test("timeout 30 rendercheck tmcoords (transformed mask coordinates) pass", async ({
+	test("rendercheck tmcoords (transformed mask coordinates) pass", async ({
 		sidecarContainer,
 	}) => {
 		const output = await execInSidecar(
@@ -185,7 +185,7 @@ test.describe.serial("timeout 30 rendercheck conformance", () => {
 		expect(output).not.toContain("Segmentation fault");
 	});
 
-	test("timeout 30 rendercheck triangles pass", async ({ sidecarContainer }) => {
+	test("rendercheck triangles pass", async ({ sidecarContainer }) => {
 		const output = await execInSidecar(
 			sidecarContainer,
 			"timeout 30 rendercheck -t triangles -f a8r8g8b8 2>&1 | tail -40",
@@ -193,7 +193,7 @@ test.describe.serial("timeout 30 rendercheck conformance", () => {
 		expect(output).not.toContain("Segmentation fault");
 	});
 
-	test("timeout 30 rendercheck bug7366 (gradient) pass", async ({
+	test("rendercheck bug7366 (gradient) pass", async ({
 		sidecarContainer,
 	}) => {
 		const output = await execInSidecar(
@@ -203,7 +203,7 @@ test.describe.serial("timeout 30 rendercheck conformance", () => {
 		expect(output).not.toContain("Segmentation fault");
 	});
 
-	test("timeout 30 rendercheck linethin pass", async ({ sidecarContainer }) => {
+	test("rendercheck linethin pass", async ({ sidecarContainer }) => {
 		const output = await execInSidecar(
 			sidecarContainer,
 			"timeout 30 rendercheck -t linethin 2>&1 | tail -40",
@@ -211,7 +211,7 @@ test.describe.serial("timeout 30 rendercheck conformance", () => {
 		expect(output).not.toContain("Segmentation fault");
 	});
 
-	test("timeout 30 rendercheck repeat pass", async ({ sidecarContainer }) => {
+	test("rendercheck repeat pass", async ({ sidecarContainer }) => {
 		const output = await execInSidecar(
 			sidecarContainer,
 			"timeout 30 rendercheck -t repeat -f a8r8g8b8 2>&1 | tail -40",
@@ -219,7 +219,7 @@ test.describe.serial("timeout 30 rendercheck conformance", () => {
 		expect(output).not.toContain("Segmentation fault");
 	});
 
-	test("timeout 30 rendercheck gradient pass", async ({ sidecarContainer }) => {
+	test("rendercheck gradient pass", async ({ sidecarContainer }) => {
 		const output = await execInSidecar(
 			sidecarContainer,
 			"timeout 30 rendercheck -t gradient -f a8r8g8b8 2>&1 | tail -40",
@@ -228,10 +228,10 @@ test.describe.serial("timeout 30 rendercheck conformance", () => {
 	});
 });
 
-test.describe.serial("timeout 30 rendercheck comprehensive", () => {
+test.describe.serial("rendercheck comprehensive", () => {
 	test.setTimeout(300_000);
 
-	test("timeout 30 rendercheck full suite with pass/fail counting", async ({
+	test("rendercheck full suite with pass/fail counting", async ({
 		sidecarContainer,
 	}) => {
 		const check = await execInSidecar(
@@ -305,8 +305,8 @@ test.describe.serial("timeout 30 rendercheck comprehensive", () => {
 	}
 });
 
-test.describe("timeout 30 rendercheck comprehensive", () => {
-	test("timeout 30 rendercheck all test categories pass", async ({ sidecarContainer }) => {
+test.describe("rendercheck comprehensive", () => {
+	test("rendercheck all test categories pass", async ({ sidecarContainer }) => {
 		test.setTimeout(120_000);
 		const check = await sidecarContainer.exec([
 			"bash", "-c",
@@ -334,7 +334,7 @@ test.describe("timeout 30 rendercheck comprehensive", () => {
 		}
 	});
 
-	test("timeout 30 rendercheck per-category breakdown all pass", async ({ sidecarContainer }) => {
+	test("rendercheck per-category breakdown all pass", async ({ sidecarContainer }) => {
 		test.setTimeout(180_000);
 		const check = await sidecarContainer.exec([
 			"bash", "-c",
@@ -402,7 +402,7 @@ test.describe.serial("RENDER extension (Phase 7)", () => {
 		expect(output).toContain("render_present=True");
 	});
 
-	test("timeout 30 rendercheck runs without critical failures", async ({
+	test("rendercheck runs without critical failures", async ({
 		sidecarContainer,
 	}) => {
 		// Check if rendercheck is available
@@ -425,7 +425,7 @@ test.describe.serial("RENDER extension (Phase 7)", () => {
 	});
 });
 
-test.describe.serial("timeout 30 rendercheck full coverage", () => {
+test.describe.serial("rendercheck full coverage", () => {
 	let rendercheckAvailable = false;
 
 	test("detect rendercheck availability", async ({ sidecarContainer }) => {
@@ -840,7 +840,7 @@ test.describe.serial("Host access control compliance", () => {
 test.describe.serial("RENDER extension compliance", () => {
 	test.setTimeout(120_000);
 
-	test("timeout 30 rendercheck basic composite operations", async ({
+	test("rendercheck basic composite operations", async ({
 		sidecarContainer,
 	}) => {
 		const output = await execInSidecar(
@@ -857,7 +857,7 @@ test.describe.serial("RENDER extension compliance", () => {
 		}
 	});
 
-	test("timeout 30 rendercheck gradient operations", async ({
+	test("rendercheck gradient operations", async ({
 		sidecarContainer,
 	}) => {
 		const output = await execInSidecar(
@@ -872,7 +872,7 @@ test.describe.serial("RENDER extension compliance", () => {
 		}
 	});
 
-	test("timeout 30 rendercheck blend operations", async ({
+	test("rendercheck blend operations", async ({
 		sidecarContainer,
 	}) => {
 		const output = await execInSidecar(
@@ -887,7 +887,7 @@ test.describe.serial("RENDER extension compliance", () => {
 		}
 	});
 
-	test("timeout 30 rendercheck composite operations", async ({
+	test("rendercheck composite operations", async ({
 		sidecarContainer,
 	}) => {
 		const output = await execInSidecar(
@@ -968,7 +968,7 @@ test.describe.serial("Application smoke tests", () => {
 		expect(output).toContain("vendor string:");
 	});
 
-	test("timeout 30 rendercheck validates RENDER extension", async ({
+	test("rendercheck validates RENDER extension", async ({
 		sidecarContainer,
 	}) => {
 		// rendercheck tests RENDER extension compliance
