@@ -310,6 +310,9 @@ test.describe.serial("Application compatibility", () => {
 	// --- Multi-client interaction ---
 
 	test("Multiple X clients can coexist", async ({ sidecarContainer }) => {
+		// Kill any leftover instances from prior tests so pgrep counts reflect
+		// only what this test starts.
+		await killApps(sidecarContainer);
 		await execInSidecar(sidecarContainer, "xeyes &");
 		await execInSidecar(sidecarContainer, "xclock -digital &");
 		await execInSidecar(sidecarContainer, "xlogo &");

@@ -16,7 +16,7 @@ async function execInSidecar(
 }
 
 test.describe.serial("RENDER extension operations", () => {
-	test("rendercheck passes core tests", async ({ sidecarContainer }) => {
+	test("timeout 30 rendercheck passes core tests", async ({ sidecarContainer }) => {
 		test.setTimeout(120_000);
 		const hasRendercheck = await execInSidecar(
 			sidecarContainer,
@@ -55,7 +55,7 @@ test.describe.serial("RENDER CreatePicture validation", () => {
 });
 
 test.describe("Conformance: rendercheck extended", () => {
-	test("rendercheck composite operations pass", async ({ sidecarContainer }) => {
+	test("timeout 30 rendercheck composite operations pass", async ({ sidecarContainer }) => {
 		test.setTimeout(60_000);
 		const output = await execInSidecar(
 			sidecarContainer,
@@ -65,7 +65,7 @@ test.describe("Conformance: rendercheck extended", () => {
 		expect(output).not.toContain("Segmentation fault");
 	});
 
-	test("rendercheck gradient operations pass", async ({ sidecarContainer }) => {
+	test("timeout 30 rendercheck gradient operations pass", async ({ sidecarContainer }) => {
 		test.setTimeout(60_000);
 		const output = await execInSidecar(
 			sidecarContainer,
@@ -104,134 +104,134 @@ test.describe("Extended app compatibility", () => {
 	});
 });
 
-test.describe.serial("rendercheck conformance", () => {
+test.describe.serial("timeout 30 rendercheck conformance", () => {
 	test.setTimeout(300_000);
 
-	test("rendercheck blend operations pass", async ({ sidecarContainer }) => {
+	test("timeout 30 rendercheck blend operations pass", async ({ sidecarContainer }) => {
 		const output = await execInSidecar(
 			sidecarContainer,
-			"rendercheck -t blend -f a8r8g8b8 2>&1 | tail -40",
+			"timeout 30 rendercheck -t blend -f a8r8g8b8 2>&1 | tail -40",
 		);
 		expect(output).not.toContain("Segmentation fault");
 		// rendercheck reports "tests passed" or individual test results
 		expect(output.toLowerCase()).not.toContain("server error");
 	});
 
-	test("rendercheck composite operations pass", async ({
+	test("timeout 30 rendercheck composite operations pass", async ({
 		sidecarContainer,
 	}) => {
 		const output = await execInSidecar(
 			sidecarContainer,
-			"rendercheck -t composite -f a8r8g8b8 2>&1 | tail -40",
+			"timeout 30 rendercheck -t composite -f a8r8g8b8 2>&1 | tail -40",
 		);
 		expect(output).not.toContain("Segmentation fault");
 	});
 
-	test("rendercheck fill operations pass", async ({ sidecarContainer }) => {
+	test("timeout 30 rendercheck fill operations pass", async ({ sidecarContainer }) => {
 		const output = await execInSidecar(
 			sidecarContainer,
-			"rendercheck -t fill -f a8r8g8b8 2>&1 | tail -40",
+			"timeout 30 rendercheck -t fill -f a8r8g8b8 2>&1 | tail -40",
 		);
 		expect(output).not.toContain("Segmentation fault");
 	});
 
-	test("rendercheck dcoords (destination coordinates) pass", async ({
+	test("timeout 30 rendercheck dcoords (destination coordinates) pass", async ({
 		sidecarContainer,
 	}) => {
 		const output = await execInSidecar(
 			sidecarContainer,
-			"rendercheck -t dcoords -f a8r8g8b8 2>&1 | tail -40",
+			"timeout 30 rendercheck -t dcoords -f a8r8g8b8 2>&1 | tail -40",
 		);
 		expect(output).not.toContain("Segmentation fault");
 	});
 
-	test("rendercheck scoords (source coordinates) pass", async ({
+	test("timeout 30 rendercheck scoords (source coordinates) pass", async ({
 		sidecarContainer,
 	}) => {
 		const output = await execInSidecar(
 			sidecarContainer,
-			"rendercheck -t scoords -f a8r8g8b8 2>&1 | tail -40",
+			"timeout 30 rendercheck -t scoords -f a8r8g8b8 2>&1 | tail -40",
 		);
 		expect(output).not.toContain("Segmentation fault");
 	});
 
-	test("rendercheck mcoords (mask coordinates) pass", async ({
+	test("timeout 30 rendercheck mcoords (mask coordinates) pass", async ({
 		sidecarContainer,
 	}) => {
 		const output = await execInSidecar(
 			sidecarContainer,
-			"rendercheck -t mcoords -f a8r8g8b8 2>&1 | tail -40",
+			"timeout 30 rendercheck -t mcoords -f a8r8g8b8 2>&1 | tail -40",
 		);
 		expect(output).not.toContain("Segmentation fault");
 	});
 
-	test("rendercheck tscoords (transformed source coordinates) pass", async ({
+	test("timeout 30 rendercheck tscoords (transformed source coordinates) pass", async ({
 		sidecarContainer,
 	}) => {
 		const output = await execInSidecar(
 			sidecarContainer,
-			"rendercheck -t tscoords -f a8r8g8b8 2>&1 | tail -40",
+			"timeout 30 rendercheck -t tscoords -f a8r8g8b8 2>&1 | tail -40",
 		);
 		expect(output).not.toContain("Segmentation fault");
 	});
 
-	test("rendercheck tmcoords (transformed mask coordinates) pass", async ({
+	test("timeout 30 rendercheck tmcoords (transformed mask coordinates) pass", async ({
 		sidecarContainer,
 	}) => {
 		const output = await execInSidecar(
 			sidecarContainer,
-			"rendercheck -t tmcoords -f a8r8g8b8 2>&1 | tail -40",
+			"timeout 30 rendercheck -t tmcoords -f a8r8g8b8 2>&1 | tail -40",
 		);
 		expect(output).not.toContain("Segmentation fault");
 	});
 
-	test("rendercheck triangles pass", async ({ sidecarContainer }) => {
+	test("timeout 30 rendercheck triangles pass", async ({ sidecarContainer }) => {
 		const output = await execInSidecar(
 			sidecarContainer,
-			"rendercheck -t triangles -f a8r8g8b8 2>&1 | tail -40",
+			"timeout 30 rendercheck -t triangles -f a8r8g8b8 2>&1 | tail -40",
 		);
 		expect(output).not.toContain("Segmentation fault");
 	});
 
-	test("rendercheck bug7366 (gradient) pass", async ({
+	test("timeout 30 rendercheck bug7366 (gradient) pass", async ({
 		sidecarContainer,
 	}) => {
 		const output = await execInSidecar(
 			sidecarContainer,
-			"rendercheck -t bug7366 -f a8r8g8b8 2>&1 | tail -40",
+			"timeout 30 rendercheck -t bug7366 -f a8r8g8b8 2>&1 | tail -40",
 		);
 		expect(output).not.toContain("Segmentation fault");
 	});
 
-	test("rendercheck linethin pass", async ({ sidecarContainer }) => {
+	test("timeout 30 rendercheck linethin pass", async ({ sidecarContainer }) => {
 		const output = await execInSidecar(
 			sidecarContainer,
-			"rendercheck -t linethin 2>&1 | tail -40",
+			"timeout 30 rendercheck -t linethin 2>&1 | tail -40",
 		);
 		expect(output).not.toContain("Segmentation fault");
 	});
 
-	test("rendercheck repeat pass", async ({ sidecarContainer }) => {
+	test("timeout 30 rendercheck repeat pass", async ({ sidecarContainer }) => {
 		const output = await execInSidecar(
 			sidecarContainer,
-			"rendercheck -t repeat -f a8r8g8b8 2>&1 | tail -40",
+			"timeout 30 rendercheck -t repeat -f a8r8g8b8 2>&1 | tail -40",
 		);
 		expect(output).not.toContain("Segmentation fault");
 	});
 
-	test("rendercheck gradient pass", async ({ sidecarContainer }) => {
+	test("timeout 30 rendercheck gradient pass", async ({ sidecarContainer }) => {
 		const output = await execInSidecar(
 			sidecarContainer,
-			"rendercheck -t gradient -f a8r8g8b8 2>&1 | tail -40",
+			"timeout 30 rendercheck -t gradient -f a8r8g8b8 2>&1 | tail -40",
 		);
 		expect(output).not.toContain("Segmentation fault");
 	});
 });
 
-test.describe.serial("rendercheck comprehensive", () => {
+test.describe.serial("timeout 30 rendercheck comprehensive", () => {
 	test.setTimeout(300_000);
 
-	test("rendercheck full suite with pass/fail counting", async ({
+	test("timeout 30 rendercheck full suite with pass/fail counting", async ({
 		sidecarContainer,
 	}) => {
 		const check = await execInSidecar(
@@ -239,7 +239,7 @@ test.describe.serial("rendercheck comprehensive", () => {
 			"command -v rendercheck && echo OK || echo MISSING",
 		);
 		if (check.includes("MISSING")) {
-			console.log("rendercheck not available");
+			console.log("timeout 30 rendercheck not available");
 			return;
 		}
 
@@ -305,8 +305,8 @@ test.describe.serial("rendercheck comprehensive", () => {
 	}
 });
 
-test.describe("rendercheck comprehensive", () => {
-	test("rendercheck all test categories pass", async ({ sidecarContainer }) => {
+test.describe("timeout 30 rendercheck comprehensive", () => {
+	test("timeout 30 rendercheck all test categories pass", async ({ sidecarContainer }) => {
 		test.setTimeout(120_000);
 		const check = await sidecarContainer.exec([
 			"bash", "-c",
@@ -334,7 +334,7 @@ test.describe("rendercheck comprehensive", () => {
 		}
 	});
 
-	test("rendercheck per-category breakdown all pass", async ({ sidecarContainer }) => {
+	test("timeout 30 rendercheck per-category breakdown all pass", async ({ sidecarContainer }) => {
 		test.setTimeout(180_000);
 		const check = await sidecarContainer.exec([
 			"bash", "-c",
@@ -402,7 +402,7 @@ test.describe.serial("RENDER extension (Phase 7)", () => {
 		expect(output).toContain("render_present=True");
 	});
 
-	test("rendercheck runs without critical failures", async ({
+	test("timeout 30 rendercheck runs without critical failures", async ({
 		sidecarContainer,
 	}) => {
 		// Check if rendercheck is available
@@ -425,7 +425,7 @@ test.describe.serial("RENDER extension (Phase 7)", () => {
 	});
 });
 
-test.describe.serial("rendercheck full coverage", () => {
+test.describe.serial("timeout 30 rendercheck full coverage", () => {
 	let rendercheckAvailable = false;
 
 	test("detect rendercheck availability", async ({ sidecarContainer }) => {
@@ -435,7 +435,7 @@ test.describe.serial("rendercheck full coverage", () => {
 		);
 		rendercheckAvailable = check.includes("AVAILABLE");
 		if (!rendercheckAvailable) {
-			console.log("rendercheck not installed – tests will be skipped");
+			console.log("timeout 30 rendercheck not installed – tests will be skipped");
 		}
 		expect(true).toBe(true);
 	});
@@ -452,7 +452,7 @@ test.describe.serial("rendercheck full coverage", () => {
 		"tri",
 	]) {
 		test(`rendercheck -t ${category}`, async ({ sidecarContainer }) => {
-			test.skip(!rendercheckAvailable, "rendercheck not available");
+			test.skip(!rendercheckAvailable, "timeout 30 rendercheck not available");
 			test.setTimeout(120_000);
 
 			const output = await execInSidecar(
@@ -840,12 +840,12 @@ test.describe.serial("Host access control compliance", () => {
 test.describe.serial("RENDER extension compliance", () => {
 	test.setTimeout(120_000);
 
-	test("rendercheck basic composite operations", async ({
+	test("timeout 30 rendercheck basic composite operations", async ({
 		sidecarContainer,
 	}) => {
 		const output = await execInSidecar(
 			sidecarContainer,
-			"rendercheck -t fill 2>&1 | tail -5",
+			"timeout 30 rendercheck -t fill 2>&1 | tail -5",
 		);
 		// rendercheck reports pass/fail
 		if (output.includes("tests passed")) {
@@ -857,12 +857,12 @@ test.describe.serial("RENDER extension compliance", () => {
 		}
 	});
 
-	test("rendercheck gradient operations", async ({
+	test("timeout 30 rendercheck gradient operations", async ({
 		sidecarContainer,
 	}) => {
 		const output = await execInSidecar(
 			sidecarContainer,
-			"rendercheck -t gradient 2>&1 | tail -5",
+			"timeout 30 rendercheck -t gradient 2>&1 | tail -5",
 		);
 		if (output.includes("not found")) {
 			test.skip();
@@ -872,12 +872,12 @@ test.describe.serial("RENDER extension compliance", () => {
 		}
 	});
 
-	test("rendercheck blend operations", async ({
+	test("timeout 30 rendercheck blend operations", async ({
 		sidecarContainer,
 	}) => {
 		const output = await execInSidecar(
 			sidecarContainer,
-			"rendercheck -t blend 2>&1 | tail -5",
+			"timeout 30 rendercheck -t blend 2>&1 | tail -5",
 		);
 		if (output.includes("not found")) {
 			test.skip();
@@ -887,12 +887,12 @@ test.describe.serial("RENDER extension compliance", () => {
 		}
 	});
 
-	test("rendercheck composite operations", async ({
+	test("timeout 30 rendercheck composite operations", async ({
 		sidecarContainer,
 	}) => {
 		const output = await execInSidecar(
 			sidecarContainer,
-			"rendercheck -t composite 2>&1 | tail -5",
+			"timeout 30 rendercheck -t composite 2>&1 | tail -5",
 		);
 		if (output.includes("not found")) {
 			test.skip();
@@ -968,13 +968,13 @@ test.describe.serial("Application smoke tests", () => {
 		expect(output).toContain("vendor string:");
 	});
 
-	test("rendercheck validates RENDER extension", async ({
+	test("timeout 30 rendercheck validates RENDER extension", async ({
 		sidecarContainer,
 	}) => {
 		// rendercheck tests RENDER extension compliance
 		const output = await execInSidecar(
 			sidecarContainer,
-			"rendercheck -t fill -t blend -t composite 2>&1 | tail -20 || echo 'rendercheck_unavailable'",
+			"timeout 30 rendercheck -t fill -t blend -t composite 2>&1 | tail -20 || echo 'rendercheck_unavailable'",
 		);
 		// Should complete without segfault
 		expect(output).not.toContain("Segmentation fault");

@@ -168,6 +168,12 @@ test.describe("GLX extension", () => {
 });
 
 test.describe("Orphan: GLX integration", () => {
+	test.afterEach(async ({ sidecarContainer }) => {
+		// Tests in this block spawn glxgears as a backgrounded process —
+		// kill any survivors so they don't pollute later tests/files.
+		await killApps(sidecarContainer);
+	});
+
 	test("glxinfo reports working GLX with OSMesa", async ({ sidecarContainer }) => {
 		test.setTimeout(30_000);
 		const result = await sidecarContainer.exec([
@@ -188,11 +194,12 @@ test.describe("Orphan: GLX integration", () => {
 
 	test("glxgears renders frames via OSMesa", async ({ page, sidecarContainer, frontendUrl }) => {
 		test.setTimeout(30_000);
-		// Start glxgears in the background
+		// Start glxgears in the background, capped to 10s so it can't outlive
+		// the test (afterEach killApps handles cleanup as a backstop).
 		await sidecarContainer.exec([
 			"bash",
 			"-c",
-			"export DISPLAY=:99; glxgears -geometry 300x300+50+50 &",
+			"export DISPLAY=:99; timeout 10 glxgears -geometry 300x300+50+50 &",
 		]);
 		// Wait for window to appear
 		await page.goto(frontendUrl);
@@ -433,6 +440,12 @@ test.describe.serial("Real-world application smoke tests", () => {
 		sidecarContainer,
 	}) => {
 		test.setTimeout(600_000);
+
+		const which = await execInSidecar(
+			sidecarContainer,
+			"which x11perf 2>/dev/null || echo MISSING",
+		);
+		test.skip(which.includes("MISSING"), "x11perf not installed");
 
 		// Run a comprehensive x11perf test covering all major operations
 		const output = await execInSidecar(
@@ -1124,6 +1137,11 @@ sys.exit(1 if failed > 0 else 0)
 
 	test("comprehensive x11perf wide lines and stipple fills", async ({ sidecarContainer }) => {
 		test.setTimeout(600_000);
+		const which = await execInSidecar(
+			sidecarContainer,
+			"which x11perf 2>/dev/null || echo MISSING",
+		);
+		test.skip(which.includes("MISSING"), "x11perf not installed");
 		const result = await sidecarContainer.exec([
 			"bash", "-c", [
 				"export DISPLAY=:99",
