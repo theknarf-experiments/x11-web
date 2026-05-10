@@ -5,6 +5,17 @@ use super::{
 use tiny_skia::{FillRule, Paint, PathBuilder, Transform};
 use x11rb_protocol::protocol::xproto::{ArcMode, FillRule as XFillRule, LineStyle};
 
+/// X11 arc angles are encoded in 1/64-degree units (`angle = degrees * 64`).
+const ARC_ANGLE_UNITS_PER_DEGREE: f64 = 64.0;
+/// Full-circle threshold (in 1/64-degree units): `360 * 64 = 23040`.
+const ARC_ANGLE_FULL_CIRCLE: i16 = 360 * 64;
+/// Lower bound for arc/circle tessellation step count (used by clamp).
+const ARC_TESSELLATION_MIN_STEPS: f64 = 32.0;
+/// Upper bound for arc/circle tessellation step count (used by clamp).
+const ARC_TESSELLATION_MAX_STEPS: f64 = 256.0;
+/// Minimum tessellation step count (used by .max(...) — floor only, no upper bound).
+const ARC_TESSELLATION_FLOOR_STEPS: f64 = 64.0;
+
 #[inline]
 fn winding_fill_rule(fill_rule: u8) -> FillRule {
     if XFillRule::from(fill_rule) == XFillRule::WINDING {
@@ -234,8 +245,9 @@ impl Framebuffer {
         let rx = width as f64 / 2.0;
         let ry = height as f64 / 2.0;
 
-        let start_rad = (angle1 as f64) / 64.0 * std::f64::consts::PI / 180.0;
-        let extent_rad = (angle2 as f64) / 64.0 * std::f64::consts::PI / 180.0;
+        let start_rad = (angle1 as f64) / ARC_ANGLE_UNITS_PER_DEGREE * std::f64::consts::PI / 180.0;
+        let extent_rad =
+            (angle2 as f64) / ARC_ANGLE_UNITS_PER_DEGREE * std::f64::consts::PI / 180.0;
 
         if filled {
             // Fast path: solid GXcopy goes to tiny-skia for AA fill.
@@ -301,7 +313,7 @@ impl Framebuffer {
             // Fallback (non-GXcopy): single-pixel Bresenham along
             // sampled arc points. Wide strokes under raster-op blends
             // are not supported.
-            let steps = ((rx + ry) * 2.0).max(64.0) as usize;
+            let steps = ((rx + ry) * 2.0).max(ARC_TESSELLATION_FLOOR_STEPS) as usize;
             let mut prev: Option<(i32, i32)> = None;
             for i in 0..=steps {
                 let t = start_rad + extent_rad * (i as f64 / steps as f64);
@@ -341,7 +353,7 @@ impl Framebuffer {
         if ddx * ddx + ddy * ddy > 1.0 {
             return false;
         }
-        if angle2.abs() >= 360 * 64 {
+        if angle2.abs() >= ARC_ANGLE_FULL_CIRCLE {
             return true;
         }
         if ArcMode::from(arc_mode) == ArcMode::CHORD {
@@ -386,8 +398,9 @@ impl Framebuffer {
         let cy = y as f64 + height as f64 / 2.0;
         let rx = width as f64 / 2.0;
         let ry = height as f64 / 2.0;
-        let start_rad = (angle1 as f64) / 64.0 * std::f64::consts::PI / 180.0;
-        let extent_rad = (angle2 as f64) / 64.0 * std::f64::consts::PI / 180.0;
+        let start_rad = (angle1 as f64) / ARC_ANGLE_UNITS_PER_DEGREE * std::f64::consts::PI / 180.0;
+        let extent_rad =
+            (angle2 as f64) / ARC_ANGLE_UNITS_PER_DEGREE * std::f64::consts::PI / 180.0;
 
         // Fast path: GXcopy + full plane mask -> tiny-skia path fill
         // with a tile pattern paint.
@@ -495,8 +508,9 @@ impl Framebuffer {
         let cy = y as f64 + height as f64 / 2.0;
         let rx = width as f64 / 2.0;
         let ry = height as f64 / 2.0;
-        let start_rad = (angle1 as f64) / 64.0 * std::f64::consts::PI / 180.0;
-        let extent_rad = (angle2 as f64) / 64.0 * std::f64::consts::PI / 180.0;
+        let start_rad = (angle1 as f64) / ARC_ANGLE_UNITS_PER_DEGREE * std::f64::consts::PI / 180.0;
+        let extent_rad =
+            (angle2 as f64) / ARC_ANGLE_UNITS_PER_DEGREE * std::f64::consts::PI / 180.0;
         let chord = ArcChordData::new_if_chord(arc_mode, angle2, start_rad, extent_rad);
         let stipple_stride = stipple_w.div_ceil(8) as usize;
         let min_y = y.max(0) as i32;
@@ -582,8 +596,9 @@ impl Framebuffer {
         let cy = y as f64 + height as f64 / 2.0;
         let rx = width as f64 / 2.0;
         let ry = height as f64 / 2.0;
-        let start_rad = (angle1 as f64) / 64.0 * std::f64::consts::PI / 180.0;
-        let extent_rad = (angle2 as f64) / 64.0 * std::f64::consts::PI / 180.0;
+        let start_rad = (angle1 as f64) / ARC_ANGLE_UNITS_PER_DEGREE * std::f64::consts::PI / 180.0;
+        let extent_rad =
+            (angle2 as f64) / ARC_ANGLE_UNITS_PER_DEGREE * std::f64::consts::PI / 180.0;
 
         // Fast path: solid GXcopy strokes (with optional dashes) go to
         // tiny-skia. DoubleDash is handled by stroking the background
@@ -611,7 +626,7 @@ impl Framebuffer {
         }
 
         // Fallback: per-pixel Bresenham along the arc with dash logic.
-        let steps = ((rx + ry) * 2.0).max(64.0) as usize;
+        let steps = ((rx + ry) * 2.0).max(ARC_TESSELLATION_FLOOR_STEPS) as usize;
         let use_dashes = line_style_uses_dashes(line_style) && !dash_list.is_empty();
         let mut dash_state = use_dashes.then(|| DashState::new(dash_list, dash_offset));
         let mut prev: Option<(i32, i32)> = None;
@@ -1009,7 +1024,7 @@ fn build_arc_polyline(
     if rx <= 0.0 || ry <= 0.0 {
         return None;
     }
-    let segments = ((rx + ry) * 2.0).clamp(32.0, 256.0) as usize;
+    let segments = ((rx + ry) * 2.0).clamp(ARC_TESSELLATION_MIN_STEPS, ARC_TESSELLATION_MAX_STEPS) as usize;
     let mut pb = PathBuilder::new();
     let pt = |t: f64| ((cx + rx * t.cos()) as f32, (cy - ry * t.sin()) as f32);
     let (sx, sy) = pt(start_rad);
@@ -1040,8 +1055,8 @@ fn build_arc_path(
     if rx <= 0.0 || ry <= 0.0 {
         return None;
     }
-    let full_circle = angle2.abs() >= 360 * 64;
-    let segments = ((rx + ry) * 2.0).clamp(32.0, 256.0) as usize;
+    let full_circle = angle2.abs() >= ARC_ANGLE_FULL_CIRCLE;
+    let segments = ((rx + ry) * 2.0).clamp(ARC_TESSELLATION_MIN_STEPS, ARC_TESSELLATION_MAX_STEPS) as usize;
     let mut pb = PathBuilder::new();
     let pt = |t: f64| ((cx + rx * t.cos()) as f32, (cy - ry * t.sin()) as f32);
     let (sx, sy) = pt(start_rad);

@@ -47,7 +47,7 @@ pub(crate) fn start_incr_transfer(
     target: u32,
     data: Vec<u8>,
 ) -> bool {
-    const INCR_ATOM: u32 = 138;
+    use crate::xserver::atoms::predef;
     let total_size = data.len() as u32;
 
     // Set the INCR property with the total size estimate (CARDINAL/32).
@@ -55,7 +55,7 @@ pub(crate) fn start_incr_transfer(
         win.properties.insert(
             property,
             PropertyValue {
-                prop_type: INCR_ATOM,
+                prop_type: predef::INCR,
                 format: 32,
                 data: total_size.to_le_bytes().to_vec(),
             },
@@ -180,11 +180,7 @@ pub(crate) fn serve_persistent_clipboard(
     property: u32,
     requestor: u32,
 ) -> bool {
-    const TARGETS_ATOM: u32 = 135;
-    const ATOM_ATOM: u32 = 4;
-    const TIMESTAMP_ATOM: u32 = 137;
-    const CARDINAL_ATOM: u32 = 6;
-
+    use crate::xserver::atoms::predef;
     let pc_lock = match state.persistent_clipboard.lock() {
         Ok(l) => l,
         Err(_) => return false,
@@ -197,12 +193,8 @@ pub(crate) fn serve_persistent_clipboard(
     // Handle TARGETS: return the list of available target atoms plus
     // TARGETS and TIMESTAMP (standard practice).
     // Also advertise text format variants if any text format is stored.
-    if target == TARGETS_ATOM {
-        const STRING_ATOM: u32 = 31;
-        const UTF8_STRING_ATOM: u32 = 133;
-        const COMPOUND_TEXT_ATOM: u32 = 181;
-        const TEXT_ATOM: u32 = 182;
-        let text_atoms = [STRING_ATOM, UTF8_STRING_ATOM, COMPOUND_TEXT_ATOM, TEXT_ATOM];
+    if target == predef::TARGETS {
+        let text_atoms = [predef::STRING, predef::UTF8_STRING, predef::COMPOUND_TEXT, predef::TEXT];
 
         let mut atoms: Vec<u32> = entry.targets.keys().copied().collect();
 
@@ -216,11 +208,11 @@ pub(crate) fn serve_persistent_clipboard(
             }
         }
 
-        if !atoms.contains(&TARGETS_ATOM) {
-            atoms.push(TARGETS_ATOM);
+        if !atoms.contains(&predef::TARGETS) {
+            atoms.push(predef::TARGETS);
         }
-        if !atoms.contains(&TIMESTAMP_ATOM) {
-            atoms.push(TIMESTAMP_ATOM);
+        if !atoms.contains(&predef::TIMESTAMP) {
+            atoms.push(predef::TIMESTAMP);
         }
         let mut data = Vec::with_capacity(atoms.len() * 4);
         for a in &atoms {
@@ -232,7 +224,7 @@ pub(crate) fn serve_persistent_clipboard(
             win.properties.insert(
                 property,
                 PropertyValue {
-                    prop_type: ATOM_ATOM,
+                    prop_type: predef::ATOM,
                     format: 32,
                     data,
                 },
@@ -246,7 +238,7 @@ pub(crate) fn serve_persistent_clipboard(
                 time: state.timestamp(),
                 requestor,
                 selection,
-                target: TARGETS_ATOM,
+                target: predef::TARGETS,
                 property,
             },
             state.msb_first,
@@ -258,7 +250,7 @@ pub(crate) fn serve_persistent_clipboard(
     }
 
     // Handle TIMESTAMP: return the time the persistent data was captured.
-    if target == TIMESTAMP_ATOM {
+    if target == predef::TIMESTAMP {
         let ts = entry.timestamp;
         drop(pc_lock);
 
@@ -268,7 +260,7 @@ pub(crate) fn serve_persistent_clipboard(
             win.properties.insert(
                 property,
                 PropertyValue {
-                    prop_type: CARDINAL_ATOM,
+                    prop_type: predef::CARDINAL,
                     format: 32,
                     data: ts_data.to_vec(),
                 },
@@ -282,7 +274,7 @@ pub(crate) fn serve_persistent_clipboard(
                 time: state.timestamp(),
                 requestor,
                 selection,
-                target: TIMESTAMP_ATOM,
+                target: predef::TIMESTAMP,
                 property,
             },
             state.msb_first,
@@ -356,12 +348,7 @@ pub(crate) fn serve_persistent_clipboard(
 
     // Target not found directly — try automatic text format conversion.
     // Many apps request UTF8_STRING but clipboard may only have STRING, or vice versa.
-    const STRING_ATOM: u32 = 31;
-    const UTF8_STRING_ATOM: u32 = 133;
-    const COMPOUND_TEXT_ATOM: u32 = 181;
-    const TEXT_ATOM: u32 = 182;
-
-    let text_targets = [STRING_ATOM, UTF8_STRING_ATOM, COMPOUND_TEXT_ATOM, TEXT_ATOM];
+    let text_targets = [predef::STRING, predef::UTF8_STRING, predef::COMPOUND_TEXT, predef::TEXT];
     if text_targets.contains(&target) {
         // Look for any available text format and convert
         for &alt in &text_targets {

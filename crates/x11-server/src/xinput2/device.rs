@@ -13,6 +13,15 @@ pub(crate) const MAX_KEYCODE: u8 = 255;
 /// Number of physical + scroll buttons for the virtual pointer.
 pub(crate) const N_POINTER_BUTTONS: u16 = 7;
 
+/// XI1 `DeviceInfo.device_type`: an atom for the device's "type" name.
+/// We use atom 0 ("None") because virtual core devices don't have an
+/// XI1-style device-type atom assigned.
+const XI1_DEVICE_TYPE_NONE: u32 = 0;
+/// XI1 `InputClassInfo.event_type_base`: device-relative event index base.
+/// 0 means events are delivered with their native types (no translation),
+/// which is correct for the virtual core devices we expose.
+const XI1_EVENT_TYPE_BASE_NONE: u8 = 0;
+
 /// Build a proper ListInputDevices reply with the two virtual core devices.
 /// Each device carries its full set of XI 1.x input classes (KeyInfo,
 /// ButtonInfo, ValuatorInfo) so legacy toolkits can discover device
@@ -81,13 +90,13 @@ pub(crate) fn build_list_input_devices_reply(
         length: 0, // patched by serialize_xi_reply
         devices: vec![
             xi::DeviceInfo {
-                device_type: 0,
+                device_type: XI1_DEVICE_TYPE_NONE,
                 device_id: MASTER_POINTER_ID as u8,
                 num_class_info: 2, // button + valuator
                 device_use: xi::DeviceUse::IS_X_POINTER,
             },
             xi::DeviceInfo {
-                device_type: 0,
+                device_type: XI1_DEVICE_TYPE_NONE,
                 device_id: MASTER_KEYBOARD_ID as u8,
                 num_class_info: 1, // key
                 device_use: xi::DeviceUse::IS_X_KEYBOARD,
@@ -124,17 +133,17 @@ pub(crate) fn build_open_device_reply(
     let class_info: Vec<xi::InputClassInfo> = if is_keyboard {
         vec![xi::InputClassInfo {
             class_id: xi::InputClass::KEY,
-            event_type_base: 0,
+            event_type_base: XI1_EVENT_TYPE_BASE_NONE,
         }]
     } else {
         vec![
             xi::InputClassInfo {
                 class_id: xi::InputClass::BUTTON,
-                event_type_base: 0,
+                event_type_base: XI1_EVENT_TYPE_BASE_NONE,
             },
             xi::InputClassInfo {
                 class_id: xi::InputClass::VALUATOR,
-                event_type_base: 0,
+                event_type_base: XI1_EVENT_TYPE_BASE_NONE,
             },
         ]
     };

@@ -941,12 +941,12 @@ pub(crate) fn handle_send_event(state: &mut ClientState, req: &SendEventRequest)
     // SelectionNotify with a non-None property, the data on the requestor's
     // window property is the clipboard content. Save it so the server can serve
     // it after the owning client disconnects.
-    const CLIPBOARD_ATOM: u32 = 134;
+    use crate::xserver::atoms::predef;
     if event_type == SELECTION_NOTIFY_EVENT && event.len() >= 24 {
         let sel_atom = state.read_u32(&event, 12);
         let target_atom = state.read_u32(&event, 16);
         let property_atom = state.read_u32(&event, 20);
-        if sel_atom == CLIPBOARD_ATOM && property_atom != 0 {
+        if sel_atom == predef::CLIPBOARD && property_atom != 0 {
             let requestor_wid = state.read_u32(&event, 8);
             // Try local windows first, then fall back to shared windows
             // (for cross-connection transfers where the requestor is on
@@ -966,7 +966,7 @@ pub(crate) fn handle_send_event(state: &mut ClientState, req: &SendEventRequest)
             if let Some(data) = prop_data {
                 if let Ok(mut pc) = state.persistent_clipboard.lock() {
                     let entry =
-                        pc.entry(CLIPBOARD_ATOM)
+                        pc.entry(predef::CLIPBOARD)
                             .or_insert_with(|| PersistentClipboardEntry {
                                 targets: HashMap::new(),
                                 timestamp: state.timestamp(),

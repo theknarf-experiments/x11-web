@@ -4,10 +4,10 @@ use super::*;
 use crate::xserver::core::{GRAPHICS_EXPOSURE_EVENT, NO_EXPOSURE_EVENT};
 use crate::xserver::event::serialize_event;
 use x11rb_protocol::protocol::xproto::{
-    ClearAreaRequest, CopyAreaRequest, CopyPlaneRequest, ExposeEvent, FillPolyRequest, FillStyle,
-    GraphicsExposureEvent, NoExposureEvent, PolyArcRequest, PolyFillArcRequest,
+    ClearAreaRequest, CoordMode, CopyAreaRequest, CopyPlaneRequest, ExposeEvent, FillPolyRequest,
+    FillStyle, GraphicsExposureEvent, NoExposureEvent, PolyArcRequest, PolyFillArcRequest,
     PolyFillRectangleRequest, PolyLineRequest, PolyPointRequest, PolyRectangleRequest,
-    PolySegmentRequest, SubwindowMode, WindowClass,
+    PolySegmentRequest, SubwindowMode, WindowClass, GX,
 };
 
 // ---------------------------------------------------------------------------
@@ -143,7 +143,7 @@ pub(crate) fn handle_copy_area(state: &mut ClientState, req: &CopyAreaRequest) -
                 .map(|fb| fb.extract_pixels(src_x, src_y, width, height))
         };
         if let Some(pixels) = pixels {
-            if src_depth <= 1 && gc.function != 3 {
+            if src_depth <= 1 && GX::from(gc.function) != GX::COPY {
                 let ca_fg = state.map_color_for_drawable(dst, gc.foreground);
                 let ca_bg = state.map_color_for_drawable(dst, gc.background);
                 if let Some(fb) = state.get_framebuffer_mut(dst) {
@@ -173,7 +173,7 @@ pub(crate) fn handle_copy_area(state: &mut ClientState, req: &CopyAreaRequest) -
                         }
                     }
                 }
-            } else if gc.function != 3 || has_clip {
+            } else if GX::from(gc.function) != GX::COPY || has_clip {
                 if let Some(fb) = state.get_framebuffer_mut(dst) {
                     fb.put_image_gc(
                         dst_x,
@@ -410,7 +410,7 @@ pub(crate) fn handle_copy_plane(state: &mut ClientState, req: &CopyPlaneRequest)
 // ---------------------------------------------------------------------------
 
 pub(crate) fn handle_poly_point(state: &mut ClientState, req: &PolyPointRequest) -> Vec<u8> {
-    let coord_mode = u8::from(req.coordinate_mode);
+    let coord_mode = CoordMode::from(req.coordinate_mode);
     let drawable = req.drawable;
     let gc_id = req.gc;
 
@@ -429,7 +429,7 @@ pub(crate) fn handle_poly_point(state: &mut ClientState, req: &PolyPointRequest)
     for pt in req.points.iter() {
         let mut x = pt.x;
         let mut y = pt.y;
-        if coord_mode == 1 {
+        if coord_mode == CoordMode::PREVIOUS {
             x += last_x;
             y += last_y;
         }
@@ -477,7 +477,7 @@ pub(crate) fn handle_poly_point(state: &mut ClientState, req: &PolyPointRequest)
 // ---------------------------------------------------------------------------
 
 pub(crate) fn handle_poly_line(state: &mut ClientState, req: &PolyLineRequest) -> Vec<u8> {
-    let coord_mode = u8::from(req.coordinate_mode);
+    let coord_mode = CoordMode::from(req.coordinate_mode);
     let drawable = req.drawable;
     let gc_id = req.gc;
 
@@ -494,7 +494,7 @@ pub(crate) fn handle_poly_line(state: &mut ClientState, req: &PolyLineRequest) -
     for pt in req.points.iter() {
         let x = pt.x;
         let y = pt.y;
-        if coord_mode == 1 && !points.is_empty() {
+        if coord_mode == CoordMode::PREVIOUS && !points.is_empty() {
             let (px, py) = points[points.len() - 1];
             points.push((px + x, py + y));
         } else {
@@ -536,8 +536,8 @@ pub(crate) fn handle_poly_line(state: &mut ClientState, req: &PolyLineRequest) -
     if let Some(fb) = state.get_framebuffer_mut(drawable) {
         let dashes = &gc.dash_list;
         let pts: Vec<(i32, i32)> = points.iter().map(|&(x, y)| (x as i32, y as i32)).collect();
-        match gc.fill_style {
-            1 => {
+        match FillStyle::from(gc.fill_style) {
+            FillStyle::TILED => {
                 // Tiled: draw each segment with tile pattern
                 if let Some((ref tdata, tw, th)) = tile_data {
                     for w in pts.windows(2) {
@@ -574,7 +574,7 @@ pub(crate) fn handle_poly_line(state: &mut ClientState, req: &PolyLineRequest) -
                     );
                 }
             }
-            2 | 3 => {
+            FillStyle::STIPPLED | FillStyle::OPAQUE_STIPPLED => {
                 // Stippled/OpaqueStippled: draw each segment with stipple pattern
                 if let Some((ref sdata, sw, sh)) = stipple_data {
                     for w in pts.windows(2) {
@@ -712,8 +712,8 @@ pub(crate) fn handle_poly_segment(state: &mut ClientState, req: &PolySegmentRequ
     if let Some(fb) = state.get_framebuffer_mut(drawable) {
         let dashes = &gc.dash_list;
         for &(x1, y1, x2, y2) in &segments {
-            match gc.fill_style {
-                1 => {
+            match FillStyle::from(gc.fill_style) {
+                FillStyle::TILED => {
                     if let Some((ref tdata, tw, th)) = tile_data {
                         fb.draw_line_tiled(
                             x1 as i32,
@@ -750,7 +750,7 @@ pub(crate) fn handle_poly_segment(state: &mut ClientState, req: &PolySegmentRequ
                         );
                     }
                 }
-                2 | 3 => {
+                FillStyle::STIPPLED | FillStyle::OPAQUE_STIPPLED => {
                     if let Some((ref sdata, sw, sh)) = stipple_data {
                         fb.draw_line_stippled(
                             x1 as i32,
@@ -904,8 +904,8 @@ pub(crate) fn handle_poly_rectangle(
                 (x2, y2, x as i32, y2),
                 (x as i32, y2, x as i32, y as i32),
             ];
-            match gc.fill_style {
-                1 => {
+            match FillStyle::from(gc.fill_style) {
+                FillStyle::TILED => {
                     if let Some((ref tdata, tw, th)) = tile_data {
                         for &(lx0, ly0, lx1, ly1) in &lines {
                             fb.draw_line_tiled(
@@ -946,7 +946,7 @@ pub(crate) fn handle_poly_rectangle(
                         }
                     }
                 }
-                2 | 3 => {
+                FillStyle::STIPPLED | FillStyle::OPAQUE_STIPPLED => {
                     if let Some((ref sdata, sw, sh)) = stipple_data {
                         for &(lx0, ly0, lx1, ly1) in &lines {
                             fb.draw_line_stippled(
@@ -1106,13 +1106,13 @@ pub(crate) fn handle_fill_poly(state: &mut ClientState, req: &FillPolyRequest) -
     }
 
     let gc = state.gcs.get(&gc_id).cloned().unwrap_or_default();
-    let coord_mode = u8::from(req.coordinate_mode); // 0 = Origin, 1 = Previous
+    let coord_mode = CoordMode::from(req.coordinate_mode); // 0 = Origin, 1 = Previous
 
     let mut points = Vec::new();
     for pt in req.points.iter() {
         let x = pt.x;
         let y = pt.y;
-        if coord_mode == 1 && !points.is_empty() {
+        if coord_mode == CoordMode::PREVIOUS && !points.is_empty() {
             let (px, py): (i16, i16) = points[points.len() - 1];
             points.push((px + x, py + y));
         } else {
@@ -1153,8 +1153,8 @@ pub(crate) fn handle_fill_poly(state: &mut ClientState, req: &FillPolyRequest) -
 
     if points.len() >= 3 {
         if let Some(fb) = state.get_framebuffer_mut(drawable) {
-            match gc.fill_style {
-                1 => {
+            match FillStyle::from(gc.fill_style) {
+                FillStyle::TILED => {
                     // Tiled: rasterize polygon using tile pattern
                     if let Some((ref tdata, tw, th)) = tile_data {
                         fb.fill_polygon_tiled(
@@ -1180,7 +1180,7 @@ pub(crate) fn handle_fill_poly(state: &mut ClientState, req: &FillPolyRequest) -
                         );
                     }
                 }
-                2 | 3 => {
+                FillStyle::STIPPLED | FillStyle::OPAQUE_STIPPLED => {
                     // Stippled/OpaqueStippled: rasterize with stipple pattern
                     if let Some((ref sdata, sw, sh)) = stipple_data {
                         fb.fill_polygon_stippled(
@@ -1303,8 +1303,8 @@ pub(crate) fn handle_poly_fill_rectangle(
 
     if let Some(fb) = state.get_framebuffer_mut(drawable) {
         for &(x, y, width, height) in &rects {
-            match gc.fill_style {
-                1 => {
+            match FillStyle::from(gc.fill_style) {
+                FillStyle::TILED => {
                     // Tiled
                     if let Some((ref data, tw, th)) = tile_data {
                         if gc.clip_rects.is_empty() {
@@ -1356,7 +1356,7 @@ pub(crate) fn handle_poly_fill_rectangle(
                         );
                     }
                 }
-                2 | 3 => {
+                FillStyle::STIPPLED | FillStyle::OPAQUE_STIPPLED => {
                     // Stippled (2) or OpaqueStippled (3)
                     if let Some((ref data, sw, sh)) = stipple_data {
                         if gc.clip_rects.is_empty() {
@@ -1496,8 +1496,8 @@ pub(crate) fn handle_poly_fill_arc(state: &mut ClientState, req: &PolyFillArcReq
 
     if let Some(fb) = state.get_framebuffer_mut(drawable) {
         for &(x, y, width, height, angle1, angle2) in &arcs {
-            match gc.fill_style {
-                1 => {
+            match FillStyle::from(gc.fill_style) {
+                FillStyle::TILED => {
                     // Tiled: fill arc region with tile pattern (per-pixel within arc shape)
                     if let Some((ref tdata, tw, th)) = tile_data {
                         fb.fill_arc_tiled(
@@ -1540,7 +1540,7 @@ pub(crate) fn handle_poly_fill_arc(state: &mut ClientState, req: &PolyFillArcReq
                         );
                     }
                 }
-                2 | 3 => {
+                FillStyle::STIPPLED | FillStyle::OPAQUE_STIPPLED => {
                     // Stippled/OpaqueStippled: fill arc region with stipple pattern
                     if let Some((ref sdata, sw, sh)) = stipple_data {
                         fb.fill_arc_stippled(

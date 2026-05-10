@@ -2,7 +2,7 @@
 
 use super::*;
 use crate::xserver::reply::ReplyBuf;
-use x11rb_protocol::protocol::xproto::{GetImageRequest, PutImageRequest, WindowClass};
+use x11rb_protocol::protocol::xproto::{GetImageRequest, ImageFormat, PutImageRequest, WindowClass, GX};
 
 /// Decode a 16-bit RGB565 pixel into a 24-bit `0x00RRGGBB` value, scaling
 /// each channel up to 8 bits via bit-replication so the lowest bits don't
@@ -39,9 +39,10 @@ pub(crate) fn handle_put_image(state: &mut ClientState, req: &PutImageRequest) -
     if !state.gcs.contains_key(&gc_id) {
         return build_error(G_CONTEXT_ERROR, state.sequence, gc_id, 72, 0);
     }
-    if format > 2 {
+    if format > u8::from(ImageFormat::Z_PIXMAP) {
         return build_error(VALUE_ERROR, state.sequence, format as u32, 72, 0);
     }
+    let image_format = ImageFormat::from(format);
     let width = req.width;
     let height = req.height;
     let dst_x = req.dst_x;
@@ -65,7 +66,7 @@ pub(crate) fn handle_put_image(state: &mut ClientState, req: &PutImageRequest) -
 
     let gc = state.gcs.get(&gc_id).cloned().unwrap_or_default();
 
-    if format == 2 && depth >= 24 {
+    if image_format == ImageFormat::Z_PIXMAP && depth >= 24 {
         // ZPixmap depth 24/32: X11 wire delivers BGRA; framebuffer stores RGBA.
         let rgba = crate::framebuffer::swap_br(pixel_data);
         if let Some(fb) = state.get_framebuffer_mut(drawable) {
@@ -80,7 +81,7 @@ pub(crate) fn handle_put_image(state: &mut ClientState, req: &PutImageRequest) -
                 &gc.clip_rects,
             );
         }
-    } else if format == 2 && depth == 16 {
+    } else if image_format == ImageFormat::Z_PIXMAP && depth == 16 {
         // ZPixmap depth 16: RGB565 packed pixels → BGRA32 framebuffer
         let gc_func = gc.function;
         let plane_mask = gc.plane_mask;
@@ -123,7 +124,7 @@ pub(crate) fn handle_put_image(state: &mut ClientState, req: &PutImageRequest) -
                 }
             }
         }
-    } else if format == 2 && depth == 8 {
+    } else if image_format == ImageFormat::Z_PIXMAP && depth == 8 {
         // ZPixmap depth 8: 8-bit pixel indices → look up via colormap for display.
         // Store the colormap-resolved RGB in B/G/R channels for rendering, and
         // preserve the original colormap index in the A channel so that GetImage
@@ -203,7 +204,7 @@ pub(crate) fn handle_put_image(state: &mut ClientState, req: &PutImageRequest) -
                 }
             }
         }
-    } else if format == 2 && depth == 4 {
+    } else if image_format == ImageFormat::Z_PIXMAP && depth == 4 {
         // ZPixmap depth 4: nibble-packed pixels
         let gc_func = gc.function;
         let plane_mask = gc.plane_mask;
@@ -252,7 +253,7 @@ pub(crate) fn handle_put_image(state: &mut ClientState, req: &PutImageRequest) -
                 }
             }
         }
-    } else if format == 2 && depth == 1 {
+    } else if image_format == ImageFormat::Z_PIXMAP && depth == 1 {
         // 1-bit depth ZPixmap: write bitmap data into the depth-1 pixmap
         // framebuffer. Each row is padded to 32-bit boundary; each byte
         // holds 8 pixels in LSB-first order.  We store 1-bit values as
@@ -295,7 +296,7 @@ pub(crate) fn handle_put_image(state: &mut ClientState, req: &PutImageRequest) -
                 }
             }
         }
-    } else if format == 0 || format == 1 {
+    } else if image_format == ImageFormat::XY_BITMAP || image_format == ImageFormat::XY_PIXMAP {
         let mapped_fg = state.map_color_for_drawable(drawable, gc.foreground);
         let mapped_bg = state.map_color_for_drawable(drawable, gc.background);
         if let Some(fb) = state.get_framebuffer_mut(drawable) {
@@ -308,7 +309,7 @@ pub(crate) fn handle_put_image(state: &mut ClientState, req: &PutImageRequest) -
             let scanline_bytes = scanline_bits.div_ceil(8);
             let padded_scanline = align_to_4(scanline_bytes);
 
-            if format == 0 {
+            if image_format == ImageFormat::XY_BITMAP {
                 let fg = mapped_fg & gc.plane_mask;
                 let bg = mapped_bg & gc.plane_mask;
                 let has_clip = !gc.clip_rects.is_empty();
@@ -338,7 +339,7 @@ pub(crate) fn handle_put_image(state: &mut ClientState, req: &PutImageRequest) -
                         let src_color = if bit != 0 { fg } else { bg };
                         let fb_off = (dy as usize * fb_w + dx as usize) * 4;
                         if fb_off + 3 < fb_data.len() {
-                            if gc_func == 3 && plane_mask == 0xFFFFFFFF {
+                            if GX::from(gc_func) == GX::COPY && plane_mask == 0xFFFFFFFF {
                                 crate::framebuffer::write_pixel(fb_data, fb_off, src_color, 0xFF);
                             } else {
                                 let dst_color = crate::framebuffer::read_pixel(fb_data, fb_off);
@@ -394,7 +395,7 @@ pub(crate) fn handle_put_image(state: &mut ClientState, req: &PutImageRequest) -
                                 }
                             }
                         }
-                        let result = if gc_func == 3 {
+                        let result = if GX::from(gc_func) == GX::COPY {
                             pixel_val
                         } else {
                             (apply_rop(gc_func, pixel_val, dst_color) & plane_mask)
@@ -455,7 +456,8 @@ pub(crate) fn handle_get_image(state: &mut ClientState, req: &GetImageRequest) -
             }
         }
     }
-    if format != 1 && format != 2 {
+    let image_format = ImageFormat::from(format);
+    if image_format != ImageFormat::XY_PIXMAP && image_format != ImageFormat::Z_PIXMAP {
         return build_error(VALUE_ERROR, seq, format as u32, 73, 0);
     }
     let x = req.x;

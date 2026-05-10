@@ -7,6 +7,10 @@ use x11rb_protocol::protocol::xproto::{CapStyle, Gravity, LineStyle, GX};
 /// Full plane mask: all 32 bit-planes are affected by GC operations.
 pub(crate) const PLANE_MASK_ALL: u32 = u32::MAX;
 
+/// Maximum 8-bit alpha value (fully opaque). Used as the divisor in
+/// alpha-blending arithmetic and to mark output pixels opaque.
+pub(crate) const ALPHA_MAX: u32 = 255;
+
 mod drawing;
 mod shapes;
 #[cfg(test)]
@@ -537,11 +541,11 @@ impl Framebuffer {
                     self.data[dst_off..dst_off + 4].copy_from_slice(&data[src_off..src_off + 4]);
                 } else {
                     let sa = src_a as u32;
-                    let da = 255 - sa;
+                    let da = ALPHA_MAX - sa;
                     for c in 0..3 {
                         let s = data[src_off + c] as u32;
                         let d = self.data[dst_off + c] as u32;
-                        self.data[dst_off + c] = ((s * sa + d * da) / 255) as u8;
+                        self.data[dst_off + c] = ((s * sa + d * da) / ALPHA_MAX) as u8;
                     }
                     self.data[dst_off + 3] = 0xFF;
                 }
@@ -609,13 +613,13 @@ impl Framebuffer {
                     (data[src_off], data[src_off + 1], data[src_off + 2])
                 } else {
                     let sa = src_a as u32;
-                    let da = 255 - sa;
-                    let r =
-                        ((data[src_off] as u32 * sa + self.data[dst_off] as u32 * da) / 255) as u8;
+                    let da = ALPHA_MAX - sa;
+                    let r = ((data[src_off] as u32 * sa + self.data[dst_off] as u32 * da)
+                        / ALPHA_MAX) as u8;
                     let g = ((data[src_off + 1] as u32 * sa + self.data[dst_off + 1] as u32 * da)
-                        / 255) as u8;
+                        / ALPHA_MAX) as u8;
                     let b = ((data[src_off + 2] as u32 * sa + self.data[dst_off + 2] as u32 * da)
-                        / 255) as u8;
+                        / ALPHA_MAX) as u8;
                     (r, g, b)
                 };
 

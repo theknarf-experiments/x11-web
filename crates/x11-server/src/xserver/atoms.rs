@@ -15,9 +15,15 @@ pub(crate) mod predef {
     pub(crate) const STRING: u32 = 31;
     pub(crate) const VISUALID: u32 = 32;
     pub(crate) const WINDOW: u32 = 33;
+    pub(crate) const UTF8_STRING: u32 = 133;
+    pub(crate) const CLIPBOARD: u32 = 134;
+    pub(crate) const TARGETS: u32 = 135;
     pub(crate) const MULTIPLE: u32 = 136;
     pub(crate) const TIMESTAMP: u32 = 137;
-    pub(crate) const CLIPBOARD: u32 = 134;
+    pub(crate) const INCR: u32 = 138;
+    pub(crate) const COMPOUND_TEXT: u32 = 181;
+    pub(crate) const TEXT: u32 = 182;
+    pub(crate) const DELETE: u32 = 190;
     pub(crate) const NET_WM_WINDOW_TYPE: u32 = 79;
     pub(crate) const NET_WM_WINDOW_TYPE_NORMAL: u32 = 80;
     pub(crate) const NET_WM_WINDOW_TYPE_DIALOG: u32 = 81;

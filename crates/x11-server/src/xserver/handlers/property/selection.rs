@@ -190,8 +190,7 @@ pub(crate) fn handle_convert_selection(
         let effective_property = if property == 0 { target } else { property };
 
         // --- DELETE target: owner should delete the selection data (ICCCM §2.6.3.1) ---
-        const DELETE_ATOM: u32 = 190;
-        if target == DELETE_ATOM {
+        if target == crate::xserver::atoms::predef::DELETE {
             // If we're the owner, remove the selection.
             state.selections.remove(&selection);
             state.selection_timestamps.remove(&selection);
