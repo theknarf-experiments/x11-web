@@ -177,6 +177,8 @@ fn legacy_fallback(keycode: u8) -> (u32, u32) {
     const XK_CAPS_LOCK: u32 = 0xffe5;
     const XK_ALT_L: u32 = 0xffe9;
     const XK_ALT_R: u32 = 0xffea;
+    const XK_META_L: u32 = 0xffe7;
+    const XK_META_R: u32 = 0xffe8;
     const XK_SUPER_L: u32 = 0xffeb;
     const XK_SUPER_R: u32 = 0xffec;
     const XK_F1: u32 = 0xffbe;
@@ -198,14 +200,14 @@ fn legacy_fallback(keycode: u8) -> (u32, u32) {
         52 => (0x7a, 0x5a),
         58 => (0x6d, 0x4d),
         62 => (XK_SHIFT_R, XK_SHIFT_R),
-        64 => (XK_ALT_L, XK_ALT_L),
+        64 => (XK_ALT_L, XK_META_L),
         65 => (XK_SPACE, XK_SPACE),
         66 => (XK_CAPS_LOCK, XK_CAPS_LOCK),
         k @ 67..=76 => (XK_F1 + (k - 67) as u32, XK_F1 + (k - 67) as u32),
         95 => (XK_F1 + 10, XK_F1 + 10),
         96 => (XK_F1 + 11, XK_F1 + 11),
         105 => (XK_CONTROL_R, XK_CONTROL_R),
-        108 => (XK_ALT_R, XK_ALT_R),
+        108 => (XK_ALT_R, XK_META_R),
         110 => (XK_HOME, XK_HOME),
         111 => (XK_UP, XK_UP),
         112 => (XK_PAGE_UP, XK_PAGE_UP),

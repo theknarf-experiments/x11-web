@@ -1,3 +1,4 @@
+use super::types::CharInfo;
 use super::*;
 use std::sync::Mutex;
 

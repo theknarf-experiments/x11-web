@@ -107,6 +107,24 @@ impl XFixesRegion {
         let bounding = XFixesRegion::from_rects(vec![*bounds]);
         bounding.subtract(self)
     }
+
+    /// Expand each rectangle outward by `(left, top, right, bottom)` —
+    /// the XFIXES "ExpandRegion" semantics. The origin moves up-left
+    /// by `(left, top)` and the size grows by `(left + right, top +
+    /// bottom)`.
+    pub(crate) fn expand(&self, left: u16, top: u16, right: u16, bottom: u16) -> XFixesRegion {
+        let rects = self
+            .rects
+            .iter()
+            .map(|r| RegionRect {
+                x: r.x.saturating_sub(left as i16),
+                y: r.y.saturating_sub(top as i16),
+                width: r.width.saturating_add(left).saturating_add(right),
+                height: r.height.saturating_add(top).saturating_add(bottom),
+            })
+            .collect();
+        XFixesRegion { rects }
+    }
 }
 
 #[cfg(test)]

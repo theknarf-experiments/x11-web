@@ -258,6 +258,28 @@ pub(crate) fn write_u32_bo(buf: &mut [u8], offset: usize, val: u32, msb_first: b
     buf[offset..offset + 4].copy_from_slice(&bytes);
 }
 
+/// Helper to write u16 into a buffer in the specified byte order.
+#[inline]
+pub(crate) fn write_u16_bo(buf: &mut [u8], offset: usize, val: u16, msb_first: bool) {
+    let bytes = if msb_first {
+        val.to_be_bytes()
+    } else {
+        val.to_le_bytes()
+    };
+    buf[offset..offset + 2].copy_from_slice(&bytes);
+}
+
+/// Helper to write i16 into a buffer in the specified byte order.
+#[inline]
+pub(crate) fn write_i16_bo(buf: &mut [u8], offset: usize, val: i16, msb_first: bool) {
+    let bytes = if msb_first {
+        val.to_be_bytes()
+    } else {
+        val.to_le_bytes()
+    };
+    buf[offset..offset + 2].copy_from_slice(&bytes);
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

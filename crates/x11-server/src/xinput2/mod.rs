@@ -28,6 +28,13 @@ pub use events::{
     patch_query_pointer_root,
 };
 
+// Re-export internal builders / constants that the tests reach for via
+// `super::*`.
+#[cfg(test)]
+pub(crate) use device::{MAX_KEYCODE, MIN_KEYCODE, N_POINTER_BUTTONS};
+#[cfg(test)]
+pub(crate) use events::build_xi_pointer_event;
+
 pub use handler::handle_request;
 
 pub use state::XiState;
@@ -133,6 +140,19 @@ pub struct PendingSynthetic {
 pub struct AxisValue {
     pub axis: u16,
     pub value: i32,
+}
+
+/// Active XI2 device grab (from XIGrabDevice). Tracks the parameters
+/// of a grab that's currently in effect so dispatch can route
+/// subsequent events to the grab window with the grab's mask.
+#[derive(Clone, Debug)]
+pub struct Xi2ActiveGrab {
+    pub deviceid: xi::DeviceId,
+    pub grab_window: u32,
+    pub event_mask: Vec<xi::XIEventMask>,
+    pub owner_events: bool,
+    pub paired_device_mode: u8,
+    pub grab_mode: u8,
 }
 
 /// Passive XI2 device grab (from XIPassiveGrabDevice).

@@ -74,6 +74,29 @@ impl ReplyBuf {
         self
     }
 
+    /// Set a u64 at the given offset, written as two 32-bit halves in
+    /// the chosen endianness with the low word first. That's the
+    /// layout XRES uses for `pixmap_bytes` in
+    /// `XResourceQueryClientPixmapBytes`, and matches what other X
+    /// servers emit for 64-bit reply fields.
+    pub(crate) fn set_u64(mut self, offset: usize, val: u64) -> Self {
+        let lo = (val & 0xFFFF_FFFF) as u32;
+        let hi = (val >> 32) as u32;
+        let lo_bytes = if self.msb_first {
+            lo.to_be_bytes()
+        } else {
+            lo.to_le_bytes()
+        };
+        let hi_bytes = if self.msb_first {
+            hi.to_be_bytes()
+        } else {
+            hi.to_le_bytes()
+        };
+        self.buf[offset..offset + 4].copy_from_slice(&lo_bytes);
+        self.buf[offset + 4..offset + 8].copy_from_slice(&hi_bytes);
+        self
+    }
+
     /// Copy raw bytes into the buffer at the given offset.
     pub(crate) fn set_bytes(mut self, offset: usize, data: &[u8]) -> Self {
         self.buf[offset..offset + data.len()].copy_from_slice(data);
