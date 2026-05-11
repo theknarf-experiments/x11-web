@@ -6,11 +6,10 @@ use tracing::debug;
 use super::super::super::client::ClientState;
 use super::super::parse_minor;
 use super::{
-    build_var_reply, byteswap_image_format_info, fourcc_yuv_format, rgb_format, CapturedFrame,
+    build_var_reply, fourcc_yuv_format, rgb_format, CapturedFrame,
     FOURCC_I420, FOURCC_NV12, FOURCC_NV21, FOURCC_RGB3, FOURCC_RV32, FOURCC_UYVY, FOURCC_Y800,
     FOURCC_YUY2, FOURCC_YV12, FOURCC_YV16, XV_MAJOR_OPCODE,
 };
-use crate::xserver::byteswap::{swap_u16, swap_u32, swap_u32_array};
 use x11rb_protocol::protocol::xv::{
     GetStillRequest, GetVideoRequest, ImageFormatInfoFormat, ListImageFormatsReply,
     ListImageFormatsRequest, PutImageRequest, PutStillRequest, PutVideoRequest,
@@ -640,9 +639,7 @@ pub(crate) fn handle_image_request(
                 length: 0,
                 format,
             };
-            build_var_reply(&reply, state.msb_first, |buf| {
-                byteswap_list_image_formats_reply(buf, reply.format.len());
-            })
+            build_var_reply(&reply, state.byte_order())
         }
         QUERY_IMAGE_ATTRIBUTES_REQUEST => {
             let req = parse_minor!(
@@ -667,9 +664,7 @@ pub(crate) fn handle_image_request(
                 pitches: pitches[..num_planes].to_vec(),
                 offsets: offsets[..num_planes].to_vec(),
             };
-            build_var_reply(&reply, state.msb_first, |buf| {
-                byteswap_query_image_attributes_reply(buf, num_planes);
-            })
+            build_var_reply(&reply, state.byte_order())
         }
         PUT_IMAGE_REQUEST => {
             let req = parse_minor!(PutImageRequest, data, state, seq, XV_MAJOR_OPCODE, minor);
@@ -796,32 +791,3 @@ fn supported_image_formats() -> Vec<x11rb_protocol::protocol::xv::ImageFormatInf
     ]
 }
 
-/// `ListImageFormatsReply`:
-/// `[type:1, pad:1, sequence:u16, length:u32, num_formats:u32,
-///   pad:20, format:[ImageFormatInfo (128 each)]]`
-fn byteswap_list_image_formats_reply(buf: &mut [u8], num_formats: usize) {
-    swap_u16(buf, 2);
-    swap_u32(buf, 4);
-    swap_u32(buf, 8); // num_formats
-    let header_bytes = 32;
-    for i in 0..num_formats {
-        byteswap_image_format_info(buf, header_bytes + i * 128);
-    }
-}
-
-/// `QueryImageAttributesReply`:
-/// `[type:1, pad:1, sequence:u16, length:u32, num_planes:u32, data_size:u32,
-///   width:u16, height:u16, pad:12, pitches:[u32; num_planes],
-///   offsets:[u32; num_planes]]`
-fn byteswap_query_image_attributes_reply(buf: &mut [u8], num_planes: usize) {
-    swap_u16(buf, 2);
-    swap_u32(buf, 4);
-    swap_u32(buf, 8); // num_planes
-    swap_u32(buf, 12); // data_size
-    swap_u16(buf, 16); // width
-    swap_u16(buf, 18); // height
-    let pitches_off = 32;
-    let offsets_off = pitches_off + num_planes * 4;
-    swap_u32_array(buf, pitches_off, num_planes);
-    swap_u32_array(buf, offsets_off, num_planes);
-}

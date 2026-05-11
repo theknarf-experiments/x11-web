@@ -1,10 +1,9 @@
 //! XVideo (Xv) extension handler.
 //!
 //! Software-only video adaptor supporting basic YUV/RGB overlay rendering.
-//! Replies are constructed via x11rb's `xv` reply structs so the wire
-//! layout (`AdaptorInfo`, `EncodingInfo`, `ImageFormatInfo`, etc.) is
-//! owned by the protocol crate. For MSB-first clients we re-encode each
-//! multi-byte field in place using the shared `byteswap` helpers.
+//! Replies are constructed via x11rb's `xv` reply structs and the
+//! generator-emitted `SerializeEndian` impls, which produce wire-correct
+//! bytes for either LSB or MSB clients directly.
 
 mod dcv_convert;
 mod image;
@@ -15,7 +14,6 @@ use tracing::debug;
 
 use super::super::client::ClientState;
 use super::parse_minor;
-use crate::xserver::byteswap::{swap_u16, swap_u32, swap_u32_array};
 use x11rb_protocol::protocol::xv::{
     AdaptorInfo, EncodingInfo, Format, ImageFormatInfo, QueryAdaptorsReply, QueryAdaptorsRequest,
     QueryEncodingsReply, QueryEncodingsRequest, QueryExtensionReply, QueryExtensionRequest,
@@ -26,7 +24,7 @@ use x11rb_protocol::protocol::xv::{
     QUERY_PORT_ATTRIBUTES_REQUEST, SELECT_PORT_NOTIFY_REQUEST, SELECT_VIDEO_NOTIFY_REQUEST,
     SET_PORT_ATTRIBUTE_REQUEST, SHM_PUT_IMAGE_REQUEST, STOP_VIDEO_REQUEST, UNGRAB_PORT_REQUEST,
 };
-use x11rb_protocol::x11_utils::Serialize;
+use x11rb_protocol::x11_utils::{ByteOrder, SerializeEndian};
 
 /// XVideo (Xv) extension major opcode (assigned by ListExtensions).
 pub(crate) const XV_MAJOR_OPCODE: u8 = 156;
@@ -122,7 +120,7 @@ pub(crate) fn handle_xvideo_request(state: &mut ClientState, data: &[u8], seq: u
                 major: 2,
                 minor: 2,
             };
-            build_reply(&reply, state.msb_first, byteswap_query_extension_reply)
+            build_reply(&reply, state.byte_order())
         }
         QUERY_ADAPTORS_REQUEST => {
             let _req = parse_minor!(
@@ -147,7 +145,7 @@ pub(crate) fn handle_xvideo_request(state: &mut ClientState, data: &[u8], seq: u
                     }],
                 }],
             };
-            build_query_adaptors_reply(&reply, state.msb_first)
+            build_var_reply(&reply, state.byte_order())
         }
         QUERY_ENCODINGS_REQUEST => {
             let _req = parse_minor!(
@@ -172,7 +170,7 @@ pub(crate) fn handle_xvideo_request(state: &mut ClientState, data: &[u8], seq: u
                     name: b"XV_IMAGE".to_vec(),
                 }],
             };
-            build_query_encodings_reply(&reply, state.msb_first)
+            build_var_reply(&reply, state.byte_order())
         }
         GRAB_PORT_REQUEST
         | UNGRAB_PORT_REQUEST
@@ -209,148 +207,40 @@ pub(crate) fn handle_xvideo_request(state: &mut ClientState, data: &[u8], seq: u
 // Reply serialization (shared with port.rs / image.rs)
 // ---------------------------------------------------------------------------
 
-/// Serialize a fixed-size x11rb reply struct, padding short reply
-/// types (e.g. `[u8; 8]` for `GrabPortReply`) to the X11 32-byte
-/// minimum and byte-swapping for MSB-first clients.
-pub(super) fn build_reply<R, F>(reply: &R, msb_first: bool, swap: F) -> Vec<u8>
-where
-    R: Serialize,
-    R::Bytes: AsRef<[u8]>,
-    F: Fn(&mut [u8]),
-{
+/// Serialize a fixed-size reply via the codegen-emitted
+/// `SerializeEndian` impl, padding short reply types (e.g.
+/// `GrabPortReply`) to the X11 32-byte minimum.
+pub(super) fn build_reply<R: SerializeEndian>(reply: &R, byte_order: ByteOrder) -> Vec<u8> {
     const REPLY_MIN: usize = 32;
-    let mut bytes: Vec<u8> = reply.serialize().as_ref().to_vec();
+    let mut bytes = Vec::with_capacity(REPLY_MIN);
+    reply.serialize_endian_into(&mut bytes, byte_order);
     if bytes.len() < REPLY_MIN {
         bytes.resize(REPLY_MIN, 0);
     }
-    if msb_first {
-        swap(&mut bytes);
-    }
     bytes
 }
 
-/// Serialize a variable-length reply (one whose `Serialize::Bytes` is
-/// `Vec<u8>`) and stamp the X11 length field from the actual buffer
-/// size — that way the length field can never disagree with the
-/// trailing payload, no matter what was put on the struct.
-pub(super) fn build_var_reply<R, F>(reply: &R, msb_first: bool, swap: F) -> Vec<u8>
-where
-    R: Serialize<Bytes = Vec<u8>>,
-    F: Fn(&mut [u8]),
-{
-    let mut bytes = reply.serialize();
-    fix_length(&mut bytes);
-    if msb_first {
-        swap(&mut bytes);
-    }
+/// Variable-length reply: serialize via `SerializeEndian` and stamp the
+/// X11 length field from the actual buffer size so it can never
+/// disagree with the trailing payload.
+pub(super) fn build_var_reply<R: SerializeEndian>(reply: &R, byte_order: ByteOrder) -> Vec<u8> {
+    let mut bytes = Vec::new();
+    reply.serialize_endian_into(&mut bytes, byte_order);
+    fix_length(&mut bytes, byte_order);
     bytes
 }
 
-fn fix_length(bytes: &mut Vec<u8>) {
+fn fix_length(bytes: &mut Vec<u8>, byte_order: ByteOrder) {
     const HEADER_BYTES: usize = 32;
     const WORD_BYTES: usize = 4;
     debug_assert!(bytes.len() >= HEADER_BYTES);
     debug_assert!((bytes.len() - HEADER_BYTES) % WORD_BYTES == 0);
     let length = u32::try_from((bytes.len() - HEADER_BYTES) / WORD_BYTES).expect("reply fits");
-    bytes[4..8].copy_from_slice(&length.to_ne_bytes());
-}
-
-// ---------------------------------------------------------------------------
-// Per-reply byteswap helpers (mirror x11rb's `serialize_into` exactly)
-// ---------------------------------------------------------------------------
-
-/// `QueryExtensionReply` (12 bytes from x11rb, padded to 32):
-/// `[type:1, pad:1, sequence:u16, length:u32, major:u16, minor:u16, pad:20]`
-fn byteswap_query_extension_reply(buf: &mut [u8]) {
-    swap_u16(buf, 2);
-    swap_u32(buf, 4);
-    swap_u16(buf, 8);
-    swap_u16(buf, 10);
-}
-
-/// `QueryAdaptorsReply`:
-/// `[type:1, pad:1, sequence:u16, length:u32, num_adaptors:u16, pad:22, info:[AdaptorInfo]]`
-pub(super) fn build_query_adaptors_reply(reply: &QueryAdaptorsReply, msb_first: bool) -> Vec<u8> {
-    let mut bytes = reply.serialize();
-    fix_length(&mut bytes);
-    if msb_first {
-        swap_u16(&mut bytes, 2);
-        swap_u32(&mut bytes, 4);
-        swap_u16(&mut bytes, 8);
-        let mut off = 32;
-        for adaptor in &reply.info {
-            byteswap_adaptor_info(&mut bytes, &mut off, adaptor);
-        }
-    }
-    bytes
-}
-
-/// `AdaptorInfo`:
-/// `[base_id:u32, name_size:u16, num_ports:u16, num_formats:u16,
-///   type:u8, pad:1, name:bytes (name_size, padded to 4),
-///   formats:[Format]]`
-fn byteswap_adaptor_info(buf: &mut [u8], off: &mut usize, adaptor: &AdaptorInfo) {
-    swap_u32(buf, *off); // base_id
-    swap_u16(buf, *off + 4); // name_size
-    swap_u16(buf, *off + 6); // num_ports
-    swap_u16(buf, *off + 8); // num_formats
-    *off += 12;
-    let name_padded = crate::xserver::core::align_to_4(adaptor.name.len());
-    *off += name_padded; // name bytes (no swap)
-    for _ in &adaptor.formats {
-        // Format: visual:u32, depth:u8, pad:3
-        swap_u32(buf, *off);
-        *off += 8;
-    }
-}
-
-/// `QueryEncodingsReply`:
-/// `[type:1, pad:1, sequence:u16, length:u32, num_encodings:u16,
-///   pad:22, info:[EncodingInfo]]`
-pub(super) fn build_query_encodings_reply(reply: &QueryEncodingsReply, msb_first: bool) -> Vec<u8> {
-    let mut bytes = reply.serialize();
-    fix_length(&mut bytes);
-    if msb_first {
-        swap_u16(&mut bytes, 2);
-        swap_u32(&mut bytes, 4);
-        swap_u16(&mut bytes, 8);
-        let mut off = 32;
-        for encoding in &reply.info {
-            byteswap_encoding_info(&mut bytes, &mut off, encoding);
-        }
-    }
-    bytes
-}
-
-/// `EncodingInfo`:
-/// `[encoding:u32, name_size:u16, width:u16, height:u16, pad:2,
-///   rate:Rational(i32 num + i32 den), name:bytes (padded to 4)]`
-fn byteswap_encoding_info(buf: &mut [u8], off: &mut usize, encoding: &EncodingInfo) {
-    swap_u32(buf, *off); // encoding
-    swap_u16(buf, *off + 4); // name_size
-    swap_u16(buf, *off + 6); // width
-    swap_u16(buf, *off + 8); // height
-    swap_u32(buf, *off + 12); // rate.numerator
-    swap_u32(buf, *off + 16); // rate.denominator
-    *off += 20 + (crate::xserver::core::align_to_4(encoding.name.len()));
-}
-
-/// `ImageFormatInfo` (128 bytes, no inner variable-length parts).
-/// Mirrors x11rb's serialize_into:
-/// `[id:u32, type_:u8, byte_order:u8, pad:2, guid:[u8;16], bpp:u8,
-///   num_planes:u8, pad:2, depth:u8, pad:3, red_mask:u32, green_mask:u32,
-///   blue_mask:u32, format:u8, pad:3, y_sample_bits:u32, u_sample_bits:u32,
-///   v_sample_bits:u32, vhorz_y_period:u32, vhorz_u_period:u32, vhorz_v_period:u32,
-///   vvert_y_period:u32, vvert_u_period:u32, vvert_v_period:u32,
-///   vcomp_order:[u8;32], vscanline_order:u8, pad:11]`
-pub(super) fn byteswap_image_format_info(buf: &mut [u8], off: usize) {
-    swap_u32(buf, off); // id
-                        // type_ at off+4 is u8, byte_order at off+5 is u8 — no swap.
-                        // guid is bytes — no swap.
-    swap_u32(buf, off + 32); // red_mask
-    swap_u32(buf, off + 36); // green_mask
-    swap_u32(buf, off + 40); // blue_mask
-    swap_u32_array(buf, off + 48, 9); // y/u/v sample_bits + 6 vhorz/vvert periods
+    let length_bytes = match byte_order {
+        ByteOrder::Lsb => length.to_le_bytes(),
+        ByteOrder::Msb => length.to_be_bytes(),
+    };
+    bytes[4..8].copy_from_slice(&length_bytes);
 }
 
 /// Build a YUV-format `ImageFormatInfo` for our software adaptor. The

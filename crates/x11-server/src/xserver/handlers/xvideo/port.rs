@@ -9,7 +9,6 @@ use super::{
     build_reply, XV_ATTR_BRIGHTNESS, XV_ATTR_COLORSPACE, XV_ATTR_CONTRAST, XV_ATTR_HUE,
     XV_ATTR_SATURATION, XV_MAJOR_OPCODE,
 };
-use crate::xserver::byteswap::{swap_u16, swap_u32};
 use crate::xserver::reply::ReplyBuf;
 use x11rb_protocol::protocol::xv::{
     AttributeFlag, GetPortAttributeReply, GetPortAttributeRequest, GrabPortReply, GrabPortRequest,
@@ -45,7 +44,7 @@ pub(crate) fn handle_port_request(
                 sequence: seq,
                 length: 0,
             };
-            build_reply(&reply, state.msb_first, byteswap_grab_port_reply)
+            build_reply(&reply, state.byte_order())
         }
         UNGRAB_PORT_REQUEST => {
             let req = parse_minor!(UngrabPortRequest, data, state, seq, XV_MAJOR_OPCODE, minor);
@@ -71,7 +70,7 @@ pub(crate) fn handle_port_request(
                 actual_width: req.vid_w,
                 actual_height: req.vid_h,
             };
-            build_reply(&reply, state.msb_first, byteswap_query_best_size_reply)
+            build_reply(&reply, state.byte_order())
         }
         SET_PORT_ATTRIBUTE_REQUEST => {
             let req = parse_minor!(
@@ -130,7 +129,7 @@ pub(crate) fn handle_port_request(
                 length: 0,
                 value,
             };
-            build_reply(&reply, state.msb_first, byteswap_get_port_attribute_reply)
+            build_reply(&reply, state.byte_order())
         }
         QUERY_PORT_ATTRIBUTES_REQUEST => {
             let _req = parse_minor!(
@@ -228,31 +227,3 @@ fn build_query_port_attributes_reply(
     reply.build()
 }
 
-// ---------------------------------------------------------------------------
-// Per-reply byteswap helpers
-// ---------------------------------------------------------------------------
-
-/// `GrabPortReply` (8 bytes from x11rb, padded to 32):
-/// `[type:1, result:u8, sequence:u16, length:u32, pad:24]`
-fn byteswap_grab_port_reply(buf: &mut [u8]) {
-    swap_u16(buf, 2);
-    swap_u32(buf, 4);
-}
-
-/// `QueryBestSizeReply`:
-/// `[type:1, pad:1, sequence:u16, length:u32, actual_width:u16,
-///   actual_height:u16, pad:20]`
-fn byteswap_query_best_size_reply(buf: &mut [u8]) {
-    swap_u16(buf, 2);
-    swap_u32(buf, 4);
-    swap_u16(buf, 8);
-    swap_u16(buf, 10);
-}
-
-/// `GetPortAttributeReply`:
-/// `[type:1, pad:1, sequence:u16, length:u32, value:i32, pad:20]`
-fn byteswap_get_port_attribute_reply(buf: &mut [u8]) {
-    swap_u16(buf, 2);
-    swap_u32(buf, 4);
-    swap_u32(buf, 8);
-}

@@ -1,17 +1,12 @@
 //! XFree86-VidModeExtension handler (opcode 153).
 //!
-//! Replies are constructed via x11rb's `Serialize` impls so the wire
-//! layout is owned by a single source of truth (the protocol crate)
-//! rather than scattered byte-offset arithmetic. x11rb's `serialize()`
-//! emits native-endian bytes; for MSB-first clients we re-encode each
-//! multi-byte field in place using the shared `byteswap` helpers. The
-//! per-reply byteswap helpers at the bottom of this file mirror the
-//! corresponding `Serialize::serialize_into` field-by-field.
+//! Replies are constructed via x11rb's generator-emitted `SerializeEndian`
+//! impls, which produce wire-correct bytes for either LSB or MSB clients
+//! directly — no per-reply byteswap callbacks needed.
 
 use tracing::debug;
 
 use super::super::client::ClientState;
-use crate::xserver::byteswap::{swap_u16, swap_u32, swap_u32_array};
 use x11rb_protocol::protocol::xf86vidmode::{
     AddModeLineRequest, DeleteModeLineRequest, GetAllModeLinesReply, GetAllModeLinesRequest,
     GetDotClocksReply, GetDotClocksRequest, GetGammaRampReply, GetGammaRampRequest,
@@ -27,7 +22,7 @@ use x11rb_protocol::protocol::xf86vidmode::{
     QUERY_VERSION_REQUEST, SET_CLIENT_VERSION_REQUEST, SET_GAMMA_RAMP_REQUEST, SET_GAMMA_REQUEST,
     SET_VIEW_PORT_REQUEST, SWITCH_MODE_REQUEST, SWITCH_TO_MODE_REQUEST, VALIDATE_MODE_LINE_REQUEST,
 };
-use x11rb_protocol::x11_utils::Serialize;
+use x11rb_protocol::x11_utils::{ByteOrder, SerializeEndian};
 
 use super::parse_minor;
 
@@ -107,27 +102,20 @@ fn trailing_words(serialized_len: usize) -> u32 {
     u32::try_from((serialized_len - HEADER_BYTES) / WORD_BYTES).expect("reply fits in u32 words")
 }
 
-/// Serialize an x11rb reply struct, byte-swapping in place when the
-/// client expects MSB-first wire encoding. The byteswap callback
-/// mirrors the reply's `Serialize::serialize_into` field-by-field.
+/// Serialize an x11rb reply via the generator-emitted `SerializeEndian`
+/// impl — bytes come out already wire-correct for `byte_order` so no
+/// per-reply swap callback is needed.
 ///
-/// Some x11rb `Serialize::Bytes` types are smaller than the X11
-/// 32-byte reply minimum (notably `QueryVersionReply` is 12 bytes);
-/// we right-pad with zeros to the wire-format minimum so the client
-/// doesn't stall waiting for the missing tail.
-fn build_reply<R, F>(reply: &R, msb_first: bool, swap: F) -> Vec<u8>
-where
-    R: Serialize,
-    R::Bytes: AsRef<[u8]>,
-    F: Fn(&mut [u8]),
-{
+/// Some replies' fixed-size header is smaller than the X11 32-byte reply
+/// minimum (notably `QueryVersionReply` is 12 bytes); we right-pad with
+/// zeros to the wire-format minimum so the client doesn't stall waiting
+/// for the missing tail.
+fn build_reply<R: SerializeEndian>(reply: &R, byte_order: ByteOrder) -> Vec<u8> {
     const REPLY_MIN: usize = 32;
-    let mut bytes: Vec<u8> = reply.serialize().as_ref().to_vec();
+    let mut bytes = Vec::with_capacity(REPLY_MIN);
+    reply.serialize_endian_into(&mut bytes, byte_order);
     if bytes.len() < REPLY_MIN {
         bytes.resize(REPLY_MIN, 0);
-    }
-    if msb_first {
-        swap(&mut bytes);
     }
     bytes
 }
@@ -147,7 +135,7 @@ pub(crate) fn handle_vidmode_request(state: &mut ClientState, data: &[u8], seq: 
                 major_version: 2,
                 minor_version: 2,
             };
-            build_reply(&reply, state.msb_first, byteswap_query_version_reply)
+            build_reply(&reply, state.byte_order())
         }
         GET_MODE_LINE_REQUEST => {
             let _req = parse_minor!(GetModeLineRequest, data, state, seq, 153, minor);
@@ -168,7 +156,7 @@ pub(crate) fn handle_vidmode_request(state: &mut ClientState, data: &[u8], seq: 
                 flags: ModeFlag::from(mode.flags),
                 private: Vec::new(),
             };
-            build_get_mode_line_reply(&reply, state.msb_first)
+            build_var_reply(&reply, state.byte_order())
         }
         MOD_MODE_LINE_REQUEST => {
             // Modify a mode in the mode list. Treated as a no-op:
@@ -223,7 +211,7 @@ pub(crate) fn handle_vidmode_request(state: &mut ClientState, data: &[u8], seq: 
                 alignment_pad,
                 model,
             };
-            build_get_monitor_reply(&reply, state.msb_first)
+            build_var_reply(&reply, state.byte_order())
         }
         LOCK_MODE_SWITCH_REQUEST => {
             let req = parse_minor!(LockModeSwitchRequest, data, state, seq, 153, minor);
@@ -248,7 +236,7 @@ pub(crate) fn handle_vidmode_request(state: &mut ClientState, data: &[u8], seq: 
                 length: 0,
                 modeinfo,
             };
-            build_get_all_mode_lines_reply(&reply, state.msb_first)
+            build_var_reply(&reply, state.byte_order())
         }
         ADD_MODE_LINE_REQUEST => {
             let req = parse_minor!(AddModeLineRequest, data, state, seq, 153, minor);
@@ -290,7 +278,7 @@ pub(crate) fn handle_vidmode_request(state: &mut ClientState, data: &[u8], seq: 
                 length: 0,
                 status: 0, // MODE_OK
             };
-            build_reply(&reply, state.msb_first, byteswap_validate_mode_line_reply)
+            build_reply(&reply, state.byte_order())
         }
         SWITCH_TO_MODE_REQUEST => {
             let req = parse_minor!(SwitchToModeRequest, data, state, seq, 153, minor);
@@ -328,7 +316,7 @@ pub(crate) fn handle_vidmode_request(state: &mut ClientState, data: &[u8], seq: 
                 x: state.vidmode_viewport_x,
                 y: state.vidmode_viewport_y,
             };
-            build_reply(&reply, state.msb_first, byteswap_get_view_port_reply)
+            build_reply(&reply, state.byte_order())
         }
         SET_VIEW_PORT_REQUEST => {
             let req = parse_minor!(SetViewPortRequest, data, state, seq, 153, minor);
@@ -351,7 +339,7 @@ pub(crate) fn handle_vidmode_request(state: &mut ClientState, data: &[u8], seq: 
                 maxclocks: dotclock,
                 clock: vec![dotclock],
             };
-            build_get_dot_clocks_reply(&reply, state.msb_first)
+            build_var_reply(&reply, state.byte_order())
         }
         SET_CLIENT_VERSION_REQUEST => {
             // Xxf86vm calls this on every connection to negotiate
@@ -381,7 +369,7 @@ pub(crate) fn handle_vidmode_request(state: &mut ClientState, data: &[u8], seq: 
                 green: to_fp(gamma_g),
                 blue: to_fp(gamma_b),
             };
-            build_reply(&reply, state.msb_first, byteswap_get_gamma_reply)
+            build_reply(&reply, state.byte_order())
         }
         GET_GAMMA_RAMP_REQUEST => {
             let req = parse_minor!(GetGammaRampRequest, data, state, seq, 153, minor);
@@ -399,7 +387,7 @@ pub(crate) fn handle_vidmode_request(state: &mut ClientState, data: &[u8], seq: 
                 green,
                 blue,
             };
-            build_get_gamma_ramp_reply(&reply, state.msb_first)
+            build_var_reply(&reply, state.byte_order())
         }
         SET_GAMMA_RAMP_REQUEST => {
             let req = parse_minor!(SetGammaRampRequest, data, state, seq, 153, minor);
@@ -421,7 +409,7 @@ pub(crate) fn handle_vidmode_request(state: &mut ClientState, data: &[u8], seq: 
                 length: 0,
                 size: 256,
             };
-            build_reply(&reply, state.msb_first, byteswap_get_gamma_ramp_size_reply)
+            build_reply(&reply, state.byte_order())
         }
         _ => vidmode_err(crate::xserver::core::REQUEST_ERROR, 0),
     }
@@ -570,48 +558,10 @@ fn sample_gamma_ramps(
 // Reply builders for variable-length replies
 // ---------------------------------------------------------------------------
 
-fn build_get_mode_line_reply(reply: &GetModeLineReply, msb_first: bool) -> Vec<u8> {
-    let mut bytes = reply.serialize();
-    fix_length(&mut bytes);
-    if msb_first {
-        byteswap_get_mode_line_reply(&mut bytes);
-    }
-    bytes
-}
-
-fn build_get_monitor_reply(reply: &GetMonitorReply, msb_first: bool) -> Vec<u8> {
-    let mut bytes = reply.serialize();
-    fix_length(&mut bytes);
-    if msb_first {
-        byteswap_get_monitor_reply(&mut bytes, reply.hsync.len(), reply.vsync.len());
-    }
-    bytes
-}
-
-fn build_get_all_mode_lines_reply(reply: &GetAllModeLinesReply, msb_first: bool) -> Vec<u8> {
-    let mut bytes = reply.serialize();
-    fix_length(&mut bytes);
-    if msb_first {
-        byteswap_get_all_mode_lines_reply(&mut bytes, reply.modeinfo.len());
-    }
-    bytes
-}
-
-fn build_get_dot_clocks_reply(reply: &GetDotClocksReply, msb_first: bool) -> Vec<u8> {
-    let mut bytes = reply.serialize();
-    fix_length(&mut bytes);
-    if msb_first {
-        byteswap_get_dot_clocks_reply(&mut bytes, reply.clock.len());
-    }
-    bytes
-}
-
-fn build_get_gamma_ramp_reply(reply: &GetGammaRampReply, msb_first: bool) -> Vec<u8> {
-    let mut bytes = reply.serialize();
-    fix_length(&mut bytes);
-    if msb_first {
-        byteswap_get_gamma_ramp_reply(&mut bytes, reply.red.len());
-    }
+fn build_var_reply<R: SerializeEndian>(reply: &R, byte_order: ByteOrder) -> Vec<u8> {
+    let mut bytes = Vec::new();
+    reply.serialize_endian_into(&mut bytes, byte_order);
+    fix_length(&mut bytes, byte_order);
     bytes
 }
 
@@ -620,158 +570,11 @@ fn build_get_gamma_ramp_reply(reply: &GetGammaRampReply, msb_first: bool) -> Vec
 /// emits whatever value the caller put on the struct, but we always
 /// build with `length: 0` and let the buffer length be the source of
 /// truth — that way we can't drift.
-fn fix_length(bytes: &mut Vec<u8>) {
+fn fix_length(bytes: &mut Vec<u8>, byte_order: ByteOrder) {
     let length = trailing_words(bytes.len());
-    bytes[4..8].copy_from_slice(&length.to_ne_bytes());
-}
-
-// ---------------------------------------------------------------------------
-// Per-reply byteswap helpers
-//
-// Each helper mirrors the corresponding `Serialize::serialize_into`
-// in x11rb_protocol::protocol::xf86vidmode field-by-field. If x11rb
-// changes the wire layout of one of these replies (rare — it's an
-// X11 extension protocol fixed by spec) the mirror function must
-// be updated in tandem. Tests in `e2e/tests/extensions/vidmode.spec.ts`
-// exercise the LE path; the BE path is covered by audit.
-// ---------------------------------------------------------------------------
-
-/// QueryVersionReply: [type:1, pad:1, sequence:u16, length:u32,
-///                     major:u16, minor:u16]
-fn byteswap_query_version_reply(buf: &mut [u8]) {
-    swap_u16(buf, 2);
-    swap_u32(buf, 4);
-    swap_u16(buf, 8);
-    swap_u16(buf, 10);
-}
-
-/// GetModeLineReply: [type:1, pad:1, sequence:u16, length:u32,
-///                    dotclock:u32, hdisplay:u16, hsyncstart:u16,
-///                    hsyncend:u16, htotal:u16, hskew:u16,
-///                    vdisplay:u16, vsyncstart:u16, vsyncend:u16,
-///                    vtotal:u16, pad:2, flags:u32, pad:12,
-///                    privsize:u32, private:bytes]
-fn byteswap_get_mode_line_reply(buf: &mut [u8]) {
-    swap_u16(buf, 2); // sequence
-    swap_u32(buf, 4); // length
-    swap_u32(buf, 8); // dotclock
-    for i in 0..7 {
-        swap_u16(buf, 12 + i * 2); // hdisplay..hskew
-    }
-    for i in 0..4 {
-        swap_u16(buf, 22 + i * 2); // vdisplay..vtotal
-    }
-    swap_u32(buf, 32); // flags
-    swap_u32(buf, 48); // privsize
-                       // `private` bytes are an opaque blob — no swap.
-}
-
-/// ValidateModeLineReply: [type:1, pad:1, sequence:u16, length:u32,
-///                         status:u32, pad:20]
-fn byteswap_validate_mode_line_reply(buf: &mut [u8]) {
-    swap_u16(buf, 2);
-    swap_u32(buf, 4);
-    swap_u32(buf, 8);
-}
-
-/// GetMonitorReply: [type:1, pad:1, sequence:u16, length:u32,
-///                   vendor_length:u8, model_length:u8,
-///                   num_hsync:u8, num_vsync:u8, pad:20,
-///                   hsync:[Syncrange], vsync:[Syncrange],
-///                   vendor:bytes, alignment_pad:bytes, model:bytes]
-fn byteswap_get_monitor_reply(buf: &mut [u8], hsync_count: usize, vsync_count: usize) {
-    swap_u16(buf, 2);
-    swap_u32(buf, 4);
-    let hsync_off = 32;
-    swap_u32_array(buf, hsync_off, hsync_count);
-    let vsync_off = hsync_off + hsync_count * 4;
-    swap_u32_array(buf, vsync_off, vsync_count);
-    // vendor/model strings and alignment padding are byte-only.
-}
-
-/// GetAllModeLinesReply: [type:1, pad:1, sequence:u16, length:u32,
-///                        modecount:u32, pad:20, modeinfo:[ModeInfo]]
-fn byteswap_get_all_mode_lines_reply(buf: &mut [u8], mode_count: usize) {
-    swap_u16(buf, 2);
-    swap_u32(buf, 4);
-    swap_u32(buf, 8); // modecount
-    let mode_size = size_of::<<WireModeInfo as Serialize>::Bytes>();
-    let header_bytes = 32;
-    for i in 0..mode_count {
-        byteswap_mode_info(buf, header_bytes + i * mode_size);
-    }
-}
-
-/// ModeInfo (48 bytes): [dotclock:u32, hdisplay:u16, hsyncstart:u16,
-///                       hsyncend:u16, htotal:u16, hskew:u32,
-///                       vdisplay:u16, vsyncstart:u16, vsyncend:u16,
-///                       vtotal:u16, pad:4, flags:u32, pad:12,
-///                       privsize:u32]
-fn byteswap_mode_info(buf: &mut [u8], off: usize) {
-    swap_u32(buf, off); // dotclock
-    for i in 0..4 {
-        swap_u16(buf, off + 4 + i * 2); // hdisplay..htotal
-    }
-    swap_u32(buf, off + 12); // hskew (u32)
-    for i in 0..4 {
-        swap_u16(buf, off + 16 + i * 2); // vdisplay..vtotal
-    }
-    swap_u32(buf, off + 28); // flags
-    swap_u32(buf, off + 44); // privsize
-}
-
-/// GetDotClocksReply: [type:1, pad:1, sequence:u16, length:u32,
-///                     flags:u32, clocks:u32, maxclocks:u32, pad:12,
-///                     clock:[u32]]
-fn byteswap_get_dot_clocks_reply(buf: &mut [u8], clock_count: usize) {
-    swap_u16(buf, 2);
-    swap_u32(buf, 4);
-    swap_u32(buf, 8); // flags
-    swap_u32(buf, 12); // clocks
-    swap_u32(buf, 16); // maxclocks
-    swap_u32_array(buf, 32, clock_count);
-}
-
-/// GetViewPortReply: [type:1, pad:1, sequence:u16, length:u32,
-///                    x:u32, y:u32, pad:16]
-fn byteswap_get_view_port_reply(buf: &mut [u8]) {
-    swap_u16(buf, 2);
-    swap_u32(buf, 4);
-    swap_u32(buf, 8);
-    swap_u32(buf, 12);
-}
-
-/// GetGammaReply: [type:1, pad:1, sequence:u16, length:u32,
-///                 red:u32, green:u32, blue:u32, pad:12]
-fn byteswap_get_gamma_reply(buf: &mut [u8]) {
-    swap_u16(buf, 2);
-    swap_u32(buf, 4);
-    swap_u32(buf, 8);
-    swap_u32(buf, 12);
-    swap_u32(buf, 16);
-}
-
-/// GetGammaRampReply: [type:1, pad:1, sequence:u16, length:u32,
-///                     size:u16, pad:22, red:[u16], green:[u16],
-///                     blue:[u16]] where each channel is
-///                     `(size + 1) & !1` u16s long.
-fn byteswap_get_gamma_ramp_reply(buf: &mut [u8], channel_len: usize) {
-    swap_u16(buf, 2);
-    swap_u32(buf, 4);
-    swap_u16(buf, 8); // size
-    let header_bytes = 32;
-    for channel in 0..3 {
-        let base = header_bytes + channel * channel_len * 2;
-        for i in 0..channel_len {
-            swap_u16(buf, base + i * 2);
-        }
-    }
-}
-
-/// GetGammaRampSizeReply: [type:1, pad:1, sequence:u16, length:u32,
-///                         size:u16, pad:22]
-fn byteswap_get_gamma_ramp_size_reply(buf: &mut [u8]) {
-    swap_u16(buf, 2);
-    swap_u32(buf, 4);
-    swap_u16(buf, 8);
+    let length_bytes = match byte_order {
+        ByteOrder::Lsb => length.to_le_bytes(),
+        ByteOrder::Msb => length.to_be_bytes(),
+    };
+    bytes[4..8].copy_from_slice(&length_bytes);
 }

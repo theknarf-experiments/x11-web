@@ -2,10 +2,23 @@
 //! event broadcasting, atom interning.
 
 use uuid::Uuid;
+use x11rb_protocol::x11_utils::ByteOrder;
 
 use super::ClientState;
 
 impl ClientState {
+    /// Convert the per-client `msb_first` bool into the typed [`ByteOrder`]
+    /// expected by `TryParseEndian` / `SerializeEndian`. Use this whenever
+    /// driving the generator-emitted endian-aware parse or serialise paths.
+    #[inline]
+    pub(crate) fn byte_order(&self) -> ByteOrder {
+        if self.msb_first {
+            ByteOrder::Msb
+        } else {
+            ByteOrder::Lsb
+        }
+    }
+
     // -----------------------------------------------------------------------
     // Resource limit checks
     // -----------------------------------------------------------------------
