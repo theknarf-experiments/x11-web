@@ -1,0 +1,141 @@
+--- a/src/x11_utils.rs
++++ b/src/x11_utils.rs
+@@ -313,6 +313,53 @@
+     fn serialize_into(&self, bytes: &mut Vec<u8>);
+ }
+ 
++/// Wire byte order, used when an X11 server has to parse / serialise on
++/// behalf of a specific client. Upstream's `TryParse` / `Serialize` are
++/// hard-coded to host-native endianness (LSB on x86/ARM) because x11rb is
++/// a client library that always controls both ends; this enum + the
++/// `TryParseEndian` / `SerializeEndian` traits below extend the framework
++/// so a server can speak either order without re-emitting hand-coded
++/// byte-swappers per request.
++#[derive(Copy, Clone, Debug, PartialEq, Eq)]
++pub enum ByteOrder {
++    /// Least-significant-byte-first (little-endian).
++    Lsb,
++    /// Most-significant-byte-first (big-endian).
++    Msb,
++}
++
++impl ByteOrder {
++    /// `ByteOrder::Lsb` on little-endian hosts, `ByteOrder::Msb` on
++    /// big-endian hosts. Matches what plain `TryParse` / `Serialize` use.
++    pub const NATIVE: ByteOrder = if cfg!(target_endian = "little") {
++        ByteOrder::Lsb
++    } else {
++        ByteOrder::Msb
++    };
++}
++
++/// A type implementing this trait can be parsed from raw bytes in a
++/// caller-chosen byte order. Implementations are generated alongside the
++/// host-endian `TryParse` impls.
++pub trait TryParseEndian: Sized {
++    /// Parse `value` with the given byte order, returning the parsed value
++    /// plus the remaining bytes.
++    fn try_parse_endian(value: &[u8], endian: ByteOrder) -> Result<(Self, &[u8]), ParseError>;
++}
++
++/// A type implementing this trait can be serialised into raw bytes in a
++/// caller-chosen byte order.
++pub trait SerializeEndian {
++    /// Serialise this value into a fresh `Vec<u8>` in the given byte order.
++    fn serialize_endian(&self, endian: ByteOrder) -> Vec<u8> {
++        let mut bytes = Vec::new();
++        self.serialize_endian_into(&mut bytes, endian);
++        bytes
++    }
++    /// Serialise this value, appending into the given `Vec<u8>`.
++    fn serialize_endian_into(&self, bytes: &mut Vec<u8>, endian: ByteOrder);
++}
++
+ // Now implement TryParse and Serialize for some primitive data types that we need.
+ 
+ macro_rules! implement_try_parse {
+@@ -386,6 +433,84 @@
+ forward_float!(f32: u32);
+ forward_float!(f64: u64);
+ 
++// --- endian-aware versions of the primitive impls -------------------------
++
++macro_rules! implement_try_parse_endian {
++    ($t:ty) => {
++        impl TryParseEndian for $t {
++            fn try_parse_endian(
++                value: &[u8],
++                endian: ByteOrder,
++            ) -> Result<(Self, &[u8]), ParseError> {
++                let len = core::mem::size_of::<$t>();
++                let bytes: [u8; core::mem::size_of::<$t>()] = value
++                    .get(..len)
++                    .ok_or(ParseError::InsufficientData)?
++                    .try_into()
++                    .unwrap();
++                let v = match endian {
++                    ByteOrder::Lsb => <$t>::from_le_bytes(bytes),
++                    ByteOrder::Msb => <$t>::from_be_bytes(bytes),
++                };
++                Ok((v, &value[len..]))
++            }
++        }
++    };
++}
++
++macro_rules! implement_serialize_endian {
++    ($t:ty) => {
++        impl SerializeEndian for $t {
++            fn serialize_endian_into(&self, bytes: &mut Vec<u8>, endian: ByteOrder) {
++                match endian {
++                    ByteOrder::Lsb => bytes.extend_from_slice(&self.to_le_bytes()),
++                    ByteOrder::Msb => bytes.extend_from_slice(&self.to_be_bytes()),
++                }
++            }
++        }
++    };
++}
++
++macro_rules! forward_float_endian {
++    ($from:ty: $to:ty) => {
++        impl TryParseEndian for $from {
++            fn try_parse_endian(
++                value: &[u8],
++                endian: ByteOrder,
++            ) -> Result<(Self, &[u8]), ParseError> {
++                let (data, remaining) = <$to>::try_parse_endian(value, endian)?;
++                Ok((<$from>::from_bits(data), remaining))
++            }
++        }
++        impl SerializeEndian for $from {
++            fn serialize_endian_into(&self, bytes: &mut Vec<u8>, endian: ByteOrder) {
++                self.to_bits().serialize_endian_into(bytes, endian);
++            }
++        }
++    };
++}
++
++implement_try_parse_endian!(u8);
++implement_try_parse_endian!(i8);
++implement_try_parse_endian!(u16);
++implement_try_parse_endian!(i16);
++implement_try_parse_endian!(u32);
++implement_try_parse_endian!(i32);
++implement_try_parse_endian!(u64);
++implement_try_parse_endian!(i64);
++
++implement_serialize_endian!(u8);
++implement_serialize_endian!(i8);
++implement_serialize_endian!(u16);
++implement_serialize_endian!(i16);
++implement_serialize_endian!(u32);
++implement_serialize_endian!(i32);
++implement_serialize_endian!(u64);
++implement_serialize_endian!(i64);
++
++forward_float_endian!(f32: u32);
++forward_float_endian!(f64: u64);
++
+ #[cfg(all(test, feature = "std"))]
+ mod float_tests {
+     use super::{Serialize, TryParse};
