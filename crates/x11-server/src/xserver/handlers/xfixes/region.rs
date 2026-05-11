@@ -404,7 +404,7 @@ pub(crate) fn handle_set_window_shape_region(
     if data.len() < 20 {
         return Vec::new();
     }
-    let req = parse_or_void!(SetWindowShapeRegionRequest, data);
+    let req = parse_or_void!(SetWindowShapeRegionRequest, data, state);
     let window_id = req.dest;
     let kind: u8 = req.dest_kind.into();
     let x_offset = req.x_offset;

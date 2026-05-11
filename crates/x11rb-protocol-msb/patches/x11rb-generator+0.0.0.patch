@@ -1,5 +1,5 @@
---- a/src/generator/namespace/parse.rs	2026-05-11 20:02:49.199260847 +0200
-+++ b/src/generator/namespace/parse.rs	2026-05-11 20:02:49.203260871 +0200
+--- a/src/generator/namespace/parse.rs	2026-05-11 20:55:42.135553190 +0200
++++ b/src/generator/namespace/parse.rs	2026-05-11 20:55:42.139553217 +0200
 @@ -5,6 +5,11 @@
      Output,
  };
@@ -182,8 +182,8 @@
  }
  
  fn emit_value_post_parse(type_: &xcbdefs::FieldValueType, var_name: &str, out: &mut Output) {
---- a/src/generator/namespace/struct_type.rs	2026-05-11 20:02:49.199260847 +0200
-+++ b/src/generator/namespace/struct_type.rs	2026-05-11 20:02:49.203260871 +0200
+--- a/src/generator/namespace/struct_type.rs	2026-05-11 20:55:42.135553190 +0200
++++ b/src/generator/namespace/struct_type.rs	2026-05-11 20:55:42.139553217 +0200
 @@ -141,6 +141,7 @@
                          "remaining",
                          FieldContainer::Other,
@@ -443,8 +443,8 @@
                  );
              }
          });
---- a/src/generator/namespace/switch.rs	2026-05-11 20:02:49.199260847 +0200
-+++ b/src/generator/namespace/switch.rs	2026-05-11 20:02:49.203260871 +0200
+--- a/src/generator/namespace/switch.rs	2026-05-11 20:55:42.135553190 +0200
++++ b/src/generator/namespace/switch.rs	2026-05-11 20:55:42.139553217 +0200
 @@ -483,6 +483,7 @@
                                          "remaining",
                                          FieldContainer::Other,
@@ -598,8 +598,8 @@
  }
  
  pub(super) fn generate_switch(
---- a/src/generator/namespace/header.rs	2026-05-11 20:02:49.199260847 +0200
-+++ b/src/generator/namespace/header.rs	2026-05-11 20:02:49.203260871 +0200
+--- a/src/generator/namespace/header.rs	2026-05-11 20:55:42.135553190 +0200
++++ b/src/generator/namespace/header.rs	2026-05-11 20:55:42.139553217 +0200
 @@ -74,7 +74,7 @@
      outln!(out, "#[allow(unused_imports)]");
      outln!(
@@ -609,8 +609,8 @@
      );
      if mode == Mode::X11rb {
          outln!(out, "use std::io::IoSlice;");
---- a/src/generator/namespace/mod.rs	2026-05-11 20:02:49.199260847 +0200
-+++ b/src/generator/namespace/mod.rs	2026-05-11 20:02:49.203260871 +0200
+--- a/src/generator/namespace/mod.rs	2026-05-11 20:55:42.135553190 +0200
++++ b/src/generator/namespace/mod.rs	2026-05-11 20:55:42.139553217 +0200
 @@ -457,6 +457,7 @@
                              "remaining",
                              FieldContainer::Other,
@@ -696,8 +696,8 @@
  
          let mut events_with_from = HashSet::new();
  
---- a/src/generator/namespace/request.rs	2026-05-11 20:02:49.199260847 +0200
-+++ b/src/generator/namespace/request.rs	2026-05-11 20:02:49.203260871 +0200
+--- a/src/generator/namespace/request.rs	2026-05-11 20:55:42.135553190 +0200
++++ b/src/generator/namespace/request.rs	2026-05-11 20:55:42.139553217 +0200
 @@ -681,6 +681,7 @@
                                          false,
                                          &bytes_name,
@@ -706,16 +706,68 @@
                                      );
                                  });
                                  outln!(tmp_out, "}}");
-@@ -997,6 +998,7 @@
+@@ -936,14 +937,23 @@
+                 lifetime = parse_lifetime_block,
+             );
+         } else {
++            // Emit the endian-aware variant as the primary body; the
++            // host-native `try_parse_request` becomes a thin delegate.
+             outln!(
+                 out,
+-                "pub fn try_parse_request(header: RequestHeader, value: &{lifetime}[u8]) -> \
+-                 Result<Self, ParseError> {{",
++                "pub fn try_parse_endian_request(header: RequestHeader, value: &{lifetime}[u8], \
++                 endian: ByteOrder) -> Result<Self, ParseError> {{",
+                 lifetime = parse_lifetime_block,
+             );
+         }
++        let body_uses_endian = !gathered.has_fds();
+         out.indented(|out| {
++            if body_uses_endian {
++                // Always touch `endian` so requests whose body is all bytes
++                // (or all enums dispatched separately) don't trip
++                // `#![deny(unused)]` on the parameter.
++                outln!(out, "let _ = endian;");
++            }
+             if ns.ext_info.is_some() {
+                 // We don't have enough information here to validate the major opcode, that requires
+                 // state from the connection.
+@@ -997,6 +1007,7 @@
                      from,
                      FieldContainer::Request(name.to_string()),
                      out,
-+                    false,
++                    body_uses_endian,
                  );
                  if !field
                      .name()
---- a/src/generator/namespace/serialize.rs	2026-05-11 20:02:49.199260847 +0200
-+++ b/src/generator/namespace/serialize.rs	2026-05-11 20:02:49.203260871 +0200
+@@ -1056,6 +1067,25 @@
+             outln!(out, "{})", members_end);
+         });
+         outln!(out, "}}");
++        // Emit the host-native `try_parse_request` as a thin delegate
++        // to the endian-aware body above. The Request-enum dispatch
++        // table calls `try_parse_request(header, remaining)` so this
++        // method must stay available. The FD case has its own
++        // `try_parse_request_fd` signature and skips endian for now.
++        if !gathered.has_fds() {
++            outln!(out, "#[cfg(feature = \"request-parsing\")]");
++            outln!(
++                out,
++                "pub fn try_parse_request(header: RequestHeader, value: &{lifetime}[u8]) -> \
++                 Result<Self, ParseError> {{",
++                lifetime = parse_lifetime_block,
++            );
++            outln!(
++                out.indent(),
++                "Self::try_parse_endian_request(header, value, ByteOrder::NATIVE)",
++            );
++            outln!(out, "}}");
++        }
+         if has_cows {
+             outln!(out, "/// Clone all borrowed data in this {}Request.", name);
+             outln!(
+--- a/src/generator/namespace/serialize.rs	2026-05-11 20:55:42.135553190 +0200
++++ b/src/generator/namespace/serialize.rs	2026-05-11 20:55:42.139553217 +0200
 @@ -154,6 +154,9 @@
      }
  }

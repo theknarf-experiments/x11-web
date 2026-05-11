@@ -90,7 +90,7 @@ macro_rules! parse_minor {
         )
     };
     ($T:ty, $data:ident, $state:ident, $seq:ident, $major:expr, $minor:expr, $header:expr) => {
-        match <$T>::try_parse_request($header, &$data[4..]) {
+        match <$T>::try_parse_endian_request($header, &$data[4..], $state.byte_order()) {
             Ok(r) => r,
             Err(_) => {
                 return crate::xserver::core::build_error(
@@ -111,8 +111,12 @@ pub(crate) use parse_minor;
 /// reply-less extension requests where a malformed packet should be
 /// silently dropped rather than reported as a protocol error.
 macro_rules! parse_or_void {
-    ($T:ty, $data:ident) => {
-        match <$T>::try_parse_request(crate::xserver::request::request_header($data), &$data[4..]) {
+    ($T:ty, $data:ident, $state:ident) => {
+        match <$T>::try_parse_endian_request(
+            crate::xserver::request::request_header($data),
+            &$data[4..],
+            $state.byte_order(),
+        ) {
             Ok(r) => r,
             Err(_) => return Vec::new(),
         }

@@ -1076,11 +1076,9 @@ pub(crate) async fn handle_client(
                         };
                         request_data.extend_from_slice(&len_field.to_le_bytes());
                         request_data.extend_from_slice(&raw[8..]);
-                        // MSB-first clients send multi-byte fields in
-                        // big-endian; our handlers expect LE.
-                        if state.msb_first {
-                            super::byteswap::byteswap_request_in_place(&mut request_data);
-                        }
+                        // MSB-first requests are now parsed directly via the
+                        // codegen-emitted `try_parse_endian_request`; no
+                        // pre-swap needed here.
                         let mut response = handle_request(&mut state, &request_data);
                         // Errors are built in canonical LE; swap into MSB
                         // for clients that negotiated big-endian byte order.
@@ -1105,11 +1103,9 @@ pub(crate) async fn handle_client(
                     let mut request_data: Vec<u8> = pending.drain(..req_len_bytes).collect();
                     state.sequence = state.sequence.wrapping_add(1);
 
-                    // MSB-first clients send multi-byte fields in big-endian;
-                    // our handlers (and x11rb_protocol parsers) expect LE.
-                    if state.msb_first {
-                        super::byteswap::byteswap_request_in_place(&mut request_data);
-                    }
+                    // MSB-first requests are parsed in place via the
+                    // codegen-emitted `try_parse_endian_request`; no
+                    // pre-swap pass needed.
 
                     // RECORD: intercept request from this client
                     state.record_intercept_request(&request_data);

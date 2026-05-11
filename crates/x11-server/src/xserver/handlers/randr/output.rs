@@ -96,7 +96,7 @@ pub(crate) fn handle_configure_output_property(
     _seq: u16,
 ) -> Vec<u8> {
     if data.len() >= 14 {
-        let req = parse_or_void!(ConfigureOutputPropertyRequest, data);
+        let req = parse_or_void!(ConfigureOutputPropertyRequest, data, state);
         let output_id = req.output;
         let property_atom = req.property;
         let pending = req.pending;
@@ -124,7 +124,7 @@ pub(crate) fn handle_change_output_property(
     _seq: u16,
 ) -> Vec<u8> {
     if data.len() >= 24 {
-        let req = parse_or_void!(ChangeOutputPropertyRequest, data);
+        let req = parse_or_void!(ChangeOutputPropertyRequest, data, state);
         let output_id = req.output;
         let property = req.property;
         let prop_type = req.type_;
@@ -151,7 +151,7 @@ pub(crate) fn handle_delete_output_property(
     _seq: u16,
 ) -> Vec<u8> {
     if data.len() >= 12 {
-        let req = parse_or_void!(DeleteOutputPropertyRequest, data);
+        let req = parse_or_void!(DeleteOutputPropertyRequest, data, state);
         let output_id = req.output;
         let property = req.property;
         if let Some(output) = state.randr_find_output_mut(output_id) {
@@ -230,7 +230,7 @@ pub(crate) fn handle_create_mode(state: &mut ClientState, data: &[u8], seq: u16)
 /// RRDestroyMode (17).
 pub(crate) fn handle_destroy_mode(state: &mut ClientState, data: &[u8], _seq: u16) -> Vec<u8> {
     if data.len() >= 8 {
-        let req = parse_or_void!(DestroyModeRequest, data);
+        let req = parse_or_void!(DestroyModeRequest, data, state);
         let mode_id = req.mode;
         state.randr_modes.retain(|m| m.id != mode_id);
         debug!("RRDestroyMode mode_id={mode_id}");
@@ -241,7 +241,7 @@ pub(crate) fn handle_destroy_mode(state: &mut ClientState, data: &[u8], _seq: u1
 /// RRAddOutputMode (18).
 pub(crate) fn handle_add_output_mode(state: &mut ClientState, data: &[u8], _seq: u16) -> Vec<u8> {
     if data.len() >= 12 {
-        let req = parse_or_void!(AddOutputModeRequest, data);
+        let req = parse_or_void!(AddOutputModeRequest, data, state);
         let output_id = req.output;
         let mode_id = req.mode;
         if let Some(output) = state.randr_find_output_mut(output_id) {
@@ -261,7 +261,7 @@ pub(crate) fn handle_delete_output_mode(
     _seq: u16,
 ) -> Vec<u8> {
     if data.len() >= 12 {
-        let req = parse_or_void!(DeleteOutputModeRequest, data);
+        let req = parse_or_void!(DeleteOutputModeRequest, data, state);
         let output_id = req.output;
         let mode_id = req.mode;
         if let Some(output) = state.randr_find_output_mut(output_id) {
@@ -279,7 +279,7 @@ pub(crate) fn handle_set_output_primary(
     _seq: u16,
 ) -> Vec<u8> {
     if data.len() >= 12 {
-        let req = parse_or_void!(SetOutputPrimaryRequest, data);
+        let req = parse_or_void!(SetOutputPrimaryRequest, data, state);
         let output_id = req.output;
         state.randr_primary_output = output_id;
         debug!("RRSetOutputPrimary output={output_id}");
@@ -443,7 +443,7 @@ pub(crate) fn handle_get_monitors(state: &mut ClientState, _data: &[u8], seq: u1
 /// RRSetMonitor (43).
 pub(crate) fn handle_set_monitor(state: &mut ClientState, data: &[u8], _seq: u16) -> Vec<u8> {
     if data.len() >= 28 {
-        let req = parse_or_void!(SetMonitorRequest, data);
+        let req = parse_or_void!(SetMonitorRequest, data, state);
         let mi = &req.monitorinfo;
         let name_atom = mi.name;
         let primary = mi.primary;
@@ -474,7 +474,7 @@ pub(crate) fn handle_set_monitor(state: &mut ClientState, data: &[u8], _seq: u16
 /// RRDeleteMonitor (44).
 pub(crate) fn handle_delete_monitor(state: &mut ClientState, data: &[u8], _seq: u16) -> Vec<u8> {
     if data.len() >= 12 {
-        let req = parse_or_void!(DeleteMonitorRequest, data);
+        let req = parse_or_void!(DeleteMonitorRequest, data, state);
         let name_atom = req.name;
         state.randr_monitors.retain(|m| m.name_atom != name_atom);
         debug!("RRDeleteMonitor name_atom={name_atom}");
