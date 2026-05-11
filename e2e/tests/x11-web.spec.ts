@@ -4485,7 +4485,7 @@ test("window gravity attributes are stored and queryable", async ({
 // -------------------------------------------------------------------
 // Protocol robustness: SHAPE + XFIXES + Composite together
 // -------------------------------------------------------------------
-test.skip("multiple extensions work together without crashes", async ({
+test("multiple extensions work together without crashes", async ({
 	sidecarContainer,
 }) => {
 	const result = await sidecarContainer.exec([

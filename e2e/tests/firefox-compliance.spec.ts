@@ -235,10 +235,12 @@ test("gtk3-demo keyboard navigation moves list selection", async ({
 // silently no-op because they're delivered to focus_window which doesn't
 // match the cursor's actual visual target.
 //
-// SKIPPED: even with the dispatch fix in place, GTK3 doesn't react to
-// the synthesized clicks — likely needs Enter/Leave crossing events
-// generated alongside the motion-then-click sequence so the toolkit
-// updates its hovered-widget state before the press fires.
+// XTEST FakeInput motion now emits Enter/Leave crossings alongside
+// MotionNotify (commit 22e34ad), but synthesised clicks on gtk3-demo
+// still don't change the canvas hash — the toolkit/canvas pipeline
+// needs more than just the crossing events.  Leaving skipped pending
+// a deeper look at whether gtk3-demo is responding to the press at
+// all and the frontend just isn't seeing the repaint.
 test.skip("xdotool clicks reach the window under the pointer", async ({
 	page,
 	sidecarContainer,

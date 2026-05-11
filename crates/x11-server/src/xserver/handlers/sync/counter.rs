@@ -18,7 +18,8 @@ pub(crate) fn list_system_counters(state: &mut ClientState, seq: u16) -> Vec<u8>
     debug!("SYNC ListSystemCounters");
     let counter_name = b"SERVERTIME";
     let name_len = counter_name.len();
-    let name_pad = (4 - (name_len % 4)) % 4;
+    // Per SYNC spec: p = pad(n+2), i.e. pad so (name_len + 2) + p ≡ 0 mod 4.
+    let name_pad = (4 - ((name_len + 2) % 4)) % 4;
     let entry_size = 4 + 4 + 4 + 2 + name_len + name_pad;
     let extra = entry_size;
     let mut reply = ReplyBuf::with_extra(seq, extra, state.msb_first).set_u32(8, 1u32); // num_counters = 1
