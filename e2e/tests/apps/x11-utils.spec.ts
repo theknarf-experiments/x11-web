@@ -433,55 +433,24 @@ test.describe.serial("App compatibility: real-app smoke (page-driven)", () => {
 		expect(hashAfter).not.toBe(hashBefore);
 	});
 
-	// Spawning xterm + xclip and watching the CLIPBOARD round-trip via
-	// the frontend canvas. The protocol-level coverage of CLIPBOARD
-	// lives in xts.spec.ts ("multi-client: two xclip processes share
-	// clipboard data") which doesn't depend on the page being mounted.
-	test.skip("multi-app clipboard round-trip via xclip", async ({
-		page,
-		sidecarContainer,
-		frontendUrl,
-	}) => {
+	test("multi-app clipboard round-trip via xclip", async ({ sidecarContainer }) => {
 		test.setTimeout(60_000);
 
-		const check = await sidecarContainer.exec([
-			"bash",
-			"-c",
-			"command -v xclip &>/dev/null && echo 'AVAILABLE' || echo 'MISSING'",
-		]);
-		if (check.output.trim().includes("MISSING")) {
-			test.skip();
-			return;
-		}
-
-		await page.goto(frontendUrl);
-		await waitForDock(page);
-
-		const win1 = await spawnApp(page, "-fn fixed -geometry 60x10", "xterm");
-		const canvas1 = win1.locator('[data-testid="x11-canvas"]');
-		await expect(canvas1).toBeVisible();
-		await waitForCanvasStable(canvas1, { stableMs: 2000 });
-
-		const win2 = await spawnApp(page, "-fn fixed -geometry 60x10", "xterm");
-		const canvas2 = win2.locator('[data-testid="x11-canvas"]');
-		await expect(canvas2).toBeVisible();
-		await waitForCanvasStable(canvas2, { stableMs: 2000 });
-
 		const clipboardContent = "x11web-clipboard-test-" + Date.now();
-		await sidecarContainer.exec([
-			"bash",
-			"-c",
-			`echo -n "${clipboardContent}" | DISPLAY=:99 xclip -selection clipboard`,
+		// Set the CLIPBOARD selection in one xclip process (which must
+		// stay alive to act as the owner) and read it back from another.
+		const result = await sidecarContainer.exec([
+			"bash", "-c", [
+				"export DISPLAY=:99",
+				`echo -n "${clipboardContent}" | xclip -selection clipboard -i &`,
+				"OWNER_PID=$!",
+				"sleep 1",
+				"OUT=$(xclip -selection clipboard -o 2>&1)",
+				"echo \"got=$OUT\"",
+				"kill $OWNER_PID 2>/dev/null; wait 2>/dev/null; true",
+			].join("\n"),
 		]);
-		await page.waitForTimeout(1000);
-
-		const readResult = await sidecarContainer.exec([
-			"bash",
-			"-c",
-			"DISPLAY=:99 xclip -selection clipboard -o 2>&1",
-		]);
-		console.log(`Clipboard read: "${readResult.output.trim()}"`);
-		expect(readResult.output.trim()).toBe(clipboardContent);
+		expect(result.output).toContain(`got=${clipboardContent}`);
 	});
 
 	// xclock spawn (after xeyes) isn't producing a window-frame in the
