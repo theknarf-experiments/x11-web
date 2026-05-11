@@ -119,14 +119,6 @@ test.describe("App compatibility: Xdnd drag-and-drop protocol", () => {
 test.describe("App compatibility: clipboard between apps", () => {
 	test("xclip sets clipboard and xsel reads it back", async ({ sidecarContainer }) => {
 		test.setTimeout(30_000);
-		const whichClip = await sidecarContainer.exec([
-			"bash", "-c",
-			"which xclip 2>/dev/null && which xsel 2>/dev/null || echo NONE",
-		]);
-		if (whichClip.output.trim() === "NONE") {
-			test.skip();
-			return;
-		}
 		const result = await sidecarContainer.exec([
 			"bash", "-c", [
 				"export DISPLAY=:99",
