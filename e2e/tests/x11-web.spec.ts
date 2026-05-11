@@ -3560,6 +3560,11 @@ print('fuzz-complete')
 // -------------------------------------------------------------------
 // MSB-first (big-endian) byte order client test
 // -------------------------------------------------------------------
+// TODO: msb_first_client_connect_exchange.py reads the last 16 bytes of
+// /tmp/.x11-web-Xauthority and presents it as the cookie. The server
+// rejects (closes the connection with no reply written), so either our
+// MSB-first auth path is wrong or the cookie-extraction heuristic is.
+// Investigate before re-enabling.
 test.skip("MSB-first client connects and exchanges data", async ({
 	sidecarContainer,
 }) => {
@@ -4340,7 +4345,7 @@ test("XFIXES version and cursor operations are supported", async ({
 // -------------------------------------------------------------------
 // DBE (Double Buffer): extension is advertised
 // -------------------------------------------------------------------
-test.skip("DOUBLE-BUFFER extension is advertised", async ({ sidecarContainer }) => {
+test("DOUBLE-BUFFER extension is advertised", async ({ sidecarContainer }) => {
 	const result = await sidecarContainer.exec([
 		"bash",
 		"-c",
@@ -4643,7 +4648,7 @@ test("RECORD extension is queryable via xdpyinfo", async ({
 // -------------------------------------------------------------------
 // SECURITY: extension queryable and auth present
 // -------------------------------------------------------------------
-test.skip("SECURITY extension is listed and auth cookie exists", async ({
+test("SECURITY extension is listed and auth cookie exists", async ({
 	sidecarContainer,
 }) => {
 	const result = await sidecarContainer.exec([
@@ -4652,6 +4657,7 @@ test.skip("SECURITY extension is listed and auth cookie exists", async ({
 		[
 			"set -e",
 			"export DISPLAY=:99",
+			"export XAUTHORITY=/tmp/.x11-web-Xauthority",
 			'if xdpyinfo 2>&1 | grep -q "SECURITY"; then',
 			'  echo "security-found"',
 			"fi",
