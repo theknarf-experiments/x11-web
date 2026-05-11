@@ -8,118 +8,55 @@ use std::ptr;
 
 use super::gl_generated;
 
+/// Thin forwarder for trivial GL calls.
+macro_rules! gl_thin {
+    ($snake:ident -> $camel:ident($($p:ident: $t:ty),* $(,)?)) => {
+        pub fn $snake($($p: $t),*) {
+            unsafe { gl_generated::$camel($($p),*) }
+        }
+    };
+}
+
 // ===== Original GL 1.0-1.1 wrappers (unchanged API) =====
 
 /// Execute a GL Clear call.
-pub fn gl_clear(mask: u32) {
-    unsafe {
-        gl_generated::Clear(mask);
-    }
-}
+gl_thin!(gl_clear -> Clear(mask: u32));
 
 /// Execute a GL ClearColor call.
-pub fn gl_clear_color(r: f32, g: f32, b: f32, a: f32) {
-    unsafe {
-        gl_generated::ClearColor(r, g, b, a);
-    }
-}
+gl_thin!(gl_clear_color -> ClearColor(r: f32, g: f32, b: f32, a: f32));
 
 /// Execute a GL Viewport call.
-pub fn gl_viewport(x: i32, y: i32, w: i32, h: i32) {
-    unsafe {
-        gl_generated::Viewport(x, y, w, h);
-    }
-}
+gl_thin!(gl_viewport -> Viewport(x: i32, y: i32, w: i32, h: i32));
 
-pub fn gl_begin(mode: u32) {
-    unsafe {
-        gl_generated::Begin(mode);
-    }
-}
+gl_thin!(gl_begin -> Begin(mode: u32));
 
-pub fn gl_end() {
-    unsafe {
-        gl_generated::End();
-    }
-}
+gl_thin!(gl_end -> End());
 
-pub fn gl_vertex2f(x: f32, y: f32) {
-    unsafe {
-        gl_generated::Vertex2f(x, y);
-    }
-}
+gl_thin!(gl_vertex2f -> Vertex2f(x: f32, y: f32));
 
-pub fn gl_vertex3f(x: f32, y: f32, z: f32) {
-    unsafe {
-        gl_generated::Vertex3f(x, y, z);
-    }
-}
+gl_thin!(gl_vertex3f -> Vertex3f(x: f32, y: f32, z: f32));
 
-pub fn gl_vertex4f(x: f32, y: f32, z: f32, w: f32) {
-    unsafe {
-        gl_generated::Vertex4f(x, y, z, w);
-    }
-}
+gl_thin!(gl_vertex4f -> Vertex4f(x: f32, y: f32, z: f32, w: f32));
 
-pub fn gl_vertex2i(x: i32, y: i32) {
-    unsafe {
-        gl_generated::Vertex2i(x, y);
-    }
-}
+gl_thin!(gl_vertex2i -> Vertex2i(x: i32, y: i32));
 
-pub fn gl_vertex3i(x: i32, y: i32, z: i32) {
-    unsafe {
-        gl_generated::Vertex3i(x, y, z);
-    }
-}
+gl_thin!(gl_vertex3i -> Vertex3i(x: i32, y: i32, z: i32));
 
-pub fn gl_color3f(r: f32, g: f32, b: f32) {
-    unsafe {
-        gl_generated::Color3f(r, g, b);
-    }
-}
+gl_thin!(gl_color3f -> Color3f(r: f32, g: f32, b: f32));
 
-pub fn gl_color4f(r: f32, g: f32, b: f32, a: f32) {
-    unsafe {
-        gl_generated::Color4f(r, g, b, a);
-    }
-}
+gl_thin!(gl_color4f -> Color4f(r: f32, g: f32, b: f32, a: f32));
 
-pub fn gl_color3ub(r: u8, g: u8, b: u8) {
-    unsafe {
-        gl_generated::Color3ub(r, g, b);
-    }
-}
+gl_thin!(gl_color3ub -> Color3ub(r: u8, g: u8, b: u8));
 
-pub fn gl_color4ub(r: u8, g: u8, b: u8, a: u8) {
-    unsafe {
-        gl_generated::Color4ub(r, g, b, a);
-    }
-}
+gl_thin!(gl_color4ub -> Color4ub(r: u8, g: u8, b: u8, a: u8));
 
-pub fn gl_flush() {
-    unsafe {
-        gl_generated::Flush();
-    }
-}
+gl_thin!(gl_flush -> Flush());
 
-pub fn gl_finish() {
-    unsafe {
-        gl_generated::Finish();
-    }
-}
+gl_thin!(gl_finish -> Finish());
 
-pub fn gl_enable(cap: u32) {
-    unsafe {
-        gl_generated::Enable(cap);
-    }
-}
+gl_thin!(gl_enable -> Enable(cap: u32));
 
-pub fn gl_disable(cap: u32) {
-    unsafe {
-        gl_generated::Disable(cap);
-    }
-}
+gl_thin!(gl_disable -> Disable(cap: u32));
 
 pub fn gl_gen_textures(n: i32, textures: &mut [u32]) {
     unsafe {
@@ -133,11 +70,7 @@ pub fn gl_delete_textures(textures: &[u32]) {
     }
 }
 
-pub fn gl_bind_texture(target: u32, texture: u32) {
-    unsafe {
-        gl_generated::BindTexture(target, texture);
-    }
-}
+gl_thin!(gl_bind_texture -> BindTexture(target: u32, texture: u32));
 
 pub fn gl_tex_image_2d(
     target: u32,
@@ -190,11 +123,7 @@ pub fn gl_tex_image_2d_null(
     }
 }
 
-pub fn gl_tex_parameteri(target: u32, pname: u32, param: i32) {
-    unsafe {
-        gl_generated::TexParameteri(target, pname, param);
-    }
-}
+gl_thin!(gl_tex_parameteri -> TexParameteri(target: u32, pname: u32, param: i32));
 
 pub fn gl_tex_sub_image_2d(
     target: u32,
@@ -222,65 +151,25 @@ pub fn gl_tex_sub_image_2d(
     }
 }
 
-pub fn gl_scissor(x: i32, y: i32, w: i32, h: i32) {
-    unsafe {
-        gl_generated::Scissor(x, y, w, h);
-    }
-}
+gl_thin!(gl_scissor -> Scissor(x: i32, y: i32, w: i32, h: i32));
 
-pub fn gl_blend_func(sfactor: u32, dfactor: u32) {
-    unsafe {
-        gl_generated::BlendFunc(sfactor, dfactor);
-    }
-}
+gl_thin!(gl_blend_func -> BlendFunc(sfactor: u32, dfactor: u32));
 
-pub fn gl_depth_func(func: u32) {
-    unsafe {
-        gl_generated::DepthFunc(func);
-    }
-}
+gl_thin!(gl_depth_func -> DepthFunc(func: u32));
 
-pub fn gl_depth_mask(flag: u8) {
-    unsafe {
-        gl_generated::DepthMask(flag);
-    }
-}
+gl_thin!(gl_depth_mask -> DepthMask(flag: u8));
 
-pub fn gl_color_mask(r: u8, g: u8, b: u8, a: u8) {
-    unsafe {
-        gl_generated::ColorMask(r, g, b, a);
-    }
-}
+gl_thin!(gl_color_mask -> ColorMask(r: u8, g: u8, b: u8, a: u8));
 
-pub fn gl_stencil_func(func: u32, ref_: i32, mask: u32) {
-    unsafe {
-        gl_generated::StencilFunc(func, ref_, mask);
-    }
-}
+gl_thin!(gl_stencil_func -> StencilFunc(func: u32, ref_: i32, mask: u32));
 
-pub fn gl_stencil_op(fail: u32, zfail: u32, zpass: u32) {
-    unsafe {
-        gl_generated::StencilOp(fail, zfail, zpass);
-    }
-}
+gl_thin!(gl_stencil_op -> StencilOp(fail: u32, zfail: u32, zpass: u32));
 
-pub fn gl_stencil_mask(mask: u32) {
-    unsafe {
-        gl_generated::StencilMask(mask);
-    }
-}
+gl_thin!(gl_stencil_mask -> StencilMask(mask: u32));
 
-pub fn gl_matrix_mode(mode: u32) {
-    unsafe {
-        gl_generated::MatrixMode(mode);
-    }
-}
+gl_thin!(gl_matrix_mode -> MatrixMode(mode: u32));
 
-pub fn gl_load_identity() {
-    unsafe {
-        gl_generated::LoadIdentity();
-    }
-}
+gl_thin!(gl_load_identity -> LoadIdentity());
 
 pub fn gl_load_matrixf(m: &[f32; 16]) {
     unsafe {
@@ -306,131 +195,47 @@ pub fn gl_mult_matrixd(m: &[f64; 16]) {
     }
 }
 
-pub fn gl_push_matrix() {
-    unsafe {
-        gl_generated::PushMatrix();
-    }
-}
+gl_thin!(gl_push_matrix -> PushMatrix());
 
-pub fn gl_pop_matrix() {
-    unsafe {
-        gl_generated::PopMatrix();
-    }
-}
+gl_thin!(gl_pop_matrix -> PopMatrix());
 
-pub fn gl_ortho(left: f64, right: f64, bottom: f64, top: f64, near: f64, far: f64) {
-    unsafe {
-        gl_generated::Ortho(left, right, bottom, top, near, far);
-    }
-}
+gl_thin!(gl_ortho -> Ortho(left: f64, right: f64, bottom: f64, top: f64, near: f64, far: f64));
 
-pub fn gl_frustum(left: f64, right: f64, bottom: f64, top: f64, near: f64, far: f64) {
-    unsafe {
-        gl_generated::Frustum(left, right, bottom, top, near, far);
-    }
-}
+gl_thin!(gl_frustum -> Frustum(left: f64, right: f64, bottom: f64, top: f64, near: f64, far: f64));
 
-pub fn gl_rotatef(angle: f32, x: f32, y: f32, z: f32) {
-    unsafe {
-        gl_generated::Rotatef(angle, x, y, z);
-    }
-}
+gl_thin!(gl_rotatef -> Rotatef(angle: f32, x: f32, y: f32, z: f32));
 
-pub fn gl_scalef(x: f32, y: f32, z: f32) {
-    unsafe {
-        gl_generated::Scalef(x, y, z);
-    }
-}
+gl_thin!(gl_scalef -> Scalef(x: f32, y: f32, z: f32));
 
-pub fn gl_translatef(x: f32, y: f32, z: f32) {
-    unsafe {
-        gl_generated::Translatef(x, y, z);
-    }
-}
+gl_thin!(gl_translatef -> Translatef(x: f32, y: f32, z: f32));
 
-pub fn gl_normal3f(nx: f32, ny: f32, nz: f32) {
-    unsafe {
-        gl_generated::Normal3f(nx, ny, nz);
-    }
-}
+gl_thin!(gl_normal3f -> Normal3f(nx: f32, ny: f32, nz: f32));
 
-pub fn gl_tex_coord2f(s: f32, t: f32) {
-    unsafe {
-        gl_generated::TexCoord2f(s, t);
-    }
-}
+gl_thin!(gl_tex_coord2f -> TexCoord2f(s: f32, t: f32));
 
-pub fn gl_tex_coord4f(s: f32, t: f32, r: f32, q: f32) {
-    unsafe {
-        gl_generated::TexCoord4f(s, t, r, q);
-    }
-}
+gl_thin!(gl_tex_coord4f -> TexCoord4f(s: f32, t: f32, r: f32, q: f32));
 
-pub fn gl_pixel_storei(pname: u32, param: i32) {
-    unsafe {
-        gl_generated::PixelStorei(pname, param);
-    }
-}
+gl_thin!(gl_pixel_storei -> PixelStorei(pname: u32, param: i32));
 
-pub fn gl_line_width(width: f32) {
-    unsafe {
-        gl_generated::LineWidth(width);
-    }
-}
+gl_thin!(gl_line_width -> LineWidth(width: f32));
 
-pub fn gl_point_size(size: f32) {
-    unsafe {
-        gl_generated::PointSize(size);
-    }
-}
+gl_thin!(gl_point_size -> PointSize(size: f32));
 
-pub fn gl_polygon_mode(face: u32, mode: u32) {
-    unsafe {
-        gl_generated::PolygonMode(face, mode);
-    }
-}
+gl_thin!(gl_polygon_mode -> PolygonMode(face: u32, mode: u32));
 
-pub fn gl_cull_face(mode: u32) {
-    unsafe {
-        gl_generated::CullFace(mode);
-    }
-}
+gl_thin!(gl_cull_face -> CullFace(mode: u32));
 
-pub fn gl_front_face(mode: u32) {
-    unsafe {
-        gl_generated::FrontFace(mode);
-    }
-}
+gl_thin!(gl_front_face -> FrontFace(mode: u32));
 
-pub fn gl_shade_model(mode: u32) {
-    unsafe {
-        gl_generated::ShadeModel(mode);
-    }
-}
+gl_thin!(gl_shade_model -> ShadeModel(mode: u32));
 
-pub fn gl_clear_depth(depth: f64) {
-    unsafe {
-        gl_generated::ClearDepth(depth);
-    }
-}
+gl_thin!(gl_clear_depth -> ClearDepth(depth: f64));
 
-pub fn gl_clear_stencil(s: i32) {
-    unsafe {
-        gl_generated::ClearStencil(s);
-    }
-}
+gl_thin!(gl_clear_stencil -> ClearStencil(s: i32));
 
-pub fn gl_alpha_func(func: u32, ref_: f32) {
-    unsafe {
-        gl_generated::AlphaFunc(func, ref_);
-    }
-}
+gl_thin!(gl_alpha_func -> AlphaFunc(func: u32, ref_: f32));
 
-pub fn gl_hint(target: u32, mode: u32) {
-    unsafe {
-        gl_generated::Hint(target, mode);
-    }
-}
+gl_thin!(gl_hint -> Hint(target: u32, mode: u32));
 
 pub fn gl_get_integerv(pname: u32, params: &mut [i32]) {
     unsafe {
@@ -460,29 +265,13 @@ pub fn gl_get_string(name: u32) -> String {
     }
 }
 
-pub fn gl_rectf(x1: f32, y1: f32, x2: f32, y2: f32) {
-    unsafe {
-        gl_generated::Rectf(x1, y1, x2, y2);
-    }
-}
+gl_thin!(gl_rectf -> Rectf(x1: f32, y1: f32, x2: f32, y2: f32));
 
-pub fn gl_recti(x1: i32, y1: i32, x2: i32, y2: i32) {
-    unsafe {
-        gl_generated::Recti(x1, y1, x2, y2);
-    }
-}
+gl_thin!(gl_recti -> Recti(x1: i32, y1: i32, x2: i32, y2: i32));
 
-pub fn gl_rectd(x1: f64, y1: f64, x2: f64, y2: f64) {
-    unsafe {
-        gl_generated::Rectd(x1, y1, x2, y2);
-    }
-}
+gl_thin!(gl_rectd -> Rectd(x1: f64, y1: f64, x2: f64, y2: f64));
 
-pub fn gl_rects(x1: i16, y1: i16, x2: i16, y2: i16) {
-    unsafe {
-        gl_generated::Rects(x1, y1, x2, y2);
-    }
-}
+gl_thin!(gl_rects -> Rects(x1: i16, y1: i16, x2: i16, y2: i16));
 
 // ===== Additional color variants =====
 
@@ -492,105 +281,33 @@ pub fn gl_color3b(r: i8, g: i8, b: i8) {
         gl_generated::Color3b(r as GLbyte, g as GLbyte, b as GLbyte);
     }
 }
-pub fn gl_color3d(r: f64, g: f64, b: f64) {
-    unsafe {
-        gl_generated::Color3d(r, g, b);
-    }
-}
-pub fn gl_color3i(r: i32, g: i32, b: i32) {
-    unsafe {
-        gl_generated::Color3i(r, g, b);
-    }
-}
-pub fn gl_color3s(r: i16, g: i16, b: i16) {
-    unsafe {
-        gl_generated::Color3s(r, g, b);
-    }
-}
-pub fn gl_color3ui(r: u32, g: u32, b: u32) {
-    unsafe {
-        gl_generated::Color3ui(r, g, b);
-    }
-}
-pub fn gl_color3us(r: u16, g: u16, b: u16) {
-    unsafe {
-        gl_generated::Color3us(r, g, b);
-    }
-}
+gl_thin!(gl_color3d -> Color3d(r: f64, g: f64, b: f64));
+gl_thin!(gl_color3i -> Color3i(r: i32, g: i32, b: i32));
+gl_thin!(gl_color3s -> Color3s(r: i16, g: i16, b: i16));
+gl_thin!(gl_color3ui -> Color3ui(r: u32, g: u32, b: u32));
+gl_thin!(gl_color3us -> Color3us(r: u16, g: u16, b: u16));
 pub fn gl_color4b(r: i8, g: i8, b: i8, a: i8) {
     use gl_generated::types::GLbyte;
     unsafe {
         gl_generated::Color4b(r as GLbyte, g as GLbyte, b as GLbyte, a as GLbyte);
     }
 }
-pub fn gl_color4d(r: f64, g: f64, b: f64, a: f64) {
-    unsafe {
-        gl_generated::Color4d(r, g, b, a);
-    }
-}
-pub fn gl_color4i(r: i32, g: i32, b: i32, a: i32) {
-    unsafe {
-        gl_generated::Color4i(r, g, b, a);
-    }
-}
-pub fn gl_color4s(r: i16, g: i16, b: i16, a: i16) {
-    unsafe {
-        gl_generated::Color4s(r, g, b, a);
-    }
-}
-pub fn gl_color4ui(r: u32, g: u32, b: u32, a: u32) {
-    unsafe {
-        gl_generated::Color4ui(r, g, b, a);
-    }
-}
-pub fn gl_color4us(r: u16, g: u16, b: u16, a: u16) {
-    unsafe {
-        gl_generated::Color4us(r, g, b, a);
-    }
-}
+gl_thin!(gl_color4d -> Color4d(r: f64, g: f64, b: f64, a: f64));
+gl_thin!(gl_color4i -> Color4i(r: i32, g: i32, b: i32, a: i32));
+gl_thin!(gl_color4s -> Color4s(r: i16, g: i16, b: i16, a: i16));
+gl_thin!(gl_color4ui -> Color4ui(r: u32, g: u32, b: u32, a: u32));
+gl_thin!(gl_color4us -> Color4us(r: u16, g: u16, b: u16, a: u16));
 
 // ===== Edge flag / Index / ClearIndex =====
 
-pub fn gl_edge_flag(flag: u8) {
-    unsafe {
-        gl_generated::EdgeFlag(flag);
-    }
-}
-pub fn gl_indexd(c: f64) {
-    unsafe {
-        gl_generated::Indexd(c);
-    }
-}
-pub fn gl_indexf(c: f32) {
-    unsafe {
-        gl_generated::Indexf(c);
-    }
-}
-pub fn gl_indexi(c: i32) {
-    unsafe {
-        gl_generated::Indexi(c);
-    }
-}
-pub fn gl_indexs(c: i16) {
-    unsafe {
-        gl_generated::Indexs(c);
-    }
-}
-pub fn gl_indexub(c: u8) {
-    unsafe {
-        gl_generated::Indexub(c);
-    }
-}
-pub fn gl_index_mask(mask: u32) {
-    unsafe {
-        gl_generated::IndexMask(mask);
-    }
-}
-pub fn gl_clear_index(c: f32) {
-    unsafe {
-        gl_generated::ClearIndex(c);
-    }
-}
+gl_thin!(gl_edge_flag -> EdgeFlag(flag: u8));
+gl_thin!(gl_indexd -> Indexd(c: f64));
+gl_thin!(gl_indexf -> Indexf(c: f32));
+gl_thin!(gl_indexi -> Indexi(c: i32));
+gl_thin!(gl_indexs -> Indexs(c: i16));
+gl_thin!(gl_indexub -> Indexub(c: u8));
+gl_thin!(gl_index_mask -> IndexMask(mask: u32));
+gl_thin!(gl_clear_index -> ClearIndex(c: f32));
 
 // ===== Additional normal variants =====
 
@@ -600,196 +317,56 @@ pub fn gl_normal3b(nx: i8, ny: i8, nz: i8) {
         gl_generated::Normal3b(nx as GLbyte, ny as GLbyte, nz as GLbyte);
     }
 }
-pub fn gl_normal3d(nx: f64, ny: f64, nz: f64) {
-    unsafe {
-        gl_generated::Normal3d(nx, ny, nz);
-    }
-}
-pub fn gl_normal3i(nx: i32, ny: i32, nz: i32) {
-    unsafe {
-        gl_generated::Normal3i(nx, ny, nz);
-    }
-}
-pub fn gl_normal3s(nx: i16, ny: i16, nz: i16) {
-    unsafe {
-        gl_generated::Normal3s(nx, ny, nz);
-    }
-}
+gl_thin!(gl_normal3d -> Normal3d(nx: f64, ny: f64, nz: f64));
+gl_thin!(gl_normal3i -> Normal3i(nx: i32, ny: i32, nz: i32));
+gl_thin!(gl_normal3s -> Normal3s(nx: i16, ny: i16, nz: i16));
 
 // ===== Additional vertex variants =====
 
-pub fn gl_vertex2d(x: f64, y: f64) {
-    unsafe {
-        gl_generated::Vertex2d(x, y);
-    }
-}
-pub fn gl_vertex2s(x: i16, y: i16) {
-    unsafe {
-        gl_generated::Vertex2s(x, y);
-    }
-}
-pub fn gl_vertex3d(x: f64, y: f64, z: f64) {
-    unsafe {
-        gl_generated::Vertex3d(x, y, z);
-    }
-}
-pub fn gl_vertex3s(x: i16, y: i16, z: i16) {
-    unsafe {
-        gl_generated::Vertex3s(x, y, z);
-    }
-}
-pub fn gl_vertex4d(x: f64, y: f64, z: f64, w: f64) {
-    unsafe {
-        gl_generated::Vertex4d(x, y, z, w);
-    }
-}
-pub fn gl_vertex4i(x: i32, y: i32, z: i32, w: i32) {
-    unsafe {
-        gl_generated::Vertex4i(x, y, z, w);
-    }
-}
-pub fn gl_vertex4s(x: i16, y: i16, z: i16, w: i16) {
-    unsafe {
-        gl_generated::Vertex4s(x, y, z, w);
-    }
-}
+gl_thin!(gl_vertex2d -> Vertex2d(x: f64, y: f64));
+gl_thin!(gl_vertex2s -> Vertex2s(x: i16, y: i16));
+gl_thin!(gl_vertex3d -> Vertex3d(x: f64, y: f64, z: f64));
+gl_thin!(gl_vertex3s -> Vertex3s(x: i16, y: i16, z: i16));
+gl_thin!(gl_vertex4d -> Vertex4d(x: f64, y: f64, z: f64, w: f64));
+gl_thin!(gl_vertex4i -> Vertex4i(x: i32, y: i32, z: i32, w: i32));
+gl_thin!(gl_vertex4s -> Vertex4s(x: i16, y: i16, z: i16, w: i16));
 
 // ===== Additional texcoord variants =====
 
-pub fn gl_tex_coord1d(s: f64) {
-    unsafe {
-        gl_generated::TexCoord1d(s);
-    }
-}
-pub fn gl_tex_coord1f(s: f32) {
-    unsafe {
-        gl_generated::TexCoord1f(s);
-    }
-}
-pub fn gl_tex_coord1i(s: i32) {
-    unsafe {
-        gl_generated::TexCoord1i(s);
-    }
-}
-pub fn gl_tex_coord1s(s: i16) {
-    unsafe {
-        gl_generated::TexCoord1s(s);
-    }
-}
-pub fn gl_tex_coord2d(s: f64, t: f64) {
-    unsafe {
-        gl_generated::TexCoord2d(s, t);
-    }
-}
-pub fn gl_tex_coord2i(s: i32, t: i32) {
-    unsafe {
-        gl_generated::TexCoord2i(s, t);
-    }
-}
-pub fn gl_tex_coord2s(s: i16, t: i16) {
-    unsafe {
-        gl_generated::TexCoord2s(s, t);
-    }
-}
-pub fn gl_tex_coord3d(s: f64, t: f64, r: f64) {
-    unsafe {
-        gl_generated::TexCoord3d(s, t, r);
-    }
-}
-pub fn gl_tex_coord3f(s: f32, t: f32, r: f32) {
-    unsafe {
-        gl_generated::TexCoord3f(s, t, r);
-    }
-}
-pub fn gl_tex_coord3i(s: i32, t: i32, r: i32) {
-    unsafe {
-        gl_generated::TexCoord3i(s, t, r);
-    }
-}
-pub fn gl_tex_coord3s(s: i16, t: i16, r: i16) {
-    unsafe {
-        gl_generated::TexCoord3s(s, t, r);
-    }
-}
-pub fn gl_tex_coord4d(s: f64, t: f64, r: f64, q: f64) {
-    unsafe {
-        gl_generated::TexCoord4d(s, t, r, q);
-    }
-}
-pub fn gl_tex_coord4i(s: i32, t: i32, r: i32, q: i32) {
-    unsafe {
-        gl_generated::TexCoord4i(s, t, r, q);
-    }
-}
+gl_thin!(gl_tex_coord1d -> TexCoord1d(s: f64));
+gl_thin!(gl_tex_coord1f -> TexCoord1f(s: f32));
+gl_thin!(gl_tex_coord1i -> TexCoord1i(s: i32));
+gl_thin!(gl_tex_coord1s -> TexCoord1s(s: i16));
+gl_thin!(gl_tex_coord2d -> TexCoord2d(s: f64, t: f64));
+gl_thin!(gl_tex_coord2i -> TexCoord2i(s: i32, t: i32));
+gl_thin!(gl_tex_coord2s -> TexCoord2s(s: i16, t: i16));
+gl_thin!(gl_tex_coord3d -> TexCoord3d(s: f64, t: f64, r: f64));
+gl_thin!(gl_tex_coord3f -> TexCoord3f(s: f32, t: f32, r: f32));
+gl_thin!(gl_tex_coord3i -> TexCoord3i(s: i32, t: i32, r: i32));
+gl_thin!(gl_tex_coord3s -> TexCoord3s(s: i16, t: i16, r: i16));
+gl_thin!(gl_tex_coord4d -> TexCoord4d(s: f64, t: f64, r: f64, q: f64));
+gl_thin!(gl_tex_coord4i -> TexCoord4i(s: i32, t: i32, r: i32, q: i32));
 
 // ===== Additional raster pos variants =====
 
-pub fn gl_raster_pos2d(x: f64, y: f64) {
-    unsafe {
-        gl_generated::RasterPos2d(x, y);
-    }
-}
-pub fn gl_raster_pos2s(x: i16, y: i16) {
-    unsafe {
-        gl_generated::RasterPos2s(x, y);
-    }
-}
-pub fn gl_raster_pos3d(x: f64, y: f64, z: f64) {
-    unsafe {
-        gl_generated::RasterPos3d(x, y, z);
-    }
-}
-pub fn gl_raster_pos3s(x: i16, y: i16, z: i16) {
-    unsafe {
-        gl_generated::RasterPos3s(x, y, z);
-    }
-}
-pub fn gl_raster_pos4d(x: f64, y: f64, z: f64, w: f64) {
-    unsafe {
-        gl_generated::RasterPos4d(x, y, z, w);
-    }
-}
-pub fn gl_raster_pos4s(x: i16, y: i16, z: i16, w: i16) {
-    unsafe {
-        gl_generated::RasterPos4s(x, y, z, w);
-    }
-}
+gl_thin!(gl_raster_pos2d -> RasterPos2d(x: f64, y: f64));
+gl_thin!(gl_raster_pos2s -> RasterPos2s(x: i16, y: i16));
+gl_thin!(gl_raster_pos3d -> RasterPos3d(x: f64, y: f64, z: f64));
+gl_thin!(gl_raster_pos3s -> RasterPos3s(x: i16, y: i16, z: i16));
+gl_thin!(gl_raster_pos4d -> RasterPos4d(x: f64, y: f64, z: f64, w: f64));
+gl_thin!(gl_raster_pos4s -> RasterPos4s(x: i16, y: i16, z: i16, w: i16));
 
 // ===== Additional transform variants =====
 
-pub fn gl_rotated(angle: f64, x: f64, y: f64, z: f64) {
-    unsafe {
-        gl_generated::Rotated(angle, x, y, z);
-    }
-}
-pub fn gl_scaled(x: f64, y: f64, z: f64) {
-    unsafe {
-        gl_generated::Scaled(x, y, z);
-    }
-}
-pub fn gl_translated(x: f64, y: f64, z: f64) {
-    unsafe {
-        gl_generated::Translated(x, y, z);
-    }
-}
+gl_thin!(gl_rotated -> Rotated(angle: f64, x: f64, y: f64, z: f64));
+gl_thin!(gl_scaled -> Scaled(x: f64, y: f64, z: f64));
+gl_thin!(gl_translated -> Translated(x: f64, y: f64, z: f64));
 
 // ===== Line stipple / draw+read buffer =====
 
-pub fn gl_line_stipple(factor: i32, pattern: u16) {
-    unsafe {
-        gl_generated::LineStipple(factor, pattern);
-    }
-}
-pub fn gl_draw_buffer(mode: u32) {
-    unsafe {
-        gl_generated::DrawBuffer(mode);
-    }
-}
-pub fn gl_read_buffer(mode: u32) {
-    unsafe {
-        gl_generated::ReadBuffer(mode);
-    }
-}
+gl_thin!(gl_line_stipple -> LineStipple(factor: i32, pattern: u16));
+gl_thin!(gl_draw_buffer -> DrawBuffer(mode: u32));
+gl_thin!(gl_read_buffer -> ReadBuffer(mode: u32));
 
 // ===== 1D texture copy/sub =====
 
@@ -807,11 +384,7 @@ pub fn gl_copy_tex_image_1d(
     }
 }
 
-pub fn gl_copy_tex_sub_image_1d(target: u32, level: i32, xoffset: i32, x: i32, y: i32, width: i32) {
-    unsafe {
-        gl_generated::CopyTexSubImage1D(target, level, xoffset, x, y, width);
-    }
-}
+gl_thin!(gl_copy_tex_sub_image_1d -> CopyTexSubImage1D(target: u32, level: i32, xoffset: i32, x: i32, y: i32, width: i32));
 
 pub fn gl_tex_sub_image_1d(
     target: u32,
@@ -837,37 +410,21 @@ pub fn gl_tex_sub_image_1d(
 
 // ===== Display Lists =====
 
-pub fn gl_new_list(list: u32, mode: u32) {
-    unsafe {
-        gl_generated::NewList(list, mode);
-    }
-}
+gl_thin!(gl_new_list -> NewList(list: u32, mode: u32));
 
-pub fn gl_end_list() {
-    unsafe {
-        gl_generated::EndList();
-    }
-}
+gl_thin!(gl_end_list -> EndList());
 
 pub fn gl_gen_lists(range: i32) -> u32 {
     unsafe { gl_generated::GenLists(range) }
 }
 
-pub fn gl_delete_lists(list: u32, range: i32) {
-    unsafe {
-        gl_generated::DeleteLists(list, range);
-    }
-}
+gl_thin!(gl_delete_lists -> DeleteLists(list: u32, range: i32));
 
 pub fn gl_is_list(list: u32) -> bool {
     unsafe { gl_generated::IsList(list) != 0 }
 }
 
-pub fn gl_call_list(list: u32) {
-    unsafe {
-        gl_generated::CallList(list);
-    }
-}
+gl_thin!(gl_call_list -> CallList(list: u32));
 
 pub fn gl_call_lists(n: i32, list_type: u32, lists: &[u8]) {
     unsafe {
@@ -875,19 +432,11 @@ pub fn gl_call_lists(n: i32, list_type: u32, lists: &[u8]) {
     }
 }
 
-pub fn gl_list_base(base: u32) {
-    unsafe {
-        gl_generated::ListBase(base);
-    }
-}
+gl_thin!(gl_list_base -> ListBase(base: u32));
 
 // ===== Lighting =====
 
-pub fn gl_lightf(light: u32, pname: u32, param: f32) {
-    unsafe {
-        gl_generated::Lightf(light, pname, param);
-    }
-}
+gl_thin!(gl_lightf -> Lightf(light: u32, pname: u32, param: f32));
 
 pub fn gl_lightfv(light: u32, pname: u32, params: &[f32]) {
     unsafe {
@@ -895,11 +444,7 @@ pub fn gl_lightfv(light: u32, pname: u32, params: &[f32]) {
     }
 }
 
-pub fn gl_lighti(light: u32, pname: u32, param: i32) {
-    unsafe {
-        gl_generated::Lighti(light, pname, param);
-    }
-}
+gl_thin!(gl_lighti -> Lighti(light: u32, pname: u32, param: i32));
 
 pub fn gl_lightiv(light: u32, pname: u32, params: &[i32]) {
     unsafe {
@@ -907,11 +452,7 @@ pub fn gl_lightiv(light: u32, pname: u32, params: &[i32]) {
     }
 }
 
-pub fn gl_light_modelf(pname: u32, param: f32) {
-    unsafe {
-        gl_generated::LightModelf(pname, param);
-    }
-}
+gl_thin!(gl_light_modelf -> LightModelf(pname: u32, param: f32));
 
 pub fn gl_light_modelfv(pname: u32, params: &[f32]) {
     unsafe {
@@ -919,11 +460,7 @@ pub fn gl_light_modelfv(pname: u32, params: &[f32]) {
     }
 }
 
-pub fn gl_light_modeli(pname: u32, param: i32) {
-    unsafe {
-        gl_generated::LightModeli(pname, param);
-    }
-}
+gl_thin!(gl_light_modeli -> LightModeli(pname: u32, param: i32));
 
 pub fn gl_light_modeliv(pname: u32, params: &[i32]) {
     unsafe {
@@ -931,11 +468,7 @@ pub fn gl_light_modeliv(pname: u32, params: &[i32]) {
     }
 }
 
-pub fn gl_materialf(face: u32, pname: u32, param: f32) {
-    unsafe {
-        gl_generated::Materialf(face, pname, param);
-    }
-}
+gl_thin!(gl_materialf -> Materialf(face: u32, pname: u32, param: f32));
 
 pub fn gl_materialfv(face: u32, pname: u32, params: &[f32]) {
     unsafe {
@@ -943,11 +476,7 @@ pub fn gl_materialfv(face: u32, pname: u32, params: &[f32]) {
     }
 }
 
-pub fn gl_materiali(face: u32, pname: u32, param: i32) {
-    unsafe {
-        gl_generated::Materiali(face, pname, param);
-    }
-}
+gl_thin!(gl_materiali -> Materiali(face: u32, pname: u32, param: i32));
 
 pub fn gl_materialiv(face: u32, pname: u32, params: &[i32]) {
     unsafe {
@@ -955,19 +484,11 @@ pub fn gl_materialiv(face: u32, pname: u32, params: &[i32]) {
     }
 }
 
-pub fn gl_color_material(face: u32, mode: u32) {
-    unsafe {
-        gl_generated::ColorMaterial(face, mode);
-    }
-}
+gl_thin!(gl_color_material -> ColorMaterial(face: u32, mode: u32));
 
 // ===== Fog =====
 
-pub fn gl_fogf(pname: u32, param: f32) {
-    unsafe {
-        gl_generated::Fogf(pname, param);
-    }
-}
+gl_thin!(gl_fogf -> Fogf(pname: u32, param: f32));
 
 pub fn gl_fogfv(pname: u32, params: &[f32]) {
     unsafe {
@@ -975,11 +496,7 @@ pub fn gl_fogfv(pname: u32, params: &[f32]) {
     }
 }
 
-pub fn gl_fogi(pname: u32, param: i32) {
-    unsafe {
-        gl_generated::Fogi(pname, param);
-    }
-}
+gl_thin!(gl_fogi -> Fogi(pname: u32, param: i32));
 
 pub fn gl_fogiv(pname: u32, params: &[i32]) {
     unsafe {
@@ -989,11 +506,7 @@ pub fn gl_fogiv(pname: u32, params: &[i32]) {
 
 // ===== Polygon/Drawing =====
 
-pub fn gl_polygon_offset(factor: f32, units: f32) {
-    unsafe {
-        gl_generated::PolygonOffset(factor, units);
-    }
-}
+gl_thin!(gl_polygon_offset -> PolygonOffset(factor: f32, units: f32));
 
 pub fn gl_polygon_stipple(mask: &[u8]) {
     unsafe {
@@ -1007,11 +520,7 @@ pub fn gl_get_polygon_stipple(mask: &mut [u8]) {
     }
 }
 
-pub fn gl_logic_op(opcode: u32) {
-    unsafe {
-        gl_generated::LogicOp(opcode);
-    }
-}
+gl_thin!(gl_logic_op -> LogicOp(opcode: u32));
 
 pub fn gl_draw_pixels(width: i32, height: i32, format: u32, type_: u32, pixels: &[u8]) {
     unsafe {
@@ -1025,11 +534,7 @@ pub fn gl_draw_pixels(width: i32, height: i32, format: u32, type_: u32, pixels: 
     }
 }
 
-pub fn gl_copy_pixels(x: i32, y: i32, width: i32, height: i32, type_: u32) {
-    unsafe {
-        gl_generated::CopyPixels(x, y, width, height, type_);
-    }
-}
+gl_thin!(gl_copy_pixels -> CopyPixels(x: i32, y: i32, width: i32, height: i32, type_: u32));
 
 pub fn gl_bitmap(
     width: i32,
@@ -1045,63 +550,27 @@ pub fn gl_bitmap(
     }
 }
 
-pub fn gl_pixel_zoom(xfactor: f32, yfactor: f32) {
-    unsafe {
-        gl_generated::PixelZoom(xfactor, yfactor);
-    }
-}
+gl_thin!(gl_pixel_zoom -> PixelZoom(xfactor: f32, yfactor: f32));
 
-pub fn gl_raster_pos2f(x: f32, y: f32) {
-    unsafe {
-        gl_generated::RasterPos2f(x, y);
-    }
-}
+gl_thin!(gl_raster_pos2f -> RasterPos2f(x: f32, y: f32));
 
-pub fn gl_raster_pos3f(x: f32, y: f32, z: f32) {
-    unsafe {
-        gl_generated::RasterPos3f(x, y, z);
-    }
-}
+gl_thin!(gl_raster_pos3f -> RasterPos3f(x: f32, y: f32, z: f32));
 
-pub fn gl_raster_pos4f(x: f32, y: f32, z: f32, w: f32) {
-    unsafe {
-        gl_generated::RasterPos4f(x, y, z, w);
-    }
-}
+gl_thin!(gl_raster_pos4f -> RasterPos4f(x: f32, y: f32, z: f32, w: f32));
 
-pub fn gl_raster_pos2i(x: i32, y: i32) {
-    unsafe {
-        gl_generated::RasterPos2i(x, y);
-    }
-}
+gl_thin!(gl_raster_pos2i -> RasterPos2i(x: i32, y: i32));
 
-pub fn gl_raster_pos3i(x: i32, y: i32, z: i32) {
-    unsafe {
-        gl_generated::RasterPos3i(x, y, z);
-    }
-}
+gl_thin!(gl_raster_pos3i -> RasterPos3i(x: i32, y: i32, z: i32));
 
-pub fn gl_raster_pos4i(x: i32, y: i32, z: i32, w: i32) {
-    unsafe {
-        gl_generated::RasterPos4i(x, y, z, w);
-    }
-}
+gl_thin!(gl_raster_pos4i -> RasterPos4i(x: i32, y: i32, z: i32, w: i32));
 
 // ===== Depth =====
 
-pub fn gl_depth_range(near: f64, far: f64) {
-    unsafe {
-        gl_generated::DepthRange(near, far);
-    }
-}
+gl_thin!(gl_depth_range -> DepthRange(near: f64, far: f64));
 
 // ===== Texture Environment/Generation =====
 
-pub fn gl_tex_envf(target: u32, pname: u32, param: f32) {
-    unsafe {
-        gl_generated::TexEnvf(target, pname, param);
-    }
-}
+gl_thin!(gl_tex_envf -> TexEnvf(target: u32, pname: u32, param: f32));
 
 pub fn gl_tex_envfv(target: u32, pname: u32, params: &[f32]) {
     unsafe {
@@ -1109,11 +578,7 @@ pub fn gl_tex_envfv(target: u32, pname: u32, params: &[f32]) {
     }
 }
 
-pub fn gl_tex_envi(target: u32, pname: u32, param: i32) {
-    unsafe {
-        gl_generated::TexEnvi(target, pname, param);
-    }
-}
+gl_thin!(gl_tex_envi -> TexEnvi(target: u32, pname: u32, param: i32));
 
 pub fn gl_tex_enviv(target: u32, pname: u32, params: &[i32]) {
     unsafe {
@@ -1121,23 +586,11 @@ pub fn gl_tex_enviv(target: u32, pname: u32, params: &[i32]) {
     }
 }
 
-pub fn gl_tex_geni(coord: u32, pname: u32, param: i32) {
-    unsafe {
-        gl_generated::TexGeni(coord, pname, param);
-    }
-}
+gl_thin!(gl_tex_geni -> TexGeni(coord: u32, pname: u32, param: i32));
 
-pub fn gl_tex_genf(coord: u32, pname: u32, param: f32) {
-    unsafe {
-        gl_generated::TexGenf(coord, pname, param);
-    }
-}
+gl_thin!(gl_tex_genf -> TexGenf(coord: u32, pname: u32, param: f32));
 
-pub fn gl_tex_gend(coord: u32, pname: u32, param: f64) {
-    unsafe {
-        gl_generated::TexGend(coord, pname, param);
-    }
-}
+gl_thin!(gl_tex_gend -> TexGend(coord: u32, pname: u32, param: f64));
 
 pub fn gl_tex_geniv(coord: u32, pname: u32, params: &[i32]) {
     unsafe {
@@ -1234,11 +687,7 @@ pub fn gl_copy_tex_sub_image_2d(
     }
 }
 
-pub fn gl_tex_parameterf(target: u32, pname: u32, param: f32) {
-    unsafe {
-        gl_generated::TexParameterf(target, pname, param);
-    }
-}
+gl_thin!(gl_tex_parameterf -> TexParameterf(target: u32, pname: u32, param: f32));
 
 pub fn gl_tex_parameterfv(target: u32, pname: u32, params: &[f32]) {
     unsafe {
@@ -1252,31 +701,15 @@ pub fn gl_tex_parameteriv(target: u32, pname: u32, params: &[i32]) {
     }
 }
 
-pub fn gl_pixel_storef(pname: u32, param: f32) {
-    unsafe {
-        gl_generated::PixelStoref(pname, param);
-    }
-}
+gl_thin!(gl_pixel_storef -> PixelStoref(pname: u32, param: f32));
 
-pub fn gl_pixel_transferf(pname: u32, param: f32) {
-    unsafe {
-        gl_generated::PixelTransferf(pname, param);
-    }
-}
+gl_thin!(gl_pixel_transferf -> PixelTransferf(pname: u32, param: f32));
 
-pub fn gl_pixel_transferi(pname: u32, param: i32) {
-    unsafe {
-        gl_generated::PixelTransferi(pname, param);
-    }
-}
+gl_thin!(gl_pixel_transferi -> PixelTransferi(pname: u32, param: i32));
 
 // ===== Vertex Arrays (GL 1.1) =====
 
-pub fn gl_draw_arrays(mode: u32, first: i32, count: i32) {
-    unsafe {
-        gl_generated::DrawArrays(mode, first, count);
-    }
-}
+gl_thin!(gl_draw_arrays -> DrawArrays(mode: u32, first: i32, count: i32));
 
 /// # Safety
 /// The `indices` pointer must be valid for the given `count` and `type_`.
@@ -1308,23 +741,11 @@ pub unsafe fn gl_tex_coord_pointer(size: i32, type_: u32, stride: i32, pointer: 
     gl_generated::TexCoordPointer(size, type_, stride, pointer);
 }
 
-pub fn gl_enable_client_state(array: u32) {
-    unsafe {
-        gl_generated::EnableClientState(array);
-    }
-}
+gl_thin!(gl_enable_client_state -> EnableClientState(array: u32));
 
-pub fn gl_disable_client_state(array: u32) {
-    unsafe {
-        gl_generated::DisableClientState(array);
-    }
-}
+gl_thin!(gl_disable_client_state -> DisableClientState(array: u32));
 
-pub fn gl_array_element(i: i32) {
-    unsafe {
-        gl_generated::ArrayElement(i);
-    }
-}
+gl_thin!(gl_array_element -> ArrayElement(i: i32));
 
 // ===== State Queries =====
 
@@ -1536,91 +957,35 @@ pub fn gl_map2d(
     }
 }
 
-pub fn gl_eval_coord1f(u: f32) {
-    unsafe {
-        gl_generated::EvalCoord1f(u);
-    }
-}
+gl_thin!(gl_eval_coord1f -> EvalCoord1f(u: f32));
 
-pub fn gl_eval_coord1d(u: f64) {
-    unsafe {
-        gl_generated::EvalCoord1d(u);
-    }
-}
+gl_thin!(gl_eval_coord1d -> EvalCoord1d(u: f64));
 
-pub fn gl_eval_coord2f(u: f32, v: f32) {
-    unsafe {
-        gl_generated::EvalCoord2f(u, v);
-    }
-}
+gl_thin!(gl_eval_coord2f -> EvalCoord2f(u: f32, v: f32));
 
-pub fn gl_eval_coord2d(u: f64, v: f64) {
-    unsafe {
-        gl_generated::EvalCoord2d(u, v);
-    }
-}
+gl_thin!(gl_eval_coord2d -> EvalCoord2d(u: f64, v: f64));
 
-pub fn gl_map_grid1f(un: i32, u1: f32, u2: f32) {
-    unsafe {
-        gl_generated::MapGrid1f(un, u1, u2);
-    }
-}
+gl_thin!(gl_map_grid1f -> MapGrid1f(un: i32, u1: f32, u2: f32));
 
-pub fn gl_map_grid1d(un: i32, u1: f64, u2: f64) {
-    unsafe {
-        gl_generated::MapGrid1d(un, u1, u2);
-    }
-}
+gl_thin!(gl_map_grid1d -> MapGrid1d(un: i32, u1: f64, u2: f64));
 
-pub fn gl_map_grid2f(un: i32, u1: f32, u2: f32, vn: i32, v1: f32, v2: f32) {
-    unsafe {
-        gl_generated::MapGrid2f(un, u1, u2, vn, v1, v2);
-    }
-}
+gl_thin!(gl_map_grid2f -> MapGrid2f(un: i32, u1: f32, u2: f32, vn: i32, v1: f32, v2: f32));
 
-pub fn gl_map_grid2d(un: i32, u1: f64, u2: f64, vn: i32, v1: f64, v2: f64) {
-    unsafe {
-        gl_generated::MapGrid2d(un, u1, u2, vn, v1, v2);
-    }
-}
+gl_thin!(gl_map_grid2d -> MapGrid2d(un: i32, u1: f64, u2: f64, vn: i32, v1: f64, v2: f64));
 
-pub fn gl_eval_mesh1(mode: u32, i1: i32, i2: i32) {
-    unsafe {
-        gl_generated::EvalMesh1(mode, i1, i2);
-    }
-}
+gl_thin!(gl_eval_mesh1 -> EvalMesh1(mode: u32, i1: i32, i2: i32));
 
-pub fn gl_eval_mesh2(mode: u32, i1: i32, i2: i32, j1: i32, j2: i32) {
-    unsafe {
-        gl_generated::EvalMesh2(mode, i1, i2, j1, j2);
-    }
-}
+gl_thin!(gl_eval_mesh2 -> EvalMesh2(mode: u32, i1: i32, i2: i32, j1: i32, j2: i32));
 
-pub fn gl_eval_point1(i: i32) {
-    unsafe {
-        gl_generated::EvalPoint1(i);
-    }
-}
+gl_thin!(gl_eval_point1 -> EvalPoint1(i: i32));
 
-pub fn gl_eval_point2(i: i32, j: i32) {
-    unsafe {
-        gl_generated::EvalPoint2(i, j);
-    }
-}
+gl_thin!(gl_eval_point2 -> EvalPoint2(i: i32, j: i32));
 
 // ===== Accumulation =====
 
-pub fn gl_accum(op: u32, value: f32) {
-    unsafe {
-        gl_generated::Accum(op, value);
-    }
-}
+gl_thin!(gl_accum -> Accum(op: u32, value: f32));
 
-pub fn gl_clear_accum(r: f32, g: f32, b: f32, a: f32) {
-    unsafe {
-        gl_generated::ClearAccum(r, g, b, a);
-    }
-}
+gl_thin!(gl_clear_accum -> ClearAccum(r: f32, g: f32, b: f32, a: f32));
 
 // ===== Selection/Feedback =====
 
@@ -1628,47 +993,19 @@ pub fn gl_render_mode(mode: u32) -> i32 {
     unsafe { gl_generated::RenderMode(mode) }
 }
 
-pub fn gl_init_names() {
-    unsafe {
-        gl_generated::InitNames();
-    }
-}
+gl_thin!(gl_init_names -> InitNames());
 
-pub fn gl_push_name(name: u32) {
-    unsafe {
-        gl_generated::PushName(name);
-    }
-}
+gl_thin!(gl_push_name -> PushName(name: u32));
 
-pub fn gl_pop_name() {
-    unsafe {
-        gl_generated::PopName();
-    }
-}
+gl_thin!(gl_pop_name -> PopName());
 
-pub fn gl_load_name(name: u32) {
-    unsafe {
-        gl_generated::LoadName(name);
-    }
-}
+gl_thin!(gl_load_name -> LoadName(name: u32));
 
-pub fn gl_pass_through(token: f32) {
-    unsafe {
-        gl_generated::PassThrough(token);
-    }
-}
+gl_thin!(gl_pass_through -> PassThrough(token: f32));
 
-pub fn gl_push_attrib(mask: u32) {
-    unsafe {
-        gl_generated::PushAttrib(mask);
-    }
-}
+gl_thin!(gl_push_attrib -> PushAttrib(mask: u32));
 
-pub fn gl_pop_attrib() {
-    unsafe {
-        gl_generated::PopAttrib();
-    }
-}
+gl_thin!(gl_pop_attrib -> PopAttrib());
 
 pub fn gl_pixel_mapfv(map: u32, map_size: i32, values: &[f32]) {
     unsafe {
@@ -1751,41 +1088,17 @@ pub fn gl_tex_sub_image_3d(
 
 // ===== GL 1.3 Optional =====
 
-pub fn gl_active_texture(texture: u32) {
-    unsafe {
-        gl_generated::ActiveTexture(texture);
-    }
-}
+gl_thin!(gl_active_texture -> ActiveTexture(texture: u32));
 
-pub fn gl_multi_tex_coord1f(target: u32, s: f32) {
-    unsafe {
-        gl_generated::MultiTexCoord1f(target, s);
-    }
-}
+gl_thin!(gl_multi_tex_coord1f -> MultiTexCoord1f(target: u32, s: f32));
 
-pub fn gl_multi_tex_coord2f(target: u32, s: f32, t: f32) {
-    unsafe {
-        gl_generated::MultiTexCoord2f(target, s, t);
-    }
-}
+gl_thin!(gl_multi_tex_coord2f -> MultiTexCoord2f(target: u32, s: f32, t: f32));
 
-pub fn gl_multi_tex_coord3f(target: u32, s: f32, t: f32, r: f32) {
-    unsafe {
-        gl_generated::MultiTexCoord3f(target, s, t, r);
-    }
-}
+gl_thin!(gl_multi_tex_coord3f -> MultiTexCoord3f(target: u32, s: f32, t: f32, r: f32));
 
-pub fn gl_multi_tex_coord4f(target: u32, s: f32, t: f32, r: f32, q: f32) {
-    unsafe {
-        gl_generated::MultiTexCoord4f(target, s, t, r, q);
-    }
-}
+gl_thin!(gl_multi_tex_coord4f -> MultiTexCoord4f(target: u32, s: f32, t: f32, r: f32, q: f32));
 
-pub fn gl_sample_coverage(value: f32, invert: u8) {
-    unsafe {
-        gl_generated::SampleCoverage(value, invert);
-    }
-}
+gl_thin!(gl_sample_coverage -> SampleCoverage(value: f32, invert: u8));
 
 pub fn gl_compressed_tex_image_1d(
     target: u32,
@@ -1939,47 +1252,19 @@ pub fn gl_compressed_tex_sub_image_3d(
 
 // ===== GL 1.4 Optional =====
 
-pub fn gl_secondary_color3f(r: f32, g: f32, b: f32) {
-    unsafe {
-        gl_generated::SecondaryColor3f(r, g, b);
-    }
-}
+gl_thin!(gl_secondary_color3f -> SecondaryColor3f(r: f32, g: f32, b: f32));
 
-pub fn gl_secondary_color3ub(r: u8, g: u8, b: u8) {
-    unsafe {
-        gl_generated::SecondaryColor3ub(r, g, b);
-    }
-}
+gl_thin!(gl_secondary_color3ub -> SecondaryColor3ub(r: u8, g: u8, b: u8));
 
-pub fn gl_window_pos2f(x: f32, y: f32) {
-    unsafe {
-        gl_generated::WindowPos2f(x, y);
-    }
-}
+gl_thin!(gl_window_pos2f -> WindowPos2f(x: f32, y: f32));
 
-pub fn gl_window_pos3f(x: f32, y: f32, z: f32) {
-    unsafe {
-        gl_generated::WindowPos3f(x, y, z);
-    }
-}
+gl_thin!(gl_window_pos3f -> WindowPos3f(x: f32, y: f32, z: f32));
 
-pub fn gl_fog_coordf(coord: f32) {
-    unsafe {
-        gl_generated::FogCoordf(coord);
-    }
-}
+gl_thin!(gl_fog_coordf -> FogCoordf(coord: f32));
 
-pub fn gl_fog_coordd(coord: f64) {
-    unsafe {
-        gl_generated::FogCoordd(coord);
-    }
-}
+gl_thin!(gl_fog_coordd -> FogCoordd(coord: f64));
 
-pub fn gl_point_parameterf(pname: u32, param: f32) {
-    unsafe {
-        gl_generated::PointParameterf(pname, param);
-    }
-}
+gl_thin!(gl_point_parameterf -> PointParameterf(pname: u32, param: f32));
 
 pub fn gl_point_parameterfv(pname: u32, params: &[f32]) {
     unsafe {
@@ -1987,51 +1272,23 @@ pub fn gl_point_parameterfv(pname: u32, params: &[f32]) {
     }
 }
 
-pub fn gl_point_parameteri(pname: u32, param: i32) {
-    unsafe {
-        gl_generated::PointParameteri(pname, param);
-    }
-}
+gl_thin!(gl_point_parameteri -> PointParameteri(pname: u32, param: i32));
 
 // ===== GL 1.4 Blend (Optional) =====
 
-pub fn gl_blend_equation(mode: u32) {
-    unsafe {
-        gl_generated::BlendEquation(mode);
-    }
-}
+gl_thin!(gl_blend_equation -> BlendEquation(mode: u32));
 
-pub fn gl_blend_func_separate(src_rgb: u32, dst_rgb: u32, src_alpha: u32, dst_alpha: u32) {
-    unsafe {
-        gl_generated::BlendFuncSeparate(src_rgb, dst_rgb, src_alpha, dst_alpha);
-    }
-}
+gl_thin!(gl_blend_func_separate -> BlendFuncSeparate(src_rgb: u32, dst_rgb: u32, src_alpha: u32, dst_alpha: u32));
 
-pub fn gl_blend_color(r: f32, g: f32, b: f32, a: f32) {
-    unsafe {
-        gl_generated::BlendColor(r, g, b, a);
-    }
-}
+gl_thin!(gl_blend_color -> BlendColor(r: f32, g: f32, b: f32, a: f32));
 
 // ===== GL 2.0 Stencil Separate (Optional) =====
 
-pub fn gl_stencil_func_separate(face: u32, func: u32, ref_: i32, mask: u32) {
-    unsafe {
-        gl_generated::StencilFuncSeparate(face, func, ref_, mask);
-    }
-}
+gl_thin!(gl_stencil_func_separate -> StencilFuncSeparate(face: u32, func: u32, ref_: i32, mask: u32));
 
-pub fn gl_stencil_op_separate(face: u32, sfail: u32, dpfail: u32, dppass: u32) {
-    unsafe {
-        gl_generated::StencilOpSeparate(face, sfail, dpfail, dppass);
-    }
-}
+gl_thin!(gl_stencil_op_separate -> StencilOpSeparate(face: u32, sfail: u32, dpfail: u32, dppass: u32));
 
-pub fn gl_stencil_mask_separate(face: u32, mask: u32) {
-    unsafe {
-        gl_generated::StencilMaskSeparate(face, mask);
-    }
-}
+gl_thin!(gl_stencil_mask_separate -> StencilMaskSeparate(face: u32, mask: u32));
 
 // ===== Imaging Subset (Optional) =====
 //
@@ -2051,6 +1308,10 @@ pub fn gl_color_table(
     _data: &[u8],
 ) {
 }
+
+// Empty stubs for imaging-subset extensions we don't implement.
+// Calling these is a no-op; GLX clients that hit them will draw nothing
+// but won't crash the server.
 pub fn gl_convolution_parameterf(_target: u32, _pname: u32, _param: f32) {}
 pub fn gl_convolution_parameterfv(_target: u32, _pname: u32, _params: &[f32]) {}
 pub fn gl_convolution_parameteri(_target: u32, _pname: u32, _param: i32) {}
