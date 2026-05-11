@@ -90,6 +90,7 @@ pub(crate) fn handle_reparent_window(
         win.x = x;
         win.y = y;
     }
+    state.mark_window_shared_dirty(window);
 
     // Add to new parent's children_order (on top of stacking order)
     if let Some(new_parent_win) = state.windows.get_mut(&new_parent) {
@@ -515,6 +516,13 @@ pub(crate) fn handle_configure_window(
                 ));
             }
         }
+    }
+
+    if changed {
+        // Push the new geometry to shared_windows so other clients (xprop,
+        // xwininfo, the WM) observe the change instead of waiting on the
+        // dirty-set optimisation in sync_windows to find them.
+        state.mark_window_shared_dirty(wid);
     }
 
     // Apply win_gravity to children when parent was resized

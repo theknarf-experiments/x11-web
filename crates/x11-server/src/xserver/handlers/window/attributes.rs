@@ -202,6 +202,9 @@ pub(crate) fn handle_change_window_attributes(
         }
     }
 
+    // Push event_mask / override_redirect / colormap / etc. updates to
+    // shared_windows on the next sync tick.
+    state.mark_window_shared_dirty(wid);
     Vec::new()
 }
 

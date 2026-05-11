@@ -472,15 +472,22 @@ impl ClientState {
             self.intern_atom("_NET_WM_ACTION_CLOSE", false),
         ];
         let data: Vec<u8> = actions.iter().flat_map(|a| a.to_le_bytes()).collect();
+        let prop = PropertyValue {
+            prop_type: crate::xserver::atoms::predef::ATOM,
+            format: 32,
+            data,
+        };
         if let Some(win) = self.windows.get_mut(&window) {
-            win.properties.insert(
-                allowed_atom,
-                PropertyValue {
-                    prop_type: crate::xserver::atoms::predef::ATOM,
-                    format: 32,
-                    data,
-                },
-            );
+            win.properties.insert(allowed_atom, prop.clone());
+        }
+        // Sync to the shared window store so other connections (xprop, WMs)
+        // see the property immediately. Without this the next read-tick's
+        // `sync_windows()` skips this window (it isn't in `shared_dirty_windows`)
+        // and the property only ever lives in our local map.
+        if let Ok(mut shared) = self.shared_windows.lock() {
+            if let Some(sw) = shared.get_mut(&window) {
+                sw.properties.insert(allowed_atom, prop);
+            }
         }
     }
 

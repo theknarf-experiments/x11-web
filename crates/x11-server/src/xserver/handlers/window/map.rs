@@ -402,6 +402,12 @@ pub(crate) fn handle_map_window(state: &mut ClientState, req: &MapWindowRequest)
         state.set_allowed_actions(wid);
     }
 
+    // Mark the window dirty so the local mapped=true / new EWMH properties
+    // get flushed to shared_windows on the next sync tick. Without this the
+    // dirty-set optimisation in sync_windows would skip this window — only
+    // CreateWindow currently marks dirty by default.
+    state.mark_window_shared_dirty(wid);
+
     // Enforce stacking based on window type layers (EWMH _NET_WM_WINDOW_TYPE)
     // This places dock/tooltip/notification windows in their correct layer.
     {
@@ -576,6 +582,9 @@ pub(crate) fn handle_unmap_window(state: &mut ClientState, req: &UnmapWindowRequ
         }
         win.mapped = false;
     }
+
+    // Make sure the mapped=false transition reaches shared_windows.
+    state.mark_window_shared_dirty(wid);
 
     if let Some(uuid) = state.window_uuid(wid) {
         let _ = state.update_tx.send((

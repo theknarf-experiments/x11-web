@@ -8,14 +8,6 @@ import { test, expect, runPythonScript } from "../fixtures";
 test.describe("Application smoke tests", () => {
 	test("Firefox ESR starts and creates a window", async ({ sidecarContainer }) => {
 		test.setTimeout(120_000);
-		const check = await sidecarContainer.exec([
-			"bash", "-c",
-			"which firefox-esr 2>/dev/null || echo NONE",
-		]);
-		if (check.output.trim() === "NONE") {
-			test.skip();
-			return;
-		}
 		const result = await sidecarContainer.exec([
 			"bash", "-c", [
 				"export DISPLAY=:99 HOME=/root",
@@ -37,14 +29,6 @@ test.describe("Application smoke tests", () => {
 
 	test("GIMP starts without crashing", async ({ sidecarContainer }) => {
 		test.setTimeout(120_000);
-		const check = await sidecarContainer.exec([
-			"bash", "-c",
-			"which gimp 2>/dev/null || echo NONE",
-		]);
-		if (check.output.trim() === "NONE") {
-			test.skip();
-			return;
-		}
 		const result = await sidecarContainer.exec([
 			"bash", "-c", [
 				"export DISPLAY=:99 HOME=/root",
@@ -57,14 +41,6 @@ test.describe("Application smoke tests", () => {
 
 	test("Emacs starts and quits cleanly", async ({ sidecarContainer }) => {
 		test.setTimeout(60_000);
-		const check = await sidecarContainer.exec([
-			"bash", "-c",
-			"which emacs 2>/dev/null || echo NONE",
-		]);
-		if (check.output.trim() === "NONE") {
-			test.skip();
-			return;
-		}
 		const result = await sidecarContainer.exec([
 			"bash", "-c", [
 				"export DISPLAY=:99 HOME=/root",
@@ -83,14 +59,6 @@ test.describe("Application smoke tests", () => {
 
 	test("LibreOffice Writer starts and quits", async ({ sidecarContainer }) => {
 		test.setTimeout(120_000);
-		const check = await sidecarContainer.exec([
-			"bash", "-c",
-			"which libreoffice 2>/dev/null || echo NONE",
-		]);
-		if (check.output.trim() === "NONE") {
-			test.skip();
-			return;
-		}
 		const result = await sidecarContainer.exec([
 			"bash", "-c", [
 				"export DISPLAY=:99 HOME=/root",
@@ -103,16 +71,8 @@ test.describe("Application smoke tests", () => {
 });
 
 test.describe("App compatibility: multi-window application", () => {
-	test.skip("GIMP creates multiple X11 windows", async ({ sidecarContainer }) => {
+	test("GIMP creates multiple X11 windows", async ({ sidecarContainer }) => {
 		test.setTimeout(120_000);
-		const which = await sidecarContainer.exec([
-			"bash", "-c",
-			"which gimp 2>/dev/null || echo NONE",
-		]);
-		if (which.output.trim() === "NONE") {
-			test.skip();
-			return;
-		}
 		const result = await sidecarContainer.exec([
 			"bash", "-c", [
 				"export DISPLAY=:99 HOME=/root",

@@ -154,9 +154,13 @@ impl ClientState {
             }
             } // end of `if needs_step1` block
 
-            // 2. local → shared: push only the windows we mutated since the
-            //    last sync. Each handler that changes window state should call
-            //    `state.mark_window_shared_dirty(wid)` so this loop sees it.
+            // 2. local → shared: push the windows we mutated since the last
+            //    sync. Each handler that changes window state should call
+            //    `state.mark_window_shared_dirty(wid)`; iterating all windows
+            //    on every read tick is O(N²) under x11perf-style burst loads
+            //    because we clone the per-window framebuffer when first
+            //    inserting into shared and we redo a property-merge for every
+            //    mapped window on every tick.
             let dirty = std::mem::take(&mut self.shared_dirty_windows);
             for wid in &dirty {
                 let Some(local_win) = self.windows.get(wid) else {
@@ -198,8 +202,9 @@ impl ClientState {
             }
 
             // 3. Drop shared entries that we previously owned and have removed
-            //    locally (DestroyWindow / disconnect cleanup). Use the explicit
-            //    removal set instead of scanning `shared` for orphans.
+            //    locally (DestroyWindow / disconnect cleanup). Uses the
+            //    explicit `shared_removed_windows` set so we don't have to
+            //    scan all of `shared` for orphans every tick.
             let removed = std::mem::take(&mut self.shared_removed_windows);
             for wid in removed {
                 if !self.windows.contains_key(&wid) {

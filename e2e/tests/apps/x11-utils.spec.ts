@@ -210,41 +210,32 @@ test.describe("Toolkit smoke tests", () => {
 		expect(result.output).toContain("xfontsel-ok");
 	});
 
-	// Pre-existing: editres expects to run as another client's resource
-	// editor; the test merely verifies it survives a few seconds. It dies
-	// before the timeout in our environment — likely a missing X resource
-	// or incomplete Xt support.
-	test.skip("editres starts without crash", async ({ sidecarContainer }) => {
-		const which = await sidecarContainer.exec([
-			"bash", "-c",
-			"which editres 2>/dev/null || echo NONE",
-		]);
-		if (which.output.trim() === "NONE") {
-			test.skip();
-			return;
-		}
+	test("editres starts without crash", async ({ sidecarContainer }) => {
 		const result = await sidecarContainer.exec([
 			"bash", "-c", [
 				"export DISPLAY=:99",
 				"timeout 5 editres 2>&1 &",
 				"sleep 3",
-				"pkill -f editres 2>/dev/null && echo 'editres-ok' || echo 'editres-no-process'",
+				// `pkill -f editres` would also match this bash script
+				// (its argv contains the string 'editres'), killing the
+				// subshell before the next echo runs. Match by exact
+				// binary name instead.
+				"pkill -KILL -x editres 2>/dev/null && echo 'editres-ok' || echo 'editres-no-process'",
 			].join("\n"),
 		]);
 		expect(result.output).toContain("editres-ok");
 	});
 
-	// Pre-existing: `xterm -sb -rightbar` doesn't show up in xwininfo's
-	// tree dump. The scrollbar widget probably exposes a child window that
-	// our server isn't tracking back into the WM tree.
-	test.skip("xterm with Athena scrollbar renders", async ({ sidecarContainer }) => {
+	test("xterm with Athena scrollbar renders", async ({ sidecarContainer }) => {
 		const result = await sidecarContainer.exec([
 			"bash", "-c", [
 				"export DISPLAY=:99",
-				"timeout 5 xterm -sb -rightbar -e 'echo athena-sb-ok; sleep 2' 2>&1 &",
+				// Inner sleep must outlast the outer `sleep 3` so xterm is
+				// still in the window tree when xwininfo runs.
+				"xterm -sb -rightbar -e 'sleep 10' 2>&1 &",
 				"sleep 3",
 				"xwininfo -root -tree 2>/dev/null | grep -qi 'xterm' && echo 'xterm-athena-ok' || echo 'xterm-no-window'",
-				"pkill -f xterm 2>/dev/null || true",
+				"pkill -KILL -x xterm 2>/dev/null || true",
 			].join("\n"),
 		]);
 		expect(result.output).toContain("xterm-athena-ok");

@@ -8,14 +8,6 @@ import { test, expect, runPythonScript } from "../fixtures";
 test.describe("App compatibility: window manager compliance", () => {
 	test("_NET_WM_STATE transitions: fullscreen and maximize via xdotool", async ({ sidecarContainer }) => {
 		test.setTimeout(60_000);
-		const which = await sidecarContainer.exec([
-			"bash", "-c",
-			"which xdotool 2>/dev/null && which xprop 2>/dev/null || echo NONE",
-		]);
-		if (which.output.trim() === "NONE") {
-			test.skip();
-			return;
-		}
 		const result = await sidecarContainer.exec([
 			"bash", "-c", [
 				"export DISPLAY=:99",

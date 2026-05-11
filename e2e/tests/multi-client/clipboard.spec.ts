@@ -45,14 +45,6 @@ test.describe("Clipboard manager", () => {
 
 test.describe("Clipboard round-trip", () => {
 	test("xclip copy/paste round-trip", async ({ sidecarContainer }) => {
-		const which = await sidecarContainer.exec([
-			"bash", "-c",
-			"which xclip 2>/dev/null || echo NONE",
-		]);
-		if (which.output.trim() === "NONE") {
-			test.skip();
-			return;
-		}
 		const result = await sidecarContainer.exec([
 			"bash", "-c", [
 				"export DISPLAY=:99",
@@ -65,14 +57,6 @@ test.describe("Clipboard round-trip", () => {
 	});
 
 	test("xsel copy/paste round-trip", async ({ sidecarContainer }) => {
-		const which = await sidecarContainer.exec([
-			"bash", "-c",
-			"which xsel 2>/dev/null || echo NONE",
-		]);
-		if (which.output.trim() === "NONE") {
-			test.skip();
-			return;
-		}
 		const result = await sidecarContainer.exec([
 			"bash", "-c", [
 				"export DISPLAY=:99",
@@ -85,14 +69,6 @@ test.describe("Clipboard round-trip", () => {
 	});
 
 	test("cross-tool clipboard: xclip write → xsel read", async ({ sidecarContainer }) => {
-		const check = await sidecarContainer.exec([
-			"bash", "-c",
-			"which xclip 2>/dev/null && which xsel 2>/dev/null && echo BOTH || echo MISSING",
-		]);
-		if (check.output.trim().includes("MISSING")) {
-			test.skip();
-			return;
-		}
 		const result = await sidecarContainer.exec([
 			"bash", "-c", [
 				"export DISPLAY=:99",
@@ -105,14 +81,6 @@ test.describe("Clipboard round-trip", () => {
 	});
 
 	test("large clipboard transfer (>4KB INCR)", async ({ sidecarContainer }) => {
-		const which = await sidecarContainer.exec([
-			"bash", "-c",
-			"which xclip 2>/dev/null || echo NONE",
-		]);
-		if (which.output.trim() === "NONE") {
-			test.skip();
-			return;
-		}
 		const result = await sidecarContainer.exec([
 			"bash", "-c", [
 				"export DISPLAY=:99",
