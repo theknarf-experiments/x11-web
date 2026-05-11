@@ -11,8 +11,18 @@ members = [
     "crates/ws-wire",
     "crates/pixel-codec",
     "crates/x11-server",
+    "crates/x11rb-protocol-msb",
 ]
 resolver = "2"
+
+# Endian-aware x11rb fork. `tools/setup-x11rb-fork.sh` clones upstream
+# into `tools/x11rb-fork/` (outside `target/` so cargo clean doesn't wipe
+# it) and applies our patches via `patch -p1`. patch-crate's `git apply`
+# can't create new files outside a git repo, which our generator patch
+# requires (it adds `src/lib.rs`), so we don't use patch-crate.
+[patch."https://github.com/psychon/x11rb.git"]
+x11rb-generator = { path = "./tools/x11rb-fork/generator" }
+xcbgen = { path = "./tools/x11rb-fork/xcbgen-rs" }
 
 # WebP-lossless encoding via libwebp is CPU-bound. cc-rs picks
 # -O0 for libwebp's C source in dev builds by default, which makes
