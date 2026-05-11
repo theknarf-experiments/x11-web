@@ -1,13 +1,11 @@
-//! Endian-aware fork of x11rb-protocol, generated at build time from a
-//! patched x11rb generator. See `build.rs` for the round-trip.
+//! Endian-aware fork of `x11rb-protocol`.
 //!
-//! This file is a placeholder for the spike. The next steps will:
-//! - patch the generator to thread `ByteOrder` through `TryParse` /
-//!   `Serialize` emission;
-//! - vendor (or pull in) x11rb-protocol's framework half (`x11_utils`,
-//!   `errors`, etc.) so the generated module compiles standalone;
-//! - re-export the resulting `protocol::*` from this crate.
+//! For now this is a thin re-export of the upstream crate; the workspace
+//! `[patch.crates-io]` redirects to our regenerated fork at
+//! `tools/x11rb-fork/x11rb-protocol/` (see `tools/setup-x11rb-fork.sh`),
+//! so this re-export already picks up any generator-side patches.
+//!
+//! Endian-aware traits and serialize helpers will land here as a layer
+//! on top of `x11rb_protocol::*` in subsequent commits.
 
-/// Path to the directory of generated `.rs` files. Exposed so consumers (or
-/// integration tests) can sanity-check the build artefact.
-pub const GENERATED_DIR: &str = concat!(env!("OUT_DIR"), "/protocol");
+pub use x11rb_protocol::*;

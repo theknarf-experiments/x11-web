@@ -3,19 +3,18 @@ name = "x11rb-protocol-msb"
 version = "0.1.0"
 edition = "2021"
 publish = false
-build = "build.rs"
 
 [lib]
 path = "src/lib.rs"
 
 [dependencies]
-# (none yet — this spike just confirms the build-time generation round-trips)
-
-[build-dependencies]
-# x11rb's generator is `publish = false` in the upstream workspace, so we
-# pull both it and its sibling `xcbgen` from git pinned to a known rev.
-# `tools/setup-x11rb-fork.sh` applies our patches to a working copy under
-# `tools/x11rb-fork/`, and the workspace-root `[patch."<git-url>"]`
-# redirects Cargo here.
-x11rb-generator = { git = "https://github.com/psychon/x11rb.git", rev = "4cd9f2429a9e83d8963e569b977df79894f70cab" }
-xcbgen = { git = "https://github.com/psychon/x11rb.git", rev = "4cd9f2429a9e83d8963e569b977df79894f70cab" }
+# Pinned to the same rev `tools/setup-x11rb-fork.sh` uses, and redirected
+# via the workspace `[patch.crates-io]` table to our patched fork. Future
+# endian-aware extensions live in this crate as a thin layer on top.
+x11rb-protocol = { version = "0.13", features = [
+    "request-parsing",
+    "composite", "damage", "dbe", "dpms", "dri3", "glx", "present",
+    "randr", "record", "render", "res", "screensaver", "shape", "shm",
+    "sync", "xf86vidmode", "xfixes", "xinerama", "xinput", "xkb",
+    "xtest", "xv",
+] }
