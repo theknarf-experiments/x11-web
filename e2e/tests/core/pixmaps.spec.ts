@@ -62,20 +62,6 @@ test.describe.serial("Drawable depth handling (Phase 7)", () => {
 });
 
 test.describe.serial("x11perf smoke tests", () => {
-	let x11perfAvailable = false;
-
-	test("detect x11perf availability", async ({ sidecarContainer }) => {
-		const check = await execInSidecar(
-			sidecarContainer,
-			"command -v x11perf 2>/dev/null && echo AVAILABLE || echo MISSING",
-		);
-		x11perfAvailable = check.includes("AVAILABLE");
-		if (!x11perfAvailable) {
-			console.log("x11perf not installed – tests will be skipped");
-		}
-		expect(true).toBe(true);
-	});
-
 	for (const { flag, label } of [
 		{ flag: "-rect500", label: "500px rectangles" },
 		{ flag: "-line500", label: "500px lines" },
@@ -83,7 +69,6 @@ test.describe.serial("x11perf smoke tests", () => {
 		{ flag: "-copypixwin500", label: "500px pixmap-to-window copy" },
 	]) {
 		test(`x11perf ${flag} (${label})`, async ({ sidecarContainer }) => {
-			test.skip(!x11perfAvailable, "x11perf not available");
 			test.setTimeout(60_000);
 
 			const output = await execInSidecar(

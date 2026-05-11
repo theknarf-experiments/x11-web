@@ -356,11 +356,9 @@ test.describe.serial("Advanced protocol compliance", () => {
 		expect(output).toContain("dbe_present=True");
 	});
 
-	// DRI3 was removed from the server (commit 60b4bd3).
-	test.skip("DRI3 extension is available", async ({ sidecarContainer }) => {
-		const output = (await runPythonScript(sidecarContainer, "dri3_extension_is_available.py", { env: { DISPLAY: ":99" } })).output.trim();
-		expect(output).toContain("dri3_present=True");
-	});
+	// DRI3 is intentionally not advertised — we have no DRM/GPU access
+	// to back it. dri3.spec.ts already asserts QueryExtension reports it
+	// absent so a stray re-registration would surface there.
 
 	test("Present extension is available", async ({ sidecarContainer }) => {
 		const output = (await runPythonScript(sidecarContainer, "present_extension_is_available.py", { env: { DISPLAY: ":99" } })).output.trim();

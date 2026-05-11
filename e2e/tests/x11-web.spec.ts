@@ -3380,6 +3380,11 @@ test("Xts: drawing primitives", async ({ sidecarContainer }) => {
 // `timeout 15` — hundreds of binaries, hours of wall time. Re-enable
 // after bounding the discovery set (e.g. cap at 50 binaries or filter to
 // a stable subset) or hoisting the run into a separate slow-suite job.
+// XTS upstream binaries are TET tests that need a tcc/tcm runner to
+// produce pass/fail signals; running them as plain executables either
+// hangs or returns useless statuses. We exercise the same protocol
+// surface via the focused "Xts: …" tests above, which are byte-level
+// asserts the X server passes today.
 test.skip("Xts: built test binaries from xts-src", async ({ sidecarContainer }) => {
 	test.setTimeout(120_000);
 	// Run any TET-based Xts test binaries that were successfully

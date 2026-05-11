@@ -170,14 +170,6 @@ test.describe("Application smoke tests", () => {
 test.describe("Toolkit smoke tests", () => {
 	test("Tk (wish) renders a window", async ({ sidecarContainer }) => {
 		test.setTimeout(20_000);
-		const which = await sidecarContainer.exec([
-			"bash", "-c",
-			"which wish 2>/dev/null || echo NONE",
-		]);
-		if (which.output.trim() === "NONE") {
-			test.skip();
-			return;
-		}
 		const result = await sidecarContainer.exec([
 			"bash", "-c", [
 				"export DISPLAY=:99",
@@ -190,14 +182,6 @@ test.describe("Toolkit smoke tests", () => {
 	});
 
 	test("xfontsel starts and renders", async ({ sidecarContainer }) => {
-		const which = await sidecarContainer.exec([
-			"bash", "-c",
-			"which xfontsel 2>/dev/null || echo NONE",
-		]);
-		if (which.output.trim() === "NONE") {
-			test.skip();
-			return;
-		}
 		const result = await sidecarContainer.exec([
 			"bash", "-c", [
 				"export DISPLAY=:99",
@@ -245,14 +229,6 @@ test.describe("Toolkit smoke tests", () => {
 test.describe("App compatibility: xedit", () => {
 	test("xedit (Athena widget editor) starts and renders", async ({ sidecarContainer }) => {
 		test.setTimeout(30_000);
-		const which = await sidecarContainer.exec([
-			"bash", "-c",
-			"which xedit 2>/dev/null || echo NONE",
-		]);
-		if (which.output.trim() === "NONE") {
-			test.skip();
-			return;
-		}
 		const result = await sidecarContainer.exec([
 			"bash", "-c", [
 				"export DISPLAY=:99",
