@@ -3772,11 +3772,9 @@ test("GIMP connects to server without protocol errors", async ({
 // -------------------------------------------------------------------
 // Override-redirect windows (menus/tooltips)
 // -------------------------------------------------------------------
-test.skip("override-redirect windows are created without frames", async ({
-	page,
+test("override-redirect windows are created without frames", async ({
 	sidecarContainer,
 }) => {
-	await waitForDock(page);
 	// xmessage with -center creates a normal window; xeyes is normal too.
 	// To test override-redirect we can use xdotool to query window attrs.
 	const result = await sidecarContainer.exec([
@@ -4294,7 +4292,7 @@ test("SHAPE extension is advertised and QueryVersion works", async ({
 // -------------------------------------------------------------------
 // ChangeKeyboardMapping: xmodmap can set and query keymap
 // -------------------------------------------------------------------
-test.skip("ChangeKeyboardMapping stores and retrieves custom mappings", async ({
+test("ChangeKeyboardMapping stores and retrieves custom mappings", async ({
 	sidecarContainer,
 }) => {
 	const result = await sidecarContainer.exec([
@@ -5892,7 +5890,7 @@ test("multiple selection targets via TARGETS atom", async ({
 	expect(passed).toBeGreaterThanOrEqual(5);
 });
 
-test.skip("SelectionClear event on ownership change", async ({
+test("SelectionClear event on ownership change", async ({
 	sidecarContainer,
 }) => {
 	test.setTimeout(30_000);

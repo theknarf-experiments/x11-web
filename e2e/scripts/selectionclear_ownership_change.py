@@ -80,11 +80,14 @@ try:
     d.sync()
     time.sleep(0.2)
     owner = d.get_selection_owner(CLIPBOARD)
-    if owner.id == 0 or owner == Xlib.X.NONE:
+    # python-xlib returns either a raw XID (int) or a resource object
+    # depending on version — handle both.
+    owner_id = owner.id if hasattr(owner, "id") else int(owner)
+    if owner_id == 0 or owner == Xlib.X.NONE:
         passed += 1; print("PASS: selection released (no owner)")
     else:
         # Some servers keep the owner until the connection closes
-        passed += 1; print(f"PASS: selection owner after release = 0x{owner.id:x} (acceptable)")
+        passed += 1; print(f"PASS: selection owner after release = 0x{owner_id:x} (acceptable)")
 except Exception as e:
     failed += 1; print(f"FAIL: release ownership: {e}")
 
