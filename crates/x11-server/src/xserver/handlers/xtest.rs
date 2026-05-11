@@ -227,6 +227,29 @@ pub(crate) fn handle_xtest_request(state: &mut ClientState, data: &[u8], seq: u1
                             state.pointer_y,
                             u32::from(crate::xserver::core::EventMask::POINTER_MOTION),
                         );
+
+                        // Emit Enter/Leave crossing events first if the
+                        // pointer moved to a different window — toolkits
+                        // (GTK3 etc.) update their hovered-widget state
+                        // on these and won't react to a subsequent click
+                        // without them. Without this gating, xdotool
+                        // mousemove-then-click silently no-ops.
+                        // build_crossing_events returns a concatenated
+                        // byte buffer of crossing events; push it to
+                        // pending so it reaches the clients before the
+                        // MotionNotify.
+                        let crossings = super::super::input::build_crossing_events(
+                            state,
+                            event_window,
+                            state.pointer_x,
+                            state.pointer_y,
+                            ex,
+                            ey,
+                        );
+                        if !crossings.is_empty() {
+                            state.pending_events.push(crossings);
+                        }
+
                         let event = build_kbp_event(
                             state,
                             MOTION_NOTIFY_EVENT,
