@@ -50,22 +50,14 @@ test.describe.serial("Resource limits and robustness", () => {
 });
 
 test.describe("Multi-app interaction", () => {
-	// XTEST FakeInput KeyPress events are now broadcast to the focus
-	// window's selecting clients (see crates/x11-server xtest.rs), but
-	// `xdotool type` still doesn't reach xterm — the events arrive at our
-	// server, the focus is set correctly, but xterm doesn't process them.
-	// Likely needs FocusIn synthesis for cross-client SetInputFocus and/or
-	// XKB state synchronisation; tracked as a separate workstream.
+	// Re-attempted with the shared-keymap + XTEST broadcast plumbing in
+	// place, the xterm child still receives no keys: `result.output` comes
+	// back empty (the `xdotool search --name xterm` never finds a WID, so
+	// the `echo xdotool-type-ok` branch never runs). Suggests xterm isn't
+	// surfacing as a top-level the way xdotool expects — its window-name
+	// property or _NET_CLIENT_LIST registration is the next thing to chase.
 	test.skip("xdotool sends keystrokes to a specific window", async ({ sidecarContainer }) => {
 		test.setTimeout(30_000);
-		const check = await sidecarContainer.exec([
-			"bash", "-c",
-			"which xdotool 2>/dev/null || echo NONE",
-		]);
-		if (check.output.trim() === "NONE") {
-			test.skip();
-			return;
-		}
 		const result = await sidecarContainer.exec([
 			"bash", "-c", [
 				"export DISPLAY=:99",
