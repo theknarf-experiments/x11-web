@@ -153,6 +153,87 @@ mod endian_primitive_tests {
 }
 
 #[cfg(test)]
+mod generator_emitted_tryparse_endian_tests {
+    //! Verify the generator-emitted `impl TryParseEndian` actually works
+    //! against real MSB-first wire bytes for a fixed-layout reply struct.
+    use x11rb_protocol::protocol::xproto::GetGeometryReply;
+    use x11rb_protocol::x11_utils::{ByteOrder, TryParseEndian};
+
+    #[test]
+    fn parse_msb_get_geometry_reply() {
+        // Hand-build the wire layout for a GetGeometryReply in MSB:
+        //   1                  reply type
+        //   24                 depth
+        //   0x0042             sequence (MSB)
+        //   0x00000000         length
+        //   0x01234567         root (MSB)
+        //   0xFFF6 (-10)       x i16 (MSB)
+        //   0x0014 (20)        y
+        //   0x0320 (800)       width
+        //   0x0258 (600)       height
+        //   0x0002             border_width
+        //   10 bytes of zero padding to reach 32
+        let mut bytes = vec![
+            1, 24, 0x00, 0x42,
+            0x00, 0x00, 0x00, 0x00,
+            0x01, 0x23, 0x45, 0x67,
+            0xFF, 0xF6,
+            0x00, 0x14,
+            0x03, 0x20,
+            0x02, 0x58,
+            0x00, 0x02,
+        ];
+        bytes.resize(32, 0);
+
+        let (reply, rest) = GetGeometryReply::try_parse_endian(&bytes, ByteOrder::Msb)
+            .expect("parse MSB GetGeometryReply");
+        // `GetGeometryReply` has an `EmbeddedLength` size constraint, so
+        // the parser consumes the whole 32-byte fixed reply including the
+        // trailing pad.
+        assert!(rest.is_empty(), "all 32 bytes consumed");
+        assert_eq!(reply.depth, 24);
+        assert_eq!(reply.sequence, 0x0042);
+        assert_eq!(reply.length, 0);
+        assert_eq!(reply.root, 0x01234567);
+        assert_eq!(reply.x, -10);
+        assert_eq!(reply.y, 20);
+        assert_eq!(reply.width, 800);
+        assert_eq!(reply.height, 600);
+        assert_eq!(reply.border_width, 2);
+    }
+
+    #[test]
+    fn parse_lsb_get_geometry_reply_matches_native_try_parse() {
+        use x11rb_protocol::x11_utils::TryParse;
+        // Build LSB bytes the same way native `try_parse` would expect.
+        let mut bytes = vec![
+            1, 24, 0x42, 0x00,
+            0x00, 0x00, 0x00, 0x00,
+            0x67, 0x45, 0x23, 0x01,
+            0xF6, 0xFF,
+            0x14, 0x00,
+            0x20, 0x03,
+            0x58, 0x02,
+            0x02, 0x00,
+        ];
+        bytes.resize(32, 0);
+
+        let (via_endian, _) =
+            GetGeometryReply::try_parse_endian(&bytes, ByteOrder::Lsb).unwrap();
+        let (via_native, _) = GetGeometryReply::try_parse(&bytes).unwrap();
+        // GetGeometryReply doesn't impl PartialEq upstream; compare fields.
+        assert_eq!(via_endian.depth, via_native.depth);
+        assert_eq!(via_endian.sequence, via_native.sequence);
+        assert_eq!(via_endian.root, via_native.root);
+        assert_eq!(via_endian.x, via_native.x);
+        assert_eq!(via_endian.y, via_native.y);
+        assert_eq!(via_endian.width, via_native.width);
+        assert_eq!(via_endian.height, via_native.height);
+        assert_eq!(via_endian.border_width, via_native.border_width);
+    }
+}
+
+#[cfg(test)]
 mod reply_serialize_tests {
     use super::reply_serialize::*;
     use x11rb_protocol::protocol::xproto::{

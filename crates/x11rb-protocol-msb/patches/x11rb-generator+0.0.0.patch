@@ -1,325 +1,466 @@
-diff --git a/src/lib.rs b/src/lib.rs
-new file mode 100644
-index 0000000..4f62592
---- /dev/null
-+++ b/src/lib.rs
-@@ -0,0 +1,145 @@
-+#![deny(
-+    rust_2018_idioms,
-+    trivial_numeric_casts,
-+    unsafe_code,
-+    unreachable_pub,
-+    unused,
-+    unused_qualifications
-+)]
-+#![forbid(unsafe_code)]
-+// This crate is not shipped to users and does not follow our MSRV
-+#![allow(clippy::incompatible_msrv)]
-+
-+use std::path::{Path, PathBuf};
-+
-+mod generator;
-+
-+#[derive(Debug)]
-+pub enum Error {
-+    FileReadFailed {
-+        _path: PathBuf,
-+        _error: std::io::Error,
-+    },
-+    FileWriteFailed {
-+        _path: PathBuf,
-+        _error: std::io::Error,
-+    },
-+    DirOpenFailed {
-+        _path: PathBuf,
-+        _error: std::io::Error,
-+    },
-+    DirReadFailed {
-+        _path: PathBuf,
-+        _error: std::io::Error,
-+    },
-+    FileIsNotUtf8 {
-+        _path: PathBuf,
-+        _error: std::str::Utf8Error,
-+    },
-+    XmlParseFailed {
-+        _path: PathBuf,
-+        _error: roxmltree::Error,
-+    },
-+    XcbParseFailed {
-+        _path: PathBuf,
-+        _error: xcbgen::ParseError,
-+    },
-+    XcbResolveFailed {
-+        _error: xcbgen::ResolveError,
-+    },
-+}
-+
-+fn list_xmls(dir_path: &Path) -> Result<Vec<PathBuf>, Error> {
-+    let mut files = Vec::new();
-+    let dir_reader = std::fs::read_dir(dir_path).map_err(|e| Error::DirOpenFailed {
-+        _path: dir_path.to_path_buf(),
-+        _error: e,
-+    })?;
-+    for entry in dir_reader {
-+        let entry = entry.map_err(|e| Error::DirReadFailed {
-+            _path: dir_path.to_path_buf(),
-+            _error: e,
-+        })?;
-+        let file_path = entry.path();
-+        if file_path.extension() == Some(std::ffi::OsStr::new("xml")) {
-+            files.push(file_path);
-+        }
-+    }
-+    files.sort();
-+    Ok(files)
-+}
-+
-+fn load_namespace(path: &Path, parser: &mut xcbgen::Parser) -> Result<(), Error> {
-+    let file_bytes = std::fs::read(path).map_err(|e| Error::FileReadFailed {
-+        _path: path.to_path_buf(),
-+        _error: e,
-+    })?;
-+    let file_string = String::from_utf8(file_bytes).map_err(|e| Error::FileIsNotUtf8 {
-+        _path: path.to_path_buf(),
-+        _error: e.utf8_error(),
-+    })?;
-+    let xml_doc = roxmltree::Document::parse(&file_string).map_err(|e| Error::XmlParseFailed {
-+        _path: path.to_path_buf(),
-+        _error: e,
-+    })?;
-+    parser
-+        .parse_namespace(xml_doc.root().first_element_child().unwrap())
-+        .map_err(|e| Error::XcbParseFailed {
-+            _path: path.to_path_buf(),
-+            _error: e,
-+        })?;
-+    Ok(())
-+}
-+
-+/// Writes `data` to `file_path` if the file does not exist or
-+/// its current contents are different. This avoids updating the timestamps
-+/// if the contents have not changed.
-+fn replace_file_if_different(file_path: &Path, data: &[u8]) -> Result<(), Error> {
-+    if file_path.exists() {
-+        let existing_data = std::fs::read(file_path).map_err(|e| Error::FileReadFailed {
-+            _path: file_path.to_path_buf(),
-+            _error: e,
-+        })?;
-+        if existing_data == data {
-+            return Ok(());
-+        }
-+    }
-+
-+    std::fs::write(file_path, data).map_err(|e| Error::FileWriteFailed {
-+        _path: file_path.to_path_buf(),
-+        _error: e,
-+    })?;
-+
-+    Ok(())
-+}
-+
-+/// Run the generator over the XML files in `input_dir`, writing the rendered
-+/// `.rs` files into `proto_output_dir`, `x11rb_output_dir`, and
-+/// `async_output_dir`. The three output directories must already exist.
-+pub fn run(
-+    input_dir: &Path,
-+    proto_output_dir: &Path,
-+    x11rb_output_dir: &Path,
-+    async_output_dir: &Path,
-+) -> Result<(), Error> {
-+    let xml_files = list_xmls(input_dir)?;
-+    let module = xcbgen::defs::Module::new();
-+    let mut parser = xcbgen::Parser::new(module.clone());
-+    for file_path in xml_files.iter() {
-+        load_namespace(file_path, &mut parser)?;
-+    }
-+
-+    xcbgen::resolve(&module).map_err(|e| Error::XcbResolveFailed { _error: e })?;
-+
-+    let generated = generator::generate(&module);
-+    for generated in generated.iter() {
-+        let proto_file_path = proto_output_dir.join(&generated.file_name);
-+        let x11rb_file_path = x11rb_output_dir.join(&generated.file_name);
-+        let async_file_path = async_output_dir.join(&generated.file_name);
-+        replace_file_if_different(&proto_file_path, generated.proto.as_bytes())?;
-+        replace_file_if_different(&x11rb_file_path, generated.x11rb.as_bytes())?;
-+        replace_file_if_different(&async_file_path, generated.async_.as_bytes())?;
-+    }
-+
-+    Ok(())
-+}
-diff --git a/src/main.rs b/src/main.rs
-index 768d872..aa27fe2 100644
---- a/src/main.rs
-+++ b/src/main.rs
-@@ -10,111 +10,10 @@
- // This crate is not shipped to users and does not follow our MSRV
- #![allow(clippy::incompatible_msrv)]
+--- a/src/generator/namespace/parse.rs	2026-05-11 19:23:44.665248425 +0200
++++ b/src/generator/namespace/parse.rs	2026-05-11 19:23:44.669248450 +0200
+@@ -5,6 +5,11 @@
+     Output,
+ };
  
--use std::path::{Path, PathBuf};
-+use std::path::Path;
- use std::process::ExitCode;
- 
--mod generator;
--
--#[derive(Debug)]
--enum Error {
--    FileReadFailed {
--        _path: PathBuf,
--        _error: std::io::Error,
--    },
--    FileWriteFailed {
--        _path: PathBuf,
--        _error: std::io::Error,
--    },
--    DirOpenFailed {
--        _path: PathBuf,
--        _error: std::io::Error,
--    },
--    DirReadFailed {
--        _path: PathBuf,
--        _error: std::io::Error,
--    },
--    FileIsNotUtf8 {
--        _path: PathBuf,
--        _error: std::str::Utf8Error,
--    },
--    XmlParseFailed {
--        _path: PathBuf,
--        _error: roxmltree::Error,
--    },
--    XcbParseFailed {
--        _path: PathBuf,
--        _error: xcbgen::ParseError,
--    },
--    XcbResolveFailed {
--        _error: xcbgen::ResolveError,
--    },
--}
--
--fn list_xmls(dir_path: &Path) -> Result<Vec<PathBuf>, Error> {
--    let mut files = Vec::new();
--    let dir_reader = std::fs::read_dir(dir_path).map_err(|e| Error::DirOpenFailed {
--        _path: dir_path.to_path_buf(),
--        _error: e,
--    })?;
--    for entry in dir_reader {
--        let entry = entry.map_err(|e| Error::DirReadFailed {
--            _path: dir_path.to_path_buf(),
--            _error: e,
--        })?;
--        let file_path = entry.path();
--        if file_path.extension() == Some(std::ffi::OsStr::new("xml")) {
--            files.push(file_path);
--        }
--    }
--    files.sort();
--    Ok(files)
--}
--
--fn load_namespace(path: &Path, parser: &mut xcbgen::Parser) -> Result<(), Error> {
--    let file_bytes = std::fs::read(path).map_err(|e| Error::FileReadFailed {
--        _path: path.to_path_buf(),
--        _error: e,
--    })?;
--    let file_string = String::from_utf8(file_bytes).map_err(|e| Error::FileIsNotUtf8 {
--        _path: path.to_path_buf(),
--        _error: e.utf8_error(),
--    })?;
--    let xml_doc = roxmltree::Document::parse(&file_string).map_err(|e| Error::XmlParseFailed {
--        _path: path.to_path_buf(),
--        _error: e,
--    })?;
--    parser
--        .parse_namespace(xml_doc.root().first_element_child().unwrap())
--        .map_err(|e| Error::XcbParseFailed {
--            _path: path.to_path_buf(),
--            _error: e,
--        })?;
--    Ok(())
--}
--
--/// Writes `data` to `file_path` if the file does not exist or
--/// its current contents are different. This avoids updating the timestamps
--/// if the contents have not changed.
--fn replace_file_if_different(file_path: &Path, data: &[u8]) -> Result<(), Error> {
--    if file_path.exists() {
--        let existing_data = std::fs::read(file_path).map_err(|e| Error::FileReadFailed {
--            _path: file_path.to_path_buf(),
--            _error: e,
--        })?;
--        if existing_data == data {
--            return Ok(());
--        }
--    }
--
--    std::fs::write(file_path, data).map_err(|e| Error::FileWriteFailed {
--        _path: file_path.to_path_buf(),
--        _error: e,
--    })?;
--
--    Ok(())
--}
--
--fn main() -> Result<ExitCode, Error> {
-+fn main() -> ExitCode {
-     let args: Vec<_> = std::env::args_os().collect();
-     if args.len() != 5 {
-         eprintln!("USAGE:");
-@@ -122,39 +21,27 @@ fn main() -> Result<ExitCode, Error> {
-             "    {} <INPUT_DIR> <PROTO_OUTPUT_DIR> <X11RB_OUTPUT_DIR> <ASYNC_OUTPUT_DIR>",
-             args[0].to_string_lossy()
-         );
--        return Ok(ExitCode::FAILURE);
-+        return ExitCode::FAILURE;
-     }
-     let input_dir_path = Path::new(&args[1]);
-     let proto_output_dir_path = Path::new(&args[2]);
-     let x11rb_output_dir_path = Path::new(&args[3]);
-     let async_output_dir_path = Path::new(&args[4]);
- 
--    let xml_files = list_xmls(input_dir_path)?;
--    let module = xcbgen::defs::Module::new();
--    let mut parser = xcbgen::Parser::new(module.clone());
--    for file_path in xml_files.iter() {
--        println!("Loading {file_path:?}");
--        load_namespace(file_path, &mut parser)?;
--    }
--
--    //eprintln!("{:#?}", module);
--    println!("{} XMLs loaded", module.namespaces.borrow().len());
--
--    xcbgen::resolve(&module).map_err(|e| Error::XcbResolveFailed { _error: e })?;
--    println!("Resolved successfully");
--
--    let generated = generator::generate(&module);
--    for generated in generated.iter() {
--        let mut proto_file_path = PathBuf::from(proto_output_dir_path);
--        let mut x11rb_file_path = PathBuf::from(x11rb_output_dir_path);
--        proto_file_path.push(&generated.file_name);
--        x11rb_file_path.push(&generated.file_name);
--        let async_file_path = async_output_dir_path.join(&generated.file_name);
--        replace_file_if_different(&proto_file_path, generated.proto.as_bytes())?;
--        replace_file_if_different(&x11rb_file_path, generated.x11rb.as_bytes())?;
--        replace_file_if_different(&async_file_path, generated.async_.as_bytes())?;
-+    println!("Loading XML files from {input_dir_path:?}");
-+    match x11rb_generator::run(
-+        input_dir_path,
-+        proto_output_dir_path,
-+        x11rb_output_dir_path,
-+        async_output_dir_path,
-+    ) {
-+        Ok(()) => {
-+            println!("Code generated successfully");
-+            ExitCode::SUCCESS
-+        }
-+        Err(e) => {
-+            eprintln!("Generation failed: {e:?}");
-+            ExitCode::FAILURE
-+        }
-     }
--    println!("Code generated successfully");
--
--    Ok(ExitCode::SUCCESS)
++/// `endian = false` emits the native `T::try_parse(...)` form (matching
++/// upstream). `endian = true` emits `T::try_parse_endian(..., endian)`
++/// and `parse_list_endian` instead, with a free variable `endian` of
++/// type [`ByteOrder`] assumed to be in scope at the call site (the
++/// outer `fn try_parse_endian` signature provides it).
+ pub(super) fn emit_field_parse(
+     generator: &NamespaceGenerator<'_, '_>,
+     field: &xcbdefs::FieldDef,
+@@ -12,6 +17,7 @@
+     from: &str,
+     container: FieldContainer,
+     out: &mut Output,
++    endian: bool,
+ ) {
+     match field {
+         xcbdefs::FieldDef::Pad(pad_field) => {
+@@ -46,7 +52,7 @@
+                 out,
+                 "let ({}, remaining) = {};",
+                 rust_field_name,
+-                emit_value_parse(generator, &normal_field.type_, from),
++                emit_value_parse(generator, &normal_field.type_, from, endian),
+             );
+         }
+         xcbdefs::FieldDef::List(list_field) => {
+@@ -112,21 +118,39 @@
+             {
+                 let rust_element_type =
+                     generator.type_to_rust_type(list_field.element_type.type_.get_resolved());
+-                outln!(
+-                    out,
+-                    "let ({}, remaining) = crate::x11_utils::parse_list::<{}>(remaining, \
+-                     {}.try_to_usize()?)?;",
+-                    rust_field_name,
+-                    rust_element_type,
+-                    expr_to_str(
+-                        generator,
+-                        list_field.length_expr.as_ref().unwrap(),
+-                        to_rust_variable_name,
+-                        false,
+-                        None,
+-                        true,
+-                    ),
+-                );
++                if endian {
++                    outln!(
++                        out,
++                        "let ({}, remaining) = crate::x11_utils::parse_list_endian::<{}>(remaining, \
++                         {}.try_to_usize()?, endian)?;",
++                        rust_field_name,
++                        rust_element_type,
++                        expr_to_str(
++                            generator,
++                            list_field.length_expr.as_ref().unwrap(),
++                            to_rust_variable_name,
++                            false,
++                            None,
++                            true,
++                        ),
++                    );
++                } else {
++                    outln!(
++                        out,
++                        "let ({}, remaining) = crate::x11_utils::parse_list::<{}>(remaining, \
++                         {}.try_to_usize()?)?;",
++                        rust_field_name,
++                        rust_element_type,
++                        expr_to_str(
++                            generator,
++                            list_field.length_expr.as_ref().unwrap(),
++                            to_rust_variable_name,
++                            false,
++                            None,
++                            true,
++                        ),
++                    );
++                }
+             } else if let Some(list_len) = list_field.length() {
+                 for i in 0..list_len {
+                     let tmp_name = format!("{rust_field_name}_{i}");
+@@ -135,7 +159,7 @@
+                         "let ({}_{}, remaining) = {};",
+                         rust_field_name,
+                         i,
+-                        emit_value_parse(generator, &list_field.element_type, from),
++                        emit_value_parse(generator, &list_field.element_type, from, endian),
+                     );
+                     emit_value_post_parse(&list_field.element_type, &tmp_name, out);
+                 }
+@@ -174,7 +198,7 @@
+                     outln!(
+                         out,
+                         "let (v, new_remaining) = {};",
+-                        emit_value_parse(generator, &list_field.element_type, from),
++                        emit_value_parse(generator, &list_field.element_type, from, endian),
+                     );
+                     emit_value_post_parse(&list_field.element_type, "v", out);
+                     outln!(out, "remaining = new_remaining;");
+@@ -202,13 +226,25 @@
+                 }
+                 parse_params.push(variable);
+             }
+-            outln!(
+-                out,
+-                "let ({}, remaining) = {}::try_parse({})?;",
+-                rust_field_name,
+-                switch_struct_name,
+-                parse_params.join(", "),
+-            );
++            if endian {
++                let mut endian_params = parse_params.clone();
++                endian_params.push(String::from("endian"));
++                outln!(
++                    out,
++                    "let ({}, remaining) = {}::try_parse_endian({})?;",
++                    rust_field_name,
++                    switch_struct_name,
++                    endian_params.join(", "),
++                );
++            } else {
++                outln!(
++                    out,
++                    "let ({}, remaining) = {}::try_parse({})?;",
++                    rust_field_name,
++                    switch_struct_name,
++                    parse_params.join(", "),
++                );
++            }
+         }
+         xcbdefs::FieldDef::Fd(fd_field) => {
+             let rust_field_name = to_rust_variable_name(&fd_field.name);
+@@ -250,7 +286,7 @@
+                         out,
+                         "let ({}, remaining) = {};",
+                         rust_field_name,
+-                        emit_value_parse(generator, &expr_ref.type_, from),
++                        emit_value_parse(generator, &expr_ref.type_, from, endian),
+                     );
+                 }
+                 _ => {
+@@ -260,7 +296,12 @@
+                     assert_eq!(expr_ref.name, "odd_length");
+                     outln!(
+                         out,
+-                        "let (odd_length, remaining) = bool::try_parse(remaining)?;"
++                        "let (odd_length, remaining) = {};",
++                        if endian {
++                            "bool::try_parse_endian(remaining, endian)?"
++                        } else {
++                            "bool::try_parse(remaining)?"
++                        },
+                     );
+                     // And there is a matching special case to use this in request parsing.
+                 }
+@@ -295,11 +336,22 @@
+     generator: &NamespaceGenerator<'_, '_>,
+     type_: &xcbdefs::FieldValueType,
+     from: &str,
++    endian: bool,
+ ) -> String {
+     let type_type = type_.type_.get_resolved();
+     let rust_type = generator.type_to_rust_type(type_type);
+     let params = generator.get_type_parse_params(type_type, from);
+-    format!("{}::try_parse({})?", rust_type, params.join(", "))
++    if endian {
++        let mut endian_params = params.clone();
++        endian_params.push(String::from("endian"));
++        format!(
++            "{}::try_parse_endian({})?",
++            rust_type,
++            endian_params.join(", "),
++        )
++    } else {
++        format!("{}::try_parse({})?", rust_type, params.join(", "))
++    }
  }
+ 
+ fn emit_value_post_parse(type_: &xcbdefs::FieldValueType, var_name: &str, out: &mut Output) {
+--- a/src/generator/namespace/struct_type.rs	2026-05-11 19:23:44.665248425 +0200
++++ b/src/generator/namespace/struct_type.rs	2026-05-11 19:23:44.669248450 +0200
+@@ -141,6 +141,7 @@
+                         "remaining",
+                         FieldContainer::Other,
+                         out,
++                        false,
+                     );
+                 }
+                 for field in fields.iter() {
+@@ -208,6 +209,127 @@
+ 
+         outln!(out.indent(), "}}");
+         outln!(out, "}}");
++
++        // Endian-aware parallel impl. Emitted for the trait-impl case
++        // (`impl TryParseEndian for X`) and for the inherent
++        // `pub fn try_parse(value, ext_params)` case (parallel inherent
++        // `pub fn try_parse_endian(value, ext_params, endian)`). FD
++        // types are skipped — server-side FD passing isn't on our path.
++        if !has_fds {
++            if !external_params.is_empty() {
++                outln!(out, "impl {} {{", name);
++                let p = external_params
++                    .iter()
++                    .map(|ext_param| {
++                        format!(
++                            "{}: {}",
++                            to_rust_variable_name(&ext_param.name),
++                            generator.type_to_rust_type(&ext_param.type_),
++                        )
++                    })
++                    .collect::<Vec<_>>();
++                outln!(out.indent(), "#[allow(dead_code)]");
++                outln!(
++                    out.indent(),
++                    "pub fn try_parse_endian({}: &[u8], {}, endian: ByteOrder) -> Result<(Self, &[u8]), ParseError> {{",
++                    input_name,
++                    p.join(", "),
++                );
++            } else {
++                outln!(out, "impl TryParseEndian for {} {{", name);
++                outln!(
++                    out.indent(),
++                    "fn try_parse_endian({}: &[u8], endian: ByteOrder) -> Result<(Self, &[u8]), ParseError> {{",
++                    input_name,
++                );
++            }
++            out.indented(|out| {
++                out.indented(|out| {
++                    // Always touch `endian` so structs whose fields are
++                    // all byte-arrays (and therefore endian-agnostic)
++                    // don't trigger `unused_variables` under the
++                    // crate-wide `#![deny(unused)]`.
++                    outln!(out, "let _ = endian;");
++                    if !matches!(parse_size_constraint, StructSizeConstraint::None) {
++                        outln!(out, "let remaining = initial_value;");
++                    }
++                    NamespaceGenerator::emit_let_value_for_dynamic_align(fields, out);
++                    for field in fields.iter() {
++                        parse::emit_field_parse(
++                            generator,
++                            field,
++                            switch_prefix,
++                            "remaining",
++                            FieldContainer::Other,
++                            out,
++                            true,
++                        );
++                    }
++                    for field in fields.iter() {
++                        if !field
++                            .name()
++                            .map(|field_name| deducible_fields.contains_key(field_name))
++                            .unwrap_or(false)
++                        {
++                            parse::emit_field_post_parse(field, out);
++                        }
++                    }
++                    let field_names = fields
++                        .iter()
++                        .filter_map(|field| {
++                            if generator.field_is_visible(field, &deducible_fields) {
++                                Some(to_rust_variable_name(field.name().unwrap()))
++                            } else {
++                                None
++                            }
++                        })
++                        .collect::<Vec<_>>();
++                    outln!(
++                        out,
++                        "let result = {} {{ {} }};",
++                        name,
++                        field_names.join(", ")
++                    );
++                    match parse_size_constraint {
++                        StructSizeConstraint::None => (),
++                        StructSizeConstraint::Fixed(fixed_size) => {
++                            outln!(out, "let _ = remaining;");
++                            outln!(out, "let remaining = initial_value.get({}..)", fixed_size);
++                            outln!(out.indent(), ".ok_or(ParseError::InsufficientData)?;");
++                        }
++                        StructSizeConstraint::EmbeddedLength { minimum } => {
++                            outln!(out, "let _ = remaining;");
++                            outln!(
++                                out,
++                                "let remaining = initial_value.get({} + length as usize * 4..)",
++                                minimum,
++                            );
++                            outln!(out.indent(), ".ok_or(ParseError::InsufficientData)?;");
++                        }
++                        StructSizeConstraint::LengthExpr(length_expr) => {
++                            outln!(
++                                out,
++                                "let length = {}.try_to_usize()?;",
++                                expr_to_str(
++                                    generator,
++                                    length_expr,
++                                    to_rust_variable_name,
++                                    false,
++                                    None,
++                                    true,
++                                ),
++                            );
++                            outln!(out, "let _ = remaining;");
++                            outln!(out, "let remaining = initial_value.get(length..)");
++                            outln!(out.indent(), ".ok_or(ParseError::InsufficientData)?;");
++                        }
++                    }
++                    outln!(out, "Ok((result, remaining))");
++                })
++            });
++            outln!(out.indent(), "}}");
++            outln!(out, "}}");
++        }
+     }
+ 
+     if generate_serialize {
+--- a/src/generator/namespace/switch.rs	2026-05-11 19:23:44.665248425 +0200
++++ b/src/generator/namespace/switch.rs	2026-05-11 19:23:44.669248450 +0200
+@@ -483,6 +483,7 @@
+                                         "remaining",
+                                         FieldContainer::Other,
+                                         out,
++                                        false,
+                                     );
+                                 }
+                                 for field in case_fields.iter() {
+@@ -580,6 +581,7 @@
+                                         "remaining",
+                                         FieldContainer::Other,
+                                         out,
++                                        false,
+                                     );
+                                 }
+                                 for field in case_fields.iter() {
+@@ -631,6 +633,54 @@
+ 
+     outln!(out.indent(), "}}");
+     outln!(out, "}}");
++
++    // Stub `try_parse_endian` for switch types: delegates to native
++    // `try_parse`. Switch types are concentrated in xinput and aren't on
++    // the hot path for MSB clients yet; threading endian through the
++    // case-by-case body emission is future work.
++    if !external_params.is_empty() {
++        outln!(out, "impl {} {{", name);
++        let p = external_params
++            .iter()
++            .map(|ext_param| {
++                format!(
++                    "{}: {}",
++                    to_rust_variable_name(&ext_param.name),
++                    generator.type_to_rust_type(&ext_param.type_),
++                )
++            })
++            .collect::<Vec<_>>();
++        let arg_names = external_params
++            .iter()
++            .map(|ext_param| to_rust_variable_name(&ext_param.name))
++            .collect::<Vec<_>>();
++        outln!(out.indent(), "#[allow(dead_code)]");
++        outln!(
++            out.indent(),
++            "fn try_parse_endian(value: &[u8], {}, _endian: ByteOrder) -> Result<(Self, &[u8]), ParseError> {{",
++            p.join(", "),
++        );
++        out.indented(|out| {
++            out.indented(|out| {
++                outln!(out, "Self::try_parse(value, {})", arg_names.join(", "));
++            });
++        });
++        outln!(out.indent(), "}}");
++        outln!(out, "}}");
++    } else {
++        outln!(out, "impl TryParseEndian for {} {{", name);
++        outln!(
++            out.indent(),
++            "fn try_parse_endian(value: &[u8], _endian: ByteOrder) -> Result<(Self, &[u8]), ParseError> {{",
++        );
++        out.indented(|out| {
++            out.indented(|out| {
++                outln!(out, "Self::try_parse(value)");
++            });
++        });
++        outln!(out.indent(), "}}");
++        outln!(out, "}}");
++    }
+ }
+ 
+ fn emit_fixed_size_switch_serialize(
+--- a/src/generator/namespace/header.rs	2026-05-11 19:23:44.665248425 +0200
++++ b/src/generator/namespace/header.rs	2026-05-11 19:23:44.669248450 +0200
+@@ -74,7 +74,7 @@
+     outln!(out, "#[allow(unused_imports)]");
+     outln!(
+         out,
+-        "use crate::x11_utils::{{Request, RequestHeader, Serialize, TryParse, TryParseFd}};"
++        "use crate::x11_utils::{{Request, RequestHeader, Serialize, TryParse, TryParseFd, TryParseEndian, ByteOrder, SerializeEndian}};"
+     );
+     if mode == Mode::X11rb {
+         outln!(out, "use std::io::IoSlice;");
+--- a/src/generator/namespace/mod.rs	2026-05-11 19:23:44.665248425 +0200
++++ b/src/generator/namespace/mod.rs	2026-05-11 19:23:44.669248450 +0200
+@@ -457,6 +457,7 @@
+                             "remaining",
+                             FieldContainer::Other,
+                             out,
++                            false,
+                         );
+                         parse::emit_field_post_parse(field, out);
+                         outln!(out, "let _ = remaining;");
+@@ -503,6 +504,19 @@
+             outln!(out, "}}");
+         });
+         outln!(out, "}}");
++        // The union wrapper stores raw bytes; interpretation of its
++        // inner fields is the caller's job, so the endian-aware variant
++        // is endian-agnostic and just delegates.
++        outln!(out, "impl TryParseEndian for {} {{", rust_name);
++        out.indented(|out| {
++            outln!(
++                out,
++                "fn try_parse_endian(value: &[u8], _endian: ByteOrder) -> Result<(Self, &[u8]), ParseError> {{",
++            );
++            outln!(out.indent(), "Self::try_parse(value)");
++            outln!(out, "}}");
++        });
++        outln!(out, "}}");
+ 
+         let mut seen_field_types = HashSet::new();
+ 
+@@ -674,6 +688,19 @@
+             outln!(out, "}}");
+         });
+         outln!(out, "}}");
++        // Event-struct wrappers hold a 32-byte opaque payload; endian-aware
++        // parse falls through to the native impl since interpretation of
++        // the inner bytes is the caller's job.
++        outln!(out, "impl TryParseEndian for {} {{", rust_name);
++        out.indented(|out| {
++            outln!(
++                out,
++                "fn try_parse_endian(value: &[u8], _endian: ByteOrder) -> Result<(Self, &[u8]), ParseError> {{",
++            );
++            outln!(out.indent(), "Self::try_parse(value)");
++            outln!(out, "}}");
++        });
++        outln!(out, "}}");
+ 
+         let mut events_with_from = HashSet::new();
+ 
+--- a/src/generator/namespace/request.rs	2026-05-11 19:23:44.665248425 +0200
++++ b/src/generator/namespace/request.rs	2026-05-11 19:23:44.669248450 +0200
+@@ -997,6 +997,7 @@
+                     from,
+                     FieldContainer::Request(name.to_string()),
+                     out,
++                    false,
+                 );
+                 if !field
+                     .name()

@@ -139,3 +139,60 @@
  #[cfg(all(test, feature = "std"))]
  mod float_tests {
      use super::{Serialize, TryParse};
+@@ -443,6 +568,14 @@
+     }
+ }
+ 
++impl TryParseEndian for bool {
++    fn try_parse_endian(value: &[u8], _endian: ByteOrder) -> Result<(Self, &[u8]), ParseError> {
++        // bool is one byte; endian doesn't matter, but the generator
++        // emits the call with an `endian` argument for uniformity.
++        Self::try_parse(value)
++    }
++}
++
+ impl Serialize for bool {
+     type Bytes = [u8; 1];
+     fn serialize(&self) -> Self::Bytes {
+@@ -453,6 +586,13 @@
+     }
+ }
+ 
++impl SerializeEndian for bool {
++    fn serialize_endian_into(&self, bytes: &mut Vec<u8>, _endian: ByteOrder) {
++        // bool is one byte; endian-independent.
++        bytes.push(u8::from(*self));
++    }
++}
++
+ // Tuple handling
+ 
+ macro_rules! tuple_try_parse {
+@@ -545,6 +685,27 @@
+         result.push(entry);
+         remaining = new_remaining;
+     }
++    Ok((result, remaining))
++}
++
++/// Endian-aware variant of [`parse_list`]. Used by the generator when it
++/// emits the `TryParseEndian` body for a list-typed field.
++#[allow(dead_code)]
++pub(crate) fn parse_list_endian<T>(
++    data: &[u8],
++    list_length: usize,
++    endian: ByteOrder,
++) -> Result<(Vec<T>, &[u8]), ParseError>
++where
++    T: TryParseEndian,
++{
++    let mut remaining = data;
++    let mut result = Vec::with_capacity(list_length);
++    for _ in 0..list_length {
++        let (entry, new_remaining) = T::try_parse_endian(remaining, endian)?;
++        result.push(entry);
++        remaining = new_remaining;
++    }
+     Ok((result, remaining))
+ }
+ 
