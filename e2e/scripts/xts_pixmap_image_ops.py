@@ -26,7 +26,8 @@ except Exception as e:
 
 # Test 3: GetImage from pixmap
 try:
-    image = pm.get_image(0, 0, 100, 100, 0xFFFFFFFF, Xlib.X.ZPixmap)
+    # python-xlib: get_image(x, y, width, height, format, plane_mask)
+    image = pm.get_image(0, 0, 100, 100, Xlib.X.ZPixmap, 0xFFFFFFFF)
     if len(image.data) > 0:
         passed += 1; print(f"PASS: GetImage {len(image.data)} bytes")
     else:

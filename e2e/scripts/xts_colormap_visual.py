@@ -3,9 +3,11 @@ passed = 0; failed = 0
 d = Xlib.display.Display()
 screen = d.screen()
 
-# Test 1: default colormap exists
+# Test 1: default colormap exists. python-xlib >= 0.32 returns a
+# Colormap resource object here; older versions returned the raw XID.
 try:
-    cmap = screen.default_colormap
+    cmap_attr = screen.default_colormap
+    cmap = cmap_attr.id if hasattr(cmap_attr, "id") else cmap_attr
     if cmap > 0:
         passed += 1; print(f"PASS: default colormap id=0x{cmap:x}")
     else:

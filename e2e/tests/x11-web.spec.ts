@@ -1977,7 +1977,7 @@ test("XTS event delivery conformance", async ({ sidecarContainer }) => {
 	expect(result.output).toContain("XTS_EVENT_OK");
 });
 
-test.skip("XTS graphics primitive conformance", async ({ sidecarContainer }) => {
+test("XTS graphics primitive conformance", async ({ sidecarContainer }) => {
 	// Exercises core drawing requests: CreatePixmap, CreateGC,
 	// PolyFillRectangle, PutImage, GetImage, CopyArea, and
 	// FreeGC / FreePixmap. Validates pixel-level correctness
@@ -3298,7 +3298,7 @@ test("CirculateWindow changes stacking order", async ({ sidecarContainer }) => {
 // primitives. Each test runs a self-contained python3 script inside
 // the sidecar container and parses structured pass/fail output.
 
-test.skip("Xts: connection setup and server info", async ({ sidecarContainer }) => {
+test("Xts: connection setup and server info", async ({ sidecarContainer }) => {
 	test.setTimeout(30_000);
 	const result = await runPythonScript(
 		sidecarContainer,
@@ -3376,6 +3376,10 @@ test("Xts: drawing primitives", async ({ sidecarContainer }) => {
 	expect(passed).toBeGreaterThanOrEqual(12);
 });
 
+// TODO: this finds every executable .t in /opt/xts-src and runs it with
+// `timeout 15` — hundreds of binaries, hours of wall time. Re-enable
+// after bounding the discovery set (e.g. cap at 50 binaries or filter to
+// a stable subset) or hoisting the run into a separate slow-suite job.
 test.skip("Xts: built test binaries from xts-src", async ({ sidecarContainer }) => {
 	test.setTimeout(120_000);
 	// Run any TET-based Xts test binaries that were successfully
@@ -4515,7 +4519,7 @@ test.skip("multiple extensions work together without crashes", async ({
 // -------------------------------------------------------------------
 // Xts: colormap and visual operations
 // -------------------------------------------------------------------
-test.skip("Xts: colormap and visual operations", async ({ sidecarContainer }) => {
+test("Xts: colormap and visual operations", async ({ sidecarContainer }) => {
 	test.setTimeout(30_000);
 	const result = await runPythonScript(
 		sidecarContainer,
@@ -5700,7 +5704,7 @@ test("GrabPointer and AllowEvents work correctly", async ({
 // ---------------------------------------------------------------
 // Xts: pixmap and image operations
 // ---------------------------------------------------------------
-test.skip("Xts: pixmap and image operations", async ({ sidecarContainer }) => {
+test("Xts: pixmap and image operations", async ({ sidecarContainer }) => {
 	test.setTimeout(30_000);
 	const result = await runPythonScript(
 		sidecarContainer,

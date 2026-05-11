@@ -26,7 +26,8 @@ d.sync()
 
 # Test 2: GetImage readback to verify pixel data
 try:
-    img = pixmap.get_image(0, 0, 100, 100, 0xFFFFFFFF, Xlib.X.ZPixmap)
+    # python-xlib signature: get_image(x, y, width, height, format, plane_mask)
+    img = pixmap.get_image(0, 0, 100, 100, Xlib.X.ZPixmap, 0xFFFFFFFF)
     data = img.data
     if len(data) >= 4:
         # Check first pixel is red (format depends on server byte order)

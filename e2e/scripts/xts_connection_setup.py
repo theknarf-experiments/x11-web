@@ -5,8 +5,8 @@ try:
     # Test 1: connection succeeds
     passed += 1
     print("PASS: connection established")
-    # Test 2: protocol version
-    v = d.display.info.protocol_major_version
+    # Test 2: protocol version (python-xlib exposes this as protocol_major)
+    v = d.display.info.protocol_major
     if v == 11:
         passed += 1; print(f"PASS: protocol version {v}")
     else:
