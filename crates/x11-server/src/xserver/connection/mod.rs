@@ -19,7 +19,7 @@ use tokio::sync::mpsc;
 use tokio::time::Duration;
 use tracing::{debug, info, warn};
 use x11rb_protocol::protocol::xfixes::{SelectionEvent, SelectionNotifyEvent};
-use x11rb_protocol::protocol::xproto::{ImageOrder, SetupRequest};
+use x11rb_protocol::protocol::xproto::ImageOrder;
 
 /// X11 setup-request `byte_order` byte values: 0x6c ('l') means LSB-first /
 /// little-endian; 0x42 ('B') means MSB-first / big-endian.
@@ -191,8 +191,12 @@ pub(crate) async fn handle_client(
         stream.read_exact(&mut setup_buf[12..]).await?;
     }
 
-    let _setup_request = SetupRequest::try_parse(&setup_buf)
-        .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, format!("Bad setup: {e:?}")))?;
+    // The x11rb-derived `SetupRequest::try_parse` reads field lengths as
+    // little-endian only, so calling it on an MSB-first setup would
+    // misparse `authorization_protocol_name_len` and fail before we
+    // ever reach the auth check. We've already parsed `auth_name_len`
+    // and `auth_data_len` with the correct byte order above and sized
+    // `setup_buf` accordingly, so there's no extra validation to do.
 
     // Validate MIT-MAGIC-COOKIE-1 auth.
     // - If the client presents MIT-MAGIC-COOKIE-1, the data must match exactly.
