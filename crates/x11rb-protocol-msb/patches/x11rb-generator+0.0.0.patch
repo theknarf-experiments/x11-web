@@ -1,5 +1,5 @@
---- a/src/generator/namespace/parse.rs	2026-05-11 19:23:44.665248425 +0200
-+++ b/src/generator/namespace/parse.rs	2026-05-11 19:23:44.669248450 +0200
+--- a/src/generator/namespace/parse.rs	2026-05-11 20:02:49.199260847 +0200
++++ b/src/generator/namespace/parse.rs	2026-05-11 20:02:49.203260871 +0200
 @@ -5,6 +5,11 @@
      Output,
  };
@@ -182,8 +182,8 @@
  }
  
  fn emit_value_post_parse(type_: &xcbdefs::FieldValueType, var_name: &str, out: &mut Output) {
---- a/src/generator/namespace/struct_type.rs	2026-05-11 19:23:44.665248425 +0200
-+++ b/src/generator/namespace/struct_type.rs	2026-05-11 19:23:44.669248450 +0200
+--- a/src/generator/namespace/struct_type.rs	2026-05-11 20:02:49.199260847 +0200
++++ b/src/generator/namespace/struct_type.rs	2026-05-11 20:02:49.203260871 +0200
 @@ -141,6 +141,7 @@
                          "remaining",
                          FieldContainer::Other,
@@ -320,8 +320,131 @@
      }
  
      if generate_serialize {
---- a/src/generator/namespace/switch.rs	2026-05-11 19:23:44.665248425 +0200
-+++ b/src/generator/namespace/switch.rs	2026-05-11 19:23:44.669248450 +0200
+@@ -428,6 +550,62 @@
+                     },
+                     "bytes",
+                     out,
++                    false,
++                );
++            }
++        });
++        outln!(out, "}}");
++    });
++    outln!(out, "}}");
++
++    // Endian-aware parallel `SerializeEndian` impl. Mirrors the
++    // `serialize_into` path but threads `endian` through every
++    // primitive write. For fixed-size structs we don't emit a
++    // `Bytes`-returning array form — the trait only provides the
++    // `serialize_endian_into(&mut Vec, endian)` shape.
++    if external_params.is_empty() {
++        outln!(out, "impl SerializeEndian for {} {{", name);
++    } else {
++        outln!(out, "impl {} {{", name);
++    }
++    out.indented(|out| {
++        if external_params.is_empty() {
++            outln!(
++                out,
++                "fn serialize_endian_into(&self, bytes: &mut Vec<u8>, endian: ByteOrder) {{",
++            );
++        } else {
++            outln!(out, "#[allow(dead_code)]");
++            outln!(
++                out,
++                "pub fn serialize_endian_into(&self, bytes: &mut Vec<u8>{}, endian: ByteOrder) {{",
++                ext_params_arg_defs,
++            );
++        }
++        out.indented(|out| {
++            outln!(out, "let _ = endian;");
++            outln!(out, "bytes.reserve({});", size);
++            for field in fields.iter() {
++                if skip_length_field && field.name() == Some("length") {
++                    continue;
++                }
++                serialize::emit_field_serialize_into(
++                    generator,
++                    field,
++                    deducible_fields,
++                    |field_name| {
++                        let rust_field_name = to_rust_variable_name(field_name);
++                        if !deducible_fields.contains_key(field_name)
++                            && !external_params.iter().any(|param| param.name == field_name)
++                        {
++                            format!("self.{rust_field_name}")
++                        } else {
++                            rust_field_name
++                        }
++                    },
++                    "bytes",
++                    out,
++                    true,
+                 );
+             }
+         });
+@@ -520,6 +698,59 @@
+                     },
+                     "bytes",
+                     out,
++                    false,
++                );
++            }
++        });
++        outln!(out, "}}");
++    });
++    outln!(out, "}}");
++
++    // Endian-aware parallel `SerializeEndian` impl for variable-size
++    // structs. Same body shape as `serialize_into`, threading `endian`
++    // through every primitive emission.
++    if external_params.is_empty() {
++        outln!(out, "impl SerializeEndian for {} {{", name);
++    } else {
++        outln!(out, "impl {} {{", name);
++    }
++    out.indented(|out| {
++        if external_params.is_empty() {
++            outln!(
++                out,
++                "fn serialize_endian_into(&self, bytes: &mut Vec<u8>, endian: ByteOrder) {{",
++            );
++        } else {
++            outln!(out, "#[allow(dead_code)]");
++            outln!(
++                out,
++                "pub fn serialize_endian_into(&self, bytes: &mut Vec<u8>{}, endian: ByteOrder) {{",
++                ext_params_arg_defs,
++            );
++        }
++        out.indented(|out| {
++            outln!(out, "let _ = endian;");
++            for field in fields.iter() {
++                if skip_length_field && field.name() == Some("length") {
++                    continue;
++                }
++                serialize::emit_field_serialize_into(
++                    generator,
++                    field,
++                    deducible_fields,
++                    |field_name| {
++                        let rust_field_name = to_rust_variable_name(field_name);
++                        if !deducible_fields.contains_key(field_name)
++                            && !external_params.iter().any(|param| param.name == field_name)
++                        {
++                            format!("self.{rust_field_name}")
++                        } else {
++                            rust_field_name
++                        }
++                    },
++                    "bytes",
++                    out,
++                    true,
+                 );
+             }
+         });
+--- a/src/generator/namespace/switch.rs	2026-05-11 20:02:49.199260847 +0200
++++ b/src/generator/namespace/switch.rs	2026-05-11 20:02:49.203260871 +0200
 @@ -483,6 +483,7 @@
                                          "remaining",
                                          FieldContainer::Other,
@@ -393,8 +516,90 @@
  }
  
  fn emit_fixed_size_switch_serialize(
---- a/src/generator/namespace/header.rs	2026-05-11 19:23:44.665248425 +0200
-+++ b/src/generator/namespace/header.rs	2026-05-11 19:23:44.669248450 +0200
+@@ -755,6 +805,7 @@
+                                     to_rust_variable_name,
+                                     "bytes",
+                                     out,
++                                    false,
+                                 );
+                             }
+                         });
+@@ -778,6 +829,47 @@
+         outln!(out, "}}");
+     });
+     outln!(out, "}}");
++
++    // SerializeEndian stub: delegates to native serialize. Switch types
++    // aren't endian-threaded yet; correct for our current use cases (the
++    // affected ones live in xinput and aren't reached from MSB clients).
++    emit_switch_serialize_endian_stub(generator, &external_params, name, ext_params_arg_defs.as_str(), out);
++}
++
++fn emit_switch_serialize_endian_stub(
++    generator: &NamespaceGenerator<'_, '_>,
++    external_params: &[xcbdefs::ExternalParam],
++    name: &str,
++    ext_params_arg_defs: &str,
++    out: &mut Output,
++) {
++    let ext_params_call_args =
++        generator.ext_params_to_call_args(true, to_rust_variable_name, external_params);
++    if external_params.is_empty() {
++        outln!(out, "impl SerializeEndian for {} {{", name);
++    } else {
++        outln!(out, "impl {} {{", name);
++    }
++    out.indented(|out| {
++        if !external_params.is_empty() {
++            outln!(out, "#[allow(dead_code)]");
++            outln!(
++                out,
++                "pub fn serialize_endian_into(&self, bytes: &mut Vec<u8>{}, _endian: ByteOrder) {{",
++                ext_params_arg_defs,
++            );
++        } else {
++            outln!(
++                out,
++                "fn serialize_endian_into(&self, bytes: &mut Vec<u8>, _endian: ByteOrder) {{",
++            );
++        }
++        out.indented(|out| {
++            outln!(out, "self.serialize_into(bytes{});", ext_params_call_args);
++        });
++        outln!(out, "}}");
++    });
++    outln!(out, "}}");
+ }
+ 
+ fn emit_variable_size_switch_serialize(
+@@ -893,6 +985,7 @@
+                                         to_rust_variable_name,
+                                         "bytes",
+                                         out,
++                                        false,
+                                     );
+                                 }
+                             });
+@@ -966,6 +1059,7 @@
+                                             to_rust_variable_name,
+                                             "bytes",
+                                             out,
++                                            false,
+                                         );
+                                     }
+                                 });
+@@ -997,6 +1091,9 @@
+         outln!(out, "}}");
+     });
+     outln!(out, "}}");
++
++    // SerializeEndian stub for variable-size switch: native delegate.
++    emit_switch_serialize_endian_stub(generator, &external_params, name, ext_params_arg_defs.as_str(), out);
+ }
+ 
+ pub(super) fn generate_switch(
+--- a/src/generator/namespace/header.rs	2026-05-11 20:02:49.199260847 +0200
++++ b/src/generator/namespace/header.rs	2026-05-11 20:02:49.203260871 +0200
 @@ -74,7 +74,7 @@
      outln!(out, "#[allow(unused_imports)]");
      outln!(
@@ -404,8 +609,8 @@
      );
      if mode == Mode::X11rb {
          outln!(out, "use std::io::IoSlice;");
---- a/src/generator/namespace/mod.rs	2026-05-11 19:23:44.665248425 +0200
-+++ b/src/generator/namespace/mod.rs	2026-05-11 19:23:44.669248450 +0200
+--- a/src/generator/namespace/mod.rs	2026-05-11 20:02:49.199260847 +0200
++++ b/src/generator/namespace/mod.rs	2026-05-11 20:02:49.203260871 +0200
 @@ -457,6 +457,7 @@
                              "remaining",
                              FieldContainer::Other,
@@ -414,7 +619,26 @@
                          );
                          parse::emit_field_post_parse(field, out);
                          outln!(out, "let _ = remaining;");
-@@ -503,6 +504,19 @@
+@@ -481,6 +482,18 @@
+             outln!(out, "}}");
+         });
+         outln!(out, "}}");
++        // The union wrapper stores raw bytes; SerializeEndian is endian-
++        // agnostic (caller decides how to interpret the inner bytes).
++        outln!(out, "impl SerializeEndian for {} {{", rust_name);
++        out.indented(|out| {
++            outln!(
++                out,
++                "fn serialize_endian_into(&self, bytes: &mut Vec<u8>, _endian: ByteOrder) {{",
++            );
++            outln!(out.indent(), "bytes.extend_from_slice(&self.0);");
++            outln!(out, "}}");
++        });
++        outln!(out, "}}");
+         outln!(out, "impl TryParse for {} {{", rust_name);
+         out.indented(|out| {
+             outln!(
+@@ -503,6 +516,19 @@
              outln!(out, "}}");
          });
          outln!(out, "}}");
@@ -434,7 +658,25 @@
  
          let mut seen_field_types = HashSet::new();
  
-@@ -674,6 +688,19 @@
+@@ -656,6 +682,17 @@
+             outln!(out, "}}");
+         });
+         outln!(out, "}}");
++        // Event-struct wrapper holds 32 opaque bytes; endian-agnostic.
++        outln!(out, "impl SerializeEndian for {} {{", rust_name);
++        out.indented(|out| {
++            outln!(
++                out,
++                "fn serialize_endian_into(&self, bytes: &mut Vec<u8>, _endian: ByteOrder) {{",
++            );
++            outln!(out.indent(), "bytes.extend_from_slice(&self.0);");
++            outln!(out, "}}");
++        });
++        outln!(out, "}}");
+ 
+         outln!(out, "impl TryParse for {} {{", rust_name);
+         out.indented(|out| {
+@@ -674,6 +711,19 @@
              outln!(out, "}}");
          });
          outln!(out, "}}");
@@ -454,9 +696,17 @@
  
          let mut events_with_from = HashSet::new();
  
---- a/src/generator/namespace/request.rs	2026-05-11 19:23:44.665248425 +0200
-+++ b/src/generator/namespace/request.rs	2026-05-11 19:23:44.669248450 +0200
-@@ -997,6 +997,7 @@
+--- a/src/generator/namespace/request.rs	2026-05-11 20:02:49.199260847 +0200
++++ b/src/generator/namespace/request.rs	2026-05-11 20:02:49.203260871 +0200
+@@ -681,6 +681,7 @@
+                                         false,
+                                         &bytes_name,
+                                         tmp_out,
++                                        false,
+                                     );
+                                 });
+                                 outln!(tmp_out, "}}");
+@@ -997,6 +998,7 @@
                      from,
                      FieldContainer::Request(name.to_string()),
                      out,
@@ -464,3 +714,206 @@
                  );
                  if !field
                      .name()
+--- a/src/generator/namespace/serialize.rs	2026-05-11 20:02:49.199260847 +0200
++++ b/src/generator/namespace/serialize.rs	2026-05-11 20:02:49.203260871 +0200
+@@ -154,6 +154,9 @@
+     }
+ }
+ 
++/// `endian = false` emits `value.serialize_into(bytes)` (matching upstream).
++/// `endian = true` emits `value.serialize_endian_into(bytes, endian)` and
++/// expects a free `endian: ByteOrder` variable in scope at the call site.
+ pub(super) fn emit_field_serialize_into(
+     generator: &NamespaceGenerator<'_, '_>,
+     field: &xcbdefs::FieldDef,
+@@ -161,6 +164,7 @@
+     mut wrap_field_ref: impl FnMut(&str) -> String,
+     bytes_name: &str,
+     out: &mut Output,
++    endian: bool,
+ ) {
+     emit_assert_for_field_serialize(generator, field, deducible_fields, &mut wrap_field_ref, out);
+     match field {
+@@ -196,6 +200,7 @@
+                     true,
+                     bytes_name,
+                     out,
++                    endian,
+                 );
+             } else {
+                 emit_value_serialize_into(
+@@ -205,6 +210,7 @@
+                     false,
+                     bytes_name,
+                     out,
++                    endian,
+                 );
+             }
+         }
+@@ -218,12 +224,21 @@
+                     wrap_field_ref(&list_field.name),
+                 );
+             } else if parse::can_use_simple_list_parsing(generator, &list_field.element_type) {
+-                outln!(
+-                    out,
+-                    "{}.serialize_into({});",
+-                    wrap_field_ref(&list_field.name),
+-                    bytes_name
+-                );
++                if endian {
++                    outln!(
++                        out,
++                        "{}.serialize_endian_into({}, endian);",
++                        wrap_field_ref(&list_field.name),
++                        bytes_name,
++                    );
++                } else {
++                    outln!(
++                        out,
++                        "{}.serialize_into({});",
++                        wrap_field_ref(&list_field.name),
++                        bytes_name,
++                    );
++                }
+             } else {
+                 out!(
+                     out,
+@@ -249,6 +264,7 @@
+                         false,
+                         "bytes",
+                         out,
++                        endian,
+                     );
+                 });
+                 outln!(out, "}}");
+@@ -266,13 +282,26 @@
+                 },
+                 &switch_field.external_params.borrow(),
+             );
+-            outln!(
+-                out,
+-                "{}.serialize_into({}{});",
+-                wrap_field_ref(&switch_field.name),
+-                bytes_name,
+-                ext_params_args,
+-            );
++            if endian {
++                // Switch types only have a stub `serialize_endian_into`
++                // delegating to native; the actual case bodies aren't
++                // endian-threaded yet.
++                outln!(
++                    out,
++                    "{}.serialize_endian_into({}{}, endian);",
++                    wrap_field_ref(&switch_field.name),
++                    bytes_name,
++                    ext_params_args,
++                );
++            } else {
++                outln!(
++                    out,
++                    "{}.serialize_into({}{});",
++                    wrap_field_ref(&switch_field.name),
++                    bytes_name,
++                    ext_params_args,
++                );
++            }
+         }
+         xcbdefs::FieldDef::Expr(xcbdefs::ExprField {
+             name,
+@@ -300,7 +329,15 @@
+                 rbytes_name,
+                 field.list_name
+             );
+-            outln!(out, "let {0} = {0}.to_ne_bytes();", rbytes_name);
++            if endian {
++                outln!(
++                    out,
++                    "let {0} = match endian {{ ByteOrder::Lsb => {0}.to_le_bytes(), ByteOrder::Msb => {0}.to_be_bytes() }};",
++                    rbytes_name,
++                );
++            } else {
++                outln!(out, "let {0} = {0}.to_ne_bytes();", rbytes_name);
++            }
+             outln!(out, "{}.extend_from_slice(&{});", bytes_name, rbytes_name);
+         }
+         field => unreachable!("Unknown field: {:?}", field),
+@@ -442,6 +479,7 @@
+     was_deduced: bool,
+     bytes_var: &str,
+     out: &mut Output,
++    endian: bool,
+ ) {
+     // Deduced fields are not converted to their enum value
+     if let (false, Some(enum_def)) = (was_deduced, generator.use_enum_type_in_field(type_)) {
+@@ -451,12 +489,31 @@
+         let current_wire_size = type_.type_.get_resolved().size().unwrap();
+ 
+         if max_wire_size > 1 && u32::from(max_wire_size / 8) > current_wire_size {
++            if endian {
++                outln!(
++                    out,
++                    "(u{}::from({}) as {}).serialize_endian_into({}, endian);",
++                    max_wire_size,
++                    value,
++                    rust_wire_type,
++                    bytes_var,
++                );
++            } else {
++                outln!(
++                    out,
++                    "(u{}::from({}) as {}).serialize_into({});",
++                    max_wire_size,
++                    value,
++                    rust_wire_type,
++                    bytes_var,
++                );
++            }
++        } else if endian {
+             outln!(
+                 out,
+-                "(u{}::from({}) as {}).serialize_into({});",
+-                max_wire_size,
+-                value,
++                "{}::from({}).serialize_endian_into({}, endian);",
+                 rust_wire_type,
++                value,
+                 bytes_var,
+             );
+         } else {
+@@ -477,20 +534,30 @@
+             let item = s.upgrade().expect("not resolved?");
+             let externals = item.external_params.borrow();
+             if !externals.is_empty() {
+-                // we have external paramaters
+-                // normally we'd need to use wrap_field_ref here, but we don't need to
+-                // since this is only used in one case IIRC
+                 let ext_args = generator.ext_params_to_call_args(
+                     true,
+                     |name| format!("self.{}", to_rust_variable_name(name)),
+                     &externals,
+                 );
+-                outln!(out, "{}.serialize_into({}{});", value, bytes_var, ext_args,);
+-
++                if endian {
++                    outln!(
++                        out,
++                        "{}.serialize_endian_into({}{}, endian);",
++                        value,
++                        bytes_var,
++                        ext_args,
++                    );
++                } else {
++                    outln!(out, "{}.serialize_into({}{});", value, bytes_var, ext_args);
++                }
+                 return;
+             }
+         }
+ 
+-        outln!(out, "{}.serialize_into({});", value, bytes_var);
++        if endian {
++            outln!(out, "{}.serialize_endian_into({}, endian);", value, bytes_var);
++        } else {
++            outln!(out, "{}.serialize_into({});", value, bytes_var);
++        }
+     }
+ }

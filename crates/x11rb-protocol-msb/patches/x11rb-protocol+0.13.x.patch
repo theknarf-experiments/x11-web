@@ -1,5 +1,5 @@
---- a/src/x11_utils.rs
-+++ b/src/x11_utils.rs
+--- a/src/x11_utils.rs	2026-05-11 20:02:49.159260609 +0200
++++ b/src/x11_utils.rs	2026-05-11 20:02:49.179260728 +0200
 @@ -313,6 +313,53 @@
      fn serialize_into(&self, bytes: &mut Vec<u8>);
  }
@@ -54,7 +54,7 @@
  // Now implement TryParse and Serialize for some primitive data types that we need.
  
  macro_rules! implement_try_parse {
-@@ -386,6 +433,84 @@
+@@ -386,6 +433,92 @@
  forward_float!(f32: u32);
  forward_float!(f64: u64);
  
@@ -136,10 +136,18 @@
 +forward_float_endian!(f32: u32);
 +forward_float_endian!(f64: u64);
 +
++impl<T: SerializeEndian> SerializeEndian for [T] {
++    fn serialize_endian_into(&self, bytes: &mut Vec<u8>, endian: ByteOrder) {
++        for item in self {
++            item.serialize_endian_into(bytes, endian);
++        }
++    }
++}
++
  #[cfg(all(test, feature = "std"))]
  mod float_tests {
      use super::{Serialize, TryParse};
-@@ -443,6 +568,14 @@
+@@ -443,6 +576,14 @@
      }
  }
  
@@ -154,7 +162,7 @@
  impl Serialize for bool {
      type Bytes = [u8; 1];
      fn serialize(&self) -> Self::Bytes {
-@@ -453,6 +586,13 @@
+@@ -453,6 +594,13 @@
      }
  }
  
@@ -168,7 +176,7 @@
  // Tuple handling
  
  macro_rules! tuple_try_parse {
-@@ -545,6 +685,27 @@
+@@ -545,6 +693,27 @@
          result.push(entry);
          remaining = new_remaining;
      }
