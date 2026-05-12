@@ -2,11 +2,10 @@ use tracing::debug;
 
 use super::super::parse_minor;
 use super::PictFilter;
-use crate::xserver::reply::serialize_var_reply;
+use crate::xserver::reply::{byte_order_of, serialize_var_reply};
 use crate::xserver::ClientState;
 use x11rb_protocol::protocol::render::{QueryFiltersReply, SetPictureFilterRequest};
 use x11rb_protocol::protocol::xproto::Str;
-use x11rb_protocol::x11_utils::ByteOrder;
 
 /// SetPictureFilter (RENDER minor opcode 30).
 /// Sets the filter on a picture (nearest, bilinear, etc.).
@@ -36,7 +35,6 @@ pub(crate) fn handle_set_picture_filter(state: &mut ClientState, data: &[u8], se
 }
 
 pub(crate) fn handle_query_filters(seq: u16, bo: bool) -> Vec<u8> {
-    let byte_order = if bo { ByteOrder::Msb } else { ByteOrder::Lsb };
     serialize_var_reply(
         &QueryFiltersReply {
             sequence: seq,
@@ -51,6 +49,6 @@ pub(crate) fn handle_query_filters(seq: u16, bo: bool) -> Vec<u8> {
                 },
             ],
         },
-        byte_order,
+        byte_order_of(bo),
     )
 }

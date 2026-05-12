@@ -19,7 +19,7 @@ use tracing::{debug, warn};
 use super::super::client::ClientState;
 use crate::xserver::event::serialize_event;
 use x11rb_protocol::protocol::sync::{
-    AlarmNotifyEvent, InitializeReply, InitializeRequest, Int64, ALARMSTATE, TESTTYPE, VALUETYPE,
+    AlarmNotifyEvent, InitializeReply, InitializeRequest, Int64, ALARMSTATE, TESTTYPE,
 };
 
 /// A SYNC counter (system or client-created).

@@ -5,7 +5,6 @@ use x11rb_protocol::protocol::render::{
     QueryPictFormatsReply, QueryPictIndexValuesReply, QueryPictIndexValuesRequest,
     QueryVersionReply, SetPictureClipRectanglesRequest, SubPixel,
 };
-use x11rb_protocol::x11_utils::ByteOrder;
 
 use super::super::parse_minor;
 use super::{
@@ -14,17 +13,9 @@ use super::{
 };
 use crate::xserver::core::require_len;
 use crate::xserver::core::{read_u32_bo, ROOT_VISUAL};
-use crate::xserver::reply::{serialize_reply, serialize_var_reply};
+use crate::xserver::reply::{byte_order_of, serialize_reply, serialize_var_reply};
 use crate::xserver::request::request_header;
 use crate::xserver::ClientState;
-
-fn to_byte_order(msb_first: bool) -> ByteOrder {
-    if msb_first {
-        ByteOrder::Msb
-    } else {
-        ByteOrder::Lsb
-    }
-}
 
 /// QueryVersion: reply with version 0.11
 pub(crate) fn handle_query_version(seq: u16, bo: bool) -> Vec<u8> {
@@ -35,7 +26,7 @@ pub(crate) fn handle_query_version(seq: u16, bo: bool) -> Vec<u8> {
             major_version: 0,
             minor_version: 11,
         },
-        to_byte_order(bo),
+        byte_order_of(bo),
     )
 }
 
@@ -189,7 +180,7 @@ pub(crate) fn handle_query_pict_formats(seq: u16, bo: bool) -> Vec<u8> {
             screens,
             subpixels: vec![SubPixel::UNKNOWN],
         },
-        to_byte_order(bo),
+        byte_order_of(bo),
     )
 }
 

@@ -258,28 +258,6 @@ pub(crate) fn write_u32_bo(buf: &mut [u8], offset: usize, val: u32, msb_first: b
     buf[offset..offset + 4].copy_from_slice(&bytes);
 }
 
-/// Helper to write u16 into a buffer in the specified byte order.
-#[inline]
-pub(crate) fn write_u16_bo(buf: &mut [u8], offset: usize, val: u16, msb_first: bool) {
-    let bytes = if msb_first {
-        val.to_be_bytes()
-    } else {
-        val.to_le_bytes()
-    };
-    buf[offset..offset + 2].copy_from_slice(&bytes);
-}
-
-/// Helper to write i16 into a buffer in the specified byte order.
-#[inline]
-pub(crate) fn write_i16_bo(buf: &mut [u8], offset: usize, val: i16, msb_first: bool) {
-    let bytes = if msb_first {
-        val.to_be_bytes()
-    } else {
-        val.to_le_bytes()
-    };
-    buf[offset..offset + 2].copy_from_slice(&bytes);
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -408,47 +386,6 @@ mod tests {
     }
 
     // -----------------------------------------------------------------------
-    // write_u16_bo
-    // -----------------------------------------------------------------------
-
-    #[test]
-    fn write_u16_bo_little_endian() {
-        let mut buf = [0u8; 4];
-        write_u16_bo(&mut buf, 0, 0x1234, false);
-        assert_eq!(&buf[0..2], &[0x34, 0x12]);
-    }
-
-    #[test]
-    fn write_u16_bo_big_endian() {
-        let mut buf = [0u8; 4];
-        write_u16_bo(&mut buf, 0, 0x1234, true);
-        assert_eq!(&buf[0..2], &[0x12, 0x34]);
-    }
-
-    #[test]
-    fn write_u16_bo_le_max() {
-        let mut buf = [0u8; 2];
-        write_u16_bo(&mut buf, 0, u16::MAX, false);
-        assert_eq!(&buf, &[0xFF, 0xFF]);
-    }
-
-    #[test]
-    fn write_u16_bo_be_max() {
-        let mut buf = [0u8; 2];
-        write_u16_bo(&mut buf, 0, u16::MAX, true);
-        assert_eq!(&buf, &[0xFF, 0xFF]);
-    }
-
-    #[test]
-    fn write_u16_bo_offset() {
-        let mut buf = [0u8; 4];
-        write_u16_bo(&mut buf, 2, 0xABCD, false);
-        assert_eq!(&buf[2..4], &[0xCD, 0xAB]);
-        write_u16_bo(&mut buf, 2, 0xABCD, true);
-        assert_eq!(&buf[2..4], &[0xAB, 0xCD]);
-    }
-
-    // -----------------------------------------------------------------------
     // write_u32_bo
     // -----------------------------------------------------------------------
 
@@ -481,82 +418,8 @@ mod tests {
     }
 
     // -----------------------------------------------------------------------
-    // write_i16_bo
-    // -----------------------------------------------------------------------
-
-    #[test]
-    fn write_i16_bo_little_endian_positive() {
-        let mut buf = [0u8; 2];
-        write_i16_bo(&mut buf, 0, 42i16, false);
-        assert_eq!(&buf, &[0x2A, 0x00]);
-    }
-
-    #[test]
-    fn write_i16_bo_big_endian_positive() {
-        let mut buf = [0u8; 2];
-        write_i16_bo(&mut buf, 0, 42i16, true);
-        assert_eq!(&buf, &[0x00, 0x2A]);
-    }
-
-    #[test]
-    fn write_i16_bo_le_min() {
-        let mut buf = [0u8; 2];
-        write_i16_bo(&mut buf, 0, i16::MIN, false);
-        assert_eq!(&buf, &[0x00, 0x80]);
-    }
-
-    #[test]
-    fn write_i16_bo_be_min() {
-        let mut buf = [0u8; 2];
-        write_i16_bo(&mut buf, 0, i16::MIN, true);
-        assert_eq!(&buf, &[0x80, 0x00]);
-    }
-
-    #[test]
-    fn write_i16_bo_le_max() {
-        let mut buf = [0u8; 2];
-        write_i16_bo(&mut buf, 0, i16::MAX, false);
-        assert_eq!(&buf, &[0xFF, 0x7F]);
-    }
-
-    #[test]
-    fn write_i16_bo_be_max() {
-        let mut buf = [0u8; 2];
-        write_i16_bo(&mut buf, 0, i16::MAX, true);
-        assert_eq!(&buf, &[0x7F, 0xFF]);
-    }
-
-    // -----------------------------------------------------------------------
     // Round-trip tests
     // -----------------------------------------------------------------------
-
-    #[test]
-    fn round_trip_u16_le() {
-        let values: &[u16] = &[0, 1, 0x1234, u16::MAX - 1, u16::MAX];
-        let mut buf = [0u8; 2];
-        for &v in values {
-            write_u16_bo(&mut buf, 0, v, false);
-            assert_eq!(
-                read_u16_bo(&buf, 0, false),
-                v,
-                "round-trip LE u16 failed for {v}"
-            );
-        }
-    }
-
-    #[test]
-    fn round_trip_u16_be() {
-        let values: &[u16] = &[0, 1, 0x1234, u16::MAX - 1, u16::MAX];
-        let mut buf = [0u8; 2];
-        for &v in values {
-            write_u16_bo(&mut buf, 0, v, true);
-            assert_eq!(
-                read_u16_bo(&buf, 0, true),
-                v,
-                "round-trip BE u16 failed for {v}"
-            );
-        }
-    }
 
     #[test]
     fn round_trip_u32_le() {
@@ -582,34 +445,6 @@ mod tests {
                 read_u32_bo(&buf, 0, true),
                 v,
                 "round-trip BE u32 failed for {v}"
-            );
-        }
-    }
-
-    #[test]
-    fn round_trip_i16_le() {
-        let values: &[i16] = &[0, 1, -1, i16::MIN, i16::MAX, 100, -100];
-        let mut buf = [0u8; 2];
-        for &v in values {
-            write_i16_bo(&mut buf, 0, v, false);
-            assert_eq!(
-                read_i16_bo(&buf, 0, false),
-                v,
-                "round-trip LE i16 failed for {v}"
-            );
-        }
-    }
-
-    #[test]
-    fn round_trip_i16_be() {
-        let values: &[i16] = &[0, 1, -1, i16::MIN, i16::MAX, 100, -100];
-        let mut buf = [0u8; 2];
-        for &v in values {
-            write_i16_bo(&mut buf, 0, v, true);
-            assert_eq!(
-                read_i16_bo(&buf, 0, true),
-                v,
-                "round-trip BE i16 failed for {v}"
             );
         }
     }

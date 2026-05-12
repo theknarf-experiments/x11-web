@@ -52,7 +52,7 @@ const REPEAT_TIMER_DORMANT: std::time::Duration = std::time::Duration::from_secs
 const BIG_REQUEST_MIN_BYTES: usize = 8;
 const BIG_REQUEST_MAX_BYTES: usize = 16 * 1024 * 1024;
 
-use x11rb_protocol::x11_utils::{Serialize, TryParse};
+use x11rb_protocol::x11_utils::Serialize;
 
 use super::atoms::AtomManager;
 use super::client::ClientState;

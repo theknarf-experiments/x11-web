@@ -17,7 +17,7 @@ use tracing::{debug, info};
 use x11rb_protocol::protocol::xproto::{
     AllowEventsRequest, ChangeActivePointerGrabRequest, GrabButtonRequest, GrabKeyRequest,
     GrabKeyboardReply, GrabKeyboardRequest, GrabPointerReply, GrabPointerRequest, GrabServerRequest,
-    GrabStatus, ModMask, UngrabButtonRequest, UngrabKeyRequest, UngrabKeyboardRequest,
+    GrabStatus, UngrabButtonRequest, UngrabKeyRequest, UngrabKeyboardRequest,
     UngrabPointerRequest, UngrabServerRequest,
 };
 
@@ -973,6 +973,7 @@ pub(crate) fn clamp_to_confine(state: &ClientState, x: i16, y: i16) -> (i16, i16
 #[cfg(test)]
 mod tests {
     use super::*;
+    use x11rb_protocol::protocol::xproto::ModMask;
 
     #[test]
     fn any_modifier_matches_x11rb() {

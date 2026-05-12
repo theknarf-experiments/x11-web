@@ -20,6 +20,18 @@ use x11rb_protocol::x11_utils::{ByteOrder, SerializeEndian};
 /// Reply type byte: X11 reply messages always have byte 0 == 1.
 const REPLY_TYPE_BYTE: u8 = 1;
 
+/// Convert a `msb_first` bool flag into the matching x11rb `ByteOrder`.
+/// Used by callers that have a raw bool but not a full `ClientState`
+/// (e.g. the GLX / XInput dispatchers that pass `msb_first` as a parameter).
+#[inline]
+pub(crate) fn byte_order_of(msb_first: bool) -> ByteOrder {
+    if msb_first {
+        ByteOrder::Msb
+    } else {
+        ByteOrder::Lsb
+    }
+}
+
 /// Serialise an x11rb reply struct via the codegen-emitted
 /// `SerializeEndian` impl, padding short fixed-size types to the
 /// 32-byte wire minimum. Use this in preference to `ReplyBuf` whenever
@@ -122,38 +134,9 @@ impl ReplyBuf {
         self
     }
 
-    /// Set an i16 at the given offset (byte-order aware).
-    pub(crate) fn set_i16(mut self, offset: usize, val: i16) -> Self {
-        write_i16(&mut self.buf, offset, val, self.msb_first);
-        self
-    }
-
     /// Set a u32 at the given offset (byte-order aware).
     pub(crate) fn set_u32(mut self, offset: usize, val: u32) -> Self {
         write_u32(&mut self.buf, offset, val, self.msb_first);
-        self
-    }
-
-    /// Set a u64 at the given offset, written as two 32-bit halves in
-    /// the chosen endianness with the low word first. That's the
-    /// layout XRES uses for `pixmap_bytes` in
-    /// `XResourceQueryClientPixmapBytes`, and matches what other X
-    /// servers emit for 64-bit reply fields.
-    pub(crate) fn set_u64(mut self, offset: usize, val: u64) -> Self {
-        let lo = (val & 0xFFFF_FFFF) as u32;
-        let hi = (val >> 32) as u32;
-        let lo_bytes = if self.msb_first {
-            lo.to_be_bytes()
-        } else {
-            lo.to_le_bytes()
-        };
-        let hi_bytes = if self.msb_first {
-            hi.to_be_bytes()
-        } else {
-            hi.to_le_bytes()
-        };
-        self.buf[offset..offset + 4].copy_from_slice(&lo_bytes);
-        self.buf[offset + 4..offset + 8].copy_from_slice(&hi_bytes);
         self
     }
 
@@ -177,16 +160,6 @@ impl ReplyBuf {
 // Standalone byte-order-aware write functions (don't need &self).
 #[inline]
 fn write_u16(buf: &mut [u8], offset: usize, val: u16, msb_first: bool) {
-    let bytes = if msb_first {
-        val.to_be_bytes()
-    } else {
-        val.to_le_bytes()
-    };
-    buf[offset..offset + 2].copy_from_slice(&bytes);
-}
-
-#[inline]
-fn write_i16(buf: &mut [u8], offset: usize, val: i16, msb_first: bool) {
     let bytes = if msb_first {
         val.to_be_bytes()
     } else {
@@ -238,30 +211,6 @@ mod tests {
 
         let be = ReplyBuf::fixed(0, true).set_u32(8, 0x12345678).build();
         assert_eq!(&be[8..12], &[0x12, 0x34, 0x56, 0x78]);
-    }
-
-    #[test]
-    fn set_u64_le_stores_low_word_first() {
-        let reply = ReplyBuf::with_extra(0, 8, false)
-            .set_u64(32, 0x00FF_FFFF_FFFF_FFFF)
-            .build();
-        // Low u32 (0xFFFFFFFF) in LE, then high u32 (0x00FFFFFF) in LE
-        assert_eq!(
-            &reply[32..40],
-            &[0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x00]
-        );
-    }
-
-    #[test]
-    fn set_u64_be_stores_low_word_first_in_be() {
-        let reply = ReplyBuf::with_extra(0, 8, true)
-            .set_u64(32, 0x00FF_FFFF_FFFF_FFFF)
-            .build();
-        // Low u32 (0xFFFFFFFF) in BE, then high u32 (0x00FFFFFF) in BE
-        assert_eq!(
-            &reply[32..40],
-            &[0xFF, 0xFF, 0xFF, 0xFF, 0x00, 0xFF, 0xFF, 0xFF]
-        );
     }
 
     #[test]

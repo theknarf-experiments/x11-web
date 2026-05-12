@@ -56,17 +56,6 @@ impl ClientState {
         self.read_u32(data, offset)
     }
 
-    /// Write a u16 into a reply buffer in the client's byte order.
-    #[inline]
-    pub(crate) fn write_u16(&self, buf: &mut [u8], offset: usize, val: u16) {
-        let bytes = if self.msb_first {
-            val.to_be_bytes()
-        } else {
-            val.to_le_bytes()
-        };
-        buf[offset..offset + 2].copy_from_slice(&bytes);
-    }
-
     /// Write a u32 into a reply buffer in the client's byte order.
     #[inline]
     pub(crate) fn write_u32(&self, buf: &mut [u8], offset: usize, val: u32) {
@@ -76,16 +65,5 @@ impl ClientState {
             val.to_le_bytes()
         };
         buf[offset..offset + 4].copy_from_slice(&bytes);
-    }
-
-    /// Write an i16 into a reply buffer in the client's byte order.
-    #[inline]
-    pub(crate) fn write_i16(&self, buf: &mut [u8], offset: usize, val: i16) {
-        let bytes = if self.msb_first {
-            val.to_be_bytes()
-        } else {
-            val.to_le_bytes()
-        };
-        buf[offset..offset + 2].copy_from_slice(&bytes);
     }
 }

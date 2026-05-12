@@ -9,7 +9,7 @@ use super::{
     build_reply, XV_ATTR_BRIGHTNESS, XV_ATTR_COLORSPACE, XV_ATTR_CONTRAST, XV_ATTR_HUE,
     XV_ATTR_SATURATION, XV_MAJOR_OPCODE,
 };
-use crate::xserver::reply::serialize_var_reply;
+use crate::xserver::reply::{byte_order_of, serialize_var_reply};
 use x11rb_protocol::protocol::xv::{
     AttributeFlag, AttributeInfo, GetPortAttributeReply, GetPortAttributeRequest, GrabPortReply,
     GrabPortRequest, GrabPortStatus, QueryBestSizeReply, QueryBestSizeRequest,
@@ -17,7 +17,6 @@ use x11rb_protocol::protocol::xv::{
     UngrabPortRequest, GET_PORT_ATTRIBUTE_REQUEST, GRAB_PORT_REQUEST, QUERY_BEST_SIZE_REQUEST,
     QUERY_PORT_ATTRIBUTES_REQUEST, SET_PORT_ATTRIBUTE_REQUEST, UNGRAB_PORT_REQUEST,
 };
-use x11rb_protocol::x11_utils::ByteOrder;
 
 pub(crate) fn handle_port_request(
     state: &mut ClientState,
@@ -218,11 +217,6 @@ fn build_query_port_attributes_reply(
             name: a.name.to_vec(),
         })
         .collect();
-    let byte_order = if msb_first {
-        ByteOrder::Msb
-    } else {
-        ByteOrder::Lsb
-    };
     serialize_var_reply(
         &QueryPortAttributesReply {
             sequence: seq,
@@ -230,7 +224,7 @@ fn build_query_port_attributes_reply(
             text_size,
             attributes,
         },
-        byte_order,
+        byte_order_of(msb_first),
     )
 }
 

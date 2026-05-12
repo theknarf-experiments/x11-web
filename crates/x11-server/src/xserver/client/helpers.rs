@@ -12,11 +12,7 @@ impl ClientState {
     /// driving the generator-emitted endian-aware parse or serialise paths.
     #[inline]
     pub(crate) fn byte_order(&self) -> ByteOrder {
-        if self.msb_first {
-            ByteOrder::Msb
-        } else {
-            ByteOrder::Lsb
-        }
+        crate::xserver::reply::byte_order_of(self.msb_first)
     }
 
     // -----------------------------------------------------------------------
