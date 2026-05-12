@@ -40,6 +40,12 @@ pub(crate) fn serialize_reply<R: SerializeEndian>(reply: &R, byte_order: ByteOrd
 /// actual buffer size, byte-order-aware. The caller is responsible for
 /// building the reply struct with whatever fields it wants — `length`
 /// can be 0 and gets overwritten here.
+///
+/// If the codegen-emitted serializer produces a payload that isn't a
+/// multiple of 4 bytes (e.g. a trailing `Vec<u8>` whose length is not
+/// 4-aligned), we zero-pad to the next 4-byte boundary so the wire
+/// length field is a valid word count. The X11 protocol requires
+/// reply length to be expressed in 4-byte words.
 pub(crate) fn serialize_var_reply<R: SerializeEndian>(
     reply: &R,
     byte_order: ByteOrder,
@@ -47,7 +53,8 @@ pub(crate) fn serialize_var_reply<R: SerializeEndian>(
     let mut bytes = Vec::new();
     reply.serialize_endian_into(&mut bytes, byte_order);
     debug_assert!(bytes.len() >= REPLY_HEADER_SIZE);
-    debug_assert!((bytes.len() - REPLY_HEADER_SIZE) % BYTES_PER_WORD == 0);
+    let pad = (BYTES_PER_WORD - (bytes.len() % BYTES_PER_WORD)) % BYTES_PER_WORD;
+    bytes.resize(bytes.len() + pad, 0);
     let length = ((bytes.len() - REPLY_HEADER_SIZE) / BYTES_PER_WORD) as u32;
     let length_bytes = match byte_order {
         ByteOrder::Lsb => length.to_le_bytes(),

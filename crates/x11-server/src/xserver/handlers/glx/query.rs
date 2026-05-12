@@ -13,7 +13,9 @@ use super::{
     GLX_TRANSPARENT_TYPE, GLX_TRUE_COLOR, GLX_VISUAL_ID, GLX_WINDOW_BIT, GLX_X_RENDERABLE,
     GLX_X_VISUAL_TYPE,
 };
-use crate::xserver::reply::ReplyBuf;
+use crate::xserver::reply::serialize_var_reply;
+use x11rb_protocol::protocol::glx::{GetFBConfigsReply, GetVisualConfigsReply};
+use x11rb_protocol::x11_utils::ByteOrder;
 
 // ---------------------------------------------------------------------------
 // GLX_QUERY_VERSION (minor 7)
@@ -28,50 +30,42 @@ pub(crate) fn handle_query_version(seq: u16) -> Vec<u8> {
 // ---------------------------------------------------------------------------
 
 pub(crate) fn handle_get_visual_configs(_data: &[u8], seq: u16) -> Vec<u8> {
-    // Return a single visual config matching ROOT_VISUAL
-    let num_configs: u32 = 1;
-    // Use exactly __GLX_MIN_CONFIG_PROPS (18) properties per config.
-    // Mesa's createConfigsFromProperties reads exactly numProps * 4 bytes.
-    let props_per_config: u32 = 18;
-    let total_props = num_configs * props_per_config;
-
-    let extra_bytes = total_props as usize * 4;
-    let mut reply = ReplyBuf::with_extra(seq, extra_bytes, false)
-        .set_u32(8, num_configs)
-        .set_u32(12, props_per_config);
-
     // Visual config properties — positional format per Mesa's GetVisualConfigs parser.
     // First 18 properties are the standard ones. Order must match Mesa exactly:
     // [0]=visual_id, [1]=class, [2]=rgba, [3]=red, [4]=green, [5]=blue, [6]=alpha,
     // [7..10]=accum RGBA, [11]=doublebuf, [12]=stereo, [13]=bufsize, [14]=depth,
     // [15]=stencil, [16]=aux, [17]=level
     const X_VISUAL_CLASS_TRUE_COLOR: u32 = 4;
-    let props: [u32; 18] = [
-        ROOT_VISUAL,               // [0] visual id
-        X_VISUAL_CLASS_TRUE_COLOR, // [1] class (TrueColor = 4)
-        1,                         // [2] rgba (True)
-        8,                         // [3] red size
-        8,                         // [4] green size
-        8,                         // [5] blue size
-        0,                         // [6] alpha size
-        0,                         // [7] accum red
-        0,                         // [8] accum green
-        0,                         // [9] accum blue
-        0,                         // [10] accum alpha
-        1,                         // [11] double buffer
-        0,                         // [12] stereo
-        24,                        // [13] buffer size (R+G+B+A = 8+8+8+0 = 24)
-        24,                        // [14] depth size
-        8,                         // [15] stencil size
-        0,                         // [16] aux buffers
-        0,                         // [17] level
+    let property_list: Vec<u32> = vec![
+        ROOT_VISUAL,
+        X_VISUAL_CLASS_TRUE_COLOR,
+        1,
+        8,
+        8,
+        8,
+        0,
+        0,
+        0,
+        0,
+        0,
+        1,
+        0,
+        24,
+        24,
+        8,
+        0,
+        0,
     ];
-    for (i, &v) in props.iter().enumerate() {
-        let off = 32 + i * 4;
-        reply.buf_mut()[off..off + 4].copy_from_slice(&v.to_le_bytes());
-    }
 
-    reply.build()
+    serialize_var_reply(
+        &GetVisualConfigsReply {
+            sequence: seq,
+            num_visuals: 1,
+            num_properties: 18,
+            property_list,
+        },
+        ByteOrder::Lsb,
+    )
 }
 
 // ---------------------------------------------------------------------------
@@ -79,20 +73,11 @@ pub(crate) fn handle_get_visual_configs(_data: &[u8], seq: u16) -> Vec<u8> {
 // ---------------------------------------------------------------------------
 
 pub(crate) fn handle_get_fb_configs(_data: &[u8], seq: u16) -> Vec<u8> {
-    let num_configs: u32 = 2;
     // numAttribs in the GLX wire protocol is the number of attribute *pairs*
-    // (key-value), NOT the number of u32 words.  Each attribute occupies
-    // 2 u32s on the wire.  Mesa's __glXInitializeVisualConfigFromTags reads
-    // exactly numAttribs key-value pairs, so getting this wrong makes the
-    // client read past the end of the reply data.
+    // (key-value), NOT the number of u32 words. Each attribute occupies
+    // 2 u32s on the wire. Mesa's __glXInitializeVisualConfigFromTags reads
+    // exactly numAttribs key-value pairs.
     let num_attribs = FBCONFIG_ATTRIB_COUNT as u32;
-    let u32s_per_config = num_attribs * 2;
-
-    let total_u32s = num_configs * u32s_per_config;
-    let extra_bytes = total_u32s as usize * 4;
-    let mut reply = ReplyBuf::with_extra(seq, extra_bytes, false)
-        .set_u32(8, num_configs)
-        .set_u32(12, num_attribs);
 
     // FBConfig 1: 24-bit XRGB (no alpha)
     // GLX_BUFFER_SIZE must equal R+G+B+A = 8+8+8+0 = 24.
@@ -168,15 +153,21 @@ pub(crate) fn handle_get_fb_configs(_data: &[u8], seq: u16) -> Vec<u8> {
         (GLX_MAX_PBUFFER_PIXELS, 4096 * 4096),
     ];
 
-    let mut off = 32;
-    for &(key, val) in config1.iter().chain(config2.iter()) {
-        reply.buf_mut()[off..off + 4].copy_from_slice(&key.to_le_bytes());
-        off += 4;
-        reply.buf_mut()[off..off + 4].copy_from_slice(&val.to_le_bytes());
-        off += 4;
-    }
+    let property_list: Vec<u32> = config1
+        .iter()
+        .chain(config2.iter())
+        .flat_map(|&(k, v)| [k, v])
+        .collect();
 
-    reply.build()
+    serialize_var_reply(
+        &GetFBConfigsReply {
+            sequence: seq,
+            num_fb_configs: 2,
+            num_properties: num_attribs,
+            property_list,
+        },
+        ByteOrder::Lsb,
+    )
 }
 
 // ---------------------------------------------------------------------------

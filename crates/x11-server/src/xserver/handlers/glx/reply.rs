@@ -156,38 +156,64 @@ impl GlxReply {
 // GLX management reply builders (non-single-command replies)
 // ---------------------------------------------------------------------------
 
+use crate::xserver::reply::{serialize_reply, serialize_var_reply};
+use x11rb_protocol::protocol::glx::{
+    AreTexturesResidentReply, GetDrawableAttributesReply, IsDirectReply, MakeCurrentReply,
+    QueryServerStringReply, QueryVersionReply as GlxQueryVersionReply,
+};
+use x11rb_protocol::x11_utils::ByteOrder;
+
 /// MakeCurrent / MakeContextCurrent reply: contextTag in retval[8..12].
 pub(crate) fn make_current_reply(seq: u16, context_tag: u32) -> Vec<u8> {
-    crate::xserver::reply::ReplyBuf::fixed(seq, false)
-        .set_u32(8, context_tag)
-        .build()
+    serialize_reply(
+        &MakeCurrentReply {
+            sequence: seq,
+            length: 0,
+            context_tag,
+        },
+        ByteOrder::Lsb,
+    )
 }
 
-/// IsDirect reply: is_direct at byte[1] (not byte[8]!).
+/// IsDirect reply: is_direct at byte[1].
 pub(crate) fn is_direct_reply(seq: u16, is_direct: bool) -> Vec<u8> {
-    crate::xserver::reply::ReplyBuf::fixed(seq, false)
-        .set_data_byte(if is_direct { 1 } else { 0 })
-        .build()
+    serialize_reply(
+        &IsDirectReply {
+            sequence: seq,
+            length: 0,
+            is_direct,
+        },
+        ByteOrder::Lsb,
+    )
 }
 
 /// QueryVersion reply: major at [8..12], minor at [12..16].
 pub(crate) fn query_version_reply(seq: u16, major: u32, minor: u32) -> Vec<u8> {
-    crate::xserver::reply::ReplyBuf::fixed(seq, false)
-        .set_u32(8, major)
-        .set_u32(12, minor)
-        .build()
+    serialize_reply(
+        &GlxQueryVersionReply {
+            sequence: seq,
+            length: 0,
+            major_version: major,
+            minor_version: minor,
+        },
+        ByteOrder::Lsb,
+    )
 }
 
 /// GetDrawableAttributes / QueryContext reply.
-/// numAttribs at [8..12], key-value pairs at [32..].
+/// numAttribs at [8..12], key-value pairs at [32..]. The wire layout matches
+/// both `GetDrawableAttributesReply` and `QueryContextReply` (both have
+/// `attribs: Vec<u32>` with identical serialization); we use the former.
 pub(crate) fn attrib_pairs_reply(seq: u16, pairs: &[(u32, u32)]) -> Vec<u8> {
-    let extra_bytes = pairs.len() * 8;
-    let mut buf = crate::xserver::reply::ReplyBuf::with_extra(seq, extra_bytes, false)
-        .set_u32(8, pairs.len() as u32);
-    for (i, &(key, val)) in pairs.iter().enumerate() {
-        buf = buf.set_u32(32 + i * 8, key).set_u32(32 + i * 8 + 4, val);
-    }
-    buf.build()
+    let attribs: Vec<u32> = pairs.iter().flat_map(|&(k, v)| [k, v]).collect();
+    serialize_var_reply(
+        &GetDrawableAttributesReply {
+            sequence: seq,
+            length: 0,
+            attribs,
+        },
+        ByteOrder::Lsb,
+    )
 }
 
 /// AreTexturesResident reply.
@@ -197,25 +223,32 @@ pub(crate) fn are_textures_resident_reply(
     all_resident: bool,
     residences: &[u8],
 ) -> Vec<u8> {
-    let extra_padded = residences.len().div_ceil(4) * 4;
-    let mut buf = crate::xserver::reply::ReplyBuf::with_extra(seq, extra_padded, false)
-        .set_u32(8, if all_resident { 1 } else { 0 });
-    buf.buf_mut()[32..32 + residences.len()].copy_from_slice(residences);
-    buf.build()
+    serialize_var_reply(
+        &AreTexturesResidentReply {
+            sequence: seq,
+            ret_val: if all_resident { 1 } else { 0 },
+            data: residences.iter().map(|&b| b != 0).collect(),
+        },
+        ByteOrder::Lsb,
+    )
 }
 
 /// GLX query string reply builder.
 ///
 /// Used by QueryExtensionsString (minor 18) and QueryServerString (minor 19).
-/// Both have the same layout: pad at [8..12], n at [12..16], string at [32..].
-/// The string MUST include the null terminator in `n` (Xorg convention).
+/// Both have the same wire layout. Mesa allocates exactly `n` bytes for the
+/// string and expects the null terminator inside that count, so we embed
+/// the trailing `\0` in the byte vector.
 pub(crate) fn build_glx_string_reply(seq: u16, string: &[u8]) -> Vec<u8> {
-    // Include null terminator — Mesa allocates exactly n bytes without adding '\0'.
-    let n = string.len() + 1;
-    let padded = crate::xserver::core::align_to_4(n);
-    let mut reply =
-        crate::xserver::reply::ReplyBuf::with_extra(seq, padded, false).set_u32(12, n as u32);
-    reply.buf_mut()[32..32 + string.len()].copy_from_slice(string);
-    // Null terminator at [32 + string.len()] is already 0 from ReplyBuf init.
-    reply.build()
+    let mut s = Vec::with_capacity(string.len() + 1);
+    s.extend_from_slice(string);
+    s.push(0);
+    serialize_var_reply(
+        &QueryServerStringReply {
+            sequence: seq,
+            length: 0,
+            string: s,
+        },
+        ByteOrder::Lsb,
+    )
 }
