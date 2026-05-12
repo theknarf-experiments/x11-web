@@ -1,5 +1,4 @@
 //! XKB compatibility map: GetCompatMap, SetCompatMap, and compat compilation.
-use crate::xserver::reply::ReplyBuf;
 
 use tracing::debug;
 
@@ -221,47 +220,54 @@ pub(crate) fn build_xkb_get_compat_map_reply(
     seq: u16,
     device_id: u8,
 ) -> Vec<u8> {
-    let si_list = &state.xkb_compat_si;
-    let n_si = si_list.len() as u16;
+    use crate::xserver::reply::serialize_var_reply;
+    use x11rb_protocol::protocol::xkb::{
+        GetCompatMapReply, ModDef, SAType, SIAction, SetOfGroup, SymInterpret, VMod, VModsLow,
+    };
+    use x11rb_protocol::protocol::xproto::ModMask;
 
-    // Build SI wire data: 16 bytes per entry
-    let mut si_data = Vec::with_capacity(n_si as usize * 16);
-    for si in si_list {
-        // sym (4 bytes)
-        let off = si_data.len();
-        si_data.extend_from_slice(&[0u8; 4]);
-        state.write_u32(&mut si_data, off, si.sym);
-        // mods (1 byte)
-        si_data.push(si.mods);
-        // match (1 byte)
-        si_data.push(si.match_op);
-        // virtualMod (1 byte)
-        si_data.push(si.virtual_mod);
-        // flags (1 byte)
-        si_data.push(si.flags);
-        // action (8 bytes)
-        si_data.extend_from_slice(&si.action);
-    }
+    let si_rtrn: Vec<SymInterpret> = state
+        .xkb_compat_si
+        .iter()
+        .map(|si| {
+            let action_bytes: [u8; 7] = si.action[1..8].try_into().unwrap_or([0; 7]);
+            SymInterpret {
+                sym: si.sym,
+                mods: ModMask::from(si.mods as u16),
+                match_: si.match_op,
+                virtual_mod: VModsLow::from(si.virtual_mod),
+                flags: si.flags,
+                action: SIAction {
+                    type_: SAType::from(si.action[0]),
+                    data: action_bytes,
+                },
+            }
+        })
+        .collect();
 
-    // Group compat: 4 groups, 4 bytes each (mods, realMods, vmods_hi, vmods_lo)
-    let mut group_data = Vec::with_capacity(16);
-    for gc in &state.xkb_group_compat {
-        group_data.push(gc.mods);
-        group_data.push(gc.real_mods);
-        group_data.push((gc.vmods >> 8) as u8);
-        group_data.push((gc.vmods & 0xFF) as u8);
-    }
+    let group_rtrn: Vec<ModDef> = state
+        .xkb_group_compat
+        .iter()
+        .map(|gc| ModDef {
+            mask: ModMask::from(gc.mods as u16),
+            real_mods: ModMask::from(gc.real_mods as u16),
+            vmods: VMod::from(gc.vmods),
+        })
+        .collect();
 
-    let body = [si_data.as_slice(), group_data.as_slice()].concat();
-
-    let mut reply = ReplyBuf::with_extra(seq, body.len(), state.msb_first)
-        .set_data_byte(device_id)
-        .set_u8(8, 0x0F) // groupsRtrn: all 4 groups
-        // 10-11: firstSIRtrn (CARD16) = 0
-        .set_u16(12, n_si) // nSIRtrn
-        .set_u16(14, n_si); // nTotalSI
-    reply.buf_mut()[32..].copy_from_slice(&body);
-    reply.build()
+    serialize_var_reply(
+        &GetCompatMapReply {
+            device_id,
+            sequence: seq,
+            length: 0,
+            groups_rtrn: SetOfGroup::from(0x0Fu8), // all 4 groups
+            first_si_rtrn: 0,
+            n_total_si: si_rtrn.len() as u16,
+            si_rtrn,
+            group_rtrn,
+        },
+        state.byte_order(),
+    )
 }
 
 /// Parse and apply a SetCompatMap request via the typed `xkb::SetCompatMapRequest`.

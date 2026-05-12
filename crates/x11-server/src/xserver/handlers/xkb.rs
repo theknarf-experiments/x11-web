@@ -9,17 +9,20 @@
 //!   device     — ListComponents, GetDeviceInfo, SetDeviceInfo
 use super::parse_minor;
 use crate::xserver::event::serialize_event_with_layout;
-use crate::xserver::reply::ReplyBuf;
-use x11rb_protocol::protocol::ge::QUERY_VERSION_REQUEST as GE_QUERY_VERSION_REQUEST;
+use crate::xserver::reply::serialize_reply;
+use x11rb_protocol::protocol::ge::{
+    QueryVersionReply as GeQueryVersionReply, QUERY_VERSION_REQUEST as GE_QUERY_VERSION_REQUEST,
+};
 use x11rb_protocol::protocol::xkb::{
-    ControlsNotifyEvent, MapNotifyEvent, StateNotifyEvent, BELL_REQUEST, GET_COMPAT_MAP_REQUEST,
-    GET_CONTROLS_REQUEST, GET_DEVICE_INFO_REQUEST, GET_INDICATOR_MAP_REQUEST,
-    GET_INDICATOR_STATE_REQUEST, GET_KBD_BY_NAME_REQUEST, GET_MAP_REQUEST,
-    GET_NAMED_INDICATOR_REQUEST, GET_NAMES_REQUEST, GET_STATE_REQUEST, LATCH_LOCK_STATE_REQUEST,
-    LIST_COMPONENTS_REQUEST, PER_CLIENT_FLAGS_REQUEST, SELECT_EVENTS_REQUEST,
-    SET_COMPAT_MAP_REQUEST, SET_CONTROLS_REQUEST, SET_DEBUGGING_FLAGS_REQUEST,
-    SET_DEVICE_INFO_REQUEST, SET_INDICATOR_MAP_REQUEST, SET_MAP_REQUEST,
-    SET_NAMED_INDICATOR_REQUEST, SET_NAMES_REQUEST, USE_EXTENSION_REQUEST,
+    ControlsNotifyEvent, MapNotifyEvent, PerClientFlag, PerClientFlagsReply,
+    SetDebuggingFlagsReply, StateNotifyEvent, UseExtensionReply, BELL_REQUEST,
+    GET_COMPAT_MAP_REQUEST, GET_CONTROLS_REQUEST, GET_DEVICE_INFO_REQUEST,
+    GET_INDICATOR_MAP_REQUEST, GET_INDICATOR_STATE_REQUEST, GET_KBD_BY_NAME_REQUEST,
+    GET_MAP_REQUEST, GET_NAMED_INDICATOR_REQUEST, GET_NAMES_REQUEST, GET_STATE_REQUEST,
+    LATCH_LOCK_STATE_REQUEST, LIST_COMPONENTS_REQUEST, PER_CLIENT_FLAGS_REQUEST,
+    SELECT_EVENTS_REQUEST, SET_COMPAT_MAP_REQUEST, SET_CONTROLS_REQUEST,
+    SET_DEBUGGING_FLAGS_REQUEST, SET_DEVICE_INFO_REQUEST, SET_INDICATOR_MAP_REQUEST,
+    SET_MAP_REQUEST, SET_NAMED_INDICATOR_REQUEST, SET_NAMES_REQUEST, USE_EXTENSION_REQUEST,
 };
 
 mod compat;
@@ -285,13 +288,15 @@ pub(crate) fn handle_ge_request(state: &mut ClientState, data: &[u8], seq: u16) 
     debug!("Generic Event Extension minor opcode: {minor}");
 
     match minor {
-        GE_QUERY_VERSION_REQUEST => {
-            // QueryVersion: reply with version 1.0
-            ReplyBuf::fixed(seq, state.msb_first)
-                .set_u16(8, 1) // major version
-                .set_u16(10, 0) // minor version
-                .build()
-        }
+        GE_QUERY_VERSION_REQUEST => serialize_reply(
+            &GeQueryVersionReply {
+                sequence: seq,
+                length: 0,
+                major_version: 1,
+                minor_version: 0,
+            },
+            state.byte_order(),
+        ),
         _ => {
             debug!("Unhandled GE minor opcode: {minor}");
             crate::xserver::core::build_error(
@@ -316,14 +321,16 @@ pub(crate) fn handle_xkb_request(state: &mut ClientState, data: &[u8], seq: u16)
     let device_id_byte = if data.len() >= 6 { data[4] } else { 0 };
 
     match minor {
-        USE_EXTENSION_REQUEST => {
-            // UseExtension: reply with supported=true, version 1.0
-            ReplyBuf::fixed(seq, state.msb_first)
-                .set_data_byte(1) // supported = true
-                .set_u16(8, 1) // server major version
-                .set_u16(10, 0) // server minor version
-                .build()
-        }
+        USE_EXTENSION_REQUEST => serialize_reply(
+            &UseExtensionReply {
+                supported: true,
+                sequence: seq,
+                length: 0,
+                server_major: 1,
+                server_minor: 0,
+            },
+            state.byte_order(),
+        ),
         SELECT_EVENTS_REQUEST => handle_xkb_select_events(state, data),
         BELL_REQUEST => {
             // Bell: ring the bell with percent from request.
@@ -389,13 +396,18 @@ pub(crate) fn handle_xkb_request(state: &mut ClientState, data: &[u8], seq: u16)
             let value = u32::from(req.value);
             let result = value & change;
             debug!("PerClientFlags reply");
-            ReplyBuf::fixed(seq, state.msb_first)
-                .set_data_byte(device_id_byte)
-                .set_u32(8, 0x1F) // supported flags (all per-client flags)
-                .set_u32(12, result)
-                .set_u32(16, u32::from(req.auto_ctrls))
-                .set_u32(20, u32::from(req.auto_ctrls_values))
-                .build()
+            serialize_reply(
+                &PerClientFlagsReply {
+                    device_id: device_id_byte,
+                    sequence: seq,
+                    length: 0,
+                    supported: PerClientFlag::from(0x1Fu32),
+                    value: PerClientFlag::from(result),
+                    auto_ctrls: req.auto_ctrls,
+                    auto_ctrls_values: req.auto_ctrls_values,
+                },
+                state.byte_order(),
+            )
         }
         LIST_COMPONENTS_REQUEST => device::handle_list_components(state, seq, device_id_byte),
         GET_KBD_BY_NAME_REQUEST => {
@@ -404,18 +416,19 @@ pub(crate) fn handle_xkb_request(state: &mut ClientState, data: &[u8], seq: u16)
         GET_DEVICE_INFO_REQUEST => device::handle_get_device_info(state, seq, device_id_byte),
         SET_DEVICE_INFO_REQUEST => device::handle_set_device_info(state, data),
         SET_DEBUGGING_FLAGS_REQUEST => {
-            // SetDebuggingFlags: reply with all-zero flags/ctrls.
-            // Wire: 4-7=msg_length, 8-11=affect_flags, 12-15=flags,
-            //       16-19=affect_ctrls, 20-23=ctrls, then message.
-            // 8-11: currentFlags = 0
-            // 12-15: supportedFlags = 0
-            // 16-19: currentCtrls = 0
-            // 20-23: supportedCtrls = 0
-            // All zeros already.
+            let _ = device_id_byte;
             debug!("SetDebuggingFlags: returning zeros");
-            ReplyBuf::fixed(seq, state.msb_first)
-                .set_data_byte(device_id_byte)
-                .build()
+            serialize_reply(
+                &SetDebuggingFlagsReply {
+                    sequence: seq,
+                    length: 0,
+                    current_flags: 0,
+                    current_ctrls: 0,
+                    supported_flags: 0,
+                    supported_ctrls: 0,
+                },
+                state.byte_order(),
+            )
         }
         _ => {
             debug!("Unhandled XKB minor opcode: {minor}");

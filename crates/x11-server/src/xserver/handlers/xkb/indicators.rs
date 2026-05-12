@@ -2,11 +2,13 @@
 
 use super::super::super::client::ClientState;
 use crate::xserver::core::read_u32_bo as read_u32;
-use crate::xserver::reply::ReplyBuf;
+use crate::xserver::reply::{serialize_reply, serialize_var_reply};
+use x11rb_protocol::protocol::xkb::{
+    GetIndicatorMapReply, GetIndicatorStateReply, GetNamedIndicatorReply, IMFlag, IMGroupsWhich,
+    IMModsWhich, IndicatorMap as WireIndicatorMap, SetOfGroup, SetOfGroups, VMod,
+};
 
 /// Real-modifier mask bits as `u8` aliases of `x11rb::xproto::ModMask`.
-/// Used by the XKB indicator state / map handlers, which need raw bytes
-/// rather than the `ModMask` wrapper type. Verified by a test below.
 const MOD_LOCK: u8 = 1 << 1; // Caps Lock
 const MOD_M2: u8 = 1 << 4; // Num Lock
 const MOD_M3: u8 = 1 << 5; // Scroll Lock
@@ -14,34 +16,17 @@ const MOD_M3: u8 = 1 << 5; // Scroll Lock
 /// XkbIM_UseLocked flag for the IndicatorMap whichMods field.
 const WHICH_MODS_USE_LOCKED: u8 = 0x04;
 
-/// XkbIM_UseEffective flag for the IndicatorMap whichGroups field — indicator
-/// tracks the effective keyboard group rather than a fixed group set.
+/// XkbIM_UseEffective flag for the IndicatorMap whichGroups field.
 const WHICH_GROUPS_USE_EFFECTIVE: u8 = 0x80;
 
 /// Group bitmask for "lit when not in group 0" — covers groups 2, 3, and 4.
 const GROUPS_NON_BASE: u8 = 0x0E;
 
-/// XkbIndicatorMapWireDesc layout: 12-byte record per indicator in
-/// `GetIndicatorMap` replies and `SetIndicatorMap` requests.
-mod indicator_map_layout {
-    /// Wire size of one IndicatorMap entry.
-    pub(super) const SIZE: usize = 12;
-    /// u8 flags (XkbIM_NoExplicit etc.).
-    pub(super) const FLAGS: usize = 0;
-    /// u8 whichGroups (XkbIM_UseBase|UseLatched|UseLocked|UseEffective|UseCompat).
-    pub(super) const WHICH_GROUPS: usize = 1;
-    /// u8 groups (group bitmask).
-    pub(super) const GROUPS: usize = 2;
-    /// u8 whichMods (XkbIM_UseBase|UseLatched|UseLocked|UseEffective|UseCompat).
-    pub(super) const WHICH_MODS: usize = 3;
-    /// u8 mods (modifier bitmask).
-    pub(super) const MODS: usize = 4;
-    /// u8 realMods (real modifier bitmask).
-    pub(super) const REAL_MODS: usize = 5;
-    // u16 vmods (virtual modifiers) at offset 6.
-    /// u32 ctrls (controls bitmask) — wire offset 8.
-    pub(super) const CTRLS: usize = 8;
-}
+/// XkbIndicatorMapWireDesc offset of the ctrls u32 — used when parsing
+/// `SetIndicatorMap` requests since the inline ctrls field is at offset 8
+/// within each 12-byte entry.
+const SET_INDICATOR_CTRLS_OFFSET: usize = 8;
+const INDICATOR_MAP_WIRE_SIZE: usize = 12;
 
 /// Handle GetIndicatorState (minor opcode 12).
 pub(crate) fn handle_get_indicator_state(
@@ -51,28 +36,42 @@ pub(crate) fn handle_get_indicator_state(
 ) -> Vec<u8> {
     let mut ind_state: u32 = 0;
     let eff_mods = state.xkb_state.effective_mods();
-    // Indicator 0: Caps Lock
     if eff_mods & MOD_LOCK != 0 {
         ind_state |= 1 << 0;
     }
-    // Indicator 1: Num Lock
     if eff_mods & MOD_M2 != 0 {
         ind_state |= 1 << 1;
     }
-    // Indicator 2: Scroll Lock — not common but supported
     if eff_mods & MOD_M3 != 0 {
         ind_state |= 1 << 2;
     }
-    // Indicator 3: Group (lit when group > 0)
     if state.xkb_state.effective_group() > 0 {
         ind_state |= 1 << 3;
     }
     state.xkb_indicators = ind_state;
 
-    ReplyBuf::fixed(seq, state.msb_first)
-        .set_data_byte(device_id_byte)
-        .set_u32(8, ind_state)
-        .build()
+    serialize_reply(
+        &GetIndicatorStateReply {
+            device_id: device_id_byte,
+            sequence: seq,
+            length: 0,
+            state: ind_state,
+        },
+        state.byte_order(),
+    )
+}
+
+fn empty_indicator_map() -> WireIndicatorMap {
+    WireIndicatorMap {
+        flags: IMFlag::from(0u8),
+        which_groups: IMGroupsWhich::from(0u8),
+        groups: SetOfGroup::from(0u8),
+        which_mods: IMModsWhich::from(0u8),
+        mods: x11rb_protocol::protocol::xproto::ModMask::from(0u16),
+        real_mods: x11rb_protocol::protocol::xproto::ModMask::from(0u16),
+        vmods: VMod::from(0u16),
+        ctrls: x11rb_protocol::protocol::xkb::BoolCtrl::from(0u32),
+    }
 }
 
 /// Handle GetIndicatorMap (minor opcode 13).
@@ -82,58 +81,56 @@ pub(crate) fn handle_get_indicator_map(
     seq: u16,
     device_id_byte: u8,
 ) -> Vec<u8> {
-    // which = bitmask from request (bytes 8-11), return all requested
     let which: u32 = if data.len() >= 12 {
         state.read_u32(data, 8)
     } else {
         0x0F
     };
-    let n_indicators = which.count_ones() as usize;
-    let body_len = n_indicators * indicator_map_layout::SIZE;
-    let mut reply = ReplyBuf::with_extra(seq, body_len, state.msb_first)
-        .set_data_byte(device_id_byte)
-        .set_u32(8, which); // which indicators
-    let mut off = 32;
+    let mut maps: Vec<WireIndicatorMap> = Vec::new();
     for bit in 0..32u32 {
         if which & (1 << bit) == 0 {
             continue;
         }
-        if off + indicator_map_layout::SIZE > reply.buf_mut().len() {
-            break;
-        }
+        let mut m = empty_indicator_map();
         match bit {
             0 => {
                 // Caps Lock: driven by Lock modifier
-                reply.buf_mut()[off + indicator_map_layout::FLAGS] = 0;
-                reply.buf_mut()[off + indicator_map_layout::WHICH_GROUPS] = 0;
-                reply.buf_mut()[off + indicator_map_layout::GROUPS] = 0;
-                reply.buf_mut()[off + indicator_map_layout::WHICH_MODS] = WHICH_MODS_USE_LOCKED;
-                reply.buf_mut()[off + indicator_map_layout::MODS] = MOD_LOCK;
-                reply.buf_mut()[off + indicator_map_layout::REAL_MODS] = MOD_LOCK;
+                m.which_mods = IMModsWhich::from(WHICH_MODS_USE_LOCKED);
+                m.mods = x11rb_protocol::protocol::xproto::ModMask::from(MOD_LOCK as u16);
+                m.real_mods = x11rb_protocol::protocol::xproto::ModMask::from(MOD_LOCK as u16);
             }
             1 => {
-                // Num Lock: driven by Mod2
-                reply.buf_mut()[off + indicator_map_layout::WHICH_MODS] = WHICH_MODS_USE_LOCKED;
-                reply.buf_mut()[off + indicator_map_layout::MODS] = MOD_M2;
-                reply.buf_mut()[off + indicator_map_layout::REAL_MODS] = MOD_M2;
+                m.which_mods = IMModsWhich::from(WHICH_MODS_USE_LOCKED);
+                m.mods = x11rb_protocol::protocol::xproto::ModMask::from(MOD_M2 as u16);
+                m.real_mods = x11rb_protocol::protocol::xproto::ModMask::from(MOD_M2 as u16);
             }
             2 => {
-                // Scroll Lock: driven by Mod3
-                reply.buf_mut()[off + indicator_map_layout::WHICH_MODS] = WHICH_MODS_USE_LOCKED;
-                reply.buf_mut()[off + indicator_map_layout::MODS] = MOD_M3;
-                reply.buf_mut()[off + indicator_map_layout::REAL_MODS] = MOD_M3;
+                m.which_mods = IMModsWhich::from(WHICH_MODS_USE_LOCKED);
+                m.mods = x11rb_protocol::protocol::xproto::ModMask::from(MOD_M3 as u16);
+                m.real_mods = x11rb_protocol::protocol::xproto::ModMask::from(MOD_M3 as u16);
             }
             3 => {
-                // Group indicator: driven by effective group != 0
-                reply.buf_mut()[off + indicator_map_layout::WHICH_GROUPS] =
-                    WHICH_GROUPS_USE_EFFECTIVE;
-                reply.buf_mut()[off + indicator_map_layout::GROUPS] = GROUPS_NON_BASE;
+                m.which_groups = IMGroupsWhich::from(WHICH_GROUPS_USE_EFFECTIVE);
+                m.groups = SetOfGroup::from(GROUPS_NON_BASE);
             }
             _ => {}
         }
-        off += indicator_map_layout::SIZE;
+        maps.push(m);
     }
-    reply.build()
+    let n_indicators = maps.len() as u8;
+
+    serialize_var_reply(
+        &GetIndicatorMapReply {
+            device_id: device_id_byte,
+            sequence: seq,
+            length: 0,
+            which,
+            real_indicators: which,
+            n_indicators,
+            maps,
+        },
+        state.byte_order(),
+    )
 }
 
 /// Handle SetIndicatorMap (minor opcode 14).
@@ -146,7 +143,7 @@ pub(crate) fn handle_set_indicator_map(state: &mut ClientState, data: &[u8]) -> 
             if which & (1 << bit) == 0 {
                 continue;
             }
-            if off + indicator_map_layout::SIZE > data.len() {
+            if off + INDICATOR_MAP_WIRE_SIZE > data.len() {
                 break;
             }
             while state.xkb_indicator_maps.len() <= bit as usize {
@@ -154,14 +151,17 @@ pub(crate) fn handle_set_indicator_map(state: &mut ClientState, data: &[u8]) -> 
                     .xkb_indicator_maps
                     .push(super::super::super::client::XkbIndicatorMap::default());
             }
-            let ctrls_val = read_u32(data, off + indicator_map_layout::CTRLS, msb);
+            let ctrls_val = read_u32(data, off + SET_INDICATOR_CTRLS_OFFSET, msb);
             let map = &mut state.xkb_indicator_maps[bit as usize];
-            map.which_groups = data[off + indicator_map_layout::WHICH_GROUPS];
-            map.groups = data[off + indicator_map_layout::GROUPS];
-            map.which_mods = data[off + indicator_map_layout::WHICH_MODS];
-            map.mods = data[off + indicator_map_layout::MODS];
+            // Inline parsing matches XkbIndicatorMapWireDesc layout:
+            //   flags(0) whichGroups(1) groups(2) whichMods(3) mods(4) realMods(5)
+            //   vmods(6,7) ctrls(8,9,10,11)
+            map.which_groups = data[off + 1];
+            map.groups = data[off + 2];
+            map.which_mods = data[off + 3];
+            map.mods = data[off + 4];
             map.ctrls = ctrls_val;
-            off += indicator_map_layout::SIZE;
+            off += INDICATOR_MAP_WIRE_SIZE;
         }
     }
     Vec::new()
@@ -179,16 +179,11 @@ pub(crate) fn handle_get_named_indicator(
     } else {
         0
     };
-    let mut reply = ReplyBuf::fixed(seq, state.msb_first)
-        .set_data_byte(device_id_byte)
-        .set_u32(8, indicator_atom)
-        .set_u8(12, 1); // found
-                        // on = check current indicator state
+
     let eff_mods = state.xkb_state.effective_mods();
     let on = if indicator_atom == 0 {
         false
     } else {
-        // Check by looking up the atom name for well-known indicators
         let name = state
             .atoms
             .lock()
@@ -203,8 +198,29 @@ pub(crate) fn handle_get_named_indicator(
             _ => false,
         }
     };
-    reply = reply.set_u8(13, on as u8);
-    reply.build()
+
+    serialize_reply(
+        &GetNamedIndicatorReply {
+            device_id: device_id_byte,
+            sequence: seq,
+            length: 0,
+            indicator: indicator_atom,
+            found: true,
+            on,
+            real_indicator: false,
+            ndx: 0,
+            map_flags: IMFlag::from(0u8),
+            map_which_groups: IMGroupsWhich::from(0u8),
+            map_groups: SetOfGroups::from(0u8),
+            map_which_mods: IMModsWhich::from(0u8),
+            map_mods: x11rb_protocol::protocol::xproto::ModMask::from(0u16),
+            map_real_mods: x11rb_protocol::protocol::xproto::ModMask::from(0u16),
+            map_vmod: VMod::from(0u16),
+            map_ctrls: x11rb_protocol::protocol::xkb::BoolCtrl::from(0u32),
+            supported: true,
+        },
+        state.byte_order(),
+    )
 }
 
 #[cfg(test)]
