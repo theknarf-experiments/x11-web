@@ -1,15 +1,33 @@
 //! XFIXES cursor operations.
 use super::super::parse_minor;
-use crate::xserver::reply::ReplyBuf;
+use crate::xserver::reply::serialize_var_reply;
 
 use tracing::debug;
 
 use super::super::super::client::ClientState;
 use x11rb_protocol::protocol::xfixes::{
-    ChangeCursorByNameRequest, ChangeCursorRequest, GetCursorImageAndNameRequest,
-    GetCursorImageRequest, GetCursorNameRequest, HideCursorRequest, SelectCursorInputRequest,
-    SetCursorNameRequest, ShowCursorRequest,
+    ChangeCursorByNameRequest, ChangeCursorRequest, GetCursorImageAndNameReply,
+    GetCursorImageAndNameRequest, GetCursorImageReply, GetCursorImageRequest, GetCursorNameReply,
+    GetCursorNameRequest, HideCursorRequest, SelectCursorInputRequest, SetCursorNameRequest,
+    ShowCursorRequest,
 };
+
+/// Pack the byte-stream ARGB pixel buffer into the `Vec<u32>` that
+/// `GetCursorImageReply::cursor_image` expects. We treat the bytes as
+/// little-endian so the serializer reproduces the same wire layout the
+/// hand-rolled implementation emitted on LE clients (which is virtually
+/// every real-world X11 client).
+fn argb_bytes_to_u32(bytes: &[u8], width: u16, height: u16) -> Vec<u32> {
+    let count = width as usize * height as usize;
+    let mut out = Vec::with_capacity(count);
+    for chunk in bytes.chunks_exact(4).take(count) {
+        out.push(u32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]));
+    }
+    while out.len() < count {
+        out.push(0);
+    }
+    out
+}
 
 /// 3: SelectCursorInput
 pub(crate) fn handle_select_cursor_input(
@@ -54,22 +72,21 @@ pub(crate) fn handle_get_cursor_image(state: &mut ClientState, data: &[u8], seq:
         (1u16, 1u16, 0u16, 0u16, vec![0u8; 4])
     };
 
-    let pixels_len = (width as usize) * (height as usize) * 4;
-    let extra = 24 + pixels_len;
-    let _total = 32 + extra;
-    let _length_units = (extra / 4) as u32;
-    let mut reply = ReplyBuf::with_extra(seq, extra, state.msb_first)
-        .set_i16(8, state.pointer_x) // x
-        .set_i16(10, state.pointer_y) // y
-        .set_u16(12, width)
-        .set_u16(14, height)
-        .set_u16(16, hotspot_x)
-        .set_u16(18, hotspot_y)
-        .set_u32(20, state.cursor_serial);
-    // Copy ARGB pixel data
-    let copy_len = pixels_len.min(argb_data.len());
-    reply.buf_mut()[32..32 + copy_len].copy_from_slice(&argb_data[..copy_len]);
-    reply.build()
+    serialize_var_reply(
+        &GetCursorImageReply {
+            sequence: seq,
+            length: 0,
+            x: state.pointer_x,
+            y: state.pointer_y,
+            width,
+            height,
+            xhot: hotspot_x,
+            yhot: hotspot_y,
+            cursor_serial: state.cursor_serial,
+            cursor_image: argb_bytes_to_u32(&argb_data, width, height),
+        },
+        state.byte_order(),
+    )
 }
 
 /// 23: SetCursorName
@@ -123,19 +140,15 @@ pub(crate) fn handle_get_cursor_name(state: &mut ClientState, data: &[u8], seq: 
     } else {
         0
     };
-    let name_bytes = name.as_bytes();
-    let name_len = name_bytes.len();
-    let pad = (4 - (name_len % 4)) % 4;
-    let extra = name_len + pad;
-    let _total = 32 + extra;
-    let _length_units = (extra / 4) as u32;
-    let mut reply = ReplyBuf::with_extra(seq, extra, state.msb_first)
-        .set_u32(8, atom) // cursor name atom
-        .set_u16(12, name_len as u16); // nbytes
-    if !name_bytes.is_empty() {
-        reply.buf_mut()[32..32 + name_len].copy_from_slice(name_bytes);
-    }
-    reply.build()
+    serialize_var_reply(
+        &GetCursorNameReply {
+            sequence: seq,
+            length: 0,
+            atom,
+            name: name.into_bytes(),
+        },
+        state.byte_order(),
+    )
 }
 
 /// 25: GetCursorImageAndName
@@ -167,41 +180,29 @@ pub(crate) fn handle_get_cursor_image_and_name(
         (1u16, 1u16, 0u16, 0u16, vec![0u8; 4], String::new())
     };
 
-    let name_bytes = name.as_bytes();
-    let name_len = name_bytes.len();
     let name_atom = if !name.is_empty() {
         let mut atoms = state.atoms.lock().unwrap();
         atoms.intern(&name, true)
     } else {
         0
     };
-    let pixels_len = (width as usize) * (height as usize) * 4;
-    let name_pad = (4 - (name_len % 4)) % 4;
-    // Reply body after the 32-byte header:
-    //   x(2) y(2) width(2) height(2) hotspot_x(2) hotspot_y(2) serial(4) atom(4) name_len(2) pad(2)
-    //   = 24 bytes of fields, then pixels, then name + padding
-    let extra = 24 + pixels_len + name_len + name_pad;
-    let _total = 32 + extra;
-    let _length_units = (extra / 4) as u32;
-    let mut reply = ReplyBuf::with_extra(seq, extra, state.msb_first)
-        .set_i16(8, state.pointer_x) // x
-        .set_i16(10, state.pointer_y) // y
-        .set_u16(12, width)
-        .set_u16(14, height)
-        .set_u16(16, hotspot_x)
-        .set_u16(18, hotspot_y)
-        .set_u32(20, state.cursor_serial)
-        .set_u32(24, name_atom)
-        .set_u16(28, name_len as u16);
-    // Pixel data starts at 32
-    let copy_len = pixels_len.min(argb_data.len());
-    reply.buf_mut()[32..32 + copy_len].copy_from_slice(&argb_data[..copy_len]);
-    // Name data follows pixels
-    let name_offset = 32 + pixels_len;
-    if !name_bytes.is_empty() {
-        reply.buf_mut()[name_offset..name_offset + name_len].copy_from_slice(name_bytes);
-    }
-    reply.build()
+    serialize_var_reply(
+        &GetCursorImageAndNameReply {
+            sequence: seq,
+            length: 0,
+            x: state.pointer_x,
+            y: state.pointer_y,
+            width,
+            height,
+            xhot: hotspot_x,
+            yhot: hotspot_y,
+            cursor_serial: state.cursor_serial,
+            cursor_atom: name_atom,
+            cursor_image: argb_bytes_to_u32(&argb_data, width, height),
+            name: name.into_bytes(),
+        },
+        state.byte_order(),
+    )
 }
 
 /// 26: ChangeCursor

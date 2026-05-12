@@ -2,9 +2,10 @@ use tracing::debug;
 use x11rb_protocol::protocol::render::{
     ChangePictureRequest, CreateCursorRequest, CreatePictureRequest, Directformat,
     FreePictureRequest, PictType, Pictdepth, Pictforminfo, Pictscreen, Pictvisual,
-    QueryPictIndexValuesRequest, SetPictureClipRectanglesRequest,
+    QueryPictFormatsReply, QueryPictIndexValuesReply, QueryPictIndexValuesRequest,
+    QueryVersionReply, SetPictureClipRectanglesRequest, SubPixel,
 };
-use x11rb_protocol::x11_utils::Serialize;
+use x11rb_protocol::x11_utils::ByteOrder;
 
 use super::super::parse_minor;
 use super::{
@@ -13,16 +14,29 @@ use super::{
 };
 use crate::xserver::core::require_len;
 use crate::xserver::core::{read_u32_bo, ROOT_VISUAL};
-use crate::xserver::reply::ReplyBuf;
+use crate::xserver::reply::{serialize_reply, serialize_var_reply};
 use crate::xserver::request::request_header;
 use crate::xserver::ClientState;
 
+fn to_byte_order(msb_first: bool) -> ByteOrder {
+    if msb_first {
+        ByteOrder::Msb
+    } else {
+        ByteOrder::Lsb
+    }
+}
+
 /// QueryVersion: reply with version 0.11
 pub(crate) fn handle_query_version(seq: u16, bo: bool) -> Vec<u8> {
-    ReplyBuf::fixed(seq, bo)
-        .set_u32(8, 0) // major version
-        .set_u32(12, 11) // minor version
-        .build()
+    serialize_reply(
+        &QueryVersionReply {
+            sequence: seq,
+            length: 0,
+            major_version: 0,
+            minor_version: 11,
+        },
+        to_byte_order(bo),
+    )
 }
 
 /// QueryPictFormats: reply with ARGB32, RGB24, A8, A1, xRGB32, xBGR32
@@ -140,7 +154,7 @@ pub(crate) fn handle_query_pict_formats(seq: u16, bo: bool) -> Vec<u8> {
         },
     ];
 
-    let screens = [Pictscreen {
+    let screens = vec![Pictscreen {
         fallback: PICTFORMAT_RGB24,
         depths: vec![
             Pictdepth {
@@ -157,36 +171,26 @@ pub(crate) fn handle_query_pict_formats(seq: u16, bo: bool) -> Vec<u8> {
         ],
     }];
 
-    // Count totals for the reply header fields
     let num_depths: u32 = screens.iter().map(|s| s.depths.len() as u32).sum();
     let num_visuals: u32 = screens
         .iter()
         .flat_map(|s| &s.depths)
         .map(|d| d.visuals.len() as u32)
         .sum();
+    let _ = num_subpixel;
 
-    // NOTE: x11rb's Serialize uses native endian (LE on our platform).
-    // If `bo` (msb_first) is true, the ReplyBuf header will be BE but
-    // the struct data below will still be LE. This is a known limitation --
-    // virtually all X11 clients use LE, so this is acceptable for now.
-    let mut extra_data: Vec<u8> = Vec::new();
-    for f in &formats {
-        f.serialize_into(&mut extra_data);
-    }
-    for s in &screens {
-        s.serialize_into(&mut extra_data);
-    }
-    // Subpixel order: 0 = Unknown
-    0u32.serialize_into(&mut extra_data);
-
-    ReplyBuf::with_extra(seq, extra_data.len(), bo)
-        .set_u32(8, formats.len() as u32) // num_formats
-        .set_u32(12, screens.len() as u32) // num_screens
-        .set_u32(16, num_depths) // num_depths (total across screens)
-        .set_u32(20, num_visuals) // num_visuals (total across all depths)
-        .set_u32(24, num_subpixel) // num_subpixel
-        .set_bytes(32, &extra_data)
-        .build()
+    serialize_var_reply(
+        &QueryPictFormatsReply {
+            sequence: seq,
+            length: 0,
+            num_depths,
+            num_visuals,
+            formats: formats.to_vec(),
+            screens,
+            subpixels: vec![SubPixel::UNKNOWN],
+        },
+        to_byte_order(bo),
+    )
 }
 
 pub(crate) fn handle_create_picture(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
@@ -540,7 +544,12 @@ pub(crate) fn handle_query_pict_index_values(
         data[1] as u16
     );
     // Reply with 0 index values (we don't have indexed formats)
-    ReplyBuf::fixed(seq, state.msb_first)
-        .set_u32(8, 0) // num_values = 0
-        .build()
+    serialize_var_reply(
+        &QueryPictIndexValuesReply {
+            sequence: seq,
+            length: 0,
+            values: Vec::new(),
+        },
+        state.byte_order(),
+    )
 }

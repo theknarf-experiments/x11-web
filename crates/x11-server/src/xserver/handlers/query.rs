@@ -1,9 +1,10 @@
 //! Query and miscellaneous handlers (opcodes 97-99).
 
 use super::*;
-use crate::xserver::reply::ReplyBuf;
+use crate::xserver::reply::{serialize_reply, serialize_var_reply};
 use x11rb_protocol::protocol::xproto::{
-    ListExtensionsRequest, QueryBestSizeRequest, QueryExtensionRequest,
+    ListExtensionsReply, ListExtensionsRequest, QueryBestSizeReply, QueryBestSizeRequest,
+    QueryExtensionReply, QueryExtensionRequest, Str,
 };
 
 // ---------------------------------------------------------------------------
@@ -16,13 +17,6 @@ pub(crate) fn handle_query_best_size(state: &ClientState, req: &QueryBestSizeReq
     let width = req.width;
     let height = req.height;
 
-    // Per X11 spec §8.5.2:
-    // - Cursor: return the closest size that the display can support.
-    //   Our software implementation supports any size, so return as-is.
-    // - Tile: return the size snapped to a power-of-two or the closest
-    //   size the server can tile efficiently.  In software, any size works.
-    // - Stipple: similar to Tile.
-    // Validate class is 0, 1, or 2.
     if class > 2 {
         return build_error(VALUE_ERROR, seq, class as u32, 97, 0);
     }
@@ -42,10 +36,15 @@ pub(crate) fn handle_query_best_size(state: &ClientState, req: &QueryBestSizeReq
         _ => (width, height),
     };
 
-    ReplyBuf::fixed(seq, state.msb_first)
-        .set_u16(8, best_w)
-        .set_u16(10, best_h)
-        .build()
+    serialize_reply(
+        &QueryBestSizeReply {
+            sequence: seq,
+            length: 0,
+            width: best_w,
+            height: best_h,
+        },
+        state.byte_order(),
+    )
 }
 
 /// Round up to the nearest power of two, with a minimum of 1.
@@ -62,30 +61,33 @@ fn next_power_of_two(v: u16) -> u16 {
 // ---------------------------------------------------------------------------
 
 pub(crate) fn handle_query_extension(
-    _state: &mut ClientState,
+    state: &mut ClientState,
     req: &QueryExtensionRequest,
 ) -> Vec<u8> {
-    let seq = _state.sequence;
+    let seq = state.sequence;
     let name = std::str::from_utf8(&req.name).unwrap_or("");
 
     debug!("QueryExtension: \"{}\"", name);
 
-    let mut reply = ReplyBuf::fixed(seq, _state.msb_first);
+    let (present, major_opcode, first_event, first_error) =
+        match state.extension_registry.by_name(name) {
+            Some(info) if info.enabled => {
+                (true, info.major_opcode, info.first_event, info.first_error)
+            }
+            _ => (false, 0, 0, 0),
+        };
 
-    // Look up the extension in the registry.
-    if let Some(info) = _state.extension_registry.by_name(name) {
-        if info.enabled {
-            reply = reply
-                .set_u8(8, 1) // present = true
-                .set_u8(9, info.major_opcode)
-                .set_u8(10, info.first_event)
-                .set_u8(11, info.first_error);
-        }
-        // else: present = false (byte 8 = 0) — extension disabled
-    }
-    // else: present = false — extension unknown
-
-    reply.build()
+    serialize_reply(
+        &QueryExtensionReply {
+            sequence: seq,
+            length: 0,
+            present,
+            major_opcode,
+            first_event,
+            first_error,
+        },
+        state.byte_order(),
+    )
 }
 
 // ---------------------------------------------------------------------------
@@ -94,25 +96,20 @@ pub(crate) fn handle_query_extension(
 
 pub(crate) fn handle_list_extensions(state: &ClientState, _req: &ListExtensionsRequest) -> Vec<u8> {
     let seq = state.sequence;
-    // Collect enabled extension wire names from the registry.
-    let extensions: Vec<&str> = state
+    let names: Vec<Str> = state
         .extension_registry
         .enabled_extensions()
-        .map(|info| info.wire_name)
+        .map(|info| Str {
+            name: info.wire_name.as_bytes().to_vec(),
+        })
         .collect();
 
-    let mut names_data = Vec::new();
-    for ext in &extensions {
-        names_data.push(ext.len() as u8);
-        names_data.extend_from_slice(ext.as_bytes());
-    }
-    while names_data.len() % 4 != 0 {
-        names_data.push(0);
-    }
-
-    let extra_len = names_data.len();
-    ReplyBuf::with_extra(seq, extra_len, state.msb_first)
-        .set_data_byte(extensions.len() as u8)
-        .set_bytes(32, &names_data)
-        .build()
+    serialize_var_reply(
+        &ListExtensionsReply {
+            sequence: seq,
+            length: 0,
+            names,
+        },
+        state.byte_order(),
+    )
 }

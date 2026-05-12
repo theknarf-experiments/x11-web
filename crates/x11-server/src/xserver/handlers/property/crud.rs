@@ -3,10 +3,10 @@
 
 use super::*;
 use crate::xserver::event::serialize_event;
-use crate::xserver::reply::ReplyBuf;
+use crate::xserver::reply::{serialize_reply, serialize_var_reply};
 use x11rb_protocol::protocol::xproto::{
-    ChangePropertyRequest, DeletePropertyRequest, GetPropertyRequest, ListPropertiesRequest,
-    PropMode, PropertyNotifyEvent,
+    ChangePropertyRequest, DeletePropertyRequest, GetPropertyReply, GetPropertyRequest,
+    ListPropertiesReply, ListPropertiesRequest, PropMode, PropertyNotifyEvent,
 };
 
 // ---------------------------------------------------------------------------
@@ -483,14 +483,19 @@ pub(crate) fn handle_get_property(state: &mut ClientState, req: &GetPropertyRequ
             _ => return_data.len() as u32,
         };
 
-        let padded_len = align_to_4(return_data.len());
-
-        let mut reply = ReplyBuf::with_extra(seq, padded_len, state.msb_first)
-            .set_data_byte(prop_val.format)
-            .set_u32(8, prop_val.prop_type) // type
-            .set_u32(12, bytes_after as u32) // bytes_after
-            .set_u32(16, value_length); // value_length
-        reply.buf_mut()[32..32 + return_data.len()].copy_from_slice(return_data);
+        let value = return_data.to_vec();
+        let reply = serialize_var_reply(
+            &GetPropertyReply {
+                format: prop_val.format,
+                sequence: seq,
+                length: 0,
+                type_: prop_val.prop_type,
+                bytes_after: bytes_after as u32,
+                value_len: value_length,
+                value,
+            },
+            state.byte_order(),
+        );
 
         // Delete property if requested and we returned all of it
         if delete && bytes_after == 0 {
@@ -519,16 +524,24 @@ pub(crate) fn handle_get_property(state: &mut ClientState, req: &GetPropertyRequ
                 state.pending_events.push(event);
             }
 
-            // Advance INCR transfer if this was an incremental selection
             advance_incr_transfer(state, window, property_atom);
         }
 
-        reply.build()
+        reply
     } else {
-        // Property not found
-        ReplyBuf::fixed(seq, state.msb_first)
-            // type = 0 (None), format = 0, bytes_after = 0, value_length = 0
-            .build()
+        // Property not found: type=None, format=0, bytes_after=0, value_len=0
+        serialize_reply(
+            &GetPropertyReply {
+                format: 0,
+                sequence: seq,
+                length: 0,
+                type_: 0,
+                bytes_after: 0,
+                value_len: 0,
+                value: Vec::new(),
+            },
+            state.byte_order(),
+        )
     }
 }
 
@@ -567,11 +580,12 @@ pub(crate) fn handle_list_properties(state: &ClientState, req: &ListPropertiesRe
         }
     }
 
-    let n = atoms.len();
-    let extra_bytes = n * 4;
-    let mut reply = ReplyBuf::with_extra(seq, extra_bytes, state.msb_first).set_u16(8, n as u16); // num_atoms
-    for (i, atom) in atoms.iter().enumerate() {
-        reply = reply.set_u32(32 + i * 4, *atom);
-    }
-    reply.build()
+    serialize_var_reply(
+        &ListPropertiesReply {
+            sequence: seq,
+            length: 0,
+            atoms,
+        },
+        state.byte_order(),
+    )
 }

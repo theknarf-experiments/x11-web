@@ -6,9 +6,10 @@ use tracing::{debug, info, warn};
 use super::super::client::ClientState;
 use super::super::core::{OVERLAY_WINDOW, ROOT_COLORMAP, VISUAL_TRUE_COLOR_ARGB_32};
 use super::super::types::{DamageInfo, PixmapState, WindowState, WindowType};
-use crate::xserver::reply::ReplyBuf;
+use crate::xserver::reply::serialize_reply;
 use x11rb_protocol::protocol::composite::{
-    CreateRegionFromBorderClipRequest, GetOverlayWindowRequest, NameWindowPixmapRequest,
+    CreateRegionFromBorderClipRequest, GetOverlayWindowReply, GetOverlayWindowRequest,
+    NameWindowPixmapRequest, QueryVersionReply as CompositeQueryVersionReply,
     RedirectSubwindowsRequest, RedirectWindowRequest, ReleaseOverlayWindowRequest,
     UnredirectSubwindowsRequest, UnredirectWindowRequest, CREATE_REGION_FROM_BORDER_CLIP_REQUEST,
     GET_OVERLAY_WINDOW_REQUEST, NAME_WINDOW_PIXMAP_REQUEST,
@@ -18,9 +19,9 @@ use x11rb_protocol::protocol::composite::{
 };
 use x11rb_protocol::protocol::damage::{
     AddRequest as DamageAddRequest, CreateRequest as DamageCreateRequest,
-    DestroyRequest as DamageDestroyRequest, SubtractRequest as DamageSubtractRequest,
-    ADD_REQUEST as DAMAGE_ADD_REQUEST, CREATE_REQUEST as DAMAGE_CREATE_REQUEST,
-    DESTROY_REQUEST as DAMAGE_DESTROY_REQUEST,
+    DestroyRequest as DamageDestroyRequest, QueryVersionReply as DamageQueryVersionReply,
+    SubtractRequest as DamageSubtractRequest, ADD_REQUEST as DAMAGE_ADD_REQUEST,
+    CREATE_REQUEST as DAMAGE_CREATE_REQUEST, DESTROY_REQUEST as DAMAGE_DESTROY_REQUEST,
     QUERY_VERSION_REQUEST as DAMAGE_QUERY_VERSION_REQUEST,
     SUBTRACT_REQUEST as DAMAGE_SUBTRACT_REQUEST,
 };
@@ -31,13 +32,15 @@ pub(crate) fn handle_damage_request(state: &mut ClientState, data: &[u8], seq: u
     debug!("DAMAGE minor opcode: {minor}");
 
     match minor {
-        DAMAGE_QUERY_VERSION_REQUEST => {
-            // Reply with version 1.1.
-            ReplyBuf::fixed(seq, state.msb_first)
-                .set_u32(8, 1) // major version
-                .set_u32(12, 1) // minor version
-                .build()
-        }
+        DAMAGE_QUERY_VERSION_REQUEST => serialize_reply(
+            &DamageQueryVersionReply {
+                sequence: seq,
+                length: 0,
+                major_version: 1,
+                minor_version: 1,
+            },
+            state.byte_order(),
+        ),
         DAMAGE_CREATE_REQUEST => {
             let req = parse_minor!(DamageCreateRequest, data, state, seq, 143, minor as u16);
             let damage_id = req.damage;
@@ -143,13 +146,15 @@ pub(crate) fn handle_x_composite_request(
     };
 
     match minor {
-        COMPOSITE_QUERY_VERSION_REQUEST => {
-            // Reply with version 0.4.
-            ReplyBuf::fixed(seq, state.msb_first)
-                .set_u32(8, 0) // major version
-                .set_u32(12, 4) // minor version
-                .build()
-        }
+        COMPOSITE_QUERY_VERSION_REQUEST => serialize_reply(
+            &CompositeQueryVersionReply {
+                sequence: seq,
+                length: 0,
+                major_version: 0,
+                minor_version: 4,
+            },
+            state.byte_order(),
+        ),
         REDIRECT_WINDOW_REQUEST => {
             let req = parse_minor!(RedirectWindowRequest, data, state, seq, 142, minor as u16);
             let window = req.window;
@@ -375,9 +380,14 @@ pub(crate) fn handle_x_composite_request(
                 "Overlay window ref count incremented to {}",
                 state.overlay_ref_count
             );
-            ReplyBuf::fixed(seq, state.msb_first)
-                .set_u32(8, OVERLAY_WINDOW)
-                .build()
+            serialize_reply(
+                &GetOverlayWindowReply {
+                    sequence: seq,
+                    length: 0,
+                    overlay_win: OVERLAY_WINDOW,
+                },
+                state.byte_order(),
+            )
         }
         RELEASE_OVERLAY_WINDOW_REQUEST => {
             // Decrement the internal reference count on the overlay window.

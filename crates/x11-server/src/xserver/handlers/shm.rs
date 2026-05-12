@@ -8,11 +8,11 @@ use super::super::core::ROOT_VISUAL;
 use super::super::types::{PixmapState, ShmPixmapBacking, ShmSegment};
 use crate::framebuffer::Framebuffer;
 use crate::xserver::core::require_len;
-use crate::xserver::reply::ReplyBuf;
+use crate::xserver::reply::{serialize_reply, ReplyBuf};
 use x11rb_protocol::protocol::shm::{
-    AttachRequest, CreatePixmapRequest, DetachRequest, GetImageRequest, PutImageRequest,
-    ATTACH_FD_REQUEST, ATTACH_REQUEST, CREATE_PIXMAP_REQUEST, DETACH_REQUEST, GET_IMAGE_REQUEST,
-    PUT_IMAGE_REQUEST, QUERY_VERSION_REQUEST,
+    AttachRequest, CreatePixmapRequest, DetachRequest, GetImageReply, GetImageRequest,
+    PutImageRequest, QueryVersionReply, ATTACH_FD_REQUEST, ATTACH_REQUEST, CREATE_PIXMAP_REQUEST,
+    DETACH_REQUEST, GET_IMAGE_REQUEST, PUT_IMAGE_REQUEST, QUERY_VERSION_REQUEST,
 };
 #[cfg(target_os = "linux")]
 use x11rb_protocol::protocol::shm::{CreateSegmentRequest, CREATE_SEGMENT_REQUEST};
@@ -28,14 +28,19 @@ pub(crate) fn handle_shm_request(state: &mut ClientState, data: &[u8], seq: u16)
     match minor {
         QUERY_VERSION_REQUEST => {
             info!("SHM QueryVersion");
-            ReplyBuf::fixed(seq, state.msb_first)
-                .set_data_byte(1) // shared_pixmaps = true
-                .set_u16(8, 1u16) // major version
-                .set_u16(10, 2u16) // minor version
-                .set_u16(12, 0u16) // uid
-                .set_u16(14, 0u16) // gid
-                .set_u8(16, 2) // pixmap_format = ZPixmap
-                .build()
+            serialize_reply(
+                &QueryVersionReply {
+                    shared_pixmaps: true,
+                    sequence: seq,
+                    length: 0,
+                    major_version: 1,
+                    minor_version: 2,
+                    uid: 0,
+                    gid: 0,
+                    pixmap_format: 2, // ZPixmap
+                },
+                state.byte_order(),
+            )
         }
 
         ATTACH_REQUEST => {
@@ -222,12 +227,16 @@ pub(crate) fn handle_shm_request(state: &mut ClientState, data: &[u8], seq: u16)
                 }
             }
 
-            // Reply
-            ReplyBuf::fixed(seq, state.msb_first)
-                .set_data_byte(24) // depth
-                .set_u32(8, ROOT_VISUAL)
-                .set_u32(12, width as u32 * height as u32) // size
-                .build()
+            serialize_reply(
+                &GetImageReply {
+                    depth: 24,
+                    sequence: seq,
+                    length: 0,
+                    visual: ROOT_VISUAL,
+                    size: width as u32 * height as u32,
+                },
+                state.byte_order(),
+            )
         }
 
         CREATE_PIXMAP_REQUEST => {
