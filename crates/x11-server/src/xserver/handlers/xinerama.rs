@@ -3,68 +3,101 @@
 use tracing::debug;
 
 use super::super::client::ClientState;
-use crate::xserver::reply::ReplyBuf;
+use super::parse_minor;
+use crate::xserver::reply::{serialize_reply, serialize_var_reply};
+use x11rb_protocol::protocol::xinerama::{
+    GetScreenCountReply, GetScreenCountRequest, GetScreenSizeReply, GetScreenSizeRequest,
+    GetStateReply, GetStateRequest, IsActiveReply, IsActiveRequest, QueryScreensReply,
+    QueryScreensRequest, QueryVersionReply, QueryVersionRequest, ScreenInfo,
+};
 
 /// Handle XINERAMA extension requests. We report a single screen covering the
 /// entire display so that apps querying multi-monitor configurations work.
-pub(crate) fn handle_xinerama_request(state: &ClientState, data: &[u8], seq: u16) -> Vec<u8> {
+pub(crate) fn handle_xinerama_request(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
     let minor = data[1];
     match minor {
         0 => {
             // QueryVersion
-            ReplyBuf::fixed(seq, state.msb_first)
-                .set_u16(8, 1) // major
-                .set_u16(10, 1) // minor
-                .build()
+            let _req = parse_minor!(QueryVersionRequest, data, state, seq, 158, minor);
+            serialize_reply(
+                &QueryVersionReply {
+                    sequence: seq,
+                    length: 0,
+                    major: 1,
+                    minor: 1,
+                },
+                state.byte_order(),
+            )
         }
         1 => {
             // GetState
-            let mut reply = ReplyBuf::fixed(seq, state.msb_first).set_data_byte(1); // state = active
-                                                                                    // window ID at bytes 8-11 (from request)
-            if data.len() >= 8 {
-                reply = reply.set_bytes(8, &data[4..8]);
-            }
-            reply.build()
+            let req = parse_minor!(GetStateRequest, data, state, seq, 158, minor);
+            serialize_reply(
+                &GetStateReply {
+                    state: 1, // active
+                    sequence: seq,
+                    length: 0,
+                    window: req.window,
+                },
+                state.byte_order(),
+            )
         }
         2 => {
             // GetScreenCount
-            let mut reply = ReplyBuf::fixed(seq, state.msb_first).set_data_byte(1); // screen_count = 1
-            if data.len() >= 8 {
-                reply = reply.set_bytes(8, &data[4..8]);
-            }
-            reply.build()
+            let req = parse_minor!(GetScreenCountRequest, data, state, seq, 158, minor);
+            serialize_reply(
+                &GetScreenCountReply {
+                    screen_count: 1,
+                    sequence: seq,
+                    length: 0,
+                    window: req.window,
+                },
+                state.byte_order(),
+            )
         }
         3 => {
             // GetScreenSize
-            let mut reply = ReplyBuf::fixed(seq, state.msb_first)
-                .set_u32(8, state.screen_width as u32) // width
-                .set_u32(12, state.screen_height as u32) // height
-                .set_u32(20, 0); // screen_number
-            if data.len() >= 8 {
-                reply = reply.set_bytes(16, &data[4..8]); // window
-            }
-            reply.build()
+            let req = parse_minor!(GetScreenSizeRequest, data, state, seq, 158, minor);
+            serialize_reply(
+                &GetScreenSizeReply {
+                    sequence: seq,
+                    length: 0,
+                    width: state.screen_width as u32,
+                    height: state.screen_height as u32,
+                    window: req.window,
+                    screen: 0,
+                },
+                state.byte_order(),
+            )
         }
         4 => {
             // IsActive
-            ReplyBuf::fixed(seq, state.msb_first)
-                .set_u32(8, 1) // state = active
-                .build()
+            let _req = parse_minor!(IsActiveRequest, data, state, seq, 158, minor);
+            serialize_reply(
+                &IsActiveReply {
+                    sequence: seq,
+                    length: 0,
+                    state: 1,
+                },
+                state.byte_order(),
+            )
         }
         5 => {
             // QueryScreens - return single screen covering the whole display
-            let num_screens: u32 = 1;
-            let screen_info_size = 8usize; // x_org(2) + y_org(2) + width(2) + height(2)
-            let extra = screen_info_size;
-            let padded = crate::xserver::core::align_to_4(extra);
-            // Screen 0: x=0, y=0, width=state.screen_width, height=state.screen_height
-            let off = 32;
-            // x_org = 0, y_org = 0 (already zero)
-            ReplyBuf::with_extra(seq, padded, state.msb_first)
-                .set_u32(8, num_screens)
-                .set_u16(off + 4, state.screen_width)
-                .set_u16(off + 6, state.screen_height)
-                .build()
+            let _req = parse_minor!(QueryScreensRequest, data, state, seq, 158, minor);
+            serialize_var_reply(
+                &QueryScreensReply {
+                    sequence: seq,
+                    length: 0,
+                    screen_info: vec![ScreenInfo {
+                        x_org: 0,
+                        y_org: 0,
+                        width: state.screen_width,
+                        height: state.screen_height,
+                    }],
+                },
+                state.byte_order(),
+            )
         }
         _ => {
             debug!("XINERAMA: unhandled minor opcode {minor}");

@@ -7,15 +7,20 @@ use tracing::debug;
 
 use super::super::client::ClientState;
 use super::super::core::*;
-use crate::xserver::reply::ReplyBuf;
+use crate::xserver::reply::{serialize_reply, serialize_var_reply};
 use crate::xserver::request::request_header;
+use x11rb_protocol::protocol::res::{
+    Client, ClientIdMask, ClientIdSpec, ClientIdValue, QueryClientIdsReply,
+    QueryClientIdsRequest, QueryClientPixmapBytesReply, QueryClientResourcesReply,
+    QueryClientsReply, QueryResourceBytesReply, QueryResourceBytesRequest, QueryVersionReply,
+    ResourceIdSpec, ResourceSizeSpec, ResourceSizeValue, Type,
+};
 
 /// X-Resource major opcode (assigned in QueryExtension).
 const XRES_MAJOR_OPCODE: u8 = 160;
 
 pub(crate) fn handle_xresource_request(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
     let minor = data[1];
-    let bo = state.msb_first;
     debug!("X-Resource minor opcode: {minor}");
     let bad_request = |bad_value: u32| {
         build_error(
@@ -29,30 +34,34 @@ pub(crate) fn handle_xresource_request(state: &mut ClientState, data: &[u8], seq
 
     match minor {
         // 0: QueryVersion
-        0 => {
-            ReplyBuf::fixed(seq, bo)
-                .set_u16(8, 1) // server_major = 1
-                .set_u16(10, 2) // server_minor = 2
-                .build()
-        }
+        0 => serialize_reply(
+            &QueryVersionReply {
+                sequence: seq,
+                length: 0,
+                server_major: 1,
+                server_minor: 2,
+            },
+            state.byte_order(),
+        ),
 
         // 1: QueryClients — return list of connected client XIDs
         1 => {
-            // Read all connected client resource bases from the shared registry.
             let client_bases = state.client_registry.lock().unwrap().clone();
-            let num_clients = client_bases.len() as u32;
-            let extra_bytes = (num_clients as usize) * 8; // each client entry = 8 bytes
-
-            // Client entries: resource_base (4 bytes) + resource_mask (4 bytes) each
-            let mut reply = ReplyBuf::with_extra(seq, extra_bytes, bo).set_u32(8, num_clients); // num_clients
-            for (i, &resource_base) in client_bases.iter().enumerate() {
-                let off = 32 + i * 8;
-                reply = reply
-                    .set_u32(off, resource_base)
-                    .set_u32(off + 4, RESOURCE_ID_MASK);
-            }
-
-            reply.build()
+            let clients: Vec<Client> = client_bases
+                .into_iter()
+                .map(|resource_base| Client {
+                    resource_base,
+                    resource_mask: RESOURCE_ID_MASK,
+                })
+                .collect();
+            serialize_var_reply(
+                &QueryClientsReply {
+                    sequence: seq,
+                    length: 0,
+                    clients,
+                },
+                state.byte_order(),
+            )
         }
 
         // 2: QueryClientResources — return resource type counts for a client
@@ -61,73 +70,65 @@ pub(crate) fn handle_xresource_request(state: &mut ClientState, data: &[u8], seq
                 return bad_request(0);
             }
 
-            // Count resources by type
-            let num_windows = state.windows.len() as u32;
-            let num_pixmaps = state.pixmaps.len() as u32;
-            let num_gcs = state.gcs.len() as u32;
-            let num_cursors = state.cursors.len() as u32;
-            let num_colormaps = state.colormaps.len() as u32;
-            let num_fonts = 1u32; // font manager always has at least default
-            let num_pictures = state.render.picture_count() as u32;
-            let num_glyphsets = state.render.glyphset_count() as u32;
-
-            // Build type entries: each is resource_type_atom (4) + count (4) = 8 bytes
             struct TypeCount {
                 type_name: &'static str,
                 count: u32,
             }
-            let types = [
+            let candidates = [
                 TypeCount {
                     type_name: "WINDOW",
-                    count: num_windows,
+                    count: state.windows.len() as u32,
                 },
                 TypeCount {
                     type_name: "PIXMAP",
-                    count: num_pixmaps,
+                    count: state.pixmaps.len() as u32,
                 },
                 TypeCount {
                     type_name: "GC",
-                    count: num_gcs,
+                    count: state.gcs.len() as u32,
                 },
                 TypeCount {
                     type_name: "CURSOR",
-                    count: num_cursors,
+                    count: state.cursors.len() as u32,
                 },
                 TypeCount {
                     type_name: "COLORMAP",
-                    count: num_colormaps,
+                    count: state.colormaps.len() as u32,
                 },
                 TypeCount {
                     type_name: "FONT",
-                    count: num_fonts,
+                    count: 1,
                 },
                 TypeCount {
                     type_name: "PICTURE",
-                    count: num_pictures,
+                    count: state.render.picture_count() as u32,
                 },
                 TypeCount {
                     type_name: "GLYPHSET",
-                    count: num_glyphsets,
+                    count: state.render.glyphset_count() as u32,
                 },
             ];
 
-            // Only include types with count > 0
-            let active_types: Vec<&TypeCount> = types.iter().filter(|t| t.count > 0).collect();
-            let num_types = active_types.len() as u32;
-            let extra_bytes = (num_types as usize) * 8;
-            let mut reply = ReplyBuf::with_extra(seq, extra_bytes, bo).set_u32(8, num_types);
+            let types: Vec<Type> = {
+                let mut atoms = state.atoms.lock().unwrap();
+                candidates
+                    .iter()
+                    .filter(|t| t.count > 0)
+                    .map(|t| Type {
+                        resource_type: atoms.intern(t.type_name, false),
+                        count: t.count,
+                    })
+                    .collect()
+            };
 
-            let mut off = 32;
-            for t in active_types {
-                let atom = {
-                    let mut atoms = state.atoms.lock().unwrap();
-                    atoms.intern(t.type_name, false)
-                };
-                reply = reply.set_u32(off, atom).set_u32(off + 4, t.count);
-                off += 8;
-            }
-
-            reply.build()
+            serialize_var_reply(
+                &QueryClientResourcesReply {
+                    sequence: seq,
+                    length: 0,
+                    types,
+                },
+                state.byte_order(),
+            )
         }
 
         // 3: QueryClientPixmapBytes — total pixmap memory for a client
@@ -142,40 +143,39 @@ pub(crate) fn handle_xresource_request(state: &mut ClientState, data: &[u8], seq
                 .map(|p| (p.width as u64) * (p.height as u64) * (p.depth as u64 / 8).max(1))
                 .sum();
 
-            ReplyBuf::fixed(seq, bo)
-                .set_u32(8, total_bytes as u32) // bytes (low 32)
-                .set_u32(12, (total_bytes >> 32) as u32) // bytes_overflow (high 32)
-                .build()
+            serialize_reply(
+                &QueryClientPixmapBytesReply {
+                    sequence: seq,
+                    length: 0,
+                    bytes: total_bytes as u32,
+                    bytes_overflow: (total_bytes >> 32) as u32,
+                },
+                state.byte_order(),
+            )
         }
 
         // 4: QueryClientIds (XRes 1.2) — return client IDs with their types
         4 => {
-            use x11rb_protocol::protocol::res::QueryClientIdsRequest;
             let Ok(req) =
                 QueryClientIdsRequest::try_parse_request(request_header(data), &data[4..])
             else {
                 return bad_request(0);
             };
 
-            // Collect client IDs from the request specs
             let client_bases = state.client_registry.lock().unwrap().clone();
-            let mut ids: Vec<(u32, u32)> = Vec::new(); // (resource_base, pid)
+            let mut ids: Vec<ClientIdValue> = Vec::new();
 
             for spec in req.specs.iter() {
                 let client_xid = spec.client;
                 let mask = u32::from(spec.mask);
 
-                // mask bit 0 = X_RES_CLIENT_ID_NR (client number)
-                // mask bit 1 = X_RES_CLIENT_ID_PID (process id)
                 if mask == 0 {
                     continue;
                 }
 
-                // If client_xid is 0, return info for all clients
                 let targets: Vec<u32> = if client_xid == 0 {
                     client_bases.clone()
                 } else {
-                    // Find matching client by resource base
                     let base = client_xid & !RESOURCE_ID_MASK;
                     if client_bases.contains(&base) {
                         vec![base]
@@ -185,50 +185,46 @@ pub(crate) fn handle_xresource_request(state: &mut ClientState, data: &[u8], seq
                 };
 
                 for &base in &targets {
-                    if mask & 1 != 0 {
-                        // X_RES_CLIENT_ID_NR: value is the XID base
-                        ids.push((base, 0));
+                    if mask & u32::from(ClientIdMask::CLIENT_XID) != 0 {
+                        ids.push(ClientIdValue {
+                            spec: ClientIdSpec {
+                                client: base,
+                                mask: ClientIdMask::CLIENT_XID,
+                            },
+                            value: vec![base],
+                        });
                     }
-                    if mask & 2 != 0 {
-                        // X_RES_CLIENT_ID_PID: report our PID
-                        ids.push((base, std::process::id()));
+                    if mask & u32::from(ClientIdMask::LOCAL_CLIENT_PID) != 0 {
+                        ids.push(ClientIdValue {
+                            spec: ClientIdSpec {
+                                client: base,
+                                mask: ClientIdMask::LOCAL_CLIENT_PID,
+                            },
+                            value: vec![std::process::id()],
+                        });
                     }
                 }
             }
 
-            // Each ClientIdValue: spec (8 bytes) + length (4) + value (4) = 16 bytes
-            let num_ids = ids.len() as u32;
-            let data_bytes = num_ids as usize * 16;
-            let mut reply = ReplyBuf::with_extra(seq, data_bytes, bo).set_u32(8, num_ids);
-
-            let mut off = 32;
-            for (base, value) in &ids {
-                // ClientIdValue: client (4), mask (4), length (4), value (4)
-                let id_mask = if *value == 0 { 1u32 } else { 2u32 };
-                reply = reply
-                    .set_u32(off, *base)
-                    .set_u32(off + 4, id_mask)
-                    .set_u32(off + 8, 4) // length = 4 bytes
-                    .set_u32(off + 12, *value);
-                off += 16;
-            }
-
-            reply.build()
+            serialize_var_reply(
+                &QueryClientIdsReply {
+                    sequence: seq,
+                    length: 0,
+                    ids,
+                },
+                state.byte_order(),
+            )
         }
 
         // 5: QueryResourceBytes (XRes 1.2) — total bytes used by resource types
         5 => {
-            use x11rb_protocol::protocol::res::QueryResourceBytesRequest;
-            let Ok(req) =
+            let Ok(_req) =
                 QueryResourceBytesRequest::try_parse_request(request_header(data), &data[4..])
             else {
                 return bad_request(0);
             };
-            let _client_xid = req.client;
-            let num_specs = req.specs.len();
 
-            // Compute byte counts for all resource types
-            let window_bytes: u64 = state.windows.len() as u64 * 256; // estimate per window
+            let window_bytes: u64 = state.windows.len() as u64 * 256;
             let pixmap_bytes: u64 = state
                 .pixmaps
                 .values()
@@ -242,7 +238,7 @@ pub(crate) fn handle_xresource_request(state: &mut ClientState, data: &[u8], seq
                 count: u32,
                 bytes: u64,
             }
-            let all_types = [
+            let candidates = [
                 SizeEntry {
                     type_name: "WINDOW",
                     count: state.windows.len() as u32,
@@ -265,36 +261,34 @@ pub(crate) fn handle_xresource_request(state: &mut ClientState, data: &[u8], seq
                 },
             ];
 
-            // If num_specs > 0, filter to requested types; otherwise return all
-            let entries: Vec<&SizeEntry> = if num_specs == 0 {
-                all_types.iter().filter(|e| e.count > 0).collect()
-            } else {
-                // Accept all types for simplicity
-                all_types.iter().filter(|e| e.count > 0).collect()
+            let sizes: Vec<ResourceSizeValue> = {
+                let mut atoms = state.atoms.lock().unwrap();
+                candidates
+                    .iter()
+                    .filter(|e| e.count > 0)
+                    .map(|e| ResourceSizeValue {
+                        size: ResourceSizeSpec {
+                            spec: ResourceIdSpec {
+                                resource: 0,
+                                type_: atoms.intern(e.type_name, false),
+                            },
+                            bytes: e.bytes as u32,
+                            ref_count: e.count,
+                            use_count: 0,
+                        },
+                        cross_references: Vec::new(),
+                    })
+                    .collect()
             };
 
-            let num_sizes = entries.len() as u32;
-            // Each ResourceSizeValue: spec (8) + bytes (4) + ref_count (4) + use_count (4) = 20 bytes
-            let data_bytes = num_sizes as usize * 20;
-            let padded = align_to_4(data_bytes);
-            let mut reply = ReplyBuf::with_extra(seq, padded, bo).set_u32(8, num_sizes);
-
-            let mut off = 32;
-            for e in entries {
-                let atom = {
-                    let mut atoms = state.atoms.lock().unwrap();
-                    atoms.intern(e.type_name, false)
-                };
-                reply = reply
-                    .set_u32(off, atom) // resource_type
-                    .set_u32(off + 4, e.count) // count
-                    .set_u32(off + 8, e.bytes as u32) // bytes (low)
-                    .set_u32(off + 12, (e.bytes >> 32) as u32) // bytes (high)
-                    .set_u32(off + 16, 0); // ref_count
-                off += 20;
-            }
-
-            reply.build()
+            serialize_var_reply(
+                &QueryResourceBytesReply {
+                    sequence: seq,
+                    length: 0,
+                    sizes,
+                },
+                state.byte_order(),
+            )
         }
 
         _ => {
