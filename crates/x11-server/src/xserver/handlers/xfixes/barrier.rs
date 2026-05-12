@@ -4,10 +4,10 @@ use super::super::parse_minor;
 use tracing::debug;
 
 use super::super::super::client::ClientState;
-use crate::xserver::reply::ReplyBuf;
+use crate::xserver::reply::serialize_reply;
 use x11rb_protocol::protocol::xfixes::{
-    CreatePointerBarrierRequest, DeletePointerBarrierRequest, GetClientDisconnectModeRequest,
-    SetClientDisconnectModeRequest,
+    ClientDisconnectFlags, CreatePointerBarrierRequest, DeletePointerBarrierRequest,
+    GetClientDisconnectModeReply, GetClientDisconnectModeRequest, SetClientDisconnectModeRequest,
 };
 
 /// 31: CreatePointerBarrier
@@ -92,7 +92,12 @@ pub(crate) fn handle_get_client_disconnect_mode(
     seq: u16,
 ) -> Vec<u8> {
     let _req = parse_minor!(GetClientDisconnectModeRequest, data, state, seq, 138, 34);
-    ReplyBuf::fixed(seq, state.msb_first)
-        .set_u32(8, state.disconnect_mode)
-        .build()
+    serialize_reply(
+        &GetClientDisconnectModeReply {
+            sequence: seq,
+            length: 0,
+            disconnect_mode: ClientDisconnectFlags::from(state.disconnect_mode),
+        },
+        state.byte_order(),
+    )
 }

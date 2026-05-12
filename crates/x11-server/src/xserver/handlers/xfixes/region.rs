@@ -3,19 +3,11 @@
 use super::super::{parse_minor, parse_or_void};
 use tracing::debug;
 
-/// FetchRegion reply layout: a 32-byte reply header, then 8 bytes of extents
-/// (x1/y1/x2/y2 as i16), then a packed array of 8-byte RECTANGLE entries.
-mod fetch_region_layout {
-    /// Where the rectangle array begins within the reply buffer (after the
-    /// 32-byte header and the 8-byte extents block).
-    pub(super) const RECTS_START: usize = 32 + 8;
-    /// Wire size of one RECTANGLE entry (x:i16, y:i16, w:u16, h:u16).
-    pub(super) const RECT_SIZE: usize = 8;
-}
-
 use super::super::super::client::ClientState;
 use super::super::super::types::{RegionRect, XFixesRegion};
-use crate::xserver::reply::ReplyBuf;
+use crate::xserver::reply::serialize_var_reply;
+use x11rb_protocol::protocol::xfixes::FetchRegionReply;
+use x11rb_protocol::protocol::xproto::Rectangle;
 use x11rb_protocol::protocol::xfixes::{
     CopyRegionRequest, CreateRegionFromBitmapRequest, CreateRegionFromGCRequest,
     CreateRegionFromPictureRequest, CreateRegionFromWindowRequest, CreateRegionRequest,
@@ -349,24 +341,28 @@ pub(crate) fn handle_fetch_region(state: &mut ClientState, data: &[u8], seq: u16
             &[] as &[RegionRect],
         ),
     };
-    let rects_bytes = rects.len() * fetch_region_layout::RECT_SIZE;
-    let extra = 8 + rects_bytes; // 8 bytes extents + rect data
-    let mut reply = ReplyBuf::with_extra(seq, extra, state.msb_first)
-        // Extents: x1, y1, x2, y2 as i16
-        .set_i16(8, ext.x)
-        .set_i16(10, ext.y)
-        .set_i16(12, ext.x + ext.width as i16)
-        .set_i16(14, ext.y + ext.height as i16);
-    // Rectangles
-    for (i, r) in rects.iter().enumerate() {
-        let off = fetch_region_layout::RECTS_START + i * fetch_region_layout::RECT_SIZE;
-        reply = reply
-            .set_i16(off, r.x)
-            .set_i16(off + 2, r.y)
-            .set_u16(off + 4, r.width)
-            .set_u16(off + 6, r.height);
-    }
-    reply.build()
+    let rectangles: Vec<Rectangle> = rects
+        .iter()
+        .map(|r| Rectangle {
+            x: r.x,
+            y: r.y,
+            width: r.width,
+            height: r.height,
+        })
+        .collect();
+    serialize_var_reply(
+        &FetchRegionReply {
+            sequence: seq,
+            extents: Rectangle {
+                x: ext.x,
+                y: ext.y,
+                width: ext.width,
+                height: ext.height,
+            },
+            rectangles,
+        },
+        state.byte_order(),
+    )
 }
 
 /// 20: SetGCClipRegion

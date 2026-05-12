@@ -2,10 +2,11 @@
 
 use super::*;
 use crate::xserver::event::serialize_event;
-use crate::xserver::reply::ReplyBuf;
+use crate::xserver::reply::serialize_reply;
 use x11rb_protocol::protocol::xproto::{
     BackingStore, ChangeSaveSetRequest, ChangeWindowAttributesRequest, ColormapNotifyEvent,
-    ColormapState as XColormapState, GetWindowAttributesRequest,
+    ColormapState as XColormapState, GetWindowAttributesReply, GetWindowAttributesRequest, Gravity,
+    MapState, WindowClass,
 };
 
 // ---------------------------------------------------------------------------
@@ -273,33 +274,34 @@ pub(crate) fn handle_get_window_attributes(
             1
         }
     };
-    let mut reply = ReplyBuf::with_extra(seq, 12, state.msb_first)
-        .set_data_byte(win.backing_store)
-        .set_u32(8, win.visual) // visual (4 bytes)
-        .set_u16(12, win.class) // class (2 bytes)
-        .set_u8(14, bit_gravity) // bit_gravity
-        .set_u8(15, win_gravity) // win_gravity
-        .set_u32(16, win.backing_planes); // backing_planes
     let cmap = if win.colormap != 0 {
         win.colormap
     } else {
         ROOT_COLORMAP
     };
-    // all_event_masks: union of all clients' event masks (own + remote)
     let remote_masks = state.event_broadcaster.all_event_masks(wid);
-    reply = reply
-        .set_u32(20, win.backing_pixel) // backing_pixel
-        .set_u8(24, if win.save_under { 1 } else { 0 })
-        .set_u8(25, 1) // map_is_installed = true
-        .set_u8(26, map_state) // map_state: see above
-        .set_u8(27, if win.override_redirect { 1 } else { 0 })
-        .set_u32(28, cmap) // colormap
-        .set_u32(32, win.event_mask | remote_masks) // all_event_masks
-        .set_u32(36, win.event_mask) // your_event_mask
-        .set_u16(40, win.do_not_propagate_mask as u16); // do_not_propagate_mask
-                                                        // bytes 42-43: unused padding
-
-    reply.build()
+    serialize_reply(
+        &GetWindowAttributesReply {
+            backing_store: BackingStore::from(win.backing_store),
+            sequence: seq,
+            length: 0,
+            visual: win.visual,
+            class: WindowClass::from(win.class),
+            bit_gravity: Gravity::from(bit_gravity),
+            win_gravity: Gravity::from(win_gravity),
+            backing_planes: win.backing_planes,
+            backing_pixel: win.backing_pixel,
+            save_under: win.save_under,
+            map_is_installed: true,
+            map_state: MapState::from(map_state),
+            override_redirect: win.override_redirect,
+            colormap: cmap,
+            all_event_masks: EventMask::from(win.event_mask | remote_masks),
+            your_event_mask: EventMask::from(win.event_mask),
+            do_not_propagate_mask: EventMask::from(win.do_not_propagate_mask as u32),
+        },
+        state.byte_order(),
+    )
 }
 
 // ---------------------------------------------------------------------------

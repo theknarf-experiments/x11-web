@@ -7,10 +7,10 @@ use tracing::{debug, warn};
 use super::super::super::client::ClientState;
 use super::super::super::core::{MATCH_ERROR, VALUE_ERROR};
 use super::{check_pending_fence_awaits_ext, FenceState, PendingFenceAwait};
-use crate::xserver::reply::ReplyBuf;
+use crate::xserver::reply::serialize_reply;
 use x11rb_protocol::protocol::sync::{
-    AwaitFenceRequest, CreateFenceRequest, DestroyFenceRequest, QueryFenceRequest,
-    ResetFenceRequest, TriggerFenceRequest,
+    AwaitFenceRequest, CreateFenceRequest, DestroyFenceRequest, QueryFenceReply,
+    QueryFenceRequest, ResetFenceRequest, TriggerFenceRequest,
 };
 
 /// Minor opcode 14: CreateFence
@@ -112,9 +112,14 @@ pub(crate) fn query_fence(state: &mut ClientState, data: &[u8], seq: u16) -> Vec
         .unwrap_or(true);
     debug!("SYNC QueryFence: id={fence_id:#x} triggered={triggered}");
 
-    ReplyBuf::fixed(seq, state.msb_first)
-        .set_u8(8, if triggered { 1 } else { 0 })
-        .build()
+    serialize_reply(
+        &QueryFenceReply {
+            sequence: seq,
+            length: 0,
+            triggered,
+        },
+        state.byte_order(),
+    )
 }
 
 /// Minor opcode 19: AwaitFence

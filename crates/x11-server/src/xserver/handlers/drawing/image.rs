@@ -1,8 +1,10 @@
 //! Image operations (opcodes 72-73).
 
 use super::*;
-use crate::xserver::reply::ReplyBuf;
-use x11rb_protocol::protocol::xproto::{GetImageRequest, ImageFormat, PutImageRequest, WindowClass, GX};
+use crate::xserver::reply::serialize_var_reply;
+use x11rb_protocol::protocol::xproto::{
+    GetImageReply, GetImageRequest, ImageFormat, PutImageRequest, WindowClass, GX,
+};
 
 /// Decode a 16-bit RGB565 pixel into a 24-bit `0x00RRGGBB` value, scaling
 /// each channel up to 8 bits via bit-replication so the lowest bits don't
@@ -621,14 +623,17 @@ pub(crate) fn handle_get_image(state: &mut ClientState, req: &GetImageRequest) -
         }
     };
 
-    let data_len = image_data.len();
-    // Pad data to 4-byte boundary per X11 protocol
-    let padded_len = align_to_4(data_len);
-
-    let mut reply = ReplyBuf::with_extra(seq, padded_len, state.msb_first)
-        .set_data_byte(depth)
-        .set_u32(8, visual);
-    reply.buf_mut()[32..32 + data_len].copy_from_slice(&image_data);
-
-    reply.build()
+    // X11 GetImageReply requires `data` to be a multiple of 4 bytes.
+    let mut data = image_data;
+    let pad = (4 - (data.len() % 4)) % 4;
+    data.resize(data.len() + pad, 0);
+    serialize_var_reply(
+        &GetImageReply {
+            depth,
+            sequence: seq,
+            visual,
+            data,
+        },
+        state.byte_order(),
+    )
 }

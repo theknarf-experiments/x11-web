@@ -6,7 +6,7 @@
 //! - Alarms that trigger on counter value transitions
 //! - Fences for synchronization primitives
 use super::parse_minor;
-use crate::xserver::reply::ReplyBuf;
+use crate::xserver::reply::serialize_reply;
 
 mod alarm;
 mod await_op;
@@ -19,7 +19,7 @@ use tracing::{debug, warn};
 use super::super::client::ClientState;
 use crate::xserver::event::serialize_event;
 use x11rb_protocol::protocol::sync::{
-    AlarmNotifyEvent, InitializeRequest, Int64, ALARMSTATE, TESTTYPE, VALUETYPE,
+    AlarmNotifyEvent, InitializeReply, InitializeRequest, Int64, ALARMSTATE, TESTTYPE, VALUETYPE,
 };
 
 /// A SYNC counter (system or client-created).
@@ -321,10 +321,15 @@ pub(crate) fn handle_sync_request(state: &mut ClientState, data: &[u8], seq: u16
             // Initialize: reply with version 3.1
             let _req = parse_minor!(InitializeRequest, data, state, seq, 134, 0);
             debug!("SYNC Initialize");
-            ReplyBuf::fixed(seq, state.msb_first)
-                .set_u8(8, 3) // major version
-                .set_u8(9, 1) // minor version
-                .build()
+            serialize_reply(
+                &InitializeReply {
+                    sequence: seq,
+                    length: 0,
+                    major_version: 3,
+                    minor_version: 1,
+                },
+                state.byte_order(),
+            )
         }
         1 => counter::list_system_counters(state, seq),
         2 => counter::create_counter(state, data, seq),

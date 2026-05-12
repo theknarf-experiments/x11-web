@@ -8,9 +8,10 @@ use tracing::debug;
 
 use super::super::client::ClientState;
 use super::parse_minor;
-use crate::xserver::reply::ReplyBuf;
+use crate::xserver::reply::serialize_reply;
 use x11rb_protocol::protocol::xfixes::{
-    ChangeSaveSetRequest, QueryVersionRequest, SelectSelectionInputRequest,
+    ChangeSaveSetRequest, QueryVersionReply as XfixesQueryVersionReply, QueryVersionRequest,
+    SelectSelectionInputRequest,
 };
 
 pub(crate) fn handle_xfixes_request(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
@@ -24,10 +25,15 @@ pub(crate) fn handle_xfixes_request(state: &mut ClientState, data: &[u8], seq: u
         // 0: QueryVersion
         0 => {
             let _req = parse_minor!(QueryVersionRequest, data, state, seq, 138, 0);
-            ReplyBuf::fixed(seq, state.msb_first)
-                .set_u32(8, 5u32)
-                .set_u32(12, 0u32)
-                .build()
+            serialize_reply(
+                &XfixesQueryVersionReply {
+                    sequence: seq,
+                    length: 0,
+                    major_version: 5,
+                    minor_version: 0,
+                },
+                state.byte_order(),
+            )
         }
 
         // 1: ChangeSaveSet (extended)

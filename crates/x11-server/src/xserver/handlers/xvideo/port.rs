@@ -9,14 +9,15 @@ use super::{
     build_reply, XV_ATTR_BRIGHTNESS, XV_ATTR_COLORSPACE, XV_ATTR_CONTRAST, XV_ATTR_HUE,
     XV_ATTR_SATURATION, XV_MAJOR_OPCODE,
 };
-use crate::xserver::reply::ReplyBuf;
+use crate::xserver::reply::serialize_var_reply;
 use x11rb_protocol::protocol::xv::{
-    AttributeFlag, GetPortAttributeReply, GetPortAttributeRequest, GrabPortReply, GrabPortRequest,
-    GrabPortStatus, QueryBestSizeReply, QueryBestSizeRequest, QueryPortAttributesRequest,
-    SetPortAttributeRequest, UngrabPortRequest, GET_PORT_ATTRIBUTE_REQUEST, GRAB_PORT_REQUEST,
-    QUERY_BEST_SIZE_REQUEST, QUERY_PORT_ATTRIBUTES_REQUEST, SET_PORT_ATTRIBUTE_REQUEST,
-    UNGRAB_PORT_REQUEST,
+    AttributeFlag, AttributeInfo, GetPortAttributeReply, GetPortAttributeRequest, GrabPortReply,
+    GrabPortRequest, GrabPortStatus, QueryBestSizeReply, QueryBestSizeRequest,
+    QueryPortAttributesReply, QueryPortAttributesRequest, SetPortAttributeRequest,
+    UngrabPortRequest, GET_PORT_ATTRIBUTE_REQUEST, GRAB_PORT_REQUEST, QUERY_BEST_SIZE_REQUEST,
+    QUERY_PORT_ATTRIBUTES_REQUEST, SET_PORT_ATTRIBUTE_REQUEST, UNGRAB_PORT_REQUEST,
 };
+use x11rb_protocol::x11_utils::ByteOrder;
 
 pub(crate) fn handle_port_request(
     state: &mut ClientState,
@@ -207,23 +208,29 @@ fn build_query_port_attributes_reply(
     msb_first: bool,
     attrs: &[PortAttribute],
 ) -> Vec<u8> {
-    const ATTR_INFO_BYTES: usize = 16;
-    let trailing_bytes: usize = attrs.iter().map(|a| ATTR_INFO_BYTES + a.name.len()).sum();
-    debug_assert!(trailing_bytes % 4 == 0, "trailing must be 4-aligned");
     let text_size: u32 = attrs.iter().map(|a| a.name.len() as u32 + 1).sum();
-    let mut reply = ReplyBuf::with_extra(seq, trailing_bytes, msb_first)
-        .set_u32(8, attrs.len() as u32) // num_attributes
-        .set_u32(12, text_size);
-    let mut off = 32;
-    for attr in attrs {
-        reply = reply
-            .set_u32(off, u32::from(attr.flags))
-            .set_u32(off + 4, attr.min as u32)
-            .set_u32(off + 8, attr.max as u32)
-            .set_u32(off + 12, attr.name.len() as u32)
-            .set_bytes(off + ATTR_INFO_BYTES, attr.name);
-        off += ATTR_INFO_BYTES + attr.name.len();
-    }
-    reply.build()
+    let attributes: Vec<AttributeInfo> = attrs
+        .iter()
+        .map(|a| AttributeInfo {
+            flags: AttributeFlag::from(a.flags),
+            min: a.min,
+            max: a.max,
+            name: a.name.to_vec(),
+        })
+        .collect();
+    let byte_order = if msb_first {
+        ByteOrder::Msb
+    } else {
+        ByteOrder::Lsb
+    };
+    serialize_var_reply(
+        &QueryPortAttributesReply {
+            sequence: seq,
+            length: 0,
+            text_size,
+            attributes,
+        },
+        byte_order,
+    )
 }
 

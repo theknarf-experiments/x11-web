@@ -1,10 +1,12 @@
 use tracing::debug;
 
 use super::super::parse_minor;
-use super::{pad4, PictFilter};
-use crate::xserver::reply::ReplyBuf;
+use super::PictFilter;
+use crate::xserver::reply::serialize_var_reply;
 use crate::xserver::ClientState;
-use x11rb_protocol::protocol::render::SetPictureFilterRequest;
+use x11rb_protocol::protocol::render::{QueryFiltersReply, SetPictureFilterRequest};
+use x11rb_protocol::protocol::xproto::Str;
+use x11rb_protocol::x11_utils::ByteOrder;
 
 /// SetPictureFilter (RENDER minor opcode 30).
 /// Sets the filter on a picture (nearest, bilinear, etc.).
@@ -34,36 +36,21 @@ pub(crate) fn handle_set_picture_filter(state: &mut ClientState, data: &[u8], se
 }
 
 pub(crate) fn handle_query_filters(seq: u16, bo: bool) -> Vec<u8> {
-    // Return ["nearest", "bilinear"]
-    let filter1 = b"nearest";
-    let filter2 = b"bilinear";
-
-    // Each alias is 2 bytes (CARD16), num_aliases first
-    // Each filter is: 1-byte length + name bytes, padded to 4 bytes
-    let num_aliases: u32 = 0;
-    let num_filters: u32 = 2;
-
-    let aliases_bytes = 0usize;
-    let filter1_bytes = 1 + filter1.len(); // length byte + name
-    let filter2_bytes = 1 + filter2.len();
-    let filters_bytes = pad4(filter1_bytes) + pad4(filter2_bytes);
-    let extra = aliases_bytes + filters_bytes;
-
-    let mut reply = ReplyBuf::with_extra(seq, extra, bo)
-        .set_u32(8, num_aliases)
-        .set_u32(12, num_filters);
-
-    // Filter 1: "nearest"
-    let mut off = 32;
-    reply.buf_mut()[off] = filter1.len() as u8;
-    off += 1;
-    reply.buf_mut()[off..off + filter1.len()].copy_from_slice(filter1);
-    off = 32 + pad4(filter1_bytes);
-
-    // Filter 2: "bilinear"
-    reply.buf_mut()[off] = filter2.len() as u8;
-    off += 1;
-    reply.buf_mut()[off..off + filter2.len()].copy_from_slice(filter2);
-
-    reply.build()
+    let byte_order = if bo { ByteOrder::Msb } else { ByteOrder::Lsb };
+    serialize_var_reply(
+        &QueryFiltersReply {
+            sequence: seq,
+            length: 0,
+            aliases: Vec::new(),
+            filters: vec![
+                Str {
+                    name: b"nearest".to_vec(),
+                },
+                Str {
+                    name: b"bilinear".to_vec(),
+                },
+            ],
+        },
+        byte_order,
+    )
 }

@@ -3,14 +3,14 @@
 use super::parse_minor;
 use tracing::debug;
 use x11rb_protocol::protocol::screensaver::{
-    Kind, SelectInputRequest, SetAttributesRequest, State, QUERY_INFO_REQUEST,
-    QUERY_VERSION_REQUEST, SELECT_INPUT_REQUEST, SET_ATTRIBUTES_REQUEST, SUSPEND_REQUEST,
-    UNSET_ATTRIBUTES_REQUEST,
+    Kind, QueryInfoReply, QueryVersionReply as ScreenSaverQueryVersionReply, SelectInputRequest,
+    SetAttributesRequest, State, QUERY_INFO_REQUEST, QUERY_VERSION_REQUEST, SELECT_INPUT_REQUEST,
+    SET_ATTRIBUTES_REQUEST, SUSPEND_REQUEST, UNSET_ATTRIBUTES_REQUEST,
 };
 
 use super::super::client::ClientState;
 use crate::xserver::core::require_len;
-use crate::xserver::reply::ReplyBuf;
+use crate::xserver::reply::serialize_reply;
 
 /// Resume request opcode (the X11 SCREEN-SAVER protocol pairs Suspend(5)
 /// with Resume(6); x11rb only exposes `SUSPEND_REQUEST = 5`, so we
@@ -33,10 +33,15 @@ pub(crate) fn handle_screen_saver_request(
 ) -> Vec<u8> {
     let minor = data[1];
     match minor {
-        QUERY_VERSION_REQUEST => ReplyBuf::fixed(seq, state.msb_first)
-            .set_u16(8, 1) // server_major
-            .set_u16(10, 1) // server_minor
-            .build(),
+        QUERY_VERSION_REQUEST => serialize_reply(
+            &ScreenSaverQueryVersionReply {
+                sequence: seq,
+                length: 0,
+                server_major_version: 1,
+                server_minor_version: 1,
+            },
+            state.byte_order(),
+        ),
         QUERY_INFO_REQUEST => {
             let saver_state = if state.screen_saver_suspend_count > 0 {
                 State::DISABLED
@@ -45,14 +50,19 @@ pub(crate) fn handle_screen_saver_request(
             } else {
                 State::OFF
             };
-            ReplyBuf::fixed(seq, state.msb_first)
-                .set_data_byte(u8::from(saver_state))
-                .set_u32(8, state.screen_saver_window) // saver_window
-                .set_u32(12, 0) // ms_until_server
-                .set_u32(16, state.timestamp()) // ms_since_user_input
-                .set_u32(20, state.screen_saver_event_mask) // event_mask
-                .set_u8(24, u8::from(Kind::BLANKED))
-                .build()
+            serialize_reply(
+                &QueryInfoReply {
+                    state: u8::from(saver_state),
+                    sequence: seq,
+                    length: 0,
+                    saver_window: state.screen_saver_window,
+                    ms_until_server: 0,
+                    ms_since_user_input: state.timestamp(),
+                    event_mask: state.screen_saver_event_mask,
+                    kind: Kind::BLANKED,
+                },
+                state.byte_order(),
+            )
         }
         SELECT_INPUT_REQUEST => {
             require_len!(data, 12, seq, 152, minor as u16, state.msb_first);

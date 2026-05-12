@@ -3,10 +3,10 @@
 
 use super::*;
 use crate::xserver::event::serialize_event;
-use crate::xserver::reply::ReplyBuf;
+use crate::xserver::reply::serialize_reply;
 use x11rb_protocol::protocol::xproto::{
-    ConvertSelectionRequest, GetSelectionOwnerRequest, SelectionClearEvent, SelectionNotifyEvent,
-    SelectionRequestEvent, SetSelectionOwnerRequest,
+    ConvertSelectionRequest, GetSelectionOwnerReply, GetSelectionOwnerRequest, SelectionClearEvent,
+    SelectionNotifyEvent, SelectionRequestEvent, SetSelectionOwnerRequest,
 };
 
 // ---------------------------------------------------------------------------
@@ -145,8 +145,6 @@ pub(crate) fn handle_get_selection_owner(
 ) -> Vec<u8> {
     let seq = state.sequence;
     let selection = req.selection;
-    let mut reply_buf = ReplyBuf::fixed(seq, state.msb_first);
-    // Check local selections first, then shared (cross-connection).
     let owner = state
         .selections
         .get(&selection)
@@ -159,8 +157,14 @@ pub(crate) fn handle_get_selection_owner(
                 .and_then(|sels| sels.get(&selection).map(|e| e.owner))
         })
         .unwrap_or(0);
-    reply_buf = reply_buf.set_u32(8, owner);
-    reply_buf.build()
+    serialize_reply(
+        &GetSelectionOwnerReply {
+            sequence: seq,
+            length: 0,
+            owner,
+        },
+        state.byte_order(),
+    )
 }
 
 // ---------------------------------------------------------------------------

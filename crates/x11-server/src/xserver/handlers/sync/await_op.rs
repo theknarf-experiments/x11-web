@@ -5,8 +5,10 @@ use tracing::debug;
 
 use super::super::super::client::ClientState;
 use super::{is_trigger_satisfied, AwaitTrigger, PendingAwait};
-use crate::xserver::reply::ReplyBuf;
-use x11rb_protocol::protocol::sync::{AwaitRequest, GetPriorityRequest, SetPriorityRequest};
+use crate::xserver::reply::serialize_reply;
+use x11rb_protocol::protocol::sync::{
+    AwaitRequest, GetPriorityReply, GetPriorityRequest, SetPriorityRequest,
+};
 
 /// Minor opcode 7: Await
 pub(crate) fn await_op(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
@@ -95,7 +97,12 @@ pub(crate) fn get_priority(state: &mut ClientState, data: &[u8], seq: u16) -> Ve
         .copied()
         .unwrap_or(0);
     debug!("SYNC GetPriority: resource={resource_id:#x} priority={priority}");
-    ReplyBuf::fixed(seq, state.msb_first)
-        .set_u32(8, priority as u32)
-        .build()
+    serialize_reply(
+        &GetPriorityReply {
+            sequence: seq,
+            length: 0,
+            priority,
+        },
+        state.byte_order(),
+    )
 }

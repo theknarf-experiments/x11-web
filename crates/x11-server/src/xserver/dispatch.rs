@@ -10,7 +10,7 @@ use super::client::ClientState;
 use super::core::*;
 use super::extensions::ExtensionId;
 use super::handlers;
-use super::reply::ReplyBuf;
+use super::reply::serialize_reply;
 
 /// Minimum length of an X11 request header: major opcode (1) + minor opcode
 /// or data byte (1) + length-in-words (2).
@@ -65,9 +65,14 @@ fn dispatch_extension(state: &mut ClientState, data: &[u8], seq: u16, id: Extens
         ExtensionId::BigRequests => {
             // BigReqEnable: mark BIG-REQUESTS as enabled and return max request length.
             state.big_requests_enabled = true;
-            ReplyBuf::fixed(seq, state.msb_first)
-                .set_u32(8, crate::xserver::core::BIG_REQUESTS_MAX_LEN_WORDS)
-                .build()
+            serialize_reply(
+                &x11rb_protocol::protocol::bigreq::EnableReply {
+                    sequence: seq,
+                    length: 0,
+                    maximum_request_length: crate::xserver::core::BIG_REQUESTS_MAX_LEN_WORDS,
+                },
+                state.byte_order(),
+            )
         }
         ExtensionId::Shape => handlers::extensions::handle_shape_request(state, data, seq),
         ExtensionId::MitShm => handlers::extensions::handle_shm_request(state, data, seq),

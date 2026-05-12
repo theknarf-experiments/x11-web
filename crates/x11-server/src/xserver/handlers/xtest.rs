@@ -7,12 +7,13 @@ use x11rb_protocol::protocol::xproto::{
     MOTION_NOTIFY_EVENT,
 };
 use x11rb_protocol::protocol::xtest::{
-    COMPARE_CURSOR_REQUEST, FAKE_INPUT_REQUEST, GET_VERSION_REQUEST, GRAB_CONTROL_REQUEST,
+    CompareCursorReply, GetVersionReply as XtestGetVersionReply, COMPARE_CURSOR_REQUEST,
+    FAKE_INPUT_REQUEST, GET_VERSION_REQUEST, GRAB_CONTROL_REQUEST,
 };
 
 use super::super::client::ClientState;
 use crate::xserver::core::require_len;
-use crate::xserver::reply::ReplyBuf;
+use crate::xserver::reply::serialize_reply;
 
 /// XTEST (opcode 150)
 pub(crate) fn handle_xtest_request(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
@@ -21,12 +22,15 @@ pub(crate) fn handle_xtest_request(state: &mut ClientState, data: &[u8], seq: u1
         crate::xserver::core::build_error(code, seq, bad_value, 150, minor as u16)
     };
     match minor {
-        GET_VERSION_REQUEST => {
-            ReplyBuf::fixed(seq, state.msb_first)
-                .set_data_byte(2) // major_version in data byte
-                .set_u16(8, 2) // minor_version
-                .build()
-        }
+        GET_VERSION_REQUEST => serialize_reply(
+            &XtestGetVersionReply {
+                major_version: 2,
+                sequence: seq,
+                length: 0,
+                minor_version: 2,
+            },
+            state.byte_order(),
+        ),
         COMPARE_CURSOR_REQUEST => {
             require_len!(data, 12, seq, 150, minor as u16, state.msb_first);
             use x11rb_protocol::protocol::xtest::CompareCursorRequest;
@@ -48,9 +52,14 @@ pub(crate) fn handle_xtest_request(state: &mut ClientState, data: &[u8], seq: u1
                 win_cursor == cursor_id
             };
 
-            ReplyBuf::fixed(seq, state.msb_first)
-                .set_data_byte(if same { 1 } else { 0 })
-                .build()
+            serialize_reply(
+                &CompareCursorReply {
+                    same,
+                    sequence: seq,
+                    length: 0,
+                },
+                state.byte_order(),
+            )
         }
         FAKE_INPUT_REQUEST => {
             // SECURITY: untrusted clients are denied FakeInput (BadAccess)

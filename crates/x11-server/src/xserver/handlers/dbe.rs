@@ -15,7 +15,10 @@ use crate::framebuffer::Framebuffer;
 use crate::xserver::core::{
     depth_for_visual, require_len, VISUAL_TRUE_COLOR_24, VISUAL_TRUE_COLOR_ARGB_32,
 };
-use crate::xserver::reply::ReplyBuf;
+use crate::xserver::reply::serialize_reply;
+use x11rb_protocol::protocol::dbe::{
+    BufferAttributes, GetBackBufferAttributesReply, QueryVersionReply as DbeQueryVersionReply,
+};
 
 /// DBE - Double Buffer Extension (opcode 157)
 pub(crate) fn handle_dbe_request(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
@@ -24,13 +27,15 @@ pub(crate) fn handle_dbe_request(state: &mut ClientState, data: &[u8], seq: u16)
         crate::xserver::core::build_error(code, seq, bad_value, 157, minor as u16)
     };
     match minor {
-        QUERY_VERSION_REQUEST => {
-            // GetVersion
-            ReplyBuf::fixed(seq, state.msb_first)
-                .set_u8(8, 1) // major_version
-                .set_u8(9, 0) // minor_version
-                .build()
-        }
+        QUERY_VERSION_REQUEST => serialize_reply(
+            &DbeQueryVersionReply {
+                sequence: seq,
+                length: 0,
+                major_version: 1,
+                minor_version: 0,
+            },
+            state.byte_order(),
+        ),
         ALLOCATE_BACK_BUFFER_REQUEST => {
             // AllocateBackBufferName
             require_len!(data, 16, seq, 157, minor as u16, state.msb_first);
@@ -237,9 +242,14 @@ pub(crate) fn handle_dbe_request(state: &mut ClientState, data: &[u8], seq: u16)
                 .get(&back_buffer_id)
                 .copied()
                 .unwrap_or(0);
-            ReplyBuf::fixed(seq, state.msb_first)
-                .set_u32(8, window_id)
-                .build()
+            serialize_reply(
+                &GetBackBufferAttributesReply {
+                    sequence: seq,
+                    length: 0,
+                    attributes: BufferAttributes { window: window_id },
+                },
+                state.byte_order(),
+            )
         }
         _ => {
             debug!("DBE: unhandled minor opcode {minor}");
