@@ -2,14 +2,16 @@
 
 use super::*;
 use crate::xserver::event::serialize_event;
-use crate::xserver::reply::ReplyBuf;
+use crate::xserver::reply::{serialize_reply, serialize_var_reply};
 use x11rb_protocol::protocol::xproto::{
-    AllocColorCellsRequest, AllocColorPlanesRequest, AllocColorRequest, AllocNamedColorRequest,
+    AllocColorCellsReply, AllocColorCellsRequest, AllocColorPlanesReply, AllocColorPlanesRequest,
+    AllocColorReply, AllocColorRequest, AllocNamedColorReply, AllocNamedColorRequest,
     ColormapNotifyEvent, ColormapState as XColormapState, CopyColormapAndFreeRequest,
     CreateColormapRequest, CreateCursorRequest, CreateGlyphCursorRequest, FreeColormapRequest,
-    FreeColorsRequest, FreeCursorRequest, InstallColormapRequest, ListInstalledColormapsRequest,
-    LookupColorRequest, QueryColorsRequest, RecolorCursorRequest, StoreColorsRequest,
-    StoreNamedColorRequest, UninstallColormapRequest,
+    FreeColorsRequest, FreeCursorRequest, InstallColormapRequest, ListInstalledColormapsReply,
+    ListInstalledColormapsRequest, LookupColorReply, LookupColorRequest, QueryColorsReply,
+    QueryColorsRequest, RecolorCursorRequest, Rgb, StoreColorsRequest, StoreNamedColorRequest,
+    UninstallColormapRequest,
 };
 
 // ---------------------------------------------------------------------------
@@ -243,22 +245,16 @@ pub(crate) fn handle_list_installed_colormaps(
 ) -> Vec<u8> {
     let seq = state.sequence;
     // _req.window is available but currently unused — we return all installed colormaps.
-    // Return only colormaps that have been explicitly installed
-    // (the default colormap ROOT_COLORMAP is always installed).
     let cmaps: Vec<u32> = state.installed_colormaps.iter().copied().collect();
 
-    let n_cmaps = cmaps.len();
-    let extra_bytes = n_cmaps * 4;
-    let padded = align_to_4(extra_bytes);
-
-    let mut reply = ReplyBuf::with_extra(seq, padded, state.msb_first).set_u16(8, n_cmaps as u16);
-
-    for (i, &cid) in cmaps.iter().enumerate() {
-        let off = 32 + i * 4;
-        reply = reply.set_u32(off, cid);
-    }
-
-    reply.build()
+    serialize_var_reply(
+        &ListInstalledColormapsReply {
+            sequence: seq,
+            length: 0,
+            cmaps,
+        },
+        state.byte_order(),
+    )
 }
 
 // ---------------------------------------------------------------------------
@@ -293,12 +289,17 @@ pub(crate) fn handle_alloc_color(state: &mut ClientState, req: &AllocColorReques
         None => return build_error(ALLOC_ERROR, seq, 0, 84, 0),
     };
 
-    ReplyBuf::fixed(seq, state.msb_first)
-        .set_u16(8, red)
-        .set_u16(10, green)
-        .set_u16(12, blue)
-        .set_u32(16, pixel)
-        .build()
+    serialize_reply(
+        &AllocColorReply {
+            sequence: seq,
+            length: 0,
+            red,
+            green,
+            blue,
+            pixel,
+        },
+        state.byte_order(),
+    )
 }
 
 // ---------------------------------------------------------------------------
@@ -332,15 +333,20 @@ pub(crate) fn handle_alloc_named_color(
 
     info!("AllocNamedColor: name={name:?} -> pixel={pixel:#x}");
 
-    ReplyBuf::fixed(seq, state.msb_first)
-        .set_u32(8, pixel)
-        .set_u16(12, r16) // exact red
-        .set_u16(14, g16) // exact green
-        .set_u16(16, b16) // exact blue
-        .set_u16(18, r16) // visual red
-        .set_u16(20, g16) // visual green
-        .set_u16(22, b16) // visual blue
-        .build()
+    serialize_reply(
+        &AllocNamedColorReply {
+            sequence: seq,
+            length: 0,
+            pixel,
+            exact_red: r16,
+            exact_green: g16,
+            exact_blue: b16,
+            visual_red: r16,
+            visual_green: g16,
+            visual_blue: b16,
+        },
+        state.byte_order(),
+    )
 }
 
 // ---------------------------------------------------------------------------
@@ -399,23 +405,19 @@ pub(crate) fn handle_alloc_color_cells(
 
     match pixels {
         Some(pix) => {
-            // Build reply: pixels array + masks array
             let n_pix = n_colors as usize;
             let n_mask = if n_planes > 0 { n_planes as usize } else { 0 };
-            let data_len = (n_pix + n_mask) * 4;
-            let padded = align_to_4(data_len);
-            let mut reply = ReplyBuf::with_extra(seq, padded, state.msb_first)
-                .set_u16(8, n_pix as u16)
-                .set_u16(10, n_mask as u16);
-            for (i, &p) in pix.iter().take(n_pix).enumerate() {
-                reply = reply.set_u32(32 + i * 4, p);
-            }
-            // Plane masks: for each plane bit, set that bit position
-            for i in 0..n_mask {
-                let mask = 1u32 << i;
-                reply = reply.set_u32(32 + (n_pix + i) * 4, mask);
-            }
-            reply.build()
+            let pixels: Vec<u32> = pix.iter().take(n_pix).copied().collect();
+            let masks: Vec<u32> = (0..n_mask).map(|i| 1u32 << i).collect();
+            serialize_var_reply(
+                &AllocColorCellsReply {
+                    sequence: seq,
+                    length: 0,
+                    pixels,
+                    masks,
+                },
+                state.byte_order(),
+            )
         }
         None => build_error(ALLOC_ERROR, seq, 0, 86, 0),
     }
@@ -474,9 +476,6 @@ pub(crate) fn handle_alloc_color_planes(
 
     match pixels {
         Some(pix) => {
-            let data_len = n_colors as usize * 4;
-            let padded = align_to_4(data_len);
-            // Red/green/blue masks at offsets 12, 16, 20
             let mut bit = 0u32;
             let mut red_mask = 0u32;
             for _ in 0..n_reds {
@@ -493,15 +492,18 @@ pub(crate) fn handle_alloc_color_planes(
                 blue_mask |= 1 << bit;
                 bit += 1;
             }
-            let mut reply = ReplyBuf::with_extra(seq, padded, state.msb_first)
-                .set_u16(8, n_colors)
-                .set_u32(12, red_mask)
-                .set_u32(16, green_mask)
-                .set_u32(20, blue_mask);
-            for (i, &p) in pix.iter().take(n_colors as usize).enumerate() {
-                reply = reply.set_u32(32 + i * 4, p);
-            }
-            reply.build()
+            let pixels: Vec<u32> = pix.iter().take(n_colors as usize).copied().collect();
+            serialize_var_reply(
+                &AllocColorPlanesReply {
+                    sequence: seq,
+                    length: 0,
+                    red_mask,
+                    green_mask,
+                    blue_mask,
+                    pixels,
+                },
+                state.byte_order(),
+            )
         }
         None => build_error(ALLOC_ERROR, seq, 0, 87, 0),
     }
@@ -520,38 +522,34 @@ pub(crate) fn handle_query_colors(state: &mut ClientState, req: &QueryColorsRequ
         return build_error(COLORMAP_ERROR, seq, cmap_id, 91, 0);
     }
 
-    let n_pixels = req.pixels.len();
-    let mut colors = Vec::with_capacity(n_pixels);
+    let colors: Vec<Rgb> = req
+        .pixels
+        .iter()
+        .map(|&pixel| {
+            let (r, g, b) = if let Some(cmap) = state.colormaps.get(&cmap_id) {
+                cmap.lookup(pixel)
+            } else {
+                // Default TrueColor decomposition (ROOT_COLORMAP)
+                let (r8, g8, b8) = crate::framebuffer::unpack_rgb(pixel);
+                let (r, g, b) = (r8 as u16, g8 as u16, b8 as u16);
+                (r << 8 | r, g << 8 | g, b << 8 | b)
+            };
+            Rgb {
+                red: r,
+                green: g,
+                blue: b,
+            }
+        })
+        .collect();
 
-    for &pixel in req.pixels.iter() {
-        // Look up in the colormap (handles both PseudoColor and TrueColor)
-        let (r, g, b) = if let Some(cmap) = state.colormaps.get(&cmap_id) {
-            cmap.lookup(pixel)
-        } else {
-            // Default TrueColor decomposition (ROOT_COLORMAP)
-            let (r8, g8, b8) = crate::framebuffer::unpack_rgb(pixel);
-            let (r, g, b) = (r8 as u16, g8 as u16, b8 as u16);
-            (r << 8 | r, g << 8 | g, b << 8 | b)
-        };
-
-        colors.push((r, g, b));
-    }
-
-    let data_len = n_pixels * 8; // Each RGB is 8 bytes (r2, g2, b2, pad2)
-    let padded = align_to_4(data_len);
-
-    let mut reply = ReplyBuf::with_extra(seq, padded, state.msb_first).set_u16(8, n_pixels as u16);
-
-    for (i, &(r, g, b)) in colors.iter().enumerate() {
-        let off = 32 + i * 8;
-        reply = reply
-            .set_u16(off, r)
-            .set_u16(off + 2, g)
-            .set_u16(off + 4, b);
-        // pad at off+6..off+8
-    }
-
-    reply.build()
+    serialize_var_reply(
+        &QueryColorsReply {
+            sequence: seq,
+            length: 0,
+            colors,
+        },
+        state.byte_order(),
+    )
 }
 
 // ---------------------------------------------------------------------------
@@ -576,15 +574,19 @@ pub(crate) fn handle_lookup_color(state: &mut ClientState, req: &LookupColorRequ
         }
     };
 
-    // Reply: exact and visual colors
-    ReplyBuf::fixed(seq, state.msb_first)
-        .set_u16(8, r16)
-        .set_u16(10, g16)
-        .set_u16(12, b16)
-        .set_u16(14, r16)
-        .set_u16(16, g16)
-        .set_u16(18, b16)
-        .build()
+    serialize_reply(
+        &LookupColorReply {
+            sequence: seq,
+            length: 0,
+            exact_red: r16,
+            exact_green: g16,
+            exact_blue: b16,
+            visual_red: r16,
+            visual_green: g16,
+            visual_blue: b16,
+        },
+        state.byte_order(),
+    )
 }
 
 // ---------------------------------------------------------------------------

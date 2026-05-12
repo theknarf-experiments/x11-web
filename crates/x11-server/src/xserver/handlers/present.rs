@@ -6,18 +6,20 @@ use tracing::{debug, info};
 use super::super::client::ClientState;
 use super::super::types::PresentSubscription;
 use crate::xserver::event::serialize_event_with_layout;
-use crate::xserver::reply::ReplyBuf;
+use crate::xserver::reply::{serialize_reply, serialize_var_reply};
 use crate::xserver::request::request_header;
 use x11rb_protocol::protocol::present::{
     Capability, CompleteKind, CompleteMode, CompleteNotifyEvent,
     ConfigureNotifyEvent as PresentConfigureNotifyEvent, EventMask, IdleNotifyEvent,
     NotifyMSCRequest, Option as PresentOption, PixmapRequest as PresentPixmapRequest,
-    QueryCapabilitiesRequest, SelectInputRequest as PresentSelectInputRequest, NOTIFY_MSC_REQUEST,
-    PIXMAP_REQUEST, QUERY_CAPABILITIES_REQUEST,
+    QueryCapabilitiesReply, QueryCapabilitiesRequest,
+    QueryVersionReply as PresentQueryVersionReply, SelectInputRequest as PresentSelectInputRequest,
+    NOTIFY_MSC_REQUEST, PIXMAP_REQUEST, QUERY_CAPABILITIES_REQUEST,
     QUERY_VERSION_REQUEST as PRESENT_QUERY_VERSION_REQUEST, SELECT_INPUT_REQUEST,
 };
 use x11rb_protocol::protocol::xc_misc::{
-    GetXIDListRequest, GET_VERSION_REQUEST, GET_XID_LIST_REQUEST, GET_XID_RANGE_REQUEST,
+    GetVersionReply, GetXIDListReply, GetXIDListRequest, GetXIDRangeReply, GET_VERSION_REQUEST,
+    GET_XID_LIST_REQUEST, GET_XID_RANGE_REQUEST,
 };
 
 /// Present major opcode (assigned at QueryExtension time).
@@ -74,13 +76,15 @@ pub(crate) fn handle_xc_misc_request(state: &mut ClientState, data: &[u8], seq: 
     debug!("XC-MISC minor opcode: {minor}");
 
     match minor {
-        GET_VERSION_REQUEST => {
-            // Reply with version 1.1.
-            ReplyBuf::fixed(seq, state.msb_first)
-                .set_u16(8, 1) // major version
-                .set_u16(10, 1) // minor version
-                .build()
-        }
+        GET_VERSION_REQUEST => serialize_reply(
+            &GetVersionReply {
+                sequence: seq,
+                length: 0,
+                server_major_version: 1,
+                server_minor_version: 1,
+            },
+            state.byte_order(),
+        ),
         GET_XID_RANGE_REQUEST => {
             // Reply with a contiguous range of resource IDs.
             // Per the XC-MISC spec, first try to return recycled (freed) IDs
@@ -94,10 +98,15 @@ pub(crate) fn handle_xc_misc_request(state: &mut ClientState, data: &[u8], seq: 
             // Advance the counter
             state.next_xid = state.resource_id_base | ((current_offset + range_size) & mask);
 
-            ReplyBuf::fixed(seq, state.msb_first)
-                .set_u32(8, start_id) // start_id
-                .set_u32(12, range_size) // count
-                .build()
+            serialize_reply(
+                &GetXIDRangeReply {
+                    sequence: seq,
+                    length: 0,
+                    start_id,
+                    count: range_size,
+                },
+                state.byte_order(),
+            )
         }
         GET_XID_LIST_REQUEST => {
             // Return the requested number of individual resource IDs.
@@ -107,15 +116,12 @@ pub(crate) fn handle_xc_misc_request(state: &mut ClientState, data: &[u8], seq: 
                 .unwrap_or(0);
             let ids_to_return = count.min(4096) as usize;
 
-            // Collect IDs: first from freed pool, then from sequential allocation
             let mut ids: Vec<u32> = Vec::with_capacity(ids_to_return);
 
-            // Drain freed XIDs first (most recently freed first)
             while ids.len() < ids_to_return && !state.freed_xids.is_empty() {
                 ids.push(state.freed_xids.pop().unwrap());
             }
 
-            // Fill remaining from sequential allocation
             if ids.len() < ids_to_return {
                 let mask: u32 = crate::xserver::core::RESOURCE_ID_MASK;
                 let current_offset = state.next_xid.wrapping_sub(state.resource_id_base) & mask;
@@ -129,16 +135,14 @@ pub(crate) fn handle_xc_misc_request(state: &mut ClientState, data: &[u8], seq: 
                     state.resource_id_base | ((current_offset + sequential_count) & mask);
             }
 
-            let actual_count = ids.len() as u32;
-            let extra_bytes = (actual_count as usize) * 4;
-            let padded = crate::xserver::core::align_to_4(extra_bytes);
-            let mut reply =
-                ReplyBuf::with_extra(seq, padded, state.msb_first).set_u32(8, actual_count); // ids_count
-            for (i, &id) in ids.iter().enumerate() {
-                let offset = 32 + i * 4;
-                reply = reply.set_u32(offset, id);
-            }
-            reply.build()
+            serialize_var_reply(
+                &GetXIDListReply {
+                    sequence: seq,
+                    length: 0,
+                    ids,
+                },
+                state.byte_order(),
+            )
         }
         _ => {
             debug!("Unhandled XC-MISC minor opcode: {minor}");
@@ -159,10 +163,15 @@ pub(crate) fn handle_present_request(state: &mut ClientState, data: &[u8], seq: 
     debug!("Present minor opcode: {minor}");
 
     match minor {
-        PRESENT_QUERY_VERSION_REQUEST => ReplyBuf::fixed(seq, state.msb_first)
-            .set_u32(8, 1) // major version
-            .set_u32(12, 2) // minor version
-            .build(),
+        PRESENT_QUERY_VERSION_REQUEST => serialize_reply(
+            &PresentQueryVersionReply {
+                sequence: seq,
+                length: 0,
+                major_version: 1,
+                minor_version: 2,
+            },
+            state.byte_order(),
+        ),
         PIXMAP_REQUEST => {
             // PresentPixmap — the critical operation.
             let req = parse_minor!(PresentPixmapRequest, data, state, seq, 148, minor as u16);
@@ -633,10 +642,15 @@ pub(crate) fn handle_present_request(state: &mut ClientState, data: &[u8], seq: 
                 QueryCapabilitiesRequest::try_parse_request(request_header(data), &data[4..])
                     .map(|r| r.target)
                     .unwrap_or(0);
-            ReplyBuf::fixed(seq, state.msb_first)
-                // We always present asynchronously.
-                .set_u32(8, u32::from(u8::from(Capability::ASYNC)))
-                .build()
+            // We always present asynchronously.
+            serialize_reply(
+                &QueryCapabilitiesReply {
+                    sequence: seq,
+                    length: 0,
+                    capabilities: u32::from(u8::from(Capability::ASYNC)),
+                },
+                state.byte_order(),
+            )
         }
         _ => {
             debug!("Unhandled Present minor opcode: {minor}");
