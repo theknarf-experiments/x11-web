@@ -7,7 +7,7 @@
 
 use std::time::Duration;
 
-use x11_web_wire::conn::{accept, dial, listen};
+use x11_web_wire::conn::{accept, dial, listen, SidecarKind};
 use x11_web_wire::tls::{generate_self_signed, parse_fingerprint};
 use x11_web_wire::{wire_capnp, PROTOCOL_VERSION};
 
@@ -58,6 +58,7 @@ async fn handshake_and_heartbeat_roundtrip() {
             fingerprint,
             b"test-token",
             "test-sidecar",
+            SidecarKind::X11,
         )
         .await
         .expect("dial");
