@@ -6,17 +6,20 @@ use super::{
     KB_LOCK, MAX_GROUPS, MAX_KEY_CODE, MIN_KEY_CODE, MODIFIER_KEYS, N_KEYS, SA_LOCK_GROUP,
     SA_LOCK_MODS, SA_SET_GROUP, SA_SET_MODS,
 };
-use crate::xserver::reply::ReplyBuf;
+use crate::xserver::reply::{serialize_var_reply, ReplyBuf};
 use tracing::debug;
+use x11rb_protocol::protocol::xkb::{
+    Action, Behavior, CommonBehavior, Explicit, GetMapMap, GetMapMapKeyActions, GetMapReply,
+    KTMapEntry, KeyModMap, KeySymMap, KeyType, KeyVModMap, SAType, SASetGroup, SASetMods, SA,
+    SetBehavior, SetExplicit, VMod, VModsHigh, VModsLow,
+};
+use x11rb_protocol::protocol::xproto::ModMask;
 use x11rb_protocol::x11_utils::Serialize;
 
 /// Build an XKB GetMap reply with full sections: KeyTypes, KeySyms,
 /// KeyActions, KeyBehaviors, VirtualMods, ExplicitComponents,
 /// ModifierMap, and VirtualModMap.
 pub(crate) fn build_xkb_get_map_reply(state: &mut ClientState, seq: u16) -> Vec<u8> {
-    // ----- Build the variable-length sections -----
-    let mut data = Vec::new();
-
     // How many groups are active? At least 1 (US-QWERTY). Additional groups
     // come from state.xkb_extra_groups (populated by SetMap or layout config).
     let num_groups = (1 + state.xkb_extra_groups.len() as u8).min(MAX_GROUPS);
@@ -25,78 +28,98 @@ pub(crate) fn build_xkb_get_map_reply(state: &mut ClientState, seq: u16) -> Vec<
     // 1. KeyTypes: 4 standard XKB types
     // =====================================================================
     let n_types = 4u8;
-
-    // type 0 — ONE_LEVEL: numLevels=1, no map entries.
-    data.extend_from_slice(&[
-        0x00, 0x00, 0x00, 0x00, // mask, realMods, vmods (16-bit)
-        0x01, // numLevels
-        0x00, // nMapEntries
-        0x00, 0x00, // hasPreserve, pad
-    ]);
-
-    // type 1 — TWO_LEVEL: Shift mask, 1 entry mapping Shift -> level 1.
-    data.extend_from_slice(&[
-        0x01, 0x01, 0x00, 0x00, // mask=Shift, realMods=Shift, vmods=0
-        0x02, // numLevels
-        0x01, // nMapEntries
-        0x00, 0x00, // hasPreserve, pad
-    ]);
-    // map entry: active=1, mask=Shift, level=1, realMods=Shift
-    data.extend_from_slice(&[0x01, 0x01, 0x01, 0x01, 0x00, 0x00, 0x00, 0x00]);
-
-    // type 2 — ALPHABETIC: Shift+Lock, 2 entries.
-    data.extend_from_slice(&[
-        0x03, 0x03, 0x00, 0x00, // mask=Shift|Lock, realMods=Shift|Lock
-        0x02, // numLevels
-        0x02, // nMapEntries
-        0x00, 0x00,
-    ]);
-    data.extend_from_slice(&[0x01, 0x01, 0x01, 0x01, 0x00, 0x00, 0x00, 0x00]);
-    data.extend_from_slice(&[0x01, 0x02, 0x01, 0x02, 0x00, 0x00, 0x00, 0x00]);
-
-    // type 3 — KEYPAD: NumLock (Mod2 = 0x10), 1 entry.
-    data.extend_from_slice(&[
-        0x10, 0x10, 0x00, 0x00, // mask=Mod2, realMods=Mod2
-        0x02, // numLevels
-        0x01, // nMapEntries
-        0x00, 0x00,
-    ]);
-    data.extend_from_slice(&[0x01, 0x10, 0x01, 0x10, 0x00, 0x00, 0x00, 0x00]);
+    let one_level = KeyType {
+        mods_mask: ModMask::from(0u16),
+        mods_mods: ModMask::from(0u16),
+        mods_vmods: VMod::from(0u16),
+        num_levels: 1,
+        has_preserve: false,
+        map: Vec::new(),
+        preserve: Vec::new(),
+    };
+    let two_level = KeyType {
+        mods_mask: ModMask::from(0x01u16),
+        mods_mods: ModMask::from(0x01u16),
+        mods_vmods: VMod::from(0u16),
+        num_levels: 2,
+        has_preserve: false,
+        map: vec![KTMapEntry {
+            active: true,
+            mods_mask: ModMask::from(0x01u16),
+            level: 1,
+            mods_mods: ModMask::from(0x01u16),
+            mods_vmods: VMod::from(0u16),
+        }],
+        preserve: Vec::new(),
+    };
+    let alphabetic = KeyType {
+        mods_mask: ModMask::from(0x03u16),
+        mods_mods: ModMask::from(0x03u16),
+        mods_vmods: VMod::from(0u16),
+        num_levels: 2,
+        has_preserve: false,
+        map: vec![
+            KTMapEntry {
+                active: true,
+                mods_mask: ModMask::from(0x01u16),
+                level: 1,
+                mods_mods: ModMask::from(0x01u16),
+                mods_vmods: VMod::from(0u16),
+            },
+            KTMapEntry {
+                active: true,
+                mods_mask: ModMask::from(0x02u16),
+                level: 1,
+                mods_mods: ModMask::from(0x02u16),
+                mods_vmods: VMod::from(0u16),
+            },
+        ],
+        preserve: Vec::new(),
+    };
+    let keypad = KeyType {
+        mods_mask: ModMask::from(0x10u16),
+        mods_mods: ModMask::from(0x10u16),
+        mods_vmods: VMod::from(0u16),
+        num_levels: 2,
+        has_preserve: false,
+        map: vec![KTMapEntry {
+            active: true,
+            mods_mask: ModMask::from(0x10u16),
+            level: 1,
+            mods_mods: ModMask::from(0x10u16),
+            mods_vmods: VMod::from(0u16),
+        }],
+        preserve: Vec::new(),
+    };
+    let types_rtrn: Vec<KeyType> = vec![one_level, two_level, alphabetic, keypad];
 
     // =====================================================================
     // 2. KeySyms: one XkbSymMapWireDesc per key, with multi-group support
     // =====================================================================
     let mut total_syms_count: u16 = 0;
+    let mut syms_rtrn: Vec<KeySymMap> = Vec::with_capacity(N_KEYS);
     let custom_keymap_snapshot = state.custom_keymap.lock().unwrap().clone();
     for kc in MIN_KEY_CODE..=MAX_KEY_CODE {
         let (normal, shifted) = super::super::resolve_keysym(kc, &custom_keymap_snapshot);
-        let two_level = normal != 0 && shifted != 0 && normal != shifted;
-        let width: u8 = if two_level { 2 } else { 1 };
+        let two_level_key = normal != 0 && shifted != 0 && normal != shifted;
+        let width: u8 = if two_level_key { 2 } else { 1 };
 
-        // Collect keysyms for each group.
-        // Group 0: custom keymap (from ChangeKeyboardMapping/SetMap) or built-in US-QWERTY.
-        // Groups 1+: from xkb_extra_groups tables (fallback to group 0 if missing).
+        // Group 0: custom keymap or US-QWERTY. Groups 1+: xkb_extra_groups.
         let mut group_syms: Vec<Vec<u32>> = Vec::with_capacity(num_groups as usize);
-
-        // Group 0
-        if two_level {
+        if two_level_key {
             group_syms.push(vec![normal, shifted]);
         } else {
             group_syms.push(vec![normal]);
         }
-
-        // Additional groups
         for gi in 0..num_groups.saturating_sub(1) {
             let gi = gi as usize;
             if gi < state.xkb_extra_groups.len() {
                 let extra = &state.xkb_extra_groups[gi];
                 if let Some(syms) = extra.get(&kc) {
-                    // Pad or truncate to `width` entries
                     let mut gs = syms.clone();
                     gs.resize(width as usize, 0);
                     group_syms.push(gs);
                 } else {
-                    // Fallback: duplicate group 0
                     group_syms.push(group_syms[0].clone());
                 }
             } else {
@@ -106,264 +129,209 @@ pub(crate) fn build_xkb_get_map_reply(state: &mut ClientState, seq: u16) -> Vec<
 
         let actual_groups = group_syms.len() as u8;
         let n_syms = (width as u16) * (actual_groups as u16);
+        let kt_idx = if two_level_key { 1u8 } else { 0u8 };
 
-        let off = data.len();
-        // kt_index: one per group (up to 4), packed into 4 bytes
-        let kt_idx = if two_level { 1u8 } else { 0u8 };
-        data.extend_from_slice(&[kt_idx, kt_idx, kt_idx, kt_idx]);
-        // groupInfo: low 4 bits = nGroups
-        data.push(actual_groups);
-        data.push(width);
-        data.extend_from_slice(&[0u8; 2]); // nSyms placeholder
-        state.write_u16(&mut data, off + 6, n_syms);
-
-        // Emit keysyms: group0_level0, group0_level1, group1_level0, ...
-        for gs in &group_syms {
-            for &sym in gs {
-                let sym_off = data.len();
-                data.extend_from_slice(&[0u8; 4]);
-                state.write_u32(&mut data, sym_off, sym);
-            }
-        }
+        let flat_syms: Vec<u32> = group_syms.into_iter().flatten().collect();
+        syms_rtrn.push(KeySymMap {
+            kt_index: [kt_idx, kt_idx, kt_idx, kt_idx],
+            group_info: actual_groups,
+            width,
+            syms: flat_syms,
+        });
         total_syms_count += n_syms;
     }
 
     // =====================================================================
-    // 3. KeyActions: per-key nActs array + action records
+    // 3. KeyActions: per-key nActs array + Action records
     // =====================================================================
-    // Build lookup of keycode -> action info.
-    // Action data: (keycode, action_type, param) where param is mod_mask for
-    // SA_SetMods/SA_LockMods or group_index for SA_SetGroup/SA_LockGroup.
-    let mut key_actions: Vec<(u8, u8, u8)> = Vec::new();
+    let mut key_actions_lookup: Vec<(u8, u8, u8)> = Vec::new();
     for &(kc, real_mod, _vmod) in MODIFIER_KEYS {
         if is_lock_key(kc) {
-            key_actions.push((kc, SA_LOCK_MODS, real_mod));
+            key_actions_lookup.push((kc, SA_LOCK_MODS, real_mod));
         } else {
-            key_actions.push((kc, SA_SET_MODS, real_mod));
+            key_actions_lookup.push((kc, SA_SET_MODS, real_mod));
         }
     }
-    // If multiple groups are configured, add group-switch actions.
-    // By convention: right Alt (108) can toggle groups when multi-layout is active.
     if num_groups > 1 {
-        // Check if client has configured explicit group-switch keys via xkb_group_switch_keys;
-        // otherwise don't override the default Alt_R binding.
         for &(kc, group_idx) in &state.xkb_group_switch_keys {
-            // Remove any existing modifier action for this key
-            key_actions.retain(|(k, _, _)| *k != kc);
-            key_actions.push((kc, SA_LOCK_GROUP, group_idx));
+            key_actions_lookup.retain(|(k, _, _)| *k != kc);
+            key_actions_lookup.push((kc, SA_LOCK_GROUP, group_idx));
         }
     }
 
-    // Write per-key nActs array (1 byte per key)
-    let mut total_actions: u16 = 0;
-    for kc in MIN_KEY_CODE..=MAX_KEY_CODE {
-        if key_actions.iter().any(|(k, _, _)| *k == kc) {
-            data.push(1); // 1 action for this key
-            total_actions += 1;
-        } else {
-            data.push(0); // no actions
-        }
-    }
-    // Pad to 4-byte boundary
-    while data.len() % 4 != 0 {
-        data.push(0);
-    }
+    let acts_rtrn_count: Vec<u8> = (MIN_KEY_CODE..=MAX_KEY_CODE)
+        .map(|kc| {
+            if key_actions_lookup.iter().any(|(k, _, _)| *k == kc) {
+                1
+            } else {
+                0
+            }
+        })
+        .collect();
+    let total_actions: u16 = acts_rtrn_count.iter().map(|&n| n as u16).sum();
 
-    // Write the action records (8 bytes each, XkbAnyAction)
+    let mut acts_rtrn_acts: Vec<Action> = Vec::new();
     for kc in MIN_KEY_CODE..=MAX_KEY_CODE {
-        if let Some(&(_, action_type, param)) = key_actions.iter().find(|(k, _, _)| *k == kc) {
+        if let Some(&(_, action_type, param)) =
+            key_actions_lookup.iter().find(|(k, _, _)| *k == kc)
+        {
             match action_type {
                 SA_SET_GROUP | SA_LOCK_GROUP => {
-                    // XkbGroupAction layout (8 bytes):
-                    //   byte 0: type (SA_SetGroup or SA_LockGroup)
-                    //   byte 1: flags (0 = absolute group)
-                    //   byte 2: group (signed group index)
-                    //   byte 3-7: pad
-                    let mut action = [0u8; 8];
-                    action[0] = action_type;
-                    action[1] = 0; // flags: 0 = absolute
-                    action[2] = param; // group index
-                    data.extend_from_slice(&action);
+                    acts_rtrn_acts.push(Action::from(SASetGroup {
+                        type_: SAType::from(action_type),
+                        flags: SA::from(0u8),
+                        group: param as i8,
+                    }));
                 }
                 _ => {
-                    // XkbModAction layout (8 bytes):
-                    //   byte 0: type (SA_SetMods or SA_LockMods)
-                    //   byte 1: flags
-                    //   byte 2: mask (real modifier mask)
-                    //   byte 3: realMods
-                    //   byte 4-5: vmods
-                    //   byte 6-7: pad
-                    let mut action = [0u8; 8];
-                    action[0] = action_type;
-                    action[1] = 0;
-                    action[2] = param; // mod_mask
-                    action[3] = param; // realMods
-                                       // vmods: set if this key has a virtual modifier
-                    if let Some(&(_, _, vmod_idx)) = MODIFIER_KEYS.iter().find(|(k, _, _)| *k == kc)
-                    {
-                        if vmod_idx != 0xFF {
-                            let vmod_bits: u16 = 1 << vmod_idx;
-                            data.push(action[0]);
-                            data.push(action[1]);
-                            data.push(action[2]);
-                            data.push(action[3]);
-                            let vmod_off = data.len();
-                            data.extend_from_slice(&[0u8; 2]);
-                            state.write_u16(&mut data, vmod_off, vmod_bits);
-                            data.extend_from_slice(&[0u8; 2]); // pad
-                            continue;
-                        }
-                    }
-                    data.extend_from_slice(&action);
+                    let (vmods_high, vmods_low) =
+                        MODIFIER_KEYS
+                            .iter()
+                            .find(|(k, _, _)| *k == kc)
+                            .map_or((0u8, 0u8), |&(_, _, vmod_idx)| {
+                                if vmod_idx != 0xFF {
+                                    let bits: u16 = 1 << vmod_idx;
+                                    ((bits >> 8) as u8, (bits & 0xFF) as u8)
+                                } else {
+                                    (0, 0)
+                                }
+                            });
+                    acts_rtrn_acts.push(Action::from(SASetMods {
+                        type_: SAType::from(action_type),
+                        flags: SA::from(0u8),
+                        mask: ModMask::from(param as u16),
+                        real_mods: ModMask::from(param as u16),
+                        vmods_high: VModsHigh::from(vmods_high),
+                        vmods_low: VModsLow::from(vmods_low),
+                    }));
                 }
             }
         }
     }
 
-    // =====================================================================
-    // 4. KeyBehaviors: XkbBehaviorWireDesc (4 bytes each, sparse)
-    // =====================================================================
-    // Only emit entries for lock keys (CapsLock, NumLock)
-    let mut behavior_entries: Vec<(u8, u8)> = Vec::new(); // (keycode, behavior_type)
-    for &kc in &[66u8, 77u8] {
-        // CapsLock, NumLock
-        behavior_entries.push((kc, KB_LOCK));
-    }
-    let n_key_behaviors = behavior_entries.len() as u8;
-    let total_key_behaviors = n_key_behaviors;
+    let key_actions_section = GetMapMapKeyActions {
+        acts_rtrn_count,
+        acts_rtrn_acts,
+    };
 
-    for &(kc, behavior) in &behavior_entries {
-        // XkbBehaviorWireDesc: keycode(1) + type(1) + data(1) + pad(1)
-        data.push(kc);
-        data.push(behavior);
-        data.push(0); // data
-        data.push(0); // pad
-    }
+    // =====================================================================
+    // 4. KeyBehaviors: lock-keys only (CapsLock, NumLock)
+    // =====================================================================
+    let behavior_keys = [66u8, 77u8];
+    let behaviors_rtrn: Vec<SetBehavior> = behavior_keys
+        .iter()
+        .map(|&kc| SetBehavior {
+            keycode: kc,
+            behavior: Behavior::from(CommonBehavior {
+                type_: KB_LOCK,
+                data: 0,
+            }),
+        })
+        .collect();
+    let n_key_behaviors = behaviors_rtrn.len() as u8;
+    let total_key_behaviors = n_key_behaviors;
 
     // =====================================================================
     // 5. VirtualMods: per-vmod modifier mapping
     // =====================================================================
-    // Virtual modifier mask: bits 0,1,3 = Alt(0), NumLock(1), Super(3)
+    // bits 0,1,3 = Alt(Mod1=0x08), NumLock(Mod2=0x10), Super(Mod4=0x40)
     let virtual_mods: u16 = (1 << 0) | (1 << 1) | (1 << 3);
-    // For each set bit in virtualMods, emit 1 byte (the real modifier mapping)
-    // Bit 0 (Alt) → Mod1 = 0x08
-    data.push(0x08);
-    // Bit 1 (NumLock) → Mod2 = 0x10
-    data.push(0x10);
-    // Bit 3 (Super) → Mod4 = 0x40
-    data.push(0x40);
-    // Pad to 4-byte boundary
-    while data.len() % 4 != 0 {
-        data.push(0);
-    }
+    let vmods_rtrn: Vec<ModMask> = vec![
+        ModMask::from(0x08u16),
+        ModMask::from(0x10u16),
+        ModMask::from(0x40u16),
+    ];
 
     // =====================================================================
-    // 6. ExplicitComponents: XkbExplicitWireDesc (2 bytes each, sparse)
+    // 6. ExplicitComponents
     // =====================================================================
-    // Mark modifier keys with explicit interpretation flags
-    // XkbExplicitWireDesc: keycode(1) + explicit(1)
-    let mut explicit_entries: Vec<(u8, u8)> = Vec::new();
-    for &(kc, _, _) in MODIFIER_KEYS {
-        // XkbExplicitInterpretMask (0x10) | XkbExplicitAutoRepeatMask (0x20)
-        explicit_entries.push((kc, 0x30));
-    }
-    let n_key_explicit = explicit_entries.len() as u8;
+    let explicit_rtrn: Vec<SetExplicit> = MODIFIER_KEYS
+        .iter()
+        .map(|&(kc, _, _)| SetExplicit {
+            keycode: kc,
+            // XkbExplicitInterpretMask (0x10) | XkbExplicitAutoRepeatMask (0x20)
+            explicit: Explicit::from(0x30u8),
+        })
+        .collect();
+    let n_key_explicit = explicit_rtrn.len() as u8;
     let total_key_explicit = n_key_explicit;
 
-    for &(kc, explicit) in &explicit_entries {
-        data.push(kc);
-        data.push(explicit);
-    }
-    // Pad to 4-byte boundary
-    while data.len() % 4 != 0 {
-        data.push(0);
-    }
-
     // =====================================================================
-    // 7. ModifierMap: XkbKeyModMapWireDesc (2 bytes each, sparse)
+    // 7. ModifierMap
     // =====================================================================
-    // Map keycodes to real modifier bits
-    let mut modmap_entries: Vec<(u8, u8)> = Vec::new(); // (keycode, mods)
+    let mut modmap_seen: Vec<u8> = Vec::new();
+    let mut modmap_rtrn: Vec<KeyModMap> = Vec::new();
     for &(kc, real_mod, _) in MODIFIER_KEYS {
-        // Deduplicate: only add if not already present
-        if !modmap_entries.iter().any(|(k, _)| *k == kc) {
-            modmap_entries.push((kc, real_mod));
+        if !modmap_seen.contains(&kc) {
+            modmap_seen.push(kc);
+            modmap_rtrn.push(KeyModMap {
+                keycode: kc,
+                mods: ModMask::from(real_mod as u16),
+            });
         }
     }
-    let n_mod_map_keys = modmap_entries.len() as u8;
+    let n_mod_map_keys = modmap_rtrn.len() as u8;
     let total_mod_map_keys = n_mod_map_keys;
 
-    for &(kc, mods) in &modmap_entries {
-        data.push(kc);
-        data.push(mods);
-    }
-    // Pad to 4-byte boundary
-    while data.len() % 4 != 0 {
-        data.push(0);
-    }
-
     // =====================================================================
-    // 8. VirtualModMap: XkbKeyVModMapWireDesc (4 bytes each, sparse)
+    // 8. VirtualModMap
     // =====================================================================
-    let mut vmodmap_entries: Vec<(u8, u16)> = Vec::new(); // (keycode, vmod_mask)
+    let mut vmodmap_seen: Vec<u8> = Vec::new();
+    let mut vmodmap_rtrn: Vec<KeyVModMap> = Vec::new();
     for &(kc, _, vmod_idx) in MODIFIER_KEYS {
-        if vmod_idx != 0xFF {
-            let mask = 1u16 << vmod_idx;
-            if !vmodmap_entries.iter().any(|(k, _)| *k == kc) {
-                vmodmap_entries.push((kc, mask));
-            }
+        if vmod_idx != 0xFF && !vmodmap_seen.contains(&kc) {
+            vmodmap_seen.push(kc);
+            vmodmap_rtrn.push(KeyVModMap {
+                keycode: kc,
+                vmods: VMod::from(1u16 << vmod_idx),
+            });
         }
     }
-    let n_vmod_map_keys = vmodmap_entries.len() as u8;
+    let n_vmod_map_keys = vmodmap_rtrn.len() as u8;
     let total_vmod_map_keys = n_vmod_map_keys;
 
-    for &(kc, vmods) in &vmodmap_entries {
-        // XkbKeyVModMapWireDesc: keycode(1) + pad(1) + vmods(2)
-        data.push(kc);
-        data.push(0); // pad
-        let off = data.len();
-        data.extend_from_slice(&[0u8; 2]);
-        state.write_u16(&mut data, off, vmods);
-    }
-
-    // Pad to 4-byte boundary
-    while data.len() % 4 != 0 {
-        data.push(0);
-    }
-
-    // ----- Header -----
-    let total_extra = 8 + data.len();
-    let mut reply = ReplyBuf::with_extra(seq, total_extra, state.msb_first).set_data_byte(3); // deviceID (matches Xvfb's default core kbd)
-    reply.buf_mut()[10] = MIN_KEY_CODE;
-    reply.buf_mut()[11] = MAX_KEY_CODE;
-    let present: u16 = 0x00ff;
-    reply = reply.set_u16(12, present);
-    reply.buf_mut()[14] = 0; // firstType
-    reply.buf_mut()[15] = n_types;
-    reply.buf_mut()[16] = n_types; // totalTypes
-    reply.buf_mut()[17] = MIN_KEY_CODE; // firstKeySym
-    reply = reply.set_u16(18, total_syms_count);
-    reply.buf_mut()[20] = N_KEYS as u8; // nKeySyms
-    reply.buf_mut()[21] = MIN_KEY_CODE; // firstKeyAction
-    reply = reply.set_u16(22, total_actions);
-    reply.buf_mut()[24] = N_KEYS as u8; // nKeyActions (full range)
-    reply.buf_mut()[25] = MIN_KEY_CODE; // firstKeyBehavior
-    reply.buf_mut()[26] = n_key_behaviors;
-    reply.buf_mut()[27] = total_key_behaviors;
-    reply.buf_mut()[28] = MIN_KEY_CODE; // firstKeyExplicit
-    reply.buf_mut()[29] = n_key_explicit;
-    reply.buf_mut()[30] = total_key_explicit;
-    reply.buf_mut()[31] = MIN_KEY_CODE; // firstModMapKey
-    reply.buf_mut()[32] = n_mod_map_keys;
-    reply.buf_mut()[33] = total_mod_map_keys;
-    reply.buf_mut()[34] = MIN_KEY_CODE; // firstVModMapKey
-    reply.buf_mut()[35] = n_vmod_map_keys;
-    reply.buf_mut()[36] = total_vmod_map_keys;
-    // 37 = pad2
-    reply = reply.set_u16(38, virtual_mods);
-
-    reply.buf_mut()[40..].copy_from_slice(&data);
-    reply.build()
+    serialize_var_reply(
+        &GetMapReply {
+            device_id: 3,
+            sequence: seq,
+            length: 0,
+            min_key_code: MIN_KEY_CODE,
+            max_key_code: MAX_KEY_CODE,
+            first_type: 0,
+            n_types,
+            total_types: n_types,
+            first_key_sym: MIN_KEY_CODE,
+            total_syms: total_syms_count,
+            n_key_syms: N_KEYS as u8,
+            first_key_action: MIN_KEY_CODE,
+            total_actions,
+            n_key_actions: N_KEYS as u8,
+            first_key_behavior: MIN_KEY_CODE,
+            n_key_behaviors,
+            total_key_behaviors,
+            first_key_explicit: MIN_KEY_CODE,
+            n_key_explicit,
+            total_key_explicit,
+            first_mod_map_key: MIN_KEY_CODE,
+            n_mod_map_keys,
+            total_mod_map_keys,
+            first_v_mod_map_key: MIN_KEY_CODE,
+            n_v_mod_map_keys: n_vmod_map_keys,
+            total_v_mod_map_keys: total_vmod_map_keys,
+            virtual_mods: VMod::from(virtual_mods),
+            map: GetMapMap {
+                types_rtrn: Some(types_rtrn),
+                syms_rtrn: Some(syms_rtrn),
+                key_actions: Some(key_actions_section),
+                behaviors_rtrn: Some(behaviors_rtrn),
+                vmods_rtrn: Some(vmods_rtrn),
+                explicit_rtrn: Some(explicit_rtrn),
+                modmap_rtrn: Some(modmap_rtrn),
+                vmodmap_rtrn: Some(vmodmap_rtrn),
+            },
+        },
+        state.byte_order(),
+    )
 }
 
 /// Handle XKB SetMap request: allow clients to change key type assignments,
