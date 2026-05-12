@@ -8,7 +8,7 @@ use x11rb_protocol::protocol::dbe::{
     GET_BACK_BUFFER_ATTRIBUTES_REQUEST, GET_VISUAL_INFO_REQUEST, QUERY_VERSION_REQUEST,
     SWAP_BUFFERS_REQUEST,
 };
-use x11rb_protocol::x11_utils::Serialize;
+use x11rb_protocol::x11_utils::{ByteOrder, SerializeEndian};
 
 use super::super::client::ClientState;
 use crate::framebuffer::Framebuffer;
@@ -201,19 +201,22 @@ pub(crate) fn handle_dbe_request(state: &mut ClientState, data: &[u8], seq: u16)
                     },
                 ],
             }];
-            let mut bytes = GetVisualInfoReply {
+            let reply = GetVisualInfoReply {
                 sequence: seq,
                 length: 0,
                 supported_visuals,
-            }
-            .serialize();
+            };
+            let byte_order = state.byte_order();
+            let mut bytes = Vec::new();
+            reply.serialize_endian_into(&mut bytes, byte_order);
             // Stamp length from the actual buffer size (overrides the
-            // 0 we passed in).
+            // 0 we passed in), endian-aware.
             let length = ((bytes.len() - 32) / 4) as u32;
-            bytes[4..8].copy_from_slice(&length.to_ne_bytes());
-            if state.msb_first {
-                byteswap_get_visual_info_reply(&mut bytes);
-            }
+            let length_bytes = match byte_order {
+                ByteOrder::Lsb => length.to_le_bytes(),
+                ByteOrder::Msb => length.to_be_bytes(),
+            };
+            bytes[4..8].copy_from_slice(&length_bytes);
             bytes
         }
         GET_BACK_BUFFER_ATTRIBUTES_REQUEST => {
@@ -241,36 +244,6 @@ pub(crate) fn handle_dbe_request(state: &mut ClientState, data: &[u8], seq: u16)
         _ => {
             debug!("DBE: unhandled minor opcode {minor}");
             dbe_err(crate::xserver::core::REQUEST_ERROR, minor as u32)
-        }
-    }
-}
-
-/// `GetVisualInfoReply`:
-/// `[type:1, pad:1, sequence:u16, length:u32, n_supported_visuals:u32,
-///   pad:20, supported_visuals:[VisualInfos]]`. Each `VisualInfos` is
-/// `n_infos:u32` followed by `n_infos` × `VisualInfo (8 bytes:
-/// visual_id:u32, depth:u8, perf_level:u8, pad:2)`.
-///
-/// Called before any byte-swaps; reads multi-byte fields in native
-/// order to walk the layout, then swaps each field in place.
-fn byteswap_get_visual_info_reply(buf: &mut [u8]) {
-    use crate::xserver::byteswap::{swap_u16, swap_u32};
-    let n_screens = u32::from_ne_bytes([buf[8], buf[9], buf[10], buf[11]]) as usize;
-    swap_u16(buf, 2); // sequence
-    swap_u32(buf, 4); // length
-    swap_u32(buf, 8); // n_supported_visuals
-    let mut off = 32;
-    for _ in 0..n_screens {
-        if off + 4 > buf.len() {
-            return;
-        }
-        let n_infos =
-            u32::from_ne_bytes([buf[off], buf[off + 1], buf[off + 2], buf[off + 3]]) as usize;
-        swap_u32(buf, off); // n_infos
-        off += 4;
-        for _ in 0..n_infos {
-            swap_u32(buf, off); // visual_id; depth/perf_level/pad are bytes
-            off += 8;
         }
     }
 }
