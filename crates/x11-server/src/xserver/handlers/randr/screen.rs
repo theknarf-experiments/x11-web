@@ -22,6 +22,12 @@ pub(crate) fn handle_select_input(state: &mut ClientState, data: &[u8], _seq: u1
 }
 
 /// RRGetScreenInfo (5) — legacy screen configuration.
+///
+/// `n_info` is the count of (sizes + rate-info entries). The codegen
+/// serializer asserts `rates.len() == n_info - n_sizes`; mismatch
+/// panics the request loop and drops the client connection. We
+/// advertise one rate-info per size (with no concrete rates), so
+/// `n_info == 2` for our single size.
 pub(crate) fn handle_get_screen_info(state: &mut ClientState, _data: &[u8], seq: u16) -> Vec<u8> {
     serialize_var_reply(
         &GetScreenInfoReply {
@@ -34,7 +40,7 @@ pub(crate) fn handle_get_screen_info(state: &mut ClientState, _data: &[u8], seq:
             size_id: 0,
             rotation: Rotation::from(1u16),
             rate: 0,
-            n_info: 1,
+            n_info: 2,
             sizes: vec![ScreenSize {
                 width: state.screen_width,
                 height: state.screen_height,
