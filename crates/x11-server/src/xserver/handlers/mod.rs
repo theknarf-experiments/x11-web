@@ -59,7 +59,11 @@ pub(crate) use window::restack_by_window_type;
 /// centralises the boilerplate that used to live at the top of every handler.
 macro_rules! typed {
     ($T:ty, $handler:path, $opcode:literal, $data:ident, $state:ident) => {{
-        match <$T>::try_parse_request(crate::xserver::request::request_header($data), &$data[4..]) {
+        match <$T>::try_parse_endian_request(
+            crate::xserver::request::request_header($data),
+            &$data[4..],
+            $state.byte_order(),
+        ) {
             Ok(req) => $handler($state, &req),
             Err(_) => crate::xserver::core::build_error(
                 crate::xserver::core::LENGTH_ERROR,
