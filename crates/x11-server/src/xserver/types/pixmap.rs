@@ -19,6 +19,7 @@ pub(crate) struct PixmapState {
 /// Stores the pixmap's geometry and owner so other connections can
 /// validate references. The actual framebuffer data is proxied through
 /// the owning connection via SharedPixmapFbs.
+#[allow(dead_code)]
 #[derive(Clone)]
 pub(crate) struct SharedPixmapMeta {
     pub(crate) width: u16,

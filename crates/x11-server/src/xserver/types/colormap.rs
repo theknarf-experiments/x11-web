@@ -16,6 +16,7 @@ mod rgb_332 {
 }
 
 /// Colormap state for both TrueColor (read-only) and PseudoColor (writable) visuals.
+#[allow(dead_code)]
 #[derive(Clone)]
 pub(crate) struct ColormapState {
     /// Visual ID this colormap is associated with.

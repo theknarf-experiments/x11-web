@@ -34,6 +34,7 @@ pub(crate) struct CursorInfo {
 }
 
 /// XFIXES pointer barrier (CreatePointerBarrier).
+#[allow(dead_code)]
 #[derive(Clone, Debug)]
 pub(crate) struct PointerBarrier {
     pub(crate) barrier_id: u32,

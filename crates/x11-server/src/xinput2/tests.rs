@@ -673,42 +673,6 @@ fn xi_get_selected_events_returns_subscriptions() {
 }
 
 #[test]
-fn xi_passive_grab_check_matches() {
-    let mut xi_state = XiState::default();
-    xi_state.passive_grabs.push(Xi2PassiveGrab {
-        deviceid: MASTER_POINTER_ID,
-        grab_window: 0x400001,
-        detail: 1,         // Button 1
-        grab_type: 1,      // Button
-        modifiers: 0x8000, // AnyModifier
-        event_mask: vec![],
-        owner_events: false,
-        paired_device_mode: 1,
-        grab_mode: 1,
-    });
-
-    // Should match: button 1 on window 0x400001 with any modifier.
-    let result = xi_state.check_passive_grab(
-        MASTER_POINTER_ID,
-        1,    // detail = button 1
-        1,    // grab_type = Button
-        0x04, // modifiers = Control
-        &[0x400001, 0x62],
-    );
-    assert!(result.is_some());
-
-    // Should NOT match: button 2.
-    let result = xi_state.check_passive_grab(
-        MASTER_POINTER_ID,
-        2, // detail = button 2
-        1,
-        0,
-        &[0x400001, 0x62],
-    );
-    assert!(result.is_none());
-}
-
-#[test]
 fn xi_sync_grab_freezes_pointer() {
     let mut xi_state = XiState::default();
     let mut focus = 0x62u32;

@@ -23,6 +23,7 @@ use x11rb_protocol::protocol::sync::{
 };
 
 /// A SYNC counter (system or client-created).
+#[allow(dead_code)]
 #[derive(Clone, Debug)]
 pub(crate) struct SyncCounter {
     /// Current counter value (64-bit, stored as hi/lo pair).
@@ -58,6 +59,7 @@ pub(crate) struct SyncAlarm {
 }
 
 /// A SYNC fence for synchronization.
+#[allow(dead_code)]
 #[derive(Clone, Debug)]
 pub(crate) struct FenceState {
     /// The fence resource ID.
@@ -71,6 +73,7 @@ pub(crate) struct FenceState {
 }
 
 /// A single trigger condition for SYNC Await.
+#[allow(dead_code)]
 #[derive(Clone, Debug)]
 pub(crate) struct AwaitTrigger {
     pub(crate) counter_id: u32,

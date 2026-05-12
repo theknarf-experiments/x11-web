@@ -107,24 +107,6 @@ impl XFixesRegion {
         let bounding = XFixesRegion::from_rects(vec![*bounds]);
         bounding.subtract(self)
     }
-
-    /// Expand each rectangle outward by `(left, top, right, bottom)` —
-    /// the XFIXES "ExpandRegion" semantics. The origin moves up-left
-    /// by `(left, top)` and the size grows by `(left + right, top +
-    /// bottom)`.
-    pub(crate) fn expand(&self, left: u16, top: u16, right: u16, bottom: u16) -> XFixesRegion {
-        let rects = self
-            .rects
-            .iter()
-            .map(|r| RegionRect {
-                x: r.x.saturating_sub(left as i16),
-                y: r.y.saturating_sub(top as i16),
-                width: r.width.saturating_add(left).saturating_add(right),
-                height: r.height.saturating_add(top).saturating_add(bottom),
-            })
-            .collect();
-        XFixesRegion { rects }
-    }
 }
 
 #[cfg(test)]
@@ -250,15 +232,6 @@ mod tests {
         assert_eq!(area, 30 * 30 - 10 * 10); // 800
     }
 
-    #[test]
-    fn expand_increases_all_sides() {
-        let reg = XFixesRegion::from_rects(vec![r(10, 10, 20, 20)]);
-        let expanded = reg.expand(5, 5, 5, 5);
-        assert_eq!(expanded.rects[0].x, 5);
-        assert_eq!(expanded.rects[0].y, 5);
-        assert_eq!(expanded.rects[0].width, 30);
-        assert_eq!(expanded.rects[0].height, 30);
-    }
 }
 
 /// Subtract rectangle `sub` from rectangle `r`, appending result fragments.

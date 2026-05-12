@@ -347,7 +347,6 @@ pub(crate) async fn handle_client(
         windows: local_windows,
         shared_windows,
         shared_dirty_windows: std::collections::HashSet::new(),
-        shared_removed_windows: std::collections::HashSet::new(),
         pixmaps: HashMap::new(),
         gcs: HashMap::new(),
         atoms: shared_atoms,
@@ -1100,7 +1099,7 @@ pub(crate) async fn handle_client(
                         break;
                     }
 
-                    let mut request_data: Vec<u8> = pending.drain(..req_len_bytes).collect();
+                    let request_data: Vec<u8> = pending.drain(..req_len_bytes).collect();
                     state.sequence = state.sequence.wrapping_add(1);
 
                     // MSB-first requests are parsed in place via the

@@ -120,6 +120,7 @@ pub(crate) enum GlxDrawableKind {
 }
 
 /// Metadata for a tracked GLX drawable.
+#[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub(crate) struct GlxDrawable {
     pub(crate) kind: GlxDrawableKind,

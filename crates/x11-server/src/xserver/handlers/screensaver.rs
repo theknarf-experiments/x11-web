@@ -18,6 +18,7 @@ use crate::xserver::reply::serialize_reply;
 const RESUME_REQUEST: u8 = 6;
 
 /// Screen saver window attributes stored by MIT-SCREEN-SAVER SetAttributes.
+#[allow(dead_code)]
 pub(crate) struct ScreenSaverAttrs {
     pub(crate) x: i16,
     pub(crate) y: i16,

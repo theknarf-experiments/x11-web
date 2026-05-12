@@ -57,34 +57,3 @@ impl Default for XiState {
     }
 }
 
-impl XiState {
-    /// Look up a passive grab matching the supplied event details.
-    ///
-    /// Returns the matching grab when its `(grab_type, deviceid,
-    /// detail, modifiers)` tuple is compatible with the event AND the
-    /// `grab_window` is in the propagation `chain` (the event window
-    /// or one of its ancestors). Wildcard values: deviceid `0`/`1`
-    /// match any master pair member; detail `0` matches any button or
-    /// keycode; modifiers `0x8000` (core AnyModifier) and `0x80000000`
-    /// (XI AnyModifier) match any modifier state.
-    pub fn check_passive_grab(
-        &self,
-        deviceid: xi::DeviceId,
-        detail: u32,
-        grab_type: u8,
-        modifiers: u16,
-        chain: &[u32],
-    ) -> Option<&Xi2PassiveGrab> {
-        const XI_ANY_MOD: u32 = 1 << 31;
-        const CORE_ANY_MOD: u32 = 1 << 15;
-        self.passive_grabs.iter().find(|g| {
-            g.grab_type == grab_type
-                && (g.deviceid == 0 || g.deviceid == 1 || g.deviceid == deviceid)
-                && (g.detail == 0 || g.detail == detail)
-                && (g.modifiers == XI_ANY_MOD
-                    || g.modifiers == CORE_ANY_MOD
-                    || (g.modifiers as u16) == modifiers)
-                && chain.iter().any(|w| *w == g.grab_window)
-        })
-    }
-}

@@ -68,8 +68,6 @@ pub(crate) struct ClientState {
     /// this we'd re-iterate every window on every read tick, which becomes
     /// O(N²) under x11perf-style burst create/destroy workloads.
     pub(crate) shared_dirty_windows: HashSet<u32>,
-    /// Window IDs that should be removed from `shared_windows` on next sync.
-    pub(crate) shared_removed_windows: HashSet<u32>,
     pub(crate) pixmaps: HashMap<u32, PixmapState>,
     pub(crate) gcs: HashMap<u32, GcState>,
     pub(crate) atoms: Arc<Mutex<AtomManager>>,

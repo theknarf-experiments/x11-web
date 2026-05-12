@@ -69,11 +69,6 @@ pub(crate) fn serialize_event_with_layout<E: Serialize>(
 ///
 /// Wire-format byte offsets within a 32-byte X11 event.
 mod event_layout {
-    /// Event-type byte (KeyPress, ConfigureNotify, …).
-    pub(super) const RESPONSE_TYPE: usize = 0;
-    /// Event-specific detail byte (e.g. keycode for KeyPress).
-    #[allow(dead_code)]
-    pub(super) const DETAIL: usize = 1;
     /// Sequence number of the originating request (u16).
     pub(super) const SEQUENCE: std::ops::Range<usize> = 2..4;
     /// First byte of the u32-aligned payload area. All standard X11 events

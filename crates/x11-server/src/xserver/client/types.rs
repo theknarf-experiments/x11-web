@@ -1,6 +1,10 @@
 //! Auxiliary types used by ClientState.
 
-/// Security authorization token.
+/// Security authorization token. None of the fields are consumed by
+/// dispatch today — the SECURITY extension stores them so clients can
+/// query/revoke; effective enforcement of `trust_level` happens through
+/// the parallel `SecurityTokenInfo` entry in `shared_security_tokens`.
+#[allow(dead_code)]
 #[derive(Clone, Debug)]
 pub(crate) struct SecurityAuthorization {
     pub(crate) auth_id: u32,

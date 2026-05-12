@@ -51,6 +51,7 @@ pub(crate) const FOURCC_RV32: u32 = 0x32335652; // 'RV32' (packed RGBA32/BGRA32)
 pub(crate) const FOURCC_Y800: u32 = 0x30303859; // 'Y800' / 'GREY' (8-bit grayscale)
 
 /// A frame captured by GetStill: raw ARGB32 pixels plus dimensions.
+#[allow(dead_code)]
 #[derive(Clone, Debug)]
 pub(crate) struct CapturedFrame {
     /// Width in pixels.

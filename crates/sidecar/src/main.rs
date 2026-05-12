@@ -150,6 +150,9 @@ impl ProcessManager {
 /// process; dropping it would let dbus-daemon exit.
 struct DbusSession {
     address: String,
+    /// RAII guard — keeps the dbus-daemon child process alive. Never
+    /// read directly; the Drop on Child is what matters.
+    #[allow(dead_code)]
     daemon: Child,
 }
 

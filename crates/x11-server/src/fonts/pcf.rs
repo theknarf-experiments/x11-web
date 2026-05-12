@@ -50,10 +50,6 @@ fn pcf_read_u16(data: &[u8], offset: usize, msb: bool) -> u16 {
     }
 }
 
-fn pcf_read_i16(data: &[u8], offset: usize, msb: bool) -> i16 {
-    pcf_read_u16(data, offset, msb) as i16
-}
-
 fn pcf_read_i32(data: &[u8], offset: usize, msb: bool) -> i32 {
     pcf_read_u32(data, offset, msb) as i32
 }
@@ -103,10 +99,6 @@ impl<'a> PcfReader<'a> {
         self.read_u8() as i16 - COMPRESSED_METRIC_BIAS
     }
 
-    fn skip(&mut self, n: usize) {
-        self.pos += n;
-    }
-
     fn pos(&self) -> usize {
         self.pos
     }
@@ -118,8 +110,6 @@ impl<'a> PcfReader<'a> {
 
 struct PcfTable {
     table_type: u32,
-    format: u32,
-    size: u32,
     offset: u32,
 }
 
@@ -157,12 +147,11 @@ pub(super) fn parse_pcf_data(data: &[u8], path: &Path) -> Option<BitmapFont> {
     let mut r = PcfReader::new(data, 8, false);
     let mut tables = Vec::with_capacity(table_count);
     for _ in 0..table_count {
-        tables.push(PcfTable {
-            table_type: r.read_u32(),
-            format: r.read_u32(),
-            size: r.read_u32(),
-            offset: r.read_u32(),
-        });
+        let table_type = r.read_u32();
+        let _format = r.read_u32();
+        let _size = r.read_u32();
+        let offset = r.read_u32();
+        tables.push(PcfTable { table_type, offset });
     }
 
     let find_table = |tt: u32| -> Option<&PcfTable> { tables.iter().find(|t| t.table_type == tt) };

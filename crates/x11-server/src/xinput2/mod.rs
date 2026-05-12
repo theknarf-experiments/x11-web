@@ -145,6 +145,11 @@ pub struct AxisValue {
 /// Active XI2 device grab (from XIGrabDevice). Tracks the parameters
 /// of a grab that's currently in effect so dispatch can route
 /// subsequent events to the grab window with the grab's mask.
+///
+/// Most fields aren't read yet — XI2 grab semantics (event routing /
+/// freeze modes) are not fully wired through the dispatcher. We still
+/// capture the request so the bookkeeping is in place for when they are.
+#[allow(dead_code)]
 #[derive(Clone, Debug)]
 pub struct Xi2ActiveGrab {
     pub deviceid: xi::DeviceId,
@@ -156,6 +161,7 @@ pub struct Xi2ActiveGrab {
 }
 
 /// Passive XI2 device grab (from XIPassiveGrabDevice).
+#[allow(dead_code)]
 #[derive(Clone, Debug)]
 pub struct Xi2PassiveGrab {
     /// The device the passive grab is for.

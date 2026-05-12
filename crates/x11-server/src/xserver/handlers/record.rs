@@ -115,6 +115,7 @@ impl RecordRange {
 // ---------------------------------------------------------------------------
 
 /// RECORD context tracking state.
+#[allow(dead_code)]
 #[derive(Clone, Debug)]
 pub(crate) struct RecordContext {
     /// Context ID.

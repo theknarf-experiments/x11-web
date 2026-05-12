@@ -19,13 +19,13 @@ macro_rules! gl_thin {
 
 // ===== Original GL 1.0-1.1 wrappers (unchanged API) =====
 
-/// Execute a GL Clear call.
+// Execute a GL Clear call.
 gl_thin!(gl_clear -> Clear(mask: u32));
 
-/// Execute a GL ClearColor call.
+// Execute a GL ClearColor call.
 gl_thin!(gl_clear_color -> ClearColor(r: f32, g: f32, b: f32, a: f32));
 
-/// Execute a GL Viewport call.
+// Execute a GL Viewport call.
 gl_thin!(gl_viewport -> Viewport(x: i32, y: i32, w: i32, h: i32));
 
 gl_thin!(gl_begin -> Begin(mode: u32));

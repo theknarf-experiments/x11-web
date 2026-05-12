@@ -683,22 +683,6 @@ mod tests {
         assert_eq!(inv.rects[0].height, 100);
     }
 
-    #[test]
-    fn region_expand_increases_extents() {
-        let r = XFixesRegion::from_rects(vec![RegionRect {
-            x: 10,
-            y: 10,
-            width: 20,
-            height: 20,
-        }]);
-        let expanded = r.expand(5, 5, 5, 5);
-        assert_eq!(expanded.rects.len(), 1);
-        assert_eq!(expanded.rects[0].x, 5);
-        assert_eq!(expanded.rects[0].y, 5);
-        assert_eq!(expanded.rects[0].width, 30);
-        assert_eq!(expanded.rects[0].height, 30);
-    }
-
     // -----------------------------------------------------------------------
     // ColormapState: edge cases
     // -----------------------------------------------------------------------
@@ -770,20 +754,6 @@ mod tests {
     // -----------------------------------------------------------------------
 
     #[test]
-    fn clip_mask_bitmap_test_bounds() {
-        let bm = ClipMaskBitmap {
-            width: 8,
-            height: 4,
-            bits: vec![0xFF, 0xFF, 0xFF, 0xFF], // all bits set (8x4 = 32 bits = 4 bytes)
-        };
-        assert!(bm.test(0, 0));
-        assert!(bm.test(7, 3));
-        assert!(!bm.test(8, 0), "out of bounds x");
-        assert!(!bm.test(0, 4), "out of bounds y");
-        assert!(!bm.test(-1, 0), "negative x");
-    }
-
-    #[test]
     fn clip_mask_bitmap_to_rects() {
         // 4-wide bitmap: bits 0b00001010 = pixels 1 and 3 set
         let bm = ClipMaskBitmap {
@@ -813,38 +783,6 @@ mod tests {
         assert_eq!(rects[0].0, 10, "x should be offset");
         assert_eq!(rects[0].1, 20, "y should be offset");
         assert_eq!(rects[0].2, 4, "width should be 4");
-    }
-
-    // -----------------------------------------------------------------------
-    // GcState: effective_clip_rects and has_clip
-    // -----------------------------------------------------------------------
-
-    #[test]
-    fn gc_state_no_clip_by_default() {
-        let gc = GcState::default();
-        assert!(!gc.has_clip());
-        assert!(gc.effective_clip_rects().is_empty());
-    }
-
-    #[test]
-    fn gc_state_clip_rects_take_precedence() {
-        let mut gc = GcState::default();
-        gc.clip_rects = vec![(0, 0, 100, 100)];
-        assert!(gc.has_clip());
-        assert_eq!(gc.effective_clip_rects().len(), 1);
-    }
-
-    #[test]
-    fn gc_state_bitmap_mask_converts_to_rects() {
-        let mut gc = GcState::default();
-        gc.clip_mask_bitmap = Some(ClipMaskBitmap {
-            width: 4,
-            height: 1,
-            bits: vec![0xFF],
-        });
-        assert!(gc.has_clip());
-        let rects = gc.effective_clip_rects();
-        assert!(!rects.is_empty(), "bitmap mask should produce clip rects");
     }
 
     // -----------------------------------------------------------------------

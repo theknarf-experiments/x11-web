@@ -142,6 +142,7 @@ pub(crate) struct GrabState {
     pub(crate) frozen_keyboard_events: VecDeque<Vec<u8>>,
 }
 
+#[allow(dead_code)]
 #[derive(Clone)]
 pub(crate) struct ActivePointerGrab {
     pub(crate) grab_window: u32,
@@ -205,6 +206,7 @@ fn window_abs_bounds(
     ))
 }
 
+#[allow(dead_code)]
 #[derive(Clone)]
 pub(crate) struct ActiveKeyboardGrab {
     pub(crate) grab_window: u32,

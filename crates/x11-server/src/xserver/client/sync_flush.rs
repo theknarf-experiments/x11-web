@@ -72,10 +72,9 @@ impl ClientState {
     ///
     /// This is called once per socket-read tick. To keep the cost proportional
     /// to *changes* rather than to the size of `self.windows`, the local→shared
-    /// push (step 2) and the explicit removal step (step 3) only walk
-    /// `shared_dirty_windows` and `shared_removed_windows`. Without that
-    /// gating, a single client opening N windows would re-iterate every window
-    /// on every read — observed as O(N²) total CPU under x11perf burst loads.
+    /// push (step 2) only walks `shared_dirty_windows`. Without that gating,
+    /// a single client opening N windows would re-iterate every window on
+    /// every read — observed as O(N²) total CPU under x11perf burst loads.
     ///
     /// The shared→local pull (step 1) still walks `shared` because the cost is
     /// already proportional to "things produced by other clients" plus the
@@ -201,24 +200,6 @@ impl ClientState {
                 }
             }
 
-            // 3. Drop shared entries that we previously owned and have removed
-            //    locally (DestroyWindow / disconnect cleanup). Uses the
-            //    explicit `shared_removed_windows` set so we don't have to
-            //    scan all of `shared` for orphans every tick.
-            let removed = std::mem::take(&mut self.shared_removed_windows);
-            for wid in removed {
-                if !self.windows.contains_key(&wid) {
-                    let owner_is_me = shared
-                        .get(&wid)
-                        .map(|w| {
-                            w.owner_client_id.is_empty() || w.owner_client_id == self.client_id
-                        })
-                        .unwrap_or(false);
-                    if owner_is_me {
-                        shared.remove(&wid);
-                    }
-                }
-            }
         }
     }
 
@@ -228,13 +209,6 @@ impl ClientState {
     /// connections (geometry, properties, mapped/redirected flags, etc.).
     pub(crate) fn mark_window_shared_dirty(&mut self, wid: u32) {
         self.shared_dirty_windows.insert(wid);
-    }
-
-    /// Mark `wid` as needing to be removed from `shared_windows` on the next
-    /// `sync_windows()` call.
-    pub(crate) fn mark_window_shared_removed(&mut self, wid: u32) {
-        self.shared_removed_windows.insert(wid);
-        self.shared_dirty_windows.remove(&wid);
     }
 
     /// Send dirty framebuffer regions for all mapped windows as PutImage updates.
