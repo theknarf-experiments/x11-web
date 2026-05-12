@@ -764,7 +764,9 @@ fn num_planes_for(fourcc: u32) -> u8 {
     match fourcc {
         FOURCC_I420 | FOURCC_YV12 | FOURCC_YV16 => 3,
         FOURCC_NV12 | FOURCC_NV21 => 2,
-        FOURCC_YUY2 | FOURCC_UYVY | FOURCC_RGB3 | FOURCC_RV32 | FOURCC_Y800 | _ => 1,
+        // Packed formats (YUY2, UYVY, RGB3, RV32, Y800) and anything we
+        // don't explicitly recognise are treated as single-plane.
+        _ => 1,
     }
 }
 

@@ -231,7 +231,7 @@ pub(super) fn build_var_reply<R: SerializeEndian>(reply: &R, byte_order: ByteOrd
     bytes
 }
 
-fn fix_length(bytes: &mut Vec<u8>, byte_order: ByteOrder) {
+fn fix_length(bytes: &mut [u8], byte_order: ByteOrder) {
     const HEADER_BYTES: usize = 32;
     const WORD_BYTES: usize = 4;
     debug_assert!(bytes.len() >= HEADER_BYTES);

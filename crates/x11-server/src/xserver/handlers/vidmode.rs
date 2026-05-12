@@ -570,7 +570,7 @@ fn build_var_reply<R: SerializeEndian>(reply: &R, byte_order: ByteOrder) -> Vec<
 /// emits whatever value the caller put on the struct, but we always
 /// build with `length: 0` and let the buffer length be the source of
 /// truth — that way we can't drift.
-fn fix_length(bytes: &mut Vec<u8>, byte_order: ByteOrder) {
+fn fix_length(bytes: &mut [u8], byte_order: ByteOrder) {
     let length = trailing_words(bytes.len());
     let length_bytes = match byte_order {
         ByteOrder::Lsb => length.to_le_bytes(),

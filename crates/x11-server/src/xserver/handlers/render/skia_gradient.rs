@@ -84,9 +84,11 @@ fn render_shader_to_bgra(
     let Some(mut pixmap) = Pixmap::new(width.max(1), height.max(1)) else {
         return vec![0u8; (width * height * 4) as usize];
     };
-    let mut paint = Paint::default();
-    paint.shader = shader;
-    paint.anti_alias = false;
+    let paint = Paint {
+        shader,
+        anti_alias: false,
+        ..Default::default()
+    };
     let rect = Rect::from_xywh(0.0, 0.0, width as f32, height as f32)
         .unwrap_or_else(|| Rect::from_xywh(0.0, 0.0, 1.0, 1.0).unwrap());
     pixmap.fill_rect(

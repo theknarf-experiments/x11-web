@@ -786,15 +786,17 @@ impl Framebuffer {
         let Some(tile_pm) = PixmapRef::from_bytes(tile_data, tile_w, tile_h) else {
             return false;
         };
-        let mut paint = Paint::default();
-        paint.shader = Pattern::new(
-            tile_pm,
-            SpreadMode::Repeat,
-            FilterQuality::Nearest,
-            1.0,
-            Transform::from_translate(ts_x as f32, ts_y as f32),
-        );
-        paint.anti_alias = false;
+        let paint = Paint {
+            shader: Pattern::new(
+                tile_pm,
+                SpreadMode::Repeat,
+                FilterQuality::Nearest,
+                1.0,
+                Transform::from_translate(ts_x as f32, ts_y as f32),
+            ),
+            anti_alias: false,
+            ..Default::default()
+        };
         let clip_mask = build_clip_mask(self.width, self.height, clip_rects);
         self.with_pixmap_mut(|pm| {
             pm.fill_path(
@@ -841,20 +843,22 @@ impl Framebuffer {
         dash: Option<DashSpec>,
         clip_rects: &[(i16, i16, u16, u16)],
     ) {
-        let mut paint = Paint::default();
-        paint.set_color(skia_color(color));
-        paint.anti_alias = true;
-        let mut stroke = Stroke::default();
-        stroke.width = line_width.max(1) as f32;
-        stroke.line_cap = match CapStyle::from(cap_style) {
-            CapStyle::ROUND => tiny_skia::LineCap::Round,
-            CapStyle::PROJECTING => tiny_skia::LineCap::Square,
-            _ => tiny_skia::LineCap::Butt,
+        let mut paint = Paint {
+            anti_alias: true,
+            ..Default::default()
         };
-        stroke.line_join = line_join;
-        if let Some(d) = dash {
-            stroke.dash = StrokeDash::new(d.array, d.offset);
-        }
+        paint.set_color(skia_color(color));
+        let stroke = Stroke {
+            width: line_width.max(1) as f32,
+            line_cap: match CapStyle::from(cap_style) {
+                CapStyle::ROUND => tiny_skia::LineCap::Round,
+                CapStyle::PROJECTING => tiny_skia::LineCap::Square,
+                _ => tiny_skia::LineCap::Butt,
+            },
+            line_join,
+            dash: dash.and_then(|d| StrokeDash::new(d.array, d.offset)),
+            ..Default::default()
+        };
         let clip_mask = build_clip_mask(self.width, self.height, clip_rects);
         let _ = self.with_pixmap_mut(|pm| {
             pm.stroke_path(

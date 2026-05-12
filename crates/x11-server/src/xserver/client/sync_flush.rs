@@ -336,8 +336,8 @@ impl ClientState {
                                 damage: damage_id,
                                 timestamp: 0,
                                 area: Rectangle {
-                                    x: x,
-                                    y: y,
+                                    x,
+                                    y,
                                     width: w,
                                     height: h,
                                 },

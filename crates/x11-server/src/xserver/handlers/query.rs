@@ -25,7 +25,7 @@ pub(crate) fn handle_query_best_size(state: &ClientState, req: &QueryBestSizeReq
         0 => {
             // Cursor: most hardware has a max cursor size.  We support any
             // size in software; clamp to a reasonable 256×256 maximum.
-            (width.min(256).max(1), height.min(256).max(1))
+            (width.clamp(1, 256), height.clamp(1, 256))
         }
         1 | 2 => {
             // Tile / Stipple: snap to nearest power-of-two for efficient

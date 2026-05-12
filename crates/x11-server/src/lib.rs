@@ -32,6 +32,12 @@
 //!   Constructed by the embedder so it can choose the DBus address
 //!   to dial.
 
+// X11 request handlers naturally mirror protocol request layouts, where
+// most opcodes carry many parameters. Forcing them into argument structs
+// across hundreds of handlers would obscure the wire layout without
+// improving correctness, so we silence the lint crate-wide.
+#![allow(clippy::too_many_arguments)]
+
 mod colors;
 mod compose;
 mod fonts;

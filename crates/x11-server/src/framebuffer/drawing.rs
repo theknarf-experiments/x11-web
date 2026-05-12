@@ -282,21 +282,25 @@ impl Framebuffer {
                 pb.move_to(x0 as f32, y0 as f32);
                 pb.line_to(x1 as f32, y1 as f32);
                 if let Some(path) = pb.finish() {
-                    let mut paint = Paint::default();
-                    paint.shader = Pattern::new(
-                        tile_pm,
-                        SpreadMode::Repeat,
-                        FilterQuality::Nearest,
-                        1.0,
-                        Transform::from_translate(ts_x as f32, ts_y as f32),
-                    );
-                    paint.anti_alias = true;
-                    let mut stroke = Stroke::default();
-                    stroke.width = 1.0;
-                    stroke.line_cap = match CapStyle::from(cap_style) {
-                        CapStyle::ROUND => tiny_skia::LineCap::Round,
-                        CapStyle::PROJECTING => tiny_skia::LineCap::Square,
-                        _ => tiny_skia::LineCap::Butt,
+                    let paint = Paint {
+                        shader: Pattern::new(
+                            tile_pm,
+                            SpreadMode::Repeat,
+                            FilterQuality::Nearest,
+                            1.0,
+                            Transform::from_translate(ts_x as f32, ts_y as f32),
+                        ),
+                        anti_alias: true,
+                        ..Default::default()
+                    };
+                    let stroke = Stroke {
+                        width: 1.0,
+                        line_cap: match CapStyle::from(cap_style) {
+                            CapStyle::ROUND => tiny_skia::LineCap::Round,
+                            CapStyle::PROJECTING => tiny_skia::LineCap::Square,
+                            _ => tiny_skia::LineCap::Butt,
+                        },
+                        ..Default::default()
                     };
                     let clip_mask = build_clip_mask(self.width, self.height, clip_rects);
                     let _ = self.with_pixmap_mut(|pm| {

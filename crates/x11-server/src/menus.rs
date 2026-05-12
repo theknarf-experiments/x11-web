@@ -449,6 +449,7 @@ trait GtkMenus {
 trait GtkActions {
     fn list(&self) -> zbus::Result<Vec<String>>;
     /// `a{s(bgav)}` — map from action name to (enabled, param_signature, state).
+    #[allow(clippy::type_complexity)] // wire-format-determined, not refactorable
     fn describe_all(&self) -> zbus::Result<HashMap<String, (bool, String, Vec<OwnedValue>)>>;
     fn activate(
         &self,

@@ -599,10 +599,9 @@ pub(crate) fn dispatch(opcode: u16, data: &[u8]) -> Option<bool> {
                 let map_size = super::read_i32_le(data, 4);
                 let count = map_size as usize;
                 if data.len() >= 8 + count * 2 {
-                    let mut values = vec![0u16; count];
-                    for i in 0..count {
-                        values[i] = super::read_u16_le(data, 8 + i * 2);
-                    }
+                    let values: Vec<u16> = (0..count)
+                        .map(|i| super::read_u16_le(data, 8 + i * 2))
+                        .collect();
                     osmesa::gl_pixel_mapusv(map, map_size, &values);
                 }
             }

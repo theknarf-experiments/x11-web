@@ -368,7 +368,7 @@ pub(crate) fn handle_record_request(state: &mut ClientState, data: &[u8], seq: u
             };
             let context_id = req.context;
             let element_header = req.element_header;
-            let client_specs: Vec<u32> = req.client_specs.iter().map(|&s| s).collect();
+            let client_specs: Vec<u32> = req.client_specs.iter().copied().collect();
             let ranges: Vec<RecordRange> = req.ranges.iter().map(RecordRange::from).collect();
 
             debug!(
@@ -408,7 +408,7 @@ pub(crate) fn handle_record_request(state: &mut ClientState, data: &[u8], seq: u
                 return bad_length();
             };
             let context_id = req.context;
-            let client_specs: Vec<u32> = req.client_specs.iter().map(|&s| s).collect();
+            let client_specs: Vec<u32> = req.client_specs.iter().copied().collect();
             let ranges: Vec<RecordRange> = req.ranges.iter().map(RecordRange::from).collect();
             if let Some(ctx) = state.record_contexts.get_mut(&context_id) {
                 ctx.element_header = req.element_header;
