@@ -2,17 +2,22 @@
 
 use super::*;
 use crate::xserver::event::serialize_event;
-use crate::xserver::reply::ReplyBuf;
+use crate::xserver::reply::{serialize_reply, serialize_var_reply};
 use x11rb_protocol::protocol::xproto::{
-    BellRequest, ChangeHostsRequest, ChangeKeyboardControlRequest, ChangeKeyboardMappingRequest,
-    ChangePointerControlRequest, ExposeEvent, ForceScreenSaverRequest, GetInputFocusRequest,
-    GetKeyboardControlRequest, GetKeyboardMappingRequest, GetModifierMappingRequest,
-    GetMotionEventsRequest, GetPointerControlRequest, GetPointerMappingRequest,
-    GetScreenSaverRequest, KillClientRequest, ListHostsRequest, MappingNotifyEvent,
-    MotionNotifyEvent, PropertyNotifyEvent, QueryKeymapRequest, QueryPointerRequest,
-    RotatePropertiesRequest, SetAccessControlRequest, SetCloseDownModeRequest,
-    SetInputFocusRequest, SetModifierMappingRequest, SetPointerMappingRequest,
-    SetScreenSaverRequest, TranslateCoordinatesRequest, WarpPointerRequest,
+    AccessControl, AutoRepeatMode, BellRequest, Blanking, ChangeHostsRequest,
+    ChangeKeyboardControlRequest, ChangeKeyboardMappingRequest, ChangePointerControlRequest,
+    ExposeEvent, Exposures, ForceScreenSaverRequest, GetInputFocusReply, GetInputFocusRequest,
+    GetKeyboardControlReply, GetKeyboardControlRequest, GetKeyboardMappingReply,
+    GetKeyboardMappingRequest, GetModifierMappingReply, GetModifierMappingRequest,
+    GetMotionEventsReply, GetMotionEventsRequest, GetPointerControlReply, GetPointerControlRequest,
+    GetPointerMappingReply, GetPointerMappingRequest, GetScreenSaverReply, GetScreenSaverRequest,
+    Host, InputFocus, KeyButMask, KillClientRequest, ListHostsReply, ListHostsRequest,
+    MappingNotifyEvent, MappingStatus, MotionNotifyEvent, PropertyNotifyEvent, QueryKeymapReply,
+    QueryKeymapRequest, QueryPointerReply, QueryPointerRequest, RotatePropertiesRequest,
+    SetAccessControlRequest, SetCloseDownModeRequest, SetInputFocusRequest,
+    SetModifierMappingReply, SetModifierMappingRequest, SetPointerMappingReply,
+    SetPointerMappingRequest, SetScreenSaverRequest, Timecoord, TranslateCoordinatesReply,
+    TranslateCoordinatesRequest, WarpPointerRequest,
 };
 
 // ---------------------------------------------------------------------------
@@ -87,16 +92,21 @@ pub(crate) fn handle_query_pointer(state: &mut ClientState, req: &QueryPointerRe
     // Build modifier/button mask: low byte = keyboard modifiers, bits 8-12 = buttons 1-5
     let mask = state.xkb_state.effective_mods() as u16 | state.pointer_button_mask;
 
-    ReplyBuf::fixed(seq, state.msb_first)
-        .set_data_byte(1) // same_screen
-        .set_u32(8, state.root_window)
-        .set_u32(12, child)
-        .set_i16(16, state.pointer_x)
-        .set_i16(18, state.pointer_y)
-        .set_i16(20, win_x)
-        .set_i16(22, win_y)
-        .set_u16(24, mask)
-        .build()
+    serialize_reply(
+        &QueryPointerReply {
+            same_screen: true,
+            sequence: seq,
+            length: 0,
+            root: state.root_window,
+            child,
+            root_x: state.pointer_x,
+            root_y: state.pointer_y,
+            win_x,
+            win_y,
+            mask: KeyButMask::from(mask),
+        },
+        state.byte_order(),
+    )
 }
 
 // ---------------------------------------------------------------------------
@@ -121,21 +131,18 @@ pub(crate) fn handle_get_motion_events(
         })
         .collect();
 
-    let n_events = events.len() as u32;
-    // Each motion event is 8 bytes: timestamp(4) + x(2) + y(2)
-    let data_bytes = n_events as usize * 8;
-    let data_padded = align_to_4(data_bytes);
-    let mut reply = ReplyBuf::with_extra(seq, data_padded, state.msb_first).set_u32(8, n_events);
-
-    for (i, (ts, x, y)) in events.iter().enumerate() {
-        let off = 32 + i * 8;
-        reply = reply
-            .set_u32(off, *ts)
-            .set_i16(off + 4, *x)
-            .set_i16(off + 6, *y);
-    }
-
-    reply.build()
+    let events: Vec<Timecoord> = events
+        .into_iter()
+        .map(|&(ts, x, y)| Timecoord { time: ts, x, y })
+        .collect();
+    serialize_var_reply(
+        &GetMotionEventsReply {
+            sequence: seq,
+            length: 0,
+            events,
+        },
+        state.byte_order(),
+    )
 }
 
 // ---------------------------------------------------------------------------
@@ -205,12 +212,17 @@ pub(crate) fn handle_translate_coordinates(
         .map(|w| w.id)
         .unwrap_or(0);
 
-    ReplyBuf::fixed(seq, state.msb_first)
-        .set_data_byte(1) // same_screen
-        .set_u32(8, child)
-        .set_i16(12, dst_x)
-        .set_i16(14, dst_y)
-        .build()
+    serialize_reply(
+        &TranslateCoordinatesReply {
+            same_screen: true,
+            sequence: seq,
+            length: 0,
+            child,
+            dst_x,
+            dst_y,
+        },
+        state.byte_order(),
+    )
 }
 
 // ---------------------------------------------------------------------------
@@ -417,10 +429,15 @@ pub(crate) fn handle_get_input_focus(
     _req: &GetInputFocusRequest,
 ) -> Vec<u8> {
     let seq = state.sequence;
-    ReplyBuf::fixed(seq, state.msb_first)
-        .set_data_byte(state.focus_revert_to)
-        .set_u32(8, state.focus_window)
-        .build()
+    serialize_reply(
+        &GetInputFocusReply {
+            revert_to: InputFocus::from(state.focus_revert_to),
+            sequence: seq,
+            length: 0,
+            focus: state.focus_window,
+        },
+        state.byte_order(),
+    )
 }
 
 // ---------------------------------------------------------------------------
@@ -429,9 +446,16 @@ pub(crate) fn handle_get_input_focus(
 
 pub(crate) fn handle_query_keymap(state: &ClientState, _req: &QueryKeymapRequest) -> Vec<u8> {
     let seq = state.sequence;
-    ReplyBuf::with_extra(seq, 8, state.msb_first)
-        .set_bytes(32, &state.pressed_keys[0..8])
-        .build()
+    let mut keys = [0u8; 32];
+    keys[..8].copy_from_slice(&state.pressed_keys[0..8]);
+    serialize_var_reply(
+        &QueryKeymapReply {
+            sequence: seq,
+            length: 0,
+            keys,
+        },
+        state.byte_order(),
+    )
 }
 
 // ---------------------------------------------------------------------------
@@ -504,32 +528,35 @@ pub(crate) fn handle_get_keyboard_mapping(
     // Determine keysyms_per_keycode: use max from custom mappings or default 4
     let max_custom = custom_keymap.values().map(|v| v.len()).max().unwrap_or(0);
     let keysyms_per_keycode = max_custom.max(4) as u8;
-    let total_syms = count as u32 * keysyms_per_keycode as u32;
-    let extra_bytes = total_syms as usize * 4;
-
-    let mut reply =
-        ReplyBuf::with_extra(seq, extra_bytes, state.msb_first).set_data_byte(keysyms_per_keycode);
+    let per_kc = keysyms_per_keycode as usize;
+    let mut keysyms = vec![0u32; count as usize * per_kc];
 
     for i in 0..count as usize {
         let keycode = first_keycode.wrapping_add(i as u8);
-        let offset = 32 + i * keysyms_per_keycode as usize * 4;
-
+        let offset = i * per_kc;
         if let Some(custom_syms) = custom_keymap.get(&keycode) {
             // Use the custom mapping set by ChangeKeyboardMapping
-            for (j, &sym) in custom_syms.iter().enumerate() {
-                if j < keysyms_per_keycode as usize {
-                    reply = reply.set_u32(offset + j * 4, sym);
-                }
+            for (j, &sym) in custom_syms.iter().take(per_kc).enumerate() {
+                keysyms[offset + j] = sym;
             }
         } else {
-            // Fall back to built-in US layout
+            // Fall back to built-in US layout (NoSymbol in mode-switch slots)
             let (normal, shifted) = keycode_to_keysym(keycode);
-            reply = reply.set_u32(offset, normal).set_u32(offset + 4, shifted);
-            // Remaining slots (mode switch, mode+shift) left as 0 (NoSymbol)
+            keysyms[offset] = normal;
+            if per_kc > 1 {
+                keysyms[offset + 1] = shifted;
+            }
         }
     }
 
-    reply.build()
+    serialize_var_reply(
+        &GetKeyboardMappingReply {
+            keysyms_per_keycode,
+            sequence: seq,
+            keysyms,
+        },
+        state.byte_order(),
+    )
 }
 
 // ---------------------------------------------------------------------------
@@ -618,15 +645,20 @@ pub(crate) fn handle_get_keyboard_control(
 ) -> Vec<u8> {
     let seq = state.sequence;
     let kc = &state.keyboard_control;
-    ReplyBuf::with_extra(seq, 20, state.msb_first)
-        .set_data_byte(kc.global_auto_repeat)
-        .set_u32(8, kc.led_mask)
-        .set_u8(12, kc.key_click_percent)
-        .set_u8(13, kc.bell_percent)
-        .set_u16(14, kc.bell_pitch)
-        .set_u16(16, kc.bell_duration)
-        .set_bytes(20, &kc.auto_repeats)
-        .build()
+    serialize_var_reply(
+        &GetKeyboardControlReply {
+            global_auto_repeat: AutoRepeatMode::from(kc.global_auto_repeat),
+            sequence: seq,
+            length: 0,
+            led_mask: kc.led_mask,
+            key_click_percent: kc.key_click_percent,
+            bell_percent: kc.bell_percent,
+            bell_pitch: kc.bell_pitch,
+            bell_duration: kc.bell_duration,
+            auto_repeats: kc.auto_repeats,
+        },
+        state.byte_order(),
+    )
 }
 
 // ---------------------------------------------------------------------------
@@ -668,11 +700,16 @@ pub(crate) fn handle_get_pointer_control(
 ) -> Vec<u8> {
     let seq = state.sequence;
     let pc = &state.pointer_control;
-    ReplyBuf::fixed(seq, state.msb_first)
-        .set_u16(8, pc.acceleration_numerator)
-        .set_u16(10, pc.acceleration_denominator)
-        .set_u16(12, pc.threshold)
-        .build()
+    serialize_reply(
+        &GetPointerControlReply {
+            sequence: seq,
+            length: 0,
+            acceleration_numerator: pc.acceleration_numerator,
+            acceleration_denominator: pc.acceleration_denominator,
+            threshold: pc.threshold,
+        },
+        state.byte_order(),
+    )
 }
 
 // ---------------------------------------------------------------------------
@@ -714,12 +751,17 @@ pub(crate) fn handle_get_screen_saver(
 ) -> Vec<u8> {
     let seq = state.sequence;
     let ss = &state.screen_saver;
-    ReplyBuf::fixed(seq, state.msb_first)
-        .set_u16(8, ss.timeout)
-        .set_u16(10, ss.interval)
-        .set_u8(12, ss.prefer_blanking)
-        .set_u8(13, ss.allow_exposures)
-        .build()
+    serialize_reply(
+        &GetScreenSaverReply {
+            sequence: seq,
+            length: 0,
+            timeout: ss.timeout,
+            interval: ss.interval,
+            prefer_blanking: Blanking::from(ss.prefer_blanking),
+            allow_exposures: Exposures::from(ss.allow_exposures),
+        },
+        state.byte_order(),
+    )
 }
 
 // ---------------------------------------------------------------------------
@@ -836,24 +878,29 @@ pub(crate) fn build_screen_saver_on_event(state: &ClientState) -> Vec<u8> {
 // ---------------------------------------------------------------------------
 
 pub(crate) fn handle_list_hosts(state: &ClientState, _req: &ListHostsRequest) -> Vec<u8> {
-    use x11rb_protocol::protocol::xproto::Host as XprotoHost;
-    use x11rb_protocol::x11_utils::Serialize;
     let seq = state.sequence;
-    let mut host_entries = Vec::new();
-    for host in &state.access_hosts {
-        XprotoHost {
-            family: host.family.into(),
-            address: host.address.clone(),
-        }
-        .serialize_into(&mut host_entries);
-    }
-
-    let extra_padded = align_to_4(host_entries.len());
-    ReplyBuf::with_extra(seq, extra_padded, state.msb_first)
-        .set_data_byte(if state.access_control_enabled { 1 } else { 0 })
-        .set_u16(8, state.access_hosts.len() as u16)
-        .set_bytes(32, &host_entries)
-        .build()
+    let hosts: Vec<Host> = state
+        .access_hosts
+        .iter()
+        .map(|h| Host {
+            family: h.family.into(),
+            address: h.address.clone(),
+        })
+        .collect();
+    let mode = if state.access_control_enabled {
+        AccessControl::ENABLE
+    } else {
+        AccessControl::DISABLE
+    };
+    serialize_var_reply(
+        &ListHostsReply {
+            mode,
+            sequence: seq,
+            length: 0,
+            hosts,
+        },
+        state.byte_order(),
+    )
 }
 
 // ---------------------------------------------------------------------------
@@ -1189,9 +1236,14 @@ pub(crate) fn handle_set_pointer_mapping(
             .broadcast_global(&event, &state.client_id);
     }
 
-    ReplyBuf::fixed(seq, state.msb_first)
-        .set_data_byte(0) // MappingSuccess
-        .build()
+    serialize_reply(
+        &SetPointerMappingReply {
+            status: MappingStatus::SUCCESS,
+            sequence: seq,
+            length: 0,
+        },
+        state.byte_order(),
+    )
 }
 
 // ---------------------------------------------------------------------------
@@ -1203,13 +1255,14 @@ pub(crate) fn handle_get_pointer_mapping(
     _req: &GetPointerMappingRequest,
 ) -> Vec<u8> {
     let seq = state.sequence;
-    let map = &state.pointer_mapping;
-    let n = map.len() as u8;
-    let padded_len = align_to_4(n as usize);
-    ReplyBuf::with_extra(seq, padded_len, state.msb_first)
-        .set_data_byte(n)
-        .set_bytes(32, map)
-        .build()
+    serialize_var_reply(
+        &GetPointerMappingReply {
+            sequence: seq,
+            length: 0,
+            map: state.pointer_mapping.to_vec(),
+        },
+        state.byte_order(),
+    )
 }
 
 // ---------------------------------------------------------------------------
@@ -1257,9 +1310,14 @@ pub(crate) fn handle_set_modifier_mapping(
             .broadcast_global(&event, &state.client_id);
     }
 
-    ReplyBuf::fixed(seq, state.msb_first)
-        .set_data_byte(0) // MappingSuccess
-        .build()
+    serialize_reply(
+        &SetModifierMappingReply {
+            status: MappingStatus::SUCCESS,
+            sequence: seq,
+            length: 0,
+        },
+        state.byte_order(),
+    )
 }
 
 // ---------------------------------------------------------------------------
@@ -1271,27 +1329,31 @@ pub(crate) fn handle_get_modifier_mapping(
     _req: &GetModifierMappingRequest,
 ) -> Vec<u8> {
     let seq = state.sequence;
-    // Find the max keycodes per modifier to determine padding
-    let max_keycodes = state
+    // Find the max keycodes per modifier; X11 requires at least 2 per spec.
+    let keycodes_per_modifier = state
         .modifier_map
         .iter()
         .map(|v| v.len())
         .max()
         .unwrap_or(2)
         .max(2);
-    let keycodes_per_modifier = max_keycodes as u8;
 
-    let data_len = 8 * keycodes_per_modifier as usize;
-    let mut reply =
-        ReplyBuf::with_extra(seq, data_len, state.msb_first).set_data_byte(keycodes_per_modifier);
-
-    for (i, keycodes) in state.modifier_map.iter().enumerate() {
-        let off = 32 + i * keycodes_per_modifier as usize;
-        for (j, &kc) in keycodes.iter().enumerate() {
-            if j < keycodes_per_modifier as usize {
-                reply = reply.set_u8(off + j, kc);
-            }
+    // Flatten 8 modifier groups into a single Vec<Keycode> of length
+    // `8 * keycodes_per_modifier`; padded with zero where a group is short.
+    let mut keycodes = vec![0u8; 8 * keycodes_per_modifier];
+    for (i, group) in state.modifier_map.iter().take(8).enumerate() {
+        let off = i * keycodes_per_modifier;
+        for (j, &kc) in group.iter().take(keycodes_per_modifier).enumerate() {
+            keycodes[off + j] = kc;
         }
     }
-    reply.build()
+
+    serialize_var_reply(
+        &GetModifierMappingReply {
+            sequence: seq,
+            length: 0,
+            keycodes,
+        },
+        state.byte_order(),
+    )
 }
