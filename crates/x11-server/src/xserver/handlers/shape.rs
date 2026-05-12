@@ -10,14 +10,16 @@ use tracing::debug;
 use super::super::client::ClientState;
 use super::super::types::RegionRect;
 use crate::xserver::event::serialize_event;
-use crate::xserver::reply::ReplyBuf;
+use crate::xserver::reply::{serialize_reply, serialize_var_reply};
 use x11rb_protocol::protocol::shape::{
-    CombineRequest, GetRectanglesRequest, InputSelectedRequest, MaskRequest,
-    NotifyEvent as ShapeNotifyEvent, OffsetRequest, QueryExtentsRequest, QueryVersionRequest,
+    CombineRequest, GetRectanglesReply, GetRectanglesRequest, InputSelectedReply,
+    InputSelectedRequest, MaskRequest, NotifyEvent as ShapeNotifyEvent, OffsetRequest,
+    QueryExtentsReply, QueryExtentsRequest, QueryVersionReply, QueryVersionRequest,
     RectanglesRequest, SelectInputRequest, COMBINE_REQUEST, GET_RECTANGLES_REQUEST,
     INPUT_SELECTED_REQUEST, MASK_REQUEST, OFFSET_REQUEST, QUERY_EXTENTS_REQUEST,
     QUERY_VERSION_REQUEST, RECTANGLES_REQUEST, SELECT_INPUT_REQUEST, SK, SO,
 };
+use x11rb_protocol::protocol::xproto::{ClipOrdering, Rectangle};
 
 /// Absolute event code for SHAPE NotifyEvent. The extension's
 /// first_event base is fixed at 64 in our server; x11rb's
@@ -34,10 +36,15 @@ pub(crate) fn handle_shape_request(state: &mut ClientState, data: &[u8], seq: u1
     match minor {
         QUERY_VERSION_REQUEST => {
             let _req = parse_minor!(QueryVersionRequest, data, state, seq, 128, 0);
-            ReplyBuf::fixed(seq, state.msb_first)
-                .set_u16(8, 1) // major version
-                .set_u16(10, 1) // minor version
-                .build()
+            serialize_reply(
+                &QueryVersionReply {
+                    sequence: seq,
+                    length: 0,
+                    major_version: 1,
+                    minor_version: 1,
+                },
+                state.byte_order(),
+            )
         }
 
         RECTANGLES_REQUEST => {
@@ -193,18 +200,23 @@ pub(crate) fn handle_shape_request(state: &mut ClientState, data: &[u8], seq: u1
                 (false, bx, by, bw, bh)
             };
 
-            ReplyBuf::fixed(seq, state.msb_first)
-                .set_u8(8, bounding_shaped as u8)
-                .set_u8(9, clip_shaped as u8)
-                .set_i16(12, bx)
-                .set_i16(14, by)
-                .set_u16(16, bw)
-                .set_u16(18, bh)
-                .set_i16(20, cx)
-                .set_i16(22, cy)
-                .set_u16(24, cw)
-                .set_u16(26, ch)
-                .build()
+            serialize_reply(
+                &QueryExtentsReply {
+                    sequence: seq,
+                    length: 0,
+                    bounding_shaped,
+                    clip_shaped,
+                    bounding_shape_extents_x: bx,
+                    bounding_shape_extents_y: by,
+                    bounding_shape_extents_width: bw,
+                    bounding_shape_extents_height: bh,
+                    clip_shape_extents_x: cx,
+                    clip_shape_extents_y: cy,
+                    clip_shape_extents_width: cw,
+                    clip_shape_extents_height: ch,
+                },
+                state.byte_order(),
+            )
         }
 
         SELECT_INPUT_REQUEST => {
@@ -239,9 +251,14 @@ pub(crate) fn handle_shape_request(state: &mut ClientState, data: &[u8], seq: u1
                 .map(|w| !w.shape_select_clients.is_empty())
                 .unwrap_or(false);
 
-            ReplyBuf::fixed(seq, state.msb_first)
-                .set_data_byte(enabled as u8)
-                .build()
+            serialize_reply(
+                &InputSelectedReply {
+                    enabled,
+                    sequence: seq,
+                    length: 0,
+                },
+                state.byte_order(),
+            )
         }
 
         GET_RECTANGLES_REQUEST => {
@@ -276,22 +293,24 @@ pub(crate) fn handle_shape_request(state: &mut ClientState, data: &[u8], seq: u1
                 }]
             };
 
-            let n_rects = rects.len() as u32;
-            let rects_bytes = rects.len() * 8;
-            let padded = crate::xserver::core::align_to_4(rects_bytes);
-            let mut reply = ReplyBuf::with_extra(seq, padded, state.msb_first)
-                .set_data_byte(0) // ordering = UnSorted
-                .set_u32(8, n_rects);
-
-            for (i, r) in rects.iter().enumerate() {
-                let off = 32 + i * 8;
-                reply = reply
-                    .set_i16(off, r.x)
-                    .set_i16(off + 2, r.y)
-                    .set_u16(off + 4, r.width)
-                    .set_u16(off + 6, r.height);
-            }
-            reply.build()
+            let rectangles: Vec<Rectangle> = rects
+                .iter()
+                .map(|r| Rectangle {
+                    x: r.x,
+                    y: r.y,
+                    width: r.width,
+                    height: r.height,
+                })
+                .collect();
+            serialize_var_reply(
+                &GetRectanglesReply {
+                    ordering: ClipOrdering::UNSORTED,
+                    sequence: seq,
+                    length: 0,
+                    rectangles,
+                },
+                state.byte_order(),
+            )
         }
 
         _ => {

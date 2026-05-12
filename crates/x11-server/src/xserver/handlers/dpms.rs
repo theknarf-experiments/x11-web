@@ -3,14 +3,14 @@
 use super::parse_minor;
 use tracing::debug;
 use x11rb_protocol::protocol::dpms::{
-    DPMSMode, ForceLevelRequest, SetTimeoutsRequest, CAPABLE_REQUEST, DISABLE_REQUEST,
-    ENABLE_REQUEST, FORCE_LEVEL_REQUEST, GET_TIMEOUTS_REQUEST, GET_VERSION_REQUEST, INFO_REQUEST,
-    SET_TIMEOUTS_REQUEST,
+    CapableReply, DPMSMode, ForceLevelRequest, GetTimeoutsReply, GetVersionReply, InfoReply,
+    SetTimeoutsRequest, CAPABLE_REQUEST, DISABLE_REQUEST, ENABLE_REQUEST, FORCE_LEVEL_REQUEST,
+    GET_TIMEOUTS_REQUEST, GET_VERSION_REQUEST, INFO_REQUEST, SET_TIMEOUTS_REQUEST,
 };
 
 use super::super::client::ClientState;
 use crate::xserver::core::require_len;
-use crate::xserver::reply::ReplyBuf;
+use crate::xserver::reply::serialize_reply;
 
 /// DPMS (opcode 151)
 pub(crate) fn handle_dpms_request(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
@@ -19,18 +19,33 @@ pub(crate) fn handle_dpms_request(state: &mut ClientState, data: &[u8], seq: u16
         crate::xserver::core::build_error(code, seq, bad_value, 151, minor as u16)
     };
     match minor {
-        GET_VERSION_REQUEST => ReplyBuf::fixed(seq, state.msb_first)
-            .set_u16(8, 1) // major
-            .set_u16(10, 2) // minor
-            .build(),
-        CAPABLE_REQUEST => ReplyBuf::fixed(seq, state.msb_first)
-            .set_u8(8, 1) // capable = true
-            .build(),
-        GET_TIMEOUTS_REQUEST => ReplyBuf::fixed(seq, state.msb_first)
-            .set_u16(8, state.dpms_standby_timeout)
-            .set_u16(10, state.dpms_suspend_timeout)
-            .set_u16(12, state.dpms_off_timeout)
-            .build(),
+        GET_VERSION_REQUEST => serialize_reply(
+            &GetVersionReply {
+                sequence: seq,
+                length: 0,
+                server_major_version: 1,
+                server_minor_version: 2,
+            },
+            state.byte_order(),
+        ),
+        CAPABLE_REQUEST => serialize_reply(
+            &CapableReply {
+                sequence: seq,
+                length: 0,
+                capable: true,
+            },
+            state.byte_order(),
+        ),
+        GET_TIMEOUTS_REQUEST => serialize_reply(
+            &GetTimeoutsReply {
+                sequence: seq,
+                length: 0,
+                standby_timeout: state.dpms_standby_timeout,
+                suspend_timeout: state.dpms_suspend_timeout,
+                off_timeout: state.dpms_off_timeout,
+            },
+            state.byte_order(),
+        ),
         SET_TIMEOUTS_REQUEST => {
             require_len!(data, 10, seq, 151, minor as u16, state.msb_first);
             let req = parse_minor!(SetTimeoutsRequest, data, state, seq, 151, minor as u16);
@@ -74,10 +89,15 @@ pub(crate) fn handle_dpms_request(state: &mut ClientState, data: &[u8], seq: u16
             debug!("DPMS ForceLevel: level={level:?}");
             Vec::new()
         }
-        INFO_REQUEST => ReplyBuf::fixed(seq, state.msb_first)
-            .set_u16(8, state.dpms_power_level)
-            .set_u8(10, if state.dpms_enabled { 1 } else { 0 })
-            .build(),
+        INFO_REQUEST => serialize_reply(
+            &InfoReply {
+                sequence: seq,
+                length: 0,
+                power_level: DPMSMode::from(state.dpms_power_level),
+                state: state.dpms_enabled,
+            },
+            state.byte_order(),
+        ),
         _ => {
             debug!("DPMS: unhandled minor opcode {minor}");
             dpms_err(crate::xserver::core::REQUEST_ERROR, minor as u32)

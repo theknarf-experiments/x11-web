@@ -5,9 +5,14 @@
 //! registers ranges of protocol elements to intercept, then enables the
 //! context. While enabled, matching events/requests/replies/errors from
 //! OTHER clients are forwarded to the recording client as data replies.
-use crate::xserver::reply::ReplyBuf;
+use crate::xserver::reply::{serialize_reply, serialize_var_reply};
 
 use tracing::debug;
+use x11rb_protocol::protocol::record::{
+    ClientInfo, ElementHeader, ExtRange, GetContextReply, QueryVersionReply, Range as RecordWireRange,
+    Range16, Range8,
+};
+use x11rb_protocol::x11_utils::ByteOrder;
 
 use super::super::client::ClientState;
 
@@ -34,41 +39,6 @@ pub(crate) const RECORD_CLIENT_DIED: u8 = 3;
 pub(crate) const RECORD_START_OF_DATA: u8 = 4;
 /// EndOfData: context disabled.
 pub(crate) const RECORD_END_OF_DATA: u8 = 5;
-
-/// `GetContext` reply layout: client-info header + 24-byte RecordRange entries.
-mod get_context_layout {
-    /// First byte of client-info section (after the 32-byte reply header).
-    pub(super) const CLIENT_SPEC: usize = 32;
-    /// nRanges (u32) for the client-info entry.
-    pub(super) const N_RANGES: usize = 36;
-    /// First byte of the RecordRange array (after one ClientInfo header).
-    pub(super) const RANGES_START: usize = 40;
-}
-
-/// Wire layout of one xRecordRange struct (24 bytes).
-/// Each (first, last) range is two bytes; ext requests/replies are
-/// (major, first_minor, last_minor) — 4 bytes each (3 used + 1 pad).
-mod record_range_layout {
-    pub(super) const SIZE: usize = 24;
-    /// Core request range first/last (2 bytes).
-    pub(super) const CORE_REQUESTS: usize = 0;
-    /// Core reply range first/last (2 bytes).
-    pub(super) const CORE_REPLIES: usize = 2;
-    /// Extension requests (major, first_minor, last_minor + 1 pad).
-    pub(super) const EXT_REQUESTS: usize = 4;
-    /// Extension replies (major, first_minor, last_minor + 1 pad).
-    pub(super) const EXT_REPLIES: usize = 8;
-    /// Delivered events range (2 bytes).
-    pub(super) const DELIVERED_EVENTS: usize = 12;
-    /// Device events range (2 bytes).
-    pub(super) const DEVICE_EVENTS: usize = 14;
-    /// Errors range (2 bytes).
-    pub(super) const ERRORS: usize = 16;
-    /// client_started flag (u8).
-    pub(super) const CLIENT_STARTED: usize = 18;
-    /// client_died flag (u8).
-    pub(super) const CLIENT_DIED: usize = 20;
-}
 
 // ---------------------------------------------------------------------------
 // RecordRange: describes what protocol elements to intercept
@@ -365,11 +335,16 @@ pub(crate) fn handle_record_request(state: &mut ClientState, data: &[u8], seq: u
     };
     match minor {
         0 => {
-            // QueryVersion
-            ReplyBuf::fixed(seq, false) // RECORD uses LE byte order
-                .set_u16(8, 1) // major
-                .set_u16(10, 13) // minor
-                .build()
+            // QueryVersion — RECORD replies are always LE per protocol.
+            serialize_reply(
+                &QueryVersionReply {
+                    sequence: seq,
+                    length: 0,
+                    major_version: 1,
+                    minor_version: 13,
+                },
+                ByteOrder::Lsb,
+            )
         }
         1 => {
             // CreateContext
@@ -480,91 +455,84 @@ pub(crate) fn handle_record_request(state: &mut ClientState, data: &[u8], seq: u
                 return bad_length();
             };
             let context_id = req.context;
+            let (enabled, element_header, intercepted_clients) = if let Some(ctx) =
+                state.record_contexts.get(&context_id)
             {
-                if let Some(ctx) = state.record_contexts.get(&context_id) {
-                    // Build reply with intercepted client info
-                    let num_clients = if ctx.client_specs.is_empty() {
-                        0u32
-                    } else {
-                        1u32
-                    };
-                    let ranges_per_client = ctx.ranges.len() as u32;
-                    // Each client info: client_resource(4) + num_ranges(4)
-                    // Each range: 24 bytes
-                    let client_info_bytes = if num_clients > 0 {
-                        8 + (ranges_per_client as usize * 24)
-                    } else {
-                        0
-                    };
-                    let padded = crate::xserver::core::align_to_4(client_info_bytes);
-
-                    let mut reply = ReplyBuf::with_extra(seq, padded, false)
-                        .set_data_byte(if ctx.enabled { 1 } else { 0 })
-                        .set_u8(8, ctx.element_header)
-                        .set_u32(12, num_clients);
-
-                    if num_clients > 0 {
-                        // Write client info
-                        let spec = ctx
-                            .client_specs
-                            .first()
-                            .copied()
-                            .unwrap_or(CLIENT_SPEC_ALL_CLIENTS);
-                        reply.buf_mut()[get_context_layout::CLIENT_SPEC
-                            ..get_context_layout::CLIENT_SPEC + 4]
-                            .copy_from_slice(&spec.to_le_bytes());
-                        reply.buf_mut()
-                            [get_context_layout::N_RANGES..get_context_layout::N_RANGES + 4]
-                            .copy_from_slice(&ranges_per_client.to_le_bytes());
-
-                        // Write ranges
-                        for (i, range) in ctx.ranges.iter().enumerate() {
-                            let off = get_context_layout::RANGES_START
-                                + i * record_range_layout::SIZE;
-                            if off + record_range_layout::SIZE <= reply.buf_mut().len() {
-                                let buf = reply.buf_mut();
-                                buf[off + record_range_layout::CORE_REQUESTS] =
-                                    range.core_requests.0;
-                                buf[off + record_range_layout::CORE_REQUESTS + 1] =
-                                    range.core_requests.1;
-                                buf[off + record_range_layout::CORE_REPLIES] =
-                                    range.core_replies.0;
-                                buf[off + record_range_layout::CORE_REPLIES + 1] =
-                                    range.core_replies.1;
-                                buf[off + record_range_layout::EXT_REQUESTS] =
-                                    range.ext_requests.0;
-                                buf[off + record_range_layout::EXT_REQUESTS + 1] =
-                                    range.ext_requests.1;
-                                buf[off + record_range_layout::EXT_REQUESTS + 2] =
-                                    range.ext_requests.2;
-                                buf[off + record_range_layout::EXT_REPLIES] = range.ext_replies.0;
-                                buf[off + record_range_layout::EXT_REPLIES + 1] =
-                                    range.ext_replies.1;
-                                buf[off + record_range_layout::EXT_REPLIES + 2] =
-                                    range.ext_replies.2;
-                                buf[off + record_range_layout::DELIVERED_EVENTS] =
-                                    range.delivered_events.0;
-                                buf[off + record_range_layout::DELIVERED_EVENTS + 1] =
-                                    range.delivered_events.1;
-                                buf[off + record_range_layout::DEVICE_EVENTS] =
-                                    range.device_events.0;
-                                buf[off + record_range_layout::DEVICE_EVENTS + 1] =
-                                    range.device_events.1;
-                                buf[off + record_range_layout::ERRORS] = range.errors.0;
-                                buf[off + record_range_layout::ERRORS + 1] = range.errors.1;
-                                buf[off + record_range_layout::CLIENT_STARTED] =
-                                    range.client_started as u8;
-                                buf[off + record_range_layout::CLIENT_DIED] =
-                                    range.client_died as u8;
-                            }
-                        }
-                    }
-
-                    reply.build()
+                let ranges: Vec<RecordWireRange> = ctx
+                    .ranges
+                    .iter()
+                    .map(|r| RecordWireRange {
+                        core_requests: Range8 {
+                            first: r.core_requests.0,
+                            last: r.core_requests.1,
+                        },
+                        core_replies: Range8 {
+                            first: r.core_replies.0,
+                            last: r.core_replies.1,
+                        },
+                        ext_requests: ExtRange {
+                            major: Range8 {
+                                first: r.ext_requests.0,
+                                last: r.ext_requests.0,
+                            },
+                            minor: Range16 {
+                                first: r.ext_requests.1 as u16,
+                                last: r.ext_requests.2 as u16,
+                            },
+                        },
+                        ext_replies: ExtRange {
+                            major: Range8 {
+                                first: r.ext_replies.0,
+                                last: r.ext_replies.0,
+                            },
+                            minor: Range16 {
+                                first: r.ext_replies.1 as u16,
+                                last: r.ext_replies.2 as u16,
+                            },
+                        },
+                        delivered_events: Range8 {
+                            first: r.delivered_events.0,
+                            last: r.delivered_events.1,
+                        },
+                        device_events: Range8 {
+                            first: r.device_events.0,
+                            last: r.device_events.1,
+                        },
+                        errors: Range8 {
+                            first: r.errors.0,
+                            last: r.errors.1,
+                        },
+                        client_started: r.client_started,
+                        client_died: r.client_died,
+                    })
+                    .collect();
+                let intercepted = if ctx.client_specs.is_empty() {
+                    Vec::new()
                 } else {
-                    ReplyBuf::fixed(seq, false).build()
-                }
-            }
+                    let spec = ctx
+                        .client_specs
+                        .first()
+                        .copied()
+                        .unwrap_or(CLIENT_SPEC_ALL_CLIENTS);
+                    vec![ClientInfo {
+                        client_resource: spec.into(),
+                        ranges,
+                    }]
+                };
+                (ctx.enabled, ctx.element_header, intercepted)
+            } else {
+                (false, 0, Vec::new())
+            };
+            serialize_var_reply(
+                &GetContextReply {
+                    enabled,
+                    sequence: seq,
+                    length: 0,
+                    element_header: ElementHeader::from(element_header),
+                    intercepted_clients,
+                },
+                ByteOrder::Lsb,
+            )
         }
         5 => {
             // EnableContext
