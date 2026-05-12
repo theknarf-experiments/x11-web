@@ -5,15 +5,20 @@ use tracing::{debug, info};
 use super::super::super::client::ClientState;
 use super::super::super::types::{OutputPropertyConfig, PropertyValue, RandrMode, RandrMonitor};
 use super::super::parse_or_void;
-use crate::xserver::reply::ReplyBuf;
+use crate::xserver::reply::{serialize_reply, serialize_var_reply};
 use crate::xserver::request::request_header;
 use x11rb_protocol::protocol::randr::{
-    AddOutputModeRequest, ChangeOutputPropertyRequest, ConfigureOutputPropertyRequest,
-    CreateModeRequest, DeleteMonitorRequest, DeleteOutputModeRequest, DeleteOutputPropertyRequest,
-    DestroyModeRequest, GetOutputInfoRequest, GetOutputPropertyRequest, GetProviderInfoRequest,
-    ListOutputPropertiesRequest, QueryOutputPropertyRequest, SetMonitorRequest,
-    SetOutputPrimaryRequest, SetProviderOffloadSinkRequest, SetProviderOutputSourceRequest,
+    AddOutputModeRequest, ChangeOutputPropertyRequest, Connection,
+    ConfigureOutputPropertyRequest, CreateModeReply, CreateModeRequest, DeleteMonitorRequest,
+    DeleteOutputModeRequest, DeleteOutputPropertyRequest, DestroyModeRequest, GetOutputInfoReply,
+    GetOutputInfoRequest, GetOutputPrimaryReply, GetOutputPropertyReply, GetOutputPropertyRequest,
+    GetProviderInfoReply, GetProviderInfoRequest, GetProviderPropertyReply, GetProvidersReply,
+    ListOutputPropertiesReply, ListOutputPropertiesRequest, ListProviderPropertiesReply,
+    ProviderCapability, QueryOutputPropertyReply, QueryOutputPropertyRequest,
+    QueryProviderPropertyReply, SetConfig, SetMonitorRequest, SetOutputPrimaryRequest,
+    SetProviderOffloadSinkRequest, SetProviderOutputSourceRequest,
 };
+use x11rb_protocol::protocol::render::SubPixel;
 
 /// RRGetOutputInfo (9).
 pub(crate) fn handle_get_output_info(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
@@ -33,7 +38,18 @@ pub(crate) fn handle_list_output_properties(
         ListOutputPropertiesRequest::try_parse_request(request_header(data), &data[4..])
             .map(|r| r.output)
             .unwrap_or(0);
-    build_list_output_properties_reply(state, seq, output_id)
+    let atoms: Vec<u32> = state
+        .randr_find_output(output_id)
+        .map(|o| o.properties.keys().copied().collect())
+        .unwrap_or_default();
+    serialize_var_reply(
+        &ListOutputPropertiesReply {
+            sequence: seq,
+            length: 0,
+            atoms,
+        },
+        state.byte_order(),
+    )
 }
 
 /// RRQueryOutputProperty (11).
@@ -42,51 +58,48 @@ pub(crate) fn handle_query_output_property(
     data: &[u8],
     seq: u16,
 ) -> Vec<u8> {
+    let empty = QueryOutputPropertyReply {
+        sequence: seq,
+        pending: false,
+        range: false,
+        immutable: false,
+        valid_values: Vec::new(),
+    };
     if data.len() < 12 {
-        return ReplyBuf::fixed(seq, state.msb_first).build();
+        return serialize_var_reply(&empty, state.byte_order());
     }
     let Ok(req) = QueryOutputPropertyRequest::try_parse_request(request_header(data), &data[4..])
     else {
-        return ReplyBuf::fixed(seq, state.msb_first).build();
+        return serialize_var_reply(&empty, state.byte_order());
     };
     let output_id = req.output;
     let property_atom = req.property;
 
-    // Check if the output has an explicit property config (set by ConfigureOutputProperty)
     let (pending, range, immutable, values) =
         if let Some(output) = state.randr_find_output(output_id) {
             if let Some(config) = output.property_configs.get(&property_atom) {
                 (config.pending, config.range, false, config.values.clone())
             } else {
-                // Fall back to well-known property defaults based on atom name
                 let atom_name = state.get_atom_name(property_atom).unwrap_or_default();
                 match atom_name.as_str() {
-                    "Backlight" | "BACKLIGHT" => {
-                        // Range constraint: min=0, max=100
-                        (false, true, false, vec![0, 100])
-                    }
-                    _ => {
-                        // Unknown property: no constraints
-                        (false, false, false, Vec::new())
-                    }
+                    "Backlight" | "BACKLIGHT" => (false, true, false, vec![0, 100]),
+                    _ => (false, false, false, Vec::new()),
                 }
             }
         } else {
             (false, false, false, Vec::new())
         };
 
-    let num_values = values.len() as u32;
-    let extra_bytes = (num_values as usize) * 4;
-    let mut reply = ReplyBuf::with_extra(seq, extra_bytes, state.msb_first)
-        .set_u8(8, if pending { 1 } else { 0 })
-        .set_u8(9, if range { 1 } else { 0 })
-        .set_u8(10, if immutable { 1 } else { 0 });
-    // values follow the 32-byte header
-    for (i, &val) in values.iter().enumerate() {
-        let off = 32 + i * 4;
-        reply = reply.set_u32(off, val);
-    }
-    reply.build()
+    serialize_var_reply(
+        &QueryOutputPropertyReply {
+            sequence: seq,
+            pending,
+            range,
+            immutable,
+            valid_values: values.into_iter().map(|v| v as i32).collect(),
+        },
+        state.byte_order(),
+    )
 }
 
 /// RRConfigureOutputProperty (12).
@@ -174,12 +187,17 @@ pub(crate) fn handle_get_output_property(
 
 /// RRCreateMode (16).
 pub(crate) fn handle_create_mode(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
+    let empty = CreateModeReply {
+        sequence: seq,
+        length: 0,
+        mode: 0,
+    };
     if data.len() < 40 {
-        return ReplyBuf::fixed(seq, state.msb_first).build();
+        return serialize_reply(&empty, state.byte_order());
     }
 
     let Ok(req) = CreateModeRequest::try_parse_request(request_header(data), &data[4..]) else {
-        return ReplyBuf::fixed(seq, state.msb_first).build();
+        return serialize_reply(&empty, state.byte_order());
     };
 
     let mi = &req.mode_info;
@@ -221,10 +239,14 @@ pub(crate) fn handle_create_mode(state: &mut ClientState, data: &[u8], seq: u16)
 
     info!("RRCreateMode: {width}x{height} -> mode_id={mode_id}");
 
-    // Reply: 32 bytes, mode_id at offset 8.
-    ReplyBuf::fixed(seq, state.msb_first)
-        .set_u32(8, mode_id)
-        .build()
+    serialize_reply(
+        &CreateModeReply {
+            sequence: seq,
+            length: 0,
+            mode: mode_id,
+        },
+        state.byte_order(),
+    )
 }
 
 /// RRDestroyMode (17).
@@ -293,31 +315,33 @@ pub(crate) fn handle_get_output_primary(
     _data: &[u8],
     seq: u16,
 ) -> Vec<u8> {
-    // Use the stored primary, or fall back to the first output if
-    // no primary has been explicitly set yet.
     let primary_output = if state.randr_primary_output != 0 {
         state.randr_primary_output
     } else {
         state.randr_outputs.first().map(|o| o.id).unwrap_or(0)
     };
-    ReplyBuf::fixed(seq, state.msb_first)
-        .set_u32(8, primary_output)
-        .build()
+    serialize_reply(
+        &GetOutputPrimaryReply {
+            sequence: seq,
+            length: 0,
+            output: primary_output,
+        },
+        state.byte_order(),
+    )
 }
 
 /// RRGetProviders (32).
 pub(crate) fn handle_get_providers(state: &mut ClientState, _data: &[u8], seq: u16) -> Vec<u8> {
-    let num_providers = state.randr_providers.len() as u16;
-    let var_len = num_providers as usize * 4;
-    let mut reply = ReplyBuf::with_extra(seq, var_len, state.msb_first)
-        .set_u32(8, state.timestamp())
-        .set_u16(12, num_providers);
-    let mut off = 32;
-    for p in &state.randr_providers {
-        reply = reply.set_u32(off, p.id);
-        off += 4;
-    }
-    reply.build()
+    let providers: Vec<u32> = state.randr_providers.iter().map(|p| p.id).collect();
+    serialize_var_reply(
+        &GetProvidersReply {
+            sequence: seq,
+            length: 0,
+            timestamp: state.timestamp(),
+            providers,
+        },
+        state.byte_order(),
+    )
 }
 
 /// RRGetProviderInfo (33).
@@ -329,7 +353,6 @@ pub(crate) fn handle_get_provider_info(state: &mut ClientState, data: &[u8], seq
 }
 
 /// RRSetProviderOffloadSink (34): Set a provider as an offload sink.
-/// Virtual display has a single provider — accept and log for diagnostics.
 pub(crate) fn handle_set_provider_offload_sink(
     _state: &mut ClientState,
     data: &[u8],
@@ -350,8 +373,7 @@ pub(crate) fn handle_set_provider_offload_sink(
     Vec::new()
 }
 
-/// RRSetProviderOutputSource (35): Set a provider as an output source.
-/// Virtual display has a single provider — accept and log for diagnostics.
+/// RRSetProviderOutputSource (35).
 pub(crate) fn handle_set_provider_output_source(
     _state: &mut ClientState,
     data: &[u8],
@@ -378,10 +400,14 @@ pub(crate) fn handle_list_provider_properties(
     _data: &[u8],
     seq: u16,
 ) -> Vec<u8> {
-    ReplyBuf::fixed(seq, state.msb_first)
-        // length = 0, num_atoms = 0
-        .set_u16(8, 0)
-        .build()
+    serialize_var_reply(
+        &ListProviderPropertiesReply {
+            sequence: seq,
+            length: 0,
+            atoms: Vec::new(),
+        },
+        state.byte_order(),
+    )
 }
 
 /// RRQueryProviderProperty (37).
@@ -390,8 +416,16 @@ pub(crate) fn handle_query_provider_property(
     _data: &[u8],
     seq: u16,
 ) -> Vec<u8> {
-    // Reply with empty constraints (pending=0, range=0, immutable=0, no values)
-    ReplyBuf::fixed(seq, state.msb_first).build()
+    serialize_var_reply(
+        &QueryProviderPropertyReply {
+            sequence: seq,
+            pending: false,
+            range: false,
+            immutable: false,
+            valid_values: Vec::new(),
+        },
+        state.byte_order(),
+    )
 }
 
 /// RRConfigureProviderProperty (38).
@@ -430,9 +464,18 @@ pub(crate) fn handle_get_provider_property(
     _data: &[u8],
     seq: u16,
 ) -> Vec<u8> {
-    // Reply with type=None, format=0, length=0, bytes_after=0
-    // All fields default to 0: type=None, bytes_after=0, num_items=0
-    ReplyBuf::fixed(seq, state.msb_first).build()
+    serialize_var_reply(
+        &GetProviderPropertyReply {
+            format: 0,
+            sequence: seq,
+            length: 0,
+            type_: 0,
+            bytes_after: 0,
+            num_items: 0,
+            data: Vec::new(),
+        },
+        state.byte_order(),
+    )
 }
 
 /// RRGetMonitors (42).
@@ -454,7 +497,6 @@ pub(crate) fn handle_set_monitor(state: &mut ClientState, data: &[u8], _seq: u16
         let height = mi.height;
         let output_ids: Vec<u32> = mi.outputs.clone();
 
-        // Remove any existing monitor with the same name
         state.randr_monitors.retain(|m| m.name_atom != name_atom);
         state.randr_monitors.push(RandrMonitor {
             name_atom,
@@ -510,89 +552,73 @@ fn build_output_info_reply(state: &ClientState, seq: u16, output_id: u32) -> Vec
     let output = match state.randr_find_output(output_id) {
         Some(o) => o.clone(),
         None => {
-            // Return a minimal "disconnected" reply.
-            return ReplyBuf::with_extra(seq, 24, state.msb_first)
-                .set_data_byte(0)
-                .set_u8(24, 1) // Disconnected
-                .build();
+            return serialize_var_reply(
+                &GetOutputInfoReply {
+                    status: SetConfig::SUCCESS,
+                    sequence: seq,
+                    length: 0,
+                    timestamp: 0,
+                    crtc: 0,
+                    mm_width: 0,
+                    mm_height: 0,
+                    connection: Connection::DISCONNECTED,
+                    subpixel_order: SubPixel::UNKNOWN,
+                    num_preferred: 0,
+                    crtcs: Vec::new(),
+                    modes: Vec::new(),
+                    clones: Vec::new(),
+                    name: Vec::new(),
+                },
+                state.byte_order(),
+            );
         }
     };
 
-    let output_name = output.name.as_bytes();
-    let num_crtcs = output.possible_crtcs.len() as u16;
-    let num_modes = output.modes.len() as u16;
-    let num_clones: u16 = 0;
-
-    let name_pad = (4 - (output_name.len() % 4)) % 4;
-    let var_data = (num_crtcs as usize * 4)
-        + (num_modes as usize * 4)
-        + (num_clones as usize * 4)
-        + output_name.len()
-        + name_pad;
-    let inline_header = 24; // bytes 8-31
-    let extra_bytes = inline_header + var_data;
-
-    let mut reply = ReplyBuf::with_extra(seq, extra_bytes, state.msb_first)
-        .set_data_byte(0) // Success
-        .set_u32(8, state.timestamp())
-        .set_u32(12, output.crtc_id)
-        .set_u32(16, output.mm_width)
-        .set_u32(20, output.mm_height)
-        .set_u8(24, output.connection_status)
-        .set_u8(25, 0) // subpixel_order: Unknown
-        .set_u16(26, num_crtcs)
-        .set_u16(28, num_modes)
-        .set_u16(30, 1) // num_preferred
-        .set_u16(32, num_clones)
-        .set_u16(34, output_name.len() as u16);
-
-    let mut off = 36;
-    // CRTC IDs (possible CRTCs)
-    for &crtc_id in &output.possible_crtcs {
-        reply = reply.set_u32(off, crtc_id);
-        off += 4;
-    }
-    // Mode IDs
-    for &mode_id in &output.modes {
-        reply = reply.set_u32(off, mode_id);
-        off += 4;
-    }
-    // Clone IDs (none)
-    // Output name
-    reply = reply.set_bytes(off, output_name);
-
-    reply.build()
-}
-
-/// Build the reply for RRListOutputProperties.
-fn build_list_output_properties_reply(state: &ClientState, seq: u16, output_id: u32) -> Vec<u8> {
-    let atoms: Vec<u32> = state
-        .randr_find_output(output_id)
-        .map(|o| o.properties.keys().copied().collect())
-        .unwrap_or_default();
-
-    let num_atoms = atoms.len() as u16;
-    let var_len = atoms.len() * 4;
-    let mut reply = ReplyBuf::with_extra(seq, var_len, state.msb_first).set_u16(8, num_atoms);
-
-    let mut off = 32;
-    for atom in atoms {
-        reply = reply.set_u32(off, atom);
-        off += 4;
-    }
-
-    reply.build()
+    serialize_var_reply(
+        &GetOutputInfoReply {
+            status: SetConfig::SUCCESS,
+            sequence: seq,
+            length: 0,
+            timestamp: state.timestamp(),
+            crtc: output.crtc_id,
+            mm_width: output.mm_width,
+            mm_height: output.mm_height,
+            connection: Connection::from(output.connection_status),
+            subpixel_order: SubPixel::UNKNOWN,
+            num_preferred: 1,
+            crtcs: output.possible_crtcs.clone(),
+            modes: output.modes.clone(),
+            clones: Vec::new(),
+            name: output.name.as_bytes().to_vec(),
+        },
+        state.byte_order(),
+    )
 }
 
 /// Build the reply for RRGetOutputProperty.
 fn build_get_output_property_reply(state: &ClientState, data: &[u8], seq: u16) -> Vec<u8> {
+    let empty_reply = |state: &ClientState| {
+        serialize_var_reply(
+            &GetOutputPropertyReply {
+                format: 0,
+                sequence: seq,
+                length: 0,
+                type_: 0,
+                bytes_after: 0,
+                num_items: 0,
+                data: Vec::new(),
+            },
+            state.byte_order(),
+        )
+    };
+
     if data.len() < 24 {
-        return ReplyBuf::fixed(seq, state.msb_first).build();
+        return empty_reply(state);
     }
 
     let Ok(req) = GetOutputPropertyRequest::try_parse_request(request_header(data), &data[4..])
     else {
-        return ReplyBuf::fixed(seq, state.msb_first).build();
+        return empty_reply(state);
     };
     let output_id = req.output;
     let property = req.property;
@@ -602,27 +628,28 @@ fn build_get_output_property_reply(state: &ClientState, data: &[u8], seq: u16) -
 
     let output = match state.randr_find_output(output_id) {
         Some(o) => o,
-        None => {
-            return ReplyBuf::fixed(seq, state.msb_first).build();
-        }
+        None => return empty_reply(state),
     };
 
     let prop = match output.properties.get(&property) {
         Some(p) => p,
-        None => {
-            // Property not found.
-            // type = None (0), format = 0, length = 0, bytes_after = 0
-            return ReplyBuf::fixed(seq, state.msb_first).build();
-        }
+        None => return empty_reply(state),
     };
 
-    // Type mismatch check.
+    // Type mismatch: return type + bytes_after but no data.
     if req_type != 0 && req_type != prop.prop_type {
-        return ReplyBuf::fixed(seq, state.msb_first)
-            .set_u32(8, prop.prop_type) // actual type
-            // bytes_after = total data length
-            .set_u32(12, prop.data.len() as u32)
-            .build();
+        return serialize_var_reply(
+            &GetOutputPropertyReply {
+                format: 0,
+                sequence: seq,
+                length: 0,
+                type_: prop.prop_type,
+                bytes_after: prop.data.len() as u32,
+                num_items: 0,
+                data: Vec::new(),
+            },
+            state.byte_order(),
+        );
     }
 
     let bytes_per_item = match prop.format {
@@ -631,7 +658,6 @@ fn build_get_output_property_reply(state: &ClientState, data: &[u8], seq: u16) -
         32 => 4,
         _ => 1,
     };
-    let _total_items = prop.data.len() / bytes_per_item;
     let byte_offset = long_offset * 4;
     let max_bytes = long_length * 4;
 
@@ -642,7 +668,7 @@ fn build_get_output_property_reply(state: &ClientState, data: &[u8], seq: u16) -
         (byte_offset, end)
     };
 
-    let returned_data = &prop.data[slice_start..slice_end];
+    let returned_data = prop.data[slice_start..slice_end].to_vec();
     let bytes_after = if slice_end < prop.data.len() {
         prop.data.len() - slice_end
     } else {
@@ -650,17 +676,18 @@ fn build_get_output_property_reply(state: &ClientState, data: &[u8], seq: u16) -
     };
     let num_items = returned_data.len() / bytes_per_item;
 
-    let pad = (4 - (returned_data.len() % 4)) % 4;
-    let var_len = returned_data.len() + pad;
-
-    let reply = ReplyBuf::with_extra(seq, var_len, state.msb_first)
-        .set_data_byte(prop.format)
-        .set_u32(8, prop.prop_type)
-        .set_u32(12, bytes_after as u32)
-        .set_u32(16, num_items as u32)
-        .set_bytes(32, returned_data);
-
-    reply.build()
+    serialize_var_reply(
+        &GetOutputPropertyReply {
+            format: prop.format,
+            sequence: seq,
+            length: 0,
+            type_: prop.prop_type,
+            bytes_after: bytes_after as u32,
+            num_items: num_items as u32,
+            data: returned_data,
+        },
+        state.byte_order(),
+    )
 }
 
 /// Build the reply for RRGetProviderInfo.
@@ -668,41 +695,37 @@ fn build_provider_info_reply(state: &ClientState, seq: u16, provider_id: u32) ->
     let provider = match state.randr_providers.iter().find(|p| p.id == provider_id) {
         Some(p) => p.clone(),
         None => {
-            return ReplyBuf::fixed(seq, state.msb_first).build();
+            return serialize_var_reply(
+                &GetProviderInfoReply {
+                    status: 0,
+                    sequence: seq,
+                    length: 0,
+                    timestamp: 0,
+                    capabilities: ProviderCapability::from(0u8),
+                    crtcs: Vec::new(),
+                    outputs: Vec::new(),
+                    associated_providers: Vec::new(),
+                    associated_capability: Vec::new(),
+                    name: Vec::new(),
+                },
+                state.byte_order(),
+            );
         }
     };
 
-    let name_bytes = provider.name.as_bytes();
-    let name_pad = (4 - (name_bytes.len() % 4)) % 4;
-    let num_crtcs = provider.crtcs.len() as u16;
-    let num_outputs = provider.outputs.len() as u16;
-    let num_associated = 0u16;
-
-    // GetProviderInfo reply layout:
-    //   0-31: 32-byte fixed header (type, status, seq, length, timestamp,
-    //         capabilities, num_crtcs, num_outputs, num_associated, name_len, pad)
-    //   32+:  variable data (crtc IDs, output IDs, associated providers, name)
-    let var_len = num_crtcs as usize * 4 + num_outputs as usize * 4 + name_bytes.len() + name_pad;
-
-    let mut reply = ReplyBuf::with_extra(seq, var_len, state.msb_first)
-        .set_u32(8, state.timestamp())
-        .set_u32(12, provider.capabilities)
-        .set_u16(16, num_crtcs)
-        .set_u16(18, num_outputs)
-        .set_u16(20, num_associated)
-        .set_u16(22, name_bytes.len() as u16);
-
-    let mut off = 32;
-    for &cid in &provider.crtcs {
-        reply = reply.set_u32(off, cid);
-        off += 4;
-    }
-    for &oid in &provider.outputs {
-        reply = reply.set_u32(off, oid);
-        off += 4;
-    }
-    // No associated providers.
-    reply = reply.set_bytes(off, name_bytes);
-
-    reply.build()
+    serialize_var_reply(
+        &GetProviderInfoReply {
+            status: 0,
+            sequence: seq,
+            length: 0,
+            timestamp: state.timestamp(),
+            capabilities: ProviderCapability::from(provider.capabilities),
+            crtcs: provider.crtcs.clone(),
+            outputs: provider.outputs.clone(),
+            associated_providers: Vec::new(),
+            associated_capability: Vec::new(),
+            name: provider.name.as_bytes().to_vec(),
+        },
+        state.byte_order(),
+    )
 }

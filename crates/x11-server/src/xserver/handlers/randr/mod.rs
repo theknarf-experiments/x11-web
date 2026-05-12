@@ -26,7 +26,11 @@ use x11rb_protocol::protocol::randr::{
 
 use super::super::client::ClientState;
 use super::parse_minor;
-use crate::xserver::reply::ReplyBuf;
+use crate::xserver::reply::serialize_reply;
+use x11rb_protocol::protocol::randr::{
+    QueryVersionReply as RandrQueryVersionReply, SetConfig, SetScreenConfigReply,
+};
+use x11rb_protocol::protocol::render::SubPixel;
 
 pub(crate) fn handle_randr_request(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
     let minor = data[1];
@@ -36,12 +40,15 @@ pub(crate) fn handle_randr_request(state: &mut ClientState, data: &[u8], seq: u1
         // ---------------------------------------------------------------
         // RRQueryVersion (0)
         // ---------------------------------------------------------------
-        QUERY_VERSION_REQUEST => {
-            ReplyBuf::fixed(seq, state.msb_first)
-                .set_u32(8, 1) // major version
-                .set_u32(12, 5) // minor version
-                .build()
-        }
+        QUERY_VERSION_REQUEST => serialize_reply(
+            &RandrQueryVersionReply {
+                sequence: seq,
+                length: 0,
+                major_version: 1,
+                minor_version: 5,
+            },
+            state.byte_order(),
+        ),
 
         // ---------------------------------------------------------------
         // RRSetScreenConfig (2) — legacy screen configuration
@@ -52,21 +59,30 @@ pub(crate) fn handle_randr_request(state: &mut ClientState, data: &[u8], seq: u1
             let config_timestamp = req.config_timestamp;
 
             // Check config timestamp — if it doesn't match, reply InvalidConfigTime
-            let status =
-                if config_timestamp != 0 && config_timestamp != state.randr_config_timestamp {
-                    2 // InvalidConfigTime
-                } else {
-                    0 // Success
-                };
+            let status = if config_timestamp != 0
+                && config_timestamp != state.randr_config_timestamp
+            {
+                SetConfig::INVALID_CONFIG_TIME
+            } else {
+                SetConfig::SUCCESS
+            };
 
-            debug!("RRSetScreenConfig: status={status} config_ts={config_timestamp}");
-            ReplyBuf::fixed(seq, state.msb_first)
-                .set_data_byte(status)
-                .set_u32(8, state.timestamp())
-                .set_u32(12, state.randr_config_timestamp)
-                .set_u32(16, state.root_window)
-                // subpixel_order at byte 20 (0 = Unknown, already zero)
-                .build()
+            debug!(
+                "RRSetScreenConfig: status={} config_ts={config_timestamp}",
+                u8::from(status)
+            );
+            serialize_reply(
+                &SetScreenConfigReply {
+                    status,
+                    sequence: seq,
+                    length: 0,
+                    new_timestamp: state.timestamp(),
+                    config_timestamp: state.randr_config_timestamp,
+                    root: state.root_window,
+                    subpixel_order: SubPixel::UNKNOWN,
+                },
+                state.byte_order(),
+            )
         }
 
         // Screen operations

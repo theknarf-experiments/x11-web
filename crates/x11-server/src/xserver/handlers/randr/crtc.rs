@@ -3,27 +3,46 @@
 use tracing::{debug, info};
 
 use super::super::super::client::ClientState;
-use crate::xserver::reply::ReplyBuf;
+use crate::xserver::reply::{serialize_reply, serialize_var_reply};
 use crate::xserver::request::request_header;
 use x11rb_protocol::protocol::randr::{
-    GetCrtcGammaRequest, GetCrtcGammaSizeRequest, GetCrtcInfoRequest, GetCrtcTransformRequest,
-    GetPanningRequest, SetCrtcConfigRequest, SetCrtcGammaRequest, SetCrtcTransformRequest,
-    SetPanningRequest,
+    GetCrtcGammaReply, GetCrtcGammaRequest, GetCrtcGammaSizeReply, GetCrtcGammaSizeRequest,
+    GetCrtcInfoReply, GetCrtcInfoRequest, GetCrtcTransformReply, GetCrtcTransformRequest,
+    GetPanningReply, GetPanningRequest, Rotation, SetCrtcConfigReply, SetCrtcConfigRequest,
+    SetCrtcGammaRequest, SetCrtcTransformRequest, SetPanningReply, SetPanningRequest, SetConfig,
 };
-
-/// RRGetCrtcTransform reply: pending and current transforms are 3x3 fixed-
-/// point matrices; each entry is one u32 word.
-mod crtc_transform_layout {
-    /// Pending transform matrix begins at this offset within the reply.
-    pub(super) const PENDING_MATRIX: usize = 8;
-    /// Current transform matrix begins at this offset within the reply.
-    pub(super) const CURRENT_MATRIX: usize = 48;
-    /// Wire size of one fixed-point matrix entry.
-    pub(super) const ENTRY_SIZE: usize = 4;
-}
+use x11rb_protocol::protocol::render::Transform;
 
 /// 16.16 fixed-point representation of `1.0` — used for identity-matrix entries.
 const FIXED_16_16_ONE: i32 = 65536;
+
+fn identity_transform() -> Transform {
+    Transform {
+        matrix11: FIXED_16_16_ONE,
+        matrix12: 0,
+        matrix13: 0,
+        matrix21: 0,
+        matrix22: FIXED_16_16_ONE,
+        matrix23: 0,
+        matrix31: 0,
+        matrix32: 0,
+        matrix33: FIXED_16_16_ONE,
+    }
+}
+
+fn matrix_to_transform(matrix: [i32; 9]) -> Transform {
+    Transform {
+        matrix11: matrix[0],
+        matrix12: matrix[1],
+        matrix13: matrix[2],
+        matrix21: matrix[3],
+        matrix22: matrix[4],
+        matrix23: matrix[5],
+        matrix31: matrix[6],
+        matrix32: matrix[7],
+        matrix33: matrix[8],
+    }
+}
 
 /// RRGetCrtcInfo (20).
 pub(crate) fn handle_get_crtc_info(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
@@ -36,9 +55,15 @@ pub(crate) fn handle_get_crtc_info(state: &mut ClientState, data: &[u8], seq: u1
 /// RRSetCrtcConfig (21).
 pub(crate) fn handle_set_crtc_config(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
     let Ok(req) = SetCrtcConfigRequest::try_parse_request(request_header(data), &data[4..]) else {
-        return ReplyBuf::fixed(seq, state.msb_first)
-            .set_data_byte(1) // InvalidConfig
-            .build();
+        return serialize_reply(
+            &SetCrtcConfigReply {
+                status: SetConfig::INVALID_CONFIG_TIME,
+                sequence: seq,
+                length: 0,
+                timestamp: 0,
+            },
+            state.byte_order(),
+        );
     };
 
     let crtc_id = req.crtc;
@@ -49,7 +74,6 @@ pub(crate) fn handle_set_crtc_config(state: &mut ClientState, data: &[u8], seq: 
     let mode_id = req.mode;
     let rotation = u16::from(req.rotation);
 
-    // Look up mode dimensions first to avoid borrow conflict.
     let mode_dims = if mode_id == 0 {
         Some((0u16, 0u16))
     } else {
@@ -82,11 +106,15 @@ pub(crate) fn handle_set_crtc_config(state: &mut ClientState, data: &[u8], seq: 
         state.randr_queue_screen_change_notify();
     }
 
-    let ts = state.timestamp();
-    ReplyBuf::fixed(seq, state.msb_first)
-        .set_data_byte(0) // Success
-        .set_u32(8, ts)
-        .build()
+    serialize_reply(
+        &SetCrtcConfigReply {
+            status: SetConfig::SUCCESS,
+            sequence: seq,
+            length: 0,
+            timestamp: state.timestamp(),
+        },
+        state.byte_order(),
+    )
 }
 
 /// RRGetCrtcGammaSize (22).
@@ -103,9 +131,14 @@ pub(crate) fn handle_get_crtc_gamma_size(
     } else {
         0
     };
-    ReplyBuf::fixed(seq, state.msb_first)
-        .set_u16(8, size)
-        .build()
+    serialize_reply(
+        &GetCrtcGammaSizeReply {
+            sequence: seq,
+            length: 0,
+            size,
+        },
+        state.byte_order(),
+    )
 }
 
 /// RRGetCrtcGamma (23).
@@ -137,7 +170,6 @@ pub(crate) fn handle_set_crtc_transform(
 ) -> Vec<u8> {
     if let Ok(req) = SetCrtcTransformRequest::try_parse_request(request_header(data), &data[4..]) {
         let crtc_id = req.crtc;
-        // Convert the x11rb Transform struct to our [i32; 9] matrix.
         let t = &req.transform;
         let matrix = [
             t.matrix11, t.matrix12, t.matrix13, t.matrix21, t.matrix22, t.matrix23, t.matrix31,
@@ -161,9 +193,27 @@ pub(crate) fn handle_set_crtc_transform(
 /// RRGetPanning (27).
 pub(crate) fn handle_get_panning(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
     let _req = GetPanningRequest::try_parse_request(request_header(data), &data[4..]);
-    ReplyBuf::fixed(seq, state.msb_first)
-        .set_data_byte(0) // Success
-        .build()
+    serialize_reply(
+        &GetPanningReply {
+            status: SetConfig::SUCCESS,
+            sequence: seq,
+            length: 0,
+            timestamp: 0,
+            left: 0,
+            top: 0,
+            width: 0,
+            height: 0,
+            track_left: 0,
+            track_top: 0,
+            track_width: 0,
+            track_height: 0,
+            border_left: 0,
+            border_top: 0,
+            border_right: 0,
+            border_bottom: 0,
+        },
+        state.byte_order(),
+    )
 }
 
 /// RRSetPanning (28).
@@ -172,10 +222,15 @@ pub(crate) fn handle_set_panning(state: &mut ClientState, data: &[u8], seq: u16)
         .map(|r| r.crtc)
         .unwrap_or(0);
     debug!("RRSetPanning crtc={crtc_id} -> Success");
-    ReplyBuf::fixed(seq, state.msb_first)
-        .set_data_byte(0) // Success
-        .set_u32(8, state.timestamp())
-        .build()
+    serialize_reply(
+        &SetPanningReply {
+            status: SetConfig::SUCCESS,
+            sequence: seq,
+            length: 0,
+            timestamp: state.timestamp(),
+        },
+        state.byte_order(),
+    )
 }
 
 /// RRGetCrtcTransform (29).
@@ -183,47 +238,25 @@ pub(crate) fn handle_get_crtc_transform(state: &mut ClientState, data: &[u8], se
     let crtc_id = GetCrtcTransformRequest::try_parse_request(request_header(data), &data[4..])
         .map(|r| r.crtc)
         .unwrap_or(0);
-    // Retrieve transform or fall back to identity.
-    let identity = [
-        FIXED_16_16_ONE,
-        0,
-        0,
-        0,
-        FIXED_16_16_ONE,
-        0,
-        0,
-        0,
-        FIXED_16_16_ONE,
-    ];
     let transform = state
         .randr_find_crtc(crtc_id)
-        .map(|c| c.transform)
-        .unwrap_or(identity);
+        .map(|c| matrix_to_transform(c.transform))
+        .unwrap_or_else(identity_transform);
 
-    // Reply: 32-byte header + 36 (pending matrix) + 2 (namelen) + 2 (pad)
-    //        + 36 (current matrix) + 2 (namelen) + 2 (pad) = 32 + 80 = 112
-    // But the length field counts words after the first 32 bytes: 80/4 = 20.
-    let mut reply = ReplyBuf::with_extra(seq, 80, state.msb_first);
-
-    // Write pending transform.
-    for (i, &val) in transform.iter().enumerate() {
-        reply = reply.set_u32(
-            crtc_transform_layout::PENDING_MATRIX + i * crtc_transform_layout::ENTRY_SIZE,
-            val as u32,
-        );
-    }
-    // pending filter name length = 0 at offset 44, padding at 46-47: already 0
-
-    // Write current transform.
-    for (i, &val) in transform.iter().enumerate() {
-        reply = reply.set_u32(
-            crtc_transform_layout::CURRENT_MATRIX + i * crtc_transform_layout::ENTRY_SIZE,
-            val as u32,
-        );
-    }
-    // current filter name length = 0 at offset 84, padding at 86-87: already 0
-
-    reply.build()
+    serialize_var_reply(
+        &GetCrtcTransformReply {
+            sequence: seq,
+            length: 0,
+            pending_transform: transform,
+            has_transforms: false,
+            current_transform: transform,
+            pending_filter_name: Vec::new(),
+            pending_params: Vec::new(),
+            current_filter_name: Vec::new(),
+            current_params: Vec::new(),
+        },
+        state.byte_order(),
+    )
 }
 
 // ===========================================================================
@@ -235,82 +268,65 @@ fn build_crtc_info_reply(state: &ClientState, seq: u16, crtc_id: u32) -> Vec<u8>
     let crtc = match state.randr_find_crtc(crtc_id) {
         Some(c) => c.clone(),
         None => {
-            return ReplyBuf::fixed(seq, state.msb_first)
-                .set_data_byte(1) // InvalidConfig
-                .build();
+            return serialize_var_reply(
+                &GetCrtcInfoReply {
+                    status: SetConfig::INVALID_CONFIG_TIME,
+                    sequence: seq,
+                    length: 0,
+                    timestamp: 0,
+                    x: 0,
+                    y: 0,
+                    width: 0,
+                    height: 0,
+                    mode: 0,
+                    rotation: Rotation::from(0u16),
+                    rotations: Rotation::from(0u16),
+                    outputs: Vec::new(),
+                    possible: Vec::new(),
+                },
+                state.byte_order(),
+            );
         }
     };
 
-    let num_outputs = crtc.outputs.len() as u16;
     // Possible outputs = all outputs (in our model every output can go to any CRTC)
-    let num_possible = state.randr_outputs.len() as u16;
-    let var_data = (num_outputs as usize + num_possible as usize) * 4;
-    let inline_header = 24;
-    let extra_bytes = inline_header + var_data;
+    let possible: Vec<u32> = state.randr_outputs.iter().map(|o| o.id).collect();
 
-    let mut reply = ReplyBuf::with_extra(seq, extra_bytes, state.msb_first)
-        .set_data_byte(0) // Success
-        .set_u32(8, state.timestamp())
-        .set_i16(12, crtc.x)
-        .set_i16(14, crtc.y)
-        .set_u16(16, crtc.width)
-        .set_u16(18, crtc.height)
-        .set_u32(20, crtc.mode_id)
-        .set_u16(24, crtc.rotation)
-        .set_u16(26, 1) // rotations supported: Rotate_0
-        .set_u16(28, num_outputs)
-        .set_u16(30, num_possible);
-
-    let mut off = 32;
-    // Current outputs
-    for &oid in &crtc.outputs {
-        reply = reply.set_u32(off, oid);
-        off += 4;
-    }
-    // Possible outputs
-    for output in &state.randr_outputs {
-        reply = reply.set_u32(off, output.id);
-        off += 4;
-    }
-
-    reply.build()
+    serialize_var_reply(
+        &GetCrtcInfoReply {
+            status: SetConfig::SUCCESS,
+            sequence: seq,
+            length: 0,
+            timestamp: state.timestamp(),
+            x: crtc.x,
+            y: crtc.y,
+            width: crtc.width,
+            height: crtc.height,
+            mode: crtc.mode_id,
+            rotation: Rotation::from(crtc.rotation),
+            rotations: Rotation::from(1u16), // Rotate_0
+            outputs: crtc.outputs.clone(),
+            possible,
+        },
+        state.byte_order(),
+    )
 }
 
 /// Build the reply for RRGetCrtcGamma.
 fn build_get_crtc_gamma_reply(state: &ClientState, seq: u16, crtc_id: u32) -> Vec<u8> {
-    let crtc = match state.randr_find_crtc(crtc_id) {
-        Some(c) => c,
-        None => {
-            // Empty gamma reply.
-            return ReplyBuf::fixed(seq, state.msb_first).set_u16(8, 0).build();
-        }
+    let (red, green, blue) = match state.randr_find_crtc(crtc_id) {
+        Some(c) => (c.gamma_red.clone(), c.gamma_green.clone(), c.gamma_blue.clone()),
+        None => (Vec::new(), Vec::new(), Vec::new()),
     };
 
-    let size = crtc.gamma_red.len() as u16;
-    // Each channel is `size` u16 values = size * 2 bytes.
-    // Total gamma data = 3 * size * 2 bytes.
-    let gamma_data_len = 3 * size as usize * 2;
-    let pad = (4 - (gamma_data_len % 4)) % 4;
-    let var_len = gamma_data_len + pad;
-
-    let mut reply = ReplyBuf::with_extra(seq, var_len, state.msb_first).set_u16(8, size);
-
-    let mut off = 32;
-    // Red
-    for &v in &crtc.gamma_red {
-        reply = reply.set_u16(off, v);
-        off += 2;
-    }
-    // Green
-    for &v in &crtc.gamma_green {
-        reply = reply.set_u16(off, v);
-        off += 2;
-    }
-    // Blue
-    for &v in &crtc.gamma_blue {
-        reply = reply.set_u16(off, v);
-        off += 2;
-    }
-
-    reply.build()
+    serialize_var_reply(
+        &GetCrtcGammaReply {
+            sequence: seq,
+            length: 0,
+            red,
+            green,
+            blue,
+        },
+        state.byte_order(),
+    )
 }
