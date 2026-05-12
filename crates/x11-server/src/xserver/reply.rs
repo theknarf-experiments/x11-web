@@ -15,9 +15,47 @@
 //! ```
 
 use super::core::{X11_EVENT_SIZE as REPLY_HEADER_SIZE, X11_WORD_SIZE as BYTES_PER_WORD};
+use x11rb_protocol::x11_utils::{ByteOrder, SerializeEndian};
 
 /// Reply type byte: X11 reply messages always have byte 0 == 1.
 const REPLY_TYPE_BYTE: u8 = 1;
+
+/// Serialise an x11rb reply struct via the codegen-emitted
+/// `SerializeEndian` impl, padding short fixed-size types to the
+/// 32-byte wire minimum. Use this in preference to `ReplyBuf` whenever
+/// the reply struct exists in `x11rb_protocol::protocol::*` — the
+/// codegen owns the wire layout so call sites stay short and any field
+/// reordering / addition flows through one regeneration.
+pub(crate) fn serialize_reply<R: SerializeEndian>(reply: &R, byte_order: ByteOrder) -> Vec<u8> {
+    let mut bytes = Vec::with_capacity(REPLY_HEADER_SIZE);
+    reply.serialize_endian_into(&mut bytes, byte_order);
+    if bytes.len() < REPLY_HEADER_SIZE {
+        bytes.resize(REPLY_HEADER_SIZE, 0);
+    }
+    bytes
+}
+
+/// Serialise a variable-length reply struct (one whose payload extends
+/// past the 32-byte header) and stamp the X11 length field from the
+/// actual buffer size, byte-order-aware. The caller is responsible for
+/// building the reply struct with whatever fields it wants — `length`
+/// can be 0 and gets overwritten here.
+pub(crate) fn serialize_var_reply<R: SerializeEndian>(
+    reply: &R,
+    byte_order: ByteOrder,
+) -> Vec<u8> {
+    let mut bytes = Vec::new();
+    reply.serialize_endian_into(&mut bytes, byte_order);
+    debug_assert!(bytes.len() >= REPLY_HEADER_SIZE);
+    debug_assert!((bytes.len() - REPLY_HEADER_SIZE) % BYTES_PER_WORD == 0);
+    let length = ((bytes.len() - REPLY_HEADER_SIZE) / BYTES_PER_WORD) as u32;
+    let length_bytes = match byte_order {
+        ByteOrder::Lsb => length.to_le_bytes(),
+        ByteOrder::Msb => length.to_be_bytes(),
+    };
+    bytes[offset::LENGTH..offset::LENGTH + BYTES_PER_WORD].copy_from_slice(&length_bytes);
+    bytes
+}
 
 mod offset {
     /// Sequence number (u16) — bytes 2..4.

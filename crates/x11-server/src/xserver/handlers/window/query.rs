@@ -1,8 +1,10 @@
 //! Query/geometry window handlers (opcodes 14, 15).
 
 use super::*;
-use crate::xserver::reply::ReplyBuf;
-use x11rb_protocol::protocol::xproto::{GetGeometryRequest, QueryTreeRequest};
+use crate::xserver::reply::{serialize_reply, serialize_var_reply};
+use x11rb_protocol::protocol::xproto::{
+    GetGeometryReply, GetGeometryRequest, QueryTreeReply, QueryTreeRequest,
+};
 
 // ---------------------------------------------------------------------------
 // Opcode 14: GetGeometry
@@ -12,26 +14,38 @@ pub(crate) fn handle_get_geometry(state: &mut ClientState, req: &GetGeometryRequ
     let seq = state.sequence;
     let drawable = req.drawable;
 
-    // Check windows first, then pixmaps
     if let Some(win) = state.windows.get(&drawable) {
-        return ReplyBuf::fixed(seq, state.msb_first)
-            .set_data_byte(win.depth)
-            .set_u32(8, state.root_window)
-            .set_i16(12, win.x)
-            .set_i16(14, win.y)
-            .set_u16(16, win.width)
-            .set_u16(18, win.height)
-            .set_u16(20, win.border_width)
-            .build();
+        return serialize_reply(
+            &GetGeometryReply {
+                depth: win.depth,
+                sequence: seq,
+                length: 0,
+                root: state.root_window,
+                x: win.x,
+                y: win.y,
+                width: win.width,
+                height: win.height,
+                border_width: win.border_width,
+            },
+            state.byte_order(),
+        );
     }
 
     if let Some(pixmap) = state.pixmaps.get(&drawable) {
-        return ReplyBuf::fixed(seq, state.msb_first)
-            .set_data_byte(pixmap.depth)
-            .set_u32(8, state.root_window)
-            .set_u16(16, pixmap.width)
-            .set_u16(18, pixmap.height)
-            .build();
+        return serialize_reply(
+            &GetGeometryReply {
+                depth: pixmap.depth,
+                sequence: seq,
+                length: 0,
+                root: state.root_window,
+                x: 0,
+                y: 0,
+                width: pixmap.width,
+                height: pixmap.height,
+                border_width: 0,
+            },
+            state.byte_order(),
+        );
     }
 
     // Cross-client fallback: foreign windows live in the shared store.
@@ -41,15 +55,20 @@ pub(crate) fn handle_get_geometry(state: &mut ClientState, req: &GetGeometryRequ
         .ok()
         .and_then(|sw| sw.get(&drawable).cloned())
     {
-        return ReplyBuf::fixed(seq, state.msb_first)
-            .set_data_byte(sw.depth)
-            .set_u32(8, state.root_window)
-            .set_i16(12, sw.x)
-            .set_i16(14, sw.y)
-            .set_u16(16, sw.width)
-            .set_u16(18, sw.height)
-            .set_u16(20, sw.border_width)
-            .build();
+        return serialize_reply(
+            &GetGeometryReply {
+                depth: sw.depth,
+                sequence: seq,
+                length: 0,
+                root: state.root_window,
+                x: sw.x,
+                y: sw.y,
+                width: sw.width,
+                height: sw.height,
+                border_width: sw.border_width,
+            },
+            state.byte_order(),
+        );
     }
 
     // Drawable not found - return BadDrawable error
@@ -98,17 +117,15 @@ pub(crate) fn handle_query_tree(state: &mut ClientState, req: &QueryTreeRequest)
         })
         .unwrap_or_default();
 
-    let n_children = children.len() as u16;
-    let mut reply = ReplyBuf::with_extra(seq, children.len() * 4, state.msb_first)
-        .set_u32(8, state.root_window);
-
     let parent = state.windows.get(&wid).map(|w| w.parent).unwrap_or(0);
-    reply = reply.set_u32(12, parent).set_u16(16, n_children);
-
-    for (i, &child) in children.iter().enumerate() {
-        let off = 32 + i * 4;
-        reply = reply.set_u32(off, child);
-    }
-
-    reply.build()
+    serialize_var_reply(
+        &QueryTreeReply {
+            sequence: seq,
+            length: 0,
+            root: state.root_window,
+            parent,
+            children,
+        },
+        state.byte_order(),
+    )
 }
