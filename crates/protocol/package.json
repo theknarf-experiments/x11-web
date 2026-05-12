@@ -2,6 +2,7 @@
 	"name": "x11-web-protocol",
 	"private": true,
 	"scripts": {
+		"codegen": "bash ../../tools/setup-x11rb-fork.sh",
 		"build": "cargo build -p x11-web-protocol",
 		"check": "cargo check -p x11-web-protocol"
 	}

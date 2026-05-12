@@ -5,6 +5,27 @@
 			"inputs": ["../crates/rtc-wire/schema/**/*.capnp"],
 			"outputs": ["src/generated/**"]
 		},
+		"x11-web-backend#codegen": {
+			"inputs": [
+				"$TURBO_ROOT$/tools/setup-x11rb-fork.sh",
+				"$TURBO_ROOT$/crates/x11rb-protocol-msb/patches/**"
+			],
+			"outputs": ["$TURBO_ROOT$/tools/x11rb-fork/.x11web-applied-stamp"]
+		},
+		"x11-web-protocol#codegen": {
+			"inputs": [
+				"$TURBO_ROOT$/tools/setup-x11rb-fork.sh",
+				"$TURBO_ROOT$/crates/x11rb-protocol-msb/patches/**"
+			],
+			"outputs": ["$TURBO_ROOT$/tools/x11rb-fork/.x11web-applied-stamp"]
+		},
+		"x11-web-sidecar#codegen": {
+			"inputs": [
+				"$TURBO_ROOT$/tools/setup-x11rb-fork.sh",
+				"$TURBO_ROOT$/crates/x11rb-protocol-msb/patches/**"
+			],
+			"outputs": ["$TURBO_ROOT$/tools/x11rb-fork/.x11web-applied-stamp"]
+		},
 		"build": {
 			"dependsOn": ["^build", "codegen"],
 			"outputs": ["dist/**"]

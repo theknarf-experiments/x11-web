@@ -5,3 +5,5 @@ frontend/node_modules/
 e2e/node_modules/
 .git/
 .claude/
+tools/x11rb-fork/
+tools/.x11rb-fork.lock

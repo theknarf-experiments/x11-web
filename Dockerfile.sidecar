@@ -14,6 +14,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 WORKDIR /app
 ARG CACHE_BUST=0
 COPY Cargo.toml Cargo.lock ./
+# Set up the x11rb-protocol fork that Cargo.toml's [patch.crates-io]
+# redirects to. tools/setup-x11rb-fork.sh clones upstream, applies the
+# patches in crates/x11rb-protocol-msb/patches/, and regenerates the
+# protocol bindings. Copy only the inputs the script reads, so the
+# layer is cached until the script or patches change.
+COPY tools/setup-x11rb-fork.sh tools/setup-x11rb-fork.sh
+COPY crates/x11rb-protocol-msb/ crates/x11rb-protocol-msb/
+RUN bash tools/setup-x11rb-fork.sh
 COPY crates/ crates/
 RUN cargo build --release --bin x11-web-sidecar
 

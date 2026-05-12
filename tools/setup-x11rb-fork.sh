@@ -26,8 +26,23 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 FORK_DIR="$REPO_ROOT/tools/x11rb-fork"
 PATCH_DIR="$REPO_ROOT/crates/x11rb-protocol-msb/patches"
 STAMP_FILE="$FORK_DIR/.x11web-applied-stamp"
+LOCK_DIR="$REPO_ROOT/tools/.x11rb-fork.lock"
 
 desired_stamp=$(printf '%s\n' "$PINNED_REV" "$(find "$PATCH_DIR" -name '*.patch' -print0 | sort -z | xargs -0 sha256sum 2>/dev/null | sha256sum)" | sha256sum | cut -d' ' -f1)
+
+if [[ -f "$STAMP_FILE" ]] && [[ "$(cat "$STAMP_FILE")" == "$desired_stamp" ]]; then
+    echo "x11rb fork already up to date at $FORK_DIR"
+    exit 0
+fi
+
+# Serialise concurrent invocations (turbo runs codegen for each Rust
+# crate in parallel; they all want to populate the same fork dir).
+# mkdir is atomic on POSIX, so the first invocation wins the lock and
+# the rest wait, then re-check the stamp file.
+while ! mkdir "$LOCK_DIR" 2>/dev/null; do
+    sleep 0.5
+done
+trap 'rmdir "$LOCK_DIR"' EXIT
 
 if [[ -f "$STAMP_FILE" ]] && [[ "$(cat "$STAMP_FILE")" == "$desired_stamp" ]]; then
     echo "x11rb fork already up to date at $FORK_DIR"
