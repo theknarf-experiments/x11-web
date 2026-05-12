@@ -695,7 +695,7 @@ pub fn handle_request(
                     mode,
                 );
                 let map = xi1_dont_propagate.get_or_insert_with(HashMap::new);
-                let entry = map.entry(window).or_insert_with(Vec::new);
+                let entry = map.entry(window).or_default();
                 for &class in req.classes.iter() {
                     if mode == xi::PropagateMode::ADD_TO_LIST {
                         if !entry.contains(&class) {

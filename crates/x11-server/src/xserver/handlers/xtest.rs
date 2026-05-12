@@ -387,11 +387,11 @@ fn find_subwindow_in_shared(
     let mut found: Option<(u32, i16, i16)> = None;
     for _ in 0..super::super::window_tree::MAX_TREE_DEPTH {
         if let Some(w) = shared.get(&walker) {
-            if u32::from(w.event_mask) & required_mask != 0 {
+            if w.event_mask & required_mask != 0 {
                 found = Some((walker, accum_x, accum_y));
                 break;
             }
-            if u32::from(w.do_not_propagate_mask) & required_mask != 0 {
+            if w.do_not_propagate_mask & required_mask != 0 {
                 break;
             }
             let parent = w.parent;

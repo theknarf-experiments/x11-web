@@ -50,7 +50,7 @@ pub(crate) fn handle_dbe_request(state: &mut ClientState, data: &[u8], seq: u16)
             );
             let window_id = req.window;
             let back_buffer_id = req.buffer;
-            let _swap_action = u8::from(req.swap_action); // Undefined, Background, Untouched, Copied
+            let _swap_action = req.swap_action; // Undefined, Background, Untouched, Copied
 
             debug!("DBE AllocateBackBuffer: window={window_id:#x} buffer={back_buffer_id:#x}");
 

@@ -244,7 +244,7 @@ pub(crate) fn handle_create_picture(state: &mut ClientState, data: &[u8], seq: u
     }
 
     // Extract values from the parsed value_list
-    let repeat = value_list.repeat.map(|r| u32::from(r)).unwrap_or(0);
+    let repeat = value_list.repeat.map(u32::from).unwrap_or(0);
     let component_alpha = value_list.componentalpha.map(|v| v != 0).unwrap_or(false);
     let clip_origin_x = value_list.clipxorigin.map(|v| v as i16).unwrap_or(0);
     let clip_origin_y = value_list.clipyorigin.map(|v| v as i16).unwrap_or(0);

@@ -51,6 +51,12 @@ struct WindowRoute {
     x11_window_id: u32,
 }
 
+impl Default for WindowRouter {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl WindowRouter {
     pub fn new() -> Self {
         Self {

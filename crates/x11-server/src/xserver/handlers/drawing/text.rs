@@ -72,7 +72,7 @@ pub(crate) fn handle_poly_text8(state: &mut ClientState, req: &PolyText8Request)
         let delta = items_data[offset + 1] as i8;
         cursor_x += delta as i16;
 
-        if let Some(ref f) = font {
+        if let Some(f) = font {
             let text = &items_data[offset + 2..offset + 2 + item_len];
             let (img_w, img_h, pixels) = f.render_text_transparent(text, gc.foreground);
 
@@ -167,7 +167,7 @@ pub(crate) fn handle_poly_text16(state: &mut ClientState, req: &PolyText16Reques
         let delta = items_data[offset + 1] as i8;
         cursor_x += delta as i16;
 
-        if let Some(ref font) = font {
+        if let Some(font) = font {
             // Extract 2-byte character codes (big-endian per X11 spec)
             let mut char_codes: Vec<u16> = Vec::with_capacity(item_len);
             for i in 0..item_len {

@@ -367,8 +367,8 @@ pub(crate) fn handle_record_request(state: &mut ClientState, data: &[u8], seq: u
                 return bad_length();
             };
             let context_id = req.context;
-            let element_header = u8::from(req.element_header);
-            let client_specs: Vec<u32> = req.client_specs.iter().map(|&s| u32::from(s)).collect();
+            let element_header = req.element_header;
+            let client_specs: Vec<u32> = req.client_specs.iter().map(|&s| s).collect();
             let ranges: Vec<RecordRange> = req.ranges.iter().map(RecordRange::from).collect();
 
             debug!(
@@ -408,10 +408,10 @@ pub(crate) fn handle_record_request(state: &mut ClientState, data: &[u8], seq: u
                 return bad_length();
             };
             let context_id = req.context;
-            let client_specs: Vec<u32> = req.client_specs.iter().map(|&s| u32::from(s)).collect();
+            let client_specs: Vec<u32> = req.client_specs.iter().map(|&s| s).collect();
             let ranges: Vec<RecordRange> = req.ranges.iter().map(RecordRange::from).collect();
             if let Some(ctx) = state.record_contexts.get_mut(&context_id) {
-                ctx.element_header = u8::from(req.element_header);
+                ctx.element_header = req.element_header;
                 ctx.ranges.extend(ranges);
                 ctx.client_specs.extend(client_specs);
                 if let Ok(mut shared) = state.shared_record_contexts.lock() {
@@ -433,7 +433,7 @@ pub(crate) fn handle_record_request(state: &mut ClientState, data: &[u8], seq: u
             };
             if let Some(ctx) = state.record_contexts.get_mut(&req.context) {
                 for &spec in req.client_specs.iter() {
-                    ctx.client_specs.retain(|&s| s != u32::from(spec));
+                    ctx.client_specs.retain(|&s| s != spec);
                 }
                 if ctx.client_specs.is_empty() {
                     ctx.ranges.clear();
@@ -516,7 +516,7 @@ pub(crate) fn handle_record_request(state: &mut ClientState, data: &[u8], seq: u
                         .copied()
                         .unwrap_or(CLIENT_SPEC_ALL_CLIENTS);
                     vec![ClientInfo {
-                        client_resource: spec.into(),
+                        client_resource: spec,
                         ranges,
                     }]
                 };

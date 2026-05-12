@@ -59,7 +59,7 @@ fn find_passive_grab<'a>(
             && (g.modifiers == XI_ANY_MODIFIER
                 || g.modifiers == CORE_ANY_MODIFIER
                 || (g.modifiers as u16) == modifiers)
-            && chain.iter().any(|w| *w == g.grab_window)
+            && chain.contains(&g.grab_window)
     })
 }
 
@@ -354,7 +354,7 @@ pub fn build_xi_events_for(
                 return build_xi_key_events(
                     xi::KEY_PRESS_EVENT,
                     xi::RAW_KEY_PRESS_EVENT,
-                    keycode as u32,
+                    keycode,
                     state,
                     selections,
                     passive_grabs,
@@ -368,7 +368,7 @@ pub fn build_xi_events_for(
                 return build_xi_key_events(
                     xi::KEY_RELEASE_EVENT,
                     xi::RAW_KEY_RELEASE_EVENT,
-                    keycode as u32,
+                    keycode,
                     state,
                     selections,
                     passive_grabs,

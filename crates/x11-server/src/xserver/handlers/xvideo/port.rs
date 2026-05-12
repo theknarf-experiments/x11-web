@@ -211,7 +211,7 @@ fn build_query_port_attributes_reply(
     let attributes: Vec<AttributeInfo> = attrs
         .iter()
         .map(|a| AttributeInfo {
-            flags: AttributeFlag::from(a.flags),
+            flags: a.flags,
             min: a.min,
             max: a.max,
             name: a.name.to_vec(),

@@ -83,7 +83,7 @@ pub(crate) fn build_dash(line_style: u8, dash_list: &[u8], dash_offset: u16) -> 
     // X11 dash arrays may be odd-length; tiny-skia requires even-length
     // pairs (on, off, ...). Duplicate the pattern to make it even.
     let mut array: Vec<f32> = dash_list.iter().map(|&n| n as f32).collect();
-    if array.len() % 2 != 0 {
+    if !array.len().is_multiple_of(2) {
         let dup = array.clone();
         array.extend(dup);
     }

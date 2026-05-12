@@ -469,8 +469,8 @@ pub(crate) fn handle_map_window(state: &mut ClientState, req: &MapWindowRequest)
         let pointer_y = state.pointer_y;
         if let Some(win) = state.windows.get(&wid) {
             if win.mapped {
-                let abs_x = win.x as i16;
-                let abs_y = win.y as i16;
+                let abs_x = win.x;
+                let abs_y = win.y;
                 let abs_x2 = abs_x + win.width as i16;
                 let abs_y2 = abs_y + win.height as i16;
                 if pointer_x >= abs_x

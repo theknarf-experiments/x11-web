@@ -410,7 +410,7 @@ pub(crate) fn handle_copy_plane(state: &mut ClientState, req: &CopyPlaneRequest)
 // ---------------------------------------------------------------------------
 
 pub(crate) fn handle_poly_point(state: &mut ClientState, req: &PolyPointRequest) -> Vec<u8> {
-    let coord_mode = CoordMode::from(req.coordinate_mode);
+    let coord_mode = req.coordinate_mode;
     let drawable = req.drawable;
     let gc_id = req.gc;
 
@@ -477,7 +477,7 @@ pub(crate) fn handle_poly_point(state: &mut ClientState, req: &PolyPointRequest)
 // ---------------------------------------------------------------------------
 
 pub(crate) fn handle_poly_line(state: &mut ClientState, req: &PolyLineRequest) -> Vec<u8> {
-    let coord_mode = CoordMode::from(req.coordinate_mode);
+    let coord_mode = req.coordinate_mode;
     let drawable = req.drawable;
     let gc_id = req.gc;
 
@@ -1106,7 +1106,7 @@ pub(crate) fn handle_fill_poly(state: &mut ClientState, req: &FillPolyRequest) -
     }
 
     let gc = state.gcs.get(&gc_id).cloned().unwrap_or_default();
-    let coord_mode = CoordMode::from(req.coordinate_mode); // 0 = Origin, 1 = Previous
+    let coord_mode = req.coordinate_mode; // 0 = Origin, 1 = Previous
 
     let mut points = Vec::new();
     for pt in req.points.iter() {

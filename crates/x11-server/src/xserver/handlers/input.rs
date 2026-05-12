@@ -499,7 +499,7 @@ pub(crate) fn handle_change_keyboard_mapping(
             response_type: MAPPING_NOTIFY_EVENT,
             sequence: seq,
             request: 1u8.into(), // Keyboard
-            first_keycode: first_keycode,
+            first_keycode,
             count: keycode_count as u8,
         },
         state.msb_first,
@@ -591,7 +591,7 @@ pub(crate) fn handle_change_keyboard_control(
             return build_error(VALUE_ERROR, state.sequence, val, 102, 0);
         }
         if let Some(led) = vl.led {
-            if led >= 1 && led <= 32 {
+            if (1..=32).contains(&led) {
                 let bit_pos = led - 1;
                 if val == 1 {
                     state.keyboard_control.led_mask |= 1 << bit_pos;
@@ -616,7 +616,7 @@ pub(crate) fn handle_change_keyboard_control(
         }
         if let Some(key) = vl.key {
             // Per spec: key must be a valid keycode (8-255)
-            if key >= 8 && key <= 255 {
+            if (8..=255).contains(&key) {
                 let byte_idx = (key / 8) as usize;
                 let bit_mask = 1u8 << (key % 8);
                 match val {

@@ -543,7 +543,7 @@ pub(crate) fn handle_get_image(state: &mut ClientState, req: &GetImageRequest) -
                         } else if depth <= 4 {
                             // For depth-4, extract a 4-bit pixel from R channel
                             // (byte 2 in BGRA wire-order swap above).
-                            let r = pixels[src_off + 2] as u8;
+                            let r = pixels[src_off + 2];
                             out[dst_off] = (r >> 4) & (plane_mask as u8);
                         } else {
                             // For depth 8 colormapped visuals, the original

@@ -3,7 +3,7 @@
 use std::time::Instant;
 
 /// XKB modifier and group state tracking.
-#[derive(Clone)]
+#[derive(Clone, Default)]
 pub(crate) struct XkbState {
     /// Base modifiers (from currently pressed modifier keys).
     pub(crate) base_mods: u8,
@@ -26,21 +26,6 @@ pub(crate) struct XkbState {
     pub(crate) sticky_mods: u8,
 }
 
-impl Default for XkbState {
-    fn default() -> Self {
-        Self {
-            base_mods: 0,
-            latched_mods: 0,
-            locked_mods: 0,
-            base_group: 0,
-            latched_group: 0,
-            locked_group: 0,
-            controls: XkbControls::default(),
-            bounce_key_release_time: std::collections::HashMap::new(),
-            sticky_mods: 0,
-        }
-    }
-}
 
 impl XkbState {
     /// Effective (combined) modifiers: base | latched | locked.
@@ -101,14 +86,13 @@ impl XkbState {
         let sticky_enabled = (self.controls.enabled_ctrls & XKB_STICKY_KEYS_MASK) != 0;
 
         let mod_bit = keycode_to_modifier(keycode);
-        if mod_bit != 0 && !is_lock_key(keycode) {
-            if !sticky_enabled {
+        if mod_bit != 0 && !is_lock_key(keycode)
+            && !sticky_enabled {
                 self.base_mods &= !mod_bit;
                 // Clear latched modifiers on release of the modifier key
                 self.latched_mods &= !mod_bit;
             }
             // For StickyKeys: modifier stays latched until a non-modifier is pressed
-        }
 
         // BounceKeys: record release time for debounce
         if (self.controls.enabled_ctrls & XKB_BOUNCE_KEYS_MASK) != 0 {

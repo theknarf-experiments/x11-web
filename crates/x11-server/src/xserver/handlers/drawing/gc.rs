@@ -57,7 +57,7 @@ fn apply_create_gc_aux(gc: &mut GcState, aux: &CreateGCAux) {
         gc.subwindow_mode = u32::from(v) as u8;
     }
     if let Some(v) = aux.graphics_exposures {
-        gc.graphics_exposures = u32::from(v) != 0;
+        gc.graphics_exposures = v != 0;
     }
     if let Some(v) = aux.clip_x_origin {
         gc.clip_x = v as i16;
@@ -120,7 +120,7 @@ pub(crate) fn handle_create_gc(state: &mut ClientState, req: &CreateGCRequest) -
     }
 
     let mut gc = GcState::default();
-    apply_create_gc_aux(&mut gc, &value_list);
+    apply_create_gc_aux(&mut gc, value_list);
 
     // If clip_mask was set to a pixmap, resolve it to a bitmap and
     // populate clip_rects from the bitmap so all drawing code works.

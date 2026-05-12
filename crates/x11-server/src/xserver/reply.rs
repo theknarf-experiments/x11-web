@@ -105,7 +105,7 @@ impl ReplyBuf {
     /// `extra_bytes` must be a multiple of 4.
     pub(crate) fn with_extra(seq: u16, extra_bytes: usize, msb_first: bool) -> Self {
         debug_assert!(
-            extra_bytes % BYTES_PER_WORD == 0,
+            extra_bytes.is_multiple_of(BYTES_PER_WORD),
             "extra_bytes must be a multiple of 4"
         );
         let extra_words = (extra_bytes / BYTES_PER_WORD) as u32;

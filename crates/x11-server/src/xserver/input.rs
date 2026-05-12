@@ -976,11 +976,10 @@ pub(crate) fn build_x11_input_event(
             | InputEvent::ButtonRelease { .. }
             | InputEvent::KeyPress { .. }
             | InputEvent::KeyRelease { .. }
-    ) {
-        if is_blocked_by_modal(&state.windows, event_window) {
+    )
+        && is_blocked_by_modal(&state.windows, event_window) {
             return Vec::new();
         }
-    }
 
     // Generate crossing events for pointer movement between windows
     let mut crossing_events = Vec::new();

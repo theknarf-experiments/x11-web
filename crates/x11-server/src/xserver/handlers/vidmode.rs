@@ -47,7 +47,7 @@ impl VidModeInfo {
     /// is owned by x11rb's `serialize()` instead of by us.
     fn to_wire(&self) -> WireModeInfo {
         WireModeInfo {
-            dotclock: self.dotclock.into(),
+            dotclock: self.dotclock,
             hdisplay: self.hdisplay,
             hsyncstart: self.hsyncstart,
             hsyncend: self.hsyncend,
@@ -98,7 +98,7 @@ fn trailing_words(serialized_len: usize) -> u32 {
     const HEADER_BYTES: usize = 32;
     const WORD_BYTES: usize = 4;
     debug_assert!(serialized_len >= HEADER_BYTES);
-    debug_assert!((serialized_len - HEADER_BYTES) % WORD_BYTES == 0);
+    debug_assert!((serialized_len - HEADER_BYTES).is_multiple_of(WORD_BYTES));
     u32::try_from((serialized_len - HEADER_BYTES) / WORD_BYTES).expect("reply fits in u32 words")
 }
 
@@ -143,7 +143,7 @@ pub(crate) fn handle_vidmode_request(state: &mut ClientState, data: &[u8], seq: 
             let reply = GetModeLineReply {
                 sequence: seq,
                 length: 0,
-                dotclock: mode.dotclock.into(),
+                dotclock: mode.dotclock,
                 hdisplay: mode.hdisplay,
                 hsyncstart: mode.hsyncstart,
                 hsyncend: mode.hsyncend,
@@ -459,7 +459,7 @@ fn mode_from_delete_modeline(req: &DeleteModeLineRequest) -> VidModeInfo {
 
 fn mode_from_switch_to_mode(req: &SwitchToModeRequest<'_>) -> VidModeInfo {
     VidModeInfo {
-        dotclock: req.dotclock.into(),
+        dotclock: req.dotclock,
         hdisplay: req.hdisplay,
         hsyncstart: req.hsyncstart,
         hsyncend: req.hsyncend,

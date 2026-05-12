@@ -235,7 +235,7 @@ fn fix_length(bytes: &mut Vec<u8>, byte_order: ByteOrder) {
     const HEADER_BYTES: usize = 32;
     const WORD_BYTES: usize = 4;
     debug_assert!(bytes.len() >= HEADER_BYTES);
-    debug_assert!((bytes.len() - HEADER_BYTES) % WORD_BYTES == 0);
+    debug_assert!((bytes.len() - HEADER_BYTES).is_multiple_of(WORD_BYTES));
     let length = u32::try_from((bytes.len() - HEADER_BYTES) / WORD_BYTES).expect("reply fits");
     let length_bytes = match byte_order {
         ByteOrder::Lsb => length.to_le_bytes(),

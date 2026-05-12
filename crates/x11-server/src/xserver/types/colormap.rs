@@ -114,9 +114,9 @@ impl ColormapState {
         let mut entries = Vec::with_capacity(n_entries);
         for i in 0..n_entries {
             // 3-3-2 decomposition: RRRGGGBB
-            let r = ((i as u32 >> rgb_332::R_SHIFT) & rgb_332::RG_MASK) as u32;
-            let g = ((i as u32 >> rgb_332::G_SHIFT) & rgb_332::RG_MASK) as u32;
-            let b = (i as u32 & rgb_332::B_MASK) as u32;
+            let r = (i as u32 >> rgb_332::R_SHIFT) & rgb_332::RG_MASK;
+            let g = (i as u32 >> rgb_332::G_SHIFT) & rgb_332::RG_MASK;
+            let b = i as u32 & rgb_332::B_MASK;
             entries.push((
                 ((r * 65535) / rgb_332::RG_MAX) as u16,
                 ((g * 65535) / rgb_332::RG_MAX) as u16,

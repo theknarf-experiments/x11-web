@@ -404,7 +404,7 @@ fn parse_pcf_bitmaps(
         }
 
         // Row stride in the PCF file: ceil(ceil(w/8) / glyph_pad) * glyph_pad
-        let pcf_row_bytes = (w.div_ceil(8) + glyph_pad - 1) / glyph_pad * glyph_pad;
+        let pcf_row_bytes = w.div_ceil(8).div_ceil(glyph_pad) * glyph_pad;
         // Our internal row stride: ceil(w/8)
         let dst_row_bytes = w.div_ceil(8);
 
