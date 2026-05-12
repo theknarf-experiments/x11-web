@@ -34,16 +34,30 @@ pub(crate) fn byte_order_of(msb_first: bool) -> ByteOrder {
 
 /// Serialise an x11rb reply struct via the codegen-emitted
 /// `SerializeEndian` impl, padding short fixed-size types to the
-/// 32-byte wire minimum. Use this in preference to `ReplyBuf` whenever
+/// 32-byte wire minimum and stamping the X11 length field from the
+/// actual buffer size. Use this in preference to `ReplyBuf` whenever
 /// the reply struct exists in `x11rb_protocol::protocol::*` — the
 /// codegen owns the wire layout so call sites stay short and any field
 /// reordering / addition flows through one regeneration.
+///
+/// The codegen serializer emits `self.length` verbatim. Fixed replies
+/// larger than 32 bytes (e.g. `GetWindowAttributesReply` at 44, or
+/// `QueryKeymapReply` at 40) would otherwise advertise the wrong wire
+/// length, causing clients to drop the trailing bytes and desync.
 pub(crate) fn serialize_reply<R: SerializeEndian>(reply: &R, byte_order: ByteOrder) -> Vec<u8> {
     let mut bytes = Vec::with_capacity(REPLY_HEADER_SIZE);
     reply.serialize_endian_into(&mut bytes, byte_order);
     if bytes.len() < REPLY_HEADER_SIZE {
         bytes.resize(REPLY_HEADER_SIZE, 0);
     }
+    let pad = (BYTES_PER_WORD - (bytes.len() % BYTES_PER_WORD)) % BYTES_PER_WORD;
+    bytes.resize(bytes.len() + pad, 0);
+    let length = ((bytes.len() - REPLY_HEADER_SIZE) / BYTES_PER_WORD) as u32;
+    let length_bytes = match byte_order {
+        ByteOrder::Lsb => length.to_le_bytes(),
+        ByteOrder::Msb => length.to_be_bytes(),
+    };
+    bytes[offset::LENGTH..offset::LENGTH + BYTES_PER_WORD].copy_from_slice(&length_bytes);
     bytes
 }
 
