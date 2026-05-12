@@ -1,11 +1,25 @@
 //! Font handlers (opcodes 45-52).
 
 use super::*;
-use crate::xserver::reply::ReplyBuf;
+use crate::fonts::types::CharInfo as FontCharInfo;
+use crate::xserver::reply::{serialize_reply, serialize_var_reply};
 use x11rb_protocol::protocol::xproto::{
-    CloseFontRequest, GetFontPathRequest, ListFontsRequest, ListFontsWithInfoRequest,
-    OpenFontRequest, QueryFontRequest, QueryTextExtentsRequest, SetFontPathRequest,
+    Charinfo, CloseFontRequest, FontDraw, Fontprop, GetFontPathReply, GetFontPathRequest,
+    ListFontsReply, ListFontsRequest, ListFontsWithInfoReply, ListFontsWithInfoRequest,
+    OpenFontRequest, QueryFontReply, QueryFontRequest, QueryTextExtentsReply,
+    QueryTextExtentsRequest, SetFontPathRequest, Str,
 };
+
+fn charinfo_from(ci: &FontCharInfo) -> Charinfo {
+    Charinfo {
+        left_side_bearing: ci.left_side_bearing,
+        right_side_bearing: ci.right_side_bearing,
+        character_width: ci.character_width,
+        ascent: ci.ascent,
+        descent: ci.descent,
+        attributes: ci.attributes,
+    }
+}
 
 // ---------------------------------------------------------------------------
 // Opcode 45: OpenFont
@@ -72,47 +86,38 @@ pub(crate) fn handle_query_font(state: &mut ClientState, req: &QueryFontRequest)
     let font = match font {
         Some(f) => f,
         None => {
-            // Font ID or GC is valid but no font data available -- return
+            // Font ID or GC is valid but no font data available — return
             // reasonable defaults that approximate a 6x13 fixed font so apps
             // can still lay out text correctly.
-            let n_char_infos: u32 = 95; // 32..126
-            let char_infos_bytes = n_char_infos as usize * 12;
-            let extra = 28 + char_infos_bytes; // 60 - 32 = 28 header extra + char infos
-            let mut reply = ReplyBuf::with_extra(seq, extra, state.msb_first)
-                // min_bounds: lsb=0, rsb=6, width=6, ascent=10, descent=3
-                .set_i16(8, 0) // min lsb
-                .set_i16(10, 6) // min rsb
-                .set_i16(12, 6) // min width
-                .set_i16(14, 10) // min ascent
-                .set_i16(16, 3) // min descent
-                // max_bounds (same for monospaced)
-                .set_i16(24, 0)
-                .set_i16(26, 6)
-                .set_i16(28, 6)
-                .set_i16(30, 10)
-                .set_i16(32, 3)
-                .set_u16(40, 32u16) // min_char_or_byte2
-                .set_u16(42, 126u16) // max_char_or_byte2
-                .set_u16(44, 32u16) // default_char
-                .set_u16(46, 0u16) // n_properties
-                .set_u8(48, 0) // draw_direction = LeftToRight
-                .set_u8(51, 1) // all_chars_exist
-                .set_i16(52, 10i16) // font_ascent
-                .set_i16(54, 3i16) // font_descent
-                .set_u32(56, n_char_infos);
-            // Fill per-character info (all same for monospaced fallback)
-            let mut off = 60;
-            for _ in 0..n_char_infos {
-                reply = reply
-                    .set_i16(off, 0) // lsb
-                    .set_i16(off + 2, 6) // rsb
-                    .set_i16(off + 4, 6) // width
-                    .set_i16(off + 6, 10) // ascent
-                    .set_i16(off + 8, 3) // descent
-                    .set_u16(off + 10, 0); // attributes
-                off += 12;
-            }
-            return reply.build();
+            let bounds = Charinfo {
+                left_side_bearing: 0,
+                right_side_bearing: 6,
+                character_width: 6,
+                ascent: 10,
+                descent: 3,
+                attributes: 0,
+            };
+            let char_infos = (32..=126u16).map(|_| bounds).collect();
+            return serialize_var_reply(
+                &QueryFontReply {
+                    sequence: seq,
+                    length: 0,
+                    min_bounds: bounds,
+                    max_bounds: bounds,
+                    min_char_or_byte2: 32,
+                    max_char_or_byte2: 126,
+                    default_char: 32,
+                    draw_direction: FontDraw::LEFT_TO_RIGHT,
+                    min_byte1: 0,
+                    max_byte1: 0,
+                    all_chars_exist: true,
+                    font_ascent: 10,
+                    font_descent: 3,
+                    properties: Vec::new(),
+                    char_infos,
+                },
+                state.byte_order(),
+            );
         }
     };
 
@@ -143,7 +148,6 @@ pub(crate) fn handle_query_font(state: &mut ClientState, req: &QueryFontRequest)
         (10, 1, char_width * 10)
     };
 
-    // Intern the property atoms. Per X11 spec, these match standard BDF/PCF properties.
     let prop_defs: Vec<(&str, i32)> = vec![
         ("PIXEL_SIZE", pixel_size),
         ("POINT_SIZE", point_size),
@@ -164,77 +168,42 @@ pub(crate) fn handle_query_font(state: &mut ClientState, req: &QueryFontRequest)
         ("UNDERLINE_THICKNESS", 1),
     ];
 
-    let props: Vec<(u32, i32)> = {
+    let properties: Vec<Fontprop> = {
         let mut atoms = state.atoms.lock().unwrap();
         prop_defs
             .iter()
-            .map(|(name, val)| (atoms.intern(name, false), *val))
+            .map(|(name, val)| Fontprop {
+                name: atoms.intern(name, false),
+                value: *val as u32,
+            })
             .collect()
     };
 
-    let n_properties = props.len() as u16;
-    let props_bytes = props.len() * 8; // each FONTPROP is 8 bytes
+    let n_char_infos = (font.max_char - font.min_char + 1) as usize;
+    let all_chars = font.char_infos.len() == n_char_infos;
 
-    let n_char_infos = (font.max_char - font.min_char + 1) as u32;
-    let char_infos_bytes = n_char_infos as usize * 12;
+    let char_infos: Vec<Charinfo> = font.char_infos.iter().map(charinfo_from).collect();
 
-    let extra = 28 + props_bytes + char_infos_bytes; // 60 - 32 = 28 header extra
-    let all_chars = if font.char_infos.len() == n_char_infos as usize {
-        1u8
-    } else {
-        0u8
-    };
-    let mut reply = ReplyBuf::with_extra(seq, extra, state.msb_first)
-        // min_bounds at offset 8 (12 bytes)
-        .set_i16(8, font.min_bounds.left_side_bearing)
-        .set_i16(10, font.min_bounds.right_side_bearing)
-        .set_i16(12, font.min_bounds.character_width)
-        .set_i16(14, font.min_bounds.ascent)
-        .set_i16(16, font.min_bounds.descent)
-        .set_u16(18, font.min_bounds.attributes)
-        // pad at 20..24
-        // max_bounds at offset 24 (12 bytes)
-        .set_i16(24, font.max_bounds.left_side_bearing)
-        .set_i16(26, font.max_bounds.right_side_bearing)
-        .set_i16(28, font.max_bounds.character_width)
-        .set_i16(30, font.max_bounds.ascent)
-        .set_i16(32, font.max_bounds.descent)
-        .set_u16(34, font.max_bounds.attributes)
-        // pad at 36..40
-        .set_u16(40, font.min_char)
-        .set_u16(42, font.max_char)
-        .set_u16(44, font.default_char)
-        .set_u16(46, n_properties)
-        .set_u8(48, 0) // draw_direction = LeftToRight
-        .set_u8(49, 0) // min_byte1
-        .set_u8(50, 0) // max_byte1
-        .set_u8(51, all_chars) // all_chars_exist
-        .set_i16(52, font.font_ascent)
-        .set_i16(54, font.font_descent)
-        .set_u32(56, n_char_infos);
-
-    // Font properties at offset 60 (each FONTPROP = 4-byte atom + 4-byte value)
-    let mut off = 60;
-    for (atom, value) in &props {
-        reply = reply.set_u32(off, *atom).set_u32(off + 4, *value as u32);
-        off += 8;
-    }
-
-    // Char infos follow properties
-    let buf = reply.buf_mut();
-    for ci in &font.char_infos {
-        if off + 12 <= buf.len() {
-            state.write_i16(buf, off, ci.left_side_bearing);
-            state.write_i16(buf, off + 2, ci.right_side_bearing);
-            state.write_i16(buf, off + 4, ci.character_width);
-            state.write_i16(buf, off + 6, ci.ascent);
-            state.write_i16(buf, off + 8, ci.descent);
-            state.write_u16(buf, off + 10, ci.attributes);
-            off += 12;
-        }
-    }
-
-    reply.build()
+    serialize_var_reply(
+        &QueryFontReply {
+            sequence: seq,
+            length: 0,
+            min_bounds: charinfo_from(&font.min_bounds),
+            max_bounds: charinfo_from(&font.max_bounds),
+            min_char_or_byte2: font.min_char,
+            max_char_or_byte2: font.max_char,
+            default_char: font.default_char,
+            draw_direction: FontDraw::LEFT_TO_RIGHT,
+            min_byte1: 0,
+            max_byte1: 0,
+            all_chars_exist: all_chars,
+            font_ascent: font.font_ascent,
+            font_descent: font.font_descent,
+            properties,
+            char_infos,
+        },
+        state.byte_order(),
+    )
 }
 
 // ---------------------------------------------------------------------------
@@ -279,7 +248,6 @@ pub(crate) fn handle_query_text_extents(
             pos += char_w;
             width += char_w;
         }
-        // If width extends past rightmost rbearing, use width
         if pos > right {
             right = pos;
         }
@@ -294,15 +262,21 @@ pub(crate) fn handle_query_text_extents(
         (12i16, 4i16, 0i16, 0i16, 0i16)
     };
 
-    ReplyBuf::fixed(seq, state.msb_first)
-        .set_i16(8, ascent) // font_ascent
-        .set_i16(10, descent) // font_descent
-        .set_i16(12, ascent) // overall_ascent
-        .set_i16(14, descent) // overall_descent
-        .set_u32(16, overall_width as i32 as u32) // overall_width
-        .set_u32(20, overall_left as i32 as u32) // overall_left
-        .set_u32(24, overall_right as i32 as u32) // overall_right
-        .build()
+    serialize_reply(
+        &QueryTextExtentsReply {
+            draw_direction: FontDraw::LEFT_TO_RIGHT,
+            sequence: seq,
+            length: 0,
+            font_ascent: ascent,
+            font_descent: descent,
+            overall_ascent: ascent,
+            overall_descent: descent,
+            overall_width: overall_width as i32,
+            overall_left: overall_left as i32,
+            overall_right: overall_right as i32,
+        },
+        state.byte_order(),
+    )
 }
 
 // ---------------------------------------------------------------------------
@@ -318,23 +292,23 @@ pub(crate) fn handle_list_fonts(state: &mut ClientState, req: &ListFontsRequest)
         String::from_utf8_lossy(&req.pattern).to_string()
     };
 
-    let names = state.font_manager.list_fonts(&pattern, max_names);
+    let names: Vec<Str> = state
+        .font_manager
+        .list_fonts(&pattern, max_names)
+        .into_iter()
+        .map(|n| Str {
+            name: n.into_bytes(),
+        })
+        .collect();
 
-    // Build the STR list: each entry is 1-byte length + name bytes.
-    let mut str_data: Vec<u8> = Vec::new();
-    for name in &names {
-        let nb = name.as_bytes();
-        str_data.push(nb.len() as u8);
-        str_data.extend_from_slice(nb);
-    }
-    // Pad to 4-byte boundary.
-    let padded = align_to_4(str_data.len());
-    str_data.resize(padded, 0);
-
-    ReplyBuf::with_extra(seq, padded, state.msb_first)
-        .set_u16(8, names.len() as u16)
-        .set_bytes(32, &str_data)
-        .build()
+    serialize_var_reply(
+        &ListFontsReply {
+            sequence: seq,
+            length: 0,
+            names,
+        },
+        state.byte_order(),
+    )
 }
 
 // ---------------------------------------------------------------------------
@@ -354,20 +328,14 @@ pub(crate) fn handle_list_fonts_with_info(
     };
 
     let font_names = state.font_manager.list_fonts(pattern, max_names);
-
-    // Build concatenated replies: one per font + terminator
+    let total = font_names.len() as u32;
     let mut all_replies = Vec::new();
+    let bo = state.byte_order();
 
-    let remaining = font_names.len() as u32;
     for (i, name) in font_names.iter().enumerate() {
-        let name_bytes = name.as_bytes();
-        let name_len = name_bytes.len().min(255);
-
-        // Try to get font info for this name
         let font = state.font_manager.get_font_by_name(name);
 
-        // Build font properties (same as QueryFont) when font data is available
-        let props: Vec<(u32, i32)> = if let Some(f) = &font {
+        let properties: Vec<Fontprop> = if let Some(f) = &font {
             let pixel_size = (f.font_ascent + f.font_descent) as i32;
             let point_size = pixel_size * 10;
             let char_width = f.max_bounds.character_width as i32;
@@ -383,70 +351,81 @@ pub(crate) fn handle_list_fonts_with_info(
             let mut atoms = state.atoms.lock().unwrap();
             prop_defs
                 .iter()
-                .map(|(pname, val)| (atoms.intern(pname, false), *val))
+                .map(|(pname, val)| Fontprop {
+                    name: atoms.intern(pname, false),
+                    value: *val as u32,
+                })
                 .collect()
         } else {
             Vec::new()
         };
-        let n_properties = props.len() as u16;
-        let props_bytes = props.len() * 8; // each FONTPROP is 8 bytes
 
-        let name_pad = (4 - (name_len % 4)) % 4;
-        let extra = 28 + props_bytes + name_len + name_pad; // 28 for header bytes at 32..60
+        let name_bytes: Vec<u8> = name.as_bytes().iter().take(255).copied().collect();
+        let replies_hint = (total as usize - i - 1) as u32;
 
-        let mut reply =
-            ReplyBuf::with_extra(seq, extra, state.msb_first).set_data_byte(name_len as u8);
+        let reply = if let Some(f) = &font {
+            ListFontsWithInfoReply {
+                sequence: seq,
+                length: 0,
+                min_bounds: charinfo_from(&f.min_bounds),
+                max_bounds: charinfo_from(&f.max_bounds),
+                min_char_or_byte2: f.min_char,
+                max_char_or_byte2: f.max_char,
+                default_char: f.default_char,
+                draw_direction: FontDraw::LEFT_TO_RIGHT,
+                min_byte1: 0,
+                max_byte1: 0,
+                all_chars_exist: false,
+                font_ascent: f.font_ascent,
+                font_descent: f.font_descent,
+                replies_hint,
+                properties,
+                name: name_bytes,
+            }
+        } else {
+            ListFontsWithInfoReply {
+                sequence: seq,
+                length: 0,
+                min_bounds: Charinfo::default(),
+                max_bounds: Charinfo::default(),
+                min_char_or_byte2: 0,
+                max_char_or_byte2: 0,
+                default_char: 0,
+                draw_direction: FontDraw::LEFT_TO_RIGHT,
+                min_byte1: 0,
+                max_byte1: 0,
+                all_chars_exist: false,
+                font_ascent: 0,
+                font_descent: 0,
+                replies_hint,
+                properties,
+                name: name_bytes,
+            }
+        };
 
-        if let Some(f) = &font {
-            // min_bounds at offset 8
-            reply = reply
-                .set_i16(8, f.min_bounds.left_side_bearing)
-                .set_i16(10, f.min_bounds.right_side_bearing)
-                .set_i16(12, f.min_bounds.character_width)
-                .set_i16(14, f.min_bounds.ascent)
-                .set_i16(16, f.min_bounds.descent)
-                // pad at 20..24
-                // max_bounds at offset 24
-                .set_i16(24, f.max_bounds.left_side_bearing)
-                .set_i16(26, f.max_bounds.right_side_bearing)
-                .set_i16(28, f.max_bounds.character_width)
-                .set_i16(30, f.max_bounds.ascent)
-                // Continue after header
-                .set_i16(32, f.max_bounds.descent)
-                // pad at 36..40
-                .set_u16(40, f.min_char)
-                .set_u16(42, f.max_char)
-                .set_u16(44, f.default_char)
-                .set_u16(46, n_properties)
-                .set_u8(48, 0) // draw_direction
-                .set_i16(52, f.font_ascent)
-                .set_i16(54, f.font_descent);
-        }
-
-        let replies_remaining = (remaining as usize - i - 1) as u32;
-        reply = reply.set_u32(56, replies_remaining);
-
-        // Font properties at offset 60 (each FONTPROP = 4-byte atom + 4-byte value)
-        let mut off = 60;
-        for (atom, value) in &props {
-            reply = reply.set_u32(off, *atom).set_u32(off + 4, *value as u32);
-            off += 8;
-        }
-
-        // Name after properties
-        let name_off = 60 + props_bytes;
-        if name_off + name_len <= reply.buf_mut().len() {
-            reply.buf_mut()[name_off..name_off + name_len].copy_from_slice(&name_bytes[..name_len]);
-        }
-
-        all_replies.extend_from_slice(&reply.build());
+        all_replies.extend_from_slice(&serialize_var_reply(&reply, bo));
     }
 
-    // Terminator reply: name_length=0
-    let term = ReplyBuf::with_extra(seq, 28, state.msb_first)
-        .set_data_byte(0) // name_length = 0 → last reply
-        .build();
-    all_replies.extend_from_slice(&term);
+    // Terminator reply: name is empty → name_len = 0 signals end-of-list.
+    let term = ListFontsWithInfoReply {
+        sequence: seq,
+        length: 0,
+        min_bounds: Charinfo::default(),
+        max_bounds: Charinfo::default(),
+        min_char_or_byte2: 0,
+        max_char_or_byte2: 0,
+        default_char: 0,
+        draw_direction: FontDraw::LEFT_TO_RIGHT,
+        min_byte1: 0,
+        max_byte1: 0,
+        all_chars_exist: false,
+        font_ascent: 0,
+        font_descent: 0,
+        replies_hint: 0,
+        properties: Vec::new(),
+        name: Vec::new(),
+    };
+    all_replies.extend_from_slice(&serialize_var_reply(&term, bo));
 
     all_replies
 }
@@ -457,22 +436,23 @@ pub(crate) fn handle_list_fonts_with_info(
 
 pub(crate) fn handle_get_font_path(state: &ClientState, _req: &GetFontPathRequest) -> Vec<u8> {
     let seq = state.sequence;
-    // Build STR8 list of font paths
-    let mut path_data = Vec::new();
-    for path in &state.font_path {
-        let bytes = path.as_bytes();
-        if bytes.len() <= 255 {
-            path_data.push(bytes.len() as u8);
-            path_data.extend_from_slice(bytes);
-        }
-    }
-    let padded_len = align_to_4(path_data.len());
-    path_data.resize(padded_len, 0);
+    let path: Vec<Str> = state
+        .font_path
+        .iter()
+        .filter(|p| p.len() <= 255)
+        .map(|p| Str {
+            name: p.as_bytes().to_vec(),
+        })
+        .collect();
 
-    ReplyBuf::with_extra(seq, padded_len, state.msb_first)
-        .set_u16(8, state.font_path.len() as u16)
-        .set_bytes(32, &path_data)
-        .build()
+    serialize_var_reply(
+        &GetFontPathReply {
+            sequence: seq,
+            length: 0,
+            path,
+        },
+        state.byte_order(),
+    )
 }
 
 pub(crate) fn handle_set_font_path(state: &mut ClientState, req: &SetFontPathRequest) -> Vec<u8> {
