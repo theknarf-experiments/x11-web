@@ -612,6 +612,10 @@ test("xterm accepts keyboard input", async ({ page, frontendUrl }) => {
 	});
 });
 
+// After page.reload(), the frontend doesn't re-discover existing windows
+// on its WebRTC reconnection — window-frame stays empty. Likely needs the
+// frontend to seed itself from the server's _NET_CLIENT_LIST on connect.
+// Skipping until the reconnect-rehydration story is fleshed out.
 test.skip("window content survives page refresh", async ({ page, frontendUrl }) => {
 	await page.goto(frontendUrl);
 	await waitForDock(page);
@@ -796,7 +800,7 @@ test("vim workflow: insert, save, quit, cat", async ({ page, frontendUrl }) => {
 	});
 });
 
-test.skip("firefox renders on the canvas", async ({ page, frontendUrl }) => {
+test("firefox renders on the canvas", async ({ page, frontendUrl }) => {
 	await page.goto(frontendUrl);
 	await waitForDock(page);
 
@@ -4874,7 +4878,7 @@ test.skip("firefox: spawn, render content, and navigate", async ({
 // ---------------------------------------------------------------
 // GIMP: spawn, wait for multi-window, verify tool palette
 // ---------------------------------------------------------------
-test.skip("gimp: multi-window rendering and tool palette", async ({
+test("gimp: multi-window rendering and tool palette", async ({
 	page,
 	frontendUrl,
 }) => {
@@ -5146,6 +5150,11 @@ test.skip("qt6: minimal widget renders and responds to input", async ({
 // Multi-window coordination: spawn multiple apps, verify
 // independent rendering and focus switching
 // ---------------------------------------------------------------
+// Exercises the same canvas-pixel-hash-after-input chain that flakes in
+// the xeyes-pupils / vim-:q / libreoffice tests above. The first half
+// (three independent canvases, each with rendered content) works; the
+// half that types into xterm and expects the hash to differ is the
+// flaky part. Stays skipped until input → app → repaint is reliable.
 test.skip("multi-window: independent rendering and focus switching", async ({
 	page,
 	frontendUrl,
@@ -5226,7 +5235,7 @@ test.skip("multi-window: independent rendering and focus switching", async ({
 // ---------------------------------------------------------------
 // Clipboard: copy text with xclip, paste in xterm, verify
 // ---------------------------------------------------------------
-test.skip("clipboard: xclip copy and xterm paste round-trip", async ({
+test("clipboard: xclip copy and xterm paste round-trip", async ({
 	page,
 	sidecarContainer,
 	frontendUrl,
