@@ -145,6 +145,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     # headers but not the compiler driver.
     g++ \
     pkg-config \
+    # Full JDK so apps/java.spec.ts (Java Swing) can compile + run the
+    # inline SwingTest.java. default-jdk-headless lacks the AWT/Swing
+    # graphical classes Swing needs.
+    default-jdk \
     # CJK fonts for XIM CJK input testing
     fonts-noto-cjk \
     # OpenSSL runtime — used by X11 apps (Firefox, etc.) for TLS.
