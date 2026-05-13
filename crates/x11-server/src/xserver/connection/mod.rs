@@ -149,6 +149,7 @@ pub(crate) async fn handle_client(
     shared_pixmap_fbs: SharedPixmapFbs,
     shared_gcs: SharedGcs,
     client_registry: SharedClientRegistry,
+    shared_pointer: super::types::SharedPointer,
     event_broadcaster: EventBroadcaster,
     server_grab: ServerGrabLock,
     shared_record_contexts: SharedRecordContexts,
@@ -352,8 +353,11 @@ pub(crate) async fn handle_client(
         atoms: shared_atoms,
         update_tx,
         root_window: ROOT_WINDOW,
-        pointer_x: 0,
-        pointer_y: 0,
+        // Read the current global pointer position so a new client
+        // connecting mid-session sees where the pointer actually is
+        // (e.g. after an earlier client's XTEST motion), not (0, 0).
+        pointer_x: shared_pointer.lock().map(|p| p.0).unwrap_or(0),
+        pointer_y: shared_pointer.lock().map(|p| p.1).unwrap_or(0),
         focus_window: ROOT_WINDOW,
         focus_revert_to: 1, // Parent
         font_manager: FontManager::new(),
@@ -486,6 +490,7 @@ pub(crate) async fn handle_client(
         shared_pixmap_fbs,
         shared_gcs,
         client_registry: client_registry.clone(),
+        shared_pointer: shared_pointer.clone(),
         event_broadcaster,
         server_grab,
         randr_crtcs: Vec::new(),
@@ -1335,8 +1340,7 @@ pub(crate) async fn handle_client(
                                             };
                                             state.xi.valuators.x = fx as i32;
                                             state.xi.valuators.y = fy as i32;
-                                            state.pointer_x = fx;
-                                            state.pointer_y = fy;
+                                            state.set_pointer(fx, fy);
                                             // Record in motion history
                                             let ts = state.timestamp();
                                             state.record_motion_history(ts, fx, fy);
@@ -1415,8 +1419,7 @@ pub(crate) async fn handle_client(
                                                 y: new_y,
                                                 state: *mask,
                                             };
-                                            state.pointer_x = new_x;
-                                            state.pointer_y = new_y;
+                                            state.set_pointer(new_x, new_y);
                                             state.xi.valuators.x = new_x as i32;
                                             state.xi.valuators.y = new_y as i32;
                                             let ts = state.timestamp();
@@ -1755,8 +1758,7 @@ pub(crate) async fn handle_client(
                                 x11_web_protocol::InputEvent::MotionNotify { x, y, state: mask } => {
                                     let (cx, cy) = grab::clamp_to_confine(&state, *x, *y);
                                     if cx != *x || cy != *y {
-                                        state.pointer_x = cx;
-                                        state.pointer_y = cy;
+                                        state.set_pointer(cx, cy);
                                         state.xi.valuators.x = cx as i32;
                                         state.xi.valuators.y = cy as i32;
                                     }
@@ -1774,8 +1776,7 @@ pub(crate) async fn handle_client(
                                             *x, *y,
                                         );
                                         if bx != *x || by != *y {
-                                            state.pointer_x = bx;
-                                            state.pointer_y = by;
+                                            state.set_pointer(bx, by);
                                             state.xi.valuators.x = bx as i32;
                                             state.xi.valuators.y = by as i32;
                                         }

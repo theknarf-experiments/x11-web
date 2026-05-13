@@ -15,6 +15,30 @@ impl ClientState {
         crate::xserver::reply::byte_order_of(self.msb_first)
     }
 
+    /// Write the pointer position to local and shared state in one shot.
+    /// Use this everywhere the pointer moves (XTEST motion, WarpPointer,
+    /// barrier clamps, frontend pointer input) so cross-connection clients
+    /// querying the position see the up-to-date value.
+    #[inline]
+    pub(crate) fn set_pointer(&mut self, x: i16, y: i16) {
+        self.pointer_x = x;
+        self.pointer_y = y;
+        if let Ok(mut p) = self.shared_pointer.lock() {
+            *p = (x, y);
+        }
+    }
+
+    /// Pull the latest pointer position from shared state into local.
+    /// Call before answering pointer reads (QueryPointer, GetMotionEvents)
+    /// so a FakeInput from another client is visible.
+    #[inline]
+    pub(crate) fn refresh_pointer_from_shared(&mut self) {
+        if let Ok(p) = self.shared_pointer.lock() {
+            self.pointer_x = p.0;
+            self.pointer_y = p.1;
+        }
+    }
+
     // -----------------------------------------------------------------------
     // Resource limit checks
     // -----------------------------------------------------------------------

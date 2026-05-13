@@ -246,6 +246,14 @@ impl Drop for WmCleanupGuard {
 /// Each entry is the resource_id_base assigned to a connected client.
 pub(crate) type SharedClientRegistry = Arc<Mutex<Vec<u32>>>;
 
+/// Globally-shared pointer position `(x, y)`. The pointer is logically
+/// a server-wide resource: an XTEST FakeInput from client A must be
+/// observable by client B's next `QueryPointer`. Each `ClientState`
+/// keeps its own `pointer_x` / `pointer_y` for hot-path use, but writes
+/// flow through `set_pointer()` to mirror into here, and reads through
+/// `refresh_pointer_from_shared()` pull the latest before answering.
+pub(crate) type SharedPointer = Arc<Mutex<(i16, i16)>>;
+
 /// RAII guard that removes this client's resource base from the shared registry on disconnect.
 pub(crate) struct ClientRegistryGuard {
     pub(crate) registry: SharedClientRegistry,

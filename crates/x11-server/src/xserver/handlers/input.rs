@@ -51,6 +51,9 @@ pub(crate) fn handle_bell(state: &mut ClientState, req: &BellRequest) -> Vec<u8>
 
 pub(crate) fn handle_query_pointer(state: &mut ClientState, req: &QueryPointerRequest) -> Vec<u8> {
     let seq = state.sequence;
+    // Pointer position is logically server-wide; an XTEST FakeInput from
+    // another client must be observable here.
+    state.refresh_pointer_from_shared();
     state.motion_hint_suppressed = false;
     let window = req.window;
 
@@ -297,10 +300,12 @@ pub(crate) fn handle_warp_pointer(state: &mut ClientState, req: &WarpPointerRequ
     let old_px = state.pointer_x;
     let old_py = state.pointer_y;
 
-    if dst_window == 0 {
+    let (mut new_px, mut new_py) = if dst_window == 0 {
         // Relative warp: offset from current position
-        state.pointer_x = state.pointer_x.saturating_add(dst_x);
-        state.pointer_y = state.pointer_y.saturating_add(dst_y);
+        (
+            state.pointer_x.saturating_add(dst_x),
+            state.pointer_y.saturating_add(dst_y),
+        )
     } else {
         // Absolute warp: position relative to dst_window, converted to root coords
         let mut abs_x = dst_x as i32;
@@ -318,22 +323,21 @@ pub(crate) fn handle_warp_pointer(state: &mut ClientState, req: &WarpPointerRequ
                 break;
             }
         }
-        state.pointer_x = abs_x.clamp(0, state.screen_width as i32 - 1) as i16;
-        state.pointer_y = abs_y.clamp(0, state.screen_height as i32 - 1) as i16;
-    }
+        (
+            abs_x.clamp(0, state.screen_width as i32 - 1) as i16,
+            abs_y.clamp(0, state.screen_height as i32 - 1) as i16,
+        )
+    };
 
     // Enforce XFIXES pointer barriers
     if !state.barriers.is_empty() {
         let (bx, by) = super::super::input::enforce_barriers(
-            &state.barriers,
-            old_px,
-            old_py,
-            state.pointer_x,
-            state.pointer_y,
+            &state.barriers, old_px, old_py, new_px, new_py,
         );
-        state.pointer_x = bx;
-        state.pointer_y = by;
+        new_px = bx;
+        new_py = by;
     }
+    state.set_pointer(new_px, new_py);
 
     // Per X11 spec: WarpPointer must generate EnterNotify/LeaveNotify crossing
     // events if the pointer moves between different windows.

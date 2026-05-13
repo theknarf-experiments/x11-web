@@ -3116,7 +3116,7 @@ test("glxinfo queries GLX extension without crashing", async ({
 	expect([139]).not.toContain(result.exitCode);
 });
 
-test.skip("xdotool windowfocus and key sends events to a window", async ({
+test("xdotool windowfocus and key sends events to a window", async ({
 	page,
 	sidecarContainer,
 	frontendUrl,
@@ -3142,7 +3142,7 @@ test.skip("xdotool windowfocus and key sends events to a window", async ({
 	expect(result.exitCode).toBe(0);
 });
 
-test.skip("xdotool mousemove + getmouselocation tracks position", async ({
+test("xdotool mousemove + getmouselocation tracks position", async ({
 	sidecarContainer,
 }) => {
 	// Move mouse to a known position, then verify

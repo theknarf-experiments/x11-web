@@ -312,6 +312,10 @@ pub(crate) struct ClientState {
     pub(crate) shared_gcs: super::types::SharedGcs,
     /// Shared registry of connected client resource bases (for X-Resource).
     pub(crate) client_registry: super::types::SharedClientRegistry,
+    /// Globally-shared pointer `(x, y)` so a FakeInput from client A is
+    /// visible to client B's next QueryPointer. Sync helpers live on
+    /// `ClientState` (`set_pointer`, `refresh_pointer_from_shared`).
+    pub(crate) shared_pointer: super::types::SharedPointer,
     /// Cross-connection event broadcaster for per-window event subscriptions.
     pub(crate) event_broadcaster: super::types::EventBroadcaster,
     /// Shared server grab lock (GrabServer/UngrabServer across all clients).

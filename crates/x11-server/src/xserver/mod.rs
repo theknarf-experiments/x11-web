@@ -183,6 +183,7 @@ impl X11Server {
         let shared_pixmap_fbs: types::SharedPixmapFbs = Arc::new(Mutex::new(HashMap::new()));
         let shared_gcs: types::SharedGcs = Arc::new(Mutex::new(HashMap::new()));
         let client_registry: types::SharedClientRegistry = Arc::new(Mutex::new(Vec::new()));
+        let shared_pointer: types::SharedPointer = Arc::new(Mutex::new((0, 0)));
         let event_broadcaster = types::EventBroadcaster::new();
         let server_grab: types::ServerGrabLock =
             Arc::new((Mutex::new(None), tokio::sync::Notify::new()));
@@ -998,6 +999,7 @@ vi_VN,vi_VN.UTF-8"
                 let spf = shared_pixmap_fbs.clone();
                 let sg = shared_gcs.clone();
                 let cr = client_registry.clone();
+                let sptr = shared_pointer.clone();
                 let eb = event_broadcaster.clone();
                 let sgl = server_grab.clone();
                 let src = shared_record_contexts.clone();
@@ -1011,7 +1013,7 @@ vi_VN,vi_VN.UTF-8"
                 tokio::spawn(async move {
                     if let Err(e) = connection::handle_client(
                         stream, client_id, update_tx, message_tx, message_rx, conn_index, peer_pid,
-                        sw, skm, wm, sa, wr, mt, er, ss, cn, sp, spf, sg, cr, eb, sgl, src, pc, ac,
+                        sw, skm, wm, sa, wr, mt, er, ss, cn, sp, spf, sg, cr, sptr, eb, sgl, src, pc, ac,
                         ssr, sacl, sst, exr,
                     )
                     .await

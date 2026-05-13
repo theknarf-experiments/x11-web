@@ -906,8 +906,7 @@ pub(crate) fn build_x11_input_event(
         InputEvent::MotionNotify { x, y, .. }
         | InputEvent::ButtonPress { x, y, .. }
         | InputEvent::ButtonRelease { x, y, .. } => {
-            state.pointer_x = *x;
-            state.pointer_y = *y;
+            state.set_pointer(*x, *y);
             // Record motion history for GetMotionEvents
             if matches!(input, InputEvent::MotionNotify { .. }) {
                 let ts = state.timestamp();

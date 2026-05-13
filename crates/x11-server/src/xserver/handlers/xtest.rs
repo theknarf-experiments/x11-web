@@ -209,24 +209,22 @@ pub(crate) fn handle_xtest_request(state: &mut ClientState, data: &[u8], seq: u1
                     MOTION_NOTIFY_EVENT => {
                         let old_px = state.pointer_x;
                         let old_py = state.pointer_y;
-                        if detail == 0 {
-                            state.pointer_x = state.pointer_x.saturating_add(root_x);
-                            state.pointer_y = state.pointer_y.saturating_add(root_y);
+                        let (mut nx, mut ny) = if detail == 0 {
+                            (
+                                state.pointer_x.saturating_add(root_x),
+                                state.pointer_y.saturating_add(root_y),
+                            )
                         } else {
-                            state.pointer_x = root_x;
-                            state.pointer_y = root_y;
-                        }
+                            (root_x, root_y)
+                        };
                         if !state.barriers.is_empty() {
                             let (bx, by) = super::super::input::enforce_barriers(
-                                &state.barriers,
-                                old_px,
-                                old_py,
-                                state.pointer_x,
-                                state.pointer_y,
+                                &state.barriers, old_px, old_py, nx, ny,
                             );
-                            state.pointer_x = bx;
-                            state.pointer_y = by;
+                            nx = bx;
+                            ny = by;
                         }
+                        state.set_pointer(nx, ny);
                         // Motion goes to the window under the new pointer
                         // position; consult the shared registry so we
                         // reach windows owned by other clients.
