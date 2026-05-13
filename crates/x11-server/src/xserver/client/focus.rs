@@ -432,6 +432,13 @@ impl ClientState {
                 },
             );
         }
+        // Other clients (xprop, xdotool, EWMH-aware tools) read these properties
+        // from the root window across connections. Without dirtying, the mutation
+        // stays in our local map and the shared store never sees the update, so
+        // xdotool's `search --name` walks an empty _NET_CLIENT_LIST and finds no
+        // top-levels.
+        let root = self.root_window;
+        self.mark_window_shared_dirty(root);
     }
 
     // -----------------------------------------------------------------------

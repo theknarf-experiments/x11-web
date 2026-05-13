@@ -50,20 +50,18 @@ test.describe.serial("Resource limits and robustness", () => {
 });
 
 test.describe("Multi-app interaction", () => {
-	// Re-attempted with the shared-keymap + XTEST broadcast plumbing in
-	// place, the xterm child still receives no keys: `result.output` comes
-	// back empty (the `xdotool search --name xterm` never finds a WID, so
-	// the `echo xdotool-type-ok` branch never runs). Suggests xterm isn't
-	// surfacing as a top-level the way xdotool expects — its window-name
-	// property or _NET_CLIENT_LIST registration is the next thing to chase.
-	test.skip("xdotool sends keystrokes to a specific window", async ({ sidecarContainer }) => {
+	test("xdotool sends keystrokes to a specific window", async ({ sidecarContainer }) => {
 		test.setTimeout(30_000);
 		const result = await sidecarContainer.exec([
 			"bash", "-c", [
 				"export DISPLAY=:99",
+				"rm -f /tmp/xdotool-test.txt",
+				// `xterm -e CMD` renames WM_NAME to the command, but WM_CLASS
+				// stays "xterm"/"XTerm" — search by class to find the window
+				// regardless of title.
 				"xterm -e 'cat > /tmp/xdotool-test.txt' &",
 				"sleep 2",
-				"WID=$(xdotool search --name xterm | head -1)",
+				"WID=$(xdotool search --class xterm | head -1)",
 				"if [ -n \"$WID\" ]; then",
 				"  xdotool windowfocus $WID",
 				"  sleep 0.5",
