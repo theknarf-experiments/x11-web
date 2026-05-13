@@ -2384,7 +2384,7 @@ test("rendercheck gradient tests pass", async ({ sidecarContainer }) => {
 	}
 });
 
-test.skip("xterm renders with proper fonts", async ({ page, frontendUrl }) => {
+test("xterm renders with proper fonts", async ({ page, frontendUrl }) => {
 	await page.goto(frontendUrl);
 	await waitForDock(page);
 
@@ -5339,6 +5339,13 @@ test.skip("xdotool: inject keystrokes into xterm and verify response", async ({
 // ---------------------------------------------------------------
 // xdotool: inject mouse click on xeyes, verify pupil movement
 // ---------------------------------------------------------------
+// xeyes doesn't visibly track xdotool's pointer motion — the canvas pixel
+// hash stays the same before and after the xdotool mousemove sequence.
+// This is the same "input-then-redraw" gap as the vim :q test: the motion
+// event reaches the server (xdotool exit 0, getmouselocation returns the
+// expected coords) but xeyes either doesn't get the motion or doesn't
+// redraw on the frontend. Skipping until the motion-to-app-to-canvas
+// loop is verified end-to-end.
 test.skip("xdotool: inject mouse events and verify xeyes responds", async ({
 	page,
 	sidecarContainer,
