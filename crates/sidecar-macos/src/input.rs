@@ -18,14 +18,8 @@ use tracing::warn;
 use x11_web_protocol::InputEvent;
 
 use crate::ax;
-use crate::focus_guard;
 use crate::router::WindowRoute;
 use crate::skylight::probe;
-
-/// Delay between an AXPress activation and the focus-guard release. Matches
-/// the timing cua's focus preventer uses; long enough for the activation
-/// hop to fire before we restore the original front window.
-const AX_PRESS_FOCUS_GUARD_DELAY: std::time::Duration = std::time::Duration::from_millis(50);
 
 /// Inject a single browser `InputEvent` against the window described
 /// by `route`. Logs and skips silently for event kinds we don't
@@ -297,22 +291,45 @@ fn x11_state_to_cg_flags(state: u16) -> CGEventFlags {
     flags
 }
 
-/// Try to resolve an AX element at the click point and dispatch
-/// `AXPress` against it. Returns `Ok(true)` on a successful AX
-/// click, `Ok(false)` when no element resolves (caller should fall
-/// back to pixel), `Err` on AX failures we want surfaced.
+/// Resolve an AX element at the click point and dispatch `AXPress`
+/// against it. Returns `Ok(true)` on success, `Ok(false)` when
+/// nothing resolves or the element doesn't support `AXPress`,
+/// `Err` for other AX failures we want surfaced.
+///
+/// This is the **exact** flow Codex's computer-use Service uses
+/// — verified against the binary and reproduced empirically by
+/// `tools/codex-poc-click.swift`. The action is dispatched to the
+/// target's accessibility delegate in-process; it never enters the
+/// global event stream, so the target app does not activate, does
+/// not raise its windows, and does not steal focus or cursor.
+///
+/// Three optional Codex-style flourishes:
+///
+///   1. We hit-test on the **target app's** AX root (not
+///      system-wide), so the right element resolves regardless of
+///      visual z-order — the user's frontend window can stay
+///      visually on top while we click into a backgrounded target.
+///
+///   2. Before pressing, snapshot `AXEnhancedUserInterface` and
+///      force it `false` if it was `true`. Catalyst / Electron
+///      apps re-flow their AX layout based on EUI; clicks resolve
+///      to the wrong element if EUI is on at hit-test time. Codex
+///      does the same; we mirror it. Restored after the press.
+///      No-op on stock Cocoa targets that don't expose the
+///      attribute (errors silently ignored).
+///
+///   3. No focus dance. No `focus_guard::arm/release`. No
+///      synthetic `AXFocused` / `AXMain` writes. No
+///      `focus_without_raise`. No synthetic `CGEvent` fallback.
+///      Targets we can't reach via AX (web content in Chromium
+///      with renderer-AX disabled) are explicitly out of scope —
+///      reaching into them would need a different protocol (e.g.
+///      a browser extension à la Codex's `chrome` plugin).
 fn try_ax_click(route: &WindowRoute, target: CGPoint) -> Result<bool, ax::AxError> {
     if !ax::is_authorized() {
         warn!("AX click skipped: Accessibility permission not granted");
         return Ok(false);
     }
-    // Hit-test within the **target app's AX tree**, not the
-    // system-wide root. cua's setup hit-tests system-wide because
-    // the target is at the visual top in their use case (no local
-    // user). For us, the user's browser is on top — system-wide
-    // hit-test would return a browser element. Using the
-    // application root traverses only the target pid's tree, so we
-    // get the right element regardless of visual z-order.
     let app_root = ax::application_root(route.pid);
     let element = match ax::element_at_point(&app_root, target.x as f32, target.y as f32) {
         Ok(e) => e,
@@ -332,28 +349,112 @@ fn try_ax_click(route: &WindowRoute, target: CGPoint) -> Result<bool, ax::AxErro
         "AX click: dispatching AXPress to element in pid {} at ({:.0},{:.0})",
         elem_pid.unwrap_or(-1),
         target.x,
-        target.y
+        target.y,
     );
 
-    let window = ax::enclosing_window(&element);
-    let handle = focus_guard::arm(route.pid, window, Some(element.clone()));
+    // Snapshot AXEnhancedUserInterface and disable it if needed. On
+    // targets that don't expose this attribute, both calls return
+    // an error which we ignore.
+    let prior_eui = ax::attribute_bool(&app_root, "AXEnhancedUserInterface");
+    if prior_eui == Some(true) {
+        let _ = ax::set_attribute_bool(&app_root, "AXEnhancedUserInterface", false);
+    }
 
-    let result = ax::perform_action(&element, "AXPress");
-    tracing::info!("AX click: AXPress result = {result:?}");
+    let press_result = ax::perform_action(&element, "AXPress");
+    tracing::info!("AX click: AXPress result = {press_result:?}");
 
-    // Always release; cua's preventer matches a 50 ms delay to give
-    // the activation a chance to fire before our restore.
-    focus_guard::release(handle, AX_PRESS_FOCUS_GUARD_DELAY);
-
-    match result {
+    let outcome: Result<bool, ax::AxError> = match press_result {
         Ok(()) => Ok(true),
-        Err(ax::AxError::ActionFailed { .. }) => {
-            // Action failed — element doesn't support AXPress (e.g.
-            // a static label hit by a coord). Logged and dropped.
-            tracing::info!("AX click: AXPress unsupported");
-            Ok(false)
+        Err(ax::AxError::ActionFailed { code: -25206, .. }) => {
+            // `kAXErrorActionUnsupported`. The hit element doesn't
+            // advertise `AXPress`. Two common shapes:
+            //
+            //   (a) The hit is an `AXStaticText` / `AXImage` inside
+            //       an `AXRow` (Notes' note list, Arc's sidebar).
+            //       The row itself doesn't expose `AXPress` either,
+            //       but writing `AXSelected = true` on it selects
+            //       the row. Verified empirically (see
+            //       tools/codex-poc-click.swift + /tmp/test_select_row.swift).
+            //   (b) The hit is a leaf inside a genuinely
+            //       non-interactive container (AXScrollArea wrapping
+            //       Chromium's web content with renderer AX off).
+            //       Nothing to do via AX; the click is dropped.
+            //
+            // Walk up to 5 parents looking for an `AXRow` ancestor.
+            // If we find one, try the `AXSelected = true` write.
+            // Stays focus-jump-free: attribute writes don't enter
+            // the global event stream any more than `AXPress` does.
+            if try_select_row_ancestor(&element) {
+                Ok(true)
+            } else {
+                tracing::info!("AX click: AXPress unsupported and no selectable AXRow ancestor");
+                Ok(false)
+            }
         }
         Err(e) => Err(e),
+    };
+
+    if prior_eui == Some(true) {
+        let _ = ax::set_attribute_bool(&app_root, "AXEnhancedUserInterface", true);
+    }
+
+    outcome
+}
+
+/// Walk up to 5 parents of `elem` looking for the nearest `AXRow`
+/// (`AXOutlineRow` subroles included — Swift `AXRow` covers both).
+/// If found, write `AXSelected = true` on it. Returns `true` when
+/// the row was found *and* the write succeeded.
+///
+/// This is the AX-only equivalent of "click a row in a list view"
+/// for apps that don't expose `AXPress` on rows — outline lists in
+/// Catalyst apps (Notes), and Arc's sidebar both follow this shape.
+/// Codex's Service binary doesn't have this pattern explicitly
+/// (it relies on the model picking elements by index from a tree
+/// snapshot, where the model already knows which is the row), but
+/// for our coord-driven click flow it's the natural fix.
+fn try_select_row_ancestor(elem: &objc2_application_services::AXUIElement) -> bool {
+    use objc2_application_services::AXUIElement;
+    use objc2_core_foundation::CFRetained;
+
+    // Check the hit element itself first, then ancestors.
+    if try_select_if_row(elem) {
+        return true;
+    }
+    let mut cursor: Option<CFRetained<AXUIElement>> = ax::attribute_element(elem, "AXParent");
+    let mut depth = 0;
+    while let Some(c) = cursor {
+        if depth >= 5 {
+            return false;
+        }
+        if try_select_if_row(&c) {
+            return true;
+        }
+        cursor = ax::attribute_element(&c, "AXParent");
+        depth += 1;
+    }
+    false
+}
+
+fn try_select_if_row(elem: &objc2_application_services::AXUIElement) -> bool {
+    let role = ax::attribute_string(elem, "AXRole");
+    if role.as_deref() != Some("AXRow") {
+        return false;
+    }
+    match ax::set_attribute_bool(elem, "AXSelected", true) {
+        Ok(()) => {
+            tracing::info!(
+                "AX click: selected AXRow ancestor via AXSelected=true (subrole={})",
+                ax::attribute_string(elem, "AXSubrole")
+                    .as_deref()
+                    .unwrap_or("-")
+            );
+            true
+        }
+        Err(e) => {
+            tracing::info!("AX click: AXRow AXSelected write failed: {e}");
+            false
+        }
     }
 }
 

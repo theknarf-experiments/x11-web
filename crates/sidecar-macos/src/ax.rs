@@ -114,6 +114,21 @@ pub fn attribute_element(
     Some(unsafe { CFRetained::from_raw(NonNull::new_unchecked(raw as *mut AXUIElement)) })
 }
 
+/// Read a String-typed attribute (e.g. `AXRole`, `AXSubrole`).
+/// `None` when the attribute is missing or isn't a `CFString`. Used
+/// by the click path to walk parent chains looking for an `AXRow`
+/// ancestor when `AXPress` returns `kAXErrorActionUnsupported`.
+pub fn attribute_string(element: &AXUIElement, attribute: &str) -> Option<String> {
+    let cfkey = CFString::from_str(attribute);
+    let mut raw: *const CFType = std::ptr::null();
+    let result = unsafe { element.copy_attribute_value(&cfkey, NonNull::new_unchecked(&mut raw)) };
+    if result.0 != 0 || raw.is_null() {
+        return None;
+    }
+    let cf = unsafe { CFRetained::from_raw(NonNull::new_unchecked(raw as *mut CFType)) };
+    cf.downcast::<CFString>().ok().map(|s| s.to_string())
+}
+
 /// Read a Boolean attribute. `None` when the attribute is missing
 /// or not a CFBoolean.
 pub fn attribute_bool(element: &AXUIElement, attribute: &str) -> Option<bool> {
