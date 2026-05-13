@@ -130,6 +130,21 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     # Video codecs for Firefox media playback (H.264, VP8/VP9, Opus, etc.)
     ffmpeg \
     libavcodec-extra \
+    # PulseAudio daemon + pactl/parec utils for the audio.spec.ts suite.
+    # The /etc/pulse/system.pa config below relies on the daemon being
+    # present; without these, every audio test conditionally-skips.
+    pulseaudio \
+    pulseaudio-utils \
+    # VLC (cvlc headless) for the audio playback test. Audacity is also
+    # exercised by audio.spec.ts but its install footprint is large; the
+    # test there already skips gracefully when audacity is absent.
+    vlc \
+    # C++ toolchain + pkg-config so the qt6 widget compile-and-run test
+    # in x11-web.spec.ts can actually build its inline source instead of
+    # falling back to GPP_MISSING. qt6-base-dev (above) brings the
+    # headers but not the compiler driver.
+    g++ \
+    pkg-config \
     # CJK fonts for XIM CJK input testing
     fonts-noto-cjk \
     # OpenSSL runtime — used by X11 apps (Firefox, etc.) for TLS.
