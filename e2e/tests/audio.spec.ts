@@ -26,36 +26,59 @@ test.describe("Audio", () => {
 		await cleanupApps(sidecarContainer);
 	});
 
-	test.skip("PulseAudio is running in sidecar", async ({ sidecarContainer }) => {
-		// Verify PulseAudio daemon is active.
+	test("PulseAudio is running in sidecar", async ({ sidecarContainer }) => {
+		// PulseAudio is optional in the sidecar image; skip gracefully
+		// when pactl isn't installed instead of failing.
+		const probe = await sidecarContainer.exec([
+			"bash",
+			"-c",
+			"command -v pactl >/dev/null 2>&1 && echo HAVE || echo MISS",
+		]);
+		if (probe.output.includes("MISS")) {
+			test.skip();
+			return;
+		}
 		const result = await sidecarContainer.exec([
 			"bash",
 			"-c",
 			"pactl info 2>&1 || echo PULSE_NOT_RUNNING",
 		]);
-		const output = result.output;
-		// PulseAudio should report server info (or at least not error).
-		// If PA isn't running, we'll see PULSE_NOT_RUNNING.
-		expect(output).not.toContain("PULSE_NOT_RUNNING");
+		expect(result.output).not.toContain("PULSE_NOT_RUNNING");
 	});
 
-	test.skip("PulseAudio virtual sinks are configured", async ({
+	test("PulseAudio virtual sinks are configured", async ({
 		sidecarContainer,
 	}) => {
-		// Check that virtual_out and virtual_in sinks exist.
+		const probe = await sidecarContainer.exec([
+			"bash",
+			"-c",
+			"command -v pactl >/dev/null 2>&1 && echo HAVE || echo MISS",
+		]);
+		if (probe.output.includes("MISS")) {
+			test.skip();
+			return;
+		}
 		const result = await sidecarContainer.exec([
 			"bash",
 			"-c",
 			"pactl list sinks short 2>&1",
 		]);
-		const output = result.output;
-		expect(output).toContain("virtual_out");
-		expect(output).toContain("virtual_in");
+		expect(result.output).toContain("virtual_out");
+		expect(result.output).toContain("virtual_in");
 	});
 
-	test.skip("VLC plays test video with audio output", async ({
+	test("VLC plays test video with audio output", async ({
 		sidecarContainer,
 	}) => {
+		const probe = await sidecarContainer.exec([
+			"bash",
+			"-c",
+			"command -v cvlc >/dev/null 2>&1 && command -v pactl >/dev/null 2>&1 && echo HAVE || echo MISS",
+		]);
+		if (probe.output.includes("MISS")) {
+			test.skip();
+			return;
+		}
 		// Run cvlc (headless VLC) directly in the container to play test video.
 		// This tests audio flows through PulseAudio without needing an X11 window.
 		const playResult = await sidecarContainer.exec([
