@@ -930,7 +930,7 @@ test.skip("firefox responds to mouse and keyboard input", async ({
 	);
 });
 
-test.skip("scrolling on a window canvas does not pan the InfiniteCanvas", async ({
+test("scrolling on a window canvas does not pan the InfiniteCanvas", async ({
 	page,
 	frontendUrl,
 }) => {
