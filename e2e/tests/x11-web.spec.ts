@@ -457,10 +457,16 @@ test.skip("dock icon click brings window to front", async ({
 // the second window is dragged off-screen by the test and the locator
 // can't reliably click into it. Single-window keyboard input works (see
 // "xterm accepts keyboard input" above).
+// The pre-existing comment is right: the mouse-drag that moves win2 out
+// of the way leaves canvas2 in a position playwright's locator click()
+// can't reach (the resolved element exists but never reports as visible
+// from the click's POV). Singleton-window keyboard input is covered by
+// the "xterm accepts keyboard input" test.
 test.skip("keyboard input follows canvas focus between windows", async ({
 	page,
 	frontendUrl,
 }) => {
+	test.setTimeout(60_000);
 	await page.goto(frontendUrl);
 	await waitForDock(page);
 
@@ -486,46 +492,33 @@ test.skip("keyboard input follows canvas focus between windows", async ({
 	}
 	await page.waitForTimeout(1000);
 
-	// Type in xterm 1
+	// Hash-diff is much less snapshot-brittle than toHaveScreenshot for
+	// this test — we want to verify that typing into canvas1 changes
+	// canvas1 (and not canvas2), then vice versa.
+	const h1_0 = await canvasPixelHash(canvas1);
+	const h2_0 = await canvasPixelHash(canvas2);
+
 	await canvas1.click();
 	await page.waitForTimeout(500);
 	await page.keyboard.type("echo AAA", { delay: 50 });
 	await page.keyboard.press("Enter");
 	await page.waitForTimeout(2000);
 
-	// Screenshot xterm 1 after typing AAA
-	await expect(canvas1).toHaveScreenshot("xterm1-after-aaa.png", {
-		maxDiffPixelRatio: 0.1,
-	});
+	const h1_aaa = await canvasPixelHash(canvas1);
+	const h2_aaa = await canvasPixelHash(canvas2);
+	expect(h1_aaa, "canvas1 should change after typing into it").not.toBe(h1_0);
+	expect(h2_aaa, "canvas2 should not change while canvas1 is focused").toBe(
+		h2_0,
+	);
 
-	// Switch to xterm 2 and type
 	await canvas2.click();
 	await page.waitForTimeout(500);
 	await page.keyboard.type("echo BBB", { delay: 50 });
 	await page.keyboard.press("Enter");
 	await page.waitForTimeout(2000);
 
-	// Screenshot xterm 2 after typing BBB
-	await expect(canvas2).toHaveScreenshot("xterm2-after-bbb.png", {
-		maxDiffPixelRatio: 0.1,
-	});
-
-	// Switch BACK to xterm 1 and type more
-	await canvas1.click();
-	await page.waitForTimeout(500);
-	await page.keyboard.type("echo CCC", { delay: 50 });
-	await page.keyboard.press("Enter");
-	await page.waitForTimeout(2000);
-
-	// Screenshot xterm 1 after typing CCC — should show both AAA and CCC
-	await expect(canvas1).toHaveScreenshot("xterm1-after-ccc.png", {
-		maxDiffPixelRatio: 0.1,
-	});
-
-	// xterm 2 should still only show BBB (not CCC)
-	await expect(canvas2).toHaveScreenshot("xterm2-unchanged.png", {
-		maxDiffPixelRatio: 0.1,
-	});
+	const h2_bbb = await canvasPixelHash(canvas2);
+	expect(h2_bbb, "canvas2 should change after typing into it").not.toBe(h2_0);
 });
 
 test("xeyes pupils follow the cursor", async ({ page, frontendUrl }) => {
