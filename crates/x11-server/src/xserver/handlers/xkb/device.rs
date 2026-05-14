@@ -72,20 +72,27 @@ pub(crate) fn handle_get_device_info(
         std::str::from_utf8(&device_name).unwrap_or("?")
     );
 
+    // Mirror what Xvfb reports for the Virtual core keyboard: hasOwnState
+    // false (the core kbd IS the device, no separate state), supported
+    // mask 0x1e (Keyboards|Buttons|Indicators|IndicatorState — matches
+    // dix/xkb.c in upstream Xorg), and dfltKbdFB = 1 (the default
+    // keyboard feedback id). Returning has_own_state=true here previously
+    // made Qt6 (libxcb xkb plugin) trip an internal invariant during
+    // device-info parsing and segfault inside QApplication's constructor.
     serialize_var_reply(
         &GetDeviceInfoReply {
             device_id: device_id_byte,
             sequence: seq,
             length: 0,
             present: XIFeature::from(0u16),
-            supported: XIFeature::from(0u16),
+            supported: XIFeature::from(0x1eu16),
             unsupported: XIFeature::from(0u16),
             first_btn_wanted: 0,
             n_btns_wanted: 0,
             first_btn_rtrn: 0,
             total_btns: 0,
-            has_own_state: true,
-            dflt_kbd_fb: 0,
+            has_own_state: false,
+            dflt_kbd_fb: 1,
             dflt_led_fb: 0,
             dev_type: 0,
             name: device_name,

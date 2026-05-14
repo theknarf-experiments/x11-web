@@ -5073,8 +5073,6 @@ test.skip("qt6: minimal widget renders and responds to input", async ({
 }) => {
 	test.setTimeout(60_000);
 
-	// Need both Qt6 libs and a C++ compiler — the sidecar image
-	// can ship one without the other.
 	const check = await sidecarContainer.exec([
 		"bash",
 		"-c",
@@ -5086,8 +5084,6 @@ test.skip("qt6: minimal widget renders and responds to input", async ({
 		return;
 	}
 
-	// Write, compile, and run a minimal Qt6 app that creates a
-	// window with a label, waits 3 seconds, then exits cleanly
 	const result = await sidecarContainer.exec(
 		[
 			"bash",
@@ -5096,7 +5092,6 @@ test.skip("qt6: minimal widget renders and responds to input", async ({
 				"set -e",
 				"export DISPLAY=:99",
 				"export QT_QPA_PLATFORM=xcb",
-				// Write the Qt6 test program
 				"cat > /tmp/qt6test.cpp << 'CPPEOF'",
 				"#include <QApplication>",
 				"#include <QLabel>",
@@ -5110,21 +5105,14 @@ test.skip("qt6: minimal widget renders and responds to input", async ({
 				"    return app.exec();",
 				"}",
 				"CPPEOF",
-				// Compile
-				"g++ -fPIC /tmp/qt6test.cpp -o /tmp/qt6test " +
-					"$(pkg-config --cflags --libs Qt6Widgets 2>/dev/null || " +
-					"echo '-I/usr/include/x86_64-linux-gnu/qt6 -I/usr/include/x86_64-linux-gnu/qt6/QtWidgets -I/usr/include/x86_64-linux-gnu/qt6/QtGui -I/usr/include/x86_64-linux-gnu/qt6/QtCore -lQt6Widgets -lQt6Gui -lQt6Core') " +
-					"2>&1",
+				"g++ -fPIC /tmp/qt6test.cpp -o /tmp/qt6test $(pkg-config --cflags --libs Qt6Widgets 2>/dev/null) 2>&1",
 				"if [ $? -ne 0 ]; then echo 'qt6-compile-failed'; exit 0; fi",
-				// Run with a timeout
 				"timeout 10 /tmp/qt6test 2>&1 &",
 				"QT_PID=$!",
 				"sleep 3",
-				// While it's running, check the X window tree for it
 				'WID=$(xdotool search --name "Hello from Qt6" 2>/dev/null | head -1 || true)',
 				'if [ -n "$WID" ]; then',
 				'  echo "qt6-window-found: $WID"',
-				'  xwininfo -id $WID 2>&1 | grep -E "Width|Height" || true',
 				"fi",
 				"wait $QT_PID 2>/dev/null || true",
 				'echo "qt6-app-test-done"',
@@ -5133,7 +5121,6 @@ test.skip("qt6: minimal widget renders and responds to input", async ({
 		{ timeout: 30_000 } as any,
 	);
 	expect(result.output).toContain("qt6-app-test-done");
-	// If compilation succeeded, we should have found the window
 	if (!result.output.includes("qt6-compile-failed")) {
 		expect(result.output).toContain("qt6-window-found");
 	}
