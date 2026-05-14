@@ -5332,18 +5332,14 @@ test("xdotool: inject keystrokes into xterm and verify response", async ({
 // ---------------------------------------------------------------
 // xdotool: inject mouse click on xeyes, verify pupil movement
 // ---------------------------------------------------------------
-// xdotool mousemove via XTEST FakeInput correctly updates the server's
-// shared pointer state — xdotool getmouselocation from another connection
-// returns the new x:340 y:60 reliably. xeyes' own 200ms QueryPointer
-// timer is also reading the same shared state. But the canvas hash
-// stays unchanged: either xeyes isn't actually redrawing on the
-// server (maybe xeyes uses an XScreenSaver-based wakeup that we don't
-// trigger for FakeInput motion), or the redraw doesn't propagate to
-// the frontend canvas because the frontend's overlay-cursor sprite
-// only moves on frontend-originated input. The pupils-follow-cursor
-// test that DOES pass uses page.mouse.move which feeds the frontend
-// directly. Tracking as a deeper "FakeInput motion → app repaint →
-// canvas" investigation.
+// XTEST FakeInput motion updates the shared pointer correctly
+// (cross-connection getmouselocation returns the right coords)
+// but xeyes' canvas hash still doesn't change. The shared-focus
+// fix doesn't help here — xeyes uses a 200ms QueryPointer poll,
+// not focus. The likely remaining gap is that XTEST motion
+// doesn't trigger xeyes' framebuffer dirty marker through the
+// drawing-request path, possibly because find_subwindow_in_shared
+// picks a window other than xeyes.
 test.skip("xdotool: inject mouse events and verify xeyes responds", async ({
 	page,
 	sidecarContainer,
@@ -5558,7 +5554,7 @@ test("gnome-calculator: render widgets and respond to click", async ({
 // ---------------------------------------------------------------
 // Zenity + xdotool: synthetic button press on dialog
 // ---------------------------------------------------------------
-test.skip("xdotool: click zenity dialog button via XTEST", async ({
+test("xdotool: click zenity dialog button via XTEST", async ({
 	page,
 	sidecarContainer,
 	frontendUrl,
@@ -5788,7 +5784,7 @@ test("RandR dynamic resolution change works", async ({ sidecarContainer }) => {
 // xdotool: comprehensive synthetic event pipeline — move, click,
 // type, and verify the full chain in one test
 // ---------------------------------------------------------------
-test.skip("xdotool: full synthetic event pipeline on xev", async ({
+test("xdotool: full synthetic event pipeline on xev", async ({
 	page,
 	sidecarContainer,
 	frontendUrl,

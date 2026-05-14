@@ -241,6 +241,10 @@ test("gtk3-demo keyboard navigation moves list selection", async ({
 // needs more than just the crossing events.  Leaving skipped pending
 // a deeper look at whether gtk3-demo is responding to the press at
 // all and the frontend just isn't seeing the repaint.
+// Even with the shared-focus fix, gtk3-demo's canvas hash doesn't
+// flip after xdotool-injected clicks at the inner main-window
+// coordinates. Likely the gtk3-demo widget pipeline expects more
+// than ButtonPress + Crossing — pointer focus or grab events too.
 test.skip("xdotool clicks reach the window under the pointer", async ({
 	page,
 	sidecarContainer,
