@@ -4937,10 +4937,14 @@ test("gimp: multi-window rendering and tool palette", async ({
 // ---------------------------------------------------------------
 // LibreOffice Writer: spawn, type text, verify visible change
 // ---------------------------------------------------------------
-// LibreOffice starts but its top-level window doesn't surface as a
-// [data-testid="window-frame"] in the frontend, so spawnApp times out
-// waiting for the frame count to grow. Same frontend
-// window-discovery gap as the Qt5 qterminal test.
+// LibreOffice Writer never produces a top-level [data-testid=
+// "window-frame"] even after 120s. The "LibreOffice Writer starts
+// without crashing" test in this same file confirms the soffice
+// process stays alive, but its X11 window isn't being registered
+// in _NET_CLIENT_LIST (or the frontend's window-discovery rule
+// excludes it for some reason — possibly because libreoffice
+// uses override-redirect or sets a window type the frontend
+// ignores). Same gap as qterminal.
 test.skip("libreoffice writer: spawn, type text, verify rendering", async ({
 	page,
 	frontendUrl,
@@ -4949,7 +4953,6 @@ test.skip("libreoffice writer: spawn, type text, verify rendering", async ({
 	await page.goto(frontendUrl);
 	await waitForDock(page);
 
-	// Spawn LibreOffice Writer with no first-start wizard
 	const win = await spawnApp(
 		page,
 		"--writer --nofirststartwizard",
