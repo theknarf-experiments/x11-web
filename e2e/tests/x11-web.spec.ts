@@ -5136,11 +5136,12 @@ test.skip("qt6: minimal widget renders and responds to input", async ({
 // Multi-window coordination: spawn multiple apps, verify
 // independent rendering and focus switching
 // ---------------------------------------------------------------
-// Exercises the same canvas-pixel-hash-after-input chain that flakes in
-// the xeyes-pupils / vim-:q / libreoffice tests above. The first half
-// (three independent canvases, each with rendered content) works; the
-// half that types into xterm and expects the hash to differ is the
-// flaky part. Stays skipped until input → app → repaint is reliable.
+// canvas2.click() times out because canvas2 (the second xterm) is
+// stacked behind canvas1 in the frontend even though the X server
+// placed them at different +y offsets — same as the keyboard-input-
+// follows-canvas-focus skip. Multi-window rendering works (verified
+// by the multiple-xeyes / closing-one-app tests); only the focus-
+// switching part needs canvas2 to be clickable.
 test.skip("multi-window: independent rendering and focus switching", async ({
 	page,
 	frontendUrl,
