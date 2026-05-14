@@ -960,7 +960,7 @@ test("scrolling on a window canvas does not pan the InfiniteCanvas", async ({
 	expect(transformAfter).toBe(transformBefore);
 });
 
-test.skip("scroll wheel triggers xterm scrollback", async ({
+test("scroll wheel triggers xterm scrollback", async ({
 	page,
 	frontendUrl,
 }) => {
@@ -1316,7 +1316,7 @@ test("rendercheck XRender compliance", async ({ sidecarContainer }) => {
 	expect(passed).toBeGreaterThanOrEqual(RENDERCHECK_BASELINE_PASSED);
 });
 
-test.skip("xev reports synthetic input events", async ({
+test("xev reports synthetic input events", async ({
 	page,
 	sidecarContainer,
 	frontendUrl,
