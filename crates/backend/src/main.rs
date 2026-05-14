@@ -1220,19 +1220,19 @@ async fn backend_attach_window(
     sidecar_id: &str,
     window_id: &str,
 ) {
-    // Pull the sidecar-reported dimensions for this window.
-    let (width, height) = {
+    // Pull the sidecar-reported dimensions + placement for this window.
+    let placement = {
         let track = state.window_track.read().await;
-        match track
+        track
             .iter()
             .find(|((_, _, w), _)| w == window_id)
-            .map(|(_, w)| (w.width as f64, w.height as f64))
-        {
-            Some(dims) => dims,
-            None => {
-                warn!("backend_attach_window: window {window_id} not in tracker");
-                return;
-            }
+            .map(|(_, w)| (w.x as f64, w.y as f64, w.width as f64, w.height as f64))
+    };
+    let (server_x, server_y, width, height) = match placement {
+        Some(p) => p,
+        None => {
+            warn!("backend_attach_window: window {window_id} not in tracker");
+            return;
         }
     };
     let changed = {
@@ -1241,17 +1241,25 @@ async fn backend_attach_window(
             warn!("backend_attach_window: no doc for workspace {workspace_id}");
             return;
         };
-        // Cascade position + z so the new window lands on top and
-        // visibly offset from existing nodes. (200, 100) is the
-        // canvas-space anchor; 30px stairsteps look natural.
+        // Prefer the X-server placement when the app supplied a
+        // non-trivial geometry hint (-geometry +X+Y). Match-box places
+        // the typical xterm at (0, 0) — in that case fall back to the
+        // historical cascade so the user sees multiple new windows
+        // stagger naturally instead of stacking on top of each other.
         // `node_stats` reads via targeted ops — `entry.snapshot()`
-        // would `hydrate` the whole doc, which panics if any
-        // existing node was created on a peer that didn't write
-        // explicit `Null`s for absent `Option` fields (the JS
-        // Automerge API doesn't).
+        // would `hydrate` the whole doc, which panics if any existing
+        // node was created on a peer that didn't write explicit
+        // `Null`s for absent `Option` fields (the JS Automerge API
+        // doesn't).
         let (node_count, max_z) = entry.node_stats();
-        let x = 200.0 + node_count as f64 * 30.0;
-        let y = 100.0 + node_count as f64 * 30.0;
+        let (x, y) = if server_x > 0.0 || server_y > 0.0 {
+            (200.0 + server_x, 100.0 + server_y)
+        } else {
+            (
+                200.0 + node_count as f64 * 30.0,
+                100.0 + node_count as f64 * 30.0,
+            )
+        };
         entry.attach_window_node(window_id, sidecar_id, x, y, max_z + 1.0, width, height)
     };
     if !changed {
