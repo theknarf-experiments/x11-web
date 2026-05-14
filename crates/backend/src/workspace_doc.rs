@@ -378,6 +378,34 @@ impl WorkspaceEntry {
         true
     }
 
+    /// Mirror sidecar-reported position onto the window-node.
+    /// Only used for the *pre-map* `WindowConfigured` that the X
+    /// server emits when honoring `WM_NORMAL_HINTS` USPosition /
+    /// PPosition — the auto-attach used the (0, 0) from
+    /// `WindowCreated` so the cascade fallback kicked in; this lets
+    /// the WM-style position rewrite the node before the user sees
+    /// it. Returns `true` if a node existed and x/y actually
+    /// changed.
+    pub fn set_window_node_position(&mut self, window_id: &str, x: f64, y: f64) -> bool {
+        let Some(nodes) = get_map(&self.doc, &ROOT, "nodes") else {
+            return false;
+        };
+        let Some(node) = get_map(&self.doc, &nodes, window_id) else {
+            return false;
+        };
+        if get_map(&self.doc, &node, "window").is_none() {
+            return false;
+        }
+        let cur_x = read_f64(&self.doc, &node, "x");
+        let cur_y = read_f64(&self.doc, &node, "y");
+        if cur_x == Some(x) && cur_y == Some(y) {
+            return false;
+        }
+        let _ = self.doc.put(&node, "x", x);
+        let _ = self.doc.put(&node, "y", y);
+        true
+    }
+
     /// Mirror sidecar-reported geometry onto the window-node.
     /// Hot path — called on every `WindowConfigured` from the
     /// sidecar. Targeted writes only (no full-doc reconcile).

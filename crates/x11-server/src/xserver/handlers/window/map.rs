@@ -95,6 +95,51 @@ pub(crate) fn handle_map_window(state: &mut ClientState, req: &MapWindowRequest)
     let wm_state_atom = state.intern_atom("WM_STATE", false);
     let msb_first = state.msb_first;
 
+    // No external WM runs in front of us, so we honor `WM_NORMAL_HINTS`
+    // USPosition / PPosition ourselves before the window is mapped: if
+    // the client asked to be placed at a specific +x+y (e.g. via
+    // `xterm -geometry 80x24+400+10`), nudge its top-level position to
+    // match. Without this, clients that pass `(0, 0)` to `CreateWindow`
+    // and rely on the WM to read the hint stay stacked at the origin.
+    // Only applies to top-level non-override-redirect windows — pop-ups
+    // and reparented children keep whatever position the client gave.
+    let pre_map_geom = state.windows.get(&wid).map(|w| {
+        (
+            w.parent == state.root_window
+                && w.class == u16::from(WindowClass::INPUT_OUTPUT)
+                && !w.override_redirect,
+            w.x,
+            w.y,
+            w.width,
+            w.height,
+            w.border_width,
+            w.border_pixel,
+        )
+    });
+    if let Some((true, old_x, old_y, w_px, h_px, bw, bp)) = pre_map_geom {
+        if let Some((hx, hy)) = state.get_size_hints_position(wid) {
+            if (hx, hy) != (old_x, old_y) {
+                if let Some(win) = state.windows.get_mut(&wid) {
+                    win.x = hx;
+                    win.y = hy;
+                }
+                let _ = state.update_tx.send((
+                    state.client_id.clone(),
+                    DisplayUpdate::WindowConfigured {
+                        window_id: wid_str.clone(),
+                        x: hx,
+                        y: hy,
+                        width: w_px,
+                        height: h_px,
+                        border_width: bw,
+                        border_pixel: bp,
+                        resizable: true,
+                    },
+                ));
+            }
+        }
+    }
+
     // Pre-extract background fill info before the main mutable borrow.
     // Complex fills (ParentRelative, pixmap tiling) need separate data extraction.
     struct BgInfo {

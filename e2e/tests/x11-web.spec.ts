@@ -461,16 +461,7 @@ test("dock icon click brings window to front", async ({
 	expect(frame1Z).toBeGreaterThan(z2Before);
 });
 
-// Multi-window xterm focus-tracking test still flakes on canvas2.click() —
-// the second window is dragged off-screen by the test and the locator
-// can't reliably click into it. Single-window keyboard input works (see
-// "xterm accepts keyboard input" above).
-// The pre-existing comment is right: the mouse-drag that moves win2 out
-// of the way leaves canvas2 in a position playwright's locator click()
-// can't reach (the resolved element exists but never reports as visible
-// from the click's POV). Singleton-window keyboard input is covered by
-// the "xterm accepts keyboard input" test.
-test.skip("keyboard input follows canvas focus between windows", async ({
+test("keyboard input follows canvas focus between windows", async ({
 	page,
 	frontendUrl,
 }) => {
@@ -478,27 +469,15 @@ test.skip("keyboard input follows canvas focus between windows", async ({
 	await page.goto(frontendUrl);
 	await waitForDock(page);
 
-	// Spawn two xterms
-	const win1 = await spawnApp(page, "-fn fixed -geometry 40x10", "xterm");
+	const win1 = await spawnApp(page, "-fn fixed -geometry 40x10+10+10 -e bash", "xterm");
 	const canvas1 = win1.locator('[data-testid="x11-canvas"]');
 	await expect(canvas1).toBeVisible();
 	await page.waitForTimeout(5000);
 
-	const win2 = await spawnApp(page, "-fn fixed -geometry 40x10", "xterm");
+	const win2 = await spawnApp(page, "-fn fixed -geometry 40x10+400+10 -e bash", "xterm");
 	const canvas2 = win2.locator('[data-testid="x11-canvas"]');
 	await expect(canvas2).toBeVisible();
 	await page.waitForTimeout(5000);
-
-	// Move win2 so both canvases are accessible
-	const tb2 = win2.locator('[class*="header"]');
-	const tb2Box = await tb2.boundingBox();
-	if (tb2Box) {
-		await page.mouse.move(tb2Box.x + 50, tb2Box.y + 10);
-		await page.mouse.down();
-		await page.mouse.move(tb2Box.x + 400, tb2Box.y + 10, { steps: 5 });
-		await page.mouse.up();
-	}
-	await page.waitForTimeout(1000);
 
 	// Hash-diff is much less snapshot-brittle than toHaveScreenshot for
 	// this test — we want to verify that typing into canvas1 changes

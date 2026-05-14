@@ -17,6 +17,8 @@ use crate::xserver::event::serialize_event;
 /// ICCCM WM_NORMAL_HINTS flag bits (selecting which fields of the
 /// `WM_SIZE_HINTS` structure are valid).
 mod wm_size_hints {
+    pub(super) const US_POSITION: u32 = 1 << 0;
+    pub(super) const P_POSITION: u32 = 1 << 2;
     pub(super) const P_MIN_SIZE: u32 = 1 << 4;
     pub(super) const P_MAX_SIZE: u32 = 1 << 5;
     pub(super) const P_RESIZE_INC: u32 = 1 << 6;
@@ -28,6 +30,8 @@ mod wm_size_hints {
 #[allow(dead_code)]
 mod wm_size_hints_offset {
     pub(super) const FLAGS: usize = 0;
+    pub(super) const X: usize = 1;
+    pub(super) const Y: usize = 2;
     pub(super) const MIN_WIDTH: usize = 5;
     pub(super) const MIN_HEIGHT: usize = 6;
     pub(super) const MAX_WIDTH: usize = 7;
@@ -639,6 +643,37 @@ impl ClientState {
         }
 
         Some(hints)
+    }
+
+    /// Return the `(x, y)` from `WM_NORMAL_HINTS` if `USPosition` or
+    /// `PPosition` is set in the flags. ICCCM §4.1.2.3: clients use
+    /// these flags to tell the WM where they'd like to be placed
+    /// (`USPosition` = user-supplied via `-geometry +X+Y`,
+    /// `PPosition` = program-supplied). Without a separate WM we
+    /// honor these hints ourselves at map time so apps land at the
+    /// position the user asked for.
+    pub(crate) fn get_size_hints_position(&self, window: u32) -> Option<(i16, i16)> {
+        let wm_normal_hints_atom = self.intern_atom("WM_NORMAL_HINTS", true);
+        if wm_normal_hints_atom == 0 {
+            return None;
+        }
+        let pv = self
+            .windows
+            .get(&window)?
+            .properties
+            .get(&wm_normal_hints_atom)?;
+        if pv.format != 32 || pv.data.len() < 72 {
+            return None;
+        }
+        use wm_size_hints::{P_POSITION, US_POSITION};
+        use wm_size_hints_offset as off;
+        let flags = read_u32_word(&pv.data, off::FLAGS)?;
+        if flags & (US_POSITION | P_POSITION) == 0 {
+            return None;
+        }
+        let x = read_u32_word(&pv.data, off::X)? as i32 as i16;
+        let y = read_u32_word(&pv.data, off::Y)? as i32 as i16;
+        Some((x, y))
     }
 
     /// Recalculate _NET_WORKAREA on the root window based on all windows with

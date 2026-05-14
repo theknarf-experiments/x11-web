@@ -1180,20 +1180,54 @@ async fn on_window_lifecycle_after(
         }
         DisplayUpdate::WindowConfigured {
             window_id,
+            x,
+            y,
             width,
             height,
             ..
         } => {
             // Sidecar resized the window — mirror new dimensions
             // onto every workspace's matching window-node so peers
-            // see the new size.
+            // see the new size. Additionally: if the window hasn't
+            // been mapped yet, propagate the new x/y as well. This
+            // catches the X server's WM-style position update that
+            // fires at MapWindow time when `WM_NORMAL_HINTS` carries
+            // a US/PPosition hint — we want the window to land where
+            // the app asked (e.g. `xterm -geometry +400+10`) instead
+            // of the cascade fallback we used at `WindowCreated`. We
+            // gate on `!mapped` so that any later app-driven
+            // ConfigureWindow doesn't blow away a user-initiated
+            // drag (drags don't round-trip through the X server, so
+            // they wouldn't show up here, but apps that XMoveWindow
+            // themselves after mapping would).
+            let sync_position = state
+                .window_track
+                .read()
+                .await
+                .get(&(sidecar_id.to_string(), client_id.to_string(), window_id.clone()))
+                .map(|w| !w.mapped)
+                .unwrap_or(false);
+            let canvas_anchor_x = 200.0_f64;
+            let canvas_anchor_y = 100.0_f64;
             let affected: Vec<String> = {
                 let mut docs = state.workspace_docs.write().await;
                 docs.iter_mut()
                     .filter_map(|(ws_id, entry)| {
-                        entry
-                            .set_window_node_size(window_id, *width as f64, *height as f64)
-                            .then(|| ws_id.clone())
+                        let mut changed = entry.set_window_node_size(
+                            window_id,
+                            *width as f64,
+                            *height as f64,
+                        );
+                        if sync_position
+                            && entry.set_window_node_position(
+                                window_id,
+                                canvas_anchor_x + *x as f64,
+                                canvas_anchor_y + *y as f64,
+                            )
+                        {
+                            changed = true;
+                        }
+                        changed.then(|| ws_id.clone())
                     })
                     .collect()
             };
