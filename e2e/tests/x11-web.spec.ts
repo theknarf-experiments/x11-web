@@ -851,17 +851,11 @@ test("firefox renders on the canvas", async ({ page, frontendUrl }) => {
 	});
 });
 
-// Snapshot-based screenshot diff against pre-recorded
-// firefox-before-input.png. The locator's nth(1) returns xeyes (the
-// first-spawned 100x80 window) instead of the 921x691 Firefox canvas
-// because the frontend doesn't deterministically order
-// window-frame siblings by spawn time. Fix here is to switch to
-// finding the canvas by size or by Firefox's WM_NAME, but that's
-// orthogonal to a server bug — keep skipped.
-test.skip("firefox responds to mouse and keyboard input", async ({
+test("firefox responds to mouse and keyboard input", async ({
 	page,
 	frontendUrl,
 }) => {
+	test.setTimeout(180_000);
 	await page.goto(frontendUrl);
 	await waitForDock(page);
 
@@ -880,22 +874,31 @@ test.skip("firefox responds to mouse and keyboard input", async ({
 	const windowFrames = page.locator('[data-testid="window-frame"]');
 	await expect(windowFrames).toHaveCount(2, { timeout: 120_000 });
 
-	// Wait for both canvases to have content
+	// Find the *largest* canvas — that's Firefox's main window (~921x691),
+	// not the 100x80 xeyes. Iterating in DOM order with reassignment used
+	// to land us on whichever canvas iterated last, which was non-
+	// deterministic between runs.
 	let firefoxCanvas: Locator | null = null;
 	await expect
 		.poll(
 			async () => {
 				const count = await windowFrames.count();
+				let largestArea = 0;
 				let withContent = 0;
 				for (let i = 0; i < count; i++) {
 					const canvas = windowFrames
 						.nth(i)
 						.locator('[data-testid="x11-canvas"]');
-					if (
-						(await canvas.isVisible()) &&
-						(await hasRenderedContent(canvas))
-					) {
-						withContent++;
+					if (!(await canvas.isVisible())) continue;
+					if (!(await hasRenderedContent(canvas))) continue;
+					withContent++;
+					const size = await canvas.evaluate((el: HTMLCanvasElement) => ({
+						w: el.width,
+						h: el.height,
+					}));
+					const area = size.w * size.h;
+					if (area > largestArea) {
+						largestArea = area;
 						firefoxCanvas = canvas;
 					}
 				}
@@ -905,12 +908,10 @@ test.skip("firefox responds to mouse and keyboard input", async ({
 		)
 		.toBe(true);
 
-	// Screenshot before interaction
-	await page.waitForTimeout(5000);
-	await expect(firefoxCanvas!).toHaveScreenshot("firefox-before-input.png", {
-		maxDiffPixelRatio: 0.1,
-		timeout: 15_000,
-	});
+	expect(firefoxCanvas).not.toBeNull();
+	const hashBefore = await canvasPixelHash(firefoxCanvas!);
+	const pixelsBefore = await countNonBlackPixels(firefoxCanvas!);
+	expect(pixelsBefore).toBeGreaterThan(1000);
 
 	// Click the address bar and type a URL
 	const box = await firefoxCanvas!.boundingBox();
@@ -924,11 +925,9 @@ test.skip("firefox responds to mouse and keyboard input", async ({
 	await page.keyboard.press("Enter");
 	await page.waitForTimeout(5000);
 
-	// The page should have changed — no longer the welcome page
-	await expect(firefoxCanvas!).not.toHaveScreenshot(
-		"firefox-before-input.png",
-		{ maxDiffPixelRatio: 0.1, timeout: 30_000 },
-	);
+	// The page should have changed
+	const hashAfter = await canvasPixelHash(firefoxCanvas!);
+	expect(hashAfter).not.toBe(hashBefore);
 });
 
 test("scrolling on a window canvas does not pan the InfiniteCanvas", async ({
