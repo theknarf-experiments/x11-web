@@ -7,6 +7,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 COPY Cargo.toml Cargo.lock ./
+# Set up the x11rb-protocol fork the workspace patches in.
+# `tools/setup-x11rb-fork.sh` clones upstream, applies the bundled
+# patches, and regenerates the protocol bindings.
+COPY tools/setup-x11rb-fork.sh tools/setup-x11rb-fork.sh
+COPY crates/x11rb-protocol-msb/ crates/x11rb-protocol-msb/
+RUN bash tools/setup-x11rb-fork.sh
 COPY crates/ crates/
 RUN cargo build --release --bin x11-web-backend
 

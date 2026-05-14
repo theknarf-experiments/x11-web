@@ -4944,14 +4944,13 @@ test("gimp: multi-window rendering and tool palette", async ({
 // ---------------------------------------------------------------
 // LibreOffice Writer: spawn, type text, verify visible change
 // ---------------------------------------------------------------
-// LibreOffice Writer never produces a top-level [data-testid=
-// "window-frame"] even after 120s. The "LibreOffice Writer starts
-// without crashing" test in this same file confirms the soffice
-// process stays alive, but its X11 window isn't being registered
-// in _NET_CLIENT_LIST (or the frontend's window-discovery rule
-// excludes it for some reason — possibly because libreoffice
-// uses override-redirect or sets a window type the frontend
-// ignores). Same gap as qterminal.
+// LibreOffice Writer never produces a top-level window-frame in the
+// frontend. The wrapper-then-exit launcher pattern (`oosplash`
+// forking `soffice.bin`) is correctly handled by the backend +
+// sidecar's spawn lineage tracking (verified by manual inspection:
+// both pids live during the spawn window), but the window still
+// isn't reaching the frontend. Likely a frontend window-discovery
+// rule rather than the auto-attach path.
 test.skip("libreoffice writer: spawn, type text, verify rendering", async ({
 	page,
 	frontendUrl,

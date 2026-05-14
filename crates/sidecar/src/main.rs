@@ -40,6 +40,15 @@ struct ProcessManager {
     /// `None` if dbus-daemon failed to start. When set, every spawned
     /// X11 app inherits it so GTK / Qt apps can export their AppMenu.
     dbus_session_address: Option<String>,
+    /// Every pid we've ever spawned, kept around even after the
+    /// wrapper exits. Some apps (LibreOffice's `libreoffice` →
+    /// `soffice.bin`, the `qterminal` launcher → real terminal, etc.)
+    /// fork+exit a child that connects to X *after* the wrapper has
+    /// reaped. Walking up from the connecting peer's pid through
+    /// /proc/<pid>/PPid lands on init/the sidecar once the wrapper
+    /// is gone, so we'd never match the live `processes` set. Using
+    /// this history lets find_ancestor_pid still resolve the lineage.
+    spawned_pid_history: std::collections::HashSet<u32>,
 }
 
 struct ManagedProcess {
@@ -53,6 +62,7 @@ impl ProcessManager {
             processes: HashMap::new(),
             display_string,
             dbus_session_address,
+            spawned_pid_history: std::collections::HashSet::new(),
         }
     }
 
@@ -81,6 +91,7 @@ impl ProcessManager {
                 command: command.to_string(),
             },
         );
+        self.spawned_pid_history.insert(pid);
         info!(
             "Spawned process: {} (pid {}) with DISPLAY={}",
             command, pid, self.display_string
@@ -116,6 +127,13 @@ impl ProcessManager {
                 command: proc.command.clone(),
             })
             .collect()
+    }
+
+    /// Every pid we've ever spawned, alive or reaped. Used by
+    /// find_ancestor_pid so wrapper-then-exit launchers still
+    /// resolve their connecting descendant.
+    fn spawned_pid_history(&self) -> &std::collections::HashSet<u32> {
+        &self.spawned_pid_history
     }
 
     async fn check_exited(&mut self) -> Vec<(u32, Option<i32>)> {
@@ -560,8 +578,13 @@ async fn run_session(
                     let _ = tx.send(SidecarToBackend::DisplayUpdate { client_id, update });
                 }
                 Some((client_id, peer_pid)) = client_connected_rx.recv() => {
-                    let spawned_pids: Vec<u32> = process_manager.list().iter().map(|p| p.pid).collect();
-                    if let Some(pid) = find_ancestor_pid(peer_pid, &spawned_pids) {
+                    // Prefer matching against the full spawn history (covers
+                    // wrapper-exits-fast launchers like LibreOffice and
+                    // qterminal). Fall back to live processes for the
+                    // command-name lookup, which still needs the live entry.
+                    let history: Vec<u32> = process_manager.spawned_pid_history()
+                        .iter().copied().collect();
+                    if let Some(pid) = find_ancestor_pid(peer_pid, &history) {
                         let command = process_manager.get_command(pid).unwrap_or("").to_string();
                         info!(
                             "Process {pid} ({command}) (peer {peer_pid}) connected as X11 client {client_id}"

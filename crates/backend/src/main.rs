@@ -338,22 +338,31 @@ async fn dispatch_sidecar_msg(state: &AppState, sidecar_id: &str, msg: SidecarTo
                 // Drop matching entries from per-sidecar list and the
                 // window-state index; clear any buffered display
                 // updates keyed by the freed client_ids.
-                state
-                    .spawn_origin
-                    .write()
-                    .await
-                    .remove(&(sidecar_id.clone(), pid));
-                let freed_client_ids: Vec<String> = {
-                    let mut procs = state.processes.write().await;
-                    let list = procs.entry(sidecar_id.clone()).or_default();
-                    let freed: Vec<String> = list
-                        .iter()
-                        .filter(|p| p.pid == pid)
-                        .map(|p| p.client_id.clone())
-                        .collect();
-                    list.retain(|p| p.pid != pid);
-                    freed
-                };
+                //
+                // Keep the spawn_origin entry alive past the process's
+                // exit. Wrapper-style launchers (`libreoffice` forking
+                // soffice.bin, qterminal forking the real terminal,
+                // gimp's RPC server, etc.) reap before their
+                // descendant connects to the X server. The sidecar
+                // side already matches the connecting peer's pid
+                // against its spawn history; the backend has to keep
+                // (sidecar, wrapper_pid) → workspace mapped here for
+                // the auto-attach lookup to succeed. The whole map is
+                // freed on sidecar disconnect.
+                //
+                // Same reasoning applies to `processes`: the sidecar
+                // reports `ProcessConnected { pid: wrapper_pid, ... }`
+                // for the descendant connecting after the wrapper
+                // exits, so the entry whose key is the wrapper pid
+                // *also* identifies the descendant. Removing it on
+                // ProcessExited would discard the live descendant's
+                // mapping. Keep the entry; X11 client disconnect is
+                // the right cleanup signal but we don't surface that
+                // back to the backend yet — overstaying entries are
+                // tolerable (orphan lookups simply fail to find a
+                // workspace, which is the pre-existing behaviour).
+                let freed_client_ids: Vec<String> = Vec::new();
+                let _ = pid;
                 // Position state is keyed by window_id; orphan
                 // entries from destroyed windows are harmless and
                 // get cleaned up via `drop_client_windows` below.
