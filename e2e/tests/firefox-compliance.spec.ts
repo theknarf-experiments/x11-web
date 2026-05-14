@@ -727,10 +727,14 @@ test("firefox: navigate to Wikipedia", async ({
 // ---------------------------------------------------------------------------
 // Firefox scroll works
 // ---------------------------------------------------------------------------
-// Scroll-wheel events don't reach Firefox's content area today —
-// the page doesn't scroll and the canvas hash is unchanged after
-// page.mouse.wheel(). Likely a frontend wheel-to-X11-button-4/5 path
-// gap. Tracked separately.
+// Wheel events reach our frontend's wheel handler (verified) and the
+// X server translates them to XI_Motion with scroll-class valuators
+// (covered by xinput2/tests.rs::scroll_button_press_emits_motion...).
+// Firefox-ESR still doesn't visibly scroll though — likely the
+// content-area child window isn't where we route the synthesized
+// scroll events. Needs an XInput2 scrolling investigation; the
+// xterm scroll test passes (uses legacy button 4/5), so the
+// non-XInput2 path is fine.
 test.skip("firefox: scroll works on loaded page", async ({
 	page,
 	sidecarContainer,
