@@ -21,6 +21,10 @@ test("dock is visible", async ({ page, frontendUrl }) => {
 	await waitForDock(page);
 });
 
+// global-menu-bar-title element renders empty even before any window
+// is focused — should fall back to "x11-web" per the existing test
+// assertion. Frontend menu-bar component doesn't set the default
+// title. Tracked separately.
 test.skip("global menu bar tracks the focused window", async ({
 	page,
 	frontendUrl,
