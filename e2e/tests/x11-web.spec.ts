@@ -4931,6 +4931,10 @@ test("gimp: multi-window rendering and tool palette", async ({
 // ---------------------------------------------------------------
 // LibreOffice Writer: spawn, type text, verify visible change
 // ---------------------------------------------------------------
+// LibreOffice starts but its top-level window doesn't surface as a
+// [data-testid="window-frame"] in the frontend, so spawnApp times out
+// waiting for the frame count to grow. Same frontend
+// window-discovery gap as the Qt5 qterminal test.
 test.skip("libreoffice writer: spawn, type text, verify rendering", async ({
 	page,
 	frontendUrl,
@@ -4991,7 +4995,7 @@ test.skip("libreoffice writer: spawn, type text, verify rendering", async ({
 // ---------------------------------------------------------------
 // Emacs (via xterm): spawn, verify mode line, type text
 // ---------------------------------------------------------------
-test.skip("emacs: spawn in xterm, verify mode line, type and verify", async ({
+test("emacs: spawn in xterm, verify mode line, type and verify", async ({
 	page,
 	frontendUrl,
 }) => {
