@@ -288,7 +288,7 @@ test("multiple instances of same app get separate dock entries", async ({
 	await expect(windowFrames).toHaveCount(3, { timeout: 5_000 });
 });
 
-test.skip("resizing a window changes the canvas dimensions", async ({
+test("resizing a window changes the canvas dimensions", async ({
 	page,
 	frontendUrl,
 }) => {
@@ -325,7 +325,7 @@ test.skip("resizing a window changes the canvas dimensions", async ({
 	expect(newSize.height).toBeGreaterThan(initialSize.height);
 });
 
-test.skip("resizing one window does not affect other windows", async ({
+test("resizing one window does not affect other windows", async ({
 	page,
 	frontendUrl,
 }) => {
@@ -424,7 +424,7 @@ test("clicking a window brings it to front", async ({ page, frontendUrl }) => {
 	expect(z1After).toBeGreaterThan(z2Before);
 });
 
-test.skip("dock icon click brings window to front", async ({
+test("dock icon click brings window to front", async ({
 	page,
 	frontendUrl,
 }) => {
