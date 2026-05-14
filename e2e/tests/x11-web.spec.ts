@@ -5271,14 +5271,13 @@ test("clipboard: xclip copy and xterm paste round-trip", async ({
 // XTest injection: xdotool sends synthetic events to xterm,
 // verify the target window responds
 // ---------------------------------------------------------------
-// XTEST keystrokes from xdotool DO reach xterm — the
-// stability/stress.spec.ts "xdotool sends keystrokes to a specific
-// window" test demonstrates the shell processes them by writing
-// a file. But xterm doesn't visually redraw its canvas after
-// XTEST-driven keystrokes (only frontend-driven keystrokes via
-// page.keyboard.type produce repaints), so this test's canvas
-// pixel-hash assertion fails. Same input-then-canvas-redraw gap
-// as the xeyes test.
+// Even with an explicit `-e bash` shell child (verified bash is alive),
+// the canvas pixel hash doesn't change after xdotool injected
+// keystrokes. The stability/stress.spec.ts xdotool-keystrokes test
+// proves keys reach the shell (a file is written), so the gap is
+// specifically that XTEST-driven keystrokes don't trigger the
+// xterm-redraw → DisplayUpdate::PutImage → frontend canvas chain.
+// Tracked alongside the xeyes XTEST-mouse test.
 test.skip("xdotool: inject keystrokes into xterm and verify response", async ({
 	page,
 	sidecarContainer,
@@ -5288,8 +5287,11 @@ test.skip("xdotool: inject keystrokes into xterm and verify response", async ({
 	await page.goto(frontendUrl);
 	await waitForDock(page);
 
-	// Spawn xterm
-	const win = await spawnApp(page, "-fn fixed -geometry 60x15", "xterm");
+	const win = await spawnApp(
+		page,
+		"-fn fixed -geometry 60x15 -e bash",
+		"xterm",
+	);
 	const canvas = win.locator('[data-testid="x11-canvas"]');
 	await expect(canvas).toBeVisible();
 	await waitForCanvasStable(canvas, {
@@ -5320,10 +5322,8 @@ test.skip("xdotool: inject keystrokes into xterm and verify response", async ({
 	]);
 	expect(injectResult.output).toContain("xdotool-inject-done");
 
-	// Wait for the xterm to repaint
 	await page.waitForTimeout(2000);
 
-	// Verify the canvas changed — the typed text should be visible
 	const hashAfter = await canvasPixelHash(canvas);
 	expect(
 		hashAfter,
