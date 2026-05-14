@@ -1099,11 +1099,7 @@ test.skip("firefox responds to scroll wheel input", async ({
 	);
 });
 
-// vim :q sends 'q\n' to xterm; the canvas pixel hash matches before
-// and after, so either the key delivery doesn't reach vim through the
-// xterm process or xterm doesn't redraw the shell prompt afterwards.
-// Either way it's an input/redraw chain issue we haven't isolated yet.
-test.skip("vim can be quit with :q", async ({ page, frontendUrl }) => {
+test("vim can be quit with :q", async ({ page, frontendUrl }) => {
 	test.setTimeout(60_000);
 	await page.goto(frontendUrl);
 	await waitForDock(page);
@@ -1117,30 +1113,27 @@ test.skip("vim can be quit with :q", async ({ page, frontendUrl }) => {
 	await canvas.click();
 	await page.waitForTimeout(1000);
 
-	// Open vim
 	await page.keyboard.type("vim", { delay: 80 });
 	await page.keyboard.press("Enter");
-	// Wait for vim to fully load
 	await page.waitForTimeout(4000);
 
-	// Press Escape multiple times to ensure we're in normal mode
-	// (vim may be showing a splash screen)
+	const inVim = await canvasPixelHash(canvas);
+
+	// Use keyboard.press("Shift+Semicolon") rather than keyboard.type(":")
+	// because Playwright's keyboard.type(":") emits the colon character
+	// without firing a Shift down/up around it, so the resulting X11
+	// KeyPress carries shiftKey=false and xterm sees `;` instead of `:`.
+	// Pressing the explicit chord goes through the normal modifier mask
+	// in modifierMask() and reaches vim as a colon.
 	await page.keyboard.press("Escape");
 	await page.waitForTimeout(300);
-	await page.keyboard.press("Escape");
-	await page.waitForTimeout(500);
-
-	// Capture hash before quitting
-	const beforeQuit = await canvasPixelHash(canvas);
-
-	// Quit vim with :q + Enter
-	await page.keyboard.type(":q", { delay: 80 });
+	await page.keyboard.press("Shift+Semicolon");
+	await page.keyboard.press("q");
 	await page.keyboard.press("Enter");
 	await page.waitForTimeout(3000);
 
-	// The canvas should change (back to shell prompt)
 	const afterQuit = await canvasPixelHash(canvas);
-	expect(afterQuit).not.toBe(beforeQuit);
+	expect(afterQuit).not.toBe(inVim);
 });
 
 // =====================================================================
