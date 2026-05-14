@@ -5494,7 +5494,7 @@ test.skip("clipboard: set in one xterm, read in another via UI", async ({
 // ---------------------------------------------------------------
 // gnome-calculator: GTK3 complex widget rendering + button click
 // ---------------------------------------------------------------
-test.skip("gnome-calculator: render widgets and respond to click", async ({
+test("gnome-calculator: render widgets and respond to click", async ({
 	page,
 	sidecarContainer,
 	frontendUrl,
