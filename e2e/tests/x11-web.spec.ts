@@ -5599,7 +5599,7 @@ test.skip("xdotool: click zenity dialog button via XTEST", async ({
 // ---------------------------------------------------------------
 // GTK4 gnome-text-editor: render and verify content
 // ---------------------------------------------------------------
-test.skip("gtk4 gnome-text-editor: renders and accepts input", async ({
+test("gtk4 gnome-text-editor: renders and accepts input", async ({
 	page,
 	sidecarContainer,
 	frontendUrl,
