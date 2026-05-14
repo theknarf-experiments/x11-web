@@ -780,7 +780,7 @@ test.skip("firefox: scroll works on loaded page", async ({
 // ---------------------------------------------------------------------------
 // Firefox navigates to YouTube
 // ---------------------------------------------------------------------------
-test.skip("firefox: navigate to YouTube", async ({
+test("firefox: navigate to YouTube", async ({
 	page,
 	sidecarContainer,
 	frontendUrl,
@@ -810,6 +810,13 @@ test.skip("firefox: navigate to YouTube", async ({
 // ---------------------------------------------------------------------------
 // Local HTML5 video playback
 // ---------------------------------------------------------------------------
+// Firefox loads /opt/test-video.mp4 but the canvas pixel hash
+// never changes — either the video element doesn't actually
+// play frames, or the per-frame redraws of the video element
+// don't propagate through to the X11 canvas. Likely the latter
+// given how much the rest of Firefox renders. Tracked
+// separately; needs an audit of how Firefox uses the X11 surface
+// for video tear-free output.
 test.skip("firefox: local HTML5 video playback", async ({
 	page,
 	sidecarContainer,
