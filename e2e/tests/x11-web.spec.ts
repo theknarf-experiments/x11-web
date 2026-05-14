@@ -4801,7 +4801,7 @@ test("rendercheck passes with bilinear filter tests", async ({
 // ---------------------------------------------------------------
 // Firefox: spawn, verify rendering, navigate via address bar
 // ---------------------------------------------------------------
-test.skip("firefox: spawn, render content, and navigate", async ({
+test("firefox: spawn, render content, and navigate", async ({
 	page,
 	frontendUrl,
 }) => {
