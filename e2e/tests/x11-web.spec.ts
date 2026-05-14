@@ -5136,13 +5136,7 @@ test.skip("qt6: minimal widget renders and responds to input", async ({
 // Multi-window coordination: spawn multiple apps, verify
 // independent rendering and focus switching
 // ---------------------------------------------------------------
-// canvas2.click() times out because canvas2 (the second xterm) is
-// stacked behind canvas1 in the frontend even though the X server
-// placed them at different +y offsets — same as the keyboard-input-
-// follows-canvas-focus skip. Multi-window rendering works (verified
-// by the multiple-xeyes / closing-one-app tests); only the focus-
-// switching part needs canvas2 to be clickable.
-test.skip("multi-window: independent rendering and focus switching", async ({
+test("multi-window: independent rendering and focus switching", async ({
 	page,
 	frontendUrl,
 }) => {
@@ -5154,7 +5148,7 @@ test.skip("multi-window: independent rendering and focus switching", async ({
 	const xeyesFrame = await spawnApp(page, "-geometry 200x150+10+10");
 	const xtermFrame = await spawnApp(
 		page,
-		"-fn fixed -geometry 40x10+300+10",
+		"-fn fixed -geometry 40x10+300+10 -e bash",
 		"xterm",
 	);
 	const xclockFrame = await spawnApp(

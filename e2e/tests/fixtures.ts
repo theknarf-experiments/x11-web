@@ -330,7 +330,18 @@ export async function spawnApp(
 	windowTimeout = 15_000,
 ): Promise<Locator> {
 	const windowFrames = page.locator('[data-testid="window-frame"]');
-	const countBefore = await windowFrames.count();
+	// Snapshot existing frames by `data-client-id` rather than count.
+	// `windows` is keyed off the doc's OcifNode order, not click
+	// order; nth(countBefore) can pick a sibling that re-rendered
+	// in between (e.g. a parent frame whose z just changed) rather
+	// than the brand-new one. Diffing the id set finds the new frame
+	// no matter where it lands in the DOM.
+	const idsBefore = new Set(
+		await windowFrames.evaluateAll((els) =>
+			els.map((el) => el.getAttribute("data-client-id") ?? ""),
+		),
+	);
+	const countBefore = idsBefore.size;
 
 	await page.locator('[data-testid="spawn-button"]').click();
 	if (command !== "xeyes") {
@@ -347,7 +358,20 @@ export async function spawnApp(
 	await expect(windowFrames).toHaveCount(countBefore + 1, {
 		timeout: windowTimeout,
 	});
-	return windowFrames.nth(countBefore);
+	const newId = await page.evaluate((existing: string[]) => {
+		const set = new Set(existing);
+		const all = Array.from(
+			document.querySelectorAll('[data-testid="window-frame"]'),
+		);
+		const found = all.find(
+			(el) => !set.has(el.getAttribute("data-client-id") ?? ""),
+		);
+		return found?.getAttribute("data-client-id") ?? null;
+	}, Array.from(idsBefore));
+	if (!newId) {
+		throw new Error("spawnApp: failed to identify newly spawned window frame");
+	}
+	return page.locator(`[data-testid="window-frame"][data-client-id="${newId}"]`);
 }
 
 export async function waitForDock(page: Page) {
