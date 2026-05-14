@@ -5425,6 +5425,12 @@ test("clipboard: cross-connection xsel/xclip interop", async ({
 // ---------------------------------------------------------------
 // Multi-app clipboard: set in one xterm, read in another
 // ---------------------------------------------------------------
+// Spawns two xterms; clicking into canvas2 times out because canvas2
+// is stacked behind canvas1 in the frontend (windows don't separate
+// by their +y offset). Same gap as the keyboard-input-follows-canvas-
+// focus test. Multi-app clipboard interop is covered by the
+// passing "multi-app clipboard round-trip via xclip" test which
+// uses container-exec instead of canvas clicks.
 test.skip("clipboard: set in one xterm, read in another via UI", async ({
 	page,
 	sidecarContainer,
@@ -5434,8 +5440,11 @@ test.skip("clipboard: set in one xterm, read in another via UI", async ({
 	await page.goto(frontendUrl);
 	await waitForDock(page);
 
-	// Spawn two xterms
-	const win1 = await spawnApp(page, "-fn fixed -geometry 50x10+10+10", "xterm");
+	const win1 = await spawnApp(
+		page,
+		"-fn fixed -geometry 50x10+10+10 -e bash",
+		"xterm",
+	);
 	const canvas1 = win1.locator('[data-testid="x11-canvas"]');
 	await expect(canvas1).toBeVisible();
 	await waitForCanvasStable(canvas1, {
@@ -5445,7 +5454,7 @@ test.skip("clipboard: set in one xterm, read in another via UI", async ({
 
 	const win2 = await spawnApp(
 		page,
-		"-fn fixed -geometry 50x10+10+250",
+		"-fn fixed -geometry 50x10+10+250 -e bash",
 		"xterm",
 	);
 	const canvas2 = win2.locator('[data-testid="x11-canvas"]');
