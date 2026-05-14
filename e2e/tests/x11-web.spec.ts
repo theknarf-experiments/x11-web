@@ -391,18 +391,19 @@ test.skip("resizing one window does not affect other windows", async ({
 	expect(size2After.height).toBe(size2Before.height);
 });
 
-// Frontend z-index semantics — the two newly-spawned windows don't pick
-// up monotonic z-indexes, so `expect(z2Before).toBeGreaterThan(z1Before)`
-// fails before we even click. Tracked as a frontend stacking/dock fix.
-test.skip("clicking a window brings it to front", async ({ page, frontendUrl }) => {
+test("clicking a window brings it to front", async ({ page, frontendUrl }) => {
 	await page.goto(frontendUrl);
 	await waitForDock(page);
 
-	// Spawn two windows
+	// Spawn two windows. spawnApp's wait is just `toBeVisible` on the
+	// window-frame — the OcifNode that drives the real z-index may sync
+	// a tick later, so give it room before reading z.
 	const win1 = await spawnApp(page, "-geometry 200x150+50+50");
+	await page.waitForTimeout(500);
 	const win2 = await spawnApp(page, "-geometry 200x150+100+100");
 	await expect(win1).toBeVisible();
 	await expect(win2).toBeVisible();
+	await page.waitForTimeout(1000);
 
 	// win2 was spawned second, so it should have higher z-index initially
 	const z2Before = await win2.evaluate((el) =>
@@ -415,7 +416,7 @@ test.skip("clicking a window brings it to front", async ({ page, frontendUrl }) 
 
 	// Directly trigger pointerdown on win1 to bring it to front
 	await win1.dispatchEvent("pointerdown");
-	await page.waitForTimeout(300);
+	await page.waitForTimeout(500);
 
 	const z1After = await win1.evaluate((el) =>
 		Number.parseInt(el.style.zIndex || "0"),
