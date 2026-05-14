@@ -433,6 +433,9 @@ pub(crate) fn handle_get_input_focus(
     _req: &GetInputFocusRequest,
 ) -> Vec<u8> {
     let seq = state.sequence;
+    // Focus is server-wide; pick up whatever the last SetInputFocus
+    // from any client landed on.
+    state.refresh_focus_from_shared();
     serialize_reply(
         &GetInputFocusReply {
             revert_to: InputFocus::from(state.focus_revert_to),

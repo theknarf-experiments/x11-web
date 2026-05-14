@@ -150,6 +150,7 @@ pub(crate) async fn handle_client(
     shared_gcs: SharedGcs,
     client_registry: SharedClientRegistry,
     shared_pointer: super::types::SharedPointer,
+    shared_focus: super::types::SharedFocus,
     event_broadcaster: EventBroadcaster,
     server_grab: ServerGrabLock,
     shared_record_contexts: SharedRecordContexts,
@@ -358,7 +359,14 @@ pub(crate) async fn handle_client(
         // (e.g. after an earlier client's XTEST motion), not (0, 0).
         pointer_x: shared_pointer.lock().map(|p| p.0).unwrap_or(0),
         pointer_y: shared_pointer.lock().map(|p| p.1).unwrap_or(0),
-        focus_window: ROOT_WINDOW,
+        // Read the global focus on connect — a client joining mid-session
+        // (xterm, etc.) needs to see what xdotool's earlier SetInputFocus
+        // already chose, not the bare ROOT default. Same pattern as
+        // pointer_x/y above.
+        focus_window: shared_focus
+            .lock()
+            .map(|f| *f)
+            .unwrap_or(ROOT_WINDOW),
         focus_revert_to: 1, // Parent
         font_manager: FontManager::new(),
         render: handlers::render::RenderState::new(),
@@ -491,6 +499,7 @@ pub(crate) async fn handle_client(
         shared_gcs,
         client_registry: client_registry.clone(),
         shared_pointer: shared_pointer.clone(),
+        shared_focus: shared_focus.clone(),
         event_broadcaster,
         server_grab,
         randr_crtcs: Vec::new(),

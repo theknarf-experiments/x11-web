@@ -5276,14 +5276,7 @@ test("clipboard: xclip copy and xterm paste round-trip", async ({
 // XTest injection: xdotool sends synthetic events to xterm,
 // verify the target window responds
 // ---------------------------------------------------------------
-// Even with an explicit `-e bash` shell child (verified bash is alive),
-// the canvas pixel hash doesn't change after xdotool injected
-// keystrokes. The stability/stress.spec.ts xdotool-keystrokes test
-// proves keys reach the shell (a file is written), so the gap is
-// specifically that XTEST-driven keystrokes don't trigger the
-// xterm-redraw → DisplayUpdate::PutImage → frontend canvas chain.
-// Tracked alongside the xeyes XTEST-mouse test.
-test.skip("xdotool: inject keystrokes into xterm and verify response", async ({
+test("xdotool: inject keystrokes into xterm and verify response", async ({
 	page,
 	sidecarContainer,
 	frontendUrl,

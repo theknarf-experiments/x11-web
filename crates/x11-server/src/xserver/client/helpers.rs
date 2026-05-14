@@ -39,6 +39,27 @@ impl ClientState {
         }
     }
 
+    /// Mirror the new focus window into shared state. Called by
+    /// `set_focus_window` after the local update + event fan-out, so
+    /// xdotool's `windowfocus` is observable to xterm's later
+    /// `GetInputFocus`.
+    #[inline]
+    pub(crate) fn write_focus_to_shared(&self, focus: u32) {
+        if let Ok(mut f) = self.shared_focus.lock() {
+            *f = focus;
+        }
+    }
+
+    /// Pull the latest global focus window from shared state into
+    /// local. Used by `GetInputFocus` so the reply reflects any
+    /// `SetInputFocus` from another connection.
+    #[inline]
+    pub(crate) fn refresh_focus_from_shared(&mut self) {
+        if let Ok(f) = self.shared_focus.lock() {
+            self.focus_window = *f;
+        }
+    }
+
     // -----------------------------------------------------------------------
     // Resource limit checks
     // -----------------------------------------------------------------------

@@ -89,6 +89,10 @@ impl ClientState {
         let prev_focus = self.focus_window;
         let prev_uuid = self.top_level_uuid_for(prev_focus);
         self.focus_window = new_focus;
+        // Per X11 spec, focus is a server-wide resource — mirror into
+        // shared state so other clients' GetInputFocus reflects this
+        // update.
+        self.write_focus_to_shared(new_focus);
         let next_uuid = self.top_level_uuid_for(new_focus);
         if prev_uuid != next_uuid {
             self.broadcast_focus(next_uuid);

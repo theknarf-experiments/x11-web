@@ -316,6 +316,11 @@ pub(crate) struct ClientState {
     /// visible to client B's next QueryPointer. Sync helpers live on
     /// `ClientState` (`set_pointer`, `refresh_pointer_from_shared`).
     pub(crate) shared_pointer: super::types::SharedPointer,
+    /// Globally-shared focus window — xdotool's `windowfocus xterm`
+    /// must be visible to xterm's own `GetInputFocus`. Sync helpers
+    /// (`set_focus_shared`, `refresh_focus_from_shared`) live on
+    /// `ClientState`.
+    pub(crate) shared_focus: super::types::SharedFocus,
     /// Cross-connection event broadcaster for per-window event subscriptions.
     pub(crate) event_broadcaster: super::types::EventBroadcaster,
     /// Shared server grab lock (GrabServer/UngrabServer across all clients).

@@ -133,7 +133,11 @@ pub(crate) fn handle_xtest_request(state: &mut ClientState, data: &[u8], seq: u1
 
                         // Keys go to the focus window (or its first ancestor
                         // that selected the mask, but we deliver to the focus
-                        // window itself and let the receiver propagate).
+                        // window itself and let the receiver propagate). Refresh
+                        // focus from shared state so xdotool's earlier
+                        // `windowfocus xterm` (from a separate connection) is
+                        // visible here.
+                        state.refresh_focus_from_shared();
                         let event = build_kbp_event(
                             state,
                             event_type,

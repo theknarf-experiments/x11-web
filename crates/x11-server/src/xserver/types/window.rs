@@ -254,6 +254,16 @@ pub(crate) type SharedClientRegistry = Arc<Mutex<Vec<u32>>>;
 /// `refresh_pointer_from_shared()` pull the latest before answering.
 pub(crate) type SharedPointer = Arc<Mutex<(i16, i16)>>;
 
+/// Globally-shared input focus window. Per X11 spec the focus state is
+/// a server-wide resource — `SetInputFocus` by one client is visible
+/// to every other client's `GetInputFocus`. Each ClientState still
+/// keeps a local `focus_window` because focus events also flow through
+/// it (FocusIn / FocusOut deltas, _NET_ACTIVE_WINDOW property writes,
+/// per-client subscription routing), but reads route through
+/// `refresh_focus_from_shared()` so xdotool's `windowfocus xterm` is
+/// observable to xterm's own `GetInputFocus`.
+pub(crate) type SharedFocus = Arc<Mutex<u32>>;
+
 /// RAII guard that removes this client's resource base from the shared registry on disconnect.
 pub(crate) struct ClientRegistryGuard {
     pub(crate) registry: SharedClientRegistry,
