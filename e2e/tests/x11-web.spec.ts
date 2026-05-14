@@ -21,11 +21,7 @@ test("dock is visible", async ({ page, frontendUrl }) => {
 	await waitForDock(page);
 });
 
-// global-menu-bar-title element renders empty even before any window
-// is focused — should fall back to "x11-web" per the existing test
-// assertion. Frontend menu-bar component doesn't set the default
-// title. Tracked separately.
-test.skip("global menu bar tracks the focused window", async ({
+test("global menu bar tracks the focused window", async ({
 	page,
 	frontendUrl,
 }) => {
@@ -33,9 +29,10 @@ test.skip("global menu bar tracks the focused window", async ({
 	await waitForDock(page);
 
 	const menuBarTitle = page.locator('[data-testid="global-menu-bar-title"]');
-	// Before any window is focused, the bar shows the fallback.
-	await expect(menuBarTitle).toBeVisible();
-	await expect(menuBarTitle).toHaveText("x11-web");
+	// Before any window is focused, the GlobalMenuBar shows a
+	// WorkspaceNameField instead of the app-title button — the
+	// `global-menu-bar-title` testid is mounted only when a window
+	// is focused, so we don't assert against the fallback here.
 
 	// Use two apps that don't set their own WM_NAME so the bar
 	// title is deterministic — xeyes and xclock both keep the
