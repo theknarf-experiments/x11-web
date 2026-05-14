@@ -247,4 +247,36 @@ describe("keyDownToInput / keyUpToInput", () => {
 		).toBeNull();
 		expect(keyUpToInput({ ...noMods, code: "", keyCode: 0 })).toBeNull();
 	});
+
+	// Playwright's `keyboard.type(":")` dispatches the colon character
+	// with `code="Semicolon"` and `key=":"` but does NOT set shiftKey,
+	// so a literal modifierMask read would lose the shift bit and the
+	// X server would see `;` instead of `:`. impliedShiftMask() compensates.
+	test("infers shift bit from shifted key character even when shiftKey=false", () => {
+		expect(
+			keyDownToInput({
+				...noMods,
+				code: "Semicolon",
+				key: ":",
+				keyCode: 186,
+			}),
+		).toEqual({ kind: "KeyPress", keycode: 47, state: 0x01 });
+	});
+
+	test("does not infer shift when key character is the unshifted variant", () => {
+		expect(
+			keyDownToInput({
+				...noMods,
+				code: "Semicolon",
+				key: ";",
+				keyCode: 186,
+			}),
+		).toEqual({ kind: "KeyPress", keycode: 47, state: 0 });
+	});
+
+	test("infers shift for uppercase letter typed without an explicit Shift event", () => {
+		expect(
+			keyDownToInput({ ...noMods, code: "KeyA", key: "A", keyCode: 65 }),
+		).toEqual({ kind: "KeyPress", keycode: 38, state: 0x01 });
+	});
 });

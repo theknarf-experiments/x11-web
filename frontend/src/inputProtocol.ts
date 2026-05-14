@@ -24,6 +24,11 @@ export interface ModifierLike {
 export interface KeyLike extends ModifierLike {
 	code: string;
 	keyCode: number;
+	/** Printable-character key, used to infer shift when the
+	 *  modifier wasn't explicitly pressed (e.g. Playwright's
+	 *  keyboard.type(":")). Optional because legacy paths only need
+	 *  code + keyCode. */
+	key?: string;
 }
 
 /** Subset of `MouseEvent` we need for mouse / button translation. */
@@ -182,6 +187,44 @@ export function modifierMask(e: ModifierLike): number {
 	return mask;
 }
 
+/** Shifted printable characters (`:`, `?`, `<`, `>`, `_`, `+`, `!`, `@`,
+ *  `#`, `$`, `%`, `^`, `&`, `*`, `(`, `)`, `{`, `}`, `|`, `~`, `"`, A-Z)
+ *  whose corresponding `code` value would otherwise pair with shiftKey
+ *  unset. Playwright's `keyboard.type(":")` dispatches the colon char
+ *  with `code="Semicolon"` but does NOT fire a Shift modifier, so a
+ *  literal modifierMask read would lose the shift bit and the X server
+ *  would see `;` instead of `:`. When `e.key` is one of these characters
+ *  we set the shift bit unconditionally. */
+const SHIFTED_KEY_CHARS: ReadonlySet<string> = new Set([
+	":",
+	"<",
+	">",
+	"?",
+	"~",
+	'"',
+	"{",
+	"}",
+	"|",
+	"!",
+	"@",
+	"#",
+	"$",
+	"%",
+	"^",
+	"&",
+	"*",
+	"(",
+	")",
+	"_",
+	"+",
+	// Uppercase letters are also shifted versions of their lowercase keys.
+	..."ABCDEFGHIJKLMNOPQRSTUVWXYZ",
+]);
+
+function impliedShiftMask(e: KeyLike): number {
+	return e.key && SHIFTED_KEY_CHARS.has(e.key) ? 0x01 : 0;
+}
+
 /** Resolve the bit in `MouseEvent.buttons` corresponding to
  *  `MouseEvent.button`. Browsers report `buttons` AFTER the press
  *  for a `mousedown` and BEFORE the release for a `mouseup`, so
@@ -271,12 +314,20 @@ export function mouseUpToInput(
 export function keyDownToInput(e: KeyLike): InputEvent | null {
 	const keycode = browserKeyToX11Keycode(e);
 	if (keycode <= 0) return null;
-	return { kind: "KeyPress", keycode, state: modifierMask(e) };
+	return {
+		kind: "KeyPress",
+		keycode,
+		state: modifierMask(e) | impliedShiftMask(e),
+	};
 }
 
 /** `keyup` → `KeyRelease`, or `null` when unmappable. */
 export function keyUpToInput(e: KeyLike): InputEvent | null {
 	const keycode = browserKeyToX11Keycode(e);
 	if (keycode <= 0) return null;
-	return { kind: "KeyRelease", keycode, state: modifierMask(e) };
+	return {
+		kind: "KeyRelease",
+		keycode,
+		state: modifierMask(e) | impliedShiftMask(e),
+	};
 }

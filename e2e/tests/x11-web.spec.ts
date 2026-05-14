@@ -1119,16 +1119,9 @@ test("vim can be quit with :q", async ({ page, frontendUrl }) => {
 
 	const inVim = await canvasPixelHash(canvas);
 
-	// Use keyboard.press("Shift+Semicolon") rather than keyboard.type(":")
-	// because Playwright's keyboard.type(":") emits the colon character
-	// without firing a Shift down/up around it, so the resulting X11
-	// KeyPress carries shiftKey=false and xterm sees `;` instead of `:`.
-	// Pressing the explicit chord goes through the normal modifier mask
-	// in modifierMask() and reaches vim as a colon.
 	await page.keyboard.press("Escape");
 	await page.waitForTimeout(300);
-	await page.keyboard.press("Shift+Semicolon");
-	await page.keyboard.press("q");
+	await page.keyboard.type(":q", { delay: 80 });
 	await page.keyboard.press("Enter");
 	await page.waitForTimeout(3000);
 
