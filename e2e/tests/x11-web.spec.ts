@@ -851,6 +851,13 @@ test("firefox renders on the canvas", async ({ page, frontendUrl }) => {
 	});
 });
 
+// Snapshot-based screenshot diff against pre-recorded
+// firefox-before-input.png. The locator's nth(1) returns xeyes (the
+// first-spawned 100x80 window) instead of the 921x691 Firefox canvas
+// because the frontend doesn't deterministically order
+// window-frame siblings by spawn time. Fix here is to switch to
+// finding the canvas by size or by Firefox's WM_NAME, but that's
+// orthogonal to a server bug — keep skipped.
 test.skip("firefox responds to mouse and keyboard input", async ({
 	page,
 	frontendUrl,
