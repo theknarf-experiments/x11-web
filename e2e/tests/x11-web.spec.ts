@@ -5270,6 +5270,14 @@ test("clipboard: xclip copy and xterm paste round-trip", async ({
 // XTest injection: xdotool sends synthetic events to xterm,
 // verify the target window responds
 // ---------------------------------------------------------------
+// XTEST keystrokes from xdotool DO reach xterm — the
+// stability/stress.spec.ts "xdotool sends keystrokes to a specific
+// window" test demonstrates the shell processes them by writing
+// a file. But xterm doesn't visually redraw its canvas after
+// XTEST-driven keystrokes (only frontend-driven keystrokes via
+// page.keyboard.type produce repaints), so this test's canvas
+// pixel-hash assertion fails. Same input-then-canvas-redraw gap
+// as the xeyes test.
 test.skip("xdotool: inject keystrokes into xterm and verify response", async ({
 	page,
 	sidecarContainer,
@@ -5299,13 +5307,10 @@ test.skip("xdotool: inject keystrokes into xterm and verify response", async ({
 		[
 			"set -e",
 			"export DISPLAY=:99",
-			// Find the xterm window
 			"WID=$(xdotool search --class xterm 2>/dev/null | head -1)",
 			'if [ -z "$WID" ]; then echo "xterm-not-found"; exit 1; fi',
-			// Focus it
-			"xdotool windowactivate --sync $WID 2>&1 || true",
+			"xdotool windowfocus $WID 2>&1 || true",
 			"sleep 0.3",
-			// Type a command using XTEST FakeInput
 			"xdotool type --delay 30 'echo XDOTOOL_INJECTED'",
 			"xdotool key Return",
 			"sleep 1",
