@@ -5314,13 +5314,18 @@ test.skip("xdotool: inject keystrokes into xterm and verify response", async ({
 // ---------------------------------------------------------------
 // xdotool: inject mouse click on xeyes, verify pupil movement
 // ---------------------------------------------------------------
-// xeyes doesn't visibly track xdotool's pointer motion — the canvas pixel
-// hash stays the same before and after the xdotool mousemove sequence.
-// This is the same "input-then-redraw" gap as the vim :q test: the motion
-// event reaches the server (xdotool exit 0, getmouselocation returns the
-// expected coords) but xeyes either doesn't get the motion or doesn't
-// redraw on the frontend. Skipping until the motion-to-app-to-canvas
-// loop is verified end-to-end.
+// xdotool mousemove via XTEST FakeInput correctly updates the server's
+// shared pointer state — xdotool getmouselocation from another connection
+// returns the new x:340 y:60 reliably. xeyes' own 200ms QueryPointer
+// timer is also reading the same shared state. But the canvas hash
+// stays unchanged: either xeyes isn't actually redrawing on the
+// server (maybe xeyes uses an XScreenSaver-based wakeup that we don't
+// trigger for FakeInput motion), or the redraw doesn't propagate to
+// the frontend canvas because the frontend's overlay-cursor sprite
+// only moves on frontend-originated input. The pupils-follow-cursor
+// test that DOES pass uses page.mouse.move which feeds the frontend
+// directly. Tracking as a deeper "FakeInput motion → app repaint →
+// canvas" investigation.
 test.skip("xdotool: inject mouse events and verify xeyes responds", async ({
 	page,
 	sidecarContainer,
@@ -5338,26 +5343,21 @@ test.skip("xdotool: inject mouse events and verify xeyes responds", async ({
 		totalTimeoutMs: 10_000,
 	});
 
-	// Move cursor to center via Playwright first, record hash
 	const box = await canvas.boundingBox();
 	expect(box).not.toBeNull();
 	await page.mouse.move(box!.x + box!.width / 2, box!.y + box!.height / 2);
 	await page.waitForTimeout(1000);
 	const hashCenter = await canvasPixelHash(canvas);
 
-	// Now use xdotool to move the mouse to a far corner via XTEST
 	await sidecarContainer.exec([
 		"bash",
 		"-c",
 		"DISPLAY=:99 xdotool mousemove 340 60 2>&1",
 	]);
-	await page.waitForTimeout(1500);
+	await page.waitForTimeout(2000);
 
-	// xeyes pupils should track the xdotool-injected position
 	const hashCorner = await canvasPixelHash(canvas);
-	expect(hashCorner, "xeyes should respond to xdotool mousemove").not.toBe(
-		hashCenter,
-	);
+	expect(hashCorner).not.toBe(hashCenter);
 });
 
 // ---------------------------------------------------------------
