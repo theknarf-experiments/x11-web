@@ -341,7 +341,20 @@ impl AppMenuRegistrar {
             menu_object_path.as_str()
         );
 
-        match self.tracker.window_index().lookup(window_id) {
+        // Apps can race the X server: `XCreateWindow` + `XFlush`
+        // followed immediately by a DBus `RegisterWindow` call can
+        // arrive at the sidecar before our X-server task has drained
+        // the CreateWindow request and called `get_or_create_window_uuid`.
+        // Poll the index briefly before giving up.
+        let mut resolved: Option<(String, String)> = self.tracker.window_index().lookup(window_id);
+        for _ in 0..20 {
+            if resolved.is_some() {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+            resolved = self.tracker.window_index().lookup(window_id);
+        }
+        match resolved {
             Some((uuid, client_id)) => {
                 self.tracker.attach_dbusmenu(
                     uuid,
@@ -351,7 +364,9 @@ impl AppMenuRegistrar {
                 );
             }
             None => {
-                warn!("AppMenu.RegisterWindow: unknown xid {window_id:#x}");
+                warn!(
+                    "AppMenu.RegisterWindow: xid {window_id:#x} never showed up in window_index after 1s — leaving registration pending"
+                );
             }
         }
 
@@ -893,17 +908,22 @@ async fn dispatch_activation(
     default_path = "/MenuBar"
 )]
 trait Dbusmenu {
-    /// `(revision, layout)` where `layout` is a recursive
-    /// `(i, a{sv}, av)` triple. The third field is `av` (array of
-    /// variants); each variant wraps another triple. We deserialize
-    /// the layout side as `OwnedValue` and walk it manually because
-    /// recursive structures are awkward to express in serde.
+    /// Per the dbusmenu spec, `GetLayout` returns `(u(ia{sv}av))` —
+    /// a u32 revision followed by the recursive layout struct
+    /// `(ia{sv}av)` *directly* (not wrapped in a variant). zbus
+    /// translates the struct into a `(i32, HashMap, Vec<OwnedValue>)`
+    /// tuple; we then walk the `Vec<OwnedValue>` children manually.
+    /// The previous signature `(u32, OwnedValue)` decoded as `(uv)`
+    /// and failed with `Signature mismatch: got 'u(ia{sv}av)',
+    /// expected '(uv)'`, which silently emptied every dbusmenu app's
+    /// global menu.
+    #[allow(clippy::type_complexity)]
     fn get_layout(
         &self,
         parent_id: i32,
         recursion_depth: i32,
         property_names: &[&str],
-    ) -> zbus::Result<(u32, OwnedValue)>;
+    ) -> zbus::Result<(u32, (i32, HashMap<String, OwnedValue>, Vec<OwnedValue>))>;
 
     /// `event_id` is one of "clicked", "opened", "closed", "hovered".
     fn event(&self, id: i32, event_id: &str, data: &Value<'_>, timestamp: u32) -> zbus::Result<()>;
@@ -1006,7 +1026,7 @@ async fn fetch_and_publish_dbusmenu(
     // Wrapped in a timeout because some apps publish a path then never
     // actually answer requests at it (looking at you, featherpad).
     let layout_call = proxy.get_layout(0, -1, &[]);
-    let (_revision, layout_value) =
+    let (_revision, (root_id, root_props, root_children)) =
         match tokio::time::timeout(std::time::Duration::from_secs(5), layout_call).await {
             Ok(result) => result?,
             Err(_) => {
@@ -1014,12 +1034,13 @@ async fn fetch_and_publish_dbusmenu(
                 return Ok(());
             }
         };
-    let root = match parse_dbusmenu_value(&layout_value) {
-        Some(node) => node,
-        None => {
-            warn!("dbusmenu GetLayout returned an unparseable tree");
-            return Ok(());
-        }
+    let root = DbusmenuNode {
+        id: root_id,
+        properties: root_props,
+        children: root_children
+            .into_iter()
+            .filter_map(parse_dbusmenu_owned)
+            .collect(),
     };
     info!(
         "dbusmenu mirror for {window_uuid}: {} top-level items",
@@ -1045,12 +1066,6 @@ async fn fetch_and_publish_dbusmenu(
 /// We rely on zvariant's `TryInto<(i32, HashMap<...>, Vec<OwnedValue>)>`
 /// to peel one layer at a time: each child in the `Vec<OwnedValue>` is
 /// itself a variant-wrapped triple, and we recurse on it.
-fn parse_dbusmenu_value(value: &OwnedValue) -> Option<DbusmenuNode> {
-    // OwnedValue is Clone (cheap, refcounted). We need to consume one
-    // here because TryInto is by-value.
-    parse_dbusmenu_owned(value.try_clone().ok()?)
-}
-
 fn parse_dbusmenu_owned(value: OwnedValue) -> Option<DbusmenuNode> {
     let (id, props, children_owned): (i32, HashMap<String, OwnedValue>, Vec<OwnedValue>) =
         value.try_into().ok()?;
