@@ -4047,7 +4047,11 @@ test("xdotool windowraise and windowlower update stacking", async ({
 // -------------------------------------------------------------------
 // Performance: frame rate timer verification
 // -------------------------------------------------------------------
-test.skip("xeyes renders at higher frame rate with 16ms timer", async ({ page }) => {
+test("xeyes renders at higher frame rate with 16ms timer", async ({
+	page,
+	frontendUrl,
+}) => {
+	await page.goto(frontendUrl);
 	await waitForDock(page);
 	const frame = await spawnApp(page);
 	const canvas = frame.locator('[data-testid="x11-canvas"]');
@@ -4112,7 +4116,8 @@ test("xwininfo reports correct stacking order", async ({
 // -------------------------------------------------------------------
 // GetMotionEvents returns motion history
 // -------------------------------------------------------------------
-test.skip("xdotool mousemove works correctly", async ({ page }) => {
+test("xdotool mousemove works correctly", async ({ page, frontendUrl }) => {
+	await page.goto(frontendUrl);
 	await waitForDock(page);
 	const frame = await spawnApp(page);
 	const canvas = frame.locator('[data-testid="x11-canvas"]');
@@ -4176,7 +4181,11 @@ test("xmodmap can query modifier mapping", async ({ sidecarContainer }) => {
 // -------------------------------------------------------------------
 // Passive button grab via xdotool
 // -------------------------------------------------------------------
-test.skip("xdotool can issue button clicks on windows", async ({ page }) => {
+test("xdotool can issue button clicks on windows", async ({
+	page,
+	frontendUrl,
+}) => {
+	await page.goto(frontendUrl);
 	await waitForDock(page);
 	const frame = await spawnApp(page);
 	const canvas = frame.locator('[data-testid="x11-canvas"]');
