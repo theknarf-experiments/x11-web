@@ -57,9 +57,15 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libdbusmenu-glib-dev libx11-dev libglib2.0-dev \
     && rm -rf /var/lib/apt/lists/*
 COPY crates/x11-server/test-tools/dbusmenu-test.c /tmp/
+# dbusmenu-test.c uses GDBus (`#include <gio/gio.h>`) plus the
+# libdbusmenu-glib-0.4 / x11 headers, but `dbusmenu-glib-0.4.pc`
+# doesn't transitively pull in glib's own header path on Debian's
+# pkg-config setup — add `gio-2.0` explicitly so the build doesn't
+# silently fall through to the `|| touch` fallback. Drop the touch
+# fallback: a working binary is required for the dbusmenu e2e test
+# and a silently-empty file is harder to debug than a build failure.
 RUN gcc -o /usr/local/bin/dbusmenu-test /tmp/dbusmenu-test.c \
-    $(pkg-config --cflags --libs dbusmenu-glib-0.4 x11) \
-    || touch /usr/local/bin/dbusmenu-test
+    $(pkg-config --cflags --libs dbusmenu-glib-0.4 x11 gio-2.0)
 
 FROM debian:bookworm-slim
 RUN apt-get update && apt-get install -y --no-install-recommends \

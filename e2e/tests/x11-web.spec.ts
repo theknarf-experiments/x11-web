@@ -131,13 +131,14 @@ test("global menu bar mirrors a GTK app's exported menus", async ({
 
 // Uses a custom dbusmenu-test binary (built in Dockerfile) that
 // publishes a static com.canonical.dbusmenu tree with File/Edit/Help
-// menus and registers via AppMenu.Registrar.
-// dbusmenu-test binary spawns but its X11 window doesn't surface
-// as a [data-testid="window-frame"] in the frontend — same
-// auto-attach gap as qterminal / LibreOffice. The XEMBED-style
-// helper window dbusmenu-test creates doesn't trip the backend's
-// (sidecar_id, pid) → workspace lookup that
-// backend_attach_window relies on.
+// menus and registers via AppMenu.Registrar. With the Dockerfile fix
+// the binary now actually builds (was previously a 0-byte stub due to
+// `gcc ... || touch` swallowing a missing-glib-header error), and the
+// dbusmenu-test window does surface on the canvas. Still skipped: the
+// `[data-testid="global-menu-top-item"]` entries don't populate — the
+// AppMenu.Registrar → MenuTracker → backend → frontend pipeline gets
+// the registration but the rendered menu list stays empty. Likely a
+// dbusmenu-tree-fetch / serialize bug in `MenuTracker::attach_dbusmenu`.
 test.skip("global menu bar mirrors an app via dbusmenu", async ({
 	page,
 	sidecarContainer,
