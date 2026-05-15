@@ -902,15 +902,39 @@ pub(crate) fn build_x11_input_event(
     input: &InputEvent,
     top_level: u32,
 ) -> Vec<u8> {
+    // Frontend pointer events carry coordinates *relative to the
+    // top-level window's canvas* (= the X window's interior origin),
+    // not root-window coordinates. Until WM_NORMAL_HINTS-driven
+    // positioning landed, every window also lived at (0, 0) so the
+    // two coordinate spaces coincided and this distinction didn't
+    // matter — `set_pointer(x, y)` happened to set the right root
+    // pointer. Now that we honor `-geometry +X+Y`, a window sitting
+    // at (50, 50) would otherwise have its `root_x/root_y` reported
+    // as canvas-local, and `QueryPointer` from a different client
+    // (e.g. xeyes polling, xdotool getmouselocation) would return
+    // the window-local value as if it were root-relative — pupils
+    // and probes follow the wrong coordinate space. Translate once
+    // up front: root_x = top_level.x + input.x, etc.
+    let (root_off_x, root_off_y) = state
+        .windows
+        .get(&top_level)
+        .map(|w| (w.x as i32, w.y as i32))
+        .unwrap_or((0, 0));
+    let local_to_root = |lx: i16, ly: i16| -> (i16, i16) {
+        let rx = (root_off_x + lx as i32).clamp(i16::MIN as i32, i16::MAX as i32) as i16;
+        let ry = (root_off_y + ly as i32).clamp(i16::MIN as i32, i16::MAX as i32) as i16;
+        (rx, ry)
+    };
     match input {
         InputEvent::MotionNotify { x, y, .. }
         | InputEvent::ButtonPress { x, y, .. }
         | InputEvent::ButtonRelease { x, y, .. } => {
-            state.set_pointer(*x, *y);
+            let (rx, ry) = local_to_root(*x, *y);
+            state.set_pointer(rx, ry);
             // Record motion history for GetMotionEvents
             if matches!(input, InputEvent::MotionNotify { .. }) {
                 let ts = state.timestamp();
-                state.record_motion_history(ts, *x, *y);
+                state.record_motion_history(ts, rx, ry);
             }
         }
         _ => {}
@@ -1008,6 +1032,7 @@ pub(crate) fn build_x11_input_event(
 
     match input {
         InputEvent::MotionNotify { x, y, state: mask } => {
+            let (rx, ry) = local_to_root(*x, *y);
             event = serialize_event(
                 &MotionNotifyEvent {
                     response_type: MOTION_NOTIFY_EVENT,
@@ -1017,8 +1042,8 @@ pub(crate) fn build_x11_input_event(
                     root: root_window,
                     event: event_window,
                     child: 0,
-                    root_x: *x,
-                    root_y: *y,
+                    root_x: rx,
+                    root_y: ry,
                     event_x,
                     event_y,
                     state: (*mask).into(),
@@ -1034,6 +1059,7 @@ pub(crate) fn build_x11_input_event(
             state: mask,
         } => {
             state.motion_hint_suppressed = false;
+            let (rx, ry) = local_to_root(*x, *y);
             event = serialize_event(
                 &ButtonPressEvent {
                     response_type: BUTTON_PRESS_EVENT,
@@ -1043,8 +1069,8 @@ pub(crate) fn build_x11_input_event(
                     root: root_window,
                     event: event_window,
                     child: 0,
-                    root_x: *x,
-                    root_y: *y,
+                    root_x: rx,
+                    root_y: ry,
                     event_x,
                     event_y,
                     state: (*mask).into(),
@@ -1060,6 +1086,7 @@ pub(crate) fn build_x11_input_event(
             state: mask,
         } => {
             state.motion_hint_suppressed = false;
+            let (rx, ry) = local_to_root(*x, *y);
             event = serialize_event(
                 &ButtonPressEvent {
                     response_type: BUTTON_RELEASE_EVENT,
@@ -1069,8 +1096,8 @@ pub(crate) fn build_x11_input_event(
                     root: root_window,
                     event: event_window,
                     child: 0,
-                    root_x: *x,
-                    root_y: *y,
+                    root_x: rx,
+                    root_y: ry,
                     event_x,
                     event_y,
                     state: (*mask).into(),

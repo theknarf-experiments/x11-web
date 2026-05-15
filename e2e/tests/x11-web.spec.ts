@@ -5309,14 +5309,17 @@ test("xdotool: inject keystrokes into xterm and verify response", async ({
 // ---------------------------------------------------------------
 // xdotool: inject mouse click on xeyes, verify pupil movement
 // ---------------------------------------------------------------
-// XTEST FakeInput motion updates the shared pointer correctly
-// (cross-connection getmouselocation returns the right coords)
-// but xeyes' canvas hash still doesn't change. The shared-focus
-// fix doesn't help here — xeyes uses a 200ms QueryPointer poll,
-// not focus. The likely remaining gap is that XTEST motion
-// doesn't trigger xeyes' framebuffer dirty marker through the
-// drawing-request path, possibly because find_subwindow_in_shared
-// picks a window other than xeyes.
+// Even with the XTEST motion detail-bit fix and the root-vs-window
+// coordinate-translation fix, this test still fails because xeyes
+// inside the test container doesn't seem to repaint between the two
+// pointer positions. Standalone repro: `xdotool mousemove 340 60`
+// leaves the server's pointer correctly at (340, 60) and xeyes'
+// window UUID still resolves under the pointer, but the window's
+// framebuffer captured via `xwd` stays the all-black startup state.
+// xeyes paints fine in the browser-driven `xeyes pupils follow the
+// cursor` test, so the difference is in how XTEST FakeInput plays
+// through xeyes' Xt timer / Expose pipeline. Tracking separately —
+// keep skipped until the redraw path is understood.
 test.skip("xdotool: inject mouse events and verify xeyes responds", async ({
 	page,
 	sidecarContainer,

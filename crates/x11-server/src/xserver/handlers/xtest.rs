@@ -213,13 +213,22 @@ pub(crate) fn handle_xtest_request(state: &mut ClientState, data: &[u8], seq: u1
                     MOTION_NOTIFY_EVENT => {
                         let old_px = state.pointer_x;
                         let old_py = state.pointer_y;
+                        // Per the XTEST protocol, MotionNotify's `detail` is
+                        // a boolean `relativeP`: 0 (xFalse) means absolute,
+                        // 1 (xTrue) means relative. `XTestFakeMotionEvent`
+                        // (xdotool's default code path) sends detail=0 with
+                        // absolute root coordinates;
+                        // `XTestFakeRelativeMotionEvent` sends detail=1 with
+                        // a delta. This was inverted, so every `xdotool
+                        // mousemove X Y` added X/Y to the current pointer
+                        // instead of jumping to (X, Y).
                         let (mut nx, mut ny) = if detail == 0 {
+                            (root_x, root_y)
+                        } else {
                             (
                                 state.pointer_x.saturating_add(root_x),
                                 state.pointer_y.saturating_add(root_y),
                             )
-                        } else {
-                            (root_x, root_y)
                         };
                         if !state.barriers.is_empty() {
                             let (bx, by) = super::super::input::enforce_barriers(
