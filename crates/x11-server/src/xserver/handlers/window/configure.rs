@@ -500,11 +500,25 @@ pub(crate) fn handle_configure_window(
                     .resize_with_gravity(new_w as u32, new_h as u32, bg);
             }
 
-            if let Some(ref uuid) = wid_str {
+            // Tag the WindowConfigured update with the *owning*
+            // client's id and resolve the canonical UUID via the
+            // cross-client `WindowRouter` map. When the request comes
+            // from a different connection (e.g. xdotool resizing
+            // xeyes' top-level), this connection's local
+            // `x11_to_uuid` map doesn't carry the foreign window's
+            // UUID — without the router lookup the emission falls
+            // through silently and the resize never reaches the
+            // backend's `window_track` (which is keyed by the
+            // owner-allocated UUID).
+            let owner = win.owner_client_id.clone();
+            let resolved_uuid = wid_str
+                .clone()
+                .or_else(|| state.window_router.uuid_for_x11_wid(wid));
+            if let Some(uuid) = resolved_uuid {
                 let _ = state.update_tx.send((
-                    state.client_id.clone(),
+                    owner,
                     DisplayUpdate::WindowConfigured {
-                        window_id: uuid.clone(),
+                        window_id: uuid,
                         x: win.x,
                         y: win.y,
                         width: win.width,

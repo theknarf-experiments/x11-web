@@ -482,13 +482,7 @@ test.describe.serial("App compatibility: real-app smoke (page-driven)", () => {
 		}
 	});
 
-	// xdotool windowsize sends ConfigureWindow on the outer xeyes
-	// window; our X server processes it but xeyes doesn't pick up the
-	// new size for its canvas. Likely the ConfigureNotify doesn't
-	// trigger xeyes' framebuffer resize / Expose cycle. Same family
-	// of "XTEST-driven action doesn't visibly redraw" bugs as the
-	// xeyes-XTEST-pointer test.
-	test.skip("window resize via xdotool windowsize", async ({
+	test("window resize via xdotool windowsize", async ({
 		page,
 		sidecarContainer,
 		frontendUrl,

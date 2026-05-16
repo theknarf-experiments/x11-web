@@ -112,6 +112,20 @@ impl WindowRouter {
         }
         false
     }
+
+    /// Cross-client reverse lookup: which UUID maps to this X11
+    /// window id? Used when one connection mutates a window owned
+    /// by another (e.g. xdotool sending `ConfigureWindow` on xeyes'
+    /// top-level) and needs to emit a `DisplayUpdate` whose
+    /// `window_id` field carries the canonical, owner-allocated
+    /// UUID rather than `None`.
+    pub(crate) fn uuid_for_x11_wid(&self, x11_wid: u32) -> Option<String> {
+        let routes = self.routes.lock().ok()?;
+        routes
+            .iter()
+            .find(|(_, r)| r.x11_window_id == x11_wid)
+            .map(|(uuid, _)| uuid.clone())
+    }
 }
 
 /// Routes raw X11 events to the correct connection by X11 window ID.
