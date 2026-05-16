@@ -88,7 +88,15 @@ pub(crate) fn handle_map_window(state: &mut ClientState, req: &MapWindowRequest)
         return events;
     }
 
-    let Some(wid_str) = state.window_uuid(wid) else {
+    // The local per-client `x11_to_uuid` map only knows windows this
+    // connection created. For cross-client requests (`xdotool
+    // windowmap WID` on someone else's window) fall back to the
+    // shared `WindowRouter` map. Skipping silently here used to
+    // make `xdotool windowmap` a no-op on foreign windows.
+    let Some(wid_str) = state
+        .window_uuid(wid)
+        .or_else(|| state.window_router.uuid_for_x11_wid(wid))
+    else {
         warn!("MapWindow: no UUID for {wid:#x}, skipping");
         return events;
     };
@@ -287,8 +295,12 @@ pub(crate) fn handle_map_window(state: &mut ClientState, req: &MapWindowRequest)
         let width = win.width;
         let height = win.height;
 
+        // Tag with the window owner so the backend's `window_track`
+        // (keyed by owner_client_id) catches the update when the
+        // request came from a different client.
+        let owner = win.owner_client_id.clone();
         let _ = state.update_tx.send((
-            state.client_id.clone(),
+            owner.clone(),
             DisplayUpdate::WindowMapped {
                 window_id: wid_str.clone(),
                 is_top_level,
@@ -299,7 +311,7 @@ pub(crate) fn handle_map_window(state: &mut ClientState, req: &MapWindowRequest)
         // If initial_state is IconicState (3), immediately send Minimized state to frontend
         if is_top_level && initial_state == 3 {
             let _ = state.update_tx.send((
-                state.client_id.clone(),
+                owner,
                 DisplayUpdate::WindowStateChanged {
                     window_id: wid_str.clone(),
                     state: x11_web_protocol::WindowWmState::Minimized,
@@ -631,9 +643,17 @@ pub(crate) fn handle_unmap_window(state: &mut ClientState, req: &UnmapWindowRequ
     // Make sure the mapped=false transition reaches shared_windows.
     state.mark_window_shared_dirty(wid);
 
-    if let Some(uuid) = state.window_uuid(wid) {
+    let owner_for_unmap = state
+        .windows
+        .get(&wid)
+        .map(|w| w.owner_client_id.clone())
+        .unwrap_or_else(|| state.client_id.clone());
+    let resolved_uuid_unmap = state
+        .window_uuid(wid)
+        .or_else(|| state.window_router.uuid_for_x11_wid(wid));
+    if let Some(uuid) = resolved_uuid_unmap {
         let _ = state.update_tx.send((
-            state.client_id.clone(),
+            owner_for_unmap,
             DisplayUpdate::WindowUnmapped { window_id: uuid },
         ));
     }
