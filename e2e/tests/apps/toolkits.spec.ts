@@ -178,11 +178,7 @@ test.describe("App compatibility: GTK3", () => {
 		expect(result.output).toContain("gtk3-ok");
 	});
 
-	// zenity isn't producing a window-frame visible to the frontend.
-	// Same root cause as the firefox-compliance suite: spawnApp times
-	// out waiting for `[data-testid="window-frame"]` to grow.
-	// Documented in todo.md.
-	test.skip("GTK text entry (zenity --entry) launches", async ({
+	test("GTK text entry (zenity --entry) launches", async ({
 		page,
 		sidecarContainer,
 		frontendUrl,

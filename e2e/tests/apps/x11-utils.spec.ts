@@ -429,9 +429,7 @@ test.describe.serial("App compatibility: real-app smoke (page-driven)", () => {
 		expect(result.output).toContain(`got=${clipboardContent}`);
 	});
 
-	// xclock spawn (after xeyes) isn't producing a window-frame in the
-	// frontend so the toHaveCount(2) check fails. Documented in todo.md.
-	test.skip("window stacking order via xdotool windowraise", async ({
+	test("window stacking order via xdotool windowraise", async ({
 		page,
 		sidecarContainer,
 		frontendUrl,
@@ -484,9 +482,12 @@ test.describe.serial("App compatibility: real-app smoke (page-driven)", () => {
 		}
 	});
 
-	// xdotool windowsize sends ConfigureWindow on the outer xeyes window;
-	// matchbox-WM redirects via SubstructureRedirectMask but the resize
-	// never reaches xeyes (canvas stays 200x150). Documented in todo.md.
+	// xdotool windowsize sends ConfigureWindow on the outer xeyes
+	// window; our X server processes it but xeyes doesn't pick up the
+	// new size for its canvas. Likely the ConfigureNotify doesn't
+	// trigger xeyes' framebuffer resize / Expose cycle. Same family
+	// of "XTEST-driven action doesn't visibly redraw" bugs as the
+	// xeyes-XTEST-pointer test.
 	test.skip("window resize via xdotool windowsize", async ({
 		page,
 		sidecarContainer,
