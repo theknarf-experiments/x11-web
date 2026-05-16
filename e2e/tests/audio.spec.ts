@@ -168,7 +168,7 @@ test.describe("Audio", () => {
 		expect(pixels).toBeGreaterThan(100);
 	});
 
-	test.skip("xterm renders with display updates via existing path", async ({
+	test("xterm renders with display updates via existing path", async ({
 		page,
 		frontendUrl,
 	}) => {
