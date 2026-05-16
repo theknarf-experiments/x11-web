@@ -859,3 +859,105 @@ test.skip("firefox: local HTML5 video playback", async ({
 	}
 	expect(changes).toBeGreaterThanOrEqual(2);
 });
+
+// ---------------------------------------------------------------------------
+// Firefox: click URL bar, type a URL, wait for the page to render.
+//
+// This is the *canonical* mouse-input-end-to-end test. It exercises the
+// click-delivery path through Firefox's chrome (a child window inside the
+// toplevel) instead of using the `Ctrl+L` keyboard shortcut that the
+// existing `firefox: navigate to Wikipedia` test uses.
+//
+// Currently failing — kept skipped, with the diagnostic notes below so the
+// next attempt has a starting point.
+//
+// Findings from probing this path (manual sidecar + xev + sidecar tracing):
+//   * Firefox does NOT issue any XISelectEvents (no DBG XInput logs fire
+//     during startup). So it's using core X events, not XInput2 — even
+//     though our X server advertises XInputExtension and negotiates
+//     `XIQueryVersion → 2.4`.
+//   * Firefox's chrome child window (the visible 921x691 child of the
+//     "Mozilla Firefox" Navigator top-level) selects core BUTTON_PRESS /
+//     BUTTON_RELEASE / ENTER / LEAVE / MOTION in its event_mask
+//     (= 0x43807c). So clicks *should* be delivered as core events.
+//   * `find_subwindow_in_shared` correctly resolves a click at
+//     `(canvas-center, 63)` to that chrome child, and `broadcast_event`
+//     fires with one matching subscriber (Firefox's own connection).
+//   * Despite that, `xev -id <chrome-child>` only ever sees ButtonRelease
+//     for an XTEST click — ButtonPress is missing from the log. The press
+//     event IS sent to Firefox's connection (broadcast logs confirm), but
+//     the visible state never changes: no URL bar caret appears, typed
+//     keys never echo into the bar, navigation doesn't fire.
+//   * The same click-and-type pattern works for `gtk3-demo` (probed
+//     during the same investigation), so the core-button-delivery
+//     primitive works in general; the failure is Firefox-specific.
+//   * `_NET_ACTIVE_WINDOW` after the click reports Firefox's 1x1 helper
+//     window (`0x...002b`) rather than the toplevel — likely Firefox sets
+//     this itself when it processes whatever FocusIn it sees. Our
+//     `set_focus_window` targets the toplevel, which may be a mismatch.
+//   * Keyboard input via `Ctrl+L` works (covered by `firefox: navigate
+//     to Wikipedia`). So Firefox's chrome receives core *keyboard*
+//     events after a focus-establishing click, just not *button* widget
+//     hits.
+//
+// Likely next directions: (a) verify whether Firefox is silently
+// discarding our ButtonPress due to a missing FocusIn / wrong focus
+// target before the press; (b) check whether the event's `time` field is
+// being garbage — `xev` consistently prints `time=12` for our XTEST
+// events even after 30 s of uptime, which would explain Firefox treating
+// them as stale; (c) inspect any passive XI2 / core passive button grab
+// Firefox sets up on its chrome.
+// ---------------------------------------------------------------------------
+test.skip("firefox: click URL bar, type wikipedia.org, page renders", async ({
+	page,
+	sidecarContainer,
+	frontendUrl,
+}) => {
+	test.setTimeout(240_000);
+	await cleanupApps(sidecarContainer);
+	await page.goto(frontendUrl);
+	await waitForDock(page);
+
+	const canvas = await spawnFirefoxAndWait(page);
+	await waitForCanvasStable(canvas, {
+		stableMs: 2500,
+		totalTimeoutMs: 30_000,
+	});
+
+	const hashBefore = await canvasPixelHash(canvas);
+	await canvas.screenshot({ path: "test-results/ff-click-1-before.png" });
+
+	const box = await canvas.boundingBox();
+	if (!box) throw new Error("Firefox canvas has no bounding box");
+	// URL bar sits in Firefox-ESR chrome around y=55-65 from canvas
+	// top. Click at center-x so we land squarely in the entry field.
+	const ux = box.x + box.width * 0.5;
+	const uy = box.y + 63;
+	await page.mouse.click(ux, uy);
+	await page.waitForTimeout(800);
+	await canvas.screenshot({ path: "test-results/ff-click-2-after-click.png" });
+
+	// Select-all to clear whatever placeholder/url is there.
+	await page.keyboard.press("Control+a");
+	await page.waitForTimeout(200);
+
+	await page.keyboard.type("www.wikipedia.org", { delay: 40 });
+	await page.waitForTimeout(500);
+	await canvas.screenshot({ path: "test-results/ff-click-3-typed.png" });
+
+	await page.keyboard.press("Enter");
+	// Wait long enough for Wikipedia to load and paint.
+	await page.waitForTimeout(15_000);
+	await waitForCanvasStable(canvas, {
+		stableMs: 2000,
+		totalTimeoutMs: 60_000,
+	});
+	await canvas.screenshot({ path: "test-results/ff-click-4-loaded.png" });
+
+	const hashAfter = await canvasPixelHash(canvas);
+	expect(hashAfter, "Firefox canvas should change after navigation").not.toBe(
+		hashBefore,
+	);
+	const pixels = await countNonBlackPixels(canvas);
+	expect(pixels).toBeGreaterThan(2000);
+});
