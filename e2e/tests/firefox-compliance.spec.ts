@@ -900,13 +900,19 @@ test.skip("firefox: local HTML5 video playback", async ({
 //     events after a focus-establishing click, just not *button* widget
 //     hits.
 //
-// Likely next directions: (a) verify whether Firefox is silently
-// discarding our ButtonPress due to a missing FocusIn / wrong focus
-// target before the press; (b) check whether the event's `time` field is
-// being garbage — `xev` consistently prints `time=12` for our XTEST
-// events even after 30 s of uptime, which would explain Firefox treating
-// them as stale; (c) inspect any passive XI2 / core passive button grab
-// Firefox sets up on its chrome.
+// Update (after the 10cbe63 timestamp fix): `xev` now reports
+// `time=16999` on a click that used to read `time=12`, so the per-
+// connection start-time bug is gone. Re-running this test with the
+// fix in place still leaves the URL bar empty and the page un-
+// navigated — so the stale-timestamp theory was real but not
+// sufficient on its own.
+//
+// Remaining hypotheses for the next pass: (a) verify whether Firefox
+// is silently discarding our ButtonPress due to a missing FocusIn /
+// wrong focus target before the press; (b) inspect any passive XI2
+// / core passive button grab Firefox sets on its chrome — if it
+// grabs *only* via XI2 and our XTEST handler only fires core events,
+// the grab never activates.
 // ---------------------------------------------------------------------------
 test.skip("firefox: click URL bar, type wikipedia.org, page renders", async ({
 	page,
