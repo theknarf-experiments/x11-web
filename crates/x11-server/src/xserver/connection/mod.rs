@@ -1799,6 +1799,35 @@ pub(crate) async fn handle_client(
                             };
                             let event_bytes = build_x11_input_event(&mut state, &input, x11_wid);
 
+                            // Per X11 spec, FocusOut/FocusIn precede the
+                            // ButtonPress that triggered the focus change —
+                            // a client clicking on a previously-unfocused
+                            // window observes the focus transition first,
+                            // then the press. Flush any FocusIn we queued
+                            // in `set_focus_window` (and any other
+                            // pre-press notifications like _NET_WM_USER_TIME
+                            // PropertyNotify) onto the wire *before* the
+                            // press. Without this ordering Firefox treats
+                            // the ButtonPress as arriving on a chrome
+                            // window that hasn't yet been focused for
+                            // input and silently drops it.
+                            if matches!(
+                                &input,
+                                x11_web_protocol::InputEvent::ButtonPress { .. }
+                            ) && !state.pending_events.is_empty()
+                            {
+                                let mut events: Vec<Vec<u8>> =
+                                    state.pending_events.drain(..).collect();
+                                patch_event_sequences(&mut events, state.sequence, state.msb_first);
+                                let record_intercepts = state.record_intercept_events(&events);
+                                for event in events {
+                                    stream.write_all(&event).await?;
+                                }
+                                for intercept in record_intercepts {
+                                    stream.write_all(&intercept).await?;
+                                }
+                            }
+
                             // Update _NET_WM_USER_TIME on user input (KeyPress, ButtonPress)
                             if matches!(&input,
                                 x11_web_protocol::InputEvent::KeyPress { .. } |
