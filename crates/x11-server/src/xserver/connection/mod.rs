@@ -160,6 +160,7 @@ pub(crate) async fn handle_client(
     shared_access_control: super::types::SharedAccessControl,
     shared_security_tokens: super::types::SharedSecurityTokens,
     extension_registry: Arc<super::extensions::ExtensionRegistry>,
+    server_start: std::time::Instant,
 ) -> io::Result<()> {
     // Phase 1: Read client setup request
     let mut header_buf = [0u8; 12];
@@ -394,7 +395,7 @@ pub(crate) async fn handle_client(
         disconnect_cleanup_done: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
         last_entered_window: ROOT_WINDOW,
         pressed_keys: [0u8; 32],
-        server_start: std::time::Instant::now(),
+        server_start,
         keyboard_control: Default::default(),
         pointer_control: Default::default(),
         screen_saver: Default::default(),

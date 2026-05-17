@@ -51,6 +51,14 @@ use self::types::*;
 pub struct X11Server {
     display_number: u32,
     socket_path: PathBuf,
+    /// Server-global startup time. Per the X11 spec, the `time` field
+    /// on every event is "Server Time" — milliseconds since X server
+    /// start, comparable across clients. If each connection had its
+    /// own start instant, a fresh client's events would carry a tiny
+    /// `time` value (~10s of ms) and apps using the field to dedupe
+    /// or order events (e.g. Firefox vs. a focus_time of 30 000+)
+    /// silently dropped them as stale.
+    server_start: std::time::Instant,
     update_tx: mpsc::UnboundedSender<TaggedDisplayUpdate>,
     client_connected_tx: mpsc::UnboundedSender<(String, u32)>,
     window_router: WindowRouter,
@@ -97,6 +105,7 @@ impl X11Server {
         Self {
             display_number,
             socket_path,
+            server_start: std::time::Instant::now(),
             update_tx,
             client_connected_tx,
             window_router,
@@ -1011,12 +1020,13 @@ vi_VN,vi_VN.UTF-8"
                 let sacl = self.shared_access_control.clone();
                 let sst = self.shared_security_tokens.clone();
                 let exr = self.extension_registry.clone();
+                let sst_start = self.server_start;
                 let stream = $stream;
                 tokio::spawn(async move {
                     if let Err(e) = connection::handle_client(
                         stream, client_id, update_tx, message_tx, message_rx, conn_index, peer_pid,
                         sw, skm, wm, sa, wr, mt, er, ss, cn, sp, spf, sg, cr, sptr, sfoc, eb, sgl, src, pc, ac,
-                        ssr, sacl, sst, exr,
+                        ssr, sacl, sst, exr, sst_start,
                     )
                     .await
                     {
