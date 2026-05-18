@@ -22,7 +22,25 @@ COPY Cargo.toml Cargo.lock ./
 COPY tools/setup-x11rb-fork.sh tools/setup-x11rb-fork.sh
 COPY crates/x11rb-protocol-msb/ crates/x11rb-protocol-msb/
 RUN bash tools/setup-x11rb-fork.sh
-COPY crates/ crates/
+# Copy only the crates the sidecar actually depends on. Crates like
+# `backend`, `auth`, `ws-wire`, `rtc-wire`, and `sidecar-macos` are
+# workspace members but are NOT transitive dependencies of
+# `x11-web-sidecar`, so we stub them out. This keeps the layer cache
+# valid when backend-only files change — no sidecar rebuild needed.
+COPY crates/sidecar/ crates/sidecar/
+COPY crates/x11-server/ crates/x11-server/
+COPY crates/protocol/ crates/protocol/
+COPY crates/wire/ crates/wire/
+COPY crates/pixel-codec/ crates/pixel-codec/
+COPY crates/telemetry/ crates/telemetry/
+# Stub workspace members the sidecar doesn't depend on so `cargo build`
+# can resolve the workspace manifest without them.
+RUN for crate in backend auth rtc-wire ws-wire sidecar-macos; do \
+      mkdir -p crates/$crate/src; \
+      printf '[package]\nname = "x11-web-%s"\nversion = "0.1.0"\nedition = "2021"\n' "$crate" \
+        > crates/$crate/Cargo.toml; \
+      printf 'fn main() {}\n' > crates/$crate/src/main.rs; \
+    done
 RUN cargo build --release --bin x11-web-sidecar
 
 # Build Xts (X Test Suite) from source — not available in Debian repos

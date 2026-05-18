@@ -677,6 +677,7 @@ test("firefox: navigate to about:config", async ({
 }) => {
 	test.setTimeout(180_000);
 	await cleanupApps(sidecarContainer);
+
 	await page.goto(frontendUrl);
 	await waitForDock(page);
 
@@ -684,6 +685,7 @@ test("firefox: navigate to about:config", async ({
 		page,
 		"--no-remote --new-instance about:config",
 	);
+
 	await waitForCanvasStable(canvas, { stableMs: 2000, totalTimeoutMs: 30_000 });
 	await canvas.screenshot({ path: "test-results/firefox-about-config.png" });
 

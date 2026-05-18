@@ -409,11 +409,18 @@ async fn dispatch_sidecar_msg(state: &AppState, sidecar_id: &str, msg: SidecarTo
                     list.retain(|p| p.client_id != client_id);
                     list.push(ProcessInfo {
                         pid,
-                        client_id,
+                        client_id: client_id.clone(),
                         command,
                     });
                 }
                 broadcast_process_list(state, &sidecar_id).await;
+                // If WindowCreated(s) for this client already beat
+                // ProcessConnected to the backend (a race: the sidecar's
+                // tokio::select! picks display_rx and client_connected_rx
+                // non-deterministically when both are ready), the auto-attach
+                // in on_window_lifecycle_after found pid=None and skipped.
+                // Catch up now.
+                attach_windows_for_new_client(state, &sidecar_id, &client_id, pid).await;
             }
             SidecarToBackend::DisplayUpdate { client_id, update } => {
                 // Window-lifecycle variants are absorbed by the
@@ -950,9 +957,14 @@ async fn handle_frontend_ws(socket: WebSocket, state: AppState) {
         }
     }
 
-    // Frontend disconnected
+    // Frontend disconnected — abort the RTC task so it releases the
+    // fixed UDP port immediately. Without this, the task keeps the socket
+    // open until ICE keepalives time out (~30 s), blocking the next
+    // connection from binding the same port.
     info!("Frontend disconnected: {}", frontend_id);
-    state.frontends.write().await.remove(&frontend_id);
+    if let Some(conn) = state.frontends.write().await.remove(&frontend_id) {
+        conn.rtc.task.abort();
+    }
     if let Some(m) = telemetry::metrics() {
         m.frontends_connected.add(-1, &[]);
     }
@@ -1144,6 +1156,11 @@ async fn on_window_lifecycle_after(
                             .find(|p| p.client_id == client_id)
                             .map(|p| p.pid)
                     });
+                info!(
+                    "WindowCreated {window_id} client={client_id} sidecar={sidecar_id} \
+                     → pid={pid:?} (ProcessConnected {})",
+                    if pid.is_some() { "present" } else { "NOT YET — will catch up" }
+                );
                 let workspace_id = match pid {
                     Some(pid) => state
                         .spawn_origin
@@ -1248,6 +1265,73 @@ async fn on_window_lifecycle_after(
 /// Used by X11 auto-attach on `WindowCreated`. Frontend-side
 /// attaches arrive as inbound sync messages and never call this
 /// directly.
+/// Attach any windows in `window_track` for `(sidecar_id, client_id)` that
+/// aren't yet in any workspace doc. Called from the `ProcessConnected`
+/// handler to handle the race where `WindowCreated` beat `ProcessConnected`
+/// to the backend — on_window_lifecycle_after found pid=None and skipped the
+/// auto-attach; we finish the job here.
+async fn attach_windows_for_new_client(
+    state: &AppState,
+    sidecar_id: &str,
+    client_id: &str,
+    pid: u32,
+) {
+    let kind = state
+        .sidecars
+        .read()
+        .await
+        .get(sidecar_id)
+        .map(|s| s.kind)
+        .unwrap_or(SidecarKind::Unknown);
+    if !matches!(kind, SidecarKind::X11 | SidecarKind::Unknown) {
+        return;
+    }
+    let workspace_id = state
+        .spawn_origin
+        .read()
+        .await
+        .get(&(sidecar_id.to_string(), pid))
+        .cloned();
+    let Some(workspace_id) = workspace_id else {
+        return;
+    };
+    let unattached: Vec<String> = {
+        let track = state.window_track.read().await;
+        let docs = state.workspace_docs.read().await;
+        let already_attached: std::collections::HashSet<String> = docs
+            .values()
+            .flat_map(|e| e.window_node_ids())
+            .collect();
+        track
+            .iter()
+            .filter_map(|((s, c, wid), w)| {
+                if s == sidecar_id
+                    && c == client_id
+                    && !w.override_redirect
+                    && !already_attached.contains(wid)
+                {
+                    Some(wid.clone())
+                } else {
+                    None
+                }
+            })
+            .collect()
+    };
+    info!(
+        "attach_windows_for_new_client sidecar={sidecar_id} client={client_id} pid={pid} \
+         workspace={workspace_id} unattached_count={}",
+        unattached.len()
+    );
+    if unattached.is_empty() {
+        return;
+    }
+    for window_id in &unattached {
+        info!("catch-up attach window {window_id} → workspace {workspace_id}");
+        backend_attach_window(state, &workspace_id, sidecar_id, window_id).await;
+    }
+    broadcast_window_list(state).await;
+}
+
 async fn backend_attach_window(
     state: &AppState,
     workspace_id: &str,
@@ -1296,9 +1380,19 @@ async fn backend_attach_window(
         };
         entry.attach_window_node(window_id, sidecar_id, x, y, max_z + 1.0, width, height)
     };
+    info!(
+        "backend_attach_window workspace={workspace_id} window={window_id} changed={changed}"
+    );
     if !changed {
         return;
     }
+    let peer_count = {
+        let docs = state.workspace_docs.read().await;
+        docs.get(workspace_id).map(|e| e.peers().len()).unwrap_or(0)
+    };
+    info!(
+        "fan_out_workspace_sync workspace={workspace_id} peer_count={peer_count}"
+    );
     fan_out_workspace_sync(state, workspace_id).await;
     reconcile_streaming_after_change(state).await;
 }
@@ -1442,7 +1536,7 @@ async fn kick_workspace_sync(state: &AppState, frontend_id: &str, workspace_id: 
         )
     };
     if !control_open {
-        // Caller will retry once the DC opens.
+        info!("kick_workspace_sync: control DC not open for {frontend_id} workspace={workspace_id}");
         return;
     }
     let mut docs = state.workspace_docs.write().await;
@@ -1450,9 +1544,16 @@ async fn kick_workspace_sync(state: &AppState, frontend_id: &str, workspace_id: 
         warn!("kick_workspace_sync: no doc for workspace {workspace_id}");
         return;
     };
+    let mut msg_count = 0usize;
     while let Some(msg) = entry.generate_sync(frontend_id) {
         let bytes = rtc_codec::encode_workspace_sync(workspace_id, &msg);
         let _ = control_tx.send(bytes);
+        msg_count += 1;
+    }
+    if msg_count > 0 {
+        info!(
+            "kick_workspace_sync: sent {msg_count} sync msgs to {frontend_id} workspace={workspace_id}"
+        );
     }
 }
 

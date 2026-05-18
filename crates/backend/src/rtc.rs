@@ -21,6 +21,7 @@ use str0m::net::{Protocol, Receive};
 use str0m::{Candidate, Event, Input, Output, Rtc};
 use tokio::net::UdpSocket;
 use tokio::sync::{mpsc, Notify};
+use tokio::task::JoinHandle;
 use tracing::{debug, info, warn};
 use x11_web_protocol::BackendToFrontend;
 
@@ -49,6 +50,10 @@ pub struct RtcConn {
     #[allow(dead_code)] // read in slice 1b (workspace-sync gating)
     pub control_open: Arc<AtomicBool>,
     pub control_opened: Arc<Notify>,
+    /// JoinHandle for the driver task. Abort this on frontend disconnect
+    /// so the UDP socket (bound to the fixed RTC port) is released
+    /// promptly and the next connection can reuse the port.
+    pub task: JoinHandle<()>,
 }
 
 #[derive(Debug)]
@@ -82,7 +87,7 @@ pub fn spawn(
     let control_open_for_task = control_open.clone();
     let control_opened_for_task = control_opened.clone();
 
-    tokio::spawn(async move {
+    let task = tokio::spawn(async move {
         if let Err(e) = drive(
             frontend_id,
             ws_tx,
@@ -109,6 +114,7 @@ pub fn spawn(
         control_tx,
         control_open,
         control_opened,
+        task,
     }
 }
 
