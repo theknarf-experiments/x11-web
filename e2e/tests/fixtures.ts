@@ -272,11 +272,15 @@ async function doSetup() {
 }
 
 async function teardownAll() {
-	// Per-worker containers are torn down by testcontainers' Ryuk on session
-	// exit; the per-worker network is removed by global-teardown.ts via the
-	// `x11web-worker-*` prefix match.
 	setupDone = false;
 	setupPromise = null;
+	// Stop containers explicitly so signal-handler teardowns don't leave
+	// processes running. global-teardown.ts is the fallback for SIGKILL.
+	await Promise.allSettled([
+		sidecarContainer?.stop(),
+		backendContainer?.stop(),
+		mockOidcContainer?.stop(),
+	]);
 }
 
 // ---------------------------------------------------------------------------
