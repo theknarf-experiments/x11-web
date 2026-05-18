@@ -37,16 +37,19 @@ async function spawnFirefoxAndWait(
 	const canvas = win.locator('[data-testid="x11-canvas"]');
 	await expect(canvas).toBeVisible({ timeout: FIREFOX_STARTUP_TIMEOUT });
 
-	// Wait for Firefox to finish its multi-stage rendering
+	// Wait for Firefox to finish its multi-stage rendering. `hasRenderedContent`
+	// can transiently return true mid-paint (e.g. while WebRender clears the
+	// surface) and then flip back to all-black; poll `countNonBlackPixels`
+	// directly so we only succeed once meaningful content is actually on-screen.
 	await expect
-		.poll(async () => hasRenderedContent(canvas), {
+		.poll(async () => countNonBlackPixels(canvas), {
 			timeout: FIREFOX_STARTUP_TIMEOUT,
 			intervals: [3000, 5000, 5000, 10000, 10000, 10000],
 		})
-		.toBe(true);
-
-	const pixels = await countNonBlackPixels(canvas);
-	expect(pixels).toBeGreaterThan(500);
+		.toBeGreaterThan(500);
+	// Use hasRenderedContent as a final sanity check that we got more than one
+	// solid color, not just a flash of a single non-black fill.
+	expect(await hasRenderedContent(canvas)).toBe(true);
 	return canvas;
 }
 
@@ -907,12 +910,17 @@ test.skip("firefox: local HTML5 video playback", async ({
 // navigated — so the stale-timestamp theory was real but not
 // sufficient on its own.
 //
-// Remaining hypotheses for the next pass: (a) verify whether Firefox
-// is silently discarding our ButtonPress due to a missing FocusIn /
-// wrong focus target before the press; (b) inspect any passive XI2
-// / core passive button grab Firefox sets on its chrome — if it
-// grabs *only* via XI2 and our XTEST handler only fires core events,
-// the grab never activates.
+// Update (after the xtest duplicate-event fix): The click now causes
+// a visible state change in Firefox's chrome (the focus-ring on the
+// search-icon button disappears), confirming the press reaches the
+// chrome window and is no longer being canceled by a duplicate. But
+// the URL bar entry still does not gain keyboard focus, so typing
+// echoes nowhere and Enter doesn't navigate. Remaining hypothesis:
+// the click reaches Firefox's chrome top-level but isn't dispatched
+// to the URL-bar GtkEntry child — either because our event_window
+// resolution lands on the wrong child, the event_x/event_y inside
+// the chrome window are off, or GTK requires an XI2 ButtonPress
+// (not just core) to route to the entry widget.
 // ---------------------------------------------------------------------------
 test.skip("firefox: click URL bar, type wikipedia.org, page renders", async ({
 	page,
