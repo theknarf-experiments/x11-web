@@ -174,35 +174,14 @@ pub(crate) fn handle_xtest_request(state: &mut ClientState, data: &[u8], seq: u1
                         );
                         let event =
                             build_kbp_event(state, event_type, detail, event_window, ex, ey);
-                        // Prefer routing the event directly to the owning
-                        // connection via EventRouter — broadcast filters by
-                        // subscription mask which can lag behind the
-                        // window's actual selection. EventRouter only knows
-                        // top-level UUIDs; fall back to the broadcaster for
-                        // sub-window targets and for any other client that
-                        // also selected on the window.
-                        let routed = state.event_router.send_event(event_window, event.clone());
-                        if !routed {
-                            // Walk up to find the nearest top-level that's
-                            // registered with the router.
-                            if let Ok(shared) = state.shared_windows.lock() {
-                                let mut walker = event_window;
-                                for _ in 0..super::super::window_tree::MAX_TREE_DEPTH {
-                                    if state
-                                        .event_router
-                                        .send_event(walker, event.clone())
-                                    {
-                                        break;
-                                    }
-                                    match shared.get(&walker) {
-                                        Some(w) if w.parent != 0 && w.parent != walker => {
-                                            walker = w.parent;
-                                        }
-                                        _ => break,
-                                    }
-                                }
-                            }
-                        }
+                        // Deliver via the subscription broadcaster only. The
+                        // owner subscribes to events on its own window when
+                        // CreateWindow / ChangeWindowAttributes sets a non-zero
+                        // event_mask, so a single broadcast reaches both the
+                        // owner and any other client that selected the same
+                        // mask. Routing additionally via `event_router` here
+                        // caused Firefox (and other GTK apps) to receive each
+                        // click twice and treat the pair as a no-op.
                         let mask = if event_type == BUTTON_PRESS_EVENT {
                             crate::xserver::core::EventMask::BUTTON_PRESS
                         } else {
@@ -278,26 +257,11 @@ pub(crate) fn handle_xtest_request(state: &mut ClientState, data: &[u8], seq: u1
                             ex,
                             ey,
                         );
-                        // Route to the owning connection so toolkits update
-                        // their pointer-tracking state before the click
-                        // arrives.
-                        let routed = state.event_router.send_event(event_window, event.clone());
-                        if !routed {
-                            if let Ok(shared) = state.shared_windows.lock() {
-                                let mut walker = event_window;
-                                for _ in 0..super::super::window_tree::MAX_TREE_DEPTH {
-                                    if state.event_router.send_event(walker, event.clone()) {
-                                        break;
-                                    }
-                                    match shared.get(&walker) {
-                                        Some(w) if w.parent != 0 && w.parent != walker => {
-                                            walker = w.parent;
-                                        }
-                                        _ => break,
-                                    }
-                                }
-                            }
-                        }
+                        // See BUTTON_PRESS/RELEASE branch: deliver via the
+                        // subscription broadcaster only. The owner subscribes
+                        // to events on its own window, so the broadcast
+                        // reaches it without an additional router walk-up
+                        // (which would deliver the same event twice).
                         state.broadcast_event(
                             event_window,
                             crate::xserver::core::EventMask::POINTER_MOTION,
