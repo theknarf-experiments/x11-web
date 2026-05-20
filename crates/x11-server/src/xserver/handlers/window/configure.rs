@@ -1141,7 +1141,7 @@ pub(crate) fn handle_configure_window(
             }
 
             // Notify Present extension subscribers about the reconfiguration
-            super::extensions::send_present_config_notify(
+            super::super::present::send_present_config_notify(
                 state, wid, x, y, width, height, 0, 0, // off_x, off_y
                 width, height, // pixmap_width, pixmap_height = window size
                 0,      // pixmap_flags

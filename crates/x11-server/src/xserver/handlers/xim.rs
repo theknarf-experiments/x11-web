@@ -173,7 +173,7 @@ impl XimServer {
 
 /// Handle an `_XIM_XCONNECT` client message sent to the XIM server window.
 /// Returns a client message event to send back to the requesting client.
-pub(crate) fn handle_xim_xconnect(state: &mut ClientState, event: &[u8]) -> Vec<u8> {
+fn handle_xim_xconnect(state: &mut ClientState, event: &[u8]) -> Vec<u8> {
     // ClientMessage event layout:
     //   [0]    = event type (CLIENT_MESSAGE_EVENT | SEND_EVENT_FLAG)
     //   [1]    = format (32)
@@ -229,7 +229,7 @@ pub(crate) fn handle_xim_xconnect(state: &mut ClientState, event: &[u8]) -> Vec<
 
 /// Handle an `_XIM_PROTOCOL` client message containing an XIM protocol message.
 /// The protocol data is packed into the 20-byte client message data area.
-pub(crate) fn handle_xim_protocol(state: &mut ClientState, event: &[u8]) -> Vec<u8> {
+fn handle_xim_protocol(state: &mut ClientState, event: &[u8]) -> Vec<u8> {
     // ClientMessage data area starts at byte 12 and contains the XIM protocol
     // message. Header: major_opcode (1), minor_opcode (1), length (u16, words).
     if event.len() < 16 {

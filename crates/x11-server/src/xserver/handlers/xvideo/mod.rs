@@ -33,10 +33,10 @@ pub(crate) const XV_MAJOR_OPCODE: u8 = 156;
 ///
 /// Software-only video adaptor supporting basic YUV/RGB overlay rendering.
 /// Port 100 is the single available port on the software adaptor.
-pub(crate) const XV_PORT_BASE: u32 = 100;
+const XV_PORT_BASE: u32 = 100;
 
 /// Number of XVideo ports exposed by our software adaptor.
-pub(crate) const XV_NUM_PORTS: u32 = 1;
+const XV_NUM_PORTS: u32 = 1;
 
 /// FOURCC identifiers for supported image formats.
 pub(crate) const FOURCC_YUY2: u32 = 0x32595559; // 'YUY2'

@@ -6,7 +6,6 @@
 mod color;
 pub(crate) mod default_keymap;
 mod drawing;
-pub(crate) mod extensions;
 mod font;
 pub(crate) mod input;
 mod property;
@@ -14,27 +13,32 @@ mod query;
 pub(crate) mod render;
 mod window;
 
-// Extension submodules (re-exported via extensions.rs)
-mod composite;
-mod dbe;
-mod dpms;
+// Extension submodules — entry points referenced by ExtensionRegistry.
+pub(crate) mod big_requests;
+pub(crate) mod composite;
+pub(crate) mod damage;
+pub(crate) mod dbe;
+pub(crate) mod dpms;
 mod dri3;
+pub(crate) mod generic_event;
 pub(crate) mod glx;
-mod present;
-mod randr;
+pub(crate) mod present;
+pub(crate) mod randr;
 pub(crate) mod record;
 pub(crate) mod screensaver;
-mod security;
-mod shape;
-mod shm;
+pub(crate) mod security;
+pub(crate) mod shape;
+pub(crate) mod shm;
 pub(crate) mod sync;
 pub(crate) mod vidmode;
-mod xfixes;
+pub(crate) mod xc_misc;
+pub(crate) mod xfixes;
 pub(crate) mod xim;
-mod xinerama;
+pub(crate) mod xinerama;
+pub(crate) mod xinput;
 pub(crate) mod xkb;
-mod xresource;
-mod xtest;
+pub(crate) mod xresource;
+pub(crate) mod xtest;
 pub(crate) mod xvideo;
 
 use std::collections::HashMap;

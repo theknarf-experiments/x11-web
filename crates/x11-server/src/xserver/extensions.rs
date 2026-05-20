@@ -12,6 +12,16 @@
 
 use std::collections::HashMap;
 
+use super::client::ClientState;
+use super::handlers;
+
+/// Signature every extension dispatcher implements.
+///
+/// `data` is the full request packet (header + body); `seq` is the
+/// sequence number to stamp on the reply. The handler returns the
+/// raw reply bytes (or `Vec::new()` for void requests).
+pub(crate) type ExtHandlerFn = fn(&mut ClientState, &[u8], u16) -> Vec<u8>;
+
 // Extension `first_event` bases — the wire event-type byte assigned to each
 // extension's first event. Must stay in sync with the table in `add(...)`
 // calls in `ExtensionRegistry::new` (covered by `extension_event_bases_no_overlap`).
@@ -62,10 +72,14 @@ pub(crate) enum ExtensionId {
 // ---------------------------------------------------------------------------
 
 /// Static metadata for a single extension, mirroring what `QueryExtension`
-/// returns to the client.
-#[derive(Debug, Clone)]
+/// returns to the client, plus a handler function pointer used by
+/// the request dispatcher.
+#[derive(Clone)]
 pub(crate) struct ExtensionInfo {
-    /// Extension identifier.
+    /// Extension identifier. Read by `set_enabled` (test-only) and by
+    /// debugging/diagnostic code; the runtime dispatcher selects by
+    /// opcode, not by id.
+    #[allow(dead_code)]
     pub id: ExtensionId,
     /// The canonical X11 wire name (e.g. `"RENDER"`, `"MIT-SHM"`).
     pub wire_name: &'static str,
@@ -75,6 +89,8 @@ pub(crate) struct ExtensionInfo {
     pub first_event: u8,
     /// First error code, or 0 if the extension defines no errors.
     pub first_error: u8,
+    /// Dispatch entry point for this extension.
+    pub handler: ExtHandlerFn,
     /// Whether the extension is currently enabled.
     pub enabled: bool,
 }
@@ -110,7 +126,13 @@ impl ExtensionRegistry {
         };
 
         // Helper closure to avoid repetition.
-        let add = |reg: &mut Self, id, wire_name, major_opcode, first_event, first_error| {
+        let add = |reg: &mut Self,
+                   id,
+                   wire_name,
+                   major_opcode,
+                   first_event,
+                   first_error,
+                   handler: ExtHandlerFn| {
             let idx = reg.entries.len();
             reg.entries.push(ExtensionInfo {
                 id,
@@ -118,6 +140,7 @@ impl ExtensionRegistry {
                 major_opcode,
                 first_event,
                 first_error,
+                handler,
                 enabled: true,
             });
             reg.by_name.insert(wire_name, idx);
@@ -127,37 +150,109 @@ impl ExtensionRegistry {
         use ExtensionId::*;
 
         // --- ext-core (always compiled in) -----------------------------------
-        add(&mut reg, Shape, "SHAPE", 128, 64, 0);
-        add(&mut reg, MitShm, "MIT-SHM", 130, 65, 128);
-        add(&mut reg, BigRequests, "BIG-REQUESTS", 133, 0, 0);
-        add(&mut reg, Sync, "SYNC", 134, 83, 0);
-        add(&mut reg, GenericEvent, "Generic Event Extension", 135, 0, 0);
-        add(&mut reg, Xfixes, "XFIXES", 138, 87, 0);
-        add(&mut reg, Randr, "RANDR", 140, 89, 0);
-        add(&mut reg, XcMisc, "XC-MISC", 141, 0, 0);
-        add(&mut reg, XResource, "X-Resource", 160, 0, 0);
+        add(&mut reg, Shape, "SHAPE", 128, 64, 0, handlers::shape::handle_shape_request);
+        add(&mut reg, MitShm, "MIT-SHM", 130, 65, 128, handlers::shm::handle_shm_request);
+        add(
+            &mut reg,
+            BigRequests,
+            "BIG-REQUESTS",
+            133,
+            0,
+            0,
+            handlers::big_requests::handle_big_requests_request,
+        );
+        add(&mut reg, Sync, "SYNC", 134, 83, 0, handlers::sync::handle_sync_request);
+        add(
+            &mut reg,
+            GenericEvent,
+            "Generic Event Extension",
+            135,
+            0,
+            0,
+            handlers::generic_event::handle_ge_request,
+        );
+        add(
+            &mut reg,
+            Xfixes,
+            "XFIXES",
+            138,
+            87,
+            0,
+            handlers::xfixes::handle_xfixes_request,
+        );
+        add(&mut reg, Randr, "RANDR", 140, 89, 0, handlers::randr::handle_randr_request);
+        add(
+            &mut reg,
+            XcMisc,
+            "XC-MISC",
+            141,
+            0,
+            0,
+            handlers::xc_misc::handle_xc_misc_request,
+        );
+        add(
+            &mut reg,
+            XResource,
+            "X-Resource",
+            160,
+            0,
+            0,
+            handlers::xresource::handle_xresource_request,
+        );
 
         // --- ext-input -------------------------------------------------------
         #[cfg(feature = "ext-input")]
         {
-            add(&mut reg, XInput, "XInputExtension", 131, 105, 152);
-            add(&mut reg, Xtest, "XTEST", 150, 0, 0);
-            add(&mut reg, Xkb, "XKEYBOARD", 136, 85, 0);
+            add(
+                &mut reg,
+                XInput,
+                "XInputExtension",
+                131,
+                105,
+                152,
+                handlers::xinput::handle_xinput_request,
+            );
+            add(&mut reg, Xtest, "XTEST", 150, 0, 0, handlers::xtest::handle_xtest_request);
+            add(&mut reg, Xkb, "XKEYBOARD", 136, 85, 0, handlers::xkb::handle_xkb_request);
         }
 
         // --- ext-render ------------------------------------------------------
         #[cfg(feature = "ext-render")]
         {
-            add(&mut reg, Render, "RENDER", 139, 0, 142);
-            add(&mut reg, Composite, "Composite", 142, 0, 0);
-            add(&mut reg, Damage, "DAMAGE", 143, 91, 152);
-            add(&mut reg, Present, "Present", 148, 0, 0);
+            add(&mut reg, Render, "RENDER", 139, 0, 142, handlers::render::handle_render_request);
+            add(
+                &mut reg,
+                Composite,
+                "Composite",
+                142,
+                0,
+                0,
+                handlers::composite::handle_x_composite_request,
+            );
+            add(
+                &mut reg,
+                Damage,
+                "DAMAGE",
+                143,
+                91,
+                152,
+                handlers::damage::handle_damage_request,
+            );
+            add(
+                &mut reg,
+                Present,
+                "Present",
+                148,
+                0,
+                0,
+                handlers::present::handle_present_request,
+            );
         }
 
         // --- ext-glx ---------------------------------------------------------
         #[cfg(feature = "ext-glx")]
         {
-            add(&mut reg, Glx, "GLX", 159, 0, 159);
+            add(&mut reg, Glx, "GLX", 159, 0, 159, handlers::glx::handle_glx_request);
             // DRI3 is NOT registered: our server does not provide GPU/DRM
             // access, so advertising DRI3 causes Mesa to attempt (and fail)
             // hardware-accelerated DRI rendering before falling back.
@@ -166,19 +261,67 @@ impl ExtensionRegistry {
         // --- ext-media -------------------------------------------------------
         #[cfg(feature = "ext-media")]
         {
-            add(&mut reg, XVideo, "XVideo", 156, 95, 156);
-            add(&mut reg, Dbe, "DOUBLE-BUFFER", 157, 0, 157);
+            add(
+                &mut reg,
+                XVideo,
+                "XVideo",
+                156,
+                95,
+                156,
+                handlers::xvideo::handle_xvideo_request,
+            );
+            add(&mut reg, Dbe, "DOUBLE-BUFFER", 157, 0, 157, handlers::dbe::handle_dbe_request);
         }
 
         // --- ext-compat ------------------------------------------------------
         #[cfg(feature = "ext-compat")]
         {
-            add(&mut reg, Dpms, "DPMS", 151, 0, 0);
-            add(&mut reg, ScreenSaver, "MIT-SCREEN-SAVER", 152, 92, 0);
-            add(&mut reg, VidMode, "XFree86-VidModeExtension", 153, 0, 0);
-            add(&mut reg, Record, "RECORD", 154, 0, 154);
-            add(&mut reg, Security, "SECURITY", 155, 93, 155);
-            add(&mut reg, Xinerama, "XINERAMA", 158, 0, 0);
+            add(&mut reg, Dpms, "DPMS", 151, 0, 0, handlers::dpms::handle_dpms_request);
+            add(
+                &mut reg,
+                ScreenSaver,
+                "MIT-SCREEN-SAVER",
+                152,
+                92,
+                0,
+                handlers::screensaver::handle_screen_saver_request,
+            );
+            add(
+                &mut reg,
+                VidMode,
+                "XFree86-VidModeExtension",
+                153,
+                0,
+                0,
+                handlers::vidmode::handle_vidmode_request,
+            );
+            add(
+                &mut reg,
+                Record,
+                "RECORD",
+                154,
+                0,
+                154,
+                handlers::record::handle_record_request,
+            );
+            add(
+                &mut reg,
+                Security,
+                "SECURITY",
+                155,
+                93,
+                155,
+                handlers::security::handle_security_request,
+            );
+            add(
+                &mut reg,
+                Xinerama,
+                "XINERAMA",
+                158,
+                0,
+                0,
+                handlers::xinerama::handle_xinerama_request,
+            );
         }
 
         reg

@@ -10,9 +10,6 @@
 use super::parse_minor;
 use crate::xserver::event::serialize_event_with_layout;
 use crate::xserver::reply::serialize_reply;
-use x11rb_protocol::protocol::ge::{
-    QueryVersionReply as GeQueryVersionReply, QUERY_VERSION_REQUEST as GE_QUERY_VERSION_REQUEST,
-};
 use x11rb_protocol::protocol::xkb::{
     ControlsNotifyEvent, MapNotifyEvent, PerClientFlag, PerClientFlagsReply,
     SetDebuggingFlagsReply, StateNotifyEvent, UseExtensionReply, BELL_REQUEST,
@@ -279,36 +276,6 @@ fn handle_xkb_set_named_indicator(state: &mut ClientState, data: &[u8]) -> Vec<u
     Vec::new() // void request
 }
 
-// ---------------------------------------------------------------------------
-// Generic Event Extension handler
-// ---------------------------------------------------------------------------
-
-pub(crate) fn handle_ge_request(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
-    let minor = data[1];
-    debug!("Generic Event Extension minor opcode: {minor}");
-
-    match minor {
-        GE_QUERY_VERSION_REQUEST => serialize_reply(
-            &GeQueryVersionReply {
-                sequence: seq,
-                length: 0,
-                major_version: 1,
-                minor_version: 0,
-            },
-            state.byte_order(),
-        ),
-        _ => {
-            debug!("Unhandled GE minor opcode: {minor}");
-            crate::xserver::core::build_error(
-                crate::xserver::core::REQUEST_ERROR,
-                seq,
-                minor as u32,
-                135,
-                minor as u16,
-            )
-        }
-    }
-}
 
 // ---------------------------------------------------------------------------
 // Main XKB dispatcher
@@ -448,7 +415,7 @@ pub(crate) fn handle_xkb_request(state: &mut ClientState, data: &[u8], seq: u16)
 // ---------------------------------------------------------------------------
 
 /// XKB extension event code (first_event assigned by QueryExtension).
-pub(crate) const XKB_EVENT_BASE: u8 = 85;
+const XKB_EVENT_BASE: u8 = 85;
 
 // XKB event type codes (xkbType field in the event)
 const XKB_STATE_NOTIFY: u8 = 0;

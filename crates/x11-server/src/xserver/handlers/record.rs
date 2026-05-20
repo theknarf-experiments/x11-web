@@ -23,9 +23,9 @@ use super::super::client::ClientState;
 /// RECORD ClientSpec wire values used in `Vec<u32>` `client_specs` fields.
 /// Mirrors `x11rb::record::CS::*` but kept as `u32` because the spec stores
 /// `client_specs` as `CARD32` (a 32-bit XID-or-magic field).
-pub(crate) const CLIENT_SPEC_CURRENT_CLIENTS: u32 = 1;
-pub(crate) const CLIENT_SPEC_FUTURE_CLIENTS: u32 = 2;
-pub(crate) const CLIENT_SPEC_ALL_CLIENTS: u32 = 3;
+const CLIENT_SPEC_CURRENT_CLIENTS: u32 = 1;
+const CLIENT_SPEC_FUTURE_CLIENTS: u32 = 2;
+const CLIENT_SPEC_ALL_CLIENTS: u32 = 3;
 
 /// FromServer: events and errors from the server.
 pub(crate) const RECORD_FROM_SERVER: u8 = 0;
@@ -36,9 +36,9 @@ pub(crate) const RECORD_CLIENT_STARTED: u8 = 2;
 /// ClientDied: client disconnection.
 pub(crate) const RECORD_CLIENT_DIED: u8 = 3;
 /// StartOfData: initial reply when context is enabled.
-pub(crate) const RECORD_START_OF_DATA: u8 = 4;
+const RECORD_START_OF_DATA: u8 = 4;
 /// EndOfData: context disabled.
-pub(crate) const RECORD_END_OF_DATA: u8 = 5;
+const RECORD_END_OF_DATA: u8 = 5;
 
 // ---------------------------------------------------------------------------
 // RecordRange: describes what protocol elements to intercept
