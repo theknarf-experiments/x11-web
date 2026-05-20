@@ -137,7 +137,7 @@ impl ClientState {
         self.window_router
             .register(&uuid, x11_wid, &self.message_tx);
         self.event_router.register(x11_wid, &self.wm_events_tx);
-        self.menu_tracker
+        self.menu.tracker
             .window_index()
             .register(x11_wid, uuid.clone(), self.client_id.clone());
         uuid

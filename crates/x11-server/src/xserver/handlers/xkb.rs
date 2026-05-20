@@ -163,10 +163,10 @@ fn handle_xkb_select_events(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
     let clear = state.read_u16(data, 8) as u32;
     let select_all = state.read_u16(data, 10) as u32;
 
-    let old_mask = state.xkb_event_mask;
+    let old_mask = state.xkb.event_mask;
     // Bits touched by this request: first clear them, then apply selectAll
     let new_mask = (old_mask & !affect_which) | (select_all & affect_which & !clear);
-    state.xkb_event_mask = new_mask;
+    state.xkb.event_mask = new_mask;
 
     debug!(
         "XKB SelectEvents: affectWhich={affect_which:#06x} clear={clear:#06x} \
@@ -184,7 +184,7 @@ fn handle_xkb_select_events(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
 // ---------------------------------------------------------------------------
 
 /// Handle XKB SetNamedIndicator: parse indicator name atom and settings and
-/// store them in `state.xkb_named_indicators`.
+/// store them in `state.xkb.named_indicators`.
 ///
 /// Wire layout (bytes):
 ///   0-1   major/minor opcode
@@ -234,7 +234,8 @@ fn handle_xkb_set_named_indicator(state: &mut ClientState, data: &[u8]) -> Vec<u
         }
     } else {
         state
-            .xkb_named_indicators
+            .xkb
+            .named_indicators
             .get(&indicator_atom)
             .map(|ni| ni.map.clone())
             .unwrap_or_default()
@@ -242,9 +243,10 @@ fn handle_xkb_set_named_indicator(state: &mut ClientState, data: &[u8]) -> Vec<u
 
     // Determine the indicator index: try the existing entry first, then
     // allocate a new slot (capped at 31 so the 32-bit state bitmask is safe).
-    let next_index = state.xkb_named_indicators.len().min(31) as u8;
+    let next_index = state.xkb.named_indicators.len().min(31) as u8;
     let index = state
-        .xkb_named_indicators
+        .xkb
+        .named_indicators
         .get(&indicator_atom)
         .map(|ni| ni.index)
         .unwrap_or(next_index);
@@ -263,13 +265,13 @@ fn handle_xkb_set_named_indicator(state: &mut ClientState, data: &[u8]) -> Vec<u
          setState={set_state} on={on} setMap={set_map}"
     );
 
-    state.xkb_named_indicators.insert(indicator_atom, entry);
+    state.xkb.named_indicators.insert(indicator_atom, entry);
 
     if set_state {
         if on {
-            state.xkb_indicators |= 1 << index;
+            state.xkb.indicators |= 1 << index;
         } else {
-            state.xkb_indicators &= !(1u32 << index);
+            state.xkb.indicators &= !(1u32 << index);
         }
     }
 
@@ -445,7 +447,7 @@ pub(crate) struct XkbStateSnapshot {
 impl XkbStateSnapshot {
     /// Capture the current XKB state.
     pub(crate) fn capture(state: &ClientState) -> Self {
-        let xkb = &state.xkb_state;
+        let xkb = &state.xkb;
         Self {
             base_mods: xkb.base_mods,
             latched_mods: xkb.latched_mods,
@@ -470,7 +472,7 @@ pub(crate) fn maybe_send_xkb_state_notify(
     event_type: u8,
 ) {
     // Check if this client subscribed to XkbStateNotify.
-    if state.xkb_event_mask & XKB_STATE_NOTIFY_MASK == 0 {
+    if state.xkb.event_mask & XKB_STATE_NOTIFY_MASK == 0 {
         return;
     }
 
@@ -479,7 +481,7 @@ pub(crate) fn maybe_send_xkb_state_notify(
         return; // No change
     }
 
-    let xkb = &state.xkb_state;
+    let xkb = &state.xkb;
     let effective_mods = xkb.effective_mods();
     let effective_group = xkb.effective_group() as u8;
 
@@ -552,7 +554,7 @@ const STATE_NOTIFY_LAYOUT: &[(usize, usize)] = &[
 /// Called after SetMap to notify interested clients of keymap changes.
 /// The `changed` bitmask indicates which components were modified.
 pub(crate) fn maybe_send_xkb_map_notify(state: &mut ClientState, changed: u16) {
-    if state.xkb_event_mask & XKB_MAP_NOTIFY_MASK == 0 {
+    if state.xkb.event_mask & XKB_MAP_NOTIFY_MASK == 0 {
         return;
     }
 
@@ -605,11 +607,11 @@ pub(crate) fn maybe_send_xkb_controls_notify(
     changed_ctrls: u32,
     enabled_ctrls_before: u32,
 ) {
-    if state.xkb_event_mask & XKB_CONTROLS_NOTIFY_MASK == 0 {
+    if state.xkb.event_mask & XKB_CONTROLS_NOTIFY_MASK == 0 {
         return;
     }
 
-    let enabled_changes = state.xkb_state.controls.enabled_ctrls ^ enabled_ctrls_before;
+    let enabled_changes = state.xkb.controls.enabled_ctrls ^ enabled_ctrls_before;
 
     let event = serialize_event_with_layout(
         &ControlsNotifyEvent {
@@ -618,9 +620,9 @@ pub(crate) fn maybe_send_xkb_controls_notify(
             sequence: state.sequence,
             time: state.timestamp(),
             device_id: 0,
-            num_groups: state.xkb_state.controls.num_groups,
+            num_groups: state.xkb.controls.num_groups,
             changed_controls: changed_ctrls.into(),
-            enabled_controls: state.xkb_state.controls.enabled_ctrls.into(),
+            enabled_controls: state.xkb.controls.enabled_ctrls.into(),
             enabled_control_changes: enabled_changes.into(),
             keycode: 0,
             event_type: 0,

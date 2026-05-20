@@ -101,6 +101,23 @@ impl GtkMenuPaths {
     }
 }
 
+/// Per-connection menu-related state. Bundles the (cheap-to-clone)
+/// DBus-backed MenuTracker handle together with per-window GTK menu
+/// path bookkeeping. Lives on `ClientState::menu`.
+pub(crate) struct MenuState {
+    pub(crate) tracker: MenuTracker,
+    pub(crate) gtk_paths: std::collections::HashMap<u32, GtkMenuPaths>,
+}
+
+impl MenuState {
+    pub(crate) fn new(tracker: MenuTracker) -> Self {
+        Self {
+            tracker,
+            gtk_paths: std::collections::HashMap::new(),
+        }
+    }
+}
+
 /// Owns the DBus connection and bookkeeping for every tracked window.
 /// Cheap to clone — the inner state lives behind an `Arc<Mutex<...>>`.
 #[derive(Clone)]

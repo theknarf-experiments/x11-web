@@ -227,7 +227,8 @@ pub(crate) fn build_xkb_get_compat_map_reply(
     use x11rb_protocol::protocol::xproto::ModMask;
 
     let si_rtrn: Vec<SymInterpret> = state
-        .xkb_compat_si
+        .xkb
+        .compat_si
         .iter()
         .map(|si| {
             let action_bytes: [u8; 7] = si.action[1..8].try_into().unwrap_or([0; 7]);
@@ -246,7 +247,8 @@ pub(crate) fn build_xkb_get_compat_map_reply(
         .collect();
 
     let group_rtrn: Vec<ModDef> = state
-        .xkb_group_compat
+        .xkb
+        .group_compat
         .iter()
         .map(|gc| ModDef {
             mask: ModMask::from(gc.mods as u16),
@@ -310,12 +312,12 @@ pub(crate) fn handle_xkb_set_compat_map(state: &mut ClientState, data: &[u8]) ->
         .collect();
 
     if truncate {
-        state.xkb_compat_si.truncate(first_si);
-        state.xkb_compat_si.extend(new_entries);
+        state.xkb.compat_si.truncate(first_si);
+        state.xkb.compat_si.extend(new_entries);
     } else {
         let end = first_si + n_si;
-        while state.xkb_compat_si.len() < end {
-            state.xkb_compat_si.push(XkbSymInterpretation {
+        while state.xkb.compat_si.len() < end {
+            state.xkb.compat_si.push(XkbSymInterpretation {
                 sym: 0,
                 mods: 0,
                 match_op: MATCH_ANY_OF_OR_NONE,
@@ -325,7 +327,7 @@ pub(crate) fn handle_xkb_set_compat_map(state: &mut ClientState, data: &[u8]) ->
             });
         }
         for (i, entry) in new_entries.into_iter().enumerate() {
-            state.xkb_compat_si[first_si + i] = entry;
+            state.xkb.compat_si[first_si + i] = entry;
         }
     }
 
@@ -334,7 +336,7 @@ pub(crate) fn handle_xkb_set_compat_map(state: &mut ClientState, data: &[u8]) ->
     for g in 0..4u8 {
         if groups & (1 << g) != 0 {
             if let Some(gm) = group_iter.next() {
-                state.xkb_group_compat[g as usize] = XkbGroupCompat {
+                state.xkb.group_compat[g as usize] = XkbGroupCompat {
                     mods: u16::from(gm.mask) as u8,
                     real_mods: u16::from(gm.real_mods) as u8,
                     vmods: u16::from(gm.vmods),
@@ -359,7 +361,7 @@ fn recompute_compat_actions(state: &mut ClientState) {
     // Walk all keycodes in the keymap range
     for keycode in MIN_KEY_CODE..=MAX_KEY_CODE {
         // Skip keys that have explicit actions (set by SetMap with XkbExplicit)
-        if state.xkb_explicit.get(&keycode).copied().unwrap_or(0) & 0x01 != 0 {
+        if state.xkb.explicit.get(&keycode).copied().unwrap_or(0) & 0x01 != 0 {
             // XkbExplicitKeyAction (bit 0) — client set this action explicitly
             continue;
         }
@@ -372,16 +374,16 @@ fn recompute_compat_actions(state: &mut ClientState) {
 
         // Find matching SI entry
         if let Some(si) = find_matching_si(
-            &state.xkb_compat_si,
+            &state.xkb.compat_si,
             keysym,
-            state.xkb_modmap.get(&keycode).copied().unwrap_or(0),
+            state.xkb.modmap.get(&keycode).copied().unwrap_or(0),
         ) {
             let action = si.action;
             let virtual_mod = si.virtual_mod;
             let flags = si.flags;
 
             // Apply the action
-            state.xkb_key_actions.insert(
+            state.xkb.key_actions.insert(
                 keycode,
                 vec![crate::xserver::client::xkb_state::XkbAction { raw: action }],
             );
@@ -389,12 +391,12 @@ fn recompute_compat_actions(state: &mut ClientState) {
             // If the SI specifies a virtual modifier, update the vmodmap
             if virtual_mod != 0xFF && virtual_mod < 16 {
                 let vmod_bit = 1u16 << virtual_mod;
-                state.xkb_vmodmap.insert(keycode, vmod_bit);
+                state.xkb.vmodmap.insert(keycode, vmod_bit);
             }
 
             // Update key behavior based on SI flags
             if flags & SI_LOCKING_KEY != 0 {
-                state.xkb_key_behaviors.insert(
+                state.xkb.key_behaviors.insert(
                     keycode,
                     crate::xserver::client::xkb_state::XkbKeyBehavior {
                         behavior_type: super::KB_LOCK,
@@ -407,7 +409,7 @@ fn recompute_compat_actions(state: &mut ClientState) {
 
     debug!(
         "XKB compat recompute: updated actions for {} keys",
-        state.xkb_key_actions.len()
+        state.xkb.key_actions.len()
     );
 }
 

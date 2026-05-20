@@ -96,8 +96,7 @@ pub(crate) struct ClientState {
     pub(crate) x11_to_uuid: HashMap<u32, String>,
     pub(crate) cursors: HashMap<u32, String>,
     pub(crate) xi: crate::xinput2::XiState,
-    pub(crate) menu_tracker: crate::menus::MenuTracker,
-    pub(crate) gtk_menu_paths: HashMap<u32, crate::menus::GtkMenuPaths>,
+    pub(crate) menu: crate::menus::MenuState,
     /// Grab state: pointer grabs, keyboard grabs, passive grabs.
     pub(crate) grabs: GrabState,
     /// SaveSet: windows to reparent to root on client disconnect (used by WMs).
@@ -177,71 +176,13 @@ pub(crate) struct ClientState {
     pub(crate) security: super::handlers::security::SecurityState,
     /// Font search path (SetFontPath/GetFontPath).
     pub(crate) font_path: Vec<String>,
-    /// XTEST: impervious grab mode.
-    pub(crate) xtest_grab_impervious: bool,
+    /// XTEST extension state.
+    pub(crate) xtest: super::handlers::xtest::XTestState,
     /// DPMS extension state.
     pub(crate) dpms: super::handlers::dpms::DpmsState,
-    /// XKB modifier/group state and controls.
-    pub(crate) xkb_state: XkbState,
-    /// XKB extra keyboard groups/layouts (groups 1-3). Each entry is a
-    /// HashMap<keycode, Vec<keysym>> for that group. Group 0 is the built-in
-    /// US-QWERTY layout from `keycode_to_keysym`.
-    pub(crate) xkb_extra_groups: Vec<HashMap<u8, Vec<u32>>>,
-    /// XKB indicator state (32 bits, one per named indicator).
-    pub(crate) xkb_indicators: u32,
-    /// XKB indicator maps: indicator_index → (which_groups, groups, which_mods, mods).
-    pub(crate) xkb_indicator_maps: Vec<XkbIndicatorMap>,
-    /// XKB group-switch keys: (keycode, target_group_index).
-    /// When multi-layout is active, pressing these keys switches the active group.
-    pub(crate) xkb_group_switch_keys: Vec<(u8, u8)>,
-    /// XKB symbolic names stored by SetNames (which_bit → atom).
-    /// Bits: 0=Keycodes, 1=Geometry, 2=Symbols, 3=PhysSymbols, 4=Types, 5=Compat.
-    pub(crate) xkb_names_atoms: HashMap<u8, u32>,
-    /// XKB: per-type name atoms (overridden by SetNames).
-    pub(crate) xkb_type_names: Vec<u32>,
-    /// XKB: per-type per-level name atoms (overridden by SetNames).
-    pub(crate) xkb_kt_level_names: Vec<Vec<u32>>,
-    /// XKB: group name atoms (overridden by SetNames).
-    pub(crate) xkb_group_names: Vec<u32>,
-    /// XKB: indicator name atoms (overridden by SetNames).
-    pub(crate) xkb_indicator_name_atoms: Vec<u32>,
-    /// XKB: virtual modifier name atoms (overridden by SetNames).
-    pub(crate) xkb_vmod_names: Vec<u32>,
-    /// XKB: per-key name overrides (overridden by SetNames).
-    pub(crate) xkb_key_names: HashMap<u8, [u8; 4]>,
-    /// XKB: key alias pairs (overridden by SetNames).
-    pub(crate) xkb_key_aliases: Vec<([u8; 4], [u8; 4])>,
-    /// XKB: custom key types set by SetMap (keyed by type index).
-    pub(crate) xkb_key_types: HashMap<u8, XkbKeyType>,
-    /// XKB: per-key action lists set by SetMap (keyed by keycode).
-    pub(crate) xkb_key_actions: HashMap<u8, Vec<XkbAction>>,
-    /// XKB: per-key behaviors set by SetMap (keyed by keycode).
-    pub(crate) xkb_key_behaviors: HashMap<u8, XkbKeyBehavior>,
-    /// XKB: per-key explicit override flags set by SetMap (keyed by keycode).
-    pub(crate) xkb_explicit: HashMap<u8, u8>,
-    /// XKB: per-key modifier map set by SetMap (keyed by keycode).
-    pub(crate) xkb_modmap: HashMap<u8, u8>,
-    /// XKB: per-key virtual modifier map set by SetMap (keyed by keycode).
-    pub(crate) xkb_vmodmap: HashMap<u8, u16>,
-    /// XKB: virtual modifier bindings (16 entries for mod1-mod16).
-    pub(crate) xkb_vmod_bindings: [u8; 16],
-    /// XKB: per-button action mappings set by SetDeviceInfo (keyed by button index).
-    pub(crate) xkb_button_actions: HashMap<u8, [u8; 8]>,
-    /// XKB: LED feedback info blob from SetDeviceInfo (echoed by GetDeviceInfo).
-    pub(crate) xkb_device_led_info: Vec<u8>,
-    /// XKB: compatibility map — symbol interpretations (SI entries).
-    /// Populated with defaults, overridable via SetCompatMap.
-    pub(crate) xkb_compat_si: Vec<XkbSymInterpretation>,
-    /// XKB: group compatibility entries (4 groups).
-    pub(crate) xkb_group_compat: [XkbGroupCompat; 4],
-    /// XKB: per-client event mask (SelectEvents). Bitmask of XKB event types this
-    /// client wants to receive. Bit positions correspond to XkbEventType values
-    /// (e.g., bit 0 = NewKeyboardNotify, bit 1 = MapNotify, bit 11 = StateNotify).
-    pub(crate) xkb_event_mask: u32,
-    /// XKB: named indicator settings set by SetNamedIndicator.
-    /// Maps indicator name atom to (indicator_index, change_state, led_state,
-    ///   affect_which, change_which, affect_map_mask, map).
-    pub(crate) xkb_named_indicators: HashMap<u32, XkbNamedIndicator>,
+    /// XKB extension state (modifier/group tracking, controls, indicator
+    /// maps, key overrides, compat map, …).
+    pub(crate) xkb: XkbState,
     /// XVideo extension state.
     pub(crate) xvideo: super::handlers::xvideo::XVideoState,
     /// Current pointer button mask (bits 8-12 for buttons 1-5).
@@ -285,9 +226,8 @@ pub(crate) struct ClientState {
     pub(crate) freed_xids: Vec<u32>,
     /// Built-in XIM (X Input Method) server state.
     pub(crate) xim: super::handlers::xim::XimServer,
-    /// Composite: overlay window reference count (GetOverlayWindow increments,
-    /// ReleaseOverlayWindow decrements).
-    pub(crate) overlay_ref_count: u32,
+    /// Composite extension state.
+    pub(crate) composite: super::handlers::composite::CompositeState,
     /// Shared extension registry — single source of truth for which extensions
     /// are available, their opcodes, event/error bases, and enabled state.
     pub(crate) extension_registry: std::sync::Arc<super::extensions::ExtensionRegistry>,

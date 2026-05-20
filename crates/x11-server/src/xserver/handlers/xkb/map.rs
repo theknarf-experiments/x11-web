@@ -21,8 +21,8 @@ use x11rb_protocol::x11_utils::Serialize;
 /// ModifierMap, and VirtualModMap.
 pub(crate) fn build_xkb_get_map_reply(state: &mut ClientState, seq: u16) -> Vec<u8> {
     // How many groups are active? At least 1 (US-QWERTY). Additional groups
-    // come from state.xkb_extra_groups (populated by SetMap or layout config).
-    let num_groups = (1 + state.xkb_extra_groups.len() as u8).min(MAX_GROUPS);
+    // come from state.xkb.extra_groups (populated by SetMap or layout config).
+    let num_groups = (1 + state.xkb.extra_groups.len() as u8).min(MAX_GROUPS);
 
     // =====================================================================
     // 1. KeyTypes: 4 standard XKB types
@@ -113,8 +113,8 @@ pub(crate) fn build_xkb_get_map_reply(state: &mut ClientState, seq: u16) -> Vec<
         }
         for gi in 0..num_groups.saturating_sub(1) {
             let gi = gi as usize;
-            if gi < state.xkb_extra_groups.len() {
-                let extra = &state.xkb_extra_groups[gi];
+            if gi < state.xkb.extra_groups.len() {
+                let extra = &state.xkb.extra_groups[gi];
                 if let Some(syms) = extra.get(&kc) {
                     let mut gs = syms.clone();
                     gs.resize(width as usize, 0);
@@ -153,7 +153,7 @@ pub(crate) fn build_xkb_get_map_reply(state: &mut ClientState, seq: u16) -> Vec<
         }
     }
     if num_groups > 1 {
-        for &(kc, group_idx) in &state.xkb_group_switch_keys {
+        for &(kc, group_idx) in &state.xkb.group_switch_keys {
             key_actions_lookup.retain(|(k, _, _)| *k != kc);
             key_actions_lookup.push((kc, SA_LOCK_GROUP, group_idx));
         }
@@ -372,7 +372,7 @@ pub(crate) fn handle_xkb_set_map(state: &mut ClientState, data: &[u8], seq: u16)
                     vmods: u16::from(e.virtual_mods),
                 })
                 .collect();
-            state.xkb_key_types.insert(
+            state.xkb.key_types.insert(
                 type_idx,
                 XkbKeyType {
                     mods_mask: u16::from(t.mask) as u8,
@@ -417,7 +417,7 @@ pub(crate) fn handle_xkb_set_map(state: &mut ClientState, data: &[u8], seq: u16)
                 .filter_map(|_| act_iter.next().map(|a| XkbAction { raw: a.serialize() }))
                 .collect();
             if !actions.is_empty() {
-                state.xkb_key_actions.insert(kc, actions);
+                state.xkb.key_actions.insert(kc, actions);
             }
         }
         debug!(
@@ -432,7 +432,7 @@ pub(crate) fn handle_xkb_set_map(state: &mut ClientState, data: &[u8], seq: u16)
         for b in behaviors {
             let common = b.behavior.as_common();
             if common.type_ != 0 {
-                state.xkb_key_behaviors.insert(
+                state.xkb.key_behaviors.insert(
                     b.keycode,
                     XkbKeyBehavior {
                         behavior_type: common.type_,
@@ -451,7 +451,7 @@ pub(crate) fn handle_xkb_set_map(state: &mut ClientState, data: &[u8], seq: u16)
         for bit in 0..16u8 {
             if mask & (1u16 << bit) != 0 {
                 if let Some(b) = iter.next() {
-                    state.xkb_vmod_bindings[bit as usize] = b;
+                    state.xkb.vmod_bindings[bit as usize] = b;
                 }
             }
         }
@@ -464,7 +464,7 @@ pub(crate) fn handle_xkb_set_map(state: &mut ClientState, data: &[u8], seq: u16)
         for e in explicit {
             let flags = u8::from(e.explicit);
             if flags != 0 {
-                state.xkb_explicit.insert(e.keycode, flags);
+                state.xkb.explicit.insert(e.keycode, flags);
             }
         }
         debug!("SetMap: stored {count} explicit flags");
@@ -476,7 +476,7 @@ pub(crate) fn handle_xkb_set_map(state: &mut ClientState, data: &[u8], seq: u16)
         for m in modmap {
             let mods = u16::from(m.mods) as u8;
             if mods != 0 {
-                state.xkb_modmap.insert(m.keycode, mods);
+                state.xkb.modmap.insert(m.keycode, mods);
             }
         }
         debug!("SetMap: stored {count} modifier map entries");
@@ -488,7 +488,7 @@ pub(crate) fn handle_xkb_set_map(state: &mut ClientState, data: &[u8], seq: u16)
         for v in vmodmap {
             let bits = u16::from(v.vmods);
             if bits != 0 {
-                state.xkb_vmodmap.insert(v.keycode, bits);
+                state.xkb.vmodmap.insert(v.keycode, bits);
             }
         }
         debug!("SetMap: stored {count} virtual modifier map entries");

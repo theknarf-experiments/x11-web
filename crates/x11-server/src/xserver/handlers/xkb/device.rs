@@ -124,7 +124,7 @@ pub(crate) fn handle_set_device_info(state: &mut ClientState, data: &[u8]) -> Ve
                     .try_into()
                     .expect("checked length above");
                 let action_type = action[0];
-                state.xkb_button_actions.insert(btn_idx, action);
+                state.xkb.button_actions.insert(btn_idx, action);
                 debug!(
                     "SetDeviceInfo: button {} action type {}",
                     btn_idx, action_type
@@ -135,7 +135,7 @@ pub(crate) fn handle_set_device_info(state: &mut ClientState, data: &[u8]) -> Ve
 
         if change & 2 != 0 && offset + 4 <= data.len() {
             let remaining = &data[offset..];
-            state.xkb_device_led_info = remaining.to_vec();
+            state.xkb.device_led_info = remaining.to_vec();
             debug!(
                 "SetDeviceInfo: stored {} bytes of LED info",
                 remaining.len()

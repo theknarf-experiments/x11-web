@@ -35,7 +35,7 @@ pub(crate) fn handle_get_indicator_state(
     device_id_byte: u8,
 ) -> Vec<u8> {
     let mut ind_state: u32 = 0;
-    let eff_mods = state.xkb_state.effective_mods();
+    let eff_mods = state.xkb.effective_mods();
     if eff_mods & MOD_LOCK != 0 {
         ind_state |= 1 << 0;
     }
@@ -45,10 +45,10 @@ pub(crate) fn handle_get_indicator_state(
     if eff_mods & MOD_M3 != 0 {
         ind_state |= 1 << 2;
     }
-    if state.xkb_state.effective_group() > 0 {
+    if state.xkb.effective_group() > 0 {
         ind_state |= 1 << 3;
     }
-    state.xkb_indicators = ind_state;
+    state.xkb.indicators = ind_state;
 
     serialize_reply(
         &GetIndicatorStateReply {
@@ -146,13 +146,14 @@ pub(crate) fn handle_set_indicator_map(state: &mut ClientState, data: &[u8]) -> 
             if off + INDICATOR_MAP_WIRE_SIZE > data.len() {
                 break;
             }
-            while state.xkb_indicator_maps.len() <= bit as usize {
+            while state.xkb.indicator_maps.len() <= bit as usize {
                 state
-                    .xkb_indicator_maps
+                    .xkb
+                    .indicator_maps
                     .push(super::super::super::client::XkbIndicatorMap::default());
             }
             let ctrls_val = read_u32(data, off + SET_INDICATOR_CTRLS_OFFSET, msb);
-            let map = &mut state.xkb_indicator_maps[bit as usize];
+            let map = &mut state.xkb.indicator_maps[bit as usize];
             // Inline parsing matches XkbIndicatorMapWireDesc layout:
             //   flags(0) whichGroups(1) groups(2) whichMods(3) mods(4) realMods(5)
             //   vmods(6,7) ctrls(8,9,10,11)
@@ -180,7 +181,7 @@ pub(crate) fn handle_get_named_indicator(
         0
     };
 
-    let eff_mods = state.xkb_state.effective_mods();
+    let eff_mods = state.xkb.effective_mods();
     let on = if indicator_atom == 0 {
         false
     } else {
@@ -194,7 +195,7 @@ pub(crate) fn handle_get_named_indicator(
             Some("Caps Lock") => eff_mods & MOD_LOCK != 0,
             Some("Num Lock") => eff_mods & MOD_M2 != 0,
             Some("Scroll Lock") => eff_mods & MOD_M3 != 0,
-            Some("Group 2") => state.xkb_state.effective_group() >= 1,
+            Some("Group 2") => state.xkb.effective_group() >= 1,
             _ => false,
         }
     };

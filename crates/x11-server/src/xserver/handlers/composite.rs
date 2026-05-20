@@ -3,6 +3,15 @@
 use super::parse_minor;
 use tracing::{debug, info, warn};
 
+/// Per-connection Composite extension state. Lives on
+/// `ClientState::composite`.
+#[derive(Default)]
+pub(crate) struct CompositeState {
+    /// Overlay window reference count (GetOverlayWindow increments,
+    /// ReleaseOverlayWindow decrements).
+    pub(crate) overlay_ref_count: u32,
+}
+
 use super::super::client::ClientState;
 use super::super::core::{OVERLAY_WINDOW, ROOT_COLORMAP, VISUAL_TRUE_COLOR_ARGB_32};
 use super::super::types::{PixmapState, WindowState, WindowType};
@@ -266,10 +275,10 @@ pub(crate) fn handle_x_composite_request(
                 }
                 info!("Created overlay window {OVERLAY_WINDOW:#x} ({w}x{h})");
             }
-            state.overlay_ref_count += 1;
+            state.composite.overlay_ref_count += 1;
             info!(
                 "Overlay window ref count incremented to {}",
-                state.overlay_ref_count
+                state.composite.overlay_ref_count
             );
             serialize_reply(
                 &GetOverlayWindowReply {
@@ -292,10 +301,10 @@ pub(crate) fn handle_x_composite_request(
                 minor as u16
             );
             let window = req.window;
-            if state.overlay_ref_count > 0 {
-                state.overlay_ref_count -= 1;
-                info!("Composite ReleaseOverlayWindow: window={window:#x}, ref count decremented to {}", state.overlay_ref_count);
-                if state.overlay_ref_count == 0 {
+            if state.composite.overlay_ref_count > 0 {
+                state.composite.overlay_ref_count -= 1;
+                info!("Composite ReleaseOverlayWindow: window={window:#x}, ref count decremented to {}", state.composite.overlay_ref_count);
+                if state.composite.overlay_ref_count == 0 {
                     info!("Overlay window {window:#x} is no longer in use (ref count reached 0)");
                 }
             } else {

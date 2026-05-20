@@ -1,10 +1,16 @@
 //! XKB modifier and group state tracking types and helpers.
 
+use std::collections::HashMap;
 use std::time::Instant;
 
-/// XKB modifier and group state tracking.
-#[derive(Clone, Default)]
+/// Per-connection XKB extension state. Lives on `ClientState::xkb`;
+/// reads and writes happen through `state.xkb.*`.
+///
+/// Bundles the live modifier/group/controls tracking with the larger
+/// SetMap / SetNames / SetCompatMap / SetIndicatorMap bookkeeping that
+/// XKB clients can override.
 pub(crate) struct XkbState {
+    // -- live modifier / group state --------------------------------------
     /// Base modifiers (from currently pressed modifier keys).
     pub(crate) base_mods: u8,
     /// Latched modifiers (cleared on next non-modifier key press).
@@ -20,10 +26,132 @@ pub(crate) struct XkbState {
     /// XKB controls state.
     pub(crate) controls: XkbControls,
     /// BounceKeys: timestamp of last release per keycode (for debounce).
-    pub(crate) bounce_key_release_time: std::collections::HashMap<u8, Instant>,
+    pub(crate) bounce_key_release_time: HashMap<u8, Instant>,
     /// StickyKeys: modifiers that have been "stuck" (latched by press-release)
     /// and will apply to the next non-modifier key, then clear.
     pub(crate) sticky_mods: u8,
+
+    // -- map / SetMap bookkeeping ----------------------------------------
+    /// Extra keyboard groups/layouts (groups 1-3). Each entry is a
+    /// HashMap<keycode, Vec<keysym>> for that group. Group 0 is the built-in
+    /// US-QWERTY layout from `keycode_to_keysym`.
+    pub(crate) extra_groups: Vec<HashMap<u8, Vec<u32>>>,
+    /// Group-switch keys: (keycode, target_group_index).
+    /// When multi-layout is active, pressing these keys switches the active group.
+    pub(crate) group_switch_keys: Vec<(u8, u8)>,
+    /// Custom key types set by SetMap (keyed by type index).
+    pub(crate) key_types: HashMap<u8, XkbKeyType>,
+    /// Per-key action lists set by SetMap (keyed by keycode).
+    pub(crate) key_actions: HashMap<u8, Vec<XkbAction>>,
+    /// Per-key behaviors set by SetMap (keyed by keycode).
+    pub(crate) key_behaviors: HashMap<u8, XkbKeyBehavior>,
+    /// Per-key explicit override flags set by SetMap (keyed by keycode).
+    pub(crate) explicit: HashMap<u8, u8>,
+    /// Per-key modifier map set by SetMap (keyed by keycode).
+    pub(crate) modmap: HashMap<u8, u8>,
+    /// Per-key virtual modifier map set by SetMap (keyed by keycode).
+    pub(crate) vmodmap: HashMap<u8, u16>,
+    /// Virtual modifier bindings (16 entries for mod1-mod16).
+    pub(crate) vmod_bindings: [u8; 16],
+
+    // -- indicator state -------------------------------------------------
+    /// XKB indicator state (32 bits, one per named indicator).
+    pub(crate) indicators: u32,
+    /// XKB indicator maps: indicator_index → (which_groups, groups, which_mods, mods).
+    pub(crate) indicator_maps: Vec<XkbIndicatorMap>,
+    /// XKB named indicator settings set by SetNamedIndicator.
+    /// Maps indicator name atom to (indicator_index, change_state, led_state,
+    ///   affect_which, change_which, affect_map_mask, map).
+    pub(crate) named_indicators: HashMap<u32, XkbNamedIndicator>,
+
+    // -- name overrides (SetNames) --------------------------------------
+    /// XKB symbolic names stored by SetNames (which_bit → atom).
+    /// Bits: 0=Keycodes, 1=Geometry, 2=Symbols, 3=PhysSymbols, 4=Types, 5=Compat.
+    pub(crate) names_atoms: HashMap<u8, u32>,
+    /// Per-type name atoms (overridden by SetNames).
+    pub(crate) type_names: Vec<u32>,
+    /// Per-type per-level name atoms (overridden by SetNames).
+    pub(crate) kt_level_names: Vec<Vec<u32>>,
+    /// Group name atoms (overridden by SetNames).
+    pub(crate) group_names: Vec<u32>,
+    /// Indicator name atoms (overridden by SetNames).
+    pub(crate) indicator_name_atoms: Vec<u32>,
+    /// Virtual modifier name atoms (overridden by SetNames).
+    pub(crate) vmod_names: Vec<u32>,
+    /// Per-key name overrides (overridden by SetNames).
+    pub(crate) key_names: HashMap<u8, [u8; 4]>,
+    /// Key alias pairs (overridden by SetNames).
+    pub(crate) key_aliases: Vec<([u8; 4], [u8; 4])>,
+
+    // -- device info (SetDeviceInfo) ------------------------------------
+    /// Per-button action mappings set by SetDeviceInfo (keyed by button index).
+    pub(crate) button_actions: HashMap<u8, [u8; 8]>,
+    /// LED feedback info blob from SetDeviceInfo (echoed by GetDeviceInfo).
+    pub(crate) device_led_info: Vec<u8>,
+
+    // -- compat / interpretations ---------------------------------------
+    /// Compatibility map — symbol interpretations (SI entries).
+    /// Populated with defaults, overridable via SetCompatMap.
+    pub(crate) compat_si: Vec<XkbSymInterpretation>,
+    /// Group compatibility entries (4 groups).
+    pub(crate) group_compat: [XkbGroupCompat; 4],
+
+    // -- per-client event subscription ----------------------------------
+    /// Per-client event mask (SelectEvents). Bitmask of XKB event types this
+    /// client wants to receive. Bit positions correspond to XkbEventType values
+    /// (e.g., bit 0 = NewKeyboardNotify, bit 1 = MapNotify, bit 11 = StateNotify).
+    pub(crate) event_mask: u32,
+}
+
+impl Default for XkbState {
+    fn default() -> Self {
+        Self {
+            base_mods: 0,
+            latched_mods: 0,
+            locked_mods: 0,
+            base_group: 0,
+            latched_group: 0,
+            locked_group: 0,
+            controls: XkbControls::default(),
+            bounce_key_release_time: HashMap::new(),
+            sticky_mods: 0,
+
+            extra_groups: Vec::new(),
+            group_switch_keys: Vec::new(),
+            key_types: HashMap::new(),
+            key_actions: HashMap::new(),
+            key_behaviors: HashMap::new(),
+            explicit: HashMap::new(),
+            modmap: HashMap::new(),
+            vmodmap: HashMap::new(),
+            vmod_bindings: [0; 16],
+
+            indicators: 0,
+            indicator_maps: Vec::new(),
+            named_indicators: HashMap::new(),
+
+            names_atoms: HashMap::new(),
+            type_names: Vec::new(),
+            kt_level_names: Vec::new(),
+            group_names: Vec::new(),
+            indicator_name_atoms: Vec::new(),
+            vmod_names: Vec::new(),
+            key_names: HashMap::new(),
+            key_aliases: Vec::new(),
+
+            button_actions: HashMap::new(),
+            device_led_info: Vec::new(),
+
+            // Populated with default symbol interpretations by the
+            // connection initializer (calls `handlers::xkb::default_compat_si`).
+            // Default here is empty so the struct can be `Default::default()`
+            // without depending on the handler module.
+            compat_si: Vec::new(),
+            group_compat: <[XkbGroupCompat; 4]>::default(),
+
+            event_mask: 0,
+        }
+    }
 }
 
 

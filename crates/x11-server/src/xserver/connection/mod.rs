@@ -386,8 +386,7 @@ pub(crate) async fn handle_client(
         x11_to_uuid: HashMap::new(),
         cursors: HashMap::new(),
         xi: crate::xinput2::XiState::default(),
-        menu_tracker,
-        gtk_menu_paths: HashMap::new(),
+        menu: crate::menus::MenuState::new(menu_tracker),
         grabs: GrabState::default(),
         save_set: Vec::new(),
         close_down_mode: 0,
@@ -453,30 +452,13 @@ pub(crate) async fn handle_client(
             "/usr/share/fonts/X11/75dpi".to_string(),
             "/usr/share/fonts/X11/100dpi".to_string(),
         ],
-        xtest_grab_impervious: false,
+        xtest: handlers::xtest::XTestState::default(),
         dpms: super::handlers::dpms::DpmsState::default(),
-        xkb_state: super::client::XkbState::default(),
-        xkb_extra_groups: Vec::new(),
-        xkb_indicators: 0,
-        xkb_indicator_maps: Vec::new(),
-        xkb_group_switch_keys: Vec::new(),
-        xkb_names_atoms: HashMap::new(),
-        xkb_type_names: Vec::new(),
-        xkb_kt_level_names: Vec::new(),
-        xkb_group_names: Vec::new(),
-        xkb_indicator_name_atoms: Vec::new(),
-        xkb_vmod_names: Vec::new(),
-        xkb_key_names: HashMap::new(),
-        xkb_key_aliases: Vec::new(),
-        xkb_key_types: HashMap::new(),
-        xkb_key_actions: HashMap::new(),
-        xkb_key_behaviors: HashMap::new(),
-        xkb_explicit: HashMap::new(),
-        xkb_modmap: HashMap::new(),
-        xkb_vmodmap: HashMap::new(),
-        xkb_vmod_bindings: [0u8; 16],
-        xkb_button_actions: HashMap::new(),
-        xkb_device_led_info: Vec::new(),
+        xkb: {
+            let mut x = super::client::XkbState::default();
+            x.compat_si = super::handlers::xkb::default_compat_si();
+            x
+        },
         xvideo: handlers::xvideo::XVideoState::default(),
         pointer_button_mask: 0,
         motion_hint_suppressed: false,
@@ -495,11 +477,7 @@ pub(crate) async fn handle_client(
         big_requests_enabled: false,
         freed_xids: Vec::new(),
         xim: handlers::xim::XimServer::new(XIM_WINDOW),
-        xkb_compat_si: super::handlers::xkb::default_compat_si(),
-        xkb_group_compat: Default::default(),
-        xkb_event_mask: 0,
-        xkb_named_indicators: HashMap::new(),
-        overlay_ref_count: 0,
+        composite: handlers::composite::CompositeState::default(),
         extension_registry,
         resource_limits: super::client::ResourceLimits::default(),
     };
@@ -1335,7 +1313,7 @@ pub(crate) async fn handle_client(
 
                             if let x11_web_protocol::InputEvent::MenuActivate { action } = &input {
                                 if let Some(uuid) = state.top_level_uuid_for(x11_wid) {
-                                    state.menu_tracker.activate(&uuid, action.clone());
+                                    state.menu.tracker.activate(&uuid, action.clone());
                                 }
                                 continue;
                             }
@@ -1392,19 +1370,19 @@ pub(crate) async fn handle_client(
                                     let kc = *keycode as usize;
 
                                     // BounceKeys: reject key press if within debounce interval
-                                    if state.xkb_state.bounce_keys_reject(kc as u8) {
+                                    if state.xkb.bounce_keys_reject(kc as u8) {
                                         continue;
                                     }
 
                                     // MouseKeys: convert numpad keys to pointer events
-                                    if (state.xkb_state.controls.enabled_ctrls
+                                    if (state.xkb.controls.enabled_ctrls
                                         & crate::xserver::handlers::xkb::XKB_MOUSE_KEYS_MASK)
                                         != 0
                                     {
                                         use crate::xserver::client::xkb_state::{mousekeys_movement, mousekeys_is_click};
                                         if let Some((dx, dy)) = mousekeys_movement(kc as u8) {
                                             // Convert to pointer motion
-                                            let speed = state.xkb_state.controls.mk_max_speed.max(1) as i16;
+                                            let speed = state.xkb.controls.mk_max_speed.max(1) as i16;
                                             let new_x = (state.pointer_x + dx * speed).max(0);
                                             let new_y = (state.pointer_y + dy * speed).max(0);
                                             let motion = x11_web_protocol::InputEvent::MotionNotify {
@@ -1438,7 +1416,7 @@ pub(crate) async fn handle_client(
                                             continue;
                                         } else if mousekeys_is_click(kc as u8) {
                                             // KP_5: generate ButtonPress for the default button
-                                            let btn = state.xkb_state.controls.mk_dflt_btn.max(1);
+                                            let btn = state.xkb.controls.mk_dflt_btn.max(1);
                                             let press = x11_web_protocol::InputEvent::ButtonPress {
                                                 button: btn,
                                                 x: state.pointer_x,
@@ -1472,11 +1450,11 @@ pub(crate) async fn handle_client(
                                     // (Simplified synchronous check — a full implementation would use
                                     // an async timer to accept the key after slow_keys_delay.)
                                     // For now we track first-press time and accept on subsequent events.
-                                    if (state.xkb_state.controls.enabled_ctrls
+                                    if (state.xkb.controls.enabled_ctrls
                                         & crate::xserver::handlers::xkb::XKB_SLOW_KEYS_MASK)
                                         != 0
                                     {
-                                        let delay = state.xkb_state.controls.slow_keys_delay;
+                                        let delay = state.xkb.controls.slow_keys_delay;
                                         // Use the auto-repeat mechanism: a slow key press is only
                                         // accepted if the key is already being held (repeat event).
                                         // First press is "pending" until auto-repeat fires after delay.
@@ -1494,7 +1472,7 @@ pub(crate) async fn handle_client(
                                                 kc as u8,
                                             );
                                             let xkb_before = handlers::xkb::XkbStateSnapshot::capture(&state);
-                                            state.xkb_state.key_press(kc as u8);
+                                            state.xkb.key_press(kc as u8);
                                             handlers::xkb::maybe_send_xkb_state_notify(&mut state, &xkb_before, kc as u8, 2);
                                             key_repeat = Some(RepeatState {
                                                 keycode: kc as u8,
@@ -1513,20 +1491,20 @@ pub(crate) async fn handle_client(
                                             &mut state.pressed_keys,
                                             kc as u8,
                                         );
-                                        state.xkb_state.key_press(kc as u8);
+                                        state.xkb.key_press(kc as u8);
                                     }
                                     handlers::xkb::maybe_send_xkb_state_notify(&mut state, &xkb_before, kc as u8, 2);
                                     // Start auto-repeat if enabled for this key.
-                                    let repeat_enabled = (state.xkb_state.controls.enabled_ctrls
+                                    let repeat_enabled = (state.xkb.controls.enabled_ctrls
                                         & crate::xserver::handlers::xkb::XKB_REPEAT_KEYS_MASK)
                                         != 0;
                                     let key_repeats = kc < 256
                                         && crate::xserver::types::keycode_bitset::get(
-                                            &state.xkb_state.controls.per_key_repeat,
+                                            &state.xkb.controls.per_key_repeat,
                                             kc as u8,
                                         );
                                     if repeat_enabled && key_repeats {
-                                        let delay = state.xkb_state.controls.repeat_delay as u64;
+                                        let delay = state.xkb.controls.repeat_delay as u64;
                                         key_repeat = Some(RepeatState {
                                             keycode: *keycode as u8,
                                             mask: *mask,
@@ -1544,7 +1522,7 @@ pub(crate) async fn handle_client(
                                     let kc = *keycode as usize;
 
                                     // MouseKeys: convert KP_5 release to ButtonRelease
-                                    if (state.xkb_state.controls.enabled_ctrls
+                                    if (state.xkb.controls.enabled_ctrls
                                         & crate::xserver::handlers::xkb::XKB_MOUSE_KEYS_MASK)
                                         != 0
                                     {
@@ -1553,7 +1531,7 @@ pub(crate) async fn handle_client(
                                             // Movement key release: nothing to do (motion has no release)
                                             continue;
                                         } else if mousekeys_is_click(kc as u8) {
-                                            let btn = state.xkb_state.controls.mk_dflt_btn.max(1);
+                                            let btn = state.xkb.controls.mk_dflt_btn.max(1);
                                             let release = x11_web_protocol::InputEvent::ButtonRelease {
                                                 button: btn,
                                                 x: state.pointer_x,
@@ -1589,7 +1567,7 @@ pub(crate) async fn handle_client(
                                             &mut state.pressed_keys,
                                             kc as u8,
                                         );
-                                        state.xkb_state.key_release(kc as u8);
+                                        state.xkb.key_release(kc as u8);
                                     }
                                     handlers::xkb::maybe_send_xkb_state_notify(&mut state, &xkb_before, kc as u8, 3);
                                     // Cancel auto-repeat for this key.
@@ -2015,7 +1993,7 @@ pub(crate) async fn handle_client(
                     }
 
                     // Schedule next repeat: if we were in delay phase, switch to interval.
-                    let interval = state.xkb_state.controls.repeat_interval as u64;
+                    let interval = state.xkb.controls.repeat_interval as u64;
                     if let Some(ref mut r) = key_repeat {
                         r.in_delay_phase = false;
                     }

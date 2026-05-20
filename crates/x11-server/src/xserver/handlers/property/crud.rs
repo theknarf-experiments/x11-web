@@ -282,7 +282,7 @@ pub(crate) fn handle_change_property(
                 let value = String::from_utf8_lossy(&req.data[..byte_len])
                     .trim_end_matches('\0')
                     .to_string();
-                let entry = state.gtk_menu_paths.entry(window).or_default();
+                let entry = state.menu.gtk_paths.entry(window).or_default();
                 match name.as_str() {
                     "_GTK_UNIQUE_BUS_NAME" => entry.bus_name = value,
                     "_GTK_MENUBAR_OBJECT_PATH" => entry.menubar_path = Some(value),
@@ -291,10 +291,10 @@ pub(crate) fn handle_change_property(
                     "_GTK_WINDOW_OBJECT_PATH" => entry.win_actions_path = Some(value),
                     _ => {}
                 }
-                if let Some(paths) = state.gtk_menu_paths.get(&window) {
+                if let Some(paths) = state.menu.gtk_paths.get(&window) {
                     if paths.has_menu() {
                         if let Some(uuid) = state.window_uuid(window) {
-                            state.menu_tracker.attach_gtk(
+                            state.menu.tracker.attach_gtk(
                                 uuid,
                                 state.client_id.clone(),
                                 paths.clone(),

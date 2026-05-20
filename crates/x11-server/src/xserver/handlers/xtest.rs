@@ -2,6 +2,13 @@
 
 use super::parse_minor;
 use tracing::{debug, warn};
+
+/// Per-connection XTEST state. Lives on `ClientState::xtest`.
+#[derive(Default)]
+pub(crate) struct XTestState {
+    /// XTEST impervious-to-server-grabs flag (XTestGrabControl).
+    pub(crate) grab_impervious: bool,
+}
 use x11rb_protocol::protocol::xproto::{
     BUTTON_PRESS_EVENT, BUTTON_RELEASE_EVENT, KEY_PRESS_EVENT, KEY_RELEASE_EVENT,
     MOTION_NOTIFY_EVENT,
@@ -119,10 +126,10 @@ pub(crate) fn handle_xtest_request(state: &mut ClientState, data: &[u8], seq: u1
                         use crate::xserver::types::keycode_bitset;
                         if event_type == KEY_PRESS_EVENT {
                             keycode_bitset::set(&mut state.pressed_keys, keycode);
-                            state.xkb_state.key_press(keycode);
+                            state.xkb.key_press(keycode);
                         } else {
                             keycode_bitset::clear(&mut state.pressed_keys, keycode);
-                            state.xkb_state.key_release(keycode);
+                            state.xkb.key_release(keycode);
                         }
                         super::xkb::maybe_send_xkb_state_notify(
                             state,
@@ -282,7 +289,7 @@ pub(crate) fn handle_xtest_request(state: &mut ClientState, data: &[u8], seq: u1
             // events even when another client holds a grab.
             require_len!(data, 8, seq, 150, minor as u16, state.msb_first);
             let impervious = data[4] != 0;
-            state.xtest_grab_impervious = impervious;
+            state.xtest.grab_impervious = impervious;
             debug!("XTEST GrabControl: impervious={impervious}");
             Vec::new()
         }

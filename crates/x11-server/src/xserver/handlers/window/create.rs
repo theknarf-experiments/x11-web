@@ -491,8 +491,8 @@ pub(crate) fn handle_destroy_window(
 
         state.windows.remove(&desc);
         state.recycle_xid(desc);
-        state.gtk_menu_paths.remove(&desc);
-        state.menu_tracker.window_index().unregister(desc);
+        state.menu.gtk_paths.remove(&desc);
+        state.menu.tracker.window_index().unregister(desc);
         if let Ok(mut shared) = state.shared_windows.lock() {
             shared.remove(&desc);
         }
@@ -500,7 +500,7 @@ pub(crate) fn handle_destroy_window(
             state
                 .window_router
                 .unregister_all(std::slice::from_ref(&uuid));
-            state.menu_tracker.detach(&uuid);
+            state.menu.tracker.detach(&uuid);
             let _ = state.update_tx.send((
                 state.client_id.clone(),
                 DisplayUpdate::WindowDestroyed { window_id: uuid },
@@ -517,8 +517,8 @@ pub(crate) fn handle_destroy_window(
 
     state.windows.remove(&wid);
     state.recycle_xid(wid);
-    state.gtk_menu_paths.remove(&wid);
-    state.menu_tracker.window_index().unregister(wid);
+    state.menu.gtk_paths.remove(&wid);
+    state.menu.tracker.window_index().unregister(wid);
 
     // Remove from shared window registry so other connections see the destroy immediately
     if let Ok(mut shared) = state.shared_windows.lock() {
@@ -529,7 +529,7 @@ pub(crate) fn handle_destroy_window(
         state
             .window_router
             .unregister_all(std::slice::from_ref(&uuid));
-        state.menu_tracker.detach(&uuid);
+        state.menu.tracker.detach(&uuid);
         let _ = state.update_tx.send((
             state.client_id.clone(),
             DisplayUpdate::WindowDestroyed { window_id: uuid },
@@ -598,13 +598,13 @@ pub(crate) fn handle_destroy_subwindows(
     // Destroy all descendants
     for wid in all_descendants {
         state.windows.remove(&wid);
-        state.gtk_menu_paths.remove(&wid);
-        state.menu_tracker.window_index().unregister(wid);
+        state.menu.gtk_paths.remove(&wid);
+        state.menu.tracker.window_index().unregister(wid);
         if let Some(uuid) = state.x11_to_uuid.remove(&wid) {
             state
                 .window_router
                 .unregister_all(std::slice::from_ref(&uuid));
-            state.menu_tracker.detach(&uuid);
+            state.menu.tracker.detach(&uuid);
             let _ = state.update_tx.send((
                 state.client_id.clone(),
                 DisplayUpdate::WindowDestroyed { window_id: uuid },

@@ -31,7 +31,7 @@ mod latch_lock_state_req {
 
 /// Build an XKB GetState reply with real modifier/group state.
 pub(crate) fn build_xkb_get_state_reply(state: &ClientState, seq: u16, device_id: u8) -> Vec<u8> {
-    let xkb = &state.xkb_state;
+    let xkb = &state.xkb;
     let effective_mods = xkb.effective_mods();
     let effective_group = xkb.effective_group() as u8;
 
@@ -89,7 +89,7 @@ pub(crate) fn handle_xkb_latch_lock_state(
         0
     };
 
-    let xkb = &mut state.xkb_state;
+    let xkb = &mut state.xkb;
 
     // Apply modifier locks
     if affect_mod_locks != 0 {
@@ -114,8 +114,8 @@ pub(crate) fn handle_xkb_latch_lock_state(
 
     debug!(
         "LatchLockState: locked_mods=0x{:02x} latched_mods=0x{:02x} locked_group={} latched_group={}",
-        state.xkb_state.locked_mods, state.xkb_state.latched_mods,
-        state.xkb_state.locked_group, state.xkb_state.latched_group
+        state.xkb.locked_mods, state.xkb.latched_mods,
+        state.xkb.locked_group, state.xkb.latched_group
     );
 
     // Send XkbStateNotify if state changed and client subscribed.
@@ -130,7 +130,7 @@ pub(crate) fn build_xkb_get_controls_reply(
     seq: u16,
     device_id: u8,
 ) -> Vec<u8> {
-    let ctrls = &state.xkb_state.controls;
+    let ctrls = &state.xkb.controls;
     let zero_mod = ModMask::from(0u16);
 
     serialize_reply(
@@ -176,8 +176,8 @@ pub(crate) fn handle_xkb_set_controls(state: &mut ClientState, data: &[u8], seq:
 
     let req = parse_minor!(SetControlsRequest, data, state, seq, 136, data[1] as u16);
     let change_ctrls = u32::from(req.change_controls);
-    let enabled_ctrls_before = state.xkb_state.controls.enabled_ctrls;
-    let ctrls = &mut state.xkb_state.controls;
+    let enabled_ctrls_before = state.xkb.controls.enabled_ctrls;
+    let ctrls = &mut state.xkb.controls;
 
     if change_ctrls & XKB_MOUSE_KEYS_MASK != 0 {
         ctrls.mk_dflt_btn = req.mouse_keys_dflt_btn;

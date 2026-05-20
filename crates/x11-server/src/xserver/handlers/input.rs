@@ -93,7 +93,7 @@ pub(crate) fn handle_query_pointer(state: &mut ClientState, req: &QueryPointerRe
         .unwrap_or(0);
 
     // Build modifier/button mask: low byte = keyboard modifiers, bits 8-12 = buttons 1-5
-    let mask = state.xkb_state.effective_mods() as u16 | state.pointer_button_mask;
+    let mask = state.xkb.effective_mods() as u16 | state.pointer_button_mask;
 
     serialize_reply(
         &QueryPointerReply {
