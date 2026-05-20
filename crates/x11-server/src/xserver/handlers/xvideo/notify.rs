@@ -29,9 +29,9 @@ pub(crate) fn handle_notify_request(
                 minor
             );
             if req.onoff {
-                state.xv_video_notify_drawables.insert(req.drawable);
+                state.xvideo.video_notify_drawables.insert(req.drawable);
             } else {
-                state.xv_video_notify_drawables.remove(&req.drawable);
+                state.xvideo.video_notify_drawables.remove(&req.drawable);
             }
             debug!(
                 "XVideo SelectVideoNotify: drawable={:#x} on={}",
@@ -51,9 +51,9 @@ pub(crate) fn handle_notify_request(
                 minor
             );
             if req.onoff {
-                state.xv_port_notify_ports.insert(req.port);
+                state.xvideo.port_notify_ports.insert(req.port);
             } else {
-                state.xv_port_notify_ports.remove(&req.port);
+                state.xvideo.port_notify_ports.remove(&req.port);
             }
             debug!(
                 "XVideo SelectPortNotify: port={} on={}",

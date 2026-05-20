@@ -399,10 +399,6 @@ pub(crate) async fn handle_client(
         keyboard_control: Default::default(),
         pointer_control: Default::default(),
         screen_saver: Default::default(),
-        screen_saver_event_mask: 0,
-        screen_saver_window: 0,
-        screen_saver_attrs: None,
-        screen_saver_suspend_count: 0,
         msb_first: byte_order == 0x42,
         screen_width: SCREEN_WIDTH,
         screen_height: SCREEN_HEIGHT,
@@ -458,11 +454,7 @@ pub(crate) async fn handle_client(
         access_control_enabled: false,
         shared_access_control: shared_access_control.clone(),
         xtest_grab_impervious: false,
-        dpms_enabled: true,
-        dpms_power_level: 0,
-        dpms_standby_timeout: 0,
-        dpms_suspend_timeout: 0,
-        dpms_off_timeout: 0,
+        dpms: super::handlers::dpms::DpmsState::default(),
         xkb_state: super::client::XkbState::default(),
         xkb_extra_groups: Vec::new(),
         xkb_indicators: 0,
@@ -485,9 +477,7 @@ pub(crate) async fn handle_client(
         xkb_vmod_bindings: [0u8; 16],
         xkb_button_actions: HashMap::new(),
         xkb_device_led_info: Vec::new(),
-        xv_ports: HashMap::new(),
-        xv_video_notify_drawables: std::collections::HashSet::new(),
-        xv_port_notify_ports: std::collections::HashSet::new(),
+        xvideo: handlers::xvideo::XVideoState::default(),
         pointer_button_mask: 0,
         motion_hint_suppressed: false,
         barriers: HashMap::new(),
@@ -511,14 +501,7 @@ pub(crate) async fn handle_client(
         randr_monitors: Vec::new(),
         randr_primary_output: 0,
         randr_next_mode_id: 1000,
-        vidmode_viewport_x: 0,
-        vidmode_viewport_y: 0,
-        vidmode_modes: vec![handlers::vidmode::VidModeInfo::default_for_screen(
-            SCREEN_WIDTH,
-            SCREEN_HEIGHT,
-        )],
-        vidmode_locked: false,
-        vidmode_current_mode: 0,
+        vidmode: handlers::vidmode::VidModeState::new_for_screen(SCREEN_WIDTH, SCREEN_HEIGHT),
         big_requests_enabled: false,
         freed_xids: Vec::new(),
         xim: handlers::xim::XimServer::new(XIM_WINDOW),
@@ -1202,7 +1185,7 @@ pub(crate) async fn handle_client(
                 // has occurred for `timeout` seconds and suspend_count == 0.
                 if !state.screen_saver.active
                     && state.screen_saver.timeout > 0
-                    && state.screen_saver_suspend_count == 0
+                    && state.screen_saver.suspend_count == 0
                 {
                     let now = state.timestamp();
                     let elapsed_ms = now.wrapping_sub(state.screen_saver.last_reset_ms);
@@ -1856,7 +1839,7 @@ pub(crate) async fn handle_client(
                             }
 
                             // Reset screen saver timer on any user input (per X11 spec §14.3)
-                            if state.screen_saver.timeout > 0 && state.screen_saver_suspend_count == 0 {
+                            if state.screen_saver.timeout > 0 && state.screen_saver.suspend_count == 0 {
                                 state.screen_saver.last_reset_ms = state.timestamp();
                                 if state.screen_saver.active {
                                     state.screen_saver.active = false;

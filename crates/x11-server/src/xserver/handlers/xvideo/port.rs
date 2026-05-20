@@ -32,7 +32,7 @@ pub(crate) fn handle_port_request(
             let req = parse_minor!(GrabPortRequest, data, state, seq, XV_MAJOR_OPCODE, minor);
             let port = req.port;
             debug!("XVideo GrabPort: port={port}");
-            let ps = state.xv_ports.entry(port).or_default();
+            let ps = state.xvideo.ports.entry(port).or_default();
             let result = if ps.grabbed {
                 GrabPortStatus::ALREADY_GRABBED
             } else {
@@ -50,7 +50,7 @@ pub(crate) fn handle_port_request(
             let req = parse_minor!(UngrabPortRequest, data, state, seq, XV_MAJOR_OPCODE, minor);
             let port = req.port;
             debug!("XVideo UngrabPort: port={port}");
-            if let Some(ps) = state.xv_ports.get_mut(&port) {
+            if let Some(ps) = state.xvideo.ports.get_mut(&port) {
                 ps.grabbed = false;
             }
             Vec::new()
@@ -85,7 +85,7 @@ pub(crate) fn handle_port_request(
             let atom = req.attribute;
             let value = req.value;
             let name = state.get_atom_name(atom).unwrap_or_default();
-            let ps = state.xv_ports.entry(port).or_default();
+            let ps = state.xvideo.ports.entry(port).or_default();
             match name.as_str() {
                 XV_ATTR_BRIGHTNESS => ps.brightness = value.clamp(-1000, 1000),
                 XV_ATTR_CONTRAST => ps.contrast = value.clamp(0, 2000),
@@ -112,7 +112,7 @@ pub(crate) fn handle_port_request(
             let port = req.port;
             let atom = req.attribute;
             let name = state.get_atom_name(atom).unwrap_or_default();
-            let ps = state.xv_ports.entry(port).or_default();
+            let ps = state.xvideo.ports.entry(port).or_default();
             let value = match name.as_str() {
                 XV_ATTR_BRIGHTNESS => ps.brightness,
                 XV_ATTR_CONTRAST => ps.contrast,

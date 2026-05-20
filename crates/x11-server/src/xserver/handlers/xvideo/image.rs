@@ -504,8 +504,8 @@ fn xv_put_image_impl(
     dst_h: u16,
 ) {
     // Ensure port state exists
-    state.xv_ports.entry(port).or_default();
-    let colorspace = state.xv_ports.get(&port).map(|p| p.colorspace).unwrap_or(0);
+    state.xvideo.ports.entry(port).or_default();
+    let colorspace = state.xvideo.ports.get(&port).map(|p| p.colorspace).unwrap_or(0);
 
     let argb = match convert_yuv_to_argb(fourcc, yuv_data, src_w as u32, src_h as u32, colorspace) {
         Some(px) => px,
@@ -607,7 +607,7 @@ pub(crate) fn handle_image_request(
             } else {
                 vec![0u8; drw_w as usize * drw_h as usize * 4]
             };
-            let port_state = state.xv_ports.entry(port).or_default();
+            let port_state = state.xvideo.ports.entry(port).or_default();
             port_state.captured_frame = Some(CapturedFrame {
                 width: drw_w,
                 height: drw_h,

@@ -92,9 +92,12 @@ impl Default for PointerControl {
     }
 }
 
-/// Screen saver settings (for Get/SetScreenSaver).
-#[derive(Clone, Default)]
-pub(crate) struct ScreenSaverSettings {
+/// Per-connection screen-saver state. Bundles the core `SetScreenSaver`
+/// settings together with the MIT-SCREEN-SAVER extension fields, both of
+/// which describe the same subsystem.
+#[derive(Default)]
+pub(crate) struct ScreenSaverState {
+    // -- core SetScreenSaver / GetScreenSaver --
     pub(crate) timeout: u16,
     pub(crate) interval: u16,
     pub(crate) prefer_blanking: u8,
@@ -103,4 +106,14 @@ pub(crate) struct ScreenSaverSettings {
     pub(crate) active: bool,
     /// Timestamp (ms since server start) of the last screen saver timer reset.
     pub(crate) last_reset_ms: u32,
+
+    // -- MIT-SCREEN-SAVER extension --
+    /// Event mask for `ScreenSaverNotify`.
+    pub(crate) event_mask: u32,
+    /// Window ID for the screen saver window.
+    pub(crate) window: u32,
+    /// Attributes stored by `SetAttributes`.
+    pub(crate) attrs: Option<super::super::handlers::screensaver::ScreenSaverAttrs>,
+    /// Reference-counted suspend level.
+    pub(crate) suspend_count: u32,
 }

@@ -62,6 +62,19 @@ pub(crate) struct CapturedFrame {
     pub(crate) data: Vec<u8>,
 }
 
+/// Per-connection XVideo extension state. Lives on
+/// `ClientState::xvideo`; reads and writes happen through
+/// `state.xvideo.*`.
+#[derive(Default)]
+pub(crate) struct XVideoState {
+    /// Per-port state: attributes and allocation tracking.
+    pub(crate) ports: std::collections::HashMap<u32, XvPortState>,
+    /// Drawables registered for XvVideoNotify (via XvSelectVideoNotify).
+    pub(crate) video_notify_drawables: std::collections::HashSet<u32>,
+    /// Ports registered for XvPortNotify (via XvSelectPortNotify).
+    pub(crate) port_notify_ports: std::collections::HashSet<u32>,
+}
+
 /// Per-port XVideo state: attributes and allocation tracking.
 #[derive(Clone, Debug)]
 pub(crate) struct XvPortState {

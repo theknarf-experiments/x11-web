@@ -121,16 +121,8 @@ pub(crate) struct ClientState {
     pub(crate) keyboard_control: KeyboardControl,
     /// Pointer control settings.
     pub(crate) pointer_control: PointerControl,
-    /// Screen saver settings.
-    pub(crate) screen_saver: ScreenSaverSettings,
-    /// MIT-SCREEN-SAVER: event mask for ScreenSaverNotify.
-    pub(crate) screen_saver_event_mask: u32,
-    /// MIT-SCREEN-SAVER: window ID for the screen saver window.
-    pub(crate) screen_saver_window: u32,
-    /// MIT-SCREEN-SAVER: stored attributes from SetAttributes.
-    pub(crate) screen_saver_attrs: Option<super::handlers::screensaver::ScreenSaverAttrs>,
-    /// MIT-SCREEN-SAVER: reference-counted suspend level.
-    pub(crate) screen_saver_suspend_count: u32,
+    /// Screen-saver state (core SetScreenSaver settings + MIT-SCREEN-SAVER fields).
+    pub(crate) screen_saver: ScreenSaverState,
     /// Client byte order: false = LSB-first (0x6c), true = MSB-first (0x42).
     pub(crate) msb_first: bool,
     /// Current screen dimensions (dynamic, updated on resize).
@@ -208,16 +200,8 @@ pub(crate) struct ClientState {
     pub(crate) shared_access_control: super::types::SharedAccessControl,
     /// XTEST: impervious grab mode.
     pub(crate) xtest_grab_impervious: bool,
-    /// DPMS: whether DPMS is enabled.
-    pub(crate) dpms_enabled: bool,
-    /// DPMS: current power level (0=On, 1=Standby, 2=Suspend, 3=Off).
-    pub(crate) dpms_power_level: u16,
-    /// DPMS: standby timeout in seconds.
-    pub(crate) dpms_standby_timeout: u16,
-    /// DPMS: suspend timeout in seconds.
-    pub(crate) dpms_suspend_timeout: u16,
-    /// DPMS: off timeout in seconds.
-    pub(crate) dpms_off_timeout: u16,
+    /// DPMS extension state.
+    pub(crate) dpms: super::handlers::dpms::DpmsState,
     /// XKB modifier/group state and controls.
     pub(crate) xkb_state: XkbState,
     /// XKB extra keyboard groups/layouts (groups 1-3). Each entry is a
@@ -279,16 +263,8 @@ pub(crate) struct ClientState {
     /// Maps indicator name atom to (indicator_index, change_state, led_state,
     ///   affect_which, change_which, affect_map_mask, map).
     pub(crate) xkb_named_indicators: HashMap<u32, XkbNamedIndicator>,
-    /// XVideo port state: per-port attributes and allocation tracking.
-    pub(crate) xv_ports: HashMap<u32, super::handlers::xvideo::XvPortState>,
-    /// Set of drawable IDs that have registered for XvVideoNotify events
-    /// (via XvSelectVideoNotify). Used to deliver VideoNotify when video
-    /// operations complete on those drawables.
-    pub(crate) xv_video_notify_drawables: std::collections::HashSet<u32>,
-    /// Set of port IDs that have registered for XvPortNotify events
-    /// (via XvSelectPortNotify). Used to deliver PortNotify when port
-    /// attributes change.
-    pub(crate) xv_port_notify_ports: std::collections::HashSet<u32>,
+    /// XVideo extension state.
+    pub(crate) xvideo: super::handlers::xvideo::XVideoState,
     /// Current pointer button mask (bits 8-12 for buttons 1-5).
     pub(crate) pointer_button_mask: u16,
     /// POINTER_MOTION_HINT_MASK: when true, motion events are suppressed
@@ -345,18 +321,8 @@ pub(crate) struct ClientState {
     pub(crate) randr_primary_output: u32,
     /// Next RandR mode ID for RRCreateMode.
     pub(crate) randr_next_mode_id: u32,
-    /// XFree86-VidMode viewport X offset (set by XF86VidModeSetViewPort).
-    /// For our single virtual display this is always clamped to 0.
-    pub(crate) vidmode_viewport_x: u32,
-    /// XFree86-VidMode viewport Y offset (set by XF86VidModeSetViewPort).
-    /// For our single virtual display this is always clamped to 0.
-    pub(crate) vidmode_viewport_y: u32,
-    /// XFree86-VidMode: list of available video modes.
-    pub(crate) vidmode_modes: Vec<super::handlers::vidmode::VidModeInfo>,
-    /// XFree86-VidMode: whether mode switching is locked.
-    pub(crate) vidmode_locked: bool,
-    /// XFree86-VidMode: index of the current mode in `vidmode_modes`.
-    pub(crate) vidmode_current_mode: usize,
+    /// XFree86-VidMode extension state.
+    pub(crate) vidmode: super::handlers::vidmode::VidModeState,
     /// Whether the client has enabled BIG-REQUESTS via BigReqEnable.
     pub(crate) big_requests_enabled: bool,
     /// Freed resource IDs available for reuse via XC-MISC GetXIDRange/GetXIDList.

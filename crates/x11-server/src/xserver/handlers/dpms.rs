@@ -12,6 +12,34 @@ use super::super::client::ClientState;
 use crate::xserver::core::require_len;
 use crate::xserver::reply::serialize_reply;
 
+/// Per-connection DPMS state. Lives on `ClientState::dpms`; reads and
+/// writes happen through `state.dpms.*`.
+#[derive(Debug)]
+pub(crate) struct DpmsState {
+    /// Whether DPMS is enabled.
+    pub(crate) enabled: bool,
+    /// Current power level (0=On, 1=Standby, 2=Suspend, 3=Off).
+    pub(crate) power_level: u16,
+    /// Standby timeout in seconds.
+    pub(crate) standby_timeout: u16,
+    /// Suspend timeout in seconds.
+    pub(crate) suspend_timeout: u16,
+    /// Off timeout in seconds.
+    pub(crate) off_timeout: u16,
+}
+
+impl Default for DpmsState {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            power_level: 0, // DPMSMode::ON
+            standby_timeout: 0,
+            suspend_timeout: 0,
+            off_timeout: 0,
+        }
+    }
+}
+
 /// DPMS (opcode 151)
 pub(crate) fn handle_dpms_request(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
     let minor = data[1];
@@ -40,32 +68,32 @@ pub(crate) fn handle_dpms_request(state: &mut ClientState, data: &[u8], seq: u16
             &GetTimeoutsReply {
                 sequence: seq,
                 length: 0,
-                standby_timeout: state.dpms_standby_timeout,
-                suspend_timeout: state.dpms_suspend_timeout,
-                off_timeout: state.dpms_off_timeout,
+                standby_timeout: state.dpms.standby_timeout,
+                suspend_timeout: state.dpms.suspend_timeout,
+                off_timeout: state.dpms.off_timeout,
             },
             state.byte_order(),
         ),
         SET_TIMEOUTS_REQUEST => {
             require_len!(data, 10, seq, 151, minor as u16, state.msb_first);
             let req = parse_minor!(SetTimeoutsRequest, data, state, seq, 151, minor as u16);
-            state.dpms_standby_timeout = req.standby_timeout;
-            state.dpms_suspend_timeout = req.suspend_timeout;
-            state.dpms_off_timeout = req.off_timeout;
+            state.dpms.standby_timeout = req.standby_timeout;
+            state.dpms.suspend_timeout = req.suspend_timeout;
+            state.dpms.off_timeout = req.off_timeout;
             debug!(
                 "DPMS SetTimeouts: standby={} suspend={} off={}",
-                state.dpms_standby_timeout, state.dpms_suspend_timeout, state.dpms_off_timeout
+                state.dpms.standby_timeout, state.dpms.suspend_timeout, state.dpms.off_timeout
             );
             Vec::new()
         }
         ENABLE_REQUEST => {
-            state.dpms_enabled = true;
+            state.dpms.enabled = true;
             debug!("DPMS Enable");
             Vec::new()
         }
         DISABLE_REQUEST => {
-            state.dpms_enabled = false;
-            state.dpms_power_level = u16::from(DPMSMode::ON); // reset when disabled
+            state.dpms.enabled = false;
+            state.dpms.power_level = u16::from(DPMSMode::ON); // reset when disabled
             debug!("DPMS Disable");
             Vec::new()
         }
@@ -82,10 +110,10 @@ pub(crate) fn handle_dpms_request(state: &mut ClientState, data: &[u8], seq: u16
             }
             // ForceLevel fails if DPMS is disabled and the requested level
             // is not On (per the DPMS spec).
-            if !state.dpms_enabled && level != DPMSMode::ON {
+            if !state.dpms.enabled && level != DPMSMode::ON {
                 return dpms_err(crate::xserver::core::VALUE_ERROR, u32::from(level));
             }
-            state.dpms_power_level = u16::from(level);
+            state.dpms.power_level = u16::from(level);
             debug!("DPMS ForceLevel: level={level:?}");
             Vec::new()
         }
@@ -93,8 +121,8 @@ pub(crate) fn handle_dpms_request(state: &mut ClientState, data: &[u8], seq: u16
             &InfoReply {
                 sequence: seq,
                 length: 0,
-                power_level: DPMSMode::from(state.dpms_power_level),
-                state: state.dpms_enabled,
+                power_level: DPMSMode::from(state.dpms.power_level),
+                state: state.dpms.enabled,
             },
             state.byte_order(),
         ),

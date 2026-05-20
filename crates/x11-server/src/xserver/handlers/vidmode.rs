@@ -26,6 +26,39 @@ use x11rb_protocol::x11_utils::{ByteOrder, SerializeEndian};
 
 use super::parse_minor;
 
+/// Per-connection XFree86-VidMode state. Lives on
+/// `ClientState::vidmode`; reads and writes happen through
+/// `state.vidmode.*`.
+#[derive(Debug)]
+pub(crate) struct VidModeState {
+    /// Viewport X offset (set by XF86VidModeSetViewPort).
+    /// For our single virtual display this is always clamped to 0.
+    pub(crate) viewport_x: u32,
+    /// Viewport Y offset (set by XF86VidModeSetViewPort).
+    /// For our single virtual display this is always clamped to 0.
+    pub(crate) viewport_y: u32,
+    /// List of available video modes.
+    pub(crate) modes: Vec<VidModeInfo>,
+    /// Whether mode switching is locked.
+    pub(crate) locked: bool,
+    /// Index of the current mode in `modes`.
+    pub(crate) current_mode: usize,
+}
+
+impl VidModeState {
+    /// Build the per-connection default with one mode matching the
+    /// current screen size.
+    pub(crate) fn new_for_screen(width: u16, height: u16) -> Self {
+        Self {
+            viewport_x: 0,
+            viewport_y: 0,
+            modes: vec![VidModeInfo::default_for_screen(width, height)],
+            locked: false,
+            current_mode: 0,
+        }
+    }
+}
+
 /// XFree86-VidMode mode information.
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct VidModeInfo {
@@ -171,21 +204,21 @@ pub(crate) fn handle_vidmode_request(state: &mut ClientState, data: &[u8], seq: 
             let req = parse_minor!(SwitchModeRequest, data, state, seq, 153, minor);
             let screen = req.screen;
             let zoom = req.zoom as i16;
-            if state.vidmode_locked {
+            if state.vidmode.locked {
                 debug!("VidMode SwitchMode: screen={screen} zoom={zoom} rejected — mode switching is locked");
                 return Vec::new();
             }
-            if !state.vidmode_modes.is_empty() {
-                let len = state.vidmode_modes.len();
+            if !state.vidmode.modes.is_empty() {
+                let len = state.vidmode.modes.len();
                 if zoom > 0 {
-                    state.vidmode_current_mode = (state.vidmode_current_mode + 1) % len;
+                    state.vidmode.current_mode = (state.vidmode.current_mode + 1) % len;
                 } else if zoom < 0 {
-                    state.vidmode_current_mode = (state.vidmode_current_mode + len - 1) % len;
+                    state.vidmode.current_mode = (state.vidmode.current_mode + len - 1) % len;
                 }
-                let mode = &state.vidmode_modes[state.vidmode_current_mode];
+                let mode = &state.vidmode.modes[state.vidmode.current_mode];
                 debug!(
                     "VidMode SwitchMode: screen={screen} zoom={zoom} -> mode {} ({}x{})",
-                    state.vidmode_current_mode, mode.hdisplay, mode.vdisplay,
+                    state.vidmode.current_mode, mode.hdisplay, mode.vdisplay,
                 );
             }
             Vec::new()
@@ -217,17 +250,18 @@ pub(crate) fn handle_vidmode_request(state: &mut ClientState, data: &[u8], seq: 
             let req = parse_minor!(LockModeSwitchRequest, data, state, seq, 153, minor);
             let screen = req.screen;
             let lock = req.lock;
-            state.vidmode_locked = lock != 0;
+            state.vidmode.locked = lock != 0;
             debug!(
                 "VidMode LockModeSwitch: screen={screen} locked={}",
-                state.vidmode_locked
+                state.vidmode.locked
             );
             Vec::new()
         }
         GET_ALL_MODE_LINES_REQUEST => {
             let _req = parse_minor!(GetAllModeLinesRequest, data, state, seq, 153, minor);
             let modeinfo: Vec<WireModeInfo> = state
-                .vidmode_modes
+                .vidmode
+                .modes
                 .iter()
                 .map(VidModeInfo::to_wire)
                 .collect();
@@ -245,8 +279,8 @@ pub(crate) fn handle_vidmode_request(state: &mut ClientState, data: &[u8], seq: 
                 "VidMode AddModeLine: screen={} {}x{} dotclock={}",
                 req.screen, new_mode.hdisplay, new_mode.vdisplay, new_mode.dotclock,
             );
-            if !state.vidmode_modes.iter().any(|m| m.matches(&new_mode)) {
-                state.vidmode_modes.push(new_mode);
+            if !state.vidmode.modes.iter().any(|m| m.matches(&new_mode)) {
+                state.vidmode.modes.push(new_mode);
             }
             Vec::new()
         }
@@ -257,13 +291,13 @@ pub(crate) fn handle_vidmode_request(state: &mut ClientState, data: &[u8], seq: 
                 "VidMode DeleteModeLine: screen={} {}x{} dotclock={}",
                 req.screen, target.hdisplay, target.vdisplay, target.dotclock,
             );
-            if let Some(idx) = state.vidmode_modes.iter().position(|m| m.matches(&target)) {
-                if state.vidmode_modes.len() > 1 {
-                    state.vidmode_modes.remove(idx);
-                    if state.vidmode_current_mode >= state.vidmode_modes.len() {
-                        state.vidmode_current_mode = 0;
-                    } else if state.vidmode_current_mode > idx {
-                        state.vidmode_current_mode -= 1;
+            if let Some(idx) = state.vidmode.modes.iter().position(|m| m.matches(&target)) {
+                if state.vidmode.modes.len() > 1 {
+                    state.vidmode.modes.remove(idx);
+                    if state.vidmode.current_mode >= state.vidmode.modes.len() {
+                        state.vidmode.current_mode = 0;
+                    } else if state.vidmode.current_mode > idx {
+                        state.vidmode.current_mode -= 1;
                     }
                 } else {
                     debug!("VidMode DeleteModeLine: refusing to delete last mode");
@@ -283,7 +317,7 @@ pub(crate) fn handle_vidmode_request(state: &mut ClientState, data: &[u8], seq: 
         SWITCH_TO_MODE_REQUEST => {
             let req = parse_minor!(SwitchToModeRequest, data, state, seq, 153, minor);
             let requested = mode_from_switch_to_mode(&req);
-            if state.vidmode_locked {
+            if state.vidmode.locked {
                 debug!(
                     "VidMode SwitchToMode: screen={} {}x{} rejected — mode switching is locked",
                     req.screen, requested.hdisplay, requested.vdisplay,
@@ -291,11 +325,12 @@ pub(crate) fn handle_vidmode_request(state: &mut ClientState, data: &[u8], seq: 
                 return Vec::new();
             }
             if let Some(idx) = state
-                .vidmode_modes
+                .vidmode
+                .modes
                 .iter()
                 .position(|m| m.matches(&requested))
             {
-                state.vidmode_current_mode = idx;
+                state.vidmode.current_mode = idx;
                 debug!(
                     "VidMode SwitchToMode: screen={} switched to mode {idx} ({}x{}, dotclock={})",
                     req.screen, requested.hdisplay, requested.vdisplay, requested.dotclock,
@@ -313,15 +348,15 @@ pub(crate) fn handle_vidmode_request(state: &mut ClientState, data: &[u8], seq: 
             let reply = GetViewPortReply {
                 sequence: seq,
                 length: 0,
-                x: state.vidmode_viewport_x,
-                y: state.vidmode_viewport_y,
+                x: state.vidmode.viewport_x,
+                y: state.vidmode.viewport_y,
             };
             build_reply(&reply, state.byte_order())
         }
         SET_VIEW_PORT_REQUEST => {
             let req = parse_minor!(SetViewPortRequest, data, state, seq, 153, minor);
-            state.vidmode_viewport_x = req.x;
-            state.vidmode_viewport_y = req.y;
+            state.vidmode.viewport_x = req.x;
+            state.vidmode.viewport_y = req.y;
             debug!(
                 "VidMode SetViewPort: screen={} x={} y={} (stored; virtual display always at 0,0)",
                 req.screen, req.x, req.y,
@@ -421,8 +456,9 @@ pub(crate) fn handle_vidmode_request(state: &mut ClientState, data: &[u8], seq: 
 
 fn current_mode(state: &ClientState) -> VidModeInfo {
     state
-        .vidmode_modes
-        .get(state.vidmode_current_mode)
+        .vidmode
+        .modes
+        .get(state.vidmode.current_mode)
         .cloned()
         .unwrap_or_else(|| VidModeInfo::default_for_screen(state.screen_width, state.screen_height))
 }

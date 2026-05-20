@@ -44,7 +44,7 @@ pub(crate) fn handle_screen_saver_request(
             state.byte_order(),
         ),
         QUERY_INFO_REQUEST => {
-            let saver_state = if state.screen_saver_suspend_count > 0 {
+            let saver_state = if state.screen_saver.suspend_count > 0 {
                 State::DISABLED
             } else if state.screen_saver.active {
                 State::ON
@@ -56,10 +56,10 @@ pub(crate) fn handle_screen_saver_request(
                     state: u8::from(saver_state),
                     sequence: seq,
                     length: 0,
-                    saver_window: state.screen_saver_window,
+                    saver_window: state.screen_saver.window,
                     ms_until_server: 0,
                     ms_since_user_input: state.timestamp(),
-                    event_mask: state.screen_saver_event_mask,
+                    event_mask: state.screen_saver.event_mask,
                     kind: Kind::BLANKED,
                 },
                 state.byte_order(),
@@ -69,7 +69,7 @@ pub(crate) fn handle_screen_saver_request(
             require_len!(data, 12, seq, 152, minor as u16, state.msb_first);
             let req = parse_minor!(SelectInputRequest, data, state, seq, 152, minor as u16);
             let event_mask = u32::from(req.event_mask);
-            state.screen_saver_event_mask = event_mask;
+            state.screen_saver.event_mask = event_mask;
             debug!("ScreenSaver SelectInput: event_mask=0x{event_mask:08x}");
             Vec::new()
         }
@@ -77,7 +77,7 @@ pub(crate) fn handle_screen_saver_request(
             // Store screen saver window attributes for when the saver activates.
             require_len!(data, 24, seq, 152, minor as u16, state.msb_first);
             let req = parse_minor!(SetAttributesRequest, data, state, seq, 152, minor as u16);
-            state.screen_saver_attrs = Some(ScreenSaverAttrs {
+            state.screen_saver.attrs = Some(ScreenSaverAttrs {
                 x: req.x,
                 y: req.y,
                 width: req.width,
@@ -90,26 +90,26 @@ pub(crate) fn handle_screen_saver_request(
             Vec::new()
         }
         UNSET_ATTRIBUTES_REQUEST => {
-            state.screen_saver_attrs = None;
+            state.screen_saver.attrs = None;
             debug!("ScreenSaver UnsetAttributes");
             Vec::new()
         }
         SUSPEND_REQUEST => {
             // Reference-counted: each Suspend increments, Resume decrements.
-            state.screen_saver_suspend_count += 1;
+            state.screen_saver.suspend_count += 1;
             debug!(
                 "ScreenSaver Suspend: count={}",
-                state.screen_saver_suspend_count
+                state.screen_saver.suspend_count
             );
             Vec::new()
         }
         RESUME_REQUEST => {
-            if state.screen_saver_suspend_count > 0 {
-                state.screen_saver_suspend_count -= 1;
+            if state.screen_saver.suspend_count > 0 {
+                state.screen_saver.suspend_count -= 1;
             }
             debug!(
                 "ScreenSaver Resume: count={}",
-                state.screen_saver_suspend_count
+                state.screen_saver.suspend_count
             );
             Vec::new()
         }

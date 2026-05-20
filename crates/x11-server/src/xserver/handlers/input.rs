@@ -850,7 +850,7 @@ fn build_screen_saver_notify(state: &ClientState, saver_state: u8) -> Vec<u8> {
         Kind as SsKind, NotifyEvent as ScreenSaverNotifyEvent, State as SsState,
     };
 
-    if state.screen_saver_event_mask == 0 {
+    if state.screen_saver.event_mask == 0 {
         return Vec::new();
     }
 
@@ -861,7 +861,7 @@ fn build_screen_saver_notify(state: &ClientState, saver_state: u8) -> Vec<u8> {
             sequence: state.sequence,
             time: state.timestamp(),
             root: state.root_window,
-            window: state.screen_saver_window,
+            window: state.screen_saver.window,
             kind: SsKind::from(0u8), // Blanked
             forced: true,
         },
