@@ -168,7 +168,7 @@ impl ClientState {
                 if let Some(win) = self.windows.get(&new_focus) {
                     if win.event_mask & EventMask::KEYMAP_STATE != EventMask::NO_EVENT {
                         let mut keys = [0u8; 31];
-                        keys.copy_from_slice(&self.pressed_keys[1..32]);
+                        keys.copy_from_slice(&self.keyboard.pressed_keys[1..32]);
                         let km_event = serialize_event(
                             &KeymapNotifyEvent {
                                 response_type: KEYMAP_NOTIFY_EVENT,

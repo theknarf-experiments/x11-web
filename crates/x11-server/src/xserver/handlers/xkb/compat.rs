@@ -416,7 +416,7 @@ fn recompute_compat_actions(state: &mut ClientState) {
 /// Look up the primary keysym for a keycode (group 0, level 0).
 fn lookup_keysym_for_key(state: &ClientState, keycode: u8) -> u32 {
     // Check custom keymap first (from ChangeKeyboardMapping or SetMap)
-    if let Some(syms) = state.custom_keymap.lock().unwrap().get(&keycode) {
+    if let Some(syms) = state.keyboard.custom_keymap.lock().unwrap().get(&keycode) {
         if let Some(&sym) = syms.first() {
             return sym;
         }

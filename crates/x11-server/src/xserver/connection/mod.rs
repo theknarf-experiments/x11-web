@@ -371,13 +371,15 @@ pub(crate) async fn handle_client(
         focus_revert_to: 1, // Parent
         font_manager: FontManager::new(),
         render: handlers::render::RenderState::new(),
-        selections: HashMap::new(),
-        selection_timestamps: HashMap::new(),
+        selection: super::client::SelectionState::new(
+            shared_selections,
+            clipboard_notify_tx,
+            persistent_clipboard.clone(),
+        ),
         shm_segments: HashMap::new(),
         wm_state: shared_wm_state.clone(),
         wm_events_tx,
         event_router,
-        shared_selections,
         damage_regions: HashMap::new(),
         present_subscriptions: HashMap::new(),
         pending_events: Vec::new(),
@@ -393,10 +395,22 @@ pub(crate) async fn handle_client(
         close_down_mode_atomic: std::sync::Arc::new(std::sync::atomic::AtomicU8::new(0)),
         disconnect_cleanup_done: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
         last_entered_window: ROOT_WINDOW,
-        pressed_keys: [0u8; 32],
         server_start,
-        keyboard_control: Default::default(),
-        pointer_control: Default::default(),
+        pointer: super::client::PointerState::default(),
+        keyboard: {
+            let mut k = super::client::KeyboardState::new(shared_keymap.clone());
+            k.modifier_map = vec![
+                vec![50, 62],   // Shift (keycodes 50=Shift_L, 62=Shift_R)
+                vec![66],       // Lock (66=Caps_Lock)
+                vec![37, 105],  // Control (37=Control_L, 105=Control_R)
+                vec![64, 108],  // Mod1 (64=Alt_L, 108=Alt_R)
+                vec![77],       // Mod2 (77=Num_Lock)
+                vec![],         // Mod3
+                vec![133, 134], // Mod4 (133=Super_L, 134=Super_R)
+                vec![],         // Mod5
+            ];
+            k
+        },
         screen_saver: Default::default(),
         msb_first: byte_order == 0x42,
         screen_width: SCREEN_WIDTH,
@@ -406,7 +420,6 @@ pub(crate) async fn handle_client(
             ..Default::default()
         },
         xfixes: handlers::xfixes::XFixesState::default(),
-        incr_transfers: Vec::new(),
         retained_temporary_windows: Vec::new(),
         colormaps: HashMap::new(),
         installed_colormaps: {
@@ -418,21 +431,8 @@ pub(crate) async fn handle_client(
         sync_state: handlers::sync::SyncState::new(),
         pending_fds: Vec::new(),
         reply_fds: Vec::new(),
-        motion_history: Vec::with_capacity(256),
-        pointer_mapping: [1, 2, 3, 4, 5, 6, 7], // identity mapping
-        modifier_map: vec![
-            vec![50, 62],   // Shift (keycodes 50=Shift_L, 62=Shift_R)
-            vec![66],       // Lock (66=Caps_Lock)
-            vec![37, 105],  // Control (37=Control_L, 105=Control_R)
-            vec![64, 108],  // Mod1 (64=Alt_L, 108=Alt_R)
-            vec![77],       // Mod2 (77=Num_Lock)
-            vec![],         // Mod3
-            vec![133, 134], // Mod4 (133=Super_L, 134=Super_R)
-            vec![],         // Mod5
-        ],
         win_gravity: HashMap::new(),
         bit_gravity: HashMap::new(),
-        custom_keymap: shared_keymap.clone(),
         cursor_serial: 0,
         current_cursor: 0,
         dbe: handlers::dbe::DbeState::default(),
@@ -460,11 +460,7 @@ pub(crate) async fn handle_client(
             x
         },
         xvideo: handlers::xvideo::XVideoState::default(),
-        pointer_button_mask: 0,
-        motion_hint_suppressed: false,
         present_msc: 0,
-        clipboard_notify_tx: Some(clipboard_notify_tx),
-        persistent_clipboard,
         shared_pixmaps,
         shared_pixmap_fbs,
         shared_gcs,
@@ -683,7 +679,7 @@ pub(crate) async fn handle_client(
                         let timestamp = state.timestamp();
 
                         // Check if this client owns CLIPBOARD and we have cached data.
-                        let owns_clipboard = if let Ok(sels) = state.shared_selections.lock() {
+                        let owns_clipboard = if let Ok(sels) = state.selection.shared.lock() {
                             sels.get(&CLIPBOARD_ATOM)
                                 .map(|e| my_wids.contains(&e.owner))
                                 .unwrap_or(false)
@@ -691,14 +687,14 @@ pub(crate) async fn handle_client(
                             false
                         };
                         let has_persistent_data = if owns_clipboard {
-                            state.persistent_clipboard.lock().ok()
+                            state.selection.persistent_clipboard.lock().ok()
                                 .map(|pc| pc.contains_key(&CLIPBOARD_ATOM))
                                 .unwrap_or(false)
                         } else {
                             false
                         };
 
-                        if let Ok(mut sels) = state.shared_selections.lock() {
+                        if let Ok(mut sels) = state.selection.shared.lock() {
                             // Collect selection atoms that are being removed.
                             let lost_selections: Vec<u32> = sels.iter()
                                 .filter(|(_, entry)| my_wids.contains(&entry.owner))
@@ -785,8 +781,8 @@ pub(crate) async fn handle_client(
                             }
                         }
                         // Also clear local selection state.
-                        state.selections.clear();
-                        state.selection_timestamps.clear();
+                        state.selection.owners.clear();
+                        state.selection.timestamps.clear();
                     }
 
                     // Unregister shared pixmaps and GCs owned by this connection
@@ -1423,7 +1419,7 @@ pub(crate) async fn handle_client(
                                                 y: state.pointer_y,
                                                 state: *mask,
                                             };
-                                            state.pointer_button_mask |= 1u16 << (7 + btn as u16);
+                                            state.pointer.button_mask |= 1u16 << (7 + btn as u16);
                                             let event_bytes = build_x11_input_event(&mut state, &press, x11_wid);
                                             if !event_bytes.is_empty() {
                                                 stream.write_all(&event_bytes).await?;
@@ -1460,7 +1456,7 @@ pub(crate) async fn handle_client(
                                         // First press is "pending" until auto-repeat fires after delay.
                                         if kc < 256
                                             && !crate::xserver::types::keycode_bitset::get(
-                                                &state.pressed_keys,
+                                                &state.keyboard.pressed_keys,
                                                 kc as u8,
                                             )
                                         {
@@ -1468,7 +1464,7 @@ pub(crate) async fn handle_client(
                                             // the event yet. Instead, set up a repeat timer with
                                             // slow_keys_delay and the first repeat will be the accepted press.
                                             crate::xserver::types::keycode_bitset::set(
-                                                &mut state.pressed_keys,
+                                                &mut state.keyboard.pressed_keys,
                                                 kc as u8,
                                             );
                                             let xkb_before = handlers::xkb::XkbStateSnapshot::capture(&state);
@@ -1488,7 +1484,7 @@ pub(crate) async fn handle_client(
                                     let xkb_before = handlers::xkb::XkbStateSnapshot::capture(&state);
                                     if kc < 256 {
                                         crate::xserver::types::keycode_bitset::set(
-                                            &mut state.pressed_keys,
+                                            &mut state.keyboard.pressed_keys,
                                             kc as u8,
                                         );
                                         state.xkb.key_press(kc as u8);
@@ -1538,7 +1534,7 @@ pub(crate) async fn handle_client(
                                                 y: state.pointer_y,
                                                 state: *mask,
                                             };
-                                            state.pointer_button_mask &= !(1u16 << (7 + btn as u16));
+                                            state.pointer.button_mask &= !(1u16 << (7 + btn as u16));
                                             let event_bytes = build_x11_input_event(&mut state, &release, x11_wid);
                                             if !event_bytes.is_empty() {
                                                 stream.write_all(&event_bytes).await?;
@@ -1564,7 +1560,7 @@ pub(crate) async fn handle_client(
                                     let xkb_before = handlers::xkb::XkbStateSnapshot::capture(&state);
                                     if kc < 256 {
                                         crate::xserver::types::keycode_bitset::clear(
-                                            &mut state.pressed_keys,
+                                            &mut state.keyboard.pressed_keys,
                                             kc as u8,
                                         );
                                         state.xkb.key_release(kc as u8);
@@ -1586,7 +1582,7 @@ pub(crate) async fn handle_client(
                             if let x11_web_protocol::InputEvent::KeyPress { keycode, state: mask } = &input {
                                 let shifted = (*mask & 1) != 0; // ShiftMask
                                 let (normal_ks, shifted_ks) = {
-                                    let keymap = state.custom_keymap.lock().unwrap();
+                                    let keymap = state.keyboard.custom_keymap.lock().unwrap();
                                     handlers::resolve_keysym(*keycode as u8, &keymap)
                                 };
                                 let keysym = if shifted { shifted_ks } else { normal_ks };
@@ -1703,7 +1699,7 @@ pub(crate) async fn handle_client(
                             match &input {
                                 x11_web_protocol::InputEvent::ButtonPress { button, state: mask, .. } => {
                                     if *button >= 1 && *button <= 5 {
-                                        state.pointer_button_mask |= 1u16 << (7 + *button as u16);
+                                        state.pointer.button_mask |= 1u16 << (7 + *button as u16);
                                     }
                                     grab::check_passive_button_grab(&mut state, *button, *mask, x11_wid);
                                 }
@@ -1712,7 +1708,7 @@ pub(crate) async fn handle_client(
                                 }
                                 x11_web_protocol::InputEvent::ButtonRelease { button, state: mask, .. } => {
                                     if *button >= 1 && *button <= 5 {
-                                        state.pointer_button_mask &= !(1u16 << (7 + *button as u16));
+                                        state.pointer.button_mask &= !(1u16 << (7 + *button as u16));
                                     }
                                     grab::check_button_release_ungrab(&mut state, 0, *mask);
                                 }

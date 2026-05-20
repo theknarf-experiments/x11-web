@@ -27,10 +27,11 @@ pub(crate) fn handle_set_selection_owner(
         }
 
         // Check if there was a previous owner (local or cross-connection).
-        let prev_owner_local = state.selections.get(&selection).copied();
+        let prev_owner_local = state.selection.owners.get(&selection).copied();
         let prev_owner_remote = if prev_owner_local.is_none() {
             state
-                .shared_selections
+                .selection
+                .shared
                 .lock()
                 .ok()
                 .and_then(|sels| sels.get(&selection).map(|e| e.owner))
@@ -65,7 +66,7 @@ pub(crate) fn handle_set_selection_owner(
         // A real client is taking ownership — clear any persistent clipboard
         // data for this selection since it's now superseded.
         if owner != 0 {
-            if let Ok(mut pc) = state.persistent_clipboard.lock() {
+            if let Ok(mut pc) = state.selection.persistent_clipboard.lock() {
                 pc.remove(&selection);
             }
         }
@@ -73,16 +74,16 @@ pub(crate) fn handle_set_selection_owner(
         let timestamp = state.timestamp();
 
         if owner == 0 {
-            state.selections.remove(&selection);
-            state.selection_timestamps.remove(&selection);
-            if let Ok(mut sels) = state.shared_selections.lock() {
+            state.selection.owners.remove(&selection);
+            state.selection.timestamps.remove(&selection);
+            if let Ok(mut sels) = state.selection.shared.lock() {
                 sels.remove(&selection);
             }
         } else {
-            state.selections.insert(selection, owner);
-            state.selection_timestamps.insert(selection, timestamp);
+            state.selection.owners.insert(selection, owner);
+            state.selection.timestamps.insert(selection, timestamp);
             // Register in shared selections so other connections can find us.
-            if let Ok(mut sels) = state.shared_selections.lock() {
+            if let Ok(mut sels) = state.selection.shared.lock() {
                 sels.insert(
                     selection,
                     SelectionEntry {
@@ -128,7 +129,7 @@ pub(crate) fn handle_set_selection_owner(
         // Today the receiver in main.rs just drains, but the
         // X-server-internal selection machinery still emits events so
         // the wiring stays in place.
-        if let Some(ref clipboard_tx) = state.clipboard_notify_tx {
+        if let Some(ref clipboard_tx) = state.selection.clipboard_notify_tx {
             let _ = clipboard_tx.send(());
         }
     }
@@ -146,12 +147,14 @@ pub(crate) fn handle_get_selection_owner(
     let seq = state.sequence;
     let selection = req.selection;
     let owner = state
-        .selections
+        .selection
+        .owners
         .get(&selection)
         .copied()
         .or_else(|| {
             state
-                .shared_selections
+                .selection
+                .shared
                 .lock()
                 .ok()
                 .and_then(|sels| sels.get(&selection).map(|e| e.owner))
@@ -196,12 +199,12 @@ pub(crate) fn handle_convert_selection(
         // --- DELETE target: owner should delete the selection data (ICCCM §2.6.3.1) ---
         if target == crate::xserver::atoms::predef::DELETE {
             // If we're the owner, remove the selection.
-            state.selections.remove(&selection);
-            state.selection_timestamps.remove(&selection);
-            if let Ok(mut sels) = state.shared_selections.lock() {
+            state.selection.owners.remove(&selection);
+            state.selection.timestamps.remove(&selection);
+            if let Ok(mut sels) = state.selection.shared.lock() {
                 sels.remove(&selection);
             }
-            if let Ok(mut pc) = state.persistent_clipboard.lock() {
+            if let Ok(mut pc) = state.selection.persistent_clipboard.lock() {
                 pc.remove(&selection);
             }
 
@@ -229,12 +232,14 @@ pub(crate) fn handle_convert_selection(
         if target == predef::TIMESTAMP {
             // Look up the timestamp when this selection was acquired.
             let sel_ts = state
-                .selection_timestamps
+                .selection
+                .timestamps
                 .get(&selection)
                 .copied()
                 .or_else(|| {
                     state
-                        .shared_selections
+                        .selection
+                        .shared
                         .lock()
                         .ok()
                         .and_then(|sels| sels.get(&selection).map(|e| e.timestamp))
@@ -322,9 +327,9 @@ pub(crate) fn handle_convert_selection(
             // We handle TIMESTAMP inline; others get forwarded to the selection owner.
             // Track which pairs failed so we can replace them with None.
             let mut result_pairs: Vec<(u32, u32)> = Vec::with_capacity(pairs.len());
-            let owner_local = state.selections.get(&selection).copied();
+            let owner_local = state.selection.owners.get(&selection).copied();
             let remote_entry = if owner_local.is_none() {
-                state.shared_selections.lock().ok().and_then(|sels| {
+                state.selection.shared.lock().ok().and_then(|sels| {
                     sels.get(&selection)
                         .filter(|e| e.owner != CLIPBOARD_MANAGER_WINDOW)
                         .map(|e| (e.owner, e.event_tx.clone(), e.timestamp))
@@ -336,7 +341,8 @@ pub(crate) fn handle_convert_selection(
             let server_owned_multi = owner_local.is_none()
                 && remote_entry.is_none()
                 && state
-                    .shared_selections
+                    .selection
+                    .shared
                     .lock()
                     .ok()
                     .map(|sels| {
@@ -353,13 +359,15 @@ pub(crate) fn handle_convert_selection(
                 if pt == predef::TIMESTAMP {
                     // Handle TIMESTAMP inline.
                     let sel_ts = state
-                        .selection_timestamps
+                        .selection
+                        .timestamps
                         .get(&selection)
                         .copied()
                         .or_else(|| remote_entry.as_ref().map(|(_, _, ts)| *ts))
                         .or_else(|| {
                             if server_owned_multi {
                                 state
+                                    .selection
                                     .persistent_clipboard
                                     .lock()
                                     .ok()
@@ -474,7 +482,8 @@ pub(crate) fn handle_convert_selection(
         // Check if the server's clipboard manager owns this selection
         // (persistent clipboard after the original owner disconnected).
         let is_server_owned = state
-            .shared_selections
+            .selection
+            .shared
             .lock()
             .ok()
             .map(|sels| {
@@ -495,7 +504,7 @@ pub(crate) fn handle_convert_selection(
         }
 
         // Check local selections first.
-        if let Some(&owner) = state.selections.get(&selection) {
+        if let Some(&owner) = state.selection.owners.get(&selection) {
             let sel_request = serialize_event(
                 &SelectionRequestEvent {
                     response_type: SELECTION_REQUEST_EVENT,
@@ -512,7 +521,7 @@ pub(crate) fn handle_convert_selection(
             state.pending_events.push(sel_request);
         } else {
             // Check shared (cross-connection) selections.
-            let remote_entry = state.shared_selections.lock().ok().and_then(|sels| {
+            let remote_entry = state.selection.shared.lock().ok().and_then(|sels| {
                 sels.get(&selection)
                     // Skip the clipboard manager window — already handled above.
                     .filter(|e| e.owner != CLIPBOARD_MANAGER_WINDOW)

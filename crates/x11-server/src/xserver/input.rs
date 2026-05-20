@@ -733,7 +733,7 @@ pub(crate) fn build_crossing_events_with_mode(
         if win.event_mask & EventMask::KEYMAP_STATE != EventMask::NO_EVENT {
             let mut km_event = [0u8; 32];
             km_event[0] = KEYMAP_NOTIFY_EVENT;
-            km_event[1..32].copy_from_slice(&state.pressed_keys[1..32]);
+            km_event[1..32].copy_from_slice(&state.keyboard.pressed_keys[1..32]);
             events.extend_from_slice(&km_event);
         }
     }
@@ -1045,7 +1045,7 @@ pub(crate) fn build_x11_input_event(
     // further motion events until QueryPointer/GetMotionEvents/button/crossing.
     if matches!(input, InputEvent::MotionNotify { .. }) {
         if !crossing_events.is_empty() {
-            state.motion_hint_suppressed = false;
+            state.pointer.motion_hint_suppressed = false;
         }
         let has_hint = state
             .windows
@@ -1053,10 +1053,10 @@ pub(crate) fn build_x11_input_event(
             .map(|w| w.event_mask & EventMask::POINTER_MOTION_HINT != EventMask::NO_EVENT)
             .unwrap_or(false);
         if has_hint {
-            if state.motion_hint_suppressed {
+            if state.pointer.motion_hint_suppressed {
                 return crossing_events;
             }
-            state.motion_hint_suppressed = true;
+            state.pointer.motion_hint_suppressed = true;
         }
     }
 
@@ -1089,7 +1089,7 @@ pub(crate) fn build_x11_input_event(
             y,
             state: mask,
         } => {
-            state.motion_hint_suppressed = false;
+            state.pointer.motion_hint_suppressed = false;
             let (rx, ry) = local_to_root(*x, *y);
             let child = pointer_event_child(&state.windows, event_window, event_x, event_y);
             event = serialize_event(
@@ -1117,7 +1117,7 @@ pub(crate) fn build_x11_input_event(
             y,
             state: mask,
         } => {
-            state.motion_hint_suppressed = false;
+            state.pointer.motion_hint_suppressed = false;
             let (rx, ry) = local_to_root(*x, *y);
             let child = pointer_event_child(&state.windows, event_window, event_x, event_y);
             event = serialize_event(

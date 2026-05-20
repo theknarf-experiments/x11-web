@@ -80,14 +80,12 @@ pub(crate) struct ClientState {
     pub(crate) focus_revert_to: u8,
     pub(crate) font_manager: FontManager,
     pub(crate) render: super::handlers::render::RenderState,
-    pub(crate) selections: HashMap<u32, u32>,
-    /// Timestamps when each selection was acquired (selection atom → timestamp).
-    pub(crate) selection_timestamps: HashMap<u32, u32>,
+    /// Selection / clipboard state.
+    pub(crate) selection: SelectionState,
     pub(crate) shm_segments: HashMap<u32, ShmSegment>,
     pub(crate) wm_state: SharedWmState,
     pub(crate) wm_events_tx: mpsc::UnboundedSender<Vec<u8>>,
     pub(crate) event_router: EventRouter,
-    pub(crate) shared_selections: SharedSelections,
     pub(crate) damage_regions: HashMap<u32, DamageInfo>,
     pub(crate) present_subscriptions: HashMap<u32, PresentSubscription>,
     pub(crate) pending_events: Vec<Vec<u8>>,
@@ -112,14 +110,12 @@ pub(crate) struct ClientState {
     pub(crate) disconnect_cleanup_done: std::sync::Arc<std::sync::atomic::AtomicBool>,
     /// Last window the pointer entered (for crossing events).
     pub(crate) last_entered_window: u32,
-    /// Currently pressed keys (for QueryKeymap).
-    pub(crate) pressed_keys: [u8; 32],
     /// Server start time for generating timestamps.
     pub(crate) server_start: std::time::Instant,
-    /// Keyboard control settings.
-    pub(crate) keyboard_control: KeyboardControl,
-    /// Pointer control settings.
-    pub(crate) pointer_control: PointerControl,
+    /// Pointer state (button mask, motion history, mapping, control settings).
+    pub(crate) pointer: PointerState,
+    /// Keyboard state (pressed keys, modifier map, control settings, custom keymap).
+    pub(crate) keyboard: KeyboardState,
     /// Screen-saver state (core SetScreenSaver settings + MIT-SCREEN-SAVER fields).
     pub(crate) screen_saver: ScreenSaverState,
     /// Client byte order: false = LSB-first (0x6c), true = MSB-first (0x42).
@@ -131,8 +127,6 @@ pub(crate) struct ClientState {
     pub(crate) randr: super::handlers::randr::RandRState,
     /// XFIXES extension state (regions, barriers, cursor subscribers, …).
     pub(crate) xfixes: super::handlers::xfixes::XFixesState,
-    /// Pending INCR (incremental) selection transfers.
-    pub(crate) incr_transfers: Vec<IncrTransfer>,
     /// Windows retained from clients that disconnected with close_down_mode = RetainTemporary.
     pub(crate) retained_temporary_windows: Vec<u32>,
     /// Colormaps: maps colormap ID to colormap state.
@@ -147,21 +141,10 @@ pub(crate) struct ClientState {
     pub(crate) pending_fds: Vec<i32>,
     /// File descriptors to send back to client via SCM_RIGHTS (for SHM CreateSegment).
     pub(crate) reply_fds: Vec<i32>,
-    /// Motion history buffer (circular): (timestamp_ms, x, y).
-    pub(crate) motion_history: Vec<(u32, i16, i16)>,
-    /// Pointer button mapping (button 1-7 -> mapped button).
-    pub(crate) pointer_mapping: [u8; 7],
-    /// Modifier mapping: 8 modifiers x N keycodes.
-    pub(crate) modifier_map: Vec<Vec<u8>>,
     /// Window gravity values (stored per window ID).
     pub(crate) win_gravity: HashMap<u32, u8>,
     /// Bit gravity values (stored per window ID).
     pub(crate) bit_gravity: HashMap<u32, u8>,
-    /// Custom keycode→keysym mapping (ChangeKeyboardMapping).
-    /// Key = keycode, value = list of keysyms for that keycode.
-    /// Server-wide (shared across connections) per the X11 spec —
-    /// `xmodmap` from one client must be observable from another.
-    pub(crate) custom_keymap: super::types::SharedKeymap,
     /// Current cursor serial (incremented on cursor change).
     pub(crate) cursor_serial: u32,
     /// Current cursor ID (for GetCursorImage).
@@ -185,17 +168,8 @@ pub(crate) struct ClientState {
     pub(crate) xkb: XkbState,
     /// XVideo extension state.
     pub(crate) xvideo: super::handlers::xvideo::XVideoState,
-    /// Current pointer button mask (bits 8-12 for buttons 1-5).
-    pub(crate) pointer_button_mask: u16,
-    /// POINTER_MOTION_HINT_MASK: when true, motion events are suppressed
-    /// until QueryPointer/GetMotionEvents or button/crossing event occurs.
-    pub(crate) motion_hint_suppressed: bool,
     /// Present extension: monotonically increasing media stream counter per-CRTC.
     pub(crate) present_msc: u64,
-    /// Channel for clipboard events (selection ownership changes, data responses).
-    pub(crate) clipboard_notify_tx: Option<mpsc::UnboundedSender<()>>,
-    /// Persistent clipboard data saved when a clipboard owner disconnects.
-    pub(crate) persistent_clipboard: super::types::PersistentClipboard,
     /// Shared pixmap registry for cross-connection drawable access.
     pub(crate) shared_pixmaps: super::types::SharedPixmaps,
     /// Shared pixmap framebuffers for cross-connection drawing.

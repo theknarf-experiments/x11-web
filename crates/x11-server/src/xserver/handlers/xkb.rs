@@ -309,7 +309,7 @@ pub(crate) fn handle_xkb_request(state: &mut ClientState, data: &[u8], seq: u16)
             let percent = if data.len() > 10 {
                 data[10]
             } else {
-                state.keyboard_control.bell_percent
+                state.keyboard.control.bell_percent
             };
             let _force = if data.len() > 11 {
                 data[11] != 0

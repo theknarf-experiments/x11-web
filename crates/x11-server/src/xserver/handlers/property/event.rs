@@ -964,7 +964,7 @@ pub(crate) fn handle_send_event(state: &mut ClientState, req: &SendEventRequest)
                     })
                 });
             if let Some(data) = prop_data {
-                if let Ok(mut pc) = state.persistent_clipboard.lock() {
+                if let Ok(mut pc) = state.selection.persistent_clipboard.lock() {
                     let entry =
                         pc.entry(predef::CLIPBOARD)
                             .or_insert_with(|| PersistentClipboardEntry {

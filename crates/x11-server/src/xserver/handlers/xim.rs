@@ -882,7 +882,7 @@ fn handle_xim_forward_event(state: &mut ClientState, data: &[u8]) -> Vec<u8> {
     let modifier_state = u16::from_le_bytes([x_event[28], x_event[29]]);
 
     // Look up the keysym from the keycode.
-    let custom_keymap = state.custom_keymap.lock().unwrap();
+    let custom_keymap = state.keyboard.custom_keymap.lock().unwrap();
     let (normal_keysym, shifted_keysym) = super::resolve_keysym(keycode, &custom_keymap);
     drop(custom_keymap);
     let shift_pressed = modifier_state & u16::from(ModMask::SHIFT) != 0;

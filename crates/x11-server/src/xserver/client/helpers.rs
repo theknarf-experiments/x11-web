@@ -91,17 +91,17 @@ impl ClientState {
 
     /// Record a motion history entry, enforcing the max limit.
     pub(crate) fn record_motion_history(&mut self, timestamp: u32, x: i16, y: i16) {
-        if self.motion_history.len() >= self.resource_limits.max_motion_history {
-            self.motion_history.remove(0);
+        if self.pointer.motion_history.len() >= self.resource_limits.max_motion_history {
+            self.pointer.motion_history.remove(0);
         }
-        self.motion_history.push((timestamp, x, y));
+        self.pointer.motion_history.push((timestamp, x, y));
     }
 
     /// Remove INCR transfers that have been inactive for longer than `timeout`.
     /// Per X11 spec, stale incremental selection transfers should be cleaned up
     /// if the requestor stops consuming chunks.
     pub(crate) fn cleanup_stale_incr_transfers(&mut self, timeout: std::time::Duration) {
-        self.incr_transfers
+        self.selection.incr_transfers
             .retain(|t| t.last_activity.elapsed() < timeout);
     }
 
@@ -113,13 +113,13 @@ impl ClientState {
         transfer: super::super::types::IncrTransfer,
     ) -> bool {
         const MAX_INCR_TRANSFERS: usize = 100;
-        if self.incr_transfers.len() >= MAX_INCR_TRANSFERS {
+        if self.selection.incr_transfers.len() >= MAX_INCR_TRANSFERS {
             self.cleanup_stale_incr_transfers(std::time::Duration::from_secs(5));
         }
-        if self.incr_transfers.len() >= MAX_INCR_TRANSFERS {
+        if self.selection.incr_transfers.len() >= MAX_INCR_TRANSFERS {
             return false; // Still at limit after cleanup
         }
-        self.incr_transfers.push(transfer);
+        self.selection.incr_transfers.push(transfer);
         true
     }
 

@@ -15,7 +15,7 @@ pub(crate) fn handle_xinput_request(
     data: &[u8],
     seq: u16,
 ) -> Vec<u8> {
-    let custom_keymap = state.custom_keymap.lock().unwrap().clone();
+    let custom_keymap = state.keyboard.custom_keymap.lock().unwrap().clone();
     let mut reply = crate::xinput2::handle_request(
         data,
         seq,

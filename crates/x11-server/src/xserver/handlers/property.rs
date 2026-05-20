@@ -103,15 +103,16 @@ pub(crate) fn start_incr_transfer(
 pub(crate) fn advance_incr_transfer(state: &mut ClientState, window: u32, property: u32) {
     // Find the matching INCR transfer.
     let idx = state
+        .selection
         .incr_transfers
         .iter()
         .position(|t| t.requestor == window && t.property == property);
     let Some(idx) = idx else { return };
 
     // Update last_activity timestamp for timeout tracking.
-    state.incr_transfers[idx].last_activity = std::time::Instant::now();
+    state.selection.incr_transfers[idx].last_activity = std::time::Instant::now();
 
-    let transfer = &state.incr_transfers[idx];
+    let transfer = &state.selection.incr_transfers[idx];
     let remaining = transfer.data.len() - transfer.offset;
 
     if remaining == 0 {
@@ -126,14 +127,14 @@ pub(crate) fn advance_incr_transfer(state: &mut ClientState, window: u32, proper
                 },
             );
         }
-        state.incr_transfers.remove(idx);
+        state.selection.incr_transfers.remove(idx);
     } else {
         // Write the next chunk.
-        let chunk_size = remaining.min(state.incr_transfers[idx].chunk_size);
-        let offset = state.incr_transfers[idx].offset;
-        let chunk = state.incr_transfers[idx].data[offset..offset + chunk_size].to_vec();
-        let target = state.incr_transfers[idx].target;
-        state.incr_transfers[idx].offset += chunk_size;
+        let chunk_size = remaining.min(state.selection.incr_transfers[idx].chunk_size);
+        let offset = state.selection.incr_transfers[idx].offset;
+        let chunk = state.selection.incr_transfers[idx].data[offset..offset + chunk_size].to_vec();
+        let target = state.selection.incr_transfers[idx].target;
+        state.selection.incr_transfers[idx].offset += chunk_size;
 
         if let Some(win) = state.windows.get_mut(&window) {
             win.properties.insert(
@@ -181,7 +182,7 @@ pub(crate) fn serve_persistent_clipboard(
     requestor: u32,
 ) -> bool {
     use crate::xserver::atoms::predef;
-    let pc_lock = match state.persistent_clipboard.lock() {
+    let pc_lock = match state.selection.persistent_clipboard.lock() {
         Ok(l) => l,
         Err(_) => return false,
     };

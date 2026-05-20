@@ -27,13 +27,13 @@ use x11rb_protocol::protocol::xproto::{
 pub(crate) fn handle_bell(state: &mut ClientState, req: &BellRequest) -> Vec<u8> {
     let percent = req.percent as u8;
     let effective_percent = if percent == 0 {
-        state.keyboard_control.bell_percent
+        state.keyboard.control.bell_percent
     } else if percent > 0 && percent <= 100 {
         percent
     } else {
         // negative percent means reduce from base
         let p = percent as i8;
-        let base = state.keyboard_control.bell_percent as i16;
+        let base = state.keyboard.control.bell_percent as i16;
         (base + (base * p as i16) / 100).clamp(0, 100) as u8
     };
     let _ = state.update_tx.send((
@@ -54,7 +54,7 @@ pub(crate) fn handle_query_pointer(state: &mut ClientState, req: &QueryPointerRe
     // Pointer position is logically server-wide; an XTEST FakeInput from
     // another client must be observable here.
     state.refresh_pointer_from_shared();
-    state.motion_hint_suppressed = false;
+    state.pointer.motion_hint_suppressed = false;
     let window = req.window;
 
     // Calculate window-relative coordinates by walking up from window to root
@@ -93,7 +93,7 @@ pub(crate) fn handle_query_pointer(state: &mut ClientState, req: &QueryPointerRe
         .unwrap_or(0);
 
     // Build modifier/button mask: low byte = keyboard modifiers, bits 8-12 = buttons 1-5
-    let mask = state.xkb.effective_mods() as u16 | state.pointer_button_mask;
+    let mask = state.xkb.effective_mods() as u16 | state.pointer.button_mask;
 
     serialize_reply(
         &QueryPointerReply {
@@ -121,12 +121,13 @@ pub(crate) fn handle_get_motion_events(
     req: &GetMotionEventsRequest,
 ) -> Vec<u8> {
     let seq = state.sequence;
-    state.motion_hint_suppressed = false;
+    state.pointer.motion_hint_suppressed = false;
     let start_time = req.start;
     let stop_time = req.stop;
 
     // Filter motion history by time range
     let events: Vec<&(u32, i16, i16)> = state
+        .pointer
         .motion_history
         .iter()
         .filter(|(ts, _, _)| {
@@ -454,7 +455,7 @@ pub(crate) fn handle_get_input_focus(
 pub(crate) fn handle_query_keymap(state: &ClientState, _req: &QueryKeymapRequest) -> Vec<u8> {
     let seq = state.sequence;
     let mut keys = [0u8; 32];
-    keys[..8].copy_from_slice(&state.pressed_keys[0..8]);
+    keys[..8].copy_from_slice(&state.keyboard.pressed_keys[0..8]);
     serialize_var_reply(
         &QueryKeymapReply {
             sequence: seq,
@@ -484,7 +485,7 @@ pub(crate) fn handle_change_keyboard_mapping(
 
     // Store the new keycode->keysym mappings from the parsed keysyms list
     {
-        let mut keymap = state.custom_keymap.lock().unwrap();
+        let mut keymap = state.keyboard.custom_keymap.lock().unwrap();
         for i in 0..keycode_count {
             let keycode = first_keycode.wrapping_add(i as u8);
             let start = i * keysyms_per_keycode;
@@ -531,7 +532,7 @@ pub(crate) fn handle_get_keyboard_mapping(
     let first_keycode = req.first_keycode;
     let count = req.count;
 
-    let custom_keymap = state.custom_keymap.lock().unwrap();
+    let custom_keymap = state.keyboard.custom_keymap.lock().unwrap();
     // Determine keysyms_per_keycode: use max from custom mappings or default 4
     let max_custom = custom_keymap.values().map(|v| v.len()).max().unwrap_or(0);
     let keysyms_per_keycode = max_custom.max(4) as u8;
@@ -580,16 +581,16 @@ pub(crate) fn handle_change_keyboard_control(
     // and key (bit 6) and auto_repeat_mode (bit 7) work together.
 
     if let Some(val) = vl.key_click_percent {
-        state.keyboard_control.key_click_percent = (val as u32).min(100) as u8;
+        state.keyboard.control.key_click_percent = (val as u32).min(100) as u8;
     }
     if let Some(val) = vl.bell_percent {
-        state.keyboard_control.bell_percent = (val as u32).min(100) as u8;
+        state.keyboard.control.bell_percent = (val as u32).min(100) as u8;
     }
     if let Some(val) = vl.bell_pitch {
-        state.keyboard_control.bell_pitch = val as u16;
+        state.keyboard.control.bell_pitch = val as u16;
     }
     if let Some(val) = vl.bell_duration {
-        state.keyboard_control.bell_duration = val as u16;
+        state.keyboard.control.bell_duration = val as u16;
     }
 
     if let Some(led_mode) = vl.led_mode {
@@ -601,17 +602,17 @@ pub(crate) fn handle_change_keyboard_control(
             if (1..=32).contains(&led) {
                 let bit_pos = led - 1;
                 if val == 1 {
-                    state.keyboard_control.led_mask |= 1 << bit_pos;
+                    state.keyboard.control.led_mask |= 1 << bit_pos;
                 } else {
-                    state.keyboard_control.led_mask &= !(1 << bit_pos);
+                    state.keyboard.control.led_mask &= !(1 << bit_pos);
                 }
             }
         } else {
             // Per spec: if led is not specified, led_mode applies to all LEDs
             if val == 1 {
-                state.keyboard_control.led_mask = 0xFFFFFFFF;
+                state.keyboard.control.led_mask = 0xFFFFFFFF;
             } else {
-                state.keyboard_control.led_mask = 0;
+                state.keyboard.control.led_mask = 0;
             }
         }
     }
@@ -627,15 +628,15 @@ pub(crate) fn handle_change_keyboard_control(
                 let byte_idx = (key / 8) as usize;
                 let bit_mask = 1u8 << (key % 8);
                 match val {
-                    0 => state.keyboard_control.auto_repeats[byte_idx] &= !bit_mask,
-                    1 => state.keyboard_control.auto_repeats[byte_idx] |= bit_mask,
-                    2 => state.keyboard_control.auto_repeats[byte_idx] |= bit_mask, // Default = On
+                    0 => state.keyboard.control.auto_repeats[byte_idx] &= !bit_mask,
+                    1 => state.keyboard.control.auto_repeats[byte_idx] |= bit_mask,
+                    2 => state.keyboard.control.auto_repeats[byte_idx] |= bit_mask, // Default = On
                     _ => {}
                 }
             }
         } else {
             // Per spec: if key is not specified, this sets global auto_repeat
-            state.keyboard_control.global_auto_repeat = val.min(1) as u8;
+            state.keyboard.control.global_auto_repeat = val.min(1) as u8;
         }
     }
 
@@ -651,7 +652,7 @@ pub(crate) fn handle_get_keyboard_control(
     _req: &GetKeyboardControlRequest,
 ) -> Vec<u8> {
     let seq = state.sequence;
-    let kc = &state.keyboard_control;
+    let kc = &state.keyboard.control;
     serialize_var_reply(
         &GetKeyboardControlReply {
             global_auto_repeat: AutoRepeatMode::from(kc.global_auto_repeat),
@@ -684,14 +685,14 @@ pub(crate) fn handle_change_pointer_control(
 
     if do_accel {
         if accel_num > 0 {
-            state.pointer_control.acceleration_numerator = accel_num as u16;
+            state.pointer.control.acceleration_numerator = accel_num as u16;
         }
         if accel_den > 0 {
-            state.pointer_control.acceleration_denominator = accel_den as u16;
+            state.pointer.control.acceleration_denominator = accel_den as u16;
         }
     }
     if do_threshold && threshold >= 0 {
-        state.pointer_control.threshold = threshold as u16;
+        state.pointer.control.threshold = threshold as u16;
     }
 
     Vec::new()
@@ -706,7 +707,7 @@ pub(crate) fn handle_get_pointer_control(
     _req: &GetPointerControlRequest,
 ) -> Vec<u8> {
     let seq = state.sequence;
-    let pc = &state.pointer_control;
+    let pc = &state.pointer.control;
     serialize_reply(
         &GetPointerControlReply {
             sequence: seq,
@@ -1221,12 +1222,12 @@ pub(crate) fn handle_set_pointer_mapping(
     let seq = state.sequence;
     let n_buttons = req.map.len();
     // Parse the new mapping from the request data (support up to 7 buttons)
-    let max_buttons = state.pointer_mapping.len();
+    let max_buttons = state.pointer.mapping.len();
     if n_buttons <= max_buttons {
-        state.pointer_mapping[..n_buttons].copy_from_slice(&req.map);
+        state.pointer.mapping[..n_buttons].copy_from_slice(&req.map);
         debug!(
             "SetPointerMapping: {:?}",
-            &state.pointer_mapping[..n_buttons]
+            &state.pointer.mapping[..n_buttons]
         );
 
         // MappingNotify (request=Pointer) must be sent to ALL clients per X11 spec.
@@ -1269,7 +1270,7 @@ pub(crate) fn handle_get_pointer_mapping(
         &GetPointerMappingReply {
             sequence: seq,
             length: 0,
-            map: state.pointer_mapping.to_vec(),
+            map: state.pointer.mapping.to_vec(),
         },
         state.byte_order(),
     )
@@ -1287,7 +1288,7 @@ pub(crate) fn handle_set_modifier_mapping(
     let keycodes_per_modifier = req.keycodes.len() / 8;
 
     if keycodes_per_modifier > 0 {
-        state.modifier_map.clear();
+        state.keyboard.modifier_map.clear();
         for mod_idx in 0..8 {
             let start = mod_idx * keycodes_per_modifier;
             let end = start + keycodes_per_modifier;
@@ -1296,7 +1297,7 @@ pub(crate) fn handle_set_modifier_mapping(
                 .copied()
                 .filter(|&k| k != 0)
                 .collect();
-            state.modifier_map.push(keycodes);
+            state.keyboard.modifier_map.push(keycodes);
         }
         debug!(
             "SetModifierMapping: {} keycodes/modifier",
@@ -1341,6 +1342,7 @@ pub(crate) fn handle_get_modifier_mapping(
     let seq = state.sequence;
     // Find the max keycodes per modifier; X11 requires at least 2 per spec.
     let keycodes_per_modifier = state
+        .keyboard
         .modifier_map
         .iter()
         .map(|v| v.len())
@@ -1351,7 +1353,7 @@ pub(crate) fn handle_get_modifier_mapping(
     // Flatten 8 modifier groups into a single Vec<Keycode> of length
     // `8 * keycodes_per_modifier`; padded with zero where a group is short.
     let mut keycodes = vec![0u8; 8 * keycodes_per_modifier];
-    for (i, group) in state.modifier_map.iter().take(8).enumerate() {
+    for (i, group) in state.keyboard.modifier_map.iter().take(8).enumerate() {
         let off = i * keycodes_per_modifier;
         for (j, &kc) in group.iter().take(keycodes_per_modifier).enumerate() {
             keycodes[off + j] = kc;

@@ -125,10 +125,10 @@ pub(crate) fn handle_xtest_request(state: &mut ClientState, data: &[u8], seq: u1
                         let xkb_before = super::xkb::XkbStateSnapshot::capture(state);
                         use crate::xserver::types::keycode_bitset;
                         if event_type == KEY_PRESS_EVENT {
-                            keycode_bitset::set(&mut state.pressed_keys, keycode);
+                            keycode_bitset::set(&mut state.keyboard.pressed_keys, keycode);
                             state.xkb.key_press(keycode);
                         } else {
-                            keycode_bitset::clear(&mut state.pressed_keys, keycode);
+                            keycode_bitset::clear(&mut state.keyboard.pressed_keys, keycode);
                             state.xkb.key_release(keycode);
                         }
                         super::xkb::maybe_send_xkb_state_notify(

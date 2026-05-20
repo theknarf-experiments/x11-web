@@ -92,6 +92,94 @@ impl Default for PointerControl {
     }
 }
 
+/// Per-connection selection / clipboard state.
+pub(crate) struct SelectionState {
+    /// Selection ownership: atom → owner window id.
+    pub(crate) owners: std::collections::HashMap<u32, u32>,
+    /// Timestamps when each selection was acquired (atom → timestamp).
+    pub(crate) timestamps: std::collections::HashMap<u32, u32>,
+    /// Shared cross-connection selection registry.
+    pub(crate) shared: super::super::types::SharedSelections,
+    /// Pending INCR (incremental) selection transfers.
+    pub(crate) incr_transfers: Vec<super::super::types::IncrTransfer>,
+    /// Channel for clipboard events (selection ownership changes, data responses).
+    pub(crate) clipboard_notify_tx: Option<tokio::sync::mpsc::UnboundedSender<()>>,
+    /// Persistent clipboard data saved when a clipboard owner disconnects.
+    pub(crate) persistent_clipboard: super::super::types::PersistentClipboard,
+}
+
+impl SelectionState {
+    pub(crate) fn new(
+        shared: super::super::types::SharedSelections,
+        clipboard_notify_tx: tokio::sync::mpsc::UnboundedSender<()>,
+        persistent_clipboard: super::super::types::PersistentClipboard,
+    ) -> Self {
+        Self {
+            owners: std::collections::HashMap::new(),
+            timestamps: std::collections::HashMap::new(),
+            shared,
+            incr_transfers: Vec::new(),
+            clipboard_notify_tx: Some(clipboard_notify_tx),
+            persistent_clipboard,
+        }
+    }
+}
+
+/// Per-connection pointer state (subsystem-private bookkeeping; hot-path
+/// `pointer_x`/`pointer_y` live directly on `ClientState`).
+pub(crate) struct PointerState {
+    /// Current pointer button mask (bits 8-12 for buttons 1-5).
+    pub(crate) button_mask: u16,
+    /// POINTER_MOTION_HINT_MASK: when true, motion events are suppressed
+    /// until QueryPointer/GetMotionEvents or button/crossing event occurs.
+    pub(crate) motion_hint_suppressed: bool,
+    /// Motion history buffer (circular): (timestamp_ms, x, y).
+    pub(crate) motion_history: Vec<(u32, i16, i16)>,
+    /// Pointer button mapping (button 1-7 -> mapped button).
+    pub(crate) mapping: [u8; 7],
+    /// Pointer control settings (acceleration, threshold).
+    pub(crate) control: PointerControl,
+}
+
+impl Default for PointerState {
+    fn default() -> Self {
+        Self {
+            button_mask: 0,
+            motion_hint_suppressed: false,
+            motion_history: Vec::new(),
+            mapping: [1, 2, 3, 4, 5, 6, 7],
+            control: PointerControl::default(),
+        }
+    }
+}
+
+/// Per-connection keyboard state (subsystem-private bookkeeping; XKB
+/// modifier/group state lives on `ClientState::xkb`).
+pub(crate) struct KeyboardState {
+    /// Keyboard control settings (auto-repeat, bell, LED mask).
+    pub(crate) control: KeyboardControl,
+    /// Currently pressed keys (for QueryKeymap).
+    pub(crate) pressed_keys: [u8; 32],
+    /// Modifier mapping: 8 modifiers x N keycodes.
+    pub(crate) modifier_map: Vec<Vec<u8>>,
+    /// Custom keycode→keysym mapping (ChangeKeyboardMapping).
+    /// Key = keycode, value = list of keysyms for that keycode.
+    /// Server-wide (shared across connections) per the X11 spec —
+    /// `xmodmap` from one client must be observable from another.
+    pub(crate) custom_keymap: super::super::types::SharedKeymap,
+}
+
+impl KeyboardState {
+    pub(crate) fn new(custom_keymap: super::super::types::SharedKeymap) -> Self {
+        Self {
+            control: KeyboardControl::default(),
+            pressed_keys: [0; 32],
+            modifier_map: Vec::new(),
+            custom_keymap,
+        }
+    }
+}
+
 /// Per-connection screen-saver state. Bundles the core `SetScreenSaver`
 /// settings together with the MIT-SCREEN-SAVER extension fields, both of
 /// which describe the same subsystem.
