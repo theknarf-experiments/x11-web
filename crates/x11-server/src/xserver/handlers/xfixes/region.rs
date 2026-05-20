@@ -33,7 +33,7 @@ pub(crate) fn handle_create_region(state: &mut ClientState, data: &[u8], seq: u1
         .collect();
     let num_rects = rects.len();
     state
-        .xfixes_regions
+        .xfixes.regions
         .insert(region_id, XFixesRegion::from_rects(rects));
     debug!("CreateRegion: id={region_id:#x} rects={num_rects}");
     Vec::new()
@@ -59,7 +59,7 @@ pub(crate) fn handle_create_region_from_bitmap(
     } else {
         XFixesRegion::new()
     };
-    state.xfixes_regions.insert(region_id, region);
+    state.xfixes.regions.insert(region_id, region);
     Vec::new()
 }
 
@@ -82,7 +82,7 @@ pub(crate) fn handle_create_region_from_window(
     } else {
         XFixesRegion::new()
     };
-    state.xfixes_regions.insert(region_id, region);
+    state.xfixes.regions.insert(region_id, region);
     Vec::new()
 }
 
@@ -114,7 +114,7 @@ pub(crate) fn handle_create_region_from_gc(
     } else {
         XFixesRegion::new()
     };
-    state.xfixes_regions.insert(region_id, region);
+    state.xfixes.regions.insert(region_id, region);
     Vec::new()
 }
 
@@ -163,7 +163,7 @@ pub(crate) fn handle_create_region_from_picture(
         XFixesRegion::new()
     };
     debug!("CreateRegionFromPicture: region={region_id:#x} picture={picture_id:#x}");
-    state.xfixes_regions.insert(region_id, region);
+    state.xfixes.regions.insert(region_id, region);
     Vec::new()
 }
 
@@ -171,7 +171,7 @@ pub(crate) fn handle_create_region_from_picture(
 pub(crate) fn handle_destroy_region(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
     let req = parse_minor!(DestroyRegionRequest, data, state, seq, 138, 10);
     let region_id = req.region;
-    state.xfixes_regions.remove(&region_id);
+    state.xfixes.regions.remove(&region_id);
     state.recycle_xid(region_id);
     debug!("DestroyRegion: id={region_id:#x}");
     Vec::new()
@@ -192,7 +192,7 @@ pub(crate) fn handle_set_region(state: &mut ClientState, data: &[u8], seq: u16) 
         })
         .collect();
     state
-        .xfixes_regions
+        .xfixes.regions
         .insert(region_id, XFixesRegion::from_rects(rects));
     Vec::new()
 }
@@ -203,11 +203,11 @@ pub(crate) fn handle_copy_region(state: &mut ClientState, data: &[u8], seq: u16)
     let src_id = req.source;
     let dst_id = req.destination;
     let region = state
-        .xfixes_regions
+        .xfixes.regions
         .get(&src_id)
         .cloned()
         .unwrap_or_else(XFixesRegion::new);
-    state.xfixes_regions.insert(dst_id, region);
+    state.xfixes.regions.insert(dst_id, region);
     Vec::new()
 }
 
@@ -218,16 +218,16 @@ pub(crate) fn handle_union_region(state: &mut ClientState, data: &[u8], seq: u16
     let src2 = req.source2;
     let dst = req.destination;
     let r1 = state
-        .xfixes_regions
+        .xfixes.regions
         .get(&src1)
         .cloned()
         .unwrap_or_else(XFixesRegion::new);
     let r2 = state
-        .xfixes_regions
+        .xfixes.regions
         .get(&src2)
         .cloned()
         .unwrap_or_else(XFixesRegion::new);
-    state.xfixes_regions.insert(dst, r1.union(&r2));
+    state.xfixes.regions.insert(dst, r1.union(&r2));
     Vec::new()
 }
 
@@ -238,16 +238,16 @@ pub(crate) fn handle_intersect_region(state: &mut ClientState, data: &[u8], seq:
     let src2 = req.source2;
     let dst = req.destination;
     let r1 = state
-        .xfixes_regions
+        .xfixes.regions
         .get(&src1)
         .cloned()
         .unwrap_or_else(XFixesRegion::new);
     let r2 = state
-        .xfixes_regions
+        .xfixes.regions
         .get(&src2)
         .cloned()
         .unwrap_or_else(XFixesRegion::new);
-    state.xfixes_regions.insert(dst, r1.intersect(&r2));
+    state.xfixes.regions.insert(dst, r1.intersect(&r2));
     Vec::new()
 }
 
@@ -258,16 +258,16 @@ pub(crate) fn handle_subtract_region(state: &mut ClientState, data: &[u8], seq: 
     let src2 = req.source2;
     let dst = req.destination;
     let r1 = state
-        .xfixes_regions
+        .xfixes.regions
         .get(&src1)
         .cloned()
         .unwrap_or_else(XFixesRegion::new);
     let r2 = state
-        .xfixes_regions
+        .xfixes.regions
         .get(&src2)
         .cloned()
         .unwrap_or_else(XFixesRegion::new);
-    state.xfixes_regions.insert(dst, r1.subtract(&r2));
+    state.xfixes.regions.insert(dst, r1.subtract(&r2));
     Vec::new()
 }
 
@@ -277,7 +277,7 @@ pub(crate) fn handle_invert_region(state: &mut ClientState, data: &[u8], seq: u1
     let src = req.source;
     let dst = req.destination;
     let r = state
-        .xfixes_regions
+        .xfixes.regions
         .get(&src)
         .cloned()
         .unwrap_or_else(XFixesRegion::new);
@@ -287,7 +287,7 @@ pub(crate) fn handle_invert_region(state: &mut ClientState, data: &[u8], seq: u1
         width: req.bounds.width,
         height: req.bounds.height,
     };
-    state.xfixes_regions.insert(dst, r.invert(&bounds));
+    state.xfixes.regions.insert(dst, r.invert(&bounds));
     Vec::new()
 }
 
@@ -297,7 +297,7 @@ pub(crate) fn handle_translate_region(state: &mut ClientState, data: &[u8], seq:
     let region_id = req.region;
     let dx = req.dx;
     let dy = req.dy;
-    if let Some(r) = state.xfixes_regions.get_mut(&region_id) {
+    if let Some(r) = state.xfixes.regions.get_mut(&region_id) {
         r.translate(dx, dy);
     }
     Vec::new()
@@ -309,7 +309,7 @@ pub(crate) fn handle_region_extents(state: &mut ClientState, data: &[u8], seq: u
     let src = req.source;
     let dst = req.destination;
     let ext = state
-        .xfixes_regions
+        .xfixes.regions
         .get(&src)
         .map(|r| r.extents())
         .unwrap_or(RegionRect {
@@ -319,7 +319,7 @@ pub(crate) fn handle_region_extents(state: &mut ClientState, data: &[u8], seq: u
             height: 0,
         });
     state
-        .xfixes_regions
+        .xfixes.regions
         .insert(dst, XFixesRegion::from_rects(vec![ext]));
     Vec::new()
 }
@@ -328,7 +328,7 @@ pub(crate) fn handle_region_extents(state: &mut ClientState, data: &[u8], seq: u
 pub(crate) fn handle_fetch_region(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
     let req = parse_minor!(FetchRegionRequest, data, state, seq, 138, 19);
     let region_id = req.region;
-    let region = state.xfixes_regions.get(&region_id);
+    let region = state.xfixes.regions.get(&region_id);
     let (ext, rects) = match region {
         Some(r) => (r.extents(), &r.rects[..]),
         None => (
@@ -378,7 +378,7 @@ pub(crate) fn handle_set_gc_clip_region(state: &mut ClientState, data: &[u8], se
             gc.clip_rects.clear();
             gc.clip_x = 0;
             gc.clip_y = 0;
-        } else if let Some(region) = state.xfixes_regions.get(&region_id) {
+        } else if let Some(region) = state.xfixes.regions.get(&region_id) {
             gc.clip_x = x_origin;
             gc.clip_y = y_origin;
             gc.clip_rects = region
@@ -412,7 +412,7 @@ pub(crate) fn handle_set_window_shape_region(
             // None region = reset to default (unshaped)
             None
         } else {
-            state.xfixes_regions.get(&region_id).map(|region| {
+            state.xfixes.regions.get(&region_id).map(|region| {
                 region
                     .rects
                     .iter()
@@ -452,7 +452,7 @@ pub(crate) fn handle_set_picture_clip_region(
     let y_origin = req.y_origin;
     if region_id == 0 {
         state.render.set_picture_clip_region(pic_id, None, 0, 0);
-    } else if let Some(region) = state.xfixes_regions.get(&region_id) {
+    } else if let Some(region) = state.xfixes.regions.get(&region_id) {
         let clip_rects: Vec<(i16, i16, u16, u16)> = region
             .rects
             .iter()
@@ -475,7 +475,7 @@ pub(crate) fn handle_expand_region(state: &mut ClientState, data: &[u8], seq: u1
     let top = req.top as i16;
     let bottom = req.bottom as i16;
     let region = state
-        .xfixes_regions
+        .xfixes.regions
         .get(&src)
         .cloned()
         .unwrap_or_else(XFixesRegion::new);
@@ -491,6 +491,6 @@ pub(crate) fn handle_expand_region(state: &mut ClientState, data: &[u8], seq: u1
             })
             .collect(),
     );
-    state.xfixes_regions.insert(dst, expanded);
+    state.xfixes.regions.insert(dst, expanded);
     Vec::new()
 }

@@ -70,7 +70,7 @@ pub(crate) fn handle_damage_request(state: &mut ClientState, data: &[u8], seq: u
             let remainder = if repair == 0 {
                 // repair=None: subtract everything (acknowledge all damage).
                 super::super::types::XFixesRegion::new()
-            } else if let Some(repair_region) = state.xfixes_regions.get(&repair) {
+            } else if let Some(repair_region) = state.xfixes.regions.get(&repair) {
                 // Subtract the repair region from accumulated damage.
                 accumulated.subtract(repair_region)
             } else {
@@ -80,7 +80,7 @@ pub(crate) fn handle_damage_request(state: &mut ClientState, data: &[u8], seq: u
 
             // Store the remainder in the parts region (if not None).
             if parts != 0 {
-                state.xfixes_regions.insert(parts, remainder.clone());
+                state.xfixes.regions.insert(parts, remainder.clone());
             }
 
             // Update the accumulated damage to the remainder.
@@ -97,7 +97,7 @@ pub(crate) fn handle_damage_request(state: &mut ClientState, data: &[u8], seq: u
             let region = req.region;
             debug!("DAMAGE Add: drawable={drawable:#x} region={region:#x}");
             // Get region extents and notify damage
-            if let Some(reg) = state.xfixes_regions.get(&region) {
+            if let Some(reg) = state.xfixes.regions.get(&region) {
                 let ext = reg.extents();
                 state.notify_damage(drawable, ext.x, ext.y, ext.width, ext.height);
             }

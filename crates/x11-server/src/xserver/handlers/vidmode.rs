@@ -386,7 +386,7 @@ pub(crate) fn handle_vidmode_request(state: &mut ClientState, data: &[u8], seq: 
             let req = parse_minor!(SetGammaRequest, data, state, seq, 153, minor);
             // 16.16 fixed point: 1.0 == 65536.
             let gamma = |fp: u32| -> f64 { fp as f64 / 65536.0 };
-            if let Some(crtc) = state.randr_crtcs.get_mut(0) {
+            if let Some(crtc) = state.randr.crtcs.get_mut(0) {
                 crtc.gamma_red = compute_gamma_ramp(gamma(req.red));
                 crtc.gamma_green = compute_gamma_ramp(gamma(req.green));
                 crtc.gamma_blue = compute_gamma_ramp(gamma(req.blue));
@@ -430,7 +430,7 @@ pub(crate) fn handle_vidmode_request(state: &mut ClientState, data: &[u8], seq: 
             if size == 0 {
                 return vidmode_err(crate::xserver::core::LENGTH_ERROR, 0);
             }
-            if let Some(crtc) = state.randr_crtcs.get_mut(0) {
+            if let Some(crtc) = state.randr.crtcs.get_mut(0) {
                 crtc.gamma_red = req.red.iter().take(size).copied().collect();
                 crtc.gamma_green = req.green.iter().take(size).copied().collect();
                 crtc.gamma_blue = req.blue.iter().take(size).copied().collect();
@@ -541,7 +541,7 @@ fn approx_gamma_from_state(state: &ClientState) -> (f64, f64, f64) {
             1.0
         }
     };
-    if let Some(crtc) = state.randr_crtcs.first() {
+    if let Some(crtc) = state.randr.crtcs.first() {
         (
             approx(&crtc.gamma_red),
             approx(&crtc.gamma_green),
@@ -576,7 +576,7 @@ fn sample_gamma_ramps(
             })
             .collect()
     };
-    if let Some(crtc) = state.randr_crtcs.first() {
+    if let Some(crtc) = state.randr.crtcs.first() {
         (
             sample(&crtc.gamma_red),
             sample(&crtc.gamma_green),

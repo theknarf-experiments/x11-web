@@ -218,8 +218,8 @@ pub(crate) fn handle_create_mode(state: &mut ClientState, data: &[u8], seq: u16)
         format!("{}x{}", width, height)
     };
 
-    let mode_id = state.randr_next_mode_id;
-    state.randr_next_mode_id += 1;
+    let mode_id = state.randr.next_mode_id;
+    state.randr.next_mode_id += 1;
 
     let mode = RandrMode {
         id: mode_id,
@@ -235,7 +235,7 @@ pub(crate) fn handle_create_mode(state: &mut ClientState, data: &[u8], seq: u16)
         v_total,
         flags,
     };
-    state.randr_modes.push(mode);
+    state.randr.modes.push(mode);
 
     info!("RRCreateMode: {width}x{height} -> mode_id={mode_id}");
 
@@ -254,7 +254,7 @@ pub(crate) fn handle_destroy_mode(state: &mut ClientState, data: &[u8], _seq: u1
     if data.len() >= 8 {
         let req = parse_or_void!(DestroyModeRequest, data, state);
         let mode_id = req.mode;
-        state.randr_modes.retain(|m| m.id != mode_id);
+        state.randr.modes.retain(|m| m.id != mode_id);
         debug!("RRDestroyMode mode_id={mode_id}");
     }
     Vec::new()
@@ -303,7 +303,7 @@ pub(crate) fn handle_set_output_primary(
     if data.len() >= 12 {
         let req = parse_or_void!(SetOutputPrimaryRequest, data, state);
         let output_id = req.output;
-        state.randr_primary_output = output_id;
+        state.randr.primary_output = output_id;
         debug!("RRSetOutputPrimary output={output_id}");
     }
     Vec::new()
@@ -315,10 +315,10 @@ pub(crate) fn handle_get_output_primary(
     _data: &[u8],
     seq: u16,
 ) -> Vec<u8> {
-    let primary_output = if state.randr_primary_output != 0 {
-        state.randr_primary_output
+    let primary_output = if state.randr.primary_output != 0 {
+        state.randr.primary_output
     } else {
-        state.randr_outputs.first().map(|o| o.id).unwrap_or(0)
+        state.randr.outputs.first().map(|o| o.id).unwrap_or(0)
     };
     serialize_reply(
         &GetOutputPrimaryReply {
@@ -332,7 +332,7 @@ pub(crate) fn handle_get_output_primary(
 
 /// RRGetProviders (32).
 pub(crate) fn handle_get_providers(state: &mut ClientState, _data: &[u8], seq: u16) -> Vec<u8> {
-    let providers: Vec<u32> = state.randr_providers.iter().map(|p| p.id).collect();
+    let providers: Vec<u32> = state.randr.providers.iter().map(|p| p.id).collect();
     serialize_var_reply(
         &GetProvidersReply {
             sequence: seq,
@@ -497,8 +497,8 @@ pub(crate) fn handle_set_monitor(state: &mut ClientState, data: &[u8], _seq: u16
         let height = mi.height;
         let output_ids: Vec<u32> = mi.outputs.clone();
 
-        state.randr_monitors.retain(|m| m.name_atom != name_atom);
-        state.randr_monitors.push(RandrMonitor {
+        state.randr.monitors.retain(|m| m.name_atom != name_atom);
+        state.randr.monitors.push(RandrMonitor {
             name_atom,
             primary,
             automatic,
@@ -518,7 +518,7 @@ pub(crate) fn handle_delete_monitor(state: &mut ClientState, data: &[u8], _seq: 
     if data.len() >= 12 {
         let req = parse_or_void!(DeleteMonitorRequest, data, state);
         let name_atom = req.name;
-        state.randr_monitors.retain(|m| m.name_atom != name_atom);
+        state.randr.monitors.retain(|m| m.name_atom != name_atom);
         debug!("RRDeleteMonitor name_atom={name_atom}");
     }
     Vec::new()
@@ -692,7 +692,7 @@ fn build_get_output_property_reply(state: &ClientState, data: &[u8], seq: u16) -
 
 /// Build the reply for RRGetProviderInfo.
 fn build_provider_info_reply(state: &ClientState, seq: u16, provider_id: u32) -> Vec<u8> {
-    let provider = match state.randr_providers.iter().find(|p| p.id == provider_id) {
+    let provider = match state.randr.providers.iter().find(|p| p.id == provider_id) {
         Some(p) => p.clone(),
         None => {
             return serialize_var_reply(

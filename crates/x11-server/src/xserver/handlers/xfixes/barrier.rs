@@ -39,7 +39,7 @@ pub(crate) fn handle_create_pointer_barrier(
     let device_ids: Vec<u16> = req.devices.iter().copied().collect();
     let num_devices = device_ids.len();
     debug!("XFIXES CreatePointerBarrier: id={barrier_id:#x} window={window:#x} ({x1},{y1})-({x2},{y2}) dirs={directions:#x} devices={num_devices}");
-    state.barriers.insert(
+    state.xfixes.barriers.insert(
         barrier_id,
         super::super::super::types::PointerBarrier {
             barrier_id,
@@ -64,7 +64,7 @@ pub(crate) fn handle_delete_pointer_barrier(
     let req = parse_minor!(DeletePointerBarrierRequest, data, state, seq, 138, 32);
     let barrier_id = req.barrier;
     debug!("XFIXES DeletePointerBarrier: id={barrier_id:#x}");
-    state.barriers.remove(&barrier_id);
+    state.xfixes.barriers.remove(&barrier_id);
     state.recycle_xid(barrier_id);
     Vec::new()
 }
@@ -81,7 +81,7 @@ pub(crate) fn handle_set_client_disconnect_mode(
     let req = parse_minor!(SetClientDisconnectModeRequest, data, state, seq, 138, 33);
     let mode = req.disconnect_mode.bits() & 0x1; // Only bit 0 is defined
     debug!("XFIXES SetClientDisconnectMode: mode={mode:#x}");
-    state.disconnect_mode = mode;
+    state.xfixes.disconnect_mode = mode;
     Vec::new()
 }
 
@@ -96,7 +96,7 @@ pub(crate) fn handle_get_client_disconnect_mode(
         &GetClientDisconnectModeReply {
             sequence: seq,
             length: 0,
-            disconnect_mode: ClientDisconnectFlags::from(state.disconnect_mode),
+            disconnect_mode: ClientDisconnectFlags::from(state.xfixes.disconnect_mode),
         },
         state.byte_order(),
     )

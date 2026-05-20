@@ -147,7 +147,7 @@ pub(crate) fn handle_present_request(state: &mut ClientState, data: &[u8], seq: 
                 0
             };
             let region_rects: Option<Vec<(i16, i16, u16, u16)>> = if region_id != 0 {
-                state.xfixes_regions.get(&region_id).and_then(|region| {
+                state.xfixes.regions.get(&region_id).and_then(|region| {
                     if region.rects.is_empty() {
                         None
                     } else {

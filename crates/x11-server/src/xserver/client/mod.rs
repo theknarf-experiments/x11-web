@@ -128,10 +128,10 @@ pub(crate) struct ClientState {
     /// Current screen dimensions (dynamic, updated on resize).
     pub(crate) screen_width: u16,
     pub(crate) screen_height: u16,
-    /// RandR configuration timestamp (incremented on screen changes).
-    pub(crate) randr_config_timestamp: u32,
-    /// XFIXES regions.
-    pub(crate) xfixes_regions: HashMap<u32, XFixesRegion>,
+    /// RANDR extension state (CRTCs, outputs, modes, monitors, event mask).
+    pub(crate) randr: super::handlers::randr::RandRState,
+    /// XFIXES extension state (regions, barriers, cursor subscribers, …).
+    pub(crate) xfixes: super::handlers::xfixes::XFixesState,
     /// Pending INCR (incremental) selection transfers.
     pub(crate) incr_transfers: Vec<IncrTransfer>,
     /// Windows retained from clients that disconnected with close_down_mode = RetainTemporary.
@@ -163,41 +163,20 @@ pub(crate) struct ClientState {
     /// Server-wide (shared across connections) per the X11 spec —
     /// `xmodmap` from one client must be observable from another.
     pub(crate) custom_keymap: super::types::SharedKeymap,
-    /// XFIXES: clients subscribed to cursor change events (window_id → bool).
-    pub(crate) cursor_event_subscribers: HashMap<u32, bool>,
-    /// XFIXES: clients subscribed to selection events (selection_atom → event_mask).
-    pub(crate) selection_event_subscribers: HashMap<u32, u32>,
     /// Current cursor serial (incremented on cursor change).
     pub(crate) cursor_serial: u32,
     /// Current cursor ID (for GetCursorImage).
     pub(crate) current_cursor: u32,
-    /// XFIXES: cursor is hidden (HideCursor/ShowCursor nesting count).
-    pub(crate) cursor_hidden: u32,
-    /// DBE: back buffer allocations (back_buffer_id → window_id).
-    pub(crate) back_buffers: HashMap<u32, u32>,
-    /// DBE: idiom nesting depth (BeginIdiom/EndIdiom).
-    pub(crate) dbe_idiom_depth: u32,
-    /// RECORD extension: recording contexts (local, owned by this client).
-    pub(crate) record_contexts: HashMap<u32, super::handlers::record::RecordContext>,
-    /// Shared RECORD contexts for cross-connection interception.
-    pub(crate) shared_record_contexts: SharedRecordContexts,
+    /// DBE extension state.
+    pub(crate) dbe: super::handlers::dbe::DbeState,
+    /// RECORD extension state.
+    pub(crate) record: super::handlers::record::RecordState,
     /// GLX extension state.
     pub(crate) glx: super::handlers::glx::GlxState,
-    /// SECURITY extension: authorization tokens (local to this client's session).
-    pub(crate) security_authorizations: HashMap<u32, SecurityAuthorization>,
-    /// Shared SECURITY tokens for cross-connection validation.
-    pub(crate) shared_security_tokens: super::types::SharedSecurityTokens,
-    /// Trust level for this client (0 = trusted, 1 = untrusted).
-    /// Set during connection auth if a SECURITY-generated token was used.
-    pub(crate) trust_level: u32,
+    /// SECURITY extension state.
+    pub(crate) security: super::handlers::security::SecurityState,
     /// Font search path (SetFontPath/GetFontPath).
     pub(crate) font_path: Vec<String>,
-    /// Access control list (ChangeHosts/ListHosts) — now backed by shared server-wide state.
-    pub(crate) access_hosts: Vec<AccessHost>,
-    /// Whether access control is enabled.
-    pub(crate) access_control_enabled: bool,
-    /// Shared server-wide access control state (for enforcement on new TCP connections).
-    pub(crate) shared_access_control: super::types::SharedAccessControl,
     /// XTEST: impervious grab mode.
     pub(crate) xtest_grab_impervious: bool,
     /// DPMS extension state.
@@ -270,10 +249,6 @@ pub(crate) struct ClientState {
     /// POINTER_MOTION_HINT_MASK: when true, motion events are suppressed
     /// until QueryPointer/GetMotionEvents or button/crossing event occurs.
     pub(crate) motion_hint_suppressed: bool,
-    /// XFIXES pointer barriers.
-    pub(crate) barriers: HashMap<u32, PointerBarrier>,
-    /// XFIXES client disconnect mode (0 = default).
-    pub(crate) disconnect_mode: u32,
     /// Present extension: monotonically increasing media stream counter per-CRTC.
     pub(crate) present_msc: u64,
     /// Channel for clipboard events (selection ownership changes, data responses).
@@ -302,25 +277,6 @@ pub(crate) struct ClientState {
     /// Shared server grab lock (GrabServer/UngrabServer across all clients).
     pub(crate) server_grab: super::types::ServerGrabLock,
 
-    // -----------------------------------------------------------------------
-    // RandR multi-monitor model
-    // -----------------------------------------------------------------------
-    /// RandR CRTCs (display controllers).
-    pub(crate) randr_crtcs: Vec<RandrCrtc>,
-    /// RandR outputs (connectors).
-    pub(crate) randr_outputs: Vec<RandrOutput>,
-    /// RandR modes (resolutions/timings).
-    pub(crate) randr_modes: Vec<RandrMode>,
-    /// RandR providers.
-    pub(crate) randr_providers: Vec<RandrProvider>,
-    /// RandR event selection mask for this client.
-    pub(crate) randr_event_mask: u32,
-    /// RandR 1.5 monitor definitions (set by RRSetMonitor).
-    pub(crate) randr_monitors: Vec<RandrMonitor>,
-    /// Primary output ID (0 = none / use first). Set by RRSetOutputPrimary.
-    pub(crate) randr_primary_output: u32,
-    /// Next RandR mode ID for RRCreateMode.
-    pub(crate) randr_next_mode_id: u32,
     /// XFree86-VidMode extension state.
     pub(crate) vidmode: super::handlers::vidmode::VidModeState,
     /// Whether the client has enabled BIG-REQUESTS via BigReqEnable.

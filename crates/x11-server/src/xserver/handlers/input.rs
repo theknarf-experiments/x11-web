@@ -330,9 +330,9 @@ pub(crate) fn handle_warp_pointer(state: &mut ClientState, req: &WarpPointerRequ
     };
 
     // Enforce XFIXES pointer barriers
-    if !state.barriers.is_empty() {
+    if !state.xfixes.barriers.is_empty() {
         let (bx, by) = super::super::input::enforce_barriers(
-            &state.barriers, old_px, old_py, new_px, new_py,
+            &state.xfixes.barriers, old_px, old_py, new_px, new_py,
         );
         new_px = bx;
         new_py = by;
@@ -887,6 +887,7 @@ pub(crate) fn build_screen_saver_on_event(state: &ClientState) -> Vec<u8> {
 pub(crate) fn handle_list_hosts(state: &ClientState, _req: &ListHostsRequest) -> Vec<u8> {
     let seq = state.sequence;
     let hosts: Vec<Host> = state
+        .security
         .access_hosts
         .iter()
         .map(|h| Host {
@@ -894,7 +895,7 @@ pub(crate) fn handle_list_hosts(state: &ClientState, _req: &ListHostsRequest) ->
             address: h.address.clone(),
         })
         .collect();
-    let mode = if state.access_control_enabled {
+    let mode = if state.security.access_control_enabled {
         AccessControl::ENABLE
     } else {
         AccessControl::DISABLE
@@ -972,11 +973,12 @@ pub(crate) fn handle_change_hosts(state: &mut ClientState, req: &ChangeHostsRequ
             // Insert
             // Don't add duplicates
             if !state
+                .security
                 .access_hosts
                 .iter()
                 .any(|h| h.family == family && h.address == address)
             {
-                state.access_hosts.push(AccessHost {
+                state.security.access_hosts.push(AccessHost {
                     family,
                     address: address.clone(),
                 });
@@ -985,6 +987,7 @@ pub(crate) fn handle_change_hosts(state: &mut ClientState, req: &ChangeHostsRequ
         1 => {
             // Delete
             state
+                .security
                 .access_hosts
                 .retain(|h| !(h.family == family && h.address == address));
         }
@@ -992,8 +995,8 @@ pub(crate) fn handle_change_hosts(state: &mut ClientState, req: &ChangeHostsRequ
     }
 
     // Sync to shared server-wide access control for TCP enforcement
-    if let Ok(mut acl) = state.shared_access_control.lock() {
-        acl.hosts = state.access_hosts.clone();
+    if let Ok(mut acl) = state.security.shared_access_control.lock() {
+        acl.hosts = state.security.access_hosts.clone();
     }
 
     Vec::new()
@@ -1007,12 +1010,12 @@ pub(crate) fn handle_set_access_control(
     state: &mut ClientState,
     req: &SetAccessControlRequest,
 ) -> Vec<u8> {
-    state.access_control_enabled = u8::from(req.mode) != 0;
-    debug!("SetAccessControl: enabled={}", state.access_control_enabled);
+    state.security.access_control_enabled = u8::from(req.mode) != 0;
+    debug!("SetAccessControl: enabled={}", state.security.access_control_enabled);
 
     // Sync to shared server-wide access control for TCP enforcement
-    if let Ok(mut acl) = state.shared_access_control.lock() {
-        acl.enabled = state.access_control_enabled;
+    if let Ok(mut acl) = state.security.shared_access_control.lock() {
+        acl.enabled = state.security.access_control_enabled;
     }
 
     Vec::new()

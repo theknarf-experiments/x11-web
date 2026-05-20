@@ -1,7 +1,19 @@
 //! DBE (Double Buffer Extension) handler.
 
+use std::collections::HashMap;
+
 use super::parse_minor;
 use tracing::debug;
+
+/// Per-connection DBE extension state. Lives on `ClientState::dbe`;
+/// reads and writes happen through `state.dbe.*`.
+#[derive(Default)]
+pub(crate) struct DbeState {
+    /// Back buffer allocations (back_buffer_id → window_id).
+    pub(crate) back_buffers: HashMap<u32, u32>,
+    /// Idiom nesting depth (BeginIdiom/EndIdiom).
+    pub(crate) idiom_depth: u32,
+}
 use x11rb_protocol::protocol::dbe::{
     GetVisualInfoReply, SwapAction, VisualInfo, VisualInfos, ALLOCATE_BACK_BUFFER_REQUEST,
     BEGIN_IDIOM_REQUEST, DEALLOCATE_BACK_BUFFER_REQUEST, END_IDIOM_REQUEST,
@@ -70,7 +82,7 @@ pub(crate) fn handle_dbe_request(state: &mut ClientState, data: &[u8], seq: u16)
                         shm_backing: None,
                     },
                 );
-                state.back_buffers.insert(back_buffer_id, window_id);
+                state.dbe.back_buffers.insert(back_buffer_id, window_id);
             } else {
                 return dbe_err(crate::xserver::core::WINDOW_ERROR, window_id);
             }
@@ -91,7 +103,7 @@ pub(crate) fn handle_dbe_request(state: &mut ClientState, data: &[u8], seq: u16)
             let back_buffer_id = req.buffer;
             debug!("DBE DeallocateBackBuffer: buffer={back_buffer_id:#x}");
             state.pixmaps.remove(&back_buffer_id);
-            state.back_buffers.remove(&back_buffer_id);
+            state.dbe.back_buffers.remove(&back_buffer_id);
             state.recycle_xid(back_buffer_id);
             Vec::new()
         }
@@ -107,6 +119,7 @@ pub(crate) fn handle_dbe_request(state: &mut ClientState, data: &[u8], seq: u16)
 
                 // Find the back buffer for this window
                 let back_buffer_id = state
+                    .dbe
                     .back_buffers
                     .iter()
                     .find(|(_, &wid)| wid == window_id)
@@ -177,13 +190,13 @@ pub(crate) fn handle_dbe_request(state: &mut ClientState, data: &[u8], seq: u16)
             // BeginIdiom: mark start of atomic swap group.
             // All SwapBuffers calls between Begin and EndIdiom should be treated as atomic.
             // We accept this silently since our SwapBuffers is already synchronous.
-            state.dbe_idiom_depth += 1;
+            state.dbe.idiom_depth += 1;
             Vec::new()
         }
         END_IDIOM_REQUEST => {
             // EndIdiom: end of atomic swap group.
-            if state.dbe_idiom_depth > 0 {
-                state.dbe_idiom_depth -= 1;
+            if state.dbe.idiom_depth > 0 {
+                state.dbe.idiom_depth -= 1;
             }
             Vec::new()
         }
@@ -238,6 +251,7 @@ pub(crate) fn handle_dbe_request(state: &mut ClientState, data: &[u8], seq: u16)
             );
             let back_buffer_id = req.buffer;
             let window_id = state
+                .dbe
                 .back_buffers
                 .get(&back_buffer_id)
                 .copied()

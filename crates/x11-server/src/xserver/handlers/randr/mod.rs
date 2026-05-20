@@ -27,6 +27,31 @@ use x11rb_protocol::protocol::randr::{
 use super::super::client::ClientState;
 use super::parse_minor;
 use crate::xserver::reply::serialize_reply;
+use crate::xserver::types::{RandrCrtc, RandrMode, RandrMonitor, RandrOutput, RandrProvider};
+
+/// Per-connection RANDR multi-monitor state. Lives on
+/// `ClientState::randr`; reads and writes happen through `state.randr.*`.
+#[derive(Default)]
+pub(crate) struct RandRState {
+    /// RandR config timestamp (incremented on screen changes).
+    pub(crate) config_timestamp: u32,
+    /// RandR CRTCs (display controllers).
+    pub(crate) crtcs: Vec<RandrCrtc>,
+    /// RandR outputs (connectors).
+    pub(crate) outputs: Vec<RandrOutput>,
+    /// RandR modes (resolutions/timings).
+    pub(crate) modes: Vec<RandrMode>,
+    /// RandR providers.
+    pub(crate) providers: Vec<RandrProvider>,
+    /// RandR event selection mask for this client.
+    pub(crate) event_mask: u32,
+    /// RandR 1.5 monitor definitions (set by RRSetMonitor).
+    pub(crate) monitors: Vec<RandrMonitor>,
+    /// Primary output ID (0 = none / use first). Set by RRSetOutputPrimary.
+    pub(crate) primary_output: u32,
+    /// Next RandR mode ID for RRCreateMode.
+    pub(crate) next_mode_id: u32,
+}
 use x11rb_protocol::protocol::randr::{
     QueryVersionReply as RandrQueryVersionReply, SetConfig, SetScreenConfigReply,
 };
@@ -60,7 +85,7 @@ pub(crate) fn handle_randr_request(state: &mut ClientState, data: &[u8], seq: u1
 
             // Check config timestamp — if it doesn't match, reply InvalidConfigTime
             let status = if config_timestamp != 0
-                && config_timestamp != state.randr_config_timestamp
+                && config_timestamp != state.randr.config_timestamp
             {
                 SetConfig::INVALID_CONFIG_TIME
             } else {
@@ -77,7 +102,7 @@ pub(crate) fn handle_randr_request(state: &mut ClientState, data: &[u8], seq: u1
                     sequence: seq,
                     length: 0,
                     new_timestamp: state.timestamp(),
-                    config_timestamp: state.randr_config_timestamp,
+                    config_timestamp: state.randr.config_timestamp,
                     root: state.root_window,
                     subpixel_order: SubPixel::UNKNOWN,
                 },

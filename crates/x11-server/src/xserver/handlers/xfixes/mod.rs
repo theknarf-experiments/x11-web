@@ -4,15 +4,37 @@ mod barrier;
 mod cursor;
 mod region;
 
+use std::collections::HashMap;
+
 use tracing::debug;
 
 use super::super::client::ClientState;
 use super::parse_minor;
 use crate::xserver::reply::serialize_reply;
+use crate::xserver::types::{PointerBarrier, XFixesRegion};
 use x11rb_protocol::protocol::xfixes::{
     ChangeSaveSetRequest, QueryVersionReply as XfixesQueryVersionReply, QueryVersionRequest,
     SelectSelectionInputRequest,
 };
+
+/// Per-connection XFIXES extension state. Lives on
+/// `ClientState::xfixes`; reads and writes happen through
+/// `state.xfixes.*`.
+#[derive(Default)]
+pub(crate) struct XFixesState {
+    /// XFIXES regions.
+    pub(crate) regions: HashMap<u32, XFixesRegion>,
+    /// Clients subscribed to cursor change events (window_id → bool).
+    pub(crate) cursor_event_subscribers: HashMap<u32, bool>,
+    /// Clients subscribed to selection events (selection_atom → event_mask).
+    pub(crate) selection_event_subscribers: HashMap<u32, u32>,
+    /// Cursor is hidden (HideCursor/ShowCursor nesting count).
+    pub(crate) cursor_hidden: u32,
+    /// XFIXES pointer barriers.
+    pub(crate) barriers: HashMap<u32, PointerBarrier>,
+    /// XFIXES client disconnect mode (0 = default).
+    pub(crate) disconnect_mode: u32,
+}
 
 pub(crate) fn handle_xfixes_request(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
     let minor = data[1];
@@ -70,10 +92,11 @@ pub(crate) fn handle_xfixes_request(state: &mut ClientState, data: &[u8], seq: u
             debug!("XFIXES SelectSelectionInput: window={window:#x} selection={selection:#x} mask={event_mask:#x}");
             if event_mask != 0 {
                 state
+                    .xfixes
                     .selection_event_subscribers
                     .insert(selection, event_mask);
             } else {
-                state.selection_event_subscribers.remove(&selection);
+                state.xfixes.selection_event_subscribers.remove(&selection);
             }
             Vec::new()
         }

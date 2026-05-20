@@ -143,7 +143,7 @@ pub(crate) fn handle_core_request(state: &mut ClientState, data: &[u8]) -> Vec<u
 
     // Per SECURITY extension spec: untrusted clients are restricted from
     // certain operations that could affect other clients or system security.
-    if state.trust_level > 0 {
+    if state.security.trust_level > 0 {
         match major_opcode {
             // ChangeHosts: untrusted clients cannot modify host access control
             109 => {
@@ -956,7 +956,7 @@ fn emit_cursor_changed(state: &mut ClientState, wid: u32) {
     state.current_cursor = new_cursor_id;
 
     // Send XFixesCursorNotify to subscribers if the cursor actually changed.
-    if new_cursor_id != old_cursor_id && !state.cursor_event_subscribers.is_empty() {
+    if new_cursor_id != old_cursor_id && !state.xfixes.cursor_event_subscribers.is_empty() {
         use crate::xserver::event::serialize_event;
         use x11rb_protocol::protocol::xfixes::{
             CursorNotify as CursorNotifySubtype, CursorNotifyEvent,
@@ -969,7 +969,7 @@ fn emit_cursor_changed(state: &mut ClientState, wid: u32) {
 
         // Collect subscriber windows first to avoid borrow conflict.
         let subscribers: Vec<u32> = state
-            .cursor_event_subscribers
+            .xfixes.cursor_event_subscribers
             .iter()
             .filter(|(_, &subscribed)| subscribed)
             .map(|(&win, _)| win)

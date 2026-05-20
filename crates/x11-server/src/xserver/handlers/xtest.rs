@@ -63,7 +63,7 @@ pub(crate) fn handle_xtest_request(state: &mut ClientState, data: &[u8], seq: u1
         }
         FAKE_INPUT_REQUEST => {
             // SECURITY: untrusted clients are denied FakeInput (BadAccess)
-            if state.trust_level > 0 {
+            if state.security.trust_level > 0 {
                 return xtest_err(crate::xserver::core::ACCESS_ERROR, 0);
             }
             require_len!(data, 24, seq, 150, minor as u16, state.msb_first);
@@ -209,9 +209,9 @@ pub(crate) fn handle_xtest_request(state: &mut ClientState, data: &[u8], seq: u1
                                 state.pointer_y.saturating_add(root_y),
                             )
                         };
-                        if !state.barriers.is_empty() {
+                        if !state.xfixes.barriers.is_empty() {
                             let (bx, by) = super::super::input::enforce_barriers(
-                                &state.barriers, old_px, old_py, nx, ny,
+                                &state.xfixes.barriers, old_px, old_py, nx, ny,
                             );
                             nx = bx;
                             ny = by;

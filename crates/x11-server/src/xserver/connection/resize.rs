@@ -204,7 +204,7 @@ pub(super) fn apply_screen_resize(state: &mut ClientState, new_w: u16, new_h: u1
     // 1. Update screen dimensions
     state.screen_width = new_w;
     state.screen_height = new_h;
-    state.randr_config_timestamp += 1;
+    state.randr.config_timestamp += 1;
 
     // 2. Update root window dimensions and framebuffer
     if let Some(root) = state.windows.get_mut(&state.root_window) {
@@ -264,12 +264,12 @@ pub(super) fn apply_screen_resize(state: &mut ClientState, new_w: u16, new_h: u1
 
     // Update mode
     let new_mode = RandrMode::new(mode_id, new_w, new_h);
-    if let Some(mode) = state.randr_modes.iter_mut().find(|m| m.id == mode_id) {
+    if let Some(mode) = state.randr.modes.iter_mut().find(|m| m.id == mode_id) {
         *mode = new_mode;
     }
 
     // Update CRTC
-    if let Some(crtc) = state.randr_crtcs.iter_mut().find(|c| c.id == crtc_id) {
+    if let Some(crtc) = state.randr.crtcs.iter_mut().find(|c| c.id == crtc_id) {
         crtc.width = new_w;
         crtc.height = new_h;
     }
@@ -279,7 +279,7 @@ pub(super) fn apply_screen_resize(state: &mut ClientState, new_w: u16, new_h: u1
     let mm_h = crate::xserver::types::pixels_to_mm_at_96dpi(new_h as u32);
     let edid_atom = state.intern_atom("EDID", false);
     let edid_data = generate_edid(mm_w as u16, mm_h as u16, new_w, new_h);
-    if let Some(output) = state.randr_outputs.iter_mut().find(|o| o.id == output_id) {
+    if let Some(output) = state.randr.outputs.iter_mut().find(|o| o.id == output_id) {
         output.mm_width = mm_w;
         output.mm_height = mm_h;
         output.properties.insert(

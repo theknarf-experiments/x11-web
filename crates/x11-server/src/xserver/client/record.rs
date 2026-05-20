@@ -25,11 +25,11 @@ impl ClientState {
             return;
         }
         // Local contexts (self-interception)
-        if !self.record_contexts.is_empty() {
+        if !self.record.contexts.is_empty() {
             let server_time = self.timestamp();
             let seq = self.sequence;
             let intercepts = super::super::handlers::record::intercept_request(
-                &self.record_contexts,
+                &self.record.contexts,
                 &self.client_id,
                 &self.client_id,
                 self.resource_id_base,
@@ -40,7 +40,7 @@ impl ClientState {
             self.pending_events.extend(intercepts);
         }
         // Shared contexts (cross-client interception)
-        if let Ok(shared) = self.shared_record_contexts.lock() {
+        if let Ok(shared) = self.record.shared_contexts.lock() {
             if shared.is_empty() {
                 return;
             }
@@ -97,12 +97,12 @@ impl ClientState {
             return;
         }
         // Local contexts (self-interception)
-        if !self.record_contexts.is_empty() {
+        if !self.record.contexts.is_empty() {
             let server_time = self.timestamp();
             let seq = self.sequence;
             if response[0] == 1 {
                 let intercepts = super::super::handlers::record::intercept_reply(
-                    &self.record_contexts,
+                    &self.record.contexts,
                     &self.client_id,
                     &self.client_id,
                     self.resource_id_base,
@@ -115,7 +115,7 @@ impl ClientState {
                 self.pending_events.extend(intercepts);
             } else if response[0] == 0 && response.len() >= 2 {
                 let intercepts = super::super::handlers::record::intercept_error(
-                    &self.record_contexts,
+                    &self.record.contexts,
                     &self.client_id,
                     &self.client_id,
                     self.resource_id_base,
@@ -127,7 +127,7 @@ impl ClientState {
             }
         }
         // Shared contexts (cross-client interception)
-        if let Ok(shared) = self.shared_record_contexts.lock() {
+        if let Ok(shared) = self.record.shared_contexts.lock() {
             if shared.is_empty() {
                 return;
             }
@@ -187,7 +187,7 @@ impl ClientState {
     pub(crate) fn record_intercept_events(&self, events: &[Vec<u8>]) -> Vec<Vec<u8>> {
         let mut results = Vec::new();
         // Local contexts (self-interception)
-        if !self.record_contexts.is_empty() {
+        if !self.record.contexts.is_empty() {
             for event in events {
                 if event.len() == X11_EVENT_SIZE
                     && event[0] >= X11_EVENT_TYPE_MIN
@@ -196,7 +196,7 @@ impl ClientState {
                     let server_time = self.timestamp();
                     let seq = self.sequence;
                     results.extend(super::super::handlers::record::intercept_event(
-                        &self.record_contexts,
+                        &self.record.contexts,
                         &self.client_id,
                         &self.client_id,
                         self.resource_id_base,
@@ -208,7 +208,7 @@ impl ClientState {
             }
         }
         // Shared contexts (cross-client interception)
-        if let Ok(shared) = self.shared_record_contexts.lock() {
+        if let Ok(shared) = self.record.shared_contexts.lock() {
             if !shared.is_empty() {
                 for event in events {
                     if event.len() == X11_EVENT_SIZE
@@ -254,9 +254,10 @@ impl ClientState {
     pub(crate) fn record_notify_client_started(&mut self) {
         let server_time = self.timestamp();
         // Local contexts
-        if !self.record_contexts.is_empty() {
+        if !self.record.contexts.is_empty() {
             let notifications: Vec<Vec<u8>> = self
-                .record_contexts
+                .record
+                .contexts
                 .values()
                 .filter(|ctx| ctx.enabled && ctx.wants_client_started())
                 .filter(|ctx| ctx.client_specs.iter().any(|&s| s == 2 || s == 3))
@@ -272,7 +273,7 @@ impl ClientState {
             self.pending_events.extend(notifications);
         }
         // Shared contexts: notify recording clients about this new client
-        if let Ok(shared) = self.shared_record_contexts.lock() {
+        if let Ok(shared) = self.record.shared_contexts.lock() {
             for entry in shared.values() {
                 if !entry.context.enabled || !entry.context.wants_client_started() {
                     continue;
@@ -301,9 +302,10 @@ impl ClientState {
     pub(crate) fn record_notify_client_died(&mut self) {
         let server_time = self.timestamp();
         // Local contexts
-        if !self.record_contexts.is_empty() {
+        if !self.record.contexts.is_empty() {
             let notifications: Vec<Vec<u8>> = self
-                .record_contexts
+                .record
+                .contexts
                 .values()
                 .filter(|ctx| ctx.enabled && ctx.wants_client_died())
                 .filter(|ctx| ctx.client_specs.iter().any(|&s| s == 2 || s == 3))
@@ -319,7 +321,7 @@ impl ClientState {
             self.pending_events.extend(notifications);
         }
         // Shared contexts: notify recording clients about this client dying
-        if let Ok(shared) = self.shared_record_contexts.lock() {
+        if let Ok(shared) = self.record.shared_contexts.lock() {
             for entry in shared.values() {
                 if !entry.context.enabled || !entry.context.wants_client_died() {
                     continue;

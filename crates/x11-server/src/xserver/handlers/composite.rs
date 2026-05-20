@@ -149,7 +149,7 @@ pub(crate) fn handle_x_composite_request(
             } else {
                 return bad_window(window);
             };
-            state.xfixes_regions.insert(
+            state.xfixes.regions.insert(
                 region_id,
                 super::super::types::XFixesRegion::from_rects(vec![rect]),
             );

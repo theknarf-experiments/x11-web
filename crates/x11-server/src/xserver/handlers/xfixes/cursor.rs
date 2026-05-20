@@ -40,7 +40,7 @@ pub(crate) fn handle_select_cursor_input(
     let event_mask = req.event_mask;
     debug!("XFIXES SelectCursorInput: window={window:#x} mask={event_mask:?}");
     state
-        .cursor_event_subscribers
+        .xfixes.cursor_event_subscribers
         .insert(window, event_mask.bits() != 0);
     Vec::new()
 }
@@ -284,10 +284,10 @@ pub(crate) fn handle_change_cursor_by_name(
 pub(crate) fn handle_hide_cursor(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
     let req = parse_minor!(HideCursorRequest, data, state, seq, 138, 29);
     let window_id = req.window;
-    state.cursor_hidden = state.cursor_hidden.saturating_add(1);
+    state.xfixes.cursor_hidden = state.xfixes.cursor_hidden.saturating_add(1);
     debug!(
         "XFIXES HideCursor: window={window_id:#x} nesting={}",
-        state.cursor_hidden
+        state.xfixes.cursor_hidden
     );
     Vec::new()
 }
@@ -296,10 +296,10 @@ pub(crate) fn handle_hide_cursor(state: &mut ClientState, data: &[u8], seq: u16)
 pub(crate) fn handle_show_cursor(state: &mut ClientState, data: &[u8], seq: u16) -> Vec<u8> {
     let req = parse_minor!(ShowCursorRequest, data, state, seq, 138, 30);
     let window_id = req.window;
-    state.cursor_hidden = state.cursor_hidden.saturating_sub(1);
+    state.xfixes.cursor_hidden = state.xfixes.cursor_hidden.saturating_sub(1);
     debug!(
         "XFIXES ShowCursor: window={window_id:#x} nesting={}",
-        state.cursor_hidden
+        state.xfixes.cursor_hidden
     );
     Vec::new()
 }

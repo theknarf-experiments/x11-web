@@ -15,7 +15,7 @@ pub(crate) fn handle_select_input(state: &mut ClientState, data: &[u8], _seq: u1
     use x11rb_protocol::protocol::randr::SelectInputRequest;
     if let Ok(req) = SelectInputRequest::try_parse_request(request_header(data), &data[4..]) {
         let enable = u16::from(req.enable);
-        state.randr_event_mask = enable as u32;
+        state.randr.event_mask = enable as u32;
         debug!("RRSelectInput mask=0x{:04x}", enable);
     }
     Vec::new()
@@ -36,7 +36,7 @@ pub(crate) fn handle_get_screen_info(state: &mut ClientState, _data: &[u8], seq:
             length: 0,
             root: state.root_window,
             timestamp: state.timestamp(),
-            config_timestamp: state.randr_config_timestamp,
+            config_timestamp: state.randr.config_timestamp,
             size_id: 0,
             rotation: Rotation::from(1u16),
             rate: 0,
@@ -85,7 +85,7 @@ pub(crate) fn handle_set_screen_size(state: &mut ClientState, data: &[u8], _seq:
             );
             state.screen_width = new_w;
             state.screen_height = new_h;
-            state.randr_config_timestamp += 1;
+            state.randr.config_timestamp += 1;
             if let Some(root) = state.windows.get_mut(&state.root_window) {
                 root.width = new_w;
                 root.height = new_h;
@@ -99,10 +99,10 @@ pub(crate) fn handle_set_screen_size(state: &mut ClientState, data: &[u8], _seq:
 
 /// RRGetScreenResources (8) / RRGetScreenResourcesCurrent (25).
 pub(crate) fn build_screen_resources_reply(state: &ClientState, seq: u16) -> Vec<u8> {
-    let crtcs: Vec<u32> = state.randr_crtcs.iter().map(|c| c.id).collect();
-    let outputs: Vec<u32> = state.randr_outputs.iter().map(|o| o.id).collect();
+    let crtcs: Vec<u32> = state.randr.crtcs.iter().map(|c| c.id).collect();
+    let outputs: Vec<u32> = state.randr.outputs.iter().map(|o| o.id).collect();
     let modes: Vec<ModeInfo> = state
-        .randr_modes
+        .randr.modes
         .iter()
         .map(|m| ModeInfo {
             id: m.id,
@@ -121,7 +121,7 @@ pub(crate) fn build_screen_resources_reply(state: &ClientState, seq: u16) -> Vec
         })
         .collect();
     let mut names = Vec::new();
-    for mode in &state.randr_modes {
+    for mode in &state.randr.modes {
         names.extend_from_slice(mode.name.as_bytes());
     }
 
@@ -130,7 +130,7 @@ pub(crate) fn build_screen_resources_reply(state: &ClientState, seq: u16) -> Vec
             sequence: seq,
             length: 0,
             timestamp: state.timestamp(),
-            config_timestamp: state.randr_config_timestamp,
+            config_timestamp: state.randr.config_timestamp,
             crtcs,
             outputs,
             modes,
@@ -143,13 +143,13 @@ pub(crate) fn build_screen_resources_reply(state: &ClientState, seq: u16) -> Vec
 /// Build the reply for RRGetMonitors (42).
 pub(crate) fn build_get_monitors_reply(state: &ClientState, seq: u16) -> Vec<u8> {
     let active_crtcs: Vec<_> = state
-        .randr_crtcs
+        .randr.crtcs
         .iter()
         .filter(|c| c.mode_id != 0)
         .collect();
     let total_outputs: u32 = (active_crtcs.iter().map(|c| c.outputs.len()).sum::<usize>()
         + state
-            .randr_monitors
+            .randr.monitors
             .iter()
             .map(|m| m.output_ids.len())
             .sum::<usize>()) as u32;
@@ -183,7 +183,7 @@ pub(crate) fn build_get_monitors_reply(state: &ClientState, seq: u16) -> Vec<u8>
         });
     }
 
-    for m in &state.randr_monitors {
+    for m in &state.randr.monitors {
         let mm_w = crate::xserver::types::pixels_to_mm_at_96dpi(m.width as u32);
         let mm_h = crate::xserver::types::pixels_to_mm_at_96dpi(m.height as u32);
         monitors.push(MonitorInfo {

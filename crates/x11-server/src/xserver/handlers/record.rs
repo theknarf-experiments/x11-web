@@ -5,7 +5,30 @@
 //! registers ranges of protocol elements to intercept, then enables the
 //! context. While enabled, matching events/requests/replies/errors from
 //! OTHER clients are forwarded to the recording client as data replies.
+
+use std::collections::HashMap;
+
+use super::super::types::SharedRecordContexts;
 use crate::xserver::reply::{serialize_reply, serialize_var_reply};
+
+/// Per-connection RECORD extension state. Lives on
+/// `ClientState::record`; reads and writes happen through
+/// `state.record.*`.
+pub(crate) struct RecordState {
+    /// Recording contexts (local, owned by this client).
+    pub(crate) contexts: HashMap<u32, RecordContext>,
+    /// Shared RECORD contexts for cross-connection interception.
+    pub(crate) shared_contexts: SharedRecordContexts,
+}
+
+impl RecordState {
+    pub(crate) fn new(shared_contexts: SharedRecordContexts) -> Self {
+        Self {
+            contexts: HashMap::new(),
+            shared_contexts,
+        }
+    }
+}
 
 use tracing::debug;
 use x11rb_protocol::protocol::record::{
@@ -350,7 +373,7 @@ pub(crate) fn handle_record_request(state: &mut ClientState, data: &[u8], seq: u
         1 => {
             // CreateContext
             // SECURITY: untrusted clients are denied CreateContext (BadAccess)
-            if state.trust_level > 0 {
+            if state.security.trust_level > 0 {
                 return crate::xserver::core::build_error(
                     crate::xserver::core::ACCESS_ERROR,
                     seq,
@@ -384,7 +407,7 @@ pub(crate) fn handle_record_request(state: &mut ClientState, data: &[u8], seq: u
                 client_specs,
                 enable_sequence: 0,
             };
-            if let Ok(mut shared) = state.shared_record_contexts.lock() {
+            if let Ok(mut shared) = state.record.shared_contexts.lock() {
                 shared.insert(
                     context_id,
                     super::super::types::SharedRecordEntry {
@@ -395,7 +418,7 @@ pub(crate) fn handle_record_request(state: &mut ClientState, data: &[u8], seq: u
                     },
                 );
             }
-            state.record_contexts.insert(context_id, ctx);
+            state.record.contexts.insert(context_id, ctx);
             Vec::new()
         }
         2 => {
@@ -410,11 +433,11 @@ pub(crate) fn handle_record_request(state: &mut ClientState, data: &[u8], seq: u
             let context_id = req.context;
             let client_specs: Vec<u32> = req.client_specs.iter().copied().collect();
             let ranges: Vec<RecordRange> = req.ranges.iter().map(RecordRange::from).collect();
-            if let Some(ctx) = state.record_contexts.get_mut(&context_id) {
+            if let Some(ctx) = state.record.contexts.get_mut(&context_id) {
                 ctx.element_header = req.element_header;
                 ctx.ranges.extend(ranges);
                 ctx.client_specs.extend(client_specs);
-                if let Ok(mut shared) = state.shared_record_contexts.lock() {
+                if let Ok(mut shared) = state.record.shared_contexts.lock() {
                     if let Some(entry) = shared.get_mut(&context_id) {
                         entry.context = ctx.clone();
                     }
@@ -431,14 +454,14 @@ pub(crate) fn handle_record_request(state: &mut ClientState, data: &[u8], seq: u
             ) else {
                 return bad_length();
             };
-            if let Some(ctx) = state.record_contexts.get_mut(&req.context) {
+            if let Some(ctx) = state.record.contexts.get_mut(&req.context) {
                 for &spec in req.client_specs.iter() {
                     ctx.client_specs.retain(|&s| s != spec);
                 }
                 if ctx.client_specs.is_empty() {
                     ctx.ranges.clear();
                 }
-                if let Ok(mut shared) = state.shared_record_contexts.lock() {
+                if let Ok(mut shared) = state.record.shared_contexts.lock() {
                     if let Some(entry) = shared.get_mut(&req.context) {
                         entry.context = ctx.clone();
                     }
@@ -457,7 +480,7 @@ pub(crate) fn handle_record_request(state: &mut ClientState, data: &[u8], seq: u
             };
             let context_id = req.context;
             let (enabled, element_header, intercepted_clients) = if let Some(ctx) =
-                state.record_contexts.get(&context_id)
+                state.record.contexts.get(&context_id)
             {
                 let ranges: Vec<RecordWireRange> = ctx
                     .ranges
@@ -546,14 +569,14 @@ pub(crate) fn handle_record_request(state: &mut ClientState, data: &[u8], seq: u
             };
             let context_id = req.context;
             {
-                if let Some(ctx) = state.record_contexts.get_mut(&context_id) {
+                if let Some(ctx) = state.record.contexts.get_mut(&context_id) {
                     ctx.enabled = true;
                     ctx.enable_sequence = seq;
                     debug!("RECORD EnableContext: id={context_id:#x}");
                 }
 
                 // Update shared context: set enabled, update enable_sequence and event_tx
-                if let Ok(mut shared) = state.shared_record_contexts.lock() {
+                if let Ok(mut shared) = state.record.shared_contexts.lock() {
                     if let Some(entry) = shared.get_mut(&context_id) {
                         entry.context.enabled = true;
                         entry.context.enable_sequence = seq;
@@ -563,7 +586,8 @@ pub(crate) fn handle_record_request(state: &mut ClientState, data: &[u8], seq: u
 
                 // Return StartOfData reply
                 let element_header = state
-                    .record_contexts
+                    .record
+                    .contexts
                     .get(&context_id)
                     .map(|c| c.element_header)
                     .unwrap_or(0);
@@ -582,16 +606,17 @@ pub(crate) fn handle_record_request(state: &mut ClientState, data: &[u8], seq: u
             };
             let context_id = req.context;
             let (enable_seq, element_header) = state
-                .record_contexts
+                .record
+                .contexts
                 .get(&context_id)
                 .map(|c| (c.enable_sequence, c.element_header))
                 .unwrap_or((0, 0));
 
-            if let Some(ctx) = state.record_contexts.get_mut(&context_id) {
+            if let Some(ctx) = state.record.contexts.get_mut(&context_id) {
                 ctx.enabled = false;
                 debug!("RECORD DisableContext: id={context_id:#x}");
             }
-            if let Ok(mut shared) = state.shared_record_contexts.lock() {
+            if let Ok(mut shared) = state.record.shared_contexts.lock() {
                 if let Some(entry) = shared.get_mut(&context_id) {
                     entry.context.enabled = false;
                 }
@@ -611,9 +636,9 @@ pub(crate) fn handle_record_request(state: &mut ClientState, data: &[u8], seq: u
                 return bad_length();
             };
             let context_id = req.context;
-            state.record_contexts.remove(&context_id);
+            state.record.contexts.remove(&context_id);
             state.recycle_xid(context_id);
-            if let Ok(mut shared) = state.shared_record_contexts.lock() {
+            if let Ok(mut shared) = state.record.shared_contexts.lock() {
                 shared.remove(&context_id);
             }
             debug!("RECORD FreeContext: id={context_id:#x}");
@@ -849,8 +874,6 @@ pub(crate) fn intercept_error(
 
     results
 }
-
-use std::collections::HashMap;
 
 #[cfg(test)]
 mod tests {

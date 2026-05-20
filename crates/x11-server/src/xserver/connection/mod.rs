@@ -402,8 +402,11 @@ pub(crate) async fn handle_client(
         msb_first: byte_order == 0x42,
         screen_width: SCREEN_WIDTH,
         screen_height: SCREEN_HEIGHT,
-        randr_config_timestamp: 0,
-        xfixes_regions: HashMap::new(),
+        randr: handlers::randr::RandRState {
+            next_mode_id: 1000,
+            ..Default::default()
+        },
+        xfixes: handlers::xfixes::XFixesState::default(),
         incr_transfers: Vec::new(),
         retained_temporary_windows: Vec::new(),
         colormaps: HashMap::new(),
@@ -431,28 +434,25 @@ pub(crate) async fn handle_client(
         win_gravity: HashMap::new(),
         bit_gravity: HashMap::new(),
         custom_keymap: shared_keymap.clone(),
-        cursor_event_subscribers: HashMap::new(),
-        selection_event_subscribers: HashMap::new(),
         cursor_serial: 0,
         current_cursor: 0,
-        cursor_hidden: 0,
-        back_buffers: HashMap::new(),
-        dbe_idiom_depth: 0,
-        record_contexts: HashMap::new(),
-        shared_record_contexts,
+        dbe: handlers::dbe::DbeState::default(),
+        record: handlers::record::RecordState::new(shared_record_contexts),
         glx: Default::default(),
-        security_authorizations: HashMap::new(),
-        shared_security_tokens: shared_security_tokens.clone(),
-        trust_level: security_trust_level,
+        security: {
+            let mut s = handlers::security::SecurityState::new(
+                shared_security_tokens.clone(),
+                shared_access_control.clone(),
+            );
+            s.trust_level = security_trust_level;
+            s
+        },
         font_path: vec![
             "/usr/share/fonts/X11/misc".to_string(),
             "/usr/share/fonts/X11/Type1".to_string(),
             "/usr/share/fonts/X11/75dpi".to_string(),
             "/usr/share/fonts/X11/100dpi".to_string(),
         ],
-        access_hosts: Vec::new(),
-        access_control_enabled: false,
-        shared_access_control: shared_access_control.clone(),
         xtest_grab_impervious: false,
         dpms: super::handlers::dpms::DpmsState::default(),
         xkb_state: super::client::XkbState::default(),
@@ -480,8 +480,6 @@ pub(crate) async fn handle_client(
         xvideo: handlers::xvideo::XVideoState::default(),
         pointer_button_mask: 0,
         motion_hint_suppressed: false,
-        barriers: HashMap::new(),
-        disconnect_mode: 0,
         present_msc: 0,
         clipboard_notify_tx: Some(clipboard_notify_tx),
         persistent_clipboard,
@@ -493,14 +491,6 @@ pub(crate) async fn handle_client(
         shared_focus: shared_focus.clone(),
         event_broadcaster,
         server_grab,
-        randr_crtcs: Vec::new(),
-        randr_outputs: Vec::new(),
-        randr_modes: Vec::new(),
-        randr_providers: Vec::new(),
-        randr_event_mask: 0,
-        randr_monitors: Vec::new(),
-        randr_primary_output: 0,
-        randr_next_mode_id: 1000,
         vidmode: handlers::vidmode::VidModeState::new_for_screen(SCREEN_WIDTH, SCREEN_HEIGHT),
         big_requests_enabled: false,
         freed_xids: Vec::new(),
@@ -774,7 +764,7 @@ pub(crate) async fn handle_client(
                                     0
                                 };
 
-                                if let Some(&event_mask) = state.selection_event_subscribers.get(sel_atom) {
+                                if let Some(&event_mask) = state.xfixes.selection_event_subscribers.get(sel_atom) {
                                     if event_mask & 1 != 0 {
                                         const XFIXES_SELECTION_NOTIFY: u8 = 87;
                                         let event = serialize_event(
@@ -921,10 +911,10 @@ pub(crate) async fn handle_client(
                             state.cursor_info.clear();
                             state.colormaps.clear();
                             // Free XFIXES regions
-                            state.xfixes_regions.clear();
+                            state.xfixes.regions.clear();
                             // Free RECORD contexts (local and shared)
-                            state.record_contexts.clear();
-                            if let Ok(mut shared_rec) = state.shared_record_contexts.lock() {
+                            state.record.contexts.clear();
+                            if let Ok(mut shared_rec) = state.record.shared_contexts.lock() {
                                 shared_rec.retain(|_, entry| entry.recording_client_id != state.client_id);
                             }
                             // Free GLX state
@@ -933,7 +923,7 @@ pub(crate) async fn handle_client(
                             state.damage_regions.clear();
                             state.present_subscriptions.clear();
                             // Free DBE back buffers
-                            state.back_buffers.clear();
+                            state.dbe.back_buffers.clear();
                             // Free SHM segments (detach from shared memory)
                             for (_, seg) in state.shm_segments.drain() {
                                 safe_shmdt(seg.addr);
@@ -1326,8 +1316,8 @@ pub(crate) async fn handle_client(
                                     if i < last_idx {
                                         // Update pointer position but skip event generation
                                         if let x11_web_protocol::InputEvent::MotionNotify { x, y, .. } = &input {
-                                            let (fx, fy) = if !state.barriers.is_empty() {
-                                                enforce_barriers(&state.barriers, state.pointer_x, state.pointer_y, *x, *y)
+                                            let (fx, fy) = if !state.xfixes.barriers.is_empty() {
+                                                enforce_barriers(&state.xfixes.barriers, state.pointer_x, state.pointer_y, *x, *y)
                                             } else {
                                                 (*x, *y)
                                             };
@@ -1772,9 +1762,9 @@ pub(crate) async fn handle_client(
                             // Enforce XFIXES pointer barriers on motion events.
                             let input = match &input {
                                 x11_web_protocol::InputEvent::MotionNotify { x, y, state: mask } => {
-                                    if !state.barriers.is_empty() {
+                                    if !state.xfixes.barriers.is_empty() {
                                         let (bx, by) = enforce_barriers(
-                                            &state.barriers,
+                                            &state.xfixes.barriers,
                                             old_pointer_x, old_pointer_y,
                                             *x, *y,
                                         );

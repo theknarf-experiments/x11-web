@@ -1,8 +1,48 @@
 //! SECURITY extension handler (opcode 155).
 
+use std::collections::HashMap;
+
 use tracing::debug;
 
-use super::super::client::ClientState;
+use super::super::client::{AccessHost, ClientState, SecurityAuthorization};
+use super::super::types::{SharedAccessControl, SharedSecurityTokens};
+
+/// Per-connection SECURITY extension state. Lives on
+/// `ClientState::security`; reads and writes happen through
+/// `state.security.*`.
+pub(crate) struct SecurityState {
+    /// Authorization tokens (local to this client's session).
+    pub(crate) authorizations: HashMap<u32, SecurityAuthorization>,
+    /// Shared SECURITY tokens for cross-connection validation.
+    pub(crate) shared_tokens: SharedSecurityTokens,
+    /// Trust level for this client (0 = trusted, 1 = untrusted).
+    /// Set during connection auth if a SECURITY-generated token was used.
+    pub(crate) trust_level: u32,
+    /// Access control list (ChangeHosts/ListHosts) — now backed by shared server-wide state.
+    pub(crate) access_hosts: Vec<AccessHost>,
+    /// Whether access control is enabled.
+    pub(crate) access_control_enabled: bool,
+    /// Shared server-wide access control state (for enforcement on new TCP connections).
+    pub(crate) shared_access_control: SharedAccessControl,
+}
+
+impl SecurityState {
+    /// Build the per-connection SECURITY state from the shared registries
+    /// the listener owns.
+    pub(crate) fn new(
+        shared_tokens: SharedSecurityTokens,
+        shared_access_control: SharedAccessControl,
+    ) -> Self {
+        Self {
+            authorizations: HashMap::new(),
+            shared_tokens,
+            trust_level: 0,
+            access_hosts: Vec::new(),
+            access_control_enabled: false,
+            shared_access_control,
+        }
+    }
+}
 
 /// SECURITY `CA` value-mask bits for `GenerateAuthorization` — controls which
 /// optional fields follow the request body in 4-byte words. Order on the wire
@@ -68,7 +108,7 @@ pub(crate) fn handle_security_request(state: &mut ClientState, data: &[u8], seq:
                 // Generate a unique auth ID using UUID to avoid collisions
                 let auth_id = uuid::Uuid::new_v4().as_u128() as u32;
 
-                state.security_authorizations.insert(
+                state.security.authorizations.insert(
                     auth_id,
                     SecurityAuthorization {
                         auth_id,
@@ -87,7 +127,7 @@ pub(crate) fn handle_security_request(state: &mut ClientState, data: &[u8], seq:
                 // Register the token in the shared security map for cross-connection validation
                 let mut token_key = [0u8; 16];
                 token_key.copy_from_slice(&auth_data[..16]);
-                if let Ok(mut tokens) = state.shared_security_tokens.lock() {
+                if let Ok(mut tokens) = state.security.shared_tokens.lock() {
                     tokens.insert(
                         token_key,
                         crate::xserver::types::SecurityTokenInfo {
@@ -122,10 +162,10 @@ pub(crate) fn handle_security_request(state: &mut ClientState, data: &[u8], seq:
             // RevokeAuthorization
             require_len!(data, 8, seq, 155, minor as u16, state.msb_first);
             let auth_id = state.read_u32(data, 4);
-            state.security_authorizations.remove(&auth_id);
+            state.security.authorizations.remove(&auth_id);
             state.recycle_xid(auth_id);
             // Remove from shared token map
-            if let Ok(mut tokens) = state.shared_security_tokens.lock() {
+            if let Ok(mut tokens) = state.security.shared_tokens.lock() {
                 tokens.retain(|_, info| info.auth_id != auth_id);
             }
             debug!("SECURITY RevokeAuthorization: auth_id={auth_id}");

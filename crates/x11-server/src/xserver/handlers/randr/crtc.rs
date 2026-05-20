@@ -101,7 +101,7 @@ pub(crate) fn handle_set_crtc_config(state: &mut ClientState, data: &[u8], seq: 
     };
 
     if found {
-        state.randr_config_timestamp += 1;
+        state.randr.config_timestamp += 1;
         state.randr_queue_crtc_change_notify(crtc_id);
         state.randr_queue_screen_change_notify();
     }
@@ -290,7 +290,7 @@ fn build_crtc_info_reply(state: &ClientState, seq: u16, crtc_id: u32) -> Vec<u8>
     };
 
     // Possible outputs = all outputs (in our model every output can go to any CRTC)
-    let possible: Vec<u32> = state.randr_outputs.iter().map(|o| o.id).collect();
+    let possible: Vec<u32> = state.randr.outputs.iter().map(|o| o.id).collect();
 
     serialize_var_reply(
         &GetCrtcInfoReply {

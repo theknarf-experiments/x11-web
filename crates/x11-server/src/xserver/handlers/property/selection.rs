@@ -96,7 +96,7 @@ pub(crate) fn handle_set_selection_owner(
 
         // XFIXES: emit XFixesSelectionNotify (event base 87 + 0) to subscribers.
         // This is required for GTK/Qt clipboard monitoring (e.g., clipboard managers).
-        if let Some(&event_mask) = state.selection_event_subscribers.get(&selection) {
+        if let Some(&event_mask) = state.xfixes.selection_event_subscribers.get(&selection) {
             // Bit 0 = SetSelectionOwnerNotifyMask
             if event_mask & 1 != 0 {
                 // Find the subscribing window (we stored it as the key in the subscriber)

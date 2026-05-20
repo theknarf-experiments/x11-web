@@ -61,42 +61,42 @@ impl ClientState {
             outputs: vec![output_id],
         };
 
-        self.randr_crtcs = vec![crtc];
-        self.randr_outputs = vec![output];
-        self.randr_modes = vec![mode];
-        self.randr_providers = vec![provider];
+        self.randr.crtcs = vec![crtc];
+        self.randr.outputs = vec![output];
+        self.randr.modes = vec![mode];
+        self.randr.providers = vec![provider];
     }
 
     /// Find a RandR CRTC by ID.
     pub(crate) fn randr_find_crtc(&self, id: u32) -> Option<&RandrCrtc> {
-        self.randr_crtcs.iter().find(|c| c.id == id)
+        self.randr.crtcs.iter().find(|c| c.id == id)
     }
 
     /// Find a RandR CRTC by ID (mutable).
     pub(crate) fn randr_find_crtc_mut(&mut self, id: u32) -> Option<&mut RandrCrtc> {
-        self.randr_crtcs.iter_mut().find(|c| c.id == id)
+        self.randr.crtcs.iter_mut().find(|c| c.id == id)
     }
 
     /// Find a RandR output by ID.
     pub(crate) fn randr_find_output(&self, id: u32) -> Option<&RandrOutput> {
-        self.randr_outputs.iter().find(|o| o.id == id)
+        self.randr.outputs.iter().find(|o| o.id == id)
     }
 
     /// Find a RandR output by ID (mutable).
     pub(crate) fn randr_find_output_mut(&mut self, id: u32) -> Option<&mut RandrOutput> {
-        self.randr_outputs.iter_mut().find(|o| o.id == id)
+        self.randr.outputs.iter_mut().find(|o| o.id == id)
     }
 
     /// Find a RandR mode by ID.
     pub(crate) fn randr_find_mode(&self, id: u32) -> Option<&RandrMode> {
-        self.randr_modes.iter().find(|m| m.id == id)
+        self.randr.modes.iter().find(|m| m.id == id)
     }
 
     /// Queue an RRScreenChangeNotify event if the client selected that mask.
     pub(crate) fn randr_queue_screen_change_notify(&mut self) {
         use super::super::types::RANDR_EVENT_BASE;
 
-        if self.randr_event_mask & super::super::types::RR_SCREEN_CHANGE_NOTIFY_MASK == 0 {
+        if self.randr.event_mask & super::super::types::RR_SCREEN_CHANGE_NOTIFY_MASK == 0 {
             return;
         }
 
@@ -128,7 +128,7 @@ impl ClientState {
     pub(crate) fn randr_queue_crtc_change_notify(&mut self, crtc_id: u32) {
         use super::super::types::{RANDR_EVENT_BASE, RR_CRTC_CHANGE_NOTIFY_MASK};
 
-        if self.randr_event_mask & RR_CRTC_CHANGE_NOTIFY_MASK == 0 {
+        if self.randr.event_mask & RR_CRTC_CHANGE_NOTIFY_MASK == 0 {
             return;
         }
 
