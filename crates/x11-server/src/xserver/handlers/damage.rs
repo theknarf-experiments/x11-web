@@ -1,10 +1,20 @@
 //! DAMAGE extension handler.
 
+use std::collections::HashMap;
+
 use super::parse_minor;
 use tracing::{debug, info};
 
 use super::super::client::ClientState;
 use super::super::types::DamageInfo;
+
+/// Per-connection DAMAGE extension state. Lives on
+/// `ClientState::damage`.
+#[derive(Default)]
+pub(crate) struct DamageState {
+    /// DAMAGE region trackers (damage_id → info).
+    pub(crate) regions: HashMap<u32, DamageInfo>,
+}
 use crate::xserver::reply::serialize_reply;
 use x11rb_protocol::protocol::damage::{
     AddRequest as DamageAddRequest, CreateRequest as DamageCreateRequest,
@@ -35,7 +45,7 @@ pub(crate) fn handle_damage_request(state: &mut ClientState, data: &[u8], seq: u
             let drawable = req.drawable;
             let level = u8::from(req.level);
             info!("DAMAGE Create: id={damage_id:#x} drawable={drawable:#x} level={level}");
-            state.damage_regions.insert(
+            state.damage.regions.insert(
                 damage_id,
                 DamageInfo {
                     drawable,
@@ -49,7 +59,7 @@ pub(crate) fn handle_damage_request(state: &mut ClientState, data: &[u8], seq: u
             let req = parse_minor!(DamageDestroyRequest, data, state, seq, 143, minor as u16);
             let damage_id = req.damage;
             debug!("DAMAGE Destroy: id={damage_id:#x}");
-            state.damage_regions.remove(&damage_id);
+            state.damage.regions.remove(&damage_id);
             state.recycle_xid(damage_id);
             Vec::new()
         }
@@ -62,7 +72,8 @@ pub(crate) fn handle_damage_request(state: &mut ClientState, data: &[u8], seq: u
 
             // Get the accumulated damage for this damage object.
             let accumulated = state
-                .damage_regions
+                .damage
+                .regions
                 .get(&damage_id)
                 .map(|d| d.accumulated.clone())
                 .unwrap_or_else(super::super::types::XFixesRegion::new);
@@ -84,7 +95,7 @@ pub(crate) fn handle_damage_request(state: &mut ClientState, data: &[u8], seq: u
             }
 
             // Update the accumulated damage to the remainder.
-            if let Some(dmg) = state.damage_regions.get_mut(&damage_id) {
+            if let Some(dmg) = state.damage.regions.get_mut(&damage_id) {
                 dmg.accumulated = remainder;
             }
 

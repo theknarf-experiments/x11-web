@@ -376,12 +376,12 @@ pub(crate) async fn handle_client(
             clipboard_notify_tx,
             persistent_clipboard.clone(),
         ),
-        shm_segments: HashMap::new(),
+        shm: handlers::shm::ShmState::default(),
         wm_state: shared_wm_state.clone(),
         wm_events_tx,
         event_router,
-        damage_regions: HashMap::new(),
-        present_subscriptions: HashMap::new(),
+        damage: handlers::damage::DamageState::default(),
+        present: handlers::present::PresentState::default(),
         pending_events: Vec::new(),
         window_router,
         message_tx,
@@ -460,7 +460,6 @@ pub(crate) async fn handle_client(
             x
         },
         xvideo: handlers::xvideo::XVideoState::default(),
-        present_msc: 0,
         shared_pixmaps,
         shared_pixmap_fbs,
         shared_gcs,
@@ -894,12 +893,12 @@ pub(crate) async fn handle_client(
                             // Free GLX state
                             state.glx = handlers::glx::GlxState::default();
                             // Free damage and present subscriptions
-                            state.damage_regions.clear();
-                            state.present_subscriptions.clear();
+                            state.damage.regions.clear();
+                            state.present.subscriptions.clear();
                             // Free DBE back buffers
                             state.dbe.back_buffers.clear();
                             // Free SHM segments (detach from shared memory)
-                            for (_, seg) in state.shm_segments.drain() {
+                            for (_, seg) in state.shm.segments.drain() {
                                 safe_shmdt(seg.addr);
                             }
                             // Close pending file descriptors
@@ -1142,7 +1141,7 @@ pub(crate) async fn handle_client(
                 for intercept in record_intercepts { stream.write_all(&intercept).await?; }
             }
             _ = frame_interval.tick() => {
-                state.present_msc += 1;
+                state.present.msc += 1;
 
                 // Screen saver auto-activation: check if timeout elapsed since last input.
                 // Per X11 spec §14.3, the screen saver activates when no user input

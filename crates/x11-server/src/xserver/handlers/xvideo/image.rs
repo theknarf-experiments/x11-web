@@ -709,7 +709,7 @@ pub(crate) fn handle_image_request(
                 req.width,
                 req.height,
             );
-            if let Some(seg) = state.shm_segments.get(&req.shmseg) {
+            if let Some(seg) = state.shm.segments.get(&req.shmseg) {
                 if offset + data_size as usize <= seg.size {
                     let yuv_data = unsafe {
                         std::slice::from_raw_parts(seg.addr.add(offset), data_size as usize)

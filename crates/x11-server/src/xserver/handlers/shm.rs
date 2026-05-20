@@ -1,7 +1,16 @@
 //! MIT-SHM (Shared Memory) extension handler.
 
+use std::collections::HashMap;
+
 use super::parse_minor;
 use tracing::{info, warn};
+
+/// Per-connection MIT-SHM extension state. Lives on `ClientState::shm`.
+#[derive(Default)]
+pub(crate) struct ShmState {
+    /// Attached SHM segments (shmseg id → ShmSegment).
+    pub(crate) segments: HashMap<u32, super::super::types::ShmSegment>,
+}
 
 use super::super::client::ClientState;
 use super::super::core::ROOT_VISUAL;
@@ -68,7 +77,7 @@ pub(crate) fn handle_shm_request(state: &mut ClientState, data: &[u8], seq: u16)
                     return shm_err(crate::xserver::core::ACCESS_ERROR, shmid as u32);
                 }
 
-                state.shm_segments.insert(
+                state.shm.segments.insert(
                     shmseg,
                     ShmSegment {
                         addr: addr as *mut u8,
@@ -85,7 +94,7 @@ pub(crate) fn handle_shm_request(state: &mut ClientState, data: &[u8], seq: u16)
             let shmseg = req.shmseg;
             info!("SHM Detach: shmseg={shmseg}");
 
-            if let Some(seg) = state.shm_segments.remove(&shmseg) {
+            if let Some(seg) = state.shm.segments.remove(&shmseg) {
                 unsafe {
                     libc::shmdt(seg.addr as *const libc::c_void);
                 }
@@ -118,7 +127,7 @@ pub(crate) fn handle_shm_request(state: &mut ClientState, data: &[u8], seq: u16)
                  dst=({dst_x},{dst_y}) send_event={send_event}"
             );
 
-            let seg = match state.shm_segments.get(&shmseg) {
+            let seg = match state.shm.segments.get(&shmseg) {
                 Some(s) => s,
                 None => {
                     warn!("SHM PutImage: unknown shmseg={shmseg}");
@@ -212,7 +221,7 @@ pub(crate) fn handle_shm_request(state: &mut ClientState, data: &[u8], seq: u16)
             };
             crate::framebuffer::swap_br_in_place(&mut pixels);
 
-            if let Some(seg) = state.shm_segments.get(&shmseg) {
+            if let Some(seg) = state.shm.segments.get(&shmseg) {
                 let bpp = 4usize;
                 let row_bytes = width as usize * bpp;
                 let total_bytes = row_bytes * height as usize;
@@ -308,7 +317,7 @@ pub(crate) fn handle_shm_request(state: &mut ClientState, data: &[u8], seq: u16)
                         return shm_err(crate::xserver::core::ACCESS_ERROR, shmseg);
                     }
 
-                    state.shm_segments.insert(
+                    state.shm.segments.insert(
                         shmseg,
                         ShmSegment {
                             addr: addr as *mut u8,
@@ -373,7 +382,7 @@ pub(crate) fn handle_shm_request(state: &mut ClientState, data: &[u8], seq: u16)
                     return shm_err(crate::xserver::core::ALLOC_ERROR, size as u32);
                 }
 
-                state.shm_segments.insert(
+                state.shm.segments.insert(
                     shmseg,
                     ShmSegment {
                         addr: addr as *mut u8,

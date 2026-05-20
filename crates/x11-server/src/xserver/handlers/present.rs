@@ -1,7 +1,19 @@
 //! Present extension handler.
 
+use std::collections::HashMap;
+
 use super::parse_minor;
 use tracing::{debug, info};
+
+/// Per-connection Present extension state. Lives on
+/// `ClientState::present`.
+#[derive(Default)]
+pub(crate) struct PresentState {
+    /// Subscriptions for PresentNotify events (window → mask).
+    pub(crate) subscriptions: HashMap<u32, super::super::types::PresentSubscription>,
+    /// Monotonically increasing media stream counter per-CRTC.
+    pub(crate) msc: u64,
+}
 
 use super::super::client::ClientState;
 use super::super::types::PresentSubscription;
@@ -391,10 +403,11 @@ pub(crate) fn handle_present_request(state: &mut ClientState, data: &[u8], seq: 
             }
 
             // Increment MSC for each presentation
-            state.present_msc += 1;
+            state.present.msc += 1;
             // Send PresentCompleteNotify if the client subscribed via SelectInput
             let matching_subs: Vec<(u32, u32)> = state
-                .present_subscriptions
+                .present
+                .subscriptions
                 .iter()
                 .filter(|(_, sub)| {
                     sub.window == window
@@ -404,7 +417,7 @@ pub(crate) fn handle_present_request(state: &mut ClientState, data: &[u8], seq: 
                 .collect();
 
             let ust = state.server_start.elapsed().as_micros() as u64;
-            let msc = state.present_msc;
+            let msc = state.present.msc;
             for (event_id, _win) in &matching_subs {
                 let ev = CompleteNotifyEvent {
                     response_type: GENERIC_EVENT,
@@ -436,7 +449,8 @@ pub(crate) fn handle_present_request(state: &mut ClientState, data: &[u8], seq: 
             // does not claim ownership of the pixmap).
             if !is_copy {
                 let idle_subs: Vec<u32> = state
-                    .present_subscriptions
+                    .present
+                    .subscriptions
                     .iter()
                     .filter(|(_, sub)| {
                         sub.window == window
@@ -478,7 +492,7 @@ pub(crate) fn handle_present_request(state: &mut ClientState, data: &[u8], seq: 
 
             debug!(
                 "PresentNotifyMSC: window={:#x} serial={} msc={}",
-                window, serial, state.present_msc
+                window, serial, state.present.msc
             );
 
             // Send PresentCompleteNotify immediately with current MSC.
@@ -486,7 +500,8 @@ pub(crate) fn handle_present_request(state: &mut ClientState, data: &[u8], seq: 
             // For a software server we always notify immediately since we have no
             // hardware vblank to wait for.
             let matching_subs: Vec<(u32, u32)> = state
-                .present_subscriptions
+                .present
+                .subscriptions
                 .iter()
                 .filter(|(_, sub)| {
                     sub.window == window
@@ -495,7 +510,7 @@ pub(crate) fn handle_present_request(state: &mut ClientState, data: &[u8], seq: 
                 .map(|(&eid, sub)| (eid, sub.window))
                 .collect();
 
-            let msc = state.present_msc;
+            let msc = state.present.msc;
             let ust = state.server_start.elapsed().as_micros() as u64;
             for (event_id, _win) in matching_subs {
                 let ev = CompleteNotifyEvent {
@@ -540,10 +555,11 @@ pub(crate) fn handle_present_request(state: &mut ClientState, data: &[u8], seq: 
 
             if event_mask == 0 {
                 // Unsubscribe
-                state.present_subscriptions.remove(&event_id);
+                state.present.subscriptions.remove(&event_id);
             } else {
                 state
-                    .present_subscriptions
+                    .present
+                    .subscriptions
                     .insert(event_id, PresentSubscription { window, event_mask });
             }
             Vec::new() // SelectInput has no reply
@@ -592,7 +608,8 @@ pub(crate) fn send_present_config_notify(
     pixmap_flags: u32,
 ) {
     let subs: Vec<u32> = state
-        .present_subscriptions
+        .present
+        .subscriptions
         .iter()
         .filter(|(_, sub)| {
             sub.window == window && (sub.event_mask & u32::from(EventMask::CONFIGURE_NOTIFY)) != 0

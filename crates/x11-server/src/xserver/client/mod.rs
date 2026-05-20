@@ -82,12 +82,15 @@ pub(crate) struct ClientState {
     pub(crate) render: super::handlers::render::RenderState,
     /// Selection / clipboard state.
     pub(crate) selection: SelectionState,
-    pub(crate) shm_segments: HashMap<u32, ShmSegment>,
+    /// MIT-SHM extension state.
+    pub(crate) shm: super::handlers::shm::ShmState,
     pub(crate) wm_state: SharedWmState,
     pub(crate) wm_events_tx: mpsc::UnboundedSender<Vec<u8>>,
     pub(crate) event_router: EventRouter,
-    pub(crate) damage_regions: HashMap<u32, DamageInfo>,
-    pub(crate) present_subscriptions: HashMap<u32, PresentSubscription>,
+    /// DAMAGE extension state.
+    pub(crate) damage: super::handlers::damage::DamageState,
+    /// Present extension state.
+    pub(crate) present: super::handlers::present::PresentState,
     pub(crate) pending_events: Vec<Vec<u8>>,
     pub(crate) window_router: WindowRouter,
     pub(crate) message_tx: mpsc::UnboundedSender<(u32, WindowMessage)>,
@@ -168,8 +171,6 @@ pub(crate) struct ClientState {
     pub(crate) xkb: XkbState,
     /// XVideo extension state.
     pub(crate) xvideo: super::handlers::xvideo::XVideoState,
-    /// Present extension: monotonically increasing media stream counter per-CRTC.
-    pub(crate) present_msc: u64,
     /// Shared pixmap registry for cross-connection drawable access.
     pub(crate) shared_pixmaps: super::types::SharedPixmaps,
     /// Shared pixmap framebuffers for cross-connection drawing.

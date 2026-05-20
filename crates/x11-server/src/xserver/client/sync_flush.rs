@@ -29,7 +29,7 @@ impl ClientState {
             )
         };
 
-        let seg = match self.shm_segments.get(&shmseg) {
+        let seg = match self.shm.segments.get(&shmseg) {
             Some(s) => s,
             None => {
                 tracing::warn!(
@@ -314,7 +314,8 @@ impl ClientState {
                     let win_width = win.width;
                     let win_height = win.height;
                     let damage_matches: Vec<(u32, u8)> = self
-                        .damage_regions
+                        .damage
+                        .regions
                         .iter_mut()
                         .filter(|(_, info)| info.drawable == wid)
                         .map(|(&did, info)| {
@@ -416,7 +417,8 @@ impl ClientState {
         let damage_region = super::super::types::XFixesRegion::from_rects(vec![damage_rect]);
 
         let matches: Vec<(u32, u8)> = self
-            .damage_regions
+            .damage
+            .regions
             .iter_mut()
             .filter(|(_, info)| info.drawable == resolved)
             .map(|(&did, info)| {
