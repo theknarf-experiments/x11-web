@@ -1383,11 +1383,21 @@ pub(crate) async fn handle_client(
                             ) {
                                 let cur = state.focus_window;
                                 let cur_top = state.top_level_for(cur);
+                                // Only run click-to-focus side effects when focus
+                                // is NOT already inside this top-level. Sending
+                                // WM_TAKE_FOCUS on every click — even when the
+                                // app already has focus on a sub-window like
+                                // Firefox's keyboard helper 0x40002b — causes a
+                                // SetInputFocus round-trip whose FocusOut/FocusIn
+                                // events arrive interleaved with the ButtonPress
+                                // and confuse GTK3's widget focus tracking; the
+                                // URL bar GtkEntry never receives the click.
                                 if cur_top != Some(x11_wid) {
                                     state.set_focus_window(x11_wid);
+                                    let uuid = state.top_level_uuid_for(x11_wid);
+                                    state.broadcast_focus(uuid);
+                                    state.send_wm_take_focus(x11_wid);
                                 }
-                                let uuid = state.top_level_uuid_for(x11_wid);
-                                state.broadcast_focus(uuid);
                             }
                             match &input {
                                 x11_web_protocol::InputEvent::MotionNotify { x, y, .. }

@@ -866,6 +866,36 @@ fn resolve_keyboard_event_target(
     (target, 0, 0)
 }
 
+/// Compute the child field for pointer events per X11 spec §7.
+/// Returns the direct child of event_window (in stacking order) that contains
+/// (event_x, event_y), or 0 if the pointer is directly on event_window itself.
+fn pointer_event_child(
+    windows: &HashMap<u32, WindowState>,
+    event_window: u32,
+    event_x: i16,
+    event_y: i16,
+) -> u32 {
+    let Some(win) = windows.get(&event_window) else {
+        return 0;
+    };
+    win.children_order
+        .iter()
+        .rev()
+        .copied()
+        .find(|&cid| {
+            if let Some(c) = windows.get(&cid) {
+                c.mapped
+                    && event_x >= c.x
+                    && event_x < c.x + c.width as i16
+                    && event_y >= c.y
+                    && event_y < c.y + c.height as i16
+            } else {
+                false
+            }
+        })
+        .unwrap_or(0)
+}
+
 /// Compute the child field for keyboard events per X11 spec.
 /// If event_window is an ancestor of focus_window, returns the direct child
 /// of event_window on the path to focus_window. Otherwise returns 0.
@@ -1033,6 +1063,7 @@ pub(crate) fn build_x11_input_event(
     match input {
         InputEvent::MotionNotify { x, y, state: mask } => {
             let (rx, ry) = local_to_root(*x, *y);
+            let child = pointer_event_child(&state.windows, event_window, event_x, event_y);
             event = serialize_event(
                 &MotionNotifyEvent {
                     response_type: MOTION_NOTIFY_EVENT,
@@ -1041,7 +1072,7 @@ pub(crate) fn build_x11_input_event(
                     time: timestamp,
                     root: root_window,
                     event: event_window,
-                    child: 0,
+                    child,
                     root_x: rx,
                     root_y: ry,
                     event_x,
@@ -1060,6 +1091,7 @@ pub(crate) fn build_x11_input_event(
         } => {
             state.motion_hint_suppressed = false;
             let (rx, ry) = local_to_root(*x, *y);
+            let child = pointer_event_child(&state.windows, event_window, event_x, event_y);
             event = serialize_event(
                 &ButtonPressEvent {
                     response_type: BUTTON_PRESS_EVENT,
@@ -1068,7 +1100,7 @@ pub(crate) fn build_x11_input_event(
                     time: timestamp,
                     root: root_window,
                     event: event_window,
-                    child: 0,
+                    child,
                     root_x: rx,
                     root_y: ry,
                     event_x,
@@ -1087,6 +1119,7 @@ pub(crate) fn build_x11_input_event(
         } => {
             state.motion_hint_suppressed = false;
             let (rx, ry) = local_to_root(*x, *y);
+            let child = pointer_event_child(&state.windows, event_window, event_x, event_y);
             event = serialize_event(
                 &ButtonPressEvent {
                     response_type: BUTTON_RELEASE_EVENT,
@@ -1095,7 +1128,7 @@ pub(crate) fn build_x11_input_event(
                     time: timestamp,
                     root: root_window,
                     event: event_window,
-                    child: 0,
+                    child,
                     root_x: rx,
                     root_y: ry,
                     event_x,

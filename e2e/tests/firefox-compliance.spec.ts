@@ -650,6 +650,70 @@ test.skip("DIAG: Firefox click delivery target", async ({
 	console.log("---WINDOW TREE---\n" + tree.output);
 });
 
+// Temporary diagnostic: does Ctrl+L keyboard navigation work without any prior click?
+test.skip("DIAG: keyboard Ctrl+L navigation", async ({
+	page,
+	sidecarContainer,
+	frontendUrl,
+}) => {
+	test.setTimeout(180_000);
+	await cleanupApps(sidecarContainer);
+	await page.goto(frontendUrl);
+	await waitForDock(page);
+
+	// Spawn Firefox with about:blank so there's no newtab noise
+	const canvas = await spawnFirefoxAndWait(page, "--no-remote --new-instance about:blank");
+	await waitForCanvasStable(canvas, { stableMs: 2000, totalTimeoutMs: 30_000 });
+	await canvas.screenshot({ path: "test-results/ctrl-l-1-before.png" });
+
+	// Check WM_PROTOCOLS and the *actual* event masks on all Firefox windows
+	const ffWin = await sidecarContainer.exec(["bash", "-c",
+		"export DISPLAY=:99; " +
+		"FF=$(xwininfo -root -tree | grep 'Mozilla Firefox.*Navigator' | grep -oE '0x[0-9a-f]+' | head -1); " +
+		"echo \"FF=$FF\"; " +
+		"xprop -id \"$FF\" WM_PROTOCOLS WM_HINTS 2>&1; " +
+		"echo '--- xprop event masks on all children ---'; " +
+		"for c in $(xwininfo -id $FF -tree 2>/dev/null | grep -oE '0x[0-9a-f]+' | grep -v \"^$FF\$\"); do " +
+		"  echo -n \"child $c xprop: \"; xprop -id $c 2>/dev/null | grep -i 'event.*mask\\|all.*event\\|your.*event'; " +
+		"done; " +
+		"echo '--- getinputfocus before click ---'; " +
+		"xdotool getwindowfocus 2>&1"
+	]);
+	console.log("Firefox props:\n" + ffWin.output);
+
+	// canvas is already the x11-canvas element (spawnFirefoxAndWait returns win.locator('[data-testid="x11-canvas"]'))
+	const box = await canvas.boundingBox();
+	if (!box) throw new Error("no box");
+
+	// --- TEST 1: Click URL bar area (8% from top), then type directly ---
+	// This mirrors the approach from x11-web.spec.ts "firefox responds to mouse and keyboard input"
+	await page.mouse.click(box.x + box.width * 0.5, box.y + box.height * 0.08);
+	await page.waitForTimeout(1000);
+	await canvas.screenshot({ path: "test-results/ctrl-l-2-after-urlbar-click.png" });
+
+	const focusAfterUrlBar = await sidecarContainer.exec(["bash", "-c",
+		"export DISPLAY=:99; FWIN=$(xdotool getwindowfocus 2>/dev/null); echo \"focus=0x$(printf '%x' $FWIN)\"",
+	]);
+	console.log("focus after url bar click:", focusAfterUrlBar.output.trim());
+
+	// Give DOM focus to canvas then type
+	await canvas.click({ position: { x: box.width * 0.5, y: box.height * 0.08 } });
+	await page.waitForTimeout(300);
+	await page.keyboard.type('about:config', { delay: 50 });
+	await page.waitForTimeout(500);
+	await canvas.screenshot({ path: "test-results/ctrl-l-3-typed.png" });
+
+	await page.keyboard.press('Enter');
+	await page.waitForTimeout(5000);
+	await waitForCanvasStable(canvas, { stableMs: 2000, totalTimeoutMs: 30_000 });
+	await canvas.screenshot({ path: "test-results/ctrl-l-4-after-enter.png" });
+
+	// If navigation worked, the title should change
+	await expect(
+		page.locator('[data-testid="window-frame"]').filter({ hasText: /Advanced Preferences|about:config/i }),
+	).toBeVisible({ timeout: 10_000 });
+});
+
 // ---------------------------------------------------------------------------
 // Firefox startup and initial rendering
 // ---------------------------------------------------------------------------
@@ -912,6 +976,22 @@ test.skip("firefox: local HTML5 video playback", async ({
 // resolution lands on the wrong child, the event_x/event_y inside
 // the chrome window are off, or GTK requires an XI2 ButtonPress
 // (not just core) to route to the entry widget.
+//
+// Update (this session): Verified that the *XTEST* path (xdotool
+// mousemove → click → type → Enter) DOES focus the URL bar and
+// navigate, but only with a fresh Firefox profile and after gating
+// WM_TAKE_FOCUS to only fire when focus is not already inside the
+// top-level (see crates/x11-server/.../connection/mod.rs). With those
+// in place a manual run drives Firefox to Wikipedia. The e2e click
+// path (page.mouse.click → InputEvent → window_router.send_input →
+// build_x11_input_event → direct stream.write_all) still fails —
+// Firefox's URL bar GtkEntry never takes the click, even though the
+// React dock indicator confirms the click reached the canvas. The
+// bytes we write should be byte-identical to what the XTEST broadcast
+// path emits; the divergence is between *how* those bytes are
+// delivered (direct stream write vs broadcaster channel + sequence
+// patch) or in adjacent events (XI2 device events follow the core
+// event on the frontend path but not on the XTEST path).
 // ---------------------------------------------------------------------------
 test.skip("firefox: click URL bar, type wikipedia.org, page renders", async ({
 	page,
@@ -934,12 +1014,24 @@ test.skip("firefox: click URL bar, type wikipedia.org, page renders", async ({
 
 	const box = await canvas.boundingBox();
 	if (!box) throw new Error("Firefox canvas has no bounding box");
-	// URL bar sits in Firefox-ESR chrome around y=55-65 from canvas
-	// top. Click at center-x so we land squarely in the entry field.
-	const ux = box.x + box.width * 0.5;
-	const uy = box.y + 63;
-	await page.mouse.click(ux, uy);
+	// Click via the canvas locator with element-local coords. This routes
+	// through the canvas's onPointerDown (which focuses the DOM element)
+	// instead of relying on page.mouse.click hitting whatever element is
+	// topmost at the viewport coordinate. Without canvas DOM focus
+	// page.keyboard.type goes to document.body, not to the canvas's
+	// handleKeyDown, and the X server never sees any keystrokes.
+	//
+	// Move first, pause, then click. xdotool's mousemove → 1s → click
+	// pattern works manually; doing them in one playwright `click()` call
+	// fires move/down/up in milliseconds and GTK3 doesn't seem to update
+	// its hovered-widget state in time for the URL bar GtkEntry to take
+	// the press.
+	const cx = box.width * 0.5;
+	const cy = 63;
+	await canvas.hover({ position: { x: cx, y: cy } });
 	await page.waitForTimeout(800);
+	await canvas.click({ position: { x: cx, y: cy } });
+	await page.waitForTimeout(1500);
 	await canvas.screenshot({ path: "test-results/ff-click-2-after-click.png" });
 
 	// Select-all to clear whatever placeholder/url is there.
